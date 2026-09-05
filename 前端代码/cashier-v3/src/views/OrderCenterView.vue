@@ -845,12 +845,27 @@ function recordPersonnelInitialSelection(line = {}) {
   return recordPersonnelSelected(line).map((selected) => {
     const employeeId = Number(selected.employeeId || selected.staffId || selected.id || 0)
     const candidate = candidates.find((item) => Number(item.employeeId || item.staffId || item.id || 0) === employeeId)
+    // 充值／补交打开的是已落账记录。此处必须把服务端事实金额直接交给
+    // 分配组件，不能因候选员工只有岗位资料而退回默认 0 或按当前比例重算。
+    const performanceAmountCents = Math.max(0, Math.trunc(Number(
+      selected.performanceAmountCents
+        ?? selected.performance_amount_cents
+        ?? selected.amountCents
+        ?? selected.amount_cents
+        ?? 0
+    )))
     return {
       ...selected,
       ...(candidate || {}),
       id: candidate?.staffId || selected.staffId || employeeId,
       staffId: candidate?.staffId || selected.staffId || employeeId,
       employeeId,
+      performanceAmountCents,
+      performanceAmountLocked: Boolean(
+        selected.performanceAmountLocked
+          ?? selected.performance_amount_locked
+          ?? Object.prototype.hasOwnProperty.call(selected, 'amountCents')
+      ),
       selected: true
     }
   })

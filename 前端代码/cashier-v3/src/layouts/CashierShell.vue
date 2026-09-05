@@ -1064,16 +1064,9 @@ async function completeMemberSelection(detail) {
   window.dispatchEvent(new CustomEvent('cashier-v3:member-selector-selected', {
     detail: { context: detail.context, record: detail.record }
   }))
-  // 欠款提醒必须先于销售来源选择：欠款补交不使用销售来源；若先打开来源
-  // 弹层，用户关闭该弹层会按销售流程撤销刚选择的会员，导致无法进入还款。
-  if (detail.context === 'cashier' && pendingDebtReminderAfterSource.value?.member) {
-    handleCheckoutBusinessSourceSettled()
-    return true
-  }
-  // A normal cashier member selection starts the customer-source interaction
-  // immediately. Source is a browser-side checkout field and is confirmed by
-  // the existing source overlay; recharge/debt/top-action flows keep their
-  // own follow-up dialog instead of opening two overlays at once.
+  // 会员选择后的固定顺序：先确认客户来源，再提示该会员的待还欠款。
+  // 欠款提醒由 checkout-business-source-confirmed 事件串行打开，避免两层
+  // 弹窗重叠，也确保充值／销售都会冻结同一份来源快照。
   if (detail.context === 'cashier' && !pendingMemberTopAction.value && !pendingCashierWorkflowTarget.value) {
     window.dispatchEvent(new CustomEvent('cashier-v3:open-toolbar-business-source', {
       detail: { reason: 'member-selected' }
@@ -2613,6 +2606,7 @@ onBeforeUnmount(() => {
     <RechargeOverlay
       v-if="rechargeSession && !isCashierPage"
       :session="rechargeSession"
+      :business-date="toolbarBusinessDate"
       :submitting="isRechargeSubmitting"
       @close="rechargeSession = null"
       @submit="submitRecharge"

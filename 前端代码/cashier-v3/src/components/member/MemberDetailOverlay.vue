@@ -18,7 +18,7 @@ import { formatMoney } from '@/services/cashierV3Bridge'
  * {
  *   member: {
  *     id, name, phone, memberNo, statusLabel, storeName, exclusiveServiceStaff,
- *     accountBalance, currentPoints, cardBenefitAmount, remainingProjectTimes,
+ *     accountBalance, principalBalance, giftBalance, currentPoints, cardBenefitAmount, remainingProjectTimes,
  *     remainingProjectAmount, activeCardCount, totalConsumptionAmount,
  *     visitCount, latestPurchaseDate, latestVisitDate
  *   },
@@ -212,6 +212,9 @@ const headerFacts = computed(() => [
 
 const headerStats = computed(() => [
   metric('账户余额', summaryValue(['accountBalance', 'totalBalance', 'balance']), 'money'),
+  // 本金与赠金均由会员余额权威快照返回；这里只展示，绝不由总余额在浏览器拆分。
+  metric('本金余额', summaryValue(['principalBalance']), 'money'),
+  metric('赠金余额', summaryValue(['giftBalance']), 'money'),
   metric('次卡权益金额', summaryValue(['cardBenefitAmount', 'cardBenefitValue']), 'money'),
   { ...metric('剩余项目次数', summaryValue(['remainingProjectTimes', 'remainingTimes']), 'times'), tooltip: '剩余项目次数不计算时间卡的次数' },
   metric('剩余项目金额', summaryValue(['remainingProjectAmount', 'remainingAmount']), 'money'),
@@ -1497,7 +1500,7 @@ async function triggerAction(action, context = {}) {
 
 .member-detail-overlay__stats {
   display: grid;
-  grid-template-columns: repeat(8, minmax(104px, 1fr));
+  grid-template-columns: repeat(10, minmax(104px, 1fr));
   overflow-x: auto;
   border-bottom: 1px solid #eaecf0;
   background: #fbfcfe;
@@ -1980,7 +1983,7 @@ async function triggerAction(action, context = {}) {
 
 @media (max-width: 1240px) {
   .member-detail-overlay__stats {
-    grid-template-columns: repeat(8, minmax(128px, 1fr));
+    grid-template-columns: repeat(10, minmax(128px, 1fr));
   }
 
   .member-detail-overlay__card-meta {

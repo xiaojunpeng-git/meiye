@@ -99,10 +99,10 @@ const localCheckoutBusinessSource = ref({
   secondarySourceId: 0,
   rewardAmountCents: 0
 })
-const isSavingRechargeDate = ref(false)
 const rechargeSession = ref(null)
 const rechargePreparationIdempotencyKey = ref('')
 const isRechargeSubmitting = ref(false)
+const rechargePreparationError = ref('')
 const isHangOrderOpen = ref(false)
 const hangOrderPreparationId = ref(null)
 const hangOrderSession = ref(null)
@@ -176,7 +176,6 @@ const {
 } = useRechargeCheckout({
   member,
   currentMemberId,
-  stateContextId: computed(() => state.stateContextId || ''),
   openSourceSelector: (kind) => openCheckoutBusinessSourceSelector(kind)
 })
 const cashierScopeIdentity = computed(() => ({
@@ -1408,26 +1407,6 @@ async function loadInlineCheckoutBusinessSources() {
   }
 }
 
-async function loadInlineRechargeBusinessSources() {
-  const current = rechargeCheckout.value
-  const loadToken = ++checkoutBusinessSourcesLoadToken
-  if (!current || current.sourceEnabled !== true || current.sourceSelectable === false) return
-  checkoutBusinessSourcesLoadError.value = ''
-  isLoadingCheckoutBusinessSources.value = true
-  try {
-    const catalog = await loadCheckoutBusinessCatalog()
-    if (loadToken !== checkoutBusinessSourcesLoadToken || rechargeCheckout.value !== current) return
-    checkoutInlineBusinessSources.value = Array.isArray(catalog.sources) ? catalog.sources : []
-  } catch (error) {
-    if (loadToken === checkoutBusinessSourcesLoadToken) {
-      checkoutInlineBusinessSources.value = []
-      checkoutBusinessSourcesLoadError.value = checkoutSourceSelectorError(error)
-    }
-  } finally {
-    if (loadToken === checkoutBusinessSourcesLoadToken) isLoadingCheckoutBusinessSources.value = false
-  }
-}
-
 watch(
   () => [
     isCheckoutOpen.value,
@@ -1444,28 +1423,6 @@ watch(
     checkoutInlineBusinessSources.value = []
     checkoutBusinessSourcesLoadError.value = ''
     isLoadingCheckoutBusinessSources.value = false
-  },
-  { immediate: true }
-)
-
-watch(
-  () => [
-    Boolean(rechargeCheckout.value),
-    rechargeCheckout.value?.rechargeCheckoutRequestId || '',
-    rechargeCheckout.value?.sourceEnabled,
-    rechargeCheckout.value?.sourceSelectable
-  ],
-  ([isOpen]) => {
-    if (isOpen) {
-      loadInlineRechargeBusinessSources()
-      return
-    }
-    if (!isCheckoutOpen.value) {
-      checkoutBusinessSourcesLoadToken += 1
-      checkoutInlineBusinessSources.value = []
-      checkoutBusinessSourcesLoadError.value = ''
-      isLoadingCheckoutBusinessSources.value = false
-    }
   },
   { immediate: true }
 )
@@ -1602,26 +1559,6 @@ async function saveCheckoutBusinessSource(selection = {}) {
 
 function saveInlineCheckoutBusinessSource(selection = {}) {
   return persistCheckoutBusinessSource('sale', selection)
-}
-
-function saveInlineRechargeBusinessSource(selection = {}) {
-  return persistCheckoutBusinessSource('recharge', selection)
-}
-
-async function saveRechargeBusinessDate(selection = {}) {
-  if (isSavingRechargeDate.value) return null
-  const businessDate = String(selection.businessDate || '').trim()
-  const reason = String(selection.reason || '').trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return null
-  isSavingRechargeDate.value = true
-  try {
-    return await requestRechargeCheckoutAction({
-      action: 'update-recharge-business-date',
-      payload: { businessDate, reason }
-    })
-  } finally {
-    isSavingRechargeDate.value = false
-  }
 }
 
 async function saveCheckoutSalesDate(selection = {}) {
@@ -4207,26 +4144,73 @@ function openRecharge(event = {}) {
     return
   }
   rechargePreparationIdempotencyKey.value = ''
-  rechargeSession.value = session
+  rechargePreparationError.value = ''
+  // 客户来源在选会员后已由收银顶部确认。充值第一步只保存这一份浏览器
+  // 快照；后续“下一步”不得再读取可能被异步根投影清掉的工具栏状态，
+  // 更不能要求员工重复选择来源。
+  rechargeSession.value = {
+    ...session,
+    businessSourceSnapshot: {
+      primarySourceId: Number(localCheckoutBusinessSource.value.primarySourceId || 0),
+      secondarySourceId: Number(localCheckoutBusinessSource.value.secondarySourceId || 0),
+      rewardAmountCents: Math.max(0, Number(localCheckoutBusinessSource.value.rewardAmountCents || 0))
+    }
+  }
 }
 
 function closeRecharge() {
   rechargeSession.value = null
   rechargePreparationIdempotencyKey.value = ''
+  rechargePreparationError.value = ''
 }
 
 async function submitRecharge(payload = {}) {
   if (isRechargeSubmitting.value || !rechargeSession.value) return
+  const capturedSource = rechargeSession.value.businessSourceSnapshot || {}
+  const livePrimarySourceId = Number(localCheckoutBusinessSource.value.primarySourceId || 0)
+  const liveSecondarySourceId = Number(localCheckoutBusinessSource.value.secondarySourceId || 0)
+  const primarySourceId = livePrimarySourceId > 0
+    ? livePrimarySourceId
+    : Number(capturedSource.primarySourceId || 0)
+  const secondarySourceId = livePrimarySourceId > 0
+    ? liveSecondarySourceId
+    : Number(capturedSource.secondarySourceId || 0)
+  const rewardAmountCents = livePrimarySourceId > 0
+    ? Math.max(0, Number(localCheckoutBusinessSource.value.rewardAmountCents || 0))
+    : Math.max(0, Number(capturedSource.rewardAmountCents || 0))
+  // 选会员流程尚未确认来源时，保持当前充值表单并给出明确提示；不在
+  // “下一步”叠加第二个来源弹窗，避免误以为来源被重复要求。
+  if (primarySourceId <= 0 || secondarySourceId < 0) {
+    rechargePreparationError.value = '请先在收银页面顶部选择客户来源。'
+    return {
+      result: {
+        status: 'failed',
+        code: 'RECHARGE_BUSINESS_SOURCE_REQUIRED',
+        message: rechargePreparationError.value
+      }
+    }
+  }
   isRechargeSubmitting.value = true
   try {
+    // 客户来源只在收银顶部选择一次。准备充值结账时将该选择和业务日期、
+    // 销售人同时冻结；结账页不再出现第二套来源选择控件。
+    const businessSource = {
+      primarySourceId,
+      secondarySourceId,
+      rewardAmountCents
+    }
     const response = await requestCashierV3Action('prepare-recharge-checkout', {
       ...payload,
       memberId: payload.memberId || currentMemberId.value,
+      businessSource,
       ...(rechargePreparationIdempotencyKey.value
         ? { idempotencyKey: rechargePreparationIdempotencyKey.value }
         : {})
     })
     const responseStatus = resultStatus(response)
+    rechargePreparationError.value = ['success', 'succeeded'].includes(responseStatus)
+      ? ''
+      : resultMessage(response, '充值收款准备失败，请核对资料后重试。')
     if (responseStatus === 'result_unknown') {
       rechargePreparationIdempotencyKey.value = String(response.idempotencyKey || '')
     } else if (responseStatus === 'success' || responseStatus === 'succeeded' || responseStatus === 'failed' || responseStatus === 'conflict') {
@@ -6135,6 +6119,40 @@ async function closeSucceededCheckoutAndRefreshWorkbench(submissionResponse = {}
   await requestAction('open-cashier-workbench', { silent: true })
 }
 
+async function closeSucceededRechargeCheckoutAndRefreshWorkbench() {
+  // 充值结账是独立草稿，完成后不会携带收银主工作台投影。先冻结本次
+  // 会员身份；随后根工作台刷新和会员摘要查询都不能将其降级成游客。
+  const completedMember = clonePlain(rechargeCheckout.value?.member || member.value || {})
+  const completedMemberId = Number(
+    completedMember.id || completedMember.memberId || currentMemberId.value || 0
+  )
+  closeRechargeCheckout()
+  await requestAction('open-cashier-workbench', { silent: true })
+  if (completedMemberId <= 0) return
+  const summaryResult = await requestCashierV3Action('query-cashier-member-summary', {
+    memberId: completedMemberId,
+    // 这只是独立会员摘要，不能用其诊断性根投影覆盖已完成充值后的收银现场。
+    preserveRootState: true,
+    silent: true
+  })
+  if (!['success', 'succeeded'].includes(resultStatus(summaryResult))) return
+  const summary = responseDataBlock(summaryResult)?.memberSummary
+  if (!summary || typeof summary !== 'object') return
+  const visibleMemberId = Number(member.value?.id || member.value?.memberId || 0)
+  // 用户若在异步刷新期间已经切换到另一位会员，绝不回写本次充值的摘要；
+  // 空会员则代表后端投影缺失，恢复本次已确认完成的会员快照。
+  if (visibleMemberId > 0 && visibleMemberId !== completedMemberId) return
+  state.cashier = {
+    ...(state.cashier || {}),
+    customerMode: 'member',
+    member: {
+      ...completedMember,
+      ...(member.value || {}),
+      ...summary
+    }
+  }
+}
+
 function closeHangOrderOverlay() {
   isHangOrderOpen.value = false
   hangOrderPreparationId.value = null
@@ -6305,7 +6323,9 @@ onBeforeUnmount(() => {
     <RechargeOverlay
       v-if="rechargeSession"
       :session="rechargeSession"
+      :business-date="localCheckoutBusinessDate"
       :submitting="isRechargeSubmitting"
+      :submit-error="rechargePreparationError"
       @close="closeRecharge"
       @submit="submitRecharge"
     />
@@ -6898,18 +6918,10 @@ onBeforeUnmount(() => {
       <CashierCheckoutOverlay
         v-if="rechargeCheckout"
         :checkout="rechargeCheckout"
-        :business-sources="checkoutInlineBusinessSources"
-        :business-sources-loading="isLoadingCheckoutBusinessSources"
-        :business-sources-load-error="checkoutBusinessSourcesLoadError"
-        :business-source-saving="isSavingCheckoutBusinessSource"
         :sales-date-max="cashierToday"
-        :sales-date-saving="isSavingRechargeDate"
         @close="closeRechargeCheckout"
-        @completed="closeRechargeCheckout"
+        @completed="closeSucceededRechargeCheckoutAndRefreshWorkbench"
         @request="enqueueRechargeCheckoutAction"
-        @business-source-change="saveInlineRechargeBusinessSource"
-        @retry-business-sources="loadInlineRechargeBusinessSources"
-        @recharge-date-change="saveRechargeBusinessDate"
       />
     </Teleport>
 

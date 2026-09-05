@@ -112,11 +112,14 @@ final class CashierV3RechargeModule
             $snapshot = $accountingConfig->resolveAccountingMethodSnapshot((string)$paymentLine['paymentMethod'], true);
             $input['paymentLines'][$index]['paymentMethodNameSnapshot'] = (string)$snapshot['displayNameSnapshot'];
         }
-        $input['salespeople'] = $this->resolveSalespeople(
-            (array)($input['salespersonAllocations'] ?? []),
-            $input['creditedPrincipalCents'],
-            $operator
-        );
+        $preparedSalespeople = $scope['recharge_checkout_salespeople_snapshot'] ?? null;
+        $input['salespeople'] = is_array($preparedSalespeople)
+            ? $this->normalizePreparedSalespeopleSnapshot($preparedSalespeople)
+            : $this->resolveSalespeople(
+                (array)($input['salespersonAllocations'] ?? []),
+                $input['creditedPrincipalCents'],
+                $operator
+            );
         $now = time();
         $orderNo = (new CashierV3BusinessDocumentNumberServices())->allocateForSourceInTx(
             $dataScope->tenantId(),
@@ -360,8 +363,8 @@ final class CashierV3RechargeModule
                 'employeeTypeSnapshot' => (string)$person['employeeTypeCodeSnapshot'],
                 'employeeTypeAuthorityVersion' => (int)$person['employeeTypeAuthorityVersion'],
                 'roleSnapshot' => 'salesperson',
-                'allocationWeightNumerator' => $amountCents,
-                'allocationWeightDenominator' => $paymentCents,
+                'allocationWeightNumerator' => (int)$person['allocationWeight'],
+                'allocationWeightDenominator' => 100,
                 'allocationBaseAmountCents' => $paymentCents,
                 'amountCents' => $amountCents,
                 'ruleCodeSnapshot' => 'recharge_salesperson_allocation',
@@ -506,14 +509,10 @@ final class CashierV3RechargeModule
         if ($businessDate > $today) {
             throw self::failure('recharge_business_date_future', '充值日期不能晚于今天。');
         }
-        if ($businessDate < $today && $reason === '') {
-            throw self::failure('recharge_business_date_reason_required', '历史充值日期必须填写补单原因。');
-        }
-        if (mb_strlen($reason) > 200) {
-            throw self::failure('recharge_business_date_reason_invalid', '补单原因不能超过 200 个字。');
-        }
         $input['businessDate'] = $businessDate;
-        $input['businessDateReason'] = $businessDate < $today ? $reason : '';
+        // 第20轮起日期在充值弹窗准备阶段冻结，和补交一样只记录业务日期；
+        // 结账阶段不再显示或修改历史日期原因。
+        $input['businessDateReason'] = '';
         return $input;
     }
 
@@ -549,99 +548,135 @@ final class CashierV3RechargeModule
     }
 
     /**
-     * The browser proposes the same integer percentage allocation used by the
-     * cart personnel editor. Names, eligibility and the resulting whole-yuan
-     * performance amounts are always rebuilt under the current store lock.
-     * Legacy amount payloads remain readable only for already-prepared drafts.
+     * 充值人员在准备阶段按当前门店资料锁定。每个“独立核算”职位单独
+     * 组成一个 100% 分配组，普通职位共同组成 normal 组；手填业绩金额
+     * 是该员工的最终金额，不在正式结账时二次折算。
      */
-    private function resolveSalespeople(array $allocations, int $principalCents, CashierV3OperatorScope $operator): array
+    public function resolveSalespeopleForPreparation(array $allocations, int $cashPerformanceCents, CashierV3OperatorScope $operator): array
     {
-        if (!$allocations) {
-            return [];
-        }
-        if (count($allocations) > 20 || $principalCents <= 0) {
+        return $this->resolveSalespeople($allocations, $cashPerformanceCents, $operator);
+    }
+
+    private function resolveSalespeople(array $allocations, int $cashPerformanceCents, CashierV3OperatorScope $operator): array
+    {
+        if (!$allocations) return [];
+        if ($cashPerformanceCents <= 0 || $cashPerformanceCents % 100 !== 0 || count($allocations) > 20) {
             throw self::failure('recharge_salesperson_allocations_invalid', '销售人分配信息无效，请重新填写。');
         }
         $requested = [];
-        $total = 0;
-        $usesWeights = array_reduce($allocations, static function (bool $carry, $allocation): bool {
-            return $carry && is_array($allocation) && array_key_exists('allocationWeight', $allocation);
-        }, true);
-        foreach ($allocations as $index => $allocation) {
-            $staffId = is_array($allocation) ? (int)($allocation['staffId'] ?? $allocation['id'] ?? 0) : 0;
-            $allocationValue = $usesWeights
-                ? (int)($allocation['allocationWeight'] ?? 0)
-                : (is_array($allocation) ? $this->moneyToCents($allocation['amount'] ?? null) : -1);
-            if ($staffId <= 0 || $allocationValue <= 0 || isset($requested[$staffId])) {
-                throw self::failure('recharge_salesperson_allocations_invalid', '销售人或分配金额无效，请重新填写。');
+        foreach ($allocations as $index => $row) {
+            $staffId = is_array($row) ? (int)($row['staffId'] ?? $row['id'] ?? 0) : 0;
+            $weight = is_array($row) ? (int)($row['allocationWeight'] ?? 0) : 0;
+            if ($staffId <= 0 || $weight <= 0 || $weight > 100 || isset($requested[$staffId])) {
+                throw self::failure('recharge_salesperson_allocations_invalid', '销售人或分配比例无效，请重新填写。');
             }
+            [$manual, $manualCents] = self::manualPerformanceAmount((array)$row);
             $requested[$staffId] = [
-                'allocationValue' => $allocationValue,
+                'allocationWeight' => $weight,
+                'isPreSale' => !empty($row['isPreSale']) || !empty($row['marked']),
+                'performanceAmountManual' => $manual,
+                'performanceAmountCents' => $manualCents,
                 'sequence' => $index + 1,
-                'isPreSale' => !empty($allocation['isPreSale']) || !empty($allocation['marked']),
             ];
-            $total += $allocationValue;
-        }
-        if (($usesWeights && $total !== 100) || (!$usesWeights && $total > $principalCents)) {
-            throw self::failure('recharge_salesperson_amount_exceeds_principal', '销售人分配金额不能超过本次充值本金。');
         }
         $staffIds = array_keys($requested);
         sort($staffIds, SORT_NUMERIC);
-        $rows = Db::name('system_store_staff')->alias('ss')
-            ->join('employee e', 'e.id = ss.employee_id')
-            ->whereIn('ss.id', $staffIds)
-            ->where('ss.store_id', $operator->storeId())
-            ->where('ss.status', 1)
-            ->where('ss.is_del', 0)
-            ->where('ss.employee_id', '>', 0)
-            ->where('ss.cashier_salesperson_enabled', 1)
-            ->where('e.status', 1)
-            ->where('e.is_del', 0)
-            ->field('ss.id,ss.employee_id,ss.staff_name,e.name as employee_name,e.employment_type_code,e.employment_type_version')
-            ->lock(true)
-            ->select()
-            ->toArray();
-        $byStaffId = [];
-        foreach ($rows as $row) {
-            $byStaffId[(int)$row['id']] = $row;
-        }
-        if (count($byStaffId) !== count($requested)) {
-            throw self::failure('recharge_salesperson_not_active', '所选销售人已停用、离职或不属于当前门店，请重新选择。');
-        }
-        $result = [];
-        $allocatedCents = 0;
-        $selectionCount = count($requested);
+        $rows = Db::name('system_store_staff')->alias('ss')->join('employee e', 'e.id=ss.employee_id')
+            ->leftJoin('staff_job_position sjp', 'sjp.staff_id=ss.id AND sjp.status=1 AND sjp.is_del=0 AND sjp.end_time=0')
+            ->leftJoin('position p', 'p.id=sjp.position_id AND p.status=1')
+            ->whereIn('ss.id', $staffIds)->where('ss.store_id', $operator->storeId())->where('ss.status', 1)->where('ss.is_del', 0)
+            ->where('ss.cashier_salesperson_enabled', 1)->where('e.status', 1)->where('e.is_del', 0)
+            ->field('ss.id,ss.staff_name,ss.employee_id,e.name,e.employment_type_code,e.employment_type_version,sjp.position_id,p.name as position_name,p.performance_independent')
+            ->lock(true)->select()->toArray();
+        if (count($rows) !== count($requested)) throw self::failure('recharge_salesperson_not_active', '所选销售人已停用、离职或不属于当前门店，请重新选择。');
+        $byStaffId = []; foreach ($rows as $row) $byStaffId[(int)$row['id']] = $row;
+        $result = []; $groups = []; $cashYuan = intdiv($cashPerformanceCents, 100);
         foreach ($requested as $staffId => $selection) {
-            $row = $byStaffId[$staffId];
-            $name = trim((string)($row['employee_name'] ?? '')) ?: trim((string)($row['staff_name'] ?? ''));
+            $row = $byStaffId[$staffId] ?? null;
+            if (!$row) throw self::failure('recharge_salesperson_not_active', '所选销售人已停用、离职或不属于当前门店，请重新选择。');
+            $name = trim((string)($row['name'] ?? '')) ?: trim((string)($row['staff_name'] ?? ''));
             $type = (string)($row['employment_type_code'] ?? '');
             $typeVersion = (int)($row['employment_type_version'] ?? 0);
             if ($name === '' || !in_array($type, ['internal', 'partner', 'outsourced'], true) || $typeVersion <= 0) {
                 throw self::failure('recharge_salesperson_profile_incomplete', '所选销售人员工档案不完整，请先维护员工信息。');
             }
-            $sequence = (int)$selection['sequence'];
-            $amountCents = $usesWeights
-                ? ($sequence === $selectionCount
-                    ? $principalCents - $allocatedCents
-                    : intdiv(intdiv($principalCents, 100) * (int)$selection['allocationValue'], 100) * 100)
-                : (int)$selection['allocationValue'];
-            if ($amountCents <= 0 || $amountCents % 100 !== 0) {
-                throw self::failure('recharge_salesperson_allocations_invalid', '销售人分配结果必须为正整数金额，请调整分配比例。');
-            }
-            $allocatedCents += $amountCents;
+            $positionId = (int)($row['position_id'] ?? 0);
+            $independent = (int)($row['performance_independent'] ?? 0) === 1;
+            $groupKey = $independent ? 'independent:' . ($positionId > 0 ? $positionId : $staffId) : 'normal';
             $result[] = [
-                'staffId' => (int)$staffId,
-                'employeeId' => (int)$row['employee_id'],
-                'name' => $name,
-                'amountCents' => $amountCents,
-                'allocationWeight' => $usesWeights ? (int)$selection['allocationValue'] : 0,
-                'isPreSale' => (bool)$selection['isPreSale'],
-                'sequence' => $sequence,
-                'employeeTypeCodeSnapshot' => $type,
-                'employeeTypeAuthorityVersion' => $typeVersion,
+                'staffId' => (int)$staffId, 'employeeId' => (int)$row['employee_id'], 'name' => $name,
+                'employeeTypeCodeSnapshot' => $type, 'employeeTypeAuthorityVersion' => $typeVersion,
+                'allocationWeight' => (int)$selection['allocationWeight'], 'amountCents' => 0,
+                'performanceAmountManual' => (bool)$selection['performanceAmountManual'],
+                'performanceAmountCents' => (int)$selection['performanceAmountCents'],
+                'isPreSale' => (bool)$selection['isPreSale'], 'sequence' => (int)$selection['sequence'],
+                'positionId' => $positionId, 'positionName' => (string)($row['position_name'] ?? ''),
+                'performanceIndependent' => $independent, 'allocationGroupKey' => $groupKey,
             ];
+            $groups[$groupKey][] = count($result) - 1;
+        }
+        foreach ($groups as $groupKey => $indexes) {
+            $weightTotal = 0; foreach ($indexes as $index) $weightTotal += (int)$result[$index]['allocationWeight'];
+            if ($weightTotal !== 100) throw self::failure('recharge_salespeople_group_weight_invalid', '每个销售业绩分配组的比例合计必须为 100%。');
+            $manualIndexes = array_values(array_filter($indexes, static fn(int $index): bool => !empty($result[$index]['performanceAmountManual'])));
+            if ($manualIndexes) {
+                $autoIndexes = array_values(array_filter($indexes, static fn(int $index): bool => empty($result[$index]['performanceAmountManual'])));
+                $autoWeight = 0; foreach ($autoIndexes as $index) $autoWeight += (int)$result[$index]['allocationWeight'];
+                $autoBase = intdiv($cashYuan * $autoWeight, 100) * 100;
+                $allocated = 0; $lastAuto = $autoIndexes[count($autoIndexes) - 1] ?? null;
+                foreach ($autoIndexes as $index) {
+                    $share = $index === $lastAuto ? $autoBase - $allocated : intdiv($cashYuan * (int)$result[$index]['allocationWeight'], 100) * 100;
+                    if ($share <= 0 || $share % 100 !== 0) throw self::failure('recharge_salespeople_amount_invalid', '销售人业绩金额无效，请调整比例或金额。');
+                    $allocated += $share; $result[$index]['amountCents'] = $share;
+                }
+                foreach ($manualIndexes as $index) $result[$index]['amountCents'] = (int)$result[$index]['performanceAmountCents'];
+                continue;
+            }
+            $allocated = 0; $last = $indexes[count($indexes) - 1];
+            foreach ($indexes as $index) {
+                $share = $index === $last ? $cashPerformanceCents - $allocated : intdiv($cashYuan * (int)$result[$index]['allocationWeight'], 100) * 100;
+                if ($share <= 0 || $share % 100 !== 0) throw self::failure('recharge_salespeople_amount_invalid', '销售人业绩金额无效，请调整比例或金额。');
+                $allocated += $share; $result[$index]['amountCents'] = $share;
+            }
+            if ($allocated !== $cashPerformanceCents) throw self::failure('recharge_salespeople_amount_invalid', '销售人业绩金额无效，请调整比例或金额。');
         }
         return $result;
+    }
+
+    private function normalizePreparedSalespeopleSnapshot(array $rows): array
+    {
+        if ($rows === []) return [];
+        if (count($rows) > 20) throw self::failure('recharge_salespeople_snapshot_invalid', '充值销售人快照无效，请重新打开充值后重试。');
+        $result = []; $seen = []; $weightsByGroup = [];
+        foreach (array_values($rows) as $index => $row) {
+            if (!is_array($row)) throw self::failure('recharge_salespeople_snapshot_invalid', '充值销售人快照无效，请重新打开充值后重试。');
+            $staffId = (int)($row['staffId'] ?? 0); $employeeId = (int)($row['employeeId'] ?? 0);
+            $weight = (int)($row['allocationWeight'] ?? 0); $amount = (int)($row['amountCents'] ?? -1);
+            $manual = !empty($row['performanceAmountManual']); $manualAmount = (int)($row['performanceAmountCents'] ?? 0);
+            $positionId = max(0, (int)($row['positionId'] ?? 0)); $independent = !empty($row['performanceIndependent']);
+            $groupKey = $independent ? 'independent:' . ($positionId > 0 ? $positionId : $staffId) : 'normal';
+            $name = trim((string)($row['name'] ?? '')); $type = (string)($row['employeeTypeCodeSnapshot'] ?? ''); $typeVersion = (int)($row['employeeTypeAuthorityVersion'] ?? 0);
+            if ($staffId <= 0 || $employeeId <= 0 || $weight <= 0 || $weight > 100 || $amount < 0 || $amount % 100 !== 0 || ($manual && ($manualAmount < 0 || $manualAmount % 100 !== 0)) || $name === '' || !in_array($type, ['internal', 'partner', 'outsourced'], true) || $typeVersion <= 0 || isset($seen[$staffId])) {
+                throw self::failure('recharge_salespeople_snapshot_invalid', '充值销售人快照无效，请重新打开充值后重试。');
+            }
+            $seen[$staffId] = true; $weightsByGroup[$groupKey] = ($weightsByGroup[$groupKey] ?? 0) + $weight;
+            $result[] = ['staffId'=>$staffId,'employeeId'=>$employeeId,'name'=>$name,'employeeTypeCodeSnapshot'=>$type,'employeeTypeAuthorityVersion'=>$typeVersion,'allocationWeight'=>$weight,'amountCents'=>$amount,'performanceAmountManual'=>$manual,'performanceAmountCents'=>$manualAmount,'isPreSale'=>!empty($row['isPreSale']),'sequence'=>max(1, (int)($row['sequence'] ?? ($index + 1))),'positionId'=>$positionId,'positionName'=>(string)($row['positionName'] ?? ''),'performanceIndependent'=>$independent,'allocationGroupKey'=>$groupKey];
+        }
+        foreach ($weightsByGroup as $weight) if ($weight !== 100) throw self::failure('recharge_salespeople_snapshot_invalid', '充值销售人快照无效，请重新打开充值后重试。');
+        return $result;
+    }
+
+    private static function manualPerformanceAmount(array $row): array
+    {
+        $manual = !empty($row['performanceAmountManual']) || !empty($row['performance_amount_manual']);
+        if (!$manual) return [false, 0];
+        $raw = $row['performanceAmountCents'] ?? $row['performance_amount_cents'] ?? null;
+        if ((!is_int($raw) && !is_string($raw)) || preg_match('/^(?:0|[1-9][0-9]*)$/D', trim((string)$raw)) !== 1) {
+            throw self::failure('recharge_salespeople_manual_amount_invalid', '手填销售人业绩金额无效，请重新填写。');
+        }
+        $cents = (int)$raw;
+        if ($cents < 0 || $cents % 100 !== 0) throw self::failure('recharge_salespeople_manual_amount_invalid', '手填销售人业绩金额无效，请重新填写。');
+        return [true, $cents];
     }
 
     /** @return array<int,array{paymentMethod:string,amountCents:int,collectionReference:string}> */
@@ -698,6 +733,13 @@ final class CashierV3RechargeModule
                 'employee_id' => (int)$person['employeeId'],
                 'employee_type' => (string)$person['employeeTypeCodeSnapshot'],
                 'sequence' => (int)$person['sequence'],
+                'allocation_weight' => (int)$person['allocationWeight'],
+                'performance_amount_manual' => !empty($person['performanceAmountManual']),
+                'performance_amount_cents' => (int)($person['performanceAmountCents'] ?? 0),
+                'position_id' => (int)($person['positionId'] ?? 0),
+                'position_name' => (string)($person['positionName'] ?? ''),
+                'performance_independent' => !empty($person['performanceIndependent']),
+                'allocation_group_key' => (string)($person['allocationGroupKey'] ?? 'normal'),
             ];
         }, $salespeople);
     }

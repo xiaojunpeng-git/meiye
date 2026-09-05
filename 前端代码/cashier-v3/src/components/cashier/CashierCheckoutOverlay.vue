@@ -19,22 +19,6 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
-  businessSources: {
-    type: Array,
-    default: () => []
-  },
-  businessSourcesLoading: {
-    type: Boolean,
-    default: false
-  },
-  businessSourcesLoadError: {
-    type: String,
-    default: ''
-  },
-  businessSourceSaving: {
-    type: Boolean,
-    default: false
-  },
   salesDateMax: {
     type: String,
     default: ''
@@ -49,10 +33,7 @@ const emit = defineEmits([
   'close',
   'completed',
   'request',
-  'business-source-change',
-  'retry-business-sources',
-  'sales-date-change',
-  'recharge-date-change'
+  'sales-date-change'
 ])
 
 const localStep = ref(1)
@@ -84,9 +65,6 @@ const balancePaymentPromptOpen = ref(false)
 const paymentValidationPromptMessage = ref('')
 const receiptPrintError = ref('')
 const receiptPrintLoading = ref(false)
-const pendingPrimarySourceId = ref(0)
-const pendingSecondarySourceId = ref(0)
-const rewardAmountDraft = ref('0')
 const salesDateDraft = ref('')
 const salesDateReason = ref('')
 const pendingPaymentMethodIds = ref(new Set())
@@ -245,37 +223,6 @@ const hasAuthoritativeOrderSnapshot = computed(() => (
   && hasOwn(checkoutSummary.value, 'discountAmount')
 ))
 const payment = computed(() => props.checkout.payment || {})
-const businessSourceRoots = computed(() => Array.isArray(props.businessSources)
-  ? props.businessSources.filter((source) => Number(source?.id) > 0)
-  : [])
-const selectedPrimarySourceId = computed(() => Number(pendingPrimarySourceId.value || props.checkout.primarySourceId || 0))
-const selectedPrimarySource = computed(() => businessSourceRoots.value.find((source) => Number(source.id) === selectedPrimarySourceId.value) || null)
-const selectedSecondarySourceId = computed(() => (
-  pendingPrimarySourceId.value
-  && Number(pendingPrimarySourceId.value) !== Number(props.checkout.primarySourceId || 0)
-    ? Number(pendingSecondarySourceId.value || 0)
-    : Number(props.checkout.secondarySourceId || 0)
-))
-const selectedSecondarySources = computed(() => Array.isArray(selectedPrimarySource.value?.children)
-  ? selectedPrimarySource.value.children.filter((source) => Number(source?.id) > 0)
-  : [])
-const selectedPrimaryRequiresSecondary = computed(() => (
-  selectedPrimarySource.value?.requireSecondary === true
-  || Number(selectedPrimarySource.value?.requireSecondary) === 1
-))
-const selectedPrimaryIsCrossIndustry = computed(() => /^G(?:\s|异业|$)/u.test(String(selectedPrimarySource.value?.name || '').trim()))
-const rewardAmountCents = computed(() => {
-  const value = String(rewardAmountDraft.value || '').trim()
-  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)) return null
-  const [yuan, fraction = ''] = value.split('.')
-  const cents = Number(yuan) * 100 + Number(fraction.padEnd(2, '0'))
-  return Number.isSafeInteger(cents) && cents <= 100000000000 ? cents : null
-})
-const crossIndustrySourceUnsaved = computed(() => selectedPrimaryIsCrossIndustry.value && (
-  pendingPrimarySourceId.value > 0
-  || rewardAmountCents.value === null
-  || rewardAmountCents.value !== Number(props.checkout.rewardAmountCents || 0)
-))
 const salesDateIsHistorical = computed(() => (
   salesDateDraft.value !== ''
   && props.salesDateMax !== ''
@@ -612,23 +559,6 @@ watch(
 )
 
 watch(
-  () => [props.checkout.primarySourceId, props.checkout.secondarySourceId, props.checkout.rewardAmountCents],
-  () => {
-    pendingPrimarySourceId.value = 0
-    pendingSecondarySourceId.value = 0
-    rewardAmountDraft.value = (Number(props.checkout.rewardAmountCents || 0) / 100).toFixed(2).replace(/\.00$/, '')
-  }
-  , { immediate: true }
-)
-
-watch(() => props.businessSourceSaving, (saving, wasSaving) => {
-  if (wasSaving && !saving) {
-    pendingPrimarySourceId.value = 0
-    pendingSecondarySourceId.value = 0
-  }
-})
-
-watch(
   () => props.checkout.businessDate,
   (businessDate) => {
     salesDateDraft.value = String(businessDate || '')
@@ -704,45 +634,9 @@ function handleSubmissionResponse(response) {
   }
 }
 
-function chooseBusinessSourcePrimary(source) {
-  if (props.businessSourceSaving || Number(source?.id) <= 0) return
-  pendingPrimarySourceId.value = Number(source.id)
-  pendingSecondarySourceId.value = 0
-  const children = Array.isArray(source.children) ? source.children.filter((item) => Number(item?.id) > 0) : []
-  const requiresSecondary = source.requireSecondary === true || Number(source.requireSecondary) === 1
-  if (!requiresSecondary && !/^G(?:\s|异业|$)/u.test(String(source.name || '').trim())) {
-    emit('business-source-change', { primarySourceId: Number(source.id), secondarySourceId: 0, rewardAmountCents: 0 })
-  } else if (requiresSecondary && !children.length) {
-    pendingPrimarySourceId.value = 0
-  }
-}
-
-function chooseBusinessSourceSecondary(secondarySourceId) {
-  if (props.businessSourceSaving || !selectedPrimarySourceId.value) return
-  if (selectedPrimaryIsCrossIndustry.value) {
-    pendingSecondarySourceId.value = Number(secondarySourceId || 0)
-    return
-  }
-  emit('business-source-change', {
-    primarySourceId: selectedPrimarySourceId.value,
-    secondarySourceId: Number(secondarySourceId || 0),
-    rewardAmountCents: 0
-  })
-}
-
-function saveCrossIndustrySource() {
-  if (props.businessSourceSaving || rewardAmountCents.value === null) return
-  if (selectedPrimaryRequiresSecondary.value && !selectedSecondarySourceId.value) return
-  emit('business-source-change', {
-    primarySourceId: selectedPrimarySourceId.value,
-    secondarySourceId: selectedSecondarySourceId.value,
-    rewardAmountCents: rewardAmountCents.value
-  })
-}
-
 function saveSalesDate() {
   if (!canSaveSalesDate.value) return
-  emit(isRechargeCheckout.value ? 'recharge-date-change' : 'sales-date-change', {
+  emit('sales-date-change', {
     businessDate: salesDateDraft.value,
     reason: salesDateIsHistorical.value ? salesDateReason.value.trim() : ''
   })
@@ -1367,65 +1261,11 @@ onBeforeUnmount(() => {
 
         <div v-if="hasEntitlementLines" class="checkout-service-hint">本次包含会员已有权益；权益服务与销售收款分别处理，权益行不计入本次应付。</div>
 
-        <section v-if="isRechargeCheckout && checkout.sourceEnabled" class="checkout-business-sources" aria-label="客户来源">
-          <div class="checkout-business-sources__heading">
-            <strong>客户来源</strong>
-            <span v-if="checkout.sourceSelectable === false">{{ checkout.sourceLabel || '继承原订单来源' }}</span>
-            <span v-else-if="businessSourceSaving">正在保存…</span>
-            <span v-else>{{ checkout.sourceLabel || '请选择客户来源' }}</span>
-          </div>
-          <template v-if="checkout.sourceSelectable !== false">
-            <div v-if="businessSourcesLoading" class="checkout-business-sources__state">正在加载客户来源…</div>
-            <div v-else-if="businessSourcesLoadError" class="checkout-business-sources__state checkout-business-sources__state--error" role="alert">
-              <span>{{ businessSourcesLoadError }}</span>
-              <button type="button" class="button button--text" @click="emit('retry-business-sources')">重新加载</button>
-            </div>
-            <div v-else-if="businessSourceRoots.length" class="checkout-business-sources__choices" aria-label="客户来源">
-              <button
-                v-for="source in businessSourceRoots"
-                :key="source.id"
-                type="button"
-                :class="{ 'is-selected': Number(source.id) === selectedPrimarySourceId }"
-                :disabled="businessSourceSaving"
-                @click="chooseBusinessSourcePrimary(source)"
-              >{{ source.name }}</button>
-            </div>
-            <div v-else class="checkout-business-sources__state">当前没有可用的客户来源，请联系平台管理员配置后重试。</div>
-            <div v-if="selectedPrimarySource && selectedSecondarySources.length" class="checkout-business-sources__secondary">
-              <strong>二级来源<span v-if="selectedPrimaryRequiresSecondary">（必选）</span></strong>
-              <div class="checkout-business-sources__choices" aria-label="二级客户来源">
-                <button
-                  v-if="!selectedPrimaryRequiresSecondary"
-                  type="button"
-                  :class="{ 'is-selected': !selectedSecondarySourceId }"
-                  :disabled="businessSourceSaving"
-                  @click="chooseBusinessSourceSecondary(0)"
-                >不选二级</button>
-                <button
-                  v-for="source in selectedSecondarySources"
-                  :key="source.id"
-                  type="button"
-                  :class="{ 'is-selected': Number(source.id) === selectedSecondarySourceId }"
-                  :disabled="businessSourceSaving"
-                  @click="chooseBusinessSourceSecondary(source.id)"
-                >{{ source.name }}</button>
-              </div>
-            </div>
-            <div v-if="selectedPrimaryIsCrossIndustry" class="checkout-business-sources__reward">
-              <label for="cross-industry-reward">奖励金额</label>
-              <div>
-                <input id="cross-industry-reward" v-model.trim="rewardAmountDraft" inputmode="decimal" maxlength="12" :disabled="businessSourceSaving" aria-label="奖励金额" />
-                <button type="button" class="button button--secondary" :disabled="businessSourceSaving || rewardAmountCents === null || (selectedPrimaryRequiresSecondary && !selectedSecondarySourceId)" @click="saveCrossIndustrySource">保存来源与奖励</button>
-              </div>
-              <span v-if="rewardAmountCents === null" role="alert">请输入不超过两位小数的非负金额。</span>
-            </div>
-          </template>
-        </section>
-
         <dl v-if="isRechargeCheckout" class="checkout-order-details checkout-order-details--source-date">
           <div v-if="checkout.businessDate" class="checkout-sales-date">
             <dt>{{ dateLabel }}</dt>
-            <dd>
+            <dd v-if="isRechargeCheckout">{{ checkout.businessDate }}</dd>
+            <dd v-else>
               <input v-model="salesDateDraft" type="date" :max="salesDateMax || undefined" :disabled="dateSaving" :aria-label="dateLabel">
               <input
                 v-if="salesDateIsHistorical"

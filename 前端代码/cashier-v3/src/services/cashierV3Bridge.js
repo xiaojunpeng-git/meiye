@@ -2740,8 +2740,6 @@ function isCashierWorkspaceAction(action) {
     || action === 'add-recharge-checkout-payment-method'
     || action === 'update-recharge-checkout-payment-line'
     || action === 'remove-recharge-checkout-payment-line'
-    || action === 'update-recharge-checkout-business-source'
-    || action === 'update-recharge-checkout-business-date'
     || action === 'reload-recharge-checkout'
     || action === 'submit-recharge-checkout'
     || action === 'submit-recharge-debt-repayment'
@@ -2756,6 +2754,17 @@ function isCashierWorkspaceAction(action) {
  * 也不再接受单个 command.context——少传一个对象就是少校验一个版本。
  */
 function resolveCommandContexts(action, payload) {
+  // 充值结账以服务端创建的唯一草稿为准：准备时服务端直接锁定会员余额，
+  // 不读取收银工作台的页面版本，避免局部充值流程把已选会员重置为游客。
+  if (action === 'prepare-recharge-checkout') {
+    return { invalid: false, contexts: [] }
+  }
+  if (['add-recharge-checkout-payment-method', 'update-recharge-checkout-payment-line', 'remove-recharge-checkout-payment-line', 'reload-recharge-checkout', 'submit-recharge-checkout'].includes(action)) {
+    const snapshotContexts = Array.isArray(payload.commandContexts) ? payload.commandContexts : []
+    return snapshotContexts.length
+      ? { invalid: false, contexts: distinctCommandContexts(snapshotContexts) }
+      : { invalid: true, contexts: [] }
+  }
   // 服务记录作废以服务事实中已经保存的权益明细、持卡记录和次数为准，
   // 由领域事务锁定当前数据并原路退回，不携带任何页面或影子版本。
   if (action === 'void-service-record') {
@@ -2895,8 +2904,7 @@ function resolveCommandContexts(action, payload) {
 
   if ((action === 'submit-recharge' || action === 'prepare-recharge-checkout' || action === 'prepare-recharge-debt-repayment'
     || action === 'add-recharge-checkout-payment-method' || action === 'update-recharge-checkout-payment-line'
-    || action === 'remove-recharge-checkout-payment-line' || action === 'update-recharge-checkout-business-source'
-    || action === 'update-recharge-checkout-business-date'
+    || action === 'remove-recharge-checkout-payment-line'
     || action === 'submit-recharge-checkout'
     || action === 'reload-recharge-checkout'
     || action === 'submit-recharge-debt-repayment' || action === 'submit-direct-gift') && payload.memberId) {
@@ -3615,11 +3623,25 @@ export async function requestCashierV3Action(action, payload = {}) {
     && String(requestBody.operationType || '') === 'project_replacement'
   const directCheckoutSnapshot = canonicalAction === 'submit-checkout'
     && isRecord(requestBody.checkoutSnapshot)
+  // 充值结账是独立的服务端草稿：它只返回／更新自己的快照，绝不能把
+  // 准备失败或草稿编辑响应附带的工作台投影套回主收银页。否则已选会员会
+  // 在点击“下一步”后被游客根状态覆盖。
+  const independentRechargeCheckoutAction = [
+    'prepare-recharge-checkout',
+    'add-recharge-checkout-payment-method',
+    'update-recharge-checkout-payment-line',
+    'remove-recharge-checkout-payment-line',
+    'reload-recharge-checkout',
+    'submit-recharge-checkout'
+  ].includes(canonicalAction)
   // 欠款补交的可还金额、来源归属和并发锁全部由服务端在同一事务内读取。
   // 它不接受浏览器工作台版本，因此空 contexts 是这个命令的正常合同，
   // 不能误判为“缺少版本”后刷新整个工作台并把当前会员覆盖为游客。
   const serverLockedDebtRepaymentPreparation = [
     'prepare-debt-repayment',
+    // 充值准备也由服务端直接锁定会员余额并生成唯一草稿。空 contexts 是
+    // 正常契约，不能触发工作台恢复而把当前会员切回游客。
+    'prepare-recharge-checkout',
     'prepare-recharge-debt-repayment',
     'submit-debt-repayment'
   ].includes(canonicalAction)
@@ -3678,7 +3700,7 @@ export async function requestCashierV3Action(action, payload = {}) {
     requireIdempotencyBinding: !readOnly,
     correlationId,
     requireCorrelationBinding: true,
-    preserveRootState: preserveRootState === true,
+    preserveRootState: preserveRootState === true || independentRechargeCheckoutAction,
     stateContextId: stateContextIdOf(cashierV3State) || '',
     requireOriginalIdempotencyKey: RESULT_QUERY_ACTIONS.has(canonicalAction) && Boolean(originalResultKey),
     originalIdempotencyKey: originalResultKey
@@ -3710,7 +3732,9 @@ export async function requestCashierV3Action(action, payload = {}) {
     if (!contextRecoveryAttempted && canonicalAction !== 'open-cashier-workbench') {
       const hasCurrentRoot = Boolean(stateContextIdOf(cashierV3State))
       const recovered = hasCurrentRoot
-        ? await requestCashierV3Action('open-cashier-workbench', { silent: true })
+        ? await requestCashierV3Action('open-cashier-workbench', {
+            silent: true
+          })
         : await requestCashierV3ContextSwitch({
             reason: 'command_context_recovery',
             action: 'open-cashier-workbench',

@@ -24,7 +24,9 @@ assert.match(saveSalesDate, /localCheckoutBusinessDateReason\.value = reason/, '
 assert.doesNotMatch(saveSalesDate, /requestAction\(|enqueueCheckoutAction\(/, '销售日期编辑不得提前写入服务端结账草稿')
 assert.match(workbench, /action === 'update-checkout-sales-date'/, '最终结账预览仍需支持回放业务日期到快照')
 assert.doesNotMatch(manifest, /'update-checkout-sales-date':\s*FEATURE_CASHIER/, '销售日期命令不应进入动作清单；仅保留前端快照回放')
-assert.match(workbench, /action: 'update-recharge-business-date'/, '充值日期必须提交充值结账草稿命令')
-assert.match(overlay, /'recharge-date-change'/, '充值日期必须复用结账日期保存事件')
+assert.match(workbench, /:business-date="localCheckoutBusinessDate"/, '充值弹窗必须从工具栏带入业务日期')
+assert.match(overlay, /<dd v-if="isRechargeCheckout">\{\{ checkout\.businessDate \}\}<\/dd>/, '充值结账页只能展示准备时冻结的日期')
+assert.doesNotMatch(workbench, /update-recharge-business-date/, '充值日期不得在结账阶段重新写草稿')
+assert.doesNotMatch(manifest, /update-recharge-checkout-business-date/, '充值日期修改命令不应继续暴露')
 
 console.log('cashier checkout sales-date frontend contract: PASS')

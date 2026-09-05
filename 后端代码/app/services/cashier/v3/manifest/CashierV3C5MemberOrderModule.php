@@ -56,8 +56,6 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'add-recharge-checkout-payment-method',
             'update-recharge-checkout-payment-line',
             'remove-recharge-checkout-payment-line',
-            'update-recharge-checkout-business-source',
-            'update-recharge-checkout-business-date',
             'reload-recharge-checkout',
             'submit-recharge-checkout',
             'submit-recharge-debt-repayment',

@@ -8,6 +8,7 @@ const repo = path.resolve(dirname, '../../..')
 const shell = fs.readFileSync(path.join(repo, '前端代码/cashier-v3/src/layouts/CashierShell.vue'), 'utf8')
 const selector = fs.readFileSync(path.join(repo, '前端代码/cashier-v3/src/components/common/MemberSelectorOverlay.vue'), 'utf8')
 const memberSelection = shell.slice(shell.indexOf('async function selectMemberFromSelector'), shell.indexOf('function applyCashierMemberDraft'))
+const memberSelectionFlow = shell.slice(shell.indexOf('async function selectMemberFromSelector'), shell.indexOf('async function selectGuestOrderFromSelector'))
 const guestSelection = shell.slice(shell.indexOf('async function selectGuestOrderFromSelector'), shell.indexOf('async function createMemberFromSelector'))
 const cashierSelectorOpen = shell.slice(shell.indexOf('async function openWorkflowMemberSelector'), shell.indexOf('async function openWorkflowMemberDetail'))
 
@@ -17,7 +18,9 @@ const checks = [
   ['收银会员选择不再二次读取完整工作台', !/open-cashier-workbench/.test(memberSelection)],
   ['收银会员选择读取权威欠款摘要', /requestCashierV3Action\(\s*['"]query-cashier-member-summary['"]/.test(memberSelection)
     && /memberSummary/.test(memberSelection)
-    && /pendingDebtReminderAfterSource\.value = \{ member: selectedMember \}/.test(memberSelection)],
+    && /pendingDebtReminderAfterSource\.value = \{ member: selectedMember \}/.test(memberSelection)
+    && /open-toolbar-business-source/.test(memberSelectionFlow)
+    && !/handleCheckoutBusinessSourceSettled\(\)\s*;\s*return true/.test(memberSelectionFlow)],
   ['收银会员选择器打开不再写服务端工作台', !/requestCashierV3Action\(\s*['"]open-member-selector['"]/.test(cashierSelectorOpen)],
   ['游客切换只写入浏览器草稿', /applyLocalCashierCustomerSelection\(\{ customerMode: 'guest' \}\)/.test(guestSelection)],
   ['游客切换不再调用服务端命令', !/requestCashierV3Action\(\s*['"]set-guest-order['"]/.test(guestSelection)],

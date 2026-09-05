@@ -1,5 +1,5 @@
 import { ref, unref } from 'vue'
-import { createCashierV3CommandId, requestCashierV3Action, mergeCashierV3PublicVersions } from '@/services/cashierV3Bridge'
+import { createCashierV3CommandId, requestCashierV3Action } from '@/services/cashierV3Bridge'
 import { cashierV3ResponseEnvelope } from '@/services/cashierV3CheckoutResultContract'
 
 function resultStatus(result) {
@@ -23,7 +23,7 @@ function clonePlain(value = {}) {
  * the current member/context and the shared business-source selector callback;
  * all recharge mutations remain serialized and versioned in this boundary.
  */
-export function useRechargeCheckout({ member, currentMemberId, stateContextId, openSourceSelector }) {
+export function useRechargeCheckout({ member, currentMemberId, openSourceSelector }) {
   const rechargeCheckout = ref(null)
   let rechargeCheckoutMutationTail = Promise.resolve()
 
@@ -39,14 +39,6 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
     const projection = rechargeCheckoutProjection(response)
     if (projection) {
       rechargeCheckout.value = projection
-      // Recharge draft mutations advance recharge_checkout_request independently
-      // of the root workbench. Keep the bridge's public version in sync so the
-      // next serialized edit is sent with the version returned by the server.
-      mergeCashierV3PublicVersions([{
-        kind: 'recharge_checkout_request',
-        id: projection.rechargeCheckoutRequestId,
-        version: Number(projection.checkoutRequestVersion)
-      }], unref(stateContextId), { requestStateContextId: unref(stateContextId) })
     } else {
       // A command can reach the server but lose its HTTP response (timeout,
       // worker restart, or a proxy disconnect). Keep the same request visible
@@ -74,11 +66,6 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
     if (!['success', 'succeeded'].includes(resultStatus(response))) return null
     const projection = setRechargeCheckout(response)
     if (!projection) return null
-    mergeCashierV3PublicVersions([{
-      kind: 'recharge_checkout_request',
-      id: projection.rechargeCheckoutRequestId,
-      version: Number(projection.checkoutRequestVersion)
-    }], unref(stateContextId), { requestStateContextId: unref(stateContextId) })
     return projection
   }
 
@@ -105,27 +92,26 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
       'update-payment-line': 'update-recharge-checkout-payment-line',
       'remove-payment-line': 'remove-recharge-checkout-payment-line',
       'submit-checkout': 'submit-recharge-checkout',
-      'update-checkout-business-source': 'update-recharge-checkout-business-source',
-      'update-recharge-business-date': 'update-recharge-checkout-business-date',
       'query-checkout-result': 'reload-recharge-checkout'
     }
     const targetAction = actionMap[action]
     if (!targetAction) return { result: { status: 'failed', code: 'RECHARGE_CHECKOUT_ACTION_NOT_ALLOWED', message: '该充值结账操作尚未开放。' } }
-    const draftAction = ['add-payment-method', 'update-payment-line', 'remove-payment-line', 'update-checkout-business-source'].includes(action)
+    const draftAction = ['add-payment-method', 'update-payment-line', 'remove-payment-line'].includes(action)
     const requestPayload = {
       ...payload,
       memberId,
       rechargeCheckoutRequestId: checkout.rechargeCheckoutRequestId,
       rechargeCheckoutRequestVersion: checkout.checkoutRequestVersion,
+      // 后续请求只携带服务端返回的唯一充值草稿快照，不再读取收银主界面。
+      commandContexts: Array.isArray(checkout.commandContexts)
+        ? clonePlain(checkout.commandContexts)
+        : [],
       silent: draftAction
     }
     if (action === 'submit-checkout' || action === 'retry-checkout') {
       const orderLines = Array.isArray(checkout.orderLines) ? checkout.orderLines : []
       const paymentLines = Array.isArray(checkout.payment?.selectedLines)
         ? checkout.payment.selectedLines
-        : []
-      requestPayload.commandContexts = Array.isArray(checkout.commandContexts)
-        ? clonePlain(checkout.commandContexts)
         : []
       requestPayload.checkoutSnapshot = {
         contractVersion: checkout.contractVersion || 'cashier-v3-recharge-checkout-v1',
@@ -181,7 +167,7 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
   async function requestRechargeCheckoutMutationWithSingleConflictReplay(event = {}) {
     const action = String(event?.action || '')
     const first = await requestRechargeCheckoutAction(event)
-    if (!['add-payment-method', 'update-payment-line', 'remove-payment-line', 'update-checkout-business-source'].includes(action)
+    if (!['add-payment-method', 'update-payment-line', 'remove-payment-line'].includes(action)
       || !rechargeCheckoutDraftConflict(first)) return first
     const current = rechargeCheckout.value
     const requestId = String(current?.rechargeCheckoutRequestId || '')
@@ -190,6 +176,7 @@ export function useRechargeCheckout({ member, currentMemberId, stateContextId, o
     const refreshed = await requestCashierV3Action('reload-recharge-checkout', {
       requestId,
       memberId,
+      commandContexts: Array.isArray(current.commandContexts) ? clonePlain(current.commandContexts) : [],
       idempotencyKey: createCashierV3CommandId()
     })
     const projection = rechargeCheckoutProjection(refreshed)

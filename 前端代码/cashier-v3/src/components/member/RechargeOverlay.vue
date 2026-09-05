@@ -5,7 +5,11 @@ import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerforman
 
 const props = defineProps({
   session: { type: Object, default: () => ({}) },
-  submitting: { type: Boolean, default: false }
+  // 充值日期是本次充值的业务快照。打开弹窗时从收银工具栏带入，
+  // 点击下一步后与人员分配一同冻结；不能在正式收款阶段回读工具栏。
+  businessDate: { type: String, default: '' },
+  submitting: { type: Boolean, default: false },
+  submitError: { type: String, default: '' }
 })
 const emit = defineEmits(['close', 'submit'])
 
@@ -22,7 +26,10 @@ const isSalespersonSelectorOpen = ref(false)
 const isSalespersonLoading = ref(false)
 const salespersonLoadError = ref('')
 const validationMessage = ref('')
+const businessDate = ref('')
 let paymentLineSequence = 1
+
+const cashierToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date())
 
 const member = computed(() => props.session.member || {})
 const balance = computed(() => props.session.balance || {})
@@ -60,6 +67,7 @@ watch(() => props.session, () => {
   paymentLines.value = [createPaymentLine('unionpay')]
   newPaymentMethod.value = 'unionpay'
   salespersonAllocations.value = []
+  businessDate.value = String(props.businessDate || cashierToday)
   validationMessage.value = ''
 }, { immediate: true, deep: true })
 
@@ -106,11 +114,12 @@ function submit() {
   const principal = displayedPrincipal.value.trim()
   const bonus = displayedBonus.value.trim()
   const debt = debtAmount.value.trim()
+  const selectedBusinessDate = businessDate.value.trim()
   if (!memberId.value) validationMessage.value = '会员信息已失效，请重新选择会员。'
   else if (!isMoney(principal)) validationMessage.value = '请输入大于 0 的充值金额。'
   else if (!isMoney(bonus, true)) validationMessage.value = '赠送金额只能填写不小于 0 的金额。'
   else if (!isMoney(debt, true) || moneyToCents(debt) > moneyToCents(principal)) validationMessage.value = '欠款金额必须在 0 到充值本金之间。'
-  else if (salespersonAllocations.value.length && salespersonAllocations.value.reduce((total, item) => total + Number(item.allocationWeight || 0), 0) !== 100) validationMessage.value = '销售人分配比例合计必须为 100%。'
+  else if (!isValidBusinessDate(selectedBusinessDate)) validationMessage.value = '请选择不晚于今天的业务日期。'
   else validationMessage.value = ''
   if (validationMessage.value) return
   emit('submit', {
@@ -120,13 +129,25 @@ function submit() {
     principalAmount: principal,
     bonusAmount: bonus,
     debtAmount: debt,
+    businessDate: selectedBusinessDate,
     salespersonAllocations: salespersonAllocations.value.map((item) => ({
       staffId: item.staffId || item.id,
       allocationWeight: Number(item.allocationWeight),
-      isPreSale: Boolean(item.isPreSale ?? item.marked)
-    })),
-    balanceVersion: Number(balance.value.accountVersion || 0)
+      isPreSale: Boolean(item.isPreSale ?? item.marked),
+      performanceAmountCents: Math.max(0, Number(item.performanceAmountCents || 0)),
+      performanceAmountManual: Boolean(item.performanceAmountManual),
+      positionId: Number(item.positionId || 0),
+      positionName: String(item.positionName || ''),
+      performanceIndependent: Boolean(item.performanceIndependent),
+      allocationGroupKey: String(item.allocationGroupKey || '')
+    }))
   })
+}
+
+function isValidBusinessDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value > cashierToday) return false
+  const date = new Date(`${value}T00:00:00+08:00`)
+  return Number.isFinite(date.getTime()) && date.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' }) === value
 }
 
 async function openSalespersonSelector() {
@@ -237,17 +258,20 @@ function createPaymentLine(paymentMethod) {
           </template>
           <label>本次欠款<input v-model="debtAmount" inputmode="numeric" autocomplete="off" @input="normalizeDebtAmount"></label>
         </div>
-        <section class="recharge-overlay__salespeople" aria-label="销售人分配">
-          <header><strong>销售人分配</strong><span>{{ salespersonAllocations.length ? salespersonAllocations.map((item) => `${item.name} ${item.allocationWeight}%`).join('、') : '暂未选择' }}</span><button type="button" class="button button--secondary" @click="openSalespersonSelector">选择销售人</button></header>
-          <div v-if="salespersonAllocations.length" class="recharge-overlay__salesperson-list">
-            <span v-for="item in salespersonAllocations" :key="item.staffId || item.id">{{ item.name }}（{{ item.isPreSale || item.marked ? '售前' : '售后' }}，{{ item.allocationWeight }}%）</span>
-          </div>
-          <p v-else class="recharge-overlay__hint">未分配时，本笔现金业绩不归属具体销售人。</p>
+        <section class="recharge-overlay__context" aria-label="充值日期与销售人分配">
+          <label class="recharge-overlay__business-date">业务日期<input v-model="businessDate" type="date" :max="cashierToday"></label>
+          <section class="recharge-overlay__salespeople" aria-label="销售人分配">
+            <header><strong>销售人分配</strong><span>{{ salespersonAllocations.length ? salespersonAllocations.map((item) => `${item.name} ${item.allocationWeight}%`).join('、') : '暂未选择' }}</span><button type="button" class="button button--secondary" @click="openSalespersonSelector">选择销售人</button></header>
+            <div v-if="salespersonAllocations.length" class="recharge-overlay__salesperson-list">
+              <span v-for="item in salespersonAllocations" :key="item.staffId || item.id">{{ item.name }}（{{ item.isPreSale || item.marked ? '售前' : '售后' }}，{{ item.allocationWeight }}%）</span>
+            </div>
+            <p v-else class="recharge-overlay__hint">未分配时，本笔现金业绩不归属具体销售人。</p>
+          </section>
         </section>
-        <p v-if="validationMessage" class="recharge-overlay__error" role="alert">{{ validationMessage }}</p>
+        <p v-if="validationMessage || submitError" class="recharge-overlay__error" role="alert">{{ validationMessage || submitError }}</p>
         <footer class="recharge-overlay__footer">
           <button type="button" class="button button--secondary" :disabled="submitting" @click="emit('close')">取消</button>
-          <button type="submit" class="button button--primary" :disabled="submitting">{{ submitting ? '正在准备' : '下一步：收款信息' }}</button>
+          <button type="button" class="button button--primary" :disabled="submitting" @click="submit">{{ submitting ? '正在准备' : '下一步：收款信息' }}</button>
         </footer>
       </form>
     </section>
@@ -260,6 +284,7 @@ function createPaymentLine(paymentMethod) {
       :salesperson-candidates="salespersonCandidates"
       :selected-craftsmen="[]"
       :selected-salespeople="salespersonAllocations"
+      :performance-base-amount-cents="cashDueCents"
       :loading="isSalespersonLoading"
       :load-error="salespersonLoadError"
       @close="isSalespersonSelectorOpen = false"
@@ -297,7 +322,11 @@ function createPaymentLine(paymentMethod) {
 .recharge-overlay__fields label { display: grid; gap: 7px; color: #3f4c5c; font-size: 14px; }
 .recharge-overlay__fields input, .recharge-overlay__fields select { width: 100%; height: 38px; padding: 0 10px; border: 1px solid #cfd7e3; border-radius: 5px; background: #fff; color: #202b3a; }
 .recharge-overlay__fields input:focus, .recharge-overlay__fields select:focus { outline: 2px solid rgba(41, 129, 229, .24); border-color: #2981e5; }
-.recharge-overlay__salespeople { margin: 0 24px 22px; border-top: 1px solid #edf0f4; padding-top: 16px; }
+.recharge-overlay__context { display: grid; grid-template-columns: minmax(180px, .7fr) minmax(0, 1.3fr); gap: 20px; margin: 0 24px 22px; border-top: 1px solid #edf0f4; padding-top: 16px; }
+.recharge-overlay__business-date { display: grid; align-content: start; gap: 7px; color: #3f4c5c; font-size: 14px; }
+.recharge-overlay__business-date input { width: 100%; height: 38px; padding: 0 10px; border: 1px solid #cfd7e3; border-radius: 5px; background: #fff; color: #202b3a; }
+.recharge-overlay__business-date input:focus { outline: 2px solid rgba(41, 129, 229, .24); border-color: #2981e5; }
+.recharge-overlay__salespeople { min-width: 0; }
 .recharge-overlay__salespeople header { display: flex; align-items: center; gap: 10px; }
 .recharge-overlay__salespeople header strong { color: #263445; }
 .recharge-overlay__salespeople header span { flex: 1; color: #5c6a7e; font-size: 13px; text-align: right; }
@@ -316,5 +345,6 @@ function createPaymentLine(paymentMethod) {
 @media (max-width: 720px) {
   .recharge-overlay__packages { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .recharge-overlay__fields--custom { grid-template-columns: minmax(0, 1fr); }
+  .recharge-overlay__context { grid-template-columns: minmax(0, 1fr); gap: 16px; }
 }
 </style>

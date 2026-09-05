@@ -44,23 +44,47 @@ final class CashierV3RechargePersonnelAdjustmentServices
         $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', $scope->tenantId())
             ->where('order_id', $source['orderId'])->where('source_document_type', 'recharge')
             ->where('performance_type', 'sales_performance_allocated')->where('fact_direction', 'forward')
-            ->where('status', 'effective')->field('fact_id,employee_id,employee_name_snapshot,amount_cents,allocation_base_amount_cents')
+            ->where('status', 'effective')->field('fact_id,employee_id,employee_name_snapshot,amount_cents,allocation_base_amount_cents,allocation_weight_numerator')
             ->order('id', 'asc')->select()->toArray();
         $factIds = array_values(array_filter(array_map(static fn(array $row): string => (string)($row['fact_id'] ?? ''), $rows)));
         $reversed = $factIds === [] ? [] : Db::name('cashier_v3_performance_fact')
             ->where('tenant_id', $scope->tenantId())->where('fact_direction', 'reversal')
             ->whereIn('reversal_of', $factIds)->column('reversal_of');
         $reversed = array_fill_keys(array_map('strval', $reversed), true);
+        $candidates = $this->candidates($operator);
+        $candidateByEmployee = [];
+        foreach ($candidates as $candidate) {
+            $candidateByEmployee[(int)($candidate['employeeId'] ?? 0)] = $candidate;
+        }
         $current = [];
         foreach ($rows as $row) {
             if (isset($reversed[(string)($row['fact_id'] ?? '')])) continue;
             $id = (int)($row['employee_id'] ?? 0);
             if ($id <= 0) continue;
             $base = max(0, (int)($row['allocation_base_amount_cents'] ?? 0));
-            $amount = (int)($row['amount_cents'] ?? 0);
-            $current[$id] = ['employeeId' => $id, 'name' => (string)($row['employee_name_snapshot'] ?? ''), 'amountCents' => $amount, 'allocationWeight' => $base > 0 ? (int)round($amount * 100 / $base) : 0];
+            $amount = abs((int)($row['amount_cents'] ?? 0));
+            $snapshotWeight = (int)($row['allocation_weight_numerator'] ?? 0);
+            $allocationWeight = $snapshotWeight > 0 && $snapshotWeight <= 100
+                ? $snapshotWeight
+                : ($base > 0 ? (int)round($amount * 100 / $base) : 0);
+            $candidate = (array)($candidateByEmployee[$id] ?? []);
+            $positionId = (int)($candidate['positionId'] ?? 0);
+            $independent = !empty($candidate['performanceIndependent']);
+            // 订单中心回显的是结账时已经落账的业绩事实。即使当时使用了手工
+            // 业绩金额，它也不能被当前编辑器的比例或空基数重新算成 0。
+            $current[$id] = [
+                'employeeId' => $id,
+                'name' => (string)($row['employee_name_snapshot'] ?? ''),
+                'amountCents' => $amount,
+                'performanceAmountCents' => $amount,
+                'performanceAmountLocked' => true,
+                'allocationWeight' => $allocationWeight,
+                'positionId' => $positionId,
+                'positionName' => (string)($candidate['positionName'] ?? ''),
+                'performanceIndependent' => $independent,
+                'allocationGroupKey' => $independent ? 'independent:' . ($positionId > 0 ? $positionId : $id) : 'normal',
+            ];
         }
-        $candidates = $this->candidates($operator);
         return [
             'contractVersion' => self::CONTRACT_VERSION,
             'recordId' => (string)$source['rechargeId'], 'rechargeId' => (int)$source['rechargeId'], 'rechargeOrderNo' => (string)$source['orderNo'],
@@ -99,9 +123,9 @@ final class CashierV3RechargePersonnelAdjustmentServices
             'aggregate_name_snapshot' => $source['orderNo'], 'store_name_snapshot' => $source['storeName'],
             'payload' => ['contractVersion' => self::CONTRACT_VERSION, 'operationId' => $operationId, 'operationNo' => $operationNo, 'rechargeId' => $source['rechargeId'], 'salespeople' => $input['salespeople']],
         ]);
-        $facts = Db::name('cashier_v3_performance_fact')->where('tenant_id', $dataScope->tenantId())->where('order_id', $source['orderId'])
-            ->where('source_document_type', 'recharge')->whereIn('performance_type', ['sales_performance_allocated', 'actual_performance_recorded'])
-            ->where('fact_direction', 'forward')->where('status', 'effective')->lock(true)->order('id', 'asc')->select()->toArray();
+        // 只冲销当前有效快照。此前已经被冲销的历史事实只用于审计，绝不能
+        // 再次参与本次调整，否则会生成多组并列的销售人快照。
+        $facts = $this->effectiveForwardFacts($dataScope->tenantId(), $source['orderId'], true);
         $base = 0; $actualTemplate = null; $salesTemplate = null;
         foreach ($facts as $fact) {
             if ((string)$fact['performance_type'] === 'actual_performance_recorded') { $actualTemplate = $fact; $base = (int)$fact['allocation_base_amount_cents']; }
@@ -117,7 +141,7 @@ final class CashierV3RechargePersonnelAdjustmentServices
             if (in_array((string)$staff['employment_type_code'], ['partner', 'outsourced'], true)) $external += $amount;
             $salesFactTemplate = $salesTemplate ?: $actualTemplate;
             if ($salesFactTemplate !== null) {
-                $newSales[] = $this->newFact($salesFactTemplate, $operationId, $key, (array)$event, $operator, $now, $staff, $amount, $base, $i + 1, 'sales', !empty($person['isPreSale']));
+                $newSales[] = $this->newFact($salesFactTemplate, $operationId, $key, (array)$event, $operator, $now, $staff, $amount, $base, $i + 1, 'sales', !empty($person['isPreSale']), (int)$person['allocationWeight']);
             }
         }
         if ($base > 0) {
@@ -147,26 +171,59 @@ final class CashierV3RechargePersonnelAdjustmentServices
     {
         $reason = trim((string)($payload['reason'] ?? '')); if ($reason === '' || mb_strlen($reason) > 255) throw self::failure('recharge_personnel_reason_invalid');
         $raw = $payload['personnel'] ?? $payload['salespeople'] ?? null; if (!is_array($raw) || $raw === [] || count($raw) > 50) throw self::failure('recharge_personnel_empty');
-        $out = []; $seen = []; $weight = 0;
+        $out = []; $seen = []; $weightsByGroup = [];
         foreach (array_values($raw) as $item) {
             if (!is_array($item)) throw self::failure('recharge_personnel_item_invalid');
             $staffId = (int)($item['staffId'] ?? 0); $id = (int)($item['employeeId'] ?? $item['employee_id'] ?? $staffId); $w = (int)($item['allocationWeight'] ?? $item['weight'] ?? $item['ratio'] ?? 0);
             if ($id <= 0 || $w <= 0 || isset($seen[$id])) throw self::failure('recharge_personnel_item_invalid');
-            $staffQuery = Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)->where('s.cashier_salesperson_enabled', 1)->where('e.status', 1)->where('e.is_del', 0);
+            [$manualAmount, $manualAmountCents] = self::manualPerformanceAmount($item);
+            $staffQuery = Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')
+                ->leftJoin('staff_job_position sjp', 'sjp.staff_id = s.id AND sjp.status = 1 AND sjp.is_del = 0 AND sjp.end_time = 0')
+                ->leftJoin('position p', 'p.id = sjp.position_id AND p.status = 1')
+                ->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)->where('s.cashier_salesperson_enabled', 1)->where('e.status', 1)->where('e.is_del', 0);
             if ($staffId > 0) $staffQuery->where(function ($q) use ($staffId, $id): void { $q->where('s.id', $staffId)->whereOr('s.employee_id', $id); }); else $staffQuery->where('s.employee_id', $id);
-            $staff = (array)$staffQuery->field('s.id,s.employee_id,s.staff_name,e.name,e.employment_type_code,e.employment_type_version')->lock(true)->find();
+            $staff = (array)$staffQuery->field('s.id,s.employee_id,s.staff_name,e.name,e.employment_type_code,e.employment_type_version,sjp.position_id,p.name as position_name,p.performance_independent')->lock(true)->find();
             if (!$staff) throw self::failure('recharge_personnel_staff_ineligible');
             $id = (int)$staff['employee_id']; if (isset($seen[$id])) throw self::failure('recharge_personnel_item_invalid');
-            $seen[$id] = true; $weight += $w; $out[] = ['staffId' => (int)$staff['id'], 'employeeId' => $id, 'allocationWeight' => $w, 'isPreSale' => !empty($item['isPreSale']), '_staff' => $staff];
+            $positionId = (int)($staff['position_id'] ?? 0);
+            $independent = (int)($staff['performance_independent'] ?? 0) === 1;
+            $groupKey = $independent ? 'independent:' . ($positionId > 0 ? $positionId : (int)$staff['id']) : 'normal';
+            $seen[$id] = true;
+            $weightsByGroup[$groupKey] = ($weightsByGroup[$groupKey] ?? 0) + $w;
+            $out[] = [
+                'staffId' => (int)$staff['id'], 'employeeId' => $id,
+                'allocationWeight' => $w, 'isPreSale' => !empty($item['isPreSale']),
+                'performanceAmountManual' => $manualAmount,
+                'performanceAmountCents' => $manualAmountCents,
+                'positionId' => $positionId, 'performanceIndependent' => $independent,
+                'allocationGroupKey' => $groupKey, '_staff' => $staff,
+            ];
         }
-        if ($weight !== 100) throw self::failure('recharge_personnel_weight_total_invalid');
+        foreach ($weightsByGroup as $weight) {
+            if ($weight !== 100) throw self::failure('recharge_personnel_weight_total_invalid');
+        }
         return ['reason' => $reason, 'salespeople' => $out];
     }
 
     private function candidates(CashierV3OperatorScope $operator): array
     {
-        $rows = Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)->where('s.cashier_salesperson_enabled', 1)->where('e.status', 1)->where('e.is_del', 0)->field('s.id,s.employee_id,e.name,s.staff_name,e.employment_type_code')->order('s.id', 'asc')->select()->toArray();
-        return array_map(static function (array $row): array { return ['staffId' => (int)$row['id'], 'employeeId' => (int)$row['employee_id'], 'name' => trim((string)$row['name']) ?: (string)$row['staff_name'], 'employeeTypeCode' => (string)$row['employment_type_code']]; }, $rows);
+        $rows = Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')
+            ->leftJoin('staff_job_position sjp', 'sjp.staff_id = s.id AND sjp.status = 1 AND sjp.is_del = 0 AND sjp.end_time = 0')
+            ->leftJoin('position p', 'p.id = sjp.position_id AND p.status = 1')
+            ->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)->where('s.cashier_salesperson_enabled', 1)->where('e.status', 1)->where('e.is_del', 0)
+            ->field('s.id,s.employee_id,e.name,s.staff_name,e.employment_type_code,sjp.position_id,p.name as position_name,p.performance_independent')->order('s.id', 'asc')->select()->toArray();
+        return array_map(static function (array $row): array {
+            $positionId = (int)($row['position_id'] ?? 0);
+            $independent = (int)($row['performance_independent'] ?? 0) === 1;
+            return [
+                'staffId' => (int)$row['id'], 'employeeId' => (int)$row['employee_id'],
+                'name' => trim((string)$row['name']) ?: (string)$row['staff_name'],
+                'employeeTypeCode' => (string)$row['employment_type_code'],
+                'positionId' => $positionId, 'positionName' => (string)($row['position_name'] ?? ''),
+                'performanceIndependent' => $independent,
+                'allocationGroupKey' => $independent ? 'independent:' . ($positionId > 0 ? $positionId : (int)$row['id']) : 'normal',
+            ];
+        }, $rows);
     }
 
     private function performanceBase(array $source, CashierV3DataScopeContext $scope): int
@@ -174,12 +231,28 @@ final class CashierV3RechargePersonnelAdjustmentServices
         return (int)Db::name('cashier_v3_performance_fact')->where('tenant_id', $scope->tenantId())->where('order_id', $source['orderId'])->where('source_document_type', 'recharge')->where('performance_type', 'actual_performance_recorded')->where('fact_direction', 'forward')->where('status', 'effective')->value('allocation_base_amount_cents');
     }
 
+    /** @return array<int,array<string,mixed>> */
+    private function effectiveForwardFacts(string $tenantId, string $orderId, bool $lock = false): array
+    {
+        $query = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)->where('order_id', $orderId)
+            ->where('source_document_type', 'recharge')->whereIn('performance_type', ['sales_performance_allocated', 'actual_performance_recorded'])
+            ->where('fact_direction', 'forward')->where('status', 'effective')->order('id', 'asc');
+        if ($lock) $query->lock(true);
+        $rows = $query->select()->toArray();
+        $factIds = array_values(array_filter(array_map(static fn(array $row): string => (string)($row['fact_id'] ?? ''), $rows)));
+        if ($factIds === []) return [];
+        $reversed = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)
+            ->where('fact_direction', 'reversal')->whereIn('reversal_of', $factIds)->column('reversal_of');
+        $reversed = array_fill_keys(array_map('strval', $reversed), true);
+        return array_values(array_filter($rows, static fn(array $row): bool => !isset($reversed[(string)($row['fact_id'] ?? '')])));
+    }
+
     private function reverseFact(array $source, string $operationId, string $key, array $event, CashierV3OperatorScope $operator, int $now): void
     {
         $row = $source; unset($row['id'], $row['created_at'], $row['updated_at']); $row['fact_id'] = 'RPR-' . strtoupper(substr(hash('sha256', $source['fact_id'] . '|' . $operationId), 0, 40)); $row['natural_key'] = 'recharge_personnel_adjust:reversal:' . hash('sha256', $source['fact_id'] . '|' . $operationId); $row['business_event_no'] = (string)$event['event_no']; $row['fact_direction'] = 'reversal'; $row['reversal_of'] = (string)$source['fact_id']; $row['command_idempotency_key'] = $key; $row['operator_id'] = $operator->operatorId(); $row['business_date'] = date('Y-m-d', $now); $row['occurred_at'] = $now; $row['settled_at'] = $now; $row['recorded_at'] = $now; $row['amount_cents'] = -(int)$source['amount_cents']; $row['immutable_fingerprint'] = hash('sha256', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)); if ((int)Db::name('cashier_v3_performance_fact')->insert($row) !== 1) throw self::failure('recharge_personnel_reversal_insert_failed');
     }
 
-    private function newFact(array $template, string $operationId, string $key, array $event, CashierV3OperatorScope $operator, int $now, ?array $staff, int $amount, int $base, int $sequence, string $kind = 'sales', bool $isPreSale = false): array
+    private function newFact(array $template, string $operationId, string $key, array $event, CashierV3OperatorScope $operator, int $now, ?array $staff, int $amount, int $base, int $sequence, string $kind = 'sales', bool $isPreSale = false, int $allocationWeight = 0): array
     {
         $row = $template;
         unset($row['id'], $row['created_at'], $row['updated_at']);
@@ -203,14 +276,78 @@ final class CashierV3RechargePersonnelAdjustmentServices
             $row['employee_id'] = 0; $row['employee_name_snapshot'] = ''; $row['employee_type_snapshot'] = '';
             $row['employee_type_authority_version'] = 0; $row['role_snapshot'] = '';
         }
-        $row['allocation_weight_numerator'] = $staff ? $amount : 0;
-        $row['allocation_weight_denominator'] = $staff ? max(1, $base) : 1;
+        $row['allocation_weight_numerator'] = $staff ? $allocationWeight : 0;
+        $row['allocation_weight_denominator'] = $staff ? 100 : 1;
         $row['immutable_fingerprint'] = hash('sha256', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         if ((int)Db::name('cashier_v3_performance_fact')->insert($row) !== 1) throw self::failure('recharge_personnel_fact_insert_failed');
         return $row;
     }
 
-    private function allocate(int $total, array $people): array { $sum = array_sum(array_column($people, 'allocationWeight')); if ($sum !== 100) throw self::failure('recharge_personnel_weight_total_invalid'); $out = []; $used = 0; foreach ($people as $i => $person) { $value = $i === count($people) - 1 ? $total - $used : intdiv($total * (int)$person['allocationWeight'], 100); $out[] = $value; $used += $value; } return $out; }
+    /**
+     * 每个独立核算组各自使用同一笔充值业绩基数。店长独立核算与普通销售组
+     * 都可以是 100%，不能再把它们合并成全局 200% 后判为非法。
+     *
+     * 手填金额是唯一当前快照的最终值；本次调整会反向冲销旧事实并写入一组
+     * 新事实，不保留可并列使用的旧快照。
+     */
+    private function allocate(int $total, array $people): array
+    {
+        $groups = [];
+        foreach ($people as $index => $person) {
+            $groups[(string)($person['allocationGroupKey'] ?? 'normal')][] = $index;
+        }
+        $out = array_fill(0, count($people), 0);
+        foreach ($groups as $indexes) {
+            $weight = 0;
+            foreach ($indexes as $index) $weight += (int)($people[$index]['allocationWeight'] ?? 0);
+            if ($weight !== 100) throw self::failure('recharge_personnel_weight_total_invalid');
+            $manualIndexes = array_values(array_filter($indexes, static fn(int $index): bool => !empty($people[$index]['performanceAmountManual'])));
+            if ($manualIndexes) {
+                $autoIndexes = array_values(array_filter($indexes, static fn(int $index): bool => empty($people[$index]['performanceAmountManual'])));
+                $autoWeight = 0;
+                foreach ($autoIndexes as $index) $autoWeight += (int)$people[$index]['allocationWeight'];
+                $autoBase = intdiv($total * $autoWeight, 100);
+                $allocated = 0;
+                $lastAuto = $autoIndexes[count($autoIndexes) - 1] ?? null;
+                foreach ($autoIndexes as $index) {
+                    $share = $index === $lastAuto
+                        ? $autoBase - $allocated
+                        : intdiv($total * (int)$people[$index]['allocationWeight'], 100);
+                    if ($share < 0) throw self::failure('recharge_personnel_amount_invalid');
+                    $allocated += $share;
+                    $out[$index] = $share;
+                }
+                foreach ($manualIndexes as $index) {
+                    $out[$index] = (int)$people[$index]['performanceAmountCents'];
+                }
+                continue;
+            }
+            $allocated = 0;
+            $last = $indexes[count($indexes) - 1];
+            foreach ($indexes as $index) {
+                $share = $index === $last
+                    ? $total - $allocated
+                    : intdiv($total * (int)$people[$index]['allocationWeight'], 100);
+                if ($share < 0) throw self::failure('recharge_personnel_amount_invalid');
+                $allocated += $share;
+                $out[$index] = $share;
+            }
+        }
+        return $out;
+    }
+
+    private static function manualPerformanceAmount(array $row): array
+    {
+        $manual = !empty($row['performanceAmountManual']) || !empty($row['performance_amount_manual']);
+        if (!$manual) return [false, 0];
+        $raw = $row['performanceAmountCents'] ?? $row['performance_amount_cents'] ?? null;
+        if ((!is_int($raw) && !is_string($raw)) || preg_match('/^(?:0|[1-9][0-9]*)$/D', trim((string)$raw)) !== 1) {
+            throw self::failure('recharge_personnel_manual_amount_invalid');
+        }
+        $cents = (int)$raw;
+        if ($cents < 0 || $cents % 100 !== 0) throw self::failure('recharge_personnel_manual_amount_invalid');
+        return [true, $cents];
+    }
     private function scope(array $scope): array { $operator = $scope['operator_scope'] ?? null; $data = $scope['data_scope'] ?? null; if (!$operator instanceof CashierV3OperatorScope || !$data instanceof CashierV3DataScopeContext) throw self::failure('recharge_personnel_scope_incomplete'); return [$operator, $data]; }
     private function executionScope(array $scope): array { [$operator, $data] = $this->scope($scope); $recorder = $scope['event_recorder'] ?? null; $execution = $scope['event_execution'] ?? null; if (!$recorder instanceof CashierV3BusinessEventRecorder || !$execution instanceof CashierV3BusinessEventExecution) throw self::failure('recharge_personnel_event_scope_incomplete'); return [$operator, $data, $recorder, $execution]; }
     private function secret(): string { $secret = trim((string)config('cashier_v3.checkout_namespace_secret')); if (strlen($secret) < 32) throw self::failure('recharge_personnel_secret_missing'); return $secret; }

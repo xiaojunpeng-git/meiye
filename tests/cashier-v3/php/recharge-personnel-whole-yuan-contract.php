@@ -7,11 +7,15 @@ $source = (string)file_get_contents(
 );
 
 $checks = [
-    'recharge accepts the unified allocation weight' => strpos($source, "array_key_exists('allocationWeight', \$allocation)") !== false,
-    'selected weights must total one hundred' => strpos($source, '$usesWeights && $total !== 100') !== false,
-    'allocation is calculated in whole yuan' => strpos($source, 'intdiv(intdiv($principalCents, 100) *') !== false
-        && strpos($source, '$amountCents % 100 !== 0') !== false,
-    'the last salesperson receives the integer remainder' => strpos($source, '$principalCents - $allocatedCents') !== false,
+    'recharge accepts the unified allocation weight' => strpos($source, "(int)(\$row['allocationWeight'] ?? 0)") !== false,
+    'independent position groups each require one hundred percent' => strpos($source, "'recharge_salespeople_group_weight_invalid'") !== false
+        && strpos($source, "'independent:'") !== false,
+    'allocation uses actual collected principal rather than recharge principal' => strpos($source, 'resolveSalespeopleForPreparation(array $allocations, int $cashPerformanceCents') !== false
+        && strpos($source, '$cashPerformanceCents - $allocated') !== false,
+    'manual performance amount stays final' => strpos($source, "'performanceAmountManual' => (bool)\$selection['performanceAmountManual']") !== false
+        && strpos($source, 'foreach ($manualIndexes as $index) $result[$index][\'amountCents\']') !== false,
+    'prepared snapshot is used without staff re-query at final checkout' => strpos($source, 'normalizePreparedSalespeopleSnapshot') !== false
+        && strpos($source, "'recharge_checkout_salespeople_snapshot'") !== false,
     'staff authority is still reloaded for the current store' => strpos($source, "->where('ss.store_id', \$operator->storeId())") !== false
         && strpos($source, "->where('ss.cashier_salesperson_enabled', 1)") !== false,
 ];

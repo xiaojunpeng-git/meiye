@@ -14,6 +14,12 @@ $manifestModule = (string)file_get_contents(
 $manifest = (string)file_get_contents(
     $root . '/后端代码/app/services/cashier/v3/manifest/CashierV3ActionManifest.php'
 );
+$dispatcher = (string)file_get_contents(
+    $root . '/后端代码/app/services/cashier/v3/CashierV3ActionDispatcher.php'
+);
+$contextPolicy = (string)file_get_contents(
+    $root . '/后端代码/app/services/cashier/v3/registry/CashierV3ContextPolicy.php'
+);
 $migration = (string)file_get_contents(
     $root . '/后端代码/database/upgrades/2026-08-05-收银V3充值统一结账/02-正式升级.sql'
 );
@@ -27,6 +33,11 @@ $checks = [
         && strpos($module, '充值就按当前登录门店归属创建') !== false,
     'draft writes are eventless while final submit reuses recharge authority' => strpos($module, 'eventless; only submit-recharge-checkout') !== false
         && strpos($module, '(new CashierV3RechargeModule())->submitInTx(') !== false,
+    'prepare freezes business date and authoritative salesperson snapshot' => strpos($module, "'business_date'=>\$input['businessDate']") !== false
+        && strpos($module, 'resolveSalespeopleForPreparation') !== false
+        && strpos($module, "'recharge_checkout_salespeople_snapshot'=>\$salespeopleSnapshot") !== false,
+    'recharge date is not mutable after preparation' => strpos($manifestModule, "'update-recharge-checkout-business-date'") === false
+        && strpos($manifest, "'update-recharge-checkout-business-date'") === false,
     'payment edits lock the request version and reject totals above receivable' => strpos($module, 'private function lockEditing') !== false
         && strpos($module, 'recharge_checkout_payment_exceeds_due') !== false
         && strpos($module, 'recharge_checkout_payment_total_mismatch') !== false,
@@ -37,12 +48,28 @@ $checks = [
     'recharge payment line identity stays stable across draft versions' => strpos($module, 'private function publicPaymentLineId') !== false
         && strpos($module, "'id'=>\$this->publicPaymentLineId") !== false
         && strpos($module, "hash_equals(\$this->publicPaymentLineId") !== false,
-    'recharge source selection advances workspace only' => strpos($module, "self::SOURCE, ['cashier_workspace','member','member_balance','recharge_checkout_request'], ['cashier_workspace']") !== false
-        && strpos($module, "'touched' => ['cashier_workspace']") !== false,
+    'recharge source is frozen from the cashier toolbar at preparation' => strpos($module, 'captureRechargePreparationInTx') !== false
+        && strpos($module, "'sourceEnabled'=>false,'sourceSelectable'=>false") !== false
+        && strpos($module, 'update-recharge-checkout-business-source') === false
+        && strpos($manifestModule, 'update-recharge-checkout-business-source') === false
+        && strpos($manifest, 'update-recharge-checkout-business-source') === false,
     'new context version provider and action module are installed' => strpos($bootstrap, 'CashierV3RechargeCheckoutRequestVersionProvider') !== false
         && strpos($bootstrap, 'CashierV3RechargeCheckoutModule::install') !== false,
     'reload command is registered with an explicit eventless contract' => strpos($manifestModule, "'reload-recharge-checkout'") !== false
         && strpos($manifest, "'reload-recharge-checkout' => \$eventless(\$checkoutPreparation)") !== false,
+    'recharge checkout drafts never replace the selected-member workbench root' => strpos($dispatcher, "'prepare-recharge-checkout'") !== false
+        && strpos($dispatcher, "'add-recharge-checkout-payment-method'") !== false
+        && strpos($dispatcher, "'update-recharge-checkout-payment-line'") !== false
+        && strpos($dispatcher, "'remove-recharge-checkout-payment-line'") !== false
+        && strpos($dispatcher, "'reload-recharge-checkout'") !== false
+        && strpos($dispatcher, '浏览器中已选会员') !== false,
+    'recharge preparation locks one server snapshot instead of browser root versions' => strpos($module, '$install(self::PREPARE, [], []') !== false
+        && strpos($module, 'CashierV3MemberBalanceProvider') !== false
+        && strpos($module, 'lockSnapshotInTx((int)$input[\'memberId\']') !== false
+        && strpos($module, "'allows_empty_contexts'=>empty(\$required)") !== false,
+    'final recharge keeps the server-locked request context while domain writes stay atomic' => strpos($contextPolicy, "\$this->action === 'submit-recharge-checkout'") !== false
+        && strpos($contextPolicy, "is_array(\$payload['checkoutSnapshot'] ?? null)") !== false
+        && strpos($contextPolicy, "\$out['allows_empty_touched_result'] = true;") !== false,
     'migration creates only dedicated recharge checkout draft tables' => strpos($migration, 'eb_cashier_v3_recharge_checkout_request') !== false
         && strpos($migration, 'eb_cashier_v3_recharge_checkout_payment_draft') !== false
         && stripos($migration, 'UPDATE ') === false

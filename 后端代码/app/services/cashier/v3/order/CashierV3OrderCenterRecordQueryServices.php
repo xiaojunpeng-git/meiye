@@ -430,6 +430,8 @@ final class CashierV3OrderCenterRecordQueryServices
 
         $facts = Db::name('cashier_v3_payment_fact')->alias('pf')
             ->where('pf.source_document_type', 'recharge')
+            // 业务日期属于原充值单快照；作废反向事实按作废日入账，不能覆盖订单的原业务日期。
+            ->where('pf.fact_direction', 'forward')
             ->where('pf.status', 'effective')
             ->whereIn('pf.store_id', array_values($storeIds))
             ->whereIn('pf.order_no_snapshot', array_values($orderNos))
@@ -461,14 +463,10 @@ final class CashierV3OrderCenterRecordQueryServices
             ->where('fact_direction', 'forward')->where('status', 'effective')
             ->whereIn('order_id', array_map(static function (int $id): string { return 'RCH:' . $id; }, $ids))
             ->field('fact_id,order_id,employee_name_snapshot')->order('id', 'asc')->select()->toArray();
-        $factIds = array_values(array_filter(array_map(static fn(array $row): string => (string)($row['fact_id'] ?? ''), $rows)));
-        $reversed = $factIds === [] ? [] : Db::name('cashier_v3_performance_fact')
-            ->where('tenant_id', $tenantId)->where('fact_direction', 'reversal')
-            ->whereIn('reversal_of', $factIds)->column('reversal_of');
-        $reversed = array_fill_keys(array_map('strval', $reversed), true);
         $names = [];
         foreach ($rows as $row) {
-            if (isset($reversed[(string)($row['fact_id'] ?? '')])) continue;
+            // 订单详情展示的是原单快照，不是当期可计提业绩。作废会生成
+            // 反向业绩事实抵销统计，但不能抹掉原充值单的销售人审计痕迹。
             $orderId = (string)($row['order_id'] ?? '');
             $name = trim((string)($row['employee_name_snapshot'] ?? ''));
             if (!preg_match('/^RCH:([1-9][0-9]*)$/D', $orderId, $m) || $name === '') continue;
@@ -502,6 +500,8 @@ final class CashierV3OrderCenterRecordQueryServices
         if ($storeIds === [] || $orderNos === []) return [];
         $facts = Db::name('cashier_v3_payment_fact')->alias('pf')
             ->where('pf.source_document_type', 'recharge')
+            // 原充值业务日期取正向事实；作废反向事实按作废日入账，不能覆盖原单日期快照。
+            ->where('pf.fact_direction', 'forward')
             ->where('pf.status', 'effective')
             ->whereIn('pf.store_id', array_values($storeIds))
             ->whereIn('pf.order_no_snapshot', array_values($orderNos))
