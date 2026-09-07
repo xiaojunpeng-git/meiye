@@ -74,6 +74,7 @@ final class CashierV3ReservationDetailQueryServices
             ->where('reservation_id', $reservationId)
             ->order('occurred_at asc,id asc')
             ->select());
+        $projectOutcomes = $this->projectOutcomes($reservation, $lines, $operations);
 
         $startAt = (int)($reservation['appointment_start_at'] ?? 0);
         $endAt = (int)($reservation['appointment_end_at'] ?? 0);
@@ -97,9 +98,10 @@ final class CashierV3ReservationDetailQueryServices
                 'name' => (string)($reservation['member_name_snapshot'] ?? ''),
                 'phone' => (string)($reservation['member_phone_snapshot'] ?? ''),
             ],
-            'projects' => array_map(function (array $line): array {
+            'projects' => array_map(function (array $line) use ($projectOutcomes): array {
                 $minutes = max(0, (int)($line['service_duration_minutes'] ?? 0));
-                return [
+                $lineId = (int)($line['id'] ?? 0);
+                return array_merge([
                     'id' => (int)($line['id'] ?? 0),
                     'projectId' => (int)($line['project_id'] ?? 0),
                     'name' => (string)($line['project_name_snapshot'] ?? ''),
@@ -110,7 +112,7 @@ final class CashierV3ReservationDetailQueryServices
                     'appliedDurationMinutes' => $minutes,
                     'appliedDurationLabel' => $minutes > 0 ? ($minutes . '分钟') : '',
                     'durationDescription' => $minutes > 0 ? '预约创建时采用的服务时长。' : '',
-                ];
+                ], (array)($projectOutcomes[$lineId] ?? []));
             }, $lines),
             'appointmentStartAt' => self::formatTime($startAt),
             'appointmentEndAt' => self::formatTime($endAt),
@@ -166,6 +168,124 @@ final class CashierV3ReservationDetailQueryServices
             }, $operations),
             'actions' => self::actions($status),
         ];
+    }
+
+    /**
+     * Resolve each project from authoritative reservation, occupation and
+     * write-off facts. The completed state is historical: later debt repayment
+     * must not rewrite what happened when service ended.
+     *
+     * @param array<string,mixed> $reservation
+     * @param array<int,array<string,mixed>> $lines
+     * @param array<int,array<string,mixed>> $operations
+     * @return array<int,array<string,mixed>>
+     */
+    private function projectOutcomes(array $reservation, array $lines, array $operations): array
+    {
+        $tenantId = (string)($reservation['tenant_id'] ?? '');
+        $reservationId = (int)($reservation['id'] ?? 0);
+        $status = (string)($reservation['status'] ?? '');
+        $occupations = $this->rows(Db::name('cashier_v3_reservation_entitlement_occupation')
+            ->where('tenant_id', $tenantId)->where('reservation_id', $reservationId)
+            ->order('reservation_line_id asc,id asc')->select());
+        $occupationByLine = [];
+        $holderIds = [];
+        foreach ($occupations as $occupation) {
+            $lineId = (int)($occupation['reservation_line_id'] ?? 0);
+            if ($lineId <= 0) continue;
+            $occupationByLine[$lineId] = $occupation;
+            $holderId = (int)($occupation['card_holder_id'] ?? 0);
+            if ($holderId > 0) $holderIds[$holderId] = $holderId;
+        }
+        $holderNames = [];
+        if ($holderIds) {
+            foreach ($this->rows(Db::name('user_card_holder')->whereIn('id', array_values($holderIds))
+                ->field('id,card_name')->select()) as $holder) {
+                $holderNames[(int)$holder['id']] = trim((string)($holder['card_name'] ?? ''));
+            }
+        }
+
+        $writeoffByLine = [];
+        foreach ($this->rows(Db::name('cashier_v3_entitlement_writeoff_fact')
+            ->where('tenant_id', $tenantId)->where('checkout_request_id', 'reservation:' . $reservationId)
+            ->where('status', 'effective')->order('id asc')->select()) as $writeoff) {
+            if (!preg_match('/:(\d+)$/', (string)($writeoff['source_line_id'] ?? ''), $matches)) continue;
+            $writeoffByLine[(int)$matches[1]] = $writeoff;
+        }
+
+        $debtSnapshotByLine = [];
+        foreach ($operations as $operation) {
+            if ((string)($operation['operation_type'] ?? '') !== 'END_SERVICE') continue;
+            $result = json_decode((string)($operation['result_json'] ?? ''), true);
+            $blocked = is_array($result) ? (array)($result['facts']['debtBlockedEntitlements'] ?? []) : [];
+            foreach ($blocked as $item) {
+                $lineId = (int)($item['reservationLineId'] ?? 0);
+                if ($lineId > 0) $debtSnapshotByLine[$lineId] = (array)$item;
+            }
+        }
+
+        $outcomes = [];
+        foreach ($lines as $line) {
+            $lineId = (int)($line['id'] ?? 0);
+            $isEntitlement = strtoupper((string)($line['project_source'] ?? '')) === 'ENTITLEMENT';
+            $occupation = (array)($occupationByLine[$lineId] ?? []);
+            $writeoff = (array)($writeoffByLine[$lineId] ?? []);
+            $debtSnapshot = (array)($debtSnapshotByLine[$lineId] ?? []);
+            $holderId = (int)($occupation['card_holder_id'] ?? 0);
+            $cardName = trim((string)($debtSnapshot['cardName'] ?? $writeoff['source_name_snapshot'] ?? ($holderNames[$holderId] ?? '')));
+
+            if (!$isEntitlement) {
+                $outcomes[$lineId] = [
+                    'processingStatus' => 'registration_only',
+                    'processingStatusLabel' => '仅预约登记',
+                    'processingDescription' => $status === 'COMPLETED'
+                        ? '服务已结束；该项目未关联已购权益，本次不扣卡项次数。'
+                        : '该项目未购买，仅登记本次预约，不占用或扣除卡项次数。',
+                    'sourceCardName' => '',
+                    'entitlementDeducted' => false,
+                ];
+                continue;
+            }
+            if ($status === 'COMPLETED' && ($writeoff || (string)($occupation['status'] ?? '') === 'CONSUMED')) {
+                $outcomes[$lineId] = [
+                    'processingStatus' => 'entitlement_deducted',
+                    'processingStatusLabel' => '已扣权益',
+                    'processingDescription' => '服务已结束，已从卡项「' . ($cardName ?: '对应卡项') . '」扣除 '
+                        . max(1, (int)($occupation['occupied_times'] ?? $line['quantity'] ?? 1)) . ' 次。',
+                    'sourceCardName' => $cardName,
+                    'entitlementDeducted' => true,
+                ];
+                continue;
+            }
+            if ($status === 'COMPLETED' && ($debtSnapshot || (string)($occupation['status'] ?? '') === 'RELEASED')) {
+                $outcomes[$lineId] = [
+                    'processingStatus' => 'debt_blocked',
+                    'processingStatusLabel' => '欠款未扣权益',
+                    'processingDescription' => '服务已结束；卡项「' . ($cardName ?: '对应卡项') . '」有欠款，未扣除权益，请手动处理。',
+                    'sourceCardName' => $cardName,
+                    'entitlementDeducted' => false,
+                ];
+                continue;
+            }
+            if (in_array($status, ['CANCELLED', 'REJECTED'], true)) {
+                $outcomes[$lineId] = [
+                    'processingStatus' => 'not_processed',
+                    'processingStatusLabel' => '未产生扣减',
+                    'processingDescription' => '预约已取消或拒绝，未扣除已购权益。',
+                    'sourceCardName' => $cardName,
+                    'entitlementDeducted' => false,
+                ];
+                continue;
+            }
+            $outcomes[$lineId] = [
+                'processingStatus' => 'pending_entitlement',
+                'processingStatusLabel' => '待服务后扣权益',
+                'processingDescription' => '已关联卡项「' . ($cardName ?: '对应卡项') . '」，服务结束时按卡项状态处理权益。',
+                'sourceCardName' => $cardName,
+                'entitlementDeducted' => null,
+            ];
+        }
+        return $outcomes;
     }
 
     private function actualCraftsmen(array $serviceLines): array

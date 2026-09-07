@@ -8,7 +8,11 @@ const baseCss = fs.readFileSync(new URL('../../../前端代码/cashier-v3/src/st
 
 assert.match(source, /blockStart >= slotStart[\s\S]*blockStart < slotEnd/, '非整点预约必须归入所属半小时时段')
 assert.match(source, /const offsetRatio = \(startMinutes % 30\) \/ 30/, '预约卡片必须保留真实分钟偏移')
-assert.match(source, /Math\.ceil\(\(endMinutes - startMinutes\) \/ 30\)/, '卡片高度必须与 30 分钟日历行一致')
+assert.match(source, /const crossesMidnight = endMinutes < startMinutes/, '日历必须识别跨到次日的预约')
+assert.match(source, /\(endMinutes \+ \(24 \* 60\)\) - startMinutes/, '跨日预约必须按真实跨日时长计算')
+assert.match(source, /Math\.min\(durationMinutes, \(24 \* 60\) - startMinutes\)/, '跨日预约卡片必须在当天日历边界内显示')
+assert.match(source, /nextDay \? '次日 ' : ''/, '跨日预约结束时间必须明确标注次日')
+assert.match(source, /Math\.ceil\(visibleDurationMinutes \/ 30\)/, '卡片高度必须与 30 分钟日历行一致')
 assert.match(provider, /BUSINESS_TIMEZONE = 'Asia\/Shanghai'/, '预约业务时间必须固定使用门店业务时区')
 assert.match(provider, /field\('day_start,day_end'\)/, '日历必须读取门店营业时间')
 assert.match(provider, /营业时间只限制新预约的可选时段/, '营业时间不能隐藏已经创建的预约')

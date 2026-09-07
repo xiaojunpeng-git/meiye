@@ -199,6 +199,8 @@ try {
     $header = (array)Db::name('cashier_v3_reservation')->where('id', $reservationId)->find();
     $endedProjection = $reservationProjection($mobile->list($merchantB, ['workflow' => 'service', 'quickFilter' => 'ended', 'page' => 1, 'pageSize' => 100]));
     $endedRecords = (array)($endedProjection['records'] ?? []);
+    $endedDetailResponse = $mobile->detail($merchantA, ['reservationId' => $reservationId]);
+    $endedDetail = (array)($endedDetailResponse['data']['reservation']['detail'] ?? []);
     $facts = [
         'service' => Db::name('cashier_v3_entitlement_service_fact')->where('checkout_request_id', 'reservation:' . $reservationId)->count(),
         'writeoff' => Db::name('cashier_v3_entitlement_writeoff_fact')->where('checkout_request_id', 'reservation:' . $reservationId)->count(),
@@ -223,6 +225,124 @@ try {
         && (int)($facts['performance'] ?? 0) >= 1
         && Db::name('cashier_v3_entitlement_service_fact')->where('checkout_request_id', 'reservation:' . $reservationId)->count() === 1
         && Db::name('cashier_v3_entitlement_writeoff_fact')->where('checkout_request_id', 'reservation:' . $reservationId)->count() === 1;
+    $checks['completed reservation detail identifies deducted entitlement per project'] =
+        (string)($endedDetail['projects'][0]['processingStatus'] ?? '') === 'entitlement_deducted'
+        && (string)($endedDetail['projects'][0]['processingStatusLabel'] ?? '') === '已扣权益'
+        && !empty($endedDetail['projects'][0]['sourceCardName'])
+        && ($endedDetail['projects'][0]['entitlementDeducted'] ?? null) === true;
+
+    // A debt can appear after the entitlement was reserved. Ending the real
+    // service must still succeed, while the reserved entitlement is released
+    // for explicit manual handling and no writeoff/performance is fabricated.
+    $debtCandidate = $memberService->create((int)$fixture['uid'], (int)$fixture['order_id'], [
+        'cart_num' => 1,
+        'reservation_time' => $tomorrow,
+        'reservation_start' => '16:00',
+        'reservation_end' => '17:00',
+        'custom_form' => [[]],
+        'cart_info_id' => (int)$fixture['detail_id'],
+        'service_staff_id' => 0,
+        'service_duration_minutes' => 60,
+        'addon_items' => [],
+        'sync_all' => [],
+        'store_id' => (int)$fixture['store_id'],
+        'mark' => 'V3 debt discovered at service end fixture',
+    ]);
+    $debtReservationId = (int)$debtCandidate['reservationId'];
+    $debtHeader = (array)Db::name('cashier_v3_reservation')->where('id', $debtReservationId)->find();
+    $debtLines = Db::name('cashier_v3_reservation_line')->where('reservation_id', $debtReservationId)->order('id asc')->select()->toArray();
+    $debtConfirm = $command('confirm-reservation', $debtReservationId, 1, 'RESERVATION-11111111-1111-4111-8111-111111111111');
+    $debtConfirm['reservation'] = [
+        'memberId' => (int)$fixture['uid'],
+        'member' => ['id' => (int)$fixture['uid'], 'name' => (string)($debtHeader['member_name_snapshot'] ?? '')],
+        'appointmentTime' => $tomorrow . ' 16:00',
+        'projects' => [[
+            'projectId' => (int)$debtLines[0]['project_id'],
+            'skuId' => (int)($debtLines[0]['sku_id'] ?? 0),
+            'name' => (string)$debtLines[0]['project_name_snapshot'],
+            'source' => 'card',
+            'entitlementSourceDetailId' => (int)$debtLines[0]['entitlement_source_detail_id'],
+            'quantity' => (int)$debtLines[0]['quantity'],
+            'appliedDurationMinutes' => (int)$debtLines[0]['service_duration_minutes'],
+        ]],
+        'craftsmen' => [],
+        'roomId' => 0,
+        'roomName' => '',
+        'remark' => 'V3 debt discovered at service end fixture',
+    ];
+    $debtConfirmed = $mobile->confirm($merchantA, $debtReservationId, $debtConfirm);
+    if (!in_array((string)($debtConfirmed['result']['status'] ?? ''), ['success', 'succeeded'], true)) {
+        throw new RuntimeException('DEBT_CONFIRM_COMMAND_FAILED ' . json_encode($debtConfirmed, JSON_UNESCAPED_UNICODE));
+    }
+    $debtStarted = $mobile->startService($merchantA, $debtReservationId,
+        $command('start-reservation-service', $debtReservationId, 2, 'RESERVATION-22222222-2222-4222-8222-222222222222'));
+    if (!in_array((string)($debtStarted['result']['status'] ?? ''), ['success', 'succeeded'], true)) {
+        throw new RuntimeException('DEBT_START_COMMAND_FAILED ' . json_encode($debtStarted, JSON_UNESCAPED_UNICODE));
+    }
+    $beforeDebtEndDetail = (int)Db::name('store_order_cart_info')->where('id', (int)$fixture['detail_id'])->value('write_surplus_times');
+    $debtOccupation = (array)Db::name('cashier_v3_reservation_entitlement_occupation')->where('reservation_id', $debtReservationId)->where('status', 'ACTIVE')->find();
+    $beforeDebtEndHolder = (int)Db::name('user_card_holder')->where('id', (int)$debtOccupation['card_holder_id'])->value('write_surplus_times');
+    $testDebtNo = 'TEST-END-' . $debtReservationId;
+    $testDebtId = (int)Db::name('store_debt')->insertGetId([
+        'debt_no' => $testDebtNo,
+        'order_id' => (int)$fixture['order_id'],
+        'order_sn' => 'TEST-' . (int)$fixture['order_id'],
+        'uid' => (int)$fixture['uid'],
+        'store_id' => (int)$fixture['store_id'],
+        'staff_id' => (int)$merchantA['staffId'],
+        'total_debt' => '1.00',
+        'repaid_debt' => '0.00',
+        'status' => 0,
+        'remark' => 'transaction rollback fixture',
+        'add_time' => time(),
+        'update_time' => time(),
+    ]);
+    Db::name('store_order')->where('id', (int)$fixture['order_id'])->update(['debt_amount' => '1.00', 'repaid_debt_amount' => '0.00']);
+    $debtEndPayload = $command('end-reservation-service', $debtReservationId, 3, 'RESERVATION-33333333-3333-4333-8333-333333333333');
+    $debtEnded = $mobile->endService($merchantA, $debtReservationId, $debtEndPayload);
+    $debtEndedReplay = $mobile->endService($merchantA, $debtReservationId, $debtEndPayload);
+    if (!in_array((string)($debtEnded['result']['status'] ?? ''), ['success', 'succeeded'], true)) {
+        throw new RuntimeException('DEBT_END_COMMAND_FAILED ' . json_encode($debtEnded, JSON_UNESCAPED_UNICODE));
+    }
+    $debtEndFacts = (array)($debtEnded['data']['reservationAction']['facts'] ?? []);
+    $debtBlockedSnapshots = (array)($debtEndFacts['debtBlockedEntitlements'] ?? []);
+    $debtCardName = (string)Db::name('user_card_holder')->where('id', (int)$debtOccupation['card_holder_id'])->value('card_name');
+    $debtProjectName = (string)($debtLines[0]['project_name_snapshot'] ?? '');
+    $debtWarningMessage = (string)($debtEnded['feedback']['message'] ?? '');
+    $debtDetailResponse = $mobile->detail($merchantA, ['reservationId' => $debtReservationId]);
+    $debtDetail = (array)($debtDetailResponse['data']['reservation']['detail'] ?? []);
+    if (strpos($debtWarningMessage, '卡项「' . $debtCardName . '」有欠款') === false
+        || strpos($debtWarningMessage, '项目「' . $debtProjectName . '」未扣权益') === false
+        || empty($debtEnded['feedback']['persistent'])
+        || empty($debtEndFacts['manualWriteoffRequired'])
+        || (string)($debtBlockedSnapshots[0]['cardName'] ?? '') !== $debtCardName
+        || (string)($debtBlockedSnapshots[0]['projectName'] ?? '') !== $debtProjectName) {
+        throw new RuntimeException('DEBT_END_RESPONSE_INVALID ' . json_encode($debtEnded, JSON_UNESCAPED_UNICODE));
+    }
+    $checks['debt discovered at end still completes service and returns manual writeoff warning'] =
+        (string)Db::name('cashier_v3_reservation')->where('id', $debtReservationId)->value('status') === 'COMPLETED'
+        && (string)Db::name('cashier_v3_service_order')->where('id', (int)Db::name('cashier_v3_reservation')->where('id', $debtReservationId)->value('service_order_id'))->value('status') === 'COMPLETED'
+        && !empty($debtEndFacts['manualWriteoffRequired'])
+        && strpos($debtWarningMessage, '卡项「' . $debtCardName . '」有欠款') !== false
+        && strpos($debtWarningMessage, '项目「' . $debtProjectName . '」未扣权益') !== false
+        && !empty($debtEnded['feedback']['persistent'])
+        && !empty($debtEndedReplay['replay']);
+    $checks['completed reservation detail identifies debt-blocked entitlement per project'] =
+        (string)($debtDetail['projects'][0]['processingStatus'] ?? '') === 'debt_blocked'
+        && (string)($debtDetail['projects'][0]['processingStatusLabel'] ?? '') === '欠款未扣权益'
+        && (string)($debtDetail['projects'][0]['sourceCardName'] ?? '') === $debtCardName
+        && ($debtDetail['projects'][0]['entitlementDeducted'] ?? null) === false;
+    $checks['debt discovered at end releases occupation without deducting entitlement'] =
+        (string)Db::name('cashier_v3_reservation_entitlement_occupation')->where('reservation_id', $debtReservationId)->value('status') === 'RELEASED'
+        && (int)Db::name('store_order_cart_info')->where('id', (int)$fixture['detail_id'])->value('write_surplus_times') === $beforeDebtEndDetail
+        && (int)Db::name('user_card_holder')->where('id', (int)$debtOccupation['card_holder_id'])->value('write_surplus_times') === $beforeDebtEndHolder;
+    $checks['debt discovered at end records service only and never writeoff or performance'] =
+        Db::name('cashier_v3_entitlement_service_fact')->where('checkout_request_id', 'reservation:' . $debtReservationId)->count() === 1
+        && Db::name('cashier_v3_entitlement_writeoff_fact')->where('checkout_request_id', 'reservation:' . $debtReservationId)->count() === 0
+        && Db::name('cashier_v3_performance_fact')->where('checkout_request_id', 'reservation:' . $debtReservationId)->count() === 0
+        && Db::name('cashier_v3_reservation_operation')->where('reservation_id', $debtReservationId)->where('operation_type', 'END_SERVICE')->count() === 1;
+    Db::name('store_debt')->where('id', $testDebtId)->delete();
+    Db::name('store_order')->where('id', (int)$fixture['order_id'])->update(['debt_amount' => '0.00', 'repaid_debt_amount' => '0.00']);
 
     $cancelCandidate = (new MemberV3ReservationServices())->create((int)$fixture['uid'], (int)$fixture['order_id'], [
         'cart_num' => 1,

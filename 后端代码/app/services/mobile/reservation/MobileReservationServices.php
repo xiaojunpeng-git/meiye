@@ -263,7 +263,7 @@ final class MobileReservationServices
             'result', 'data', 'replay', 'stateContextId', 'contextChanged',
             'boundAction', 'boundCanonical', 'boundIdempotencyKey',
             'correlationId', 'boundCorrelationId', 'businessNo',
-            'idempotencyKey', 'requiresRefresh'
+            'idempotencyKey', 'requiresRefresh', 'feedback'
         ] as $field) {
             if (array_key_exists($field, $envelope)) $out[$field] = $envelope[$field];
         }

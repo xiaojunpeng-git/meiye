@@ -90,6 +90,25 @@ reservationLifecycleOk('结束服务同一事务写核销、服务、消耗与�
     && strpos($completionFacts, "consumption_performance_recorded") !== false
     && strpos($completionFacts, "labor_performance_allocated") !== false
     && strpos($completionFacts, 'CustomerLifecycleFactServices') !== false);
+reservationLifecycleOk('结束服务遇到来源权益欠款时完成服务但释放占用且不直接核销',
+    strpos($lifecycle, 'debtBlockedOccupationIdsInTx') !== false
+    && strpos($lifecycle, 'debtBlockedEntitlementSnapshots') !== false
+    && strpos($lifecycle, "'debtBlockedEntitlements'") !== false
+    && strpos($lifecycle, "'reservation_debt_released'") !== false
+    && strpos($lifecycle, "\$facts['manualWriteoffRequired']") !== false
+    && strpos($module, '该顾客有欠款，无法直接核销权益，请手动操作。') !== false
+    && strpos($module, '卡项「') !== false
+    && strpos($module, '」有欠款，项目「') !== false
+    && strpos($module, "'persistent' => true") !== false
+    && strpos($mobileReservation, "'idempotencyKey', 'requiresRefresh', 'feedback'") !== false);
+reservationLifecycleOk('预约详情逐项目返回登记、已扣权益和欠款未扣权益结果',
+    strpos($detail, 'private function projectOutcomes') !== false
+    && strpos($detail, "'processingStatus' => 'registration_only'") !== false
+    && strpos($detail, "'processingStatus' => 'entitlement_deducted'") !== false
+    && strpos($detail, "'processingStatus' => 'debt_blocked'") !== false
+    && strpos($detail, "'processingStatusLabel' => '仅预约登记'") !== false
+    && strpos($detail, "'processingStatusLabel' => '已扣权益'") !== false
+    && strpos($detail, "'processingStatusLabel' => '欠款未扣权益'") !== false);
 reservationLifecycleOk('会员待确认预约不能绕过确认直接开始服务',
     strpos($module, "(string)\$header['status'] !== self::STATUS_UNSTARTED") !== false
     && strpos($module, '会员预约须先确认') !== false);

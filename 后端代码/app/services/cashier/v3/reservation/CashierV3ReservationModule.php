@@ -180,7 +180,21 @@ final class CashierV3ReservationModule
         });
         self::registerCommand($handlers, 'end-reservation-service', function (array $scope): array {
             $result = self::end($scope);
-            return ['data' => ['reservationAction' => $result], 'business_no' => $result['reservationNo'], 'touched' => ['reservation'], 'message' => '服务已结束。'];
+            $manualWriteoffRequired = !empty($result['facts']['manualWriteoffRequired']);
+            $message = $manualWriteoffRequired
+                ? self::manualWriteoffMessage((array)($result['facts']['debtBlockedEntitlements'] ?? []))
+                : '服务已结束。';
+            $data = ['reservationAction' => $result];
+            if ($manualWriteoffRequired) {
+                // Command UI directives are persisted inside data so a replay
+                // returns the same warning without executing the business again.
+                $data['_feedback'] = [
+                    'title' => '操作提示',
+                    'message' => $message,
+                    'persistent' => true,
+                ];
+            }
+            return ['data' => $data, 'business_no' => $result['reservationNo'], 'touched' => ['reservation'], 'message' => $message];
         });
 
         foreach (['create-reservation', 'update-reservation'] as $action) {
@@ -201,6 +215,19 @@ final class CashierV3ReservationModule
     private static function registerCommand($handlers, string $action, callable $handler): void
     {
         if (!$handlers->hasCommand($action)) $handlers->registerCommand($action, $handler);
+    }
+
+    /** @param array<int,array<string,mixed>> $items */
+    private static function manualWriteoffMessage(array $items): string
+    {
+        if (!$items) return '该顾客有欠款，无法直接核销权益，请手动操作。';
+        $details = [];
+        foreach ($items as $item) {
+            $cardName = trim((string)($item['cardName'] ?? '')) ?: '对应卡项';
+            $projectName = trim((string)($item['projectName'] ?? '')) ?: '预约项目';
+            $details[] = '卡项「' . $cardName . '」有欠款，项目「' . $projectName . '」未扣权益';
+        }
+        return implode('；', $details) . '。服务已正常结束，请手动处理。';
     }
 
     private static function create(array $scope, CashierV3ActionDispatcher $dispatcher, CashierV3SaleCatalogServices $catalog): array

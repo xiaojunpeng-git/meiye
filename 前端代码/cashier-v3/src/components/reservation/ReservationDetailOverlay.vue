@@ -362,6 +362,18 @@ function projectKey(line, index) {
   return firstValue(line, ['id', 'projectLineId', 'reservationProjectId', 'projectId']) || `${projectName(line)}-${index}`
 }
 
+function processingStatus(line) {
+  return plainText(firstValue(line, ['processingStatus', 'resultStatus']), 'unknown')
+}
+
+function processingStatusLabel(line) {
+  return plainText(firstValue(line, ['processingStatusLabel', 'resultStatusLabel']), '处理状态待核对')
+}
+
+function processingDescription(line) {
+  return plainText(firstValue(line, ['processingDescription', 'resultDescription']), '当前记录没有完整的项目处理结果，请人工核对。')
+}
+
 function positiveNumber(value) {
   const number = Number(value)
   return Number.isFinite(number) && number > 0 ? number : null
@@ -687,7 +699,7 @@ useModalFocusTrap({
           <section class="reservation-detail__section">
             <header class="reservation-detail__section-header">
               <h3>预约项目</h3>
-              <span>每笔预约仅有一个主项目，其他为明细项目。</span>
+              <span>逐项目显示预约来源、服务结果及权益是否扣除。</span>
             </header>
             <div v-if="projectLines.length" class="reservation-detail__project-list">
               <article v-for="(line, index) in projectLines" :key="projectKey(line, index)" class="reservation-detail__project-row">
@@ -700,6 +712,10 @@ useModalFocusTrap({
                   <div><dt>采用时长</dt><dd>{{ durationValue(line) }}</dd></div>
                   <div><dt>时长说明</dt><dd>{{ durationDescription(line) }}</dd></div>
                 </dl>
+                <div class="reservation-detail__project-result">
+                  <span :class="`reservation-detail__result-tag reservation-detail__result-tag--${processingStatus(line)}`">{{ processingStatusLabel(line) }}</span>
+                  <small>{{ processingDescription(line) }}</small>
+                </div>
               </article>
             </div>
             <div v-else class="reservation-detail__empty-inline">暂无项目明细</div>
@@ -1142,7 +1158,7 @@ useModalFocusTrap({
 
 .reservation-detail__project-row {
   display: grid;
-  grid-template-columns: minmax(240px, .92fr) minmax(360px, 1.08fr);
+  grid-template-columns: minmax(210px, .8fr) minmax(280px, 1fr) minmax(230px, .9fr);
   gap: 20px;
   align-items: center;
   padding: 16px 18px;
@@ -1189,6 +1205,47 @@ useModalFocusTrap({
 
 .reservation-detail__project-duration {
   grid-template-columns: minmax(130px, .4fr) minmax(220px, 1fr);
+}
+
+.reservation-detail__project-result {
+  display: grid;
+  gap: 6px;
+  align-content: center;
+}
+
+.reservation-detail__project-result small {
+  color: #667085;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.reservation-detail__result-tag {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.reservation-detail__result-tag--entitlement_deducted {
+  background: #ecfdf3;
+  color: #027a48;
+}
+
+.reservation-detail__result-tag--debt_blocked {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.reservation-detail__result-tag--registration_only,
+.reservation-detail__result-tag--pending_entitlement {
+  background: #eff8ff;
+  color: #175cd3;
 }
 
 .reservation-detail__section--two-columns {

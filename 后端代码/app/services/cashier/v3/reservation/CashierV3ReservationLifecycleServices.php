@@ -254,12 +254,33 @@ final class CashierV3ReservationLifecycleServices
             ->where('status', 'ACTIVE')->order('entitlement_source_detail_id asc,id asc')->select());
         $lines = $this->rows(Db::name('cashier_v3_reservation_line')->where('tenant_id', $tenantId)
             ->where('reservation_id', $reservationId)->order('id asc')->lock(true)->select());
-        $facts = (new CashierV3ReservationCompletionFactServices())->persistInTx($header, $lines, $occupations, $execution, $now);
+        // Repayment uses debt -> order -> entitlement as its lock order. Read the
+        // detail/order mapping first, then lock debt and order authorities before
+        // touching the entitlement guard so end-service cannot race a repayment.
+        $debtBlockedOccupationIds = $this->debtBlockedOccupationIdsInTx($occupations);
+        $debtBlockedEntitlements = $this->debtBlockedEntitlementSnapshots(
+            $occupations,
+            $lines,
+            $debtBlockedOccupationIds
+        );
+        $settledOccupations = array_values(array_filter($occupations, static function (array $occupation) use ($debtBlockedOccupationIds): bool {
+            return !isset($debtBlockedOccupationIds[(int)$occupation['id']]);
+        }));
+        $facts = (new CashierV3ReservationCompletionFactServices())->persistInTx($header, $lines, $settledOccupations, $execution, $now);
         foreach ($occupations as $occupation) {
             $detailId = (int)$occupation['entitlement_source_detail_id'];
             $holderId = (int)$occupation['card_holder_id'];
             $quantity = (int)$occupation['occupied_times'];
             $this->lockGuard($tenantId, $detailId, $now);
+            if (isset($debtBlockedOccupationIds[(int)$occupation['id']])) {
+                $affected = Db::name('cashier_v3_reservation_entitlement_occupation')
+                    ->where('id', (int)$occupation['id'])->where('tenant_id', $tenantId)
+                    ->where('status', 'ACTIVE')->where('version', (int)$occupation['version'])
+                    ->update(['status' => 'RELEASED', 'version' => (int)$occupation['version'] + 1, 'released_at' => $now, 'updated_at' => $now]);
+                if ((int)$affected !== 1) throw $this->failure('预约权益占用已变更，请刷新后重试。');
+                $this->bumpGuard($tenantId, $detailId, 'reservation_debt_released', $now);
+                continue;
+            }
             $detail = Db::name('store_order_cart_info')->where('id', $detailId)->lock(true)->find();
             $holder = Db::name('user_card_holder')->where('id', $holderId)->lock(true)->find();
             if (!$detail || !$holder || (int)$detail['write_surplus_times'] < $quantity || (int)$holder['write_surplus_times'] < $quantity) {
@@ -289,7 +310,121 @@ final class CashierV3ReservationLifecycleServices
             Db::name('cashier_v3_service_order_line')->where('tenant_id', $tenantId)->where('service_order_id', $serviceOrderId)
                 ->where('status', 'ACTIVE')->update(['status' => 'COMPLETED', 'updated_at' => $now]);
         }
+        $facts['manualWriteoffRequired'] = !empty($debtBlockedOccupationIds);
+        $facts['debtBlockedEntitlementCount'] = count($debtBlockedOccupationIds);
+        $facts['debtBlockedEntitlements'] = $debtBlockedEntitlements;
         return $facts;
+    }
+
+    /**
+     * Persist a human-readable snapshot in the end-service receipt. The detail
+     * view can then explain the original decision even after a debt is repaid or
+     * a card is renamed.
+     *
+     * @param array<int,array<string,mixed>> $occupations
+     * @param array<int,array<string,mixed>> $lines
+     * @param array<int,true> $blockedOccupationIds
+     * @return array<int,array<string,mixed>>
+     */
+    private function debtBlockedEntitlementSnapshots(
+        array $occupations,
+        array $lines,
+        array $blockedOccupationIds
+    ): array {
+        if (!$blockedOccupationIds) return [];
+
+        $lineById = [];
+        foreach ($lines as $line) {
+            $lineById[(int)($line['id'] ?? 0)] = $line;
+        }
+        $holderIds = [];
+        foreach ($occupations as $occupation) {
+            if (!isset($blockedOccupationIds[(int)($occupation['id'] ?? 0)])) continue;
+            $holderId = (int)($occupation['card_holder_id'] ?? 0);
+            if ($holderId > 0) $holderIds[$holderId] = $holderId;
+        }
+        $holderNames = [];
+        if ($holderIds) {
+            foreach ($this->rows(Db::name('user_card_holder')->whereIn('id', array_values($holderIds))
+                ->field('id,card_name')->select()) as $holder) {
+                $holderNames[(int)$holder['id']] = trim((string)($holder['card_name'] ?? ''));
+            }
+        }
+
+        $snapshots = [];
+        foreach ($occupations as $occupation) {
+            $occupationId = (int)($occupation['id'] ?? 0);
+            if (!isset($blockedOccupationIds[$occupationId])) continue;
+            $lineId = (int)($occupation['reservation_line_id'] ?? 0);
+            $holderId = (int)($occupation['card_holder_id'] ?? 0);
+            $line = (array)($lineById[$lineId] ?? []);
+            $snapshots[] = [
+                'reservationLineId' => $lineId,
+                'entitlementSourceDetailId' => (int)($occupation['entitlement_source_detail_id'] ?? 0),
+                'cardHolderId' => $holderId,
+                'cardName' => $holderNames[$holderId] ?? '对应卡项',
+                'projectName' => trim((string)($line['project_name_snapshot'] ?? '')) ?: '预约项目',
+                'quantity' => max(1, (int)($occupation['occupied_times'] ?? 1)),
+            ];
+        }
+        usort($snapshots, static function (array $left, array $right): int {
+            return (int)$left['reservationLineId'] <=> (int)$right['reservationLineId'];
+        });
+        return $snapshots;
+    }
+
+    /** @return array<int,true> occupation id map */
+    private function debtBlockedOccupationIdsInTx(array $occupations): array
+    {
+        if (!$occupations) return [];
+        $detailIds = array_values(array_unique(array_filter(array_map(static function (array $occupation): int {
+            return (int)($occupation['entitlement_source_detail_id'] ?? 0);
+        }, $occupations))));
+        if (!$detailIds) return [];
+
+        $detailRows = $this->rows(Db::name('store_order_cart_info')->whereIn('id', $detailIds)
+            ->field('id,oid')->order('oid asc,id asc')->select());
+        $orderIdByDetail = [];
+        foreach ($detailRows as $detail) {
+            $orderIdByDetail[(int)$detail['id']] = (int)$detail['oid'];
+        }
+        $orderIds = array_values(array_unique(array_filter(array_map('intval', array_values($orderIdByDetail)))));
+        sort($orderIds, SORT_NUMERIC);
+        if (!$orderIds) return [];
+
+        $debtRows = $this->rows(Db::name('store_debt')->whereIn('order_id', $orderIds)
+            ->field('id,order_id,status,total_debt,repaid_debt')->order('order_id asc,id asc')->lock(true)->select());
+        $ordersWithDebtRow = [];
+        $blockedOrderIds = [];
+        foreach ($debtRows as $debt) {
+            $orderId = (int)$debt['order_id'];
+            $ordersWithDebtRow[$orderId] = true;
+            if ((int)$debt['status'] === 0 && bccomp(bcsub((string)$debt['total_debt'], (string)$debt['repaid_debt'], 2), '0', 2) > 0) {
+                $blockedOrderIds[$orderId] = true;
+            }
+        }
+
+        // Historical orders may not yet have a store_debt row. Preserve the
+        // existing order snapshot fallback used by the cashier entitlement view.
+        $orders = $this->rows(Db::name('store_order')->whereIn('id', $orderIds)
+            ->field('id,debt_amount,repaid_debt_amount')->order('id asc')->lock(true)->select());
+        foreach ($orders as $order) {
+            $orderId = (int)$order['id'];
+            if (isset($ordersWithDebtRow[$orderId])) continue;
+            if (bccomp(bcsub((string)$order['debt_amount'], (string)$order['repaid_debt_amount'], 2), '0', 2) > 0) {
+                $blockedOrderIds[$orderId] = true;
+            }
+        }
+
+        $blockedOccupationIds = [];
+        foreach ($occupations as $occupation) {
+            $occupationId = (int)$occupation['id'];
+            $detailId = (int)$occupation['entitlement_source_detail_id'];
+            if (isset($blockedOrderIds[(int)($orderIdByDetail[$detailId] ?? 0)])) {
+                $blockedOccupationIds[$occupationId] = true;
+            }
+        }
+        return $blockedOccupationIds;
     }
 
     private function lockGuard(string $tenantId, int $detailId, int $now): array

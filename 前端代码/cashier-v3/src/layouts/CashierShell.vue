@@ -2440,7 +2440,11 @@ function operatorFeedback(detail, conflictText) {
     kind: status === 'conflict' ? 'conflict' : status === 'failed' ? 'error' : 'info',
     title: detail.feedback?.title || (status === 'conflict' ? '内容已更新' : '操作提示'),
     message: fallbackMessage,
-    persistent: detail.stateIgnored === true || detail.requiresRefresh === true || ['failed', 'conflict'].includes(status)
+    persistent:
+      detail.feedback?.persistent === true ||
+      detail.stateIgnored === true ||
+      detail.requiresRefresh === true ||
+      ['failed', 'conflict'].includes(status)
   }
 }
 
@@ -2501,8 +2505,12 @@ async function handleUiResult(event) {
     }))
   }
 
-  if (['success', 'succeeded'].includes(String(detail.status || ''))) {
-    dismissFeedback()
+  // Most successful commands remain silent. A successful command may still
+  // carry an explicit business warning (for example service ended while an
+  // indebted entitlement was deliberately left unconsumed); that warning must
+  // reach the operator instead of being discarded with the generic success.
+  if (['success', 'succeeded'].includes(String(detail.status || '')) && !detail.feedback) {
+    if (uiFeedback.value?.persistent !== true) dismissFeedback()
     return
   }
   if (!detail.message && !detail.feedback && detail.status !== 'conflict') return

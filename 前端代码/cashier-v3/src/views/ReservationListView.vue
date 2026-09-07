@@ -362,6 +362,9 @@ function recordActions(record) {
     ]
   }
   if (phase === 'serving') return [{ action: 'end-reservation-service', label: '结束服务', primary: true }]
+  if (['ended', 'rejected'].includes(phase)) {
+    return [{ action: 'open-reservation-detail', label: '查看详情' }]
+  }
   return []
 }
 
@@ -494,7 +497,16 @@ async function requestReservationRecordButton(record, action) {
 function blockStyle(block, index = 0, count = 1) {
   const startMinutes = clockMinutes(block.start) ?? 0
   const endMinutes = clockMinutes(block.end) ?? startMinutes
-  const slotCount = Math.max(1, Math.ceil((endMinutes - startMinutes) / 30))
+  const crossesMidnight = endMinutes < startMinutes
+  const durationMinutes = crossesMidnight
+    ? (endMinutes + (24 * 60)) - startMinutes
+    : endMinutes - startMinutes
+  // A day calendar cannot draw into tomorrow's grid. Keep the real duration
+  // in the label, while the visible block extends to the current-day boundary.
+  const visibleDurationMinutes = crossesMidnight
+    ? Math.min(durationMinutes, (24 * 60) - startMinutes)
+    : durationMinutes
+  const slotCount = Math.max(1, Math.ceil(visibleDurationMinutes / 30))
   const offsetRatio = (startMinutes % 30) / 30
   const safeCount = Math.max(1, Number(count) || 1)
   const safeIndex = Math.min(Math.max(0, Number(index) || 0), safeCount - 1)
@@ -505,6 +517,15 @@ function blockStyle(block, index = 0, count = 1) {
     left: `calc(5px + ((100% - 10px) * ${safeIndex} / ${safeCount}))`,
     width: `calc(((100% - 10px) / ${safeCount}) - ${safeCount > 1 ? 3 : 0}px)`
   }
+}
+
+function blockTimeLabel(block) {
+  const start = String(block?.start || '')
+  const end = String(block?.end || '')
+  const startMinutes = clockMinutes(start)
+  const endMinutes = clockMinutes(end)
+  const nextDay = startMinutes !== null && endMinutes !== null && endMinutes < startMinutes
+  return `${start}–${nextDay ? '次日 ' : ''}${end}`
 }
 
 async function requestAction(action, payload = {}) {
@@ -1454,7 +1475,7 @@ onBeforeUnmount(() => {
               @click="openReservationDetail(reservationPayload(block.reservationId || block.id))"
             >
               <strong>{{ block.memberName }}</strong>
-              <span>{{ block.start }}–{{ block.end }} · {{ block.projectCount }}项</span>
+              <span>{{ blockTimeLabel(block) }} · {{ block.projectCount }}项</span>
               <span>{{ block.status }} · {{ block.roomName }}</span>
             </button>
           </div>
