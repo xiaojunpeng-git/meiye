@@ -1,0 +1,20 @@
+{
+  "task": "MOHE-AI-R5 live integration and mutex fix",
+  "date": "2026-09-09",
+  "base_head": "2693b867f263c17ca707b5fbd3f458999de53c2f",
+  "status": "Codex scoped self-test passed; product acceptance pending; not committed or deployed",
+  "files": [
+    {"path": "后端代码/app/services/ai/execution/AiRunStore.php", "sha256": "600b846833d39ce52c4199ea4b1a873f7baf79b3720efab77a24ce13d8ac20d9"},
+    {"path": "tests/mohe-ai/query-export-runtime-mysql.php", "sha256": "1e6381325a7c57c3be98d1fa10d4f3a0261e9c51d2ba81ff37f0100c3ec0f38e"},
+    {"path": "tests/mohe-ai/run-query-mysql.sh", "sha256": "330ce331f6e379a13776a8e0898578ded07394fb9338331a41cecf009956ef09"},
+    {"path": "tests/mohe-ai/state-mysql-concurrency.php", "sha256": "24f321ca780ec95e0cbcfd661165e4e15ee5a5b5042827c1b7cd014beb79aac5"},
+    {"path": "tests/mohe-ai/R5-LIVE-VERIFICATION.md", "sha256": "c7955d9a0212369cd58370b22e0a63d610a40b53464c846ce360b5a9fb6aceb6"}
+  ],
+  "self_excluded_from_file_hashes": true,
+  "test_logs": [
+    {"path": "/tmp/mohe-r5-live-regression.log", "exit_code": 0, "sha256": "e7fd6a4c564114ae3c05d5a2f12d0cc838d61c90e9b6bd53413bd26c9bcd061f"},
+    {"path": "/tmp/mohe-r5-live-php74.log", "exit_code": 0, "sha256": "da997ec89f85e8f29e828b518b7253dab14d71b26a9d2f8b0e10f2548e31a575"},
+    {"path": "/tmp/mohe-r5-live-mysql.log", "exit_code": 0, "sha256": "4dc702b7eb04f276a130777a976687fb4793ff3780db74d805c3e091cf82177b"}
+  ],
+  "scope": "Local platform/store UI, configured SiliconFlow, actual local business facts and Excel; disposable MySQL concurrency; no production or native mobile acceptance"
+}

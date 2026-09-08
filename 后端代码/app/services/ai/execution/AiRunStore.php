@@ -481,7 +481,12 @@ final class AiRunStore
         if ($this->db->inTransaction()) { throw new RuntimeException('AI_STORE_NESTED_TRANSACTION'); }
         if ($this->sqlite) { $this->db->exec('BEGIN IMMEDIATE'); } else { $this->db->beginTransaction(); }
         try {
-            $sql=($this->sqlite?'INSERT OR IGNORE':'INSERT IGNORE').' INTO '.$this->table('mutex').' (instance_id) VALUES (?)';
+            // MySQL INSERT IGNORE takes a shared duplicate-key lock. Concurrent
+            // requests then upgrading it with FOR UPDATE can deadlock. Acquire
+            // the exclusive row lock directly, without changing its counters.
+            $sql=$this->sqlite
+                ? 'INSERT OR IGNORE INTO '.$this->table('mutex').' (instance_id) VALUES (?)'
+                : 'INSERT INTO '.$this->table('mutex').' (instance_id) VALUES (?) ON DUPLICATE KEY UPDATE instance_id=VALUES(instance_id)';
             $this->execute($sql,[$this->instance]);
             $this->one('SELECT instance_id FROM '.$this->table('mutex').' WHERE instance_id=?'.($this->sqlite?'':' FOR UPDATE'),[$this->instance]);
             $result=$fn();

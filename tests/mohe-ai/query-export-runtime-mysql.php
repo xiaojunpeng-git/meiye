@@ -29,6 +29,7 @@ function app() { return new class { public function getRuntimePath(){return $GLO
         mysqlCheck($export->ready($context),'runtime real shared schema ready');
         $owner=['account_id'=>1,'terminal'=>'store','conversation_id'=>'e2e-conversation','window_id'=>'e2e-window'];
         $snapshot=['capability_snapshot_ref'=>'fixture','capability_snapshot_hash'=>app\services\ai\execution\AiAuthority::capabilityHash(true),'budget_profile_version'=>'v1','authorization_version'=>app\services\ai\execution\AiAuthority::permissionHash($context),'model_config_version'=>'1'];
+        $snapshot+=['guidance_schema_version'=>'mohe-clarification-v2','guidance_profile_version'=>'fixture-v2','max_clarification_rounds'=>'3'];
         $run=$runs->create($owner,'e2e-request',hash('sha256','fixture'),$snapshot)['run'];
         $token=bin2hex(random_bytes(24)); $runs->claim($owner,$run['run_id'],$run['generation'],$token);
         $run=$runs->get($owner,$run['run_id'],$run['generation']);

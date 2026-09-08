@@ -24,3 +24,4 @@ for ((attempt=0;attempt<120;attempt++)); do
 done
 if [[ "$ready" != yes ]]; then echo 'Disposable MySQL did not become ready' >&2; exit 1; fi
 php "$test_dir/query-mysql.php"
+php "$test_dir/state-mysql-concurrency.php"
