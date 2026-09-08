@@ -1,4 +1,5 @@
 <template>
+  <MoheAiEntry />
 	<view class="customer-profile">
 		<view class="customer-profile__header">
 			<view class="customer-profile__back" role="button" @tap="goBack"><text>‹</text></view>
@@ -51,6 +52,7 @@
 </template>
 
 <script setup lang="uts">
+  import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	import { createMobileCustomerProfile, queryMobileCustomerProfile, queryMobileCustomerProfileDraft, updateMobileCustomerProfile, uploadMobileCustomerProfileAvatar } from '../../../shared/api/mobile-customer-client.uts'
 	import { replaceMerchantCustomerDetail, returnFromMerchantCustomerProfile } from '../../../shared/platform/mobile-navigation.uts'
 	import { chooseMobileImage } from '../../../shared/platform/mobile-platform.uts'

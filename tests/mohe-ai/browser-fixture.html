@@ -1,0 +1,13 @@
+<!doctype html><meta charset="utf-8"><title>魔核 AI 本地交互合同夹具（非真实经营数据）</title>
+<h1>魔核 AI 本地交互合同夹具</h1><p>此页只验证前端交互，全部数字为固定测试夹具，不连接业务库或模型。</p>
+<script type="module">
+import { mountMoheAi } from '/前端代码/shared/mohe-ai/browser-entry.mjs';
+let run;
+mountMoheAi({request:async(method,path,payload)=>{
+ if(path==='/bootstrap')return {enabled:true,identity_key:'test-fixture-only',window_token:'fixture',can_configure:false};
+ if(path==='/runs')return run={run_id:'fixture',generation:1,run_delivery_token:'fixture',status:'READY',progress:'已接纳'};
+ if(path.endsWith('/cancel'))return run={...run,status:'CANCELLED',progress:'已取消'};
+ if(path.endsWith('/execute')){await new Promise(r=>setTimeout(r,1000));if(run.status==='CANCELLED')return run;return run={...run,status:'COMPLETED',progress:'已完成（测试夹具）',answer:{summary:'以下是交互测试数据，不是真实业绩。',cards:[{metric_name:'现金业绩（测试）',display_value:'123',unit:'元',tooltip:'这是测试夹具，不代表业务口径。',period_label:'测试日期'}]}};}
+ return run;
+}});
+</script>

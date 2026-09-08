@@ -1,0 +1,521 @@
+{
+  "task": "MOHE-AI-00002",
+  "status": "local-development-self-tests-passed-live-acceptance-pending",
+  "base_head": "90eadab2d73afe6307052187e55ee0141ec488f1",
+  "tracked_patch_sha256": "6d08a60565994c9d5d838c0aa55b0a4e647fc2ca9cd6942a0462d27cfb02a68a",
+  "note": "Individual hashes include untracked AI source and tests. Manifest excludes itself. This is not a commit, complete product acceptance or deployment.",
+  "files": [
+    {
+      "path": "tests/mohe-ai/CASH-RECHARGE-VERIFICATION.md",
+      "sha256": "8b23f68bd311047411035f0801d7327efaa9e2ba80c7ae19f48ce51d431be56b"
+    },
+    {
+      "path": "tests/mohe-ai/FRONTEND-VERIFICATION.md",
+      "sha256": "adee3a55578303b8a645ec6536a36bd4975d7872c1f570d2c409c686868de3a4"
+    },
+    {
+      "path": "tests/mohe-ai/IMPLEMENTATION-STATUS.md",
+      "sha256": "767aa536c4f02cac54d5c7828b7313f3364f925458b7c46f744912aea4cdc1c9"
+    },
+    {
+      "path": "tests/mohe-ai/LOCAL-INSTALL.md",
+      "sha256": "2e9665182666206c723e5fae62e82b682551f932585f8ab63c0956128d4b5f86"
+    },
+    {
+      "path": "tests/mohe-ai/QUERY-READ-VIEW.md",
+      "sha256": "8b87df111df5f3ec9c8ae2b617cdec64f58ab4df5bfae6373bbe23c22e9e7e9c"
+    },
+    {
+      "path": "tests/mohe-ai/README.md",
+      "sha256": "31c8e3ab66e18ae8b5b7393abc75ba8a480d12f40965d3f11f919ee7594677b9"
+    },
+    {
+      "path": "tests/mohe-ai/browser-entry-contract.mjs",
+      "sha256": "51e22a9b645598fc9fd7e70d5ae0ab187f8d68b95c5a17d84baf5d3e5d1bab2d"
+    },
+    {
+      "path": "tests/mohe-ai/browser-fixture.html",
+      "sha256": "3b640aebefd6f748e95eb7971af1866b7c46057dfbe9047c1a06004c6eef4a3b"
+    },
+    {
+      "path": "tests/mohe-ai/browser-transport-contract.mjs",
+      "sha256": "1b1d4eb46db03edf455119a7ccb10c6e93cb5d101deddf10a4b0be01b3181f2c"
+    },
+    {
+      "path": "tests/mohe-ai/browser-workflow-contract.mjs",
+      "sha256": "8efca347abe3a587e50f79c3014cb93dda6238c763a94a213547e43ef441763f"
+    },
+    {
+      "path": "tests/mohe-ai/cash-recharge-mysql.php",
+      "sha256": "15cca67c0e436bf499b2246ecded80947df2c699a76708c173ba8c34f87259fd"
+    },
+    {
+      "path": "tests/mohe-ai/cash-report-projection.php",
+      "sha256": "403e062bd2680f25324b228822aef5f0485632d6eaceadcff897b48aa65ccbe6"
+    },
+    {
+      "path": "tests/mohe-ai/device-session-contract.mjs",
+      "sha256": "f9176238764a88d916fe266c67db4c4017d02665adbd06fee95715078c5978f7"
+    },
+    {
+      "path": "tests/mohe-ai/export-queue-contract.php",
+      "sha256": "b0a5dbec370d55767dc9f709527b78d0628261970611c1aa763de7220be5207b"
+    },
+    {
+      "path": "tests/mohe-ai/export-runtime-contract.php",
+      "sha256": "9662e874e095146dd42415940321cd9d91d5d43f6c3c0bde12cde27b8e14766a"
+    },
+    {
+      "path": "tests/mohe-ai/export-source-contract.php",
+      "sha256": "d087ae9306f7878ce4ed862ccfbc89f9437b9edfb826731a4f6bdcff94cc62a8"
+    },
+    {
+      "path": "tests/mohe-ai/export-worker-contract.php",
+      "sha256": "8cffd2623896fb97df6b1558a82a0235738347f751fafca4f0880e64ad00590d"
+    },
+    {
+      "path": "tests/mohe-ai/gateway-components.php",
+      "sha256": "bbe00357c90fcc86766225f6513d65e03a5b2dbf8aca8d4d958ea7b176978ae1"
+    },
+    {
+      "path": "tests/mohe-ai/gateway-integration.php",
+      "sha256": "aef3b08dd38d1b2e1bdc71cbe001bf3cf66c3540b180bbd0e8dc04c2cf7ceaf4"
+    },
+    {
+      "path": "tests/mohe-ai/gateway-review-regressions.php",
+      "sha256": "77d960b28d075c040bea46b4b16fb98ab23fde779f0369b22e6b4b3f04961f89"
+    },
+    {
+      "path": "tests/mohe-ai/http-actions-contract.php",
+      "sha256": "2ec7fc0b2ad9b35c3bfdbedfea0df9741792a887faa8712ed8603f04e82baf2c"
+    },
+    {
+      "path": "tests/mohe-ai/http-guard-contract.php",
+      "sha256": "6fd7d405d4071cfeae2b46cb978bd3babf8581905370c91408e5d5acaa692250"
+    },
+    {
+      "path": "tests/mohe-ai/http-routing-contract.php",
+      "sha256": "0b9e2bb52ad7c7a6b567c45ea8f515a35498eb527a5136c4a5cb4f6aed4025eb"
+    },
+    {
+      "path": "tests/mohe-ai/metric-contract.php",
+      "sha256": "03364fbb362a9a0913723ca4f14b58b5be9033bdb186277ee56c37850f4db77e"
+    },
+    {
+      "path": "tests/mohe-ai/monitor-contract.php",
+      "sha256": "8a9e537d03e63aaf77f541f1dae0e670762e28c914252710a2c6e9f505810fbe"
+    },
+    {
+      "path": "tests/mohe-ai/plan-contract.php",
+      "sha256": "78f5a3c3b4e481b2534da69d6cd7d4594c447bfa47fe772b7a75b0b9f183f03b"
+    },
+    {
+      "path": "tests/mohe-ai/principal-resolvers.php",
+      "sha256": "506211824a694e56dc1eeff834a3b9ba94bb90843f4249baca010df57dabf591"
+    },
+    {
+      "path": "tests/mohe-ai/query-export-lifecycle-mysql.php",
+      "sha256": "1b3f5e7d1ce690b888957d8376f62c378c6d826c1208110a3afd795225888bf6"
+    },
+    {
+      "path": "tests/mohe-ai/query-export-runtime-mysql.php",
+      "sha256": "c27314cf2759b41f4f5e905559f217824c2d2a3cdd27affe7bb69e18594beb91"
+    },
+    {
+      "path": "tests/mohe-ai/query-mysql.php",
+      "sha256": "5921e0afa7dfd70e0d82a1856a6eb8f7d5630b7870601eb743e24557c54d63c4"
+    },
+    {
+      "path": "tests/mohe-ai/query-read-view.php",
+      "sha256": "c9188c3c60f5999781f0dd3329b0eae42dac6e0769d272fdc602a96dd2ff98fb"
+    },
+    {
+      "path": "tests/mohe-ai/run-all.sh",
+      "sha256": "cb6963e375b7bae851bca65d7b19635a12bd460a44443636a8e77a9e46a175f5"
+    },
+    {
+      "path": "tests/mohe-ai/run-query-mysql.sh",
+      "sha256": "53dcb2775f44bd4ed7566400fcf2d99efff556a1cc92b0fac68e222683404475"
+    },
+    {
+      "path": "tests/mohe-ai/run-queue-redis.sh",
+      "sha256": "a9e62f2f93b825e770e6db77728c2f4963e1f8c640786b77fcd5ec84b34bcdd4"
+    },
+    {
+      "path": "tests/mohe-ai/runtime-contract.php",
+      "sha256": "740b9c34b01de49c8f27b3ab3151a5bbb3af8789b4cde5b7261bd2d43ca0de48"
+    },
+    {
+      "path": "tests/mohe-ai/state-admission-contract.php",
+      "sha256": "e60198ed2ccdc455a9857f06a5ec5efe583f006b5b85678cf319c5ac3496157f"
+    },
+    {
+      "path": "tests/mohe-ai/state-attempt-contract.php",
+      "sha256": "d5fba1a36b1448dc36f54fb2c5795d31d6f6a55001eb36bb1f3bf5e7498d0f25"
+    },
+    {
+      "path": "tests/mohe-ai/state-concurrency.php",
+      "sha256": "f1fda3c9f7d2861cd9bb2fa31836118ea326af27ed11681301045cfe64eb7fbf"
+    },
+    {
+      "path": "tests/mohe-ai/state-export-contract.php",
+      "sha256": "1b264a8b0d40428209ecb7b3cbf3f82a3c5932761d6fc547730e861ae30cc784"
+    },
+    {
+      "path": "tests/mohe-ai/state-store-contract.php",
+      "sha256": "8fab551edc551f1832d97efdef6705236559df8d188b021dd8c3909de1244d94"
+    },
+    {
+      "path": "前端代码/admin/src/App.vue",
+      "sha256": "a59cba666d8d1c20d55b052e0f8e877d1e139f7e65c9f6b566fd1f22bb86e549"
+    },
+    {
+      "path": "前端代码/admin/src/components/MoheAiEntry.vue",
+      "sha256": "cc386220d098dfae683a6744a0cbdd7e8067ee5e750f119aff42ef720d3d4e66"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/App.vue",
+      "sha256": "34b11ffd266bafcb12edecc68528a0241c3d255ff050b53da16dff39daf6a3c9"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/components/MoheAiEntry.vue",
+      "sha256": "efde220b1f855e43f543f262f67e7c17ef707763117d6127e9d011e4a77bca09"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/account/index.uvue",
+      "sha256": "152670d2ce9d7d1219fc00504c1c877dda36a80e938d57645c17093e93f1d485"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/customer-care/index.uvue",
+      "sha256": "eccd88d22ac234d316d02b1760f1f846c558251482994ea9a0f682fd59d0a846"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/customer-detail/index.uvue",
+      "sha256": "ef48e0b465b3a2582436cccd0be9e50c2b3cb9938325202f0172abcea67f273f"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/customer-order-detail/index.uvue",
+      "sha256": "6da596fb77473dfc806291d2dd9ddbabb4e732eb0fc04488db230b9fcb2baa1b"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/customer-profile/index.uvue",
+      "sha256": "c2d70d1349a9300ac8d6470f5b2698ff45b1d6c8ed8a6ba84e3569a55b5c1406"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/customer-settings/index.uvue",
+      "sha256": "823ed28ebdaaa734eafd89879efcdb08067c7282e68d054a2066eaf615555b5b"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/employee-performance/index.uvue",
+      "sha256": "c1303256dac0b6acc9ef3268cf56dcd257f7c93e74d307ba6a8f1701fc32e926"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/member-dashboard/index.uvue",
+      "sha256": "0def5ead4fb90b061d1b86949cafbc14c7e060e48ce5d0c6acaf1d7526be5ef0"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/product-dashboard/index.uvue",
+      "sha256": "0545d3170f5a74ca033529d81bc8cafce5fdae188e0331984b8c4e734a2fdfd7"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/reservation-confirmations/index.uvue",
+      "sha256": "6f5dbaa6f2726b51daa34bc35c32efa4d6ca08a356dd32708c61b618ffb531e8"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/reservations/index.uvue",
+      "sha256": "8e155a960b5da97e536c08d9d2238b71f1cc66d364889d6b451d0cb6a61d5ad0"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/merchant/pages/scope/index.uvue",
+      "sha256": "e03e49cb1b6bd396502373034f8168b9eec38a0857c56db0b484042200668178"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/shared/api/mobile-ai-client.uts",
+      "sha256": "ea98410111ee0432dfeb56f6529c390d3bf64f81af73176440953952028b1e38"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/shared/components/merchant-primary-tab-bar.uvue",
+      "sha256": "7256ce589a7e11dc7c64477be0c5e689944d32b721e30fd509eae3bb162e48a3"
+    },
+    {
+      "path": "前端代码/mobile-vue3/src/shared/components/mohe-ai-entry.uvue",
+      "sha256": "696c0691f62ec2de384c83b0a857c396e20999f5009ec00d4904d70edcdb75fc"
+    },
+    {
+      "path": "前端代码/shared/mohe-ai/browser-entry.mjs",
+      "sha256": "a06872ebe50f3a70269d9d19e47d9dcca5be021bf0b2d4f216167594d0df5a6f"
+    },
+    {
+      "path": "前端代码/shared/mohe-ai/browser-transport.mjs",
+      "sha256": "34f544f8f77266c083b65fb36da456c5fe68715af9cdb58eccf52f60b7e39bd7"
+    },
+    {
+      "path": "前端代码/shared/mohe-ai/device-session.mjs",
+      "sha256": "76c6e5e9947d7fa511847aa07e03f56b5ef2399a9b69cb07fde777eb6b274bc8"
+    },
+    {
+      "path": "后端代码/app/command/MoheAiSupervisor.php",
+      "sha256": "7975f2e46b80f72e19e3866a866ca9c896569b73a47a2d05ee46ae08e6859a86"
+    },
+    {
+      "path": "后端代码/app/controller/admin/v1/ai/Ai.php",
+      "sha256": "021042cc881d4a6bf98a2607752545ebc028d608c4800e8c0fb90dd072c8e84f"
+    },
+    {
+      "path": "后端代码/app/controller/admin/v1/report/UnifiedReport.php",
+      "sha256": "a63ed2f8da5d1629e9fec3e3604de4cadf0ff8ff0bca164449f1df62dcfedaf2"
+    },
+    {
+      "path": "后端代码/app/controller/ai/AiHttpActions.php",
+      "sha256": "4405e665c5f2017fabb17f6c3b0ccdccca31c1684b691f5f888d0b6d8a926350"
+    },
+    {
+      "path": "后端代码/app/controller/cashier/v3/Ai.php",
+      "sha256": "25f45a668931b07c3a7198db57a4364ff22316800952873e3aa65e0014035da1"
+    },
+    {
+      "path": "后端代码/app/controller/cashier/v3/Report.php",
+      "sha256": "5d694891e4944db6da3b079f014ed3a9096108538a59a433e4f5e241aaa4f4b1"
+    },
+    {
+      "path": "后端代码/app/controller/mobile/merchant/Ai.php",
+      "sha256": "4343757e0608e0b66f8749362a03fe810ea24e0f4a43502ec1236947bd4941ff"
+    },
+    {
+      "path": "后端代码/app/http/middleware/AiRequestGuardMiddleware.php",
+      "sha256": "5d39ac3f3da6f7163c6c075298e68a547a85c5ea68c722435016fbb5a5e91c7b"
+    },
+    {
+      "path": "后端代码/app/jobs/query/AiUnifiedQueryExportJob.php",
+      "sha256": "a0f9d1dfcffbfc302faa7e1a8654b9295284bd782b47a0217ddbaca4ffc92518"
+    },
+    {
+      "path": "后端代码/app/services/ai/AiGatewayServices.php",
+      "sha256": "2ee83835eeb227dcb6597e924f53fe3b4eae8a07de9657020302f61f55839e61"
+    },
+    {
+      "path": "后端代码/app/services/ai/config/AiConfigStore.php",
+      "sha256": "ff793e3c5b6b0f1b4f3cb3eca0cb1167bd256a7150d0dd43738af94c50d43fcc"
+    },
+    {
+      "path": "后端代码/app/services/ai/config/AiPrivateStorage.php",
+      "sha256": "a51049e583f893d58b02ad030bc198c27fe88037a452a03d75d85e6bfd60bb59"
+    },
+    {
+      "path": "后端代码/app/services/ai/contract/AiContractException.php",
+      "sha256": "7c2d873ac261779d79c3b179f49ded728194a43a29cc86dab2c7695477dbdce9"
+    },
+    {
+      "path": "后端代码/app/services/ai/contract/AiQueryPlanInputValidator.php",
+      "sha256": "ea0fe493a768d625d8b2bd69153de8d0537ef12a608bc4df15f87815bd43883e"
+    },
+    {
+      "path": "后端代码/app/services/ai/contract/AiStrictJson.php",
+      "sha256": "19841d0177594ff2e94d61900cfc973489f37deee24c5c2a3cb5c6de2b9ee9f4"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiAuthority.php",
+      "sha256": "51976278784b6090d90b87fb3a6e6654cb4786ec76c365fb88c862a742b37c20"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiCapacityPolicy.php",
+      "sha256": "6eca9575ef723c993f698658b91992b6ef86b8e083dcef8e6ebb961648ef1bbf"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiExportQueue.php",
+      "sha256": "cecc1428aa45c169d0862f93133dafe9256694b432a3772a4f6ba9e8fa72b031"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiExportRuntime.php",
+      "sha256": "2f847c07d4cf2adbb1ad9ad3dd14618edc82c29a4123fc5ebd40849661dbb999"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiExportWorkerContextResolver.php",
+      "sha256": "dd5365836a338fb3aed3f4b181a64441198497f6efb547c9b93dd746d6680dd7"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiFailureClassificationPolicy.php",
+      "sha256": "b4d625d3faa8c8354db2ad4ec1e1f3fa5889ff90b40b009b0c7d0a169c9d41e1"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiMerchantPrincipalResolver.php",
+      "sha256": "5fb72c09391042215e65d500211400d010dad6b279fa86a8decae4291436136d"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiPlatformPrincipalResolver.php",
+      "sha256": "b8cd9f1ff4c78dbc4feff13934d315fb9e16e5736cc2b1b6e63fb031c752c294"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiRunBudgetPolicy.php",
+      "sha256": "82292b47c198886355cd4af827f80adc6baba30f5c9cd1fce0bfae39be4af8e6"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiRunStore.php",
+      "sha256": "757a8e4ba61a62a122d064664cf9d24758b64842462793422bffa0770643fe34"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiRuntimeFactory.php",
+      "sha256": "5f66fb0662852a3682ca360b6c84b9414c878b2bd90d60a253389085f2e24a27"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiRuntimeMonitor.php",
+      "sha256": "3fb98aef7248f64f3e3827a2b5fbaed41cd3e7c73d1a2c62d655014d438d5780"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiRuntimePolicyException.php",
+      "sha256": "55c6fbcef8a394e7e19d685bb14ca6d782934da1bbbf0799f71dff86a696450f"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiTrustedPrincipalResolver.php",
+      "sha256": "300c28f0fb524a2a8e07a34a819d3766b23c50750f3100d014217b33af23ff84"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiWorkflowPlanner.php",
+      "sha256": "debbcb759ec638f265bbdbadfdfcc78e5215a4460f36c9bb2ac01c9d1e62db5b"
+    },
+    {
+      "path": "后端代码/app/services/ai/model/AiModelInputProjector.php",
+      "sha256": "f438183eb8e6d480869043298e55732ce9903b92707b4b437b6c148061f72f2b"
+    },
+    {
+      "path": "后端代码/app/services/ai/model/SiliconFlowClient.php",
+      "sha256": "ba76f9d386db46b0a8e54eb61e81eb5f562bbc6ea1923903e971ba6117e972a2"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/permission/CashierV3FeatureResolver.php",
+      "sha256": "f47729764d5ab9ce8f71810987a72840aa9d7d5953c4bee442b89c57a8f8e6a6"
+    },
+    {
+      "path": "后端代码/app/services/metric/MetricDictionaryServices.php",
+      "sha256": "10311b745bceacd876ea0d48670bbdc1e3d5c681f18962b6ab817edab380368b"
+    },
+    {
+      "path": "后端代码/app/services/mobile/merchant/MobileMerchantCapabilityCatalog.php",
+      "sha256": "80a15baec755fb02aa6f9dda0abf88f1d447cb22a3eeb5c7622e5259c92674e0"
+    },
+    {
+      "path": "后端代码/app/services/mobile/merchant/MobileMerchantRequestContextResolver.php",
+      "sha256": "e509dd735d016e0511ba3a906eb20c37a8f244ff28a950d7cef2447905000d90"
+    },
+    {
+      "path": "后端代码/app/services/mobile/warehouse/MobileWarehouseServices.php",
+      "sha256": "3c9922f84f8d1642343ee47f434c50e9f1c82bf5c83c8d0880e98ddfe3245bfb"
+    },
+    {
+      "path": "后端代码/app/services/organization/JobPositionPolicyServices.php",
+      "sha256": "3d21e405a50c2b05edab2f6e8ca73eb94e4bef190238800f53d37b4df5afd877"
+    },
+    {
+      "path": "后端代码/app/services/query/UnifiedQueryExportSourcePolicy.php",
+      "sha256": "eee5bfe41f78ba259a24b81ff825f0946c8e6a0fe6d2354a841eaae30841d17d"
+    },
+    {
+      "path": "后端代码/app/services/query/UnifiedQueryExportStorage.php",
+      "sha256": "b89ac3ac2a42683eea6bd9eae41324553780c4e9a202ff0050d82bb4037deaea"
+    },
+    {
+      "path": "后端代码/app/services/query/UnifiedQueryExportTaskServices.php",
+      "sha256": "1a0543df387e9fd38ca272c118fbac533726efee93dbdfd760dde199ae6e4586"
+    },
+    {
+      "path": "后端代码/app/services/query/UnifiedQueryExportWorkerServices.php",
+      "sha256": "edfacde1b4c42a9e4984cb29277c13082fc7c12d34471d622a4b352510d73b93"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/GroupPerformanceMetricReadServices.php",
+      "sha256": "52f47cbdd932c7c132523a936275ca7769012fa4ebb1499499695439b24e3882"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/MetricGroupedProjection.php",
+      "sha256": "9637a7b8416fd313c5c5eea7db83b95158cdbfe08220cdbe8b10787ea502adb5"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/MetricMoneyFormatter.php",
+      "sha256": "e7896ca77da8187d3f906d860cb13da69f849e7074da991e7b933f8e2ff5e5d0"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/MetricQueryCatalog.php",
+      "sha256": "dd4aebdc4b4f3fed32047ebb681a34d95831ee74af8d5a7fe396c73c15a477f3"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/MetricQueryContractException.php",
+      "sha256": "89dfac5df5f9be270eeceee677d3ebf3812b8fa2e29ab9b823cfde5f0e3df771"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/MetricQueryReadinessGate.php",
+      "sha256": "a5d72a5f7160656b304fc18b5401ab8df64d13f67ae206fe67b3e5be722722c0"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/MetricReadTransaction.php",
+      "sha256": "f9c78db547bccdf1e2ba7ce957fa7e91c32197b37252c8f9885dec1a9c957140"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/MetricReadViewExportProvider.php",
+      "sha256": "96bd14f2a36d81f69ebdc3e5d6fd96742e1fc16f7f0a938c498a21e2493c6cc5"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/MetricReadViewExportRegistrar.php",
+      "sha256": "cdfd347d38faf7cb777d450e3a31e6f98d4e343594a89a98e31482d8fc6b432f"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/MetricReadViewServices.php",
+      "sha256": "de0a0a1e78e62d77388c40ab7cb45625c39bafa34de4032abc4c939a85545889"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/MetricReadViewStore.php",
+      "sha256": "26de244c82fe35365976eb8f1b5394690f41d8b62e61dbb3c1b1b5c27ee0a1ae"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/MetricReportCapabilityRegistry.php",
+      "sha256": "5d0c4d3f03f378ed2e93a908575ef89bffd9cca208f4f61f256f13c4e3e1f443"
+    },
+    {
+      "path": "后端代码/app/services/report/GroupManagementDashboardServices.php",
+      "sha256": "26e02fa948b664bcd3c0bc50a79f47e8d895d50b5423566fbf1857a44b85202d"
+    },
+    {
+      "path": "后端代码/config/console.php",
+      "sha256": "8797903489b93a6059b7c6c981df9524a12198eff86ee96bafddfe85de8cb1d2"
+    },
+    {
+      "path": "后端代码/config/mohe_ai.php",
+      "sha256": "14717d33ccbcdd3ac4147bf0939ef3c949f6aa8e41ecd3ee97271f9181785f72"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-09-08-魔核AI/02-安全配置.sql",
+      "sha256": "66bab8c364857120c4c56c3a834c5c72f2b83f1340ca3729145acaa6db24f3a9"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-09-08-魔核AI运行状态/01-运行状态.sql",
+      "sha256": "d79b62e5753a898208ec011df67edd6c10190266a606e3846a8fdc3d7090b0ef"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-09-08-魔核AI运行状态/02-入口权限登记.sql",
+      "sha256": "f42166490eee839c1aeb3b920019be5fc91525ed608aae0bd89203b5f9af54fc"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-09-08-魔核AI运行状态/04-共享导出来源隔离.sql",
+      "sha256": "c1214f6361e8538449f6f49eff6427b09488b9cf539d1a083dc94ce3a677a00a"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-09-08-魔核AI运行状态/README.md",
+      "sha256": "f4cbc35f9f70383cee1d84229c184eb6945b1bfa4e552ef7baa986c6ad4f9258"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-09-08-魔核AI运行状态/共享导出发布屏障.md",
+      "sha256": "eea66617ff620bfd347d8388a47383e6e125e8cc3d09b565fe1d938ab6544e7b"
+    },
+    {
+      "path": "后端代码/route/a-ai.php",
+      "sha256": "c612c7e40a007431f56aed0a987244b9958b9d7fcf45882c4785ae72e9f56da7"
+    }
+  ],
+  "external_documents": [
+    {
+      "path": "/Users/xiaojunpeng/Desktop/魔核/美业/XJPMD/06-业务逻辑备忘.md",
+      "sha256": "d9c99e96ab9497e9b475b0bf9997ce1bcd632296340154a9fe5e84ab7138d14d"
+    }
+  ],
+  "verification_increment": "Recharge-inclusive cash: offline full suite and 82 isolated MySQL 5.7.44 checks passed. Live model/user and production-scale performance acceptance remain pending.",
+  "commit_request_note": "2026-09-08 user explicitly requested local commit of current development results. Does not assert full live acceptance, deployment or push. Added previously omitted cash metric tooltip file to manifest; no source change."
+}

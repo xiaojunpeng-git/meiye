@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { browserTransport } from '../../前端代码/shared/mohe-ai/browser-transport.mjs';
+let sent;
+globalThis.fetch = async (url,options) => { sent={url,options}; return {ok:true,json:async()=>({status:200,data:{ok:true}}),blob:async()=>({fixtureBlob:true})}; };
+const request = browserTransport('/fixture/ai',()=> 'fixture-login');
+await request('GET','/runs/id',{client_session_id:'device1',generation:2,run_delivery_token:'fixture-delivery'});
+assert.equal(sent.url,'/fixture/ai/runs/id');
+assert.equal(sent.options.headers['X-Mohe-Ai-Client-Session-Id'],'device1');
+assert.equal(sent.options.headers['X-Mohe-Ai-Run-Delivery-Token'],'fixture-delivery');
+assert.equal(sent.options.headers['X-Mohe-Ai-Generation'],'2');
+assert.equal(sent.options.body,undefined);
+await assert.rejects(()=>request('GET','/runs/id',{question:'not-in-url'}));
+await request('POST','/runs',{question:'fixture-question'});
+assert.equal(sent.options.body,JSON.stringify({question:'fixture-question'}));
+assert.equal(sent.options.credentials,'omit');
+assert.deepEqual(await request('GET','/runs/id/export',{client_session_id:'device1'},{binary:true}),{fixtureBlob:true});
+console.log('Browser transport no URL credentials: 9 checks PASS');

@@ -665,6 +665,13 @@ class UnifiedReport extends AuthController
         return $this->hasMenuPermission('admin-report-group-management-dashboard');
     }
 
+    /** AI is the same report entry; neither its menu nor client input can grant report scope. */
+    public function aiContext(): array
+    {
+        if ((int)$this->adminId<=0 || !$this->adminInfo) { throw new \RuntimeException('AI_AUTH_REQUIRED'); }
+        return app()->make(\app\services\ai\execution\AiPlatformPrincipalResolver::class)->authenticated((int)$this->adminId);
+    }
+
     private function groupDashboardContext(array $input): array
     {
         $stores = $this->scopedStoreIds([
@@ -763,13 +770,13 @@ class UnifiedReport extends AuthController
         return $this->hasMenuPermission('setting-shop-six-dimension-consumption-tier');
     }
 
-    private function hasMenuPermission(string $uniqueAuth): bool
+    private function hasMenuPermission(string $uniqueAuth,int $authType=1): bool
     {
         if (!(int)($this->adminInfo['level'] ?? 0) && (int)$this->adminType !== 3) return true;
         $roles = $this->adminInfo['roles'] ?? [];
         $roles = is_string($roles) ? array_filter(explode(',', $roles)) : (array)$roles;
         if (!$roles) return false;
-        foreach (app()->make(SystemRoleServices::class)->getRolesByAuth($roles, 1) as $menu) {
+        foreach (app()->make(SystemRoleServices::class)->getRolesByAuth($roles, $authType) as $menu) {
             if ((string)($menu['unique_auth'] ?? '') === $uniqueAuth) return true;
         }
         return false;

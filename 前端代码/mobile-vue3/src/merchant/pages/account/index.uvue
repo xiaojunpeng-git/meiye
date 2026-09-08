@@ -1,4 +1,5 @@
 <template>
+  <MoheAiEntry />
 	<view class="merchant-account">
 		<view class="merchant-account__header"><view class="merchant-account__back" role="button" @tap="goBack"><text>‹</text></view><text class="merchant-account__title">账号资料</text><view class="merchant-account__spacer"></view></view>
 		<scroll-view class="merchant-account__content" scroll-y refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh">
@@ -17,6 +18,7 @@
 </template>
 
 <script setup lang="uts">
+  import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	import { changeMobileMerchantCredentials, queryMobileMerchantAccount } from '../../../shared/api/mobile-merchant-profile-client.uts'
 	import { clearMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
 	import { openMerchantBootstrap } from '../../../shared/platform/mobile-navigation.uts'

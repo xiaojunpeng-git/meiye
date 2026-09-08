@@ -32,12 +32,14 @@ final class MetricQueryReadinessGate
         foreach (['report_capability_code', 'scope_provider_code', 'filter_contract_ref'] as $field) {
             if ($binding[$field] !== $trustedAuthorization[$field]) $this->fail('METRIC_PERMISSION_DENIED');
         }
-        // No input flag can turn incomplete providers/snapshots/parity into production readiness.
+        // Only the server's explicit shared-query catalog can attest implemented contracts.
+        $ready = $metric['ai_query_ready'] === true && in_array($request['query_shape'], $metric['query_shapes'] ?? [], true)
+            && ($metric['filter_grain'] ?? null) === $trustedAuthorization['filter_grain'];
         return [
             'metric' => $metric,
             'binding' => $binding,
-            'ai_query_ready' => false,
-            'readiness_reasons' => array_values(array_unique(array_merge($metric['readiness_reasons'], [
+            'ai_query_ready' => $ready,
+            'readiness_reasons' => $ready ? [] : array_values(array_unique(array_merge($metric['readiness_reasons'], [
                 'PRODUCTION_QUERY_PROVIDER_UNAVAILABLE', 'REPLAYABLE_READ_UNVERIFIED', 'REPORT_EXPORT_PARITY_UNVERIFIED',
             ]))),
         ];
@@ -45,8 +47,7 @@ final class MetricQueryReadinessGate
 
     public function assertQueryable(array $request, array $trustedAuthorization): void
     {
-        $this->inspect($request, $trustedAuthorization);
-        $this->fail('METRIC_QUERY_NOT_READY');
+        if (!$this->inspect($request, $trustedAuthorization)['ai_query_ready']) $this->fail('METRIC_QUERY_NOT_READY');
     }
 
     private function exactStrings(array $input, array $fields): void

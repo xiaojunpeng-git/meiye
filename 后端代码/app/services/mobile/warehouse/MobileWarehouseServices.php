@@ -138,6 +138,24 @@ final class MobileWarehouseServices
         ];
     }
 
+    /** No query is executed: expose the existing warehouse permission contract to AI. */
+    public function aiReportContext(array $merchant): array
+    {
+        $this->assertWarehouseFeature((int)$merchant['employeeId']);
+        $entry=$this->entryScopes->resolve($merchant);
+        $personal=(string)$entry['entryType']===MobileMerchantAnalyticsEntryPolicy::TYPE_PERSONAL;
+        $stores=$personal?[]:array_values(array_unique(array_filter(array_map('intval',(array)$entry['authorizedStoreIds']))));
+        sort($stores);
+        $canUse=in_array('MOHE_AI_USE',(array)($merchant['availableActions']??[]),true);
+        return [
+            'terminal'=>'merchant','account_id'=>(int)$merchant['accountId'],
+            'scope_mode'=>$personal?'self_participant':($stores?'stores':'none'),
+            'store_ids'=>$stores,'permission_version'=>hash('sha256',json_encode([$merchant['permissionVersion'],$entry,$canUse])),
+            'can_use'=>$canUse && $stores!==[],'can_configure'=>false,
+            'report_capability_code'=>'group_management_dashboard',
+        ];
+    }
+
     /** Read-only V3 performance drill-down for one employee in the current server scope. */
     public function employeePerformance(array $merchant, array $input): array
     {

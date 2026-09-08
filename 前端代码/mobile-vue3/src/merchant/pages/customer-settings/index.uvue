@@ -1,4 +1,5 @@
 <template>
+  <MoheAiEntry />
 	<view class="customer-settings">
 		<view class="customer-settings__header"><navigator class="customer-settings__back" url="/src/merchant/pages/customers/index" open-type="navigate"><text>‹</text></navigator><view class="customer-settings__header-copy"><text class="customer-settings__eyebrow">客户</text><text class="customer-settings__title">列表字段</text></view><view class="customer-settings__header-save" @tap="saveVisibleFields"><text>{{ savingSettings ? '正在保存' : '保存设置' }}</text></view></view>
 		<scroll-view scroll-y class="customer-settings__content">
@@ -18,6 +19,7 @@
 </template>
 
 <script setup lang="uts">
+  import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	import { dispatchMobileCustomerUnifiedQueryCommand, queryMobileCustomerUnifiedQueryCapabilities } from '../../../shared/api/mobile-customer-client.uts'
 	const loading = ref(false)
 	const savingSettings = ref(false)

@@ -35,6 +35,22 @@ final class MobileMerchantRequestContextResolver
             throw MobileApiException::business('MERCHANT_SESSION_EXPIRED', '商家会话上下文不完整，请重新进入商家端。', 'SESSION_TIMEOUT');
         }
         $this->assertSessionCurrent($session, $employeeId, $meta);
+        $result=$this->trustedBusinessPrincipal($employeeId,$staffId,$storeId,(string)$context['organization_id']);
+        $result['session']=$session;
+        $result['requestMetadata']=$meta;
+        return $result;
+    }
+
+    /** No credential re-creation. Caller authenticates HTTP or verifies a server-owned task first. */
+    public function trustedBusinessPrincipal(int $employeeId,int $staffId,int $storeId,string $organizationId): array
+    {
+        if ($employeeId<=0 || $storeId<=0 || $staffId<0) throw new \RuntimeException('AI_AUTH_REQUIRED');
+        $employee=Db::name('employee')->where('id',$employeeId)->where('status',1)->where('is_del',0)->find();
+        $state=Db::name('employee_mobile_auth_state')->where('employee_id',$employeeId)->find();
+        $store=Db::name('system_store')->where('id',$storeId)->where('is_del',0)->find();
+        $organization=Db::name('organization')->where('id',(int)$organizationId)->where('is_del',0)->find();
+        $storeBinding=Db::name('organization_store')->where('store_id',$storeId)->where('org_id',(int)$organizationId)->find();
+        if (!$employee || !$state || !$store || !$organization || !$storeBinding) throw new \RuntimeException('AI_AUTH_REQUIRED');
         $mobileAuth = $this->mobileAuthorization($employeeId);
         if ($staffId > 0) {
             $staff = $this->currentStaff($employeeId, $staffId, $storeId);
@@ -55,14 +71,12 @@ final class MobileMerchantRequestContextResolver
             'staffId' => $staffId,
             'staffName' => $staffName,
             'storeId' => $storeId,
-            'organizationId' => (string)$context['organization_id'],
+            'organizationId' => $organizationId,
             'visibleStoreIds' => $dataScope['stores'],
             'dataScopeMode' => $dataScope['mode'],
-            'permissionVersion' => 'mobile:' . (int)$session['auth_version']
-                . ':binding:' . (int)$session['employee_phone_binding_version'],
+            'permissionVersion' => 'mobile:' . (int)$state['auth_version']
+                . ':binding:' . (int)$state['phone_binding_version'],
             'availableActions' => $actions,
-            'session' => $session,
-            'requestMetadata' => $meta,
         ];
     }
 

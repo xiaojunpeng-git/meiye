@@ -1,4 +1,5 @@
 <template>
+  <MoheAiEntry />
 	<view class="reservation-page" :class="{ 'reservation-page--native-mini': platformUsesNativeCanvas }">
 		<view class="reservation-page__header">
 			<view class="reservation-page__header-row"><text class="reservation-page__back" @tap="backToWorkbench">‹</text><text class="reservation-page__title">预约服务</text><view class="reservation-page__header-space"></view></view>
@@ -22,6 +23,7 @@
 </template>
 
 <script setup lang="uts">
+  import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	import { endMobileReservationService, queryMobileReservationDetail, queryMobileReservations, startMobileReservationService } from '../../../shared/api/mobile-reservation-client.uts'
 	import { openMerchantBootstrap, openMerchantWorkbench } from '../../../shared/platform/mobile-navigation.uts'
 	import { confirmMobileAction, currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'

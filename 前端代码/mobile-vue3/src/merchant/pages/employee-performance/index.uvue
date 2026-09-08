@@ -1,4 +1,5 @@
 <template>
+  <MoheAiEntry />
 	<view class="employee-performance" :class="{ 'employee-performance--native-mini': platformUsesNativeCanvas }">
 		<view class="employee-performance__header">
 			<view class="employee-performance__back" @tap="returnToWarehouse"><text>‹</text></view>
@@ -32,6 +33,7 @@
 </template>
 
 <script setup lang="uts">
+  import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	import { queryMobileWarehouseEmployeePerformance } from '../../../shared/api/mobile-warehouse-client.uts'
 	import { mobileHttpResultRequiresMerchantLogin } from '../../../shared/api/mobile-http.uts'
 	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'

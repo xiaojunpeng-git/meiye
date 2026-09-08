@@ -27,6 +27,7 @@ return [
         'reservationJindu' => \app\command\ReservationJindu::class,
         'migrate' => \app\command\Migrate::class,
         'unified-query:export-worker' => \app\command\UnifiedQueryExportWorker::class,
+        'mohe-ai:supervise' => \app\command\MoheAiSupervisor::class,
         'group-dashboard:aggregate' => \app\command\GroupManagementDashboardAggregate::class,
     ],
 ];

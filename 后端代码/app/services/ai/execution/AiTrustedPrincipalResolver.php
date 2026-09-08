@@ -1,0 +1,63 @@
+<?php
+namespace app\services\ai\execution;
+
+use app\model\store\SystemStoreStaff;
+use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
+use app\services\cashier\v3\CashierV3DataScopeContext;
+use app\services\cashier\v3\permission\CashierV3FeatureResolver;
+use think\facade\Db;
+
+/** Same current permission source for authenticated HTTP and trusted export jobs; no stored tokens. */
+final class AiTrustedPrincipalResolver
+{
+    public function storeAuthenticated(int $storeId,int $accountId,array $authenticatedProfile): array
+    {
+        if ($storeId<=0 || $accountId<=0) { throw new \RuntimeException('AI_AUTH_REQUIRED'); }
+        $delegated=!empty($authenticatedProfile['_cashier_v3_delegated']);
+        if ($delegated) {
+            // Delegated sessions are only available through live authentication, not background re-creation.
+            $profile=$authenticatedProfile;
+        } else {
+            $staff=SystemStoreStaff::where('id',$accountId)->where('status',1)->where('is_del',0)->find();
+            if (!$staff) { throw new \RuntimeException('AI_AUTH_REQUIRED'); }
+            $profile=$staff->toArray();
+        }
+        $employeeId=(int)($profile['employee_id']??0);
+        if ($employeeId>0 && !Db::name('employee')->where('id',$employeeId)->where('status',1)->where('is_del',0)->find()) {
+            throw new \RuntimeException('AI_AUTH_REQUIRED');
+        }
+        $dispatcher=CashierV3Bootstrap::dispatcher();
+        $operator=$dispatcher->scopeResolver()->operatorScope($storeId,$accountId);
+        $scope=$dispatcher->dataScopeFactory()->build($storeId,$accountId,$profile,$operator->tenantId(),$operator->organizationId());
+        $resolver=app()->make(CashierV3FeatureResolver::class);
+        $features=$delegated ? $resolver->employeeStoreV3GrantedFeatures($employeeId) : $resolver->resolveGrantedFeatures($profile);
+        $reportAllowed=count(array_diff($features,['cashier.v3.ai']))>0;
+        $personal=$scope->isSelfParticipantMode();
+        $allowed=$scope->visibleStoreIds();
+        $store=Db::name('system_store')->where('id',$storeId)->where('is_del',0)->where('is_show',1)->find();
+        $stores=(!$personal && $reportAllowed && $scope->authorizationMode()!==CashierV3DataScopeContext::MODE_NONE
+            && $store && ($allowed===null || in_array($storeId,array_map('intval',(array)$allowed),true)))?[$storeId]:[];
+        sort($features);
+        return ['terminal'=>'store','account_id'=>$accountId,
+            'scope_mode'=>$personal?'self_participant':($stores?'stores':'none'),'store_ids'=>$stores,
+            'permission_version'=>hash('sha256',json_encode([$scope->permissionVersion(),$stores,$features])),
+            'can_use'=>in_array('cashier.v3.ai',$features,true) && $stores!==[], 'can_configure'=>false,
+            'report_capability_code'=>'group_management_dashboard',
+            'export_principal_ready'=>!$delegated,'principal_kind'=>$delegated?'delegated_session':'store_staff','origin_store_id'=>$storeId,
+            'origin_organization_id'=>$operator->organizationId(),'tenant_id'=>$operator->tenantId()];
+    }
+
+    /** Caller must first validate server-owned task/binding instance + Run fence; never expose as an HTTP identity selector. */
+    public function worker(array $binding): array
+    {
+        if (($binding['terminal']??null)==='platform') { return (new AiPlatformPrincipalResolver())->worker($binding); }
+        if (($binding['terminal']??null)==='merchant') { return (new AiMerchantPrincipalResolver())->worker($binding); }
+        if (($binding['terminal']??null)!=='store' || ($binding['principal_kind']??null)!=='store_staff'
+            || !is_int($binding['account_id']??null) || !is_int($binding['origin_store_id']??null)) {
+            throw new \RuntimeException('AI_EXPORT_PRINCIPAL_UNAVAILABLE');
+        }
+        $context=$this->storeAuthenticated($binding['origin_store_id'],$binding['account_id'],[]);
+        if (!$context['can_use']) { throw new \RuntimeException('AI_PERMISSION_REVOKED'); }
+        return $context;
+    }
+}

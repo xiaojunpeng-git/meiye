@@ -1,4 +1,5 @@
 <template>
+  <MoheAiEntry />
 	<view class="product-detail-page">
 		<view class="product-detail-page__header"><view class="product-detail-page__back" @tap="goBack"><text>‹</text><text>返回经营</text></view><text class="product-detail-page__eyebrow">经营首页 · 商品与库存</text><text class="product-detail-page__title">商品与库存明细</text><text class="product-detail-page__subtitle">按当前员工数据权限查看商品销售与库存提醒</text></view>
 		<scroll-view scroll-y="true" refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="product-detail-page__content"><view class="product-detail-page__content-inner">
@@ -12,6 +13,7 @@
 </template>
 
 <script setup lang="uts">
+  import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	import { queryMobileMerchantHome } from '../../../shared/api/mobile-home-client.uts'
 	const loading = ref(false)
 	const refreshing = ref(false)

@@ -1,0 +1,134 @@
+import { DeviceSessions, newId, isTerminal, acceptRun } from './device-session.mjs';
+
+// Framework-neutral, shadow-scoped adapter. No business arithmetic or HTML injection.
+export function mountMoheAi({ request, storage = window.localStorage, documentRef = document }) {
+  const host = documentRef.createElement('div'); host.dataset.moheAi = 'entry';
+  documentRef.body.appendChild(host); const root = host.attachShadow({ mode: 'open' });
+  const style = documentRef.createElement('style'); style.textContent = `
+    :host{font:14px/1.5 system-ui,sans-serif;color:#243447}button,input,textarea,select{font:inherit}button{cursor:pointer;border:1px solid #dbe2ec;border-radius:8px;background:white;padding:7px 12px;color:inherit}button:disabled{opacity:.5;cursor:default}.entry{position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:2147483000;background:#5142b5;color:white;border-radius:0 14px 14px 0;padding:12px 10px}.panel{position:fixed;left:12px;top:50%;transform:translateY(-50%);width:min(440px,calc(100vw - 24px));height:min(700px,calc(100vh - 32px));z-index:2147483001;background:white;border:1px solid #dce2ed;border-radius:16px;box-shadow:0 16px 60px #17233d33;display:flex;flex-direction:column;overflow:hidden}.head,.footer{padding:14px;border-bottom:1px solid #edf0f4}.head{display:flex;gap:8px;align-items:center}.head strong{flex:1}.body{overflow:auto;padding:14px;flex:1}.message{white-space:pre-wrap;margin:8px 0;padding:10px;border-radius:10px;background:#f5f6fa}.question{background:#eeebff}.card{border:1px solid #e2e8f0;padding:12px;margin:8px 0;border-radius:10px}.value{font-size:26px;color:#1f5f8b}.muted{color:#65758b;font-size:12px}.footer{border-top:1px solid #edf0f4;border-bottom:0}textarea{box-sizing:border-box;width:100%;resize:vertical;min-height:65px;border:1px solid #ccd5e3;border-radius:8px;padding:8px}.actions{display:flex;gap:8px;align-items:center;margin-top:8px}.primary{background:#5142b5;color:white}.error{color:#9a3412}select,input{max-width:100%;padding:6px;margin:5px 0}table{border-collapse:collapse;display:block;overflow:auto}td,th{border:1px solid #e2e8f0;padding:6px;white-space:nowrap}`;
+  style.textContent += '[hidden]{display:none!important}';
+  root.appendChild(style);
+  const el = (tag, text, cls) => { const n = documentRef.createElement(tag); if (text != null) n.textContent = String(text); if (cls) n.className = cls; return n; };
+  let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, pollTimer, expiryTimer, disposed = false, cancelling = false, closeRequested = false;
+  const clientSession = newId(); const entry = el('button', '魔核 AI', 'entry'); entry.hidden = true; root.appendChild(entry);
+  function message(text, cls) { const n = el('div', text, 'message ' + (cls || '')); body.appendChild(n); body.scrollTop = body.scrollHeight; }
+  function renderAnswer(answer, live = true) {
+    if (!answer || typeof answer !== 'object') return;
+    if (answer.summary) message(answer.summary);
+    (answer.cards || []).forEach(card => { const n = el('div', null, 'card'); n.appendChild(el('div', card.metric_name)); n.appendChild(el('div', String(card.display_value) + (card.unit || ''), 'value')); if (card.tooltip) { const details = el('details'); details.appendChild(el('summary', '统计口径')); if (typeof card.tooltip === 'string') details.appendChild(el('div', card.tooltip)); else [['summary',''],['include','包含：'],['exclude','不包含：'],['timing','统计时间：'],['note','说明：']].forEach(([key,label]) => { if (typeof card.tooltip[key] === 'string' && card.tooltip[key]) details.appendChild(el('div', label + card.tooltip[key])); }); n.appendChild(details); } if (card.period_label) n.appendChild(el('div', card.period_label, 'muted')); body.appendChild(n); });
+    if (answer.table && Array.isArray(answer.table.columns) && Array.isArray(answer.table.rows)) { const table = el('table'); const tr = el('tr'); answer.table.columns.forEach(c => tr.appendChild(el('th',c.label))); table.appendChild(tr); answer.table.rows.forEach(row => { const r = el('tr'); answer.table.columns.forEach(c => r.appendChild(el('td',row[c.key] == null ? '-' : row[c.key]))); table.appendChild(r); }); body.appendChild(table); }
+    if (live && answer.export && answer.export.file_ref && run && isTerminal(run.status)) { const source = { ...run }; const download = el('button', '下载 Excel'); download.onclick = async () => { download.disabled = true; try { const blob = await request('GET', '/runs/' + encodeURIComponent(source.run_id) + '/export', { client_session_id: clientSession, run_delivery_token: source.run_delivery_token, generation: source.generation }, {binary:true}); const url = URL.createObjectURL(blob); const link = el('a'); link.href = url; link.download = answer.export.filename || '经营数据.xlsx'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); } catch (_) { message('文件暂不可下载，请重新查询。','error'); } finally { download.disabled = false; } }; body.appendChild(download); }
+  }
+  function binding() { return { client_session_id: clientSession, run_delivery_token: run.run_delivery_token, generation: run.generation }; }
+  async function update(next) {
+    const previous = run; run = acceptRun(run, next); if (!run || run === previous) return;
+    progress.textContent = typeof run.progress === 'string' ? run.progress : (run.progress && run.progress.message) || '正在处理';
+    if (isTerminal(run.status)) {
+      clearTimeout(pollTimer); cancelling = false; send.disabled = false;
+      if (['COMPLETED', 'PARTIAL_SUCCEEDED'].includes(run.status) && run.answer) {
+        renderAnswer(run.answer);
+        const text = run.answer.summary || (run.answer.cards || []).map(c => `${c.metric_name}：${c.display_value}${c.unit || ''}`).join('\n');
+        try { sessions.append(conversation, question, text, run.answer); } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error'); }
+      } else message(run.status === 'CANCELLED' ? '已取消' : run.message || '本次未能完成，请重新提问。');
+      return;
+    }
+    if (run.status === 'WAITING_CLARIFICATION' && run.clarification) renderClarification(run.clarification);
+    else pollTimer = setTimeout(poll, 1000);
+  }
+  async function poll() {
+    if (disposed || !run || isTerminal(run.status)) return;
+    try { await update(await request('GET', '/runs/' + encodeURIComponent(run.run_id), binding())); }
+    catch (_) { if (progress) progress.textContent = cancelling ? '暂未确认取消结果，请检查网络。' : '连接暂时中断，正在重新确认任务状态。'; pollTimer = setTimeout(poll, 3000); }
+  }
+  function renderClarification(c) {
+    const area = el('div', null, 'card'); area.appendChild(el('div', c.question || '请一次选清查询条件')); const controls = [];
+    (c.fields || []).forEach(field => { const label = el('label', field.label); const control = el(field.type === 'date' ? 'input' : 'select'); if (field.type === 'date') control.type = 'date'; else (field.options || []).forEach(option => { const o = el('option', option.label); o.value = option.value; control.appendChild(o); }); control.required = true; label.appendChild(control); area.appendChild(label); controls.push({ field, control }); });
+    const confirm = el('button', '确认查询', 'primary'); confirm.onclick = async () => { const choices = {}; controls.forEach(({field, control}) => { choices[field.key] = control.value; }); if (controls.some(v => !v.control.value)) return; confirm.disabled = true; try { await update(await request('POST', '/runs/' + encodeURIComponent(run.run_id) + '/clarify', { ...binding(), clarification_id: c.id, choices })); area.remove(); } catch (_) { confirm.disabled = false; message('确认未完成，请检查网络后重试。', 'error'); } }; area.appendChild(confirm); body.appendChild(area);
+  }
+  async function stop() {
+    closeRequested = true;
+    if (!run || isTerminal(run.status)) return;
+    cancelling = true; progress.textContent = '正在取消';
+    try { await update(await request('POST', '/runs/' + encodeURIComponent(run.run_id) + '/cancel', binding(), { keepalive: true })); } catch (_) { progress.textContent = '暂未确认取消结果，请检查网络。'; }
+    if (run && !isTerminal(run.status)) { clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000); }
+  }
+  async function open() {
+    if (panel) { panel.hidden = false; return; }
+    try { boot = await request('GET', '/bootstrap', {client_session_id:clientSession}); if (!boot.enabled && !boot.can_configure) return; sessions = new DeviceSessions(storage, boot.identity_key); conversation = sessions.create().id; } catch (_) { return; }
+    panel = el('section', null, 'panel'); panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', '魔核 AI');
+    const head = el('div', null, 'head'); head.appendChild(el('strong', '魔核 AI')); const history = el('button', '历史'); const fresh = el('button', '新对话'); const close = el('button', '关闭'); head.append(history, fresh, close); panel.appendChild(head);
+    body = el('div', null, 'body'); panel.appendChild(body); message('能确定就直接查；有歧义一次选清。聊天只保留在本设备 24 小时。', 'muted');
+    const footer = el('div', null, 'footer'); progress = el('div', '', 'muted'); progress.setAttribute('role', 'status'); footer.appendChild(progress); input = el('textarea'); input.placeholder = '例如：今天本店现金业绩多少？'; input.maxLength = 4000; footer.appendChild(input); const actions = el('div', null, 'actions'); const format = el('select'); [['screen','仅查看数据'],['screen_and_xlsx','数据和 Excel']].forEach(([value,label]) => { const o = el('option', label); o.value = value; format.appendChild(o); }); actions.appendChild(format); send = el('button', '发送', 'primary'); const cancel = el('button', '停止'); actions.append(send,cancel); footer.appendChild(actions); panel.appendChild(footer); root.appendChild(panel);
+    const excelOption = format.querySelector('option[value="screen_and_xlsx"]');
+    function refreshCapabilities() {
+      const capabilities = boot.capabilities || {};
+      const ready = (capabilities.output_formats || []).includes('screen_and_xlsx');
+      excelOption.disabled = !ready; excelOption.textContent = ready ? '数据和 Excel' : 'Excel 暂未开放';
+      if (!ready) format.value = 'screen';
+      input.placeholder = (capabilities.metric_codes || []).includes('consume_amount') ? '例如：今天本店消耗业绩多少？' : '请输入要查询的指标和日期';
+    }
+    refreshCapabilities();
+    if (boot.can_configure) {
+      const settings = el('button', '配置'); head.insertBefore(settings, close);
+      settings.onclick = async () => {
+        if (run && !isTerminal(run.status)) return;
+        try {
+          const config = await request('GET', '/config'); body.textContent = '';
+          message('使用客户自己的 SiliconFlow 账号，费用由客户承担。密钥保存后不回显。', 'muted');
+          if (config.runtime_status && typeof config.runtime_status === 'object') {
+            const status = config.runtime_status;
+            const rows = [['success','完整成功'],['partial','数据已出但文件未生成'],['technical','技术失败'],['active','处理中']]
+              .filter(([key]) => Number.isInteger(status[key]) && status[key] >= 0);
+            if (rows.length) { const diagnostics = el('div', null, 'card'); diagnostics.appendChild(el('div','近 24 小时运行概况')); rows.forEach(([key,label]) => diagnostics.appendChild(el('div',label + '：' + status[key]))); diagnostics.appendChild(el('div','统计数量不代表模型连接、账号余额或可用状态。','muted')); body.appendChild(diagnostics); }
+            const monitoring = status.monitoring;
+            if (monitoring && typeof monitoring === 'object') {
+              const monitor = el('div', null, 'card'); monitor.appendChild(el('div','运行监控'));
+              const labels = {CAPACITY_PRESSURE:'当前使用压力较高',QUERY_TECHNICAL_FAILURES:'数据查询出现技术故障',SECURITY_INTEGRITY_FAILURES:'数据安全或完整性检查异常',EXECUTION_OUTCOME_UNKNOWN:'部分任务结果尚未确认',EXPORT_FILE_FAILURES:'文件生成失败较多',RUN_DURATION_HIGH:'任务处理耗时偏长',CLEANUP_FAILED:'到期数据清理失败',CLEANUP_NOT_CONFIRMED:'尚未确认到期数据清理完成'};
+              if (monitoring.status === 'not_ready') { monitor.appendChild(el('div','监控阈值尚未登记，不能判断运行健康')); if (Array.isArray(monitoring.alerts)) monitoring.alerts.forEach(alert => { if (alert && typeof alert.code === 'string' && Object.prototype.hasOwnProperty.call(labels,alert.code)) monitor.appendChild(el('div',labels[alert.code],'error')); }); }
+              else if (monitoring.status === 'alert' && Array.isArray(monitoring.alerts)) {
+                const known = monitoring.alerts.filter(alert => alert && typeof alert.code === 'string' && Object.prototype.hasOwnProperty.call(labels,alert.code));
+                known.forEach(alert => monitor.appendChild(el('div',labels[alert.code],'error')));
+                if (known.length !== monitoring.alerts.length || known.length === 0) monitor.appendChild(el('div','部分监控信息尚未确认，请联系管理员检查。'));
+              } else if (monitoring.status === 'ok' && Array.isArray(monitoring.alerts) && monitoring.alerts.length === 0 && monitoring.cleanup_health && monitoring.cleanup_health.status === 'ok' && Number.isInteger(monitoring.cleanup_health.checked_at)) monitor.appendChild(el('div','当前已登记的监控项未触发告警；不代表模型或账号余额可用。'));
+              else monitor.appendChild(el('div','监控信息不完整，暂不能判断运行健康。'));
+              body.appendChild(monitor);
+            }
+          }
+          const enabled = el('input'); enabled.type = 'checkbox'; enabled.checked = config.enabled === true;
+          const enableLabel = el('label', '启用魔核 AI '); enableLabel.appendChild(enabled); body.appendChild(enableLabel);
+          const model = el('input'); model.placeholder = 'SiliconFlow 模型名称'; model.value = config.model || ''; model.setAttribute('aria-label','模型名称'); body.appendChild(model);
+          const key = el('input'); key.type = 'password'; key.autocomplete = 'new-password'; key.placeholder = config.has_api_key ? '已保存密钥，留空保持不变' : '输入客户 API Key'; key.setAttribute('aria-label','API Key'); body.appendChild(key);
+          const consent = el('input'); consent.type = 'checkbox'; consent.checked = config.external_processing_authorized === true;
+          const consentLabel = el('label', '同意按约定规则将必要内容交由 SiliconFlow 处理 '); consentLabel.appendChild(consent); body.appendChild(consentLabel);
+          const save = el('button', '保存配置', 'primary'); save.onclick = async () => { save.disabled = true; try { const payload = { version: config.version, enabled: enabled.checked, model: model.value.trim(), external_processing_authorized: consent.checked, api_key:key.value }; await request('PUT','/config',payload); key.value = ''; boot = await request('GET','/bootstrap',{client_session_id:clientSession}); refreshCapabilities(); const latest = await request('GET','/config'); config.version = latest.version; message('配置已保存'); } catch (_) { key.value = ''; message('配置保存失败或已被其他管理员更新，请重新打开配置。','error'); } finally { save.disabled = false; } }; body.appendChild(save);
+          const check = el('button', '测试连接（可能消耗客户额度）'); check.onclick = async () => { if (!window.confirm('此测试可能消耗客户 SiliconFlow 额度，是否继续？')) return; check.disabled = true; try { const r = await request('POST','/config/check',{confirm_cost:true}); message(r.message || '测试完成，请查看配置状态。'); } catch (_) { message('暂未确认连接状态，请检查配置，不代表账号欠费。','error'); } finally { check.disabled = false; } }; body.appendChild(check);
+        } catch (_) { message('暂时无法读取配置。','error'); }
+      };
+    }
+    let pendingCreate = null;
+    send.onclick = async () => {
+      if (!boot.enabled) { progress.textContent = boot.disabled_reason || '请先完成配置并启用可用能力。'; return; }
+      if (!input.value.trim() || (run && !isTerminal(run.status))) return;
+      question = pendingCreate ? pendingCreate.question : input.value.trim(); send.disabled = true; closeRequested = false;
+      if (!pendingCreate) { message(question, 'question'); pendingCreate = { client_request_id: newId(), conversation_id: conversation, client_session_id: clientSession, window_token: boot.window_token, question, history: sessions.history(conversation), output_format: format.value }; }
+      input.value = ''; progress.textContent = '正在接纳请求'; run = null;
+      try {
+        const submitted = pendingCreate;
+        const accepted = await request('POST', '/runs', submitted);
+        if (accepted && accepted.accepted === false) { pendingCreate = null; send.disabled = false; send.textContent = '发送'; progress.textContent = accepted.message || '当前使用人数较多，请稍后再问。'; return; }
+        await update(accepted);
+        pendingCreate = null;
+        if (closeRequested || disposed) { await stop(); return; }
+        if (run && !isTerminal(run.status)) await update(await request('POST', '/runs/' + encodeURIComponent(run.run_id) + '/execute', { ...binding(), question: submitted.question, history: submitted.history, output_format: submitted.output_format }));
+      } catch (error) { progress.textContent = error.responseKnown ? error.message : '请求结果暂未确认。'; if (run) { clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000); } else { if (error.responseKnown) pendingCreate = null; send.disabled = false; send.textContent = error.responseKnown ? '发送' : '重试确认'; input.value = question; } }
+    };
+    cancel.onclick = stop; close.onclick = () => { stop(); panel.hidden = true; };
+    fresh.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) { message('请先确认当前任务状态。'); return; } conversation = sessions.create().id; body.textContent = ''; run = null; };
+    history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; body.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', s.rounds[0] ? s.rounds[0].question.slice(0,30) : '新对话'); b.onclick = () => { conversation = s.id; body.textContent = ''; s.rounds.forEach(r => { message(r.question,'question'); renderAnswer(r.presentation || {summary:r.answer},false); }); }; body.appendChild(b); }); };
+  }
+  entry.onclick = open;
+  request('GET', '/bootstrap',{client_session_id:clientSession}).then(value => { if (!disposed) { boot = value; entry.hidden = !value.enabled && !value.can_configure; } }).catch(() => {});
+  expiryTimer = setInterval(() => { if (sessions) { try { if (!sessions.load().some(s => s.id === conversation) && panel) { body.textContent = ''; progress.textContent = '会话已到期，请新建对话。'; } } catch (_) {} } }, 30000);
+  const unload = () => { stop(); }; window.addEventListener('pagehide', unload);
+  return () => { stop(); disposed = true; clearTimeout(pollTimer); clearInterval(expiryTimer); window.removeEventListener('pagehide', unload); host.remove(); };
+}

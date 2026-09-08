@@ -32,11 +32,19 @@ class UnifiedQueryExportWorkerServices
     /** @var UnifiedQueryExportStorage */
     protected $storage;
 
+    /** A queue name is not authority: every scan and direct claim checks this partition. */
+    protected $partition;
+
     public function __construct(
         UnifiedQueryExportTaskServices $tasks,
         UnifiedQueryProviderRegistry $providers,
-        UnifiedQueryWorkerContextResolverRegistry $contextResolvers
+        UnifiedQueryWorkerContextResolverRegistry $contextResolvers,
+        string $partition = 'REPORT'
     ) {
+        if (!in_array($partition, ['REPORT', 'AI_EXPORT'], true)) {
+            throw new \InvalidArgumentException('EXPORT_PARTITION_MISMATCH');
+        }
+        $this->partition = $partition;
         $this->tasks = $tasks;
         $this->providers = $providers;
         $this->contextResolvers = $contextResolvers;
@@ -61,6 +69,16 @@ class UnifiedQueryExportWorkerServices
         $expired = Db::name(UnifiedQueryExportTaskServices::TABLE)
             ->where('status', 'running')
             ->whereBetween('lease_expires_at', [1, max(1, time() - 1)]);
+        if ($this->tasks->hasSourceContract()) {
+            $source = $this->partition === 'REPORT' ? 'REPORT' : 'AI';
+            $pending->where('source_type', $source);
+            $expired->where('source_type', $source);
+        } elseif ($this->partition !== 'REPORT') {
+            throw new \RuntimeException('EXPORT_AI_SCHEMA_NOT_READY');
+        }
+        // An expired lease is not proof that the previous AI process has stopped.
+        // AI recovery needs an explicit supervisor decision, never automatic re-execution.
+        if ($this->partition === 'AI_EXPORT') { $expired->where('id', 0); }
         if ($onlyTaskNo !== '') {
             $pending->where('task_no', $onlyTaskNo);
             $expired->where('task_no', $onlyTaskNo);
@@ -115,6 +133,10 @@ class UnifiedQueryExportWorkerServices
     public function cleanupExpired(int $limit = 100): array
     {
         $limit = max(1, min(200, $limit));
+        if ($this->partition === 'AI_EXPORT') {
+            if (!$this->tasks->hasSourceContract()) { throw new \RuntimeException('EXPORT_AI_SCHEMA_NOT_READY'); }
+            return $this->tasks->cleanupAiExpired($limit, function (array $task): bool { $this->deleteAiObjects($task); return true; });
+        }
         $now = time();
         $marked = 0;
         $deleted = 0;
@@ -125,8 +147,9 @@ class UnifiedQueryExportWorkerServices
             ->field('id')
             ->order('expires_at', 'asc')
             ->order('id', 'asc')
-            ->limit($limit)
-            ->select()
+            ->limit($limit);
+        if ($this->tasks->hasSourceContract()) { $candidates->where('source_type', 'REPORT'); }
+        $candidates = $candidates->select()
             ->toArray();
         foreach ($candidates as $candidate) {
             $marked += (int)Db::name(UnifiedQueryExportTaskServices::TABLE)
@@ -147,8 +170,9 @@ class UnifiedQueryExportWorkerServices
             ->field('id,storage_key')
             ->order('expires_at', 'asc')
             ->order('id', 'asc')
-            ->limit($limit)
-            ->select()
+            ->limit($limit);
+        if ($this->tasks->hasSourceContract()) { $expired->where('source_type', 'REPORT'); }
+        $expired = $expired->select()
             ->toArray();
         foreach ($expired as $task) {
             $storageKey = (string)$task['storage_key'];
@@ -176,6 +200,27 @@ class UnifiedQueryExportWorkerServices
         return ['markedExpired' => $marked, 'deletedFiles' => $deleted, 'retry' => $retry];
     }
 
+    /** Delete only this validated task's final/temporary lease objects, never recurse or follow links. */
+    protected function deleteAiObjects(array $task): void
+    {
+        $taskNo=(string)($task['task_no']??'');
+        if (!preg_match('/^uqe_[a-f0-9]{32}$/D',$taskNo)) { throw new \RuntimeException('EXPORT_TASK_INVALID'); }
+        $root=rtrim((string)app()->getRuntimePath(),DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'unified-query-exports';
+        if (!is_dir($root)) { return; }
+        if (is_link($root)) { throw new \RuntimeException('EXPORT_STORAGE_INVALID'); }
+        // Writer uses exactly YYYY/MM directories. A task can cross a month boundary.
+        foreach (new \DirectoryIterator($root) as $year) {
+            if ($year->isDot() || !$year->isDir() || $year->isLink() || !preg_match('/^\d{4}$/D',$year->getFilename())) { continue; }
+            foreach (new \DirectoryIterator($year->getPathname()) as $month) {
+                if ($month->isDot() || !$month->isDir() || $month->isLink() || !preg_match('/^(0[1-9]|1[0-2])$/D',$month->getFilename())) { continue; }
+                foreach (new \DirectoryIterator($month->getPathname()) as $file) {
+                    if ($file->isDot() || !preg_match('/^'.preg_quote($taskNo,'/').'\-[a-f0-9]{64}\.xlsx(?:\.tmp\-[a-f0-9]{12})?$/D',$file->getFilename())) { continue; }
+                    if ($file->isLink() || !$file->isFile() || !unlink($file->getPathname())) { throw new \RuntimeException('EXPORT_DELETE_FAILED'); }
+                }
+            }
+        }
+    }
+
     public function processOne(string $taskNo): array
     {
         $seed = Db::name(UnifiedQueryExportTaskServices::TABLE)
@@ -184,14 +229,17 @@ class UnifiedQueryExportWorkerServices
         if (!$seed) {
             throw new \RuntimeException('导出任务不存在');
         }
+        // Outside catch: a consumer from the wrong pool must not mark another pool's task failed.
+        $this->tasks->assertExecutionPartition($seed, $this->partition);
         $claim = null;
         $storageKey = '';
         $completionAttempted = false;
+        $inFileStage = false;
         $execution = [];
         $heartbeat = null;
         try {
             $context = $this->currentContext($seed);
-            $claim = $this->tasks->claim($context, $taskNo);
+            $claim = $this->tasks->claim($context, $taskNo, $this->partition);
             $this->applyProcessTimeout();
             $heartbeat = $this->leaseHeartbeat($claim, $taskNo);
             // claim 后立即 CAS 续期；后续任何昂贵阶段开始前都已确认本 worker
@@ -223,7 +271,7 @@ class UnifiedQueryExportWorkerServices
             $context['query_cutoff_date'] = $claimCutoffDate;
             $context['data_as_of'] = $claimDataAsOf;
 
-            $plan = UnifiedQueryJson::decode((string)$claim['query_payload']);
+            $plan = $this->tasks->executablePlan($claim);
             $taskPageCode = trim((string)($claim['page_code'] ?? ''));
             $planPageCode = trim((string)($plan['page_code'] ?? ''));
             if ($taskPageCode === '' || $planPageCode !== $taskPageCode) {
@@ -268,6 +316,7 @@ class UnifiedQueryExportWorkerServices
                 count((array)$execution['exportRows']),
                 $includeSummary
             );
+            $inFileStage = true;
             $storageKey = $this->writeXlsx(
                 $taskNo,
                 (string)$claim['workerToken'],
@@ -277,6 +326,7 @@ class UnifiedQueryExportWorkerServices
                 $includeSummary,
                 $heartbeat
             );
+            $inFileStage = false;
             $heartbeat(true);
             // 从此刻起 complete() 可能已在数据库提交、但调用方只收到连接异常。
             // catch 必须先核对权威任务行，不能直接删除可能已被成功任务引用的文件。
@@ -366,12 +416,20 @@ class UnifiedQueryExportWorkerServices
             return [
                 'taskId' => $taskNo,
                 'status' => 'failed',
+                // Only these writer/storage failures can preserve already-verified screen data.
+                // Permission, cancellation, source mismatch and uncertain completion never qualify.
+                'exportFailureClass' => $this->partition === 'AI_EXPORT' && $inFileStage && !$completionAttempted
+                    && ($exception instanceof \PhpOffice\PhpSpreadsheet\Writer\Exception
+                        || in_array($exception->getMessage(), ['无法创建导出运行时目录','导出文件写入失败'], true))
+                    ? 'FILE_GENERATION_FAILED' : 'NOT_SAFE_TO_DEGRADE',
                 'reason' => $reason,
                 // 供 CLI/监控按稳定业务码归类；页面只使用 reason，不暴露堆栈。
                 'errorCode' => $exception instanceof UnifiedQueryException
                     ? $exception->getErrorCode()
                     : 'UNIFIED_QUERY_EXPORT_WORKER_FAILED',
-                'diagnostic' => get_class($exception) . ': ' . $exception->getMessage(),
+                'diagnostic' => $this->partition === 'AI_EXPORT'
+                    ? 'AI_EXPORT_FAILED'
+                    : get_class($exception) . ': ' . $exception->getMessage(),
             ];
         }
     }
@@ -741,7 +799,7 @@ class UnifiedQueryExportWorkerServices
                     ['max_seconds' => self::MAX_TASK_RUNTIME_SECONDS]
                 );
             }
-            if ($force || $lastRenewedAt <= 0.0
+            if ($this->partition === 'AI_EXPORT' || $force || $lastRenewedAt <= 0.0
                 || $now - $lastRenewedAt >= self::LEASE_RENEW_INTERVAL_SECONDS) {
                 $this->tasks->renewLease(
                     $tenantId,

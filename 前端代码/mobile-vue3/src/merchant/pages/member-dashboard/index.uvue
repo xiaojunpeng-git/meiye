@@ -1,4 +1,5 @@
 <template>
+  <MoheAiEntry />
 	<view class="merchant-detail-page">
 		<view class="merchant-detail-page__header">
 			<view class="merchant-detail-page__back" @tap="goBack"><text>‹</text><text>返回</text></view>
@@ -24,6 +25,7 @@
 </template>
 
 <script setup lang="uts">
+  import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	const loading = ref(false)
 	const message = ref('')
 

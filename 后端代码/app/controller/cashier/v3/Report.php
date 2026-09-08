@@ -178,6 +178,14 @@ class Report extends AuthController
         );
     }
 
+    /** Reuses this report's existing scope resolver; personal report grain is not widened. */
+    public function aiContext(): array
+    {
+        return (new \app\services\ai\execution\AiTrustedPrincipalResolver())->storeAuthenticated(
+            (int)$this->storeId,(int)$this->cashierId,is_array($this->cashierInfo)?$this->cashierInfo:[]
+        );
+    }
+
     private function scopeStoreIds(array $input, $dataScope = null): array
     {
         $allowed = ($dataScope ?: $this->dataScope())->visibleStoreIds();

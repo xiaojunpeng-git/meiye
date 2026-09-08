@@ -1,4 +1,5 @@
 <template>
+  <MoheAiEntry />
 	<view class="confirmation-page" :class="{ 'confirmation-page--native-mini': platformUsesNativeCanvas }">
 		<view class="confirmation-page__header"><view class="confirmation-page__header-row"><text class="confirmation-page__back" @tap="backToWorkbench">‹</text><text class="confirmation-page__title">预约确认</text><view class="confirmation-page__header-space"></view></view><text class="confirmation-page__subtitle">确认或拒绝会员提交的新预约</text></view>
 		<view class="confirmation-page__summary"><text class="confirmation-page__summary-number">{{ totalRecords }}</text><text class="confirmation-page__summary-label">待确认</text><view class="confirmation-page__refresh" @tap="loadReservations(true)"><text>刷新</text></view></view>
@@ -25,6 +26,7 @@
 </template>
 
 <script setup lang="uts">
+  import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	import { confirmMobileReservation, openMobileReservationEditor, queryMobileReservationDetail, queryMobileReservations, rejectMobileReservation } from '../../../shared/api/mobile-reservation-client.uts'
 	import { openMerchantBootstrap, openMerchantWorkbench } from '../../../shared/platform/mobile-navigation.uts'
 	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'

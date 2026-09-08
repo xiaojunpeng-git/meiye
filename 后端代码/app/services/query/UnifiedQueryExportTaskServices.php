@@ -41,6 +41,93 @@ class UnifiedQueryExportTaskServices
     /** @var UnifiedQueryAccessPolicy */
     protected $access;
 
+    protected $aiFence;
+    private $sourceContractAvailable;
+
+    /** Trusted runtime wiring only. Fence must verify instance/owner/Run/generation and
+     * execute the callback under the same cancellation/publication exclusion lock.
+     */
+    public function setAiFence(callable $fence): void { $this->aiFence = $fence; }
+
+    public function hasSourceContract(): bool
+    {
+        if ($this->sourceContractAvailable === null) {
+            $fields = Db::name(self::TABLE)->getTableFields();
+            $hasSource = in_array('source_type', $fields, true); $hasBinding = in_array('ai_binding', $fields, true);
+            if ($hasSource !== $hasBinding) throw new \RuntimeException('EXPORT_SOURCE_SCHEMA_INCOMPLETE');
+            $this->sourceContractAvailable = $hasSource && $hasBinding;
+        }
+        return $this->sourceContractAvailable;
+    }
+
+    public function assertExecutionPartition(array $task, string $partition): void
+    {
+        // Only the entire pre-migration schema is legacy; never infer a row's origin from null.
+        $source = $this->sourceType($task);
+        if (UnifiedQueryExportSourcePolicy::partitionForSource($source) !== $partition) {
+            throw new UnifiedQueryException('UNIFIED_QUERY_EXPORT_PARTITION_MISMATCH', '导出任务不属于当前执行分区。', []);
+        }
+        if ($source === 'REPORT' && !empty($task['ai_binding'])) throw new \InvalidArgumentException('EXPORT_REPORT_AI_BINDING_FORBIDDEN');
+    }
+
+    public function withAiFence(array $task, string $phase, callable $action)
+    {
+        $source = $this->sourceType($task);
+        if ($source !== 'AI') return $action();
+        if (!is_callable($this->aiFence)) throw new UnifiedQueryException('UNIFIED_QUERY_AI_EXPORT_NOT_READY', 'AI 导出尚未就绪。', []);
+        $binding = UnifiedQueryJson::decode((string)$task['ai_binding']);
+        $called = false;
+        $result = call_user_func($this->aiFence, $binding, $phase, function () use (&$called, $action) {
+            if ($called) throw new \LogicException('AI_EXPORT_FENCE_REENTRY');
+            $called = true;
+            return $action();
+        });
+        if (!$called) throw new \LogicException('AI_EXPORT_FENCE_DID_NOT_EXECUTE');
+        return $result;
+    }
+
+    private function sourceType(array $task): string
+    {
+        if (!$this->hasSourceContract()) {
+            if (!empty($task['ai_binding']) || (isset($task['source_type']) && $task['source_type'] !== 'REPORT')) throw new \InvalidArgumentException('EXPORT_SOURCE_SCHEMA_REQUIRED');
+            return 'REPORT';
+        }
+        $source = $task['source_type'] ?? null;
+        UnifiedQueryExportSourcePolicy::partitionForSource($source);
+        if ($source === 'REPORT' && !empty($task['ai_binding'])) throw new \InvalidArgumentException('EXPORT_REPORT_AI_BINDING_FORBIDDEN');
+        return $source;
+    }
+
+    /** Return the original shared compiler plan; never repair either AI scope. */
+    public function executablePlan(array $task): array
+    {
+        $plan = UnifiedQueryJson::decode((string)($task['query_payload'] ?? ''));
+        if ($this->sourceType($task) === 'AI') {
+            if (($task['export_scope'] ?? null) !== 'query' || ($plan['query']['export']['scope'] ?? null) !== 'query'
+                || !is_array($plan['plan'] ?? null) || count($plan) !== 3
+                || count($plan['query']) !== 1 || count($plan['query']['export']) !== 1
+                || ($plan['page_code'] ?? null) !== ($plan['plan']['page_code'] ?? null)) throw new \InvalidArgumentException('EXPORT_AI_QUERY_SCOPE_REQUIRED');
+            $plan = $plan['plan'];
+        }
+        return $plan;
+    }
+
+    private function lifecycleTask(string $tenantId, string $taskNo): array
+    {
+        $task = Db::name(self::TABLE)->where('tenant_id', $tenantId)->where('task_no', $taskNo)->find();
+        if (!$task) throw new \RuntimeException('导出任务不存在');
+        $this->sourceType($task);
+        return $task;
+    }
+
+    private function assertAiExecution(array $task): void
+    {
+        if ($this->sourceType($task) !== 'AI') return;
+        $binding = UnifiedQueryJson::decode((string)$task['ai_binding']);
+        $normalized = $task; $normalized['ai_binding'] = $binding;
+        UnifiedQueryExportSourcePolicy::assertClaimable($normalized, UnifiedQueryJson::decode((string)$task['query_payload']), 'AI_EXPORT', $binding, time());
+    }
+
     public function __construct(
         UnifiedQueryPageRegistry $registry,
         UnifiedQueryCustomFieldServices $customFields,
@@ -63,6 +150,26 @@ class UnifiedQueryExportTaskServices
      * 对齐 create-unified-query-export。
      */
     public function create(array $rawContext, array $payload): array
+    {
+        if (array_key_exists('source_type', $payload) || array_key_exists('ai_binding', $payload)) throw new \InvalidArgumentException('EXPORT_SOURCE_CLIENT_FORBIDDEN');
+        return $this->createWithSource($rawContext, $payload, 'REPORT', []);
+    }
+
+    public function createAi(array $rawContext, array $payload, array $binding): array
+    {
+        if (!$this->hasSourceContract() || !is_callable($this->aiFence)) throw new UnifiedQueryException('UNIFIED_QUERY_AI_EXPORT_NOT_READY', 'AI 导出尚未就绪。', []);
+        if (($payload['scope'] ?? null) !== 'query' || ($payload['query']['export']['scope'] ?? null) !== 'query'
+            || array_key_exists('source_type', $payload) || array_key_exists('ai_binding', $payload)) throw new \InvalidArgumentException('EXPORT_AI_QUERY_SCOPE_REQUIRED');
+        if (($payload['pageCode'] ?? ($payload['page_code'] ?? null)) !== metric\MetricReadViewExportProvider::PAGE_CODE || !empty($payload['includeSummary'])) throw new \InvalidArgumentException('EXPORT_AI_PAGE_INVALID');
+        if (($rawContext['scope_dimensions']['metric_read_ref'] ?? null) !== [$binding['read_consistency_ref'] ?? null]) throw new \InvalidArgumentException('EXPORT_AI_READ_SCOPE_MISMATCH');
+        $task = ['source_type' => 'AI', 'export_scope' => 'query', 'ai_binding' => $binding];
+        UnifiedQueryExportSourcePolicy::assertClaimable($task, ['query' => $payload['query']], 'AI_EXPORT', $binding, time());
+        if ((int)($rawContext['account_id'] ?? 0) !== $binding['account_id']) throw new \InvalidArgumentException('EXPORT_AI_OWNER_MISMATCH');
+        $task['ai_binding'] = UnifiedQueryJson::encode($binding);
+        return $this->withAiFence($task, 'create', function () use ($rawContext, $payload, $binding) { return $this->createWithSource($rawContext, $payload, 'AI', $binding); });
+    }
+
+    private function createWithSource(array $rawContext, array $payload, string $sourceType, array $aiBinding): array
     {
         $context = $this->access->normalizeContext($rawContext);
         $permissions = $this->access->capabilityPermissions($context);
@@ -202,12 +309,14 @@ class UnifiedQueryExportTaskServices
             $queryForPlan,
             $planContext
         );
-        $queryJson = UnifiedQueryJson::encode($queryPlan);
+        $queryJson = UnifiedQueryJson::encode($sourceType === 'AI'
+            ? ['page_code' => $pageCode, 'query' => ['export' => ['scope' => 'query']], 'plan' => $queryPlan]
+            : $queryPlan);
         $fieldSnapshot = [];
         // 过滤、排序、分组或合计里的自定义字段同样决定任务是否可执行。
         // 不能只冻结导出列，否则停用字段时会漏掉仍在 pending 的任务。
         $customVersions = $resolvedVersions;
-        $aliasMap = $this->aliases->aliases($context, $pageCode);
+        $aliasMap = $sourceType === 'AI' ? [] : $this->aliases->aliases($context, $pageCode);
         foreach ($selected as $fieldKey) {
             if (!isset($available[$fieldKey])) {
                 throw new UnifiedQueryException(
@@ -272,9 +381,11 @@ class UnifiedQueryExportTaskServices
             $permissionFingerprint,
             $frozenScope,
             $includeSummary,
-            $reservedCellCount
+            $reservedCellCount,
+            $sourceType,
+            $aiBinding
         ) {
-            Db::name(self::TABLE)->insert([
+            $insert = [
                 'task_no' => $taskNo,
                 'tenant_id' => $context['tenant_id'],
                 'account_id' => $context['account_id'],
@@ -309,7 +420,13 @@ class UnifiedQueryExportTaskServices
                 'started_at' => 0,
                 'completed_at' => 0,
                 'expires_at' => 0,
-            ]);
+            ];
+            if ($this->hasSourceContract()) {
+                $insert['source_type'] = $sourceType;
+                $insert['ai_binding'] = $sourceType === 'AI' ? UnifiedQueryJson::encode($aiBinding) : '';
+                if ($sourceType === 'AI') $insert['expires_at'] = $aiBinding['expires_at'];
+            }
+            Db::name(self::TABLE)->insert($insert);
             $this->references->register(
                 $context['tenant_id'],
                 'export_task',
@@ -334,7 +451,15 @@ class UnifiedQueryExportTaskServices
     /**
      * Worker 领取前必须重新注入当前账号权限；权限减少时由实际查询再次取交集。
      */
-    public function claim(array $rawContext, string $taskNo): array
+    public function claim(array $rawContext, string $taskNo, string $partition = 'REPORT'): array
+    {
+        $task = Db::name(self::TABLE)->where('task_no', $taskNo)->find();
+        if (!$task) throw new \RuntimeException('导出任务不存在');
+        $this->assertExecutionPartition($task, $partition);
+        return $this->withAiFence($task, 'claim', function () use ($rawContext, $taskNo, $partition) { return $this->claimInternal($rawContext, $taskNo, $partition); });
+    }
+
+    private function claimInternal(array $rawContext, string $taskNo, string $partition): array
     {
         $context = $this->access->normalizeContext($rawContext);
         if (!$this->access->capabilityPermissions($context)['export']) {
@@ -345,7 +470,7 @@ class UnifiedQueryExportTaskServices
             );
         }
         $contextPageCode = $this->contextPageCode($context);
-        return Db::transaction(function () use ($context, $contextPageCode, $taskNo) {
+        return Db::transaction(function () use ($context, $contextPageCode, $taskNo, $partition) {
             $task = Db::name(self::TABLE)
                 ->where('tenant_id', $context['tenant_id'])
                 ->where('task_no', $taskNo)
@@ -359,10 +484,17 @@ class UnifiedQueryExportTaskServices
                 );
             }
             $this->assertTaskPage($contextPageCode, $task);
+            $this->assertExecutionPartition($task, $partition);
+            if (($task['source_type'] ?? '') === 'AI') {
+                $binding = UnifiedQueryJson::decode((string)$task['ai_binding']);
+                $normalizedTask = $task; $normalizedTask['ai_binding'] = $binding;
+                UnifiedQueryExportSourcePolicy::assertClaimable($normalizedTask, UnifiedQueryJson::decode((string)$task['query_payload']), 'AI_EXPORT', $binding, time());
+            }
             $now = time();
             $canReclaim = (string)$task['status'] === 'running'
                 && (int)$task['lease_expires_at'] > 0
                 && (int)$task['lease_expires_at'] < $now;
+            if (($task['source_type'] ?? '') === 'AI') $canReclaim = false; // Lease expiry is not physical stop evidence.
             if ((string)$task['status'] !== 'pending' && !$canReclaim) {
                 throw new UnifiedQueryException(
                     'UNIFIED_QUERY_EXPORT_ALREADY_CLAIMED',
@@ -374,6 +506,10 @@ class UnifiedQueryExportTaskServices
             $effectiveFrozenScope = UnifiedQueryJson::encode(
                 $this->canonicalScope($effectiveScope)
             );
+            if (($task['source_type'] ?? '') === 'AI' && !hash_equals(
+                hash('sha256', UnifiedQueryJson::encode($this->normalizeFrozenScope($contextPageCode, $task['frozen_scope']))),
+                hash('sha256', $effectiveFrozenScope)
+            )) throw new UnifiedQueryException('UNIFIED_QUERY_EXPORT_DOWNLOAD_SCOPE_REVOKED', '当前权限已改变，原结果不能继续导出。', []);
             $leaseToken = hash('sha256', $taskNo . '|' . bin2hex(random_bytes(16)));
             $query = Db::name(self::TABLE)->where('id', (int)$task['id']);
             if ($canReclaim) {
@@ -707,6 +843,21 @@ class UnifiedQueryExportTaskServices
     }
 
     public function complete(
+        string $tenantId, string $taskNo, int $resultCount, string $storageKey, int $expiresAt, string $leaseToken
+    ): void {
+        $task = $this->lifecycleTask($tenantId, $taskNo);
+        $this->withAiFence($task, 'complete', function () use ($task, $tenantId, $taskNo, $resultCount, $storageKey, $expiresAt, $leaseToken): void {
+            $this->assertAiExecution($task);
+            if ($this->sourceType($task) === 'AI') {
+                $binding = UnifiedQueryJson::decode((string)$task['ai_binding']);
+                $expiresAt = min($expiresAt, $binding['expires_at'], (int)$task['expires_at']);
+                if ($expiresAt <= time()) throw new \RuntimeException('EXPORT_AI_EXPIRED');
+            }
+            $this->completeInternal($tenantId, $taskNo, $resultCount, $storageKey, $expiresAt, $leaseToken);
+        });
+    }
+
+    private function completeInternal(
         string $tenantId,
         string $taskNo,
         int $resultCount,
@@ -748,6 +899,15 @@ class UnifiedQueryExportTaskServices
     }
 
     public function fail(
+        string $tenantId, string $taskNo, string $reason, string $leaseToken
+    ): void {
+        $task=$this->lifecycleTask($tenantId,$taskNo);
+        $this->withAiFence($task,'failure',function () use ($task,$tenantId,$taskNo,$reason,$leaseToken): void {
+            $this->failInternal($tenantId,$taskNo,$this->sourceType($task)==='AI'?'AI_EXPORT_FAILED':$reason,$leaseToken);
+        });
+    }
+
+    private function failInternal(
         string $tenantId,
         string $taskNo,
         string $reason,
@@ -778,6 +938,14 @@ class UnifiedQueryExportTaskServices
 
     public function failPending(string $tenantId, string $taskNo, string $reason): void
     {
+        $task=$this->lifecycleTask($tenantId,$taskNo);
+        $this->withAiFence($task,'failure',function () use ($task,$tenantId,$taskNo,$reason): void {
+            $this->failPendingInternal($tenantId,$taskNo,$this->sourceType($task)==='AI'?'AI_EXPORT_FAILED':$reason);
+        });
+    }
+
+    private function failPendingInternal(string $tenantId, string $taskNo, string $reason): void
+    {
         Db::transaction(function () use ($tenantId, $taskNo, $reason) {
             $updated = Db::name(self::TABLE)
                 ->where('tenant_id', $tenantId)
@@ -804,6 +972,8 @@ class UnifiedQueryExportTaskServices
      */
     public function failExpiredRunning(string $tenantId, string $taskNo, string $reason): bool
     {
+        $task=$this->lifecycleTask($tenantId,$taskNo);
+        if ($this->sourceType($task)==='AI') return false; // Unknown worker receipt remains fenced, not auto-reclaimed or silently failed.
         return Db::transaction(function () use ($tenantId, $taskNo, $reason): bool {
             $now = time();
             $updated = Db::name(self::TABLE)
@@ -829,6 +999,16 @@ class UnifiedQueryExportTaskServices
     }
 
     public function renewLease(
+        string $tenantId, string $taskNo, string $leaseToken, int $seconds = 300
+    ): int {
+        $task = $this->lifecycleTask($tenantId, $taskNo);
+        return $this->withAiFence($task, 'heartbeat', function () use ($task, $tenantId, $taskNo, $leaseToken, $seconds): int {
+            $this->assertAiExecution($task);
+            return $this->renewLeaseInternal($tenantId, $taskNo, $leaseToken, $seconds);
+        });
+    }
+
+    private function renewLeaseInternal(
         string $tenantId,
         string $taskNo,
         string $leaseToken,
@@ -932,7 +1112,51 @@ class UnifiedQueryExportTaskServices
             );
         }
         $this->assertTaskPage($contextPageCode, $task);
-        return $this->present($task);
+        return $this->withAiFence($task, 'status', function () use ($task): array { return $this->present($task); });
+    }
+
+    /** Trusted Run controller only; a state change fences late complete, not proof of process exit. */
+    public function cancelAiTask(string $tenantId, string $taskNo): bool
+    {
+        $task = $this->lifecycleTask($tenantId, $taskNo);
+        if ($this->sourceType($task) !== 'AI') throw new \InvalidArgumentException('EXPORT_AI_SOURCE_REQUIRED');
+        return $this->withAiFence($task, 'cancel', function () use ($tenantId, $taskNo): bool {
+            return Db::transaction(function () use ($tenantId, $taskNo): bool {
+                $changed = Db::name(self::TABLE)->where('tenant_id', $tenantId)->where('task_no', $taskNo)->where('source_type', 'AI')
+                    ->whereIn('status', ['pending', 'running'])->update(['status'=>'cancelled', 'lease_token'=>'', 'lease_expires_at'=>0, 'completed_at'=>time(), 'updated_at'=>time()]);
+                if ($changed) $this->references->release($tenantId, 'export_task', $taskNo);
+                return (int)$changed === 1;
+            });
+        });
+    }
+
+    /** Clear every AI state at the original expiry. File deletion failures remain visible retries, never successful erasure. */
+    public function cleanupAiExpired(int $limit, callable $deleteFiles): array
+    {
+        if (!$this->hasSourceContract()) return ['purged'=>0, 'retry'=>0];
+        $tasks = Db::name(self::TABLE)->where('source_type', 'AI')->where(function ($q) {
+            $q->whereBetween('expires_at',[1,time()])->whereOr('created_at','<=',time()-86400);
+        })
+            ->order('expires_at','asc')->limit(max(1,min(200,$limit)))->select()->toArray();
+        $purged=0; $retry=0;
+        foreach ($tasks as $task) {
+            $id=(int)$task['id'];
+            // Revoke first, then erase sensitive payload even when filesystem cleanup requires a retry.
+            Db::transaction(function () use ($id, $task): void {
+                Db::name(self::TABLE)->where('id',$id)->where('source_type','AI')->update([
+                    'status'=>'expired', 'query_payload'=>'', 'field_snapshot'=>'', 'alias_snapshot'=>'', 'frozen_scope'=>'', 'ai_binding'=>'',
+                    'permission_fingerprint'=>'', 'permission_version'=>'', 'account_id'=>0, 'operator_id'=>0, 'origin_store_id'=>0,
+                    'origin_organization_id'=>0, 'file_name'=>'', 'error_reason'=>'', 'lease_token'=>'', 'lease_expires_at'=>0,
+                    'result_count'=>0, 'query_cutoff_date'=>'1970-01-01', 'data_as_of'=>0, 'include_summary'=>0, 'updated_at'=>time(),
+                ]);
+                $this->references->release((string)$task['tenant_id'], 'export_task', (string)$task['task_no']);
+            });
+            try {
+                if (call_user_func($deleteFiles,$task) !== true) throw new \RuntimeException('EXPORT_FILE_ERASURE_UNCONFIRMED');
+                $purged += (int)Db::name(self::TABLE)->where('id',$id)->where('source_type','AI')->where('status','expired')->delete();
+            } catch (\Throwable $e) { ++$retry; }
+        }
+        return ['purged'=>$purged, 'retry'=>$retry];
     }
 
     /**
@@ -947,6 +1171,16 @@ class UnifiedQueryExportTaskServices
      * 下载控制器同时消费受控对象键与创建任务时冻结的用户文件名。
      */
     public function resolveDownloadDescriptor(array $rawContext, string $taskNo): array
+    {
+        $context = $this->access->normalizeContext($rawContext);
+        $task = $this->lifecycleTask((string)$context['tenant_id'], $taskNo);
+        if ((int)$task['account_id'] !== (int)$context['account_id']) throw new \RuntimeException('导出文件不可用');
+        return $this->withAiFence($task, 'download', function () use ($rawContext, $taskNo): array {
+            return $this->resolveDownloadDescriptorInternal($rawContext, $taskNo);
+        });
+    }
+
+    private function resolveDownloadDescriptorInternal(array $rawContext, string $taskNo): array
     {
         $context = $this->access->normalizeContext($rawContext);
         $this->access->assertPageAccess($context);
@@ -981,7 +1215,7 @@ class UnifiedQueryExportTaskServices
         }
         $this->assertDownloadScopeCurrent($context, $task);
         try {
-            $plan = UnifiedQueryJson::decode((string)($task['query_payload'] ?? ''));
+            $plan = $this->executablePlan($task);
             $fieldSnapshot = UnifiedQueryJson::decode(
                 (string)($task['field_snapshot'] ?? '')
             );

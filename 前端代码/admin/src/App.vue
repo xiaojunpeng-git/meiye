@@ -1,16 +1,19 @@
 <template>
   <div id="app">
     <router-view v-if="isRouterAlive" />
+    <MoheAiEntry :key="$route.path" />
   </div>
 </template>
 <script>
 import { on, off } from 'view-design/src/utils/dom';
 import { setMatchMedia } from 'view-design/src/utils/assist';
 import { mapMutations } from 'vuex';
+import MoheAiEntry from './components/MoheAiEntry.vue';
 setMatchMedia();
 
 export default {
   name: 'app',
+  components: { MoheAiEntry },
   provide() {
     return {
       reload: this.reload

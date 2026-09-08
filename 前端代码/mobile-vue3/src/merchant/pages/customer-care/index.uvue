@@ -1,4 +1,5 @@
 <template>
+  <MoheAiEntry />
 	<view class="care-page" :class="{ 'care-page--native-mini': platformUsesNativeCanvas }">
 		<view class="care-page__topbar">
 			<view class="care-page__back" role="button" aria-label="返回工作台" @tap="returnToWorkbench"><text>‹</text></view>
@@ -133,6 +134,7 @@
 </template>
 
 <script setup lang="uts">
+  import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	import { completeMobileCustomerCareTask, createMobileCustomerCareRecord, createMobileCustomerCareTask, deleteMobileCustomerCareTask, queryMobileCustomerCare, startMobileCustomerCareTask, uploadMobileCustomerCarePhoto } from '../../../shared/api/mobile-customer-care-client.uts'
 	import { callMobilePhone, currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
 	import { openMerchantWorkbench } from '../../../shared/platform/mobile-navigation.uts'

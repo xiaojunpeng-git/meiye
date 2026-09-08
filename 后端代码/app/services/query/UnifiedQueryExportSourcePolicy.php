@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace app\services\query;
 
 /**
- * Pure source contract for the future shared export adapter (PHP 7.1 compatible).
+ * Pure source contract used by the shared export adapter (PHP 7.1 compatible).
  *
- * Not wired into Task/Worker: this neither authorizes AI creation nor proves
+ * This policy alone neither authorizes AI creation nor proves
  * current permissions, publication, cancellation or physical worker shutdown.
  * Callers must supply a transactionally verified current owner and decoded plan.
  * It never repairs missing source data or mutates a task on a partition mismatch.

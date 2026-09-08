@@ -16,7 +16,8 @@ use think\facade\Db;
 final class GroupManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'group_management_dashboard';
-    public const METRIC_VERSION = 'group-management-dashboard-facts-v1';
+    public const METRIC_VERSION = 'group-management-cash-recharge-v2';
+    private const CASH_EXPLANATION = '成功记账收款总额，包含充值及充值欠款补交；商品与卡项收款按销售明细及卡内项目分摊，充值不归入商品分类。退款按退款成功日期单独统计，不在现金业绩中重复扣减。';
     public const COVERAGE_START = '2026-08-10';
 
     private $organizationDimensions;
@@ -87,13 +88,14 @@ final class GroupManagementDashboardServices
             $actual = $grossCash + $refund;
             return [
                 'cards' => [
-                    $this->metric('cash_performance', '现金业绩', $cash, 'money', '成功记账收款按销售明细及卡内项目分摊后的收款总额；退款单独按退款成功日期统计，不在此卡重复扣减。'),
+                    $this->metric('cash_performance', '现金业绩', $cash, 'money', self::CASH_EXPLANATION),
                     $this->metric('refund_amount', '退款金额', abs($refund), 'money', '退款成功后形成的退款金额，按退款成功日期统计，以绝对值展示。'),
                     $this->metric('actual_performance', '实际业绩', $actual, 'money', '现金业绩减退款金额；现金业绩按成功记账收款正负事实汇总，退款按退款成功日期以负数冲减，不重复扣减。'),
                     $this->metric('consumption_performance', '消耗业绩', $consumption, 'money', '项目实际完成服务后形成的项目级消耗业绩。'),
                     $this->metric('consumption_count', '消耗数量', 0, 'count', '商品看板摘要不展示消耗数量。'),
                     $this->metric('consumption_unit_price', '消耗单价', null, 'money', '商品看板摘要不展示消耗单价。'),
                 ],
+                'metric_version' => self::METRIC_VERSION,
                 'aggregation_caught_up' => $aggregateStatus === null
                     ? false
                     : (bool)$aggregateStatus['aggregation_caught_up'],
@@ -118,7 +120,7 @@ final class GroupManagementDashboardServices
         $month = substr($range['end'], 0, 7);
         $year = (int)substr($range['end'], 0, 4);
         $cards = [
-            $this->metric('cash_performance', '现金业绩', $cash, 'money', '成功记账收款按销售明细及卡内项目分摊后的收款总额；退款单独按退款成功日期统计，不在此卡重复扣减。'),
+            $this->metric('cash_performance', '现金业绩', $cash, 'money', self::CASH_EXPLANATION),
             $this->metric('refund_amount', '退款金额', abs($refund), 'money', '退款成功后形成的退款金额，按退款成功日期统计，以绝对值展示。'),
             $this->metric('actual_performance', '实际业绩', $actual, 'money', '现金业绩减退款金额；现金业绩按成功记账收款正负事实汇总，退款按退款成功日期以负数冲减，不重复扣减。'),
             $this->metric('consumption_performance', '消耗业绩', $consumption, 'money', '项目实际完成服务后形成的项目级消耗业绩。'),
@@ -128,6 +130,7 @@ final class GroupManagementDashboardServices
         if (!empty($input['summary_only'])) {
             return [
                 'cards' => $cards,
+                'metric_version' => self::METRIC_VERSION,
                 'aggregation_caught_up' => $aggregateStatus === null
                     ? false
                     : (bool)$aggregateStatus['aggregation_caught_up'],
@@ -298,6 +301,12 @@ final class GroupManagementDashboardServices
         if ($categoryIds !== []) $direct->whereIn('d.category_id_snapshot', $categoryIds);
         $rows = $direct->fieldRaw('p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,d.item_id,d.item_name_snapshot item_name,d.product_type_snapshot,d.category_id_snapshot category_id,d.category_path_snapshot category_path')->group('p.id')->select()->toArray();
         $cards = (clone $base)->where('s.source_type', 'card')->fieldRaw('p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,s.fact_id sale_fact_id')->group('p.id')->select()->toArray();
+        // Recharge has no sale allocation. Reuse the same cash-fact reader as
+        // the scalar summary, before the no-card early return. A category
+        // constraint must never be silently broadened to include recharge.
+        if ($categoryIds === []) {
+            $rows = array_merge($rows, (new \app\services\query\metric\GroupPerformanceMetricReadServices())->rechargeCashRows($tenantId, $stores, $range));
+        }
         if ($cards === []) return $rows;
         $saleIds = array_values(array_unique(array_filter(array_column($cards, 'sale_fact_id'))));
         $bySale = [];
@@ -344,36 +353,13 @@ final class GroupManagementDashboardServices
 
     private function performanceTotalScalar(string $tenantId, array $stores, array $range, string $type): int
     {
-        $query = Db::name('cashier_v3_performance_fact')->alias('p')
-            ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
-            ->whereBetween('p.business_date', [$range['start'], $range['end']])
-            ->where('p.status', 'effective')->where('p.performance_type', $type);
-        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
-        if ($type === 'consumption_performance_recorded') {
-            $query->whereExists(function ($service) {
-                $service->name('cashier_v3_entitlement_service_fact')->whereRaw(
-                    "tenant_id=p.tenant_id AND checkout_request_id=p.checkout_request_id AND source_line_id=p.source_line_id AND service_status='completed'"
-                );
-            });
-        }
-        $row = $query->fieldRaw('COALESCE(SUM(p.amount_cents),0) amount_cents')->find() ?: [];
-        return (int)($row['amount_cents'] ?? 0);
+        return (new \app\services\query\metric\GroupPerformanceMetricReadServices())->performanceTotal($tenantId, $stores, $range, $type);
     }
 
     /** @return array{gross_cents:int,refund_cents:int} */
     private function cashTotals(string $tenantId, array $stores, array $range): array
     {
-        $query = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('p')
-            ->leftJoin('cashier_v3_payment_sale_allocation_fact original', 'original.tenant_id=p.tenant_id AND original.allocation_fact_id=p.reversal_of')
-            ->join('cashier_v3_sale_fact s', 's.tenant_id=p.tenant_id AND s.fact_id=COALESCE(original.sale_fact_id,p.sale_fact_id)')
-            ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
-            ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective');
-        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
-        $row = $query->fieldRaw(
-            'COALESCE(SUM(CASE WHEN p.amount_cents > 0 THEN p.amount_cents ELSE 0 END),0) gross_cents,'
-            . 'COALESCE(SUM(CASE WHEN p.amount_cents < 0 THEN p.amount_cents ELSE 0 END),0) refund_cents'
-        )->find() ?: [];
-        return ['gross_cents' => (int)($row['gross_cents'] ?? 0), 'refund_cents' => (int)($row['refund_cents'] ?? 0)];
+        return (new \app\services\query\metric\GroupPerformanceMetricReadServices())->cashTotals($tenantId, $stores, $range);
     }
 
     private function actualCashTotal(string $tenantId, array $stores, array $range, array $categoryIds): int
@@ -661,5 +647,5 @@ final class GroupManagementDashboardServices
     private function monthsForRange(array $range):array{$out=[];$date=substr($range['start'],0,7).'-01';$end=substr($range['end'],0,7).'-01';while($date<=$end){$out[]=(int)substr($date,5,2);$date=date('Y-m-01',strtotime($date.' +1 month'));}return$out;}
     private function goalProjection(string $title,int $target,int $actual,string $explanation):array{$rate=$target>0?round($actual/$target*100,1):null;return['title'=>$title,'target_amount_cents'=>$target,'actual_performance_cents'=>$actual,'remaining_amount_cents'=>max(0,$target-$actual),'achievement_rate'=>$rate,'source_explanation'=>$explanation];}
     private function filterSchema(array $roots):array{$options=[['value'=>0,'label'=>'全部商品']];foreach($roots as$row)$options[]=['value'=>(int)$row['id'],'label'=>(string)$row['name']];return[['key'=>'start_date','label'=>'开始日期','type'=>'date','source_explanation'=>'包含开始当天。'],['key'=>'end_date','label'=>'截止日期','type'=>'date','source_explanation'=>'包含截止当天。'],['key'=>'category_id','label'=>'商品分类','type'=>'select','options'=>$options,'source_explanation'=>'只显示当前启用一级商品分类；选择后包含全部下级分类。'],['key'=>'store_ids','label'=>'组织 / 门店','type'=>'scope_picker','source_explanation'=>'当前账号权限范围由后端强制，选择只能缩小范围。']];}
-    private function fieldExplanations():array{return['cash_performance'=>'成功记账收款按销售明细及卡内项目分摊后的收款总额；退款不在此列重复扣减。','refund_amount'=>'退款成功的实际退款金额，按退款成功日期统计，以绝对值展示。','actual_performance'=>'现金业绩减退款金额；现金业绩取正向成功收款，退款取退款成功事实的绝对值，得到净实际业绩。','consumption_performance'=>'项目实际完成服务后，从对应的消耗业绩事实汇总；已有卡内权益完成服务也计入，不要求存在销售明细。','consumption_count'=>'成功完成服务的项目数量。','consumption_unit_price'=>'消耗业绩除以消耗数量；分母为零显示 -。'];}
+    private function fieldExplanations():array{return['cash_performance'=>self::CASH_EXPLANATION,'refund_amount'=>'退款成功的实际退款金额，按退款成功日期统计，以绝对值展示。','actual_performance'=>'现金业绩减退款金额；现金业绩取正向成功收款，退款取退款成功事实的绝对值，得到净实际业绩。','consumption_performance'=>'项目实际完成服务后，从对应的消耗业绩事实汇总；已有卡内权益完成服务也计入，不要求存在销售明细。','consumption_count'=>'成功完成服务的项目数量。','consumption_unit_price'=>'消耗业绩除以消耗数量；分母为零显示 -。'];}
 }

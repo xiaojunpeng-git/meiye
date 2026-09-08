@@ -69,6 +69,32 @@ final class MetricQueryCatalog
         return $this->entries[$code];
     }
 
+    /** Explicit shared implementation catalog; instance engine/coverage and current report access
+     * are still checked at execution. This never promotes legacy cash/actual implementations.
+     */
+    public static function fromSharedQuery(callable $lookup): self
+    {
+        $catalog = self::fromDictionary($lookup);
+        foreach (MetricReadViewServices::metricCapabilities() as $code => $capability) {
+            if (!isset($catalog->entries[$code])) continue;
+            $entry = $catalog->entries[$code];
+            $ready = $entry['user_ready'] && $capability['ai_query_ready'];
+            $entry['ai_query_ready'] = $ready;
+            $entry['version_ready'] = $ready;
+            $entry['metric_version'] = $ready ? $capability['metric_version'] : null;
+            $entry['query_shapes'] = $ready ? $capability['query_shapes'] : [];
+            $entry['readiness_reasons'] = $capability['readiness_reasons'];
+            if (!$entry['user_ready']) $entry['readiness_reasons'][] = 'METRIC_USER_NOT_READY';
+            if ($ready) {
+                $entry['canonical_mapping_version'] = $capability['mapping_version'];
+                $entry['coverage_start'] = $capability['coverage_start'];
+                $entry['filter_grain'] = $capability['filter_grain'];
+            }
+            $catalog->entries[$code] = $entry;
+        }
+        return $catalog;
+    }
+
     public function all(): array
     {
         return array_values($this->entries);

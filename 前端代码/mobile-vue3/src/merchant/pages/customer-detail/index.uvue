@@ -1,4 +1,5 @@
 <template>
+  <MoheAiEntry />
 	<view class="customer-detail">
 		<view class="customer-detail__header">
 			<view class="customer-detail__back" role="button" aria-label="返回客户列表" @tap="goBack"><text>‹</text></view>
@@ -89,6 +90,7 @@
 </template>
 
 <script setup lang="uts">
+  import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
 	import { queryMobileCustomerAssetRecords, queryMobileCustomerOrderRecords, queryMobileCustomerRecentSummary, queryMobileCustomerServiceRecords, queryMobileCustomers } from '../../../shared/api/mobile-customer-client.uts'
 	import { queryMobileCustomerCare } from '../../../shared/api/mobile-customer-care-client.uts'
 	import { callMobilePhone } from '../../../shared/platform/mobile-platform.uts'

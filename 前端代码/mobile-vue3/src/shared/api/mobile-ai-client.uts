@@ -1,0 +1,42 @@
+import { buildMobileRequestPlan } from './request-context.uts'
+import { sendMobileRequest } from './mobile-http.uts'
+import { currentMerchantRoot, merchantRequestSession } from '../platform/mobile-merchant-session.uts'
+import { mobileApiOrigin } from '../platform/mobile-runtime-config.uts'
+
+export function mobileAiRequest(method : string, suffix : string, payload : any, done : (value : any) => void) : void {
+  let session = merchantRequestSession(currentMerchantRoot())
+  if (session == null) { done({ ok:false, message:'请先登录商家端。' }); return }
+  let contract : any = { contractVersion:'mobile-merchant-v1', endpoints:{ ai:{method:method,path:'/mobile/merchant/ai' + suffix,requestMetadataProfile:'MERCHANT_SESSION'} }, requestMetadataProfiles:{MERCHANT_SESSION:{required:{'X-Mobile-Contract-Version':'contractVersion','X-Mobile-Client-Session-Id':'clientSessionId','X-Mobile-Platform':'platform','X-Mobile-Request-Id':'requestId',Authorization:'Bearer <merchantToken>','X-Mobile-Active-Context-Id':'activeContextId','X-Mobile-State-Context-Id':'stateContextId'},forbidden:['Cookie']}} }
+  let plan = buildMobileRequestPlan(contract,'ai',session)
+  if (plan == null) { done({ok:false,message:'登录上下文已失效。'}); return }
+  let body = payload
+  if (method == 'GET') {
+    let names : any = {client_session_id:'X-Mohe-Ai-Client-Session-Id',run_delivery_token:'X-Mohe-Ai-Run-Delivery-Token',generation:'X-Mohe-Ai-Generation',window_token:'X-Mohe-Ai-Window-Token'}
+    let keys = Object.keys(payload || {})
+    for (let index = 0; index < keys.length; index++) { let key = keys[index]; if (names[key] == null) { done({ok:false,message:'请求字段无效。'}); return }; plan.headers[names[key]] = String(payload[key]) }
+    body = {}
+  }
+  sendMobileRequest(plan,body,(response : any) => {
+    let body = response.body
+    if (response.ok !== true || body == null || body.status !== 200) { done({ok:false,responseKnown:response.statusCode > 0,message:body != null && typeof body.msg == 'string' ? body.msg : '请求暂未完成，请检查网络或配置。'}); return }
+    done({ok:true,data:body.data})
+  })
+}
+
+export function downloadMobileAi(run : any, clientSessionId : string, filename : string, done : (message : string) => void) : void {
+  let session = merchantRequestSession(currentMerchantRoot())
+  if (session == null) { done('请重新登录。'); return }
+  let headers : any = {Authorization:'Bearer ' + session.merchantToken,'X-Mobile-Contract-Version':'mobile-merchant-v1','X-Mobile-Client-Session-Id':session.clientSessionId,'X-Mobile-Platform':session.platform,'X-Mobile-Request-Id':session.requestId,'X-Mobile-Active-Context-Id':session.activeContextId,'X-Mobile-State-Context-Id':session.stateContextId}
+  headers['X-Mohe-Ai-Client-Session-Id'] = clientSessionId
+  headers['X-Mohe-Ai-Generation'] = String(run.generation)
+  headers['X-Mohe-Ai-Run-Delivery-Token'] = String(run.run_delivery_token)
+  let path = mobileApiOrigin() + '/api/mobile/merchant/ai/runs/' + encodeURIComponent(String(run.run_id)) + '/export'
+  // #ifdef H5
+  let downloadRequest = fetch(path,{headers:headers,credentials:'omit'})
+  if (downloadRequest == null) { done('当前浏览器不支持文件下载。'); return }
+  downloadRequest.then((response : any) => { if (!response.ok) throw new Error('download'); return response.blob() }).then((blob : any) => { let url = URL.createObjectURL(blob); let link = document.createElement('a'); link.href = url; link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(url),1000); done('文件已交给浏览器下载。') }).catch(() => done('文件暂不可下载，请重新查询。'))
+  // #endif
+  // #ifndef H5
+  uni.downloadFile({url:path,header:headers,success:(response : any) => { if (response.statusCode != 200) { done('文件暂不可下载。'); return }; uni.openDocument({filePath:response.tempFilePath,fileType:'xlsx',showMenu:true,success:() => done('文件已打开。'),fail:() => done('当前设备无法打开 Excel。')}) },fail:() => done('文件暂不可下载，请检查网络。')})
+  // #endif
+}
