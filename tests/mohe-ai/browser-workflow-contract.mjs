@@ -25,7 +25,7 @@ function setup({delayCreate=false,monitoring=null,clarification=false}={}) {
       const result=json({run_id:id,generation:1,status:'WAITING_CLARIFICATION',clarification:{id:'clarify-one',fields:[{key:'metric',label:'业绩指标',options:[{label:'现金业绩',value:'cash'}]}]}});
       return url.endsWith('/execute')?new Promise(resolve=>setTimeout(()=>resolve(result),1150)):result;
     }
-    if(url.endsWith('/execute'))return json({run_id:id,generation:1,status:'COMPLETED',answer:{summary:'已校验答案'+sequence,cards:[{metric_name:'消耗业绩',display_value:'123',unit:'元'}]}});
+    if(url.endsWith('/execute'))return json({run_id:id,generation:1,status:'COMPLETED',answer:{summary:'已校验答案'+sequence,context_ref:'fixture-context-'+sequence,cards:[{metric_name:'消耗业绩',display_value:'123',unit:'元'}]}});
     if(url.endsWith('/cancel'))return json({run_id:id,generation:1,status:'CANCELLED'});
     throw new Error('unexpected fixture endpoint');
   };
@@ -48,13 +48,19 @@ function setup({delayCreate=false,monitoring=null,clarification=false}={}) {
   eq(creates.length,2);eq(creates[0].body.history,[]);
   eq(creates[1].body.history,[{question:'今天消耗业绩多少？',answer:'已校验答案1'}]);
   eq(creates[1].body.conversation_id,creates[0].body.conversation_id);
+  eq(Object.prototype.hasOwnProperty.call(creates[0].body,'context_ref'),false);
+  eq(creates[1].body.context_ref,'fixture-context-1');
+  eq(f.calls.filter(c=>c.url.endsWith('/execute'))[1].body.context_ref,'fixture-context-1');
   f.click('新对话');await f.send('本月消耗业绩多少？');
   const third=f.calls.filter(c=>c.url.endsWith('/runs'))[2];eq(third.body.history,[]);assert.notEqual(third.body.conversation_id,creates[0].body.conversation_id);checks++;
+  eq(Object.prototype.hasOwnProperty.call(third.body,'context_ref'),false);
   f.click('历史');f.click('今天消耗业绩多少？');
   eq(f.root().querySelector('[role=status]').textContent,'');
   eq(f.root().querySelectorAll('.value').length,2);
   await f.send('前天消耗业绩多少？');
   const fourth=f.calls.filter(c=>c.url.endsWith('/runs'))[3];eq(fourth.body.conversation_id,creates[0].body.conversation_id);eq(fourth.body.history.length,2);
+  eq(fourth.body.context_ref,'fixture-context-2'); // not the last answer in another conversation
+  eq(f.calls.filter(c=>c.url.endsWith('/execute'))[3].body.context_ref,'fixture-context-2');
   eq(window.localStorage.getItem('mohe-ai:v1:account-one').includes('fixture-key-not-real'),false);
   f.dispose();
 }

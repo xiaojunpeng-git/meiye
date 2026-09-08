@@ -23,7 +23,7 @@ trait AiHttpActions
         try {
             if (strtoupper((string)$this->request->method())==='GET') {
                 $query=$this->request->get();
-                foreach (['client_session_id','run_delivery_token','generation','window_token','question','history'] as $key) {
+                foreach (['client_session_id','run_delivery_token','generation','window_token','question','history','context_ref'] as $key) {
                     if (array_key_exists($key,(array)$query)) { throw new \RuntimeException('AI_SENSITIVE_QUERY_FORBIDDEN'); }
                 }
                 $input=[];
@@ -49,7 +49,12 @@ trait AiHttpActions
             return $response->header(['Cache-Control'=>'no-store']);
         } catch (\Throwable $exception) {
             // Never return/log SQL, request content, tokens, prompts or provider errors here.
-            $message='魔核 AI 请求未完成，请重试或联系管理员。';
+            $message=[
+                'AI_CLIENT_UPGRADE_REQUIRED'=>'魔核 AI 已更新，请刷新页面后重新打开。',
+                'AI_CLARIFICATION_STALE'=>'这一步已更新，请使用当前显示的选项确认。',
+                'AI_IDEMPOTENCY_CONFLICT'=>'本次提交与先前记录不一致，请刷新任务状态后再操作。',
+                'AI_CONTEXT_REQUIRED'=>'前文条件已失效或无法核验，请在新问题中明确条件。',
+            ][$exception->getMessage()]??'魔核 AI 请求未完成，请重试或联系管理员。';
             return ($this->isMobileAi()
                 ? json(['contractVersion'=>MobileApiResponse::MERCHANT_CONTRACT,'errorCode'=>'AI_REQUEST_FAILED','message'=>$message],400)
                 : app('json')->fail($message))->header(['Cache-Control'=>'no-store']);

@@ -19,6 +19,8 @@ return [
     'run_budget_ms'=>180000,
     'execution_slots'=>4,
     'active_run_limit'=>8,
+    // Frozen into each new Run. A running question can never extend its guidance quota.
+    'max_clarification_rounds'=>$integer('max_clarification_rounds', 3, 3, 5),
     // No implied healthy status until thresholds and supervision frequency are registered.
     'monitoring'=>[
         'registered'=>$flag('monitor_registered'),

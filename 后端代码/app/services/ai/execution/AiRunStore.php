@@ -40,8 +40,14 @@ final class AiRunStore
             throw new RuntimeException('AI_CREATE_INVALID');
         }
         $keys = ['capability_snapshot_ref','capability_snapshot_hash','budget_profile_version','authorization_version','model_config_version'];
-        if (count($snapshot) !== count($keys)) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); }
+        $guidanceKeys=['guidance_schema_version','guidance_profile_version','max_clarification_rounds'];
+        if (array_diff(array_keys($snapshot),array_merge($keys,$guidanceKeys))) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); }
         foreach ($keys as $key) { if (!isset($snapshot[$key]) || !is_string($snapshot[$key])) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); } $this->identifier($snapshot[$key]); }
+        if (array_intersect(array_keys($snapshot),$guidanceKeys)) {
+            if (($snapshot['guidance_schema_version']??'')!=='mohe-clarification-v2' || !in_array($snapshot['max_clarification_rounds']??null,['3','4','5'],true)
+                || !is_string($snapshot['guidance_profile_version']??null)) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); }
+            $this->identifier($snapshot['guidance_profile_version']);
+        }
         if (!preg_match('/^[a-f0-9]{64}$/D',$snapshot['capability_snapshot_hash'])) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); }
         return $this->transaction(function () use ($owner, $requestId, $requestHash, $snapshot, $budgetMs, $capacity, $activeLimit) {
             $now = $this->now();
@@ -79,7 +85,14 @@ final class AiRunStore
 
     public function get(array $owner, string $runId, int $generation): array
     {
-        return $this->transaction(function () use ($owner,$runId,$generation) { return $this->publicRun($this->read($owner,$runId,$generation)); });
+        return $this->transaction(function () use ($owner,$runId,$generation) {
+            $r=$this->read($owner,$runId,$generation); $counts=json_decode($r['counters_json'],true)?:[];
+            if ($r['status']==='WAITING_CLARIFICATION' && $this->now()-(int)$r['pause_at']+($counts['clarification_wait_ms']??0)>=600000) {
+                $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\',reason=\'CLARIFICATION_EXPIRED\',version=version+1,last_clock_at=? WHERE instance_id=? AND run_id=?',[$this->now(),$this->instance,$runId]);
+                $r=$this->read($owner,$runId,$generation);
+            }
+            return $this->publicRun($r);
+        });
     }
 
     public function assertRequest(array $owner, string $runId, int $generation, string $requestHash): void
@@ -224,37 +237,83 @@ final class AiRunStore
     }
 
     /** Called after planning has actually returned and before relinquishing its execution thread. */
-    public function pauseForClarification(array $owner,string $runId,int $generation,string $workerToken,string $clarificationRef=''): array
+    public function pauseForClarification(array $owner,string $runId,int $generation,string $workerToken,string $clarificationRef='',bool $newStep=true): array
     {
         if ($clarificationRef!=='') { $this->identifier($clarificationRef); }
-        return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$clarificationRef) {
+        return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$clarificationRef,$newStep) {
             $r=$this->read($owner,$runId,$generation); $this->worker($r,$workerToken); $this->live($r);
-            if ((int)$r['clarification_count']!==0) { throw new RuntimeException('AI_CLARIFICATION_EXHAUSTED'); }
+            $snapshot=json_decode($r['snapshot_json'],true); $max=(int)($snapshot['max_clarification_rounds']??1);
+            $counts=json_decode($r['counters_json'],true)?:[];
+            if ($newStep && (int)$r['clarification_count'] >= $max) { throw new RuntimeException('AI_CLARIFICATION_EXHAUSTED'); }
+            if (!$newStep && ($clarificationRef!==$r['clarification_ref'] || (int)$r['clarification_count']<1)) { throw new RuntimeException('AI_CLARIFICATION_INVALID'); }
+            if (!$newStep) { $counts['clarification_invalid_count']=($counts['clarification_invalid_count']??0)+1; }
+            if (($counts['clarification_invalid_count']??0)>3) { throw new RuntimeException('AI_CLARIFICATION_INVALID_LIMIT'); }
+            if (($counts['clarification_wait_ms']??0)>=600000) { throw new RuntimeException('AI_CLARIFICATION_EXPIRED'); }
             $now=$this->now();
             $pending=$this->one('SELECT COUNT(*) AS n FROM '.$this->table('attempt').' WHERE instance_id=? AND run_id=? AND state IN (\'PREPARED\',\'IN_FLIGHT\',\'UNKNOWN\')',[$this->instance,$runId]);
             if ((int)$pending['n']!==0) { throw new RuntimeException('AI_ATTEMPT_UNRESOLVED'); }
-            $this->execute('UPDATE '.$this->table('run').' SET status=\'WAITING_CLARIFICATION\', clarification_ref=?, clarification_count=1, pause_at=?, remaining_ms=?, slot_held=0, worker_token=\'\', version=version+1 WHERE instance_id=? AND run_id=?',[$clarificationRef,$now,(int)$r['deadline_at']-$now,$this->instance,$runId]);
+            $counts['clarification_invalid_count']=$counts['clarification_invalid_count']??0;
+            $this->execute('UPDATE '.$this->table('run').' SET status=\'WAITING_CLARIFICATION\', clarification_ref=?, clarification_count=?, counters_json=?, pause_at=?, remaining_ms=?, slot_held=0, worker_token=\'\', version=version+1 WHERE instance_id=? AND run_id=?',[$clarificationRef,(int)$r['clarification_count']+($newStep?1:0),json_encode($counts),$now,(int)$r['deadline_at']-$now,$this->instance,$runId]);
             return $this->publicRun($this->read($owner,$runId,$generation));
         });
     }
 
     /** Resume does not clear counters, extend retention, or claim that a stale process stopped. */
-    public function resume(array $owner,string $runId,int $generation,string $workerToken,int $capacity=4): array
+    public function resume(array $owner,string $runId,int $generation,string $workerToken,int $capacity=4,?array $submission=null): array
     {
         $this->identifier($workerToken);
         if ($capacity<1 || $capacity>64) { throw new RuntimeException('AI_CAPACITY_INVALID'); }
-        return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$capacity) {
+        return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$capacity,$submission) {
             $r=$this->read($owner,$runId,$generation); $now=$this->now();
-            if ($r['status']!=='WAITING_CLARIFICATION' || $now<(int)$r['pause_at'] || $now>=(int)$r['pause_at']+600000) { throw new RuntimeException('AI_CLARIFICATION_EXPIRED'); }
+            $counts=json_decode($r['counters_json'],true)?:[];
+            if ($submission!==null) {
+                $this->validateSubmission($submission);
+                $key=hash('sha256',$submission['request_id']);
+                if (isset($counts['clarification_submissions'][$key])) {
+                    if (!hash_equals($counts['clarification_submissions'][$key]['hash'],$submission['request_hash'])) { throw new RuntimeException('AI_IDEMPOTENCY_CONFLICT'); }
+                    return $this->publicRun($r)+['submission_replayed'=>true];
+                }
+                if ($r['clarification_ref']!==$submission['clarification_ref'] || (int)$r['clarification_count']!==$submission['intent_revision'] || $submission['step_revision']!==1) { throw new RuntimeException('AI_CLARIFICATION_STALE'); }
+            }
+            if ($r['status']!=='WAITING_CLARIFICATION' || $now<(int)$r['pause_at'] || $now-(int)$r['pause_at']+($counts['clarification_wait_ms']??0)>=600000) { throw new RuntimeException('AI_CLARIFICATION_EXPIRED'); }
             $used=$this->one('SELECT COUNT(*) AS n FROM '.$this->table('run').' WHERE instance_id=? AND slot_held=1',[$this->instance]);
             $quarantine=$this->one('SELECT quarantined_slots FROM '.$this->table('mutex').' WHERE instance_id=?',[$this->instance]);
             if ((int)$used['n']+(int)$quarantine['quarantined_slots'] >= $capacity) {
                 $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\', reason=\'CAPACITY_STOPPED\', last_clock_at=?, version=version+1 WHERE instance_id=? AND run_id=?',[$this->now(),$this->instance,$runId]);
                 return $this->publicRun($this->read($owner,$runId,$generation));
             }
-            $this->execute('UPDATE '.$this->table('run').' SET status=\'WORKFLOW_EXECUTING\', worker_token=?, deadline_at=?, last_clock_at=?, pause_at=0, slot_held=1, version=version+1 WHERE instance_id=? AND run_id=?',[$workerToken,$now+(int)$r['remaining_ms'],$now,$this->instance,$runId]);
+            $counts['clarification_wait_ms']=($counts['clarification_wait_ms']??0)+$now-(int)$r['pause_at'];
+            if ($submission!==null) {
+                if (count($counts['clarification_submissions']??[])>=20) { throw new RuntimeException('AI_CLARIFICATION_INVALID_LIMIT'); }
+                $counts['clarification_submissions'][$key]=['hash'=>$submission['request_hash'],'accepted'=>false];
+            }
+            $this->execute('UPDATE '.$this->table('run').' SET status=\'WORKFLOW_EXECUTING\', worker_token=?, deadline_at=?, last_clock_at=?, counters_json=?, pause_at=0, slot_held=1, version=version+1 WHERE instance_id=? AND run_id=?',[$workerToken,$now+(int)$r['remaining_ms'],$now,json_encode($counts),$this->instance,$runId]);
             return $this->publicRun($this->read($owner,$runId,$generation));
         });
+    }
+
+    /** Records validated choices once. Only opaque references/hashes, never text or choice payloads. */
+    public function acceptClarification(array $owner,string $id,int $generation,string $worker,string $requestId): void
+    {
+        $this->identifier($requestId);
+        $this->transaction(function () use($owner,$id,$generation,$worker,$requestId) {
+            $r=$this->read($owner,$id,$generation); $this->worker($r,$worker); $this->live($r);
+            $counts=json_decode($r['counters_json'],true)?:[]; $key=hash('sha256',$requestId);
+            if (!isset($counts['clarification_submissions'][$key])) { throw new RuntimeException('AI_CLARIFICATION_INVALID'); }
+            if (!$counts['clarification_submissions'][$key]['accepted']) {
+                $counts['clarification_submissions'][$key]['accepted']=true;
+                $counts['clarification_accepted_count']=($counts['clarification_accepted_count']??0)+1;
+                $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$id]);
+            }
+        });
+    }
+
+    private function validateSubmission(array $s): void
+    {
+        if (array_diff(array_keys($s),['request_id','request_hash','clarification_ref','intent_revision','step_revision']) || count($s)!==5
+            || !is_string($s['request_hash']??null) || !preg_match('/^[a-f0-9]{64}$/D',$s['request_hash'])
+            || !is_int($s['intent_revision']??null) || !is_int($s['step_revision']??null)) { throw new RuntimeException('AI_CLARIFICATION_INVALID'); }
+        foreach (['request_id','clarification_ref'] as $key) { if (!is_string($s[$key]??null)) { throw new RuntimeException('AI_CLARIFICATION_INVALID'); } $this->identifier($s[$key]); }
     }
 
     /** Returns false for a duplicate claim: callers MUST NOT execute the request again. */
@@ -340,7 +399,10 @@ final class AiRunStore
         return $this->transaction(function () {
             $now=$this->now();
             $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\', reason=CASE WHEN status=\'WAITING_EXPORT\' THEN \'AI_EXPORT_DEADLINE\' ELSE \'DEADLINE_EXCEEDED\' END, last_clock_at=?, slot_held=CASE WHEN worker_token=\'\' THEN 0 ELSE slot_held END, version=version+1 WHERE instance_id=? AND status NOT IN (\'COMPLETED\',\'PARTIAL_SUCCEEDED\',\'FAILED\',\'CANCELLED\',\'WAITING_CLARIFICATION\') AND deadline_at<=?',[$now,$this->instance,$now]);
-            $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\', reason=\'CLARIFICATION_EXPIRED\', last_clock_at=?, version=version+1 WHERE instance_id=? AND status=\'WAITING_CLARIFICATION\' AND pause_at<=?',[$now,$this->instance,$now-600000]);
+            foreach ($this->rows('SELECT run_id,pause_at,counters_json FROM '.$this->table('run').' WHERE instance_id=? AND status=\'WAITING_CLARIFICATION\'',[$this->instance]) as $waiting) {
+                $waited=(int)((json_decode($waiting['counters_json'],true)?:[])['clarification_wait_ms']??0);
+                if ($now-(int)$waiting['pause_at']+$waited>=600000) { $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\', reason=\'CLARIFICATION_EXPIRED\', last_clock_at=?, version=version+1 WHERE instance_id=? AND run_id=?',[$now,$this->instance,$waiting['run_id']]); }
+            }
             $this->execute('UPDATE '.$this->table('attempt').' SET state=\'UNKNOWN\' WHERE instance_id=? AND target_code=\'siliconflow_probe\' AND state=\'IN_FLIGHT\' AND created_at<=?',[$this->instance,$now-20000]);
             $expired=$this->one('SELECT COUNT(*) AS n, COALESCE(SUM(slot_held),0) AS held FROM '.$this->table('run').' WHERE instance_id=? AND expires_at<=?',[$this->instance,$now]);
             $this->execute('UPDATE '.$this->table('attempt').' SET state=\'UNKNOWN\' WHERE instance_id=? AND state=\'IN_FLIGHT\' AND run_id IN (SELECT run_id FROM '.$this->table('run').' WHERE instance_id=? AND status IN (\'FAILED\',\'CANCELLED\'))',[$this->instance,$this->instance]);
@@ -405,6 +467,8 @@ final class AiRunStore
         if ($r['status']==='CANCELLED') return 'neutral';
         if ($r['status']!=='FAILED') return 'active';
         if (in_array($r['reason'],['CAPACITY_STOPPED','CAPACITY_REJECTED','AI_EXPORT_CAPACITY_REJECTED'],true)) return 'capacity';
+        if (in_array($r['reason'],['AI_INTENT_UNRESOLVED','AI_CAPABILITY_NOT_READY','AI_CONTEXT_REQUIRED','AI_RANK_LIMIT_NOT_READY','AI_FUTURE_ACTUALS_UNAVAILABLE','AI_DATA_COVERAGE_INCOMPLETE',
+            'AI_DATE_INVALID','AI_CLARIFICATION_EXHAUSTED','AI_CLARIFICATION_INVALID_LIMIT','AI_CLARIFICATION_EXPIRED','AI_CLARIFICATION_STALE','AI_CLIENT_UPGRADE_REQUIRED','AI_METADATA_NOT_READY'],true)) return 'neutral';
         if (in_array($r['reason'],['AI_EXPORT_NOT_READY','AI_EXPORT_PRINCIPAL_UNAVAILABLE','AI_EXPORT_NOT_PUBLISHED','AI_EXPORT_EXPIRED','METRIC_NOT_REGISTERED','METRIC_PERMISSION_CHANGED','METRIC_PERMISSION_DENIED','METRIC_PERMISSION_GRAIN_UNAVAILABLE','METRIC_QUERY_COVERAGE_UNAVAILABLE','METRIC_QUERY_RANGE_INVALID','METRIC_QUERY_SCHEMA_INVALID','METRIC_QUERY_SHAPE_UNAVAILABLE','METRIC_SEMANTICS_CONFLICT','CLARIFICATION_EXPIRED','AI_PERMISSION_DENIED','AI_AUTHORIZATION_CHANGED','AI_CAPABILITY_CHANGED','AI_INPUT_SCHEMA_INVALID','AI_UNSUPPORTED_CONDITION','AI_METRIC_NOT_READY','AI_QUERY_SHAPE_NOT_READY','AI_OUTPUT_FORMAT_INVALID','AI_CLARIFICATION_INVALID','AI_EVIDENCE_INCOMPLETE','AI_CANCELLED','AI_NOT_CONFIGURED','AI_METRIC_EXPLANATION_NOT_READY','AI_EXTERNAL_AUTHORIZATION_REQUIRED'],true)) return 'neutral';
         if (in_array($r['reason'],['AI_EXPORT_DISPATCH_UNKNOWN','AI_EXPORT_CANCELLATION_UNKNOWN'],true)) return 'export_unknown';
         if (in_array($r['reason'],['AI_EXPORT_CONTENT_MISMATCH','AI_EXPORT_SIGNATURE_INVALID','AI_EXPORT_SOURCE_MISMATCH','AI_EXPORT_OWNER_MISMATCH','AI_EXPORT_BINDING_INVALID','AI_EXPORT_TASK_BINDING_INVALID','AI_EXPORT_HANDOFF_INVALID','AI_EXPORT_UNSAFE_FAILURE','METRIC_READ_BINDING_MISMATCH'],true)) return 'security';
@@ -468,6 +532,12 @@ final class AiRunStore
         $out=[];
         foreach (['run_id','generation','status','reason','progress_code','clarification_ref','version','created_at','expires_at','deadline_at','slot_held','evidence_ref','answer_ref'] as $k) { $out[$k]=$r[$k]; }
         foreach (['generation','version','created_at','expires_at','deadline_at','slot_held'] as $k) { $out[$k]=(int)$out[$k]; }
+        $snapshot=json_decode($r['snapshot_json'],true)?:[]; $counts=json_decode($r['counters_json'],true)?:[];
+        $out['guidance_schema_version']=$snapshot['guidance_schema_version']??'mohe-clarification-v1';
+        $out['max_clarification_rounds']=(int)($snapshot['max_clarification_rounds']??1);
+        $out['clarification_count']=(int)$r['clarification_count'];
+        $out['clarification_accepted_count']=(int)($counts['clarification_accepted_count']??0);
+        $out['clarification_wait_ms']=(int)($counts['clarification_wait_ms']??0);
         return $out;
     }
 }

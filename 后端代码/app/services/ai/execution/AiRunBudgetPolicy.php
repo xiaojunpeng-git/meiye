@@ -14,7 +14,7 @@ class AiRunBudgetPolicy
     private const COUNTER_CAPS = [
         'stage_count' => 2, 'model_attempt_count' => 3,
         'model_recovery_count' => 1, 'failover_count' => 1,
-        'clarification_count' => 1, 'supplement_count' => 1,
+        'clarification_count' => 5, 'supplement_count' => 1,
         'node_visit_count' => 12, 'skill_execution_count' => 8,
         'tool_call_count' => 8, 'workflow_transition_count' => 16,
         'model_input_tokens' => 64000, 'model_output_tokens' => 6000,
@@ -25,7 +25,7 @@ class AiRunBudgetPolicy
         return [
             'version' => 1, 'run_execution_budget_ms' => 180000,
             'finalization_reserve_ms' => 5000, 'tool_timeout_ms' => 10000,
-            'model_timeout_ms' => 20000, 'clarification_wait_ms' => 600000,
+            'model_timeout_ms' => 20000, 'clarification_wait_ms' => 600000, 'max_clarification_rounds' => 3,
         ];
     }
 
@@ -38,7 +38,7 @@ class AiRunBudgetPolicy
         if ($profile['run_execution_budget_ms'] > 300000
             || $profile['finalization_reserve_ms'] >= $profile['run_execution_budget_ms']
             || $profile['tool_timeout_ms'] > 10000 || $profile['model_timeout_ms'] > 20000
-            || $profile['clarification_wait_ms'] > 600000) {
+            || $profile['clarification_wait_ms'] > 600000 || !in_array($profile['max_clarification_rounds'], [3,4,5], true)) {
             self::fail('BUDGET_PROFILE_INVALID');
         }
         return $profile;
@@ -73,7 +73,7 @@ class AiRunBudgetPolicy
             'expires_at_ms' => $nowMs + 86400000, 'last_clock_ms' => $nowMs,
             'remaining_execution_ms' => $profile['run_execution_budget_ms'],
             'execution_deadline_ms' => $nowMs + $profile['run_execution_budget_ms'],
-            'paused_at_ms' => null,
+            'paused_at_ms' => null, 'clarification_wait_used_ms' => 0,
             'counters' => array_fill_keys(array_keys(self::COUNTER_CAPS), 0),
         ];
     }
@@ -89,7 +89,7 @@ class AiRunBudgetPolicy
             self::fail('RUN_EXPIRED');
         }
         if ($state['paused_at_ms'] !== null) {
-            if ($nowMs - $state['paused_at_ms'] >= $state['profile']['clarification_wait_ms']) {
+            if ($nowMs - $state['paused_at_ms'] + $state['clarification_wait_used_ms'] >= $state['profile']['clarification_wait_ms']) {
                 self::fail('CLARIFICATION_EXPIRED');
             }
         } else {
@@ -113,9 +113,10 @@ class AiRunBudgetPolicy
     public static function resumeAfterClarification(array $state, $nowMs): array
     {
         $state = self::consume($state, $nowMs);
-        if ($state['paused_at_ms'] === null || $state['counters']['clarification_count'] !== 1) {
+        if ($state['paused_at_ms'] === null || $state['counters']['clarification_count'] < 1) {
             self::fail('NOT_WAITING_CLARIFICATION');
         }
+        $state['clarification_wait_used_ms'] += $nowMs - $state['paused_at_ms'];
         $state['paused_at_ms'] = null;
         $state['execution_deadline_ms'] = $nowMs + $state['remaining_execution_ms'];
         return $state;
@@ -130,7 +131,8 @@ class AiRunBudgetPolicy
             || ($counter !== 'model_input_tokens' && $counter !== 'model_output_tokens' && $amount !== 1)) {
             self::fail('COUNTER_REQUEST_INVALID');
         }
-        if ($amount > self::COUNTER_CAPS[$counter] - $state['counters'][$counter]) {
+        $cap=$counter==='clarification_count'?$state['profile']['max_clarification_rounds']:self::COUNTER_CAPS[$counter];
+        if ($amount > $cap - $state['counters'][$counter]) {
             self::fail('COUNTER_BUDGET_EXHAUSTED');
         }
         $state['counters'][$counter] += $amount;
@@ -165,12 +167,12 @@ class AiRunBudgetPolicy
     private static function validateState(array $state): void
     {
         self::keys($state, ['profile', 'created_at_ms', 'expires_at_ms', 'last_clock_ms',
-            'remaining_execution_ms', 'execution_deadline_ms', 'paused_at_ms', 'counters']);
+            'remaining_execution_ms', 'execution_deadline_ms', 'paused_at_ms', 'clarification_wait_used_ms', 'counters']);
         if (!is_array($state['profile']) || !is_array($state['counters'])) {
             self::fail('BUDGET_STATE_INVALID');
         }
         self::validateProfile($state['profile']);
-        foreach (['created_at_ms', 'expires_at_ms', 'last_clock_ms', 'remaining_execution_ms'] as $key) {
+        foreach (['created_at_ms', 'expires_at_ms', 'last_clock_ms', 'remaining_execution_ms', 'clarification_wait_used_ms'] as $key) {
             if (!is_int($state[$key]) || $state[$key] < 0) {
                 self::fail('BUDGET_STATE_INVALID');
             }
@@ -178,7 +180,8 @@ class AiRunBudgetPolicy
         if ($state['created_at_ms'] > $state['last_clock_ms']
             || $state['expires_at_ms'] > $state['created_at_ms'] + 86400000
             || $state['expires_at_ms'] <= $state['created_at_ms']
-            || $state['remaining_execution_ms'] > $state['profile']['run_execution_budget_ms']) {
+            || $state['remaining_execution_ms'] > $state['profile']['run_execution_budget_ms']
+            || $state['clarification_wait_used_ms'] >= $state['profile']['clarification_wait_ms']) {
             self::fail('BUDGET_STATE_INVALID');
         }
         if ($state['paused_at_ms'] === null) {
@@ -196,13 +199,14 @@ class AiRunBudgetPolicy
         }
         self::keys($state['counters'], array_keys(self::COUNTER_CAPS));
         foreach (self::COUNTER_CAPS as $key => $cap) {
+            if ($key==='clarification_count') $cap=$state['profile']['max_clarification_rounds'];
             if (!is_int($state['counters'][$key]) || $state['counters'][$key] < 0 || $state['counters'][$key] > $cap) {
                 self::fail('BUDGET_STATE_INVALID');
             }
         }
         if ($state['counters']['model_attempt_count'] > $state['counters']['stage_count'] + $state['counters']['model_recovery_count']
             || $state['counters']['failover_count'] > $state['counters']['model_recovery_count']
-            || ($state['paused_at_ms'] !== null && $state['counters']['clarification_count'] !== 1)) {
+            || ($state['paused_at_ms'] !== null && $state['counters']['clarification_count'] < 1)) {
             self::fail('BUDGET_STATE_INVALID');
         }
     }

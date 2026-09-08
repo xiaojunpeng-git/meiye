@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__.'/fixture-autoload.php';
 require_once __DIR__.'/../../后端代码/app/services/ai/execution/AiAuthority.php';
 require_once __DIR__.'/../../后端代码/app/services/ai/execution/AiRuntimeMonitor.php';
 // Real SQLite state/config + real encrypted object/read-view stores. Only model and
@@ -42,8 +43,9 @@ try {
  verifyGateway($boot['enabled'] && $boot['history_round_limit']===20,'bootstrap enabled +20');
  verifyGateway($boot['capabilities']['metric_codes']===['consume_amount','cash_performance'],'ready cash and consumption metrics only');
  verifyGateway(!isset($boot['api_key']),'bootstrap never key');
- $make=function($request,$question,$history=[])use($gateway,$context,$boot){$input=['client_request_id'=>$request,'conversation_id'=>'conversation1','client_session_id'=>'device1','window_token'=>$boot['window_token'],'question'=>$question,'history'=>$history,'output_format'=>'screen'];return [$gateway->handle('create',$context,$input),$input];};
+ $make=function($request,$question,$history=[])use($gateway,$context,$boot){$input=['client_request_id'=>$request,'conversation_id'=>'conversation1','client_session_id'=>'device1','window_token'=>$boot['window_token'],'question'=>$question,'history'=>$history,'output_format'=>'screen','guidance_schema_version'=>'mohe-clarification-v2'];return [$gateway->handle('create',$context,$input),$input];};
  $binding=function($run){return ['client_session_id'=>'device1','generation'=>$run['generation'],'run_delivery_token'=>$run['run_delivery_token']];};
+ $clarify=function($run,$waiting,$choices,$id)use($gateway,$context,$binding){$c=$waiting['clarification'];return $gateway->handle('clarify',$context,$binding($run)+['schema_version'=>'mohe-clarification-v2','clarification_id'=>$c['id'],'step_revision'=>$c['step_revision'],'intent_revision'=>$c['intent_revision'],'client_submission_id'=>$id,'choices'=>$choices],$run['run_id']);};
  [$run,$input]=$make('request1','今天消耗业绩多少？',[['question'=>'历史测试问题','answer'=>'TRANSCRIPT_SECRET_DO_NOT_STORE']]);
  verifyGateway($run['status']==='RECEIVED','create reserved');
  $result=$gateway->handle('execute',$context,$binding($run)+$input,$run['run_id']);
@@ -57,10 +59,12 @@ try {
  verifyGateway(is_string($repeat['progress']),'frontend progress string');
  [$ask,$askInput]=$make('request2','业绩多少？');
  $waiting=$gateway->handle('execute',$context,$binding($ask)+$askInput,$ask['run_id']);
- verifyGateway($waiting['status']==='WAITING_CLARIFICATION' && count($waiting['clarification']['fields'])===3,'one full clarification');
- $answered=$gateway->handle('clarify',$context,$binding($ask)+['clarification_id'=>$waiting['clarification']['id'],'choices'=>['metric_code'=>'consume_amount','start_date'=>'2026-09-01','end_date'=>'2026-09-08']],$ask['run_id']);
+ verifyGateway($waiting['status']==='WAITING_CLARIFICATION' && count($waiting['clarification']['fields'])===1,'v2 asks metric only');
+ $dateWait=$clarify($ask,$waiting,['metric_code'=>'consume_amount'],'metric-answer');
+ verifyGateway($dateWait['status']==='WAITING_CLARIFICATION' && count($dateWait['clarification']['fields'])===2,'v2 then asks one date interval');
+ $answered=$clarify($ask,$dateWait,['start_date'=>'2026-09-01','end_date'=>'2026-09-08'],'date-answer');
  verifyGateway($answered['status']==='COMPLETED','clarification resumes complete status='.($answered['status']??'').' reason='.($answered['reason']??''));
- verifyGateway((int)$db->query("SELECT clarification_count FROM mohe_ai_run WHERE run_id=".$db->quote($ask['run_id']))->fetchColumn()===1,'one clarification budget');
+ verifyGateway((int)$db->query("SELECT clarification_count FROM mohe_ai_run WHERE run_id=".$db->quote($ask['run_id']))->fetchColumn()===2,'two semantic questions budget');
  [$cancel,$cancelInput]=$make('request3','今天消耗业绩多少？');$before=$models;
  verifyGateway($gateway->handle('cancel',$context,$binding($cancel),$cancel['run_id'])['status']==='CANCELLED','cancel received');
  verifyGateway($gateway->handle('execute',$context,$binding($cancel)+$cancelInput,$cancel['run_id'])['status']==='CANCELLED' && $models===$before,'cancel before execute no model');
@@ -75,7 +79,7 @@ try {
  [$compare,$compareInput]=$make('comparison','今天消耗业绩对比');
  $compareWait=$gateway->handle('execute',$context,$binding($compare)+$compareInput,$compare['run_id']);
  verifyGateway($compareWait['status']==='WAITING_CLARIFICATION' && count($compareWait['clarification']['fields'])===2,'comparison asks exact other range once');
- $compareDone=$gateway->handle('clarify',$context,$binding($compare)+['clarification_id'=>$compareWait['clarification']['id'],'choices'=>['compare_start'=>'2026-09-01','compare_end'=>'2026-09-02']],$compare['run_id']);
+ $compareDone=$clarify($compare,$compareWait,['compare_start'=>'2026-09-01','compare_end'=>'2026-09-02'],'comparison-answer');
  verifyGateway($compareDone['status']==='COMPLETED' && count($compareDone['answer']['cards'])===2,'comparison two periods');
  foreach (['Q001'=>'今天收了多少钱？','Q002'=>'今天现金业绩多少？'] as $case=>$question) {
    [$cashRun,$cashInput]=$make($case,$question);

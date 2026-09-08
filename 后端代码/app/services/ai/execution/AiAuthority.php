@@ -8,10 +8,24 @@ final class AiAuthority
     {
         $registered=\app\services\query\metric\MetricReadViewServices::metricCapabilities(); $metrics=[];
         foreach ($registered as $code=>$capability) if (!empty($capability['ai_query_ready'])) $metrics[]=$code;
+        $metadata=[]; $dictionary=new \app\services\metric\MetricDictionaryServices();
+        foreach (['cash_performance','consume_amount'] as $code) {
+            $tooltip=$dictionary->getTooltip($code); unset($tooltip['updated_at']);
+            if (($tooltip['user_ready']??false)===true && isset($registered[$code]['metric_version'])) {
+                $metadata[$code]=['user_ready'=>true,'metric_version'=>$registered[$code]['metric_version'],
+                    'description_ref'=>'metric-description-'.hash('sha256',json_encode($tooltip,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES))];
+            }
+        }
         return ['metric_codes'=>$metrics,'query_shapes'=>['summary','trend','ranking','comparison'],
-            'output_formats'=>$exportReady?['screen','screen_and_xlsx']:['screen'],'metric_readiness'=>$registered];
+            'output_formats'=>$exportReady?['screen','screen_and_xlsx']:['screen'],'metric_readiness'=>$registered,
+            'definition_metric_codes'=>array_keys($metadata),'metadata_readiness'=>$metadata];
     }
-    public static function capabilityHash(bool $exportReady): string { return hash('sha256',json_encode(self::capabilities($exportReady))); }
+    public static function capabilityHash(bool $exportReady,bool $legacy=false): string
+    {
+        $capabilities=self::capabilities($exportReady);
+        if ($legacy) unset($capabilities['definition_metric_codes'],$capabilities['metadata_readiness']);
+        return hash('sha256',json_encode($capabilities));
+    }
     public static function identity(array $context,string $instance,string $key): string
     { return hash_hmac('sha256',$instance.':'.$context['terminal'].':'.$context['account_id'],$key); }
     public static function permissionHash(array $context): string

@@ -8,7 +8,19 @@
         <view v-for="(card,ci) in item.cards" :key="ci" class="ai-card"><text>{{ card.metric_name }}</text><text class="ai-number">{{ card.display_value }}{{ card.unit }}</text><text class="ai-note">{{ tooltipText(card.tooltip) }}</text></view>
         <view v-if="item.table != null" class="ai-card"><view v-for="(row,ri) in item.table.rows" :key="ri"><text v-for="column in item.table.columns" :key="column.key">{{ column.label }}：{{ row[column.key] }}　</text></view></view>
       </view>
-      <view v-if="clarification != null" class="ai-message"><text>{{ clarification.question }}</text><view v-for="field in clarification.fields" :key="field.key"><text>{{ field.label }}</text><picker v-if="field.type == 'date'" mode="date" @change="selectDate(field.key,$event)"><text class="ai-choice">{{ choices[field.key] || '选择日期' }}</text></picker><picker v-else :range="field.options" range-key="label" @change="selectOption(field,$event)"><text class="ai-choice">{{ choiceLabels[field.key] || '请选择' }}</text></picker></view><button size="mini" @tap="confirmChoices">确认查询</button></view>
+      <view v-if="clarification != null" class="ai-message">
+        <text v-if="clarification.schema_version == guidanceSchema" class="ai-note">第 {{ clarification.round_no }} 步 · 最多 {{ clarification.max_clarification_rounds }} 步，明确后立即查询</text>
+        <view v-for="(item,si) in clarification.confirmed_summary || []" :key="si"><text class="ai-note">{{ item.label }}：{{ item.value }}</text></view>
+        <text>{{ currentGuidanceQuestion() }}</text>
+        <view v-for="field in currentGuidanceFields()" :key="field.key">
+          <text>{{ field.label }}</text>
+          <picker v-if="field.type == 'date'" mode="date" :start="field.min || ''" :end="field.max || ''" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @change="selectDate(field.key,$event)"><text class="ai-choice">{{ choices[field.key] || '选择日期' }}</text></picker>
+          <view v-else-if="field.options.length <= 3"><button v-for="option in field.options" :key="option.value" size="mini" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="chooseValue(field,option)">{{ choices[field.key] == option.value ? '● ' : '○ ' }}{{ option.label }}</button></view>
+          <picker v-else :range="field.options" range-key="label" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @change="selectOption(field,$event)"><text class="ai-choice">{{ choiceLabels[field.key] || '请选择' }}</text></picker>
+        </view>
+        <button size="mini" :disabled="guidanceBusy || closeRequestedState" @tap="confirmChoices">{{ guidanceUnknown ? '重试确认' : clarification.schema_version == guidanceSchema ? '确认并继续' : '确认查询' }}</button>
+        <view v-if="clarification.revisable_steps != null && clarification.revisable_steps.length > 0"><text class="ai-note">修改已确认条件</text><button v-for="oldStep in clarification.revisable_steps" :key="oldStep.id" size="mini" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="editGuidance(oldStep)">{{ oldStep.question }}</button><button v-if="revisingId.length > 0" size="mini" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="resetGuidanceChoices">返回当前问题</button></view>
+      </view>
       <button v-if="exportReady" size="mini" @tap="downloadExcel">下载 Excel</button>
     </scroll-view>
     <view class="ai-footer"><text class="ai-note">{{ progress }}</text><textarea v-model="question" :placeholder="questionHint()" :maxlength="4000" class="ai-input"/><view class="ai-head"><switch :checked="wantExcel" :disabled="!excelAvailable" @change="wantExcel=$event.detail.value"/><text>{{ excelAvailable ? '同时生成 Excel' : 'Excel 暂未开放' }}</text><button size="mini" :disabled="busy" @tap="submit">发送</button><button size="mini" @tap="cancelRun">停止</button></view></view>
@@ -19,6 +31,9 @@ import { mobileAiRequest, downloadMobileAi } from '../api/mobile-ai-client.uts'
 const enabled = ref(false), opened = ref(false), busy = ref(false)
 const question = ref(''), progress = ref(''), displayed = ref<Array<any>>([])
 const clarification = ref<any>(null), choices = ref<any>({}), choiceLabels = ref<any>({})
+const guidanceSchema = 'mohe-clarification-v2'
+const guidanceBusy = ref(false), guidanceUnknown = ref(false), closeRequestedState = ref(false), revisingId = ref('')
+let guidanceSubmission : any = null, activeGuidanceSchema = ''
 const wantExcel = ref(false), exportReady = ref(false)
 const excelAvailable = ref(false)
 let bootstrap : any = null, run : any = null, pending : any = null
@@ -27,34 +42,98 @@ function id() : string { return 'device-' + Date.now().toString(36) + '-' + Math
 function questionHint() : string { return bootstrap != null && bootstrap.capabilities != null && Array.isArray(bootstrap.capabilities.metric_codes) && bootstrap.capabilities.metric_codes.indexOf('consume_amount') >= 0 ? '例如：今天本店消耗业绩多少？' : '请输入要查询的指标和日期' }
 function tooltipText(value : any) : string { if (value == null) return ''; if (typeof value == 'string') return String(value); let lines : Array<string> = []; ['summary','include','exclude','timing','note'].forEach((key : string) => { if (typeof value[key] == 'string' && String(value[key]).length > 0) { let label = key == 'include' ? '包含：' : key == 'exclude' ? '不包含：' : key == 'timing' ? '统计时间：' : key == 'note' ? '说明：' : ''; lines.push(label + String(value[key])) } }); return lines.join('\n') }
 function terminal() : boolean { return run != null && ['COMPLETED','PARTIAL_SUCCEEDED','FAILED','CANCELLED'].indexOf(String(run.status)) >= 0 }
-function load() : Array<any> { let raw = uni.getStorageSync(storageKey); let now = Date.now(); let all : Array<any> = []; if (Array.isArray(raw)) raw.forEach((s : any) => { if (s != null && typeof s.created_at == 'number' && s.created_at <= now && s.created_at + 86400000 > now && Array.isArray(s.rounds)) all.push(s) }); uni.setStorageSync(storageKey,all); return all }
-function newConversation() : void { if (busy.value || (pending != null && run == null)) return; let all = load(); conversation = id(); all.push({id:conversation,created_at:Date.now(),rounds:[]}); uni.setStorageSync(storageKey,all); displayed.value = []; run = null; clarification.value = null; exportReady.value = false }
+function load() : Array<any> { let raw = uni.getStorageSync(storageKey); let now = Date.now(); let all : Array<any> = []; if (Array.isArray(raw)) raw.forEach((s : any) => { if (s != null && typeof s.id == 'string' && Number.isSafeInteger(s.created_at) && s.created_at <= now && s.created_at + 86400000 > now && Array.isArray(s.rounds)) { s.rounds = s.rounds.filter((r : any) => r != null && typeof r.question == 'string' && typeof r.answer == 'string' && Number.isSafeInteger(r.created_at) && r.created_at <= now && r.created_at + 86400000 > now); all.push(s) } }); uni.setStorageSync(storageKey,all); return all }
+function newConversation() : void { if (busy.value || (pending != null && run == null)) return; let all = load(); conversation = id(); all.push({id:conversation,created_at:Date.now(),rounds:[]}); uni.setStorageSync(storageKey,all); displayed.value = []; run = null; clarification.value = null; clearGuidance(); exportReady.value = false }
 function openPanel() : void { opened.value = true; if (conversation.length == 0) newConversation() }
 function binding() : any { return {client_session_id:sessionId,generation:run.generation,run_delivery_token:run.run_delivery_token} }
-function schedulePoll() : void { if (timer != null) clearTimeout(timer); timer = setTimeout(() => { if (run == null || terminal()) return; mobileAiRequest('GET','/runs/' + run.run_id,binding(),(r : any) => { if (r.ok) accept(r.data); else { progress.value = '连接中断，暂未确认任务结果。'; schedulePoll() } }) },1500) }
+function schedulePoll() : void { if (timer != null) clearTimeout(timer); timer = setTimeout(() => { if (run == null || terminal()) return; mobileAiRequest('GET','/runs/' + run.run_id,binding(),(r : any) => { if (r.ok) { accept(r.data); if (!terminal() && (run.status != 'WAITING_CLARIFICATION' || closeRequestedState.value)) schedulePoll() } else { progress.value = closeRequestedState.value ? '暂未确认取消结果。' : '连接中断，暂未确认任务结果。'; schedulePoll() } }) },1500) }
 function accept(value : any) : void {
   if (value == null || (run != null && (value.run_id != run.run_id || value.generation != run.generation || terminal()))) return
+  if (value.version != null && (!Number.isSafeInteger(value.version) || value.version < 1)) return
+  if (run != null && Number.isSafeInteger(run.version) && (!Number.isSafeInteger(value.version) || value.version <= run.version)) return
   if (run != null && value.run_delivery_token == null) value.run_delivery_token = run.run_delivery_token
   run = value; progress.value = typeof run.progress == 'string' ? run.progress : '正在处理'
-  if (terminal()) { busy.value = false; clarification.value = null; if (timer != null) clearTimeout(timer)
-    if (run.answer != null && ['COMPLETED','PARTIAL_SUCCEEDED'].indexOf(String(run.status)) >= 0) { let answer = run.answer; exportReady.value = answer.export != null && answer.export.file_ref != null; let row : any = {question:pending.question,answer:String(answer.summary || ''),cards:answer.cards || [],table:answer.table || null,created_at:Date.now()}; displayed.value.push(row); let all = load(); all.forEach((s : any) => { if (s.id == conversation) s.rounds.push(row) }); uni.setStorageSync(storageKey,all) }
+  if (terminal()) { busy.value = false; clarification.value = null; clearGuidance(); if (timer != null) clearTimeout(timer)
+    if (run.answer != null && ['COMPLETED','PARTIAL_SUCCEEDED'].indexOf(String(run.status)) >= 0) { let answer = run.answer; exportReady.value = answer.export != null && answer.export.file_ref != null; let row : any = {question:pending.question,answer:String(answer.summary || ''),cards:answer.cards || [],table:answer.table || null,presentation:answer,created_at:Date.now()}; displayed.value.push(row); let all = load(); all.forEach((s : any) => { if (s.id == conversation) s.rounds.push(row) }); uni.setStorageSync(storageKey,all) }
     else progress.value = run.status == 'CANCELLED' ? '已取消' : '本次未能完成，请重新提问。'; pending = null; return }
-  if (run.status == 'WAITING_CLARIFICATION') clarification.value = run.clarification; else schedulePoll()
+  if (run.status == 'WAITING_CLARIFICATION' && !closeRequestedState.value) {
+    let c = run.clarification
+    if (!validGuidance(c)) { clarification.value = null; clearGuidance(); progress.value = '引导信息不完整，请重新确认任务状态。'; return }
+    if (c.schema_version == guidanceSchema) activeGuidanceSchema = guidanceSchema
+    let same = clarification.value != null && clarification.value.id == c.id && clarification.value.step_revision == c.step_revision && clarification.value.intent_revision == c.intent_revision
+    clarification.value = c; if (!same) clearGuidance()
+  } else { clarification.value = null; clearGuidance(); schedulePoll() }
 }
 function submit() : void {
   if (busy.value || question.value.trim().length == 0) return
-  let history : Array<any> = []; load().forEach((s : any) => { if (s.id == conversation) s.rounds.slice(-20).forEach((r : any) => history.push({question:r.question,answer:r.answer})) })
-  if (pending == null) pending = {client_request_id:id(),conversation_id:conversation,client_session_id:sessionId,window_token:bootstrap.window_token,question:question.value.trim(),history:history,output_format:wantExcel.value ? 'screen_and_xlsx' : 'screen'}
+  let history : Array<any> = []; let contextRef = ''
+  load().forEach((s : any) => { if (s.id == conversation) { s.rounds.slice(-20).forEach((r : any) => history.push({question:r.question,answer:r.answer})); if (s.rounds.length > 0) { let last = s.rounds[s.rounds.length - 1]; if (last.presentation != null && typeof last.presentation.context_ref == 'string') contextRef = last.presentation.context_ref } } })
+  if (pending == null) { activeGuidanceSchema = String(bootstrap.guidance_schema_version || ''); pending = {client_request_id:id(),conversation_id:conversation,client_session_id:sessionId,window_token:bootstrap.window_token,question:question.value.trim(),history:history,output_format:wantExcel.value ? 'screen_and_xlsx' : 'screen'}; if (activeGuidanceSchema == guidanceSchema) pending.guidance_schema_version = guidanceSchema; if (contextRef.length > 0) pending.context_ref = contextRef }
   exportReady.value = false
-  busy.value = true; closeRequested = false; run = null; question.value = ''; progress.value = '正在接纳请求'
-  mobileAiRequest('POST','/runs',pending,(r : any) => { if (!r.ok) { busy.value = false; question.value = pending.question; if (r.responseKnown) { pending = null; progress.value = r.message } else progress.value = '请求结果暂未确认，再次发送将重试同一任务。'; return }; if (r.data.accepted === false) { busy.value = false; pending = null; progress.value = r.data.message || '当前使用人数较多，请稍后再问。'; return }; accept(r.data); if (terminal()) return; if (closeRequested) { cancelRun(); return }; let body : any = binding(); body.question = pending.question; body.history = pending.history; body.output_format = pending.output_format; mobileAiRequest('POST','/runs/' + run.run_id + '/execute',body,(e : any) => { if (e.ok) accept(e.data); else schedulePoll() }) })
+  busy.value = true; closeRequested = false; closeRequestedState.value = false; run = null; question.value = ''; progress.value = '正在接纳请求'
+  mobileAiRequest('POST','/runs',pending,(r : any) => { if (!r.ok) { busy.value = false; question.value = pending.question; if (r.responseKnown) { pending = null; progress.value = r.message } else progress.value = '请求结果暂未确认，再次发送将重试同一任务。'; return }; if (r.data.accepted === false) { busy.value = false; pending = null; progress.value = r.data.message || '当前使用人数较多，请稍后再问。'; return }; accept(r.data); if (terminal()) return; if (closeRequested) { cancelRun(); return }; let body : any = binding(); body.question = pending.question; body.history = pending.history; body.output_format = pending.output_format; if (pending.context_ref != null) body.context_ref = pending.context_ref; mobileAiRequest('POST','/runs/' + run.run_id + '/execute',body,(e : any) => { if (e.ok) accept(e.data); else schedulePoll() }) })
 }
-function cancelRun() : void { closeRequested = true; if (run == null || terminal()) return; progress.value = '正在取消'; mobileAiRequest('POST','/runs/' + run.run_id + '/cancel',binding(),(r : any) => { if (r.ok) accept(r.data); else { progress.value = '暂未确认取消结果。'; schedulePoll() } }) }
+function cancelRun() : void { closeRequested = true; closeRequestedState.value = true; if (run == null || terminal()) return; progress.value = '正在取消'; mobileAiRequest('POST','/runs/' + run.run_id + '/cancel',binding(),(r : any) => { if (r.ok) accept(r.data); else { progress.value = '暂未确认取消结果。'; schedulePoll() } }) }
 function closePanel() : void { cancelRun(); opened.value = false }
 function downloadExcel() : void { if (run == null || !terminal() || !exportReady.value) return; downloadMobileAi(run,sessionId,String(run.answer.export.filename || '经营数据.xlsx'),(message : string) => { progress.value = message }) }
-function selectDate(key : string,event : any) : void { choices.value[key] = event.detail.value }
-function selectOption(field : any,event : any) : void { let option = field.options[Number(event.detail.value)]; choices.value[field.key] = option.value; choiceLabels.value[field.key] = option.label }
-function confirmChoices() : void { let body : any = binding(); body.clarification_id = clarification.value.id; body.choices = choices.value; mobileAiRequest('POST','/runs/' + run.run_id + '/clarify',body,(r : any) => { if (r.ok) { clarification.value = null; accept(r.data) } else progress.value = '条件确认未完成，请重试。' }) }
+function validGuidance(c : any) : boolean {
+  if (c == null || typeof c.id != 'string' || c.id.length == 0 || !Array.isArray(c.fields) || c.fields.length == 0) return false
+  let modern = c.schema_version == guidanceSchema
+  if ((activeGuidanceSchema == guidanceSchema && !modern) || (c.schema_version != null && !modern)) return false
+  if (modern && (!Number.isSafeInteger(c.step_revision) || c.step_revision < 1 || !Number.isSafeInteger(c.intent_revision) || c.intent_revision < 1 || !Number.isSafeInteger(c.round_no) || c.round_no < 1 || [3,4,5].indexOf(c.max_clarification_rounds) < 0 || c.round_no > c.max_clarification_rounds || !Array.isArray(c.confirmed_summary))) return false
+  if (!validGuidanceFields(c.fields,modern)) return false
+  if (modern) {
+    for (let i = 0; i < c.confirmed_summary.length; i++) { let item = c.confirmed_summary[i]; if (item == null || typeof item.label != 'string' || typeof item.value != 'string') return false }
+    if (c.revisable_steps != null) {
+      if (!Array.isArray(c.revisable_steps) || c.revisable_steps.length > 5) return false
+      let seen : Array<string> = []
+      for (let i = 0; i < c.revisable_steps.length; i++) { let old = c.revisable_steps[i]; if (old == null || typeof old.id != 'string' || seen.indexOf(old.id) >= 0 || typeof old.question != 'string' || old.choices == null || !validGuidanceFields(old.fields,true)) return false; seen.push(old.id) }
+    }
+  }
+  return true
+}
+function validGuidanceFields(fields : any,modern : boolean) : boolean {
+  if (!Array.isArray(fields) || fields.length == 0) return false
+  if (modern && !(fields.length == 1 || (fields.length == 2 && fields.every((field : any) => field != null && field.type == 'date')))) return false
+  let seen : Array<string> = []
+  for (let i = 0; i < fields.length; i++) {
+    let field = fields[i]; if (field == null || typeof field.key != 'string' || field.key.length == 0 || ['__proto__','prototype','constructor'].indexOf(field.key) >= 0 || seen.indexOf(field.key) >= 0 || typeof field.label != 'string') return false; seen.push(field.key)
+    if (field.type == 'date') continue
+    if (field.type != null && ['select','single_choice'].indexOf(field.type) < 0) return false
+    if (!Array.isArray(field.options) || field.options.length == 0) return false
+    let optionKeys : Array<string> = []
+    for (let oi = 0; oi < field.options.length; oi++) { let option = field.options[oi]; if (option == null || typeof option.label != 'string' || typeof option.value != 'string' || optionKeys.indexOf(option.value) >= 0) return false; optionKeys.push(option.value) }
+  }
+  return true
+}
+function clearGuidance() : void { choices.value = {}; choiceLabels.value = {}; guidanceBusy.value = false; guidanceUnknown.value = false; revisingId.value = ''; guidanceSubmission = null }
+function currentGuidanceFields() : Array<any> { if (clarification.value == null) return []; let c = clarification.value; if (revisingId.value.length > 0 && Array.isArray(c.revisable_steps)) { let old = c.revisable_steps.find((item : any) => item.id == revisingId.value); if (old != null) return old.fields }; return c.fields }
+function currentGuidanceQuestion() : string { if (clarification.value == null) return ''; if (revisingId.value.length > 0) { let old = clarification.value.revisable_steps.find((item : any) => item.id == revisingId.value); if (old != null) return '修改：' + String(old.question) }; return String(clarification.value.question || '请选择本次要查询的内容') }
+function editGuidance(old : any) : void { if (guidanceBusy.value || guidanceUnknown.value || closeRequestedState.value) return; revisingId.value = old.id; choices.value = {}; choiceLabels.value = {}; old.fields.forEach((field : any) => { if (typeof old.choices[field.key] == 'string') choices.value[field.key] = old.choices[field.key]; if (Array.isArray(field.options)) field.options.forEach((option : any) => { if (option.value == choices.value[field.key]) choiceLabels.value[field.key] = option.label }) }) }
+function resetGuidanceChoices() : void { if (guidanceBusy.value || guidanceUnknown.value || closeRequestedState.value) return; clearGuidance() }
+function selectDate(key : string,event : any) : void { if (!guidanceBusy.value && !guidanceUnknown.value && !closeRequestedState.value) choices.value[key] = event.detail.value }
+function chooseValue(field : any,option : any) : void { if (guidanceBusy.value || guidanceUnknown.value || closeRequestedState.value) return; choices.value[field.key] = option.value; choiceLabels.value[field.key] = option.label }
+function selectOption(field : any,event : any) : void { let option = field.options[Number(event.detail.value)]; if (option != null) chooseValue(field,option) }
+function confirmChoices() : void {
+  if (guidanceBusy.value || closeRequestedState.value || run == null || terminal() || run.status != 'WAITING_CLARIFICATION' || clarification.value == null) return
+  let c = clarification.value
+  if (guidanceSubmission == null) {
+    let submittedChoices : any = {}; let invalid = false
+    currentGuidanceFields().forEach((field : any) => { let value = choices.value[field.key]; if (typeof value != 'string' || value.length == 0) invalid = true; else submittedChoices[field.key] = value })
+    if (invalid) { progress.value = '请完成当前选择或填写有效日期。'; return }
+    let body : any = binding(); body.clarification_id = c.id; body.choices = submittedChoices
+    if (c.schema_version == guidanceSchema) { body.schema_version = guidanceSchema; body.step_revision = c.step_revision; body.intent_revision = c.intent_revision; body.client_submission_id = id(); if (revisingId.value.length > 0) body.revise_clarification_id = revisingId.value }
+    guidanceSubmission = body
+  }
+  let submitted = guidanceSubmission; guidanceBusy.value = true
+  mobileAiRequest('POST','/runs/' + run.run_id + '/clarify',submitted,(r : any) => {
+    if (r.ok) accept(r.data)
+    if (clarification.value == null || clarification.value.id != c.id || clarification.value.intent_revision != c.intent_revision || closeRequestedState.value) return
+    guidanceBusy.value = false
+    if (r.ok) { guidanceSubmission = null; guidanceUnknown.value = false }
+    else { if (r.responseKnown) { guidanceSubmission = null; guidanceUnknown.value = false; progress.value = r.message } else { guidanceUnknown.value = true; progress.value = '提交结果暂未确认，请重试确认同一次选择。' } }
+  })
+}
 function showHistory() : void { if (busy.value || (pending != null && run == null)) return; let all = load(); if (all.length == 0) return; uni.showActionSheet({itemList:all.map((s : any) => s.rounds.length > 0 ? String(s.rounds[0].question).slice(0,25) : '新对话'),success:(r : any) => { conversation = all[r.tapIndex].id; displayed.value = all[r.tapIndex].rounds; run = null; exportReady.value = false }}) }
 onMounted(() => { sessionId = id(); mobileAiRequest('GET','/bootstrap',{client_session_id:sessionId},(r : any) => { if (!r.ok || !r.data.enabled) return; bootstrap = r.data; storageKey = 'mohe-ai:v1:' + encodeURIComponent(String(bootstrap.identity_key)); excelAvailable.value = bootstrap.capabilities != null && Array.isArray(bootstrap.capabilities.output_formats) && bootstrap.capabilities.output_formats.indexOf('screen_and_xlsx') >= 0; enabled.value = true }); expiryTimer = setInterval(() => { if (storageKey.length > 0 && !load().some((s : any) => s.id == conversation)) { displayed.value = []; progress.value = '会话已到期，请新建对话。' } },30000) })
 onUnmounted(() => { cancelRun(); if (timer != null) clearTimeout(timer); if (expiryTimer != null) clearInterval(expiryTimer) })

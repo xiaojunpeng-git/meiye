@@ -31,58 +31,8 @@ final class AiModelInputProjector
 
     public function project(string $question): array
     {
-        // This projection intentionally does not relay unrecognized names/conditions.
-        // Unknown text must trigger clarification/refusal, never an unfiltered query.
-        $lexicon = [
-            '现金业绩' => 'cash_performance', '收了多少钱' => 'cash_performance',
-            '消耗业绩' => 'consume_amount', '实际业绩' => 'actual_performance',
-            '服务业绩' => 'ambiguous_metric', '耗卡业绩' => 'ambiguous_metric',
-            '业绩' => 'ambiguous_metric', '今天' => 'TODAY', '昨天' => 'YESTERDAY',
-            '本月' => 'THIS_MONTH', '上月' => 'LAST_MONTH', '这月' => 'THIS_MONTH',
-            '现金' => 'cash_performance', '消耗' => 'consume_amount',
-            '本店' => 'current_store',
-            '合计' => 'summary', '汇总' => 'summary', '趋势' => 'trend',
-            '最高的前五' => 'top_5', '最高的前5' => 'top_5',
-            '最低的后五' => 'bottom_5', '最低的后5' => 'bottom_5',
-            '排行' => 'ranking', '排名' => 'ranking', '前五' => 'top_5', '后五' => 'bottom_5',
-            '前5' => 'top_5', '后5' => 'bottom_5',
-            '最好' => 'top_5', '最差' => 'bottom_5', '对比' => 'comparison',
-            'Excel' => 'xlsx', 'excel' => 'xlsx', 'EXCEL' => 'xlsx', '表格' => 'xlsx',
-        ];
-        $remaining = $question; $signals = [];
-        foreach ($lexicon as $text => $code) {
-            if (strpos($remaining, $text) !== false) {
-                $signals[] = $code; $remaining = str_replace($text, '', $remaining);
-            }
-        }
-        preg_match_all('/(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])/', $remaining, $dates);
-        foreach ($dates[0] as $date) $remaining = str_replace($date, '', $remaining);
-        if (array_intersect($signals,['ranking','top_5','bottom_5'])) $remaining=str_replace(['家店','门店'],'',$remaining);
-        $remaining = str_replace(['请帮我', '帮我', '我想知道', '我想查', '查询', '查一下', '看一下', '多少钱', '多少', '当前权限范围', '生成', '导出', '一份', '数据', '一下', '请', '问', '的', '是', '有', '和', '与', '到', '至', '从', '及', '把', '给我', '呢', '那', '？', '?', '。', '，', ',', '、', '！', '!', ' ', "\n", "\r", "\t"], '', $remaining);
-        return ['signals' => array_values(array_unique($signals)), 'dates' => array_slice($dates[0], 0, 4),
-            'date_terms' => $this->dateTerms($question),
-            'date_grouping_ambiguous' => (bool)preg_match('/(?:今天|昨天|本月|这月|上月)\s*(?:到|至)\s*(?:今天|昨天|本月|这月|上月|[0-9]{4}-[0-9]{2}-[0-9]{2})|[0-9]{4}-[0-9]{2}-[0-9]{2}\s*(?:到|至)\s*(?:今天|昨天|本月|这月|上月)/u', $question),
-            'unresolved_condition' => $remaining !== '', 'projection_version' => 'mohe-model-vocabulary-v1'];
-    }
-
-    /** Preserve textual date order without forwarding any original text. */
-    private function dateTerms(string $question): array
-    {
-        preg_match_all('/今天|昨天|本月|这月|上月|(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])/', $question, $matches, PREG_OFFSET_CAPTURE);
-        $codes=['今天'=>'TODAY','昨天'=>'YESTERDAY','本月'=>'THIS_MONTH','这月'=>'THIS_MONTH','上月'=>'LAST_MONTH'];
-        $terms=[]; $tokens=$matches[0];
-        foreach ($tokens as $index=>$token) {
-            if (isset($skip) && $index===$skip) continue;
-            [$value,$offset]=$token;
-            if (isset($codes[$value])) { $terms[]=['code'=>$codes[$value]]; continue; }
-            $end=$value;
-            if (isset($tokens[$index+1]) && !isset($codes[$tokens[$index+1][0]])) {
-                $connector=substr($question,$offset+strlen($value),$tokens[$index+1][1]-$offset-strlen($value));
-                if (preg_match('/^\s*(到|至)\s*$/uD',$connector)) { $end=$tokens[$index+1][0]; $skip=$index+1; }
-            }
-            $terms[]=['code'=>'EXPLICIT','start'=>$value,'end'=>$end];
-        }
-        return $terms;
+        require_once dirname(__DIR__) . '/semantic/AiSemanticIntentParser.php';
+        return (new \app\services\ai\semantic\AiSemanticIntentParser())->parse($question);
     }
 
     public function modelView(array $conversation): array

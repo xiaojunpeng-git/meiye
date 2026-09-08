@@ -13,7 +13,10 @@ for suite in config-contract metric-contract runtime-contract export-source-cont
     gateway-components client-runtime-compat gateway-integration gateway-review-regressions monitor-contract \
     http-routing-contract http-actions-contract http-guard-contract principal-resolvers \
     export-worker-contract export-runtime-contract; do
-    "$php_bin" "$test_dir/$suite.php"
+    "$php_bin" -d auto_prepend_file="$test_dir/fixture-autoload.php" "$test_dir/$suite.php"
+done
+for suite in semantic-guidance registry-execution state-guidance-contract gateway-r5-guidance r5-holdout; do
+    "$php_bin" -d auto_prepend_file="$test_dir/fixture-autoload.php" "$test_dir/$suite.php"
 done
 
 while IFS= read -r source_file; do
@@ -25,7 +28,7 @@ done < <(rg --files "$source_root/后端代码/app/services/ai" "$source_root/�
 "$php_bin" "$source_root/tests/cashier-v3/php/order-center-unified-export-contract.php"
 
 node_bin="${MOHE_TEST_NODE:-node}"
-for suite in device-session-contract browser-entry-contract browser-transport-contract browser-workflow-contract order-export-snapshot; do
+for suite in device-session-contract browser-entry-contract browser-transport-contract browser-workflow-contract browser-guidance-contract browser-mobile-guidance-contract order-export-snapshot; do
     "$node_bin" "$test_dir/$suite.mjs"
 done
 bash "$test_dir/local-entrypoint-permissions.sh"

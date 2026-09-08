@@ -112,9 +112,13 @@ checkRuntime('only clarification pause freezes remainder', $paused['remaining_ex
 $resumed = Budget::resumeAfterClarification($paused, 331000);
 checkRuntime('resume does not grant new duration', $resumed['remaining_execution_ms'] === 150000 && $resumed['execution_deadline_ms'] === 481000);
 checkRuntime('pause preserves all counters', $resumed['counters'] === $paused['counters']);
-rejectsRuntime('second clarification prohibited', function () use ($resumed) {
-    Budget::pauseForClarification($resumed, 332000);
-}, 'COUNTER_BUDGET_EXHAUSTED');
+$second=Budget::pauseForClarification($resumed,332000);
+checkRuntime('second step shares original frozen profile', $second['counters']['clarification_count']===2 && $second['profile']['max_clarification_rounds']===3);
+$third=Budget::pauseForClarification(Budget::resumeAfterClarification($second,333000),334000);
+$thirdAnswered=Budget::resumeAfterClarification($third,335000);
+checkRuntime('last permitted answer can execute without another step', Budget::callTimeout($thirdAnswered,'tool',10000,335001)===10000);
+rejectsRuntime('fourth step exceeds default three',function()use($thirdAnswered){Budget::pauseForClarification($thirdAnswered,336000);},'COUNTER_BUDGET_EXHAUSTED');
+rejectsRuntime('all clarification waits share ten minutes',function()use($second){Budget::resumeAfterClarification($second,632000);},'CLARIFICATION_EXPIRED');
 rejectsRuntime('no tool during clarification', function () use ($paused) {
     Budget::callTimeout($paused, 'tool', 6000, 32000);
 }, 'WAITING_CLARIFICATION');

@@ -21,6 +21,14 @@ export class DeviceSessions {
   save(sessions) { this.storage.setItem(this.key, JSON.stringify(sessions)); }
   create(id = newId()) { const sessions = this.load(); const session = { id, created_at: this.clock(), rounds: [] }; sessions.push(session); this.save(sessions); return session; }
   history(id) { const s = this.load().find(s => s.id === id); return s ? s.rounds.slice(-HISTORY_ROUNDS).map(r => ({ question: r.question, answer: r.answer })) : []; }
+  contextRef(id) {
+    const session = this.load().find(value => value.id === id);
+    const last = session && session.rounds.length ? session.rounds[session.rounds.length - 1] : null;
+    const ref = last && last.presentation && last.presentation.context_ref;
+    // Forward an opaque reference only. The server must validate ownership,
+    // expiry and whether this new question actually refers to the old answer.
+    return typeof ref === 'string' && ref.length > 0 ? ref : null;
+  }
   append(id, question, answer, presentation) {
     const sessions = this.load(); const s = sessions.find(s => s.id === id);
     if (!s) throw new Error('会话已到期，请新建对话。');
@@ -33,6 +41,11 @@ export const isTerminal = status => ['COMPLETED', 'PARTIAL_SUCCEEDED', 'FAILED',
 export function acceptRun(current, incoming) {
   if (!incoming || typeof incoming.run_id !== 'string' || !Number.isInteger(incoming.generation)) return current;
   if (current && (current.run_id !== incoming.run_id || current.generation !== incoming.generation || isTerminal(current.status))) return current;
+  // RunStore.version is the server-owned projection order. Once observed, a
+  // delayed/legacy response cannot remove it or replay an older guidance step.
+  // Versionless fixtures/old runs remain compatible until a version is seen.
+  if (Object.prototype.hasOwnProperty.call(incoming, 'version') && (!Number.isSafeInteger(incoming.version) || incoming.version < 1)) return current;
+  if (current && Number.isSafeInteger(current.version) && (!Number.isSafeInteger(incoming.version) || incoming.version <= current.version)) return current;
   return { ...(current || {}), ...incoming };
 }
 export function safeDownloadUrl(value, origin) {

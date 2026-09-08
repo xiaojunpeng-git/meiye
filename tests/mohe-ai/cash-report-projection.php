@@ -101,7 +101,7 @@ namespace {
         check($values($overview)[$metric]===$expected,$metric.' full overview matches scalar');
     }
     check($summary['metric_version']===Dashboard::METRIC_VERSION,'summary version propagated');
-    check(str_contains($overview['field_explanations']['cash_performance'],'充值欠款补交'),'business explanation includes recharge repayment');
+    check(strpos($overview['field_explanations']['cash_performance'],'充值欠款补交')!==false,'business explanation includes recharge repayment');
     check(array_sum(array_column($overview['categories'],'cash_performance_cents'))===20000,'positive category projections preserve total including unclassified recharge');
     $restricted=$dashboard->drilldown($ctx,$input+['store_ids'=>'2','metric_code'=>'cash_performance']);
     check(array_sum(array_column($restricted['records'],'amount_cents'))===5000,'requested store only narrows permission');
