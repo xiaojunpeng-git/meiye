@@ -17,6 +17,7 @@ class CashierV3StaffFeatureOverrideServices
     public static function operationFeatureCodes(): array
     {
         return [
+            'cashier.v3.ai',
             'cashier.v3.cashier.recharge', 'cashier.v3.cashier.gift', 'cashier.v3.cashier.checkout',
             'cashier.v3.cashier.card.upgrade', 'cashier.v3.cashier.card.extend',
             'cashier.v3.cashier.card.transfer', 'cashier.v3.cashier.card.disable',

@@ -11,6 +11,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   const el = (tag, text, cls) => { const n = documentRef.createElement(tag); if (text != null) n.textContent = String(text); if (cls) n.className = cls; return n; };
   let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, pollTimer, expiryTimer, disposed = false, cancelling = false, closeRequested = false;
   const clientSession = newId(); const entry = el('button', '魔核 AI', 'entry'); entry.hidden = true; root.appendChild(entry);
+  let clarificationArea = null, clarificationId = null;
   function message(text, cls) { const n = el('div', text, 'message ' + (cls || '')); body.appendChild(n); body.scrollTop = body.scrollHeight; }
   function renderAnswer(answer, live = true) {
     if (!answer || typeof answer !== 'object') return;
@@ -22,8 +23,11 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   function binding() { return { client_session_id: clientSession, run_delivery_token: run.run_delivery_token, generation: run.generation }; }
   async function update(next) {
     const previous = run; run = acceptRun(run, next); if (!run || run === previous) return;
+    clearTimeout(pollTimer);
     progress.textContent = typeof run.progress === 'string' ? run.progress : (run.progress && run.progress.message) || '正在处理';
     if (isTerminal(run.status)) {
+      if (clarificationArea) clarificationArea.remove();
+      clarificationArea = null; clarificationId = null;
       clearTimeout(pollTimer); cancelling = false; send.disabled = false;
       if (['COMPLETED', 'PARTIAL_SUCCEEDED'].includes(run.status) && run.answer) {
         renderAnswer(run.answer);
@@ -41,7 +45,10 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     catch (_) { if (progress) progress.textContent = cancelling ? '暂未确认取消结果，请检查网络。' : '连接暂时中断，正在重新确认任务状态。'; pollTimer = setTimeout(poll, 3000); }
   }
   function renderClarification(c) {
+    if (clarificationArea && clarificationArea.isConnected && clarificationId === c.id) return;
+    if (clarificationArea) clarificationArea.remove();
     const area = el('div', null, 'card'); area.appendChild(el('div', c.question || '请一次选清查询条件')); const controls = [];
+    clarificationArea = area; clarificationId = c.id;
     (c.fields || []).forEach(field => { const label = el('label', field.label); const control = el(field.type === 'date' ? 'input' : 'select'); if (field.type === 'date') control.type = 'date'; else (field.options || []).forEach(option => { const o = el('option', option.label); o.value = option.value; control.appendChild(o); }); control.required = true; label.appendChild(control); area.appendChild(label); controls.push({ field, control }); });
     const confirm = el('button', '确认查询', 'primary'); confirm.onclick = async () => { const choices = {}; controls.forEach(({field, control}) => { choices[field.key] = control.value; }); if (controls.some(v => !v.control.value)) return; confirm.disabled = true; try { await update(await request('POST', '/runs/' + encodeURIComponent(run.run_id) + '/clarify', { ...binding(), clarification_id: c.id, choices })); area.remove(); } catch (_) { confirm.disabled = false; message('确认未完成，请检查网络后重试。', 'error'); } }; area.appendChild(confirm); body.appendChild(area);
   }
@@ -123,8 +130,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       } catch (error) { progress.textContent = error.responseKnown ? error.message : '请求结果暂未确认。'; if (run) { clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000); } else { if (error.responseKnown) pendingCreate = null; send.disabled = false; send.textContent = error.responseKnown ? '发送' : '重试确认'; input.value = question; } }
     };
     cancel.onclick = stop; close.onclick = () => { stop(); panel.hidden = true; };
-    fresh.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) { message('请先确认当前任务状态。'); return; } conversation = sessions.create().id; body.textContent = ''; run = null; };
-    history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; body.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', s.rounds[0] ? s.rounds[0].question.slice(0,30) : '新对话'); b.onclick = () => { conversation = s.id; body.textContent = ''; s.rounds.forEach(r => { message(r.question,'question'); renderAnswer(r.presentation || {summary:r.answer},false); }); }; body.appendChild(b); }); };
+    fresh.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) { message('请先确认当前任务状态。'); return; } conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; };
+    history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; body.textContent = ''; progress.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', s.rounds[0] ? s.rounds[0].question.slice(0,30) : '新对话'); b.onclick = () => { conversation = s.id; body.textContent = ''; progress.textContent = ''; s.rounds.forEach(r => { message(r.question,'question'); renderAnswer(r.presentation || {summary:r.answer},false); }); }; body.appendChild(b); }); };
   }
   entry.onclick = open;
   request('GET', '/bootstrap',{client_session_id:clientSession}).then(value => { if (!disposed) { boot = value; entry.hidden = !value.enabled && !value.can_configure; } }).catch(() => {});

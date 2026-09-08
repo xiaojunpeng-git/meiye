@@ -7,7 +7,7 @@ const require=createRequire(import.meta.url);
 const {JSDOM}=require('../../前端代码/admin/node_modules/jsdom');
 const flush=()=>new Promise(r=>setTimeout(r,12));let checks=0;
 function eq(a,b){assert.deepEqual(a,b);checks++;}
-function setup({delayCreate=false,monitoring=null}={}) {
+function setup({delayCreate=false,monitoring=null,clarification=false}={}) {
   const dom=new JSDOM('<!doctype html><body></body>',{url:'https://fixture.test'});
   // Old jsdom has no native shadow root: actual DOM events + real transport,
   // shim only supplies the root. This is not a browser layout or live API test.
@@ -21,6 +21,10 @@ function setup({delayCreate=false,monitoring=null}={}) {
     if(url.endsWith('/config')) {if(options.method==='PUT'){configured=body.enabled;version++;return json({});}return json({enabled:configured,model:'fixture/model',version,has_api_key:false,external_processing_authorized:configured,runtime_status:{success:2,partial:1,technical:0,active:3,monitoring}});}
     if(url.endsWith('/runs')){const result=json({run_id:'run'+(++sequence),generation:1,run_delivery_token:'delivery',status:'RECEIVED'});return delayCreate?new Promise(resolve=>{releaseCreate=()=>resolve(result);}):result;}
     const id=url.match(/\/runs\/(run\d+)/)?.[1];
+    if(clarification && (url.endsWith('/execute') || options.method==='GET')) {
+      const result=json({run_id:id,generation:1,status:'WAITING_CLARIFICATION',clarification:{id:'clarify-one',fields:[{key:'metric',label:'业绩指标',options:[{label:'现金业绩',value:'cash'}]}]}});
+      return url.endsWith('/execute')?new Promise(resolve=>setTimeout(()=>resolve(result),1150)):result;
+    }
     if(url.endsWith('/execute'))return json({run_id:id,generation:1,status:'COMPLETED',answer:{summary:'已校验答案'+sequence,cards:[{metric_name:'消耗业绩',display_value:'123',unit:'元'}]}});
     if(url.endsWith('/cancel'))return json({run_id:id,generation:1,status:'CANCELLED'});
     throw new Error('unexpected fixture endpoint');
@@ -47,10 +51,19 @@ function setup({delayCreate=false,monitoring=null}={}) {
   f.click('新对话');await f.send('本月消耗业绩多少？');
   const third=f.calls.filter(c=>c.url.endsWith('/runs'))[2];eq(third.body.history,[]);assert.notEqual(third.body.conversation_id,creates[0].body.conversation_id);checks++;
   f.click('历史');f.click('今天消耗业绩多少？');
+  eq(f.root().querySelector('[role=status]').textContent,'');
   eq(f.root().querySelectorAll('.value').length,2);
   await f.send('前天消耗业绩多少？');
   const fourth=f.calls.filter(c=>c.url.endsWith('/runs'))[3];eq(fourth.body.conversation_id,creates[0].body.conversation_id);eq(fourth.body.history.length,2);
   eq(window.localStorage.getItem('mohe-ai:v1:account-one').includes('fixture-key-not-real'),false);
+  f.dispose();
+}
+{
+  const f=setup({clarification:true});await f.enable();await f.send('今天业绩多少？');
+  await new Promise(resolve=>setTimeout(resolve,1300));
+  eq(Array.from(f.root().querySelectorAll('button')).filter(n=>n.textContent==='确认查询').length,1);
+  f.click('停止');await flush();
+  eq(Array.from(f.root().querySelectorAll('button')).filter(n=>n.textContent==='确认查询').length,0);
   f.dispose();
 }
 for(const action of ['close','dispose']) {

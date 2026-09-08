@@ -24,5 +24,7 @@ $p=new \app\services\ai\execution\AiPlatformPrincipalResolver();$b=['terminal'=>
 $m=new \app\services\ai\execution\AiMerchantPrincipalResolver();$mb=['terminal'=>'merchant','principal_kind'=>'merchant_employee','account_id'=>9,'employee_id'=>11,'staff_id'=>5,'origin_store_id'=>1,'origin_organization_id'=>'3'];ok($m->worker($mb)['employee_id']===11);
 \app\services\mobile\merchant\MobileMerchantRequestContextResolver::$account=10;denied(fn()=>$m->worker($mb));\app\services\mobile\merchant\MobileMerchantRequestContextResolver::$account=9;
 \app\services\mobile\warehouse\MobileWarehouseServices::$personal=true;denied(fn()=>$m->worker($mb));$mb['employee_id']='11';denied(fn()=>$m->worker($mb));
+require dirname(__DIR__,2).'/后端代码/app/services/cashier/v3/permission/CashierV3StaffFeatureOverrideServices.php';
+ok(in_array('cashier.v3.ai',\app\services\cashier\v3\permission\CashierV3StaffFeatureOverrideServices::operationFeatureCodes(),true));
 echo "Principal adapters: $count checks PASS (authority fixtures; no live DB)\n";
 }

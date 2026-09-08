@@ -156,4 +156,5 @@ try {
 }
 require __DIR__.'/query-export-runtime-mysql.php';
 require __DIR__.'/cash-recharge-mysql.php';
+if (getenv('MOHE_QUERY_TEST_SCALE')==='yes') require __DIR__.'/cash-recharge-scale-mysql.php';
 echo 'query-mysql: PASS (' . $checks . ' real MySQL ' . $pdo->getAttribute(PDO::ATTR_SERVER_VERSION) . " checks; disposable fixture, no customer DB)\n";

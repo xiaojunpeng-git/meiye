@@ -28,12 +28,23 @@ final class AiWorkflowPlanner
         if ($selection['query_shape'] !== $shape) throw new AiContractException('AI_MODEL_SELECTION_MISMATCH');
         $selected = $selection['metric_codes']; sort($selected); $expected = $metrics; sort($expected);
         if ($metrics && $selected !== $expected) throw new AiContractException('AI_MODEL_SELECTION_MISMATCH');
+        $range = null; $compare = null;
+        if ($shape === 'comparison') {
+            // Signals are a vocabulary set, not user order. Only the locally
+            // projected ordered periods can bind primary vs comparison.
+            $terms = $projection['date_terms'] ?? [];
+            if (count($terms) <= 2 && empty($projection['date_grouping_ambiguous'])) {
+                if (isset($terms[0])) $range = $this->period($terms[0], $today);
+                if (isset($terms[1])) $compare = $this->period($terms[1], $today);
+            }
+            // More than two ungrouped periods is ambiguous: request both
+            // ranges together instead of dropping one or choosing endpoints.
+        } else {
         $dateCode = null;
         foreach (['TODAY', 'YESTERDAY', 'THIS_MONTH', 'LAST_MONTH'] as $code) if (in_array($code, $signals, true)) {
             if ($dateCode !== null) throw new AiContractException('AI_UNSUPPORTED_CONDITION');
             $dateCode = $code;
         }
-        $range = null;
         if ($projection['dates']) {
             if ($dateCode !== null || count($projection['dates']) > 2) throw new AiContractException('AI_UNSUPPORTED_CONDITION');
             $range = $this->range($projection['dates'][0], $projection['dates'][1] ?? $projection['dates'][0]);
@@ -44,11 +55,12 @@ final class AiWorkflowPlanner
             $range = $this->range($dateCode === 'THIS_MONTH' || $dateCode === 'LAST_MONTH' ? $date->format('Y-m-01') : $date->format('Y-m-d'),
                 $dateCode === 'LAST_MONTH' ? $date->format('Y-m-t') : $date->format('Y-m-d'));
         }
+        }
         $ranking=null;
         if ($shape==='ranking' && (in_array('top_5',$signals,true)||in_array('bottom_5',$signals,true))) {
             $ranking=['direction'=>in_array('top_5',$signals,true)?(in_array('bottom_5',$signals,true)?'top_and_bottom':'top'):'bottom','limit'=>5];
         }
-        if (!$metrics || !$range || in_array('ambiguous_metric', $signals, true) || $shape==='comparison' || ($shape==='ranking' && !$ranking)) {
+        if (!$metrics || !$range || in_array('ambiguous_metric', $signals, true) || ($shape==='comparison' && !$compare) || ($shape==='ranking' && !$ranking)) {
             $fields = [];
             if (!$metrics || in_array('ambiguous_metric', $signals, true)) {
                 $options = []; foreach ($capabilities['metric_codes'] as $metric) if (isset($this->names[$metric])) $options[] = ['value' => $metric, 'label' => $this->names[$metric]];
@@ -56,11 +68,11 @@ final class AiWorkflowPlanner
                 $fields[] = ['key' => 'metric_code', 'label' => '业绩指标', 'type' => 'select', 'options' => $options];
             }
             if (!$range) { $fields[] = ['key' => 'start_date', 'label' => '开始日期', 'type' => 'date']; $fields[] = ['key' => 'end_date', 'label' => '结束日期', 'type' => 'date']; }
-            if ($shape==='comparison') { $fields[]=['key'=>'compare_start','label'=>'对比开始日期','type'=>'date']; $fields[]=['key'=>'compare_end','label'=>'对比结束日期','type'=>'date']; }
+            if ($shape==='comparison' && !$compare) { $fields[]=['key'=>'compare_start','label'=>'对比开始日期','type'=>'date']; $fields[]=['key'=>'compare_end','label'=>'对比结束日期','type'=>'date']; }
             if ($shape==='ranking' && !$ranking) $fields[]=['key'=>'rank_direction','label'=>'排行方式','type'=>'select','options'=>[['value'=>'top','label'=>'前五家'],['value'=>'bottom','label'=>'后五家'],['value'=>'top_and_bottom','label'=>'前五及后五家']]];
-            return ['kind' => 'clarification', 'fields' => $fields, 'resolved_metrics' => $metrics, 'resolved_range' => $range, 'query_shape' => $shape,'ranking'=>$ranking,'output_format'=>$format];
+            return ['kind' => 'clarification', 'fields' => $fields, 'resolved_metrics' => $metrics, 'resolved_range' => $range, 'resolved_compare_range' => $compare, 'query_shape' => $shape,'ranking'=>$ranking,'output_format'=>$format];
         }
-        return $this->plan($metrics, $range, $shape,null,$ranking,$format);
+        return $this->plan($metrics, $range, $shape,$compare,$ranking,$format);
     }
 
     public function choose(array $envelope, array $choices): array
@@ -73,7 +85,7 @@ final class AiWorkflowPlanner
             $metrics = [$choices['metric_code']];
         }
         if (!$range) $range = $this->range($choices['start_date'] ?? null, $choices['end_date'] ?? null);
-        $compare=$envelope['query_shape']==='comparison'?$this->range($choices['compare_start']??null,$choices['compare_end']??null):null;
+        $compare=$envelope['query_shape']==='comparison'?($envelope['resolved_compare_range']??$this->range($choices['compare_start']??null,$choices['compare_end']??null)):null;
         $ranking=$envelope['ranking']??null;
         if ($envelope['query_shape']==='ranking' && !$ranking) {
             if (!in_array($choices['rank_direction']??null,['top','bottom','top_and_bottom'],true)) throw new AiContractException('AI_CLARIFICATION_INVALID');
@@ -92,6 +104,17 @@ final class AiWorkflowPlanner
             'max_visits' => 3, 'max_tool_calls' => 1, 'output_format' => $format];
         $plan['compiled_run_hash'] = hash('sha256', json_encode($plan, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         return ['kind' => 'plan', 'plan' => $plan];
+    }
+    private function period(array $term, string $today): array
+    {
+        if (($term['code'] ?? '') === 'EXPLICIT') return $this->range($term['start'] ?? null, $term['end'] ?? null);
+        $code=$term['code']??'';
+        if (!in_array($code,['TODAY','YESTERDAY','THIS_MONTH','LAST_MONTH'],true)) throw new AiContractException('AI_DATE_INVALID');
+        $date=$this->date($today);
+        if ($code==='YESTERDAY') $date=$date->modify('-1 day');
+        if ($code==='LAST_MONTH') $date=$date->modify('first day of last month');
+        return $this->range(in_array($code,['THIS_MONTH','LAST_MONTH'],true)?$date->format('Y-m-01'):$date->format('Y-m-d'),
+            $code==='LAST_MONTH'?$date->format('Y-m-t'):$date->format('Y-m-d'));
     }
     private function range($start, $end): array
     {

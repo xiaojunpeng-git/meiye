@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace think\facade {
     final class Db {
         public static array $sales = [];
+        public static array $components = [];
         public static function name($name) { return new \CashProjectionQuery($name); }
     }
 }
@@ -52,8 +53,9 @@ namespace {
         public function column(...$args) { return [1=>'一店',2=>'二店']; }
         public function toArray():array {
             if($this->table==='store_product_category') return [['id'=>7,'pid'=>0,'cate_name'=>'服务']];
-            if($this->table!=='cashier_v3_payment_sale_allocation_fact') return [];
-            return array_values(array_filter(\think\facade\Db::$sales,function($r) {
+            if(!in_array($this->table,['cashier_v3_payment_sale_allocation_fact','cashier_v3_card_sale_item_allocation_fact'],true)) return [];
+            $source=$this->table==='cashier_v3_card_sale_item_allocation_fact'?\think\facade\Db::$components:\think\facade\Db::$sales;
+            return array_values(array_filter($source,function($r) {
                 foreach($this->filters as [$key,$op,$v]) {
                     $key=preg_replace('/^[^.]+\./','',$key);
                     if($key==='category_id_snapshot') $key='category_id';
@@ -103,5 +105,36 @@ namespace {
     check(array_sum(array_column($overview['categories'],'cash_performance_cents'))===20000,'positive category projections preserve total including unclassified recharge');
     $restricted=$dashboard->drilldown($ctx,$input+['store_ids'=>'2','metric_code'=>'cash_performance']);
     check(array_sum(array_column($restricted['records'],'amount_cents'))===5000,'requested store only narrows permission');
+    // A successful card receipt remains authoritative even when its legacy
+    // category projection is missing. No fact repair or invented category.
+    Reader::$recharges=[];
+    $card=row('card:missing',210000);$card['source_type']='card';$card['sale_fact_id']='sale:missing';
+    \think\facade\Db::$sales=[$card];
+    $missing=invoke($dashboard,'cashRows','test',[1,2],$range,[]);
+    check(count($missing)===1 && $missing[0]['amount_cents']===210000,'missing card components cannot erase receipt');
+    check($missing[0]['category_id']===0 && $missing[0]['classification_coverage']==='missing_card_components','missing classification explicitly marked not invented');
+    check(invoke($dashboard,'cashRows','test',[1,2],$range,[7])===[],'unknown card classification does not satisfy category filter');
+    check(invoke($dashboard,'dailyCashPerformance','test',[1,2],$range,[])===['2026-09-08'=>210000],'missing card daily total retains cash');
+    check(invoke($dashboard,'cashByStore','test',[1,2],$range,[])===[1=>210000],'missing card store total retains cash');
+    check($values($dashboard->dashboard($ctx,$input))['cash_performance']===210000,'missing card overview matches scalar');
+    $weights=[['configured_amount_cents'=>12000],['configured_amount_cents'=>0],['configured_amount_cents'=>0]];
+    foreach([298000,-298000] as $amount) {
+        $parts=array_column(invoke($dashboard,'allocate',$amount,$weights),'amount_cents');
+        check($parts===[$amount,0,0],'zero weight cannot create opposite signed refund/receipt');
+        check(array_sum($parts)===$amount,'signed allocation preserves cents');
+    }
+    check(array_column(invoke($dashboard,'allocate',101,[['configured_amount_cents'=>0],['configured_amount_cents'=>0],['configured_amount_cents'=>0]]),'amount_cents')===[33,33,35],'all zero weights use equal allocation with last remainder');
+    check(array_column(invoke($dashboard,'allocate',101,[['configured_amount_cents'=>1],['configured_amount_cents'=>2]]),'amount_cents')===[33,68],'normal weighted exact remainder unchanged');
+    foreach([101,-101] as $amount) {
+        $parts=array_column(invoke($dashboard,'allocate',$amount,[['configured_amount_cents'=>1],['configured_amount_cents'=>1],['configured_amount_cents'=>0]]),'amount_cents');
+        check($parts===($amount>0?[50,51,0]:[-50,-51,0]),'trailing zero weight receives no positive or negative remainder');
+        check(array_sum($parts)===$amount,'last positive weight remainder preserves signed total');
+    }
+    $card['amount_cents']=298000;$card['sale_fact_id']='sale:configured';\think\facade\Db::$sales=[$card];
+    foreach($weights as $i=>$w) \think\facade\Db::$components[]=array_merge($w,['tenant_id'=>'test','sale_fact_id'=>'sale:configured','status'=>'effective','component_product_id'=>$i+1,'item_name_snapshot'=>'项目','category_id'=>7,'category_id_snapshot'=>7,'category_path_snapshot'=>'服务']);
+    $full=$values($dashboard->dashboard($ctx,$input));
+    check($full['cash_performance']===298000 && $full['refund_amount']===0,'positive configured card creates no false refund');
+    check(array_sum(array_column($dashboard->drilldown($ctx,$input+['metric_code'=>'cash_performance'])['records'],'amount_cents'))===298000,'configured card cash drilldown reconciles');
+    check($dashboard->drilldown($ctx,$input+['metric_code'=>'refund_amount'])['records']===[],'refund drilldown empty without negative source');
     echo "cash report projection: {$checks} PASS\n";
 }

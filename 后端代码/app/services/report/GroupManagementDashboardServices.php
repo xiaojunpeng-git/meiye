@@ -310,10 +310,22 @@ final class GroupManagementDashboardServices
         if ($cards === []) return $rows;
         $saleIds = array_values(array_unique(array_filter(array_column($cards, 'sale_fact_id'))));
         $bySale = [];
-        foreach (Db::name('cashier_v3_card_sale_item_allocation_fact')->where('tenant_id', $tenantId)->whereIn('sale_fact_id', $saleIds)->where('status', 'effective')->field('allocation_fact_id,sale_fact_id,component_product_id,item_name_snapshot,category_id_snapshot,category_path_snapshot,component_count,sale_amount_cents,configured_amount_cents')->select()->toArray() as $row) $bySale[(string)$row['sale_fact_id']][] = $row;
+        foreach (Db::name('cashier_v3_card_sale_item_allocation_fact')->where('tenant_id', $tenantId)->whereIn('sale_fact_id', $saleIds)->where('status', 'effective')->field('allocation_fact_id,sale_fact_id,component_product_id,item_name_snapshot,category_id_snapshot,category_path_snapshot,component_count,sale_amount_cents,configured_amount_cents')->order('allocation_fact_id', 'asc')->select()->toArray() as $row) $bySale[(string)$row['sale_fact_id']][] = $row;
         $allowed = array_fill_keys($categoryIds, true);
         foreach ($cards as $payment) {
             $items = $bySale[(string)$payment['sale_fact_id']] ?? [];
+            // Missing classification evidence must not erase a successful
+            // receipt. Preserve its original amount only in the unfiltered
+            // view; never invent a component/category to satisfy a filter.
+            if ($items === []) {
+                if ($allowed === []) $rows[] = array_merge($payment, [
+                    'item_id' => 0, 'item_name' => '卡项（分类待补齐）',
+                    'product_type_snapshot' => 'card_unclassified',
+                    'category_id' => 0, 'category_path' => '',
+                    'classification_coverage' => 'missing_card_components',
+                ]);
+                continue;
+            }
             foreach ($this->allocate((int)$payment['amount_cents'], $items) as $allocation) {
                 $item = $allocation['item'];
                 if ($allowed !== [] && !isset($allowed[(int)$item['category_id_snapshot']])) continue;
@@ -326,11 +338,25 @@ final class GroupManagementDashboardServices
     /** @return array<int,array{item:array<string,mixed>,amount_cents:int}> */
     private function allocate(int $amount, array $items): array
     {
-        $weight = 0; foreach ($items as $item) $weight += max(0, (int)($item['configured_amount_cents'] ?? $item['sale_amount_cents'] ?? 0));
-        if ($weight <= 0) $weight = count($items);
+        $weight = 0; $weights = [];
+        foreach ($items as $item) {
+            $weights[] = max(0, (int)($item['configured_amount_cents'] ?? $item['sale_amount_cents'] ?? 0));
+            $weight += $weights[count($weights) - 1];
+            if (!is_int($weight)) throw new \RuntimeException('卡项分摊权重超出安全范围');
+        }
+        if ($weight <= 0) { $weight = count($items); $weights = array_fill(0, count($items), 1); }
+        $lastEligible = -1;
+        foreach ($weights as $index => $itemWeight) if ($itemWeight > 0) $lastEligible = $index;
         $out = []; $assigned = 0;
         foreach ($items as $index => $item) {
-            $part = $index === count($items) - 1 ? $amount - $assigned : (int)floor($amount * max(1, (int)($item['configured_amount_cents'] ?? $item['sale_amount_cents'] ?? 1)) / $weight);
+            // Zero-weight components stay zero. Using max(1) here while the
+            // denominator used max(0) overallocated positive receipts and
+            // fabricated a negative last component (a false refund).
+            $product = $amount * $weights[$index];
+            if (!is_int($product)) throw new \RuntimeException('卡项分摊金额超出安全范围');
+            // The stable last eligible component receives the remainder;
+            // trailing zero-weight components never acquire residual cents.
+            $part = $index === $lastEligible ? $amount - $assigned : intdiv($product, $weight);
             $assigned += $part; $out[] = ['item' => $item, 'amount_cents' => $part];
         }
         return $out;

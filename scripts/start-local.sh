@@ -198,6 +198,7 @@ ensure_admin_dev() {
     -p 18081:8081 \
     --add-host host.docker.internal:host-gateway \
     -v "$ADMIN_SRC:/app" \
+    -v "$ROOT/前端代码/shared:/shared:ro" \
     -v "$ADMIN_NM_VOLUME:/app/node_modules" \
     -w /app \
     node:14-bullseye \

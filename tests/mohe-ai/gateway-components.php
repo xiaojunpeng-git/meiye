@@ -5,7 +5,8 @@ namespace app\services\ai\model {
     function curl_setopt_array($handle, $options) { $GLOBALS['sfOptions'] = $options; return true; }
     function curl_exec($handle) {
         $options = $GLOBALS['sfOptions'];
-        if ($options[CURLOPT_XFERINFOFUNCTION]() !== 0) return false;
+        $progress=defined('CURLOPT_XFERINFOFUNCTION')?constant('CURLOPT_XFERINFOFUNCTION'):CURLOPT_PROGRESSFUNCTION;
+        if ($options[$progress]() !== 0) return false;
         $body = $GLOBALS['sfResponse'];
         return $options[CURLOPT_WRITEFUNCTION]($handle, $body) === strlen($body);
     }
@@ -31,6 +32,11 @@ namespace {
     check($view['current']['signals'] === ['cash_performance','TODAY'], 'Q002 vocabulary');
     check($projector->project('今天收了多少钱？')['signals'] === ['cash_performance','TODAY'], 'Q001 vocabulary');
     check($projector->project('今天消耗业绩多少？')['signals'] === ['consume_amount','TODAY'], 'Q003 vocabulary');
+    foreach (['本月现金业绩最高的前五家店','本月现金业绩最高的前5家店'] as $q) {
+        $p=$projector->project($q); check(!$p['unresolved_condition'] && in_array('top_5',$p['signals'],true),'explicit top five phrasing');
+    }
+    check($projector->project('本月现金业绩最高的前五家店排除张三')['unresolved_condition'],'ranking alias retains unknown filter');
+    check($projector->project('本月现金业绩最高的前十家店')['unresolved_condition'],'ranking alias does not silently change requested limit');
     $history = array_fill(0,20,['question'=>'今天现金业绩','answer'=>['summary'=>'测试']]);
     check(count($projector->validateConversation('今天业绩',$history)['history']) === 20,'20 complete rounds');
     rejects(function()use($projector,$history){$history[]=$history[0];$projector->validateConversation('问',$history);},'AI_CONVERSATION_INVALID');
@@ -54,6 +60,39 @@ namespace {
     rejects(function()use($planner,$projector,$selection,$cap){$planner->compile($projector->project('今天实际业绩'),$selection,$cap,'screen','2026-09-08');},'AI_METRIC_NOT_READY');
     // Source compiler intentionally refuses export until shared export readiness.
     rejects(function()use($planner,$projector,$selection,$cap){$planner->compile($projector->project('今天现金业绩'),$selection,$cap,'screen_and_xlsx','2026-09-08');},'AI_EXPORT_NOT_READY');
+    $compareCap=['metric_codes'=>['cash_performance','consume_amount'],'query_shapes'=>['comparison']];
+    $compareSelection=['decision'=>'query','query_shape'=>'comparison','metric_codes'=>['consume_amount'],'date_code'=>'TODAY'];
+    foreach ([
+        ['今天和昨天消耗业绩对比','2026-09-08','2026-09-08','2026-09-07','2026-09-07'],
+        ['昨天与今天消耗业绩对比','2026-09-07','2026-09-07','2026-09-08','2026-09-08'],
+        ['上月和本月消耗业绩对比','2026-08-01','2026-08-31','2026-09-01','2026-09-08'],
+        ['本月和上月消耗业绩对比','2026-09-01','2026-09-08','2026-08-01','2026-08-31'],
+        ['2026-09-07与2026-09-08消耗业绩对比','2026-09-07','2026-09-07','2026-09-08','2026-09-08'],
+        ['2026-09-01到2026-09-03和2026-08-01至2026-08-03消耗业绩对比','2026-09-01','2026-09-03','2026-08-01','2026-08-03'],
+        ['昨天和2026-09-01到2026-09-03消耗业绩对比','2026-09-07','2026-09-07','2026-09-01','2026-09-03'],
+    ] as [$q,$start,$end,$compareStart,$compareEnd]) {
+        $result=$planner->compile($projector->project($q),$compareSelection,$compareCap,'screen','2026-09-08');
+        check($result['kind']==='plan','two explicit periods need no redundant clarification');
+        $query=$result['plan']['query'];
+        check([$query['start_date'],$query['end_date'],$query['compare_range']['start'],$query['compare_range']['end']]===[$start,$end,$compareStart,$compareEnd],'comparison preserves textual period order and both full ranges');
+        check($result['plan']['max_tool_calls']===1 && $result['plan']['max_visits']===3,'comparison does not enlarge execution budget');
+    }
+    $ambiguous=$planner->compile($projector->project('今天和昨天业绩对比'),array_merge($compareSelection,['metric_codes'=>[],'decision'=>'clarify']),$compareCap,'screen','2026-09-08');
+    check(array_column($ambiguous['fields'],'key')===['metric_code'],'resolved comparison dates survive metric-only clarification');
+    $chosen=$planner->choose($ambiguous,['metric_code'=>'consume_amount']);
+    check($chosen['plan']['query']['compare_range']===['start'=>'2026-09-07','end'=>'2026-09-07'],'metric clarification keeps comparison range');
+    $missing=$planner->compile($projector->project('今天消耗业绩对比'),$compareSelection,$compareCap,'screen','2026-09-08');
+    check(array_column($missing['fields'],'key')===['compare_start','compare_end'],'only missing comparison period requested');
+    $multiple=$planner->compile($projector->project('2026-09-01和2026-09-02和2026-09-03消耗业绩对比'),$compareSelection,$compareCap,'screen','2026-09-08');
+    check(array_column($multiple['fields'],'key')===['start_date','end_date','compare_start','compare_end'],'ambiguous multiple dates ask both periods once without dropping a date');
+    $chosen=$planner->choose($multiple,['start_date'=>'2026-09-01','end_date'=>'2026-09-02','compare_start'=>'2026-09-03','compare_end'=>'2026-09-03']);
+    check($chosen['kind']==='plan','one combined period clarification proceeds without second prompt');
+    $grouping=$planner->compile($projector->project('昨天到今天消耗业绩对比'),$compareSelection,$compareCap,'screen','2026-09-08');
+    check(array_column($grouping['fields'],'key')===['start_date','end_date','compare_start','compare_end'],'range connector cannot be silently reinterpreted as two comparison periods');
+    $ordered=$projector->project('昨天和今天张三消耗业绩对比');
+    check(array_column($ordered['date_terms'],'code')===['YESTERDAY','TODAY'],'date order is independent of lexicon signal order');
+    check(strpos(json_encode($ordered,JSON_UNESCAPED_UNICODE),'张三')===false,'date projection never forwards raw user text');
+    rejects(function()use($planner,$ordered,$compareSelection,$compareCap){$planner->compile($ordered,$compareSelection,$compareCap,'screen','2026-09-08');},'AI_UNSUPPORTED_CONDITION');
     if (!function_exists('curl_init')) throw new \RuntimeException('curl extension required for offline option constants');
     $client = new SiliconFlowClient();
     $GLOBALS['sfStatus']=200;
@@ -64,7 +103,25 @@ namespace {
     check($result['selection']===$selection,'model valid response');
     check($GLOBALS['sfEndpoint']===SiliconFlowClient::ENDPOINT,'fixed endpoint');
     check($GLOBALS['sfOptions'][CURLOPT_FOLLOWLOCATION]===false,'redirect prohibited');
+    check(json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true)['temperature']===0,'deterministic vocabulary selection temperature');
     check($result['usage']['input_tokens']===8,'usage recorded');
+    $rankView=$projector->modelView($projector->validateConversation('本月现金业绩最高的前五家店',[
+        ['question'=>'本月消耗业绩','answer'=>'PRIVATE_ANSWER_NOT_FOR_MODEL'],
+    ]));
+    check($rankView['current']['signals']===['cash_performance','THIS_MONTH','top_5'] && !$rankView['current']['unresolved_condition'],'current ranking is separate from historical consume');
+    $rankSelection=['decision'=>'query','query_shape'=>'ranking','metric_codes'=>['cash_performance'],'date_code'=>'THIS_MONTH'];
+    $GLOBALS['sfResponse']=$response(json_encode($rankSelection));
+    $rankResult=$client->select($rankView,$cap['metric_codes'],'fixture/model','fixture-key',1000,function(){});
+    $wire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
+    $rules=implode("\n",array_column(array_filter($wire['messages'],function($m){return $m['role']==='system';}),'content'));
+    check(strpos($rules,'Selection scope is intent.current only.')!==false && strpos($rules,'top_5 or bottom_5 means query_shape=ranking')!==false,'real request includes current-only selection and ranking alias rules');
+    check(strpos(json_encode($wire),'PRIVATE_ANSWER_NOT_FOR_MODEL')===false,'history answers never reach model request');
+    $rankCap=['metric_codes'=>['cash_performance','consume_amount'],'query_shapes'=>['ranking']];
+    check($planner->compile($rankView['current'],$rankResult['selection'],$rankCap,'screen','2026-09-08')['kind']==='plan','current-only ranking selection compiles with unrelated history');
+    $historicalMetrics=$rankSelection; $historicalMetrics['metric_codes'][]='consume_amount';
+    rejects(function()use($planner,$rankView,$historicalMetrics,$rankCap){$planner->compile($rankView['current'],$historicalMetrics,$rankCap,'screen','2026-09-08');},'AI_MODEL_SELECTION_MISMATCH');
+    $wrongShape=$rankSelection; $wrongShape['query_shape']='summary';
+    rejects(function()use($planner,$rankView,$wrongShape,$rankCap){$planner->compile($rankView['current'],$wrongShape,$rankCap,'screen','2026-09-08');},'AI_MODEL_SELECTION_MISMATCH');
     foreach (['{"metric_codes":[],"metric_codes":[],"query_shape":"summary","date_code":"TODAY","decision":"query"}'=>'AI_JSON_DUPLICATE_KEY', '{"metric_codes":["invented"],"query_shape":"summary","date_code":"TODAY","decision":"query"}'=>'AI_MODEL_METRIC_UNKNOWN', '{"metric_codes":[],"query_shape":"summary","date_code":"TODAY","decision":"query","sql":"SELECT 1"}'=>'AI_MODEL_RESPONSE_INVALID'] as $json=>$error) {
         $GLOBALS['sfResponse']=$response($json); rejects(function()use($client,$view,$cap){$client->select($view,$cap['metric_codes'],'fixture/model','fixture-key',1000,function(){});},$error);
     }

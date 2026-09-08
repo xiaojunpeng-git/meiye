@@ -429,14 +429,26 @@ const activeQueryFields = computed(() => activeUnifiedQuery.value?.fields?.value
 const executedQuery = computed(() => executedQueryByType.value[activeTabKey.value] || null)
 
 function exportQuerySnapshot(recordType, query = {}) {
-  // `status` belongs to the legacy normal-list request. The unified-query
-  // contract represents the same choice through `dataScope`/`businessStatus`,
-  // so forwarding it makes the shared export validator reject an otherwise
-  // valid frozen query.
-  const { recordType: ignoredRecordType, queryCursor, pageSize, status: ignoredStatus, ...rest } = query || {}
+  // Legacy list aliases are not part of the unified-query contract. Preserve
+  // their effective date range as structured filters before removing aliases.
+  const {
+    recordType: ignoredRecordType, queryCursor, pageSize, status: ignoredStatus,
+    dateFrom, dateTo, businessDateFrom, businessDateTo,
+    date_from, date_to, business_date_from, business_date_to,
+    ...rest
+  } = query || {}
+  const { from, to } = businessDateRangeFromQuery(query)
+  const topFilters = [...(Array.isArray(rest.topFilters) ? rest.topFilters : [])]
+  for (const [operator, value] of [['gte', from], ['lte', to]]) {
+    if (value && !topFilters.some((filter) => filter?.field === 'business_date'
+      && filter?.operator === operator && filter?.value === value)) {
+      topFilters.push({ field: 'business_date', operator, value })
+    }
+  }
   const tab = ORDER_TABS.find((item) => item.key === recordType)
   return {
     ...rest,
+    topFilters,
     pageCode: tab?.pageCode || '',
     page: Math.max(1, Number(rest.page) || 1),
     limit: Math.max(1, Number(rest.limit ?? pageSize) || 20)

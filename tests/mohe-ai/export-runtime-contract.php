@@ -36,9 +36,74 @@ $fields=[]; foreach (\app\services\query\metric\MetricReadViewExportRegistrar::f
 $key=$write->invoke($worker,'uqe_'.str_repeat('e',32),str_repeat('f',64),$fields,\app\services\query\metric\MetricReadViewExportProvider::project($view),[],false,null);
 $verify=$reflect->getMethod('verifyFile'); $verify->setAccessible(true); $verify->invoke($runtime,$fixtureRoot.'/'.$key,$view);
 $check(true,'Actual shared XLSX passes exact original-result readback');
+// Both enabled metrics must use the same immutable projection for every shape.
+// Synthetic values only: no business DB, model or real customer export.
+$cash=['metric_code'=>'cash_performance','storage_unit'=>'fen','period'=>'current'];
+$consume=['metric_code'=>'consume_amount','storage_unit'=>'fen','period'=>'current'];
+$fixtures=[];
+$fixtures['summary']=['query'=>$view['query'],'results'=>[
+    $cash+['amount_cents'=>12345,'metric_name'=>'UNTRUSTED_LABEL'],
+    $consume+['amount_cents'=>-1],
+]];
+$fixtures['comparison']=['query'=>array_replace($view['query'],['query_shape'=>'comparison','compare_range'=>['start'=>'2026-09-07','end'=>'2026-09-07']]),'results'=>[
+    $cash+['amount_cents'=>12345],$consume+['amount_cents'=>0],
+    array_replace($cash,['period'=>'comparison','amount_cents'=>99]),
+    array_replace($consume,['period'=>'comparison','amount_cents'=>-101]),
+]];
+$fixtures['trend']=['query'=>array_replace($view['query'],['query_shape'=>'trend','start_date'=>'2026-09-07']),'results'=>[
+    $cash+['rows'=>[['business_date'=>'2026-09-07','amount_cents'=>1],['business_date'=>'2026-09-08','amount_cents'=>10001]]],
+    $consume+['rows'=>[['business_date'=>'2026-09-07','amount_cents'=>0],['business_date'=>'2026-09-08','amount_cents'=>-99]]],
+]];
+$fixtures['ranking']=['query'=>array_replace($view['query'],['query_shape'=>'ranking']),'results'=>[
+    $cash+['rows'=>['top'=>[['store_name'=>'测试甲店','amount_cents'=>12345]],'bottom'=>[['store_name'=>'测试乙店','amount_cents'=>1]]]],
+    $consume+['rows'=>['top'=>[['store_name'=>'测试乙店','amount_cents'=>9999]],'bottom'=>[['store_name'=>'测试甲店','amount_cents'=>-1]]]],
+]];
+$project=\app\services\query\metric\MetricReadViewExportProvider::class;
+foreach ($fixtures as $shape=>$fixture) {
+    $rows=$project::project($fixture);
+    $check(array_values(array_unique(array_column($rows,'metric_name')))===['现金业绩','消耗业绩'], $shape.' preserves both registered names');
+    $check(array_column($rows,'row_id')===array_map('strval',range(1,count($rows))), $shape.' has stable result IDs');
+    $fileKey=$write->invoke($worker,'uqe_'.md5('fixture-'.$shape),str_repeat('f',64),$fields,$rows,[],false,null);
+    $verify->invoke($runtime,$fixtureRoot.'/'.$fileKey,$fixture);
+    $check(true, $shape.' passes real writer and original-evidence readback');
+    $sheetBook=\PhpOffice\PhpSpreadsheet\IOFactory::load($fixtureRoot.'/'.$fileKey);
+    foreach ($rows as $i=>$row) {
+        $sheet=$sheetBook->getActiveSheet();
+        $check($sheet->getCell('B'.($i+2))->getValue()===$row['metric_name'], $shape.' XLSX correct metric label');
+        $check(number_format((float)$sheet->getCell('I'.($i+2))->getValue(),2,'.','')===$row['amount_yuan'], $shape.' XLSX cents preserved');
+    }
+    $sheetBook->disconnectWorksheets();
+}
+$summaryRows=$project::project($fixtures['summary']);
+$check(array_column($summaryRows,'amount_yuan')===['123.45','-0.01'], 'mixed summary is formatted without re-computing totals');
+$large=$fixtures['summary'];
+$large['results'][0]['amount_cents']=PHP_INT_MAX;
+$large['results'][1]['amount_cents']=PHP_INT_MIN;
+$largeRows=$project::project($large);
+$check(array_column($largeRows,'amount_yuan')===['92233720368547758.07','-92233720368547758.08'], '64-bit cents boundaries never pass through float');
+$largeKey=$write->invoke($worker,'uqe_'.md5('fixture-large'),str_repeat('f',64),$fields,$largeRows,[],false,null);
+$verify->invoke($runtime,$fixtureRoot.'/'.$largeKey,$large);
+$largeBook=\PhpOffice\PhpSpreadsheet\IOFactory::load($fixtureRoot.'/'.$largeKey);
+$check($largeBook->getActiveSheet()->getCell('I2')->getValue()===$largeRows[0]['amount_yuan'] && $largeBook->getActiveSheet()->getCell('I3')->getValue()===$largeRows[1]['amount_yuan'], 'large exact amounts survive actual XLSX writer as precise text');
+$largeBook->disconnectWorksheets();
+$comparisonRows=$project::project($fixtures['comparison']);
+$check(array_column($comparisonRows,'period_name')===['本期','本期','对比期','对比期'] && array_column($comparisonRows,'start_date')===['2026-09-08','2026-09-08','2026-09-07','2026-09-07'], 'comparison preserves exact periods and ranges');
+$check(array_column($project::project($fixtures['trend']),'business_date')===['2026-09-07','2026-09-08','2026-09-07','2026-09-08'], 'both metric trends preserve dates');
+$rankingRows=$project::project($fixtures['ranking']);
+$check(array_column($rankingRows,'ranking_direction')===['前列','后列','前列','后列'] && array_column($rankingRows,'store_name')===['测试甲店','测试乙店','测试乙店','测试甲店'], 'ranking preserves direction and store identity per metric');
+foreach (['actual_performance','cash_amount','custom_formula','',null] as $invalidMetric) {
+    $badView=$fixtures['summary']; $badView['results'][0]['metric_code']=$invalidMetric;
+    try {$project::project($badView); throw new LogicException('expected metric rejection');} catch (RuntimeException $e) {$check($e->getMessage()==='METRIC_EXPORT_METRIC_NOT_READY','unregistered/unready metric remains closed');}
+}
+foreach (['12345',123.45,null] as $invalidAmount) {
+    $badView=$fixtures['summary']; $badView['results'][0]['amount_cents']=$invalidAmount;
+    try {$project::project($badView); throw new LogicException('expected cents rejection');} catch (RuntimeException $e) {$check(in_array($e->getMessage(),['METRIC_EXPORT_AMOUNT_INVALID','METRIC_EXPORT_RESULT_INVALID'],true),'non-integer amounts cannot be exported');}
+}
+$badView=$fixtures['summary']; $badView['results'][0]['storage_unit']='yuan';
+try {$project::project($badView); throw new LogicException('expected unit rejection');} catch (RuntimeException $e) {$check($e->getMessage()==='METRIC_EXPORT_METRIC_NOT_READY','unit cannot silently change');}
 $book=\PhpOffice\PhpSpreadsheet\IOFactory::load($fixtureRoot.'/'.$key); $book->getActiveSheet()->setCellValue('I2',999); (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($book))->save($fixtureRoot.'/'.$key); $book->disconnectWorksheets();
 try {$verify->invoke($runtime,$fixtureRoot.'/'.$key,$view); throw new LogicException('expected mismatch');} catch (RuntimeException $e) {$check($e->getMessage()==='AI_EXPORT_CONTENT_MISMATCH','Tampered amount prevents publication');}
 // Exact newly-created isolated fixture root; contains no application or user artifacts.
 $iterator=new RecursiveIteratorIterator(new RecursiveDirectoryIterator($fixtureRoot,FilesystemIterator::SKIP_DOTS),RecursiveIteratorIterator::CHILD_FIRST);
 foreach ($iterator as $file) { if ($file->isDir()) rmdir($file->getPathname()); else unlink($file->getPathname()); } rmdir($fixtureRoot);
-echo "PASS 9 runtime registry/signature/physical-lock/real-XLSX checks; no production DB/model.\n";
+echo "PASS runtime registry/signature/physical-lock plus both-metric summary/comparison/trend/ranking real-XLSX and rejection checks; no production DB/model.\n";

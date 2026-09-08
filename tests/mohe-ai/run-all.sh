@@ -8,9 +8,9 @@ source_root="$(cd "$test_dir/../.." && pwd)"
 php_bin="${MOHE_TEST_PHP:-php}"
 
 "$php_bin" -v
-for suite in metric-contract runtime-contract export-source-contract plan-contract \
+for suite in config-contract metric-contract runtime-contract export-source-contract plan-contract \
     query-read-view cash-report-projection state-store-contract state-attempt-contract state-concurrency state-export-contract state-admission-contract \
-    gateway-components gateway-integration gateway-review-regressions monitor-contract \
+    gateway-components client-runtime-compat gateway-integration gateway-review-regressions monitor-contract \
     http-routing-contract http-actions-contract http-guard-contract principal-resolvers \
     export-worker-contract export-runtime-contract; do
     "$php_bin" "$test_dir/$suite.php"
@@ -25,6 +25,7 @@ done < <(rg --files "$source_root/后端代码/app/services/ai" "$source_root/�
 "$php_bin" "$source_root/tests/cashier-v3/php/order-center-unified-export-contract.php"
 
 node_bin="${MOHE_TEST_NODE:-node}"
-for suite in device-session-contract browser-entry-contract browser-transport-contract browser-workflow-contract; do
+for suite in device-session-contract browser-entry-contract browser-transport-contract browser-workflow-contract order-export-snapshot; do
     "$node_bin" "$test_dir/$suite.mjs"
 done
+bash "$test_dir/local-entrypoint-permissions.sh"

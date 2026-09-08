@@ -37,13 +37,17 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
     }
     public static function project(array $view): array
     {
-        $rows=[];
+        $rows=[]; $capabilities=MetricReadViewServices::metricCapabilities();
         foreach ($view['results'] as $result) {
-            if (($result['metric_code']??null)!=='consume_amount' || ($result['storage_unit']??null)!=='fen') throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
+            $code=$result['metric_code']??null;
+            // Keep export eligibility explicit; names come from the same registered
+            // read contract as the cards, never from model/result display text.
+            if (!in_array($code,['cash_performance','consume_amount'],true) || ($result['storage_unit']??null)!=='fen'
+                || ($capabilities[$code]['ai_query_ready']??false)!==true) throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
             if (!in_array($result['period']??null,['current','comparison'],true)) throw new \RuntimeException('METRIC_EXPORT_PERIOD_INVALID');
             $period=$result['period']; $range=$period==='current'?['start'=>$view['query']['start_date'],'end'=>$view['query']['end_date']]:$view['query']['compare_range'];
             if (!is_array($range)) throw new \RuntimeException('METRIC_EXPORT_PERIOD_INVALID');
-            $base=['metric_name'=>'消耗业绩','period_name'=>$period==='current'?'本期':'对比期','start_date'=>$range['start'],'end_date'=>$range['end'],
+            $base=['metric_name'=>$capabilities[$code]['name'],'period_name'=>$period==='current'?'本期':'对比期','start_date'=>$range['start'],'end_date'=>$range['end'],
                 'store_name'=>'当前授权范围','ranking_direction'=>'','business_date'=>''];
             if (isset($result['amount_cents'])) self::append($rows,$base,$result['amount_cents']);
             elseif ($view['query']['query_shape']==='trend') foreach ($result['rows'] as $point) self::append($rows,array_replace($base,['business_date'=>$point['business_date']]),$point['amount_cents']);
