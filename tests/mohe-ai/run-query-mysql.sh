@@ -25,3 +25,4 @@ done
 if [[ "$ready" != yes ]]; then echo 'Disposable MySQL did not become ready' >&2; exit 1; fi
 php "$test_dir/query-mysql.php"
 php "$test_dir/state-mysql-concurrency.php"
+php "$test_dir/management-mysql.php"

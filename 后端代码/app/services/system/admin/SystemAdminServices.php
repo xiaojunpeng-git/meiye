@@ -144,6 +144,7 @@ class SystemAdminServices extends BaseServices
                     /** @var SystemMenusServices $services */
                     $services = app()->make(SystemMenusServices::class);
                     [$menus, $uniqueAuth] = $services->getMenusList($adminInfo->roles, (int)$adminInfo['level'], 1, $adminType);
+                    [$menus, $uniqueAuth] = \app\services\ai\management\AiManagementMenuPolicy::formatted($menus, $uniqueAuth, $adminInfo->toArray());
                     return [
                         'token' => $tokenInfo['token'],
                         'expires_time' => $tokenInfo['params']['exp'],
@@ -179,6 +180,7 @@ class SystemAdminServices extends BaseServices
         /** @var SystemMenusServices $services */
         $services = app()->make(SystemMenusServices::class);
         [$menus, $uniqueAuth] = $services->getMenusList($adminInfo->roles, (int)$adminInfo['level'], 1, $adminType);
+        [$menus, $uniqueAuth] = \app\services\ai\management\AiManagementMenuPolicy::formatted($menus, $uniqueAuth, $adminInfo->toArray());
         return [
             'token' => $tokenInfo['token'],
             'expires_time' => $tokenInfo['params']['exp'],

@@ -1,0 +1,156 @@
+{
+  "task": "MOHE-AI-R6",
+  "baseline": "5866a2d2b111132e6ccbcf629ddf8032d250dfc5",
+  "status": "Implementation and automated/backend-live tests completed; full browser acceptance blocked by old native dialog; PM acceptance pending",
+  "fingerprint": "411d1803e24fd2171dee6a472c44e3994a7be05b78be242244ca5dc4a5104e55",
+  "files": [
+    {
+      "path": "前端代码/admin/src/api/moheAi.js",
+      "sha256": "0789b9e44cbd0a8c03816ce86d13171815611b04e6d564efb05cbf1c1cccfcef"
+    },
+    {
+      "path": "前端代码/admin/src/libs/moheAiManagementMenu.js",
+      "sha256": "1d6a7436311dda34d357e4899ed92e47bc9f781022ec3670d84b38b91b7a48c5"
+    },
+    {
+      "path": "前端代码/admin/src/pages/setting/moheAi/index.vue",
+      "sha256": "0dea63f72789bacf91ea9afa608f7aa78204527195d78fce5eb4be85cec9b78c"
+    },
+    {
+      "path": "前端代码/admin/src/pages/setting/moheAi/trial.vue",
+      "sha256": "44000921497696dc04a89022b606019338b6cf7420919f940e01434820fda045"
+    },
+    {
+      "path": "前端代码/admin/src/pages/setting/moheAi/confirm.vue",
+      "sha256": "11737ab50ea1afa93c2163e5b3295f4a012da60de62c7bb7fb29305357922775"
+    },
+    {
+      "path": "前端代码/admin/src/router/index.js",
+      "sha256": "7151dfcbf6437593c54ea3b26b5ef1091d84e7b076cc2be32567dea099dbf298"
+    },
+    {
+      "path": "前端代码/admin/src/router/modules/setting.js",
+      "sha256": "52ae8b8f4ba0b1c6c13518b8baaebf7c1f82414ca1c6860bbef8114685b5a738"
+    },
+    {
+      "path": "前端代码/admin/src/store/modules/admin/modules/menu.js",
+      "sha256": "fcc59261f0ce00fc123dea7213b0400ee40bd79010eb79ee3fcba259e3b7822e"
+    },
+    {
+      "path": "前端代码/shared/mohe-ai/browser-entry.mjs",
+      "sha256": "5c242b9526c485d49ad496a92398d6c03c3ab3cc85dd4a135219a635b017ed6c"
+    },
+    {
+      "path": "后端代码/app/controller/admin/Common.php",
+      "sha256": "8ef24210dfafb9a8cb9db925095f92e3b0d10682eb87db028cc0e66593e93cb9"
+    },
+    {
+      "path": "后端代码/app/controller/admin/v1/system/SystemMenus.php",
+      "sha256": "42538b70d0aaead1891206d0447407ba85091238be3163d27a3fc2e96cb44cae"
+    },
+    {
+      "path": "后端代码/app/controller/ai/AiHttpActions.php",
+      "sha256": "401f57d21cf6ead0bcdd18e4621254d2677418fc02da500db8cbe9a43a171fea"
+    },
+    {
+      "path": "后端代码/app/services/system/admin/SystemAdminServices.php",
+      "sha256": "bfeedba2adfe8ba994f45593efa7aa39184bd939b0d1a2f97dd1eef132f1deb4"
+    },
+    {
+      "path": "后端代码/app/services/ai/AiGatewayServices.php",
+      "sha256": "b5a3fc321928456c1e988b5567662cf9c940cea614f181ac4df7e74046511281"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiMerchantPrincipalResolver.php",
+      "sha256": "a176d9d49008f93a0b1afa5eaa06cf03c1ae2e9e340e984e0e3f669d80c14b2e"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiPlatformPrincipalResolver.php",
+      "sha256": "35cfa1cd8af960a50126427a82b2d76ee345eb810cea150499da2c760867ec23"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiRunStore.php",
+      "sha256": "28e9abf614d9f24bcd117361e79f62bfce8c4583e8f73a04dbe0c90f5dcbc8eb"
+    },
+    {
+      "path": "后端代码/app/services/ai/execution/AiRuntimeFactory.php",
+      "sha256": "48e26a1a6ba5622cd8e4d91cc020cd30c28d381f5ea1af7780ef150f80eb82b9"
+    },
+    {
+      "path": "后端代码/app/services/ai/management/AiManagementMenuPolicy.php",
+      "sha256": "a64958405a6a899500d216dea760a9e1ff0e2193452415e011f9115eae327a07"
+    },
+    {
+      "path": "后端代码/app/services/ai/management/AiManagementPolicy.php",
+      "sha256": "630b667e3c741874db0a2c66253d887eed7ccb132bbca595f0b193695d9909ce"
+    },
+    {
+      "path": "后端代码/app/services/ai/management/AiManagementStore.php",
+      "sha256": "fec8b637e60aa3e94c5710849f291c04c3eb9c4fdf0419875173ddcff1784603"
+    },
+    {
+      "path": "后端代码/route/a-ai.php",
+      "sha256": "610e69dee62d063d788cf1cb02bbe662e66b2c64c01842d9ba7621b0df809cfd"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-09-09-魔核AI管理配置/01-schema.sql",
+      "sha256": "9b95cede153ff4f60033e6706d83bcb5a926d96c0c469d47b56b52109845acb8"
+    },
+    {
+      "path": "tests/mohe-ai/browser-entry-contract.mjs",
+      "sha256": "60f923c40324a08d2d885778a43fdf5af0475f3bb6be8d0ec30a2f43c5e72b6d"
+    },
+    {
+      "path": "tests/mohe-ai/browser-workflow-contract.mjs",
+      "sha256": "ad439f04cd75a734b7f748cb696200581c450ab869d6a7cd0f068e95da7c30ff"
+    },
+    {
+      "path": "tests/mohe-ai/gateway-integration.php",
+      "sha256": "c382416340b4e1a52cef79d40abf5812fea5dab8400c737e096cf6edcf03c1c6"
+    },
+    {
+      "path": "tests/mohe-ai/principal-resolvers.php",
+      "sha256": "eb6613eb455e87b2c51080ab55e24f90ad2cfdc72c0840b29efe849d56ec0de6"
+    },
+    {
+      "path": "tests/mohe-ai/management-core.php",
+      "sha256": "db4dfeea4442d9c6772ab20266c500398bffdbc9461bcaa2432166fd9293da04"
+    },
+    {
+      "path": "tests/mohe-ai/management-gateway.php",
+      "sha256": "fdfaec20df9fca4c57b95dfce7802190051ed0c0963d1a0f7cd160bb9b908077"
+    },
+    {
+      "path": "tests/mohe-ai/management-menu.php",
+      "sha256": "77d2dec2f528b3f7b6db7429555521176bb29d11f44811705c734c7b20b8a8f2"
+    },
+    {
+      "path": "tests/mohe-ai/management-mysql.php",
+      "sha256": "84d85f5aec95dc4cbf085f50935936c21820f7b9295bf71cb4749d6bd92226cc"
+    },
+    {
+      "path": "tests/mohe-ai/management-local-live.php",
+      "sha256": "0679ad5e7d1e169e683a81308755850373ea864f444ac42d146c5b67e0aeb4a8"
+    },
+    {
+      "path": "tests/mohe-ai/r6-management-ui.cjs",
+      "sha256": "b5e81e06b59c5904bf07c9185763315d957da90e6f533b95ad8cd3e4157be188"
+    },
+    {
+      "path": "tests/mohe-ai/run-all.sh",
+      "sha256": "dd418771789987e3d8dfd8dc8038391e8454c0a7ad93da13cfa992ed40a5a64c"
+    },
+    {
+      "path": "tests/mohe-ai/run-query-mysql.sh",
+      "sha256": "7598b9ab07ad6486c5bd23d5f840d63f5c43a9ef7f473e73019abfaaab7d61bf"
+    },
+    {
+      "path": "scripts/mohe-ai-test-php74.sh",
+      "sha256": "89ea2853c1538b3c95bb25b6d49a564f2772e5dc274fafb0b26921ab1101a932"
+    },
+    {
+      "path": "tests/mohe-ai/R6-DELIVERY.md",
+      "sha256": "3aa2a693ea57f5f39b1af67aabae39ea3fb6280af3241879a4107d580dba40c1"
+    }
+  ]
+}

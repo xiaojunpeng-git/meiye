@@ -97,12 +97,22 @@ try {
  foreach (['mohe_ai_run','mohe_ai_receipt','mohe_ai_attempt','mohe_ai_config'] as $table) { $rows=$db->query('SELECT * FROM '.$table)->fetchAll(PDO::FETCH_ASSOC);$text=json_encode($rows,JSON_UNESCAPED_UNICODE);verifyGateway(strpos($text,'TRANSCRIPT_SECRET_DO_NOT_STORE')===false && strpos($text,'今天消耗业绩多少')===false,'no chat DB '.$table); }
  foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($temp,FilesystemIterator::SKIP_DOTS)) as $file) if($file->isFile())verifyGateway(strpos(file_get_contents($file->getPathname()),'TRANSCRIPT_SECRET_DO_NOT_STORE')===false,'no transcript file');
  $passiveModels=$models; $passiveQueries=$queries;
- $adminStatus=$gateway->handle('config_get',$context,[]);
+ // R6 configuration is a platform-only authority, independent of the store Run fixture.
+ $adminContext=$context;$adminContext['terminal']='platform';
+ $adminCurrent=$adminContext;unset($adminCurrent['_refresh']);
+ $adminContext['_refresh']=function()use(&$adminCurrent){return $adminCurrent;};
+ $adminStatus=$gateway->handle('config_get',$adminContext,[]);
  verifyGateway(isset($adminStatus['runtime_status']['success']) && !isset($adminStatus['api_key']),'administrator passive runtime diagnostics without key');
  verifyGateway($adminStatus['runtime_status']['monitoring']['status']==='not_ready','unregistered monitor is not a healthy-instance assertion');
  verifyGateway($models===$passiveModels && $queries===$passiveQueries,'passive diagnostics neither model nor business query');
- $ordinary=$context; $ordinary['can_configure']=false;
+ // Store context cannot configure even if an obsolete fixture says it can.
+ rejectGateway(function()use($gateway,$context){$gateway->handle('config_get',$context,[]);},'AI_PERMISSION_DENIED');
+ $ordinary=$adminContext; $ordinary['can_configure']=false;
+ $ordinaryCurrent=$ordinary;unset($ordinaryCurrent['_refresh']);
+ $ordinary['_refresh']=function()use($ordinaryCurrent){return $ordinaryCurrent;};
  rejectGateway(function()use($gateway,$ordinary){$gateway->handle('config_get',$ordinary,[]);},'AI_PERMISSION_DENIED');
+ $adminCurrent['can_configure']=false;
+ rejectGateway(function()use($gateway,$adminContext){$gateway->handle('config_get',$adminContext,[]);},'AI_PERMISSION_DENIED');
  $probe=$config->beginProbe(1);
  rejectGateway(function()use($config){$config->beginProbe(1);},'AI_CHECK_RATE_LIMITED');
  $config->finishProbe($probe,'UNKNOWN');

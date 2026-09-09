@@ -25,6 +25,12 @@ export default {
   component: BasicLayout,
   children: [
     {
+      path: 'mohe-ai',
+      name: `${pre}mohe_ai`,
+      meta: { auth: ['setting-mohe-ai'], title: '魔核 AI', moheAiMaintainer: true },
+      component: () => import('@/pages/setting/moheAi/index.vue')
+    },
+    {
       path: 'system_config',
       name: `${pre}setSystem`,
       meta: {

@@ -17,7 +17,15 @@ $aiActions=function () {
     Route::put('config','Ai/aiConfigSave')->completeMatch();
     Route::post('config/check','Ai/aiConfigCheck')->completeMatch();
 };
-Route::group('adminapi/ai',$aiActions)->prefix('admin.v1.ai.')->middleware([
+Route::group('adminapi/ai',function () use($aiActions) {
+    $aiActions();
+    Route::get('management','Ai/aiManagementGet')->completeMatch();
+    Route::put('management/draft','Ai/aiManagementSave')->completeMatch();
+    Route::post('management/validate','Ai/aiManagementValidate')->completeMatch();
+    Route::post('management/publish','Ai/aiManagementPublish')->completeMatch();
+    Route::post('management/rollback','Ai/aiManagementRollback')->completeMatch();
+    Route::post('management/preview','Ai/aiManagementPreview')->completeMatch();
+})->prefix('admin.v1.ai.')->middleware([
     \app\http\middleware\AiRequestGuardMiddleware::class,
 ]);
 Route::group('cashierapi/v3/ai',$aiActions)->prefix('cashier.v3.')->middleware([

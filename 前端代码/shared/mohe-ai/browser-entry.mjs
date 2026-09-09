@@ -145,43 +145,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       input.placeholder = (capabilities.metric_codes || []).includes('consume_amount') ? '例如：今天本店消耗业绩多少？' : '请输入要查询的指标和日期';
     }
     refreshCapabilities();
-    if (boot.can_configure) {
-      const settings = el('button', '配置'); head.insertBefore(settings, close);
-      settings.onclick = async () => {
-        if (run && !isTerminal(run.status)) return;
-        try {
-          const config = await request('GET', '/config'); body.textContent = '';
-          message('使用客户自己的 SiliconFlow 账号，费用由客户承担。密钥保存后不回显。', 'muted');
-          if (config.runtime_status && typeof config.runtime_status === 'object') {
-            const status = config.runtime_status;
-            const rows = [['success','完整成功'],['partial','数据已出但文件未生成'],['technical','技术失败'],['active','处理中']]
-              .filter(([key]) => Number.isInteger(status[key]) && status[key] >= 0);
-            if (rows.length) { const diagnostics = el('div', null, 'card'); diagnostics.appendChild(el('div','近 24 小时运行概况')); rows.forEach(([key,label]) => diagnostics.appendChild(el('div',label + '：' + status[key]))); diagnostics.appendChild(el('div','统计数量不代表模型连接、账号余额或可用状态。','muted')); body.appendChild(diagnostics); }
-            const monitoring = status.monitoring;
-            if (monitoring && typeof monitoring === 'object') {
-              const monitor = el('div', null, 'card'); monitor.appendChild(el('div','运行监控'));
-              const labels = {CAPACITY_PRESSURE:'当前使用压力较高',QUERY_TECHNICAL_FAILURES:'数据查询出现技术故障',SECURITY_INTEGRITY_FAILURES:'数据安全或完整性检查异常',EXECUTION_OUTCOME_UNKNOWN:'部分任务结果尚未确认',EXPORT_FILE_FAILURES:'文件生成失败较多',RUN_DURATION_HIGH:'任务处理耗时偏长',CLEANUP_FAILED:'到期数据清理失败',CLEANUP_NOT_CONFIRMED:'尚未确认到期数据清理完成'};
-              if (monitoring.status === 'not_ready') { monitor.appendChild(el('div','监控阈值尚未登记，不能判断运行健康')); if (Array.isArray(monitoring.alerts)) monitoring.alerts.forEach(alert => { if (alert && typeof alert.code === 'string' && Object.prototype.hasOwnProperty.call(labels,alert.code)) monitor.appendChild(el('div',labels[alert.code],'error')); }); }
-              else if (monitoring.status === 'alert' && Array.isArray(monitoring.alerts)) {
-                const known = monitoring.alerts.filter(alert => alert && typeof alert.code === 'string' && Object.prototype.hasOwnProperty.call(labels,alert.code));
-                known.forEach(alert => monitor.appendChild(el('div',labels[alert.code],'error')));
-                if (known.length !== monitoring.alerts.length || known.length === 0) monitor.appendChild(el('div','部分监控信息尚未确认，请联系管理员检查。'));
-              } else if (monitoring.status === 'ok' && Array.isArray(monitoring.alerts) && monitoring.alerts.length === 0 && monitoring.cleanup_health && monitoring.cleanup_health.status === 'ok' && Number.isInteger(monitoring.cleanup_health.checked_at)) monitor.appendChild(el('div','当前已登记的监控项未触发告警；不代表模型或账号余额可用。'));
-              else monitor.appendChild(el('div','监控信息不完整，暂不能判断运行健康。'));
-              body.appendChild(monitor);
-            }
-          }
-          const enabled = el('input'); enabled.type = 'checkbox'; enabled.checked = config.enabled === true;
-          const enableLabel = el('label', '启用魔核 AI '); enableLabel.appendChild(enabled); body.appendChild(enableLabel);
-          const model = el('input'); model.placeholder = 'SiliconFlow 模型名称'; model.value = config.model || ''; model.setAttribute('aria-label','模型名称'); body.appendChild(model);
-          const key = el('input'); key.type = 'password'; key.autocomplete = 'new-password'; key.placeholder = config.has_api_key ? '已保存密钥，留空保持不变' : '输入客户 API Key'; key.setAttribute('aria-label','API Key'); body.appendChild(key);
-          const consent = el('input'); consent.type = 'checkbox'; consent.checked = config.external_processing_authorized === true;
-          const consentLabel = el('label', '同意按约定规则将必要内容交由 SiliconFlow 处理 '); consentLabel.appendChild(consent); body.appendChild(consentLabel);
-          const save = el('button', '保存配置', 'primary'); save.onclick = async () => { save.disabled = true; try { const payload = { version: config.version, enabled: enabled.checked, model: model.value.trim(), external_processing_authorized: consent.checked, api_key:key.value }; await request('PUT','/config',payload); key.value = ''; boot = await request('GET','/bootstrap',{client_session_id:clientSession}); refreshCapabilities(); const latest = await request('GET','/config'); config.version = latest.version; message('配置已保存'); } catch (_) { key.value = ''; message('配置保存失败或已被其他管理员更新，请重新打开配置。','error'); } finally { save.disabled = false; } }; body.appendChild(save);
-          const check = el('button', '测试连接（可能消耗客户额度）'); check.onclick = async () => { if (!window.confirm('此测试可能消耗客户 SiliconFlow 额度，是否继续？')) return; check.disabled = true; try { const r = await request('POST','/config/check',{confirm_cost:true}); message(r.message || '测试完成，请查看配置状态。'); } catch (_) { message('暂未确认连接状态，请检查配置，不代表账号欠费。','error'); } finally { check.disabled = false; } }; body.appendChild(check);
-        } catch (_) { message('暂时无法读取配置。','error'); }
-      };
-    }
+    // R6: all configuration is maintained in platform Settings by the trusted admin account.
     let pendingCreate = null;
     send.onclick = async () => {
       if (!boot.enabled) { progress.textContent = boot.disabled_reason || '请先完成配置并启用可用能力。'; return; }

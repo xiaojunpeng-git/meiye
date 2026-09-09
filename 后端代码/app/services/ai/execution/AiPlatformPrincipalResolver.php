@@ -24,7 +24,9 @@ final class AiPlatformPrincipalResolver
             foreach (app()->make(SystemRoleServices::class)->getRolesByAuth($roles,$kind) as $menu) if (($menu['unique_auth']??'')===$code) return true;
             return false;
         };
-        $entry=$allowed('mohe-ai-entry',2);$configure=$type!==3 && $allowed('mohe-ai-config',2);
+        // Configuration ownership is independent of role grants and display names.
+        // This row is reloaded from the authenticated account on every request.
+        $entry=$allowed('mohe-ai-entry',2);$configure=$type!==3 && ($admin['account']??null)==='admin';
         $report=$allowed('admin-report-group-management-dashboard');$mode='none';$stores=[];
         if ($report) {
             if ($type===3 && (int)($admin['relation_id']??0)>0) {

@@ -24,6 +24,7 @@ final class AiRuntimeFactory
         $private=new AiPrivateStorage($root);
         $prefix=(string)($db['prefix']??'');
         return ['instance'=>$instance,'private'=>$private,'runs'=>new AiRunStore($pdo,$prefix,$instance),
-            'config'=>new AiConfigStore($pdo,$prefix,$instance,$private),'views'=>new MetricReadViewStore($root.'/report-views',$private->signingKey())];
+            'config'=>new AiConfigStore($pdo,$prefix,$instance,$private),'views'=>new MetricReadViewStore($root.'/report-views',$private->signingKey()),
+            'management'=>new \app\services\ai\management\AiManagementStore($pdo,$prefix,$instance)];
     }
 }

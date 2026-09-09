@@ -40,13 +40,14 @@ final class AiRunStore
             throw new RuntimeException('AI_CREATE_INVALID');
         }
         $keys = ['capability_snapshot_ref','capability_snapshot_hash','budget_profile_version','authorization_version','model_config_version'];
-        $guidanceKeys=['guidance_schema_version','guidance_profile_version','max_clarification_rounds'];
+        $guidanceKeys=['guidance_schema_version','guidance_profile_version','max_clarification_rounds','management_revision'];
         if (array_diff(array_keys($snapshot),array_merge($keys,$guidanceKeys))) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); }
         foreach ($keys as $key) { if (!isset($snapshot[$key]) || !is_string($snapshot[$key])) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); } $this->identifier($snapshot[$key]); }
         if (array_intersect(array_keys($snapshot),$guidanceKeys)) {
             if (($snapshot['guidance_schema_version']??'')!=='mohe-clarification-v2' || !in_array($snapshot['max_clarification_rounds']??null,['3','4','5'],true)
                 || !is_string($snapshot['guidance_profile_version']??null)) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); }
             $this->identifier($snapshot['guidance_profile_version']);
+            if (isset($snapshot['management_revision'])) $this->identifier($snapshot['management_revision']);
         }
         if (!preg_match('/^[a-f0-9]{64}$/D',$snapshot['capability_snapshot_hash'])) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); }
         return $this->transaction(function () use ($owner, $requestId, $requestHash, $snapshot, $budgetMs, $capacity, $activeLimit) {
@@ -473,6 +474,7 @@ final class AiRunStore
         if (in_array($r['reason'],['AI_EXPORT_DISPATCH_UNKNOWN','AI_EXPORT_CANCELLATION_UNKNOWN'],true)) return 'export_unknown';
         if (in_array($r['reason'],['AI_EXPORT_CONTENT_MISMATCH','AI_EXPORT_SIGNATURE_INVALID','AI_EXPORT_SOURCE_MISMATCH','AI_EXPORT_OWNER_MISMATCH','AI_EXPORT_BINDING_INVALID','AI_EXPORT_TASK_BINDING_INVALID','AI_EXPORT_HANDOFF_INVALID','AI_EXPORT_UNSAFE_FAILURE','METRIC_READ_BINDING_MISMATCH'],true)) return 'security';
         if (in_array($r['reason'],['AI_EXPORT_FAILED','AI_EXPORT_DEADLINE','DATA_ONLY_EXPORT_FAILED'],true)) return 'export';
+        if ($r['reason']==='AI_WORKFLOW_DISABLED') return 'neutral';
         return 'technical';
     }
 

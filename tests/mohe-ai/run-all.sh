@@ -15,7 +15,7 @@ for suite in config-contract metric-contract runtime-contract export-source-cont
     export-worker-contract export-runtime-contract; do
     "$php_bin" -d auto_prepend_file="$test_dir/fixture-autoload.php" "$test_dir/$suite.php"
 done
-for suite in semantic-guidance registry-execution state-guidance-contract gateway-r5-guidance r5-holdout; do
+for suite in semantic-guidance registry-execution state-guidance-contract gateway-r5-guidance r5-holdout management-core management-gateway management-menu; do
     "$php_bin" -d auto_prepend_file="$test_dir/fixture-autoload.php" "$test_dir/$suite.php"
 done
 

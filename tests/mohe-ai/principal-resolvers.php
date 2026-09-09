@@ -16,12 +16,30 @@ $root=dirname(__DIR__,2).'/后端代码/app/services/ai/execution/';require $roo
 $count=0;function ok($value){global $count;if(!$value)throw new \RuntimeException('principal check failed');$count++;}function denied($call){try{$call();}catch(\RuntimeException $e){ok(true);return;}throw new \RuntimeException('expected deny');}
 \think\facade\Db::$rows=['system_admin'=>[['id'=>7,'status'=>1,'is_del'=>0,'level'=>1,'admin_type'=>0,'roles'=>'1','employee_id'=>11]],'employee'=>[['id'=>11,'status'=>1,'is_del'=>0]],'system_store'=>[['id'=>1,'is_del'=>0,'name'=>'A']]];
 $p=new \app\services\ai\execution\AiPlatformPrincipalResolver();$b=['terminal'=>'platform','principal_kind'=>'platform_admin','account_id'=>7];ok($p->worker($b)['store_ids']===[1]);
+// R6: role grants, super-admin level, display name and lookalikes cannot grant configuration.
+foreach ([null,'operator','Admin','admin ','admin-other'] as $account) {
+    \think\facade\Db::$rows['system_admin'][0]['account']=$account;
+    \think\facade\Db::$rows['system_admin'][0]['real_name']='admin';
+    ok($p->authenticated(7)['can_configure']===false);
+    ok($p->authenticated(7)['can_use']===true);
+}
+\think\facade\Db::$rows['system_admin'][0]['level']=0;
+ok($p->authenticated(7)['can_configure']===false);
+\think\facade\Db::$rows['system_admin'][0]['level']=1;
+\think\facade\Db::$rows['system_admin'][0]['account']='admin';
+ok($p->authenticated(7)['can_configure']===true);
+\app\services\system\SystemRoleServices::$allow=false;
+ok($p->authenticated(7)['can_configure']===true);
+ok($p->authenticated(7)['can_use']===false);
+\app\services\system\SystemRoleServices::$allow=true;
 \app\services\organization\EmployeeDataScopeServices::$mode='personal';denied(fn()=>$p->worker($b));\app\services\organization\EmployeeDataScopeServices::$mode='store';
 \app\services\system\SystemRoleServices::$allow=false;denied(fn()=>$p->worker($b));\app\services\system\SystemRoleServices::$allow=true;
 \think\facade\Db::$rows['system_admin'][0]['status']=0;denied(fn()=>$p->worker($b));\think\facade\Db::$rows['system_admin'][0]['status']=1;
 \think\facade\Db::$rows['system_admin'][0]['admin_type']=3;\think\facade\Db::$rows['system_admin'][0]['relation_id']=0;denied(fn()=>$p->worker($b));
 \think\facade\Db::$rows['system_admin'][0]['relation_id']=4;ok($p->worker($b)['store_ids']===[2]);
+ok($p->authenticated(7)['can_configure']===false);
 $m=new \app\services\ai\execution\AiMerchantPrincipalResolver();$mb=['terminal'=>'merchant','principal_kind'=>'merchant_employee','account_id'=>9,'employee_id'=>11,'staff_id'=>5,'origin_store_id'=>1,'origin_organization_id'=>'3'];ok($m->worker($mb)['employee_id']===11);
+ok($m->worker($mb)['can_configure']===false);
 \app\services\mobile\merchant\MobileMerchantRequestContextResolver::$account=10;denied(fn()=>$m->worker($mb));\app\services\mobile\merchant\MobileMerchantRequestContextResolver::$account=9;
 \app\services\mobile\warehouse\MobileWarehouseServices::$personal=true;denied(fn()=>$m->worker($mb));$mb['employee_id']='11';denied(fn()=>$m->worker($mb));
 require dirname(__DIR__,2).'/后端代码/app/services/cashier/v3/permission/CashierV3StaffFeatureOverrideServices.php';

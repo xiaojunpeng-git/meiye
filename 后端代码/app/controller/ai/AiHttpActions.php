@@ -17,6 +17,12 @@ trait AiHttpActions
     public function aiConfigGet() { return $this->callAi('config_get'); }
     public function aiConfigSave() { return $this->callAi('config_save'); }
     public function aiConfigCheck() { return $this->callAi('config_check'); }
+    public function aiManagementGet() { return $this->callAi('management_get'); }
+    public function aiManagementSave() { return $this->callAi('management_save'); }
+    public function aiManagementValidate() { return $this->callAi('management_validate'); }
+    public function aiManagementPublish() { return $this->callAi('management_publish'); }
+    public function aiManagementRollback() { return $this->callAi('management_rollback'); }
+    public function aiManagementPreview() { return $this->callAi('management_preview'); }
 
     private function callAi(string $operation,string $runId='')
     {
@@ -50,6 +56,13 @@ trait AiHttpActions
         } catch (\Throwable $exception) {
             // Never return/log SQL, request content, tokens, prompts or provider errors here.
             $message=[
+                'AI_PERMISSION_DENIED'=>'当前账号没有此项操作权限。',
+                'AI_MANAGEMENT_REVISION_CONFLICT'=>'配置已更新，请刷新后重新操作，未覆盖其他修改。',
+                'AI_MANAGEMENT_DOCUMENT_INVALID'=>'配置内容不符合已登记能力，请检查填写项。',
+                'AI_MANAGEMENT_BUDGET_INVALID'=>'执行预算不合法，不能超过已登记上限或小于节点预算合计。',
+                'AI_MANAGEMENT_SOURCE_CHANGED'=>'底层能力版本已变化，请联系维护人员核对配置。',
+                'AI_MANAGEMENT_NOT_READY'=>'管理配置尚未安装完成，请联系维护人员。',
+                'AI_MANAGEMENT_VERSION_NOT_FOUND'=>'所选配置版本不存在或不属于当前实例。',
                 'AI_CLIENT_UPGRADE_REQUIRED'=>'魔核 AI 已更新，请刷新页面后重新打开。',
                 'AI_CLARIFICATION_STALE'=>'这一步已更新，请使用当前显示的选项确认。',
                 'AI_IDEMPOTENCY_CONFLICT'=>'本次提交与先前记录不一致，请刷新任务状态后再操作。',

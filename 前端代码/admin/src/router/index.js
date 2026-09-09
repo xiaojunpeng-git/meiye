@@ -14,6 +14,7 @@ import iView from 'view-design';
 import util from '@/libs/util';
 
 import Setting from '@/setting';
+import moheAiRequest from '@/api/moheAi';
 
 import store from '@/store/index';
 
@@ -138,6 +139,19 @@ async function handleAuthenticatedRoute(to, next, agent_access, access) {
     .find(route => route.meta && route.meta.auth);
   const meta = permissionRoute ? permissionRoute.meta : {};
   const userInfo = store.state.admin.user.info || {};
+  // Old login snapshots may not include account. Resolve this dedicated entry
+  // from the current server principal, never from root-level or cached access.
+  if (meta.moheAiMaintainer) {
+    store.commit('admin/menu/setMoheAiVerifiedUser', null);
+    if (meta.isAgentRoute) return next({ name: '403' });
+    try {
+      await moheAiRequest('GET', '/management');
+      await store.dispatch('admin/menus/getMenusNavList');
+      store.commit('admin/menu/setMoheAiVerifiedUser', store.state.admin.user.info);
+      return next();
+    }
+    catch (_) { return next({ name: '403' }); }
+  }
   const account = String(userInfo.account || userInfo.username || '').trim().toLowerCase();
   const isRootAdmin = (
     Number(userInfo.level) === 0 && Number(userInfo.admin_type || userInfo.adminType || 0) !== 3

@@ -363,6 +363,8 @@ class Common extends AuthController
 			}
 			return sort_list_tier($data);
 		});
+        // Apply account ownership after the shared role cache, never inside it.
+        $list = \app\services\ai\management\AiManagementMenuPolicy::raw($list, is_array($this->adminInfo) ? $this->adminInfo : $this->adminInfo->toArray());
         return app('json')->success($list);
     }
 

@@ -13,7 +13,7 @@ const flush = () => new Promise(r => setTimeout(r,10));
 const calls = []; let finishExecute;
 const request = async (method,path,payload) => {
   calls.push({method,path,payload});
-  if (path === '/bootstrap') return {enabled:true,can_configure:false,identity_key:'fixture:user',window_token:'w',capabilities:{metric_codes:['consume_amount'],output_formats:['screen']}};
+  if (path === '/bootstrap') return {enabled:true,can_configure:true,identity_key:'fixture:user',window_token:'w',capabilities:{metric_codes:['consume_amount'],output_formats:['screen']}};
   if (path === '/runs') return {run_id:'r',generation:1,run_delivery_token:'delivery',status:'READY',progress:'已接纳'};
   if (path.endsWith('/execute')) return new Promise(resolve=>{finishExecute=resolve;});
   if (path.endsWith('/cancel')) return {run_id:'r',generation:1,status:'CANCELLED'};
@@ -23,6 +23,8 @@ const dispose = mountMoheAi({request}); await flush();
 const root = document.querySelector('[data-mohe-ai]').shadowRoot;
 root.querySelector('.entry').click(); await flush();
 assert.ok(root.querySelector('[role=dialog]'));
+assert.equal(Array.from(root.querySelectorAll('button')).some(b=>b.textContent==='配置'),false);
+assert.equal(root.querySelector('input[type=password]'),null);
 assert.equal(root.querySelector('textarea').placeholder,'例如：今天本店消耗业绩多少？');
 assert.equal(root.querySelector('option[value="screen_and_xlsx"]').disabled,true);
 const input = root.querySelector('textarea'); input.value = '<img src=x onerror=alert(1)>今天现金业绩';
@@ -38,4 +40,5 @@ finishExecute({run_id:'r',generation:1,status:'COMPLETED',answer:{summary:'迟�
 assert.equal(root.querySelector('.value'),null);
 assert.equal(window.localStorage.getItem('mohe-ai:v1:fixture%3Auser').includes('999'),false);
 dispose(); assert.equal(document.querySelector('[data-mohe-ai]'),null);
-console.log('Browser entry create/execute/cancel/late result/XSS/capability: 12 checks PASS');
+assert.equal(calls.some(c=>c.path.startsWith('/config')),false);
+console.log('Browser entry create/execute/cancel/late result/XSS/capability/admin-no-config: 15 checks PASS');

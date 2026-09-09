@@ -14,6 +14,7 @@ import { cloneDeep } from 'lodash';
 import { includeArray } from '@/libs/system';
 import util from '@/libs/util';
 import Setting from '@/setting';
+import { filterMoheAiManagementMenu } from '@/libs/moheAiManagementMenu';
 import { normalizeOrganizationWorkspaceMenu } from '@/libs/organizationWorkspaceMenu';
 import { normalizeProductBusinessConfigMenu } from '@/libs/productBusinessConfigMenu';
 
@@ -130,6 +131,8 @@ function getChilden(data) {
 export default {
   namespaced: true,
   state: {
+    // In-memory server probe only; replacing login user info invalidates it.
+    moheAiVerifiedUser: null,
     // 顶部菜单
     header: [],
     // 侧栏菜单
@@ -149,7 +152,8 @@ export default {
     filterSider(state, getters, rootState) {
       const userInfo = rootState.admin.user.info;
       // @权限
-      const access = userInfo.access;
+      const aiVerified = state.moheAiVerifiedUser !== null && state.moheAiVerifiedUser === userInfo;
+      const access = aiVerified ? [...(Array.isArray(userInfo.access) ? userInfo.access : []), 'setting-mohe-ai'] : userInfo.access;
       // 后端对 level=0 的平台超级管理员不做菜单权限裁剪；前端也必须保持同一口径，
       // 否则新增的独立报表入口会在菜单中消失并被路由守卫拦截。
       const account = String(userInfo.account || userInfo.username || '').trim().toLowerCase();
@@ -165,7 +169,7 @@ export default {
         filtered = filterMenu(state.sider, [], []);
       }
       return normalizeProductBusinessConfigMenu(
-        normalizeOrganizationWorkspaceMenu(filtered, Setting.roterPre),
+        normalizeOrganizationWorkspaceMenu(filterMoheAiManagementMenu(filtered, userInfo, aiVerified), Setting.roterPre),
         Setting.roterPre
       );
     },
@@ -213,6 +217,7 @@ export default {
     }
   },
   mutations: {
+    setMoheAiVerifiedUser(state, user) { state.moheAiVerifiedUser = user; },
     /**
          * @description 设置侧边栏菜单
          * @param {Object} state vuex state

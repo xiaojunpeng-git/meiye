@@ -14,6 +14,7 @@ final class AiMerchantPrincipalResolver
         if ((int)$current['accountId']!==(int)$merchant['accountId']) throw new \RuntimeException('AI_AUTH_REQUIRED');
         if (!in_array('MERCHANT_WAREHOUSE_VIEW',(array)$current['availableActions'],true)) throw new \RuntimeException('AI_PERMISSION_REVOKED');
         $context=app()->make(MobileWarehouseServices::class)->aiReportContext($current);
+        $context['can_configure']=false; // Configuration is platform admin-only, never inherited from merchant scope.
         return $context+['tenant_id'=>'0','origin_store_id'=>(int)$current['storeId'],'origin_organization_id'=>(string)$current['organizationId'],
             'employee_id'=>(int)$current['employeeId'],'staff_id'=>(int)$current['staffId'],'export_principal_ready'=>true,'principal_kind'=>'merchant_employee'];
     }

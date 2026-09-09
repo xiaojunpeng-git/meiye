@@ -18,19 +18,21 @@ use RuntimeException;
 final class AiGatewayServices
 {
     private $runs; private $config; private $private; private $instance; private $views; private $model; private $queryTransaction; private $exports;
+    private $management; private $managementDocument; private $managementRevision='source';
 
     /** Optional injected dependencies are for an isolated integration environment, never request parameters. */
     public function __construct(?AiRunStore $runs = null, ?AiConfigStore $config = null, ?AiPrivateStorage $private = null,
-        string $instance = '', ?MetricReadViewStore $views = null, ?callable $model = null, ?callable $queryTransaction = null)
+        string $instance = '', ?MetricReadViewStore $views = null, ?callable $model = null, ?callable $queryTransaction = null, $management = null)
     {
         $this->runs=$runs; $this->config=$config; $this->private=$private; $this->instance=$instance; $this->views=$views; $this->model=$model; $this->queryTransaction=$queryTransaction;
+        $this->management=$management;
     }
 
     private function initialize(): void
     {
         if ($this->runs) return;
         $runtime=\app\services\ai\execution\AiRuntimeFactory::make();
-        foreach (['instance','private','runs','config','views'] as $key) $this->$key=$runtime[$key];
+        foreach (['instance','private','runs','config','views','management'] as $key) $this->$key=$runtime[$key];
     }
 
     /** Trusted CLI supervision only. Counts contain no account, Run ID or conversation data. */
@@ -60,12 +62,16 @@ final class AiGatewayServices
             'export'=>['client_session_id','generation','run_delivery_token'],
             'clarify'=>['client_session_id','generation','run_delivery_token','clarification_id','choices','schema_version','step_revision','intent_revision','client_submission_id','revise_clarification_id'],
             'config_get'=>[], 'config_save'=>['version','enabled','model','api_key','external_processing_authorized'], 'config_check'=>['confirm_cost'],
+            'management_get'=>[], 'management_save'=>['expected_revision','document'], 'management_validate'=>['expected_revision'],
+            'management_publish'=>['expected_revision'], 'management_rollback'=>['expected_revision','target_version'],
+            'management_preview'=>['expected_revision','question'],
         ];
         if (!isset($schemas[$operation]) || array_diff(array_keys($input),$schemas[$operation])) throw new RuntimeException('AI_INPUT_SCHEMA_INVALID');
         $this->initialize();
         if (!in_array($context['terminal']??'', ['platform','store','merchant'],true) || (int)($context['account_id']??0)<1) throw new RuntimeException('AI_AUTH_REQUIRED');
+        if (strpos($operation,'management_')===0) return $this->manage($operation,$context,$input);
         if (strpos($operation,'config_')===0) {
-            if (empty($context['can_configure'])) throw new RuntimeException('AI_PERMISSION_DENIED');
+            if ($context['terminal']!=='platform' || empty($this->fresh($context)['can_configure'])) throw new RuntimeException('AI_PERMISSION_DENIED');
             if ($operation==='config_get') {
                 $diagnostics=$this->runs->diagnostics();
                 $diagnostics['monitoring']=$this->monitor()->evaluate($diagnostics);
@@ -76,6 +82,7 @@ final class AiGatewayServices
         }
         $configuration=$this->config->read();
         if ($operation==='bootstrap') {
+            $this->loadManagement();
             $session=$this->identifier($input['client_session_id']??null);
             return ['enabled'=>!empty($context['can_use']) && $configuration['enabled'], 'configured'=>$configuration['has_api_key'],
                 'identity_key'=>$this->identity($context),'window_token'=>$this->token(['type'=>'window','identity'=>$this->identity($context),'window'=>$session,'expires'=>time()+86400]),
@@ -86,6 +93,7 @@ final class AiGatewayServices
         // Revocation must never prevent this authenticated owner from stopping their old task.
         if ($operation!=='cancel' && empty($context['can_use'])) throw new RuntimeException('AI_PERMISSION_DENIED');
         if ($operation==='create') {
+            $this->loadManagement();
             if (($input['guidance_schema_version']??'')!=='mohe-clarification-v2') throw new RuntimeException('AI_CLIENT_UPGRADE_REQUIRED');
             if (!$configuration['enabled'] || !$configuration['external_processing_authorized']) throw new RuntimeException('AI_NOT_CONFIGURED');
             $session=$this->identifier($input['client_session_id']??null);
@@ -96,6 +104,7 @@ final class AiGatewayServices
             $snapshot=['capability_snapshot_ref'=>$this->registryHash($context),'capability_snapshot_hash'=>hash('sha256',json_encode($this->capabilities($context))),
                 'budget_profile_version'=>$limits['run_budget_ms'].'-v1','authorization_version'=>$this->permissionHash($context),'model_config_version'=>(string)$configuration['version'],
                 'guidance_schema_version'=>'mohe-clarification-v2','guidance_profile_version'=>'guidance-v2-'.$limits['max_clarification_rounds'],'max_clarification_rounds'=>(string)$limits['max_clarification_rounds']];
+            if ($this->management) $snapshot['management_revision']=$this->managementRevision;
             $created=$this->runs->create($owner,$this->identifier($input['client_request_id']??null),$this->bodyHash($body),$snapshot,$limits['run_budget_ms'],$limits['execution_slots'],$limits['active_run_limit']);
             if (!$created['accepted']) return ['accepted'=>false,'reason'=>$created['reason'],'message'=>[
                 'RATE_LIMITED'=>'您近期提问较频繁，请稍后再问。',
@@ -131,6 +140,8 @@ final class AiGatewayServices
     {
         $worker=bin2hex(random_bytes(24)); $claimed=false; $paused=false;
         try {
+            $frozen=$this->runs->snapshot($owner,$id,$generation);
+            $this->loadManagement($frozen['management_revision']??'source');
             if ($operation==='execute') {
                 $body=$this->conversation($input); $this->runs->assertRequest($owner,$id,$generation,$this->bodyHash($body));
                 $current=$this->runs->get($owner,$id,$generation);
@@ -189,6 +200,7 @@ final class AiGatewayServices
                 $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
                 $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
                 $compiled=(new AiWorkflowPlanner())->compile($view['current'],$reply['selection'],$capabilities,$body['output_format'],$today);
+                $compiled=$this->decorateGuidance($compiled);
                 if ($compiled['kind']==='clarification') {
                     $r=$this->issueGuidance($owner,$id,$generation,$worker,$compiled,$compiled,[]); $paused=true;
                     return $this->present($context,$owner,$r);
@@ -221,7 +233,83 @@ final class AiGatewayServices
 
     private function registryHash(array $context): string
     {
-        return (new AiBusinessRegistry())->snapshot($this->capabilities($context))['snapshot_hash'];
+        return $this->registry()->snapshot($this->capabilities($context))['snapshot_hash'];
+    }
+
+    private function loadManagement(?string $version=null): void
+    {
+        $this->managementDocument=null; $this->managementRevision='source';
+        if (!$this->management) return;
+        $record=$version===null?$this->management->active():$this->management->version($version);
+        $this->managementRevision=$record['version'];
+        // Old source runs retain exactly the pre-management registry and guidance.
+        if ($record['version']!=='source') $this->managementDocument=$record['document'];
+    }
+    private function registry(): AiBusinessRegistry
+    {
+        return $this->managementDocument
+            ? \app\services\ai\management\AiManagementPolicy::registry($this->managementDocument)
+            : new AiBusinessRegistry();
+    }
+    private function decorateGuidance(array $plan): array
+    {
+        return $this->managementDocument
+            ? \app\services\ai\management\AiManagementPolicy::decorateEnvelope($this->managementDocument,$plan) : $plan;
+    }
+    private function assertManagedPlan(array $plan): void
+    {
+        if (!$this->managementDocument) return;
+        $shape=$plan['query']['query_shape']??($plan['query_shape']??'');
+        $code=$shape==='definition'?'wf_metric_definition':'wf_performance_'.$shape;
+        $policy=$this->managementDocument['workflows'][$code]??null;
+        if (!$policy || !$policy['enabled']) throw new RuntimeException('AI_WORKFLOW_DISABLED');
+        if (($plan['output_format']??'screen')==='screen_and_xlsx' && !$policy['allow_export']) throw new RuntimeException('AI_EXPORT_NOT_READY');
+    }
+
+    /** Admin settings only. Preview never calls a model or reads business facts. */
+    private function manage(string $operation,array $context,array $input): array
+    {
+        if ($context['terminal']!=='platform' || empty($this->fresh($context)['can_configure'])) throw new RuntimeException('AI_PERMISSION_DENIED');
+        if (!$this->management) throw new RuntimeException('AI_MANAGEMENT_NOT_READY');
+        $expected=$input['expected_revision']??null;
+        if ($operation!=='management_get' && (!is_int($expected)||$expected<1)) throw new RuntimeException('AI_MANAGEMENT_REVISION_CONFLICT');
+        if ($operation==='management_save') {
+            if (!is_array($input['document']??null)) throw new RuntimeException('AI_MANAGEMENT_DOCUMENT_INVALID');
+            $this->management->saveDraft($expected,$input['document']);
+        } elseif ($operation==='management_validate') return $this->management->validateDraft($expected);
+        elseif ($operation==='management_publish') $this->management->publish($expected);
+        elseif ($operation==='management_rollback') {
+            if (!is_string($input['target_version']??null)) throw new RuntimeException('AI_MANAGEMENT_VERSION_NOT_FOUND');
+            $this->management->rollback($expected,$input['target_version']);
+        } elseif ($operation==='management_preview') {
+            $this->management->validateDraft($expected);
+            $state=$this->management->read();
+            if ($state['revision']!==$expected) throw new RuntimeException('AI_MANAGEMENT_REVISION_CONFLICT');
+            $this->managementDocument=$state['draft'];
+            $body=(new AiModelInputProjector())->validateConversation($input['question']??null,[]);
+            $projection=(new AiModelInputProjector())->project($body['question']);
+            try {
+                $signals=$projection['signals']; $shape='summary';
+                foreach (['trend','ranking','comparison'] as $candidate) if (in_array($candidate,$signals,true)) $shape=$candidate;
+                if (array_intersect(['top_5','bottom_5','rank_top','rank_bottom'],$signals)) $shape='ranking';
+                $caps=$this->capabilities($context); $caps['current_store_bound']=false;
+                $selection=['decision'=>'supported','query_shape'=>$shape,'metric_codes'=>array_values(array_intersect(['cash_performance','consume_amount'],$signals))];
+                $preview=$this->decorateGuidance((new AiWorkflowPlanner())->compile($projection,$selection,$caps,'screen',(new \DateTimeImmutable('now',new \DateTimeZone('Asia/Shanghai')))->format('Y-m-d')));
+                if ($preview['kind']==='plan') {
+                    $this->assertManagedPlan($preview['plan']);
+                    $compiled=(new AiRegisteredPlanCompiler($this->registry()))->compile($preview['plan'],$caps);
+                    $preview['workflow_code']=$compiled['workflow_code']; $preview['nodes']=$compiled['nodes'];
+                    $preview['compiled_run_hash']=$compiled['compiled_run_hash'];
+                }
+                return $preview+['revision'=>$expected,'mode'=>'draft_preview','model_called'=>false,'business_data_read'=>false];
+            } catch (\Throwable $error) {
+                $reason=preg_match('/^AI_[A-Z0-9_]+$/D',$error->getMessage())?$error->getMessage():'AI_PREVIEW_FAILED';
+                return ['kind'=>'unsupported','reason'=>$reason,'message'=>'当前草稿不能合法完成此问题，请检查能力或明确条件。','mode'=>'draft_preview','model_called'=>false,'business_data_read'=>false,'revision'=>$expected];
+            }
+        }
+        $state=$this->management->read();
+        $active=$this->management->version($state['active_version']);
+        return $state+['active_document'=>$active['document'],'catalog'=>\app\services\ai\management\AiManagementPolicy::catalog()];
     }
 
     /** Signed evidence supplies prior conditions, never prior figures or additional data authority. */
@@ -257,7 +345,7 @@ final class AiGatewayServices
 
     private function discoverIntent(array $context,array $intent): array
     {
-        $registry=new AiBusinessRegistry(); $snapshot=$registry->snapshot($this->capabilities($context));
+        $registry=$this->registry(); $snapshot=$registry->snapshot($this->capabilities($context));
         $goal=$intent['semantic_intent']['goal']??'business_results';
         $scene=$goal==='store_performance_comparison'?'store_performance_compare':'business_performance_overview';
         $scenes=$registry->discover($snapshot,1,['scene_codes'=>[$scene]]);
@@ -287,7 +375,7 @@ final class AiGatewayServices
         if (!is_array($choices)) throw new RuntimeException('AI_CLARIFICATION_INVALID');
         $steps=$stored['accepted_steps']??[];
         if (!isset($input['revise_clarification_id'])) {
-            $next=$planner->choose($stored['envelope'],$choices);
+            $next=$this->decorateGuidance($planner->choose($stored['envelope'],$choices));
             $steps[]=['id'=>$ref,'envelope'=>$stored['envelope'],'choices'=>$choices];
             return [$next,$steps];
         }
@@ -299,7 +387,7 @@ final class AiGatewayServices
             $expected=array_column($draft['fields'],'key'); $previous=array_keys($step['choices']); sort($expected); sort($previous);
             if ($expected!==$previous) continue;
             $selection=$step['id']===$target?$choices:$step['choices'];
-            try { $next=$planner->choose($draft,$selection); }
+            try { $next=$this->decorateGuidance($planner->choose($draft,$selection)); }
             catch (\Throwable $error) {
                 if ($step['id']===$target || !$found) throw $error;
                 break; // Invalid dependent binding must be re-confirmed, not silently retained.
@@ -317,7 +405,8 @@ final class AiGatewayServices
         $today=(new \DateTimeImmutable('@'.intdiv($run['created_at'],1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
         if (isset($plannerPlan['query']) && ($plannerPlan['query']['end_date']>$today || (($plannerPlan['query']['compare_range']['end']??$today)>$today))) throw new RuntimeException('AI_FUTURE_ACTUALS_UNAVAILABLE');
         $budget=(int)explode('-',$snapshot['budget_profile_version'])[0];
-        $plan=(new AiRegisteredPlanCompiler())->compile($plannerPlan,$this->capabilities($context),[
+        $this->assertManagedPlan($plannerPlan);
+        $plan=(new AiRegisteredPlanCompiler($this->registry()))->compile($plannerPlan,$this->capabilities($context),[
             'run_budget_ms'=>$budget,'remaining_execution_ms'=>min($budget,$run['deadline_at']-(int)floor(microtime(true)*1000))]);
         $evidence=null; $answer=null; $waiting=null; $trace=[];
         $guard=function() use($context,$owner,$id,$generation,$worker,$snapshot,&$waiting): void {
@@ -376,7 +465,7 @@ final class AiGatewayServices
                 return ['deferred'=>true];
             },
         ];
-        $execution=(new AiRegisteredWorkflowExecutor())->execute($plan,$handlers,$checkpoint);
+        $execution=(new AiRegisteredWorkflowExecutor($this->registry()))->execute($plan,$handlers,$checkpoint);
         if ($waiting!==null) return $waiting;
         $guard();
         [$evidenceRef,$answerRef]=$this->saveResults($owner,$id,$generation,$plan,$evidence,$answer,$execution['trace']);
@@ -388,7 +477,8 @@ final class AiGatewayServices
         $expires=min($evidence['expires_at'],intdiv($this->runs->get($owner,$id,$generation)['expires_at'],1000));
         $binding=['owner'=>$owner,'run_id'=>$id,'generation'=>$generation];
         $source=$plan['query']===null?['definition'=>$evidence]:['view_ref'=>$evidence['read_consistency_ref'],'query'=>$plan['query']];
-        return [$this->private->put('evidence',$binding+$source+['compiled_run_hash'=>$plan['compiled_run_hash'],'execution_trace'=>$trace],$expires),
+        return [$this->private->put('evidence',$binding+$source+['compiled_run_hash'=>$plan['compiled_run_hash'],'execution_trace'=>$trace,
+            'workflow_code'=>$plan['workflow_code'],'management_version'=>$this->managementRevision],$expires),
             $this->private->put('answer',$binding+['answer'=>$answer],$expires)];
     }
 
@@ -449,6 +539,7 @@ final class AiGatewayServices
     {
         $values=[];
         foreach (['run_budget_ms'=>180000,'execution_slots'=>4,'active_run_limit'=>8,'max_clarification_rounds'=>3] as $key=>$default) $values[$key]=function_exists('config')?config('mohe_ai.'.$key,$default):$default;
+        if ($this->managementDocument) $values['max_clarification_rounds']=$this->managementDocument['guidance']['max_rounds'];
         foreach ($values as $value) if (!is_int($value)) throw new RuntimeException('AI_CAPACITY_PROFILE_INVALID');
         if ($values['run_budget_ms']<180000||$values['run_budget_ms']>300000||$values['execution_slots']<1||$values['execution_slots']>64||$values['active_run_limit']<1||$values['active_run_limit']>128) throw new RuntimeException('AI_CAPACITY_PROFILE_INVALID');
         if (!in_array($values['max_clarification_rounds'],[3,4,5],true)) throw new RuntimeException('AI_GUIDANCE_PROFILE_INVALID');
@@ -508,6 +599,10 @@ final class AiGatewayServices
             else $this->queryService($context)->replay([],$stored['query'],$stored['view_ref']);
             $answer=$this->private->read($run['answer_ref']); $this->assertBinding($answer,$owner,$run['run_id'],$run['generation']);
             $result['answer']=$answer['answer'];
+            if ($context['terminal']==='platform' && !empty($this->fresh($context)['can_configure'])) {
+                $result['management_trace']=['workflow_code'=>$stored['workflow_code']??null,'management_version'=>$stored['management_version']??'source',
+                    'nodes'=>$stored['execution_trace']??[]];
+            }
             if (isset($stored['query'])) $result['answer']['context_ref']=$this->token(['type'=>'context','identity'=>$this->identity($context),'window'=>$owner['window_id'],
                 'conversation'=>$owner['conversation_id'],'run'=>$run['run_id'],'generation'=>$run['generation'],'evidence'=>$run['evidence_ref'],'expires'=>intdiv($run['expires_at'],1000)]);
             if ($run['status']==='COMPLETED' && ($answer['answer']['export_status']??null)==='ready' && !empty($answer['export_task_no'])) {
@@ -567,6 +662,7 @@ final class AiGatewayServices
         if ($run['status']==='PARTIAL_SUCCEEDED') return '数据已核对，文件未生成';
         if ($run['status']==='WAITING_EXPORT') return '正在生成 Excel 文件';
         if ($run['status']==='FAILED') return [
+            'AI_WORKFLOW_DISABLED'=>'此项分析能力已由管理员停用，请联系平台管理员。',
             'AI_INTENT_UNRESOLVED'=>'还不能准确确定您的完整需求。请明确想了解什么、涉及对象和时间；本次未删减条件或查询数据。',
             'AI_CAPABILITY_NOT_READY'=>'已识别您的需求，但对应的数据能力或筛选组合尚未接入，暂不能准确提供结果。',
             'AI_CONTEXT_REQUIRED'=>'本次缺少可验证的前文条件，请明确要查询的指标和时间。',

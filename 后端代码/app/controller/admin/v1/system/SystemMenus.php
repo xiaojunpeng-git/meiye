@@ -239,6 +239,7 @@ class SystemMenus extends AuthController
             ['type', 1]
         ], true);
         [$menus, $unique] = $this->services->getMenusList($this->adminInfo['roles'], (int)$this->adminInfo['level']);
+        [$menus, $unique] = \app\services\ai\management\AiManagementMenuPolicy::formatted($menus, $unique, is_array($this->adminInfo) ? $this->adminInfo : $this->adminInfo->toArray());
         return app('json')->success(['menus' => $menus, 'unique' => $unique]);
     }
 
