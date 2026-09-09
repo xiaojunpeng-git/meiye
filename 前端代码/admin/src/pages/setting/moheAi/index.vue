@@ -22,7 +22,7 @@
 
       <section v-if="tab === 'catalog'" class="box">
         <h2>能力目录</h2><p class="muted">目录来自已登记的后端能力。管理配置不能新增指标公式、SQL、DAO 或扩大数据权限。</p>
-        <h3>一级 · 业务场景</h3><div v-for="(scene, code) in catalog.scenes" :key="code" class="subbox"><strong>{{ scene.label }}</strong><p>{{ scene.goal }}</p><code>{{ code }}</code></div>
+        <h3>一级 · 业务场景</h3><div v-for="(scene, code) in catalog.scenes" :key="code" class="subbox"><strong>{{ scene.label }}</strong><p>{{ scene.goal }}</p><code>{{ code }}</code><details v-if="scene.skill_code"><summary>查看 Skill 详情 · {{ scene.skill_code }}</summary><ai-skill-detail :scene-code="code" :catalog="catalog" :published="state.active_document" :version="activeVersion" /></details></div>
         <h3>二级 · Skill 与工作流</h3><div v-for="(flow, code) in catalog.workflows" :key="code" class="subbox"><strong>{{ workflowLabel(code) }}</strong><p>Skill：{{ workflowSkill(flow) }} · {{ workflowStatus(code) }}</p><code>{{ code }}</code><p>支持形态：{{ flow.shape || flow.query_shape || '按已登记契约' }}</p></div>
         <h3>三级 · 只读 Tool 与执行节点</h3><div v-for="(tool, code) in catalog.tools" :key="code" class="subbox"><strong>{{ tool.label || code }}</strong><p>{{ tool.description || '只读能力，参数与权限由后端校验' }}</p><code>{{ code }}</code></div>
       </section>
@@ -58,9 +58,10 @@
 import request from '@/api/moheAi';
 import AiTrial from './trial.vue';
 import AiConfirm from './confirm.vue';
+import AiSkillDetail from './skillDetail.vue';
 const copy = value => JSON.parse(JSON.stringify(value));
 export default {
-  name: 'MoheAiManagement', components: { AiTrial, AiConfirm },
+  name: 'MoheAiManagement', components: { AiTrial, AiConfirm, AiSkillDetail },
   data() { return { tab: 'config', tabs: [{ key: 'config', label: '基础配置' }, { key: 'catalog', label: '能力目录' }, { key: 'scenes', label: '场景与引导' }, { key: 'workflows', label: '工作流编排' }, { key: 'trial', label: '试问验证' }, { key: 'versions', label: '版本管理' }], state: null, document: null, config: null, apiKey: '', loading: true, busy: false, dirty: false, validated: false, error: '', notice: '', question: '', preview: null }; },
   computed: {
     catalog() { return this.state.catalog || {}; }, defaults() { return this.catalog.defaults || { workflows: {} }; },
