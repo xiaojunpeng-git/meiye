@@ -23,6 +23,19 @@ paCheck($step['fields'][0]['key']==='analysis_object','actual object choice firs
 $next=$planner->choose($step,['analysis_object'=>'position:2']);
 paCheck($next['fields'][0]['key']==='analysis_metric' && count($next['fields'][0]['options'])===2,'best does not guess cash or labor');
 $plan=$planner->choose($next,['analysis_metric'=>'staff_labor_yeji'])['plan'];
+$follow=new app\services\ai\execution\AiFollowupQueryPlanner();
+$names=array_map(static function($value){return $value['name'];},$candidates);
+$month=$follow->compile($plan['query'],'那本月做最好的呢',$names,'screen','2026-09-09')['plan'];
+paCheck($month['query']['start_date']==='2026-09-01' && $month['query']['end_date']==='2026-09-09','followup changes only period to month to date');
+foreach(['business_filters','store_ids','metric_codes','ranking'] as $key)paCheck($month['query'][$key]===$plan['query'][$key],'followup preserves '.$key);
+$changed=$follow->compile($month['query'],'那销售人业绩呢',$names,'screen','2026-09-09')['plan']['query'];
+paCheck($changed['metric_codes']===['staff_sales_yeji'] && $changed['business_filters']===$month['query']['business_filters'],'explicit dictionary metric overrides without dropping object');
+$bottom=$follow->compile($month['query'],'那后3名呢',$names,'screen','2026-09-09')['plan']['query'];
+paCheck($bottom['ranking']===['direction'=>'bottom','limit'=>3],'explicit rank direction/count override rather than fixed five');
+foreach(['那本月排除合作方呢','那本月张某呢','那本月服务数量呢','那本月现金呢','那今天到本月呢'] as $q)
+ paReject(function()use($follow,$plan,$names,$q){$follow->compile($plan['query'],$q,$names,'screen','2026-09-09');},'AI_FOLLOWUP_CONDITION_REQUIRED');
+$explicitStore=$plan['query'];$explicitStore['store_ids']=[1];
+paCheck($follow->compile($explicitStore,'那昨天呢',$names,'screen','2026-09-09')['plan']['query']['store_ids']===[1],'explicit store scope preserved');
 paCheck($plan['query']['business_filters']===['object_kind'=>'person','selection_ref'=>'position:2'],'selection survives into executable query');
 paCheck($plan['query']['ranking']===['direction'=>'top','limit'=>1] && $plan['query']['start_date']==='2026-09-09','singular who preserves today and one result');
 paReject(function()use($planner,$step){$planner->choose($step,['analysis_object'=>'position:999']);},'AI_CLARIFICATION_INVALID');

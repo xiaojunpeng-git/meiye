@@ -178,7 +178,16 @@ final class AiGatewayServices
                 if (($view['current']['semantic_intent']['followup']??'none')==='requested' && isset($body['context_ref'])) {
                     $view['current']=$this->inheritContext($context,$owner,$body['context_ref'],$view['current']);
                 }
-                if (AiConfigStore::allowsSanitizedQuestion($configuration) && in_array($view['current']['blocking_reason']??null,['AI_INTENT_UNRESOLVED','AI_CAPABILITY_NOT_READY'],true)) {
+                if (isset($view['current']['verified_source_query'])) {
+                    $names=[];$dictionary=new \app\services\metric\MetricDictionaryServices();
+                    foreach($currentCapabilities['metric_codes'] as $code) {
+                        $tooltip=$dictionary->getTooltip($code);
+                        if(($tooltip['user_ready']??false)===true)$names[$code]=$tooltip['name'];
+                    }
+                    $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
+                    $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
+                    $compiled=(new \app\services\ai\execution\AiFollowupQueryPlanner())->compile($view['current']['verified_source_query'],$body['question'],$names,$body['output_format'],$today);
+                } elseif (AiConfigStore::allowsSanitizedQuestion($configuration) && in_array($view['current']['blocking_reason']??null,['AI_INTENT_UNRESOLVED','AI_CAPABILITY_NOT_READY'],true)) {
                     $compiled=$this->understandAnalysis($context,$owner,$id,$generation,$worker,$body,$view['current'],$configuration);
                 } else {
                 // Unknown meaningful constraints are retained as blockers, never deleted to force a match.
@@ -331,7 +340,10 @@ final class AiGatewayServices
         if (!isset($stored['query'],$stored['view_ref'])) throw new RuntimeException('AI_CONTEXT_REQUIRED');
         $query=$stored['query'];
         $this->queryService($context)->replay([],$query,$stored['view_ref']);
-        if ($query['business_filters']!==[] || $query['store_ids']!==[]) throw new RuntimeException('AI_CONTEXT_REQUIRED');
+        if ($query['business_filters']!==[] || $query['store_ids']!==[]) {
+            $intent['verified_source_query']=$query;
+            return $intent;
+        }
         // Explicit current conditions always win. Missing slots inherit only this validated source.
         if (!array_intersect(['cash_performance','consume_amount','ambiguous_metric','actual_performance'],$intent['signals'])) $intent['signals']=array_merge($intent['signals'],$query['metric_codes']);
         if (!array_intersect(['summary','trend','comparison','ranking','definition'],$intent['signals'])) {
@@ -771,6 +783,8 @@ final class AiGatewayServices
         $person=($view['query']['business_filters']['object_kind']??null)==='person';
         if ($person) {
             $answer['summary'].=' 人员范围：'.$view['personnel_selection_label'].'（按当前任职筛选）。';
+            $criteria=[];foreach($view['query']['metric_codes'] as $code)$criteria[]=$dictionary->getTooltip($code)['name'];
+            $answer['summary'].=' 评价指标：'.implode('、',$criteria).'。';
             if ($shape==='ranking') $answer['summary'].=$rows?'仅按所选指标排序，不代表综合评价；相同金额按稳定人员顺序展示。':'本期间没有符合条件的人员业绩事实，不能据此评定谁表现最好。';
         }
         if ($view['query']['compare_range']) $answer['summary'].='对比时间：'.$view['query']['compare_range']['start'].' 至 '.$view['query']['compare_range']['end'].'。';
@@ -801,6 +815,7 @@ final class AiGatewayServices
             'AI_INTENT_UNRESOLVED'=>'还不能准确确定您的完整需求。请明确想了解什么、涉及对象和时间；本次未删减条件或查询数据。',
             'AI_CAPABILITY_NOT_READY'=>'已识别您的需求，但对应的数据能力或筛选组合尚未接入，暂不能准确提供结果。',
             'AI_CONTEXT_REQUIRED'=>'本次缺少可验证的前文条件，请明确要查询的指标和时间。',
+            'AI_FOLLOWUP_CONDITION_REQUIRED'=>'已找到上次查询，但本次修改的条件还不能准确确认。请明确要修改的指标、时间或人员范围；未删减您的条件。',
             'AI_RANK_LIMIT_NOT_READY'=>'当前支持门店前五、后五排行，暂不支持您要求的数量；本次未更改您的条件。',
             'AI_FUTURE_ACTUALS_UNAVAILABLE'=>'未来日期尚未发生实际业绩，暂不能提供该日期的实际数据，也未替换成今天或预测值。',
             'AI_DATA_COVERAGE_INCOMPLETE'=>'您要求的完整期间尚未全部通过数据核验，本次未缩短日期范围，请选择其他期间。',

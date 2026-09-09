@@ -150,6 +150,33 @@ try {
         } finally {$book->disconnectWorksheets();}
         echo "LIVE_DOWNLOAD_GATE_AND_EXCEL_CENTS_MATCH\n";
     }
+    if(getenv('MOHE_ANALYSIS_TEST_FOLLOWUP')==='1') {
+        if($mode!=='TEST_HISTORY' || getenv('MOHE_ANALYSIS_TEST_NAMED')==='1')throw new RuntimeException('LIVE_FOLLOWUP_FIXTURE_INVALID');
+        $input['context_ref']=$run['answer']['context_ref']??'';
+        $input['client_request_id']='followup-'.bin2hex(random_bytes(8));
+        $input['question']='那本月做最好的呢';
+        $input['history']=[['question'=>$question,'answer'=>$run['answer']['summary']]];
+        $run=$call('create',$input);$run=$call('execute',$input+$binding($run),$run['run_id']);
+        $until=microtime(true)+30;
+        while(in_array($run['status'],['WAITING_EXPORT','WORKFLOW_EXECUTING'],true)&&microtime(true)<$until){usleep(250000);$run=$call('status',$binding($run),$run['run_id']);}
+        if($run['status']!=='COMPLETED')throw new RuntimeException('LIVE_FOLLOWUP_FAILED_'.($run['reason']??$run['status']));
+        $start=date('Y-m-01');$end=date('Y-m-d');
+        $monthly=(clone $query)->where('p.business_date','>=',$start)->where('p.business_date','<=',$end)
+            ->fieldRaw('p.employee_id,SUM(p.amount_cents) amount_cents')->group('p.employee_id')->order('amount_cents','desc')->order('p.employee_id','asc')->limit(1)->select()->toArray();
+        $rows=$run['answer']['table']['rows']??[];
+        if(count($rows)!==count($monthly)||strpos($run['answer']['summary'],$start.' 至 '.$end)===false||strpos($run['answer']['summary'],'评价指标：劳动业绩')===false)
+            throw new RuntimeException('LIVE_FOLLOWUP_CONDITIONS_MISMATCH');
+        foreach($monthly as $i=>$expected)if($rows[$i]['label']!==$selection['names'][(int)$expected['employee_id']]||$rows[$i]['value']!==app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$expected['amount_cents'])||$rows[$i]['rank']!=='前1')
+            throw new RuntimeException('LIVE_FOLLOWUP_PARITY_MISMATCH');
+        if($input['output_format']==='screen_and_xlsx') {
+            $download=$call('export',$binding($run),$run['run_id']);
+            if(!$download instanceof think\response\File)throw new RuntimeException('LIVE_FOLLOWUP_DOWNLOAD_INVALID');
+            $book=PhpOffice\PhpSpreadsheet\IOFactory::load($download->getData());
+            try {foreach($monthly as $i=>$expected)if((int)round((float)$book->getActiveSheet()->getCell('I'.($i+2))->getValue()*100)!==(int)$expected['amount_cents'])throw new RuntimeException('LIVE_FOLLOWUP_EXCEL_MISMATCH');}
+            finally {$book->disconnectWorksheets();}
+        }
+        echo "LIVE_FOLLOWUP_MONTH_SCOPE_METRIC_RANK_AND_EXCEL_MATCH\n";
+    }
     echo json_encode(['result'=>'PASS','real_model'=>true,'real_fact_query'=>true,'rendered_rows'=>count($run['answer']['table']['rows']??[]),
         'source'=>'local_authorized_instance','business_records_modified'=>false])."\n";
 } catch(Throwable $e) {

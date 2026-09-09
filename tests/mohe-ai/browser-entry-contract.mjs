@@ -38,7 +38,9 @@ assert.equal(calls.filter(c=>c.path.endsWith('/cancel')).length,1);
 assert.equal(root.querySelector('.panel').hidden,true);
 finishExecute({run_id:'r',generation:1,status:'COMPLETED',answer:{summary:'迟到结果',cards:[{metric_name:'现金业绩',display_value:'999',unit:'元'}]}}); await flush();
 assert.equal(root.querySelector('.value'),null);
-assert.equal(window.localStorage.getItem('mohe-ai:v1:fixture%3Auser').includes('999'),false);
+// Inspect delivered content, not random IDs/timestamps that may contain "999".
+const savedRounds = JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixture%3Auser')).flatMap(s => s.rounds);
+assert.equal(savedRounds.some(r => r.answer.includes('迟到结果') || (r.presentation?.cards || []).some(c => c.display_value === '999')), false);
 dispose(); assert.equal(document.querySelector('[data-mohe-ai]'),null);
 assert.equal(calls.some(c=>c.path.startsWith('/config')),false);
 console.log('Browser entry create/execute/cancel/late result/XSS/capability/admin-no-config: 15 checks PASS');
