@@ -38,6 +38,12 @@ final class GroupPerformanceMetricReadServices
             'refund_cents' => $this->add($this->cents($row['refund_cents'] ?? 0),$this->cents($recharge['refund_cents']??0))];
     }
 
+    public function personnelTotals(string $tenantId,array $stores,array $range,string $metric,array $pairs): array
+    {
+        $this->assertScope($tenantId,$stores,$range);
+        return (new PersonnelPerformanceReadServices($this->queryFactory,$this->normalScope))->totals($tenantId,$stores,$range,$metric,$pairs);
+    }
+
     /** Mutually exclusive from sale allocation facts: recharge has no sale lines. */
     private function rechargeCashQuery(string $tenantId,array $stores,array $range)
     {

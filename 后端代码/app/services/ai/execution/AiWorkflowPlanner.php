@@ -193,6 +193,8 @@ final class AiWorkflowPlanner
         return $this->range(in_array($code,['THIS_MONTH','LAST_MONTH'],true)?$date->format('Y-m-01'):$date->format('Y-m-d'),
             $code==='LAST_MONTH'?$date->format('Y-m-t'):$date->format('Y-m-d'));
     }
+    /** Shared date normalization for capability-driven planners; no model date arithmetic. */
+    public function normalizePeriod(array $term,string $today): array { return $this->period($term,$today); }
     private function range($start, $end): array
     {
         $first = $this->date($start); $last = $this->date($end);

@@ -37,24 +37,29 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
     }
     public static function project(array $view): array
     {
-        $rows=[]; $capabilities=MetricReadViewServices::metricCapabilities();
+        $rows=[]; $capabilities=MetricReadViewServices::metricCapabilities()+PersonnelPerformanceReadServices::capabilities();
         foreach ($view['results'] as $result) {
             $code=$result['metric_code']??null;
             // Keep export eligibility explicit; names come from the same registered
             // read contract as the cards, never from model/result display text.
-            if (!in_array($code,['cash_performance','consume_amount'],true) || ($result['storage_unit']??null)!=='fen'
+            if (!isset($capabilities[$code]) || ($result['storage_unit']??null)!=='fen'
                 || ($capabilities[$code]['ai_query_ready']??false)!==true) throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
             if (!in_array($result['period']??null,['current','comparison'],true)) throw new \RuntimeException('METRIC_EXPORT_PERIOD_INVALID');
             $period=$result['period']; $range=$period==='current'?['start'=>$view['query']['start_date'],'end'=>$view['query']['end_date']]:$view['query']['compare_range'];
             if (!is_array($range)) throw new \RuntimeException('METRIC_EXPORT_PERIOD_INVALID');
+            $person=($view['query']['business_filters']['object_kind']??null)==='person';
+            if (($capabilities[$code]['filter_grain']==='person')!==$person) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
+            $label=$person?($view['personnel_selection_label']??''): '当前授权范围';
+            if (!is_string($label)||$label==='') throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
             $base=['metric_name'=>$capabilities[$code]['name'],'period_name'=>$period==='current'?'本期':'对比期','start_date'=>$range['start'],'end_date'=>$range['end'],
-                'store_name'=>'当前授权范围','ranking_direction'=>'','business_date'=>''];
+                'store_name'=>$label.($person?'（按当前任职筛选）':''),'ranking_direction'=>'','business_date'=>''];
             if (isset($result['amount_cents'])) self::append($rows,$base,$result['amount_cents']);
             elseif ($view['query']['query_shape']==='trend') foreach ($result['rows'] as $point) self::append($rows,array_replace($base,['business_date'=>$point['business_date']]),$point['amount_cents']);
             elseif ($view['query']['query_shape']==='ranking') foreach ($result['rows'] as $direction=>$points) foreach ($points as $point) {
                 if (!in_array($direction,['top','bottom'],true)) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
-                if (!is_string($point['store_name']??null) || $point['store_name']==='') throw new \RuntimeException('METRIC_EXPORT_STORE_NAME_INVALID');
-                self::append($rows,array_replace($base,['store_name'=>$point['store_name'],'ranking_direction'=>$direction==='top'?'前列':'后列']),$point['amount_cents']);
+                $name=$person?($point['employee_name']??null):($point['store_name']??null);
+                if (!is_string($name) || $name==='') throw new \RuntimeException('METRIC_EXPORT_STORE_NAME_INVALID');
+                self::append($rows,array_replace($base,['store_name'=>$name.($person?'；范围：'.$base['store_name']:''),'ranking_direction'=>$direction==='top'?'前列':'后列']),$point['amount_cents']);
             } else throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
         }
         return $rows;

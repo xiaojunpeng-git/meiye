@@ -49,7 +49,12 @@ final class AiExportRuntime
         },$this->principalResolver);
         $this->readViews=new M\MetricReadViewServices($this->runtime['views'],function():array {
             return AiAuthority::reportBinding($this->current(),$this->runtime['instance'],$this->runtime['private']->signingKey());
-        });
+        },null,null,new M\PersonnelAnalysisObjectServices(static function(string $table){return Db::name($table);},function(string $metric):array {
+            $context=$this->current();
+            if (empty($context['can_use']) || ($context['analysis_personnel_grants'][$metric]??false)!==true
+                || !\app\services\ai\config\AiConfigStore::allowsSanitizedQuestion($this->runtime['config']->read())) throw new \RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
+            return ['personnel_authorized'=>true,'store_ids'=>$context['store_ids'],'employee_id'=>0,'permission_version'=>AiAuthority::permissionHash($context)];
+        }));
         $providers=new Q\UnifiedQueryProviderRegistry($pages);
         $providers->register(new M\MetricReadViewExportProvider($this->readViews,function(array $context,string $ref):array {
             if (!$this->binding || $ref!==$this->binding['read_consistency_ref']) throw new \RuntimeException('AI_EXPORT_SOURCE_MISMATCH');
@@ -259,7 +264,8 @@ final class AiExportRuntime
         $snapshot=$this->runtime['runs']->snapshot($this->owner($binding),$binding['run_id'],$binding['generation']);
         if (AiAuthority::permissionHash($current)!==$binding['permission_hash'] || $snapshot['authorization_version']!==$binding['permission_hash']
             || $snapshot['model_config_version']!==$binding['model_config_version'] || (string)$this->runtime['config']->read()['version']!==$binding['model_config_version']) throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
-        if (!$this->ready($current) || !hash_equals($snapshot['capability_snapshot_hash'],AiAuthority::capabilityHash(true,!isset($snapshot['guidance_schema_version'])))) throw new \RuntimeException('AI_CAPABILITY_CHANGED');
+        $current['analysis_personnel_ready']=\app\services\ai\config\AiConfigStore::allowsSanitizedQuestion($this->runtime['config']->read());
+        if (!$this->ready($current) || !hash_equals($snapshot['capability_snapshot_hash'],AiAuthority::capabilityHash(true,!isset($snapshot['guidance_schema_version']),$current))) throw new \RuntimeException('AI_CAPABILITY_CHANGED');
     }
     private function assertObjectOwner(array $object,array $binding): void
     { if (($object['owner']??null)!=$this->owner($binding) || ($object['run_id']??null)!==$binding['run_id'] || ($object['generation']??null)!==$binding['generation']) throw new \RuntimeException('AI_EVIDENCE_BINDING_INVALID'); }

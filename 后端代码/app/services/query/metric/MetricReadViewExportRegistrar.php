@@ -18,6 +18,6 @@ final class MetricReadViewExportRegistrar implements UnifiedQueryPageRegistrar
     public static function fields(): array
     {
         return ['row_id'=>'结果编号','metric_name'=>'指标','period_name'=>'统计周期','start_date'=>'开始日期','end_date'=>'结束日期',
-            'store_name'=>'门店','ranking_direction'=>'排行方向','business_date'=>'业务日期','amount_yuan'=>'金额（元）'];
+            'store_name'=>'对象/范围','ranking_direction'=>'排行方向','business_date'=>'业务日期','amount_yuan'=>'金额（元）'];
     }
 }

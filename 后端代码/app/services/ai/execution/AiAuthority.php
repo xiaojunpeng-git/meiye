@@ -4,9 +4,12 @@ namespace app\services\ai\execution;
 /** Exact shared identity/report binding used by HTTP and background continuation. */
 final class AiAuthority
 {
-    public static function capabilities(bool $exportReady): array
+    public static function capabilities(bool $exportReady,array $context=[]): array
     {
         $registered=\app\services\query\metric\MetricReadViewServices::metricCapabilities(); $metrics=[];
+        if (($context['analysis_personnel_ready']??false)===true) foreach (\app\services\query\metric\PersonnelPerformanceReadServices::capabilities() as $code=>$contract) {
+            if (($context['analysis_personnel_grants'][$code]??false)===true) $registered[$code]=$contract;
+        }
         foreach ($registered as $code=>$capability) if (!empty($capability['ai_query_ready'])) $metrics[]=$code;
         $metadata=[]; $dictionary=new \app\services\metric\MetricDictionaryServices();
         foreach (['cash_performance','consume_amount'] as $code) {
@@ -20,9 +23,9 @@ final class AiAuthority
             'output_formats'=>$exportReady?['screen','screen_and_xlsx']:['screen'],'metric_readiness'=>$registered,
             'definition_metric_codes'=>array_keys($metadata),'metadata_readiness'=>$metadata];
     }
-    public static function capabilityHash(bool $exportReady,bool $legacy=false): string
+    public static function capabilityHash(bool $exportReady,bool $legacy=false,array $context=[]): string
     {
-        $capabilities=self::capabilities($exportReady);
+        $capabilities=self::capabilities($exportReady,$context);
         if ($legacy) unset($capabilities['definition_metric_codes'],$capabilities['metadata_readiness']);
         return hash('sha256',json_encode($capabilities));
     }

@@ -16,6 +16,7 @@ final class MetricReadViewServices
     private $transaction;
     private $authorize;
     private $clock;
+    private $personnel;
 
     /** Implemented shared contracts, not a grant of entry/report access or instance deployment readiness. */
     public static function metricCapabilities(): array
@@ -38,28 +39,53 @@ final class MetricReadViewServices
     }
 
     /** authorize must rebuild report permissions from the authenticated principal on EVERY invocation. */
-    public function __construct(MetricReadViewStore $store, callable $authorize, ?callable $transaction = null, ?callable $clock = null)
+    public function __construct(MetricReadViewStore $store, callable $authorize, ?callable $transaction = null, ?callable $clock = null, ?PersonnelAnalysisObjectServices $personnel = null)
     {
         $this->store = $store;
         $this->authorize = $authorize;
         $this->transaction = $transaction ?: [new MetricReadTransaction(), 'run'];
         $this->clock = $clock ?: static function (): int { return time(); };
+        $this->personnel = $personnel;
     }
 
     public function create(array $principal, array $query, ?int $expiresAt = null): array
     {
         $normalized = $this->query($query);
         $binding = $this->binding(call_user_func($this->authorize, $principal), $normalized['store_ids']);
+        $personnel = $this->personnelSelection($normalized,$binding);
         $now = $this->now();
         $expiresAt=$expiresAt??($now+86400);
         if ($expiresAt<=$now || $expiresAt>$now+86400) $this->fail('METRIC_READ_EXPIRY_INVALID');
         $ranges = ['current' => ['start' => $normalized['start_date'], 'end' => $normalized['end_date']]];
         if ($normalized['compare_range'] !== null) $ranges['comparison'] = $normalized['compare_range'];
-        $results = call_user_func($this->transaction, function (GroupPerformanceMetricReadServices $reader) use ($normalized, $binding, $ranges): array {
+        $results = call_user_func($this->transaction, function (GroupPerformanceMetricReadServices $reader) use ($normalized, $binding, $ranges,$personnel): array {
             $results = [];
-            $storeNames = $normalized['query_shape'] === 'ranking' ? $reader->storeNames($binding['store_ids']) : [];
+            $storeNames = $normalized['query_shape'] === 'ranking' && $personnel===null ? $reader->storeNames($binding['store_ids']) : [];
             foreach ($ranges as $period => $range) {
                 foreach ($normalized['metric_codes'] as $metric) {
+                    if ($personnel!==null) {
+                        $points=$personnel['pairs']?$reader->personnelTotals($binding['tenant_id'],$binding['store_ids'],$range,$metric,$personnel['pairs']):[];
+                        $totals=[];$sum=0;
+                        foreach ($points as $point) {
+                            $sum=$this->addAmount($sum,$point['amount_cents']);
+                            $employee=$point['employee_id'];$totals[$employee]=$this->addAmount($totals[$employee]??0,$point['amount_cents']);
+                        }
+                        if ($normalized['query_shape']==='summary') $results[]=['period'=>$period,'metric_code'=>$metric,'amount_cents'=>$sum,'storage_unit'=>'fen'];
+                        else {
+                            $rows=[];
+                            foreach ($totals as $employee=>$amount) {
+                                if (!isset($personnel['names'][$employee])) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                                $rows[]=['employee_id'=>$employee,'employee_name'=>$personnel['names'][$employee],'amount_cents'=>$amount];
+                            }
+                            $rank=$normalized['ranking'];$directions=$rank['direction']==='top_and_bottom'?['top','bottom']:[$rank['direction']];$groups=[];
+                            foreach ($directions as $direction) {
+                                $sorted=$rows;usort($sorted,static function($a,$b)use($direction){return ($direction==='top'?($b['amount_cents']<=>$a['amount_cents']):($a['amount_cents']<=>$b['amount_cents']))?:($a['employee_id']<=>$b['employee_id']);});
+                                $groups[$direction]=array_slice($sorted,0,$rank['limit']);
+                            }
+                            $results[]=['period'=>$period,'metric_code'=>$metric,'storage_unit'=>'fen','rows'=>$groups];
+                        }
+                        continue;
+                    }
                     if (in_array($normalized['query_shape'], ['trend', 'ranking'], true)) {
                         $points = $reader->dailyStoreTotals($binding['tenant_id'], $binding['store_ids'], $range, $metric);
                         $projector = new MetricGroupedProjection();
@@ -81,7 +107,7 @@ final class MetricReadViewServices
         });
         // A revocation during the read cannot mint a usable view.
         if ($this->binding(call_user_func($this->authorize, $principal), $normalized['store_ids']) !== $binding) $this->fail('METRIC_PERMISSION_CHANGED');
-        $capabilities = self::metricCapabilities();
+        $capabilities = self::metricCapabilities()+PersonnelPerformanceReadServices::capabilities();
         $readiness = []; $metricVersions = []; $allReady = true;
         foreach ($normalized['metric_codes'] as $metric) {
             $readiness[$metric] = $capabilities[$metric];
@@ -109,6 +135,11 @@ final class MetricReadViewServices
             'results' => $results, 'result_status' => 'complete',
             'result_hash' => hash('sha256', UnifiedQueryJson::encode(['query' => $normalized, 'binding' => $binding, 'results' => $results, 'version' => self::CONTRACT_VERSION])),
         ];
+        if ($personnel!==null) {
+            if ($this->personnelSelection($normalized,$binding)!==$personnel) $this->fail('METRIC_PERMISSION_CHANGED');
+            $view['personnel_binding_hash']=$personnel['binding_hash'];$view['personnel_selection_label']=$personnel['label'];
+            $view['result_hash']=hash('sha256',UnifiedQueryJson::encode(['base'=>$view['result_hash'],'personnel_binding_hash'=>$personnel['binding_hash']]));
+        }
         $ref = $this->store->put($view);
         return $this->replay($principal, $normalized, $ref);
     }
@@ -120,7 +151,19 @@ final class MetricReadViewServices
         $view = $this->store->get($ref);
         if (($view['schema_version'] ?? null) !== self::CONTRACT_VERSION || ($view['binding'] ?? null) !== $binding
             || ($view['query'] ?? null) !== $normalized) $this->fail('METRIC_READ_BINDING_MISMATCH');
+        $personnel=$this->personnelSelection($normalized,$binding);
+        if ($personnel!==null && ($view['personnel_binding_hash']??null)!==$personnel['binding_hash']) $this->fail('METRIC_PERMISSION_CHANGED');
         return $view;
+    }
+
+    private function addAmount(int $a,int $b): int { $sum=$a+$b;if(!is_int($sum))$this->fail('METRIC_SOURCE_AMOUNT_INVALID');return $sum; }
+    private function personnelSelection(array $query,array $binding): ?array
+    {
+        if (!$query['business_filters']) return null;
+        if (!$this->personnel) $this->fail('METRIC_PERMISSION_GRAIN_UNAVAILABLE');
+        $selection=$this->personnel->selection($query['metric_codes'][0],$query['business_filters']['selection_ref']);
+        if ($selection['scope']['store_ids']!==$binding['store_ids']) $this->fail('METRIC_PERMISSION_DENIED');
+        return $selection;
     }
 
     private function binding($binding, array $requested): array
@@ -145,7 +188,10 @@ final class MetricReadViewServices
         if (!array_key_exists('ranking', $query)) $query['ranking'] = null;
         $fields = ['query_shape', 'metric_codes', 'start_date', 'end_date', 'compare_range', 'store_ids', 'business_filters', 'ranking'];
         if (array_diff(array_keys($query), $fields) || array_diff($fields, array_keys($query))) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
-        if (!in_array($query['query_shape'], ['summary', 'comparison', 'trend', 'ranking'], true) || $query['business_filters'] !== []) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if (!in_array($query['query_shape'], ['summary', 'comparison', 'trend', 'ranking'], true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $person=($query['business_filters']['object_kind']??null)==='person';
+        if ($query['business_filters']!==[] && (!$person || count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref']??null)
+            || !preg_match('/^((position|person):[1-9][0-9]*|role:craftsman|role:salesperson)$/D',$query['business_filters']['selection_ref']))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if ($query['query_shape'] === 'ranking') {
             $rank = $query['ranking'];
             if (!is_array($rank) || count($rank) !== 2 || !in_array($rank['direction'] ?? null, ['top', 'bottom', 'top_and_bottom'], true)
@@ -153,7 +199,9 @@ final class MetricReadViewServices
         } elseif ($query['ranking'] !== null) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         if (!is_array($query['metric_codes']) || $query['metric_codes'] === [] || count($query['metric_codes']) > 2
             || array_keys($query['metric_codes']) !== range(0, count($query['metric_codes']) - 1)) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
-        foreach ($query['metric_codes'] as $metric) if (!in_array($metric, ['cash_performance', 'consume_amount'], true)) $this->fail('METRIC_NOT_REGISTERED');
+        $allowed=$person?array_keys(PersonnelPerformanceReadServices::capabilities()):['cash_performance','consume_amount'];
+        foreach ($query['metric_codes'] as $metric) if (!in_array($metric, $allowed, true)) $this->fail('METRIC_NOT_REGISTERED');
+        if ($person && (count($query['metric_codes'])!==1 || !in_array($query['query_shape'],['summary','ranking'],true))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if (count(array_unique($query['metric_codes'])) !== count($query['metric_codes'])) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         $this->range(['start' => $query['start_date'], 'end' => $query['end_date']]);
         if ($query['query_shape'] === 'comparison') {

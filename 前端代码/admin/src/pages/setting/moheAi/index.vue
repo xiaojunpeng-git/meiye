@@ -15,6 +15,9 @@
           <label>模型名称<input v-model.trim="config.model" aria-label="模型名称" required maxlength="180"></label>
           <label>API Key<input v-model="apiKey" type="password" autocomplete="new-password" aria-label="API Key" :placeholder="config.has_api_key ? '已保存密钥，留空保持不变' : '请输入客户 API Key'"></label>
           <label class="check"><input v-model="config.external_processing_authorized" type="checkbox">已获得客户对 SiliconFlow 外部处理的授权</label>
+          <label class="check"><input :checked="config.external_scope_version === 'sanitized-question-v1'" :disabled="!config.external_scope_supported || !config.external_processing_authorized" type="checkbox" @change="config.external_scope_version = $event.target.checked ? 'sanitized-question-v1' : ''">另行授权发送最小脱敏当前问题及必要能力摘要</label>
+          <p class="muted">此项不沿用旧授权。仅发送到本客户配置的 SiliconFlow；不发送人员或门店名称、联系方式、内部编号、经营数字或历史回答。无法可靠脱敏时转本地选择引导。取消上方外部处理授权会同时撤销此项。</p>
+          <p v-if="!config.external_scope_supported" class="muted">当前实例尚未升级授权存储，不能启用新外发范围；原有配置仍可保存。</p>
           <div class="actions"><button class="primary" :disabled="busy" type="submit">保存基础配置</button><button type="button" :disabled="busy" @click="checkConnection">测试连接（可能消耗客户额度）</button></div>
         </form>
         <div v-if="config && config.runtime_status" class="subbox"><h3>近 24 小时运行概况</h3><div class="metrics"><span v-for="item in runtimeCounts" :key="item.label">{{ item.label }}：{{ item.value }}</span></div><p class="muted">运行数量不能证明模型连接、账号余额或服务可用。{{ monitorText }}</p></div>
@@ -22,6 +25,8 @@
 
       <section v-if="tab === 'catalog'" class="box">
         <h2>能力目录</h2><p class="muted">目录来自已登记的后端能力。管理配置不能新增指标公式、SQL、DAO 或扩大数据权限。</p>
+        <p class="muted">下方场景是可复用的引导与执行模板，不是用户问题白名单。实际可查询对象、指标及组合由统一底层合同与当前数据权限决定；排行流程可复用于已授权的门店或人员数据。</p>
+        <ai-analysis-inventory v-if="catalog.analysis_inventory" :inventory="catalog.analysis_inventory" />
         <h3>一级 · 业务场景</h3><div v-for="(scene, code) in catalog.scenes" :key="code" class="subbox"><strong>{{ scene.label }}</strong><p>{{ scene.goal }}</p><code>{{ code }}</code><details v-if="scene.skill_code"><summary>查看 Skill 详情 · {{ scene.skill_code }}</summary><ai-skill-detail :scene-code="code" :catalog="catalog" :published="state.active_document" :version="activeVersion" /></details></div>
         <h3>二级 · Skill 与工作流</h3><div v-for="(flow, code) in catalog.workflows" :key="code" class="subbox"><strong>{{ workflowLabel(code) }}</strong><p>Skill：{{ workflowSkill(flow) }} · {{ workflowStatus(code) }}</p><code>{{ code }}</code><p>支持形态：{{ flow.shape || flow.query_shape || '按已登记契约' }}</p></div>
         <h3>三级 · 只读 Tool 与执行节点</h3><div v-for="(tool, code) in catalog.tools" :key="code" class="subbox"><strong>{{ tool.label || code }}</strong><p>{{ tool.description || '只读能力，参数与权限由后端校验' }}</p><code>{{ code }}</code></div>
@@ -59,9 +64,10 @@ import request from '@/api/moheAi';
 import AiTrial from './trial.vue';
 import AiConfirm from './confirm.vue';
 import AiSkillDetail from './skillDetail.vue';
+import AiAnalysisInventory from './analysisInventory.vue';
 const copy = value => JSON.parse(JSON.stringify(value));
 export default {
-  name: 'MoheAiManagement', components: { AiTrial, AiConfirm, AiSkillDetail },
+  name: 'MoheAiManagement', components: { AiTrial, AiConfirm, AiSkillDetail, AiAnalysisInventory },
   data() { return { tab: 'config', tabs: [{ key: 'config', label: '基础配置' }, { key: 'catalog', label: '能力目录' }, { key: 'scenes', label: '场景与引导' }, { key: 'workflows', label: '工作流编排' }, { key: 'trial', label: '试问验证' }, { key: 'versions', label: '版本管理' }], state: null, document: null, config: null, apiKey: '', loading: true, busy: false, dirty: false, validated: false, error: '', notice: '', question: '', preview: null }; },
   computed: {
     catalog() { return this.state.catalog || {}; }, defaults() { return this.catalog.defaults || { workflows: {} }; },
@@ -84,7 +90,7 @@ export default {
     moveSlot(index, delta) { const order = this.document.guidance.slot_order; const next = order.slice(); [next[index], next[index + delta]] = [next[index + delta], next[index]]; this.document.guidance.slot_order = next; this.changed(); },
     slotLabel(code) { return { metric_code: '指标意图', start_date: '查询时间', compare_start: '对比时间', rank_direction: '排行方向', rank_limit: '排行数量' }[code] || code; },
     nodeLabel(code) { return { query: '统一查询', catalog: '指标说明', evidence: '证据校验', render: '确定性渲染', export: 'Excel 导出' }[code] || code; },
-    workflowLabel(code) { return { wf_performance_summary: '业绩汇总', wf_performance_trend: '业绩趋势', wf_performance_ranking: '门店排行', wf_performance_comparison: '两期对比', wf_metric_definition: '指标解释' }[code] || code; },
+    workflowLabel(code) { return { wf_performance_summary: '业绩汇总', wf_performance_trend: '业绩趋势', wf_performance_ranking: '表现排行（按底层对象能力）', wf_performance_comparison: '两期对比', wf_metric_definition: '指标解释' }[code] || code; },
     workflowNodes(code) { return (this.catalog.workflows[code] || {}).nodes || []; },
     workflowSkill(flow) { const scene = this.catalog.scenes && this.catalog.scenes[flow.scene]; return scene ? scene.skill_code : '指标解释专用流程'; },
     workflowStatus(code) { return this.document.workflows[code].enabled ? '草稿中启用' : '草稿中停用'; },
@@ -94,7 +100,7 @@ export default {
     async publishDraft() { if (!await this.confirmAction('发布后，新任务将使用当前草稿；在途任务不受影响。确认发布？', '发布草稿')) return; return this.perform(async () => { this.hydrate(await request('POST', '/management/publish', { expected_revision: this.state.revision })); this.notice = '版本已发布。'; }); },
     async rollback(version) { if (!await this.confirmAction('确认恢复到所选版本的配置？系统将生成新的发布版本。', '回滚配置')) return; return this.perform(async () => { this.hydrate(await request('POST', '/management/rollback', { expected_revision: this.state.revision, target_version: version })); this.notice = '已回滚并生成新版本。'; }); },
     previewDraft() { return this.perform(async () => { this.preview = await request('POST', '/management/preview', { expected_revision: this.state.revision, question: this.question.trim() }); }); },
-    saveConfig() { return this.perform(async () => { try { await request('PUT', '/config', { version: this.config.version, enabled: this.config.enabled, model: this.config.model, external_processing_authorized: this.config.external_processing_authorized, api_key: this.apiKey }); this.config = await request('GET', '/config'); this.notice = '基础配置已保存。'; } finally { this.apiKey = ''; } }); },
+    saveConfig() { return this.perform(async () => { try { const payload = { version: this.config.version, enabled: this.config.enabled, model: this.config.model, external_processing_authorized: this.config.external_processing_authorized, api_key: this.apiKey }; if (this.config.external_scope_supported) payload.external_scope_version = this.config.external_processing_authorized ? this.config.external_scope_version : ''; await request('PUT', '/config', payload); this.config = await request('GET', '/config'); this.notice = '基础配置已保存。'; } finally { this.apiKey = ''; } }); },
     async checkConnection() { if (!await this.confirmAction('此测试可能消耗客户 SiliconFlow 额度，只测试连接，不携带经营数据。是否继续？', '测试模型连接')) return; return this.perform(async () => { const result = await request('POST', '/config/check', { confirm_cost: true }); this.notice = result.message || '测试完成，请查看配置状态。'; }); }
   }
 };

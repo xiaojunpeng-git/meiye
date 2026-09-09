@@ -15,7 +15,7 @@ for suite in config-contract metric-contract runtime-contract export-source-cont
     query-read-view cash-report-projection state-store-contract state-attempt-contract state-concurrency state-export-contract state-admission-contract \
     gateway-components client-runtime-compat gateway-integration gateway-review-regressions monitor-contract \
     http-routing-contract http-actions-contract http-guard-contract principal-resolvers \
-    export-worker-contract export-runtime-contract semantic-guidance registry-execution state-guidance-contract gateway-r5-guidance r5-holdout management-core management-gateway management-menu; do
+    export-worker-contract export-runtime-contract semantic-guidance registry-execution state-guidance-contract gateway-r5-guidance r5-holdout management-core management-gateway management-menu analysis-capability-catalog analysis-object-resolution personnel-analysis; do
     if [ "$suite" = state-concurrency ] && ! php -r "exit(function_exists(\"pcntl_fork\") ? 0 : 1);"; then
         echo "SKIP PHP74 state-concurrency: image lacks pcntl; mandatory host run-all executes real multi-process test."
         continue

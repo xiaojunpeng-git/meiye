@@ -14,6 +14,9 @@ final class AiRunStore
     private $instance;
     private $sqlite;
     private $clock;
+    private $clockRegressionMs = null;
+    private $previousClockSample = null;
+    private $minimumClockDelta = 0;
 
     public function __construct(PDO $db, string $prefix, string $instanceId, ?callable $clock = null)
     {
@@ -467,6 +470,8 @@ final class AiRunStore
         if ($r['status']==='PARTIAL_SUCCEEDED') return 'partial';
         if ($r['status']==='CANCELLED') return 'neutral';
         if ($r['status']!=='FAILED') return 'active';
+        if (in_array($r['reason'],['AI_ANALYSIS_COMBINATION_UNAVAILABLE','AI_OBJECT_BINDING_UNAVAILABLE','AI_OBJECT_SCOPE_TOO_LARGE',
+            'AI_PERSONNEL_PERMISSION_REQUIRED','AI_EXTERNAL_SCOPE_REQUIRED','AI_LOCAL_CONDITION_REQUIRED'],true)) return 'neutral';
         if (in_array($r['reason'],['CAPACITY_STOPPED','CAPACITY_REJECTED','AI_EXPORT_CAPACITY_REJECTED'],true)) return 'capacity';
         if (in_array($r['reason'],['AI_INTENT_UNRESOLVED','AI_CAPABILITY_NOT_READY','AI_CONTEXT_REQUIRED','AI_RANK_LIMIT_NOT_READY','AI_FUTURE_ACTUALS_UNAVAILABLE','AI_DATA_COVERAGE_INCOMPLETE',
             'AI_DATE_INVALID','AI_CLARIFICATION_EXHAUSTED','AI_CLARIFICATION_INVALID_LIMIT','AI_CLARIFICATION_EXPIRED','AI_CLARIFICATION_STALE','AI_CLIENT_UPGRADE_REQUIRED','AI_METADATA_NOT_READY'],true)) return 'neutral';
@@ -515,7 +520,11 @@ final class AiRunStore
     {
         if ($this->terminal($r)) { throw new RuntimeException('AI_RUN_TERMINAL'); }
         $now=$this->now();
-        if ($now < (int)$r['last_clock_at'] || $now >= (int)$r['deadline_at']) { throw new RuntimeException('AI_RUN_DEADLINE'); }
+        if ($now < (int)$r['last_clock_at']) {
+            $this->clockRegressionMs=(int)$r['last_clock_at']-$now;
+            throw new RuntimeException('AI_EXECUTION_CLOCK_REGRESSED');
+        }
+        if ($now >= (int)$r['deadline_at']) { throw new RuntimeException('AI_RUN_DEADLINE'); }
         $this->execute('UPDATE '.$this->table('run').' SET last_clock_at=? WHERE instance_id=? AND run_id=?',[$now,$this->instance,$r['run_id']]);
     }
     private function worker(array $r,string $token): void { if ($token==='' || !hash_equals($r['worker_token'],$token)) { throw new RuntimeException('AI_WORKER_FENCED'); } }
@@ -527,7 +536,12 @@ final class AiRunStore
         if (!in_array($owner['terminal'],['platform','store','merchant'],true)) { throw new RuntimeException('AI_OWNER_INVALID'); }
     }
     private function identifier(string $v): void { if (!preg_match('/^[A-Za-z0-9_.:-]{1,128}$/D',$v)) { throw new RuntimeException('AI_REFERENCE_INVALID'); } }
-    private function now(): int { $v=call_user_func($this->clock); if (!is_int($v)||$v<1) { throw new RuntimeException('AI_CLOCK_INVALID'); } return $v; }
+    private function now(): int {
+        $v=call_user_func($this->clock); if (!is_int($v)||$v<1) { throw new RuntimeException('AI_CLOCK_INVALID'); }
+        if ($this->previousClockSample!==null) $this->minimumClockDelta=min($this->minimumClockDelta,$v-$this->previousClockSample);
+        $this->previousClockSample=$v;
+        return $v;
+    }
     private function table(string $name): string { return $this->prefix.'mohe_ai_'.$name; }
     private function execute(string $sql,array $params) { $s=$this->db->prepare($sql); $s->execute($params); return $s; }
     private function one(string $sql,array $params) { return $this->execute($sql,$params)->fetch(PDO::FETCH_ASSOC); }

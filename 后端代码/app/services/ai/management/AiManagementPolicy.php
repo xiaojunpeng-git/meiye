@@ -61,7 +61,8 @@ final class AiManagementPolicy
     public static function registry(array $document): AiBusinessRegistry { return new AiBusinessRegistry(self::applyManifest($document)); }
     public static function catalog(): array
     {
-        $m=AiBusinessManifest::definitions();return ['source_registry_hash'=>AiRegistryValue::hash($m),'registry_version'=>$m['registry_version'],'scenes'=>$m['scenes'],'tools'=>$m['tools'],'actions'=>$m['actions'],'workflows'=>$m['workflows'],'export_node'=>$m['export_node'],'defaults'=>self::defaults()];
+        $m=AiBusinessManifest::definitions();return ['source_registry_hash'=>AiRegistryValue::hash($m),'registry_version'=>$m['registry_version'],'scenes'=>$m['scenes'],'tools'=>$m['tools'],'actions'=>$m['actions'],'workflows'=>$m['workflows'],'export_node'=>$m['export_node'],'defaults'=>self::defaults(),
+            'analysis_inventory'=>\app\services\query\metric\AnalysisCapabilityCatalogFactory::make()->inventory()];
     }
     /** Reorders only unresolved groups; date endpoints stay together. Does not interpret user text. */
     public static function decorateEnvelope(array $document,array $envelope): array

@@ -109,7 +109,12 @@ final class AiRegisteredPlanCompiler
         if (!in_array($query['query_shape'],['summary','trend','ranking','comparison'],true)) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
         $metrics=AiRegistryValue::strings($query['metric_codes'],2);
         if (!$metrics||array_diff($metrics,array_keys($snapshot['metrics']))) AiRegistryValue::fail('AI_METRIC_NOT_READY');
-        if ($query['business_filters']!==[]) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+        $person=($query['business_filters']['object_kind']??null)==='person';
+        if ($query['business_filters']!==[]) {
+            if (!$person || count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref']??null)
+                || !preg_match('/^((position|person):[1-9][0-9]*|role:craftsman|role:salesperson)$/D',$query['business_filters']['selection_ref']) || count($metrics)!==1) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+        }
+        foreach ($metrics as $metric) if (($snapshot['metrics'][$metric]['filter_grain']==='person')!==$person) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         if (!is_array($query['store_ids'])||!AiRegistryValue::isList($query['store_ids'])||count($query['store_ids'])>1000) AiRegistryValue::fail('AI_SCOPE_INVALID');
         foreach ($query['store_ids'] as $id) if (!is_int($id)||$id<1) AiRegistryValue::fail('AI_SCOPE_INVALID');
         if (count(array_unique($query['store_ids']))!==count($query['store_ids'])||array_diff($query['store_ids'],$capabilities['store_ids']??[])) AiRegistryValue::fail('AI_SCOPE_INVALID');
@@ -122,7 +127,8 @@ final class AiRegisteredPlanCompiler
         if ($query['query_shape']==='ranking') {
             if (!is_array($query['ranking'])) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
             AiRegistryValue::exact($query['ranking'],['direction','limit']);
-            if (!in_array($query['ranking']['direction'],['top','bottom','top_and_bottom'],true)||$query['ranking']['limit']!==5) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+            if (!in_array($query['ranking']['direction'],['top','bottom','top_and_bottom'],true)
+                || ($person?(!is_int($query['ranking']['limit'])||$query['ranking']['limit']<1||$query['ranking']['limit']>20):$query['ranking']['limit']!==5)) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         } elseif ($query['ranking']!==null) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
         foreach ($metrics as $metric) {
             $contract=$snapshot['metrics'][$metric];

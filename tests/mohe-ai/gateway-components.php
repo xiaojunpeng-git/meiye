@@ -138,6 +138,18 @@ namespace {
     $GLOBALS['sfStatus']=200; $GLOBALS['sfResponse']=str_repeat('x',131073); rejects(function()use($client,$view,$cap){$client->select($view,$cap['metric_codes'],'fixture/model','fixture-key',1000,function(){});},'AI_MODEL_RESPONSE_TOO_LARGE');
     rejects(function()use($client,$view,$cap){$client->select($view,$cap['metric_codes'],'fixture/model',"bad\rkey",1000,function(){});},'AI_MODEL_CONFIG_INVALID');
     $temp = sys_get_temp_dir() . '/mohe-ai-gateway-fixture-' . bin2hex(random_bytes(8));
+    $safeQuestion=['schema_version'=>'sanitized-question-v1','question'=>'今天 做的最好 技师 是 谁','has_unresolved_conditions'=>false];
+    $meanings=[['metric_code'=>'staff_labor_yeji','name'=>'劳动业绩','summary'=>'按规则分配给手艺人的业绩','object_kind'=>'person']];
+    $intent=['object_kind'=>'person','object_term'=>'技师','operation'=>'ranking','metric_codes'=>[],'needs_metric_choice'=>true];
+    $GLOBALS['sfResponse']=$response(json_encode($intent));
+    $understood=$client->understand($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){});
+    check($understood['intent']===$intent,'general interpretation separates object, operation and missing criterion');
+    $outbound=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
+    check(strpos(json_encode($outbound),'recent_user_intents')===false,'new question understanding does not replay conversation history');
+    foreach ([array_merge($intent,['sql'=>'SELECT 1']),array_merge($intent,['metric_codes'=>['invented']]),array_merge($intent,['object_term'=>'张三'])] as $invalid) {
+        $GLOBALS['sfResponse']=$response(json_encode($invalid));
+        rejects(function()use($client,$safeQuestion,$meanings){$client->understand($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){});},isset($invalid['metric_codes'][0])?'AI_MODEL_METRIC_UNKNOWN':'AI_MODEL_RESPONSE_INVALID');
+    }
     mkdir($temp,0700); $private = new AiPrivateStorage($temp);
     try {
         check(strlen($private->signingKey())===32,'key created'); check($private->signingKey()===$private->signingKey(),'stable key');
@@ -169,6 +181,24 @@ namespace {
         $input['version']=2;$input['enabled']=true;$input['external_processing_authorized']=false;
         rejects(function()use($store,$input){$store->save($input);},'AI_EXTERNAL_AUTHORIZATION_REQUIRED');
         $other=new AiConfigStore($db,'','fixture-other',$private);check($other->read()['has_api_key']===false,'instance config isolated');
+        check(!$store->read()['external_scope_supported'] && !AiConfigStore::allowsSanitizedQuestion($store->read()),'legacy schema never grants expanded scope');
+        $input['enabled']=true;$input['external_processing_authorized']=true;$input['external_scope_version']=AiConfigStore::QUESTION_SCOPE;
+        rejects(function()use($store,$input){$store->save($input);},'AI_CONFIG_SCOPE_MIGRATION_REQUIRED');
+        $db->exec("ALTER TABLE mohe_ai_config ADD COLUMN external_scope_version TEXT NOT NULL DEFAULT ''");
+        check($store->read()['external_scope_supported'] && !AiConfigStore::allowsSanitizedQuestion($store->read()),'migration does not grant consent');
+        $public=$store->save($input);
+        check($public['version']===3 && AiConfigStore::allowsSanitizedQuestion($public),'explicit versioned consent stored');
+        check(!AiConfigStore::allowsSanitizedQuestion($other->read()),'consent not shared across instances');
+        $input['version']=3;unset($input['external_scope_version']);
+        check(AiConfigStore::allowsSanitizedQuestion($store->save($input)),'legacy request preserves already explicit scope');
+        $input['version']=4;$input['enabled']=false;$input['external_processing_authorized']=false;
+        check($store->save($input)['external_scope_version']==='','revocation clears scope durably');
+        $input['version']=5;$input['enabled']=true;$input['external_processing_authorized']=true;
+        check(!AiConfigStore::allowsSanitizedQuestion($store->save($input)),'re-enabling old authorization does not restore expanded consent');
+        $input['version']=6;$input['external_scope_version']='future-unapproved-scope';
+        rejects(function()use($store,$input){$store->save($input);},'AI_CONFIG_INVALID');
+        $input['external_scope_version']=null;
+        rejects(function()use($store,$input){$store->save($input);},'AI_CONFIG_INVALID');
     } finally {
         // Exact test-created directory only; no user/config/production paths.
         foreach (new \DirectoryIterator($temp) as $file) if ($file->isFile() && !$file->isLink()) unlink($file->getPathname());

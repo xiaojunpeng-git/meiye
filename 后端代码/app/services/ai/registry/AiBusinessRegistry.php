@@ -55,18 +55,23 @@ final class AiBusinessRegistry
             foreach (['metric_version','mapping_version','source_metric_version','coverage_start'] as $key) {
                 if (!is_string($item[$key]??null)||$item[$key]===''||strlen($item[$key])>160) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             }
-            if (($item['filter_grain']??null)!=='store'||($item['business_filters']??null)!==[]
+            $person=($item['filter_grain']??null)==='person';
+            if ((!$person && (($item['filter_grain']??null)!=='store'||($item['business_filters']??null)!==[]))
+                || ($person && ($item['business_filters']??null)!==['selection_ref'])
                 ||!preg_match('/^\d{4}-\d{2}-\d{2}$/D',$item['coverage_start'])) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             $coverage=\DateTimeImmutable::createFromFormat('!Y-m-d',$item['coverage_start']);
             if (!$coverage||$coverage->format('Y-m-d')!==$item['coverage_start']) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             // This release cannot inherit a new metric merely because a lower catalog gained it.
-            if (!in_array($code,['cash_performance','consume_amount'],true)) continue;
+            $registered=\app\services\query\metric\MetricReadViewServices::metricCapabilities()+\app\services\query\metric\PersonnelPerformanceReadServices::capabilities();
+            if (!isset($registered[$code]) || !$registered[$code]['ai_query_ready']) continue;
+            if (($registered[$code]['filter_grain']??null)!==($item['filter_grain']??null)
+                || ($registered[$code]['business_filters']??null)!==($item['business_filters']??null)) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             $available=array_values(array_intersect($shapes,AiRegistryValue::strings($item['query_shapes']??[],8)));
             if (!$available) continue;
             sort($available,SORT_STRING);
             $metrics[$code]=['metric_code'=>$code,'name'=>(string)($item['name']??$code),'metric_version'=>$item['metric_version'],
                 'mapping_version'=>$item['mapping_version'],'source_metric_version'=>$item['source_metric_version'],
-                'query_shapes'=>$available,'coverage_start'=>$item['coverage_start'],'filter_grain'=>'store','business_filters'=>[]];
+                'query_shapes'=>$available,'coverage_start'=>$item['coverage_start'],'filter_grain'=>$person?'person':'store','business_filters'=>$person?['selection_ref']:[]];
         }
         ksort($metrics,SORT_STRING);
         $definitions=[];
