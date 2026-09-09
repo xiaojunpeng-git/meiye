@@ -1,10 +1,11 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import BusinessRecordDetailOverlay from '@/components/order/BusinessRecordDetailOverlay.vue'
 import ReceiptPrinterSetupOverlay from '@/components/order/ReceiptPrinterSetupOverlay.vue'
 import SalesOrderDetailOverlay from '@/components/order/SalesOrderDetailOverlay.vue'
 import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
+import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import Printer from '@lucide/vue/dist/esm/icons/printer.mjs'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
@@ -30,6 +31,7 @@ import {
   serviceRecordReceiptFromRecord
 } from '@/services/salesOrderReceiptPrint'
 import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
+import { queryPlatformOrderCenterScope } from '@/services/platformOrderCenterApi'
 
 const field = (key, label, type = 'text', extra = {}) => ({ key, label, type, defaultVisible: true, ...extra })
 const isPrinterSetupOpen = ref(false)
@@ -273,9 +275,17 @@ const FIELD_ALIASES = {
 
 const state = useCashierV3State()
 const router = useRouter()
+const route = useRoute()
+const isPlatformReadOnly = computed(() => route.meta.platformReadOnly === true)
+const platformScopePicker = ref({ loading: false, tree: [], allowedStoreIds: [], label: '当前权限范围' })
+const platformScopeStoreIds = ref([])
 const orderCenter = computed(() => state.orderCenter || {})
-const activeTabKey = ref('sales')
+const requestedPlatformTab = String(route.query.tab || route.query.recordType || '').trim()
+const activeTabKey = ref(ORDER_TABS.some((tab) => tab.key === requestedPlatformTab) ? requestedPlatformTab : 'sales')
 const availableTabs = computed(() => {
+  // 平台的首个查询响应只对应当前页签，不能在它尚未带全量 businessTypes
+  // 时把其余七个入口隐藏。
+  if (isPlatformReadOnly.value) return ORDER_TABS
   const advertised = Array.isArray(orderCenter.value.businessTypes) ? orderCenter.value.businessTypes : []
   if (!advertised.length) return ORDER_TABS.filter((tab) => tab.key === 'sales')
   const readyKeys = new Set()
@@ -424,7 +434,23 @@ const unifiedQueryPages = Object.fromEntries(ORDER_TABS.map((tab) => [tab.key, u
   requestAction
 })]))
 const activeUnifiedQuery = computed(() => unifiedQueryPages[activeTabKey.value] || unifiedQueryPages.sales)
-const activeQueryCapability = computed(() => activeUnifiedQuery.value?.capability?.value || {})
+const platformOrderCenterDefaultDateRanges = computed(() => {
+  if (!isPlatformReadOnly.value) return {}
+  const to = orderCenterToday()
+  return { business_date: { min: `${to.slice(0, 8)}01`, max: to } }
+})
+const activeQueryCapability = computed(() => {
+  const capability = activeUnifiedQuery.value?.capability?.value || {}
+  if (!isPlatformReadOnly.value) return capability
+  // 平台入口只提供列表查询；即使后端复用了门店的统一查询能力描述，也不
+  // 显示导出、字段管理或其他会写入个人配置的工具栏操作。
+  return {
+    ...capability,
+    commandContext: null,
+    exportCapability: { ...(capability.exportCapability || {}), enabled: false },
+    permissions: { ...(capability.permissions || {}), renameFields: false, createCustomField: false, editCustomField: false }
+  }
+})
 const activeQueryFields = computed(() => activeUnifiedQuery.value?.fields?.value || queryFields.value)
 const executedQuery = computed(() => executedQueryByType.value[activeTabKey.value] || null)
 
@@ -555,7 +581,7 @@ function memberDetailPayload(record = {}) {
 }
 
 function canOpenMemberDetail(record) {
-  return memberDetailPayload(record) !== null
+  return !isPlatformReadOnly.value && memberDetailPayload(record) !== null
 }
 
 function openMemberDetail(record) {
@@ -634,6 +660,7 @@ function personnelNames(item, key) {
 }
 
 function salesOrderActionAvailable(record, action, permission) {
+  if (isPlatformReadOnly.value) return false
   const actions = record?.availableActions
   const available = Array.isArray(actions) ? actions.includes(action) : actions?.[action] === true
   return available && (!permission || canUseCashierV3Operation(permission))
@@ -1101,17 +1128,20 @@ function normalizeOrderCenterDateQuery(query = {}) {
 }
 
 function defaultOrderCenterDateQuery() {
-  const date = orderCenterToday()
+  // 订单中心是跨门店查询入口。默认只查“今天”会让刚打开页面的人
+  // 在当天尚未结账时误以为历史订单丢失；统一按本月截至今天查询。
+  const to = orderCenterToday()
+  const from = `${to.slice(0, 8)}01`
   return {
     dataScope: 'normal',
     businessStatus: '',
-    dateFrom: date,
-    dateTo: date,
-    businessDateFrom: date,
-    businessDateTo: date,
+    dateFrom: from,
+    dateTo: to,
+    businessDateFrom: from,
+    businessDateTo: to,
     topFilters: [
-      { field: 'business_date', operator: 'gte', value: date },
-      { field: 'business_date', operator: 'lte', value: date }
+      { field: 'business_date', operator: 'gte', value: from },
+      { field: 'business_date', operator: 'lte', value: to }
     ]
   }
 }
@@ -1131,6 +1161,45 @@ function normalizeSalesOrderQuery(query = {}) {
   return { ...normalizeOrderCenterDateQuery(query), status }
 }
 
+function applyPlatformScope(query = {}) {
+  if (!isPlatformReadOnly.value) return query
+  const { storeIds: ignoredStoreIds, store_ids: ignoredStoreIdsSnakeCase, ...rest } = query
+  return platformScopeStoreIds.value.length
+    ? { ...rest, storeIds: [...platformScopeStoreIds.value] }
+    : rest
+}
+
+async function loadPlatformOrderScope() {
+  if (!isPlatformReadOnly.value || platformScopePicker.value.loading) return
+  platformScopePicker.value = { ...platformScopePicker.value, loading: true }
+  try {
+    const response = await queryPlatformOrderCenterScope()
+    const allowedStoreIds = Array.isArray(response?.allowed_store_ids)
+      ? response.allowed_store_ids.map(Number).filter(Boolean)
+      : []
+    platformScopePicker.value = {
+      ...platformScopePicker.value,
+      loading: false,
+      tree: Array.isArray(response?.tree) ? response.tree : [],
+      allowedStoreIds
+    }
+  } catch (_) {
+    // 订单查询仍由服务端数据权限保护。范围树异常时保留“当前权限范围”，
+    // 避免把前端失败误解为没有订单数据。
+    platformScopePicker.value = { ...platformScopePicker.value, loading: false, tree: [], allowedStoreIds: [] }
+  }
+}
+
+function changePlatformOrderScope({ storeIds = [], label = '当前权限范围' } = {}) {
+  const allowed = new Set(platformScopePicker.value.allowedStoreIds.map(Number).filter(Boolean))
+  platformScopeStoreIds.value = [...new Set(storeIds.map(Number).filter((id) => allowed.has(id)))]
+  platformScopePicker.value = {
+    ...platformScopePicker.value,
+    label: platformScopeStoreIds.value.length ? String(label || '已选范围') : '当前权限范围'
+  }
+  queryRecords({}, true)
+}
+
 async function queryRecords(query = {}, resetPage = true) {
   const recordType = activeTabKey.value
   if (recordType !== 'sales') {
@@ -1138,13 +1207,13 @@ async function queryRecords(query = {}, resetPage = true) {
     const requestedPageSize = Math.max(1, Number(query.pageSize ?? query.limit) || pageSize.value)
     const pageSizeChanged = Number(currentQuery.pageSize || pageSize.value) !== requestedPageSize
     const targetPage = resetPage || pageSizeChanged ? 1 : Math.max(1, Number(query.page) || page.value)
-    const nextQuery = normalizeOrderCenterDateQuery({
+    const nextQuery = normalizeOrderCenterDateQuery(applyPlatformScope({
       ...currentQuery,
       ...query,
       recordType,
       page: targetPage,
       pageSize: requestedPageSize
-    })
+    }))
     queryModelByType.value = { ...queryModelByType.value, [recordType]: nextQuery }
     const sequence = ++recordQuerySequence
     isOrderQueryLoading.value = true
@@ -1175,13 +1244,13 @@ async function queryRecords(query = {}, resetPage = true) {
       }
     }
   }
-  const nextQuery = normalizeSalesOrderQuery({
+  const nextQuery = normalizeSalesOrderQuery(applyPlatformScope({
     ...currentQuery,
     ...query,
     recordType,
     page: targetPage,
     pageSize: requestedPageSize
-  })
+  }))
   const cursorQuery = nextSalesOrderQueryWithCursor(nextQuery, cursor)
   queryModelByType.value = { ...queryModelByType.value, sales: cursorQuery }
 
@@ -1406,6 +1475,7 @@ function closeSalesDetail() {
 }
 
 function openRecordDetail(record) {
+  if (isPlatformReadOnly.value) return null
   if (activeTabKey.value === 'sales') {
     return openSalesOrderDetail({ orderId: record?.id || record?.orderId || record?.salesOrderId })
   }
@@ -1883,9 +1953,30 @@ onMounted(() => {
   window.addEventListener('cashier-v3:state-context-changed', resetLocalContext)
 })
 
-watch(activeTabKey, () => {
-  activeUnifiedQuery.value?.load({ silent: true })
+// Vue Router 在首帧可能尚未把嵌套路由 meta 写入 route；若只在 mounted
+// 判断，会漏掉平台页的首个查询，页面于是错误地显示 0 条。等只读路由身份
+// 已确认后执行一次本月查询，同时保留普通收银入口原有流程。
+watch(isPlatformReadOnly, (readOnly) => {
+  if (readOnly) {
+    void loadPlatformOrderScope()
+    queryRecords(defaultOrderCenterDateQuery(), true)
+  }
 }, { immediate: true })
+
+watch(activeTabKey, () => {
+  // 平台页没有可保存的统一查询设置；加载它会触发工具栏的“今天”默认
+  // 查询并覆盖本页约定的“本月截至今天”。
+  if (!isPlatformReadOnly.value) activeUnifiedQuery.value?.load({ silent: true })
+}, { immediate: true })
+
+watch(
+  () => String(route.query.tab || route.query.recordType || '').trim(),
+  (tab) => {
+    if (!isPlatformReadOnly.value || !ORDER_TABS.some((item) => item.key === tab) || tab === activeTabKey.value) return
+    activeTabKey.value = tab
+    queryRecords(defaultOrderCenterDateQuery(), true)
+  }
+)
 
 // 根分区是登录时的通用快照，不能直接当作销售订单的“正常数据”结果。
 // 首次拿到当前工作台上下文后主动执行一次后端 normal 查询，避免首屏把
@@ -1893,6 +1984,7 @@ watch(activeTabKey, () => {
 watch(
   () => state.stateContextId,
   (stateContextId) => {
+    if (isPlatformReadOnly.value) return
     if (!stateContextId) return
     // 首屏的页面能力请求可能发生在工作台上下文建立之前。上下文就绪后重试当前
     // 页签，避免安全降级状态把“导出”一直隐藏到手工刷新为止。
@@ -1912,7 +2004,7 @@ onBeforeUnmount(() => {
 <template>
   <section class="order-center-page" aria-label="订单中心">
     <header class="order-center-page__head">
-      <nav class="order-center-tabs" role="tablist" aria-label="订单与业务记录类型">
+      <nav v-if="!isPlatformReadOnly" class="order-center-tabs" role="tablist" aria-label="订单与业务记录类型">
         <button
           v-for="tab in availableTabs"
           :key="tab.key"
@@ -1927,14 +2019,15 @@ onBeforeUnmount(() => {
           <strong class="order-center-tabs__count">{{ tabCount(tab.key) }}</strong>
         </button>
       </nav>
-      <button type="button" class="order-center-printer-button" @click="isPrinterSetupOpen = true">
+      <span v-if="isPlatformReadOnly" class="order-center-page__readonly-note">平台只读查询；业务操作请前往门店端处理</span>
+      <button v-else type="button" class="order-center-printer-button" @click="isPrinterSetupOpen = true">
         <Printer :size="17" />
         打印设置
       </button>
     </header>
 
-    <p v-if="serviceVoidNotice" class="order-center-notice" role="status">{{ serviceVoidNotice }}</p>
-    <p v-if="servicePrintError" class="order-center-page__inline-error" role="alert">{{ servicePrintError }}</p>
+    <p v-if="!isPlatformReadOnly && serviceVoidNotice" class="order-center-notice" role="status">{{ serviceVoidNotice }}</p>
+    <p v-if="!isPlatformReadOnly && servicePrintError" class="order-center-page__inline-error" role="alert">{{ servicePrintError }}</p>
 
     <UnifiedQueryToolbar
       class="order-center-query-toolbar"
@@ -1954,9 +2047,11 @@ onBeforeUnmount(() => {
       :current-page="page"
       :data-as-of="orderCenter.dataAsOf"
       :executed-query="executedQuery"
+      :default-quick-date-ranges="platformOrderCenterDefaultDateRanges"
       :is-query-loading="isOrderQueryLoading"
       :state-context-key="state.stateContextId"
       :query-capability="activeQueryCapability"
+      :show-settings-button="!isPlatformReadOnly"
       @query="queryRecords"
       :on-save-settings="saveQuerySettings"
       :on-create-export="createActiveExport"
@@ -1967,7 +2062,19 @@ onBeforeUnmount(() => {
       export-button-after-settings
       direct-query-export
       @settings-applied="applyQuerySettings"
-    />
+    >
+      <template #leading-controls>
+        <OrganizationStoreScopePicker
+          v-if="isPlatformReadOnly"
+          v-model="platformScopeStoreIds"
+          :tree="platformScopePicker.tree"
+          :allowed-store-ids="platformScopePicker.allowedStoreIds"
+          :label="platformScopePicker.label"
+          :loading="platformScopePicker.loading"
+          @change="changePlatformOrderScope"
+        />
+      </template>
+    </UnifiedQueryToolbar>
 
     <main class="order-center-list-wrap">
       <table v-if="activeTabKey === 'sales'" class="order-center-list-table sales-order-query-table" :style="{ '--order-column-count': salesOrderListColumns.length }">
@@ -1985,7 +2092,7 @@ onBeforeUnmount(() => {
               <span>门店：{{ displayRecordField(record, 'store') }}</span>
               <span>客户：{{ displayRecordField(record, 'member_name') }}</span>
               <span>来源：{{ displayRecordField(record, 'source') }}</span>
-              <span class="sales-order-query-group__actions">
+              <span v-if="!isPlatformReadOnly" class="sales-order-query-group__actions">
                 <button type="button" class="button button--text" @click="openRecordDetail(record)">订单详情</button>
                 <button
                   v-if="canUseCashierV3Operation('cashier.v3.order.receipt_print')"
@@ -2064,14 +2171,14 @@ onBeforeUnmount(() => {
         <thead>
           <tr>
             <th v-for="fieldItem in visibleFields" :key="fieldItem.key">{{ fieldItem.label }}</th>
-            <th>操作</th>
+            <th v-if="!isPlatformReadOnly">操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="(record, index) in records" :key="recordKey(record, index)">
             <td v-for="fieldItem in visibleFields" :key="fieldItem.key" :class="tableCellClass(record, fieldItem)">
               <button
-                v-if="fieldItem.key === activeTab.primaryField"
+                v-if="!isPlatformReadOnly && fieldItem.key === activeTab.primaryField"
                 type="button"
                 class="order-link"
                 @click="openRecordDetail(record)"
@@ -2088,7 +2195,7 @@ onBeforeUnmount(() => {
                 {{ displayRecordField(record, fieldItem.key) }}
               </button>
               <button
-                v-else-if="fieldItem.key === 'salesperson' && ['recharge', 'supplement'].includes(activeTabKey) && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
+                v-else-if="!isPlatformReadOnly && fieldItem.key === 'salesperson' && ['recharge', 'supplement'].includes(activeTabKey) && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
                 type="button"
                 class="order-link"
                 title="修改销售人"
@@ -2097,7 +2204,7 @@ onBeforeUnmount(() => {
                 {{ displayRecordField(record, fieldItem.key) }}
               </button>
               <button
-                v-else-if="fieldItem.key === 'craftsman' && serviceRecordIsNormal(record) && canUseCashierV3Operation('cashier.v3.order.service_detail')"
+                v-else-if="!isPlatformReadOnly && fieldItem.key === 'craftsman' && serviceRecordIsNormal(record) && canUseCashierV3Operation('cashier.v3.order.service_detail')"
                 type="button"
                 class="order-link"
                 title="修改该服务记录的手艺人分配"
@@ -2112,7 +2219,7 @@ onBeforeUnmount(() => {
               </span>
               <span v-else>{{ displayRecordField(record, fieldItem.key) }}</span>
             </td>
-            <td>
+            <td v-if="!isPlatformReadOnly">
               <button
                 v-if="activeTabKey !== 'service' || canUseCashierV3Operation('cashier.v3.order.service_detail')"
                 type="button"
@@ -2167,7 +2274,7 @@ onBeforeUnmount(() => {
     />
 
     <SalesOrderDetailOverlay
-      v-if="isSalesDetailOpen"
+      v-if="!isPlatformReadOnly && isSalesDetailOpen"
       :order="salesDetailOrder"
       :is-loading="isSalesDetailLoading"
       :load-error="salesDetailLoadError"
@@ -2181,7 +2288,7 @@ onBeforeUnmount(() => {
     />
 
     <PersonnelPerformanceOverlay
-      v-if="salesPersonnelEditorOpen && salesPersonnelEntry && salesPersonnelTarget"
+      v-if="!isPlatformReadOnly && salesPersonnelEditorOpen && salesPersonnelEntry && salesPersonnelTarget"
       :initial-tab="salesPersonnelTarget.uiRole"
       initial-mode="full"
       :show-craftsmen="false"
@@ -2202,7 +2309,7 @@ onBeforeUnmount(() => {
     />
 
     <PersonnelPerformanceOverlay
-      v-if="recordPersonnelEditorOpen && recordPersonnelEntry && recordPersonnelTarget"
+      v-if="!isPlatformReadOnly && recordPersonnelEditorOpen && recordPersonnelEntry && recordPersonnelTarget"
       initial-tab="salespeople"
       initial-mode="full"
       :show-craftsmen="false"
@@ -2218,7 +2325,7 @@ onBeforeUnmount(() => {
     />
 
     <BusinessRecordDetailOverlay
-      v-if="genericDetailRecord"
+      v-if="!isPlatformReadOnly && genericDetailRecord"
       :title="`${activeTab.label}详情`"
       :record="genericDetailRecord"
       :fields="detailFields"
@@ -2230,12 +2337,12 @@ onBeforeUnmount(() => {
       @close="genericDetailRecord = null"
     />
 
-    <p v-if="serviceCraftsmanError && !serviceCraftsmanEditorOpen && !serviceCraftsmanPendingAssignment" class="order-center-page__inline-error" role="alert">
+    <p v-if="!isPlatformReadOnly && serviceCraftsmanError && !serviceCraftsmanEditorOpen && !serviceCraftsmanPendingAssignment" class="order-center-page__inline-error" role="alert">
       {{ serviceCraftsmanError }}
     </p>
 
     <PersonnelPerformanceOverlay
-      v-if="serviceCraftsmanEditorOpen && serviceCraftsmanEntry"
+      v-if="!isPlatformReadOnly && serviceCraftsmanEditorOpen && serviceCraftsmanEntry"
       initial-tab="craftsmen"
       :show-craftsmen="true"
       :show-salespeople="false"
@@ -2253,12 +2360,12 @@ onBeforeUnmount(() => {
     />
 
     <ReceiptPrinterSetupOverlay
-      v-if="isPrinterSetupOpen"
+      v-if="!isPlatformReadOnly && isPrinterSetupOpen"
       :store-name="state.currentStore?.name || state.currentStore?.storeName || ''"
       @close="isPrinterSetupOpen = false"
     />
 
-    <div v-if="serviceVoidRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="service-void-title">
+    <div v-if="!isPlatformReadOnly && serviceVoidRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="service-void-title">
       <div class="service-void-modal__backdrop" @click="closeServiceVoid"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">
@@ -2276,7 +2383,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="serviceCraftsmanPendingAssignment" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="service-craftsman-reason-title">
+    <div v-if="!isPlatformReadOnly && serviceCraftsmanPendingAssignment" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="service-craftsman-reason-title">
       <div class="service-void-modal__backdrop" @click="cancelServiceCraftsmanReason"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">
@@ -2294,7 +2401,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="salesPersonnelPendingAssignment && salesPersonnelTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="sales-personnel-reason-title">
+    <div v-if="!isPlatformReadOnly && salesPersonnelPendingAssignment && salesPersonnelTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="sales-personnel-reason-title">
       <div class="service-void-modal__backdrop" @click="cancelSalesPersonnelReason"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">
@@ -2312,7 +2419,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="recordPersonnelPendingAssignment && recordPersonnelTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="record-personnel-reason-title">
+    <div v-if="!isPlatformReadOnly && recordPersonnelPendingAssignment && recordPersonnelTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="record-personnel-reason-title">
       <div class="service-void-modal__backdrop" @click="cancelRecordPersonnelReason"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">
@@ -2330,7 +2437,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="salesOrderNoteRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="sales-order-note-title">
+    <div v-if="!isPlatformReadOnly && salesOrderNoteRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="sales-order-note-title">
       <div class="service-void-modal__backdrop" @click="closeSalesOrderNoteEditor"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">
@@ -2352,6 +2459,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .order-center-page { position: relative; }
+.order-center-page__readonly-note { margin-left: auto; color: #667085; font-size: 13px; }
 .order-center-notice { margin: 12px 0 0; padding: 9px 12px; border-left: 3px solid #c83c3c; background: #fff4f4; color: #8a3030; }
 .order-center-page__inline-error { position: fixed; right: 20px; bottom: 20px; z-index: 90; max-width: min(420px, calc(100vw - 40px)); margin: 0; padding: 10px 14px; border: 1px solid #fecdca; border-radius: 6px; background: #fff4f4; color: #b42318; box-shadow: 0 8px 24px rgba(16, 24, 40, .14); }
 .service-void-modal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; }

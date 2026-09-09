@@ -6,6 +6,7 @@ import {
   canonicalCashierV3Action,
   hasCashierV3Action,
   isCashierV3CommandAction,
+  isCashierV3ProjectionAction,
   PREPARATION_PROJECTION_ACTIONS
 } from './cashierV3ActionManifest'
 import { isCompleteCheckoutCompositionContract } from './cashierV3EntitlementDraftContract'
@@ -3604,8 +3605,22 @@ export async function requestCashierV3Action(action, payload = {}) {
   }
 
   const canonicalAction = canonicalCashierV3Action(action)
+  // 平台订单中心只接收只读投影。前端先拒绝 command，后端仍会以平台菜单
+  // 权限和数据范围二次校验，避免未来误加按钮后把门店操作送进该入口。
+  const platformReadOnly = adapter?.platformReadOnly === true
+  if (platformReadOnly && !isCashierV3ProjectionAction(canonicalAction)) {
+    const denied = {
+      result: {
+        status: 'failed',
+        code: 'PLATFORM_ORDER_CENTER_READ_ONLY',
+        message: '平台订单中心仅支持查询，请前往门店端处理业务操作。'
+      }
+    }
+    if (!silent) emitCashierV3UiResult(denied)
+    return denied
+  }
   const permissionCheck = cashierV3ActionPermission(canonicalAction, requestBody)
-  if (!permissionCheck.allowed) {
+  if (!platformReadOnly && !permissionCheck.allowed) {
     const denied = {
       result: {
         status: 'failed',

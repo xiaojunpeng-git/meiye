@@ -124,6 +124,12 @@ const props = defineProps({
     type: Object,
     default: null
   },
+  // 页面可以为某个快捷日期字段提供初始范围；未提供时保持现有“今天”默认。
+  // 该值只影响首次初始化/清空后的显示，不替代服务端查询口径。
+  defaultQuickDateRanges: {
+    type: Object,
+    default: () => ({})
+  },
   isQueryLoading: {
     type: Boolean,
     default: false
@@ -395,13 +401,23 @@ function localToday() {
   return new Date(now.getTime() - offset).toISOString().slice(0, 10)
 }
 
+function defaultQuickDateRange(field) {
+  const configured = props.defaultQuickDateRanges?.[field?.key]
+  const min = String(configured?.min ?? '').trim()
+  const max = String(configured?.max ?? '').trim()
+  const isDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value)
+  if (isDate(min) && isDate(max) && min <= max) return { min, max }
+  const today = localToday()
+  return { min: today, max: today }
+}
+
 function ensureQuickDateRangeDefaults() {
   activeQuickFields.value.forEach((field) => {
     if (!isQuickDateRange(field)) return
     if (!quickFieldRanges[field.key]) quickFieldRanges[field.key] = { min: '', max: '' }
-    const today = localToday()
-    if (!quickFieldRanges[field.key].min) quickFieldRanges[field.key].min = today
-    if (!quickFieldRanges[field.key].max) quickFieldRanges[field.key].max = today
+    const defaults = defaultQuickDateRange(field)
+    if (!quickFieldRanges[field.key].min) quickFieldRanges[field.key].min = defaults.min
+    if (!quickFieldRanges[field.key].max) quickFieldRanges[field.key].max = defaults.max
   })
 }
 
@@ -546,7 +562,7 @@ function clearTopField(field) {
   if (isFixedStoreField(field)) return
   if (field.quickRange === true || isQuickDateRange(field)) {
     quickFieldRanges[field.key] = isQuickDateRange(field)
-      ? { min: localToday(), max: localToday() }
+      ? defaultQuickDateRange(field)
       : { min: '', max: '' }
     quickRangeError.value = ''
     return
@@ -701,6 +717,7 @@ async function startDirectQueryExport() {
   >
     <div class="unified-query-toolbar__topline">
       <div class="unified-query-toolbar__primary">
+        <slot name="leading-controls" />
         <div v-if="inlineQuickControls && quickFilters.length" class="unified-query-toolbar__quick">
           <button
             v-for="filter in quickFilters"

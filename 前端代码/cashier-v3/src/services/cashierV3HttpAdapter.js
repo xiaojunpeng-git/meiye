@@ -1,8 +1,23 @@
 import { readStoreV3SessionToken } from './storeV3SessionToken.js'
 
 const DEFAULT_ACTION_ENDPOINT = '/cashierapi/v3/workbenches/actions'
+const PLATFORM_ORDER_CENTER_ACTION_ENDPOINT = '/adminapi/store/order-center/actions'
 const CASHIER_SOURCE = 'f76d38d0ee4f854f'
 const DEFAULT_TIMEOUT_MS = 30000
+const PLATFORM_ORDER_CENTER_READ_ACTIONS = new Set([
+  'query-sales-orders',
+  'query-order-center-records',
+  'open-sales-order-detail',
+  'query-unified-query-capabilities'
+])
+
+function readSameOriginCookie(name, browserWindow) {
+  const cookie = String(browserWindow?.document?.cookie || '')
+  const prefix = `${encodeURIComponent(name)}=`
+  const part = cookie.split(';').map((item) => item.trim()).find((item) => item.startsWith(prefix))
+  if (!part) return ''
+  try { return decodeURIComponent(part.slice(prefix.length)) } catch (_) { return '' }
+}
 
 function resolveSameOriginEndpoint(endpoint, origin) {
   const configured = String(endpoint || DEFAULT_ACTION_ENDPOINT).trim()
@@ -52,8 +67,11 @@ export function createCashierV3HttpAdapter(options = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('当前浏览器不支持收银网络请求。')
 
   const origin = options.origin || browserWindow?.location?.origin || ''
+  const platformOrderCenter = options.mode === 'platform-order-center'
   const endpoint = resolveSameOriginEndpoint(
-    options.endpoint || import.meta.env?.VITE_CASHIER_V3_ACTION_ENDPOINT,
+    options.endpoint || (platformOrderCenter
+      ? (import.meta.env?.VITE_PLATFORM_ORDER_CENTER_ACTION_ENDPOINT || PLATFORM_ORDER_CENTER_ACTION_ENDPOINT)
+      : import.meta.env?.VITE_CASHIER_V3_ACTION_ENDPOINT),
     origin
   )
   const timeoutMs = Number.isSafeInteger(Number(options.timeoutMs)) && Number(options.timeoutMs) >= 0
@@ -61,7 +79,11 @@ export function createCashierV3HttpAdapter(options = {}) {
     : DEFAULT_TIMEOUT_MS
 
   async function post(payload) {
-    const token = options.storage
+    const token = platformOrderCenter
+      // 平台嵌入页与现有平台看板共用 admin-token；绝不能读取门店
+      // cashier_token，否则管理员页面会被错误地当成门店收银会话。
+      ? readSameOriginCookie('admin-token', browserWindow)
+      : options.storage
       ? String(options.storage.getItem?.('cashier-v3:session-token') || '').trim()
       : readStoreV3SessionToken(browserWindow)
     const headers = {
@@ -80,7 +102,7 @@ export function createCashierV3HttpAdapter(options = {}) {
     try {
       const response = await fetchImpl(endpoint, {
         method: 'POST',
-        credentials: 'omit',
+        credentials: platformOrderCenter ? 'same-origin' : 'omit',
         cache: 'no-store',
         headers,
         body: JSON.stringify(payload),
@@ -115,15 +137,22 @@ export function createCashierV3HttpAdapter(options = {}) {
   }
 
   return Object.freeze({
+    platformReadOnly: platformOrderCenter,
     async request(action, payload = {}) {
       const canonicalAction = String(action || '').trim()
       const payloadAction = String(payload?.action || '').trim()
       if (!canonicalAction || (payloadAction && payloadAction !== canonicalAction)) {
         throw new Error('收银操作与请求内容不一致，已拒绝发送。')
       }
+      if (platformOrderCenter && !PLATFORM_ORDER_CENTER_READ_ACTIONS.has(canonicalAction)) {
+        throw new Error('平台订单中心仅支持查询，不允许执行门店操作。')
+      }
       return post({ ...payload, action: canonicalAction })
     },
     async bootstrap(payload = {}) {
+      if (platformOrderCenter) {
+        throw new Error('平台订单中心不允许初始化门店收银工作台。')
+      }
       const action = String(payload?.action || 'open-cashier-workbench').trim()
       if (action !== 'open-cashier-workbench') {
         throw new Error('工作台初始化操作无效，已拒绝发送。')

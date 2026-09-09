@@ -37,6 +37,9 @@ function selectEntity(payload) {
     :compact-keyword-search="compactKeywordSearch"
     :on-select-entity="selectEntity"
   >
+    <template #leading-controls>
+      <slot name="leading-controls" />
+    </template>
     <template #primary-actions>
       <slot name="primary-actions" />
     </template>

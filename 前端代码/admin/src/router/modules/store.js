@@ -176,6 +176,24 @@ export default {
       component: () => import('@/pages/store/region/create')
     },
     {
+      path: 'order/center',
+      name: `${pre}orderCenter`,
+      meta: {
+        auth: [
+          'admin-store-order-center-sales',
+          'admin-store-order-center-recharge',
+          'admin-store-order-center-refund',
+          'admin-store-order-center-debt',
+          'admin-store-order-center-service',
+          'admin-store-order-center-supplement',
+          'admin-store-order-center-gift',
+          'admin-store-order-center-card-operation'
+        ],
+        title: '门店订单'
+      },
+      component: () => import('@/pages/store/order/center')
+    },
+    {
       path: 'order/index',
       name: `${pre}order`,
       meta: {

@@ -119,6 +119,14 @@ const routes = [
     meta: { platformReport: true, title: '员工看板' }
   },
   {
+    // 复用订单中心的查询页签；此入口由平台管理员数据范围授权，不能初始化
+    // 门店收银会话，也不提供任何门店写操作。
+    path: '/platform/order-center',
+    name: 'cashier-v3-platform-order-center',
+    component: OrderCenterView,
+    meta: { platformReport: true, platformReadOnly: true, title: '门店订单' }
+  },
+  {
     path: '/',
     component: CashierShell,
     redirect: '/cashier',
