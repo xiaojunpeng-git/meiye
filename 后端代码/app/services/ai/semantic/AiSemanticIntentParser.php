@@ -28,8 +28,6 @@ final class AiSemanticIntentParser
         require_once __DIR__.'/AiSemanticVocabulary.php';
         $patterns=AiSemanticVocabulary::patterns();
         foreach($patterns as $code=>$pattern) $take($pattern,$code);
-        $map=['cash_performance_short'=>'cash_performance','consume_amount_short'=>'consume_amount'];
-        foreach($signals as &$signal) if(isset($map[$signal])) $signal=$map[$signal]; unset($signal);
         $relative=['这个月'=>'THIS_MONTH','这一个月'=>'THIS_MONTH','上个月'=>'LAST_MONTH','本月'=>'THIS_MONTH','这月'=>'THIS_MONTH','上月'=>'LAST_MONTH','今天'=>'TODAY','今日'=>'TODAY','昨天'=>'YESTERDAY','昨日'=>'YESTERDAY','前天'=>'DAY_BEFORE_YESTERDAY','明天'=>'TOMORROW'];
         // Normalize date synonyms only locally. Original text is never retained.
         $normalized=strtr($text,['这个月'=>'本月','这一个月'=>'本月','上个月'=>'上月','今日'=>'今天','昨日'=>'昨天']);
@@ -42,15 +40,15 @@ final class AiSemanticIntentParser
             $signals[]='ranking';
         }
         $limits=array_values(array_unique($limits));
-        foreach(['unavailable_metric','unavailable_count','unavailable_domain','person_filter','category_filter','source_filter','exclusion','page_reference','history_point'] as $type) if(in_array($type,$signals,true)) $constraints[]=['type'=>$type,'status'=>'not_bound'];
+        foreach(['person_filter','category_filter','source_filter','exclusion','page_reference','history_point'] as $type) if(in_array($type,$signals,true)) $constraints[]=['type'=>$type,'status'=>'not_bound'];
         if (in_array('attention_goal',$signals,true) || in_array('ranking',$signals,true)) $covered=str_replace(['门店','哪家店','哪家','家店','家','哪','经营','做得'],' ',$covered);
         // Only grammar/phrasing is discarded. Unparsed content is represented
         // separately from known capability gaps, and never becomes no filter.
-        $covered=preg_replace('/(?:午休前|下班前)?核对一下|请帮我|麻烦帮我|麻烦|帮忙|帮我|我想知道|我想了解|我想查|查询|查一下|查查|先不查钱数|看一下|看看|看|多少钱|多少|怎么样|当前权限范围|生成|导出|一份|数据|情况|一下|请问|请|问|的|是|有|和|与|到|至|从|及|把|给我|呢|那|换成|同时|再|继续|了|吗|列出|列|附|分成两项|分成|两项|展示|显示|都要|各|一起|名单|金额|这个指标|结果|也要|还要|放上|成|就|还是|查|按|[\s？?。，,、！!：:“”"（）()]/u','',$covered);
+        $covered=preg_replace('/(?:午休前|下班前)?核对一下|请帮我|麻烦帮我|麻烦|帮忙|帮我|我想知道|我想了解|我想查|查询|查一下|查查|先不查钱数|看一下|看看|看|多少钱|多少|怎么样|当前权限范围|相同日期|同样日期|上述日期|原日期|生成|导出|一份|数据|情况|一下|请问|请|问|的|是|有|和|与|到|至|从|及|把|给我|呢|那|换成|同时|再|继续|了|吗|列出|列|附|分成两项|分成|两项|展示|显示|都要|各|一起|名单|金额|这个指标|结果|也要|还要|放上|成|就|还是|查|按|[\s？?。，,、！!：:“”"（）()]/u','',$covered);
         $covered=str_replace('为','',$covered);
         $unparsed=$covered!=='';
         if($unparsed) $constraints[]=['type'=>'unparsed_business_condition','status'=>'unresolved'];
-        $followup=preg_match('/^\s*(那|换成|继续|再看)|条件不变|其他条件别动|(?:月|天)呢/u',$text)?'requested':'none';
+        $followup=preg_match('/^\s*(那|换成|继续|再看)|条件不变|其他条件别动|相同日期|同样日期|上述日期|原日期|(?:月|天)呢/u',$text)?'requested':'none';
         $signals=array_values(array_unique($signals));
         if(array_intersect(['service_metric_ambiguity','income_ambiguity','sales_ambiguity'],$signals)) $signals[]='ambiguous_metric';
         $limit=count($limits)===1?$limits[0]:null;
@@ -62,7 +60,6 @@ final class AiSemanticIntentParser
         foreach($constraints as $constraint) if($constraint['type']!=='unparsed_business_condition') $blocking='AI_CAPABILITY_NOT_READY';
         if(!$blocking && $unparsed) $blocking='AI_INTENT_UNRESOLVED';
         if($limits && ($limits!==[5])) $blocking='AI_RANK_LIMIT_NOT_READY';
-        if(in_array('actual_performance',$signals,true)) $blocking='AI_METRIC_NOT_READY';
         if(in_array('TOMORROW',$signals,true)) $blocking='AI_FUTURE_ACTUALS_UNAVAILABLE';
         $periods=$this->periods($normalized);
         if(count($periods)===2 && preg_match('/分别|并排|各.*昨天|各.*今天/u',$text) && !in_array('comparison',$signals,true)) $signals[]='comparison';

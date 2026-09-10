@@ -6,7 +6,10 @@ use app\services\ai\contract\AiContractException;
 /** Registered workflows and compiler live together; the model cannot supply graph edges. */
 final class AiWorkflowPlanner
 {
-    private $names = ['cash_performance' => '现金业绩', 'consume_amount' => '消耗业绩'];
+    private function names(array $codes=[]): array
+    {
+        return \app\services\query\metric\MetricSemanticCatalog::names($codes);
+    }
 
     public function compile(array $projection, array $selection, array $capabilities, string $format, string $today): array
     {
@@ -18,9 +21,9 @@ final class AiWorkflowPlanner
         $format=($format==='screen_and_xlsx' || in_array('xlsx',$signals,true))?'screen_and_xlsx':'screen';
         if ($format==='screen_and_xlsx' && !in_array($format,$capabilities['output_formats']??[],true)) throw new AiContractException('AI_EXPORT_NOT_READY');
         if (in_array('current_store',$signals,true) && empty($capabilities['current_store_bound'])) throw new AiContractException('AI_UNSUPPORTED_CONDITION');
-        $metrics = array_values(array_intersect(array_keys($this->names), $signals));
+        $names=$this->names();
+        $metrics = array_values(array_intersect(array_keys($names), $signals));
         $definition=in_array('definition',$signals,true);
-        if (in_array('actual_performance', $signals, true)) throw new AiContractException('AI_METRIC_NOT_READY');
         $available=$definition?($capabilities['definition_metric_codes']??[]):$capabilities['metric_codes'];
         foreach ($metrics as $metric) if (!in_array($metric, $available, true)) throw new AiContractException('AI_METRIC_NOT_READY');
         $shapes=array_values(array_intersect(['summary','trend','ranking','comparison'],$signals));
@@ -78,12 +81,13 @@ final class AiWorkflowPlanner
         if (!$metrics || (!$definition && !$range) || in_array('ambiguous_metric', $signals, true) || ($shape==='comparison' && !$compare) || ($shape==='ranking' && (!$ranking['direction'] || !$ranking['limit']))) {
             $fields = [];
             if (!$metrics || in_array('ambiguous_metric', $signals, true)) {
-                $options = []; foreach ($available as $metric) if (isset($this->names[$metric])) $options[] = ['value' => $metric, 'label' => $metric==='cash_performance'?'收了多少钱（现金业绩）':'完成服务产生的业绩（消耗业绩）'];
+                $options = []; foreach ($available as $metric) if (isset($names[$metric])) $options[] = ['value' => $metric, 'label' => \app\services\query\metric\MetricSemanticCatalog::optionLabel($metric)];
                 if (!$options) throw new AiContractException('AI_METRIC_NOT_READY');
                 if(in_array('service_metric_ambiguity',$signals,true)) {
                     $options=array_values(array_filter($options,static function($option){return $option['value']==='consume_amount';}));
                     if(!$options) throw new AiContractException('AI_CAPABILITY_NOT_READY');
-                    $options[]=['value'=>'other_service_meaning','label'=>'人员劳动业绩或储值扣款（暂未接入）','action'=>'stop'];
+                    foreach (['staff_labor_yeji','balance_deduction_amount'] as $metric) if (isset($names[$metric]) && in_array($metric,$available,true)) $options[]=['value'=>$metric,'label'=>\app\services\query\metric\MetricSemanticCatalog::optionLabel($metric)];
+                    $options[]=['value'=>'other_service_meaning','label'=>'以上都不是','action'=>'stop'];
                 }
                 if(in_array('income_ambiguity',$signals,true)) {
                     $options=array_values(array_filter($options,static function($option){return $option['value']==='cash_performance';}));
@@ -91,7 +95,8 @@ final class AiWorkflowPlanner
                 }
                 if(in_array('sales_ambiguity',$signals,true)) {
                     $options=array_values(array_filter($options,static function($option){return $option['value']==='cash_performance';}));
-                    $options[]=['value'=>'other_sales_meaning','label'=>'销售成交金额或数量（暂未接入）','action'=>'stop'];
+                    foreach (['sales_amount','completed_service_item_count'] as $metric) if (isset($names[$metric]) && in_array($metric,$available,true)) $options[]=['value'=>$metric,'label'=>\app\services\query\metric\MetricSemanticCatalog::optionLabel($metric)];
+                    $options[]=['value'=>'other_sales_meaning','label'=>'以上都不是','action'=>'stop'];
                 }
                 $fields[] = ['key' => 'metric_code', 'label' => '想了解哪一种业绩？', 'type' => 'select', 'options' => $options];
             }
@@ -145,7 +150,10 @@ final class AiWorkflowPlanner
         $questions=['metric_code'=>'您想了解哪一种业绩？','start_date'=>'您想查询哪个时间段？','compare_start'=>'您想和哪个时间段比较？','rank_direction'=>'您想看业绩较高还是较低的门店？','rank_limit'=>'当前支持查询五家，是否按五家查询？'];
         $envelope['question']=$questions[$first['key']]??$first['label'];
         $summary=[];
-        if($envelope['resolved_metrics']) $summary[]=['label'=>'已确定指标','value'=>implode('、',array_map(function($code){return $this->names[$code];},$envelope['resolved_metrics']))];
+        if($envelope['resolved_metrics']) {
+            $names=$this->names($envelope['resolved_metrics']);
+            $summary[]=['label'=>'已确定指标','value'=>implode('、',array_map(static function($code)use($names){return $names[$code]??$code;},$envelope['resolved_metrics']))];
+        }
         foreach(['resolved_range'=>'查询期间','resolved_compare_range'=>'对比期间'] as $key=>$label) if(!empty($envelope[$key])) $summary[]=['label'=>$label,'value'=>$envelope[$key]['start'].' 至 '.$envelope[$key]['end']];
         if(!empty($envelope['ranking']['direction'])) $summary[]=['label'=>'排行方向','value'=>['top'=>'业绩较高','bottom'=>'业绩较低','top_and_bottom'=>'高低都看'][$envelope['ranking']['direction']]];
         if(!empty($envelope['ranking']['limit'])) $summary[]=['label'=>'门店数量','value'=>(string)$envelope['ranking']['limit'].' 家'];

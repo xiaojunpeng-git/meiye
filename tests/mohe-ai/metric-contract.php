@@ -21,13 +21,13 @@ function rejectMetric(callable $call, $code) { try { $call(); } catch (MetricQue
 $dictionary = new \app\services\metric\MetricDictionaryServices();
 $lookup = function ($code) use ($dictionary) { return $dictionary->getByCode($code); };
 $catalog = MetricQueryCatalog::fromDictionary($lookup);
-checkMetric(count($catalog->all()) === 3, 'only scoped canonical codes');
+checkMetric(count($catalog->all()) === 11, 'all round-three canonical codes share one catalog');
 foreach ($catalog->all() as $metric) {
     checkMetric($metric['ai_query_ready'] === false && $metric['metric_version'] === null, 'not falsely ready');
     checkMetric(!isset($metric['dev_source']) && !isset($metric['version']) && !isset($metric['updated_at']) && !isset($metric['aliases']), 'no internal fields');
 }
-checkMetric($catalog->get('actual_performance')['readiness_reasons'] === ['METRIC_SEMANTICS_CONFLICT'], 'actual conflict closed');
-checkMetric($catalog->get('consume_amount')['readiness_reasons'] === ['METRIC_MAPPING_UNVERIFIED'], 'consume mapping closed');
+checkMetric($catalog->get('actual_performance')['readiness_reasons'] === ['REGISTERED_READER_NOT_BOUND'], 'metadata-only catalog does not claim an execution binding');
+checkMetric($catalog->get('consume_amount')['readiness_reasons'] === ['REGISTERED_READER_NOT_BOUND'], 'consumption metadata stays separate from execution readiness');
 checkMetric($catalog->get('cash_performance') === MetricQueryCatalog::fromDictionary($lookup)->get('cash_performance'), 'stable metadata');
 rejectMetric(function () use ($catalog) { $catalog->get('consumption_performance'); }, 'METRIC_NOT_REGISTERED');
 rejectMetric(function () { MetricQueryCatalog::fromDictionary(function () { return []; }); }, 'METRIC_DICTIONARY_INVALID');

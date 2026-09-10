@@ -3,7 +3,7 @@
  * Prints statuses/counts only, not credentials, object names, answers or Run IDs.
  */
 $mode=getenv('MOHE_ANALYSIS_LOCAL_CONFIRM');
-if (!in_array($mode,['PREFLIGHT','ENABLE_AND_TEST','TEST_HISTORY','CLOCK_STRESS'],true)) exit("Explicit local opt-in required\n");
+if (!in_array($mode,['PREFLIGHT','REBASE_SOURCE','ENABLE_AND_TEST','TEST_HISTORY','CLOCK_STRESS'],true)) exit("Explicit local opt-in required\n");
 require getcwd().'/vendor/autoload.php';
 $app=new think\App();$app->initialize();
 $db=(array)config('database.connections.'.config('database.default'));
@@ -21,6 +21,19 @@ echo json_encode(['target_verified'=>true,'active_runs'=>$active,'scope_column'=
     'active_ai_exports'=>(int)think\facade\Db::name('unified_query_export_task')->where('source_type','AI')->whereIn('status',['pending','running'])->count(),
     'authorized_personnel_metrics'=>array_keys(array_filter($context['analysis_personnel_grants']))])."\n";
 if ($mode==='PREFLIGHT') exit(0);
+if ($mode==='REBASE_SOURCE') {
+    if($active!==0) exit("Active Runs exist; source rebase postponed\n");
+    $gateway=new app\services\ai\AiGatewayServices();
+    $call=function($operation,$input=[])use($gateway,$context){return $gateway->handle($operation,$context,$input);};
+    $state=$call('management_get');
+    if(empty($state['source_changed'])) {echo "LOCAL_MANAGEMENT_SOURCE_ALREADY_CURRENT\n";exit(0);}
+    $state=$call('management_rebase',['expected_revision'=>$state['revision']]);
+    $valid=$call('management_validate',['expected_revision'=>$state['revision']]);
+    if(($valid['valid']??false)!==true) throw new RuntimeException('LOCAL_MANAGEMENT_REBASE_INVALID');
+    $state=$call('management_publish',['expected_revision'=>$state['revision']]);
+    if(!empty($state['source_changed'])||!is_array($state['active_document']??null)) throw new RuntimeException('LOCAL_MANAGEMENT_REBASE_NOT_ACTIVE');
+    echo "LOCAL_MANAGEMENT_SOURCE_REBASED_AND_PUBLISHED\n";exit(0);
+}
 if(getenv('MOHE_ANALYSIS_CLOCK_SCHEMA')==='1') {
     $s=$pdo->prepare('SELECT COLUMN_NAME,COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME IN (\'last_clock_at\',\'created_at\',\'deadline_at\')');$s->execute([$db['prefix'].'mohe_ai_run']);echo json_encode(['clock_schema'=>$s->fetchAll(PDO::FETCH_ASSOC)])."\n";exit(0);
 }

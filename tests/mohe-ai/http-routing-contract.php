@@ -34,4 +34,10 @@ foreach (['adminapi/ai'=>'admin.v1.ai.','cashierapi/v3/ai'=>'cashier.v3.','api/m
     $request=new \think\Request(); $request->setMethod('OPTIONS')->setPathinfo($base.'/bootstrap')->setHost('localhost');
     if (!$router->matchOnly($request)->getDispatch() instanceof Closure) { throw new RuntimeException('Missing AI preflight route'); } ++$checks;
 }
+$request=new \think\Request();$request->setMethod('POST')->setPathinfo('adminapi/ai/management/rebase')->setHost('localhost');
+if($router->matchOnly($request)->getDispatch()!==['admin.v1.ai.Ai','aiManagementRebase']) throw new RuntimeException('Missing admin management rebase route');
+++$checks;
+$request=new \think\Request();$request->setMethod('GET')->setPathinfo('adminapi/ai/metric-registry')->setHost('localhost');
+if($router->matchOnly($request)->getDispatch()!==['admin.v1.ai.Ai','aiMetricRegistryGet']) throw new RuntimeException('Missing admin metric registry route');
+++ $checks;
 echo 'PASS '.$checks." real ThinkPHP route matches (no application/DB/model boot).\n";

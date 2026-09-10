@@ -47,6 +47,37 @@ final class AiManagementPolicy
         if(strlen(json_encode($d,JSON_UNESCAPED_UNICODE))>32768) self::fail();
         return $d;
     }
+    /**
+     * Rebase only administrator-editable presentation/budget choices onto the
+     * current source registry. Executable declarations, metric contracts and
+     * source hashes always come from code; an old document cannot reintroduce
+     * removed capabilities.
+     */
+    public static function rebase(array $old): array
+    {
+        $base=self::defaults();$candidate=$base;
+        if(($old['schema_version']??null)!==$base['schema_version']) self::fail('AI_MANAGEMENT_REBASE_INVALID');
+        $guidance=$old['guidance']??null;
+        if(is_array($guidance)) {
+            if(in_array($guidance['max_rounds']??null,[3,4,5],true)) $candidate['guidance']['max_rounds']=$guidance['max_rounds'];
+            $order=$guidance['slot_order']??null;$slots=$base['guidance']['slot_order'];
+            if(is_array($order)&&AiRegistryValue::isList($order)&&count($order)===count($slots)&&!array_diff($order,$slots)&&count(array_unique($order))===count($slots)) $candidate['guidance']['slot_order']=$order;
+            foreach($base['guidance']['prompts'] as $key=>$unused) if(is_string($guidance['prompts'][$key]??null)) $candidate['guidance']['prompts'][$key]=$guidance['prompts'][$key];
+        }
+        foreach($base['scenes'] as $code=>$unused) if(is_array($old['scenes'][$code]??null)) {
+            foreach(['label','goal','examples'] as $field) if(array_key_exists($field,$old['scenes'][$code])) $candidate['scenes'][$code][$field]=$old['scenes'][$code][$field];
+        }
+        foreach($base['workflows'] as $code=>$current) if(is_array($old['workflows'][$code]??null)) {
+            $saved=$old['workflows'][$code];
+            if(is_bool($saved['enabled']??null)) $candidate['workflows'][$code]['enabled']=$saved['enabled'];
+            if(is_bool($saved['allow_export']??null)) $candidate['workflows'][$code]['allow_export']=$current['allow_export']&&$saved['allow_export'];
+            if(is_int($saved['max_path_ms']??null)) $candidate['workflows'][$code]['max_path_ms']=min($current['max_path_ms'],$saved['max_path_ms']);
+            foreach($current['node_timeouts'] as $node=>$maximum) if(is_int($saved['node_timeouts'][$node]??null)) $candidate['workflows'][$code]['node_timeouts'][$node]=min($maximum,$saved['node_timeouts'][$node]);
+            $minimum=array_sum($candidate['workflows'][$code]['node_timeouts']);
+            if($candidate['workflows'][$code]['max_path_ms']<$minimum) $candidate['workflows'][$code]['max_path_ms']=$minimum;
+        }
+        return self::validate($candidate);
+    }
     public static function applyManifest(array $document): array
     {
         $d=self::validate($document); $m=AiBusinessManifest::definitions();

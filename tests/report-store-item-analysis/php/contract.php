@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__, 3);
 $service = (string)file_get_contents($root . '/后端代码/app/services/report/StoreUnifiedReportServices.php');
+$metricReader = (string)file_get_contents($root . '/后端代码/app/services/query/metric/RegisteredMetricReadServices.php');
 $view = (string)file_get_contents($root . '/前端代码/cashier-v3/src/views/StoreBusinessReportView.vue');
 $serviceSnapshot = (string)file_get_contents($root . '/后端代码/app/services/report/StoreReportServiceCategorySnapshotServices.php');
 
@@ -19,9 +20,9 @@ function itemAnalysisAssert(bool $condition, string $message): void
 itemAnalysisAssert(
     str_contains($service, "['cash', '现金业绩'")
         && str_contains($service, "['share', '分成业绩'")
-        && str_contains($service, "['actual', '实际业绩'")
+        && str_contains($service, "['actual', '分成后业绩'")
         && str_contains($service, "['consume', '消耗业绩'"),
-    'summary area has cash share actual and consumption metrics'
+    'summary area distinguishes cash, share, after-split and consumption metrics'
 );
 itemAnalysisAssert(
     str_contains($service, "['today', '当日']")
@@ -32,8 +33,9 @@ itemAnalysisAssert(
 itemAnalysisAssert(
     str_contains($service, '$this->money($cash - $share)')
         && str_contains($service, "'现金分成业绩'")
+        && str_contains($service, '该列不是实际业绩')
         && str_contains($service, 'array_slice($parts, 0, 2)'),
-    'actual performance subtracts share and category headers stop at two levels'
+    'after-split performance subtracts share and is not mislabeled as actual performance'
 );
 itemAnalysisAssert(
     str_contains($service, '$definitions = $this->itemAnalysisCategoryDefinitions($storeId);')
@@ -45,11 +47,13 @@ itemAnalysisAssert(
     'category headers come from all visible product categories even without period facts'
 );
 itemAnalysisAssert(
-    str_contains($service, 'cashier_v3_card_sale_category_allocation_fact')
-        && str_contains($service, 'cashier_v3_entitlement_service_fact es')
-        && str_contains($service, 'consumption_performance_recorded')
-        && str_contains($service, "whereIn('p.store_id'")
-        && str_contains($service, "where('p.store_id'"),
+    str_contains($metricReader, 'cashier_v3_card_sale_category_allocation_fact')
+        && str_contains($metricReader, 'cashier_v3_entitlement_service_fact')
+        && str_contains($metricReader, 'completedServicePerformanceCategoryRows')
+        && str_contains($service, "->categoryReportBuckets('cash_performance'")
+        && str_contains($service, "->categoryReportBuckets('consume_amount'")
+        && str_contains($service, "['cash_cents'] = (int)\$entry['store_metric_value']")
+        && str_contains($service, "['consume_cents'] = (int)\$entry['store_metric_value']"),
     'cash and consumption use persisted category facts rather than browser calculation'
 );
 itemAnalysisAssert(

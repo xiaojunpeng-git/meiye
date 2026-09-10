@@ -11,7 +11,7 @@ cleanup_fixture() {
   unset MOHE_QUERY_TEST_PASSWORD MOHE_QUERY_TEST_PORT MOHE_QUERY_TEST_DISPOSABLE
 }
 trap cleanup_fixture EXIT INT TERM
-docker run -d --user mysql --name "$test_container" --label mohe.task=ai-query-fixture \
+docker run -d --name "$test_container" --label mohe.task=ai-query-fixture \
   -p 127.0.0.1::3306 -e MYSQL_ROOT_PASSWORD="$MOHE_QUERY_TEST_PASSWORD" \
   -e MYSQL_DATABASE=mohe_query_fixture -e MYSQL_ROOT_HOST=% \
   docker.m.daocloud.io/library/mysql:5.7 --innodb-buffer-pool-size=64M >/dev/null
@@ -23,6 +23,10 @@ for ((attempt=0;attempt<120;attempt++)); do
   sleep 1
 done
 if [[ "$ready" != yes ]]; then echo 'Disposable MySQL did not become ready' >&2; exit 1; fi
-php "$test_dir/query-mysql.php"
+if [[ "${1:-}" == '--acceptance' ]]; then
+  php "$test_dir/round3-acceptance-probes.php"
+else
+  php "$test_dir/query-mysql.php"
+fi
 php "$test_dir/state-mysql-concurrency.php"
 php "$test_dir/management-mysql.php"

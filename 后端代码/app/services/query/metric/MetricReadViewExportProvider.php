@@ -37,7 +37,7 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
     }
     public static function project(array $view): array
     {
-        $rows=[]; $capabilities=MetricReadViewServices::metricCapabilities()+PersonnelPerformanceReadServices::capabilities();
+        $rows=[]; $capabilities=MetricReadViewServices::metricCapabilities();
         foreach ($view['results'] as $result) {
             $code=$result['metric_code']??null;
             // Keep export eligibility explicit; names come from the same registered

@@ -91,7 +91,7 @@ $check(array_column($comparisonRows,'period_name')===['本期','本期','对比�
 $check(array_column($project::project($fixtures['trend']),'business_date')===['2026-09-07','2026-09-08','2026-09-07','2026-09-08'], 'both metric trends preserve dates');
 $rankingRows=$project::project($fixtures['ranking']);
 $check(array_column($rankingRows,'ranking_direction')===['前列','后列','前列','后列'] && array_column($rankingRows,'store_name')===['测试甲店','测试乙店','测试乙店','测试甲店'], 'ranking preserves direction and store identity per metric');
-foreach (['actual_performance','cash_amount','custom_formula','',null] as $invalidMetric) {
+foreach (['cash_amount','custom_formula','',null] as $invalidMetric) {
     $badView=$fixtures['summary']; $badView['results'][0]['metric_code']=$invalidMetric;
     try {$project::project($badView); throw new LogicException('expected metric rejection');} catch (RuntimeException $e) {$check($e->getMessage()==='METRIC_EXPORT_METRIC_NOT_READY','unregistered/unready metric remains closed');}
 }

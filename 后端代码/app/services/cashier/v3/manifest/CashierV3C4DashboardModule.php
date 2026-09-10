@@ -38,7 +38,6 @@ class CashierV3C4DashboardModule implements CashierV3ActionModule
             'query-business-dashboard-trend',
             'query-business-dashboard-ranking',
             'open-business-dashboard-detail',
-            'export-business-dashboard',
             'query-store-target-dashboard',
         ] as $action) {
             $projection[$action] = self::FEATURE_DASHBOARD;

@@ -25,34 +25,34 @@ mysqlCheck($cashTotals(['start'=>'2026-09-09','end'=>'2026-09-09'])===['gross_ce
 $cashInsert('void-forward',1234,['order_id'=>'RCH:102']);
 $cashInsert('void-reversal',-1234,['order_id'=>'RCH:102']);
 $pdo->prepare('INSERT INTO eb_cashier_v3_order_lifecycle_operation VALUES (?,?,?,?,?)')->execute([$cashTenant,'102','recharge','void','succeeded']);
-mysqlCheck($cashTotals()===['gross_cents'=>707,'refund_cents'=>0],'RCH prefix links recharge void and excludes both signs not refund');
+mysqlCheck($cashTotals()===['gross_cents'=>1941,'refund_cents'=>-1234],'signed recharge reversal is the actual cash refund side of the same facts');
 $cashInsert('other-tenant-void-safe',20,['order_id'=>'RCH:103']);
 $pdo->prepare('INSERT INTO eb_cashier_v3_order_lifecycle_operation VALUES (?,?,?,?,?)')->execute(['other-cash-tenant','103','recharge','void','succeeded']);
-mysqlCheck($cashTotals()['gross_cents']===727,'foreign tenant void cannot hide recharge');
+mysqlCheck($cashTotals()['gross_cents']===1961,'foreign tenant void cannot hide recharge');
 $cashInsert('repaid',500,['order_id'=>'repayment-ok','source_document_type'=>'recharge_debt_repayment']);
 $pdo->prepare('INSERT INTO eb_cashier_v3_recharge_debt_repayment VALUES (?,?,?,?,?,?)')->execute([$cashTenant,'repayment-ok',101,1,10,'succeeded']);
-mysqlCheck($cashTotals()===['gross_cents'=>1227,'refund_cents'=>0],'successful recharge debt repayment is independent positive cash');
+mysqlCheck($cashTotals()===['gross_cents'=>2461,'refund_cents'=>-1234],'successful recharge debt repayment is independent positive cash');
 foreach(['missing','wrong-store','wrong-member','wrong-tenant','not-succeeded','void-master','void-operation','parent-void'] as $case){
     $id='repayment-'.$case;$cashInsert($id,7777,['order_id'=>$id,'source_document_type'=>'recharge_debt_repayment']);
     if($case==='missing')continue;
     $pdo->prepare('INSERT INTO eb_cashier_v3_recharge_debt_repayment VALUES (?,?,?,?,?,?)')->execute([$case==='wrong-tenant'?'other-cash-tenant':$cashTenant,$id,$case==='parent-void'?102:101,$case==='wrong-store'?2:1,$case==='wrong-member'?11:10,$case==='not-succeeded'?'pending':($case==='void-master'?'voided':'succeeded')]);
     if($case==='void-operation')$pdo->prepare('INSERT INTO eb_cashier_v3_order_center_void_operation VALUES (?,?,?,?)')->execute([$cashTenant,$id,'recharge_supplement','succeeded']);
 }
-mysqlCheck($cashTotals()===['gross_cents'=>1227,'refund_cents'=>0],'invalid repayment bindings master void source_kind void and parent void fail closed');
+mysqlCheck($cashTotals()===['gross_cents'=>18015,'refund_cents'=>-1234],'invalid repayment bindings fail closed while signed void facts remain authoritative');
 $pdo->prepare('INSERT INTO eb_cashier_v3_order_center_void_operation VALUES (?,?,?,?)')->execute(['other-cash-tenant','repayment-ok','recharge_supplement','succeeded']);
 $pdo->prepare('INSERT INTO eb_cashier_v3_order_center_void_operation VALUES (?,?,?,?)')->execute([$cashTenant,'repayment-ok','sales_supplement','succeeded']);
-mysqlCheck($cashTotals()['gross_cents']===1227,'wrong tenant or source_kind void does not hide valid repayment');
+mysqlCheck($cashTotals()['gross_cents']===18015,'wrong tenant or source_kind void does not hide valid repayment');
 $cashInsert('store-two',300,['store_id'=>2]);
-mysqlCheck($cashTotals(null,[1,2])['gross_cents']===1527,'multistore sum includes only authorized recharge scope');
+mysqlCheck($cashTotals(null,[1,2])['gross_cents']===18315,'multistore sum includes only authorized recharge scope');
 $points=$reader->dailyStoreTotals($cashTenant,[1,2],$cashDay,'cash_performance');
-mysqlCheck(array_column($points,'amount_cents')===[1227,300],'daily store cash agrees with recharge-inclusive summary');
-$detail=$reader->rechargeCashRows($cashTenant,[1],$cashDay);
-mysqlCheck(array_sum(array_column($detail,'amount_cents'))===1227 && count($detail)===9,'recharge detail explains exact summary without duplicates');
+mysqlCheck(array_column($points,'amount_cents')===[18015,300],'daily store cash agrees with recharge-inclusive summary');
+$detail=(new app\services\query\metric\RegisteredMetricReadServices())->categoryRows('actual_performance',$cashTenant,[1],$cashDay);
+mysqlCheck(array_sum(array_column($detail,'amount_cents'))===16781 && count($detail)===13,'recharge detail explains exact signed net without duplicates');
 mysqlCheck(count(array_filter($detail,static function($r){return (int)$r['category_id']!==0;}))===0,'recharge never invents a product category');
 mysqlCheck(count(array_filter($detail,static function($r){return (int)$r['business_source_primary_id']===7 && $r['source_label']==='发生时来源';}))===7,'recharge detail preserves frozen business source labels');
 $readBoth=$transaction->run(function($r)use($cashTenant,$cashDay){return [$r->cashTotals($cashTenant,[1],$cashDay),$r->dailyStoreTotals($cashTenant,[1],$cashDay,'cash_performance')];});
-mysqlCheck($readBoth[0]['gross_cents']===$readBoth[1][0]['amount_cents'],'real repeatable-read recharge summary and daily source agree');
-foreach(['cashier_v3_payment_fact','cashier_v3_recharge_debt_repayment','cashier_v3_order_center_void_operation'] as $engineTable){
+mysqlCheck($readBoth[0]['gross_cents']===$readBoth[1][0]['amount_cents'],'real repeatable-read recharge gross summary and daily source agree');
+foreach(['cashier_v3_payment_fact','cashier_v3_recharge_debt_repayment','cashier_v3_order_lifecycle_operation'] as $engineTable){
     $pdo->exec('ALTER TABLE eb_'.$engineTable.' ENGINE=MyISAM');
     try {mysqlReject(function()use($transaction){$transaction->run(function(){});},'METRIC_READ_ENGINE_UNVERIFIED');}
     finally {$pdo->exec('ALTER TABLE eb_'.$engineTable.' ENGINE=InnoDB');}
@@ -64,8 +64,9 @@ $wide=$reader->cashTotals($cashTenant,$wideStores,$cashDay);
 $wideRows=$reader->dailyStoreTotals($cashTenant,$wideStores,$cashDay,'cash_performance');
 $wideMs=(int)round((microtime(true)-$wideStarted)*1000);
 mysqlCheck($wide['gross_cents']===13000 && count($wideRows)===130 && array_sum(array_column($wideRows,'amount_cents'))===13000,'130-store scope is complete not capped at first stores');
-$cashMethod=new ReflectionMethod($reader,'rechargeCashQuery');$cashMethod->setAccessible(true);
-$cashSql=$cashMethod->invoke($reader,$cashTenant,$wideStores,$cashDay)->fieldRaw('SUM(p.amount_cents) total')->fetchSql(true)->find();
+$registeredReader=new app\services\query\metric\RegisteredMetricReadServices();
+$cashMethod=new ReflectionMethod($registeredReader,'rechargeCashQuery');$cashMethod->setAccessible(true);
+$cashSql=$cashMethod->invoke($registeredReader,$cashTenant,$wideStores,$cashDay)->fieldRaw('SUM(p.amount_cents) total')->fetchSql(true)->find();
 $explained=$pdo->query('EXPLAIN '.$cashSql)->fetchAll(PDO::FETCH_ASSOC);
 mysqlCheck(count($explained)>0 && in_array('p',array_column($explained,'table'),true),'real MySQL explains recharge guarded query');
 echo 'cash-recharge fixture 130-store summary+daily elapsed_ms='.$wideMs.' explain_rows='.count($explained)."; small fixture, not production capacity acceptance\n";

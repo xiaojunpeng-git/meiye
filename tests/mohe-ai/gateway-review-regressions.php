@@ -1,7 +1,7 @@
 <?php
 // Read-only deterministic review regressions: no app boot, database, model or network.
 $base=dirname(__DIR__,2).'/后端代码/app/services/';
-foreach (['BaseServices.php','metric/MetricDictionaryServices.php','query/metric/MetricMoneyFormatter.php','ai/contract/AiContractException.php',
+foreach (['BaseServices.php','metric/MetricDictionaryServices.php','query/metric/MetricMoneyFormatter.php','query/metric/MetricSemanticCatalog.php','ai/contract/AiContractException.php',
     'ai/model/AiModelInputProjector.php','ai/execution/AiWorkflowPlanner.php','ai/AiGatewayServices.php'] as $file) require_once $base.$file;
 $passed=0; $failed=[];
 $check=function($ok,$label) use (&$passed,&$failed) {if ($ok) ++$passed; else $failed[]=$label;};
@@ -24,6 +24,12 @@ $check(count($view['recent_user_intents'])===20,'accept latest twenty local roun
 foreach (['张三','王小明','13800138000','13900139000','98765432','fixture-secret-token'] as $secret) $check(strpos($wire,$secret)===false,'PII/answer content excluded: '.substr(hash('sha256',$secret),0,8));
 $check($projector->project('今天张三消耗业绩')['unresolved_condition']===true,'unknown person never becomes unfiltered query');
 $gateway=new app\services\ai\AiGatewayServices();
+$fallback=new ReflectionMethod($gateway,'registeredSelectionFallback'); if (PHP_VERSION_ID<80100) $fallback->setAccessible(true);
+$recovered=$fallback->invoke($gateway,$projector->project('2026-09-01到2026-09-09现金业绩多少，生成Excel'),['cash_performance']);
+$check($recovered['selection']===['metric_codes'=>['cash_performance'],'query_shape'=>'summary','date_code'=>'EXPLICIT','decision'=>'query'],
+    'explicit registered intent can recover only from vendor response contract errors');
+$check($fallback->invoke($gateway,$projector->project('今天业绩多少'),['cash_performance'])===null,
+    'fallback never guesses an ambiguous metric');
 $method=new ReflectionMethod($gateway,'answer'); if (PHP_VERSION_ID<80100) $method->setAccessible(true);
 $answer=$method->invoke($gateway,['query'=>['query_shape'=>'comparison','start_date'=>'2026-09-08','end_date'=>'2026-09-08','compare_range'=>['start'=>'2026-09-07','end'=>'2026-09-07']],
     'data_as_of'=>'2026-09-08T12:00:00+08:00','results'=>[
@@ -45,9 +51,14 @@ foreach (['trend','ranking'] as $shape) {
     $projected=$method->invoke($gateway,$cashView);
     $check($projected['table']['rows'][0]['metric']==='现金业绩' && $projected['table']['rows'][0]['value']==='151','cash '.$shape.' never mislabeled consumption');
 }
-$cashView['results']=[['metric_code'=>'actual_performance','period'=>'current','amount_cents'=>15050]];
-$rejected=false;try {$method->invoke($gateway,$cashView);} catch (Throwable $e) {$rejected=$e->getMessage()==='AI_EVIDENCE_INVALID';}
-$check($rejected,'actual performance cannot enter answer renderer through cash enablement');
+$cashView['query']['query_shape']='summary';
+$cashView['results']=[['metric_code'=>'actual_performance','period'=>'current','amount_cents'=>15050,'storage_unit'=>'fen']];
+$actual=$method->invoke($gateway,$cashView);
+$check($actual['cards'][0]['metric_name']==='实际业绩' && $actual['cards'][0]['display_value']==='151','confirmed actual metric renders through its own registration');
+$check(app\services\query\metric\MetricMoneyFormatter::integerYuan(15149)==='151'
+    && app\services\query\metric\MetricMoneyFormatter::integerYuan(15150)==='152'
+    && app\services\query\metric\MetricMoneyFormatter::integerYuan(-15150)==='-152',
+    'integer yuan formatting rounds cents symmetrically instead of truncating');
 $http=file_get_contents(dirname(__DIR__,2).'/后端代码/app/controller/ai/AiHttpActions.php');
 $check(strpos($http,'return new AiGatewayServices();')!==false,'framework adapter does not autowire optional fixture dependencies');
 foreach ($failed as $label) echo 'FAIL '.$label."\n";

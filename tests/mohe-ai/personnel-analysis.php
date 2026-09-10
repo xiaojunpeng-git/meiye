@@ -52,7 +52,7 @@ class PaQuery {
  public function __call($name,$args){self::$calls[]=[$name,$args];if(isset($args[0])&&is_callable($args[0]))$args[0]($this);if(in_array($name,['field','fieldRaw'],true))$this->field=$args[0];return $this;}
  public function select(){return $this;}
  public function toArray(){
-  if(strpos($this->field,'SUM(')!==false)return [['employee_id'=>'7','business_date'=>'2026-09-09','amount_cents'=>self::$amount,'fact_count'=>'2']];
+  if(strpos($this->field,'SUM(')!==false)return [['employee_id'=>'7','business_date'=>'2026-09-09','metric_value'=>self::$amount,'fact_count'=>'2']];
   if(strpos($this->field,'position_name')!==false)return [['store_id'=>1,'employee_id'=>7,'employee_name'=>'合成人员甲','cashier_craftsman_enabled'=>1,'cashier_salesperson_enabled'=>1,'position_id'=>2,'position_name'=>'护理师']];
   return [['store_id'=>1,'employee_id'=>7,'employee_name'=>'合成人员甲']];
  }
@@ -71,7 +71,7 @@ $range=['start'=>'2026-09-09','end'=>'2026-09-09'];
 $points=$reader->personnelTotals('0',[1],$range,'staff_labor_yeji',$selection['pairs']);
 paCheck($points[0]['amount_cents']===10001,'exact cents');
 $record=json_encode(PaQuery::$calls);
-foreach (['labor_performance_allocated','normalScope','p.tenant_id','p.employee_id','p.store_id','SUM(p.amount_cents)','p.business_date'] as $needle)paCheck(strpos($record,$needle)!==false,'query contract '.$needle);
+foreach (['labor_performance_allocated','normalScope','p.tenant_id','p.employee_id','p.store_id','SUM(amount_cents)','p.business_date'] as $needle)paCheck(strpos($record,$needle)!==false,'query contract '.$needle);
 PaQuery::$amount='-200';paCheck($reader->personnelTotals('0',[1],$range,'staff_labor_yeji',$selection['pairs'])[0]['amount_cents']===-200,'reversals keep negative sign');PaQuery::$amount='10001';
 paReject(function()use($reader,$range){$reader->personnelTotals('0',[1],$range,'staff_labor_yeji',[['store_id'=>2,'employee_id'=>7]]);},'METRIC_PERSONNEL_SCOPE_INVALID');
 $binding=['instance_id'=>'fixture','subject_ref'=>'fixture','terminal'=>'platform','tenant_id'=>'0','permission_version'=>'fixture-v1','report_capability_code'=>'group_management_dashboard','scope_provider_code'=>'current_report_scope_v1','scope_mode'=>'stores','store_ids'=>[1]];

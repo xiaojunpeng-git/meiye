@@ -19,7 +19,7 @@ use app\services\query\metric\GroupPerformanceMetricReadServices;
 $checks=0;
 function verifyGateway($value,$label){global $checks;if(!$value)throw new RuntimeException('FAIL '.$label);$checks++;}
 function rejectGateway(callable $call,$code){try{$call();}catch(Throwable $e){verifyGateway($e->getMessage()===$code,'expected '.$code.' got '.$e->getMessage());return;}throw new RuntimeException('Missing error '.$code);}
-class GatewayFactFixture { private $day;private $table;public function __construct($table){$this->table=$table;}public function __call($name,$args){if($name==='whereExists')$args[0]($this);if($name==='whereBetween')$this->day=$args[1][0];return $this;}public function find(){return ['amount_cents'=>'12345','gross_cents'=>$this->table==='cashier_v3_payment_fact'?'10000':'12345','refund_cents'=>$this->table==='cashier_v3_payment_fact'?'-1000':'-234'];}public function column(){return [1=>'测试门店'];}public function toArray(){return [['store_id'=>'1','business_date'=>$this->day,'amount_cents'=>$this->table==='cashier_v3_payment_fact'?'10000':'12345']];} }
+class GatewayFactFixture { private $day;private $table;public function __construct($table){$this->table=$table;}public function __call($name,$args){if($name==='whereExists')$args[0]($this);if($name==='whereBetween')$this->day=$args[1][0];return $this;}public function find(){return ['amount_cents'=>$this->table==='cashier_v3_payment_fact'?'10000':'12345'];}public function column(){return [1=>'测试门店'];}public function toArray(){return [['store_id'=>'1','business_date'=>$this->day,'amount_cents'=>$this->table==='cashier_v3_payment_fact'?'10000':'12345']];} }
 $db=new PDO('sqlite::memory:');
 foreach ([
  'CREATE TABLE mohe_ai_mutex (instance_id TEXT PRIMARY KEY,quarantined_slots INTEGER NOT NULL DEFAULT 0)',
@@ -41,7 +41,7 @@ try {
  $context=$auth;$context['_refresh']=function()use(&$auth){return $auth;};
  $boot=$gateway->handle('bootstrap',$context,['client_session_id'=>'device1']);
  verifyGateway($boot['enabled'] && $boot['history_round_limit']===20,'bootstrap enabled +20');
- verifyGateway($boot['capabilities']['metric_codes']===['consume_amount','cash_performance'],'ready cash and consumption metrics only');
+ verifyGateway($boot['capabilities']['metric_codes']===['cash_performance','refund_performance','actual_performance','consume_amount','sales_amount','balance_deduction_amount','recharge_amount'],'all registered amount metrics exposed from the shared catalog');
  verifyGateway(!isset($boot['api_key']),'bootstrap never key');
  $make=function($request,$question,$history=[])use($gateway,$context,$boot){$input=['client_request_id'=>$request,'conversation_id'=>'conversation1','client_session_id'=>'device1','window_token'=>$boot['window_token'],'question'=>$question,'history'=>$history,'output_format'=>'screen','guidance_schema_version'=>'mohe-clarification-v2'];return [$gateway->handle('create',$context,$input),$input];};
  $binding=function($run){return ['client_session_id'=>'device1','generation'=>$run['generation'],'run_delivery_token'=>$run['run_delivery_token']];};

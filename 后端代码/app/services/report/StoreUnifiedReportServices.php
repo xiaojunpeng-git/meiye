@@ -153,6 +153,13 @@ class StoreUnifiedReportServices extends BaseServices
         return $service;
     }
 
+    /**
+     * Aggregate a registered metric at the already-filtered sale-line grain.
+     * The report supplies only a narrowing set of immutable line identifiers;
+     * source, amount expression and normal-data guards remain owned by Reader.
+     *
+     * @return array<string,int>
+     */
     private function applyOrganizationDimensions(array &$row): void
     {
         $this->organizationDimensions()->project(
@@ -236,10 +243,15 @@ class StoreUnifiedReportServices extends BaseServices
     private function partnerItemSummary($storeId, array $range, array $input): array
     {
         $query = $this->operationSaleQuery($storeId, $range, $input)->whereRaw("COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)<>''");
-        $facts = $query->fieldRaw("s.business_date,s.organization_id,s.organization_path_snapshot,s.store_id,s.store_name_snapshot AS store_name,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.partner_name_snapshot,d.partner_name_snapshot) AS partner_name_snapshot,COALESCE(c.sale_amount_cents,s.sale_amount_cents) AS sale_amount_cents,COALESCE(d.is_experience,0) AS is_experience,s.member_id,s.quantity,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') AS consumption_amount_cents,(SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents,COALESCE(c.cash_performance_amount_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='actual_performance_recorded' AND pf.status='effective')) AS actual_performance_cents")
+        $facts = $query->fieldRaw("s.business_date,s.organization_id,s.organization_path_snapshot,s.store_id,s.store_name_snapshot AS store_name,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.partner_name_snapshot,d.partner_name_snapshot) AS partner_name_snapshot,0 AS sale_amount_cents,COALESCE(d.is_experience,0) AS is_experience,s.member_id,s.quantity,s.source_line_id,(SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents")
             ->order('s.business_date', 'desc')->order('s.id', 'desc')->select()->toArray();
+        $saleByLine = $this->metricSourceLineCategoryTotals('sales_amount', $storeId, $range, $input, array_column($facts, 'source_line_id'));
+        $consumeByLine = $this->metricSourceLineCategoryTotals('consume_amount', $storeId, $range, $input, array_column($facts, 'source_line_id'));
         $grouped = [];
         foreach ($facts as $fact) {
+            $consumeKey = (string)($fact['source_line_id'] ?? '') . '|' . (int)($fact['category_id_snapshot'] ?? 0);
+            $fact['sale_amount_cents'] = (int)($saleByLine[$consumeKey] ?? 0);
+            $fact['consumption_amount_cents'] = (int)($consumeByLine[$consumeKey] ?? 0);
             $this->applyOrganizationDimensions($fact);
             $month = substr((string)$fact['business_date'], 0, 7);
             $categoryPath = (string)$fact['category_path_snapshot'];
@@ -259,7 +271,7 @@ class StoreUnifiedReportServices extends BaseServices
                     'performance_type' => strtok($categoryPath, '/') ?: '',
                     'sale_amount_cents' => 0, 'experience_count' => 0, 'quantity' => 0,
                     'consumption_amount_cents' => 0, 'labor_amount_cents' => 0,
-                    'actual_performance_cents' => 0, '_member_ids' => [],
+                    '_member_ids' => [],
                 ];
             }
             $row =& $grouped[$key];
@@ -268,7 +280,6 @@ class StoreUnifiedReportServices extends BaseServices
             $row['quantity'] += (int)$fact['quantity'];
             $row['consumption_amount_cents'] += (int)$fact['consumption_amount_cents'];
             $row['labor_amount_cents'] += (int)$fact['labor_amount_cents'];
-            $row['actual_performance_cents'] += (int)$fact['actual_performance_cents'];
             if ((int)$fact['member_id'] > 0) $row['_member_ids'][(string)$fact['member_id']] = true;
             unset($row);
         }
@@ -278,7 +289,6 @@ class StoreUnifiedReportServices extends BaseServices
             $row['member_count'] = count($row['_member_ids']);
             unset($row['_member_ids']);
             $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']);
-            $row['actual_performance'] = $this->money((int)$row['actual_performance_cents']);
             $row['consumption_amount'] = $this->money((int)$row['consumption_amount_cents']);
             $row['labor_amount'] = $this->money((int)$row['labor_amount_cents']);
         }
@@ -317,12 +327,28 @@ class StoreUnifiedReportServices extends BaseServices
     {
         $query = $this->operationSaleQuery($storeId, $range, $input)->whereRaw("COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)<>''");
         $total = (int)(clone $query)->count('s.id');
-        $summary = (clone $query)->fieldRaw("COUNT(DISTINCT NULLIF(s.member_id,0)) AS member_count,SUM(s.quantity) AS quantity,SUM(COALESCE(c.sale_amount_cents,s.sale_amount_cents)) AS sale_amount_cents,SUM((SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective')) AS consumption_amount_cents,SUM((SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective')) AS labor_amount_cents")->find() ?: [];
+        $summary = (clone $query)->fieldRaw("COUNT(DISTINCT NULLIF(s.member_id,0)) AS member_count,SUM(s.quantity) AS quantity,SUM((SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective')) AS labor_amount_cents")->find() ?: [];
+        $summarySales = $this->metricSourceLineCategoryTotals(
+            'sales_amount', $storeId, $range, $input, (clone $query)->column('s.source_line_id')
+        );
+        $summary['sale_amount_cents'] = array_sum($summarySales);
+        $summaryConsume = $this->metricSourceLineCategoryTotals(
+            'consume_amount', $storeId, $range, $input, (clone $query)->column('s.source_line_id')
+        );
+        $summary['consumption_amount_cents'] = array_sum($summaryConsume);
         $rows = (clone $query)->leftJoin('user u', 'u.uid = s.member_id')
-            ->fieldRaw("s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.member_id,s.member_name_snapshot,u.phone AS member_phone,s.item_name_snapshot,s.source_type,s.quantity,COALESCE(c.sale_amount_cents,s.sale_amount_cents) AS sale_amount_cents,COALESCE(c.product_type_snapshot,d.product_type_snapshot) AS product_type_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.partner_name_snapshot,d.partner_name_snapshot) AS partner_name_snapshot,d.is_experience,s.source_line_id,s.fact_id,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') AS consumption_amount_cents,(SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents,COALESCE(c.cash_performance_amount_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='actual_performance_recorded' AND pf.status='effective')) AS actual_performance_cents")
+            ->fieldRaw("s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.member_id,s.member_name_snapshot,u.phone AS member_phone,s.item_name_snapshot,s.source_type,s.quantity,0 AS sale_amount_cents,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.product_type_snapshot,d.product_type_snapshot) AS product_type_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.partner_name_snapshot,d.partner_name_snapshot) AS partner_name_snapshot,d.is_experience,s.source_line_id,s.fact_id,(SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents")
             ->order('s.business_date','desc')->order('s.id','desc')->page($this->page($input),$this->limit($input))->select()->toArray();
+        $pageSales = $this->metricSourceLineCategoryTotals('sales_amount', $storeId, $range, $input, array_column($rows, 'source_line_id'));
+        $pageConsume = $this->metricSourceLineCategoryTotals('consume_amount', $storeId, $range, $input, array_column($rows, 'source_line_id'));
+        foreach ($rows as &$row) {
+            $consumeKey = (string)($row['source_line_id'] ?? '') . '|' . (int)($row['category_id_snapshot'] ?? 0);
+            $row['sale_amount_cents'] = (int)($pageSales[$consumeKey] ?? 0);
+            $row['consumption_amount_cents'] = (int)($pageConsume[$consumeKey] ?? 0);
+        }
+        unset($row);
         $rows = $this->attachAnnotations($rows, 'partner_item_detail', $storeId);
-        foreach ($rows as &$row) { $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']); $row['actual_performance'] = $this->money((int)$row['actual_performance_cents']); $row['consumption_amount'] = $this->money((int)$row['consumption_amount_cents']); $row['labor_amount'] = $this->money((int)$row['labor_amount_cents']); $row['experience'] = (int)$row['is_experience'] === 1 ? '是' : '否'; }
+        foreach ($rows as &$row) { $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']); $row['consumption_amount'] = $this->money((int)$row['consumption_amount_cents']); $row['labor_amount'] = $this->money((int)$row['labor_amount_cents']); $row['experience'] = (int)$row['is_experience'] === 1 ? '是' : '否'; }
         unset($row);
         foreach ($rows as &$row) { $this->applyOrganizationDimensions($row); $row['member_phone'] = (string)($row['member_phone'] ?? ''); $row['performance_type'] = strtok((string)$row['category_path_snapshot'], '/'); $row['experience_project'] = $row['experience']; $row['deal_headcount'] = (int)($row['member_id'] ?? 0) > 0 ? 1 : 0; $row['deal_project'] = $row['item_name_snapshot']; $row['consumption'] = $row['consumption_amount'] ?? '0'; $row['consumption_amount'] = $row['consumption_amount'] ?? '0'; $row['labor_fee'] = $row['labor_amount'] ?? '0'; $row['deal_amount'] = $row['sale_amount']; $row['partner_label'] = $row['partner_name_snapshot']; }
         unset($row);
@@ -375,7 +401,7 @@ class StoreUnifiedReportServices extends BaseServices
         foreach ($this->paymentMethodDefinitions() as $method) $columns[] = ['key'=>'payment_'.$method['code'],'label'=>$method['label'],'group_label'=>'支付现金业绩方式'];
         $columns[] = ['key'=>'receipt_total','label'=>'收款总金额','group_label'=>'支付现金业绩方式'];
         foreach ($partnerDefinitions as $definition) $columns[] = ['key'=>$definition['key'],'label'=>$definition['label'],'group_label'=>'合作方分成业绩'];
-        foreach ([['partner_performance','合作方业绩'],['actual_cash_performance','实际现金业绩'],['experience_cash','体验现金业绩'],['experience_payment_method','体验现金业绩支付方式']] as $column) $columns[] = ['key'=>$column[0],'label'=>$column[1]];
+        foreach ([['partner_performance','合作方业绩'],['actual_cash_performance','分成后现金业绩'],['experience_cash','体验现金业绩'],['experience_payment_method','体验现金业绩支付方式']] as $column) $columns[] = ['key'=>$column[0],'label'=>$column[1]];
         $columns = $this->fixedColumns($columns, [
             'business_date'=>104, 'consume_type'=>88, 'member_name'=>88,
             'consumption_detail'=>138, 'category'=>116,
@@ -461,7 +487,7 @@ class StoreUnifiedReportServices extends BaseServices
         foreach ([
             ['cash', '现金业绩', '成功记账收款按销售明细分摊后的金额；不含余额支付和欠款。', 'payment'],
             ['share', '分成业绩', '各分类现金业绩按结账时冻结的合作方默认比例计算后的合计。', 'partner'],
-            ['actual', '实际业绩', '现金业绩扣除分成业绩后的金额。', 'result'],
+            ['actual', '分成后业绩', '现金业绩扣除分成业绩后的金额；该列不是实际业绩。', 'result'],
             ['consume', '消耗业绩', '实际完成服务或核销后形成的消耗业绩。', 'consumption'],
         ] as $summary) {
             [$metric, $label, $logic, $tone] = $summary;
@@ -524,13 +550,43 @@ class StoreUnifiedReportServices extends BaseServices
     {
         $stores = [];
         $categories = [];
-        $cashRows = $this->operationSaleQuery($storeId, $range, $input)
-            ->fieldRaw("s.store_id,s.store_name_snapshot,s.organization_id,s.organization_path_snapshot,s.business_date,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.cash_performance_amount_cents,d.cash_performance_amount_cents,0) AS cash_cents,COALESCE(c.partner_share_amount_cents,d.partner_share_amount_cents,0) AS share_cents")
+        $authorizedStores = is_array($storeId)
+            ? array_values(array_unique(array_filter(array_map('intval', $storeId))))
+            : [(int)$storeId];
+        // Organization filters narrow the authorized store set before every
+        // source is read. They never act as a page-side post-filter.
+        $authorizedStores = $this->organizationDimensions()->narrowStoreIds($authorizedStores, $input);
+        if ($authorizedStores === []) return compact('stores', 'categories');
+        $shareRows = $this->operationSaleQuery($authorizedStores, $range, $input)
+            ->fieldRaw("s.store_id,s.store_name_snapshot,s.organization_id,s.organization_path_snapshot,s.business_date,s.source_line_id,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.partner_share_amount_cents,d.partner_share_amount_cents,0) AS share_cents")
             ->select()->toArray();
+        $categoryIds = (int)($input['category_id'] ?? 0) > 0 ? [(int)$input['category_id']] : [];
+        $metricFilters = $this->itemAnalysisMetricFilters($input);
+        $metricReader = new \app\services\query\metric\RegisteredMetricReadServices();
+        // "本人参与" is a data-scope guard, not a page-side post-filter and
+        // not a request filter. The Reader's dedicated server-side entry
+        // applies it to every selected fact population.
+        $cashRows = $this->participantEmployeeId > 0
+            ? $metricReader->categoryReportBucketsForParticipant('cash_performance', CashierV3ScopeResolver::TENANT_SCOPE_ID, $authorizedStores, $range, $categoryIds, $metricFilters, $this->participantEmployeeId)
+            : $metricReader->categoryReportBuckets('cash_performance', CashierV3ScopeResolver::TENANT_SCOPE_ID, $authorizedStores, $range, $categoryIds, $metricFilters);
         foreach ($cashRows as $entry) {
+            $entry['category_id_snapshot'] = (int)($entry['category_id'] ?? 0);
+            $entry['category_path_snapshot'] = (string)($entry['category_path'] ?? '');
             $this->applyOrganizationDimensions($entry);
             $storeKey = $this->itemAnalysisStore($stores, $entry);
-            $stores[$storeKey]['cash_cents'] += (int)$entry['cash_cents'];
+            $stores[$storeKey]['cash_cents'] = (int)$entry['store_metric_value'];
+            $category = $this->itemAnalysisConfiguredCategory(
+                $definitions,
+                (int)($entry['category_id_snapshot'] ?? 0),
+                (string)$entry['category_path_snapshot']
+            );
+            if ($category === null) continue;
+            $this->itemAnalysisCategoryAmount($categories, $storeKey, $category);
+            $categories[$storeKey][$category['id']]['cash_cents'] = (int)$entry['metric_value'];
+        }
+        foreach ($shareRows as $entry) {
+            $this->applyOrganizationDimensions($entry);
+            $storeKey = $this->itemAnalysisStore($stores, $entry);
             $stores[$storeKey]['share_cents'] += (int)$entry['share_cents'];
             $category = $this->itemAnalysisConfiguredCategory(
                 $definitions,
@@ -539,49 +595,44 @@ class StoreUnifiedReportServices extends BaseServices
             );
             if ($category === null) continue;
             $this->itemAnalysisCategoryAmount($categories, $storeKey, $category);
-            $categories[$storeKey][$category['id']]['cash_cents'] += (int)$entry['cash_cents'];
             $categories[$storeKey][$category['id']]['share_cents'] += (int)$entry['share_cents'];
         }
-        $consume = Db::name('cashier_v3_performance_fact')->alias('p')
-            ->leftJoin('cashier_v3_entitlement_service_fact es', 'es.tenant_id=p.tenant_id AND es.checkout_request_id=p.checkout_request_id AND es.source_line_id=p.source_line_id')
-            ->whereBetween('p.business_date', [$range['start'], $range['end']])
-            ->where('p.status', 'effective')->where('p.performance_type', 'consumption_performance_recorded');
-        $this->normalDataScope()->excludeVoidedSalesOrderFacts($consume, 'p.tenant_id', 'p.order_id');
-        if (is_array($storeId)) {
-            $consume->whereIn('p.store_id', array_values(array_unique(array_map('intval', $storeId))));
-        } else {
-            $consume->where('p.store_id', (int)$storeId);
-        }
-        if ($this->participantEmployeeId > 0) {
-            (new StoreReportParticipantScopeServices())->applyCheckout($consume, 'p.checkout_request_id', $this->participantEmployeeId);
-        }
-        $this->organizationDimensions()->applyFilters($consume, 'p', $input, $range);
-        $this->itemAnalysisConsumptionFilters($consume, $input);
-        foreach ($consume->fieldRaw("p.store_id,p.store_name_snapshot,p.organization_id,p.organization_path_snapshot,p.business_date,es.project_category_id_snapshot,COALESCE(NULLIF(es.project_category_path_snapshot,''),es.project_category_name_snapshot) AS category_path_snapshot,SUM(p.amount_cents) AS consume_cents")
-            ->group('p.store_id,p.store_name_snapshot,p.organization_id,p.organization_path_snapshot,p.business_date,es.project_category_id_snapshot,es.project_category_path_snapshot,es.project_category_name_snapshot')->select()->toArray() as $entry) {
+        $consumeRows = $this->participantEmployeeId > 0
+            ? $metricReader->categoryReportBucketsForParticipant('consume_amount', CashierV3ScopeResolver::TENANT_SCOPE_ID, $authorizedStores, $range, $categoryIds, $metricFilters, $this->participantEmployeeId)
+            : $metricReader->categoryReportBuckets('consume_amount', CashierV3ScopeResolver::TENANT_SCOPE_ID, $authorizedStores, $range, $categoryIds, $metricFilters);
+        foreach ($consumeRows as $entry) {
+            $entry['category_id_snapshot'] = (int)($entry['category_id'] ?? 0);
+            $entry['category_path_snapshot'] = (string)($entry['category_path'] ?? '');
             $this->applyOrganizationDimensions($entry);
             $storeKey = $this->itemAnalysisStore($stores, $entry);
-            $stores[$storeKey]['consume_cents'] += (int)$entry['consume_cents'];
+            $stores[$storeKey]['consume_cents'] = (int)$entry['store_metric_value'];
             $category = $this->itemAnalysisConfiguredCategory(
                 $definitions,
-                (int)($entry['project_category_id_snapshot'] ?? 0),
+                (int)($entry['category_id_snapshot'] ?? 0),
                 (string)$entry['category_path_snapshot']
             );
             if ($category === null) continue;
             $this->itemAnalysisCategoryAmount($categories, $storeKey, $category);
-            $categories[$storeKey][$category['id']]['consume_cents'] += (int)$entry['consume_cents'];
+            $categories[$storeKey][$category['id']]['consume_cents'] = (int)$entry['metric_value'];
         }
         return compact('stores', 'categories');
     }
 
-    private function itemAnalysisConsumptionFilters($query, array $input): void
+    private function itemAnalysisMetricFilters(array $input): array
     {
-        $categoryId = (int)($input['category_id'] ?? 0);
-        $path = trim((string)($input['category_path'] ?? ''));
-        $type = trim((string)($input['product_type'] ?? ''));
-        if ($categoryId > 0) $query->where('es.project_category_id_snapshot', $categoryId);
-        if ($path !== '') $query->whereLike('es.project_category_path_snapshot', $path . '%');
-        if ($type !== '' && $type !== 'project') $query->whereRaw('1=0');
+        $filters = [];
+        foreach (['category_path', 'product_type', 'partner_name'] as $key) {
+            $value = trim((string)($input[$key] ?? ''));
+            if ($value !== '') $filters[$key] = $value;
+        }
+        foreach (['salesperson_id', 'guide_id', 'sales_manager_id'] as $key) {
+            $value = (int)($input[$key] ?? 0);
+            if ($value > 0) $filters[$key] = $value;
+        }
+        if (array_key_exists('is_experience', $input) && $input['is_experience'] !== '' && $input['is_experience'] !== null) {
+            $filters['is_experience'] = (int)$input['is_experience'];
+        }
+        return $filters;
     }
 
     private function itemAnalysisStore(array &$stores, array $entry): string
@@ -592,7 +643,7 @@ class StoreUnifiedReportServices extends BaseServices
         ]);
         if (!isset($stores[$key])) {
             $stores[$key] = [
-                'store_name' => (string)($entry['store_name_snapshot'] ?? ''),
+                'store_name' => (string)($entry['store_name_snapshot'] ?? $entry['store_name'] ?? ''),
                 'division_name' => (string)($entry['division_name'] ?? ''),
                 'company_dimension_id' => (string)($entry['company_dimension_id'] ?? ''),
                 'city_manager' => (string)($entry['city_manager'] ?? ''),
@@ -608,6 +659,21 @@ class StoreUnifiedReportServices extends BaseServices
         if (!isset($categories[$storeId][$category['id']])) {
             $categories[$storeId][$category['id']] = ['label' => $category['label'], 'cash_cents' => 0, 'share_cents' => 0, 'consume_cents' => 0];
         }
+    }
+
+    private function metricSourceLineCategoryTotals(string $metricCode, $storeId, array $range, array $input, array $sourceLineIds): array
+    {
+        $lineIds = array_values(array_unique(array_filter(array_map('strval', $sourceLineIds), static function (string $line): bool {
+            return $line !== '';
+        })));
+        if ($lineIds === []) return [];
+        $stores = is_array($storeId)
+            ? array_values(array_unique(array_filter(array_map('intval', $storeId))))
+            : [(int)$storeId];
+        return (new \app\services\query\metric\RegisteredMetricReadServices())->sourceLineCategoryTotals(
+            $metricCode, CashierV3ScopeResolver::TENANT_SCOPE_ID, $stores, $range, $lineIds,
+            $this->itemAnalysisMetricFilters($input)
+        );
     }
 
     /**
@@ -722,38 +788,31 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function craftsmanConsumption($storeId, array $range, array $input): array
     {
-        $query = $this->withStoreScope(Db::name('cashier_v3_performance_fact')->alias('p'), $storeId)->whereBetween('p.business_date',[$range['start'],$range['end']])->where('p.status','effective')->where('p.performance_type','labor_performance_allocated')->where('p.employee_id','>',0);
-        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
-        if ($this->participantEmployeeId > 0) $query->where('p.employee_id', $this->participantEmployeeId);
-        if ((int)($input['craftsman_id'] ?? 0) > 0) $query->where('p.employee_id',(int)$input['craftsman_id']);
-        $this->organizationDimensions()->applyFilters($query, 'p', $input, $range);
+        $stores = is_array($storeId) ? array_values(array_unique(array_map('intval', $storeId))) : [(int)$storeId];
+        $stores = $this->organizationDimensions()->narrowStoreIds($stores, $input);
+        $employeeIds = $this->personnelSelection($input, 'craftsman_id');
         // This report is a craftsman projection. "消耗" is the craftsman's
         // allocated labor performance; "手工" is the independent fee saved
         // with that allocation, never a second use of amount_cents.
-        $raw = $query->fieldRaw("p.store_id,p.store_name_snapshot AS store_name,p.organization_id,p.organization_path_snapshot,p.business_date,p.employee_name_snapshot AS employee_name,p.employee_id,DAY(p.business_date) AS day_no,SUM(p.amount_cents) AS consumption_amount_cents,SUM(p.labor_fee_amount_cents) AS labor_amount_cents,MAX(p.rule_code_snapshot) AS labor_rule_snapshot")->group('p.store_id,p.store_name_snapshot,p.organization_id,p.organization_path_snapshot,p.business_date,p.employee_id,p.employee_name_snapshot')->order('employee_name','asc')->select()->toArray();
-        $by = []; $summaryConsume = []; $summaryLabor = [];
-        foreach ($raw as $row) {
-            $this->applyOrganizationDimensions($row);
-            $key = implode('|', [(string)$row['store_id'], (string)$row['employee_id'], (string)$row['company_dimension_id'], (string)$row['city_manager_dimension_id']]);
-            if (!isset($by[$key])) $by[$key] = ['store_id'=>(int)$row['store_id'],'store_name'=>(string)$row['store_name'],'employee_name'=>(string)$row['employee_name'],'employee_id'=>(int)$row['employee_id'],'division_name'=>(string)$row['division_name'],'company_dimension_id'=>(string)$row['company_dimension_id'],'city_manager'=>(string)$row['city_manager'],'city_manager_dimension_id'=>(string)$row['city_manager_dimension_id']];
-            $day = (int)$row['day_no'];
-            $by[$key]['day_'.$day.'_consume_cents'] = (int)($by[$key]['day_'.$day.'_consume_cents'] ?? 0) + (int)$row['consumption_amount_cents'];
-            $by[$key]['day_'.$day.'_labor_cents'] = (int)($by[$key]['day_'.$day.'_labor_cents'] ?? 0) + (int)$row['labor_amount_cents'];
-            $by[$key]['total_consume_cents'] = (int)($by[$key]['total_consume_cents'] ?? 0) + (int)$row['consumption_amount_cents'];
-            $by[$key]['total_labor_cents'] = (int)($by[$key]['total_labor_cents'] ?? 0) + (int)$row['labor_amount_cents'];
-            $summaryConsume[$day] = (int)($summaryConsume[$day] ?? 0) + (int)$row['consumption_amount_cents'];
-            $summaryLabor[$day] = (int)($summaryLabor[$day] ?? 0) + (int)$row['labor_amount_cents'];
-        }
+        $matrix = ($stores === [] || $employeeIds === null)
+            ? ['records' => [], 'summary' => ['day_metric_values' => [], 'total_metric_value' => 0, 'day_labor_values' => [], 'total_labor_value' => 0]]
+            : (new \app\services\query\metric\RegisteredMetricReadServices())->personnelDayMatrix('staff_labor_yeji', '0', $stores, $range, $employeeIds);
+        $by = $matrix['records'];
+        $summaryConsume = $matrix['summary']['day_metric_values'];
+        $summaryLabor = $matrix['summary']['day_labor_values'];
         foreach ($by as &$row) {
+            $this->applyOrganizationDimensions($row);
             foreach (range(1, 31) as $day) {
-                $row['day_'.$day.'_consume'] = $this->money((int)($row['day_'.$day.'_consume_cents'] ?? 0));
-                $row['day_'.$day.'_labor'] = $this->money((int)($row['day_'.$day.'_labor_cents'] ?? 0));
-                if ((int)($row['day_'.$day.'_consume_cents'] ?? 0) !== 0 || (int)($row['day_'.$day.'_labor_cents'] ?? 0) !== 0) {
+                $metricValue = (int)($row['day_metric_values'][$day] ?? 0);
+                $laborValue = (int)($row['day_labor_values'][$day] ?? 0);
+                $row['day_'.$day.'_consume'] = $this->money($metricValue);
+                $row['day_'.$day.'_labor'] = $this->money($laborValue);
+                if ($metricValue !== 0 || $laborValue !== 0) {
                     $row['_drilldown']['day_'.$day.'_consume'] = $this->craftsmanConsumptionDrilldown($day);
                     $row['_drilldown']['day_'.$day.'_labor'] = $this->craftsmanConsumptionDrilldown($day);
                 }
             }
-            if ((int)($row['total_consume_cents'] ?? 0) !== 0 || (int)($row['total_labor_cents'] ?? 0) !== 0) {
+            if ((int)$row['total_metric_value'] !== 0 || (int)$row['total_labor_value'] !== 0) {
                 $row['_drilldown']['total_consume'] = $this->craftsmanConsumptionDrilldown();
                 $row['_drilldown']['total_labor'] = $this->craftsmanConsumptionDrilldown();
             }
@@ -762,18 +821,25 @@ class StoreUnifiedReportServices extends BaseServices
         $columns = array_merge($this->organizationDimensionColumns(), [['key'=>'employee_name','label'=>'手艺人']]);
         foreach (range(1,31) as $day) { $columns[]=['key'=>'day_'.$day.'_consume','label'=>$day.'日消耗','group_label'=>$day.'日']; $columns[]=['key'=>'day_'.$day.'_labor','label'=>$day.'日手工','group_label'=>$day.'日']; }
         $columns[]=['key'=>'total_consume','label'=>'合计消耗']; $columns[]=['key'=>'total_labor','label'=>'合计手工'];
-        foreach ($by as &$row) { $row['total_consume']=$this->money((int)($row['total_consume_cents']??0)); $row['total_labor']=$this->money((int)($row['total_labor_cents']??0)); }
+        foreach ($by as &$row) {
+            // Compatibility keys mirror a Reader-computed value; they are not
+            // recomputed from page rows and remain available to exports/tests.
+            $row['total_consume_cents'] = (int)$row['total_metric_value'];
+            $row['total_labor_cents'] = (int)$row['total_labor_value'];
+            $row['total_consume']=$this->money($row['total_consume_cents']);
+            $row['total_labor']=$this->money($row['total_labor_cents']);
+        }
         unset($row);
         $summaryValues = ['employee_name'=>'合计'];
         foreach (range(1, 31) as $day) {
             $summaryValues['day_'.$day.'_consume'] = $this->money((int)($summaryConsume[$day] ?? 0));
             $summaryValues['day_'.$day.'_labor'] = $this->money((int)($summaryLabor[$day] ?? 0));
         }
-        $summaryValues['total_consume'] = $this->money(array_sum($summaryConsume));
-        $summaryValues['total_labor'] = $this->money(array_sum($summaryLabor));
+        $summaryValues['total_consume'] = $this->money((int)$matrix['summary']['total_metric_value']);
+        $summaryValues['total_labor'] = $this->money((int)$matrix['summary']['total_labor_value']);
         $columns = $this->fixedColumns($columns, ['division_name'=>130, 'city_manager'=>130, 'employee_name'=>120]);
         return [
-            'title'=>'门店手艺人消耗','columns'=>$columns,'column_groups'=>$this->columnGroups($columns),'records'=>array_values($by),'total'=>count($by),'page'=>1,'page_size'=>count($by),
+            'title'=>'门店手艺人消耗','columns'=>$columns,'column_groups'=>$this->columnGroups($columns),'records'=>$by,'total'=>count($by),'page'=>1,'page_size'=>count($by),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true], 'summary_row'=>$this->summaryRow($columns, $summaryValues),
         ];
@@ -799,32 +865,22 @@ class StoreUnifiedReportServices extends BaseServices
      */
     private function craftsmanConsumptionDetail($storeId, array $range, array $input): array
     {
-        $query = Db::name('cashier_v3_performance_fact')->alias('p')
-            ->leftJoin('cashier_v3_sales_order_line sol', 'sol.tenant_id=p.tenant_id AND sol.order_id=p.order_id AND sol.order_line_id=p.source_line_id')
-            ->whereBetween('p.business_date', [$range['start'], $range['end']])
-            ->where('p.status', 'effective')
-            ->where('p.performance_type', 'labor_performance_allocated')
-            ->where('p.employee_id', '>', 0);
-        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
-        if (is_array($storeId)) $query->whereIn('p.store_id', array_values(array_unique(array_map('intval', $storeId))));
-        else $query->where('p.store_id', (int)$storeId);
-        if ($this->participantEmployeeId > 0) $query->where('p.employee_id', $this->participantEmployeeId);
-        if ((int)($input['craftsman_id'] ?? 0) > 0) $query->where('p.employee_id', (int)$input['craftsman_id']);
+        $stores = is_array($storeId) ? array_values(array_unique(array_map('intval', $storeId))) : [(int)$storeId];
+        $stores = $this->organizationDimensions()->narrowStoreIds($stores, $input);
+        $employeeIds = $this->personnelSelection($input, 'craftsman_id');
         $dayOfMonth = (int)($input['day_of_month'] ?? 0);
-        if ($dayOfMonth >= 1 && $dayOfMonth <= 31) $query->whereRaw('DAY(p.business_date)=?', [$dayOfMonth]);
-        $this->organizationDimensions()->applyFilters($query, 'p', $input, $range);
-
-        $allRows = $query->fieldRaw("p.fact_id,p.store_id,p.store_name_snapshot AS store_name,p.organization_id,p.organization_path_snapshot,p.business_date,p.order_no_snapshot,p.member_name_snapshot,p.source_line_id,p.employee_id,p.employee_name_snapshot AS employee_name,p.fact_direction,p.amount_cents,p.labor_fee_amount_cents,p.project_count_half_units,p.rule_name_snapshot,sol.item_name_snapshot")
-            ->order('p.business_date', 'asc')->order('p.id', 'asc')->select()->toArray();
-        $summaryConsumption = 0;
-        $summaryLabor = 0;
+        $detail = ($stores === [] || $employeeIds === null)
+            ? ['rows' => [], 'total_metric_value' => 0, 'total_labor_value' => 0]
+            : (new \app\services\query\metric\RegisteredMetricReadServices())->personnelDetailResult('staff_labor_yeji', '0', $stores, $range, $employeeIds, $dayOfMonth);
+        $allRows = $detail['rows'];
+        $itemNames = $this->sourceLineItemNames(CashierV3ScopeResolver::TENANT_SCOPE_ID, $allRows);
         foreach ($allRows as &$row) {
+            $row['store_name'] = (string)($row['store_name_snapshot'] ?? '');
+            $row['employee_name'] = (string)($row['employee_name_snapshot'] ?? '');
             $this->applyOrganizationDimensions($row);
-            $summaryConsumption += (int)($row['amount_cents'] ?? 0);
-            $summaryLabor += (int)($row['labor_fee_amount_cents'] ?? 0);
-            $itemName = trim((string)($row['item_name_snapshot'] ?? ''));
+            $itemName = trim((string)($itemNames[(string)($row['order_id'] ?? '') . '|' . (string)($row['source_line_id'] ?? '')] ?? ''));
             $row['item_name_snapshot'] = $itemName !== '' ? $itemName : '来源行 ' . (string)($row['source_line_id'] ?? '-');
-            $row['consumption_amount'] = $this->money((int)($row['amount_cents'] ?? 0));
+            $row['consumption_amount'] = $this->money((int)($row['metric_value'] ?? 0));
             $row['labor_amount'] = $this->money((int)($row['labor_fee_amount_cents'] ?? 0));
             $row['project_count'] = ((int)($row['project_count_half_units'] ?? 0)) / 2;
             $row['business_status'] = (string)($row['fact_direction'] ?? '') === 'reversal' ? '冲销' : '正常';
@@ -847,60 +903,99 @@ class StoreUnifiedReportServices extends BaseServices
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout' => ['fixed'=>true],
             'summary_row' => $this->summaryRow($columns, [
-                'employee_name' => '合计', 'consumption_amount' => $this->money($summaryConsumption),
-                'labor_amount' => $this->money($summaryLabor),
+                'employee_name' => '合计', 'consumption_amount' => $this->money((int)$detail['total_metric_value']),
+                'labor_amount' => $this->money((int)$detail['total_labor_value']),
             ]),
         ];
     }
 
     private function salespersonPerformance($storeId, array $range, array $input): array
     {
-        $query = $this->withStoreScope(Db::name('cashier_v3_performance_fact')->alias('p'), $storeId)->whereBetween('p.business_date',[$range['start'],$range['end']])->where('p.status','effective')->where('p.performance_type','sales_performance_allocated')->where('p.employee_id','>',0);
-        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
-        if ($this->participantEmployeeId > 0) $query->where('p.employee_id', $this->participantEmployeeId);
-        if ((int)($input['salesperson_id'] ?? 0) > 0) $query->where('p.employee_id',(int)$input['salesperson_id']);
-        $this->organizationDimensions()->applyFilters($query, 'p', $input, $range);
-        $raw = $query->fieldRaw("p.store_id,p.store_name_snapshot AS store_name,p.organization_id,p.organization_path_snapshot,p.business_date,p.employee_name_snapshot AS employee_name,p.employee_id,DAY(p.business_date) AS day_no,SUM(p.amount_cents) AS amount_cents")->group('p.store_id,p.store_name_snapshot,p.organization_id,p.organization_path_snapshot,p.business_date,p.employee_id,p.employee_name_snapshot')->order('employee_name','asc')->select()->toArray();
-        $by=[]; $summaryPerformance=[];
-        foreach($raw as $row){$this->applyOrganizationDimensions($row);$key=implode('|',[(string)$row['store_id'],(string)$row['employee_id'],(string)$row['company_dimension_id'],(string)$row['city_manager_dimension_id']]);if(!isset($by[$key]))$by[$key]=['store_name'=>(string)$row['store_name'],'employee_name'=>(string)$row['employee_name'],'employee_id'=>(int)$row['employee_id'],'division_name'=>(string)$row['division_name'],'company_dimension_id'=>(string)$row['company_dimension_id'],'city_manager'=>(string)$row['city_manager'],'city_manager_dimension_id'=>(string)$row['city_manager_dimension_id']];$day=(int)$row['day_no'];$by[$key]['day_'.$day.'_performance_cents']=(int)($by[$key]['day_'.$day.'_performance_cents']??0)+(int)$row['amount_cents'];$by[$key]['total_performance_cents']=(int)($by[$key]['total_performance_cents']??0)+(int)$row['amount_cents'];$summaryPerformance[$day]=(int)($summaryPerformance[$day]??0)+(int)$row['amount_cents'];}
+        $stores = is_array($storeId) ? array_values(array_unique(array_map('intval', $storeId))) : [(int)$storeId];
+        $stores = $this->organizationDimensions()->narrowStoreIds($stores, $input);
+        $employeeIds = $this->personnelSelection($input, 'salesperson_id');
+        $matrix = ($stores === [] || $employeeIds === null)
+            ? ['records' => [], 'summary' => ['day_metric_values' => [], 'total_metric_value' => 0]]
+            : (new \app\services\query\metric\RegisteredMetricReadServices())->personnelDayMatrix('staff_sales_yeji', '0', $stores, $range, $employeeIds);
+        $by = $matrix['records'];
+        $summaryPerformance = $matrix['summary']['day_metric_values'];
         // 销售人只产生销售业绩事实，不产生手艺人手工费；日期直接作为列名展示，
         // 不再返回二级日期分组表头或无意义的手工列。
         $columns=array_merge($this->organizationDimensionColumns(), [['key'=>'employee_name','label'=>'销售人']]); foreach(range(1,31) as $day){$columns[]=['key'=>'day_'.$day.'_performance','label'=>$day.'日业绩'];} $columns[]=['key'=>'total_performance','label'=>'合计业绩'];
-        foreach($by as &$row){foreach(range(1,31) as $day)$row['day_'.$day.'_performance']=$this->money((int)($row['day_'.$day.'_performance_cents']??0));$row['total_performance']=$this->money((int)($row['total_performance_cents']??0));} unset($row);
-        $summaryValues = ['employee_name'=>'合计']; foreach(range(1,31) as $day)$summaryValues['day_'.$day.'_performance']=$this->money((int)($summaryPerformance[$day]??0)); $summaryValues['total_performance']=$this->money(array_sum($summaryPerformance));
+        foreach($by as &$row){
+            $this->applyOrganizationDimensions($row);
+            foreach(range(1,31) as $day)$row['day_'.$day.'_performance']=$this->money((int)($row['day_metric_values'][$day]??0));
+            $row['total_performance_cents']=(int)$row['total_metric_value'];
+            $row['total_performance']=$this->money($row['total_performance_cents']);
+        } unset($row);
+        $summaryValues = ['employee_name'=>'合计']; foreach(range(1,31) as $day)$summaryValues['day_'.$day.'_performance']=$this->money((int)($summaryPerformance[$day]??0)); $summaryValues['total_performance']=$this->money((int)$matrix['summary']['total_metric_value']);
         $columns = $this->fixedColumns($columns, ['division_name'=>130, 'city_manager'=>130, 'employee_name'=>120]);
         return [
-            'title'=>'门店销售人业绩','columns'=>$columns,'records'=>array_values($by),'total'=>count($by),'page'=>1,'page_size'=>count($by),
+            'title'=>'门店销售人业绩','columns'=>$columns,'records'=>$by,'total'=>count($by),'page'=>1,'page_size'=>count($by),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true], 'summary_row'=>$this->summaryRow($columns, $summaryValues),
         ];
     }
 
+    /** @return array<int,int>|null null means two narrowing personnel filters conflict. */
+    private function personnelSelection(array $input, string $inputKey): ?array
+    {
+        $requested = max(0, (int)($input[$inputKey] ?? 0));
+        if ($this->participantEmployeeId > 0 && $requested > 0 && $requested !== $this->participantEmployeeId) return null;
+        $employeeId = $this->participantEmployeeId > 0 ? $this->participantEmployeeId : $requested;
+        return $employeeId > 0 ? [$employeeId] : [];
+    }
+
+    /**
+     * Item text is presentation metadata, not an amount source. Performance
+     * values have already been fixed by the registered Reader before this
+     * optional label lookup runs.
+     *
+     * @return array<string,string>
+     */
+    private function sourceLineItemNames(string $tenantId, array $rows): array
+    {
+        $orders = [];
+        foreach ($rows as $row) {
+            $orderId = trim((string)($row['order_id'] ?? ''));
+            $lineId = trim((string)($row['source_line_id'] ?? ''));
+            if ($orderId !== '' && $lineId !== '') $orders[$orderId . '|' . $lineId] = [$orderId, $lineId];
+        }
+        if ($orders === []) return [];
+        $lineIds = array_values(array_unique(array_column($orders, 1)));
+        $result = [];
+        foreach (Db::name('cashier_v3_sales_order_line')->where('tenant_id', $tenantId)->whereIn('order_line_id', $lineIds)
+            ->field('order_id,order_line_id,item_name_snapshot')->select()->toArray() as $item) {
+            $key = (string)($item['order_id'] ?? '') . '|' . (string)($item['order_line_id'] ?? '');
+            if (isset($orders[$key])) $result[$key] = (string)($item['item_name_snapshot'] ?? '');
+        }
+        return $result;
+    }
+
     private function overview($storeId, array $range, array $input)
     {
         $metrics = [
-            'sales_amount' => ['销售额', 'cashier_v3_sale_fact', 'sale_amount_cents', []],
-            'cash_performance' => ['现金业绩', 'cashier_v3_payment_fact', 'amount_cents', []],
-            'actual_performance' => ['实际业绩', 'cashier_v3_performance_fact', 'amount_cents', ['performance_type' => 'actual_performance_recorded']],
-            'balance_deduction_amount' => ['余额扣款', 'cashier_v3_balance_fact', '-(principal_delta_cents + bonus_delta_cents)', ['balance_change_type' => 'order_payment']],
-            'recharge_amount' => ['充值', 'cashier_v3_balance_fact', 'principal_delta_cents', ['balance_change_type' => 'recharge_credit']],
-            'service_count' => ['服务次数', 'cashier_v3_entitlement_service_fact', 'quantity', ['service_status' => 'completed']],
-            'consumption_performance' => ['消耗业绩', 'cashier_v3_performance_fact', 'amount_cents', ['performance_type' => 'consumption_performance_recorded']],
-            'labor_performance' => ['劳动业绩', 'cashier_v3_performance_fact', 'amount_cents', ['performance_type' => 'labor_performance_allocated']],
+            'sales_amount' => 'sales_amount', 'cash_performance' => 'cash_performance',
+            'actual_performance' => 'actual_performance', 'balance_deduction_amount' => 'balance_deduction_amount',
+            'recharge_amount' => 'recharge_amount', 'service_count' => 'completed_service_item_count',
+            'consumption_performance' => 'consume_amount', 'labor_performance' => 'staff_labor_yeji',
         ];
+        $stores=is_array($storeId)?array_values(array_unique(array_map('intval',$storeId))):[(int)$storeId];
+        $reader=new \app\services\query\metric\RegisteredMetricReadServices();
+        $dictionary=new MetricDictionaryServices();
         $cards = [];
-        foreach ($metrics as $code => $item) {
-            $value = $this->sum($item[1], $item[2], $storeId, $range, $item[3]);
-            $cards[] = ['code' => $code, 'name' => $item[0], 'value' => $code === 'service_count' ? $value : $this->money($value), 'unit' => $code === 'service_count' ? '次' : '元'];
+        foreach ($metrics as $code => $canonical) {
+            $contract=\app\services\query\metric\MetricDefinitionRegistry::get($canonical);
+            $definition=$dictionary->getTooltip($canonical);
+            if (($definition['user_ready']??false)!==true) throw new \RuntimeException('REPORT_METRIC_DICTIONARY_NOT_READY');
+            $value=$reader->summary($canonical,'0',$stores,$range);$count=$contract['storage_unit']==='count';
+            $cards[] = ['code' => $code, 'name' => (string)$definition['name'], 'value' => $count ? $value : $this->money($value), 'value_cents' => $count ? null : $value, 'unit' => $count ? '次' : '元'];
         }
         $trendCode = in_array(($input['metric'] ?? ''), array_keys($metrics), true) ? $input['metric'] : 'cash_performance';
-        $trend = $this->trend($metrics[$trendCode], $storeId, $range, $trendCode === 'service_count');
-        $ranking = $this->withStoreScope(Db::name('cashier_v3_performance_fact'), $storeId)->whereBetween('business_date', [$range['start'], $range['end']])
-            ->where('status', 'effective')->where('performance_type', 'labor_performance_allocated')->where('employee_id', '>', 0);
-        $this->normalDataScope()->excludeVoidedSalesOrderFacts($ranking, 'tenant_id', 'order_id');
-        $ranking
-            ->fieldRaw('employee_id, MAX(employee_name_snapshot) AS employee_name, SUM(amount_cents) AS amount_cents')
-            ->group('employee_id')->orderRaw('amount_cents DESC')->limit(20)->select()->toArray();
+        $trendContract=\app\services\query\metric\MetricDefinitionRegistry::get($metrics[$trendCode]);
+        $trend=$reader->dailyStoreTotals($metrics[$trendCode],'0',$stores,$range);
+        foreach($trend as &$point)$point['value']=$trendContract['storage_unit']==='count'?(int)$point['amount_cents']:$this->money((int)$point['amount_cents']);unset($point);
+        $ranking = $reader->personnelRanking('staff_labor_yeji', '0', $stores, $range, 20);
         foreach ($ranking as &$row) $row['amount'] = $this->money((int)$row['amount_cents']);
         unset($row);
         return ['title' => '经营总览', 'cards' => $cards, 'trend' => ['metric' => $trendCode, 'points' => $trend], 'ranking' => $ranking, 'columns' => [], 'records' => []];
@@ -926,10 +1021,12 @@ class StoreUnifiedReportServices extends BaseServices
         $this->normalDataScope()->excludeVoidedSalesOrderServices($serviceQuery, 'cashier_v3_entitlement_service_fact');
         $total = (int)(clone $serviceQuery)->count();
         $records = (clone $serviceQuery)->order('business_date', 'desc')->order('id', 'desc')->page($this->page($input), $this->limit($input))->select()->toArray();
-        $performance = $this->withStoreScope(Db::name('cashier_v3_performance_fact'), $storeId)->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective')->whereIn('performance_type', ['consumption_performance_recorded', 'labor_performance_allocated']);
-        $this->normalDataScope()->excludeVoidedSalesOrderFacts($performance, 'tenant_id', 'order_id');
-        $performance
-            ->fieldRaw("performance_type, SUM(amount_cents) AS amount_cents")->group('performance_type')->select()->toArray();
+        $stores = is_array($storeId) ? array_values(array_unique(array_map('intval', $storeId))) : [(int)$storeId];
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $performance = [
+            ['metric_code' => 'consume_amount', 'amount_cents' => $reader->summary('consume_amount', '0', $stores, $range)],
+            ['metric_code' => 'staff_labor_yeji', 'amount_cents' => $reader->summary('staff_labor_yeji', '0', $stores, $range)],
+        ];
         return ['title' => '服务消耗明细', 'columns' => $this->serviceColumns(), 'records' => $records, 'total' => $total, 'page' => $this->page($input), 'page_size' => $this->limit($input), 'performance_summary' => $performance];
     }
 
@@ -1027,31 +1124,6 @@ class StoreUnifiedReportServices extends BaseServices
         return ['title' => '拓客渠道（首次疗程卡来源）', 'columns' => [['key'=>'channel_name','label'=>'首次疗程卡来源'],['key'=>'source_type','label'=>'来源类型'],['key'=>'member_count','label'=>'成交顾客'],['key'=>'order_count','label'=>'首次疗程卡单数'],['key'=>'sale_amount','label'=>'成交金额'],['key'=>'receipt_amount','label'=>'收款金额'],['key'=>'average_order_amount','label'=>'成交单产']], 'records' => $records, 'total' => count($records), 'page' => 1, 'page_size' => count($records)];
     }
 
-    private function sum($table, $amount, $storeId, array $range, array $conditions)
-    {
-        $query = $this->withStoreScope(Db::name($table), $storeId)->whereBetween('business_date', [$range['start'], $range['end']]);
-        foreach ($conditions as $key => $value) $query->where($key, $value);
-        if ($table === 'cashier_v3_entitlement_service_fact') $query->where('service_status', 'completed'); else $query->where('status', 'effective');
-        if ($table === 'cashier_v3_entitlement_service_fact') $this->normalDataScope()->excludeVoidedSalesOrderServices($query, $table);
-        else $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'tenant_id', 'order_id');
-        $row = $query->fieldRaw('COALESCE(SUM(' . $amount . '),0) AS amount')->find();
-        return (int)($row['amount'] ?? 0);
-    }
-
-    private function trend(array $metric, $storeId, array $range, $count)
-    {
-        $table = $metric[1]; $amount = $metric[2]; $conditions = $metric[3];
-        $query = $this->withStoreScope(Db::name($table), $storeId)->whereBetween('business_date', [$range['start'], $range['end']]);
-        foreach ($conditions as $key => $value) $query->where($key, $value);
-        if ($table === 'cashier_v3_entitlement_service_fact') $query->where('service_status', 'completed'); else $query->where('status', 'effective');
-        if ($table === 'cashier_v3_entitlement_service_fact') $this->normalDataScope()->excludeVoidedSalesOrderServices($query, $table);
-        else $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'tenant_id', 'order_id');
-        $rows = $query->fieldRaw('business_date, SUM(' . $amount . ') AS amount')->group('business_date')->order('business_date', 'asc')->select()->toArray();
-        foreach ($rows as &$row) $row['value'] = $count ? (int)$row['amount'] : $this->money((int)$row['amount']);
-        unset($row);
-        return $rows;
-    }
-
     private function commonFilters($query, array $input, $dataset)
     {
         if (!empty($input['item_id']) && $dataset === 'sale') $query->where('item_id', (string)$input['item_id']);
@@ -1084,10 +1156,10 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function activeMembers($storeId, array $range, array $memberIds): array
     {
-        $query = $this->withStoreScope(Db::name('cashier_v3_entitlement_service_fact'), $storeId)->whereIn('member_id', $memberIds)
-            ->whereBetween('business_date', [$range['start'], $range['end']])->where('service_status', 'completed');
-        $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'cashier_v3_entitlement_service_fact');
-        $rows = $query->field('member_id')->group('member_id')->select()->toArray();
+        $query = $this->withStoreScope(Db::name('cashier_v3_entitlement_service_fact')->alias('s'), $storeId)->whereIn('s.member_id', $memberIds)
+            ->whereBetween('s.business_date', [$range['start'], $range['end']])->where('s.service_status', 'completed');
+        $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 's');
+        $rows = $query->field('s.member_id')->group('s.member_id')->select()->toArray();
         $result = []; foreach ($rows as $row) $result[(int)$row['member_id']] = true;
         return $result;
     }
@@ -1548,7 +1620,7 @@ class StoreUnifiedReportServices extends BaseServices
     private function page(array $input) { return max(1, (int)($input['page'] ?? 1)); }
     private function limit(array $input) { return min(100, max(10, (int)($input['limit'] ?? 20))); }
     private function withStoreScope($query, $storeId) { return is_array($storeId) ? $query->whereIn('store_id', array_values(array_unique(array_map('intval', $storeId)))) : $query->where('store_id', (int)$storeId); }
-    private function money($cents) { return (string)intdiv((int)$cents, 100); }
+    private function money($cents) { return \app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$cents); }
     private function saleColumns() { return [['key'=>'business_date','label'=>'业务日期'],['key'=>'order_no_snapshot','label'=>'订单号'],['key'=>'member_name_snapshot','label'=>'顾客'],['key'=>'item_name_snapshot','label'=>'品项'],['key'=>'quantity','label'=>'数量'],['key'=>'business_source_label_snapshot','label'=>'结账来源'],['key'=>'amount','label'=>'销售额']]; }
     private function paymentColumns() { return [['key'=>'business_date','label'=>'业务日期'],['key'=>'order_no_snapshot','label'=>'订单号'],['key'=>'member_name_snapshot','label'=>'顾客'],['key'=>'payment_method','label'=>'收款方式'],['key'=>'business_source_label_snapshot','label'=>'结账来源'],['key'=>'amount','label'=>'收款金额']]; }
     private function serviceColumns() { return [['key'=>'business_date','label'=>'服务日期'],['key'=>'document_no_snapshot','label'=>'服务单号'],['key'=>'member_name_snapshot','label'=>'顾客'],['key'=>'project_name_snapshot','label'=>'项目'],['key'=>'quantity','label'=>'服务次数'],['key'=>'service_object','label'=>'服务对象']]; }

@@ -23,6 +23,8 @@ trait AiHttpActions
     public function aiManagementPublish() { return $this->callAi('management_publish'); }
     public function aiManagementRollback() { return $this->callAi('management_rollback'); }
     public function aiManagementPreview() { return $this->callAi('management_preview'); }
+    public function aiManagementRebase() { return $this->callAi('management_rebase'); }
+    public function aiMetricRegistryGet() { return $this->callAi('metric_registry_get'); }
 
     private function callAi(string $operation,string $runId='')
     {
@@ -61,6 +63,7 @@ trait AiHttpActions
                 'AI_MANAGEMENT_DOCUMENT_INVALID'=>'配置内容不符合已登记能力，请检查填写项。',
                 'AI_MANAGEMENT_BUDGET_INVALID'=>'执行预算不合法，不能超过已登记上限或小于节点预算合计。',
                 'AI_MANAGEMENT_SOURCE_CHANGED'=>'底层能力版本已变化，请联系维护人员核对配置。',
+                'AI_MANAGEMENT_REBASE_INVALID'=>'旧版管理配置无法安全迁移，请恢复源码默认配置后重新设置。',
                 'AI_MANAGEMENT_NOT_READY'=>'管理配置尚未安装完成，请联系维护人员。',
                 'AI_MANAGEMENT_VERSION_NOT_FOUND'=>'所选配置版本不存在或不属于当前实例。',
                 'AI_CLIENT_UPGRADE_REQUIRED'=>'魔核 AI 已更新，请刷新页面后重新打开。',

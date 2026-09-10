@@ -10,6 +10,10 @@ function rejects(callable $f,string $reason){try{$f();}catch(Throwable $e){check
 $d=Policy::defaults();check(Policy::validate($d)===$d,'defaults');check(count(Policy::catalog()['workflows'])===5,'catalog');Policy::applyManifest($d);$checks++;
 foreach(['sql','metric_codes','permissions','handler'] as $key){$bad=$d;$bad[$key]='arbitrary';rejects(function()use($bad){Policy::validate($bad);},'AI_MANAGEMENT_DOCUMENT_INVALID');}
 $bad=$d;$bad['source_registry_hash']=str_repeat('0',64);rejects(function()use($bad){Policy::validate($bad);},'AI_MANAGEMENT_SOURCE_CHANGED');
+$old=$bad;$old['guidance']['max_rounds']=5;$old['guidance']['prompts']['metric_code']='请选择业绩类型';
+$rebased=Policy::rebase($old);check($rebased['source_registry_hash']===$d['source_registry_hash'],'rebase adopts current source hash');
+check($rebased['guidance']['max_rounds']===5&&$rebased['guidance']['prompts']['metric_code']==='请选择业绩类型','rebase preserves editable guidance');
+$badSchema=$old;$badSchema['schema_version']='unknown';rejects(function()use($badSchema){Policy::rebase($badSchema);},'AI_MANAGEMENT_REBASE_INVALID');
 foreach([2,6,'3'] as $round){$bad=$d;$bad['guidance']['max_rounds']=$round;rejects(function()use($bad){Policy::validate($bad);},'AI_MANAGEMENT_DOCUMENT_INVALID');}
 foreach([3,4,5] as $round){$good=$d;$good['guidance']['max_rounds']=$round;check(Policy::validate($good)===$good,'legal rounds');}
 $bad=$d;$bad['workflows']['wf_metric_definition']['allow_export']=true;rejects(function()use($bad){Policy::validate($bad);},'AI_MANAGEMENT_DOCUMENT_INVALID');
@@ -24,6 +28,9 @@ $out=Policy::decorateEnvelope($good,$env);check(array_column($out['fields'],'key
 $pdo=new PDO('sqlite::memory:');$pdo->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_EXCEPTION);$store=new Store($pdo,'t_','local');check($store->active()['version']==='source','missing table source');
 $pdo->exec('CREATE TABLE t_mohe_ai_management_state(instance_key TEXT PRIMARY KEY,revision INTEGER NOT NULL,active_version TEXT NOT NULL,draft_json TEXT NOT NULL,updated_at INTEGER NOT NULL)');
 $pdo->exec('CREATE TABLE t_mohe_ai_management_version(instance_key TEXT NOT NULL,version TEXT NOT NULL,document_json TEXT NOT NULL,document_hash TEXT NOT NULL,created_at INTEGER NOT NULL,action TEXT NOT NULL,source_version TEXT NOT NULL,PRIMARY KEY(instance_key,version))');
+$rebaseStore=new Store($pdo,'t_','rebase');$rebaseState=$rebaseStore->read();
+$stmt=$pdo->prepare('UPDATE t_mohe_ai_management_state SET draft_json=? WHERE instance_key=?');$stmt->execute([json_encode($old,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),'rebase']);
+$rebaseState=$rebaseStore->rebaseDraft($rebaseState['revision']);check($rebaseState['revision']===2&&$rebaseState['draft']===$rebased,'stale draft rebased atomically');
 $state=$store->read();check($state['revision']===1&&$state['active_version']==='source','initial');$good['guidance']['max_rounds']=5;
 $state=$store->saveDraft(1,$good);check($state['revision']===2,'saved');check((new Store($pdo,'t_','local'))->read()['draft']===$good,'refresh persistent');check($store->active()['document']===$d,'draft not live');
 rejects(function()use($store,$d){$store->saveDraft(1,$d);},'AI_MANAGEMENT_REVISION_CONFLICT');check($store->validateDraft(2)['valid'],'validate');

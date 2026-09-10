@@ -43,6 +43,6 @@ $controller->request=(new \think\Request())->setMethod('POST')->withInput('{}');
 $response=$controller->aiCreate();
 $check(strpos(json_encode($response->getData()),'SECRET_SQL_PROMPT')===false,'Exception is redacted');
 foreach ([\app\controller\admin\v1\ai\Ai::class,\app\controller\cashier\v3\Ai::class,\app\controller\mobile\merchant\Ai::class] as $class) {
-    $check(class_exists($class) && method_exists($class,'aiExecute'),'Actual controller inheritance loads');
+    $check(class_exists($class) && method_exists($class,'aiExecute') && method_exists($class,'aiManagementRebase'),'Actual controller inheritance loads');
 }
 echo 'PASS '.$checks." HTTP action assertions; no DB/model/application boot.\n";

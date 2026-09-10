@@ -17,7 +17,6 @@ final class GroupManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'group_management_dashboard';
     public const METRIC_VERSION = 'group-management-cash-recharge-v2';
-    private const CASH_EXPLANATION = '成功记账收款总额，包含充值及充值欠款补交；商品与卡项收款按销售明细及卡内项目分摊，充值不归入商品分类。退款按退款成功日期单独统计，不在现金业绩中重复扣减。';
     public const COVERAGE_START = '2026-08-10';
 
     private $organizationDimensions;
@@ -78,20 +77,17 @@ final class GroupManagementDashboardServices
         // aggregate the two required facts in SQL so a high-volume month does
         // not materialize every payment allocation in the PHP worker.
         if (!empty($input['summary_only']) && $categoryIds === []) {
-            $cashTotals = $this->cashTotals($scope['tenant_id'], $scope['store_ids'], $range);
-            $consumption = $aggregateReady
-                ? $this->aggregatePerformanceTotal($scope['tenant_id'], $scope['store_ids'], $range, 'consumption_performance_recorded')
-                : $this->performanceTotalScalar($scope['tenant_id'], $scope['store_ids'], $range, 'consumption_performance_recorded');
-            $grossCash = (int)$cashTotals['gross_cents'];
-            $refund = (int)$cashTotals['refund_cents'];
-            $cash = $grossCash;
-            $actual = $grossCash + $refund;
+            $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+            $cash = $reader->summary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $range);
+            $refund = $reader->summary('refund_performance', $scope['tenant_id'], $scope['store_ids'], $range);
+            $actual = $reader->summary('actual_performance', $scope['tenant_id'], $scope['store_ids'], $range);
+            $consumption = $reader->summary('consume_amount', $scope['tenant_id'], $scope['store_ids'], $range);
             return [
                 'cards' => [
-                    $this->metric('cash_performance', '现金业绩', $cash, 'money', self::CASH_EXPLANATION),
-                    $this->metric('refund_amount', '退款金额', abs($refund), 'money', '退款成功后形成的退款金额，按退款成功日期统计，以绝对值展示。'),
-                    $this->metric('actual_performance', '实际业绩', $actual, 'money', '现金业绩减退款金额；现金业绩按成功记账收款正负事实汇总，退款按退款成功日期以负数冲减，不重复扣减。'),
-                    $this->metric('consumption_performance', '消耗业绩', $consumption, 'money', '项目实际完成服务后形成的项目级消耗业绩。'),
+                    $this->registeredMetric('cash_performance', 'cash_performance', $cash),
+                    $this->registeredMetric('refund_performance', 'refund_performance', $refund),
+                    $this->registeredMetric('actual_performance', 'actual_performance', $actual),
+                    $this->registeredMetric('consumption_performance', 'consume_amount', $consumption),
                     $this->metric('consumption_count', '消耗数量', 0, 'count', '商品看板摘要不展示消耗数量。'),
                     $this->metric('consumption_unit_price', '消耗单价', null, 'money', '商品看板摘要不展示消耗单价。'),
                 ],
@@ -103,28 +99,29 @@ final class GroupManagementDashboardServices
         }
         $cashRows = $this->cashRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
         $serviceRows = $this->serviceRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
-        $consumption = $aggregateReady
-            ? $this->aggregatePerformanceTotal($scope['tenant_id'], $scope['store_ids'], $range, 'consumption_performance_recorded')
-            : $this->performanceTotal($scope['tenant_id'], $scope['store_ids'], $range, 'consumption_performance_recorded', $categoryIds);
-        $refund = $this->sum(array_values(array_filter($cashRows, static function (array $row): bool {
-            return (int)($row['amount_cents'] ?? 0) < 0;
-        })), 'amount_cents');
-        $grossCash = $this->sum(array_values(array_filter($cashRows, static function (array $row): bool {
-            return (int)($row['amount_cents'] ?? 0) > 0;
-        })), 'amount_cents');
-        // Cash facts retain signed refund adjustments. Actual performance is
-        // the same net result: gross receipts less successful refunds.
-        $cash = $grossCash;
-        $actual = $grossCash + $refund;
-        $serviceCount = $this->sum($serviceRows, 'quantity');
+        if ($categoryIds === []) {
+            $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+            $cash = $reader->summary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $range);
+            $refund = $reader->summary('refund_performance', $scope['tenant_id'], $scope['store_ids'], $range);
+            $actual = $reader->summary('actual_performance', $scope['tenant_id'], $scope['store_ids'], $range);
+            $consumption = $reader->summary('consume_amount', $scope['tenant_id'], $scope['store_ids'], $range);
+            $serviceCount = $reader->summary('completed_service_item_count', $scope['tenant_id'], $scope['store_ids'], $range);
+        } else {
+            $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+            $cash = $reader->categorySummary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+            $refund = $reader->categorySummary('refund_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+            $actual = $reader->categorySummary('actual_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+            $consumption = $reader->categorySummary('consume_amount', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+            $serviceCount = $reader->categorySummary('completed_service_item_count', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+        }
         $month = substr($range['end'], 0, 7);
         $year = (int)substr($range['end'], 0, 4);
         $cards = [
-            $this->metric('cash_performance', '现金业绩', $cash, 'money', self::CASH_EXPLANATION),
-            $this->metric('refund_amount', '退款金额', abs($refund), 'money', '退款成功后形成的退款金额，按退款成功日期统计，以绝对值展示。'),
-            $this->metric('actual_performance', '实际业绩', $actual, 'money', '现金业绩减退款金额；现金业绩按成功记账收款正负事实汇总，退款按退款成功日期以负数冲减，不重复扣减。'),
-            $this->metric('consumption_performance', '消耗业绩', $consumption, 'money', '项目实际完成服务后形成的项目级消耗业绩。'),
-            $this->metric('consumption_count', '消耗数量', $serviceCount, 'count', '所选期间内成功完成服务的项目数量；同一次项目服务只计一次。'),
+            $this->registeredMetric('cash_performance', 'cash_performance', $cash),
+            $this->registeredMetric('refund_performance', 'refund_performance', $refund),
+            $this->registeredMetric('actual_performance', 'actual_performance', $actual),
+            $this->registeredMetric('consumption_performance', 'consume_amount', $consumption),
+            $this->registeredMetric('consumption_count', 'completed_service_item_count', $serviceCount),
             $this->metric('consumption_unit_price', '消耗单价', $serviceCount > 0 ? (int)round($consumption / $serviceCount) : null, 'money', '消耗业绩除以消耗数量；分母为零显示 -。'),
         ];
         if (!empty($input['summary_only'])) {
@@ -139,10 +136,9 @@ final class GroupManagementDashboardServices
         $goalMonths = $this->monthsForRange($range);
         $targets = $this->targets->totals(['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, $goalMonths);
         $monthTargets = $this->targets->totals(['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, [(int)substr($range['end'], 5, 2)]);
-        $categoryCashRows = array_values(array_filter($cashRows, static function (array $row): bool {
-            return (int)($row['amount_cents'] ?? 0) > 0;
-        }));
-        $categoryCards = $this->categoryCards($categoryTree['roots'], $categoryTree['children'], $categoryCashRows, $scope['store_ids'], $range);
+        $categoryCards = (new \app\services\query\metric\RegisteredMetricReadServices())->categoryDashboardCards(
+            'cash_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryTree['roots'], $categoryTree['children'], $categoryIds
+        );
         $currentTarget = array_sum($monthTargets);
         $yearTarget = array_sum($targets);
         $monthActual = $this->actualCashTotal($scope['tenant_id'], $scope['store_ids'], ['start' => $month . '-01', 'end' => $range['end']], $categoryIds);
@@ -192,30 +188,12 @@ final class GroupManagementDashboardServices
         $categoryId = max(0, (int)($input['category_id'] ?? 0));
         if ($categoryId > 0) $categoryIds = $this->descendants($categoryId, $this->categories()['children']);
         $metric = trim((string)($input['metric_code'] ?? 'cash_performance'));
-        if (!in_array($metric, ['cash_performance', 'actual_performance', 'consumption_performance', 'refund_amount'], true)) {
+        if (!in_array($metric, ['cash_performance', 'actual_performance', 'consumption_performance', 'refund_performance'], true)) {
             throw new \InvalidArgumentException('下钻指标无效');
         }
-        if ($metric === 'cash_performance' || $metric === 'refund_amount') {
-            $rows = $this->cashRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
-            if ($metric === 'cash_performance') {
-                $rows = array_values(array_filter($rows, static function (array $row): bool {
-                    return (int)($row['amount_cents'] ?? 0) > 0;
-                }));
-            }
-            if ($metric === 'refund_amount') {
-                $rows = array_values(array_filter($rows, static function (array $row): bool {
-                    return (int)($row['amount_cents'] ?? 0) < 0;
-                }));
-            }
-        } else {
-            if ($metric === 'actual_performance') {
-                // Actual performance is the signed net cash result. Keep the
-                // same cash facts in the drilldown so the card is explainable.
-                $rows = $this->cashRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
-            } else {
-                $rows = $this->performanceRows($scope['tenant_id'], $scope['store_ids'], $range, 'consumption_performance_recorded', $categoryIds);
-            }
-        }
+        $canonical = $metric === 'consumption_performance' ? 'consume_amount' : $metric;
+        $rows = (new \app\services\query\metric\RegisteredMetricReadServices())
+            ->categoryRows($canonical, $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
         return [
             'metric_code' => $metric,
             'records' => $rows,
@@ -287,120 +265,45 @@ final class GroupManagementDashboardServices
         return array_values($result);
     }
 
-    /** Frozen direct rows plus card contained project allocations. @return array<int,array<string,mixed>> */
+    /** Registered signed net-cash rows at frozen category grain. @return array<int,array<string,mixed>> */
     private function cashRows(string $tenantId, array $stores, array $range, array $categoryIds): array
     {
-        $base = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('p')
-            ->leftJoin('cashier_v3_payment_sale_allocation_fact original', 'original.tenant_id=p.tenant_id AND original.allocation_fact_id=p.reversal_of')
-            ->join('cashier_v3_sale_fact s', 's.tenant_id=p.tenant_id AND s.fact_id=COALESCE(original.sale_fact_id,p.sale_fact_id)')
-            ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
-            ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective');
-        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($base, 's.tenant_id', 's.order_id');
-        $direct = clone $base;
-        $direct->join('cashier_v3_report_sale_dimension_fact d', 'd.tenant_id=s.tenant_id AND d.sale_fact_id=s.fact_id')->where('s.source_type', '<>', 'card');
-        if ($categoryIds !== []) $direct->whereIn('d.category_id_snapshot', $categoryIds);
-        $rows = $direct->fieldRaw('p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,d.item_id,d.item_name_snapshot item_name,d.product_type_snapshot,d.category_id_snapshot category_id,d.category_path_snapshot category_path')->group('p.id')->select()->toArray();
-        $cards = (clone $base)->where('s.source_type', 'card')->fieldRaw('p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,s.fact_id sale_fact_id')->group('p.id')->select()->toArray();
-        // Recharge has no sale allocation. Reuse the same cash-fact reader as
-        // the scalar summary, before the no-card early return. A category
-        // constraint must never be silently broadened to include recharge.
-        if ($categoryIds === []) {
-            $rows = array_merge($rows, (new \app\services\query\metric\GroupPerformanceMetricReadServices())->rechargeCashRows($tenantId, $stores, $range));
-        }
-        if ($cards === []) return $rows;
-        $saleIds = array_values(array_unique(array_filter(array_column($cards, 'sale_fact_id'))));
-        $bySale = [];
-        foreach (Db::name('cashier_v3_card_sale_item_allocation_fact')->where('tenant_id', $tenantId)->whereIn('sale_fact_id', $saleIds)->where('status', 'effective')->field('allocation_fact_id,sale_fact_id,component_product_id,item_name_snapshot,category_id_snapshot,category_path_snapshot,component_count,sale_amount_cents,configured_amount_cents')->order('allocation_fact_id', 'asc')->select()->toArray() as $row) $bySale[(string)$row['sale_fact_id']][] = $row;
-        $allowed = array_fill_keys($categoryIds, true);
-        foreach ($cards as $payment) {
-            $items = $bySale[(string)$payment['sale_fact_id']] ?? [];
-            // Missing classification evidence must not erase a successful
-            // receipt. Preserve its original amount only in the unfiltered
-            // view; never invent a component/category to satisfy a filter.
-            if ($items === []) {
-                if ($allowed === []) $rows[] = array_merge($payment, [
-                    'item_id' => 0, 'item_name' => '卡项（分类待补齐）',
-                    'product_type_snapshot' => 'card_unclassified',
-                    'category_id' => 0, 'category_path' => '',
-                    'classification_coverage' => 'missing_card_components',
-                ]);
-                continue;
-            }
-            foreach ($this->allocate((int)$payment['amount_cents'], $items) as $allocation) {
-                $item = $allocation['item'];
-                if ($allowed !== [] && !isset($allowed[(int)$item['category_id_snapshot']])) continue;
-                $rows[] = array_merge($payment, ['amount_cents' => $allocation['amount_cents'], 'item_id' => (string)$item['component_product_id'], 'item_name' => (string)$item['item_name_snapshot'], 'product_type_snapshot' => 'card_component', 'category_id' => (int)$item['category_id_snapshot'], 'category_path' => (string)$item['category_path_snapshot']]);
-            }
-        }
-        return $rows;
-    }
-
-    /** @return array<int,array{item:array<string,mixed>,amount_cents:int}> */
-    private function allocate(int $amount, array $items): array
-    {
-        $weight = 0; $weights = [];
-        foreach ($items as $item) {
-            $weights[] = max(0, (int)($item['configured_amount_cents'] ?? $item['sale_amount_cents'] ?? 0));
-            $weight += $weights[count($weights) - 1];
-            if (!is_int($weight)) throw new \RuntimeException('卡项分摊权重超出安全范围');
-        }
-        if ($weight <= 0) { $weight = count($items); $weights = array_fill(0, count($items), 1); }
-        $lastEligible = -1;
-        foreach ($weights as $index => $itemWeight) if ($itemWeight > 0) $lastEligible = $index;
-        $out = []; $assigned = 0;
-        foreach ($items as $index => $item) {
-            // Zero-weight components stay zero. Using max(1) here while the
-            // denominator used max(0) overallocated positive receipts and
-            // fabricated a negative last component (a false refund).
-            $product = $amount * $weights[$index];
-            if (!is_int($product)) throw new \RuntimeException('卡项分摊金额超出安全范围');
-            // The stable last eligible component receives the remainder;
-            // trailing zero-weight components never acquire residual cents.
-            $part = $index === $lastEligible ? $amount - $assigned : intdiv($product, $weight);
-            $assigned += $part; $out[] = ['item' => $item, 'amount_cents' => $part];
-        }
-        return $out;
+        return (new \app\services\query\metric\RegisteredMetricReadServices())
+            ->categoryRows('actual_performance', $tenantId, $stores, $range, $categoryIds);
     }
 
     /** @return array<int,array<string,mixed>> */
     private function serviceRows(string $tenantId, array $stores, array $range, array $categoryIds): array
     {
-        $query = Db::name('cashier_v3_entitlement_service_fact')->alias('s')->where('s.tenant_id', $tenantId)->whereIn('s.store_id', $stores)->whereBetween('s.business_date', [$range['start'], $range['end']])->where('s.service_status', 'completed');
-        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 's');
-        if ($categoryIds !== []) $query->whereIn('s.project_category_id_snapshot', $categoryIds);
-        return $query->fieldRaw("s.service_fact_id,s.store_id,s.member_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.project_id,s.project_name_snapshot,s.project_category_id_snapshot,s.project_category_path_snapshot,s.source_line_id,s.quantity,(SELECT MAX(sf.business_source_primary_id) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=s.tenant_id AND sf.checkout_request_id=s.checkout_request_id AND sf.source_line_id=s.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') business_source_primary_id")->select()->toArray();
+        return (new \app\services\query\metric\RegisteredMetricReadServices())
+            ->categoryRows('completed_service_item_count', $tenantId, $stores, $range, $categoryIds);
     }
 
-    private function performanceTotal(string $tenantId, array $stores, array $range, string $type, array $categoryIds): int
+    private function performanceTotal(string $tenantId, array $stores, array $range, array $categoryIds): int
     {
-        if ($categoryIds === []) return $this->performanceTotalScalar($tenantId, $stores, $range, $type);
-        return $this->sum($this->performanceRows($tenantId, $stores, $range, $type, $categoryIds), 'amount_cents');
-    }
-
-    private function performanceTotalScalar(string $tenantId, array $stores, array $range, string $type): int
-    {
-        return (new \app\services\query\metric\GroupPerformanceMetricReadServices())->performanceTotal($tenantId, $stores, $range, $type);
-    }
-
-    /** @return array{gross_cents:int,refund_cents:int} */
-    private function cashTotals(string $tenantId, array $stores, array $range): array
-    {
-        return (new \app\services\query\metric\GroupPerformanceMetricReadServices())->cashTotals($tenantId, $stores, $range);
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        return $categoryIds === []
+            ? $reader->summary('consume_amount', $tenantId, $stores, $range)
+            : $reader->categorySummary('consume_amount', $tenantId, $stores, $range, $categoryIds);
     }
 
     private function actualCashTotal(string $tenantId, array $stores, array $range, array $categoryIds): int
     {
-        return $this->sum($this->cashRows($tenantId, $stores, $range, $categoryIds), 'amount_cents');
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        return $categoryIds === []
+            ? $reader->summary('actual_performance', $tenantId, $stores, $range)
+            : $reader->categorySummary('actual_performance', $tenantId, $stores, $range, $categoryIds);
     }
 
     /** @return array<string,int> */
     private function dailyCashPerformance(string $tenantId, array $stores, array $range, array $categoryIds): array
     {
         $out = [];
-        foreach ($this->cashRows($tenantId, $stores, $range, $categoryIds) as $row) {
-            $date = (string)($row['business_date'] ?? '');
-            if ($date !== '') $out[$date] = (int)($out[$date] ?? 0) + (int)($row['amount_cents'] ?? 0);
-        }
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $rows = $categoryIds === []
+            ? $reader->dailyTotals('actual_performance', $tenantId, $stores, $range)
+            : $reader->categoryDailyTotals('actual_performance', $tenantId, $stores, $range, $categoryIds);
+        foreach ($rows as $row) $out[(string)$row['business_date']] = (int)$row['metric_value'];
         return $out;
     }
 
@@ -419,36 +322,27 @@ final class GroupManagementDashboardServices
             for ($month = 1; $month <= 12; $month++) {
                 $start = sprintf('%s-%02d-01', substr($range['end'], 0, 4), $month); $end = date('Y-m-t', strtotime($start));
                 $monthRange = compact('start', 'end');
-                $points[] = ['id' => substr($start, 0, 7), 'label' => sprintf('%02d月', $month), 'actual_performance_cents' => $this->actualCashTotal($tenantId, $stores, $monthRange, $categoryIds), 'consumption_performance_cents' => $aggregateEligible ? $this->aggregatePerformanceTotal($tenantId, $stores, $monthRange, 'consumption_performance_recorded') : $this->performanceTotal($tenantId, $stores, $monthRange, 'consumption_performance_recorded', $categoryIds)];
+                $points[] = ['id' => substr($start, 0, 7), 'label' => sprintf('%02d月', $month), 'actual_performance_cents' => $this->actualCashTotal($tenantId, $stores, $monthRange, $categoryIds), 'consumption_performance_cents' => $categoryIds === [] ? (new \app\services\query\metric\RegisteredMetricReadServices())->summary('consume_amount', $tenantId, $stores, $monthRange) : $this->performanceTotal($tenantId, $stores, $monthRange, $categoryIds)];
             }
             return ['granularity' => 'month', 'range_label' => '本年（自然月）', 'points' => $points, 'source_explanation' => '本年按自然月汇总实际业绩和消耗业绩。'];
         }
         $trendRange = ['start' => $periodStart, 'end' => $periodEnd];
         $actual = $this->dailyCashPerformance($tenantId, $stores, $trendRange, $categoryIds);
-        $consumption = $aggregateEligible ? $this->aggregateDailyPerformance($tenantId, $stores, $trendRange, 'consumption_performance_recorded') : $this->dailyPerformance($tenantId, $stores, $trendRange, 'consumption_performance_recorded', $categoryIds);
+        $consumption = $this->dailyPerformance($tenantId, $stores, $trendRange, $categoryIds);
         $points = [];
         for ($day = $periodStart; $day <= $periodEnd; $day = date('Y-m-d', strtotime($day . ' +1 day'))) $points[] = ['id' => $day, 'label' => substr($day, 8) . '日', 'actual_performance_cents' => (int)($actual[$day] ?? 0), 'consumption_performance_cents' => (int)($consumption[$day] ?? 0)];
         return ['granularity' => 'day', 'range_label' => '所在月份（自然日）', 'points' => $points, 'source_explanation' => '今天和本月固定展示所在自然月从 1 日到最后一天的实际业绩和消耗业绩。'];
     }
 
-    private function dailyPerformance(string $tenantId, array $stores, array $range, string $type, array $categoryIds): array
+    private function dailyPerformance(string $tenantId, array $stores, array $range, array $categoryIds): array
     {
         $out = [];
-        foreach ($this->performanceRows($tenantId, $stores, $range, $type, $categoryIds) as $row) {
-            $date = (string)($row['business_date'] ?? '');
-            if ($date !== '') $out[$date] = (int)($out[$date] ?? 0) + (int)($row['amount_cents'] ?? 0);
-        }
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $rows = $categoryIds === []
+            ? $reader->dailyTotals('consume_amount', $tenantId, $stores, $range)
+            : $reader->categoryDailyTotals('consume_amount', $tenantId, $stores, $range, $categoryIds);
+        foreach ($rows as $row) $out[(string)$row['business_date']] = (int)$row['metric_value'];
         return $out;
-    }
-
-    private function aggregatePerformanceTotal(string $tenantId, array $stores, array $range, string $type): int
-    {
-        $column = $type === 'actual_performance_recorded' ? 'actual_performance_cents' : 'consumption_performance_cents';
-        $total = 0;
-        foreach ($this->dailyAggregate->rows($tenantId, $stores, $range['start'], $range['end']) as $row) {
-            $total += (int)($row[$column] ?? 0);
-        }
-        return $total;
     }
 
     /**
@@ -459,41 +353,38 @@ final class GroupManagementDashboardServices
      */
     private function aggregateMatchesFacts(string $tenantId, array $stores, array $range): bool
     {
-        $types = ['actual_performance_recorded', 'consumption_performance_recorded'];
-        foreach ($types as $type) {
-            $facts = $this->performanceTotal($tenantId, $stores, $range, $type, []);
-            $aggregate = $this->aggregatePerformanceTotal($tenantId, $stores, $range, $type);
-            if ($facts !== $aggregate) return false;
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $contracts = [
+            'actual_performance' => 'actual_performance_cents',
+            'consume_amount' => 'consumption_performance_cents',
+        ];
+        $expected = [];
+        foreach ($contracts as $metricCode => $column) {
+            foreach ($reader->dailyStoreTotals($metricCode, $tenantId, $stores, $range) as $row) {
+                $expected[$metricCode][(int)$row['store_id']][(string)$row['business_date']] = (int)$row['amount_cents'];
+            }
         }
-        $factByStore = $this->performanceByStore($tenantId, $stores, $range, 'actual_performance_recorded', []);
-        $aggregateByStore = $this->aggregateByStoreActual($tenantId, $stores, $range);
-        foreach ($stores as $storeId) {
-            if ((int)($factByStore[(int)$storeId] ?? 0) !== (int)($aggregateByStore[(int)$storeId] ?? 0)) return false;
-        }
-        return true;
-    }
-
-    /** @return array<string,int> */
-    private function aggregateDailyPerformance(string $tenantId, array $stores, array $range, string $type): array
-    {
-        $column = $type === 'actual_performance_recorded' ? 'actual_performance_cents' : 'consumption_performance_cents';
-        $out = [];
-        foreach ($this->dailyAggregate->rows($tenantId, $stores, $range['start'], $range['end']) as $row) {
-            $day = (string)($row['business_date'] ?? '');
-            if ($day !== '') $out[$day] = (int)($out[$day] ?? 0) + (int)($row[$column] ?? 0);
-        }
-        return $out;
-    }
-
-    /** @return array<int,int> */
-    private function aggregateByStoreActual(string $tenantId, array $stores, array $range): array
-    {
-        $out = [];
+        $actual = [];
         foreach ($this->dailyAggregate->rows($tenantId, $stores, $range['start'], $range['end']) as $row) {
             $storeId = (int)($row['store_id'] ?? 0);
-            if ($storeId > 0) $out[$storeId] = (int)($out[$storeId] ?? 0) + (int)($row['actual_performance_cents'] ?? 0);
+            $day = (string)($row['business_date'] ?? '');
+            foreach ($contracts as $metricCode => $column) {
+                $actual[$metricCode][$storeId][$day] = (int)($row[$column] ?? 0);
+            }
         }
-        return $out;
+        foreach ($contracts as $metricCode => $_column) {
+            foreach ($stores as $storeId) {
+                $days = array_unique(array_merge(
+                    array_keys((array)($expected[$metricCode][(int)$storeId] ?? [])),
+                    array_keys((array)($actual[$metricCode][(int)$storeId] ?? []))
+                ));
+                foreach ($days as $day) {
+                    if ((int)($expected[$metricCode][(int)$storeId][$day] ?? 0)
+                        !== (int)($actual[$metricCode][(int)$storeId][$day] ?? 0)) return false;
+                }
+            }
+        }
+        return true;
     }
 
     /** @return array{start:string,end:string} */
@@ -507,106 +398,6 @@ final class GroupManagementDashboardServices
             $end = substr($range['end'], 0, 4) . '-12-31';
         }
         return compact('start', 'end');
-    }
-
-    /**
-     * Performance facts inherit the sold line's category. A card shell is
-     * allocated to its contained projects with the same signed split used by
-     * payment allocation, so filtering a category never attributes the whole
-     * card performance to one component.
-     *
-     * @return array<int,array<string,mixed>>
-     */
-    private function performanceRows(string $tenantId, array $stores, array $range, string $type, array $categoryIds): array
-    {
-        if ($type === 'consumption_performance_recorded') {
-            // Consumption facts are keyed to completed service lines. They do
-            // not necessarily have a matching sale fact (existing card rights
-            // are a valid example), so joining through sale_fact would erase
-            // legitimate consumption amounts.
-            $query = Db::name('cashier_v3_performance_fact')->alias('p')
-                ->join('cashier_v3_entitlement_service_fact sv', 'sv.tenant_id=p.tenant_id AND sv.checkout_request_id=p.checkout_request_id AND sv.source_line_id=p.source_line_id AND sv.service_status=\'completed\'')
-                ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
-                ->whereBetween('p.business_date', [$range['start'], $range['end']])
-                ->where('p.status', 'effective')->where('p.performance_type', $type);
-            (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 'sv');
-            if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
-            return $query->fieldRaw('p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,sv.project_category_id_snapshot category_id')->group('p.fact_id')->select()->toArray();
-        }
-
-        $base = Db::name('cashier_v3_performance_fact')->alias('p')
-            ->join('cashier_v3_sale_fact s', "s.tenant_id=p.tenant_id AND s.source_line_id=p.source_line_id AND s.fact_direction='forward' AND s.status='effective'")
-            ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
-            ->whereBetween('p.business_date', [$range['start'], $range['end']])
-            ->where('p.status', 'effective')->where('p.performance_type', $type);
-        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($base, 'p.tenant_id', 'p.order_id');
-
-        $direct = clone $base;
-        $direct->join('cashier_v3_report_sale_dimension_fact d', 'd.tenant_id=s.tenant_id AND d.sale_fact_id=s.fact_id')
-            ->where('s.source_type', '<>', 'card');
-        if ($categoryIds !== []) $direct->whereIn('d.category_id_snapshot', $categoryIds);
-        $rows = $direct->fieldRaw('p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,d.category_id_snapshot category_id')->group('p.fact_id')->select()->toArray();
-
-        $cards = (clone $base)->where('s.source_type', 'card')
-            ->fieldRaw('p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,s.fact_id sale_fact_id')->group('p.fact_id')->select()->toArray();
-        if ($cards === []) return $rows;
-        $saleIds = array_values(array_unique(array_filter(array_column($cards, 'sale_fact_id'))));
-        if ($saleIds === []) return $rows;
-        $itemsBySale = [];
-        foreach (Db::name('cashier_v3_card_sale_item_allocation_fact')->where('tenant_id', $tenantId)->whereIn('sale_fact_id', $saleIds)->where('status', 'effective')
-            ->field('allocation_fact_id,sale_fact_id,category_id_snapshot,configured_amount_cents,sale_amount_cents')->select()->toArray() as $item) {
-            $itemsBySale[(string)$item['sale_fact_id']][] = $item;
-        }
-        $allowed = array_fill_keys($categoryIds, true);
-        foreach ($cards as $performance) {
-            foreach ($this->allocate((int)$performance['amount_cents'], (array)($itemsBySale[(string)$performance['sale_fact_id']] ?? [])) as $allocation) {
-                $item = $allocation['item'];
-                $categoryId = (int)($item['category_id_snapshot'] ?? 0);
-                if ($allowed !== [] && !isset($allowed[$categoryId])) continue;
-                $rows[] = [
-                    'fact_id' => (string)$performance['fact_id'],
-                    'store_id' => (int)$performance['store_id'],
-                    'member_id' => (int)$performance['member_id'],
-                    'order_id' => (string)$performance['order_id'],
-                    'source_line_id' => (string)$performance['source_line_id'],
-                    'business_date' => (string)$performance['business_date'],
-                    'amount_cents' => (int)$allocation['amount_cents'],
-                    'category_id' => $categoryId,
-                ];
-            }
-        }
-        return $rows;
-    }
-
-    private function categoryCards(array $roots, array $children, array $cashRows, array $stores, array $range): array
-    {
-        $total = $this->sum($cashRows, 'amount_cents'); $cards = [];
-        $categorized = 0;
-        foreach ($roots as $root) {
-            $ids = array_fill_keys($this->descendants((int)$root['id'], $children), true); $rows = array_values(array_filter($cashRows, static function (array $row) use ($ids): bool { return isset($ids[(int)($row['category_id'] ?? 0)]); }));
-            $amount = $this->sum($rows, 'amount_cents');
-            $categorized += $amount;
-            $cards[] = ['category_id' => (int)$root['id'], 'name' => (string)$root['name'], 'cash_performance_cents' => $amount, 'share' => $total === 0 ? null : round($amount / $total * 100, 1), 'drilldown' => ['metric_code' => 'cash_performance', 'category_id' => (int)$root['id']], 'project_rankings' => $this->top($rows, 'item_name', '项目'), 'product_rankings' => $this->top(array_values(array_filter($rows, static function (array $row): bool { return (string)($row['product_type_snapshot'] ?? '') !== 'project'; })), 'item_name', '产品'), 'source_explanation' => '当前启用一级商品分类及全部下级分类的现金业绩；卡项按卡内项目分类和分摊金额归入。'];
-        }
-        $unclassified = $total - $categorized;
-        if ($unclassified !== 0) {
-            $classifiedIds = [];
-            foreach ($roots as $root) $classifiedIds += $this->descendants((int)$root['id'], $children);
-            $classifiedIds = array_fill_keys($classifiedIds, true);
-            $rows = array_values(array_filter($cashRows, static function (array $row) use ($classifiedIds): bool {
-                $categoryId = (int)($row['category_id'] ?? 0);
-                if ($categoryId <= 0) return true;
-                return !isset($classifiedIds[$categoryId]);
-            }));
-            $cards[] = ['category_id' => 0, 'name' => '未分类', 'cash_performance_cents' => $unclassified, 'share' => $total === 0 ? null : round($unclassified / $total * 100, 1), 'drilldown' => ['metric_code' => 'cash_performance'], 'project_rankings' => $this->top($rows, 'item_name', '项目'), 'product_rankings' => $this->top(array_values(array_filter($rows, static function (array $row): bool { return (string)($row['product_type_snapshot'] ?? '') !== 'project'; })), 'item_name', '产品'), 'source_explanation' => '未能匹配当前启用一级商品分类的现金业绩；保留在独立未分类卡中，确保分类合计与现金业绩一致。'];
-        }
-        return $cards;
-    }
-
-    private function top(array $rows, string $field, string $type): array
-    {
-        $amounts = []; foreach ($rows as $row) { $name = trim((string)($row[$field] ?? '')); if ($name !== '') $amounts[$name] = (int)($amounts[$name] ?? 0) + (int)($row['amount_cents'] ?? 0); }
-        arsort($amounts, SORT_NUMERIC); $out = []; foreach (array_slice($amounts, 0, 5, true) as $name => $amount) $out[] = ['name' => $name, 'amount_cents' => $amount, 'type' => $type]; return $out;
     }
 
     private function sources(array $stores, array $range, array $cashRows, array $serviceRows): array
@@ -648,30 +439,54 @@ final class GroupManagementDashboardServices
         return ['records' => $out, 'source_explanation' => '当前阶段预警门店目标达成率低于 80%；后续环比和退款阈值使用同一后端阈值配置后再启用。'];
     }
 
-    private function performanceByStore(string $tenantId, array $stores, array $range, string $type, array $categoryIds): array
-    {
-        $out = [];
-        foreach ($this->performanceRows($tenantId, $stores, $range, $type, $categoryIds) as $row) {
-            $storeId = (int)($row['store_id'] ?? 0);
-            if ($storeId > 0) $out[$storeId] = (int)($out[$storeId] ?? 0) + (int)($row['amount_cents'] ?? 0);
-        }
-        return $out;
-    }
-
     /** @return array<int,int> */
     private function cashByStore(string $tenantId, array $stores, array $range, array $categoryIds): array
     {
         $out = [];
-        foreach ($this->cashRows($tenantId, $stores, $range, $categoryIds) as $row) {
-            $storeId = (int)($row['store_id'] ?? 0);
-            if ($storeId > 0) $out[$storeId] = (int)($out[$storeId] ?? 0) + (int)($row['amount_cents'] ?? 0);
+        if ($categoryIds === []) {
+            foreach ((new \app\services\query\metric\RegisteredMetricReadServices())->dailyStoreTotals('actual_performance', $tenantId, $stores, $range) as $row) {
+                $storeId = (int)$row['store_id'];
+                $out[$storeId] = (int)($out[$storeId] ?? 0) + (int)$row['amount_cents'];
+            }
+            return $out;
+        }
+        foreach ((new \app\services\query\metric\RegisteredMetricReadServices())->categoryStoreTotals('actual_performance', $tenantId, $stores, $range, $categoryIds) as $row) {
+            $storeId = (int)$row['store_id'];
+            $out[$storeId] = (int)$row['amount_cents'];
         }
         return $out;
     }
-    private function metric(string $code,string $name,$value,string $type,string $explanation):array{return['metric_code'=>$code,'name'=>$name,'value_cents'=>$type==='money'?$value:null,'value'=>$type==='count'?$value:null,'value_type'=>$type,'drilldown'=>in_array($code,['cash_performance','refund_amount','actual_performance','consumption_performance'],true)?['metric_code'=>$code]:null,'source_explanation'=>$explanation];}
+    private function registeredMetric(string $outputCode, string $metricCode, int $value): array
+    {
+        $contract = \app\services\query\metric\MetricDefinitionRegistry::get($metricCode);
+        $definition = (new \app\services\metric\MetricDictionaryServices())->getTooltip($metricCode);
+        if (($definition['user_ready'] ?? false) !== true) throw new \RuntimeException('DASHBOARD_METRIC_DICTIONARY_NOT_READY');
+        $type = $contract['storage_unit'] === 'fen' ? 'money' : 'count';
+        return $this->metric($outputCode, (string)$definition['name'], $value, $type, (string)$definition['summary']);
+    }
+
+    private function metric(string $code,string $name,$value,string $type,string $explanation):array{return['metric_code'=>$code,'name'=>$name,'value_cents'=>$type==='money'?$value:null,'value'=>$type==='count'?$value:null,'value_type'=>$type,'drilldown'=>in_array($code,['cash_performance','refund_performance','actual_performance','consumption_performance'],true)?['metric_code'=>$code]:null,'source_explanation'=>$explanation];}
     private function sum(array $rows,string $key):int{$sum=0;foreach($rows as$row)$sum+=(int)($row[$key]??0);return$sum;}
     private function monthsForRange(array $range):array{$out=[];$date=substr($range['start'],0,7).'-01';$end=substr($range['end'],0,7).'-01';while($date<=$end){$out[]=(int)substr($date,5,2);$date=date('Y-m-01',strtotime($date.' +1 month'));}return$out;}
     private function goalProjection(string $title,int $target,int $actual,string $explanation):array{$rate=$target>0?round($actual/$target*100,1):null;return['title'=>$title,'target_amount_cents'=>$target,'actual_performance_cents'=>$actual,'remaining_amount_cents'=>max(0,$target-$actual),'achievement_rate'=>$rate,'source_explanation'=>$explanation];}
     private function filterSchema(array $roots):array{$options=[['value'=>0,'label'=>'全部商品']];foreach($roots as$row)$options[]=['value'=>(int)$row['id'],'label'=>(string)$row['name']];return[['key'=>'start_date','label'=>'开始日期','type'=>'date','source_explanation'=>'包含开始当天。'],['key'=>'end_date','label'=>'截止日期','type'=>'date','source_explanation'=>'包含截止当天。'],['key'=>'category_id','label'=>'商品分类','type'=>'select','options'=>$options,'source_explanation'=>'只显示当前启用一级商品分类；选择后包含全部下级分类。'],['key'=>'store_ids','label'=>'组织 / 门店','type'=>'scope_picker','source_explanation'=>'当前账号权限范围由后端强制，选择只能缩小范围。']];}
-    private function fieldExplanations():array{return['cash_performance'=>self::CASH_EXPLANATION,'refund_amount'=>'退款成功的实际退款金额，按退款成功日期统计，以绝对值展示。','actual_performance'=>'现金业绩减退款金额；现金业绩取正向成功收款，退款取退款成功事实的绝对值，得到净实际业绩。','consumption_performance'=>'项目实际完成服务后，从对应的消耗业绩事实汇总；已有卡内权益完成服务也计入，不要求存在销售明细。','consumption_count'=>'成功完成服务的项目数量。','consumption_unit_price'=>'消耗业绩除以消耗数量；分母为零显示 -。'];}
+    private function fieldExplanations(): array
+    {
+        $dictionary = new \app\services\metric\MetricDictionaryServices();
+        $mapping = [
+            'cash_performance' => 'cash_performance',
+            'refund_performance' => 'refund_performance',
+            'actual_performance' => 'actual_performance',
+            'consumption_performance' => 'consume_amount',
+            'consumption_count' => 'completed_service_item_count',
+        ];
+        $out = [];
+        foreach ($mapping as $outputCode => $metricCode) {
+            $definition = $dictionary->getTooltip($metricCode);
+            if (($definition['user_ready'] ?? false) !== true) throw new \RuntimeException('DASHBOARD_METRIC_DICTIONARY_NOT_READY');
+            $out[$outputCode] = (string)$definition['summary'];
+        }
+        $out['consumption_unit_price'] = '消耗业绩除以消耗数量；分母为零显示 -。';
+        return $out;
+    }
 }

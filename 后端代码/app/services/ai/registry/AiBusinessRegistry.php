@@ -62,7 +62,7 @@ final class AiBusinessRegistry
             $coverage=\DateTimeImmutable::createFromFormat('!Y-m-d',$item['coverage_start']);
             if (!$coverage||$coverage->format('Y-m-d')!==$item['coverage_start']) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             // This release cannot inherit a new metric merely because a lower catalog gained it.
-            $registered=\app\services\query\metric\MetricReadViewServices::metricCapabilities()+\app\services\query\metric\PersonnelPerformanceReadServices::capabilities();
+            $registered=\app\services\query\metric\MetricReadViewServices::metricCapabilities();
             if (!isset($registered[$code]) || !$registered[$code]['ai_query_ready']) continue;
             if (($registered[$code]['filter_grain']??null)!==($item['filter_grain']??null)
                 || ($registered[$code]['business_filters']??null)!==($item['business_filters']??null)) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
@@ -77,7 +77,7 @@ final class AiBusinessRegistry
         $definitions=[];
         foreach (AiRegistryValue::strings($capabilities['definition_metric_codes']??[],32) as $code) {
             $item=$capabilities['metadata_readiness'][$code]??null;
-            if (!in_array($code,['cash_performance','consume_amount'],true)||!is_array($item)||($item['user_ready']??null)!==true) continue;
+            if (!isset($metrics[$code])||!is_array($item)||($item['user_ready']??null)!==true) continue;
             foreach (['metric_version','description_ref'] as $key) if (!is_string($item[$key]??null)||$item[$key]===''||strlen($item[$key])>160) AiRegistryValue::fail('AI_METADATA_CONTRACT_INCOMPLETE');
             $definitions[$code]=['metric_code'=>$code,'metric_version'=>$item['metric_version'],'description_ref'=>$item['description_ref']];
         }

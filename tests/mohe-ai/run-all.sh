@@ -8,7 +8,7 @@ source_root="$(cd "$test_dir/../.." && pwd)"
 php_bin="${MOHE_TEST_PHP:-php}"
 
 "$php_bin" -v
-for suite in config-contract metric-contract runtime-contract export-source-contract plan-contract \
+for suite in config-contract metric-contract metric-registry-contract round3-reaudit-regressions runtime-contract export-source-contract plan-contract \
     query-read-view cash-report-projection state-store-contract state-attempt-contract state-concurrency state-export-contract state-admission-contract \
     gateway-components client-runtime-compat gateway-integration gateway-review-regressions monitor-contract \
     http-routing-contract http-actions-contract http-guard-contract principal-resolvers \

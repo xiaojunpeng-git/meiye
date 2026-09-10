@@ -25,7 +25,8 @@ final class AiFollowupQueryPlanner
             || (!empty($intent['blocking_reason']) && $intent['blocking_reason']!=='AI_RANK_LIMIT_NOT_READY'))
             throw new \RuntimeException('AI_FOLLOWUP_CONDITION_REQUIRED');
         $signals=$intent['signals'];
-        if(array_diff(array_intersect(['cash_performance','consume_amount','actual_performance'],$signals),array_keys($metricNames)))
+        $registered=array_keys(\app\services\query\metric\MetricSemanticCatalog::entries());
+        if(array_diff(array_intersect($registered,$signals),array_keys($metricNames)))
             throw new \RuntimeException('AI_FOLLOWUP_CONDITION_REQUIRED');
         foreach(array_intersect(array_keys($metricNames),$signals) as $code)$metrics[]=$code;
         if(array_intersect($signals,['ambiguous_metric','current_store','original_result','definition','comparison','attention_goal']))

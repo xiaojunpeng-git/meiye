@@ -5,6 +5,6 @@ export function isMoheAiMaintainer(user) {
 export function filterMoheAiManagementMenu(items, user, serverVerified = false) {
   const allowed = isMoheAiMaintainer(user) || serverVerified;
   return (Array.isArray(items) ? items : []).filter(item => item && (allowed || !(
-    item.unique_auth === 'setting-mohe-ai' || /\/setting\/mohe-ai\/?$/.test(String(item.path || item.menu_path || ''))
+    item.unique_auth === 'setting-mohe-ai' || /\/setting\/mohe-ai(?:\/|$)/.test(String(item.path || item.menu_path || ''))
   ))).map(item => ({ ...item, ...(Array.isArray(item.children) ? { children: filterMoheAiManagementMenu(item.children, user, serverVerified) } : {}) }));
 }

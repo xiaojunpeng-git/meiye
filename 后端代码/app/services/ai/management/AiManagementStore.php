@@ -46,6 +46,12 @@ final class AiManagementStore
         $row=$this->row();$this->expected($row,$expectedRevision);$d=AiManagementPolicy::validate($this->decode($row['draft_json']));AiManagementPolicy::applyManifest($d);
         return ['valid'=>true,'revision'=>(int)$row['revision'],'document_hash'=>AiRegistryValue::hash($d),'source_registry_hash'=>$d['source_registry_hash']];
     }
+    public function rebaseDraft(int $expectedRevision): array
+    {
+        $row=$this->row();$this->expected($row,$expectedRevision);
+        $document=AiManagementPolicy::rebase($this->decode($row['draft_json']));
+        $this->change($expectedRevision,$document,null,null);return $this->read();
+    }
     public function publish(int $expectedRevision): array { $this->change($expectedRevision,null,'publish',null);return $this->read(); }
     public function rollback(int $expectedRevision,string $targetVersion): array { $this->change($expectedRevision,null,'rollback',$targetVersion);return $this->read(); }
     private function change(int $expectedRevision,?array $document,?string $action,?string $target): void

@@ -204,7 +204,7 @@ businessDashboard: {
 }
 ```
 
-卡片顺序固定为：销售人业绩、现金业绩、实际业绩、消耗业绩、退款金额、储值金额、余额扣款、散客数量、新客数量、预约客数；不得出现“新建档数”。默认趋势与排行均为现金业绩降序。前端动作 `query-business-dashboard-summary`、`query-business-dashboard-trend`、`query-business-dashboard-ranking`、`open-business-dashboard-detail`、`export-business-dashboard` 仅请求后端重算或下钻；后端必须返回相同的 `metricVersion`、`dataAsOf`、`aggregationCaughtUp`、`coverageStart` 和强制权限范围。
+卡片顺序固定为：销售人业绩、现金业绩、实际业绩、消耗业绩、退款金额、储值金额、余额扣款、散客数量、新客数量、预约客数；不得出现“新建档数”。默认趋势与排行均为现金业绩降序。前端动作 `query-business-dashboard-summary`、`query-business-dashboard-trend`、`query-business-dashboard-ranking`、`open-business-dashboard-detail` 仅请求后端重算或下钻；后端必须返回相同的 `metricVersion`、`dataAsOf`、`aggregationCaughtUp`、`coverageStart` 和强制权限范围。经营看板 CSV 导出已下线，页面不得再注册或调用该动作。
 
 ### 结账收款明细与恢复契约
 

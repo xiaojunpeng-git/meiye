@@ -10,12 +10,7 @@ final class PersonnelPerformanceReadServices
     public static function capabilities(): array
     {
         $out=[];
-        foreach (['staff_labor_yeji'=>['劳动业绩','labor_performance_allocated'], 'staff_sales_yeji'=>['销售人业绩','sales_performance_allocated']] as $code=>$item) {
-            $out[$code]=['metric_code'=>$code,'name'=>$item[0],'ai_query_ready'=>true,'metric_version'=>$item[1].'-person-v1',
-                'mapping_version'=>'personnel-allocated-fact-v1','source_metric_code'=>$code,'source_metric_version'=>'personnel-allocated-fact-v1',
-                'query_shapes'=>['summary','ranking'],'coverage_start'=>MetricReadViewServices::COVERAGE_START,
-                'filter_grain'=>'person','business_filters'=>['selection_ref'],'readiness_reasons'=>[]];
-        }
+        foreach (MetricDefinitionRegistry::capabilities() as $code=>$item) if ($item['filter_grain']==='person') $out[$code]=$item;
         return $out;
     }
     private $query; private $normalScope;
@@ -24,8 +19,8 @@ final class PersonnelPerformanceReadServices
 
     public function totals(string $tenant,array $stores,array $range,string $metric,array $pairs): array
     {
-        $types=['staff_labor_yeji'=>'labor_performance_allocated','staff_sales_yeji'=>'sales_performance_allocated'];
-        if (!isset($types[$metric]) || $tenant==='' || !$stores || !$pairs || count($pairs)>1000) $this->fail('METRIC_PERSONNEL_SCOPE_INVALID');
+        $contract=MetricDefinitionRegistry::get($metric);
+        if (($contract['reader_strategy']??null)!=='personnel_fact_sum' || $tenant==='' || !$stores || !$pairs || count($pairs)>1000) $this->fail('METRIC_PERSONNEL_SCOPE_INVALID');
         foreach ($stores as $id) if (!is_int($id)||$id<1) $this->fail('METRIC_PERSONNEL_SCOPE_INVALID');
         if (count($range)!==2) $this->fail('METRIC_SOURCE_RANGE_INVALID');
         foreach (['start','end'] as $key) {
@@ -42,21 +37,22 @@ final class PersonnelPerformanceReadServices
         }
         $query=call_user_func($this->query,'cashier_v3_performance_fact')->alias('p')
             ->where('p.tenant_id',$tenant)->whereIn('p.store_id',$stores)->where('p.status','effective')
-            ->where('p.performance_type',$types[$metric])->whereBetween('p.business_date',[$range['start'],$range['end']]);
+            ->where('p.performance_type',$contract['source']['filters']['performance_type'])->whereBetween('p.business_date',[$range['start'],$range['end']]);
         call_user_func($this->normalScope,$query,'p.tenant_id','p.order_id');
         $query->where(function($scope)use($unique){
             foreach ($unique as $pair) $scope->whereOr(function($both)use($pair){$both->where('p.store_id',$pair['store_id'])->where('p.employee_id',$pair['employee_id']);});
         });
         // No source-row limit: reversals and allocations all contribute before grouping.
-        $rows=$query->fieldRaw('p.employee_id,p.business_date,SUM(p.amount_cents) AS amount_cents,COUNT(*) AS fact_count')
+        // The amount expression is owned by the registered metric contract.
+        $rows=$query->fieldRaw('p.employee_id,p.business_date,SUM(' . (string)$contract['source']['amount'] . ') AS metric_value,COUNT(*) AS fact_count')
             ->group('p.employee_id,p.business_date')->order('p.employee_id','asc')->order('p.business_date','asc')->limit(10001)->select()->toArray();
         if (count($rows)>10000) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
         $allowed=array_column($unique,'employee_id');$out=[];$seen=[];
         foreach ($rows as $row) {
-            $id=$this->integer($row['employee_id']??null);$amount=$this->integer($row['amount_cents']??null);$count=$this->integer($row['fact_count']??null);
+            $id=$this->integer($row['employee_id']??null);$amount=$this->integer($row['metric_value']??null);$count=$this->integer($row['fact_count']??null);
             $day=$row['business_date']??null;$date=is_string($day)?\DateTimeImmutable::createFromFormat('!Y-m-d',$day):false;
             if (!in_array($id,$allowed,true) || !$date || $date->format('Y-m-d')!==$day || $day<$range['start'] || $day>$range['end'] || $count<1 || isset($seen[$id.':'.$day])) $this->fail('METRIC_SOURCE_RESULT_INVALID');
-            $seen[$id.':'.$day]=true;$out[]=['employee_id'=>$id,'business_date'=>$day,'amount_cents'=>$amount,'fact_count'=>$count];
+            $seen[$id.':'.$day]=true;$out[]=['employee_id'=>$id,'business_date'=>$day,'metric_value'=>$amount,'amount_cents'=>$amount,'fact_count'=>$count];
         }
         return $out;
     }

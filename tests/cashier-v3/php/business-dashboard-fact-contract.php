@@ -11,9 +11,12 @@ $read = static function (string $path) use ($root): string {
 };
 
 $reader = $read('/后端代码/app/services/cashier/v3/dashboard/CashierV3BusinessDashboardReadModel.php');
+$registeredReader = $read('/后端代码/app/services/query/metric/RegisteredMetricReadServices.php');
+$metricRegistry = $read('/后端代码/app/services/query/metric/MetricDefinitionRegistry.php');
 $module = $read('/后端代码/app/services/cashier/v3/dashboard/CashierV3BusinessDashboardModule.php');
 $bootstrap = $read('/后端代码/app/services/cashier/v3/bootstrap/CashierV3Bootstrap.php');
-$management = $read('/前端代码/cashier-v3/src/views/ManagementCenterView.vue');
+$bridge = $read('/前端代码/cashier-v3/src/services/cashierV3Bridge.js');
+$router = $read('/前端代码/cashier-v3/src/router/index.js');
 
 $requiredFacts = [
     'cashier_v3_sale_fact', 'cashier_v3_payment_fact', 'cashier_v3_balance_fact',
@@ -22,7 +25,7 @@ $requiredFacts = [
 ];
 $requiredActions = [
     'query-business-dashboard-summary', 'query-business-dashboard-trend',
-    'query-business-dashboard-ranking', 'open-business-dashboard-detail', 'export-business-dashboard',
+    'query-business-dashboard-ranking', 'open-business-dashboard-detail',
 ];
 $requiredMetrics = [
     'sales_amount', 'cash_performance', 'actual_performance', 'balance_deduction',
@@ -30,7 +33,7 @@ $requiredMetrics = [
 ];
 
 $failures = [];
-foreach ($requiredFacts as $fact) if (strpos($reader, $fact) === false) $failures[] = 'missing fact authority: ' . $fact;
+foreach ($requiredFacts as $fact) if (strpos($reader . $registeredReader . $metricRegistry, $fact) === false) $failures[] = 'missing fact authority: ' . $fact;
 foreach ($requiredActions as $action) if (strpos($module, $action) === false) $failures[] = 'missing projection action: ' . $action;
 foreach ($requiredMetrics as $metric) if (strpos($reader, "'" . $metric . "'") === false) $failures[] = 'missing metric: ' . $metric;
 if (strpos($reader, 'use app\\services\\statistics\\BusinessDashboardServices') !== false
@@ -46,9 +49,10 @@ if (strpos($reader, "CASE WHEN fact_direction = 'reversal'") !== false
     || strpos($reader, "fact_direction'] ?? 'forward') === 'reversal'") !== false) $failures[] = 'signed fact amounts must not be inverted again by fact_direction';
 if (strpos($reader, 'COALESCE(SUM({$amount}),0) AS amount') === false
     || substr_count($reader, '"SUM({$amount})"') < 2) $failures[] = 'dashboard totals, trends and rankings must sum signed fact amounts directly';
-if (strpos($reader, 'return (string)intdiv($cents, 100);') === false || strpos($reader, 'number_format($cents / 100, 2') !== false) $failures[] = 'dashboard money display must preserve the cashier whole-yuan rule';
+if (strpos($reader, 'MetricMoneyFormatter::integerYuan($cents)') === false || strpos($reader, 'number_format($cents / 100, 2') !== false) $failures[] = 'dashboard money display must round to integer yuan through the shared formatter';
+if (strpos($reader . $module, 'export-business-dashboard') !== false || strpos($reader, 'function export(') !== false) $failures[] = 'removed CSV export still exists';
 if (strpos($bootstrap, 'CashierV3BusinessDashboardModule::install($dispatcher, $assembler);') === false) $failures[] = 'C4 module is not installed by production bootstrap';
-if (strpos($management, "id: 'business-dashboard-v3'") === false || strpos($management, "cashier-v3-business-dashboard") === false) $failures[] = 'management entry is not routed to dashboard';
+if (strpos($bridge, "id: 'business-dashboard-v3'") === false || strpos($router, "cashier-v3-business-dashboard") === false) $failures[] = 'management entry is not routed to dashboard';
 
 if ($failures) {
     foreach ($failures as $failure) fwrite(STDERR, "[FAIL] {$failure}\n");

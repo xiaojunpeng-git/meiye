@@ -256,35 +256,10 @@ async function openRankingDetail(record) {
   })
 }
 
-async function exportDashboard() {
-  const response = await requestCashierV3Action('export-business-dashboard', {
-    ...scopePayload(),
-    metricCode: activeMetricCode.value,
-    sortBy: rankingSortBy.value,
-    sortOrder: ranking.value.sortOrder || 'desc',
-    silent: true
-  })
-  const exportData = response?.data?.businessDashboard?.export || response?.data?.data?.businessDashboard?.export
-  if (!exportData?.records || !Array.isArray(exportData.columns)) return
-  const lines = [exportData.columns.map((column) => csvCell(column.label || column.key)).join(',')]
-  exportData.records.forEach((record) => lines.push(exportData.columns.map((column) => csvCell(record[column.key])).join(',')))
-  const url = URL.createObjectURL(new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = exportData.filename || '运营概况.csv'
-  link.click()
-  URL.revokeObjectURL(url)
-}
-
 function applyDashboardResponse(response) {
   const next = response?.data?.businessDashboard || response?.data?.data?.businessDashboard
   if (next && typeof next === 'object') dashboardSnapshot.value = next
   return response
-}
-
-function csvCell(value) {
-  const text = String(value ?? '')
-  return `"${text.replaceAll('"', '""')}"`
 }
 
 function trendBarStyle(point) {
@@ -321,7 +296,6 @@ function aggregationLabel() {
         <h2>{{ dashboardTitle }}</h2>
       </div>
       <div class="business-dashboard-page__actions">
-        <button type="button" class="button button--secondary" @click="exportDashboard">导出</button>
         <button type="button" class="button button--primary" @click="applyScope">刷新数据</button>
       </div>
     </header>

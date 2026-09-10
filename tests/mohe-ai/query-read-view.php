@@ -17,18 +17,20 @@ function queryReject(callable $call, $code) { try { $call(); } catch (MetricQuer
 class ReadViewFixtureQuery {
     public $calls = [];
     private $row;
-    public function __construct(array $row) { $this->row = $row; }
+    private $table;
+    public function __construct(array $row, string $table='') { $this->row = $row; $this->table=$table; }
     public function __call($name, $args) { $this->calls[] = [$name, $args]; if ($name === 'whereExists') $args[0]($this); return $this; }
     public function find() { return $this->row; }
 }
 $seen = [];
 $reader = new GroupPerformanceMetricReadServices(function ($table) use (&$seen) {
-    $query = new ReadViewFixtureQuery($table === 'cashier_v3_payment_fact' ? ['gross_cents' => '0', 'refund_cents' => '0'] : ['gross_cents' => '12345', 'refund_cents' => '-234', 'amount_cents' => '1001']);
+    $amount=$table==='cashier_v3_payment_sale_allocation_fact'?'12345':($table==='cashier_v3_performance_fact'?'1001':'0');
+    $query = new ReadViewFixtureQuery(['amount_cents' => $amount], $table);
     $seen[] = [$table, $query]; return $query;
 }, function ($query, $tenant, $order) { $query->scopeNormal($tenant, $order); });
 $range = ['start' => '2026-09-08', 'end' => '2026-09-08'];
-queryCheck($reader->cashTotals('0', [1], $range) === ['gross_cents' => 12345, 'refund_cents' => -234], 'exact cents preserve signs');
-queryCheck($reader->performanceTotal('0', [1], $range, 'consumption_performance_recorded') === 1001, 'consumption exact cents');
+queryCheck($reader->cashTotals('0', [1], $range) === ['gross_cents' => 12345, 'refund_cents' => -12345], 'registered cash and refund share the same signed fact source');
+queryCheck($reader->metricTotal('0', [1], $range, 'consume_amount') === 1001, 'consumption exact cents');
 $cashCalls = json_encode($seen[0][1]->calls); $consumptionCalls = json_encode($seen[count($seen)-1][1]->calls);
 foreach (['p.tenant_id', 'p.store_id', 'p.business_date', 'effective', 'scopeNormal', 'COALESCE'] as $needle) queryCheck(strpos($cashCalls, $needle) !== false, 'cash source contract ' . $needle);
 queryCheck(strpos($consumptionCalls, "service_status='completed'") !== false, 'consumption requires completed service');
@@ -36,12 +38,12 @@ queryCheck(strpos($cashCalls, 'limit') === false && strpos($consumptionCalls, 'l
 $capabilities = MetricReadViewServices::metricCapabilities();
 queryCheck($capabilities['consume_amount']['ai_query_ready'] === true && count($capabilities['consume_amount']['query_shapes']) === 4, 'consumption implemented contracts registered');
 queryCheck($capabilities['cash_performance']['ai_query_ready'] === true && count($capabilities['cash_performance']['query_shapes']) === 4 && $capabilities['cash_performance']['readiness_reasons'] === [], 'cash recharge-inclusive contract registered');
-queryCheck($capabilities['actual_performance']['ai_query_ready'] === false, 'actual semantics remain closed');
+queryCheck($capabilities['actual_performance']['ai_query_ready'] === true, 'confirmed actual formula is registered');
 foreach ([[], [0], ['1'], [1, 1], [1 => 1]] as $stores) queryReject(function () use ($reader, $range, $stores) { $reader->cashTotals('0', $stores, $range); }, 'METRIC_SOURCE_SCOPE_INVALID');
-queryReject(function () use ($reader, $range) { $reader->performanceTotal('0', [1], $range, 'invented'); }, 'METRIC_SOURCE_TYPE_INVALID');
+queryReject(function () use ($reader, $range) { $reader->metricTotal('0', [1], $range, 'invented'); }, 'METRIC_NOT_REGISTERED');
 foreach (['1.00', '1e3', '9223372036854775808', 1.5, null] as $bad) {
     if ($bad === null) continue; // absent DB sum is the established empty zero path.
-    $badReader = new GroupPerformanceMetricReadServices(function () use ($bad) { return new ReadViewFixtureQuery(['gross_cents' => $bad, 'refund_cents' => 0]); }, function () {});
+    $badReader = new GroupPerformanceMetricReadServices(function () use ($bad) { return new ReadViewFixtureQuery(['amount_cents' => $bad]); }, function () {});
     queryReject(function () use ($badReader, $range) { $badReader->cashTotals('0', [1], $range); }, 'METRIC_SOURCE_AMOUNT_INVALID');
 }
 
@@ -76,7 +78,7 @@ try {
     queryReject(function () use ($service, $principal, $query) { $service->create($principal, $query); }, 'METRIC_PERMISSION_GRAIN_UNAVAILABLE');
     $binding['scope_mode'] = 'stores';
     foreach (['drill', 'invented'] as $shape) queryReject(function () use ($service, $principal, $query, $shape) { $q = $query; $q['query_shape'] = $shape; $service->create($principal, $q); }, 'METRIC_QUERY_SHAPE_UNAVAILABLE');
-    foreach (['actual_performance', 'consumption_performance', 'refund_amount'] as $metric) queryReject(function () use ($service, $principal, $query, $metric) { $q = $query; $q['metric_codes'] = [$metric]; $service->create($principal, $q); }, 'METRIC_NOT_REGISTERED');
+    foreach (['consumption_performance', 'refund_amount', 'invented'] as $metric) queryReject(function () use ($service, $principal, $query, $metric) { $q = $query; $q['metric_codes'] = [$metric]; $service->create($principal, $q); }, 'METRIC_NOT_REGISTERED');
     queryReject(function () use ($service, $principal, $query) { $q = $query; $q['business_filters'] = ['person' => 1]; $service->create($principal, $q); }, 'METRIC_QUERY_SHAPE_UNAVAILABLE');
     queryReject(function () use ($service, $principal, $query) { $q = $query; $q['store_ids'] = [3]; $service->create($principal, $q); }, 'METRIC_PERMISSION_DENIED');
     queryReject(function () use ($service, $principal, $query) { $service->create($principal, $query + ['sql' => 'forbidden']); }, 'METRIC_QUERY_SCHEMA_INVALID');

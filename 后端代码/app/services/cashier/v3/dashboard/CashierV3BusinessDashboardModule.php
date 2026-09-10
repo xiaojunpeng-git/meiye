@@ -15,7 +15,7 @@ final class CashierV3BusinessDashboardModule
         $reader = new CashierV3BusinessDashboardReadModel();
         $targetReader = new CashierV3StoreTargetDashboardReadModel();
         $handlers = $dispatcher->handlers();
-        foreach (['query-business-dashboard-summary', 'query-business-dashboard-trend', 'query-business-dashboard-ranking', 'open-business-dashboard-detail', 'export-business-dashboard', 'query-store-target-dashboard'] as $action) {
+        foreach (['query-business-dashboard-summary', 'query-business-dashboard-trend', 'query-business-dashboard-ranking', 'open-business-dashboard-detail', 'query-store-target-dashboard'] as $action) {
             if ($handlers->hasProjection($action)) {
                 throw new \LogicException('C4 business dashboard handler duplicate: ' . $action);
             }
@@ -33,9 +33,6 @@ final class CashierV3BusinessDashboardModule
         });
         $handlers->registerProjection('open-business-dashboard-detail', static function (array $scope) use ($reader): array {
             return ['data' => ['businessDashboard' => ['detail' => $reader->detail((array)$scope['payload'], $scope['operator_scope'], $scope['data_scope'])]], 'message' => '经营明细已读取。'];
-        });
-        $handlers->registerProjection('export-business-dashboard', static function (array $scope) use ($reader): array {
-            return ['data' => ['businessDashboard' => ['export' => $reader->export((array)$scope['payload'], $scope['operator_scope'], $scope['data_scope'])]], 'message' => '经营明细已生成导出文件。'];
         });
         $handlers->registerProjection('query-store-target-dashboard', static function (array $scope) use ($targetReader): array {
             return ['data' => ['targetDashboard' => $targetReader->dashboard((array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope'])], 'message' => '目标看板已刷新。'];

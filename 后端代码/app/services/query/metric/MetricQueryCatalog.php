@@ -20,7 +20,7 @@ final class MetricQueryCatalog
     public static function fromDictionary(callable $lookup): self
     {
         $entries = [];
-        foreach (['cash_performance', 'consume_amount', 'actual_performance'] as $code) {
+        foreach (array_keys(MetricDefinitionRegistry::all()) as $code) {
             $definition = $lookup($code);
             if (!is_array($definition) || ($definition['code'] ?? null) !== $code) {
                 throw new MetricQueryContractException('METRIC_DICTIONARY_INVALID', '指标目录配置不完整。');
@@ -52,9 +52,7 @@ final class MetricQueryCatalog
             $entry['metric_version'] = null;
             $entry['version_ready'] = false;
             $entry['ai_query_ready'] = false;
-            $entry['readiness_reasons'] = $code === 'actual_performance'
-                ? ['METRIC_SEMANTICS_CONFLICT']
-                : ($code === 'consume_amount' ? ['METRIC_MAPPING_UNVERIFIED'] : ['SOURCE_PARITY_UNVERIFIED']);
+            $entry['readiness_reasons'] = ['REGISTERED_READER_NOT_BOUND'];
             if (!$ready) $entry['readiness_reasons'][] = 'METRIC_USER_NOT_READY';
             $entries[$code] = $entry;
         }

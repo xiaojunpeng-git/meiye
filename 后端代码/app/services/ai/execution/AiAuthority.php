@@ -7,12 +7,11 @@ final class AiAuthority
     public static function capabilities(bool $exportReady,array $context=[]): array
     {
         $registered=\app\services\query\metric\MetricReadViewServices::metricCapabilities(); $metrics=[];
-        if (($context['analysis_personnel_ready']??false)===true) foreach (\app\services\query\metric\PersonnelPerformanceReadServices::capabilities() as $code=>$contract) {
-            if (($context['analysis_personnel_grants'][$code]??false)===true) $registered[$code]=$contract;
-        }
+        foreach ($registered as $code=>$contract) if (($contract['filter_grain']??null)==='person'
+            && (!(($context['analysis_personnel_ready']??false)===true) || ($context['analysis_personnel_grants'][$code]??false)!==true)) unset($registered[$code]);
         foreach ($registered as $code=>$capability) if (!empty($capability['ai_query_ready'])) $metrics[]=$code;
         $metadata=[]; $dictionary=new \app\services\metric\MetricDictionaryServices();
-        foreach (['cash_performance','consume_amount'] as $code) {
+        foreach ($registered as $code=>$contract) {
             $tooltip=$dictionary->getTooltip($code); unset($tooltip['updated_at']);
             if (($tooltip['user_ready']??false)===true && isset($registered[$code]['metric_version'])) {
                 $metadata[$code]=['user_ready'=>true,'metric_version'=>$registered[$code]['metric_version'],

@@ -76,9 +76,8 @@ final class MobileWarehouseServices
         }
 
         $period = $this->period($input);
-        $factProjection = $this->factProjection($validStoreIds, $period);
         $scopeStoreIds = array_values(array_map('intval', (array)($hierarchy['currentNode']['_storeIds'] ?? [])));
-        $metrics = $this->summaryMetrics($scopeStoreIds, $factProjection);
+        $metrics = $this->summaryMetrics($scopeStoreIds, $period);
         $trend = $this->trendProjection(
             $scopeStoreIds,
             $period,
@@ -86,7 +85,7 @@ final class MobileWarehouseServices
         );
         foreach ($hierarchy['rows'] as &$row) {
             $rowStoreIds = array_values(array_map('intval', (array)($row['_storeIds'] ?? [])));
-            $row['metrics'] = $this->metricValues($this->summaryMetrics($rowStoreIds, $factProjection));
+            $row['metrics'] = $this->metricValues($this->summaryMetrics($rowStoreIds, $period));
             unset($row['_storeIds']);
         }
         unset($row);
@@ -161,7 +160,7 @@ final class MobileWarehouseServices
     {
         $this->assertWarehouseFeature((int)$merchant['employeeId']);
         $entry = $this->entryScopes->resolve($merchant);
-        $storeIds = array_values(array_map('intval', (array)$entry['authorizedStoreIds']));
+        $storeIds = array_values(array_unique(array_map('intval', (array)$entry['authorizedStoreIds'])));
         if ($storeIds === []) {
             throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限范围内没有可查看的门店。');
         }
@@ -175,34 +174,33 @@ final class MobileWarehouseServices
         }
 
         $period = $this->period($input);
-        $performanceRows = Db::name('cashier_v3_performance_fact')
-            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
-            ->where('status', 'effective')->where('employee_id', $employeeId)
-            ->whereIn('performance_type', ['sales_performance_allocated', 'labor_performance_allocated'])
-            ->fieldRaw('performance_type,COALESCE(SUM(amount_cents),0) AS amount_cents')
-            ->group('performance_type')->select()->toArray();
-        $amounts = ['sales_performance_allocated' => 0, 'labor_performance_allocated' => 0];
-        foreach ($performanceRows as $row) {
-            $amounts[(string)($row['performance_type'] ?? '')] = (int)($row['amount_cents'] ?? 0);
+        $metricReader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $metricRange = ['start' => $period['startDate'], 'end' => $period['endDate']];
+        $pairs = [];
+        foreach ($storeIds as $storeId) $pairs[] = ['store_id' => (int)$storeId, 'employee_id' => $employeeId];
+        $metricAmounts = [];
+        foreach (['staff_sales_yeji', 'staff_labor_yeji'] as $metricCode) {
+            $metricAmounts[$metricCode] = $metricReader->personnelTotal($metricCode, '0', $storeIds, $metricRange, $pairs);
         }
 
-        $identity = Db::name('cashier_v3_performance_fact')
-            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
-            ->where('status', 'effective')->where('employee_id', $employeeId)
-            ->whereIn('performance_type', ['sales_performance_allocated', 'labor_performance_allocated'])
-            ->field('employee_name_snapshot')->order('id', 'desc')->find();
+        $identityRows = array_merge(
+            $metricReader->personnelDailyTotals('staff_sales_yeji', '0', $storeIds, $metricRange, [$employeeId]),
+            $metricReader->personnelDailyTotals('staff_labor_yeji', '0', $storeIds, $metricRange, [$employeeId])
+        );
         $pointCustomer = 0.0;
         $pointName = '';
-        foreach ($this->designatedCustomerRanking($storeIds, $period, 'desc') as $row) {
+        foreach ($this->designatedCustomerRanking($storeIds, $period, 'desc', 0) as $row) {
             if ((int)($row['entityId'] ?? 0) === $employeeId) {
                 $pointCustomer = (float)($row['rankingValue'] ?? 0);
                 $pointName = trim((string)($row['name'] ?? ''));
                 break;
             }
         }
-        $employeeName = is_array($identity) ? trim((string)($identity['employee_name_snapshot'] ?? '')) : '';
+        $employeeName = '';
+        foreach ($identityRows as $identity) {
+            $employeeName = trim((string)($identity['employee_name'] ?? ''));
+            if ($employeeName !== '') break;
+        }
         if ($employeeName === '') {
             $employeeName = $pointName;
         }
@@ -210,34 +208,19 @@ final class MobileWarehouseServices
             throw MobileApiException::business('STORE_NOT_ALLOWED', '该员工不在当前数据权限范围内。');
         }
 
-        $serviceCounts = Db::name('cashier_v3_performance_fact')
-            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
-            ->where('status', 'effective')->where('employee_id', $employeeId)
-            ->where('performance_type', 'labor_performance_allocated')
-            ->fieldRaw('COUNT(DISTINCT CASE WHEN member_id > 0 THEN member_id END) AS member_count,COUNT(DISTINCT source_line_id) AS project_count')
-            ->find();
+        $serviceCounts = $metricReader->personnelFactCounts('staff_labor_yeji', '0', $storeIds, $metricRange, $employeeId);
         $detailMode = trim((string)($input['detailMode'] ?? 'cash')) === 'labor' ? 'labor' : 'cash';
-        $detailPerformanceType = $detailMode === 'labor' ? 'labor_performance_allocated' : 'sales_performance_allocated';
+        $detailMetricCode = $detailMode === 'labor' ? 'staff_labor_yeji' : 'staff_sales_yeji';
         $page = max(1, (int)($input['page'] ?? 1));
         $pageSize = min(20, max(1, (int)($input['pageSize'] ?? 20)));
-        $detailQuery = Db::name('cashier_v3_performance_fact')
-            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
-            ->where('status', 'effective')->where('employee_id', $employeeId)
-            ->where('performance_type', $detailPerformanceType);
-        $total = (int)$detailQuery->count();
-        $detailRows = Db::name('cashier_v3_performance_fact')
-            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
-            ->where('status', 'effective')->where('employee_id', $employeeId)
-            ->where('performance_type', $detailPerformanceType)
-            ->field('fact_id,business_date,order_no_snapshot,store_name_snapshot,member_name_snapshot,source_line_id,rule_name_snapshot,amount_cents')
-            ->order('business_date', 'desc')->order('id', 'desc')
-            ->limit(($page - 1) * $pageSize, $pageSize)->select()->toArray();
+        $detailPage = $metricReader->personnelDetailPage(
+            $detailMetricCode, '0', $storeIds, $metricRange, $employeeId, $page, $pageSize
+        );
+        $total = (int)$detailPage['total'];
+        $detailRows = $detailPage['rows'];
         $details = [];
         foreach ($detailRows as $row) {
-            $amount = intdiv((int)($row['amount_cents'] ?? 0), 100);
+            $amount = (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)($row['metric_value'] ?? 0));
             $details[] = [
                 'factId' => (string)($row['fact_id'] ?? ''),
                 'businessDate' => (string)($row['business_date'] ?? ''),
@@ -259,8 +242,8 @@ final class MobileWarehouseServices
                 'employee' => ['id' => $employeeId, 'name' => $employeeName],
                 'period' => $period,
                 'metrics' => [
-                    ['code' => 'cash_performance', 'name' => '现金业绩', 'value' => intdiv($amounts['sales_performance_allocated'], 100), 'unit' => 'amount'],
-                    ['code' => 'labor_performance', 'name' => '劳动业绩', 'value' => intdiv($amounts['labor_performance_allocated'], 100), 'unit' => 'amount'],
+                    ['code' => 'staff_sales_yeji', 'name' => \app\services\query\metric\MetricSemanticCatalog::names(['staff_sales_yeji'])['staff_sales_yeji'], 'value' => (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($metricAmounts['staff_sales_yeji']), 'unit' => 'amount'],
+                    ['code' => 'staff_labor_yeji', 'name' => \app\services\query\metric\MetricSemanticCatalog::names(['staff_labor_yeji'])['staff_labor_yeji'], 'value' => (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($metricAmounts['staff_labor_yeji']), 'unit' => 'amount'],
                     ['code' => 'designated_customer', 'name' => '点客', 'value' => $pointCustomer, 'unit' => 'count'],
                     ['code' => 'service_members', 'name' => '服务会员', 'value' => (int)($serviceCounts['member_count'] ?? 0), 'unit' => 'count'],
                     ['code' => 'project_count', 'name' => '项目数', 'value' => (int)($serviceCounts['project_count'] ?? 0), 'unit' => 'count'],
@@ -291,8 +274,8 @@ final class MobileWarehouseServices
     {
         $storeIds = $this->positiveIds($storeIds);
         $period = $this->periodForDashboard($input);
-        $projection = $this->factProjection($storeIds, $period);
-        $summary = $this->summaryMetrics($storeIds, $projection);
+        $projection = $this->registeredStoreProjection($storeIds, $period);
+        $summary = $this->summaryMetrics($storeIds, $period);
         $trend = [];
         // The merchant homepage requests the comparison chart through
         // dashboardTrendComparison. Avoid a third (cash) trend scan while
@@ -314,8 +297,8 @@ final class MobileWarehouseServices
                 'entityId' => $storeId,
                 'entityType' => 'store',
                 'entityName' => (string)($storeNames[$storeId] ?? ('门店#' . $storeId)),
-                'rankingValue' => intdiv($amountCents, 100),
-                'displayValue' => number_format(intdiv($amountCents, 100), 0, '.', ','),
+                'rankingValue' => (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($amountCents),
+                'displayValue' => number_format((int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($amountCents), 0, '.', ','),
                 'metricCode' => 'cash_performance',
             ];
         }
@@ -362,13 +345,13 @@ final class MobileWarehouseServices
         $storeIds = $this->positiveIds($storeIds);
         if ($storeIds === []) return [];
         $period = $this->periodForDashboard($input);
-        $projection = $this->factProjection($storeIds, $period);
         if ($dimension === 'store') {
+            $projection = $this->registeredStoreProjection($storeIds, $period);
             $names = Db::name('system_store')->whereIn('id', $storeIds)->where('is_del', 0)->column('name', 'id');
             $rows = [];
             foreach ($storeIds as $storeId) {
                 $cents = (int)($projection['cash_performance'][$storeId] ?? 0);
-                $rows[] = ['entityType' => 'store', 'entityId' => $storeId, 'entityName' => (string)($names[$storeId] ?? ('门店#' . $storeId)), 'rankingCents' => $cents, 'rankingValue' => intdiv($cents, 100), 'storeCount' => 1];
+                $rows[] = ['entityType' => 'store', 'entityId' => $storeId, 'entityName' => (string)($names[$storeId] ?? ('门店#' . $storeId)), 'rankingCents' => $cents, 'rankingValue' => (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($cents), 'storeCount' => 1];
             }
             usort($rows, [$this, 'compareDashboardRanking']);
             return $this->formatDashboardRanking(array_slice($rows, 0, 5), 'store');
@@ -380,22 +363,33 @@ final class MobileWarehouseServices
         $dimensionService = new StoreUnifiedReportOrganizationDimensionServices();
         $dimensionCode = $dimension === 'company' ? 'company' : 'city_manager';
         $entityType = $dimension === 'company' ? 'branch' : 'manager';
-        $grouped = [];
+        $storeGroupKeys = [];
+        $groupLabels = [];
         foreach ($storeIds as $storeId) {
             $resolved = $dimensionService->resolve($dimensionCode, '', '', (string)$period['endDate'], (int)$storeId);
             $id = (int)($resolved['id'] ?? 0);
             $name = trim((string)($resolved['name'] ?? ''));
             if ($id <= 0 || $name === '') continue;
-            if (!isset($grouped[$id])) {
-                $grouped[$id] = ['entityType' => $entityType, 'entityId' => $id, 'entityName' => $name, 'rankingCents' => 0, 'rankingValue' => 0, 'storeCount' => 0];
-            }
-            $grouped[$id]['rankingCents'] += (int)($projection['cash_performance'][$storeId] ?? 0);
-            $grouped[$id]['storeCount']++;
+            $storeGroupKeys[$storeId] = (string)$id;
+            $groupLabels[(string)$id] = $name;
         }
-        if ($grouped !== []) {
-            foreach ($grouped as &$group) $group['rankingValue'] = intdiv((int)$group['rankingCents'], 100);
-            unset($group);
-            $rows = array_values($grouped);
+        // A partially configured hierarchy has no sound aggregate. Keep the
+        // documented store-level fallback rather than silently omitting stores.
+        if (count($storeGroupKeys) === count($storeIds)) {
+            $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+            $range = ['start' => $period['startDate'], 'end' => $period['endDate']];
+            $rows = [];
+            foreach ($reader->groupedStoreTotals('cash_performance', '0', $storeIds, $range, $storeGroupKeys) as $group) {
+                $groupId = (string)$group['group_key'];
+                $cents = (int)$group['metric_value'];
+                $rows[] = [
+                    'entityType' => $entityType, 'entityId' => (int)$groupId,
+                    'entityName' => (string)($groupLabels[$groupId] ?? ''),
+                    'rankingCents' => $cents,
+                    'rankingValue' => (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($cents),
+                    'storeCount' => (int)$group['store_count'],
+                ];
+            }
             usort($rows, [$this, 'compareDashboardRanking']);
             return $this->formatDashboardRanking(array_slice($rows, 0, 5), $entityType);
         }
@@ -533,68 +527,18 @@ final class MobileWarehouseServices
         return $value;
     }
 
-    private function factProjection(array $storeIds, array $period): array
+    private function registeredStoreProjection(array $storeIds, array $period): array
     {
-        $projection = [
-            'cash_performance' => [],
-            'actual_performance' => [],
-            'consume_amount' => [],
-            'visit_members' => [],
-            'refund_performance' => [],
-        ];
+        // Both callers consume cash rankings only. Overview values are read
+        // separately by summaryMetrics; do not run unused metric queries.
+        $projection = ['cash_performance' => []];
         if ($storeIds === []) {
             return $projection;
         }
-        $payments = Db::name('cashier_v3_payment_fact')
-            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
-            ->where('status', 'effective')
-            ->fieldRaw('store_id,COALESCE(SUM(amount_cents),0) AS amount_cents')
-            ->group('store_id')->select()->toArray();
-        foreach ($payments as $row) {
-            $projection['cash_performance'][(int)$row['store_id']] = (int)$row['amount_cents'];
-        }
-        $performance = Db::name('cashier_v3_performance_fact')
-            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
-            ->where('status', 'effective')
-            ->whereIn('performance_type', ['actual_performance_recorded', 'consumption_performance_recorded'])
-            ->fieldRaw('store_id,performance_type,COALESCE(SUM(amount_cents),0) AS amount_cents')
-            ->group('store_id,performance_type')->select()->toArray();
-        foreach ($performance as $row) {
-            $code = (string)$row['performance_type'] === 'actual_performance_recorded'
-                ? 'actual_performance'
-                : 'consume_amount';
-            $projection[$code][(int)$row['store_id']] = (int)$row['amount_cents'];
-        }
-        // Cash refunds are a lifecycle fact in V3.  Do not use the legacy
-        // store_order_refund projection here: member-account restoration is
-        // represented independently by restored_principal_cents and
-        // restored_bonus_cents and must never be added to this cash amount.
-        $refunds = Db::name('cashier_v3_order_lifecycle_operation')
-            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
-            ->where('operation_type', 'refund')->where('status', 'succeeded')
-            ->fieldRaw('store_id,COALESCE(SUM(cash_refund_cents),0) AS amount_cents')
-            ->group('store_id')->select()->toArray();
-        foreach ($refunds as $row) {
-            $projection['refund_performance'][(int)$row['store_id']] = (int)$row['amount_cents'];
-        }
-        // 实际业绩统一按现金业绩扣除现金退款计算，避免与历史 performance
-        // 快照口径不一致。金额保持分，允许退款大于现金时呈现负数。
-        foreach ($storeIds as $storeId) {
-            $storeId = (int)$storeId;
-            $projection['actual_performance'][$storeId] =
-                (int)($projection['cash_performance'][$storeId] ?? 0)
-                - (int)($projection['refund_performance'][$storeId] ?? 0);
-        }
-        $visits = Db::name('cashier_v3_entitlement_service_fact')
-            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
-            ->where('service_status', 'completed')->where('member_id', '>', 0)
-            ->field('store_id,member_id')->group('store_id,member_id')->select()->toArray();
-        foreach ($visits as $row) {
-            $projection['visit_members'][(int)$row['store_id']][(int)$row['member_id']] = true;
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $range = ['start' => $period['startDate'], 'end' => $period['endDate']];
+        foreach ($reader->storeTotals('cash_performance', '0', $storeIds, $range) as $row) {
+            $projection['cash_performance'][(int)$row['store_id']] = (int)$row['metric_value'];
         }
         return $projection;
     }
@@ -623,15 +567,21 @@ final class MobileWarehouseServices
                 : $cursor->modify('-1 year');
             $yoyKey = $this->trendKey($yoyCursor, $calendar['granularity']);
             $momKey = $this->trendKey($momCursor, $calendar['granularity']);
+            $currentCents = $cursor > $today ? null : (int)($current[$currentKey] ?? 0);
+            $yoyCents = (int)($yearOnYear[$yoyKey] ?? 0);
+            $momCents = (int)($monthOnMonth[$momKey] ?? 0);
             $points[] = [
                 'key' => $currentKey,
                 'label' => $calendar['granularity'] === 'day'
                     ? $cursor->format('j')
                     : ($calendar['granularity'] === 'month' ? $cursor->format('n月') : $cursor->format('Y年')),
                 // Future periods are intentionally gaps, not zeroes.
-                'current' => $cursor > $today ? null : (int)($current[$currentKey] ?? 0),
-                'yoy' => (int)($yearOnYear[$yoyKey] ?? 0),
-                'mom' => (int)($monthOnMonth[$momKey] ?? 0),
+                'current' => $currentCents === null ? null : (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($currentCents),
+                'yoy' => (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($yoyCents),
+                'mom' => (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($momCents),
+                'currentCents' => $currentCents,
+                'yoyCents' => $yoyCents,
+                'momCents' => $momCents,
             ];
             $cursor = $calendar['granularity'] === 'day'
                 ? $cursor->modify('+1 day')
@@ -660,13 +610,9 @@ final class MobileWarehouseServices
 
     private function trendMetricName(string $code): string
     {
-        $names = [
-            'cash_performance' => '现金业绩',
-            'actual_performance' => '实际业绩',
-            'consume_amount' => '消耗业绩',
-            'refund_performance' => '退款金额',
-        ];
-        return $names[$code] ?? '现金业绩';
+        $definition = $this->dictionary->getTooltip($this->trendMetricCode($code));
+        if (($definition['user_ready'] ?? false) !== true) throw new \RuntimeException('MOBILE_METRIC_DICTIONARY_NOT_READY');
+        return (string)$definition['name'];
     }
 
     /** @return array<string,string> */
@@ -739,105 +685,41 @@ final class MobileWarehouseServices
         return $granularity === 'month' ? $date->format('Y-m') : $date->format('Y');
     }
 
-    /** @return array<string,int> values are whole-yuan, grouped by chart granularity. */
+    /** @return array<string,int> values stay in cents until the final response projection. */
     private function trendAmounts(array $storeIds, string $startDate, string $endDate, string $metricCode, string $granularity): array
     {
         if ($storeIds === []) {
             return [];
         }
-        if ($metricCode === 'cash_performance') {
-            $rows = Db::name('cashier_v3_payment_fact')
-                ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-                ->whereBetween('business_date', [$startDate, $endDate])->where('status', 'effective')
-                ->fieldRaw('business_date,COALESCE(SUM(amount_cents),0) AS amount_cents')
-                ->group('business_date')->select()->toArray();
-        } elseif ($metricCode === 'refund_performance') {
-            // The dashboard's refund metric is cash actually returned to the
-            // customer.  Account principal/bonus restoration remains out of
-            // this total and is only exposed as separate detail facts.
-            $rows = Db::name('cashier_v3_order_lifecycle_operation')
-                ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-                ->whereBetween('business_date', [$startDate, $endDate])
-                ->where('operation_type', 'refund')->where('status', 'succeeded')
-                ->fieldRaw('business_date,COALESCE(SUM(cash_refund_cents),0) AS amount_cents')
-                ->group('business_date')->select()->toArray();
-        } elseif ($metricCode === 'actual_performance') {
-            $cashRows = Db::name('cashier_v3_payment_fact')
-                ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-                ->whereBetween('business_date', [$startDate, $endDate])->where('status', 'effective')
-                ->fieldRaw('business_date,COALESCE(SUM(amount_cents),0) AS amount_cents')
-                ->group('business_date')->select()->toArray();
-            $refundRows = Db::name('cashier_v3_order_lifecycle_operation')
-                ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-                ->whereBetween('business_date', [$startDate, $endDate])
-                ->where('operation_type', 'refund')->where('status', 'succeeded')
-                ->fieldRaw('business_date,COALESCE(SUM(cash_refund_cents),0) AS amount_cents')
-                ->group('business_date')->select()->toArray();
-            $cashByDate = [];
-            foreach ($cashRows as $row) {
-                $cashByDate[(string)($row['business_date'] ?? '')] = (int)($row['amount_cents'] ?? 0);
-            }
-            $refundByDate = [];
-            foreach ($refundRows as $row) {
-                $refundByDate[(string)($row['business_date'] ?? '')] = (int)($row['amount_cents'] ?? 0);
-            }
-            $result = [];
-            foreach (array_unique(array_merge(array_keys($cashByDate), array_keys($refundByDate))) as $date) {
-                $key = $granularity === 'day'
-                    ? $date
-                    : ($granularity === 'month' ? substr($date, 0, 7) : substr($date, 0, 4));
-                $result[$key] = (int)($result[$key] ?? 0)
-                    + intdiv((int)($cashByDate[$date] ?? 0) - (int)($refundByDate[$date] ?? 0), 100);
-            }
-            return $result;
-        } else {
-            $performanceType = $metricCode === 'consume_amount'
-                ? 'consumption_performance_recorded'
-                : 'labor_performance_allocated';
-            $rows = Db::name('cashier_v3_performance_fact')
-                ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-                ->whereBetween('business_date', [$startDate, $endDate])->where('status', 'effective')
-                ->where('performance_type', $performanceType)
-                ->fieldRaw('business_date,COALESCE(SUM(amount_cents),0) AS amount_cents')
-                ->group('business_date')->select()->toArray();
-        }
-        $result = [];
-        foreach ($rows as $row) {
-            $date = (string)($row['business_date'] ?? '');
-            $key = $granularity === 'day'
-                ? $date
-                : ($granularity === 'month' ? substr($date, 0, 7) : substr($date, 0, 4));
-            $result[$key] = (int)($result[$key] ?? 0) + intdiv((int)($row['amount_cents'] ?? 0), 100);
-        }
-        return $result;
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        return $reader->periodTotals($metricCode, '0', $storeIds, ['start' => $startDate, 'end' => $endDate], $granularity);
     }
 
-    private function summaryMetrics(array $storeIds, array $projection): array
+    private function summaryMetrics(array $storeIds, array $period): array
     {
-        $amounts = ['cash_performance' => 0, 'actual_performance' => 0, 'consume_amount' => 0, 'refund_performance' => 0];
-        $visitMembers = [];
-        foreach ($storeIds as $storeId) {
-            foreach (array_keys($amounts) as $code) {
-                $amounts[$code] += (int)($projection[$code][$storeId] ?? 0);
-            }
-            foreach (array_keys((array)($projection['visit_members'][$storeId] ?? [])) as $memberId) {
-                $visitMembers[(int)$memberId] = true;
-            }
-        }
-        $values = $amounts;
-        $values['visit_customer'] = count($visitMembers);
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $range = ['start' => $period['startDate'], 'end' => $period['endDate']];
         $items = [];
-        foreach (['cash_performance', 'actual_performance', 'consume_amount', 'refund_performance', 'visit_customer'] as $code) {
-            $definition = $this->dictionary->getByCode($code);
-            $value = (int)$values[$code];
+        $visibleMetrics = [
+            'cash_performance' => 'cash_performance',
+            'actual_performance' => 'actual_performance',
+            'consume_amount' => 'consume_amount',
+            'refund_performance' => 'refund_performance',
+            'visit_customer' => 'customer_active',
+        ];
+        foreach ($visibleMetrics as $code => $metricCode) {
+            $definition = $this->dictionary->getTooltip($metricCode);
+            if (($definition['user_ready'] ?? false) !== true) throw new \RuntimeException('MOBILE_METRIC_DICTIONARY_NOT_READY');
+            $value = $storeIds === [] ? 0 : $reader->summary($metricCode, '0', $storeIds, $range);
             $isCount = $code === 'visit_customer';
             $items[] = [
                 'code' => $code,
-				'name' => (string)($definition['name'] ?? ($code === 'refund_performance' ? '退款金额' : $code)),
-                'value' => $isCount ? $value : intdiv($value, 100),
+				'name' => (string)$definition['name'],
+                'value' => $isCount ? $value : (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($value),
+                'valueCents' => $isCount ? null : $value,
                 'displayValue' => $isCount
                     ? number_format($value, 0, '.', ',')
-                    : number_format(intdiv($value, 100), 0, '.', ','),
+                    : number_format((int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($value), 0, '.', ','),
                 'unit' => $isCount ? 'count' : 'amount',
                 'available' => true,
                 'unavailableReason' => '',
@@ -862,6 +744,9 @@ final class MobileWarehouseServices
 
     private function rankingCatalog(bool $showOrganizationRanking): array
     {
+        $sales = $this->dictionary->getTooltip('staff_sales_yeji');
+        $labor = $this->dictionary->getTooltip('staff_labor_yeji');
+        $projects = $this->dictionary->getTooltip('completed_service_item_count');
         $items = [
             [
                 'code' => 'organization',
@@ -871,14 +756,14 @@ final class MobileWarehouseServices
             ],
             [
                 'code' => 'staff_cash_performance',
-                'name' => '员工现金业绩',
+                'name' => '员工'.(string)$sales['name'],
                 'available' => true,
-                'metricCode' => 'cash_performance',
+                'metricCode' => 'staff_sales_yeji',
                 'groupDimension' => 'employee',
             ],
             [
                 'code' => 'staff_labor_performance',
-                'name' => '员工劳动业绩',
+                'name' => '员工'.(string)$labor['name'],
                 'available' => true,
                 'metricCode' => 'staff_labor_yeji',
                 'groupDimension' => 'employee',
@@ -892,7 +777,7 @@ final class MobileWarehouseServices
             ],
             [
                 'code' => 'project_count',
-                'name' => '项目数排行',
+                'name' => (string)$projects['name'].'排行',
                 'available' => true,
                 'metricCode' => 'service_project_count',
                 'metricDictionaryReady' => true,
@@ -966,27 +851,22 @@ final class MobileWarehouseServices
         if ($rankingCode === 'staff_designated_customer') {
             return $this->designatedCustomerRanking($storeIds, $period, $rankingOrder);
         }
-        $orderSql = $rankingOrder === 'asc' ? 'ranking_value ASC,entity_id ASC' : 'ranking_value DESC,entity_id ASC';
-        if ($rankingCode === 'project_count') {
-            $rows = Db::name('cashier_v3_entitlement_service_fact')
-                ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-                ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
-                ->where('service_status', 'completed')->where('project_id', '>', 0)
-                ->fieldRaw('project_id AS entity_id,MAX(project_name_snapshot) AS entity_name,COALESCE(SUM(quantity),0) AS ranking_value')
-                ->group('project_id')->orderRaw($orderSql)->limit(10)->select()->toArray();
-            return $this->rankingRows($rows, 'project', false);
+        $bindings = [
+            'project_count' => ['metric' => 'completed_service_item_count', 'dimension' => 'project', 'entity' => 'project', 'money' => false],
+            'staff_cash_performance' => ['metric' => 'staff_sales_yeji', 'dimension' => 'employee', 'entity' => 'employee', 'money' => true],
+            'staff_labor_performance' => ['metric' => 'staff_labor_yeji', 'dimension' => 'employee', 'entity' => 'employee', 'money' => true],
+        ];
+        $binding = $bindings[$rankingCode] ?? null;
+        if (!is_array($binding)) return [];
+        $registered = (new \app\services\query\metric\RegisteredMetricReadServices())->dimensionRanking(
+            $binding['metric'], $binding['dimension'], '0', $storeIds,
+            ['start' => $period['startDate'], 'end' => $period['endDate']], 10, $rankingOrder
+        );
+        $rows = [];
+        foreach ($registered as $row) {
+            $rows[] = ['entity_id' => $row['entity_id'], 'entity_name' => $row['entity_name'], 'ranking_value' => $row['metric_value']];
         }
-        $performanceType = $rankingCode === 'staff_cash_performance'
-            ? 'sales_performance_allocated'
-            : 'labor_performance_allocated';
-        $rows = Db::name('cashier_v3_performance_fact')
-            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
-            ->where('status', 'effective')->where('performance_type', $performanceType)
-            ->where('employee_id', '>', 0)
-            ->fieldRaw('employee_id AS entity_id,MAX(employee_name_snapshot) AS entity_name,COALESCE(SUM(amount_cents),0) AS ranking_value')
-            ->group('employee_id')->orderRaw($orderSql)->limit(10)->select()->toArray();
-        return $this->rankingRows($rows, 'employee', true);
+        return $this->rankingRows($rows, $binding['entity'], $binding['money']);
     }
 
     /**
@@ -997,7 +877,7 @@ final class MobileWarehouseServices
      * group split one customer in hundredths, with the final remainder given
      * to the largest staff id for deterministic results.
      */
-    private function designatedCustomerRanking(array $storeIds, array $period, string $rankingOrder): array
+    private function designatedCustomerRanking(array $storeIds, array $period, string $rankingOrder, int $limit = 10): array
     {
         $facts = Db::name('cashier_v3_entitlement_service_fact')
             ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
@@ -1066,7 +946,7 @@ final class MobileWarehouseServices
             }
             return $rankingOrder === 'asc' ? $leftValue <=> $rightValue : $rightValue <=> $leftValue;
         });
-        return $this->fractionalCustomerRankingRows(array_slice($rows, 0, 10));
+        return $this->fractionalCustomerRankingRows($limit > 0 ? array_slice($rows, 0, $limit) : $rows);
     }
 
     /**
@@ -1136,7 +1016,7 @@ final class MobileWarehouseServices
         $result = [];
         foreach ($rows as $row) {
             $raw = (int)($row['ranking_value'] ?? 0);
-            $value = $money ? intdiv($raw, 100) : $raw;
+            $value = $money ? (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($raw) : $raw;
             $result[] = [
                 'entityType' => $entityType,
                 'entityId' => (int)($row['entity_id'] ?? 0),

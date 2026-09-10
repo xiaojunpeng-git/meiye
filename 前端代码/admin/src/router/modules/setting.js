@@ -31,6 +31,12 @@ export default {
       component: () => import('@/pages/setting/moheAi/index.vue')
     },
     {
+      path: 'mohe-ai/metrics',
+      name: `${pre}mohe_ai_metrics`,
+      meta: { auth: ['setting-mohe-ai'], title: '指标注册表', moheAiMaintainer: true },
+      component: () => import('@/pages/setting/moheAi/metrics.vue')
+    },
+    {
       path: 'system_config',
       name: `${pre}setSystem`,
       meta: {

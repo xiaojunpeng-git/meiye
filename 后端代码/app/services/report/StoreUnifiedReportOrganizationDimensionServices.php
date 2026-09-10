@@ -91,6 +91,31 @@ final class StoreUnifiedReportOrganizationDimensionServices
         }
     }
 
+    /**
+     * Resolve organization selections into a narrower existing report scope.
+     * It is the array counterpart of applyFilters() for registered Readers:
+     * no selected organization can ever add a store to the caller's scope.
+     *
+     * @return array<int,int>
+     */
+    public function narrowStoreIds(array $stores, array $input): array
+    {
+        $out = array_values(array_unique(array_filter(array_map('intval', $stores), static function (int $id): bool { return $id > 0; })));
+        foreach (['company' => 'company_dimension_id', 'city_manager' => 'city_manager_dimension_id'] as $type => $inputKey) {
+            $dimensionId = trim((string)($input[$inputKey] ?? ''));
+            if ($dimensionId === '') continue;
+            $versions = Db::name(StoreUnifiedReportPhaseThreeFoundationServices::ORGANIZATION_DIMENSION_TABLE)
+                ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                ->where('dimension_code', $type)->where('organization_id', $dimensionId)->where('enabled', 1)
+                ->field('organization_id')->select()->toArray();
+            if ($versions === []) return [];
+            $allowed = array_fill_keys($this->storesForOrganizationIds(array_column($versions, 'organization_id')), true);
+            $out = array_values(array_filter($out, static function (int $storeId) use ($allowed): bool { return isset($allowed[$storeId]); }));
+            if ($out === []) return [];
+        }
+        return $out;
+    }
+
     /** @return array<int,array<string,mixed>> */
     public function filterSchema(array $range): array
     {

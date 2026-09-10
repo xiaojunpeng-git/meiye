@@ -247,8 +247,7 @@ const C4_ACTIONS = entries(C4, ACTION_TYPE_PROJECTION, {
   'query-business-dashboard-trend': FEATURE_MANAGEMENT,
   'query-business-dashboard-ranking': FEATURE_MANAGEMENT,
   'query-store-target-dashboard': FEATURE_MANAGEMENT,
-  'open-business-dashboard-detail': FEATURE_MANAGEMENT,
-  'export-business-dashboard': FEATURE_MANAGEMENT
+  'open-business-dashboard-detail': FEATURE_MANAGEMENT
 })
 
 const C5_ACTIONS = {

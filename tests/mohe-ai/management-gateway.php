@@ -27,8 +27,11 @@ try {
     $h->boot=mgboot($h);
     $state=mgcall($h,'management_get');$baseline=$state['draft'];
     mgcheck($state['active_version']==='source','source baseline');
+    $metricRegistry=mgcall($h,'metric_registry_get');
+    mgcheck(($metricRegistry['registry_version']??'')===\app\services\query\metric\MetricDefinitionRegistry::VERSION
+        && count($metricRegistry['items']??[])===11,'metric registry is a source-owned read-only catalog');
     $beforeModels=$h->models;$beforeQueries=$h->queries;
-    foreach(['store','merchant'] as $terminal){$context=$h->context;$context['terminal']=$terminal;mgdeny(function()use($h,$context){$h->gateway->handle('management_get',$context,[]);},'AI_PERMISSION_DENIED');}
+    foreach(['store','merchant'] as $terminal){$context=$h->context;$context['terminal']=$terminal;mgdeny(function()use($h,$context){$h->gateway->handle('management_get',$context,[]);},'AI_PERMISSION_DENIED');mgdeny(function()use($h,$context){$h->gateway->handle('metric_registry_get',$context,[]);},'AI_PERMISSION_DENIED');}
     $context=$h->context;$context['can_configure']=false;$context['_refresh']=function()use($context){return $context;};
     mgdeny(function()use($h,$context){$h->gateway->handle('management_get',$context,[]);},'AI_PERMISSION_DENIED');
     mgdeny(function()use($h,$context){$h->gateway->handle('config_get',$context,[]);},'AI_PERMISSION_DENIED');
@@ -80,6 +83,17 @@ try {
     $h->auth['permission_version']='permission-revoked';$beforeQueries=$h->queries;
     $revoked=$h->start('那就换成消耗业绩，其他条件别动。',$source['answer']['context_ref']);
     mgcheck($revoked['status']==='FAILED'&&$h->queries===$beforeQueries,'published management cannot revive expired source authority');
+
+    // A source upgrade must keep management reachable, require explicit admin
+    // rebase + publish, and never silently execute a stale document.
+    $state=mgcall($h,'management_get');$stale=$state['draft'];$stale['source_registry_hash']=str_repeat('0',64);
+    $json=json_encode($stale,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);$hash=\app\services\ai\registry\AiRegistryValue::hash($stale);
+    $stmt=$h->db->prepare('UPDATE mohe_ai_management_state SET draft_json=? WHERE instance_key=?');$stmt->execute([$json,'fixture_r6']);
+    $stmt=$h->db->prepare('UPDATE mohe_ai_management_version SET document_json=?,document_hash=? WHERE instance_key=? AND version=?');$stmt->execute([$json,$hash,'fixture_r6',$state['active_version']]);
+    $staleState=mgcall($h,'management_get');mgcheck($staleState['source_changed']===true&&$staleState['active_document']===null,'stale source remains administrable but cannot appear active');
+    $rebased=mgcall($h,'management_rebase',['expected_revision'=>$staleState['revision']]);mgcheck($rebased['source_changed']===true&&$rebased['draft']['source_registry_hash']!==$stale['source_registry_hash'],'rebase updates draft only');
+    mgcall($h,'management_validate',['expected_revision'=>$rebased['revision']]);$republished=mgcall($h,'management_publish',['expected_revision'=>$rebased['revision']]);
+    mgcheck($republished['source_changed']===false&&is_array($republished['active_document']),'explicit publish activates current source');
 
     // A maintainer without report authority can configure, but cannot ask for data.
     $h->auth['can_use']=false;$h->context['can_use']=false;

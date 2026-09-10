@@ -7,7 +7,6 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\metric\MetricDictionaryServices;
-use app\services\report\StoreReportNormalDataScopeServices;
 use think\facade\Db;
 
 /**
@@ -52,6 +51,7 @@ final class CashierV3BusinessDashboardReadModel
                 'name' => $definition['name'],
                 'description' => $definition['summary'],
                 'value' => $definition['unit'] === '元' ? $this->centsToMoney($rawValue) : $rawValue,
+                'valueCents' => $definition['unit'] === '元' ? $rawValue : null,
                 'unit' => $definition['unit'],
                 'valueType' => $definition['unit'] === '元' ? 'money' : 'count',
             ];
@@ -85,13 +85,29 @@ final class CashierV3BusinessDashboardReadModel
         $metric = $this->metric($payload['metricCode'] ?? $payload['metric_code'] ?? 'cash_performance');
         $page = max(1, (int)($payload['page'] ?? 1));
         $pageSize = min(100, max(10, (int)($payload['pageSize'] ?? $payload['page_size'] ?? 20)));
-        $source = $this->source($metric, $range, $operator, $scope);
-        $total = (int)(clone $source['query'])->count();
-        $rows = (clone $source['query'])->order($source['time'], 'desc')->order('id', 'desc')
-            ->page($page, $pageSize)->select()->toArray();
+        return $this->detailResult($range, $metric, $page, $pageSize, $operator, $scope);
+    }
+
+    /** @return array<string,mixed> */
+    private function detailResult(array $range, string $metric, int $page, int $pageSize, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
+    {
+        if ($metric === 'debt_amount') {
+            // 欠款尚未纳入本轮注册指标，继续使用原有权威读模型。
+            $source = $this->source($metric, $range, $operator, $scope);
+            $total = (int)(clone $source['query'])->count();
+            $rows = (clone $source['query'])->order($source['time'], 'desc')->order('id', 'desc')
+                ->page($page, $pageSize)->select()->toArray();
+        } else {
+            $pageData = (new \app\services\query\metric\RegisteredMetricReadServices())->detailPage(
+                \app\services\query\metric\MetricDefinitionRegistry::canonical($metric),
+                $operator->tenantId(), [$operator->storeId()], $range, $page, $pageSize
+            );
+            $total = (int)$pageData['total'];
+            $rows = $pageData['rows'];
+        }
         $records = [];
         foreach ($rows as $row) {
-            $records[] = $this->detailRecord($metric, $row, $source['amount']);
+            $records[] = $this->detailRecord($metric, $row);
         }
         return [
             'metricCode' => $metric,
@@ -106,22 +122,17 @@ final class CashierV3BusinessDashboardReadModel
         ];
     }
 
-    /** @return array<string,mixed> */
-    public function export(array $payload, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
-    {
-        $payload['page'] = 1;
-        $payload['pageSize'] = 100;
-        $detail = $this->detail($payload, $operator, $scope);
-        return ['filename' => '运营概况-' . $detail['metricName'] . '-' . date('YmdHis') . '.csv', 'columns' => $detail['columns'], 'records' => $detail['records']];
-    }
-
     private function totalCents(string $metric, array $range, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): int
     {
+        if ($metric !== 'debt_amount') {
+            return (new \app\services\query\metric\RegisteredMetricReadServices())->summary(
+                \app\services\query\metric\MetricDefinitionRegistry::canonical($metric),
+                $operator->tenantId(), [$operator->storeId()], $range
+            );
+        }
         $source = $this->source($metric, $range, $operator, $scope);
         $amount = $source['amount'];
         $sql = "COALESCE(SUM({$amount}),0) AS amount";
-        if ($metric === 'service_count') $sql = 'COALESCE(SUM(quantity),0) AS amount';
-        if ($metric === 'debt_amount') $sql = "COALESCE(SUM({$amount}),0) AS amount";
         // ThinkORM's value('amount') replaces the aggregate select with the physical
         // column name. Read the aggregate row so the AS amount alias is preserved.
         $row = (clone $source['query'])->fieldRaw($sql)->find();
@@ -131,9 +142,33 @@ final class CashierV3BusinessDashboardReadModel
     /** @return array<int,array<string,mixed>> */
     private function trend(string $metric, array $range, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
     {
+        if ($metric !== 'debt_amount') {
+            $canonical = \app\services\query\metric\MetricDefinitionRegistry::canonical($metric);
+            $contract = \app\services\query\metric\MetricDefinitionRegistry::get($canonical);
+            $rows = (new \app\services\query\metric\RegisteredMetricReadServices())->dailyStoreTotals(
+                $canonical, $operator->tenantId(), [$operator->storeId()], $range
+            );
+            $map = [];
+            foreach ($rows as $row) {
+                $map[(string)$row['business_date']] = (int)$row['amount_cents'];
+            }
+            $points = [];
+            for ($date = $range['start']; $date <= $range['end']; $date = date('Y-m-d', strtotime($date . ' +1 day'))) {
+                $value = $map[$date] ?? 0;
+                $isMoney = $contract['storage_unit'] === 'fen';
+                $points[] = [
+                    'id' => $date,
+                    'label' => substr($date, 5),
+                    'value' => $isMoney ? $this->centsToMoney($value) : $value,
+                    'valueCents' => $isMoney ? $value : null,
+                    'unit' => $isMoney ? '元' : '次',
+                ];
+            }
+            return $points;
+        }
         $source = $this->source($metric, $range, $operator, $scope);
         $amount = $source['amount'];
-        $value = $metric === 'service_count' ? 'SUM(quantity)' : "SUM({$amount})";
+        $value = "SUM({$amount})";
         $dateColumn = $source['date'];
         $rows = (clone $source['query'])->fieldRaw("{$dateColumn} AS day, COALESCE({$value},0) AS amount")
             ->group($dateColumn)->orderRaw($dateColumn . ' ASC')->select()->toArray();
@@ -142,7 +177,7 @@ final class CashierV3BusinessDashboardReadModel
         $points = [];
         for ($date = $range['start']; $date <= $range['end']; $date = date('Y-m-d', strtotime($date . ' +1 day'))) {
             $value = $map[$date] ?? 0;
-            $points[] = ['id' => $date, 'label' => substr($date, 5), 'value' => $this->definition($metric)['unit'] === '元' ? $this->centsToMoney($value) : $value, 'unit' => $this->definition($metric)['unit']];
+            $points[] = ['id' => $date, 'label' => substr($date, 5), 'value' => $this->definition($metric)['unit'] === '元' ? $this->centsToMoney($value) : $value, 'valueCents' => $this->definition($metric)['unit'] === '元' ? $value : null, 'unit' => $this->definition($metric)['unit']];
         }
         return $points;
     }
@@ -150,9 +185,30 @@ final class CashierV3BusinessDashboardReadModel
     /** @return array<string,mixed> */
     private function ranking(string $metric, string $order, array $range, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
     {
+        // 欠款仍走原有权威读模型，不将本轮冻结指标强行送入注册表。
+        $canonical = $metric === 'debt_amount' ? null : \app\services\query\metric\MetricDefinitionRegistry::canonical($metric);
+        if ($canonical !== null) {
+            $ranking = (new \app\services\query\metric\RegisteredMetricReadServices())->defaultRanking(
+                $canonical, $operator->tenantId(), [$operator->storeId()], $range, 50, $order
+            );
+            $records = [];
+            foreach ($ranking['rows'] as $row) {
+                $records[] = [
+                    'id' => (int)$row['entity_id'], 'name' => (string)$row['entity_name'],
+                    'amount' => $this->definition($metric)['unit'] === '元' ? $this->centsToMoney((int)$row['metric_value']) : (int)$row['metric_value'],
+                    'amountCents' => $this->definition($metric)['unit'] === '元' ? (int)$row['metric_value'] : null,
+                ];
+            }
+            return [
+                'dimension' => (string)$ranking['dimension'], 'sortBy' => $metric, 'sortOrder' => $order,
+                'sortOptions' => array_map(function (string $code): array { return ['value' => $code, 'label' => $this->definition($code)['name']]; }, self::METRICS),
+                'columns' => [['key' => 'name', 'label' => '人员'], ['key' => 'amount', 'label' => $this->definition($metric)['name'], 'type' => $this->definition($metric)['unit'] === '元' ? 'money' : 'count']],
+                'records' => $records, 'isLoading' => false,
+            ];
+        }
         $source = $this->source($metric, $range, $operator, $scope);
         $amount = $source['amount'];
-        $value = $metric === 'service_count' ? 'SUM(quantity)' : "SUM({$amount})";
+        $value = "SUM({$amount})";
         $operator = $metric === 'debt_amount'
             ? "0 AS operator_id, '' AS operator_name"
             : 'operator_id AS operator_id, MAX(operator_name_snapshot) AS operator_name';
@@ -161,7 +217,7 @@ final class CashierV3BusinessDashboardReadModel
         $records = [];
         foreach ($rows as $row) {
             $raw = (int)$row['amount'];
-            $records[] = ['id' => (int)$row['operator_id'], 'name' => (string)$row['operator_name'], 'amount' => $this->definition($metric)['unit'] === '元' ? $this->centsToMoney($raw) : $raw];
+            $records[] = ['id' => (int)$row['operator_id'], 'name' => (string)$row['operator_name'], 'amount' => $this->definition($metric)['unit'] === '元' ? $this->centsToMoney($raw) : $raw, 'amountCents' => $this->definition($metric)['unit'] === '元' ? $raw : null];
         }
         return [
             'dimension' => 'operator', 'sortBy' => $metric, 'sortOrder' => $order,
@@ -183,46 +239,24 @@ final class CashierV3BusinessDashboardReadModel
                 ->field("d.id, d.debt_no AS business_no, d.member_id, d.created_at AS occurred_at, d.created_at AS settled_at, d.created_at AS recorded_at, d.store_id, 0 AS operator_id, '' AS operator_name_snapshot, sd.total_debt * 100 AS debt_amount");
             return ['query' => $query, 'amount' => 'sd.total_debt * 100', 'time' => 'occurred_at', 'date' => 'DATE(FROM_UNIXTIME(d.created_at))'];
         }
-        $table = 'cashier_v3_sale_fact'; $amount = 'sale_amount_cents';
-        if ($metric === 'cash_performance') { $table = 'cashier_v3_payment_fact'; $amount = 'amount_cents'; }
-        elseif ($metric === 'actual_performance') { $table = 'cashier_v3_performance_fact'; $amount = 'amount_cents'; }
-        elseif ($metric === 'balance_deduction') { $table = 'cashier_v3_balance_fact'; $amount = '-(principal_delta_cents + bonus_delta_cents)'; }
-        elseif ($metric === 'recharge_amount') { $table = 'cashier_v3_balance_fact'; $amount = 'principal_delta_cents'; }
-        elseif ($metric === 'service_count') { $table = 'cashier_v3_entitlement_service_fact'; $amount = 'quantity'; }
-        elseif ($metric === 'consumption_performance' || $metric === 'labor_performance') { $table = 'cashier_v3_performance_fact'; $amount = 'amount_cents'; }
-        $query = Db::name($table)->where('tenant_id', $tenantId)->where('store_id', $storeId)->whereBetween('business_date', [$range['start'], $range['end']]);
-        if ($metric === 'service_count') $query->where('service_status', 'completed');
-        else $query->where('status', 'effective');
-        if ($metric === 'service_count') {
-            (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, $table);
-        } elseif ($metric !== 'debt_amount') {
-            (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, $table . '.tenant_id', $table . '.order_id');
-        }
-        if ($metric === 'actual_performance') $query->where('performance_type', 'actual_performance_recorded');
-        if ($metric === 'balance_deduction') $query->where('balance_change_type', 'order_payment');
-        if ($metric === 'recharge_amount') $query->where('balance_change_type', 'recharge_credit');
-        if ($metric === 'consumption_performance') $query->where('performance_type', 'consumption_performance_recorded');
-        if ($metric === 'labor_performance') $query->where('performance_type', 'labor_performance_allocated');
-        return ['query' => $query, 'amount' => $amount, 'time' => 'settled_at', 'date' => 'business_date'];
+        throw new \LogicException('未注册指标不得使用门店运营看板旧取数通道。');
     }
 
-    private function detailRecord(string $metric, array $row, string $amount): array
+    private function detailRecord(string $metric, array $row): array
     {
-        $raw = $metric === 'service_count' ? (int)($row['quantity'] ?? 0) : ($metric === 'debt_amount' ? (int)($row['debt_amount'] ?? 0) : $this->rowAmount($row, $amount));
+        // Registered metric detail rows arrive with one already-calculated
+        // value.  The dashboard only formats it and must not reinterpret a
+        // source expression or field list.
+        $raw = $metric === 'debt_amount' ? (int)($row['debt_amount'] ?? 0) : (int)($row['metric_value'] ?? 0);
         return [
             'id' => (string)($row['fact_id'] ?? $row['service_fact_id'] ?? $row['id'] ?? ''),
             'businessDate' => (string)($row['business_date'] ?? date('Y-m-d', (int)($row['occurred_at'] ?? 0))),
             'businessNo' => (string)($row['order_no_snapshot'] ?? $row['document_no_snapshot'] ?? $row['business_no'] ?? ''),
             'memberName' => (string)($row['member_name_snapshot'] ?? ''), 'operatorName' => (string)($row['operator_name_snapshot'] ?? ''),
             'amount' => $this->definition($metric)['unit'] === '元' ? $this->centsToMoney($raw) : $raw,
+            'amountCents' => $this->definition($metric)['unit'] === '元' ? $raw : null,
             'status' => (string)($row['status'] ?? $row['service_status'] ?? '有效'),
         ];
-    }
-
-    private function rowAmount(array $row, string $amount): int
-    {
-        if ($amount === '-(principal_delta_cents + bonus_delta_cents)') return -((int)($row['principal_delta_cents'] ?? 0) + (int)($row['bonus_delta_cents'] ?? 0));
-        return (int)($row[$amount] ?? 0);
     }
 
     /** @return array{start:string,end:string} */
@@ -252,23 +286,20 @@ final class CashierV3BusinessDashboardReadModel
     /** @return array{name:string,summary:string,unit:string} */
     private function definition(string $code): array
     {
-        $fallback = [
-            'sales_amount' => ['销售额', '正式结账成功的销售明细金额。', '元'],
-            'cash_performance' => ['现金业绩', '七种记账收款成功金额，不含余额扣款和欠款。', '元'],
-            'actual_performance' => ['实际业绩', '现金业绩扣除合作方和外包销售人分配后的最终业绩。', '元'],
-            'balance_deduction' => ['余额扣款', '订单支付实际扣减的会员储值余额，不计入现金业绩。', '元'],
-            'recharge_amount' => ['充值', '充值成功实际进入会员余额的本金，赠金不计入。', '元'],
-            'debt_amount' => ['欠款', 'V3 充值产生并已建立权威债权的欠款金额。', '元'],
-            'service_count' => ['服务次数', '实际确认完成服务的项目次数。', '次'],
-            'consumption_performance' => ['消耗业绩', '项目完成服务后形成的项目级消耗业绩。', '元'],
-            'labor_performance' => ['劳动业绩', '项目完成服务后分配给手艺人的劳动业绩。', '元'],
-        ];
-        foreach ((new MetricDictionaryServices())->getDefinitions() as $definition) {
-            if ((string)($definition['code'] ?? '') === $code) {
-                return ['name' => (string)$definition['name'], 'summary' => (string)$definition['summary'], 'unit' => $code === 'service_count' ? '次' : '元'];
-            }
+        if ($code === 'debt_amount') {
+            return ['name' => '欠款', 'summary' => 'V3 充值产生并已建立权威债权的欠款金额。', 'unit' => '元'];
         }
-        return ['name' => $fallback[$code][0], 'summary' => $fallback[$code][1], 'unit' => $fallback[$code][2]];
+        $canonical = \app\services\query\metric\MetricDefinitionRegistry::canonical($code);
+        $contract = \app\services\query\metric\MetricDefinitionRegistry::get($canonical);
+        $definition = (new MetricDictionaryServices())->getTooltip($canonical);
+        if (($definition['user_ready'] ?? false) !== true) {
+            throw new \RuntimeException('DASHBOARD_METRIC_NOT_REGISTERED');
+        }
+        return [
+            'name' => (string)$definition['name'],
+            'summary' => (string)$definition['summary'],
+            'unit' => $contract['storage_unit'] === 'fen' ? '元' : '次',
+        ];
     }
 
     private function storeName(int $storeId): string
@@ -276,5 +307,5 @@ final class CashierV3BusinessDashboardReadModel
         return (string)(Db::name('system_store')->where('id', $storeId)->value('name') ?: '当前门店');
     }
 
-    private function centsToMoney(int $cents): string { return (string)intdiv($cents, 100); }
+    private function centsToMoney(int $cents): string { return \app\services\query\metric\MetricMoneyFormatter::integerYuan($cents); }
 }

@@ -25,6 +25,8 @@ Route::group('adminapi/ai',function () use($aiActions) {
     Route::post('management/publish','Ai/aiManagementPublish')->completeMatch();
     Route::post('management/rollback','Ai/aiManagementRollback')->completeMatch();
     Route::post('management/preview','Ai/aiManagementPreview')->completeMatch();
+    Route::post('management/rebase','Ai/aiManagementRebase')->completeMatch();
+    Route::get('metric-registry','Ai/aiMetricRegistryGet')->completeMatch();
 })->prefix('admin.v1.ai.')->middleware([
     \app\http\middleware\AiRequestGuardMiddleware::class,
 ]);

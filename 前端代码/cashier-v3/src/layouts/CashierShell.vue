@@ -184,7 +184,7 @@ watch(
 const sidebarPreferenceKey = 'cashier-v3-sidebar-collapsed'
 const isSidebarCollapsed = ref(readSidebarPreference())
 const isInventoryMenuExpanded = ref(false)
-const managementRouteNames = ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings']
+const managementRouteNames = ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings', 'cashier-v3-business-dashboard']
 const isManagementMenuExpanded = ref(managementRouteNames.includes(route.name))
 // 库存工作区与收银台共用当前 V3 会话；初始化时就读取，避免 HMR/路由重载
 // 期间库存组件先于点击事件挂载而拿到空 token。
@@ -206,7 +206,8 @@ const inventoryFeatureItems = [
 const visibleInventoryFeatureItems = computed(() => inventoryFeatureItems.filter((entry) => canUseFeature(entry.featureCode)))
 const managementFeatureItems = [
   { key: 'staff', label: '人员管理', to: { name: 'cashier-v3-staff-list' } },
-  { key: 'room-settings', label: '房间设置', to: { name: 'cashier-v3-room-settings' } }
+  { key: 'room-settings', label: '房间设置', to: { name: 'cashier-v3-room-settings' } },
+  { key: 'business-dashboard', label: '经营看板', to: { name: 'cashier-v3-business-dashboard' } }
 ]
 const isInventoryWorkspaceOpen = ref(false)
 const activeInventoryFeatureKey = ref('overview')
@@ -232,7 +233,7 @@ const menuItems = [
     icon: Settings,
     featureCode: 'cashier.v3.management_center',
     to: { name: 'cashier-v3-staff-list' },
-    activeRouteNames: ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings']
+    activeRouteNames: ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings', 'cashier-v3-business-dashboard']
   },
   {
     key: 'data',
@@ -240,7 +241,7 @@ const menuItems = [
     icon: ChartNoAxesCombined,
     featureCode: 'cashier.v3.management_center',
     to: { name: 'cashier-v3-store-business-reports' },
-    activeRouteNames: ['cashier-v3-store-business-reports', 'cashier-v3-business-dashboard']
+    activeRouteNames: ['cashier-v3-store-business-reports']
   },
   {
     key: 'targets',

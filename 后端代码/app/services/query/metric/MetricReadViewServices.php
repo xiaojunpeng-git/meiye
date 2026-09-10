@@ -21,21 +21,7 @@ final class MetricReadViewServices
     /** Implemented shared contracts, not a grant of entry/report access or instance deployment readiness. */
     public static function metricCapabilities(): array
     {
-        return [
-            'consume_amount' => ['metric_code' => 'consume_amount', 'name' => '消耗业绩', 'ai_query_ready' => true,
-                'metric_version' => 'consumption-completed-service-facts-v1', 'mapping_version' => 'group-consumption-canonical-map-v1',
-                'source_metric_code' => 'consumption_performance', 'source_metric_version' => 'group-management-dashboard-facts-v1',
-                'query_shapes' => ['summary', 'comparison', 'trend', 'ranking'], 'coverage_start' => self::COVERAGE_START,
-                'filter_grain' => 'store', 'business_filters' => [], 'readiness_reasons' => []],
-            'cash_performance' => ['metric_code' => 'cash_performance', 'name' => '现金业绩', 'ai_query_ready' => true,
-                'metric_version' => 'cash-collected-recharge-inclusive-v2', 'mapping_version' => 'group-cash-canonical-map-v2',
-                'source_metric_code' => 'cash_performance', 'source_metric_version' => 'group-management-cash-recharge-v2',
-                'query_shapes' => ['summary', 'comparison', 'trend', 'ranking'], 'coverage_start' => self::COVERAGE_START,
-                'filter_grain' => 'store', 'business_filters' => [], 'readiness_reasons' => []],
-            'actual_performance' => ['metric_code' => 'actual_performance', 'name' => '实际业绩', 'ai_query_ready' => false,
-                'metric_version' => null, 'query_shapes' => [], 'readiness_reasons' => ['METRIC_SEMANTICS_CONFLICT'],
-                'unavailable_message' => '实际业绩正在统一统计口径，暂不能查询。'],
-        ];
+        return MetricDefinitionRegistry::capabilities();
     }
 
     /** authorize must rebuild report permissions from the authenticated principal on EVERY invocation. */
@@ -63,6 +49,7 @@ final class MetricReadViewServices
             $storeNames = $normalized['query_shape'] === 'ranking' && $personnel===null ? $reader->storeNames($binding['store_ids']) : [];
             foreach ($ranges as $period => $range) {
                 foreach ($normalized['metric_codes'] as $metric) {
+                    $metricContract = MetricDefinitionRegistry::get($metric);
                     if ($personnel!==null) {
                         $points=$personnel['pairs']?$reader->personnelTotals($binding['tenant_id'],$binding['store_ids'],$range,$metric,$personnel['pairs']):[];
                         $totals=[];$sum=0;
@@ -70,7 +57,7 @@ final class MetricReadViewServices
                             $sum=$this->addAmount($sum,$point['amount_cents']);
                             $employee=$point['employee_id'];$totals[$employee]=$this->addAmount($totals[$employee]??0,$point['amount_cents']);
                         }
-                        if ($normalized['query_shape']==='summary') $results[]=['period'=>$period,'metric_code'=>$metric,'amount_cents'=>$sum,'storage_unit'=>'fen'];
+                        if ($normalized['query_shape']==='summary') $results[]=['period'=>$period,'metric_code'=>$metric,'amount_cents'=>$sum,'storage_unit'=>$metricContract['storage_unit']];
                         else {
                             $rows=[];
                             foreach ($totals as $employee=>$amount) {
@@ -82,7 +69,7 @@ final class MetricReadViewServices
                                 $sorted=$rows;usort($sorted,static function($a,$b)use($direction){return ($direction==='top'?($b['amount_cents']<=>$a['amount_cents']):($a['amount_cents']<=>$b['amount_cents']))?:($a['employee_id']<=>$b['employee_id']);});
                                 $groups[$direction]=array_slice($sorted,0,$rank['limit']);
                             }
-                            $results[]=['period'=>$period,'metric_code'=>$metric,'storage_unit'=>'fen','rows'=>$groups];
+                            $results[]=['period'=>$period,'metric_code'=>$metric,'storage_unit'=>$metricContract['storage_unit'],'rows'=>$groups];
                         }
                         continue;
                     }
@@ -94,20 +81,20 @@ final class MetricReadViewServices
                             foreach ($rows as &$direction) foreach ($direction as &$row) $row['store_name'] = $storeNames[$row['store_id']];
                             unset($row, $direction);
                         }
-                        $results[] = ['period' => $period, 'metric_code' => $metric, 'storage_unit' => 'fen', 'rows' => $rows];
+                        $results[] = ['period' => $period, 'metric_code' => $metric, 'storage_unit' => $metricContract['storage_unit'], 'rows' => $rows];
                         continue;
                     }
-                    $value = $metric === 'cash_performance'
-                        ? $reader->cashTotals($binding['tenant_id'], $binding['store_ids'], $range)['gross_cents']
-                        : $reader->performanceTotal($binding['tenant_id'], $binding['store_ids'], $range, 'consumption_performance_recorded');
-                    $results[] = ['period' => $period, 'metric_code' => $metric, 'amount_cents' => $value, 'storage_unit' => 'fen'];
+                    $value = $reader->metricTotal($binding['tenant_id'], $binding['store_ids'], $range, $metric);
+                    $result = ['period' => $period, 'metric_code' => $metric, 'storage_unit' => $metricContract['storage_unit']];
+                    $result[$metricContract['storage_unit'] === 'fen' ? 'amount_cents' : 'count'] = $value;
+                    $results[] = $result;
                 }
             }
             return $results;
         });
         // A revocation during the read cannot mint a usable view.
         if ($this->binding(call_user_func($this->authorize, $principal), $normalized['store_ids']) !== $binding) $this->fail('METRIC_PERMISSION_CHANGED');
-        $capabilities = self::metricCapabilities()+PersonnelPerformanceReadServices::capabilities();
+        $capabilities = self::metricCapabilities();
         $readiness = []; $metricVersions = []; $allReady = true;
         foreach ($normalized['metric_codes'] as $metric) {
             $readiness[$metric] = $capabilities[$metric];
@@ -199,7 +186,10 @@ final class MetricReadViewServices
         } elseif ($query['ranking'] !== null) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         if (!is_array($query['metric_codes']) || $query['metric_codes'] === [] || count($query['metric_codes']) > 2
             || array_keys($query['metric_codes']) !== range(0, count($query['metric_codes']) - 1)) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
-        $allowed=$person?array_keys(PersonnelPerformanceReadServices::capabilities()):['cash_performance','consume_amount'];
+        $allowed=[];
+        foreach (self::metricCapabilities() as $code=>$capability) {
+            if (($capability['filter_grain']==='person')===$person && ($capability['ai_query_ready']??false)===true) $allowed[]=$code;
+        }
         foreach ($query['metric_codes'] as $metric) if (!in_array($metric, $allowed, true)) $this->fail('METRIC_NOT_REGISTERED');
         if ($person && (count($query['metric_codes'])!==1 || !in_array($query['query_shape'],['summary','ranking'],true))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if (count(array_unique($query['metric_codes'])) !== count($query['metric_codes'])) $this->fail('METRIC_QUERY_SCHEMA_INVALID');

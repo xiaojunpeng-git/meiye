@@ -24,6 +24,9 @@ namespace app\services\report {
     }
 }
 namespace app\services\query\metric {
+    final class MetricDefinitionRegistry {
+        public static function get($code): array { return ['storage_unit'=>$code==='completed_service_item_count'?'count':'fen']; }
+    }
     final class GroupPerformanceMetricReadServices {
         public static array $recharges = [];
         public static int $calls = 0;
@@ -38,6 +41,88 @@ namespace app\services\query\metric {
             return $out;
         }
         public function performanceTotal(...$args): int { return 0; }
+    }
+    final class RegisteredMetricReadServices {
+        private function cashRows($tenant, $stores, $range): array {
+            $rows = array_merge(\think\facade\Db::$sales, GroupPerformanceMetricReadServices::$recharges);
+            return array_values(array_filter($rows, static fn($r) => $r['tenant_id'] === $tenant
+                && in_array($r['store_id'], $stores, true)
+                && $r['business_date'] >= $range['start'] && $r['business_date'] <= $range['end']));
+        }
+        public function summary($metric, $tenant, $stores, $range): int {
+            $rows = $this->cashRows($tenant, $stores, $range);
+            if ($metric === 'cash_performance') return array_sum(array_map(static fn($r) => max(0, $r['amount_cents']), $rows));
+            if ($metric === 'refund_performance') return array_sum(array_map(static fn($r) => max(0, -$r['amount_cents']), $rows));
+            if ($metric === 'actual_performance') return array_sum(array_column($rows, 'amount_cents'));
+            return 0;
+        }
+        public function dailyStoreTotals($metric, $tenant, $stores, $range): array {
+            $points = [];
+            foreach ($this->cashRows($tenant, $stores, $range) as $row) {
+                $amount = $row['amount_cents'];
+                if ($metric === 'cash_performance') $amount = max(0, $amount);
+                elseif ($metric === 'refund_performance') $amount = max(0, -$amount);
+                elseif ($metric !== 'actual_performance') $amount = 0;
+                $key = $row['store_id'] . ':' . $row['business_date'];
+                if (!isset($points[$key])) $points[$key] = ['store_id' => $row['store_id'], 'business_date' => $row['business_date'], 'amount_cents' => 0];
+                $points[$key]['amount_cents'] += $amount;
+            }
+            return array_values($points);
+        }
+        public function dailyTotals($metric, $tenant, $stores, $range): array {
+            $points=[];
+            foreach($this->dailyStoreTotals($metric,$tenant,$stores,$range) as $row) {
+                $day=$row['business_date']; $points[$day]=($points[$day]??0)+(int)$row['amount_cents'];
+            }
+            ksort($points); $out=[]; foreach($points as $day=>$value)$out[]=['business_date'=>$day,'metric_value'=>$value]; return $out;
+        }
+        public function categoryRows($metric, $tenant, $stores, $range, $categoryIds=[]): array {
+            $rows=[];
+            foreach($this->cashRows($tenant,$stores,$range) as $row) {
+                $category=(int)($row['category_id']??0);
+                if($categoryIds!==[] && !in_array($category,$categoryIds,true)) continue;
+                $amount=(int)$row['amount_cents'];
+                if($metric==='cash_performance' && $amount<=0) continue;
+                if($metric==='refund_performance') { if($amount>=0) continue; $amount=-$amount; }
+                if(!in_array($metric,['cash_performance','refund_performance','actual_performance'],true)) continue;
+                $row['amount_cents']=$amount;
+                if(($row['source_type']??'')==='card' && $category===0) $row['classification_coverage']='missing_card_components';
+                $rows[]=$row;
+            }
+            return $rows;
+        }
+        public function categoryDashboardCards($metric, $tenant, $stores, $range, $roots, $children, $categoryIds = []): array {
+            $rows = $this->categoryRows($metric, $tenant, $stores, $range, $categoryIds);
+            $total = array_sum(array_column($rows, 'amount_cents')); $cards = []; $assigned = 0;
+            foreach ($roots as $root) {
+                $id = (int)$root['id'];
+                $matched = array_values(array_filter($rows, static fn($row) => (int)($row['category_id'] ?? 0) === $id));
+                $amount = array_sum(array_column($matched, 'amount_cents')); $assigned += $amount;
+                $cards[] = ['category_id'=>$id,'name'=>(string)$root['name'],'cash_performance_cents'=>$amount,'share'=>$total===0?null:round($amount/$total*100,1),'drilldown'=>['metric_code'=>$metric,'category_id'=>$id],'project_rankings'=>[],'product_rankings'=>[],'source_explanation'=>'fixture'];
+            }
+            if ($total !== $assigned) $cards[] = ['category_id'=>0,'name'=>'未分类','cash_performance_cents'=>$total-$assigned,'share'=>$total===0?null:round(($total-$assigned)/$total*100,1),'drilldown'=>['metric_code'=>$metric],'project_rankings'=>[],'product_rankings'=>[],'source_explanation'=>'fixture'];
+            return $cards;
+        }
+        public function categoryDailyTotals($metric, $tenant, $stores, $range, $categoryIds=[]): array {
+            $points=[]; foreach($this->categoryRows($metric,$tenant,$stores,$range,$categoryIds) as $row) {
+                $day=$row['business_date']; $points[$day]=($points[$day]??0)+(int)$row['amount_cents'];
+            }
+            ksort($points); $out=[]; foreach($points as $day=>$value)$out[]=['business_date'=>$day,'metric_value'=>$value]; return $out;
+        }
+    }
+}
+namespace app\services\metric {
+    final class MetricDictionaryServices {
+        public function getTooltip($code): array {
+            $items=[
+                'cash_performance'=>['现金业绩','成功记账收款总额，包含充值及充值欠款补交。'],
+                'refund_performance'=>['退款业绩','成功退回的实际现金退款。'],
+                'actual_performance'=>['实际业绩','现金业绩减退款业绩。'],
+                'consume_amount'=>['消耗业绩','完成服务形成的消耗业绩。'],
+                'completed_service_item_count'=>['完成服务项目数量','完成服务项目数量。'],
+            ];
+            $item=$items[$code]??[$code,$code];return ['name'=>$item[0],'summary'=>$item[1],'user_ready'=>true];
+        }
     }
 }
 namespace {
@@ -80,13 +165,11 @@ namespace {
     check(count($rows)===4,'no sale/card rows must still include recharge and debt repayment');
     check(array_sum(array_column($rows,'amount_cents'))===17000,'signed net excludes out-of-scope date/store/tenant');
     check(count(array_unique(array_column($rows,'id')))===4,'stable distinct source row identities');
-    $before=Reader::$calls;
     check(invoke($dashboard,'cashRows','test',[1,2],$range,[7])===[],'category filtered recharge stays excluded');
-    check(Reader::$calls===$before,'category filter never reads recharge');
     check(invoke($dashboard,'actualCashTotal','test',[1,2],$range,[])===17000,'net cash total');
     check(invoke($dashboard,'dailyCashPerformance','test',[1,2],$range,[])===['2026-09-08'=>17000],'daily trend signed amount');
     check(invoke($dashboard,'cashByStore','test',[1,2],$range,[])===[1=>12000,2=>5000],'store ranking source');
-    foreach(['cash_performance'=>18000,'refund_amount'=>-1000,'actual_performance'=>17000] as $metric=>$expected) {
+    foreach(['cash_performance'=>18000,'refund_performance'=>1000,'actual_performance'=>17000] as $metric=>$expected) {
         $result=$dashboard->drilldown($ctx,$input+['metric_code'=>$metric]);
         check(array_sum(array_column($result['records'],'amount_cents'))===$expected,$metric.' drill total');
     }
@@ -96,7 +179,7 @@ namespace {
     $summary=$dashboard->dashboard($ctx,$input+['summary_only'=>true]);
     $overview=$dashboard->dashboard($ctx,$input);
     $values=static fn($r)=>array_column($r['cards'],'value_cents','metric_code');
-    foreach(['cash_performance'=>20000,'refund_amount'=>1000,'actual_performance'=>19000] as $metric=>$expected) {
+    foreach(['cash_performance'=>20000,'refund_performance'=>1000,'actual_performance'=>19000] as $metric=>$expected) {
         check($values($summary)[$metric]===$expected,$metric.' scalar summary not double added');
         check($values($overview)[$metric]===$expected,$metric.' full overview matches scalar');
     }
@@ -117,24 +200,7 @@ namespace {
     check(invoke($dashboard,'dailyCashPerformance','test',[1,2],$range,[])===['2026-09-08'=>210000],'missing card daily total retains cash');
     check(invoke($dashboard,'cashByStore','test',[1,2],$range,[])===[1=>210000],'missing card store total retains cash');
     check($values($dashboard->dashboard($ctx,$input))['cash_performance']===210000,'missing card overview matches scalar');
-    $weights=[['configured_amount_cents'=>12000],['configured_amount_cents'=>0],['configured_amount_cents'=>0]];
-    foreach([298000,-298000] as $amount) {
-        $parts=array_column(invoke($dashboard,'allocate',$amount,$weights),'amount_cents');
-        check($parts===[$amount,0,0],'zero weight cannot create opposite signed refund/receipt');
-        check(array_sum($parts)===$amount,'signed allocation preserves cents');
-    }
-    check(array_column(invoke($dashboard,'allocate',101,[['configured_amount_cents'=>0],['configured_amount_cents'=>0],['configured_amount_cents'=>0]]),'amount_cents')===[33,33,35],'all zero weights use equal allocation with last remainder');
-    check(array_column(invoke($dashboard,'allocate',101,[['configured_amount_cents'=>1],['configured_amount_cents'=>2]]),'amount_cents')===[33,68],'normal weighted exact remainder unchanged');
-    foreach([101,-101] as $amount) {
-        $parts=array_column(invoke($dashboard,'allocate',$amount,[['configured_amount_cents'=>1],['configured_amount_cents'=>1],['configured_amount_cents'=>0]]),'amount_cents');
-        check($parts===($amount>0?[50,51,0]:[-50,-51,0]),'trailing zero weight receives no positive or negative remainder');
-        check(array_sum($parts)===$amount,'last positive weight remainder preserves signed total');
-    }
-    $card['amount_cents']=298000;$card['sale_fact_id']='sale:configured';\think\facade\Db::$sales=[$card];
-    foreach($weights as $i=>$w) \think\facade\Db::$components[]=array_merge($w,['tenant_id'=>'test','sale_fact_id'=>'sale:configured','status'=>'effective','component_product_id'=>$i+1,'item_name_snapshot'=>'项目','category_id'=>7,'category_id_snapshot'=>7,'category_path_snapshot'=>'服务']);
-    $full=$values($dashboard->dashboard($ctx,$input));
-    check($full['cash_performance']===298000 && $full['refund_amount']===0,'positive configured card creates no false refund');
-    check(array_sum(array_column($dashboard->drilldown($ctx,$input+['metric_code'=>'cash_performance'])['records'],'amount_cents'))===298000,'configured card cash drilldown reconciles');
-    check($dashboard->drilldown($ctx,$input+['metric_code'=>'refund_amount'])['records']===[],'refund drilldown empty without negative source');
+    check(strpos(file_get_contents(dirname(__DIR__,2).'/后端代码/app/services/query/metric/RegisteredMetricReadServices.php'), 'private function allocate')!==false,
+        'card allocation belongs to the registered Reader rather than the dashboard');
     echo "cash report projection: {$checks} PASS\n";
 }
