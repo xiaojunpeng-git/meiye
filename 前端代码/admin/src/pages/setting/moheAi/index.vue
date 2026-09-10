@@ -31,7 +31,7 @@
         <h2>能力目录</h2><p class="muted">目录来自已登记的后端能力。管理配置不能新增指标公式、SQL、DAO 或扩大数据权限。</p>
         <p class="muted">下方场景是可复用的引导与执行模板，不是用户问题白名单。实际可查询对象、指标及组合由统一底层合同与当前数据权限决定；排行流程可复用于已授权的门店或人员数据。</p>
         <ai-analysis-inventory v-if="catalog.analysis_inventory" :inventory="catalog.analysis_inventory" />
-        <h3>一级 · 业务场景</h3><div v-for="(scene, code) in catalog.scenes" :key="code" class="subbox"><strong>{{ scene.label }}</strong><p>{{ scene.goal }}</p><code>{{ code }}</code><details v-if="scene.skill_code"><summary>查看 Skill 详情 · {{ scene.skill_code }}</summary><ai-skill-detail :scene-code="code" :catalog="catalog" :published="state.active_document" :version="activeVersion" /></details></div>
+        <h3>一级 · 业务 Skill</h3><div v-for="(scene, code) in catalog.scenes" :key="code" class="subbox"><strong>{{ scene.label }}</strong><p>{{ scene.goal }}</p><p v-if="scene.domains" class="muted">覆盖：{{ scene.domains.map(domain => domain.label).join('、') }}</p><code>{{ code }}</code><details v-if="scene.skill_code"><summary>查看 Skill 详情 · {{ scene.skill_code }}</summary><ai-skill-detail :scene-code="code" :catalog="catalog" :published="state.active_document" :version="activeVersion" /></details></div>
         <h3>二级 · Skill 与工作流</h3><div v-for="(flow, code) in catalog.workflows" :key="code" class="subbox"><strong>{{ workflowLabel(code) }}</strong><p>Skill：{{ workflowSkill(flow) }} · {{ workflowStatus(code) }}</p><code>{{ code }}</code><p>支持形态：{{ flow.shape || flow.query_shape || '按已登记契约' }}</p></div>
         <h3>三级 · 只读 Tool 与执行节点</h3><div v-for="(tool, code) in catalog.tools" :key="code" class="subbox"><strong>{{ tool.label || code }}</strong><p>{{ tool.description || '只读能力，参数与权限由后端校验' }}</p><code>{{ code }}</code></div>
       </section>
@@ -96,7 +96,7 @@ export default {
     nodeLabel(code) { return { query: '统一查询', catalog: '指标说明', evidence: '证据校验', render: '确定性渲染', export: 'Excel 导出' }[code] || code; },
     workflowLabel(code) { return { wf_performance_summary: '业绩汇总', wf_performance_trend: '业绩趋势', wf_performance_ranking: '表现排行（按底层对象能力）', wf_performance_comparison: '两期对比', wf_metric_definition: '指标解释' }[code] || code; },
     workflowNodes(code) { return (this.catalog.workflows[code] || {}).nodes || []; },
-    workflowSkill(flow) { const scene = this.catalog.scenes && this.catalog.scenes[flow.scene]; return scene ? scene.skill_code : '指标解释专用流程'; },
+    workflowSkill(flow) { const scene = this.catalog.scenes && this.catalog.scenes[flow.scene]; return scene ? scene.skill_code : '未绑定业务 Skill'; },
     workflowStatus(code) { return this.document.workflows[code].enabled ? '草稿中启用' : '草稿中停用'; },
     printable(value) { return JSON.stringify(value, null, 2); }, formatTime(value) { return value ? new Date(Number(value) * 1000).toLocaleString() : '—'; },
     saveDraft() { return this.perform(async () => { this.hydrate(await request('PUT', '/management/draft', { expected_revision: this.state.revision, document: this.document })); this.notice = '草稿已保存，尚未发布。'; }); },

@@ -42,7 +42,9 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             $code=$result['metric_code']??null;
             // Keep export eligibility explicit; names come from the same registered
             // read contract as the cards, never from model/result display text.
-            if (!isset($capabilities[$code]) || ($result['storage_unit']??null)!=='fen'
+            $storageUnit = $result['storage_unit'] ?? null;
+            if (!isset($capabilities[$code]) || !in_array($storageUnit, ['fen', 'count'], true)
+                || ($capabilities[$code]['storage_unit'] ?? null) !== $storageUnit
                 || ($capabilities[$code]['ai_query_ready']??false)!==true) throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
             if (!in_array($result['period']??null,['current','comparison'],true)) throw new \RuntimeException('METRIC_EXPORT_PERIOD_INVALID');
             $period=$result['period']; $range=$period==='current'?['start'=>$view['query']['start_date'],'end'=>$view['query']['end_date']]:$view['query']['compare_range'];
@@ -52,23 +54,30 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             $label=$person?($view['personnel_selection_label']??''): '当前授权范围';
             if (!is_string($label)||$label==='') throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
             $base=['metric_name'=>$capabilities[$code]['name'],'period_name'=>$period==='current'?'本期':'对比期','start_date'=>$range['start'],'end_date'=>$range['end'],
-                'store_name'=>$label.($person?'（按当前任职筛选）':''),'ranking_direction'=>'','business_date'=>''];
-            if (isset($result['amount_cents'])) self::append($rows,$base,$result['amount_cents']);
-            elseif ($view['query']['query_shape']==='trend') foreach ($result['rows'] as $point) self::append($rows,array_replace($base,['business_date'=>$point['business_date']]),$point['amount_cents']);
+                'store_name'=>$label.($person?'（按当前任职筛选）':''),'ranking_direction'=>'','business_date'=>'',
+                'unit'=>$storageUnit === 'fen' ? '元' : '个'];
+            if (isset($result['amount_cents']) || isset($result['count'])) self::append($rows,$base,$storageUnit==='fen' ? ($result['amount_cents']??null) : ($result['count']??null),$storageUnit);
+            elseif ($view['query']['query_shape']==='trend') foreach ($result['rows'] as $point) self::append($rows,array_replace($base,['business_date'=>$point['business_date']]),$point['amount_cents'],$storageUnit);
             elseif ($view['query']['query_shape']==='ranking') foreach ($result['rows'] as $direction=>$points) foreach ($points as $point) {
                 if (!in_array($direction,['top','bottom'],true)) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
                 $name=$person?($point['employee_name']??null):($point['store_name']??null);
                 if (!is_string($name) || $name==='') throw new \RuntimeException('METRIC_EXPORT_STORE_NAME_INVALID');
-                self::append($rows,array_replace($base,['store_name'=>$name.($person?'；范围：'.$base['store_name']:''),'ranking_direction'=>$direction==='top'?'前列':'后列']),$point['amount_cents']);
+                self::append($rows,array_replace($base,['store_name'=>$name.($person?'；范围：'.$base['store_name']:''),'ranking_direction'=>$direction==='top'?'前列':'后列']),$point['amount_cents'],$storageUnit);
             } else throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
         }
         return $rows;
     }
-    private static function append(array &$rows,array $base,$cents): void
+    private static function append(array &$rows,array $base,$value,string $storageUnit): void
     {
-        if (!is_int($cents)) throw new \RuntimeException('METRIC_EXPORT_AMOUNT_INVALID');
-        $digits=str_pad(ltrim((string)$cents,'-'),3,'0',STR_PAD_LEFT);
-        $amount=($cents<0?'-':'').substr($digits,0,-2).'.'.substr($digits,-2);
-        $rows[]=array_merge(['row_id'=>(string)(count($rows)+1)],$base,['amount_yuan'=>$amount]);
+        if (!is_int($value)) {
+            throw new \RuntimeException($storageUnit === 'fen' ? 'METRIC_EXPORT_AMOUNT_INVALID' : 'METRIC_EXPORT_COUNT_INVALID');
+        }
+        if ($storageUnit === 'fen') {
+            $digits=str_pad(ltrim((string)$value,'-'),3,'0',STR_PAD_LEFT);
+            $display=($value<0?'-':'').substr($digits,0,-2).'.'.substr($digits,-2);
+        } elseif ($storageUnit === 'count') {
+            $display=(string)$value;
+        } else throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
+        $rows[]=array_merge(['row_id'=>(string)(count($rows)+1)],$base,['metric_value'=>$display]);
     }
 }

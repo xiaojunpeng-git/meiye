@@ -64,8 +64,13 @@ final class AiManagementPolicy
             if(is_array($order)&&AiRegistryValue::isList($order)&&count($order)===count($slots)&&!array_diff($order,$slots)&&count(array_unique($order))===count($slots)) $candidate['guidance']['slot_order']=$order;
             foreach($base['guidance']['prompts'] as $key=>$unused) if(is_string($guidance['prompts'][$key]??null)) $candidate['guidance']['prompts'][$key]=$guidance['prompts'][$key];
         }
-        foreach($base['scenes'] as $code=>$unused) if(is_array($old['scenes'][$code]??null)) {
-            foreach(['label','goal','examples'] as $field) if(array_key_exists($field,$old['scenes'][$code])) $candidate['scenes'][$code][$field]=$old['scenes'][$code][$field];
+        foreach($base['scenes'] as $code=>$unused) {
+            // R8 renamed the single interaction boundary. Preserve the only
+            // administrator-editable presentation fields when old documents
+            // are rebased; no executable declaration is inherited.
+            $savedScene=$old['scenes'][$code]??($code==='store_operations'?($old['scenes']['registered_metric_analysis']??null):null);
+            if (!is_array($savedScene)) continue;
+            foreach(['label','goal','examples'] as $field) if(array_key_exists($field,$savedScene)) $candidate['scenes'][$code][$field]=$savedScene[$field];
         }
         foreach($base['workflows'] as $code=>$current) if(is_array($old['workflows'][$code]??null)) {
             $saved=$old['workflows'][$code];
@@ -92,7 +97,19 @@ final class AiManagementPolicy
     public static function registry(array $document): AiBusinessRegistry { return new AiBusinessRegistry(self::applyManifest($document)); }
     public static function catalog(): array
     {
-        $m=AiBusinessManifest::definitions();return ['source_registry_hash'=>AiRegistryValue::hash($m),'registry_version'=>$m['registry_version'],'scenes'=>$m['scenes'],'tools'=>$m['tools'],'actions'=>$m['actions'],'workflows'=>$m['workflows'],'export_node'=>$m['export_node'],'defaults'=>self::defaults(),
+        $m=AiBusinessManifest::definitions(); $sourceRegistryHash=AiRegistryValue::hash($m); $runtimeSkills=\app\services\ai\registry\AiSkillDocument::catalog();
+        // Keep the human-readable source beside the matching scene.  Some
+        // administration clients intentionally retain only scene payloads;
+        // embedding this read-only copy prevents the real runtime document
+        // from disappearing from the detail view through a client projection.
+        foreach ($m['scenes'] as &$scene) foreach ($runtimeSkills as $skill) {
+            if ($skill['skill_code'] === $scene['skill_code']) {
+                $scene['runtime_skill_document']=['source_path'=>$skill['source_path'],'source_hash'=>$skill['source_hash'],'markdown'=>$skill['markdown']];
+                break;
+            }
+        }
+        unset($scene);
+        return ['source_registry_hash'=>$sourceRegistryHash,'registry_version'=>$m['registry_version'],'scenes'=>$m['scenes'],'runtime_skills'=>$runtimeSkills,'tools'=>$m['tools'],'actions'=>$m['actions'],'workflows'=>$m['workflows'],'export_node'=>$m['export_node'],'defaults'=>self::defaults(),
             'analysis_inventory'=>\app\services\query\metric\AnalysisCapabilityCatalogFactory::make()->inventory()];
     }
     /** Reorders only unresolved groups; date endpoints stay together. Does not interpret user text. */

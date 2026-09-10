@@ -196,14 +196,15 @@ final class AiGatewayServices
                 if (!empty($view['current']['blocking_reason'])) throw new RuntimeException($view['current']['blocking_reason']);
                 $discovered=$this->discoverIntent($context,$view['current']);
                 $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
-                $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode($view))+2048));
+                $runtimeSkill=$this->registry()->modelSkill('store_operations');
+                $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$view,$runtimeSkill]))+2048));
                 $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
                 $this->runs->prepareAttempt($owner,$id,$generation,$worker,'understand','model',hash('sha256',json_encode($view)),'siliconflow');
                 $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand');
                 try {
                     $checkpoint=function () use($owner,$id,$generation,$worker):void { $this->runs->checkpoint($owner,$id,$generation,$worker); };
                     $reply=$this->model ? call_user_func($this->model,$view,$discovered,$configuration,$checkpoint)
-                        : (new SiliconFlowClient())->select($view,$discovered,$configuration['model'],$configuration['api_key'],20000,$checkpoint);
+                        : (new SiliconFlowClient())->select($view,$discovered,$configuration['model'],$configuration['api_key'],20000,$checkpoint,$runtimeSkill);
                     $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
                 } catch (\Throwable $e) {
                     $unknown=in_array($e->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED'],true);
@@ -479,7 +480,7 @@ final class AiGatewayServices
 
     private function understandAnalysis(array $context,array $owner,string $id,int $generation,string $worker,array $body,array $projection,array $configuration): array
     {
-        $caps=$this->capabilities($this->fresh($context));$dictionary=new \app\services\metric\MetricDictionaryServices();$summaries=[];
+        $caps=$this->capabilities($this->fresh($context));$runtimeSkill=$this->registry()->modelSkill('store_operations');$dictionary=new \app\services\metric\MetricDictionaryServices();$summaries=[];
         foreach ($caps['metric_codes'] as $code) {
             $tooltip=$dictionary->getTooltip($code);if (($tooltip['user_ready']??false)!==true) continue;
             $kind=$caps['metric_readiness'][$code]['filter_grain'];
@@ -521,14 +522,14 @@ final class AiGatewayServices
         }
         $safe['outbound']['has_unresolved_conditions']=(bool)$safe['local_conditions'];
         $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
-        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$safe['outbound'],$summaries]))+2048));
+        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$safe['outbound'],$summaries,$runtimeSkill]))+2048));
         $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
         $this->runs->prepareAttempt($owner,$id,$generation,$worker,'understand','model',hash('sha256',json_encode([$safe['outbound'],$summaries])),'siliconflow');
         $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand');
         try {
             $checkpoint();
             $reply=$this->model?call_user_func($this->model,$safe['outbound'],$summaries,$configuration,$checkpoint)
-                :(new SiliconFlowClient())->understand($safe['outbound'],$summaries,$configuration['model'],$configuration['api_key'],20000,$checkpoint);
+                :(new SiliconFlowClient())->understand($safe['outbound'],$summaries,$configuration['model'],$configuration['api_key'],20000,$checkpoint,$runtimeSkill);
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
         } catch (\Throwable $error) {
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand',in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');throw $error;

@@ -32,7 +32,7 @@ $workerReflection=new ReflectionClass(\app\services\query\UnifiedQueryExportWork
 $write=$workerReflection->getMethod('writeXlsx'); $write->setAccessible(true);
 $view=['query'=>['start_date'=>'2026-09-08','end_date'=>'2026-09-08','query_shape'=>'summary'],
     'results'=>[['metric_code'=>'consume_amount','storage_unit'=>'fen','period'=>'current','amount_cents'=>12345]]];
-$fields=[]; foreach (\app\services\query\metric\MetricReadViewExportRegistrar::fields() as $key=>$label) $fields[]=['key'=>$key,'label'=>$label,'type'=>$key==='amount_yuan'?'amount':'text'];
+$fields=[]; foreach (\app\services\query\metric\MetricReadViewExportRegistrar::fields() as $key=>$label) $fields[]=['key'=>$key,'label'=>$label,'type'=>$key==='metric_value'?'decimal':'text'];
 $key=$write->invoke($worker,'uqe_'.str_repeat('e',32),str_repeat('f',64),$fields,\app\services\query\metric\MetricReadViewExportProvider::project($view),[],false,null);
 $verify=$reflect->getMethod('verifyFile'); $verify->setAccessible(true); $verify->invoke($runtime,$fixtureRoot.'/'.$key,$view);
 $check(true,'Actual shared XLSX passes exact original-result readback');
@@ -70,21 +70,35 @@ foreach ($fixtures as $shape=>$fixture) {
     foreach ($rows as $i=>$row) {
         $sheet=$sheetBook->getActiveSheet();
         $check($sheet->getCell('B'.($i+2))->getValue()===$row['metric_name'], $shape.' XLSX correct metric label');
-        $check(number_format((float)$sheet->getCell('I'.($i+2))->getValue(),2,'.','')===$row['amount_yuan'], $shape.' XLSX cents preserved');
+        $check(number_format((float)$sheet->getCell('I'.($i+2))->getValue(),2,'.','')===$row['metric_value'], $shape.' XLSX cents preserved');
     }
     $sheetBook->disconnectWorksheets();
 }
 $summaryRows=$project::project($fixtures['summary']);
-$check(array_column($summaryRows,'amount_yuan')===['123.45','-0.01'], 'mixed summary is formatted without re-computing totals');
+$check(array_column($summaryRows,'metric_value')===['123.45','-0.01'], 'mixed summary is formatted without re-computing totals');
+$countFixture=['query'=>$view['query'],'results'=>[[
+    'metric_code'=>'completed_service_item_count','storage_unit'=>'count','period'=>'current','count'=>3,
+], [
+    'metric_code'=>'customer_active','storage_unit'=>'count','period'=>'current','count'=>2,
+]]];
+$countRows=$project::project($countFixture);
+$check(array_column($countRows,'metric_value')===['3','2'] && array_column($countRows,'unit')===['个','个'],
+    'registered counts export as counts with their own unit');
+$countKey=$write->invoke($worker,'uqe_'.md5('fixture-count'),str_repeat('f',64),$fields,$countRows,[],false,null);
+$verify->invoke($runtime,$fixtureRoot.'/'.$countKey,$countFixture);
+$countBook=\PhpOffice\PhpSpreadsheet\IOFactory::load($fixtureRoot.'/'.$countKey);
+$check((string)(int)$countBook->getActiveSheet()->getCell('I2')->getValue()==='3' && $countBook->getActiveSheet()->getCell('J2')->getValue()==='个',
+    'count XLSX keeps numeric value and visible unit');
+$countBook->disconnectWorksheets();
 $large=$fixtures['summary'];
 $large['results'][0]['amount_cents']=PHP_INT_MAX;
 $large['results'][1]['amount_cents']=PHP_INT_MIN;
 $largeRows=$project::project($large);
-$check(array_column($largeRows,'amount_yuan')===['92233720368547758.07','-92233720368547758.08'], '64-bit cents boundaries never pass through float');
+$check(array_column($largeRows,'metric_value')===['92233720368547758.07','-92233720368547758.08'], '64-bit cents boundaries never pass through float');
 $largeKey=$write->invoke($worker,'uqe_'.md5('fixture-large'),str_repeat('f',64),$fields,$largeRows,[],false,null);
 $verify->invoke($runtime,$fixtureRoot.'/'.$largeKey,$large);
 $largeBook=\PhpOffice\PhpSpreadsheet\IOFactory::load($fixtureRoot.'/'.$largeKey);
-$check($largeBook->getActiveSheet()->getCell('I2')->getValue()===$largeRows[0]['amount_yuan'] && $largeBook->getActiveSheet()->getCell('I3')->getValue()===$largeRows[1]['amount_yuan'], 'large exact amounts survive actual XLSX writer as precise text');
+$check($largeBook->getActiveSheet()->getCell('I2')->getValue()===$largeRows[0]['metric_value'] && $largeBook->getActiveSheet()->getCell('I3')->getValue()===$largeRows[1]['metric_value'], 'large exact amounts survive actual XLSX writer as precise text');
 $largeBook->disconnectWorksheets();
 $comparisonRows=$project::project($fixtures['comparison']);
 $check(array_column($comparisonRows,'period_name')===['本期','本期','对比期','对比期'] && array_column($comparisonRows,'start_date')===['2026-09-08','2026-09-08','2026-09-07','2026-09-07'], 'comparison preserves exact periods and ranges');

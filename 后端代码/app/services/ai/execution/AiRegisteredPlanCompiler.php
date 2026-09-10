@@ -54,7 +54,7 @@ final class AiRegisteredPlanCompiler
         $cost=array_sum(array_column($nodes,'timeout_ms'));
         $pathLimit=$workflow['max_path_ms']+($format==='screen_and_xlsx'?10000:0);
         if ($cost>$pathLimit||$pathLimit+$reserve>$remaining) AiRegistryValue::fail('AI_WORKFLOW_BUDGET_EXHAUSTED');
-        $counters=['node_visit_count'=>count($nodes),'skill_execution_count'=>$definition?0:1,'tool_call_count'=>0,'workflow_transition_count'=>count($nodes),'supplement_count'=>0];
+        $counters=['node_visit_count'=>count($nodes),'skill_execution_count'=>$workflow['scene']===null?0:1,'tool_call_count'=>0,'workflow_transition_count'=>count($nodes),'supplement_count'=>0];
         foreach ($nodes as $node) $counters['tool_call_count']+=$node['charges']['tool_call_count'];
         $compiled=['schema_version'=>'mohe-compiled-registry-v1','registry_version'=>$this->registry->version(),'registry_hash'=>$this->registry->fingerprint(),
             'capability_snapshot'=>$snapshot,'workflow_code'=>$workflowCode,'workflow_version'=>$workflow['version'],'scene_code'=>$workflow['scene'],

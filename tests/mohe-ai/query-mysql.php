@@ -289,7 +289,7 @@ try {
     $exportPlan=app\services\query\UnifiedQueryJson::decode(app\services\query\UnifiedQueryJson::encode($exportPlan));
     $exportContext=['scope_dimensions'=>['metric_read_ref'=>[$exportView['read_consistency_ref']]]];
     $exportResult=$exportProvider->executeFrozenPlan($exportContext,$exportPlan,'query',$exportFields);
-    mysqlCheck($exportResult['exportRows'][0]['amount_yuan']==='95.00' && $exportResult['result_hash']===$exportView['result_hash'],'export reuses exact view cents and evidence hash');
+    mysqlCheck($exportResult['exportRows'][0]['metric_value']==='95.00' && $exportResult['exportRows'][0]['unit']==='元' && $exportResult['result_hash']===$exportView['result_hash'],'export reuses exact view cents and evidence hash');
     $pageRejected=false; try {$exportProvider->executeFrozenPlan($exportContext,$exportPlan,'page',$exportFields);} catch(Throwable $e) {$pageRejected=true;}
     mysqlCheck($pageRejected,'shared metric export refuses page scope');
     $binding['store_ids']=[2];

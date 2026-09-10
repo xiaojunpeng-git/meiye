@@ -125,15 +125,20 @@ final class MetricDefinitionRegistry
             if (!is_array($definition) || ($definition['user_ready'] ?? false) !== true) {
                 throw new MetricQueryContractException('METRIC_DICTIONARY_NOT_READY', '指标字典未就绪。');
             }
+            // A read view carries its storage unit all the way through evidence,
+            // deterministic rendering and the guarded export projection.  Counts
+            // are therefore a first-class registered result, not a failed attempt
+            // to masquerade as cents.
+            $aiReady = in_array($item['storage_unit'], ['fen', 'count'], true);
             $out[$code] = [
-                'metric_code' => $code, 'name' => (string)$definition['name'], 'ai_query_ready' => $item['storage_unit'] === 'fen',
+                'metric_code' => $code, 'name' => (string)$definition['name'], 'ai_query_ready' => $aiReady,
                 'metric_version' => $item['metric_version'], 'mapping_version' => self::VERSION,
                 'source_metric_code' => $code, 'source_metric_version' => $item['metric_version'],
                 'query_shapes' => $item['query_shapes'], 'coverage_start' => self::COVERAGE_START,
                 'filter_grain' => $item['filter_grain'], 'business_filters' => $item['business_filters'],
                 'storage_unit' => $item['storage_unit'],
                 'derivation' => $item['derivation'] ?? null,
-                'readiness_reasons' => $item['storage_unit'] === 'fen' ? [] : ['AI_COUNT_EXPORT_CONTRACT_PENDING'],
+                'readiness_reasons' => $aiReady ? [] : ['AI_STORAGE_UNIT_UNSUPPORTED'],
             ];
         }
         return $out;

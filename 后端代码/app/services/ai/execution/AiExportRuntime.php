@@ -305,7 +305,13 @@ final class AiExportRuntime
                 if ($sheet->getCell($letter.'1')->getValue()!==$label) throw new \RuntimeException('AI_EXPORT_CONTENT_MISMATCH');
                 foreach ($expected as $index=>$row) {
                     $cell=$sheet->getCell($letter.($index+2)); $actual=$cell->getValue(); $wanted=$row[$key];
-                    if ($cell->getDataType()==='f' || ($key==='amount_yuan' && !is_string($actual) ? number_format((float)$actual,2,'.','')!==$wanted : (string)$actual!==(string)$wanted)) throw new \RuntimeException('AI_EXPORT_CONTENT_MISMATCH');
+                    $numericValue = $key === 'metric_value' && !is_string($actual);
+                    $sameValue = $numericValue
+                        ? (($row['unit'] ?? null) === '元'
+                            ? number_format((float)$actual, 2, '.', '') === $wanted
+                            : (string)(int)$actual === (string)$wanted)
+                        : (string)$actual === (string)$wanted;
+                    if ($cell->getDataType()==='f' || !$sameValue) throw new \RuntimeException('AI_EXPORT_CONTENT_MISMATCH');
                 }
             }
         } finally { $book->disconnectWorksheets(); }

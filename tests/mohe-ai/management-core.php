@@ -7,12 +7,16 @@ use app\services\ai\management\AiManagementStore as Store;
 $checks=0;
 function check($ok,$name){global $checks;if(!$ok)throw new RuntimeException($name);$checks++;}
 function rejects(callable $f,string $reason){try{$f();}catch(Throwable $e){check($e->getMessage()===$reason,$e->getMessage().' != '.$reason);return;}throw new RuntimeException('Expected '.$reason);}
-$d=Policy::defaults();check(Policy::validate($d)===$d,'defaults');check(count(Policy::catalog()['workflows'])===5,'catalog');Policy::applyManifest($d);$checks++;
+$d=Policy::defaults();check(Policy::validate($d)===$d,'defaults');$catalog=Policy::catalog();check(count($catalog['workflows'])===5,'catalog');
+check(($catalog['scenes']['store_operations']['runtime_skill_document']['source_hash']??null)===$catalog['scenes']['store_operations']['skill_source_hash'],'catalog keeps the exact readable Skill source with its scene');
+check(($catalog['scenes']['store_operations']['runtime_skill_document']['markdown']??'')!=='' ,'catalog supplies runtime markdown even for scene-only clients');Policy::applyManifest($d);$checks++;
 foreach(['sql','metric_codes','permissions','handler'] as $key){$bad=$d;$bad[$key]='arbitrary';rejects(function()use($bad){Policy::validate($bad);},'AI_MANAGEMENT_DOCUMENT_INVALID');}
 $bad=$d;$bad['source_registry_hash']=str_repeat('0',64);rejects(function()use($bad){Policy::validate($bad);},'AI_MANAGEMENT_SOURCE_CHANGED');
 $old=$bad;$old['guidance']['max_rounds']=5;$old['guidance']['prompts']['metric_code']='请选择业绩类型';
 $rebased=Policy::rebase($old);check($rebased['source_registry_hash']===$d['source_registry_hash'],'rebase adopts current source hash');
 check($rebased['guidance']['max_rounds']===5&&$rebased['guidance']['prompts']['metric_code']==='请选择业绩类型','rebase preserves editable guidance');
+$legacyScene=$old;$legacyScene['scenes']=['registered_metric_analysis'=>$old['scenes']['store_operations']];$legacyScene['scenes']['registered_metric_analysis']['label']='旧版经营分析';
+$legacyRebased=Policy::rebase($legacyScene);check($legacyRebased['scenes']['store_operations']['label']==='旧版经营分析','legacy Skill presentation rebases onto store operations');
 $badSchema=$old;$badSchema['schema_version']='unknown';rejects(function()use($badSchema){Policy::rebase($badSchema);},'AI_MANAGEMENT_REBASE_INVALID');
 foreach([2,6,'3'] as $round){$bad=$d;$bad['guidance']['max_rounds']=$round;rejects(function()use($bad){Policy::validate($bad);},'AI_MANAGEMENT_DOCUMENT_INVALID');}
 foreach([3,4,5] as $round){$good=$d;$good['guidance']['max_rounds']=$round;check(Policy::validate($good)===$good,'legal rounds');}

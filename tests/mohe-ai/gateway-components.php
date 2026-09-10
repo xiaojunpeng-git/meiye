@@ -15,6 +15,7 @@ namespace app\services\ai\model {
 }
 namespace {
     $root = dirname(__DIR__, 2) . '/后端代码/app/services/ai/';
+    require_once __DIR__ . '/fixture-autoload.php';
     foreach (['contract/AiContractException.php','contract/AiStrictJson.php','model/AiModelInputProjector.php','model/SiliconFlowClient.php','execution/AiWorkflowPlanner.php','config/AiPrivateStorage.php','config/AiConfigStore.php'] as $file) require_once $root . $file;
     use app\services\ai\model\AiModelInputProjector;
     use app\services\ai\model\SiliconFlowClient;
@@ -103,11 +104,13 @@ namespace {
     $response = function($content,$finish='stop') { return json_encode(['choices'=>[['finish_reason'=>$finish,'message'=>['content'=>$content]]],'usage'=>['prompt_tokens'=>8,'completion_tokens'=>4]]); };
     $validJson = json_encode($selection);
     $GLOBALS['sfResponse']=$response($validJson);
-    $result=$client->select($view,$cap['metric_codes'],'fixture/model','fixture-key',1000,function(){});
+    $skill=(new \app\services\ai\registry\AiBusinessRegistry())->modelSkill('store_operations');
+    $result=$client->select($view,$cap['metric_codes'],'fixture/model','fixture-key',1000,function(){},$skill);
     check($result['selection']===$selection,'model valid response');
     check($GLOBALS['sfEndpoint']===SiliconFlowClient::ENDPOINT,'fixed endpoint');
     check($GLOBALS['sfOptions'][CURLOPT_FOLLOWLOCATION]===false,'redirect prohibited');
     check(json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true)['temperature']===0,'deterministic vocabulary selection temperature');
+    check((json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true)['messages'][4]['content']??'')!=='' && strpos(json_encode(json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true)),'skill_store_operations')!==false,'real model request carries the published runtime Skill contract');
     check($result['usage']['input_tokens']===8,'usage recorded');
     $definitionSelection=['decision'=>'query','query_shape'=>'definition','metric_codes'=>['cash_performance'],'date_code'=>'UNSPECIFIED'];
     $GLOBALS['sfResponse']=$response(json_encode($definitionSelection));
@@ -144,10 +147,11 @@ namespace {
     $meanings=[['metric_code'=>'staff_labor_yeji','name'=>'劳动业绩','summary'=>'按规则分配给手艺人的业绩','object_kind'=>'person']];
     $intent=['object_kind'=>'person','object_term'=>'技师','operation'=>'ranking','metric_codes'=>[],'needs_metric_choice'=>true];
     $GLOBALS['sfResponse']=$response(json_encode($intent));
-    $understood=$client->understand($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){});
+    $understood=$client->understand($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){},$skill);
     check($understood['intent']===$intent,'general interpretation separates object, operation and missing criterion');
     $outbound=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
     check(strpos(json_encode($outbound),'recent_user_intents')===false,'new question understanding does not replay conversation history');
+    check(strpos(json_encode($outbound),'member_operations')!==false&&strpos(json_encode($outbound),'partner_product_performance')!==false,'model understanding receives all published operating scenarios');
     foreach ([array_merge($intent,['sql'=>'SELECT 1']),array_merge($intent,['metric_codes'=>['invented']]),array_merge($intent,['object_term'=>'张三'])] as $invalid) {
         $GLOBALS['sfResponse']=$response(json_encode($invalid));
         rejects(function()use($client,$safeQuestion,$meanings){$client->understand($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){});},isset($invalid['metric_codes'][0])?'AI_MODEL_METRIC_UNKNOWN':'AI_MODEL_RESPONSE_INVALID');

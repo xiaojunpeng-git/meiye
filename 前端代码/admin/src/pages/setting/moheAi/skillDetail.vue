@@ -1,7 +1,8 @@
 <template>
   <section class="skill-detail" :aria-label="scene.skill_code + ' 详情'">
     <h3>{{ scene.label }} · Skill v{{ scene.skill_version }}</h3>
-    <p>只读查看后端注册内容，不是可编辑的 SKILL.md。当前发布版本：{{ version }}。未保存或未发布的草稿不在本详情中生效。</p>
+    <p>此 Skill 的业务范围来自后端受版本校验的 SKILL.md；当前发布版本：{{ version }}。未保存或未发布的草稿不在本详情中生效。</p>
+    <details v-if="runtimeSkill"><summary>查看运行时 SKILL.md（只读）</summary><pre>{{ runtimeSkill.markdown }}</pre></details>
     <h4>场景与能力边界</h4>
     <p>{{ scene.goal }}</p>
     <p v-if="activeScene">已发布场景说明：{{ activeScene.goal }}</p>
@@ -45,6 +46,7 @@ export default {
     flows() { return Object.keys(this.catalog.workflows || {}).filter(code => this.catalog.workflows[code].scene === this.sceneCode).map(code => ({ ...this.catalog.workflows[code], code })); },
     actions() { return (this.scene.actions || []).filter(code => this.catalog.actions && this.catalog.actions[code]).map(code => ({ ...this.catalog.actions[code], code })); },
     tools() { const codes = new Set(this.actions.map(action => action.tool)); this.flows.forEach(flow => flow.nodes.forEach(node => { if (node.tool) codes.add(node.tool); })); return Array.from(codes).filter(code => (this.catalog.tools || {})[code]).map(code => ({ ...this.catalog.tools[code], code })); },
+    runtimeSkill() { return this.scene.runtime_skill_document || (this.catalog.runtime_skills || []).find(skill => skill.skill_code === this.scene.skill_code) || null; },
     raw() { return JSON.stringify({ scene: this.scene, actions: this.actions, workflows: this.flows, tools: this.tools, export_node: this.tools.some(t => t.code === 'verified_export_create') ? this.catalog.export_node : undefined }, null, 2); }
   },
   methods: {

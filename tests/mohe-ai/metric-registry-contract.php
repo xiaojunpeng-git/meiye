@@ -35,6 +35,9 @@ metricRegistryCheck(MetricDefinitionRegistry::get('refund_performance')['reader_
 metricRegistryCheck(MetricDefinitionRegistry::canonical('service_count') === 'completed_service_item_count', 'page alias resolves without a second formula');
 metricRegistryCheck(MetricDefinitionRegistry::get('completed_service_item_count')['storage_unit'] === 'count'
     && MetricDefinitionRegistry::get('customer_active')['storage_unit'] === 'count', 'count metrics never masquerade as cents');
+metricRegistryCheck(MetricDefinitionRegistry::capabilities()['completed_service_item_count']['ai_query_ready'] === true
+    && MetricDefinitionRegistry::capabilities()['customer_active']['ai_query_ready'] === true,
+    'registered quantity and people-count metrics are AI query-ready with their own unit');
 metricRegistryCheck((MetricDefinitionRegistry::get('sales_amount')['category_reader']['strategy'] ?? '') === 'sale_completed_allocation',
     'sales amount declares its category reader instead of leaving reports to sum sale facts');
 

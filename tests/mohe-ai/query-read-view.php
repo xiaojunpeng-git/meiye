@@ -37,8 +37,11 @@ queryCheck(strpos($consumptionCalls, "service_status='completed'") !== false, 'c
 queryCheck(strpos($cashCalls, 'limit') === false && strpos($consumptionCalls, 'limit') === false, 'no fact limit hidden in metric totals');
 $capabilities = MetricReadViewServices::metricCapabilities();
 queryCheck($capabilities['consume_amount']['ai_query_ready'] === true && count($capabilities['consume_amount']['query_shapes']) === 4, 'consumption implemented contracts registered');
-queryCheck($capabilities['cash_performance']['ai_query_ready'] === true && count($capabilities['cash_performance']['query_shapes']) === 4 && $capabilities['cash_performance']['readiness_reasons'] === [], 'cash recharge-inclusive contract registered');
-queryCheck($capabilities['actual_performance']['ai_query_ready'] === true, 'confirmed actual formula is registered');
+    queryCheck($capabilities['cash_performance']['ai_query_ready'] === true && count($capabilities['cash_performance']['query_shapes']) === 4 && $capabilities['cash_performance']['readiness_reasons'] === [], 'cash recharge-inclusive contract registered');
+    queryCheck($capabilities['actual_performance']['ai_query_ready'] === true, 'confirmed actual formula is registered');
+    queryCheck($capabilities['completed_service_item_count']['ai_query_ready'] === true
+        && $capabilities['customer_active']['ai_query_ready'] === true,
+        'registered count contracts are query-ready without becoming cents');
 foreach ([[], [0], ['1'], [1, 1], [1 => 1]] as $stores) queryReject(function () use ($reader, $range, $stores) { $reader->cashTotals('0', $stores, $range); }, 'METRIC_SOURCE_SCOPE_INVALID');
 queryReject(function () use ($reader, $range) { $reader->metricTotal('0', [1], $range, 'invented'); }, 'METRIC_NOT_REGISTERED');
 foreach (['1.00', '1e3', '9223372036854775808', 1.5, null] as $bad) {
@@ -89,6 +92,11 @@ try {
     $shrunk = $query; $shrunk['store_ids'] = [1];
     $narrow = $service->create($principal, $shrunk);
     queryCheck($narrow['binding']['store_ids'] === [1], 'requested scope narrows');
+    $countQuery = $query; $countQuery['metric_codes'] = ['completed_service_item_count', 'customer_active'];
+    $countView = $service->create($principal, $countQuery);
+    queryCheck($countView['ai_query_ready'] === true && array_column($countView['results'], 'count') === [0, 0]
+        && array_column($countView['results'], 'storage_unit') === ['count', 'count'],
+        'count result preserves registered units through the immutable read view');
     $binding['store_ids'] = [2];
     queryReject(function () use ($service, $principal, $shrunk, $narrow) { $service->replay($principal, $shrunk, $narrow['read_consistency_ref']); }, 'METRIC_PERMISSION_DENIED');
     $binding['store_ids'] = [1, 2];
@@ -97,7 +105,7 @@ try {
     queryReject(function () use ($store) { $store->get('../outside'); }, 'METRIC_READ_VIEW_UNAVAILABLE');
     $now += 86400;
     queryReject(function () use ($service, $principal, $query, $view) { $service->replay($principal, $query, $view['read_consistency_ref']); }, 'METRIC_READ_VIEW_UNAVAILABLE');
-    queryCheck($store->cleanup() === 3, 'all expired views physically removed');
+    queryCheck($store->cleanup() === 4, 'all expired views physically removed');
     queryCheck(iterator_count(new FilesystemIterator($temp)) === 0, 'no fixture content retained');
 } finally {
     foreach (new DirectoryIterator($temp) as $file) if (!$file->isDot() && $file->isFile() && !$file->isLink()) unlink($file->getPathname());

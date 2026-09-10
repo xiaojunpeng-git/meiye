@@ -41,7 +41,7 @@ try {
  $context=$auth;$context['_refresh']=function()use(&$auth){return $auth;};
  $boot=$gateway->handle('bootstrap',$context,['client_session_id'=>'device1']);
  verifyGateway($boot['enabled'] && $boot['history_round_limit']===20,'bootstrap enabled +20');
- verifyGateway($boot['capabilities']['metric_codes']===['cash_performance','refund_performance','actual_performance','consume_amount','sales_amount','balance_deduction_amount','recharge_amount'],'all registered amount metrics exposed from the shared catalog');
+ verifyGateway($boot['capabilities']['metric_codes']===['cash_performance','refund_performance','actual_performance','consume_amount','sales_amount','balance_deduction_amount','recharge_amount','completed_service_item_count','customer_active'],'all query-ready store metrics exposed from the shared catalog');
  verifyGateway(!isset($boot['api_key']),'bootstrap never key');
  $make=function($request,$question,$history=[])use($gateway,$context,$boot){$input=['client_request_id'=>$request,'conversation_id'=>'conversation1','client_session_id'=>'device1','window_token'=>$boot['window_token'],'question'=>$question,'history'=>$history,'output_format'=>'screen','guidance_schema_version'=>'mohe-clarification-v2'];return [$gateway->handle('create',$context,$input),$input];};
  $binding=function($run){return ['client_session_id'=>'device1','generation'=>$run['generation'],'run_delivery_token'=>$run['run_delivery_token']];};

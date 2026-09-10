@@ -101,22 +101,22 @@ export default {
       component: () => import('@/pages/report/data/six_dimension')
     },
     {
-		    path: 'shop/eshop',
-		    name: `${pre}shop_eshop`,
-		    meta: {
-		        auth: ['setting-shop-eshop'],
-		        title: '网店模式'
-		    },
-		    component: () => import('@/pages/setting/shop/eshop')
+      path: 'shop/eshop',
+      name: `${pre}shop_eshop`,
+      meta: {
+        auth: ['setting-shop-eshop'],
+        title: '网店模式'
+      },
+      component: () => import('@/pages/setting/shop/eshop')
     },
     {
-		    path: 'shop/entry_rules',
-		    name: `${pre}shop_rules`,
-		    meta: {
-		        auth: ['setting-shop-entry_rules'],
-		        title: '进店规则'
-		    },
-		    component: () => import('@/pages/setting/shop/rules')
+      path: 'shop/entry_rules',
+      name: `${pre}shop_rules`,
+      meta: {
+        auth: ['setting-shop-entry_rules'],
+        title: '进店规则'
+      },
+      component: () => import('@/pages/setting/shop/rules')
     },
     {
       path: 'shop/agreemant',
@@ -155,13 +155,13 @@ export default {
       component: () => import('@/pages/setting/systemRole/index')
     },
     {
-		    path: 'system_role/add/:id?',
-		    name: `${pre}roleAdd`,
-		    meta: {
-		        auth: ['setting-system_role-add'],
-		        title: '商品添加'
-		    },
-		    component: () => import('@/pages/setting/systemRole/add')
+      path: 'system_role/add/:id?',
+      name: `${pre}roleAdd`,
+      meta: {
+        auth: ['setting-system_role-add'],
+        title: '商品添加'
+      },
+      component: () => import('@/pages/setting/systemRole/add')
     },
     {
       path: 'system_admin/index',
@@ -656,60 +656,14 @@ export default {
       },
       component: () => import('@/pages/setting/cityDelivery/statistics')
     },
-    // 平台零时
     {
-		    path: 'platform/index',
-		    name: `${pre}platform`,
-		    meta: {
-		        auth: ['setting-freight-express'],
-		        title: '门店'
-		    },
-		    component: () => import('@/pages/platform/index/index')
-    },
-    {
-		    path: 'platform/list/index',
-		    name: `${pre}list`,
-		    meta: {
-		        auth: ['setting-freight-express'],
-		        title: '门店列表'
-		    },
-		    component: () => import('@/pages/platform/list/index')
-    },
-    {
-		    path: 'platform/order/index',
-		    name: `${pre}orderExpress`,
-		    meta: {
-		        auth: ['setting-freight-express'],
-		        title: '门店订单'
-		    },
-		    component: () => import('@/pages/platform/order/index')
-    },
-    {
-		    path: 'platform/bill/index',
-		    name: `${pre}bill`,
-		    meta: {
-		        auth: ['setting-freight-express'],
-		        title: '账单记录'
-		    },
-		    component: () => import('@/pages/platform/bill/index')
-    },
-    {
-		    path: 'platform/setting/index',
-		    name: `${pre}setting`,
-		    meta: {
-		        auth: ['setting-freight-express'],
-		        title: '财务设置'
-		    },
-		    component: () => import('@/pages/platform/setting/index')
-    },
-    {
-		    path: 'storage',
-		    name: `${pre}storage`,
-		    meta: {
-		        // auth: ['setting-storage'],
-		        title: '存储设置'
-		    },
-		    component: () => import('@/pages/setting/storage/index')
+      path: 'storage',
+      name: `${pre}storage`,
+      meta: {
+        // auth: ['setting-storage'],
+        title: '存储设置'
+      },
+      component: () => import('@/pages/setting/storage/index')
     },
     {
       path: 'system_form',
