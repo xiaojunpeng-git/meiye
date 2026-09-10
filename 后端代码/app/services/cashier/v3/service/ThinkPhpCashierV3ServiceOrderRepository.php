@@ -48,12 +48,19 @@ final class ThinkPhpCashierV3ServiceOrderRepository implements CashierV3ServiceO
     ): array {
         // The guard already serializes every writer for this entitlement. This
         // first read only discovers ids so locks can follow the global order:
-        // guard -> service order id -> complete line set.
+        // guard -> service order id -> complete line set. Reservation service
+        // orders record a planned service, not a checkout occupation, so they
+        // are deliberately excluded even when historical lines use the old
+        // ENTITLEMENT marker with a zero occupied_times value.
         $discovered = $this->rows(Db::name(self::LINE_TABLE)
-            ->where('tenant_id', $tenantId)
-            ->where('source_type', self::LINE_SOURCE_ENTITLEMENT)
-            ->where('entitlement_source_detail_id', $entitlementSourceDetailId)
-            ->order('service_order_id asc,id asc')
+            ->alias('service_line')
+            ->join(self::ORDER_TABLE . ' service_order', 'service_order.id = service_line.service_order_id AND service_order.tenant_id = service_line.tenant_id')
+            ->field('service_line.*')
+            ->where('service_line.tenant_id', $tenantId)
+            ->where('service_line.source_type', self::LINE_SOURCE_ENTITLEMENT)
+            ->where('service_line.entitlement_source_detail_id', $entitlementSourceDetailId)
+            ->where('service_order.source_type', '<>', 'RESERVATION')
+            ->order('service_line.service_order_id asc,service_line.id asc')
             ->select());
 
         $orderIds = [];

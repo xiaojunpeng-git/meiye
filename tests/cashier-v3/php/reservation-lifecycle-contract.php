@@ -17,6 +17,7 @@ $independentDocumentMigration = file_get_contents($root . '/后端代码/databas
 $lifecycle = file_get_contents($root . '/后端代码/app/services/cashier/v3/reservation/CashierV3ReservationLifecycleServices.php');
 $checkoutEntitlement = file_get_contents($root . '/后端代码/app/services/cashier/v3/checkout/CashierV3DirectSnapshotEntitlementSettlementServices.php');
 $projection = file_get_contents($root . '/后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php');
+$serviceOrderRepository = file_get_contents($root . '/后端代码/app/services/cashier/v3/service/ThinkPhpCashierV3ServiceOrderRepository.php');
 $completionFacts = file_get_contents($root . '/后端代码/app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php');
 $member = file_get_contents($root . '/后端代码/app/services/cashier/v3/reservation/MemberV3ReservationServices.php');
 $mobileReservation = file_get_contents($root . '/后端代码/app/services/mobile/reservation/MobileReservationServices.php');
@@ -55,7 +56,8 @@ reservationLifecycleOk('预约不冻结收银权益，结账只读取实时卡�
     strpos($module, 'occupyLinesInTx($tenant') === false
     && strpos($member, 'occupyLinesInTx($tenantId') === false
     && strpos($projection, "'剩余次数已被预约占用'") === false
-    && strpos($checkoutEntitlement, "->where('service_order.source_type', '<>', 'RESERVATION')") !== false);
+    && strpos($checkoutEntitlement, "->where('service_order.source_type', '<>', 'RESERVATION')") !== false
+    && strpos($serviceOrderRepository, "->where('service_order.source_type', '<>', 'RESERVATION')") !== false);
 reservationLifecycleOk('预约行保存并回显权益来源明细，旧行兼容为未付款来源',
     strpos($module, "'project_source' => \$isEntitlement ? 'ENTITLEMENT' : 'UNPAID'") !== false
     && strpos($module, "'entitlement_source_detail_id' => \$isEntitlement") !== false
