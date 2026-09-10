@@ -21,7 +21,7 @@ import TriangleAlert from '@lucide/vue/dist/esm/icons/triangle-alert.mjs'
 import UserPlus from '@lucide/vue/dist/esm/icons/user-plus.mjs'
 import Users from '@lucide/vue/dist/esm/icons/users.mjs'
 import WalletCards from '@lucide/vue/dist/esm/icons/wallet-cards.mjs'
-import { customerAnalyticsPreviewData, customerAnalyticsScopePreview } from '@/dev/customerAnalyticsPreviewData'
+import { customerAnalyticsPreviewData } from '@/dev/customerAnalyticsPreviewData'
 import { queryCustomerAnalytics, queryCustomerAnalyticsScope } from '@/services/customerAnalyticsApi'
 
 const groups = [
@@ -61,14 +61,14 @@ function localDateString(date = new Date()) {
 const today = localDateString()
 const customStart = ref(`${today.slice(0, 4)}-01-01`)
 const customEnd = ref(today)
-const region = ref('全部区域')
-const store = ref('全部门店')
 const demoState = ref('normal')
 const loading = ref(false)
 const notice = ref('正在读取客户分析数据…')
 const scopeOpen = ref(false)
-const selectedOrg = ref(customerAnalyticsScopePreview.organization)
-const selectedStores = ref([])
+const scopeTree = ref([])
+const selectedOrgId = ref(null)
+const selectedStoreIds = ref([])
+const expandedOrgIds = ref([])
 const consumptionMode = ref('cash')
 const rankingPageSize = 10
 const appearanceCashPage = ref(1)
@@ -119,12 +119,61 @@ function setResponsiveRoot(enabled) {
   }
 }
 
-onMounted(() => { setResponsiveRoot(true); loadReport('查询'); queryCustomerAnalyticsScope().catch(() => {}) })
+onMounted(async () => {
+  setResponsiveRoot(true)
+  await loadScope()
+  loadReport('查询')
+})
 onBeforeUnmount(() => setResponsiveRoot(false))
 
 const activeTitle = computed(() => groups.flatMap((group) => group.items).find((item) => item.key === active.value)?.label || '客户概况')
 const currentPeriodLabel = computed(() => ({ month: '本月', year: '本年', custom: '自定义' }[period.value] || '本年'))
-const scopeLabel = computed(() => selectedStores.value.length ? `${selectedOrg.value} / ${selectedStores.value.join('、')}` : `${selectedOrg.value} / 全部门店`)
+function flattenScopeNodes(nodes, type, result = []) {
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (String(node?.node_type || '') === type) result.push(node)
+    flattenScopeNodes(node?.children, type, result)
+  }
+  return result
+}
+function collectStoreNodes(nodes, result = []) {
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (String(node?.node_type || '') === 'store') result.push(node)
+    else collectStoreNodes(node?.children, result)
+  }
+  return result
+}
+const scopeOrganizations = computed(() => flattenScopeNodes(scopeTree.value, 'org'))
+function visibleScopeOrganizations(nodes, depth = 0, result = []) {
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (String(node?.node_type || '') !== 'org') continue
+    const id = Number(node?.id || 0)
+    const childOrganizations = (Array.isArray(node?.children) ? node.children : []).filter((child) => String(child?.node_type || '') === 'org')
+    result.push({ node, depth, expandable: childOrganizations.length > 0 })
+    if (id > 0 && expandedOrgIds.value.includes(id)) visibleScopeOrganizations(childOrganizations, depth + 1, result)
+  }
+  return result
+}
+const visibleOrganizations = computed(() => visibleScopeOrganizations(scopeTree.value))
+const selectedOrganization = computed(() => scopeOrganizations.value.find((node) => Number(node.id) === Number(selectedOrgId.value)) || null)
+const scopeStores = computed(() => {
+  const source = selectedOrganization.value ? [selectedOrganization.value] : scopeTree.value
+  const unique = new Map()
+  collectStoreNodes(source).forEach((node) => {
+    const id = Number(node?.id || 0)
+    if (id > 0) unique.set(id, node)
+  })
+  return [...unique.values()]
+})
+const selectedStores = computed(() => {
+  const selected = new Set(selectedStoreIds.value.map(Number))
+  return scopeStores.value.filter((node) => selected.has(Number(node.id)))
+})
+const scopeLabel = computed(() => {
+  const orgName = selectedOrganization.value?.name || '当前权限范围'
+  return selectedStores.value.length
+    ? `${orgName} / ${selectedStores.value.map((node) => node.name).join('、')}`
+    : `${orgName} / 全部门店`
+})
 const maxAge = computed(() => Math.max(...data.overview.age.map((item) => item.value), 1))
 const maxVisit = computed(() => Math.max(...data.visits.frequency.map((item) => item.value), 1))
 const maxRecency = computed(() => Math.max(...data.visits.recency.map((item) => item.value), 1))
@@ -179,9 +228,8 @@ function reportQuery() {
       : { start_date: `${customEnd.value.slice(0, 4)}-01-01`, end_date: customEnd.value }
   return {
     report: apiReportCode(), ...dates,
-    org_id: selectedOrg.value === '总部' ? 0 : undefined,
-    store_ids: selectedStores.value.join(','),
-    category_path: region.value === '全部区域' ? '' : region.value,
+    org_id: selectedOrganization.value ? Number(selectedOrganization.value.id) : undefined,
+    store_ids: selectedStoreIds.value.join(','),
     consumption_metric: consumptionMode.value
   }
 }
@@ -349,7 +397,36 @@ async function loadReport(action = '查询') {
   }
 }
 function setModule(key) { active.value = key; period.value = defaultPeriodForReport(keyToReport[key]); const report = keyToReport[key]; if (report && String(route.params.report || '') !== report) router.replace({ path: `/platform/customer-analytics/${report}`, query: route.query }).catch(() => {}); loadReport('切换') }
-function chooseStore(value) { store.value = value; selectedStores.value = value === '全部门店' ? [] : [value]; scopeOpen.value = false }
+async function loadScope() {
+  try {
+    const payload = await queryCustomerAnalyticsScope()
+    scopeTree.value = Array.isArray(payload?.tree) ? payload.tree : []
+  } catch (_) {
+    // 查询仍由后端按当前账号的数据权限裁剪；选择器不可用时不展示伪造的组织或门店选项。
+    scopeTree.value = []
+  }
+}
+function resetScope() {
+  selectedOrgId.value = null
+  selectedStoreIds.value = []
+  expandedOrgIds.value = []
+}
+function chooseOrganization(node) {
+  const id = Number(node?.id || 0)
+  selectedOrgId.value = id || null
+  selectedStoreIds.value = []
+  const children = Array.isArray(node?.children) ? node.children : []
+  if (id > 0 && children.some((child) => String(child?.node_type || '') === 'org')) {
+    expandedOrgIds.value = expandedOrgIds.value.includes(id)
+      ? expandedOrgIds.value.filter((value) => value !== id)
+      : [...expandedOrgIds.value, id]
+  }
+}
+function chooseStore(node) {
+  const id = Number(node?.id || 0)
+  selectedStoreIds.value = id > 0 ? [id] : []
+  scopeOpen.value = false
+}
 function runQuery(action = '查询') { loadReport(action) }
 function changeAppearancePage(type, page) {
   if (type === 'cash') appearanceCashPage.value = Math.min(Math.max(1, page), appearanceCashPages.value)
@@ -428,14 +505,13 @@ function isError() { return demoState.value === 'error' }
             <button type="button" class="scope-trigger" @click="scopeOpen = !scopeOpen"><SlidersHorizontal :size="16" />{{ scopeLabel }}<ChevronDown :size="15" :class="{ 'is-rotated': scopeOpen }" /></button>
             <div class="periods" role="tablist"><button v-for="item in [['month','本月'],['year','本年'],['custom','自定义']]" :key="item[0]" type="button" :class="{ 'is-active': period === item[0] }" @click="period = item[0]">{{ item[1] }}</button></div>
             <label v-if="period === 'custom'" class="date-field"><CalendarDays :size="14" /><input v-model="customStart" type="date" /><span>至</span><input v-model="customEnd" type="date" /></label>
-            <label class="select-field"><span>区域</span><select v-model="region"><option>全部区域</option><option>华东区域</option><option>华南区域</option><option>华北区域</option></select></label>
-            <label class="select-field"><span>门店</span><select v-model="store"><option>全部门店</option><option>南陵夫子庙店</option><option>淮南商之都店</option><option>北京朝阳店</option><option>广州天河店</option></select></label>
             <div class="query-actions"><button type="button" class="button button--primary" :disabled="loading" @click="runQuery()"><Search :size="15" />查询</button><button type="button" class="button" :disabled="loading" @click="runQuery('刷新')"><RefreshCw :size="15" :class="{ 'is-spinning': loading }" />刷新</button></div>
           </div>
           <div class="query-card__row query-card__row--meta"><span>数据范围：{{ scopeLabel }}</span><span>统计周期：{{ currentPeriodLabel }}</span><span class="meta-status"><i></i>{{ notice }}</span></div>
           <div v-if="scopeOpen" class="scope-panel">
             <header><strong>当前权限范围</strong><button type="button" @click="scopeOpen = false">收起</button></header>
-            <div class="scope-panel__body"><div class="scope-tree"><button class="tree-root is-selected" type="button" @click="selectedOrg = '总部'; selectedStores = []; store = '全部门店'">⌄ <Store :size="14" />总部</button><button v-for="node in customerAnalyticsScopePreview.tree[0].children" :key="node.label" type="button" class="tree-node" :class="{ 'is-selected': selectedOrg === node.label }" @click="selectedOrg = node.label; selectedStores = []; store = '全部门店'">› <span>{{ node.label }}</span></button></div><div class="scope-stores"><p>选择门店（可选）</p><button type="button" :class="{ 'is-selected': !selectedStores.length }" @click="chooseStore('全部门店')">全部门店</button><button v-for="node in customerAnalyticsScopePreview.tree[0].children.flatMap((item) => item.stores)" :key="node" type="button" :class="{ 'is-selected': selectedStores.includes(node) }" @click="chooseStore(node)">{{ node }}</button></div></div>
+            <div v-if="scopeOrganizations.length || scopeStores.length" class="scope-panel__body"><div class="scope-tree"><button class="tree-root" :class="{ 'is-selected': !selectedOrganization }" type="button" @click="resetScope">⌄ <Store :size="14" />当前权限范围</button><button v-for="entry in visibleOrganizations" :key="`org-${entry.node.id}`" type="button" class="tree-node" :style="{ paddingLeft: `${18 + entry.depth * 16}px` }" :class="{ 'is-selected': selectedOrganization && Number(selectedOrganization.id) === Number(entry.node.id) }" @click="chooseOrganization(entry.node)">{{ entry.expandable ? (expandedOrgIds.includes(Number(entry.node.id)) ? '⌄' : '›') : '·' }} <span>{{ entry.node.name }}</span></button></div><div class="scope-stores"><p>选择门店（可选）</p><button type="button" :class="{ 'is-selected': !selectedStoreIds.length }" @click="selectedStoreIds = []">全部门店</button><button v-for="node in scopeStores" :key="`store-${node.id}`" type="button" :class="{ 'is-selected': selectedStoreIds.includes(Number(node.id)) }" @click="chooseStore(node)">{{ node.name }}</button></div></div>
+            <p v-else class="scope-panel__empty">当前账号没有可选门店；查询仍会由后端按权限范围执行。</p>
           </div>
         </section>
 
