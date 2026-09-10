@@ -21,8 +21,8 @@ final class AiBusinessManifest
                 'tool'=>$tool,'timeout_ms'=>$timeout,'max_visits'=>1];
         };
         $workflows=[];
-        foreach (['summary'=>'performance_summary','trend'=>'performance_trend','ranking'=>'store_performance_ranking','comparison'=>'performance_comparison'] as $shape=>$actionId) {
-            $workflows['wf_performance_'.$shape]=['version'=>1,'scene'=>$shape==='ranking'?'store_performance_compare':'business_performance_overview',
+        foreach (['summary'=>'performance_summary','trend'=>'performance_trend','ranking'=>'registered_metric_ranking','comparison'=>'performance_comparison'] as $shape=>$actionId) {
+            $workflows['wf_performance_'.$shape]=['version'=>2,'scene'=>'registered_metric_analysis',
                 'action'=>$actionId,'query_shape'=>$shape,'entry'=>'query','terminal'=>'render','allow_export'=>true,
                 'max_path_ms'=>40000,'nodes'=>[
                     $node('query','unified_metric_query',[],'query_input','business_evidence','unified_metric_query',10000),
@@ -36,7 +36,7 @@ final class AiBusinessManifest
                 $node('evidence','metadata_guard',['catalog'],'metadata_evidence','verified_result',null,1000),
                 $node('render','deterministic_definition',['evidence'],'verified_result','answer_result',null,1000),
             ]];
-        return ['registry_version'=>'mohe-business-registry-r5-v2',
+        return ['registry_version'=>'mohe-business-registry-r7-v1',
             'semantic_resource_hash'=>\app\services\ai\semantic\AiSemanticVocabulary::fingerprint(),
             'schemas'=>['query_input','definition_input','business_evidence','metadata_evidence','verified_result','answer_result','export_result'],
             'tools'=>[
@@ -47,23 +47,20 @@ final class AiBusinessManifest
             'actions'=>[
                 'performance_summary'=>$action('summary','unified_metric_query'),
                 'performance_trend'=>$action('trend','unified_metric_query'),
-                'store_performance_ranking'=>$action('ranking','unified_metric_query'),
+                'registered_metric_ranking'=>$action('ranking','unified_metric_query'),
                 'performance_comparison'=>$action('comparison','unified_metric_query'),
                 'verified_result_export'=>$action('export','verified_export_create'),
             ],
             'scenes'=>[
-                'business_performance_overview'=>['version'=>1,'skill_code'=>'skill_business_performance_overview','skill_version'=>1,'label'=>'经营结果了解','goal'=>'了解明确期间的收款或服务结果、变化及两期情况',
-                    'actions'=>['performance_summary','performance_trend','performance_comparison','verified_result_export'],
-                    'required_facts'=>['confirmed_metric','complete_period','current_business_scope','complete_filters'],
-                    'ambiguities'=>['performance_metric','period','comparison_period'],
-                    'completion'=>'所有请求的指标、期间和完整条件均有权威证据；不推断原因或临时计算增幅',
-                    'counterexamples'=>['未登记利润','省略人员或分类条件','将两期金额解释为已证明经营原因']],
-                'store_performance_compare'=>['version'=>1,'skill_code'=>'skill_store_performance_compare','skill_version'=>1,'label'=>'门店表现比较','goal'=>'按明确标准了解门店表现与相对位置',
-                    'actions'=>['store_performance_ranking','verified_result_export'],
-                    'required_facts'=>['confirmed_metric','complete_period','current_business_scope','ranking_contract'],
-                    'ambiguities'=>['evaluation_metric','direction','count'],
-                    'completion'=>'按同一已登记排行合同覆盖合法参评门店；排行不等于经营健康诊断',
-                    'counterexamples'=>['自动判断经营好坏','改变用户请求的门店数量','以排名查询扩大门店权限']],
+                // A scene is an interaction boundary, not a report page or a
+                // fixed question list.  Registered metric/object contracts decide
+                // what is discoverable for the current account at runtime.
+                'registered_metric_analysis'=>['version'=>2,'skill_code'=>'skill_registered_metric_analysis','skill_version'=>2,'label'=>'已登记指标分析','goal'=>'基于当前授权范围，通过已登记指标、对象与筛选合同回答经营分析问题',
+                    'actions'=>['performance_summary','performance_trend','registered_metric_ranking','performance_comparison','verified_result_export'],
+                    'required_facts'=>['registered_metric','complete_period','current_business_scope','complete_filters','object_grain_contract'],
+                    'ambiguities'=>['analysis_object','evaluation_metric','period','comparison_period','ranking_contract'],
+                    'completion'=>'仅当对象、指标、期间和完整条件均有权威证据时完成；不推断原因、不现场计算、不扩大权限',
+                    'counterexamples'=>['按报表页固定候选','未登记指标','省略人员或分类条件','将排行解释为已证明经营原因']],
             ],
             'workflows'=>$workflows,
             'export_node'=>$node('export','verified_export_create',['evidence','render'],'verified_result','export_result','verified_export_create',10000),

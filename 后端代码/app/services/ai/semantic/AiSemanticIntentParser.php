@@ -50,7 +50,6 @@ final class AiSemanticIntentParser
         if($unparsed) $constraints[]=['type'=>'unparsed_business_condition','status'=>'unresolved'];
         $followup=preg_match('/^\s*(那|换成|继续|再看)|条件不变|其他条件别动|相同日期|同样日期|上述日期|原日期|(?:月|天)呢/u',$text)?'requested':'none';
         $signals=array_values(array_unique($signals));
-        if(array_intersect(['service_metric_ambiguity','income_ambiguity','sales_ambiguity'],$signals)) $signals[]='ambiguous_metric';
         $limit=count($limits)===1?$limits[0]:null;
         if($limit===5 && !in_array('exclusion',$signals,true)) {
             if(in_array('rank_top',$signals,true)) $signals[]='top_5';

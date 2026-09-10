@@ -91,6 +91,8 @@ try {
     $stmt=$h->db->prepare('UPDATE mohe_ai_management_state SET draft_json=? WHERE instance_key=?');$stmt->execute([$json,'fixture_r6']);
     $stmt=$h->db->prepare('UPDATE mohe_ai_management_version SET document_json=?,document_hash=? WHERE instance_key=? AND version=?');$stmt->execute([$json,$hash,'fixture_r6',$state['active_version']]);
     $staleState=mgcall($h,'management_get');mgcheck($staleState['source_changed']===true&&$staleState['active_document']===null,'stale source remains administrable but cannot appear active');
+    $boot=$h->gateway->handle('bootstrap',$h->context,['client_session_id'=>'stale-source-device']);
+    mgcheck($boot['guidance_schema_version']==='mohe-clarification-v2','stale management document falls back to current source for a new entry');
     $rebased=mgcall($h,'management_rebase',['expected_revision'=>$staleState['revision']]);mgcheck($rebased['source_changed']===true&&$rebased['draft']['source_registry_hash']!==$stale['source_registry_hash'],'rebase updates draft only');
     mgcall($h,'management_validate',['expected_revision'=>$rebased['revision']]);$republished=mgcall($h,'management_publish',['expected_revision'=>$rebased['revision']]);
     mgcheck($republished['source_changed']===false&&is_array($republished['active_document']),'explicit publish activates current source');

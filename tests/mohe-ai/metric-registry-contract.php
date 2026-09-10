@@ -148,7 +148,7 @@ metricRegistryCheck(strpos($gateway, "str_replace(['劳动业绩','销售人业�
     && strpos($gateway, "preg_match('/劳动业绩|销售业绩|销售人业绩/u'") === false,
     'person intent has no handwritten metric phrase list');
 metricRegistryCheck(strpos($gateway, '$metric=$explicitMetrics[0]??') !== false
-    && strpos($gateway, "\$intent['metric_codes']=[\$metric]") !== false,
+    && strpos($gateway, "\$intent['metric_codes']=\$metric===null?[]:[\$metric]") !== false,
     'explicit registered metric is authoritative over a model guess');
 metricRegistryCheck(!preg_match('/\\$metric\\s*===\\s*[\'\"][a-z0-9_]+[\'\"]|switch\\s*\\(\\s*\\$metric\\s*\\)/', $reader.$view),
     'registered execution layer has no metric-code if or switch branch');

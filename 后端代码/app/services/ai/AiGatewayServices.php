@@ -258,7 +258,16 @@ final class AiGatewayServices
     {
         $this->managementDocument=null; $this->managementRevision='source';
         if (!$this->management) return;
-        $record=$version===null?$this->management->active():$this->management->version($version);
+        try {$record=$version===null?$this->management->active():$this->management->version($version);}
+        catch (\RuntimeException $error) {
+            // A source registry upgrade must not make the customer-facing entry
+            // unusable just because an administrator has an older editable
+            // document.  New Runs use the current source defaults until the
+            // administrator rebases and publishes that document.  A frozen old
+            // Run is intentionally not rebound to new executable declarations.
+            if ($version===null && $error->getMessage()==='AI_MANAGEMENT_SOURCE_CHANGED') return;
+            throw $error;
+        }
         $this->managementRevision=$record['version'];
         // Old source runs retain exactly the pre-management registry and guidance.
         if ($record['version']!=='source') $this->managementDocument=$record['document'];
@@ -470,13 +479,16 @@ final class AiGatewayServices
 
     private function understandAnalysis(array $context,array $owner,string $id,int $generation,string $worker,array $body,array $projection,array $configuration): array
     {
-        $caps=$this->capabilities($this->fresh($context));$dictionary=new \app\services\metric\MetricDictionaryServices();$summaries=[];$personMetrics=[];
+        $caps=$this->capabilities($this->fresh($context));$dictionary=new \app\services\metric\MetricDictionaryServices();$summaries=[];
         foreach ($caps['metric_codes'] as $code) {
             $tooltip=$dictionary->getTooltip($code);if (($tooltip['user_ready']??false)!==true) continue;
             $kind=$caps['metric_readiness'][$code]['filter_grain'];
             $summaries[]=['metric_code'=>$code,'name'=>$tooltip['name'],'summary'=>$tooltip['summary'],'object_kind'=>$kind];
-            if ($kind==='person') $personMetrics[$code]=['name'=>$tooltip['name'],'summary'=>$tooltip['summary']];
         }
+        // The prompt-facing candidates and the later controlled choices are both
+        // projected from the same registered provider contracts.  A dictionary
+        // definition alone therefore never becomes an executable AI choice.
+        $personMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,'person');
         $checkpoint=function()use($context,$owner,$id,$generation,$worker,$configuration):void {
             $this->runs->checkpoint($owner,$id,$generation,$worker);
             $current=$this->config->read();
@@ -530,6 +542,8 @@ final class AiGatewayServices
         if ($safe['local_conditions']) throw new RuntimeException('AI_LOCAL_CONDITION_REQUIRED');
         $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
         $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
+        $constraintTypes=array_column($projection['semantic_intent']['constraints']??[],'type');
+        if ($intent['object_kind']==='unknown' && in_array('person_filter',$constraintTypes,true)) $intent['object_kind']='person';
         if ($intent['object_kind']==='person') {
             $remaining=(new AiModelInputProjector())->project(\app\services\query\metric\MetricSemanticCatalog::stripTerms($body['question'],array_keys($personMetrics)));
             foreach ($remaining['semantic_intent']['constraints']??[] as $constraint) {
@@ -546,10 +560,11 @@ final class AiGatewayServices
             // An unambiguous dictionary hit is a stronger contract than a model
             // guess. The model may discover the object, but cannot replace an
             // explicitly named registered metric.
-            $metric=$explicitMetrics[0]??($intent['metric_codes'][0]??array_keys($personMetrics)[0]);
-            if (!isset($personMetrics[$metric])) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
-            $intent['metric_codes']=[$metric];
-            $catalog=$localCatalogs[$metric];
+            $metric=$explicitMetrics[0]??($intent['metric_codes'][0]??null);
+            if ($metric!==null && !isset($personMetrics[$metric])) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            $intent['metric_codes']=$metric===null?[]:[$metric];
+            if ($intent['operation']==='unknown') $intent['operation']=preg_match('/最好|最差|最高|最低|是谁|哪一位|哪个人/u',$body['question'])?'ranking':'summary';
+            $catalog=$localCatalogs[$metric??array_key_first($personMetrics)];
             $objectCatalog=new \app\services\query\metric\AnalysisObjectCatalog($catalog['objects'],static function(){return true;});
             $named=$objectCatalog->resolve($term,'person',$metric);
             // Exact local names may bind a person; a missing name is never fuzzily

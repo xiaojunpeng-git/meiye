@@ -9,6 +9,7 @@ $checks=0;
 function verify($condition,string $label):void { global $checks;$checks++;if(!$condition)throw new RuntimeException('FAIL '.$label); }
 function rejected(callable $call,string $reason):void { try{$call();}catch(Throwable $e){verify($e->getMessage()===$reason,'expected '.$reason.' got '.$e->getMessage());return;}throw new RuntimeException('expected '.$reason); }
 $cap=['metric_codes'=>['cash_performance','refund_performance','actual_performance','consume_amount','sales_amount','balance_deduction_amount','recharge_amount'],'query_shapes'=>['summary','trend','ranking','comparison'],'output_formats'=>['screen','screen_and_xlsx'],'current_store_bound'=>true,'definition_metric_codes'=>['cash_performance','refund_performance','actual_performance','consume_amount','sales_amount','balance_deduction_amount','recharge_amount']];
+$cap['metric_readiness']=array_intersect_key(\app\services\query\metric\MetricReadViewServices::metricCapabilities(),array_flip($cap['metric_codes']));
 function build(string $question,array $capOverride=[]):array {
     global $parser,$planner,$cap;
     $p=$parser->project($question);$s=$p['signals'];
@@ -36,13 +37,19 @@ foreach(['本月现金最高和最低的五家店','本月现金最高的前5家
 foreach(['本月前十家店的现金业绩','给我全部前十名，不是前五名','本月现金前6家店'] as $q) rejected(static function()use($q){build($q);},'AI_RANK_LIMIT_NOT_READY');
 $r=build('本月现金最好的门店');verify($r['kind']==='clarification' && $r['fields'][0]['key']==='rank_limit','best never invents five');
 $r=$planner->choose($r,['rank_limit'=>'5']);verify($r['plan']['query']['ranking']['limit']===5,'explicit limit consent');
-$r=build('今天业绩多少');verify(count($r['fields'])===1 && count($r['fields'][0]['options'])===count($cap['metric_codes']),'all executable metric options come from registry');
+$r=build('今天业绩多少');$metricOptions=array_values(array_filter($r['fields'][0]['options'],static function($option){return ($option['action']??null)!=='stop';}));$expectedOptions=$cap['metric_codes'];sort($expectedOptions);
+verify(count($r['fields'])===1 && array_column($metricOptions,'value')===$expectedOptions,'all executable metric options come from current registry contracts');
+$restricted=$cap;$restricted['metric_codes']=['refund_performance','recharge_amount'];$restricted['metric_readiness']=array_intersect_key($cap['metric_readiness'],array_flip($restricted['metric_codes']));
+$r=build('今天业绩多少',$restricted);$metricOptions=array_values(array_filter($r['fields'][0]['options'],static function($option){return ($option['action']??null)!=='stop';}));
+verify(array_column($metricOptions,'value')===['recharge_amount','refund_performance'],'candidate list follows current registered contracts, not fixed cash/consume rules');
+$r=build('今天业绩多少');
 verify($r['confirmed_summary'][0]['label']==='查询期间','known period summarized');
 $r=$planner->choose($r,['metric_code'=>'consume_amount']);verify($r['kind']==='plan','one-step resolved executes');
+verify($r['plan']['workflow_code']==='wf_performance_summary' && !isset($r['plan']['nodes']),'raw plan selects registered workflow and never carries an editable graph');
 $r=build('今天服务业绩多少');verify($r['kind']==='clarification' && count($r['fields'][0]['options'])>=2,'service meaning ambiguity remains');
 $serviceOptions=$r['fields'][0]['options'];$serviceLast=end($serviceOptions);
 verify($serviceLast['action']==='stop','unknown meaning is not silently replaced');
-rejected(static function()use($planner,$r){$planner->choose($r,['metric_code'=>'other_service_meaning']);},'AI_CAPABILITY_NOT_READY');
+rejected(static function()use($planner,$r){$planner->choose($r,['metric_code'=>'other_registered_metric']);},'AI_CAPABILITY_NOT_READY');
 $r=build('今天现金和服务业绩多少');$r=$planner->choose($r,['metric_code'=>'consume_amount']);verify($r['plan']['query']['metric_codes']===['cash_performance','consume_amount'],'explicit joint metric not replaced by clarification');
 $r=build('现金和消耗多少');verify($r['fields'][0]['key']==='start_date','joint goal asks only missing date');
 $r=$planner->choose($r,['start_date'=>'2026-09-01','end_date'=>'2026-09-30']);verify(count($r['plan']['query']['metric_codes'])===2,'joint metrics survive date answer');
@@ -52,7 +59,7 @@ foreach([['metric_code'=>'cash_performance'],['start_date'=>'2026-09-01','end_da
     verify($r['kind']==='clarification' && count($r['fields'])<=2,'one relevant semantic question');$steps[]=$r['guidance_step'];$r=$planner->choose($r,$choice);
 }
 verify($steps===['metric_code','start_date','rank_direction','rank_limit'],'no preset minimum step count');
-verify($r['kind']==='plan' && $r['plan']['max_tool_calls']===1,'last necessary step completes bounded plan');
+verify($r['kind']==='plan' && $r['plan']['workflow_code']==='wf_performance_ranking','last necessary step chooses a registered workflow');
 verify($r['plan']['query']['ranking']['direction']==='bottom','attention is not automatic diagnosis');
 $initial=build('业绩多少');$cashDate=$planner->choose($initial,['metric_code'=>'cash_performance']);$consumeDate=$planner->choose($initial,['metric_code'=>'consume_amount']);
 verify($cashDate['resolved_metrics']===['cash_performance'] && $consumeDate['resolved_metrics']===['consume_amount'],'replay frozen initial envelope supports correction without old candidate restriction');

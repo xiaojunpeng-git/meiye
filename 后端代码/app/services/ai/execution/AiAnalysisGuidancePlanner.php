@@ -9,6 +9,12 @@ final class AiAnalysisGuidancePlanner
     public function start(array $intent,array $projection,array $candidates,array $objects,string $format,string $today): array
     {
         if ($intent['object_kind']!=='person' || !in_array($intent['operation'],['summary','ranking'],true)) throw new \RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+        $candidates=array_filter($candidates,static function(array $candidate) use($intent): bool {
+            // The optional fallback keeps stored pre-R7 clarification envelopes
+            // reviewable; all new gateway candidates carry query_shapes.
+            return !isset($candidate['query_shapes']) || in_array($intent['operation'],$candidate['query_shapes'],true);
+        });
+        ksort($candidates);
         if (!$candidates) throw new \RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
         if (count($intent['metric_codes'])>1) throw new \RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
         $metric=$intent['metric_codes'][0]??null;
@@ -73,6 +79,8 @@ final class AiAnalysisGuidancePlanner
         $query=['query_shape'=>$state['operation'],'metric_codes'=>[$state['metric']],'start_date'=>$state['range']['start'],'end_date'=>$state['range']['end'],
             'compare_range'=>null,'store_ids'=>[],'business_filters'=>['object_kind'=>'person','selection_ref'=>$state['object']],
             'ranking'=>$state['operation']==='ranking'?['direction'=>$state['direction'],'limit'=>$state['limit']]:null];
-        return ['kind'=>'plan','plan'=>['query'=>$query,'output_format'=>$state['format']]];
+        // The registered compiler chooses and freezes the concrete Workflow from
+        // query_shape.  Guidance never accepts model-authored graph nodes.
+        return ['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_'.$state['operation'],'query'=>$query,'output_format'=>$state['format']]];
     }
 }

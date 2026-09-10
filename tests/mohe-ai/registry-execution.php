@@ -28,11 +28,10 @@ function registryCapabilities():array
 }
 function registryPlan(string $shape='summary',string $format='screen'):array
 {
-    return ['schema_version'=>'mohe-executable-workflow-v1','workflow_code'=>'wf_performance_snapshot','workflow_version'=>1,
+    return ['schema_version'=>'mohe-executable-workflow-v1','workflow_code'=>'wf_performance_'.$shape,
         'query'=>['query_shape'=>$shape,'metric_codes'=>['cash_performance','consume_amount'],'start_date'=>'2026-09-01','end_date'=>'2026-09-08',
             'compare_range'=>$shape==='comparison'?['start'=>'2026-08-10','end'=>'2026-08-17']:null,
-            'store_ids'=>[],'business_filters'=>[],'ranking'=>$shape==='ranking'?['direction'=>'top_and_bottom','limit'=>5]:null],
-        'nodes'=>['query_metric_summary','all_evidence_guard','deterministic_answer'],'max_visits'=>3,'max_tool_calls'=>1,'output_format'=>$format];
+            'store_ids'=>[],'business_filters'=>[],'ranking'=>$shape==='ranking'?['direction'=>'top_and_bottom','limit'=>5]:null], 'output_format'=>$format];
 }
 function registryHandlers(array &$seen):array
 {
@@ -69,11 +68,11 @@ try {
     $reordered=array_reverse($cap,true); $reordered['metric_codes']=array_reverse($cap['metric_codes']);
     $reordered['query_shapes']=array_reverse($cap['query_shapes']); $reordered['metric_readiness']=array_reverse($cap['metric_readiness'],true);
     registryCheck($registry->snapshot($reordered)===$snapshot,'capability fingerprint independent of set/key order');
-    registryCheck(count($registry->discover($snapshot,1)['items'])===2,'two scenario skills are discoverable without report names');
+    registryCheck(count($registry->discover($snapshot,1)['items'])===1,'one generic registered-metric Skill is discoverable without report names');
     registryCheck(count($registry->discover($snapshot,2,['metric_codes'=>['cash_performance']])['items'])===1,'bounded metric discovery');
-    registryCheck($registry->discover($snapshot,2,['scene_codes'=>['store_performance_compare']])['items'][0]['query_shapes']===['ranking'],'level two respects scene dependency contract');
-    $discovered=$registry->discover($snapshot,3,['scene_codes'=>['store_performance_compare'],'metric_codes'=>['cash_performance']]);
-    registryCheck(array_column($discovered['items'],'workflow_code')===['wf_performance_ranking'],'scenario/action dependency narrows workflow');
+    registryCheck($registry->discover($snapshot,2,['scene_codes'=>['registered_metric_analysis']])['items'][0]['query_shapes']===['comparison','ranking','summary','trend'],'level two exposes registered operations without a report scenario');
+    $discovered=$registry->discover($snapshot,3,['scene_codes'=>['registered_metric_analysis'],'metric_codes'=>['cash_performance']]);
+    registryCheck(in_array('wf_performance_ranking',array_column($discovered['items'],'workflow_code'),true),'generic Skill exposes registered reusable workflows');
     registryCheck(strpos(json_encode($discovered),'handler')===false&&strpos(json_encode($discovered),'depends_on')===false,'discovery excludes server handlers and graph');
     registryReject(function()use($registry,$snapshot){$registry->discover($snapshot,4);},'AI_DISCOVERY_LEVEL_INVALID');
     registryReject(function()use($registry,$snapshot){$registry->discover($snapshot,2,['sql'=>[]]);},'AI_REGISTRY_SCHEMA_INVALID');
@@ -96,11 +95,11 @@ try {
         registryCheck($compiled['workflow_code']==='wf_performance_'.$shape,'registered '.$shape.' fragment');
         registryCheck($compiled['query']===registryPlan($shape)['query'],'all '.$shape.' query slots retained exactly');
         registryCheck($compiled['budget']['counters']['tool_call_count']===1&&$compiled['budget']['counters']['skill_execution_count']===1,'actual calls counted once');
-        registryCheck($compiled['scene_code']===($shape==='ranking'?'store_performance_compare':'business_performance_overview'),'scenario separate from reusable shape');
+        registryCheck($compiled['scene_code']==='registered_metric_analysis','generic Skill stays separate from reusable shape');
     }
     $compiled=$compiler->compile(registryPlan(),$cap);
     registryCheck($compiled['dependency_versions']['tool']===['unified_metric_query'=>1],'complete tool dependency version frozen');
-    registryCheck($compiled['dependency_versions']['skill']===['skill_business_performance_overview'=>1],'scene Skill has explicit immutable id and version');
+    registryCheck($compiled['dependency_versions']['skill']===['skill_registered_metric_analysis'=>2],'generic Skill has explicit immutable id and version');
     $metadataPlan=['query_shape'=>'definition','definition_metric_codes'=>['cash_performance'],'output_format'=>'screen'];
     $definition=$compiler->compile($metadataPlan,$cap); $compiler->assertCompiled($definition);
     registryCheck($definition['query']===null&&$definition['scene_code']===null&&$definition['budget']['counters']['skill_execution_count']===0,'pure explanation has no operating-data query or invented business skill');

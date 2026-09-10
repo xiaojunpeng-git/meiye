@@ -16,12 +16,14 @@ foreach(['AI_ANALYSIS_COMBINATION_UNAVAILABLE','AI_OBJECT_BINDING_UNAVAILABLE','
  paCheck($outcome->invoke(null,['status'=>'FAILED','reason'=>$reason])==='neutral','capability/authority refusal never counts as user technical failure');
 $intent=['object_kind'=>'person','object_term'=>'技师','operation'=>'ranking','metric_codes'=>[],'needs_metric_choice'=>true];
 $projection=['date_terms'=>[['code'=>'TODAY']],'signals'=>['rank_top'],'analysis_singular_person'=>true];
-$candidates=['staff_labor_yeji'=>['name'=>'劳动业绩','summary'=>'按实际手艺人分配'],'staff_sales_yeji'=>['name'=>'销售人业绩','summary'=>'按销售人分配']];
+$candidates=['staff_labor_yeji'=>['name'=>'劳动业绩','summary'=>'按实际手艺人分配','query_shapes'=>['summary','ranking']],
+ 'staff_sales_yeji'=>['name'=>'销售人业绩','summary'=>'按销售人分配','query_shapes'=>['summary','ranking']],
+ 'summary_only'=>['name'=>'仅汇总合同','summary'=>'不能用于排行','query_shapes'=>['summary']]];
 $objects=['status'=>'choose','objects'=>[['ref'=>'position:2','label'=>'护理师'],['ref'=>'role:craftsman','label'=>'有手艺人资格的在职人员']]];
 $step=$planner->start($intent,$projection,$candidates,$objects,'screen','2026-09-09');
 paCheck($step['fields'][0]['key']==='analysis_object','actual object choice first, no technician scene');
 $next=$planner->choose($step,['analysis_object'=>'position:2']);
-paCheck($next['fields'][0]['key']==='analysis_metric' && count($next['fields'][0]['options'])===2,'best does not guess cash or labor');
+paCheck($next['fields'][0]['key']==='analysis_metric' && count($next['fields'][0]['options'])===2,'best does not guess cash or labor; unsupported operation is not offered');
 $plan=$planner->choose($next,['analysis_metric'=>'staff_labor_yeji'])['plan'];
 $follow=new app\services\ai\execution\AiFollowupQueryPlanner();
 $names=array_map(static function($value){return $value['name'];},$candidates);

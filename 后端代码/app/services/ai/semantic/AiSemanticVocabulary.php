@@ -4,7 +4,7 @@ namespace app\services\ai\semantic;
 /** Source-owned business language resources. No formulas, SQL or report page identities. */
 final class AiSemanticVocabulary
 {
-    public const VERSION='mohe-semantic-vocabulary-r6-v1';
+    public const VERSION='mohe-semantic-vocabulary-r7-v1';
     public static function patterns(): array
     {
         require_once dirname(__DIR__,2).'/BaseServices.php';
@@ -14,16 +14,15 @@ final class AiSemanticVocabulary
         require_once dirname(__DIR__,2).'/query/metric/MetricSemanticCatalog.php';
         $metrics=\app\services\query\metric\MetricSemanticCatalog::unambiguousPatterns();
         return $metrics + [
-            'service_metric_ambiguity'=>'/服务业绩|耗卡业绩|扣卡业绩/u',
-            'person_filter'=>'/销售人|手艺人|操作人|员工|店长|岗位|老师/u',
+            'person_filter'=>'/销售人|手艺人|技师|美容师|护理师|顾问|操作人|员工|店长|岗位|老师/u',
             'category_filter'=>'/商品分类|分类|品项|项目|产品|生美|私密|花园/u',
             'source_filter'=>'/合作方|渠道|来源/u',
             'exclusion'=>'/排除|不含|不包括|不要|不是|除了|仅限|只看/u',
             'page_reference'=>'/按这张表|按这个图|这张表|这个图|这批|当前页面/u',
             'history_point'=>'/截至|截止|月末|年末|首年|累计|自然年|今年|去年/u',
-            'income_ambiguity'=>'/收入/u',
-            'sales_ambiguity'=>'/卖了多少/u',
-            'ambiguous_metric'=>'/业绩|做了多少|经营情况/u',
+            // These phrases identify an incomplete metric slot only.  They do
+            // not choose a predefined metric or a predefined business scene.
+            'ambiguous_metric'=>'/服务业绩|耗卡业绩|扣卡业绩|收入|卖了多少|业绩|做了多少|经营情况/u',
             'definition'=>'/是什么意思|什么意思|指什么|是什么|怎么理解|口径说明|统计口径|解释/u',
             'trend'=>'/每天|每日|逐日|按天|趋势/u',
             'comparison'=>'/对比|相比|比较|分别|并排/u',

@@ -2,6 +2,7 @@
 namespace app\services\ai\execution;
 
 use app\services\ai\contract\AiContractException;
+require_once __DIR__.'/AiCapabilityGuidanceCatalog.php';
 
 /** Registered workflows and compiler live together; the model cannot supply graph edges. */
 final class AiWorkflowPlanner
@@ -24,7 +25,9 @@ final class AiWorkflowPlanner
         $names=$this->names();
         $metrics = array_values(array_intersect(array_keys($names), $signals));
         $definition=in_array('definition',$signals,true);
-        $available=$definition?($capabilities['definition_metric_codes']??[]):$capabilities['metric_codes'];
+        // Candidate meanings come from the lower-layer provider contracts which
+        // this user may use now, not from a report-page or phrase-specific list.
+        $available=$definition?($capabilities['definition_metric_codes']??[]):array_keys(AiCapabilityGuidanceCatalog::discover($capabilities,'store'));
         foreach ($metrics as $metric) if (!in_array($metric, $available, true)) throw new AiContractException('AI_METRIC_NOT_READY');
         $shapes=array_values(array_intersect(['summary','trend','ranking','comparison'],$signals));
         if (in_array('top_5', $signals, true) || in_array('bottom_5', $signals, true)) $shapes[]='ranking';
@@ -34,6 +37,8 @@ final class AiWorkflowPlanner
         $shape=$definition?'definition':($shapes[0]??'summary');
         if ($definition && ($shapes || $projection['date_terms'] || $format!=='screen')) throw new AiContractException('AI_UNSUPPORTED_CONDITION');
         if (!$definition && !in_array($shape, $capabilities['query_shapes'], true)) throw new AiContractException('AI_QUERY_SHAPE_NOT_READY');
+        $shapeAvailable=$definition?$available:array_keys(AiCapabilityGuidanceCatalog::discover($capabilities,'store',$shape));
+        foreach ($metrics as $metric) if (!$definition && !in_array($metric,$shapeAvailable,true)) throw new AiContractException('AI_QUERY_SHAPE_NOT_READY');
         if (!$definition && $selection['query_shape'] !== $shape) throw new AiContractException('AI_MODEL_SELECTION_MISMATCH');
         $selected = $selection['metric_codes']; sort($selected); $expected = $metrics; sort($expected);
         if ($metrics && !in_array('ambiguous_metric',$signals,true) && $selected !== $expected) throw new AiContractException('AI_MODEL_SELECTION_MISMATCH');
@@ -81,24 +86,10 @@ final class AiWorkflowPlanner
         if (!$metrics || (!$definition && !$range) || in_array('ambiguous_metric', $signals, true) || ($shape==='comparison' && !$compare) || ($shape==='ranking' && (!$ranking['direction'] || !$ranking['limit']))) {
             $fields = [];
             if (!$metrics || in_array('ambiguous_metric', $signals, true)) {
-                $options = []; foreach ($available as $metric) if (isset($names[$metric])) $options[] = ['value' => $metric, 'label' => \app\services\query\metric\MetricSemanticCatalog::optionLabel($metric)];
+                $options = []; foreach ($shapeAvailable as $metric) if (isset($names[$metric])) $options[] = ['value' => $metric, 'label' => \app\services\query\metric\MetricSemanticCatalog::optionLabel($metric)];
                 if (!$options) throw new AiContractException('AI_METRIC_NOT_READY');
-                if(in_array('service_metric_ambiguity',$signals,true)) {
-                    $options=array_values(array_filter($options,static function($option){return $option['value']==='consume_amount';}));
-                    if(!$options) throw new AiContractException('AI_CAPABILITY_NOT_READY');
-                    foreach (['staff_labor_yeji','balance_deduction_amount'] as $metric) if (isset($names[$metric]) && in_array($metric,$available,true)) $options[]=['value'=>$metric,'label'=>\app\services\query\metric\MetricSemanticCatalog::optionLabel($metric)];
-                    $options[]=['value'=>'other_service_meaning','label'=>'以上都不是','action'=>'stop'];
-                }
-                if(in_array('income_ambiguity',$signals,true)) {
-                    $options=array_values(array_filter($options,static function($option){return $option['value']==='cash_performance';}));
-                    $options[]=['value'=>'other_income_meaning','label'=>'财务收入（暂未接入）','action'=>'stop'];
-                }
-                if(in_array('sales_ambiguity',$signals,true)) {
-                    $options=array_values(array_filter($options,static function($option){return $option['value']==='cash_performance';}));
-                    foreach (['sales_amount','completed_service_item_count'] as $metric) if (isset($names[$metric]) && in_array($metric,$available,true)) $options[]=['value'=>$metric,'label'=>\app\services\query\metric\MetricSemanticCatalog::optionLabel($metric)];
-                    $options[]=['value'=>'other_sales_meaning','label'=>'以上都不是','action'=>'stop'];
-                }
-                $fields[] = ['key' => 'metric_code', 'label' => '想了解哪一种业绩？', 'type' => 'select', 'options' => $options];
+                $options[]=['value'=>'other_registered_metric','label'=>'以上都不是','action'=>'stop'];
+                $fields[] = ['key' => 'metric_code', 'label' => '想了解哪一个已登记指标？', 'type' => 'select', 'options' => $options];
             }
             if (!$definition && !$range) { $fields[] = ['key' => 'start_date', 'label' => '开始日期', 'type' => 'date']; $fields[] = ['key' => 'end_date', 'label' => '结束日期', 'type' => 'date']; }
             if ($shape==='comparison' && !$compare) { $fields[]=['key'=>'compare_start','label'=>'对比开始日期','type'=>'date']; $fields[]=['key'=>'compare_end','label'=>'对比结束日期','type'=>'date']; }
@@ -116,7 +107,7 @@ final class AiWorkflowPlanner
         $metrics = $envelope['resolved_metrics']; $range = $envelope['resolved_range'];
         foreach ($envelope['fields'] as $field) if ($field['key'] === 'metric_code') {
             if (!is_string($choices['metric_code']) || !in_array($choices['metric_code'], array_column($field['options'], 'value'), true)) throw new AiContractException('AI_CLARIFICATION_INVALID');
-            if(in_array($choices['metric_code'],['other_service_meaning','other_income_meaning','other_sales_meaning'],true)) throw new AiContractException('AI_CAPABILITY_NOT_READY');
+            foreach ($field['options'] as $option) if ($option['value']===$choices['metric_code'] && (($option['action']??null)==='stop')) throw new AiContractException('AI_CAPABILITY_NOT_READY');
             $metrics = array_values(array_unique(array_merge($metrics,[$choices['metric_code']])));
         }
         if (array_key_exists('start_date',$choices)) $range = $this->range($choices['start_date'], $choices['end_date'] ?? null);
@@ -147,7 +138,7 @@ final class AiWorkflowPlanner
         if(in_array($first['key'],['start_date','compare_start'],true)) $fields[]=array_shift($all);
         $envelope['schema_version']='mohe-guidance-state-v2';
         $envelope['fields']=$fields;$envelope['pending_fields']=$all;$envelope['guidance_step']=$first['key'];
-        $questions=['metric_code'=>'您想了解哪一种业绩？','start_date'=>'您想查询哪个时间段？','compare_start'=>'您想和哪个时间段比较？','rank_direction'=>'您想看业绩较高还是较低的门店？','rank_limit'=>'当前支持查询五家，是否按五家查询？'];
+        $questions=['metric_code'=>'您想了解哪一个已登记指标？','start_date'=>'您想查询哪个时间段？','compare_start'=>'您想和哪个时间段比较？','rank_direction'=>'您想看业绩较高还是较低的门店？','rank_limit'=>'当前支持查询五家，是否按五家查询？'];
         $envelope['question']=$questions[$first['key']]??$first['label'];
         $summary=[];
         if($envelope['resolved_metrics']) {
@@ -164,17 +155,16 @@ final class AiWorkflowPlanner
     private function plan(array $metrics, ?array $range, string $shape,?array $compare=null,?array $ranking=null,string $format='screen'): array
     {
         if($shape==='definition') {
-            $plan=['schema_version'=>'mohe-executable-workflow-v1','workflow_code'=>'wf_metric_definition','workflow_version'=>1,'query_shape'=>'definition','definition_metric_codes'=>$metrics,
-                'nodes'=>['metric_catalog_read','metadata_guard','deterministic_definition'],'max_visits'=>3,'max_tool_calls'=>1,'output_format'=>'screen'];
-            $plan['compiled_run_hash']=hash('sha256',json_encode($plan,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES));return ['kind'=>'plan','plan'=>$plan];
+            return ['kind'=>'plan','plan'=>['schema_version'=>'mohe-executable-workflow-v1','workflow_code'=>'wf_metric_definition',
+                'query_shape'=>'definition','definition_metric_codes'=>$metrics,'output_format'=>'screen']];
         }
         if (!in_array($shape,['summary','trend','ranking','comparison'],true)) throw new AiContractException('AI_QUERY_SHAPE_NOT_READY');
-        $plan = ['schema_version' => 'mohe-executable-workflow-v1', 'workflow_code' => 'wf_performance_snapshot', 'workflow_version' => 1,
+        $plan = ['schema_version' => 'mohe-executable-workflow-v1', 'workflow_code' => 'wf_performance_'.$shape,
             'query' => ['query_shape' => $shape, 'metric_codes' => $metrics, 'start_date' => $range['start'], 'end_date' => $range['end'],
                 'compare_range' => $compare, 'store_ids' => [], 'business_filters' => [],'ranking'=>$ranking],
-            'nodes' => ['query_metric_summary', 'all_evidence_guard', 'deterministic_answer'],
-            'max_visits' => 3, 'max_tool_calls' => 1, 'output_format' => $format];
-        $plan['compiled_run_hash'] = hash('sha256', json_encode($plan, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            // Nodes and budgets are compiled from the selected registration; this
+            // preliminary plan deliberately carries no editable graph or hash.
+            'output_format' => $format];
         return ['kind' => 'plan', 'plan' => $plan];
     }
     private function period(array $term, string $today): array

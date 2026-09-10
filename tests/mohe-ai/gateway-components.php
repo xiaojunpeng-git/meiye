@@ -48,7 +48,7 @@ namespace {
     $compiled = $planner->compile($projector->project('今天现金业绩多少？'),$selection,$cap,'screen','2026-09-08');
     check($compiled['kind']==='plan' && $compiled['plan']['query']['start_date']==='2026-09-08','today exact');
     check($compiled['plan']['query']['metric_codes']===['cash_performance'],'exact metric');
-    check(count($compiled['plan']['nodes'])===3 && $compiled['plan']['max_tool_calls']===1,'bounded nodes');
+    check($compiled['plan']['workflow_code']==='wf_performance_summary' && !isset($compiled['plan']['nodes']),'raw plan names the registered workflow without editable nodes');
     foreach (['今天张三现金业绩多少？'=>'AI_INTENT_UNRESOLVED','今天店长现金业绩多少？'=>'AI_CAPABILITY_NOT_READY','今天生美现金业绩多少？'=>'AI_CAPABILITY_NOT_READY','今天现金业绩排除张三'=>'AI_CAPABILITY_NOT_READY','今天现金业绩和销售数量'=>'AI_INTENT_UNRESOLVED'] as $unknown=>$expectedError) rejects(function()use($planner,$projector,$selection,$cap,$unknown){$planner->compile($projector->project($unknown),$selection,$cap,'screen','2026-09-08');},$expectedError);
     $envelope = $planner->compile($projector->project('业绩多少？'),$selection,$cap,'screen','2026-09-08');
     check($envelope['kind']==='clarification' && count($envelope['fields'])===1,'only current semantic question displayed');
@@ -78,7 +78,7 @@ namespace {
         check($result['kind']==='plan','two explicit periods need no redundant clarification');
         $query=$result['plan']['query'];
         check([$query['start_date'],$query['end_date'],$query['compare_range']['start'],$query['compare_range']['end']]===[$start,$end,$compareStart,$compareEnd],'comparison preserves textual period order and both full ranges');
-        check($result['plan']['max_tool_calls']===1 && $result['plan']['max_visits']===3,'comparison does not enlarge execution budget');
+        check($result['plan']['workflow_code']==='wf_performance_comparison' && !isset($result['plan']['nodes']),'comparison selects a registered workflow without an editable budget');
     }
     $ambiguous=$planner->compile($projector->project('今天和昨天业绩对比'),array_merge($compareSelection,['metric_codes'=>[],'decision'=>'clarify']),$compareCap,'screen','2026-09-08');
     check(array_column($ambiguous['fields'],'key')===['metric_code'],'resolved comparison dates survive metric-only clarification');
