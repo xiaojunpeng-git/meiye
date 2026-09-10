@@ -11,7 +11,10 @@ final class AiManagementPolicy
     public static function defaults(): array
     {
         $m=AiBusinessManifest::definitions(); $scenes=[]; $workflows=[];
-        foreach($m['scenes'] as $code=>$s) $scenes[$code]=['label'=>$s['label'],'goal'=>$s['goal'],'examples'=>[]];
+        // Source Markdown is the sole business-language guidance.  A saved
+        // administration document may change presentation labels, but cannot
+        // carry a second scene description or examples that drift from Skill.
+        foreach($m['scenes'] as $code=>$s) $scenes[$code]=['label'=>$s['label']];
         foreach($m['workflows'] as $code=>$w) $workflows[$code]=['enabled'=>true,'allow_export'=>$w['allow_export'],'max_path_ms'=>$w['max_path_ms'],'node_timeouts'=>array_column($w['nodes'],'timeout_ms','id')];
         return ['schema_version'=>'mohe-management-v1','source_registry_hash'=>AiRegistryValue::hash($m),
             'guidance'=>['max_rounds'=>3,'slot_order'=>['metric_code','start_date','compare_start','rank_direction','rank_limit'],
@@ -31,9 +34,7 @@ final class AiManagementPolicy
         foreach($d['guidance']['prompts'] as $text) self::text($text,240);
         self::keys($d['scenes'],array_keys($base['scenes']));
         foreach($d['scenes'] as $scene) {
-            self::keys($scene,['label','goal','examples']);self::text($scene['label'],80);self::text($scene['goal'],500);
-            if(!is_array($scene['examples'])||!AiRegistryValue::isList($scene['examples'])||count($scene['examples'])>12) self::fail();
-            foreach($scene['examples'] as $text) self::text($text,240);
+            self::keys($scene,['label']);self::text($scene['label'],80);
         }
         self::keys($d['workflows'],array_keys($base['workflows']));
         foreach($d['workflows'] as $code=>$w) {
@@ -70,7 +71,7 @@ final class AiManagementPolicy
             // are rebased; no executable declaration is inherited.
             $savedScene=$old['scenes'][$code]??($code==='store_operations'?($old['scenes']['registered_metric_analysis']??null):null);
             if (!is_array($savedScene)) continue;
-            foreach(['label','goal','examples'] as $field) if(array_key_exists($field,$savedScene)) $candidate['scenes'][$code][$field]=$savedScene[$field];
+            if(array_key_exists('label',$savedScene)) $candidate['scenes'][$code]['label']=$savedScene['label'];
         }
         foreach($base['workflows'] as $code=>$current) if(is_array($old['workflows'][$code]??null)) {
             $saved=$old['workflows'][$code];
@@ -86,7 +87,7 @@ final class AiManagementPolicy
     public static function applyManifest(array $document): array
     {
         $d=self::validate($document); $m=AiBusinessManifest::definitions();
-        foreach($d['scenes'] as $code=>$s) {$m['scenes'][$code]['label']=$s['label'];$m['scenes'][$code]['goal']=$s['goal'];}
+        foreach($d['scenes'] as $code=>$s) $m['scenes'][$code]['label']=$s['label'];
         foreach($d['workflows'] as $code=>$w) {
             $m['workflows'][$code]['allow_export']=$w['allow_export'];$m['workflows'][$code]['max_path_ms']=$w['max_path_ms'];
             foreach($m['workflows'][$code]['nodes'] as &$node) $node['timeout_ms']=$w['node_timeouts'][$node['id']];unset($node);

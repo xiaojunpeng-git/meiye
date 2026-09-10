@@ -17,10 +17,6 @@ final class AiDimensionGuidancePlanner
         }
         ksort($candidates);
         if (!$candidates) throw new \RuntimeException('AI_CAPABILITY_NOT_READY');
-        $signals = $projection['signals'] ?? [];
-        // Preserve every explicit metric: selecting the supported intersection
-        // would silently discard part of a multi-metric question.
-        $explicit = array_values(array_intersect($signals, array_keys(\app\services\query\metric\MetricSemanticCatalog::entries())));
         // Business actions are produced by the general intent Skill and have
         // already been validated against the business Skill contract.  This
         // planner never scans the question for action words.
@@ -41,21 +37,21 @@ final class AiDimensionGuidancePlanner
                 return ['kind'=>'capability_unavailable','reason'=>'AI_DIMENSION_ACTION_CONTRACT_NOT_READY'];
             }
         }
-        // A user-visible dictionary match is stronger than model output.  When
-        // the Skill itself established an action (for example “卖得”), the
-        // action contract is stronger than an arbitrary model metric choice.
-        $selected = $explicit ?: ($requestedActions ? [] : ($intent['metric_codes'] ?? []));
+        // The language model supplies the semantic candidate; this planner only
+        // checks that it is executable under the registered metric contract.
+        $selected = $intent['metric_codes'] ?? [];
         if (count($selected) > 1 || array_diff($selected, array_keys($candidates))) throw new \RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
         $metric = $selected[0] ?? null;
         if ($metric===null && $requestedActions && count($candidates)===1) $metric=(string)array_key_first($candidates);
-        if (!$explicit && !$requestedActions && ($intent['needs_metric_choice'] ?? false) === true) $metric = null;
+        if (!$requestedActions && ($intent['needs_metric_choice'] ?? false) === true) $metric = null;
         $terms = $projection['date_terms'] ?? [];
         if (count($terms) > 1 || !empty($projection['date_grouping_ambiguous'])) throw new \RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
         $range = $terms ? (new AiWorkflowPlanner())->normalizePeriod($terms[0], $today) : null;
         // Result shape belongs to the model's generic language understanding,
         // not to a project/member/person phrase table or a business scene.
         $ranking=$intent['ranking']??null;
-        if (!is_array($ranking) || array_keys($ranking)!==['direction','limit']
+        $rankingKeys=is_array($ranking)?array_keys($ranking):[];sort($rankingKeys);
+        if (!is_array($ranking) || $rankingKeys!==['direction','limit']
             || !in_array($ranking['direction']??null,['top','bottom','top_and_bottom','unspecified'],true)
             || (!is_null($ranking['limit']??null) && !is_int($ranking['limit']))) throw new \RuntimeException('AI_MODEL_RESPONSE_INVALID');
         $direction=$ranking['direction']==='unspecified'?null:$ranking['direction'];
@@ -108,7 +104,7 @@ final class AiDimensionGuidancePlanner
             $fields[]=['key'=>'dimension_direction','label'=>'排序方向','type'=>'select','options'=>[['value'=>'top','label'=>'从高到低'],['value'=>'bottom','label'=>'从低到高']]];
         } elseif ($state['limit'] === null) {
             $question='您希望查看多少项结果？';
-            $fields[]=['key'=>'dimension_limit','label'=>'展示数量','type'=>'select','options'=>[['value'=>'5','label'=>'5 项'],['value'=>'10','label'=>'10 项'],['value'=>'20','label'=>'20 项']]];
+            $fields[]=['key'=>'dimension_limit','label'=>'展示数量','type'=>'select','options'=>[['value'=>'1','label'=>'1 项'],['value'=>'3','label'=>'3 项'],['value'=>'5','label'=>'5 项'],['value'=>'10','label'=>'10 项'],['value'=>'20','label'=>'20 项']]];
         }
         if ($fields) {
             $summary=[];

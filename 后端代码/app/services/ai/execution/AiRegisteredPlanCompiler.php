@@ -141,8 +141,7 @@ final class AiRegisteredPlanCompiler
             if (!is_array($query['ranking'])) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
             AiRegistryValue::exact($query['ranking'],['direction','limit']);
             if (!in_array($query['ranking']['direction'],['top','bottom','top_and_bottom'],true)
-                || !is_int($query['ranking']['limit'])||$query['ranking']['limit']<1||$query['ranking']['limit']>20
-                || (!$person && $query['business_filters']===[] && $query['ranking']['limit']!==5)) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+                || !is_int($query['ranking']['limit'])||$query['ranking']['limit']<1||$query['ranking']['limit']>20) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         } elseif ($query['ranking']!==null) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
         foreach ($metrics as $metric) {
             $contract=$snapshot['metrics'][$metric];

@@ -21,6 +21,8 @@ $candidates=['staff_labor_yeji'=>['name'=>'劳动业绩','summary'=>'按实际�
  'summary_only'=>['name'=>'仅汇总合同','summary'=>'不能用于排行','query_shapes'=>['summary']]];
 $objects=['status'=>'choose','objects'=>[['ref'=>'position:2','label'=>'护理师'],['ref'=>'role:craftsman','label'=>'有手艺人资格的在职人员']]];
 $step=$planner->start($intent,$projection,$candidates,$objects,'screen','2026-09-09');
+$reordered=$intent;$reordered['ranking']=['limit'=>1,'direction'=>'top'];
+paCheck($planner->start($reordered,$projection,$candidates,$objects,'screen','2026-09-09')['kind']==='clarification','model JSON member order never changes personnel interpretation');
 paCheck($step['fields'][0]['key']==='analysis_object','actual object choice first, no technician scene');
 $next=$planner->choose($step,['analysis_object'=>'position:2']);
 paCheck($next['fields'][0]['key']==='analysis_metric' && count($next['fields'][0]['options'])===2,'best does not guess cash or labor; unsupported operation is not offered');

@@ -150,9 +150,9 @@ metricRegistryCheck(strpos($gateway, 'MetricSemanticCatalog::stripTerms') === fa
 metricRegistryCheck(strpos($gateway, "str_replace(['劳动业绩','销售人业绩','销售业绩']") === false
     && strpos($gateway, "preg_match('/劳动业绩|销售业绩|销售人业绩/u'") === false,
     'person intent has no handwritten metric phrase list');
-metricRegistryCheck(strpos($gateway, '$metric=$explicitMetrics[0]??') !== false
-    && strpos($gateway, "\$intent['metric_codes']=\$metric===null?[]:[\$metric]") !== false,
-    'explicit registered metric is authoritative over a model guess');
+metricRegistryCheck(strpos($gateway, '$metric=$explicitMetrics[0]??') === false
+    && strpos($gateway, "\$projection['signals']=array_values(array_unique(array_merge(\$intent['metric_codes']") !== false,
+    'the model supplies a semantic metric candidate and the registry remains the execution authority');
 metricRegistryCheck(!preg_match('/\\$metric\\s*===\\s*[\'\"][a-z0-9_]+[\'\"]|switch\\s*\\(\\s*\\$metric\\s*\\)/', $reader.$view),
     'registered execution layer has no metric-code if or switch branch');
 

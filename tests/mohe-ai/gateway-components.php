@@ -144,16 +144,19 @@ namespace {
     $GLOBALS['sfStatus']=200; $GLOBALS['sfResponse']=str_repeat('x',131073); rejects(function()use($client,$view,$cap){$client->select($view,$cap['metric_codes'],'fixture/model','fixture-key',1000,function(){});},'AI_MODEL_RESPONSE_TOO_LARGE');
     rejects(function()use($client,$view,$cap){$client->select($view,$cap['metric_codes'],'fixture/model',"bad\rkey",1000,function(){});},'AI_MODEL_CONFIG_INVALID');
     $temp = sys_get_temp_dir() . '/mohe-ai-gateway-fixture-' . bin2hex(random_bytes(8));
-    $safeQuestion=['schema_version'=>'sanitized-question-v2','question'=>'今天做的最好技师是谁','has_unresolved_conditions'=>false,'server_resolved_fields'=>['period']];
+    $safeQuestion=['schema_version'=>'sanitized-question-v2','question'=>'今天做的最好技师是谁','recent_questions'=>['昨天哪个技师表现最好'],
+        'prior_query'=>null,'has_unresolved_conditions'=>false,'server_resolved_fields'=>[],'reference_date'=>'2026-09-10'];
     $meanings=[['metric_code'=>'staff_labor_yeji','name'=>'劳动业绩','summary'=>'按规则分配给手艺人的业绩','object_contracts'=>[['object_kind'=>'person','action_codes'=>['service']]]]];
-    $intent=['object_kind'=>'person','object_term'=>'技师','operation'=>'ranking','metric_codes'=>[],'action_codes'=>['service'],'needs_metric_choice'=>true,'ranking'=>['direction'=>'top','limit'=>1],'unresolved_fragments'=>[]];
+    $intent=['object_kind'=>'person','object_term'=>'技师','operation'=>'ranking','metric_codes'=>[],'action_codes'=>['service'],'needs_metric_choice'=>true,'ranking'=>['direction'=>'top','limit'=>1],'periods'=>[['kind'=>'relative_days','end_offset_days'=>0,'days'=>1]],'scope'=>'authorized','context_conditions'=>['store_scope'=>'inherit','business_filters'=>'inherit'],'unresolved_fragments'=>[]];
     $GLOBALS['sfResponse']=$response(json_encode($intent));
     $understood=$client->understand($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){},$skills);
     check($understood['intent']===$intent,'general interpretation separates object, operation and missing criterion');
     $outbound=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
-    check(strpos(json_encode($outbound),'recent_user_intents')===false,'new question understanding does not replay conversation history');
-    check(strpos(json_encode($outbound),'member_operations')!==false&&strpos(json_encode($outbound),'partner_product_performance')!==false&&strpos(json_encode($outbound),'skill_intent_understanding')!==false,'model understanding receives the general intent Skill and all business capability groups');
-    foreach ([array_merge($intent,['sql'=>'SELECT 1']),array_merge($intent,['metric_codes'=>['invented']]),array_merge($intent,['object_term'=>'张三'])] as $invalid) {
+    $understandingInput=json_decode($outbound['messages'][2]['content'],true);
+    check(!isset($understandingInput['question']['recent_user_intents']) && $understandingInput['question']['recent_questions']===['昨天哪个技师表现最好'],'new question understanding receives de-identified local question context only');
+    $outboundText=json_encode($outbound,JSON_UNESCAPED_UNICODE);
+    check(strpos($outboundText,'skill_intent_understanding')!==false&&strpos($outboundText,'# 门店运营')!==false&&strpos($outboundText,'# 用户意图理解')!==false,'model understanding receives the complete source-owned language and business Skills');
+    foreach ([array_merge($intent,['sql'=>'SELECT 1']),array_merge($intent,['metric_codes'=>['invented']]),array_merge($intent,['object_term'=>'张三']),array_merge($intent,['periods'=>[null]]),array_merge($intent,['context_conditions'=>['store_scope'=>'inherit','business_filters'=>'unknown']])] as $invalid) {
         $GLOBALS['sfResponse']=$response(json_encode($invalid));
         rejects(function()use($client,$safeQuestion,$meanings,$skills){$client->understand($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){},$skills);},isset($invalid['metric_codes'][0])?'AI_MODEL_METRIC_UNKNOWN':'AI_MODEL_RESPONSE_INVALID');
     }

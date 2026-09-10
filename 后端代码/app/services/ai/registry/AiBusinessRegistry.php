@@ -29,9 +29,7 @@ final class AiBusinessRegistry
         return [
             'skill_code'=>$scene['skill_code'], 'skill_version'=>$scene['skill_version'],
             'skill_source_hash'=>$scene['skill_source_hash'], 'label'=>$scene['label'],
-            'goal'=>$scene['goal'], 'domains'=>$scene['domains'], 'ambiguities'=>$scene['ambiguities'],
-            'completion'=>$scene['completion'], 'counterexamples'=>$scene['counterexamples'],
-            'semantic_projection'=>$scene['semantic_projection'],
+            'instructions'=>$scene['instructions'],
         ];
     }
 
@@ -42,9 +40,7 @@ final class AiBusinessRegistry
         return [
             'intent_understanding'=>[
                 'skill_code'=>$intent['skill_code'],'skill_version'=>$intent['version'],
-                'skill_source_hash'=>$intent['source_hash'],'label'=>$intent['label'],'goal'=>$intent['goal'],
-                'principles'=>$intent['principles'],'output_contract'=>$intent['output_contract'],
-                'completion'=>$intent['completion'],
+                'skill_source_hash'=>$intent['source_hash'],'label'=>$intent['label'],'instructions'=>$intent['markdown'],
             ],
             'business'=>$this->modelSkill($sceneCode),
         ];
@@ -146,7 +142,7 @@ final class AiBusinessRegistry
                 if (isset($selectors['scene_codes'])&&!in_array($code,$selectors['scene_codes'],true)) continue;
                 $legal=[]; foreach ($snapshot['workflows'] as $workflow=>$record) if ($record['scene']===$code) $legal[]=$workflow;
                 if ($legal) $items[]=['scene_code'=>$code,'version'=>$scene['version'],'skill_code'=>$scene['skill_code'],'skill_version'=>$scene['skill_version'],
-                    'label'=>$scene['label'],'goal'=>$scene['goal'],'ambiguities'=>$scene['ambiguities']];
+                    'label'=>$scene['label'],'skill_source_hash'=>$scene['skill_source_hash']];
             }
             return ['level'=>1,'registry_version'=>$this->version(),'items'=>$items,'metadata_explanation_available'=>(bool)$snapshot['definitions']];
         }
@@ -235,35 +231,14 @@ final class AiBusinessRegistry
         }
         $skillCodes=[];
         foreach ($m['scenes'] as $scene) {
-            AiRegistryValue::exact($scene,['version','skill_code','skill_version','skill_source_hash','skill_source_path','label','goal','domains','semantic_projection','actions','required_facts','ambiguities','completion','counterexamples']);
+            AiRegistryValue::exact($scene,['version','skill_code','skill_version','skill_source_hash','skill_source_path','label','instructions','actions']);
             if (!is_string($scene['skill_code'])||!preg_match('/^skill_[a-z0-9_]{1,73}$/D',$scene['skill_code'])||in_array($scene['skill_code'],$skillCodes,true)
                 ||!is_int($scene['skill_version'])||$scene['skill_version']<1) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
             if (!is_string($scene['skill_source_hash']) || !preg_match('/^[a-f0-9]{64}$/D',$scene['skill_source_hash'])
-                || !is_string($scene['skill_source_path']) || !preg_match('#^app/services/ai/skills/[a-z_]+/SKILL\.md$#D',$scene['skill_source_path'])) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
+                || !is_string($scene['skill_source_path']) || !preg_match('#^app/services/ai/skills/[a-z_]+/SKILL\.md$#D',$scene['skill_source_path'])
+                || !is_string($scene['instructions']) || trim($scene['instructions'])==='' || strlen($scene['instructions'])>32768) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
             $skillCodes[]=$scene['skill_code'];
             if (array_diff(AiRegistryValue::strings($scene['actions'],8),array_keys($m['actions']))) AiRegistryValue::fail('AI_REGISTRY_DEPENDENCY_INVALID');
-            foreach (['required_facts','ambiguities','counterexamples'] as $key) AiRegistryValue::strings($scene[$key],16);
-            $projection=$scene['semantic_projection'];
-            if (!is_array($projection) || array_diff(['objects','actions','capability_groups','slots','gateway'],array_keys($projection)) || array_diff(array_keys($projection),['objects','actions','capability_groups','slots','gateway'])) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
-            // AiSkillDocument already validates the complete source contract.  The
-            // registry repeats only the immutable shape required to safely pass it
-            // through to the model and gateway.
-            foreach (['objects','actions','capability_groups','slots'] as $key) if (!is_array($projection[$key]) || !$projection[$key]) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
-            if (!is_array($projection['gateway']) || ($projection['gateway']['candidate_source']??null)!=='server_authorized_contract') AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
-            if (!is_array($scene['domains']) || !AiRegistryValue::isList($scene['domains']) || !$scene['domains'] || count($scene['domains'])>16) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
-            $domainCodes=[];
-            foreach ($scene['domains'] as $domain) {
-                if (!is_array($domain)) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
-                AiRegistryValue::exact($domain,['code','label','objects','questions']);
-                if (!is_string($domain['code']) || !preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$domain['code'])
-                    || in_array($domain['code'],$domainCodes,true)
-                    || !is_string($domain['label']) || $domain['label']==='' || strlen($domain['label'])>160) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
-                foreach (['objects','questions'] as $key) {
-                    $values=AiRegistryValue::strings($domain[$key],16);
-                    if (!$values) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
-                }
-                $domainCodes[]=$domain['code'];
-            }
         }
         foreach ($m['workflows'] as $workflow) {
             AiRegistryValue::exact($workflow,['version','scene','action','query_shape','entry','terminal','allow_export','max_path_ms','nodes']);

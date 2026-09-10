@@ -176,11 +176,17 @@ final class AiGatewayServices
                 || $this->permissionHash($this->fresh($context))!==$snapshot['authorization_version']) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
             if ($operation==='execute') {
                 $this->runs->progress($owner,$id,$generation,$worker,'UNDERSTANDING');
-                $projector=new AiModelInputProjector(); $view=$projector->modelView($body);
-                if (($view['current']['semantic_intent']['followup']??'none')==='requested' && isset($body['context_ref'])) {
+                $projector=new AiModelInputProjector();
+                // A normal external-model request starts with the original
+                // language, not with a locally guessed vocabulary projection.
+                // The projection remains only for frozen legacy configuration,
+                // context-follow-up compatibility and isolated injected tests.
+                $view=null;
+                if (!AiConfigStore::allowsSanitizedQuestion($configuration)) $view=$projector->modelView($body);
+                if ($view!==null && ($view['current']['semantic_intent']['followup']??'none')==='requested' && isset($body['context_ref'])) {
                     $view['current']=$this->inheritContext($context,$owner,$body['context_ref'],$view['current']);
                 }
-                if (isset($view['current']['verified_source_query'])) {
+                if ($view!==null && isset($view['current']['verified_source_query'])) {
                     $names=[];$dictionary=new \app\services\metric\MetricDictionaryServices();
                     foreach($currentCapabilities['metric_codes'] as $code) {
                         $tooltip=$dictionary->getTooltip($code);
@@ -189,12 +195,12 @@ final class AiGatewayServices
                     $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
                     $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
                     $compiled=(new \app\services\ai\execution\AiFollowupQueryPlanner())->compile($view['current']['verified_source_query'],$body['question'],$names,$body['output_format'],$today);
-                // The safe model is the one natural-language interpretation
-                // path.  Local parsing supplies privacy boundaries and known
-                // dates/metrics, never a list of phrases that define result
-                // shapes such as a ranking or comparison.
+                // The safe model is the natural-language interpretation path.
+                // It receives only de-identified text, full source Skills and
+                // dynamically registered capabilities; compilation is separate.
                 } elseif (AiConfigStore::allowsSanitizedQuestion($configuration)) {
-                    $compiled=$this->understandAnalysis($context,$owner,$id,$generation,$worker,$body,$view['current'],$configuration);
+                    $projection=$view['current']??['dates'=>[],'date_terms'=>[],'signals'=>[],'semantic_intent'=>['constraints'=>[]],'blocking_reason'=>null,'unresolved_condition'=>false];
+                    $compiled=$this->understandAnalysis($context,$owner,$id,$generation,$worker,$body,$projection,$configuration);
                 } else {
                 // Unknown meaningful constraints are retained as blockers, never deleted to force a match.
                 if (!empty($view['current']['blocking_reason'])) throw new RuntimeException($view['current']['blocking_reason']);
@@ -288,7 +294,7 @@ final class AiGatewayServices
     {
         // Dependency order in capability guidance is server-owned; old scene prompt
         // configuration must not reorder object binding after metric execution.
-        if (in_array(($plan['schema_version']??null),['mohe-analysis-guidance-v1','mohe-skill-guidance-v1'],true)) return $plan;
+        if (in_array(($plan['schema_version']??null),['mohe-analysis-guidance-v1','mohe-skill-guidance-v1','mohe-store-scope-guidance-v1'],true)) return $plan;
         return $this->managementDocument
             ? \app\services\ai\management\AiManagementPolicy::decorateEnvelope($this->managementDocument,$plan) : $plan;
     }
@@ -363,7 +369,7 @@ final class AiGatewayServices
     }
 
     /** Signed evidence supplies prior conditions, never prior figures or additional data authority. */
-    private function inheritContext(array $context,array $owner,string $reference,array $intent): array
+    private function sourceContextQuery(array $context,array $owner,string $reference): array
     {
         $untrusted=json_decode(base64_decode(strtr(explode('.',$reference)[0],'-_','+/')),true);
         if (!is_array($untrusted) || !is_string($untrusted['window']??null)) throw new RuntimeException('AI_CONTEXT_REQUIRED');
@@ -374,6 +380,13 @@ final class AiGatewayServices
         if (!isset($stored['query'],$stored['view_ref'])) throw new RuntimeException('AI_CONTEXT_REQUIRED');
         $query=$stored['query'];
         $this->queryService($context)->replay([],$query,$stored['view_ref']);
+        return $query;
+    }
+
+    /** Legacy projected conversations retain their previous compatibility path. */
+    private function inheritContext(array $context,array $owner,string $reference,array $intent): array
+    {
+        $query=$this->sourceContextQuery($context,$owner,$reference);
         if ($query['business_filters']!==[] || $query['store_ids']!==[]) {
             $intent['verified_source_query']=$query;
             return $intent;
@@ -394,6 +407,116 @@ final class AiGatewayServices
         }
         $intent['signals']=array_values(array_unique($intent['signals']));
         return $intent;
+    }
+
+    /** Only non-sensitive, already-authorized query meaning is visible to the model. */
+    private function modelPriorQuery(array $query): array
+    {
+        return ['metric_codes'=>array_values($query['metric_codes']), 'operation'=>$query['query_shape'],
+            'periods'=>array_values(array_filter([
+                ['kind'=>'date_range','start'=>$query['start_date'],'end'=>$query['end_date']],
+                $query['compare_range']===null?null:['kind'=>'date_range','start'=>$query['compare_range']['start'],'end'=>$query['compare_range']['end']],
+            ])),
+            'ranking'=>$query['ranking']];
+    }
+
+    /** The model says which prior restrictions still describe the new request.
+     * The returned values remain a narrowing candidate and are always checked
+     * again by the registered compiler and Reader against current authority. */
+    private function inheritedQueryConstraints(?array $sourceQuery,array $contextConditions): ?array
+    {
+        if ($sourceQuery===null) return null;
+        return [
+            // null means the current request intentionally replaces or removes
+            // this old condition. An empty array is different: it is the signed
+            // prior meaning of "the complete authorized range/no filter" and
+            // remains an enforceable inherited condition.
+            'store_ids'=>$contextConditions['store_scope']==='inherit'?$sourceQuery['store_ids']:null,
+            'business_filters'=>$contextConditions['business_filters']==='inherit'?$sourceQuery['business_filters']:null,
+        ];
+    }
+
+    /** A signed prior result may retain only the restrictions that the current
+     * natural-language meaning says to retain. It never increases authority. */
+    private function bindInheritedQueryConstraints(array $compiled,?array $constraints): array
+    {
+        if ($constraints===null) return $compiled;
+        if (($compiled['kind']??null)==='clarification') {
+            $compiled['inherited_query_constraints']=$constraints;
+            return $compiled;
+        }
+        if (($compiled['kind']??null)!=='plan' || !is_array($compiled['plan']['query']??null)) return $compiled;
+        $query=&$compiled['plan']['query'];
+        foreach (['store_ids','business_filters'] as $key) {
+            if (!array_key_exists($key,$constraints) || ($constraints[$key]!==null && !is_array($constraints[$key]))) {
+                throw new RuntimeException('AI_CONTEXT_CONDITION_CONFLICT');
+            }
+            if ($constraints[$key]===null) continue;
+            if ($query[$key]!==[] && $query[$key]!==$constraints[$key]) throw new RuntimeException('AI_CONTEXT_CONDITION_CONFLICT');
+            $query[$key]=$constraints[$key];
+        }
+        unset($query);
+        return $compiled;
+    }
+
+    /**
+     * Converts a model-understood named store into a stable scope only after
+     * looking it up in the current report-authorized store catalog. The model
+     * never receives this catalog and never supplies an ID.
+     */
+    private function bindNamedStoreScope(array $compiled,array $context,string $term,array $conditions,array $owner,string $id,int $generation,string $worker): array
+    {
+        // Replacing a signed store constraint without an authoritative target
+        // must never widen the query to the complete authorized range.  An
+        // empty term means the model understood a replacement but could not
+        // bind its target; the same server-built choice flow is required.
+        if ($conditions['store_scope']!=='replace') return $compiled;
+        $this->runs->prepareAttempt($owner,$id,$generation,$worker,'analysis_store_scope','tool',hash('sha256',$term),'authorized_store_catalog');
+        $this->runs->sendAttempt($owner,$id,$generation,$worker,'analysis_store_scope');
+        try {
+            $resolution=(new \app\services\query\metric\AnalysisObjectCatalog($this->authorizedStoreObjects($context),static function(): bool { return true; }))
+                ->resolve($term,'store');
+            $this->runs->finishAttempt($owner,$id,$generation,$worker,'analysis_store_scope','SUCCEEDED');
+        } catch (\Throwable $error) {
+            $this->runs->finishAttempt($owner,$id,$generation,$worker,'analysis_store_scope','FAILED');
+            throw $error;
+        }
+        if ($resolution['status']==='unavailable') throw new RuntimeException('AI_STORE_SCOPE_UNAVAILABLE');
+        if ($resolution['status']!=='resolved') return (new \app\services\ai\execution\AiStoreScopeGuidancePlanner())->start($compiled,$resolution['objects']);
+        $reference=$resolution['objects'][0]['ref'];
+        if (!preg_match('/^store:([1-9][0-9]*)$/D',$reference,$match)) throw new RuntimeException('AI_STORE_SCOPE_UNAVAILABLE');
+        $stores=[(int)$match[1]];
+        if (($compiled['kind']??null)==='plan' && is_array($compiled['plan']['query']??null)) {
+            $compiled['plan']['query']['store_ids']=$stores;
+            return $compiled;
+        }
+        if (($compiled['kind']??null)==='clarification') {
+            $compiled['resolved_store_ids']=$stores;
+            return $compiled;
+        }
+        throw new RuntimeException('AI_STORE_SCOPE_UNAVAILABLE');
+    }
+
+    /** Reads only trusted names for stores already granted by the current report scope. */
+    private function authorizedStoreObjects(array $context): array
+    {
+        $before=$this->fresh($context);$stores=$before['store_ids']??null;
+        if (!is_array($stores)||$stores===[]||count($stores)>10000) throw new RuntimeException('AI_STORE_SCOPE_UNAVAILABLE');
+        foreach ($stores as $store) if (!is_int($store)||$store<1) throw new RuntimeException('AI_STORE_SCOPE_UNAVAILABLE');
+        $transaction=$this->queryTransaction ?: [new \app\services\query\metric\MetricReadTransaction(5000),'run'];
+        $names=call_user_func($transaction,function(\app\services\query\metric\GroupPerformanceMetricReadServices $reader) use($stores): array {
+            return $reader->storeNames($stores);
+        });
+        $after=$this->fresh($context);
+        if ($this->permissionHash($before)!==$this->permissionHash($after)) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
+        $objects=[];
+        foreach ($stores as $store) {
+            $label=$names[$store]??null;
+            if (!is_string($label)||trim($label)==='') throw new RuntimeException('AI_STORE_SCOPE_UNAVAILABLE');
+            $objects[]=['ref'=>'store:'.$store,'kind'=>'store','label'=>$label,'aliases'=>[],
+                'version'=>hash('sha256',$store.':'.$label),'relations'=>[]];
+        }
+        return $objects;
     }
 
     private function discoverIntent(array $context,array $intent): array
@@ -456,13 +579,12 @@ final class AiGatewayServices
     /** Revisions replay immutable semantic state, not a narrowed downstream candidate list. */
     private function advanceGuidance(array $stored,string $ref,array $input): array
     {
-        $planner=isset($stored['envelope']['analysis_state'])?new \app\services\ai\execution\AiAnalysisGuidancePlanner()
-            :(isset($stored['envelope']['dimension_state'])?new \app\services\ai\execution\AiDimensionGuidancePlanner()
-            :(isset($stored['envelope']['skill_state'])?new \app\services\ai\execution\AiSkillGuidancePlanner():new AiWorkflowPlanner())); $choices=$input['choices']??null;
+        $planner=$this->guidancePlanner($stored['envelope']); $choices=$input['choices']??null;
         if (!is_array($choices)) throw new RuntimeException('AI_CLARIFICATION_INVALID');
         $steps=$stored['accepted_steps']??[];
         if (!isset($input['revise_clarification_id'])) {
             $next=$this->decorateGuidance($planner->choose($stored['envelope'],$choices));
+            $next=$this->bindInheritedQueryConstraints($next,$stored['origin']['inherited_query_constraints']??null);
             $steps[]=['id'=>$ref,'envelope'=>$stored['envelope'],'choices'=>$choices];
             return [$next,$steps];
         }
@@ -474,7 +596,11 @@ final class AiGatewayServices
             $expected=array_column($draft['fields'],'key'); $previous=array_keys($step['choices']); sort($expected); sort($previous);
             if ($expected!==$previous) continue;
             $selection=$step['id']===$target?$choices:$step['choices'];
-            try { $next=$this->decorateGuidance($planner->choose($draft,$selection)); }
+            // A revision replays a chain which may have crossed multiple
+            // guidance types (for example store choice -> date choice). Use
+            // the planner carried by each historical envelope, rather than
+            // the planner of the currently displayed final step.
+            try { $next=$this->decorateGuidance($this->guidancePlanner($draft)->choose($draft,$selection)); }
             catch (\Throwable $error) {
                 if ($step['id']===$target || !$found) throw $error;
                 break; // Invalid dependent binding must be re-confirmed, not silently retained.
@@ -482,16 +608,22 @@ final class AiGatewayServices
             $rebuilt[]=['id'=>$step['id'],'envelope'=>$draft,'choices'=>$selection]; $draft=$next;
         }
         if (!$found) throw new RuntimeException('AI_CLARIFICATION_STALE');
-        return [$draft,$rebuilt];
+        return [$this->bindInheritedQueryConstraints($draft,$stored['origin']['inherited_query_constraints']??null),$rebuilt];
+    }
+
+    /** Selects only the server-owned planner encoded by a clarification state. */
+    private function guidancePlanner(array $envelope)
+    {
+        if (isset($envelope['store_scope_state'])) return new \app\services\ai\execution\AiStoreScopeGuidancePlanner();
+        if (isset($envelope['analysis_state'])) return new \app\services\ai\execution\AiAnalysisGuidancePlanner();
+        if (isset($envelope['dimension_state'])) return new \app\services\ai\execution\AiDimensionGuidancePlanner();
+        if (isset($envelope['skill_state'])) return new \app\services\ai\execution\AiSkillGuidancePlanner();
+        return new AiWorkflowPlanner();
     }
 
     private function understandAnalysis(array $context,array $owner,string $id,int $generation,string $worker,array $body,array $projection,array $configuration): array
     {
-        // Semantic object analysis must retain the same explicit-store guard
-        // as ordinary metric questions before calling a model or querying data.
-        if (in_array('current_store',$projection['signals']??[],true)
-            && !($context['terminal']==='store' && count($context['store_ids'])===1)) throw new RuntimeException('AI_UNSUPPORTED_CONDITION');
-        $caps=$this->capabilities($this->fresh($context));$runtimeSkills=$this->registry()->modelSkills('store_operations');$runtimeSkill=$runtimeSkills['business'];$dictionary=new \app\services\metric\MetricDictionaryServices();$summaries=[];
+        $caps=$this->capabilities($this->fresh($context));$runtimeSkills=$this->registry()->modelSkills('store_operations');$dictionary=new \app\services\metric\MetricDictionaryServices();$summaries=[];
         foreach ($caps['metric_codes'] as $code) {
             $tooltip=$dictionary->getTooltip($code);if (($tooltip['user_ready']??false)!==true) continue;
             $contract=$caps['metric_readiness'][$code];$objectContracts=[];
@@ -533,22 +665,29 @@ final class AiGatewayServices
                 $privateLabels[]=$object['label'];$privateKinds[$object['label']][$object['kind']]=true;
             }
         }
-        $safe=(new \app\services\ai\model\AiSafeQuestionProjector())->project($body['question'],$configuration,array_values(array_unique($privateLabels)));
-        foreach ($safe['local_conditions'] as $reference=>$value) {
-            if (in_array($value,$projection['dates']??[],true)) {
-                $safe['outbound']['question']=str_replace('['.$reference.']','指定期间',$safe['outbound']['question']);
-                unset($safe['local_conditions'][$reference]);
-            } elseif(in_array($value,$privateLabels,true)) {
+        $safe=(new \app\services\ai\model\AiSafeQuestionProjector())->projectConversation(
+            $body['question'],$body['history'],$configuration,array_values(array_unique($privateLabels))
+        );
+        foreach (($safe['reference_values']??$safe['local_conditions']) as $reference=>$value) {
+            if(in_array($value,$privateLabels,true)) {
                 $kinds=$privateKinds[$value]??[];$descriptor=isset($kinds['position'])&&!isset($kinds['person'])?'岗位':'人员';
                 $privateKindsByReference[$reference]=$descriptor==='岗位'?'position':'person';
                 $safe['outbound']['question']=str_replace('['.$reference.']',$descriptor.' ['.$reference.']',$safe['outbound']['question']);
             }
         }
         $safe['outbound']['has_unresolved_conditions']=(bool)$safe['local_conditions'];
-        $resolved=[];
-        if (!empty($projection['dates']) || !empty($projection['date_terms'])) $resolved[]='period';
-        if (in_array('current_store',$projection['signals']??[],true)) $resolved[]='current_store_scope';
-        $safe['outbound']['server_resolved_fields']=$resolved;
+        $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
+        $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
+        // The reference date is server-owned context, not a guessed reading of
+        // customer language.  Relative time is interpreted by the model and
+        // then materialized below with this value.
+        $safe['outbound']['reference_date']=$today;
+        $safe['outbound']['server_resolved_fields']=[];
+        // A signed answer reference is useful conversation context, not a
+        // shortcut around natural-language understanding.  It is verified and
+        // reduced to non-sensitive query meaning before the model sees it.
+        $sourceQuery=isset($body['context_ref'])?$this->sourceContextQuery($context,$owner,$body['context_ref']):null;
+        $safe['outbound']['prior_query']=$sourceQuery===null?null:$this->modelPriorQuery($sourceQuery);
         $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
         $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$safe['outbound'],$summaries,$runtimeSkills]))+2048));
         $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
@@ -562,38 +701,38 @@ final class AiGatewayServices
         } catch (\Throwable $error) {
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand',in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');throw $error;
         }
-        $checkpoint();$intent=$this->semanticIntent($reply['intent']??null,$runtimeSkill['semantic_projection'],$safe['outbound']['question']);$term=$intent['object_term'];
+        $checkpoint();$intent=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound']);$term=$intent['object_term'];
         if ($intent['unresolved_fragments']) throw new RuntimeException('AI_INTENT_UNRESOLVED');
         if ($intent['operation']==='unknown') throw new RuntimeException('AI_INTENT_UNRESOLVED');
         $localTerm=null;
         if (preg_match('/^\[(local_condition_[0-9]+)\]$/D',$term,$match)) {
-            $localTerm=$safe['local_conditions'][$match[1]]??null;unset($safe['local_conditions'][$match[1]]);$term=$localTerm??'';
+            $localTerm=($safe['reference_values']??$safe['local_conditions'])[$match[1]]??null;
+            unset($safe['local_conditions'][$match[1]]);$term=$localTerm??'';
         }
         // All remaining opaque conditions are meaningful. Never query a reduced request.
-        if ($safe['local_conditions']) {
-            \app\services\ai\execution\AiSemanticObjectContractRegistry::requireGatewayRule($runtimeSkill['semantic_projection'],'unknown_term','RESOLVE_OR_STOP');
-            throw new RuntimeException('AI_LOCAL_CONDITION_REQUIRED');
-        }
-        // Object readiness comes only from the source-owned contract registry.
-        // A Skill may recognize a subject but cannot make it executable by name.
-        $modelTerms=[];
-        if (!in_array($intent['object_kind'],['unknown'],true)) $modelTerms[]=['kind'=>'object','code'=>$intent['object_kind'],'label'=>$intent['object_term'],'text'=>$intent['object_term']];
-        $missing=\app\services\ai\execution\AiSemanticObjectContractRegistry::missingObjects($runtimeSkill['semantic_projection'],$modelTerms,$caps);
-        if ($missing) return (new \app\services\ai\execution\AiSkillGuidancePlanner())->start($runtimeSkill['semantic_projection'],$missing);
+        if ($safe['local_conditions']) throw new RuntimeException('AI_LOCAL_CONDITION_REQUIRED');
         if (($intent['object_kind']??null)==='position' || ($localTerm!==null && (($privateKindsByReference[$match[1]??'']??null)==='position'))) $intent['object_kind']='person';
-        $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
-        $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
+        if ($intent['_periods_supplied'] && $intent['periods']!==[]) {
+            $projection['dates']=[];
+            $projection['date_terms']=$this->naturalPeriodTerms($intent['periods'],$today);
+        } elseif ($sourceQuery!==null) {
+            $projection['dates']=[];
+            $projection['date_terms']=$this->naturalPeriodTerms($this->modelPriorQuery($sourceQuery)['periods'],$today);
+        }
+        if ($intent['_scope_supplied'] && $intent['scope']==='current_store') {
+            if (!($context['terminal']==='store' && count($context['store_ids'])===1)) throw new RuntimeException('AI_UNSUPPORTED_CONDITION');
+            $projection['signals'][]='current_store';
+        }
+        $inheritedConstraints=$this->inheritedQueryConstraints($sourceQuery,$intent['context_conditions']);
         // The model Skill identifies the semantic subject from the complete
         // sentence. Local aliases are used for privacy/catalog projection only;
         // they must not override the subject merely because a short word also
         // appears inside a scope phrase such as “本店”.
-        $recognizedObject=!in_array($intent['object_kind'],['store','person','position','unknown'],true);
-        $constraintTypes=array_column($projection['semantic_intent']['constraints']??[],'type');
-        if ($recognizedObject) {
-            $projection['blocking_reason']=null; $projection['unresolved_condition']=false;
-            $projection['semantic_intent']['constraints']=[];
-        }
-        if ($intent['object_kind']==='unknown' && in_array('person_filter',$constraintTypes,true)) $intent['object_kind']='person';
+        // The model owns natural-language interpretation. The legacy projector
+        // may still contribute trusted follow-up state, but cannot overrule the
+        // model with a phrase match, blocker or inferred object.
+        $projection['blocking_reason']=null;$projection['unresolved_condition']=false;
+        $projection['semantic_intent']['constraints']=[];
         // Any registered object dimension follows the same controlled path.
         // Object labels come from the runtime Skill; metrics and dimensions
         // come from the lower-layer registry.  No report page/object switch is
@@ -602,23 +741,16 @@ final class AiGatewayServices
             $dimensionMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,$intent['object_kind'],'ranking');
             if ($localTerm!==null || !$dimensionMetrics) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
             if ($intent['operation']!=='ranking') throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
-            return (new \app\services\ai\execution\AiDimensionGuidancePlanner())->start(
+            return $this->bindInheritedQueryConstraints((new \app\services\ai\execution\AiDimensionGuidancePlanner())->start(
                 $intent['object_kind'],$intent,$projection,$dimensionMetrics,$body['output_format'],$today
-            );
+            ),$inheritedConstraints);
         }
         if ($intent['object_kind']==='person') {
             if (!$personMetrics) throw new RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
             // Resolve against a common authorized object catalog. Before selecting a
             // different metric, execution independently rechecks its own report grant.
-            $explicitRegistered=array_values(array_intersect($projection['signals'],array_keys(\app\services\query\metric\MetricSemanticCatalog::entries())));
-            $explicitMetrics=array_values(array_intersect($explicitRegistered,array_keys($personMetrics)));
-            if (array_diff($explicitRegistered,array_keys($personMetrics))) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
-            if(count($explicitMetrics)>1) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
-            if (!$explicitRegistered && count($intent['metric_codes'])>1) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
-            // An unambiguous dictionary hit is a stronger contract than a model
-            // guess. The model may discover the object, but cannot replace an
-            // explicitly named registered metric.
-            $metric=$explicitMetrics[0]??($intent['metric_codes'][0]??null);
+            if (count($intent['metric_codes'])>1) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            $metric=$intent['metric_codes'][0]??null;
             if ($metric!==null && !isset($personMetrics[$metric])) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
             $intent['metric_codes']=$metric===null?[]:[$metric];
             $catalog=$localCatalogs[$metric??array_key_first($personMetrics)];
@@ -628,19 +760,20 @@ final class AiGatewayServices
             // replaced with someone else. Otherwise resolve actual position metadata.
             $exactPeople=array_values(array_filter($catalog['objects'],static function($o)use($term){return $o['kind']==='person' && $o['label']===$term;}));
             $objects=$exactPeople?$named:$objectCatalog->resolve($term,'position',$metric);
-            return (new \app\services\ai\execution\AiAnalysisGuidancePlanner())->start($intent,$projection,$personMetrics,$objects,$body['output_format'],$today);
+            return $this->bindInheritedQueryConstraints((new \app\services\ai\execution\AiAnalysisGuidancePlanner())->start($intent,$projection,$personMetrics,$objects,$body['output_format'],$today),$inheritedConstraints);
         }
         // No staff/customer/object restriction may become an unfiltered store query.
         if ($localTerm!==null || !in_array($intent['object_kind'],['store','unknown'],true)) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
-        $explicit=array_values(array_intersect($projection['signals'],array_keys(\app\services\query\metric\MetricSemanticCatalog::entries())));
-        $selected=$intent['metric_codes'];sort($explicit);sort($selected);
-        if ($explicit && $explicit!==$selected) throw new RuntimeException('AI_MODEL_SELECTION_MISMATCH');
-        $projection['signals']=array_values(array_diff($projection['signals'],['summary','trend','ranking','comparison','definition','rank_top','rank_bottom','top_5','bottom_5','ambiguous_metric']));
-        $projection['signals']=array_values(array_unique(array_merge($projection['signals'],$intent['metric_codes'],[$intent['operation']])));
+        // Do not let a local word list select a metric or result shape.  The
+        // natural-language model returns a candidate, and the compiler below
+        // verifies it against the same registered contracts used by reports.
+        $projection['signals']=array_values(array_unique(array_merge($intent['metric_codes'],[$intent['operation']])));
         if ($intent['needs_metric_choice']) $projection['signals'][]='ambiguous_metric';
         $projection['blocking_reason']=null;$projection['unresolved_condition']=false;$projection['semantic_intent']['constraints']=[];
         $caps['current_store_bound']=$context['terminal']==='store' && count($context['store_ids'])===1;
-        return (new AiWorkflowPlanner())->compile($projection,['decision'=>'query','query_shape'=>$intent['operation'],'metric_codes'=>$intent['metric_codes'],'ranking'=>$intent['ranking']],$caps,$body['output_format'],$today);
+        $compiled=(new AiWorkflowPlanner())->compile($projection,['decision'=>'query','query_shape'=>$intent['operation'],'metric_codes'=>$intent['metric_codes'],'ranking'=>$intent['ranking']],$caps,$body['output_format'],$today);
+        $compiled=$this->bindNamedStoreScope($compiled,$context,$term,$intent['context_conditions'],$owner,$id,$generation,$worker);
+        return $this->bindInheritedQueryConstraints($compiled,$inheritedConstraints);
     }
 
     /**
@@ -648,30 +781,101 @@ final class AiGatewayServices
      * but it only returns a bounded, declarative result shape.  This server
      * boundary deliberately does not interpret individual Chinese phrases.
      */
-    private function semanticIntent($intent,array $semanticProjection,string $safeQuestion): array
+    private function semanticIntent($intent,array $capabilities,array $safeQuestion): array
     {
         if (!is_array($intent)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        $periodsSupplied=array_key_exists('periods',$intent);$legacyPeriodSupplied=array_key_exists('period',$intent);$scopeSupplied=array_key_exists('scope',$intent);$contextConditionsSupplied=array_key_exists('context_conditions',$intent);
+        if ($periodsSupplied && $legacyPeriodSupplied) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
         $keys=array_keys($intent); sort($keys);
-        if ($keys!==['action_codes','metric_codes','needs_metric_choice','object_kind','object_term','operation','ranking','unresolved_fragments']
+        $expected=['action_codes','metric_codes','needs_metric_choice','object_kind','object_term','operation','ranking','unresolved_fragments'];
+        if ($periodsSupplied) $expected[]='periods'; elseif ($legacyPeriodSupplied) $expected[]='period'; sort($expected);
+        if ($scopeSupplied) {$expected[]='scope';sort($expected);}
+        if ($contextConditionsSupplied) {$expected[]='context_conditions';sort($expected);}
+        if ($keys!==$expected
             || !is_bool($intent['needs_metric_choice']) || !is_string($intent['object_term'])
             || !in_array($intent['object_kind'],['store','person','position','member','product','project','category','partner','inventory','course','organization','unknown'],true)
             || !in_array($intent['operation'],['summary','trend','ranking','comparison','definition','unknown'],true)
             || !is_array($intent['metric_codes']) || count($intent['metric_codes'])>8 || !is_array($intent['action_codes']) || count($intent['action_codes'])>8
             || !is_array($intent['unresolved_fragments']) || count($intent['unresolved_fragments'])>8
-            || !is_array($intent['ranking']) || array_keys($intent['ranking'])!==['direction','limit']
+            || !is_array($intent['ranking'])
             || !in_array($intent['ranking']['direction']??null,['top','bottom','top_and_bottom','unspecified'],true)
             || (!is_null($intent['ranking']['limit']??null) && (!is_int($intent['ranking']['limit']) || $intent['ranking']['limit']<1 || $intent['ranking']['limit']>999))) {
             throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
         }
+        $rankingKeys=array_keys($intent['ranking']);sort($rankingKeys);
+        if ($rankingKeys!==['direction','limit']) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        $periods=$periodsSupplied?$intent['periods']:($legacyPeriodSupplied&&$intent['period']!==null?[$intent['period']]:[]);
+        if (($periodsSupplied && !$this->validNaturalPeriods($periods)) || ($legacyPeriodSupplied && !$this->validNaturalPeriods($periods))) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        if ($scopeSupplied && !in_array($intent['scope'],['current_store','authorized','unspecified'],true)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        $contextConditions=$intent['context_conditions']??['store_scope'=>'inherit','business_filters'=>'inherit'];
+        $contextKeys=is_array($contextConditions)?array_keys($contextConditions):[];sort($contextKeys);
+        if ($contextKeys!==['business_filters','store_scope']
+            || !in_array($contextConditions['store_scope'],['inherit','replace','clear'],true)
+            || !in_array($contextConditions['business_filters'],['inherit','replace','clear'],true)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
         foreach ($intent['metric_codes'] as $code) if (!is_string($code) || !preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$code)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        $allowedActions=[];foreach(($semanticProjection['actions']??[]) as $action) if(is_string($action['code']??null))$allowedActions[]=$action['code'];
+        $allowedActions=[];foreach($capabilities as $capability) foreach((array)($capability['object_contracts']??[]) as $contract) foreach((array)($contract['action_codes']??[]) as $action) if(is_string($action))$allowedActions[$action]=true;
+        $allowedActions=array_keys($allowedActions);
         foreach ($intent['action_codes'] as $code) if(!is_string($code)||!in_array($code,$allowedActions,true)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        if ($intent['object_term']!=='' && mb_strpos($safeQuestion,$intent['object_term'],0,'UTF-8')===false) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        $questionTexts=array_merge([$safeQuestion['question']??''],(array)($safeQuestion['recent_questions']??[]));
+        $contains=function(string $value) use($questionTexts):bool { foreach($questionTexts as $text) if(is_string($text)&&mb_strpos($text,$value,0,'UTF-8')!==false)return true; return false; };
+        if ($intent['object_term']!=='' && !$contains($intent['object_term'])) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
         foreach ($intent['unresolved_fragments'] as $fragment) if(!is_string($fragment)||$fragment===''||mb_strlen($fragment,'UTF-8')>160
-            || mb_strpos($safeQuestion,$fragment,0,'UTF-8')===false) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+            || !$contains($fragment)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
         if (count(array_unique($intent['metric_codes']))!==count($intent['metric_codes']) || count(array_unique($intent['action_codes']))!==count($intent['action_codes'])
             || count(array_unique($intent['unresolved_fragments']))!==count($intent['unresolved_fragments'])) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        unset($intent['period']);
+        $intent['_periods_supplied']=$periodsSupplied||$legacyPeriodSupplied;
+        $intent['periods']=$periods;
+        $intent['_scope_supplied']=$scopeSupplied;
+        $intent['context_conditions']=$contextConditions;
+        if (!$scopeSupplied) $intent['scope']='unspecified';
         return $intent;
+    }
+
+    /** A bounded semantic date value from the model becomes a trusted explicit
+     * range before any workflow is compiled.  No customer phrase is matched here.
+     */
+    private function naturalPeriodTerms(array $periods,string $today): array
+    {
+        $out=[];foreach ($periods as $period) $out=array_merge($out,$this->naturalPeriodTermsOne($period,$today));return $out;
+    }
+
+    private function naturalPeriodTermsOne(array $period,string $today): array
+    {
+        $reference=new \DateTimeImmutable($today,new \DateTimeZone('Asia/Shanghai'));
+        if ($period['kind']==='date_range') return [['code'=>'EXPLICIT','start'=>$period['start'],'end'=>$period['end']]];
+        if ($period['kind']==='relative_days') {
+            $end=$reference->modify(((int)$period['end_offset_days']).' days');
+            return [['code'=>'EXPLICIT','start'=>$end->modify('-'.(((int)$period['days'])-1).' days')->format('Y-m-d'),'end'=>$end->format('Y-m-d')]];
+        }
+        $offset=(int)$period['offset_months'];
+        $month=$reference->modify('first day of this month')->modify($offset.' months');
+        // “本月” means month-to-date.  A real-time reader must never turn it
+        // into a request for days that have not happened yet.
+        $end=$offset===0?$reference->format('Y-m-d'):$month->format('Y-m-t');
+        return [['code'=>'EXPLICIT','start'=>$month->format('Y-m-d'),'end'=>$end]];
+    }
+
+    private function validNaturalPeriod($period): bool
+    {
+        if (!is_array($period) || !isset($period['kind']) || !is_string($period['kind'])) return false;
+        $keys=array_keys($period);sort($keys);
+        if ($period['kind']==='date_range') {
+            return $keys===['end','kind','start'] && is_string($period['start']) && is_string($period['end'])
+                && preg_match('/^\d{4}-\d{2}-\d{2}$/D',$period['start']) && preg_match('/^\d{4}-\d{2}-\d{2}$/D',$period['end']);
+        }
+        if ($period['kind']==='relative_days') return $keys===['days','end_offset_days','kind']
+            && is_int($period['end_offset_days']) && $period['end_offset_days']>=-365 && $period['end_offset_days']<=0
+            && is_int($period['days']) && $period['days']>=1 && $period['days']<=366;
+        return $period['kind']==='month_offset' && $keys===['kind','offset_months']
+            && is_int($period['offset_months']) && $period['offset_months']>=-24 && $period['offset_months']<=0;
+    }
+
+    private function validNaturalPeriods($periods): bool
+    {
+        if (!is_array($periods) || count($periods)>2 || ($periods!==[] && array_keys($periods)!==range(0,count($periods)-1))) return false;
+        foreach ($periods as $period) if (!$this->validNaturalPeriod($period)) return false;
+        return true;
     }
 
     /** Registry selects the frozen graph; the gateway supplies only trusted infrastructure adapters. */

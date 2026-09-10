@@ -1,9 +1,12 @@
 <?php
 /** Offline registry/compiler/real scheduler fixtures. No database, model, queue or HTTP access. */
+$fixture=__DIR__.'/fixture-autoload.php'; require_once $fixture;
 $backend=dirname(__DIR__,2).'/后端代码/';
 foreach (['contract/AiContractException.php','registry/AiRegistryValue.php','registry/AiBusinessManifest.php','registry/AiBusinessRegistry.php',
     'execution/AiRegisteredPlanCompiler.php','execution/AiRegisteredWorkflowExecutor.php'] as $file) require_once $backend.'app/services/ai/'.$file;
 require_once $backend.'app/services/query/metric/MetricReadViewServices.php';
+require_once $backend.'app/services/query/metric/MetricDefinitionRegistry.php';
+require_once $backend.'app/services/metric/MetricDictionaryServices.php';
 
 use app\services\ai\registry\AiBusinessRegistry;
 use app\services\ai\registry\AiBusinessManifest;
@@ -70,11 +73,11 @@ try {
     registryCheck($registry->snapshot($reordered)===$snapshot,'capability fingerprint independent of set/key order');
     $skill=\app\services\ai\registry\AiSkillDocument::storeOperations();
     registryCheck(count($registry->discover($snapshot,1)['items'])===1,'one store-operations Skill is discoverable without report names');
-    registryCheck($skill['skill_code']==='skill_store_operations'&&count($skill['domains'])===8,'runtime Skill markdown declares the eight business domains');
-    registryCheck(strpos($skill['markdown'],'门店运营 Skill')!==false&&preg_match('/^[a-f0-9]{64}$/D',$skill['source_hash'])===1,'runtime Skill markdown has a fixed source hash');
+    registryCheck($skill['skill_code']==='skill_store_operations'&&$skill['version']===13,'runtime Skill has a stable published identity');
+    registryCheck(strpos($skill['markdown'],'# 门店运营')===0&&preg_match('/^[a-f0-9]{64}$/D',$skill['source_hash'])===1,'runtime Skill markdown has a fixed source hash');
     $modelSkill=$registry->modelSkill('store_operations');
     registryCheck($modelSkill['skill_code']===$skill['skill_code']&&$modelSkill['skill_version']===$skill['version']&&$modelSkill['skill_source_hash']===$skill['source_hash'],'model Skill is the exact validated published source');
-    registryCheck(array_column($modelSkill['domains'],'code')===['operating_result','store_organization_performance','personnel_position_performance','project_performance','product_category_performance','member_operations','partner_product_performance','product_usage_inventory'],'model Skill keeps all operating scenarios in a stable order');
+    registryCheck($modelSkill['instructions']===$skill['markdown'],'model receives the complete source-owned Skill, not a reduced phrase catalog');
     registryCheck(count($registry->discover($snapshot,2,['metric_codes'=>['cash_performance']])['items'])===1,'bounded metric discovery');
     registryCheck($registry->discover($snapshot,2,['scene_codes'=>['store_operations']])['items'][0]['query_shapes']===['comparison','ranking','summary','trend'],'level two exposes registered operations without a report scenario');
     $discovered=$registry->discover($snapshot,3,['scene_codes'=>['store_operations'],'metric_codes'=>['cash_performance']]);
@@ -105,7 +108,7 @@ try {
     }
     $compiled=$compiler->compile(registryPlan(),$cap);
     registryCheck($compiled['dependency_versions']['tool']===['unified_metric_query'=>1],'complete tool dependency version frozen');
-    registryCheck($compiled['dependency_versions']['skill']===['skill_store_operations'=>12],'business Skill has explicit immutable id and version');
+    registryCheck($compiled['dependency_versions']['skill']===['skill_store_operations'=>13],'business Skill has explicit immutable id and version');
     $memberPlan=registryPlan('ranking');
     $memberPlan['query']['metric_codes']=['cash_performance'];
     $memberPlan['query']['business_filters']=['object_kind'=>'member'];
@@ -139,7 +142,7 @@ try {
     $scoped=$cap; $scoped['store_ids']=[1,2]; $scopedCompiled=$compiler->compile($invalid,$scoped); $compiler->assertCompiled($scopedCompiled);
     registryCheck($scopedCompiled['query']['store_ids']===[2],'trusted authority can only narrow scope');
     $invalid=registryPlan('ranking'); $invalid['query']['ranking']['limit']=10;
-    registryReject(function()use($compiler,$cap,$invalid){$compiler->compile($invalid,$cap);},'AI_UNSUPPORTED_CONDITION');
+    registryCheck($compiler->compile($invalid,$cap)['query']['ranking']['limit']===10,'registered ranking count is preserved instead of being rewritten to five');
     $invalid=registryPlan('comparison'); $invalid['query']['compare_range']['start']='2026-08-01';
     registryReject(function()use($compiler,$cap,$invalid){$compiler->compile($invalid,$cap);},'AI_DATA_COVERAGE_INCOMPLETE');
     $invalid=registryPlan(); $invalid['query']['start_date']='2026-02-30';
@@ -162,7 +165,7 @@ try {
         if ($mutation==='duplicate') $manifest['workflows']['wf_performance_summary']['nodes'][2]['id']='query';
         if ($mutation==='unbounded') $manifest['workflows']['wf_performance_summary']['nodes'][0]['max_visits']=0;
         if ($mutation==='arbitrary_handler') $manifest['tools']['unified_metric_query']['handler']='AnyClass::query';
-        if ($mutation==='incomplete_domain') $manifest['scenes']['store_operations']['domains'][0]['questions']=[];
+        if ($mutation==='incomplete_domain') $manifest['scenes']['store_operations']['instructions']='';
         $reason=['missing_tool'=>'AI_REGISTRY_DEPENDENCY_INVALID','schema'=>'AI_REGISTRY_SCHEMA_INCOMPATIBLE','cycle'=>'AI_WORKFLOW_GRAPH_INVALID',
             'duplicate'=>'AI_WORKFLOW_GRAPH_INVALID','unbounded'=>'AI_WORKFLOW_NODE_INVALID','arbitrary_handler'=>'AI_TOOL_CONTRACT_INVALID',
             'incomplete_domain'=>'AI_REGISTRY_VERSION_INVALID'][$mutation];

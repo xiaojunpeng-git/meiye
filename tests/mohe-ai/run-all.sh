@@ -31,4 +31,5 @@ node_bin="${MOHE_TEST_NODE:-node}"
 for suite in device-session-contract browser-entry-contract browser-transport-contract browser-workflow-contract browser-guidance-contract browser-mobile-guidance-contract order-export-snapshot; do
     "$node_bin" "$test_dir/$suite.mjs"
 done
+"$node_bin" "$test_dir/management-ui-contract.mjs"
 bash "$test_dir/local-entrypoint-permissions.sh"

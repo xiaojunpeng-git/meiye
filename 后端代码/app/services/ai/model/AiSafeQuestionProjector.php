@@ -10,7 +10,40 @@ use app\services\ai\config\AiConfigStore;
  */
 final class AiSafeQuestionProjector
 {
+    /**
+     * The device keeps the conversation locally.  When the customer has
+     * explicitly authorized the external model, only de-identified *questions*
+     * from that local context are supplied to it.  Previous answers can contain
+     * figures and names, so they never cross this boundary.
+     */
+    public function projectConversation(string $question,array $history,array $configuration,array $privateLabels=[]): array
+    {
+        // One conversation has one reference map.  A name mentioned in an
+        // earlier question must keep the same opaque reference when the next
+        // question uses a pronoun, while a newly mentioned name gets a new one.
+        $references=[];
+        $recent=[];
+        foreach ($history as $round) {
+            if (!is_array($round) || !is_string($round['question']??null)) throw new \RuntimeException('AI_CONVERSATION_INVALID');
+            $past=$this->projectWithReferences($round['question'],$configuration,$privateLabels,$references);
+            $recent[]=$past['outbound']['question'];
+        }
+        $current=$this->projectWithReferences($question,$configuration,$privateLabels,$references);
+        $current['outbound']['recent_questions']=$recent;
+        // Current conditions are the only ones that can block this request.
+        // The complete map is retained locally so a model can safely refer to
+        // a de-identified object that first appeared in the conversation.
+        $current['reference_values']=$references;
+        return $current;
+    }
+
     public function project(string $question,array $configuration,array $privateLabels=[]): array
+    {
+        $references=[];
+        return $this->projectWithReferences($question,$configuration,$privateLabels,$references);
+    }
+
+    private function projectWithReferences(string $question,array $configuration,array $privateLabels,array &$references): array
     {
         if (!AiConfigStore::allowsSanitizedQuestion($configuration)) throw new \RuntimeException('AI_EXTERNAL_SCOPE_REQUIRED');
         if ($question==='' || strlen($question)>8192 || preg_match('//u',$question)!==1
@@ -20,8 +53,14 @@ final class AiSafeQuestionProjector
         usort($privateLabels,static function(string $left,string $right):int{return strlen($right)<=>strlen($left);});
 
         $local=[];$safe=$question;
-        $reference=static function(string $value) use (&$local):string {
-            $ref='local_condition_'.(count($local)+1);$local[$ref]=$value;return '['.$ref.']';
+        $reference=static function(string $value) use (&$local,&$references):string {
+            $ref=array_search($value,$references,true);
+            if ($ref===false) {
+                $ref='local_condition_'.(count($references)+1);
+                $references[$ref]=$value;
+            }
+            $local[$ref]=$value;
+            return '['.$ref.']';
         };
         foreach ([
             '/\bsk-[A-Za-z0-9_-]{12,}\b/u',

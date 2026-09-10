@@ -31,7 +31,8 @@ final class AiAnalysisGuidancePlanner
         if (count($periods)>1 || !empty($projection['date_grouping_ambiguous'])) throw new \RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
         $range=$periods?(new AiWorkflowPlanner())->normalizePeriod($periods[0],$today):null;
         $ranking=$intent['ranking']??null;
-        if (!is_array($ranking) || array_keys($ranking)!==['direction','limit']
+        $rankingKeys=is_array($ranking)?array_keys($ranking):[];sort($rankingKeys);
+        if (!is_array($ranking) || $rankingKeys!==['direction','limit']
             || !in_array($ranking['direction']??null,['top','bottom','top_and_bottom','unspecified'],true)
             || (!is_null($ranking['limit']??null) && !is_int($ranking['limit']))) throw new \RuntimeException('AI_MODEL_RESPONSE_INVALID');
         $direction=$ranking['direction']==='unspecified'?null:$ranking['direction'];

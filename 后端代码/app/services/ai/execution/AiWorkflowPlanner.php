@@ -78,11 +78,11 @@ final class AiWorkflowPlanner
         $ranking=null;
         if ($shape==='ranking' && isset($selection['ranking'])) {
             $candidate=$selection['ranking'];
-            if (!is_array($candidate) || array_keys($candidate)!==['direction','limit']
+            $candidateKeys=is_array($candidate)?array_keys($candidate):[];sort($candidateKeys);
+            if (!is_array($candidate) || $candidateKeys!==['direction','limit']
                 || !in_array($candidate['direction']??null,['top','bottom','top_and_bottom','unspecified'],true)
                 || (!is_null($candidate['limit']??null) && !is_int($candidate['limit']))) throw new AiContractException('AI_MODEL_RESPONSE_INVALID');
             $ranking=['direction'=>$candidate['direction']==='unspecified'?null:$candidate['direction'],'limit'=>$candidate['limit']];
-            if ($ranking['limit']!==null && $ranking['limit']!==5) throw new AiContractException('AI_RANK_LIMIT_NOT_READY');
         }
         if ($shape==='ranking' && (in_array('top_5',$signals,true)||in_array('bottom_5',$signals,true))) {
             $ranking=$ranking??['direction'=>in_array('top_5',$signals,true)?(in_array('bottom_5',$signals,true)?'top_and_bottom':'top'):'bottom','limit'=>5];
@@ -102,7 +102,7 @@ final class AiWorkflowPlanner
             if (!$definition && !$range) { $fields[] = ['key' => 'start_date', 'label' => '开始日期', 'type' => 'date']; $fields[] = ['key' => 'end_date', 'label' => '结束日期', 'type' => 'date']; }
             if ($shape==='comparison' && !$compare) { $fields[]=['key'=>'compare_start','label'=>'对比开始日期','type'=>'date']; $fields[]=['key'=>'compare_end','label'=>'对比结束日期','type'=>'date']; }
             if ($shape==='ranking' && !$ranking['direction']) $fields[]=['key'=>'rank_direction','label'=>'想看表现较高还是较低的门店？','type'=>'select','options'=>[['value'=>'top','label'=>'业绩较高'],['value'=>'bottom','label'=>'业绩较低'],['value'=>'top_and_bottom','label'=>'高低都看']]];
-            if ($shape==='ranking' && !$ranking['limit']) $fields[]=['key'=>'rank_limit','label'=>'当前已支持前后五家，是否查询五家？','type'=>'select','options'=>[['value'=>'5','label'=>'查询五家'],['value'=>'other','label'=>'需要其他数量（暂未接入）','action'=>'stop']]];
+            if ($shape==='ranking' && !$ranking['limit']) $fields[]=['key'=>'rank_limit','label'=>'您希望查看多少家门店？','type'=>'select','options'=>[['value'=>'1','label'=>'1 家'],['value'=>'3','label'=>'3 家'],['value'=>'5','label'=>'5 家'],['value'=>'10','label'=>'10 家'],['value'=>'20','label'=>'20 家']]];
             return $this->step(['kind' => 'clarification', 'fields' => $fields, 'resolved_metrics' => $metrics, 'resolved_range' => $range, 'resolved_compare_range' => $compare, 'query_shape' => $shape,'ranking'=>$ranking,'output_format'=>$format,'semantic_constraints'=>$projection['semantic_intent']??[],'requested_period_terms'=>$projection['date_terms']??[]]);
         }
         return $this->plan($metrics, $range, $shape,$compare,$ranking,$format);
@@ -127,16 +127,15 @@ final class AiWorkflowPlanner
             $ranking['direction']=$choices['rank_direction'];
         }
         if(array_key_exists('rank_limit',$choices)) {
-            if($choices['rank_limit']==='other') throw new AiContractException('AI_RANK_LIMIT_NOT_READY');
-            if($choices['rank_limit']!=='5') throw new AiContractException('AI_CLARIFICATION_INVALID');
-            $ranking['limit']=5;
+            if(!is_string($choices['rank_limit']) || !in_array($choices['rank_limit'],['1','3','5','10','20'],true)) throw new AiContractException('AI_CLARIFICATION_INVALID');
+            $ranking['limit']=(int)$choices['rank_limit'];
         }
         if(!empty($envelope['pending_fields'])) {
             $envelope['fields']=$envelope['pending_fields'];unset($envelope['pending_fields']);
             $envelope['resolved_metrics']=$metrics;$envelope['resolved_range']=$range;$envelope['resolved_compare_range']=$compare;$envelope['ranking']=$ranking;
             return $this->step($envelope);
         }
-        return $this->plan($metrics, $range, $envelope['query_shape'],$compare,$ranking,$envelope['output_format']??'screen');
+        return $this->plan($metrics, $range, $envelope['query_shape'],$compare,$ranking,$envelope['output_format']??'screen',$envelope['resolved_store_ids']??[]);
     }
 
     /** One semantic question; range endpoints are a single controlled input. */
@@ -146,7 +145,7 @@ final class AiWorkflowPlanner
         if(in_array($first['key'],['start_date','compare_start'],true)) $fields[]=array_shift($all);
         $envelope['schema_version']='mohe-guidance-state-v2';
         $envelope['fields']=$fields;$envelope['pending_fields']=$all;$envelope['guidance_step']=$first['key'];
-        $questions=['metric_code'=>'您想了解哪一个已登记指标？','start_date'=>'您想查询哪个时间段？','compare_start'=>'您想和哪个时间段比较？','rank_direction'=>'您想看业绩较高还是较低的门店？','rank_limit'=>'当前支持查询五家，是否按五家查询？'];
+        $questions=['metric_code'=>'您想了解哪一个已登记指标？','start_date'=>'您想查询哪个时间段？','compare_start'=>'您想和哪个时间段比较？','rank_direction'=>'您想看业绩较高还是较低的门店？','rank_limit'=>'您希望查看多少家门店？'];
         $envelope['question']=$questions[$first['key']]??$first['label'];
         $summary=[];
         if($envelope['resolved_metrics']) {
@@ -160,7 +159,7 @@ final class AiWorkflowPlanner
         return $envelope;
     }
 
-    private function plan(array $metrics, ?array $range, string $shape,?array $compare=null,?array $ranking=null,string $format='screen'): array
+    private function plan(array $metrics, ?array $range, string $shape,?array $compare=null,?array $ranking=null,string $format='screen',array $storeIds=[]): array
     {
         if($shape==='definition') {
             return ['kind'=>'plan','plan'=>['schema_version'=>'mohe-executable-workflow-v1','workflow_code'=>'wf_metric_definition',
@@ -169,7 +168,7 @@ final class AiWorkflowPlanner
         if (!in_array($shape,['summary','trend','ranking','comparison'],true)) throw new AiContractException('AI_QUERY_SHAPE_NOT_READY');
         $plan = ['schema_version' => 'mohe-executable-workflow-v1', 'workflow_code' => 'wf_performance_'.$shape,
             'query' => ['query_shape' => $shape, 'metric_codes' => $metrics, 'start_date' => $range['start'], 'end_date' => $range['end'],
-                'compare_range' => $compare, 'store_ids' => [], 'business_filters' => [],'ranking'=>$ranking],
+                'compare_range' => $compare, 'store_ids' => $storeIds, 'business_filters' => [],'ranking'=>$ranking],
             // Nodes and budgets are compiled from the selected registration; this
             // preliminary plan deliberately carries no editable graph or hash.
             'output_format' => $format];

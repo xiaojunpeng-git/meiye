@@ -31,14 +31,14 @@
         <h2>能力目录</h2><p class="muted">目录来自已登记的后端能力。管理配置不能新增指标公式、SQL、DAO 或扩大数据权限。</p>
         <p class="muted">下方场景是可复用的引导与执行模板，不是用户问题白名单。实际可查询对象、指标及组合由统一底层合同与当前数据权限决定；排行流程可复用于已授权的门店或人员数据。</p>
         <ai-analysis-inventory v-if="catalog.analysis_inventory" :inventory="catalog.analysis_inventory" />
-        <h3>一级 · 业务 Skill</h3><div v-for="(scene, code) in catalog.scenes" :key="code" class="subbox"><strong>{{ scene.label }}</strong><p>{{ scene.goal }}</p><p v-if="scene.domains" class="muted">覆盖：{{ scene.domains.map(domain => domain.label).join('、') }}</p><code>{{ code }}</code><details v-if="scene.skill_code"><summary>查看 Skill 详情 · {{ scene.skill_code }}</summary><ai-skill-detail :scene-code="code" :catalog="catalog" :published="state.active_document" :version="activeVersion" /></details></div>
+        <h3>一级 · 业务 Skill</h3><div v-for="(scene, code) in catalog.scenes" :key="code" class="subbox"><strong>{{ scene.label }}</strong><p class="muted">业务语义以已发布的 Skill 原文为准；可执行范围仍由统一指标合同和当前权限决定。</p><code>{{ code }}</code><details v-if="scene.skill_code"><summary>查看 Skill 详情 · {{ scene.skill_code }}</summary><ai-skill-detail :scene-code="code" :catalog="catalog" :published="state.active_document" :version="activeVersion" /></details></div>
         <h3>二级 · Skill 与工作流</h3><div v-for="(flow, code) in catalog.workflows" :key="code" class="subbox"><strong>{{ workflowLabel(code) }}</strong><p>Skill：{{ workflowSkill(flow) }} · {{ workflowStatus(code) }}</p><code>{{ code }}</code><p>支持形态：{{ flow.shape || flow.query_shape || '按已登记契约' }}</p></div>
         <h3>三级 · 只读 Tool 与执行节点</h3><div v-for="(tool, code) in catalog.tools" :key="code" class="subbox"><strong>{{ tool.label || code }}</strong><p>{{ tool.description || '只读能力，参数与权限由后端校验' }}</p><code>{{ code }}</code></div>
       </section>
 
       <section v-if="tab === 'scenes'" class="box">
-        <h2>场景与引导</h2><p class="muted">修改先保存为草稿，发布后用于新任务。常见问法用于试问验证，不会自动训练模型或改写指标含义。</p>
-        <fieldset v-for="(scene, code) in document.scenes" :key="code"><legend>{{ scene.label }}</legend><label>场景名称<input v-model="scene.label" maxlength="80" @input="changed"></label><label>场景目标<textarea v-model="scene.goal" maxlength="500" @input="changed"></textarea></label><label>常见问法（每行一条，最多 12 条）<textarea :value="scene.examples.join('\n')" @input="setExamples(code, $event.target.value)"></textarea></label></fieldset>
+        <h2>场景与引导</h2><p class="muted">业务语义来自版本化 Skill 原文，不在这里维护第二份场景说明或问法列表。这里仅可调整显示名称和通用引导策略。</p>
+        <fieldset v-for="(scene, code) in document.scenes" :key="code"><legend>{{ scene.label }}</legend><label>显示名称<input v-model="scene.label" maxlength="80" @input="changed"></label></fieldset>
         <label>最多引导轮数<select v-model.number="document.guidance.max_rounds" aria-label="最多引导轮数" @change="changed"><option :value="3">3 轮</option><option :value="4">4 轮</option><option :value="5">5 轮</option></select></label>
         <h3>分步引导顺序与提示语</h3><p class="muted">只对尚未明确的条件提问；日期起止始终一起选择，不因顺序调整重复提问。</p>
         <div v-for="(slot, index) in document.guidance.slot_order" :key="slot" class="subbox"><div class="row"><strong>{{ index + 1 }}. {{ slotLabel(slot) }}</strong><span class="actions"><button :disabled="index === 0" @click="moveSlot(index, -1)">上移</button><button :disabled="index === document.guidance.slot_order.length - 1" @click="moveSlot(index, 1)">下移</button></span></div><label>提示语<input v-model="document.guidance.prompts[slot]" maxlength="240" @input="changed"></label></div>
@@ -90,7 +90,6 @@ export default {
     confirmAction(message, title) { return this.$refs.confirmation ? this.$refs.confirmation.open(message, title) : Promise.resolve(false); },
     async reload() { if (this.dirty && !await this.confirmAction('刷新会丢失未保存修改，是否继续？', '刷新管理配置')) return; await this.perform(async () => { this.loading = true; try { const state = await request('GET', '/management'); this.hydrate(state); this.config = await request('GET', '/config'); } finally { this.loading = false; } }); },
     changed() { this.dirty = true; this.validated = false; this.preview = null; },
-    setExamples(code, value) { this.document.scenes[code].examples = value.split('\n').map(v => v.trim()).filter(Boolean); this.changed(); },
     moveSlot(index, delta) { const order = this.document.guidance.slot_order; const next = order.slice(); [next[index], next[index + delta]] = [next[index + delta], next[index]]; this.document.guidance.slot_order = next; this.changed(); },
     slotLabel(code) { return { metric_code: '指标意图', start_date: '查询时间', compare_start: '对比时间', rank_direction: '排行方向', rank_limit: '排行数量' }[code] || code; },
     nodeLabel(code) { return { query: '统一查询', catalog: '指标说明', evidence: '证据校验', render: '确定性渲染', export: 'Excel 导出' }[code] || code; },

@@ -18,9 +18,13 @@ final class AiAuthority
                     'description_ref'=>'metric-description-'.hash('sha256',json_encode($tooltip,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES))];
             }
         }
+        // The compiler receives the same current report scope that the Reader
+        // will revalidate. It may use it only to reject expansion or accept a
+        // narrower, catalog-bound store selection.
+        $stores=array_values($context['store_ids']??[]);
         return ['metric_codes'=>$metrics,'query_shapes'=>['summary','trend','ranking','comparison'],
             'output_formats'=>$exportReady?['screen','screen_and_xlsx']:['screen'],'metric_readiness'=>$registered,
-            'definition_metric_codes'=>array_keys($metadata),'metadata_readiness'=>$metadata];
+            'definition_metric_codes'=>array_keys($metadata),'metadata_readiness'=>$metadata,'store_ids'=>$stores];
     }
     public static function capabilityHash(bool $exportReady,bool $legacy=false,array $context=[]): string
     {

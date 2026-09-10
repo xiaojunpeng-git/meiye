@@ -6,7 +6,6 @@ final class AiBusinessManifest
 {
     public static function definitions(): array
     {
-        require_once dirname(__DIR__).'/semantic/AiSemanticVocabulary.php';
         require_once __DIR__.'/AiSkillDocument.php';
         $storeOperations=AiSkillDocument::storeOperations();
         $intentUnderstanding=AiSkillDocument::intentUnderstanding();
@@ -40,8 +39,8 @@ final class AiBusinessManifest
                 $node('evidence','metadata_guard',['catalog'],'metadata_evidence','verified_result',null,1000),
                 $node('render','deterministic_definition',['evidence'],'verified_result','answer_result',null,1000),
             ]];
-        return ['registry_version'=>'mohe-business-registry-r8-v4',
-            'semantic_resource_hash'=>hash('sha256',\app\services\ai\semantic\AiSemanticVocabulary::fingerprint().$intentUnderstanding['source_hash']),
+        return ['registry_version'=>'mohe-business-registry-r9-v1',
+            'semantic_resource_hash'=>hash('sha256',$intentUnderstanding['source_hash'].$storeOperations['source_hash']),
             'schemas'=>['query_input','definition_input','business_evidence','metadata_evidence','verified_result','answer_result','export_result'],
             'tools'=>[
                 'unified_metric_query'=>$tool('unified_metric_query','query_input','business_evidence','unified_query_current_business_scope','read_only'),
@@ -57,16 +56,12 @@ final class AiBusinessManifest
                 'verified_result_export'=>$action('export','verified_export_create'),
             ],
             'scenes'=>[
-                // The Markdown document supplies the business Skill boundary;
-                // registered tools, workflow graph and permission checks remain
-                // source-owned PHP declarations below.
+                // The complete published Markdown is model guidance. Capability
+                // and permission decisions remain source-owned below.
                 'store_operations'=>['version'=>$storeOperations['version'],'skill_code'=>$storeOperations['skill_code'],'skill_version'=>$storeOperations['version'],
                     'skill_source_hash'=>$storeOperations['source_hash'],'skill_source_path'=>$storeOperations['source_path'],
-                    'label'=>$storeOperations['label'],'goal'=>$storeOperations['goal'],'domains'=>$storeOperations['domains'],
-                    'semantic_projection'=>$storeOperations['semantic_projection'],
-                    'actions'=>['performance_summary','performance_trend','registered_metric_ranking','performance_comparison','metric_definition_read','verified_result_export'],
-                    'required_facts'=>$storeOperations['required_facts'],'ambiguities'=>$storeOperations['ambiguities'],
-                    'completion'=>$storeOperations['completion'],'counterexamples'=>$storeOperations['counterexamples']],
+                    'label'=>$storeOperations['label'],'instructions'=>$storeOperations['markdown'],
+                    'actions'=>['performance_summary','performance_trend','registered_metric_ranking','performance_comparison','metric_definition_read','verified_result_export']],
             ],
             'workflows'=>$workflows,
             'export_node'=>$node('export','verified_export_create',['evidence','render'],'verified_result','export_result','verified_export_create',10000),
