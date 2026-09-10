@@ -74,7 +74,13 @@ final class CashierV3SalesOrderReversalServices
         if ($cashReversal < 0 || $cashReversal > $cashCollected) throw self::failure('sales_reversal_cash_refund_exceeds_source');
         if ($entitlementCreditCents < 0) throw self::failure('sales_reversal_entitlement_credit_invalid');
         $economicReversal = $cashReversal + $restorePrincipal + $restoreBonus + $cancelledDebtCents + $entitlementCreditCents;
-        if ($economicReversal <= 0 || $economicReversal > (int)$source['amountCents']) {
+        // 免费的人次／项目也是已经结算的销售事实。全量作废仍需留下作废
+        // 事件和反向业务事实，只是没有资金、欠款、余额或权益可冲销；退款
+        // 则必须始终有正向经济金额，不能借此生成零额退款。
+        $isZeroValueVoid = $action === 'void-sales-order'
+            && (int)$source['amountCents'] === 0
+            && $economicReversal === 0;
+        if ((!$isZeroValueVoid && $economicReversal <= 0) || $economicReversal > (int)$source['amountCents']) {
             throw self::failure('sales_reversal_economic_amount_invalid');
         }
         if ($action === 'void-sales-order' && $economicReversal !== (int)$source['amountCents']) {

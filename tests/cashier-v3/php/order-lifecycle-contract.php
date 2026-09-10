@@ -111,6 +111,9 @@ $checks = [
         && strpos($salesQuery, "effectivePersonnelFacts(\$orderIds, \$tenantIds[0])") !== false,
     'financial_reversal_records_cash_reversal_separately' => strpos($service, "'reversed_cash_cents' => \$reversedCash") !== false
         && strpos($service, "'cash_refund_cents' => \$cash") !== false,
+    'zero_value_sales_void_remains_auditable_without_a_fake_financial_reversal' => strpos($reversalService, "\$isZeroValueVoid = \$action === 'void-sales-order'") !== false
+        && strpos($reversalService, "&& (int)\$source['amountCents'] === 0") !== false
+        && strpos($reversalService, "(!\$isZeroValueVoid && \$economicReversal <= 0)") !== false,
     'reversal_audits_cover_debt_and_benefits' => strpos($reversalService, 'DEBT_REVERSAL_TABLE') !== false
         && strpos($reversalService, 'BENEFIT_REVERSAL_TABLE') !== false
         && strpos($reversalService, "'cancelled_debt_cents'") !== false
