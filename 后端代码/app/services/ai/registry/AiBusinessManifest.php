@@ -39,7 +39,7 @@ final class AiBusinessManifest
                 $node('evidence','metadata_guard',['catalog'],'metadata_evidence','verified_result',null,1000),
                 $node('render','deterministic_definition',['evidence'],'verified_result','answer_result',null,1000),
             ]];
-        return ['registry_version'=>'mohe-business-registry-r8-v2',
+        return ['registry_version'=>'mohe-business-registry-r8-v3',
             'semantic_resource_hash'=>\app\services\ai\semantic\AiSemanticVocabulary::fingerprint(),
             'schemas'=>['query_input','definition_input','business_evidence','metadata_evidence','verified_result','answer_result','export_result'],
             'tools'=>[
@@ -62,6 +62,7 @@ final class AiBusinessManifest
                 'store_operations'=>['version'=>$storeOperations['version'],'skill_code'=>$storeOperations['skill_code'],'skill_version'=>$storeOperations['version'],
                     'skill_source_hash'=>$storeOperations['source_hash'],'skill_source_path'=>$storeOperations['source_path'],
                     'label'=>$storeOperations['label'],'goal'=>$storeOperations['goal'],'domains'=>$storeOperations['domains'],
+                    'semantic_projection'=>$storeOperations['semantic_projection'],
                     'actions'=>['performance_summary','performance_trend','registered_metric_ranking','performance_comparison','metric_definition_read','verified_result_export'],
                     'required_facts'=>$storeOperations['required_facts'],'ambiguities'=>$storeOperations['ambiguities'],
                     'completion'=>$storeOperations['completion'],'counterexamples'=>$storeOperations['counterexamples']],

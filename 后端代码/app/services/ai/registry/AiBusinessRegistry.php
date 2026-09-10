@@ -31,6 +31,7 @@ final class AiBusinessRegistry
             'skill_source_hash'=>$scene['skill_source_hash'], 'label'=>$scene['label'],
             'goal'=>$scene['goal'], 'domains'=>$scene['domains'], 'ambiguities'=>$scene['ambiguities'],
             'completion'=>$scene['completion'], 'counterexamples'=>$scene['counterexamples'],
+            'semantic_projection'=>$scene['semantic_projection'],
         ];
     }
     public function exportNode(): array { return $this->manifest['export_node']; }
@@ -192,7 +193,7 @@ final class AiBusinessRegistry
         }
         $skillCodes=[];
         foreach ($m['scenes'] as $scene) {
-            AiRegistryValue::exact($scene,['version','skill_code','skill_version','skill_source_hash','skill_source_path','label','goal','domains','actions','required_facts','ambiguities','completion','counterexamples']);
+            AiRegistryValue::exact($scene,['version','skill_code','skill_version','skill_source_hash','skill_source_path','label','goal','domains','semantic_projection','actions','required_facts','ambiguities','completion','counterexamples']);
             if (!is_string($scene['skill_code'])||!preg_match('/^skill_[a-z0-9_]{1,73}$/D',$scene['skill_code'])||in_array($scene['skill_code'],$skillCodes,true)
                 ||!is_int($scene['skill_version'])||$scene['skill_version']<1) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
             if (!is_string($scene['skill_source_hash']) || !preg_match('/^[a-f0-9]{64}$/D',$scene['skill_source_hash'])
@@ -200,6 +201,13 @@ final class AiBusinessRegistry
             $skillCodes[]=$scene['skill_code'];
             if (array_diff(AiRegistryValue::strings($scene['actions'],8),array_keys($m['actions']))) AiRegistryValue::fail('AI_REGISTRY_DEPENDENCY_INVALID');
             foreach (['required_facts','ambiguities','counterexamples'] as $key) AiRegistryValue::strings($scene[$key],16);
+            $projection=$scene['semantic_projection'];
+            if (!is_array($projection) || array_diff(['objects','scenes','slots','preserve_words','gateway'],array_keys($projection)) || array_diff(array_keys($projection),['objects','scenes','slots','preserve_words','gateway'])) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
+            // AiSkillDocument already validates the complete source contract.  The
+            // registry repeats only the immutable shape required to safely pass it
+            // through to the model and gateway.
+            foreach (['objects','scenes','slots','preserve_words'] as $key) if (!is_array($projection[$key]) || !$projection[$key]) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
+            if (!is_array($projection['gateway'])) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
             if (!is_array($scene['domains']) || !AiRegistryValue::isList($scene['domains']) || !$scene['domains'] || count($scene['domains'])>16) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
             $domainCodes=[];
             foreach ($scene['domains'] as $domain) {

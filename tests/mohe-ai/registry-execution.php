@@ -105,7 +105,7 @@ try {
     }
     $compiled=$compiler->compile(registryPlan(),$cap);
     registryCheck($compiled['dependency_versions']['tool']===['unified_metric_query'=>1],'complete tool dependency version frozen');
-    registryCheck($compiled['dependency_versions']['skill']===['skill_store_operations'=>2],'business Skill has explicit immutable id and version');
+    registryCheck($compiled['dependency_versions']['skill']===['skill_store_operations'=>3],'business Skill has explicit immutable id and version');
     registryCheck($compiled['dependency_versions']['skill_source']===['skill_store_operations'=>$skill['source_hash']],'compiled plan freezes the exact SKILL.md source');
     $metadataPlan=['query_shape'=>'definition','definition_metric_codes'=>['cash_performance'],'output_format'=>'screen'];
     $definition=$compiler->compile($metadataPlan,$cap); $compiler->assertCompiled($definition);

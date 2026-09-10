@@ -238,6 +238,7 @@ final class AiGatewayServices
                     return $this->present($context,$owner,$r);
                 }
             }
+            if (($compiled['kind']??null)==='capability_unavailable') throw new RuntimeException($compiled['reason']??'AI_OBJECT_CONTRACT_NOT_READY');
             $result=$this->executeRegistered($context,$owner,$id,$generation,$worker,$snapshot,$compiled['plan']);
             $paused=$result['status']==='WAITING_EXPORT';
             return $this->present($context,$owner,$result);
@@ -283,7 +284,7 @@ final class AiGatewayServices
     {
         // Dependency order in capability guidance is server-owned; old scene prompt
         // configuration must not reorder object binding after metric execution.
-        if (($plan['schema_version']??null)==='mohe-analysis-guidance-v1') return $plan;
+        if (in_array(($plan['schema_version']??null),['mohe-analysis-guidance-v1','mohe-skill-guidance-v1'],true)) return $plan;
         return $this->managementDocument
             ? \app\services\ai\management\AiManagementPolicy::decorateEnvelope($this->managementDocument,$plan) : $plan;
     }
@@ -451,7 +452,8 @@ final class AiGatewayServices
     /** Revisions replay immutable semantic state, not a narrowed downstream candidate list. */
     private function advanceGuidance(array $stored,string $ref,array $input): array
     {
-        $planner=isset($stored['envelope']['analysis_state'])?new \app\services\ai\execution\AiAnalysisGuidancePlanner():new AiWorkflowPlanner(); $choices=$input['choices']??null;
+        $planner=isset($stored['envelope']['analysis_state'])?new \app\services\ai\execution\AiAnalysisGuidancePlanner()
+            :(isset($stored['envelope']['skill_state'])?new \app\services\ai\execution\AiSkillGuidancePlanner():new AiWorkflowPlanner()); $choices=$input['choices']??null;
         if (!is_array($choices)) throw new RuntimeException('AI_CLARIFICATION_INVALID');
         $steps=$stored['accepted_steps']??[];
         if (!isset($input['revise_clarification_id'])) {
@@ -511,7 +513,7 @@ final class AiGatewayServices
             } catch (\Throwable $error) {$this->runs->finishAttempt($owner,$id,$generation,$worker,'analysis_objects','FAILED');throw $error;}
             foreach($localCatalogs as $catalog) foreach($catalog['objects'] as $object) if ($object['kind']==='person') $privateLabels[]=$object['label'];
         }
-        $safe=(new \app\services\ai\model\AiSafeQuestionProjector())->project($body['question'],$configuration,array_values(array_unique($privateLabels)));
+        $safe=(new \app\services\ai\model\AiSafeQuestionProjector())->project($body['question'],$configuration,array_values(array_unique($privateLabels)),$runtimeSkill['semantic_projection']);
         foreach ($safe['local_conditions'] as $reference=>$value) {
             if (in_array($value,$projection['dates']??[],true)) {
                 $safe['outbound']['question']=str_replace('['.$reference.']','指定期间',$safe['outbound']['question']);
@@ -541,6 +543,14 @@ final class AiGatewayServices
         }
         // All remaining opaque conditions are meaningful. Never query a reduced request.
         if ($safe['local_conditions']) throw new RuntimeException('AI_LOCAL_CONDITION_REQUIRED');
+        // The model contributes intent understanding, but a recognized public
+        // object is source-bound by the published Skill.  A missing query
+        // contract gets a bounded guide; it can never fall through to a broad
+        // store query or a similarly named registered metric.
+        $recognized=array_values(array_filter($safe['recognized_terms'],static function(array $term):bool {
+            return ($term['kind']??null)==='object' && in_array($term['code']??'',['project','product','category','partner','member','inventory'],true);
+        }));
+        if ($recognized) return (new \app\services\ai\execution\AiSkillGuidancePlanner())->start($runtimeSkill['semantic_projection'],$recognized);
         $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
         $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
         $constraintTypes=array_column($projection['semantic_intent']['constraints']??[],'type');
@@ -887,6 +897,13 @@ final class AiGatewayServices
             'AI_OBJECT_SCOPE_TOO_LARGE'=>'涉及的人员范围较大，请先缩小到具体门店或岗位后再查询。',
             'AI_LOCAL_CONDITION_REQUIRED'=>'问题中还有未能准确绑定的条件，未将这些内容发给模型，也未删掉条件查询。请明确这些条件后重试。',
             'AI_ANALYSIS_COMBINATION_UNAVAILABLE'=>'已识别分析方向，但当前底层尚不能完整执行这些对象、指标与条件的组合；没有替换指标或删减条件。',
+            'AI_PROJECT_OBJECT_NOT_READY'=>'项目对象尚未接入项目解析、当前权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他指标。',
+            'AI_PRODUCT_OBJECT_NOT_READY'=>'产品对象尚未接入产品解析、当前权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他指标。',
+            'AI_CATEGORY_OBJECT_NOT_READY'=>'商品分类对象尚未接入当前配置快照、权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他指标。',
+            'AI_PARTNER_OBJECT_NOT_READY'=>'合作方对象尚未接入分类维度、当前权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他对象。',
+            'AI_MEMBER_OBJECT_NOT_READY'=>'会员对象尚未接入隐私权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他对象。',
+            'AI_INVENTORY_OBJECT_NOT_READY'=>'库存与耗用对象尚未接入门店权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他指标。',
+            'AI_OBJECT_CONTRACT_NOT_READY'=>'当前分析对象尚未接入对象解析、权限、筛选、统一查询与证据合同；未查询或替换条件。',
             'AI_INTENT_UNRESOLVED'=>'还不能准确确定您的完整需求。请明确想了解什么、涉及对象和时间；本次未删减条件或查询数据。',
             'AI_CAPABILITY_NOT_READY'=>'已识别您的需求，但对应的数据能力或筛选组合尚未接入，暂不能准确提供结果。',
             'AI_CONTEXT_REQUIRED'=>'本次缺少可验证的前文条件，请明确要查询的指标和时间。',

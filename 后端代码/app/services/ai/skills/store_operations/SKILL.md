@@ -8,7 +8,7 @@
 {
   "schema_version": "mohe-runtime-skill-v1",
   "skill_code": "skill_store_operations",
-  "version": 2,
+  "version": 3,
   "label": "门店运营",
   "goal": "基于当前授权范围和统一数据底层，理解门店经营者的问题，逐步确认分析对象、评价标准、期间和筛选条件，并只执行已登记、可验证的经营查询。",
   "domains": [
@@ -25,6 +25,31 @@
   "ambiguities": ["analysis_object","evaluation_metric","period","comparison_period","scope","business_filter","ranking_contract","member_behavior_type","usage_fact_type"],
   "completion": "仅当分析对象、评价指标、期间和全部筛选条件均有权威证据，并由当前账号可执行的统一查询合同覆盖时完成。",
   "counterexamples": ["按报表页或固定问法限定能力","未登记指标或对象关系","将售卖、领用和实际耗用混为同一事实","把合作方当成获客渠道或客户来源","省略人员、分类、合作方或会员条件","将排行或变化直接解释为经营原因"],
+  "semantic_projection": {
+    "objects": [
+      {"code":"store","label":"门店","aliases":["门店","店铺","店"],"model_kind":"store","contract_label":"门店范围与统一查询合同"},
+      {"code":"person","label":"人员","aliases":["人员","员工","技师","美容师","手艺人","销售人","岗位","职位"],"model_kind":"person","contract_label":"人员对象、当前任职与逐人指标合同"},
+      {"code":"project","label":"项目","aliases":["项目","品项","服务项目"],"model_kind":"project","contract_label":"项目对象解析、当前权限、筛选、统一查询与证据合同"},
+      {"code":"product","label":"产品","aliases":["产品","商品","货品"],"model_kind":"product","contract_label":"产品对象解析、当前权限、筛选、统一查询与证据合同"},
+      {"code":"category","label":"商品分类","aliases":["商品分类","品类","分类"],"model_kind":"category","contract_label":"商品分类对象、当前配置快照与统一查询合同"},
+      {"code":"partner","label":"合作方","aliases":["合作方","合作品牌","合作品项"],"model_kind":"partner","contract_label":"合作方分类维度、当前权限与统一查询合同"},
+      {"code":"member","label":"会员","aliases":["会员","顾客","客户"],"model_kind":"member","contract_label":"会员对象、隐私权限、筛选、统一查询与证据合同"},
+      {"code":"inventory","label":"库存与耗用","aliases":["库存","耗用","领用","使用量"],"model_kind":"inventory","contract_label":"库存与耗用对象、门店权限、统一查询与证据合同"}
+    ],
+    "scenes": [
+      {"code":"project_performance","object_codes":["project"],"action_codes":["sales","service","consume"],"slot_codes":["evaluation_metric"]},
+      {"code":"product_performance","object_codes":["product","category","partner"],"action_codes":["sales","service","consume"],"slot_codes":["evaluation_metric"]},
+      {"code":"member_operations","object_codes":["member"],"action_codes":["consumption","visit"],"slot_codes":["member_behavior"]},
+      {"code":"inventory_operations","object_codes":["inventory"],"action_codes":["usage","inventory"],"slot_codes":["usage_fact_type"]}
+    ],
+    "slots": [
+      {"code":"evaluation_metric","label":"您想按哪种结果判断？","options":[{"code":"sales_amount","label":"销售额"},{"code":"sales_quantity","label":"销售数量"},{"code":"completed_service_count","label":"完成服务数量"},{"code":"consume_amount","label":"消耗金额"}]},
+      {"code":"member_behavior","label":"您想了解会员的哪种表现？","options":[{"code":"consumption_strength","label":"消费能力"},{"code":"visit_frequency","label":"到店频次"},{"code":"service_frequency","label":"服务次数"}]},
+      {"code":"usage_fact_type","label":"您想查看哪一种库存结果？","options":[{"code":"sold","label":"卖出"},{"code":"issued","label":"领用"},{"code":"consumed","label":"实际耗用"},{"code":"stock","label":"库存"}]}
+    ],
+    "preserve_words": ["卖得","卖出","销售","销量","完成","服务","消耗","耗用","领用","使用","消费","经常来","到店","最好","最差","最高","最低","排行","排名"],
+    "gateway": {"unknown_term_policy":"resolve_authorized_catalog_or_stop","missing_contract_policy":"guide_then_stop","candidate_source":"server_authorized_contract"}
+  },
   "extension_rule": "教培、标准财务等模块完成后，通过新增统一数据底层的指标、对象关系和读取合同接入；本 Skill 不保存模块公式、表名、SQL、DAO 或客户数据。"
 }
 MOHE_SKILL_CONTRACT_END -->

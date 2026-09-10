@@ -20,19 +20,19 @@ class R5Facts {
 }
 class R5Harness {
  public $db,$private,$gateway,$auth,$context,$temp,$boot,$models=0,$queries=0,$sequence=0;
- public function __construct($rounds){
+ public function __construct($rounds,$sanitized=false){
   $GLOBALS['r5_rounds']=$rounds;$this->db=new PDO('sqlite::memory:');
   foreach([
    'CREATE TABLE mohe_ai_mutex(instance_id TEXT PRIMARY KEY,quarantined_slots INTEGER NOT NULL DEFAULT 0)',
    'CREATE TABLE mohe_ai_receipt(instance_id TEXT,receipt_key TEXT,request_hash TEXT,window_id TEXT,run_id TEXT,reason TEXT,expires_at INTEGER,PRIMARY KEY(instance_id,receipt_key))',
    'CREATE TABLE mohe_ai_attempt(instance_id TEXT,run_id TEXT,attempt_code TEXT,kind TEXT,target_code TEXT,payload_hash TEXT,state TEXT,input_tokens INTEGER,output_tokens INTEGER,created_at INTEGER,expires_at INTEGER,PRIMARY KEY(instance_id,run_id,attempt_code))',
    'CREATE TABLE mohe_ai_run(instance_id TEXT,run_id TEXT,account_id INTEGER,terminal TEXT,conversation_id TEXT,window_id TEXT,generation INTEGER,status TEXT,reason TEXT,progress_code TEXT,clarification_ref TEXT,version INTEGER,created_at INTEGER,expires_at INTEGER,deadline_at INTEGER,last_clock_at INTEGER,remaining_ms INTEGER,pause_at INTEGER,clarification_count INTEGER,slot_held INTEGER,worker_token TEXT,evidence_ref TEXT,answer_ref TEXT,snapshot_json TEXT,counters_json TEXT,PRIMARY KEY(instance_id,run_id))',
-   'CREATE TABLE mohe_ai_config(instance_id TEXT PRIMARY KEY,enabled INTEGER,model TEXT,encrypted_key TEXT,external_authorized INTEGER,version INTEGER)'
+   'CREATE TABLE mohe_ai_config(instance_id TEXT PRIMARY KEY,enabled INTEGER,model TEXT,encrypted_key TEXT,external_authorized INTEGER,external_scope_version TEXT,version INTEGER)'
   ]as$sql)$this->db->exec($sql);
   $this->temp=sys_get_temp_dir().'/mohe-r5-guidance-'.bin2hex(random_bytes(8));mkdir($this->temp,0700);
   $this->private=new AiPrivateStorage($this->temp);$config=new AiConfigStore($this->db,'','fixture.r5',$this->private);
-  $config->save(['enabled'=>true,'external_processing_authorized'=>true,'model'=>'fixture/model','api_key'=>'synthetic-fixture-key','version'=>0]);
-  $model=function($view,$candidates,$configuration,$checkpoint){$this->models++;$checkpoint();$s=$view['current']['signals'];$shape='summary';foreach(['trend','ranking','comparison']as$v)if(in_array($v,$s,true))$shape=$v;if(in_array('top_5',$s,true)||in_array('bottom_5',$s,true))$shape='ranking';if(($view['current']['semantic_intent']['goal']??'')==='metric_definition')$shape='definition';return ['selection'=>['metric_codes'=>array_values(array_intersect(['cash_performance','consume_amount'],$s)),'query_shape'=>$shape,'decision'=>'query','date_code'=>'TODAY'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];};
+  $configInput=['enabled'=>true,'external_processing_authorized'=>true,'model'=>'fixture/model','api_key'=>'synthetic-fixture-key','version'=>0];if($sanitized)$configInput['external_scope_version']=AiConfigStore::QUESTION_SCOPE;$config->save($configInput);
+  $model=function($view,$candidates,$configuration,$checkpoint){$this->models++;$checkpoint();if(($view['schema_version']??null)==='sanitized-question-v1')return ['intent'=>['object_kind'=>'project','object_term'=>'项目','operation'=>'ranking','metric_codes'=>[],'needs_metric_choice'=>true],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];$s=$view['current']['signals'];$shape='summary';foreach(['trend','ranking','comparison']as$v)if(in_array($v,$s,true))$shape=$v;if(in_array('top_5',$s,true)||in_array('bottom_5',$s,true))$shape='ranking';if(($view['current']['semantic_intent']['goal']??'')==='metric_definition')$shape='definition';return ['selection'=>['metric_codes'=>array_values(array_intersect(['cash_performance','consume_amount'],$s)),'query_shape'=>$shape,'decision'=>'query','date_code'=>'TODAY'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];};
   $transaction=function($call){$this->queries++;return $call(new GroupPerformanceMetricReadServices(function(){return new R5Facts();},function(){}));};
   $this->gateway=new AiGatewayServices(new AiRunStore($this->db,'','fixture.r5'),$config,$this->private,'fixture.r5',new MetricReadViewStore($this->temp.'/views',$this->private->signingKey()),$model,$transaction);
   $this->auth=['terminal'=>'store','account_id'=>7,'tenant_id'=>'0','can_use'=>true,'can_configure'=>true,'permission_version'=>'v1','scope_mode'=>'stores','store_ids'=>[1],'report_capability_code'=>'group_management_dashboard'];
@@ -77,6 +77,11 @@ try{
   if($rounds===5){$run=$h->choose($run,['metric_code'=>'consume_amount'],$original);$h->step($run,'rank_direction',4);r5check(strpos(json_encode($run['clarification']['confirmed_summary'],JSON_UNESCAPED_UNICODE),'消耗')!==false,'revision replaces metric and preserves date');}
   $run=$h->choose($run,['rank_direction'=>'top']);$h->step($run,'rank_limit',$rounds);$run=$h->choose($run,['rank_limit'=>'5']);r5check($run['status']==='COMPLETED','last allowed '.$rounds.' answer completes');r5check($h->models===1&&$h->queries===1,'guidance no additional model or premature facts');r5check($run['answer']['table']['rows'][0]['value']===($rounds===5?'123':'247'),'registered numeric result remains authoritative');$h->close();$h=null;
  }
+ $h=new R5Harness(3,true);
+ $before=$h->queries;$project=$h->start('这个月卖得最好的项目');$h->step($project,'skill_evaluation_metric',1);r5check($h->queries===$before,'unregistered project has no fact read before Skill clarification');
+ $project=$h->choose($project,['skill_evaluation_metric'=>'sales_amount']);r5check($project['status']==='FAILED'&&$project['reason']==='AI_PROJECT_OBJECT_NOT_READY','project choice states the missing object contract rather than a generic local-condition failure');
+ $unknown=$h->start('这个月魔法项目卖得最好');r5check($unknown['status']==='FAILED'&&$unknown['reason']==='AI_LOCAL_CONDITION_REQUIRED','unknown qualifier remains blocked and never becomes a project query');
+ $h->close();$h=null;
  $h=new R5Harness(3);
  $source=$h->start('9月1日到9月8日现金业绩合计多少');
  r5check($source['status']==='COMPLETED' && isset($source['answer']['context_ref']),'source answer signs conditions reference');
