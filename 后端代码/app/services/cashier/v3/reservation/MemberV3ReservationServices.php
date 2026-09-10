@@ -223,8 +223,6 @@ final class MemberV3ReservationServices
                 ]);
                 $lineRows[] = Db::name('cashier_v3_reservation_line')->where('id', $addonLineId)->find();
             }
-            $lifecycle->occupyLinesInTx($tenantId, $reservationId, $uid, $storeId, $lineRows, $now);
-
             $operator = new CashierV3OperatorScope($storeId, $uid, $organizationId, $tenantId);
             $scope = new CashierV3DataScopeContext($uid, 0, $storeId, $tenantId, $organizationId, [$storeId], CashierV3DataScopeContext::MODE_STORES, [], false, 'member_reservation', 'member-v1', [], ['name' => $name ?: ('会员' . $uid)]);
             $recorder = new CashierV3BusinessEventRecorder();
@@ -459,7 +457,7 @@ final class MemberV3ReservationServices
         $sourceOrderId = (int)($sourceOrder['id'] ?? 0);
         $firstDetailId = (int)($lines[0]['entitlement_source_detail_id'] ?? 0);
         $firstDetail = $context['details'][$firstDetailId] ?? [];
-        $availableTimes = max(0, (int)($firstDetail['write_surplus_times'] ?? 0) - (int)($context['occupied'][$firstDetailId] ?? 0));
+        $availableTimes = max(0, (int)($firstDetail['write_surplus_times'] ?? 0));
         $result = [
             'reservationId' => (int)$row['id'], 'reservationNo' => (string)$row['reservation_no'],
             'status' => $status, 'statusLabel' => $this->statusLabel($status),
@@ -521,7 +519,7 @@ final class MemberV3ReservationServices
     /** Batch-loads projection data without reading the legacy reservation table. */
     private function compatibilityContext(array $headers, array $knownLines = []): array
     {
-        $context = ['lines' => [], 'details' => [], 'orders' => [], 'stores' => [], 'products' => [], 'staff' => [], 'occupied' => []];
+        $context = ['lines' => [], 'details' => [], 'orders' => [], 'stores' => [], 'products' => [], 'staff' => []];
         if (!$headers) return $context;
         $reservationIds = [];
         $storeIds = [];
@@ -559,14 +557,6 @@ final class MemberV3ReservationServices
                 foreach ($this->rows(Db::name('store_order')->whereIn('id', array_values($orderIds))->field('id,order_id')->select()) as $order) {
                     $context['orders'][(int)$order['id']] = $order;
                 }
-            }
-            $occupationRows = $this->rows(Db::name('cashier_v3_reservation_entitlement_occupation')
-                ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-                ->whereIn('entitlement_source_detail_id', array_values($detailIds))->where('status', 'ACTIVE')
-                ->field('entitlement_source_detail_id,SUM(occupied_times) AS occupied_times')
-                ->group('entitlement_source_detail_id')->select());
-            foreach ($occupationRows as $occupation) {
-                $context['occupied'][(int)$occupation['entitlement_source_detail_id']] = (int)$occupation['occupied_times'];
             }
         }
         if ($storeIds) {

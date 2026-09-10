@@ -7,6 +7,8 @@ use think\facade\Db;
 final class ThinkPhpCashierV3ServiceOrderRepository implements CashierV3ServiceOrderRepository
 {
     public const LINE_SOURCE_ENTITLEMENT = 'ENTITLEMENT';
+    /** Reservation catalog selection; it is not a cashier occupation. */
+    public const LINE_SOURCE_RESERVATION_INTENT = 'RESERVATION_INTENT';
     public const LINE_SOURCE_SALE_PROJECT = 'SALE_PROJECT';
     public const ORDER_TABLE = 'cashier_v3_service_order';
     public const LINE_TABLE = 'cashier_v3_service_order_line';

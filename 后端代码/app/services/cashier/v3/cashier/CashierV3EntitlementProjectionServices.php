@@ -472,17 +472,8 @@ final class CashierV3EntitlementProjectionServices
         }
         $cartIds = array_values(array_unique(array_map('intval', array_column($carts, 'id'))));
         $reservations = [];
-        if ($includeOperationalState && $cartIds) {
-            $reservationQuery = Db::name('store_reservation_order')
-                ->field('id,cart_info_id,status,is_del,is_system_del')
-                ->whereIn('cart_info_id', $cartIds)
-                ->whereIn('status', [0, 1, 3])
-                ->where('is_del', 0)
-                ->where('is_system_del', 0);
-            // A1 不预留或扣减权益，避免与旧预约路径形成 reservation -> cart
-            // 和 cart -> reservation 的反向锁环；最终完成服务时必须再次锁定复核。
-            $reservations = $this->rows($reservationQuery->order('cart_info_id asc,id asc')->select());
-        }
+        // Reservations are deliberately not part of the cashier authority.
+        // The displayed and settleable amount is the current card balance.
 
         $debts = [];
         if ($includeOperationalState && $validOrderIds) {
@@ -622,11 +613,6 @@ final class CashierV3EntitlementProjectionServices
         foreach ($snapshot['holders'] as $holder) {
             $holdersByOrder[(int)$holder['oid']] = $holder;
         }
-        $occupied = [];
-        foreach ($snapshot['reservations'] as $reservation) {
-            $detailId = (int)$reservation['cart_info_id'];
-            $occupied[$detailId] = (int)($occupied[$detailId] ?? 0) + 1;
-        }
         $debts = [];
         foreach ($snapshot['debts'] as $debt) {
             $debts[(int)$debt['order_id']] = $debt;
@@ -694,8 +680,8 @@ final class CashierV3EntitlementProjectionServices
                 $effective = min($rawSurplus, max(0, (int)$effective));
             }
             $debtBlocked = max(0, $rawSurplus - $effective);
-            $reservationOccupied = (int)($occupied[$detailId] ?? 0);
-            $available = max(0, $effective - $reservationOccupied);
+            $reservationOccupied = 0;
+            $available = max(0, $effective);
             $validity = is_array($ruleAuthority)
                 ? $this->ruleValidity($ruleAuthority)
                 : $this->effectiveValidity($holder, $cart);
@@ -719,8 +705,6 @@ final class CashierV3EntitlementProjectionServices
                 $reason = '已达到任选项目种数';
             } elseif ($available <= 0 && $debtBlocked > 0) {
                 $reason = '欠款限制后暂无可用次数';
-            } elseif ($available <= 0 && $reservationOccupied > 0) {
-                $reason = '剩余次数已被预约占用';
             } elseif ($available <= 0) {
                 $reason = '暂无可用次数';
             }

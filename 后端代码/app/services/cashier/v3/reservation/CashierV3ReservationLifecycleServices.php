@@ -8,6 +8,7 @@ use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\service\ThinkPhpCashierV3ServiceOrderRepository;
 use app\services\store\StoreReservationStaffServices;
 use think\facade\Db;
 
@@ -15,7 +16,9 @@ use think\facade\Db;
  * Transaction-only lifecycle collaborator for the new reservation generation.
  *
  * The reservation header stays authoritative.  This class owns only the
- * entitlement occupation and the service-order facts derived from it.
+ * live entitlement settlement at service completion and the service-order
+ * facts derived from that outcome. Historical occupation rows are released
+ * for compatibility only; new reservations never create them.
  */
 final class CashierV3ReservationLifecycleServices
 {
@@ -23,6 +26,7 @@ final class CashierV3ReservationLifecycleServices
     public const SOURCE_MEMBER = 'MEMBER';
     public const SOURCE_STORE = 'STORE';
 
+    /** @deprecated New V3 reservations must not reserve card quantities. */
     public function occupyLinesInTx(string $tenantId, int $reservationId, int $memberId, int $storeId, array $lines, int $now): void
     {
         CashierV3TransactionGuard::assertInTransaction('reservationLifecycle.occupy');
@@ -217,7 +221,11 @@ final class CashierV3ReservationLifecycleServices
                 'tenant_id' => $tenantId,
                 'service_order_id' => $serviceId,
                 'line_key' => 'reservation:' . $reservationId . ':' . (int)$line['id'],
-                'source_type' => $isEntitlement ? 'ENTITLEMENT' : 'SALE_PROJECT',
+                // An appointment records the selected card project only. It
+                // does not become an active checkout occupation.
+                'source_type' => $isEntitlement
+                    ? ThinkPhpCashierV3ServiceOrderRepository::LINE_SOURCE_RESERVATION_INTENT
+                    : ThinkPhpCashierV3ServiceOrderRepository::LINE_SOURCE_SALE_PROJECT,
                 'source_id' => (int)$line['id'],
                 'source_version_snapshot' => 1,
                 'hang_line_id' => 0,
@@ -249,56 +257,57 @@ final class CashierV3ReservationLifecycleServices
         CashierV3TransactionGuard::assertInTransaction('reservationLifecycle.consume');
         $tenantId = (string)$header['tenant_id'];
         $reservationId = (int)$header['id'];
-        $occupations = $this->rows(Db::name('cashier_v3_reservation_entitlement_occupation')
-            ->where('tenant_id', $tenantId)->where('reservation_id', $reservationId)
-            ->where('status', 'ACTIVE')->order('entitlement_source_detail_id asc,id asc')->select());
         $lines = $this->rows(Db::name('cashier_v3_reservation_line')->where('tenant_id', $tenantId)
             ->where('reservation_id', $reservationId)->order('id asc')->lock(true)->select());
-        // Repayment uses debt -> order -> entitlement as its lock order. Read the
-        // detail/order mapping first, then lock debt and order authorities before
-        // touching the entitlement guard so end-service cannot race a repayment.
-        $debtBlockedOccupationIds = $this->debtBlockedOccupationIdsInTx($occupations);
+
+        // Legacy reservations may still have occupation rows. They are
+        // historical only: release them so they cannot influence a cashier
+        // checkout, then make this completion decision solely from the live
+        // card balance.
+        $this->releaseInTx($tenantId, $reservationId, $now);
+        $candidateResult = $this->liveEntitlementCandidatesInTx($header, $lines);
+        $candidates = $candidateResult['candidates'];
+        $debtBlockedOccupationIds = $this->debtBlockedOccupationIdsInTx($candidates);
         $debtBlockedEntitlements = $this->debtBlockedEntitlementSnapshots(
-            $occupations,
+            $candidates,
             $lines,
             $debtBlockedOccupationIds
         );
-        $settledOccupations = array_values(array_filter($occupations, static function (array $occupation) use ($debtBlockedOccupationIds): bool {
-            return !isset($debtBlockedOccupationIds[(int)$occupation['id']]);
-        }));
-        $facts = (new CashierV3ReservationCompletionFactServices())->persistInTx($header, $lines, $settledOccupations, $execution, $now);
-        foreach ($occupations as $occupation) {
-            $detailId = (int)$occupation['entitlement_source_detail_id'];
-            $holderId = (int)$occupation['card_holder_id'];
-            $quantity = (int)$occupation['occupied_times'];
-            $this->lockGuard($tenantId, $detailId, $now);
-            if (isset($debtBlockedOccupationIds[(int)$occupation['id']])) {
-                $affected = Db::name('cashier_v3_reservation_entitlement_occupation')
-                    ->where('id', (int)$occupation['id'])->where('tenant_id', $tenantId)
-                    ->where('status', 'ACTIVE')->where('version', (int)$occupation['version'])
-                    ->update(['status' => 'RELEASED', 'version' => (int)$occupation['version'] + 1, 'released_at' => $now, 'updated_at' => $now]);
-                if ((int)$affected !== 1) throw $this->failure('预约权益占用已变更，请刷新后重试。');
-                $this->bumpGuard($tenantId, $detailId, 'reservation_debt_released', $now);
+
+        $detailRemain = $candidateResult['detailRemain'];
+        $holderRemain = $candidateResult['holderRemain'];
+        $settledOccupations = [];
+        $insufficientEntitlements = $candidateResult['unavailable'];
+        foreach ($candidates as $candidate) {
+            $candidateId = (int)$candidate['id'];
+            if (isset($debtBlockedOccupationIds[$candidateId])) continue;
+            $detailId = (int)$candidate['entitlement_source_detail_id'];
+            $holderId = (int)$candidate['card_holder_id'];
+            $quantity = max(1, (int)$candidate['occupied_times']);
+            $available = min((int)($detailRemain[$detailId] ?? 0), (int)($holderRemain[$holderId] ?? 0));
+            if ($available < $quantity) {
+                $insufficientEntitlements[] = $this->insufficientSnapshot($candidate, $available);
                 continue;
             }
-            $detail = Db::name('store_order_cart_info')->where('id', $detailId)->lock(true)->find();
-            $holder = Db::name('user_card_holder')->where('id', $holderId)->lock(true)->find();
-            if (!$detail || !$holder || (int)$detail['write_surplus_times'] < $quantity || (int)$holder['write_surplus_times'] < $quantity) {
-                throw $this->failure('卡项剩余次数已变更，无法结束服务。');
-            }
-            $detailRemain = (int)$detail['write_surplus_times'] - $quantity;
-            $holderRemain = (int)$holder['write_surplus_times'] - $quantity;
+            $candidate['detailSnapshot']['write_surplus_times'] = (int)$detailRemain[$detailId];
+            $candidate['holderSnapshot']['write_surplus_times'] = (int)$holderRemain[$holderId];
+            $settledOccupations[] = $candidate;
+            $detailRemain[$detailId] -= $quantity;
+            $holderRemain[$holderId] -= $quantity;
+        }
+        $facts = (new CashierV3ReservationCompletionFactServices())->persistInTx($header, $lines, $settledOccupations, $execution, $now);
+        foreach ($candidateResult['details'] as $detailId => $detail) {
+            if (!array_key_exists($detailId, $detailRemain)) continue;
             Db::name('store_order_cart_info')->where('id', $detailId)->update([
-                'write_surplus_times' => $detailRemain,
-                'is_writeoff' => $detailRemain === 0 ? 1 : 0,
+                'write_surplus_times' => max(0, (int)$detailRemain[$detailId]),
+                'is_writeoff' => (int)$detailRemain[$detailId] === 0 ? 1 : 0,
             ]);
-            Db::name('user_card_holder')->where('id', $holderId)->update(['write_surplus_times' => $holderRemain]);
-            $affected = Db::name('cashier_v3_reservation_entitlement_occupation')
-                ->where('id', (int)$occupation['id'])->where('tenant_id', $tenantId)
-                ->where('status', 'ACTIVE')->where('version', (int)$occupation['version'])
-                ->update(['status' => 'CONSUMED', 'version' => (int)$occupation['version'] + 1, 'consumed_at' => $now, 'updated_at' => $now]);
-            if ((int)$affected !== 1) throw $this->failure('预约权益占用已变更，请刷新后重试。');
-            $this->bumpGuard($tenantId, $detailId, 'reservation_consumed', $now);
+        }
+        foreach ($candidateResult['holders'] as $holderId => $holder) {
+            if (!array_key_exists($holderId, $holderRemain)) continue;
+            Db::name('user_card_holder')->where('id', $holderId)->update([
+                'write_surplus_times' => max(0, (int)$holderRemain[$holderId]),
+            ]);
         }
 
         $serviceOrderId = (int)($header['service_order_id'] ?? 0);
@@ -313,7 +322,63 @@ final class CashierV3ReservationLifecycleServices
         $facts['manualWriteoffRequired'] = !empty($debtBlockedOccupationIds);
         $facts['debtBlockedEntitlementCount'] = count($debtBlockedOccupationIds);
         $facts['debtBlockedEntitlements'] = $debtBlockedEntitlements;
+        $facts['insufficientEntitlementCount'] = count($insufficientEntitlements);
+        $facts['insufficientEntitlements'] = $insufficientEntitlements;
         return $facts;
+    }
+
+    /** Build end-service candidates from live authorities, never from a reservation occupation. */
+    private function liveEntitlementCandidatesInTx(array $header, array $lines): array
+    {
+        $memberId = (int)$header['member_id'];
+        $entitlementLines = array_values(array_filter($lines, static function (array $line): bool {
+            return strtoupper((string)($line['project_source'] ?? '')) === 'ENTITLEMENT';
+        }));
+        $detailIds = array_values(array_unique(array_filter(array_map(static function (array $line): int {
+            return (int)($line['entitlement_source_detail_id'] ?? 0);
+        }, $entitlementLines))));
+        if (!$detailIds) return ['candidates' => [], 'details' => [], 'holders' => [], 'detailRemain' => [], 'holderRemain' => [], 'unavailable' => []];
+
+        $discovered = $this->rows(Db::name('store_order_cart_info')->whereIn('id', $detailIds)->field('id,oid')->select());
+        $orderIds = array_values(array_unique(array_filter(array_map(static function (array $row): int { return (int)($row['oid'] ?? 0); }, $discovered))));
+        $holders = $orderIds ? $this->rows(Db::name('user_card_holder')->where('uid', $memberId)->whereIn('oid', $orderIds)
+            ->where('is_del', 0)->order('id asc')->lock(true)->select()) : [];
+        $holderByOrder = [];
+        foreach ($holders as $holder) {
+            $oid = (int)($holder['oid'] ?? 0);
+            if ($oid > 0 && !isset($holderByOrder[$oid])) $holderByOrder[$oid] = $holder;
+        }
+        $details = $this->rows(Db::name('store_order_cart_info')->whereIn('id', $detailIds)->order('id asc')->lock(true)->select());
+        $detailById = [];
+        foreach ($details as $detail) $detailById[(int)$detail['id']] = $detail;
+
+        $candidates = []; $unavailable = []; $detailRemain = []; $holderRemain = []; $detailMap = []; $holderMap = [];
+        foreach ($entitlementLines as $line) {
+            $lineId = (int)($line['id'] ?? 0); $detailId = (int)($line['entitlement_source_detail_id'] ?? 0);
+            $detail = (array)($detailById[$detailId] ?? []); $holder = (array)($holderByOrder[(int)($detail['oid'] ?? 0)] ?? []);
+            $quantity = max(1, (int)($line['quantity'] ?? 1));
+            if ($lineId <= 0 || !$detail || !$holder) {
+                $unavailable[] = ['reservationLineId' => $lineId, 'entitlementSourceDetailId' => $detailId, 'cardHolderId' => 0, 'cardName' => '对应卡项', 'projectName' => trim((string)($line['project_name_snapshot'] ?? '')) ?: '预约项目', 'quantity' => $quantity, 'availableTimes' => 0];
+                continue;
+            }
+            $holderId = (int)$holder['id'];
+            $detailRemain[$detailId] = (int)$detail['write_surplus_times'];
+            $holderRemain[$holderId] = (int)$holder['write_surplus_times'];
+            $detailMap[$detailId] = $detail; $holderMap[$holderId] = $holder;
+            $candidates[] = ['id' => $lineId, 'reservation_line_id' => $lineId, 'entitlement_source_detail_id' => $detailId,
+                'card_holder_id' => $holderId, 'occupied_times' => $quantity, 'status' => 'DIRECT_CHECK', 'version' => 1,
+                'projectName' => trim((string)($line['project_name_snapshot'] ?? '')) ?: '预约项目',
+                'detailSnapshot' => $detail, 'holderSnapshot' => $holder];
+        }
+        return ['candidates' => $candidates, 'details' => $detailMap, 'holders' => $holderMap,
+            'detailRemain' => $detailRemain, 'holderRemain' => $holderRemain, 'unavailable' => $unavailable];
+    }
+
+    private function insufficientSnapshot(array $candidate, int $available): array
+    {
+        return ['reservationLineId' => (int)$candidate['reservation_line_id'], 'entitlementSourceDetailId' => (int)$candidate['entitlement_source_detail_id'],
+            'cardHolderId' => (int)$candidate['card_holder_id'], 'cardName' => trim((string)($candidate['holderSnapshot']['card_name'] ?? '')) ?: '对应卡项',
+            'projectName' => trim((string)($candidate['projectName'] ?? '')) ?: '预约项目', 'quantity' => max(1, (int)$candidate['occupied_times']), 'availableTimes' => max(0, $available)];
     }
 
     /**

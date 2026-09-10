@@ -181,11 +181,13 @@ final class CashierV3ReservationModule
         self::registerCommand($handlers, 'end-reservation-service', function (array $scope): array {
             $result = self::end($scope);
             $manualWriteoffRequired = !empty($result['facts']['manualWriteoffRequired']);
-            $message = $manualWriteoffRequired
-                ? self::manualWriteoffMessage((array)($result['facts']['debtBlockedEntitlements'] ?? []))
-                : '服务已结束。';
+            $insufficient = (array)($result['facts']['insufficientEntitlements'] ?? []);
+            $message = self::endServiceMessage(
+                (array)($result['facts']['debtBlockedEntitlements'] ?? []),
+                $insufficient
+            );
             $data = ['reservationAction' => $result];
-            if ($manualWriteoffRequired) {
+            if ($manualWriteoffRequired || $insufficient) {
                 // Command UI directives are persisted inside data so a replay
                 // returns the same warning without executing the business again.
                 $data['_feedback'] = [
@@ -230,6 +232,19 @@ final class CashierV3ReservationModule
         return implode('；', $details) . '。服务已正常结束，请手动处理。';
     }
 
+    /** The service always ends; only the real-time entitlement writeoff varies. */
+    private static function endServiceMessage(array $debtItems, array $insufficientItems): string
+    {
+        $messages = [];
+        if ($debtItems) $messages[] = self::manualWriteoffMessage($debtItems);
+        foreach ($insufficientItems as $item) {
+            $card = trim((string)($item['cardName'] ?? '')) ?: '对应卡项';
+            $project = trim((string)($item['projectName'] ?? '')) ?: '预约项目';
+            $messages[] = '卡项「' . $card . '」的项目「' . $project . '」剩余权益数量不够，未扣除权益。服务已正常结束。';
+        }
+        return $messages ? implode('；', array_values(array_unique($messages))) : '服务已结束。';
+    }
+
     private static function create(array $scope, CashierV3ActionDispatcher $dispatcher, CashierV3SaleCatalogServices $catalog): array
     {
         $operator = $scope['operator_scope'];
@@ -272,8 +287,7 @@ final class CashierV3ReservationModule
         ];
         $headerId = (int)Db::name('cashier_v3_reservation')->insertGetId($header);
         if ($headerId <= 0) throw new \RuntimeException('reservation_insert_failed');
-        $insertedLines = self::replaceLines($headerId, $tenant, $plans, $artisanStaffIds, $now);
-        $lifecycle->occupyLinesInTx($tenant, $headerId, $memberId, $operator->storeId(), $insertedLines, $now);
+        self::replaceLines($headerId, $tenant, $plans, $artisanStaffIds, $now);
         self::record($scope, 'reservation.created', 'reservation', (string)$headerId, 1, $header, $now, date('Y-m-d', $when), ['reservationNo' => $reservationNo, 'appointmentStartAt' => $when, 'appointmentEndAt' => $when + $duration * 60]);
         $result = ['status' => 'succeeded', 'reservationId' => $headerId, 'reservationNo' => $reservationNo, 'originalIdempotencyKey' => (string)($scope['idempotency_key'] ?? ''), 'message' => '预约已创建。'];
         self::operation($tenant, $headerId, (string)($scope['idempotency_key'] ?? ''), 'CREATE', 0, 1, $result, $now);
@@ -303,8 +317,7 @@ final class CashierV3ReservationModule
         ]);
         $beforeLines = self::lineSnapshot((int)$header['id'], $dataScope->tenantId());
         $lifecycle->releaseInTx($dataScope->tenantId(), (int)$header['id'], $now);
-        $insertedLines = self::replaceLines((int)$header['id'], $dataScope->tenantId(), $plans, $artisanStaffIds, $now);
-        $lifecycle->occupyLinesInTx($dataScope->tenantId(), (int)$header['id'], $memberId, $operator->storeId(), $insertedLines, $now);
+        self::replaceLines((int)$header['id'], $dataScope->tenantId(), $plans, $artisanStaffIds, $now);
         $eventHeader = array_merge($header, ['appointment_start_at' => $when, 'appointment_end_at' => $when + $duration * 60]);
         self::record($scope, 'reservation.updated', 'reservation', (string)$header['id'], $nextVersion, $eventHeader, $now, date('Y-m-d', $when), ['reservationNo' => (string)$header['reservation_no'], 'appointmentStartAt' => $when, 'appointmentEndAt' => $when + $duration * 60, 'lineCount' => count($plans), 'beforeLines' => $beforeLines, 'afterLines' => self::planSnapshot($plans, $artisanStaffIds)]);
         $result = ['status' => 'succeeded', 'reservationId' => (int)$header['id'], 'reservationNo' => (string)$header['reservation_no'], 'version' => $nextVersion, 'originalIdempotencyKey' => (string)($scope['idempotency_key'] ?? '')];
@@ -349,8 +362,7 @@ final class CashierV3ReservationModule
             $lifecycle->assertRoomAvailabilityInTx($dataScope->tenantId(), $operator->storeId(), (int)$header['id'], $room['id'], $when, $endAt);
             $beforeLines = self::lineSnapshot((int)$header['id'], $dataScope->tenantId());
             $lifecycle->releaseInTx($dataScope->tenantId(), (int)$header['id'], $now);
-            $insertedLines = self::replaceLines((int)$header['id'], $dataScope->tenantId(), $plans, $artisanStaffIds, $now);
-            $lifecycle->occupyLinesInTx($dataScope->tenantId(), (int)$header['id'], (int)$header['member_id'], $operator->storeId(), $insertedLines, $now);
+            self::replaceLines((int)$header['id'], $dataScope->tenantId(), $plans, $artisanStaffIds, $now);
             $changes = array_merge($changes, [
                 'room_id' => $room['id'], 'room_name_snapshot' => $room['name'],
                 'appointment_start_at' => $when, 'appointment_end_at' => $endAt,
@@ -551,19 +563,6 @@ final class CashierV3ReservationModule
             ->where('is_writeoff', 0)->where('write_surplus_times', '>', 0)
             ->field('id,oid,product_id,cart_info,write_surplus_times,write_start,write_end')->order('id asc')->select());
         if (!$carts) return [];
-        $detailIds = array_values(array_unique(array_map('intval', array_column($carts, 'id'))));
-        $occupiedByDetail = [];
-        if ($detailIds) {
-            $occupiedRows = self::rows(Db::name('cashier_v3_reservation_entitlement_occupation')
-                ->where('tenant_id', $dataScope->tenantId())
-                ->whereIn('entitlement_source_detail_id', $detailIds)
-                ->where('status', 'ACTIVE')
-                ->field('entitlement_source_detail_id,SUM(occupied_times) AS occupied_times')
-                ->group('entitlement_source_detail_id')->select());
-            foreach ($occupiedRows as $occupiedRow) {
-                $occupiedByDetail[(int)$occupiedRow['entitlement_source_detail_id']] = (int)$occupiedRow['occupied_times'];
-            }
-        }
         $disabledHolders = self::disabledCardHolders(array_values($holderByOrder), $memberId, $dataScope->tenantId());
         $catalogByProject = [];
         foreach ($unpaidOptions as $option) {
@@ -581,7 +580,7 @@ final class CashierV3ReservationModule
             if ($holderId <= 0 || $detailId <= 0 || $projectId <= 0 || isset($disabledHolders[$holderId])
                 || ($start > 0 && $start > $now) || ($end > 0 && $end < $now)) continue;
             $catalog = (array)($catalogByProject[$projectId] ?? []);
-            $availableTimes = max(0, (int)$cart['write_surplus_times'] - (int)($occupiedByDetail[$detailId] ?? 0));
+            $availableTimes = max(0, (int)$cart['write_surplus_times']);
             if ($availableTimes <= 0) continue;
             $info = json_decode((string)($cart['cart_info'] ?? ''), true);
             $info = is_array($info) ? $info : [];

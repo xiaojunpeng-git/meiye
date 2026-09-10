@@ -15,6 +15,8 @@ $migration = file_get_contents($root . '/后端代码/database/upgrades/2026-08-
 $entitlementMigration = file_get_contents($root . '/后端代码/database/upgrades/2026-08-10-收银V3预约已购项目来源/02-正式升级.sql');
 $independentDocumentMigration = file_get_contents($root . '/后端代码/database/upgrades/2026-08-10-收银V3预约独立单据索引/02-正式升级.sql');
 $lifecycle = file_get_contents($root . '/后端代码/app/services/cashier/v3/reservation/CashierV3ReservationLifecycleServices.php');
+$checkoutEntitlement = file_get_contents($root . '/后端代码/app/services/cashier/v3/checkout/CashierV3DirectSnapshotEntitlementSettlementServices.php');
+$projection = file_get_contents($root . '/后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php');
 $completionFacts = file_get_contents($root . '/后端代码/app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php');
 $member = file_get_contents($root . '/后端代码/app/services/cashier/v3/reservation/MemberV3ReservationServices.php');
 $mobileReservation = file_get_contents($root . '/后端代码/app/services/mobile/reservation/MobileReservationServices.php');
@@ -49,6 +51,11 @@ reservationLifecycleOk('预约保存仅保留已购项目的权益明细标识�
     && strpos($module, "['entitlementSourceDetailId'] ?? \$project['sourceDetailId']") !== false
     && strpos($module, '已购项目缺少权益明细') !== false
     && strpos($module, '已购项目剩余次数不足') === false);
+reservationLifecycleOk('预约不冻结收银权益，结账只读取实时卡项余额',
+    strpos($module, 'occupyLinesInTx($tenant') === false
+    && strpos($member, 'occupyLinesInTx($tenantId') === false
+    && strpos($projection, "'剩余次数已被预约占用'") === false
+    && strpos($checkoutEntitlement, "->where('service_order.source_type', '<>', 'RESERVATION')") !== false);
 reservationLifecycleOk('预约行保存并回显权益来源明细，旧行兼容为未付款来源',
     strpos($module, "'project_source' => \$isEntitlement ? 'ENTITLEMENT' : 'UNPAID'") !== false
     && strpos($module, "'entitlement_source_detail_id' => \$isEntitlement") !== false
@@ -77,12 +84,13 @@ reservationLifecycleOk('编辑替换项目明细前后均写入预约事件快�
     strpos($module, "'beforeLines' => \$beforeLines") !== false
     && strpos($module, "'afterLines' => self::planSnapshot") !== false
     && strpos($module, 'private static function lineSnapshot') !== false);
-reservationLifecycleOk('开始服务写服务单和实际开始时间，结束服务转权益消耗',
+reservationLifecycleOk('开始服务写服务单，结束服务按实时权益余额处理',
     strpos($module, "'status' => self::STATUS_IN_SERVICE") !== false
     && strpos($module, "'status' => self::STATUS_COMPLETED") !== false
     && strpos($lifecycle, "Db::name('cashier_v3_service_order')->insertGetId") !== false
     && strpos($lifecycle, 'actual_service_started_at') === false
-    && strpos($lifecycle, 'reservation_consumed') !== false);
+    && strpos($lifecycle, 'liveEntitlementCandidatesInTx') !== false
+    && strpos($lifecycle, "'insufficientEntitlements'") !== false);
 reservationLifecycleOk('结束服务同一事务写核销、服务、消耗与劳动业绩事实',
     strpos($lifecycle, 'CashierV3ReservationCompletionFactServices') !== false
     && strpos($completionFacts, "cashier_v3_entitlement_writeoff_fact") !== false
@@ -90,25 +98,26 @@ reservationLifecycleOk('结束服务同一事务写核销、服务、消耗与�
     && strpos($completionFacts, "consumption_performance_recorded") !== false
     && strpos($completionFacts, "labor_performance_allocated") !== false
     && strpos($completionFacts, 'CustomerLifecycleFactServices') !== false);
-reservationLifecycleOk('结束服务遇到来源权益欠款时完成服务但释放占用且不直接核销',
+reservationLifecycleOk('结束服务遇到来源权益欠款时完成服务但不直接核销',
     strpos($lifecycle, 'debtBlockedOccupationIdsInTx') !== false
     && strpos($lifecycle, 'debtBlockedEntitlementSnapshots') !== false
     && strpos($lifecycle, "'debtBlockedEntitlements'") !== false
-    && strpos($lifecycle, "'reservation_debt_released'") !== false
     && strpos($lifecycle, "\$facts['manualWriteoffRequired']") !== false
     && strpos($module, '该顾客有欠款，无法直接核销权益，请手动操作。') !== false
     && strpos($module, '卡项「') !== false
     && strpos($module, '」有欠款，项目「') !== false
     && strpos($module, "'persistent' => true") !== false
     && strpos($mobileReservation, "'idempotencyKey', 'requiresRefresh', 'feedback'") !== false);
-reservationLifecycleOk('预约详情逐项目返回登记、已扣权益和欠款未扣权益结果',
+reservationLifecycleOk('预约详情逐项目返回登记、已扣权益、欠款和余额不足结果',
     strpos($detail, 'private function projectOutcomes') !== false
     && strpos($detail, "'processingStatus' => 'registration_only'") !== false
     && strpos($detail, "'processingStatus' => 'entitlement_deducted'") !== false
     && strpos($detail, "'processingStatus' => 'debt_blocked'") !== false
+    && strpos($detail, "'processingStatus' => 'insufficient_entitlement'") !== false
     && strpos($detail, "'processingStatusLabel' => '仅预约登记'") !== false
     && strpos($detail, "'processingStatusLabel' => '已扣权益'") !== false
-    && strpos($detail, "'processingStatusLabel' => '欠款未扣权益'") !== false);
+    && strpos($detail, "'processingStatusLabel' => '欠款未扣权益'") !== false
+    && strpos($detail, "'processingStatusLabel' => '权益不足未扣'") !== false);
 reservationLifecycleOk('会员待确认预约不能绕过确认直接开始服务',
     strpos($module, "(string)\$header['status'] !== self::STATUS_UNSTARTED") !== false
     && strpos($module, '会员预约须先确认') !== false);
@@ -120,11 +129,11 @@ reservationLifecycleOk('预约写入使用事务行锁与 CAS，但不对用户�
     && strpos($module, "['version' => \$nextVersion]") !== false
     && strpos($provider, 'return $current;') !== false
     && strpos($provider, 'reservation_authority_version_bump_conflict') === false);
-reservationLifecycleOk('会员创建待确认并即时占用，门店创建直接待服务',
+reservationLifecycleOk('会员与门店预约均不占用权益，门店创建直接待服务',
     strpos($member, "'status' => 'PENDING_CONFIRMATION'") !== false
     && strpos($module, "'status' => self::STATUS_UNSTARTED") !== false
-    && strpos($member, 'occupyLinesInTx') !== false
-    && strpos($module, 'occupyLinesInTx') !== false);
+    && strpos($member, 'occupyLinesInTx($tenantId') === false
+    && strpos($module, 'occupyLinesInTx($tenant') === false);
 reservationLifecycleOk('会员 V3 DTO 直接兼容原列表和详情展示契约',
     strpos($member, "'project_list' => \$projectList") !== false
     && strpos($member, "'cart_info' => \$firstCartInfo") !== false
@@ -134,11 +143,11 @@ reservationLifecycleOk('会员 V3 DTO 直接兼容原列表和详情展示契约
     && strpos($member, "'service_images' => []") !== false
     && strpos($member, "Db::name('store_reservation") === false
     && strpos($member, '->getOrderInfo(') === false);
-reservationLifecycleOk('会员增项已购项目与主项目一起占用和结算',
+reservationLifecycleOk('会员增项已购项目与主项目一起在结束服务时结算',
     strpos($member, 'private function addonDetails') !== false
     && strpos($member, "'role_code' => 'ADDON'") !== false
     && strpos($member, "'entitlement_source_detail_id' => (int)\$addon['id']") !== false
-    && strpos($member, 'occupyLinesInTx($tenantId, $reservationId, $uid, $storeId, $lineRows') !== false);
+    && strpos($lifecycle, 'liveEntitlementCandidatesInTx') !== false);
 reservationLifecycleOk('会员已取消或已拒绝新单仅软删除展示，不删权威事实',
     strpos($member, "['CANCELLED', 'REJECTED']") !== false
     && strpos($member, "'member_deleted_at' => \$now") !== false
@@ -155,11 +164,11 @@ reservationLifecycleOk('确认、拒绝和占用释放的事件合同已激活',
     strpos($events, "'required_event_types' => ['reservation.confirmed']") !== false
     && strpos($events, "'required_event_types' => ['reservation.rejected']") !== false
     && strpos($module, 'releaseInTx') !== false);
-reservationLifecycleOk('确认时可在同一事务修改预约但绝不允许更换客户',
+reservationLifecycleOk('确认时可在同一事务修改预约但绝不允许更换客户或占用权益',
     strpos($module, 'editedDuringConfirmation') !== false
     && strpos($module, 'assertSameMember($header, $reservation)') !== false
     && strpos($module, '确认预约时不能修改客户') !== false
-    && strpos($module, 'occupyLinesInTx($dataScope->tenantId(), (int)$header[\'id\']') !== false
+    && strpos($module, 'occupyLinesInTx($dataScope->tenantId(), (int)$header[\'id\']') === false
     && strpos($module, "'status' => self::STATUS_UNSTARTED") !== false
     && strpos($mobileReservation, "if (is_array(\$payload['reservation'] ?? null)) \$actionPayload['reservation']") !== false
     && strpos($mobileController, 'openEditor($merchant, $this->payload())') !== false);

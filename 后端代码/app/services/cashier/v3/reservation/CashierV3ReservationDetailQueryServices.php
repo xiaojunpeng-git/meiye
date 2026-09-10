@@ -214,6 +214,7 @@ final class CashierV3ReservationDetailQueryServices
         }
 
         $debtSnapshotByLine = [];
+        $insufficientSnapshotByLine = [];
         foreach ($operations as $operation) {
             if ((string)($operation['operation_type'] ?? '') !== 'END_SERVICE') continue;
             $result = json_decode((string)($operation['result_json'] ?? ''), true);
@@ -221,6 +222,10 @@ final class CashierV3ReservationDetailQueryServices
             foreach ($blocked as $item) {
                 $lineId = (int)($item['reservationLineId'] ?? 0);
                 if ($lineId > 0) $debtSnapshotByLine[$lineId] = (array)$item;
+            }
+            foreach ((is_array($result) ? (array)($result['facts']['insufficientEntitlements'] ?? []) : []) as $item) {
+                $lineId = (int)($item['reservationLineId'] ?? 0);
+                if ($lineId > 0) $insufficientSnapshotByLine[$lineId] = (array)$item;
             }
         }
 
@@ -231,8 +236,9 @@ final class CashierV3ReservationDetailQueryServices
             $occupation = (array)($occupationByLine[$lineId] ?? []);
             $writeoff = (array)($writeoffByLine[$lineId] ?? []);
             $debtSnapshot = (array)($debtSnapshotByLine[$lineId] ?? []);
+            $insufficientSnapshot = (array)($insufficientSnapshotByLine[$lineId] ?? []);
             $holderId = (int)($occupation['card_holder_id'] ?? 0);
-            $cardName = trim((string)($debtSnapshot['cardName'] ?? $writeoff['source_name_snapshot'] ?? ($holderNames[$holderId] ?? '')));
+            $cardName = trim((string)($debtSnapshot['cardName'] ?? $insufficientSnapshot['cardName'] ?? $writeoff['source_name_snapshot'] ?? ($holderNames[$holderId] ?? '')));
 
             if (!$isEntitlement) {
                 $outcomes[$lineId] = [
@@ -257,11 +263,22 @@ final class CashierV3ReservationDetailQueryServices
                 ];
                 continue;
             }
-            if ($status === 'COMPLETED' && ($debtSnapshot || (string)($occupation['status'] ?? '') === 'RELEASED')) {
+            if ($status === 'COMPLETED' && $debtSnapshot) {
                 $outcomes[$lineId] = [
                     'processingStatus' => 'debt_blocked',
                     'processingStatusLabel' => '欠款未扣权益',
                     'processingDescription' => '服务已结束；卡项「' . ($cardName ?: '对应卡项') . '」有欠款，未扣除权益，请手动处理。',
+                    'sourceCardName' => $cardName,
+                    'entitlementDeducted' => false,
+                ];
+                continue;
+            }
+            if ($status === 'COMPLETED' && $insufficientSnapshot) {
+                $outcomes[$lineId] = [
+                    'processingStatus' => 'insufficient_entitlement',
+                    'processingStatusLabel' => '权益不足未扣',
+                    'processingDescription' => '服务已结束；卡项「' . ($cardName ?: '对应卡项') . '」的项目「'
+                        . (trim((string)($line['project_name_snapshot'] ?? '')) ?: '预约项目') . '」剩余权益数量不够，未扣除权益。',
                     'sourceCardName' => $cardName,
                     'entitlementDeducted' => false,
                 ];

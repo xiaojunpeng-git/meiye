@@ -1265,11 +1265,19 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             ];
         }
 
+        // A reservation is only an intention to use a card.  It must never
+        // reserve a card for the cashier: checkout settles against the live
+        // card balance exclusively.  Keep historical reservation service
+        // lines out of this occupation calculation as well.
         $serviceLines = $this->rows(Db::name(ThinkPhpCashierV3ServiceOrderRepository::LINE_TABLE)
-            ->where('tenant_id', $dataScope->tenantId())
-            ->where('source_type', ThinkPhpCashierV3ServiceOrderRepository::LINE_SOURCE_ENTITLEMENT)
-            ->where('entitlement_source_detail_id', $detailId)
-            ->order('service_order_id asc,id asc')
+            ->alias('service_line')
+            ->join(ThinkPhpCashierV3ServiceOrderRepository::ORDER_TABLE . ' service_order', 'service_order.id = service_line.service_order_id AND service_order.tenant_id = service_line.tenant_id')
+            ->field('service_line.*')
+            ->where('service_line.tenant_id', $dataScope->tenantId())
+            ->where('service_line.source_type', ThinkPhpCashierV3ServiceOrderRepository::LINE_SOURCE_ENTITLEMENT)
+            ->where('service_line.entitlement_source_detail_id', $detailId)
+            ->where('service_order.source_type', '<>', 'RESERVATION')
+            ->order('service_line.service_order_id asc,service_line.id asc')
             ->select());
         $occupiedByOrder = [];
         foreach ($serviceLines as $line) {

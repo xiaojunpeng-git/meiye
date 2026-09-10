@@ -239,8 +239,13 @@ final class CashierV3ReservationCompletionFactServices
 
     private function entitlementAmount(array $occupation, int $quantity): array
     {
-        $detail = Db::name('store_order_cart_info')->where('id', (int)$occupation['entitlement_source_detail_id'])->lock(true)->find();
-        $holder = Db::name('user_card_holder')->where('id', (int)$occupation['card_holder_id'])->lock(true)->find();
+        // Reservation completion supplies the exact, already locked live
+        // snapshot from its own authority check.  This preserves the amount
+        // sequence for two lines using the same card in one completion.
+        $detail = (array)($occupation['detailSnapshot'] ?? []);
+        $holder = (array)($occupation['holderSnapshot'] ?? []);
+        if (!$detail) $detail = Db::name('store_order_cart_info')->where('id', (int)$occupation['entitlement_source_detail_id'])->lock(true)->find();
+        if (!$holder) $holder = Db::name('user_card_holder')->where('id', (int)$occupation['card_holder_id'])->lock(true)->find();
         if (!$detail || !$holder) throw new \LogicException('reservation_completion_entitlement_missing');
         $snapshot = json_decode((string)($detail['cart_info'] ?? ''), true);
         $snapshot = is_array($snapshot) ? $snapshot : [];
