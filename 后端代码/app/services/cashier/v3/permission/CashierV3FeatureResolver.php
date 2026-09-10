@@ -9,8 +9,8 @@ use think\facade\Db;
  * 从真实收银会话解析功能入口权限码。
  *
  * 权威链路（普通账号）：
- * AuthTokenMiddleware → 已绑定门店的员工任职 → 员工渠道覆盖（如有）
- * → 岗位 store_v3 规则 → cashier.v3.* feature codes。
+ * AuthTokenMiddleware → 已绑定门店的员工任职 → 岗位 store_v3 规则
+ * → cashier.v3.* feature codes。
  *
  * 平台超级管理员也必须拥有当前门店的有效任职和 store_v3 授权；
  * 平台级别不能绕过门店会话边界。
@@ -63,7 +63,6 @@ class CashierV3FeatureResolver
         'cashier.v3.order.service_void',
         'cashier.v3.staff.create',
         'cashier.v3.staff.edit',
-        'cashier.v3.staff.permission_edit',
         'cashier.v3.staff.export',
         'cashier.v3.inventory.presale_claim.create',
         'cashier.v3.inventory.presale_claim.detail',
@@ -135,8 +134,7 @@ class CashierV3FeatureResolver
     {
         // V3 never consumes legacy cashier/store_backend menu rules. The
         // current active staff assignment and V3 position rule must exist.
-        // An employee-level entry row is an explicit override: absence inherits
-        // the position entry, while an explicit disabled row denies access.
+        // 员工权限只由岗位决定；历史个人覆盖数据仅保留审计，不参与授权解析。
         $granted = $this->storeV3GrantedFeatures($operatorProfile);
         // This marker is produced only by the mobile merchant-session adapter.
         // It re-reads the active mobile capability grants server-side; client
@@ -213,34 +211,10 @@ class CashierV3FeatureResolver
                     if ($ruleId > 0) $ruleIds[$ruleId] = $ruleId;
                 }
             }
-            $base = JobPositionPolicyServices::storeV3FeaturesFromRuleIds(array_values($ruleIds));
-            return $this->mergeEmployeeOverrides($staffId, $employeeId, $storeId, $base);
+            return JobPositionPolicyServices::storeV3FeaturesFromRuleIds(array_values($ruleIds));
         } catch (\Throwable $exception) {
             return [];
         }
-    }
-
-    /** @return string[] */
-    private function mergeEmployeeOverrides(int $staffId, int $employeeId, int $storeId, array $base): array
-    {
-        if ($staffId <= 0 || $employeeId <= 0 || $storeId <= 0) return array_values(array_unique($base));
-        try {
-            $rows = Db::name('staff_store_v3_feature_override')
-                ->where('staff_id', $staffId)->where('employee_id', $employeeId)->where('store_id', $storeId)
-                ->where('status', 1)->where('is_del', 0)->select()->toArray();
-        } catch (\Throwable $e) {
-            // Upgrade 尚未执行时保持岗位权限，避免登录整体不可用；写接口仍会提示升级未完成。
-            return array_values(array_unique($base));
-        }
-        $allowed = array_fill_keys(array_values(array_intersect($base, self::FEATURE_CODES)), true);
-        foreach ($rows as $row) {
-            $code = trim((string)($row['feature_code'] ?? ''));
-            if (!in_array($code, self::FEATURE_CODES, true)) continue;
-            $effect = (string)($row['effect'] ?? 'inherit');
-            if ($effect === 'deny') unset($allowed[$code]);
-            if ($effect === 'allow') $allowed[$code] = true;
-        }
-        return array_keys($allowed);
     }
 
     /**

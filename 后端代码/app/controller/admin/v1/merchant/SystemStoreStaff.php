@@ -15,7 +15,6 @@ use app\services\store\StoreStaffTransferServices;
 use app\services\store\SystemStoreServices;
 use app\services\store\SystemStoreStaffServices;
 use app\services\store\finance\StaffFlowingWaterServices;
-use app\services\cashier\v3\permission\CashierV3StaffFeatureOverrideServices;
 use app\services\system\AdminTableColumnServices;
 use app\services\system\SystemRoleServices;
 use app\services\user\UserServices;
@@ -385,90 +384,24 @@ class SystemStoreStaff extends AuthController
         }
     }
 
-    /**
-     * 平台查看门店员工功能权限。该接口只读取既有任职及其权限覆盖，
-     * 不会改变员工组织或门店关系。
-     */
-    public function featurePermissionRead(int $staffId, CashierV3StaffFeatureOverrideServices $service)
+    /** 已停用：人员功能权限统一由岗位决定，保留路由只为向旧客户端返回明确提示。 */
+    public function featurePermissionRead(int $staffId)
     {
         try {
-            $context = $this->assertFeaturePermissionContext($staffId);
-            return $this->success($service->read($staffId, $context['store_id']));
+            \app\services\cashier\v3\permission\CashierV3StaffFeatureOverrideServices::assertIndividualPermissionEditingDisabled();
         } catch (AdminException $e) {
             return $this->fail($e->getMessage());
-        } catch (\Throwable $e) {
-            return $this->fail($e->getMessage() ?: '员工权限读取失败');
         }
     }
 
-    /**
-     * 平台保存门店员工功能权限。只写员工当前门店任职的三态覆盖，
-     * 不写 organization_employee / system_store_staff 的关系字段。
-     */
-    public function featurePermissionSave(int $staffId, CashierV3StaffFeatureOverrideServices $service)
+    /** 已停用：人员功能权限统一由岗位决定，不允许单人修改。 */
+    public function featurePermissionSave(int $staffId)
     {
         try {
-            $context = $this->assertFeaturePermissionContext($staffId);
-            $payload = $this->request->post();
-            if (!is_array($payload)) $payload = [];
-            $effects = $payload['effects'] ?? [];
-            if (!is_array($effects)) {
-                throw new AdminException('员工功能权限参数无效');
-            }
-            $result = $service->save(
-                $staffId,
-                $context['store_id'],
-                $effects,
-                (int)($payload['version'] ?? 0),
-                [
-                    'type' => 'admin',
-                    'source' => 'admin',
-                    'id' => (int)$this->adminId,
-                    'name' => (string)($this->adminInfo['real_name'] ?? $this->adminInfo['account'] ?? ''),
-                    'ip' => (string)$this->request->ip(),
-                    'request_id' => (string)$this->request->header('X-Request-Id', ''),
-                ]
-            );
-            return $this->success('员工功能权限已保存，下次登录生效', $result + ['reauth_required' => true]);
+            \app\services\cashier\v3\permission\CashierV3StaffFeatureOverrideServices::assertIndividualPermissionEditingDisabled();
         } catch (AdminException $e) {
             return $this->fail($e->getMessage());
-        } catch (\Throwable $e) {
-            return $this->fail($e->getMessage() ?: '员工权限保存失败');
         }
-    }
-
-    /**
-     * 权限接口的统一目标范围校验。
-     * @return array{staff_id:int,store_id:int,employee_id:int,org_id:int}
-     */
-    protected function assertFeaturePermissionContext(int $staffId): array
-    {
-        if ($staffId <= 0) throw new AdminException('员工无效');
-        $gate = app()->make(\app\services\organization\OrganizationWorkspaceWriteGate::class);
-        $maintain = $gate->assertPlatformStaffMaintainPermission($this->adminInfo);
-        if (empty($maintain['ok'])) throw new AdminException((string)$maintain['reason_text']);
-
-        $staff = Db::name('system_store_staff')->where('id', $staffId)
-            ->where('status', 1)->where('is_del', 0)->find();
-        if (!$staff || (int)($staff['employee_id'] ?? 0) <= 0 || (int)($staff['store_id'] ?? 0) <= 0) {
-            throw new AdminException('该员工没有有效的门店任职');
-        }
-        $storeId = (int)$staff['store_id'];
-        if (!$this->checkStaffStoreAccess($storeId)) throw new AdminException('无权操作该店员');
-        $orgId = (int)Db::name('organization_store')->where('store_id', $storeId)->value('org_id');
-        if ($orgId <= 0) {
-            $orgId = (int)Db::name('organization_employee')
-                ->where('employee_id', (int)$staff['employee_id'])->where('is_del', 0)
-                ->order('id', 'desc')->value('org_id');
-        }
-        $scope = $gate->assertOrganizationManagePermission($orgId, $this->adminInfo);
-        if (empty($scope['ok'])) throw new AdminException((string)$scope['reason_text']);
-        return [
-            'staff_id' => $staffId,
-            'store_id' => $storeId,
-            'employee_id' => (int)$staff['employee_id'],
-            'org_id' => $orgId,
-        ];
     }
 
     /**

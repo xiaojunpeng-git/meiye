@@ -6,13 +6,20 @@ use mohe\exceptions\AdminException;
 use think\facade\Db;
 
 /**
- * 门店员工的操作权限覆盖。
+ * 已停用的门店员工个人操作权限覆盖兼容服务。
  *
- * 岗位仍是默认来源；本服务只保存员工当前门店任职上的 allow / deny 差异，
- * 未保存行等同 inherit。所有写入与员工审计、auth_version 在同一事务内完成。
+ * 历史数据保留以便审计，但人员权限只由岗位决定，任何读写入口均不得再使用
+ * 这些覆盖数据。保留此类是为了让旧路由得到明确的业务提示，而非静默 404。
  */
 class CashierV3StaffFeatureOverrideServices
 {
+    public const INDIVIDUAL_PERMISSION_EDITING_DISABLED_MESSAGE = '员工权限由岗位决定，不允许单独修改。请在岗位管理中调整岗位权限。';
+
+    public static function assertIndividualPermissionEditingDisabled(): void
+    {
+        throw new AdminException(self::INDIVIDUAL_PERMISSION_EDITING_DISABLED_MESSAGE);
+    }
+
     /** @return string[] */
     public static function operationFeatureCodes(): array
     {
@@ -26,7 +33,7 @@ class CashierV3StaffFeatureOverrideServices
             'cashier.v3.order.staff_adjust', 'cashier.v3.order.refund', 'cashier.v3.order.void',
             'cashier.v3.order.reopen', 'cashier.v3.order.receipt_print', 'cashier.v3.order.debt_view',
             'cashier.v3.order.service_detail', 'cashier.v3.order.service_void', 'cashier.v3.staff.create',
-            'cashier.v3.staff.edit', 'cashier.v3.staff.permission_edit', 'cashier.v3.staff.export',
+            'cashier.v3.staff.edit', 'cashier.v3.staff.export',
             'cashier.v3.inventory.presale_claim.create', 'cashier.v3.inventory.presale_claim.detail',
             'cashier.v3.inventory.presale_claim.void',
         ];
@@ -35,6 +42,7 @@ class CashierV3StaffFeatureOverrideServices
     /** @return array<int,array<string,mixed>> */
     public function read(int $staffId, int $storeId): array
     {
+        self::assertIndividualPermissionEditingDisabled();
         $staff = $this->requireStaff($staffId, $storeId);
         $rows = Db::name('staff_store_v3_feature_override')
             ->where('staff_id', $staffId)->where('employee_id', (int)$staff['employee_id'])
@@ -63,6 +71,7 @@ class CashierV3StaffFeatureOverrideServices
     /** @return array{version:int,items:array<int,array<string,mixed>>} */
     public function save(int $staffId, int $storeId, array $effects, int $expectedVersion, array $operator): array
     {
+        self::assertIndividualPermissionEditingDisabled();
         $allowed = array_fill_keys(self::operationFeatureCodes(), true);
         $normalized = [];
         foreach ($effects as $code => $effect) {

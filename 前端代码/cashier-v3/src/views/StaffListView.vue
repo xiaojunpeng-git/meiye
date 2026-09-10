@@ -9,8 +9,6 @@ import {
   readStoreStaffPositions,
   readStoreStaffWorkMembers,
   saveStoreStaff,
-  readStoreStaffFeaturePermissions,
-  saveStoreStaffFeaturePermissions,
   uploadStoreStaffAvatar
 } from '@/services/staffManagementApi'
 import {
@@ -35,22 +33,6 @@ const positionOptions = ref([])
 const workMemberOptions = ref([])
 const avatarUploading = ref(false)
 const positionKeyword = ref('')
-const permissionOpen = ref(false)
-const permissionLoading = ref(false)
-const permissionSaving = ref(false)
-const permissionError = ref('')
-const permissionStaff = ref(null)
-const permissionVersion = ref(0)
-const permissionItems = ref([])
-const permissionGroups = computed(() => {
-  const groups = new Map()
-  permissionItems.value.forEach((item) => {
-    const module = String(item.module || '其他功能')
-    if (!groups.has(module)) groups.set(module, [])
-    groups.get(module).push(item)
-  })
-  return Array.from(groups, ([module, items]) => ({ module, items }))
-})
 
 const PAGE_CODE = 'staff_list'
 const DATE_FIELDS = ['joinDate', 'birthdayDate', 'contractBegin', 'contractEnd']
@@ -153,7 +135,6 @@ const visibleKeys = ref([])
 const visibleFields = computed(() => visibleKeys.value.map((key) => fieldMap.value.get(key)).filter(Boolean))
 const canCreateStaff = computed(() => canUseCashierV3Operation('cashier.v3.staff.create'))
 const canEditStaff = computed(() => canUseCashierV3Operation('cashier.v3.staff.edit'))
-const canEditStaffPermissions = computed(() => canUseCashierV3Operation('cashier.v3.staff.permission_edit'))
 const canExportStaff = computed(() => canUseCashierV3Operation('cashier.v3.staff.export'))
 
 function applyQuerySettings(settings) {
@@ -348,45 +329,6 @@ async function saveEditor() {
   }
 }
 
-async function openPermissionEditor(record) {
-  if (!canEditStaffPermissions.value) return
-  const staffId = Number(record?.staffId || record?.staff_id || record?.id || 0)
-  if (!staffId) return
-  permissionOpen.value = true
-  permissionLoading.value = true
-  permissionError.value = ''
-  permissionStaff.value = record
-  try {
-    const response = await readStoreStaffFeaturePermissions(staffId)
-    const data = response?.data || response
-    permissionVersion.value = Number(data?.version || 0)
-    permissionItems.value = Array.isArray(data?.items) ? data.items.map((item) => ({ ...item })) : []
-  } catch (error) {
-    permissionError.value = error?.message || '员工权限加载失败。'
-  } finally {
-    permissionLoading.value = false
-  }
-}
-
-async function savePermissionEditor() {
-  if (!canEditStaffPermissions.value) return
-  const staffId = Number(permissionStaff.value?.staffId || permissionStaff.value?.staff_id || permissionStaff.value?.id || 0)
-  if (!staffId) return
-  permissionSaving.value = true
-  permissionError.value = ''
-  try {
-    const effects = Object.fromEntries(permissionItems.value.map((item) => [item.code, item.effect]))
-    const response = await saveStoreStaffFeaturePermissions(staffId, effects, permissionVersion.value)
-    const data = response?.data || response
-    permissionVersion.value = Number(data?.version || permissionVersion.value)
-    permissionOpen.value = false
-  } catch (error) {
-    permissionError.value = error?.message || '员工权限保存失败。'
-  } finally {
-    permissionSaving.value = false
-  }
-}
-
 function createStaffExport(payload) {
   if (!canExportStaff.value) return Promise.resolve({ result: { status: 'failed', message: '当前账号没有导出员工权限。' } })
   return unifiedQuery.createExport(payload)
@@ -442,7 +384,7 @@ async function onAvatarFileChange(event) {
     <p v-else-if="queryError" class="staff-list-message staff-list-message--error">{{ queryError }}</p>
     <main class="staff-list-wrap">
       <table class="staff-list-table"><thead><tr><th v-for="field in visibleFields" :key="field.key">{{ field.label }}</th><th class="staff-list-table__action">操作</th></tr></thead>
-        <tbody><tr v-for="record in records" :key="record.staffId || record.id"><td v-for="field in visibleFields" :key="field.key">{{ displayValue(record, field) }}</td><td class="staff-list-table__action"><button v-if="canEditStaff" type="button" class="button button--text" @click="openEditor(record)">编辑</button><button v-if="canEditStaffPermissions" type="button" class="button button--text" @click="openPermissionEditor(record)">权限编辑</button></td></tr></tbody>
+        <tbody><tr v-for="record in records" :key="record.staffId || record.id"><td v-for="field in visibleFields" :key="field.key">{{ displayValue(record, field) }}</td><td class="staff-list-table__action"><button v-if="canEditStaff" type="button" class="button button--text" @click="openEditor(record)">编辑</button><!-- 人员功能权限统一由岗位决定，已停用单人权限编辑入口。 --></td></tr></tbody>
       </table>
       <div v-if="!records.length && !isQueryLoading" class="staff-list-empty">暂无符合条件的员工。</div>
     </main>
@@ -494,32 +436,6 @@ async function onAvatarFileChange(event) {
         <footer><button type="button" class="button button--secondary" :disabled="editorSaving" @click="editorOpen = false">取消</button><button type="submit" class="button button--primary" :disabled="editorLoading || editorSaving || avatarUploading">{{ editorSaving ? '保存中…' : '保存' }}</button></footer>
       </form>
     </div>
-    <div v-if="permissionOpen" class="staff-editor-backdrop" @click.self="!permissionSaving && (permissionOpen = false)">
-      <section class="staff-editor staff-permission-editor" aria-label="员工功能权限">
-        <header><div><h2>员工功能权限</h2><p v-if="permissionStaff">{{ permissionStaff.staffName || permissionStaff.staff_name || '当前员工' }}</p></div><button type="button" class="staff-editor__close" :disabled="permissionSaving" @click="permissionOpen = false">×</button></header>
-        <div v-if="permissionLoading" class="staff-editor__loading">正在加载员工权限…</div>
-        <div v-else class="staff-editor__body">
-          <p class="staff-editor__hint">岗位权限是默认值，员工权限可单独设置为继承、允许或禁止。保存后下次登录生效。</p>
-          <div v-if="permissionGroups.length" class="permission-tree" aria-label="门店端功能权限树">
-            <details v-for="group in permissionGroups" :key="group.module" class="permission-tree__group" open>
-              <summary class="permission-tree__module"><strong>{{ group.module }}</strong><small>{{ group.items.length }}项功能</small></summary>
-              <div class="permission-tree__children">
-                <div v-for="item in group.items" :key="item.code" class="permission-row">
-                  <span class="permission-row__branch" aria-hidden="true"></span>
-                  <strong>{{ item.label }}</strong>
-                  <select v-model="item.effect" :aria-label="`${group.module}-${item.label}权限`">
-                    <option value="inherit">继承岗位</option><option value="allow">允许</option><option value="deny">禁止</option>
-                  </select>
-                </div>
-              </div>
-            </details>
-          </div>
-          <p v-else class="staff-editor__empty">暂无可配置的功能权限。</p>
-          <p v-if="permissionError" class="staff-editor__error">{{ permissionError }}</p>
-        </div>
-        <footer><button type="button" class="button button--secondary" :disabled="permissionSaving" @click="permissionOpen = false">取消</button><button type="button" class="button button--primary" :disabled="permissionLoading || permissionSaving" @click="savePermissionEditor">{{ permissionSaving ? '保存中…' : '保存权限' }}</button></footer>
-      </section>
-    </div>
   </section>
 </template>
 
@@ -538,7 +454,6 @@ async function onAvatarFileChange(event) {
 .staff-editor__choice-field { display:flex; flex-wrap:wrap; gap:0; padding:0; border:0; border-radius:0; }.staff-editor__choice-field legend { flex:0 0 100%; box-sizing:border-box; padding:0 0 6px; color:#697586; font-size:13px; }.staff-editor__choice-field label { position:relative; flex:1 1 0; justify-content:center; min-height:38px; box-sizing:border-box; margin-left:-1px; padding:7px 12px; border:1px solid #d9e1eb; background:#fff; color:#697586; white-space:nowrap; }.staff-editor__choice-field label:first-of-type { margin-left:0; border-radius:6px 0 0 6px; }.staff-editor__choice-field label:last-of-type { border-radius:0 6px 6px 0; }.staff-editor__choice-field label:has(input:checked) { z-index:1; border-color:#2f80ed; background:#f0f7ff; color:#2f80ed; }.staff-editor__choice-field input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
 .staff-editor__select-dropdown summary { flex-wrap:wrap; gap:4px; padding:4px 30px 4px 6px; }.staff-editor__select-tag { display:inline-flex; align-items:center; gap:6px; min-height:26px; padding:2px 7px; border:1px solid #d9e1eb; border-radius:4px; background:#f4f6f8; color:#4c596a; }.staff-editor__select-tag button { width:16px; height:16px; padding:0; border:0; background:transparent; color:#8a94a3; font-size:16px; line-height:14px; cursor:pointer; }.staff-editor__select-tag button:hover { color:#2f80ed; }.staff-editor__select-search { flex:1 1 80px; min-width:70px; height:28px; padding:2px 4px; border:0 !important; outline:0; background:transparent !important; color:#303133; font:inherit; }.staff-editor__select-search::placeholder { color:#8a94a3; }.staff-editor__select-options label.selected { background:#f3f7ff; color:#2f80ed; }.staff-editor__select-options label b { margin-left:auto; color:#2f80ed; font-size:16px; }.staff-editor__select-options input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
 .staff-editor__select-dropdown summary { overflow:auto; white-space:normal; }.staff-editor__scope-field { display:flex !important; align-items:center; gap:20px; width:100%; box-sizing:border-box; margin:0; padding:0; border:0 !important; }.staff-editor__scope-field legend { flex:0 0 auto; padding:0; color:#697586; font-size:13px; }.staff-editor__scope-field label { display:inline-flex !important; align-items:center; gap:7px; flex:0 0 auto; white-space:nowrap; color:#303133; cursor:pointer; }.staff-editor__scope-field input { width:18px; height:18px; margin:0; }
-.permission-tree { display:grid; gap:8px; margin-top:16px; }.permission-tree__group { overflow:hidden; border:1px solid #e4ebf3; border-radius:7px; background:#fff; }.permission-tree__module { display:flex; align-items:center; gap:8px; min-height:40px; box-sizing:border-box; padding:8px 12px; color:#303133; cursor:pointer; list-style-position:inside; }.permission-tree__module::marker { color:#2f80ed; }.permission-tree__module small { margin-left:auto; color:#8a94a3; font-size:12px; font-weight:400; }.permission-tree__children { padding:0 12px 4px 32px; border-top:1px solid #edf1f5; }.permission-row { position:relative; display:grid; grid-template-columns:12px minmax(0,1fr) 120px; align-items:center; gap:8px; min-height:42px; padding:6px 0; border-bottom:1px solid #edf1f5; }.permission-row:last-child { border-bottom:0; }.permission-row__branch { position:relative; align-self:stretch; min-height:28px; border-left:1px solid #cbd6e4; }.permission-row__branch::after { content:''; position:absolute; top:50%; left:0; width:10px; border-top:1px solid #cbd6e4; }.permission-row strong { min-width:0; color:#303133; font-size:13px; font-weight:500; }.permission-row select { width:120px; flex:0 0 120px; }.staff-editor__empty { margin:16px 0 0; color:#8a94a3; font-size:13px; }
 @media (max-width:760px) {
   .staff-list-page { padding:12px; }
   .staff-list-page__head { flex-direction:column; align-items:stretch; padding:14px 16px; }

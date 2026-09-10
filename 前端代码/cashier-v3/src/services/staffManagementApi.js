@@ -126,16 +126,3 @@ export function saveStoreStaff(staffId, values) {
     }
   })
 }
-
-export function readStoreStaffFeaturePermissions(staffId) {
-  return request(`/cashierapi/v3/management/staff/${encodeURIComponent(staffId)}/feature-permissions`)
-}
-
-export function saveStoreStaffFeaturePermissions(staffId, effects, version) {
-  const requestToken = createRequestToken()
-  return request(`/cashierapi/v3/management/staff/${encodeURIComponent(staffId)}/feature-permissions`, {
-    method: 'PUT',
-    requestToken,
-    body: { effects: effects && typeof effects === 'object' ? effects : {}, version: Number(version) || 0 }
-  })
-}

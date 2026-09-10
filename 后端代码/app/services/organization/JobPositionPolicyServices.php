@@ -62,7 +62,6 @@ class JobPositionPolicyServices extends BaseServices
         ['id' => 301007, 'title' => '管理', 'feature_code' => 'cashier.v3.management_center', 'children' => [
             ['id' => 301040, 'title' => '新增员工', 'feature_code' => 'cashier.v3.staff.create'],
             ['id' => 301041, 'title' => '编辑员工', 'feature_code' => 'cashier.v3.staff.edit'],
-            ['id' => 301042, 'title' => '编辑员工权限', 'feature_code' => 'cashier.v3.staff.permission_edit'],
             ['id' => 301043, 'title' => '导出员工', 'feature_code' => 'cashier.v3.staff.export'],
         ]],
         ['id' => 301100, 'title' => '库存管理', 'feature_code' => 'cashier.v3.inventory.overview', 'children' => [
