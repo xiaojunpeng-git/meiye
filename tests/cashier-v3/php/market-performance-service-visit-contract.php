@@ -13,6 +13,8 @@ $checks = [
     'card service rows bridge legacy origin orders to the sale order' => strpos($service, 'cashier_v3_card_purchase_receipt cr') !== false && strpos($service, 'cr.sales_order_id') !== false,
     'voided service facts are excluded as reversals' => strpos($service, "cashier_v3_service_record_void_operation vo") !== false && strpos($service, '->whereNull(\'vo.id\')') !== false,
     'service facts remain deduplicated at service_fact_id grain' => strpos($service, 'sv.store_id,sv.service_fact_id,sv.checkout_request_id') !== false,
+    'shared service resolver filters selected array rows rather than the query object' => preg_match('/\\$rows\\s*=\\s*\\$query\\s*->fieldRaw\\(/s', $service) === 1
+        && strpos($service, 'return array_values(array_filter($rows, static function (array $row): bool {') !== false,
     'market detail matches visits by source as well as order identity' => strpos($service, ". '|' . \$sourceKey") !== false,
     'successful order void payment reversals are included in report net cash' => strpos($service, "reversal_operation.operation_type IN ('refund','void')") !== false,
     'market performance keeps order void reversals in their original source channel' => strpos($service, 'is_refund_reversal') !== false

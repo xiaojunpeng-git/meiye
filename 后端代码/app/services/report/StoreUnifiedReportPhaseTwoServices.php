@@ -683,7 +683,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->where('sv.service_status', 'completed')
             ->whereNull('vo.id');
         $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'sv');
-        $query
+        $rows = $query
             ->fieldRaw(
                 'sv.store_id,sv.service_fact_id,sv.checkout_request_id,'
                 . 'COALESCE(NULLIF(wf.origin_order_id,0),0) origin_order_id,'
@@ -698,7 +698,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->group('sv.store_id,sv.service_fact_id,sv.checkout_request_id,wf.origin_order_id,cr.sales_order_id')
             ->select()
             ->toArray();
-        return array_values(array_filter($query, static function (array $row): bool {
+        return array_values(array_filter($rows, static function (array $row): bool {
             return (int)($row['business_source_primary_id'] ?? 0) > 0;
         }));
     }
