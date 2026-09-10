@@ -22,7 +22,7 @@ import SalesOrderReceiptPrintButton from '@/components/order/SalesOrderReceiptPr
  *     payableAmount, debtAmount, actualReceivedAmount,
  *     salespeople: [{ id, name, salesPerformanceAmount }],
  *     // 仅项目：craftsmen、laborPerformanceAmount、serviceRecipientType
- *     // 卡项：cardBatchId、cardBatchNo、benefitEntryId、benefitSummary
+ *     // 卡项：cardPurchaseTimes（成交时购买次数快照）、cardBatchId、cardBatchNo、benefitEntryId、benefitSummary
  *   }],
  *   paymentDetails: [{ id, methodName, amount, externalTransactionNo, remark, isBalancePayment }],
  *   cardBatches: [{ id, cardBatchNo, cardName, isCustomCard, benefitEntryId, benefitSummary }],
@@ -227,6 +227,28 @@ function recipientText(item) {
 
 function isExperienceItem(item) {
   return item?.isExperience === true || Number(item?.isExperience ?? item?.is_experience) === 1
+}
+
+// 卡项购买次数来自订单成交时冻结的快照，不读取当前剩余权益，避免
+// 后续核销或卡项配置变更把历史订单的购买内容展示错。
+function cardPurchaseTimesText(item) {
+  if (itemType(item) !== '卡项') return ''
+  const snapshot = item?.cardPurchaseTimes
+  if (!snapshot || typeof snapshot !== 'object') return ''
+  if (snapshot.mode === 'shared' && Number(snapshot.times) > 0) {
+    return `任选共享 ${Number(snapshot.times)}次`
+  }
+  const components = Array.isArray(snapshot.components) ? snapshot.components : []
+  const labels = components
+    .filter((component) => component && String(component.name || '').trim() && Number(component.times) > 0)
+    .map((component) => `${String(component.name).trim()} ${Number(component.times)}次`)
+  return labels.join('、')
+}
+
+function cardPurchaseTimesLabel(item) {
+  if (!cardPurchaseTimesText(item)) return ''
+  const quantity = Number(pickValue(item, ['quantity', 'count', 'number']))
+  return Number.isFinite(quantity) && quantity > 1 ? '每张购买次数' : '购买次数'
 }
 
 function amountRowsForItem(item) {
@@ -671,6 +693,7 @@ async function runAction(action, payload = {}) {
                   <span v-if="itemType(item)" class="sales-order-detail-tag">{{ itemType(item) }}</span>
                   <h4>{{ itemName(item) }}</h4>
                   <p v-if="pickValue(item, ['purchaseSpec', 'specification', 'specName', 'packageName', 'cardSpecification'])">购买规格：{{ pickValue(item, ['purchaseSpec', 'specification', 'specName', 'packageName', 'cardSpecification']) }}</p>
+                  <p v-if="cardPurchaseTimesText(item)">{{ cardPurchaseTimesLabel(item) }}：{{ cardPurchaseTimesText(item) }}</p>
                 </div>
                 <div class="sales-order-detail-item__unit">
                   <span v-if="hasValue(pickValue(item, ['unitPrice', 'price', 'salePrice']))">单价 {{ displayAmount(pickValue(item, ['unitPrice', 'price', 'salePrice'])) }}</span>

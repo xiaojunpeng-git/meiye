@@ -1008,7 +1008,7 @@ final class CashierV3SalesOrderQueryServices
             ->field(
                 'order_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,'
                 . 'checkout_line_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,is_experience,craftsmen_snapshot_json,quantity,'
-                . 'original_amount_cents,discount_amount_cents,sale_amount_cents,line_version'
+                . 'original_amount_cents,discount_amount_cents,sale_amount_cents,card_purchase_snapshot_json,line_version'
             )
             ->select()
             ->toArray();
@@ -1200,7 +1200,7 @@ final class CashierV3SalesOrderQueryServices
             ->whereIn('order_id', $orderIds)
             ->where('line_status', 'settled')
             ->where('line_direction', 'forward')
-            ->field('order_line_id,checkout_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,is_experience,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,line_version')
+            ->field('order_line_id,checkout_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,is_experience,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,card_purchase_snapshot_json,line_version')
             ->order('order_id', 'asc')->order('line_no', 'asc')->select()->toArray() as $line) {
             $linesByOrder[(string)$line['order_id']][] = $line;
         }
@@ -1665,6 +1665,12 @@ final class CashierV3SalesOrderQueryServices
             'payableAmount' => $this->moneyFromCents((int)$line['sale_amount_cents']),
             'debtAmount' => $this->moneyFromCents((int)($line['debt_amount_cents'] ?? 0)),
             'actualReceivedAmount' => null, 'economicsDataStatus' => 'ready', 'snapshotStatus' => 'ready',
+            // 购买次数只读取销售明细在结账时冻结的购卡快照；绝不从当前
+            // 剩余权益、当前卡项配置或服务记录反推，避免历史订单被后续
+            // 核销、作废以外的配置变更改写。
+            'cardPurchaseTimes' => $type === '卡项'
+                ? $this->cardPurchaseTimesSnapshot($line['card_purchase_snapshot_json'] ?? null)
+                : [],
             'serviceRecipientType' => (string)($line['service_object'] ?? ''),
             'isExperience' => (int)($line['is_experience'] ?? 0) === 1,
             'salespeople' => array_map(function (array $person): array {
@@ -2067,6 +2073,9 @@ final class CashierV3SalesOrderQueryServices
             'debtAmount' => $v3Ready ? $this->decimalMoney($line['debt_amount'] ?? '0') : null,
             'actualReceivedAmount' => $v3Ready
                 ? $this->decimalMoney($line['cash_pay_amount'] ?? '0') : null,
+            'cardPurchaseTimes' => $type === '卡项' && $v3Ready
+                ? $this->cardPurchaseTimesSnapshot($authority['card_purchase_snapshot_json'] ?? null)
+                : [],
             'serviceRecipientType' => $v3Ready ? (string)($authority['service_object'] ?? '') : '',
             'isExperience' => $v3Ready && (int)($authority['is_experience'] ?? 0) === 1,
             'economicsDataStatus' => $v3Ready ? 'ready' : self::ECONOMICS_STATUS,
@@ -2076,6 +2085,49 @@ final class CashierV3SalesOrderQueryServices
             'guides' => array_values((array)($v3['guides'] ?? [])),
             'craftsmen' => $v3Ready ? $this->craftsmenForLine($authority) : [],
         ];
+    }
+
+    /**
+     * Map the immutable card-purchase snapshot to the small, display-only
+     * purchase-count contract consumed by the order detail.  This method
+     * deliberately returns no current balance, remaining count, catalogue
+     * identity or raw snapshot so this historical read model cannot be
+     * mistaken for the live entitlement authority.
+     */
+    private function cardPurchaseTimesSnapshot($rawSnapshot): array
+    {
+        if (!is_string($rawSnapshot) || trim($rawSnapshot) === '') {
+            return [];
+        }
+        $snapshot = json_decode($rawSnapshot, true);
+        if (!is_array($snapshot) || array_values($snapshot) === $snapshot) {
+            return [];
+        }
+        $ruleType = trim((string)($snapshot['ruleType'] ?? ''));
+        $components = [];
+        foreach ((array)($snapshot['components'] ?? []) as $component) {
+            if (!is_array($component)) {
+                continue;
+            }
+            $name = trim((string)($component['nameSnapshot'] ?? ''));
+            $times = max(0, (int)($component['writeTimes'] ?? 0));
+            if ($name === '' || $times <= 0) {
+                continue;
+            }
+            $components[] = ['name' => $name, 'times' => $times];
+        }
+        // “任选次数”是一个共享次数池，不能错误地展示成每个内含项目
+        // 各自拥有该次数；按时长卡不存在可展示的购买次数。
+        if ($ruleType === 'choice_count') {
+            $sharedTimes = max(0, (int)($snapshot['sharedTimes'] ?? 0));
+            return $sharedTimes > 0
+                ? ['mode' => 'shared', 'times' => $sharedTimes, 'components' => $components]
+                : [];
+        }
+        if ($ruleType === 'time') {
+            return [];
+        }
+        return $components === [] ? [] : ['mode' => 'independent', 'components' => $components];
     }
 
     private function craftsmenForLine(array $line): array
