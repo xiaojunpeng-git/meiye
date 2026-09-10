@@ -9,6 +9,7 @@ final class AiBusinessManifest
         require_once dirname(__DIR__).'/semantic/AiSemanticVocabulary.php';
         require_once __DIR__.'/AiSkillDocument.php';
         $storeOperations=AiSkillDocument::storeOperations();
+        $intentUnderstanding=AiSkillDocument::intentUnderstanding();
         $tool=function(string $handler,string $input,string $output,string $permission,string $effect):array {
             return ['version'=>1,'handler'=>$handler,'input_schema'=>$input,'output_schema'=>$output,
                 'permission_contract'=>$permission,'side_effect'=>$effect,'timeout_ms'=>10000,
@@ -39,8 +40,8 @@ final class AiBusinessManifest
                 $node('evidence','metadata_guard',['catalog'],'metadata_evidence','verified_result',null,1000),
                 $node('render','deterministic_definition',['evidence'],'verified_result','answer_result',null,1000),
             ]];
-        return ['registry_version'=>'mohe-business-registry-r8-v3',
-            'semantic_resource_hash'=>\app\services\ai\semantic\AiSemanticVocabulary::fingerprint(),
+        return ['registry_version'=>'mohe-business-registry-r8-v4',
+            'semantic_resource_hash'=>hash('sha256',\app\services\ai\semantic\AiSemanticVocabulary::fingerprint().$intentUnderstanding['source_hash']),
             'schemas'=>['query_input','definition_input','business_evidence','metadata_evidence','verified_result','answer_result','export_result'],
             'tools'=>[
                 'unified_metric_query'=>$tool('unified_metric_query','query_input','business_evidence','unified_query_current_business_scope','read_only'),

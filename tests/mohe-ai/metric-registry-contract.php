@@ -144,9 +144,9 @@ metricRegistryCheck(strpos($semantic, 'MetricSemanticCatalog::unambiguousPattern
 metricRegistryCheck(strpos($planner, "private \$names = ['cash_performance'") === false
     && strpos($planner, 'MetricSemanticCatalog::names') !== false,
     'workflow planner has no second hardcoded metric list');
-metricRegistryCheck(strpos($gateway, 'MetricSemanticCatalog::stripTerms') !== false
+metricRegistryCheck(strpos($gateway, 'MetricSemanticCatalog::stripTerms') === false
     && strpos($semanticCatalog, "preg_quote(\$term,'/')") !== false,
-    'person intent removes only registry and dictionary projected metric terms');
+    'person intent is model-structured and no longer re-parses a phrase-stripped question');
 metricRegistryCheck(strpos($gateway, "str_replace(['劳动业绩','销售人业绩','销售业绩']") === false
     && strpos($gateway, "preg_match('/劳动业绩|销售业绩|销售人业绩/u'") === false,
     'person intent has no handwritten metric phrase list');

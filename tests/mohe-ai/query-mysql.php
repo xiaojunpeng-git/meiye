@@ -40,12 +40,12 @@ foreach ($schemas as $name => $schema) $pdo->exec('CREATE TABLE eb_' . $name . '
 $pdo->exec("INSERT INTO eb_system_store VALUES (1,'测试甲店'),(2,'测试乙店'),(3,'无权店')");
 $pdo->exec("INSERT INTO eb_organization (id,pid,is_del) VALUES (1,0,0)");
 $pdo->exec("INSERT INTO eb_organization_store (store_id,org_id) VALUES (1,1),(2,1),(3,1)");
-$pdo->exec("INSERT INTO eb_cashier_v3_sale_fact (tenant_id,fact_id,store_id,business_date,status,sale_amount_cents,order_id,source_line_id,operator_id,operator_name_snapshot) VALUES
-('0','sale',1,'2026-09-08','effective',12000,'order','line',7,'测试操作人'),
-('other','sale-other',1,'2026-09-08','effective',99999,'foreign','foreign-line',8,'外部操作人')");
-$pdo->exec("INSERT INTO eb_cashier_v3_payment_fact (fact_id,tenant_id,store_id,member_id,business_date,status,fact_type,source_document_type,payment_method,amount_cents,order_id,source_line_id,organization_id,organization_path_snapshot,store_name_snapshot,operator_id,operator_name_snapshot) VALUES
-('payment-cash','0',1,101,'2026-09-08','effective','payment_collected','cashier_snapshot','wechat',900001,'order','line','org','org','测试甲店',7,'测试操作人'),
-('payment-refund','0',1,101,'2026-09-08','effective','payment_collected','cashier_snapshot','wechat',-10000,'order','line','org','org','测试甲店',7,'测试操作人')");
+$pdo->exec("INSERT INTO eb_cashier_v3_sale_fact (tenant_id,fact_id,store_id,member_id,member_name_snapshot,business_date,status,sale_amount_cents,order_id,source_line_id,operator_id,operator_name_snapshot) VALUES
+('0','sale',1,101,'测试会员','2026-09-08','effective',12000,'order','line',7,'测试操作人'),
+('other','sale-other',1,0,'','2026-09-08','effective',99999,'foreign','foreign-line',8,'外部操作人')");
+$pdo->exec("INSERT INTO eb_cashier_v3_payment_fact (fact_id,tenant_id,store_id,member_id,member_name_snapshot,business_date,status,fact_type,source_document_type,payment_method,amount_cents,order_id,source_line_id,organization_id,organization_path_snapshot,store_name_snapshot,operator_id,operator_name_snapshot) VALUES
+('payment-cash','0',1,101,'测试会员','2026-09-08','effective','payment_collected','cashier_snapshot','wechat',900001,'order','line','org','org','测试甲店',7,'测试操作人'),
+('payment-refund','0',1,101,'测试会员','2026-09-08','effective','payment_collected','cashier_snapshot','wechat',-10000,'order','line','org','org','测试甲店',7,'测试操作人')");
 $pdo->exec("INSERT INTO eb_cashier_v3_payment_sale_allocation_fact (tenant_id,allocation_fact_id,sale_fact_id,reversal_of,payment_fact_id,store_id,business_date,status,amount_cents,order_id) VALUES
 ('0','cash','sale',NULL,'payment-cash',1,'2026-09-08','effective',900001,'order'),
 ('0','refund','sale','cash','payment-refund',1,'2026-09-08','effective',-10000,'order'),
@@ -123,6 +123,9 @@ mysqlCheck(array_sum(array_column($actualDetails['rows'],'metric_value'))===8900
 $cashOperatorRanking=$registered->defaultRanking('cash_performance','0',[1],$range,20,'desc');
 mysqlCheck($cashOperatorRanking['dimension']==='operator' && $cashOperatorRanking['rows']===[['entity_id'=>7,'entity_name'=>'测试操作人','metric_value'=>900001]],
     'cash operator ranking uses the same allocated-sale population as cash summary');
+$cashMemberRanking=$registered->dimensionRanking('cash_performance','member','0',[1],$range,20,'desc');
+mysqlCheck($cashMemberRanking === [['entity_id'=>101,'entity_name'=>'测试会员','metric_value'=>900001]],
+    'cash member ranking uses the same registered cash population as cash summary');
 $personRanking = $registered->personnelRanking('staff_labor_yeji', '0', [1], $range);
 mysqlCheck(count($personRanking) === 1 && $personRanking[0]['employee_name'] === '技师甲'
     && $personRanking[0]['amount_cents'] === 4500, 'registered technician ranking');
@@ -273,6 +276,41 @@ try {
     $rankView=$service->create([], $rank); $rr=$rankView['results'];
     mysqlCheck(array_column($rr[0]['rows']['top'],'store_id') === [1,2] && array_column($rr[0]['rows']['bottom'],'store_id') === [2,1], 'full authorized ranking both directions');
     mysqlCheck(array_column($rr[0]['rows']['top'],'store_name') === ['测试甲店','测试乙店'], 'authorized authoritative store labels');
+    $memberRank = $rank;
+    $memberRank['store_ids'] = [1];
+    $memberRank['metric_codes'] = ['cash_performance'];
+    $memberRank['business_filters'] = ['object_kind' => 'member'];
+    $memberView = $service->create([], $memberRank);
+    // The signed view canonicalizes associative key order. Compare canonical
+    // payloads while preserving list order, exact integers and all fields.
+    mysqlCheck(app\services\query\UnifiedQueryJson::encode($memberView['results'][0]['rows']['top'])
+        === app\services\query\UnifiedQueryJson::encode([['entity_id' => 101, 'entity_name' => '测试会员', 'amount_cents' => 901101]]),
+        'metric read view executes registered member payment ranking without a separate member gate');
+    $memberExport=app\services\query\metric\MetricReadViewExportProvider::project($memberView);
+    $memberExportDirections=array_column($memberExport,null,'ranking_direction');
+    mysqlCheck(count($memberExport)===2 && isset($memberExportDirections['前列'],$memberExportDirections['后列'])
+        && array_column($memberExport,'metric_value')===['9011.01','9011.01']
+        && array_column($memberExport,'store_name')===['测试会员；范围：当前授权范围','测试会员；范围：当前授权范围'],
+        'member export preserves exact cents, identity and both ranking directions');
+    $projectRank=$rank;
+    $projectRank['store_ids']=[1];
+    $projectRank['metric_codes']=['completed_service_item_count'];
+    $projectRank['business_filters']=['object_kind'=>'project'];
+    $projectRank['ranking']=['direction'=>'top','limit'=>5];
+    $projectView=$service->create([],$projectRank);
+    mysqlCheck(app\services\query\UnifiedQueryJson::encode($projectView['results'][0]['rows']['top'])
+        === app\services\query\UnifiedQueryJson::encode([['entity_id'=>31,'entity_name'=>'护理项目','amount_cents'=>3]])
+        && ($projectView['results'][0]['object_label']??null)==='项目',
+        'metric read view executes a registered project dimension without an object-specific reader');
+    $projectExport=app\services\query\metric\MetricReadViewExportProvider::project($projectView);
+    mysqlCheck(count($projectExport)===1 && $projectExport[0]['store_name']==='护理项目；范围：当前授权范围'
+        && $projectExport[0]['metric_value']==='3' && $projectExport[0]['unit']==='个',
+        'registered project ranking export keeps the object identity and count unit');
+    $memberUnrestricted=$memberRank;$memberUnrestricted['store_ids']=[];
+    mysqlReject(function()use($service,$memberUnrestricted,$memberView){$service->replay([],$memberUnrestricted,$memberView['read_consistency_ref']);},'METRIC_READ_BINDING_MISMATCH');
+    $binding['permission_version']='member-revoked';
+    mysqlReject(function()use($service,$memberRank,$memberView){$service->replay([],$memberRank,$memberView['read_consistency_ref']);},'METRIC_READ_BINDING_MISMATCH');
+    $binding['permission_version']='fixture-v1';
     $pdo->exec("UPDATE eb_system_store SET name='改名后' WHERE id=1");
     mysqlCheck($service->replay([], $rank, $rankView['read_consistency_ref'])['results'] === $rr, 'replay preserves names with original amounts');
     $exportQuery=$query; $exportQuery['metric_codes']=['consume_amount'];
@@ -301,7 +339,7 @@ try {
     $actualView=$service->create([],$actualQuery);
     mysqlCheck($actualView['results'][0]['amount_cents']
         === $registered->summary('actual_performance','0',[1],$range), 'AI view consumes registered actual performance');
-    $now+=86400; mysqlCheck($store->cleanup()===6,'real views TTL cleanup');
+    $now+=86400; mysqlCheck($store->cleanup()===8,'real views TTL cleanup includes member and project ranking views');
 } finally {
     foreach(new DirectoryIterator($tmp) as $file) if(!$file->isDot() && $file->isFile() && !$file->isLink()) unlink($file->getPathname());
     rmdir($tmp);

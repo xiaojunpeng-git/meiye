@@ -27,7 +27,9 @@ class MetricDictionaryServices extends BaseServices
                 'exclude' => '尚未收取的欠款、充值赠金、余额扣款和旧卡录入不计入；已作废的收款不计入。系统不设置纸币现金方式。',
                 'timing' => '以记账收款业务成功时间作为现金业绩确认时间。',
                 'note' => '退款按退款成功日期单独统计，不在现金业绩中重复扣减。',
-                'aliases' => ['store_income', '实际收款金额', '门店订单金额', 'target_revenue', '本月业绩', 'PK本月业绩', '收了多少钱', '收了多少款', '收款金额', '收得怎么样', '现金'],
+                // 「消费能力／付款能力」是对会员付款规模的业务表述；它不改变
+                // 指标公式，仍由统一收款事实的现金业绩合同提供。
+                'aliases' => ['store_income', '实际收款金额', '门店订单金额', 'target_revenue', '本月业绩', 'PK本月业绩', '收了多少钱', '收了多少款', '收款金额', '收得怎么样', '消费能力', '付款能力', '支付能力', '现金'],
                 'dev_source' => 'MetricDefinitionRegistry：V3 销售收款分摊事实与合格充值收款事实的正向金额',
                 'dev_time_field' => 'V3 收款事实 business_date',
             ],

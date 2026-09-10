@@ -11,9 +11,9 @@ final class AiSemanticIntentParser
         $text=preg_replace('/(?:先)?不查(?:钱数|金额)(?:[，,、]\s*)?|不用(?:计算|算)(?:差额|增幅)[。.]?|不按当前页面(?:的)?筛选[。.]?/u',' ',$text);
         $signals=[]; $covered=$text; $constraints=[];
         $limits=[];
-        preg_match_all('/(?:前|后|最高|最低|最好|最差)(?:的)?\s*([0-9]+|[一二两三四五六七八九十百]+)|([0-9]+|[一二两三四五六七八九十百]+)\s*家/u',$text,$counts,PREG_SET_ORDER);
+        preg_match_all('/(?:前|后|最高|最低|最好|最差)(?:的)?\s*([0-9]+|[一二两三四五六七八九十百]+)\s*(?:名)?|([0-9]+|[一二两三四五六七八九十百]+)\s*家/u',$text,$counts,PREG_SET_ORDER);
         foreach($counts as $count) {
-            if (!preg_match('/排行|排名|门店|家店|倒数|[前后][一二两三四五六七八九十0-9]+(?![天日月年号])/u',$text)) continue;
+            if (!preg_match('/排行|排名|门店|家店|倒数|(?:前|后|最高|最低|最好|最差)(?:的)?\s*[一二两三四五六七八九十0-9]+\s*(?:名)?(?![天日月年号])/u',$text)) continue;
             $raw=$count[1]!==''?$count[1]:($count[2]??'');$limits[]=$this->number($raw);
             if(preg_match('/前|最高|最好/u',$count[0])) $signals[]='rank_top';
             if(preg_match('/后|最低|最差/u',$count[0])) $signals[]='rank_bottom';
@@ -58,6 +58,8 @@ final class AiSemanticIntentParser
         $blocking=null;
         foreach($constraints as $constraint) if($constraint['type']!=='unparsed_business_condition') $blocking='AI_CAPABILITY_NOT_READY';
         if(!$blocking && $unparsed) $blocking='AI_INTENT_UNRESOLVED';
+        // Legacy store-only compact routing keeps its historic fixed five
+        // contract. Object dimensions bypass it and use model result shapes.
         if($limits && ($limits!==[5])) $blocking='AI_RANK_LIMIT_NOT_READY';
         if(in_array('TOMORROW',$signals,true)) $blocking='AI_FUTURE_ACTUALS_UNAVAILABLE';
         $periods=$this->periods($normalized);

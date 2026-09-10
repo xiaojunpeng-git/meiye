@@ -38,7 +38,13 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         renderAnswer(run.answer);
         const text = run.answer.summary || (run.answer.cards || []).map(c => `${c.metric_name}：${c.display_value}${c.unit || ''}`).join('\n');
         try { sessions.append(conversation, question, text, run.answer); } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error'); }
-      } else message(run.status === 'CANCELLED' ? '已取消' : run.message || '本次未能完成，请重新提问。');
+      } else {
+        // The terminal message is already appended to the conversation.  Do
+        // not leave the same failure in the footer status as a second visible
+        // answer; it makes a controlled refusal look like two responses.
+        progress.textContent = '';
+        message(run.status === 'CANCELLED' ? '已取消' : run.message || '本次未能完成，请重新提问。');
+      }
       return;
     }
     if (run.status === 'WAITING_CLARIFICATION' && run.clarification && !cancelling) renderClarification(run.clarification);

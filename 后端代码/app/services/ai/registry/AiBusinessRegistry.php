@@ -34,6 +34,21 @@ final class AiBusinessRegistry
             'semantic_projection'=>$scene['semantic_projection'],
         ];
     }
+
+    /** The language layer and the selected business layer are separate Skills. */
+    public function modelSkills(string $sceneCode): array
+    {
+        $intent=AiSkillDocument::intentUnderstanding();
+        return [
+            'intent_understanding'=>[
+                'skill_code'=>$intent['skill_code'],'skill_version'=>$intent['version'],
+                'skill_source_hash'=>$intent['source_hash'],'label'=>$intent['label'],'goal'=>$intent['goal'],
+                'principles'=>$intent['principles'],'output_contract'=>$intent['output_contract'],
+                'completion'=>$intent['completion'],
+            ],
+            'business'=>$this->modelSkill($sceneCode),
+        ];
+    }
     public function exportNode(): array { return $this->manifest['export_node']; }
     public function dependencyVersions(string $code,bool $export): array
     {
@@ -77,19 +92,25 @@ final class AiBusinessRegistry
             if ((!$person && (($item['filter_grain']??null)!=='store'||($item['business_filters']??null)!==[]))
                 || ($person && ($item['business_filters']??null)!==['selection_ref'])
                 ||!preg_match('/^\d{4}-\d{2}-\d{2}$/D',$item['coverage_start'])) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+            $dimensions=AiRegistryValue::strings($item['analysis_dimensions']??[],16);
+            if (!in_array('store',$dimensions,true)) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+            $dimensionContracts=$this->dimensionContracts($item['analysis_dimension_contracts']??[]);
             $coverage=\DateTimeImmutable::createFromFormat('!Y-m-d',$item['coverage_start']);
             if (!$coverage||$coverage->format('Y-m-d')!==$item['coverage_start']) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             // This release cannot inherit a new metric merely because a lower catalog gained it.
             $registered=\app\services\query\metric\MetricReadViewServices::metricCapabilities();
             if (!isset($registered[$code]) || !$registered[$code]['ai_query_ready']) continue;
             if (($registered[$code]['filter_grain']??null)!==($item['filter_grain']??null)
-                || ($registered[$code]['business_filters']??null)!==($item['business_filters']??null)) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+                || ($registered[$code]['business_filters']??null)!==($item['business_filters']??null)
+                || ($registered[$code]['analysis_dimensions']??null)!==$dimensions
+                || $this->dimensionContracts($registered[$code]['analysis_dimension_contracts']??[])!==$dimensionContracts) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             $available=array_values(array_intersect($shapes,AiRegistryValue::strings($item['query_shapes']??[],8)));
             if (!$available) continue;
             sort($available,SORT_STRING);
             $metrics[$code]=['metric_code'=>$code,'name'=>(string)($item['name']??$code),'metric_version'=>$item['metric_version'],
                 'mapping_version'=>$item['mapping_version'],'source_metric_version'=>$item['source_metric_version'],
-                'query_shapes'=>$available,'coverage_start'=>$item['coverage_start'],'filter_grain'=>$person?'person':'store','business_filters'=>$person?['selection_ref']:[]];
+                'query_shapes'=>$available,'coverage_start'=>$item['coverage_start'],'filter_grain'=>$person?'person':'store','business_filters'=>$person?['selection_ref']:[],
+                'analysis_dimensions'=>$dimensions,'analysis_dimension_contracts'=>$dimensionContracts];
         }
         ksort($metrics,SORT_STRING);
         $definitions=[];
@@ -167,6 +188,27 @@ final class AiBusinessRegistry
         $hash=$snapshot['snapshot_hash']; unset($snapshot['snapshot_hash']);
         if (!is_string($hash)||!hash_equals(AiRegistryValue::hash($snapshot),$hash)||$snapshot['registry_version']!==$this->version()||$snapshot['registry_hash']!==$this->fingerprint()) AiRegistryValue::fail('AI_CAPABILITY_CHANGED');
     }
+
+    /** Runtime capability details that are safe to freeze into a plan snapshot. */
+    private function dimensionContracts($contracts): array
+    {
+        if (!is_array($contracts)||!AiRegistryValue::isList($contracts)||count($contracts)>16) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+        $out=[];
+        foreach ($contracts as $contract) {
+            AiRegistryValue::exact($contract,['dimension','object_kind','object_label','relation_role','action_codes','filter_keys']);
+            foreach (['dimension','object_kind','relation_role'] as $key) {
+                if (!is_string($contract[$key]??null)||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$contract[$key])) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+            }
+            if (!is_string($contract['object_label']??null)||trim($contract['object_label'])===''||mb_strlen($contract['object_label'],'UTF-8')>80) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+            $actions=AiRegistryValue::strings($contract['action_codes']??[],8);
+            if (!$actions) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+            $filters=AiRegistryValue::strings($contract['filter_keys']??[],8);
+            $out[]=['dimension'=>$contract['dimension'],'object_kind'=>$contract['object_kind'],'object_label'=>$contract['object_label'],'relation_role'=>$contract['relation_role'],'action_codes'=>$actions,'filter_keys'=>$filters];
+        }
+        usort($out,static function(array $left,array $right): int { return [$left['object_kind'],$left['dimension']] <=> [$right['object_kind'],$right['dimension']]; });
+        if (count(array_unique(array_map(static function(array $item): string { return $item['object_kind'].'|'.$item['dimension']; },$out)))!==count($out)) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+        return $out;
+    }
     private function validate(): void
     {
         $m=$this->manifest;
@@ -202,12 +244,12 @@ final class AiBusinessRegistry
             if (array_diff(AiRegistryValue::strings($scene['actions'],8),array_keys($m['actions']))) AiRegistryValue::fail('AI_REGISTRY_DEPENDENCY_INVALID');
             foreach (['required_facts','ambiguities','counterexamples'] as $key) AiRegistryValue::strings($scene[$key],16);
             $projection=$scene['semantic_projection'];
-            if (!is_array($projection) || array_diff(['objects','scenes','slots','preserve_words','gateway'],array_keys($projection)) || array_diff(array_keys($projection),['objects','scenes','slots','preserve_words','gateway'])) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
+            if (!is_array($projection) || array_diff(['objects','actions','capability_groups','slots','gateway'],array_keys($projection)) || array_diff(array_keys($projection),['objects','actions','capability_groups','slots','gateway'])) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
             // AiSkillDocument already validates the complete source contract.  The
             // registry repeats only the immutable shape required to safely pass it
             // through to the model and gateway.
-            foreach (['objects','scenes','slots','preserve_words'] as $key) if (!is_array($projection[$key]) || !$projection[$key]) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
-            if (!is_array($projection['gateway'])) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
+            foreach (['objects','actions','capability_groups','slots'] as $key) if (!is_array($projection[$key]) || !$projection[$key]) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
+            if (!is_array($projection['gateway']) || ($projection['gateway']['candidate_source']??null)!=='server_authorized_contract') AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
             if (!is_array($scene['domains']) || !AiRegistryValue::isList($scene['domains']) || !$scene['domains'] || count($scene['domains'])>16) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
             $domainCodes=[];
             foreach ($scene['domains'] as $domain) {

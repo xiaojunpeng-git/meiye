@@ -11,7 +11,10 @@ namespace app\services\query\metric;
  */
 final class MetricDefinitionRegistry
 {
-    public const VERSION = 'unified-metric-registry-v2';
+    // v3 introduces source-owned analysis-dimension contracts.  Bumping the
+    // mapping identity prevents a plan frozen against the older registry from
+    // being mistaken for one that carries those object contracts.
+    public const VERSION = 'unified-metric-registry-v5';
     public const COVERAGE_START = '2026-08-10';
 
     /** @return array<string,array<string,mixed>> */
@@ -19,7 +22,29 @@ final class MetricDefinitionRegistry
     {
         return [
             'cash_performance' => self::amount('cash_positive', 'cash-collected-recharge-inclusive-v3', ['summary', 'comparison', 'trend', 'ranking']) + [
-                'dimensions' => ['operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot']],
+                'dimensions' => [
+                    'operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot'],
+                    // 会员付款能力排行复用这一已登记收款指标；维度仅决定
+                    // Reader 如何分组，不会新建另一套金额或公式。
+                    'member' => [
+                        'id' => 'member_id', 'name' => 'member_name_snapshot',
+                        // This opt-in is the source-owned contract which makes
+                        // a registered fact dimension an AI analysis object.
+                        // Merely having an id/name column never does so.
+                        'analysis_object_kind' => 'member',
+                        'analysis_object_label' => '会员',
+                        'analysis_relation_role' => 'member_metric_total',
+                        // A dimension contract describes both the object and
+                        // the business action it can truthfully answer.  The
+                        // AI may not substitute another action merely because
+                        // it happens to share the same object dimension.
+                        // Same registered cash fact: it can truthfully answer
+                        // both member payment-strength and collection ranking.
+                        // This remains a single metric/reader, not a second
+                        // formula inferred by the AI.
+                        'analysis_action_codes' => ['payment','revenue'],
+                    ],
+                ],
                 'default_ranking_dimension' => 'operator',
                 'category_reader' => ['strategy' => 'cash_sale_allocation', 'mode' => 'positive'],
             ],
@@ -44,12 +69,22 @@ final class MetricDefinitionRegistry
             'staff_sales_yeji' => self::amount('personnel_fact_sum', 'sales-performance-allocated-person-v1', ['summary', 'ranking'], [
                 'table' => 'cashier_v3_performance_fact', 'amount' => 'amount_cents',
                 'filters' => ['status' => 'effective', 'performance_type' => 'sales_performance_allocated'],
-                'normal_scope' => 'facts', 'dimensions' => ['employee' => ['id' => 'employee_id', 'name' => 'employee_name_snapshot']],
+                'normal_scope' => 'facts', 'dimensions' => ['employee' => [
+                    'id' => 'employee_id', 'name' => 'employee_name_snapshot',
+                    'analysis_object_kind' => 'person', 'analysis_object_label' => '人员',
+                    'analysis_relation_role' => 'allocated_employee', 'analysis_action_codes' => ['sales'],
+                    'analysis_filter_keys' => ['selection_ref'],
+                ]],
             ], 'person', ['selection_ref']) + ['default_ranking_dimension' => 'employee'],
             'staff_labor_yeji' => self::amount('personnel_fact_sum', 'labor-performance-allocated-person-v1', ['summary', 'ranking'], [
                 'table' => 'cashier_v3_performance_fact', 'amount' => 'amount_cents',
                 'filters' => ['status' => 'effective', 'performance_type' => 'labor_performance_allocated'],
-                'normal_scope' => 'facts', 'dimensions' => ['employee' => ['id' => 'employee_id', 'name' => 'employee_name_snapshot']],
+                'normal_scope' => 'facts', 'dimensions' => ['employee' => [
+                    'id' => 'employee_id', 'name' => 'employee_name_snapshot',
+                    'analysis_object_kind' => 'person', 'analysis_object_label' => '人员',
+                    'analysis_relation_role' => 'allocated_employee', 'analysis_action_codes' => ['service'],
+                    'analysis_filter_keys' => ['selection_ref'],
+                ]],
             ], 'person', ['selection_ref']) + ['default_ranking_dimension' => 'employee'],
             'sales_amount' => self::amount('fact_sum', 'v3-sale-completed-lines-v1', ['summary', 'comparison', 'trend', 'ranking'], [
                 'table' => 'cashier_v3_sale_fact', 'amount' => 'sale_amount_cents',
@@ -76,7 +111,13 @@ final class MetricDefinitionRegistry
                 'table' => 'cashier_v3_entitlement_service_fact', 'amount' => 'quantity',
                 'filters' => ['service_status' => 'completed'], 'normal_scope' => 'services',
                 'dimensions' => [
-                    'project' => ['id' => 'project_id', 'name' => 'project_name_snapshot'],
+                    'project' => [
+                        'id' => 'project_id', 'name' => 'project_name_snapshot',
+                        'analysis_object_kind' => 'project',
+                        'analysis_object_label' => '项目',
+                        'analysis_relation_role' => 'project_metric_total',
+                        'analysis_action_codes' => ['service'],
+                    ],
                     'operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot'],
                 ],
                 'category_reader' => ['strategy' => 'completed_service_quantity'],
@@ -112,7 +153,12 @@ final class MetricDefinitionRegistry
         if (!isset($all[$code])) {
             throw new MetricQueryContractException('METRIC_NOT_REGISTERED', '当前指标尚未注册。');
         }
-        return ['metric_code' => $code] + $all[$code];
+        $item=$all[$code];
+        // Readers and capability snapshots consume the same derived dimension
+        // contract.  Keep it on the authoritative definition too so execution
+        // never relies on a separately reconstructed object mapping.
+        $item['analysis_dimension_contracts']=self::analysisDimensionContracts($item);
+        return ['metric_code' => $code] + $item;
     }
 
     /** AI 与报表共享这一份能力声明；注册不等于绕过报表数据权限。 */
@@ -137,6 +183,10 @@ final class MetricDefinitionRegistry
                 'query_shapes' => $item['query_shapes'], 'coverage_start' => self::COVERAGE_START,
                 'filter_grain' => $item['filter_grain'], 'business_filters' => $item['business_filters'],
                 'storage_unit' => $item['storage_unit'],
+                // 可分析对象由指标维度声明派生；Skill 不能自行把任意对象变成
+                // 可执行查询。
+                'analysis_dimensions' => self::analysisDimensions($item),
+                'analysis_dimension_contracts' => self::analysisDimensionContracts($item),
                 'derivation' => $item['derivation'] ?? null,
                 'readiness_reasons' => $aiReady ? [] : ['AI_STORAGE_UNIT_UNSUPPORTED'],
             ];
@@ -161,5 +211,53 @@ final class MetricDefinitionRegistry
             'query_shapes' => $shapes, 'source' => $source, 'filter_grain' => $grain,
             'business_filters' => $filters, 'storage_unit' => $unit,
         ];
+    }
+
+    /** @param array<string,mixed> $item @return array<int,string> */
+    private static function analysisDimensions(array $item): array
+    {
+        $dimensions = array_values(array_unique(array_merge(['store'], array_keys((array)($item['dimensions'] ?? ($item['source']['dimensions'] ?? []))))));
+        sort($dimensions, SORT_STRING);
+        return $dimensions;
+    }
+
+    /**
+     * Explicit opt-in contracts for dimensions that may be exposed as an
+     * analysis object.  This is deliberately stricter than `dimensions`: a
+     * source column alone is not an AI capability or a permission grant.
+     *
+     * @return array<int,array{dimension:string,object_kind:string,object_label:string,relation_role:string,action_codes:array<int,string>,filter_keys:array<int,string>}>
+     */
+    private static function analysisDimensionContracts(array $item): array
+    {
+        $dimensions=(array)($item['dimensions'] ?? ($item['source']['dimensions'] ?? []));
+        $out=[];
+        foreach ($dimensions as $dimension=>$contract) {
+            if (!is_array($contract) || !isset($contract['analysis_object_kind'])) continue;
+            $kind=$contract['analysis_object_kind']; $label=$contract['analysis_object_label']??null;
+            $role=$contract['analysis_relation_role']??null;
+            $actions=$contract['analysis_action_codes']??null;$filterKeys=$contract['analysis_filter_keys']??[];
+            if (!is_string($dimension) || !preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$dimension)
+                || !is_string($kind) || !preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$kind)
+                || !is_string($label) || trim($label)==='' || !is_string($role)
+                || !preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$role)
+                || !is_array($actions) || $actions===[] || count($actions)>8 || !is_array($filterKeys) || count($filterKeys)>8) {
+                throw new MetricQueryContractException('METRIC_DIMENSION_CONTRACT_INVALID', '指标对象维度合同无效。');
+            }
+            $actions=array_values(array_unique($actions));
+            foreach ($actions as $action) if (!is_string($action) || !preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$action)) {
+                throw new MetricQueryContractException('METRIC_DIMENSION_CONTRACT_INVALID', '指标对象维度合同无效。');
+            }
+            $filterKeys=array_values(array_unique($filterKeys));
+            foreach ($filterKeys as $key) if (!is_string($key) || !preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$key)) {
+                throw new MetricQueryContractException('METRIC_DIMENSION_CONTRACT_INVALID', '指标对象维度合同无效。');
+            }
+            sort($actions, SORT_STRING);
+            sort($filterKeys, SORT_STRING);
+            $out[]=['dimension'=>$dimension,'object_kind'=>$kind,'object_label'=>$label,
+                'relation_role'=>$role,'action_codes'=>$actions,'filter_keys'=>$filterKeys];
+        }
+        usort($out,static function(array $left,array $right): int { return [$left['object_kind'],$left['dimension']] <=> [$right['object_kind'],$right['dimension']]; });
+        return $out;
     }
 }

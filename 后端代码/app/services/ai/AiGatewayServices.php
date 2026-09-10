@@ -189,7 +189,11 @@ final class AiGatewayServices
                     $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
                     $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
                     $compiled=(new \app\services\ai\execution\AiFollowupQueryPlanner())->compile($view['current']['verified_source_query'],$body['question'],$names,$body['output_format'],$today);
-                } elseif (AiConfigStore::allowsSanitizedQuestion($configuration) && in_array($view['current']['blocking_reason']??null,['AI_INTENT_UNRESOLVED','AI_CAPABILITY_NOT_READY'],true)) {
+                // The safe model is the one natural-language interpretation
+                // path.  Local parsing supplies privacy boundaries and known
+                // dates/metrics, never a list of phrases that define result
+                // shapes such as a ranking or comparison.
+                } elseif (AiConfigStore::allowsSanitizedQuestion($configuration)) {
                     $compiled=$this->understandAnalysis($context,$owner,$id,$generation,$worker,$body,$view['current'],$configuration);
                 } else {
                 // Unknown meaningful constraints are retained as blockers, never deleted to force a match.
@@ -453,7 +457,8 @@ final class AiGatewayServices
     private function advanceGuidance(array $stored,string $ref,array $input): array
     {
         $planner=isset($stored['envelope']['analysis_state'])?new \app\services\ai\execution\AiAnalysisGuidancePlanner()
-            :(isset($stored['envelope']['skill_state'])?new \app\services\ai\execution\AiSkillGuidancePlanner():new AiWorkflowPlanner()); $choices=$input['choices']??null;
+            :(isset($stored['envelope']['dimension_state'])?new \app\services\ai\execution\AiDimensionGuidancePlanner()
+            :(isset($stored['envelope']['skill_state'])?new \app\services\ai\execution\AiSkillGuidancePlanner():new AiWorkflowPlanner())); $choices=$input['choices']??null;
         if (!is_array($choices)) throw new RuntimeException('AI_CLARIFICATION_INVALID');
         $steps=$stored['accepted_steps']??[];
         if (!isset($input['revise_clarification_id'])) {
@@ -482,11 +487,23 @@ final class AiGatewayServices
 
     private function understandAnalysis(array $context,array $owner,string $id,int $generation,string $worker,array $body,array $projection,array $configuration): array
     {
-        $caps=$this->capabilities($this->fresh($context));$runtimeSkill=$this->registry()->modelSkill('store_operations');$dictionary=new \app\services\metric\MetricDictionaryServices();$summaries=[];
+        // Semantic object analysis must retain the same explicit-store guard
+        // as ordinary metric questions before calling a model or querying data.
+        if (in_array('current_store',$projection['signals']??[],true)
+            && !($context['terminal']==='store' && count($context['store_ids'])===1)) throw new RuntimeException('AI_UNSUPPORTED_CONDITION');
+        $caps=$this->capabilities($this->fresh($context));$runtimeSkills=$this->registry()->modelSkills('store_operations');$runtimeSkill=$runtimeSkills['business'];$dictionary=new \app\services\metric\MetricDictionaryServices();$summaries=[];
         foreach ($caps['metric_codes'] as $code) {
             $tooltip=$dictionary->getTooltip($code);if (($tooltip['user_ready']??false)!==true) continue;
-            $kind=$caps['metric_readiness'][$code]['filter_grain'];
-            $summaries[]=['metric_code'=>$code,'name'=>$tooltip['name'],'summary'=>$tooltip['summary'],'object_kind'=>$kind];
+            $contract=$caps['metric_readiness'][$code];$objectContracts=[];
+            $baseKind=$contract['filter_grain'];$objectContracts[$baseKind]=[];
+            foreach ((array)($contract['analysis_dimension_contracts']??[]) as $dimension) {
+                if (!is_array($dimension) || !is_string($dimension['object_kind']??null) || !is_array($dimension['action_codes']??null)) continue;
+                $kind=$dimension['object_kind'];
+                foreach ($dimension['action_codes'] as $action) if (is_string($action)) $objectContracts[$kind][$action]=true;
+            }
+            $objects=[];
+            foreach($objectContracts as $kind=>$actions){$actions=array_keys($actions);sort($actions);$objects[]=['object_kind'=>$kind,'action_codes'=>$actions];}
+            $summaries[]=['metric_code'=>$code,'name'=>$tooltip['name'],'summary'=>$tooltip['summary'],'object_contracts'=>$objects];
         }
         // The prompt-facing candidates and the later controlled choices are both
         // projected from the same registered provider contracts.  A dictionary
@@ -498,7 +515,7 @@ final class AiGatewayServices
             if ($current['version']!==$configuration['version'] || !AiConfigStore::allowsSanitizedQuestion($current)
                 || $this->permissionHash($this->fresh($context))!==$this->permissionHash($context)) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
         };
-        $localCatalogs=[];$privateLabels=[];
+        $localCatalogs=[];$privateLabels=[];$privateKinds=[];$privateKindsByReference=[];
         if ($personMetrics) {
             // Pre-plan metadata discovery is a bounded, server-owned catalog read,
             // not a model-authored business query or an extra executable workflow.
@@ -511,70 +528,99 @@ final class AiGatewayServices
                 });
                 $checkpoint();$this->runs->finishAttempt($owner,$id,$generation,$worker,'analysis_objects','SUCCEEDED');
             } catch (\Throwable $error) {$this->runs->finishAttempt($owner,$id,$generation,$worker,'analysis_objects','FAILED');throw $error;}
-            foreach($localCatalogs as $catalog) foreach($catalog['objects'] as $object) if ($object['kind']==='person') $privateLabels[]=$object['label'];
+            foreach($localCatalogs as $catalog) foreach($catalog['objects'] as $object) {
+                if (!in_array($object['kind'],['person','position'],true)) continue;
+                $privateLabels[]=$object['label'];$privateKinds[$object['label']][$object['kind']]=true;
+            }
         }
-        $safe=(new \app\services\ai\model\AiSafeQuestionProjector())->project($body['question'],$configuration,array_values(array_unique($privateLabels)),$runtimeSkill['semantic_projection']);
+        $safe=(new \app\services\ai\model\AiSafeQuestionProjector())->project($body['question'],$configuration,array_values(array_unique($privateLabels)));
         foreach ($safe['local_conditions'] as $reference=>$value) {
             if (in_array($value,$projection['dates']??[],true)) {
                 $safe['outbound']['question']=str_replace('['.$reference.']','指定期间',$safe['outbound']['question']);
                 unset($safe['local_conditions'][$reference]);
             } elseif(in_array($value,$privateLabels,true)) {
-                $safe['outbound']['question']=str_replace('['.$reference.']','人员 ['.$reference.']',$safe['outbound']['question']);
+                $kinds=$privateKinds[$value]??[];$descriptor=isset($kinds['position'])&&!isset($kinds['person'])?'岗位':'人员';
+                $privateKindsByReference[$reference]=$descriptor==='岗位'?'position':'person';
+                $safe['outbound']['question']=str_replace('['.$reference.']',$descriptor.' ['.$reference.']',$safe['outbound']['question']);
             }
         }
         $safe['outbound']['has_unresolved_conditions']=(bool)$safe['local_conditions'];
+        $resolved=[];
+        if (!empty($projection['dates']) || !empty($projection['date_terms'])) $resolved[]='period';
+        if (in_array('current_store',$projection['signals']??[],true)) $resolved[]='current_store_scope';
+        $safe['outbound']['server_resolved_fields']=$resolved;
         $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
-        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$safe['outbound'],$summaries,$runtimeSkill]))+2048));
+        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$safe['outbound'],$summaries,$runtimeSkills]))+2048));
         $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
         $this->runs->prepareAttempt($owner,$id,$generation,$worker,'understand','model',hash('sha256',json_encode([$safe['outbound'],$summaries])),'siliconflow');
         $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand');
         try {
             $checkpoint();
             $reply=$this->model?call_user_func($this->model,$safe['outbound'],$summaries,$configuration,$checkpoint)
-                :(new SiliconFlowClient())->understand($safe['outbound'],$summaries,$configuration['model'],$configuration['api_key'],20000,$checkpoint,$runtimeSkill);
+                :(new SiliconFlowClient())->understand($safe['outbound'],$summaries,$configuration['model'],$configuration['api_key'],20000,$checkpoint,$runtimeSkills);
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
         } catch (\Throwable $error) {
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand',in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');throw $error;
         }
-        $checkpoint();$intent=$reply['intent'];$term=$intent['object_term'];
+        $checkpoint();$intent=$this->semanticIntent($reply['intent']??null,$runtimeSkill['semantic_projection'],$safe['outbound']['question']);$term=$intent['object_term'];
+        if ($intent['unresolved_fragments']) throw new RuntimeException('AI_INTENT_UNRESOLVED');
+        if ($intent['operation']==='unknown') throw new RuntimeException('AI_INTENT_UNRESOLVED');
         $localTerm=null;
         if (preg_match('/^\[(local_condition_[0-9]+)\]$/D',$term,$match)) {
             $localTerm=$safe['local_conditions'][$match[1]]??null;unset($safe['local_conditions'][$match[1]]);$term=$localTerm??'';
         }
         // All remaining opaque conditions are meaningful. Never query a reduced request.
-        if ($safe['local_conditions']) throw new RuntimeException('AI_LOCAL_CONDITION_REQUIRED');
-        // The model contributes intent understanding, but a recognized public
-        // object is source-bound by the published Skill.  A missing query
-        // contract gets a bounded guide; it can never fall through to a broad
-        // store query or a similarly named registered metric.
-        $recognized=array_values(array_filter($safe['recognized_terms'],static function(array $term):bool {
-            return ($term['kind']??null)==='object' && in_array($term['code']??'',['project','product','category','partner','member','inventory'],true);
-        }));
-        if ($recognized) return (new \app\services\ai\execution\AiSkillGuidancePlanner())->start($runtimeSkill['semantic_projection'],$recognized);
+        if ($safe['local_conditions']) {
+            \app\services\ai\execution\AiSemanticObjectContractRegistry::requireGatewayRule($runtimeSkill['semantic_projection'],'unknown_term','RESOLVE_OR_STOP');
+            throw new RuntimeException('AI_LOCAL_CONDITION_REQUIRED');
+        }
+        // Object readiness comes only from the source-owned contract registry.
+        // A Skill may recognize a subject but cannot make it executable by name.
+        $modelTerms=[];
+        if (!in_array($intent['object_kind'],['unknown'],true)) $modelTerms[]=['kind'=>'object','code'=>$intent['object_kind'],'label'=>$intent['object_term'],'text'=>$intent['object_term']];
+        $missing=\app\services\ai\execution\AiSemanticObjectContractRegistry::missingObjects($runtimeSkill['semantic_projection'],$modelTerms,$caps);
+        if ($missing) return (new \app\services\ai\execution\AiSkillGuidancePlanner())->start($runtimeSkill['semantic_projection'],$missing);
+        if (($intent['object_kind']??null)==='position' || ($localTerm!==null && (($privateKindsByReference[$match[1]??'']??null)==='position'))) $intent['object_kind']='person';
         $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
         $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
+        // The model Skill identifies the semantic subject from the complete
+        // sentence. Local aliases are used for privacy/catalog projection only;
+        // they must not override the subject merely because a short word also
+        // appears inside a scope phrase such as “本店”.
+        $recognizedObject=!in_array($intent['object_kind'],['store','person','position','unknown'],true);
         $constraintTypes=array_column($projection['semantic_intent']['constraints']??[],'type');
+        if ($recognizedObject) {
+            $projection['blocking_reason']=null; $projection['unresolved_condition']=false;
+            $projection['semantic_intent']['constraints']=[];
+        }
         if ($intent['object_kind']==='unknown' && in_array('person_filter',$constraintTypes,true)) $intent['object_kind']='person';
+        // Any registered object dimension follows the same controlled path.
+        // Object labels come from the runtime Skill; metrics and dimensions
+        // come from the lower-layer registry.  No report page/object switch is
+        // permitted here.
+        if (!in_array($intent['object_kind'],['person','store','unknown'],true)) {
+            $dimensionMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,$intent['object_kind'],'ranking');
+            if ($localTerm!==null || !$dimensionMetrics) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            if ($intent['operation']!=='ranking') throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            return (new \app\services\ai\execution\AiDimensionGuidancePlanner())->start(
+                $intent['object_kind'],$intent,$projection,$dimensionMetrics,$body['output_format'],$today
+            );
+        }
         if ($intent['object_kind']==='person') {
-            $remaining=(new AiModelInputProjector())->project(\app\services\query\metric\MetricSemanticCatalog::stripTerms($body['question'],array_keys($personMetrics)));
-            foreach ($remaining['semantic_intent']['constraints']??[] as $constraint) {
-                if (!in_array($constraint['type'],['person_filter','unparsed_business_condition'],true)) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
-            }
-            if (array_intersect($projection['signals'],['definition','comparison','trend'])) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
             if (!$personMetrics) throw new RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
             // Resolve against a common authorized object catalog. Before selecting a
             // different metric, execution independently rechecks its own report grant.
             $explicitRegistered=array_values(array_intersect($projection['signals'],array_keys(\app\services\query\metric\MetricSemanticCatalog::entries())));
             $explicitMetrics=array_values(array_intersect($explicitRegistered,array_keys($personMetrics)));
-            if ($explicitRegistered && !$explicitMetrics) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            if (array_diff($explicitRegistered,array_keys($personMetrics))) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
             if(count($explicitMetrics)>1) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            if (!$explicitRegistered && count($intent['metric_codes'])>1) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
             // An unambiguous dictionary hit is a stronger contract than a model
             // guess. The model may discover the object, but cannot replace an
             // explicitly named registered metric.
             $metric=$explicitMetrics[0]??($intent['metric_codes'][0]??null);
             if ($metric!==null && !isset($personMetrics[$metric])) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
             $intent['metric_codes']=$metric===null?[]:[$metric];
-            if ($intent['operation']==='unknown') $intent['operation']=preg_match('/最好|最差|最高|最低|是谁|哪一位|哪个人/u',$body['question'])?'ranking':'summary';
             $catalog=$localCatalogs[$metric??array_key_first($personMetrics)];
             $objectCatalog=new \app\services\query\metric\AnalysisObjectCatalog($catalog['objects'],static function(){return true;});
             $named=$objectCatalog->resolve($term,'person',$metric);
@@ -582,23 +628,50 @@ final class AiGatewayServices
             // replaced with someone else. Otherwise resolve actual position metadata.
             $exactPeople=array_values(array_filter($catalog['objects'],static function($o)use($term){return $o['kind']==='person' && $o['label']===$term;}));
             $objects=$exactPeople?$named:$objectCatalog->resolve($term,'position',$metric);
-            // Only explicitly requested criteria can skip the metric question.
-            if (preg_match('/最好|最差|最高|最低/u',$body['question']) && !$explicitMetrics) $intent['needs_metric_choice']=true;
-            $projection['analysis_singular_person']=(bool)preg_match('/是谁|哪一位|哪个人/u',$body['question']);
             return (new \app\services\ai\execution\AiAnalysisGuidancePlanner())->start($intent,$projection,$personMetrics,$objects,$body['output_format'],$today);
         }
         // No staff/customer/object restriction may become an unfiltered store query.
-        if ($localTerm!==null || !in_array($intent['object_kind'],['store','unknown'],true) || !in_array($intent['object_term'],['','门店'],true)
-            || ($projection['semantic_intent']['constraints']??[])!==[['type'=>'unparsed_business_condition','status'=>'unresolved']]) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+        if ($localTerm!==null || !in_array($intent['object_kind'],['store','unknown'],true)) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
         $explicit=array_values(array_intersect($projection['signals'],array_keys(\app\services\query\metric\MetricSemanticCatalog::entries())));
         $selected=$intent['metric_codes'];sort($explicit);sort($selected);
         if ($explicit && $explicit!==$selected) throw new RuntimeException('AI_MODEL_SELECTION_MISMATCH');
-        foreach(['trend','comparison','definition','ranking'] as $shape) if(in_array($shape,$projection['signals'],true) && $shape!==$intent['operation']) throw new RuntimeException('AI_MODEL_SELECTION_MISMATCH');
+        $projection['signals']=array_values(array_diff($projection['signals'],['summary','trend','ranking','comparison','definition','rank_top','rank_bottom','top_5','bottom_5','ambiguous_metric']));
         $projection['signals']=array_values(array_unique(array_merge($projection['signals'],$intent['metric_codes'],[$intent['operation']])));
         if ($intent['needs_metric_choice']) $projection['signals'][]='ambiguous_metric';
-        $projection['blocking_reason']=null;$projection['unresolved_condition']=false;
+        $projection['blocking_reason']=null;$projection['unresolved_condition']=false;$projection['semantic_intent']['constraints']=[];
         $caps['current_store_bound']=$context['terminal']==='store' && count($context['store_ids'])===1;
-        return (new AiWorkflowPlanner())->compile($projection,['decision'=>'query','query_shape'=>$intent['operation'],'metric_codes'=>$intent['metric_codes']],$caps,$body['output_format'],$today);
+        return (new AiWorkflowPlanner())->compile($projection,['decision'=>'query','query_shape'=>$intent['operation'],'metric_codes'=>$intent['metric_codes'],'ranking'=>$intent['ranking']],$caps,$body['output_format'],$today);
+    }
+
+    /**
+     * The vendor (or an injected test adapter) may recognize natural language,
+     * but it only returns a bounded, declarative result shape.  This server
+     * boundary deliberately does not interpret individual Chinese phrases.
+     */
+    private function semanticIntent($intent,array $semanticProjection,string $safeQuestion): array
+    {
+        if (!is_array($intent)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        $keys=array_keys($intent); sort($keys);
+        if ($keys!==['action_codes','metric_codes','needs_metric_choice','object_kind','object_term','operation','ranking','unresolved_fragments']
+            || !is_bool($intent['needs_metric_choice']) || !is_string($intent['object_term'])
+            || !in_array($intent['object_kind'],['store','person','position','member','product','project','category','partner','inventory','course','organization','unknown'],true)
+            || !in_array($intent['operation'],['summary','trend','ranking','comparison','definition','unknown'],true)
+            || !is_array($intent['metric_codes']) || count($intent['metric_codes'])>8 || !is_array($intent['action_codes']) || count($intent['action_codes'])>8
+            || !is_array($intent['unresolved_fragments']) || count($intent['unresolved_fragments'])>8
+            || !is_array($intent['ranking']) || array_keys($intent['ranking'])!==['direction','limit']
+            || !in_array($intent['ranking']['direction']??null,['top','bottom','top_and_bottom','unspecified'],true)
+            || (!is_null($intent['ranking']['limit']??null) && (!is_int($intent['ranking']['limit']) || $intent['ranking']['limit']<1 || $intent['ranking']['limit']>999))) {
+            throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        }
+        foreach ($intent['metric_codes'] as $code) if (!is_string($code) || !preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$code)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        $allowedActions=[];foreach(($semanticProjection['actions']??[]) as $action) if(is_string($action['code']??null))$allowedActions[]=$action['code'];
+        foreach ($intent['action_codes'] as $code) if(!is_string($code)||!in_array($code,$allowedActions,true)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        if ($intent['object_term']!=='' && mb_strpos($safeQuestion,$intent['object_term'],0,'UTF-8')===false) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        foreach ($intent['unresolved_fragments'] as $fragment) if(!is_string($fragment)||$fragment===''||mb_strlen($fragment,'UTF-8')>160
+            || mb_strpos($safeQuestion,$fragment,0,'UTF-8')===false) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        if (count(array_unique($intent['metric_codes']))!==count($intent['metric_codes']) || count(array_unique($intent['action_codes']))!==count($intent['action_codes'])
+            || count(array_unique($intent['unresolved_fragments']))!==count($intent['unresolved_fragments'])) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        return $intent;
     }
 
     /** Registry selects the frozen graph; the gateway supplies only trusted infrastructure adapters. */
@@ -848,7 +921,7 @@ final class AiGatewayServices
                 continue;
             }
             if ($shape==='ranking') {
-                foreach ($row['rows'] as $direction=>$points) foreach ($points as $index=>$point) $rows[]=['label'=>$point['employee_name']??($point['store_name']??('门店 ID '.$point['store_id'])),
+                foreach ($row['rows'] as $direction=>$points) foreach ($points as $index=>$point) $rows[]=['label'=>$point['employee_name']??($point['member_name']??($point['entity_name']??($point['store_name']??('门店 ID '.$point['store_id'])))),
                     'metric'=>$tooltip['name'],'rank'=>($direction==='top'?'前':'后').($index+1),'value'=>$this->metricValue($point['amount_cents'],$storageUnit),'unit'=>$unit];
                 continue;
             }
@@ -859,16 +932,31 @@ final class AiGatewayServices
                 'start_date'=>$range['start'],'end_date'=>$range['end'],'data_as_of'=>$view['data_as_of']];
         }
         $answer=['summary'=>'已按您当前报表的数据范围查询。统计时间：'.$view['query']['start_date'].' 至 '.$view['query']['end_date'].'。','cards'=>$cards];
-        $person=($view['query']['business_filters']['object_kind']??null)==='person';
+        $objectKind=$view['query']['business_filters']['object_kind']??'store';
+        $person=$objectKind==='person'; $member=$objectKind==='member';
+        $dimensionLabel=null;
+        if (!$person && !$member && $shape==='ranking') foreach ($view['results'] as $result) {
+            if (($result['object_kind']??null)===$objectKind && is_string($result['object_label']??null)) { $dimensionLabel=$result['object_label']; break; }
+        }
         if ($person) {
             $answer['summary'].=' 人员范围：'.$view['personnel_selection_label'].'（按当前任职筛选）。';
             $criteria=[];foreach($view['query']['metric_codes'] as $code)$criteria[]=$dictionary->getTooltip($code)['name'];
             $answer['summary'].=' 评价指标：'.implode('、',$criteria).'。';
             if ($shape==='ranking') $answer['summary'].=$rows?'仅按所选指标排序，不代表综合评价；相同金额按稳定人员顺序展示。':'本期间没有符合条件的人员业绩事实，不能据此评定谁表现最好。';
         }
+        if ($member) {
+            $criteria=[];foreach($view['query']['metric_codes'] as $code)$criteria[]=$dictionary->getTooltip($code)['name'];
+            $answer['summary'].=' 会员评价指标：'.implode('、',$criteria).'。';
+            if ($shape==='ranking') $answer['summary'].=$rows?'仅按所选指标排序；相同数值按稳定会员顺序展示。':'本期间没有符合条件的会员数据。';
+        }
+        if ($dimensionLabel!==null) {
+            $criteria=[];foreach($view['query']['metric_codes'] as $code)$criteria[]=$dictionary->getTooltip($code)['name'];
+            $answer['summary'].=$dimensionLabel.'评价指标：'.implode('、',$criteria).'。';
+            if ($shape==='ranking') $answer['summary'].=$rows?'仅按所选指标排序；相同数值按稳定'.$dimensionLabel.'顺序展示。':'本期间没有符合条件的'.$dimensionLabel.'数据。';
+        }
         if ($view['query']['compare_range']) $answer['summary'].='对比时间：'.$view['query']['compare_range']['start'].' 至 '.$view['query']['compare_range']['end'].'。';
         if ($rows) {
-            $columns=[['key'=>'label','label'=>$shape==='trend'?'日期':($person?'人员':'门店')],['key'=>'metric','label'=>'指标'],['key'=>'value','label'=>'数值'],['key'=>'unit','label'=>'单位']];
+            $columns=[['key'=>'label','label'=>$shape==='trend'?'日期':($person?'人员':($member?'会员':($dimensionLabel??'门店')))],['key'=>'metric','label'=>'指标'],['key'=>'value','label'=>'数值'],['key'=>'unit','label'=>'单位']];
             if ($shape==='ranking') $columns[]=['key'=>'rank','label'=>'名次'];
             $answer['table']=['columns'=>$columns,'rows'=>$rows];
         }
@@ -904,11 +992,13 @@ final class AiGatewayServices
             'AI_MEMBER_OBJECT_NOT_READY'=>'会员对象尚未接入隐私权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他对象。',
             'AI_INVENTORY_OBJECT_NOT_READY'=>'库存与耗用对象尚未接入门店权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他指标。',
             'AI_OBJECT_CONTRACT_NOT_READY'=>'当前分析对象尚未接入对象解析、权限、筛选、统一查询与证据合同；未查询或替换条件。',
+            'AI_DIMENSION_ACTION_CONTRACT_NOT_READY'=>'当前分析对象的这项评价方式尚未接入统一查询合同；未改用其他指标或删减条件。',
             'AI_INTENT_UNRESOLVED'=>'还不能准确确定您的完整需求。请明确想了解什么、涉及对象和时间；本次未删减条件或查询数据。',
             'AI_CAPABILITY_NOT_READY'=>'已识别您的需求，但对应的数据能力或筛选组合尚未接入，暂不能准确提供结果。',
             'AI_CONTEXT_REQUIRED'=>'本次缺少可验证的前文条件，请明确要查询的指标和时间。',
             'AI_FOLLOWUP_CONDITION_REQUIRED'=>'已找到上次查询，但本次修改的条件还不能准确确认。请明确要修改的指标、时间或人员范围；未删减您的条件。',
             'AI_RANK_LIMIT_NOT_READY'=>'当前支持门店前五、后五排行，暂不支持您要求的数量；本次未更改您的条件。',
+            'AI_DIMENSION_RANK_LIMIT_NOT_READY'=>'当前分析对象最多支持前20、后20排行，暂不支持您要求的数量；本次未更改您的条件。',
             'AI_FUTURE_ACTUALS_UNAVAILABLE'=>'未来日期尚未发生实际业绩，暂不能提供该日期的实际数据，也未替换成今天或预测值。',
             'AI_DATA_COVERAGE_INCOMPLETE'=>'您要求的完整期间尚未全部通过数据核验，本次未缩短日期范围，请选择其他期间。',
             'AI_DATE_INVALID'=>'日期范围不完整或无效，请重新选择开始和结束日期。',

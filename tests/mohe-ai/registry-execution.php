@@ -21,7 +21,7 @@ function registryReject(callable $operation,string $reason):void
 }
 function registryCapabilities():array
 {
-    return ['metric_codes'=>['cash_performance','consume_amount'],'query_shapes'=>['summary','trend','ranking','comparison'],
+    return ['metric_codes'=>['cash_performance','consume_amount','completed_service_item_count'],'query_shapes'=>['summary','trend','ranking','comparison'],
         'output_formats'=>['screen','screen_and_xlsx'],'metric_readiness'=>MetricReadViewServices::metricCapabilities(),
         'definition_metric_codes'=>['cash_performance'],'metadata_readiness'=>[
             'cash_performance'=>['user_ready'=>true,'metric_version'=>'fixture-confirmed-dictionary-v2','description_ref'=>'fixture:cash-description:v2']]];
@@ -64,7 +64,7 @@ function registryHandlers(array &$seen):array
 try {
     $registry=new AiBusinessRegistry(); $compiler=new AiRegisteredPlanCompiler($registry); $cap=registryCapabilities();
     $snapshot=$registry->snapshot($cap);
-    registryCheck(count($snapshot['metrics'])===2&&!isset($snapshot['metrics']['actual_performance']),'only approved metric contracts, no actual formula invented');
+    registryCheck(count($snapshot['metrics'])===3&&!isset($snapshot['metrics']['actual_performance']),'only approved metric contracts, no actual formula invented');
     $reordered=array_reverse($cap,true); $reordered['metric_codes']=array_reverse($cap['metric_codes']);
     $reordered['query_shapes']=array_reverse($cap['query_shapes']); $reordered['metric_readiness']=array_reverse($cap['metric_readiness'],true);
     registryCheck($registry->snapshot($reordered)===$snapshot,'capability fingerprint independent of set/key order');
@@ -105,7 +105,19 @@ try {
     }
     $compiled=$compiler->compile(registryPlan(),$cap);
     registryCheck($compiled['dependency_versions']['tool']===['unified_metric_query'=>1],'complete tool dependency version frozen');
-    registryCheck($compiled['dependency_versions']['skill']===['skill_store_operations'=>3],'business Skill has explicit immutable id and version');
+    registryCheck($compiled['dependency_versions']['skill']===['skill_store_operations'=>12],'business Skill has explicit immutable id and version');
+    $memberPlan=registryPlan('ranking');
+    $memberPlan['query']['metric_codes']=['cash_performance'];
+    $memberPlan['query']['business_filters']=['object_kind'=>'member'];
+    $memberPlan['query']['ranking']=['direction'=>'top','limit'=>5];
+    $memberCompiled=$compiler->compile($memberPlan,$cap); $compiler->assertCompiled($memberCompiled);
+    registryCheck($memberCompiled['query']['business_filters']===['object_kind'=>'member']&&$memberCompiled['query']['ranking']['limit']===5,'registered member dimension compiles only through the frozen metric contract');
+    $projectPlan=registryPlan('ranking');
+    $projectPlan['query']['metric_codes']=['completed_service_item_count'];
+    $projectPlan['query']['business_filters']=['object_kind'=>'project'];
+    $projectPlan['query']['ranking']=['direction'=>'top','limit'=>5];
+    $projectCompiled=$compiler->compile($projectPlan,$cap); $compiler->assertCompiled($projectCompiled);
+    registryCheck($projectCompiled['query']['business_filters']===['object_kind'=>'project'],'registered project dimension compiles without a compiler object-name branch');
     registryCheck($compiled['dependency_versions']['skill_source']===['skill_store_operations'=>$skill['source_hash']],'compiled plan freezes the exact SKILL.md source');
     $metadataPlan=['query_shape'=>'definition','definition_metric_codes'=>['cash_performance'],'output_format'=>'screen'];
     $definition=$compiler->compile($metadataPlan,$cap); $compiler->assertCompiled($definition);

@@ -39,6 +39,18 @@ final class GroupPerformanceMetricReadServices
         return $this->registered->personnelTotals($metricCode, $tenantId, $stores, $range, $pairs);
     }
 
+    /**
+     * Keeps the immutable read transaction on the same registry-owned reader
+     * when a registered object dimension (member, operator, project, …) is
+     * requested. The facade owns no metric mapping of its own.
+     *
+     * @return array<int,array{entity_id:int,entity_name:string,metric_value:int}>
+     */
+    public function dimensionRanking(string $metricCode, string $dimension, string $tenantId, array $stores, array $range, int $limit = 20, string $order = 'desc'): array
+    {
+        return $this->registered->dimensionRanking($metricCode, $dimension, $tenantId, $stores, $range, $limit, $order);
+    }
+
     public function storeNames(array $stores): array
     {
         return $this->registered->storeNames($stores);

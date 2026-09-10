@@ -29,7 +29,7 @@ final class AiSemanticVocabulary
             'summary'=>'/汇总|合计|总额/u',
             'ranking'=>'/排行|排名|哪几家店|哪些门店/u',
             'attention_goal'=>'/需要关注|值得关注|经营健康|健康/u',
-            'rank_top'=>'/最高|最好|从高到低/u',
+            'rank_top'=>'/最高|最好|最强|最多|从高到低/u',
             'rank_bottom'=>'/最低|最差|倒数|从低到高/u',
             'current_store'=>'/本店|店里/u',
             'xlsx'=>'/Excel|excel|EXCEL|表格/u',

@@ -1158,12 +1158,26 @@ final class RegisteredMetricReadServices
 
     private function cashDimensionRanking(string $tenantId, array $stores, array $range, string $mode, array $dimension, int $limit, string $order): array
     {
-        if (($dimension['id'] ?? null) !== 'operator_id' || ($dimension['name'] ?? null) !== 'operator_name_snapshot') {
-            $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-        }
+        // Dimensions are selected only from the registered contract. Sale
+        // allocations and recharge payments retain their snapshots differently.
+        $dimensionKey = (string)($dimension['id'] ?? '') . '|' . (string)($dimension['name'] ?? '');
+        $sources = [
+            'operator_id|operator_name_snapshot' => [
+                'sale' => ['join' => 'payment', 'id' => 'payment.operator_id', 'name' => 'payment.operator_name_snapshot'],
+                'recharge' => ['id' => 'p.operator_id', 'name' => 'p.operator_name_snapshot'],
+            ],
+            'member_id|member_name_snapshot' => [
+                // The allocation is a payment allocation, while membership is
+                // authoritative on its referenced sale fact. Do not require an
+                // accidental duplicate member id on the allocation row.
+                'sale' => ['id' => 's.member_id', 'name' => 's.member_name_snapshot'],
+                'recharge' => ['id' => 'p.member_id', 'name' => 'p.member_name_snapshot'],
+            ],
+        ];
+        if (!isset($sources[$dimensionKey])) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $expression = $this->cashExpression($mode);
-        $sale = $this->cashDimensionRows($this->saleCashQuery($tenantId, $stores, $range), $expression, 'payment');
-        $recharge = $this->cashDimensionRows($this->rechargeCashQuery($tenantId, $stores, $range), $expression, 'p');
+        $sale = $this->cashDimensionRows($this->saleCashQuery($tenantId, $stores, $range), $expression, $sources[$dimensionKey]['sale']);
+        $recharge = $this->cashDimensionRows($this->rechargeCashQuery($tenantId, $stores, $range), $expression, $sources[$dimensionKey]['recharge']);
         $merged = [];
         foreach (array_merge($sale, $recharge) as $row) {
             $id = $this->integer($row['entity_id'] ?? null);
@@ -1183,14 +1197,18 @@ final class RegisteredMetricReadServices
         return array_slice($rows, 0, $limit);
     }
 
-    private function cashDimensionRows($query, string $expression, string $alias): array
+    private function cashDimensionRows($query, string $expression, array $fields): array
     {
-        if ($alias === 'payment') {
+        if (($fields['join'] ?? null) === 'payment') {
             $query->join('cashier_v3_payment_fact payment', 'payment.tenant_id=p.tenant_id AND payment.fact_id=p.payment_fact_id');
         }
-        return $query->where($alias . '.operator_id', '>', 0)
-            ->fieldRaw($alias . '.operator_id entity_id,MAX(' . $alias . '.operator_name_snapshot) entity_name,COALESCE(SUM(' . $expression . '),0) metric_value')
-            ->group($alias . '.operator_id')->select()->toArray();
+        $id = $fields['id'] ?? null; $name = $fields['name'] ?? null;
+        if (!is_string($id) || !is_string($name) || !preg_match('/^[a-z_]+\.[a-z_]+$/D', $id) || !preg_match('/^[a-z_]+\.[a-z_]+$/D', $name)) {
+            $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        }
+        return $query->where($id, '>', 0)
+            ->fieldRaw($id . ' entity_id,MAX(' . $name . ') entity_name,COALESCE(SUM(' . $expression . '),0) metric_value')
+            ->group($id)->select()->toArray();
     }
 
     private function cashExpression(string $mode): string

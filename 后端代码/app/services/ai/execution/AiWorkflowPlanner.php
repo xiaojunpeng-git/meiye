@@ -76,8 +76,16 @@ final class AiWorkflowPlanner
         }
         }
         $ranking=null;
+        if ($shape==='ranking' && isset($selection['ranking'])) {
+            $candidate=$selection['ranking'];
+            if (!is_array($candidate) || array_keys($candidate)!==['direction','limit']
+                || !in_array($candidate['direction']??null,['top','bottom','top_and_bottom','unspecified'],true)
+                || (!is_null($candidate['limit']??null) && !is_int($candidate['limit']))) throw new AiContractException('AI_MODEL_RESPONSE_INVALID');
+            $ranking=['direction'=>$candidate['direction']==='unspecified'?null:$candidate['direction'],'limit'=>$candidate['limit']];
+            if ($ranking['limit']!==null && $ranking['limit']!==5) throw new AiContractException('AI_RANK_LIMIT_NOT_READY');
+        }
         if ($shape==='ranking' && (in_array('top_5',$signals,true)||in_array('bottom_5',$signals,true))) {
-            $ranking=['direction'=>in_array('top_5',$signals,true)?(in_array('bottom_5',$signals,true)?'top_and_bottom':'top'):'bottom','limit'=>5];
+            $ranking=$ranking??['direction'=>in_array('top_5',$signals,true)?(in_array('bottom_5',$signals,true)?'top_and_bottom':'top'):'bottom','limit'=>5];
         }
         if ($shape==='ranking' && !$ranking) {
             $direction=in_array('rank_top',$signals,true)?(in_array('rank_bottom',$signals,true)?'top_and_bottom':'top'):(in_array('rank_bottom',$signals,true)?'bottom':null);

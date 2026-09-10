@@ -16,10 +16,10 @@ class R5Facts {
  private $day='2026-09-01'; public function __call($name,$args){if($name==='whereExists')$args[0]($this);if($name==='whereBetween')$this->day=$args[1][0];return $this;}
  public function find(){return ['amount_cents'=>'12345','gross_cents'=>'12345','refund_cents'=>'0'];}
  public function column(){return [1=>'合成门店'];}
- public function toArray(){return [['store_id'=>'1','business_date'=>$this->day,'amount_cents'=>'12345']];}
+ public function toArray(){return [['store_id'=>'1','business_date'=>$this->day,'amount_cents'=>'12345','entity_id'=>'101','entity_name'=>'合成会员','metric_value'=>'12345']];}
 }
 class R5Harness {
- public $db,$private,$gateway,$auth,$context,$temp,$boot,$models=0,$queries=0,$sequence=0;
+ public $db,$private,$gateway,$auth,$context,$temp,$boot,$models=0,$queries=0,$sequence=0,$semanticIntent=null;
  public function __construct($rounds,$sanitized=false){
   $GLOBALS['r5_rounds']=$rounds;$this->db=new PDO('sqlite::memory:');
   foreach([
@@ -32,7 +32,7 @@ class R5Harness {
   $this->temp=sys_get_temp_dir().'/mohe-r5-guidance-'.bin2hex(random_bytes(8));mkdir($this->temp,0700);
   $this->private=new AiPrivateStorage($this->temp);$config=new AiConfigStore($this->db,'','fixture.r5',$this->private);
   $configInput=['enabled'=>true,'external_processing_authorized'=>true,'model'=>'fixture/model','api_key'=>'synthetic-fixture-key','version'=>0];if($sanitized)$configInput['external_scope_version']=AiConfigStore::QUESTION_SCOPE;$config->save($configInput);
-  $model=function($view,$candidates,$configuration,$checkpoint){$this->models++;$checkpoint();if(($view['schema_version']??null)==='sanitized-question-v1')return ['intent'=>['object_kind'=>'project','object_term'=>'项目','operation'=>'ranking','metric_codes'=>[],'needs_metric_choice'=>true],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];$s=$view['current']['signals'];$shape='summary';foreach(['trend','ranking','comparison']as$v)if(in_array($v,$s,true))$shape=$v;if(in_array('top_5',$s,true)||in_array('bottom_5',$s,true))$shape='ranking';if(($view['current']['semantic_intent']['goal']??'')==='metric_definition')$shape='definition';return ['selection'=>['metric_codes'=>array_values(array_intersect(['cash_performance','consume_amount'],$s)),'query_shape'=>$shape,'decision'=>'query','date_code'=>'TODAY'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];};
+  $model=function($view,$candidates,$configuration,$checkpoint){$this->models++;$checkpoint();if(($view['schema_version']??null)==='sanitized-question-v2'){ $intent=$this->semanticIntent??['object_kind'=>'project','object_term'=>'项目','operation'=>'ranking','metric_codes'=>[],'action_codes'=>['service'],'needs_metric_choice'=>true];$intent['ranking']=$intent['ranking']??['direction'=>'top','limit'=>null];$intent['action_codes']=$intent['action_codes']??[];$intent['unresolved_fragments']=$intent['unresolved_fragments']??[];return ['intent'=>$intent,'usage'=>['input_tokens'=>20,'output_tokens'=>10]];}$s=$view['current']['signals'];$shape='summary';foreach(['trend','ranking','comparison']as$v)if(in_array($v,$s,true))$shape=$v;if(in_array('top_5',$s,true)||in_array('bottom_5',$s,true))$shape='ranking';if(($view['current']['semantic_intent']['goal']??'')==='metric_definition')$shape='definition';return ['selection'=>['metric_codes'=>array_values(array_intersect(['cash_performance','consume_amount'],$s)),'query_shape'=>$shape,'decision'=>'query','date_code'=>'TODAY'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];};
   $transaction=function($call){$this->queries++;return $call(new GroupPerformanceMetricReadServices(function(){return new R5Facts();},function(){}));};
   $this->gateway=new AiGatewayServices(new AiRunStore($this->db,'','fixture.r5'),$config,$this->private,'fixture.r5',new MetricReadViewStore($this->temp.'/views',$this->private->signingKey()),$model,$transaction);
   $this->auth=['terminal'=>'store','account_id'=>7,'tenant_id'=>'0','can_use'=>true,'can_configure'=>true,'permission_version'=>'v1','scope_mode'=>'stores','store_ids'=>[1],'report_capability_code'=>'group_management_dashboard'];
@@ -78,9 +78,71 @@ try{
   $run=$h->choose($run,['rank_direction'=>'top']);$h->step($run,'rank_limit',$rounds);$run=$h->choose($run,['rank_limit'=>'5']);r5check($run['status']==='COMPLETED','last allowed '.$rounds.' answer completes');r5check($h->models===1&&$h->queries===1,'guidance no additional model or premature facts');r5check($run['answer']['table']['rows'][0]['value']===($rounds===5?'123':'247'),'registered numeric result remains authoritative');$h->close();$h=null;
  }
  $h=new R5Harness(3,true);
- $before=$h->queries;$project=$h->start('这个月卖得最好的项目');$h->step($project,'skill_evaluation_metric',1);r5check($h->queries===$before,'unregistered project has no fact read before Skill clarification');
- $project=$h->choose($project,['skill_evaluation_metric'=>'sales_amount']);r5check($project['status']==='FAILED'&&$project['reason']==='AI_PROJECT_OBJECT_NOT_READY','project choice states the missing object contract rather than a generic local-condition failure');
- $unknown=$h->start('这个月魔法项目卖得最好');r5check($unknown['status']==='FAILED'&&$unknown['reason']==='AI_LOCAL_CONDITION_REQUIRED','unknown qualifier remains blocked and never becomes a project query');
+ $h->semanticIntent=['object_kind'=>'project','object_term'=>'项目','operation'=>'ranking','metric_codes'=>['completed_service_item_count'],'action_codes'=>['service'],'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>null]];
+ $before=$h->queries;$correctedProject=$h->start('这个月完成服务最多的项目有哪些');
+ r5check($correctedProject['status']==='COMPLETED'&&$h->queries===$before+1,'natural-language model meaning and registered service action execute without an unrelated metric');
+ r5check($correctedProject['answer']['table']['columns'][0]['label']==='项目','registered service action renders the project dimension through the shared reader');
+ $h->semanticIntent=['object_kind'=>'project','object_term'=>'项目','operation'=>'ranking','metric_codes'=>[],'action_codes'=>['sales'],'needs_metric_choice'=>true];
+ $before=$h->queries;$project=$h->start('这个月卖得最好的项目');
+ r5check($project['status']==='FAILED'&&$project['reason']==='AI_DIMENSION_ACTION_CONTRACT_NOT_READY'&&$h->queries===$before,'sales wording never substitutes the only registered project service metric');
+ $before=$h->queries;$soldProject=$h->start('本月卖出最多的项目');
+ r5check($soldProject['status']==='FAILED'&&$soldProject['reason']==='AI_DIMENSION_ACTION_CONTRACT_NOT_READY'&&$h->queries===$before,'published sold wording never substitutes the only registered project service metric');
+ $h->semanticIntent=['object_kind'=>'member','object_term'=>'会员','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>['service'],'needs_metric_choice'=>false];
+ $before=$h->queries;$unsupportedMemberAction=$h->start('本月服务最多的会员');
+ r5check($unsupportedMemberAction['status']==='FAILED'&&$unsupportedMemberAction['reason']==='AI_DIMENSION_ACTION_CONTRACT_NOT_READY'&&$h->queries===$before,'recognized but unregistered member service action never falls back to payment');
+ $before=$h->queries;$unsupportedMemberSales=$h->start('本月销量最高的会员');
+ r5check($unsupportedMemberSales['status']==='FAILED'&&$unsupportedMemberSales['reason']==='AI_DIMENSION_ACTION_CONTRACT_NOT_READY'&&$h->queries===$before,'published sales wording remains an unmet member contract instead of falling back to payment');
+ $h->semanticIntent['action_codes']=['revenue'];$before=$h->queries;$explicitCashReceipt=$h->start('本月现金业绩收款最多的会员');
+ r5check($explicitCashReceipt['status']==='COMPLETED'&&$h->queries===$before+1&&$explicitCashReceipt['answer']['table']['columns'][0]['label']==='会员','explicit cash metric and registered collection wording execute the same member cash contract');
+ $h->semanticIntent['action_codes']=['payment','revenue'];$before=$h->queries;$equivalentMemberActions=$h->start('本月按收款查询消费能力最强的会员');
+ r5check($equivalentMemberActions['status']==='COMPLETED'&&$h->queries===$before+1&&$equivalentMemberActions['answer']['table']['columns'][0]['label']==='会员','multiple action words execute when one registered metric contract satisfies all of them');
+ $rankH=new R5Harness(3,true);
+ foreach ([[1,'top'],[2,'bottom'],[5,'top'],[10,'top'],[20,'top_and_bottom']] as [$limit,$direction]) {
+  $rankH->semanticIntent=['object_kind'=>'member','object_term'=>'会员','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>['payment'],'needs_metric_choice'=>false,'ranking'=>['direction'=>$direction,'limit'=>$limit]];
+  $before=$rankH->queries;$ranked=$rankH->start('本月消费能力最强的会员');
+  $evidence=$rankH->private->read($rankH->row($ranked)['evidence_ref']);
+  r5check($ranked['status']==='COMPLETED'&&$rankH->queries===$before+1&&$evidence['query']['ranking']===['direction'=>$direction,'limit'=>$limit],"any in-contract model result shape executes unchanged: {$direction}/{$limit}");
+ }
+ $rankH->semanticIntent=['object_kind'=>'member','object_term'=>'会员','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>['payment'],'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>21]];
+ $before=$rankH->queries;$tooManyMember=$rankH->start('本月消费能力最强的会员');
+ r5check($tooManyMember['status']==='FAILED'&&$tooManyMember['reason']==='AI_DIMENSION_RANK_LIMIT_NOT_READY'&&$rankH->queries===$before,'out-of-contract model result count stops before business query');
+ r5check(str_contains($tooManyMember['message'],'前20、后20'),'dimension limit message states the registered object limit rather than the store limit');
+ $rankH->close();
+ $h->semanticIntent=['object_kind'=>'member','object_term'=>'会员','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>['service'],'needs_metric_choice'=>false];
+ $before=$h->queries;$conflictingObject=$h->start('本月服务最多的会员');
+ r5check($conflictingObject['status']==='FAILED'&&$conflictingObject['reason']==='AI_DIMENSION_ACTION_CONTRACT_NOT_READY'&&$h->queries===$before,'model-resolved member service request cannot fall back to a different dimension or metric');
+ $h->semanticIntent=['object_kind'=>'member','object_term'=>'会员','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>['payment'],'needs_metric_choice'=>false];
+ $before=$h->queries;$correctedMember=$h->start('本月消费能力最强的会员');
+ r5check($correctedMember['status']==='COMPLETED'&&$h->queries===$before+1&&$correctedMember['answer']['table']['columns'][0]['label']==='会员','model-resolved member payment meaning reaches the registered payment dimension');
+ $h->semanticIntent=['object_kind'=>'member','object_term'=>'会员','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>['payment'],'needs_metric_choice'=>false,'unresolved_fragments'=>['和门店']];
+ $before=$h->queries;$multipleObjects=$h->start('本月消费能力最强的会员和门店');
+ r5check($multipleObjects['status']==='FAILED'&&$multipleObjects['reason']==='AI_INTENT_UNRESOLVED'&&$h->queries===$before,'multiple requested analysis objects remain unresolved and never execute one object while discarding the other');
+ $h->semanticIntent=['object_kind'=>'member','object_term'=>'会员','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>['payment'],'needs_metric_choice'=>false];
+ $before=$h->queries;$storeScopedMember=$h->start('本月本店消费能力最强的会员');
+ r5check($storeScopedMember['status']==='COMPLETED'&&$h->queries===$before+1&&$storeScopedMember['answer']['table']['columns'][0]['label']==='会员','bound current-store scope is not misread as a second analysis object');
+$h->semanticIntent['unresolved_fragments']=['和门店'];$before=$h->queries;$storeScopedMultipleObjects=$h->start('本月本店消费能力最强的会员和门店');
+ r5check($storeScopedMultipleObjects['status']==='FAILED'&&$storeScopedMultipleObjects['reason']==='AI_INTENT_UNRESOLVED'&&$h->queries===$before,'current-store scope never hides an independently requested store analysis object');
+ $h->semanticIntent=['object_kind'=>'project','object_term'=>'项目','operation'=>'ranking','metric_codes'=>[],'action_codes'=>['sales'],'needs_metric_choice'=>true,'unresolved_fragments'=>['不含销售']];
+ $before=$h->queries;$excluded=$h->start('这个月不含销售的项目最多');
+ r5check($excluded['status']==='FAILED'&&$excluded['reason']==='AI_INTENT_UNRESOLVED'&&$h->queries===$before,'unbound exclusion remains unresolved and never queries a reduced request');
+ $h->semanticIntent=['object_kind'=>'project','object_term'=>'项目','operation'=>'ranking','metric_codes'=>[],'action_codes'=>['sales'],'needs_metric_choice'=>true,'unresolved_fragments'=>['魔法']];
+ $unknown=$h->start('这个月魔法项目卖得最好');r5check($unknown['status']==='FAILED'&&$unknown['reason']==='AI_INTENT_UNRESOLVED','unresolved model meaning remains blocked and never becomes a project query');
+ $h->semanticIntent=['object_kind'=>'member','object_term'=>'会员','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>['payment'],'needs_metric_choice'=>false];
+ $member=$h->start('消费能力最强的会员有哪些');$h->step($member,'start_date',1);$before=$h->queries;
+ $member=$h->choose($member,['start_date'=>'2026-09-01','end_date'=>'2026-09-08']);
+ r5check($member['status']==='COMPLETED','member date guidance resumes registered execution '.($member['reason']??''));
+ r5check($h->queries===$before+1&&$member['answer']['table']['rows'][0]['label']==='合成会员','member result passes real gateway state and registered reader facade');
+ r5check(strpos($member['answer']['summary'],'2026-09-01 至 2026-09-08')!==false,'member date selection retained in final answer');
+ $before=$h->queries;
+ $mixed=$h->start('本月会员现金业绩和消耗业绩最高');
+ r5check($mixed['status']==='FAILED'&&$h->queries===$before,'unsupported member metric is not dropped to query only cash');
+ $h->semanticIntent['unresolved_fragments']=['并按天趋势'];$trend=$h->start('本月会员现金业绩最高并按天趋势');
+ r5check($trend['status']==='FAILED'&&$h->queries===$before,'member ranking cannot silently discard requested trend');
+ $h->context['terminal']='platform';$h->auth['terminal']='platform';
+ $h->boot=$h->gateway->handle('bootstrap',$h->context,['client_session_id'=>'device1']);
+ $beforeModels=$h->models;$scope=$h->start('本月本店消费能力最强的会员有哪些');
+ r5check($scope['status']==='FAILED'&&$scope['reason']==='AI_UNSUPPORTED_CONDITION'&&$h->queries===$before&&$h->models===$beforeModels,
+  'platform question with unbound current-store scope cannot become all authorized stores');
  $h->close();$h=null;
  $h=new R5Harness(3);
  $source=$h->start('9月1日到9月8日现金业绩合计多少');

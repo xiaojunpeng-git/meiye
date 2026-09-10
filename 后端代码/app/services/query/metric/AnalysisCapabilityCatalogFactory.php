@@ -15,6 +15,21 @@ final class AnalysisCapabilityCatalogFactory
                 'object_kind'=>$person?'person':'store','operations'=>$capability['query_shapes'],
                 'filter_keys'=>$person?['selection_ref']:[], 'relation_role'=>$person?'allocated_employee':'store_total',
                 'contract_version'=>$capability['metric_version']];
+            // Object dimensions are declared by the registered metric. They are
+            // not inferred from user phrases or from a report page. A future
+            // domain becomes discoverable by registering this lower-layer
+            // contract; this factory has no object-name allowlist.
+            foreach ((array)($capability['analysis_dimension_contracts']??[]) as $dimension) {
+                if (!is_array($dimension)) continue;
+                $operations=array_values(array_intersect((array)$capability['query_shapes'],['ranking']));
+                if (!$operations) continue;
+                $kind=$dimension['object_kind']??null;$role=$dimension['relation_role']??null;
+                $filterKeys=$dimension['filter_keys']??null;
+                if (!is_string($kind)||!is_string($role)||!is_array($filterKeys)) continue;
+                $bindings[]=['capability_code'=>'metric_dimension.'.$kind.'.'.$code,'metric_code'=>$code,
+                    'object_kind'=>$kind,'operations'=>$operations,'filter_keys'=>$filterKeys,
+                    'relation_role'=>$role,'contract_version'=>$capability['metric_version']];
+            }
         }
         return new AnalysisCapabilityCatalog($definitions,$bindings);
     }

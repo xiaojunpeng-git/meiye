@@ -49,8 +49,17 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             if (!in_array($result['period']??null,['current','comparison'],true)) throw new \RuntimeException('METRIC_EXPORT_PERIOD_INVALID');
             $period=$result['period']; $range=$period==='current'?['start'=>$view['query']['start_date'],'end'=>$view['query']['end_date']]:$view['query']['compare_range'];
             if (!is_array($range)) throw new \RuntimeException('METRIC_EXPORT_PERIOD_INVALID');
-            $person=($view['query']['business_filters']['object_kind']??null)==='person';
-            if (($capabilities[$code]['filter_grain']==='person')!==$person) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
+            $businessFilters=$view['query']['business_filters']??[];
+            if (!is_array($businessFilters)) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
+            $objectKind=$businessFilters['object_kind']??'store';
+            $person=$objectKind==='person';
+            $dimensionContract=null;
+            foreach ((array)($capabilities[$code]['analysis_dimension_contracts']??[]) as $contract) {
+                if (is_array($contract)&&($contract['object_kind']??null)===$objectKind&&($contract['filter_keys']??null)===[]) $dimensionContract=$contract;
+            }
+            $valid=$person ? (($capabilities[$code]['filter_grain']??null)==='person')
+                : ($dimensionContract!==null || (($capabilities[$code]['filter_grain']??null)==='store' && $businessFilters===[]));
+            if (!$valid) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
             $label=$person?($view['personnel_selection_label']??''): '当前授权范围';
             if (!is_string($label)||$label==='') throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
             $base=['metric_name'=>$capabilities[$code]['name'],'period_name'=>$period==='current'?'本期':'对比期','start_date'=>$range['start'],'end_date'=>$range['end'],
@@ -60,9 +69,15 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             elseif ($view['query']['query_shape']==='trend') foreach ($result['rows'] as $point) self::append($rows,array_replace($base,['business_date'=>$point['business_date']]),$point['amount_cents'],$storageUnit);
             elseif ($view['query']['query_shape']==='ranking') foreach ($result['rows'] as $direction=>$points) foreach ($points as $point) {
                 if (!in_array($direction,['top','bottom'],true)) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
-                $name=$person?($point['employee_name']??null):($point['store_name']??null);
+                // Views are retained locally for 24 hours.  A member ranking
+                // created before the generic dimension-row shape used
+                // `member_name`; continue to export that already verified
+                // result instead of treating a harmless schema evolution as a
+                // reason to lose its Excel file.
+                $name=$person?($point['employee_name']??($point['member_name']??null))
+                    :($dimensionContract!==null?($point['entity_name']??($point['member_name']??null)):($point['store_name']??null));
                 if (!is_string($name) || $name==='') throw new \RuntimeException('METRIC_EXPORT_STORE_NAME_INVALID');
-                self::append($rows,array_replace($base,['store_name'=>$name.($person?'；范围：'.$base['store_name']:''),'ranking_direction'=>$direction==='top'?'前列':'后列']),$point['amount_cents'],$storageUnit);
+                self::append($rows,array_replace($base,['store_name'=>$name.(($person||$dimensionContract!==null)?'；范围：'.$base['store_name']:''),'ranking_direction'=>$direction==='top'?'前列':'后列']),$point['amount_cents'],$storageUnit);
             } else throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
         }
         return $rows;

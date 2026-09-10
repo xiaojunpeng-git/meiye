@@ -14,6 +14,11 @@ final class AiAnalysisGuidancePlanner
             // reviewable; all new gateway candidates carry query_shapes.
             return !isset($candidate['query_shapes']) || in_array($intent['operation'],$candidate['query_shapes'],true);
         });
+        $actions=$intent['action_codes']??[];
+        if (!is_array($actions)||count($actions)>8||count(array_unique($actions))!==count($actions)) throw new \RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        if ($actions) $candidates=array_filter($candidates,static function(array $candidate) use($actions):bool {
+            return array_diff($actions,(array)($candidate['action_codes']??[]))===[];
+        });
         ksort($candidates);
         if (!$candidates) throw new \RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
         if (count($intent['metric_codes'])>1) throw new \RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
@@ -25,10 +30,12 @@ final class AiAnalysisGuidancePlanner
         $periods=$projection['date_terms']??[];
         if (count($periods)>1 || !empty($projection['date_grouping_ambiguous'])) throw new \RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
         $range=$periods?(new AiWorkflowPlanner())->normalizePeriod($periods[0],$today):null;
-        $signals=$projection['signals'];$direction=in_array('rank_top',$signals,true)?'top':(in_array('rank_bottom',$signals,true)?'bottom':null);
-        if (in_array('rank_top',$signals,true)&&in_array('rank_bottom',$signals,true)) $direction='top_and_bottom';
-        $limit=$projection['semantic_intent']['rank_limit']??null;
-        if ($limit===null && ($projection['analysis_singular_person']??false)) $limit=1;
+        $ranking=$intent['ranking']??null;
+        if (!is_array($ranking) || array_keys($ranking)!==['direction','limit']
+            || !in_array($ranking['direction']??null,['top','bottom','top_and_bottom','unspecified'],true)
+            || (!is_null($ranking['limit']??null) && !is_int($ranking['limit']))) throw new \RuntimeException('AI_MODEL_RESPONSE_INVALID');
+        $direction=$ranking['direction']==='unspecified'?null:$ranking['direction'];
+        $limit=$ranking['limit'];
         if ($limit!==null && (!is_int($limit)||$limit<1||$limit>20)) throw new \RuntimeException('AI_RANK_LIMIT_NOT_READY');
         return $this->next(['metric'=>$metric,'candidates'=>$candidates,'object'=>$selection,'objects'=>$objects['objects'],
             'range'=>$range,'operation'=>$intent['operation'],'direction'=>$direction,'limit'=>$limit,'format'=>$format]);

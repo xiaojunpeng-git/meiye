@@ -25,17 +25,19 @@ $education=new AnalysisObjectCatalog([['ref'=>'course:1','kind'=>'course','label
 $assert($education->resolve('基础课','course','learner')['status']==='resolved','new domain supplied as metadata without new scenario');
 $safe=new AiSafeQuestionProjector();
 $config=['enabled'=>true,'external_processing_authorized'=>true,'external_scope_supported'=>true,'external_scope_version'=>AiConfigStore::QUESTION_SCOPE];
-$question=$safe->project('今天做的最好的技师是谁',$config);
+$question=$safe->project('今天做的最好的技师是谁',$config,[]);
 $assert(!$question['outbound']['has_unresolved_conditions'],'public business question reconstructed without opaque spans');
-foreach (['张三','18326012588','sk-secret-fixture','88000元','AB-123','foo@example.test','DROP TABLE secrets'] as $private) {
- $projection=$safe->project('今天'.$private.'业绩多少',$config);
+foreach (['18326012588','sk-secret-fixture-token','foo@example.test','opaque_customer_123456789'] as $private) {
+ $projection=$safe->project('今天'.$private.'业绩多少',$config,[]);
  $out=json_encode($projection['outbound'],JSON_UNESCAPED_UNICODE);
- $assert(strpos($out,$private)===false && $projection['outbound']['has_unresolved_conditions'],'private/unknown span remains local: '.$private);
+ $assert(strpos($out,$private)===false && $projection['outbound']['has_unresolved_conditions'],'deterministic private identifier remains local: '.$private);
 }
+$natural=$safe->project('今天金额超过88000元的项目表现如何',$config,[]);
+$assert($natural['outbound']['question']==='今天金额超过88000元的项目表现如何'&&!$natural['outbound']['has_unresolved_conditions'],'novel business wording is preserved for natural-language understanding');
 $projection=$safe->project('今天护理师业绩多少',$config,['护理师']);
 $assert(strpos(json_encode($projection['outbound'],JSON_UNESCAPED_UNICODE),'护理师')===false,'customer name masked before generic interpretation');
-$projection=$safe->project('今天业绩排除张三',$config);
+$projection=$safe->project('今天业绩排除张三',$config,['张三']);
 $assert(strpos($projection['outbound']['question'],'排除')!==false && $projection['local_conditions'],'exclusion retained alongside private reference');
-try {$safe->project('今天现金业绩',array_merge($config,['external_scope_version'=>'']));throw new RuntimeException('scope bypass');}
+try {$safe->project('今天现金业绩',array_merge($config,['external_scope_version'=>'']),[]);throw new RuntimeException('scope bypass');}
 catch(RuntimeException $e){$assert($e->getMessage()==='AI_EXTERNAL_SCOPE_REQUIRED','versioned consent required');}
 echo "PASS object resolution / safe question: $checks checks\n";

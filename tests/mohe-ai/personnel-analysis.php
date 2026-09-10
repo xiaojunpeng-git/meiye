@@ -14,7 +14,7 @@ $planner=new AiAnalysisGuidancePlanner();
 $outcome=new ReflectionMethod(app\services\ai\execution\AiRunStore::class,'outcomeClass');if(PHP_VERSION_ID<80100)$outcome->setAccessible(true);
 foreach(['AI_ANALYSIS_COMBINATION_UNAVAILABLE','AI_OBJECT_BINDING_UNAVAILABLE','AI_OBJECT_SCOPE_TOO_LARGE','AI_PERSONNEL_PERMISSION_REQUIRED','AI_EXTERNAL_SCOPE_REQUIRED','AI_LOCAL_CONDITION_REQUIRED'] as $reason)
  paCheck($outcome->invoke(null,['status'=>'FAILED','reason'=>$reason])==='neutral','capability/authority refusal never counts as user technical failure');
-$intent=['object_kind'=>'person','object_term'=>'技师','operation'=>'ranking','metric_codes'=>[],'needs_metric_choice'=>true];
+$intent=['object_kind'=>'person','object_term'=>'技师','operation'=>'ranking','metric_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'top','limit'=>1]];
 $projection=['date_terms'=>[['code'=>'TODAY']],'signals'=>['rank_top'],'analysis_singular_person'=>true];
 $candidates=['staff_labor_yeji'=>['name'=>'劳动业绩','summary'=>'按实际手艺人分配','query_shapes'=>['summary','ranking']],
  'staff_sales_yeji'=>['name'=>'销售人业绩','summary'=>'按销售人分配','query_shapes'=>['summary','ranking']],

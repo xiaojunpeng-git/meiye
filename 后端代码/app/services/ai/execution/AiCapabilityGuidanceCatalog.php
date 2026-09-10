@@ -13,19 +13,18 @@ final class AiCapabilityGuidanceCatalog
 {
     public static function discover(array $capabilities, string $objectKind, ?string $operation=null): array
     {
-        if (!in_array($objectKind, ['store','person'], true)) return [];
         $operations=$operation===null ? ['summary','trend','ranking','comparison'] : [$operation];
         if (array_diff($operations, ['summary','trend','ranking','comparison'])) return [];
         $allowed=array_flip($capabilities['metric_codes']??[]);
         $readiness=$capabilities['metric_readiness']??[];
         $hasReadiness=is_array($readiness) && $readiness!==[];
         $filterKeys=$objectKind==='person' ? ['selection_ref'] : [];
-        $role=$objectKind==='person' ? 'allocated_employee' : 'store_total';
+        $role=$objectKind==='person'?'allocated_employee':($objectKind==='store'?'store_total':null);
         $items=[];
         foreach ($operations as $shape) {
             $found=(AnalysisCapabilityCatalogFactory::make())->discover([
                 'metric_codes'=>[], 'object_kind'=>$objectKind, 'operation'=>$shape,
-                'filter_keys'=>$filterKeys, 'relation_role'=>$role,
+                'filter_keys'=>$filterKeys, 'relation_role'=>$role??self::relationRole($readiness,$objectKind),
             ], static function(array $binding) use($allowed,$readiness,$hasReadiness,$objectKind,$filterKeys,$shape): bool {
                 $code=$binding['metric_code']; $contract=$readiness[$code]??null;
                 // Production gateway snapshots always include metric_readiness.
@@ -33,9 +32,13 @@ final class AiCapabilityGuidanceCatalog
                 // creating a second candidate list; the compiler still applies
                 // its complete readiness contract before any execution.
                 if (!$hasReadiness) return isset($allowed[$code]);
+                $dimensionReady=($contract['filter_grain']??null)===$objectKind && ($contract['business_filters']??null)===$filterKeys;
+                foreach ((array)($contract['analysis_dimension_contracts']??[]) as $dimension) {
+                    if (is_array($dimension) && ($dimension['object_kind']??null)===$objectKind
+                        && ($dimension['filter_keys']??null)===$filterKeys) $dimensionReady=true;
+                }
                 return isset($allowed[$code]) && is_array($contract) && ($contract['ai_query_ready']??false)===true
-                    && ($contract['filter_grain']??null)===$objectKind
-                    && ($contract['business_filters']??null)===$filterKeys
+                    && $dimensionReady
                     && in_array($shape,$contract['query_shapes']??[],true);
             });
             foreach ($found['items'] as $item) {
@@ -44,12 +47,31 @@ final class AiCapabilityGuidanceCatalog
                     'name'=>$item['metric']['name'], 'summary'=>$item['metric']['summary'],
                     'query_shapes'=>[], 'capability_code'=>$item['binding']['capability_code'],
                     'contract_version'=>$item['binding']['contract_version'],
+                    'action_codes'=>[],
                 ];
                 $items[$code]['query_shapes'][]=$shape;
+                foreach ((array)($readiness[$code]['analysis_dimension_contracts']??[]) as $dimension) {
+                    if (!is_array($dimension) || ($dimension['object_kind']??null)!==$objectKind
+                        || ($dimension['filter_keys']??null)!==$filterKeys) continue;
+                    foreach ((array)($dimension['action_codes']??[]) as $action) if (is_string($action)) $items[$code]['action_codes'][$action]=true;
+                }
             }
         }
-        foreach ($items as &$item) { $item['query_shapes']=array_values(array_unique($item['query_shapes'])); sort($item['query_shapes']); }
+        foreach ($items as &$item) {
+            $item['query_shapes']=array_values(array_unique($item['query_shapes'])); sort($item['query_shapes']);
+            $item['action_codes']=array_keys($item['action_codes']); sort($item['action_codes']);
+        }
         unset($item); ksort($items);
         return $items;
+    }
+
+    private static function relationRole(array $readiness,string $objectKind): string
+    {
+        $roles=[];
+        foreach ($readiness as $contract) foreach ((array)($contract['analysis_dimension_contracts']??[]) as $dimension) {
+            if (is_array($dimension) && ($dimension['object_kind']??null)===$objectKind && is_string($dimension['relation_role']??null)) $roles[$dimension['relation_role']]=true;
+        }
+        if (count($roles)!==1) return 'unregistered_object_relation';
+        return (string)array_key_first($roles);
     }
 }
