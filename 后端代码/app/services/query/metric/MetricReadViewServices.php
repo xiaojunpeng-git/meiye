@@ -11,7 +11,7 @@ use app\services\query\UnifiedQueryJson;
 final class MetricReadViewServices
 {
     const CONTRACT_VERSION = 'group-performance-summary-read-v1';
-    const COVERAGE_START = '2026-08-10';
+    const COVERAGE_START = MetricDefinitionRegistry::COVERAGE_START;
     private $store;
     private $transaction;
     private $authorize;
@@ -45,7 +45,7 @@ final class MetricReadViewServices
         if ($expiresAt<=$now || $expiresAt>$now+86400) $this->fail('METRIC_READ_EXPIRY_INVALID');
         $ranges = ['current' => ['start' => $normalized['start_date'], 'end' => $normalized['end_date']]];
         if ($normalized['compare_range'] !== null) $ranges['comparison'] = $normalized['compare_range'];
-        $results = call_user_func($this->transaction, function (GroupPerformanceMetricReadServices $reader) use ($normalized, $binding, $ranges,$personnel,$dimensionRanking): array {
+        $results = call_user_func($this->transaction, function (GroupPerformanceMetricReadServices $reader) use ($normalized, $binding, $ranges,$personnel,$dimensionRanking,$now): array {
             $results = [];
             $storeNames = $normalized['query_shape'] === 'ranking' && $personnel===null && $dimensionRanking===null ? $reader->storeNames($binding['store_ids']) : [];
             foreach ($ranges as $period => $range) {
@@ -90,7 +90,7 @@ final class MetricReadViewServices
                     if (in_array($normalized['query_shape'], ['trend', 'ranking'], true)) {
                         $points = $reader->dailyStoreTotals($binding['tenant_id'], $binding['store_ids'], $range, $metric);
                         $projector = new MetricGroupedProjection();
-                        $rows = $normalized['query_shape'] === 'trend' ? $projector->trend($points, $range) : $projector->ranking($points, $binding['store_ids'], $normalized['ranking']);
+                        $rows = $normalized['query_shape'] === 'trend' ? $projector->trend($points, $range, (new \DateTimeImmutable('@'.$now))->setTimezone(new \DateTimeZone(MetricQueryDatePolicy::TIMEZONE))->format('Y-m-d')) : $projector->ranking($points, $binding['store_ids'], $normalized['ranking']);
                         if ($normalized['query_shape'] === 'ranking') {
                             foreach ($rows as &$direction) foreach ($direction as &$row) $row['store_name'] = $storeNames[$row['store_id']];
                             unset($row, $direction);
@@ -173,27 +173,41 @@ final class MetricReadViewServices
     }
     private function personnelSelection(array $query,array $binding): ?array
     {
+        if ($binding['scope_mode']==='self_participant' && ($query['business_filters']['object_kind']??null)!=='person') $this->fail('METRIC_PERMISSION_GRAIN_UNAVAILABLE');
+        if (($binding['store_report_authorized']??true)!==true && ($query['business_filters']['object_kind']??null)!=='person') $this->fail('METRIC_PERMISSION_GRAIN_UNAVAILABLE');
         if (($query['business_filters']['object_kind'] ?? null) !== 'person') return null;
         if (!$this->personnel) $this->fail('METRIC_PERMISSION_GRAIN_UNAVAILABLE');
         $selection=$this->personnel->selection($query['metric_codes'][0],$query['business_filters']['selection_ref']);
-        if ($selection['scope']['store_ids']!==$binding['store_ids']) $this->fail('METRIC_PERMISSION_DENIED');
+        if ($binding['scope_mode']==='self_participant' && ($selection['scope']['employee_id']??0)<1) $this->fail('METRIC_PERMISSION_DENIED');
+        if ($binding['scope_mode']==='self_participant' && (int)($binding['employee_id']??0)!==$selection['scope']['employee_id']) $this->fail('METRIC_PERMISSION_DENIED');
+        if (array_diff($binding['store_ids'],$selection['scope']['store_ids'])) $this->fail('METRIC_PERMISSION_DENIED');
+        if ($selection['scope']['store_ids']!==$binding['store_ids']) {
+            $selection['pairs']=array_values(array_filter($selection['pairs'],static fn($pair)=>in_array($pair['store_id'],$binding['store_ids'],true)));
+            $selection['names']=array_intersect_key($selection['names'],array_fill_keys(array_column($selection['pairs'],'employee_id'),true));
+            $selection['scope']['store_ids']=$binding['store_ids'];
+            $selection['binding_hash']=hash('sha256',UnifiedQueryJson::encode($selection));
+        }
         return $selection;
     }
 
     private function binding($binding, array $requested): array
     {
         $fields = ['instance_id', 'subject_ref', 'terminal', 'tenant_id', 'permission_version', 'report_capability_code', 'scope_provider_code', 'scope_mode', 'store_ids'];
+        // Optional only for historical non-AI callers. AI always signs both
+        // fields from the freshly authenticated personnel authority.
+        foreach (['store_report_authorized','employee_id'] as $key) if (is_array($binding) && array_key_exists($key,$binding)) $fields[]=$key;
         if (!is_array($binding) || array_diff(array_keys($binding), $fields) || array_diff($fields, array_keys($binding))) $this->fail('METRIC_PERMISSION_INVALID');
-        foreach (array_diff($fields, ['store_ids']) as $key) {
+        if (array_key_exists('store_report_authorized',$binding) && !is_bool($binding['store_report_authorized'])) $this->fail('METRIC_PERMISSION_INVALID');
+        if (array_key_exists('employee_id',$binding) && (!is_int($binding['employee_id']) || $binding['employee_id']<0)) $this->fail('METRIC_PERMISSION_INVALID');
+        foreach (array_diff($fields, ['store_ids','store_report_authorized','employee_id']) as $key) {
             if (!is_string($binding[$key]) || $binding[$key] === '' || strlen($binding[$key]) > 256 || preg_match('/[\x00-\x1f\x7f]/', $binding[$key])) $this->fail('METRIC_PERMISSION_INVALID');
         }
         if (!in_array($binding['terminal'], ['platform', 'store', 'merchant'], true)
-            || !in_array($binding['scope_mode'], ['stores', 'all', 'agent_limited', 'platform_admin'], true)
+            || !in_array($binding['scope_mode'], ['stores', 'all', 'agent_limited', 'platform_admin','self_participant'], true)
             || $binding['report_capability_code'] !== 'group_management_dashboard') $this->fail('METRIC_PERMISSION_GRAIN_UNAVAILABLE');
         $allowed = $this->ids($binding['store_ids']);
         if ($allowed === [] || array_diff($requested, $allowed)) $this->fail('METRIC_PERMISSION_DENIED');
         $binding['store_ids'] = $requested === [] ? $allowed : $requested;
-        if ($binding['terminal'] === 'store' && count($binding['store_ids']) !== 1) $this->fail('METRIC_PERMISSION_DENIED');
         return UnifiedQueryJson::decode(UnifiedQueryJson::encode($binding));
     }
 
@@ -240,15 +254,8 @@ final class MetricReadViewServices
 
     private function range(array $range): void
     {
-        if (count($range) !== 2 || !isset($range['start'], $range['end'])) $this->fail('METRIC_QUERY_RANGE_INVALID');
-        $dates = [];
-        foreach (['start', 'end'] as $key) {
-            if (!is_string($range[$key]) || !preg_match('/^[1-9][0-9]{3}-[0-9]{2}-[0-9]{2}$/D', $range[$key])) $this->fail('METRIC_QUERY_RANGE_INVALID');
-            $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $range[$key], new \DateTimeZone('Asia/Shanghai'));
-            if (!$date || $date->format('Y-m-d') !== $range[$key]) $this->fail('METRIC_QUERY_RANGE_INVALID');
-            $dates[$key] = $date;
-        }
-        if ($range['start'] < self::COVERAGE_START || $range['start'] > $range['end'] || $dates['start']->diff($dates['end'])->days > 366) $this->fail('METRIC_QUERY_COVERAGE_UNAVAILABLE');
+        $today=(new \DateTimeImmutable('@'.$this->now()))->setTimezone(new \DateTimeZone(MetricQueryDatePolicy::TIMEZONE))->format('Y-m-d');
+        MetricQueryDatePolicy::assertExecutable($range,self::COVERAGE_START,$today);
     }
 
     private function ids($ids): array

@@ -71,11 +71,23 @@ paReject(function()use($reader,$range){$reader->personnelTotals('0',[1],$range,'
 $binding=['instance_id'=>'fixture','subject_ref'=>'fixture','terminal'=>'platform','tenant_id'=>'0','permission_version'=>'fixture-v1','report_capability_code'=>'group_management_dashboard','scope_provider_code'=>'current_report_scope_v1','scope_mode'=>'stores','store_ids'=>[1]];
 $temp=sys_get_temp_dir().'/mohe-personnel-test-'.bin2hex(random_bytes(8));
 $store=new MetricReadViewStore($temp,str_repeat('fixture',8));
-$views=new MetricReadViewServices($store,static function()use($binding){return $binding;},static function($call)use($reader){return $call($reader);},null,$objectService);
+$views=new MetricReadViewServices($store,static function()use(&$binding){return $binding;},static function($call)use($reader){return $call($reader);},null,$objectService);
 try {
  $view=$views->create([],$plan['query']);
  paCheck($view['results'][0]['rows']['top'][0]['employee_name']==='合成人员甲','shared immutable view contains validated object label');
  paCheck($views->replay([],$plan['query'],$view['read_consistency_ref'])['result_hash']===$view['result_hash'],'exact replay');
+ $binding['scope_mode']='self_participant';$binding['employee_id']=7;$binding['store_report_authorized']=false;$scope['employee_id']=7;
+ $selfQuery=$plan['query'];$selfQuery['query_shape']='summary';$selfQuery['ranking']=null;$selfQuery['business_filters']['selection_ref']='person:7';
+ foreach (['platform','store','merchant'] as $terminal) {
+  $binding['terminal']=$terminal;
+  paCheck($views->create([],$selfQuery)['results'][0]['amount_cents']===10001,'self personnel works through '.$terminal);
+ }
+ $cash=$selfQuery;$cash['metric_codes']=['cash_performance'];$cash['business_filters']=[];
+ paReject(fn()=>$views->create([],$cash),'METRIC_PERMISSION_GRAIN_UNAVAILABLE');
+ $scope['employee_id']=0;paReject(fn()=>$views->create([],$selfQuery),'METRIC_PERMISSION_DENIED');$scope['employee_id']=7;
+ $binding['employee_id']=8;paReject(fn()=>$views->create([],$selfQuery),'METRIC_PERMISSION_DENIED');$binding['employee_id']=7;
+ $binding['scope_mode']='stores';paReject(fn()=>$views->create([],$cash),'METRIC_PERMISSION_GRAIN_UNAVAILABLE');
+ $binding=['instance_id'=>'fixture','subject_ref'=>'fixture','terminal'=>'platform','tenant_id'=>'0','permission_version'=>'fixture-v1','report_capability_code'=>'group_management_dashboard','scope_provider_code'=>'current_report_scope_v1','scope_mode'=>'stores','store_ids'=>[1]];$scope['employee_id']=0;
  $scope['personnel_authorized']=false;
  paReject(function()use($views,$plan,$view){$views->replay([],$plan['query'],$view['read_consistency_ref']);},'AI_PERSONNEL_PERMISSION_REQUIRED');
 } finally {foreach(new DirectoryIterator($temp) as $file)if($file->isFile()&&!$file->isLink())unlink($file->getPathname());rmdir($temp);}

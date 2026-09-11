@@ -89,7 +89,24 @@ final class MetricDefinitionRegistry
             'sales_amount' => self::amount('fact_sum', 'v3-sale-completed-lines-v1', ['summary', 'comparison', 'trend', 'ranking'], [
                 'table' => 'cashier_v3_sale_fact', 'amount' => 'sale_amount_cents',
                 'filters' => ['status' => 'effective'], 'normal_scope' => 'facts',
-                'dimensions' => ['operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot']],
+                'dimensions' => [
+                    'operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot'],
+                    // A sale fact freezes the sold line's type and item snapshot.
+                    // This turns project/product ranking into the same registered
+                    // sales metric read, rather than a page or AI side query.
+                    'project' => [
+                        'id' => 'item_id', 'name' => 'item_name_snapshot',
+                        'analysis_object_kind' => 'project', 'analysis_object_label' => '项目',
+                        'analysis_relation_role' => 'sold_item', 'analysis_action_codes' => ['sales'],
+                        'analysis_source_filters' => ['source_type' => 'project'],
+                    ],
+                    'product' => [
+                        'id' => 'item_id', 'name' => 'item_name_snapshot',
+                        'analysis_object_kind' => 'product', 'analysis_object_label' => '产品',
+                        'analysis_relation_role' => 'sold_item', 'analysis_action_codes' => ['sales'],
+                        'analysis_source_filters' => ['source_type' => 'product'],
+                    ],
+                ],
             ]) + [
                 'default_ranking_dimension' => 'operator',
                 // Direct sales use their frozen sales dimension; card sales use

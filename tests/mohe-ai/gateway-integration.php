@@ -34,7 +34,14 @@ try {
  $config=new AiConfigStore($db,'','fixture.instance',$private);
  $config->save(['enabled'=>true,'external_processing_authorized'=>true,'external_scope_version'=>AiConfigStore::QUESTION_SCOPE,'model'=>'fixture/model','api_key'=>'fixture-only-key','version'=>0]);
  $runs=new AiRunStore($db,'','fixture.instance');$models=0;$queries=0;
- $model=function($view,$candidates,$configuration,$checkpoint)use(&$models){$models++;$checkpoint();$legacy=(new \app\services\ai\model\AiModelInputProjector())->modelView(['question'=>$view['question'],'history'=>[]]);$signals=$legacy['current']['signals'];$shape='summary';foreach(['trend','ranking','comparison'] as $candidate)if(in_array($candidate,$signals,true))$shape=$candidate;if(in_array('top_5',$signals,true)||in_array('bottom_5',$signals,true))$shape='ranking';$metrics=array_values(array_intersect(['cash_performance','consume_amount'],$signals));$dates=[];if(in_array('TODAY',$signals,true))$dates=[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]];return ['intent'=>['object_kind'=>'store','object_term'=>'','operation'=>$shape,'metric_codes'=>$metrics,'action_codes'=>[],'needs_metric_choice'=>$metrics===[],'ranking'=>['direction'=>'top','limit'=>5],'periods'=>$dates,'scope'=>'authorized','unresolved_fragments'=>[]],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];};
+ $model=function($view,$candidates,$configuration,$checkpoint,$repairPredicate=null)use(&$models){$models++;$checkpoint();
+   if ($view['question']==='查看尚未登记的经营目标') return ['intent'=>['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'understanding'=>['goal'=>'查看尚未登记的经营目标','evidence_fragments'=>['查看尚未登记的经营目标'],'status'=>'understood'],'ranking'=>['direction'=>'top','limit'=>5],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'authorized','unresolved_fragments'=>[]],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
+   if ($view['question']==='今天消耗业绩格式修复') {
+       $intent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['consume_amount'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'authorized','unresolved_fragments'=>[]];
+       if ($repairPredicate===null) unset($intent['unresolved_fragments']);
+       return ['intent'=>$intent,'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
+   }
+   $legacy=(new \app\services\ai\model\AiModelInputProjector())->modelView(['question'=>$view['question'],'history'=>[]]);$signals=$legacy['current']['signals'];$shape='summary';foreach(['trend','ranking','comparison'] as $candidate)if(in_array($candidate,$signals,true))$shape=$candidate;if(in_array('top_5',$signals,true)||in_array('bottom_5',$signals,true))$shape='ranking';$metrics=array_values(array_intersect(['cash_performance','consume_amount'],$signals));$dates=[];if(in_array('TODAY',$signals,true))$dates=[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]];return ['intent'=>['object_kind'=>'store','object_term'=>'','operation'=>$shape,'metric_codes'=>$metrics,'action_codes'=>[],'needs_metric_choice'=>$metrics===[],'ranking'=>['direction'=>'top','limit'=>5],'periods'=>$dates,'scope'=>'authorized','unresolved_fragments'=>[]],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];};
  $transaction=function($callback)use(&$queries){$queries++;return $callback(new GroupPerformanceMetricReadServices(function($table){return new GatewayFactFixture($table);},function(){}));};
  $gateway=new AiGatewayServices($runs,$config,$private,'fixture.instance',$views,$model,$transaction);
  $auth=['terminal'=>'store','account_id'=>7,'tenant_id'=>'0','can_use'=>true,'can_configure'=>true,'permission_version'=>'v1','scope_mode'=>'stores','store_ids'=>[1],'report_capability_code'=>'group_management_dashboard'];
@@ -57,6 +64,14 @@ try {
  $repeat=$gateway->handle('execute',$context,$binding($run)+$input,$run['run_id']);
  verifyGateway($repeat['status']==='COMPLETED' && $models===1 && $queries===1,'idempotent execute no duplicates');
  verifyGateway(is_string($repeat['progress']),'frontend progress string');
+ [$repairRun,$repairInput]=$make('repair-current','今天消耗业绩格式修复');$modelsBeforeRepair=$models;$queriesBeforeRepair=$queries;
+ $repairResult=$gateway->handle('execute',$context,$binding($repairRun)+$repairInput,$repairRun['run_id']);
+ verifyGateway($repairResult['status']==='COMPLETED' && $models===$modelsBeforeRepair+2 && $queries===$queriesBeforeRepair+1,'fresh model response with an omitted structural field completes through one bounded repair');
+ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($repairRun['run_id'])." AND attempt_code='understand_repair' AND state='SUCCEEDED'")->fetchColumn()===1,'fresh structural repair is recorded as one successful separate model attempt');
+ [$unbound,$unboundInput]=$make('unbound-goal','查看尚未登记的经营目标');$queriesBefore=$queries;
+ $unboundResult=$gateway->handle('execute',$context,$binding($unbound)+$unboundInput,$unbound['run_id']);
+ verifyGateway($unboundResult['status']==='FAILED' && $unboundResult['reason']==='AI_ANALYSIS_COMBINATION_UNAVAILABLE','understood but unregistered goal is a capability gap');
+ verifyGateway($queries===$queriesBefore,'unregistered goal never substitutes a nearby metric or reads facts');
  [$ask,$askInput]=$make('request2','业绩多少？');
  $waiting=$gateway->handle('execute',$context,$binding($ask)+$askInput,$ask['run_id']);
  verifyGateway($waiting['status']==='WAITING_CLARIFICATION' && count($waiting['clarification']['fields'])===1,'v2 asks metric only');

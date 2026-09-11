@@ -3,12 +3,15 @@ namespace app\services\ai\execution;
 
 use app\services\ai\registry\AiBusinessRegistry;
 use app\services\ai\registry\AiRegistryValue;
+use app\services\query\metric\MetricQueryDatePolicy;
+use app\services\query\metric\MetricQueryContractException;
 
 /** Compiles a business-slot plan into a closed, version-frozen executable graph. */
 final class AiRegisteredPlanCompiler
 {
     private $registry;
-    public function __construct(?AiBusinessRegistry $registry=null) { $this->registry=$registry??new AiBusinessRegistry(); }
+    private $today;
+    public function __construct(?AiBusinessRegistry $registry=null,?callable $today=null) { $this->registry=$registry??new AiBusinessRegistry(); $this->today=$today; }
 
     public function compile(array $plan,array $capabilities,array $options=[]): array
     {
@@ -146,17 +149,14 @@ final class AiRegisteredPlanCompiler
         foreach ($metrics as $metric) {
             $contract=$snapshot['metrics'][$metric];
             if (!in_array($query['query_shape'],$contract['query_shapes'],true)) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
-            if ($query['start_date']<$contract['coverage_start']||($query['compare_range']!==null&&$query['compare_range']['start']<$contract['coverage_start'])) AiRegistryValue::fail('AI_DATA_COVERAGE_INCOMPLETE');
+            $this->range($query['start_date'],$query['end_date'],$contract['coverage_start']);
+            if ($query['compare_range']!==null) $this->range($query['compare_range']['start'],$query['compare_range']['end'],$contract['coverage_start']);
         }
         return $query;
     }
-    private function range($start,$end): void
+    private function range($start,$end,?string $coverageStart=null): void
     {
-        foreach ([$start,$end] as $date) {
-            if (!is_string($date)||!preg_match('/^\d{4}-\d{2}-\d{2}$/D',$date)) AiRegistryValue::fail('AI_DATE_INVALID');
-            $parsed=\DateTimeImmutable::createFromFormat('!Y-m-d',$date);
-            if (!$parsed||$parsed->format('Y-m-d')!==$date) AiRegistryValue::fail('AI_DATE_INVALID');
-        }
-        if ($start>$end||(new \DateTimeImmutable($start))->diff(new \DateTimeImmutable($end))->days>365) AiRegistryValue::fail('AI_DATE_INVALID');
+        try { MetricQueryDatePolicy::assertExecutable(['start'=>$start,'end'=>$end],$coverageStart,$this->today?call_user_func($this->today):null); }
+        catch (MetricQueryContractException $error) { AiRegistryValue::fail(MetricQueryDatePolicy::aiReason($error->getErrorCode())); }
     }
 }

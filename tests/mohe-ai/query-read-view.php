@@ -21,6 +21,7 @@ class ReadViewFixtureQuery {
     public function __construct(array $row, string $table='') { $this->row = $row; $this->table=$table; }
     public function __call($name, $args) { $this->calls[] = [$name, $args]; if ($name === 'whereExists') $args[0]($this); return $this; }
     public function find() { return $this->row; }
+    public function select() { return new class { public function toArray() { return []; } }; }
 }
 $seen = [];
 $reader = new GroupPerformanceMetricReadServices(function ($table) use (&$seen) {
@@ -35,6 +36,10 @@ $cashCalls = json_encode($seen[0][1]->calls); $consumptionCalls = json_encode($s
 foreach (['p.tenant_id', 'p.store_id', 'p.business_date', 'effective', 'scopeNormal', 'COALESCE'] as $needle) queryCheck(strpos($cashCalls, $needle) !== false, 'cash source contract ' . $needle);
 queryCheck(strpos($consumptionCalls, "service_status='completed'") !== false, 'consumption requires completed service');
 queryCheck(strpos($cashCalls, 'limit') === false && strpos($consumptionCalls, 'limit') === false, 'no fact limit hidden in metric totals');
+$reader->dimensionRanking('sales_amount','project','0',[1],$range,5,'desc');
+$projectSalesCalls=json_encode($seen[count($seen)-1][1]->calls);
+queryCheck(strpos($projectSalesCalls,'p.source_type')!==false && strpos($projectSalesCalls,'project')!==false,
+    'project sales ranking applies its frozen registered source-type split inside the Reader');
 $capabilities = MetricReadViewServices::metricCapabilities();
 queryCheck($capabilities['consume_amount']['ai_query_ready'] === true && count($capabilities['consume_amount']['query_shapes']) === 4, 'consumption implemented contracts registered');
     queryCheck($capabilities['cash_performance']['ai_query_ready'] === true && count($capabilities['cash_performance']['query_shapes']) === 4 && $capabilities['cash_performance']['readiness_reasons'] === [], 'cash recharge-inclusive contract registered');

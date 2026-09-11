@@ -21,10 +21,16 @@ final class AiCapabilityGuidanceCatalog
         $filterKeys=$objectKind==='person' ? ['selection_ref'] : [];
         $role=$objectKind==='person'?'allocated_employee':($objectKind==='store'?'store_total':null);
         $items=[];
-        foreach ($operations as $shape) {
+        // One customer object may participate in several registered relations
+        // (for example, a project can be sold and also consumed).  Discover
+        // every declared relation and let the later metric choice distinguish
+        // their business meaning; treating that as an unknown relation would
+        // hide valid registered capabilities.
+        $roles=$role===null?self::relationRoles($readiness,$objectKind):[$role];
+        foreach ($operations as $shape) foreach ($roles as $relationRole) {
             $found=(AnalysisCapabilityCatalogFactory::make())->discover([
                 'metric_codes'=>[], 'object_kind'=>$objectKind, 'operation'=>$shape,
-                'filter_keys'=>$filterKeys, 'relation_role'=>$role??self::relationRole($readiness,$objectKind),
+                'filter_keys'=>$filterKeys, 'relation_role'=>$relationRole,
             ], static function(array $binding) use($allowed,$readiness,$hasReadiness,$objectKind,$filterKeys,$shape): bool {
                 $code=$binding['metric_code']; $contract=$readiness[$code]??null;
                 // Production gateway snapshots always include metric_readiness.
@@ -65,13 +71,14 @@ final class AiCapabilityGuidanceCatalog
         return $items;
     }
 
-    private static function relationRole(array $readiness,string $objectKind): string
+    /** @return array<int,string> */
+    private static function relationRoles(array $readiness,string $objectKind): array
     {
         $roles=[];
         foreach ($readiness as $contract) foreach ((array)($contract['analysis_dimension_contracts']??[]) as $dimension) {
             if (is_array($dimension) && ($dimension['object_kind']??null)===$objectKind && is_string($dimension['relation_role']??null)) $roles[$dimension['relation_role']]=true;
         }
-        if (count($roles)!==1) return 'unregistered_object_relation';
-        return (string)array_key_first($roles);
+        $roles=array_keys($roles);sort($roles,SORT_STRING);
+        return $roles;
     }
 }

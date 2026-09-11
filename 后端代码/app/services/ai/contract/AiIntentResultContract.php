@@ -39,7 +39,7 @@ final class AiIntentResultContract
         $context=$hasPriorQuery
             ? 'A verified prior query exists. Include context_delta with exactly these keys: '.implode(', ',self::DELTA_FIELDS).'. Each value is one of inherit, replace, clear or pending. Use inherit only when the current wording leaves that exact meaning unchanged. Use replace only when current wording supplies a new meaning in the matching ordinary field. Use clear only when the customer explicitly removes a condition. Use pending when clarification is needed. Never omit a delta key and never infer inherit from an omitted field. A short continuation can replace just the analytical object while retaining the verified period, response form, ranking direction, ranking quantity, scope and other unchanged meaning. When that new object cannot legally use the previous metric under capabilities.object_contracts, mark metric_codes pending rather than returning operation unknown or an unresolved fragment; the server will present only registered choices.'
             : 'No verified prior query exists. Do not include context_delta.';
-        return 'Return one JSON object following '.self::VERSION.'. Required keys: '.implode(', ',self::REQUIRED_FIELDS).'. Optional keys: ranking, periods, scope'.($hasPriorQuery?', context_delta':'').'. '.$context.' object_term is an exact customer term or an empty string where no named object is needed. needs_metric_choice is true only when the customer must choose between legal metric meanings; then metric_codes must be empty. periods, when present, is an ordered array of up to two period objects. A period is exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":positive-integer,"end_offset_days":integer-from--365-to-0}, or {"kind":"month_offset","offset_months":integer-from--24-to-0}. A calendar-month meaning uses month_offset; relative_days is only for a stated rolling number of days. ranking is {"direction":"top|bottom|top_and_bottom|unspecified","limit":integer-or-null}. Scope and accessible stores are server-owned: omit scope unless current wording explicitly changes current-store versus authorized scope. metric_codes and action_codes only contain supplied codes. unresolved_fragments only contains exact current-question text that cannot be represented. Never calculate, query, invent a condition, discard a condition, or copy a previous result value.';
+        return 'Return one JSON object following '.self::VERSION.'. Required keys: '.implode(', ',self::REQUIRED_FIELDS).'. Optional keys: understanding, ranking, periods, scope'.($hasPriorQuery?', context_delta':'').'. '.$context.' object_term is an exact customer term or an empty string where no named object is needed. needs_metric_choice is true only when the intended business measurement is genuinely ambiguous; then metric_codes must be empty. Lack of an available metric is not ambiguity. periods, when present, is an ordered array of up to two period objects. A period is exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":positive-integer,"end_offset_days":signed-integer}, or {"kind":"month_offset","offset_months":signed-integer}. Preserve early, future and long periods exactly; execution coverage and length limits are checked by the server later, never reinterpret them as an invalid intent. A calendar-month meaning uses month_offset; relative_days is only for a stated rolling number of days. ranking is {"direction":"top|bottom|top_and_bottom|unspecified","limit":integer-or-null}. Scope and accessible stores are server-owned: omit scope unless current wording explicitly changes current-store versus authorized scope. metric_codes and action_codes are optional binding candidates inside their required arrays and only contain supplied codes; they never limit which business meaning may be understood. unresolved_fragments only contains exact current-question text whose meaning cannot be understood, not understood requests that lack a registered binding. Never calculate, query, invent a condition, discard a condition, or copy a previous result value. '.AiIntentUnderstandingContract::modelInstruction();
     }
 
     public static function normalize($value,array $metricCodes,array $actionCodes,array $safeQuestion): array
@@ -49,10 +49,12 @@ final class AiIntentResultContract
         $hasPrior=($safeQuestion['prior_query']??null)!==null;
         foreach (self::REQUIRED_FIELDS as $key) if (!array_key_exists($key,$value)) self::fail('missing_key:'.$key);
         if ($hasPrior && !array_key_exists('context_delta',$value)) self::fail('missing_key:context_delta');
-        $allowed=array_merge(self::REQUIRED_FIELDS,['ranking','periods','scope'],$hasPrior?['context_delta']:[]);sort($allowed,SORT_STRING);
+        $allowed=array_merge(self::REQUIRED_FIELDS,['understanding','ranking','periods','scope'],$hasPrior?['context_delta']:[]);sort($allowed,SORT_STRING);
         $keys=array_keys($value);sort($keys,SORT_STRING);
         if (array_diff($keys,$allowed)) self::fail('unknown_key');
         if (!$hasPrior && array_key_exists('context_delta',$value)) self::fail('unexpected_context_delta');
+        $understanding=array_key_exists('understanding',$value) && $value['understanding']!==null
+            ? AiIntentUnderstandingContract::normalize($value['understanding'],$safeQuestion) : null;
         if (!is_bool($value['needs_metric_choice'])) self::fail('bad_type:needs_metric_choice');
         if (!is_string($value['object_term']) || mb_strlen($value['object_term'],'UTF-8')>160) self::fail('bad_value:object_term');
         if (!in_array($value['object_kind'],['store','person','position','member','product','project','category','partner','inventory','course','organization','unknown'],true)) self::fail('bad_value:object_kind');
@@ -91,7 +93,7 @@ final class AiIntentResultContract
         $normalized=$value['object_term']!=='' && !self::contained($value['object_term'],$texts);
         if ($normalized) $value['object_term']='';
         foreach ($value['unresolved_fragments'] as $fragment) if (!is_string($fragment)||$fragment===''||mb_strlen($fragment,'UTF-8')>160||!self::contained($fragment,$texts)) self::fail('bad_value:unresolved_fragments');
-        return ['object_kind'=>$value['object_kind'],'object_term'=>$value['object_term'],'operation'=>$value['operation'],'metric_codes'=>$value['metric_codes'],'action_codes'=>$value['action_codes'],'needs_metric_choice'=>$value['needs_metric_choice'],'ranking'=>$ranking,'periods'=>$periods,'scope'=>$scope,'context_delta'=>$delta,'unresolved_fragments'=>$value['unresolved_fragments'],'_periods_supplied'=>$periodsSupplied,'_scope_supplied'=>$scopeSupplied,'_ranking_supplied'=>$rankingSupplied,'_object_term_normalized'=>$normalized,'_contract_version'=>self::VERSION];
+        return ['object_kind'=>$value['object_kind'],'object_term'=>$value['object_term'],'operation'=>$value['operation'],'metric_codes'=>$value['metric_codes'],'action_codes'=>$value['action_codes'],'needs_metric_choice'=>$value['needs_metric_choice'],'understanding'=>$understanding,'ranking'=>$ranking,'periods'=>$periods,'scope'=>$scope,'context_delta'=>$delta,'unresolved_fragments'=>$value['unresolved_fragments'],'_periods_supplied'=>$periodsSupplied,'_scope_supplied'=>$scopeSupplied,'_ranking_supplied'=>$rankingSupplied,'_object_term_normalized'=>$normalized,'_contract_version'=>self::VERSION];
     }
 
     private static function delta($value): array
@@ -115,13 +117,13 @@ final class AiIntentResultContract
     }
 
     private static function codes($values): bool { if (!is_array($values)||count($values)>8||count(array_unique($values))!==count($values)) return false;foreach($values as $v)if(!is_string($v))return false;return true; }
-    private static function periods($periods): bool
+    public static function periods($periods): bool
     {
         if (!is_array($periods)||count($periods)>2||($periods!==[]&&array_keys($periods)!==range(0,count($periods)-1))) return false;
         foreach ($periods as $p) { if(!is_array($p)||!is_string($p['kind']??null))return false;$keys=array_keys($p);sort($keys,SORT_STRING);
             if($p['kind']==='date_range'){if($keys!==['end','kind','start']||!is_string($p['start'])||!is_string($p['end'])||!preg_match('/^\d{4}-\d{2}-\d{2}$/D',$p['start'])||!preg_match('/^\d{4}-\d{2}-\d{2}$/D',$p['end']))return false;}
-            elseif($p['kind']==='relative_days'){if($keys!==['days','end_offset_days','kind']||!is_int($p['end_offset_days'])||$p['end_offset_days'] < -365||$p['end_offset_days']>0||!is_int($p['days'])||$p['days']<1||$p['days']>366)return false;}
-            elseif($p['kind']==='month_offset'){if($keys!==['kind','offset_months']||!is_int($p['offset_months'])||$p['offset_months'] < -24||$p['offset_months']>0)return false;} else return false;
+            elseif($p['kind']==='relative_days'){if($keys!==['days','end_offset_days','kind']||!is_int($p['end_offset_days'])||!is_int($p['days'])||$p['days']<1)return false;}
+            elseif($p['kind']==='month_offset'){if($keys!==['kind','offset_months']||!is_int($p['offset_months']))return false;} else return false;
         } return true;
     }
     private static function contained(string $value,array $texts): bool {foreach($texts as $text)if(is_string($text)&&mb_strpos($text,$value,0,'UTF-8')!==false)return true;return false;}

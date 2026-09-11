@@ -32,7 +32,7 @@ final class AiPlatformPrincipalResolver
             'staff_labor_yeji'=>$allowed('admin-report-store-operations-store_craftsman_consumption'),
             'staff_sales_yeji'=>$allowed('admin-report-store-operations-store_salesperson_performance'),
         ];
-        if ($report) {
+        {
             if ($type===3 && (int)($admin['relation_id']??0)>0) {
                 $mode='agent_limited';$stores=app()->make(OrganizationScopeService::class)->getResolvedStoreIdsByLegacyAgentId((int)$admin['relation_id']);
             } elseif ($type===3) {
@@ -42,15 +42,15 @@ final class AiPlatformPrincipalResolver
                 $scopes=app()->make(EmployeeDataScopeServices::class);
                 $resolved=$scopes->resolveEffectiveStoreIds($employeeId,0,$admin);
                 if ($resolved===null) { $mode='all';$stores=$this->allStores(); }
-                elseif ($scopes->resolvePrimaryHqScopeMode($employeeId)===EmployeeDataScopeServices::MODE_PERSONAL) $mode='self_participant';
+                elseif ($resolved===[]) { $mode='self_participant';$stores=$scopes->resolveCurrentActiveStoreIds($employeeId); }
                 else { $mode='stores';$stores=$resolved; }
             } else { $mode='platform_admin';$stores=$this->allStores(); }
         }
         $stores=array_values(array_unique(array_filter(array_map('intval',(array)$stores),static fn($id)=>$id>0)));sort($stores);
         return ['terminal'=>'platform','account_id'=>$accountId,'scope_mode'=>$mode==='self_participant'?$mode:($stores?'stores':'none'),
             'store_ids'=>$stores,'permission_version'=>hash('sha256',json_encode([$mode,$employeeId,$stores,$roles,$entry,$configure,$report,$personnelGrants])),
-            'analysis_personnel_grants'=>$personnelGrants,
-            'can_use'=>$entry && $report && $stores!==[],'can_configure'=>$configure,'report_capability_code'=>'group_management_dashboard',
+            'analysis_personnel_grants'=>$personnelGrants,'employee_id'=>$employeeId,'store_report_authorized'=>$report,
+            'can_use'=>$entry,'can_configure'=>$configure,'report_capability_code'=>'group_management_dashboard',
             'tenant_id'=>'0','origin_store_id'=>0,'origin_organization_id'=>'0','export_principal_ready'=>true,'principal_kind'=>'platform_admin'];
     }
 

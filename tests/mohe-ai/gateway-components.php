@@ -165,6 +165,14 @@ namespace {
     $outboundText=json_encode($outbound,JSON_UNESCAPED_UNICODE);
     check(strpos($outboundText,'skill_intent_understanding')!==false&&strpos($outboundText,'# 门店运营')!==false&&strpos($outboundText,'# 用户意图理解')!==false,'model understanding receives the complete source-owned language and business Skills');
     check(strpos($outboundText,'intent-result-v3')!==false,'model understanding receives the source-owned intent contract');
+    check(strpos($outboundText,'capabilities constrain candidate bindings, not the business meanings you can understand')!==false,'understanding prompt does not reduce customer meaning to executable metric codes');
+    $unboundQuestion=$safeQuestion;$unboundQuestion['question']='想了解课程学习后的掌握情况';$unboundQuestion['recent_questions']=[];
+    $unboundIntent=['object_kind'=>'course','object_term'=>'课程','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],
+        'needs_metric_choice'=>false,'unresolved_fragments'=>[],
+        'understanding'=>['goal'=>'了解课程学习后的掌握情况','evidence_fragments'=>['课程学习后的掌握情况'],'status'=>'understood']];
+    $GLOBALS['sfResponse']=$response(json_encode($unboundIntent));
+    $unboundReply=$client->understand($unboundQuestion,[],'fixture/model','fixture-key',1000,function(){},$skills);
+    check($unboundReply['intent']===$unboundIntent,'model boundary preserves understood meaning when no registered binding exists');
     $firstTurn=$intent; unset($firstTurn['ranking'],$firstTurn['scope']); $firstTurn['object_kind']='store';$firstTurn['object_term']='门店';$firstTurn['operation']='summary';$firstTurn['metric_codes']=[];$firstTurn['action_codes']=[];$firstTurn['needs_metric_choice']=false;$firstTurn['unresolved_fragments']=[];
     $GLOBALS['sfResponse']=$response(json_encode($firstTurn));
     check($client->understand($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){},$skills)['intent']===$firstTurn,'first question accepts omitted inapplicable fields and non-verbatim generic object term');

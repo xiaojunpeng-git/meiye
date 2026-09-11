@@ -1236,7 +1236,9 @@ final class RegisteredMetricReadServices
     {
         $idField = (string)$dimension['id'];
         $nameField = (string)$dimension['name'];
-        $rows = $this->factQuery($source, $tenantId, $stores, $range)->where('p.' . $idField, '>', 0)
+        $query=$this->factQuery($source, $tenantId, $stores, $range);
+        $this->dimensionSourceFilters($query,$dimension);
+        $rows = $query->where('p.' . $idField, '>', 0)
             ->fieldRaw('p.' . $idField . ' entity_id,MAX(p.' . $nameField . ') entity_name,COALESCE(SUM(' . $source['amount'] . '),0) metric_value')
             ->group('p.' . $idField)->orderRaw('metric_value ' . strtoupper($order) . ',entity_id ASC')
             ->limit($limit)->select()->toArray();
@@ -1248,6 +1250,22 @@ final class RegisteredMetricReadServices
             $out[] = ['entity_id' => $id, 'entity_name' => $name, 'metric_value' => $this->integer($row['metric_value'] ?? null)];
         }
         return $out;
+    }
+
+    /**
+     * A dimension may declare only a frozen source-type split owned by its
+     * metric registration.  It is intentionally not a caller-supplied filter:
+     * the query path cannot turn it into arbitrary fact-table access.
+     */
+    private function dimensionSourceFilters($query,array $dimension): void
+    {
+        $filters=$dimension['analysis_source_filters']??[];
+        if (!is_array($filters)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        foreach ($filters as $field=>$value) {
+            if ($field!=='source_type' || !is_string($value)
+                || !in_array($value,['project','product'],true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            $query->where('p.'.$field,$value);
+        }
     }
 
     private function distinctSummary(array $source, string $tenantId, array $stores, array $range): int

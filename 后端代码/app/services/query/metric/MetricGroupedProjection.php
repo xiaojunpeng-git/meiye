@@ -5,14 +5,15 @@ namespace app\services\query\metric;
 /** Deterministic shared report projection of authorized, already grouped fact totals. */
 final class MetricGroupedProjection
 {
-    public function trend(array $points, array $range): array
+    public function trend(array $points, array $range, ?string $today = null): array
     {
+        MetricQueryDatePolicy::assertExecutable($range,MetricDefinitionRegistry::COVERAGE_START,$today);
         $totals = [];
         foreach ($points as $point) $totals[$point['business_date']] = $this->add($totals[$point['business_date']] ?? 0, $point['amount_cents']);
         $out = [];
         $day = new \DateTimeImmutable($range['start'], new \DateTimeZone('Asia/Shanghai'));
         for ($count = 0; $day->format('Y-m-d') <= $range['end']; ++$count, $day = $day->modify('+1 day')) {
-            if ($count > 366) $this->fail();
+            if ($count >= MetricQueryDatePolicy::MAX_DAYS) $this->fail();
             $date = $day->format('Y-m-d');
             $out[] = ['business_date' => $date, 'amount_cents' => $totals[$date] ?? 0];
         }

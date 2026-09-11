@@ -186,10 +186,9 @@ final class AiWorkflowPlanner
             return $this->range($normalize($term['start']??null),$normalize($term['end']??null));
         }
         if ($code==='ROLLING_DAYS') {
-            $days=$term['days']??null;if(!is_int($days)||$days<1||$days>366)throw new AiContractException('AI_DATE_INVALID');
-            return $this->range($this->date($today)->modify('-'.($days-1).' days')->format('Y-m-d'),$today);
+            return $this->normalizeNaturalPeriod(['kind'=>'relative_days','days'=>$term['days']??null,'end_offset_days'=>0],$today);
         }
-        if ($code==='TOMORROW') throw new AiContractException('AI_FUTURE_ACTUALS_UNAVAILABLE');
+        if ($code==='TOMORROW') return $this->normalizeNaturalPeriod(['kind'=>'relative_days','days'=>1,'end_offset_days'=>1],$today);
         if (!in_array($code,['TODAY','YESTERDAY','DAY_BEFORE_YESTERDAY','THIS_MONTH','LAST_MONTH'],true)) throw new AiContractException('AI_DATE_INVALID');
         $date=$this->date($today);
         if ($code==='YESTERDAY') $date=$date->modify('-1 day');
@@ -200,11 +199,30 @@ final class AiWorkflowPlanner
     }
     /** Shared date normalization for capability-driven planners; no model date arithmetic. */
     public function normalizePeriod(array $term,string $today): array { return $this->period($term,$today); }
+    /** Resolves meaning only. Bounds here are calendar representation, not query capacity. */
+    public function normalizeNaturalPeriod(array $period,string $today): array
+    {
+        if (!\app\services\ai\contract\AiIntentResultContract::periods([$period])) throw new AiContractException('AI_DATE_INVALID');
+        if ($period['kind']==='date_range') return $this->range($period['start'],$period['end']);
+        $reference=$this->date($today);
+        if ($period['kind']==='relative_days') {
+            $minimum=$this->date('1000-01-01');$maximum=$this->date('9999-12-31');
+            $offset=$period['end_offset_days'];
+            if ($offset < -$minimum->diff($reference)->days || $offset > $reference->diff($maximum)->days) throw new AiContractException('AI_DATE_INVALID');
+            $end=$reference->modify($offset.' days');
+            if ($period['days']>$minimum->diff($end)->days+1) throw new AiContractException('AI_DATE_INVALID');
+            return $this->range($end->modify('-'.($period['days']-1).' days')->format('Y-m-d'),$end->format('Y-m-d'));
+        }
+        $offset=$period['offset_months'];$year=(int)$reference->format('Y');$month=(int)$reference->format('n');
+        if ($offset < - (($year-1000)*12+$month-1) || $offset > (9999-$year)*12+12-$month) throw new AiContractException('AI_DATE_INVALID');
+        $start=$reference->modify('first day of this month')->modify($offset.' months');
+        // Existing product meaning: current calendar month is month-to-date.
+        return $this->range($start->format('Y-m-d'),$offset===0?$today:$start->format('Y-m-t'));
+    }
     private function range($start, $end): array
     {
-        $first = $this->date($start); $last = $this->date($end);
-        if ($start > $end || (int)$first->diff($last)->format('%a') > 365) throw new AiContractException('AI_DATE_INVALID');
-        return ['start' => $start, 'end' => $end];
+        try { return \app\services\query\metric\MetricQueryDatePolicy::normalize(['start'=>$start,'end'=>$end]); }
+        catch (\app\services\query\metric\MetricQueryContractException $error) { throw new AiContractException(\app\services\query\metric\MetricQueryDatePolicy::aiReason($error->getErrorCode())); }
     }
     private function date($text): \DateTimeImmutable
     {

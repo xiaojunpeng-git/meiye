@@ -7,6 +7,8 @@ final class AiAuthority
     public static function capabilities(bool $exportReady,array $context=[]): array
     {
         $registered=\app\services\query\metric\MetricReadViewServices::metricCapabilities(); $metrics=[];
+        foreach ($registered as $code=>$contract) if (($contract['filter_grain']??null)!=='person'
+            && (($context['scope_mode']??null)==='self_participant' || ($context['store_report_authorized']??true)!==true)) unset($registered[$code]);
         foreach ($registered as $code=>$contract) if (($contract['filter_grain']??null)==='person'
             && (!(($context['analysis_personnel_ready']??false)===true) || ($context['analysis_personnel_grants'][$code]??false)!==true)) unset($registered[$code]);
         foreach ($registered as $code=>$capability) if (!empty($capability['ai_query_ready'])) $metrics[]=$code;
@@ -34,14 +36,20 @@ final class AiAuthority
     }
     public static function identity(array $context,string $instance,string $key): string
     { return hash_hmac('sha256',$instance.':'.$context['terminal'].':'.$context['account_id'],$key); }
+    public static function currentStoreId(array $context): ?int
+    {
+        $id=$context['origin_store_id']??null;
+        return is_int($id) && $id>0 && in_array($id,$context['store_ids']??[],true)?$id:null;
+    }
     public static function permissionHash(array $context): string
-    { return hash('sha256',json_encode([$context['permission_version'],$context['scope_mode'],$context['store_ids'],$context['can_use'],$context['report_capability_code']])); }
+    { return hash('sha256',json_encode([$context['permission_version'],$context['scope_mode'],$context['store_ids'],$context['can_use'],$context['report_capability_code'],$context['employee_id']??0,$context['store_report_authorized']??true,$context['analysis_personnel_grants']??[]])); }
     public static function reportBinding(array $context,string $instance,string $key): array
     {
         if (empty($context['can_use'])) throw new \RuntimeException('AI_PERMISSION_DENIED');
         return ['instance_id'=>$instance,'subject_ref'=>self::identity($context,$instance,$key),'terminal'=>$context['terminal'],
             'tenant_id'=>(string)($context['tenant_id']??0),'permission_version'=>self::permissionHash($context),
             'report_capability_code'=>$context['report_capability_code'],'scope_provider_code'=>'current_report_scope_v1',
-            'scope_mode'=>$context['scope_mode'],'store_ids'=>$context['store_ids']];
+            'scope_mode'=>$context['scope_mode'],'store_ids'=>$context['store_ids'],
+            'store_report_authorized'=>($context['store_report_authorized']??true)===true,'employee_id'=>(int)($context['employee_id']??0)];
     }
 }

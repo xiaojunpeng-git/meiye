@@ -386,6 +386,32 @@ final class AiGatewayServices
         throw new RuntimeException('AI_STORE_SCOPE_UNAVAILABLE');
     }
 
+    /**
+     * Resolves only an explicit “current store” reference against the
+     * authenticated, still-authorized origin.  It never infers a store for a
+     * question that did not contain that reference and it never widens an
+     * already narrowed plan.
+     */
+    private function bindCurrentStoreScope(array $compiled,array $context,bool $requested): array
+    {
+        if (!$requested) return $compiled;
+        $store=\app\services\ai\execution\AiAuthority::currentStoreId($context);
+        if ($store===null) throw new RuntimeException('AI_UNSUPPORTED_CONDITION');
+        if (($compiled['kind']??null)==='plan' && is_array($compiled['plan']['query']??null)) {
+            $existing=$compiled['plan']['query']['store_ids']??[];
+            if (!is_array($existing) || ($existing!==[] && $existing!==[$store])) throw new RuntimeException('AI_UNSUPPORTED_CONDITION');
+            $compiled['plan']['query']['store_ids']=[$store];
+            return $compiled;
+        }
+        if (($compiled['kind']??null)==='clarification') {
+            $existing=$compiled['resolved_store_ids']??[];
+            if (!is_array($existing) || ($existing!==[] && $existing!==[$store])) throw new RuntimeException('AI_UNSUPPORTED_CONDITION');
+            $compiled['resolved_store_ids']=[$store];
+            return $compiled;
+        }
+        throw new RuntimeException('AI_UNSUPPORTED_CONDITION');
+    }
+
     /** Reads only trusted names for stores already granted by the current report scope. */
     private function authorizedStoreObjects(array $context): array
     {
@@ -564,6 +590,11 @@ final class AiGatewayServices
                 // that single, fenced call enough room within the 180-second
                 // Run budget; it remains cancellable through checkpoint().
                 :(new SiliconFlowClient())->understand($safe['outbound'],$summaries,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills);
+            // Treat an injected adapter exactly like a provider response.  The
+            // gateway owns the final contract boundary, so a malformed test
+            // adapter cannot bypass the same single recovery path used in
+            // production.
+            $reply['intent']=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound']);
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
         } catch (\Throwable $error) {
             if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error);
@@ -571,8 +602,12 @@ final class AiGatewayServices
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand',$firstState);
             $diagnostic=$error instanceof AiContractException?$error->diagnostic():[];
             $repairPredicate=$diagnostic['predicate']??null;
-            $repairable=$this->model===null && $sourceQuery!==null
-                && $error instanceof AiContractException
+            // A provider may omit a mandatory JSON field on either a fresh
+            // question or a follow-up.  One fenced completion attempt is safe
+            // in both cases: it asks the model to provide the field itself,
+            // and never supplies a metric, condition, date or other business
+            // meaning on the model's behalf.
+            $repairable=$error instanceof AiContractException
                 && $error->getMessage()==='AI_MODEL_INTENT_CONTRACT_INVALID'
                 && AiIntentResultContract::repairableOmission($repairPredicate);
             if (!$repairable) throw $error;
@@ -586,7 +621,10 @@ final class AiGatewayServices
             $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand_repair');
             try {
                 $checkpoint();
-                $reply=(new SiliconFlowClient())->understand($safe['outbound'],$summaries,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills,$repairPredicate);
+                $reply=$this->model
+                    ? call_user_func($this->model,$safe['outbound'],$summaries,$configuration,$checkpoint,$repairPredicate)
+                    : (new SiliconFlowClient())->understand($safe['outbound'],$summaries,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills,$repairPredicate);
+                $reply['intent']=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound']);
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_repair','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
             } catch (\Throwable $repairError) {
                 if ($repairError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$repairError);
@@ -594,7 +632,7 @@ final class AiGatewayServices
                 throw $repairError;
             }
         }
-        $checkpoint();$intent=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound']);
+        $checkpoint();$intent=$reply['intent'];
         // The model states only a delta. This named merger is the sole place
         // that may retain verified query meaning across turns.
         $merged=\app\services\ai\execution\IntentContextMerger::merge($sourceQuery,$intent);
@@ -668,9 +706,13 @@ final class AiGatewayServices
             $projection['date_terms']=$this->naturalPeriodTerms($intent['periods'],$today);
         }
         if ($intent['_scope_supplied'] && $intent['scope']==='current_store') {
-            if (!($context['terminal']==='store' && count($context['store_ids'])===1)) throw new RuntimeException('AI_UNSUPPORTED_CONDITION');
+            if (\app\services\ai\execution\AiAuthority::currentStoreId($context)===null) throw new RuntimeException('AI_UNSUPPORTED_CONDITION');
             $projection['signals'][]='current_store';
         }
+        // A current-store phrase is an explicit customer condition.  The
+        // authenticated origin may resolve that phrase, but it must be bound
+        // into the eventual query rather than merely accepted as a signal.
+        $currentStoreRequested=$intent['_scope_supplied'] && $intent['scope']==='current_store';
         // Scope changes are shared by every subject, not just store summaries.
         // The source selection has already been recovered before this finishing
         // step; an unresolved new store must still ask, never widen the query.
@@ -684,8 +726,9 @@ final class AiGatewayServices
         );
         $operationOptions=$this->registeredOperationOptions($caps,$intent['object_kind']??'unknown');
         $replacementOperationOptions=$this->registeredOperationOptions($caps,$merged['prospective_intent']['object_kind']??'unknown');
-        $finish=function(array $compiled)use($context,$term,$contextDecisions,$owner,$id,$generation,$worker,$inheritedConstraints,$merged,$metricOptions,$replacementMetricOptions,$operationOptions,$replacementOperationOptions):array {
+        $finish=function(array $compiled)use($context,$term,$contextDecisions,$owner,$id,$generation,$worker,$inheritedConstraints,$merged,$metricOptions,$replacementMetricOptions,$operationOptions,$replacementOperationOptions,$currentStoreRequested):array {
             $compiled=$this->bindNamedStoreScope($compiled,$context,$term,$contextDecisions,$owner,$id,$generation,$worker);
+            $compiled=$this->bindCurrentStoreScope($compiled,$context,$currentStoreRequested);
             if ($merged['replacement_confirmation']) {
                 $remaining=array_values(array_filter($merged['pending'],static function(string $field): bool { return $field!=='business_filters'; }));
                 $compiled=(new \app\services\ai\execution\AiContextReplacementGuidancePlanner())->start($compiled,$remaining,$inheritedConstraints,$replacementMetricOptions,$merged['prospective_intent'],$replacementOperationOptions);
@@ -714,6 +757,20 @@ final class AiGatewayServices
             if (!in_array($shape,['summary','trend','ranking','comparison'],true)) throw new RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
             return $finish(['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_'.$shape,
                 'query'=>$sourceQuery,'output_format'=>$body['output_format']]]);
+        }
+        // Understanding is deliberately broader than today's registered
+        // Reader.  When the model has preserved a clear business goal but no
+        // registered metric can faithfully bind it, stop as a capability gap
+        // instead of presenting unrelated metric choices or claiming that
+        // the customer failed to explain the request.
+        $understanding=$intent['understanding']??null;
+        if (is_array($understanding) && ($understanding['status']??null)==='understood'
+            && $intent['object_kind']!=='person' && $intent['metric_codes']===[] && !$intent['needs_metric_choice']) {
+            throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+        }
+        if (is_array($understanding) && ($understanding['status']??null)==='needs_clarification'
+            && !$intent['needs_metric_choice'] && $intent['unresolved_fragments']===[]) {
+            throw new RuntimeException('AI_INTENT_UNRESOLVED');
         }
         // Any registered object dimension follows the same controlled path.
         // Object labels come from the runtime Skill; metrics and dimensions
@@ -754,7 +811,7 @@ final class AiGatewayServices
         $projection['signals']=array_values(array_unique(array_merge($intent['metric_codes'],[$intent['operation']])));
         if ($intent['needs_metric_choice']) $projection['signals'][]='ambiguous_metric';
         $projection['blocking_reason']=null;$projection['unresolved_condition']=false;$projection['semantic_intent']['constraints']=[];
-        $caps['current_store_bound']=$context['terminal']==='store' && count($context['store_ids'])===1;
+        $caps['current_store_bound']=\app\services\ai\execution\AiAuthority::currentStoreId($context)!==null;
         $compiled=(new AiWorkflowPlanner())->compile($projection,['decision'=>'query','query_shape'=>$intent['operation'],'metric_codes'=>$intent['metric_codes'],'ranking'=>$intent['ranking']],$caps,$body['output_format'],$today);
         return $finish($compiled);
     }
@@ -823,18 +880,8 @@ final class AiGatewayServices
 
     private function naturalPeriodTermsOne(array $period,string $today): array
     {
-        $reference=new \DateTimeImmutable($today,new \DateTimeZone('Asia/Shanghai'));
-        if ($period['kind']==='date_range') return [['code'=>'EXPLICIT','start'=>$period['start'],'end'=>$period['end']]];
-        if ($period['kind']==='relative_days') {
-            $end=$reference->modify(((int)$period['end_offset_days']).' days');
-            return [['code'=>'EXPLICIT','start'=>$end->modify('-'.(((int)$period['days'])-1).' days')->format('Y-m-d'),'end'=>$end->format('Y-m-d')]];
-        }
-        $offset=(int)$period['offset_months'];
-        $month=$reference->modify('first day of this month')->modify($offset.' months');
-        // “本月” means month-to-date.  A real-time reader must never turn it
-        // into a request for days that have not happened yet.
-        $end=$offset===0?$reference->format('Y-m-d'):$month->format('Y-m-t');
-        return [['code'=>'EXPLICIT','start'=>$month->format('Y-m-d'),'end'=>$end]];
+        $range=(new AiWorkflowPlanner())->normalizeNaturalPeriod($period,$today);
+        return [['code'=>'EXPLICIT','start'=>$range['start'],'end'=>$range['end']]];
     }
 
     /** Registry selects the frozen graph; the gateway supplies only trusted infrastructure adapters. */
@@ -842,10 +889,9 @@ final class AiGatewayServices
     {
         $run=$this->runs->checkpoint($owner,$id,$generation,$worker);
         $today=(new \DateTimeImmutable('@'.intdiv($run['created_at'],1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
-        if (isset($plannerPlan['query']) && ($plannerPlan['query']['end_date']>$today || (($plannerPlan['query']['compare_range']['end']??$today)>$today))) throw new RuntimeException('AI_FUTURE_ACTUALS_UNAVAILABLE');
         $budget=(int)explode('-',$snapshot['budget_profile_version'])[0];
         $this->assertManagedPlan($plannerPlan);
-        $plan=(new AiRegisteredPlanCompiler($this->registry()))->compile($plannerPlan,$this->capabilities($context),[
+        $plan=(new AiRegisteredPlanCompiler($this->registry(),static function()use($today):string{return $today;}))->compile($plannerPlan,$this->capabilities($context),[
             'run_budget_ms'=>$budget,'remaining_execution_ms'=>min($budget,$run['deadline_at']-(int)floor(microtime(true)*1000))]);
         $evidence=null; $answer=null; $waiting=null; $trace=[];
         $guard=function() use($context,$owner,$id,$generation,$worker,$snapshot,&$waiting): void {
@@ -924,7 +970,7 @@ final class AiGatewayServices
     private function definitionEvidence(array $context,array $codes): array
     {
         $fresh=$this->fresh($context); $binding=\app\services\ai\execution\AiAuthority::reportBinding($fresh,$this->instance,$this->private->signingKey());
-        if (!in_array($fresh['scope_mode'],['all','stores'],true) || ($fresh['scope_mode']==='stores' && !$fresh['store_ids'])) throw new RuntimeException('AI_PERMISSION_DENIED');
+        if (!in_array($fresh['scope_mode'],['all','stores','self_participant'],true) || !$fresh['store_ids']) throw new RuntimeException('AI_PERMISSION_DENIED');
         $capabilities=$this->capabilities($fresh); $dictionary=new \app\services\metric\MetricDictionaryServices(); $definitions=[]; $readiness=[];
         if (!$codes) throw new RuntimeException('AI_METRIC_EXPLANATION_NOT_READY');
         foreach ($codes as $code) {
@@ -949,7 +995,8 @@ final class AiGatewayServices
             if (empty($c['can_use'])) throw new RuntimeException('AI_PERMISSION_DENIED');
             return ['instance_id'=>$this->instance,'subject_ref'=>$this->identity($c),'terminal'=>$c['terminal'],'tenant_id'=>(string)($c['tenant_id']??0),
                 'permission_version'=>$this->permissionHash($c),'report_capability_code'=>$c['report_capability_code'],'scope_provider_code'=>'current_report_scope_v1',
-                'scope_mode'=>$c['scope_mode'],'store_ids'=>$c['store_ids']];
+                'scope_mode'=>$c['scope_mode'],'store_ids'=>$c['store_ids'],
+                'store_report_authorized'=>($c['store_report_authorized']??true)===true,'employee_id'=>(int)($c['employee_id']??0)];
         },$this->queryTransaction ?: [new \app\services\query\metric\MetricReadTransaction(10000,$checkpoint),'run'],null,$this->personnelObjects($context));
     }
     private function personnelObjects(array $context): \app\services\query\metric\PersonnelAnalysisObjectServices
@@ -958,7 +1005,9 @@ final class AiGatewayServices
             $fresh=$this->fresh($context);
             if (empty($fresh['can_use']) || ($fresh['analysis_personnel_grants'][$metric]??false)!==true
                 || !AiConfigStore::allowsSanitizedQuestion($this->config->read())) throw new RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
-            return ['personnel_authorized'=>true,'store_ids'=>$fresh['store_ids'],'employee_id'=>0,'permission_version'=>$this->permissionHash($fresh)];
+            $employee=($fresh['scope_mode']??null)==='self_participant'?(int)($fresh['employee_id']??0):0;
+            if (($fresh['scope_mode']??null)==='self_participant' && $employee<1) throw new RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
+            return ['personnel_authorized'=>true,'store_ids'=>$fresh['store_ids'],'employee_id'=>$employee,'permission_version'=>$this->permissionHash($fresh)];
         });
     }
     private function fresh(array $context): array
@@ -1156,7 +1205,7 @@ final class AiGatewayServices
             'AI_PRODUCT_OBJECT_NOT_READY'=>'产品对象尚未接入产品解析、当前权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他指标。',
             'AI_CATEGORY_OBJECT_NOT_READY'=>'商品分类对象尚未接入当前配置快照、权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他指标。',
             'AI_PARTNER_OBJECT_NOT_READY'=>'合作方对象尚未接入分类维度、当前权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他对象。',
-            'AI_MEMBER_OBJECT_NOT_READY'=>'会员对象尚未接入隐私权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他对象。',
+            'AI_MEMBER_OBJECT_NOT_READY'=>'会员对象尚未接入当前统一查询与证据合同；已保留您的问题，未查询或替换为其他对象。',
             'AI_INVENTORY_OBJECT_NOT_READY'=>'库存与耗用对象尚未接入门店权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他指标。',
             'AI_OBJECT_CONTRACT_NOT_READY'=>'当前分析对象尚未接入对象解析、权限、筛选、统一查询与证据合同；未查询或替换条件。',
             'AI_DIMENSION_ACTION_CONTRACT_NOT_READY'=>'当前分析对象的这项评价方式尚未接入统一查询合同；未改用其他指标或删减条件。',
@@ -1167,8 +1216,10 @@ final class AiGatewayServices
             'AI_RANK_LIMIT_NOT_READY'=>'当前支持门店前五、后五排行，暂不支持您要求的数量；本次未更改您的条件。',
             'AI_DIMENSION_RANK_LIMIT_NOT_READY'=>'当前分析对象最多支持前20、后20排行，暂不支持您要求的数量；本次未更改您的条件。',
             'AI_FUTURE_ACTUALS_UNAVAILABLE'=>'未来日期尚未发生实际业绩，暂不能提供该日期的实际数据，也未替换成今天或预测值。',
-            'AI_DATA_COVERAGE_INCOMPLETE'=>'您要求的完整期间尚未全部通过数据核验，本次未缩短日期范围，请选择其他期间。',
+            'AI_DATA_COVERAGE_INCOMPLETE'=>'所选期间早于当前指标的事实数据起点，本次未缩短或替换日期范围，请选择较晚的期间。',
             'AI_DATE_INVALID'=>'日期范围不完整或无效，请重新选择开始和结束日期。',
+            'AI_DATE_REVERSED'=>'开始日期不能晚于结束日期，请重新选择；本次未调整您的日期。',
+            'AI_DATE_RANGE_TOO_LONG'=>'本次查询的时间跨度超过单次允许范围，请缩短期间后重试；本次未自动裁剪日期。',
             'AI_CLARIFICATION_EXHAUSTED'=>'已达到本次引导上限，仍有条件未确定。请把问题拆小后重新提问。',
             'AI_CLARIFICATION_INVALID_LIMIT'=>'条件连续未能通过检查，本次已停止。请重新提问并选择完整条件。',
             'AI_CLARIFICATION_EXPIRED'=>'本次选择等待已超时，请重新提问。',
@@ -1186,7 +1237,11 @@ final class AiGatewayServices
             'AI_JSON_SIZE_INVALID'=>'本次 AI 返回内容异常，系统未执行查询，请稍后重试。',
             'AI_JSON_OBJECT_REQUIRED'=>'本次 AI 返回内容异常，系统未执行查询，请稍后重试。',
             'AI_AUTHORIZATION_CHANGED'=>'您的权限或 AI 配置已变化，本次查询已停止，请重新提问。',
-            'METRIC_QUERY_COVERAGE_UNAVAILABLE'=>'该时段的数据尚未通过核验，请选择其他日期。',
+            'METRIC_QUERY_COVERAGE_UNAVAILABLE'=>'所选期间早于当前指标的事实数据起点，本次未缩短或替换日期范围，请选择较晚的期间。',
+            'METRIC_QUERY_RANGE_INVALID'=>'日期范围不完整或无效，请重新选择开始和结束日期。',
+            'METRIC_QUERY_RANGE_REVERSED'=>'开始日期不能晚于结束日期，请重新选择；本次未调整您的日期。',
+            'METRIC_QUERY_RANGE_TOO_LONG'=>'本次查询的时间跨度超过单次允许范围，请缩短期间后重试；本次未自动裁剪日期。',
+            'METRIC_QUERY_FUTURE_UNAVAILABLE'=>'未来日期尚未发生实际数据，本次未替换成今天或预测值。',
             'CAPACITY_STOPPED'=>'当前系统繁忙，本次任务已停止，请稍后再问。',
             'AI_RUN_DEADLINE'=>'本次查询已到时间上限，请缩小问题范围后重试。',
             'AI_EXECUTION_CLOCK_REGRESSED'=>'服务时间校验异常，本次查询已停止，请稍后重试。',

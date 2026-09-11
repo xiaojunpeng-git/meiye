@@ -31,17 +31,29 @@ final class AiTrustedPrincipalResolver
         $scope=$dispatcher->dataScopeFactory()->build($storeId,$accountId,$profile,$operator->tenantId(),$operator->organizationId());
         $resolver=app()->make(CashierV3FeatureResolver::class);
         $features=$delegated ? $resolver->employeeStoreV3GrantedFeatures($employeeId) : $resolver->resolveGrantedFeatures($profile);
-        $reportAllowed=count(array_diff($features,['cashier.v3.ai']))>0;
+        $reportAllowed=in_array('cashier.v3.management_center',$features,true);
         $personal=$scope->isSelfParticipantMode();
         $allowed=$scope->visibleStoreIds();
-        $store=Db::name('system_store')->where('id',$storeId)->where('is_del',0)->where('is_show',1)->find();
-        $stores=(!$personal && $reportAllowed && $scope->authorizationMode()!==CashierV3DataScopeContext::MODE_NONE
-            && $store && ($allowed===null || in_array($storeId,array_map('intval',(array)$allowed),true)))?[$storeId]:[];
+        // The cashier page binds a current store. AI uses the employee's data
+        // authority instead; the trusted origin is only an optional filter.
+        if ($employeeId>0 && $scope->authorizationMode()!==CashierV3DataScopeContext::MODE_NONE) {
+            $dataScopes=app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+            $scopeProfile=$profile;
+            if (!array_key_exists('admin_type',$scopeProfile)) $scopeProfile['admin_type']=3;
+            $allowed=$dataScopes->resolveEffectiveStoreIds($employeeId,0,$scopeProfile);
+            $personal=$allowed===[];
+            if ($personal) $allowed=$dataScopes->resolveCurrentActiveStoreIds($employeeId);
+        }
+        $stores=$scope->authorizationMode()===CashierV3DataScopeContext::MODE_NONE?[]:($allowed===null
+            ?Db::name('system_store')->where('is_del',0)->where('name','<>','总部')->column('id'):(array)$allowed);
+        $stores=array_values(array_unique(array_filter(array_map('intval',$stores),static fn($id)=>$id>0)));sort($stores);
         sort($features);
         return ['terminal'=>'store','account_id'=>$accountId,
             'scope_mode'=>$personal?'self_participant':($stores?'stores':'none'),'store_ids'=>$stores,
             'permission_version'=>hash('sha256',json_encode([$scope->permissionVersion(),$stores,$features])),
-            'can_use'=>in_array('cashier.v3.ai',$features,true) && $stores!==[], 'can_configure'=>false,
+            'can_use'=>in_array('cashier.v3.ai',$features,true), 'can_configure'=>false,
+            'employee_id'=>$employeeId,'store_report_authorized'=>$reportAllowed,
+            'analysis_personnel_grants'=>['staff_labor_yeji'=>$reportAllowed,'staff_sales_yeji'=>$reportAllowed],
             'report_capability_code'=>'group_management_dashboard',
             'export_principal_ready'=>!$delegated,'principal_kind'=>$delegated?'delegated_session':'store_staff','origin_store_id'=>$storeId,
             'origin_organization_id'=>$operator->organizationId(),'tenant_id'=>$operator->tenantId()];

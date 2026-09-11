@@ -76,7 +76,7 @@ try {
     registryCheck($registry->snapshot($reordered)===$snapshot,'capability fingerprint independent of set/key order');
     $skill=\app\services\ai\registry\AiSkillDocument::storeOperations();
     registryCheck(count($registry->discover($snapshot,1)['items'])===1,'one store-operations Skill is discoverable without report names');
-    registryCheck($skill['skill_code']==='skill_store_operations'&&$skill['version']===13,'runtime Skill has a stable published identity');
+    registryCheck($skill['skill_code']==='skill_store_operations'&&$skill['version']===14,'runtime Skill has a stable published identity');
     registryCheck(strpos($skill['markdown'],'# 门店运营')===0&&preg_match('/^[a-f0-9]{64}$/D',$skill['source_hash'])===1,'runtime Skill markdown has a fixed source hash');
     $modelSkill=$registry->modelSkill('store_operations');
     registryCheck($modelSkill['skill_code']===$skill['skill_code']&&$modelSkill['skill_version']===$skill['version']&&$modelSkill['skill_source_hash']===$skill['source_hash'],'model Skill is the exact validated published source');
@@ -111,7 +111,7 @@ try {
     }
     $compiled=$compiler->compile(registryPlan(),$cap);
     registryCheck($compiled['dependency_versions']['tool']===['unified_metric_query'=>1],'complete tool dependency version frozen');
-    registryCheck($compiled['dependency_versions']['skill']===['skill_store_operations'=>13],'business Skill has explicit immutable id and version');
+    registryCheck($compiled['dependency_versions']['skill']===['skill_store_operations'=>14],'business Skill has explicit immutable id and version');
     $memberPlan=registryPlan('ranking');
     $memberPlan['query']['metric_codes']=['cash_performance'];
     $memberPlan['query']['business_filters']=['object_kind'=>'member'];
@@ -124,6 +124,16 @@ try {
     $projectPlan['query']['ranking']=['direction'=>'top','limit'=>5];
     $projectCompiled=$compiler->compile($projectPlan,$cap); $compiler->assertCompiled($projectCompiled);
     registryCheck($projectCompiled['query']['business_filters']===['object_kind'=>'project'],'registered project dimension compiles without a compiler object-name branch');
+    $projectSalesCap=$cap;$projectSalesCap['metric_codes'][]='sales_amount';sort($projectSalesCap['metric_codes']);
+    $projectSalesPlan=registryPlan('ranking');
+    $projectSalesPlan['query']['metric_codes']=['sales_amount'];
+    $projectSalesPlan['query']['business_filters']=['object_kind'=>'project'];
+    $projectSalesPlan['query']['ranking']=['direction'=>'top','limit'=>5];
+    $projectSalesCompiled=$compiler->compile($projectSalesPlan,$projectSalesCap); $compiler->assertCompiled($projectSalesCompiled);
+    $salesDefinition=\app\services\query\metric\MetricDefinitionRegistry::get('sales_amount');
+    registryCheck($projectSalesCompiled['query']['business_filters']===['object_kind'=>'project']
+        && ($salesDefinition['source']['dimensions']['project']['analysis_source_filters']??null)===['source_type'=>'project'],
+        'project sales ranking is a registered sales-fact dimension, never an AI-side fact query');
     registryCheck($compiled['dependency_versions']['skill_source']===['skill_store_operations'=>$skill['source_hash']],'compiled plan freezes the exact SKILL.md source');
     $metadataPlan=['query_shape'=>'definition','definition_metric_codes'=>['cash_performance'],'output_format'=>'screen'];
     $definition=$compiler->compile($metadataPlan,$cap); $compiler->assertCompiled($definition);
