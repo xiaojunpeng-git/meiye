@@ -3,6 +3,7 @@
 namespace app\services\cashier\v3\checkout\persistence;
 
 use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
+use app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver;
 use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\report\CustomerLifecycleFactServices;
@@ -779,6 +780,10 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
         // no pending debt to this service completion.
         if ((int)($order['uid'] ?? 0) !== $memberId) {
             return '0.00';
+        }
+        $v3CardDebt = (new CashierV3CardOriginDebtResolver())->pendingV3CardDebt($order, $memberId, true);
+        if ($v3CardDebt !== null) {
+            return $v3CardDebt;
         }
         $rows = $this->rows(Db::name('store_debt')
             ->field('id,order_id,status,total_debt,repaid_debt')

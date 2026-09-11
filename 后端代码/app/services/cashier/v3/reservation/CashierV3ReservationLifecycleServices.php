@@ -8,6 +8,7 @@ use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver;
 use app\services\cashier\v3\service\ThinkPhpCashierV3ServiceOrderRepository;
 use app\services\store\StoreReservationStaffServices;
 use think\facade\Db;
@@ -267,7 +268,7 @@ final class CashierV3ReservationLifecycleServices
         $this->releaseInTx($tenantId, $reservationId, $now);
         $candidateResult = $this->liveEntitlementCandidatesInTx($header, $lines);
         $candidates = $candidateResult['candidates'];
-        $debtBlockedOccupationIds = $this->debtBlockedOccupationIdsInTx($candidates);
+        $debtBlockedOccupationIds = $this->debtBlockedOccupationIdsInTx($candidates, (int)$header['member_id']);
         $debtBlockedEntitlements = $this->debtBlockedEntitlementSnapshots(
             $candidates,
             $lines,
@@ -439,7 +440,7 @@ final class CashierV3ReservationLifecycleServices
     }
 
     /** @return array<int,true> occupation id map */
-    private function debtBlockedOccupationIdsInTx(array $occupations): array
+    private function debtBlockedOccupationIdsInTx(array $occupations, int $memberId): array
     {
         if (!$occupations) return [];
         $detailIds = array_values(array_unique(array_filter(array_map(static function (array $occupation): int {
@@ -472,9 +473,17 @@ final class CashierV3ReservationLifecycleServices
         // Historical orders may not yet have a store_debt row. Preserve the
         // existing order snapshot fallback used by the cashier entitlement view.
         $orders = $this->rows(Db::name('store_order')->whereIn('id', $orderIds)
-            ->field('id,debt_amount,repaid_debt_amount')->order('id asc')->lock(true)->select());
+            ->field('id,uid,debt_amount,repaid_debt_amount')->order('id asc')->lock(true)->select());
+        $v3CardDebtResolver = new CashierV3CardOriginDebtResolver();
         foreach ($orders as $order) {
             $orderId = (int)$order['id'];
+            $v3CardDebt = $v3CardDebtResolver->pendingV3CardDebt($order, $memberId, true);
+            if ($v3CardDebt !== null) {
+                if (bccomp($v3CardDebt, '0', 2) > 0) {
+                    $blockedOrderIds[$orderId] = true;
+                }
+                continue;
+            }
             if (isset($ordersWithDebtRow[$orderId])) continue;
             if (bccomp(bcsub((string)$order['debt_amount'], (string)$order['repaid_debt_amount'], 2), '0', 2) > 0) {
                 $blockedOrderIds[$orderId] = true;

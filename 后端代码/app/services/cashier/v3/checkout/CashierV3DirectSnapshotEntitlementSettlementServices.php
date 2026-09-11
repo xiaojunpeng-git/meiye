@@ -12,6 +12,7 @@ use app\services\cashier\v3\CashierV3ResourceVersionServices;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
+use app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver;
 use app\services\cashier\v3\cashier\CashierV3EntitlementResourceVersionProvider;
 use app\services\cashier\v3\checkout\persistence\CashierV3EntitlementCompletionPlanV1;
 use app\services\cashier\v3\checkout\provider\CashierV3EntitlementDebtGuardProvider;
@@ -1153,7 +1154,7 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 $totalTimes - $remaining,
                 $decoded
             );
-            $pendingDebt = $this->pendingDebt($order);
+            $pendingDebt = $this->pendingDebt($order, $memberId);
             $debtLimited = $this->writeoffServices()->calcEffectiveWriteSurplusTimes(
                 $detail,
                 (float)$pendingDebt,
@@ -1849,8 +1850,12 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             && (int)($order['card_upgrade_use_oid'] ?? -1) === 0;
     }
 
-    private function pendingDebt(array $order): string
+    private function pendingDebt(array $order, int $memberId): string
     {
+        $v3CardDebt = (new CashierV3CardOriginDebtResolver())->pendingV3CardDebt($order, $memberId, true);
+        if ($v3CardDebt !== null) {
+            return $v3CardDebt;
+        }
         $rows = $this->rows(Db::name('store_debt')
             ->where('order_id', (int)$order['id'])
             ->select());

@@ -1137,6 +1137,13 @@ final class CashierV3EntitlementProjectionServices
 
     private function pendingDebt(array $order, $debt): string
     {
+        $v3CardDebt = (new CashierV3CardOriginDebtResolver())->pendingV3CardDebt(
+            $order,
+            (int)($order['uid'] ?? 0)
+        );
+        if ($v3CardDebt !== null) {
+            return $v3CardDebt;
+        }
         if (is_array($debt)) {
             if ((int)$debt['status'] !== 0) {
                 return '0.00';
