@@ -179,59 +179,12 @@ final class AiGatewayServices
                 || $this->permissionHash($this->fresh($context))!==$snapshot['authorization_version']) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
             if ($operation==='execute') {
                 $this->runs->progress($owner,$id,$generation,$worker,'UNDERSTANDING');
-                $projector=new AiModelInputProjector();
-                // A normal external-model request starts with the original
-                // language, not with a locally guessed vocabulary projection.
-                // The projection remains only for frozen legacy configuration,
-                // context-follow-up compatibility and isolated injected tests.
-                $view=null;
-                if (!AiConfigStore::allowsSanitizedQuestion($configuration)) $view=$projector->modelView($body);
-                if ($view!==null && ($view['current']['semantic_intent']['followup']??'none')==='requested' && isset($body['context_ref'])) {
-                    $view['current']=$this->inheritContext($context,$owner,$body['context_ref'],$view['current']);
-                }
-                if ($view!==null && isset($view['current']['verified_source_query'])) {
-                    $names=[];$dictionary=new \app\services\metric\MetricDictionaryServices();
-                    foreach($currentCapabilities['metric_codes'] as $code) {
-                        $tooltip=$dictionary->getTooltip($code);
-                        if(($tooltip['user_ready']??false)===true)$names[$code]=$tooltip['name'];
-                    }
-                    $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
-                    $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
-                    $compiled=(new \app\services\ai\execution\AiFollowupQueryPlanner())->compile($view['current']['verified_source_query'],$body['question'],$names,$body['output_format'],$today);
-                // The safe model is the natural-language interpretation path.
-                // It receives only de-identified text, full source Skills and
-                // dynamically registered capabilities; compilation is separate.
-                } elseif (AiConfigStore::allowsSanitizedQuestion($configuration)) {
-                    $projection=$view['current']??['dates'=>[],'date_terms'=>[],'signals'=>[],'semantic_intent'=>['constraints'=>[]],'blocking_reason'=>null,'unresolved_condition'=>false];
-                    $compiled=$this->understandAnalysis($context,$owner,$id,$generation,$worker,$body,$projection,$configuration);
-                } else {
-                // Unknown meaningful constraints are retained as blockers, never deleted to force a match.
-                if (!empty($view['current']['blocking_reason'])) throw new RuntimeException($view['current']['blocking_reason']);
-                $discovered=$this->discoverIntent($context,$view['current']);
-                $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
-                $runtimeSkill=$this->registry()->modelSkill('store_operations');
-                $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$view,$runtimeSkill]))+2048));
-                $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
-                $this->runs->prepareAttempt($owner,$id,$generation,$worker,'understand','model',hash('sha256',json_encode($view)),'siliconflow');
-                $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand');
-                try {
-                    $checkpoint=function () use($owner,$id,$generation,$worker):void { $this->runs->checkpoint($owner,$id,$generation,$worker); };
-                    $reply=$this->model ? call_user_func($this->model,$view,$discovered,$configuration,$checkpoint)
-                        : (new SiliconFlowClient())->select($view,$discovered,$configuration['model'],$configuration['api_key'],20000,$checkpoint,$runtimeSkill);
-                    $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
-                } catch (\Throwable $e) {
-                    $unknown=in_array($e->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED'],true);
-                    $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand',$unknown?'UNKNOWN':'FAILED');
-                    $reply=in_array($e->getMessage(),['AI_MODEL_METRIC_UNKNOWN','AI_MODEL_RESPONSE_INVALID'],true)
-                        ? $this->registeredSelectionFallback($view['current'],$discovered) : null;
-                    if ($reply===null) throw $e;
-                }
-                $capabilities=$this->capabilities($context);
-                $capabilities['current_store_bound']=$context['terminal']==='store' && count($context['store_ids'])===1;
-                $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
-                $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
-                $compiled=(new AiWorkflowPlanner())->compile($view['current'],$reply['selection'],$capabilities,$body['output_format'],$today);
-                }
+                // There is one interpretation path. A frozen configuration
+                // without the de-identified natural-language contract cannot
+                // fall back to phrase matching or a local legacy parser.
+                if (!AiConfigStore::allowsSanitizedQuestion($configuration)) throw new RuntimeException('AI_MODEL_CONFIG_UPGRADE_REQUIRED');
+                $projection=['dates'=>[],'date_terms'=>[],'signals'=>[],'semantic_intent'=>['constraints'=>[]],'blocking_reason'=>null,'unresolved_condition'=>false];
+                $compiled=$this->understandAnalysis($context,$owner,$id,$generation,$worker,$body,$projection,$configuration);
                 $compiled=$this->decorateGuidance($compiled);
                 if ($compiled['kind']==='clarification') {
                     $r=$this->issueGuidance($owner,$id,$generation,$worker,$compiled,$compiled,[]); $paused=true;
@@ -297,7 +250,10 @@ final class AiGatewayServices
     {
         // Dependency order in capability guidance is server-owned; old scene prompt
         // configuration must not reorder object binding after metric execution.
-        if (in_array(($plan['schema_version']??null),['mohe-analysis-guidance-v1','mohe-skill-guidance-v1','mohe-store-scope-guidance-v1'],true)) return $plan;
+        if (in_array(($plan['schema_version']??null),[
+            'mohe-analysis-guidance-v1','mohe-skill-guidance-v1','mohe-store-scope-guidance-v1',
+            'mohe-context-replacement-guidance-v1','mohe-context-pending-guidance-v1',
+        ],true)) return $plan;
         return $this->managementDocument
             ? \app\services\ai\management\AiManagementPolicy::decorateEnvelope($this->managementDocument,$plan) : $plan;
     }
@@ -386,80 +342,10 @@ final class AiGatewayServices
         return $query;
     }
 
-    /** Legacy projected conversations retain their previous compatibility path. */
-    private function inheritContext(array $context,array $owner,string $reference,array $intent): array
-    {
-        $query=$this->sourceContextQuery($context,$owner,$reference);
-        if ($query['business_filters']!==[] || $query['store_ids']!==[]) {
-            $intent['verified_source_query']=$query;
-            return $intent;
-        }
-        // Explicit current conditions always win. Missing slots inherit only this validated source.
-        if (!array_intersect(array_merge(array_keys(\app\services\query\metric\MetricSemanticCatalog::entries()),['ambiguous_metric']),$intent['signals'])) $intent['signals']=array_merge($intent['signals'],$query['metric_codes']);
-        if (!array_intersect(['summary','trend','comparison','ranking','definition'],$intent['signals'])) {
-            $intent['signals'][]=$query['query_shape'];
-            if ($query['query_shape']==='ranking') {
-                $direction=$query['ranking']['direction'];
-                if (in_array($direction,['top','top_and_bottom'],true)) $intent['signals'][]='top_5';
-                if (in_array($direction,['bottom','top_and_bottom'],true)) $intent['signals'][]='bottom_5';
-            }
-        }
-        if (!$intent['date_terms']) {
-            $intent['date_terms']=[['code'=>'EXPLICIT','start'=>$query['start_date'],'end'=>$query['end_date']]];
-            if ($query['compare_range']!==null) $intent['date_terms'][]=['code'=>'EXPLICIT','start'=>$query['compare_range']['start'],'end'=>$query['compare_range']['end']];
-        }
-        $intent['signals']=array_values(array_unique($intent['signals']));
-        return $intent;
-    }
-
     /** Only non-sensitive, already-authorized query meaning is visible to the model. */
     private function modelPriorQuery(array $query): array
     {
-        return ['metric_codes'=>array_values($query['metric_codes']), 'operation'=>$query['query_shape'],
-            'periods'=>array_values(array_filter([
-                ['kind'=>'date_range','start'=>$query['start_date'],'end'=>$query['end_date']],
-                $query['compare_range']===null?null:['kind'=>'date_range','start'=>$query['compare_range']['start'],'end'=>$query['compare_range']['end']],
-            ])),
-            'ranking'=>$query['ranking']];
-    }
-
-    /** The model says which prior restrictions still describe the new request.
-     * The returned values remain a narrowing candidate and are always checked
-     * again by the registered compiler and Reader against current authority. */
-    private function inheritedQueryConstraints(?array $sourceQuery,array $contextConditions): ?array
-    {
-        if ($sourceQuery===null) return null;
-        return [
-            // null means the current request intentionally replaces or removes
-            // this old condition. An empty array is different: it is the signed
-            // prior meaning of "the complete authorized range/no filter" and
-            // remains an enforceable inherited condition.
-            'store_ids'=>$contextConditions['store_scope']==='inherit'?$sourceQuery['store_ids']:null,
-            'business_filters'=>$contextConditions['business_filters']==='inherit'?$sourceQuery['business_filters']:null,
-        ];
-    }
-
-    /** A signed prior result may retain only the restrictions that the current
-     * natural-language meaning says to retain. It never increases authority. */
-    private function bindInheritedQueryConstraints(array $compiled,?array $constraints): array
-    {
-        if ($constraints===null) return $compiled;
-        if (($compiled['kind']??null)==='clarification') {
-            $compiled['inherited_query_constraints']=$constraints;
-            return $compiled;
-        }
-        if (($compiled['kind']??null)!=='plan' || !is_array($compiled['plan']['query']??null)) return $compiled;
-        $query=&$compiled['plan']['query'];
-        foreach (['store_ids','business_filters'] as $key) {
-            if (!array_key_exists($key,$constraints) || ($constraints[$key]!==null && !is_array($constraints[$key]))) {
-                throw new RuntimeException('AI_CONTEXT_CONDITION_CONFLICT');
-            }
-            if ($constraints[$key]===null) continue;
-            if ($query[$key]!==[] && $query[$key]!==$constraints[$key]) throw new RuntimeException('AI_CONTEXT_CONDITION_CONFLICT');
-            $query[$key]=$constraints[$key];
-        }
-        unset($query);
-        return $compiled;
+        return \app\services\ai\execution\IntentContextMerger::modelView($query);
     }
 
     /**
@@ -522,52 +408,6 @@ final class AiGatewayServices
         return $objects;
     }
 
-    private function discoverIntent(array $context,array $intent): array
-    {
-        $registry=$this->registry(); $snapshot=$registry->snapshot($this->capabilities($context));
-        $goal=$intent['semantic_intent']['goal']??'business_results';
-        if ($goal==='metric_definition') return array_keys($snapshot['definitions']);
-        // Discover from the shared provider contracts, not a guessed scene/report.
-        // Existing compiler/permissions remain the final executable boundary.
-        $requested=array_values(array_intersect(array_keys($snapshot['metrics']),$intent['signals']));
-        $shape='summary';
-        foreach (['trend','ranking','comparison'] as $candidate) if (in_array($candidate,$intent['signals'],true)) $shape=$candidate;
-        if (array_intersect(['top_5','bottom_5'],$intent['signals'])) $shape='ranking';
-        $catalog=\app\services\query\metric\AnalysisCapabilityCatalogFactory::make();
-        $result=$catalog->discover(['metric_codes'=>$requested && !in_array('ambiguous_metric',$intent['signals'],true)?$requested:[],
-            'object_kind'=>'store','relation_role'=>'store_total','operation'=>$shape,'filter_keys'=>[]],
-            static function(array $binding) use($snapshot,$shape): bool {
-                $metric=$snapshot['metrics'][$binding['metric_code']]??null;
-                return $metric && in_array($shape,$metric['query_shapes'],true) && $metric['metric_version']===$binding['contract_version'];
-            });
-        if (!$result['complete_request_supported']) throw new RuntimeException('AI_CAPABILITY_NOT_READY');
-        return array_column(array_column($result['items'],'binding'),'metric_code');
-    }
-
-    /**
-     * A vendor formatting/allowlist mistake must not make a fully explicit local
-     * intent unusable. This recovery may only echo locally parsed, registered
-     * values; it never guesses a missing metric, date, filter or query shape.
-     */
-    private function registeredSelectionFallback(array $intent,array $candidates): ?array
-    {
-        $signals=$intent['signals']??[];
-        if (!is_array($signals) || !empty($intent['blocking_reason']) || !empty($intent['unresolved_condition'])
-            || in_array('ambiguous_metric',$signals,true)) return null;
-        $registered=array_keys(\app\services\query\metric\MetricSemanticCatalog::entries());
-        $requested=array_values(array_intersect($registered,$signals));
-        if (!$requested || array_diff($requested,$candidates)) return null;
-        $shape='summary';
-        foreach(['trend','ranking','comparison'] as $candidate) if(in_array($candidate,$signals,true)) $shape=$candidate;
-        if(array_intersect(['top_5','bottom_5','rank_top','rank_bottom'],$signals)) $shape='ranking';
-        if(in_array('definition',$signals,true)) $shape='definition';
-        $date='UNSPECIFIED';
-        foreach(['TODAY','YESTERDAY','THIS_MONTH','LAST_MONTH'] as $candidate) if(in_array($candidate,$signals,true)) $date=$candidate;
-        if(!empty($intent['dates']) || !empty($intent['date_terms'])) $date='EXPLICIT';
-        return ['selection'=>['metric_codes'=>$requested,'query_shape'=>$shape,'date_code'=>$date,'decision'=>'query'],
-            'usage'=>['input_tokens'=>null,'output_tokens'=>null],'recovered_from_model_contract_error'=>true];
-    }
-
     private function issueGuidance(array $owner,string $id,int $generation,string $worker,array $envelope,array $origin,array $steps): array
     {
         $run=$this->runs->get($owner,$id,$generation);
@@ -587,7 +427,7 @@ final class AiGatewayServices
         $steps=$stored['accepted_steps']??[];
         if (!isset($input['revise_clarification_id'])) {
             $next=$this->decorateGuidance($planner->choose($stored['envelope'],$choices));
-            $next=$this->bindInheritedQueryConstraints($next,$stored['origin']['inherited_query_constraints']??null);
+            $next=$this->bindGuidanceConstraints($next,$stored['envelope']['inherited_query_constraints']??($stored['origin']['inherited_query_constraints']??null));
             $steps[]=['id'=>$ref,'envelope'=>$stored['envelope'],'choices'=>$choices];
             return [$next,$steps];
         }
@@ -608,16 +448,29 @@ final class AiGatewayServices
                 if ($step['id']===$target || !$found) throw $error;
                 break; // Invalid dependent binding must be re-confirmed, not silently retained.
             }
-            $rebuilt[]=['id'=>$step['id'],'envelope'=>$draft,'choices'=>$selection]; $draft=$next;
+            $rebuilt[]=['id'=>$step['id'],'envelope'=>$draft,'choices'=>$selection];
+            $draft=$this->bindGuidanceConstraints($next,$draft['inherited_query_constraints']??($stored['origin']['inherited_query_constraints']??null));
         }
         if (!$found) throw new RuntimeException('AI_CLARIFICATION_STALE');
-        return [$this->bindInheritedQueryConstraints($draft,$stored['origin']['inherited_query_constraints']??null),$rebuilt];
+        return [$draft,$rebuilt];
+    }
+
+    /** A server-owned pending-context choice may explicitly alter only its own
+     * inherited constraint.  The marker is never included in an executable plan. */
+    private function bindGuidanceConstraints(array $envelope,?array $fallback): array
+    {
+        $constraints=array_key_exists('inherited_query_constraints',$envelope)
+            ? $envelope['inherited_query_constraints'] : $fallback;
+        unset($envelope['inherited_query_constraints']);
+        return \app\services\ai\execution\IntentContextMerger::bind($envelope,$constraints);
     }
 
     /** Selects only the server-owned planner encoded by a clarification state. */
     private function guidancePlanner(array $envelope)
     {
         if (isset($envelope['store_scope_state'])) return new \app\services\ai\execution\AiStoreScopeGuidancePlanner();
+        if (isset($envelope['context_replacement_state'])) return new \app\services\ai\execution\AiContextReplacementGuidancePlanner();
+        if (isset($envelope['pending_context_state'])) return new \app\services\ai\execution\AiPendingContextGuidancePlanner();
         if (isset($envelope['analysis_state'])) return new \app\services\ai\execution\AiAnalysisGuidancePlanner();
         if (isset($envelope['dimension_state'])) return new \app\services\ai\execution\AiDimensionGuidancePlanner();
         if (isset($envelope['skill_state'])) return new \app\services\ai\execution\AiSkillGuidancePlanner();
@@ -721,7 +574,7 @@ final class AiGatewayServices
             $repairable=$this->model===null && $sourceQuery!==null
                 && $error instanceof AiContractException
                 && $error->getMessage()==='AI_MODEL_INTENT_CONTRACT_INVALID'
-                && in_array($repairPredicate,['missing_context_conditions','missing_metric_codes'],true);
+                && AiIntentResultContract::repairableOmission($repairPredicate);
             if (!$repairable) throw $error;
             // A completed response with one omitted mandatory structural field
             // is safe to correct once.  This is a separate fenced attempt,
@@ -742,6 +595,36 @@ final class AiGatewayServices
             }
         }
         $checkpoint();$intent=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound']);
+        // The model states only a delta. This named merger is the sole place
+        // that may retain verified query meaning across turns.
+        $merged=\app\services\ai\execution\IntentContextMerger::merge($sourceQuery,$intent);
+        $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
+        // Pending is a model-owned statement that more information is needed,
+        // not an execution failure. Empty fields below deliberately reach the
+        // existing controlled clarification compiler (metric/date/ranking)
+        // whenever their surrounding query meaning is already known.
+        $intent['_context_pending']=$merged['pending'];
+        // A protocol-level pending marker is not permission to replace a
+        // missing value with an empty one.  Compile a private preview from the
+        // signed predecessor and require a server-owned choice before it can
+        // reach execution.  An explicit object replacement keeps its own
+        // confirmation flow because its prospective object is the new value.
+        // A confirmed new object needs its own capability-driven guidance
+        // (for example, selecting a permitted personnel range).  Build that
+        // prospective guidance first and place the replacement confirmation
+        // in front of it. Other incomplete fields use the signed preview.
+        // A replacement can stay on its prospective path only when it is the
+        // sole unresolved decision. If another semantic field is pending,
+        // compile the signed preview until that field is explicitly resolved.
+        $semanticPending=array_values(array_diff($merged['pending'],['business_filters']));
+        if ($merged['pending'] && (!$merged['replacement_confirmation'] || $semanticPending)) {
+            $intent=$merged['fallback_intent'];
+            $intent['_context_pending']=$merged['pending'];
+            $inheritedConstraints=$merged['fallback_constraints'];
+        }
+        $contextDecisions=$sourceQuery===null
+            ? ['store_scope'=>'inherit','business_filters'=>'inherit']
+            : ['store_scope'=>$intent['context_delta']['store_scope'],'business_filters'=>$intent['context_delta']['business_filters']];
         if ($intent['_object_term_normalized']) {
             try { $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'intent_contract','predicate'=>'object_term_not_verbatim']); } catch (\Throwable $ignored) {}
         }
@@ -780,18 +663,37 @@ final class AiGatewayServices
         // All remaining opaque conditions are meaningful. Never query a reduced request.
         if ($safe['local_conditions']) throw new RuntimeException('AI_LOCAL_CONDITION_REQUIRED');
         if (($intent['object_kind']??null)==='position' || ($localTerm!==null && (($privateKindsByReference[$match[1]??'']??null)==='position'))) $intent['object_kind']='person';
-        if ($intent['_periods_supplied'] && $intent['periods']!==[]) {
+        if ($intent['periods']!==[]) {
             $projection['dates']=[];
             $projection['date_terms']=$this->naturalPeriodTerms($intent['periods'],$today);
-        } elseif ($sourceQuery!==null) {
-            $projection['dates']=[];
-            $projection['date_terms']=$this->naturalPeriodTerms($this->modelPriorQuery($sourceQuery)['periods'],$today);
         }
         if ($intent['_scope_supplied'] && $intent['scope']==='current_store') {
             if (!($context['terminal']==='store' && count($context['store_ids'])===1)) throw new RuntimeException('AI_UNSUPPORTED_CONDITION');
             $projection['signals'][]='current_store';
         }
-        $inheritedConstraints=$this->inheritedQueryConstraints($sourceQuery,$intent['context_conditions']);
+        // Scope changes are shared by every subject, not just store summaries.
+        // The source selection has already been recovered before this finishing
+        // step; an unresolved new store must still ask, never widen the query.
+        $operationIsPending=in_array('operation',$merged['pending'],true);
+        $metricOptions=$this->registeredMetricOptions(
+            $caps,$summaries,$intent['object_kind']??'unknown',$operationIsPending?null:($intent['operation']??null)
+        );
+        $replacementMetricOptions=$this->registeredMetricOptions(
+            $caps,$summaries,$merged['prospective_intent']['object_kind']??'unknown',
+            $operationIsPending?null:($merged['prospective_intent']['operation']??null)
+        );
+        $operationOptions=$this->registeredOperationOptions($caps,$intent['object_kind']??'unknown');
+        $replacementOperationOptions=$this->registeredOperationOptions($caps,$merged['prospective_intent']['object_kind']??'unknown');
+        $finish=function(array $compiled)use($context,$term,$contextDecisions,$owner,$id,$generation,$worker,$inheritedConstraints,$merged,$metricOptions,$replacementMetricOptions,$operationOptions,$replacementOperationOptions):array {
+            $compiled=$this->bindNamedStoreScope($compiled,$context,$term,$contextDecisions,$owner,$id,$generation,$worker);
+            if ($merged['replacement_confirmation']) {
+                $remaining=array_values(array_filter($merged['pending'],static function(string $field): bool { return $field!=='business_filters'; }));
+                $compiled=(new \app\services\ai\execution\AiContextReplacementGuidancePlanner())->start($compiled,$remaining,$inheritedConstraints,$replacementMetricOptions,$merged['prospective_intent'],$replacementOperationOptions);
+            } elseif ($merged['pending']) {
+                return (new \app\services\ai\execution\AiPendingContextGuidancePlanner())->start($compiled,$merged['pending'],$inheritedConstraints,$metricOptions,$merged['prospective_intent'],$operationOptions);
+            }
+            return \app\services\ai\execution\IntentContextMerger::bind($compiled,$inheritedConstraints);
+        };
         // The model Skill identifies the semantic subject from the complete
         // sentence. Local aliases are used for privacy/catalog projection only;
         // they must not override the subject merely because a short word also
@@ -809,9 +711,9 @@ final class AiGatewayServices
             $dimensionMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,$intent['object_kind'],'ranking');
             if ($localTerm!==null || !$dimensionMetrics) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
             if ($intent['operation']!=='ranking') throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
-            return $this->bindInheritedQueryConstraints((new \app\services\ai\execution\AiDimensionGuidancePlanner())->start(
+            return $finish((new \app\services\ai\execution\AiDimensionGuidancePlanner())->start(
                 $intent['object_kind'],$intent,$projection,$dimensionMetrics,$body['output_format'],$today
-            ),$inheritedConstraints);
+            ));
         }
         if ($intent['object_kind']==='person') {
             if (!$personMetrics) throw new RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
@@ -823,12 +725,14 @@ final class AiGatewayServices
             $intent['metric_codes']=$metric===null?[]:[$metric];
             $catalog=$localCatalogs[$metric??array_key_first($personMetrics)];
             $objectCatalog=new \app\services\query\metric\AnalysisObjectCatalog($catalog['objects'],static function(){return true;});
-            $named=$objectCatalog->resolve($term,'person',$metric);
+            $objectTerm=$contextDecisions['store_scope']==='replace' && $contextDecisions['business_filters']==='inherit' ? '' : $term;
+            $named=$objectCatalog->resolve($objectTerm,'person',$metric);
             // Exact local names may bind a person; a missing name is never fuzzily
             // replaced with someone else. Otherwise resolve actual position metadata.
-            $exactPeople=array_values(array_filter($catalog['objects'],static function($o)use($term){return $o['kind']==='person' && $o['label']===$term;}));
-            $objects=$exactPeople?$named:$objectCatalog->resolve($term,'position',$metric);
-            return $this->bindInheritedQueryConstraints((new \app\services\ai\execution\AiAnalysisGuidancePlanner())->start($intent,$projection,$personMetrics,$objects,$body['output_format'],$today),$inheritedConstraints);
+            $exactPeople=array_values(array_filter($catalog['objects'],static function($o)use($objectTerm){return $o['kind']==='person' && $o['label']===$objectTerm;}));
+            $objects=$exactPeople?$named:$objectCatalog->resolve($objectTerm,'position',$metric);
+            $objects=\app\services\ai\execution\IntentContextMerger::resolveSelection($objects,$catalog['objects'],$inheritedConstraints,'person',$metric);
+            return $finish((new \app\services\ai\execution\AiAnalysisGuidancePlanner())->start($intent,$projection,$personMetrics,$objects,$body['output_format'],$today));
         }
         // No staff/customer/object restriction may become an unfiltered store query.
         if ($localTerm!==null || !in_array($intent['object_kind'],['store','unknown'],true)) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
@@ -840,8 +744,39 @@ final class AiGatewayServices
         $projection['blocking_reason']=null;$projection['unresolved_condition']=false;$projection['semantic_intent']['constraints']=[];
         $caps['current_store_bound']=$context['terminal']==='store' && count($context['store_ids'])===1;
         $compiled=(new AiWorkflowPlanner())->compile($projection,['decision'=>'query','query_shape'=>$intent['operation'],'metric_codes'=>$intent['metric_codes'],'ranking'=>$intent['ranking']],$caps,$body['output_format'],$today);
-        $compiled=$this->bindNamedStoreScope($compiled,$context,$term,$intent['context_conditions'],$owner,$id,$generation,$worker);
-        return $this->bindInheritedQueryConstraints($compiled,$inheritedConstraints);
+        return $finish($compiled);
+    }
+
+    /** Builds the server-owned response shapes for one registered object. */
+    private function registeredOperationOptions(array $capabilities,string $objectKind): array
+    {
+        if (!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$objectKind)) return [];
+        $options=[];
+        foreach (\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($capabilities,$objectKind) as $metric=>$candidate) {
+            $shapes=array_values(array_intersect(['summary','trend','ranking','comparison'],(array)($candidate['query_shapes']??[])));
+            if ($shapes) $options[$metric]=$shapes;
+        }
+        ksort($options);
+        return $options;
+    }
+
+    /** Builds only metric choices executable for the object and response shape. */
+    private function registeredMetricOptions(array $capabilities,array $summaries,string $objectKind,?string $operation): array
+    {
+        if (!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$objectKind)) return [];
+        if ($operation!==null && !in_array($operation,['summary','trend','ranking','comparison'],true)) return [];
+        $labels=[];
+        foreach ($summaries as $summary) {
+            if (is_string($summary['metric_code']??null) && is_string($summary['name']??null)) {
+                $labels[$summary['metric_code']]=$summary['name'];
+            }
+        }
+        $options=[];
+        foreach (\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($capabilities,$objectKind,$operation) as $metric=>$candidate) {
+            if (!isset($labels[$metric]) || !($candidate['query_shapes']??[])) continue;
+            $options[]=['value'=>'metric:'.$metric,'label'=>$labels[$metric]];
+        }
+        return $options;
     }
 
     /**

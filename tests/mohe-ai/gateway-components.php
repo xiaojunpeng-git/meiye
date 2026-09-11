@@ -154,7 +154,7 @@ namespace {
     $safeQuestion=['schema_version'=>'sanitized-question-v2','question'=>'今天做的最好技师是谁','recent_questions'=>['昨天哪个技师表现最好'],
         'prior_query'=>null,'has_unresolved_conditions'=>false,'server_resolved_fields'=>[],'reference_date'=>'2026-09-10'];
     $meanings=[['metric_code'=>'staff_labor_yeji','name'=>'劳动业绩','summary'=>'按规则分配给手艺人的业绩','object_contracts'=>[['object_kind'=>'person','action_codes'=>['service']]]]];
-    $intent=['object_kind'=>'person','object_term'=>'技师','operation'=>'ranking','metric_codes'=>[],'action_codes'=>['service'],'needs_metric_choice'=>true,'ranking'=>['direction'=>'top','limit'=>1],'periods'=>[['kind'=>'relative_days','end_offset_days'=>0,'days'=>1]],'scope'=>'authorized','context_conditions'=>['store_scope'=>'inherit','business_filters'=>'inherit'],'unresolved_fragments'=>[]];
+    $intent=['object_kind'=>'person','object_term'=>'技师','operation'=>'ranking','metric_codes'=>[],'action_codes'=>['service'],'needs_metric_choice'=>true,'ranking'=>['direction'=>'top','limit'=>1],'periods'=>[['kind'=>'relative_days','end_offset_days'=>0,'days'=>1]],'scope'=>'authorized','unresolved_fragments'=>[]];
     $GLOBALS['sfResponse']=$response(json_encode($intent));
     $understood=$client->understand($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){},$skills);
     check($understood['intent']===$intent,'general interpretation separates object, operation and missing criterion');
@@ -164,16 +164,19 @@ namespace {
     check(!isset($understandingInput['question']['recent_user_intents']) && $understandingInput['question']['recent_questions']===['昨天哪个技师表现最好'],'new question understanding receives de-identified local question context only');
     $outboundText=json_encode($outbound,JSON_UNESCAPED_UNICODE);
     check(strpos($outboundText,'skill_intent_understanding')!==false&&strpos($outboundText,'# 门店运营')!==false&&strpos($outboundText,'# 用户意图理解')!==false,'model understanding receives the complete source-owned language and business Skills');
-    check(strpos($outboundText,'intent-result-v2')!==false,'model understanding receives the source-owned intent contract');
-    $firstTurn=$intent; unset($firstTurn['ranking'],$firstTurn['scope'],$firstTurn['context_conditions']); $firstTurn['object_kind']='store';$firstTurn['object_term']='门店';$firstTurn['operation']='summary';$firstTurn['metric_codes']=[];$firstTurn['action_codes']=[];$firstTurn['needs_metric_choice']=false;$firstTurn['unresolved_fragments']=[];
+    check(strpos($outboundText,'intent-result-v3')!==false,'model understanding receives the source-owned intent contract');
+    $firstTurn=$intent; unset($firstTurn['ranking'],$firstTurn['scope']); $firstTurn['object_kind']='store';$firstTurn['object_term']='门店';$firstTurn['operation']='summary';$firstTurn['metric_codes']=[];$firstTurn['action_codes']=[];$firstTurn['needs_metric_choice']=false;$firstTurn['unresolved_fragments']=[];
     $GLOBALS['sfResponse']=$response(json_encode($firstTurn));
     check($client->understand($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){},$skills)['intent']===$firstTurn,'first question accepts omitted inapplicable fields and non-verbatim generic object term');
     $canonical=\app\services\ai\contract\AiIntentResultContract::normalize($firstTurn,['staff_labor_yeji'],['service'],$safeQuestion);
     check($canonical['object_term']==='' && $canonical['_object_term_normalized']===true,'a non-verbatim object term is safely cleared rather than rejected or used as a filter');
+    $nullRanking=$firstTurn;$nullRanking['ranking']=null;
+    $canonicalNullRanking=\app\services\ai\contract\AiIntentResultContract::normalize($nullRanking,['staff_labor_yeji'],['service'],$safeQuestion);
+    check($canonicalNullRanking['ranking']===['direction'=>'unspecified','limit'=>null] && !$canonicalNullRanking['_ranking_supplied'],'all-null optional ranking is structural omission, not a server-selected ranking');
     $followupQuestion=$safeQuestion;
     $followupQuestion['prior_query']=['metric_codes'=>['staff_labor_yeji'],'operation'=>'ranking','periods'=>[],'ranking'=>['direction'=>'top','limit'=>1]];
     rejects(function()use($firstTurn,$followupQuestion){\app\services\ai\contract\AiIntentResultContract::normalize($firstTurn,['staff_labor_yeji'],['service'],$followupQuestion);},'AI_MODEL_INTENT_CONTRACT_INVALID');
-    $nullContext=$intent;$nullContext['context_conditions']=null;
+    $nullContext=$intent;$nullContext['context_delta']=null;
     rejects(function()use($nullContext,$followupQuestion){\app\services\ai\contract\AiIntentResultContract::normalize($nullContext,['staff_labor_yeji'],['service'],$followupQuestion);},'AI_MODEL_INTENT_CONTRACT_INVALID');
     $nullPeriods=$intent;$nullPeriods['periods']=null;
     rejects(function()use($nullPeriods,$safeQuestion){\app\services\ai\contract\AiIntentResultContract::normalize($nullPeriods,['staff_labor_yeji'],['service'],$safeQuestion);},'AI_MODEL_INTENT_CONTRACT_INVALID');
@@ -187,12 +190,19 @@ namespace {
         ['metric_code'=>'consume_amount','name'=>'消耗业绩','summary'=>'完成服务后产生的消耗','object_contracts'=>[['object_kind'=>'store','action_codes'=>[]]]],
     ];
     $switchIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['consume_amount'],'action_codes'=>[],
-        'needs_metric_choice'=>false,'context_conditions'=>['store_scope'=>'inherit','business_filters'=>'inherit'],'unresolved_fragments'=>[]];
+        'needs_metric_choice'=>false,'unresolved_fragments'=>[]];
+    $switchIntent['context_delta']=array_fill_keys(\app\services\ai\contract\AiIntentResultContract::DELTA_FIELDS,'inherit');
+    $switchIntent['context_delta']['metric_codes']='replace';
     $GLOBALS['sfResponse']=$response(json_encode($switchIntent));
     $repaired=$client->understand($switchQuestion,$switchMeanings,'fixture/model','fixture-key',1000,function(){},$skills,'missing_metric_codes');
     check($repaired['intent']['metric_codes']===['consume_amount'],'metric repair keeps an explicit current metric replacement');
     $repairWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
     check(strpos($repairWire['messages'][0]['content'],'explicitly changes the business fact or metric')!==false,'metric repair instruction gives the current question precedence');
+    $repaired=$client->understand($switchQuestion,$switchMeanings,'fixture/model','fixture-key',1000,function(){},$skills,'missing_key:action_codes');
+    check($repaired['intent']['action_codes']===[] && $repaired['intent']['metric_codes']===['consume_amount'],'generic required-field recovery returns a revalidated complete model result');
+    $omittedAgain=$switchIntent;unset($omittedAgain['action_codes']);$GLOBALS['sfResponse']=$response(json_encode($omittedAgain));
+    rejects(function()use($client,$switchQuestion,$switchMeanings,$skills){$client->understand($switchQuestion,$switchMeanings,'fixture/model','fixture-key',1000,function(){},$skills,'missing_key:action_codes');},'AI_MODEL_INTENT_CONTRACT_INVALID');
+    rejects(function()use($client,$switchQuestion,$switchMeanings,$skills){$client->understand($switchQuestion,$switchMeanings,'fixture/model','fixture-key',1000,function(){},$skills,'unknown_metric_code');},'AI_MODEL_INPUT_INVALID');
     $badChoice=$intent;$badChoice['metric_codes']=['staff_labor_yeji'];
     rejects(function()use($badChoice,$safeQuestion){\app\services\ai\contract\AiIntentResultContract::normalize($badChoice,['staff_labor_yeji'],['service'],$safeQuestion);},'AI_MODEL_INTENT_CONTRACT_INVALID');
     $missingChoice=$firstTurn; unset($missingChoice['needs_metric_choice']);$GLOBALS['sfResponse']=$response(json_encode($missingChoice));
@@ -205,7 +215,7 @@ namespace {
     check(!isset(json_decode($choiceUser[0]['content'],true)['intent']) && strpos(json_encode($choiceWire,JSON_UNESCAPED_UNICODE),'# 门店运营')!==false,'independent judgment sees source Skills but not the first model choice');
     $GLOBALS['sfResponse']=$response('{"metric_choice_is_explicit":"yes"}');
     rejects(function()use($client,$safeQuestion,$meanings,$skills){$client->confirmsMetricChoice($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){},$skills);},'AI_MODEL_INTENT_CONTRACT_INVALID');
-    foreach ([array_merge($intent,['sql'=>'SELECT 1']),array_merge($intent,['metric_codes'=>['invented']]),array_merge($intent,['periods'=>[null]]),array_merge($intent,['context_conditions'=>['store_scope'=>'inherit','business_filters'=>'unknown']])] as $invalid) {
+    foreach ([array_merge($intent,['sql'=>'SELECT 1']),array_merge($intent,['metric_codes'=>['invented']]),array_merge($intent,['periods'=>[null]]),array_merge($intent,['context_delta'=>['store_scope'=>'inherit']])] as $invalid) {
         $GLOBALS['sfResponse']=$response(json_encode($invalid));
         rejects(function()use($client,$safeQuestion,$meanings,$skills){$client->understand($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){},$skills);},isset($invalid['metric_codes'][0])?'AI_MODEL_METRIC_UNKNOWN':'AI_MODEL_INTENT_CONTRACT_INVALID');
     }

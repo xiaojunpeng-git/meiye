@@ -24,12 +24,9 @@ $check(count($view['recent_user_intents'])===20,'accept latest twenty local roun
 foreach (['张三','王小明','13800138000','13900139000','98765432','fixture-secret-token'] as $secret) $check(strpos($wire,$secret)===false,'PII/answer content excluded: '.substr(hash('sha256',$secret),0,8));
 $check($projector->project('今天张三消耗业绩')['unresolved_condition']===true,'unknown person never becomes unfiltered query');
 $gateway=new app\services\ai\AiGatewayServices();
-$fallback=new ReflectionMethod($gateway,'registeredSelectionFallback'); if (PHP_VERSION_ID<80100) $fallback->setAccessible(true);
-$recovered=$fallback->invoke($gateway,$projector->project('2026-09-01到2026-09-09现金业绩多少，生成Excel'),['cash_performance']);
-$check($recovered['selection']===['metric_codes'=>['cash_performance'],'query_shape'=>'summary','date_code'=>'EXPLICIT','decision'=>'query'],
-    'explicit registered intent can recover only from vendor response contract errors');
-$check($fallback->invoke($gateway,$projector->project('今天业绩多少'),['cash_performance'])===null,
-    'fallback never guesses an ambiguous metric');
+$gatewaySource=file_get_contents($base.'ai/AiGatewayServices.php');
+$check(strpos($gatewaySource,'AiFollowupQueryPlanner')===false && strpos($gatewaySource,'registeredSelectionFallback')===false,
+    'gateway has no keyword-parser or local fallback execution path');
 $method=new ReflectionMethod($gateway,'answer'); if (PHP_VERSION_ID<80100) $method->setAccessible(true);
 $answer=$method->invoke($gateway,['query'=>['query_shape'=>'comparison','start_date'=>'2026-09-08','end_date'=>'2026-09-08','compare_range'=>['start'=>'2026-09-07','end'=>'2026-09-07']],
     'data_as_of'=>'2026-09-08T12:00:00+08:00','results'=>[

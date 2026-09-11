@@ -1,0 +1,86 @@
+{
+  "baseline": "9b113777f56ca1be3624e29d76d6a0249b6190f2",
+  "date": "2026-09-11",
+  "status": "development_and_self_test_complete_pending_product_acceptance",
+  "tracked_diff_sha256": "not-applicable-dirty-worktree",
+  "note": "File hashes below identify the repaired implementation at the fixed baseline. A whole-worktree diff hash is intentionally not recorded because unrelated dirty-worktree changes are present. Host and PHP 7.4 suites passed. No commit/push/production deployment.",
+  "files": [
+    {
+      "status": "deleted",
+      "path": "后端代码/app/services/ai/execution/AiFollowupQueryPlanner.php"
+    },
+    {
+      "sha256": "6ce11b470e27b772b1e1a5cc15746136f7ba36f5cf93bb460e4f3c2bf38e3655",
+      "path": "后端代码/app/services/ai/AiGatewayServices.php"
+    },
+    {
+      "sha256": "9dfa82925691eeb8a04484bdddef61075db038f891c6aabbcb05a6fdb48ffb70",
+      "path": "后端代码/app/services/ai/contract/AiIntentResultContract.php"
+    },
+    {
+      "sha256": "22b4b47387fa0c726d665a957c83dec7bd36f6fe286f4398486a3de9a9d9cc67",
+      "path": "后端代码/app/services/ai/execution/IntentContextMerger.php"
+    },
+    {
+      "sha256": "d2381db64068c7173ca638d758bdf426709a3146407f9fbbad38e26e4224b55a",
+      "path": "后端代码/app/services/ai/execution/AiPendingContextGuidancePlanner.php"
+    },
+    {
+      "sha256": "1f4e2d285f5cac6d65b5fc725ffbcd4d797e424f4494a20173790cb5c9436178",
+      "path": "后端代码/app/services/ai/execution/AiContextReplacementGuidancePlanner.php"
+    },
+    {
+      "sha256": "fe33085f0230989403a3b0a07d4ed5f2339a7b9f23e890558fabbd4b40a49e21",
+      "path": "后端代码/app/services/ai/model/SiliconFlowClient.php"
+    },
+    {
+      "sha256": "d76e6f59106d0127b605211ecc6de651f3ef88bb0d2a4b6d2850b1f95ceeb2fb",
+      "path": "tests/mohe-ai/query-context.php"
+    },
+    {
+      "sha256": "e603825a110d1a0d9cb4d34dfee8aef9722ddd7f396b6246e473dddfcc6055ae",
+      "path": "tests/mohe-ai/context-delta-gateway.php"
+    },
+    {
+      "sha256": "6304615fcbdb632743f2b933df7cc93a31bd853a7015f7083e04b4a4380d82f5",
+      "path": "tests/mohe-ai/management-gateway.php"
+    },
+    {
+      "sha256": "02464104b405d7cd49996d89f45d89685436e0e86032a72589069c2ecc4f3501",
+      "path": "tests/mohe-ai/r6-gateway-harness.php"
+    },
+    {
+      "sha256": "df7d40c3c9d52f8be3608c374ae42dc28897117fb70e3c066f3803558815211d",
+      "path": "tests/mohe-ai/gateway-components.php"
+    },
+    {
+      "status": "deleted",
+      "path": "tests/mohe-ai/gateway-r5-guidance.php"
+    },
+    {
+      "sha256": "205aaf6bc9a3acfdd7035de396f179a634b649f4c0c498450d7c3af64cf22d0a",
+      "path": "tests/mohe-ai/run-all.sh"
+    },
+    {
+      "sha256": "36aba01b5c78ceb9d42cd8fced4c48ad528bfa6351fb8400493372283c685978",
+      "path": "scripts/mohe-ai-test-php74.sh"
+    },
+    {
+      "sha256": "089ab4dfbe5835191a00f9a7524457989afd825905791075855cf24abd0cc69d",
+      "path": "tests/mohe-ai/R6-CONTEXT-REPAIR.md"
+    },
+    {
+      "sha256": "a82a4698f2a0618f2d38f4a8de7ecee9d3281a2c95b6cd4d2ef8ae7a39892b32",
+      "path": "tests/mohe-ai/R6-LEGACY-PATH-REMOVAL.md"
+    }
+  ],
+  "checks": {
+    "host": "PASS bash tests/mohe-ai/run-all.sh (2026-09-11)",
+    "php74": "PASS MOHE_TEST_PHP74_IMAGE=5e6482d26e1e bash scripts/mohe-ai-test-php74.sh (2026-09-11)",
+    "context_contract": 39,
+    "context_delta_gateway": 37,
+    "gateway_components": 137,
+    "management_gateway": 36,
+    "live": "No new live-model or production-data acceptance was performed for this repair."
+  }
+}

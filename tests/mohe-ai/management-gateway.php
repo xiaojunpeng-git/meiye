@@ -1,7 +1,7 @@
 <?php
 // Reuse the existing synthetic gateway harness and run its baseline first.
 // No application bootstrap, customer database, credentials or real model calls.
-require __DIR__.'/gateway-r5-guidance.php';
+require __DIR__.'/r6-gateway-harness.php';
 
 use app\services\ai\management\AiManagementStore;
 
@@ -18,7 +18,7 @@ function mgpublish($h,array $document): array {
 }
 $h=null;
 try {
-    $h=new R5Harness(3);
+    $h=new R6GatewayHarness(3);
     $h->db->exec('CREATE TABLE mohe_ai_management_state(instance_key TEXT PRIMARY KEY,revision INTEGER NOT NULL,active_version TEXT NOT NULL,draft_json TEXT NOT NULL,updated_at INTEGER NOT NULL)');
     $h->db->exec('CREATE TABLE mohe_ai_management_version(instance_key TEXT NOT NULL,version TEXT NOT NULL,document_json TEXT NOT NULL,document_hash TEXT NOT NULL,created_at INTEGER NOT NULL,action TEXT NOT NULL,source_version TEXT NOT NULL,PRIMARY KEY(instance_key,version))');
     $store=new AiManagementStore($h->db,'','fixture_r6');
@@ -78,8 +78,16 @@ try {
     mgcheck($h->queries===$beforeQueries,'disabled workflow never accesses facts');
     $state=mgcall($h,'management_get');$rolled=mgcall($h,'management_rollback',['expected_revision'=>$state['revision'],'target_version'=>'source']);
     mgcheck($rolled['active_version']!=='source'&&mgboot($h)['max_clarification_rounds']===3,'rollback creates new audited active version with source policy');
+    $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-08']],'scope'=>'authorized','unresolved_fragments'=>[]];
     $source=$h->start('9月1日到9月8日现金业绩合计多少');
     mgcheck($source['status']==='COMPLETED'&&isset($source['answer']['context_ref']),'source query available after restore');
+    // Custom server-owned context guidance is deliberately outside the admin
+    // slot order.  A published management document must preserve it rather
+    // than rejecting its structural field as an unknown admin slot.
+    $delta=array_fill_keys(\app\services\ai\contract\AiIntentResultContract::DELTA_FIELDS,'inherit');$delta['store_scope']='pending';
+    $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$delta,'unresolved_fragments'=>[]];
+    $pendingScope=$h->start('范围还没有确定',$source['answer']['context_ref']);
+    mgcheck($pendingScope['status']==='WAITING_CLARIFICATION'&&$pendingScope['clarification']['fields'][0]['key']==='pending_store_scope','published management preserves context-pending guidance');
     $h->auth['permission_version']='permission-revoked';$beforeQueries=$h->queries;
     $revoked=$h->start('那就换成消耗业绩，其他条件别动。',$source['answer']['context_ref']);
     mgcheck($revoked['status']==='FAILED'&&$h->queries===$beforeQueries,'published management cannot revive expired source authority');

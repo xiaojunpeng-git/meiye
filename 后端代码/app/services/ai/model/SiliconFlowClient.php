@@ -89,11 +89,12 @@ final class SiliconFlowClient
             ];
         if ($repairPredicate!==null) {
             $repairInstructions=[
-                'missing_context_conditions'=>'The previous response did not include the required context_conditions object for a verified prior query. Produce the complete intent_result again. Include context_conditions exactly as required by the contract; do not invent, remove, or broaden a filter.',
+                'missing_key:context_delta'=>'The previous response omitted context_delta for a verified prior query. Produce the complete intent_result again. State every delta action explicitly; do not invent, remove, broaden, or default a condition.',
                 'missing_metric_codes'=>'The previous response omitted the required metric_codes. Produce the complete intent_result again by understanding the current question together with the verified prior query. If the current question explicitly changes the business fact or metric, use that current meaning. Otherwise preserve the prior metric_codes. Keep every other unchanged condition; do not invent, remove, broaden or substitute any meaning.',
             ];
-            if (!isset($repairInstructions[$repairPredicate])) throw new AiContractException('AI_MODEL_INPUT_INVALID');
-            array_unshift($messages,['role'=>'system','content'=>$repairInstructions[$repairPredicate]]);
+            if (!AiIntentResultContract::repairableOmission($repairPredicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+            $instruction=$repairInstructions[$repairPredicate]??('The completed previous response omitted required field '.substr($repairPredicate,12).'. Produce one complete intent_result again from the current question and verified prior query. Include every required field, even when its valid value is an empty array or empty string. Do not guess values, discard conditions, or change the current meaning to match the prior question.');
+            array_unshift($messages,['role'=>'system','content'=>$instruction]);
         }
         $payload=['model'=>$model,'stream'=>false,'max_tokens'=>1200,'temperature'=>0,'response_format'=>['type'=>'json_object'],'messages'=>$messages];
         $decoded=$this->request($payload,$apiKey,$timeoutMs,$checkpoint);
@@ -160,9 +161,14 @@ final class SiliconFlowClient
     {
         if (!is_array($query)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         $keys=array_keys($query);sort($keys);
-        if ($keys!==['metric_codes','operation','periods','ranking'] || !is_array($query['metric_codes']) || count($query['metric_codes'])>8
+        $base=['metric_codes','operation','periods','ranking'];
+        $extended=['has_object_selection','metric_codes','object_kind','operation','periods','ranking','scope'];
+        if (($keys!==$base && $keys!==$extended) || !is_array($query['metric_codes']) || count($query['metric_codes'])>8
             || !in_array($query['operation'],['summary','trend','ranking','comparison'],true) || !$this->validPeriods($query['periods'])
             || count($query['periods'])!==($query['operation']==='comparison'?2:1)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+        if ($keys===$extended && (!is_bool($query['has_object_selection']) || !is_string($query['object_kind'])
+            || !preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$query['object_kind'])
+            || !in_array($query['scope'],['current_store','authorized','unspecified'],true))) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         foreach ($query['metric_codes'] as $code) if(!is_string($code)||!preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$code)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         $ranking=$query['ranking'];
         if ($ranking===null) return;

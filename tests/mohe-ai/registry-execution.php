@@ -67,7 +67,7 @@ function registryHandlers(array &$seen):array
 try {
     $registry=new AiBusinessRegistry(); $compiler=new AiRegisteredPlanCompiler($registry); $cap=registryCapabilities();
     $manifest=AiBusinessManifest::definitions();
-    registryCheck(($manifest['intent_contract']['code']??null)==='intent_result' && ($manifest['intent_contract']['version']??null)==='intent-result-v2'
+    registryCheck(($manifest['intent_contract']['code']??null)==='intent_result' && ($manifest['intent_contract']['version']??null)==='intent-result-v3'
         && preg_match('/^[a-f0-9]{64}$/D',$manifest['intent_contract']['hash']??'')===1,'intent result contract participates in the registry fingerprint');
     $snapshot=$registry->snapshot($cap);
     registryCheck(count($snapshot['metrics'])===3&&!isset($snapshot['metrics']['actual_performance']),'only approved metric contracts, no actual formula invented');
