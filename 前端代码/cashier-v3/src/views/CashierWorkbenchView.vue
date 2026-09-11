@@ -3560,8 +3560,11 @@ function lineDebtAmountCents(line = {}) {
 }
 
 function lineSaleAmountCents(line = {}) {
-  const amount = Number(getLineAmount(line) || 0) * 100
-  return Number.isSafeInteger(amount) && amount >= 0 ? amount : 0
+  // Local sale rows retain a unit price until the final checkout snapshot,
+  // while persisted workspace rows already carry a line total.  Reuse the
+  // same normalizer as the checkout summary so a changed unit price can
+  // never make the debt editor validate against only one item in the row.
+  return localDraftLineTotalAmountCents(line)
 }
 
 function personnelPerformanceBaseAmountCents(line = {}) {
