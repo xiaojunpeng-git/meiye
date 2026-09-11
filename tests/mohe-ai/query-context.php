@@ -84,6 +84,21 @@ qcCheck(($replacementPlanner->choose($replacementStep,['replace_previous_object_
 $replacementPending=$replacementPlanner->start($basePlan,['store_scope'],['store_ids'=>[1],'business_filters'=>null]);
 $afterReplacement=$replacementPlanner->choose($replacementPending,['replace_previous_object_filter'=>'replace']);
 qcCheck(($afterReplacement['fields'][0]['key']??null)==='pending_store_scope','object replacement continues with every remaining pending field');
+// A continuation can change its analytical object without pretending that a
+// personnel-only metric is a store metric.  The successor must receive only
+// registered choices for the replacement object; retaining the incompatible
+// metric is deliberately not an available action.
+$storeTarget=$intent;
+$storeTarget['object_kind']='store';
+$storeTarget['operation']='ranking';
+$storeTarget['metric_codes']=[];
+$storeTarget['ranking']=['direction'=>'top','limit'=>1];
+$storeMetricReplacement=$replacementPlanner->start($basePlan,['metric_codes'],['store_ids'=>[1],'business_filters'=>null],
+    [['value'=>'metric:cash_performance','label'=>'现金业绩']],$storeTarget,['cash_performance'=>['ranking']]);
+$storeMetricChoice=$replacementPlanner->choose($storeMetricReplacement,['replace_previous_object_filter'=>'replace']);
+qcCheck(array_column($storeMetricChoice['fields'][0]['options']??[],'value')===['metric:cash_performance'],'replacement object does not offer retain for a metric unavailable to that object');
+$storeMetricPlan=$pendingPlanner->choose($storeMetricChoice,['pending_metric_codes'=>'metric:cash_performance']);
+qcCheck(($storeMetricPlan['plan']['query']['metric_codes']??null)===['cash_performance']&&($storeMetricPlan['plan']['query']['business_filters']??null)===[],'replacement object executes only after a compatible registered metric is selected');
 $storeScope=$intent;$storeScope['object_term']='二号门店';$storeScope['context_delta']['store_scope']='replace';
 $storeScopeSafe=$safe;$storeScopeSafe['question']='改查二号门店，其他条件不变';
 $storeScopeMerged=IntentContextMerger::merge($source,app\services\ai\contract\AiIntentResultContract::normalize($storeScope,['staff_labor_yeji'],[],$storeScopeSafe));

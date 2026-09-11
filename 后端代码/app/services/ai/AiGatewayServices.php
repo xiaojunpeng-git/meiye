@@ -703,6 +703,18 @@ final class AiGatewayServices
         // model with a phrase match, blocker or inferred object.
         $projection['blocking_reason']=null;$projection['unresolved_condition']=false;
         $projection['semantic_intent']['constraints']=[];
+        // A previous personnel/dimension answer can have originated from a
+        // clarification envelope rather than an executable plan.  When the
+        // current turn replaces that object and still needs another answer,
+        // rebase from the signed source query itself. Reusing the unfinished
+        // personnel envelope would make a later store metric selection reopen
+        // the previous personnel selector.
+        if ($sourceQuery!==null && $merged['replacement_confirmation'] && $semanticPending) {
+            $shape=$sourceQuery['query_shape']??null;
+            if (!in_array($shape,['summary','trend','ranking','comparison'],true)) throw new RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
+            return $finish(['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_'.$shape,
+                'query'=>$sourceQuery,'output_format'=>$body['output_format']]]);
+        }
         // Any registered object dimension follows the same controlled path.
         // Object labels come from the runtime Skill; metrics and dimensions
         // come from the lower-layer registry.  No report page/object switch is
