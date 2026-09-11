@@ -43,7 +43,7 @@ final class AiRunStore
             throw new RuntimeException('AI_CREATE_INVALID');
         }
         $keys = ['capability_snapshot_ref','capability_snapshot_hash','budget_profile_version','authorization_version','model_config_version'];
-        $guidanceKeys=['guidance_schema_version','guidance_profile_version','max_clarification_rounds','management_revision'];
+        $guidanceKeys=['guidance_schema_version','guidance_profile_version','max_clarification_rounds','management_revision','intent_contract_version'];
         if (array_diff(array_keys($snapshot),array_merge($keys,$guidanceKeys))) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); }
         foreach ($keys as $key) { if (!isset($snapshot[$key]) || !is_string($snapshot[$key])) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); } $this->identifier($snapshot[$key]); }
         if (array_intersect(array_keys($snapshot),$guidanceKeys)) {
@@ -51,6 +51,7 @@ final class AiRunStore
                 || !is_string($snapshot['guidance_profile_version']??null)) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); }
             $this->identifier($snapshot['guidance_profile_version']);
             if (isset($snapshot['management_revision'])) $this->identifier($snapshot['management_revision']);
+            if (isset($snapshot['intent_contract_version'])) $this->identifier($snapshot['intent_contract_version']);
         }
         if (!preg_match('/^[a-f0-9]{64}$/D',$snapshot['capability_snapshot_hash'])) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); }
         return $this->transaction(function () use ($owner, $requestId, $requestHash, $snapshot, $budgetMs, $capacity, $activeLimit) {
@@ -220,6 +221,33 @@ final class AiRunStore
             }
             $this->execute('UPDATE '.$this->table('attempt').' SET state=?, input_tokens=?, output_tokens=? WHERE instance_id=? AND run_id=? AND attempt_code=?',[$state,$inputTokens,$outputTokens,$this->instance,$runId,$attemptCode]);
             if ($state==='UNKNOWN' && !$this->terminal($r)) { $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\', reason=\'ATTEMPT_UNKNOWN\', last_clock_at=?, version=version+1 WHERE instance_id=? AND run_id=?',[$this->now(),$this->instance,$runId]); }
+        });
+    }
+
+    /** Payload-free model response diagnostics expire with the Run. */
+    public function recordDiagnostic(array $owner,string $runId,int $generation,string $workerToken,array $diagnostic): void
+    {
+        $allowed=['stage','predicate','finish_reason','content_bytes'];
+        if (array_diff(array_keys($diagnostic),$allowed) || !is_string($diagnostic['stage']??null)
+            || !preg_match('/^[a-z_]{1,48}$/D',$diagnostic['stage']) || !is_string($diagnostic['predicate']??null)
+            || !preg_match('/^[a-z0-9_:]{1,96}$/D',$diagnostic['predicate'])
+            || (isset($diagnostic['finish_reason']) && (!is_string($diagnostic['finish_reason']) || !preg_match('/^[a-z_]{1,32}$/D',$diagnostic['finish_reason'])))
+            || (isset($diagnostic['content_bytes']) && (!is_int($diagnostic['content_bytes']) || $diagnostic['content_bytes']<0 || $diagnostic['content_bytes']>131072))) {
+            throw new RuntimeException('AI_DIAGNOSTIC_INVALID');
+        }
+        $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$diagnostic) {
+            $r=$this->read($owner,$runId,$generation,true); $this->worker($r,$workerToken);
+            $counters=json_decode($r['counters_json'],true)?:[];
+            $counters['model_diagnostic']=$diagnostic;
+            $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counters),$this->instance,$runId]);
+        });
+    }
+
+    public function runDiagnostic(array $owner,string $runId,int $generation): ?array
+    {
+        return $this->transaction(function () use ($owner,$runId,$generation) {
+            $r=$this->read($owner,$runId,$generation,true); $counters=json_decode($r['counters_json'],true)?:[];
+            return is_array($counters['model_diagnostic']??null)?$counters['model_diagnostic']:null;
         });
     }
 

@@ -8,6 +8,8 @@ use app\services\ai\execution\AiWorkflowPlanner;
 use app\services\ai\execution\AiRegisteredPlanCompiler;
 use app\services\ai\execution\AiRegisteredWorkflowExecutor;
 use app\services\ai\registry\AiBusinessRegistry;
+use app\services\ai\contract\AiContractException;
+use app\services\ai\contract\AiIntentResultContract;
 use app\services\ai\model\AiModelInputProjector;
 use app\services\ai\model\SiliconFlowClient;
 use app\services\query\metric\MetricReadViewServices;
@@ -105,7 +107,8 @@ final class AiGatewayServices
             $limits=$this->limits();
             $snapshot=['capability_snapshot_ref'=>$this->registryHash($context),'capability_snapshot_hash'=>hash('sha256',json_encode($this->capabilities($context))),
                 'budget_profile_version'=>$limits['run_budget_ms'].'-v1','authorization_version'=>$this->permissionHash($context),'model_config_version'=>(string)$configuration['version'],
-                'guidance_schema_version'=>'mohe-clarification-v2','guidance_profile_version'=>'guidance-v2-'.$limits['max_clarification_rounds'],'max_clarification_rounds'=>(string)$limits['max_clarification_rounds']];
+                'guidance_schema_version'=>'mohe-clarification-v2','guidance_profile_version'=>'guidance-v2-'.$limits['max_clarification_rounds'],'max_clarification_rounds'=>(string)$limits['max_clarification_rounds'],
+                'intent_contract_version'=>AiIntentResultContract::VERSION];
             if ($this->management) $snapshot['management_revision']=$this->managementRevision;
             $created=$this->runs->create($owner,$this->identifier($input['client_request_id']??null),$this->bodyHash($body),$snapshot,$limits['run_budget_ms'],$limits['execution_slots'],$limits['active_run_limit']);
             if (!$created['accepted']) return ['accepted'=>false,'reason'=>$created['reason'],'message'=>[
@@ -635,7 +638,14 @@ final class AiGatewayServices
             }
             $objects=[];
             foreach($objectContracts as $kind=>$actions){$actions=array_keys($actions);sort($actions);$objects[]=['object_kind'=>$kind,'action_codes'=>$actions];}
-            $summaries[]=['metric_code'=>$code,'name'=>$tooltip['name'],'summary'=>$tooltip['summary'],'object_contracts'=>$objects];
+            // The model receives the registered semantic boundary, not just a
+            // short display title. This lets natural-language understanding
+            // distinguish business facts without a phrase catalogue in code.
+            $meaning=[];
+            foreach (['summary','include','exclude','timing','note'] as $key) {
+                if (is_string($tooltip[$key]??null) && $tooltip[$key]!=='') $meaning[]=$tooltip[$key];
+            }
+            $summaries[]=['metric_code'=>$code,'name'=>$tooltip['name'],'summary'=>implode("\n",$meaning),'object_contracts'=>$objects];
         }
         // The prompt-facing candidates and the later controlled choices are both
         // projected from the same registered provider contracts.  A dictionary
@@ -696,12 +706,70 @@ final class AiGatewayServices
         try {
             $checkpoint();
             $reply=$this->model?call_user_func($this->model,$safe['outbound'],$summaries,$configuration,$checkpoint)
-                :(new SiliconFlowClient())->understand($safe['outbound'],$summaries,$configuration['model'],$configuration['api_key'],20000,$checkpoint,$runtimeSkills);
+                // Natural-language understanding may carry the complete
+                // source-owned Skills and registered semantic boundary. Give
+                // that single, fenced call enough room within the 180-second
+                // Run budget; it remains cancellable through checkpoint().
+                :(new SiliconFlowClient())->understand($safe['outbound'],$summaries,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills);
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
         } catch (\Throwable $error) {
-            $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand',in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');throw $error;
+            if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error);
+            $firstState=in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
+            $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand',$firstState);
+            $diagnostic=$error instanceof AiContractException?$error->diagnostic():[];
+            $repairPredicate=$diagnostic['predicate']??null;
+            $repairable=$this->model===null && $sourceQuery!==null
+                && $error instanceof AiContractException
+                && $error->getMessage()==='AI_MODEL_INTENT_CONTRACT_INVALID'
+                && in_array($repairPredicate,['missing_context_conditions','missing_metric_codes'],true);
+            if (!$repairable) throw $error;
+            // A completed response with one omitted mandatory structural field
+            // is safe to correct once.  This is a separate fenced attempt,
+            // not a replay of an unknown provider outcome.
+            $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
+            $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$safe['outbound'],$summaries,$runtimeSkills]))+2304));
+            $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
+            $this->runs->prepareAttempt($owner,$id,$generation,$worker,'understand_repair','model',hash('sha256',json_encode([$safe['outbound'],$summaries,$repairPredicate])),'siliconflow');
+            $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand_repair');
+            try {
+                $checkpoint();
+                $reply=(new SiliconFlowClient())->understand($safe['outbound'],$summaries,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills,$repairPredicate);
+                $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_repair','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+            } catch (\Throwable $repairError) {
+                if ($repairError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$repairError);
+                $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_repair',in_array($repairError->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');
+                throw $repairError;
+            }
         }
-        $checkpoint();$intent=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound']);$term=$intent['object_term'];
+        $checkpoint();$intent=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound']);
+        if ($intent['_object_term_normalized']) {
+            try { $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'intent_contract','predicate'=>'object_term_not_verbatim']); } catch (\Throwable $ignored) {}
+        }
+        // The independent choice check is useful only for a fresh, singular
+        // metric request. It must not discard a valid multi-metric answer or
+        // a model-resolved continuation that deliberately uses signed context.
+        if (!$this->model && $sourceQuery===null && !$intent['needs_metric_choice'] && count($intent['metric_codes'])===1) {
+            $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
+            $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$safe['outbound'],$summaries,$runtimeSkills]))+1024));
+            $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',80);
+            $this->runs->prepareAttempt($owner,$id,$generation,$worker,'confirm_metric_choice','model',hash('sha256',json_encode([$safe['outbound'],$summaries])),'siliconflow');
+            $this->runs->sendAttempt($owner,$id,$generation,$worker,'confirm_metric_choice');
+            try {
+                $confirmation=(new SiliconFlowClient())->confirmsMetricChoice($safe['outbound'],$summaries,$configuration['model'],$configuration['api_key'],10000,$checkpoint,$runtimeSkills);
+                $this->runs->finishAttempt($owner,$id,$generation,$worker,'confirm_metric_choice','SUCCEEDED',$confirmation['usage']['input_tokens']??null,$confirmation['usage']['output_tokens']??null);
+            } catch (\Throwable $error) {
+                if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error);
+                else {
+                    try { $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'intent_confirmation','predicate'=>'unexpected_exception']); } catch (\Throwable $ignored) {}
+                }
+                $this->runs->finishAttempt($owner,$id,$generation,$worker,'confirm_metric_choice',in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');throw $error;
+            }
+            if (!$confirmation['metric_choice_is_explicit']) {
+                $intent['needs_metric_choice']=true;
+                $intent['metric_codes']=[];
+            }
+        }
+        $term=$intent['object_term'];
         if ($intent['unresolved_fragments']) throw new RuntimeException('AI_INTENT_UNRESOLVED');
         if ($intent['operation']==='unknown') throw new RuntimeException('AI_INTENT_UNRESOLVED');
         $localTerm=null;
@@ -783,53 +851,19 @@ final class AiGatewayServices
      */
     private function semanticIntent($intent,array $capabilities,array $safeQuestion): array
     {
-        if (!is_array($intent)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        $periodsSupplied=array_key_exists('periods',$intent);$legacyPeriodSupplied=array_key_exists('period',$intent);$scopeSupplied=array_key_exists('scope',$intent);$contextConditionsSupplied=array_key_exists('context_conditions',$intent);
-        if ($periodsSupplied && $legacyPeriodSupplied) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        $keys=array_keys($intent); sort($keys);
-        $expected=['action_codes','metric_codes','needs_metric_choice','object_kind','object_term','operation','ranking','unresolved_fragments'];
-        if ($periodsSupplied) $expected[]='periods'; elseif ($legacyPeriodSupplied) $expected[]='period'; sort($expected);
-        if ($scopeSupplied) {$expected[]='scope';sort($expected);}
-        if ($contextConditionsSupplied) {$expected[]='context_conditions';sort($expected);}
-        if ($keys!==$expected
-            || !is_bool($intent['needs_metric_choice']) || !is_string($intent['object_term'])
-            || !in_array($intent['object_kind'],['store','person','position','member','product','project','category','partner','inventory','course','organization','unknown'],true)
-            || !in_array($intent['operation'],['summary','trend','ranking','comparison','definition','unknown'],true)
-            || !is_array($intent['metric_codes']) || count($intent['metric_codes'])>8 || !is_array($intent['action_codes']) || count($intent['action_codes'])>8
-            || !is_array($intent['unresolved_fragments']) || count($intent['unresolved_fragments'])>8
-            || !is_array($intent['ranking'])
-            || !in_array($intent['ranking']['direction']??null,['top','bottom','top_and_bottom','unspecified'],true)
-            || (!is_null($intent['ranking']['limit']??null) && (!is_int($intent['ranking']['limit']) || $intent['ranking']['limit']<1 || $intent['ranking']['limit']>999))) {
-            throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        }
-        $rankingKeys=array_keys($intent['ranking']);sort($rankingKeys);
-        if ($rankingKeys!==['direction','limit']) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        $periods=$periodsSupplied?$intent['periods']:($legacyPeriodSupplied&&$intent['period']!==null?[$intent['period']]:[]);
-        if (($periodsSupplied && !$this->validNaturalPeriods($periods)) || ($legacyPeriodSupplied && !$this->validNaturalPeriods($periods))) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        if ($scopeSupplied && !in_array($intent['scope'],['current_store','authorized','unspecified'],true)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        $contextConditions=$intent['context_conditions']??['store_scope'=>'inherit','business_filters'=>'inherit'];
-        $contextKeys=is_array($contextConditions)?array_keys($contextConditions):[];sort($contextKeys);
-        if ($contextKeys!==['business_filters','store_scope']
-            || !in_array($contextConditions['store_scope'],['inherit','replace','clear'],true)
-            || !in_array($contextConditions['business_filters'],['inherit','replace','clear'],true)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        foreach ($intent['metric_codes'] as $code) if (!is_string($code) || !preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$code)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
         $allowedActions=[];foreach($capabilities as $capability) foreach((array)($capability['object_contracts']??[]) as $contract) foreach((array)($contract['action_codes']??[]) as $action) if(is_string($action))$allowedActions[$action]=true;
-        $allowedActions=array_keys($allowedActions);
-        foreach ($intent['action_codes'] as $code) if(!is_string($code)||!in_array($code,$allowedActions,true)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        $questionTexts=array_merge([$safeQuestion['question']??''],(array)($safeQuestion['recent_questions']??[]));
-        $contains=function(string $value) use($questionTexts):bool { foreach($questionTexts as $text) if(is_string($text)&&mb_strpos($text,$value,0,'UTF-8')!==false)return true; return false; };
-        if ($intent['object_term']!=='' && !$contains($intent['object_term'])) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        foreach ($intent['unresolved_fragments'] as $fragment) if(!is_string($fragment)||$fragment===''||mb_strlen($fragment,'UTF-8')>160
-            || !$contains($fragment)) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        if (count(array_unique($intent['metric_codes']))!==count($intent['metric_codes']) || count(array_unique($intent['action_codes']))!==count($intent['action_codes'])
-            || count(array_unique($intent['unresolved_fragments']))!==count($intent['unresolved_fragments'])) throw new RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        unset($intent['period']);
-        $intent['_periods_supplied']=$periodsSupplied||$legacyPeriodSupplied;
-        $intent['periods']=$periods;
-        $intent['_scope_supplied']=$scopeSupplied;
-        $intent['context_conditions']=$contextConditions;
-        if (!$scopeSupplied) $intent['scope']='unspecified';
-        return $intent;
+        $allowedActions=array_keys($allowedActions);sort($allowedActions,SORT_STRING);
+        $metricCodes=[];foreach($capabilities as $capability) if(is_string($capability['metric_code']??null)) $metricCodes[]=$capability['metric_code'];
+        sort($metricCodes,SORT_STRING);
+        return AiIntentResultContract::normalize($intent,$metricCodes,$allowedActions,$safeQuestion);
+    }
+
+    /** Store only bounded structural metadata; neither question nor model text is retained. */
+    private function recordModelDiagnostic(array $owner,string $id,int $generation,string $worker,AiContractException $error): void
+    {
+        $diagnostic=$error->diagnostic();
+        if (!$diagnostic) $diagnostic=['stage'=>'intent_parse','predicate'=>'error_reason:'.strtolower($error->reason())];
+        try { $this->runs->recordDiagnostic($owner,$id,$generation,$worker,$diagnostic); } catch (\Throwable $ignored) {}
     }
 
     /** A bounded semantic date value from the model becomes a trusted explicit
@@ -854,28 +888,6 @@ final class AiGatewayServices
         // into a request for days that have not happened yet.
         $end=$offset===0?$reference->format('Y-m-d'):$month->format('Y-m-t');
         return [['code'=>'EXPLICIT','start'=>$month->format('Y-m-d'),'end'=>$end]];
-    }
-
-    private function validNaturalPeriod($period): bool
-    {
-        if (!is_array($period) || !isset($period['kind']) || !is_string($period['kind'])) return false;
-        $keys=array_keys($period);sort($keys);
-        if ($period['kind']==='date_range') {
-            return $keys===['end','kind','start'] && is_string($period['start']) && is_string($period['end'])
-                && preg_match('/^\d{4}-\d{2}-\d{2}$/D',$period['start']) && preg_match('/^\d{4}-\d{2}-\d{2}$/D',$period['end']);
-        }
-        if ($period['kind']==='relative_days') return $keys===['days','end_offset_days','kind']
-            && is_int($period['end_offset_days']) && $period['end_offset_days']>=-365 && $period['end_offset_days']<=0
-            && is_int($period['days']) && $period['days']>=1 && $period['days']<=366;
-        return $period['kind']==='month_offset' && $keys===['kind','offset_months']
-            && is_int($period['offset_months']) && $period['offset_months']>=-24 && $period['offset_months']<=0;
-    }
-
-    private function validNaturalPeriods($periods): bool
-    {
-        if (!is_array($periods) || count($periods)>2 || ($periods!==[] && array_keys($periods)!==range(0,count($periods)-1))) return false;
-        foreach ($periods as $period) if (!$this->validNaturalPeriod($period)) return false;
-        return true;
     }
 
     /** Registry selects the frozen graph; the gateway supplies only trusted infrastructure adapters. */
@@ -1103,6 +1115,10 @@ final class AiGatewayServices
                 $result['answer']['summary'].=' 数据已核对，但 Excel 文件生成失败。';
             }
         }
+        if ($run['status']==='FAILED' && $context['terminal']==='platform' && !empty($this->fresh($context)['can_configure'])) {
+            $diagnostic=$this->runs->runDiagnostic($owner,$run['run_id'],$run['generation']);
+            if ($diagnostic!==null) $result['management_trace']=['model_diagnostic'=>$diagnostic];
+        }
         return $result;
     }
     private function assertBinding(array $stored,array $owner,string $id,int $generation): void
@@ -1216,6 +1232,12 @@ final class AiGatewayServices
             'AI_EXPORT_NOT_READY'=>'当前 Excel 能力尚未启用，本次未生成文件或发布数字。',
             'AI_MODEL_ACCOUNT_UNAVAILABLE'=>'客户 AI 账号暂不可用，请联系管理员检查 AI 配置。',
             'AI_MODEL_RESULT_UNKNOWN'=>'本次 AI 请求结果暂未确认，已停止继续调用，请稍后再问。',
+            'ATTEMPT_UNKNOWN'=>'本次 AI 请求结果暂未确认，已停止继续调用，请稍后再问。',
+            'AI_MODEL_RESPONSE_TRUNCATED'=>'本次 AI 理解结果未完整返回，系统已停止查询，请稍后重试。',
+            'AI_MODEL_RESPONSE_ENVELOPE_INVALID'=>'本次 AI 返回格式异常，系统未执行查询，请稍后重试。',
+            'AI_MODEL_INTENT_CONTRACT_INVALID'=>'本次 AI 理解结果不完整，系统未执行查询，请稍后重试。',
+            'AI_JSON_SIZE_INVALID'=>'本次 AI 返回内容异常，系统未执行查询，请稍后重试。',
+            'AI_JSON_OBJECT_REQUIRED'=>'本次 AI 返回内容异常，系统未执行查询，请稍后重试。',
             'AI_AUTHORIZATION_CHANGED'=>'您的权限或 AI 配置已变化，本次查询已停止，请重新提问。',
             'METRIC_QUERY_COVERAGE_UNAVAILABLE'=>'该时段的数据尚未通过核验，请选择其他日期。',
             'CAPACITY_STOPPED'=>'当前系统繁忙，本次任务已停止，请稍后再问。',

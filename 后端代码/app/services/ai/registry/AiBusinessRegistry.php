@@ -208,7 +208,11 @@ final class AiBusinessRegistry
     private function validate(): void
     {
         $m=$this->manifest;
-        AiRegistryValue::exact($m,['registry_version','semantic_resource_hash','schemas','tools','actions','scenes','workflows','export_node']);
+        AiRegistryValue::exact($m,['registry_version','semantic_resource_hash','intent_contract','schemas','tools','actions','scenes','workflows','export_node']);
+        $intentContract=$m['intent_contract']??null;
+        AiRegistryValue::exact(is_array($intentContract)?$intentContract:[],['code','version','hash']);
+        if ($intentContract['code']!=='intent_result'||$intentContract['version']!==\app\services\ai\contract\AiIntentResultContract::VERSION
+            ||!preg_match('/^[a-f0-9]{64}$/D',$intentContract['hash'])) AiRegistryValue::fail('AI_REGISTRY_SCHEMA_INVALID');
         if (!is_string($m['semantic_resource_hash']) || !preg_match('/^[a-f0-9]{64}$/D',$m['semantic_resource_hash'])) AiRegistryValue::fail('AI_REGISTRY_VERSION_INVALID');
         if (!is_string($m['registry_version'])||!preg_match('/^[a-z0-9_-]{1,80}$/D',$m['registry_version'])) AiRegistryValue::fail('AI_REGISTRY_INVALID');
         $schemas=AiRegistryValue::strings($m['schemas'],32);

@@ -22,6 +22,10 @@ rejectsState(function () use ($store,$owner,$id,$g) { $store->pauseForClarificat
 $store->finishAttempt($owner,$id,$g,'worker','p1','SUCCEEDED',100,20);
 $store->finishAttempt($owner,$id,$g,'worker','p1','SUCCEEDED',100,20);
 checkState((int)$db->query('SELECT input_tokens FROM mohe_ai_attempt')->fetchColumn()===100,'only known numeric usage');
+ $diagnostic=['stage'=>'intent_contract','predicate'=>'missing_key:needs_metric_choice','content_bytes'=>128];
+ $store->recordDiagnostic($owner,$id,$g,'worker',$diagnostic);
+ checkState($store->runDiagnostic($owner,$id,$g)===$diagnostic,'payload-free diagnostic is tied to the Run only');
+ rejectsState(function () use ($store,$owner,$id,$g) { $store->recordDiagnostic($owner,$id,$g,'worker',['stage'=>'bad-stage','predicate'=>'unsafe']); },'AI_DIAGNOSTIC_INVALID');
 rejectsState(function () use ($store,$owner,$id,$g) { $store->finishAttempt($owner,$id,$g,'worker','p1','FAILED'); },'AI_ATTEMPT_TERMINAL');
 $store->pauseForClarification($owner,$id,$g,'worker','clarification1');
 checkState($store->get($owner,$id,$g)['clarification_ref']==='clarification1','clarification only reference');

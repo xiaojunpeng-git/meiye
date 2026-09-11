@@ -41,6 +41,7 @@ final class AiBusinessManifest
             ]];
         return ['registry_version'=>'mohe-business-registry-r9-v1',
             'semantic_resource_hash'=>hash('sha256',$intentUnderstanding['source_hash'].$storeOperations['source_hash']),
+            'intent_contract'=>\app\services\ai\contract\AiIntentResultContract::manifest(),
             'schemas'=>['query_input','definition_input','business_evidence','metadata_evidence','verified_result','answer_result','export_result'],
             'tools'=>[
                 'unified_metric_query'=>$tool('unified_metric_query','query_input','business_evidence','unified_query_current_business_scope','read_only'),

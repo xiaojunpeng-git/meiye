@@ -171,9 +171,9 @@ try{
  r5check($correctedProject['answer']['table']['columns'][0]['label']==='项目','registered service action renders the project dimension through the shared reader');
  $h->semanticIntent=['object_kind'=>'project','object_term'=>'项目','operation'=>'ranking','metric_codes'=>[],'action_codes'=>['sales'],'needs_metric_choice'=>true];
  $before=$h->queries;$project=$h->start('这个月卖得最好的项目');
- r5check($project['status']==='FAILED'&&$project['reason']==='AI_MODEL_RESPONSE_INVALID'&&$h->queries===$before,'unregistered synthetic action is rejected before any project metric is substituted');
+ r5check($project['status']==='FAILED'&&$project['reason']==='AI_MODEL_INTENT_CONTRACT_INVALID'&&$h->queries===$before,'unregistered synthetic action is rejected before any project metric is substituted');
  $before=$h->queries;$soldProject=$h->start('本月卖出最多的项目');
- r5check($soldProject['status']==='FAILED'&&$soldProject['reason']==='AI_MODEL_RESPONSE_INVALID'&&$h->queries===$before,'the same unregistered synthetic action remains rejected for other wording');
+ r5check($soldProject['status']==='FAILED'&&$soldProject['reason']==='AI_MODEL_INTENT_CONTRACT_INVALID'&&$h->queries===$before,'the same unregistered synthetic action remains rejected for other wording');
  $h->semanticIntent=['object_kind'=>'member','object_term'=>'会员','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>['service'],'needs_metric_choice'=>false,'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'authorized'];
  $before=$h->queries;$unsupportedMemberAction=$h->start('本月服务最多的会员');
  r5check($unsupportedMemberAction['status']==='FAILED'&&$unsupportedMemberAction['reason']==='AI_DIMENSION_ACTION_CONTRACT_NOT_READY'&&$h->queries===$before,'recognized but unregistered member service action never falls back to payment');
