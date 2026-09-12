@@ -16,7 +16,7 @@ function ok(name, condition) {
   console.log(`${condition ? 'PASS' : 'FAIL'} ${name}`)
 }
 
-const openCheckout = workbench.match(/async function openCheckout\([^)]*\) \{([\s\S]*?)\n}\n\nasync function openHangOrder/)?.[1] || ''
+const openCheckout = workbench.match(/async function openCheckout\([^)]*\) \{([\s\S]*?)\n}\n\nfunction guardedOpenCheckout/)?.[1] || ''
 const finalize = workbench.match(/async function finalizeLocalCheckoutPreview\([^)]*\) \{([\s\S]*?)\n}\n\nfunction localCheckoutPaymentAmount/)?.[1] || ''
 const localAction = workbench.match(/if \(localCheckoutPreview\.value\?\.localDraftPreview === true\) \{([\s\S]*?)\n  }\n  const result = \{/)?.[1] || ''
 
@@ -25,7 +25,8 @@ ok('failed checkout remains an explicit failure with a return action',
   && !workbench.includes("status === 'failed' && code === 'CLIENT_REQUEST_FAILED'")
 )
 ok('opening checkout only creates a browser preview',
-  openCheckout.includes('localCheckoutPreview.value = localCheckoutPreviewSnapshot()')
+  openCheckout.includes('const preview = localCheckoutPreviewSnapshot()')
+  && openCheckout.includes('localCheckoutPreview.value = preview')
   && openCheckout.includes('isCheckoutOpen.value = true')
   && !/prepare-checkout|prepare-checkout-submission|checkoutRequestVersion|preparationToken/.test(openCheckout)
 )

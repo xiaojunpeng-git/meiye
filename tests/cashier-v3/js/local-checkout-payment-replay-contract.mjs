@@ -20,10 +20,13 @@ assert.doesNotMatch(finalization, /persistLocalCheckoutPaymentPreview|persistLoc
 
 const localPaymentBranch = workbench.slice(
   workbench.indexOf('function enqueueCheckoutAction'),
-  workbench.indexOf('function checkoutDraftConflict')
+  workbench.indexOf('async function requestCheckoutAction')
 )
 assert.match(localPaymentBranch, /if \(action === 'add-payment-method'\)/)
 assert.match(localPaymentBranch, /const checkoutLines = Array\.isArray\(preview\.lines\) \? preview\.lines : \[\]/)
+assert.match(localPaymentBranch,
+  /if \(!method \|\| lines\.some\([\s\S]*?请选择未重复的收款方式。[\s\S]*?cashier-v3:checkout-draft-mutation-result[\s\S]*?status: 'failed'/,
+  '重复收款方式被拒绝时必须回传失败回执，释放前端临时添加状态')
 assert.match(localPaymentBranch, /checkoutLines\.push\(\{ id: `local-payment-\$\{Date\.now\(\)\}`, lineRole: 'payment'/)
 assert.match(localPaymentBranch, /preview\.lines = checkoutLines\.filter/)
 assert.match(localPaymentBranch, /action === 'update-payment-line'/)

@@ -5288,7 +5288,13 @@ function enqueueCheckoutAction(event = {}) {
     if (action === 'add-payment-method') {
       const method = (payment.methods || []).find((item) => String(item?.id || '') === String(payload.paymentMethodId || ''))
       if (!method || lines.some((line) => String(line.method || '') === String(method.id))) {
-      const result = { result: { status: 'failed', message: '请选择未重复的收款方式。' } }
+        const result = { result: { status: 'failed', message: '请选择未重复的收款方式。' } }
+        // This local-draft rejection has no server receipt. Emit the same
+        // failed mutation result as an HTTP rejection so the overlay releases
+        // the button's temporary “添加中…” state instead of leaving it locked.
+        window.dispatchEvent(new CustomEvent('cashier-v3:checkout-draft-mutation-result', {
+          detail: { action, payload, status: 'failed', message: result.result.message }
+        }))
         event?.resolve?.(result)
         return result
       }
