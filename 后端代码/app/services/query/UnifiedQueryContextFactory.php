@@ -194,15 +194,16 @@ class UnifiedQueryContextFactory
         $resolver = $this->permissionResolvers->resolverFor($pageCode);
         if ($resolver === null) {
             $requiredFeature = (string)$page['requiredFeature'];
-            $exportFeature = (string)$page['exportFeature'];
             $features = (array)$trustedContext['granted_features'];
             $pageAllowed = $requiredFeature !== ''
                 && in_array($requiredFeature, $features, true);
             return [
                 'pageAllowed' => $pageAllowed,
-                'exportAllowed' => $pageAllowed
-                    && $exportFeature !== ''
-                    && in_array($exportFeature, $features, true),
+                // 导出是当前查询的附属能力：只要能查看当前页，就能导出
+                // 同一份后端裁剪后的查询结果。不能再额外用 exportFeature
+                // 让“能查不能导”；门店、组织、字段和租户范围仍由 trusted
+                // context 与 provider 在每次查询、任务执行和下载时强制校验。
+                'exportAllowed' => $pageAllowed,
                 'permissions' => [],
             ];
         }
@@ -251,6 +252,9 @@ class UnifiedQueryContextFactory
             $permissions[$permission] = true;
         }
         $authorization['permissions'] = array_keys($permissions);
+        // 专属 resolver 只能决定页面及字段可见性，不能再拆出独立导出权限。
+        // 这样查询、导出始终使用同一账号范围和同一份可见字段合同。
+        $authorization['exportAllowed'] = $authorization['pageAllowed'];
         return $authorization;
     }
 

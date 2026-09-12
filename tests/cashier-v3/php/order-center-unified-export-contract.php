@@ -33,6 +33,8 @@ $exportDrawer = (string)file_get_contents($root . '/前端代码/shared/unified-
 $module = (string)file_get_contents($backend . '/app/services/cashier/v3/query/UnifiedQueryModule.php');
 $commandController = (string)file_get_contents($backend . '/app/controller/cashier/v3/Command.php');
 $recordQuery = (string)file_get_contents($backend . '/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php');
+$contextFactory = (string)file_get_contents($backend . '/app/services/query/UnifiedQueryContextFactory.php');
+$permissionPolicy = (string)file_get_contents($backend . '/app/services/cashier/v3/permission/CashierV3PermissionPolicyRegistry.php');
 
 $pages = [
     'sales' => 'order_center_sales',
@@ -93,6 +95,9 @@ exportOk('订单中心导出位于设置右侧且固定导出当前查询结果'
     && strpos($toolbar, 'exportButtonAfterSettings') !== false
     && strpos($toolbar, "scope: 'query'") !== false
     && strpos($toolbar, 'includeSummary: false') !== false);
+exportOk('导出是查询权限的附属能力，不额外要求导出功能权限', strpos($contextFactory, "'exportAllowed' => \$pageAllowed") !== false
+    && strpos($contextFactory, "\$authorization['exportAllowed'] = \$authorization['pageAllowed'];") !== false
+    && strpos($permissionPolicy, "\$action === 'create-unified-query-export' && \$pageCode === 'staff_list'") === false);
 exportOk('订单中心下载导出文件会携带门店会话并校验 xlsx 二进制', strpos($view, 'on-download-export="downloadActiveExport"') !== false
     && strpos($view, 'readStoreV3SessionToken') !== false
     && strpos($view, "Authorization: `Bearer \${token}`") !== false

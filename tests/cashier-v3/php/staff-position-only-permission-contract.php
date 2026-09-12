@@ -48,6 +48,7 @@ $staffPage = file_get_contents($root . '/前端代码/cashier-v3/src/views/Staff
 $staffApi = file_get_contents($root . '/前端代码/cashier-v3/src/services/staffManagementApi.js');
 $resolver = file_get_contents($backendRoot . '/app/services/cashier/v3/permission/CashierV3FeatureResolver.php');
 $policy = file_get_contents($backendRoot . '/app/services/organization/JobPositionPolicyServices.php');
+$staffQueryRegistrar = file_get_contents($backendRoot . '/app/services/query/provider/StaffUnifiedQueryPageRegistrar.php');
 
 $check('员工列表不再渲染单人权限编辑按钮', strpos($staffPage, '>权限编辑</button>') === false);
 $check('员工列表不再引用个人权限读写接口', strpos($staffPage, 'readStoreStaffFeaturePermissions') === false
@@ -56,6 +57,10 @@ $check('员工列表不再引用个人权限读写接口', strpos($staffPage, 'r
 $check('权限解析只取岗位规则，不合并个人覆盖', strpos($resolver, 'mergeEmployeeOverrides') === false
     && strpos($resolver, 'staff_store_v3_feature_override') === false);
 $check('岗位权限树不再提供个人权限编辑项', strpos($policy, 'cashier.v3.staff.permission_edit') === false);
+$check('员工导出不再是岗位可配置的独立权限', strpos($policy, "'导出员工'") === false
+    && strpos($staffQueryRegistrar, "'exportFeature' => 'cashier.v3.staff.export'") === false
+    && strpos($staffPage, "canUseCashierV3Operation('cashier.v3.staff.export')") === false
+    && strpos($staffPage, 'return unifiedQuery.createExport(payload)') !== false);
 
 echo "STAFF_POSITION_ONLY_PERMISSION_CONTRACT passed={$passed} failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

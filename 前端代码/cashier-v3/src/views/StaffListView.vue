@@ -135,7 +135,6 @@ const visibleKeys = ref([])
 const visibleFields = computed(() => visibleKeys.value.map((key) => fieldMap.value.get(key)).filter(Boolean))
 const canCreateStaff = computed(() => canUseCashierV3Operation('cashier.v3.staff.create'))
 const canEditStaff = computed(() => canUseCashierV3Operation('cashier.v3.staff.edit'))
-const canExportStaff = computed(() => canUseCashierV3Operation('cashier.v3.staff.export'))
 
 function applyQuerySettings(settings) {
   const configured = Array.isArray(settings?.visibleFields) ? settings.visibleFields : null
@@ -330,7 +329,6 @@ async function saveEditor() {
 }
 
 function createStaffExport(payload) {
-  if (!canExportStaff.value) return Promise.resolve({ result: { status: 'failed', message: '当前账号没有导出员工权限。' } })
   return unifiedQuery.createExport(payload)
 }
 
