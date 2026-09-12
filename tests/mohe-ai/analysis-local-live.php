@@ -67,7 +67,13 @@ try {
             'api_key'=>'','external_processing_authorized'=>true,'external_scope_version'=>app\services\ai\config\AiConfigStore::QUESTION_SCOPE]);
         echo "LOCAL_ADMIN_APPROVED_SCOPE_ENABLED\n";
     }
-    $question='今天做的最好的技师是谁';$expectedRows=null;
+    // An explicit local-only question lets the same real-model harness cover
+    // a newly discovered general-management request without changing the
+    // production gateway or retaining customer wording.  It is deliberately
+    // opt-in with the rest of this script's authorization guards.
+    $question=(string)getenv('MOHE_ANALYSIS_QUESTION');
+    if ($question==='' || strlen($question)>1024) $question='今天做的最好的技师是谁';
+    $expectedRows=null;
     if ($mode==='TEST_HISTORY') {
         $scope=['personnel_authorized'=>true,'store_ids'=>$context['store_ids'],'employee_id'=>0,'permission_version'=>$context['permission_version']];
         $objects=new app\services\query\metric\PersonnelAnalysisObjectServices(static function($table){return think\facade\Db::name($table);},static function()use($scope){return $scope;});

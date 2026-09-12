@@ -194,9 +194,9 @@ try {
     cdgCheck($invalidUnderstanding['status']==='FAILED'&&($invalidUnderstanding['reason']??null)==='AI_MODEL_INTENT_CONTRACT_INVALID'&&$invalidUnderstandingHarness->queries===$beforeInvalidUnderstanding,'ambiguous understanding cannot misuse the unbound capability marker');
     $invalidUnderstandingHarness->close();
 
-    // A pending response form cannot hide a contradictory period. The server
-    // validates every stated structural requirement before it shows guidance,
-    // so confirming the pending form cannot execute the wrong period later.
+    // A pending response form cannot replace a typed natural-language period.
+    // The accepted month is carried through the binding boundary, while only
+    // the genuinely pending presentation decision is shown to the customer.
     $contractHarness->understandingOverride=['goal'=>'改查这个月','status'=>'understood','requirements'=>[
         ['id'=>'r1','meaning'=>'改查这个月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'这个月']]],
     ]];
@@ -204,7 +204,13 @@ try {
     $contractHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'unknown','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'date_range','start'=>'2026-09-10','end'=>'2026-09-10']],'scope'=>'unspecified','context_delta'=>$pendingMismatch,'unresolved_fragments'=>[]];
     $beforePendingMismatch=$contractHarness->queries;
     $pendingMismatchRun=$contractHarness->start('这个月呢？',$contractSource['answer']['context_ref']);
-    cdgCheck($pendingMismatchRun['status']==='FAILED'&&($pendingMismatchRun['reason']??null)==='AI_MODEL_INTENT_CONTRACT_INVALID'&&$contractHarness->queries===$beforePendingMismatch,'pending guidance cannot bypass a newly stated period requirement');
+    cdgCheck($pendingMismatchRun['status']==='WAITING_CLARIFICATION'&&$contractHarness->queries===$beforePendingMismatch,
+        'pending guidance retains the accepted period instead of treating a binding restatement conflict as customer failure');
+    $resolvedPendingMismatch=$contractHarness->choose($pendingMismatchRun,['pending_operation'=>'retain']);
+    $resolvedEvidence=$contractHarness->private->read($contractHarness->row($resolvedPendingMismatch)['evidence_ref']);
+    cdgCheck($resolvedPendingMismatch['status']==='COMPLETED'
+        && ($resolvedEvidence['query']['start_date']??'')===substr((string)($resolvedEvidence['query']['end_date']??''),0,7).'-01',
+        'confirming the response form executes the customer-stated month rather than the contradictory binding date');
     $contractHarness->close();
 
     // A model-declared missing metric may not execute an empty query.  It

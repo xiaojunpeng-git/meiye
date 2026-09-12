@@ -15,8 +15,8 @@ final class AiIntentUnderstandingContract
         return 'Return one JSON object following '.self::VERSION.': '
             . '{"goal":"brief business goal","requirements":[{"id":"r1","meaning":"one part of the customer request","fields":["metric_codes"],"values":{"metric_terms":["exact customer term"]},"evidence":[{"message_id":"current","quote":"exact text from that de-identified message"}]}],"status":"understood|needs_clarification"}. '
             . 'The only top-level keys are goal, requirements and status. Every meaningful part of the customer request needs one or more requirements; do not collapse exclusions, comparison relationships, quantity or time into a vague summary. When status is needs_clarification and no concrete meaning can yet be preserved, requirements may be an empty array; do not use unbound for ambiguity. '
-            . 'A requirement has exactly id, meaning, fields, values and evidence. fields may contain metric_codes, object_kind, operation, periods, ranking, scope, result_reference or unbound; use only fields actually expressed by this requirement. A field is a completed semantic commitment, never a note or a sketch. values is optional structured detail for that same commitment: when present, it may contain only values matching fields and must be complete and valid for each value it carries. Do not omit a field merely because its execution-shaped value is not available in this phase; preserve the natural-language meaning and evidence, and let the later binding phase derive the executable form. id is r followed by a positive number and is valid only in this request. evidence is an array of {"message_id":"current","quote":"exact excerpt"}; message_id must name an entry in question.evidence_messages. Do not output character offsets. The excerpt must occur exactly once in that one de-identified message; include more adjacent text if needed to distinguish repeated words. '
-            . 'The values object contains only keys named by fields. Every customer-stated business measurement belongs in fields as metric_codes and in values as metric_terms, even if it is everyday language rather than a registered indicator name; metric_codes is only the name of the later binding slot, never a request to output a code. An explicit exclusion uses metric_exclusions. Both are nonempty arrays of exact customer terms present in an evidence excerpt. Never put a registered metric code in values. A time, object or response-form requirement does not replace the separate measurement requirement. object_kind is one of store, person, position, member, product, project, category, partner, inventory, course, organization, unknown. operation is one of summary, trend, ranking, comparison, definition, unknown. scope is one of current_store, authorized, unspecified. ranking is exactly {"direction":"top|bottom|top_and_bottom|unspecified","limit":null}, where limit is an integer from 1 to 999 only when the customer specified a count; do not turn an unspecified count into a default. result_reference is exactly {"group":"top|bottom","ordinal":positive-integer} only when the customer explicitly refers to a displayed rank result; it identifies a position in the previous answer, never a name, ID or value. periods is an array of at most two objects, each exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":1,"end_offset_days":0}, or {"kind":"month_offset","offset_months":0}; numeric examples illustrate JSON types, not defaults. A relative-day count is a positive integer, and a month offset is an integer; preserve the customer meaning without imposing execution coverage limits here. Omit a values key and its field when that meaning was not supplied, except a genuinely inherited meaning must remain explicit. '
+            . 'A requirement has exactly id, meaning, fields, values and evidence. fields may contain metric_codes, object_kind, object_relation, operation, periods, ranking, scope, result_reference or unbound; use only fields actually expressed by this requirement. A field is a completed semantic commitment, never a note or a sketch. values is optional structured detail for that same commitment: when present, it may contain only values matching fields and must be complete and valid for each value it carries. Do not omit a field merely because its execution-shaped value is not available in this phase; preserve the natural-language meaning and evidence, and let the later binding phase derive the executable form. id is r followed by a positive number and is valid only in this request. evidence is an array of {"message_id":"current","quote":"exact excerpt"}; message_id must name an entry in question.evidence_messages. Do not output character offsets. The excerpt must occur exactly once in that one de-identified message; include more adjacent text if needed to distinguish repeated words. '
+            . 'The values object contains only keys named by fields. Every customer-stated business measurement belongs in fields as metric_codes and in values as metric_terms, even if it is everyday language rather than a registered indicator name; metric_codes is only the name of the later binding slot, never a request to output a code. An explicit exclusion uses metric_exclusions. Both are nonempty arrays of exact customer terms present in an evidence excerpt. Never put a registered metric code in values. A time, object or response-form requirement does not replace the separate measurement requirement. object_kind is one of store, person, position, member, product, project, category, partner, inventory, course, organization, unknown. object_relation is analysis when that kind is what the customer wants compared, grouped or listed, and selection only when the customer identifies a particular object whose records should narrow the data. An analytical object is never itself a data-range restriction. operation is one of summary, trend, ranking, comparison, definition, unknown. scope is one of current_store, authorized, unspecified. ranking is exactly {"direction":"top|bottom|top_and_bottom|unspecified","limit":null}, where limit is an integer from 1 to 999 only when the customer specified a count; do not turn an unspecified count into a default. result_reference is exactly {"group":"top|bottom","ordinal":positive-integer} only when the customer explicitly refers to a displayed rank result; it identifies a position in the previous answer, never a name, ID or value. periods is an array of at most two objects, each exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":1,"end_offset_days":0}, or {"kind":"month_offset","offset_months":0}; numeric examples illustrate JSON types, not defaults. A relative-day count is a positive integer, and a month offset is an integer; preserve the customer meaning without imposing execution coverage limits here. A comparison that expresses both sides in the customer wording must preserve those two periods in stated order; do not leave either side for a date form. Omit a values key and its field when that meaning was not supplied, except a genuinely inherited meaning must remain explicit. '
             . 'Do not output metric codes, action codes, object IDs, names hidden behind local references, calculated dates, formulas, SQL, query steps, permissions or result values. An explicit customer date range may be preserved as a period; never calculate a relative period into calendar dates. '
             . 'understood means the business request is clear even when no current capability can perform it. needs_clarification means the business request itself has more than one plausible reading. A broad request to understand overall operating conditions without naming a specific business fact is still understood: retain it as a metric_codes requirement with its exact customer term, so the later binding may propose a clearly labelled initial observation rather than requiring the customer to learn a metric name. If the customer did state a measurement that can reasonably mean several different business facts and neither the current wording nor verified context chooses among them, preserve that measurement requirement and mark needs_clarification; never turn a category label into one of its examples. unbound is allowed only with understood: ambiguity is not an unavailable capability. This object grants nothing and is later bound by the server.';
     }
@@ -57,11 +57,22 @@ final class AiIntentUnderstandingContract
                     || !isset($messages[$item['message_id']]) || !self::text($item['quote'] ?? null, 160)) self::fail('requirements');
                 $key = $item['message_id']."\0".$item['quote'];
                 if (isset($seen[$key])) self::fail('requirements');
-                $starts = self::positions($messages[$item['message_id']], $item['quote']);
-                // Selecting the first of repeated words is not evidence. The
-                // model must provide a longer excerpt that identifies one place.
-                if (count($starts) !== 1) self::fail('evidence_not_unique');
                 $seen[$key] = true;
+                $starts = self::positions($messages[$item['message_id']], $item['quote']);
+                // Selecting the first repeated word would make the model's
+                // character counting decide business meaning.  When the
+                // model supplied a real excerpt but did not make it unique,
+                // retain the complete de-identified message as the audit
+                // anchor instead.  It is one trusted customer message, not a
+                // server-created condition; later semantic admission still
+                // decides whether the proposed field is faithful.  An absent
+                // excerpt remains invalid because it could be invented.
+                if (count($starts) === 0) self::fail('evidence_not_unique');
+                if (count($starts) !== 1) {
+                    if (mb_strlen($messages[$item['message_id']], 'UTF-8') > 16384) self::fail('evidence_not_unique');
+                    $located[] = ['message_id' => $item['message_id'], 'quote' => $messages[$item['message_id']], 'start' => 0];
+                    continue;
+                }
                 $located[] = ['message_id' => $item['message_id'], 'quote' => $item['quote'], 'start' => $starts[0]];
             }
             // Typed values are optional semantic-carrier detail.  They never
@@ -122,7 +133,7 @@ final class AiIntentUnderstandingContract
             if ($key === 'metric_terms') {
                 return 'The previous response included a malformed metric detail. Return the complete understanding again. Preserve the already understood customer measurement; either emit a valid de-identified metric detail or omit that optional detail without removing the metric_codes requirement.';
             }
-            if (in_array($key, ['object_kind', 'operation', 'periods', 'ranking', 'scope', 'result_reference'], true)) {
+            if (in_array($key, ['object_kind', 'object_relation', 'operation', 'periods', 'ranking', 'scope', 'result_reference'], true)) {
                 return 'The previous response included malformed values.'.$key.'. Return the complete understanding again. Preserve the same already understood customer condition; either emit a complete valid values.'.$key.' in that requirement or omit that optional detail without removing, reinterpreting, binding or replacing the condition.';
             }
         }
@@ -176,7 +187,7 @@ final class AiIntentUnderstandingContract
 
     private static function fields($value): bool
     {
-        $allowed=['metric_codes','object_kind','operation','periods','ranking','scope','result_reference','unbound'];
+        $allowed=['metric_codes','object_kind','object_relation','operation','periods','ranking','scope','result_reference','unbound'];
         if (!is_array($value) || $value===[] || count($value)>6 || count(array_unique($value))!==count($value)) return false;
         foreach ($value as $field) if (!is_string($field) || !in_array($field,$allowed,true)) return false;
         return true;
@@ -191,13 +202,14 @@ final class AiIntentUnderstandingContract
     {
         if (!is_array($value)) self::fail('values:shape');
         $keys=array_keys($value);sort($keys,SORT_STRING);
-        $allowed=['metric_exclusions','metric_terms','object_kind','operation','periods','ranking','scope','result_reference'];
+        $allowed=['metric_exclusions','metric_terms','object_kind','object_relation','operation','periods','ranking','scope','result_reference'];
         foreach ($keys as $key) if (!in_array($key,$allowed,true)) self::fail('values:unknown_key');
         foreach ($keys as $key) {
             $field=in_array($key,['metric_terms','metric_exclusions'],true)?'metric_codes':$key;
             if (!in_array($field,$fields,true)) self::fail('values:field_mismatch');
         }
         if (isset($value['object_kind']) && !in_array($value['object_kind'],['store','person','position','member','product','project','category','partner','inventory','course','organization','unknown'],true)) self::fail('values:object_kind');
+        if (isset($value['object_relation']) && !in_array($value['object_relation'],['analysis','selection'],true)) self::fail('values:object_relation');
         if (isset($value['operation']) && !in_array($value['operation'],['summary','trend','ranking','comparison','definition','unknown'],true)) self::fail('values:operation');
         if (isset($value['scope']) && !in_array($value['scope'],['current_store','authorized','unspecified'],true)) self::fail('values:scope');
         if (isset($value['ranking'])) {

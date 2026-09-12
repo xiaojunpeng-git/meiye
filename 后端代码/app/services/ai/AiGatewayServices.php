@@ -935,7 +935,7 @@ final class AiGatewayServices
         // store.  This branches on the semantic carrier, not on a Chinese
         // phrase or an entry point.
         $contextDecisions=$sourceQuery===null
-            ? ['store_scope'=>(($intent['object_kind']??null)==='store' && ($intent['object_term']??'')!=='' ? 'replace' : 'inherit'),'business_filters'=>'inherit']
+            ? ['store_scope'=>(($intent['object_relation']??'analysis')==='selection' ? 'replace' : 'inherit'),'business_filters'=>'inherit']
             : ['store_scope'=>$intent['context_delta']['store_scope'],'business_filters'=>$intent['context_delta']['business_filters']];
         if ($intent['_object_term_normalized']) {
             try { $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'intent_contract','predicate'=>'object_term_not_verbatim']); } catch (\Throwable $ignored) {}

@@ -57,9 +57,14 @@ $missing=$base;unset($missing['provenance']);$check(AiIntentResultContract::norm
 $missingFragments=$base;unset($missingFragments['unresolved_fragments']);
 $check(AiIntentResultContract::normalize($missingFragments,['cash_performance'],[],$question,$understanding)['unresolved_fragments']===[],
     'an omitted empty unresolved-fragments carrier cannot block an otherwise complete business binding');
+$spuriousFreshReference=$base;$spuriousFreshReference['result_reference']=['group'=>'top','ordinal'=>1];
+$check(AiIntentResultContract::normalize($spuriousFreshReference,['cash_performance'],[],$question,$understanding)['result_reference']===null,
+    'a fresh conversation discards an inert result-reference transport field instead of retrying customer meaning');
 $malformed=$base;$malformed['provenance']='not-trusted';$check(AiIntentResultContract::normalize($malformed,['cash_performance'],[],$question,$understanding)['provenance']['ranking']['requirements']===['r3'],'malformed model provenance cannot block a valid query or alter the audit record');
 $nullScope=$base;$nullScope['scope']=null;$check(AiIntentResultContract::normalize($nullScope,['cash_performance'],[],$question,$understanding)['scope']==='unspecified','null optional scope is not an implicit range change');
-$invented=$base;$invented['ranking']=['direction'=>'top','limit'=>9];$invented['provenance']['ranking']=['source'=>'system','requirements'=>[]];$reject(static function()use($invented,$question,$understanding){AiIntentResultContract::normalize($invented,['cash_performance'],[],$question,$understanding);},'binding cannot change the accepted ranking value');
+$invented=$base;$invented['ranking']=['direction'=>'top','limit'=>9];$invented['provenance']['ranking']=['source'=>'system','requirements'=>[]];
+$anchoredRanking=AiIntentResultContract::normalize($invented,['cash_performance'],[],$question,$understanding);
+$check($anchoredRanking['ranking']===['direction'=>'top','limit'=>5],'binding cannot replace a typed natural-language ranking from accepted understanding');
 $naturalQuestion=$question;$naturalQuestion['question']='这个月到账多少款？';$naturalQuestion['evidence_messages'][0]['text']=$naturalQuestion['question'];
 $naturalUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'查看这个月到账金额','status'=>'understood','requirements'=>[
     ['id'=>'r1','meaning'=>'查看这个月到账金额','fields'=>['metric_codes','periods'],'values'=>['metric_terms'=>['到账'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'这个月到账多少款']]],
@@ -111,22 +116,66 @@ $followBinding=$naturalBinding;$followBinding['metric_codes']=[];$followBinding[
 $reject(static function()use($followBinding,$followQuestion,$followUnderstanding){AiIntentResultContract::normalize($followBinding,['cash_performance'],[],$followQuestion,$followUnderstanding);},'a current period cannot be falsely marked as inherited from the previous query');
 $followBinding['context_delta']['periods']='replace';
 $check(AiIntentResultContract::normalize($followBinding,['cash_performance'],[],$followQuestion,$followUnderstanding)['context_delta']['periods']==='replace','a current period is accepted only with an explicit replacement delta');
-$wrongPeriod=$base;$wrongPeriod['periods']=[['kind'=>'month_offset','offset_months'=>-1]];$reject(static function()use($wrongPeriod,$question,$understanding){AiIntentResultContract::normalize($wrongPeriod,['cash_performance'],[],$question,$understanding);},'binding cannot replace the accepted period');
+$wrongPeriod=$base;$wrongPeriod['periods']=[['kind'=>'month_offset','offset_months'=>-1]];
+$anchoredPeriod=AiIntentResultContract::normalize($wrongPeriod,['cash_performance'],[],$question,$understanding);
+$check($anchoredPeriod['periods']===[['kind'=>'month_offset','offset_months'=>0]],'binding cannot replace a typed natural-language period from accepted understanding');
+$comparisonQuestion=$question;$comparisonQuestion['question']='这个月收款和上个月比怎么样？';$comparisonQuestion['evidence_messages'][0]['text']=$comparisonQuestion['question'];
+$partialComparisonUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'比较这个月和上个月收款','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'比较这个月和上个月收款','fields'=>['metric_codes','operation','periods'],'values'=>['metric_terms'=>['收款'],'operation'=>'comparison','periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>$comparisonQuestion['question']]]],
+]],$comparisonQuestion);
+$completedComparison=$base;$completedComparison['operation']='comparison';$completedComparison['periods']=[['kind'=>'month_offset','offset_months'=>0],['kind'=>'month_offset','offset_months'=>-1]];$completedComparison['requirement_bindings']=[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']]];
+$normalizedComparison=AiIntentResultContract::normalize($completedComparison,['cash_performance'],[],$comparisonQuestion,$partialComparisonUnderstanding);
+$check(count($normalizedComparison['periods'])===2&&$normalizedComparison['provenance']['periods']['source']==='binding_candidate'
+    && AiIntentResultContract::requiresSemanticBindingReview($partialComparisonUnderstanding,$normalizedComparison),
+    'a binding may complete an understood-but-partial comparison pair only through independent semantic review');
 $notCovered=$base;$notCovered['provenance']['metric_codes']=['source'=>'customer','requirements'=>['r1']];$check(AiIntentResultContract::normalize($notCovered,['cash_performance'],[],$question,$understanding)['provenance']['metric_codes']['requirements']===['r1','r2'],'every understood requirement is covered by server derivation');
 $plainQuestion=$question;$plainQuestion['question']='本月收款';$plainQuestion['evidence_messages'][0]['text']='本月收款';
 $plainUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'查看本月收款','status'=>'understood','requirements'=>[['id'=>'r1','meaning'=>'查看本月收款','fields'=>['metric_codes','periods'],'values'=>['metric_terms'=>['收款'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'本月收款']]]]],$plainQuestion);
 $inventedRanking=$base;$inventedRanking['ranking']=['direction'=>'top','limit'=>5];$inventedRanking['requirement_bindings']=[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']]];$inventedRanking['provenance']['object_kind']=['source'=>'system','requirements'=>[]];$inventedRanking['provenance']['metric_codes']=['source'=>'customer','requirements'=>['r1']];$inventedRanking['provenance']['operation']=['source'=>'system','requirements'=>[]];$inventedRanking['provenance']['ranking']=['source'=>'customer','requirements'=>['r1']];$inventedRanking['provenance']['periods']=['source'=>'customer','requirements'=>['r1']];
-$reject(static function()use($inventedRanking,$plainQuestion,$plainUnderstanding){AiIntentResultContract::normalize($inventedRanking,['cash_performance'],[],$plainQuestion,$plainUnderstanding);},'binding cannot invent ranking outside the understanding-stage field coverage');
+$candidateRanking=AiIntentResultContract::normalize($inventedRanking,['cash_performance'],[],$plainQuestion,$plainUnderstanding);
+$check($candidateRanking['provenance']['operation']['source']==='binding_candidate'
+    && $candidateRanking['provenance']['ranking']['source']==='binding_candidate'
+    && AiIntentResultContract::requiresSemanticBindingReview($plainUnderstanding,$candidateRanking),
+    'a binding-only response form requires independent semantic admission instead of a PHP phrase rule');
+$spuriousScope=$inventedRanking;$spuriousScope['scope']='current_store';
+$normalizedSpuriousScope=AiIntentResultContract::normalize($spuriousScope,['cash_performance'],[],$plainQuestion,$plainUnderstanding);
+$check($normalizedSpuriousScope['scope']==='unspecified'&&!$normalizedSpuriousScope['_scope_supplied'],
+    'an analytical store candidate cannot silently narrow an otherwise unscoped authorized range');
+$currentScopeQuestion=$plainQuestion;$currentScopeQuestion['question']='本店本月收款';$currentScopeQuestion['evidence_messages'][0]['text']=$currentScopeQuestion['question'];
+$currentScopeUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'查看本店本月收款','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'查看本月收款','fields'=>['metric_codes','periods'],'values'=>['metric_terms'=>['收款'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'本店本月收款']]],
+    ['id'=>'r2','meaning'=>'限定本店','fields'=>['scope'],'values'=>['scope'=>'current_store'],'evidence'=>[['message_id'=>'current','quote'=>'本店']]],
+]],$currentScopeQuestion);
+$currentScopeBinding=$naturalBinding;$currentScopeBinding['scope']='current_store';
+$normalizedCurrentScope=AiIntentResultContract::normalize($currentScopeBinding,['cash_performance'],[],$currentScopeQuestion,$currentScopeUnderstanding);
+$check($normalizedCurrentScope['scope']==='current_store'&&$normalizedCurrentScope['_scope_supplied'],
+    'a first-pass understood scope remains an explicit customer restriction');
+$analyticalStore=$inventedRanking;$analyticalStore['object_term']='门店';$analyticalStore['object_relation']='analysis';
+$normalizedAnalyticalStore=AiIntentResultContract::normalize($analyticalStore,['cash_performance'],[],$plainQuestion,$plainUnderstanding);
+$check($normalizedAnalyticalStore['object_relation']==='analysis'&&$normalizedAnalyticalStore['object_term']==='',
+    'an analytical object is not transported as a named store selection');
+$selectedStoreQuestion=$plainQuestion;$selectedStoreQuestion['question']='查看二号门店本月收款';$selectedStoreQuestion['evidence_messages'][0]['text']=$selectedStoreQuestion['question'];
+$selectedStoreUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'查看二号门店本月收款','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'查看本月收款','fields'=>['metric_codes','periods'],'values'=>['metric_terms'=>['收款'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'二号门店本月收款']]],
+    ['id'=>'r2','meaning'=>'限定二号门店','fields'=>['object_kind','object_relation'],'values'=>['object_kind'=>'store','object_relation'=>'selection'],'evidence'=>[['message_id'=>'current','quote'=>'二号门店']]],
+]],$selectedStoreQuestion);
+$selectedStoreBinding=$inventedRanking;$selectedStoreBinding['object_term']='二号门店';$selectedStoreBinding['object_relation']='selection';
+$normalizedSelectedStore=AiIntentResultContract::normalize($selectedStoreBinding,['cash_performance'],[],$selectedStoreQuestion,$selectedStoreUnderstanding);
+$check($normalizedSelectedStore['object_relation']==='selection'&&$normalizedSelectedStore['object_term']==='二号门店',
+    'a model-understood particular store remains an authorized catalog selection candidate');
 $wrongHistory=['goal'=>$understanding['goal'],'status'=>$understanding['status'],'requirements'=>[['id'=>'r1','meaning'=>'查看上个月服务情况','fields'=>['metric_codes'],'values'=>['metric_terms'=>['服务']], 'evidence'=>[['message_id'=>'recent_1','quote'=>'上个月服务情况']]],['id'=>'r2','meaning'=>'排除退款','fields'=>['metric_codes'],'values'=>['metric_exclusions'=>['退款']],'evidence'=>[['message_id'=>'current','quote'=>'不要退款']]],['id'=>'r3','meaning'=>'列出前五家门店','fields'=>['object_kind','operation','ranking'],'values'=>['object_kind'=>'store','operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>5]],'evidence'=>[['message_id'=>'current','quote'=>'前五家门店']]]]];
 $check(AiIntentUnderstandingContract::normalize($wrongHistory,$question)['requirements'][0]['evidence'][0]['message_id']==='recent_1','specified prior message may be cited explicitly');
-$ambiguous=$understanding;$ambiguous['requirements'][0]['evidence'][0]['quote']='这个月';$questionRepeated=$question;$questionRepeated['question']='这个月收款，这个月退款';$questionRepeated['evidence_messages'][0]['text']=$questionRepeated['question'];
-$reject(static function()use($ambiguous,$questionRepeated){AiIntentUnderstandingContract::normalize($ambiguous,$questionRepeated);},'repeated excerpt never defaults to first occurrence');
+$ambiguous=$understanding;$ambiguous['requirements']=[$ambiguous['requirements'][0]];$ambiguous['requirements'][0]['evidence'][0]['quote']='这个月';$questionRepeated=$question;$questionRepeated['question']='这个月收款，这个月退款';$questionRepeated['evidence_messages'][0]['text']=$questionRepeated['question'];
+$repeatedEvidence=AiIntentUnderstandingContract::normalize($ambiguous,$questionRepeated);
+$check($repeatedEvidence['requirements'][0]['evidence'][0]['quote']===$questionRepeated['question']
+    && $repeatedEvidence['requirements'][0]['evidence'][0]['start']===0,
+    'repeated excerpt uses the full de-identified message instead of defaulting to its first occurrence');
 $badDate=$base;$badDate['periods']=[['kind'=>'date_range','start'=>'2026-02-30','end'=>'2026-03-01']];$reject(static function()use($badDate,$question,$understanding){AiIntentResultContract::normalize($badDate,['cash_performance'],[],$question,$understanding);},'invalid calendar date is a model contract error');
 $reversed=$base;$reversed['periods']=[['kind'=>'date_range','start'=>'2026-09-12','end'=>'2026-09-01']];$reject(static function()use($reversed,$question,$understanding){AiIntentResultContract::normalize($reversed,['cash_performance'],[],$question,$understanding);},'reversed model date is a model contract error');
 $prompt=AiIntentUnderstandingContract::modelInstruction().' '.AiIntentResultContract::modelInstruction(false);
 $check(strpos($prompt,'requirements')!==false&&strpos($prompt,'provenance')!==false,'two stage model contracts are published');
 $understandingPrompt=AiIntentUnderstandingContract::modelInstruction();
-foreach (['metric_terms','metric_exclusions','object_kind','operation','ranking','direction','limit','scope','date_range','relative_days','month_offset','end_offset_days','offset_months'] as $requiredShape) {
+foreach (['metric_terms','metric_exclusions','object_kind','object_relation','operation','ranking','direction','limit','scope','date_range','relative_days','month_offset','end_offset_days','offset_months'] as $requiredShape) {
     $check(strpos($understandingPrompt,$requiredShape)!==false,'first-stage model is told the bounded shape of '.$requiredShape);
 }
 $missingRankValue=$understanding;

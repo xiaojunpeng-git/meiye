@@ -8,11 +8,11 @@ namespace app\services\ai\contract;
  */
 final class AiIntentResultContract
 {
-    const VERSION='intent-binding-v3';
+    const VERSION='intent-binding-v4';
     const REQUIRED_FIELDS=['action_codes','metric_codes','needs_metric_choice','object_kind','object_term','operation','requirement_bindings','unresolved_fragments'];
     const DELTA_FIELDS=['metric_codes','object','business_filters','store_scope','periods','operation','ranking_direction','ranking_limit','scope'];
     const DELTA_ACTIONS=['inherit','replace','clear','pending'];
-    const PROVENANCE_FIELDS=['metric_codes','object_kind','operation','periods','ranking','scope'];
+    const PROVENANCE_FIELDS=['metric_codes','object_kind','object_relation','operation','periods','ranking','scope'];
 
     public static function repairableFormat(?string $predicate): bool
     {
@@ -52,7 +52,7 @@ final class AiIntentResultContract
         $context=$hasPriorQuery
             ? 'A verified prior query exists. Include context_delta with exactly these keys: '.implode(', ',self::DELTA_FIELDS).'. Each value is one of inherit, replace, clear or pending. Use inherit only when the current wording leaves that exact meaning unchanged. Use replace only when current wording supplies a new meaning in the matching ordinary field. Use clear only when the customer explicitly removes a condition. Use pending when clarification is needed. Never omit a delta key and never infer inherit from an omitted field. A short continuation can replace just the analytical object while retaining the verified period, response form, ranking direction, ranking quantity, scope and other unchanged meaning. Set store_scope to clear only when the current request explicitly asks for the authorized/all-store range and supplies scope=authorized; set store_scope to replace only when the current request identifies a store object; set business_filters to clear or replace only when the current request identifies the changed object scope. When that new object cannot legally use the previous metric under capabilities.object_contracts, mark metric_codes pending rather than returning operation unknown or an unresolved fragment; the server will present only registered choices.'
             : 'No verified prior query exists. Do not include context_delta.';
-        return 'Return one JSON object following '.self::VERSION.'. Required keys: '.implode(', ',self::REQUIRED_FIELDS).'. Optional keys: ranking, periods, scope, result_reference, initial_observation, recommended_initial_answer'.($hasPriorQuery?', context_delta':'').'. '.$context.' object_term is an exact customer term or an empty string where no named object is needed. needs_metric_choice is true only when the intended business measurement is genuinely ambiguous and no professionally useful first reading can be selected; then metric_codes must be empty. A customer may instead ask for a broad overall operating view without naming one measurement. When the accepted understanding is such an open operating goal, no explicit customer condition conflicts with it, and operation is summary, set initial_observation=true and select two to four independent supplied store metrics as observation angles for an initial answer. Those codes are professional observations, not a claim that the customer selected one metric; do not use this exception for a named measurement, exclusion, comparison, ranking, or object-specific request. When the customer has made the analytical object and response form clear but the business measurement has several registered readings, select the most useful compatible professional first reading from the supplied capabilities. Only a summary can intentionally return multiple independent reading angles; a ranking must set metric_codes to exactly one registered code because one ranked result needs one comparable measurement. Set recommended_initial_answer=true, needs_metric_choice=false and label the resulting metric perspective in the answer, so the customer can naturally pursue another perspective afterwards. Never set recommended_initial_answer for an unresolved meaning, an unavailable capability, a changed exclusion, or a result that needs customer confirmation. Set both initial_observation and recommended_initial_answer false or omit them for every other request. Lack of an available metric is not ambiguity. requirement_bindings is a required array with exactly one row for every accepted understanding requirement whose fields include metric_codes, and no other rows. Each row is exactly {"requirement_id":"rN","status":"satisfied|unavailable|pending","metric_codes":[registered codes]}. A satisfied row names the registered metric codes that fulfill that one requirement; together all satisfied rows must account for the selected metric_codes. An unavailable or pending row has an empty metric_codes array and therefore cannot accompany an executable metric selection. This is an accountability record for the accepted meaning, not a phrase matcher: do not decide it from word overlap, and do not omit an exclusion or another customer requirement. periods, when present, is an ordered array of up to two period objects. A period is exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":positive-integer,"end_offset_days":signed-integer}, or {"kind":"month_offset","offset_months":signed-integer}. Preserve early, future and long periods exactly; execution coverage and length limits are checked by the server later, never reinterpret them as an invalid intent. A calendar-month meaning uses month_offset; relative_days is only for a stated rolling number of days. ranking is {"direction":"top|bottom|top_and_bottom|unspecified","limit":integer-or-null}. Scope and accessible stores are server-owned: omit scope unless current wording explicitly changes current-store versus authorized scope. metric_codes and action_codes are binding candidates inside their required arrays and only contain supplied codes. Do not output provenance: the server derives it from the accepted understanding fields and rejects a bound field that has no legitimate source. result_reference, if used, is only {"group":"top|bottom","ordinal":positive-integer}; emit it only when the accepted understanding has an equal result_reference requirement with current-question evidence. group means the rank section explicitly named by the customer and never contains an ID, name or result value. unresolved_fragments only contains exact current-question text whose meaning cannot be understood, not understood requests that lack a registered binding. Never calculate, query, invent a condition, discard a condition, or copy a previous result value.';
+        return 'Return one JSON object following '.self::VERSION.'. Required keys: '.implode(', ',self::REQUIRED_FIELDS).'. Optional keys: object_relation, ranking, periods, scope, result_reference, initial_observation, recommended_initial_answer'.($hasPriorQuery?', context_delta':'').'. '.$context.' object_term is an exact customer term or an empty string where no named object is needed. object_relation is analysis when object_kind is the thing being compared, grouped or listed, and selection only when object_term identifies a particular target that must narrow the data. Do not turn an analytical object into a selection; when object_relation is analysis, object_term must be empty. The accepted understanding is the primary record of customer meaning. Do not reinterpret, replace or contradict any typed value it already carries; bind its business goal to registered capability only. If that understanding has no typed carrier for a response form, period, ranking, scope, object or object relation that you can still clearly understand from the same question, return the faithful candidate rather than treating the customer as unclear. The server sends such a new carrier to a separate semantic reviewer before it can execute. needs_metric_choice is true only when the intended business measurement is genuinely ambiguous and no professionally useful first reading can be selected; then metric_codes must be empty. A customer may instead ask for a broad overall operating view without naming one measurement. When the accepted understanding is such an open operating goal, no explicit customer condition conflicts with it, and operation is summary, set initial_observation=true and select two to four independent supplied store metrics as observation angles for an initial answer. Those codes are professional observations, not a claim that the customer selected one metric; do not use this exception for a named measurement, exclusion, comparison, ranking, or object-specific request. When the customer has made the analytical object and response form clear but the business measurement has several registered readings, select the most useful compatible professional first reading from the supplied capabilities. Only a summary can intentionally return multiple independent reading angles; a ranking must set metric_codes to exactly one registered code because one ranked result needs one comparable measurement. Set recommended_initial_answer=true, needs_metric_choice=false and label the resulting metric perspective in the answer, so the customer can naturally pursue another perspective afterwards. Never set recommended_initial_answer for an unresolved meaning, an unavailable capability, a changed exclusion, or a result that needs customer confirmation. Set both initial_observation and recommended_initial_answer false or omit them for every other request. Lack of an available metric is not ambiguity. requirement_bindings is a required array with exactly one row for every accepted understanding requirement whose fields include metric_codes, and no other rows. Each row is exactly {"requirement_id":"rN","status":"satisfied|unavailable|pending","metric_codes":[registered codes]}. A satisfied row names the registered metric codes that fulfill that one requirement; together all satisfied rows must account for the selected metric_codes. An unavailable or pending row has an empty metric_codes array and therefore cannot accompany an executable metric selection. This is an accountability record for the accepted meaning, not a phrase matcher: do not decide it from word overlap, and do not omit an exclusion or another customer requirement. periods, when present, is an ordered array of up to two period objects. A period is exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":positive-integer,"end_offset_days":signed-integer}, or {"kind":"month_offset","offset_months":signed-integer}. Preserve early, future and long periods exactly; execution coverage and length limits are checked by the server later, never reinterpret them as an invalid intent. A calendar-month meaning uses month_offset; relative_days is only for a stated rolling number of days. ranking is {"direction":"top|bottom|top_and_bottom|unspecified","limit":integer-or-null}. Scope and accessible stores are server-owned: omit scope unless current wording explicitly changes current-store versus authorized scope. metric_codes and action_codes are binding candidates inside their required arrays and only contain supplied codes. Do not output provenance: the server records whether a carrier came from accepted meaning, verified context, a system default, or a candidate that still needs semantic admission. result_reference, if used, is only {"group":"top|bottom","ordinal":positive-integer}; emit it only when the accepted understanding has an equal result_reference requirement with current-question evidence. group means the rank section explicitly named by the customer and never contains an ID, name or result value. unresolved_fragments only contains exact current-question text whose meaning cannot be understood, not understood requests that lack a registered binding. Never calculate, query, invent a condition, discard a condition, or copy a previous result value.';
     }
 
     public static function normalize($value,array $metricCodes,array $actionCodes,array $safeQuestion,array $understanding=[]): array
@@ -69,13 +69,17 @@ final class AiIntentResultContract
         if ($hasPrior && !array_key_exists('context_delta',$value)) self::fail('missing_key:context_delta');
         // Accept provenance from older model prompts but never trust or emit it.
         // The server derives the authoritative audit record below.
-        $allowed=array_merge(self::REQUIRED_FIELDS,['provenance','ranking','periods','scope','result_reference','initial_observation','recommended_initial_answer'],$hasPrior?['context_delta']:[]);sort($allowed,SORT_STRING);
+        $allowed=array_merge(self::REQUIRED_FIELDS,['provenance','object_relation','ranking','periods','scope','result_reference','initial_observation','recommended_initial_answer'],$hasPrior?['context_delta']:[]);sort($allowed,SORT_STRING);
         $keys=array_keys($value);sort($keys,SORT_STRING);
         if (array_diff($keys,$allowed)) self::fail('unknown_key');
         if (!$hasPrior && array_key_exists('context_delta',$value)) self::fail('unexpected_context_delta');
         if (!is_bool($value['needs_metric_choice'])) self::fail('bad_type:needs_metric_choice');
         if (!is_string($value['object_term']) || mb_strlen($value['object_term'],'UTF-8')>160) self::fail('bad_value:object_term');
         if (!in_array($value['object_kind'],['store','person','position','member','product','project','category','partner','inventory','course','organization','unknown'],true)) self::fail('bad_value:object_kind');
+        $objectRelation=$value['object_relation']??($value['object_term']===''?'analysis':'selection');
+        if (!in_array($objectRelation,['analysis','selection'],true)) self::fail('bad_value:object_relation');
+        if ($objectRelation==='analysis') $value['object_term']='';
+        if ($objectRelation==='selection' && $value['object_term']==='') self::fail('bad_value:object_relation');
         if (!in_array($value['operation'],['summary','trend','ranking','comparison','definition','unknown'],true)) self::fail('bad_value:operation');
         if (!self::codes($value['metric_codes'])) self::fail('bad_value:metric_codes');
         foreach ($value['metric_codes'] as $code) if (!in_array($code,$metricCodes,true)) throw new AiContractException('AI_MODEL_METRIC_UNKNOWN',['stage'=>'intent_contract','predicate'=>'unknown_metric_code']);
@@ -172,6 +176,19 @@ final class AiIntentResultContract
         // implied data-range change.
         $scopeSupplied=array_key_exists('scope',$value) && $value['scope']!==null;$scope=$scopeSupplied?$value['scope']:'unspecified';
         if (!in_array($scope,['current_store','authorized','unspecified'],true)) self::fail('bad_value:scope');
+        // Understanding owns the semantic projection of the customer's
+        // wording. Binding owns only the later capability candidate.  When
+        // the accepted projection already has a typed execution value, keep
+        // that value instead of asking a second model pass to independently
+        // restate (and occasionally contradict) the same natural-language
+        // decision. This is a copy of model-authored meaning, never a PHP
+        // phrase rule or a server-selected metric/range/rank.
+        $anchored=self::anchorUnderstandingValues($understanding,$value,$ranking,$periods,$scope,$objectRelation,
+            $rankingSupplied,$periodsSupplied,$scopeSupplied);
+        $value=$anchored['intent'];$ranking=$anchored['ranking'];$periods=$anchored['periods'];$scope=$anchored['scope'];$objectRelation=$anchored['object_relation'];
+        $rankingSupplied=$anchored['ranking_supplied'];$periodsSupplied=$anchored['periods_supplied'];$scopeSupplied=$anchored['scope_supplied'];
+        if ($objectRelation==='analysis') $value['object_term']='';
+        if ($objectRelation==='selection' && $value['object_term']==='') self::fail('bad_value:object_relation');
         $delta=$hasPrior?self::delta($value['context_delta']):null;
         self::assertContextConstraintSources($understanding,$delta,$value,$scope,$scopeSupplied);
         self::requireReplacementValues($delta,$value,$rankingSupplied,$periodsSupplied,$scopeSupplied);
@@ -179,7 +196,7 @@ final class AiIntentResultContract
         // carry an old or malformed copy, but it never gets to authorise its
         // own fields by writing that copy.  Derivation below uses only the
         // independently accepted understanding and the candidate values.
-        self::assertRequirementValues($understanding,$value,$ranking,$periods,$scope,$delta,$safeQuestion['prior_query']??null);
+        self::assertRequirementValues($understanding,$value,$ranking,$periods,$scope,$objectRelation,$delta,$safeQuestion['prior_query']??null);
         $requirementBindings=self::requirementBindings(
             $value['requirement_bindings'],
             AiIntentUnderstandingContract::requirements($understanding),
@@ -187,16 +204,23 @@ final class AiIntentResultContract
             self::effectiveMetricCodes($value['metric_codes'],$delta,$safeQuestion['prior_query']??null)
         );
         $provenance=self::provenance(
-            $understanding,$hasPrior,$value,$ranking,$periods,$scope,$delta,
+            $understanding,$hasPrior,$value,$ranking,$periods,$scope,$objectRelation,$delta,
             self::effectiveMetricCodes($value['metric_codes'],$delta,$safeQuestion['prior_query']??null)
         );
+        // A fresh conversation has no signed result snapshot at all. A model
+        // can occasionally emit the optional transport key anyway; it cannot
+        // narrow a query, reveal a result, or represent a customer condition
+        // in that state, so discard it rather than spending the only recovery
+        // attempt asking the model to remove an inert field. With verified
+        // context we retain the strict current-turn requirement below.
+        if (!$hasPrior) $value['result_reference']=null;
         $resultReference=self::resultReference($value['result_reference']??null,$hasPrior);
         self::assertResultReferenceRequirement($resultReference,$understanding);
         $texts=array_merge([(string)($safeQuestion['question']??'')],(array)($safeQuestion['recent_questions']??[]));
         $normalized=$value['object_term']!=='' && !self::contained($value['object_term'],$texts);
         if ($normalized) $value['object_term']='';
         foreach ($value['unresolved_fragments'] as $fragment) if (!is_string($fragment)||$fragment===''||mb_strlen($fragment,'UTF-8')>160||!self::contained($fragment,$texts)) self::fail('bad_value:unresolved_fragments');
-        return ['object_kind'=>$value['object_kind'],'object_term'=>$value['object_term'],'operation'=>$value['operation'],'metric_codes'=>$value['metric_codes'],'action_codes'=>$value['action_codes'],'needs_metric_choice'=>$value['needs_metric_choice'],'initial_observation'=>$initialObservation,'recommended_initial_answer'=>$recommendedInitialAnswer,'requirement_bindings'=>$requirementBindings,'provenance'=>$provenance,'ranking'=>$ranking,'periods'=>$periods,'scope'=>$scope,'context_delta'=>$delta,'result_reference'=>$resultReference,'unresolved_fragments'=>$value['unresolved_fragments'],'_periods_supplied'=>$periodsSupplied,'_scope_supplied'=>$scopeSupplied,'_ranking_supplied'=>$rankingSupplied,'_object_term_normalized'=>$normalized,'_contract_version'=>self::VERSION];
+        return ['object_kind'=>$value['object_kind'],'object_relation'=>$objectRelation,'object_term'=>$value['object_term'],'operation'=>$value['operation'],'metric_codes'=>$value['metric_codes'],'action_codes'=>$value['action_codes'],'needs_metric_choice'=>$value['needs_metric_choice'],'initial_observation'=>$initialObservation,'recommended_initial_answer'=>$recommendedInitialAnswer,'requirement_bindings'=>$requirementBindings,'provenance'=>$provenance,'ranking'=>$ranking,'periods'=>$periods,'scope'=>$scope,'context_delta'=>$delta,'result_reference'=>$resultReference,'unresolved_fragments'=>$value['unresolved_fragments'],'_periods_supplied'=>$periodsSupplied,'_scope_supplied'=>$scopeSupplied,'_ranking_supplied'=>$rankingSupplied,'_object_term_normalized'=>$normalized,'_contract_version'=>self::VERSION];
     }
 
     private static function delta($value): array
@@ -265,7 +289,7 @@ final class AiIntentResultContract
         }
     }
 
-    private static function provenance(array $understanding,bool $hasPrior,array $intent,array $ranking,array $periods,string $scope,?array $delta,array $effectiveMetricCodes): array
+    private static function provenance(array $understanding,bool $hasPrior,array $intent,array $ranking,array $periods,string $scope,string $objectRelation,?array $delta,array $effectiveMetricCodes): array
     {
         $requirements=AiIntentUnderstandingContract::requirements($understanding);
         $known=array_fill_keys(array_keys($requirements),true);
@@ -285,6 +309,17 @@ final class AiIntentResultContract
             foreach ($requirements as $id=>$requirement) if (in_array($field,$requirement['fields'],true)) $ids[]=$id;
             if ($ids!==[]) {
                 foreach ($ids as $id) $used[$id]=true;
+                // A comparison needs an ordered pair.  A first model pass may
+                // preserve one side faithfully while leaving the other side
+                // unmaterialised; a later binding may complete that pair from
+                // the same customer wording.  Do not let the server select
+                // the missing period or call the partial carrier a complete
+                // instruction.  It remains a model candidate and therefore
+                // reaches independent semantic admission.
+                if ($field==='periods' && self::incompleteComparisonPeriods($requirements,$intent,$periods)) {
+                    $out[$field]=['source'=>'binding_candidate','requirements'=>$ids];
+                    continue;
+                }
                 $out[$field]=['source'=>'customer','requirements'=>$ids];
                 continue;
             }
@@ -292,10 +327,16 @@ final class AiIntentResultContract
                 $out[$field]=['source'=>'context','requirements'=>[]];
                 continue;
             }
-            if (!self::neutralDefault($field,$intent,$ranking,$periods,$scope)) {
-                throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',[
-                    'stage'=>'intent_contract','predicate'=>'provenance_field_not_understood','field'=>$field,
-                ]);
+            if (!self::neutralDefault($field,$intent,$ranking,$periods,$scope,$objectRelation)) {
+                // The first model may preserve the business goal without
+                // materialising every executable carrier. The binding model
+                // may propose a response form, object or period from the
+                // same customer sentence, but it is never trusted merely for
+                // being well formed: requiresSemanticBindingReview() routes
+                // this candidate through an independent natural-language
+                // admission before execution.
+                $out[$field]=['source'=>'binding_candidate','requirements'=>[]];
+                continue;
             }
             $out[$field]=['source'=>'system','requirements'=>[]];
         }
@@ -326,6 +367,7 @@ final class AiIntentResultContract
             (array)($intent['ranking']??['direction'=>'unspecified','limit'=>null]),
             (array)($intent['periods']??[]),
             (string)($intent['scope']??'unspecified'),
+            (string)($intent['object_relation']??'analysis'),
             null,
             null
         );
@@ -358,6 +400,13 @@ final class AiIntentResultContract
         // metric does. Its natural-language support is reviewed independently
         // before the server resolves the row in its private snapshot.
         if (($intent['result_reference'] ?? null) !== null) return true;
+        // A binding-only field is a semantic proposal rather than a system
+        // default. Let the independent reviewer decide whether the customer
+        // actually expressed it; PHP must not turn a missing first-pass
+        // carrier into either a rejected request or an inferred condition.
+        foreach ((array)($intent['provenance']??[]) as $record) {
+            if (($record['source']??null)==='binding_candidate') return true;
+        }
         if (($intent['needs_metric_choice']??false) || empty($intent['metric_codes'])) return false;
         foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
             if (in_array('metric_codes',(array)($requirement['fields']??[]),true)) return true;
@@ -403,6 +452,8 @@ final class AiIntentResultContract
             .'When candidate_binding.recommended_initial_answer is true, accept only if it contains one to four compatible registered metrics that are reasonable professional first readings of the accepted goal, object and response form; it must not change a stated exclusion, range, ranking or object condition. '
             .'Reject when a selected metric or result reference substitutes, reverses, ignores or conflicts with any such requirement, including an exclusion. '
             .'When a binding replaces or clears a signed store range, or changes an object filter, accept only if the current customer question itself expresses that exact change. A confirmed request for the authorized range may execute directly, but never expands authority beyond the current Reader permission. '
+            .'An analytical object and a selected object have different meanings. Accept object_relation=analysis only when the customer is asking to compare, group or list that kind; accept object_relation=selection only when the customer identifies a particular target whose records must narrow the query. Reject a candidate that turns one into the other. '
+            .'The accepted understanding may preserve a clear business goal without materialising every response-form carrier. When candidate binding adds an object kind, response form, period, ranking or scope that has no typed first-pass carrier, decide from the current customer question itself whether that exact candidate is faithful. Do not reject only because the first pass omitted that carrier; reject any candidate that adds, replaces or narrows a condition the customer did not express. '
             .'An excerpt that expresses only a date, ranking, metric or another condition does not support a scope expansion merely because it appears in the same requirement. '
             .'A result reference is valid only when the current question itself asks for the displayed ranked result; it must never be inferred from prior conversation. '
             .'Do not invent requirements, metric codes, conditions, identities, dates, formulas, results or explanations. '
@@ -447,7 +498,7 @@ final class AiIntentResultContract
         return $value;
     }
 
-    private static function assertRequirementValues(array $understanding,array $intent,array $ranking,array $periods,string $scope,?array $delta,?array $priorQuery): void
+    private static function assertRequirementValues(array $understanding,array $intent,array $ranking,array $periods,string $scope,string $objectRelation,?array $delta,?array $priorQuery): void
     {
         $requirements=AiIntentUnderstandingContract::requirements($understanding);
         // All production understanding objects are normalized and therefore
@@ -482,10 +533,11 @@ final class AiIntentResultContract
         }
         foreach($requirements as $requirement) {
             $values=(array)($requirement['values']??[]);
-            foreach(['object_kind','operation','periods','ranking','scope'] as $field) {
+            foreach(['object_kind','object_relation','operation','periods','ranking','scope'] as $field) {
                 if (!array_key_exists($field,$values)) continue;
                 if ($delta!==null && !self::requiresCandidateValueCheck($field,$delta)) continue;
-                $actual=$field==='ranking'?$ranking:($field==='periods'?$periods:($field==='scope'?$scope:$intent[$field]));
+                $actual=$field==='ranking'?$ranking:($field==='periods'?$periods:($field==='scope'?$scope:($field==='object_relation'?$objectRelation:$intent[$field])));
+                if ($field==='periods' && self::incompleteComparisonPeriods($requirements,$intent,$actual)) continue;
                 if ($field==='ranking' && $delta!==null) {
                     foreach(['direction'=>'ranking_direction','limit'=>'ranking_limit'] as $key=>$deltaField) {
                         if (($delta[$deltaField]??null)==='replace'
@@ -498,6 +550,54 @@ final class AiIntentResultContract
                 if (!self::equivalent($actual,$values[$field])) self::fail('binding_requirement_value_mismatch:'.$field);
             }
         }
+    }
+
+    /**
+     * Carry one accepted, model-authored structured semantic value across the
+     * binding boundary. Multiple different values for one field deliberately
+     * remain unanchored: they need model clarification rather than a PHP tie
+     * break. The method never derives a value from customer text.
+     */
+    private static function anchorUnderstandingValues(array $understanding,array $intent,array $ranking,array $periods,string $scope,string $objectRelation,bool $rankingSupplied,bool $periodsSupplied,bool $scopeSupplied): array
+    {
+        $values=[];$scopeExpressed=false;
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            if (in_array('scope',(array)($requirement['fields']??[]),true)) $scopeExpressed=true;
+            foreach (['object_kind','object_relation','operation','periods','ranking','scope'] as $field) {
+                if (!array_key_exists($field,(array)($requirement['values']??[]))) continue;
+                $candidate=$requirement['values'][$field];
+                if (!isset($values[$field])) {$values[$field]=['value'=>$candidate,'conflict'=>false];continue;}
+                if (!self::equivalent($values[$field]['value'],$candidate)) $values[$field]['conflict']=true;
+            }
+        }
+        foreach ($values as $field=>$record) {
+            if ($record['conflict']) continue;
+            $candidate=$record['value'];
+            if ($field==='object_kind') $intent['object_kind']=$candidate;
+            elseif ($field==='object_relation') $objectRelation=$candidate;
+            elseif ($field==='operation') $intent['operation']=$candidate;
+            elseif ($field==='periods') {
+                // A partial understanding carrier must not overwrite a
+                // model-completed comparison pair.  This is structural
+                // completeness only: PHP never derives either date and the
+                // independent semantic reviewer still admits the added side.
+                if (!(($intent['operation']??null)==='comparison' && count((array)$candidate)<2 && count($periods)===2)) {
+                    $periods=$candidate;$periodsSupplied=true;
+                }
+            }
+            elseif ($field==='ranking') {$ranking=$candidate;$rankingSupplied=true;}
+            elseif ($field==='scope') {$scope=$candidate;$scopeSupplied=true;}
+        }
+        // The data range belongs to the authenticated person, not to the
+        // analytical object or application entry. A binding candidate cannot
+        // turn “which store” into “only the current store”; without an
+        // understood scope condition, use the server-owned authorized range.
+        // If the first pass did preserve a scope requirement but its typed
+        // carrier is missing or conflicting, keep the candidate for semantic
+        // review rather than silently broadening the customer request.
+        if (!$scopeExpressed) {$scope='unspecified';$scopeSupplied=false;}
+        return ['intent'=>$intent,'ranking'=>$ranking,'periods'=>$periods,'scope'=>$scope,'object_relation'=>$objectRelation,
+            'ranking_supplied'=>$rankingSupplied,'periods_supplied'=>$periodsSupplied,'scope_supplied'=>$scopeSupplied];
     }
 
     /**
@@ -649,14 +749,26 @@ final class AiIntentResultContract
         return $field!=='ranking' || $delta['ranking_limit']==='inherit';
     }
 
-    private static function neutralDefault(string $field,array $intent,array $ranking,array $periods,string $scope): bool
+    private static function neutralDefault(string $field,array $intent,array $ranking,array $periods,string $scope,string $objectRelation): bool
     {
         if ($field==='object_kind') return in_array($intent['object_kind'],['store','unknown'],true)&&$intent['object_term']==='';
+        if ($field==='object_relation') return $objectRelation==='analysis';
         if ($field==='metric_codes') return $intent['metric_codes']===[];
         if ($field==='operation') return in_array($intent['operation'],['summary','unknown'],true);
         if ($field==='ranking') return $ranking['direction']==='unspecified'&&$ranking['limit']===null;
         if ($field==='periods') return $periods===[];
         return $scope==='unspecified'||$scope==='authorized';
+    }
+
+    /** A comparison carrier is incomplete until both customer-stated periods exist. */
+    private static function incompleteComparisonPeriods(array $requirements,array $intent,array $periods): bool
+    {
+        if (($intent['operation']??null)!=='comparison' || count($periods)!==2) return false;
+        foreach ($requirements as $requirement) {
+            $value=$requirement['values']['periods']??null;
+            if (is_array($value) && count($value)<2) return true;
+        }
+        return false;
     }
 
     private static function resultReference($value,bool $hasPrior): ?array
