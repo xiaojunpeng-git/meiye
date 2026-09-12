@@ -1,7 +1,7 @@
 <?php
 // Deterministic protocol tests: no database, model or customer text parsing.
 require_once __DIR__.'/fixture-autoload.php';
-use app\services\ai\execution\IntentContextMerger;
+use app\services\ai\context\IntentContextMerger;
 use app\services\ai\execution\AiAnalysisGuidancePlanner;
 use app\services\ai\execution\AiRegisteredPlanCompiler;
 use app\services\query\metric\PersonnelPerformanceReadServices;

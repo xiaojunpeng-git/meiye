@@ -42,14 +42,13 @@ try {
     // A top-and-bottom answer has two independently displayed rank groups.
     // "First" must remain scoped to the group the customer named, rather
     // than depending on the storage order of those groups.
-    $resolve=new ReflectionMethod($h->gateway,'resultReferenceConstraints');
     $query=['query_shape'=>'ranking','business_filters'=>['object_kind'=>'store']];
     $view=['results'=>[['rows'=>[
         'bottom'=>[['store_id'=>2],['store_id'=>3]],
         'top'=>[['store_id'=>1],['store_id'=>4]],
     ]]]];
-    $top=$resolve->invoke($h->gateway,$query,$view,['group'=>'top','ordinal'=>1]);
-    $bottom=$resolve->invoke($h->gateway,$query,$view,['group'=>'bottom','ordinal'=>1]);
+    $top=\app\services\ai\context\ResultReferenceResolver::resolve($query,$view,['group'=>'top','ordinal'=>1]);
+    $bottom=\app\services\ai\context\ResultReferenceResolver::resolve($query,$view,['group'=>'bottom','ordinal'=>1]);
     if (($top['store_ids']??null)!==[1] || ($bottom['store_ids']??null)!==[2]) {
         throw new RuntimeException('reference did not preserve the displayed ranking group');
     }
@@ -57,8 +56,8 @@ try {
     $personView=['results'=>[
         ['rows'=>['top'=>[['employee_id'=>7]]]],
     ]];
-    $person=$resolve->invoke($h->gateway,$personQuery,$personView,['group'=>'top','ordinal'=>1]);
-    $constraints=\app\services\ai\execution\IntentContextMerger::applyResultReference(
+    $person=\app\services\ai\context\ResultReferenceResolver::resolve($personQuery,$personView,['group'=>'top','ordinal'=>1]);
+    $constraints=\app\services\ai\context\IntentContextMerger::applyResultReference(
         ['store_ids'=>[1],'business_filters'=>['object_kind'=>'person','selection_ref'=>'position:2']],$person
     );
     if (($constraints['store_ids']??null)!==[1]

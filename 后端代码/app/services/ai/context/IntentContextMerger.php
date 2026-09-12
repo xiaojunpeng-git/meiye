@@ -1,5 +1,5 @@
 <?php
-namespace app\services\ai\execution;
+namespace app\services\ai\context;
 
 /**
  * Sole server entry for a model delta plus a verified prior query. It merges

@@ -14,6 +14,9 @@ use app\services\ai\contract\AiIntentUnderstandingContract;
 use app\services\ai\model\AiModelInputProjector;
 use app\services\ai\model\SiliconFlowClient;
 use app\services\ai\presentation\AiAnswerRenderer;
+use app\services\ai\context\IntentContextMerger;
+use app\services\ai\context\ResultReferenceResolver;
+use app\services\ai\context\VerifiedQueryContext;
 use app\services\query\metric\MetricReadViewServices;
 use app\services\query\metric\MetricReadViewStore;
 use RuntimeException;
@@ -446,64 +449,6 @@ final class AiGatewayServices
         return \app\services\query\metric\MetricRegistryCatalogServices::catalog();
     }
 
-    /** Signed evidence supplies prior conditions, never prior figures or additional data authority. */
-    private function sourceContext(array $context,array $owner,string $reference): array
-    {
-        $untrusted=json_decode(base64_decode(strtr(explode('.',$reference)[0],'-_','+/')),true);
-        if (!is_array($untrusted) || !is_string($untrusted['window']??null)) throw new RuntimeException('AI_CONTEXT_REQUIRED');
-        $proof=$this->verifyToken($reference,$context,$untrusted['window'],'context');
-        if (($proof['conversation']??'')!==$owner['conversation_id'] || !is_string($proof['evidence']??null)) throw new RuntimeException('AI_CONTEXT_REQUIRED');
-        $stored=$this->private->read($proof['evidence']); $originalOwner=$owner;$originalOwner['window_id']=$proof['window'];
-        $this->assertBinding($stored,$originalOwner,$proof['run'],$proof['generation']);
-        if (!isset($stored['query'],$stored['view_ref'])) throw new RuntimeException('AI_CONTEXT_REQUIRED');
-        $query=$stored['query'];
-        // The read view is an encrypted, source-answer snapshot. It is never
-        // projected to a model; it is used only when a later customer refers
-        // to a displayed result and is replayed under the current authority.
-        $view=$this->queryService($context)->replay([],$query,$stored['view_ref']);
-        return ['query'=>$query,'view'=>$view];
-    }
-
-    /** Only non-sensitive, already-authorized query meaning is visible to the model. */
-    private function modelPriorQuery(array $query): array
-    {
-        return \app\services\ai\execution\IntentContextMerger::modelView($query);
-    }
-
-    /**
-     * Resolves a natural-language ordinal only against the immutable result
-     * view that produced the signed context reference. The return value holds
-     * stable, server-only keys; names, values and row positions never leave
-     * this method or the private snapshot.
-     */
-    private function resultReferenceConstraints(array $query,array $view,array $reference): array
-    {
-        if (($query['query_shape']??null)!=='ranking' || !is_int($reference['ordinal']??null)
-            || !in_array($reference['group']??null,['top','bottom'],true)) {
-            throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
-        }
-        // A result reference must identify exactly one displayed rank group in
-        // exactly one immutable result. Flattening top/bottom or several metric
-        // tables makes “the first one” depend on array order rather than the
-        // answer the customer actually saw.
-        $results=(array)($view['results']??[]);
-        if (count($results)!==1 || !is_array($results[0]??null)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
-        $rows=(array)(($results[0]['rows']??[])[$reference['group']]??null);
-        $ordinal=$reference['ordinal'];
-        if ($ordinal<1 || $ordinal>count($rows)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
-        $point=$rows[$ordinal-1];
-        $kind=$query['business_filters']['object_kind']??'store';
-        if ($kind==='person' && is_int($point['employee_id']??null) && $point['employee_id']>0) {
-            return ['object_kind'=>'person','business_filters'=>['object_kind'=>'person','selection_ref'=>'person:'.$point['employee_id']]];
-        }
-        if ($kind==='store' && is_int($point['store_id']??null) && $point['store_id']>0) {
-            return ['object_kind'=>'store','store_ids'=>[$point['store_id']],'business_filters'=>[]];
-        }
-        // Other registered dimensions are not yet valid filters. Returning an
-        // honest capability gap is safer than changing the customer's object.
-        throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
-    }
-
     /**
      * Converts a model-understood named store into a stable scope only after
      * looking it up in the current report-authorized store catalog. The model
@@ -660,7 +605,7 @@ final class AiGatewayServices
         $constraints=array_key_exists('inherited_query_constraints',$envelope)
             ? $envelope['inherited_query_constraints'] : $fallback;
         unset($envelope['inherited_query_constraints']);
-        return \app\services\ai\execution\IntentContextMerger::bind($envelope,$constraints);
+        return IntentContextMerger::bind($envelope,$constraints);
     }
 
     /** Selects only the server-owned planner encoded by a clarification state. */
@@ -754,9 +699,9 @@ final class AiGatewayServices
         // A signed answer reference is useful conversation context, not a
         // shortcut around natural-language understanding.  It is verified and
         // reduced to non-sensitive query meaning before the model sees it.
-        $sourceContext=isset($body['context_ref'])?$this->sourceContext($context,$owner,$body['context_ref']):null;
+        $sourceContext=isset($body['context_ref'])?$this->contextService()->restore($context,$owner,$body['context_ref']):null;
         $sourceQuery=$sourceContext['query']??null;
-        $safe['outbound']['prior_query']=$sourceQuery===null?null:$this->modelPriorQuery($sourceQuery);
+        $safe['outbound']['prior_query']=$sourceQuery===null?null:IntentContextMerger::modelView($sourceQuery);
         // Understanding has no metric catalogue. Binding receives accepted
         // meaning afterwards and may only propose registered execution fields.
         $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
@@ -851,7 +796,7 @@ final class AiGatewayServices
         $checkpoint();$intent=$reply['intent'];
         // The model states only a delta. This named merger is the sole place
         // that may retain verified query meaning across turns.
-        $merged=\app\services\ai\execution\IntentContextMerger::merge($sourceQuery,$intent);
+        $merged=IntentContextMerger::merge($sourceQuery,$intent);
         $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
         // A condition can be understood without having a registered Reader
         // representation (for example, a requested calendar restriction).
@@ -889,7 +834,7 @@ final class AiGatewayServices
         $resultReference=null;
         if ($intent['result_reference']!==null) {
             if ($sourceContext===null) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
-            $resultReference=$this->resultReferenceConstraints($sourceContext['query'],$sourceContext['view'],$intent['result_reference']);
+            $resultReference=ResultReferenceResolver::resolve($sourceContext['query'],$sourceContext['view'],$intent['result_reference']);
             if (!in_array($intent['object_kind'],['unknown',$resultReference['object_kind']],true)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
         }
         // Pending is a model-owned statement that more information is needed,
@@ -927,7 +872,7 @@ final class AiGatewayServices
         if ($resultReference!==null) {
             $intent['object_kind']=$resultReference['object_kind'];
             $intent['object_term']='';
-            $inheritedConstraints=\app\services\ai\execution\IntentContextMerger::applyResultReference($inheritedConstraints,$resultReference);
+            $inheritedConstraints=IntentContextMerger::applyResultReference($inheritedConstraints,$resultReference);
         }
         // On the first turn a named store is not inherited state; it is an
         // understood customer restriction that still has to be resolved in
@@ -986,7 +931,7 @@ final class AiGatewayServices
             } elseif ($merged['pending']) {
                 $compiled=(new \app\services\ai\execution\AiPendingContextGuidancePlanner())->start($compiled,$merged['pending'],$inheritedConstraints,$metricOptions,$merged['prospective_intent'],$operationOptions,['understanding'=>$understanding]);
             } else {
-                $compiled=\app\services\ai\execution\IntentContextMerger::bind($compiled,$inheritedConstraints);
+                $compiled=IntentContextMerger::bind($compiled,$inheritedConstraints);
             }
             // The frontend never receives this key: issueGuidance persists it
             // only in the signed private envelope.  Keeping the exact
@@ -1075,7 +1020,7 @@ final class AiGatewayServices
             // replaced with someone else. Otherwise resolve actual position metadata.
             $exactPeople=array_values(array_filter($catalog['objects'],static function($o)use($objectTerm){return $o['kind']==='person' && $o['label']===$objectTerm;}));
             $objects=$exactPeople?$named:$objectCatalog->resolve($objectTerm,'position',$metric);
-            $objects=\app\services\ai\execution\IntentContextMerger::resolveSelection($objects,$catalog['objects'],$inheritedConstraints,'person',$metric);
+            $objects=IntentContextMerger::resolveSelection($objects,$catalog['objects'],$inheritedConstraints,'person',$metric);
             return $finish((new \app\services\ai\execution\AiAnalysisGuidancePlanner())->start($intent,$projection,$personMetrics,$objects,$body['output_format'],$today));
         }
         // No staff/customer/object restriction may become an unfiltered store query.
@@ -1412,6 +1357,21 @@ final class AiGatewayServices
         if (!is_array($data)||($data['identity']??'')!==$this->identity($context)||($data['window']??'')!==$session||($data['type']??'')!==$type||($data['expires']??0)<=time()) throw new RuntimeException('AI_DELIVERY_INVALID');
         return $data;
     }
+    /**
+     * Keeps trusted-query lifecycle out of the HTTP facade while reusing the
+     * existing signing, evidence-binding and Reader replay primitives.
+     */
+    private function contextService(): VerifiedQueryContext
+    {
+        return new VerifiedQueryContext(
+            $this->private,
+            function(string $reference,array $context,string $window,string $type): array { return $this->verifyToken($reference,$context,$window,$type); },
+            function(array $claims): string { return $this->token($claims); },
+            function(array $context): string { return $this->identity($context); },
+            function(array $stored,array $owner,string $run,int $generation): void { $this->assertBinding($stored,$owner,$run,$generation); },
+            function(array $context,array $query,string $viewRef): array { return $this->queryService($context)->replay([],$query,$viewRef); }
+        );
+    }
     private function present(array $context,array $owner,array $run): array
     {
         $result=['run_id'=>$run['run_id'],'generation'=>$run['generation'],'version'=>$run['version'],'status'=>$run['status'],'reason'=>$run['reason'],
@@ -1437,8 +1397,8 @@ final class AiGatewayServices
                 $result['management_trace']=['workflow_code'=>$stored['workflow_code']??null,'management_version'=>$stored['management_version']??'source',
                     'nodes'=>$stored['execution_trace']??[]];
             }
-            if (isset($stored['query'])) $result['answer']['context_ref']=$this->token(['type'=>'context','identity'=>$this->identity($context),'window'=>$owner['window_id'],
-                'conversation'=>$owner['conversation_id'],'run'=>$run['run_id'],'generation'=>$run['generation'],'evidence'=>$run['evidence_ref'],'expires'=>intdiv($run['expires_at'],1000)]);
+            $contextReference=$this->contextService()->issue($context,$owner,$run,$stored);
+            if ($contextReference!==null) $result['answer']['context_ref']=$contextReference;
             if ($run['status']==='COMPLETED' && ($answer['answer']['export_status']??null)==='ready' && !empty($answer['export_task_no'])) {
                 $result['answer']['export']=['file_ref'=>$answer['export_task_no'],'filename'=>'经营数据.xlsx'];
             }
