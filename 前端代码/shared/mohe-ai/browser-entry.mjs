@@ -55,6 +55,26 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     try { const previous = run; await update(await request('GET', '/runs/' + encodeURIComponent(run.run_id), binding())); if (run === previous && run && !isTerminal(run.status) && (run.status !== 'WAITING_CLARIFICATION' || cancelling)) pollTimer = setTimeout(poll, 1000); }
     catch (_) { if (progress) progress.textContent = cancelling ? '暂未确认取消结果，请检查网络。' : '连接暂时中断，正在重新确认任务状态。'; pollTimer = setTimeout(poll, 3000); }
   }
+  async function executeAcceptedRun(source, submitted) {
+    try {
+      await update(await request('POST', '/runs/' + encodeURIComponent(source.run_id) + '/execute', {
+        client_session_id: clientSession,
+        run_delivery_token: source.run_delivery_token,
+        generation: source.generation,
+        question: submitted.question,
+        history: submitted.history,
+        output_format: submitted.output_format,
+        ...(submitted.context_ref ? { context_ref: submitted.context_ref } : {})
+      }));
+    } catch (error) {
+      // The server Run, not this long HTTP response, is the source of truth.
+      // Keep polling after any uncertain completion so the customer can still
+      // see a finished answer, controlled guidance or a cancellation.
+      if (disposed || !run || run.run_id !== source.run_id || run.generation !== source.generation || isTerminal(run.status)) return;
+      progress.textContent = error.responseKnown ? error.message : '请求结果暂未确认。';
+      clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000);
+    }
+  }
   function renderClarification(c) {
     try { validateClarification(c, activeGuidanceSchema); } catch (error) { clearClarification(); progress.textContent = error.message; return; }
     if (c.schema_version === GUIDANCE_SCHEMA) activeGuidanceSchema = GUIDANCE_SCHEMA;
@@ -170,7 +190,13 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         await update(accepted);
         pendingCreate = null;
         if (closeRequested || disposed) { await stop(); return; }
-        if (run && !isTerminal(run.status)) await update(await request('POST', '/runs/' + encodeURIComponent(run.run_id) + '/execute', { ...binding(), question: submitted.question, history: submitted.history, output_format: submitted.output_format, ...(submitted.context_ref ? { context_ref: submitted.context_ref } : {}) }));
+        if (run && !isTerminal(run.status)) {
+          // A model-backed execution may legitimately take tens of seconds.
+          // Do not keep the UI tied to one POST response: start the trusted
+          // Run once and let the existing status channel expose its actual
+          // server-side progress and terminal result.
+          void executeAcceptedRun({ ...run }, submitted);
+        }
       } catch (error) { progress.textContent = error.responseKnown ? error.message : '请求结果暂未确认。'; if (run) { clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000); } else { if (error.responseKnown) pendingCreate = null; send.disabled = false; send.textContent = error.responseKnown ? '发送' : '重试确认'; input.value = question; } }
     };
     cancel.onclick = stop; close.onclick = () => { stop(); panel.hidden = true; };
