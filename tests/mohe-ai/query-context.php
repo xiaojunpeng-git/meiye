@@ -9,6 +9,7 @@ use app\services\query\metric\AnalysisObjectCatalog;
 $checks=0;
 function qcCheck($ok,$label){global $checks;if(!$ok)throw new RuntimeException($label);$checks++;}
 function qcReject($call,$reason){try{$call();}catch(Throwable $e){qcCheck($e->getMessage()===$reason,$reason.' got '.$e->getMessage());return;}throw new RuntimeException('Missing '.$reason);}
+function qcNormalize($intent,$safe,$understanding=null){$ranking=(array)($intent['ranking']??[]);$boundCodes=(array)($intent['metric_codes']??[]);if(($intent['context_delta']['metric_codes']??null)==='inherit')$boundCodes=(array)(($safe['prior_query']['metric_codes']??[]));$intent['requirement_bindings']=[['requirement_id'=>'r1','status'=>$boundCodes===[]?'unavailable':'satisfied','metric_codes'=>$boundCodes]];$intent['provenance']=['object_kind'=>['source'=>(($intent['object_kind']??'store')==='store'&&($intent['object_term']??'')==='')?'system':'customer','requirements'=>(($intent['object_kind']??'store')==='store'&&($intent['object_term']??'')==='')?[]:['r1']],'metric_codes'=>['source'=>empty($intent['metric_codes'])?'system':'customer','requirements'=>empty($intent['metric_codes'])?[]:['r1']],'operation'=>['source'=>in_array(($intent['operation']??'summary'),['summary','unknown'],true)?'system':'customer','requirements'=>in_array(($intent['operation']??'summary'),['summary','unknown'],true)?[]:['r1']],'periods'=>['source'=>empty($intent['periods'])?'system':'customer','requirements'=>empty($intent['periods'])?[]:['r1']],'ranking'=>['source'=>(($ranking['direction']??'unspecified')==='unspecified'&&($ranking['limit']??null)===null)?'system':'customer','requirements'=>(($ranking['direction']??'unspecified')==='unspecified'&&($ranking['limit']??null)===null)?[]:['r1']],'scope'=>['source'=>($intent['scope']??'unspecified')==='current_store'?'customer':'system','requirements'=>($intent['scope']??'current_store')==='current_store'?['r1']:[]]];$understanding=$understanding??['requirements'=>[['id'=>'r1','fields'=>['metric_codes','object_kind','operation','periods','ranking','scope']]]];return app\services\ai\contract\AiIntentResultContract::normalize($intent,['staff_labor_yeji'],[],$safe,$understanding);}
 $all=app\services\ai\contract\AiIntentResultContract::DELTA_FIELDS;
 $delta=array_fill_keys($all,'inherit');
 $source=['metric_codes'=>['staff_labor_yeji'],'query_shape'=>'ranking','start_date'=>'2026-09-11','end_date'=>'2026-09-11','compare_range'=>null,'ranking'=>['direction'=>'top','limit'=>1],'store_ids'=>[1],'business_filters'=>['object_kind'=>'person','selection_ref'=>'position:2']];
@@ -19,22 +20,23 @@ $summarySource=$source;$summarySource['query_shape']='summary';$summarySource['r
 qcCheck(IntentContextMerger::modelView($summarySource)['ranking']===['direction'=>'unspecified','limit'=>null],'non-ranking prior shape projects a structural ranking placeholder without inventing a rank');
 $prior=['metric_codes'=>['staff_labor_yeji'],'operation'=>'ranking','periods'=>$view['periods'],'ranking'=>$view['ranking'],'scope'=>'authorized','object_kind'=>'person','has_object_selection'=>true];
 $safe=['question'=>'这个月呢','recent_questions'=>[],'prior_query'=>$prior];
-$intent=['object_kind'=>'unknown','object_term'=>'','operation'=>'unknown','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'unspecified','context_delta'=>$delta,'unresolved_fragments'=>[]];
+$intent=['object_kind'=>'unknown','object_term'=>'','operation'=>'unknown','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'unspecified','context_delta'=>$delta,'unresolved_fragments'=>[],
+    'provenance'=>['object_kind'=>['source'=>'system','requirements'=>[]],'metric_codes'=>['source'=>'system','requirements'=>[]],'operation'=>['source'=>'system','requirements'=>[]],'periods'=>['source'=>'customer','requirements'=>['r1']],'ranking'=>['source'=>'system','requirements'=>[]],'scope'=>['source'=>'system','requirements'=>[]]]];
 $intent['context_delta']['periods']='replace';
-$canonical=app\services\ai\contract\AiIntentResultContract::normalize($intent,['staff_labor_yeji'],[],$safe);
+$canonical=qcNormalize($intent,$safe);
 $merged=IntentContextMerger::merge($source,$canonical);
 qcCheck($merged['intent']['metric_codes']===['staff_labor_yeji']&&$merged['intent']['operation']==='ranking','time-only continuation retains metric and operation');
 qcCheck($merged['intent']['ranking']===['direction'=>'top','limit'=>1],'time-only continuation preserves singular ranking without defaulting to five');
 qcCheck($merged['intent']['periods']===$intent['periods'],'explicit replacement changes only period');
 qcCheck($merged['constraints']['business_filters']===$source['business_filters']&&$merged['constraints']['store_ids']===[1],'delta preserves verified constraints only when explicit inherit');
 $limit=$intent;$limit['ranking']=['direction'=>'unspecified','limit'=>5];$limit['context_delta']['ranking_limit']='replace';
-$limitMerged=IntentContextMerger::merge($source,app\services\ai\contract\AiIntentResultContract::normalize($limit,['staff_labor_yeji'],[],$safe));
+$limitMerged=IntentContextMerger::merge($source,qcNormalize($limit,$safe));
 qcCheck($limitMerged['intent']['ranking']===['direction'=>'top','limit'=>5],'changing first to first five retains direction through protocol');
-$clear=$intent;$clear['context_delta']['business_filters']='clear';$clearMerged=IntentContextMerger::merge($source,app\services\ai\contract\AiIntentResultContract::normalize($clear,['staff_labor_yeji'],[],$safe));
-qcCheck($clearMerged['constraints']['business_filters']===null,'explicit clear never resurrects prior selection');
-$pending=$intent;$pending['context_delta']['operation']='pending';$pendingMerged=IntentContextMerger::merge($source,app\services\ai\contract\AiIntentResultContract::normalize($pending,['staff_labor_yeji'],[],$safe));
+$clear=$intent;$clear['context_delta']['business_filters']='clear';
+qcReject(function()use($clear,$safe){qcNormalize($clear,$safe);},'AI_MODEL_INTENT_CONTRACT_INVALID');
+$pending=$intent;$pending['context_delta']['operation']='pending';$pendingMerged=IntentContextMerger::merge($source,qcNormalize($pending,$safe));
 qcCheck(in_array('operation',$pendingMerged['pending'],true)&&$pendingMerged['intent']['operation']==='unknown','uncertain semantic field becomes pending, never a default');
-$pendingScope=$intent;$pendingScope['context_delta']['store_scope']='pending';$pendingScopeMerged=IntentContextMerger::merge($source,app\services\ai\contract\AiIntentResultContract::normalize($pendingScope,['staff_labor_yeji'],[],$safe));
+$pendingScope=$intent;$pendingScope['context_delta']['store_scope']='pending';$pendingScopeMerged=IntentContextMerger::merge($source,qcNormalize($pendingScope,$safe));
 qcCheck($pendingScopeMerged['constraints']['store_ids']===[1]&&$pendingScopeMerged['fallback_constraints']['store_ids']===[1],'pending store scope retains the signed narrowing until a direct choice');
 $pendingPlanner=new app\services\ai\execution\AiPendingContextGuidancePlanner();
 $pendingEnvelope=$pendingPlanner->start(['kind'=>'plan','plan'=>['query'=>['store_ids'=>[],'business_filters'=>[]]]],['store_scope'],['store_ids'=>[1],'business_filters'=>$source['business_filters']]);
@@ -44,7 +46,7 @@ qcCheck(($retainedEnvelope['inherited_query_constraints']['store_ids']??null)===
 $pendingEnvelope=$pendingPlanner->start(['kind'=>'plan','plan'=>['query'=>['store_ids'=>[],'business_filters'=>[]]]],['store_scope'],['store_ids'=>[1],'business_filters'=>$source['business_filters']]);
 $clearedEnvelope=$pendingPlanner->choose($pendingEnvelope,['pending_store_scope'=>'clear_store_scope']);
 qcCheck(array_key_exists('store_ids',$clearedEnvelope['inherited_query_constraints'])&&$clearedEnvelope['inherited_query_constraints']['store_ids']===null,'explicit clear is the only way a pending store scope can widen');
-$objectPending=$intent;$objectPending['context_delta']['object']='pending';$objectPendingMerged=IntentContextMerger::merge($source,app\services\ai\contract\AiIntentResultContract::normalize($objectPending,['staff_labor_yeji'],[],$safe));
+$objectPending=$intent;$objectPending['context_delta']['object']='pending';$objectPendingMerged=IntentContextMerger::merge($source,qcNormalize($objectPending,$safe));
 qcCheck($objectPendingMerged['fallback_intent']['object_kind']==='person'&&$objectPendingMerged['fallback_constraints']['business_filters']===$source['business_filters'],'pending object retains its verified object binding');
 $basePlan=['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_summary','query'=>['query_shape'=>'summary','metric_codes'=>['staff_labor_yeji'],'start_date'=>'2026-09-01','end_date'=>'2026-09-02','compare_range'=>null,'store_ids'=>[1],'business_filters'=>$source['business_filters'],'ranking'=>null]]];
 $filterPending=$pendingPlanner->start($basePlan,['business_filters'],['store_ids'=>[1],'business_filters'=>$source['business_filters']]);
@@ -74,7 +76,7 @@ qcCheck(array_column($rankingOptions['fields'],'key')===['pending_ranking_direct
 $rankingPlan=$pendingPlanner->choose($rankingOptions,['pending_ranking_direction'=>'top','pending_ranking_limit'=>'3']);
 qcCheck(($rankingPlan['plan']['query']['ranking']??null)===['direction'=>'top','limit'=>3],'combined ranking confirmation becomes an executable ranking query');
 $filterConflict=$intent;$filterConflict['object_kind']='member';$filterConflict['object_term']='某会员';$filterConflict['context_delta']['object']='replace';
-$filterConflictMerged=IntentContextMerger::merge($source,app\services\ai\contract\AiIntentResultContract::normalize($filterConflict,['staff_labor_yeji'],[],$safe));
+$filterConflictMerged=IntentContextMerger::merge($source,qcNormalize($filterConflict,$safe));
 qcCheck($filterConflictMerged['constraints']['business_filters']===null&&in_array('business_filters',$filterConflictMerged['pending'],true),'a replacement subject requires explicit confirmation before its inherited business filter can be removed');
 $replacementPlanner=new app\services\ai\execution\AiContextReplacementGuidancePlanner();
 $replacementStep=$replacementPlanner->start(['kind'=>'plan','plan'=>['query'=>['business_filters'=>[]]]]);
@@ -99,16 +101,20 @@ $storeMetricChoice=$replacementPlanner->choose($storeMetricReplacement,['replace
 qcCheck(array_column($storeMetricChoice['fields'][0]['options']??[],'value')===['metric:cash_performance'],'replacement object does not offer retain for a metric unavailable to that object');
 $storeMetricPlan=$pendingPlanner->choose($storeMetricChoice,['pending_metric_codes'=>'metric:cash_performance']);
 qcCheck(($storeMetricPlan['plan']['query']['metric_codes']??null)===['cash_performance']&&($storeMetricPlan['plan']['query']['business_filters']??null)===[],'replacement object executes only after a compatible registered metric is selected');
-$storeScope=$intent;$storeScope['object_term']='二号门店';$storeScope['context_delta']['store_scope']='replace';
+$storeScope=$intent;$storeScope['object_kind']='store';$storeScope['object_term']='二号门店';$storeScope['context_delta']['object']='replace';$storeScope['context_delta']['store_scope']='replace';
 $storeScopeSafe=$safe;$storeScopeSafe['question']='改查二号门店，其他条件不变';
-$storeScopeMerged=IntentContextMerger::merge($source,app\services\ai\contract\AiIntentResultContract::normalize($storeScope,['staff_labor_yeji'],[],$storeScopeSafe));
+$storeScopeUnderstanding=['requirements'=>[['id'=>'r1','fields'=>['metric_codes','object_kind','operation','periods','ranking','scope'],'values'=>['object_kind'=>'store'],'evidence'=>[['message_id'=>'current','quote'=>'二号门店']]]]];
+$storeScopeMerged=IntentContextMerger::merge($source,qcNormalize($storeScope,$storeScopeSafe,$storeScopeUnderstanding));
 qcCheck($storeScopeMerged['intent']['object_term']==='二号门店','a replacement store scope preserves its verbatim target for authorized catalog binding');
 $badNullRanking=$intent;$badNullRanking['ranking']=['direction'=>null,'limit'=>null,'unregistered_condition'=>'opaque'];
-qcReject(function()use($badNullRanking,$safe){app\services\ai\contract\AiIntentResultContract::normalize($badNullRanking,['staff_labor_yeji'],[],$safe);},'AI_MODEL_INTENT_CONTRACT_INVALID');
+qcReject(function()use($badNullRanking,$safe){qcNormalize($badNullRanking,$safe);},'AI_MODEL_INTENT_CONTRACT_INVALID');
 $missing=$intent;unset($missing['context_delta']);
-qcReject(function()use($missing,$safe){app\services\ai\contract\AiIntentResultContract::normalize($missing,['staff_labor_yeji'],[],$safe);},'AI_MODEL_INTENT_CONTRACT_INVALID');
-foreach(['context_delta','metric_codes','operation'] as $key)qcCheck(app\services\ai\contract\AiIntentResultContract::repairableOmission('missing_key:'.$key),'one retry requests model-owned structural completion for '.$key);
-qcCheck(!app\services\ai\contract\AiIntentResultContract::repairableOmission('missing_replacement:periods'),'server never repairs an absent semantic replacement');
+qcReject(function()use($missing,$safe){app\services\ai\contract\AiIntentResultContract::normalize($missing,['staff_labor_yeji'],[],$safe,['requirements'=>[['id'=>'r1','fields'=>['metric_codes','object_kind','operation','periods','ranking','scope']]]]);},'AI_MODEL_INTENT_CONTRACT_INVALID');
+foreach(['context_delta','metric_codes','operation'] as $key)qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('missing_key:'.$key),'one retry requests model-owned structural completion for '.$key);
+qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('bad_value:requirement_bindings'),'one retry can correct an invalid metric requirement row without authorizing it');
+qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('provenance_field_not_understood'),'one retry can align a binding field with accepted understanding without supplying business meaning');
+qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('bad_value:result_reference'),'one retry can remove an ungrounded private-result reference without supplying customer meaning');
+qcCheck(!app\services\ai\contract\AiIntentResultContract::repairableFormat('missing_replacement:periods'),'server never repairs an absent semantic replacement');
 $candidates=['staff_labor_yeji'=>['name'=>'劳动业绩','summary'=>'劳动分配','query_shapes'=>['summary','ranking']]];
 $catalog=[['ref'=>'position:2','kind'=>'position','label'=>'合成岗位甲','aliases'=>[],'version'=>'1','relations'=>['staff_labor_yeji']]];
 $objects=new AnalysisObjectCatalog($catalog,static function(){return true;});

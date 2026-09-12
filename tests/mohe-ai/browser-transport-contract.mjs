@@ -14,4 +14,9 @@ await request('POST','/runs',{question:'fixture-question'});
 assert.equal(sent.options.body,JSON.stringify({question:'fixture-question'}));
 assert.equal(sent.options.credentials,'omit');
 assert.deepEqual(await request('GET','/runs/id/export',{client_session_id:'device1'},{binary:true}),{fixtureBlob:true});
-console.log('Browser transport no URL credentials: 9 checks PASS');
+globalThis.fetch = async () => ({ok:false,status:400,json:async()=>({status:400,msg:'当前账号没有此项操作权限。',data:{error_code:'AI_PERMISSION_DENIED'}})});
+await assert.rejects(
+  () => request('GET','/management'),
+  error => error.responseKnown === true && error.httpStatus === 400 && error.reason === 'AI_PERMISSION_DENIED'
+);
+console.log('Browser transport no URL credentials: 10 checks PASS');

@@ -52,7 +52,7 @@ ok($m->worker($mb)['can_configure']===false);
 \app\services\mobile\merchant\MobileMerchantRequestContextResolver::$account=10;denied(fn()=>$m->worker($mb));\app\services\mobile\merchant\MobileMerchantRequestContextResolver::$account=9;
 \app\services\organization\EmployeeDataScopeServices::$scope=[];ok($m->worker($mb)['scope_mode']==='self_participant');ok($m->worker($mb)['store_ids']===[1]);
 \app\services\organization\EmployeeDataScopeServices::$scope=[1,2];ok($m->worker($mb)['store_ids']===[1,2]);
-\app\services\mobile\merchant\MobileMerchantRequestContextResolver::$actions=['MOHE_AI_USE'];ok($m->worker($mb)['can_use']);ok(!$m->worker($mb)['store_report_authorized']);
+\app\services\mobile\merchant\MobileMerchantRequestContextResolver::$actions=['MOHE_AI_USE'];ok($m->worker($mb)['can_use']);ok($m->worker($mb)['store_report_authorized']);ok($m->worker($mb)['personnel_data_authorized']);
 \app\services\mobile\merchant\MobileMerchantRequestContextResolver::$actions=['MERCHANT_WAREHOUSE_VIEW'];denied(fn()=>$m->worker($mb));
 $mb['employee_id']='11';denied(fn()=>$m->worker($mb));
 require dirname(__DIR__,2).'/后端代码/app/services/cashier/v3/permission/CashierV3StaffFeatureOverrideServices.php';
@@ -67,7 +67,7 @@ ok(\app\services\ai\execution\AiAuthority::currentStoreId(array_replace($sc,['or
 \app\services\organization\EmployeeDataScopeServices::$scope=[];
 $sc=$s->storeAuthenticated(1,5,[]);ok($sc['scope_mode']==='self_participant');ok($sc['employee_id']===11);ok($sc['store_ids']===[1]);
 \app\services\cashier\v3\permission\CashierV3FeatureResolver::$features=['cashier.v3.ai','cashier.v3.cashier'];
-$sc=$s->storeAuthenticated(1,5,[]);ok($sc['can_use']);ok(!$sc['store_report_authorized']);ok(!$sc['analysis_personnel_grants']['staff_labor_yeji']);
+$sc=$s->storeAuthenticated(1,5,[]);ok($sc['can_use']);ok($sc['store_report_authorized']);ok($sc['personnel_data_authorized']);
 \app\services\cashier\v3\permission\CashierV3FeatureResolver::$features=['cashier.v3.management_center'];ok(!$s->storeAuthenticated(1,5,[])['can_use']);
 echo "Principal adapters: $count checks PASS (authority fixtures; no live DB)\n";
 }

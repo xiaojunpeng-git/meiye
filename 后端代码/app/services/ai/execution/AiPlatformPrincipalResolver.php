@@ -28,10 +28,6 @@ final class AiPlatformPrincipalResolver
         // This row is reloaded from the authenticated account on every request.
         $entry=$allowed('mohe-ai-entry',2);$configure=$type!==3 && ($admin['account']??null)==='admin';
         $report=$allowed('admin-report-group-management-dashboard');$mode='none';$stores=[];
-        $personnelGrants=[
-            'staff_labor_yeji'=>$allowed('admin-report-store-operations-store_craftsman_consumption'),
-            'staff_sales_yeji'=>$allowed('admin-report-store-operations-store_salesperson_performance'),
-        ];
         {
             if ($type===3 && (int)($admin['relation_id']??0)>0) {
                 $mode='agent_limited';$stores=app()->make(OrganizationScopeService::class)->getResolvedStoreIdsByLegacyAgentId((int)$admin['relation_id']);
@@ -48,8 +44,8 @@ final class AiPlatformPrincipalResolver
         }
         $stores=array_values(array_unique(array_filter(array_map('intval',(array)$stores),static fn($id)=>$id>0)));sort($stores);
         return ['terminal'=>'platform','account_id'=>$accountId,'scope_mode'=>$mode==='self_participant'?$mode:($stores?'stores':'none'),
-            'store_ids'=>$stores,'permission_version'=>hash('sha256',json_encode([$mode,$employeeId,$stores,$roles,$entry,$configure,$report,$personnelGrants])),
-            'analysis_personnel_grants'=>$personnelGrants,'employee_id'=>$employeeId,'store_report_authorized'=>$report,
+            'store_ids'=>$stores,'permission_version'=>hash('sha256',json_encode([$mode,$employeeId,$stores,$roles,$entry,$configure])),
+            'employee_id'=>$employeeId,'personnel_data_authorized'=>!empty($stores),'store_report_authorized'=>$report,
             'can_use'=>$entry,'can_configure'=>$configure,'report_capability_code'=>'group_management_dashboard',
             'tenant_id'=>'0','origin_store_id'=>0,'origin_organization_id'=>'0','export_principal_ready'=>true,'principal_kind'=>'platform_admin'];
     }

@@ -18,10 +18,11 @@ final class AiMerchantPrincipalResolver
         if ($personal) $stores=$scopes->resolveCurrentActiveStoreIds((int)$current['employeeId']);
         if ($stores===null) $stores=\think\facade\Db::name('system_store')->where('is_del',0)->where('name','<>','总部')->column('id');
         $stores=array_values(array_unique(array_filter(array_map('intval',$stores),static fn($id)=>$id>0)));sort($stores);
-        $report=in_array('MERCHANT_WAREHOUSE_VIEW',(array)$current['availableActions'],true);
         $context=['terminal'=>'merchant','account_id'=>(int)$current['accountId'],'scope_mode'=>$personal?'self_participant':($stores?'stores':'none'),
-            'store_ids'=>$stores,'can_use'=>in_array('MOHE_AI_USE',(array)$current['availableActions'],true),
-            'store_report_authorized'=>$report,'analysis_personnel_grants'=>['staff_labor_yeji'=>$report,'staff_sales_yeji'=>$report],
+            'store_ids'=>$stores,'personnel_data_authorized'=>!empty($stores),'can_use'=>in_array('MOHE_AI_USE',(array)$current['availableActions'],true),
+            // Warehouse/page visibility is not a data grant for AI.  The
+            // employee scope above is the only query range.
+            'store_report_authorized'=>true,
             'permission_version'=>hash('sha256',json_encode([$current['permissionVersion']??null,$stores,$personal,$current['availableActions'],(int)$current['employeeId']])),
             'report_capability_code'=>'group_management_dashboard'];
         $context['can_configure']=false; // Configuration is platform admin-only, never inherited from merchant scope.

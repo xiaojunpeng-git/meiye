@@ -31,7 +31,6 @@ final class AiTrustedPrincipalResolver
         $scope=$dispatcher->dataScopeFactory()->build($storeId,$accountId,$profile,$operator->tenantId(),$operator->organizationId());
         $resolver=app()->make(CashierV3FeatureResolver::class);
         $features=$delegated ? $resolver->employeeStoreV3GrantedFeatures($employeeId) : $resolver->resolveGrantedFeatures($profile);
-        $reportAllowed=in_array('cashier.v3.management_center',$features,true);
         $personal=$scope->isSelfParticipantMode();
         $allowed=$scope->visibleStoreIds();
         // The cashier page binds a current store. AI uses the employee's data
@@ -52,8 +51,9 @@ final class AiTrustedPrincipalResolver
             'scope_mode'=>$personal?'self_participant':($stores?'stores':'none'),'store_ids'=>$stores,
             'permission_version'=>hash('sha256',json_encode([$scope->permissionVersion(),$stores,$features])),
             'can_use'=>in_array('cashier.v3.ai',$features,true), 'can_configure'=>false,
-            'employee_id'=>$employeeId,'store_report_authorized'=>$reportAllowed,
-            'analysis_personnel_grants'=>['staff_labor_yeji'=>$reportAllowed,'staff_sales_yeji'=>$reportAllowed],
+            // The cashier management-center menu controls that page, not the
+            // person's AI data scope.  AI use remains separately feature-gated.
+            'employee_id'=>$employeeId,'personnel_data_authorized'=>!empty($stores),'store_report_authorized'=>true,
             'report_capability_code'=>'group_management_dashboard',
             'export_principal_ready'=>!$delegated,'principal_kind'=>$delegated?'delegated_session':'store_staff','origin_store_id'=>$storeId,
             'origin_organization_id'=>$operator->organizationId(),'tenant_id'=>$operator->tenantId()];

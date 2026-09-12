@@ -1,0 +1,22 @@
+{
+  "baseline": "5eeea667edf324d512c1bc9e6edf1ebc7afea94a",
+  "round": "R7",
+  "fixed_at": "2026-09-12",
+  "status": "development_and_self_test_complete_pending_product_acceptance",
+  "scope": "Hold any removal of a signed store range for a server-owned customer confirmation, clarify reviewer handling of inherited context, and correct the corresponding acceptance evidence.",
+  "base_manifest": "tests/mohe-ai/R7-REPAIR-FIXED-VERSION.json",
+  "files": [
+    {"path":"后端代码/app/services/ai/execution/IntentContextMerger.php","sha256":"780086f43863576ac278d1311eee798dcf6ad738edcb739991622a173a38625d"},
+    {"path":"后端代码/app/services/ai/contract/AiIntentResultContract.php","sha256":"cc929e56b6884e96e1d466702af53d835bb9aaacc2e29a0c64dcbb3816107a6d"},
+    {"path":"tests/mohe-ai/r7-context-removal-audit.php","sha256":"c84baf0ae028b9d5e413becdc5e64aadf76a7ec4c741ee67d549f28676c892d5"},
+    {"path":"tests/mohe-ai/R7-FINAL-PLAN-AUDIT-2026-09-12.md","sha256":"4db38ef985d5544d5de9d2d6bf60816ff8888058e7494756e7ffa822e1d11e0a"},
+    {"path":"tests/mohe-ai/R7-REACCEPTANCE-2026-09-12.md","sha256":"8405d4085529eabc8d7bd5c8ff3001a83cc6539a96d5657bd5b05c2b8e50b703"}
+  ],
+  "checks": {
+    "scope_clear_guard": "PASS php tests/mohe-ai/r7-context-removal-audit.php: injected accept cannot query before a server-owned scope choice; retain preserves [1], explicit all-range requires confirmation then executes.",
+    "context_regression": "PASS php tests/mohe-ai/context-delta-gateway.php and php tests/mohe-ai/query-context.php.",
+    "full_regression": "PASS bash tests/mohe-ai/run-all.sh (local fixtures only; no customer database or live model).",
+    "quality": "PASS PHP lint, git diff --check, and no matches for metric-code branches, distinct(true)->count, or the removed plan protocol in running source."
+  },
+  "limitations": "This repair removes the model-only gate for clearing an already signed store range, but it does not replace the remaining R7 product-acceptance evidence: real three-entry authority/Reader reconciliation, independently sourced real-model holdout, and training handover. No commit, deployment, database operation, or push was performed."
+}

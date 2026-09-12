@@ -71,9 +71,11 @@ trait AiHttpActions
                 'AI_IDEMPOTENCY_CONFLICT'=>'本次提交与先前记录不一致，请刷新任务状态后再操作。',
                 'AI_CONTEXT_REQUIRED'=>'前文条件已失效或无法核验，请在新问题中明确条件。',
             ][$exception->getMessage()]??'魔核 AI 请求未完成，请重试或联系管理员。';
+            $reason=$exception->getMessage();
+            $safeReason=preg_match('/^AI_[A-Z0-9_]{1,62}$/D',$reason)===1?$reason:'AI_REQUEST_FAILED';
             return ($this->isMobileAi()
-                ? json(['contractVersion'=>MobileApiResponse::MERCHANT_CONTRACT,'errorCode'=>'AI_REQUEST_FAILED','message'=>$message],400)
-                : app('json')->fail($message))->header(['Cache-Control'=>'no-store']);
+                ? json(['contractVersion'=>MobileApiResponse::MERCHANT_CONTRACT,'errorCode'=>$safeReason,'message'=>$message],400)
+                : app('json')->fail($message,['error_code'=>$safeReason]))->header(['Cache-Control'=>'no-store']);
         }
     }
 

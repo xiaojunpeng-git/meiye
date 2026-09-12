@@ -14,7 +14,13 @@ export function browserTransport(prefix, tokenReader) {
       ...(method !== 'GET' ? { body: JSON.stringify(payload || {}) } : {}) });
     if (options.binary) { if (!response.ok) throw new Error('下载未完成'); return response.blob(); }
     const result = await response.json();
-    if (!response.ok || result.status !== 200) { const error = new Error(typeof result.msg === 'string' ? result.msg : '请求未完成'); error.responseKnown = true; throw error; }
+    if (!response.ok || result.status !== 200) {
+      const error = new Error(typeof result.msg === 'string' ? result.msg : '请求未完成');
+      error.responseKnown = true;
+      error.httpStatus = response.status;
+      error.reason = result.data && typeof result.data.error_code === 'string' ? result.data.error_code : null;
+      throw error;
+    }
     return result.data;
   };
 }

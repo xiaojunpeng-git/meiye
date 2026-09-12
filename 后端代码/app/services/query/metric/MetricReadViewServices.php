@@ -173,9 +173,16 @@ final class MetricReadViewServices
     }
     private function personnelSelection(array $query,array $binding): ?array
     {
-        if ($binding['scope_mode']==='self_participant' && ($query['business_filters']['object_kind']??null)!=='person') $this->fail('METRIC_PERMISSION_GRAIN_UNAVAILABLE');
-        if (($binding['store_report_authorized']??true)!==true && ($query['business_filters']['object_kind']??null)!=='person') $this->fail('METRIC_PERMISSION_GRAIN_UNAVAILABLE');
-        if (($query['business_filters']['object_kind'] ?? null) !== 'person') return null;
+        // A self-only grant is a people-data grant, not a grant to every total
+        // from the stores where that employee works.  Store summaries have no
+        // employee predicate, so allowing them here would silently turn
+        // "my data" into "my store's data".  The gateway may still offer
+        // person-grain metrics, but every such query is bound to this employee
+        // below and the same rule applies to replay/export.
+        if (($query['business_filters']['object_kind'] ?? null) !== 'person') {
+            if ($binding['scope_mode']==='self_participant') $this->fail('METRIC_PERMISSION_GRAIN_UNAVAILABLE');
+            return null;
+        }
         if (!$this->personnel) $this->fail('METRIC_PERMISSION_GRAIN_UNAVAILABLE');
         $selection=$this->personnel->selection($query['metric_codes'][0],$query['business_filters']['selection_ref']);
         if ($binding['scope_mode']==='self_participant' && ($selection['scope']['employee_id']??0)<1) $this->fail('METRIC_PERMISSION_DENIED');
@@ -228,7 +235,7 @@ final class MetricReadViewServices
             if (!is_array($rank) || count($rank) !== 2 || !in_array($rank['direction'] ?? null, ['top', 'bottom', 'top_and_bottom'], true)
                 || !is_int($rank['limit'] ?? null) || $rank['limit'] < 1 || $rank['limit'] > 20) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         } elseif ($query['ranking'] !== null) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
-        if (!is_array($query['metric_codes']) || $query['metric_codes'] === [] || count($query['metric_codes']) > 2
+        if (!is_array($query['metric_codes']) || $query['metric_codes'] === [] || count($query['metric_codes']) > 4
             || array_keys($query['metric_codes']) !== range(0, count($query['metric_codes']) - 1)) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         $allowed=[];
         foreach (self::metricCapabilities() as $code=>$capability) {
@@ -241,6 +248,10 @@ final class MetricReadViewServices
         foreach ($query['metric_codes'] as $metric) if (!in_array($metric, $allowed, true)) $this->fail('METRIC_NOT_REGISTERED');
         if ($person && (count($query['metric_codes'])!==1 || !in_array($query['query_shape'],['summary','ranking'],true))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if (!$person && $query['business_filters']!==[] && (count($query['metric_codes'])!==1 || $query['query_shape']!=='ranking')) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        // Preserve the existing two-metric forms.  More than two facts are
+        // only batched for an unfiltered summary so a first operating answer
+        // cannot combine incompatible object grains or ranking semantics.
+        if (count($query['metric_codes'])>2 && ($query['query_shape']!=='summary' || $query['business_filters']!==[])) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if (count(array_unique($query['metric_codes'])) !== count($query['metric_codes'])) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         $this->range(['start' => $query['start_date'], 'end' => $query['end_date']]);
         if ($query['query_shape'] === 'comparison') {

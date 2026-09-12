@@ -8,10 +8,204 @@ function cdgDelta(): array {return array_fill_keys(\app\services\ai\contract\AiI
 
 $h=null;
 try {
+    $choiceHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $choiceHarness->understandingOverride=['goal'=>'查看今天的业绩','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'查看业绩','fields'=>['metric_codes'],'values'=>['metric_terms'=>['业绩']],'evidence'=>[['message_id'=>'current','quote'=>'业绩']]],
+        ['id'=>'r2','meaning'=>'今天','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'今天']]],
+    ]];
+    $choiceHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['actual_performance'],'action_codes'=>[],
+        'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],
+        'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'authorized',
+        'requirement_bindings'=>[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['actual_performance']]],'unresolved_fragments'=>[]];
+    $choiceHarness->bindingVerificationOverride=['decision'=>'metric_choice','rejected_requirement_ids'=>['r1']];
+    $choiceHarness->bindingReviewKind='candidate_blind_uniqueness';
+    $beforeChoice=$choiceHarness->queries;
+    $choicePending=$choiceHarness->start('今天业绩多少');
+    cdgCheck($choicePending['status']==='WAITING_CLARIFICATION'
+        && ($choicePending['clarification']['fields'][0]['key']??null)==='metric_code'
+        && $choiceHarness->queries===$beforeChoice,'a plausible but non-unique metric cannot execute before a customer choice');
+    $choiceHarness->bindingVerificationOverride=['decision'=>'accept','rejected_requirement_ids'=>[]];
+    $choiceHarness->bindingReviewKind='binding_coverage';
+    $choiceFinal=$choiceHarness->choose($choicePending,['metric_code'=>'cash_performance']);
+    cdgCheck($choiceFinal['status']==='COMPLETED' && $choiceHarness->queries>$beforeChoice,
+        'the confirmed registered metric is independently reviewed and then queried: '.($choiceFinal['status']??'missing').'/'.($choiceFinal['reason']??'none'));
+    $choiceHarness->close();
+
     $h=new R6GatewayHarness(3,[1,2],'platform');
-    $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-08']],'scope'=>'authorized','unresolved_fragments'=>[]];
+    $initialIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-08']],'scope'=>'authorized','unresolved_fragments'=>[]];
+
+    // A current period must never be labelled inherit and then execute the
+    // signed single-day query. The first response is rejected before querying;
+    // the explicit replacement executes the calendar-month request instead.
+    $monthHarness=new R6GatewayHarness(3,[1,2],'platform');$monthHarness->semanticIntent=$initialIntent;
+    $monthSource=$monthHarness->start('9月1日到9月8日现金业绩多少？');
+    $wrongMonthDelta=cdgDelta();
+    $monthHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'unspecified','context_delta'=>$wrongMonthDelta,'unresolved_fragments'=>[]];
+    $queriesBeforeMonthFollow=$monthHarness->queries;
+    $wrongMonthFollow=$monthHarness->start('这个月呢？',$monthSource['answer']['context_ref']);
+    cdgCheck($wrongMonthFollow['status']==='FAILED'&&($wrongMonthFollow['reason']??null)==='AI_MODEL_INTENT_CONTRACT_INVALID'&&$monthHarness->queries===$queriesBeforeMonthFollow,'a contradictory inherited month is rejected before the previous date can execute');
+    $correctMonthDelta=cdgDelta();$correctMonthDelta['periods']='replace';
+    $monthHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'unspecified','context_delta'=>$correctMonthDelta,'unresolved_fragments'=>[]];
+    $monthFollow=$monthHarness->start('这个月呢？',$monthSource['answer']['context_ref']);
+    $monthEvidence=$monthHarness->private->read($monthHarness->row($monthFollow)['evidence_ref']);$monthQuery=$monthEvidence['query']??[];
+    cdgCheck($monthFollow['status']==='COMPLETED'&&($monthQuery['start_date']??'')===substr((string)($monthQuery['end_date']??''),0,7).'-01'&&($monthQuery['end_date']??'')!=='2026-09-08','a confirmed current month executes its own period instead of the prior single range');
+    $monthHarness->close();
+
+    // A direct “top five” continuation may replace the quantity while the
+    // merger retains the signed direction. Keep it isolated from the larger
+    // conversation fixture so its extra run cannot consume that fixture's
+    // admission budget.
+    $directHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $directHarness->semanticIntent=['object_kind'=>'member','object_term'=>'','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>1],'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-08']],'scope'=>'authorized','unresolved_fragments'=>[]];
+    $directSource=$directHarness->start('会员现金业绩排行');
+    $directLimit=cdgDelta();$directLimit['ranking_limit']='replace';
+    $directHarness->understandingOverride=['goal'=>'将排行改为前五个','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'查看前五个','fields'=>['ranking'],'values'=>['ranking'=>['direction'=>'top','limit'=>5]],'evidence'=>[['message_id'=>'current','quote'=>'前五个']]],
+    ]];
+    $directHarness->semanticIntent=['object_kind'=>'member','object_term'=>'','operation'=>'ranking','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>5],'periods'=>[],'scope'=>'unspecified','context_delta'=>$directLimit,'unresolved_fragments'=>[]];
+    $directTopFive=$directHarness->start('改为前五个',$directSource['answer']['context_ref']);
+    $directTopFiveEvidence=$directHarness->private->read($directHarness->row($directTopFive)['evidence_ref']);
+    cdgCheck($directTopFive['status']==='COMPLETED'&&($directTopFiveEvidence['query']['ranking']??null)===['direction'=>'top','limit'=>5],'direct ranking-count follow-up retains the verified direction before execution');
+    $directHarness->close();
+
+    $h->semanticIntent=$initialIntent;
     $source=$h->start('9月1日到9月8日现金业绩多少？');
     cdgCheck($source['status']==='COMPLETED'&&isset($source['answer']['context_ref']),'verified source query is available');
+
+    // The two model stages are intentionally injected independently here.
+    // A binding may not turn a customer exclusion into the excluded registered
+    // metric, even when that metric is otherwise executable for this account.
+    $contractHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $contractHarness->semanticIntent=$initialIntent;
+    $contractSource=$contractHarness->start('9月1日到9月8日现金业绩多少？');
+    cdgCheck($contractSource['status']==='COMPLETED','independent source query is available for semantic contract checks');
+    $contractHarness->understandingOverride=['goal'=>'查看收款但不要退款','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'查看收款','fields'=>['metric_codes'],'values'=>['metric_terms'=>['收款']],'evidence'=>[['message_id'=>'current','quote'=>'收款']]],
+        ['id'=>'r2','meaning'=>'不要退款','fields'=>['metric_codes'],'values'=>['metric_exclusions'=>['退款']],'evidence'=>[['message_id'=>'current','quote'=>'不要退款']]],
+        ['id'=>'r3','meaning'=>'9月1日到9月8日','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-08']]],'evidence'=>[['message_id'=>'current','quote'=>'9月1日到9月8日']]],
+    ]];
+    $contractHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['refund_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-08']],'scope'=>'authorized','requirement_bindings'=>[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['refund_performance']],['requirement_id'=>'r2','status'=>'unavailable','metric_codes'=>[]]],'unresolved_fragments'=>[]];
+    $beforeExcludedMetric=$contractHarness->queries;
+    $excludedMetric=$contractHarness->start('9月1日到9月8日收款，不要退款');
+    cdgCheck($excludedMetric['status']==='FAILED'&&($excludedMetric['reason']??null)==='AI_MODEL_INTENT_CONTRACT_INVALID'&&$contractHarness->queries===$beforeExcludedMetric,'an explicitly excluded registered metric never reaches query execution');
+
+    // Structural coverage is not a semantic proof. Even when a binding falsely
+    // labels every requirement as satisfied, an independent review must block
+    // it before the Reader receives the selected refund metric.
+    $contractHarness->semanticIntent['requirement_bindings']=[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['refund_performance']],['requirement_id'=>'r2','status'=>'satisfied','metric_codes'=>['refund_performance']]];
+    $contractHarness->bindingVerificationOverride=['decision'=>'reject','rejected_requirement_ids'=>['r2']];
+    $beforeSemanticRejection=$contractHarness->queries;
+    $semanticRejection=$contractHarness->start('9月1日到9月8日收款，不要退款');
+    cdgCheck($semanticRejection['status']==='FAILED'&&($semanticRejection['reason']??null)==='AI_BINDING_SEMANTIC_REJECTED'&&$contractHarness->queries===$beforeSemanticRejection,'independent review blocks a false satisfied binding before query execution');
+    $contractHarness->bindingVerificationOverride=null;
+
+    // A pending presentation choice must not move semantic admission behind
+    // the private fallback. Otherwise “不要退款” could be replaced with the
+    // prior/refund query when the customer simply chooses how to display it.
+    $pendingReviewHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $pendingReviewHarness->semanticIntent=$initialIntent;
+    $pendingReviewSource=$pendingReviewHarness->start('9月1日到9月8日现金业绩多少？');
+    $pendingReviewHarness->understandingOverride=['goal'=>'查看收款但不要退款','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'查看收款','fields'=>['metric_codes'],'values'=>['metric_terms'=>['收款']],'evidence'=>[['message_id'=>'current','quote'=>'收款']]],
+        ['id'=>'r2','meaning'=>'不要退款','fields'=>['metric_codes'],'values'=>['metric_exclusions'=>['退款']],'evidence'=>[['message_id'=>'current','quote'=>'不要退款']]],
+    ]];
+    $pendingReviewDelta=cdgDelta();$pendingReviewDelta['metric_codes']='replace';$pendingReviewDelta['operation']='pending';
+    $pendingReviewHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'unknown','metric_codes'=>['refund_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$pendingReviewDelta,
+        'requirement_bindings'=>[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['refund_performance']],['requirement_id'=>'r2','status'=>'satisfied','metric_codes'=>['refund_performance']]],'unresolved_fragments'=>[]];
+    $pendingReviewHarness->bindingVerificationOverride=['decision'=>'reject','rejected_requirement_ids'=>['r2']];
+    $beforePendingReview=$pendingReviewHarness->queries;
+    $pendingReview=$pendingReviewHarness->start('收款，不要退款',$pendingReviewSource['answer']['context_ref']);
+    cdgCheck($pendingReview['status']==='FAILED'&&($pendingReview['reason']??null)==='AI_BINDING_SEMANTIC_REJECTED'&&$pendingReviewHarness->queries===$beforePendingReview,'pending presentation guidance cannot bypass semantic review of a newly selected metric');
+    $pendingReviewHarness->close();
+
+    // Metric clarification is an execution boundary, not merely a display
+    // choice. A reviewer must see the metric selected by the customer before
+    // the signed fallback can reach the Reader.
+    $lateMetricReviewHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $lateMetricReviewHarness->semanticIntent=$initialIntent;
+    $lateMetricSource=$lateMetricReviewHarness->start('9月1日到9月8日现金业绩多少？');
+    $lateMetricReviewHarness->understandingOverride=['goal'=>'查看收款但不要退款','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'查看收款','fields'=>['metric_codes'],'values'=>['metric_terms'=>['收款']],'evidence'=>[['message_id'=>'current','quote'=>'收款']]],
+        ['id'=>'r2','meaning'=>'不要退款','fields'=>['metric_codes'],'values'=>['metric_exclusions'=>['退款']],'evidence'=>[['message_id'=>'current','quote'=>'不要退款']]],
+    ]];
+    $lateMetricDelta=cdgDelta();$lateMetricDelta['metric_codes']='pending';
+    $lateMetricReviewHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$lateMetricDelta,'unresolved_fragments'=>[]];
+    $lateMetricReviewHarness->bindingVerificationOverride=['decision'=>'reject','rejected_requirement_ids'=>['r2']];
+    $lateMetricPending=$lateMetricReviewHarness->start('收款，不要退款',$lateMetricSource['answer']['context_ref']);
+    $beforeLateMetric=$lateMetricReviewHarness->queries;
+    $lateMetricFinal=$lateMetricReviewHarness->choose($lateMetricPending,['pending_metric_codes'=>'retain']);
+    cdgCheck($lateMetricPending['status']==='WAITING_CLARIFICATION'&&$lateMetricFinal['status']==='FAILED'
+        &&($lateMetricFinal['reason']??null)==='AI_BINDING_SEMANTIC_REJECTED'&&$lateMetricReviewHarness->queries===$beforeLateMetric,
+        'a final retained metric is independently reviewed against the original exclusion');
+    $lateMetricReviewHarness->close();
+
+    // Definition reads have no data-query payload, but selecting a definition
+    // metric is still a real, reviewed binding. It must reach the registered
+    // metadata workflow instead of being mislabeled as stale guidance.
+    $definitionHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $definitionHarness->understandingOverride=['goal'=>'解释业绩口径','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'了解业绩的定义','fields'=>['metric_codes','operation'],'values'=>['metric_terms'=>['业绩'],'operation'=>'definition'],'evidence'=>[['message_id'=>'current','quote'=>'业绩怎么算']]],
+    ]];
+    $definitionHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'definition','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'authorized','unresolved_fragments'=>[]];
+    $definitionPending=$definitionHarness->start('业绩怎么算');
+    $definitionFinal=$definitionHarness->choose($definitionPending,['metric_code'=>'cash_performance']);
+    cdgCheck($definitionPending['status']==='WAITING_CLARIFICATION'&&$definitionFinal['status']==='COMPLETED','a reviewed definition metric choice reaches the registered metadata workflow');
+    $definitionHarness->close();
+
+    // The same wording can bind cash performance when the binding stage
+    // explicitly accounts for both the requested result and the exclusion.
+    $contractHarness->semanticIntent['metric_codes']=['cash_performance'];
+    $contractHarness->semanticIntent['requirement_bindings']=[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']],['requirement_id'=>'r2','status'=>'satisfied','metric_codes'=>['cash_performance']]];
+    $includedCash=$contractHarness->start('9月1日到9月8日收款，不要退款');
+    cdgCheck($includedCash['status']==='COMPLETED','a complete semantic binding accepts a natural-language exclusion without phrase matching');
+
+    // An understood but currently unbound follow-up may not inherit a prior
+    // metric and silently answer the earlier, broader question.
+    $contractHarness->understandingOverride=['goal'=>'仅统计周末','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'仅统计周末，当前没有对应筛选能力','fields'=>['unbound'],'values'=>[],'evidence'=>[['message_id'=>'current','quote'=>'只看周末']]],
+    ]];
+    $unboundDelta=cdgDelta();
+    $contractHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$unboundDelta,'requirement_bindings'=>[],'unresolved_fragments'=>[]];
+    $beforeUnboundFollowup=$contractHarness->queries;
+    $unboundFollowup=$contractHarness->start('那只看周末',$contractSource['answer']['context_ref']);
+    cdgCheck($unboundFollowup['status']==='FAILED'&&($unboundFollowup['reason']??null)==='AI_ANALYSIS_COMBINATION_UNAVAILABLE'&&$contractHarness->queries===$beforeUnboundFollowup,'an understood but unbound condition reports a capability gap instead of retrying or inheriting a broader query');
+
+    // A pending metric choice is not allowed to postpone that same capability
+    // decision.  Otherwise selecting “retain” would execute the old metric
+    // while silently dropping the understood weekend-only condition.
+    $unboundPendingDelta=cdgDelta();$unboundPendingDelta['metric_codes']='pending';
+    $contractHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$unboundPendingDelta,'requirement_bindings'=>[],'unresolved_fragments'=>[]];
+    $beforeUnboundPending=$contractHarness->queries;
+    $unboundPending=$contractHarness->start('只看周末，指标由您选择',$contractSource['answer']['context_ref']);
+    cdgCheck($unboundPending['status']==='FAILED'&&($unboundPending['reason']??null)==='AI_ANALYSIS_COMBINATION_UNAVAILABLE'&&$contractHarness->queries===$beforeUnboundPending,'an unbound condition cannot be hidden behind a pending metric choice');
+
+    // “Unbound” has one precise meaning: the request is clear but unsupported.
+    // A model must represent genuine ambiguity as needs_clarification instead,
+    // so an invalid mixed response cannot later pass a clarification boundary.
+    $invalidUnderstandingHarness=new R6GatewayHarness(3,[1,2],'platform');$invalidUnderstandingHarness->semanticIntent=$initialIntent;
+    $invalidUnderstandingSource=$invalidUnderstandingHarness->start('9月1日到9月8日现金业绩多少？');
+    $invalidUnderstandingHarness->understandingOverride=['goal'=>'范围未确定','status'=>'needs_clarification','requirements'=>[
+        ['id'=>'r1','meaning'=>'范围未确定','fields'=>['unbound'],'values'=>[],'evidence'=>[['message_id'=>'current','quote'=>'范围未确定']]],
+    ]];
+    $invalidUnderstandingDelta=cdgDelta();$invalidUnderstandingDelta['store_scope']='pending';
+    $invalidUnderstandingHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$invalidUnderstandingDelta,'requirement_bindings'=>[],'unresolved_fragments'=>[]];
+    $beforeInvalidUnderstanding=$invalidUnderstandingHarness->queries;
+    $invalidUnderstanding=$invalidUnderstandingHarness->start('范围未确定',$invalidUnderstandingSource['answer']['context_ref']);
+    cdgCheck($invalidUnderstanding['status']==='FAILED'&&($invalidUnderstanding['reason']??null)==='AI_MODEL_INTENT_CONTRACT_INVALID'&&$invalidUnderstandingHarness->queries===$beforeInvalidUnderstanding,'ambiguous understanding cannot misuse the unbound capability marker');
+    $invalidUnderstandingHarness->close();
+
+    // A pending response form cannot hide a contradictory period. The server
+    // validates every stated structural requirement before it shows guidance,
+    // so confirming the pending form cannot execute the wrong period later.
+    $contractHarness->understandingOverride=['goal'=>'改查这个月','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'改查这个月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'这个月']]],
+    ]];
+    $pendingMismatch=cdgDelta();$pendingMismatch['periods']='replace';$pendingMismatch['operation']='pending';
+    $contractHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'unknown','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'date_range','start'=>'2026-09-10','end'=>'2026-09-10']],'scope'=>'unspecified','context_delta'=>$pendingMismatch,'unresolved_fragments'=>[]];
+    $beforePendingMismatch=$contractHarness->queries;
+    $pendingMismatchRun=$contractHarness->start('这个月呢？',$contractSource['answer']['context_ref']);
+    cdgCheck($pendingMismatchRun['status']==='FAILED'&&($pendingMismatchRun['reason']??null)==='AI_MODEL_INTENT_CONTRACT_INVALID'&&$contractHarness->queries===$beforePendingMismatch,'pending guidance cannot bypass a newly stated period requirement');
+    $contractHarness->close();
 
     // A model-declared missing metric may not execute an empty query.  It
     // first asks whether the verified previous metric should be retained.
@@ -152,12 +346,17 @@ try {
     // A direct, confirmed dimension replacement reaches the registered target
     // dimension after confirmation; it does not retain the prior store plan.
     $memberReplace=cdgDelta();$memberReplace['object']='replace';$memberReplace['operation']='replace';
-    $h->semanticIntent=['object_kind'=>'member','object_term'=>'','operation'=>'ranking','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>5],'periods'=>[],'scope'=>'unspecified','context_delta'=>$memberReplace,'unresolved_fragments'=>[]];
+    $h->semanticIntent=['object_kind'=>'member','object_term'=>'','operation'=>'ranking','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$memberReplace,'unresolved_fragments'=>[]];
     $memberReplacement=$h->start('改查看会员排行',$source['answer']['context_ref']);
     $memberReplacement=$h->choose($memberReplacement,['replace_previous_object_filter'=>'replace']);
     cdgCheck(($memberReplacement['clarification']['fields'][0]['key']??null)==='dimension_direction','a replacement query asks only for the target ranking details that the user did not state');
+    $directionEnvelope=$h->private->read($h->row($memberReplacement)['clarification_ref']);
+    cdgCheck(is_array($directionEnvelope['envelope']['_semantic_context']??null),'semantic context survives replacement into dimension guidance');
+    cdgCheck(!array_key_exists('_semantic_context',$memberReplacement['clarification']??[]),'private semantic context is never projected to the browser');
     $memberReplacement=$h->choose($memberReplacement,['dimension_direction'=>'top']);
     cdgCheck(($memberReplacement['clarification']['fields'][0]['key']??null)==='dimension_limit','target ranking quantity remains an explicit choice when it was not stated');
+    $limitEnvelope=$h->private->read($h->row($memberReplacement)['clarification_ref']);
+    cdgCheck(is_array($limitEnvelope['envelope']['_semantic_context']??null),'semantic context survives every subsequent dimension guidance step');
     $memberReplacement=$h->choose($memberReplacement,['dimension_limit'=>'5']);
     $memberReplacementEvidence=$h->private->read($h->row($memberReplacement)['evidence_ref']);
     cdgCheck($memberReplacement['status']==='COMPLETED'&&($memberReplacementEvidence['query']['business_filters']??null)===['object_kind'=>'member'],'confirmed store-to-member replacement executes a member query');

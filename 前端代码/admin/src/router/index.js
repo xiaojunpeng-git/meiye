@@ -14,7 +14,6 @@ import iView from 'view-design';
 import util from '@/libs/util';
 
 import Setting from '@/setting';
-import moheAiRequest from '@/api/moheAi';
 
 import store from '@/store/index';
 
@@ -23,6 +22,8 @@ import routes from './routes';
 
 import { includeArray } from '@/libs/system';
 import { isAgentPath } from '@/utils/pathUtils';
+import moheAiRequest from '@/api/moheAi';
+import { managementRouteAccess } from '../../../shared/mohe-ai/management-route-access.mjs';
 
 Vue.use(VueRouter);
 
@@ -144,13 +145,19 @@ async function handleAuthenticatedRoute(to, next, agent_access, access) {
   if (meta.moheAiMaintainer) {
     store.commit('admin/menu/setMoheAiVerifiedUser', null);
     if (meta.isAgentRoute) return next({ name: '403' });
+    // The configuration endpoint resolves the current bearer-token principal.
+    // Menu cache fields are never enough to decide this special entry.
+    const decision = await managementRouteAccess(moheAiRequest);
+    if (!decision.allowed) return next({ name: '403' });
+    if (decision.serverVerified) store.commit('admin/menu/setMoheAiVerifiedUser', userInfo);
+    // A menu refresh is a presentation update. An operational refresh failure
+    // must still allow the destination to show its precise server message.
     try {
-      await moheAiRequest('GET', '/management');
       await store.dispatch('admin/menus/getMenusNavList');
-      store.commit('admin/menu/setMoheAiVerifiedUser', store.state.admin.user.info);
-      return next();
+    } catch (ignored) {
+      // Endpoint authorization remains authoritative.
     }
-    catch (_) { return next({ name: '403' }); }
+    return next();
   }
   const account = String(userInfo.account || userInfo.username || '').trim().toLowerCase();
   const isRootAdmin = (

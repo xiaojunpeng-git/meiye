@@ -72,7 +72,15 @@ final class IntentContextMerger
                     $replacementConfirmation=$delta['object']==='replace';
                 }
             }
-            elseif ($decision==='clear') {$constraints[$sourceKey]=null;$fallbackConstraints[$sourceKey]=null;}
+            elseif ($decision==='clear') {
+                // The intent contract has already proved that this turn
+                // explicitly asks for the authorized scope.  Do not turn a
+                // correctly understood scope change into a second form just
+                // because it broadens the previous query: Reader authority
+                // remains the hard boundary and is rechecked at execution.
+                $constraints[$sourceKey]=null;
+                $fallbackConstraints[$sourceKey]=null;
+            }
             elseif ($decision==='replace') {$constraints[$sourceKey]=null;$fallbackConstraints[$sourceKey]=null;}
             else {
                 // Pending never means "remove the last restriction".  Keep
@@ -136,6 +144,32 @@ final class IntentContextMerger
         return $compiled;
     }
 
+    /**
+     * A result reference selects one displayed object. It must not replace an
+     * unrelated, already-confirmed store range. A referenced store is itself
+     * a store-range selection; a referenced person is a business filter and
+     * therefore keeps the current store constraint intact.
+     */
+    public static function applyResultReference(?array $constraints,array $reference): array
+    {
+        if ($constraints===null) self::conflict();
+        foreach (['store_ids','business_filters'] as $key) {
+            if (!array_key_exists($key,$constraints) || ($constraints[$key]!==null && !is_array($constraints[$key]))) self::conflict();
+        }
+        $kind=$reference['object_kind']??null;
+        if ($kind==='store') {
+            if (!is_array($reference['store_ids']??null) || !is_array($reference['business_filters']??null)) self::conflict();
+            $constraints['store_ids']=$reference['store_ids'];
+            $constraints['business_filters']=$reference['business_filters'];
+            return $constraints;
+        }
+        if ($kind==='person' && is_array($reference['business_filters']??null)) {
+            $constraints['business_filters']=$reference['business_filters'];
+            return $constraints;
+        }
+        self::conflict();
+    }
+
     private static function field(string $decision,$current,$previous,string $name,array &$pending)
     {
         if ($decision==='inherit') return $previous;
@@ -150,6 +184,6 @@ final class IntentContextMerger
         return $out;
     }
     private static function empty(string $name){return $name==='metric_codes'||$name==='periods'?[]:($name==='scope'?'unspecified':($name==='object'?'unknown':'unknown'));}
-    private static function scope(array $query): string {return $query['store_ids']===[]?'authorized':'authorized';}
+    private static function scope(array $query): string {return 'authorized';}
     private static function conflict(): void {throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');}
 }

@@ -51,8 +51,10 @@ final class AiExportRuntime
             return AiAuthority::reportBinding($this->current(),$this->runtime['instance'],$this->runtime['private']->signingKey());
         },null,null,new M\PersonnelAnalysisObjectServices(static function(string $table){return Db::name($table);},function(string $metric):array {
             $context=$this->current();
-            if (empty($context['can_use']) || ($context['analysis_personnel_grants'][$metric]??false)!==true
-                || !\app\services\ai\config\AiConfigStore::allowsSanitizedQuestion($this->runtime['config']->read())) throw new \RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
+            if (empty($context['can_use'])
+                || !\app\services\ai\config\AiConfigStore::allowsSanitizedQuestion($this->runtime['config']->read())) {
+                throw new \RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
+            }
             return ['personnel_authorized'=>true,'store_ids'=>$context['store_ids'],'employee_id'=>0,'permission_version'=>AiAuthority::permissionHash($context)];
         }));
         $providers=new Q\UnifiedQueryProviderRegistry($pages);

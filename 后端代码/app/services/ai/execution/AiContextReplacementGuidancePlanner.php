@@ -7,12 +7,12 @@ namespace app\services\ai\execution;
  */
 final class AiContextReplacementGuidancePlanner
 {
-    public function start(array $base,array $remainingPending=[],?array $constraints=null,array $metricOptions=[],array $targetIntent=[],array $operationOptions=[]): array
+    public function start(array $base,array $remainingPending=[],?array $constraints=null,array $metricOptions=[],array $targetIntent=[],array $operationOptions=[],array $semanticContext=[]): array
     {
         if (!in_array($base['kind']??null,['plan','clarification'],true)) throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
         return ['kind'=>'clarification','schema_version'=>'mohe-context-replacement-guidance-v1',
             'context_replacement_state'=>['base'=>$base,'remaining_pending'=>$remainingPending,
-                'constraints'=>$constraints,'metric_options'=>$metricOptions,'target_intent'=>$targetIntent,'operation_options'=>$operationOptions],
+                'constraints'=>$constraints,'metric_options'=>$metricOptions,'target_intent'=>$targetIntent,'operation_options'=>$operationOptions,'semantic_context'=>$semanticContext],
             'fields'=>[['key'=>'replace_previous_object_filter','type'=>'select','label'=>'查询对象','options'=>[
                 ['value'=>'replace','label'=>'按本次对象继续查询'],
             ]]],
@@ -34,15 +34,17 @@ final class AiContextReplacementGuidancePlanner
         $metricOptions=$envelope['context_replacement_state']['metric_options']??[];
         $targetIntent=$envelope['context_replacement_state']['target_intent']??[];
         $operationOptions=$envelope['context_replacement_state']['operation_options']??[];
+        $semanticContext=$envelope['context_replacement_state']['semantic_context']??[];
         if ($remaining) {
-            if (!is_array($remaining)||!is_array($constraints)||!is_array($metricOptions)||!is_array($targetIntent)||!is_array($operationOptions)) throw new \RuntimeException('AI_CLARIFICATION_INVALID');
+            if (!is_array($remaining)||!is_array($constraints)||!is_array($metricOptions)||!is_array($targetIntent)||!is_array($operationOptions)||!is_array($semanticContext)) throw new \RuntimeException('AI_CLARIFICATION_INVALID');
             // The object decision has just been confirmed. Rebase the private
             // preview onto that object before exposing the next choice, so a
             // store-only response form cannot leak into a member query.
             $base=(new AiPendingContextGuidancePlanner())->applyConfirmedIntent($base,$targetIntent);
-            return (new AiPendingContextGuidancePlanner())->start($base,$remaining,$constraints,$metricOptions,$targetIntent,$operationOptions);
+            return (new AiPendingContextGuidancePlanner())->start($base,$remaining,$constraints,$metricOptions,$targetIntent,$operationOptions,$semanticContext);
         }
-        if ($targetIntent) return (new AiPendingContextGuidancePlanner())->applyConfirmedIntent($base,$targetIntent);
+        if ($targetIntent) $base=(new AiPendingContextGuidancePlanner())->applyConfirmedIntent($base,$targetIntent);
+        $base['_semantic_context']=$semanticContext;
         return $base;
     }
 }

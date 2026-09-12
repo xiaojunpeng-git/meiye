@@ -1,6 +1,7 @@
 <?php
 // Local generated report-view fixtures only. No framework boot, model, account or database.
 $root = dirname(__DIR__, 2);
+require_once __DIR__ . '/fixture-autoload.php';
 require_once $root . '/后端代码/app/services/cashier/v3/fact/CashierV3CheckoutFactPlanV1.php';
 $dir = $root . '/后端代码/app/services/query/';
 foreach (['UnifiedQueryException', 'UnifiedQueryJson'] as $class) require_once $dir . $class . '.php';
@@ -102,6 +103,14 @@ try {
     queryCheck($countView['ai_query_ready'] === true && array_column($countView['results'], 'count') === [0, 0]
         && array_column($countView['results'], 'storage_unit') === ['count', 'count'],
         'count result preserves registered units through the immutable read view');
+    $overviewQuery = $query;
+    $overviewQuery['metric_codes'] = ['cash_performance', 'actual_performance', 'consume_amount', 'sales_amount'];
+    $overview = $service->create($principal, $overviewQuery);
+    queryCheck(count($overview['results']) === 4 && array_column($overview['results'], 'metric_code') === $overviewQuery['metric_codes']
+        && $overview['query']['metric_codes'] === $overviewQuery['metric_codes'],
+        'one authorized summary read can preserve four independently registered first-answer observations');
+    $tooMany = $overviewQuery; $tooMany['metric_codes'][] = 'refund_performance';
+    queryReject(function () use ($service, $principal, $tooMany) { $service->create($principal, $tooMany); }, 'METRIC_QUERY_SCHEMA_INVALID');
     $binding['store_ids'] = [2];
     queryReject(function () use ($service, $principal, $shrunk, $narrow) { $service->replay($principal, $shrunk, $narrow['read_consistency_ref']); }, 'METRIC_PERMISSION_DENIED');
     $binding['store_ids'] = [1, 2];
@@ -110,7 +119,7 @@ try {
     queryReject(function () use ($store) { $store->get('../outside'); }, 'METRIC_READ_VIEW_UNAVAILABLE');
     $now += 86400;
     queryReject(function () use ($service, $principal, $query, $view) { $service->replay($principal, $query, $view['read_consistency_ref']); }, 'METRIC_READ_VIEW_UNAVAILABLE');
-    queryCheck($store->cleanup() === 4, 'all expired views physically removed');
+    queryCheck($store->cleanup() === 5, 'all expired views physically removed');
     queryCheck(iterator_count(new FilesystemIterator($temp)) === 0, 'no fixture content retained');
 } finally {
     foreach (new DirectoryIterator($temp) as $file) if (!$file->isDot() && $file->isFile() && !$file->isLink()) unlink($file->getPathname());

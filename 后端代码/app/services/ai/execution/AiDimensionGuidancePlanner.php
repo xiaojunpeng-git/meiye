@@ -56,9 +56,12 @@ final class AiDimensionGuidancePlanner
             || (!is_null($ranking['limit']??null) && !is_int($ranking['limit']))) throw new \RuntimeException('AI_MODEL_RESPONSE_INVALID');
         $direction=$ranking['direction']==='unspecified'?null:$ranking['direction'];
         $limit=$ranking['limit'];
-        // A ranked list whose count is genuinely omitted uses the published
-        // result default.  An explicit count is never normalized or replaced.
-        if ($limit === null && $direction !== null) $limit = 5;
+        // A customer may ask for a ranked result without prescribing its
+        // length.  That is a complete request, not a missing business slot.
+        // Use the Reader's safe presentation capacity; an explicit count is
+        // still preserved exactly.  This is an execution/page bound, not a
+        // linguistic default such as "top five".
+        if ($limit === null && $direction !== null) $limit = 20;
         if ($limit !== null && (!is_int($limit) || $limit < 1 || $limit > 20)) throw new \RuntimeException('AI_DIMENSION_RANK_LIMIT_NOT_READY');
         return $this->next(['object_kind'=>$objectKind,'metric'=>$metric,'candidates'=>$candidates,'range'=>$range,
             'direction'=>$direction,'limit'=>$limit,'format'=>$format,'today'=>$today]);

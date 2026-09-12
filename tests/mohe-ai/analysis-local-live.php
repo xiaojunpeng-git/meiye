@@ -19,7 +19,7 @@ $context['_refresh']=function()use($resolver,$id){return $resolver->authenticate
 $active=$rt['runs']->diagnostics()['active'];$configuration=$rt['config']->read();
 echo json_encode(['target_verified'=>true,'active_runs'=>$active,'scope_column'=>$configuration['external_scope_supported'],'new_scope_authorized'=>app\services\ai\config\AiConfigStore::allowsSanitizedQuestion($configuration),
     'active_ai_exports'=>(int)think\facade\Db::name('unified_query_export_task')->where('source_type','AI')->whereIn('status',['pending','running'])->count(),
-    'authorized_personnel_metrics'=>array_keys(array_filter($context['analysis_personnel_grants']))])."\n";
+    'available_metric_count'=>count(app\services\ai\execution\AiAuthority::capabilities(false,$context)['metric_codes'])])."\n";
 if ($mode==='PREFLIGHT') exit(0);
 if ($mode==='REBASE_SOURCE') {
     if($active!==0) exit("Active Runs exist; source rebase postponed\n");
@@ -105,6 +105,14 @@ try {
         'client_session_id'=>$client,'window_token'=>$boot['window_token'],'question'=>$question,'history'=>[],
         'output_format'=>getenv('MOHE_ANALYSIS_TEST_XLSX')==='1'?'screen_and_xlsx':'screen','guidance_schema_version'=>'mohe-clarification-v2'];
     $run=$call('create',$input);
+    // Admission may deliberately decline a fresh real-model run (for
+    // example while the bounded technical-failure circuit is cooling down).
+    // Do not turn that policy outcome into an undefined-index error in the
+    // test harness, and do not attempt an execute call without a server run.
+    if (!is_array($run) || !isset($run['run_id'],$run['generation'],$run['run_delivery_token'])) {
+        echo json_encode(['result'=>'NOT_ADMITTED','reason'=>is_array($run)?($run['reason']??'unknown'): 'invalid_create_response'])."\n";
+        exit(2);
+    }
     $runsProperty=new ReflectionProperty($gateway,'runs');if(PHP_VERSION_ID<80100)$runsProperty->setAccessible(true);$probeRuns=$runsProperty->getValue($gateway);
     $binding=function($run)use($client){return ['client_session_id'=>$client,'generation'=>$run['generation'],'run_delivery_token'=>$run['run_delivery_token']];};
     $run=$call('execute',$input+$binding($run),$run['run_id']);

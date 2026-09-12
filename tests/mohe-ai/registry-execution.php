@@ -67,7 +67,7 @@ function registryHandlers(array &$seen):array
 try {
     $registry=new AiBusinessRegistry(); $compiler=new AiRegisteredPlanCompiler($registry); $cap=registryCapabilities();
     $manifest=AiBusinessManifest::definitions();
-    registryCheck(($manifest['intent_contract']['code']??null)==='intent_result' && ($manifest['intent_contract']['version']??null)==='intent-result-v3'
+    registryCheck(($manifest['intent_contract']['code']??null)==='intent_result' && ($manifest['intent_contract']['version']??null)==='intent-binding-v3'
         && preg_match('/^[a-f0-9]{64}$/D',$manifest['intent_contract']['hash']??'')===1,'intent result contract participates in the registry fingerprint');
     $snapshot=$registry->snapshot($cap);
     registryCheck(count($snapshot['metrics'])===3&&!isset($snapshot['metrics']['actual_performance']),'only approved metric contracts, no actual formula invented');
@@ -76,7 +76,7 @@ try {
     registryCheck($registry->snapshot($reordered)===$snapshot,'capability fingerprint independent of set/key order');
     $skill=\app\services\ai\registry\AiSkillDocument::storeOperations();
     registryCheck(count($registry->discover($snapshot,1)['items'])===1,'one store-operations Skill is discoverable without report names');
-    registryCheck($skill['skill_code']==='skill_store_operations'&&$skill['version']===14,'runtime Skill has a stable published identity');
+    registryCheck($skill['skill_code']==='skill_store_operations'&&$skill['version']===15,'runtime Skill has a stable published identity');
     registryCheck(strpos($skill['markdown'],'# 门店运营')===0&&preg_match('/^[a-f0-9]{64}$/D',$skill['source_hash'])===1,'runtime Skill markdown has a fixed source hash');
     $modelSkill=$registry->modelSkill('store_operations');
     registryCheck($modelSkill['skill_code']===$skill['skill_code']&&$modelSkill['skill_version']===$skill['version']&&$modelSkill['skill_source_hash']===$skill['source_hash'],'model Skill is the exact validated published source');
@@ -111,7 +111,7 @@ try {
     }
     $compiled=$compiler->compile(registryPlan(),$cap);
     registryCheck($compiled['dependency_versions']['tool']===['unified_metric_query'=>1],'complete tool dependency version frozen');
-    registryCheck($compiled['dependency_versions']['skill']===['skill_store_operations'=>14],'business Skill has explicit immutable id and version');
+    registryCheck($compiled['dependency_versions']['skill']===['skill_store_operations'=>15],'business Skill has explicit immutable id and version');
     $memberPlan=registryPlan('ranking');
     $memberPlan['query']['metric_codes']=['cash_performance'];
     $memberPlan['query']['business_filters']=['object_kind'=>'member'];

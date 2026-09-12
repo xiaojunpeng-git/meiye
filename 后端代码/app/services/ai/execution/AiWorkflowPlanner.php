@@ -91,6 +91,12 @@ final class AiWorkflowPlanner
             $direction=in_array('rank_top',$signals,true)?(in_array('rank_bottom',$signals,true)?'top_and_bottom':'top'):(in_array('rank_bottom',$signals,true)?'bottom':null);
             $ranking=['direction'=>$direction,'limit'=>$projection['semantic_intent']['rank_limit']??null];
         }
+        // Missing result count is not ambiguity.  Once the language model has
+        // understood a ranking direction, return the Reader's bounded page of
+        // results instead of asking the customer to choose a number.  The
+        // bound protects execution only; it is never presented as a customer
+        // condition and does not rewrite an explicit requested count.
+        if ($shape==='ranking' && $ranking['direction'] && $ranking['limit']===null) $ranking['limit']=20;
         if (!$metrics || (!$definition && !$range) || in_array('ambiguous_metric', $signals, true) || ($shape==='comparison' && !$compare) || ($shape==='ranking' && (!$ranking['direction'] || !$ranking['limit']))) {
             $fields = [];
             if (!$metrics || in_array('ambiguous_metric', $signals, true)) {
@@ -102,7 +108,6 @@ final class AiWorkflowPlanner
             if (!$definition && !$range) { $fields[] = ['key' => 'start_date', 'label' => '开始日期', 'type' => 'date']; $fields[] = ['key' => 'end_date', 'label' => '结束日期', 'type' => 'date']; }
             if ($shape==='comparison' && !$compare) { $fields[]=['key'=>'compare_start','label'=>'对比开始日期','type'=>'date']; $fields[]=['key'=>'compare_end','label'=>'对比结束日期','type'=>'date']; }
             if ($shape==='ranking' && !$ranking['direction']) $fields[]=['key'=>'rank_direction','label'=>'想看表现较高还是较低的门店？','type'=>'select','options'=>[['value'=>'top','label'=>'业绩较高'],['value'=>'bottom','label'=>'业绩较低'],['value'=>'top_and_bottom','label'=>'高低都看']]];
-            if ($shape==='ranking' && !$ranking['limit']) $fields[]=['key'=>'rank_limit','label'=>'您希望查看多少家门店？','type'=>'select','options'=>[['value'=>'1','label'=>'1 家'],['value'=>'3','label'=>'3 家'],['value'=>'5','label'=>'5 家'],['value'=>'10','label'=>'10 家'],['value'=>'20','label'=>'20 家']]];
             return $this->step(['kind' => 'clarification', 'fields' => $fields, 'resolved_metrics' => $metrics, 'resolved_range' => $range, 'resolved_compare_range' => $compare, 'query_shape' => $shape,'ranking'=>$ranking,'output_format'=>$format,'semantic_constraints'=>$projection['semantic_intent']??[],'requested_period_terms'=>$projection['date_terms']??[]]);
         }
         return $this->plan($metrics, $range, $shape,$compare,$ranking,$format);
@@ -129,6 +134,21 @@ final class AiWorkflowPlanner
         if(array_key_exists('rank_limit',$choices)) {
             if(!is_string($choices['rank_limit']) || !in_array($choices['rank_limit'],['1','3','5','10','20'],true)) throw new AiContractException('AI_CLARIFICATION_INVALID');
             $ranking['limit']=(int)$choices['rank_limit'];
+        }
+        // The direction may have been supplied through a server-owned
+        // clarification after the initial compile. Apply the same technical
+        // presentation bound used by compile(), otherwise this path would
+        // incorrectly keep asking for a customer count.
+        if (($envelope['query_shape']??null)==='ranking' && !empty($ranking['direction']) && empty($ranking['limit'])) {
+            $ranking['limit']=20;
+            // Compatibility with an envelope created before the no-count
+            // guidance change: discard only the obsolete presentation field,
+            // never another unresolved customer condition.
+            if (isset($envelope['pending_fields']) && is_array($envelope['pending_fields'])) {
+                $envelope['pending_fields']=array_values(array_filter($envelope['pending_fields'],static function(array $field): bool {
+                    return ($field['key']??null)!=='rank_limit';
+                }));
+            }
         }
         if(!empty($envelope['pending_fields'])) {
             $envelope['fields']=$envelope['pending_fields'];unset($envelope['pending_fields']);

@@ -85,6 +85,7 @@ try {
     // slot order.  A published management document must preserve it rather
     // than rejecting its structural field as an unknown admin slot.
     $delta=array_fill_keys(\app\services\ai\contract\AiIntentResultContract::DELTA_FIELDS,'inherit');$delta['store_scope']='pending';
+    $h->understandingOverride=['goal'=>'数据范围尚未确定','status'=>'needs_clarification','requirements'=>[]];
     $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$delta,'unresolved_fragments'=>[]];
     $pendingScope=$h->start('范围还没有确定',$source['answer']['context_ref']);
     mgcheck($pendingScope['status']==='WAITING_CLARIFICATION'&&$pendingScope['clarification']['fields'][0]['key']==='pending_store_scope','published management preserves context-pending guidance');

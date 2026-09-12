@@ -29,7 +29,7 @@ $checks=0;
 $check=static function(bool $condition,string $label)use(&$checks):void { if(!$condition) throw new RuntimeException('FAIL '.$label); ++$checks; };
 $store=AiSkillDocument::storeOperations();
 $intent=AiSkillDocument::intentUnderstanding();
-$check($store['skill_code']==='skill_store_operations'&&$store['version']===14&&$intent['skill_code']==='skill_intent_understanding'&&$intent['version']===3,'published Skill identities are source-owned');
+$check($store['skill_code']==='skill_store_operations'&&$store['version']===15&&$intent['skill_code']==='skill_intent_understanding'&&$intent['version']===4,'published Skill identities are source-owned');
 $check(strpos($store['markdown'],'```')===false&&strpos($intent['markdown'],'```')===false,'published Skills contain prose guidance rather than embedded executable contracts');
 $check(strpos($store['markdown'],'商品分类')!==false&&strpos($store['markdown'],'合作方')!==false&&strpos($intent['markdown'],'完整阅读')!==false,'business and language guidance remains available to the model');
 $check(substr_count($intent['markdown'],'## 第')===5&&substr_count($store['markdown'],'## 第')===5,'both source Skills explain a stepwise reasoning process');

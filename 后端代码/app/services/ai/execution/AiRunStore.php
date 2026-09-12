@@ -183,7 +183,7 @@ final class AiRunStore
             $counts=json_decode($r['counters_json'],true);
             if (!is_array($counts)) { throw new RuntimeException('AI_COUNTER_CORRUPT'); }
             $counts[$counter]=($counts[$counter]??0)+1;
-            if ($counts[$counter]>($kind==='model'?3:8)) { throw new RuntimeException('AI_COUNTER_EXHAUSTED'); }
+            if ($counts[$counter]>($kind==='model'?4:8)) { throw new RuntimeException('AI_COUNTER_EXHAUSTED'); }
             if ($kind==='model' && $counts[$counter]>($counts['stage_count']??0)+($counts['model_recovery_count']??0)) { throw new RuntimeException('AI_COUNTER_SEQUENCE'); }
             $this->insert('attempt',['instance_id'=>$this->instance,'run_id'=>$runId,'attempt_code'=>$attemptCode,'kind'=>$kind,'target_code'=>$targetCode,'payload_hash'=>$payloadHash,'state'=>'PREPARED','input_tokens'=>null,'output_tokens'=>null,'created_at'=>$this->now(),'expires_at'=>(int)$r['expires_at']]);
             $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$runId]);
@@ -227,12 +227,22 @@ final class AiRunStore
     /** Payload-free model response diagnostics expire with the Run. */
     public function recordDiagnostic(array $owner,string $runId,int $generation,string $workerToken,array $diagnostic): void
     {
-        $allowed=['stage','predicate','finish_reason','content_bytes'];
+        // Diagnostics deliberately hold only bounded transport facts. They
+        // must never become a back door for customer wording, model output,
+        // identities or returned business values.
+        $allowed=['stage','predicate','finish_reason','content_bytes','recommended_value_type',
+            'initial_observation','needs_metric_choice','selected_metric_count','operation','field'];
         if (array_diff(array_keys($diagnostic),$allowed) || !is_string($diagnostic['stage']??null)
             || !preg_match('/^[a-z_]{1,48}$/D',$diagnostic['stage']) || !is_string($diagnostic['predicate']??null)
             || !preg_match('/^[a-z0-9_:]{1,96}$/D',$diagnostic['predicate'])
             || (isset($diagnostic['finish_reason']) && (!is_string($diagnostic['finish_reason']) || !preg_match('/^[a-z_]{1,32}$/D',$diagnostic['finish_reason'])))
-            || (isset($diagnostic['content_bytes']) && (!is_int($diagnostic['content_bytes']) || $diagnostic['content_bytes']<0 || $diagnostic['content_bytes']>131072))) {
+            || (isset($diagnostic['content_bytes']) && (!is_int($diagnostic['content_bytes']) || $diagnostic['content_bytes']<0 || $diagnostic['content_bytes']>131072))
+            || (isset($diagnostic['recommended_value_type']) && (!is_string($diagnostic['recommended_value_type']) || !preg_match('/^[a-z_]{1,32}$/D',$diagnostic['recommended_value_type'])))
+            || (isset($diagnostic['initial_observation']) && !is_bool($diagnostic['initial_observation']))
+            || (isset($diagnostic['needs_metric_choice']) && !is_bool($diagnostic['needs_metric_choice']))
+            || (isset($diagnostic['selected_metric_count']) && (!is_int($diagnostic['selected_metric_count']) || $diagnostic['selected_metric_count']<0 || $diagnostic['selected_metric_count']>64))
+            || (isset($diagnostic['operation']) && (!is_string($diagnostic['operation']) || !preg_match('/^[a-z_]{1,32}$/D',$diagnostic['operation'])))
+            || (isset($diagnostic['field']) && (!is_string($diagnostic['field']) || !preg_match('/^[a-z_]{1,32}$/D',$diagnostic['field'])))) {
             throw new RuntimeException('AI_DIAGNOSTIC_INVALID');
         }
         $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$diagnostic) {
@@ -254,7 +264,7 @@ final class AiRunStore
     /** Reserve BEFORE any external send; retries cannot reset these counters. */
     public function reserve(array $owner,string $runId,int $generation,string $workerToken,string $counter,int $amount=1): int
     {
-        $limits=['stage_count'=>2,'model_attempt_count'=>3,'model_recovery_count'=>1,'failover_count'=>1,'supplement_count'=>1,'workflow_transition_count'=>16,'skill_execution_count'=>8,'tool_call_count'=>8,'node_visit_count'=>12,'input_tokens'=>64000,'output_tokens'=>6000];
+        $limits=['stage_count'=>3,'model_attempt_count'=>4,'model_recovery_count'=>1,'failover_count'=>1,'supplement_count'=>1,'workflow_transition_count'=>16,'skill_execution_count'=>8,'tool_call_count'=>8,'node_visit_count'=>12,'input_tokens'=>96000,'output_tokens'=>6000];
         if (!isset($limits[$counter]) || $amount<1) { throw new RuntimeException('AI_COUNTER_INVALID'); }
         return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$counter,$amount,$limits) {
             $r=$this->read($owner,$runId,$generation); $this->worker($r,$workerToken); $this->live($r);
@@ -501,10 +511,10 @@ final class AiRunStore
         if (in_array($r['reason'],['AI_ANALYSIS_COMBINATION_UNAVAILABLE','AI_OBJECT_BINDING_UNAVAILABLE','AI_OBJECT_SCOPE_TOO_LARGE',
             'AI_PERSONNEL_PERMISSION_REQUIRED','AI_EXTERNAL_SCOPE_REQUIRED','AI_LOCAL_CONDITION_REQUIRED','AI_FOLLOWUP_CONDITION_REQUIRED',
             'AI_PROJECT_OBJECT_NOT_READY','AI_PRODUCT_OBJECT_NOT_READY','AI_CATEGORY_OBJECT_NOT_READY','AI_PARTNER_OBJECT_NOT_READY',
-            'AI_MEMBER_OBJECT_NOT_READY','AI_INVENTORY_OBJECT_NOT_READY','AI_OBJECT_CONTRACT_NOT_READY'],true)) return 'neutral';
+            'AI_MEMBER_OBJECT_NOT_READY','AI_INVENTORY_OBJECT_NOT_READY','AI_OBJECT_CONTRACT_NOT_READY','AI_BINDING_SEMANTIC_REJECTED'],true)) return 'neutral';
         if (in_array($r['reason'],['CAPACITY_STOPPED','CAPACITY_REJECTED','AI_EXPORT_CAPACITY_REJECTED'],true)) return 'capacity';
         if (in_array($r['reason'],['AI_INTENT_UNRESOLVED','AI_CAPABILITY_NOT_READY','AI_CONTEXT_REQUIRED','AI_RANK_LIMIT_NOT_READY','AI_DIMENSION_RANK_LIMIT_NOT_READY','AI_FUTURE_ACTUALS_UNAVAILABLE','AI_DATA_COVERAGE_INCOMPLETE',
-            'AI_DATE_INVALID','AI_DATE_REVERSED','AI_DATE_RANGE_TOO_LONG','METRIC_QUERY_RANGE_REVERSED','METRIC_QUERY_RANGE_TOO_LONG','METRIC_QUERY_FUTURE_UNAVAILABLE','AI_CLARIFICATION_EXHAUSTED','AI_CLARIFICATION_INVALID_LIMIT','AI_CLARIFICATION_EXPIRED','AI_CLARIFICATION_STALE','AI_CLIENT_UPGRADE_REQUIRED','AI_METADATA_NOT_READY'],true)) return 'neutral';
+            'AI_DATE_INVALID','AI_DATE_REVERSED','AI_DATE_RANGE_TOO_LONG','METRIC_QUERY_RANGE_REVERSED','METRIC_QUERY_RANGE_TOO_LONG','METRIC_QUERY_FUTURE_UNAVAILABLE','AI_RESULT_REFERENCE_UNAVAILABLE','AI_CLARIFICATION_EXHAUSTED','AI_CLARIFICATION_INVALID_LIMIT','AI_CLARIFICATION_EXPIRED','AI_CLARIFICATION_STALE','AI_CLIENT_UPGRADE_REQUIRED','AI_METADATA_NOT_READY'],true)) return 'neutral';
         if (in_array($r['reason'],['AI_EXPORT_NOT_READY','AI_EXPORT_PRINCIPAL_UNAVAILABLE','AI_EXPORT_NOT_PUBLISHED','AI_EXPORT_EXPIRED','METRIC_NOT_REGISTERED','METRIC_PERMISSION_CHANGED','METRIC_PERMISSION_DENIED','METRIC_PERMISSION_GRAIN_UNAVAILABLE','METRIC_QUERY_COVERAGE_UNAVAILABLE','METRIC_QUERY_RANGE_INVALID','METRIC_QUERY_SCHEMA_INVALID','METRIC_QUERY_SHAPE_UNAVAILABLE','METRIC_SEMANTICS_CONFLICT','CLARIFICATION_EXPIRED','AI_PERMISSION_DENIED','AI_AUTHORIZATION_CHANGED','AI_CAPABILITY_CHANGED','AI_INPUT_SCHEMA_INVALID','AI_UNSUPPORTED_CONDITION','AI_METRIC_NOT_READY','AI_QUERY_SHAPE_NOT_READY','AI_OUTPUT_FORMAT_INVALID','AI_CLARIFICATION_INVALID','AI_EVIDENCE_INCOMPLETE','AI_CANCELLED','AI_NOT_CONFIGURED','AI_METRIC_EXPLANATION_NOT_READY','AI_EXTERNAL_AUTHORIZATION_REQUIRED'],true)) return 'neutral';
         if (in_array($r['reason'],['AI_EXPORT_DISPATCH_UNKNOWN','AI_EXPORT_CANCELLATION_UNKNOWN'],true)) return 'export_unknown';
         if (in_array($r['reason'],['AI_EXPORT_CONTENT_MISMATCH','AI_EXPORT_SIGNATURE_INVALID','AI_EXPORT_SOURCE_MISMATCH','AI_EXPORT_OWNER_MISMATCH','AI_EXPORT_BINDING_INVALID','AI_EXPORT_TASK_BINDING_INVALID','AI_EXPORT_HANDOFF_INVALID','AI_EXPORT_UNSAFE_FAILURE','METRIC_READ_BINDING_MISMATCH'],true)) return 'security';

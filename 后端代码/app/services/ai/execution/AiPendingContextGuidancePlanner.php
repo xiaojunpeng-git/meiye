@@ -4,13 +4,13 @@ namespace app\services\ai\execution;
 /** Resolves every model-declared missing context field before execution. */
 final class AiPendingContextGuidancePlanner
 {
-    public function start(array $base,array $pending,array $constraints,array $metricOptions=[],array $targetIntent=[],array $operationOptions=[]): array
+    public function start(array $base,array $pending,array $constraints,array $metricOptions=[],array $targetIntent=[],array $operationOptions=[],array $semanticContext=[]): array
     {
         if (!in_array($base['kind']??null,['plan','clarification'],true) || !$pending || !$this->validConstraints($constraints)) throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
         $pending=array_values(array_unique(array_filter($pending,static function($value): bool {return is_string($value);})));$this->metricOptions($metricOptions);$this->operationOptions($operationOptions);
         if (!$pending) throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
         return ['kind'=>'clarification','schema_version'=>'mohe-context-pending-guidance-v1',
-            'pending_context_state'=>['base'=>$base,'pending'=>$pending,'constraints'=>$constraints,'metric_options'=>$metricOptions,'target_intent'=>$targetIntent,'operation_options'=>$operationOptions],
+            'pending_context_state'=>['base'=>$base,'pending'=>$pending,'constraints'=>$constraints,'metric_options'=>$metricOptions,'target_intent'=>$targetIntent,'operation_options'=>$operationOptions,'semantic_context'=>$semanticContext],
             'inherited_query_constraints'=>$constraints,'fields'=>$this->fields($pending[0],$metricOptions,$base,$operationOptions),
             'question'=>'这一项尚未能从本轮问题中准确确认。请补充或选择条件；所有未确认条件完成前不会执行查询。','confirmed_summary'=>[]];
     }
@@ -21,6 +21,7 @@ final class AiPendingContextGuidancePlanner
         if (!is_array($state)||!is_array($state['base']??null)||!is_array($state['pending']??null)||!$this->validConstraints($state['constraints']??null)||!is_array($state['metric_options']??null)||!is_array($state['operation_options']??null)) throw new \RuntimeException('AI_CLARIFICATION_INVALID');
         $field=$state['pending'][0]??null;if(!is_string($field))throw new \RuntimeException('AI_CLARIFICATION_INVALID');
         $targetIntent=$state['target_intent']??[];if(!is_array($targetIntent))throw new \RuntimeException('AI_CLARIFICATION_INVALID');
+        $semanticContext=$state['semantic_context']??[];if(!is_array($semanticContext))throw new \RuntimeException('AI_CLARIFICATION_INVALID');
         $fields=$this->fields($field,$state['metric_options'],$state['base'],$state['operation_options']);$expected=array_column($fields,'key');$actual=array_keys($choices);sort($expected);sort($actual);if($actual!==$expected)throw new \RuntimeException('AI_CLARIFICATION_INVALID');
         $base=$state['base'];$constraints=$state['constraints'];$selected=$choices[$fields[0]['key']]??null;$value=$this->apply($base,$constraints,$field,$choices,$fields);
         $remaining=array_values(array_slice($state['pending'],1));
@@ -29,9 +30,9 @@ final class AiPendingContextGuidancePlanner
             if(($ranking['direction']??'unspecified')==='unspecified'||($ranking['limit']??null)===null) array_unshift($remaining,'ranking_options');
         }
         if($field==='operation'&&$selected==='operation:comparison')$remaining[]='comparison_periods';
-        if($remaining)return $this->start($base,$remaining,$constraints,$state['metric_options'],$targetIntent,$state['operation_options']);
+        if($remaining)return $this->start($base,$remaining,$constraints,$state['metric_options'],$targetIntent,$state['operation_options'],$semanticContext);
         $base=$this->applyConfirmedIntent($base,$targetIntent);
-        $base['inherited_query_constraints']=$constraints;if(($base['kind']??null)==='clarification')$base['confirmed_summary'][]=['label'=>$fields[0]['label'],'value'=>$value];return $base;
+        $base['inherited_query_constraints']=$constraints;$base['_semantic_context']=$semanticContext;if(($base['kind']??null)==='clarification')$base['confirmed_summary'][]=['label'=>$fields[0]['label'],'value'=>$value];return $base;
     }
 
     private function fields(string $pending,array $metricOptions,array $base=[],array $operationOptions=[]): array

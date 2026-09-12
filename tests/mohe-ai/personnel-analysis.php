@@ -36,6 +36,15 @@ paReject(function()use($planner,$step){$planner->choose($step,['analysis_object'
 $caps=['metric_codes'=>array_keys($candidates),'metric_readiness'=>PersonnelPerformanceReadServices::capabilities(),'query_shapes'=>['summary','ranking'],'output_formats'=>['screen']];
 $compiler=new AiRegisteredPlanCompiler();$compiled=$compiler->compile($plan,$caps);$compiler->assertCompiled($compiled);
 paCheck($compiled['workflow_code']==='wf_performance_ranking','existing reusable ranking workflow, no per-question workflow');
+$selfCapabilities=\app\services\ai\execution\AiAuthority::capabilities(false,[
+ 'scope_mode'=>'self_participant','store_ids'=>[1],'analysis_personnel_ready'=>true,
+]);
+paCheck($selfCapabilities['metric_codes']===['staff_sales_yeji','staff_labor_yeji'],
+ 'self-participant capability projection contains only Reader-executable person metrics');
+paCheck(\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($selfCapabilities,'store','summary')===[],
+ 'self-participant never receives a store-total candidate that Reader must reject');
+paCheck(\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($selfCapabilities,'person','summary')!==[],
+ 'self-participant retains its registered person-grain capabilities');
 $bad=$plan;$bad['query']['business_filters']=[];
 paReject(function()use($compiler,$bad,$caps){$compiler->compile($bad,$caps);},'AI_UNSUPPORTED_CONDITION');
 $forged=$caps;$forged['metric_readiness']['staff_labor_yeji']['filter_grain']='store';$forged['metric_readiness']['staff_labor_yeji']['business_filters']=[];
@@ -44,6 +53,7 @@ paReject(function()use($compiler,$plan,$forged){$compiler->compile($plan,$forged
 class PaQuery {
  public static $calls=[]; public static $amount='10001'; public $field='';
  public function __call($name,$args){self::$calls[]=[$name,$args];if(isset($args[0])&&is_callable($args[0]))$args[0]($this);if(in_array($name,['field','fieldRaw'],true))$this->field=$args[0];return $this;}
+ public function find(){return ['amount_cents'=>self::$amount];}
  public function select(){return $this;}
  public function toArray(){
   if(strpos($this->field,'SUM(')!==false)return [['employee_id'=>'7','business_date'=>'2026-09-09','metric_value'=>self::$amount,'fact_count'=>'2']];
@@ -86,7 +96,7 @@ try {
  paReject(fn()=>$views->create([],$cash),'METRIC_PERMISSION_GRAIN_UNAVAILABLE');
  $scope['employee_id']=0;paReject(fn()=>$views->create([],$selfQuery),'METRIC_PERMISSION_DENIED');$scope['employee_id']=7;
  $binding['employee_id']=8;paReject(fn()=>$views->create([],$selfQuery),'METRIC_PERMISSION_DENIED');$binding['employee_id']=7;
- $binding['scope_mode']='stores';paReject(fn()=>$views->create([],$cash),'METRIC_PERMISSION_GRAIN_UNAVAILABLE');
+ $binding['scope_mode']='stores';paCheck(is_int($views->create([],$cash)['results'][0]['amount_cents']),'page report visibility never changes registered Reader scope');
  $binding=['instance_id'=>'fixture','subject_ref'=>'fixture','terminal'=>'platform','tenant_id'=>'0','permission_version'=>'fixture-v1','report_capability_code'=>'group_management_dashboard','scope_provider_code'=>'current_report_scope_v1','scope_mode'=>'stores','store_ids'=>[1]];$scope['employee_id']=0;
  $scope['personnel_authorized']=false;
  paReject(function()use($views,$plan,$view){$views->replay([],$plan['query'],$view['read_consistency_ref']);},'AI_PERSONNEL_PERMISSION_REQUIRED');

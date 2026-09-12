@@ -7,10 +7,22 @@ final class AiAuthority
     public static function capabilities(bool $exportReady,array $context=[]): array
     {
         $registered=\app\services\query\metric\MetricReadViewServices::metricCapabilities(); $metrics=[];
-        foreach ($registered as $code=>$contract) if (($contract['filter_grain']??null)!=='person'
-            && (($context['scope_mode']??null)==='self_participant' || ($context['store_report_authorized']??true)!==true)) unset($registered[$code]);
+        // AI entry authorization and personnel data authorization are separate
+        // concerns.  A report menu may decide whether its page is visible, but
+        // it must never silently narrow the data a person can ask AI to read.
+        // The Reader receives the freshly resolved staff/store scope below and
+        // remains the sole enforcement point for every query.
         foreach ($registered as $code=>$contract) if (($contract['filter_grain']??null)==='person'
-            && (!(($context['analysis_personnel_ready']??false)===true) || ($context['analysis_personnel_grants'][$code]??false)!==true)) unset($registered[$code]);
+            && !(($context['analysis_personnel_ready']??false)===true)) unset($registered[$code]);
+        // A self-participant grant is only executable through the person
+        // grain.  Keeping store totals in the capability projection would
+        // offer a choice that the Reader must later reject because it would
+        // expose the whole store rather than the authenticated employee.
+        if (($context['scope_mode']??null)==='self_participant') {
+            foreach ($registered as $code=>$contract) {
+                if (($contract['filter_grain']??null)!=='person') unset($registered[$code]);
+            }
+        }
         foreach ($registered as $code=>$capability) if (!empty($capability['ai_query_ready'])) $metrics[]=$code;
         $metadata=[]; $dictionary=new \app\services\metric\MetricDictionaryServices();
         foreach ($registered as $code=>$contract) {
@@ -42,7 +54,7 @@ final class AiAuthority
         return is_int($id) && $id>0 && in_array($id,$context['store_ids']??[],true)?$id:null;
     }
     public static function permissionHash(array $context): string
-    { return hash('sha256',json_encode([$context['permission_version'],$context['scope_mode'],$context['store_ids'],$context['can_use'],$context['report_capability_code'],$context['employee_id']??0,$context['store_report_authorized']??true,$context['analysis_personnel_grants']??[]])); }
+    { return hash('sha256',json_encode([$context['permission_version'],$context['scope_mode'],$context['store_ids'],$context['can_use'],$context['report_capability_code'],$context['employee_id']??0])); }
     public static function reportBinding(array $context,string $instance,string $key): array
     {
         if (empty($context['can_use'])) throw new \RuntimeException('AI_PERMISSION_DENIED');

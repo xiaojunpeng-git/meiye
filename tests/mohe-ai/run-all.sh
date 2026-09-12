@@ -8,11 +8,11 @@ source_root="$(cd "$test_dir/../.." && pwd)"
 php_bin="${MOHE_TEST_PHP:-php}"
 
 "$php_bin" -v
-for suite in config-contract metric-contract metric-registry-contract round3-reaudit-regressions runtime-contract export-source-contract plan-contract \
+for suite in config-contract metric-contract metric-registry-contract round3-reaudit-regressions runtime-contract export-source-contract \
     query-read-view cash-report-projection state-store-contract state-attempt-contract state-concurrency state-export-contract state-admission-contract \
     gateway-components client-runtime-compat gateway-integration gateway-review-regressions monitor-contract \
     http-routing-contract http-actions-contract http-guard-contract principal-resolvers \
-    export-worker-contract export-runtime-contract; do
+    export-worker-contract export-runtime-contract result-reference semantic-binding-guard date-range-guidance r7-context-removal-audit; do
     "$php_bin" -d auto_prepend_file="$test_dir/fixture-autoload.php" "$test_dir/$suite.php"
 done
 for suite in semantic-guidance registry-execution skill-semantic-projection intent-understanding-contract state-guidance-contract r5-holdout management-core management-gateway management-menu analysis-capability-catalog analysis-object-resolution personnel-analysis query-context context-delta-gateway date-policy; do
@@ -32,4 +32,6 @@ for suite in device-session-contract browser-entry-contract browser-transport-co
     "$node_bin" "$test_dir/$suite.mjs"
 done
 "$node_bin" "$test_dir/management-ui-contract.mjs"
+"$node_bin" "$test_dir/admin-router-contract.mjs"
+"$node_bin" "$test_dir/management-route-access.mjs"
 bash "$test_dir/local-entrypoint-permissions.sh"

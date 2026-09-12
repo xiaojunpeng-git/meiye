@@ -6,14 +6,14 @@ function json($data=[],int $code=200) { return \think\Response::create($data,'js
 $gateway=new class {
     public $calls=[]; public $throws=false;
     public function handle($operation,$context,$input,$runId) {
-        if ($this->throws) { throw new RuntimeException('SECRET_SQL_PROMPT'); }
+        if ($this->throws) { throw new RuntimeException(is_string($this->throws)?$this->throws:'SECRET_SQL_PROMPT'); }
         $this->calls[]=[$operation,$context,$input,$runId]; return ['accepted'=>true];
     }
 };
 $app->instance(\app\services\ai\AiGatewayServices::class,$gateway);
 $app->instance('json',new class {
     public function success($message,$data) { return json(['status'=>200,'msg'=>$message,'data'=>$data]); }
-    public function fail($message) { return json(['status'=>400,'msg'=>$message,'data'=>[]],400); }
+    public function fail($message,$data=[]) { return json(['status'=>400,'msg'=>$message,'data'=>$data],400); }
 });
 $controller=new class {
     use \app\controller\ai\AiHttpActions;
@@ -42,6 +42,10 @@ foreach (['[]','{bad',str_repeat('x',262145)] as $raw) {
 $controller->request=(new \think\Request())->setMethod('POST')->withInput('{}'); $gateway->throws=true;
 $response=$controller->aiCreate();
 $check(strpos(json_encode($response->getData()),'SECRET_SQL_PROMPT')===false,'Exception is redacted');
+$gateway->throws='AI_PERMISSION_DENIED';
+$response=$controller->aiCreate();
+$data=$response->getData();
+$check(($data['data']['error_code']??null)==='AI_PERMISSION_DENIED','Known AI denial is safely classified for browser navigation');
 foreach ([\app\controller\admin\v1\ai\Ai::class,\app\controller\cashier\v3\Ai::class,\app\controller\mobile\merchant\Ai::class] as $class) {
     $check(class_exists($class) && method_exists($class,'aiExecute') && method_exists($class,'aiManagementRebase'),'Actual controller inheritance loads');
 }

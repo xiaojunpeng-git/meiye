@@ -35,8 +35,7 @@ foreach(['本月现金最高和最低的五家店','本月现金最高的前5家
     $r=build($q);verify($r['plan']['query']['ranking']===['direction'=>'top_and_bottom','limit'=>5],'both directions five');
 }
 foreach(['本月前十家店的现金业绩','给我全部前十名，不是前五名','本月现金前6家店'] as $q) rejected(static function()use($q){build($q);},'AI_RANK_LIMIT_NOT_READY');
-$r=build('本月现金最好的门店');verify($r['kind']==='clarification' && $r['fields'][0]['key']==='rank_limit','best never invents five');
-$r=$planner->choose($r,['rank_limit'=>'5']);verify($r['plan']['query']['ranking']['limit']===5,'explicit limit consent');
+$r=build('本月现金最好的门店');verify($r['kind']==='plan' && $r['plan']['query']['ranking']['limit']===20,'ranking with no requested count uses only the Reader presentation bound');
 $r=build('今天业绩多少');$metricOptions=array_values(array_filter($r['fields'][0]['options'],static function($option){return ($option['action']??null)!=='stop';}));$expectedOptions=$cap['metric_codes'];sort($expectedOptions);
 verify(count($r['fields'])===1 && array_column($metricOptions,'value')===$expectedOptions,'all executable metric options come from current registry contracts');
 $restricted=$cap;$restricted['metric_codes']=['refund_performance','recharge_amount'];$restricted['metric_readiness']=array_intersect_key($cap['metric_readiness'],array_flip($restricted['metric_codes']));
@@ -55,10 +54,10 @@ $r=build('现金和消耗多少');verify($r['fields'][0]['key']==='start_date','
 $r=$planner->choose($r,['start_date'=>'2026-09-01','end_date'=>'2026-09-30']);verify(count($r['plan']['query']['metric_codes'])===2,'joint metrics survive date answer');
 // Multi-step state is separate from root Run counters; no hidden new Run/model call.
 $r=build('哪几家店需要关注');$steps=[];
-foreach([['metric_code'=>'cash_performance'],['start_date'=>'2026-09-01','end_date'=>'2026-09-30'],['rank_direction'=>'bottom'],['rank_limit'=>'5']] as $choice) {
+foreach([['metric_code'=>'cash_performance'],['start_date'=>'2026-09-01','end_date'=>'2026-09-30'],['rank_direction'=>'bottom']] as $choice) {
     verify($r['kind']==='clarification' && count($r['fields'])<=2,'one relevant semantic question');$steps[]=$r['guidance_step'];$r=$planner->choose($r,$choice);
 }
-verify($steps===['metric_code','start_date','rank_direction','rank_limit'],'no preset minimum step count');
+verify($steps===['metric_code','start_date','rank_direction'],'only genuinely missing business meaning is guided');
 verify($r['kind']==='plan' && $r['plan']['workflow_code']==='wf_performance_ranking','last necessary step chooses a registered workflow');
 verify($r['plan']['query']['ranking']['direction']==='bottom','attention is not automatic diagnosis');
 $initial=build('业绩多少');$cashDate=$planner->choose($initial,['metric_code'=>'cash_performance']);$consumeDate=$planner->choose($initial,['metric_code'=>'consume_amount']);

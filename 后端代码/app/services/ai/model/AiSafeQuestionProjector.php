@@ -30,6 +30,11 @@ final class AiSafeQuestionProjector
         }
         $current=$this->projectWithReferences($question,$configuration,$privateLabels,$references);
         $current['outbound']['recent_questions']=$recent;
+        $messages=[['id'=>'current','text'=>$current['outbound']['question']]];
+        foreach ($recent as $index=>$text) $messages[]=['id'=>'recent_'.($index+1),'text'=>$text];
+        // A de-identified, request-scoped evidence projection. It never
+        // contains answers, result rows, entity IDs or server reference values.
+        $current['outbound']['evidence_messages']=$messages;
         // Current conditions are the only ones that can block this request.
         // The complete map is retained locally so a model can safely refer to
         // a de-identified object that first appeared in the conversation.

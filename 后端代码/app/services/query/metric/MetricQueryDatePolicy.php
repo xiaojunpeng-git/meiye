@@ -29,11 +29,14 @@ final class MetricQueryDatePolicy
     public static function assertExecutable(array $range, ?string $coverageStart = null, ?string $today = null): void
     {
         self::normalize($range);
-        $days = self::date($range['start'])->diff(self::date($range['end']))->days + 1;
-        if ($days > self::MAX_DAYS) self::fail('METRIC_QUERY_RANGE_TOO_LONG');
         $today = $today ?? (new \DateTimeImmutable('now', new \DateTimeZone(self::TIMEZONE)))->format('Y-m-d');
         self::date($today);
+        // An explicit date ending in the future cannot be reinterpreted as a
+        // shorter historical request. Report that user-visible boundary first,
+        // even if the requested range is also too long.
         if ($range['end'] > $today) self::fail('METRIC_QUERY_FUTURE_UNAVAILABLE');
+        $days = self::date($range['start'])->diff(self::date($range['end']))->days + 1;
+        if ($days > self::MAX_DAYS) self::fail('METRIC_QUERY_RANGE_TOO_LONG');
         if ($coverageStart !== null) {
             self::date($coverageStart);
             if ($range['start'] < $coverageStart) self::fail('METRIC_QUERY_COVERAGE_UNAVAILABLE');
