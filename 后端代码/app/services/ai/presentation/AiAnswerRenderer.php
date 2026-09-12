@@ -11,7 +11,7 @@ final class AiAnswerRenderer
     public function render(array $view): array
     {
         $dictionary = new \app\services\metric\MetricDictionaryServices();
-        $cards = []; $rows = []; $shape = $view['query']['query_shape'];
+        $cards = []; $rows = []; $facts = []; $shape = $view['query']['query_shape'];
         foreach ($view['results'] as $row) {
             $registered = MetricReadViewServices::metricCapabilities();
             if (!isset($registered[$row['metric_code'] ?? '']) || !$registered[$row['metric_code']]['ai_query_ready'] || !in_array($row['period'] ?? '', ['current', 'comparison'], true)) {
@@ -35,11 +35,14 @@ final class AiAnswerRenderer
             }
             $display = $this->metricValue($storageUnit === 'count' ? ($row['count'] ?? null) : ($row['amount_cents'] ?? null), $storageUnit);
             $range = $row['period'] === 'current' ? ['start' => $view['query']['start_date'], 'end' => $view['query']['end_date']] : $view['query']['compare_range'];
+            $facts[$row['metric_code']][$row['period']] = ['name' => $tooltip['name'], 'value' => $display, 'unit' => $unit];
             $cards[] = ['metric_name' => $tooltip['name'], 'display_value' => $display, 'unit' => $unit, 'tooltip' => $tooltip,
                 'period_label' => ($row['period'] === 'current' ? '查询期间：' : '对比期间：') . $range['start'] . ' 至 ' . $range['end'],
                 'start_date' => $range['start'], 'end_date' => $range['end'], 'data_as_of' => $view['data_as_of']];
         }
-        $answer = ['summary' => '已按您当前报表的数据范围查询。统计时间：' . $view['query']['start_date'] . ' 至 ' . $view['query']['end_date'] . '。', 'cards' => $cards];
+        $summary = $this->resultSummary($shape, $facts, $rows);
+        $summary .= ($summary === '' ? '' : ' ') . '统计时间：' . $view['query']['start_date'] . ' 至 ' . $view['query']['end_date'] . '。';
+        $answer = ['summary' => $summary, 'cards' => $cards];
         $queryMetrics = is_array($view['query']['metric_codes'] ?? null) ? $view['query']['metric_codes'] : [];
         if ($shape === 'summary' && count($queryMetrics) > 1) {
             $names = [];
@@ -76,6 +79,32 @@ final class AiAnswerRenderer
             $answer['table'] = ['columns' => $columns, 'rows' => $rows];
         }
         return $answer;
+    }
+
+    /** Builds the first visible sentence only from the Reader evidence already on screen. */
+    private function resultSummary(string $shape, array $facts, array $rows): string
+    {
+        if ($shape === 'summary' && $facts) {
+            $parts = [];
+            foreach ($facts as $periods) {
+                $current = $periods['current'] ?? null;
+                if (!is_array($current)) continue;
+                $text = $current['name'] . '为' . $current['value'] . $current['unit'];
+                $comparison = $periods['comparison'] ?? null;
+                if (is_array($comparison)) $text .= '；对比期间为' . $comparison['value'] . $comparison['unit'];
+                $parts[] = $text;
+            }
+            return $parts ? implode('。', $parts) . '。' : '';
+        }
+        if ($shape === 'ranking' && $rows) {
+            $first = $rows[0];
+            return ($first['rank'] ?? '首位') . '是' . $first['label'] . '，' . $first['metric'] . '为' . $first['value'] . $first['unit'] . '。';
+        }
+        if ($shape === 'trend' && $rows) {
+            $last = $rows[count($rows) - 1];
+            return $last['label'] . '的' . $last['metric'] . '为' . $last['value'] . $last['unit'] . '。';
+        }
+        return '已按您当前报表的数据范围查询。';
     }
 
     private function metricValue($value, string $storageUnit): string

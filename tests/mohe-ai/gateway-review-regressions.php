@@ -39,6 +39,7 @@ $cashView=['query'=>['query_shape'=>'summary','start_date'=>'2026-09-08','end_da
     ]];
 $cashAnswer=$renderer->render($cashView);
 $check($cashAnswer['cards'][0]['metric_name']==='现金业绩' && $cashAnswer['cards'][0]['display_value']==='151' && $cashAnswer['cards'][1]['metric_name']==='消耗业绩','mixed cards preserve exact metric identity and integer display');
+$check(strpos($cashAnswer['summary'],'现金业绩为151元')===0 && strpos($cashAnswer['summary'],'消耗业绩为200元')!==false,'first answer starts with verified summary facts rather than a generic processing sentence');
 $check(strpos($cashAnswer['cards'][0]['tooltip']['include'],'充值')!==false && strpos($cashAnswer['cards'][0]['tooltip']['exclude'],'尚未收取')!==false && strpos($cashAnswer['cards'][0]['tooltip']['note'],'退款')!==false,'cash tooltip explains recharge received debt and separate refund');
 foreach (['trend','ranking'] as $shape) {
     $cashView['query']['query_shape']=$shape;
