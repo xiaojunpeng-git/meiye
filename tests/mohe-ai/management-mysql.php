@@ -3,7 +3,7 @@ declare(strict_types=1);
 // Disposable launcher only. No App bootstrap, .env or existing business DB connection.
 ini_set('zend.exception_ignore_args','1');
 $base=dirname(__DIR__,2).'/后端代码/app/services/ai/';
-foreach(['contract/AiContractException','registry/AiRegistryValue','registry/AiBusinessManifest','registry/AiBusinessRegistry','management/AiManagementPolicy','management/AiManagementStore'] as $f) require_once $base.$f.'.php';
+foreach(['contract/AiContractException','contract/AiIntentResultContract','registry/AiRegistryValue','registry/AiBusinessManifest','registry/AiBusinessRegistry','management/AiManagementPolicy','management/AiManagementStore'] as $f) require_once $base.$f.'.php';
 use app\services\ai\management\AiManagementPolicy as Policy;
 use app\services\ai\management\AiManagementStore as Store;
 $port=getenv('MOHE_QUERY_TEST_PORT');$password=getenv('MOHE_QUERY_TEST_PASSWORD');

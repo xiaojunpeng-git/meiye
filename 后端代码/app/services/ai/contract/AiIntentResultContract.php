@@ -75,7 +75,7 @@ final class AiIntentResultContract
         if (!$hasPrior && array_key_exists('context_delta',$value)) self::fail('unexpected_context_delta');
         if (!is_bool($value['needs_metric_choice'])) self::fail('bad_type:needs_metric_choice');
         if (!is_string($value['object_term']) || mb_strlen($value['object_term'],'UTF-8')>160) self::fail('bad_value:object_term');
-        if (!in_array($value['object_kind'],['store','person','position','member','product','project','category','partner','inventory','course','organization','unknown'],true)) self::fail('bad_value:object_kind');
+        if (!in_array($value['object_kind'],['store','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization','unknown'],true)) self::fail('bad_value:object_kind');
         $objectRelation=$value['object_relation']??($value['object_term']===''?'analysis':'selection');
         if (!in_array($objectRelation,['analysis','selection'],true)) self::fail('bad_value:object_relation');
         if ($objectRelation==='analysis') $value['object_term']='';

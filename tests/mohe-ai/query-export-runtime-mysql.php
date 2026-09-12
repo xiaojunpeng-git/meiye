@@ -22,13 +22,18 @@ function app() { return new class { public function getRuntimePath(){return $GLO
         $runs=new app\services\ai\execution\AiRunStore($state,'','fixture.instance');
         $context=['terminal'=>'store','account_id'=>1,'tenant_id'=>'0','can_use'=>true,'permission_version'=>'v1','scope_mode'=>'stores','store_ids'=>[1],'report_capability_code'=>'group_management_dashboard','export_principal_ready'=>true,'principal_kind'=>'staff','origin_store_id'=>1,'origin_organization_id'=>'1','staff_id'=>1];
         $runtime=['instance'=>'fixture.instance','private'=>$private,'views'=>$viewStore,'runs'=>$runs,'config'=>new class {public function read(){return ['version'=>1];}}];
+        // The worker re-evaluates the capability projection immediately
+        // before it publishes an export.  Build this fixture's signed run
+        // snapshot from that same fully derived context, rather than relying
+        // on an accidental default for a later-added capability field.
+        $context['analysis_personnel_ready']=app\services\ai\config\AiConfigStore::allowsSanitizedQuestion($runtime['config']->read());
         $dispatched=[];
         $export=new app\services\ai\execution\AiExportRuntime($runtime,function()use(&$context){return $context;},function($taskNo)use(&$dispatched){$dispatched[]=$taskNo;});
         $property=(new ReflectionClass($export))->getProperty('tasks'); $tasks=$property->getValue($export);
         foreach (['customFields'=>new class {public function listVisible(...$args):array{return [];}},'preferences'=>new class {public function load(...$args):array{return [];}},'references'=>new class {public function register(...$args):void{} public function release(...$args):void{}}] as $name=>$value) (new ReflectionClass($tasks))->getProperty($name)->setValue($tasks,$value);
         mysqlCheck($export->ready($context),'runtime real shared schema ready');
         $owner=['account_id'=>1,'terminal'=>'store','conversation_id'=>'e2e-conversation','window_id'=>'e2e-window'];
-        $snapshot=['capability_snapshot_ref'=>'fixture','capability_snapshot_hash'=>app\services\ai\execution\AiAuthority::capabilityHash(true),'budget_profile_version'=>'v1','authorization_version'=>app\services\ai\execution\AiAuthority::permissionHash($context),'model_config_version'=>'1'];
+        $snapshot=['capability_snapshot_ref'=>'fixture','capability_snapshot_hash'=>app\services\ai\execution\AiAuthority::capabilityHash(true,false,$context),'budget_profile_version'=>'v1','authorization_version'=>app\services\ai\execution\AiAuthority::permissionHash($context),'model_config_version'=>'1'];
         $snapshot+=['guidance_schema_version'=>'mohe-clarification-v2','guidance_profile_version'=>'fixture-v2','max_clarification_rounds'=>'3'];
         $run=$runs->create($owner,'e2e-request',hash('sha256','fixture'),$snapshot)['run'];
         $token=bin2hex(random_bytes(24)); $runs->claim($owner,$run['run_id'],$run['generation'],$token);

@@ -84,7 +84,8 @@ final class MetricReadViewServices
                             }, $points);
                         }
                         $results[] = ['period' => $period, 'metric_code' => $metric, 'storage_unit' => $metricContract['storage_unit'],
-                            'object_kind'=>$dimensionRanking['object_kind'],'object_label'=>$dimensionRanking['object_label'],'rows' => $groups];
+                            'object_kind'=>$dimensionRanking['object_kind'],'object_label'=>$dimensionRanking['object_label'],
+                            'participant_relation'=>$dimensionRanking['participant_relation'],'rows' => $groups];
                         continue;
                     }
                     if (in_array($normalized['query_shape'], ['trend', 'ranking'], true)) {
@@ -158,7 +159,7 @@ final class MetricReadViewServices
     }
 
     private function addAmount(int $a,int $b): int { $sum=$a+$b;if(!is_int($sum))$this->fail('METRIC_SOURCE_AMOUNT_INVALID');return $sum; }
-    /** @return array{dimension:string,object_kind:string,object_label:string}|null */
+    /** @return array{dimension:string,object_kind:string,object_label:string,participant_relation:bool}|null */
     private function dimensionRanking(array $query): ?array
     {
         $objectKind=$query['business_filters']['object_kind'] ?? null;
@@ -169,7 +170,8 @@ final class MetricReadViewServices
         }));
         if (count($matches)!==1 || $query['query_shape']!=='ranking') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $dimension=$matches[0];
-        return ['dimension'=>$dimension['dimension'],'object_kind'=>$dimension['object_kind'],'object_label'=>$dimension['object_label']];
+        return ['dimension'=>$dimension['dimension'],'object_kind'=>$dimension['object_kind'],'object_label'=>$dimension['object_label'],
+            'participant_relation'=>isset($dimension['analysis_relation_source'])];
     }
     private function personnelSelection(array $query,array $binding): ?array
     {

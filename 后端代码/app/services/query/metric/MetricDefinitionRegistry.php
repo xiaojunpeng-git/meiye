@@ -106,6 +106,30 @@ final class MetricDefinitionRegistry
                         'analysis_relation_role' => 'sold_item', 'analysis_action_codes' => ['sales'],
                         'analysis_source_filters' => ['source_type' => 'product'],
                     ],
+                    // These are order-participation relationships, never an
+                    // employee-performance formula.  The relation reader
+                    // attributes a sale line only to the saved participant on
+                    // that same line, and exposes the result as associated
+                    // order sales rather than as the guide's or manager's
+                    // performance.
+                    'guide' => [
+                        'analysis_object_kind' => 'guide', 'analysis_object_label' => '导购',
+                        'analysis_relation_role' => 'introduced_order', 'analysis_action_codes' => ['sales'],
+                        'analysis_relation_source' => [
+                            'table' => 'cashier_v3_customer_guide_round_fact',
+                            'employee_id' => 'guide_employee_id',
+                            'employee_name' => 'guide_employee_name_snapshot',
+                        ],
+                    ],
+                    'sales_manager' => [
+                        'analysis_object_kind' => 'sales_manager', 'analysis_object_label' => '销售经理',
+                        'analysis_relation_role' => 'assisted_order', 'analysis_action_codes' => ['sales'],
+                        'analysis_relation_source' => [
+                            'table' => 'cashier_v3_sales_manager_fact',
+                            'employee_id' => 'sales_manager_employee_id',
+                            'employee_name' => 'sales_manager_name_snapshot',
+                        ],
+                    ],
                 ],
             ]) + [
                 'default_ranking_dimension' => 'operator',

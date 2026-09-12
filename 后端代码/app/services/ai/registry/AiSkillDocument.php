@@ -10,7 +10,7 @@ final class AiSkillDocument
 {
     public static function storeOperations(): array
     {
-        return self::read('store_operations', 'skill_store_operations', 15, '门店运营');
+        return self::read('store_operations', 'skill_store_operations', 16, '门店运营');
     }
 
     public static function intentUnderstanding(): array

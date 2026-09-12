@@ -1234,6 +1234,9 @@ final class RegisteredMetricReadServices
 
     private function factDimensionRanking(array $source, string $tenantId, array $stores, array $range, array $dimension, int $limit, string $order): array
     {
+        if (isset($dimension['analysis_relation_source'])) {
+            return $this->relationFactDimensionRanking($source, $tenantId, $stores, $range, $dimension, $limit, $order);
+        }
         $idField = (string)$dimension['id'];
         $nameField = (string)$dimension['name'];
         $query=$this->factQuery($source, $tenantId, $stores, $range);
@@ -1248,6 +1251,38 @@ final class RegisteredMetricReadServices
             $name = trim((string)($row['entity_name'] ?? ''));
             if ($id <= 0 || $name === '') $this->fail('METRIC_SOURCE_RESULT_INVALID');
             $out[] = ['entity_id' => $id, 'entity_name' => $name, 'metric_value' => $this->integer($row['metric_value'] ?? null)];
+        }
+        return $out;
+    }
+
+    /**
+     * Ranks people by their persisted relation to a sale line.  This is not a
+     * performance-allocation reader: the amount stays the registered sale
+     * amount and each result is labelled upstream as associated order sales.
+     *
+     * @return array<int,array{entity_id:int,entity_name:string,metric_value:int}>
+     */
+    private function relationFactDimensionRanking(array $source, string $tenantId, array $stores, array $range, array $dimension, int $limit, string $order): array
+    {
+        $relation=$dimension['analysis_relation_source'];
+        if (!is_array($relation) || array_keys($relation)!==['table','employee_id','employee_name']) {
+            $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        }
+        foreach ($relation as $value) if (!is_string($value) || !preg_match('/^[a-z][a-z0-9_]{0,127}$/D', $value)) {
+            $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        }
+        $query=$this->factQuery($source, $tenantId, $stores, $range)
+            ->join($relation['table'].' relation', 'relation.tenant_id=p.tenant_id AND relation.store_id=p.store_id AND relation.order_id=p.order_id AND relation.source_line_id=p.source_line_id')
+            ->where('relation.status', 'effective');
+        $rows=$query->where('relation.'.$relation['employee_id'], '>', 0)
+            ->fieldRaw('relation.'.$relation['employee_id'].' entity_id,MAX(relation.'.$relation['employee_name'].') entity_name,COALESCE(SUM('.$source['amount'].'),0) metric_value')
+            ->group('relation.'.$relation['employee_id'])->orderRaw('metric_value '.strtoupper($order).',entity_id ASC')
+            ->limit($limit)->select()->toArray();
+        $out=[];
+        foreach ($rows as $row) {
+            $id=$this->integer($row['entity_id']??null); $name=trim((string)($row['entity_name']??''));
+            if ($id<=0 || $name==='') $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            $out[]=['entity_id'=>$id,'entity_name'=>$name,'metric_value'=>$this->integer($row['metric_value']??null)];
         }
         return $out;
     }

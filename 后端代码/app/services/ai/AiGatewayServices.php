@@ -1472,8 +1472,16 @@ final class AiGatewayServices
                 continue;
             }
             if ($shape==='ranking') {
+                $metricLabel=$tooltip['name'];
+                // A registered participant relation does not create an
+                // employee-performance formula.  Make that visible in the
+                // answer instead of presenting associated sale amount as the
+                // guide's or manager's own performance.
+                if (($row['participant_relation']??false)===true && is_string($row['object_label']??null)) {
+                    $metricLabel=$row['object_label'].'关联订单'.$tooltip['name'];
+                }
                 foreach ($row['rows'] as $direction=>$points) foreach ($points as $index=>$point) $rows[]=['label'=>$point['employee_name']??($point['member_name']??($point['entity_name']??($point['store_name']??('门店 ID '.$point['store_id'])))),
-                    'metric'=>$tooltip['name'],'rank'=>($direction==='top'?'前':'后').($index+1),'value'=>$this->metricValue($point['amount_cents'],$storageUnit),'unit'=>$unit];
+                    'metric'=>$metricLabel,'rank'=>($direction==='top'?'前':'后').($index+1),'value'=>$this->metricValue($point['amount_cents'],$storageUnit),'unit'=>$unit];
                 continue;
             }
             $display=$this->metricValue($storageUnit==='count'?($row['count']??null):($row['amount_cents']??null),$storageUnit);
