@@ -13,6 +13,7 @@ use app\services\ai\contract\AiIntentResultContract;
 use app\services\ai\contract\AiIntentUnderstandingContract;
 use app\services\ai\model\AiModelInputProjector;
 use app\services\ai\model\SiliconFlowClient;
+use app\services\ai\presentation\AiAnswerRenderer;
 use app\services\query\metric\MetricReadViewServices;
 use app\services\query\metric\MetricReadViewStore;
 use RuntimeException;
@@ -1251,7 +1252,7 @@ final class AiGatewayServices
                 return ['verified'=>true];
             },
             'deterministic_answer'=>function() use($owner,$id,$generation,$worker,&$evidence,&$answer) {
-                $this->runs->progress($owner,$id,$generation,$worker,'RENDERING'); $answer=$this->answer($evidence); return ['answer'=>$answer];
+                $this->runs->progress($owner,$id,$generation,$worker,'RENDERING'); $answer=(new AiAnswerRenderer())->render($evidence); return ['answer'=>$answer];
             },
             'metric_catalog_read'=>function($input) use($context,$tool,&$evidence) {
                 $evidence=$tool('catalog','metric_catalog_read',function() use($input,$context) { return $this->definitionEvidence($context,$input['definition_metric_codes']); });
@@ -1455,95 +1456,6 @@ final class AiGatewayServices
     private function assertBinding(array $stored,array $owner,string $id,int $generation): void
     {
         if (($stored['owner']??null)!=$owner || ($stored['run_id']??'')!==$id || ($stored['generation']??0)!==$generation) throw new RuntimeException('AI_EVIDENCE_BINDING_INVALID');
-    }
-    private function answer(array $view): array
-    {
-        $dictionary=new \app\services\metric\MetricDictionaryServices();
-        $cards=[]; $rows=[]; $shape=$view['query']['query_shape'];
-        foreach ($view['results'] as $row) {
-            $registered=MetricReadViewServices::metricCapabilities();
-            if (!isset($registered[$row['metric_code']??'']) || !$registered[$row['metric_code']]['ai_query_ready']||!in_array($row['period']??'',['current','comparison'],true)) throw new RuntimeException('AI_EVIDENCE_INVALID');
-            $tooltip=$dictionary->getTooltip($row['metric_code']);
-            if (empty($tooltip['user_ready'])) throw new RuntimeException('AI_METRIC_EXPLANATION_NOT_READY');
-            $storageUnit=(string)($row['storage_unit']??'fen');
-            $unit=$storageUnit==='count'?'个':'元';
-            if ($shape==='trend') {
-                foreach ($row['rows'] as $point) $rows[]=['label'=>$point['business_date'],'metric'=>$tooltip['name'],'value'=>$this->metricValue($point['amount_cents'],$storageUnit),'unit'=>$unit];
-                continue;
-            }
-            if ($shape==='ranking') {
-                $metricLabel=$tooltip['name'];
-                // A registered participant relation does not create an
-                // employee-performance formula.  Make that visible in the
-                // answer instead of presenting associated sale amount as the
-                // guide's or manager's own performance.
-                if (($row['participant_relation']??false)===true && is_string($row['object_label']??null)) {
-                    $metricLabel=$row['object_label'].'关联订单'.$tooltip['name'];
-                }
-                foreach ($row['rows'] as $direction=>$points) foreach ($points as $index=>$point) $rows[]=['label'=>$point['employee_name']??($point['member_name']??($point['entity_name']??($point['store_name']??('门店 ID '.$point['store_id'])))),
-                    'metric'=>$metricLabel,'rank'=>($direction==='top'?'前':'后').($index+1),'value'=>$this->metricValue($point['amount_cents'],$storageUnit),'unit'=>$unit];
-                continue;
-            }
-            $display=$this->metricValue($storageUnit==='count'?($row['count']??null):($row['amount_cents']??null),$storageUnit);
-            $range=$row['period']==='current'?['start'=>$view['query']['start_date'],'end'=>$view['query']['end_date']]:$view['query']['compare_range'];
-            $cards[]=['metric_name'=>$tooltip['name'],'display_value'=>$display,'unit'=>$unit,'tooltip'=>$tooltip,
-                'period_label'=>($row['period']==='current'?'查询期间：':'对比期间：').$range['start'].' 至 '.$range['end'],
-                'start_date'=>$range['start'],'end_date'=>$range['end'],'data_as_of'=>$view['data_as_of']];
-        }
-        $answer=['summary'=>'已按您当前报表的数据范围查询。统计时间：'.$view['query']['start_date'].' 至 '.$view['query']['end_date'].'。','cards'=>$cards];
-        // Several summary facts are a server-verified first observation, not
-        // an invented composite metric or a claim that the customer named
-        // every card.  The card list remains the evidence-backed source of
-        // truth; this sentence merely explains why a broad operating question
-        // receives more than one useful fact before the customer follows up.
-        $queryMetrics=is_array($view['query']['metric_codes']??null)?$view['query']['metric_codes']:[];
-        if ($shape==='summary' && count($queryMetrics)>1) {
-            $observationNames=[];
-            foreach ($queryMetrics as $code) {
-                $name=$dictionary->getTooltip($code)['name']??null;
-                if (is_string($name) && $name!=='' && !in_array($name,$observationNames,true)) $observationNames[]=$name;
-            }
-            if ($observationNames) $answer['summary'].=' 我先从'.implode('、',$observationNames).'这些已登记经营事实查看本次情况；您可以继续说明想进一步了解的业务方向、对象或时间。';
-        }
-        $objectKind=$view['query']['business_filters']['object_kind']??'store';
-        $person=$objectKind==='person'; $member=$objectKind==='member';
-        $dimensionLabel=null;
-        if (!$person && !$member && $shape==='ranking') foreach ($view['results'] as $result) {
-            if (($result['object_kind']??null)===$objectKind && is_string($result['object_label']??null)) { $dimensionLabel=$result['object_label']; break; }
-        }
-        if ($person) {
-            $answer['summary'].=' 人员范围：'.$view['personnel_selection_label'].'（按当前任职筛选）。';
-            $criteria=[];foreach($view['query']['metric_codes'] as $code)$criteria[]=$dictionary->getTooltip($code)['name'];
-            $answer['summary'].=' 评价指标：'.implode('、',$criteria).'。';
-            if ($shape==='ranking') $answer['summary'].=$rows?'仅按所选指标排序，不代表综合评价；相同金额按稳定人员顺序展示。':'本期间没有符合条件的人员业绩事实，不能据此评定谁表现最好。';
-        }
-        if ($member) {
-            $criteria=[];foreach($view['query']['metric_codes'] as $code)$criteria[]=$dictionary->getTooltip($code)['name'];
-            $answer['summary'].=' 会员评价指标：'.implode('、',$criteria).'。';
-            if ($shape==='ranking') $answer['summary'].=$rows?'仅按所选指标排序；相同数值按稳定会员顺序展示。':'本期间没有符合条件的会员数据。';
-        }
-        if ($dimensionLabel!==null) {
-            $criteria=[];foreach($view['query']['metric_codes'] as $code)$criteria[]=$dictionary->getTooltip($code)['name'];
-            $answer['summary'].=$dimensionLabel.'评价指标：'.implode('、',$criteria).'。';
-            if ($shape==='ranking') $answer['summary'].=$rows?'仅按所选指标排序；相同数值按稳定'.$dimensionLabel.'顺序展示。':'本期间没有符合条件的'.$dimensionLabel.'数据。';
-        }
-        if ($view['query']['compare_range']) $answer['summary'].='对比时间：'.$view['query']['compare_range']['start'].' 至 '.$view['query']['compare_range']['end'].'。';
-        if ($rows) {
-            $columns=[['key'=>'label','label'=>$shape==='trend'?'日期':($person?'人员':($member?'会员':($dimensionLabel??'门店')))],['key'=>'metric','label'=>'指标'],['key'=>'value','label'=>'数值'],['key'=>'unit','label'=>'单位']];
-            if ($shape==='ranking') $columns[]=['key'=>'rank','label'=>'名次'];
-            $answer['table']=['columns'=>$columns,'rows'=>$rows];
-        }
-        return $answer;
-    }
-    private function amount($cents): string
-    {
-        return \app\services\query\metric\MetricMoneyFormatter::integerYuan($cents);
-    }
-    private function metricValue($value,string $storageUnit): string
-    {
-        if ($storageUnit==='fen') return $this->amount($value);
-        if ($storageUnit==='count' && is_int($value)) return (string)$value;
-        throw new RuntimeException('AI_EVIDENCE_VALUE_INVALID');
     }
     private function progressText(array $run): string
     {

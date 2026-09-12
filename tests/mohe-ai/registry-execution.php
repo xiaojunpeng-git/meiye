@@ -76,7 +76,7 @@ try {
     registryCheck($registry->snapshot($reordered)===$snapshot,'capability fingerprint independent of set/key order');
     $skill=\app\services\ai\registry\AiSkillDocument::storeOperations();
     registryCheck(count($registry->discover($snapshot,1)['items'])===1,'one store-operations Skill is discoverable without report names');
-    registryCheck($skill['skill_code']==='skill_store_operations'&&$skill['version']===16,'runtime Skill has a stable published identity');
+    registryCheck($skill['skill_code']==='skill_store_operations'&&is_int($skill['version'])&&$skill['version']>=1,'runtime Skill has a stable published identity');
     registryCheck(strpos($skill['markdown'],'# 门店运营')===0&&preg_match('/^[a-f0-9]{64}$/D',$skill['source_hash'])===1,'runtime Skill markdown has a fixed source hash');
     $modelSkill=$registry->modelSkill('store_operations');
     registryCheck($modelSkill['skill_code']===$skill['skill_code']&&$modelSkill['skill_version']===$skill['version']&&$modelSkill['skill_source_hash']===$skill['source_hash'],'model Skill is the exact validated published source');

@@ -5,11 +5,15 @@ namespace app\services\ai\registry;
  * Published Skill prose is the model's business guidance. It contains no
  * phrase catalogue or executable capability declaration. Query capabilities
  * remain in the metric registry and are supplied after permission narrowing.
+ * The source hash, not a manually incremented PHP value, is the effective
+ * content revision: a prose-only Skill edit therefore does not require any
+ * Tool, Workflow, Reader or runtime change.
  */
 final class AiSkillDocument
 {
     public static function storeOperations(): array
     {
+        // This is the stable registration identity, not an edit counter.
         return self::read('store_operations', 'skill_store_operations', 16, '门店运营');
     }
 
