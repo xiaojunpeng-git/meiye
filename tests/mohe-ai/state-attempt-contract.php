@@ -9,6 +9,7 @@ $r=$store->create($owner,'attempt1',$hash,$snapshot)['run']; $id=$r['run_id']; $
 $store->claim($owner,$id,$g,'worker');
 checkState($store->snapshot($owner,$id,$g)===$snapshot,'snapshot roundtrip exact');
 checkState($store->progress($owner,$id,$g,'worker','UNDERSTANDING')['progress_code']==='UNDERSTANDING','registered progress only');
+checkState($store->progress($owner,$id,$g,'worker','PUBLISHING')['progress_code']==='PUBLISHING','result handoff has a distinct non-semantic progress state');
 rejectsState(function () use ($store,$owner,$id,$g) { $store->progress($owner,$id,$g,'worker','cash is 999'); },'AI_PROGRESS_INVALID');
 rejectsState(function () use ($store,$owner,$id,$g,$hash) { $store->prepareAttempt($owner,$id,$g,'worker','p1','model',$hash,'siliconflow'); },'AI_COUNTER_SEQUENCE');
 $store->reserve($owner,$id,$g,'worker','stage_count');

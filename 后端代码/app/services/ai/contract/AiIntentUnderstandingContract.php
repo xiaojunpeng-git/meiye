@@ -65,9 +65,16 @@ final class AiIntentUnderstandingContract
                 // retain the complete de-identified message as the audit
                 // anchor instead.  It is one trusted customer message, not a
                 // server-created condition; later semantic admission still
-                // decides whether the proposed field is faithful.  An absent
-                // excerpt remains invalid because it could be invented.
-                if (count($starts) === 0) self::fail('evidence_not_unique');
+                // decides whether the proposed field is faithful. A quote
+                // with different words remains invalid. Whitespace and
+                // terminal-punctuation differences are formatting only, so
+                // they can use the original de-identified message as their
+                // anchor without teaching PHP any business synonym.
+                if (count($starts) === 0) {
+                    if (!self::formatEquivalentExcerpt($messages[$item['message_id']], $item['quote'])) self::fail('evidence_not_unique');
+                    $located[] = ['message_id' => $item['message_id'], 'quote' => $messages[$item['message_id']], 'start' => 0];
+                    continue;
+                }
                 if (count($starts) !== 1) {
                     if (mb_strlen($messages[$item['message_id']], 'UTF-8') > 16384) self::fail('evidence_not_unique');
                     $located[] = ['message_id' => $item['message_id'], 'quote' => $messages[$item['message_id']], 'start' => 0];
@@ -177,6 +184,17 @@ final class AiIntentUnderstandingContract
             $positions[] = $position; $offset = $position + max(1, mb_strlen($needle, 'UTF-8'));
         }
         return $positions;
+    }
+
+    /** Tolerates presentation spacing only; never maps a business word or synonym. */
+    private static function formatEquivalentExcerpt(string $message, string $quote): bool
+    {
+        $normalize = static function (string $text): string {
+            $value = preg_replace('/[\\s\\p{P}]+/u', '', $text);
+            return is_string($value) ? $value : '';
+        };
+        $needle = $normalize($quote);
+        return mb_strlen($needle, 'UTF-8') >= 2 && mb_strpos($normalize($message), $needle, 0, 'UTF-8') !== false;
     }
 
     private static function text($value, int $maximum): bool

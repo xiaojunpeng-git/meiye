@@ -378,7 +378,7 @@ final class AiRunStore
 
     public function progress(array $owner,string $runId,int $generation,string $workerToken,string $code): array
     {
-        if (!in_array($code,['UNDERSTANDING','QUERYING','VERIFYING','EXPORTING','RENDERING'],true)) { throw new RuntimeException('AI_PROGRESS_INVALID'); }
+        if (!in_array($code,['UNDERSTANDING','QUERYING','VERIFYING','EXPORTING','RENDERING','PUBLISHING'],true)) { throw new RuntimeException('AI_PROGRESS_INVALID'); }
         return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$code) {
             $r=$this->read($owner,$runId,$generation); $this->worker($r,$workerToken); $this->live($r);
             $this->execute('UPDATE '.$this->table('run').' SET progress_code=?, version=version+1 WHERE instance_id=? AND run_id=?',[$code,$this->instance,$runId]);

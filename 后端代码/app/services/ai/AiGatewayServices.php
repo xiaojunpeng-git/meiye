@@ -1266,7 +1266,8 @@ final class AiGatewayServices
                 $answer=['summary'=>implode("\n\n",$parts),'cards'=>[]]; return ['answer'=>$answer];
             },
             'verified_export_create'=>function() use($context,$owner,$id,$generation,$worker,$plan,$guard,&$evidence,&$answer,&$waiting,&$trace) {
-                $guard(); [$evidenceRef,$answerRef]=$this->saveResults($owner,$id,$generation,$plan,$evidence,$answer,$trace);
+                $guard(); $this->runs->progress($owner,$id,$generation,$worker,'PUBLISHING');
+                [$evidenceRef,$answerRef]=$this->saveResults($owner,$id,$generation,$plan,$evidence,$answer,$trace);
                 // ExportRuntime owns the source-bound Task receipt and dispatch UNKNOWN handling.
                 $waiting=$this->exportRuntime()->queue($this->fresh($context),$owner,$this->runs->get($owner,$id,$generation),$worker,$evidenceRef,$answerRef,$evidence);
                 return ['deferred'=>true];
@@ -1275,6 +1276,11 @@ final class AiGatewayServices
         $execution=(new AiRegisteredWorkflowExecutor($this->registry()))->execute($plan,$handlers,$checkpoint);
         if ($waiting!==null) return $waiting;
         $guard();
+        // Persisting encrypted evidence and changing a Run to COMPLETED are
+        // not rendering.  A distinct server-owned progress state lets a
+        // stalled response be attributed to the handoff boundary without
+        // retaining customer text or reinterpreting their request.
+        $this->runs->progress($owner,$id,$generation,$worker,'PUBLISHING');
         [$evidenceRef,$answerRef]=$this->saveResults($owner,$id,$generation,$plan,$evidence,$answer,$execution['trace']);
         return $this->runs->publish($owner,$id,$generation,$worker,$evidenceRef,$answerRef);
     }
@@ -1592,7 +1598,7 @@ final class AiGatewayServices
             'AI_EXECUTION_CLOCK_REGRESSED'=>'服务时间校验异常，本次查询已停止，请稍后重试。',
         ][$run['reason']]??'本次查询未完成，请稍后重试。';
         if ($run['status']==='WAITING_CLARIFICATION') return '请确认当前这一步，已确认条件会保留。';
-        return ['RECEIVED'=>'已接收问题','UNDERSTANDING'=>'正在理解查询条件','QUERYING'=>'正在查询经营数据','VERIFYING'=>'正在核对数据','RENDERING'=>'正在整理结果','EXPORTING'=>'正在生成文件'][$run['progress_code']]??'正在处理';
+        return ['RECEIVED'=>'已接收问题','UNDERSTANDING'=>'正在理解查询条件','QUERYING'=>'正在查询经营数据','VERIFYING'=>'正在核对数据','RENDERING'=>'正在整理结果','PUBLISHING'=>'正在保存并交付结果','EXPORTING'=>'正在生成文件'][$run['progress_code']]??'正在处理';
     }
     private function checkConfig(array $input): array
     {
