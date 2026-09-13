@@ -421,11 +421,11 @@ function operationProjectSelected(source = {}, project = {}) {
 
       <div v-if="operationMode === 'project-replacement' && selectedOperationProjectKeys.length" class="cashier-entitlement-selector__operation-next">
         <span>已选择 {{ selectedOperationProjectKeys.length }} 个原项目</span>
-        <button type="button" class="button button--primary" @click="emit('operation-target')">选择目标项目</button>
+        <button type="button" class="button button--primary cashier-entitlement-selector__operation-target-button" @click="emit('operation-target')">选择目标项目</button>
       </div>
       <div v-if="operationMode === 'card-upgrade' && selectedOperationSourceIds.length" class="cashier-entitlement-selector__operation-next">
         <span>已选择 {{ selectedOperationSourceIds.length }} 张原卡；结账时将全部结束并抵扣。</span>
-        <button type="button" class="button button--primary cashier-entitlement-selector__upgrade-target-button" @click="emit('operation-target')">选择目标卡</button>
+        <button type="button" class="button button--primary cashier-entitlement-selector__operation-target-button" @click="emit('operation-target')">选择目标卡</button>
       </div>
 
       <section class="cashier-entitlement-selector__content" aria-label="可使用权益">
@@ -464,7 +464,9 @@ function operationProjectSelected(source = {}, project = {}) {
                 @click="chooseSourceOperation(source)"
               >{{ operationMode === 'card-upgrade' && operationSourceSelected(source)
                 ? '已选择'
-                : sourceOperationLabel() }}</button>
+                : operationMode === 'card-upgrade' && selectedOperationSourceIds.length
+                  ? '添加'
+                  : sourceOperationLabel() }}</button>
               <span v-else />
             </article>
 

@@ -5296,16 +5296,16 @@ button:disabled {
   padding: 0 10px;
 }
 
-/* Card-upgrade only: distinguish the next affirmative selection from the
- * default blue cashier action without changing other checkout controls. */
-.cashier-entitlement-selector-panel .cashier-entitlement-selector__upgrade-target-button {
+/* Card/project operations share this affirmative next-step action; it is
+ * deliberately scoped to the selector so checkout controls stay blue. */
+.cashier-entitlement-selector-panel .cashier-entitlement-selector__operation-target-button {
   background: #16a34a;
   border-color: #16a34a;
   color: #fff;
 }
 
-.cashier-entitlement-selector-panel .cashier-entitlement-selector__upgrade-target-button:hover,
-.cashier-entitlement-selector-panel .cashier-entitlement-selector__upgrade-target-button:focus-visible {
+.cashier-entitlement-selector-panel .cashier-entitlement-selector__operation-target-button:hover,
+.cashier-entitlement-selector-panel .cashier-entitlement-selector__operation-target-button:focus-visible {
   background: #15803d;
   border-color: #15803d;
 }
