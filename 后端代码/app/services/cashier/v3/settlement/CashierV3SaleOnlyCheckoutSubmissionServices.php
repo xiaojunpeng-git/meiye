@@ -12,6 +12,7 @@ use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\card\CashierV3CardPurchaseIssuanceServices;
 use app\services\cashier\v3\card\CashierV3CardOperationCheckoutSettlementServices;
+use app\services\cashier\v3\card\CashierV3MultiCardUpgradeSettlementServices;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceContractException;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceWriterAdapter;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
@@ -76,6 +77,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         // settlement authority while recording checkout facts.  Fail before
         // any sale/payment write when this migration is not installed.
         'eb_cashier_v3_card_operation_settlement',
+        'eb_cashier_v3_multi_card_upgrade',
+        'eb_cashier_v3_multi_card_upgrade_source',
     ];
 
     private const REQUIRED_COLUMNS = [
@@ -116,6 +119,9 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
     /** @var CashierV3CardOperationCheckoutSettlementServices */
     private $cardOperationSettlements;
 
+    /** @var CashierV3MultiCardUpgradeSettlementServices */
+    private $multiCardUpgrades;
+
     /** @var CashierV3CheckoutBusinessSourceSelectionServices */
     private $businessSources;
 
@@ -138,6 +144,7 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         CashierV3MemberBalanceWriterAdapter $balances = null,
         CashierV3CheckoutDebtAuthorityServices $debts = null,
         ?CashierV3CardOperationCheckoutSettlementServices $cardOperationSettlements = null,
+        ?CashierV3MultiCardUpgradeSettlementServices $multiCardUpgrades = null,
         ?CashierV3CheckoutBusinessSourceSelectionServices $businessSources = null,
         ?CashierV3SaleProjectServiceCompletionServices $saleProjectServices = null
     ) {
@@ -154,6 +161,7 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
         $this->debts = $debts ?: new CashierV3CheckoutDebtAuthorityServices();
         $this->cardOperationSettlements = $cardOperationSettlements
             ?: new CashierV3CardOperationCheckoutSettlementServices();
+        $this->multiCardUpgrades = $multiCardUpgrades ?: new CashierV3MultiCardUpgradeSettlementServices();
         $this->businessSources = $businessSources
             ?: new CashierV3CheckoutBusinessSourceSelectionServices();
         $this->saleProjectServices = $saleProjectServices
@@ -249,10 +257,17 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 (string)$aggregate['request']['tenant_id'],
                 (int)$aggregate['request']['store_id']
             );
-            $entitlementCredit = $this->cardOperationSettlements->creditForCheckoutInTx(
+            $legacyEntitlementCredit = $this->cardOperationSettlements->creditForCheckoutInTx(
                 (string)$aggregate['request']['request_id'],
                 $dataScope
             );
+            $multiCardEntitlementCredit = $this->multiCardUpgrades->prepareCreditInTx(
+                $aggregate, $operatorScope, $dataScope, $now
+            );
+            if ($legacyEntitlementCredit !== [] && $multiCardEntitlementCredit !== []) {
+                throw self::failure('checkout_multiple_upgrade_credit_invalid');
+            }
+            $entitlementCredit = $multiCardEntitlementCredit ?: $legacyEntitlementCredit;
             $salesPlan = CashierV3SalesOrderPlanV1::fromLockedCheckoutAggregate(
                 $aggregate,
                 $commandKey,
@@ -359,6 +374,10 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $eventExecution,
                 $eventContract,
                 $now
+            );
+            $multiCardUpgradeSettlement = $this->multiCardUpgrades->settleInTx(
+                $salesPlan, $salesResult, $cardPurchaseResult, $operatorScope, $dataScope,
+                $eventRecorder, $eventExecution, $eventContract, $now
             );
             $order = $salesPlan->header();
             $batch = $paymentPlan->batch();
@@ -630,6 +649,7 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                     'receipts' => (array)$cardPurchaseResult['receipts'],
                 ],
                 'cardOperation' => $cardOperationSettlement,
+                'multiCardUpgrade' => $multiCardUpgradeSettlement,
                 'saleProjectService' => $saleProjectServiceResult,
                 'hangOrder' => $hangResult,
                 'cashierDraft' => $cashierDraft,

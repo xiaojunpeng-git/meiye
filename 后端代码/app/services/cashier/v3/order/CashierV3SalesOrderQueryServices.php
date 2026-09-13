@@ -1249,6 +1249,51 @@ final class CashierV3SalesOrderQueryServices
             }
             $upgradeSettlementsByOrder[$orderId] = $settlement;
         }
+        // A multi-card upgrade deliberately has no card-operation/version
+        // ledger. Its single immutable upgrade snapshot is the authority for
+        // the third settlement component, so normalize it only for the
+        // order-centre read model. The snapshot itself is never updated by
+        // this projection or by a later lifecycle reversal.
+        $multiCardUpgrades = Db::name('cashier_v3_multi_card_upgrade')
+            ->where('tenant_id', $tenantIds[0])
+            ->whereIn('sales_order_id', $orderIds)
+            ->field('sales_order_id,upgrade_id,target_sale_amount_cents,entitlement_credit_cents,excess_writeoff_cents,upgrade_status')
+            ->order('id', 'asc')->select()->toArray();
+        $multiCardUpgradeSources = [];
+        $multiCardUpgradeIds = array_values(array_unique(array_filter(array_map(static function (array $upgrade): string {
+            return trim((string)($upgrade['upgrade_id'] ?? ''));
+        }, $multiCardUpgrades))));
+        if ($multiCardUpgradeIds !== []) {
+            foreach (Db::name('cashier_v3_multi_card_upgrade_source')
+                ->whereIn('upgrade_id', $multiCardUpgradeIds)
+                ->field('upgrade_id,line_no,source_card_name_snapshot,source_card_no_snapshot,source_remaining_value_cents,credit_cents,excess_writeoff_cents')
+                ->order('upgrade_id', 'asc')->order('line_no', 'asc')->select()->toArray() as $source) {
+                $multiCardUpgradeSources[(string)$source['upgrade_id']][] = $source;
+            }
+        }
+        foreach ($multiCardUpgrades as $upgrade) {
+            $orderId = (string)$upgrade['sales_order_id'];
+            if (isset($upgradeSettlementsByOrder[$orderId])) {
+                throw new \RuntimeException('sales_order_authority_upgrade_settlement_conflict');
+            }
+            $targetAmount = max(0, (int)$upgrade['target_sale_amount_cents']);
+            $creditAmount = max(0, (int)$upgrade['entitlement_credit_cents']);
+            $upgradeSettlementsByOrder[$orderId] = [
+                'sales_order_id' => $orderId,
+                'operation_id' => (string)$upgrade['upgrade_id'],
+                'operation_type' => 'card_upgrade',
+                'entitlement_credit_cents' => $creditAmount,
+                // This is the pre-coupon/pre-price-change cash component,
+                // matching the regular upgrade settlement contract.
+                'cash_delta_cents' => max(0, $targetAmount - $creditAmount),
+                'settlement_status' => (string)$upgrade['upgrade_status'],
+                // The source rows are immutable snapshots made at successful
+                // settlement. They are display-only evidence for the order
+                // detail and never reopen card versions or current balances.
+                'source_cards' => $multiCardUpgradeSources[(string)$upgrade['upgrade_id']] ?? [],
+                'excess_writeoff_cents' => max(0, (int)$upgrade['excess_writeoff_cents']),
+            ];
+        }
         $salespeopleByOrderAndLine = [];
         $craftsmenByOrderAndLine = [];
         $guidesByOrderAndLine = [];
@@ -1605,6 +1650,18 @@ final class CashierV3SalesOrderQueryServices
                 'status' => (string)($upgradeSettlement['settlement_status'] ?? 'settled'),
                 'statusLabel' => '已完成',
                 'amount' => $this->moneyFromCents((int)($upgradeSettlement['cash_delta_cents'] ?? 0)),
+                'entitlementCreditAmount' => $this->moneyFromCents((int)($upgradeSettlement['entitlement_credit_cents'] ?? 0)),
+                'excessWriteoffAmount' => $this->moneyFromCents((int)($upgradeSettlement['excess_writeoff_cents'] ?? 0)),
+                'sourceCards' => array_map(function (array $source): array {
+                    return [
+                        'lineNo' => (int)($source['line_no'] ?? 0),
+                        'name' => (string)($source['source_card_name_snapshot'] ?? ''),
+                        'cardNo' => (string)($source['source_card_no_snapshot'] ?? ''),
+                        'remainingValue' => $this->moneyFromCents((int)($source['source_remaining_value_cents'] ?? 0)),
+                        'creditAmount' => $this->moneyFromCents((int)($source['credit_cents'] ?? 0)),
+                        'excessWriteoffAmount' => $this->moneyFromCents((int)($source['excess_writeoff_cents'] ?? 0)),
+                    ];
+                }, (array)($upgradeSettlement['source_cards'] ?? [])),
             ];
         }
         $debtRecords = array_map(function (array $debt) use ($debtCents): array {

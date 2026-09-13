@@ -870,13 +870,16 @@ final class CashierV3CashierWorkspaceServices
         string $workspaceId,
         string $stateContextId,
         CashierV3OperatorScope $operatorScope,
+        int $memberId,
         string $lineKey,
         int $lineAmountCents,
         int $thresholdCents,
         array $reservedCouponIds = []
     ): array {
-        $draft = $this->readDraft($workspaceId, $stateContextId, $operatorScope, false);
-        $memberId = (int)($draft['memberId'] ?? 0);
+        // 浏览器本地购物车在最终确认前不写 cashier_workspace；不能从一个
+        // 游客草稿反推当前选客。会员身份由同一请求内的权威会员摘要校验后
+        // 传入，这里只读取可用券，不创建或修改任何工作台数据。
+        $this->assertWorkspaceIdentity($workspaceId, $stateContextId, $operatorScope);
         if ($memberId <= 0) {
             throw CashierV3CommandException::invalidContext('请先选择会员后再使用优惠券。');
         }

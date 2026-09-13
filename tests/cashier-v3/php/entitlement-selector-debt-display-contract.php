@@ -22,6 +22,9 @@ $checks = [
         . '              <span aria-hidden="true" />' . PHP_EOL
         . '              <span aria-hidden="true" />'
     ),
+    'all-card view retains historical unavailable cards as display-only rows' => str_contains($projection, 'bool $includeDisplayOnlyCards = false')
+        && str_contains($projection, '已升级为其他卡项，当前不可使用')
+        && str_contains($selector, 'source.disabledReason || sourceCardNo(source)'),
 ];
 
 $passed = 0;

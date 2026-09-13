@@ -133,6 +133,14 @@ const entitlementSelectorDraftCheckpoint = ref(null)
 const cashierContextEpoch = ref(0)
 const entitlementSelectorSnapshot = ref(null)
 const cashierDraftSnapshot = ref(null)
+// 多旧卡升级的购物车仅存在于浏览器，直到最终结账事务提交唯一快照。
+// 在此期间，同一 state context 下的游客根投影不代表用户主动换客，
+// 不能冲掉已选的原卡、目标卡和抵扣金额。
+const localMultiCardUpgradeMemberCheckpoint = ref(null)
+// 优惠券选择器同样是只读请求。它不会持久化浏览器购物车，但个别适配层
+// 会在请求尚未返回时发送游客根投影；仅在这一次请求在途期间保存现场，
+// 防止多旧卡升级草稿被错误清空。
+const localCouponProjectionGuard = ref(null)
 // 收银编辑阶段只维护浏览器内的草稿。每一项操作保留为顺序命令，直到
 // 收银员点击挂单或立即结账时才统一写入当前工作台。
 const localCashierDraftOperations = ref([])
@@ -257,6 +265,60 @@ function isReadOnlyEntitlementProjectionTransition(current = {}, previous = {}) 
   return previousMemberId !== ''
     && (currentMemberId === '' || currentMemberId === previousMemberId)
 }
+
+function isLocalCouponProjectionTransition(current = {}, previous = {}) {
+  const guard = localCouponProjectionGuard.value
+  if (!guard || !isRecord(guard.member) || !isRecord(guard.draft)) return false
+  const expected = String(guard.scopeKey || '').split('|')
+  if (expected.length < 5 || !expected[4]) return false
+  if (expected[0] && current.stateContextId && expected[0] !== String(current.stateContextId)) return false
+  if (expected[1] && current.storeId && expected[1] !== String(current.storeId)) return false
+  const previousMemberId = String(previous.memberId || '')
+  const currentMemberId = String(current.memberId || '')
+  return previousMemberId === expected[4] && currentMemberId === ''
+}
+
+function isPendingLocalMultiCardUpgradeProjectionTransition(current = {}, previous = {}) {
+  const draftSnapshot = cashierDraftSnapshot.value
+  const memberSnapshot = localMultiCardUpgradeMemberCheckpoint.value
+  if (!draftSnapshot || !isRecord(draftSnapshot.snapshot) || !isRecord(memberSnapshot)) return false
+  const hasMultiCardUpgrade = Array.isArray(draftSnapshot.snapshot.lines)
+    && draftSnapshot.snapshot.lines.some((line) => isRecord(line?.cardPurchaseSnapshot?.multiCardUpgrade))
+  if (!hasMultiCardUpgrade) return false
+  const expected = String(draftSnapshot.scopeKey || '').split('|')
+  if (expected.length < 5 || !expected[4]) return false
+  if (expected[0] && current.stateContextId && expected[0] !== String(current.stateContextId)) return false
+  if (expected[1] && current.storeId && expected[1] !== String(current.storeId)) return false
+  return String(previous.memberId || '') === expected[4]
+    && String(current.memberId || '') === ''
+}
+
+function restorePendingLocalMultiCardUpgradeProjection() {
+  const draftSnapshot = cashierDraftSnapshot.value
+  const memberSnapshot = localMultiCardUpgradeMemberCheckpoint.value
+  if (!draftSnapshot || !isRecord(draftSnapshot.snapshot) || !isRecord(memberSnapshot)) return false
+  state.cashier = {
+    ...(state.cashier || {}),
+    customerMode: 'member',
+    member: clonePlain(memberSnapshot)
+  }
+  return true
+}
+
+function restoreLocalCouponProjectionGuard() {
+  const guard = localCouponProjectionGuard.value
+  if (!guard || !isRecord(guard.member) || !isRecord(guard.draft)) return false
+  state.cashier = {
+    ...(state.cashier || {}),
+    customerMode: 'member',
+    member: clonePlain(guard.member)
+  }
+  cashierDraftSnapshot.value = Object.freeze({
+    scopeKey: guard.scopeKey,
+    snapshot: Object.freeze(clonePlain(guard.draft))
+  })
+  return true
+}
 const localEntitlementSelector = computed(() => (
   entitlementSelectorSnapshot.value?.scopeKey === currentCashierScopeKey.value
     ? entitlementSelectorSnapshot.value.snapshot
@@ -295,6 +357,10 @@ const activeCardOperationUpgrade = computed(() => {
   }
   return null
 })
+const activeCardOperationUpgradeIsLocked = computed(() => activeCardOperationUpgrade.value?.multiCardUpgrade !== true)
+const selectedCardOperationSourceIds = computed(() => (previewCardOperation.value?.sources || [])
+  .map((source) => String(entitlementCardHolderId(source) || ''))
+  .filter(Boolean))
 const checkoutDebtAmountCents = computed(() => cartLines.value
   .filter((line) => !isEntitlementLine(line))
   .reduce((total, line) => total + lineDebtAmountCents(line), 0))
@@ -426,7 +492,10 @@ const checkoutOverlayState = computed(() => ({
   ...(activeCardOperationUpgrade.value
     ? {
         cardOperationUpgrade: clonePlain(activeCardOperationUpgrade.value),
-        balancePaymentAmount: (Number(activeCardOperationUpgrade.value.sourceRemainingValueCents || 0) / 100).toFixed(2)
+        balancePaymentAmount: (Math.min(
+          Number(activeCardOperationUpgrade.value.sourceRemainingValueCents || 0),
+          Number(activeCardOperationUpgrade.value.targetPriceCents || 0)
+        ) / 100).toFixed(2)
       }
     : {}),
   ...(checkoutRecoveryActiveStep.value ? { activeStep: checkoutRecoveryActiveStep.value } : {})
@@ -808,6 +877,10 @@ function canonicalCheckoutAttributions(records = [], includeRound = false) {
 
 function commitLocalCashierDraft(draft) {
   const next = recalculateLocalCashierDraft(draft)
+  if (member.value && Array.isArray(next.lines)
+    && next.lines.some((line) => isRecord(line?.cardPurchaseSnapshot?.multiCardUpgrade))) {
+    localMultiCardUpgradeMemberCheckpoint.value = clonePlain(member.value)
+  }
   cashierDraftSnapshot.value = Object.freeze({
     scopeKey: currentCashierDraftScopeKey.value,
     snapshot: Object.freeze(clonePlain(next))
@@ -912,11 +985,21 @@ function applyLocalCashierDraftMutation(action, line, payload = {}) {
     if (action === 'apply-line-coupon') {
       target.couponId = String(payload.couponId || '')
       target.couponSummary = String(payload.couponSummary || '已选优惠券')
-      const baseAmount = moneyToCents(target.couponBaseAmount ?? target.finalAmount ?? target.amount)
+      const multiUpgrade = target?.cardPurchaseSnapshot?.multiCardUpgrade
+      const baseAmount = moneyToCents(target.couponBaseAmount ?? (
+        isRecord(multiUpgrade) ? Number(multiUpgrade.targetSaleAmountCents || 0) / 100 : (target.finalAmount ?? target.amount)
+      ))
       target.couponBaseAmount = centsToMoney(baseAmount)
       target.couponDiscountCents = Math.min(baseAmount, Math.max(0, Number(payload.discountAmountCents || 0)))
-      target.finalAmount = centsToMoney(baseAmount - target.couponDiscountCents)
-      target.amount = target.finalAmount
+      if (isRecord(multiUpgrade)) {
+        // A coupon discounts the target-card sale price before old-card
+        // credit.  Keep the target price itself immutable in the one final
+        // upgrade snapshot; refresh then derives the net collection amount.
+        refreshMultiCardUpgradePayable(target, baseAmount)
+      } else {
+        target.finalAmount = centsToMoney(baseAmount - target.couponDiscountCents)
+        target.amount = target.finalAmount
+      }
       return
     }
     if (action === 'remove-line-coupon') {
@@ -927,6 +1010,7 @@ function applyLocalCashierDraftMutation(action, line, payload = {}) {
         target.finalAmount = target.couponBaseAmount
         target.amount = target.finalAmount
         delete target.couponBaseAmount
+        refreshMultiCardUpgradePayable(target, moneyToCents(target.finalAmount))
       }
     }
   })
@@ -953,11 +1037,53 @@ function applyLocalCashierRootMutation(action, payload = {}) {
         target.originalAmount = Number(target.originalAmount ?? (getLineAmount(target) || 0))
         target.finalAmount = Number(payload.lineAmountCents || 0) / 100
         target.amount = target.finalAmount
+        delete target.couponId
+        delete target.couponSummary
+        delete target.couponDiscountCents
+        delete target.couponBaseAmount
+        refreshMultiCardUpgradePayable(target, moneyToCents(target.finalAmount))
         for (const line of draft.lines || []) line.debtAmountCents = 0
       }
     }
   })
   return localDraftResult()
+}
+
+// A multi-card upgrade is still a normal target-card sale.  Keep the
+// operator-edited target sale amount separate from the amount payable after
+// old-card credit so coupons, debt and collection keep using the normal
+// checkout pipeline.
+function refreshMultiCardUpgradePayable(line = {}, targetSaleAmountOverrideCents = null) {
+  const upgrade = line?.cardPurchaseSnapshot?.multiCardUpgrade
+  if (!isRecord(upgrade)) return
+  const targetSaleAmountCents = targetSaleAmountOverrideCents === null
+    ? moneyToCents(upgrade.targetSaleAmountCents ?? line.finalAmount ?? line.amount ?? 0)
+    : Math.max(0, Number(targetSaleAmountOverrideCents || 0))
+  const couponDiscountCents = Math.min(
+    targetSaleAmountCents,
+    Math.max(0, Number(line.couponDiscountCents || 0))
+  )
+  const targetAfterCouponCents = targetSaleAmountCents - couponDiscountCents
+  const sourceCreditCents = Math.max(0, Number(upgrade.sourceRemainingValueCents || 0))
+  upgrade.targetSaleAmountCents = targetSaleAmountCents
+  upgrade.entitlementCreditCents = Math.min(targetAfterCouponCents, sourceCreditCents)
+  upgrade.excessWriteoffCents = Math.max(0, sourceCreditCents - targetAfterCouponCents)
+  upgrade.settlementDeltaCents = Math.max(0, targetAfterCouponCents - sourceCreditCents)
+  // `originalAmount` is serialized as the target-card sale price at final
+  // checkout. Keep it synchronized with the editable upgrade target amount;
+  // `amount` below remains the post-credit amount that still needs payment.
+  line.originalAmount = centsToMoney(targetSaleAmountCents)
+  line.amount = centsToMoney(upgrade.settlementDeltaCents)
+  line.finalAmount = line.amount
+  if (isRecord(line.cardOperationUpgrade) && line.cardOperationUpgrade.multiCardUpgrade === true) {
+    line.cardOperationUpgrade.targetPriceCents = targetSaleAmountCents
+    line.cardOperationUpgrade.settlementDeltaCents = upgrade.settlementDeltaCents
+  }
+}
+
+function editableSaleAmount(line = {}) {
+  const amount = Number(line?.cardPurchaseSnapshot?.multiCardUpgrade?.targetSaleAmountCents || 0)
+  return amount > 0 ? amount / 100 : getLineAmount(line)
 }
 
 function consumeSynchronizedLocalCashierOperation() {
@@ -1771,7 +1897,7 @@ async function selectCatalogItem(item) {
     reportEntitlementContractError({ message: '当前只能完成本次升级结账；如需重新选择，请先清空购物车。' })
     return
   }
-  if (item.id === 'custom-card-entry') {
+  if (item.id === 'custom-card-entry' && !(previewCardOperation.value?.mode === 'card-upgrade' && previewCardOperation.value?.awaitingTarget)) {
     if (hasCartLines.value) isCustomCardConflictOpen.value = true
     else if (currentCustomerMode.value === 'guest') {
       window.dispatchEvent(new CustomEvent('cashier-v3:open-member-selector', {
@@ -1781,6 +1907,10 @@ async function selectCatalogItem(item) {
     return
   }
   const operation = previewCardOperation.value
+  if (item.id === 'custom-card-entry' && operation?.mode === 'card-upgrade' && operation.awaitingTarget) {
+    guidedBusinessMode.value = 'custom-card'
+    return
+  }
   if (operation && operation.awaitingTarget !== true) {
     reportEntitlementContractError({ message: `当前只能办理${operation.label || '本次卡操作'}，请先完成或取消本次操作。` })
     return
@@ -2075,6 +2205,25 @@ function handleOperationSource({ source } = {}) {
     }))
     return
   }
+  if (operation.mode === 'card-upgrade') {
+    const holderId = String(entitlementCardHolderId(source) || '')
+    if (!holderId) {
+      reportEntitlementContractError({ message: '原卡数据不完整，请重新打开使用权益后再办理。' })
+      return
+    }
+    const sources = Array.isArray(operation.sources) ? operation.sources : []
+    const exists = sources.some((selected) => String(entitlementCardHolderId(selected) || '') === holderId)
+    previewCardOperation.value = {
+      ...operation,
+      sources: exists
+        ? sources.filter((selected) => String(entitlementCardHolderId(selected) || '') !== holderId)
+        : [...sources, clonePlain(source)],
+      target: null,
+      awaitingTarget: false,
+      selectorContexts
+    }
+    return
+  }
   previewCardOperation.value = {
     ...operation,
     sources: [source],
@@ -2204,7 +2353,7 @@ function setCardOperationUpgradeEntitlementQuantity(line, event) {
 
 function handleOperationTargetSelection() {
   const operation = previewCardOperation.value
-  if (operation?.mode !== 'project-replacement' || !operation.sources?.length) return
+  if (!['project-replacement', 'card-upgrade'].includes(operation?.mode) || !operation.sources?.length) return
   previewCardOperation.value = { ...operation, awaitingTarget: true }
   beginCardOperationTargetSelection(previewCardOperation.value)
   finalizeEntitlementSelector()
@@ -2247,6 +2396,9 @@ function cardOperationSourceBalance(source = {}, quantity = 1) {
 
 async function submitDirectCardOperation({ source, date = '', reason = '' } = {}) {
   const operation = previewCardOperation.value || {}
+  if (operation.mode === 'card-upgrade') {
+    return appendMultiCardUpgradeTarget(operation)
+  }
   const operationType = cardOperationTypeByMode[operation.mode]
   const sourceContext = sourceCardOperationContext(source)
   const normalizedReason = String(reason || '').trim()
@@ -2592,6 +2744,80 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
   return localDraftResult('卡操作已加入本次购物车。')
 }
 
+function multiCardUpgradeSourceSnapshot(source = {}) {
+  return {
+    cardHolderId: Number(entitlementCardHolderId(source) || 0),
+    cardName: String(source?.name || '原卡'),
+    cardNo: String(source?.fullCardNo || source?.cardNo || ''),
+    remainingValueCents: moneyToCents(Math.max(0, Number(source?.remainingAmount || source?.remainingValue || 0))),
+    outstandingDebtCents: moneyToCents(Math.max(0, Number(source?.outstandingDebtAmount || source?.debtAmount || 0)))
+  }
+}
+
+async function appendMultiCardUpgradeTarget(operation = {}) {
+  const target = operation.target || {}
+  const sourceSnapshots = (operation.sources || []).map(multiCardUpgradeSourceSnapshot)
+  if (!sourceSnapshots.length || sourceSnapshots.some((source) => source.cardHolderId <= 0)) {
+    reportEntitlementContractError({ message: '请至少选择一张完整的原卡。' })
+    return { result: { status: 'failed', code: 'MULTI_CARD_UPGRADE_SOURCE_MISSING' } }
+  }
+  const targetId = Number(target.catalogItemId ?? target.productId ?? target.id ?? 0)
+  if (target.kind !== '卡项' || targetId <= 0) {
+    reportEntitlementContractError({ message: '请选择一张目标卡。' })
+    return { result: { status: 'failed', code: 'MULTI_CARD_UPGRADE_TARGET_MISSING' } }
+  }
+  const targetAmountCents = moneyToCents(Math.max(0, Number(target.price || target.amount || 0)))
+  const sourceRemainingValueCents = sourceSnapshots.reduce((total, item) => total + item.remainingValueCents, 0)
+  const localLineId = `local-multi-card-upgrade-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const multiCardUpgrade = {
+    contractVersion: 'cashier-v3-multi-card-upgrade-v1',
+    sourceCardHolderIds: sourceSnapshots.map((item) => item.cardHolderId).sort((a, b) => a - b),
+    sources: sourceSnapshots,
+    sourceRemainingValueCents,
+    targetSaleAmountCents: targetAmountCents,
+    entitlementCreditCents: Math.min(targetAmountCents, sourceRemainingValueCents),
+    excessWriteoffCents: Math.max(0, sourceRemainingValueCents - targetAmountCents),
+    settlementDeltaCents: Math.max(0, targetAmountCents - sourceRemainingValueCents)
+  }
+  appendLocalCashierDraftOperation({ action: 'append-multi-card-upgrade', localLineId }, (draft) => {
+    draft.lines.push({
+      id: localLineId,
+      lineRole: 'sale',
+      catalogItemId: targetId,
+      productId: targetId,
+      itemId: targetId,
+      name: String(target.name || '升级目标卡'),
+      kind: '卡项',
+      productType: Number(target.productType || 0),
+      quantity: 1,
+      // The displayed collection amount is deliberately lower than the
+      // target sale amount. The immutable target amount is retained above.
+      amount: centsToMoney(multiCardUpgrade.settlementDeltaCents),
+      finalAmount: centsToMoney(multiCardUpgrade.settlementDeltaCents),
+      originalAmount: targetAmountCents / 100,
+      debtAmountCents: 0,
+      cardPurchaseSnapshot: {
+        ...clonePlain(target.cardPurchaseSnapshot || {}),
+        multiCardUpgrade
+      },
+      cardOperationUpgrade: {
+        operationType: 'card_upgrade', multiCardUpgrade: true,
+        sourceCardName: sourceSnapshots.map((item) => item.cardName).join('、'),
+        sourceRemainingValueCents, targetPriceCents: targetAmountCents,
+        settlementDeltaCents: multiCardUpgrade.settlementDeltaCents,
+        sourceCount: sourceSnapshots.length
+      },
+      localCatalogItem: { itemId: targetId, catalogKind: '卡项' }
+    })
+  })
+  finalizeEntitlementSelector()
+  previewCardOperation.value = null
+  window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+    detail: { status: 'success', message: '多张原卡已作为抵扣来源加入目标卡；请按正常流程编辑单据并结账。' }
+  }))
+  return localDraftResult('目标卡已加入本次购物车。')
+}
+
 async function handleOperationConfirm({ source, date, reason } = {}) {
   return submitDirectCardOperation({ source, date, reason })
 }
@@ -2728,6 +2954,11 @@ async function openEntitlementSelector({ preserveSnapshot = false } = {}) {
       memberId: member.value.id || member.value.memberId,
       selectorRequestId,
       cardOperationMode: previewCardOperation.value?.mode || '',
+      // The entitlement selector is a read-only lookup.  The selected member
+      // and the pending card-upgrade cart are browser-owned until checkout,
+      // so its partial root projection must never replace them with a guest
+      // workbench while the selector is opening.
+      preserveRootState: true,
       ...serviceOrderCommandPayload()
     })
     // A projection can replace the root synchronously while the workbench
@@ -3499,9 +3730,34 @@ async function openCartLineCoupon(line) {
     lineAmountCents,
     Number(line?.cardOperationUpgrade?.targetAmountCents || 0)
   )
-  const result = await requestAction(localDraft ? 'open-local-line-coupon' : 'open-line-coupon', localDraft
-    ? { lineId: line.id, lineAmountCents, couponThresholdCents, reservedCouponIds }
-    : { lineId: line.id })
+  if (localDraft && member.value) {
+    localCouponProjectionGuard.value = {
+      scopeKey: currentCashierDraftScopeKey.value,
+      member: clonePlain(member.value),
+      draft: clonePlain(localCashierDraft.value)
+    }
+  }
+  let result
+  try {
+    result = await requestAction(localDraft ? 'open-local-line-coupon' : 'open-line-coupon', localDraft
+      ? {
+          lineId: line.id,
+          // Use the same canonical reactive identity used by the final
+          // checkout snapshot.  A delayed summary merge may replace the member
+          // object while retaining this identity.
+          memberId: String(currentMemberId.value || ''),
+          lineAmountCents,
+          couponThresholdCents,
+          reservedCouponIds,
+          // This is a read-only lookup for a browser-owned line.  Its root
+          // projection is intentionally guest-shaped, so never let it replace
+          // the selected member or the in-progress local cart.
+          preserveRootState: true
+        }
+      : { lineId: line.id })
+  } finally {
+    localCouponProjectionGuard.value = null
+  }
   if (!['success', 'succeeded'].includes(resultStatus(result))) return
   const selector = responseDataBlock(result).couponSelector
   if (!selector || String(selector.lineId || '') !== String(line.id || '') || !Array.isArray(selector.coupons)) {
@@ -3994,6 +4250,10 @@ function cardOperationUpgradeBinding(line = {}) {
   return binding && ['card_upgrade', 'project_upgrade'].includes(String(binding.operationType || '')) ? binding : null
 }
 
+function cardOperationUpgradeIsLocked(line = {}) {
+  return Boolean(cardOperationUpgradeBinding(line)) && cardOperationUpgradeBinding(line)?.multiCardUpgrade !== true
+}
+
 // A local card-operation payload is meaningful on a sale row only when that
 // exact row is the browser-created upgrade row. Normal goods, projects and
 // ordinary card purchases must never inherit a stale local operation field and
@@ -4238,6 +4498,25 @@ async function confirmGuidedBusiness(result = {}) {
       const amount = Math.max(0, Number(result.amount || 0))
       if (!String(payload.cardName || '').trim() || !amount) return
       const localLineId = `local-custom-card-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const upgradeOperation = previewCardOperation.value?.mode === 'card-upgrade'
+        ? {
+            ...previewCardOperation.value,
+            target: {
+              id: `custom-card-${Date.now()}`,
+              kind: '卡项',
+              kindCode: 'custom_card',
+              name: String(payload.cardName || result.title || '定制卡'),
+              price: amount,
+              cardPurchaseSnapshot: customCardPurchaseSnapshot(payload),
+              localCustomCardConfiguration: payload
+            }
+          }
+        : null
+      if (upgradeOperation) {
+        const outcome = await appendMultiCardUpgradeCustomTarget(upgradeOperation, payload, amount)
+        if (['success', 'succeeded'].includes(resultStatus(outcome))) guidedBusinessMode.value = ''
+        return outcome
+      }
       appendLocalCashierDraftOperation({
         action: 'create-custom-card-configuration',
         localLineId,
@@ -4270,6 +4549,48 @@ async function confirmGuidedBusiness(result = {}) {
     detail: { status: 'success', message: `${result.title || '业务'}页面预览已确认，未产生真实业务数据` }
   }))
   guidedBusinessMode.value = ''
+}
+
+async function appendMultiCardUpgradeCustomTarget(operation = {}, payload = {}, amount = 0) {
+  const sourceSnapshots = (operation.sources || []).map(multiCardUpgradeSourceSnapshot)
+  if (!sourceSnapshots.length || sourceSnapshots.some((source) => source.cardHolderId <= 0) || amount <= 0) {
+    reportEntitlementContractError({ message: '原卡或定制目标卡资料不完整，请重新选择。' })
+    return { result: { status: 'failed', code: 'MULTI_CARD_UPGRADE_CUSTOM_CONTEXT_INCOMPLETE' } }
+  }
+  const targetAmountCents = moneyToCents(amount)
+  const sourceRemainingValueCents = sourceSnapshots.reduce((total, item) => total + item.remainingValueCents, 0)
+  const localLineId = `local-multi-card-upgrade-custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  appendLocalCashierDraftOperation({ action: 'append-multi-card-upgrade-custom', localLineId }, (draft) => {
+    draft.lines.push({
+      id: localLineId, lineRole: 'sale', name: String(payload.cardName || '定制卡'), kind: '卡项', kindCode: 'custom_card',
+      sourceKind: 'custom_card', productType: 0, quantity: 1,
+      amount: centsToMoney(Math.max(0, targetAmountCents - sourceRemainingValueCents)),
+      finalAmount: centsToMoney(Math.max(0, targetAmountCents - sourceRemainingValueCents)), originalAmount: amount, debtAmountCents: 0,
+      cardPurchaseSnapshot: {
+        ...customCardPurchaseSnapshot(payload),
+        multiCardUpgrade: {
+          contractVersion: 'cashier-v3-multi-card-upgrade-v1',
+          sourceCardHolderIds: sourceSnapshots.map((item) => item.cardHolderId).sort((a, b) => a - b), sources: sourceSnapshots,
+          sourceRemainingValueCents, targetSaleAmountCents: targetAmountCents,
+          entitlementCreditCents: Math.min(targetAmountCents, sourceRemainingValueCents),
+          excessWriteoffCents: Math.max(0, sourceRemainingValueCents - targetAmountCents),
+          settlementDeltaCents: Math.max(0, targetAmountCents - sourceRemainingValueCents)
+        }
+      },
+      cardOperationUpgrade: {
+        operationType: 'card_upgrade', multiCardUpgrade: true,
+        sourceCardName: sourceSnapshots.map((item) => item.cardName).join('、'),
+        sourceRemainingValueCents, targetPriceCents: targetAmountCents,
+        settlementDeltaCents: Math.max(0, targetAmountCents - sourceRemainingValueCents), sourceCount: sourceSnapshots.length
+      },
+      localCustomCardConfiguration: payload
+    })
+  })
+  previewCardOperation.value = null
+  window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+    detail: { status: 'success', message: '定制目标卡已加入本次升级结账。' }
+  }))
+  return localDraftResult('定制目标卡已加入本次购物车。')
 }
 
 function continueCustomCard() {
@@ -4323,7 +4644,7 @@ async function openMoreAction(action) {
       return
     }
     activeCartLineId.value = line.id
-    moreActionValue.value = formatPlainAmount(getLineAmount(line))
+    moreActionValue.value = formatPlainAmount(editableSaleAmount(line))
     moreActionReason.value = ''
     moreActionEditor.value = { type: 'price-change', title: '改价', line: clonePlain(line) }
     return
@@ -4705,9 +5026,13 @@ function checkoutCardPurchaseSnapshot(line = {}) {
   if (isCustomCardPurchase(line)) {
     // Custom cards have no catalogue card definition. Carry the selections
     // made in the browser line into the one final checkout snapshot.
-    return customCardPurchaseSnapshot(
+    const snapshot = customCardPurchaseSnapshot(
       line.localCustomCardConfiguration || line.customCardConfiguration || {}
     )
+    if (isRecord(line.cardPurchaseSnapshot?.multiCardUpgrade)) {
+      snapshot.multiCardUpgrade = clonePlain(line.cardPurchaseSnapshot.multiCardUpgrade)
+    }
+    return snapshot
   }
   const embedded = line.cardPurchaseSnapshot || line.authoritySnapshot?.cardPurchase
   if (isRecord(embedded) && Object.keys(embedded).length) return clonePlain(embedded)
@@ -4765,6 +5090,18 @@ function buildCheckoutSnapshot(preview = {}) {
         line,
         line.originalAmount ?? getLineAmount(line)
       )
+      if (upgradeOperation) {
+        // Reassert the one upgrade target-price snapshot at the final browser
+        // boundary. A tab that was open across hot updates must never submit
+        // a stale `originalAmount` while displaying a newer edited target.
+        const targetSaleAmountCents = Math.max(0, Number(
+          line.cardPurchaseSnapshot?.multiCardUpgrade?.targetSaleAmountCents || 0
+        ))
+        if (targetSaleAmountCents > 0) {
+          next.originalAmount = centsToMoney(targetSaleAmountCents)
+          next.originalLineAmountCents = targetSaleAmountCents
+        }
+      }
       next.salespeople = canonicalCheckoutSalespeople(line.salespeople)
       next.guideSelections = canonicalCheckoutAttributions(line.guideSelections, true)
       next.salesManagerSelections = canonicalCheckoutAttributions(line.salesManagerSelections)
@@ -6031,6 +6368,7 @@ function clearEntitlementBoundSnapshots({ preservePending = false } = {}) {
   entitlementSelectorSnapshot.value = null
   entitlementSelectorDraftCheckpoint.value = null
   cashierDraftSnapshot.value = null
+  localMultiCardUpgradeMemberCheckpoint.value = null
   localCashierDraftOperations.value = []
   localCashierPersistedLineIds.value = {}
   cashierDraftHasUnresolvedCommand.value = Boolean(
@@ -6096,6 +6434,8 @@ async function closeSucceededCheckoutAndRefreshWorkbench(submissionResponse = {}
   // receipt. Keep it as the immediate local projection before closing the
   // overlay. A root refresh can be delayed or rejected as stale by the bridge;
   // it must never make the pre-settlement cart visible again.
+  // 唯一快照已落账，接下来的空工作台投影是终态，不能再按本地升级草稿恢复。
+  localMultiCardUpgradeMemberCheckpoint.value = null
   const committedDraft = responseDataBlock(submissionResponse).cashierDraft
   let resolvedCommittedDraft = committedDraft
   let canRenderCommittedDraft = isResponseBoundCommittedCashierDraft(resolvedCommittedDraft)
@@ -6231,6 +6571,14 @@ watch(
     // Once that read has completed, a member-to-guest transition is a real
     // checkout reset and stale entitlement data must not remain on screen.
     if (isReadOnlyEntitlementProjectionTransition(current, previous)) {
+      return
+    }
+    if (isLocalCouponProjectionTransition(current, previous)) {
+      restoreLocalCouponProjectionGuard()
+      return
+    }
+    if (isPendingLocalMultiCardUpgradeProjectionTransition(current, previous)) {
+      restorePendingLocalMultiCardUpgradeProjection()
       return
     }
     const businessScopeChanged = true
@@ -6379,6 +6727,7 @@ onBeforeUnmount(() => {
           :operation-mode="previewCardOperation?.mode || ''"
           :operation-label="previewCardOperation?.label || ''"
           :selected-operation-project-keys="selectedCardOperationProjectKeys"
+          :selected-operation-source-ids="selectedCardOperationSourceIds"
           :load-state="entitlementSelectorLoadState"
           :load-error-message="entitlementSelectorLoadError"
           @close="closeEntitlementSelector"
@@ -6592,11 +6941,11 @@ onBeforeUnmount(() => {
               >
                 <div class="cart-line__upgrade-heading">
                   <strong>{{ cardOperationUpgradeLabel(cardOperationUpgradeBinding(line)) }}</strong>
-                  <span>原权益抵扣后结账</span>
+                  <span>{{ cardOperationUpgradeBinding(line).multiCardUpgrade ? '多张原卡全部抵扣后结账' : '原权益抵扣后结账' }}</span>
                 </div>
                 <div class="cart-line__upgrade-route">
                   <div>
-                    <small>原卡</small>
+                    <small>{{ cardOperationUpgradeBinding(line).multiCardUpgrade ? `原卡（${cardOperationUpgradeBinding(line).sourceCount || 0}张）` : '原卡' }}</small>
                     <strong>{{ cardOperationUpgradeBinding(line).sourceCardName || '原卡' }}</strong>
                     <span v-if="cardOperationUpgradeBinding(line).sourceCardNo">卡号 {{ cardOperationUpgradeBinding(line).sourceCardNo }}</span>
                   </div>
@@ -6819,7 +7168,7 @@ onBeforeUnmount(() => {
                     <button
                       type="button"
                       aria-label="减少数量"
-                      :disabled="Boolean(cardOperationUpgradeBinding(line)) || Number(line.quantity || 1) <= 1"
+                    :disabled="Boolean(cardOperationUpgradeBinding(line)) || Number(line.quantity || 1) <= 1"
                       @click="changeLineQuantity(line, -1)"
                     >−</button>
                     <input
@@ -6869,14 +7218,14 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="button button--secondary cashier-checkout-actions__price"
-          :disabled="Boolean(activeCardOperationUpgrade)"
+          :disabled="Boolean(activeCardOperationUpgrade) && activeCardOperationUpgradeIsLocked"
           @click="openMoreAction('open-price-change')"
         >改价</button>
         <button
           type="button"
           class="button button--secondary cashier-checkout-actions__note"
           :class="{ 'cashier-checkout-actions__note--noted': summary.hasOrderNote }"
-          :disabled="Boolean(activeCardOperationUpgrade)"
+          :disabled="Boolean(activeCardOperationUpgrade) && activeCardOperationUpgradeIsLocked"
           @click="openMoreAction('open-order-note')"
         >备注</button>
         <button type="button" class="button button--secondary cashier-checkout-actions__hang" :disabled="!hasCartLines || isSavingHangDraft || Boolean(activeCardOperationUpgrade)" @click="openHangOrder">{{ isSavingHangDraft ? '挂单中…' : '挂单' }}</button>

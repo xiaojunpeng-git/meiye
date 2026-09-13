@@ -19,6 +19,8 @@ final class CashierV3CardOperationReversalServices
     public const SETTLEMENT_TABLE = 'cashier_v3_card_operation_settlement';
     public const OPERATION_TABLE = 'cashier_v3_card_operation';
     public const OPERATION_LINE_TABLE = 'cashier_v3_card_operation_line';
+    private const MULTI_UPGRADE_TABLE = 'cashier_v3_multi_card_upgrade';
+    private const MULTI_UPGRADE_SOURCE_TABLE = 'cashier_v3_multi_card_upgrade_source';
 
     /** @return array<string,mixed> */
     public function prepare(array $source, string $action, CashierV3DataScopeContext $scope): array
@@ -28,7 +30,7 @@ final class CashierV3CardOperationReversalServices
             ->where('tenant_id', $scope->tenantId())
             ->where('sales_order_id', (string)$source['sourceId'])
             ->lock(true)->find();
-        if (!$settlement) return ['isUpgrade' => false, 'entitlementCreditCents' => 0];
+        if (!$settlement) return $this->prepareMultiCardUpgrade($source, $scope);
         $settlement = (array)$settlement;
         if ((string)($settlement['settlement_status'] ?? '') !== 'settled'
             || (int)($settlement['current_version'] ?? 0) <= 0
@@ -75,6 +77,10 @@ final class CashierV3CardOperationReversalServices
         if (empty($prepared['isUpgrade'])) return;
         $settlement = (array)$prepared['settlement'];
         $operation = (array)$prepared['operation'];
+        if (($prepared['kind'] ?? '') === 'multi_card_upgrade') {
+            $this->restoreMultiCardUpgradeSources((array)$prepared['multiSources'], $settlement, $scope);
+            return;
+        }
         if ((string)$settlement['operation_type'] === 'card_upgrade') {
             $this->restoreCardUpgradeSource($settlement, $operation, $lifecycleOperationId, $operator, $scope, $now);
         } else {
@@ -92,6 +98,62 @@ final class CashierV3CardOperationReversalServices
                 'current_version' => (int)$settlement['current_version'] + 1,
             ]);
         if ((int)$updated !== 1) throw self::failure('card_operation_reversal_settlement_race');
+    }
+
+    /**
+     * Multi-card upgrades have exactly one immutable snapshot and no
+     * card-state/version rows. A lifecycle void restores only the old legacy
+     * authority links; the original snapshot stays immutable and the void
+     * itself is recorded by the sales-order lifecycle ledger.
+     *
+     * @return array<string,mixed>
+     */
+    private function prepareMultiCardUpgrade(array $source, CashierV3DataScopeContext $scope): array
+    {
+        $header = Db::name(self::MULTI_UPGRADE_TABLE)
+            ->where('tenant_id', $scope->tenantId())
+            ->where('sales_order_id', (string)$source['sourceId'])
+            ->lock(true)->find();
+        if (!$header) return ['isUpgrade' => false, 'entitlementCreditCents' => 0];
+        $header = (array)$header;
+        if ((string)($header['upgrade_status'] ?? '') !== 'settled'
+            || (int)($header['member_id'] ?? 0) !== (int)($source['memberId'] ?? 0)
+            || (int)($header['target_legacy_order_id'] ?? 0) <= 0
+            || (int)($header['entitlement_credit_cents'] ?? -1) < 0) {
+            throw self::failure('multi_card_upgrade_reversal_header_invalid');
+        }
+        $sources = Db::name(self::MULTI_UPGRADE_SOURCE_TABLE)
+            ->where('tenant_id', $scope->tenantId())
+            ->where('upgrade_id', (string)$header['upgrade_id'])
+            ->order('line_no', 'asc')->lock(true)->select()->toArray();
+        if ($sources === []) throw self::failure('multi_card_upgrade_reversal_sources_missing');
+        foreach ($sources as $multiSource) {
+            $legacyOrder = Db::name('store_order')->where('id', (int)$multiSource['source_legacy_order_id'])->lock(true)->find();
+            if (!$legacyOrder
+                || (int)($legacyOrder['card_upgrade_use_oid'] ?? 0) !== (int)$header['target_legacy_order_id']) {
+                throw self::failure('multi_card_upgrade_reversal_source_changed');
+            }
+        }
+        return [
+            'isUpgrade' => true,
+            'kind' => 'multi_card_upgrade',
+            'settlement' => $header,
+            'operation' => [],
+            'multiSources' => $sources,
+            'entitlementCreditCents' => (int)$header['entitlement_credit_cents'],
+        ];
+    }
+
+    private function restoreMultiCardUpgradeSources(array $sources, array $header, CashierV3DataScopeContext $scope): void
+    {
+        foreach ($sources as $source) {
+            if ((int)Db::name('store_order')
+                ->where('id', (int)$source['source_legacy_order_id'])
+                ->where('card_upgrade_use_oid', (int)$header['target_legacy_order_id'])
+                ->update(['card_upgrade_use_oid' => 0]) !== 1) {
+                throw self::failure('multi_card_upgrade_reversal_source_restore_race');
+            }
+        }
     }
 
     private function assertCardUpgradeSourceRestorable(array $settlement, array $operation, CashierV3DataScopeContext $scope): void

@@ -179,13 +179,25 @@ final class CashierV3SalesOrderPlanV1
         $credit = self::normalizeEntitlementCredit($entitlementCredit, $request, $saleLines);
         if ($credit['amountCents'] > 0) {
             $couponDiscount = (int)($saleLines[0]['coupon_discount_cents'] ?? 0);
-            if ($couponDiscount < 0
-                || $couponDiscount > $credit['targetPriceCents'] - $credit['amountCents']) {
+            if ($couponDiscount < 0 || ($credit['isMultiCardUpgrade'] ?? false) !== true
+                && $couponDiscount > $credit['targetPriceCents'] - $credit['amountCents']) {
                 throw self::failure('sales_order_upgrade_coupon_discount_invalid');
             }
-            $saleLines[0]['original_amount_cents'] = $credit['targetPriceCents'];
-            $saleLines[0]['discount_amount_cents'] = $couponDiscount;
-            $saleLines[0]['sale_amount_cents'] = $credit['targetPriceCents'] - $couponDiscount;
+            if (($credit['isMultiCardUpgrade'] ?? false) === true) {
+                // Old-card value is a settlement credit, not a sale discount.
+                // Keep only the normal coupon discount on the final card-sale
+                // fact so reports and coupon reversal retain their authority.
+                // The raw checkout row holds the post-credit receivable, but
+                // the persisted normal card-sale fact must retain the target
+                // card's immutable original price.
+                $saleLines[0]['original_amount_cents'] = $credit['targetPriceCents'];
+                $saleLines[0]['discount_amount_cents'] = $couponDiscount;
+                $saleLines[0]['sale_amount_cents'] = $credit['targetPriceCents'] - $couponDiscount;
+            } else {
+                $saleLines[0]['original_amount_cents'] = $credit['targetPriceCents'];
+                $saleLines[0]['discount_amount_cents'] = $couponDiscount;
+                $saleLines[0]['sale_amount_cents'] = $credit['targetPriceCents'] - $couponDiscount;
+            }
             $saleLines[0]['checkout_line_fingerprint'] = self::canonicalFingerprint([
                 'checkoutLineFingerprint' => $saleLines[0]['checkout_line_fingerprint'],
                 'entitlementCredit' => $credit,
@@ -366,9 +378,12 @@ final class CashierV3SalesOrderPlanV1
     private static function normalizeEntitlementCredit(array $raw, array $request, array $saleLines): array
     {
         if ($raw === []) {
-            return ['operationId' => '', 'operationType' => '', 'amountCents' => 0, 'targetPriceCents' => 0];
+            return ['operationId' => '', 'operationType' => '', 'amountCents' => 0, 'targetPriceCents' => 0, 'isMultiCardUpgrade' => false];
         }
-        self::assertExactKeys($raw, ['operationId', 'operationType', 'checkoutRequestId', 'amountCents', 'targetPriceCents'], 'entitlement_credit_shape_invalid');
+        $isMulti = !empty($raw['isMultiCardUpgrade']);
+        self::assertExactKeys($raw, $isMulti
+            ? ['operationId', 'operationType', 'checkoutRequestId', 'amountCents', 'targetPriceCents', 'isMultiCardUpgrade']
+            : ['operationId', 'operationType', 'checkoutRequestId', 'amountCents', 'targetPriceCents'], 'entitlement_credit_shape_invalid');
         $operationId = self::token($raw['operationId'], 64, 'entitlement_credit_operation_invalid');
         $operationType = (string)$raw['operationType'];
         $checkoutRequestId = self::token($raw['checkoutRequestId'], 64, 'entitlement_credit_checkout_invalid');
@@ -380,12 +395,40 @@ final class CashierV3SalesOrderPlanV1
         if (count($saleLines) !== 1 || $amount < 0
             || !in_array($operationType, ['card_upgrade', 'project_upgrade'], true)
             || !hash_equals($request['request_id'], $checkoutRequestId)
-            || $targetPrice !== (int)$saleLines[0]['sale_amount_cents'] + $amount + $couponDiscount
-            || (int)$saleLines[0]['original_amount_cents'] !== $targetPrice
-            || (int)$saleLines[0]['discount_amount_cents'] !== $amount + $couponDiscount) {
-            throw self::failure('entitlement_credit_checkout_mismatch');
+            || ($isMulti
+                // A many-source upgrade enters the ordinary checkout as the
+                // remaining receivable.  Its working line's original amount
+                // is therefore intentionally the post-credit amount, not a
+                // second target-price authority.  The immutable upgrade
+                // snapshot is the sole target-price authority; preserve the
+                // financial equation here instead of comparing that working
+                // field to the target price.  The checkout UI may render the
+                // old-card credit in its temporary discount field, or may
+                // leave that field for coupon discount only.  Both forms
+                // express the same locked amount equation and are normalized
+                // to the one immutable target-card sale fact below.
+                ? ($targetPrice !== (int)$saleLines[0]['sale_amount_cents'] + $amount + $couponDiscount
+                    || !in_array((int)$saleLines[0]['discount_amount_cents'], [
+                        $couponDiscount,
+                        $amount + $couponDiscount,
+                    ], true))
+                : ($targetPrice !== (int)$saleLines[0]['sale_amount_cents'] + $amount + $couponDiscount
+                    || (int)$saleLines[0]['original_amount_cents'] !== $targetPrice
+                    || (int)$saleLines[0]['discount_amount_cents'] !== $amount + $couponDiscount))) {
+            // This is a financial authority mismatch. Keep the exact locked
+            // cents in the diagnostic detail so a rollback is actionable;
+            // the browser still receives only the generic safe failure.
+            throw self::failure('entitlement_credit_checkout_mismatch', [
+                'is_multi_card_upgrade' => $isMulti,
+                'target_price_cents' => $targetPrice,
+                'entitlement_credit_cents' => $amount,
+                'original_amount_cents' => (int)($saleLines[0]['original_amount_cents'] ?? -1),
+                'discount_amount_cents' => (int)($saleLines[0]['discount_amount_cents'] ?? -1),
+                'sale_amount_cents' => (int)($saleLines[0]['sale_amount_cents'] ?? -1),
+                'coupon_discount_cents' => $couponDiscount,
+            ]);
         }
-        return ['operationId' => $operationId, 'operationType' => $operationType, 'amountCents' => $amount, 'targetPriceCents' => $targetPrice];
+        return ['operationId' => $operationId, 'operationType' => $operationType, 'amountCents' => $amount, 'targetPriceCents' => $targetPrice, 'isMultiCardUpgrade' => $isMulti];
     }
 
     public function header(): array

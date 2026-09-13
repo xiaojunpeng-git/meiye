@@ -611,10 +611,23 @@ final class CashierV3CashierModule
         }
         $handlers->registerProjection('open-local-line-coupon', function (array $scope) use ($workspace): array {
             $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+            $rawMemberId = trim((string)($payload['memberId'] ?? $payload['member_id'] ?? ''));
+            if (preg_match('/^[1-9][0-9]*$/D', $rawMemberId) !== 1
+                || (string)(int)$rawMemberId !== $rawMemberId) {
+                throw CashierV3CommandException::invalidContext('当前优惠券对应的会员无效，请重新选择会员后重试。');
+            }
+            $memberId = (int)$rawMemberId;
+            // 本地购物车尚未持久化选客，先通过与顶部摘要一致的权威读取确认
+            // 会员仍有效，再读取优惠券；禁止把浏览器的任意会员 ID 直接用于券查询。
+            (new CashierV3CashierMemberSummaryServices())->read(
+                $memberId,
+                $scope['operator_scope']->storeId()
+            );
             $selector = $workspace->localCouponSelector(
                 self::workspaceIdForProjection($scope),
                 (string)($scope['state_context_id'] ?? ''),
                 $scope['operator_scope'],
+                $memberId,
                 self::lineKey($payload['lineId'] ?? $payload['line_id'] ?? null),
                 (int)($payload['lineAmountCents'] ?? $payload['line_amount_cents'] ?? -1),
                 (int)($payload['couponThresholdCents'] ?? $payload['coupon_threshold_cents'] ?? -1),

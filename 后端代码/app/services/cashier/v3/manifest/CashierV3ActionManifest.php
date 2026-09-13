@@ -313,6 +313,10 @@ class CashierV3ActionManifest
                     'debt.recorded',
                     'card.operation.recorded',
                     'card.operation.settled',
+                    // Multi-card upgrades remain ordinary sales checkout.
+                    // The immutable upgrade snapshot is an optional domain
+                    // event, never a separate checkout/version flow.
+                    'card.multi_upgrade.settled',
                 ],
                 'event_rules' => [
                     'checkout.completed' => [
@@ -416,6 +420,13 @@ class CashierV3ActionManifest
                         'source_type' => 'submit-checkout',
                         'aggregate_version' => null,
                     ],
+                    'card.multi_upgrade.settled' => [
+                        'min_count' => 0,
+                        'max_count' => 1,
+                        'aggregate_type' => 'multi_card_upgrade',
+                        'source_type' => 'submit-checkout',
+                        'aggregate_version' => 1,
+                    ],
                 ],
                 'eventless_reason' => '',
                 'activation_blocked_until_event_contract' => false,
@@ -436,6 +447,7 @@ class CashierV3ActionManifest
                     'debt.recorded' => [],
                     'card.operation.recorded' => [],
                     'card.operation.settled' => [],
+                    'card.multi_upgrade.settled' => [],
                 ],
             ],
             'submit-debt-repayment' => [

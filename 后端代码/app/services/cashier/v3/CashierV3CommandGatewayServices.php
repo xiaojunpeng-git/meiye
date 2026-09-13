@@ -317,24 +317,32 @@ class CashierV3CommandGatewayServices extends BaseServices
         $operatorProfile = is_array($session['operator_profile'] ?? null) ? $session['operator_profile'] : [];
         $correlationId = trim((string)($session['correlation_id'] ?? $command['correlationId'] ?? ''));
 
-        return Db::transaction(function () use (
-            $canonicalAction,
-            $idempotencyKey,
-            $contexts,
-            $contract,
-            $operatorScope,
-            $stateContext,
-            $requestHash,
-            $contextsHash,
-            $session,
-            $payload,
-            $business,
-            $dataScope,
-            $actionDefinition,
-            $eventContract,
-            $operatorProfile,
-            $rawContexts,
-            $correlationId
+        // Checkout may contend briefly with the read-only cashier projection
+        // refresh that holds the same legacy-card rows.  The outer command is
+        // fully transactional and keyed by one idempotency key, so retry only
+        // the database's explicit deadlock victim once; never retry business
+        // validation, conflict, payment or event failures.
+        $deadlockAttempts = 0;
+        while (true) {
+            try {
+                return Db::transaction(function () use (
+                    $canonicalAction,
+                    $idempotencyKey,
+                    $contexts,
+                    $contract,
+                    $operatorScope,
+                    $stateContext,
+                    $requestHash,
+                    $contextsHash,
+                    $session,
+                    $payload,
+                    $business,
+                    $dataScope,
+                    $actionDefinition,
+                    $eventContract,
+                    $operatorProfile,
+                    $rawContexts,
+                    $correlationId
         ) {
             // 1) 先按幂等键锁定回执
             $existing = Db::name(self::RECEIPT_TABLE)
@@ -639,7 +647,19 @@ class CashierV3CommandGatewayServices extends BaseServices
                     $eventExecution->close();
                 }
             }
-        });
+                });
+            } catch (\Throwable $exception) {
+                if ($canonicalAction !== 'submit-checkout'
+                    || $deadlockAttempts >= 1
+                    || !self::isRetryableDatabaseDeadlock($exception)) {
+                    throw $exception;
+                }
+                ++$deadlockAttempts;
+                // Yield only long enough for the competing read transaction
+                // to release its lock; no data leaves this rolled-back attempt.
+                usleep(25000);
+            }
+        }
     }
 
     /**
@@ -2299,5 +2319,19 @@ class CashierV3CommandGatewayServices extends BaseServices
             );
         }
         return $json;
+    }
+
+    private static function isRetryableDatabaseDeadlock(\Throwable $exception): bool
+    {
+        $current = $exception;
+        for ($depth = 0; $depth < 4 && $current !== null; ++$depth) {
+            $message = $current->getMessage();
+            if (strpos($message, 'SQLSTATE[40001]') !== false
+                && (strpos($message, '1213') !== false || strpos($message, 'Deadlock found') !== false)) {
+                return true;
+            }
+            $current = $current->getPrevious();
+        }
+        return false;
     }
 }

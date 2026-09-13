@@ -84,7 +84,8 @@ final class CashierV3EntitlementProjectionServices
             $includeDisabledCards,
             true,
             $includeUnavailableCards,
-            false
+            false,
+            true
         );
         // Only card holders that actually contribute a projected cart line
         // can be selected from this read model. Legacy data may contain an
@@ -96,7 +97,7 @@ final class CashierV3EntitlementProjectionServices
         $ordersById = [];
         foreach ((array)($snapshot['orders'] ?? []) as $order) {
             $orderId = (int)($order['id'] ?? 0);
-            if ($orderId > 0) {
+            if ($orderId > 0 && $this->sourceOrderUnavailableReason($order) === '') {
                 $ordersById[$orderId] = true;
             }
         }
@@ -127,7 +128,7 @@ final class CashierV3EntitlementProjectionServices
             }
             return $versions;
         });
-        $sources = $this->buildSources($snapshot, [], [], $operatorScope->tenantId(), false);
+        $sources = $this->buildSources($snapshot, [], [], $operatorScope->tenantId(), false, true);
         return [
             'entitlementSelector' => [
                 'ready' => true,
@@ -366,7 +367,8 @@ final class CashierV3EntitlementProjectionServices
         bool $includeDisabledCards = false,
         bool $includeOperationalState = true,
         bool $includeUnavailableCards = false,
-        bool $strictCardOperationState = true
+        bool $strictCardOperationState = true,
+        bool $includeDisplayOnlyCards = false
     ): array {
         if ($lock) {
             CashierV3TransactionGuard::assertInTransaction('loadEntitlementRowsLocked');
@@ -411,7 +413,8 @@ final class CashierV3EntitlementProjectionServices
             $tenantId,
             $lock,
             $includeDisabledCards,
-            $strictCardOperationState
+            $strictCardOperationState,
+            $includeDisplayOnlyCards
         );
         $holderCountsByOrder = [];
         foreach ($holders as $holder) {
@@ -433,14 +436,17 @@ final class CashierV3EntitlementProjectionServices
             $orderQuery = Db::name('store_order')
                 ->field('id,uid,store_id,paid,is_del,is_system_del,is_user_del,refund_status,terminal_action,card_upgrade_use_oid,order_id,mark,pay_price,cash_pay_price,yue_pay_price,debt_amount,repaid_debt_amount')
                 ->whereIn('id', $orderIds)
-                ->where('paid', 1)
-                ->where('is_del', 0)
-                ->where('is_system_del', 0)
-                ->where('is_user_del', 0)
-                ->where('refund_status', 0)
-                ->where('terminal_action', 0)
-                ->where('card_upgrade_use_oid', 0)
                 ->where('store_id', '>', 0);
+            if (!$includeDisplayOnlyCards) {
+                $orderQuery
+                    ->where('paid', 1)
+                    ->where('is_del', 0)
+                    ->where('is_system_del', 0)
+                    ->where('is_user_del', 0)
+                    ->where('refund_status', 0)
+                    ->where('terminal_action', 0)
+                    ->where('card_upgrade_use_oid', 0);
+            }
             if (!$this->crossStoreEnabled()) {
                 $orderQuery->where('store_id', $operatorScope->storeId());
             }
@@ -524,7 +530,8 @@ final class CashierV3EntitlementProjectionServices
         string $tenantId,
         bool $lock,
         bool $includeDisabledCards = false,
-        bool $strict = true
+        bool $strict = true,
+        bool $includeDisplayOnlyCards = false
     ): array
     {
         if ($holders === []) {
@@ -580,6 +587,12 @@ final class CashierV3EntitlementProjectionServices
             // 视图需要展示不可用卡，也不能把它作为权益来源或同步资源版本：
             // 原订单已被标记为升级来源，不再具备独立可用资源的当前版本。
             if ((string)$state['card_status'] === 'upgraded') {
+                if ($includeDisplayOnlyCards) {
+                    $holder['card_operation_status'] = 'upgraded';
+                    $holder['write_start'] = (int)$state['effective_write_start'];
+                    $holder['write_end'] = (int)$state['effective_write_end'];
+                    $out[] = $holder;
+                }
                 continue;
             }
             if ((string)$state['card_status'] !== 'enabled') {
@@ -602,7 +615,8 @@ final class CashierV3EntitlementProjectionServices
         array $holderVersions,
         array $detailVersions,
         string $tenantId,
-        bool $includeVersionFields = true
+        bool $includeVersionFields = true,
+        bool $includeDisplayOnlySources = false
     ): array
     {
         $orders = [];
@@ -644,6 +658,7 @@ final class CashierV3EntitlementProjectionServices
                 continue;
             }
             $ruleAuthority = $ruleAuthoritiesByHolder[(int)$holder['id']][$detailId] ?? null;
+            $sourceOrderUnavailableReason = $this->sourceOrderUnavailableReason($order);
             $pendingDebt = $this->pendingDebt($order, $debts[(int)$order['id']] ?? null);
             $rawSurplus = is_array($ruleAuthority)
                 ? max(0, (int)$ruleAuthority['remainingTimes'])
@@ -693,7 +708,9 @@ final class CashierV3EntitlementProjectionServices
                 || $amounts['remainingAmount'] === null
                 || $amounts['totalPurchaseTimes'] <= 0;
             $reason = '';
-            if ($invalidValidity) {
+            if ($sourceOrderUnavailableReason !== '') {
+                $reason = $sourceOrderUnavailableReason;
+            } elseif ($invalidValidity) {
                 $reason = '权益有效期异常';
             } elseif ($expired) {
                 $reason = $start > $now ? '未到可用时间' : '权益已过期';
@@ -729,11 +746,13 @@ final class CashierV3EntitlementProjectionServices
                 'expiryDate' => $this->expiryDate($end),
                 'orderRemark' => trim((string)($order['mark'] ?? '')),
                 'isGift' => (int)($cart['is_gift'] ?? 0) === 1,
-                'selectable' => !$expired && !$invalidAmount && $available > 0
+                'selectable' => $sourceOrderUnavailableReason === ''
+                    && !$expired && !$invalidAmount && $available > 0
                     && (!is_array($ruleAuthority)
                         || ((string)$ruleAuthority['stateStatus'] === 'active'
                             && !empty($ruleAuthority['choiceAvailable']))),
-                'disabled' => $expired || $invalidAmount || $available <= 0
+                'disabled' => $sourceOrderUnavailableReason !== ''
+                    || $expired || $invalidAmount || $available <= 0
                     || (is_array($ruleAuthority)
                         && ((string)$ruleAuthority['stateStatus'] !== 'active'
                             || empty($ruleAuthority['choiceAvailable']))),
@@ -761,11 +780,14 @@ final class CashierV3EntitlementProjectionServices
         foreach ($snapshot['holders'] as $holder) {
             $holderId = (int)$holder['id'];
             $projects = $projectsByHolder[$holderId] ?? [];
-            if (!$projects || ($includeVersionFields && empty($holderVersions[$holderId]))) {
+            if ((!$projects && !$includeDisplayOnlySources)
+                || ($includeVersionFields && empty($holderVersions[$holderId]))) {
                 continue;
             }
             $operationStatus = (string)($holder['card_operation_status'] ?? 'enabled');
             $cardDisabled = $operationStatus !== 'enabled';
+            $order = $orders[(int)$holder['oid']] ?? [];
+            $sourceOrderUnavailableReason = $this->sourceOrderUnavailableReason($order);
             $remaining = max(0, (int)($holder['write_surplus_times'] ?? 0));
             $purchaseTimes = max(0, (int)($holder['write_times'] ?? 0));
             $occupiedTimes = 0;
@@ -795,17 +817,23 @@ final class CashierV3EntitlementProjectionServices
                 $remaining = (int)$holderRuleAuthority['remainingTimes'];
                 $purchaseTimes = (int)$holderRuleAuthority['totalTimes'];
             }
-            $order = $orders[(int)$holder['oid']] ?? [];
             // 欠款权威归属为该卡来源销售订单。它是卡级余额，不能复制到
             // 每个项目明细，否则一个卡含多个项目时会造成重复展示。
             $outstandingDebtAmount = $this->pendingDebt(
                 $order,
                 $debts[(int)($order['id'] ?? 0)] ?? null
             );
-            $sourceAmounts = $kind['code'] === 'time_card'
+            $sourceAmounts = !$projects
+                ? ['purchaseAmount' => null, 'remainingAmount' => null, 'calculationVersion' => 'display-only-card-v1']
+                : ($kind['code'] === 'time_card'
                 ? $this->timeCardSourceAmounts($order)
-                : $this->sourceAmounts($projects);
+                : $this->sourceAmounts($projects));
             $sourceValidity = $this->effectiveValidity($holder, []);
+            $sourceDisabledReason = $sourceOrderUnavailableReason !== ''
+                ? $sourceOrderUnavailableReason
+                : ($operationStatus === 'upgraded'
+                    ? '已升级为其他卡项，当前不可使用'
+                    : ($cardDisabled ? '卡项已停用' : ''));
             $sources[] = [
                 'id' => $holderId,
                 'entitlementInstanceId' => $holderId,
@@ -828,10 +856,15 @@ final class CashierV3EntitlementProjectionServices
                 'unlimited' => is_array($holderRuleAuthority) && !empty($holderRuleAuthority['unlimited']),
                 'occupiedTimes' => $occupiedTimes,
                 'availableTimes' => $availableTimes,
-                'selectable' => $selectable,
-                'disabled' => $cardDisabled,
-                'statusCode' => $cardDisabled ? 'disabled' : ($selectable ? 'enabled' : 'unavailable'),
-                'status' => $cardDisabled ? '已停用' : ($selectable ? '可用' : '不可用'),
+                'selectable' => !$cardDisabled && $sourceOrderUnavailableReason === '' && $selectable,
+                'disabled' => $cardDisabled || $sourceOrderUnavailableReason !== '',
+                'disabledReason' => $sourceDisabledReason,
+                'statusCode' => $operationStatus === 'upgraded'
+                    ? 'upgraded'
+                    : (($cardDisabled || $sourceOrderUnavailableReason !== '') ? 'disabled' : ($selectable ? 'enabled' : 'unavailable')),
+                'status' => $operationStatus === 'upgraded'
+                    ? '已升级'
+                    : (($cardDisabled || $sourceOrderUnavailableReason !== '') ? '不可用' : ($selectable ? '可用' : '不可用')),
                 'expiryText' => $sourceValidity['label'],
                 'expiryDate' => $this->expiryDate((int)$sourceValidity['end']),
                 'orderRemark' => trim((string)($order['mark'] ?? '')),
@@ -1070,6 +1103,35 @@ final class CashierV3EntitlementProjectionServices
             'remainingAmount' => $paid,
             'calculationVersion' => 'time-card-order-paid-v1',
         ];
+    }
+
+    /**
+     * The selector's “全部” view is an asset history view.  It must show an
+     * existing card even when its origin order is no longer an entitlement
+     * authority, but that row must never become selectable or receive a
+     * resource-version context for a write command.
+     */
+    private function sourceOrderUnavailableReason(array $order): string
+    {
+        if ($order === []) {
+            return '来源订单已不存在，当前不可使用';
+        }
+        if ((int)($order['card_upgrade_use_oid'] ?? 0) > 0) {
+            return '已升级为其他卡项，当前不可使用';
+        }
+        if ((int)($order['terminal_action'] ?? 0) !== 0
+            || (int)($order['is_del'] ?? 0) !== 0
+            || (int)($order['is_system_del'] ?? 0) !== 0
+            || (int)($order['is_user_del'] ?? 0) !== 0) {
+            return '原订单已作废，当前不可使用';
+        }
+        if ((int)($order['refund_status'] ?? 0) !== 0) {
+            return '原订单已退款，当前不可使用';
+        }
+        if ((int)($order['paid'] ?? 0) !== 1) {
+            return '原订单未完成支付，当前不可使用';
+        }
+        return '';
     }
 
     /** @return array{code:string,label:?string} */

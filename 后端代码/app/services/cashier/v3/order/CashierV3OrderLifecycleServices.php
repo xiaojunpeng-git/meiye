@@ -635,10 +635,12 @@ final class CashierV3OrderLifecycleServices
                 || isset($types['entitlement.writeoff.completed'])
                 || isset($types['performance.labor.allocated'])
                 || isset($types['performance.consumption.recorded']),
-            'card' => isset($types['card.operation.settled']) || isset($types['card.operation.recorded']),
-            'attribution' => isset($types['service.completed'])
-                || isset($types['performance.consumption.recorded'])
-                || isset($types['performance.labor.allocated']),
+            // Multi-card upgrades have no card-operation/version ledger;
+            // their immutable snapshot emits its own checkout event and must
+            // enter the same atomic void/recovery boundary.
+            'card' => isset($types['card.operation.settled'])
+                || isset($types['card.operation.recorded'])
+                || isset($types['card.multi_upgrade.settled']),
             'presale' => isset($types['gift.consumed'])
                 || isset($types['entitlement.writeoff.completed']),
         ];

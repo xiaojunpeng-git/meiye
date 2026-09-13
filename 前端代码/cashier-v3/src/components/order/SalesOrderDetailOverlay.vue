@@ -559,6 +559,19 @@ function relationRecordId(record) {
   return pickValue(record, ['id', 'recordId', 'relationId', 'refundId', 'serviceId', 'writeoffId'])
 }
 
+function upgradeSourceCards(record) {
+  return firstList(record, ['sourceCards', 'source_cards', 'sources'])
+}
+
+function upgradeSourceCardLabel(source) {
+  const name = displayText(pickValue(source, ['name', 'cardName', 'sourceCardName']), '旧卡')
+  const cardNo = displayText(pickValue(source, ['cardNo', 'fullCardNo', 'sourceCardNo']), '')
+  const remaining = displayAmount(pickValue(source, ['remainingValue', 'sourceRemainingValue']))
+  const credit = displayAmount(pickValue(source, ['creditAmount', 'entitlementCreditAmount']))
+  const writeoff = Number(pickValue(source, ['excessWriteoffAmount', 'excessWriteoff']) || 0)
+  return `${name}${cardNo ? `（${cardNo}）` : ''}：旧卡价值 ${remaining}，本次抵扣 ${credit}${writeoff > 0 ? `，超额作废 ${displayAmount(writeoff)}` : ''}`
+}
+
 function operationKey(record, index) {
   return pickValue(record, ['id', 'operationId', 'logId']) || `${operationLabel(record)}-${index}`
 }
@@ -830,9 +843,22 @@ async function runAction(action, payload = {}) {
             <article v-for="group in relatedGroups" :key="group.key" class="sales-order-detail-related-card">
               <header><h4>{{ group.label }}</h4><span>{{ group.records.length ? '已有关联记录' : '可继续处理' }}</span></header>
               <div v-if="group.records.length" class="sales-order-detail-related-card__records">
+                <template v-for="(record, index) in group.records" :key="relationRecordId(record) || `${relationRecordLabel(record)}-${index}`">
+                <article
+                  v-if="group.key === 'upgrade' && upgradeSourceCards(record).length"
+                  class="sales-order-detail-related-record sales-order-detail-related-record--upgrade"
+                >
+                  <strong>{{ relationRecordLabel(record) }}</strong>
+                  <span v-if="relationRecordStatus(record)">{{ relationRecordStatus(record) }}</span>
+                  <span class="sales-order-detail-upgrade-credit-total">
+                    旧卡抵扣合计 {{ displayAmount(record.entitlementCreditAmount) }}
+                  </span>
+                  <span v-for="(source, sourceIndex) in upgradeSourceCards(record)" :key="`${relationRecordId(record)}-source-${source.lineNo || sourceIndex}`" class="sales-order-detail-upgrade-source-card">
+                    {{ upgradeSourceCardLabel(source) }}
+                  </span>
+                </article>
                 <button
-                  v-for="(record, index) in group.records"
-                  :key="relationRecordId(record) || `${relationRecordLabel(record)}-${index}`"
+                  v-else
                   type="button"
                   :disabled="Boolean(pendingAction)"
                   @click="runAction(group.action, { relationType: group.key, relationId: relationRecordId(record) })"
@@ -840,6 +866,7 @@ async function runAction(action, payload = {}) {
                   <strong>{{ relationRecordLabel(record) }}</strong>
                   <span v-if="relationRecordStatus(record)">{{ relationRecordStatus(record) }}</span>
                 </button>
+                </template>
               </div>
               <button
                 v-else
@@ -1346,8 +1373,10 @@ async function runAction(action, payload = {}) {
   margin-top: 12px;
 }
 
-.sales-order-detail-related-card__records button {
+.sales-order-detail-related-card__records button,
+.sales-order-detail-related-record {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -1361,6 +1390,12 @@ async function runAction(action, payload = {}) {
   text-align: left;
 }
 
+.sales-order-detail-related-record--upgrade {
+  cursor: default;
+  background: #f8fffc;
+  border-color: #b7e4d5;
+}
+
 .sales-order-detail-related-card__records button:hover:not(:disabled) {
   border-color: #b2ddff;
   background: #f5faff;
@@ -1370,6 +1405,21 @@ async function runAction(action, payload = {}) {
   flex: 0 0 auto;
   color: #7a8494;
   font-size: 12px;
+}
+
+.sales-order-detail-related-card__records .sales-order-detail-upgrade-credit-total,
+.sales-order-detail-related-card__records .sales-order-detail-upgrade-source-card {
+  flex: 1 0 100%;
+}
+
+.sales-order-detail-related-card__records .sales-order-detail-upgrade-credit-total {
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.sales-order-detail-related-card__records .sales-order-detail-upgrade-source-card {
+  color: #526174;
+  line-height: 1.55;
 }
 
 .sales-order-detail-operation-list {
