@@ -112,7 +112,7 @@ final class CashierV3OrderLifecycleServices
         // final guard; this plan only prevents unrelated domain work.
         $occurredEvents = $action === 'void-sales-order'
             ? $this->occurredCheckoutEvents($source, $dataScope)
-            : ['checkout' => true, 'inventory' => true, 'service' => true, 'card' => true, 'attribution' => true, 'presale' => true];
+            : ['checkout' => true, 'inventory' => true, 'service' => true, 'card' => true, 'presale' => true];
         $commandKey = trim((string)($scope['idempotency_key'] ?? ''));
         if ($commandKey === '') throw self::failure('order_lifecycle_idempotency_missing');
         $input = $this->input($action, (array)($scope['payload'] ?? []), $source);
@@ -198,7 +198,11 @@ final class CashierV3OrderLifecycleServices
                     (string)($scope['state_context_id'] ?? '')
                 );
             }
-            if ($action === 'void-sales-order' && $occurredEvents['attribution']) {
+            if ($action === 'void-sales-order') {
+                // Attribution facts are created during sale checkout, not
+                // only after a completed-service event. Closing them is
+                // idempotent when the order has none and mandatory when it
+                // does, otherwise a voided sale still appears in attribution.
                 $this->voidOrderAttributionFactsInTx($source, $dataScope);
             }
             if ($action === 'refund-sales-order') {
