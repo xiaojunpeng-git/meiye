@@ -23,6 +23,11 @@ $check(is_string($entry) && strpos($entry,"currentMobilePlatform() === 'MP_WEIXI
     'the WeChat panel applies its capsule-safe layout only on the native mini-program target');
 $check(is_string($entry) && strpos($entry,'.ai-panel--native-mini{padding-top:84px}')!==false,
     'the native mini-program panel reserves the capsule strip before rendering AI actions');
+$check(is_string($entry) && strpos($entry,'class="ai-user-turn"')!==false
+    && strpos($entry,'>你问</text>')!==false
+    && strpos($entry,'class="ai-answer-turn"')!==false
+    && strpos($entry,'>魔核 AI</text>')!==false,
+    'each retained turn labels the customer question and the AI answer as separate visual blocks');
 $check(is_string($entry) && strpos($entry,"runtimeKey = 'mohe-ai:v1:runtime:'")!==false
     && strpos($entry,'function persistActive(retired : boolean = false,claim : boolean = false,replaceResolved : boolean = false)')!==false && strpos($entry,'function resumeActive(record : any)')!==false,
     'an accepted or pending Run survives a panel reload long enough to resume or cancel it');
