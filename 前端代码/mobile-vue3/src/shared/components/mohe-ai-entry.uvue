@@ -1,6 +1,6 @@
 <template>
   <view v-if="enabled" class="ai-entry" role="button" aria-label="打开魔核 AI" @tap="openPanel"><text>魔核 AI</text></view>
-  <view v-if="opened" class="ai-panel">
+  <view v-if="opened" class="ai-panel" :class="{ 'ai-panel--native-mini': platformUsesNativeCanvas }">
     <view class="ai-head"><text class="ai-title">魔核 AI</text><button size="mini" @tap="showHistory">历史</button><button size="mini" @tap="newConversation">新对话</button><button size="mini" @tap="closePanel">关闭</button></view>
     <scroll-view scroll-y="true" class="ai-messages">
       <text class="ai-note">会话仅存本设备，保留 24 小时。指标与权限以报表为准。</text>
@@ -28,7 +28,11 @@
 </template>
 <script setup lang="uts">
 import { mobileAiRequest, downloadMobileAi } from '../api/mobile-ai-client.uts'
+import { currentMobilePlatform } from '../platform/mobile-platform.uts'
 const enabled = ref(false), opened = ref(false), busy = ref(false)
+// The WeChat mini-program draws its native capsule above the page WebView.
+// Keep panel actions below that reserved strip without changing H5/App layout.
+const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
 const question = ref(''), progress = ref(''), displayed = ref<Array<any>>([])
 const clarification = ref<any>(null), choices = ref<any>({}), choiceLabels = ref<any>({})
 const guidanceSchema = 'mohe-clarification-v2'
@@ -37,13 +41,16 @@ let guidanceSubmission : any = null, activeGuidanceSchema = ''
 const wantExcel = ref(false), exportReady = ref(false)
 const excelAvailable = ref(false)
 let bootstrap : any = null, run : any = null, pending : any = null
-let conversation = '', storageKey = '', sessionId = '', timer : any = null, expiryTimer : any = null, closeRequested = false
+let conversation = '', storageKey = '', runtimeKey = '', sessionId = '', timer : any = null, expiryTimer : any = null, closeRequested = false
 function id() : string { return 'device-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) }
 function questionHint() : string { return bootstrap != null && bootstrap.capabilities != null && Array.isArray(bootstrap.capabilities.metric_codes) && bootstrap.capabilities.metric_codes.indexOf('consume_amount') >= 0 ? '例如：今天本店消耗业绩多少？' : '请输入要查询的指标和日期' }
 function tooltipText(value : any) : string { if (value == null) return ''; if (typeof value == 'string') return String(value); let lines : Array<string> = []; ['summary','include','exclude','timing','note'].forEach((key : string) => { if (typeof value[key] == 'string' && String(value[key]).length > 0) { let label = key == 'include' ? '包含：' : key == 'exclude' ? '不包含：' : key == 'timing' ? '统计时间：' : key == 'note' ? '说明：' : ''; lines.push(label + String(value[key])) } }); return lines.join('\n') }
 function terminal() : boolean { return run != null && ['COMPLETED','PARTIAL_SUCCEEDED','FAILED','CANCELLED'].indexOf(String(run.status)) >= 0 }
 function load() : Array<any> { let raw = uni.getStorageSync(storageKey); let now = Date.now(); let all : Array<any> = []; if (Array.isArray(raw)) raw.forEach((s : any) => { if (s != null && typeof s.id == 'string' && Number.isSafeInteger(s.created_at) && s.created_at <= now && s.created_at + 86400000 > now && Array.isArray(s.rounds)) { s.rounds = s.rounds.filter((r : any) => r != null && typeof r.question == 'string' && typeof r.answer == 'string' && Number.isSafeInteger(r.created_at) && r.created_at <= now && r.created_at + 86400000 > now); all.push(s) } }); uni.setStorageSync(storageKey,all); return all }
-function newConversation() : void { if (busy.value || (pending != null && run == null)) return; let all = load(); conversation = id(); all.push({id:conversation,created_at:Date.now(),rounds:[]}); uni.setStorageSync(storageKey,all); displayed.value = []; run = null; clarification.value = null; clearGuidance(); exportReady.value = false }
+function activeRecord() : any { let value = uni.getStorageSync(runtimeKey); let now = Date.now(); if (value == null || typeof value.session_id != 'string' || typeof value.conversation_id != 'string' || !Number.isSafeInteger(value.created_at) || value.created_at > now || value.created_at + 86400000 <= now || (value.run == null && value.pending == null)) { if (runtimeKey.length > 0) uni.removeStorageSync(runtimeKey); return null }; return value }
+function persistActive() : void { if (runtimeKey.length == 0) return; if ((run == null && pending == null) || terminal()) { uni.removeStorageSync(runtimeKey); return }; uni.setStorageSync(runtimeKey,{created_at:Date.now(),session_id:sessionId,conversation_id:conversation,close_requested:closeRequested,run:run,pending:pending}) }
+function clearActive() : void { if (runtimeKey.length > 0) uni.removeStorageSync(runtimeKey) }
+function newConversation() : void { if (busy.value || (pending != null && run == null)) return; let all = load(); conversation = id(); all.push({id:conversation,created_at:Date.now(),rounds:[]}); uni.setStorageSync(storageKey,all); displayed.value = []; run = null; clarification.value = null; clearGuidance(); exportReady.value = false; clearActive() }
 function openPanel() : void { opened.value = true; if (conversation.length == 0) newConversation() }
 function binding() : any { return {client_session_id:sessionId,generation:run.generation,run_delivery_token:run.run_delivery_token} }
 function schedulePoll() : void { if (timer != null) clearTimeout(timer); timer = setTimeout(() => { if (run == null || terminal()) return; mobileAiRequest('GET','/runs/' + run.run_id,binding(),(r : any) => { if (r.ok) { accept(r.data); if (!terminal() && (run.status != 'WAITING_CLARIFICATION' || closeRequestedState.value)) schedulePoll() } else { progress.value = closeRequestedState.value ? '暂未确认取消结果。' : '连接中断，暂未确认任务结果。'; schedulePoll() } }) },1500) }
@@ -54,8 +61,8 @@ function accept(value : any) : void {
   if (run != null && value.run_delivery_token == null) value.run_delivery_token = run.run_delivery_token
   run = value; progress.value = typeof run.progress == 'string' ? run.progress : '正在处理'
   if (terminal()) { busy.value = false; clarification.value = null; clearGuidance(); if (timer != null) clearTimeout(timer)
-    if (run.answer != null && ['COMPLETED','PARTIAL_SUCCEEDED'].indexOf(String(run.status)) >= 0) { let answer = run.answer; exportReady.value = answer.export != null && answer.export.file_ref != null; let row : any = {question:pending.question,answer:String(answer.summary || ''),cards:answer.cards || [],table:answer.table || null,presentation:answer,created_at:Date.now()}; displayed.value.push(row); let all = load(); all.forEach((s : any) => { if (s.id == conversation) s.rounds.push(row) }); uni.setStorageSync(storageKey,all) }
-    else progress.value = run.status == 'CANCELLED' ? '已取消' : '本次未能完成，请重新提问。'; pending = null; return }
+    if (run.answer != null && ['COMPLETED','PARTIAL_SUCCEEDED'].indexOf(String(run.status)) >= 0 && pending != null && typeof pending.question == 'string') { let answer = run.answer; exportReady.value = answer.export != null && answer.export.file_ref != null; let row : any = {question:pending.question,answer:String(answer.summary || ''),cards:answer.cards || [],table:answer.table || null,presentation:answer,created_at:Date.now()}; displayed.value.push(row); let all = load(); all.forEach((s : any) => { if (s.id == conversation) s.rounds.push(row) }); uni.setStorageSync(storageKey,all) }
+    else progress.value = run.status == 'CANCELLED' ? '已取消' : '本次未能完成，请重新提问。'; pending = null; clearActive(); return }
   if (run.status == 'WAITING_CLARIFICATION' && !closeRequestedState.value) {
     let c = run.clarification
     if (!validGuidance(c)) { clarification.value = null; clearGuidance(); progress.value = '引导信息不完整，请重新确认任务状态。'; return }
@@ -63,17 +70,20 @@ function accept(value : any) : void {
     let same = clarification.value != null && clarification.value.id == c.id && clarification.value.step_revision == c.step_revision && clarification.value.intent_revision == c.intent_revision
     clarification.value = c; if (!same) clearGuidance()
   } else { clarification.value = null; clearGuidance(); schedulePoll() }
+  persistActive()
 }
 function submit() : void {
-  if (busy.value || question.value.trim().length == 0) return
+  if (busy.value || (pending == null && question.value.trim().length == 0)) return
   let history : Array<any> = []; let contextRef = ''
   load().forEach((s : any) => { if (s.id == conversation) { s.rounds.slice(-20).forEach((r : any) => history.push({question:r.question,answer:r.answer})); if (s.rounds.length > 0) { let last = s.rounds[s.rounds.length - 1]; if (last.presentation != null && typeof last.presentation.context_ref == 'string') contextRef = last.presentation.context_ref } } })
   if (pending == null) { activeGuidanceSchema = String(bootstrap.guidance_schema_version || ''); pending = {client_request_id:id(),conversation_id:conversation,client_session_id:sessionId,window_token:bootstrap.window_token,question:question.value.trim(),history:history,output_format:wantExcel.value ? 'screen_and_xlsx' : 'screen'}; if (activeGuidanceSchema == guidanceSchema) pending.guidance_schema_version = guidanceSchema; if (contextRef.length > 0) pending.context_ref = contextRef }
+  let restoringCancelledRequest = pending != null && closeRequested
   exportReady.value = false
-  busy.value = true; closeRequested = false; closeRequestedState.value = false; run = null; question.value = ''; progress.value = '正在接纳请求'
-  mobileAiRequest('POST','/runs',pending,(r : any) => { if (!r.ok) { busy.value = false; question.value = pending.question; if (r.responseKnown) { pending = null; progress.value = r.message } else progress.value = '请求结果暂未确认，再次发送将重试同一任务。'; return }; if (r.data.accepted === false) { busy.value = false; pending = null; progress.value = r.data.message || '当前使用人数较多，请稍后再问。'; return }; accept(r.data); if (terminal()) return; if (closeRequested) { cancelRun(); return }; let body : any = binding(); body.question = pending.question; body.history = pending.history; body.output_format = pending.output_format; if (pending.context_ref != null) body.context_ref = pending.context_ref; mobileAiRequest('POST','/runs/' + run.run_id + '/execute',body,(e : any) => { if (e.ok) accept(e.data); else schedulePoll() }) })
+  busy.value = true; closeRequested = restoringCancelledRequest; closeRequestedState.value = restoringCancelledRequest; run = null; question.value = ''; progress.value = '正在接纳请求'
+  persistActive()
+  mobileAiRequest('POST','/runs',pending,(r : any) => { if (!r.ok) { busy.value = false; question.value = pending.question; if (r.responseKnown) { pending = null; clearActive(); progress.value = r.message } else progress.value = '请求结果暂未确认，再次发送将重试同一任务。'; return }; if (r.data.accepted === false) { busy.value = false; pending = null; clearActive(); progress.value = r.data.message || '当前使用人数较多，请稍后再问。'; return }; accept(r.data); if (terminal()) return; if (closeRequested) { cancelRun(); return }; let body : any = binding(); body.question = pending.question; body.history = pending.history; body.output_format = pending.output_format; if (pending.context_ref != null) body.context_ref = pending.context_ref; mobileAiRequest('POST','/runs/' + run.run_id + '/execute',body,(e : any) => { if (e.ok) accept(e.data); else schedulePoll() }) })
 }
-function cancelRun() : void { closeRequested = true; closeRequestedState.value = true; if (run == null || terminal()) return; progress.value = '正在取消'; mobileAiRequest('POST','/runs/' + run.run_id + '/cancel',binding(),(r : any) => { if (r.ok) accept(r.data); else { progress.value = '暂未确认取消结果。'; schedulePoll() } }) }
+function cancelRun() : void { closeRequested = true; closeRequestedState.value = true; persistActive(); if (run == null || terminal()) return; progress.value = '正在取消'; mobileAiRequest('POST','/runs/' + run.run_id + '/cancel',binding(),(r : any) => { if (r.ok) accept(r.data); else { progress.value = '暂未确认取消结果。'; schedulePoll() } }) }
 function closePanel() : void { cancelRun(); opened.value = false }
 function downloadExcel() : void { if (run == null || !terminal() || !exportReady.value) return; downloadMobileAi(run,sessionId,String(run.answer.export.filename || '经营数据.xlsx'),(message : string) => { progress.value = message }) }
 function validGuidance(c : any) : boolean {
@@ -134,10 +144,12 @@ function confirmChoices() : void {
     else { if (r.responseKnown) { guidanceSubmission = null; guidanceUnknown.value = false; progress.value = r.message } else { guidanceUnknown.value = true; progress.value = '提交结果暂未确认，请重试确认同一次选择。' } }
   })
 }
+function resumeActive(record : any) : void { conversation = record.conversation_id; run = record.run; pending = record.pending; closeRequested = record.close_requested === true; closeRequestedState.value = closeRequested; busy.value = true; if (run == null) { if (pending == null) { busy.value = false; clearActive(); return }; pending.client_session_id = sessionId; pending.window_token = bootstrap.window_token; persistActive(); busy.value = false; submit(); return }; mobileAiRequest('GET','/runs/' + run.run_id,binding(),(r : any) => { if (r.ok) accept(r.data); else { busy.value = false; pending = null; run = null; closeRequested = false; closeRequestedState.value = false; clearActive(); progress.value = '上一次任务已失效，请重新提问。' } }) }
+function bootstrapSession(restore : boolean = false) : void { mobileAiRequest('GET','/bootstrap',{client_session_id:sessionId},(r : any) => { if (!r.ok || !r.data.enabled) return; bootstrap = r.data; storageKey = 'mohe-ai:v1:' + encodeURIComponent(String(bootstrap.identity_key)); runtimeKey = 'mohe-ai:v1:runtime:' + encodeURIComponent(String(bootstrap.identity_key)); let record = activeRecord(); if (!restore && record != null && record.session_id != sessionId) { sessionId = record.session_id; bootstrapSession(true); return }; excelAvailable.value = bootstrap.capabilities != null && Array.isArray(bootstrap.capabilities.output_formats) && bootstrap.capabilities.output_formats.indexOf('screen_and_xlsx') >= 0; enabled.value = true; if (record != null) resumeActive(record) }) }
 function showHistory() : void { if (busy.value || (pending != null && run == null)) return; let all = load(); if (all.length == 0) return; uni.showActionSheet({itemList:all.map((s : any) => s.rounds.length > 0 ? String(s.rounds[0].question).slice(0,25) : '新对话'),success:(r : any) => { conversation = all[r.tapIndex].id; displayed.value = all[r.tapIndex].rounds; run = null; exportReady.value = false }}) }
-onMounted(() => { sessionId = id(); mobileAiRequest('GET','/bootstrap',{client_session_id:sessionId},(r : any) => { if (!r.ok || !r.data.enabled) return; bootstrap = r.data; storageKey = 'mohe-ai:v1:' + encodeURIComponent(String(bootstrap.identity_key)); excelAvailable.value = bootstrap.capabilities != null && Array.isArray(bootstrap.capabilities.output_formats) && bootstrap.capabilities.output_formats.indexOf('screen_and_xlsx') >= 0; enabled.value = true }); expiryTimer = setInterval(() => { if (storageKey.length > 0 && !load().some((s : any) => s.id == conversation)) { displayed.value = []; progress.value = '会话已到期，请新建对话。' } },30000) })
+onMounted(() => { sessionId = id(); bootstrapSession(); expiryTimer = setInterval(() => { if (storageKey.length > 0 && !load().some((s : any) => s.id == conversation)) { displayed.value = []; progress.value = '会话已到期，请新建对话。' } },30000) })
 onUnmounted(() => { cancelRun(); if (timer != null) clearTimeout(timer); if (expiryTimer != null) clearInterval(expiryTimer) })
 </script>
 <style>
-.ai-entry{position:fixed;left:0;top:50%;z-index:9999;background-color:#5142b5;padding:12px;border-radius:0 12px 12px 0;color:#fff}.ai-panel{position:fixed;left:12px;right:12px;top:40px;bottom:30px;z-index:10000;background-color:#fff;border-radius:16px;padding:14px;display:flex;flex-direction:column}.ai-head{display:flex;flex-direction:row;align-items:center;gap:6px}.ai-title{font-size:18px;flex:1}.ai-messages{flex:1;height:0}.ai-message{padding:12px;margin-top:10px;background-color:#f5f6fa;border-radius:10px}.ai-question{display:block;color:#5142b5;margin-bottom:8px}.ai-note{font-size:12px;color:#65758b}.ai-card{padding:12px;margin-top:8px;background-color:#fff}.ai-number{display:block;font-size:26px;color:#1f5f8b}.ai-input{height:70px;width:100%;background-color:#f5f6fa}.ai-footer{padding-top:12px}.ai-choice{padding:8px;display:block;color:#5142b5}
+.ai-entry{position:fixed;left:0;top:50%;z-index:9999;background-color:#5142b5;padding:12px;border-radius:0 12px 12px 0;color:#fff}.ai-panel{position:fixed;left:12px;right:12px;top:40px;bottom:30px;z-index:10000;background-color:#fff;border-radius:16px;padding:14px;display:flex;flex-direction:column}.ai-panel--native-mini{padding-top:84px}.ai-head{display:flex;flex-direction:row;align-items:center;gap:6px}.ai-title{font-size:18px;flex:1}.ai-messages{flex:1;height:0}.ai-message{padding:12px;margin-top:10px;background-color:#f5f6fa;border-radius:10px}.ai-question{display:block;color:#5142b5;margin-bottom:8px}.ai-note{font-size:12px;color:#65758b}.ai-card{padding:12px;margin-top:8px;background-color:#fff}.ai-number{display:block;font-size:26px;color:#1f5f8b}.ai-input{height:70px;width:100%;background-color:#f5f6fa}.ai-footer{padding-top:12px}.ai-choice{padding:8px;display:block;color:#5142b5}
 </style>

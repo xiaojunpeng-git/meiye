@@ -56,6 +56,11 @@ final class AiRunStore
         if (!preg_match('/^[a-f0-9]{64}$/D',$snapshot['capability_snapshot_hash'])) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); }
         return $this->transaction(function () use ($owner, $requestId, $requestHash, $snapshot, $budgetMs, $capacity, $activeLimit) {
             $now = $this->now();
+            // A new request is also an admission checkpoint.  The background
+            // supervisor is intentionally best-effort, so it must not be the
+            // only way a disconnected client can stop an expired Run from
+            // blocking its next question.
+            $this->reconcileAdmissionRuns($owner,$now);
             $receiptKey = hash('sha256', json_encode([$this->instance,$owner['account_id'],$owner['terminal'],$owner['conversation_id'],$requestId]));
             $old = $this->one('SELECT * FROM '.$this->table('receipt').' WHERE instance_id=? AND receipt_key=?', [$this->instance,$receiptKey]);
             if ($old) {
@@ -484,6 +489,30 @@ final class AiRunStore
             if (++$failures>=5) return $latest+120000>$now?'CIRCUIT_OPEN':'';
         }
         return '';
+    }
+
+    /**
+     * Admission may safely retire work that cannot still be doing business
+     * work: expired logical Runs, expired clarification waits, and an
+     * unclaimed/paused conversation abandoned by the same authenticated
+     * account.  It deliberately never releases a worker-held slot and never
+     * supersedes an executing/exporting worker: those remain fenced until the
+     * worker itself stops or the normal deadline/quarantine path resolves it.
+     */
+    private function reconcileAdmissionRuns(array $owner,int $now): void
+    {
+        $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\', reason=CASE WHEN status=\'WAITING_EXPORT\' THEN \'AI_EXPORT_DEADLINE\' ELSE \'DEADLINE_EXCEEDED\' END, last_clock_at=?, slot_held=CASE WHEN worker_token=\'\' THEN 0 ELSE slot_held END, version=version+1 WHERE instance_id=? AND status NOT IN (\'COMPLETED\',\'PARTIAL_SUCCEEDED\',\'FAILED\',\'CANCELLED\',\'WAITING_CLARIFICATION\') AND deadline_at<=?',[$now,$this->instance,$now]);
+        foreach ($this->rows('SELECT run_id,pause_at,counters_json FROM '.$this->table('run').' WHERE instance_id=? AND account_id=? AND terminal=? AND status=\'WAITING_CLARIFICATION\'',[$this->instance,$owner['account_id'],$owner['terminal']]) as $waiting) {
+            $waited=(int)((json_decode($waiting['counters_json'],true)?:[])['clarification_wait_ms']??0);
+            if ($now-(int)$waiting['pause_at']+$waited>=600000) {
+                $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\', reason=\'CLARIFICATION_EXPIRED\', last_clock_at=?, version=version+1 WHERE instance_id=? AND run_id=?',[$now,$this->instance,$waiting['run_id']]);
+            }
+        }
+        // No external work exists before claim or while waiting for a human
+        // choice.  Starting a different conversation explicitly abandons
+        // those states, rather than forcing the user to recover a panel that
+        // may have been closed or reloaded.
+        $this->execute('UPDATE '.$this->table('run').' SET status=\'CANCELLED\', reason=\'SUPERSEDED\', last_clock_at=?, slot_held=0, version=version+1 WHERE instance_id=? AND account_id=? AND terminal=? AND conversation_id<>? AND worker_token=\'\' AND status IN (\'RECEIVED\',\'WAITING_CLARIFICATION\')',[$now,$this->instance,$owner['account_id'],$owner['terminal'],$owner['conversation_id']]);
     }
 
     /** No subject identifiers or messages in aggregate diagnostics; underlying rows expire at 24 h. */

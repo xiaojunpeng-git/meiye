@@ -18,5 +18,18 @@ $check(strpos($source,'done({ok:true,data:body})')!==false,
 $entry=file_get_contents(dirname(__DIR__,2).'/前端代码/mobile-vue3/src/shared/components/mohe-ai-entry.uvue');
 $check(is_string($entry) && strpos($entry,'role="button"')!==false && strpos($entry,'aria-label="打开魔核 AI"')!==false,
     'the visible AI entry exposes an accessible interactive control');
+$check(is_string($entry) && strpos($entry,"currentMobilePlatform() === 'MP_WEIXIN'")!==false
+    && strpos($entry,"'ai-panel--native-mini': platformUsesNativeCanvas")!==false,
+    'the WeChat panel applies its capsule-safe layout only on the native mini-program target');
+$check(is_string($entry) && strpos($entry,'.ai-panel--native-mini{padding-top:84px}')!==false,
+    'the native mini-program panel reserves the capsule strip before rendering AI actions');
+$check(is_string($entry) && strpos($entry,"runtimeKey = 'mohe-ai:v1:runtime:'")!==false
+    && strpos($entry,'function persistActive()')!==false && strpos($entry,'function resumeActive(record : any)')!==false,
+    'an accepted or pending Run survives a panel reload long enough to resume or cancel it');
+$check(is_string($entry) && strpos($entry,'if (closeRequested) { cancelRun(); return }')!==false
+    && strpos($entry,"pending.client_session_id = sessionId; pending.window_token = bootstrap.window_token")!==false,
+    'a restored closed panel replays only the idempotent admission and then cancels the recovered Run');
+$check(is_string($entry) && strpos($entry,'clearActive(); progress.value = r.message')!==false,
+    'known admission failures clear only the stale local task record instead of blocking the next question');
 
 echo 'PASS mobile AI entry transport: '.$checks." checks\n";

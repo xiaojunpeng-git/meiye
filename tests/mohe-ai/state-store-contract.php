@@ -90,4 +90,28 @@ checkState((int)$db->query('SELECT COUNT(*) FROM mohe_ai_receipt')->fetchColumn(
 checkState($store->create($owner,'afterexpiry',$hash,$snapshot,180000,1)['reason']==='CAPACITY_REJECTED','no unsafe expiry recovery');
 $badSnapshot=$snapshot; $badSnapshot['question']='never persist me';
 rejectsState(function () use ($store,$owner,$hash,$badSnapshot) { $store->create($owner,'bad',$hash,$badSnapshot); },'AI_SNAPSHOT_INVALID');
+
+// A panel can close between acceptance and execution.  That Run has no worker
+// and therefore must never make a later, explicitly new conversation wait for
+// a task that cannot be doing work.
+$admissionDb=new PDO('sqlite::memory:'); installAiStateFixture($admissionDb); $admissionNow=5000000;
+$admission=new AiRunStore($admissionDb,'','admission-reconcile',function () use (&$admissionNow) { return $admissionNow; });
+$firstOwner=['account_id'=>8,'terminal'=>'merchant','conversation_id'=>'first','window_id'=>'window'];
+$nextOwner=$firstOwner; $nextOwner['conversation_id']='next';
+$orphan=$admission->create($firstOwner,'orphan',$hash,$snapshot,180000,2)['run'];
+$replacement=$admission->create($nextOwner,'replacement',$hash,$snapshot,180000,2);
+checkState($replacement['accepted'],'new conversation admits after safe unclaimed orphan reconciliation');
+checkState($admission->get($firstOwner,$orphan['run_id'],$orphan['generation'])['status']==='CANCELLED','unclaimed foreign conversation is superseded');
+
+// Deadline reconciliation is also part of admission.  A worker-held slot is
+// still retained for physical safety, but its expired logical Run cannot turn
+// into an OTHER_CONVERSATION_ACTIVE deadlock.
+$deadlineDb=new PDO('sqlite::memory:'); installAiStateFixture($deadlineDb); $deadlineNow=6000000;
+$deadlineStore=new AiRunStore($deadlineDb,'','deadline-reconcile',function () use (&$deadlineNow) { return $deadlineNow; });
+$deadlineOwner=['account_id'=>9,'terminal'=>'merchant','conversation_id'=>'old','window_id'=>'window'];
+$deadlineRun=$deadlineStore->create($deadlineOwner,'old-request',$hash,$snapshot,5000,2)['run'];
+checkState($deadlineStore->claim($deadlineOwner,$deadlineRun['run_id'],$deadlineRun['generation'],'deadline-worker'),'deadline fixture claimed');
+$deadlineNow+=5000; $newDeadlineOwner=$deadlineOwner; $newDeadlineOwner['conversation_id']='new';
+checkState($deadlineStore->create($newDeadlineOwner,'new-request',$hash,$snapshot,180000,2)['accepted'],'expired foreign Run no longer blocks a new conversation');
+checkState($deadlineStore->get($deadlineOwner,$deadlineRun['run_id'],$deadlineRun['generation'])['status']==='FAILED','admission terminalizes expired Run');
 echo 'PASS '.$checks." transactional state checks (isolated SQLite; no production DB).\n";
