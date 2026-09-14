@@ -35,5 +35,24 @@ try {
     sbgCheck(\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($plain,$candidate,false),'one fresh positive metric may use candidate-blind ambiguity review');
     sbgCheck(!\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($h->understandingOverride,$candidate,false),'an exclusion makes candidate-blind ambiguity ineligible');
     sbgCheck(!\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($plain,$candidate,true),'a follow-up never defers by candidate-blind ambiguity');
+    $recommended=$candidate+['recommended_initial_answer'=>true,'initial_observation'=>false];
+    sbgCheck(\app\services\ai\contract\AiIntentResultContract::canDeferRejectedRecommendation($plain,$recommended,false),
+        'a rejected broad professional recommendation becomes a safe registry choice rather than a failed run');
+    $excludedRecommended=$recommended;
+    sbgCheck(!\app\services\ai\contract\AiIntentResultContract::canDeferRejectedRecommendation($h->understandingOverride,$excludedRecommended,false),
+        'a rejected recommendation with an exclusion remains blocked before any query');
+    $recommendedHarness=new R6GatewayHarness(3,[1,2],'merchant');
+    try {
+        $recommendedHarness->understandingOverride=$plain;
+        $recommendedHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['cash_performance'],'action_codes'=>[],
+            'needs_metric_choice'=>false,'recommended_initial_answer'=>true,'initial_observation'=>false,
+            'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'authorized',
+            'requirement_bindings'=>[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']]],'unresolved_fragments'=>[]];
+        $recommendedHarness->bindingVerificationOverride=['decision'=>'reject','rejected_requirement_ids'=>['r1']];
+        $before=$recommendedHarness->queries;
+        $deferred=$recommendedHarness->start('收款');
+        sbgCheck(($deferred['status']??null)==='WAITING_CLARIFICATION' && $recommendedHarness->queries===$before,
+            'a reviewer rejection of a broad first answer opens the registered choice without reading data');
+    } finally { $recommendedHarness->close(); }
     echo 'PASS semantic binding guard: '.$checks." checks (offline)\n";
 } finally { $h->close(); }

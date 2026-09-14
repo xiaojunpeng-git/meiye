@@ -456,6 +456,30 @@ final class AiIntentResultContract
         return count($requirements)===1;
     }
 
+    /**
+     * A first-answer recommendation is a model-owned professional reading of
+     * one broad, positive measurement requirement. If the independent
+     * reviewer cannot admit that recommendation, the safe customer outcome
+     * is a registered choice—not a technical failure and never execution of
+     * the rejected candidate. This deliberately inspects protocol shape only:
+     * it contains no language, metric, role or report-specific rule.
+     */
+    public static function canDeferRejectedRecommendation(array $understanding,array $intent,bool $customerConfirmedChoice): bool
+    {
+        if ($customerConfirmedChoice || !($intent['recommended_initial_answer']??false)
+            || ($intent['initial_observation']??false) || ($intent['needs_metric_choice']??false)
+            || empty($intent['metric_codes']) || !is_array($intent['metric_codes'])) return false;
+        $requirements=[];
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            if (!in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
+            // A negation or exclusion must never be converted into a generic
+            // selector after the semantic gate rejected the candidate.
+            if (!empty($requirement['values']['metric_exclusions'])) return false;
+            $requirements[]=$requirement;
+        }
+        return count($requirements)===1;
+    }
+
     /** A clear but unbound requirement is a capability gap, never a retryable
      * model-format error and never permission to execute a reduced query. */
     public static function hasUnboundRequirement(array $understanding): bool
@@ -473,7 +497,7 @@ final class AiIntentResultContract
             .'Evaluate only requirements that this turn newly adds, replaces or clears. A signed condition inherited unchanged from the prior query is not a new customer requirement and must neither require a new wording nor be changed. '
             .'Accept only if every evaluated customer requirement represented by the proposed binding is faithfully expressed by the current customer question. '
             .'When candidate_binding.initial_observation is true, accept only if the accepted understanding is an open overall operating goal with no customer-stated metric, exclusion, comparison, ranking or object-specific condition that the observation set would replace; otherwise reject it. '
-            .'When candidate_binding.recommended_initial_answer is true, accept only if it contains one to four compatible registered metrics that are reasonable professional first readings of the accepted goal, object and response form; it must not change a stated exclusion, range, ranking or object condition. '
+            .'When candidate_binding.recommended_initial_answer is true, accept a compatible registered metric that is a reasonable professional first reading of a broad customer goal, object and response form. A broad everyday evaluation without a named accounting basis is not by itself a conflict. Reject only when the candidate changes a stated exclusion, range, ranking, object condition or other explicit requirement; when several independent readings remain but none can be preferred, return metric_choice rather than reject. '
             .'When the customer asks to identify which comparable person, store, member, project or other object is doing best, leading or weakest, the binding must preserve that comparative result: it needs a ranking response with the requested direction, and must not substitute an aggregate summary. '
             .'Reject when a selected metric or result reference substitutes, reverses, ignores or conflicts with any such requirement, including an exclusion. '
             .'When a binding replaces or clears a signed store range, or changes an object filter, accept only if the current customer question itself expresses that exact change. A confirmed request for the authorized range may execute directly, but never expands authority beyond the current Reader permission. '

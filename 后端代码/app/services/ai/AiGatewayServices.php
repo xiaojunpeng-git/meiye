@@ -884,6 +884,12 @@ final class AiGatewayServices
                 // candidate never becomes a default answer or hidden filter.
                 $intent['metric_codes']=[];
                 $intent['needs_metric_choice']=true;
+                // The rejected/ambiguous professional recommendation is no
+                // longer a recommendation once control returns to the
+                // customer. Preserve the understood goal, but never let its
+                // presentation label leak into the selector or a later plan.
+                $intent['recommended_initial_answer']=false;
+                $intent['initial_observation']=false;
                 $intent['requirement_bindings']=array_map(static function(array $row):array {
                     return ['requirement_id'=>$row['requirement_id'],'status'=>'pending','metric_codes'=>[]];
                 },$intent['requirement_bindings']);
@@ -1335,6 +1341,17 @@ final class AiGatewayServices
                 throw new RuntimeException('AI_BINDING_SEMANTIC_REJECTED');
             }
             if ($review['decision']!=='accept') {
+                // A reviewer disagreement over a model-marked professional
+                // first answer is not a transport or query failure. The
+                // proposed metric remains rejected; downgrade only this
+                // broad, positive request to the registry-derived selector.
+                // Do not apply this escape hatch to exclusions, confirmed
+                // choices, or multi-part requirements.
+                if (AiIntentResultContract::canDeferRejectedRecommendation($understanding,$intent,$customerConfirmedChoice)) {
+                    $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'binding_review','predicate'=>'recommended_binding_deferred'],'review_binding');
+                    $this->runs->finishAttempt($owner,$id,$generation,$worker,'review_binding','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+                    return 'metric_choice';
+                }
                 $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'binding_review','predicate'=>'semantic_requirement_rejected'],'review_binding');
                 throw new RuntimeException('AI_BINDING_SEMANTIC_REJECTED');
             }

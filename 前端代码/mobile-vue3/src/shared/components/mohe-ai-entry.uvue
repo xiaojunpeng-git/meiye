@@ -1,5 +1,5 @@
 <template>
-  <view v-if="enabled" class="ai-entry" @tap="openPanel"><text>魔核 AI</text></view>
+  <view v-if="enabled" class="ai-entry" role="button" aria-label="打开魔核 AI" @tap="openPanel"><text>魔核 AI</text></view>
   <view v-if="opened" class="ai-panel">
     <view class="ai-head"><text class="ai-title">魔核 AI</text><button size="mini" @tap="showHistory">历史</button><button size="mini" @tap="newConversation">新对话</button><button size="mini" @tap="closePanel">关闭</button></view>
     <scroll-view scroll-y="true" class="ai-messages">

@@ -3,7 +3,6 @@ namespace app\services\ai\execution;
 
 use app\services\organization\EmployeeDataScopeServices;
 use app\services\organization\OrganizationScopeService;
-use app\services\system\SystemRoleServices;
 use think\facade\Db;
 
 /** Current platform report authority shared by live AI and server-bound export tasks. */
@@ -16,18 +15,10 @@ final class AiPlatformPrincipalResolver
         $employeeId=(int)($admin['employee_id']??0);
         if ($employeeId>0 && !Db::name('employee')->where('id',$employeeId)->where('status',1)->where('is_del',0)->find()) throw new \RuntimeException('AI_AUTH_REQUIRED');
         $type=(int)($admin['admin_type']??0);
-        $roles=$admin['roles']??[];
-        $roles=is_string($roles)?array_filter(explode(',',$roles)):(array)$roles;
-        $allowed=function(string $code,int $kind=1)use($admin,$type,$roles):bool {
-            if (!(int)($admin['level']??0) && $type!==3) return true;
-            if (!$roles) return false;
-            foreach (app()->make(SystemRoleServices::class)->getRolesByAuth($roles,$kind) as $menu) if (($menu['unique_auth']??'')===$code) return true;
-            return false;
-        };
-        // Configuration ownership is independent of role grants and display names.
-        // This row is reloaded from the authenticated account on every request.
-        $entry=$allowed('mohe-ai-entry',2);$configure=$type!==3 && ($admin['account']??null)==='admin';
-        $report=$allowed('admin-report-group-management-dashboard');$mode='none';$stores=[];
+        // Configuration ownership is independent of data access and display
+        // names. Query admission below is exclusively scope-derived.
+        $configure=$type!==3 && ($admin['account']??null)==='admin';
+        $mode='none';$stores=[];
         {
             if ($type===3 && (int)($admin['relation_id']??0)>0) {
                 $mode='agent_limited';$stores=app()->make(OrganizationScopeService::class)->getResolvedStoreIdsByLegacyAgentId((int)$admin['relation_id']);
@@ -43,11 +34,13 @@ final class AiPlatformPrincipalResolver
             } else { $mode='platform_admin';$stores=$this->allStores(); }
         }
         $stores=array_values(array_unique(array_filter(array_map('intval',(array)$stores),static fn($id)=>$id>0)));sort($stores);
-        return ['terminal'=>'platform','account_id'=>$accountId,'scope_mode'=>$mode==='self_participant'?$mode:($stores?'stores':'none'),
-            'store_ids'=>$stores,'permission_version'=>hash('sha256',json_encode([$mode,$employeeId,$stores,$roles,$entry,$configure])),
-            'employee_id'=>$employeeId,'personnel_data_authorized'=>!empty($stores),'store_report_authorized'=>$report,
-            'can_use'=>$entry,'can_configure'=>$configure,'report_capability_code'=>'group_management_dashboard',
+        $context=['terminal'=>'platform','account_id'=>$accountId,'scope_mode'=>$mode==='self_participant'?$mode:($stores?'stores':'none'),
+            'store_ids'=>$stores,'permission_version'=>hash('sha256',json_encode([$mode,$employeeId,$stores])),
+            'employee_id'=>$employeeId,'personnel_data_authorized'=>!empty($stores),'store_report_authorized'=>true,
+            'can_configure'=>$configure,'report_capability_code'=>'group_management_dashboard',
             'tenant_id'=>'0','origin_store_id'=>0,'origin_organization_id'=>'0','export_principal_ready'=>true,'principal_kind'=>'platform_admin'];
+        $context['can_use']=AiAuthority::canUseDataScope($context);
+        return $context;
     }
 
     /** Only a previously verified server-owned task may select this account. */

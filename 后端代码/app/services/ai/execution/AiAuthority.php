@@ -4,6 +4,18 @@ namespace app\services\ai\execution;
 /** Exact shared identity/report binding used by HTTP and background continuation. */
 final class AiAuthority
 {
+    /**
+     * AI query admission is derived solely from the freshly authenticated
+     * person's effective data range. A terminal, page menu or feature switch
+     * may decide whether an interface is rendered, but never what the person
+     * may ask AI to read.
+     */
+    public static function canUseDataScope(array $context): bool
+    {
+        return in_array($context['scope_mode']??null,['all','stores','self_participant'],true)
+            && is_array($context['store_ids']??null) && $context['store_ids']!==[];
+    }
+
     public static function capabilities(bool $exportReady,array $context=[]): array
     {
         $registered=\app\services\query\metric\MetricReadViewServices::metricCapabilities(); $metrics=[];
@@ -54,7 +66,7 @@ final class AiAuthority
         return is_int($id) && $id>0 && in_array($id,$context['store_ids']??[],true)?$id:null;
     }
     public static function permissionHash(array $context): string
-    { return hash('sha256',json_encode([$context['permission_version'],$context['scope_mode'],$context['store_ids'],$context['can_use'],$context['report_capability_code'],$context['employee_id']??0])); }
+    { return hash('sha256',json_encode([$context['permission_version'],$context['scope_mode'],$context['store_ids'],$context['employee_id']??0])); }
     public static function reportBinding(array $context,string $instance,string $key): array
     {
         if (empty($context['can_use'])) throw new \RuntimeException('AI_PERMISSION_DENIED');

@@ -19,12 +19,16 @@ final class AiMerchantPrincipalResolver
         if ($stores===null) $stores=\think\facade\Db::name('system_store')->where('is_del',0)->where('name','<>','总部')->column('id');
         $stores=array_values(array_unique(array_filter(array_map('intval',$stores),static fn($id)=>$id>0)));sort($stores);
         $context=['terminal'=>'merchant','account_id'=>(int)$current['accountId'],'scope_mode'=>$personal?'self_participant':($stores?'stores':'none'),
-            'store_ids'=>$stores,'personnel_data_authorized'=>!empty($stores),'can_use'=>in_array('MOHE_AI_USE',(array)$current['availableActions'],true),
+            'store_ids'=>$stores,'personnel_data_authorized'=>!empty($stores),
             // Warehouse/page visibility is not a data grant for AI.  The
             // employee scope above is the only query range.
             'store_report_authorized'=>true,
             'permission_version'=>hash('sha256',json_encode([$current['permissionVersion']??null,$stores,$personal,$current['availableActions'],(int)$current['employeeId']])),
             'report_capability_code'=>'group_management_dashboard'];
+        // Entry actions are presentation permissions, not a second AI data
+        // permission. Every authenticated account with an effective data
+        // range receives the same AI capability catalogue.
+        $context['can_use']=AiAuthority::canUseDataScope($context);
         $context['can_configure']=false; // Configuration is platform admin-only, never inherited from merchant scope.
         return $context+['tenant_id'=>'0','origin_store_id'=>(int)$current['storeId'],'origin_organization_id'=>(string)$current['organizationId'],
             'employee_id'=>(int)$current['employeeId'],'staff_id'=>(int)$current['staffId'],'export_principal_ready'=>true,'principal_kind'=>'merchant_employee'];

@@ -28,7 +28,6 @@ class JobPositionPolicyServices extends BaseServices
 
     /** @var array<int, array{id:int,title:string,feature_code:string,children?:array}> */
     public const STORE_V3_MENU_TREE = [
-        ['id' => 301009, 'title' => '魔核 AI', 'feature_code' => 'cashier.v3.ai'],
         ['id' => 301001, 'title' => '收银', 'feature_code' => 'cashier.v3.cashier', 'children' => [
             ['id' => 301010, 'title' => '充值', 'feature_code' => 'cashier.v3.cashier.recharge'],
             ['id' => 301011, 'title' => '赠送', 'feature_code' => 'cashier.v3.cashier.gift'],

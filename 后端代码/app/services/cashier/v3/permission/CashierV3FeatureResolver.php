@@ -20,7 +20,6 @@ use think\facade\Db;
 class CashierV3FeatureResolver
 {
     public const FEATURE_CODES = [
-        'cashier.v3.ai',
         'cashier.v3.cashier',
         'cashier.v3.cashier.recharge',
         'cashier.v3.cashier.gift',

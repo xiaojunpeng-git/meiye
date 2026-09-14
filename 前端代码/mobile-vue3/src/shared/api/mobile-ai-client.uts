@@ -18,8 +18,21 @@ export function mobileAiRequest(method : string, suffix : string, payload : any,
   }
   sendMobileRequest(plan,body,(response : any) => {
     let body = response.body
-    if (response.ok !== true || body == null || body.status !== 200) { done({ok:false,responseKnown:response.statusCode > 0,message:body != null && typeof body.msg == 'string' ? body.msg : '请求暂未完成，请检查网络或配置。'}); return }
-    done({ok:true,data:body.data})
+    // MobileApiResponse reports success through the HTTP response and its
+    // merchant contract, rather than through a legacy body.status field.
+    // Re-checking a field that this contract does not carry made every
+    // successful bootstrap look like a failure and silently hid the entry.
+    if (response.ok !== true || body == null) {
+      let message = body != null && typeof body.message == 'string' ? body.message
+        : body != null && typeof body.msg == 'string' ? body.msg
+          : '请求暂未完成，请检查网络或配置。'
+      done({ok:false,responseKnown:response.statusCode > 0,message:message}); return
+    }
+    // Merchant mobile APIs return their successful payload at the top level
+    // beside contractVersion; they do not wrap it in a legacy `data` object.
+    // Keep this adapter faithful to the shared mobile contract so bootstrap
+    // can read `enabled` and render the entry.
+    done({ok:true,data:body})
   })
 }
 

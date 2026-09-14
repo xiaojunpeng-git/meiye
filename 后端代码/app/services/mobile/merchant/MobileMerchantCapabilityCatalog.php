@@ -30,7 +30,6 @@ final class MobileMerchantCapabilityCatalog
     public const RULE_HOME = 401009;
     /** 工作台下的工程管理入口。 */
     public const RULE_ENGINEERING = 401010;
-    public const RULE_MOHE_AI = 401011;
 
     // The platform tree also submits checked group nodes. They are accepted as
     // catalogue metadata only and deliberately grant no server-side action.
@@ -46,7 +45,6 @@ final class MobileMerchantCapabilityCatalog
     public function features(): array
     {
         return [
-            ['id' => self::RULE_MOHE_AI, 'title' => '魔核 AI', 'feature_code' => 'mobile.merchant.ai', 'actions' => ['MOHE_AI_USE']],
             ['id' => self::RULE_HOME, 'title' => '经营', 'feature_code' => 'mobile.merchant.home', 'actions' => ['MERCHANT_HOME_VIEW']],
             ['id' => self::RULE_WAREHOUSE, 'title' => '数据', 'feature_code' => 'mobile.merchant.warehouse', 'actions' => ['MERCHANT_WAREHOUSE_VIEW']],
             ['id' => self::RULE_CUSTOMERS, 'title' => '客户', 'feature_code' => 'mobile.merchant.customers', 'actions' => ['CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_AUDIENCE_VIEW', 'CUSTOMER_AUDIENCE_MANAGE']],

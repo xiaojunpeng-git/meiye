@@ -4,7 +4,6 @@ namespace app\services\ai\execution;
 use app\model\store\SystemStoreStaff;
 use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
 use app\services\cashier\v3\CashierV3DataScopeContext;
-use app\services\cashier\v3\permission\CashierV3FeatureResolver;
 use think\facade\Db;
 
 /** Same current permission source for authenticated HTTP and trusted export jobs; no stored tokens. */
@@ -29,8 +28,6 @@ final class AiTrustedPrincipalResolver
         $dispatcher=CashierV3Bootstrap::dispatcher();
         $operator=$dispatcher->scopeResolver()->operatorScope($storeId,$accountId);
         $scope=$dispatcher->dataScopeFactory()->build($storeId,$accountId,$profile,$operator->tenantId(),$operator->organizationId());
-        $resolver=app()->make(CashierV3FeatureResolver::class);
-        $features=$delegated ? $resolver->employeeStoreV3GrantedFeatures($employeeId) : $resolver->resolveGrantedFeatures($profile);
         $personal=$scope->isSelfParticipantMode();
         $allowed=$scope->visibleStoreIds();
         // The cashier page binds a current store. AI uses the employee's data
@@ -46,17 +43,18 @@ final class AiTrustedPrincipalResolver
         $stores=$scope->authorizationMode()===CashierV3DataScopeContext::MODE_NONE?[]:($allowed===null
             ?Db::name('system_store')->where('is_del',0)->where('name','<>','总部')->column('id'):(array)$allowed);
         $stores=array_values(array_unique(array_filter(array_map('intval',$stores),static fn($id)=>$id>0)));sort($stores);
-        sort($features);
-        return ['terminal'=>'store','account_id'=>$accountId,
+        $context=['terminal'=>'store','account_id'=>$accountId,
             'scope_mode'=>$personal?'self_participant':($stores?'stores':'none'),'store_ids'=>$stores,
-            'permission_version'=>hash('sha256',json_encode([$scope->permissionVersion(),$stores,$features])),
-            'can_use'=>in_array('cashier.v3.ai',$features,true), 'can_configure'=>false,
+            'permission_version'=>hash('sha256',json_encode([$scope->permissionVersion(),$stores,$employeeId])),
+            'can_configure'=>false,
             // The cashier management-center menu controls that page, not the
-            // person's AI data scope.  AI use remains separately feature-gated.
+            // person's AI data scope or AI query admission.
             'employee_id'=>$employeeId,'personnel_data_authorized'=>!empty($stores),'store_report_authorized'=>true,
             'report_capability_code'=>'group_management_dashboard',
             'export_principal_ready'=>!$delegated,'principal_kind'=>$delegated?'delegated_session':'store_staff','origin_store_id'=>$storeId,
             'origin_organization_id'=>$operator->organizationId(),'tenant_id'=>$operator->tenantId()];
+        $context['can_use']=AiAuthority::canUseDataScope($context);
+        return $context;
     }
 
     /** Caller must first validate server-owned task/binding instance + Run fence; never expose as an HTTP identity selector. */
