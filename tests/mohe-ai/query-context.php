@@ -24,6 +24,8 @@ qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::modelInstructio
     'binding instruction preserves a model-understood overview group across a contextual follow-up without a metric rule');
 qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::semanticReviewInstruction(),'presentation_origin is platform_observation')!==false,
     'independent review distinguishes a continued platform overview from a new multi-metric answer without a metric rule');
+qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::semanticReviewInstruction(),'generic metric requirement')!==false,
+    'independent review leaves broad-versus-specific business meaning to the model rather than a protocol-field shortcut');
 $summarySource=$source;$summarySource['query_shape']='summary';$summarySource['ranking']=null;
 qcCheck(IntentContextMerger::modelView($summarySource)['ranking']===['direction'=>'unspecified','limit'=>null],'non-ranking prior shape projects a structural ranking placeholder without inventing a rank');
 $prior=['metric_codes'=>['staff_labor_yeji'],'operation'=>'ranking','periods'=>$view['periods'],'ranking'=>$view['ranking'],'scope'=>'authorized','object_kind'=>'person','has_object_selection'=>true,'has_store_scope_restriction'=>true,'has_business_filter'=>true];
