@@ -75,7 +75,14 @@ final class MetricDefinitionRegistry
                     'analysis_relation_role' => 'allocated_employee', 'analysis_action_codes' => ['sales'],
                     'analysis_filter_keys' => ['selection_ref'],
                 ]],
-            ], 'person', ['selection_ref']) + ['default_ranking_dimension' => 'employee'],
+            ], 'person', ['selection_ref']) + [
+                'default_ranking_dimension' => 'employee',
+                // This registered fact is assigned only to the platform's
+                // sales-qualified people. A broad people-ranking may use that
+                // factual cohort as its labelled first view; it does not infer
+                // a cohort from the customer's wording.
+                'analysis_default_selection_ref' => 'role:salesperson',
+            ],
             'staff_labor_yeji' => self::amount('personnel_fact_sum', 'labor-performance-allocated-person-v1', ['summary', 'ranking'], [
                 'table' => 'cashier_v3_performance_fact', 'amount' => 'amount_cents',
                 'filters' => ['status' => 'effective', 'performance_type' => 'labor_performance_allocated'],
@@ -85,7 +92,12 @@ final class MetricDefinitionRegistry
                     'analysis_relation_role' => 'allocated_employee', 'analysis_action_codes' => ['service'],
                     'analysis_filter_keys' => ['selection_ref'],
                 ]],
-            ], 'person', ['selection_ref']) + ['default_ranking_dimension' => 'employee'],
+            ], 'person', ['selection_ref']) + [
+                'default_ranking_dimension' => 'employee',
+                // Labour-performance facts use the same qualification source
+                // as cashier performance allocation and personnel authority.
+                'analysis_default_selection_ref' => 'role:craftsman',
+            ],
             'sales_amount' => self::amount('fact_sum', 'v3-sale-completed-lines-v1', ['summary', 'comparison', 'trend', 'ranking'], [
                 'table' => 'cashier_v3_sale_fact', 'amount' => 'sale_amount_cents',
                 'filters' => ['status' => 'effective'], 'normal_scope' => 'facts',
@@ -228,6 +240,7 @@ final class MetricDefinitionRegistry
                 // 可执行查询。
                 'analysis_dimensions' => self::analysisDimensions($item),
                 'analysis_dimension_contracts' => self::analysisDimensionContracts($item),
+                'analysis_default_selection_ref' => $item['analysis_default_selection_ref'] ?? null,
                 'derivation' => $item['derivation'] ?? null,
                 'readiness_reasons' => $aiReady ? [] : ['AI_STORAGE_UNIT_UNSUPPORTED'],
             ];

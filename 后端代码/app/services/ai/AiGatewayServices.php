@@ -227,8 +227,11 @@ final class AiGatewayServices
                 $this->assertGuidanceSemanticContext($compiled,$owner,$id,$generation,$worker,$configuration,$checkpoint);
             }
             if (($compiled['kind']??null)==='capability_unavailable') throw new RuntimeException($compiled['reason']??'AI_OBJECT_CONTRACT_NOT_READY');
+            $contextMeaning=$compiled['_context_meaning']??[];
+            unset($compiled['_context_meaning']);
+            if (!is_array($contextMeaning)) throw new RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
             try {
-                $result=$this->executeRegistered($context,$owner,$id,$generation,$worker,$snapshot,$compiled['plan']);
+                $result=$this->executeRegistered($context,$owner,$id,$generation,$worker,$snapshot,$compiled['plan'],$contextMeaning);
             } catch (\RuntimeException $error) {
                 // These are execution boundaries, not failed language understanding.
                 // Offer only server-built ranges and require customer confirmation.
@@ -701,11 +704,13 @@ final class AiGatewayServices
         // reduced to non-sensitive query meaning before the model sees it.
         $sourceContext=isset($body['context_ref'])?$this->contextService()->restore($context,$owner,$body['context_ref']):null;
         $sourceQuery=$sourceContext['query']??null;
-        $safe['outbound']['prior_query']=$sourceQuery===null?null:IntentContextMerger::modelView($sourceQuery);
+        $safe['outbound']['prior_query']=$sourceQuery===null?null:IntentContextMerger::modelView(
+            $sourceQuery,(array)($sourceContext['meaning']??[])
+        );
         // Understanding has no metric catalogue. Binding receives accepted
         // meaning afterwards and may only propose registered execution fields.
         $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
-        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$safe['outbound'],$runtimeSkills]))+1024));
+        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$runtimeSkills],1024));
         $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
         $this->runs->prepareAttempt($owner,$id,$generation,$worker,'understand_meaning','model',hash('sha256',json_encode([$safe['outbound'],$runtimeSkills])),'siliconflow');
         $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand_meaning');
@@ -717,7 +722,7 @@ final class AiGatewayServices
             $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::normalize($meaningReply['understanding']??null,$safe['outbound']);
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_meaning','SUCCEEDED',$meaningReply['usage']['input_tokens']??null,$meaningReply['usage']['output_tokens']??null);
         } catch (\Throwable $error) {
-            if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error);
+            if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,'understand_meaning');
             $firstState=in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_meaning',$firstState);
             $diagnostic=$error instanceof AiContractException?$error->diagnostic():[];
@@ -728,7 +733,7 @@ final class AiGatewayServices
             // this correction is used here, a later binding defect is reported
             // honestly instead of issuing an unbounded chain of model calls.
             $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
-            $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$safe['outbound'],$runtimeSkills,$repairPredicate]))+1536));
+            $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$runtimeSkills,$repairPredicate],1536));
             $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
             $this->runs->prepareAttempt($owner,$id,$generation,$worker,'understand_repair','model',hash('sha256',json_encode([$safe['outbound'],$runtimeSkills,$repairPredicate])),'siliconflow');
             $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand_repair');
@@ -740,27 +745,79 @@ final class AiGatewayServices
                 $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::normalize($meaningReply['understanding']??null,$safe['outbound']);
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_repair','SUCCEEDED',$meaningReply['usage']['input_tokens']??null,$meaningReply['usage']['output_tokens']??null);
             } catch (\Throwable $repairError) {
-                if ($repairError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$repairError);
+                if ($repairError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$repairError,'understand_repair');
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_repair',in_array($repairError->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');
                 throw $repairError;
             }
         }
         $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
-        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$safe['outbound'],$understanding,$summaries,$runtimeSkills]))+2048));
+        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$understanding,$summaries,$runtimeSkills],2048));
         $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
         $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_intent','model',hash('sha256',json_encode([$safe['outbound'],$understanding,$summaries])),'siliconflow');
         $this->runs->sendAttempt($owner,$id,$generation,$worker,'bind_intent');
+        $bindingRankRecovery=false;
         try {
             $checkpoint();
             $reply=$this->model
                 ? call_user_func($this->model,$safe['outbound'],$summaries,$configuration,$checkpoint,null,'binding',$understanding)
                 : (new SiliconFlowClient())->understand($safe['outbound'],$summaries,$understanding,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills);
-            $reply['intent']=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound'],$understanding);
-            $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_intent','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+            // External and injected model adapters must have identical
+            // recovery semantics. A candidate response from the provider is
+            // already marked below; an injected adapter can still return the
+            // raw candidate, so classify it with the same shared predicate.
+            if (!array_key_exists('rank_metric_candidates',$reply)) {
+                try {
+                    $reply['intent']=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound'],$understanding);
+                } catch (AiContractException $bindingError) {
+                    $codes=[];foreach($summaries as $summary) if(is_string($summary['metric_code']??null)) $codes[]=$summary['metric_code'];
+                    $candidates=SiliconFlowClient::rankMetricCandidates($reply['intent']??null,$bindingError,$codes,$understanding);
+                    if ($candidates===null) throw $bindingError;
+                    $reply['rank_metric_candidates']=$candidates;
+                }
+            }
+            if (array_key_exists('rank_metric_candidates',$reply)) {
+                // The initial binding did not form an executable ranking, but
+                // it did return registered candidates. Record that response
+                // honestly, then let one named recovery ask the model to
+                // choose its professional first reading.
+                $bindingRankRecovery=true;
+                $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_intent','FAILED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+                $reply=$this->resolveRankMetricBinding($owner,$id,$generation,$worker,$safe['outbound'],$summaries,$understanding,$configuration,$checkpoint,$reply);
+            } else {
+                $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_intent','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+            }
         } catch (\Throwable $error) {
-            if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error);
+            // The rank-recovery helper owns and finalizes its independently
+            // recorded attempt. The original bind attempt is already terminal.
+            if ($bindingRankRecovery) throw $error;
+            if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,'bind_intent');
             $firstState=in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_intent',$firstState);
+            // A bind call has no business write and the first understanding
+            // has already passed its contract.  One new, independently
+            // recorded call may therefore recover a transport-unknown result.
+            // Never replay the unknown attempt itself; this keeps its usage
+            // and outcome honest and bounds the customer-visible wait.
+            if ($error instanceof AiContractException && $error->getMessage()==='AI_MODEL_RESULT_UNKNOWN') {
+                try {
+                    $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
+                    $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$understanding,$summaries,$runtimeSkills],2048));
+                    $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
+                    $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_transport_recovery','model',hash('sha256',json_encode([$safe['outbound'],$understanding,$summaries,'transport_recovery'])),'siliconflow');
+                    $this->runs->sendAttempt($owner,$id,$generation,$worker,'bind_transport_recovery');
+                    $checkpoint();
+                    $reply=$this->model
+                        ? call_user_func($this->model,$safe['outbound'],$summaries,$configuration,$checkpoint,null,'binding',$understanding)
+                        : (new SiliconFlowClient())->understand($safe['outbound'],$summaries,$understanding,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills);
+                    $reply['intent']=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound'],$understanding);
+                    $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_transport_recovery','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+                } catch (\Throwable $recoveryError) {
+                    if ($recoveryError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$recoveryError,'bind_transport_recovery');
+                    $recoveryState=in_array($recoveryError->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
+                    try { $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_transport_recovery',$recoveryState); } catch (\Throwable $ignored) {}
+                    throw $recoveryError;
+                }
+            } else {
             $diagnostic=$error instanceof AiContractException?$error->diagnostic():[];
             $repairPredicate=$diagnostic['predicate']??null;
             // A provider may omit a mandatory JSON field on either a fresh
@@ -776,7 +833,7 @@ final class AiGatewayServices
             // is safe to correct once.  This is a separate fenced attempt,
             // not a replay of an unknown provider outcome.
             $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
-            $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$safe['outbound'],$summaries,$runtimeSkills]))+2304));
+            $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$summaries,$runtimeSkills],2304));
             $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
             $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_repair','model',hash('sha256',json_encode([$safe['outbound'],$understanding,$summaries,$repairPredicate])),'siliconflow');
             $this->runs->sendAttempt($owner,$id,$generation,$worker,'bind_repair');
@@ -788,9 +845,10 @@ final class AiGatewayServices
                 $reply['intent']=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound'],$understanding);
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_repair','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
             } catch (\Throwable $repairError) {
-                if ($repairError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$repairError);
+                if ($repairError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$repairError,'bind_repair');
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_repair',in_array($repairError->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');
                 throw $repairError;
+            }
             }
         }
         $checkpoint();$intent=$reply['intent'];
@@ -798,6 +856,13 @@ final class AiGatewayServices
         // that may retain verified query meaning across turns.
         $merged=IntentContextMerger::merge($sourceQuery,$intent);
         $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
+        // A new analytical object after an unrestricted aggregate has no
+        // prior object filter to remove. It must still use the new object's
+        // registered choices, but asking the customer to confirm a removal
+        // that cannot change their data adds friction without safety value.
+        $objectReplacementWithoutFilterConfirmation=$sourceQuery!==null
+            && ($intent['context_delta']['object']??null)==='replace'
+            && !$merged['replacement_confirmation'];
         // A condition can be understood without having a registered Reader
         // representation (for example, a requested calendar restriction).
         // Do not ask an unrelated clarification and then run the old query:
@@ -859,12 +924,21 @@ final class AiGatewayServices
             $intent=$merged['fallback_intent'];
             $intent['_context_pending']=$merged['pending'];
             $inheritedConstraints=$merged['fallback_constraints'];
+            // The signed preview only supplies a valid shell for the missing
+            // response-form question. It must retain its old analytical
+            // object until the pending planner reapplies the already
+            // understood replacement object and exposes that object's own
+            // registered choices.
+            if ($objectReplacementWithoutFilterConfirmation && $semanticPending) {
+                $intent['object_kind']=$sourceQuery['business_filters']['object_kind']??'store';
+                $intent['object_term']='';
+            }
         }
         // Merging must not turn a newly understood condition into a previous
         // query value. The pre-merge contract catches a contradictory delta;
         // this final check is a defense in depth for every executable path.
         if (!$merged['pending']) {
-            AiIntentResultContract::assertEffectiveRequirementValues($understanding,$intent);
+            AiIntentResultContract::assertEffectiveRequirementValues($understanding,$intent,$safe['outbound']['reference_date']??null);
         }
         // Apply a result reference after choosing either the requested delta
         // or its signed fallback.  A clarification must never silently drop
@@ -881,7 +955,12 @@ final class AiGatewayServices
         // store.  This branches on the semantic carrier, not on a Chinese
         // phrase or an entry point.
         $contextDecisions=$sourceQuery===null
-            ? ['store_scope'=>(($intent['object_relation']??'analysis')==='selection' ? 'replace' : 'inherit'),'business_filters'=>'inherit']
+            // An object selection is not automatically a store selection.
+            // A role, person, member or product term may be a precise
+            // analytical subject while the authorized store range remains
+            // unchanged. Only a model-understood store subject enters the
+            // authorized store-name resolver.
+            ? ['store_scope'=>(($intent['object_relation']??'analysis')==='selection' && ($intent['object_kind']??null)==='store' ? 'replace' : 'inherit'),'business_filters'=>'inherit']
             : ['store_scope'=>$intent['context_delta']['store_scope'],'business_filters'=>$intent['context_delta']['business_filters']];
         if ($intent['_object_term_normalized']) {
             try { $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'intent_contract','predicate'=>'object_term_not_verbatim']); } catch (\Throwable $ignored) {}
@@ -922,14 +1001,20 @@ final class AiGatewayServices
         );
         $operationOptions=$this->registeredOperationOptions($caps,$intent['object_kind']??'unknown');
         $replacementOperationOptions=$this->registeredOperationOptions($caps,$merged['prospective_intent']['object_kind']??'unknown');
-        $finish=function(array $compiled)use($context,$term,$contextDecisions,$owner,$id,$generation,$worker,$inheritedConstraints,$merged,$metricOptions,$replacementMetricOptions,$operationOptions,$replacementOperationOptions,$currentStoreRequested,$understanding,$safe,$summaries,$bindingCandidate):array {
+        $finish=function(array $compiled)use($context,$term,$contextDecisions,$owner,$id,$generation,$worker,$inheritedConstraints,$merged,$metricOptions,$replacementMetricOptions,$operationOptions,$replacementOperationOptions,$currentStoreRequested,$understanding,$safe,$summaries,$bindingCandidate,$objectReplacementWithoutFilterConfirmation):array {
             $compiled=$this->bindNamedStoreScope($compiled,$context,$term,$contextDecisions,$owner,$id,$generation,$worker);
             $compiled=$this->bindCurrentStoreScope($compiled,$context,$currentStoreRequested);
             if ($merged['replacement_confirmation']) {
                 $remaining=array_values(array_filter($merged['pending'],static function(string $field): bool { return $field!=='business_filters'; }));
                 $compiled=(new \app\services\ai\execution\AiContextReplacementGuidancePlanner())->start($compiled,$remaining,$inheritedConstraints,$replacementMetricOptions,$merged['prospective_intent'],$replacementOperationOptions,['understanding'=>$understanding]);
             } elseif ($merged['pending']) {
-                $compiled=(new \app\services\ai\execution\AiPendingContextGuidancePlanner())->start($compiled,$merged['pending'],$inheritedConstraints,$metricOptions,$merged['prospective_intent'],$operationOptions,['understanding'=>$understanding]);
+                $pendingMetricOptions=$metricOptions;$pendingOperationOptions=$operationOptions;
+                if ($objectReplacementWithoutFilterConfirmation) {
+                    $compiled=(new \app\services\ai\execution\AiPendingContextGuidancePlanner())->applyConfirmedIntent($compiled,$merged['prospective_intent']);
+                    $pendingMetricOptions=$replacementMetricOptions;
+                    $pendingOperationOptions=$replacementOperationOptions;
+                }
+                $compiled=(new \app\services\ai\execution\AiPendingContextGuidancePlanner())->start($compiled,$merged['pending'],$inheritedConstraints,$pendingMetricOptions,$merged['prospective_intent'],$pendingOperationOptions,['understanding'=>$understanding]);
             } else {
                 $compiled=IntentContextMerger::bind($compiled,$inheritedConstraints);
             }
@@ -955,6 +1040,15 @@ final class AiGatewayServices
                         'summaries'=>$summaries,
                     ];
                 }
+            }
+            if (($compiled['kind']??null)==='plan') {
+                // This is presentation provenance, not a reconstructed
+                // customer condition. It lets a later model distinguish a
+                // platform-suggested first view from a customer-selected
+                // metric without receiving any prior answer or result data.
+                $compiled['_context_meaning']=['presentation_origin'=>
+                    !empty($bindingCandidate['initial_observation'])?'platform_observation':
+                    (!empty($bindingCandidate['recommended_initial_answer'])?'platform_recommendation':'customer_or_verified_context')];
             }
             return $compiled;
         };
@@ -986,6 +1080,7 @@ final class AiGatewayServices
         // the customer failed to explain the request.
         if (is_array($understanding) && ($understanding['status']??null)==='understood'
             && $intent['object_kind']!=='person' && $intent['metric_codes']===[] && !$intent['needs_metric_choice']) {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_no_registered_metric');
             throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
         }
         if (is_array($understanding) && ($understanding['status']??null)==='needs_clarification'
@@ -998,8 +1093,14 @@ final class AiGatewayServices
         // permitted here.
         if (!in_array($intent['object_kind'],['person','store','unknown'],true)) {
             $dimensionMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,$intent['object_kind'],'ranking');
-            if ($localTerm!==null || !$dimensionMetrics) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
-            if ($intent['operation']!=='ranking') throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            if ($localTerm!==null || !$dimensionMetrics) {
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_dimension_contract_unavailable');
+                throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            }
+            if ($intent['operation']!=='ranking') {
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_dimension_shape_unavailable');
+                throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            }
             return $finish((new \app\services\ai\execution\AiDimensionGuidancePlanner())->start(
                 $intent['object_kind'],$intent,$projection,$dimensionMetrics,$body['output_format'],$today
             ));
@@ -1008,9 +1109,15 @@ final class AiGatewayServices
             if (!$personMetrics) throw new RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
             // Resolve against a common authorized object catalog. Before selecting a
             // different metric, execution independently rechecks its own report grant.
-            if (count($intent['metric_codes'])>1) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            if (count($intent['metric_codes'])>1) {
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_person_multiple_metrics');
+                throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            }
             $metric=$intent['metric_codes'][0]??null;
-            if ($metric!==null && !isset($personMetrics[$metric])) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            if ($metric!==null && !isset($personMetrics[$metric])) {
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_person_metric_unavailable');
+                throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            }
             $intent['metric_codes']=$metric===null?[]:[$metric];
             $catalog=$localCatalogs[$metric??array_key_first($personMetrics)];
             $objectCatalog=new \app\services\query\metric\AnalysisObjectCatalog($catalog['objects'],static function(){return true;});
@@ -1021,10 +1128,31 @@ final class AiGatewayServices
             $exactPeople=array_values(array_filter($catalog['objects'],static function($o)use($objectTerm){return $o['kind']==='person' && $o['label']===$objectTerm;}));
             $objects=$exactPeople?$named:$objectCatalog->resolve($objectTerm,'position',$metric);
             $objects=IntentContextMerger::resolveSelection($objects,$catalog['objects'],$inheritedConstraints,'person',$metric);
-            return $finish((new \app\services\ai\execution\AiAnalysisGuidancePlanner())->start($intent,$projection,$personMetrics,$objects,$body['output_format'],$today));
+            try {
+                return $finish((new \app\services\ai\execution\AiAnalysisGuidancePlanner())->start($intent,$projection,$personMetrics,$objects,$body['output_format'],$today));
+            } catch (\RuntimeException $error) {
+                // This is an internal, payload-free diagnosis only.  The model
+                // remains responsible for natural-language understanding; the
+                // server records which registered-plan boundary rejected the
+                // already-model-produced candidate, then keeps the existing
+                // user-facing capability boundary rather than inventing a
+                // phrase-specific fallback.
+                $predicates=[
+                    'AI_ANALYSIS_PERSON_OBJECT_UNAVAILABLE'=>'analysis_person_object_shape',
+                    'AI_ANALYSIS_PERSON_OPERATION_UNAVAILABLE'=>'analysis_person_operation_shape',
+                    'AI_ANALYSIS_PERSON_MULTIPLE_METRICS'=>'analysis_person_multiple_metrics',
+                    'AI_ANALYSIS_PERSON_PERIOD_COMBINATION_UNAVAILABLE'=>'analysis_person_period_combination',
+                ];
+                if (!isset($predicates[$error->getMessage()])) throw $error;
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,$predicates[$error->getMessage()]);
+                throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            }
         }
         // No staff/customer/object restriction may become an unfiltered store query.
-        if ($localTerm!==null || !in_array($intent['object_kind'],['store','unknown'],true)) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+        if ($localTerm!==null || !in_array($intent['object_kind'],['store','unknown'],true)) {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_object_contract_unavailable');
+            throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+        }
         // Do not let a local word list select a metric or result shape.  The
         // natural-language model returns a candidate, and the compiler below
         // verifies it against the same registered contracts used by reports.
@@ -1082,12 +1210,80 @@ final class AiGatewayServices
         return AiIntentResultContract::normalize($intent,$metricCodes,$allowedActions,$safeQuestion,$understanding);
     }
 
+    /**
+     * A ranking needs one comparable measurement.  The binding model may
+     * nevertheless identify several faithful registered candidates for a
+     * broad request such as "whose performance is best".  Let the model make
+     * that professional first-answer choice in one separately auditable call;
+     * PHP only verifies that its answer is one of the already supplied codes.
+     */
+    private function resolveRankMetricBinding(array $owner,string $id,int $generation,string $worker,array $safeQuestion,array $summaries,array $understanding,array $configuration,callable $checkpoint,array $reply): array
+    {
+        $candidates=$reply['rank_metric_candidates']??null;
+        $known=[];foreach($summaries as $summary) if(is_string($summary['metric_code']??null)) $known[$summary['metric_code']]=true;
+        if (!is_array($candidates) || count($candidates)<2 || count($candidates)>4
+            || count(array_unique($candidates,SORT_REGULAR))!==count($candidates)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+        foreach($candidates as $code) if(!is_string($code)||!isset($known[$code])) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+        $candidates=array_values($candidates);
+        $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
+        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safeQuestion,$understanding,$summaries,$candidates],1024));
+        $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',300);
+        $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_rank_metric_choice','model',hash('sha256',json_encode([$safeQuestion,$understanding,$candidates])),'siliconflow');
+        $this->runs->sendAttempt($owner,$id,$generation,$worker,'bind_rank_metric_choice');
+        try {
+            $checkpoint();
+            if ($this->model) {
+                $selectionReply=call_user_func($this->model,$safeQuestion,['rank_metric_candidates'=>$candidates,'capabilities'=>$summaries],$configuration,$checkpoint,null,'rank_metric_selection',$understanding);
+                $selection=$selectionReply['selection']??null;
+                $usage=$selectionReply['usage']??[];
+            } else {
+                $selection=(new SiliconFlowClient())->selectRankMetric($safeQuestion,$understanding,$summaries,$candidates,$configuration['model'],$configuration['api_key'],30000,$checkpoint);
+                $usage=$selection['usage']??[];
+            }
+            if (!is_array($selection) || !in_array($selection['decision']??null,['select','clarify'],true)
+                || (($selection['decision']??null)==='select' && (!is_string($selection['metric_code']??null) || !in_array($selection['metric_code'],$candidates,true)))
+                || (($selection['decision']??null)==='clarify' && ($selection['metric_code']??null)!==null)) {
+                throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',['stage'=>'intent_contract','predicate'=>'rank_metric_resolution']);
+            }
+            $reply['intent']=($selection['decision']==='select')
+                ? SiliconFlowClient::applyRankMetricResolution($reply['intent']??[],$selection,$understanding)
+                : SiliconFlowClient::applyRankMetricClarification($reply['intent']??[],$understanding);
+            $reply['intent']=$this->semanticIntent($reply['intent'],$summaries,$safeQuestion,$understanding);
+            unset($reply['rank_metric_candidates']);
+            $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_rank_metric_choice','SUCCEEDED',$usage['input_tokens']??null,$usage['output_tokens']??null);
+            return $reply;
+        } catch (\Throwable $error) {
+            if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,'bind_rank_metric_choice');
+            $state=in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
+            try { $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_rank_metric_choice',$state); } catch (\Throwable $ignored) {}
+            throw $error;
+        }
+    }
+
+    /**
+     * Reservations are token budgets, while PHP string length is bytes.
+     * Counting UTF-8 bytes directly makes Chinese source Skills consume about
+     * three times their budget before any provider request is sent.
+     */
+    private function inputTokenReservation(array $payload,int $margin): int
+    {
+        $json=json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+        if (!is_string($json) || $margin<1) throw new RuntimeException('AI_MODEL_INPUT_INVALID');
+        return max(1,mb_strlen($json,'UTF-8'),(int)ceil(strlen($json)/4))+$margin;
+    }
+
     /** Store only bounded structural metadata; neither question nor model text is retained. */
-    private function recordModelDiagnostic(array $owner,string $id,int $generation,string $worker,AiContractException $error): void
+    private function recordModelDiagnostic(array $owner,string $id,int $generation,string $worker,AiContractException $error,string $attemptCode=''): void
     {
         $diagnostic=$error->diagnostic();
         if (!$diagnostic) $diagnostic=['stage'=>'intent_parse','predicate'=>'error_reason:'.strtolower($error->reason())];
-        try { $this->runs->recordDiagnostic($owner,$id,$generation,$worker,$diagnostic); } catch (\Throwable $ignored) {}
+        try { $this->runs->recordDiagnostic($owner,$id,$generation,$worker,$diagnostic,$attemptCode); } catch (\Throwable $ignored) {}
+    }
+
+    /** Records a payload-free execution boundary for support and acceptance. */
+    private function recordRuntimeDiagnostic(array $owner,string $id,int $generation,string $worker,string $predicate): void
+    {
+        try { $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'analysis_binding','predicate'=>$predicate]); } catch (\Throwable $ignored) {}
     }
 
     /** A bounded semantic date value from the model becomes a trusted explicit
@@ -1113,7 +1309,7 @@ final class AiGatewayServices
     {
         $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
         $reviewInput=['question'=>$safeQuestion['question'],'reference_date'=>$safeQuestion['reference_date']];
-        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',max(1,strlen(json_encode([$reviewInput,$understanding,$intent,$summaries]))+1024));
+        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$reviewInput,$understanding,$intent,$summaries],1024));
         $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',300);
         $this->runs->prepareAttempt($owner,$id,$generation,$worker,'review_binding','model',hash('sha256',json_encode([$reviewInput,$understanding,$intent,$summaries])),'siliconflow');
         $this->runs->sendAttempt($owner,$id,$generation,$worker,'review_binding');
@@ -1135,17 +1331,17 @@ final class AiGatewayServices
                 return 'metric_choice';
             }
             if ($review['decision']==='metric_choice') {
-                $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'binding_review','predicate'=>'unexpected_metric_choice']);
+                $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'binding_review','predicate'=>'unexpected_metric_choice'],'review_binding');
                 throw new RuntimeException('AI_BINDING_SEMANTIC_REJECTED');
             }
             if ($review['decision']!=='accept') {
-                $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'binding_review','predicate'=>'semantic_requirement_rejected']);
+                $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'binding_review','predicate'=>'semantic_requirement_rejected'],'review_binding');
                 throw new RuntimeException('AI_BINDING_SEMANTIC_REJECTED');
             }
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'review_binding','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
             return 'accept';
         } catch (\Throwable $error) {
-            if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error);
+            if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,'review_binding');
             $state=in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'review_binding',$state);
             throw $error;
@@ -1153,7 +1349,7 @@ final class AiGatewayServices
     }
 
     /** Registry selects the frozen graph; the gateway supplies only trusted infrastructure adapters. */
-    private function executeRegistered(array $context,array $owner,string $id,int $generation,string $worker,array $snapshot,array $plannerPlan): array
+    private function executeRegistered(array $context,array $owner,string $id,int $generation,string $worker,array $snapshot,array $plannerPlan,array $contextMeaning=[]): array
     {
         $run=$this->runs->checkpoint($owner,$id,$generation,$worker);
         $today=(new \DateTimeImmutable('@'.intdiv($run['created_at'],1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
@@ -1191,13 +1387,34 @@ final class AiGatewayServices
             },
             'all_evidence_guard'=>function($input,$node,$compiled,$heartbeat) use($context,$owner,$id,$generation,$worker,&$evidence) {
                 $this->runs->progress($owner,$id,$generation,$worker,'VERIFYING');
-                $expected=count($input['query']['metric_codes'])*($input['query']['compare_range']===null?1:2);
-                if (!$evidence || empty($evidence['ai_query_ready']) || $evidence['result_status']!=='complete' || count($evidence['results'])!==$expected) throw new RuntimeException('AI_EVIDENCE_INCOMPLETE');
-                $this->queryService($context,$heartbeat)->replay([],$input['query'],$evidence['read_consistency_ref']);
+                try {
+                    $expected=count($input['query']['metric_codes'])*($input['query']['compare_range']===null?1:2);
+                    if (!$evidence || empty($evidence['ai_query_ready']) || $evidence['result_status']!=='complete' || count($evidence['results'])!==$expected) throw new RuntimeException('AI_EVIDENCE_INCOMPLETE');
+                    $this->queryService($context,$heartbeat)->replay([],$input['query'],$evidence['read_consistency_ref']);
+                } catch (\Throwable $error) {
+                    $known=['AI_EVIDENCE_INCOMPLETE','AI_AUTHORIZATION_CHANGED','AI_CAPABILITY_CHANGED'];
+                    $predicate=in_array($error->getMessage(),$known,true)
+                        ? 'evidence_guard_'.strtolower($error->getMessage()) : 'evidence_guard_unexpected';
+                    $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,$predicate);
+                    throw new RuntimeException('AI_EVIDENCE_GUARD_FAILED');
+                }
                 return ['verified'=>true];
             },
             'deterministic_answer'=>function() use($owner,$id,$generation,$worker,&$evidence,&$answer) {
-                $this->runs->progress($owner,$id,$generation,$worker,'RENDERING'); $answer=(new AiAnswerRenderer())->render($evidence); return ['answer'=>$answer];
+                $this->runs->progress($owner,$id,$generation,$worker,'RENDERING');
+                try {
+                    $answer=(new AiAnswerRenderer())->render($evidence);
+                } catch (\Throwable $error) {
+                    // Rendering happens after the Reader has returned verified facts.
+                    // Keep support telemetry structural: never retain a row, an object
+                    // name, a value, or the provider/model message with the run.
+                    $known=['AI_EVIDENCE_INVALID','AI_METRIC_EXPLANATION_NOT_READY','AI_EVIDENCE_VALUE_INVALID'];
+                    $predicate=in_array($error->getMessage(),$known,true)
+                        ? 'answer_render_'.strtolower($error->getMessage()) : 'answer_render_unexpected';
+                    $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,$predicate);
+                    throw new RuntimeException('AI_ANSWER_RENDER_FAILED');
+                }
+                return ['answer'=>$answer];
             },
             'metric_catalog_read'=>function($input) use($context,$tool,&$evidence) {
                 $evidence=$tool('catalog','metric_catalog_read',function() use($input,$context) { return $this->definitionEvidence($context,$input['definition_metric_codes']); });
@@ -1211,15 +1428,54 @@ final class AiGatewayServices
                 }
                 $answer=['summary'=>implode("\n\n",$parts),'cards'=>[]]; return ['answer'=>$answer];
             },
-            'verified_export_create'=>function() use($context,$owner,$id,$generation,$worker,$plan,$guard,&$evidence,&$answer,&$waiting,&$trace) {
+            'verified_export_create'=>function() use($context,$owner,$id,$generation,$worker,$plan,$guard,&$evidence,&$answer,&$waiting,&$trace,$contextMeaning) {
                 $guard(); $this->runs->progress($owner,$id,$generation,$worker,'PUBLISHING');
-                [$evidenceRef,$answerRef]=$this->saveResults($owner,$id,$generation,$plan,$evidence,$answer,$trace);
-                // ExportRuntime owns the source-bound Task receipt and dispatch UNKNOWN handling.
-                $waiting=$this->exportRuntime()->queue($this->fresh($context),$owner,$this->runs->get($owner,$id,$generation),$worker,$evidenceRef,$answerRef,$evidence);
+                try {
+                    [$evidenceRef,$answerRef]=$this->saveResults($owner,$id,$generation,$plan,$evidence,$answer,$trace,$contextMeaning);
+                } catch (\Throwable $error) {
+                    $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'export_result_handoff_failed');
+                    throw new RuntimeException('AI_EXPORT_HANDOFF_FAILED');
+                }
+                try {
+                    // ExportRuntime owns the source-bound Task receipt and dispatch UNKNOWN handling.
+                    $waiting=$this->exportRuntime()->queue($this->fresh($context),$owner,$this->runs->get($owner,$id,$generation),$worker,$evidenceRef,$answerRef,$evidence);
+                } catch (\Throwable $error) {
+                    $known=['AI_EXPORT_NOT_READY','AI_EXPORT_CAPACITY_REJECTED','AI_EXPORT_DISPATCH_UNKNOWN','AI_AUTHORIZATION_CHANGED','AI_CAPABILITY_CHANGED'];
+                    if (in_array($error->getMessage(),$known,true)
+                        || preg_match('/^[A-Z][A-Z0-9_]{0,63}$/D',$error->getMessage())) $predicate='export_queue_'.strtolower($error->getMessage());
+                    elseif ($error instanceof \TypeError) $predicate='export_queue_type_error';
+                    elseif ($error instanceof \InvalidArgumentException) $predicate='export_queue_input_contract';
+                    elseif ($error instanceof \LogicException) $predicate='export_queue_runtime_contract';
+                    elseif ($error instanceof \ErrorException) $predicate='export_queue_php_notice';
+                    else {
+                        $class=(new \ReflectionClass($error))->getShortName();
+                        $predicate=preg_match('/^[A-Za-z]{1,48}$/D',$class)
+                            ? 'export_queue_'.strtolower($class) : 'export_queue_unexpected';
+                    }
+                    $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,$predicate);
+                    throw new RuntimeException('AI_EXPORT_QUEUE_FAILED');
+                }
                 return ['deferred'=>true];
             },
         ];
-        $execution=(new AiRegisteredWorkflowExecutor($this->registry()))->execute($plan,$handlers,$checkpoint);
+        try {
+            $execution=(new AiRegisteredWorkflowExecutor($this->registry()))->execute($plan,$handlers,$checkpoint);
+        } catch (\Throwable $error) {
+            // The export handler records a more specific, payload-free
+            // diagnostic before returning one of these boundary codes.  Do
+            // not overwrite it with a generic graph-level label.
+            if (in_array($error->getMessage(),['AI_EXPORT_HANDOFF_FAILED','AI_EXPORT_QUEUE_FAILED'],true)) throw $error;
+            // The graph is server-owned.  Record a bounded execution-code
+            // diagnostic, never an exception message that may contain data.
+            $known=['AI_EVIDENCE_INCOMPLETE','AI_NODE_OUTPUT_INVALID','AI_WORKFLOW_BUDGET_EXHAUSTED','AI_NODE_TIMEOUT','AI_EXECUTION_CLOCK_REGRESSED','AI_EXECUTION_CLOCK_INVALID','AI_WORKFLOW_DEPENDENCY_UNSATISFIED','AI_ANSWER_RENDER_FAILED','AI_EVIDENCE_GUARD_FAILED'];
+            if (in_array($error->getMessage(),$known,true)) $predicate='workflow_'.strtolower($error->getMessage());
+            elseif (preg_match('/^AI_WORKFLOW_NODE_([A-Z0-9_]{1,39})_FAILED$/D',$error->getMessage(),$matches)) $predicate='workflow_node_'.strtolower($matches[1]).'_failed';
+            elseif ($error instanceof \TypeError) $predicate='workflow_type_error';
+            elseif ($error instanceof \Error) $predicate='workflow_php_error';
+            else $predicate='workflow_unexpected';
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,$predicate);
+            throw new RuntimeException('AI_WORKFLOW_EXECUTION_FAILED');
+        }
         if ($waiting!==null) return $waiting;
         $guard();
         // Persisting encrypted evidence and changing a Run to COMPLETED are
@@ -1227,15 +1483,15 @@ final class AiGatewayServices
         // stalled response be attributed to the handoff boundary without
         // retaining customer text or reinterpreting their request.
         $this->runs->progress($owner,$id,$generation,$worker,'PUBLISHING');
-        [$evidenceRef,$answerRef]=$this->saveResults($owner,$id,$generation,$plan,$evidence,$answer,$execution['trace']);
+        [$evidenceRef,$answerRef]=$this->saveResults($owner,$id,$generation,$plan,$evidence,$answer,$execution['trace'],$contextMeaning);
         return $this->runs->publish($owner,$id,$generation,$worker,$evidenceRef,$answerRef);
     }
 
-    private function saveResults(array $owner,string $id,int $generation,array $plan,array $evidence,array $answer,array $trace): array
+    private function saveResults(array $owner,string $id,int $generation,array $plan,array $evidence,array $answer,array $trace,array $contextMeaning=[]): array
     {
         $expires=min($evidence['expires_at'],intdiv($this->runs->get($owner,$id,$generation)['expires_at'],1000));
         $binding=['owner'=>$owner,'run_id'=>$id,'generation'=>$generation];
-        $source=$plan['query']===null?['definition'=>$evidence]:['view_ref'=>$evidence['read_consistency_ref'],'query'=>$plan['query']];
+        $source=$plan['query']===null?['definition'=>$evidence]:['view_ref'=>$evidence['read_consistency_ref'],'query'=>$plan['query'],'context_meaning'=>$contextMeaning];
         return [$this->private->put('evidence',$binding+$source+['compiled_run_hash'=>$plan['compiled_run_hash'],'execution_trace'=>$trace,
             'workflow_code'=>$plan['workflow_code'],'management_version'=>$this->managementRevision],$expires),
             $this->private->put('answer',$binding+['answer'=>$answer],$expires)];
@@ -1267,10 +1523,11 @@ final class AiGatewayServices
         return new MetricReadViewServices($this->views,function () use($context): array {
             $c=$this->fresh($context);
             if (empty($c['can_use'])) throw new RuntimeException('AI_PERMISSION_DENIED');
-            return ['instance_id'=>$this->instance,'subject_ref'=>$this->identity($c),'terminal'=>$c['terminal'],'tenant_id'=>(string)($c['tenant_id']??0),
-                'permission_version'=>$this->permissionHash($c),'report_capability_code'=>$c['report_capability_code'],'scope_provider_code'=>'current_report_scope_v1',
-                'scope_mode'=>$c['scope_mode'],'store_ids'=>$c['store_ids'],
-                'employee_id'=>(int)($c['employee_id']??0)];
+            // Query, screen replay and export replay must build the exact same
+            // authority binding.  A locally reassembled subset can be equal in
+            // meaning yet differ in a newly added permission field, which would
+            // make an already verified screen result impossible to export.
+            return \app\services\ai\execution\AiAuthority::reportBinding($c,$this->instance,$this->private->signingKey());
         },$this->queryTransaction ?: [new \app\services\query\metric\MetricReadTransaction(10000,$checkpoint),'run'],null,$this->personnelObjects($context));
     }
     private function personnelObjects(array $context): \app\services\query\metric\PersonnelAnalysisObjectServices

@@ -4,6 +4,7 @@ use app\services\ai\execution\AiAnalysisGuidancePlanner;
 use app\services\ai\execution\AiRegisteredPlanCompiler;
 use app\services\query\metric\PersonnelPerformanceReadServices;
 use app\services\query\metric\PersonnelAnalysisObjectServices;
+use app\services\query\metric\AnalysisObjectCatalog;
 use app\services\query\metric\MetricReadViewServices;
 use app\services\query\metric\MetricReadViewStore;
 use app\services\query\metric\GroupPerformanceMetricReadServices;
@@ -24,6 +25,14 @@ $step=$planner->start($intent,$projection,$candidates,$objects,'screen','2026-09
 $reordered=$intent;$reordered['ranking']=['limit'=>1,'direction'=>'top'];
 paCheck($planner->start($reordered,$projection,$candidates,$objects,'screen','2026-09-09')['kind']==='clarification','model JSON member order never changes personnel interpretation');
 paCheck($step['fields'][0]['key']==='analysis_object','actual object choice first, no technician scene');
+foreach ([
+ ['object_kind'=>'store','operation'=>'ranking','metric_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'top','limit'=>1]],
+ ['object_kind'=>'person','operation'=>'trend','metric_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'top','limit'=>1]],
+ ['object_kind'=>'person','operation'=>'ranking','metric_codes'=>['staff_labor_yeji','staff_sales_yeji'],'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>1]],
+] as $invalidIntent) {
+ paReject(fn()=>$planner->start($invalidIntent,$projection,$candidates,$objects,'screen','2026-09-09'),
+  $invalidIntent['object_kind']!=='person'?'AI_ANALYSIS_PERSON_OBJECT_UNAVAILABLE':($invalidIntent['operation']!=='ranking'?'AI_ANALYSIS_PERSON_OPERATION_UNAVAILABLE':'AI_ANALYSIS_PERSON_MULTIPLE_METRICS'));
+}
 $next=$planner->choose($step,['analysis_object'=>'position:2']);
 paCheck($next['fields'][0]['key']==='analysis_metric' && count($next['fields'][0]['options'])===2,'best does not guess cash or labor; unsupported operation is not offered');
 $plan=$planner->choose($next,['analysis_metric'=>'staff_labor_yeji'])['plan'];
@@ -32,6 +41,12 @@ $plan=$planner->choose($next,['analysis_metric'=>'staff_labor_yeji'])['plan'];
 // responsible only for already-normalized, registered values.
 paCheck($plan['query']['business_filters']===['object_kind'=>'person','selection_ref'=>'position:2'],'selection survives into executable query');
 paCheck($plan['query']['ranking']===['direction'=>'top','limit'=>1] && $plan['query']['start_date']==='2026-09-09','singular who preserves today and one result');
+$defaultCandidates=$candidates;
+$defaultCandidates['staff_labor_yeji']['default_selection_ref']='role:craftsman';
+$unselectedObjects=['status'=>'choose','objects'=>[['ref'=>'position:2','label'=>'护理师'],['ref'=>'role:craftsman','label'=>'有手艺人资格的在职人员']]];
+$defaultIntent=$intent;$defaultIntent['metric_codes']=['staff_labor_yeji'];$defaultIntent['needs_metric_choice']=false;
+$defaultPlan=$planner->start($defaultIntent,$projection,$defaultCandidates,$unselectedObjects,'screen','2026-09-09');
+paCheck($defaultPlan['kind']==='plan' && $defaultPlan['plan']['query']['business_filters']['selection_ref']==='role:craftsman','registered metric cohort supplies a labelled first answer without a role picker');
 paReject(function()use($planner,$step){$planner->choose($step,['analysis_object'=>'position:999']);},'AI_CLARIFICATION_INVALID');
 $caps=['metric_codes'=>array_keys($candidates),'metric_readiness'=>PersonnelPerformanceReadServices::capabilities(),'query_shapes'=>['summary','ranking'],'output_formats'=>['screen']];
 $compiler=new AiRegisteredPlanCompiler();$compiled=$compiler->compile($plan,$caps);$compiler->assertCompiled($compiled);
@@ -68,6 +83,9 @@ $objectService=new PersonnelAnalysisObjectServices($factory,$authorize);
 $selection=$objectService->selection('staff_labor_yeji','position:2');
 paCheck($selection['pairs']===[['store_id'=>1,'employee_id'=>7]],'selection uses store/person pairs');
 paCheck($objectService->selection('staff_labor_yeji','person:7')['pairs']===$selection['pairs'],'named person uses the same authorized store/person pairs');
+$roleCatalog=new AnalysisObjectCatalog($objectService->catalog('staff_labor_yeji')['objects'],static function(){return true;});
+paCheck(($roleCatalog->resolve('技师','position','staff_labor_yeji')['objects'][0]['ref']??null)==='role:craftsman','built-in role aliases resolve a technician to the qualification-backed craftsman object');
+paCheck($objectService->selection('staff_labor_yeji','role:craftsman')['pairs']===$selection['pairs'],'the resolved craftsman role uses the same authorized store/person fact pairs');
 $single=$plan;$single['query']['business_filters']['selection_ref']='person:7';
 paCheck($compiler->compile($single,$caps)['workflow_code']==='wf_performance_ranking','named person reuses the same registered workflow');
 $reader=new GroupPerformanceMetricReadServices($factory,static function($q,$tenant,$order){$q->normalScope($tenant,$order);});

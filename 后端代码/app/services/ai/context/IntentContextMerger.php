@@ -7,7 +7,13 @@ namespace app\services\ai\context;
  */
 final class IntentContextMerger
 {
-    public static function modelView(array $query): array
+    /**
+     * Project only the verified query meaning that the model may reuse.  The
+     * optional origin says whether the preceding metric perspective came from
+     * the customer or from the platform's first-answer suggestion; it contains
+     * no answer text, identity, result row or business value.
+     */
+    public static function modelView(array $query,array $contextMeaning=[]): array
     {
         return ['metric_codes'=>array_values($query['metric_codes']),'operation'=>$query['query_shape'],
             'periods'=>array_values(array_filter([
@@ -15,8 +21,22 @@ final class IntentContextMerger
                 $query['compare_range']===null?null:['kind'=>'date_range','start'=>$query['compare_range']['start'],'end'=>$query['compare_range']['end']],
             ])),'ranking'=>is_array($query['ranking']??null)?$query['ranking']:['direction'=>'unspecified','limit'=>null],'scope'=>self::scope($query),
             'object_kind'=>$query['business_filters']['object_kind']??'store',
+            // These flags disclose neither an ID nor a name. They let the
+            // model distinguish a real prior restriction from an empty
+            // placeholder, so a new analytical object is not needlessly
+            // treated as replacing a person or store the customer never chose.
+            'has_store_scope_restriction'=>($query['store_ids']??[])!==[],
+            'has_business_filter'=>($query['business_filters']??[])!==[],
             // IDs, names, refs and results never leave the server.
-            'has_object_selection'=>isset($query['business_filters']['selection_ref'])];
+            'has_object_selection'=>isset($query['business_filters']['selection_ref']),
+            'presentation_origin'=>self::presentationOrigin($contextMeaning)];
+    }
+
+    private static function presentationOrigin(array $contextMeaning): string
+    {
+        $origin=$contextMeaning['presentation_origin']??'customer_or_verified_context';
+        if (!in_array($origin,['customer_or_verified_context','platform_observation','platform_recommendation'],true)) self::conflict();
+        return $origin;
     }
 
     /**
@@ -68,8 +88,13 @@ final class IntentContextMerger
                 if ($sourceKey==='business_filters' && $delta['object']==='replace') {
                     $constraints[$sourceKey]=null;
                     $fallbackConstraints[$sourceKey]=null;
-                    $pending[]=$deltaKey;
-                    $replacementConfirmation=$delta['object']==='replace';
+                    // Replacing an empty prior filter is not a customer
+                    // decision. The new analytical object still goes through
+                    // the normal capability and authority checks below.
+                    if ($source[$sourceKey]!==[]) {
+                        $pending[]=$deltaKey;
+                        $replacementConfirmation=true;
+                    }
                 }
             }
             elseif ($decision==='clear') {

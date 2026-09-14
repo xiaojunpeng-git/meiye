@@ -8,7 +8,8 @@ final class AiAnalysisGuidancePlanner
 {
     public function start(array $intent,array $projection,array $candidates,array $objects,string $format,string $today): array
     {
-        if ($intent['object_kind']!=='person' || !in_array($intent['operation'],['summary','ranking'],true)) throw new \RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+        if ($intent['object_kind']!=='person') throw new \RuntimeException('AI_ANALYSIS_PERSON_OBJECT_UNAVAILABLE');
+        if (!in_array($intent['operation'],['summary','ranking'],true)) throw new \RuntimeException('AI_ANALYSIS_PERSON_OPERATION_UNAVAILABLE');
         $candidates=array_filter($candidates,static function(array $candidate) use($intent): bool {
             // The optional fallback keeps stored pre-R7 clarification envelopes
             // reviewable; all new gateway candidates carry query_shapes.
@@ -21,14 +22,25 @@ final class AiAnalysisGuidancePlanner
         });
         ksort($candidates);
         if (!$candidates) throw new \RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
-        if (count($intent['metric_codes'])>1) throw new \RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+        if (count($intent['metric_codes'])>1) throw new \RuntimeException('AI_ANALYSIS_PERSON_MULTIPLE_METRICS');
         $metric=$intent['metric_codes'][0]??null;
         if ($metric!==null && !isset($candidates[$metric])) throw new \RuntimeException('AI_MODEL_SELECTION_MISMATCH');
         if ($intent['needs_metric_choice']) $metric=null;
         if (!$objects['objects']) throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
         $selection=$objects['status']==='resolved'?$objects['objects'][0]['ref']:null;
+        // When a registered people-grain metric itself has one authoritative
+        // analysis cohort, a broad people question need not make the customer
+        // choose an internal role before seeing a useful first answer. An
+        // explicit person/position selection always wins; an unavailable or
+        // non-unique registered cohort falls back to the normal guidance.
+        if ($selection===null && $metric!==null && is_string($candidates[$metric]['default_selection_ref']??null)) {
+            $matches=array_values(array_filter($objects['objects'],static function(array $object)use($candidates,$metric):bool {
+                return ($object['ref']??null)===$candidates[$metric]['default_selection_ref'];
+            }));
+            if (count($matches)===1) $selection=$matches[0]['ref'];
+        }
         $periods=$projection['date_terms']??[];
-        if (count($periods)>1 || !empty($projection['date_grouping_ambiguous'])) throw new \RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+        if (count($periods)>1 || !empty($projection['date_grouping_ambiguous'])) throw new \RuntimeException('AI_ANALYSIS_PERSON_PERIOD_COMBINATION_UNAVAILABLE');
         $range=$periods?(new AiWorkflowPlanner())->normalizePeriod($periods[0],$today):null;
         $ranking=$intent['ranking']??null;
         $rankingKeys=is_array($ranking)?array_keys($ranking):[];sort($rankingKeys);

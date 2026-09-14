@@ -91,6 +91,14 @@ $contradictoryRecommendation=$recommendedBinding;$contradictoryRecommendation['n
 $normalizedContradiction=AiIntentResultContract::normalize($contradictoryRecommendation,['cash_performance'],[],$naturalQuestion,$naturalUnderstanding);
 $check($normalizedContradiction['recommended_initial_answer']===true&&!$normalizedContradiction['needs_metric_choice'],
     'one model-selected metric overrides only its contradictory choice marker and remains subject to semantic review');
+$broadRankingQuestion=$question;$broadRankingQuestion['question']='谁的业绩最高';$broadRankingQuestion['recent_questions']=[];$broadRankingQuestion['evidence_messages']=[['id'=>'current','text'=>$broadRankingQuestion['question']]];
+$broadRankingUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'找出业绩最高的人员','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'找出业绩最高的人员','fields'=>['object_kind','operation','ranking'],'values'=>['object_kind'=>'person','operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>1]],'evidence'=>[['message_id'=>'current','quote'=>$broadRankingQuestion['question']]]],
+]],$broadRankingQuestion);
+$broadRankingBinding=$naturalBinding;$broadRankingBinding['object_kind']='person';$broadRankingBinding['operation']='ranking';$broadRankingBinding['ranking']=['direction'=>'top','limit'=>1];$broadRankingBinding['periods']=[];$broadRankingBinding['needs_metric_choice']=true;$broadRankingBinding['requirement_bindings']=[];unset($broadRankingBinding['recommended_initial_answer']);
+$normalizedBroadRanking=AiIntentResultContract::normalize($broadRankingBinding,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);
+$check($normalizedBroadRanking['recommended_initial_answer']===true&&!$normalizedBroadRanking['needs_metric_choice']&&$normalizedBroadRanking['metric_codes']===['cash_performance'],
+    'a broad singular ranking can retain the model-selected professional first measure without forcing the customer to name one');
 $multipleCandidateChoice=$recommendedBinding;$multipleCandidateChoice['needs_metric_choice']=true;$multipleCandidateChoice['metric_codes']=['cash_performance','refund_performance'];$multipleCandidateChoice['requirement_bindings'][0]['metric_codes']=['cash_performance','refund_performance'];
 $normalizedMultipleChoice=AiIntentResultContract::normalize($multipleCandidateChoice,['cash_performance','refund_performance'],[],$naturalQuestion,$naturalUnderstanding);
 $check($normalizedMultipleChoice['recommended_initial_answer']===true&&count($normalizedMultipleChoice['metric_codes'])===2,
@@ -121,13 +129,12 @@ $anchoredPeriod=AiIntentResultContract::normalize($wrongPeriod,['cash_performanc
 $check($anchoredPeriod['periods']===[['kind'=>'month_offset','offset_months'=>0]],'binding cannot replace a typed natural-language period from accepted understanding');
 $comparisonQuestion=$question;$comparisonQuestion['question']='这个月收款和上个月比怎么样？';$comparisonQuestion['evidence_messages'][0]['text']=$comparisonQuestion['question'];
 $partialComparisonUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'比较这个月和上个月收款','status'=>'understood','requirements'=>[
-    ['id'=>'r1','meaning'=>'比较这个月和上个月收款','fields'=>['metric_codes','operation','periods'],'values'=>['metric_terms'=>['收款'],'operation'=>'comparison','periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>$comparisonQuestion['question']]]],
+    ['id'=>'r1','meaning'=>'比较这个月和上个月收款','fields'=>['metric_codes','operation','periods'],'values'=>['metric_terms'=>['收款'],'operation'=>'comparison','periods'=>[['kind'=>'month_offset','offset_months'=>0],['kind'=>'month_offset','offset_months'=>-1]]],'evidence'=>[['message_id'=>'current','quote'=>$comparisonQuestion['question']]]],
 ]],$comparisonQuestion);
 $completedComparison=$base;$completedComparison['operation']='comparison';$completedComparison['periods']=[['kind'=>'month_offset','offset_months'=>0],['kind'=>'month_offset','offset_months'=>-1]];$completedComparison['requirement_bindings']=[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']]];
 $normalizedComparison=AiIntentResultContract::normalize($completedComparison,['cash_performance'],[],$comparisonQuestion,$partialComparisonUnderstanding);
-$check(count($normalizedComparison['periods'])===2&&$normalizedComparison['provenance']['periods']['source']==='binding_candidate'
-    && AiIntentResultContract::requiresSemanticBindingReview($partialComparisonUnderstanding,$normalizedComparison),
-    'a binding may complete an understood-but-partial comparison pair only through independent semantic review');
+$check(count($normalizedComparison['periods'])===2&&$normalizedComparison['provenance']['periods']['source']==='customer',
+    'a comparison preserves both understood time sides before the binding phase');
 $notCovered=$base;$notCovered['provenance']['metric_codes']=['source'=>'customer','requirements'=>['r1']];$check(AiIntentResultContract::normalize($notCovered,['cash_performance'],[],$question,$understanding)['provenance']['metric_codes']['requirements']===['r1','r2'],'every understood requirement is covered by server derivation');
 $plainQuestion=$question;$plainQuestion['question']='本月收款';$plainQuestion['evidence_messages'][0]['text']='本月收款';
 $plainUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'查看本月收款','status'=>'understood','requirements'=>[['id'=>'r1','meaning'=>'查看本月收款','fields'=>['metric_codes','periods'],'values'=>['metric_terms'=>['收款'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'本月收款']]]]],$plainQuestion);
@@ -182,6 +189,12 @@ $wrongFormatUnderstanding=['goal'=>'比较这个月和上个月收款','status'=
 ]];
 $reject(static function()use($wrongFormatUnderstanding,$formatQuestion){AiIntentUnderstandingContract::normalize($wrongFormatUnderstanding,$formatQuestion);},
     'format tolerance never accepts a changed business word as evidence');
+$paraphrasedMetricDetail=$plainUnderstanding;
+$paraphrasedMetricDetail['requirements'][0]['values']['metric_terms']=['到账'];
+$normalizedParaphrasedMetricDetail=AiIntentUnderstandingContract::normalize($paraphrasedMetricDetail,$plainQuestion);
+$check(!isset($normalizedParaphrasedMetricDetail['requirements'][0]['values']['metric_terms'])
+    && $normalizedParaphrasedMetricDetail['requirements'][0]['meaning']==='查看本月收款',
+    'a non-verbatim metric aid is discarded without erasing an otherwise evidenced customer requirement');
 $badDate=$base;$badDate['periods']=[['kind'=>'date_range','start'=>'2026-02-30','end'=>'2026-03-01']];$reject(static function()use($badDate,$question,$understanding){AiIntentResultContract::normalize($badDate,['cash_performance'],[],$question,$understanding);},'invalid calendar date is a model contract error');
 $reversed=$base;$reversed['periods']=[['kind'=>'date_range','start'=>'2026-09-12','end'=>'2026-09-01']];$reject(static function()use($reversed,$question,$understanding){AiIntentResultContract::normalize($reversed,['cash_performance'],[],$question,$understanding);},'reversed model date is a model contract error');
 $prompt=AiIntentUnderstandingContract::modelInstruction().' '.AiIntentResultContract::modelInstruction(false);
@@ -192,17 +205,16 @@ foreach (['metric_terms','metric_exclusions','object_kind','object_relation','op
 }
 $missingRankValue=$understanding;
 $missingRankValue['requirements'][2]['values']['ranking']=['direction'=>'top'];
-$recoveredRanking=AiIntentUnderstandingContract::normalize($missingRankValue,$question);
-$check(in_array('ranking',$recoveredRanking['requirements'][2]['fields'],true)
-    && $recoveredRanking['requirements'][2]['values']===[],
-    'malformed optional ranking detail cannot erase a grounded customer requirement');
+$reject(static function()use($missingRankValue,$question){AiIntentUnderstandingContract::normalize($missingRankValue,$question);},
+    'a declared ranking must retain its complete typed value for later binding');
 $unknownCarrier=$understanding;$unknownCarrier['requirements'][0]['values']['unexpected']='ignored';
 $recoveredCarrier=AiIntentUnderstandingContract::normalize($unknownCarrier,$question);
-$check($recoveredCarrier['requirements'][0]['values']===[]&&in_array('metric_codes',$recoveredCarrier['requirements'][0]['fields'],true),
-    'unknown optional carrier detail is discarded before binding rather than failing the customer request');
-$periodRepair=AiIntentUnderstandingContract::repairInstruction('values:periods');
-$check(strpos($periodRepair,'values.periods')!==false&&strpos($periodRepair,'optional detail')!==false,
-    'time-carrier repair preserves model-owned time meaning without making a carrier value mandatory');
+$check(!isset($recoveredCarrier['requirements'][0]['values']['unexpected'])
+    && $recoveredCarrier['requirements'][0]['values']['periods']===[['kind'=>'month_offset','offset_months'=>0]],
+    'unknown carrier detail is discarded without erasing valid understood time meaning');
+$periodRepair=AiIntentUnderstandingContract::repairInstruction('values:missing_typed');
+$check(strpos($periodRepair,'complete valid value')!==false&&strpos($periodRepair,'indicator')!==false,
+    'missing typed meaning is repaired by the model without server-side indicator selection');
 $check(AiIntentResultContract::normalizeSemanticReview(['decision'=>'metric_choice','rejected_requirement_ids'=>['r1']],$naturalUnderstanding)['decision']==='metric_choice',
     'semantic reviewer can request a registered metric choice without authorizing a candidate');
 $check(AiIntentResultContract::normalizeSemanticUniqueness(['decision'=>'unique','metric_code'=>'cash_performance'],['cash_performance'])['metric_code']==='cash_performance',

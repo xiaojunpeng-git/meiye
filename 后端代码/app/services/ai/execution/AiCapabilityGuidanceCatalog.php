@@ -54,6 +54,10 @@ final class AiCapabilityGuidanceCatalog
                     'query_shapes'=>[], 'capability_code'=>$item['binding']['capability_code'],
                     'contract_version'=>$item['binding']['contract_version'],
                     'action_codes'=>[],
+                    // A default cohort, when registered by the fact contract,
+                    // is a data-grain property. It is never derived from the
+                    // customer wording or a page/terminal.
+                    'default_selection_ref'=>$readiness[$code]['analysis_default_selection_ref']??null,
                 ];
                 $items[$code]['query_shapes'][]=$shape;
                 foreach ((array)($readiness[$code]['analysis_dimension_contracts']??[]) as $dimension) {

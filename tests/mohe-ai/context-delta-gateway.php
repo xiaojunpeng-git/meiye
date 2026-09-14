@@ -51,6 +51,24 @@ try {
     cdgCheck($monthFollow['status']==='COMPLETED'&&($monthQuery['start_date']??'')===substr((string)($monthQuery['end_date']??''),0,7).'-01'&&($monthQuery['end_date']??'')!=='2026-09-08','a confirmed current month executes its own period instead of the prior single range');
     $monthHarness->close();
 
+    // The signed context stores an explicit Reader range, while the model
+    // correctly retains the customer's calendar-month meaning. When both
+    // materialize to the same server-reference period, inheriting it is
+    // faithful and must not fail just because their JSON shapes differ.
+    $sameMonthHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $clock=new DateTimeImmutable('now',new DateTimeZone('Asia/Shanghai'));
+    $monthStart=$clock->format('Y-m-01');$monthEnd=$clock->format('Y-m-d');
+    $sameMonthHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'date_range','start'=>$monthStart,'end'=>$monthEnd]],'scope'=>'authorized','unresolved_fragments'=>[]];
+    $sameMonthSource=$sameMonthHarness->start($monthStart.'到'.$monthEnd.'现金业绩多少？');
+    $sameMonthHarness->understandingOverride=['goal'=>'继续查看本月','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'继续查看本月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'本月']]],
+    ]];
+    $sameMonthHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'unspecified','context_delta'=>cdgDelta(),'unresolved_fragments'=>[]];
+    $sameMonthFollow=$sameMonthHarness->start('继续看本月',$sameMonthSource['answer']['context_ref']);
+    cdgCheck($sameMonthFollow['status']==='COMPLETED',
+        'a semantically identical current-month continuation inherits the verified month-to-date range');
+    $sameMonthHarness->close();
+
     // A direct “top five” continuation may replace the quantity while the
     // merger retains the signed direction. Keep it isolated from the larger
     // conversation fixture so its extra run cannot consume that fixture's
@@ -316,8 +334,7 @@ try {
     $replacePending=cdgDelta();$replacePending['object']='replace';$replacePending['operation']='pending';
     $h->semanticIntent=['object_kind'=>'member','object_term'=>'','operation'=>'unknown','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$replacePending,'unresolved_fragments'=>[]];
     $replacement=$h->start('改查看会员，但展示方式未确定',$source['answer']['context_ref']);
-    cdgCheck($replacement['status']==='WAITING_CLARIFICATION'&&($replacement['clarification']['fields'][0]['key']??null)==='replace_previous_object_filter','object replacement starts with confirmation rather than an unavailable-combination failure');
-    $replacement=$h->choose($replacement,['replace_previous_object_filter'=>'replace']);
+    cdgCheck($replacement['status']==='WAITING_CLARIFICATION'&&($replacement['clarification']['fields'][0]['key']??null)==='pending_operation','an object replacement after an unrestricted aggregate asks only for the missing response form');
     cdgCheck(array_column($replacement['clarification']['fields'][0]['options']??[],'value')===['operation:ranking'],'object replacement regenerates response choices from the new member contract and cannot retain an unsupported store summary');
     $replacement=$h->choose($replacement,['pending_operation'=>'operation:ranking']);
     $replacement=$h->choose($replacement,['pending_ranking_direction'=>'top','pending_ranking_limit'=>'5']);

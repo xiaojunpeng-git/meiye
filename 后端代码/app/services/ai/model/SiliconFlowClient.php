@@ -98,6 +98,9 @@ final class SiliconFlowClient
             if (!AiIntentResultContract::repairableFormat($repairPredicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
             if (strpos($repairPredicate,'binding_requirement_delta_mismatch:')===0) {
                 $instruction='The previous binding marked a customer-supplied field as inherited from the prior query. Produce one complete intent_result again. For each current customer condition, use context_delta replace and preserve that condition in its ordinary field; only use inherit where the current wording leaves that exact meaning unchanged. Do not invent, remove, broaden, or substitute a condition.';
+            } elseif (strpos($repairPredicate,'context_constraint_without_source:')===0) {
+                $field=substr($repairPredicate,strlen('context_constraint_without_source:'));
+                $instruction='The previous binding changed the verified prior '.$field.' without an accepted current customer condition. Produce one complete intent_result again. Preserve the accepted current meaning and use context_delta inherit for that prior restriction unless the accepted current understanding itself supplies the required replacement or clearing meaning. Do not remove, broaden or replace a restriction merely because the current follow-up is short.';
             } elseif (in_array($repairPredicate,['bad_value:requirement_bindings','missing_requirement_binding','unexpected_requirement_binding',
                 'binding_row_shape','binding_row_id','binding_row_status','binding_row_codes'],true)) {
                 $instruction='The previous requirement_bindings array did not match the already accepted understanding. Return one complete binding response. Include exactly one row for each accepted requirement whose fields contains metric_codes, and no row for any other requirement. Each row has exactly requirement_id, status and metric_codes; use the accepted requirement id. A satisfied row contains only registered codes that faithfully satisfy that requirement; pending or unavailable rows have empty codes. Do not alter the accepted meaning, invent a metric, drop a requirement, or turn a missing metric requirement into an executable one.';
@@ -125,19 +128,20 @@ final class SiliconFlowClient
         try {
             AiIntentResultContract::normalize($rawIntent,$codes,$actions,$safeQuestion,$understanding);
         } catch (AiContractException $error) {
-            if (!self::needsRankMetricResolution($rawIntent,$error,$codes,$understanding)) throw $error;
-            $selection=$this->selectRankMetric($safeQuestion,$understanding,$capabilities,$rawIntent['metric_codes'],$model,$apiKey,$timeoutMs,$checkpoint);
-            $rawIntent=self::applyRankMetricResolution($rawIntent,$selection,$understanding);
-            $usage=self::sumUsage($usage,$selection['usage']);
-            AiIntentResultContract::normalize($rawIntent,$codes,$actions,$safeQuestion,$understanding);
+            $rankCandidates=self::rankMetricCandidates($rawIntent,$error,$codes,$understanding);
+            if ($rankCandidates===null) throw $error;
+            // The gateway owns every external model attempt. Return only the
+            // already registered candidates here; it will issue the one
+            // bounded selection request with its own attempt record.
+            return ['intent'=>$rawIntent,'rank_metric_candidates'=>$rankCandidates,'usage'=>$usage];
         }
         // Validate here at the external boundary. The gateway validates the same
         // source object with this same contract before execution.
         return ['intent'=>$rawIntent,'usage'=>$usage];
     }
 
-    /** @return array{metric_code:string,usage:array{input_tokens:int,output_tokens:int}} */
-    private function selectRankMetric(array $safeQuestion,array $understanding,array $capabilities,array $candidateCodes,string $model,string $apiKey,int $timeoutMs,callable $checkpoint): array
+    /** @return array{decision:string,metric_code:?string,usage:array{input_tokens:int,output_tokens:int}} */
+    public function selectRankMetric(array $safeQuestion,array $understanding,array $capabilities,array $candidateCodes,string $model,string $apiKey,int $timeoutMs,callable $checkpoint): array
     {
         $candidateCodes=array_values(array_unique($candidateCodes)); sort($candidateCodes,SORT_STRING);
         $candidateCapabilities=array_values(array_filter($capabilities,static function($capability)use($candidateCodes):bool {
@@ -146,44 +150,84 @@ final class SiliconFlowClient
         if (count($candidateCodes)<2 || count($candidateCodes)>4 || count($candidateCapabilities)!==count($candidateCodes)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         $payload=['model'=>$model,'stream'=>false,'max_tokens'=>120,'temperature'=>0,'response_format'=>['type'=>'json_object'],
             'messages'=>[
-                ['role'=>'system','content'=>'The accepted customer meaning requires one ranked result, but a previous model response supplied several registered candidate measurements. Choose the single most useful faithful professional first measurement. Return exactly {"metric_code":"one supplied code"}. Do not add a condition, calculate, explain, expose data, or select a code that was not supplied.'],
+                ['role'=>'system','content'=>'The accepted customer meaning requires one ranked result, but a previous model response supplied several registered candidate measurements. Decide whether one supplied measurement can faithfully answer every accepted customer requirement as a clearly labelled professional first answer. If yes, return exactly {"decision":"select","metric_code":"one supplied code"}. If selecting one would omit, replace or guess a customer requirement, return exactly {"decision":"clarify","metric_code":null}. Do not add a condition, calculate, explain, expose data, or select a code that was not supplied.'],
                 ['role'=>'user','content'=>json_encode(['question'=>['question'=>$safeQuestion['question'],'reference_date'=>$safeQuestion['reference_date']],
                     'understanding'=>$understanding,'candidate_capabilities'=>$candidateCapabilities],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)],
             ]];
         $decoded=$this->request($payload,$apiKey,$timeoutMs,$checkpoint);
         $value=AiIntentResultContract::native(AiStrictJson::decodeObject($decoded['choices'][0]['message']['content']));
-        if (!is_array($value) || array_keys($value)!==['metric_code'] || !is_string($value['metric_code']) || !in_array($value['metric_code'],$candidateCodes,true)) {
+        if (!is_array($value) || array_keys($value)!==['decision','metric_code'] || !in_array($value['decision']??null,['select','clarify'],true)
+            || (($value['decision']??null)==='select' && (!is_string($value['metric_code']??null) || !in_array($value['metric_code'],$candidateCodes,true)))
+            || (($value['decision']??null)==='clarify' && ($value['metric_code']??null)!==null)) {
             throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',['stage'=>'intent_contract','predicate'=>'rank_metric_resolution']);
         }
-        return ['metric_code'=>$value['metric_code'],'usage'=>$this->usage($decoded)];
+        return ['decision'=>$value['decision'],'metric_code'=>$value['metric_code'],'usage'=>$this->usage($decoded)];
     }
 
-    private static function needsRankMetricResolution($raw,AiContractException $error,array $allowedCodes,array $understanding): bool
+    /**
+     * Returns a bounded candidate set only for the one recoverable case where
+     * a ranking is clear but its first binding contains several registered
+     * metrics. This is shared by the provider client and injected test/model
+     * adapters so they cannot diverge in recovery behaviour.
+     */
+    public static function rankMetricCandidates($raw,AiContractException $error,array $allowedCodes,array $understanding): ?array
     {
-        if (($error->diagnostic()['predicate']??null)!=='bad_value:recommended_initial_answer' || !is_array($raw)
-            || ($raw['operation']??null)!=='ranking' || ($raw['recommended_initial_answer']??null)!==true
-            || ($raw['needs_metric_choice']??null)!==false || !is_array($raw['metric_codes']??null)
+        // The normalizer may report either the incompatible recommendation
+        // flag or a dependent requirement-binding field first. The recovery
+        // is still safe only when the raw shape itself unambiguously says
+        // "one ranking with several registered measurements".
+        if (!is_array($raw)
+            || ($raw['operation']??null)!=='ranking' || !in_array($raw['recommended_initial_answer']??false,[true,false],true)
+            || !in_array($raw['needs_metric_choice']??false,[true,false],true) || ($raw['initial_observation']??false)!==false
+            || !is_array($raw['metric_codes']??null)
             || count($raw['metric_codes'])<2 || count($raw['metric_codes'])>4
-            || count(array_diff($raw['metric_codes'],$allowedCodes))!==0) return false;
-        $metricRequirements=[];
-        foreach (AiIntentUnderstandingContract::requirements($understanding) as $id=>$requirement) {
-            if (in_array('metric_codes',(array)($requirement['fields']??[]),true)) $metricRequirements[]=$id;
-        }
-        return count($metricRequirements)===1;
+            || count(array_diff($raw['metric_codes'],$allowedCodes))!==0) return null;
+        // Whether these candidates describe competing professional readings
+        // or separately requested measurements is natural-language work. The
+        // bounded follow-up model call receives the accepted requirements and
+        // must either select one faithful first answer or request customer
+        // clarification. PHP only validates the candidate set and never turns
+        // a requirement count into a semantic decision.
+        return array_values($raw['metric_codes']);
     }
 
-    private static function applyRankMetricResolution(array $intent,array $selection,array $understanding): array
+    public static function applyRankMetricResolution(array $intent,array $selection,array $understanding): array
     {
         $metricRequirementIds=[];
         foreach (AiIntentUnderstandingContract::requirements($understanding) as $id=>$requirement) {
             if (in_array('metric_codes',(array)($requirement['fields']??[]),true)) $metricRequirementIds[]=$id;
         }
-        if (count($metricRequirementIds)!==1 || !is_string($selection['metric_code']??null)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+        if (!is_string($selection['metric_code']??null)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         $intent['metric_codes']=[$selection['metric_code']];
+        $intent['needs_metric_choice']=false;
+        $intent['recommended_initial_answer']=true;
         // This row is transport accountability only. Its requirement identity
         // came from the independently accepted meaning; the model selected
         // the metric in the immediately preceding bounded call.
-        $intent['requirement_bindings']=[['requirement_id'=>$metricRequirementIds[0],'status'=>'satisfied','metric_codes'=>[$selection['metric_code']]]];
+        $intent['requirement_bindings']=array_map(static function(string $id)use($selection):array {
+            return ['requirement_id'=>$id,'status'=>'satisfied','metric_codes'=>[$selection['metric_code']]];
+        },$metricRequirementIds);
+        return $intent;
+    }
+
+    /**
+     * The selection model can honestly decide that competing measurements
+     * cannot be reduced to one first answer. Preserve that decision as a
+     * normal guided choice; do not turn a semantic uncertainty into a failed
+     * request or let server code choose on the customer's behalf.
+     */
+    public static function applyRankMetricClarification(array $intent,array $understanding): array
+    {
+        $metricRequirementIds=[];
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $id=>$requirement) {
+            if (in_array('metric_codes',(array)($requirement['fields']??[]),true)) $metricRequirementIds[]=$id;
+        }
+        $intent['metric_codes']=[];
+        $intent['needs_metric_choice']=true;
+        $intent['recommended_initial_answer']=false;
+        $intent['requirement_bindings']=array_map(static function(string $id):array {
+            return ['requirement_id'=>$id,'status'=>'pending','metric_codes'=>[]];
+        },$metricRequirementIds);
         return $intent;
     }
 
@@ -288,13 +332,14 @@ final class SiliconFlowClient
         if (!is_array($query)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         $keys=array_keys($query);sort($keys);
         $base=['metric_codes','operation','periods','ranking'];
-        $extended=['has_object_selection','metric_codes','object_kind','operation','periods','ranking','scope'];
+        $extended=['has_business_filter','has_object_selection','has_store_scope_restriction','metric_codes','object_kind','operation','periods','presentation_origin','ranking','scope'];
         if (($keys!==$base && $keys!==$extended) || !is_array($query['metric_codes']) || count($query['metric_codes'])>8
             || !in_array($query['operation'],['summary','trend','ranking','comparison'],true) || !$this->validPeriods($query['periods'])
             || count($query['periods'])!==($query['operation']==='comparison'?2:1)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
-        if ($keys===$extended && (!is_bool($query['has_object_selection']) || !is_string($query['object_kind'])
+        if ($keys===$extended && (!is_bool($query['has_object_selection']) || !is_bool($query['has_store_scope_restriction']) || !is_bool($query['has_business_filter']) || !is_string($query['object_kind'])
             || !preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$query['object_kind'])
-            || !in_array($query['scope'],['current_store','authorized','unspecified'],true))) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+            || !in_array($query['scope'],['current_store','authorized','unspecified'],true)
+            || !in_array($query['presentation_origin'],['customer_or_verified_context','platform_observation','platform_recommendation'],true))) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         foreach ($query['metric_codes'] as $code) if(!is_string($code)||!preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$code)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         $ranking=$query['ranking'];
         if ($ranking===null) return;
@@ -311,7 +356,7 @@ final class SiliconFlowClient
         $checkpoint();
         $body = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if ($body === false || strlen($body) > 65536) throw new AiContractException('AI_MODEL_INPUT_INVALID');
-        $response = ''; $aborted = false; $oversized = false;
+        $response = ''; $aborted = false; $oversized = false; $startedAt = microtime(true);
         // PHP 7.4 builds may expose only the legacy progress option, even with new libcurl.
         $progressOption = defined('CURLOPT_XFERINFOFUNCTION') ? constant('CURLOPT_XFERINFOFUNCTION') : CURLOPT_PROGRESSFUNCTION;
         $handle = curl_init(self::ENDPOINT);
@@ -331,10 +376,16 @@ final class SiliconFlowClient
         ]);
         $ok = curl_exec($handle);
         $status = (int)curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+        $elapsedMs = max(0, (int)round((microtime(true) - $startedAt) * 1000));
+        if ($aborted) {
+            if (PHP_VERSION_ID < 80000) curl_close($handle);
+            throw new AiContractException('AI_CANCELLED');
+        }
+        $errno = $ok === false ? curl_errno($handle) : 0;
         if (PHP_VERSION_ID < 80000) curl_close($handle);
-        if ($aborted) throw new AiContractException('AI_CANCELLED');
         if ($ok === false) throw new AiContractException($oversized ? 'AI_MODEL_RESPONSE_TOO_LARGE' : 'AI_MODEL_RESULT_UNKNOWN',[
-            'stage'=>'transport','predicate'=>$oversized?'response_too_large':'request_unknown'
+            'stage'=>'transport','predicate'=>$oversized?'response_too_large':self::transportPredicate($errno),
+            'transport_errno'=>$errno,'http_status'=>$status,'elapsed_ms'=>$elapsedMs,
         ]);
         if ($status !== 200) throw new AiContractException($status === 401 || $status === 403 ? 'AI_MODEL_ACCOUNT_UNAVAILABLE' : 'AI_MODEL_REQUEST_FAILED');
         $checkpoint();
@@ -344,6 +395,18 @@ final class SiliconFlowClient
         if ($finish !== 'stop') throw new AiContractException($finish==='length'?'AI_MODEL_RESPONSE_TRUNCATED':'AI_MODEL_RESPONSE_ENVELOPE_INVALID',['stage'=>'response_envelope','predicate'=>'finish_reason:'.substr($finish,0,32),'finish_reason'=>substr($finish,0,32),'content_bytes'=>is_string($decoded['choices'][0]['message']['content']??null)?strlen($decoded['choices'][0]['message']['content']):0]);
         if (!is_string($decoded['choices'][0]['message']['content'] ?? null)) throw new AiContractException('AI_MODEL_RESPONSE_ENVELOPE_INVALID',['stage'=>'response_envelope','predicate'=>'missing_content','content_bytes'=>0]);
         return $decoded;
+    }
+
+    /** Maps libcurl failures to a bounded operational class. Raw error text
+     * can contain endpoint or proxy details and is deliberately never stored. */
+    private static function transportPredicate(int $errno): string
+    {
+        if ($errno === 28) return 'timeout';
+        if (in_array($errno, [5, 6], true)) return 'name_resolution';
+        if (in_array($errno, [7, 45], true)) return 'connection';
+        if (in_array($errno, [35, 51, 58, 59, 60, 64, 66, 77, 80, 82, 83, 90], true)) return 'tls';
+        if (in_array($errno, [23, 26], true)) return 'local_io';
+        return 'request_unknown';
     }
 
     /** @return array<string,mixed> */

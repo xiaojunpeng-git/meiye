@@ -49,7 +49,14 @@ final class VerifiedQueryContext
         // only for a later result reference and is replayed under current
         // authority; no row, name, ID or amount is returned to the model.
         $view=call_user_func($this->replayView,$context,$query,$stored['view_ref']);
-        return ['query'=>$query,'view'=>$view];
+        $meaning=$stored['context_meaning']??[];
+        if (!is_array($meaning) || array_diff(array_keys($meaning),['presentation_origin'])) {
+            throw new RuntimeException('AI_CONTEXT_REQUIRED');
+        }
+        if ($meaning!==[] && !in_array($meaning['presentation_origin']??null,[
+            'customer_or_verified_context','platform_observation','platform_recommendation'
+        ],true)) throw new RuntimeException('AI_CONTEXT_REQUIRED');
+        return ['query'=>$query,'view'=>$view,'meaning'=>$meaning];
     }
 
     /**
