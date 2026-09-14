@@ -22,6 +22,8 @@ qcCheck($suggestedView['presentation_origin']==='platform_observation','model ca
 qcCheck(array_diff(array_keys($suggestedView),['metric_codes','operation','periods','ranking','scope','object_kind','has_store_scope_restriction','has_business_filter','has_object_selection','presentation_origin'])===[],'presentation provenance adds no answer, identity or result field to the model view');
 qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::modelInstruction(true),'one deliberately presented overview group')!==false,
     'binding instruction preserves a model-understood overview group across a contextual follow-up without a metric rule');
+qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::semanticReviewInstruction(),'presentation_origin is platform_observation')!==false,
+    'independent review distinguishes a continued platform overview from a new multi-metric answer without a metric rule');
 $summarySource=$source;$summarySource['query_shape']='summary';$summarySource['ranking']=null;
 qcCheck(IntentContextMerger::modelView($summarySource)['ranking']===['direction'=>'unspecified','limit'=>null],'non-ranking prior shape projects a structural ranking placeholder without inventing a rank');
 $prior=['metric_codes'=>['staff_labor_yeji'],'operation'=>'ranking','periods'=>$view['periods'],'ranking'=>$view['ranking'],'scope'=>'authorized','object_kind'=>'person','has_object_selection'=>true,'has_store_scope_restriction'=>true,'has_business_filter'=>true];

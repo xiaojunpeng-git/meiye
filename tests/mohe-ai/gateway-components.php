@@ -209,6 +209,8 @@ namespace {
     $overviewWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
     $overviewInput=json_decode(array_values(array_filter($overviewWire['messages'],static function($message){return ($message['role']??null)==='user';}))[0]['content'],true);
     check(($overviewInput['candidate_binding']['initial_observation']??false)===true,'independent reviewer receives the model-marked observation decision for semantic admission');
+    check(array_key_exists('prior_query',$overviewInput['question']) && $overviewInput['question']['prior_query']===($broadQuestion['prior_query']??null),
+        'independent reviewer receives the same de-identified prior-query projection as binding, never answer data');
     $GLOBALS['sfResponse']=$response(json_encode(['decision'=>'unique','metric_code'=>'cash_performance']));
     $wrongUnique=$client->verifyBinding($broadQuestion,$broadCaps,$broadUnderstanding,$broadCandidate,'fixture/model','fixture-key',1000,function(){});
     check($wrongUnique['review']===['decision'=>'reject','rejected_requirement_ids'=>['r1']],
