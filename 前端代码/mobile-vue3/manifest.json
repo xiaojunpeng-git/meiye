@@ -1,9 +1,9 @@
 {
 	"name": "mobile-vue3",
-	"appid": "",
+	"appid": "wx29d9b63c92555701",
 	"description": "Single mobile application for member and merchant modes",
-	"versionName": "0.1.0",
-	"versionCode": "1",
+	"versionName": "0.15.0",
+	"versionCode": "15",
 	"uni-app-x": {
 		"styleIsolationVersion": "2"
 	},
