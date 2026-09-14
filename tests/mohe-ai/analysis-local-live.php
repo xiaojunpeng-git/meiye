@@ -16,13 +16,17 @@ $id=(int)think\facade\Db::name('system_admin')->where('account','admin')->value(
 $resolver=new app\services\ai\execution\AiPlatformPrincipalResolver();$context=$resolver->authenticated($id);
 if (empty($context['can_configure']) || empty($context['can_use'])) exit("Admin authority unavailable\n");
 $context['_refresh']=function()use($resolver,$id){return $resolver->authenticated($id);};
-$active=$rt['runs']->diagnostics()['active'];$configuration=$rt['config']->read();
-echo json_encode(['target_verified'=>true,'active_runs'=>$active,'scope_column'=>$configuration['external_scope_supported'],'new_scope_authorized'=>app\services\ai\config\AiConfigStore::allowsSanitizedQuestion($configuration),
+$active=$rt['runs']->diagnostics()['active'];
+// A waiting clarification owns no execution slot and is deliberately kept for
+// customer review. It must not prevent an independent acceptance conversation;
+// only a currently executing/exporting run can conflict with this local probe.
+$blocking=(int)think\facade\Db::name('mohe_ai_run')->whereIn('status',['WORKFLOW_EXECUTING','WAITING_EXPORT'])->count();$configuration=$rt['config']->read();
+echo json_encode(['target_verified'=>true,'active_runs'=>$active,'blocking_runs'=>$blocking,'scope_column'=>$configuration['external_scope_supported'],'new_scope_authorized'=>app\services\ai\config\AiConfigStore::allowsSanitizedQuestion($configuration),
     'active_ai_exports'=>(int)think\facade\Db::name('unified_query_export_task')->where('source_type','AI')->whereIn('status',['pending','running'])->count(),
     'available_metric_count'=>count(app\services\ai\execution\AiAuthority::capabilities(false,$context)['metric_codes'])])."\n";
 if ($mode==='PREFLIGHT') exit(0);
 if ($mode==='REBASE_SOURCE') {
-    if($active!==0) exit("Active Runs exist; source rebase postponed\n");
+    if($blocking!==0) exit("Executing Runs exist; source rebase postponed\n");
     $gateway=new app\services\ai\AiGatewayServices();
     $call=function($operation,$input=[])use($gateway,$context){return $gateway->handle($operation,$context,$input);};
     $state=$call('management_get');
@@ -37,7 +41,7 @@ if ($mode==='REBASE_SOURCE') {
 if(getenv('MOHE_ANALYSIS_CLOCK_SCHEMA')==='1') {
     $s=$pdo->prepare('SELECT COLUMN_NAME,COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME IN (\'last_clock_at\',\'created_at\',\'deadline_at\')');$s->execute([$db['prefix'].'mohe_ai_run']);echo json_encode(['clock_schema'=>$s->fetchAll(PDO::FETCH_ASSOC)])."\n";exit(0);
 }
-if ($active!==0) exit("Active Runs exist; stop before changes\n");
+if ($blocking!==0) exit("Executing Runs exist; stop before changes\n");
 if($mode==='CLOCK_STRESS') {
     $owner=['terminal'=>'platform','account_id'=>$id,'conversation_id'=>'clock-probe-'.bin2hex(random_bytes(8)),'window_id'=>'clock-probe-'.bin2hex(random_bytes(8))];
     $snapshot=['capability_snapshot_ref'=>'clock-probe','capability_snapshot_hash'=>str_repeat('a',64),'budget_profile_version'=>'180000-clock-probe','authorization_version'=>'clock-probe','model_config_version'=>'clock-probe'];
@@ -134,6 +138,16 @@ try {
         echo json_encode(['stage'=>'guidance','round'=>$round+1,'status'=>$run['status'],'reason'=>$run['reason']??null,'next_field'=>$run['clarification']['fields'][0]['key']??null])."\n";
     }
     $pollUntil=microtime(true)+30;
+    // The authorized local acceptance harness invokes the same dedicated
+    // worker implementation immediately when an Excel task is queued.  It
+    // does not fake an export or change business facts, and leaves the Task
+    // and Run records intact for product review.  Production remains queued.
+    if ($input['output_format']==='screen_and_xlsx' && $run['status']==='WAITING_EXPORT') {
+        $task=think\facade\Db::name('unified_query_export_task')->where('source_type','AI')->where('status','pending')->order('id','desc')->field('task_no')->find();
+        if (!$task || !is_string($task['task_no']??null)) throw new RuntimeException('LIVE_EXPORT_TASK_MISSING');
+        app\services\ai\execution\AiExportRuntime::process($task['task_no']);
+        $run=$call('status',$binding($run),$run['run_id']);
+    }
     while(in_array($run['status'],['WAITING_EXPORT','WORKFLOW_EXECUTING'],true) && microtime(true)<$pollUntil){usleep(250000);$run=$call('status',$binding($run),$run['run_id']);}
     if ($run['status']!=='COMPLETED') {
         $clockRow=think\facade\Db::name('mohe_ai_run')->where('run_id',$run['run_id'])->field('created_at,last_clock_at,deadline_at,remaining_ms')->find();
@@ -184,6 +198,12 @@ try {
         $input['question']='那本月做最好的呢';
         $input['history']=[['question'=>$question,'answer'=>$run['answer']['summary']]];
         $run=$call('create',$input);$run=$call('execute',$input+$binding($run),$run['run_id']);
+        if($input['output_format']==='screen_and_xlsx'&&$run['status']==='WAITING_EXPORT') {
+            $task=think\facade\Db::name('unified_query_export_task')->where('source_type','AI')->where('status','pending')->order('id','desc')->field('task_no')->find();
+            if(!$task||!is_string($task['task_no']??null))throw new RuntimeException('LIVE_FOLLOWUP_EXPORT_TASK_MISSING');
+            app\services\ai\execution\AiExportRuntime::process($task['task_no']);
+            $run=$call('status',$binding($run),$run['run_id']);
+        }
         $until=microtime(true)+30;
         while(in_array($run['status'],['WAITING_EXPORT','WORKFLOW_EXECUTING'],true)&&microtime(true)<$until){usleep(250000);$run=$call('status',$binding($run),$run['run_id']);}
         if($run['status']!=='COMPLETED')throw new RuntimeException('LIVE_FOLLOWUP_FAILED_'.($run['reason']??$run['status']));

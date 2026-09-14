@@ -12,6 +12,7 @@ namespace app\services\ai\model {
         return $options[CURLOPT_WRITEFUNCTION]($handle, $body) === strlen($body);
     }
     function curl_getinfo($handle, $option) { return $GLOBALS['sfStatus']; }
+    function curl_errno($handle) { return (int)($GLOBALS['sfErrno'] ?? 0); }
     function curl_close($handle) {}
 }
 namespace {
@@ -115,10 +116,10 @@ namespace {
     $GLOBALS['sfResponse']=$response('{"ok":true}','length');
     try { $client->probe('fixture/model','fixture-key',1000,function(){}); throw new RuntimeException('missing truncated response'); }
     catch (\app\services\ai\contract\AiContractException $error) { check($error->getMessage()==='AI_MODEL_RESPONSE_TRUNCATED' && ($error->diagnostic()['stage']??'')==='response_envelope' && ($error->diagnostic()['finish_reason']??'')==='length','truncated response has bounded diagnostic'); }
-    $GLOBALS['sfTransportFailure']=true;
+    $GLOBALS['sfTransportFailure']=true; $GLOBALS['sfErrno']=28;
     try { $client->probe('fixture/model','fixture-key',1000,function(){}); throw new RuntimeException('missing unknown transport result'); }
-    catch (\app\services\ai\contract\AiContractException $error) { check($error->getMessage()==='AI_MODEL_RESULT_UNKNOWN' && $error->diagnostic()===['stage'=>'transport','predicate'=>'request_unknown'],'unknown transport result has payload-free diagnostic'); }
-    $GLOBALS['sfTransportFailure']=false;
+    catch (\app\services\ai\contract\AiContractException $error) { $d=$error->diagnostic(); check($error->getMessage()==='AI_MODEL_RESULT_UNKNOWN' && ($d['stage']??'')==='transport' && ($d['predicate']??'')==='timeout' && ($d['transport_errno']??null)===28 && isset($d['http_status'],$d['elapsed_ms']),'unknown transport result has bounded useful diagnostic'); }
+    $GLOBALS['sfTransportFailure']=false; $GLOBALS['sfErrno']=0;
     $GLOBALS['sfStatus']=401; rejects(function()use($client){$client->probe('fixture/model','fixture-key',1000,function(){});},'AI_MODEL_ACCOUNT_UNAVAILABLE');
     $GLOBALS['sfStatus']=200; $GLOBALS['sfResponse']=str_repeat('x',131073); rejects(function()use($client){$client->probe('fixture/model','fixture-key',1000,function(){});},'AI_MODEL_RESPONSE_TOO_LARGE');
     rejects(function()use($client){$client->probe('fixture/model',"bad\rkey",1000,function(){});},'AI_MODEL_CONFIG_INVALID');
@@ -140,6 +141,8 @@ namespace {
     check(strpos($outboundText,\app\services\ai\contract\AiIntentUnderstandingContract::VERSION)!==false,'understanding prompt uses its independent contract');
     check(strpos(\app\services\ai\contract\AiIntentResultContract::modelInstruction(false),'recommended_initial_answer')!==false,
         'binding contract permits a model-owned professional first answer without a phrase-specific server rule');
+    check(\app\services\ai\contract\AiIntentResultContract::repairableFormat('context_constraint_without_source:business_filters'),
+        'an ungrounded follow-up restriction change receives one bounded model correction');
     $GLOBALS['sfResponse']=$response(json_encode($understanding));
     $repairedUnderstanding=$client->understandMeaning($safeQuestion,'fixture/model','fixture-key',1000,function(){},$skills,'values:periods');
     $repairWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);

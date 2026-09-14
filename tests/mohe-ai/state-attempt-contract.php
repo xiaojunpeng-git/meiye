@@ -26,6 +26,10 @@ checkState((int)$db->query('SELECT input_tokens FROM mohe_ai_attempt')->fetchCol
  $diagnostic=['stage'=>'intent_contract','predicate'=>'missing_key:needs_metric_choice','content_bytes'=>128];
  $store->recordDiagnostic($owner,$id,$g,'worker',$diagnostic);
  checkState($store->runDiagnostic($owner,$id,$g)===$diagnostic,'payload-free diagnostic is tied to the Run only');
+ $attemptDiagnostic=['stage'=>'transport','predicate'=>'timeout','transport_errno'=>28,'elapsed_ms'=>30000];
+ $store->recordDiagnostic($owner,$id,$g,'worker',$attemptDiagnostic,'p1');
+ $counters=json_decode((string)$db->query('SELECT counters_json FROM mohe_ai_run WHERE run_id='.$db->quote($id))->fetchColumn(),true)?:[];
+ checkState(($counters['model_diagnostics']['p1']??null)===$attemptDiagnostic,'diagnostic preserves the failed model attempt without payload');
  rejectsState(function () use ($store,$owner,$id,$g) { $store->recordDiagnostic($owner,$id,$g,'worker',['stage'=>'bad-stage','predicate'=>'unsafe']); },'AI_DIAGNOSTIC_INVALID');
 rejectsState(function () use ($store,$owner,$id,$g) { $store->finishAttempt($owner,$id,$g,'worker','p1','FAILED'); },'AI_ATTEMPT_TERMINAL');
 $store->pauseForClarification($owner,$id,$g,'worker','clarification1');
@@ -36,9 +40,10 @@ $store->prepareAttempt($owner,$id,$g,'worker2','p2','model',$hash,'siliconflow')
 $store->sendAttempt($owner,$id,$g,'worker2','p2');
 rejectsState(function () use ($store,$owner,$id,$g) { $store->finishAttempt($owner,$id,$g,'worker2','p2','UNKNOWN',0,0); },'AI_ATTEMPT_INVALID');
 $store->finishAttempt($owner,$id,$g,'worker2','p2','UNKNOWN');
-checkState($store->get($owner,$id,$g)['status']==='FAILED','unknown stops parent');
-checkState($store->get($owner,$id,$g)['reason']==='ATTEMPT_UNKNOWN','unknown reason');
-rejectsState(function () use ($store,$owner,$id,$g) { $store->publish($owner,$id,$g,'worker2','e','a'); },'AI_RUN_TERMINAL');
+checkState($store->get($owner,$id,$g)['status']==='WORKFLOW_EXECUTING','unknown leaves the Run live for one gateway-owned recovery');
+rejectsState(function () use ($store,$owner,$id,$g) { $store->publish($owner,$id,$g,'worker2','e','a'); },'AI_ATTEMPT_UNRESOLVED');
+$store->fail($owner,$id,$g,'worker2','AI_MODEL_RESULT_UNKNOWN');
+checkState($store->get($owner,$id,$g)['status']==='FAILED' && $store->get($owner,$id,$g)['reason']==='AI_MODEL_RESULT_UNKNOWN','gateway terminalizes an unrecovered unknown result');
 $store->release($owner,$id,$g,'worker2');
 $r=$store->create($owner,'attempt2',$hash,$snapshot)['run']; $id=$r['run_id']; $g=$r['generation'];
 $store->claim($owner,$id,$g,'worker');

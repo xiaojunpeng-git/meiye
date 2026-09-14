@@ -32,7 +32,9 @@ final class AiRegisteredWorkflowExecutor
         $pathDeadline=$started+$compiled['budget']['worst_path_ms'];
         $trace=[]; $outputs=[];
         $counters=['node_visit_count'=>0,'skill_execution_count'=>0,'tool_call_count'=>0,'workflow_transition_count'=>0,'supplement_count'=>0];
-        foreach ($compiled['nodes'] as $node) {
+        $activeNode='preflight';
+        try { foreach ($compiled['nodes'] as $node) {
+            $activeNode=$node['id'];
             if (array_key_exists($node['id'],$outputs)||array_diff($node['depends_on'],array_keys($outputs))) AiRegistryValue::fail('AI_WORKFLOW_DEPENDENCY_UNSATISFIED');
             $now=$this->now();
             if ($now<$last) AiRegistryValue::fail('AI_EXECUTION_CLOCK_REGRESSED');
@@ -72,6 +74,13 @@ final class AiRegisteredWorkflowExecutor
             if ($node['output_schema']==='export_result'&&$result['deferred']===true) {
                 return ['status'=>'WAITING_EXTERNAL','compiled_run_hash'=>$compiled['compiled_run_hash'],'outputs'=>$outputs,'trace'=>$trace,'counters'=>$counters];
             }
+        }
+        } catch (\Throwable $error) {
+            // Preserve registered error codes verbatim.  For an otherwise
+            // opaque PHP/runtime failure, disclose only its server-owned graph
+            // node to the gateway; customer facts and exception text stay out.
+            if (preg_match('/^[A-Z][A-Z0-9_]{0,63}$/D',$error->getMessage())) throw $error;
+            throw new \RuntimeException('AI_WORKFLOW_NODE_'.strtoupper($activeNode).'_FAILED',0,$error);
         }
         return ['status'=>'COMPLETED','compiled_run_hash'=>$compiled['compiled_run_hash'],'outputs'=>$outputs,'trace'=>$trace,'counters'=>$counters];
     }

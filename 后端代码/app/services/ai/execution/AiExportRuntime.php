@@ -99,7 +99,13 @@ final class AiExportRuntime
         $seed=['source_type'=>'AI','account_id'=>$owner['account_id'],'operator_id'=>$owner['account_id'],'tenant_id'=>(string)($context['tenant_id']??0),
             'query_cutoff_date'=>date('Y-m-d',strtotime($view['data_as_of'])),'data_as_of'=>strtotime($view['data_as_of'])];
         // The same resolver builds both creation and worker contexts, without a fake request/token.
-        $factoryContext=$this->creationContext($binding,$seed);
+        try {
+            $factoryContext=$this->creationContext($binding,$seed);
+        } catch (\Throwable $error) {
+            // This is a server-side context construction fault.  Do not pass
+            // its message into a task, a run record, or a customer response.
+            throw new \RuntimeException('AI_EXPORT_CONTEXT_BUILD_FAILED',0,$error);
+        }
         try {
             $task=$this->tasks->createAi($factoryContext,['page_code'=>M\MetricReadViewExportProvider::PAGE_CODE,'scope'=>'query',
                 'fields'=>array_keys(M\MetricReadViewExportRegistrar::fields()),'includeSummary'=>false,
@@ -113,6 +119,11 @@ final class AiExportRuntime
             $answer['answer']['export_status']='failed';
             $ref=$this->runtime['private']->put('answer',$answer,$expiry);
             return $this->runtime['runs']->publish($owner,$run['run_id'],$run['generation'],$workerToken,$evidenceRef,$ref,'data_only_export_failed');
+        } catch (\Throwable $error) {
+            // createAi is a closed server contract.  Preserve only this
+            // boundary code so the gateway can distinguish it from a model
+            // or Reader failure without retaining business payloads.
+            throw new \RuntimeException('AI_EXPORT_TASK_CREATE_FAILED',0,$error);
         }
         $taskNo=$task['taskId'];
         $handoff=$this->runtime['private']->put('answer',['owner'=>$owner,'run_id'=>$run['run_id'],'generation'=>$run['generation'],

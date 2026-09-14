@@ -142,8 +142,7 @@ final class AiRunStore
         return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$handoffRef) {
             $r=$this->read($owner,$runId,$generation); $this->worker($r,$workerToken); $this->live($r);
             if ($r['status']!=='WORKFLOW_EXECUTING' || !(int)$r['slot_held']) { throw new RuntimeException('AI_EXPORT_HANDOFF_INVALID'); }
-            $pending=$this->one('SELECT COUNT(*) AS n FROM '.$this->table('attempt').' WHERE instance_id=? AND run_id=? AND state IN (\'PREPARED\',\'IN_FLIGHT\',\'UNKNOWN\')',[$this->instance,$runId]);
-            if ((int)$pending['n']!==0) { throw new RuntimeException('AI_ATTEMPT_UNRESOLVED'); }
+            if ($this->hasUnresolvedAttempt($runId)) { throw new RuntimeException('AI_ATTEMPT_UNRESOLVED'); }
             $this->execute('UPDATE '.$this->table('run').' SET status=\'WAITING_EXPORT\', progress_code=\'EXPORTING\', answer_ref=?, slot_held=0, version=version+1 WHERE instance_id=? AND run_id=?',[$handoffRef,$this->instance,$runId]);
             return $this->publicRun($this->read($owner,$runId,$generation));
         });
@@ -220,23 +219,29 @@ final class AiRunStore
                 throw new RuntimeException('AI_ATTEMPT_TERMINAL');
             }
             $this->execute('UPDATE '.$this->table('attempt').' SET state=?, input_tokens=?, output_tokens=? WHERE instance_id=? AND run_id=? AND attempt_code=?',[$state,$inputTokens,$outputTokens,$this->instance,$runId,$attemptCode]);
-            if ($state==='UNKNOWN' && !$this->terminal($r)) { $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\', reason=\'ATTEMPT_UNKNOWN\', last_clock_at=?, version=version+1 WHERE instance_id=? AND run_id=?',[$this->now(),$this->instance,$runId]); }
+            // UNKNOWN means the provider outcome is not known.  The gateway
+            // may still run one separately recorded, bounded recovery attempt
+            // for a read-only stage.  If recovery is not allowed or fails, its
+            // normal exception path terminalizes the Run with the real reason.
         });
     }
 
     /** Payload-free model response diagnostics expire with the Run. */
-    public function recordDiagnostic(array $owner,string $runId,int $generation,string $workerToken,array $diagnostic): void
+    public function recordDiagnostic(array $owner,string $runId,int $generation,string $workerToken,array $diagnostic,string $attemptCode=''): void
     {
         // Diagnostics deliberately hold only bounded transport facts. They
         // must never become a back door for customer wording, model output,
         // identities or returned business values.
-        $allowed=['stage','predicate','finish_reason','content_bytes','recommended_value_type',
+        $allowed=['stage','predicate','finish_reason','content_bytes','recommended_value_type','transport_errno','http_status','elapsed_ms',
             'initial_observation','needs_metric_choice','selected_metric_count','operation','field'];
         if (array_diff(array_keys($diagnostic),$allowed) || !is_string($diagnostic['stage']??null)
             || !preg_match('/^[a-z_]{1,48}$/D',$diagnostic['stage']) || !is_string($diagnostic['predicate']??null)
             || !preg_match('/^[a-z0-9_:]{1,96}$/D',$diagnostic['predicate'])
             || (isset($diagnostic['finish_reason']) && (!is_string($diagnostic['finish_reason']) || !preg_match('/^[a-z_]{1,32}$/D',$diagnostic['finish_reason'])))
             || (isset($diagnostic['content_bytes']) && (!is_int($diagnostic['content_bytes']) || $diagnostic['content_bytes']<0 || $diagnostic['content_bytes']>131072))
+            || (isset($diagnostic['transport_errno']) && (!is_int($diagnostic['transport_errno']) || $diagnostic['transport_errno']<0 || $diagnostic['transport_errno']>999))
+            || (isset($diagnostic['http_status']) && (!is_int($diagnostic['http_status']) || $diagnostic['http_status']<0 || $diagnostic['http_status']>599))
+            || (isset($diagnostic['elapsed_ms']) && (!is_int($diagnostic['elapsed_ms']) || $diagnostic['elapsed_ms']<0 || $diagnostic['elapsed_ms']>180000))
             || (isset($diagnostic['recommended_value_type']) && (!is_string($diagnostic['recommended_value_type']) || !preg_match('/^[a-z_]{1,32}$/D',$diagnostic['recommended_value_type'])))
             || (isset($diagnostic['initial_observation']) && !is_bool($diagnostic['initial_observation']))
             || (isset($diagnostic['needs_metric_choice']) && !is_bool($diagnostic['needs_metric_choice']))
@@ -245,10 +250,20 @@ final class AiRunStore
             || (isset($diagnostic['field']) && (!is_string($diagnostic['field']) || !preg_match('/^[a-z_]{1,32}$/D',$diagnostic['field'])))) {
             throw new RuntimeException('AI_DIAGNOSTIC_INVALID');
         }
-        $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$diagnostic) {
+        if ($attemptCode!=='') { $this->identifier($attemptCode); }
+        $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$diagnostic,$attemptCode) {
             $r=$this->read($owner,$runId,$generation,true); $this->worker($r,$workerToken);
             $counters=json_decode($r['counters_json'],true)?:[];
             $counters['model_diagnostic']=$diagnostic;
+            // Keep a bounded diagnostic per model attempt as well as the
+            // latest summary.  A recovery must not erase why the original
+            // request failed; no prompt, completion, identity or business
+            // value is stored here.
+            if ($attemptCode!=='') {
+                $attempts=is_array($counters['model_diagnostics']??null)?$counters['model_diagnostics']:[];
+                $attempts[$attemptCode]=$diagnostic;
+                $counters['model_diagnostics']=$attempts;
+            }
             $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counters),$this->instance,$runId]);
         });
     }
@@ -292,8 +307,7 @@ final class AiRunStore
             if (($counts['clarification_invalid_count']??0)>3) { throw new RuntimeException('AI_CLARIFICATION_INVALID_LIMIT'); }
             if (($counts['clarification_wait_ms']??0)>=600000) { throw new RuntimeException('AI_CLARIFICATION_EXPIRED'); }
             $now=$this->now();
-            $pending=$this->one('SELECT COUNT(*) AS n FROM '.$this->table('attempt').' WHERE instance_id=? AND run_id=? AND state IN (\'PREPARED\',\'IN_FLIGHT\',\'UNKNOWN\')',[$this->instance,$runId]);
-            if ((int)$pending['n']!==0) { throw new RuntimeException('AI_ATTEMPT_UNRESOLVED'); }
+            if ($this->hasUnresolvedAttempt($runId)) { throw new RuntimeException('AI_ATTEMPT_UNRESOLVED'); }
             $counts['clarification_invalid_count']=$counts['clarification_invalid_count']??0;
             $this->execute('UPDATE '.$this->table('run').' SET status=\'WAITING_CLARIFICATION\', clarification_ref=?, clarification_count=?, counters_json=?, pause_at=?, remaining_ms=?, slot_held=0, worker_token=\'\', version=version+1 WHERE instance_id=? AND run_id=?',[$clarificationRef,(int)$r['clarification_count']+($newStep?1:0),json_encode($counts),$now,(int)$r['deadline_at']-$now,$this->instance,$runId]);
             return $this->publicRun($this->read($owner,$runId,$generation));
@@ -415,8 +429,7 @@ final class AiRunStore
         return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$evidenceRef,$answerRef,$delivery) {
             $r=$this->read($owner,$runId,$generation); $this->worker($r,$workerToken); $this->live($r);
             if ($r['status']!=='WORKFLOW_EXECUTING' || !(int)$r['slot_held']) { throw new RuntimeException('AI_PUBLICATION_NOT_CLAIMED'); }
-            $pending=$this->one('SELECT COUNT(*) AS n FROM '.$this->table('attempt').' WHERE instance_id=? AND run_id=? AND state IN (\'PREPARED\',\'IN_FLIGHT\',\'UNKNOWN\')',[$this->instance,$runId]);
-            if ((int)$pending['n']!==0) { throw new RuntimeException('AI_ATTEMPT_UNRESOLVED'); }
+            if ($this->hasUnresolvedAttempt($runId)) { throw new RuntimeException('AI_ATTEMPT_UNRESOLVED'); }
             $counters=json_decode($r['counters_json'],true)?:[];
             $counters['export_delivery']=$delivery==='data_only_export_failed'?2:($r['answer_ref']!==''?1:0);
             $this->execute('UPDATE '.$this->table('run').' SET counters_json=? WHERE instance_id=? AND run_id=?',[json_encode($counters),$this->instance,$runId]);
@@ -587,6 +600,25 @@ final class AiRunStore
     private function one(string $sql,array $params) { return $this->execute($sql,$params)->fetch(PDO::FETCH_ASSOC); }
     private function rows(string $sql,array $params): array { return $this->execute($sql,$params)->fetchAll(PDO::FETCH_ASSOC); }
     private function attempt(string $runId,string $code) { return $this->one('SELECT * FROM '.$this->table('attempt').' WHERE instance_id=? AND run_id=? AND attempt_code=?',[$this->instance,$runId,$code]); }
+
+    /** An unknown binding request may be superseded only by the one explicit,
+     * successfully completed recovery attempt. Every other unknown call still
+     * blocks guidance, export and publication. */
+    private function hasUnresolvedAttempt(string $runId): bool
+    {
+        $rows=$this->rows('SELECT attempt_code,state FROM '.$this->table('attempt').' WHERE instance_id=? AND run_id=?',[$this->instance,$runId]);
+        $states=[];
+        foreach ($rows as $row) {
+            $states[$row['attempt_code']]=$row['state'];
+            if (in_array($row['state'],['PREPARED','IN_FLIGHT'],true)) return true;
+        }
+        foreach ($states as $code=>$state) {
+            if ($state!=='UNKNOWN') continue;
+            if ($code==='bind_intent' && ($states['bind_transport_recovery']??null)==='SUCCEEDED') continue;
+            return true;
+        }
+        return false;
+    }
     private function insert(string $name,array $r): void { $this->execute('INSERT INTO '.$this->table($name).' ('.implode(',',array_keys($r)).') VALUES ('.implode(',',array_fill(0,count($r),'?')).')',array_values($r)); }
     private function publicRun(array $r): array
     {
