@@ -37,53 +37,175 @@ const question = ref(''), progress = ref(''), displayed = ref<Array<any>>([])
 const clarification = ref<any>(null), choices = ref<any>({}), choiceLabels = ref<any>({})
 const guidanceSchema = 'mohe-clarification-v2'
 const guidanceBusy = ref(false), guidanceUnknown = ref(false), closeRequestedState = ref(false), revisingId = ref('')
-let guidanceSubmission : any = null, activeGuidanceSchema = ''
+let guidanceSubmission : any = null, queuedClarificationId = '', activeGuidanceSchema = ''
 const wantExcel = ref(false), exportReady = ref(false)
 const excelAvailable = ref(false)
-let bootstrap : any = null, run : any = null, pending : any = null
-let conversation = '', storageKey = '', runtimeKey = '', sessionId = '', timer : any = null, expiryTimer : any = null, closeRequested = false
+let bootstrap : any = null, run : any = null, pending : any = null, compatibilityExecuting = false
+let conversation = '', storageKey = '', runtimeKey = '', sessionId = '', entryId = id(), timer : any = null, expiryTimer : any = null, closeRequested = false, lifecycle = 0
 function id() : string { return 'device-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) }
 function questionHint() : string { return bootstrap != null && bootstrap.capabilities != null && Array.isArray(bootstrap.capabilities.metric_codes) && bootstrap.capabilities.metric_codes.indexOf('consume_amount') >= 0 ? '例如：今天本店消耗业绩多少？' : '请输入要查询的指标和日期' }
 function tooltipText(value : any) : string { if (value == null) return ''; if (typeof value == 'string') return String(value); let lines : Array<string> = []; ['summary','include','exclude','timing','note'].forEach((key : string) => { if (typeof value[key] == 'string' && String(value[key]).length > 0) { let label = key == 'include' ? '包含：' : key == 'exclude' ? '不包含：' : key == 'timing' ? '统计时间：' : key == 'note' ? '说明：' : ''; lines.push(label + String(value[key])) } }); return lines.join('\n') }
 function terminal() : boolean { return run != null && ['COMPLETED','PARTIAL_SUCCEEDED','FAILED','CANCELLED'].indexOf(String(run.status)) >= 0 }
 function load() : Array<any> { let raw = uni.getStorageSync(storageKey); let now = Date.now(); let all : Array<any> = []; if (Array.isArray(raw)) raw.forEach((s : any) => { if (s != null && typeof s.id == 'string' && Number.isSafeInteger(s.created_at) && s.created_at <= now && s.created_at + 86400000 > now && Array.isArray(s.rounds)) { s.rounds = s.rounds.filter((r : any) => r != null && typeof r.question == 'string' && typeof r.answer == 'string' && Number.isSafeInteger(r.created_at) && r.created_at <= now && r.created_at + 86400000 > now); all.push(s) } }); uni.setStorageSync(storageKey,all); return all }
-function activeRecord() : any { let value = uni.getStorageSync(runtimeKey); let now = Date.now(); if (value == null || typeof value.session_id != 'string' || typeof value.conversation_id != 'string' || !Number.isSafeInteger(value.created_at) || value.created_at > now || value.created_at + 86400000 <= now || (value.run == null && value.pending == null)) { if (runtimeKey.length > 0) uni.removeStorageSync(runtimeKey); return null }; return value }
-function persistActive() : void { if (runtimeKey.length == 0) return; if ((run == null && pending == null) || terminal()) { uni.removeStorageSync(runtimeKey); return }; uni.setStorageSync(runtimeKey,{created_at:Date.now(),session_id:sessionId,conversation_id:conversation,close_requested:closeRequested,run:run,pending:pending}) }
-function clearActive() : void { if (runtimeKey.length > 0) uni.removeStorageSync(runtimeKey) }
-function newConversation() : void { if (busy.value || (pending != null && run == null)) return; let all = load(); conversation = id(); all.push({id:conversation,created_at:Date.now(),rounds:[]}); uni.setStorageSync(storageKey,all); displayed.value = []; run = null; clarification.value = null; clearGuidance(); exportReady.value = false; clearActive() }
+function validStoredGuidanceSubmission(value : any) : boolean { return value != null && typeof value == 'object' && typeof value.clarification_id == 'string' && value.clarification_id.length > 0 && typeof value.client_submission_id == 'string' && value.client_submission_id.length > 0 && value.choices != null && typeof value.choices == 'object' && !Array.isArray(value.choices) && (value.schema_version == null || value.schema_version == guidanceSchema) && (value.intent_revision == null || Number.isSafeInteger(value.intent_revision)) && (value.step_revision == null || Number.isSafeInteger(value.step_revision)) }
+function validResolvedRun(value : any) : boolean { return value != null && typeof value.run_id == 'string' && value.run_id.length > 0 && Number.isSafeInteger(value.generation) && value.generation >= 1 }
+function activeRecord() : any { let value = uni.getStorageSync(runtimeKey); let now = Date.now(); if (value == null || typeof value.session_id != 'string' || typeof value.conversation_id != 'string' || !Number.isSafeInteger(value.created_at) || value.created_at > now || value.created_at + 86400000 <= now || (value.run == null && value.pending == null && !validResolvedRun(value.resolved_run)) || (value.resolved_run != null && !validResolvedRun(value.resolved_run)) || (value.queued_clarification_id != null && typeof value.queued_clarification_id != 'string') || (value.guidance_submission != null && !validStoredGuidanceSubmission(value.guidance_submission))) { if (runtimeKey.length > 0) uni.removeStorageSync(runtimeKey); return null }; return value }
+function sameRunRecord(left : any,right : any) : boolean { return left != null && right != null && typeof left.run_id == 'string' && left.run_id == right.run_id && Number.isSafeInteger(left.generation) && left.generation == right.generation }
+function versionIsNewer(left : any,right : any) : boolean { return left != null && right != null && Number.isSafeInteger(left.version) && (!Number.isSafeInteger(right.version) || left.version > right.version) }
+// A retired component may only write the record it still owns.  During a page
+// transition the replacement entry can already have a newer Run projection.
+function ownsActiveRecord() : boolean {
+  let stored = activeRecord()
+  if (stored == null || stored.session_id != sessionId || stored.conversation_id != conversation) return false
+  // A replacement component claims the record before it resumes polling. An
+  // old component may still receive lifecycle cleanup afterwards, but must not
+  // replace newer local-only state such as a queued clarification submission.
+  if (stored.owner_id != null && stored.owner_id != entryId) return false
+  if (run == null) return pending != null && stored.run == null && samePendingRecord(stored,pending)
+  return sameRunRecord(stored.run,run) && !versionIsNewer(stored.run,run)
+}
+function mayWriteActiveRecord(claim : boolean = false,replaceResolved : boolean = false) : boolean { let stored = activeRecord(); return stored == null || stored.owner_id == null || stored.owner_id == entryId || claim || (replaceResolved && validResolvedRun(stored.resolved_run)) }
+function persistActive(retired : boolean = false,claim : boolean = false,replaceResolved : boolean = false) : void { if (runtimeKey.length == 0 || !mayWriteActiveRecord(claim,replaceResolved)) return; if (retired && !ownsActiveRecord()) return; if ((run == null && pending == null) || terminal()) { uni.removeStorageSync(runtimeKey); return }; uni.setStorageSync(runtimeKey,{created_at:Date.now(),session_id:sessionId,conversation_id:conversation,owner_id:entryId,close_requested:closeRequested,queued_clarification_id:queuedClarificationId,guidance_submission:guidanceSubmission,run:run,pending:pending}) }
+function clearActive(force : boolean = false) : void { if (runtimeKey.length == 0 || !mayWriteActiveRecord(force)) return; uni.removeStorageSync(runtimeKey) }
+// A completed Run is retained as an owner-scoped tombstone.  This is not a
+// second chat history: it only prevents callbacks from a retired native page
+// from recreating an already-finished request after its replacement rendered it.
+function markResolvedRun(value : any = run,claim : boolean = false) : void { if (!validResolvedRun(value) || !mayWriteActiveRecord(claim)) return; uni.setStorageSync(runtimeKey,{created_at:Date.now(),session_id:sessionId,conversation_id:conversation,owner_id:entryId,resolved_run:{run_id:value.run_id,generation:value.generation,version:value.version || null}}) }
+function samePendingRecord(value : any,submitted : any) : boolean { return value != null && value.pending != null && submitted != null && typeof submitted.client_request_id == 'string' && value.pending.client_request_id == submitted.client_request_id }
+// A create acknowledgement can arrive after this native entry has been
+// recycled.  It may only update the exact persisted request which produced
+// it; a retired page must never overwrite a newer conversation or UI state.
+function retainLateAdmission(accepted : any,submitted : any) : any {
+  if (accepted == null || typeof accepted.run_id != 'string') return null
+  let stored = activeRecord()
+  if (!samePendingRecord(stored,submitted)) return null
+  // A normal page switch is not an instruction to discard a just-completed
+  // result.  Preserve it for the replacement entry; explicit close is the
+  // only path which is allowed to retire it without showing an answer.
+  if (['COMPLETED','PARTIAL_SUCCEEDED','FAILED','CANCELLED'].indexOf(String(accepted.status || '')) >= 0 && stored.close_requested === true) { clearActive(true); return null }
+  let current = stored.run
+  // Creation replies are normally version 1.  If the replacement entry has
+  // already observed a later version of this exact Run, retain that richer
+  // state.  A different Run with the same request envelope is never replaced.
+  if (current != null && !sameRunRecord(current,accepted)) return null
+  let selected = current != null && !versionIsNewer(accepted,current) ? current : accepted
+  let retained : any = {created_at:Date.now(),session_id:stored.session_id,conversation_id:stored.conversation_id,owner_id:stored.owner_id || null,close_requested:stored.close_requested === true,queued_clarification_id:stored.queued_clarification_id || '',guidance_submission:stored.guidance_submission || null,run:selected,pending:stored.pending}
+  uni.setStorageSync(runtimeKey,retained)
+  return retained
+}
+function cancelLateAdmission(submitted : any,retained : any) : void {
+  if (retained == null || retained.close_requested !== true || retained.run == null || typeof retained.run.run_id != 'string') return
+  let source = retained.run, body : any = {client_session_id:submitted.client_session_id,generation:source.generation,run_delivery_token:source.run_delivery_token}
+  mobileAiRequest('POST','/runs/' + source.run_id + '/cancel',body,(r : any) => {
+    // Clear only if this is still the exact admission from the closed page.
+    // A replacement entry may already have started another query meanwhile.
+    if (!r.ok || r.data == null || ['COMPLETED','PARTIAL_SUCCEEDED','FAILED','CANCELLED'].indexOf(String(r.data.status || '')) < 0) return
+    let stored = activeRecord()
+    if (stored != null && stored.close_requested === true && samePendingRecord(stored,submitted) && sameRunRecord(stored.run,source)) clearActive(true)
+  })
+}
+function unavailable(value : any) : boolean { return value != null && value.responseKnown === true && ['AI_RUN_EXPIRED','AI_RUN_NOT_FOUND'].indexOf(String(value.reason || '')) >= 0 }
+function abandonUnavailableRun() : void { if (timer != null) clearTimeout(timer); run = null; pending = null; compatibilityExecuting = false; busy.value = false; queuedClarificationId = ''; clarification.value = null; clearGuidance(); exportReady.value = false; closeRequested = false; closeRequestedState.value = false; clearActive(); progress.value = '上一次任务已失效，请重新提问。' }
+function newConversation() : void { if (busy.value || (pending != null && run == null)) return; lifecycle++; queuedClarificationId = ''; let all = load(); conversation = id(); all.push({id:conversation,created_at:Date.now(),rounds:[]}); uni.setStorageSync(storageKey,all); displayed.value = []; run = null; clarification.value = null; clearGuidance(); exportReady.value = false; let stored = activeRecord(); if (stored == null || !validResolvedRun(stored.resolved_run)) clearActive() }
 function openPanel() : void { opened.value = true; if (conversation.length == 0) newConversation() }
 function binding() : any { return {client_session_id:sessionId,generation:run.generation,run_delivery_token:run.run_delivery_token} }
-function schedulePoll() : void { if (timer != null) clearTimeout(timer); timer = setTimeout(() => { if (run == null || terminal()) return; mobileAiRequest('GET','/runs/' + run.run_id,binding(),(r : any) => { if (r.ok) { accept(r.data); if (!terminal() && (run.status != 'WAITING_CLARIFICATION' || closeRequestedState.value)) schedulePoll() } else { progress.value = closeRequestedState.value ? '暂未确认取消结果。' : '连接中断，暂未确认任务结果。'; schedulePoll() } }) },1500) }
+function schedulePoll() : void {
+  if (timer != null) clearTimeout(timer)
+  let source = run, expectedLifecycle = lifecycle
+  timer = setTimeout(() => {
+    if (source == null || expectedLifecycle != lifecycle || run == null || terminal() || run.run_id != source.run_id || run.generation != source.generation) return
+    mobileAiRequest('GET','/runs/' + source.run_id,binding(),(r : any) => {
+      if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+      if (r.ok) { accept(r.data); if (!terminal() && (run.status != 'WAITING_CLARIFICATION' || closeRequestedState.value || (run.clarification != null && queuedClarificationId == run.clarification.id))) schedulePoll() }
+      else { if (unavailable(r)) { abandonUnavailableRun(); return }; progress.value = closeRequestedState.value ? '暂未确认取消结果。' : '连接中断，暂未确认任务结果。'; persistActive(); schedulePoll() }
+    })
+  },1500)
+}
 function accept(value : any) : void {
   if (value == null || (run != null && (value.run_id != run.run_id || value.generation != run.generation || terminal()))) return
   if (value.version != null && (!Number.isSafeInteger(value.version) || value.version < 1)) return
   if (run != null && Number.isSafeInteger(run.version) && (!Number.isSafeInteger(value.version) || value.version <= run.version)) return
   if (run != null && value.run_delivery_token == null) value.run_delivery_token = run.run_delivery_token
   run = value; progress.value = typeof run.progress == 'string' ? run.progress : '正在处理'
-  if (terminal()) { busy.value = false; clarification.value = null; clearGuidance(); if (timer != null) clearTimeout(timer)
-    if (run.answer != null && ['COMPLETED','PARTIAL_SUCCEEDED'].indexOf(String(run.status)) >= 0 && pending != null && typeof pending.question == 'string') { let answer = run.answer; exportReady.value = answer.export != null && answer.export.file_ref != null; let row : any = {question:pending.question,answer:String(answer.summary || ''),cards:answer.cards || [],table:answer.table || null,presentation:answer,created_at:Date.now()}; displayed.value.push(row); let all = load(); all.forEach((s : any) => { if (s.id == conversation) s.rounds.push(row) }); uni.setStorageSync(storageKey,all) }
-    else progress.value = run.status == 'CANCELLED' ? '已取消' : '本次未能完成，请重新提问。'; pending = null; clearActive(); return }
+  if (terminal()) { busy.value = false; compatibilityExecuting = false; queuedClarificationId = ''; clarification.value = null; clearGuidance(); if (timer != null) clearTimeout(timer)
+    if (run.answer != null && ['COMPLETED','PARTIAL_SUCCEEDED'].indexOf(String(run.status)) >= 0 && pending != null && typeof pending.question == 'string') { let answer = run.answer; exportReady.value = answer.export != null && answer.export.file_ref != null; let row : any = {question:pending.question,answer:String(answer.summary || ''),cards:answer.cards || [],table:answer.table || null,presentation:answer,run_id:run.run_id,generation:run.generation,created_at:Date.now()}; let all = load(); let duplicate = false; all.forEach((s : any) => { if (s.id == conversation && s.rounds.some((item : any) => item.run_id == run.run_id && item.generation == run.generation)) duplicate = true }); if (!displayed.value.some((item : any) => item.run_id == run.run_id && item.generation == run.generation)) displayed.value.push(row); if (!duplicate) { all.forEach((s : any) => { if (s.id == conversation) s.rounds.push(row) }); uni.setStorageSync(storageKey,all) } }
+    else progress.value = run.status == 'CANCELLED' ? '已取消' : '本次未能完成，请重新提问。'; pending = null; markResolvedRun(); return }
   if (run.status == 'WAITING_CLARIFICATION' && !closeRequestedState.value) {
     let c = run.clarification
     if (!validGuidance(c)) { clarification.value = null; clearGuidance(); progress.value = '引导信息不完整，请重新确认任务状态。'; return }
+    if (run.clarification_rejected === true && queuedClarificationId == c.id) {
+      queuedClarificationId = ''
+      progress.value = '所选条件格式不完整，请检查后重新确认。'
+    }
+    // A successful choice is queued while the Run still projects the previous
+    // clarification. Keep observing that Run; do not offer the same controls
+    // again or make the customer manually refresh for the final answer.
+    if (queuedClarificationId == c.id) { clarification.value = null; clearGuidance(); schedulePoll(); persistActive(); return }
     if (c.schema_version == guidanceSchema) activeGuidanceSchema = guidanceSchema
     let same = clarification.value != null && clarification.value.id == c.id && clarification.value.step_revision == c.step_revision && clarification.value.intent_revision == c.intent_revision
     clarification.value = c; if (!same) clearGuidance()
-  } else { clarification.value = null; clearGuidance(); schedulePoll() }
+  } else { queuedClarificationId = ''; clarification.value = null; clearGuidance(); schedulePoll() }
   persistActive()
 }
 function submit() : void {
   if (busy.value || (pending == null && question.value.trim().length == 0)) return
+  // Another merchant page can start a Run after this entry bootstrapped.  Join
+  // that request before accepting a new question, while keeping the typed text.
+  let existing = activeRecord()
+  if (existing != null && !validResolvedRun(existing.resolved_run) && !ownsActiveRecord()) { busy.value = true; progress.value = '正在恢复已开始的查询，完成后可继续提问。'; sessionId = existing.session_id; bootstrapSession(true); return }
   let history : Array<any> = []; let contextRef = ''
   load().forEach((s : any) => { if (s.id == conversation) { s.rounds.slice(-20).forEach((r : any) => history.push({question:r.question,answer:r.answer})); if (s.rounds.length > 0) { let last = s.rounds[s.rounds.length - 1]; if (last.presentation != null && typeof last.presentation.context_ref == 'string') contextRef = last.presentation.context_ref } } })
-  if (pending == null) { activeGuidanceSchema = String(bootstrap.guidance_schema_version || ''); pending = {client_request_id:id(),conversation_id:conversation,client_session_id:sessionId,window_token:bootstrap.window_token,question:question.value.trim(),history:history,output_format:wantExcel.value ? 'screen_and_xlsx' : 'screen'}; if (activeGuidanceSchema == guidanceSchema) pending.guidance_schema_version = guidanceSchema; if (contextRef.length > 0) pending.context_ref = contextRef }
-  let restoringCancelledRequest = pending != null && closeRequested
+  let isNewRequest = pending == null
+  if (isNewRequest) { activeGuidanceSchema = String(bootstrap.guidance_schema_version || ''); pending = {client_request_id:id(),conversation_id:conversation,client_session_id:sessionId,window_token:bootstrap.window_token,question:question.value.trim(),history:history,output_format:wantExcel.value ? 'screen_and_xlsx' : 'screen'}; if (activeGuidanceSchema == guidanceSchema) pending.guidance_schema_version = guidanceSchema; if (contextRef.length > 0) pending.context_ref = contextRef; closeRequested = false; closeRequestedState.value = false }
+  let restoringCancelledRequest = !isNewRequest && closeRequested
   exportReady.value = false
   busy.value = true; closeRequested = restoringCancelledRequest; closeRequestedState.value = restoringCancelledRequest; run = null; question.value = ''; progress.value = '正在接纳请求'
-  persistActive()
-  mobileAiRequest('POST','/runs',pending,(r : any) => { if (!r.ok) { busy.value = false; question.value = pending.question; if (r.responseKnown) { pending = null; clearActive(); progress.value = r.message } else progress.value = '请求结果暂未确认，再次发送将重试同一任务。'; return }; if (r.data.accepted === false) { busy.value = false; pending = null; clearActive(); progress.value = r.data.message || '当前使用人数较多，请稍后再问。'; return }; accept(r.data); if (terminal()) return; if (closeRequested) { cancelRun(); return }; let body : any = binding(); body.question = pending.question; body.history = pending.history; body.output_format = pending.output_format; if (pending.context_ref != null) body.context_ref = pending.context_ref; mobileAiRequest('POST','/runs/' + run.run_id + '/execute',body,(e : any) => { if (e.ok) accept(e.data); else schedulePoll() }) })
+  // A new customer question may replace only a completion tombstone.  It must
+  // never take over another still-active page's Run.
+  persistActive(false,false,isNewRequest)
+  let stored = activeRecord()
+  if (stored == null || stored.owner_id != entryId || !samePendingRecord(stored,pending)) { let unsentQuestion = pending.question; pending = null; busy.value = stored != null; question.value = unsentQuestion; progress.value = stored == null ? '暂未保存请求，请重试发送。' : '正在恢复已开始的查询，完成后可继续提问。'; if (stored != null) { sessionId = stored.session_id; bootstrapSession(true) }; return }
+  let expectedLifecycle = lifecycle, submitted = pending
+  mobileAiRequest('POST','/runs',submitted,(r : any) => {
+    if (expectedLifecycle != lifecycle) { if (r.ok && r.data != null && r.data.accepted !== false) { let retained = retainLateAdmission(r.data,submitted); cancelLateAdmission(submitted,retained) }; return }
+    if (!r.ok) { busy.value = false; question.value = pending.question; if (r.responseKnown) { pending = null; clearActive(); progress.value = r.message } else { progress.value = '请求结果暂未确认，再次发送将重试同一任务。'; persistActive() }; return }
+    if (r.data.accepted === false) { busy.value = false; pending = null; clearActive(); progress.value = r.data.message || '当前使用人数较多，请稍后再问。'; return }
+    // New servers accept only after durable queueing.  During a staged rollout
+    // keep the old synchronous trigger for a server that has not enabled its
+    // compatible consumer yet.
+    accept(r.data)
+    if (terminal()) return
+    if (closeRequested) { cancelRun(); return }
+    if (bootstrap == null || bootstrap.async_execution !== true) executeCompatibility(run,expectedLifecycle)
+    schedulePoll()
+  })
 }
-function cancelRun() : void { closeRequested = true; closeRequestedState.value = true; persistActive(); if (run == null || terminal()) return; progress.value = '正在取消'; mobileAiRequest('POST','/runs/' + run.run_id + '/cancel',binding(),(r : any) => { if (r.ok) accept(r.data); else { progress.value = '暂未确认取消结果。'; schedulePoll() } }) }
+function executeCompatibility(source : any,expectedLifecycle : number) : void {
+  if (compatibilityExecuting || pending == null || source == null || terminal() || closeRequested || (bootstrap != null && bootstrap.async_execution === true)) return
+  compatibilityExecuting = true
+  let body : any = binding(); body.question = pending.question; body.history = pending.history; body.output_format = pending.output_format
+  if (pending.context_ref != null) body.context_ref = pending.context_ref
+  mobileAiRequest('POST','/runs/' + source.run_id + '/execute',body,(e : any) => {
+    compatibilityExecuting = false
+    if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+    if (e.ok) accept(e.data)
+    else if (unavailable(e)) abandonUnavailableRun()
+    else schedulePoll()
+  })
+}
+function cancelRun() : void {
+  if (terminal() || (run == null && pending == null)) return
+  closeRequested = true; closeRequestedState.value = true; persistActive(); if (run == null || terminal()) return
+  let source = run, expectedLifecycle = lifecycle
+  progress.value = '正在取消'
+  mobileAiRequest('POST','/runs/' + source.run_id + '/cancel',binding(),(r : any) => {
+    // A page transition keeps the Run alive for the replacement entry.  A
+    // delayed cancellation response from this retired component must not clear
+    // that replacement's durable recovery record.
+    if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+    if (r.ok) accept(r.data); else { progress.value = '暂未确认取消结果。'; schedulePoll() }
+  })
+}
 function closePanel() : void { cancelRun(); opened.value = false }
 function downloadExcel() : void { if (run == null || !terminal() || !exportReady.value) return; downloadMobileAi(run,sessionId,String(run.answer.export.filename || '经营数据.xlsx'),(message : string) => { progress.value = message }) }
 function validGuidance(c : any) : boolean {
@@ -125,7 +247,7 @@ function selectDate(key : string,event : any) : void { if (!guidanceBusy.value &
 function chooseValue(field : any,option : any) : void { if (guidanceBusy.value || guidanceUnknown.value || closeRequestedState.value) return; choices.value[field.key] = option.value; choiceLabels.value[field.key] = option.label }
 function selectOption(field : any,event : any) : void { let option = field.options[Number(event.detail.value)]; if (option != null) chooseValue(field,option) }
 function confirmChoices() : void {
-  if (guidanceBusy.value || closeRequestedState.value || run == null || terminal() || run.status != 'WAITING_CLARIFICATION' || clarification.value == null) return
+  if (guidanceBusy.value || closeRequestedState.value || run == null || terminal() || run.status != 'WAITING_CLARIFICATION' || clarification.value == null || !mayWriteActiveRecord()) return
   let c = clarification.value
   if (guidanceSubmission == null) {
     let submittedChoices : any = {}; let invalid = false
@@ -136,19 +258,89 @@ function confirmChoices() : void {
     guidanceSubmission = body
   }
   let submitted = guidanceSubmission; guidanceBusy.value = true
-  mobileAiRequest('POST','/runs/' + run.run_id + '/clarify',submitted,(r : any) => {
-    if (r.ok) accept(r.data)
+  // Persist before I/O. If the app is interrupted after sending but before a
+  // response arrives, the identical client_submission_id remains available
+  // for a safe idempotent retry after the next status read.
+  persistActive()
+  let source = run, expectedLifecycle = lifecycle
+  mobileAiRequest('POST','/runs/' + source.run_id + '/clarify',submitted,(r : any) => {
+    if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+    if (r.ok) {
+      queuedClarificationId = c.id
+      guidanceSubmission = null; guidanceUnknown.value = false; guidanceBusy.value = false
+      accept(r.data)
+      // A replay acknowledgement can keep the exact same Run version.  Save
+      // its queued-step marker before the panel is closed or reloaded, then
+      // continue polling until the worker publishes a different state.
+      if (!terminal()) persistActive()
+      if (!terminal()) schedulePoll()
+      return
+    }
     if (clarification.value == null || clarification.value.id != c.id || clarification.value.intent_revision != c.intent_revision || closeRequestedState.value) return
     guidanceBusy.value = false
-    if (r.ok) { guidanceSubmission = null; guidanceUnknown.value = false }
-    else { if (r.responseKnown) { guidanceSubmission = null; guidanceUnknown.value = false; progress.value = r.message } else { guidanceUnknown.value = true; progress.value = '提交结果暂未确认，请重试确认同一次选择。' } }
+    if (r.responseKnown) { guidanceSubmission = null; guidanceUnknown.value = false; progress.value = r.message; persistActive() }
+    else { guidanceUnknown.value = true; progress.value = '提交结果暂未确认，请重试确认同一次选择。'; persistActive() }
   })
 }
-function resumeActive(record : any) : void { conversation = record.conversation_id; run = record.run; pending = record.pending; closeRequested = record.close_requested === true; closeRequestedState.value = closeRequested; busy.value = true; if (run == null) { if (pending == null) { busy.value = false; clearActive(); return }; pending.client_session_id = sessionId; pending.window_token = bootstrap.window_token; persistActive(); busy.value = false; submit(); return }; mobileAiRequest('GET','/runs/' + run.run_id,binding(),(r : any) => { if (r.ok) accept(r.data); else { busy.value = false; pending = null; run = null; closeRequested = false; closeRequestedState.value = false; clearActive(); progress.value = '上一次任务已失效，请重新提问。' } }) }
-function bootstrapSession(restore : boolean = false) : void { mobileAiRequest('GET','/bootstrap',{client_session_id:sessionId},(r : any) => { if (!r.ok || !r.data.enabled) return; bootstrap = r.data; storageKey = 'mohe-ai:v1:' + encodeURIComponent(String(bootstrap.identity_key)); runtimeKey = 'mohe-ai:v1:runtime:' + encodeURIComponent(String(bootstrap.identity_key)); let record = activeRecord(); if (!restore && record != null && record.session_id != sessionId) { sessionId = record.session_id; bootstrapSession(true); return }; excelAvailable.value = bootstrap.capabilities != null && Array.isArray(bootstrap.capabilities.output_formats) && bootstrap.capabilities.output_formats.indexOf('screen_and_xlsx') >= 0; enabled.value = true; if (record != null) resumeActive(record) }) }
+function resumeActive(record : any) : void {
+  conversation = record.conversation_id; run = record.run; pending = record.pending; queuedClarificationId = typeof record.queued_clarification_id == 'string' ? record.queued_clarification_id : ''; guidanceSubmission = validStoredGuidanceSubmission(record.guidance_submission) ? record.guidance_submission : null; closeRequested = record.close_requested === true; closeRequestedState.value = closeRequested; busy.value = true
+  if (validResolvedRun(record.resolved_run)) { let all = load(); all.forEach((s : any) => { if (s.id == conversation) displayed.value = s.rounds || [] }); busy.value = false; return }
+  // Only a late create acknowledgement can persist a terminal Run. Hydrate it
+  // through the normal terminal renderer so a page switch never hides a real
+  // result, while an explicit close has already cleared its record above.
+  if (terminal()) { let completed = run; run = null; markResolvedRun(completed,true); accept(completed); return }
+  // Claim the durable projection before I/O. On native route changes the old
+  // entry can unmount after this replacement is already active; ownership is
+  // what prevents its teardown write from discarding this page's local state.
+  persistActive(false,true)
+  if (run == null) { if (pending == null) { busy.value = false; clearActive(); return }; pending.client_session_id = sessionId; pending.window_token = bootstrap.window_token; persistActive(); busy.value = false; submit(); return }
+  let source = run, expectedLifecycle = lifecycle
+  mobileAiRequest('GET','/runs/' + source.run_id,binding(),(r : any) => {
+    if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+    if (r.ok) {
+      // A reload often reads exactly the last persisted version.  It still
+      // represents an active Run and must continue polling even when accept
+      // correctly rejects it as a duplicate projection.
+      if (r.data != null && typeof r.data.progress == 'string') progress.value = r.data.progress
+      accept(r.data)
+      if (closeRequested) { cancelRun(); return }
+      // A restored Run can have the same version as the locally persisted
+      // snapshot.  Hydrate its current guidance explicitly because accept()
+      // correctly ignores duplicate versions to protect against stale polls.
+      let restoredClarificationId = run.clarification != null && typeof run.clarification.id == 'string' ? run.clarification.id : ''
+      if (run.status == 'WAITING_CLARIFICATION' && clarification.value == null && queuedClarificationId != restoredClarificationId && validGuidance(run.clarification)) {
+        clarification.value = run.clarification
+        if (run.clarification.schema_version == guidanceSchema) activeGuidanceSchema = guidanceSchema
+      }
+      // Retry only the exact saved submission for the step the server still
+      // presents. A newer guidance step or final answer discards the old
+      // local envelope instead of letting it mutate current intent.
+      if (guidanceSubmission != null) {
+        let c = clarification.value
+        let same = c != null && guidanceSubmission.clarification_id == c.id && (c.schema_version != guidanceSchema || (guidanceSubmission.schema_version == guidanceSchema && guidanceSubmission.intent_revision == c.intent_revision && guidanceSubmission.step_revision == c.step_revision))
+        if (same && queuedClarificationId.length == 0 && run.clarification_rejected !== true) { confirmChoices(); return }
+        guidanceSubmission = null; persistActive()
+      }
+      if (!terminal() && bootstrap != null && bootstrap.async_execution !== true) {
+        if (pending != null) executeCompatibility(run,expectedLifecycle)
+        else if (['READY','RECEIVED'].indexOf(String(run.status)) >= 0) { abandonUnavailableRun(); return }
+      }
+      if (!terminal() && (run.status != 'WAITING_CLARIFICATION' || closeRequestedState.value || (run.clarification != null && queuedClarificationId == run.clarification.id))) schedulePoll()
+      return
+    }
+    if (unavailable(r)) { abandonUnavailableRun(); return }
+    if (!r.responseKnown) { progress.value = closeRequestedState.value ? '暂未确认取消结果。' : '连接中断，正在重新确认任务状态。'; persistActive(); schedulePoll(); return }
+    busy.value = false; pending = null; run = null; closeRequested = false; closeRequestedState.value = false; clearActive(); progress.value = '上一次任务已失效，请重新提问。'
+  })
+}
+function bootstrapSession(restore : boolean = false) : void { let expectedLifecycle = lifecycle; mobileAiRequest('GET','/bootstrap',{client_session_id:sessionId},(r : any) => { if (expectedLifecycle != lifecycle) return; if (!r.ok || r.data == null || r.data.enabled !== true) { if (restore) { busy.value = false; progress.value = '暂未恢复查询，请重试发送。' }; return }; bootstrap = r.data; storageKey = 'mohe-ai:v1:' + encodeURIComponent(String(bootstrap.identity_key)); runtimeKey = 'mohe-ai:v1:runtime:' + encodeURIComponent(String(bootstrap.identity_key)); let record = activeRecord(); if (!restore && record != null && record.session_id != sessionId) { sessionId = record.session_id; bootstrapSession(true); return }; excelAvailable.value = bootstrap.capabilities != null && Array.isArray(bootstrap.capabilities.output_formats) && bootstrap.capabilities.output_formats.indexOf('screen_and_xlsx') >= 0; enabled.value = true; if (record != null) resumeActive(record); else if (restore) { busy.value = false; progress.value = '上一次任务已结束，可以继续提问。' } }) }
 function showHistory() : void { if (busy.value || (pending != null && run == null)) return; let all = load(); if (all.length == 0) return; uni.showActionSheet({itemList:all.map((s : any) => s.rounds.length > 0 ? String(s.rounds[0].question).slice(0,25) : '新对话'),success:(r : any) => { conversation = all[r.tapIndex].id; displayed.value = all[r.tapIndex].rounds; run = null; exportReady.value = false }}) }
 onMounted(() => { sessionId = id(); bootstrapSession(); expiryTimer = setInterval(() => { if (storageKey.length > 0 && !load().some((s : any) => s.id == conversation)) { displayed.value = []; progress.value = '会话已到期，请新建对话。' } },30000) })
-onUnmounted(() => { cancelRun(); if (timer != null) clearTimeout(timer); if (expiryTimer != null) clearInterval(expiryTimer) })
+// The entry is mounted on each merchant page.  Page navigation and native
+// component recycling are not an instruction to abandon a customer's query;
+// keep the durable run for the next page to resume.  Only the explicit
+// “停止” and “关闭” actions call cancelRun().
+onUnmounted(() => { lifecycle++; persistActive(true); if (timer != null) clearTimeout(timer); if (expiryTimer != null) clearInterval(expiryTimer) })
 </script>
 <style>
 .ai-entry{position:fixed;left:0;top:50%;z-index:9999;background-color:#5142b5;padding:12px;border-radius:0 12px 12px 0;color:#fff}.ai-panel{position:fixed;left:12px;right:12px;top:40px;bottom:30px;z-index:10000;background-color:#fff;border-radius:16px;padding:14px;display:flex;flex-direction:column}.ai-panel--native-mini{padding-top:84px}.ai-head{display:flex;flex-direction:row;align-items:center;gap:6px}.ai-title{font-size:18px;flex:1}.ai-messages{flex:1;height:0}.ai-message{padding:12px;margin-top:10px;background-color:#f5f6fa;border-radius:10px}.ai-question{display:block;color:#5142b5;margin-bottom:8px}.ai-note{font-size:12px;color:#65758b}.ai-card{padding:12px;margin-top:8px;background-color:#fff}.ai-number{display:block;font-size:26px;color:#1f5f8b}.ai-input{height:70px;width:100%;background-color:#f5f6fa}.ai-footer{padding-top:12px}.ai-choice{padding:8px;display:block;color:#5142b5}

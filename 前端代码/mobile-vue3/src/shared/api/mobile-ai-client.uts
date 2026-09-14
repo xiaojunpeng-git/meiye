@@ -26,7 +26,9 @@ export function mobileAiRequest(method : string, suffix : string, payload : any,
       let message = body != null && typeof body.message == 'string' ? body.message
         : body != null && typeof body.msg == 'string' ? body.msg
           : '请求暂未完成，请检查网络或配置。'
-      done({ok:false,responseKnown:response.statusCode > 0,message:message}); return
+      let reason = body != null && typeof body.errorCode == 'string' ? body.errorCode
+        : body != null && typeof body.error_code == 'string' ? body.error_code : ''
+      done({ok:false,responseKnown:response.statusCode > 0,reason:reason,message:message}); return
     }
     // Merchant mobile APIs return their successful payload at the top level
     // beside contractVersion; they do not wrap it in a legacy `data` object.
