@@ -657,6 +657,9 @@ final class CashierV3CheckoutPreparationServices
                     'priceChangedByNameSnapshot' => '',
                     'priceChangedAt' => 0,
                     'cardPurchaseSnapshot' => $cardPurchaseSnapshot,
+                    // 逐行备注是浏览器本地草稿的一部分；在这一处与商品、
+                    // 权益等权威快照一同锁定，之后不再读取可编辑购物车。
+                    'detailRemark' => (string)($line['detailRemark'] ?? ''),
                 ];
                 continue;
             }
@@ -679,6 +682,7 @@ final class CashierV3CheckoutPreparationServices
                     'serviceObject' => (string)($line['serviceObject'] ?? ''),
                     'friendCountsAsCustomer' => !array_key_exists('friendCountsAsCustomer', $line) || !empty($line['friendCountsAsCustomer']),
                     'isExperience' => !empty($line['isExperience']) ? 1 : 0,
+                    'detailRemark' => (string)($line['detailRemark'] ?? ''),
                 ];
                 $manualLaborFee = array_key_exists('laborManualFeeCents', $line)
                     ? $line['laborManualFeeCents']
@@ -952,6 +956,7 @@ final class CashierV3CheckoutPreparationServices
                 ? array_values($line['salesManagerSelections'])
                 : [],
             'isExperience' => !empty($line['isExperience']) ? 1 : 0,
+            'detailRemark' => (string)($line['detailRemark'] ?? ''),
             // These flags are part of every persisted line snapshot. Keep the
             // ordinary sale defaults explicit so strict repository validation
             // cannot reject a line that did not use the presale/outbound UI.

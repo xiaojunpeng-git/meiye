@@ -966,6 +966,11 @@ function applyLocalCashierDraftMutation(action, line, payload = {}) {
       target.debtAmountCents = Math.max(0, Number(payload.debtAmountCents || 0))
       return
     }
+    if (action === 'update-cart-line-detail-remark') {
+      // 备注仅属于购物车行的本地草稿；结账时随同一锁定行快照提交。
+      target.detailRemark = String(payload.detailRemark ?? '')
+      return
+    }
     if (action === 'update-cart-line-service-settings') {
       Object.assign(target, clonePlain(payload))
       return
@@ -4657,6 +4662,19 @@ async function openMoreAction(action) {
   }
 }
 
+function openCartLineDetailRemark(line) {
+  if (!line?.id) return
+  activeCartLineId.value = line.id
+  moreActionValue.value = String(line.detailRemark ?? '')
+  moreActionReason.value = ''
+  moreActionValidationMessage.value = ''
+  moreActionEditor.value = {
+    type: 'line-detail-remark',
+    title: '明细备注',
+    line: clonePlain(line)
+  }
+}
+
 function closeMoreActionEditor({ force = false } = {}) {
   if (isSavingMoreAction.value && !force) return
   moreActionEditor.value = null
@@ -4681,6 +4699,10 @@ async function saveMoreActionEditor() {
     if (note.length > 500) return
     action = 'update-cashier-order-note'
     payload = { orderNote: note }
+  } else if (editor.type === 'line-detail-remark') {
+    // 无必填或业务语义校验；保存空文本即清除该行备注。
+    action = 'update-cart-line-detail-remark'
+    payload = { detailRemark: String(moreActionValue.value ?? '') }
   } else if (editor.type === 'price-change') {
     const rawAmount = String(moreActionValue.value || '').trim()
     const reason = String(moreActionReason.value || '').trim()
@@ -4706,7 +4728,11 @@ async function saveMoreActionEditor() {
   if (!action) return
   isSavingMoreAction.value = true
   try {
-    applyLocalCashierRootMutation(action, payload)
+    if (editor.type === 'line-detail-remark') {
+      applyLocalCashierDraftMutation(action, editor.line, payload)
+    } else {
+      applyLocalCashierRootMutation(action, payload)
+    }
     // The save guard prevents an accidental second click, but the successful
     // save itself must still close the editor. Use the explicit force path so
     // the updated amount is visible in the cart immediately.
@@ -4955,6 +4981,9 @@ function localCheckoutPreviewSnapshot() {
     lines,
     summary: clonePlain(draft.summary || {}),
     orderSummary: clonePlain(draft.summary || {}),
+    // 订单主项备注也属于这次结账快照。此前本地预览漏传该字段，导致
+    // 收银底部“备注”在确认收款后没有进入订单头快照，详情页自然无内容可展示。
+    orderNote: String(draft.orderNote || ''),
     // The preview deliberately has no server checkout request yet.  These
     // values make its third step a complete local projection; the final click
     // replaces it with the authoritative checkout snapshot before submission.
@@ -7134,6 +7163,12 @@ onBeforeUnmount(() => {
                       >体验</button>
                     </div>
                   </div>
+                  <button
+                    type="button"
+                    class="cart-line__detail-remark"
+                    :aria-label="`${line.name || '当前明细'}明细备注`"
+                    @click="openCartLineDetailRemark(line)"
+                  >明细备注</button>
                   <div
                     v-if="cardOperationUpgradeBinding(line)?.operationType === 'project_upgrade'"
                     class="cart-line__upgrade-entitlement-quantity"
@@ -7355,7 +7390,20 @@ onBeforeUnmount(() => {
           <header><strong>{{ moreActionEditor.title }}</strong></header>
           <label v-if="moreActionEditor.type === 'order-note'">
             <span>备注内容</span>
-            <textarea v-model="moreActionValue" rows="4" maxlength="500" placeholder="填写本单备注"></textarea>
+            <textarea
+              v-model="moreActionValue"
+              rows="4"
+              maxlength="500"
+              placeholder="填写本单备注"
+            ></textarea>
+          </label>
+          <label v-else-if="moreActionEditor.type === 'line-detail-remark'">
+            <span>备注内容</span>
+            <textarea
+              v-model="moreActionValue"
+              rows="4"
+              placeholder="填写该明细备注"
+            ></textarea>
           </label>
           <template v-else-if="moreActionEditor.type === 'price-change'">
             <span>{{ moreActionEditor.line.name }}，当前金额 {{ formatMoney(getLineAmount(moreActionEditor.line)) }}</span>

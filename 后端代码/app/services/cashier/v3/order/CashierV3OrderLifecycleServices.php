@@ -298,7 +298,7 @@ final class CashierV3OrderLifecycleServices
         $source = $this->source(array_merge($payload, ['sourceType' => 'sales']), $operator, $scope, false);
         $lines = Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())
             ->where('order_id', $source['sourceId'])->where('line_direction', 'forward')->where('line_status', 'settled')
-            ->field('order_line_id,item_type,item_name_snapshot,sale_amount_cents')->order('line_no asc')->select()->toArray();
+            ->field('order_line_id,checkout_line_id,item_type,item_name_snapshot,sale_amount_cents')->order('line_no asc')->select()->toArray();
         $eligible = Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')
             ->leftJoin('staff_job_position sjp', 'sjp.staff_id = s.id AND sjp.status = 1 AND sjp.is_del = 0 AND sjp.end_time = 0')
             ->leftJoin('position p', 'p.id = sjp.position_id AND p.status = 1')
@@ -359,14 +359,31 @@ final class CashierV3OrderLifecycleServices
                 ];
             }
         }
-        // 导购/销售经理是独立归属事实，不参与销售业绩金额分配。
+        // 早期结账事实按 checkout_line_id 写入，订单中心调整按
+        // order_line_id 定位。两者属于同一笔商品行，读取时必须归并，
+        // 否则初始归属会在调整弹窗中“消失”。
+        $attributionLineToOrderLine = [];
+        foreach ($lines as $line) {
+            $orderLineId = trim((string)($line['order_line_id'] ?? ''));
+            if ($orderLineId === '') continue;
+            $attributionLineToOrderLine[$orderLineId] = $orderLineId;
+            $checkoutLineId = trim((string)($line['checkout_line_id'] ?? ''));
+            if ($checkoutLineId !== '') $attributionLineToOrderLine[$checkoutLineId] = $orderLineId;
+        }
+        // 导购/销售经理当前都是订单参与归属事实，不参与销售人业绩金额
+        // 分配，也不在这里推导他们的独立业绩或提成。
         $guides = [];
         foreach (Db::name('cashier_v3_customer_guide_round_fact')->where('tenant_id', $scope->tenantId())->where('order_id', $source['sourceId'])->where('status', 'effective')->field('source_line_id,guide_employee_id,guide_employee_name_snapshot,guide_round_no')->order('id asc')->select()->toArray() as $fact) {
-            $guides[(string)$fact['source_line_id']][] = ['employeeId' => (int)$fact['guide_employee_id'], 'name' => (string)$fact['guide_employee_name_snapshot'], 'guideRoundNo' => (int)$fact['guide_round_no']];
+            $lineId = $attributionLineToOrderLine[(string)$fact['source_line_id']] ?? (string)$fact['source_line_id'];
+            $guides[$lineId][] = ['employeeId' => (int)$fact['guide_employee_id'], 'name' => (string)$fact['guide_employee_name_snapshot'], 'guideRoundNo' => (int)$fact['guide_round_no']];
         }
         $salesManagers = [];
         foreach (Db::name('cashier_v3_sales_manager_fact')->where('tenant_id', $scope->tenantId())->where('order_id', $source['sourceId'])->where('status', 'effective')->field('source_line_id,sales_manager_employee_id,sales_manager_name_snapshot')->order('id asc')->select()->toArray() as $fact) {
-            $salesManagers[(string)$fact['source_line_id']][] = ['employeeId' => (int)$fact['sales_manager_employee_id'], 'name' => (string)$fact['sales_manager_name_snapshot']];
+            $lineId = $attributionLineToOrderLine[(string)$fact['source_line_id']] ?? (string)$fact['source_line_id'];
+            $salesManagers[$lineId][] = [
+                'employeeId' => (int)$fact['sales_manager_employee_id'],
+                'name' => (string)$fact['sales_manager_name_snapshot'],
+            ];
         }
         // 销售订单详情沿用收银人员控件，但候选人必须服从当前门店边界。
         // 这里不能直接读取 employee 全表，否则详情弹窗会把其他门店员工暴露给门店端。
@@ -490,6 +507,10 @@ final class CashierV3OrderLifecycleServices
         }
         $rows = $payload['personnel'] ?? null;
         if (!is_array($rows) || $rows === [] || count($rows) > 50) throw self::failure('personnel_adjustment_empty');
+        // The order-centre editor exposes one independent sales manager per
+        // line. Never turn a forged multi-row command into several 100%
+        // manager performances.
+        if ($role === 'sales_manager' && count($rows) !== 1) throw self::failure('personnel_adjustment_sales_manager_single_required');
         return ['targetOrderLineId' => $lineId, 'targetRole' => $role, 'personnel' => array_values($rows)];
     }
 
@@ -1052,8 +1073,8 @@ final class CashierV3OrderLifecycleServices
     }
 
     /**
-     * 导购/销售经理不含金额。旧有效事实保留为审计行并转为 reversed，
-     * 再插入本次操作的新快照；报表仍按 status=effective 读取归属。
+     * 导购和销售经理都只保留订单参与归属。旧有效事实保留为审计行并
+     * 转为 reversed，再插入本次操作的新快照；不在此推导独立业绩。
      */
     private function adjustAttributionFact(array $source, array $item, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now, array &$reversedAttributions): void
     {
@@ -1063,19 +1084,19 @@ final class CashierV3OrderLifecycleServices
         $line = (array)Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())->where('order_id', $source['sourceId'])
             ->where('order_line_id', $lineId)->where('line_direction', 'forward')->where('line_status', 'settled')->lock(true)->find();
         if (!$line) throw self::failure('personnel_adjustment_line_ineligible');
-        // 写入侧再次固定到当前门店任职关系，不能只信前端候选人列表。
-        $employee = (array)Db::name('system_store_staff')->alias('s')
-            ->join('employee e', 'e.id=s.employee_id')
-            ->where('s.employee_id', $staffId)->where('s.store_id', $operator->storeId())
-            ->where('s.status', 1)->where('s.is_del', 0)
-            ->where('e.status', 1)->where('e.is_del', 0)
-            ->field('e.id,e.name,e.employment_type_code')->lock(true)->find();
+        // 导购和销售经理是集团归属身份，不是“当前门店任职岗位”。初始
+        // 收银选择器按集团在职人员查询；调整命令必须沿用同一 employee
+        // 身份校验，不能错误地把跨店销售经理拦在调整之外。
+        $employee = (array)Db::name('employee')->where('id', $staffId)
+            ->where('status', 1)->where('is_del', 0)
+            ->field('id,name,employment_type_code')->lock(true)->find();
         if (!$employee || trim((string)($employee['name'] ?? '')) === '') throw self::failure('personnel_adjustment_staff_ineligible');
         $table = $role === 'guide' ? 'cashier_v3_customer_guide_round_fact' : 'cashier_v3_sales_manager_fact';
         $reverseKey = $table . ':' . $lineId;
+        $sourceLineId = $this->attributionFactLineId($line);
         if (!isset($reversedAttributions[$reverseKey])) {
             $oldRows = Db::name($table)->where('tenant_id', $scope->tenantId())->where('order_id', $source['sourceId'])
-                ->where('source_line_id', $lineId)->where('status', 'effective')->lock(true)->select()->toArray();
+                ->whereIn('source_line_id', $this->attributionFactLineIds($line))->where('status', 'effective')->lock(true)->select()->toArray();
             foreach ($oldRows as $old) {
                 Db::name($table)->where('id', (int)$old['id'])->where('status', 'effective')->update(['status' => 'reversed']);
             }
@@ -1084,7 +1105,7 @@ final class CashierV3OrderLifecycleServices
         $name = mb_substr(trim((string)$employee['name']), 0, 128);
         $common = [
             'tenant_id' => $scope->tenantId(), 'organization_id' => $scope->organizationId(), 'store_id' => $operator->storeId(),
-            'member_id' => (int)$source['memberId'], 'order_id' => $source['sourceId'], 'source_line_id' => $lineId,
+            'member_id' => (int)$source['memberId'], 'order_id' => $source['sourceId'], 'source_line_id' => $sourceLineId,
             'business_date' => date('Y-m-d', $now), 'operator_id' => $operator->operatorId(), 'business_event_no' => (string)$event['event_no'],
             'command_idempotency_key' => $commandKey, 'occurred_at' => $now, 'recorded_at' => $now, 'status' => 'effective',
         ];
@@ -1103,6 +1124,25 @@ final class CashierV3OrderLifecycleServices
         }
         $row['immutable_fingerprint'] = hash('sha256', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         if ((int)Db::name($table)->insert($row) !== 1) throw self::failure('personnel_adjustment_attribution_insert_failed');
+    }
+
+    /** The checkout line is canonical for attribution facts; old rows may use the formal order line. */
+    private function attributionFactLineId(array $line): string
+    {
+        $checkoutLineId = trim((string)($line['checkout_line_id'] ?? ''));
+        return $checkoutLineId !== '' ? $checkoutLineId : trim((string)($line['order_line_id'] ?? ''));
+    }
+
+    /** @return array<int,string> Every historical source-line key for one settled sales line. */
+    private function attributionFactLineIds(array $line): array
+    {
+        $keys = [];
+        foreach ([(string)($line['order_line_id'] ?? ''), (string)($line['checkout_line_id'] ?? '')] as $value) {
+            $value = trim($value);
+            if ($value !== '') $keys[$value] = $value;
+        }
+        if ($keys === []) throw self::failure('personnel_adjustment_line_ineligible');
+        return array_values($keys);
     }
 
     /** @return array<int,array<string,mixed>> */

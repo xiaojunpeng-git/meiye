@@ -707,6 +707,7 @@ async function runAction(action, payload = {}) {
                   <h4>{{ itemName(item) }}</h4>
                   <p v-if="pickValue(item, ['purchaseSpec', 'specification', 'specName', 'packageName', 'cardSpecification'])">购买规格：{{ pickValue(item, ['purchaseSpec', 'specification', 'specName', 'packageName', 'cardSpecification']) }}</p>
                   <p v-if="cardPurchaseTimesText(item)">{{ cardPurchaseTimesLabel(item) }}：{{ cardPurchaseTimesText(item) }}</p>
+                  <p v-if="pickValue(item, ['detailRemark', 'detail_remark_snapshot', 'lineRemark'])">明细备注：{{ pickValue(item, ['detailRemark', 'detail_remark_snapshot', 'lineRemark']) }}</p>
                 </div>
                 <div class="sales-order-detail-item__unit">
                   <span v-if="hasValue(pickValue(item, ['unitPrice', 'price', 'salePrice']))">单价 {{ displayAmount(pickValue(item, ['unitPrice', 'price', 'salePrice'])) }}</span>

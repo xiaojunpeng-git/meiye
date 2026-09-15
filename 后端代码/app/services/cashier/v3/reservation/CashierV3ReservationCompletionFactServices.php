@@ -58,7 +58,10 @@ final class CashierV3ReservationCompletionFactServices
         $documentId = (string)(int)$header['service_order_id'];
         $documentNo = (string)$header['service_order_no_snapshot'];
         $category = $this->category($projectId);
-        $craftsmen = $this->craftsmen((string)($line['artisan_staff_ids_json'] ?? '[]'));
+        $craftsmen = $this->craftsmen(
+            (string)($line['artisan_staff_ids_json'] ?? '[]'),
+            (array)($line['point_customer_staff_ids'] ?? [])
+        );
         $amount = $occupation ? $this->entitlementAmount($occupation, $quantity) : [
             'actualCents' => 0, 'purchaseCents' => 0, 'totalTimes' => 0,
             'consumedBefore' => 0, 'calculationVersion' => CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION,
@@ -196,14 +199,15 @@ final class CashierV3ReservationCompletionFactServices
                     'labor_performance_allocated', (int)$craftsman['employeeId'], (string)$craftsman['name'],
                     (string)$craftsman['employeeType'], (int)$craftsman['employeeTypeVersion'],
                     (int)($amountByStaff[(int)$craftsman['staffId']] ?? 0), 1, $denominator, $projectCount,
-                    'reservation_labor_' . $rule['laborMode'], '项目劳动业绩', 'reservation-rule:' . $rule['version']);
+                    'reservation_labor_' . $rule['laborMode'], '项目劳动业绩', 'reservation-rule:' . $rule['version'],
+                    !empty($craftsman['isPointCustomer']) ? 'craftsman:point' : 'craftsman:round');
                 $performanceCount++;
             }
         }
         return ['service' => $service, 'writeoff' => $writeoffCount, 'performance' => $performanceCount];
     }
 
-    private function performanceFact(array $common, array $header, array $line, array $category, string $eventNo, string $commandKey, string $sourceLineId, string $type, int $employeeId, string $employeeName, string $employeeType, int $employeeTypeVersion, int $amountCents, int $weight, int $denominator, int $projectCountHalfUnits, string $ruleCode, string $ruleName, string $ruleVersion): void
+    private function performanceFact(array $common, array $header, array $line, array $category, string $eventNo, string $commandKey, string $sourceLineId, string $type, int $employeeId, string $employeeName, string $employeeType, int $employeeTypeVersion, int $amountCents, int $weight, int $denominator, int $projectCountHalfUnits, string $ruleCode, string $ruleName, string $ruleVersion, string $roleSnapshot = ''): void
     {
         $natural = 'reservation-performance:' . (int)$header['id'] . ':' . (int)$line['id'] . ':' . $type . ':' . $employeeId;
         $row = [
@@ -227,7 +231,10 @@ final class CashierV3ReservationCompletionFactServices
             'source_line_id' => $sourceLineId, 'performance_type' => $type,
             'employee_id' => $employeeId, 'employee_name_snapshot' => $employeeName,
             'employee_type_snapshot' => $employeeType, 'employee_type_authority_version' => $employeeTypeVersion,
-            'role_snapshot' => $employeeId > 0 ? 'craftsman' : 'service_line',
+            // The point/round decision is part of the service-time snapshot.
+            // Keep it on the immutable labor fact as well, so later staff
+            // changes cannot alter historical service-record presentation.
+            'role_snapshot' => $roleSnapshot !== '' ? $roleSnapshot : ($employeeId > 0 ? 'craftsman' : 'service_line'),
             'allocation_weight_numerator' => $weight, 'allocation_weight_denominator' => max(1, $denominator),
             'allocation_base_amount_cents' => $amountCents, 'amount_cents' => $amountCents,
             'labor_fee_amount_cents' => 0, 'project_count_half_units' => $projectCountHalfUnits,
@@ -282,10 +289,11 @@ final class CashierV3ReservationCompletionFactServices
         ];
     }
 
-    private function craftsmen(string $json): array
+    private function craftsmen(string $json, array $pointCustomerStaffIds = []): array
     {
         $ids = json_decode($json, true);
         $ids = array_values(array_unique(array_filter(array_map('intval', is_array($ids) ? $ids : []))));
+        $pointCustomerStaffIds = array_fill_keys(array_filter(array_map('intval', $pointCustomerStaffIds)), true);
         sort($ids, SORT_NUMERIC);
         $rows = [];
         foreach ($ids as $staffId) {
@@ -299,6 +307,7 @@ final class CashierV3ReservationCompletionFactServices
                 'name' => (string)$staff['staff_name'], 'employeeType' => $type,
                 'employeeTypeVersion' => max(0, (int)($employee['employment_type_version'] ?? 0)),
                 'isPrimary' => count($rows) === 0,
+                'isPointCustomer' => isset($pointCustomerStaffIds[$staffId]),
             ];
         }
         return $rows;

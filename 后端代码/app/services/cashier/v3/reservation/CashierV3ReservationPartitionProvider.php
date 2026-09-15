@@ -82,11 +82,26 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         $lineRows = is_object($lineRows) && method_exists($lineRows, 'toArray') ? $lineRows->toArray() : (array)$lineRows;
         $lines = [];
         foreach ($lineRows as $line) $lines[(int)($line['reservation_id'] ?? 0)][] = $line;
-        $artisanIds = [];
-        foreach ($lineRows as $line) {
-            $ids = json_decode((string)($line['artisan_staff_ids_json'] ?? '[]'), true);
-            foreach (is_array($ids) ? $ids : [] as $staffId) { $staffId = (int)$staffId; if ($staffId > 0) $artisanIds[$staffId] = $staffId; }
+        $scheduledRows = $ids ? Db::name('cashier_v3_reservation_staff_schedule')->where('tenant_id', $tenantId)->whereIn('reservation_id', $ids)->order('reservation_id asc,staff_id asc')->select() : [];
+        $scheduledRows = is_object($scheduledRows) && method_exists($scheduledRows, 'toArray') ? $scheduledRows->toArray() : (array)$scheduledRows;
+        $artisanStaffByReservation = [];
+        foreach ($scheduledRows as $scheduled) {
+            $reservationId = (int)($scheduled['reservation_id'] ?? 0);
+            $staffId = (int)($scheduled['staff_id'] ?? 0);
+            if ($reservationId > 0 && $staffId > 0) $artisanStaffByReservation[$reservationId][$staffId] = $staffId;
         }
+        foreach ($lines as $reservationId => $reservationLines) {
+            if (!empty($artisanStaffByReservation[$reservationId])) continue;
+            foreach ($reservationLines as $line) {
+                $ids = json_decode((string)($line['artisan_staff_ids_json'] ?? '[]'), true);
+                foreach (is_array($ids) ? $ids : [] as $staffId) {
+                    $staffId = (int)$staffId;
+                    if ($staffId > 0) $artisanStaffByReservation[$reservationId][$staffId] = $staffId;
+                }
+            }
+        }
+        $artisanIds = [];
+        foreach ($artisanStaffByReservation as $staffIds) foreach ($staffIds as $staffId) $artisanIds[$staffId] = $staffId;
         $artisanNames = $artisanIds ? Db::name('system_store_staff')->whereIn('id', array_values($artisanIds))->column('staff_name', 'id') : [];
         $versions = [];
         $records = [];
@@ -109,9 +124,8 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
             $reservationArtisans = [];
             foreach ((array)($lines[$id] ?? []) as $line) {
                 $projectNames[] = (string)($line['project_name_snapshot'] ?? '');
-                $ids = json_decode((string)($line['artisan_staff_ids_json'] ?? '[]'), true);
-                foreach (is_array($ids) ? $ids : [] as $staffId) { $name = trim((string)($artisanNames[(int)$staffId] ?? '')); if ($name !== '') $reservationArtisans[$name] = $name; }
             }
+            foreach (array_values($artisanStaffByReservation[$id] ?? []) as $staffId) { $name = trim((string)($artisanNames[(int)$staffId] ?? '')); if ($name !== '') $reservationArtisans[$name] = $name; }
             $statusCode = (string)($row['status'] ?? '');
             $status = self::statusLabel($statusCode);
             $dateTime = (int)($row['appointment_start_at'] ?? 0);
@@ -136,7 +150,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
                 'appointmentTime' => $dateTime > 0 ? self::businessTimeFromTimestamp($dateTime) : '',
                 'memberName' => (string)($row['member_name_snapshot'] ?? ''),
                 'phone' => (string)($row['member_phone_snapshot'] ?? ''),
-                'projectSummary' => implode('、', array_filter($projectNames)),
+                'projectSummary' => implode('、', array_filter($projectNames)) ?: '未填写项目',
                 'projectSource' => '本次预约',
                 'craftsmanSummary' => $reservationArtisans ? implode('、', array_values($reservationArtisans)) : '待分配手艺人',
                 'roomName' => trim((string)($row['room_name_snapshot'] ?? '')) ?: ((int)($row['room_id'] ?? 0) > 0 ? '房间 ' . (int)$row['room_id'] : ''),
@@ -161,7 +175,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
             ];
         }
         $calendarDate = self::calendarDate($hints['calendarDate'] ?? $hints['calendar_date'] ?? '');
-        $calendar = self::calendar($tenantId, $storeId, $calendarDate, $rows, $lines, $artisanNames);
+        $calendar = self::calendar($tenantId, $storeId, $calendarDate, $rows, $lines, $artisanStaffByReservation, $artisanNames);
         return ['ready' => true, 'payload' => [
             'availability' => ['contractVersion' => 'cashier-v3-reservation-v1', 'status' => 'active', 'reasonCode' => '', 'dataLoaded' => true, 'businessFactsIncluded' => true],
             'quickCounts' => $counts, 'records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize,
@@ -174,7 +188,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
      * Calendar is a read model over V3 reservations only.  It deliberately
      * does not try to infer availability from legacy reservation tables.
      */
-    private static function calendar(string $tenantId, int $storeId, string $date, array $rows, array $lines, array $artisanNames): array
+    private static function calendar(string $tenantId, int $storeId, string $date, array $rows, array $lines, array $artisanStaffByReservation, array $artisanNames): array
     {
         $store = Db::name('system_store')->where('id', $storeId)->field('day_start,day_end')->find();
         $start = self::timeOfDay((string)($store['day_start'] ?? ''));
@@ -241,14 +255,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
             $at = (int)($row['appointment_start_at'] ?? 0);
             if ($reservationId <= 0 || $at <= 0 || self::businessDateFromTimestamp($at) !== $date) continue;
             $lineRows = (array)($lines[$reservationId] ?? []);
-            $staffIds = [];
-            foreach ($lineRows as $line) {
-                $ids = json_decode((string)($line['artisan_staff_ids_json'] ?? '[]'), true);
-                foreach (is_array($ids) ? $ids : [] as $staffId) {
-                    $staffId = (int)$staffId;
-                    if ($staffId > 0) $staffIds[$staffId] = $staffId;
-                }
-            }
+            $staffIds = (array)($artisanStaffByReservation[$reservationId] ?? []);
             $resourceIds = $staffIds ? array_map(static function (int $id): string { return 'staff:' . $id; }, array_values($staffIds)) : ['staff:unassigned'];
             $roomId = (int)($row['room_id'] ?? 0);
             $roomResourceId = $roomId > 0 ? 'room:' . $roomId : 'room:unassigned';

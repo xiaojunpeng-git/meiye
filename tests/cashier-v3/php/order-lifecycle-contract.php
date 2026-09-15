@@ -18,12 +18,30 @@ $salesQuery = file_get_contents($root . '/后端代码/app/services/cashier/v3/o
 $serviceVoid = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3ServiceRecordVoidServices.php');
 $entitlementVersionProvider = file_get_contents($root . '/后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementResourceVersionProvider.php');
 
+$attributionAdjustmentStart = strpos($service, 'private function adjustAttributionFact');
+$attributionAdjustmentEnd = strpos($service, 'private function attributionFactLineId');
+$attributionAdjustment = $attributionAdjustmentStart !== false && $attributionAdjustmentEnd !== false
+    ? substr($service, $attributionAdjustmentStart, $attributionAdjustmentEnd - $attributionAdjustmentStart)
+    : '';
+
 $checks = [
     'append_only_operation_table' => strpos($migration, 'cashier_v3_order_lifecycle_operation') !== false && strpos($migration, 'UNIQUE KEY `uk_tenant_command`') !== false,
     'reopen_keeps_source_order' => strpos($service, 'cashier_v3_order_reopen_draft') !== false && strpos($service, 'source_order_id') !== false,
     'personnel_reverses_then_reallocates' => strpos($service, 'insertReversal') !== false && strpos($service, 'insertAdjustedPerformance') !== false && strpos($service, 'personnel_adjustment_staff_ineligible') !== false
         && strpos($service, 'effectivePersonnelFactsForLine') !== false && strpos($service, 'cashPerformanceForLine') !== false
         && strpos($service, "'ORDER-PERSONNEL-ADJUST-V1'") !== false,
+    'attribution_adjustment_bridges_checkout_and_order_line_ids' => strpos($service, "field('order_line_id,checkout_line_id,item_type,item_name_snapshot,sale_amount_cents')") !== false
+        && strpos($service, 'attributionLineToOrderLine') !== false
+        && strpos($service, 'attributionFactLineId') !== false
+        && strpos($service, 'attributionFactLineIds') !== false
+        && strpos($service, "->whereIn('source_line_id', \$this->attributionFactLineIds(\$line))") !== false,
+    'sales_manager_adjustment_is_order_attribution_only' => strpos($attributionAdjustment, "Db::name('employee')->where('id', \$staffId)") !== false
+        && strpos($service, 'personnel_adjustment_sales_manager_single_required') !== false
+        && strpos($attributionAdjustment, 'cashPerformanceForLine') === false
+        && strpos($attributionAdjustment, "'amount_cents' =>") === false
+        && strpos($attributionAdjustment, "'allocation_weight_numerator' =>") === false,
+    'sales_void_always_closes_effective_attribution_facts' => strpos($service, "if (\$action === 'void-sales-order') {\n                // Attribution facts") !== false
+        && strpos($service, "if (\$action === 'void-sales-order' && \$occurredEvents['attribution'])") === false,
     'personnel_adjustment_fact_ids_are_staff_scoped' => strpos($service, "'personnel_adjustment_duplicate_staff'") !== false
         && strpos($service, '$allocationIdentity = $operationId . \'|\' . $lineId . \'|\' . $role . \'|\' . $staffId;') !== false
         && strpos($service, 'hash_hmac(\'sha256\', $allocationIdentity') !== false
@@ -145,9 +163,10 @@ $checks = [
     'void_cascade_follows_checkout_event_set' => strpos($service, 'occurredCheckoutEvents') !== false
         && strpos($service, "\$action === 'void-sales-order' && \$occurredEvents['inventory']") !== false
         && strpos($service, "\$action === 'void-sales-order' && \$occurredEvents['service']") !== false
+        && strpos($service, "\$action === 'void-sales-order') {\n                // Attribution facts") !== false
         && strpos($service, "\$nested->where('source_id', \$requestId)") !== false
         && strpos($service, "'checkout' => isset(\$types['checkout.completed'])") !== false
-        && strpos($service, "'attribution' => isset(\$types['service.completed'])") !== false,
+        && strpos($service, "'attribution' => isset(\$types['service.completed'])") === false,
     'detail_reads_optional_domains_from_event_set' => strpos($salesQuery, 'eventTypesByOrder') !== false
         && strpos($salesQuery, "checkout.completed") !== false
         && strpos($salesQuery, "if (\$refundOrderIds !== [])") !== false

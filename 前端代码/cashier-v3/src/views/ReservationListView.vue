@@ -30,6 +30,7 @@ const editorSession = ref(null)
 const editorSubmissionStatus = ref('')
 const editorSubmissionResult = ref({})
 const editorConfirmationMode = ref(false)
+const editorStartServiceHint = ref('')
 const isDetailOpen = ref(false)
 const reservationDetail = ref({})
 const reservationDetailSummary = ref({})
@@ -487,11 +488,54 @@ async function requestReservationRecordButton(record, action) {
   if (action === 'edit-reservation') {
     return openReservationEditor({ reservationId: reservationPayload(record).reservationId, reservation: record })
   }
+  if (action === 'start-reservation-service') {
+    const missing = reservationStartPrerequisites(record)
+    if (missing.length) {
+      const opened = await openReservationEditor({
+        reservationId: reservationPayload(record).reservationId,
+        reservation: record
+      })
+      if (opened?.success) {
+        editorStartServiceHint.value = `开始服务前请补齐：${missing.join('、')}。保存预约后再开始服务。`
+      }
+      return {
+        success: false,
+        status: 'blocked',
+        message: `开始服务前请补齐：${missing.join('、')}。`
+      }
+    }
+  }
   const approved = approvedReservationActionPayload({ action }, record)
   if (!approved.valid) {
     return { result: { status: 'failed', code: 'RESERVATION_ACTION_CONTRACT_INVALID', message: approved.message } }
   }
   return requestReservationRecordAction(action, approved.payload)
+}
+
+function reservationStartPrerequisites(record = {}) {
+  const missing = []
+  const projects = Array.isArray(record.projects)
+    ? record.projects
+    : (Array.isArray(record.projectLines) ? record.projectLines : null)
+  const projectCount = Number(record.projectCount ?? record.project_count)
+  const projectSummary = String(record.projectSummary || record.project || '').trim()
+  const hasKnownNoProject = Array.isArray(projects)
+    ? projects.length === 0
+    : (Number.isFinite(projectCount) && projectCount <= 0)
+      || (!Number.isFinite(projectCount) && ['未填写项目', '未选择项目', '—'].includes(projectSummary))
+  if (hasKnownNoProject) missing.push('项目')
+
+  const craftsmen = Array.isArray(record.craftsmen)
+    ? record.craftsmen
+    : (Array.isArray(record.plannedCraftsmen) ? record.plannedCraftsmen : null)
+  const craftsmanCount = Number(record.craftsmanCount ?? record.craftsman_count)
+  const craftsmanSummary = String(record.craftsmanSummary || record.craftsman || '').trim()
+  const hasKnownNoCraftsman = Array.isArray(craftsmen)
+    ? craftsmen.length === 0
+    : (Number.isFinite(craftsmanCount) && craftsmanCount <= 0)
+      || (!Number.isFinite(craftsmanCount) && ['待分配手艺人', '未分配手艺人', '—'].includes(craftsmanSummary))
+  if (hasKnownNoCraftsman) missing.push('手艺人')
+  return missing
 }
 
 function blockStyle(block, index = 0, count = 1) {
@@ -589,8 +633,10 @@ function hasCompleteReservationDetail(detail, reservationId) {
   if (!detailBelongsToReservation(detail, reservationId)) return false
   if (detail.detailReady !== true || positiveDetailVersion(detail) === null) return false
   if (!detail.member || typeof detail.member !== 'object' || Array.isArray(detail.member)) return false
-  if (!Array.isArray(detail.projects) || !detail.projects.length) return false
-  if (!detail.projects.some((line) => line?.isMain === true || ['main', '主项目'].includes(line?.role))) return false
+  // 纯时段预约允许暂不选择项目；此时详情仍是完整快照，只是 projects 为空。
+  // 有项目时才校验主项目，避免把合法预约误判为详情缺失。
+  if (!Array.isArray(detail.projects)) return false
+  if (detail.projects.length && !detail.projects.some((line) => line?.isMain === true || ['main', '主项目'].includes(line?.role))) return false
   for (const key of ['plannedCraftsmen', 'actualCraftsmen', 'roomChanges', 'timeline', 'actions']) {
     if (!Array.isArray(detail[key])) return false
   }
@@ -796,6 +842,20 @@ async function handleReservationDetailAction(payload = {}) {
     return result
   }
   const record = payload.reservation || records.value.find((item) => String(item.id) === String(payload.reservationId))
+  if (action === 'start-reservation-service') {
+    const missing = reservationStartPrerequisites(record || {})
+    if (missing.length) {
+      const opened = await openReservationEditor({
+        reservationId: payload.reservationId,
+        reservation: record
+      })
+      if (opened?.success) {
+        editorStartServiceHint.value = `开始服务前请补齐：${missing.join('、')}。保存预约后再开始服务。`
+        closeReservationDetail()
+      }
+      return { success: false, status: 'blocked', message: `开始服务前请补齐：${missing.join('、')}。` }
+    }
+  }
   const approved = approvedReservationActionPayload(payload.action, record || payload.reservationId)
   if (!approved.valid) {
     return { result: { status: 'failed', code: 'RESERVATION_ACTION_CONTRACT_INVALID', message: approved.message } }
@@ -991,6 +1051,7 @@ async function openReservationEditor(payload = {}) {
   const recordVersion = reservationRecordVersion(record)
   const preparationRequestId = createCashierV3CommandId('RESERVATION_EDITOR')
   editorConfirmationMode.value = detail.confirmationMode === true
+  editorStartServiceHint.value = ''
   editorPreparationRequestId.value = preparationRequestId
   preparedEditorConfig.value = null
   editorSession.value = Object.freeze({
@@ -1113,7 +1174,8 @@ async function selectEditorCraftsmen(payload = {}) {
     selectionContext: {
       scope: 'reservation_craftsmen',
       reservationId: reservationIdentity(editorDraft.value) || null,
-      serviceStartAt: editorDraft.value.appointmentTime || editorDraft.value.appointmentStartAt || null
+      serviceStartAt: editorDraft.value.appointmentStartAt || editorDraft.value.appointmentTime || null,
+      serviceEndAt: editorDraft.value.appointmentEndAt || editorDraft.value.expectedEndAt || null
     }
   })
   if (!Array.isArray(result?.selected)) return null
@@ -1291,6 +1353,7 @@ function closeReservationEditor() {
   editorSubmissionStatus.value = ''
   editorSubmissionResult.value = {}
   editorConfirmationMode.value = false
+  editorStartServiceHint.value = ''
 }
 
 function resetReservationLocalContext() {
@@ -1497,6 +1560,7 @@ onBeforeUnmount(() => {
       :on-recalculate="recalculateReservationPlan"
       :on-submit="submitReservationEditor"
       :confirmation-mode="editorConfirmationMode"
+      :start-service-hint="editorStartServiceHint"
       @close="closeReservationEditor"
       @resume-editing="resumeReservationEditing"
       @submitted="handleEditorSubmitted"

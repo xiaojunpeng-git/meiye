@@ -97,6 +97,10 @@ const actualCraftsmen = computed(() => readList(reservation.value, ['actualCraft
 const room = computed(() => firstObject(reservation.value, ['room', 'plannedRoom', 'appointmentRoom']))
 const roomChanges = computed(() => readList(reservation.value, ['roomChanges', 'roomHistory', 'roomChangeRecords']))
 const timeline = computed(() => readList(reservation.value, ['timeline', 'operationTimeline', 'activityTimeline', 'operationLogs']))
+const reservationRemark = computed(() => plainText(
+  firstValue(reservation.value, ['remark', 'remarkSnapshot', 'reservationRemark', 'note']),
+  '未填写备注'
+))
 
 const timeRows = computed(() => [
   {
@@ -408,9 +412,12 @@ function craftsmanName(craftsman) {
 }
 
 function craftsmanMeta(craftsman) {
+  const pointCustomer = craftsman?.isPointCustomer === true
+    || craftsman?.is_point_customer === true
+    || Number(craftsman?.isPointCustomer ?? craftsman?.is_point_customer ?? 0) === 1
   const role = firstValue(craftsman, ['roleLabel', 'role', 'assignmentRole'])
   const status = firstValue(craftsman, ['statusLabel', 'status'])
-  return [role, status].filter(Boolean).join(' · ')
+  return [pointCustomer ? '点客' : '', role, status].filter(Boolean).join(' · ')
 }
 
 function roomChangeKey(change, index) {
@@ -751,6 +758,13 @@ useModalFocusTrap({
               </dl>
               <p class="reservation-detail__note">预约未开始时不占用房间；只有开始服务后，房间才进入实际服务状态。</p>
             </div>
+          </section>
+
+          <section class="reservation-detail__section">
+            <header class="reservation-detail__section-header">
+              <h3>预约备注</h3>
+            </header>
+            <p class="reservation-detail__remark">{{ reservationRemark }}</p>
           </section>
 
           <section class="reservation-detail__section reservation-detail__section--two-columns">
@@ -1447,6 +1461,16 @@ useModalFocusTrap({
   color: #98a2b3;
   font-size: 13px;
   line-height: 20px;
+}
+
+.reservation-detail__remark {
+  margin: 0;
+  padding: 16px 18px 18px;
+  color: #344054;
+  font-size: 14px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .reservation-detail__loading,

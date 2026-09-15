@@ -229,6 +229,7 @@ final class CashierV3EntitlementCompletionKernel
                 'serviceSnapshot' => [
                     'serviceObject' => $intentLine['serviceObject'],
                     'isExperience' => $intentLine['isExperience'],
+                    'detailRemark' => (string)($intentLine['detailRemark'] ?? ''),
                     'craftsmen' => $craftsmen,
                     'primaryCraftsmanId' => $craftsmen[0]['staffId'],
                     'businessDate' => $snapshot['businessDate'],
@@ -597,7 +598,7 @@ final class CashierV3EntitlementCompletionKernel
         if (!is_array($line)) {
             throw self::failure('command_line_shape_invalid', ['index' => $index]);
         }
-        self::assertExactKeys($line, ['lineId', 'quantity', 'serviceObject', 'isExperience', 'craftsmanIds'], 'command.lines');
+        self::assertExactKeys($line, ['lineId', 'quantity', 'serviceObject', 'isExperience', 'craftsmanIds'], ['detailRemark'], 'command.lines');
         self::assertToken($line['lineId'], 'lineId', 128);
         self::assertPositiveInt($line['quantity'], 'quantity', self::MAX_TIMES);
         if (!in_array($line['serviceObject'], ['self', 'friend'], true)) {

@@ -728,7 +728,7 @@ final class CashierV3CheckoutSettlementKernel
                 'priceChangedByNameSnapshot',
                 'priceChangedAt',
                 'craftsmen',
-            ], ['catalogSkuId', 'serviceObject', 'friendCountsAsCustomer', 'isExperience', 'isPresale', 'inventoryOutboundRequired', 'salespeople', 'guideSelections', 'salesManagerSelections', 'manualLaborFeeCents', 'cardPurchaseSnapshot'], 'saleLines[' . $index . ']');
+            ], ['catalogSkuId', 'serviceObject', 'friendCountsAsCustomer', 'isExperience', 'isPresale', 'inventoryOutboundRequired', 'salespeople', 'guideSelections', 'salesManagerSelections', 'manualLaborFeeCents', 'cardPurchaseSnapshot', 'detailRemark'], 'saleLines[' . $index . ']');
             if ($line['saleClassification'] !== 'formal_sale') {
                 throw self::failure('sale_line_not_formal', ['index' => $index]);
             }
@@ -882,6 +882,17 @@ final class CashierV3CheckoutSettlementKernel
                 'inventoryOutboundRequired' => $inventoryOutboundRequired,
                 'cardPurchaseSnapshot' => $cardPurchaseSnapshot,
             ];
+            $detailRemark = self::text(
+                $line['detailRemark'] ?? '',
+                65535,
+                'saleLine.detailRemark',
+                true
+            );
+            // 空备注保持字段缺省，确保老的锁定行指纹仍可复放；有内容时
+            // 则成为该行不可变快照的一部分。
+            if ($detailRemark !== '') {
+                $normalized['detailRemark'] = $detailRemark;
+            }
             if ($manualLaborFeeCents !== null) {
                 $normalized['manualLaborFeeCents'] = $manualLaborFeeCents;
             }
@@ -1019,7 +1030,7 @@ final class CashierV3CheckoutSettlementKernel
                 'serviceObject',
                 'friendCountsAsCustomer',
                 'isExperience',
-                'manualLaborFeeCents',
+                'manualLaborFeeCents', 'detailRemark',
             ], 'entitlementLines[' . $index . ']');
             if (!in_array($line['sourceKind'], self::ENTITLEMENT_SOURCE_KINDS, true)) {
                 throw self::failure('entitlement_source_kind_invalid', ['index' => $index]);
@@ -1104,6 +1115,15 @@ final class CashierV3CheckoutSettlementKernel
                     $line['manualLaborFeeCents'],
                     'entitlementLine.manualLaborFeeCents'
                 );
+            }
+            $detailRemark = self::text(
+                $line['detailRemark'] ?? '',
+                65535,
+                'entitlementLine.detailRemark',
+                true
+            );
+            if ($detailRemark !== '') {
+                $normalized['detailRemark'] = $detailRemark;
             }
             // Service-assignment fields are persisted on the checkout line for
             // final entitlement completion, but the legacy projection
@@ -1521,6 +1541,7 @@ final class CashierV3CheckoutSettlementKernel
                     $line['cardPurchaseSnapshot'],
                     JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
                 ),
+                'detailRemarkSnapshot' => (string)($line['detailRemark'] ?? ''),
                 'lineFingerprint' => $line['lineFingerprint'],
                 'sortNo' => ++$sortNo,
             ];
@@ -1585,6 +1606,7 @@ final class CashierV3CheckoutSettlementKernel
                 'salesManagerSelectionsJson' => '[]',
                 'manualLaborFeeCents' => $line['manualLaborFeeCents'] ?? null,
                 'cardPurchaseSnapshotJson' => '[]',
+                'detailRemarkSnapshot' => (string)($line['detailRemark'] ?? ''),
                 'lineFingerprint' => $line['lineFingerprint'],
                 'sortNo' => ++$sortNo,
             ];

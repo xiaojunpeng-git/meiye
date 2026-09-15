@@ -84,6 +84,10 @@ const props = defineProps({
   confirmationMode: {
     type: Boolean,
     default: false
+  },
+  startServiceHint: {
+    type: String,
+    default: ''
   }
 })
 
@@ -100,6 +104,7 @@ const selectedCatalogProjectKeys = ref([])
 const refreshedCatalogOptions = ref(null)
 const isCraftsmanPickerOpen = ref(false)
 const editorDialogRef = ref(null)
+const defaultAppointmentStartTime = '09:00'
 
 const selectedMember = computed(() => draft.value.member || props.member || null)
 const hasSelectedMember = computed(() => Boolean(
@@ -157,12 +162,23 @@ const craftsmanLabel = computed(() => selectedCraftsmen.value.length
   : '待分配手艺人')
 const summaryRows = computed(() => [
   { label: '会员', value: memberLabel.value },
-  { label: '项目', value: projectLines.value.length ? projectLines.value.map((item) => `${roleText(item)}：${projectName(item)}`).join('；') : '未选择项目' },
-  { label: '预约时间', value: draft.value.appointmentTime || draft.value.appointmentStartAt || '未选择时间' },
+  { label: '预约时间', value: reservationRangeLabel.value },
+  { label: '项目', value: projectLines.value.length ? projectLines.value.map((item) => `${roleText(item)}：${projectName(item)}`).join('；') : '未填写项目（仅占用预约时段）' },
   { label: '手艺人', value: craftsmanLabel.value },
   { label: '房间', value: roomLabel.value },
   { label: '备注', value: draft.value.remark || '未填写' }
 ])
+const appointmentStartValue = computed(() => readAppointmentStart(draft.value))
+const appointmentDateValue = computed(() => datePart(appointmentStartValue.value))
+const appointmentStartTimeValue = computed(() => timePart(appointmentStartValue.value))
+const appointmentEndValue = computed(() => readAppointmentEnd(draft.value))
+const appointmentEndTimeValue = computed(() => timePart(appointmentEndValue.value))
+const reservationRangeLabel = computed(() => {
+  const start = formatDateTimeDisplay(appointmentStartValue.value)
+  const end = formatDateTimeDisplay(appointmentEndValue.value)
+  if (!start) return '未选择时间'
+  return end ? `${start} 至 ${end}` : `${start} 至 未选择结束时间`
+})
 const submissionStatus = computed(() => normalizeSubmissionStatus(props.submission.status))
 const isProcessing = computed(() => submissionStatus.value === 'processing')
 const isFailed = computed(() => submissionStatus.value === 'failed')
@@ -283,31 +299,117 @@ function formatLocalDateTime(value) {
   return `${year}-${month}-${day}T${hour}:${minute}`
 }
 
-function withExpectedEnd(value) {
+function normalizeAppointmentDateTime(value) {
+  const raw = String(value || '').trim()
+  if (/^\d{10,13}$/.test(raw)) {
+    const numeric = Number(raw)
+    const timestamp = raw.length === 10 ? numeric * 1000 : numeric
+    const parsed = new Date(timestamp)
+    return Number.isNaN(parsed.getTime()) ? '' : formatLocalDateTime(parsed)
+  }
+  if (/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}/.test(raw)) return raw.slice(0, 16).replace(' ', 'T')
+  return raw
+}
+
+function readAppointmentStart(value = {}) {
+  return normalizeAppointmentDateTime(value?.appointmentStartAt || value?.appointmentTime)
+}
+
+function readAppointmentEnd(value = {}) {
+  return normalizeAppointmentDateTime(value?.appointmentEndAt || value?.expectedEndAt)
+}
+
+function datePart(value) {
+  return /^\d{4}-\d{2}-\d{2}T/.test(String(value || '')) ? String(value).slice(0, 10) : ''
+}
+
+function timePart(value) {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(value || '')) ? String(value).slice(11, 16) : ''
+}
+
+function formatDateTimeDisplay(value) {
+  const normalized = String(value || '').trim()
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(normalized)
+    ? normalized.slice(0, 16).replace('T', ' ')
+    : normalized
+}
+
+function composeDateTime(date, time) {
+  const normalizedDate = String(date || '').trim()
+  const normalizedTime = String(time || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate) || !/^\d{2}:\d{2}$/.test(normalizedTime)) return ''
+  return `${normalizedDate}T${normalizedTime}`
+}
+
+function resolvedDurationMinutes(value) {
+  const duration = readProjects(value).reduce((total, line) => total + configuredDurationMinutes(line) * projectQuantity(line), 0)
+  return duration || 60
+}
+
+function withCalculatedEnd(value) {
   const next = cloneDraft(value)
-  const appointmentTime = String(next.appointmentTime || next.appointmentStartAt || '').trim()
-  const start = appointmentTime ? new Date(appointmentTime) : null
-  const duration = readProjects(next).reduce((total, line) => total + configuredDurationMinutes(line) * projectQuantity(line), 0)
-  if (!start || Number.isNaN(start.getTime()) || !duration) {
+  const appointmentStartAt = readAppointmentStart(next)
+  const start = appointmentStartAt ? new Date(appointmentStartAt) : null
+  if (!start || Number.isNaN(start.getTime())) {
+    next.appointmentTime = appointmentStartAt
+    next.appointmentStartAt = appointmentStartAt
+    delete next.appointmentEndAt
     delete next.expectedEndAt
     delete next.expectedEndLabel
     delete next.durationSummary
     return next
   }
+  const duration = resolvedDurationMinutes(next)
   const end = new Date(start.getTime() + duration * 60 * 1000)
-  next.expectedEndAt = formatLocalDateTime(end)
-  next.expectedEndLabel = formatLocalDateTime(end).replace('T', ' ')
-  next.durationSummary = `预计服务时长 ${duration} 分钟`
+  if (formatLocalDateTime(end).slice(0, 10) !== appointmentStartAt.slice(0, 10)) {
+    next.appointmentTime = appointmentStartAt
+    next.appointmentStartAt = appointmentStartAt
+    delete next.appointmentEndAt
+    delete next.expectedEndAt
+    next.durationSummary = '项目时长已超过当日可预约时段，请调整预约日期或开始时间后再选择结束时间。'
+    return next
+  }
+  const appointmentEndAt = formatLocalDateTime(end)
+  next.appointmentTime = appointmentStartAt
+  next.appointmentStartAt = appointmentStartAt
+  next.appointmentEndAt = appointmentEndAt
+  next.expectedEndAt = appointmentEndAt
+  next.expectedEndLabel = formatDateTimeDisplay(appointmentEndAt)
+  next.durationSummary = readProjects(next).length
+    ? `已按项目时长自动更新结束时间（${duration}分钟）；仍可手动调整。`
+    : '未填写项目，结束时间默认开始后60分钟；仍可手动调整。'
   return next
 }
 
 function applyScheduleChange(nextDraft) {
-  commit(withExpectedEnd(nextDraft))
+  commit(withCalculatedEnd(nextDraft))
 }
 
-function updateAppointmentTime(value) {
+function updateAppointmentDate(value) {
   if (editorFieldsLocked.value) return
-  applyScheduleChange({ ...draft.value, appointmentTime: value }, 'appointment_time_changed')
+  // 日期是时段输入的第一项。日期刚选定时还没有开始时间，若仍要求
+  // 先存在完整 datetime，会让受控 input 在下一次渲染时被清空。
+  // 先落一个可编辑的 09:00 起点，再由使用者调整开始/结束时间。
+  const appointmentStartAt = composeDateTime(value, appointmentStartTimeValue.value || defaultAppointmentStartTime)
+  applyScheduleChange({ ...draft.value, appointmentTime: appointmentStartAt, appointmentStartAt })
+  clearValidation('预约时间')
+}
+
+function updateAppointmentStartTime(value) {
+  if (editorFieldsLocked.value) return
+  const appointmentStartAt = composeDateTime(appointmentDateValue.value, value || defaultAppointmentStartTime)
+  applyScheduleChange({ ...draft.value, appointmentTime: appointmentStartAt, appointmentStartAt })
+  clearValidation('预约时间')
+}
+
+function updateAppointmentEnd(value) {
+  if (editorFieldsLocked.value) return
+  const appointmentEndAt = composeDateTime(appointmentDateValue.value, value)
+  const next = cloneDraft({ ...draft.value, appointmentEndAt, expectedEndAt: appointmentEndAt })
+  next.expectedEndLabel = formatDateTimeDisplay(appointmentEndAt)
+  next.durationSummary = '结束时间已手动调整。'
+  commit(next)
+  clearValidation('结束时间')
 }
 
 function updateRemark(value) {
@@ -461,7 +563,7 @@ async function chooseMember() {
     const member = result?.member || result
     if (!member || typeof member !== 'object') return
     const memberId = member.memberId || member.id || draft.value.memberId
-    applyScheduleChange({
+    updateDraft({
       ...draft.value,
       member,
       memberId,
@@ -530,7 +632,7 @@ async function chooseCraftsmen() {
     const result = await props.onSelectCraftsmen({ draft: submitDraft(), craftsmen: selectedCraftsmen.value })
     const craftsmen = result?.craftsmen || result
     if (!Array.isArray(craftsmen)) return
-    applyScheduleChange({ ...draft.value, craftsmen: craftsmen.map((item) => ({ ...item })) }, 'craftsmen_changed')
+    updateDraft({ craftsmen: craftsmen.map((item) => ({ ...item })) })
     clearValidation('手艺人')
   } finally {
     isSelecting.value = false
@@ -549,13 +651,24 @@ function toggleCraftsman(craftsman) {
   const index = next.findIndex((item) => String(item.id || item.staffId) === String(craftsmanId))
   if (index === -1) next.push({ ...craftsman })
   else next.splice(index, 1)
-  applyScheduleChange({ ...draft.value, craftsmen: next }, 'craftsmen_changed')
+  updateDraft({ craftsmen: next })
   clearValidation('手艺人')
+}
+
+function setCraftsmanPointCustomer(craftsman, checked) {
+  const craftsmanId = craftsman?.id || craftsman?.staffId
+  if (editorFieldsLocked.value || !craftsmanId) return
+  const next = selectedCraftsmen.value.map((item) => (
+    String(item.id || item.staffId) === String(craftsmanId)
+      ? { ...item, isPointCustomer: Boolean(checked) }
+      : { ...item }
+  ))
+  updateDraft({ craftsmen: next })
 }
 
 function clearCraftsmen() {
   if (editorFieldsLocked.value) return
-  applyScheduleChange({ ...draft.value, craftsmen: [] }, 'craftsmen_cleared')
+  updateDraft({ craftsmen: [] })
   isCraftsmanPickerOpen.value = false
   clearValidation('手艺人')
 }
@@ -567,12 +680,11 @@ async function chooseRoom() {
     const result = await props.onSelectRoom({ draft: submitDraft(), room: selectedRoom.value })
     const room = result?.room || result
     if (!room || typeof room !== 'object') return
-    applyScheduleChange({
-      ...draft.value,
+    updateDraft({
       room,
       roomId: room.roomId || room.id || draft.value.roomId,
       roomName: room.roomName || room.name || draft.value.roomName
-    }, 'room_changed')
+    })
   } finally {
     isSelecting.value = false
   }
@@ -580,18 +692,17 @@ async function chooseRoom() {
 
 function chooseRoomFromList(room) {
   if (editorFieldsLocked.value || room?.selectable !== true) return
-  applyScheduleChange({
-    ...draft.value,
+  updateDraft({
     room: { ...room },
     roomId: room.roomId || room.id,
     roomName: room.roomName || room.name
-  }, 'room_changed')
+  })
   isCatalogOpen.value = false
 }
 
 function clearRoom() {
   if (editorFieldsLocked.value) return
-  applyScheduleChange({ ...draft.value, room: null, roomId: null, roomName: '' }, 'room_cleared')
+  updateDraft({ room: null, roomId: null, roomName: '' })
 }
 
 function submitDraft() {
@@ -605,17 +716,29 @@ function submitDraft() {
   if (!Array.isArray(payload.craftsmen) && selectedCraftsmen.value.length) {
     payload.craftsmen = selectedCraftsmen.value.map((item) => ({ ...item }))
   }
+  const appointmentStartAt = readAppointmentStart(payload)
+  payload.appointmentTime = appointmentStartAt
+  payload.appointmentStartAt = appointmentStartAt
+  payload.appointmentEndAt = readAppointmentEnd(payload)
   return payload
 }
 
 function collectMissingFields() {
   const missing = []
   if (!hasSelectedMember.value) missing.push('会员')
-  if (!projectLines.value.length) missing.push('项目')
   if (projectLines.value.some((line) => normalizedProjectSource(line) === 'card' && !Number(line?.entitlementSourceDetailId || line?.sourceDetailId))) {
     missing.push('已购项目来源')
   }
-  if (!draft.value.appointmentTime && !draft.value.appointmentStartAt) missing.push('预约时间')
+  const appointmentStartAt = readAppointmentStart(draft.value)
+  const appointmentEndAt = readAppointmentEnd(draft.value)
+  const start = appointmentStartAt ? new Date(appointmentStartAt) : null
+  const end = appointmentEndAt ? new Date(appointmentEndAt) : null
+  if (!start || Number.isNaN(start.getTime())) missing.push('预约日期和开始时间')
+  if (!end || Number.isNaN(end.getTime()) || (start && !Number.isNaN(start.getTime()) && end <= start)) {
+    missing.push('结束时间（须晚于开始时间）')
+  } else if (datePart(appointmentStartAt) !== datePart(appointmentEndAt)) {
+    missing.push('结束时间（须在预约当日）')
+  }
   return missing
 }
 
@@ -689,14 +812,77 @@ useModalFocusTrap({
         </div>
       </section>
 
-      <section class="reservation-editor-step">
+      <section class="reservation-editor-step reservation-editor-step--compact">
         <header class="reservation-editor-step__header">
           <span class="reservation-editor-step__number">2</span>
-          <div><h3>选择项目</h3><p>每笔预约必须有一个主项目；其余项目作为明细项目。</p></div>
+          <div><h3>预约时间</h3><p>先确定预约日期、开始和结束时间；预约必须在当天完成，未填写项目时默认预约一小时。</p></div>
         </header>
+        <div class="reservation-editor-schedule-fields">
+          <label class="reservation-editor-field">
+            <span>预约日期</span>
+            <input :value="appointmentDateValue" type="date" :disabled="editorFieldsLocked" @change="updateAppointmentDate($event.target.value)">
+          </label>
+          <label class="reservation-editor-field">
+            <span>开始时间</span>
+            <input :value="appointmentStartTimeValue" type="time" step="900" :disabled="editorFieldsLocked" @change="updateAppointmentStartTime($event.target.value)">
+          </label>
+          <label class="reservation-editor-field">
+            <span>结束时间</span>
+            <input :value="appointmentEndTimeValue" type="time" step="900" :disabled="editorFieldsLocked" @change="updateAppointmentEnd($event.target.value)">
+          </label>
+        </div>
+        <p class="reservation-editor-system-note">{{ draft.durationSummary || '项目变化会自动更新结束时间；结束时间仍可按实际安排手动调整。' }}</p>
+      </section>
+
+      <section class="reservation-editor-step">
+        <header class="reservation-editor-step__header">
+          <span class="reservation-editor-step__number">3</span>
+          <div><h3>选择手艺人 <em>（可不选）</em></h3><p>未选择时显示“待分配手艺人”，不会阻止预约提交。</p></div>
+        </header>
+        <div class="reservation-editor-selection-card">
+          <div><strong>{{ craftsmanLabel }}</strong><span>可按实际安排选择手艺人。</span></div>
+          <div class="reservation-editor-selection-card__actions">
+            <button type="button" class="reservation-editor-button reservation-editor-button--secondary" :disabled="editorFieldsLocked || isSelecting" @click="chooseCraftsmen">选择手艺人</button>
+            <button type="button" class="reservation-editor-link" :disabled="editorFieldsLocked || isSelecting" @click="clearCraftsmen">暂不分配</button>
+          </div>
+        </div>
+          <div v-if="isCraftsmanPickerOpen && availableCraftsmen.length" class="reservation-editor-craftsmen-list" aria-label="后端返回的可选手艺人；先选中手艺人，再勾选点客">
+          <div
+            v-for="craftsman in availableCraftsmen"
+            :key="craftsman.id || craftsman.staffId"
+            class="reservation-editor-craftsmen-list__item"
+            :class="{ 'reservation-editor-craftsmen-list__item--active': isCraftsmanSelected(craftsman) }"
+          >
+            <button
+              type="button"
+              class="reservation-editor-craftsmen-list__select"
+              :disabled="editorFieldsLocked || craftsman.selectable !== true"
+              @click="toggleCraftsman(craftsman)"
+            >
+              <strong>{{ craftsman.name || craftsman.staffName }}</strong>
+            </button>
+            <label class="reservation-editor-craftsmen-list__point" @click.stop>
+              <input
+                type="checkbox"
+                :checked="Boolean(selectedCraftsmen.find((item) => String(item.id || item.staffId) === String(craftsman.id || craftsman.staffId))?.isPointCustomer)"
+                :disabled="editorFieldsLocked || !isCraftsmanSelected(craftsman)"
+                @change="setCraftsmanPointCustomer(craftsman, $event.target.checked)"
+              >
+              点客
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="reservation-editor-step">
+        <header class="reservation-editor-step__header">
+          <span class="reservation-editor-step__number">4</span>
+          <div><h3>选择项目 <em>（可不选）</em></h3><p>不选项目也能预约时段；开始服务前必须补齐项目和手艺人。</p></div>
+        </header>
+        <p v-if="startServiceHint" class="reservation-editor-start-service-hint">{{ startServiceHint }}</p>
         <div class="reservation-editor-project-actions">
           <button type="button" class="reservation-editor-button reservation-editor-button--secondary" :disabled="editorFieldsLocked" @click="openProjectCatalog">选择项目</button>
-          <span>第一个项目会自动成为主项目；需要时可点击“设为主项目”切换。</span>
+          <span>第一个项目会自动成为主项目；项目变动会按项目时长更新结束时间。</span>
         </div>
         <div v-if="projectLines.length" class="reservation-editor-project-list">
           <article v-for="(line, index) in projectLines" :key="projectKey(line, index)" class="reservation-editor-project-line">
@@ -720,46 +906,7 @@ useModalFocusTrap({
             </div>
           </article>
         </div>
-        <p v-else class="reservation-editor-empty">还没有选择项目。</p>
-      </section>
-
-      <section class="reservation-editor-step reservation-editor-step--compact">
-        <header class="reservation-editor-step__header">
-          <span class="reservation-editor-step__number">3</span>
-          <div><h3>预约时间</h3><p>选择顾客到店开始服务的时间；预计结束时间按项目时长计算。</p></div>
-        </header>
-        <label class="reservation-editor-field">
-          <span>开始时间</span>
-          <input :value="draft.appointmentTime || draft.appointmentStartAt || ''" type="datetime-local" step="900" :disabled="editorFieldsLocked" @input="updateAppointmentTime($event.target.value)">
-        </label>
-        <p v-if="draft.expectedEndAt || draft.expectedEndLabel" class="reservation-editor-system-note">预计结束：{{ draft.expectedEndLabel || draft.expectedEndAt }}</p>
-      </section>
-
-      <section class="reservation-editor-step">
-        <header class="reservation-editor-step__header">
-          <span class="reservation-editor-step__number">4</span>
-          <div><h3>选择手艺人 <em>（可不选）</em></h3><p>未选择时显示“待分配手艺人”，不会阻止预约提交。</p></div>
-        </header>
-        <div class="reservation-editor-selection-card">
-          <div><strong>{{ craftsmanLabel }}</strong><span>可按实际安排选择手艺人。</span></div>
-          <div class="reservation-editor-selection-card__actions">
-            <button type="button" class="reservation-editor-button reservation-editor-button--secondary" :disabled="editorFieldsLocked || isSelecting" @click="chooseCraftsmen">选择手艺人</button>
-            <button type="button" class="reservation-editor-link" :disabled="editorFieldsLocked || isSelecting" @click="clearCraftsmen">暂不分配</button>
-          </div>
-        </div>
-        <div v-if="isCraftsmanPickerOpen && availableCraftsmen.length" class="reservation-editor-craftsmen-list" aria-label="后端返回的可选手艺人">
-          <button
-            v-for="craftsman in availableCraftsmen"
-            :key="craftsman.id || craftsman.staffId"
-            type="button"
-            :disabled="editorFieldsLocked || craftsman.selectable !== true"
-            :class="{ 'reservation-editor-craftsmen-list__item--active': isCraftsmanSelected(craftsman) }"
-            @click="toggleCraftsman(craftsman)"
-          >
-            <strong>{{ craftsman.name || craftsman.staffName }}</strong>
-            <span>{{ craftsman.storeName || craftsman.organizationName || '当前门店可约' }}</span>
-          </button>
-        </div>
+        <p v-else class="reservation-editor-empty">还没有选择项目。本次只占用预约时间；开始服务前再补齐即可。</p>
       </section>
 
       <section class="reservation-editor-step">
@@ -1352,16 +1499,30 @@ useModalFocusTrap({
   color: #374151;
 }
 
-.reservation-editor-craftsmen-list button {
-  display: grid;
-  gap: 3px;
+.reservation-editor-craftsmen-list__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   border-color: #d1d5db;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
   background: #fff;
   color: #374151;
+  padding: 9px 12px;
+}
+
+.reservation-editor-craftsmen-list__select {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
   text-align: left;
 }
 
-.reservation-editor-craftsmen-list button:disabled {
+.reservation-editor-craftsmen-list__select:disabled {
   cursor: not-allowed;
   opacity: .5;
 }
@@ -1369,6 +1530,25 @@ useModalFocusTrap({
 .reservation-editor-craftsmen-list span {
   color: #6b7280;
   font-size: 12px;
+}
+
+.reservation-editor-craftsmen-list__point {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #4b5563 !important;
+  cursor: pointer;
+}
+
+.reservation-editor-craftsmen-list__point input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #1677cc;
+}
+
+.reservation-editor-craftsmen-list__point input:disabled {
+  cursor: not-allowed;
 }
 
 .reservation-editor-room-list__item--active {
@@ -1472,6 +1652,16 @@ useModalFocusTrap({
   max-width: 430px;
 }
 
+.reservation-editor-schedule-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.reservation-editor-schedule-fields .reservation-editor-field {
+  max-width: none;
+}
+
 .reservation-editor-field > span {
   display: block;
   margin-bottom: 7px;
@@ -1501,6 +1691,16 @@ useModalFocusTrap({
 .reservation-editor-system-note {
   margin-top: 10px !important;
   color: #0958d9 !important;
+}
+
+.reservation-editor-start-service-hint {
+  margin-bottom: 12px !important;
+  padding: 10px 12px;
+  border: 1px solid #f0c36d;
+  border-radius: 8px;
+  background: #fff9e8;
+  color: #9a6700 !important;
+  line-height: 1.5;
 }
 
 .reservation-editor-summary {
@@ -1592,6 +1792,10 @@ useModalFocusTrap({
   .reservation-editor-project-line {
     grid-template-columns: 1fr;
     gap: 10px;
+  }
+
+  .reservation-editor-schedule-fields {
+    grid-template-columns: 1fr;
   }
 
   .reservation-editor-summary {

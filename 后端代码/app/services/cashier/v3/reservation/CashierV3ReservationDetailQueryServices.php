@@ -36,7 +36,6 @@ final class CashierV3ReservationDetailQueryServices
             ->where('reservation_id', $reservationId)
             ->order('id asc')
             ->select());
-        if (!$lines) return null;
 
         $serviceOrderId = (int)($reservation['service_order_id'] ?? 0);
         $serviceOrder = $serviceOrderId > 0
@@ -54,10 +53,26 @@ final class CashierV3ReservationDetailQueryServices
                 ->select())
             : [];
 
+        $scheduledStaffRows = $this->rows(Db::name('cashier_v3_reservation_staff_schedule')
+            ->where('tenant_id', $tenantId)
+            ->where('reservation_id', $reservationId)
+            ->order('staff_id asc')
+            ->select());
         $plannedStaffIds = [];
-        foreach ($lines as $line) {
-            foreach ($this->positiveIds($line['artisan_staff_ids_json'] ?? '[]') as $staffId) {
-                $plannedStaffIds[$staffId] = $staffId;
+        $plannedPointCustomerByStaffId = [];
+        foreach ($scheduledStaffRows as $scheduled) {
+            $staffId = (int)($scheduled['staff_id'] ?? 0);
+            if ($staffId <= 0) continue;
+            $plannedStaffIds[$staffId] = $staffId;
+            if (!empty($scheduled['is_point_customer'])) $plannedPointCustomerByStaffId[$staffId] = true;
+        }
+        // Project-line JSON is only retained to read pre-schedule-relation
+        // reservations; new and time-only appointments read the relation.
+        if (!$plannedStaffIds) {
+            foreach ($lines as $line) {
+                foreach ($this->positiveIds($line['artisan_staff_ids_json'] ?? '[]') as $staffId) {
+                    $plannedStaffIds[$staffId] = $staffId;
+                }
             }
         }
         $plannedStaff = $plannedStaffIds
@@ -68,6 +83,17 @@ final class CashierV3ReservationDetailQueryServices
                 ->select()
             : [];
         $plannedStaff = $this->rows($plannedStaff);
+
+        $actualPointCustomerByStaffId = [];
+        if ($serviceOrderId > 0) {
+            foreach ($this->rows(Db::name('cashier_v3_service_order_staff_assignment')
+                ->where('tenant_id', $tenantId)
+                ->where('service_order_id', $serviceOrderId)
+                ->select()) as $assignment) {
+                $staffId = (int)($assignment['staff_id'] ?? 0);
+                if ($staffId > 0 && !empty($assignment['is_point_customer'])) $actualPointCustomerByStaffId[$staffId] = true;
+            }
+        }
 
         $operations = $this->rows(Db::name('cashier_v3_reservation_operation')
             ->where('tenant_id', $tenantId)
@@ -131,15 +157,17 @@ final class CashierV3ReservationDetailQueryServices
             'expectedEndAt' => $actualStartAt > 0 ? $actualStartAt + $plannedDurationSeconds : 0,
             'totalDurationSeconds' => $plannedDurationSeconds,
             'isOvertime' => $actualStartAt > 0 && $actualEndAt <= 0 && time() > $actualStartAt + $plannedDurationSeconds,
-            'plannedCraftsmen' => array_map(static function (array $staff): array {
+            'plannedCraftsmen' => array_map(static function (array $staff) use ($plannedPointCustomerByStaffId): array {
+                $staffId = (int)($staff['id'] ?? 0);
                 return [
-                    'staffId' => (int)($staff['id'] ?? 0),
+                    'staffId' => $staffId,
                     'employeeId' => (int)($staff['employee_id'] ?? 0),
                     'name' => (string)($staff['staff_name'] ?? ''),
                     'statusLabel' => ((int)($staff['status'] ?? 0) === 1 && (int)($staff['is_del'] ?? 0) === 0) ? '在职' : '历史人员',
+                    'isPointCustomer' => isset($plannedPointCustomerByStaffId[$staffId]),
                 ];
             }, $plannedStaff),
-            'actualCraftsmen' => $this->actualCraftsmen($serviceLines),
+            'actualCraftsmen' => $this->actualCraftsmen($serviceLines, $actualPointCustomerByStaffId),
             'room' => (int)($reservation['room_id'] ?? 0) > 0 ? [
                 'id' => (int)$reservation['room_id'],
                 'name' => (string)($reservation['room_name_snapshot'] ?? ''),
@@ -305,14 +333,20 @@ final class CashierV3ReservationDetailQueryServices
         return $outcomes;
     }
 
-    private function actualCraftsmen(array $serviceLines): array
+    private function actualCraftsmen(array $serviceLines, array $pointCustomerByStaffId = []): array
     {
         $items = [];
         foreach ($serviceLines as $line) {
+            $staffId = (int)($line['artisan_staff_id'] ?? 0);
             $employeeId = (int)($line['artisan_employee_id'] ?? 0);
             $name = trim((string)($line['artisan_name_snapshot'] ?? ''));
             if ($employeeId <= 0 || $name === '') continue;
-            $items[$employeeId] = ['employeeId' => $employeeId, 'name' => $name];
+            $items[$employeeId] = [
+                'staffId' => $staffId,
+                'employeeId' => $employeeId,
+                'name' => $name,
+                'isPointCustomer' => $staffId > 0 && isset($pointCustomerByStaffId[$staffId]),
+            ];
         }
         return array_values($items);
     }

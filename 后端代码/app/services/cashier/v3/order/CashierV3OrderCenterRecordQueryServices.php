@@ -921,6 +921,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'sf.project_name_snapshot', 'sf.quantity', 'sf.project_count', 'sf.store_id', 'sf.store_name_snapshot',
             'sf.operator_id', 'sf.operator_name_snapshot', 'sf.settled_at', 'sf.occurred_at',
             'sf.craftsmen_snapshot_json', 'sf.service_status', 'sf.source_document_type', 'wf.is_gift', 'wf.source_kind',
+            'sf.detail_remark_snapshot',
             'wf.source_name_snapshot AS source_name_snapshot',
             'wf.source_code_snapshot AS source_code_snapshot',
             'sf.labor_amount_cents', 'sf.labor_fee_amount_cents', 'sf.labor_mode',
@@ -950,6 +951,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'memberId' => (int)$row['member_id'],
                 'memberName' => (string)$row['member_name_snapshot'],
                 'serviceProject' => (string)$row['project_name_snapshot'],
+                'detailRemark' => (string)($row['detail_remark_snapshot'] ?? ''),
                 'entitlementSource' => $this->serviceEntitlementSource($row),
                 'sourceCardName' => (string)$row['source_name_snapshot'],
                 'sourceCardNo' => (string)$row['source_code_snapshot'],
@@ -996,12 +998,29 @@ final class CashierV3OrderCenterRecordQueryServices
         if ($serviceRows === [] || $tenantId === '') return [];
         $checkoutIds = [];
         $lineIds = [];
+        // Earlier reservation completions created labor facts before the
+        // point/round role was stored there. The completed service snapshot
+        // is immutable and authoritative for those records, so use it only
+        // as a historical compatibility projection while new labor facts
+        // carry the same role directly in role_snapshot.
+        $pointCustomerByLineAndEmployeeId = [];
         foreach ($serviceRows as $row) {
             $checkoutId = trim((string)($row['checkout_request_id'] ?? ''));
             $lineId = trim((string)($row['source_line_id'] ?? ''));
             if ($checkoutId === '' || $lineId === '') continue;
             $checkoutIds[$checkoutId] = $checkoutId;
             $lineIds[$lineId] = $lineId;
+            $key = $this->serviceLineKey($row);
+            foreach ((array)json_decode((string)($row['craftsmen_snapshot_json'] ?? '[]'), true) as $craftsman) {
+                if (!is_array($craftsman)) continue;
+                $employeeId = max(0, (int)($craftsman['employeeId'] ?? $craftsman['employee_id'] ?? 0));
+                if ($employeeId <= 0) continue;
+                if (array_key_exists('isPointCustomer', $craftsman)) {
+                    $pointCustomerByLineAndEmployeeId[$key][$employeeId] = (bool)$craftsman['isPointCustomer'];
+                } elseif (array_key_exists('is_point_customer', $craftsman)) {
+                    $pointCustomerByLineAndEmployeeId[$key][$employeeId] = (bool)$craftsman['is_point_customer'];
+                }
+            }
         }
         if ($checkoutIds === [] || $lineIds === []) return [];
         $facts = Db::name('cashier_v3_performance_fact')
@@ -1073,13 +1092,19 @@ final class CashierV3OrderCenterRecordQueryServices
             $result[$key]['hasExplicitProjectCount'] = $result[$key]['hasExplicitProjectCount']
                 || !empty($allocation['hasExplicitProjectCount']);
             $name = (string)$allocation['employeeName'];
-            if ($name !== '' && !in_array($name, $result[$key]['names'], true)) $result[$key]['names'][] = $name;
+            $pointCustomer = $this->pointCustomerFromRoleSnapshot((string)$allocation['roleSnapshot']);
+            if ($pointCustomer === null) {
+                $pointCustomer = $pointCustomerByLineAndEmployeeId[$key][(int)$allocation['employeeId']] ?? null;
+            }
+            $displayName = $this->craftsmanDisplayName($name, $pointCustomer);
+            if ($displayName !== '' && !in_array($displayName, $result[$key]['names'], true)) $result[$key]['names'][] = $displayName;
             $baseAmount = max(0, (int)$result[$key]['amountCents']);
             $result[$key]['allocations'][] = [
                 'employeeId' => (int)$allocation['employeeId'],
                 'employeeName' => $name,
                 'employeeType' => (string)$allocation['employeeType'],
                 'roleSnapshot' => (string)$allocation['roleSnapshot'],
+                'isPointCustomer' => $pointCustomer,
                 'allocationWeightNumerator' => !empty($allocation['hasExplicitAllocationWeight'])
                     ? (int)$allocation['allocationWeightNumerator']
                     : (int)$allocation['amountCents'],
@@ -1108,6 +1133,23 @@ final class CashierV3OrderCenterRecordQueryServices
         }
         unset($line);
         return $result;
+    }
+
+    /** @return bool|null null means an older fact with no role label. */
+    private function pointCustomerFromRoleSnapshot(string $roleSnapshot): ?bool
+    {
+        $role = strtolower(trim($roleSnapshot));
+        if ($role === '' || $role === 'craftsman') return null;
+        if (str_contains($role, 'point')) return true;
+        if (str_contains($role, 'round')) return false;
+        return null;
+    }
+
+    private function craftsmanDisplayName(string $name, ?bool $isPointCustomer): string
+    {
+        $name = trim($name);
+        if ($name === '' || $isPointCustomer === null) return $name;
+        return $name . ($isPointCustomer ? '（点）' : '（轮）');
     }
 
     private function laborPerformanceTypeLabel(string $mode): string

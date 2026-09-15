@@ -170,6 +170,7 @@ const ORDER_TABS = [
       field('member_name', '会员姓名'), field('service_project', '服务项目'),
       field('entitlement_source', '权益来源'), field('source_card', '来源卡名称'),
       field('source_card_no', '完整卡号'), field('used_times', '本次使用次数', 'number'),
+      field('detail_remark', '明细备注', 'text', { defaultVisible: false }),
       field('store', '服务门店', 'store'), field('craftsman', '手艺人', 'person'),
       field('labor_fee_amount', '手工费', 'money'), field('labor_performance_type', '服务业绩类型'),
       field('labor_performance_ratio', '业绩比例'), field('labor_performance_amount', '消耗业绩', 'money'),
@@ -269,6 +270,7 @@ const FIELD_ALIASES = {
   labor_performance_ratio: ['laborPerformanceRatio'],
   labor_performance_amount: ['laborPerformanceAmount'], service_status: ['serviceStatus'],
   project_count: ['projectCount'],
+  detail_remark: ['detailRemark'],
   service_completed_at: ['serviceCompletedAt', 'completedAt'], voided_at: ['voidedAt'],
   void_reason: ['voidReason'], void_operator: ['voidOperatorName']
 }
@@ -363,9 +365,12 @@ const visibleFields = computed(() => {
   return fields
 })
 const detailFields = computed(() => {
-  if (activeTabKey.value !== 'service' || !genericDetailRecord.value?.voidedAt) return visibleFields.value
+  if (activeTabKey.value !== 'service') return visibleFields.value
   const present = new Set(visibleFields.value.map((item) => item.key))
-  const extras = queryFields.value.filter((item) => ['voided_at', 'void_reason', 'void_operator'].includes(item.key) && !present.has(item.key))
+  const detailOnlyKeys = genericDetailRecord.value?.voidedAt
+    ? ['detail_remark', 'voided_at', 'void_reason', 'void_operator']
+    : ['detail_remark']
+  const extras = queryFields.value.filter((item) => detailOnlyKeys.includes(item.key) && !present.has(item.key))
   return [...visibleFields.value, ...extras]
 })
 

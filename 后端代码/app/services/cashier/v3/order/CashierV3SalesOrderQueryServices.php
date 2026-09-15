@@ -771,7 +771,11 @@ final class CashierV3SalesOrderQueryServices
             'o.checkout_request_id,o.business_date,o.business_timezone,o.occurred_at,o.settled_at,o.recorded_at',
             'o.business_source_primary_id,o.business_source_primary_name_snapshot',
             'o.business_source_secondary_id,o.business_source_secondary_name_snapshot,o.business_source_label_snapshot',
-            'o.original_amount_cents,o.discount_amount_cents,o.sale_amount_cents,o.order_version',
+            // order_note is an order-header snapshot. The authority mapper
+            // already exposes it as orderNote, so the base projection must
+            // select it for both list and detail reads; otherwise a freshly
+            // settled order silently appears to have no main-order remark.
+            'o.original_amount_cents,o.discount_amount_cents,o.sale_amount_cents,o.order_version,o.order_note',
         ]);
     }
 
@@ -1200,7 +1204,7 @@ final class CashierV3SalesOrderQueryServices
             ->whereIn('order_id', $orderIds)
             ->where('line_status', 'settled')
             ->where('line_direction', 'forward')
-            ->field('order_line_id,checkout_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,is_experience,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,card_purchase_snapshot_json,line_version')
+            ->field('order_line_id,checkout_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,is_experience,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,card_purchase_snapshot_json,detail_remark_snapshot,line_version')
             ->order('order_id', 'asc')->order('line_no', 'asc')->select()->toArray() as $line) {
             $linesByOrder[(string)$line['order_id']][] = $line;
         }
@@ -1730,6 +1734,7 @@ final class CashierV3SalesOrderQueryServices
                 : [],
             'serviceRecipientType' => (string)($line['service_object'] ?? ''),
             'isExperience' => (int)($line['is_experience'] ?? 0) === 1,
+            'detailRemark' => (string)($line['detail_remark_snapshot'] ?? ''),
             'salespeople' => array_map(function (array $person): array {
                 return ['id' => (string)$person['fact_id'], 'employeeId' => (int)$person['employee_id'], 'name' => (string)$person['employee_name_snapshot'],
                     'employeeType' => (string)$person['employee_type_snapshot'], 'roleSnapshot' => (string)($person['role_snapshot'] ?? ''), 'allocationWeight' => (int)$person['allocation_weight_numerator'],

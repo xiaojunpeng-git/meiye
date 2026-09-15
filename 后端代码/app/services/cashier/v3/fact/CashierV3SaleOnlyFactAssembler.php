@@ -59,7 +59,7 @@ final class CashierV3SaleOnlyFactAssembler
         'craftsmen_snapshot_json',
         'salespeople_snapshot_json',
         'guide_selections_json', 'sales_manager_selections_json',
-        'manual_labor_fee_cents', 'card_purchase_snapshot_json',
+        'manual_labor_fee_cents', 'card_purchase_snapshot_json', 'detail_remark_snapshot',
         'sort_no', 'add_time', 'update_time',
     ];
 

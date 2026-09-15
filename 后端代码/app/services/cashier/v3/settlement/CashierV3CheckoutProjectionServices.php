@@ -655,6 +655,11 @@ final class CashierV3CheckoutProjectionServices
                 $cardPurchaseSnapshot = self::cardPurchaseSnapshot(
                     $row['card_purchase_snapshot_json'] ?? null
                 );
+                $detailRemark = self::text(
+                    $row['detail_remark_snapshot'] ?? '',
+                    65535,
+                    'line.detail_remark_snapshot'
+                );
                 if (!in_array($serviceObject, ['', 'self', 'friend'], true)
                     || $isExperience > 1 || $friendCountsAsCustomer > 1
                     || ($sourceType === 'project'
@@ -739,6 +744,9 @@ final class CashierV3CheckoutProjectionServices
                     && $cardPurchaseSnapshot !== []) {
                     $fingerprintInput['cardPurchaseSnapshot'] = $cardPurchaseSnapshot;
                 }
+                if ($detailRemark !== '') {
+                    $fingerprintInput['detailRemark'] = $detailRemark;
+                }
                 if ($catalogSkuId <= 0) {
                     unset($fingerprintInput['catalogSkuId']);
                 }
@@ -791,6 +799,7 @@ final class CashierV3CheckoutProjectionServices
                     'laborManualFeeCents' => $manualLaborFeeCents,
                     'isExperience' => $isExperience === 1,
                     'isPresale' => $isPresale === 1,
+                    'detailRemark' => $detailRemark,
                 ];
                 if ($inventoryOutboundRequired !== 1) {
                     $fingerprintInput['inventoryOutboundRequired'] = 0;
@@ -828,7 +837,12 @@ final class CashierV3CheckoutProjectionServices
                     throw self::failure('checkout_projection_entitlement_sale_amount_forbidden');
                 }
             }
-            $expectedFingerprint = CashierV3CheckoutSettlementCanonicalizer::fingerprint([
+            $detailRemark = self::text(
+                $row['detail_remark_snapshot'] ?? '',
+                65535,
+                'line.detail_remark_snapshot'
+            );
+            $fingerprintInput = [
                 'authorityKey' => $authorityKey,
                 'sourceKind' => $sourceKind,
                 'holderId' => $sourceId,
@@ -843,7 +857,11 @@ final class CashierV3CheckoutProjectionServices
                 'projectNameSnapshot' => $projectName,
                 'projectCategoryIdSnapshot' => $categoryId,
                 'projectCategoryNameSnapshot' => $categoryName,
-            ]);
+            ];
+            if ($detailRemark !== '') {
+                $fingerprintInput['detailRemark'] = $detailRemark;
+            }
+            $expectedFingerprint = CashierV3CheckoutSettlementCanonicalizer::fingerprint($fingerprintInput);
             if (!hash_equals($storedFingerprint, $expectedFingerprint)) {
                 throw self::failure('checkout_projection_line_fingerprint_drift');
             }
@@ -878,6 +896,7 @@ final class CashierV3CheckoutProjectionServices
                 'serviceSource' => '卡内项目',
                 'categoryId' => $categoryId,
                 'categoryName' => $categoryName,
+                'detailRemark' => $detailRemark,
             ];
         }
 

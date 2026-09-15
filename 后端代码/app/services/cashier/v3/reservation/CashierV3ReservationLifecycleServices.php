@@ -149,9 +149,35 @@ final class CashierV3ReservationLifecycleServices
         }
     }
 
+    /**
+     * Creating a time-only appointment is allowed. Creating a service from it
+     * is not: at least one real project and one selectable artisan are needed
+     * before any service-order row is inserted.
+     */
+    public function assertServiceStartPrerequisitesInTx(array $header, array $lines, array $staffIds): void
+    {
+        CashierV3TransactionGuard::assertInTransaction('reservationLifecycle.startPrerequisites');
+        if (!$lines) throw $this->failure('开始服务前请至少选择一个项目。');
+        foreach ($lines as $line) {
+            if ((int)($line['project_id'] ?? 0) <= 0 || (int)($line['quantity'] ?? 0) <= 0) {
+                throw $this->failure('预约项目无效，请重新选择后开始服务。');
+            }
+        }
+        $staffIds = array_values(array_unique(array_filter(array_map('intval', $staffIds))));
+        if (!$staffIds) throw $this->failure('开始服务前请至少选择一名手艺人。');
+        $storeId = (int)($header['store_id'] ?? 0);
+        foreach ($staffIds as $staffId) {
+            $staff = Db::name('system_store_staff')->where('id', $staffId)->where('status', 1)->where('is_del', 0)->lock(true)->find();
+            if (!$staff || ((int)$staff['store_id'] !== $storeId && (int)($staff['can_choose'] ?? 0) !== 1)) {
+                throw $this->failure('预约手艺人不存在或不属于当前门店。');
+            }
+        }
+    }
+
     public function startServiceInTx(array $header, array $lines, int $operatorStaffId, int $operatorEmployeeId, string $operatorName, int $now): array
     {
         CashierV3TransactionGuard::assertInTransaction('reservationLifecycle.startService');
+        if (!$lines) throw $this->failure('开始服务前请至少选择一个项目。');
         $tenantId = (string)$header['tenant_id'];
         $reservationId = (int)$header['id'];
         $existingId = (int)($header['service_order_id'] ?? 0);
@@ -170,12 +196,14 @@ final class CashierV3ReservationLifecycleServices
             $businessDate,
             $now
         );
+        // Persist the appointment's personnel arrangement onto the generated
+        // service record.  It is a service snapshot, rather than a later read
+        // from the editable appointment relation.
+        $staffAssignments = $this->serviceStaffAssignmentsInTx($tenantId, $reservationId, $lines);
         $participantIds = [];
-        foreach ($lines as $line) {
-            foreach ($this->positiveIds($line['artisan_staff_ids_json'] ?? '[]') as $staffId) {
-                $employeeId = (int)Db::name('system_store_staff')->where('id', $staffId)->value('employee_id');
-                if ($employeeId > 0) $participantIds[$employeeId] = $employeeId;
-            }
+        foreach ($staffAssignments as $assignment) {
+            $employeeId = (int)($assignment['employee_id'] ?? 0);
+            if ($employeeId > 0) $participantIds[$employeeId] = $employeeId;
         }
         $serviceId = (int)Db::name('cashier_v3_service_order')->insertGetId([
             'service_order_no' => $serviceNo,
@@ -211,6 +239,19 @@ final class CashierV3ReservationLifecycleServices
             'updated_at' => $now,
         ]);
         if ($serviceId <= 0) throw new \RuntimeException('reservation_service_order_insert_failed');
+
+        foreach ($staffAssignments as $assignment) {
+            Db::name('cashier_v3_service_order_staff_assignment')->insert([
+                'tenant_id' => $tenantId,
+                'service_order_id' => $serviceId,
+                'staff_id' => (int)$assignment['staff_id'],
+                'employee_id' => (int)$assignment['employee_id'],
+                'staff_name_snapshot' => (string)$assignment['staff_name_snapshot'],
+                'is_point_customer' => !empty($assignment['is_point_customer']) ? 1 : 0,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        }
 
         foreach ($lines as $line) {
             $staffIds = $this->positiveIds($line['artisan_staff_ids_json'] ?? '[]');
@@ -253,6 +294,43 @@ final class CashierV3ReservationLifecycleServices
         return ['id' => $serviceId, 'service_order_no' => $serviceNo, 'service_started_at' => $now];
     }
 
+    /** @return array<int,array{staff_id:int,employee_id:int,staff_name_snapshot:string,is_point_customer:bool}> */
+    private function serviceStaffAssignmentsInTx(string $tenantId, int $reservationId, array $lines): array
+    {
+        $scheduled = $this->rows(Db::name('cashier_v3_reservation_staff_schedule')
+            ->where('tenant_id', $tenantId)->where('reservation_id', $reservationId)
+            ->order('staff_id asc')->lock(true)->select());
+        $pointCustomerByStaffId = [];
+        $staffIds = [];
+        foreach ($scheduled as $row) {
+            $staffId = (int)($row['staff_id'] ?? 0);
+            if ($staffId <= 0) continue;
+            $staffIds[$staffId] = $staffId;
+            $pointCustomerByStaffId[$staffId] = !empty($row['is_point_customer']);
+        }
+        if (!$staffIds) {
+            foreach ($lines as $line) {
+                foreach ($this->positiveIds($line['artisan_staff_ids_json'] ?? '[]') as $staffId) $staffIds[$staffId] = $staffId;
+            }
+        }
+        if (!$staffIds) return [];
+        $staffRows = $this->rows(Db::name('system_store_staff')->whereIn('id', array_values($staffIds))
+            ->field('id,employee_id,staff_name')->lock(true)->select());
+        $staffById = [];
+        foreach ($staffRows as $staff) $staffById[(int)$staff['id']] = $staff;
+        $assignments = [];
+        foreach ($staffIds as $staffId) {
+            $staff = $staffById[$staffId] ?? [];
+            $assignments[] = [
+                'staff_id' => $staffId,
+                'employee_id' => (int)($staff['employee_id'] ?? 0),
+                'staff_name_snapshot' => mb_substr((string)($staff['staff_name'] ?? ''), 0, 64),
+                'is_point_customer' => !empty($pointCustomerByStaffId[$staffId]),
+            ];
+        }
+        return $assignments;
+    }
+
     public function consumeInTx(array $header, int $now, array $execution): array
     {
         CashierV3TransactionGuard::assertInTransaction('reservationLifecycle.consume');
@@ -260,6 +338,17 @@ final class CashierV3ReservationLifecycleServices
         $reservationId = (int)$header['id'];
         $lines = $this->rows(Db::name('cashier_v3_reservation_line')->where('tenant_id', $tenantId)
             ->where('reservation_id', $reservationId)->order('id asc')->lock(true)->select());
+        $serviceOrderId = (int)($header['service_order_id'] ?? 0);
+        $pointCustomerStaffIds = $serviceOrderId > 0
+            ? Db::name('cashier_v3_service_order_staff_assignment')
+                ->where('tenant_id', $tenantId)->where('service_order_id', $serviceOrderId)
+                ->where('is_point_customer', 1)->lock(true)->column('staff_id')
+            : Db::name('cashier_v3_reservation_staff_schedule')
+                ->where('tenant_id', $tenantId)->where('reservation_id', $reservationId)
+                ->where('is_point_customer', 1)->lock(true)->column('staff_id');
+        $pointCustomerStaffIds = array_fill_keys($this->positiveIds($pointCustomerStaffIds), true);
+        foreach ($lines as &$line) $line['point_customer_staff_ids'] = array_keys($pointCustomerStaffIds);
+        unset($line);
 
         // Legacy reservations may still have occupation rows. They are
         // historical only: release them so they cannot influence a cashier

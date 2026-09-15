@@ -655,6 +655,7 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     'serviceObject' => (string)$intent['serviceObject'],
                     'isExperience' => (bool)$intent['isExperience'],
                     'craftsmanIds' => array_values($intent['craftsmanIds']),
+                    'detailRemark' => (string)($intent['detailRemark'] ?? ''),
                 ];
             }, $snapshotLines)),
         ];
@@ -1023,6 +1024,7 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     || $line['manual_labor_fee_cents'] === null
                     ? null
                     : (int)$line['manual_labor_fee_cents'],
+                'detailRemark' => (string)($line['detail_remark_snapshot'] ?? ''),
                 'serviceObject' => (string)($line['service_object'] ?? ''),
                 'friendCountsAsCustomer' => (int)($line['friend_counts_as_customer'] ?? 1) === 1,
                 'isExperience' => (int)($line['is_experience'] ?? 0) === 1,

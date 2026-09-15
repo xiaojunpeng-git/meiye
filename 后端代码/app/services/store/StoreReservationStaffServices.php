@@ -546,15 +546,31 @@ class StoreReservationStaffServices extends BaseServices
         $headers = is_object($headers) && method_exists($headers, 'toArray') ? $headers->toArray() : (array)$headers;
         if (!$headers) return [];
         $reservationIds = array_values(array_unique(array_map('intval', array_column($headers, 'id'))));
+        $staffByReservation = [];
+        // New time-only appointments have no project line. Their booking
+        // staff lives in the reservation-level schedule relation; project
+        // JSON remains a fallback for pre-upgrade reservations.
+        $scheduled = Db::name('cashier_v3_reservation_staff_schedule')
+            ->where('tenant_id', \app\services\cashier\v3\CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->whereIn('reservation_id', $reservationIds)
+            ->field('reservation_id,staff_id')->order('reservation_id asc,staff_id asc')->select();
+        $scheduled = is_object($scheduled) && method_exists($scheduled, 'toArray') ? $scheduled->toArray() : (array)$scheduled;
+        foreach ($scheduled as $row) {
+            $reservationId = (int)($row['reservation_id'] ?? 0);
+            $id = (int)($row['staff_id'] ?? 0);
+            if ($reservationId > 0 && $id > 0) $staffByReservation[$reservationId][$id] = $id;
+        }
         $lines = Db::name('cashier_v3_reservation_line')->whereIn('reservation_id', $reservationIds)
             ->field('reservation_id,artisan_staff_ids_json')->order('reservation_id asc,id asc')->select();
         $lines = is_object($lines) && method_exists($lines, 'toArray') ? $lines->toArray() : (array)$lines;
-        $staffByReservation = [];
         foreach ($lines as $line) {
+            $reservationId = (int)$line['reservation_id'];
+            // A relation row is the authority after the scheduling upgrade.
+            if (!empty($staffByReservation[$reservationId])) continue;
             $ids = json_decode((string)($line['artisan_staff_ids_json'] ?? '[]'), true);
             foreach (is_array($ids) ? $ids : [] as $id) {
                 $id = (int)$id;
-                if ($id > 0) $staffByReservation[(int)$line['reservation_id']][$id] = $id;
+                if ($id > 0) $staffByReservation[$reservationId][$id] = $id;
             }
         }
         $list = [];

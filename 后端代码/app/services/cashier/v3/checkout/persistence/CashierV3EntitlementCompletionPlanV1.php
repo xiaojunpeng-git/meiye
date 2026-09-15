@@ -509,6 +509,8 @@ final class CashierV3EntitlementCompletionPlanV1
             'amount_calculation_version' => self::token($source['amountCalculationVersion'], 128, 'line_amount_version_invalid'),
             'service_object' => $serviceObject,
             'is_experience' => self::booleanInt($service['isExperience'], 'experience_flag_invalid'),
+            // 明细备注是后加的可空快照；旧服务单没有该键时等价于空备注。
+            'detail_remark_snapshot' => self::text($service['detailRemark'] ?? '', 65535, 'detail_remark_invalid'),
             'primary_craftsman_staff_id' => $primaryId,
             'craftsmen_snapshot' => $allocations,
             'occupation_snapshot' => is_array($service['occupationContributors'])
@@ -679,6 +681,7 @@ final class CashierV3EntitlementCompletionPlanV1
             )) * $line['quantity'],
             'primary_craftsman_staff_id' => $line['primary_craftsman_staff_id'],
             'craftsmen_snapshot_json' => self::encode($line['craftsmen_snapshot']),
+            'detail_remark_snapshot' => $line['detail_remark_snapshot'],
             'service_status' => 'completed',
         ]);
         $row['immutable_fingerprint'] = self::fingerprintValue($row);

@@ -135,6 +135,8 @@ final class CashierV3SaleProjectServiceCompletionServices
                 // lookup, so the service record stays historically traceable.
                 'primary_craftsman_staff_id' => $primaryCraftsmanStaffId,
                 'craftsmen_snapshot_json' => (string)$line['craftsmen_snapshot_json'],
+                // 只从已锁定的销售明细读取，服务记录不得回看购物车草稿。
+                'detail_remark_snapshot' => (string)($line['detail_remark_snapshot'] ?? ''),
                 'service_status' => 'completed',
             ];
             $row['immutable_fingerprint'] = self::fingerprint($row);

@@ -140,14 +140,13 @@ final class CashierV3ReservationModule
                 $payload = (array)($scope['payload'] ?? []);
                 $reservation = (array)($payload['reservation'] ?? []);
                 $requestId = trim((string)($payload['recalculationRequestId'] ?? ''));
-                $when = strtotime((string)($reservation['appointmentTime'] ?? $reservation['appointmentStartAt'] ?? ''));
                 if ($requestId === '') throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '预约计算请求无效。');
-                $when = $when === false ? time() : $when;
-                [$plans, $duration] = self::projectPlans(self::projectInput($reservation));
+                [$plans, $duration] = self::projectPlansForStore(self::projectInput($reservation), $scope['operator_scope']->storeId());
+                [$when, $endAt] = self::schedule($reservation, $duration);
                 $reservation['projects'] = $plans;
                 $reservation['appointmentTime'] = self::formatTime($when);
                 $reservation['appointmentStartAt'] = $when;
-                $reservation['appointmentEndAt'] = $when + $duration * 60;
+                $reservation['appointmentEndAt'] = $endAt;
                 $reservation['scheduleCalculationReady'] = true;
                 $reservation['scheduleRecalculationRequestId'] = $requestId;
                 return ['data' => ['reservationPlan' => ['recalculationRequestId' => $requestId, 'draft' => $reservation, 'hasConflict' => false, 'conflicts' => []]], 'message' => '预约时长已计算。'];
@@ -252,14 +251,13 @@ final class CashierV3ReservationModule
         $payload = (array)($scope['payload'] ?? []);
         $reservation = (array)($payload['reservation'] ?? []);
         $memberId = self::positive($reservation['memberId'] ?? 0, '请选择会员。');
-        $when = strtotime((string)($reservation['appointmentTime'] ?? $reservation['appointmentStartAt'] ?? ''));
-        $when = $when === false ? time() : $when;
         $memberInput = (array)($reservation['member'] ?? []);
         $memberName = trim((string)($reservation['memberName'] ?? $memberInput['name'] ?? $memberInput['memberName'] ?? ''));
         $memberPhone = trim((string)($reservation['memberPhone'] ?? $memberInput['phone'] ?? $memberInput['mobile'] ?? ''));
-        [$plans, $duration] = self::projectPlans(self::projectInput($reservation));
+        [$plans, $duration] = self::projectPlansForStore(self::projectInput($reservation), $operator->storeId());
+        [$when, $endAt] = self::schedule($reservation, $duration);
         $room = self::room($reservation['roomId'] ?? 0, $reservation['roomName'] ?? ($reservation['room']['name'] ?? $reservation['room']['roomName'] ?? ''));
-        [$artisanStaffIds] = self::artisans($reservation['craftsmen'] ?? []);
+        [$artisanStaffIds, , $pointCustomerStaffIds] = self::artisans($reservation['craftsmen'] ?? []);
         $now = time();
         $tenant = $dataScope->tenantId();
         $store = Db::name('system_store')->where('id', $operator->storeId())->field('name')->find() ?: [];
@@ -270,8 +268,8 @@ final class CashierV3ReservationModule
             throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '门店工作台只能创建门店预约。');
         }
         $lifecycle = new CashierV3ReservationLifecycleServices();
-        $lifecycle->assertStaffAvailabilityInTx($operator->storeId(), 0, $artisanStaffIds, $when, $when + $duration * 60);
-        $lifecycle->assertRoomAvailabilityInTx($tenant, $operator->storeId(), 0, $room['id'], $when, $when + $duration * 60);
+        $lifecycle->assertStaffAvailabilityInTx($operator->storeId(), 0, $artisanStaffIds, $when, $endAt);
+        $lifecycle->assertRoomAvailabilityInTx($tenant, $operator->storeId(), 0, $room['id'], $when, $endAt);
         $header = [
             'reservation_id' => $reservationIdentity, 'reservation_no' => $reservationNo, 'tenant_id' => $tenant,
             'lifecycle_generation' => CashierV3ReservationLifecycleServices::GENERATION, 'source_type' => $sourceType,
@@ -279,7 +277,7 @@ final class CashierV3ReservationModule
             'store_id' => $operator->storeId(), 'store_name_snapshot' => (string)($store['name'] ?? ''),
             'member_id' => $memberId, 'member_name_snapshot' => $memberName, 'member_phone_snapshot' => $memberPhone,
             'service_order_id' => 0, 'service_order_no_snapshot' => '', 'room_id' => $room['id'], 'room_name_snapshot' => $room['name'],
-            'appointment_start_at' => $when, 'appointment_end_at' => $when + $duration * 60, 'status' => self::STATUS_UNSTARTED,
+            'appointment_start_at' => $when, 'appointment_end_at' => $endAt, 'status' => self::STATUS_UNSTARTED,
             'confirmed_at' => $now, 'rejected_at' => 0, 'reject_reason' => '', 'actual_service_started_at' => 0, 'actual_service_ended_at' => 0, 'version' => 1,
             'remark_snapshot' => mb_substr(trim((string)($reservation['remark'] ?? '')), 0, 500),
             'creator_staff_id' => $operator->operatorId(), 'creator_employee_id' => $dataScope->employeeId(), 'creator_name_snapshot' => (string)($dataScope->operatorProfile()['account'] ?? ''),
@@ -288,7 +286,8 @@ final class CashierV3ReservationModule
         $headerId = (int)Db::name('cashier_v3_reservation')->insertGetId($header);
         if ($headerId <= 0) throw new \RuntimeException('reservation_insert_failed');
         self::replaceLines($headerId, $tenant, $plans, $artisanStaffIds, $now);
-        self::record($scope, 'reservation.created', 'reservation', (string)$headerId, 1, $header, $now, date('Y-m-d', $when), ['reservationNo' => $reservationNo, 'appointmentStartAt' => $when, 'appointmentEndAt' => $when + $duration * 60]);
+        self::replaceScheduledStaff($headerId, $tenant, $artisanStaffIds, $pointCustomerStaffIds, $now);
+        self::record($scope, 'reservation.created', 'reservation', (string)$headerId, 1, $header, $now, date('Y-m-d', $when), ['reservationNo' => $reservationNo, 'appointmentStartAt' => $when, 'appointmentEndAt' => $endAt, 'scheduledStaffIds' => $artisanStaffIds]);
         $result = ['status' => 'succeeded', 'reservationId' => $headerId, 'reservationNo' => $reservationNo, 'originalIdempotencyKey' => (string)($scope['idempotency_key'] ?? ''), 'message' => '预约已创建。'];
         self::operation($tenant, $headerId, (string)($scope['idempotency_key'] ?? ''), 'CREATE', 0, 1, $result, $now);
         return $result;
@@ -302,24 +301,24 @@ final class CashierV3ReservationModule
         $payload = (array)($scope['payload'] ?? []);
         $reservation = (array)($payload['reservation'] ?? []);
         $memberId = (int)$header['member_id'];
-        $when = strtotime((string)($reservation['appointmentTime'] ?? $reservation['appointmentStartAt'] ?? ''));
-        $when = $when === false ? time() : $when;
-        [$plans, $duration] = self::projectPlans(self::projectInput($reservation));
+        [$plans, $duration] = self::projectPlansForStore(self::projectInput($reservation), $operator->storeId());
+        [$when, $endAt] = self::schedule($reservation, $duration);
         $room = self::room($reservation['roomId'] ?? 0, $reservation['roomName'] ?? ($reservation['room']['name'] ?? $reservation['room']['roomName'] ?? ''));
-        [$artisanStaffIds] = self::artisans($reservation['craftsmen'] ?? []);
+        [$artisanStaffIds, , $pointCustomerStaffIds] = self::artisans($reservation['craftsmen'] ?? []);
         $now = time(); $nextVersion = (int)$header['version'] + 1;
         $lifecycle = new CashierV3ReservationLifecycleServices();
-        $lifecycle->assertStaffAvailabilityInTx($operator->storeId(), (int)$header['id'], $artisanStaffIds, $when, $when + $duration * 60);
-        $lifecycle->assertRoomAvailabilityInTx($dataScope->tenantId(), $operator->storeId(), (int)$header['id'], $room['id'], $when, $when + $duration * 60);
+        $lifecycle->assertStaffAvailabilityInTx($operator->storeId(), (int)$header['id'], $artisanStaffIds, $when, $endAt);
+        $lifecycle->assertRoomAvailabilityInTx($dataScope->tenantId(), $operator->storeId(), (int)$header['id'], $room['id'], $when, $endAt);
         self::advanceHeader($header, $dataScope, $nextVersion, [
-            'room_id' => $room['id'], 'room_name_snapshot' => $room['name'], 'appointment_start_at' => $when, 'appointment_end_at' => $when + $duration * 60,
+            'room_id' => $room['id'], 'room_name_snapshot' => $room['name'], 'appointment_start_at' => $when, 'appointment_end_at' => $endAt,
             'remark_snapshot' => mb_substr(trim((string)($reservation['remark'] ?? '')), 0, 500), 'business_date' => date('Y-m-d', $when), 'updated_at' => $now,
         ]);
         $beforeLines = self::lineSnapshot((int)$header['id'], $dataScope->tenantId());
         $lifecycle->releaseInTx($dataScope->tenantId(), (int)$header['id'], $now);
         self::replaceLines((int)$header['id'], $dataScope->tenantId(), $plans, $artisanStaffIds, $now);
-        $eventHeader = array_merge($header, ['appointment_start_at' => $when, 'appointment_end_at' => $when + $duration * 60]);
-        self::record($scope, 'reservation.updated', 'reservation', (string)$header['id'], $nextVersion, $eventHeader, $now, date('Y-m-d', $when), ['reservationNo' => (string)$header['reservation_no'], 'appointmentStartAt' => $when, 'appointmentEndAt' => $when + $duration * 60, 'lineCount' => count($plans), 'beforeLines' => $beforeLines, 'afterLines' => self::planSnapshot($plans, $artisanStaffIds)]);
+        self::replaceScheduledStaff((int)$header['id'], $dataScope->tenantId(), $artisanStaffIds, $pointCustomerStaffIds, $now);
+        $eventHeader = array_merge($header, ['appointment_start_at' => $when, 'appointment_end_at' => $endAt]);
+        self::record($scope, 'reservation.updated', 'reservation', (string)$header['id'], $nextVersion, $eventHeader, $now, date('Y-m-d', $when), ['reservationNo' => (string)$header['reservation_no'], 'appointmentStartAt' => $when, 'appointmentEndAt' => $endAt, 'lineCount' => count($plans), 'beforeLines' => $beforeLines, 'afterLines' => self::planSnapshot($plans, $artisanStaffIds), 'scheduledStaffIds' => $artisanStaffIds]);
         $result = ['status' => 'succeeded', 'reservationId' => (int)$header['id'], 'reservationNo' => (string)$header['reservation_no'], 'version' => $nextVersion, 'originalIdempotencyKey' => (string)($scope['idempotency_key'] ?? '')];
         self::operation($dataScope->tenantId(), (int)$header['id'], (string)($scope['idempotency_key'] ?? ''), 'UPDATE', (int)$header['version'], $nextVersion, $result, $now);
         return $result;
@@ -350,19 +349,18 @@ final class CashierV3ReservationModule
 
         if ($reservation !== []) {
             self::assertSameMember($header, $reservation);
-            $when = strtotime((string)($reservation['appointmentTime'] ?? $reservation['appointmentStartAt'] ?? ''));
-            if ($when === false || $when <= 0) throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '请选择有效的预约时间。');
-            [$plans, $duration] = self::projectPlans(self::projectInput($reservation));
+            [$plans, $duration] = self::projectPlansForStore(self::projectInput($reservation), $operator->storeId());
+            [$when, $endAt] = self::schedule($reservation, $duration);
             $roomInput = is_array($reservation['room'] ?? null) ? $reservation['room'] : [];
             $room = self::room($reservation['roomId'] ?? 0, $reservation['roomName'] ?? ($roomInput['name'] ?? $roomInput['roomName'] ?? ''));
-            [$artisanStaffIds] = self::artisans($reservation['craftsmen'] ?? []);
-            $endAt = $when + $duration * 60;
+            [$artisanStaffIds, , $pointCustomerStaffIds] = self::artisans($reservation['craftsmen'] ?? []);
             $lifecycle = new CashierV3ReservationLifecycleServices();
             $lifecycle->assertStaffAvailabilityInTx($operator->storeId(), (int)$header['id'], $artisanStaffIds, $when, $endAt);
             $lifecycle->assertRoomAvailabilityInTx($dataScope->tenantId(), $operator->storeId(), (int)$header['id'], $room['id'], $when, $endAt);
             $beforeLines = self::lineSnapshot((int)$header['id'], $dataScope->tenantId());
             $lifecycle->releaseInTx($dataScope->tenantId(), (int)$header['id'], $now);
             self::replaceLines((int)$header['id'], $dataScope->tenantId(), $plans, $artisanStaffIds, $now);
+            self::replaceScheduledStaff((int)$header['id'], $dataScope->tenantId(), $artisanStaffIds, $pointCustomerStaffIds, $now);
             $changes = array_merge($changes, [
                 'room_id' => $room['id'], 'room_name_snapshot' => $room['name'],
                 'appointment_start_at' => $when, 'appointment_end_at' => $endAt,
@@ -377,6 +375,7 @@ final class CashierV3ReservationModule
                 'roomName' => $room['name'],
                 'beforeLines' => $beforeLines,
                 'afterLines' => self::planSnapshot($plans, $artisanStaffIds),
+                'scheduledStaffIds' => $artisanStaffIds,
             ]);
         }
 
@@ -425,7 +424,12 @@ final class CashierV3ReservationModule
         if ((string)$header['status'] !== self::STATUS_UNSTARTED) throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '会员预约须先确认，当前预约不能开始服务。');
         $nextVersion = (int)$header['version'] + 1;
         $lines = self::rows(Db::name('cashier_v3_reservation_line')->where('tenant_id', $dataScope->tenantId())->where('reservation_id', (int)$header['id'])->order('id asc')->lock(true)->select());
-        $service = (new CashierV3ReservationLifecycleServices())->startServiceInTx(
+        $scheduledStaffIds = self::scheduledStaffIds($dataScope->tenantId(), (int)$header['id'], $lines, true);
+        $lifecycle = new CashierV3ReservationLifecycleServices();
+        $lifecycle->assertServiceStartPrerequisitesInTx($header, $lines, $scheduledStaffIds);
+        foreach ($lines as &$line) $line['artisan_staff_ids_json'] = self::json($scheduledStaffIds);
+        unset($line);
+        $service = $lifecycle->startServiceInTx(
             $header, $lines, $scope['operator_scope']->operatorId(), $dataScope->employeeId(),
             (string)($dataScope->operatorProfile()['staff_name'] ?? $dataScope->operatorProfile()['name'] ?? $dataScope->operatorProfile()['account'] ?? ''), $now
         );
@@ -492,8 +496,8 @@ final class CashierV3ReservationModule
     private static function editorDraft(array $header, array $options): array
     {
         $lines = self::rows(Db::name('cashier_v3_reservation_line')->where('tenant_id', (string)$header['tenant_id'])->where('reservation_id', (int)$header['id'])->order('id asc')->select());
-        $staffIds = [];
-        foreach ($lines as $line) foreach (self::positiveIds(json_decode((string)($line['artisan_staff_ids_json'] ?? '[]'), true)) as $id) $staffIds[$id] = $id;
+        $staffIds = self::scheduledStaffIds((string)$header['tenant_id'], (int)$header['id'], $lines);
+        $pointCustomerStaffIds = self::scheduledPointCustomerStaffIds((string)$header['tenant_id'], (int)$header['id']);
         $staffNames = $staffIds ? Db::name('system_store_staff')->whereIn('id', array_values($staffIds))->column('staff_name', 'id') : [];
         $projects = [];
         foreach ($lines as $line) {
@@ -503,7 +507,7 @@ final class CashierV3ReservationModule
             $projects[] = ['id' => $projectId, 'projectId' => $projectId, 'skuId' => $skuId, 'name' => (string)$line['project_name_snapshot'], 'source' => $source, 'entitlementSourceDetailId' => $source === 'card' ? (int)($line['entitlement_source_detail_id'] ?? 0) : 0, 'quantity' => max(1, (int)$line['quantity']), 'appliedDurationMinutes' => (int)$line['service_duration_minutes']];
         }
         $craftsmen = [];
-        foreach ($staffIds as $id) $craftsmen[] = ['id' => $id, 'staffId' => $id, 'name' => (string)($staffNames[$id] ?? '')];
+        foreach ($staffIds as $id) $craftsmen[] = ['id' => $id, 'staffId' => $id, 'name' => (string)($staffNames[$id] ?? ''), 'isPointCustomer' => isset($pointCustomerStaffIds[$id])];
         return ['id' => (int)$header['id'], 'reservationId' => (int)$header['id'], 'revision' => (int)$header['version'], 'recordVersion' => (int)$header['version'], 'reservationVersion' => (int)$header['version'], 'memberId' => (int)$header['member_id'], 'member' => ['id' => (int)$header['member_id'], 'name' => (string)$header['member_name_snapshot'], 'phone' => (string)$header['member_phone_snapshot']], 'projects' => $projects, 'craftsmen' => $craftsmen, 'appointmentTime' => self::formatTime((int)$header['appointment_start_at']), 'appointmentStartAt' => (int)$header['appointment_start_at'], 'appointmentEndAt' => (int)$header['appointment_end_at'], 'roomId' => (int)$header['room_id'], 'room' => (int)$header['room_id'] > 0 ? ['id' => (int)$header['room_id'], 'name' => (string)$header['room_name_snapshot']] : null, 'remark' => (string)$header['remark_snapshot']];
     }
 
@@ -623,12 +627,18 @@ final class CashierV3ReservationModule
     private static function projectInput(array $reservation): array
     {
         $projects = is_array($reservation['projects'] ?? null) ? $reservation['projects'] : (array)($reservation['projectLines'] ?? []);
-        if (!$projects) throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '请至少选择一个项目。');
-        return $projects;
+        return array_values($projects);
     }
 
     /** @return array{0:array<int,array>,1:int} */
+    /** Legacy private shape retained for source-level extension compatibility. */
     private static function projectPlans(array $projects): array
+    {
+        return self::projectPlansForStore($projects, 0);
+    }
+
+    /** @return array{0:array<int,array>,1:int} */
+    private static function projectPlansForStore(array $projects, int $storeId): array
     {
         $plans = []; $total = 0;
         foreach ($projects as $project) {
@@ -640,12 +650,14 @@ final class CashierV3ReservationModule
                 ? self::positive($project['entitlementSourceDetailId'] ?? $project['sourceDetailId'] ?? 0, '已购项目缺少权益明细。')
                 : 0;
             $quantity = max(1, min(1000, (int)($project['quantity'] ?? 1)));
-            $duration = max(1, (int)($project['appliedDurationMinutes'] ?? $project['projectServiceDuration'] ?? $project['duration'] ?? 60));
+            // Service duration is catalog authority. Client-provided duration
+            // is presentation-only and cannot change resource reservations.
+            $duration = self::projectDuration($projectId, $storeId);
             $total += $duration * $quantity;
             $name = trim((string)($project['name'] ?? $project['projectName'] ?? ''));
             $plans[] = ['projectId' => $projectId, 'skuId' => $skuId, 'name' => $name === '' ? '项目 ' . $projectId : $name, 'source' => $source, 'entitlementSourceDetailId' => $detailId, 'quantity' => $quantity, 'duration' => $duration];
         }
-        return [$plans, max(1, $total)];
+        return [$plans, $total];
     }
 
     private static function projectDuration(int $projectId, int $storeId): int
@@ -667,17 +679,22 @@ final class CashierV3ReservationModule
         return ['id' => $roomId, 'name' => $name === '' ? '房间 ' . $roomId : $name];
     }
 
-    /** @return array{0:array<int,int>,1:array<int,int>} */
+    /** @return array{0:array<int,int>,1:array<int,int>,2:array<int,int>} */
     private static function artisans($values): array
     {
         $staffIds = self::positiveIds($values);
         $employeeIds = [];
+        $pointCustomerStaffIds = [];
         foreach (is_array($values) ? $values : [] as $value) {
             if (!is_array($value)) continue;
+            $staffId = (int)($value['id'] ?? $value['staffId'] ?? $value['staff_id'] ?? 0);
             $employeeId = (int)($value['employeeId'] ?? $value['employee_id'] ?? 0);
             if ($employeeId > 0) $employeeIds[$employeeId] = $employeeId;
+            if ($staffId > 0 && !empty($value['isPointCustomer'] ?? $value['is_point_customer'] ?? $value['marked'] ?? false)) {
+                $pointCustomerStaffIds[$staffId] = $staffId;
+            }
         }
-        return [$staffIds, $employeeIds];
+        return [$staffIds, $employeeIds, $pointCustomerStaffIds];
     }
 
     private static function replaceLines(int $reservationId, string $tenantId, array $plans, array $artisanStaffIds, int $now): array
@@ -691,6 +708,49 @@ final class CashierV3ReservationModule
             $rows[] = $row;
         }
         return $rows;
+    }
+
+    /**
+     * Reservation-level staff assignment is the scheduling authority.  Lines
+     * retain the same staff snapshot only because completed services need it.
+     */
+    private static function replaceScheduledStaff(int $reservationId, string $tenantId, array $staffIds, array $pointCustomerStaffIds, int $now): void
+    {
+        Db::name('cashier_v3_reservation_staff_schedule')->where('tenant_id', $tenantId)->where('reservation_id', $reservationId)->delete();
+        $pointCustomerStaffIds = array_fill_keys(self::positiveIds($pointCustomerStaffIds), true);
+        foreach (self::positiveIds($staffIds) as $staffId) {
+            Db::name('cashier_v3_reservation_staff_schedule')->insert([
+                'tenant_id' => $tenantId,
+                'reservation_id' => $reservationId,
+                'staff_id' => $staffId,
+                'is_point_customer' => isset($pointCustomerStaffIds[$staffId]) ? 1 : 0,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        }
+    }
+
+    /** Existing project reservations retain their line JSON as a read fallback. */
+    private static function scheduledStaffIds(string $tenantId, int $reservationId, array $lines = [], bool $lock = false): array
+    {
+        $query = Db::name('cashier_v3_reservation_staff_schedule')->where('tenant_id', $tenantId)->where('reservation_id', $reservationId)->order('staff_id asc');
+        if ($lock) $query->lock(true);
+        $ids = array_map('intval', (array)$query->column('staff_id'));
+        $ids = self::positiveIds($ids);
+        if ($ids) return $ids;
+        foreach ($lines as $line) {
+            $ids = array_merge($ids, self::positiveIds(json_decode((string)($line['artisan_staff_ids_json'] ?? '[]'), true)));
+        }
+        return self::positiveIds($ids);
+    }
+
+    /** Point-customer flags are stored with the appointment staff assignment. */
+    private static function scheduledPointCustomerStaffIds(string $tenantId, int $reservationId): array
+    {
+        $ids = Db::name('cashier_v3_reservation_staff_schedule')
+            ->where('tenant_id', $tenantId)->where('reservation_id', $reservationId)
+            ->where('is_point_customer', 1)->column('staff_id');
+        return array_fill_keys(self::positiveIds((array)$ids), true);
     }
 
     private static function lineSnapshot(int $reservationId, string $tenantId): array
@@ -750,8 +810,46 @@ final class CashierV3ReservationModule
         return count($ids) === 1 ? (int)reset($ids) : 0;
     }
 
+    /**
+     * The header's saved range is authoritative.  When an older caller has
+     * not sent an end value, derive only the initial suggestion: project
+     * duration when projects exist, otherwise the agreed one-hour slot.
+     *
+     * @return array{0:int,1:int}
+     */
+    private static function schedule(array $reservation, int $projectDurationMinutes): array
+    {
+        $startAt = self::timestamp($reservation['appointmentTime'] ?? $reservation['appointmentStartAt'] ?? null, '请选择有效的开始时间。');
+        $endValue = $reservation['appointmentEndAt'] ?? $reservation['appointmentEndTime'] ?? $reservation['expectedEndAt'] ?? null;
+        $endAt = $endValue === null || $endValue === ''
+            ? $startAt + max(1, $projectDurationMinutes > 0 ? $projectDurationMinutes : 60) * 60
+            : self::timestamp($endValue, '请选择有效的结束时间。');
+        if ($endAt <= $startAt) throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '结束时间必须晚于开始时间。');
+        if (self::formatTime($startAt, 'Y-m-d') !== self::formatTime($endAt, 'Y-m-d')) {
+            throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '结束时间必须在预约当日。');
+        }
+        return [$startAt, $endAt];
+    }
+
+    private static function timestamp($value, string $message): int
+    {
+        if (is_int($value) || (is_string($value) && preg_match('/^\d{10}$/', trim($value)))) {
+            $timestamp = (int)$value;
+            if ($timestamp > 0) return $timestamp;
+        }
+        $text = trim((string)$value);
+        if ($text === '') throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, $message);
+        try {
+            $timestamp = (new \DateTimeImmutable($text, new \DateTimeZone('Asia/Shanghai')))->getTimestamp();
+        } catch (\Throwable $exception) {
+            $timestamp = 0;
+        }
+        if ($timestamp <= 0) throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, $message);
+        return $timestamp;
+    }
+
     private static function isUnstarted(string $status): bool { return in_array($status, [self::STATUS_PENDING_CONFIRMATION, self::STATUS_UNSTARTED], true); }
-    private static function formatTime(int $timestamp): string { return (new \DateTimeImmutable('@' . $timestamp))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d H:i'); }
+    private static function formatTime(int $timestamp, string $format = 'Y-m-d H:i'): string { return (new \DateTimeImmutable('@' . $timestamp))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format($format); }
     private static function positiveIds($values): array { $ids = []; foreach (is_array($values) ? $values : [] as $value) { $id = is_array($value) ? (int)($value['id'] ?? $value['staffId'] ?? 0) : (int)$value; if ($id > 0) $ids[$id] = $id; } ksort($ids, SORT_NUMERIC); return array_values($ids); }
     private static function positive($value, string $message): int { $id = (int)$value; if ($id <= 0) throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, $message); return $id; }
     private static function rows($rows): array { return is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows; }

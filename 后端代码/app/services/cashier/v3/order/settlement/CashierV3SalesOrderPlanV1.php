@@ -77,7 +77,7 @@ final class CashierV3SalesOrderPlanV1
         'craftsmen_snapshot_json',
         'salespeople_snapshot_json',
         'guide_selections_json', 'sales_manager_selections_json',
-        'manual_labor_fee_cents', 'card_purchase_snapshot_json',
+        'manual_labor_fee_cents', 'card_purchase_snapshot_json', 'detail_remark_snapshot',
         'sort_no', 'add_time', 'update_time',
     ];
 
@@ -298,6 +298,7 @@ final class CashierV3SalesOrderPlanV1
                 'debt_amount_cents' => $line['debt_amount_cents'],
                 'manual_labor_fee_cents' => $line['manual_labor_fee_cents'],
                 'card_purchase_snapshot_json' => $line['card_purchase_snapshot_json'],
+                'detail_remark_snapshot' => $line['detail_remark_snapshot'],
                 'configured_cost_cents' => $line['configured_cost_cents'],
                 'price_change_reason' => $line['price_change_reason'],
                 'price_changed_by' => $line['price_changed_by'],
@@ -946,6 +947,12 @@ final class CashierV3SalesOrderPlanV1
             $row['card_purchase_snapshot_json'] ?? null,
             $sourceType
         );
+        $detailRemark = self::text(
+            $row['detail_remark_snapshot'] ?? '',
+            65535,
+            'sales_order_detail_remark_invalid',
+            true
+        );
         if ($isExperience > 1 || $friendCountsAsCustomer > 1 || $isPresale > 1 || $inventoryOutboundRequired > 1 || ($isPresale === 1 && $inventoryOutboundRequired === 1)) {
             throw self::failure('sales_order_is_experience_invalid');
         }
@@ -1005,6 +1012,9 @@ final class CashierV3SalesOrderPlanV1
             'salesManagerSelections' => $salesManagerSelections,
             'cardPurchaseSnapshot' => $cardPurchaseSnapshot,
         ];
+        if ($detailRemark !== '') {
+            $authority['detailRemark'] = $detailRemark;
+        }
         if ($inventoryOutboundRequired !== 1) {
             $authority['inventoryOutboundRequired'] = 0;
         }
@@ -1087,6 +1097,7 @@ final class CashierV3SalesOrderPlanV1
             'price_changed_at' => $priceChangedAt,
             'manual_labor_fee_cents' => $manualLaborFeeCents,
             'card_purchase_snapshot_json' => self::cardPurchaseSnapshotJson($cardPurchaseSnapshot),
+            'detail_remark_snapshot' => $detailRemark,
         ];
     }
 

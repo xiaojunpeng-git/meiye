@@ -134,6 +134,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         'salesManagerSelectionsJson' => 'sales_manager_selections_json',
         'manualLaborFeeCents' => 'manual_labor_fee_cents',
         'cardPurchaseSnapshotJson' => 'card_purchase_snapshot_json',
+        'detailRemarkSnapshot' => 'detail_remark_snapshot',
         'lineFingerprint' => 'line_fingerprint',
         'sortNo' => 'sort_no',
     ];
@@ -1263,7 +1264,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         $actualLines = $this->rows(Db::name(self::LINE_TABLE)
             ->where('request_id', $requestId)
             ->field(
-                'line_id,draft_version,line_role,entitlement_source_detail_id,friend_counts_as_customer,craftsmen_snapshot_json,salespeople_snapshot_json,guide_selections_json,sales_manager_selections_json,manual_labor_fee_cents,card_purchase_snapshot_json,is_presale,inventory_outbound_required,line_fingerprint'
+                'line_id,draft_version,line_role,entitlement_source_detail_id,friend_counts_as_customer,craftsmen_snapshot_json,salespeople_snapshot_json,guide_selections_json,sales_manager_selections_json,manual_labor_fee_cents,card_purchase_snapshot_json,detail_remark_snapshot,is_presale,inventory_outbound_required,line_fingerprint'
             )
             ->order('line_id asc')
             ->lock(true)
@@ -1281,6 +1282,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
                 'sales_manager_selections_json' => (string)($row['salesManagerSelectionsJson'] ?? ''),
                 'manual_labor_fee_cents' => $row['manualLaborFeeCents'] === null ? null : (int)$row['manualLaborFeeCents'],
                 'card_purchase_snapshot_json' => (string)$row['cardPurchaseSnapshotJson'],
+                'detail_remark_snapshot' => (string)($row['detailRemarkSnapshot'] ?? ''),
                 'is_presale' => (int)($row['isPresale'] ?? 0),
                 'inventory_outbound_required' => (int)($row['inventoryOutboundRequired'] ?? 1),
                 'line_fingerprint' => (string)$row['lineFingerprint'],
@@ -1302,6 +1304,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
                 'sales_manager_selections_json' => (string)($row['sales_manager_selections_json'] ?? ''),
                 'manual_labor_fee_cents' => $row['manual_labor_fee_cents'] === null ? null : (int)$row['manual_labor_fee_cents'],
                 'card_purchase_snapshot_json' => (string)($row['card_purchase_snapshot_json'] ?? ''),
+                'detail_remark_snapshot' => (string)($row['detail_remark_snapshot'] ?? ''),
                 'is_presale' => (int)($row['is_presale'] ?? 0),
                 'inventory_outbound_required' => (int)($row['inventory_outbound_required'] ?? 1),
                 'line_fingerprint' => (string)$row['line_fingerprint'],

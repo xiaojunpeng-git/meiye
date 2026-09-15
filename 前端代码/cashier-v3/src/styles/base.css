@@ -2591,6 +2591,7 @@ button:disabled {
     minmax(90px, 1.1fr)
     minmax(90px, 1.2fr)
     minmax(140px, 1.15fr)
+    auto
     auto;
   column-gap: 12px;
   min-height: 27px;
@@ -2640,6 +2641,28 @@ button:disabled {
   overflow: visible;
   border: 0;
   border-radius: 0;
+}
+
+.cart-line__detail-remark {
+  justify-self: end;
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 1px solid var(--cashier-line, #b9c9dc);
+  border-radius: 5px;
+  color: var(--cashier-primary, #1677ff);
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cart-line__detail-remark:hover,
+.cart-line__detail-remark:focus-visible {
+  border-color: var(--cashier-primary, #1677ff);
+  background: #f0f7ff;
+  outline: 0;
 }
 
 .cart-line .quantity-stepper--editable button {

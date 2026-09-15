@@ -145,6 +145,9 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                 if ($catalogSkuId > 0) {
                     $saleLine['catalogSkuId'] = $catalogSkuId;
                 }
+                if ((string)($row['detail_remark_snapshot'] ?? '') !== '') {
+                    $saleLine['detailRemark'] = (string)$row['detail_remark_snapshot'];
+                }
                 $saleLines[] = $saleLine;
                 continue;
             }
@@ -212,6 +215,9 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                     $row['manual_labor_fee_cents'],
                     'entitlement.manual_labor_fee_cents'
                 );
+            }
+            if ((string)($row['detail_remark_snapshot'] ?? '') !== '') {
+                $entitlementLine['detailRemark'] = (string)$row['detail_remark_snapshot'];
             }
             $entitlementLines[] = $entitlementLine;
         }
