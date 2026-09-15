@@ -25,19 +25,12 @@
             <Row :gutter="24">
               <Col :span="12">
                 <FormItem label="所属组织：" prop="org_id">
-                  <OrganizationResourceSelector
-                    v-model="formInline.org_id"
-                    resource="organization"
-                    picker-mode="modal"
-                    :tree-mode="true"
-                    selection-mode="org_only"
-                    modal-title="选择所属组织"
-                    trigger-placeholder="请选择所属组织"
-                    placeholder="搜索组织名称"
-                    :multiple="false"
-                    :disabled-ids="[]"
-                    :clearable="false"
-                    @change="onOrgPick"
+                  <OrganizationStoreScopePicker
+                    v-model="organizationPickerStoreIds"
+                    :load-scope="loadOrganizationPickerScope"
+                    :selected-label="organizationPickerLabel"
+                    empty-label="请选择所属组织"
+                    @change="onOrganizationScopePick"
                   />
                   <div v-if="organizationMemberships.length > 1" class="form-tip">
                     已有组织关系：{{ organizationMembershipLabel }}
@@ -51,20 +44,15 @@
                     :value="storeLockedLabel"
                     readonly
                   />
-                  <OrganizationResourceSelector
+                  <OrganizationStoreScopePicker
                     v-else
-                    v-model="formInline.store_id"
-                    resource="store"
-                    picker-mode="modal"
-                    :tree-mode="true"
+                    v-model="appointmentStorePickerIds"
+                    :load-scope="loadOrganizationPickerScope"
+                    :selected-label="appointmentStorePickerLabel"
+                    empty-label="可不选（无店直属）"
+                    clear-label="无任职门店"
                     selection-mode="store_only"
-                    modal-title="选择当前任职门店"
-                    trigger-placeholder="可不选（无店直属）"
-                    placeholder="搜索门店名称"
-                    :multiple="false"
-                    :disabled-ids="[]"
-                    :clearable="true"
-                    @change="onStorePick"
+                    @change="onAppointmentStoreScopePick"
                   />
                   <div class="form-tip">
                     {{ storeLocked ? '已有任职门店时，调店请走调店流程。' : '可不选。选择门店后，所属组织会自动更新为该门店所在组织。' }}
@@ -225,17 +213,13 @@
               </div>
             </FormItem>
             <FormItem v-if="formInline.scope_mode === 'org'" label="可看组织：">
-              <OrganizationResourceSelector
+              <OrganizationStoreScopePicker
                 v-model="formInline.org_ids"
-                resource="organization"
-                picker-mode="modal"
-                :tree-mode="true"
-                selection-mode="org_only"
-                modal-title="选择可看组织"
-                trigger-placeholder="请选择可看组织"
-                placeholder="搜索组织名称"
-                :multiple="true"
-                :disabled-ids="[]"
+                :load-scope="loadOrganizationPickerScope"
+                empty-label="请选择可看组织"
+                clear-label="清空已选组织"
+                selection-mode="org_multiple"
+                @change="onScopeOrganizationsPick"
               />
               <div class="form-tip">可多选组织；将查看所选组织及其下级组织、门店的数据（取并集）。不能直接选门店。手机端看板按此范围汇总，工作台需在此范围内选择一个门店操作。</div>
             </FormItem>
@@ -491,11 +475,11 @@ import {
   getStaffInfo,
   getPersonComplete,
 } from '@/api/staff.js';
-import { getJobPositions } from '@/api/store';
+import { getJobPositions, getOrganizationResourceSelector } from '@/api/store';
 import Setting from '@/setting';
 import { findFirstRequiredError } from '@/utils/requiredCheck';
 import uploadPictures from '@/components/uploadPictures';
-import OrganizationResourceSelector from '@/components/organization/OrganizationResourceSelector.vue';
+import OrganizationStoreScopePicker from '@/components/organization/OrganizationStoreScopePicker.vue';
 
 const DATE_FIELDS = ['join_date', 'birthday_date', 'contract_begin', 'contract_end'];
 
@@ -614,7 +598,7 @@ function getDefaultStaffForm() {
 
 export default {
   name: 'setting_staff_add',
-  components: { uploadPictures, OrganizationResourceSelector },
+  components: { uploadPictures, OrganizationStoreScopePicker },
   props: {
     value: { type: Boolean, default: false },
     /** 编辑主键：组织场景必须为 employee_id；店员列表场景为 staff_id */
@@ -684,6 +668,12 @@ export default {
       originalStoreId: 0,
       originalStoreName: '',
       organizationMemberships: [],
+      /** 固定 Vue2 组织/门店选择控件的本地投影；保存只使用 org_id/store_id。 */
+      organizationPickerStoreIds: [],
+      organizationPickerLabel: '',
+      /** 任职门店同样通过固定的组织 / 门店双栏选择器选择。 */
+      appointmentStorePickerIds: [],
+      appointmentStorePickerLabel: '',
       /** 详情加载序号：连续切换人员时丢弃过期响应，防止串人 */
       loadSeq: 0,
       jobOptions: [],
@@ -880,6 +870,10 @@ export default {
       this.originalStoreId = 0;
       this.originalStoreName = '';
       this.organizationMemberships = [];
+      this.organizationPickerStoreIds = [];
+      this.organizationPickerLabel = '';
+      this.appointmentStorePickerIds = [];
+      this.appointmentStorePickerLabel = '';
       this.formInline = this.getDefaultForm();
       this.employmentTypeLoaded = !(Number(this.editId) > 0);
       this.mobileAuthLoaded = !(Number(this.editId) > 0);
@@ -914,19 +908,51 @@ export default {
         const allowed = (this.allowedStoreIds || []).map(Number).filter((id) => id > 0);
         if (!allowed.length || allowed.includes(defaultStoreId)) {
           this.formInline.store_id = defaultStoreId;
+          this.appointmentStorePickerIds = [defaultStoreId];
         }
       }
     },
-    onOrgPick(orgId, meta) {
-      const oid = Number(orgId || (meta && meta.org_id) || 0);
-      this.formInline.org_id = oid > 0 ? oid : 0;
-      // 所属组织只能选组织：手动改组织时清空任职门店，避免组织与门店不一致
-      if (!this.storeLocked) {
-        this.formInline.store_id = '';
-        this.pruneJobsForStore();
+    loadOrganizationPickerScope() {
+      return getOrganizationResourceSelector({
+        resource: 'org_store_tree',
+        page: 1,
+        limit: 50,
+      });
+    },
+    onOrganizationScopePick(scope = {}) {
+      this.organizationPickerLabel = String(scope.label || '').trim();
+      if (scope.nodeType === 'org' && Number(scope.orgId) > 0) {
+        this.formInline.org_id = Number(scope.orgId);
+        // 选择组织后，当前任职门店不能保留在旧组织下。
+        if (!this.storeLocked) {
+          this.formInline.store_id = '';
+          this.pruneJobsForStore();
+        }
+        if (this.formInline.scope_mode === 'store' && !this.hasAppointmentStore) {
+          this.formInline.scope_mode = 'personal';
+        }
+      } else if (scope.nodeType === 'store' && Number(scope.storeId) > 0) {
+        // 固定控件选择门店时，按门店所在组织回写，并同步当前任职门店。
+        this.onStorePick(scope.storeId, { org_id: Number(scope.orgId || 0) });
+      } else {
+        this.formInline.org_id = 0;
+        if (!this.storeLocked) this.formInline.store_id = '';
       }
-      if (this.formInline.scope_mode === 'store' && !this.hasAppointmentStore) {
-        this.formInline.scope_mode = 'personal';
+      this.$refs.formInline && this.$refs.formInline.validateField('org_id');
+    },
+    onAppointmentStoreScopePick(scope = {}) {
+      this.appointmentStorePickerLabel = String(scope.label || '').trim();
+      if (scope.nodeType === 'store' && Number(scope.storeId) > 0) {
+        this.onStorePick(scope.storeId, { org_id: Number(scope.orgId || 0) });
+        return;
+      }
+      if (scope.nodeType === 'all') this.onStorePick(0, {});
+    },
+    onScopeOrganizationsPick(scope = {}) {
+      if (scope.nodeType === 'org' || scope.nodeType === 'all') {
+        this.formInline.org_ids = (scope.orgIds || scope.storeIds || [])
+          .map(Number)
+          .filter((id) => id > 0);
       }
     },
     onStorePick(storeId, meta) {
@@ -1022,6 +1048,15 @@ export default {
           : 0,
         status: Number((data && data.status) != null ? data.status : base.status),
       };
+      const selectedOrganization = this.organizationMemberships
+        .find((item) => item.org_id === Number(this.formInline.org_id || 0));
+      this.organizationPickerLabel = String(
+        (data && (data.org_name || data.organization_name))
+          || (selectedOrganization && selectedOrganization.org_name)
+          || '',
+      ).trim();
+      this.appointmentStorePickerIds = storeId > 0 ? [storeId] : [];
+      this.appointmentStorePickerLabel = String((data && data.store_name) || '').trim();
       this.employmentTypeLoaded = employmentTypeLoaded;
       this.mobileAuthLoaded = mobileAuthLoaded;
       this.mobileEnabledTouched = false;
@@ -1423,6 +1458,14 @@ export default {
     max-height calc(100vh - 168px)
     overflow-x hidden
     overflow-y auto
+
+    &.organization-store-scope-picker-open
+      overflow visible
+
+  // 组织 / 门店选择面板为浮层，不能被 iView 页签内容裁切。
+  .ivu-tabs-content,
+  .ivu-tabs-tabpane
+    overflow visible !important
 
   .ivu-modal-footer
     overflow-x hidden

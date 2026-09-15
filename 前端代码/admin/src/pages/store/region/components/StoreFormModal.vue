@@ -63,19 +63,13 @@
           </Col>
           <Col span="12">
             <FormItem label="所属组织：" prop="manage_region_id">
-              <OrganizationResourceSelector
-                v-model="formItem.manage_region_id"
-                resource="organization"
-                picker-mode="modal"
-                :tree-mode="true"
+              <OrganizationStoreScopePicker
+                v-model="organizationPickerStoreIds"
+                :load-scope="loadOrganizationPickerScope"
+                :selected-organization-id="formItem.manage_region_id"
+                empty-label="请选择所属组织"
                 selection-mode="org_only"
-                modal-title="选择所属组织"
-                trigger-placeholder="请选择所属组织"
-                placeholder="搜索组织名称"
-                :multiple="false"
-                :disabled-ids="[]"
-                :clearable="false"
-                @change="onOrgPick"
+                @change="onOrganizationScopePick"
               />
             </FormItem>
           </Col>
@@ -203,17 +197,18 @@
 import { mapState } from "vuex";
 import uploadPictures from "@/components/uploadPictures";
 import Maps from "@/components/map/map.vue";
-import OrganizationResourceSelector from "@/components/organization/OrganizationResourceSelector.vue";
+import OrganizationStoreScopePicker from "@/components/organization/OrganizationStoreScopePicker.vue";
 import {
   keyApi,
   storeGetInfoApi,
   cityApi,
   storeUpdateApi,
+  getOrganizationResourceSelector,
 } from "@/api/store";
 
 export default {
   name: "StoreFormModal",
-  components: { uploadPictures, Maps, OrganizationResourceSelector },
+  components: { uploadPictures, Maps, OrganizationStoreScopePicker },
   props: {
     value: { type: Boolean, default: false },
     editId: { type: [Number, String], default: 0 },
@@ -244,6 +239,7 @@ export default {
       mapKey: "",
       storeAddress: "",
       addresData: [],
+      organizationPickerStoreIds: [],
       formItem: this.emptyForm(),
       ruleValidate: {
         image: [{ required: true, validator: validateUpload, trigger: "change" }],
@@ -323,6 +319,7 @@ export default {
     },
     open() {
       this.formItem = this.emptyForm();
+      this.organizationPickerStoreIds = [];
       this.storeAddress = "";
       this.isApi = 0;
       this.cityInfo({ pid: 0 });
@@ -361,8 +358,15 @@ export default {
           this.spinShow = false;
         });
     },
-    onOrgPick(id) {
-      this.formItem.manage_region_id = Number(id || 0);
+    loadOrganizationPickerScope() {
+      return getOrganizationResourceSelector({
+        resource: "org_store_tree",
+        page: 1,
+        limit: 50,
+      });
+    },
+    onOrganizationScopePick(scope = {}) {
+      this.formItem.manage_region_id = Number(scope.orgId || 0);
       if (this.$refs.formItem) {
         this.$refs.formItem.validateField("manage_region_id");
       }
