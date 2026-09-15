@@ -10,6 +10,9 @@ const props = defineProps({
   allowedStoreIds: { type: Array, default: () => [] },
   label: { type: String, default: '当前权限范围' },
   loading: { type: Boolean, default: false },
+  // 嵌入式模式复用同一套组织 / 门店双栏控件，不使用浮层定位。
+  embedded: { type: Boolean, default: false },
+  showScopeFooter: { type: Boolean, default: true },
   // 登录等一次只能进入一间门店的场景，组织节点仅用于展开下级门店，
   // 不能把整个组织的门店范围当作一次选择结果。
   singleStoreOnly: { type: Boolean, default: false }
@@ -58,6 +61,14 @@ watch(() => props.modelValue, (value) => {
     selectedStores.value = []
   }
 }, { deep: true })
+
+watch(() => props.tree, (tree) => {
+  if (!props.embedded || expandedKeys.value.size || !Array.isArray(tree)) return
+  const initial = tree
+    .filter((node) => Array.isArray(node?.children) && node.children.length)
+    .map((node, index) => `/${node?.node_type || 'org'}-${node?.id || node?.org_id || index}`)
+  if (initial.length) expandedKeys.value = new Set(initial)
+}, { immediate: true, deep: true })
 
 function emitChange(storeIds, label, close = false) {
   const ids = [...new Set((storeIds || []).map(Number).filter(Boolean))]
@@ -183,6 +194,7 @@ function chooseAll() {
 }
 
 watch(open, async (value) => {
+  if (props.embedded) return
   if (value) {
     bindPanelPositioning()
     await nextTick()
@@ -206,14 +218,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="organization-store-scope-picker">
-    <button ref="triggerRef" type="button" class="organization-store-scope-picker__trigger" :disabled="loading" @click="open = !open">
+  <div class="organization-store-scope-picker" :class="{ 'organization-store-scope-picker--embedded': embedded }">
+    <button v-if="!embedded" ref="triggerRef" type="button" class="organization-store-scope-picker__trigger" :disabled="loading" @click="open = !open">
       <Network :size="16" aria-hidden="true" />
       <span>{{ loading ? '读取权限范围' : label }}</span>
       <ChevronDown :size="15" aria-hidden="true" />
     </button>
 
-    <section ref="panelRef" v-if="open" class="organization-store-scope-picker__panel" :style="panelStyle" aria-label="组织和门店权限范围">
+    <section ref="panelRef" v-if="embedded || open" class="organization-store-scope-picker__panel" :class="{ 'organization-store-scope-picker__panel--embedded': embedded }" :style="embedded ? {} : panelStyle" aria-label="组织和门店权限范围">
       <header>组织 / 门店</header>
       <div class="organization-store-scope-picker__body">
         <div class="organization-store-scope-picker__tree" aria-label="组织树">
@@ -236,17 +248,23 @@ onBeforeUnmount(() => {
           <p v-else class="organization-store-scope-picker__empty">请选择左侧组织。</p>
         </div>
       </div>
-      <footer v-if="!singleStoreOnly"><button type="button" @click="chooseAll">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
+      <footer v-if="showScopeFooter">
+        <button v-if="!singleStoreOnly" type="button" @click="chooseAll">当前权限范围</button>
+        <span v-else class="organization-store-scope-picker__scope-label">当前权限范围</span>
+        <span>{{ singleStoreOnly ? '选择组织查看其下级门店；请选择一间门店登录。' : '选择组织查询其全部下级门店；选择门店仅查询该门店。' }}</span>
+      </footer>
     </section>
   </div>
 </template>
 
 <style scoped>
 .organization-store-scope-picker { position: relative; display: inline-block; }
+.organization-store-scope-picker--embedded { display: block; width: 100%; }
 .organization-store-scope-picker__trigger { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; border: 1px solid #dcdee2; border-radius: 4px; padding: 5px 10px; background: #fff; color: #515a6e; font: inherit; font-size: 13px; cursor: pointer; }
 .organization-store-scope-picker__trigger:hover { border-color: #57a3f3; color: #2d8cf0; }
 .organization-store-scope-picker__trigger:disabled { cursor: wait; opacity: .65; }
 .organization-store-scope-picker__panel { overflow: hidden; border: 1px solid #dcdee2; border-radius: 4px; background: #fff; box-shadow: 0 2px 12px rgba(0, 0, 0, .14); }
+.organization-store-scope-picker__panel--embedded { position: static; width: 100%; max-height: none; box-shadow: none; }
 .organization-store-scope-picker__panel header { padding: 12px 14px 8px; border-bottom: 1px solid #edf0f5; color: #17233d; font-size: 14px; font-weight: 600; }
 .organization-store-scope-picker__body { display: flex; min-height: 230px; }
 .organization-store-scope-picker__tree { position: relative; flex: 1; max-height: 260px; overflow: auto; padding: 7px 8px; border-right: 1px solid #edf0f5; }
@@ -264,4 +282,5 @@ onBeforeUnmount(() => {
 .organization-store-scope-picker__empty { margin: 0; padding: 8px 2px; color: #bbb; font-size: 12px; line-height: 1.55; }
 .organization-store-scope-picker__panel footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-top: 1px solid #edf0f5; color: #999; font-size: 12px; line-height: 1.45; }
 .organization-store-scope-picker__panel footer button { flex: none; border: 0; padding: 0; background: transparent; color: #2d8cf0; font: inherit; font-size: 12px; cursor: pointer; }
+.organization-store-scope-picker__scope-label { flex: none; color: #2d8cf0; }
 </style>

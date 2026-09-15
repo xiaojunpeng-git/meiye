@@ -97,6 +97,9 @@ class CashierV3StoreLoginServices extends BaseServices
                 'need_select_store' => true,
                 'login_ticket' => $selectionTicket,
                 'stores' => $this->presentStores($organization),
+                // 组织树只包含当前登录候选门店所属组织及其必要祖先，作为选店导航，
+                // 不下发该组织下其他未获授权门店。
+                'organization_tree' => $this->presentOrganizationTree($organization),
                 'message' => '请选择本次进入的门店',
             ];
         }
@@ -337,5 +340,108 @@ class CashierV3StoreLoginServices extends BaseServices
                 'read_only' => false,
             ];
         }, $stores);
+    }
+
+    /**
+     * 组织选店只展示登录候选门店，不把“组织节点”错误扩展为该组织全量门店权限。
+     *
+     * @return array<int, array>
+     */
+    private function presentOrganizationTree(array $stores): array
+    {
+        $storeNodesByOrg = [];
+        foreach ($stores as $store) {
+            $storeId = (int)($store['store_id'] ?? 0);
+            if ($storeId <= 0) continue;
+            $orgId = (int)($store['org_id'] ?? 0);
+            $storeNodesByOrg[$orgId][] = [
+                'id' => $storeId,
+                'store_id' => $storeId,
+                'node_type' => 'store',
+                'name' => (string)($store['store_name'] ?? ''),
+            ];
+        }
+        if (!$storeNodesByOrg) return [];
+
+        $requiredIds = array_values(array_filter(array_map('intval', array_keys($storeNodesByOrg))));
+        $orgRows = [];
+        $pending = $requiredIds;
+        // 仅逐层补齐候选门店组织的祖先链，不查询或拼接其他下级组织。
+        while ($pending) {
+            $pending = array_values(array_diff($pending, array_keys($orgRows)));
+            if (!$pending) break;
+            $rows = Db::name('organization')->whereIn('id', $pending)->where('is_del', 0)
+                ->field('id,pid,name,sort')->select()->toArray();
+            $next = [];
+            foreach ($rows as $row) {
+                $id = (int)($row['id'] ?? 0);
+                if ($id <= 0) continue;
+                $orgRows[$id] = $row;
+                $parentId = (int)($row['pid'] ?? 0);
+                if ($parentId > 0 && !isset($orgRows[$parentId])) $next[] = $parentId;
+            }
+            $pending = array_values(array_unique($next));
+        }
+
+        $nodes = [];
+        foreach ($orgRows as $id => $row) {
+            $nodes[$id] = [
+                'id' => $id,
+                'node_type' => 'org',
+                'name' => (string)($row['name'] ?? ''),
+                'sort' => (int)($row['sort'] ?? 0),
+                'children' => [],
+            ];
+        }
+        $roots = [];
+        foreach ($nodes as $id => &$node) {
+            $parentId = (int)($orgRows[$id]['pid'] ?? 0);
+            if ($parentId > 0 && isset($nodes[$parentId])) {
+                $nodes[$parentId]['children'][] = &$node;
+            } else {
+                $roots[] = &$node;
+            }
+        }
+        unset($node);
+
+        // 无组织归属的门店保持可选，但以单独导航节点展示，避免丢失权限内候选项。
+        if (!empty($storeNodesByOrg[0])) {
+            $roots[] = [
+                'id' => 'unassigned',
+                'node_type' => 'org',
+                'name' => '未归属组织',
+                'sort' => PHP_INT_MAX,
+                'children' => [],
+            ];
+        }
+
+        foreach ($storeNodesByOrg as $orgId => $storeNodes) {
+            if ($orgId > 0 && isset($nodes[$orgId])) {
+                $nodes[$orgId]['children'] = array_merge($nodes[$orgId]['children'], $storeNodes);
+            } elseif ($orgId === 0) {
+                $last = array_key_last($roots);
+                if ($last !== null && ($roots[$last]['id'] ?? '') === 'unassigned') {
+                    $roots[$last]['children'] = $storeNodes;
+                }
+            }
+        }
+
+        $sortTree = static function (array &$items) use (&$sortTree): void {
+            usort($items, static function (array $left, array $right): int {
+                $leftOrg = ($left['node_type'] ?? '') === 'org';
+                $rightOrg = ($right['node_type'] ?? '') === 'org';
+                if ($leftOrg !== $rightOrg) return $leftOrg ? -1 : 1;
+                $bySort = ((int)($left['sort'] ?? 0)) <=> ((int)($right['sort'] ?? 0));
+                if ($bySort !== 0) return $bySort;
+                return strcmp((string)($left['name'] ?? ''), (string)($right['name'] ?? ''));
+            });
+            foreach ($items as &$item) {
+                if (!empty($item['children']) && is_array($item['children'])) $sortTree($item['children']);
+                unset($item['sort']);
+            }
+            unset($item);
+        };
+        $sortTree($roots);
+        return $roots;
     }
 }

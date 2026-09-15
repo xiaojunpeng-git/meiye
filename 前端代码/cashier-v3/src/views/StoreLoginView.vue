@@ -1,10 +1,10 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import { loginStoreV3, persistStoreV3Token } from '@/services/storeV3LoginApi'
 import { applyCashierV3LoginFeatures } from '@/services/cashierV3Bridge'
 import { onCashierStoreOrAccountChanged } from '@/services/cashierV3SessionLifecycle'
+import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 
 const router = useRouter()
 const account = ref('')
@@ -12,6 +12,7 @@ const password = ref('')
 const submitting = ref(false)
 const error = ref('')
 const storeChoices = ref([])
+const organizationTree = ref([])
 const loginTicket = ref('')
 const selectedStoreIds = ref([])
 
@@ -19,9 +20,10 @@ const storeChoiceIds = computed(() => storeChoices.value
   .map((store) => Number(store?.store_id || 0))
   .filter(Boolean))
 
-// 登录接口只返回当前数据权限内可进入的门店。这里仅将这些门店按组织分组，
-// 选择器不会加载或暴露额外的组织、门店数据。
+// 后端组织树只由当前候选门店及其必要祖先组成；兼容旧接口时才以平级分组降级展示，
+// 绝不因此加载组织下的其他门店。
 const storeChoiceTree = computed(() => {
+  if (organizationTree.value.length) return organizationTree.value
   const groups = new Map()
   storeChoices.value.forEach((store) => {
     const storeId = Number(store?.store_id || 0)
@@ -31,6 +33,7 @@ const storeChoiceTree = computed(() => {
     const key = `${orgId || 'unassigned'}:${orgName}`
     if (!groups.has(key)) {
       groups.set(key, {
+        key,
         id: orgId || `unassigned-${groups.size + 1}`,
         node_type: 'org',
         name: orgName,
@@ -85,6 +88,7 @@ async function submit() {
     const result = await loginStoreV3({ account: account.value.trim(), pwd: password.value })
     if (result.need_select_store) {
       storeChoices.value = Array.isArray(result.stores) ? result.stores : []
+      organizationTree.value = Array.isArray(result.organization_tree) ? result.organization_tree : []
       selectedStoreIds.value = []
       loginTicket.value = String(result.login_ticket || '')
       if (!loginTicket.value || !storeChoices.value.length) {
@@ -98,6 +102,13 @@ async function submit() {
   } finally {
     submitting.value = false
   }
+}
+
+function selectStoreFromOrganization(payload) {
+  const storeId = Number(payload?.storeIds?.[0] || 0)
+  const store = storeChoices.value.find((item) => Number(item?.store_id || 0) === storeId)
+  if (!store) return
+  void selectStore(store)
 }
 
 async function selectStore(store) {
@@ -117,15 +128,10 @@ async function selectStore(store) {
   }
 }
 
-function selectStoreFromOrganization({ storeIds } = {}) {
-  const storeId = Number(Array.isArray(storeIds) ? storeIds[0] : 0)
-  const store = storeChoices.value.find((item) => Number(item?.store_id || 0) === storeId)
-  if (store) void selectStore(store)
-}
-
 function backToAccountLogin() {
   if (submitting.value) return
   storeChoices.value = []
+  organizationTree.value = []
   selectedStoreIds.value = []
   loginTicket.value = ''
   error.value = ''
@@ -166,15 +172,16 @@ function backToAccountLogin() {
             <p>请选择进入门店</p>
             <h1 id="store-picker-title">选择门店后登录</h1>
           </header>
-          <p class="store-login__hint">按组织展开并选择一间门店登录；进入后工作台内不再切换门店。</p>
+          <p class="store-login__hint">按组织选择一间门店登录；进入后工作台内不再切换门店。</p>
           <OrganizationStoreScopePicker
             v-model="selectedStoreIds"
             class="store-login__organization-picker"
             :tree="storeChoiceTree"
             :allowed-store-ids="storeChoiceIds"
-            label="选择组织和门店"
+            :embedded="true"
+            :single-store-only="true"
+            :show-scope-footer="true"
             :loading="submitting"
-            single-store-only
             @change="selectStoreFromOrganization"
           />
           <button class="store-login__back" type="button" :disabled="submitting" @click="backToAccountLogin">返回重新登录</button>
@@ -217,10 +224,10 @@ function backToAccountLogin() {
 }
 
 .store-login__layout {
-  width: min(1240px, 100%);
+  width: min(1440px, 100%);
   margin: 0 auto;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+  grid-template-columns: minmax(0, 1fr) minmax(560px, 640px);
   align-items: center;
   gap: clamp(48px, 8vw, 120px);
 }
@@ -275,6 +282,16 @@ function backToAccountLogin() {
   background: rgba(255, 255, 255, .94);
   box-shadow: 0 18px 50px rgba(40, 58, 67, .12);
   backdrop-filter: blur(8px);
+}
+
+.store-login__panel:not(.store-login__store-picker) {
+  max-width: 420px;
+  justify-self: end;
+}
+
+.store-login__store-picker {
+  gap: 22px;
+  padding: 34px 36px 36px;
 }
 
 .store-login__panel header p {
@@ -351,22 +368,36 @@ function backToAccountLogin() {
 }
 
 .store-login__organization-picker { width: 100%; }
-.store-login__organization-picker :deep(.organization-store-scope-picker__trigger) {
-  justify-content: space-between;
-  width: 100%;
-  min-height: 48px;
-  border-color: #9aafaa;
-  color: #315d52;
+.store-login__organization-picker :deep(.organization-store-scope-picker__panel header) {
+  padding: 14px 16px 10px;
   font-size: 15px;
-  font-weight: 600;
 }
-.store-login__organization-picker :deep(.organization-store-scope-picker__panel) { border-color: #9aafaa; }
-.store-login__organization-picker :deep(.organization-store-scope-picker__option:hover),
-.store-login__organization-picker :deep(.organization-store-scope-picker__option--selected),
-.store-login__organization-picker :deep(.organization-store-scope-picker__store-list button:hover),
-.store-login__organization-picker :deep(.organization-store-scope-picker__store-list button.is-active) {
-  background: #edf6f2;
-  color: #315d52;
+.store-login__organization-picker :deep(.organization-store-scope-picker__body) { min-height: 330px; }
+.store-login__organization-picker :deep(.organization-store-scope-picker__tree) {
+  flex: 0 0 49%;
+  max-height: 350px;
+  padding: 10px 12px;
+}
+.store-login__organization-picker :deep(.organization-store-scope-picker__stores) {
+  width: auto;
+  flex: 1;
+  max-height: 350px;
+  padding: 14px 16px;
+}
+.store-login__organization-picker :deep(.organization-store-scope-picker__tree-row),
+.store-login__organization-picker :deep(.organization-store-scope-picker__toggle),
+.store-login__organization-picker :deep(.organization-store-scope-picker__toggle-placeholder) { min-height: 37px; }
+.store-login__organization-picker :deep(.organization-store-scope-picker__option) {
+  min-height: 37px;
+  font-size: 14px;
+}
+.store-login__organization-picker :deep(.organization-store-scope-picker__store-list button) {
+  min-height: 37px;
+  font-size: 14px;
+}
+.store-login__organization-picker :deep(.organization-store-scope-picker__panel footer) {
+  padding: 12px 16px;
+  font-size: 13px;
 }
 
 .store-login__back {
@@ -427,6 +458,9 @@ function backToAccountLogin() {
     padding: 30px 26px 32px;
     background: rgba(255, 255, 255, .97);
   }
+
+  .store-login__panel:not(.store-login__store-picker) { max-width: none; }
+  .store-login__store-picker { padding: 30px 26px 32px; }
 }
 
 @media (max-width: 460px) {
@@ -435,6 +469,17 @@ function backToAccountLogin() {
   .store-login__message h2 { font-size: 20px; line-height: 1.5; }
   .store-login__panel { gap: 17px; padding: 26px 20px 28px; }
   .store-login__panel h1 { font-size: 23px; }
+  .store-login__store-picker { padding: 26px 20px 28px; }
+  .store-login__organization-picker :deep(.organization-store-scope-picker__body) { min-height: 260px; }
+  .store-login__organization-picker :deep(.organization-store-scope-picker__tree) {
+    flex-basis: 53%;
+    max-height: 280px;
+    padding: 7px 6px;
+  }
+  .store-login__organization-picker :deep(.organization-store-scope-picker__stores) {
+    max-height: 280px;
+    padding: 10px;
+  }
   .store-login__footer { right: 12px; bottom: 16px; left: 12px; font-size: 12px; }
 }
 
