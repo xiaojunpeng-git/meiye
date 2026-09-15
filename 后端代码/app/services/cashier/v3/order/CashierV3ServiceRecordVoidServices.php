@@ -142,11 +142,25 @@ final class CashierV3ServiceRecordVoidServices
         $holder = $holderId > 0 ? (array)Db::name('user_card_holder')->where('id', $holderId)->lock(true)->find() : [];
         if ($detailId > 0 && (!$detail || (int)($detail['oid'] ?? 0) !== (int)($source['origin_order_id'] ?? 0))) throw self::failure('service_void_benefit_detail_missing');
         if ($holderId > 0 && (!$holder || (int)($holder['uid'] ?? 0) !== (int)$source['member_id'])) throw self::failure('service_void_card_holder_missing');
-        if ($detailId > 0) {
+        // 时间卡以有效期作为可用条件，legacy 的百万次数仅是兼容投影，
+        // 从未在核销时扣减。因此作废也不能把它当作普通次卡回加，否则
+        // 每一次“核销后作废”都会虚增该投影次数。
+        $unlimitedTimeCard = $holderId > 0 && $detailId > 0 && (bool)Db::name('cashier_v3_card_rule_component')
+            ->alias('c')
+            ->join('cashier_v3_card_rule_state s', 's.id=c.rule_state_id AND s.tenant_id=c.tenant_id')
+            ->where('c.tenant_id', $scope->tenantId())
+            ->where('c.card_holder_id', $holderId)
+            ->where('c.legacy_detail_id', $detailId)
+            ->where('s.member_id', (int)$source['member_id'])
+            ->where('s.rule_type', 'time')
+            ->lock(true)
+            ->value('c.id');
+        $restoredQuantity = $unlimitedTimeCard ? 0 : $quantity;
+        if (!$unlimitedTimeCard && $detailId > 0) {
             $remaining = (int)($detail['write_surplus_times'] ?? 0) + $quantity;
             Db::name('store_order_cart_info')->where('id', $detailId)->update(['write_surplus_times' => $remaining, 'is_writeoff' => 0]);
         }
-        if ($holderId > 0) {
+        if (!$unlimitedTimeCard && $holderId > 0) {
             $remaining = (int)($holder['write_surplus_times'] ?? 0) + $quantity;
             Db::name('user_card_holder')->where('id', $holderId)->update(['write_surplus_times' => $remaining]);
         }
@@ -156,13 +170,13 @@ final class CashierV3ServiceRecordVoidServices
             'member_id' => (int)$source['member_id'], 'operation_id' => $operationId,
             'original_writeoff_id' => (string)($source['writeoff_id'] ?? ''), 'service_fact_id' => (int)$source['id'],
             'holder_id' => $holderId, 'source_detail_id' => $detailId, 'project_id' => (int)($source['project_id'] ?? 0),
-            'quantity' => $quantity, 'reversal_of' => (string)($source['service_fact_id'] ?? $source['id']),
+            'quantity' => $restoredQuantity, 'reversal_of' => (string)($source['service_fact_id'] ?? $source['id']),
             'business_event_no' => (string)$event['event_no'], 'command_idempotency_key' => $commandKey,
             'operator_id' => $operator->operatorId(), 'business_date' => date('Y-m-d', $now),
             'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
         ];
         if ((int)Db::name(self::ENTITLEMENT_REVERSAL_TABLE)->insert($reversal) !== 1) throw self::failure('service_void_entitlement_reversal_insert_failed');
-        return $quantity;
+        return $restoredQuantity;
     }
 
     /** @return array{consumptionCents:int,laborCents:int,laborFeeCents:int} */
