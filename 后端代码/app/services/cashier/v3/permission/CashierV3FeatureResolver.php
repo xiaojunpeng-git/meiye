@@ -177,6 +177,9 @@ class CashierV3FeatureResolver
             // 这里不返回任何可操作权限，避免只读身份被误当作员工授权。
             return [];
         }
+        if (!empty($operatorProfile['_cashier_v3_organization'])) {
+            return $this->employeeStoreV3GrantedFeatures((int)($operatorProfile['employee_id'] ?? 0));
+        }
         if ($staffId <= 0 || $employeeId <= 0 || $storeId <= 0) {
             return [];
         }
@@ -228,11 +231,13 @@ class CashierV3FeatureResolver
             return [];
         }
         try {
-            $positionIds = Db::name('staff_job_position')
-                ->where('employee_id', $employeeId)
-                ->where('staff_id', 0)
-                ->where('status', 1)->where('is_del', 0)->where('end_time', 0)
-                ->column('position_id');
+            $positionIds = Db::name('staff_job_position')->alias('job')
+                ->join('position position', 'position.id = job.position_id')
+                ->where('job.employee_id', $employeeId)
+                ->where('job.staff_id', 0)
+                ->where('job.status', 1)->where('job.is_del', 0)->where('job.end_time', 0)
+                ->where('position.status', 1)->where('position.use_store', 1)
+                ->column('job.position_id');
             $positionIds = array_values(array_unique(array_filter(array_map('intval', $positionIds ?: []))));
             if (!$positionIds) {
                 return [];

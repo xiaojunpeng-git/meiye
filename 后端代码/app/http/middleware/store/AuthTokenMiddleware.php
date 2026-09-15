@@ -43,7 +43,7 @@ class AuthTokenMiddleware implements MiddlewareInterface
         // delegated 类型，交给同一套 V3 登录服务解析；普通门店令牌仍
         // 保持原有门店解析路径。
         [, $tokenType] = app()->make(JwtAuth::class)->parseToken($token);
-        if ((string)$tokenType === 'cashier_v3_delegated') {
+        if (in_array((string)$tokenType, ['cashier_v3_delegated', 'cashier_v3_organization'], true)) {
             /** @var CashierLoginServices $services */
             $services = app()->make(CashierLoginServices::class);
             $outInfo = $services->parseToken($token);

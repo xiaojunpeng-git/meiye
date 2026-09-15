@@ -42,11 +42,12 @@ class CashierV3PermissionSnapshotServices
             );
         }
 
-        $isDelegated = !empty($operatorProfile['_cashier_v3_delegated']);
+        $isVirtualStoreSession = !empty($operatorProfile['_cashier_v3_delegated'])
+            || !empty($operatorProfile['_cashier_v3_organization']);
         // 常规会话锁 system_store_staff；数据权限选店会话锁定自己的会话投影，
         // 不把它伪造成员工任职，也不恢复历史任职行。
         $staff = null;
-        if ($isDelegated) {
+        if ($isVirtualStoreSession) {
             $staff = $operatorProfile;
         } else {
             try {
@@ -79,7 +80,7 @@ class CashierV3PermissionSnapshotServices
         $employeeId = (int)($staff['employee_id'] ?? 0);
         $internalAccount = '';
 
-        if (!$isDelegated && ($isDel !== 0 || $status !== 1)) {
+        if (!$isVirtualStoreSession && ($isDel !== 0 || $status !== 1)) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::PERMISSION_DENIED,
                 '当前账号已停用或删除，已拒绝。',
@@ -88,7 +89,7 @@ class CashierV3PermissionSnapshotServices
             );
         }
 
-        if (!$isDelegated && $staffStoreId > 0 && $staffStoreId !== $operatorScope->storeId()) {
+        if (!$isVirtualStoreSession && $staffStoreId > 0 && $staffStoreId !== $operatorScope->storeId()) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::PERMISSION_DENIED,
                 '当前账号门店已变更，请刷新工作台后重试。',
@@ -276,6 +277,11 @@ class CashierV3PermissionSnapshotServices
 
         if (!empty($sessionHint['_cashier_v3_delegated'])) {
             $profile['_cashier_v3_delegated'] = 1;
+        }
+        if (!empty($sessionHint['_cashier_v3_organization'])) {
+            $profile['_cashier_v3_organization'] = 1;
+            $profile['type'] = 'cashier_v3_organization';
+            $profile['session_mode'] = 'store_organization';
         }
 
         // 仅透传测试菜单探针；生产不得从旧会话信任 unique_auth／deny_all

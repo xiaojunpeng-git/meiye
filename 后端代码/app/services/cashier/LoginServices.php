@@ -322,8 +322,14 @@ class LoginServices extends BaseServices
             }
             throw new AuthException(ApiErrorCode::ERR_LOGIN_INVALID);
         }
-        if ((string)$type === 'cashier_v3_delegated') {
-            return $this->parseCashierV3DelegatedToken($cacheService, (int)$id, (string)$auth, $md5Token);
+        if (in_array((string)$type, ['cashier_v3_delegated', 'cashier_v3_organization'], true)) {
+            return $this->parseCashierV3DelegatedToken(
+                $cacheService,
+                (int)$id,
+                (string)$auth,
+                $md5Token,
+                (string)$type === 'cashier_v3_delegated'
+            );
         }
         //获取管理员信息
         $storeStaffInfo = $this->dao->get($id);
@@ -370,7 +376,7 @@ class LoginServices extends BaseServices
      * 解析无直接门店任职的收银 V3 数据权限会话。
      * 会话主键不是 system_store_staff，避免为了登录而伪造或恢复门店任职。
      */
-    protected function parseCashierV3DelegatedToken(CacheService $cacheService, int $sessionId, string $auth, string $md5Token): array
+    protected function parseCashierV3DelegatedToken(CacheService $cacheService, int $sessionId, string $auth, string $md5Token, bool $readOnly = true): array
     {
         $session = \think\facade\Db::name('cashier_v3_store_session')->where('id', $sessionId)
             ->where('is_del', 0)->where('status', 1)->find();
@@ -413,16 +419,22 @@ class LoginServices extends BaseServices
             'store_id' => $storeId,
             'staff_name' => (string)($session['staff_name_snapshot'] ?? ''),
             'account' => (string)($session['account_snapshot'] ?? ''),
-            'read_only' => true,
-            'session_mode' => 'store_read_only',
+            'read_only' => $readOnly,
+            'session_mode' => $readOnly ? 'store_read_only' : 'store_organization',
             'roles' => [],
             'level' => 1,
-            '_cashier_v3_delegated' => 1,
-            '_cashier_v3_read_only' => 1,
-            'type' => 'cashier_v3_delegated',
+            'type' => $readOnly ? 'cashier_v3_delegated' : 'cashier_v3_organization',
         ];
-        $features = app()->make(\app\services\cashier\v3\permission\CashierV3FeatureResolver::class)
-            ->resolveVisibleFeatures($profile);
+        if ($readOnly) {
+            $profile['_cashier_v3_delegated'] = 1;
+            $profile['_cashier_v3_read_only'] = 1;
+        } else {
+            $profile['_cashier_v3_organization'] = 1;
+        }
+        $resolver = app()->make(\app\services\cashier\v3\permission\CashierV3FeatureResolver::class);
+        $features = $readOnly
+            ? $resolver->resolveVisibleFeatures($profile)
+            : $resolver->resolveGrantedFeatures($profile);
         if (!$features) {
             $cacheService->clearToken($md5Token);
             throw new AuthException(ApiErrorCode::ERR_LOGIN_STATUS);
@@ -430,10 +442,10 @@ class LoginServices extends BaseServices
         return $profile + [
             'features' => $features,
             'visible_features' => $features,
-            'operation_features' => [],
-            'feature_permissions' => [],
-            'read_only' => true,
-            'session_mode' => 'store_read_only',
+            'operation_features' => $readOnly ? [] : $features,
+            'feature_permissions' => $readOnly ? [] : array_fill_keys($features, true),
+            'read_only' => $readOnly,
+            'session_mode' => $readOnly ? 'store_read_only' : 'store_organization',
             'store_name' => (string)($store['name'] ?? ''),
             'logo' => (string)($store['image'] ?? ''),
             'product_category_status' => (int)($store['product_category_status'] ?? 0),

@@ -10,11 +10,11 @@ class StoreLogin extends \app\controller\cashier\AuthController
 {
     public function login(Request $request, CashierV3StoreLoginServices $services)
     {
-        [$account, $password, $storeId] = $request->postMore([
-            ['account', ''], ['pwd', ''], ['store_id', 0],
+        [$account, $password, $storeId, $ticket] = $request->postMore([
+            ['account', ''], ['pwd', ''], ['store_id', 0], ['login_ticket', ''],
         ], true);
         return app('json')->success($services->login(
-            trim((string)$account), (string)$password, (int)$storeId
+            trim((string)$account), (string)$password, (int)$storeId, (string)$ticket
         ));
     }
 

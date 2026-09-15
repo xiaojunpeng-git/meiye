@@ -15,10 +15,10 @@ final class InventoryStoreAccessPolicy
     {
         // V3 数据权限选店会话没有 system_store_staff 任职行；权限快照
         // 已在 cashier_v3_store_session 签发时由服务端计算并随 token
-        // 回读。这里仅允许当前已认证的 delegated profile 使用该快照，
+        // 回读。这里仅允许当前已认证的组织会话使用该快照，
         // 不接受前端传入的权限提示。
         $sessionInfo = (array)(request()->storeStaffInfo ?? []);
-        if (!empty($sessionInfo['_cashier_v3_delegated'])) {
+        if (!empty($sessionInfo['_cashier_v3_delegated']) || !empty($sessionInfo['_cashier_v3_organization'])) {
             if ((int)($sessionInfo['store_id'] ?? 0) !== $storeId) {
                 throw new \RuntimeException('inventory_store_access_denied');
             }

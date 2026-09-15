@@ -94,10 +94,10 @@ const assertions = [
       && storeLogin.includes('resolveUniqueStoreV3Staff($employeeId)'),
   ],
   [
-    'store-v3 login no longer creates a store-selection ticket',
-    !storeLogin.includes('SELECT_TICKET_PREFIX')
-      && !storeLogin.includes("'need_select_store' => true")
-      && !storeLogin.includes("'login_ticket'"),
+    'store-v3 login keeps direct tenure as a fixed entry and offers a ticket only for no-tenure organization users',
+    storeLogin.includes('SELECT_TICKET_PREFIX')
+      && storeLogin.includes("'need_select_store' => true")
+      && storeLogin.indexOf('if ($direct)') < storeLogin.lastIndexOf('organizationLoginCandidates($employeeId)'),
   ],
   [
     'the legacy context-switch endpoint cannot enter another store',
@@ -106,11 +106,11 @@ const assertions = [
       && !storeLogin.includes('$employees->listEligibleStoreV3Staff($employeeId)'),
   ],
   [
-    'store-v3 login page submits credentials once and has no store selector',
+    'store-v3 login page submits credentials once and renders a selector only after organization authentication',
     loginView.includes("loginStoreV3({ account: account.value.trim(), pwd: password.value })")
-      && !loginView.includes('needsStoreSelection')
-      && !loginView.includes('<select')
-      && !loginView.includes('请选择门店'),
+      && loginView.includes('loginTicket')
+      && loginView.includes('选择门店后登录')
+      && loginView.includes('login_ticket: loginTicket.value'),
   ],
   [
     'changing store business status never changes employee tenure status',

@@ -34,7 +34,7 @@ class StoreCkeckRoleMiddleware implements MiddlewareInterface
 
         $staffInfo = (array)$request->storeStaffInfo();
         $sessionType = (string)($staffInfo['type'] ?? '');
-        if (in_array($sessionType, ['cashier_v3', 'cashier_v3_delegated'], true)) {
+        if (in_array($sessionType, ['cashier_v3', 'cashier_v3_delegated', 'cashier_v3_organization'], true)) {
             $requiredFeature = $this->cashierV3PresaleFeature(
                 (string)$request->pathinfo(),
                 strtoupper((string)$request->method())
