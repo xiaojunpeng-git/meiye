@@ -9,7 +9,10 @@ const props = defineProps({
   tree: { type: Array, default: () => [] },
   allowedStoreIds: { type: Array, default: () => [] },
   label: { type: String, default: '当前权限范围' },
-  loading: { type: Boolean, default: false }
+  loading: { type: Boolean, default: false },
+  // 登录等一次只能进入一间门店的场景，组织节点仅用于展开下级门店，
+  // 不能把整个组织的门店范围当作一次选择结果。
+  singleStoreOnly: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['update:modelValue', 'change'])
@@ -162,6 +165,7 @@ function selectNode(option) {
   selectedOrganizationKey.value = option.key
   selectedOrganizationName.value = option.name
   selectedStores.value = nodeStores(option.node)
+  if (props.singleStoreOnly) return
   emitChange(ids, option.name)
 }
 
@@ -232,7 +236,7 @@ onBeforeUnmount(() => {
           <p v-else class="organization-store-scope-picker__empty">请选择左侧组织。</p>
         </div>
       </div>
-      <footer><button type="button" @click="chooseAll">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
+      <footer v-if="!singleStoreOnly"><button type="button" @click="chooseAll">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
     </section>
   </div>
 </template>

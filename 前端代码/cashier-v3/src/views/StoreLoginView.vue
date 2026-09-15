@@ -1,6 +1,7 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import { loginStoreV3, persistStoreV3Token } from '@/services/storeV3LoginApi'
 import { applyCashierV3LoginFeatures } from '@/services/cashierV3Bridge'
 import { onCashierStoreOrAccountChanged } from '@/services/cashierV3SessionLifecycle'
@@ -12,6 +13,39 @@ const submitting = ref(false)
 const error = ref('')
 const storeChoices = ref([])
 const loginTicket = ref('')
+const selectedStoreIds = ref([])
+
+const storeChoiceIds = computed(() => storeChoices.value
+  .map((store) => Number(store?.store_id || 0))
+  .filter(Boolean))
+
+// 登录接口只返回当前数据权限内可进入的门店。这里仅将这些门店按组织分组，
+// 选择器不会加载或暴露额外的组织、门店数据。
+const storeChoiceTree = computed(() => {
+  const groups = new Map()
+  storeChoices.value.forEach((store) => {
+    const storeId = Number(store?.store_id || 0)
+    if (!storeId) return
+    const orgId = Number(store?.org_id || 0)
+    const orgName = String(store?.org_name || '').trim() || '未归属组织'
+    const key = `${orgId || 'unassigned'}:${orgName}`
+    if (!groups.has(key)) {
+      groups.set(key, {
+        id: orgId || `unassigned-${groups.size + 1}`,
+        node_type: 'org',
+        name: orgName,
+        children: []
+      })
+    }
+    groups.get(key).children.push({
+      id: storeId,
+      store_id: storeId,
+      node_type: 'store',
+      name: String(store?.store_name || `门店 ${storeId}`)
+    })
+  })
+  return [...groups.values()]
+})
 
 async function finishLogin(result) {
   persistStoreV3Token(result.token)
@@ -51,6 +85,7 @@ async function submit() {
     const result = await loginStoreV3({ account: account.value.trim(), pwd: password.value })
     if (result.need_select_store) {
       storeChoices.value = Array.isArray(result.stores) ? result.stores : []
+      selectedStoreIds.value = []
       loginTicket.value = String(result.login_ticket || '')
       if (!loginTicket.value || !storeChoices.value.length) {
         throw new Error('当前账号没有可选择的有效门店。')
@@ -82,9 +117,16 @@ async function selectStore(store) {
   }
 }
 
+function selectStoreFromOrganization({ storeIds } = {}) {
+  const storeId = Number(Array.isArray(storeIds) ? storeIds[0] : 0)
+  const store = storeChoices.value.find((item) => Number(item?.store_id || 0) === storeId)
+  if (store) void selectStore(store)
+}
+
 function backToAccountLogin() {
   if (submitting.value) return
   storeChoices.value = []
+  selectedStoreIds.value = []
   loginTicket.value = ''
   error.value = ''
 }
@@ -124,20 +166,17 @@ function backToAccountLogin() {
             <p>请选择进入门店</p>
             <h1 id="store-picker-title">选择门店后登录</h1>
           </header>
-          <p class="store-login__hint">仅使用本次选定门店；进入后工作台内不再切换门店。</p>
-          <div class="store-login__stores">
-            <button
-              v-for="store in storeChoices"
-              :key="`${store.store_id}-${store.org_id}`"
-              class="store-login__store"
-              type="button"
-              :disabled="submitting"
-              @click="selectStore(store)"
-            >
-              <span class="store-login__store-name">{{ store.store_name || `门店 ${store.store_id}` }}</span>
-              <span class="store-login__store-meta">{{ store.org_name || '当前数据权限范围' }}</span>
-            </button>
-          </div>
+          <p class="store-login__hint">按组织展开并选择一间门店登录；进入后工作台内不再切换门店。</p>
+          <OrganizationStoreScopePicker
+            v-model="selectedStoreIds"
+            class="store-login__organization-picker"
+            :tree="storeChoiceTree"
+            :allowed-store-ids="storeChoiceIds"
+            label="选择组织和门店"
+            :loading="submitting"
+            single-store-only
+            @change="selectStoreFromOrganization"
+          />
           <button class="store-login__back" type="button" :disabled="submitting" @click="backToAccountLogin">返回重新登录</button>
           <p v-if="error" class="store-login__error" role="alert">{{ error }}</p>
         </section>
@@ -311,36 +350,24 @@ function backToAccountLogin() {
   line-height: 1.6;
 }
 
-.store-login__stores {
-  display: grid;
-  gap: 10px;
-  max-height: 360px;
-  overflow-y: auto;
-}
-
-.store-login__store {
-  display: grid;
-  gap: 5px;
+.store-login__organization-picker { width: 100%; }
+.store-login__organization-picker :deep(.organization-store-scope-picker__trigger) {
+  justify-content: space-between;
   width: 100%;
-  padding: 14px 15px;
-  border: 1px solid #c6d1d5;
-  border-radius: 5px;
-  color: #202b33;
-  background: #fff;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color .18s ease, background-color .18s ease;
+  min-height: 48px;
+  border-color: #9aafaa;
+  color: #315d52;
+  font-size: 15px;
+  font-weight: 600;
 }
-
-.store-login__store:hover:not(:disabled) {
-  border-color: #6f9286;
-  background: #f4f9f7;
+.store-login__organization-picker :deep(.organization-store-scope-picker__panel) { border-color: #9aafaa; }
+.store-login__organization-picker :deep(.organization-store-scope-picker__option:hover),
+.store-login__organization-picker :deep(.organization-store-scope-picker__option--selected),
+.store-login__organization-picker :deep(.organization-store-scope-picker__store-list button:hover),
+.store-login__organization-picker :deep(.organization-store-scope-picker__store-list button.is-active) {
+  background: #edf6f2;
+  color: #315d52;
 }
-
-.store-login__store:disabled { opacity: .6; cursor: wait; }
-
-.store-login__store-name { font-size: 15px; font-weight: 650; }
-.store-login__store-meta { color: #718088; font-size: 12px; }
 
 .store-login__back {
   min-height: 40px;
