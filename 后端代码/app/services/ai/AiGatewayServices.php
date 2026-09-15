@@ -848,6 +848,70 @@ final class AiGatewayServices
         $safe['outbound']['prior_query']=$sourceQuery===null?null:IntentContextMerger::modelView(
             $sourceQuery,(array)($sourceContext['meaning']??[])
         );
+        // The normal provider path returns the independently-typed customer
+        // meaning and its candidate binding in one response.  Both carriers
+        // remain separately normalised, and the later independent review is
+        // still mandatory before Reader access.  This removes one serial
+        // provider round-trip without replacing natural-language reasoning
+        // with a phrase table or a PHP metric default. Injected deterministic
+        // models deliberately retain the two-call adapter below so established
+        // contract fixtures exercise their original test seam.
+        if ($this->model===null) {
+            $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
+            $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$summaries,$runtimeSkills],3072));
+            $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1800);
+            $this->runs->prepareAttempt($owner,$id,$generation,$worker,'understand_and_bind','model',hash('sha256',json_encode([$safe['outbound'],$summaries,$runtimeSkills])),'siliconflow');
+            $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand_and_bind');
+            $combinedRankRecovery=false;
+            try {
+                $checkpoint();
+                $reply=(new SiliconFlowClient())->understandAndBind($safe['outbound'],$summaries,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills);
+                $understanding=$reply['understanding'];
+                if (array_key_exists('rank_metric_candidates',$reply)) {
+                    $combinedRankRecovery=true;
+                    $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_and_bind','FAILED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+                    $reply=$this->resolveRankMetricBinding($owner,$id,$generation,$worker,$safe['outbound'],$summaries,$understanding,$configuration,$checkpoint,$reply);
+                } else {
+                    $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_and_bind','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+                }
+            } catch (\Throwable $error) {
+                if ($combinedRankRecovery) throw $error;
+                if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,'understand_and_bind');
+                $firstState=in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
+                $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_and_bind',$firstState);
+                $diagnostic=$error instanceof AiContractException?$error->diagnostic():[];
+                // A completed but malformed combined JSON response can receive
+                // one fenced structural correction.  An unknown transport
+                // outcome is never replayed, and no correction receives any
+                // missing business value from PHP.
+                if (!($error instanceof AiContractException) || $error->getMessage()!=='AI_MODEL_INTENT_CONTRACT_INVALID') throw $error;
+                $repairPredicate=is_string($diagnostic['predicate']??null)?$diagnostic['predicate']:'combined_contract';
+                $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
+                $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$summaries,$runtimeSkills,$repairPredicate],3072));
+                $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1800);
+                $this->runs->prepareAttempt($owner,$id,$generation,$worker,'understand_and_bind_repair','model',hash('sha256',json_encode([$safe['outbound'],$summaries,$runtimeSkills,$repairPredicate])),'siliconflow');
+                $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand_and_bind_repair');
+                $repairRankRecovery=false;
+                try {
+                    $checkpoint();
+                    $reply=(new SiliconFlowClient())->understandAndBind($safe['outbound'],$summaries,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills,$repairPredicate);
+                    $understanding=$reply['understanding'];
+                    if (array_key_exists('rank_metric_candidates',$reply)) {
+                        $repairRankRecovery=true;
+                        $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_and_bind_repair','FAILED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+                        $reply=$this->resolveRankMetricBinding($owner,$id,$generation,$worker,$safe['outbound'],$summaries,$understanding,$configuration,$checkpoint,$reply);
+                    } else {
+                        $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_and_bind_repair','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+                    }
+                } catch (\Throwable $repairError) {
+                    if ($repairRankRecovery) throw $repairError;
+                    if ($repairError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$repairError,'understand_and_bind_repair');
+                    $state=in_array($repairError->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
+                    try { $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_and_bind_repair',$state); } catch (\Throwable $ignored) {}
+                    throw $repairError;
+                }
+            }
+        } else {
         // Understanding has no metric catalogue. Binding receives accepted
         // meaning afterwards and may only propose registered execution fields.
         $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
@@ -991,6 +1055,7 @@ final class AiGatewayServices
                 throw $repairError;
             }
             }
+        }
         }
         $checkpoint();$intent=$reply['intent'];
         // The model states only a delta. This named merger is the sole place

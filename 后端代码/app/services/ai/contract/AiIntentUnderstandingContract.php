@@ -21,6 +21,27 @@ final class AiIntentUnderstandingContract
             . 'understood means the business request is clear even when no current capability can perform it. needs_clarification means the business request itself has more than one plausible reading. A broad request to understand overall operating conditions without naming a specific business fact is still understood: retain it as a metric_codes requirement with its exact customer term, so the later binding may propose a clearly labelled initial observation rather than requiring the customer to learn a metric name. If the customer did state a measurement that can reasonably mean several different business facts and neither the current wording nor verified context chooses among them, preserve that measurement requirement and mark needs_clarification; never turn a category label into one of its examples. unbound is allowed only with understood: ambiguity is not an unavailable capability. This object grants nothing and is later bound by the server.';
     }
 
+    /**
+     * The combined provider path keeps this carrier nested beneath a stable
+     * envelope. Reuse the single contract instruction, but remove its normal
+     * top-level-output wording so one prompt never asks the model to produce
+     * two incompatible root JSON shapes.
+     */
+    public static function nestedModelInstruction(): string
+    {
+        return str_replace(
+            [
+                'Return one JSON object following '.self::VERSION.': ',
+                'The only top-level keys are goal, requirements and status.',
+            ],
+            [
+                'The value at envelope key understanding is one JSON object following '.self::VERSION.': ',
+                'The only keys inside understanding are goal, requirements and status.',
+            ],
+            self::modelInstruction()
+        );
+    }
+
     public static function normalize($value, array $safeQuestion): array
     {
         if ($value instanceof \stdClass) $value = get_object_vars($value);
