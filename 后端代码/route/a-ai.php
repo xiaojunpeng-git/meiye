@@ -9,6 +9,7 @@ $aiActions=function () {
     Route::get('bootstrap','Ai/aiBootstrap')->completeMatch();
     Route::post('runs','Ai/aiCreate')->completeMatch();
     Route::get('runs/:runId','Ai/aiStatus')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
+    Route::post('runs/:runId/delivery','Ai/aiDelivery')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
     Route::post('runs/:runId/execute','Ai/aiExecute')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
     Route::post('runs/:runId/clarify','Ai/aiClarify')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
     Route::post('runs/:runId/cancel','Ai/aiCancel')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();

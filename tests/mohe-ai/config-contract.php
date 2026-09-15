@@ -14,9 +14,10 @@ function configFixture(array $values = []): array {
         'monitor_export_failure_rate','monitor_export_consecutive_failures','monitor_security_count',
         'monitor_unknown_count','monitor_technical_count','monitor_cleanup_stale_seconds','monitor_duration_ms',
         'export_compatible_workers_ready','export_reserved_slots_verified','export_monitoring_ready',
-        'export_reserved_slots','export_queue_wait_budget_ms','export_publication_reserve_ms'];
+        'export_reserved_slots','export_queue_wait_budget_ms','export_publication_reserve_ms',
+        'execution_enabled','execution_compatible_workers_ready','execution_monitoring_ready','execution_consumer_stale_seconds'];
     foreach ($keys as $key) $fixtureEnv->set('mohe_ai.'.$key, $values[$key] ?? false);
-    foreach (['export_reserved_slots'=>2,'export_queue_wait_budget_ms'=>10000,'export_publication_reserve_ms'=>5000] as $key=>$default) {
+    foreach (['export_reserved_slots'=>2,'export_queue_wait_budget_ms'=>10000,'export_publication_reserve_ms'=>5000,'execution_consumer_stale_seconds'=>210] as $key=>$default) {
         if (!array_key_exists($key, $values)) $fixtureEnv->set('mohe_ai.'.$key, $default);
     }
     return require __DIR__.'/../../后端代码/config/mohe_ai.php';
@@ -30,14 +31,18 @@ function checkConfig(bool $ok, string $label): void {
 $default = configFixture();
 checkConfig($default['monitoring']['registered'] === false && !\app\services\ai\execution\AiRuntimeMonitor::profileReady($default['monitoring']), 'defaults cannot attest monitoring');
 foreach (['compatible_workers_ready','reserved_slots_verified','monitoring_ready'] as $key) checkConfig($default['export'][$key] === false, 'export default is closed');
+foreach (['enabled','compatible_workers_ready','monitoring_ready'] as $key) checkConfig($default['execution'][$key] === false, 'execution default is closed');
+checkConfig($default['execution']['consumer_stale_seconds'] === 210, 'execution heartbeat default is bounded');
 checkConfig($default['export']['reserved_slots'] === 2 && $default['export']['queue_wait_budget_ms'] === 10000 && $default['export']['publication_reserve_ms'] === 5000, 'default capacity unchanged');
 foreach ([false, 0, 'false', '0', '', 'FALSE', 'yes', 'off', 'TRUE', [], 2] as $invalid) {
-    $c = configFixture(['monitor_registered'=>$invalid,'export_compatible_workers_ready'=>$invalid,'export_reserved_slots_verified'=>$invalid,'export_monitoring_ready'=>$invalid]);
-    checkConfig($c['monitoring']['registered'] === false && $c['export']['compatible_workers_ready'] === false && $c['export']['reserved_slots_verified'] === false && $c['export']['monitoring_ready'] === false, 'non-explicit values fail closed');
+    $c = configFixture(['monitor_registered'=>$invalid,'export_compatible_workers_ready'=>$invalid,'export_reserved_slots_verified'=>$invalid,'export_monitoring_ready'=>$invalid,'execution_enabled'=>$invalid,'execution_compatible_workers_ready'=>$invalid,'execution_monitoring_ready'=>$invalid]);
+    checkConfig($c['monitoring']['registered'] === false && $c['export']['compatible_workers_ready'] === false && $c['export']['reserved_slots_verified'] === false && $c['export']['monitoring_ready'] === false && $c['execution']['enabled'] === false && $c['execution']['compatible_workers_ready'] === false && $c['execution']['monitoring_ready'] === false, 'non-explicit values fail closed');
 }
 foreach ([true, 1, 'true', '1'] as $enabled) {
     checkConfig(configFixture(['export_compatible_workers_ready'=>$enabled])['export']['compatible_workers_ready'] === true, 'explicit boolean representation accepted');
+    checkConfig(configFixture(['execution_enabled'=>$enabled])['execution']['enabled'] === true, 'explicit execution boolean representation accepted');
 }
+foreach ([29,301,'30seconds',true,[]] as $bad) checkConfig(configFixture(['execution_consumer_stale_seconds'=>$bad])['execution']['consumer_stale_seconds'] === null, 'invalid execution heartbeat cannot silently use default');
 $valid = ['monitor_registered'=>'1','monitor_capacity_count'=>'2','monitor_export_min_samples'=>'10',
     'monitor_export_failure_rate'=>'0.5','monitor_export_consecutive_failures'=>'5','monitor_security_count'=>'1',
     'monitor_unknown_count'=>'1','monitor_technical_count'=>'5','monitor_cleanup_stale_seconds'=>'60','monitor_duration_ms'=>'180000'];

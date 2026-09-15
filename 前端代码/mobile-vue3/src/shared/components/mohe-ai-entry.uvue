@@ -111,6 +111,9 @@ function abandonUnavailableRun() : void { if (timer != null) clearTimeout(timer)
 function newConversation() : void { if (busy.value || (pending != null && run == null)) return; lifecycle++; queuedClarificationId = ''; let all = load(); conversation = id(); all.push({id:conversation,created_at:Date.now(),rounds:[]}); uni.setStorageSync(storageKey,all); displayed.value = []; run = null; clarification.value = null; clearGuidance(); exportReady.value = false; let stored = activeRecord(); if (stored == null || !validResolvedRun(stored.resolved_run)) clearActive() }
 function openPanel() : void { opened.value = true; if (conversation.length == 0) newConversation() }
 function binding() : any { return {client_session_id:sessionId,generation:run.generation,run_delivery_token:run.run_delivery_token} }
+// The Run response decides its own execution path. Bootstrap is just a
+// snapshot and may have changed after this customer request was accepted.
+function needsCompatibilityExecution(value : any) : boolean { return value != null && (value.execution_mode == 'compatibility' || (value.execution_mode == null && (bootstrap == null || bootstrap.async_execution !== true))) }
 function schedulePoll() : void {
   if (timer != null) clearTimeout(timer)
   let source = run, expectedLifecycle = lifecycle
@@ -178,12 +181,12 @@ function submit() : void {
     accept(r.data)
     if (terminal()) return
     if (closeRequested) { cancelRun(); return }
-    if (bootstrap == null || bootstrap.async_execution !== true) executeCompatibility(run,expectedLifecycle)
+    if (needsCompatibilityExecution(run)) executeCompatibility(run,expectedLifecycle)
     schedulePoll()
   })
 }
 function executeCompatibility(source : any,expectedLifecycle : number) : void {
-  if (compatibilityExecuting || pending == null || source == null || terminal() || closeRequested || (bootstrap != null && bootstrap.async_execution === true)) return
+  if (compatibilityExecuting || pending == null || source == null || terminal() || closeRequested || !needsCompatibilityExecution(source)) return
   compatibilityExecuting = true
   let body : any = binding(); body.question = pending.question; body.history = pending.history; body.output_format = pending.output_format
   if (pending.context_ref != null) body.context_ref = pending.context_ref
@@ -323,7 +326,7 @@ function resumeActive(record : any) : void {
         if (same && queuedClarificationId.length == 0 && run.clarification_rejected !== true) { confirmChoices(); return }
         guidanceSubmission = null; persistActive()
       }
-      if (!terminal() && bootstrap != null && bootstrap.async_execution !== true) {
+      if (!terminal() && needsCompatibilityExecution(run)) {
         if (pending != null) executeCompatibility(run,expectedLifecycle)
         else if (['READY','RECEIVED'].indexOf(String(run.status)) >= 0) { abandonUnavailableRun(); return }
       }

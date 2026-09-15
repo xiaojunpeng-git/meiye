@@ -31,12 +31,17 @@ case "$SITE_KEY" in
   *) echo "未知站点 $SITE_KEY"; exit 2 ;;
 esac
 
-echo "→ rsync 后端 app/route/mohe → $REMOTE （不覆盖 .env/runtime/public/vendor）"
-rsync -az --delete \
+echo "→ rsync 后端 app/route/mohe 与魔核 AI 配置 → $REMOTE （不覆盖 .env/runtime/public/vendor，且不删除远端文件）"
+rsync -az \
   --exclude 'runtime/' \
   "$SRC/app/" "$SSH_HOST:$REMOTE/app/"
-rsync -az --delete "$SRC/route/" "$SSH_HOST:$REMOTE/route/"
+rsync -az "$SRC/route/" "$SSH_HOST:$REMOTE/route/"
 rsync -az "$SRC/mohe/" "$SSH_HOST:$REMOTE/mohe/"
+# Deploy only the two source-controlled AI configuration files.  In
+# particular, never rsync the whole config directory because .env and
+# instance-specific connection settings must remain on the target instance.
+rsync -az "$SRC/config/console.php" "$SSH_HOST:$REMOTE/config/console.php"
+rsync -az "$SRC/config/mohe_ai.php" "$SSH_HOST:$REMOTE/config/mohe_ai.php"
 # 清缓存（不重启 Swoole，调用方按需重启）
 ssh "$SSH_HOST" "rm -rf '$REMOTE/runtime/cache/'* 2>/dev/null || true; echo CACHE_CLEARED"
 echo "DEPLOY_BACKEND_OK $SITE_KEY"

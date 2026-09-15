@@ -19,6 +19,20 @@ return [
     'run_budget_ms'=>180000,
     'execution_slots'=>4,
     'active_run_limit'=>8,
+    // The HTTP create acknowledgement becomes a durable queue acceptance only
+    // after this instance has a verified compatible consumer and monitoring.
+    // Keeping the default closed preserves the synchronous compatibility path
+    // during a staged rollout instead of leaving customers with unobserved
+    // queued work.
+    'execution'=>[
+        'enabled'=>$flag('execution_enabled'),
+        'compatible_workers_ready'=>$flag('execution_compatible_workers_ready'),
+        'monitoring_ready'=>$flag('execution_monitoring_ready'),
+        // A live heartbeat is required in addition to the release
+        // attestations above.  It prevents an accepted Run from waiting for a
+        // consumer that is merely configured on disk but not actually running.
+        'consumer_stale_seconds'=>$integer('execution_consumer_stale_seconds',210,30,300),
+    ],
     // Frozen into each new Run. A running question can never extend its guidance quota.
     'max_clarification_rounds'=>$integer('max_clarification_rounds', 3, 3, 5),
     // No implied healthy status until thresholds and supervision frequency are registered.

@@ -25,6 +25,7 @@ function setup({delayCreate=false,clarification=false}={}) {
       return url.endsWith('/execute')?new Promise(resolve=>setTimeout(()=>resolve(result),1150)):result;
     }
     if(url.endsWith('/execute'))return json({run_id:id,generation:1,status:'COMPLETED',answer:{summary:'已校验答案'+sequence,context_ref:'fixture-context-'+sequence,cards:[{metric_name:'消耗业绩',display_value:'123',unit:'元'}]}});
+    if(url.endsWith('/delivery'))return json({accepted:true});
     if(url.endsWith('/cancel'))return json({run_id:id,generation:1,status:'CANCELLED'});
     throw new Error('unexpected fixture endpoint');
   };
@@ -60,6 +61,9 @@ function setup({delayCreate=false,clarification=false}={}) {
   const fourth=f.calls.filter(c=>c.url.endsWith('/runs'))[3];eq(fourth.body.conversation_id,creates[0].body.conversation_id);eq(fourth.body.history.length,2);
   eq(fourth.body.context_ref,'fixture-context-2'); // not the last answer in another conversation
   eq(f.calls.filter(c=>c.url.endsWith('/execute'))[3].body.context_ref,'fixture-context-2');
+  const deliveries=f.calls.filter(c=>c.url.endsWith('/delivery'));
+  eq(deliveries.length,4);eq(Object.keys(deliveries[0].body).sort(),['client_elapsed_ms','client_session_id','generation','run_delivery_token']);
+  eq(Number.isSafeInteger(deliveries[0].body.client_elapsed_ms),true);
   eq(window.localStorage.getItem('mohe-ai:v1:account-one').includes('fixture-key-not-real'),false);
   f.dispose();
 }
@@ -76,7 +80,10 @@ for(const action of ['close','dispose']) {
   if(action==='close')f.click('关闭');else f.dispose();
   eq(f.calls.filter(c=>c.url.endsWith('/cancel')).length,0);
   f.release();await flush();await flush();
-  eq(f.calls.filter(c=>c.url.endsWith('/cancel')).length,1);
+  // Closing is an explicit customer cancellation.  Replacing a page is not:
+  // the late admission remains recoverable for the next mounted entry.
+  eq(f.calls.filter(c=>c.url.endsWith('/cancel')).length,action==='close'?1:0);
+  if(action==='dispose')assert.equal(JSON.parse(window.localStorage.getItem('mohe-ai:v1:account-one:runtime')).pending_create.question,'今天消耗业绩多少？');
   eq(f.calls.filter(c=>c.url.endsWith('/execute')).length,0);
   if(action==='close'){eq(f.root().querySelector('.panel').hidden,true);f.dispose();}
 }

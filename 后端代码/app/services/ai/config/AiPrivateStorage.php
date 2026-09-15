@@ -40,7 +40,10 @@ final class AiPrivateStorage
     }
     public function put(string $kind, array $data, int $expiresAt): string
     {
-        if (!in_array($kind, ['answer', 'clarification', 'evidence'], true) || $expiresAt <= time() || $expiresAt > time() + 86400) throw new RuntimeException('AI_PRIVATE_OBJECT_INVALID');
+        // A queued request is encrypted server-side input.  The queue itself
+        // receives only the Run id; neither wording nor authentication data is
+        // ever placed in Redis or in the Run table.
+        if (!in_array($kind, ['answer', 'clarification', 'evidence', 'request'], true) || $expiresAt <= time() || $expiresAt > time() + 86400) throw new RuntimeException('AI_PRIVATE_OBJECT_INVALID');
         $this->directory(); $ref = $kind . '-' . bin2hex(random_bytes(24));
         $payload = json_encode(['kind' => $kind, 'expires_at' => $expiresAt, 'data' => $data], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if ($payload === false || strlen($payload) > 1048576) throw new RuntimeException('AI_PRIVATE_OBJECT_INVALID');
@@ -56,7 +59,7 @@ final class AiPrivateStorage
     }
     public function read(string $ref): array
     {
-        if (!preg_match('/^(answer|clarification|evidence)-[a-f0-9]{48}$/D', $ref)) throw new RuntimeException('AI_PRIVATE_OBJECT_INVALID');
+        if (!preg_match('/^(answer|clarification|evidence|request)-[a-f0-9]{48}$/D', $ref)) throw new RuntimeException('AI_PRIVATE_OBJECT_INVALID');
         $path = $this->root . '/' . $ref;
         if (!is_file($path) || is_link($path) || filesize($path) < 29 || filesize($path) > 1048604) throw new RuntimeException('AI_PRIVATE_OBJECT_UNAVAILABLE');
         $bytes = file_get_contents($path);
@@ -66,6 +69,14 @@ final class AiPrivateStorage
         if ($object['expires_at'] <= time()) throw new RuntimeException('AI_PRIVATE_OBJECT_EXPIRED');
         return $object['data'];
     }
+    /** Remove one known encrypted object after its owning Run can no longer use it. */
+    public function discard(string $ref): void
+    {
+        if (!preg_match('/^(answer|clarification|evidence|request)-[a-f0-9]{48}$/D',$ref)) throw new RuntimeException('AI_PRIVATE_OBJECT_INVALID');
+        $path=$this->root.'/'.$ref;
+        if (!file_exists($path)) return;
+        if (is_link($path) || !is_file($path) || !@unlink($path)) throw new RuntimeException('AI_PRIVATE_STORAGE_UNAVAILABLE');
+    }
     public function cleanup(): int
     {
         if (!is_dir($this->root)) return 0; $count = 0;
@@ -73,7 +84,7 @@ final class AiPrivateStorage
         $this->signingKey();
         foreach (new \DirectoryIterator($this->root) as $file) {
             $name = $file->getFilename();
-            if (!$file->isFile() || $file->isLink() || !preg_match('/^(answer|clarification|evidence)-[a-f0-9]{48}$/D', $name)) continue;
+            if (!$file->isFile() || $file->isLink() || !preg_match('/^(answer|clarification|evidence|request)-[a-f0-9]{48}$/D', $name)) continue;
             try { $this->read($name); } catch (RuntimeException $exception) {
                 // Delete only this private namespace, never a business/export directory.
                 if (($exception->getMessage()==='AI_PRIVATE_OBJECT_EXPIRED' || $file->getMTime()+86400<=time()) && unlink($file->getPathname())) $count++;

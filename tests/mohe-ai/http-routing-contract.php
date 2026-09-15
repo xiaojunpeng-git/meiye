@@ -24,7 +24,7 @@ require $backend.'/route/a-ai.php';
 \think\facade\Route::any('api/mobile/:path','Legacy/miss')->pattern(['path'=>'.*']);
 $checks=0;
 foreach (['adminapi/ai'=>'admin.v1.ai.','cashierapi/v3/ai'=>'cashier.v3.','api/mobile/merchant/ai'=>'mobile.merchant.'] as $base=>$controllerPrefix) {
-    foreach ([['GET','bootstrap','aiBootstrap'],['POST','runs','aiCreate'],['PUT','config','aiConfigSave'],['POST','config/check','aiConfigCheck'],['GET','runs/'.str_repeat('a',48),'aiStatus'],['POST','runs/'.str_repeat('a',48).'/execute','aiExecute'],['POST','runs/'.str_repeat('a',48).'/cancel','aiCancel'],['POST','runs/'.str_repeat('a',48).'/clarify','aiClarify'],['GET','runs/'.str_repeat('a',48).'/export','aiExport']] as $case) {
+    foreach ([['GET','bootstrap','aiBootstrap'],['POST','runs','aiCreate'],['PUT','config','aiConfigSave'],['POST','config/check','aiConfigCheck'],['GET','runs/'.str_repeat('a',48),'aiStatus'],['POST','runs/'.str_repeat('a',48).'/delivery','aiDelivery'],['POST','runs/'.str_repeat('a',48).'/execute','aiExecute'],['POST','runs/'.str_repeat('a',48).'/cancel','aiCancel'],['POST','runs/'.str_repeat('a',48).'/clarify','aiClarify'],['GET','runs/'.str_repeat('a',48).'/export','aiExport']] as $case) {
         $request=new \think\Request(); $request->setMethod($case[0])->setPathinfo($base.'/'.$case[1])->setHost('localhost');
         $dispatch=$router->matchOnly($request);
         $expected=[$controllerPrefix.'Ai',$case[2]];

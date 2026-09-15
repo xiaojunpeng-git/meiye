@@ -1,7 +1,7 @@
 <?php
 // Read-only deterministic review regressions: no app boot, database, model or network.
 $base=dirname(__DIR__,2).'/后端代码/app/services/';
-foreach (['BaseServices.php','metric/MetricDictionaryServices.php','query/metric/MetricMoneyFormatter.php','query/metric/MetricSemanticCatalog.php','ai/contract/AiContractException.php',
+foreach (['BaseServices.php','metric/MetricDictionaryServices.php','query/metric/MetricMoneyFormatter.php','query/metric/MetricSemanticCatalog.php','query/metric/MetricDefinitionRegistry.php','query/metric/MetricReadViewServices.php','ai/contract/AiContractException.php',
     'ai/model/AiModelInputProjector.php','ai/execution/AiWorkflowPlanner.php','ai/presentation/AiAnswerRenderer.php','ai/AiGatewayServices.php'] as $file) require_once $base.$file;
 $passed=0; $failed=[];
 $check=function($ok,$label) use (&$passed,&$failed) {if ($ok) ++$passed; else $failed[]=$label;};

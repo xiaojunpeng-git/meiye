@@ -4,6 +4,7 @@ namespace app\services\ai;
 use app\services\ai\config\AiConfigStore;
 use app\services\ai\config\AiPrivateStorage;
 use app\services\ai\execution\AiRunStore;
+use app\services\ai\execution\AiExecutionEnvelope;
 use app\services\ai\execution\AiWorkflowPlanner;
 use app\services\ai\execution\AiRegisteredPlanCompiler;
 use app\services\ai\execution\AiRegisteredWorkflowExecutor;
@@ -21,7 +22,7 @@ use app\services\query\metric\MetricReadViewServices;
 use app\services\query\metric\MetricReadViewStore;
 use RuntimeException;
 
-/** Conversation bodies exist only in the HTTP execution stack. No body is queued or logged. */
+/** Conversation bodies are never logged or queued; async input is encrypted in instance-private storage. */
 final class AiGatewayServices
 {
     private $runs; private $config; private $private; private $instance; private $views; private $model; private $queryTransaction; private $exports;
@@ -48,9 +49,31 @@ final class AiGatewayServices
         $this->initialize();
         $monitor=$this->monitor();
         try {
+            // A durable queued request is only admitted while this independent
+            // supervisor also proves it is alive.  Consumer heartbeats alone
+            // cannot repair a failed first enqueue after the client disconnects.
+            try { $this->runs->heartbeatExecutionSupervisor($this->supervisorId(),getmypid(),$this->supervisorHost()); } catch (\Throwable $ignored) {}
             $state=$this->runs->cleanup();
+            $redelivered=0; $expiredWorkers=0;
+            if ($this->asyncExecutionReady()) foreach ($this->runs->pendingExecutionIds() as $runId) {
+                try { \app\services\ai\execution\AiRunExecutionQueue::push($this->instance,$runId); ++$redelivered; } catch (\Throwable $ignored) {}
+            }
+            // Remove stale heartbeats even when no live consumer remains.
+            // A missing additive table is a staged-rollout condition, not a
+            // reason for routine supervision to fail.
+            try { $expiredWorkers=$this->runs->cleanupExpiredExecutionConsumers(); } catch (\Throwable $ignored) {}
+            $recovered=\app\services\ai\execution\AiRunExecutionRuntime::recoverStoppedWorkers($this->runs);
+            // Deadline expiry and pre-claim validation can terminally retire a
+            // Run before a Worker reaches its normal finally block. Clear the
+            // encrypted request as soon as its Run has no possible consumer.
+            $retiredInputs=0;
+            try {
+                foreach ($this->runs->takeTerminalUnclaimedExecutionInputRefs() as $ref) {
+                    try { $this->private->discard($ref); ++$retiredInputs; } catch (\Throwable $ignored) {}
+                }
+            } catch (\Throwable $ignored) {}
             $exports=$this->exportRuntime()->cleanup();
-            $result=['runtime'=>$state,'exports'=>$exports,'private_objects_removed'=>$this->private->cleanup(),'read_views_removed'=>$this->views->cleanup()];
+            $result=['runtime'=>$state,'execution_redelivered'=>$redelivered,'execution_workers_recovered'=>$recovered,'execution_workers_expired'=>$expiredWorkers,'execution_inputs_retired'=>$retiredInputs,'exports'=>$exports,'private_objects_removed'=>$this->private->cleanup(),'read_views_removed'=>$this->views->cleanup()];
             $monitor->recordCleanup(empty($exports['retry']));
             return $result;
         } catch (\Throwable $error) {
@@ -59,13 +82,21 @@ final class AiGatewayServices
         }
     }
 
+    /** Dedicated queue entry point.  It is intentionally not an HTTP action. */
+    public function executeQueued(array $context,array $owner,string $runId,int $generation,string $operation,array $input): array
+    {
+        $this->initialize();
+        if (!in_array($operation,['execute','clarify'],true)) throw new RuntimeException('AI_OPERATION_INVALID');
+        return $this->execute($operation,$context,$owner,$runId,$generation,$input);
+    }
+
     public function handle(string $operation,array $context,array $input,string $runId='')
     {
         $schemas=[
             'bootstrap'=>['client_session_id'],
             'create'=>['client_request_id','conversation_id','client_session_id','window_token','question','history','output_format','guidance_schema_version','context_ref'],
             'execute'=>['client_request_id','conversation_id','client_session_id','window_token','question','history','output_format','generation','run_delivery_token','guidance_schema_version','context_ref'],
-            'status'=>['client_session_id','generation','run_delivery_token'], 'cancel'=>['client_session_id','generation','run_delivery_token'],
+            'status'=>['client_session_id','generation','run_delivery_token'], 'delivery'=>['client_session_id','generation','run_delivery_token','client_elapsed_ms'], 'cancel'=>['client_session_id','generation','run_delivery_token'],
             'export'=>['client_session_id','generation','run_delivery_token'],
             'clarify'=>['client_session_id','generation','run_delivery_token','clarification_id','choices','schema_version','step_revision','intent_revision','client_submission_id','revise_clarification_id'],
             'config_get'=>[], 'config_save'=>['version','enabled','model','api_key','external_processing_authorized','external_scope_version'], 'config_check'=>['confirm_cost'],
@@ -97,6 +128,7 @@ final class AiGatewayServices
                 'identity_key'=>$this->identity($context),'window_token'=>$this->token(['type'=>'window','identity'=>$this->identity($context),'window'=>$session,'expires'=>time()+86400]),
                 'server_time'=>time()*1000,'retention_seconds'=>86400,'history_round_limit'=>20,'can_configure'=>!empty($context['can_configure']),
                 'guidance_schema_version'=>'mohe-clarification-v2','max_clarification_rounds'=>$this->limits()['max_clarification_rounds'],
+                'async_execution'=>$this->asyncExecutionReady(),
                 'capabilities'=>$this->capabilities($context), 'disabled_reason'=>$configuration['enabled']?'':'AI_NOT_CONFIGURED'];
         }
         // Revocation must never prevent this authenticated owner from stopping their old task.
@@ -121,7 +153,15 @@ final class AiGatewayServices
                 'CIRCUIT_OPEN'=>'近期请求连续未能完成，已暂停新请求两分钟，请稍后重试。',
                 'OTHER_CONVERSATION_ACTIVE'=>'您还有一个对话正在执行，请先完成或停止该任务。',
             ][$created['reason']]??'当前使用人数较多，请稍后再问。'];
-            return $this->present($context,$owner,$created['run']);
+            $executionMode='compatibility';
+            if ($this->asyncExecutionReady()) {
+                $this->queueExecution($context,$owner,$created['run'],'execute',$input);
+                // Redis acknowledgement is not treated as execution proof.
+                // Polling and supervision redeliver a durably queued Run.
+                try { \app\services\ai\execution\AiRunExecutionQueue::push($this->instance,$created['run']['run_id']); } catch (\Throwable $ignored) {}
+                $executionMode='async';
+            }
+            return $this->present($context,$owner,$this->runs->get($owner,$created['run']['run_id'],$created['run']['generation']))+['execution_mode'=>$executionMode];
         }
         $session=$this->identifier($input['client_session_id']??null);
         $proof=$this->verifyToken($input['run_delivery_token']??'',$context,$session,'run');
@@ -130,20 +170,116 @@ final class AiGatewayServices
         $owner=['account_id'=>(int)$context['account_id'],'terminal'=>$context['terminal'],'conversation_id'=>$proof['conversation'],'window_id'=>$session];
         if ($operation==='cancel') {
             $cancelled=$this->runs->cancel($owner,$runId,$generation);
+            // A queued request with no worker claim can never run after this
+            // terminal cancellation, so its encrypted envelope is no longer
+            // needed. Claimed work keeps its input until the worker stops.
+            try { if (($ref=$this->runs->discardUnclaimedExecutionInput($owner,$runId,$generation))!==null) $this->private->discard($ref); } catch (\Throwable $ignored) {}
             if ($cancelled['status']==='CANCELLED' && !empty($cancelled['answer_ref'])) {
                 // Logical cancellation is already committed; cleanup also retries this notification.
                 try { $this->exportRuntime()->cancel($context,$owner,$cancelled); } catch (\Throwable $ignored) {}
             }
             return $this->present($context,$owner,$cancelled);
         }
-        if ($operation==='status') return $this->present($context,$owner,$this->runs->get($owner,$runId,$generation));
+        if ($operation==='status') {
+            $current=$this->runs->get($owner,$runId,$generation);
+            // Do not enqueue every status poll while the customer is simply
+            // choosing a clarification.  Only a durable queued envelope (or
+            // one whose pre-claim worker reservation has gone stale) needs a
+            // new queue message.
+            if ($this->asyncExecutionReady() && $this->runs->executionNeedsDispatch($owner,$runId,$generation)) {
+                try { \app\services\ai\execution\AiRunExecutionQueue::push($this->instance,$runId); } catch (\Throwable $ignored) {}
+            }
+            return $this->present($context,$owner,$current);
+        }
+        if ($operation==='delivery') {
+            // This is observability only.  It is accepted only from the signed
+            // owner of a completed Run and never changes its answer, status,
+            // permissions, workflow, or any business calculation.
+            $elapsed=filter_var($input['client_elapsed_ms']??null,FILTER_VALIDATE_INT);
+            if ($elapsed===false || $elapsed<0 || $elapsed>300000) throw new RuntimeException('AI_INPUT_SCHEMA_INVALID');
+            $this->runs->recordClientDelivery($owner,$runId,$generation,$elapsed);
+            return ['accepted'=>true];
+        }
         if ($operation==='export') {
             $descriptor=$this->exportRuntime()->download($context,$owner,$this->runs->get($owner,$runId,$generation));
             $path=(new \app\services\query\UnifiedQueryExportStorage())->absolutePath($descriptor['storageKey']);
             return download($path,$descriptor['fileName'])->header(['Cache-Control'=>'no-store','X-Content-Type-Options'=>'nosniff']);
         }
         if (!in_array($operation,['execute','clarify'],true)) throw new RuntimeException('AI_OPERATION_INVALID');
+        if ($this->asyncExecutionReady()) {
+            if ($operation==='execute') {
+                // Compatibility trigger for an older client.  Creation already
+                // persisted the same body, so never replace it with a second
+                // client copy or run work inside this HTTP request.
+                $body=$this->conversation($input); $this->runs->assertRequest($owner,$runId,$generation,$this->bodyHash($body));
+                try { \app\services\ai\execution\AiRunExecutionQueue::push($this->instance,$runId); } catch (\Throwable $ignored) {}
+                return $this->present($context,$owner,$this->runs->get($owner,$runId,$generation));
+            }
+            $queued=$this->queueExecution($context,$owner,['run_id'=>$runId,'generation'=>$generation], 'clarify',$input);
+            try { \app\services\ai\execution\AiRunExecutionQueue::push($this->instance,$runId); } catch (\Throwable $ignored) {}
+            return $this->present($context,$owner,$queued);
+        }
+        // A synchronous compatibility request must use the same operation
+        // timing boundary as an asynchronous request.  This is telemetry only:
+        // it neither claims work nor changes the workflow/permission path.
+        $this->runs->beginCompatibilityExecution($owner,$runId,$generation,$operation);
         return $this->execute($operation,$context,$owner,$runId,$generation,$input);
+    }
+
+    /** Persist only encrypted request data plus a minimal trusted principal binding. */
+    private function queueExecution(array $context,array $owner,array $run,string $operation,array $input): array
+    {
+        $projected=AiExecutionEnvelope::project($operation,$input);
+        $hash=AiExecutionEnvelope::hash($operation,$projected,$this->private->signingKey());
+        if ($operation==='clarify' && ($input['schema_version']??null)==='mohe-clarification-v2') {
+            $submissionId=$this->identifier($input['client_submission_id']??null);
+            $state=$this->runs->clarificationSubmissionState($owner,$run['run_id'],(int)$run['generation'],$submissionId,$hash);
+            // A delayed retry of a previously accepted, rejected, or still
+            // running submission must only observe the current Run. It may
+            // never replace the durable queue envelope with old choices.
+            if ($state!=='new') return $this->runs->get($owner,$run['run_id'],(int)$run['generation']);
+        }
+        $expires=intdiv((int)$run['expires_at'],1000);
+        $payload=['run_id'=>$run['run_id'],'generation'=>(int)$run['generation'],'operation'=>$operation,'owner'=>$owner,
+            'binding'=>$this->principalBinding($context),'input'=>$projected];
+        $ref=$this->private->put('request',$payload,$expires);
+        try {
+            $queued=$this->runs->queueExecution($owner,$run['run_id'],(int)$run['generation'],$operation,$ref,$hash);
+            // The durable store is the idempotency authority. A duplicate
+            // browser retry may have written the same envelope just before
+            // learning its earlier acknowledgement; it must be deleted now.
+            if (!empty($queued['execution_replayed'])) $this->private->discard($ref);
+            return $queued;
+        } catch (\Throwable $error) {
+            // The Run transaction either owns this reference or rolls back.
+            try { $this->private->discard($ref); } catch (\Throwable $ignored) {}
+            throw $error;
+        }
+    }
+
+    private function principalBinding(array $context): array
+    {
+        $binding=['terminal'=>$context['terminal'],'account_id'=>(int)$context['account_id'],'principal_kind'=>$context['principal_kind']??''];
+        if (!in_array($binding['terminal'],['platform','store','merchant'],true) || $binding['account_id']<1 || !is_string($binding['principal_kind'])) throw new RuntimeException('AI_EXECUTION_PRINCIPAL_INVALID');
+        foreach (['origin_store_id','employee_id','staff_id'] as $key) if (array_key_exists($key,$context)) $binding[$key]=(int)$context[$key];
+        if (array_key_exists('origin_organization_id',$context)) $binding['origin_organization_id']=(string)$context['origin_organization_id'];
+        return $binding;
+    }
+
+    private function asyncExecutionReady(): bool
+    {
+        // Isolated contract harnesses intentionally have no framework global;
+        // absence means the staged compatibility mode, never implicit async.
+        if (!function_exists('config')) return false;
+        $settings=(array)config('mohe_ai.execution',[]);
+        $stale=(int)($settings['consumer_stale_seconds']??0);
+        if (($settings['enabled']??null)!==true || ($settings['compatible_workers_ready']??null)!==true
+            || ($settings['monitoring_ready']??null)!==true || $stale<30
+            || !\app\services\ai\execution\AiRunExecutionQueue::supported()) return false;
+        // Older instances do not have the additive worker table yet. Treat
+        // that as staged compatibility mode, never as a bootstrap failure.
+        try { return $this->runs->hasLiveExecutionConsumer($stale) && $this->runs->hasLiveExecutionSupervisor($stale); }
+        catch (\Throwable $ignored) { return false; }
     }
 
     private function execute(string $operation,array $context,array $owner,string $id,int $generation,array $input): array
@@ -162,7 +298,7 @@ final class AiGatewayServices
                 $r=$this->runs->get($owner,$id,$generation);
                 if ($r['guidance_schema_version']==='mohe-clarification-v2') {
                     if (($input['schema_version']??'')!=='mohe-clarification-v2') throw new RuntimeException('AI_CLIENT_UPGRADE_REQUIRED');
-                    $submission=['request_id'=>$this->identifier($input['client_submission_id']??null),'request_hash'=>$this->bodyHash($input),
+                    $submission=['request_id'=>$this->identifier($input['client_submission_id']??null),'request_hash'=>$this->executionHash('clarify',$input),
                         'clarification_ref'=>$this->identifier($input['clarification_id']??null),'intent_revision'=>$input['intent_revision']??null,'step_revision'=>$input['step_revision']??null];
                 } else {
                     if (array_intersect(array_keys($input),['schema_version','step_revision','intent_revision','client_submission_id','revise_clarification_id'])) throw new RuntimeException('AI_CLARIFICATION_INVALID');
@@ -206,6 +342,11 @@ final class AiGatewayServices
                 try { [$compiled,$steps]=$this->advanceGuidance($stored,$r['clarification_ref'],$input); }
                 catch (\Throwable $error) {
                     if (!in_array($error->getMessage(),['AI_CLARIFICATION_INVALID','AI_DATE_INVALID'],true)) throw $error;
+                    // The durable acknowledgement was accepted before the
+                    // worker checked the complete choice set.  Re-open this
+                    // exact step, so a client never remains waiting behind a
+                    // locally hidden, invalid submission.
+                    if ($submission!==null) $this->runs->rejectClarification($owner,$id,$generation,$worker,$submission['request_id']);
                     $r=$this->runs->pauseForClarification($owner,$id,$generation,$worker,$r['clarification_ref'],false); $paused=true;
                     $response=$this->present($context,$owner,$r); $response['message']='所选条件格式不完整，请检查后重新确认。'; return $response;
                 }
@@ -1618,6 +1759,19 @@ final class AiGatewayServices
         };
         return hash_hmac('sha256',json_encode($canonical($body),JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$this->private->signingKey());
     }
+    private function executionHash(string $operation,array $input): string
+    {
+        return AiExecutionEnvelope::hash($operation,$input,$this->private->signingKey());
+    }
+    private function supervisorHost(): string
+    {
+        $host=(string)php_uname('n');
+        return preg_match('/^[A-Za-z0-9_.:-]{1,128}$/D',$host)?$host:'host-'.substr(hash('sha256',$host),0,32);
+    }
+    private function supervisorId(): string
+    {
+        return 'supervisor-'.getmypid().'-'.substr(hash('sha256',$this->instance.':'.$this->supervisorHost()),0,24);
+    }
     private function identity(array $c): string { return \app\services\ai\execution\AiAuthority::identity($c,$this->instance,$this->private->signingKey()); }
     private function permissionHash(array $c): string { return \app\services\ai\execution\AiAuthority::permissionHash($c); }
     private function identifier($value): string { if (!is_string($value)||!preg_match('/^[A-Za-z0-9_.:-]{1,128}$/D',$value)) throw new RuntimeException('AI_REFERENCE_INVALID'); return $value; }
@@ -1650,10 +1804,14 @@ final class AiGatewayServices
     {
         $result=['run_id'=>$run['run_id'],'generation'=>$run['generation'],'version'=>$run['version'],'status'=>$run['status'],'reason'=>$run['reason'],
             'progress'=>$this->progressText($run),'message'=>$this->progressText($run),'run_delivery_token'=>$this->token(['type'=>'run','identity'=>$this->identity($context),'window'=>$owner['window_id'],
-                'conversation'=>$owner['conversation_id'],'run'=>$run['run_id'],'generation'=>$run['generation'],'expires'=>intdiv($run['expires_at'],1000)])];
+                'conversation'=>$owner['conversation_id'],'run'=>$run['run_id'],'generation'=>$run['generation'],'expires'=>intdiv($run['expires_at'],1000)]),
+            'execution_mode'=>$run['execution_mode']??'compatibility'];
         if ($run['status']==='WAITING_CLARIFICATION') {
             $stored=$this->private->read($run['clarification_ref']); $this->assertBinding($stored,$owner,$run['run_id'],$run['generation']);
             $result['clarification']=['id'=>$run['clarification_ref'],'question'=>$stored['envelope']['question']??'请确认这一项查询条件','fields'=>$stored['envelope']['fields']];
+            // This flag contains no business data; it only tells a polling
+            // client that its already-accepted submission must be shown again.
+            $result['clarification_rejected']=!empty($run['clarification_rejected']);
             if ($run['guidance_schema_version']==='mohe-clarification-v2') {
                 $result['clarification']+=['schema_version'=>'mohe-clarification-v2','step_revision'=>1,'intent_revision'=>$run['clarification_count'],
                     'round_no'=>$run['clarification_count'],'max_clarification_rounds'=>$run['max_clarification_rounds'],

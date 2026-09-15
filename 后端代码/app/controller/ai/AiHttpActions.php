@@ -11,6 +11,7 @@ trait AiHttpActions
     public function aiCreate() { return $this->callAi('create'); }
     public function aiExecute(string $runId) { return $this->callAi('execute',$runId); }
     public function aiStatus(string $runId) { return $this->callAi('status',$runId); }
+    public function aiDelivery(string $runId) { return $this->callAi('delivery',$runId); }
     public function aiClarify(string $runId) { return $this->callAi('clarify',$runId); }
     public function aiCancel(string $runId) { return $this->callAi('cancel',$runId); }
     public function aiExport(string $runId) { return $this->callAi('export',$runId); }
@@ -68,6 +69,7 @@ trait AiHttpActions
                 'AI_MANAGEMENT_VERSION_NOT_FOUND'=>'所选配置版本不存在或不属于当前实例。',
                 'AI_CLIENT_UPGRADE_REQUIRED'=>'魔核 AI 已更新，请刷新页面后重新打开。',
                 'AI_CLARIFICATION_STALE'=>'这一步已更新，请使用当前显示的选项确认。',
+                'AI_CLARIFICATION_IN_PROGRESS'=>'当前选择已接纳，正在继续查询。',
                 'AI_IDEMPOTENCY_CONFLICT'=>'本次提交与先前记录不一致，请刷新任务状态后再操作。',
                 'AI_CONTEXT_REQUIRED'=>'前文条件已失效或无法核验，请在新问题中明确条件。',
             ][$exception->getMessage()]??'魔核 AI 请求未完成，请重试或联系管理员。';

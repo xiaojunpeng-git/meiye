@@ -10,6 +10,7 @@ export class DeviceSessions {
     if (typeof identity !== 'string' || !identity) throw new Error('缺少登录身份');
     this.storage = storage; this.clock = clock;
     this.key = 'mohe-ai:v1:' + encodeURIComponent(identity);
+    this.runtimeKey = this.key + ':runtime';
   }
   load() {
     let data;
@@ -29,13 +30,35 @@ export class DeviceSessions {
     // expiry and whether this new question actually refers to the old answer.
     return typeof ref === 'string' && ref.length > 0 ? ref : null;
   }
-  append(id, question, answer, presentation) {
+  append(id, question, answer, presentation, delivery = null) {
     const sessions = this.load(); const s = sessions.find(s => s.id === id);
     if (!s) throw new Error('会话已到期，请新建对话。');
     if (typeof question !== 'string' || typeof answer !== 'string') throw new Error('无效对话');
-    s.rounds.push({ question, answer, presentation, created_at: this.clock() }); this.save(sessions);
+    // A Run can be observed by the entry being removed and by its replacement
+    // at nearly the same time.  The server result is immutable, therefore a
+    // completed Run is one conversation round rather than two client events.
+    const runId = delivery && typeof delivery.run_id === 'string' ? delivery.run_id : '';
+    const generation = delivery && Number.isInteger(delivery.generation) ? delivery.generation : null;
+    if (runId && generation !== null && s.rounds.some(row => row.run_id === runId && row.generation === generation)) return false;
+    s.rounds.push({ question, answer, presentation, ...(runId && generation !== null ? { run_id: runId, generation } : {}), created_at: this.clock() }); this.save(sessions);
+    return true;
   }
-  clear() { this.storage.removeItem(this.key); }
+  loadRuntime() {
+    let value;
+    try { value = JSON.parse(this.storage.getItem(this.runtimeKey) || 'null'); } catch (_) { value = null; }
+    const now = this.clock();
+    if (!value || typeof value !== 'object' || typeof value.session_id !== 'string' || typeof value.conversation_id !== 'string'
+      || !Number.isSafeInteger(value.created_at) || value.created_at > now || value.created_at + RETENTION_MS <= now) {
+      this.storage.removeItem(this.runtimeKey); return null;
+    }
+    return value;
+  }
+  saveRuntime(value) { this.storage.setItem(this.runtimeKey, JSON.stringify(value)); }
+  clearRuntime() { this.storage.removeItem(this.runtimeKey); }
+  // A user-initiated history clear must not leave an active-run recovery
+  // record behind: otherwise a later remount could silently restore a task
+  // from the conversation the user explicitly removed.
+  clear() { this.storage.removeItem(this.key); this.clearRuntime(); }
 }
 export const isTerminal = status => ['COMPLETED', 'PARTIAL_SUCCEEDED', 'FAILED', 'CANCELLED'].includes(status);
 export function acceptRun(current, incoming) {

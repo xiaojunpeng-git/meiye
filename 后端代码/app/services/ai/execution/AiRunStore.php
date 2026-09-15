@@ -97,6 +97,13 @@ final class AiRunStore
     {
         return $this->transaction(function () use ($owner,$runId,$generation) {
             $r=$this->read($owner,$runId,$generation); $counts=json_decode($r['counters_json'],true)?:[];
+            // A status read is also a safe deadline fence for unclaimed work.
+            // Do not wait for the periodic supervisor before telling a client
+            // that a request which can no longer be executed has ended.
+            if (!$this->terminal($r) && $r['status']!=='WAITING_CLARIFICATION' && (int)$r['deadline_at']<=$this->now()) {
+                $this->expireRun($r);
+                $r=$this->read($owner,$runId,$generation); $counts=json_decode($r['counters_json'],true)?:[];
+            }
             if ($r['status']==='WAITING_CLARIFICATION' && $this->now()-(int)$r['pause_at']+($counts['clarification_wait_ms']??0)>=600000) {
                 $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\',reason=\'CLARIFICATION_EXPIRED\',version=version+1,last_clock_at=? WHERE instance_id=? AND run_id=?',[$this->now(),$this->instance,$runId]);
                 $r=$this->read($owner,$runId,$generation);
@@ -111,6 +118,385 @@ final class AiRunStore
             $this->read($owner,$runId,$generation);
             $receipt=$this->one('SELECT request_hash FROM '.$this->table('receipt').' WHERE instance_id=? AND run_id=?',[$this->instance,$runId]);
             if (!$receipt || !hash_equals($receipt['request_hash'],$requestHash)) { throw new RuntimeException('AI_IDEMPOTENCY_CONFLICT'); }
+        });
+    }
+
+    /**
+     * The database only retains a signed reference and hash.  The encrypted
+     * request itself lives in AiPrivateStorage, and the queue carries only a
+     * Run id.  This makes the create response a real acceptance point rather
+     * than a promise that a later browser /execute request will arrive.
+     */
+    public function queueExecution(array $owner,string $runId,int $generation,string $operation,string $requestRef,string $requestHash): array
+    {
+        if (!in_array($operation,['execute','clarify'],true) || !preg_match('/^request-[a-f0-9]{48}$/D',$requestRef)
+            || !preg_match('/^[a-f0-9]{64}$/D',$requestHash)) throw new RuntimeException('AI_EXECUTION_QUEUE_INVALID');
+        return $this->transaction(function () use($owner,$runId,$generation,$operation,$requestRef,$requestHash) {
+            $r=$this->read($owner,$runId,$generation); $counts=json_decode($r['counters_json'],true)?:[];
+            $expected=$operation==='execute'?'RECEIVED':'WAITING_CLARIFICATION';
+            if (($counts['execution_operation']??'')===$operation && ($counts['execution_hash']??'')===$requestHash) {
+                return $this->publicRun($r)+['execution_replayed'=>true];
+            }
+            // A clarification acknowledgement is a single immutable choice.
+            // Once the queue has accepted it, a later request must either be
+            // the same idempotent submission or wait for the worker's result;
+            // otherwise it could replace what the customer actually chose.
+            if ($operation==='clarify' && ($counts['execution_operation']??'')==='clarify'
+                && in_array($counts['execution_state']??'', ['QUEUED','DISPATCHING'],true)) {
+                throw new RuntimeException('AI_CLARIFICATION_IN_PROGRESS');
+            }
+            if ($r['status']!==$expected || $r['worker_token']!=='') throw new RuntimeException('AI_EXECUTION_QUEUE_INVALID');
+            $counts['execution_operation']=$operation;
+            $counts['execution_ref']=$requestRef;
+            $counts['execution_hash']=$requestHash;
+            $counts['execution_state']='QUEUED';
+            $acceptedAt=$this->now();
+            $counts['execution_accepted_at']=$acceptedAt;
+            $counts['execution_queued_at']=$acceptedAt;
+            $segments=is_array($counts['execution_segments']??null)?$counts['execution_segments']:[];
+            // Keep the initial request and each clarification continuation as
+            // separate latency samples. This is operational telemetry only.
+            if (count($segments)>=5) throw new RuntimeException('AI_EXECUTION_QUEUE_INVALID');
+            $segments[]=['operation'=>$operation,'mode'=>'async','accepted_at'=>$acceptedAt,'queued_at'=>$acceptedAt];
+            $counts['execution_segments']=$segments;
+            $counts['execution_segment_index']=count($segments)-1;
+            $counts['execution_mode']='async';
+            if ($operation==='clarify') unset($counts['clarification_rejected_ref']);
+            $counts['execution_dispatch_count']=(int)($counts['execution_dispatch_count']??0);
+            $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[
+                json_encode($counts),$this->instance,$runId
+            ]);
+            return $this->publicRun($this->read($owner,$runId,$generation));
+        });
+    }
+
+    /**
+     * Compatibility execution is still an execution sample.  Record it in
+     * exactly the same per-operation shape as a queued Run, so performance
+     * reports never compare an async queue-inclusive duration with a sync
+     * execution-only duration.  This contains timestamps only, no question,
+     * answer, identity, or model payload.
+     */
+    public function beginCompatibilityExecution(array $owner,string $runId,int $generation,string $operation): array
+    {
+        if (!in_array($operation,['execute','clarify'],true)) throw new RuntimeException('AI_EXECUTION_QUEUE_INVALID');
+        return $this->transaction(function () use($owner,$runId,$generation,$operation) {
+            $r=$this->read($owner,$runId,$generation); $counts=json_decode($r['counters_json'],true)?:[];
+            if ($this->terminal($r) || $r['worker_token']!=='') return $this->publicRun($r);
+            $expected=$operation==='execute'?'RECEIVED':'WAITING_CLARIFICATION';
+            if ($r['status']!==$expected) return $this->publicRun($r);
+            $segments=is_array($counts['execution_segments']??null)?$counts['execution_segments']:[];
+            $index=(int)($counts['execution_segment_index']??-1);
+            if (($counts['execution_mode']??'')==='compatibility' && isset($segments[$index])
+                && is_array($segments[$index]) && ($segments[$index]['operation']??'')===$operation) {
+                return $this->publicRun($r);
+            }
+            if (count($segments)>=5) throw new RuntimeException('AI_EXECUTION_QUEUE_INVALID');
+            $now=$this->now();
+            $segments[]=['operation'=>$operation,'mode'=>'compatibility','accepted_at'=>$now,'queued_at'=>$now,'started_at'=>$now];
+            $counts['execution_segments']=$segments;
+            $counts['execution_segment_index']=count($segments)-1;
+            $counts['execution_mode']='compatibility';
+            $counts['execution_accepted_at']=$now;
+            $counts['execution_queued_at']=$now;
+            $counts['execution_started_at']=$now;
+            $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[
+                json_encode($counts),$this->instance,$runId
+            ]);
+            return $this->publicRun($this->read($owner,$runId,$generation));
+        });
+    }
+
+    /**
+     * Stores one bounded browser-observed elapsed duration for the current
+     * execution segment. The browser's number is intentionally kept separate
+     * from authoritative server timings: it measures click-to-render, but can
+     * never affect workflow state, permissions, answer content, or health
+     * decisions. A duplicate notification is an idempotent no-op.
+     */
+    public function recordClientDelivery(array $owner,string $runId,int $generation,int $elapsedMs): void
+    {
+        if ($elapsedMs<0 || $elapsedMs>300000) throw new RuntimeException('AI_EXECUTION_QUEUE_INVALID');
+        $this->transaction(function () use($owner,$runId,$generation,$elapsedMs) {
+            $r=$this->read($owner,$runId,$generation);
+            if (!in_array($r['status'],['COMPLETED','PARTIAL_SUCCEEDED'],true)) return;
+            $counts=json_decode($r['counters_json'],true)?:[];
+            // Private-envelope retirement removes the active index after the
+            // Worker finishes.  A terminal Run cannot gain another segment,
+            // so the retained final array item is the only safe target for a
+            // first browser-visible answer receipt.
+            $segments=is_array($counts['execution_segments']??null)?$counts['execution_segments']:[];
+            $index=count($segments)-1;
+            if ($index<0 || !isset($segments[$index]) || !is_array($segments[$index])) return;
+            // First visible render is the comparable outcome. A reload or
+            // duplicate poll cannot replace it with a later duration.
+            if (isset($segments[$index]['client_elapsed_ms'])) return;
+            $segments[$index]['client_elapsed_ms']=$elapsedMs;
+            $segments[$index]['client_reported_at']=$this->now();
+            $counts['execution_segments']=$segments;
+            $this->execute('UPDATE '.$this->table('run').' SET counters_json=? WHERE instance_id=? AND run_id=?',[
+                json_encode($counts),$this->instance,$runId
+            ]);
+        });
+    }
+
+    /** Internal worker lookup.  Never expose this envelope through status. */
+    public function queuedExecution(string $runId): ?array
+    {
+        if (!preg_match('/^[a-f0-9]{48}$/D',$runId)) return null;
+        return $this->transaction(function () use($runId) {
+            $r=$this->one('SELECT * FROM '.$this->table('run').' WHERE instance_id=? AND run_id=?',[$this->instance,$runId]);
+            if (!$r || (int)$r['expires_at']<=$this->now()) return null;
+            $counts=json_decode($r['counters_json'],true)?:[];
+            if (($counts['execution_state']??'')!=='QUEUED' || !in_array($counts['execution_operation']??'', ['execute','clarify'],true)
+                || !is_string($counts['execution_ref']??null) || !preg_match('/^request-[a-f0-9]{48}$/D',$counts['execution_ref'])
+                || !is_string($counts['execution_hash']??null) || !preg_match('/^[a-f0-9]{64}$/D',$counts['execution_hash'])) return null;
+            $expected=$counts['execution_operation']==='execute'?'RECEIVED':'WAITING_CLARIFICATION';
+            if ($r['status']!==$expected || $r['worker_token']!=='') return null;
+            // A queued message is only an invitation to start work, never an
+            // extension of the Run's original execution budget.
+            if ((int)$r['deadline_at']<=$this->now()) {
+                $this->expireRun($r);
+                return null;
+            }
+            $counts['execution_state']='DISPATCHING';
+            $counts['execution_dispatching_at']=$this->now();
+            $counts['execution_dispatch_count']=(int)($counts['execution_dispatch_count']??0)+1;
+            $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[
+                json_encode($counts),$this->instance,$runId
+            ]);
+            return ['owner'=>['account_id'=>(int)$r['account_id'],'terminal'=>$r['terminal'],'conversation_id'=>$r['conversation_id'],'window_id'=>$r['window_id']],
+                'run_id'=>$r['run_id'],'generation'=>(int)$r['generation'],'operation'=>$counts['execution_operation'],'request_ref'=>$counts['execution_ref'],'request_hash'=>$counts['execution_hash'],
+                'segment_index'=>(int)($counts['execution_segment_index']??-1)];
+        });
+    }
+
+    /** A queue message can be duplicated.  Only an untouched queued Run may be offered again. */
+    public function restoreQueuedExecution(string $runId): void
+    {
+        if (!preg_match('/^[a-f0-9]{48}$/D',$runId)) return;
+        $this->transaction(function () use($runId) {
+            $r=$this->one('SELECT * FROM '.$this->table('run').' WHERE instance_id=? AND run_id=?',[$this->instance,$runId]);
+            if (!$r || $r['worker_token']!=='' || !in_array($r['status'],['RECEIVED','WAITING_CLARIFICATION'],true)) return;
+            $counts=json_decode($r['counters_json'],true)?:[];
+            if (($counts['execution_state']??'')==='DISPATCHING') {
+                $counts['execution_state']='QUEUED';
+                unset($counts['execution_dispatching_at']);
+                $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$runId]);
+            }
+        });
+    }
+
+    /**
+     * Returns whether a durable request still needs a queue message.  A worker
+     * can die after reserving the envelope but before the gateway claims a
+     * Run; that period is safe to redeliver because worker_token is still
+     * empty and the gateway claim is the only model-call admission point.
+     */
+    public function executionNeedsDispatch(array $owner,string $runId,int $generation,int $staleMilliseconds=15000): bool
+    {
+        if ($staleMilliseconds<1000 || $staleMilliseconds>300000) throw new RuntimeException('AI_EXECUTION_QUEUE_INVALID');
+        return $this->transaction(function () use($owner,$runId,$generation,$staleMilliseconds) {
+            $r=$this->read($owner,$runId,$generation);
+            if ($r['worker_token']!=='' || !in_array($r['status'],['RECEIVED','WAITING_CLARIFICATION'],true)) return false;
+            $counts=json_decode($r['counters_json'],true)?:[];
+            if ($this->restoreStaleDispatch($counts,$staleMilliseconds)) {
+                $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$runId]);
+            }
+            return ($counts['execution_state']??'')==='QUEUED' && is_string($counts['execution_ref']??null);
+        });
+    }
+
+    /** Only pre-claim validation failures may release a queued reservation. */
+    public function failQueuedExecution(string $runId,string $reason): void
+    {
+        if (!preg_match('/^[a-f0-9]{48}$/D',$runId) || !preg_match('/^[A-Z][A-Z0-9_]{0,63}$/D',$reason)) return;
+        $this->transaction(function () use($runId,$reason) {
+            $r=$this->one('SELECT * FROM '.$this->table('run').' WHERE instance_id=? AND run_id=?',[$this->instance,$runId]);
+            if (!$r || $r['worker_token']!=='' || !in_array($r['status'],['RECEIVED','WAITING_CLARIFICATION'],true)) return;
+            $counts=json_decode($r['counters_json'],true)?:[];
+            if (($counts['execution_state']??'')!=='DISPATCHING') return;
+            $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\', reason=?, slot_held=0, last_clock_at=?, version=version+1 WHERE instance_id=? AND run_id=?',[$reason,$this->now(),$this->instance,$runId]);
+        });
+    }
+
+    /** Bounded supervisor feed for requests accepted while Redis was unavailable. */
+    public function pendingExecutionIds(int $limit=32): array
+    {
+        if ($limit<1 || $limit>128) throw new RuntimeException('AI_EXECUTION_QUEUE_INVALID');
+        return $this->transaction(function () use($limit) {
+            $ids=[];
+            // The queue state is encoded by this class with compact JSON.  Do
+            // the coarse filter in SQL first: a user paused at a clarification
+            // must never consume a supervisor page merely because it shares a
+            // WAITING_CLARIFICATION status with a queued follow-up.
+            $now=$this->now();
+            $rows=$this->rows('SELECT run_id,counters_json FROM '.$this->table('run').' WHERE instance_id=? AND status IN (\'RECEIVED\',\'WAITING_CLARIFICATION\') AND worker_token=\'\' AND expires_at>? AND deadline_at>? AND (counters_json LIKE ? OR counters_json LIKE ?) ORDER BY created_at ASC LIMIT '.$limit,[
+                $this->instance,$now,$now,'%' . '"execution_state":"QUEUED"' . '%','%' . '"execution_state":"DISPATCHING"' . '%'
+            ]);
+            foreach ($rows as $row) {
+                $counts=json_decode($row['counters_json'],true)?:[];
+                if ($this->restoreStaleDispatch($counts,15000)) {
+                    $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$row['run_id']]);
+                }
+                if (($counts['execution_state']??'')==='QUEUED' && is_string($counts['execution_ref']??null)) $ids[]=$row['run_id'];
+            }
+            return $ids;
+        });
+    }
+
+    private function restoreStaleDispatch(array &$counts,int $staleMilliseconds): bool
+    {
+        if (($counts['execution_state']??'')!=='DISPATCHING') return false;
+        $started=(int)($counts['execution_dispatching_at']??0);
+        if ($started<1 || $this->now()-$started<$staleMilliseconds) return false;
+        $counts['execution_state']='QUEUED';
+        unset($counts['execution_dispatching_at']);
+        return true;
+    }
+
+    /**
+     * A dedicated consumer sends this compact heartbeat while it is listening.
+     * It contains process metadata only; no owner, query, prompt or result is
+     * stored here.  The release gate refuses async admission without one.
+     */
+    public function heartbeatExecutionConsumer(string $workerId,int $processId,string $host,int $ttlSeconds=210): void
+    {
+        if (strpos($workerId,'supervisor-')===0) throw new RuntimeException('AI_EXECUTION_WORKER_INVALID');
+        $this->heartbeatExecutionRole($workerId,$processId,$host,$ttlSeconds);
+    }
+
+    /** The supervisor independently redelivers a missed first queue push. */
+    public function heartbeatExecutionSupervisor(string $supervisorId,int $processId,string $host,int $ttlSeconds=210): void
+    {
+        if (strpos($supervisorId,'supervisor-')!==0) throw new RuntimeException('AI_EXECUTION_WORKER_INVALID');
+        $this->heartbeatExecutionRole($supervisorId,$processId,$host,$ttlSeconds);
+    }
+
+    private function heartbeatExecutionRole(string $workerId,int $processId,string $host,int $ttlSeconds): void
+    {
+        $this->identifier($workerId); $this->identifier($host);
+        if ($processId<1 || $processId>2147483647 || $ttlSeconds<30 || $ttlSeconds>300) throw new RuntimeException('AI_EXECUTION_WORKER_INVALID');
+        $this->transaction(function () use($workerId,$processId,$host,$ttlSeconds) {
+            $now=$this->now();
+            $sql=$this->sqlite
+                ? 'INSERT INTO '.$this->table('execution_worker').' (instance_id,worker_id,host_name,process_id,heartbeat_at,expires_at) VALUES (?,?,?,?,?,?) ON CONFLICT(instance_id,worker_id) DO UPDATE SET host_name=excluded.host_name,process_id=excluded.process_id,heartbeat_at=excluded.heartbeat_at,expires_at=excluded.expires_at'
+                : 'INSERT INTO '.$this->table('execution_worker').' (instance_id,worker_id,host_name,process_id,heartbeat_at,expires_at) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE host_name=VALUES(host_name),process_id=VALUES(process_id),heartbeat_at=VALUES(heartbeat_at),expires_at=VALUES(expires_at)';
+            $this->execute($sql,[$this->instance,$workerId,$host,$processId,$now,$now+$ttlSeconds*1000]);
+        });
+    }
+
+    public function hasLiveExecutionConsumer(int $staleSeconds): bool
+    {
+        if ($staleSeconds<30 || $staleSeconds>300) return false;
+        return $this->transaction(function () use($staleSeconds) {
+            $now=$this->now();
+            $row=$this->one('SELECT COUNT(*) AS n FROM '.$this->table('execution_worker').' WHERE instance_id=? AND worker_id NOT LIKE ? AND heartbeat_at>? AND expires_at>?',[$this->instance,'supervisor-%',$now-$staleSeconds*1000,$now]);
+            return (int)($row['n']??0)>0;
+        });
+    }
+
+    public function hasLiveExecutionSupervisor(int $staleSeconds): bool
+    {
+        if ($staleSeconds<30 || $staleSeconds>300) return false;
+        return $this->transaction(function () use($staleSeconds) {
+            $now=$this->now();
+            $row=$this->one('SELECT COUNT(*) AS n FROM '.$this->table('execution_worker').' WHERE instance_id=? AND worker_id LIKE ? AND heartbeat_at>? AND expires_at>?',[$this->instance,'supervisor-%',$now-$staleSeconds*1000,$now]);
+            return (int)($row['n']??0)>0;
+        });
+    }
+
+    public function cleanupExpiredExecutionConsumers(): int
+    {
+        return $this->transaction(function () {
+            return $this->execute('DELETE FROM '.$this->table('execution_worker').' WHERE instance_id=? AND expires_at<=?',[$this->instance,$this->now()])->rowCount();
+        });
+    }
+
+    /**
+     * Returns and atomically detaches encrypted request references for Runs
+     * which are terminal before a gateway worker could claim them.  The
+     * supervisor owns the subsequent private-store deletion; a failed delete
+     * merely leaves an already-unreachable object for normal 24-hour expiry.
+     */
+    public function takeTerminalUnclaimedExecutionInputRefs(int $limit=64): array
+    {
+        if ($limit<1 || $limit>256) throw new RuntimeException('AI_EXECUTION_QUEUE_INVALID');
+        return $this->transaction(function () use($limit) {
+            $rows=$this->rows('SELECT run_id,counters_json FROM '.$this->table('run').' WHERE instance_id=? AND worker_token=\'\' AND status IN (\'COMPLETED\',\'PARTIAL_SUCCEEDED\',\'FAILED\',\'CANCELLED\') AND counters_json LIKE ? ORDER BY last_clock_at ASC LIMIT '.$limit,[
+                $this->instance,'%' . '"execution_ref":"request-' . '%'
+            ]);
+            $refs=[];
+            foreach ($rows as $row) {
+                $counts=json_decode($row['counters_json'],true)?:[];
+                $ref=$counts['execution_ref']??null;
+                if (!is_string($ref) || !preg_match('/^request-[a-f0-9]{48}$/D',$ref)) continue;
+                $this->retireExecutionEnvelope($counts);
+                $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$row['run_id']]);
+                $refs[]=$ref;
+            }
+            return $refs;
+        });
+    }
+
+    /** The queue job records the exact local process before it can claim a Run. */
+    public function startQueuedExecutionWorker(string $runId,string $workerId,int $processId,string $host): void
+    {
+        $this->identifier($runId); $this->identifier($workerId); $this->identifier($host);
+        if ($processId<1 || $processId>2147483647) throw new RuntimeException('AI_EXECUTION_WORKER_INVALID');
+        $this->transaction(function () use($runId,$workerId,$processId,$host) {
+            $r=$this->one('SELECT * FROM '.$this->table('run').' WHERE instance_id=? AND run_id=?',[$this->instance,$runId]);
+            if (!$r) return;
+            $counts=json_decode($r['counters_json'],true)?:[];
+            if (($counts['execution_state']??'')!=='DISPATCHING' || $r['worker_token']!=='' || !in_array($r['status'],['RECEIVED','WAITING_CLARIFICATION'],true)) return;
+            $counts['execution_worker']=['id'=>$workerId,'host'=>$host,'pid'=>$processId,'started_at'=>$this->now()];
+            $counts['execution_started_at']=$counts['execution_worker']['started_at'];
+            $this->segmentAt($counts,(int)($counts['execution_segment_index']??-1),'started_at',$counts['execution_started_at']);
+            $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$runId]);
+        });
+    }
+
+    public function finishQueuedExecutionWorker(string $runId,string $workerId): void
+    {
+        $this->identifier($runId); $this->identifier($workerId);
+        $this->transaction(function () use($runId,$workerId) {
+            $r=$this->one('SELECT counters_json FROM '.$this->table('run').' WHERE instance_id=? AND run_id=?',[$this->instance,$runId]);
+            if (!$r) return;
+            $counts=json_decode($r['counters_json'],true)?:[];
+            if (($counts['execution_worker']['id']??null)!==$workerId) return;
+            unset($counts['execution_worker']);
+            $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$runId]);
+        });
+    }
+
+    /**
+     * A claimed Run is never retried.  It becomes failed only when the local
+     * supervisor proves the recorded worker PID is gone. A terminal fence
+     * prevents a delayed/duplicate worker from publishing afterwards.
+     */
+    public function recoverStoppedExecutionWorkers(int $staleSeconds,callable $isStopped): int
+    {
+        if ($staleSeconds<30 || $staleSeconds>300) throw new RuntimeException('AI_EXECUTION_WORKER_INVALID');
+        return $this->transaction(function () use($staleSeconds,$isStopped) {
+            $now=$this->now(); $recovered=0;
+            $rows=$this->rows('SELECT run_id,counters_json FROM '.$this->table('run').' WHERE instance_id=? AND status=\'WORKFLOW_EXECUTING\' AND worker_token<>\'\'',[$this->instance]);
+            foreach ($rows as $row) {
+                $counts=json_decode($row['counters_json'],true)?:[]; $worker=$counts['execution_worker']??null;
+                if (!is_array($worker) || !is_string($worker['id']??null) || !is_string($worker['host']??null)
+                    || !is_int($worker['pid']??null) || !is_int($worker['started_at']??null) || $now-$worker['started_at']<$staleSeconds*1000) continue;
+                if (!$isStopped($worker['host'],$worker['pid'])) continue;
+                $this->execute('UPDATE '.$this->table('attempt').' SET state=\'UNKNOWN\' WHERE instance_id=? AND run_id=? AND state IN (\'PREPARED\',\'IN_FLIGHT\')',[$this->instance,$row['run_id']]);
+                unset($counts['execution_worker']); $counts['execution_worker_lost_at']=$now;
+                // PID absence is the terminal fence: clearing this token both
+                // prevents a late Worker from publishing and makes its now
+                // unusable encrypted request eligible for immediate cleanup.
+                $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\',reason=\'AI_EXECUTION_WORKER_LOST\',slot_held=0,worker_token=\'\',last_clock_at=?,counters_json=?,version=version+1 WHERE instance_id=? AND run_id=?',[$now,json_encode($counts),$this->instance,$row['run_id']]);
+                ++$recovered;
+            }
+            // Keep consumer heartbeat cleanup out of recovery.  Recovery must
+            // work safely during a staged rollout before this additive table
+            // has been migrated on an older instance.
+            return $recovered;
         });
     }
 
@@ -189,6 +575,20 @@ final class AiRunStore
             $counts[$counter]=($counts[$counter]??0)+1;
             if ($counts[$counter]>($kind==='model'?4:8)) { throw new RuntimeException('AI_COUNTER_EXHAUSTED'); }
             if ($kind==='model' && $counts[$counter]>($counts['stage_count']??0)+($counts['model_recovery_count']??0)) { throw new RuntimeException('AI_COUNTER_SEQUENCE'); }
+            $counts['attempt_kinds']=$counts['attempt_kinds']??[];
+            $counts['attempt_kinds'][$attemptCode]=$kind;
+            $counts['attempt_targets']=$counts['attempt_targets']??[];
+            $counts['attempt_targets'][$attemptCode]=$targetCode;
+            // Each model attempt belongs to one customer-triggered execution
+            // segment.  Keeping this bounded numeric relation prevents a
+            // clarification continuation from being reported as though its
+            // model time were part of the original request.
+            $segmentIndex=(int)($counts['execution_segment_index']??-1);
+            $segments=is_array($counts['execution_segments']??null)?$counts['execution_segments']:[];
+            if ($segmentIndex>=0 && isset($segments[$segmentIndex]) && is_array($segments[$segmentIndex])) {
+                $counts['attempt_segment_index']=is_array($counts['attempt_segment_index']??null)?$counts['attempt_segment_index']:[];
+                $counts['attempt_segment_index'][$attemptCode]=$segmentIndex;
+            }
             $this->insert('attempt',['instance_id'=>$this->instance,'run_id'=>$runId,'attempt_code'=>$attemptCode,'kind'=>$kind,'target_code'=>$targetCode,'payload_hash'=>$payloadHash,'state'=>'PREPARED','input_tokens'=>null,'output_tokens'=>null,'created_at'=>$this->now(),'expires_at'=>(int)$r['expires_at']]);
             $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$runId]);
             return ['prepared'=>true,'state'=>'PREPARED'];
@@ -204,7 +604,11 @@ final class AiRunStore
             $a=$this->attempt($runId,$attemptCode);
             if (!$a) { throw new RuntimeException('AI_ATTEMPT_NOT_FOUND'); }
             if ($a['state']!=='PREPARED') { return false; }
+            $counts=json_decode($r['counters_json'],true)?:[];
+            $counts['attempt_started_at']=$counts['attempt_started_at']??[];
+            $counts['attempt_started_at'][$attemptCode]=$this->now();
             $this->execute('UPDATE '.$this->table('attempt').' SET state=\'IN_FLIGHT\' WHERE instance_id=? AND run_id=? AND attempt_code=?',[$this->instance,$runId,$attemptCode]);
+            $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$runId]);
             return true;
         });
     }
@@ -223,7 +627,15 @@ final class AiRunStore
                 if ($a['state']===$state && $oldInput===$inputTokens && $oldOutput===$outputTokens) { return; }
                 throw new RuntimeException('AI_ATTEMPT_TERMINAL');
             }
+            $counts=json_decode($r['counters_json'],true)?:[];
+            $started=(int)(($counts['attempt_started_at']??[])[$attemptCode]??0);
+            if ($started>0) {
+                $counts['attempt_elapsed_ms']=$counts['attempt_elapsed_ms']??[];
+                $counts['attempt_elapsed_ms'][$attemptCode]=min(180000,max(0,$this->now()-$started));
+                unset($counts['attempt_started_at'][$attemptCode]);
+            }
             $this->execute('UPDATE '.$this->table('attempt').' SET state=?, input_tokens=?, output_tokens=? WHERE instance_id=? AND run_id=? AND attempt_code=?',[$state,$inputTokens,$outputTokens,$this->instance,$runId,$attemptCode]);
+            $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$runId]);
             // UNKNOWN means the provider outcome is not known.  The gateway
             // may still run one separately recorded, bounded recovery attempt
             // for a read-only stage.  If recovery is not allowed or fails, its
@@ -313,9 +725,51 @@ final class AiRunStore
             if (($counts['clarification_wait_ms']??0)>=600000) { throw new RuntimeException('AI_CLARIFICATION_EXPIRED'); }
             $now=$this->now();
             if ($this->hasUnresolvedAttempt($runId)) { throw new RuntimeException('AI_ATTEMPT_UNRESOLVED'); }
+            // A waiting customer has no execution envelope.  Leaving the
+            // previous DISPATCHING marker here makes supervision redeliver a
+            // completed worker attempt as though it were a lost queue job.
+            unset($counts['execution_operation'],$counts['execution_ref'],$counts['execution_hash'],$counts['execution_state'],$counts['execution_queued_at'],$counts['execution_dispatching_at']);
             $counts['clarification_invalid_count']=$counts['clarification_invalid_count']??0;
             $this->execute('UPDATE '.$this->table('run').' SET status=\'WAITING_CLARIFICATION\', clarification_ref=?, clarification_count=?, counters_json=?, pause_at=?, remaining_ms=?, slot_held=0, worker_token=\'\', version=version+1 WHERE instance_id=? AND run_id=?',[$clarificationRef,(int)$r['clarification_count']+($newStep?1:0),json_encode($counts),$now,(int)$r['deadline_at']-$now,$this->instance,$runId]);
             return $this->publicRun($this->read($owner,$runId,$generation));
+        });
+    }
+
+    /** Re-open the same clarification after a worker rejects its submitted values. */
+    public function rejectClarification(array $owner,string $runId,int $generation,string $workerToken,string $requestId): void
+    {
+        $this->identifier($requestId);
+        $this->transaction(function () use($owner,$runId,$generation,$workerToken,$requestId) {
+            $r=$this->read($owner,$runId,$generation); $this->worker($r,$workerToken); $this->live($r);
+            $counts=json_decode($r['counters_json'],true)?:[]; $key=hash('sha256',$requestId);
+            if (isset($counts['clarification_submissions'][$key]) && empty($counts['clarification_submissions'][$key]['accepted'])) {
+                // Keep the original request hash as an immutable rejection
+                // receipt. A delayed duplicate must replay this state rather
+                // than re-admit an old choice after the customer has corrected
+                // the form.
+                $counts['clarification_submissions'][$key]['rejected']=true;
+                $counts['clarification_rejected_ref']=$r['clarification_ref'];
+                $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$runId]);
+            }
+        });
+    }
+
+    /**
+     * Resolve an already-known client submission before it is allowed back
+     * onto the queue. The choice payload never leaves the encrypted request;
+     * the Run only retains this idempotency verdict and request hash.
+     */
+    public function clarificationSubmissionState(array $owner,string $runId,int $generation,string $requestId,string $requestHash): string
+    {
+        $this->identifier($requestId);
+        if (!preg_match('/^[a-f0-9]{64}$/D',$requestHash)) throw new RuntimeException('AI_CLARIFICATION_INVALID');
+        return $this->transaction(function () use($owner,$runId,$generation,$requestId,$requestHash) {
+            $r=$this->read($owner,$runId,$generation); $counts=json_decode($r['counters_json'],true)?:[]; $key=hash('sha256',$requestId);
+            $submission=$counts['clarification_submissions'][$key]??null;
+            if (!is_array($submission)) return 'new';
+            if (!is_string($submission['hash']??null) || !hash_equals($submission['hash'],$requestHash)) throw new RuntimeException('AI_IDEMPOTENCY_CONFLICT');
+            if (!empty($submission['rejected'])) return 'rejected';
+            return !empty($submission['accepted']) ? 'accepted' : 'pending';
         });
     }
 
@@ -400,7 +854,11 @@ final class AiRunStore
         if (!in_array($code,['UNDERSTANDING','QUERYING','VERIFYING','EXPORTING','RENDERING','PUBLISHING'],true)) { throw new RuntimeException('AI_PROGRESS_INVALID'); }
         return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$code) {
             $r=$this->read($owner,$runId,$generation); $this->worker($r,$workerToken); $this->live($r);
-            $this->execute('UPDATE '.$this->table('run').' SET progress_code=?, version=version+1 WHERE instance_id=? AND run_id=?',[$code,$this->instance,$runId]);
+            $counts=json_decode($r['counters_json'],true)?:[];
+            $counts['phase_started_at']=$counts['phase_started_at']??[];
+            if (!isset($counts['phase_started_at'][$code])) $counts['phase_started_at'][$code]=$this->now();
+            if ($code==='PUBLISHING') $this->segmentAt($counts,(int)($counts['execution_segment_index']??-1),'publishing_at',(int)$counts['phase_started_at'][$code]);
+            $this->execute('UPDATE '.$this->table('run').' SET progress_code=?, counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[$code,json_encode($counts),$this->instance,$runId]);
             return $this->publicRun($this->read($owner,$runId,$generation));
         });
     }
@@ -417,13 +875,31 @@ final class AiRunStore
         });
     }
 
+    /** A cancelled, unclaimed job has no future use for encrypted input. */
+    public function discardUnclaimedExecutionInput(array $owner,string $runId,int $generation): ?string
+    {
+        return $this->transaction(function () use($owner,$runId,$generation) {
+            $r=$this->read($owner,$runId,$generation,true);
+            if (!$this->terminal($r) || $r['worker_token']!=='') return null;
+            $counts=json_decode($r['counters_json'],true)?:[]; $ref=$counts['execution_ref']??null;
+            if (!is_string($ref) || !preg_match('/^request-[a-f0-9]{48}$/D',$ref)) return null;
+            $this->retireExecutionEnvelope($counts);
+            $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$runId]);
+            return $ref;
+        });
+    }
+
     /** The executing worker calls this only AFTER all its local operations have actually stopped. */
     public function release(array $owner, string $runId, int $generation, string $workerToken): void
     {
         $this->transaction(function () use ($owner,$runId,$generation,$workerToken) {
             $r=$this->read($owner,$runId,$generation,true); $this->worker($r,$workerToken);
             if (!$this->terminal($r)) { throw new RuntimeException('AI_RELEASE_BEFORE_STOP'); }
-            $this->execute('UPDATE '.$this->table('run').' SET slot_held=0, version=version+1 WHERE instance_id=? AND run_id=?',[$this->instance,$runId]);
+            // The worker has stopped all local work.  Clearing its fencing
+            // token makes the terminal Run eligible for supervisor-owned
+            // encrypted-input cleanup; keeping it would retain the private
+            // request until expiry and make a finished worker look active.
+            $this->execute('UPDATE '.$this->table('run').' SET slot_held=0, worker_token=\'\', version=version+1 WHERE instance_id=? AND run_id=?',[$this->instance,$runId]);
         });
     }
 
@@ -437,7 +913,9 @@ final class AiRunStore
             if ($this->hasUnresolvedAttempt($runId)) { throw new RuntimeException('AI_ATTEMPT_UNRESOLVED'); }
             $counters=json_decode($r['counters_json'],true)?:[];
             $counters['export_delivery']=$delivery==='data_only_export_failed'?2:($r['answer_ref']!==''?1:0);
-            $this->execute('UPDATE '.$this->table('run').' SET counters_json=? WHERE instance_id=? AND run_id=?',[json_encode($counters),$this->instance,$runId]);
+            $counters['execution_delivered_at']=$this->now();
+            $this->segmentAt($counters,(int)($counters['execution_segment_index']??-1),'delivered_at',$counters['execution_delivered_at']);
+            $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, last_clock_at=? WHERE instance_id=? AND run_id=?',[json_encode($counters),$counters['execution_delivered_at'],$this->instance,$runId]);
             $this->execute('UPDATE '.$this->table('run').' SET status=?, reason=?, evidence_ref=?, answer_ref=?, version=version+1 WHERE instance_id=? AND run_id=?',[$delivery==='complete'?'COMPLETED':'PARTIAL_SUCCEEDED',$delivery==='complete'?'':'DATA_ONLY_EXPORT_FAILED',$evidenceRef,$answerRef,$this->instance,$runId]);
             return $this->publicRun($this->read($owner,$runId,$generation));
         });
@@ -527,6 +1005,16 @@ final class AiRunStore
             $usage=$this->one('SELECT COALESCE(SUM(input_tokens),0) AS input_tokens,COALESCE(SUM(output_tokens),0) AS output_tokens,SUM(CASE WHEN input_tokens IS NOT NULL AND output_tokens IS NOT NULL THEN 1 ELSE 0 END) AS known_usage_attempts,SUM(CASE WHEN state=\'UNKNOWN\' THEN 1 ELSE 0 END) AS unknown_attempts,SUM(CASE WHEN state<>\'PREPARED\' AND (input_tokens IS NULL OR output_tokens IS NULL) THEN 1 ELSE 0 END) AS usage_unknown_attempts FROM '.$this->table('attempt').' WHERE instance_id=? AND expires_at>? AND kind=\'model\'',[$this->instance,$this->now()]);
             $counts['usage']=array_map('intval',$usage);
             $counts['duration']=['terminal_count'=>0,'total_ms'=>0,'max_ms'=>0,'mean_ms'=>null];
+            $counts['attempt_timing']=['model'=>['count'=>0,'total_ms'=>0,'max_ms'=>0,'mean_ms'=>null],'tool'=>['count'=>0,'total_ms'=>0,'max_ms'=>0,'mean_ms'=>null]];
+            // Fixed stage names are technical timings, not a business intent
+            // grammar.  They let operations locate latency without retaining
+            // query text, metrics, object names or result values.
+            $samples=['acceptance'=>[],'queue'=>[],'model'=>[],'reader'=>[],'delivery'=>[],'answer'=>[],'browser_observed'=>[]];
+            // A cohort is a completed customer operation, rather than one
+            // provider attempt.  This is the only safe basis for comparing
+            // compatibility and asynchronous user-visible wait budgets.
+            $cohorts=['async'=>['answer'=>[],'execution'=>[],'model_total'=>[],'browser_observed'=>[]],
+                'compatibility'=>['answer'=>[],'execution'=>[],'model_total'=>[],'browser_observed'=>[]]];
             $counts['exports']=['succeeded'=>0,'failed'=>0,'consecutive_failed'=>0,'eligible'=>0,'failure_rate'=>null];
             $runs=$this->rows('SELECT status,reason,created_at,last_clock_at,counters_json FROM '.$this->table('run').' WHERE instance_id=? AND expires_at>? AND status IN (\'COMPLETED\',\'PARTIAL_SUCCEEDED\',\'FAILED\',\'CANCELLED\') ORDER BY last_clock_at DESC,created_at DESC',[$this->instance,$this->now()]);
             $streakOpen=true;
@@ -534,11 +1022,68 @@ final class AiRunStore
                 $ms=max(0,(int)$r['last_clock_at']-(int)$r['created_at']);
                 ++$counts['duration']['terminal_count']; $counts['duration']['total_ms']+=$ms; $counts['duration']['max_ms']=max($counts['duration']['max_ms'],$ms);
                 $delivery=(int)((json_decode($r['counters_json'],true)?:[])['export_delivery']??0);
+                $detail=json_decode($r['counters_json'],true)?:[];
+                $segments=is_array($detail['execution_segments']??null)?$detail['execution_segments']:[];
+                // Older retained Runs have only scalar telemetry; current Runs
+                // keep one segment per initial/clarification execution.
+                if (!$segments) $segments=[['accepted_at'=>$detail['execution_accepted_at']??0,'queued_at'=>$detail['execution_queued_at']??0,'started_at'=>$detail['execution_started_at']??0,'publishing_at'=>($detail['phase_started_at']??[])['PUBLISHING']??0,'delivered_at'=>$detail['execution_delivered_at']??0]];
+                $runMode=($detail['execution_mode']??'')==='async'?'async':'compatibility';
+                $segmentModelTotals=[];
+                foreach ((array)($detail['attempt_elapsed_ms']??[]) as $code=>$elapsed) {
+                    if (($detail['attempt_kinds'][$code]??'')!=='model' || !is_int($elapsed)) continue;
+                    $segmentIndex=($detail['attempt_segment_index'][$code]??null);
+                    // Retained pre-segment records can only be comparable when
+                    // their Run has a single execution. Multi-step history
+                    // without a mapping is deliberately omitted rather than
+                    // inventing a relationship between attempts and choices.
+                    if (!is_int($segmentIndex) && count($segments)===1) $segmentIndex=0;
+                    if (is_int($segmentIndex) && $segmentIndex>=0 && $segmentIndex<count($segments)) {
+                        $segmentModelTotals[$segmentIndex]=($segmentModelTotals[$segmentIndex]??0)+max(0,$elapsed);
+                    }
+                }
+                foreach ($segments as $segmentIndex=>$segment) {
+                    if (!is_array($segment)) continue;
+                    $mode=($segment['mode']??$runMode)==='async'?'async':'compatibility';
+                    $accepted=(int)($segment['accepted_at']??0); $queued=(int)($segment['queued_at']??0); $started=(int)($segment['started_at']??0);
+                    $publish=(int)($segment['publishing_at']??0); $delivered=(int)($segment['delivered_at']??0);
+                    if ($accepted>0 && $accepted>=(int)$r['created_at']) $samples['acceptance'][]=min(180000,$accepted-(int)$r['created_at']);
+                    if ($queued>0 && $started>=$queued) $samples['queue'][]=min(180000,$started-$queued);
+                    if ($delivered>0 && $publish>0 && $delivered>=$publish) $samples['delivery'][]=min(180000,$delivered-$publish);
+                    if ($delivered>0 && $accepted>0 && $delivered>=$accepted) {
+                        $answer=min(180000,$delivered-$accepted);
+                        $samples['answer'][]=$answer;
+                        $cohorts[$mode]['answer'][]=$answer;
+                    }
+                    if ($delivered>0 && $started>0 && $delivered>=$started) $cohorts[$mode]['execution'][]=min(180000,$delivered-$started);
+                    $browserElapsed=$segment['client_elapsed_ms']??null;
+                    if (is_int($browserElapsed) && $browserElapsed>=0 && $browserElapsed<=300000) {
+                        $samples['browser_observed'][]=$browserElapsed;
+                        $cohorts[$mode]['browser_observed'][]=$browserElapsed;
+                    }
+                    if (($segmentModelTotals[$segmentIndex]??0)>0) $cohorts[$mode]['model_total'][]=min(180000,$segmentModelTotals[$segmentIndex]);
+                }
+                foreach ((array)($detail['attempt_elapsed_ms']??[]) as $code=>$elapsed) {
+                    $kind=($detail['attempt_kinds'][$code]??'');
+                    if (!isset($counts['attempt_timing'][$kind]) || !is_int($elapsed)) continue;
+                    ++$counts['attempt_timing'][$kind]['count'];
+                    $counts['attempt_timing'][$kind]['total_ms']+=$elapsed;
+                    $counts['attempt_timing'][$kind]['max_ms']=max($counts['attempt_timing'][$kind]['max_ms'],$elapsed);
+                    if ($kind==='model') $samples['model'][]=$elapsed;
+                    if (($detail['attempt_targets'][$code]??'')==='unified_metric_query') $samples['reader'][]=$elapsed;
+                }
                 if ($r['status']==='PARTIAL_SUCCEEDED') { ++$counts['exports']['failed']; if($streakOpen) ++$counts['exports']['consecutive_failed']; }
                 elseif ($r['status']==='COMPLETED' && $delivery===1) { ++$counts['exports']['succeeded']; $streakOpen=false; }
                 // Unknown, cancelled, rejected and unsafe outcomes are not file-rate samples.
             }
             $d=&$counts['duration']; if($d['terminal_count']) $d['mean_ms']=(int)round($d['total_ms']/$d['terminal_count']); unset($d);
+            foreach ($counts['attempt_timing'] as &$timing) if ($timing['count']) $timing['mean_ms']=(int)round($timing['total_ms']/$timing['count']); unset($timing);
+            $counts['segments']=[];
+            foreach ($samples as $name=>$values) $counts['segments'][$name]=self::timingSummary($values);
+            $counts['latency_cohorts']=[];
+            foreach ($cohorts as $mode=>$measurements) {
+                $counts['latency_cohorts'][$mode]=[];
+                foreach ($measurements as $name=>$values) $counts['latency_cohorts'][$mode][$name]=self::timingSummary($values);
+            }
             $x=&$counts['exports']; $x['eligible']=$x['succeeded']+$x['failed']; if($x['eligible'])$x['failure_rate']=$x['failed']/$x['eligible']; unset($x);
             return $counts;
         });
@@ -563,6 +1108,20 @@ final class AiRunStore
         if (in_array($r['reason'],['AI_EXPORT_FAILED','AI_EXPORT_DEADLINE','DATA_ONLY_EXPORT_FAILED'],true)) return 'export';
         if ($r['reason']==='AI_WORKFLOW_DISABLED') return 'neutral';
         return 'technical';
+    }
+
+    /** Integer-only aggregate. Raw per-Run timing is never exposed here. */
+    private static function timingSummary(array $values): array
+    {
+        // Server stages are capped at the execution budget (180s). Browser
+        // observation includes one final poll/render round, so its separately
+        // bounded receipt may be up to 300s without being discarded as if it
+        // were not a real customer-visible sample.
+        $values=array_values(array_filter($values,static function($value): bool { return is_int($value) && $value>=0 && $value<=300000; }));
+        if (!$values) return ['count'=>0,'mean_ms'=>null,'p50_ms'=>null,'p95_ms'=>null,'max_ms'=>null];
+        sort($values,SORT_NUMERIC); $n=count($values); $sum=array_sum($values);
+        $at=static function(float $quantile) use($values,$n): int { return $values[(int)ceil($quantile*$n)-1]; };
+        return ['count'=>$n,'mean_ms'=>(int)round($sum/$n),'p50_ms'=>$at(0.50),'p95_ms'=>$at(0.95),'max_ms'=>$values[$n-1]];
     }
 
     private function transaction(callable $fn)
@@ -609,6 +1168,15 @@ final class AiRunStore
         if ($now >= (int)$r['deadline_at']) { throw new RuntimeException('AI_RUN_DEADLINE'); }
         $this->execute('UPDATE '.$this->table('run').' SET last_clock_at=? WHERE instance_id=? AND run_id=?',[$now,$this->instance,$r['run_id']]);
     }
+
+    /** End a single budget-expired Run without ever releasing an active worker. */
+    private function expireRun(array $r): void
+    {
+        if ($this->terminal($r) || $r['status']==='WAITING_CLARIFICATION') return;
+        $now=$this->now();
+        $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\', reason=CASE WHEN status=\'WAITING_EXPORT\' THEN \'AI_EXPORT_DEADLINE\' ELSE \'DEADLINE_EXCEEDED\' END, last_clock_at=?, slot_held=CASE WHEN worker_token=\'\' THEN 0 ELSE slot_held END, version=version+1 WHERE instance_id=? AND run_id=? AND status NOT IN (\'COMPLETED\',\'PARTIAL_SUCCEEDED\',\'FAILED\',\'CANCELLED\',\'WAITING_CLARIFICATION\') AND deadline_at<=?',[$now,$this->instance,$r['run_id'],$now]);
+    }
+
     private function worker(array $r,string $token): void { if ($token==='' || !hash_equals($r['worker_token'],$token)) { throw new RuntimeException('AI_WORKER_FENCED'); } }
     private function terminal(array $r): bool { return in_array($r['status'],['COMPLETED','PARTIAL_SUCCEEDED','FAILED','CANCELLED'],true); }
     private function owner(array $owner): void
@@ -629,6 +1197,34 @@ final class AiRunStore
     private function one(string $sql,array $params) { return $this->execute($sql,$params)->fetch(PDO::FETCH_ASSOC); }
     private function rows(string $sql,array $params): array { return $this->execute($sql,$params)->fetchAll(PDO::FETCH_ASSOC); }
     private function attempt(string $runId,string $code) { return $this->one('SELECT * FROM '.$this->table('attempt').' WHERE instance_id=? AND run_id=? AND attempt_code=?',[$this->instance,$runId,$code]); }
+
+    /** Mutates only bounded numeric lifecycle telemetry for the active envelope. */
+    private function segmentAt(array &$counts,int $index,string $field,int $at): void
+    {
+        if ($index<0 || !is_array($counts['execution_segments']??null) || !isset($counts['execution_segments'][$index]) || !is_array($counts['execution_segments'][$index])) return;
+        if (!isset($counts['execution_segments'][$index][$field])) $counts['execution_segments'][$index][$field]=$at;
+    }
+
+    /**
+     * Detach only the private operational envelope once a Run is terminal.
+     * Timing fields deliberately survive: they are bounded numeric evidence
+     * for latency diagnostics and contain neither question text nor results.
+     * In particular, do not remove accepted/queued timestamps, otherwise
+     * older scalar telemetry loses its acceptance and queue samples during
+     * ordinary encrypted-input cleanup.
+     */
+    private function retireExecutionEnvelope(array &$counts): void
+    {
+        unset(
+            $counts['execution_operation'],
+            $counts['execution_ref'],
+            $counts['execution_hash'],
+            $counts['execution_state'],
+            $counts['execution_dispatching_at'],
+            $counts['execution_segment_index'],
+            $counts['execution_worker']
+        );
+    }
 
     /** An unknown binding request may be superseded only by the one explicit,
      * successfully completed recovery attempt. Every other unknown call still
@@ -660,6 +1256,8 @@ final class AiRunStore
         $out['clarification_count']=(int)$r['clarification_count'];
         $out['clarification_accepted_count']=(int)($counts['clarification_accepted_count']??0);
         $out['clarification_wait_ms']=(int)($counts['clarification_wait_ms']??0);
+        $out['clarification_rejected']=($r['clarification_ref']??'')!=='' && ($counts['clarification_rejected_ref']??'')===$r['clarification_ref'];
+        $out['execution_mode']=($counts['execution_mode']??'')==='async'?'async':'compatibility';
         return $out;
     }
 }

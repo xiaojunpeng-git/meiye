@@ -36,11 +36,12 @@ $check(is_string($entry) && strpos($entry,'if (closeRequested) { cancelRun(); re
     'a restored closed panel replays only the idempotent admission and then cancels the recovered Run');
 $check(is_string($entry) && strpos($entry,'clearActive(); progress.value = r.message')!==false,
     'known admission failures clear only the stale local task record instead of blocking the next question');
-$check(is_string($entry) && strpos($entry,"bootstrap.async_execution !== true")!==false
+$check(is_string($entry) && strpos($entry,'function needsCompatibilityExecution(value : any)')!==false
+    && strpos($entry,"value.execution_mode == 'compatibility'")!==false
     && strpos($entry,'function executeCompatibility(source : any,expectedLifecycle : number)')!==false
     && strpos($entry,"'/runs/' + source.run_id + '/execute'")!==false
     && strpos($entry,'New servers accept only after durable queueing.')!==false,
-    'the device uses status polling for an enabled queue and keeps a staged-server compatibility trigger');
+    'the device uses per-Run execution mode, not a stale bootstrap snapshot, and keeps compatibility for staged servers');
 $check(is_string($entry) && strpos($entry,'A reload often reads exactly the last persisted version.')!==false
     && strpos($entry,"if (!r.responseKnown) { progress.value = closeRequestedState.value")!==false,
     'a same-version or unknown-network resume preserves the active Run and continues status confirmation');

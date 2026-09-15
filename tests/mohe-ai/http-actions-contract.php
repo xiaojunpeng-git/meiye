@@ -33,11 +33,14 @@ $check($response->getHeader('Cache-Control')==='no-store','Response is not cache
 $controller->request=(new \think\Request())->setMethod('GET')->withHeader(['x-mohe-ai-client-session-id'=>'session','x-mohe-ai-run-delivery-token'=>'proof','x-mohe-ai-generation'=>'3']);
 $controller->aiStatus(str_repeat('a',48));
 $check($gateway->calls[1][2]===['client_session_id'=>'session','run_delivery_token'=>'proof','generation'=>'3'],'GET proof headers');
+$controller->request=(new \think\Request())->setMethod('POST')->withInput('{"client_session_id":"session","run_delivery_token":"proof","generation":3,"client_elapsed_ms":1200}');
+$controller->aiDelivery(str_repeat('a',48));
+$check($gateway->calls[2][0]==='delivery' && ($gateway->calls[2][2]['client_elapsed_ms']??null)===1200,'Browser-visible timing accepts only JSON body telemetry');
 $controller->request=(new \think\Request())->setMethod('GET')->withGet(['run_delivery_token'=>'query-secret']);
-$check($controller->aiStatus(str_repeat('a',48))->getCode()===400 && count($gateway->calls)===2,'Query proof rejected');
+$check($controller->aiStatus(str_repeat('a',48))->getCode()===400 && count($gateway->calls)===3,'Query proof rejected');
 foreach (['[]','{bad',str_repeat('x',262145)] as $raw) {
     $controller->request=(new \think\Request())->setMethod('POST')->withInput($raw);
-    $check($controller->aiCreate()->getCode()===400 && count($gateway->calls)===2,'Malformed/oversized body rejected');
+    $check($controller->aiCreate()->getCode()===400 && count($gateway->calls)===3,'Malformed/oversized body rejected');
 }
 $controller->request=(new \think\Request())->setMethod('POST')->withInput('{}'); $gateway->throws=true;
 $response=$controller->aiCreate();

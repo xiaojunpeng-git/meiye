@@ -44,5 +44,6 @@ assert.equal(sessions.contextRef('context-a'),null);
 assert.equal(new DeviceSessions(storage,'instance-B:person-1',()=>now).contextRef('context-b'),null);
 now += RETENTION_MS;
 assert.equal(sessions.contextRef('context-b'),null);
-sessions.clear(); assert.equal(items.has(sessions.key),false);
+sessions.saveRuntime({created_at:now,session_id:'session-a',conversation_id:'context-a',run:{run_id:'run-a'}});
+sessions.clear(); assert.equal(items.has(sessions.key),false); assert.equal(items.has(sessions.runtimeKey),false);
 console.log('Device history / identity / retention / delivery / version ordering / context reference: 34 checks PASS');
