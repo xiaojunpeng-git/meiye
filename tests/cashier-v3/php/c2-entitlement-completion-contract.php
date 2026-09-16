@@ -510,6 +510,14 @@ b1Assert(
 $plan = b1Plan();
 $lineOne = $plan['linePlans'][0];
 $lineTwo = $plan['linePlans'][1];
+$detailRemarkCommand = b1Command();
+$detailRemarkCommand['lines'][0]['detailRemark'] = '服务明细备注';
+$detailRemarkPlan = b1Plan($detailRemarkCommand);
+b1Assert(
+    'optional detail remark accepts legacy and current entitlement commands',
+    $lineOne['serviceSnapshot']['detailRemark'] === ''
+        && $detailRemarkPlan['linePlans'][0]['serviceSnapshot']['detailRemark'] === '服务明细备注'
+);
 b1Assert(
     'plan is explicitly not persisted and entitlement only',
     $plan['persistenceStatus'] === 'not_persisted'

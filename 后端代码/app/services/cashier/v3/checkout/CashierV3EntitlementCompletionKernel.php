@@ -598,7 +598,11 @@ final class CashierV3EntitlementCompletionKernel
         if (!is_array($line)) {
             throw self::failure('command_line_shape_invalid', ['index' => $index]);
         }
-        self::assertExactKeys($line, ['lineId', 'quantity', 'serviceObject', 'isExperience', 'craftsmanIds'], ['detailRemark'], 'command.lines');
+        $expectedKeys = array_merge(
+            ['lineId', 'quantity', 'serviceObject', 'isExperience', 'craftsmanIds'],
+            array_values(array_intersect(['detailRemark'], array_keys($line)))
+        );
+        self::assertExactKeys($line, $expectedKeys, 'command.lines');
         self::assertToken($line['lineId'], 'lineId', 128);
         self::assertPositiveInt($line['quantity'], 'quantity', self::MAX_TIMES);
         if (!in_array($line['serviceObject'], ['self', 'friend'], true)) {
