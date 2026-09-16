@@ -76,9 +76,9 @@ $overviewUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'了解
     ['id'=>'r1','meaning'=>'了解整体经营情况','fields'=>['metric_codes'],'values'=>['metric_terms'=>['经营']],'evidence'=>[['message_id'=>'current','quote'=>'经营']]],
     ['id'=>'r2','meaning'=>'今天','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'今天']]],
 ]],$overviewQuestion);
-$overviewBinding=$naturalBinding;$overviewBinding['metric_codes']=['cash_performance','actual_performance','consume_amount'];$overviewBinding['initial_observation']=true;$overviewBinding['periods']=[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]];$overviewBinding['requirement_bindings']=[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance','actual_performance','consume_amount']]];
+$overviewBinding=$naturalBinding;$overviewBinding['metric_codes']=['cash_performance','actual_performance','consume_amount'];$overviewBinding['initial_observation']=true;$overviewBinding['periods']=[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]];$overviewBinding['requirement_bindings']=[];
 $normalizedOverview=AiIntentResultContract::normalize($overviewBinding,['cash_performance','actual_performance','consume_amount'],[],$overviewQuestion,$overviewUnderstanding);
-$check($normalizedOverview['initial_observation']===true&&count($normalizedOverview['metric_codes'])===3,'model-marked initial overview carries multiple independent observation bindings');
+$check($normalizedOverview['initial_observation']===true&&count($normalizedOverview['metric_codes'])===3&&$normalizedOverview['requirement_bindings']===[],'model-marked initial overview carries multiple independent platform observations without inventing a customer metric binding');
 $redundantOverviewLabel=$overviewBinding;$redundantOverviewLabel['recommended_initial_answer']=true;
 $normalizedRedundantOverviewLabel=AiIntentResultContract::normalize($redundantOverviewLabel,['cash_performance','actual_performance','consume_amount'],[],$overviewQuestion,$overviewUnderstanding);
 $check($normalizedRedundantOverviewLabel['initial_observation']===true&&$normalizedRedundantOverviewLabel['recommended_initial_answer']===false,
@@ -99,6 +99,27 @@ $broadRankingBinding=$naturalBinding;$broadRankingBinding['object_kind']='person
 $normalizedBroadRanking=AiIntentResultContract::normalize($broadRankingBinding,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);
 $check($normalizedBroadRanking['recommended_initial_answer']===true&&!$normalizedBroadRanking['needs_metric_choice']&&$normalizedBroadRanking['metric_codes']===['cash_performance'],
     'a broad singular ranking can retain the model-selected professional first measure without forcing the customer to name one');
+$misbookedBroadRanking=$broadRankingBinding;$misbookedBroadRanking['needs_metric_choice']=false;$misbookedBroadRanking['recommended_initial_answer']=true;
+$misbookedBroadRanking['requirement_bindings']=[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']]];
+$normalizedMisbookedBroadRanking=AiIntentResultContract::normalize($misbookedBroadRanking,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);
+$check($normalizedMisbookedBroadRanking['requirement_bindings']===[]
+    && AiIntentResultContract::requiresSemanticBindingReview($broadRankingUnderstanding,$normalizedMisbookedBroadRanking),
+    'a model-recommended ranking clears only redundant non-metric audit bookkeeping and still enters semantic review');
+$unknownRecommendedBinding=$misbookedBroadRanking;$unknownRecommendedBinding['requirement_bindings'][0]['requirement_id']='r9';
+$reject(static function()use($unknownRecommendedBinding,$broadRankingQuestion,$broadRankingUnderstanding){AiIntentResultContract::normalize($unknownRecommendedBinding,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);},
+    'a recommendation never clears an unknown requirement binding');
+$duplicateRecommendedBinding=$misbookedBroadRanking;$duplicateRecommendedBinding['requirement_bindings'][]=['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']];
+$reject(static function()use($duplicateRecommendedBinding,$broadRankingQuestion,$broadRankingUnderstanding){AiIntentResultContract::normalize($duplicateRecommendedBinding,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);},
+    'a recommendation never clears duplicate requirement bookkeeping');
+$pendingRecommendedBinding=$misbookedBroadRanking;$pendingRecommendedBinding['requirement_bindings'][0]['status']='pending';$pendingRecommendedBinding['requirement_bindings'][0]['metric_codes']=[];
+$reject(static function()use($pendingRecommendedBinding,$broadRankingQuestion,$broadRankingUnderstanding){AiIntentResultContract::normalize($pendingRecommendedBinding,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);},
+    'a recommendation never clears a non-satisfied requirement binding');
+$differentRecommendedBinding=$misbookedBroadRanking;$differentRecommendedBinding['requirement_bindings'][0]['metric_codes']=['actual_performance'];
+$reject(static function()use($differentRecommendedBinding,$broadRankingQuestion,$broadRankingUnderstanding){AiIntentResultContract::normalize($differentRecommendedBinding,['cash_performance','actual_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);},
+    'a recommendation never clears a binding for a different metric code');
+$multipleRecommendedBinding=$misbookedBroadRanking;$multipleRecommendedBinding['metric_codes']=['cash_performance','actual_performance'];$multipleRecommendedBinding['requirement_bindings'][0]['metric_codes']=['cash_performance','actual_performance'];
+$reject(static function()use($multipleRecommendedBinding,$broadRankingQuestion,$broadRankingUnderstanding){AiIntentResultContract::normalize($multipleRecommendedBinding,['cash_performance','actual_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);},
+    'a ranking recommendation with several metric codes remains invalid');
 $multipleCandidateChoice=$recommendedBinding;$multipleCandidateChoice['needs_metric_choice']=true;$multipleCandidateChoice['metric_codes']=['cash_performance','refund_performance'];$multipleCandidateChoice['requirement_bindings'][0]['metric_codes']=['cash_performance','refund_performance'];
 $normalizedMultipleChoice=AiIntentResultContract::normalize($multipleCandidateChoice,['cash_performance','refund_performance'],[],$naturalQuestion,$naturalUnderstanding);
 $check($normalizedMultipleChoice['recommended_initial_answer']===true&&count($normalizedMultipleChoice['metric_codes'])===2,
@@ -217,8 +238,14 @@ $check(!isset($recoveredCarrier['requirements'][0]['values']['unexpected'])
 $periodRepair=AiIntentUnderstandingContract::repairInstruction('values:missing_typed');
 $check(strpos($periodRepair,'complete valid value')!==false&&strpos($periodRepair,'indicator')!==false,
     'missing typed meaning is repaired by the model without server-side indicator selection');
-$check(AiIntentResultContract::normalizeSemanticReview(['decision'=>'metric_choice','rejected_requirement_ids'=>['r1']],$naturalUnderstanding)['decision']==='metric_choice',
-    'semantic reviewer can request a registered metric choice without authorizing a candidate');
+$check(AiIntentResultContract::normalizeSemanticReview(['decision'=>'metric_choice','rejected_requirement_ids'=>[]],$naturalUnderstanding)['decision']==='metric_choice',
+    'semantic reviewer can request a registered metric choice without treating a customer requirement as rejected');
+$check(AiIntentResultContract::normalizeSemanticReview(['decision'=>'reject','rejected_requirement_ids'=>['r1']],$naturalUnderstanding)['decision']==='reject',
+    'semantic reviewer identifies the actual conflicting requirement on rejection');
+$reject(static function()use($naturalUnderstanding){AiIntentResultContract::normalizeSemanticReview(['decision'=>'metric_choice','rejected_requirement_ids'=>['r1']],$naturalUnderstanding);},
+    'metric choice cannot disguise a requirement rejection');
+$reject(static function()use($naturalUnderstanding){AiIntentResultContract::normalizeSemanticReview(['decision'=>'reject','rejected_requirement_ids'=>[]],$naturalUnderstanding);},
+    'a semantic rejection must identify a real rejected requirement');
 $check(AiIntentResultContract::normalizeSemanticUniqueness(['decision'=>'unique','metric_code'=>'cash_performance'],['cash_performance'])['metric_code']==='cash_performance',
     'candidate-blind uniqueness can name only a registered metric');
 $reject(static function(){AiIntentResultContract::normalizeSemanticUniqueness(['decision'=>'unique','metric_code'=>'invented'],['cash_performance']);},

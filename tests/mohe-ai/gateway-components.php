@@ -137,7 +137,8 @@ namespace {
     $understandingInput=json_decode($understandingUser[0]['content'],true);
     check(!isset($understandingInput['capabilities']) && $understandingInput['question']['recent_questions']===['昨天哪个技师表现最好'],'understanding receives de-identified text but no capability catalogue');
     $outboundText=json_encode($outbound,JSON_UNESCAPED_UNICODE);
-    check(strpos($outboundText,'skill_intent_understanding')!==false&&strpos($outboundText,'# 门店运营')!==false&&strpos($outboundText,'# 用户意图理解')!==false,'understanding receives complete source-owned Skills');
+    check(strpos($outboundText,'skill_intent_understanding')!==false&&strpos($outboundText,'# 用户意图理解')!==false&&strpos($outboundText,'# 门店运营')===false,
+        'understanding receives only the source-owned language Skill; business binding guidance stays in the next phase');
     check(strpos($outboundText,\app\services\ai\contract\AiIntentUnderstandingContract::VERSION)!==false,'understanding prompt uses its independent contract');
     check(strpos(\app\services\ai\contract\AiIntentResultContract::modelInstruction(false),'recommended_initial_answer')!==false,
         'binding contract permits a model-owned professional first answer without a phrase-specific server rule');
@@ -160,33 +161,15 @@ namespace {
     $bindingText=implode("\n",array_map(static function($message){return (string)($message['content']??'');},$bindingWire['messages']));
     check(strpos($bindingText,'skill_store_operations')!==false&&strpos($bindingText,'skill_intent_understanding')===false,
         'binding keeps the business Skill but does not resend the language Skill after typed understanding is accepted');
-    $GLOBALS['sfResponse']=$response(json_encode(['understanding'=>$understanding,'intent'=>$intent]));
-    $combined=$client->understandAndBind($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){},$skills);
-    check(($combined['understanding']['requirements'][0]['id']??null)==='r1'
-        && ($combined['intent']['object_kind']??null)==='person'
-        && ($combined['intent']['ranking']['limit']??null)===1,
-        'one combined provider response retains separately validated customer meaning and execution candidate');
-    $combinedWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
-    $combinedInput=json_decode(array_values(array_filter($combinedWire['messages'],static function($message){return ($message['role']??null)==='user';}))[0]['content'],true);
-    check(isset($combinedInput['question'],$combinedInput['capabilities'])&&!isset($combinedInput['question']['answers'])
-        && strpos(implode("\n",array_map(static function($message){return (string)($message['content']??'');},$combinedWire['messages'])),'skill_intent_understanding')!==false,
-        'combined fast path keeps de-identified evidence, registered boundary and both source-owned Skills in one request');
-    $combinedText=implode("\n",array_map(static function($message){return (string)($message['content']??'');},$combinedWire['messages']));
-    check(strpos($combinedText,'only these top-level keys: understanding and intent')!==false
-        && strpos($combinedText,'envelope key understanding')!==false
-        && strpos($combinedText,'envelope key intent')!==false
-        && strpos($combinedText,'Return one JSON object following intent-understanding-v4')===false
-        && strpos($combinedText,'Return one JSON object following intent-binding-v4')===false,
-        'combined carrier instructions do not conflict by each demanding their own top-level JSON object');
-    $GLOBALS['sfResponse']=$response(json_encode(['intent'=>$intent,'understanding'=>$understanding]));
-    $reorderedCombined=$client->understandAndBind($safeQuestion,$meanings,'fixture/model','fixture-key',1000,function(){},$skills);
-    check(($reorderedCombined['understanding']['requirements'][0]['id']??null)==='r1',
-        'combined response accepts equivalent JSON object member order instead of forcing a pointless retry');
+    check(strpos($bindingText,'requirement_bindings MUST be []')!==false,
+        'binding prompt keeps a model-selected professional first answer separate from customer metric requirements');
     $GLOBALS['sfResponse']=$response(json_encode($intent));
     $corrected=$client->understand($safeQuestion,$meanings,$understood['understanding'],'fixture/model','fixture-key',1000,function(){},$skills,'bad_value:requirement_bindings');
     $correctionWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
     $correctionMessages=implode("\n",array_map(static function($message){return (string)($message['content']??'');},$correctionWire['messages']));
-    check($corrected['intent']===$intent && strpos($correctionMessages,'exactly one row for each accepted requirement')!==false,'bounded binding correction states the accepted requirement-row contract');
+    check($corrected['intent']===$intent && strpos($correctionMessages,'exactly one row for each accepted requirement')!==false
+        && strpos($correctionMessages,'requirement_bindings MUST be []')!==false,
+        'bounded binding correction preserves the distinction between an accepted metric requirement and a recommended first answer');
     $GLOBALS['sfResponse']=$response(json_encode($intent));
     $referenceCorrected=$client->understand($safeQuestion,$meanings,$understood['understanding'],'fixture/model','fixture-key',1000,function(){},$skills,'bad_value:result_reference');
     $referenceCorrectionWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
@@ -219,7 +202,7 @@ namespace {
     ];
     $GLOBALS['sfResponse']=$response(json_encode(['decision'=>'ambiguous','metric_code'=>'']));
     $broadReview=$client->verifyBinding($broadQuestion,$broadCaps,$broadUnderstanding,$broadCandidate,'fixture/model','fixture-key',1000,function(){});
-    check($broadReview['review']===['decision'=>'metric_choice','rejected_requirement_ids'=>['r1']],
+    check($broadReview['review']===['decision'=>'metric_choice','rejected_requirement_ids'=>[]],
         'candidate-blind review turns a non-unique measurement into a controlled choice');
     $blindWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
     $blindInput=json_decode(array_values(array_filter($blindWire['messages'],static function($message){return ($message['role']??null)==='user';}))[0]['content'],true);

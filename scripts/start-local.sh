@@ -107,7 +107,8 @@ fi
 # 每次启动都清理三套后端/网关，避免 Swoole 保留旧路由；随后按顺序重建。
 docker rm -f mohe-app mohe-nginx \
   mohe-platform-app mohe-platform-nginx \
-  mohe-cashier-app mohe-cashier-nginx mohe-cashier-api >/dev/null 2>&1 || true
+  mohe-cashier-app mohe-cashier-nginx mohe-cashier-api \
+  mohe-ai-execution-worker mohe-ai-supervisor >/dev/null 2>&1 || true
 
 # 使用预构建镜像 mohe-app:local（含 gd，登录验证码需要）；没有则先构建
 if ! docker image inspect mohe-app:local >/dev/null 2>&1; then
@@ -153,6 +154,26 @@ docker run -d --name mohe-platform-app $APP_PLATFORM --network mohe-net \
   -v "$PROJECT:/var/www/html" \
   -w /var/www/html \
   mohe-app:local
+
+# AI uses durable Run records, but a record can only become an answer when a
+# dedicated consumer is actually resident. Keep the consumer and its recovery
+# supervisor separate from each HTTP/Swoole instance: this mirrors production
+# systemd services and avoids silently accepting work after a local restart.
+# These containers share the one backend source and database; they do not
+# create a second implementation or a terminal-specific capability path.
+docker run -d --name mohe-ai-execution-worker $APP_PLATFORM --network mohe-net \
+  --restart unless-stopped \
+  -v "$PROJECT:/var/www/html" \
+  -w /var/www/html \
+  --entrypoint /bin/sh \
+  mohe-app:local -lc 'exec php think mohe-ai:execution-worker --sleep=1'
+
+docker run -d --name mohe-ai-supervisor $APP_PLATFORM --network mohe-net \
+  --restart unless-stopped \
+  -v "$PROJECT:/var/www/html" \
+  -w /var/www/html \
+  --entrypoint /bin/sh \
+  mohe-app:local -lc 'exec php think mohe-ai:supervise --watch'
 
 docker run -d --name mohe-platform-nginx --platform linux/amd64 --network mohe-net \
   -p "$PLATFORM_API_PORT:80" \

@@ -17,7 +17,7 @@ try {
         'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],
         'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'authorized',
         'requirement_bindings'=>[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['actual_performance']]],'unresolved_fragments'=>[]];
-    $choiceHarness->bindingVerificationOverride=['decision'=>'metric_choice','rejected_requirement_ids'=>['r1']];
+    $choiceHarness->bindingVerificationOverride=['decision'=>'metric_choice','rejected_requirement_ids'=>[]];
     $choiceHarness->bindingReviewKind='candidate_blind_uniqueness';
     $beforeChoice=$choiceHarness->queries;
     $choicePending=$choiceHarness->start('今天业绩多少');

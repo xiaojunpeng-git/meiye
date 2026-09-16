@@ -21,7 +21,10 @@ try {
         ],'unresolved_fragments'=>[]];
     // A malformed/injected reviewer reply cannot turn this multi-part request
     // into an unrelated registered-metric selector.
-    $h->bindingVerificationOverride=['decision'=>'metric_choice','rejected_requirement_ids'=>['r2']];
+    // metric_choice may never conceal a rejected requirement. Its empty
+    // rejection list makes this malformed reviewer outcome fail at the
+    // semantic contract boundary before any data is read.
+    $h->bindingVerificationOverride=['decision'=>'metric_choice','rejected_requirement_ids'=>[]];
     $h->bindingReviewKind='candidate_blind_uniqueness';
     $before=$h->queries;
     $run=$h->start('今天收款，不要退款');
@@ -35,12 +38,6 @@ try {
     sbgCheck(\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($plain,$candidate,false),'one fresh positive metric may use candidate-blind ambiguity review');
     sbgCheck(!\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($h->understandingOverride,$candidate,false),'an exclusion makes candidate-blind ambiguity ineligible');
     sbgCheck(!\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($plain,$candidate,true),'a follow-up never defers by candidate-blind ambiguity');
-    $recommended=$candidate+['recommended_initial_answer'=>true,'initial_observation'=>false];
-    sbgCheck(\app\services\ai\contract\AiIntentResultContract::canDeferRejectedRecommendation($plain,$recommended,false),
-        'a rejected broad professional recommendation becomes a safe registry choice rather than a failed run');
-    $excludedRecommended=$recommended;
-    sbgCheck(!\app\services\ai\contract\AiIntentResultContract::canDeferRejectedRecommendation($h->understandingOverride,$excludedRecommended,false),
-        'a rejected recommendation with an exclusion remains blocked before any query');
     $recommendedHarness=new R6GatewayHarness(3,[1,2],'merchant');
     try {
         $recommendedHarness->understandingOverride=$plain;
@@ -50,9 +47,9 @@ try {
             'requirement_bindings'=>[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']]],'unresolved_fragments'=>[]];
         $recommendedHarness->bindingVerificationOverride=['decision'=>'reject','rejected_requirement_ids'=>['r1']];
         $before=$recommendedHarness->queries;
-        $deferred=$recommendedHarness->start('收款');
-        sbgCheck(($deferred['status']??null)==='WAITING_CLARIFICATION' && $recommendedHarness->queries===$before,
-            'a reviewer rejection of a broad first answer opens the registered choice without reading data');
+        $rejected=$recommendedHarness->start('收款');
+        sbgCheck(($rejected['status']??null)==='FAILED' && ($rejected['reason']??null)==='AI_BINDING_SEMANTIC_REJECTED' && $recommendedHarness->queries===$before,
+            'a reviewer rejection never converts a professional first answer into an unrelated selector');
     } finally { $recommendedHarness->close(); }
     echo 'PASS semantic binding guard: '.$checks." checks (offline)\n";
 } finally { $h->close(); }
