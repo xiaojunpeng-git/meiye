@@ -161,8 +161,27 @@ final class MetricReadViewServices
         $normalized = $this->query($query);
         $binding = $this->binding(call_user_func($this->authorize, $principal), $normalized['store_ids']);
         $view = $this->store->get($ref);
-        if (($view['schema_version'] ?? null) !== self::CONTRACT_VERSION || ($view['binding'] ?? null) !== $binding
-            || ($view['query'] ?? null) !== $normalized) $this->fail('METRIC_READ_BINDING_MISMATCH');
+        // A read view can legitimately predate an additive optional query
+        // field. Normalize it through the same closed schema before
+        // comparison so an omitted default has exactly the same meaning as
+        // the current explicit default. Unknown fields, altered values and
+        // invalid legacy data still fail closed in query().
+        $storedQuery = is_array($view['query'] ?? null) ? $this->query($view['query']) : null;
+        // Read views are persisted through UnifiedQueryJson, which
+        // canonicalizes object-key order.  The current trusted authority and
+        // request are freshly assembled arrays, so strict PHP array equality
+        // would reject an otherwise identical, signed view solely because the
+        // associative keys were inserted in a different order.  Compare the
+        // canonical payloads instead: values, list order and every binding
+        // field must still match exactly.
+        if (($view['schema_version'] ?? null) !== self::CONTRACT_VERSION
+            || !isset($view['binding'], $view['query'])
+            || !is_array($view['binding']) || !is_array($view['query'])
+            || $storedQuery === null
+            || UnifiedQueryJson::encode($view['binding']) !== UnifiedQueryJson::encode($binding)
+            || UnifiedQueryJson::encode($storedQuery) !== UnifiedQueryJson::encode($normalized)) {
+            $this->fail('METRIC_READ_BINDING_MISMATCH');
+        }
         $personnel=$this->personnelSelection($normalized,$binding);
         if ($personnel!==null && ($view['personnel_binding_hash']??null)!==$personnel['binding_hash']) $this->fail('METRIC_PERMISSION_CHANGED');
         return $view;

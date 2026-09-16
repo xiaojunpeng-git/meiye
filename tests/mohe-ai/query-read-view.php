@@ -75,6 +75,19 @@ try {
     queryCheck($view['read_view_kind'] === 'materialized_report_projection' && !isset($view['fact_watermark']), 'not an invented commit watermark');
     queryCheck($view['binding']['store_ids'] === [1, 2], 'canonical scope');
     queryCheck($service->replay($principal, $query, $view['read_consistency_ref']) === $view && $reads === 1, 'replay never fetches latest data');
+    // Persistence canonicalizes associative keys while trusted resolvers
+    // assemble their bindings in domain order. Key insertion order is not
+    // business meaning and must not invalidate a signed prior context.
+    $binding = array_reverse($binding, true);
+    $reorderedQuery = array_reverse($query, true);
+    queryCheck($service->replay($principal, $reorderedQuery, $view['read_consistency_ref']) === $view && $reads === 1,
+        'replay accepts canonical-equivalent binding and query key order');
+    $binding = array_reverse($binding, true);
+    $legacy = $view;
+    unset($legacy['query']['aggregate_condition']);
+    $legacyRef = $store->put($legacy);
+    queryCheck($service->replay($principal, $query, $legacyRef)['results'] === $view['results'] && $reads === 1,
+        'replay accepts a signed view that predates an additive optional query default');
     $path = $temp . '/' . $view['read_consistency_ref'] . '.json';
     queryCheck((fileperms($path) & 0777) === 0600, 'view file owner-only');
     queryReject(function () use ($service, $principal, $query, $view) { $q = $query; $q['start_date'] = '2026-09-07'; $service->replay($principal, $q, $view['read_consistency_ref']); }, 'METRIC_READ_BINDING_MISMATCH');
@@ -119,7 +132,7 @@ try {
     queryReject(function () use ($store) { $store->get('../outside'); }, 'METRIC_READ_VIEW_UNAVAILABLE');
     $now += 86400;
     queryReject(function () use ($service, $principal, $query, $view) { $service->replay($principal, $query, $view['read_consistency_ref']); }, 'METRIC_READ_VIEW_UNAVAILABLE');
-    queryCheck($store->cleanup() === 5, 'all expired views physically removed');
+    queryCheck($store->cleanup() === 6, 'all expired views physically removed');
     queryCheck(iterator_count(new FilesystemIterator($temp)) === 0, 'no fixture content retained');
 } finally {
     foreach (new DirectoryIterator($temp) as $file) if (!$file->isDot() && $file->isFile() && !$file->isLink()) unlink($file->getPathname());

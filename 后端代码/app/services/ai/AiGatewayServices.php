@@ -896,7 +896,7 @@ final class AiGatewayServices
         // A signed answer reference is useful conversation context, not a
         // shortcut around natural-language understanding.  It is verified and
         // reduced to non-sensitive query meaning before the model sees it.
-        $sourceContext=isset($body['context_ref'])?$this->contextService()->restore($context,$owner,$body['context_ref']):null;
+        $sourceContext=isset($body['context_ref'])?$this->restoreContext($context,$owner,$body['context_ref']):null;
         $sourceQuery=$sourceContext['query']??null;
         $safe['outbound']['prior_query']=$sourceQuery===null?null:IntentContextMerger::modelView(
             $sourceQuery,(array)($sourceContext['meaning']??[])
@@ -2122,6 +2122,24 @@ final class AiGatewayServices
             function(array $stored,array $owner,string $run,int $generation): void { $this->assertBinding($stored,$owner,$run,$generation); },
             function(array $context,array $query,string $viewRef): array { return $this->queryService($context)->replay([],$query,$viewRef); }
         );
+    }
+
+    /**
+     * A signed prior answer is never a reason to weaken the current Reader
+     * contract.  If that old query can no longer be replayed safely, surface
+     * a recoverable context boundary rather than misreporting it as a model
+     * or data-query failure. Current permission changes remain explicit.
+     */
+    private function restoreContext(array $context,array $owner,string $reference): array
+    {
+        try {
+            return $this->contextService()->restore($context,$owner,$reference);
+        } catch (\app\services\query\metric\MetricQueryContractException $error) {
+            if (in_array($error->getErrorCode(),[
+                'METRIC_PERMISSION_CHANGED','METRIC_PERMISSION_DENIED','METRIC_PERMISSION_GRAIN_UNAVAILABLE',
+            ],true)) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
+            throw new RuntimeException('AI_CONTEXT_REQUIRED');
+        }
     }
     private function present(array $context,array $owner,array $run): array
     {
