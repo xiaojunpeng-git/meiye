@@ -19,11 +19,11 @@ function metricRegistryCheck(bool $condition, string $label): void
 
 $expected = [
     'cash_performance', 'refund_performance', 'actual_performance', 'consume_amount',
-    'staff_sales_yeji', 'staff_labor_yeji', 'sales_amount', 'sales_quantity', 'balance_deduction_amount',
+    'staff_sales_yeji', 'staff_labor_yeji', 'sales_amount', 'sales_collected_amount', 'sales_quantity', 'balance_deduction_amount',
     'recharge_amount', 'completed_service_item_count', 'customer_active',
 ];
 $definitions = MetricDefinitionRegistry::all();
-metricRegistryCheck(array_keys($definitions) === $expected, 'only the twelve approved V3 metrics are registered');
+metricRegistryCheck(array_keys($definitions) === $expected, 'only the thirteen approved V3 metrics are registered');
 foreach ($definitions as $definition) {
     metricRegistryCheck(!array_key_exists('name', $definition), 'registry never duplicates user-visible metric names');
 }
@@ -43,6 +43,10 @@ metricRegistryCheck(MetricDefinitionRegistry::capabilities()['completed_service_
     'registered quantity and people-count metrics are AI query-ready with their own unit');
 metricRegistryCheck((MetricDefinitionRegistry::get('sales_amount')['category_reader']['strategy'] ?? '') === 'sale_completed_allocation',
     'sales amount declares its category reader instead of leaving reports to sum sale facts');
+metricRegistryCheck(MetricDefinitionRegistry::get('sales_collected_amount')['reader_strategy'] === 'sales_payment_collected'
+    && MetricDefinitionRegistry::get('sales_collected_amount')['storage_unit'] === 'fen'
+    && MetricDefinitionRegistry::get('sales_collected_amount')['query_shapes'] === ['summary', 'comparison', 'trend', 'ranking'],
+    'actual sales collection stays a separate registered sales-payment metric rather than reusing recharge-inclusive cash performance');
 metricRegistryCheck(
     isset(MetricDefinitionRegistry::get('sales_quantity')['source']['dimensions']['project'], MetricDefinitionRegistry::get('sales_quantity')['source']['dimensions']['product'])
     && !isset(MetricDefinitionRegistry::get('sales_quantity')['source']['dimensions']['guide'], MetricDefinitionRegistry::get('sales_quantity')['source']['dimensions']['sales_manager']),

@@ -33,6 +33,7 @@ final class RegisteredMetricReadServices
         $handlers = [
             'cash_positive' => function () use ($tenantId, $stores, $range): int { return $this->cashSummary($tenantId, $stores, $range, 'positive'); },
             'cash_refund' => function () use ($tenantId, $stores, $range): int { return $this->cashSummary($tenantId, $stores, $range, 'refund'); },
+            'sales_payment_collected' => function () use ($tenantId, $stores, $range): int { return $this->aggregate($this->saleCashQuery($tenantId, $stores, $range), 'p.amount_cents'); },
             'derived_subtract' => function () use ($contract, $tenantId, $stores, $range): int { return $this->derivedSummary($contract, $tenantId, $stores, $range); },
             'fact_sum' => function () use ($contract, $tenantId, $stores, $range): int { return $this->factSummary($contract['source'], $tenantId, $stores, $range); },
             'personnel_fact_sum' => function () use ($contract, $tenantId, $stores, $range): int { return $this->factSummary($contract['source'], $tenantId, $stores, $range); },
@@ -51,6 +52,7 @@ final class RegisteredMetricReadServices
         $handlers = [
             'cash_positive' => function () use ($tenantId, $stores, $range): array { return $this->cashGrouped($tenantId, $stores, $range, 'positive'); },
             'cash_refund' => function () use ($tenantId, $stores, $range): array { return $this->cashGrouped($tenantId, $stores, $range, 'refund'); },
+            'sales_payment_collected' => function () use ($tenantId, $stores, $range): array { return $this->grouped($this->saleCashQuery($tenantId, $stores, $range), 'p.amount_cents', $stores, $range); },
             'derived_subtract' => function () use ($contract, $tenantId, $stores, $range): array { return $this->derivedGrouped($contract, $tenantId, $stores, $range); },
             'fact_sum' => function () use ($contract, $tenantId, $stores, $range): array { return $this->factGrouped($contract['source'], $tenantId, $stores, $range); },
             'personnel_fact_sum' => function () use ($contract, $tenantId, $stores, $range): array { return $this->factGrouped($contract['source'], $tenantId, $stores, $range); },
@@ -215,6 +217,9 @@ final class RegisteredMetricReadServices
             },
             'cash_refund' => function () use ($tenantId, $stores, $range, $dimensionContract, $limit, $order): array {
                 return $this->cashDimensionRanking($tenantId, $stores, $range, 'refund', $dimensionContract, $limit, $order);
+            },
+            'sales_payment_collected' => function () use ($tenantId, $stores, $range, $dimensionContract, $limit, $order): array {
+                return $this->salePaymentDimensionRanking($tenantId, $stores, $range, $dimensionContract, $limit, $order);
             },
             'derived_subtract' => function () use ($tenantId, $stores, $range, $dimensionContract, $limit, $order): array {
                 return $this->cashDimensionRanking($tenantId, $stores, $range, 'net', $dimensionContract, $limit, $order);
@@ -1221,6 +1226,42 @@ final class RegisteredMetricReadServices
             return $comparison ?: ($left['entity_id'] <=> $right['entity_id']);
         });
         return array_slice($rows, 0, $limit);
+    }
+
+    /**
+     * Sales payment collection is intentionally not delegated to
+     * cashDimensionRanking(): that method combines sales, recharge and
+     * historical debt-payment sources for cash performance.  This contract
+     * keeps the member population on sales allocations only.
+     *
+     * @return array<int,array{entity_id:int,entity_name:string,metric_value:int}>
+     */
+    private function salePaymentDimensionRanking(string $tenantId, array $stores, array $range, array $dimension, int $limit, string $order): array
+    {
+        $key = (string)($dimension['id'] ?? '') . '|' . (string)($dimension['name'] ?? '');
+        if ($key !== 'member_id|member_name_snapshot') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $rows = $this->cashDimensionRows(
+            $this->saleCashQuery($tenantId, $stores, $range),
+            'p.amount_cents',
+            ['id' => 's.member_id', 'name' => 's.member_name_snapshot'],
+        );
+        $merged = [];
+        foreach ($rows as $row) {
+            $id = $this->integer($row['entity_id'] ?? null);
+            $name = trim((string)($row['entity_name'] ?? ''));
+            if ($id <= 0 || $name === '') $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            if (!isset($merged[$id])) $merged[$id] = ['entity_id' => $id, 'entity_name' => $name, 'metric_value' => 0];
+            if ($merged[$id]['entity_name'] !== $name) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            $merged[$id]['metric_value'] = $this->add($merged[$id]['metric_value'], $this->integer($row['metric_value'] ?? null));
+        }
+        $out = array_values($merged);
+        usort($out, static function (array $left, array $right) use ($order): int {
+            $comparison = $order === 'asc'
+                ? $left['metric_value'] <=> $right['metric_value']
+                : $right['metric_value'] <=> $left['metric_value'];
+            return $comparison ?: ($left['entity_id'] <=> $right['entity_id']);
+        });
+        return array_slice($out, 0, $limit);
     }
 
     private function cashDimensionRows($query, string $expression, array $fields): array

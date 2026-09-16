@@ -14,7 +14,7 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v6';
+    public const VERSION = 'unified-metric-registry-v7';
     public const COVERAGE_START = '2026-08-10';
 
     /** @return array<string,array<string,mixed>> */
@@ -109,6 +109,20 @@ final class MetricDefinitionRegistry
                 // choice so category reports never reopen sale facts to sum it.
                 'category_reader' => ['strategy' => 'sale_completed_allocation'],
             ],
+            // 销售收款与销售成交额是两个不同的业务事实。该指标只读取销售
+            // 收款分摊事实，不混入充值或历史欠款补交；退款沿同一有符号分摊链
+            // 回冲。后续会员累计门槛查询也只能声明性地复用这一事实合同。
+            'sales_collected_amount' => self::amount('sales_payment_collected', 'v3-sale-payment-collected-net-v1', ['summary', 'comparison', 'trend', 'ranking'], [
+                'dimensions' => [
+                    'member' => [
+                        'id' => 'member_id', 'name' => 'member_name_snapshot',
+                        'analysis_object_kind' => 'member',
+                        'analysis_object_label' => '会员',
+                        'analysis_relation_role' => 'member_sales_collection_total',
+                        'analysis_action_codes' => ['sales', 'payment'],
+                    ],
+                ],
+            ]) + ['default_ranking_dimension' => 'member'],
             'sales_quantity' => self::count('fact_sum', 'v3-sale-completed-line-quantity-v1', ['summary', 'comparison', 'trend', 'ranking'], [
                 'table' => 'cashier_v3_sale_fact', 'amount' => 'quantity',
                 // A refund adjusts payment amount only. Sold quantity remains
