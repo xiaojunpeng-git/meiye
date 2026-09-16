@@ -46,8 +46,13 @@ $check(strpos($safe['outbound']['question'],'消费能力')!==false,'member inte
 $capabilities=['metric_codes'=>array_keys(MetricDefinitionRegistry::capabilities()),'metric_readiness'=>MetricDefinitionRegistry::capabilities()];
 $project=AiCapabilityGuidanceCatalog::discover($capabilities,'project','ranking');
 $member=AiCapabilityGuidanceCatalog::discover($capabilities,'member','ranking');
+$person=AiCapabilityGuidanceCatalog::discover($capabilities,'person','ranking');
 $check(isset($project['sales_amount'])&&isset($project['completed_service_item_count'])&&isset($member['cash_performance'])
     && ($project['sales_amount']['action_codes']??[])===['sales'],'objects become available only when the metric registry declares an executable dimension contract');
+$check(isset($person['staff_sales_yeji'])&&!isset($person['cash_performance'])
+    && ($person['staff_sales_yeji']['default_selection_ref']??null)==='role:salesperson'
+    && strpos((string)($person['staff_sales_yeji']['summary']??''),'人员现金业绩')!==false,
+    'the model receives sales-person allocation as the registered person cash-performance meaning, not store collection totals');
 $planner=new AiDimensionGuidancePlanner();
 $plan=$planner->start('member',['object_kind'=>'member','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>['payment'],'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>3]],['date_terms'=>[['code'=>'EXPLICIT','start'=>'2026-09-01','end'=>'2026-09-09']]],['cash_performance'=>$member['cash_performance']],'screen','2026-09-10');
 $check($plan['kind']==='plan'&&$plan['plan']['query']['ranking']['limit']===3,'model-supplied natural count survives registry compilation');
