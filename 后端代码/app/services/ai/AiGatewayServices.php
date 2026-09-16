@@ -4,6 +4,7 @@ namespace app\services\ai;
 use app\services\ai\config\AiConfigStore;
 use app\services\ai\config\AiPrivateStorage;
 use app\services\ai\execution\AiRunStore;
+use app\services\ai\execution\AiRunBudgetPolicy;
 use app\services\ai\execution\AiExecutionEnvelope;
 use app\services\ai\execution\AiWorkflowPlanner;
 use app\services\ai\execution\AiRegisteredPlanCompiler;
@@ -25,6 +26,15 @@ use RuntimeException;
 /** Conversation bodies are never logged or queued; async input is encrypted in instance-private storage. */
 final class AiGatewayServices
 {
+    // The profile is the authoritative transport cap.  Individual model
+    // stages may request a tighter limit, but never a longer one.
+    private const MODEL_STAGE_LIMIT_MS = 20000;
+    // Binding is read-only and has one fenced transport recovery. Splitting
+    // its 20-second ceiling into two bounded attempts prevents an unhealthy
+    // first provider request from consuming the whole visible-answer budget.
+    // These values are transport policy, not business or metric rules.
+    private const BIND_INITIAL_STAGE_LIMIT_MS = 10000;
+    private const BIND_RECOVERY_STAGE_LIMIT_MS = 10000;
     private $runs; private $config; private $private; private $instance; private $views; private $model; private $queryTransaction; private $exports;
     private $management; private $managementDocument; private $managementRevision='source';
     /** Optional injected dependencies are for an isolated integration environment, never request parameters. */
@@ -141,8 +151,22 @@ final class AiGatewayServices
             $owner=['account_id'=>(int)$context['account_id'],'terminal'=>$context['terminal'],'conversation_id'=>$this->identifier($input['conversation_id']??null),'window_id'=>$session];
             $body=$this->conversation($input);
             $limits=$this->limits();
-            $snapshot=['capability_snapshot_ref'=>$this->registryHash($context),'capability_snapshot_hash'=>hash('sha256',json_encode($this->capabilities($context))),
-                'budget_profile_version'=>$limits['run_budget_ms'].'-v1','authorization_version'=>$this->permissionHash($context),'model_config_version'=>(string)$configuration['version'],
+            // A queued Run is executed under a freshly reconstructed trusted
+            // principal, not the mutable HTTP request context.  Freeze its
+            // admission snapshot from that same reconstruction; otherwise a
+            // harmless projection difference can reject every new Run before
+            // it reaches the model as AI_CAPABILITY_CHANGED.
+            $async=$this->asyncExecutionReady();
+            $snapshotContext=$context;
+            if ($async) {
+                try { $snapshotContext=$this->trustedQueuedContext($context); }
+                // A delegated/non-reconstructable live principal is still
+                // valid for the existing synchronous compatibility path. Do
+                // not acknowledge it as an async task that no Worker can run.
+                catch (\Throwable $ignored) { $async=false; }
+            }
+            $snapshot=['capability_snapshot_ref'=>$this->registryHash($snapshotContext),'capability_snapshot_hash'=>hash('sha256',json_encode($this->capabilities($snapshotContext))),
+                'budget_profile_version'=>$limits['run_budget_ms'].'-v1','authorization_version'=>$this->permissionHash($snapshotContext),'model_config_version'=>(string)$configuration['version'],
                 'guidance_schema_version'=>'mohe-clarification-v2','guidance_profile_version'=>'guidance-v2-'.$limits['max_clarification_rounds'],'max_clarification_rounds'=>(string)$limits['max_clarification_rounds'],
                 'intent_contract_version'=>AiIntentResultContract::VERSION];
             if ($this->management) $snapshot['management_revision']=$this->managementRevision;
@@ -153,7 +177,7 @@ final class AiGatewayServices
                 'OTHER_CONVERSATION_ACTIVE'=>'您还有一个对话正在执行，请先完成或停止该任务。',
             ][$created['reason']]??'当前使用人数较多，请稍后再问。'];
             $executionMode='compatibility';
-            if ($this->asyncExecutionReady()) {
+            if ($async) {
                 // A lost create response may be retried after its Worker has
                 // already claimed the original Run.  Receipt validation above
                 // proves it is the same request; queueExecution then returns
@@ -278,6 +302,20 @@ final class AiGatewayServices
         foreach (['origin_store_id','employee_id','staff_id'] as $key) if (array_key_exists($key,$context)) $binding[$key]=(int)$context[$key];
         if (array_key_exists('origin_organization_id',$context)) $binding['origin_organization_id']=(string)$context['origin_organization_id'];
         return $binding;
+    }
+
+    /**
+     * Reconstruct the exact principal form a queued Worker will receive.  The
+     * context is deliberately not persisted: it is only used to make create
+     * and execute compare the same capability and authorization projection.
+     */
+    private function trustedQueuedContext(array $context): array
+    {
+        $trusted=(new \app\services\ai\execution\AiTrustedPrincipalResolver())->worker($this->principalBinding($context));
+        if (($trusted['terminal']??null)!==($context['terminal']??null)
+            || (int)($trusted['account_id']??0)!==(int)($context['account_id']??0)
+            || empty($trusted['can_use'])) throw new RuntimeException('AI_EXECUTION_PRINCIPAL_INVALID');
+        return $trusted;
     }
 
     private function asyncExecutionReady(): bool
@@ -872,15 +910,10 @@ final class AiGatewayServices
         $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand_meaning');
         try {
             $checkpoint();
+            $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
             $meaningReply=$this->model
                 ? call_user_func($this->model,$safe['outbound'],[],$configuration,$checkpoint,null,'understanding')
-                // Intent understanding is the first and largest structured
-                // model response. Cutting it off at the generic 30-second
-                // transport limit turned an otherwise still-running answer
-                // into an unknown result; allow one bounded 45-second window
-                // here, while later binding/review calls retain their tighter
-                // budgets and the async UI keeps progress visible.
-                : (new SiliconFlowClient())->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],45000,$checkpoint,$runtimeSkills);
+                : (new SiliconFlowClient())->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills);
             $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::normalize($meaningReply['understanding']??null,$safe['outbound']);
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_meaning','SUCCEEDED',$meaningReply['usage']['input_tokens']??null,$meaningReply['usage']['output_tokens']??null);
         } catch (\Throwable $error) {
@@ -901,9 +934,10 @@ final class AiGatewayServices
             $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand_repair');
             try {
                 $checkpoint();
+                $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
                 $meaningReply=$this->model
                     ? call_user_func($this->model,$safe['outbound'],[],$configuration,$checkpoint,$repairPredicate,'understanding')
-                    : (new SiliconFlowClient())->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],45000,$checkpoint,$runtimeSkills,$repairPredicate);
+                    : (new SiliconFlowClient())->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,$repairPredicate);
                 $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::normalize($meaningReply['understanding']??null,$safe['outbound']);
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_repair','SUCCEEDED',$meaningReply['usage']['input_tokens']??null,$meaningReply['usage']['output_tokens']??null);
             } catch (\Throwable $repairError) {
@@ -928,9 +962,10 @@ final class AiGatewayServices
         $bindingRankRecovery=false;
         try {
             $checkpoint();
+            $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::BIND_INITIAL_STAGE_LIMIT_MS) : null;
             $reply=$this->model
                 ? call_user_func($this->model,$safe['outbound'],$bindingSummaries,$configuration,$checkpoint,null,'binding',$understanding)
-                : (new SiliconFlowClient())->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills);
+                : (new SiliconFlowClient())->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills);
             // External and injected model adapters must have identical
             // recovery semantics. A candidate response from the provider is
             // already marked below; an injected adapter can still return the
@@ -976,9 +1011,10 @@ final class AiGatewayServices
                     $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_transport_recovery','model',hash('sha256',json_encode([$safe['outbound'],$understanding,$bindingSummaries,'transport_recovery'])),'siliconflow');
                     $this->runs->sendAttempt($owner,$id,$generation,$worker,'bind_transport_recovery');
                     $checkpoint();
+                    $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::BIND_RECOVERY_STAGE_LIMIT_MS) : null;
                     $reply=$this->model
                         ? call_user_func($this->model,$safe['outbound'],$bindingSummaries,$configuration,$checkpoint,null,'binding',$understanding)
-                        : (new SiliconFlowClient())->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills);
+                        : (new SiliconFlowClient())->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills);
                     $reply['intent']=$this->semanticIntent($reply['intent']??null,$bindingSummaries,$safe['outbound'],$understanding);
                     $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_transport_recovery','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
                 } catch (\Throwable $recoveryError) {
@@ -1009,9 +1045,10 @@ final class AiGatewayServices
             $this->runs->sendAttempt($owner,$id,$generation,$worker,'bind_repair');
             try {
                 $checkpoint();
+                $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
                 $reply=$this->model
                     ? call_user_func($this->model,$safe['outbound'],$bindingSummaries,$configuration,$checkpoint,$repairPredicate,'binding',$understanding)
-                    : (new SiliconFlowClient())->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills,$repairPredicate);
+                    : (new SiliconFlowClient())->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,$repairPredicate);
                 $reply['intent']=$this->semanticIntent($reply['intent']??null,$bindingSummaries,$safe['outbound'],$understanding);
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_repair','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
             } catch (\Throwable $repairError) {
@@ -1052,6 +1089,23 @@ final class AiGatewayServices
         // report the actual capability boundary before any fallback exists.
         if (AiIntentResultContract::hasUnboundRequirement($understanding)) {
             throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+        }
+        // A clean, understood store summary with no candidate is a completed
+        // model shape, so the ordinary JSON-format repair path cannot see it.
+        // Give the binding model one bounded chance to reconcile that shape
+        // with the registry. The predicate contains no customer phrase or
+        // metric choice: the model may select a faithful observation group,
+        // request a real choice, or keep the capability gap intact.
+        if (AiIntentResultContract::requiresEmptyRegisteredBindingRecovery($understanding,$intent)) {
+            $reply=$this->repairBindingCandidate(
+                $owner,$id,$generation,$worker,$safe['outbound'],$bindingSummaries,$understanding,
+                $configuration,$checkpoint,$runtimeSkills,'empty_registered_binding'
+            );
+            $merged=IntentContextMerger::merge($sourceQuery,$reply['intent']);
+            $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
+            $objectReplacementWithoutFilterConfirmation=$sourceQuery!==null
+                && ($intent['context_delta']['object']??null)==='replace'
+                && !$merged['replacement_confirmation'];
         }
         // A clarification can defer *how* to present the result, but it may
         // never defer review of a metric selected for this turn. Review the
@@ -1164,7 +1218,17 @@ final class AiGatewayServices
         // query value. The pre-merge contract catches a contradictory delta;
         // this final check is a defense in depth for every executable path.
         if (!$merged['pending']) {
-            AiIntentResultContract::assertEffectiveRequirementValues($understanding,$intent,$safe['outbound']['reference_date']??null);
+            try {
+                AiIntentResultContract::assertEffectiveRequirementValues($understanding,$intent,$safe['outbound']['reference_date']??null);
+            } catch (AiContractException $error) {
+                // This is an executable-shape rejection after a model response
+                // was accepted at the transport boundary. Keep its structural
+                // predicate in the Run telemetry (never the question, model
+                // text, identity or result) so a real failed session can be
+                // diagnosed without weakening the final contract.
+                $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,'effective_intent');
+                throw $error;
+            }
         }
         // Apply a result reference after choosing either the requested delta
         // or its signed fallback.  A clarification must never silently drop
@@ -1502,6 +1566,31 @@ final class AiGatewayServices
     }
 
     /**
+     * The transport timeout is calculated at the send boundary, from the
+     * frozen Run budget and the live database deadline.  This avoids treating
+     * a configuration default as permission to outlive a partially consumed
+     * Run, while keeping the model client unaware of Run persistence.
+     */
+    private function modelCallTimeout(array $owner,string $id,int $generation,string $worker,int $stageLimitMs): int
+    {
+        if ($stageLimitMs<1) throw new RuntimeException('AI_MODEL_TIMEOUT_INVALID');
+        $run=$this->runs->checkpoint($owner,$id,$generation,$worker);
+        $snapshot=$this->runs->snapshot($owner,$id,$generation);
+        $version=$snapshot['budget_profile_version']??null;
+        if (!is_string($version) || !preg_match('/^([0-9]{6})-v1$/D',$version,$matches)) {
+            throw new RuntimeException('AI_SNAPSHOT_CORRUPT');
+        }
+        $profile=AiRunBudgetPolicy::defaults();
+        $profile['run_execution_budget_ms']=(int)$matches[1];
+        $now=(int)floor(microtime(true)*1000);
+        $remaining=max(0,(int)$run['deadline_at']-$now);
+        $state=AiRunBudgetPolicy::create($profile,$now);
+        $state['remaining_execution_ms']=min($profile['run_execution_budget_ms'],$remaining);
+        $state['execution_deadline_ms']=$now+$state['remaining_execution_ms'];
+        return AiRunBudgetPolicy::callTimeout($state,'model',$stageLimitMs,$now);
+    }
+
+    /**
      * Repairs one model-authored context shape, not customer meaning.  This
      * shares the global one-recovery budget with all other provider repairs,
      * so an unstable response cannot create an unbounded second dialogue or
@@ -1517,9 +1606,10 @@ final class AiGatewayServices
         $this->runs->sendAttempt($owner,$id,$generation,$worker,'bind_candidate_repair');
         try {
             $checkpoint();
+            $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
             $reply=$this->model
                 ? call_user_func($this->model,$safeQuestion,$summaries,$configuration,$checkpoint,$predicate,'binding',$understanding)
-                : (new SiliconFlowClient())->understand($safeQuestion,$summaries,$understanding,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills,$predicate);
+                : (new SiliconFlowClient())->understand($safeQuestion,$summaries,$understanding,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,$predicate);
             $reply['intent']=$this->semanticIntent($reply['intent']??null,$summaries,$safeQuestion,$understanding);
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_candidate_repair','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
             return $reply;
@@ -1558,7 +1648,8 @@ final class AiGatewayServices
                 $selection=$selectionReply['selection']??null;
                 $usage=$selectionReply['usage']??[];
             } else {
-                $selection=(new SiliconFlowClient())->selectRankMetric($safeQuestion,$understanding,$summaries,$candidates,$configuration['model'],$configuration['api_key'],30000,$checkpoint);
+                $modelTimeout=$this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS);
+                $selection=(new SiliconFlowClient())->selectRankMetric($safeQuestion,$understanding,$summaries,$candidates,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint);
                 $usage=$selection['usage']??[];
             }
             if (!is_array($selection) || !in_array($selection['decision']??null,['select','clarify'],true)
@@ -1636,9 +1727,10 @@ final class AiGatewayServices
         $this->runs->sendAttempt($owner,$id,$generation,$worker,$attemptCode);
         try {
             $checkpoint();
+            $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
             $reply=$this->model
                 ? call_user_func($this->model,$reviewInput,['candidate_binding'=>$intent,'capabilities'=>$summaries],$configuration,$checkpoint,null,'binding_verification',$understanding)
-                : (new SiliconFlowClient())->verifyBinding($safeQuestion,$summaries,$understanding,$intent,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$customerConfirmedChoice);
+                : (new SiliconFlowClient())->verifyBinding($safeQuestion,$summaries,$understanding,$intent,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$customerConfirmedChoice);
             $review=AiIntentResultContract::normalizeSemanticReview($reply['review']??null,$understanding);
             // Only the explicitly candidate-blind uniqueness pass may defer a
             // metric to the registered choice UI. A coverage reviewer has a

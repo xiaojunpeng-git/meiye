@@ -164,6 +164,33 @@ namespace {
         'binding keeps the business Skill but does not resend the language Skill after typed understanding is accepted');
     check(strpos($bindingText,'requirement_bindings MUST be []')!==false,
         'binding prompt keeps a model-selected professional first answer separate from customer metric requirements');
+    $multiObjectCapabilities=array_merge($meanings,[['metric_code'=>'cash_performance','name'=>'现金业绩','summary'=>'已收成功金额','object_contracts'=>[['object_kind'=>'store','action_codes'=>['sale']]]]]);
+    $GLOBALS['sfResponse']=$response(json_encode($intent));
+    $client->understand($safeQuestion,$multiObjectCapabilities,$understood['understanding'],'fixture/model','fixture-key',1000,function(){},$skills);
+    $objectProjectedWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
+    $objectProjectedInput=json_decode(array_values(array_filter($objectProjectedWire['messages'],static function($message){return ($message['role']??null)==='user';}))[0]['content'],true);
+    check(array_column($objectProjectedInput['capabilities'],'metric_code')===['staff_labor_yeji'],
+        'binding sends only registry entries compatible with the independently understood analytical object');
+    $timeOnlyQuestion=['schema_version'=>'sanitized-question-v2','question'=>'上个月呢？','recent_questions'=>[],
+        'evidence_messages'=>[['id'=>'current','text'=>'上个月呢？']],
+        'prior_query'=>['metric_codes'=>['project_sales_amount'],'operation'=>'ranking','periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],
+            'ranking'=>['direction'=>'top','limit'=>1],'scope'=>'authorized','object_kind'=>'project','has_business_filter'=>false,
+            'has_object_selection'=>false,'has_store_scope_restriction'=>false,'presentation_origin'=>'customer_or_verified_context'],
+        'has_unresolved_conditions'=>false,'server_resolved_fields'=>[],'reference_date'=>'2026-09-10'];
+    $timeOnlyUnderstanding=['goal'=>'查看上个月','status'=>'understood','requirements'=>[['id'=>'r1','meaning'=>'上个月','fields'=>['periods'],
+        'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>-1]]],'evidence'=>[['message_id'=>'current','quote'=>'上个月']]]]];
+    $timeOnlyCapabilities=array_merge($multiObjectCapabilities,[['metric_code'=>'project_sales_amount','name'=>'项目销售额','summary'=>'项目销售金额',
+        'object_contracts'=>[['object_kind'=>'project','action_codes'=>['sale']]]]]);
+    $timeOnlyIntent=['object_kind'=>'project','object_term'=>'','operation'=>'ranking','metric_codes'=>['project_sales_amount'],'action_codes'=>[],
+        'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>1],'periods'=>[['kind'=>'month_offset','offset_months'=>-1]],'scope'=>'authorized',
+        'context_delta'=>['metric_codes'=>'inherit','object'=>'inherit','business_filters'=>'inherit','store_scope'=>'inherit','periods'=>'replace',
+            'operation'=>'inherit','ranking_direction'=>'inherit','ranking_limit'=>'inherit','scope'=>'inherit'],'requirement_bindings'=>[],'unresolved_fragments'=>[]];
+    $GLOBALS['sfResponse']=$response(json_encode($timeOnlyIntent));
+    $client->understand($timeOnlyQuestion,$timeOnlyCapabilities,$timeOnlyUnderstanding,'fixture/model','fixture-key',1000,function(){},$skills);
+    $timeOnlyWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
+    $timeOnlyInput=json_decode(array_values(array_filter($timeOnlyWire['messages'],static function($message){return ($message['role']??null)==='user';}))[0]['content'],true);
+    check(array_column($timeOnlyInput['capabilities'],'metric_code')===['project_sales_amount'],
+        'a pure time continuation projects only the verified prior analytical object registry view');
     $GLOBALS['sfResponse']=$response(json_encode($intent));
     $corrected=$client->understand($safeQuestion,$meanings,$understood['understanding'],'fixture/model','fixture-key',1000,function(){},$skills,'bad_value:requirement_bindings');
     $correctionWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);

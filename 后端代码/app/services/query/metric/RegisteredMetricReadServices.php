@@ -787,7 +787,8 @@ final class RegisteredMetricReadServices
         $expression = $this->cashExpression($mode);
         $sale = $this->aggregate($this->saleCashQuery($tenantId, $stores, $range), $expression);
         $recharge = $this->aggregate($this->rechargeCashQuery($tenantId, $stores, $range), $expression);
-        return $this->add($sale, $recharge);
+        $unallocatedDebtRepayment = $this->aggregate($this->unallocatedSalesDebtRepaymentCashQuery($tenantId, $stores, $range), $expression);
+        return $this->add($this->add($sale, $recharge), $unallocatedDebtRepayment);
     }
 
     private function derivedSummary(array $contract, string $tenantId, array $stores, array $range): int
@@ -815,11 +816,14 @@ final class RegisteredMetricReadServices
     {
         $sale = $this->saleCashQuery($tenantId, $stores, $range);
         $recharge = $this->rechargeCashQuery($tenantId, $stores, $range);
+        $unallocatedDebtRepayment = $this->unallocatedSalesDebtRepaymentCashQuery($tenantId, $stores, $range);
         $this->applyCashDirection($sale, $mode, 'p.amount_cents');
         $this->applyCashDirection($recharge, $mode, 'p.amount_cents');
+        $this->applyCashDirection($unallocatedDebtRepayment, $mode, 'p.amount_cents');
 
         $saleTotal = (int)(clone $sale)->count('p.id');
         $rechargeTotal = (int)(clone $recharge)->count('p.id');
+        $unallocatedDebtRepaymentTotal = (int)(clone $unallocatedDebtRepayment)->count('p.id');
         $fetch = $page * $pageSize;
         $amount = $mode === 'refund' ? '-p.amount_cents' : 'p.amount_cents';
 
@@ -829,8 +833,11 @@ final class RegisteredMetricReadServices
         $rechargeRows = (clone $recharge)->fieldRaw(
             "p.id,CONCAT('recharge:',p.id) detail_sort_key,p.fact_id,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,p.business_date,p.occurred_at,p.settled_at,p.recorded_at,p.status,{$amount} metric_value,p.member_name_snapshot,p.operator_id,p.operator_name_snapshot"
         )->order('p.settled_at', 'desc')->order('p.id', 'desc')->limit($fetch)->select()->toArray();
+        $unallocatedDebtRepaymentRows = (clone $unallocatedDebtRepayment)->fieldRaw(
+            "p.id,CONCAT('sales-debt-repayment:',p.id) detail_sort_key,p.fact_id,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,p.business_date,p.occurred_at,p.settled_at,p.recorded_at,p.status,{$amount} metric_value,p.member_name_snapshot,p.operator_id,p.operator_name_snapshot"
+        )->order('p.settled_at', 'desc')->order('p.id', 'desc')->limit($fetch)->select()->toArray();
 
-        $rows = array_merge($saleRows, $rechargeRows);
+        $rows = array_merge($saleRows, $rechargeRows, $unallocatedDebtRepaymentRows);
         usort($rows, static function (array $left, array $right): int {
             $time = ((int)($right['settled_at'] ?? 0)) <=> ((int)($left['settled_at'] ?? 0));
             if ($time !== 0) return $time;
@@ -844,7 +851,7 @@ final class RegisteredMetricReadServices
         unset($row);
         return [
             'rows' => $pageRows,
-            'total' => $this->add($saleTotal, $rechargeTotal),
+            'total' => $this->add($this->add($saleTotal, $rechargeTotal), $unallocatedDebtRepaymentTotal),
         ];
     }
 
@@ -889,10 +896,20 @@ final class RegisteredMetricReadServices
         unset($populationFilters['participant_employee_id']);
         if ($categoryIds === [] && $populationFilters === []) {
             $recharge = $this->rechargeCashQuery($tenantId, $stores, $range);
+            $unallocatedDebtRepayment = $this->unallocatedSalesDebtRepaymentCashQuery($tenantId, $stores, $range);
             $this->applyParticipantScope($recharge, $filters, 'order');
+            $this->applyParticipantScope($unallocatedDebtRepayment, $filters, 'order');
             $this->applyCashDirection($recharge, $mode, 'p.amount_cents');
+            $this->applyCashDirection($unallocatedDebtRepayment, $mode, 'p.amount_cents');
             $rows = array_merge($rows, $recharge->fieldRaw(
                 "CONCAT('recharge-payment:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,CASE WHEN p.source_document_type='recharge' THEN '充值' ELSE '充值欠款补交' END item_name,'recharge' product_type_snapshot,0 category_id,'' category_path"
+            )->select()->toArray());
+            // A migrated debt may have no V3 source sale line.  Its successful
+            // payment is still cash performance, but has no defensible product
+            // category.  Keep it visible only in the unfiltered population;
+            // category filters must not invent a relation that was never saved.
+            $rows = array_merge($rows, $unallocatedDebtRepayment->fieldRaw(
+                "CONCAT('sales-debt-repayment:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,'销售欠款补交（未关联原销售明细）' item_name,'sales_debt_repayment_unallocated' product_type_snapshot,0 category_id,'' category_path"
             )->select()->toArray());
         }
         if ($cards === []) return $rows;
@@ -1153,18 +1170,21 @@ final class RegisteredMetricReadServices
         $expression = $this->cashExpression($mode);
         $sale = $this->grouped($this->saleCashQuery($tenantId, $stores, $range), $expression, $stores, $range);
         $recharge = $this->grouped($this->rechargeCashQuery($tenantId, $stores, $range), $expression, $stores, $range);
-        return $this->mergePoints($sale, $recharge);
+        $unallocatedDebtRepayment = $this->grouped($this->unallocatedSalesDebtRepaymentCashQuery($tenantId, $stores, $range), $expression, $stores, $range);
+        return $this->mergePoints($sale, $recharge, $unallocatedDebtRepayment);
     }
 
     private function cashDimensionRanking(string $tenantId, array $stores, array $range, string $mode, array $dimension, int $limit, string $order): array
     {
         // Dimensions are selected only from the registered contract. Sale
-        // allocations and recharge payments retain their snapshots differently.
+        // allocations, recharge payments and unallocated historical sales-debt
+        // repayments retain their snapshots differently.
         $dimensionKey = (string)($dimension['id'] ?? '') . '|' . (string)($dimension['name'] ?? '');
         $sources = [
             'operator_id|operator_name_snapshot' => [
                 'sale' => ['join' => 'payment', 'id' => 'payment.operator_id', 'name' => 'payment.operator_name_snapshot'],
                 'recharge' => ['id' => 'p.operator_id', 'name' => 'p.operator_name_snapshot'],
+                'unallocated_debt_repayment' => ['id' => 'p.operator_id', 'name' => 'p.operator_name_snapshot'],
             ],
             'member_id|member_name_snapshot' => [
                 // The allocation is a payment allocation, while membership is
@@ -1172,14 +1192,20 @@ final class RegisteredMetricReadServices
                 // accidental duplicate member id on the allocation row.
                 'sale' => ['id' => 's.member_id', 'name' => 's.member_name_snapshot'],
                 'recharge' => ['id' => 'p.member_id', 'name' => 'p.member_name_snapshot'],
+                'unallocated_debt_repayment' => ['id' => 'p.member_id', 'name' => 'p.member_name_snapshot'],
             ],
         ];
         if (!isset($sources[$dimensionKey])) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $expression = $this->cashExpression($mode);
         $sale = $this->cashDimensionRows($this->saleCashQuery($tenantId, $stores, $range), $expression, $sources[$dimensionKey]['sale']);
         $recharge = $this->cashDimensionRows($this->rechargeCashQuery($tenantId, $stores, $range), $expression, $sources[$dimensionKey]['recharge']);
+        $unallocatedDebtRepayment = $this->cashDimensionRows(
+            $this->unallocatedSalesDebtRepaymentCashQuery($tenantId, $stores, $range),
+            $expression,
+            $sources[$dimensionKey]['unallocated_debt_repayment']
+        );
         $merged = [];
-        foreach (array_merge($sale, $recharge) as $row) {
+        foreach (array_merge($sale, $recharge, $unallocatedDebtRepayment) as $row) {
             $id = $this->integer($row['entity_id'] ?? null);
             $name = trim((string)($row['entity_name'] ?? ''));
             if ($id <= 0 || $name === '') $this->fail('METRIC_SOURCE_RESULT_INVALID');
@@ -1470,6 +1496,27 @@ final class RegisteredMetricReadServices
         // net readers choose their own expression from this same fact population;
         // balance-only restoration never creates a negative payment fact.
         return $query;
+    }
+
+    /**
+     * Sales-debt repayments are normally represented by immutable payment-to-
+     * sale allocations. Historical debts can legitimately lack an original V3
+     * sale line, so no allocation may be created for them. Read those payment
+     * facts exactly once from their own authoritative grain instead of
+     * dropping them or fabricating a sale/category relation.
+     */
+    private function unallocatedSalesDebtRepaymentCashQuery(string $tenantId, array $stores, array $range)
+    {
+        return call_user_func($this->queryFactory, 'cashier_v3_payment_fact')->alias('p')
+            ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)->where('p.status', 'effective')
+            ->where('p.fact_type', 'payment_collected')->where('p.source_document_type', 'debt_repayment')
+            ->whereIn('p.payment_method', CashierV3CheckoutFactPlanV1::paymentMethods())
+            ->whereBetween('p.business_date', [$range['start'], $range['end']])
+            ->whereNotExists(function ($allocation): void {
+                $allocation->name('cashier_v3_payment_sale_allocation_fact')->alias('debt_payment_allocation')
+                    ->whereRaw('debt_payment_allocation.tenant_id=p.tenant_id AND debt_payment_allocation.payment_fact_id=p.fact_id')
+                    ->where('debt_payment_allocation.status', 'effective');
+            });
     }
 
     private function assertScope(string $tenantId, array $stores, array $range): void

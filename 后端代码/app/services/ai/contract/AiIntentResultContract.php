@@ -48,7 +48,12 @@ final class AiIntentResultContract
         // repair asks the model to decide the delta again; PHP never clears a
         // dimension, picks a metric or interprets customer wording itself.
         if (in_array($predicate,['context_analytical_dimension_carryover','context_metric_carryover_rejected',
-            'current_metric_binding_rejected'],true)) return true;
+            'current_metric_binding_rejected','empty_registered_binding'],true)) return true;
+        // A context-only follow-up may change one verified condition, but it
+        // cannot silently replace every other part of the prior query.  The
+        // recovery asks the model to publish a coherent delta again; PHP does
+        // not supply an object, response form, rank or metric in its place.
+        if (is_string($predicate) && preg_match('/^contextual_followup_changed:(metric_codes|object|business_filters|store_scope|operation|ranking_direction|ranking_limit|scope)$/D',$predicate)) return true;
         return is_string($predicate) && strpos($predicate,'missing_key:')===0
             && in_array(substr($predicate,12),array_merge(self::REQUIRED_FIELDS,['context_delta']),true);
     }
@@ -131,7 +136,7 @@ final class AiIntentResultContract
     public static function modelInstruction(bool $hasPriorQuery): string
     {
         $context=$hasPriorQuery
-            ? 'A verified prior query exists. Include context_delta with exactly these keys: '.implode(', ',self::DELTA_FIELDS).'. Each value is one of inherit, replace, clear or pending. Use inherit only when the current wording leaves that exact meaning unchanged. Use replace only when current wording supplies a new meaning in the matching ordinary field. Use clear only when the customer explicitly removes a condition. Use pending when clarification is needed. Never omit a delta key and never infer inherit from an omitted field. A short continuation can replace just the analytical object while retaining the verified period, response form, ranking direction, ranking quantity, scope and other unchanged meaning. Conversely, a self-contained current question seeking an overall operating view is a new topic when it does not refer to the earlier result or object: clear the old analytical object/dimension, replace the response form with summary, clear old ranking, and do not let an old product, project, person or ranking become an unspoken condition. Clearing an analytical dimension never means clearing a verified named object selection or widening authority. prior_query.presentation_origin says whether the preceding metric perspective was explicitly selected by the customer or was a platform-suggested first answer. A platform suggestion is context that may be continued when the current wording refers to it, but it is never an unspoken customer condition. When presentation_origin is platform_observation, its metric_codes are one deliberately presented overview group, not competing choices. If the current wording semantically continues that overview and changes only a contextual condition such as the period, inherit the complete group and keep initial_observation=true; do not turn it into needs_metric_choice merely because it contains several metrics. Only request a metric choice when the current wording itself introduces a different measurement or makes the intended continuation genuinely unclear. Set store_scope to clear only when the current request explicitly asks for the authorized/all-store range and supplies scope=authorized; set store_scope to replace only when the current request identifies a store object; clear business_filters when abandoning an earlier analytical dimension that carried no selected object, and otherwise clear or replace it only when the current request identifies the changed object scope. When that new object cannot legally use the previous metric under capabilities.object_contracts, do not return operation unknown or an unresolved fragment and do not reuse the old metric. Select a compatible registered metric when it faithfully provides a useful first answer to the accepted goal; mark metric_codes pending only when several readings remain and none can be selected without changing that goal.'
+            ? 'A verified prior query exists. Include context_delta with exactly these keys: '.implode(', ',self::DELTA_FIELDS).'. Each value is one of inherit, replace, clear or pending. Use inherit only when the current wording leaves that exact meaning unchanged. Use replace only when current wording supplies a new meaning in the matching ordinary field. Use clear only when the customer explicitly removes a condition or when the accepted current meaning is a complete standalone overall query rather than a continuation. Use pending when clarification is needed. Never omit a delta key and never infer inherit from an omitted field. A short continuation can replace just the analytical object while retaining the verified period, response form, ranking direction, ranking quantity, scope and other unchanged meaning. Conversely, a self-contained current question seeking an overall operating view is a new topic when it does not refer to the earlier result or object: clear the old analytical object/dimension, replace the response form with summary, clear old ranking, and do not let an old product, project, person or ranking become an unspoken condition. This can clear a prior selected analytical object as well; it never clears data authority or widens the authorized range. prior_query.presentation_origin says whether the preceding metric perspective was explicitly selected by the customer or was a platform-suggested first answer. A platform suggestion is context that may be continued when the current wording refers to it, but it is never an unspoken customer condition. When presentation_origin is platform_observation, its metric_codes are one deliberately presented overview group, not competing choices. If the current wording semantically continues that overview and changes only a contextual condition such as the period, inherit the complete group and keep initial_observation=true; do not turn it into needs_metric_choice merely because it contains several metrics. Only request a metric choice when the current wording itself introduces a different measurement or makes the intended continuation genuinely unclear. Set store_scope to clear only when the current request explicitly asks for the authorized/all-store range and supplies scope=authorized; set store_scope to replace only when the current request identifies a store object; clear business_filters when abandoning an earlier analytical dimension. A selected object may be cleared only for a complete standalone overall query, and that transition is independently reviewed before execution; otherwise clear or replace it only when the current request identifies the changed object scope. When that new object cannot legally use the previous metric under capabilities.object_contracts, do not return operation unknown or an unresolved fragment and do not reuse the old metric. Select a compatible registered metric when it faithfully provides a useful first answer to the accepted goal; mark metric_codes pending only when several readings remain and none can be selected without changing that goal.'
             : 'No verified prior query exists. Do not include context_delta.';
         return 'Return one JSON object following '.self::VERSION.'. Required keys: '.implode(', ',self::REQUIRED_FIELDS).'. Optional keys: object_relation, ranking, periods, scope, result_reference, initial_observation, recommended_initial_answer'.($hasPriorQuery?', context_delta':'').'. '.$context.' object_term is an exact customer term or an empty string where no named object is needed. object_relation is analysis when object_kind is the thing being compared, grouped or listed, and selection only when object_term identifies a particular target that must narrow the data. Do not turn an analytical object into a selection; when object_relation is analysis, object_term must be empty. For an aggregate operating goal with no named analytical object, use object_kind store and an empty object_term; words such as “overall” describe the goal, not a separate object_kind. The accepted understanding is the primary record of customer meaning. Do not reinterpret, replace or contradict any typed value it already carries; bind its business goal to registered capability only. If that understanding has no typed carrier for a response form, period, ranking, scope, object or object relation that you can still clearly understand from the same question, return the faithful candidate rather than treating the customer as unclear. The server sends such a new carrier to a separate semantic reviewer before it can execute. needs_metric_choice is true only when the intended business measurement is genuinely ambiguous and no professionally useful first reading can be selected; then metric_codes must be empty. A customer may instead ask for a broad overall operating view without naming one measurement. When the accepted understanding is such an open operating goal, no explicit customer condition conflicts with it, and operation is summary, set initial_observation=true and select two to four independent supplied store metrics as observation angles for an initial answer. Those codes are professional observations, not a claim that the customer selected one metric; do not use this exception for a named measurement, exclusion, comparison, ranking, or object-specific request. When the customer has made the analytical object and response form clear but the business measurement has several registered readings, select the most useful compatible professional first reading from the supplied capabilities. Only a summary can intentionally return multiple independent reading angles; a ranking must set metric_codes to exactly one registered code because one ranked result needs one comparable measurement. Set recommended_initial_answer=true, needs_metric_choice=false and label the resulting metric perspective in the answer, so the customer can naturally pursue another perspective afterwards. Never set recommended_initial_answer for an unresolved meaning, an unavailable capability, a changed exclusion, or a result that needs customer confirmation. Set both initial_observation and recommended_initial_answer false or omit them for every other request. Lack of an available metric is not ambiguity. requirement_bindings is a required accountability array. It has exactly one row for every accepted understanding requirement whose fields include metric_codes, and no other rows. Each row is exactly {"requirement_id":"rN","status":"satisfied|unavailable|pending","metric_codes":[registered codes]}. A satisfied row names the registered metric codes that fulfill that one requirement; together all satisfied rows must account for the selected metric_codes. An unavailable or pending row has an empty metric_codes array and therefore cannot accompany an executable metric selection. When there is no accepted metric_codes requirement and you select a professional recommended_initial_answer, requirement_bindings must be an empty array: the recommendation is not customer-selected meaning and must not be attached to object, ranking, period, scope or other requirements. This is an accountability record for the accepted meaning, not a phrase matcher: do not decide it from word overlap, and do not omit an exclusion or another customer requirement. periods, when present, is an ordered array of up to two period objects. A period is exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":positive-integer,"end_offset_days":signed-integer}, or {"kind":"month_offset","offset_months":signed-integer}. Preserve early, future and long periods exactly; execution coverage and length limits are checked by the server later, never reinterpret them as an invalid intent. A calendar-month meaning uses month_offset; relative_days is only for a stated rolling number of days. ranking is {"direction":"top|bottom|top_and_bottom|unspecified","limit":integer-or-null}. Scope and accessible stores are server-owned: omit scope unless current wording explicitly changes current-store versus authorized scope. metric_codes and action_codes are binding candidates inside their required arrays and only contain supplied codes. Do not output provenance: the server records whether a carrier came from accepted meaning, verified context, a system default, or a candidate that still needs semantic admission. result_reference, if used, is only {"group":"top|bottom","ordinal":positive-integer}; emit it only when the accepted understanding has an equal result_reference requirement with current-question evidence. group means the rank section explicitly named by the customer and never contains an ID, name or result value. unresolved_fragments only contains exact current-question text whose meaning cannot be understood, not understood requests that lack a registered binding. Never calculate, query, invent a condition, discard a condition, or copy a previous result value.';
     }
@@ -146,6 +151,15 @@ final class AiIntentResultContract
         // a metric, date, object, scope, action or permission, and avoids
         // rejecting a complete business binding for an empty carrier field.
         if (!array_key_exists('unresolved_fragments',$value)) $value['unresolved_fragments']=[];
+        // `object_term` is only an identity carrier. When accepted meaning
+        // contains no selected object, its sole faithful value is the empty
+        // string; normalizing that omission cannot select a person, store,
+        // metric, period, scope or result. A customer-selected object remains
+        // strict: the omitted identity must never be guessed or recovered
+        // from history.
+        if (!array_key_exists('object_term',$value) && self::canDefaultEmptyObjectTerm($understanding)) {
+            $value['object_term']='';
+        }
         foreach (self::REQUIRED_FIELDS as $key) if (!array_key_exists($key,$value)) self::fail('missing_key:'.$key);
         if ($hasPrior && !array_key_exists('context_delta',$value)) self::fail('missing_key:context_delta');
         // Accept provenance from older model prompts but never trust or emit it.
@@ -195,8 +209,10 @@ final class AiIntentResultContract
         // selected candidate and let the ordinary first-answer path (and its
         // semantic review) handle it. PHP does not add a metric, infer a
         // requirement, or decide what the focus should be.
+        $singleObservationRecommendation=false;
         if ($initialObservation && count($value['metric_codes'])===1) {
             $initialObservation=false;
+            $singleObservationRecommendation=true;
             $value['initial_observation']=false;
             if (($value['needs_metric_choice']??false)===false) $value['recommended_initial_answer']=true;
         }
@@ -218,9 +234,17 @@ final class AiIntentResultContract
             // customer requirement, so a model-selected professional first
             // measure is allowed. Two separately stated measurements are not:
             // selecting one would drop customer meaning.
-            if ($initialObservation || count($value['metric_codes'])>4 || count($metricRequirementIds)>1) self::fail('ambiguous_metric_codes_present');
+            // A stale "needs choice" marker can be repaired only when it
+            // carries one already-selected metric.  Several candidates for
+            // one customer measurement are genuine ambiguity; clearing the
+            // marker would silently turn alternatives into a combined query.
+            if ($initialObservation || count($value['metric_codes'])!==1 || count($metricRequirementIds)>1) self::fail('ambiguous_metric_codes_present');
             $value['needs_metric_choice']=false;
-            $value['recommended_initial_answer']=true;
+            // When the understanding already carries a customer-owned
+            // measurement, this only repairs the stale choice marker.  It is
+            // not a platform recommendation and must not later be rejected
+            // merely because the binding transport described it that way.
+            $value['recommended_initial_answer']=!self::hasCurrentMetricRequirement($understanding);
             if (is_array($value['requirement_bindings']??null) && count($value['requirement_bindings'])===1) {
                 $row=&$value['requirement_bindings'][0];
                 if (is_array($row) && ($row['status']??null)==='pending' && ($row['metric_codes']??null)===[]) {
@@ -274,15 +298,18 @@ final class AiIntentResultContract
                 'operation'=>$value['operation'],
             ]);
         }
-        // A professional first reading is useful only when the accepted
-        // meaning has not already supplied a customer-owned measurement.
-        // The understanding model, rather than PHP word matching, decides
-        // whether such a requirement exists.  This prevents a previous
-        // ranking's convenient default from being relabelled as a
-        // recommendation when the customer has expressly introduced a new
-        // business fact in the current turn.
-        if ($recommendedInitialAnswer && self::hasCurrentMetricRequirement($understanding)) {
-            self::fail('recommended_initial_answer_with_current_metric_requirement');
+        // This flag changes only response wording; it never authorizes the
+        // selected metric. A binding can accidentally retain the optional
+        // "recommended" presentation label while its selected metric is
+        // already accountable to a current customer requirement. Preserve
+        // the model's candidate and its ordinary semantic review, but remove
+        // that contradictory label instead of spending the sole recovery on
+        // a non-business transport detail. The understanding model—not a
+        // phrase rule—continues to decide whether the current turn contains
+        // a customer-owned measurement.
+        if ($recommendedInitialAnswer && !$singleObservationRecommendation && self::hasCurrentMetricRequirement($understanding)) {
+            $recommendedInitialAnswer=false;
+            $value['recommended_initial_answer']=false;
         }
         if ($initialObservation) {
             if (count($value['metric_codes'])<2 || count($value['metric_codes'])>4) self::fail('initial_observation_metric_count');
@@ -311,6 +338,7 @@ final class AiIntentResultContract
         if ($objectRelation==='selection' && $value['object_term']==='') self::fail('bad_value:object_relation');
         $delta=$hasPrior?self::delta($value['context_delta']):null;
         self::normalizeNoopContextChanges($delta,$value,$safeQuestion['prior_query']??null);
+        self::assertContextOnlyFollowup($understanding,$delta);
         self::assertContextConstraintSources($understanding,$delta,$value,$scope,$scopeSupplied,$safeQuestion['prior_query']??null);
         self::requireReplacementValues($delta,$value,$rankingSupplied,$periodsSupplied,$scopeSupplied);
         // Provenance is a server-owned audit record.  The binding model may
@@ -388,6 +416,45 @@ final class AiIntentResultContract
         }
     }
 
+    /** An absent selected-object identity is never normalized. */
+    private static function canDefaultEmptyObjectTerm(array $understanding): bool
+    {
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            if (!in_array('object_relation',(array)($requirement['fields']??[]),true)) continue;
+            if (($requirement['values']['object_relation']??null)==='selection') return false;
+        }
+        return true;
+    }
+
+    /**
+     * A turn that contributes only a new time condition is a continuation by
+     * contract, not a licence to replace the prior subject, answer form or
+     * measurement. This is based on the model-authored, evidence-backed
+     * field inventory rather than customer wording or a metric catalogue.
+     * Richer turns still let the model decide their delta and pass the normal
+     * semantic review.
+     */
+    private static function assertContextOnlyFollowup(array $understanding,?array $delta): void
+    {
+        if ($delta===null) return;
+        $currentFields=[];
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            $isCurrent=false;
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (($evidence['message_id']??null)==='current') {$isCurrent=true;break;}
+            }
+            if (!$isCurrent) continue;
+            foreach ((array)($requirement['fields']??[]) as $field) $currentFields[$field]=true;
+        }
+        // An empty understanding is handled by the ordinary contract. A
+        // result reference, metric, object, rank, scope or unbound condition
+        // makes this a richer turn and remains entirely model-owned.
+        if ($currentFields===[] || array_diff(array_keys($currentFields),['periods'])!==[]) return;
+        foreach (['metric_codes','object','business_filters','store_scope','operation','ranking_direction','ranking_limit','scope'] as $field) {
+            if (($delta[$field]??null)!=='inherit') self::fail('contextual_followup_changed:'.$field);
+        }
+    }
+
     private static function assertContextConstraintSources(array $understanding,?array $delta,array $intent,string $scope,bool $scopeSupplied,?array $priorQuery): void
     {
         if ($delta===null) return;
@@ -422,9 +489,25 @@ final class AiIntentResultContract
         // grounded in a current object request. A previous analytical
         // dimension alone has no selected identity and must not trap a later
         // independent business question in its old topic.
+        // A complete current aggregate query may deliberately end a previous
+        // selected analytical object.  This is not a PHP interpretation of
+        // a phrase: the understanding independently carries both a current
+        // measurement and summary response form, and the binding model has
+        // explicitly declared the clear.  The response form may be a
+        // capability-binding decision rather than a separately typed
+        // customer field (for example, a direct amount question). It always
+        // proceeds to the separate semantic reviewer below before a reader
+        // can execute it. A short continuation such as only a new period has
+        // neither a current measurement nor a summary candidate and remains
+        // unable to remove a selected object.
+        $standaloneAggregate=$intent['object_kind']==='store'
+            && $intent['object_term']===''
+            && $intent['operation']==='summary'
+            && $hasField('metric_codes',true);
         if (in_array($delta['business_filters'],['clear','replace'],true)
             && ($priorQuery['has_object_selection']??false)===true
-            && !$hasField('object_kind',true)) {
+            && !$hasField('object_kind',true)
+            && !$standaloneAggregate) {
             self::fail('context_constraint_without_source:business_filters');
         }
     }
@@ -623,14 +706,38 @@ final class AiIntentResultContract
         return false;
     }
 
+    /**
+     * A clear store-level summary can arrive at the registry boundary with no
+     * candidate at all. This is neither a permission to select a convenient
+     * metric nor proof that the customer is unclear: the model owns both of
+     * those decisions. It only permits one fenced re-bind request, where the
+     * model receives the same understanding and registry descriptions again.
+     */
+    public static function requiresEmptyRegisteredBindingRecovery(array $understanding,array $intent): bool
+    {
+        if (($understanding['status']??null)!=='understood' || self::hasUnboundRequirement($understanding)) return false;
+        if (($intent['object_kind']??null)!=='store' || ($intent['operation']??null)!=='summary'
+            || !empty($intent['metric_codes']) || !empty($intent['needs_metric_choice'])
+            || !empty($intent['unresolved_fragments'])) return false;
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            if (in_array('metric_codes',(array)($requirement['fields']??[]),true)) return true;
+        }
+        return false;
+    }
+
     public static function semanticReviewInstruction(): string
     {
-        return 'Return exactly {"decision":"accept|reject|metric_choice","rejected_requirement_ids":["rN"]}. '
+        // The candidate-blind uniqueness pass has its own, deliberately
+        // narrower `unique|ambiguous|unavailable` contract.  This coverage
+        // reviewer must only admit or reject the binding it was given: asking
+        // it to create a third decision here used to produce a value the
+        // gateway correctly could not execute, wasting a model round.
+        return 'Return exactly {"decision":"accept|reject","rejected_requirement_ids":["rN"]}. '
             .'Independently compare the accepted understanding with the proposed binding and supplied registered capability descriptions. '
             .'Evaluate only requirements that this turn newly adds, replaces or clears. A signed condition inherited unchanged from the prior query is not a new customer requirement and must neither require a new wording nor be changed. '
             .'Accept only if every evaluated customer requirement represented by the proposed binding is faithfully expressed by the current customer question. '
             .'When candidate_binding.initial_observation is true, accept it for a first answer only if the accepted understanding is an open overall operating goal with no specific customer-stated measurement, exclusion, comparison, ranking or object-specific condition that the observation set would replace. A broad everyday evaluation can remain an open operating goal even when the understanding protocol carries a generic metric requirement; decide from the ordinary customer wording whether it names a particular business fact, accounting basis or measurement, rather than treating that carrier by itself as a specific metric. A different case is a verified prior query whose presentation_origin is platform_observation: its metric_codes are one previously presented overview group, not alternatives. If the current accepted understanding only continues that group while changing a contextual condition, accept the complete inherited group; reject only when the current wording adds a conflicting measurement, exclusion, comparison, ranking, object condition or scope change. '
-            .'When candidate_binding.recommended_initial_answer is true, review the proposed recommendation as a candidate rather than as a customer-selected metric. Accept a compatible registered metric when it is a reasonable professional first reading of the broad customer goal, object and response form. A broad everyday evaluation without a named accounting basis is not by itself a conflict. Return metric_choice with an empty rejected_requirement_ids array only when no useful first answer can be selected without changing the customer goal. Reject only when the candidate changes a stated exclusion, range, ranking, object condition or other explicit requirement, and name the conflicting requirement ids. '
+            .'When candidate_binding.recommended_initial_answer is true, review the proposed recommendation as a candidate rather than as a customer-selected metric. Accept a compatible registered metric when it is a reasonable professional first reading of the broad customer goal, object and response form. A broad everyday evaluation without a named accounting basis is not by itself a conflict. Reject only when the candidate changes a stated exclusion, range, ranking, object condition or other explicit requirement, and name the conflicting requirement ids. '
             .'When the customer asks to identify which comparable person, store, member, project or other object is doing best, leading or weakest, the binding must preserve that comparative result: it needs a ranking response with the requested direction, and must not substitute an aggregate summary. '
             .'Reject when a selected metric or result reference substitutes, reverses, ignores or conflicts with any such requirement, including an exclusion. '
             .'When a binding replaces or clears a signed store range, or changes an object filter, accept only if the current customer question itself expresses that exact change. A confirmed request for the authorized range may execute directly, but never expands authority beyond the current Reader permission. '
@@ -639,7 +746,7 @@ final class AiIntentResultContract
             .'An excerpt that expresses only a date, ranking, metric or another condition does not support a scope expansion merely because it appears in the same requirement. '
             .'A result reference is valid only when the current question itself asks for the displayed ranked result; it must never be inferred from prior conversation. '
             .'Do not invent requirements, metric codes, conditions, identities, dates, formulas, results or explanations. '
-            .'Both accept and metric_choice use an empty rejected_requirement_ids array. A reject names every rejected requirement id.';
+            .'Accept uses an empty rejected_requirement_ids array. A reject names every rejected requirement id.';
     }
 
     public static function semanticUniquenessInstruction(): string

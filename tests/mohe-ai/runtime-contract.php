@@ -85,6 +85,19 @@ checkRuntime('queue preparation and elapsed time consume original budget', $spen
 checkRuntime('input state is not mutated', $initial['remaining_execution_ms'] === 180000);
 checkRuntime('stage tighter than global timeout', Budget::callTimeout($spent, 'tool', 6000, 22000) === 6000);
 checkRuntime('remaining minus finalization bounds call', Budget::callTimeout($spent, 'model', 20000, 174000) === 2000);
+$liveDeadline = Budget::create($profile, 90000);
+$liveDeadline['remaining_execution_ms'] = 6500;
+$liveDeadline['execution_deadline_ms'] = 96500;
+checkRuntime('model transport timeout preserves finalization reserve from live deadline', Budget::callTimeout($liveDeadline, 'model', 20000, 90000) === 1500);
+checkRuntime('model transport timeout never exceeds stage or configured cap', Budget::callTimeout($liveDeadline, 'model', 5000, 90000) === 1500);
+checkRuntime('a tighter read-only binding stage remains within the same model policy', Budget::callTimeout($spent, 'model', 10000, 22000) === 10000);
+$gatewaySource = file_get_contents(dirname(__DIR__, 2) . '/后端代码/app/services/ai/AiGatewayServices.php');
+checkRuntime('gateway derives model transport timeout at each provider send boundary', is_string($gatewaySource)
+    && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS)') === 6
+    && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::BIND_INITIAL_STAGE_LIMIT_MS)') === 1
+    && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::BIND_RECOVERY_STAGE_LIMIT_MS)') === 1
+    && strpos($gatewaySource, ',45000,$checkpoint') === false
+    && strpos($gatewaySource, ',30000,$checkpoint') === false);
 rejectsRuntime('no new work at reserve boundary', function () use ($spent) {
     Budget::callTimeout($spent, 'tool', 6000, 176000);
 }, 'WORK_BUDGET_EXHAUSTED');
