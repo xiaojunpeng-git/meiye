@@ -109,6 +109,7 @@ namespace {
     $result=$client->probe('fixture/model','fixture-key',1000,function(){});
     check($result['usage']['input_tokens']===8,'model configuration probe records bounded usage');
     check($GLOBALS['sfEndpoint']===SiliconFlowClient::ENDPOINT,'fixed endpoint');
+    check(SiliconFlowClient::MAX_REQUEST_TIMEOUT_MS===45000,'intent understanding can use the bounded 45-second provider window');
     check($GLOBALS['sfOptions'][CURLOPT_FOLLOWLOCATION]===false,'redirect prohibited');
     check(json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true)['temperature']===0,'configuration probe uses deterministic transport settings');
     $GLOBALS['sfResponse']=$response('{"ok":false}');

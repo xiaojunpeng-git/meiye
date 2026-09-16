@@ -88,10 +88,13 @@ final class IntentContextMerger
                 if ($sourceKey==='business_filters' && $delta['object']==='replace') {
                     $constraints[$sourceKey]=null;
                     $fallbackConstraints[$sourceKey]=null;
-                    // Replacing an empty prior filter is not a customer
-                    // decision. The new analytical object still goes through
-                    // the normal capability and authority checks below.
-                    if ($source[$sourceKey]!==[]) {
+                    // `object_kind` is an analytical dimension, not a
+                    // customer-selected object. Changing project to product
+                    // therefore replaces the old dimension without a second
+                    // question. Only a signed concrete selection can be lost
+                    // by that replacement; the new dimension still goes
+                    // through normal capability and authority checks.
+                    if (self::hasObjectSelection($source[$sourceKey])) {
                         $pending[]=$deltaKey;
                         $replacementConfirmation=true;
                     }
@@ -209,6 +212,11 @@ final class IntentContextMerger
         return $out;
     }
     private static function empty(string $name){return $name==='metric_codes'||$name==='periods'?[]:($name==='scope'?'unspecified':($name==='object'?'unknown':'unknown'));}
+    /** A dimension alone is not a concrete customer restriction. */
+    private static function hasObjectSelection(array $filters): bool
+    {
+        return is_string($filters['selection_ref']??null) && $filters['selection_ref']!=='';
+    }
     private static function scope(array $query): string {return 'authorized';}
     private static function conflict(): void {throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');}
 }

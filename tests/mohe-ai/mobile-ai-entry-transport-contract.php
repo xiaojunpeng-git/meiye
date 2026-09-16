@@ -31,6 +31,14 @@ $check(is_string($entry) && strpos($entry,'class="ai-user-turn"')!==false
     && strpos($entry,'class="ai-answer-turn"')!==false
     && strpos($entry,'>魔核 AI</text>')!==false,
     'each retained turn labels the customer question and the AI answer as separate visual blocks');
+$check(is_string($entry) && strpos($entry,'function contextEligible(row : any)')!==false
+    && strpos($entry,'function appendTranscript(row : any)')!==false
+    && strpos($entry,'context_eligible:false')!==false,
+    'a failed mobile Run is retained as a visible question-and-status turn without becoming an executable context reference');
+$check(is_string($entry) && strpos($entry,"s.rounds.slice().reverse().some((r : any) => { if (contextEligible(r))")!==false,
+    'mobile context reference skips failed turns and retains the latest verified query only');
+$check(is_string($entry) && strpos($entry,'s.rounds.slice(-20).forEach((r : any) => history.push({question:r.question,answer:r.answer}))')!==false,
+    'mobile sends the latest attempted questions to the server while the server remains responsible for projecting no answer text');
 $check(is_string($entry) && strpos($entry,'v-if="activeQuestion.length > 0"')!==false
     && strpos($entry,'showActiveQuestion(pending.question)')!==false
     && strpos($entry,':scroll-into-view="messageAnchor"')!==false,

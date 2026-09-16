@@ -341,14 +341,14 @@ try {
     $replacementEvidence=$h->private->read($h->row($replacement)['evidence_ref']);
     cdgCheck($replacement['status']==='COMPLETED'&&($replacementEvidence['query']['business_filters']??null)===['object_kind'=>'member'],'replacement plus pending form recompiles a member ranking after all confirmations');
 
-    // Moving from a member dimension to stores must actually remove the
-    // member dimension from the final query, not merely acknowledge it.
+    // Moving from a member dimension to stores replaces an analytical
+    // dimension, not a named member selected by the customer. It should
+    // execute directly while still removing the old dimension from the query.
     $toStore=cdgDelta();$toStore['object']='replace';
     $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'ranking','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>5],'periods'=>[],'scope'=>'unspecified','context_delta'=>$toStore,'unresolved_fragments'=>[]];
     $storeReplacement=$h->start('改查看门店排行',$memberSource['answer']['context_ref']);
-    $storeReplacement=$h->choose($storeReplacement,['replace_previous_object_filter'=>'replace']);
     $storeReplacementEvidence=$h->private->read($h->row($storeReplacement)['evidence_ref']);
-    cdgCheck($storeReplacement['status']==='COMPLETED'&&($storeReplacementEvidence['query']['business_filters']??null)===[],'confirmed replacement from member to store executes a store query');
+    cdgCheck($storeReplacement['status']==='COMPLETED'&&($storeReplacementEvidence['query']['business_filters']??null)===[],'dimension replacement from member to store executes without an unnecessary confirmation');
 
     // A single pending ranking field replaces just that field. The unchanged
     // direction/quantity remain from the signed query.

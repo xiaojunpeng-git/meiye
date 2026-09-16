@@ -99,12 +99,66 @@ $broadRankingBinding=$naturalBinding;$broadRankingBinding['object_kind']='person
 $normalizedBroadRanking=AiIntentResultContract::normalize($broadRankingBinding,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);
 $check($normalizedBroadRanking['recommended_initial_answer']===true&&!$normalizedBroadRanking['needs_metric_choice']&&$normalizedBroadRanking['metric_codes']===['cash_performance'],
     'a broad singular ranking can retain the model-selected professional first measure without forcing the customer to name one');
+$rankingChoiceCandidate=['operation'=>'ranking','metric_codes'=>['cash_performance'],'needs_metric_choice'=>false];
+$check(!AiIntentResultContract::canDeferMetricChoice($naturalUnderstanding,$rankingChoiceCandidate,false),
+    'a ranked result is semantically reviewed as a useful first answer instead of a metric-choice form');
 $misbookedBroadRanking=$broadRankingBinding;$misbookedBroadRanking['needs_metric_choice']=false;$misbookedBroadRanking['recommended_initial_answer']=true;
 $misbookedBroadRanking['requirement_bindings']=[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']]];
 $normalizedMisbookedBroadRanking=AiIntentResultContract::normalize($misbookedBroadRanking,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);
 $check($normalizedMisbookedBroadRanking['requirement_bindings']===[]
     && AiIntentResultContract::requiresSemanticBindingReview($broadRankingUnderstanding,$normalizedMisbookedBroadRanking),
     'a model-recommended ranking clears only redundant non-metric audit bookkeeping and still enters semantic review');
+$followQuestion=['schema_version'=>'sanitized-question-v2','question'=>'产品呢？','has_unresolved_conditions'=>false,
+    'server_resolved_fields'=>[],'reference_date'=>'2026-09-12','recent_questions'=>['哪个项目卖得最好？'],
+    'evidence_messages'=>[['id'=>'current','text'=>'产品呢？'],['id'=>'recent_1','text'=>'哪个项目卖得最好？']],
+    'prior_query'=>['metric_codes'=>['cash_performance'],'operation'=>'ranking',
+        'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-12']],
+        'ranking'=>['direction'=>'top','limit'=>1],'scope'=>'authorized','object_kind'=>'project',
+        'has_business_filter'=>true,'has_object_selection'=>false,'has_store_scope_restriction'=>false,
+        'presentation_origin'=>'customer_or_verified_context']];
+$followUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'查看产品表现','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'查看产品','fields'=>['object_kind'],
+        'values'=>['object_kind'=>'product'],'evidence'=>[['message_id'=>'current','quote'=>'产品']]],
+]],$followQuestion);
+$followDelta=array_fill_keys(AiIntentResultContract::DELTA_FIELDS,'inherit');$followDelta['object']='replace';
+$followBinding=['object_kind'=>'product','object_term'=>'','operation'=>'unknown','metric_codes'=>[],'action_codes'=>[],
+    'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified',
+    'context_delta'=>$followDelta,'requirement_bindings'=>[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']]],
+    'unresolved_fragments'=>[]];
+$normalizedFollow=AiIntentResultContract::normalize($followBinding,['cash_performance','actual_performance'],[],$followQuestion,$followUnderstanding);
+$check($normalizedFollow['requirement_bindings']===[]&&$normalizedFollow['metric_codes']===[],
+    'an inherited metric attached to a current object-only requirement is removed as structural bookkeeping');
+$overviewAfterDimensionQuestion=$overviewQuestion;
+$overviewAfterDimensionQuestion['prior_query']=$followQuestion['prior_query'];
+$overviewAfterDimensionQuestion['prior_query']['has_business_filter']=true;
+$overviewAfterDimensionQuestion['prior_query']['has_object_selection']=false;
+$overviewAfterDimensionDelta=array_fill_keys(AiIntentResultContract::DELTA_FIELDS,'inherit');
+$overviewAfterDimensionDelta['metric_codes']='replace';$overviewAfterDimensionDelta['operation']='replace';
+$overviewAfterDimensionDelta['periods']='replace';$overviewAfterDimensionDelta['business_filters']='clear';
+$overviewAfterDimensionBinding=$overviewBinding;
+$overviewAfterDimensionBinding['context_delta']=$overviewAfterDimensionDelta;
+$overviewAfterDimensionBinding['requirement_bindings']=[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance','actual_performance','consume_amount']]];
+$normalizedOverviewAfterDimension=AiIntentResultContract::normalize($overviewAfterDimensionBinding,['cash_performance','actual_performance','consume_amount'],[],$overviewAfterDimensionQuestion,$overviewUnderstanding);
+$check($normalizedOverviewAfterDimension['context_delta']['business_filters']==='clear',
+    'a new broad topic can clear an old analytical dimension without pretending it selected an object');
+$badOverviewCarryover=$normalizedOverviewAfterDimension;
+$badOverviewCarryover['context_delta']['object']='inherit';
+$badOverviewCarryover['context_delta']['business_filters']='inherit';
+$badOverviewCarryover['context_delta']['ranking_direction']='inherit';
+$badOverviewCarryover['context_delta']['ranking_limit']='inherit';
+$badOverviewCarryover['object_kind']='project';
+$badOverviewCarryover['ranking']=['direction'=>'top','limit'=>1];
+$carryoverSource=['business_filters'=>['object_kind'=>'project'],'query_shape'=>'ranking'];
+$check(AiIntentResultContract::requiresContextRebinding($carryoverSource,$overviewUnderstanding,$badOverviewCarryover,$badOverviewCarryover),
+    'a non-selected analytical dimension carried into a new answer form is returned to the model for one delta repair');
+$selectedCarryoverSource=['business_filters'=>['object_kind'=>'project','selection_ref'=>'private-ref'],'query_shape'=>'ranking'];
+$check(!AiIntentResultContract::requiresContextRebinding($selectedCarryoverSource,$overviewUnderstanding,$badOverviewCarryover,$badOverviewCarryover),
+    'a verified named selection is never cleared by the structural carryover repair');
+$changedSubjectFollow=$followBinding;$changedSubjectFollow['metric_codes']=['actual_performance'];$changedSubjectFollow['context_delta']['metric_codes']='replace';
+$changedSubjectFollow['requirement_bindings'][0]['metric_codes']=['actual_performance'];
+$normalizedChangedSubjectFollow=AiIntentResultContract::normalize($changedSubjectFollow,['cash_performance','actual_performance'],[],$followQuestion,$followUnderstanding);
+$check($normalizedChangedSubjectFollow['requirement_bindings']===[]&&$normalizedChangedSubjectFollow['metric_codes']===['actual_performance'],
+    'a non-metric object follow-up clears only redundant bookkeeping while preserving its reviewable metric candidate');
 $unknownRecommendedBinding=$misbookedBroadRanking;$unknownRecommendedBinding['requirement_bindings'][0]['requirement_id']='r9';
 $reject(static function()use($unknownRecommendedBinding,$broadRankingQuestion,$broadRankingUnderstanding){AiIntentResultContract::normalize($unknownRecommendedBinding,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);},
     'a recommendation never clears an unknown requirement binding');
@@ -115,8 +169,9 @@ $pendingRecommendedBinding=$misbookedBroadRanking;$pendingRecommendedBinding['re
 $reject(static function()use($pendingRecommendedBinding,$broadRankingQuestion,$broadRankingUnderstanding){AiIntentResultContract::normalize($pendingRecommendedBinding,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);},
     'a recommendation never clears a non-satisfied requirement binding');
 $differentRecommendedBinding=$misbookedBroadRanking;$differentRecommendedBinding['requirement_bindings'][0]['metric_codes']=['actual_performance'];
-$reject(static function()use($differentRecommendedBinding,$broadRankingQuestion,$broadRankingUnderstanding){AiIntentResultContract::normalize($differentRecommendedBinding,['cash_performance','actual_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);},
-    'a recommendation never clears a binding for a different metric code');
+$normalizedDifferentRecommendedBinding=AiIntentResultContract::normalize($differentRecommendedBinding,['cash_performance','actual_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);
+$check($normalizedDifferentRecommendedBinding['requirement_bindings']===[]&&$normalizedDifferentRecommendedBinding['metric_codes']===['cash_performance'],
+    'a non-metric requirement cannot turn redundant model audit codes into customer-selected meaning');
 $multipleRecommendedBinding=$misbookedBroadRanking;$multipleRecommendedBinding['metric_codes']=['cash_performance','actual_performance'];$multipleRecommendedBinding['requirement_bindings'][0]['metric_codes']=['cash_performance','actual_performance'];
 $reject(static function()use($multipleRecommendedBinding,$broadRankingQuestion,$broadRankingUnderstanding){AiIntentResultContract::normalize($multipleRecommendedBinding,['cash_performance','actual_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);},
     'a ranking recommendation with several metric codes remains invalid');
@@ -184,6 +239,15 @@ $analyticalStore=$inventedRanking;$analyticalStore['object_term']='门店';$anal
 $normalizedAnalyticalStore=AiIntentResultContract::normalize($analyticalStore,['cash_performance'],[],$plainQuestion,$plainUnderstanding);
 $check($normalizedAnalyticalStore['object_relation']==='analysis'&&$normalizedAnalyticalStore['object_term']==='',
     'an analytical object is not transported as a named store selection');
+$analyticalRelationQuestion=$plainQuestion;$analyticalRelationQuestion['question']='本月各门店收款排名';$analyticalRelationQuestion['evidence_messages'][0]['text']=$analyticalRelationQuestion['question'];
+$analyticalRelationUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'查看本月各门店收款排名','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'查看本月收款','fields'=>['metric_codes','periods'],'values'=>['metric_terms'=>['收款'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'本月各门店收款排名']]],
+    ['id'=>'r2','meaning'=>'按门店比较并排名','fields'=>['object_kind','object_relation','operation','ranking'],'values'=>['object_kind'=>'store','object_relation'=>'analysis','operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>null]],'evidence'=>[['message_id'=>'current','quote'=>'各门店收款排名']]],
+]],$analyticalRelationQuestion);
+$malformedAnalyticalRelation=$analyticalStore;$malformedAnalyticalRelation['object_relation']='grouping';
+$normalizedMalformedAnalyticalRelation=AiIntentResultContract::normalize($malformedAnalyticalRelation,['cash_performance'],[],$analyticalRelationQuestion,$analyticalRelationUnderstanding);
+$check($normalizedMalformedAnalyticalRelation['object_relation']==='analysis'&&$normalizedMalformedAnalyticalRelation['object_term']==='',
+    'an invalid binding relation reuses only the single accepted semantic relation, never a PHP text guess');
 $selectedStoreQuestion=$plainQuestion;$selectedStoreQuestion['question']='查看二号门店本月收款';$selectedStoreQuestion['evidence_messages'][0]['text']=$selectedStoreQuestion['question'];
 $selectedStoreUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'查看二号门店本月收款','status'=>'understood','requirements'=>[
     ['id'=>'r1','meaning'=>'查看本月收款','fields'=>['metric_codes','periods'],'values'=>['metric_terms'=>['收款'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'二号门店本月收款']]],

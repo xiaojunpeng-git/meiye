@@ -129,7 +129,11 @@ for (const max of [3,4,5]) {
 {
   const f = setup(); f.start(); const newer = f.step(2); f.api.accept(newer); f.api.accept({ ...newer, version: 2, clarification: { ...newer.clarification, id: 'old', round_no: 1 } });
   eq(f.api.refs.clarification.value.id, 'step-2'); f.api.closePanel(); f.answer('/runs/mobile-run/cancel', { ...newer, version: 4, status: 'CANCELLED' });
-  f.api.accept({ ...newer, version: 5, status: 'COMPLETED', answer: { summary: '迟到', cards: [] } }); eq(f.api.refs.displayed.value.length, 0); eq(f.api.refs.opened.value, false); f.unmount();
+  f.api.accept({ ...newer, version: 5, status: 'COMPLETED', answer: { summary: '迟到', cards: [] } });
+  // Stopping keeps the customer's question and its terminal status visible,
+  // while the late successful projection still has no right to replace it.
+  eq(f.api.refs.displayed.value.map(item => ({ question: item.question, answer: item.answer, context_eligible: item.context_eligible })), [{ question: '移动引导测试', answer: '已取消', context_eligible: false }]);
+  eq(f.api.refs.opened.value, false); f.unmount();
 }
 {
   const f = setup(); f.start(); eq(f.api.validGuidance({ id: 'legacy', fields: [metric] }), false);

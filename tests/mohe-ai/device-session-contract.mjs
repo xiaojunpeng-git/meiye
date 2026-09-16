@@ -41,6 +41,12 @@ sessions.append('context-a','new-q','new-a',{});
 assert.equal(sessions.contextRef('context-a'),null); // never search older answers
 sessions.append('context-a','new-q2','new-a2',{context_ref:{forged:true}});
 assert.equal(sessions.contextRef('context-a'),null);
+sessions.append('context-b','failed-product-question','本次未能完成',{summary:'本次未能完成',terminal_status:'FAILED'},null,{contextEligible:false});
+assert.equal(sessions.contextRef('context-b'),'fixture-context-b');
+assert.deepEqual(sessions.history('context-b'),[
+  {question:'q-b',answer:'a-b'},
+  {question:'failed-product-question',answer:'本次未能完成'}
+]);
 assert.equal(new DeviceSessions(storage,'instance-B:person-1',()=>now).contextRef('context-b'),null);
 now += RETENTION_MS;
 assert.equal(sessions.contextRef('context-b'),null);

@@ -263,7 +263,9 @@ assert.equal(durableText.split('当前组合暂不可用').length - 1,1);
 assert.equal(JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixture%3Adurable-pending-question'))[0].pending_question,undefined);
 const durableSaved = JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixture%3Adurable-pending-question')).flatMap(s => s.rounds);
 assert.deepEqual(durableSaved.map(r => [r.question,r.answer,r.context_eligible]), [['持久问题不能丢失','当前组合暂不可用',false]]);
-assert.deepEqual((new DeviceSessions(window.localStorage,'fixture:durable-pending-question')).history(durableConversation),[]);
+assert.deepEqual((new DeviceSessions(window.localStorage,'fixture:durable-pending-question')).history(durableConversation),[
+  {question:'持久问题不能丢失',answer:'当前组合暂不可用'}
+]);
 durablePendingRecovery();
 // Two mounts can observe the same immutable terminal projection.  The second
 // append is intentionally ignored, but it must still discard the recovery

@@ -28,13 +28,14 @@ export class DeviceSessions {
   }
   save(sessions) { this.storage.setItem(this.key, JSON.stringify(sessions)); }
   create(id = newId()) { const sessions = this.load(); const session = { id, created_at: this.clock(), rounds: [] }; sessions.push(session); this.save(sessions); return session; }
-  // A controlled failure belongs in the visible device transcript, but it is
-  // not business context for the next model request.  Otherwise a transport
-  // error such as "please retry" can be mistaken for an earlier answer and
-  // distort an ordinary follow-up.
+  // Every customer question remains available to the model as de-identified
+  // conversational context, including a failed turn. This lets “try that
+  // again” refer to the latest attempted topic rather than silently jumping
+  // to an older successful answer. The server projects questions only; a
+  // failure message or an unverified candidate never becomes a business fact.
   history(id) {
     const s = this.load().find(s => s.id === id);
-    return s ? s.rounds.filter(r => r.context_eligible !== false).slice(-HISTORY_ROUNDS).map(r => ({ question: r.question, answer: r.answer })) : [];
+    return s ? s.rounds.slice(-HISTORY_ROUNDS).map(r => ({ question: r.question, answer: r.answer })) : [];
   }
   contextRef(id) {
     const session = this.load().find(value => value.id === id);

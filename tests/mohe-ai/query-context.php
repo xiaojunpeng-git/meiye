@@ -54,6 +54,13 @@ qcCheck($noOpCanonical['context_delta']['store_scope']==='inherit'&&$noOpCanonic
 $emptySwitch=$noOpCanonical;$emptySwitch['context_delta']['object']='replace';$emptySwitch['object_kind']='person';
 $emptySwitchMerge=IntentContextMerger::merge($unrestrictedSource,$emptySwitch);
 qcCheck($emptySwitchMerge['constraints']['business_filters']===null&&$emptySwitchMerge['pending']===[]&&!$emptySwitchMerge['replacement_confirmation'],'switching an analytical object after an unrestricted result does not ask to replace a non-existent prior filter');
+$dimensionSource=$unrestrictedSource;$dimensionSource['business_filters']=['object_kind'=>'project'];
+$dimensionSwitch=IntentContextMerger::merge($dimensionSource,$emptySwitch);
+qcCheck($dimensionSwitch['constraints']['business_filters']===null&&$dimensionSwitch['pending']===[]&&!$dimensionSwitch['replacement_confirmation'],
+    'switching an analytical dimension does not pretend that the previous dimension was a selected object');
+$selectedSwitch=IntentContextMerger::merge($source,$emptySwitch);
+qcCheck($selectedSwitch['constraints']['business_filters']===null&&in_array('business_filters',$selectedSwitch['pending'],true)&&$selectedSwitch['replacement_confirmation'],
+    'switching away from a signed concrete object still requires an explicit replacement decision');
 $pending=$intent;$pending['context_delta']['operation']='pending';$pendingMerged=IntentContextMerger::merge($source,qcNormalize($pending,$safe));
 qcCheck(in_array('operation',$pendingMerged['pending'],true)&&$pendingMerged['intent']['operation']==='unknown','uncertain semantic field becomes pending, never a default');
 $pendingScope=$intent;$pendingScope['context_delta']['store_scope']='pending';$pendingScopeMerged=IntentContextMerger::merge($source,qcNormalize($pendingScope,$safe));

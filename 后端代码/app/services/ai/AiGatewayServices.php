@@ -873,7 +873,13 @@ final class AiGatewayServices
             $checkpoint();
             $meaningReply=$this->model
                 ? call_user_func($this->model,$safe['outbound'],[],$configuration,$checkpoint,null,'understanding')
-                : (new SiliconFlowClient())->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills);
+                // Intent understanding is the first and largest structured
+                // model response. Cutting it off at the generic 30-second
+                // transport limit turned an otherwise still-running answer
+                // into an unknown result; allow one bounded 45-second window
+                // here, while later binding/review calls retain their tighter
+                // budgets and the async UI keeps progress visible.
+                : (new SiliconFlowClient())->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],45000,$checkpoint,$runtimeSkills);
             $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::normalize($meaningReply['understanding']??null,$safe['outbound']);
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_meaning','SUCCEEDED',$meaningReply['usage']['input_tokens']??null,$meaningReply['usage']['output_tokens']??null);
         } catch (\Throwable $error) {
@@ -896,7 +902,7 @@ final class AiGatewayServices
                 $checkpoint();
                 $meaningReply=$this->model
                     ? call_user_func($this->model,$safe['outbound'],[],$configuration,$checkpoint,$repairPredicate,'understanding')
-                    : (new SiliconFlowClient())->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills,$repairPredicate);
+                    : (new SiliconFlowClient())->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],45000,$checkpoint,$runtimeSkills,$repairPredicate);
                 $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::normalize($meaningReply['understanding']??null,$safe['outbound']);
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_repair','SUCCEEDED',$meaningReply['usage']['input_tokens']??null,$meaningReply['usage']['output_tokens']??null);
             } catch (\Throwable $repairError) {
@@ -1011,6 +1017,19 @@ final class AiGatewayServices
         // that may retain verified query meaning across turns.
         $merged=IntentContextMerger::merge($sourceQuery,$intent);
         $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
+        // Context changes are semantic, but a provider can occasionally
+        // produce a self-contradictory delta: it swaps the answer form while
+        // carrying an old analytical dimension that the current accepted
+        // understanding never selected. Do not "fix" it in PHP. One fenced
+        // binding retry asks the model to publish a coherent delta; the
+        // normal contract, authority and Reader checks still decide whether
+        // that new candidate may execute.
+        if (AiIntentResultContract::requiresContextRebinding($sourceQuery,$understanding,$reply['intent'],$intent)) {
+            $reply=$this->repairBindingCandidate($owner,$id,$generation,$worker,$safe['outbound'],$summaries,$understanding,$configuration,$checkpoint,$runtimeSkills,'context_analytical_dimension_carryover');
+            $intent=$reply['intent'];
+            $merged=IntentContextMerger::merge($sourceQuery,$intent);
+            $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
+        }
         // A new analytical object after an unrestricted aggregate has no
         // prior object filter to remove. It must still use the new object's
         // registered choices, but asking the customer to confirm a removal
@@ -1369,6 +1388,36 @@ final class AiGatewayServices
         $metricCodes=[];foreach($capabilities as $capability) if(is_string($capability['metric_code']??null)) $metricCodes[]=$capability['metric_code'];
         sort($metricCodes,SORT_STRING);
         return AiIntentResultContract::normalize($intent,$metricCodes,$allowedActions,$safeQuestion,$understanding);
+    }
+
+    /**
+     * Repairs one model-authored context shape, not customer meaning.  This
+     * shares the global one-recovery budget with all other provider repairs,
+     * so an unstable response cannot create an unbounded second dialogue or
+     * hide latency behind automatic retries.
+     */
+    private function repairBindingCandidate(array $owner,string $id,int $generation,string $worker,array $safeQuestion,array $summaries,array $understanding,array $configuration,callable $checkpoint,array $runtimeSkills,string $predicate): array
+    {
+        if (!AiIntentResultContract::repairableFormat($predicate)) throw new RuntimeException('AI_MODEL_INPUT_INVALID');
+        $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
+        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safeQuestion,$understanding,$summaries,$runtimeSkills,$predicate],2304));
+        $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
+        $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_candidate_repair','model',hash('sha256',json_encode([$safeQuestion,$understanding,$summaries,$predicate])),'siliconflow');
+        $this->runs->sendAttempt($owner,$id,$generation,$worker,'bind_candidate_repair');
+        try {
+            $checkpoint();
+            $reply=$this->model
+                ? call_user_func($this->model,$safeQuestion,$summaries,$configuration,$checkpoint,$predicate,'binding',$understanding)
+                : (new SiliconFlowClient())->understand($safeQuestion,$summaries,$understanding,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills,$predicate);
+            $reply['intent']=$this->semanticIntent($reply['intent']??null,$summaries,$safeQuestion,$understanding);
+            $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_candidate_repair','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+            return $reply;
+        } catch (\Throwable $error) {
+            if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,'bind_candidate_repair');
+            $state=in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
+            try { $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_candidate_repair',$state); } catch (\Throwable $ignored) {}
+            throw $error;
+        }
     }
 
     /**
