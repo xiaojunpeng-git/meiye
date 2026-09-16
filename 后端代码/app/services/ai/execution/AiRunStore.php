@@ -581,7 +581,7 @@ final class AiRunStore
             $counts=json_decode($r['counters_json'],true);
             if (!is_array($counts)) { throw new RuntimeException('AI_COUNTER_CORRUPT'); }
             $counts[$counter]=($counts[$counter]??0)+1;
-            if ($counts[$counter]>($kind==='model'?4:8)) { throw new RuntimeException('AI_COUNTER_EXHAUSTED'); }
+            if ($counts[$counter]>($kind==='model'?5:8)) { throw new RuntimeException('AI_COUNTER_EXHAUSTED'); }
             if ($kind==='model' && $counts[$counter]>($counts['stage_count']??0)+($counts['model_recovery_count']??0)) { throw new RuntimeException('AI_COUNTER_SEQUENCE'); }
             $counts['attempt_kinds']=$counts['attempt_kinds']??[];
             $counts['attempt_kinds'][$attemptCode]=$kind;
@@ -704,7 +704,7 @@ final class AiRunStore
     /** Reserve BEFORE any external send; retries cannot reset these counters. */
     public function reserve(array $owner,string $runId,int $generation,string $workerToken,string $counter,int $amount=1): int
     {
-        $limits=['stage_count'=>3,'model_attempt_count'=>4,'model_recovery_count'=>1,'failover_count'=>1,'supplement_count'=>1,'workflow_transition_count'=>16,'skill_execution_count'=>8,'tool_call_count'=>8,'node_visit_count'=>12,'input_tokens'=>96000,'output_tokens'=>6000];
+        $limits=['stage_count'=>5,'model_attempt_count'=>5,'model_recovery_count'=>1,'failover_count'=>1,'supplement_count'=>1,'workflow_transition_count'=>16,'skill_execution_count'=>8,'tool_call_count'=>8,'node_visit_count'=>12,'input_tokens'=>96000,'output_tokens'=>6000];
         if (!isset($limits[$counter]) || $amount<1) { throw new RuntimeException('AI_COUNTER_INVALID'); }
         return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$counter,$amount,$limits) {
             $r=$this->read($owner,$runId,$generation); $this->worker($r,$workerToken); $this->live($r);

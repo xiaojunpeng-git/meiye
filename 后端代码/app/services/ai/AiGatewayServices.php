@@ -800,7 +800,8 @@ final class AiGatewayServices
             foreach (['summary','include','exclude','timing','note'] as $key) {
                 if (is_string($tooltip[$key]??null) && $tooltip[$key]!=='') $meaning[]=$tooltip[$key];
             }
-            $summaries[]=['metric_code'=>$code,'name'=>$tooltip['name'],'summary'=>implode("\n",$meaning),'object_contracts'=>$objects];
+            $summaries[]=['metric_code'=>$code,'name'=>$tooltip['name'],'summary'=>implode("\n",$meaning),'object_contracts'=>$objects,
+                'default_selection_ref'=>$contract['analysis_default_selection_ref']??null];
         }
         // The prompt-facing candidates and the later controlled choices are both
         // projected from the same registered provider contracts.  A dictionary
@@ -911,26 +912,34 @@ final class AiGatewayServices
                 throw $repairError;
             }
         }
+        // Understanding is the only natural-language authority here. Once it
+        // has independently established an analytical object, the binding
+        // model should not be distracted by metrics that the registry says
+        // cannot be read for that object. This narrows a capability catalogue,
+        // not the customer's meaning: an unknown or unsupported object keeps
+        // the complete catalogue so the normal capability boundary can report
+        // the gap without silently changing the subject.
+        $bindingSummaries=$this->bindingSummariesForUnderstanding($summaries,$understanding);
         $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
-        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$understanding,$summaries,$runtimeSkills],2048));
+        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$understanding,$bindingSummaries,$runtimeSkills],2048));
         $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
-        $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_intent','model',hash('sha256',json_encode([$safe['outbound'],$understanding,$summaries])),'siliconflow');
+        $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_intent','model',hash('sha256',json_encode([$safe['outbound'],$understanding,$bindingSummaries])),'siliconflow');
         $this->runs->sendAttempt($owner,$id,$generation,$worker,'bind_intent');
         $bindingRankRecovery=false;
         try {
             $checkpoint();
             $reply=$this->model
-                ? call_user_func($this->model,$safe['outbound'],$summaries,$configuration,$checkpoint,null,'binding',$understanding)
-                : (new SiliconFlowClient())->understand($safe['outbound'],$summaries,$understanding,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills);
+                ? call_user_func($this->model,$safe['outbound'],$bindingSummaries,$configuration,$checkpoint,null,'binding',$understanding)
+                : (new SiliconFlowClient())->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills);
             // External and injected model adapters must have identical
             // recovery semantics. A candidate response from the provider is
             // already marked below; an injected adapter can still return the
             // raw candidate, so classify it with the same shared predicate.
             if (!array_key_exists('rank_metric_candidates',$reply)) {
                 try {
-                    $reply['intent']=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound'],$understanding);
+                    $reply['intent']=$this->semanticIntent($reply['intent']??null,$bindingSummaries,$safe['outbound'],$understanding);
                 } catch (AiContractException $bindingError) {
-                    $codes=[];foreach($summaries as $summary) if(is_string($summary['metric_code']??null)) $codes[]=$summary['metric_code'];
+                    $codes=[];foreach($bindingSummaries as $summary) if(is_string($summary['metric_code']??null)) $codes[]=$summary['metric_code'];
                     $candidates=SiliconFlowClient::rankMetricCandidates($reply['intent']??null,$bindingError,$codes,$understanding);
                     if ($candidates===null) throw $bindingError;
                     $reply['rank_metric_candidates']=$candidates;
@@ -943,7 +952,7 @@ final class AiGatewayServices
                 // choose its professional first reading.
                 $bindingRankRecovery=true;
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_intent','FAILED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
-                $reply=$this->resolveRankMetricBinding($owner,$id,$generation,$worker,$safe['outbound'],$summaries,$understanding,$configuration,$checkpoint,$reply);
+                $reply=$this->resolveRankMetricBinding($owner,$id,$generation,$worker,$safe['outbound'],$bindingSummaries,$understanding,$configuration,$checkpoint,$reply);
             } else {
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_intent','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
             }
@@ -962,15 +971,15 @@ final class AiGatewayServices
             if ($error instanceof AiContractException && $error->getMessage()==='AI_MODEL_RESULT_UNKNOWN') {
                 try {
                     $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
-                    $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$understanding,$summaries,$runtimeSkills],2048));
+                    $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$understanding,$bindingSummaries,$runtimeSkills],2048));
                     $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
-                    $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_transport_recovery','model',hash('sha256',json_encode([$safe['outbound'],$understanding,$summaries,'transport_recovery'])),'siliconflow');
+                    $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_transport_recovery','model',hash('sha256',json_encode([$safe['outbound'],$understanding,$bindingSummaries,'transport_recovery'])),'siliconflow');
                     $this->runs->sendAttempt($owner,$id,$generation,$worker,'bind_transport_recovery');
                     $checkpoint();
                     $reply=$this->model
-                        ? call_user_func($this->model,$safe['outbound'],$summaries,$configuration,$checkpoint,null,'binding',$understanding)
-                        : (new SiliconFlowClient())->understand($safe['outbound'],$summaries,$understanding,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills);
-                    $reply['intent']=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound'],$understanding);
+                        ? call_user_func($this->model,$safe['outbound'],$bindingSummaries,$configuration,$checkpoint,null,'binding',$understanding)
+                        : (new SiliconFlowClient())->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills);
+                    $reply['intent']=$this->semanticIntent($reply['intent']??null,$bindingSummaries,$safe['outbound'],$understanding);
                     $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_transport_recovery','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
                 } catch (\Throwable $recoveryError) {
                     if ($recoveryError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$recoveryError,'bind_transport_recovery');
@@ -994,16 +1003,16 @@ final class AiGatewayServices
             // is safe to correct once.  This is a separate fenced attempt,
             // not a replay of an unknown provider outcome.
             $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
-            $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$summaries,$runtimeSkills],2304));
+            $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$bindingSummaries,$runtimeSkills],2304));
             $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
-            $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_repair','model',hash('sha256',json_encode([$safe['outbound'],$understanding,$summaries,$repairPredicate])),'siliconflow');
+            $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_repair','model',hash('sha256',json_encode([$safe['outbound'],$understanding,$bindingSummaries,$repairPredicate])),'siliconflow');
             $this->runs->sendAttempt($owner,$id,$generation,$worker,'bind_repair');
             try {
                 $checkpoint();
                 $reply=$this->model
-                    ? call_user_func($this->model,$safe['outbound'],$summaries,$configuration,$checkpoint,$repairPredicate,'binding',$understanding)
-                    : (new SiliconFlowClient())->understand($safe['outbound'],$summaries,$understanding,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills,$repairPredicate);
-                $reply['intent']=$this->semanticIntent($reply['intent']??null,$summaries,$safe['outbound'],$understanding);
+                    ? call_user_func($this->model,$safe['outbound'],$bindingSummaries,$configuration,$checkpoint,$repairPredicate,'binding',$understanding)
+                    : (new SiliconFlowClient())->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],30000,$checkpoint,$runtimeSkills,$repairPredicate);
+                $reply['intent']=$this->semanticIntent($reply['intent']??null,$bindingSummaries,$safe['outbound'],$understanding);
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_repair','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
             } catch (\Throwable $repairError) {
                 if ($repairError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$repairError,'bind_repair');
@@ -1025,7 +1034,7 @@ final class AiGatewayServices
         // normal contract, authority and Reader checks still decide whether
         // that new candidate may execute.
         if (AiIntentResultContract::requiresContextRebinding($sourceQuery,$understanding,$reply['intent'],$intent)) {
-            $reply=$this->repairBindingCandidate($owner,$id,$generation,$worker,$safe['outbound'],$summaries,$understanding,$configuration,$checkpoint,$runtimeSkills,'context_analytical_dimension_carryover');
+            $reply=$this->repairBindingCandidate($owner,$id,$generation,$worker,$safe['outbound'],$bindingSummaries,$understanding,$configuration,$checkpoint,$runtimeSkills,'context_analytical_dimension_carryover');
             $intent=$reply['intent'];
             $merged=IntentContextMerger::merge($sourceQuery,$intent);
             $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
@@ -1051,7 +1060,34 @@ final class AiGatewayServices
         // disappear when the customer confirms the presentation choice.
         $bindingCandidate=$merged['prospective_intent'];
         if (AiIntentResultContract::requiresSemanticBindingReview($understanding,$bindingCandidate)) {
-            $reviewDecision=$this->reviewSemanticBinding($owner,$id,$generation,$worker,$safe['outbound'],$summaries,$understanding,$bindingCandidate,$configuration,$checkpoint);
+            try {
+                $reviewDecision=$this->reviewSemanticBinding($owner,$id,$generation,$worker,$safe['outbound'],$bindingSummaries,$understanding,$bindingCandidate,$configuration,$checkpoint);
+            } catch (RuntimeException $error) {
+                // A rejected review is normally terminal: it has stopped an
+                // unsafe substitution before any data read.  One exception is
+                // a structurally provable context failure: the model declared
+                // that it inherited the old metric even though the accepted
+                // current-turn meaning contains a metric requirement. Ask the
+                // model once to rebind that already accepted meaning. PHP
+                // neither classifies the wording nor picks the replacement.
+                if ($error->getMessage()!=='AI_BINDING_SEMANTIC_REJECTED') throw $error;
+                $repairPredicate=AiIntentResultContract::requiresMetricContextRebinding($sourceQuery,$understanding,$reply['intent'])
+                    ? 'context_metric_carryover_rejected'
+                    : (AiIntentResultContract::requiresCurrentMetricRebinding($understanding)
+                        ? 'current_metric_binding_rejected' : null);
+                if ($repairPredicate===null) throw $error;
+                $reply=$this->repairBindingCandidate($owner,$id,$generation,$worker,$safe['outbound'],$bindingSummaries,$understanding,$configuration,$checkpoint,$runtimeSkills,$repairPredicate);
+                $merged=IntentContextMerger::merge($sourceQuery,$reply['intent']);
+                $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
+                $bindingCandidate=$merged['prospective_intent'];
+                if (!AiIntentResultContract::requiresSemanticBindingReview($understanding,$bindingCandidate)) {
+                    throw new RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
+                }
+                // A second rejection is final. The global recovery budget
+                // prevents this semantic correction from becoming a hidden
+                // retry loop or a substitute for customer clarification.
+                $reviewDecision=$this->reviewSemanticBinding($owner,$id,$generation,$worker,$safe['outbound'],$bindingSummaries,$understanding,$bindingCandidate,$configuration,$checkpoint,false,'review_binding_repaired');
+            }
             if ($reviewDecision==='metric_choice') {
                 // The candidate was only plausible, not uniquely requested.
                 // The registered guidance supplies the choices; the model's
@@ -1069,6 +1105,16 @@ final class AiGatewayServices
                 },$intent['requirement_bindings']);
                 $bindingCandidate=$intent;
                 $bindingCandidate['_reviewed_ambiguity']=true;
+            } elseif (is_string($reviewDecision) && strpos($reviewDecision,'model_metric_rebind:')===0) {
+                // The independent candidate-blind reviewer, not PHP, selected
+                // the one registered fact that meets the current requirement.
+                // This merely carries that model decision into the bounded
+                // intent envelope and releases a prior *registered default*
+                // cohort when its own metric contract no longer applies.
+                $metric=substr($reviewDecision,21);
+                $bindingCandidate=$this->applyReviewedMetricBinding($bindingCandidate,$metric,$sourceQuery,$bindingSummaries);
+                $merged=IntentContextMerger::merge($sourceQuery,$bindingCandidate);
+                $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
             }
         }
         // A model may express "the second one" but never resolves it to an
@@ -1377,6 +1423,71 @@ final class AiGatewayServices
     }
 
     /**
+     * Keeps the model's binding catalogue aligned with an independently
+     * understood analytical object. This is a registry-contract projection,
+     * never a phrase-to-metric rule: it only removes candidates whose declared
+     * object contracts cannot serve that already accepted object.
+     */
+    private function bindingSummariesForUnderstanding(array $summaries,array $understanding): array
+    {
+        $objectKinds=[];
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            if (!in_array('object_kind',(array)($requirement['fields']??[]),true)) continue;
+            $kind=$requirement['values']['object_kind']??null;
+            if (is_string($kind) && $kind!=='') $objectKinds[$kind]=true;
+        }
+        // The personnel reader is the only current object-specific catalogue
+        // with a direct person fact grain. Other declared dimensions retain
+        // the full capability list until their own registered reader exists.
+        if (array_keys($objectKinds)!==['person']) return $summaries;
+        $person=[];
+        foreach ($summaries as $summary) {
+            foreach ((array)($summary['object_contracts']??[]) as $contract) {
+                if (($contract['object_kind']??null)==='person') {
+                    $person[]=$summary;
+                    break;
+                }
+            }
+        }
+        return $person?:$summaries;
+    }
+
+    /**
+     * Copies a model-selected registered code, never a phrase-derived PHP
+     * choice.  A prior cohort is released only when it is mechanically equal
+     * to the prior metric's own declared default and the newly selected
+     * metric declares a different default; a named person or a non-default
+     * restriction remains protected by the regular context confirmation path.
+     */
+    private function applyReviewedMetricBinding(array $intent,string $metric,?array $sourceQuery,array $summaries): array
+    {
+        $defaults=[];
+        foreach ($summaries as $summary) if (is_string($summary['metric_code']??null)) {
+            $default=$summary['default_selection_ref']??null;
+            $defaults[$summary['metric_code']]=is_string($default)&&$default!==''?$default:null;
+        }
+        if (!array_key_exists($metric,$defaults)) throw new RuntimeException('AI_BINDING_SEMANTIC_REJECTED');
+        $intent['metric_codes']=[$metric];
+        $intent['recommended_initial_answer']=false;
+        $intent['initial_observation']=false;
+        foreach ((array)($intent['requirement_bindings']??[]) as $index=>$binding) {
+            if (!is_array($binding) || !is_string($binding['requirement_id']??null)) continue;
+            $intent['requirement_bindings'][$index]=['requirement_id'=>$binding['requirement_id'],'status'=>'satisfied','metric_codes'=>[$metric]];
+        }
+        if ($sourceQuery===null) return $intent;
+        $intent['context_delta']['metric_codes']='replace';
+        $priorCodes=(array)($sourceQuery['metric_codes']??[]);
+        $priorMetric=count($priorCodes)===1&&is_string($priorCodes[0])?$priorCodes[0]:null;
+        $priorRef=$sourceQuery['business_filters']['selection_ref']??null;
+        if (is_string($priorMetric) && is_string($priorRef) && isset($defaults[$priorMetric])
+            && $defaults[$priorMetric]!==null && $priorRef===$defaults[$priorMetric]
+            && $defaults[$metric]!==$defaults[$priorMetric]) {
+            $intent['context_delta']['business_filters']='replace';
+        }
+        return $intent;
+    }
+
+    /**
      * The vendor (or an injected test adapter) may recognize natural language,
      * but it only returns a bounded, declarative result shape.  This server
      * boundary deliberately does not interpret individual Chinese phrases.
@@ -1515,14 +1626,14 @@ final class AiGatewayServices
      * It deliberately runs before a pending context field is converted to a
      * private fallback, so all execution paths share the same admission gate.
      */
-    private function reviewSemanticBinding(array $owner,string $id,int $generation,string $worker,array $safeQuestion,array $summaries,array $understanding,array $intent,array $configuration,callable $checkpoint,bool $customerConfirmedChoice=false): string
+    private function reviewSemanticBinding(array $owner,string $id,int $generation,string $worker,array $safeQuestion,array $summaries,array $understanding,array $intent,array $configuration,callable $checkpoint,bool $customerConfirmedChoice=false,string $attemptCode='review_binding'): string
     {
         $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
         $reviewInput=['question'=>$safeQuestion['question'],'reference_date'=>$safeQuestion['reference_date']];
         $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$reviewInput,$understanding,$intent,$summaries],1024));
         $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',300);
-        $this->runs->prepareAttempt($owner,$id,$generation,$worker,'review_binding','model',hash('sha256',json_encode([$reviewInput,$understanding,$intent,$summaries])),'siliconflow');
-        $this->runs->sendAttempt($owner,$id,$generation,$worker,'review_binding');
+        $this->runs->prepareAttempt($owner,$id,$generation,$worker,$attemptCode,'model',hash('sha256',json_encode([$reviewInput,$understanding,$intent,$summaries])),'siliconflow');
+        $this->runs->sendAttempt($owner,$id,$generation,$worker,$attemptCode);
         try {
             $checkpoint();
             $reply=$this->model
@@ -1534,26 +1645,32 @@ final class AiGatewayServices
             // proposed binding and can only accept it or reject a conflicting
             // requirement. Treating an arbitrary metric_choice as a deferment
             // would erase exclusions before the final semantic gate.
+            if ($review['decision']==='reject' && ($reply['review_kind']??null)==='candidate_blind_uniqueness'
+                && is_string($reply['model_metric_code']??null)
+                && in_array($reply['model_metric_code'],array_column($summaries,'metric_code'),true)) {
+                $this->runs->finishAttempt($owner,$id,$generation,$worker,$attemptCode,'SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+                return 'model_metric_rebind:'.$reply['model_metric_code'];
+            }
             if ($review['decision']==='metric_choice' && !$customerConfirmedChoice
                 && (($reply['review_kind']??null)==='candidate_blind_uniqueness')
-                && AiIntentResultContract::canDeferMetricChoice($understanding,$intent,($safeQuestion['prior_query']??null)!==null)) {
-                $this->runs->finishAttempt($owner,$id,$generation,$worker,'review_binding','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+                && AiIntentResultContract::canUseCandidateBlindMetricReview($understanding,$intent)) {
+                $this->runs->finishAttempt($owner,$id,$generation,$worker,$attemptCode,'SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
                 return 'metric_choice';
             }
             if ($review['decision']==='metric_choice') {
-                $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'binding_review','predicate'=>'unexpected_metric_choice'],'review_binding');
+                $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'binding_review','predicate'=>'unexpected_metric_choice'],$attemptCode);
                 throw new RuntimeException('AI_BINDING_SEMANTIC_REJECTED');
             }
             if ($review['decision']!=='accept') {
-                $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'binding_review','predicate'=>'semantic_requirement_rejected'],'review_binding');
+                $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'binding_review','predicate'=>'semantic_requirement_rejected'],$attemptCode);
                 throw new RuntimeException('AI_BINDING_SEMANTIC_REJECTED');
             }
-            $this->runs->finishAttempt($owner,$id,$generation,$worker,'review_binding','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+            $this->runs->finishAttempt($owner,$id,$generation,$worker,$attemptCode,'SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
             return 'accept';
         } catch (\Throwable $error) {
-            if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,'review_binding');
+            if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,$attemptCode);
             $state=in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
-            $this->runs->finishAttempt($owner,$id,$generation,$worker,'review_binding',$state);
+            $this->runs->finishAttempt($owner,$id,$generation,$worker,$attemptCode,$state);
             throw $error;
         }
     }

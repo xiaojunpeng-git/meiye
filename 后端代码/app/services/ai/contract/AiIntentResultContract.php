@@ -26,6 +26,7 @@ final class AiIntentResultContract
             'bad_value:initial_observation','initial_observation_metric_count',
             'initial_observation_query_shape','provenance_field_not_understood',
             'bad_value:result_reference'],true)) return true;
+        if ($predicate==='recommended_initial_answer_with_current_metric_requirement') return true;
         // These are bounded enum carriers, not business decisions made by the
         // server.  A provider can occasionally use a natural-language label
         // (for example, "overall") where this protocol requires `store`.
@@ -46,7 +47,8 @@ final class AiIntentResultContract
         // the accepted current meaning naming no analytical object. The one
         // repair asks the model to decide the delta again; PHP never clears a
         // dimension, picks a metric or interprets customer wording itself.
-        if ($predicate==='context_analytical_dimension_carryover') return true;
+        if (in_array($predicate,['context_analytical_dimension_carryover','context_metric_carryover_rejected',
+            'current_metric_binding_rejected'],true)) return true;
         return is_string($predicate) && strpos($predicate,'missing_key:')===0
             && in_array(substr($predicate,12),array_merge(self::REQUIRED_FIELDS,['context_delta']),true);
     }
@@ -81,6 +83,37 @@ final class AiIntentResultContract
             }
         }
         return ($mergedIntent['object_kind']??null)===$priorKind;
+    }
+
+    /**
+     * A reviewer may prove that a model mechanically retained a previous
+     * metric although the current, independently accepted meaning contains a
+     * new metric requirement.  This detects only that contradictory context
+     * shape; the recovery asks the model to bind the current meaning again.
+     * It never interprets customer wording or selects a replacement metric.
+     */
+    public static function requiresMetricContextRebinding(?array $sourceQuery,array $understanding,array $rawIntent): bool
+    {
+        if ($sourceQuery===null || !is_array($rawIntent['context_delta']??null)
+            || ($rawIntent['context_delta']['metric_codes']??null)!=='inherit') return false;
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            if (!in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (($evidence['message_id']??null)==='current') return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A semantic reviewer can reject a fresh metric candidate even when the
+     * binding did not literally inherit a prior code.  The only fact this
+     * exposes is that this turn contains an evidence-backed metric
+     * requirement; the model must choose any replacement itself.
+     */
+    public static function requiresCurrentMetricRebinding(array $understanding): bool
+    {
+        return self::hasCurrentMetricRequirement($understanding);
     }
 
     public static function manifest(): array
@@ -240,6 +273,16 @@ final class AiIntentResultContract
                 'selected_metric_count'=>count($value['metric_codes']),
                 'operation'=>$value['operation'],
             ]);
+        }
+        // A professional first reading is useful only when the accepted
+        // meaning has not already supplied a customer-owned measurement.
+        // The understanding model, rather than PHP word matching, decides
+        // whether such a requirement exists.  This prevents a previous
+        // ranking's convenient default from being relabelled as a
+        // recommendation when the customer has expressly introduced a new
+        // business fact in the current turn.
+        if ($recommendedInitialAnswer && self::hasCurrentMetricRequirement($understanding)) {
+            self::fail('recommended_initial_answer_with_current_metric_requirement');
         }
         if ($initialObservation) {
             if (count($value['metric_codes'])<2 || count($value['metric_codes'])>4) self::fail('initial_observation_metric_count');
@@ -521,21 +564,53 @@ final class AiIntentResultContract
      */
     public static function canDeferMetricChoice(array $understanding,array $intent,bool $hasPriorQuery): bool
     {
-        if ($hasPriorQuery || ($intent['needs_metric_choice']??false) || ($intent['initial_observation']??false)
-            || ($intent['recommended_initial_answer']??false) || count((array)($intent['metric_codes']??[]))!==1) return false;
-        // A comparison or ranking has a concrete result shape. It should be
-        // reviewed against the bound candidate as a professional first answer,
-        // rather than making a customer select a metric before seeing any
-        // useful result. This is a response-shape policy, never a mapping
-        // from customer words to a metric.
-        if (in_array($intent['operation']??null,['ranking','comparison'],true)) return false;
+        // A new, evidence-backed measurement remains eligible for an
+        // independent candidate-blind admission even in a conversation. The
+        // prior-query flag alone is not customer meaning: prohibiting this
+        // review let a stale metric pass a weaker candidate-aware review.
+        if (($intent['needs_metric_choice']??false) || count((array)($intent['metric_codes']??[]))!==1) return false;
+        return self::canUseCandidateBlindMetricReview($understanding,$intent);
+    }
+
+    /**
+     * A candidate-blind model pass is permitted for one explicit, current
+     * measurement requirement even when the first binding declined to select
+     * a metric.  It is a semantic classification over registry descriptions,
+     * not a server-side vocabulary or metric-selection rule.  The pass can
+     * still return ambiguous or unavailable; only a model-unique result may
+     * become a bounded executable metric code.
+     */
+    public static function canUseCandidateBlindMetricReview(array $understanding,array $intent): bool
+    {
+        if (($intent['initial_observation']??false) || ($intent['recommended_initial_answer']??false)
+            || count((array)($intent['metric_codes']??[]))>1) return false;
         $requirements=[];
         foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
             if (!in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
             if (!empty($requirement['values']['metric_exclusions'])) return false;
+            $current=false;
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (($evidence['message_id']??null)==='current') {$current=true;break;}
+            }
+            // A mixed historical/current metric bundle is not a single new
+            // measurement. Keep it on the normal context-review path rather
+            // than letting a blind pass silently reinterpret old meaning.
+            if (!$current) return false;
             $requirements[]=$requirement;
         }
-        return count($requirements)===1;
+        return $requirements!==[];
+    }
+
+    /** The accepted understanding is the sole source of this distinction. */
+    private static function hasCurrentMetricRequirement(array $understanding): bool
+    {
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            if (!in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (($evidence['message_id']??null)==='current') return true;
+            }
+        }
+        return false;
     }
 
     /** A clear but unbound requirement is a capability gap, never a retryable

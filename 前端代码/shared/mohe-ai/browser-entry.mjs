@@ -46,6 +46,16 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     const n = el('div', question, 'message question'); n.dataset.moheAiActiveQuestion = 'true';
     body.appendChild(n); body.scrollTop = body.scrollHeight; activeQuestionRendered = true;
   }
+  // Once the current Run reaches a terminal projection, its question becomes
+  // an immutable transcript turn.  Keep it visible, but remove the active
+  // marker so a later identical question creates a new question/answer pair
+  // instead of appending several outcomes below an older question.
+  function completeActiveQuestion() {
+    if (!body) return;
+    const current = body.querySelector('[data-mohe-ai-active-question]');
+    if (current) current.removeAttribute('data-mohe-ai-active-question');
+    activeQuestionRendered = false;
+  }
   function validGuidanceSubmission(value) {
     return !!(value && typeof value === 'object' && typeof value.clarification_id === 'string' && value.clarification_id
       && typeof value.client_submission_id === 'string' && value.client_submission_id && value.choices
@@ -179,6 +189,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         reportVisibleDeliveryAfterPaint(run);
         const text = run.answer.summary || (run.answer.cards || []).map(c => `${c.metric_name}：${c.display_value}${c.unit || ''}`).join('\n');
         try { sessions.append(conversation, deliveredQuestion, text, run.answer, run); } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error'); }
+        completeActiveQuestion();
       } else {
         // The terminal message is already appended to the conversation.  Do
         // not leave the same failure in the footer status as a second visible
@@ -195,6 +206,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         try { sessions.append(conversation, deliveredQuestion, terminalMessage,
           { summary: terminalMessage, terminal_status: run.status }, run, { contextEligible: false });
         } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error'); }
+        completeActiveQuestion();
         clientDeliveryStartedAt=0;
         if (sessions) sessions.clearPendingQuestion(conversation);
       }

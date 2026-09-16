@@ -12,13 +12,14 @@ namespace app\services\ai\execution;
 class AiRunBudgetPolicy
 {
     private const COUNTER_CAPS = [
-        'stage_count' => 3, 'model_attempt_count' => 4,
+        'stage_count' => 5, 'model_attempt_count' => 5,
         'model_recovery_count' => 1, 'failover_count' => 1,
         'clarification_count' => 5, 'supplement_count' => 1,
         'node_visit_count' => 12, 'skill_execution_count' => 8,
         'tool_call_count' => 8, 'workflow_transition_count' => 16,
-        // Understanding, binding and an independent semantic admission review
-        // plus one bounded structural recovery must fit the published Skills.
+        // Understanding, binding and independent semantic admission normally
+        // use three stages. One bounded binding recovery may then need one
+        // final independent admission review before any Reader call.
         // This is a hard per-Run reservation ceiling, not a normal-path target.
         'model_input_tokens' => 96000, 'model_output_tokens' => 6000,
     ];

@@ -37,18 +37,31 @@ try {
     $candidate=['metric_codes'=>['cash_performance'],'needs_metric_choice'=>false];
     sbgCheck(\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($plain,$candidate,false),'one fresh positive metric may use candidate-blind ambiguity review');
     sbgCheck(!\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($h->understandingOverride,$candidate,false),'an exclusion makes candidate-blind ambiguity ineligible');
-    sbgCheck(!\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($plain,$candidate,true),'a follow-up never defers by candidate-blind ambiguity');
+    sbgCheck(\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($plain,$candidate,true),'a new evidence-backed measurement keeps candidate-blind admission in a follow-up');
+    $rankingCandidate=$candidate+['operation'=>'ranking'];
+    sbgCheck(\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($plain,$rankingCandidate,true),'a clear ranking may use the same candidate-blind metric admission');
+    $unboundCandidate=['metric_codes'=>[],'needs_metric_choice'=>true];
+    sbgCheck(\app\services\ai\contract\AiIntentResultContract::canUseCandidateBlindMetricReview($plain,$unboundCandidate),
+        'a fresh measurement may be model-resolved from the registry even when the first binder left it pending');
+    sbgCheck(!\app\services\ai\contract\AiIntentResultContract::canUseCandidateBlindMetricReview($h->understandingOverride,$unboundCandidate),
+        'a metric exclusion never enters the candidate-blind uniqueness pass');
+    $splitCurrent=['goal'=>'查看两个当前指标','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'第一项当前指标','fields'=>['metric_codes'],'values'=>['metric_terms'=>['甲']], 'evidence'=>[['message_id'=>'current','quote'=>'甲']]],
+        ['id'=>'r2','meaning'=>'第二项当前指标','fields'=>['metric_codes'],'values'=>['metric_terms'=>['乙']], 'evidence'=>[['message_id'=>'current','quote'=>'乙']]],
+    ]];
+    sbgCheck(\app\services\ai\contract\AiIntentResultContract::canUseCandidateBlindMetricReview($splitCurrent,$unboundCandidate),
+        'a model may resolve or reject a current multi-fragment measurement without PHP merging its terms');
     $recommendedHarness=new R6GatewayHarness(3,[1,2],'merchant');
     try {
-        $recommendedHarness->understandingOverride=$plain;
+        $recommendedHarness->understandingOverride=['goal'=>'了解经营情况','status'=>'understood','requirements'=>[]];
         $recommendedHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['cash_performance'],'action_codes'=>[],
             'needs_metric_choice'=>false,'recommended_initial_answer'=>true,'initial_observation'=>false,
             'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'authorized',
-            'requirement_bindings'=>[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']]],'unresolved_fragments'=>[]];
-        $recommendedHarness->bindingVerificationOverride=['decision'=>'reject','rejected_requirement_ids'=>['r1']];
+            'requirement_bindings'=>[],'unresolved_fragments'=>[]];
+        $recommendedHarness->bindingVerificationOverride=['decision'=>'reject','rejected_requirement_ids'=>[]];
         $before=$recommendedHarness->queries;
-        $rejected=$recommendedHarness->start('收款');
-        sbgCheck(($rejected['status']??null)==='FAILED' && ($rejected['reason']??null)==='AI_BINDING_SEMANTIC_REJECTED' && $recommendedHarness->queries===$before,
+        $rejected=$recommendedHarness->start('经营怎么样');
+        sbgCheck(($rejected['status']??null)==='FAILED' && $recommendedHarness->queries===$before,
             'a reviewer rejection never converts a professional first answer into an unrelated selector');
     } finally { $recommendedHarness->close(); }
     echo 'PASS semantic binding guard: '.$checks." checks (offline)\n";

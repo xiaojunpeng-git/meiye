@@ -132,7 +132,7 @@ rejectsRuntime('24h expiry hard boundary', function () use ($initial) {
     Budget::consume($initial, 86401000);
 }, 'RUN_EXPIRED');
 foreach (['tool_call_count' => 8, 'skill_execution_count' => 8, 'node_visit_count' => 12,
-    'workflow_transition_count' => 16, 'supplement_count' => 1, 'stage_count' => 3,
+    'workflow_transition_count' => 16, 'supplement_count' => 1, 'stage_count' => 5,
     'model_recovery_count' => 1] as $counter => $cap) {
     $state = $initial;
     for ($i = 0; $i < $cap; $i++) {
@@ -167,8 +167,10 @@ $model = Budget::reserve($model, 'stage_count');
 $model = Budget::reserve($model, 'model_attempt_count');
 $model = Budget::reserve($model, 'stage_count');
 $model = Budget::reserve($model, 'model_attempt_count');
-checkRuntime('three logical model stages plus one shared recovery', $model['counters']['model_attempt_count'] === 4);
-rejectsRuntime('fifth model attempt blocked', function () use ($model) {
+$model = Budget::reserve($model, 'stage_count');
+$model = Budget::reserve($model, 'model_attempt_count');
+checkRuntime('one bounded recovery may receive a final independent admission review', $model['counters']['model_attempt_count'] === 5);
+rejectsRuntime('sixth model attempt blocked', function () use ($model) {
     Budget::reserve($model, 'model_attempt_count');
 }, 'COUNTER_BUDGET_EXHAUSTED');
 foreach (['model_input_tokens' => 96000, 'model_output_tokens' => 6000] as $counter => $cap) {
