@@ -31,6 +31,13 @@ $check(is_string($entry) && strpos($entry,'class="ai-user-turn"')!==false
     && strpos($entry,'class="ai-answer-turn"')!==false
     && strpos($entry,'>魔核 AI</text>')!==false,
     'each retained turn labels the customer question and the AI answer as separate visual blocks');
+$check(is_string($entry) && strpos($entry,'function toggleCardDetail(key : string)')!==false
+    && strpos($entry,"'查看统计口径'")!==false
+    && strpos($entry,'<text class="ai-note">{{ tooltipText(card.tooltip) }}</text>')===false
+    && strpos($entry,'card.period_label')!==false,
+    'mobile cards show the verified value and period first, while the full registered metric definition remains an on-demand disclosure');
+$check(is_string($entry) && strpos($entry,"function questionHint() : string { return '例如：今天经营情况如何？' }")!==false,
+    'the mobile question example is business-neutral and does not branch on a fixed metric code');
 $check(is_string($entry) && strpos($entry,'function contextEligible(row : any)')!==false
     && strpos($entry,'function appendTranscript(row : any)')!==false
     && strpos($entry,'context_eligible:false')!==false,

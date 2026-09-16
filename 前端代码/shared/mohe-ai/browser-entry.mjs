@@ -483,14 +483,13 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     panel = el('section', null, 'panel'); panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', '魔核 AI');
     const head = el('div', null, 'head'); head.appendChild(el('strong', '魔核 AI')); const history = el('button', '历史'); const fresh = el('button', '新对话'); const close = el('button', '关闭'); head.append(history, fresh, close); panel.appendChild(head);
     body = el('div', null, 'body'); panel.appendChild(body); message('能确定就直接查；有歧义逐步选清，明确后立即查询。聊天只保留在本设备 24 小时。', 'muted');
-    const footer = el('div', null, 'footer'); progress = el('div', '', 'muted'); progress.setAttribute('role', 'status'); footer.appendChild(progress); input = el('textarea'); input.placeholder = '例如：今天本店现金业绩多少？'; input.maxLength = 4000; footer.appendChild(input); const actions = el('div', null, 'actions'); format = el('select'); [['screen','仅查看数据'],['screen_and_xlsx','数据和 Excel']].forEach(([value,label]) => { const o = el('option', label); o.value = value; format.appendChild(o); }); actions.appendChild(format); send = el('button', '发送', 'primary'); const cancel = el('button', '停止'); actions.append(send,cancel); footer.appendChild(actions); panel.appendChild(footer); root.appendChild(panel);
+    const footer = el('div', null, 'footer'); progress = el('div', '', 'muted'); progress.setAttribute('role', 'status'); footer.appendChild(progress); input = el('textarea'); input.placeholder = '例如：今天经营情况如何？'; input.maxLength = 4000; footer.appendChild(input); const actions = el('div', null, 'actions'); format = el('select'); [['screen','仅查看数据'],['screen_and_xlsx','数据和 Excel']].forEach(([value,label]) => { const o = el('option', label); o.value = value; format.appendChild(o); }); actions.appendChild(format); send = el('button', '发送', 'primary'); const cancel = el('button', '停止'); actions.append(send,cancel); footer.appendChild(actions); panel.appendChild(footer); root.appendChild(panel);
     const excelOption = format.querySelector('option[value="screen_and_xlsx"]');
     function refreshCapabilities() {
       const capabilities = boot.capabilities || {};
       const ready = (capabilities.output_formats || []).includes('screen_and_xlsx');
       excelOption.disabled = !ready; excelOption.textContent = ready ? '数据和 Excel' : 'Excel 暂未开放';
       if (!ready) format.value = 'screen';
-      input.placeholder = (capabilities.metric_codes || []).includes('consume_amount') ? '例如：今天本店消耗业绩多少？' : '请输入要查询的指标和日期';
     }
     refreshCapabilities();
     // R6: all configuration is maintained in platform Settings by the trusted admin account.
