@@ -52,7 +52,7 @@ mysqlCheck(count(array_filter($detail,static function($r){return (int)$r['catego
 mysqlCheck(count(array_filter($detail,static function($r){return (int)$r['business_source_primary_id']===7 && $r['source_label']==='发生时来源';}))===7,'recharge detail preserves frozen business source labels');
 $readBoth=$transaction->run(function($r)use($cashTenant,$cashDay){return [$r->cashTotals($cashTenant,[1],$cashDay),$r->dailyStoreTotals($cashTenant,[1],$cashDay,'cash_performance')];});
 mysqlCheck($readBoth[0]['gross_cents']===$readBoth[1][0]['amount_cents'],'real repeatable-read recharge gross summary and daily source agree');
-foreach(['cashier_v3_payment_fact','cashier_v3_recharge_debt_repayment','cashier_v3_order_lifecycle_operation'] as $engineTable){
+foreach(['cashier_v3_payment_fact','cashier_v3_payment_sale_allocation_fact','cashier_v3_recharge_debt_repayment','cashier_v3_order_lifecycle_operation'] as $engineTable){
     $pdo->exec('ALTER TABLE eb_'.$engineTable.' ENGINE=MyISAM');
     try {mysqlReject(function()use($transaction){$transaction->run(function(){});},'METRIC_READ_ENGINE_UNVERIFIED');}
     finally {$pdo->exec('ALTER TABLE eb_'.$engineTable.' ENGINE=InnoDB');}

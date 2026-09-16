@@ -23,7 +23,7 @@ $schemas = [
     'organization_store' => 'store_id INT,org_id INT',
     'cashier_v3_report_organization_dimension' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),dimension_code VARCHAR(64),organization_id VARCHAR(64),organization_name_snapshot VARCHAR(128),enabled TINYINT DEFAULT 1,valid_from DATE NULL,display_order INT DEFAULT 0',
     'cashier_v3_payment_sale_allocation_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),allocation_fact_id VARCHAR(64),sale_fact_id VARCHAR(64),reversal_of VARCHAR(64) NULL,payment_fact_id VARCHAR(64) DEFAULT "",store_id INT,member_id INT DEFAULT 0,business_date DATE,status VARCHAR(32),amount_cents BIGINT,order_id VARCHAR(64),order_no_snapshot VARCHAR(64) DEFAULT "",source_line_id VARCHAR(64) DEFAULT "",organization_id VARCHAR(64) DEFAULT "",occurred_at INT DEFAULT 0,settled_at INT DEFAULT 0,recorded_at INT DEFAULT 0',
-    'cashier_v3_sale_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),fact_id VARCHAR(64),store_id INT,member_id INT DEFAULT 0,member_name_snapshot VARCHAR(128) DEFAULT "",business_date DATE,status VARCHAR(32),sale_amount_cents BIGINT,order_id VARCHAR(64),source_line_id VARCHAR(64),source_type VARCHAR(32) DEFAULT "product",organization_id VARCHAR(64) DEFAULT "",organization_path_snapshot VARCHAR(128) DEFAULT "",store_name_snapshot VARCHAR(128) DEFAULT "",business_source_primary_id INT DEFAULT 0,business_source_label_snapshot VARCHAR(128) DEFAULT "",operator_id INT DEFAULT 0,operator_name_snapshot VARCHAR(128) DEFAULT ""',
+    'cashier_v3_sale_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),fact_id VARCHAR(64),store_id INT,member_id INT DEFAULT 0,member_name_snapshot VARCHAR(128) DEFAULT "",business_date DATE,status VARCHAR(32),sale_amount_cents BIGINT,quantity BIGINT DEFAULT 0,item_id INT DEFAULT 0,item_name_snapshot VARCHAR(128) DEFAULT "",order_id VARCHAR(64),source_line_id VARCHAR(64),source_type VARCHAR(32) DEFAULT "product",organization_id VARCHAR(64) DEFAULT "",organization_path_snapshot VARCHAR(128) DEFAULT "",store_name_snapshot VARCHAR(128) DEFAULT "",business_source_primary_id INT DEFAULT 0,business_source_label_snapshot VARCHAR(128) DEFAULT "",operator_id INT DEFAULT 0,operator_name_snapshot VARCHAR(128) DEFAULT ""',
     'cashier_v3_performance_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,fact_id VARCHAR(64) NULL UNIQUE,fact_direction VARCHAR(32) DEFAULT "forward",tenant_id VARCHAR(64),store_id INT,member_id INT DEFAULT 0,member_name_snapshot VARCHAR(128) DEFAULT "",business_date DATE,status VARCHAR(32),performance_type VARCHAR(64),amount_cents BIGINT,labor_fee_amount_cents BIGINT DEFAULT 0,project_count_half_units INT DEFAULT 0,rule_name_snapshot VARCHAR(128) DEFAULT "",order_id VARCHAR(64),order_no_snapshot VARCHAR(128) DEFAULT "",checkout_request_id VARCHAR(64),source_line_id VARCHAR(64),organization_id VARCHAR(64) DEFAULT "",organization_path_snapshot VARCHAR(128) DEFAULT "",store_name_snapshot VARCHAR(128) DEFAULT "",employee_id INT DEFAULT 0,employee_name_snapshot VARCHAR(128) DEFAULT "",operator_id INT DEFAULT 0,operator_name_snapshot VARCHAR(128) DEFAULT ""',
     'cashier_v3_entitlement_service_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),store_id INT,business_date DATE,checkout_request_id VARCHAR(64),source_line_id VARCHAR(64),service_status VARCHAR(32),quantity INT DEFAULT 1,member_id INT DEFAULT 0,order_id VARCHAR(64) DEFAULT "",operator_id INT DEFAULT 0,operator_name_snapshot VARCHAR(128) DEFAULT "",settled_at INT DEFAULT 0,project_id INT DEFAULT 0,project_name_snapshot VARCHAR(128) DEFAULT "",project_category_id_snapshot INT DEFAULT 0,project_category_name_snapshot VARCHAR(128) DEFAULT "",project_category_path_snapshot VARCHAR(512) DEFAULT "",is_experience TINYINT DEFAULT 0',
     'cashier_v3_report_sale_dimension_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),store_id INT,order_id VARCHAR(64),source_line_id VARCHAR(64),sale_fact_id VARCHAR(64),partner_name_snapshot VARCHAR(128),item_id INT DEFAULT 0,item_name_snapshot VARCHAR(128) DEFAULT "",category_id_snapshot INT DEFAULT 0,category_path_snapshot VARCHAR(512) DEFAULT "",product_type_snapshot VARCHAR(32) DEFAULT "project",is_experience TINYINT DEFAULT 0',
@@ -40,12 +40,14 @@ foreach ($schemas as $name => $schema) $pdo->exec('CREATE TABLE eb_' . $name . '
 $pdo->exec("INSERT INTO eb_system_store VALUES (1,'测试甲店'),(2,'测试乙店'),(3,'无权店')");
 $pdo->exec("INSERT INTO eb_organization (id,pid,is_del) VALUES (1,0,0)");
 $pdo->exec("INSERT INTO eb_organization_store (store_id,org_id) VALUES (1,1),(2,1),(3,1)");
-$pdo->exec("INSERT INTO eb_cashier_v3_sale_fact (tenant_id,fact_id,store_id,member_id,member_name_snapshot,business_date,status,sale_amount_cents,order_id,source_line_id,operator_id,operator_name_snapshot) VALUES
-('0','sale',1,101,'测试会员','2026-09-08','effective',12000,'order','line',7,'测试操作人'),
-('other','sale-other',1,0,'','2026-09-08','effective',99999,'foreign','foreign-line',8,'外部操作人')");
+$pdo->exec("INSERT INTO eb_cashier_v3_sale_fact (tenant_id,fact_id,store_id,member_id,member_name_snapshot,business_date,status,sale_amount_cents,quantity,item_id,item_name_snapshot,order_id,source_line_id,operator_id,operator_name_snapshot) VALUES
+('0','sale',1,101,'测试会员','2026-09-08','effective',12000,3,91,'测试产品','order','line',7,'测试操作人'),
+('other','sale-other',1,0,'','2026-09-08','effective',99999,99,92,'外部产品','foreign','foreign-line',8,'外部操作人')");
 $pdo->exec("INSERT INTO eb_cashier_v3_payment_fact (fact_id,tenant_id,store_id,member_id,member_name_snapshot,business_date,status,fact_type,source_document_type,payment_method,amount_cents,order_id,source_line_id,organization_id,organization_path_snapshot,store_name_snapshot,operator_id,operator_name_snapshot) VALUES
 ('payment-cash','0',1,101,'测试会员','2026-09-08','effective','payment_collected','cashier_snapshot','wechat',900001,'order','line','org','org','测试甲店',7,'测试操作人'),
-('payment-refund','0',1,101,'测试会员','2026-09-08','effective','payment_collected','cashier_snapshot','wechat',-10000,'order','line','org','org','测试甲店',7,'测试操作人')");
+('payment-refund','0',1,101,'测试会员','2026-09-08','effective','payment_collected','cashier_snapshot','wechat',-10000,'order','line','org','org','测试甲店',7,'测试操作人'),
+('historical-debt-cash','0',1,102,'历史欠款会员','2026-09-08','effective','payment_collected','debt_repayment','wechat',3000,'historical-debt','historical-debt:payment:1','org','org','测试甲店',8,'历史欠款收银员'),
+('historical-debt-refund','0',1,102,'历史欠款会员','2026-09-08','effective','payment_collected','debt_repayment','wechat',-200,'historical-debt','historical-debt:payment:2','org','org','测试甲店',8,'历史欠款收银员')");
 $pdo->exec("INSERT INTO eb_cashier_v3_payment_sale_allocation_fact (tenant_id,allocation_fact_id,sale_fact_id,reversal_of,payment_fact_id,store_id,business_date,status,amount_cents,order_id) VALUES
 ('0','cash','sale',NULL,'payment-cash',1,'2026-09-08','effective',900001,'order'),
 ('0','refund','sale','cash','payment-refund',1,'2026-09-08','effective',-10000,'order'),
@@ -82,18 +84,19 @@ function mysqlCheck($ok, $label) { global $checks; if (!$ok) throw new RuntimeEx
 function mysqlReject(callable $call, $code) { try { $call(); } catch (app\services\query\metric\MetricQueryContractException $e) { mysqlCheck($e->getErrorCode() === $code, 'error ' . $e->getErrorCode()); return; } throw new RuntimeException('expected rejection'); }
 $reader = new app\services\query\metric\GroupPerformanceMetricReadServices();
 $range = ['start' => '2026-09-08', 'end' => '2026-09-08'];
-mysqlCheck($reader->cashTotals('0', [1], $range) === ['gross_cents' => 900001, 'refund_cents' => -10000], 'cash signs, scope, pending and void exclusion');
+mysqlCheck($reader->cashTotals('0', [1], $range) === ['gross_cents' => 903001, 'refund_cents' => -10200], 'cash signs, scope, pending and void exclusion');
 mysqlCheck($reader->metricTotal('0', [1], $range, 'consume_amount') === 9500, 'signed consumed complete service only');
-mysqlCheck($reader->cashTotals('0', [1, 2], $range)['gross_cents'] === 930001, 'complete multistore sum');
+mysqlCheck($reader->cashTotals('0', [1, 2], $range)['gross_cents'] === 933001, 'complete multistore sum');
 $registered = new app\services\query\metric\RegisteredMetricReadServices();
 $expectedRegistered = [
-    'cash_performance' => 900001,
-    'refund_performance' => 10000,
-    'actual_performance' => 890001,
+    'cash_performance' => 903001,
+    'refund_performance' => 10200,
+    'actual_performance' => 892801,
     'consume_amount' => 9500,
     'staff_sales_yeji' => 10000,
     'staff_labor_yeji' => 4500,
     'sales_amount' => 12000,
+    'sales_quantity' => 3,
     'balance_deduction_amount' => 2500,
     'recharge_amount' => 8000,
     'completed_service_item_count' => 3,
@@ -102,12 +105,15 @@ $expectedRegistered = [
 foreach ($expectedRegistered as $metricCode => $expectedValue) {
     mysqlCheck($registered->summary($metricCode, '0', [1], $range) === $expectedValue, 'registered exact value ' . $metricCode);
 }
+$productQuantityRanking = $registered->dimensionRanking('sales_quantity', 'product', '0', [1], $range);
+mysqlCheck($productQuantityRanking === [['entity_id'=>91, 'entity_name'=>'测试产品', 'metric_value'=>3]],
+    'a partial cash refund leaves the registered completed-sale quantity unchanged');
 $guideRanking=$registered->dimensionRanking('sales_amount','guide','0',[1],$range,20,'desc');
 mysqlCheck($guideRanking===[['entity_id'=>41,'entity_name'=>'导购甲','metric_value'=>12000]],'guide relationship ranks associated order sales without a guide performance metric');
 $managerRanking=$registered->dimensionRanking('sales_amount','sales_manager','0',[1],$range,20,'desc');
 mysqlCheck($managerRanking===[['entity_id'=>51,'entity_name'=>'销售经理甲','metric_value'=>12000]],'sales-manager relationship ranks associated order sales without a manager performance metric');
 $groupedStores = $registered->groupedStoreTotals('cash_performance', '0', [1, 2], $range, [1 => 'north', 2 => 'north']);
-mysqlCheck($groupedStores === [['group_key' => 'north', 'metric_value' => 930001, 'store_count' => 2]],
+mysqlCheck($groupedStores === [['group_key' => 'north', 'metric_value' => 933001, 'store_count' => 2]],
     'registered reader owns store-group metric aggregation');
 mysqlCheck(
     $registered->summary('actual_performance', '0', [1], $range)
@@ -116,20 +122,48 @@ mysqlCheck(
     'actual performance exact registered identity'
 );
 $cashDetails=$registered->detailPage('cash_performance','0',[1],$range,1,100);
-mysqlCheck($cashDetails['total']===1 && array_sum(array_column($cashDetails['rows'],'metric_value'))
-    === $registered->summary('cash_performance','0',[1],$range), 'cash detail uses exact registered summary population');
+mysqlCheck($cashDetails['total']===2 && array_sum(array_column($cashDetails['rows'],'metric_value'))
+    === $registered->summary('cash_performance','0',[1],$range)
+    && in_array('historical-debt-cash', array_column($cashDetails['rows'], 'fact_id'), true),
+    'historical sales-debt payment is visible once in the registered cash detail');
+$unclassifiedDebtRows = array_values(array_filter(
+    $registered->categoryRows('cash_performance', '0', [1], $range),
+    static fn(array $row): bool => ($row['product_type_snapshot'] ?? '') === 'sales_debt_repayment_unallocated'
+));
+mysqlCheck(count($unclassifiedDebtRows) === 1
+    && (int)$unclassifiedDebtRows[0]['category_id'] === 0
+    && (int)$unclassifiedDebtRows[0]['amount_cents'] === 3000,
+    'unallocated historical sales-debt payment is visible without inventing an item category');
 $refundDetails=$registered->detailPage('refund_performance','0',[1],$range,1,100);
-mysqlCheck($refundDetails['total']===1 && array_sum(array_column($refundDetails['rows'],'metric_value'))===10000,
-    'refund detail uses positive display amount from registered cash reversal');
+mysqlCheck($refundDetails['total']===2 && array_sum(array_column($refundDetails['rows'],'metric_value'))===10200
+    && in_array('historical-debt-refund', array_column($refundDetails['rows'], 'fact_id'), true),
+    'debt-repayment reversal stays in the same registered refund population');
 $actualDetails=$registered->detailPage('actual_performance','0',[1],$range,1,100);
-mysqlCheck(array_sum(array_column($actualDetails['rows'],'metric_value'))===890001,
+mysqlCheck(array_sum(array_column($actualDetails['rows'],'metric_value'))===892801,
     'actual detail preserves signed cash-minus-refund identity');
 $cashOperatorRanking=$registered->defaultRanking('cash_performance','0',[1],$range,20,'desc');
-mysqlCheck($cashOperatorRanking['dimension']==='operator' && $cashOperatorRanking['rows']===[['entity_id'=>7,'entity_name'=>'测试操作人','metric_value'=>900001]],
-    'cash operator ranking uses the same allocated-sale population as cash summary');
+mysqlCheck($cashOperatorRanking['dimension']==='operator' && $cashOperatorRanking['rows']===[
+    ['entity_id'=>7,'entity_name'=>'测试操作人','metric_value'=>900001],
+    ['entity_id'=>8,'entity_name'=>'历史欠款收银员','metric_value'=>3000],
+], 'cash operator ranking includes unallocated historical debt exactly once');
 $cashMemberRanking=$registered->dimensionRanking('cash_performance','member','0',[1],$range,20,'desc');
-mysqlCheck($cashMemberRanking === [['entity_id'=>101,'entity_name'=>'测试会员','metric_value'=>900001]],
-    'cash member ranking uses the same registered cash population as cash summary');
+mysqlCheck($cashMemberRanking === [
+    ['entity_id'=>101,'entity_name'=>'测试会员','metric_value'=>900001],
+    ['entity_id'=>102,'entity_name'=>'历史欠款会员','metric_value'=>3000],
+], 'cash member ranking includes the same historical-debt payment population as summary');
+mysqlCheck(
+    $registered->dailyStoreTotals('cash_performance', '0', [1], $range) === [['store_id'=>1, 'business_date'=>'2026-09-08', 'amount_cents'=>903001]],
+    'historical sales-debt payment is merged once into the registered daily total'
+);
+$beforeAllocatedDebtProbe = $registered->summary('cash_performance', '0', [1], $range);
+$pdo->exec("INSERT INTO eb_cashier_v3_payment_fact (fact_id,tenant_id,store_id,member_id,member_name_snapshot,business_date,status,fact_type,source_document_type,payment_method,amount_cents,order_id,source_line_id,organization_id,organization_path_snapshot,store_name_snapshot,operator_id,operator_name_snapshot) VALUES ('allocated-debt-payment','0',1,101,'测试会员','2026-09-08','effective','payment_collected','debt_repayment','wechat',4000,'order','allocated-debt:payment:1','org','org','测试甲店',7,'测试操作人')");
+$pdo->exec("INSERT INTO eb_cashier_v3_payment_sale_allocation_fact (tenant_id,allocation_fact_id,sale_fact_id,reversal_of,payment_fact_id,store_id,business_date,status,amount_cents,order_id) VALUES ('0','allocated-debt-allocation','sale',NULL,'allocated-debt-payment',1,'2026-09-08','effective',4000,'order')");
+mysqlCheck(
+    $registered->summary('cash_performance', '0', [1], $range) === $beforeAllocatedDebtProbe + 4000,
+    'a debt repayment with an allocation stays in the allocation source and is never double counted'
+);
+$pdo->exec("DELETE FROM eb_cashier_v3_payment_sale_allocation_fact WHERE allocation_fact_id='allocated-debt-allocation'");
+$pdo->exec("DELETE FROM eb_cashier_v3_payment_fact WHERE fact_id='allocated-debt-payment'");
 $personRanking = $registered->personnelRanking('staff_labor_yeji', '0', [1], $range);
 mysqlCheck(count($personRanking) === 1 && $personRanking[0]['employee_name'] === '技师甲'
     && $personRanking[0]['amount_cents'] === 4500, 'registered technician ranking');
@@ -246,8 +280,8 @@ $consistent = $transaction->run(function ($r) use ($pdo, $range) {
     $after = $r->cashTotals('0', [1], $range);
     return [$before, $after];
 });
-mysqlCheck($consistent[0] === $consistent[1] && $consistent[0]['gross_cents'] === 900001, 'concurrent commit invisible inside repeatable read');
-mysqlCheck($reader->cashTotals('0', [1], $range)['gross_cents'] === 900101, 'new query sees committed update');
+mysqlCheck($consistent[0] === $consistent[1] && $consistent[0]['gross_cents'] === 903001, 'concurrent commit invisible inside repeatable read');
+mysqlCheck($reader->cashTotals('0', [1], $range)['gross_cents'] === 903101, 'new query sees committed update');
 $writeRejected = false;
 try { $transaction->run(function () use ($db) { $db->connect()->execute("UPDATE eb_cashier_v3_payment_sale_allocation_fact SET amount_cents=1 WHERE allocation_fact_id='cash'"); }); }
 catch (Throwable $e) { $writeRejected = true; }
@@ -267,14 +301,14 @@ $service = new app\services\query\metric\MetricReadViewServices($store, function
 $query = ['query_shape'=>'summary','metric_codes'=>['cash_performance','consume_amount'],'start_date'=>'2026-09-08','end_date'=>'2026-09-08','compare_range'=>null,'store_ids'=>[1],'business_filters'=>[]];
 try {
     $view = $service->create([], $query);
-    mysqlCheck(array_column($view['results'], 'amount_cents') === [900101,9500], 'real combined summary');
+    mysqlCheck(array_column($view['results'], 'amount_cents') === [903101,9500], 'real combined summary');
     $pdo->exec("UPDATE eb_cashier_v3_payment_sale_allocation_fact SET amount_cents=901101 WHERE allocation_fact_id='cash'");
     mysqlCheck($service->replay([], $query, $view['read_consistency_ref']) === $view, 'original exact view survives new fact commit');
     $comparison = $query; $comparison['query_shape']='comparison'; $comparison['compare_range']=['start'=>'2026-09-07','end'=>'2026-09-07'];
-    mysqlCheck(array_column($service->create([], $comparison)['results'], 'amount_cents') === [901101,9500,5000,0], 'real comparison periods');
+    mysqlCheck(array_column($service->create([], $comparison)['results'], 'amount_cents') === [904101,9500,5000,0], 'real comparison periods');
     $trend=$query; $trend['query_shape']='trend'; $trend['start_date']='2026-09-07';
     $tr=$service->create([], $trend)['results'];
-    mysqlCheck(array_column($tr[0]['rows'],'amount_cents') === [5000,901101], 'real daily cash trend complete');
+    mysqlCheck(array_column($tr[0]['rows'],'amount_cents') === [5000,904101], 'real daily cash trend complete');
     mysqlCheck(array_column($tr[1]['rows'],'amount_cents') === [0,9500], 'real daily consumption zero fill');
     $rank=$query; $rank['query_shape']='ranking'; $rank['store_ids']=[]; $rank['ranking']=['direction'=>'top_and_bottom','limit'=>5];
     $rankView=$service->create([], $rank); $rr=$rankView['results'];
@@ -288,14 +322,16 @@ try {
     // The signed view canonicalizes associative key order. Compare canonical
     // payloads while preserving list order, exact integers and all fields.
     mysqlCheck(app\services\query\UnifiedQueryJson::encode($memberView['results'][0]['rows']['top'])
-        === app\services\query\UnifiedQueryJson::encode([['entity_id' => 101, 'entity_name' => '测试会员', 'amount_cents' => 901101]]),
-        'metric read view executes registered member payment ranking without a separate member gate');
+        === app\services\query\UnifiedQueryJson::encode([
+            ['entity_id' => 101, 'entity_name' => '测试会员', 'amount_cents' => 901101],
+            ['entity_id' => 102, 'entity_name' => '历史欠款会员', 'amount_cents' => 3000],
+        ]), 'metric read view includes both allocated and historical debt-member cash without a separate member gate');
     $memberExport=app\services\query\metric\MetricReadViewExportProvider::project($memberView);
     $memberExportDirections=array_column($memberExport,null,'ranking_direction');
-    mysqlCheck(count($memberExport)===2 && isset($memberExportDirections['前列'],$memberExportDirections['后列'])
-        && array_column($memberExport,'metric_value')===['9011.01','9011.01']
-        && array_column($memberExport,'store_name')===['测试会员；范围：当前授权范围','测试会员；范围：当前授权范围'],
-        'member export preserves exact cents, identity and both ranking directions');
+    mysqlCheck(count($memberExport)===4 && isset($memberExportDirections['前列'],$memberExportDirections['后列'])
+        && array_column($memberExport,'metric_value')===['30.00','9011.01','9011.01','30.00']
+        && array_column($memberExport,'store_name')===['历史欠款会员；范围：当前授权范围','测试会员；范围：当前授权范围','测试会员；范围：当前授权范围','历史欠款会员；范围：当前授权范围'],
+        'member export preserves allocated and historical-debt identities in both ranking directions');
     $projectRank=$rank;
     $projectRank['store_ids']=[1];
     $projectRank['metric_codes']=['completed_service_item_count'];

@@ -72,6 +72,18 @@ class MetricDictionaryServices extends BaseServices
                 'dev_source' => 'MetricDefinitionRegistry：cashier_v3_sale_fact.sale_amount_cents',
             ],
             [
+                'code' => 'sales_quantity',
+                'name' => '销售数量',
+                'user_ready' => true,
+                'summary' => '正式结账成功的销售项目或商品件数。',
+                'include' => '有效销售明细中的成交数量。',
+                'exclude' => '作废销售、充值、余额变动和未完成销售不计入；退款只退回金额，不回退已经成交的销售数量。',
+                'timing' => '以销售结账成功日期统计。',
+                'note' => '销售数量是成交件数，不等同于服务完成项目数量。',
+                'aliases' => ['销量', '销售件数', '售出件数', '卖了多少件', '卖了几件'],
+                'dev_source' => 'MetricDefinitionRegistry：cashier_v3_sale_fact.quantity',
+            ],
+            [
                 'code' => 'completed_service_item_count',
                 'name' => '完成服务项目数量',
                 'user_ready' => true,

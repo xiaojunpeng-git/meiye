@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 // Synthetic, offline semantic/choice tests. No framework, database, model or account.
+require_once __DIR__.'/fixture-autoload.php';
 $root=dirname(__DIR__,2).'/后端代码/app/services/ai/';
 foreach(['contract/AiContractException.php','model/AiModelInputProjector.php','execution/AiWorkflowPlanner.php'] as $file) require_once $root.$file;
 $parser=new \app\services\ai\model\AiModelInputProjector();
@@ -8,7 +9,7 @@ $planner=new \app\services\ai\execution\AiWorkflowPlanner();
 $checks=0;
 function verify($condition,string $label):void { global $checks;$checks++;if(!$condition)throw new RuntimeException('FAIL '.$label); }
 function rejected(callable $call,string $reason):void { try{$call();}catch(Throwable $e){verify($e->getMessage()===$reason,'expected '.$reason.' got '.$e->getMessage());return;}throw new RuntimeException('expected '.$reason); }
-$cap=['metric_codes'=>['cash_performance','refund_performance','actual_performance','consume_amount','sales_amount','balance_deduction_amount','recharge_amount'],'query_shapes'=>['summary','trend','ranking','comparison'],'output_formats'=>['screen','screen_and_xlsx'],'current_store_bound'=>true,'definition_metric_codes'=>['cash_performance','refund_performance','actual_performance','consume_amount','sales_amount','balance_deduction_amount','recharge_amount']];
+$cap=['metric_codes'=>['cash_performance','refund_performance','actual_performance','consume_amount','sales_amount','sales_quantity','balance_deduction_amount','recharge_amount'],'query_shapes'=>['summary','trend','ranking','comparison'],'output_formats'=>['screen','screen_and_xlsx'],'current_store_bound'=>true,'definition_metric_codes'=>['cash_performance','refund_performance','actual_performance','consume_amount','sales_amount','sales_quantity','balance_deduction_amount','recharge_amount']];
 $cap['metric_readiness']=array_intersect_key(\app\services\query\metric\MetricReadViewServices::metricCapabilities(),array_flip($cap['metric_codes']));
 function build(string $question,array $capOverride=[]):array {
     global $parser,$planner,$cap;
@@ -66,7 +67,7 @@ rejected(static function()use($planner,$initial){$planner->choose($initial,['met
 rejected(static function()use($planner,$cashDate){$planner->choose($cashDate,['start_date'=>'2026-02-30','end_date'=>'2026-03-01']);},'AI_DATE_INVALID');
 foreach([
  '今天服务了几个人'=>'unparsed_business_condition','今天服务多少人、多少次'=>'unparsed_business_condition',
- '本月销售数量'=>'unparsed_business_condition','本月项目赚了多少钱'=>'category_filter',
+ '本月项目赚了多少钱'=>'category_filter',
  '本月生美现金，排除体验和离职员工'=>'category_filter','店长们的消耗是多少'=>'person_filter',
  '合作方分了多少钱'=>'source_filter','今年有多少会员'=>'history_point',
  '上个月末还有多少没消耗'=>'history_point','现在仓库还剩多少'=>'unparsed_business_condition',
@@ -80,6 +81,7 @@ rejected(static function(){build('今天张某某现金是多少');},'AI_INTENT_
 $r=build('今天实际业绩');verify($r['plan']['query']['metric_codes']===['actual_performance'],'actual performance is executable from registered reader');
 $r=build('今天退款金额');verify($r['plan']['query']['metric_codes']===['refund_performance'],'refund performance is executable from registered reader');
 $r=build('本月销售额');verify($r['plan']['query']['metric_codes']===['sales_amount'],'sales amount is executable from registered reader');
+$r=build('本月卖了多少件');verify($r['plan']['query']['metric_codes']===['sales_quantity'],'natural-language sold-quantity meaning resolves through the registered dictionary');
 rejected(static function(){build('本月现金前五家10000');},'AI_INTENT_UNRESOLVED');
 // Neither client answers nor history can silently bind executable slots.
 $view=$parser->modelView($parser->validateConversation('那上个月呢',[['question'=>'本月现金是多少','answer'=>['amount'=>987654321,'scope'=>'ALL','name'=>'SECRET_PERSON']]]));

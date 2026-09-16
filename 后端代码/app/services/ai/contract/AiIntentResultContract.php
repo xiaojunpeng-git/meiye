@@ -337,6 +337,7 @@ final class AiIntentResultContract
         if ($objectRelation==='analysis') $value['object_term']='';
         if ($objectRelation==='selection' && $value['object_term']==='') self::fail('bad_value:object_relation');
         $delta=$hasPrior?self::delta($value['context_delta']):null;
+        self::normalizeContextOnlyPendingFollowup($understanding,$delta,$value);
         self::normalizeNoopContextChanges($delta,$value,$safeQuestion['prior_query']??null);
         self::assertContextOnlyFollowup($understanding,$delta);
         self::assertContextConstraintSources($understanding,$delta,$value,$scope,$scopeSupplied,$safeQuestion['prior_query']??null);
@@ -413,6 +414,36 @@ final class AiIntentResultContract
         }
         if (($priorQuery['has_business_filter']??true)===false && $delta['business_filters']==='clear') {
             $delta['business_filters']='inherit'; $intent['context_delta']['business_filters']='inherit';
+        }
+    }
+
+    /**
+     * The understanding boundary has already accepted a turn whose only new
+     * customer meaning is a period. A binding-stage `pending` marker for an
+     * unrelated prior field cannot make that customer repeat the response
+     * form, metric, object or scope: it carries no new business choice.
+     *
+     * This deliberately uses the model-authored typed field inventory rather
+     * than a phrase, metric name or report-specific condition. Replacement
+     * and clearing remain strict failures because they would alter the query.
+     */
+    private static function normalizeContextOnlyPendingFollowup(array $understanding,?array &$delta,array &$intent): void
+    {
+        if ($delta===null) return;
+        $current=[];
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            $hasCurrent=false;
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (($evidence['message_id']??null)==='current') {$hasCurrent=true;break;}
+            }
+            if (!$hasCurrent) continue;
+            foreach ((array)($requirement['fields']??[]) as $field) $current[$field]=true;
+        }
+        if ($current===[] || array_diff(array_keys($current),['periods'])!==[]) return;
+        foreach (['metric_codes','object','business_filters','store_scope','operation','ranking_direction','ranking_limit','scope'] as $field) {
+            if (($delta[$field]??null)!=='pending') continue;
+            $delta[$field]='inherit';
+            $intent['context_delta'][$field]='inherit';
         }
     }
 

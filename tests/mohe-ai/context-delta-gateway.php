@@ -222,13 +222,10 @@ try {
     $contractHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'unknown','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'date_range','start'=>'2026-09-10','end'=>'2026-09-10']],'scope'=>'unspecified','context_delta'=>$pendingMismatch,'unresolved_fragments'=>[]];
     $beforePendingMismatch=$contractHarness->queries;
     $pendingMismatchRun=$contractHarness->start('这个月呢？',$contractSource['answer']['context_ref']);
-    cdgCheck($pendingMismatchRun['status']==='WAITING_CLARIFICATION'&&$contractHarness->queries===$beforePendingMismatch,
-        'pending guidance retains the accepted period instead of treating a binding restatement conflict as customer failure');
-    $resolvedPendingMismatch=$contractHarness->choose($pendingMismatchRun,['pending_operation'=>'retain']);
-    $resolvedEvidence=$contractHarness->private->read($contractHarness->row($resolvedPendingMismatch)['evidence_ref']);
-    cdgCheck($resolvedPendingMismatch['status']==='COMPLETED'
+    $resolvedEvidence=$contractHarness->private->read($contractHarness->row($pendingMismatchRun)['evidence_ref']);
+    cdgCheck($pendingMismatchRun['status']==='COMPLETED'&&$contractHarness->queries===$beforePendingMismatch+1
         && ($resolvedEvidence['query']['start_date']??'')===substr((string)($resolvedEvidence['query']['end_date']??''),0,7).'-01',
-        'confirming the response form executes the customer-stated month rather than the contradictory binding date');
+        'a period-only follow-up ignores an unrelated pending binding marker and executes the customer-stated month');
     $contractHarness->close();
 
     // A model-declared missing metric may not execute an empty query.  It

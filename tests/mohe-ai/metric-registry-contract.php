@@ -1,6 +1,7 @@
 <?php
 
 /** Offline architecture contract for the round-three registered metric layer. */
+require_once __DIR__ . '/fixture-autoload.php';
 $root = dirname(__DIR__, 2);
 $metricDir = $root . '/后端代码/app/services/query/metric/';
 require_once $metricDir . 'MetricQueryContractException.php';
@@ -18,11 +19,11 @@ function metricRegistryCheck(bool $condition, string $label): void
 
 $expected = [
     'cash_performance', 'refund_performance', 'actual_performance', 'consume_amount',
-    'staff_sales_yeji', 'staff_labor_yeji', 'sales_amount', 'balance_deduction_amount',
+    'staff_sales_yeji', 'staff_labor_yeji', 'sales_amount', 'sales_quantity', 'balance_deduction_amount',
     'recharge_amount', 'completed_service_item_count', 'customer_active',
 ];
 $definitions = MetricDefinitionRegistry::all();
-metricRegistryCheck(array_keys($definitions) === $expected, 'only the eleven approved V3 metrics are registered');
+metricRegistryCheck(array_keys($definitions) === $expected, 'only the twelve approved V3 metrics are registered');
 foreach ($definitions as $definition) {
     metricRegistryCheck(!array_key_exists('name', $definition), 'registry never duplicates user-visible metric names');
 }
@@ -34,12 +35,19 @@ metricRegistryCheck(MetricDefinitionRegistry::get('actual_performance')['reader_
 metricRegistryCheck(MetricDefinitionRegistry::get('refund_performance')['reader_strategy'] === 'cash_refund', 'refund uses signed cash facts');
 metricRegistryCheck(MetricDefinitionRegistry::canonical('service_count') === 'completed_service_item_count', 'page alias resolves without a second formula');
 metricRegistryCheck(MetricDefinitionRegistry::get('completed_service_item_count')['storage_unit'] === 'count'
+    && MetricDefinitionRegistry::get('sales_quantity')['storage_unit'] === 'count'
     && MetricDefinitionRegistry::get('customer_active')['storage_unit'] === 'count', 'count metrics never masquerade as cents');
 metricRegistryCheck(MetricDefinitionRegistry::capabilities()['completed_service_item_count']['ai_query_ready'] === true
+    && MetricDefinitionRegistry::capabilities()['sales_quantity']['ai_query_ready'] === true
     && MetricDefinitionRegistry::capabilities()['customer_active']['ai_query_ready'] === true,
     'registered quantity and people-count metrics are AI query-ready with their own unit');
 metricRegistryCheck((MetricDefinitionRegistry::get('sales_amount')['category_reader']['strategy'] ?? '') === 'sale_completed_allocation',
     'sales amount declares its category reader instead of leaving reports to sum sale facts');
+metricRegistryCheck(
+    isset(MetricDefinitionRegistry::get('sales_quantity')['source']['dimensions']['project'], MetricDefinitionRegistry::get('sales_quantity')['source']['dimensions']['product'])
+    && !isset(MetricDefinitionRegistry::get('sales_quantity')['source']['dimensions']['guide'], MetricDefinitionRegistry::get('sales_quantity')['source']['dimensions']['sales_manager']),
+    'sold quantity is registered for item analysis without inventing guide or sales-manager quantity attribution'
+);
 
 $read = static function (string $relative) use ($root): string {
     $source = file_get_contents($root . '/' . $relative);

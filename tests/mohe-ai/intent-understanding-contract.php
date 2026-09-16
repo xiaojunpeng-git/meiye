@@ -324,6 +324,16 @@ $selectedStoreBinding=$inventedRanking;$selectedStoreBinding['object_term']='二
 $normalizedSelectedStore=AiIntentResultContract::normalize($selectedStoreBinding,['cash_performance'],[],$selectedStoreQuestion,$selectedStoreUnderstanding);
 $check($normalizedSelectedStore['object_relation']==='selection'&&$normalizedSelectedStore['object_term']==='二号门店',
     'a model-understood particular store remains an authorized catalog selection candidate');
+$periodOnlyWithInventedMetric=['goal'=>'查看本月情况','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'查看本月情况','fields'=>['metric_codes','periods'],
+        'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
+        'evidence'=>[['message_id'=>'current','quote'=>'本月呢']]],
+]];
+$periodOnlyMetricQuestion=$plainQuestion;$periodOnlyMetricQuestion['question']='本月呢';$periodOnlyMetricQuestion['evidence_messages'][0]['text']='本月呢';
+$reject(static function()use($periodOnlyWithInventedMetric,$periodOnlyMetricQuestion){AiIntentUnderstandingContract::normalize($periodOnlyWithInventedMetric,$periodOnlyMetricQuestion);},
+    'a metric requirement without an exact customer measurement cannot turn a time-only continuation into a new metric choice');
+$check(AiIntentUnderstandingContract::repairable('values:metric_terms'),
+    'a missing metric evidence carrier receives one model-owned repair');
 $wrongHistory=['goal'=>$understanding['goal'],'status'=>$understanding['status'],'requirements'=>[['id'=>'r1','meaning'=>'查看上个月服务情况','fields'=>['metric_codes'],'values'=>['metric_terms'=>['服务']], 'evidence'=>[['message_id'=>'recent_1','quote'=>'上个月服务情况']]],['id'=>'r2','meaning'=>'排除退款','fields'=>['metric_codes'],'values'=>['metric_exclusions'=>['退款']],'evidence'=>[['message_id'=>'current','quote'=>'不要退款']]],['id'=>'r3','meaning'=>'列出前五家门店','fields'=>['object_kind','operation','ranking'],'values'=>['object_kind'=>'store','operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>5]],'evidence'=>[['message_id'=>'current','quote'=>'前五家门店']]]]];
 $check(AiIntentUnderstandingContract::normalize($wrongHistory,$question)['requirements'][0]['evidence'][0]['message_id']==='recent_1','specified prior message may be cited explicitly');
 $ambiguous=$understanding;$ambiguous['requirements']=[$ambiguous['requirements'][0]];$ambiguous['requirements'][0]['evidence'][0]['quote']='这个月';$questionRepeated=$question;$questionRepeated['question']='这个月收款，这个月退款';$questionRepeated['evidence_messages'][0]['text']=$questionRepeated['question'];
@@ -345,10 +355,8 @@ $reject(static function()use($wrongFormatUnderstanding,$formatQuestion){AiIntent
     'format tolerance never accepts a changed business word as evidence');
 $paraphrasedMetricDetail=$plainUnderstanding;
 $paraphrasedMetricDetail['requirements'][0]['values']['metric_terms']=['到账'];
-$normalizedParaphrasedMetricDetail=AiIntentUnderstandingContract::normalize($paraphrasedMetricDetail,$plainQuestion);
-$check(!isset($normalizedParaphrasedMetricDetail['requirements'][0]['values']['metric_terms'])
-    && $normalizedParaphrasedMetricDetail['requirements'][0]['meaning']==='查看本月收款',
-    'a non-verbatim metric aid is discarded without erasing an otherwise evidenced customer requirement');
+$reject(static function()use($paraphrasedMetricDetail,$plainQuestion){AiIntentUnderstandingContract::normalize($paraphrasedMetricDetail,$plainQuestion);},
+    'a non-verbatim metric aid cannot leave a metric requirement without its required customer evidence');
 $badDate=$base;$badDate['periods']=[['kind'=>'date_range','start'=>'2026-02-30','end'=>'2026-03-01']];$reject(static function()use($badDate,$question,$understanding){AiIntentResultContract::normalize($badDate,['cash_performance'],[],$question,$understanding);},'invalid calendar date is a model contract error');
 $reversed=$base;$reversed['periods']=[['kind'=>'date_range','start'=>'2026-09-12','end'=>'2026-09-01']];$reject(static function()use($reversed,$question,$understanding){AiIntentResultContract::normalize($reversed,['cash_performance'],[],$question,$understanding);},'reversed model date is a model contract error');
 $prompt=AiIntentUnderstandingContract::modelInstruction().' '.AiIntentResultContract::modelInstruction(false);

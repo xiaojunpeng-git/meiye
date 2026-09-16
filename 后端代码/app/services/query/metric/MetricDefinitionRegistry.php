@@ -14,7 +14,7 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v5';
+    public const VERSION = 'unified-metric-registry-v6';
     public const COVERAGE_START = '2026-08-10';
 
     /** @return array<string,array<string,mixed>> */
@@ -101,48 +101,7 @@ final class MetricDefinitionRegistry
             'sales_amount' => self::amount('fact_sum', 'v3-sale-completed-lines-v1', ['summary', 'comparison', 'trend', 'ranking'], [
                 'table' => 'cashier_v3_sale_fact', 'amount' => 'sale_amount_cents',
                 'filters' => ['status' => 'effective'], 'normal_scope' => 'facts',
-                'dimensions' => [
-                    'operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot'],
-                    // A sale fact freezes the sold line's type and item snapshot.
-                    // This turns project/product ranking into the same registered
-                    // sales metric read, rather than a page or AI side query.
-                    'project' => [
-                        'id' => 'item_id', 'name' => 'item_name_snapshot',
-                        'analysis_object_kind' => 'project', 'analysis_object_label' => '项目',
-                        'analysis_relation_role' => 'sold_item', 'analysis_action_codes' => ['sales'],
-                        'analysis_source_filters' => ['source_type' => 'project'],
-                    ],
-                    'product' => [
-                        'id' => 'item_id', 'name' => 'item_name_snapshot',
-                        'analysis_object_kind' => 'product', 'analysis_object_label' => '产品',
-                        'analysis_relation_role' => 'sold_item', 'analysis_action_codes' => ['sales'],
-                        'analysis_source_filters' => ['source_type' => 'product'],
-                    ],
-                    // These are order-participation relationships, never an
-                    // employee-performance formula.  The relation reader
-                    // attributes a sale line only to the saved participant on
-                    // that same line, and exposes the result as associated
-                    // order sales rather than as the guide's or manager's
-                    // performance.
-                    'guide' => [
-                        'analysis_object_kind' => 'guide', 'analysis_object_label' => '导购',
-                        'analysis_relation_role' => 'introduced_order', 'analysis_action_codes' => ['sales'],
-                        'analysis_relation_source' => [
-                            'table' => 'cashier_v3_customer_guide_round_fact',
-                            'employee_id' => 'guide_employee_id',
-                            'employee_name' => 'guide_employee_name_snapshot',
-                        ],
-                    ],
-                    'sales_manager' => [
-                        'analysis_object_kind' => 'sales_manager', 'analysis_object_label' => '销售经理',
-                        'analysis_relation_role' => 'assisted_order', 'analysis_action_codes' => ['sales'],
-                        'analysis_relation_source' => [
-                            'table' => 'cashier_v3_sales_manager_fact',
-                            'employee_id' => 'sales_manager_employee_id',
-                            'employee_name' => 'sales_manager_name_snapshot',
-                        ],
-                    ],
-                ],
+                'dimensions' => self::saleAmountDimensions(),
             ]) + [
                 'default_ranking_dimension' => 'operator',
                 // Direct sales use their frozen sales dimension; card sales use
@@ -150,6 +109,14 @@ final class MetricDefinitionRegistry
                 // choice so category reports never reopen sale facts to sum it.
                 'category_reader' => ['strategy' => 'sale_completed_allocation'],
             ],
+            'sales_quantity' => self::count('fact_sum', 'v3-sale-completed-line-quantity-v1', ['summary', 'comparison', 'trend', 'ranking'], [
+                'table' => 'cashier_v3_sale_fact', 'amount' => 'quantity',
+                // A refund adjusts payment amount only. Sold quantity remains
+                // the original completed-sale quantity until a separately
+                // registered return-quantity fact is introduced.
+                'filters' => ['status' => 'effective'], 'normal_scope' => 'facts',
+                'dimensions' => self::saleItemDimensions(),
+            ]) + ['default_ranking_dimension' => 'operator'],
             'balance_deduction_amount' => self::amount('fact_sum', 'v3-balance-order-payment-v1', ['summary', 'comparison', 'trend', 'ranking'], [
                 'table' => 'cashier_v3_balance_fact', 'amount' => '-(principal_delta_cents + bonus_delta_cents)',
                 'filters' => ['status' => 'effective', 'balance_change_type' => 'order_payment'], 'normal_scope' => 'facts',
@@ -264,6 +231,57 @@ final class MetricDefinitionRegistry
             'reader_strategy' => $strategy, 'metric_version' => $version,
             'query_shapes' => $shapes, 'source' => $source, 'filter_grain' => $grain,
             'business_filters' => $filters, 'storage_unit' => $unit,
+        ];
+    }
+
+    /** Sales item dimensions are shared by sales amount and sold quantity. */
+    private static function saleItemDimensions(): array
+    {
+        return [
+            'operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot'],
+            // A sale fact freezes the sold line's type and item snapshot. This
+            // makes product/project ranking a registered fact read, never an
+            // AI-side table query.
+            'project' => [
+                'id' => 'item_id', 'name' => 'item_name_snapshot',
+                'analysis_object_kind' => 'project', 'analysis_object_label' => '项目',
+                'analysis_relation_role' => 'sold_item', 'analysis_action_codes' => ['sales'],
+                'analysis_source_filters' => ['source_type' => 'project'],
+            ],
+            'product' => [
+                'id' => 'item_id', 'name' => 'item_name_snapshot',
+                'analysis_object_kind' => 'product', 'analysis_object_label' => '产品',
+                'analysis_relation_role' => 'sold_item', 'analysis_action_codes' => ['sales'],
+                'analysis_source_filters' => ['source_type' => 'product'],
+            ],
+        ];
+    }
+
+    /**
+     * Guide and sales-manager facts currently establish only an associated
+     * order-sales amount; they do not establish a quantity attribution.
+     */
+    private static function saleAmountDimensions(): array
+    {
+        return self::saleItemDimensions() + [
+            'guide' => [
+                'analysis_object_kind' => 'guide', 'analysis_object_label' => '导购',
+                'analysis_relation_role' => 'introduced_order', 'analysis_action_codes' => ['sales'],
+                'analysis_relation_source' => [
+                    'table' => 'cashier_v3_customer_guide_round_fact',
+                    'employee_id' => 'guide_employee_id',
+                    'employee_name' => 'guide_employee_name_snapshot',
+                ],
+            ],
+            'sales_manager' => [
+                'analysis_object_kind' => 'sales_manager', 'analysis_object_label' => '销售经理',
+                'analysis_relation_role' => 'assisted_order', 'analysis_action_codes' => ['sales'],
+                'analysis_relation_source' => [
+                    'table' => 'cashier_v3_sales_manager_fact',
+                    'employee_id' => 'sales_manager_employee_id',
+                    'employee_name' => 'sales_manager_name_snapshot',
+                ],
+            ],
         ];
     }
 
