@@ -44,6 +44,43 @@ final class RegisteredMetricReadServices
         return $handler();
     }
 
+    /**
+     * Counts registered analytical subjects after a registered per-subject
+     * period aggregation.  The condition is a typed contract, not a column,
+     * SQL fragment, member identifier or front-end calculation.
+     */
+    public function thresholdCount(string $metricCode, string $tenantId, array $stores, array $range, array $condition): int
+    {
+        $this->assertScope($tenantId, $stores, $range);
+        $contract = MetricDefinitionRegistry::get($metricCode);
+        $threshold = $contract['source']['threshold_count'] ?? null;
+        if (($contract['reader_strategy'] ?? null) !== 'sales_payment_collected' || !is_array($threshold)
+            || ($threshold['subject_dimension'] ?? null) !== 'member' || ($threshold['aggregation'] ?? null) !== 'period_total') {
+            $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        }
+        $keys = array_keys($condition); sort($keys, SORT_STRING);
+        if ($keys !== ['aggregation', 'amount_cents', 'operator', 'subject']
+            || ($condition['subject'] ?? null) !== 'member' || ($condition['aggregation'] ?? null) !== 'period_total'
+            || !in_array($condition['operator'] ?? null, (array)($threshold['operators'] ?? []), true)
+            || !is_int($condition['amount_cents'] ?? null) || $condition['amount_cents'] < 1 || $condition['amount_cents'] > 100000000000) {
+            $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        }
+        $operators = ['gte' => '>=', 'gt' => '>', 'lte' => '<=', 'lt' => '<', 'eq' => '='];
+        $operator = $operators[$condition['operator']] ?? null;
+        if ($operator === null) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        // The member aggregate and its predicate remain in SQL. Selecting
+        // members into PHP would be both slower and unsafe for large stores.
+        // amount_cents is a bounded integer above, so this contains no
+        // customer/model-supplied SQL.
+        $members = $this->saleCashQuery($tenantId, $stores, $range)
+            ->where('s.member_id', '>', 0)
+            ->fieldRaw('s.member_id member_id')
+            ->group('s.member_id')
+            ->having('SUM(p.amount_cents) ' . $operator . ' ' . $condition['amount_cents']);
+        $sql = $members->buildSql();
+        return (int) Db::table([$sql => 'member_period_totals'])->count();
+    }
+
     /** @return array<int,array{store_id:int,business_date:string,amount_cents:int}> */
     public function dailyStoreTotals(string $metricCode, string $tenantId, array $stores, array $range): array
     {

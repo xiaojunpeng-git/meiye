@@ -93,7 +93,8 @@ final class SiliconFlowClient
                 'bad_value:recommended_initial_answer'=>'The previous response used recommended_initial_answer inconsistently. Return one complete binding again. A recommended first answer preserves every accepted customer condition and has needs_metric_choice=false. If operation is ranking, metric_codes MUST be a JSON array containing exactly one compatible registered code. Otherwise omit the recommendation label and use the ordinary binding outcome.',
                 'bad_value:object_kind'=>'The previous response used an object_kind outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose object_kind only from store, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization or unknown. Do not select an object identity, metric, period, scope or result.',
                 'bad_value:object_relation'=>'The previous response used an invalid object_relation. Return one complete binding again. Preserve the accepted meaning and every other candidate field; use analysis only for the object being inspected, or selection only for a named object that narrows records. Do not add a filter, identity, metric, period, scope or result.',
-                'bad_value:operation'=>'The previous response used an operation outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose operation only from summary, trend, ranking, comparison, definition or unknown. Do not select a metric, period, scope or result.',
+                'bad_value:operation'=>'The previous response used an operation outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose operation only from summary, trend, ranking, comparison, threshold_count, definition or unknown. Do not select a metric, period, scope or result.',
+                'bad_value:aggregate_condition'=>'The previous response used an invalid aggregate condition. Return one complete binding again. Preserve the accepted threshold condition exactly when it exists; threshold_count requires subject=member, aggregation=period_total, one published operator and a positive amount_cents. Do not invent, remove or substitute a condition.',
                 'bad_value:scope'=>'The previous response used a scope outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose scope only from current_store, authorized or unspecified. Do not expand authority or select a store.',
                 'bad_value:ranking'=>'The previous response used an invalid ranking carrier. Return one complete binding again. Preserve the accepted meaning and every other candidate field; return ranking exactly as direction plus limit, or omit it when no ranked result is requested. Do not choose a metric, period, scope or result.',
                 'bad_value:periods'=>'The previous response used an invalid periods carrier. Return one complete binding again. Preserve the accepted time meaning and every other candidate field; return only complete published period objects. Do not calculate, shorten, replace or remove a customer-stated time condition.',
@@ -444,20 +445,34 @@ final class SiliconFlowClient
         if (!is_array($query)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         $keys=array_keys($query);sort($keys);
         $base=['metric_codes','operation','periods','ranking'];
-        $extended=['has_business_filter','has_object_selection','has_store_scope_restriction','metric_codes','object_kind','operation','periods','presentation_origin','ranking','scope'];
-        if (($keys!==$base && $keys!==$extended) || !is_array($query['metric_codes']) || count($query['metric_codes'])>8
-            || !in_array($query['operation'],['summary','trend','ranking','comparison'],true) || !$this->validPeriods($query['periods'])
+        $legacyExtended=['has_business_filter','has_object_selection','has_store_scope_restriction','metric_codes','object_kind','operation','periods','presentation_origin','ranking','scope'];
+        $extended=['aggregate_condition','has_business_filter','has_object_selection','has_store_scope_restriction','metric_codes','object_kind','operation','periods','presentation_origin','ranking','scope'];
+        if (($keys!==$base && $keys!==$legacyExtended && $keys!==$extended) || !is_array($query['metric_codes']) || count($query['metric_codes'])>8
+            || !in_array($query['operation'],['summary','trend','ranking','comparison','threshold_count'],true) || !$this->validPeriods($query['periods'])
             || count($query['periods'])!==($query['operation']==='comparison'?2:1)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
-        if ($keys===$extended && (!is_bool($query['has_object_selection']) || !is_bool($query['has_store_scope_restriction']) || !is_bool($query['has_business_filter']) || !is_string($query['object_kind'])
+        if (($keys===$legacyExtended || $keys===$extended) && (!is_bool($query['has_object_selection']) || !is_bool($query['has_store_scope_restriction']) || !is_bool($query['has_business_filter']) || !is_string($query['object_kind'])
             || !preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$query['object_kind'])
             || !in_array($query['scope'],['current_store','authorized','unspecified'],true)
-            || !in_array($query['presentation_origin'],['customer_or_verified_context','platform_observation','platform_recommendation'],true))) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+            || !in_array($query['presentation_origin'],['customer_or_verified_context','platform_observation','platform_recommendation'],true)
+            || ($keys===$extended && (!$this->validAggregateCondition($query['aggregate_condition'])
+                || (($query['operation']==='threshold_count') !== ($query['aggregate_condition']!==null))))
+            || ($keys===$legacyExtended && $query['operation']==='threshold_count'))) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         foreach ($query['metric_codes'] as $code) if(!is_string($code)||!preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$code)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         $ranking=$query['ranking'];
         if ($ranking===null) return;
         $rankingKeys=is_array($ranking)?array_keys($ranking):[];sort($rankingKeys);
         if ($rankingKeys!==['direction','limit'] || !in_array($ranking['direction'],['top','bottom','top_and_bottom','unspecified'],true)
             || (!is_null($ranking['limit'])&&(!is_int($ranking['limit'])||$ranking['limit']<1||$ranking['limit']>20))) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+    }
+
+    private function validAggregateCondition($condition): bool
+    {
+        if ($condition===null) return true;
+        $keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);
+        return $keys===['aggregation','amount_cents','operator','subject']
+            && ($condition['subject']??null)==='member' && ($condition['aggregation']??null)==='period_total'
+            && in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)
+            && is_int($condition['amount_cents']??null) && $condition['amount_cents']>=1 && $condition['amount_cents']<=100000000000;
     }
 
     private function request(array $payload,string $apiKey,int $timeoutMs,callable $checkpoint): array

@@ -96,6 +96,7 @@ $expectedRegistered = [
     'staff_sales_yeji' => 10000,
     'staff_labor_yeji' => 4500,
     'sales_amount' => 12000,
+    'sales_collected_amount' => 890001,
     'sales_quantity' => 3,
     'balance_deduction_amount' => 2500,
     'recharge_amount' => 8000,
@@ -105,6 +106,12 @@ $expectedRegistered = [
 foreach ($expectedRegistered as $metricCode => $expectedValue) {
     mysqlCheck($registered->summary($metricCode, '0', [1], $range) === $expectedValue, 'registered exact value ' . $metricCode);
 }
+$memberThreshold=['subject'=>'member','aggregation'=>'period_total','operator'=>'gte','amount_cents'=>498000];
+mysqlCheck($registered->thresholdCount('sales_collected_amount', '0', [1], $range, $memberThreshold)===1,
+    'registered member cumulative actual-sales collection threshold excludes recharge, debt collection and void allocation facts');
+$memberThreshold['operator']='gt';$memberThreshold['amount_cents']=890001;
+mysqlCheck($registered->thresholdCount('sales_collected_amount', '0', [1], $range, $memberThreshold)===0,
+    'registered member threshold applies the typed comparison operator to the signed sales-allocation total');
 $productQuantityRanking = $registered->dimensionRanking('sales_quantity', 'product', '0', [1], $range);
 mysqlCheck($productQuantityRanking === [['entity_id'=>91, 'entity_name'=>'测试产品', 'metric_value'=>3]],
     'a partial cash refund leaves the registered completed-sale quantity unchanged');

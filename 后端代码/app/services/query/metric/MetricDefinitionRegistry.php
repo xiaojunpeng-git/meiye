@@ -112,7 +112,7 @@ final class MetricDefinitionRegistry
             // 销售收款与销售成交额是两个不同的业务事实。该指标只读取销售
             // 收款分摊事实，不混入充值或历史欠款补交；退款沿同一有符号分摊链
             // 回冲。后续会员累计门槛查询也只能声明性地复用这一事实合同。
-            'sales_collected_amount' => self::amount('sales_payment_collected', 'v3-sale-payment-collected-net-v1', ['summary', 'comparison', 'trend', 'ranking'], [
+            'sales_collected_amount' => self::amount('sales_payment_collected', 'v3-sale-payment-collected-net-v1', ['summary', 'comparison', 'trend', 'ranking', 'threshold_count'], [
                 'dimensions' => [
                     'member' => [
                         'id' => 'member_id', 'name' => 'member_name_snapshot',
@@ -121,6 +121,11 @@ final class MetricDefinitionRegistry
                         'analysis_relation_role' => 'member_sales_collection_total',
                         'analysis_action_codes' => ['sales', 'payment'],
                     ],
+                ],
+                'threshold_count' => [
+                    'subject_dimension' => 'member',
+                    'aggregation' => 'period_total',
+                    'operators' => ['gte', 'gt', 'lte', 'lt', 'eq'],
                 ],
             ]) + ['default_ranking_dimension' => 'member'],
             'sales_quantity' => self::count('fact_sum', 'v3-sale-completed-line-quantity-v1', ['summary', 'comparison', 'trend', 'ranking'], [
@@ -222,6 +227,10 @@ final class MetricDefinitionRegistry
                 'analysis_dimensions' => self::analysisDimensions($item),
                 'analysis_dimension_contracts' => self::analysisDimensionContracts($item),
                 'analysis_default_selection_ref' => $item['analysis_default_selection_ref'] ?? null,
+                // A threshold contract is deliberately narrow: it describes
+                // the only permitted aggregate predicate for this metric,
+                // never arbitrary field filtering.
+                'threshold_count' => $item['source']['threshold_count'] ?? null,
                 'derivation' => $item['derivation'] ?? null,
                 'readiness_reasons' => $aiReady ? [] : ['AI_STORAGE_UNIT_UNSUPPORTED'],
             ];

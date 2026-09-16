@@ -40,17 +40,27 @@ final class MetricReadViewServices
         $binding = $this->binding(call_user_func($this->authorize, $principal), $normalized['store_ids']);
         $personnel = $this->personnelSelection($normalized,$binding);
         $dimensionRanking = $this->dimensionRanking($normalized);
+        $thresholdCount = $this->thresholdCount($normalized);
         $now = $this->now();
         $expiresAt=$expiresAt??($now+86400);
         if ($expiresAt<=$now || $expiresAt>$now+86400) $this->fail('METRIC_READ_EXPIRY_INVALID');
         $ranges = ['current' => ['start' => $normalized['start_date'], 'end' => $normalized['end_date']]];
         if ($normalized['compare_range'] !== null) $ranges['comparison'] = $normalized['compare_range'];
-        $results = call_user_func($this->transaction, function (GroupPerformanceMetricReadServices $reader) use ($normalized, $binding, $ranges,$personnel,$dimensionRanking,$now): array {
+        $results = call_user_func($this->transaction, function (GroupPerformanceMetricReadServices $reader) use ($normalized, $binding, $ranges,$personnel,$dimensionRanking,$thresholdCount,$now): array {
             $results = [];
             $storeNames = $normalized['query_shape'] === 'ranking' && $personnel===null && $dimensionRanking===null ? $reader->storeNames($binding['store_ids']) : [];
             foreach ($ranges as $period => $range) {
                 foreach ($normalized['metric_codes'] as $metric) {
                     $metricContract = MetricDefinitionRegistry::get($metric);
+                    if ($thresholdCount !== null) {
+                        $results[] = [
+                            'period' => $period, 'metric_code' => $metric, 'storage_unit' => 'count',
+                            'source_storage_unit' => $metricContract['storage_unit'],
+                            'object_kind' => 'member', 'aggregate_condition' => $thresholdCount,
+                            'count' => $reader->thresholdCount($binding['tenant_id'], $binding['store_ids'], $range, $metric, $thresholdCount),
+                        ];
+                        continue;
+                    }
                     if ($personnel!==null) {
                         $points=$personnel['pairs']?$reader->personnelTotals($binding['tenant_id'],$binding['store_ids'],$range,$metric,$personnel['pairs']):[];
                         $totals=[];$sum=0;
@@ -162,6 +172,7 @@ final class MetricReadViewServices
     /** @return array{dimension:string,object_kind:string,object_label:string,participant_relation:bool}|null */
     private function dimensionRanking(array $query): ?array
     {
+        if ($query['query_shape'] === 'threshold_count') return null;
         $objectKind=$query['business_filters']['object_kind'] ?? null;
         if (!is_string($objectKind) || $objectKind==='person') return null;
         $metric = MetricDefinitionRegistry::get($query['metric_codes'][0]);
@@ -172,6 +183,12 @@ final class MetricReadViewServices
         $dimension=$matches[0];
         return ['dimension'=>$dimension['dimension'],'object_kind'=>$dimension['object_kind'],'object_label'=>$dimension['object_label'],
             'participant_relation'=>isset($dimension['analysis_relation_source'])];
+    }
+    /** @return array{subject:string,aggregation:string,operator:string,amount_cents:int}|null */
+    private function thresholdCount(array $query): ?array
+    {
+        if ($query['query_shape'] !== 'threshold_count') return null;
+        return $query['aggregate_condition'];
     }
     private function personnelSelection(array $query,array $binding): ?array
     {
@@ -223,9 +240,10 @@ final class MetricReadViewServices
     private function query(array $query): array
     {
         if (!array_key_exists('ranking', $query)) $query['ranking'] = null;
-        $fields = ['query_shape', 'metric_codes', 'start_date', 'end_date', 'compare_range', 'store_ids', 'business_filters', 'ranking'];
+        if (!array_key_exists('aggregate_condition', $query)) $query['aggregate_condition'] = null;
+        $fields = ['query_shape', 'metric_codes', 'start_date', 'end_date', 'compare_range', 'store_ids', 'business_filters', 'ranking', 'aggregate_condition'];
         if (array_diff(array_keys($query), $fields) || array_diff($fields, array_keys($query))) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
-        if (!in_array($query['query_shape'], ['summary', 'comparison', 'trend', 'ranking'], true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if (!in_array($query['query_shape'], ['summary', 'comparison', 'trend', 'ranking', 'threshold_count'], true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $objectKind=$query['business_filters']['object_kind']??null;
         $person=$objectKind==='person';
         if ($query['business_filters']!==[] && (!$person && !is_string($objectKind))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
@@ -237,6 +255,16 @@ final class MetricReadViewServices
             if (!is_array($rank) || count($rank) !== 2 || !in_array($rank['direction'] ?? null, ['top', 'bottom', 'top_and_bottom'], true)
                 || !is_int($rank['limit'] ?? null) || $rank['limit'] < 1 || $rank['limit'] > 20) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         } elseif ($query['ranking'] !== null) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
+        if ($query['query_shape'] === 'threshold_count') {
+            $condition = $query['aggregate_condition']; $conditionKeys = is_array($condition) ? array_keys($condition) : []; sort($conditionKeys, SORT_STRING);
+            if ($objectKind !== 'member' || $query['business_filters'] !== ['object_kind' => 'member']
+                || $conditionKeys !== ['aggregation', 'amount_cents', 'operator', 'subject']
+                || ($condition['subject'] ?? null) !== 'member' || ($condition['aggregation'] ?? null) !== 'period_total'
+                || !in_array($condition['operator'] ?? null, ['gte', 'gt', 'lte', 'lt', 'eq'], true)
+                || !is_int($condition['amount_cents'] ?? null) || $condition['amount_cents'] < 1 || $condition['amount_cents'] > 100000000000) {
+                $this->fail('METRIC_QUERY_SCHEMA_INVALID');
+            }
+        } elseif ($query['aggregate_condition'] !== null) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         if (!is_array($query['metric_codes']) || $query['metric_codes'] === [] || count($query['metric_codes']) > 4
             || array_keys($query['metric_codes']) !== range(0, count($query['metric_codes']) - 1)) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         $allowed=[];
@@ -249,7 +277,7 @@ final class MetricReadViewServices
         }
         foreach ($query['metric_codes'] as $metric) if (!in_array($metric, $allowed, true)) $this->fail('METRIC_NOT_REGISTERED');
         if ($person && (count($query['metric_codes'])!==1 || !in_array($query['query_shape'],['summary','ranking'],true))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-        if (!$person && $query['business_filters']!==[] && (count($query['metric_codes'])!==1 || $query['query_shape']!=='ranking')) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if (!$person && $query['business_filters']!==[] && (count($query['metric_codes'])!==1 || !in_array($query['query_shape'],['ranking','threshold_count'],true))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         // Preserve the existing two-metric forms.  More than two facts are
         // only batched for an unfiltered summary so a first operating answer
         // cannot combine incompatible object grains or ranking semantics.

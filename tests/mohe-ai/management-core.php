@@ -7,7 +7,7 @@ use app\services\ai\management\AiManagementStore as Store;
 $checks=0;
 function check($ok,$name){global $checks;if(!$ok)throw new RuntimeException($name);$checks++;}
 function rejects(callable $f,string $reason){try{$f();}catch(Throwable $e){check($e->getMessage()===$reason,$e->getMessage().' != '.$reason);return;}throw new RuntimeException('Expected '.$reason);}
-$d=Policy::defaults();check(Policy::validate($d)===$d,'defaults');$catalog=Policy::catalog();check(count($catalog['workflows'])===5,'catalog');
+$d=Policy::defaults();check(Policy::validate($d)===$d,'defaults');$catalog=Policy::catalog();check(count($catalog['workflows'])===count(\app\services\ai\registry\AiBusinessManifest::definitions()['workflows']),'catalog follows the source-owned workflow registry');
 check(($catalog['scenes']['store_operations']['runtime_skill_document']['source_hash']??null)===$catalog['scenes']['store_operations']['skill_source_hash'],'catalog keeps the exact readable Skill source with its scene');
 check(($catalog['scenes']['store_operations']['runtime_skill_document']['markdown']??'')!=='' ,'catalog supplies runtime markdown even for scene-only clients');Policy::applyManifest($d);$checks++;
 foreach(['sql','metric_codes','permissions','handler'] as $key){$bad=$d;$bad[$key]='arbitrary';rejects(function()use($bad){Policy::validate($bad);},'AI_MANAGEMENT_DOCUMENT_INVALID');}

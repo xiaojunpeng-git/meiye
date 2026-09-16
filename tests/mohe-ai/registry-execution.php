@@ -34,7 +34,7 @@ function registryPlan(string $shape='summary',string $format='screen'):array
     return ['schema_version'=>'mohe-executable-workflow-v1','workflow_code'=>'wf_performance_'.$shape,
         'query'=>['query_shape'=>$shape,'metric_codes'=>['cash_performance','consume_amount'],'start_date'=>'2026-09-01','end_date'=>'2026-09-08',
             'compare_range'=>$shape==='comparison'?['start'=>'2026-08-10','end'=>'2026-08-17']:null,
-            'store_ids'=>[],'business_filters'=>[],'ranking'=>$shape==='ranking'?['direction'=>'top_and_bottom','limit'=>5]:null], 'output_format'=>$format];
+            'store_ids'=>[],'business_filters'=>[],'ranking'=>$shape==='ranking'?['direction'=>'top_and_bottom','limit'=>5]:null,'aggregate_condition'=>null], 'output_format'=>$format];
 }
 function registryHandlers(array &$seen):array
 {
@@ -67,7 +67,7 @@ function registryHandlers(array &$seen):array
 try {
     $registry=new AiBusinessRegistry(); $compiler=new AiRegisteredPlanCompiler($registry); $cap=registryCapabilities();
     $manifest=AiBusinessManifest::definitions();
-    registryCheck(($manifest['intent_contract']['code']??null)==='intent_result' && ($manifest['intent_contract']['version']??null)==='intent-binding-v4'
+    registryCheck(($manifest['intent_contract']['code']??null)==='intent_result' && ($manifest['intent_contract']['version']??null)==='intent-binding-v5'
         && preg_match('/^[a-f0-9]{64}$/D',$manifest['intent_contract']['hash']??'')===1,'intent result contract participates in the registry fingerprint');
     $snapshot=$registry->snapshot($cap);
     registryCheck(count($snapshot['metrics'])===3&&!isset($snapshot['metrics']['actual_performance']),'only approved metric contracts, no actual formula invented');
@@ -109,6 +109,19 @@ try {
         registryCheck($compiled['budget']['counters']['tool_call_count']===1&&$compiled['budget']['counters']['skill_execution_count']===1,'actual calls counted once');
         registryCheck($compiled['scene_code']==='store_operations','business Skill stays separate from reusable shape');
     }
+    $thresholdCap=registryCapabilities();
+    $thresholdCap['metric_codes']=['sales_collected_amount'];
+    $thresholdCap['query_shapes']=['threshold_count'];
+    $thresholdCap['definition_metric_codes']=[];$thresholdCap['metadata_readiness']=[];
+    $thresholdPlan=['schema_version'=>'mohe-executable-workflow-v1','workflow_code'=>'wf_performance_threshold_count',
+        'query'=>['query_shape'=>'threshold_count','metric_codes'=>['sales_collected_amount'],'start_date'=>'2026-09-01','end_date'=>'2026-09-08',
+            'compare_range'=>null,'store_ids'=>[],'business_filters'=>['object_kind'=>'member'],'ranking'=>null,
+            'aggregate_condition'=>['subject'=>'member','aggregation'=>'period_total','operator'=>'gte','amount_cents'=>498000]],'output_format'=>'screen'];
+    $thresholdCompiled=$compiler->compile($thresholdPlan,$thresholdCap);$compiler->assertCompiled($thresholdCompiled);
+    registryCheck($thresholdCompiled['workflow_code']==='wf_performance_threshold_count'
+        && $thresholdCompiled['query']===$thresholdPlan['query'],'member threshold preserves the typed registered query without a phrase branch');
+    $forgedThreshold=$thresholdPlan;$forgedThreshold['query']['aggregate_condition']['subject']='store';
+    registryReject(function()use($compiler,$forgedThreshold,$thresholdCap){$compiler->compile($forgedThreshold,$thresholdCap);},'AI_UNSUPPORTED_CONDITION');
     $compiled=$compiler->compile(registryPlan(),$cap);
     registryCheck($compiled['dependency_versions']['tool']===['unified_metric_query'=>1],'complete tool dependency version frozen');
     registryCheck($compiled['dependency_versions']['skill']===['skill_store_operations'=>16],'business Skill has explicit immutable id and version');

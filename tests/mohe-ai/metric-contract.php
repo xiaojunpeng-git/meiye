@@ -21,7 +21,7 @@ function rejectMetric(callable $call, $code) { try { $call(); } catch (MetricQue
 $dictionary = new \app\services\metric\MetricDictionaryServices();
 $lookup = function ($code) use ($dictionary) { return $dictionary->getByCode($code); };
 $catalog = MetricQueryCatalog::fromDictionary($lookup);
-checkMetric(count($catalog->all()) === 11, 'all round-three canonical codes share one catalog');
+checkMetric(count($catalog->all()) === count(\app\services\query\metric\MetricDefinitionRegistry::all()), 'every registered canonical metric shares one metadata catalog');
 foreach ($catalog->all() as $metric) {
     checkMetric($metric['ai_query_ready'] === false && $metric['metric_version'] === null, 'not falsely ready');
     checkMetric(!isset($metric['dev_source']) && !isset($metric['version']) && !isset($metric['updated_at']) && !isset($metric['aliases']), 'no internal fields');

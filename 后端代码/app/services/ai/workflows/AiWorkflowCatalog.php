@@ -13,6 +13,7 @@ final class AiWorkflowCatalog
             'performance_trend' => self::action('trend', 'unified_metric_query'),
             'registered_metric_ranking' => self::action('ranking', 'unified_metric_query'),
             'performance_comparison' => self::action('comparison', 'unified_metric_query'),
+            'member_threshold_count' => self::action('threshold_count', 'unified_metric_query'),
             'metric_definition_read' => self::action('definition', 'metric_catalog_read'),
             'verified_result_export' => self::action('export', 'verified_export_create'),
         ];
@@ -21,7 +22,7 @@ final class AiWorkflowCatalog
     public static function definitions(): array
     {
         $workflows = [];
-        foreach (['summary' => 'performance_summary', 'trend' => 'performance_trend', 'ranking' => 'registered_metric_ranking', 'comparison' => 'performance_comparison'] as $shape => $action) {
+        foreach (['summary' => 'performance_summary', 'trend' => 'performance_trend', 'ranking' => 'registered_metric_ranking', 'comparison' => 'performance_comparison', 'threshold_count' => 'member_threshold_count'] as $shape => $action) {
             $workflows['wf_performance_' . $shape] = ['version' => 3, 'scene' => 'store_operations',
                 'action' => $action, 'query_shape' => $shape, 'entry' => 'query', 'terminal' => 'render', 'allow_export' => true,
                 'max_path_ms' => 40000, 'nodes' => [

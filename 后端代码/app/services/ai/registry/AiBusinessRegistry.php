@@ -76,7 +76,7 @@ final class AiBusinessRegistry
         $codes=AiRegistryValue::strings($capabilities['metric_codes']??[],32);
         $shapes=AiRegistryValue::strings($capabilities['query_shapes']??[],8);
         $formats=AiRegistryValue::strings($capabilities['output_formats']??['screen'],2);
-        if (array_diff($shapes,['summary','trend','ranking','comparison']) || array_diff($formats,['screen','screen_and_xlsx'])) AiRegistryValue::fail('AI_CAPABILITY_INVALID');
+        if (array_diff($shapes,['summary','trend','ranking','comparison','threshold_count']) || array_diff($formats,['screen','screen_and_xlsx'])) AiRegistryValue::fail('AI_CAPABILITY_INVALID');
         $metrics=[];
         foreach ($codes as $code) {
             $item=$capabilities['metric_readiness'][$code]??null;
@@ -99,14 +99,16 @@ final class AiBusinessRegistry
             if (($registered[$code]['filter_grain']??null)!==($item['filter_grain']??null)
                 || ($registered[$code]['business_filters']??null)!==($item['business_filters']??null)
                 || ($registered[$code]['analysis_dimensions']??null)!==$dimensions
-                || $this->dimensionContracts($registered[$code]['analysis_dimension_contracts']??[])!==$dimensionContracts) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+                || $this->dimensionContracts($registered[$code]['analysis_dimension_contracts']??[])!==$dimensionContracts
+                || $this->thresholdContract($registered[$code]['threshold_count']??null)!==$this->thresholdContract($item['threshold_count']??null)) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             $available=array_values(array_intersect($shapes,AiRegistryValue::strings($item['query_shapes']??[],8)));
             if (!$available) continue;
             sort($available,SORT_STRING);
             $metrics[$code]=['metric_code'=>$code,'name'=>(string)($item['name']??$code),'metric_version'=>$item['metric_version'],
                 'mapping_version'=>$item['mapping_version'],'source_metric_version'=>$item['source_metric_version'],
                 'query_shapes'=>$available,'coverage_start'=>$item['coverage_start'],'filter_grain'=>$person?'person':'store','business_filters'=>$person?['selection_ref']:[],
-                'analysis_dimensions'=>$dimensions,'analysis_dimension_contracts'=>$dimensionContracts];
+                'analysis_dimensions'=>$dimensions,'analysis_dimension_contracts'=>$dimensionContracts,
+                'threshold_count'=>$this->thresholdContract($item['threshold_count']??null)];
         }
         ksort($metrics,SORT_STRING);
         $definitions=[];
@@ -204,6 +206,20 @@ final class AiBusinessRegistry
         usort($out,static function(array $left,array $right): int { return [$left['object_kind'],$left['dimension']] <=> [$right['object_kind'],$right['dimension']]; });
         if (count(array_unique(array_map(static function(array $item): string { return $item['object_kind'].'|'.$item['dimension']; },$out)))!==count($out)) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
         return $out;
+    }
+
+    /** One bounded aggregate contract may be frozen into a capability snapshot. */
+    private function thresholdContract($contract): ?array
+    {
+        if ($contract === null) return null;
+        AiRegistryValue::exact(is_array($contract) ? $contract : [], ['subject_dimension','aggregation','operators']);
+        if (($contract['subject_dimension'] ?? null) !== 'member' || ($contract['aggregation'] ?? null) !== 'period_total') {
+            AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+        }
+        $operators = AiRegistryValue::strings($contract['operators'] ?? [], 8);
+        sort($operators, SORT_STRING);
+        if (!$operators || array_diff($operators, ['gte','gt','lte','lt','eq'])) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+        return ['subject_dimension' => 'member', 'aggregation' => 'period_total', 'operators' => $operators];
     }
     private function validate(): void
     {

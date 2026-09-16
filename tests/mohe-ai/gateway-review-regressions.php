@@ -52,6 +52,15 @@ $cashView['query']['query_shape']='summary';
 $cashView['results']=[['metric_code'=>'actual_performance','period'=>'current','amount_cents'=>15050,'storage_unit'=>'fen']];
 $actual=$renderer->render($cashView);
 $check($actual['cards'][0]['metric_name']==='实际业绩' && $actual['cards'][0]['display_value']==='151','confirmed actual metric renders through its own registration');
+$threshold=$renderer->render(['query'=>['query_shape'=>'threshold_count','metric_codes'=>['sales_collected_amount'],'start_date'=>'2026-09-01','end_date'=>'2026-09-16','compare_range'=>null,
+    'business_filters'=>['object_kind'=>'member'],'aggregate_condition'=>['subject'=>'member','aggregation'=>'period_total','operator'=>'gte','amount_cents'=>498000]],
+    'data_as_of'=>'2026-09-16T12:00:00+08:00','results'=>[
+        ['metric_code'=>'sales_collected_amount','period'=>'current','storage_unit'=>'count','source_storage_unit'=>'fen','object_kind'=>'member',
+            'aggregate_condition'=>['subject'=>'member','aggregation'=>'period_total','operator'=>'gte','amount_cents'=>498000],'count'=>3],
+    ]]);
+$check($threshold['summary']==='累计实际收款销售额达到4980元的会员共有3人。 统计时间：2026-09-01 至 2026-09-16。'
+    && $threshold['cards'][0]['metric_name']==='达标会员数' && $threshold['cards'][0]['unit']==='人',
+    'typed threshold evidence renders a natural member count without a metric-specific answer branch');
 $check(app\services\query\metric\MetricMoneyFormatter::integerYuan(15149)==='151'
     && app\services\query\metric\MetricMoneyFormatter::integerYuan(15150)==='152'
     && app\services\query\metric\MetricMoneyFormatter::integerYuan(-15150)==='-152',

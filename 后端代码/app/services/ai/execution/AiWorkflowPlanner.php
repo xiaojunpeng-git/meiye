@@ -29,7 +29,7 @@ final class AiWorkflowPlanner
         // this user may use now, not from a report-page or phrase-specific list.
         $available=$definition?($capabilities['definition_metric_codes']??[]):array_keys(AiCapabilityGuidanceCatalog::discover($capabilities,'store'));
         foreach ($metrics as $metric) if (!in_array($metric, $available, true)) throw new AiContractException('AI_METRIC_NOT_READY');
-        $shapes=array_values(array_intersect(['summary','trend','ranking','comparison'],$signals));
+        $shapes=array_values(array_intersect(['summary','trend','ranking','comparison','threshold_count'],$signals));
         if (in_array('top_5', $signals, true) || in_array('bottom_5', $signals, true)) $shapes[]='ranking';
         $shapes=array_values(array_unique($shapes));
         if (in_array('comparison',$shapes,true) && count($projection['date_terms']??[])===2) $shapes=array_values(array_diff($shapes,['summary']));
@@ -110,7 +110,8 @@ final class AiWorkflowPlanner
             if ($shape==='ranking' && !$ranking['direction']) $fields[]=['key'=>'rank_direction','label'=>'想看表现较高还是较低的门店？','type'=>'select','options'=>[['value'=>'top','label'=>'业绩较高'],['value'=>'bottom','label'=>'业绩较低'],['value'=>'top_and_bottom','label'=>'高低都看']]];
             return $this->step(['kind' => 'clarification', 'fields' => $fields, 'resolved_metrics' => $metrics, 'resolved_range' => $range, 'resolved_compare_range' => $compare, 'query_shape' => $shape,'ranking'=>$ranking,'output_format'=>$format,'semantic_constraints'=>$projection['semantic_intent']??[],'requested_period_terms'=>$projection['date_terms']??[]]);
         }
-        return $this->plan($metrics, $range, $shape,$compare,$ranking,$format);
+        return $this->plan($metrics, $range, $shape,$compare,$ranking,$format,[],
+            $selection['aggregate_condition']??null,$selection['object_kind']??'store');
     }
 
     public function choose(array $envelope, array $choices): array
@@ -155,7 +156,8 @@ final class AiWorkflowPlanner
             $envelope['resolved_metrics']=$metrics;$envelope['resolved_range']=$range;$envelope['resolved_compare_range']=$compare;$envelope['ranking']=$ranking;
             return $this->step($envelope);
         }
-        return $this->plan($metrics, $range, $envelope['query_shape'],$compare,$ranking,$envelope['output_format']??'screen',$envelope['resolved_store_ids']??[]);
+        return $this->plan($metrics, $range, $envelope['query_shape'],$compare,$ranking,$envelope['output_format']??'screen',$envelope['resolved_store_ids']??[],
+            $envelope['aggregate_condition']??null,$envelope['object_kind']??'store');
     }
 
     /** One semantic question; range endpoints are a single controlled input. */
@@ -179,16 +181,18 @@ final class AiWorkflowPlanner
         return $envelope;
     }
 
-    private function plan(array $metrics, ?array $range, string $shape,?array $compare=null,?array $ranking=null,string $format='screen',array $storeIds=[]): array
+    private function plan(array $metrics, ?array $range, string $shape,?array $compare=null,?array $ranking=null,string $format='screen',array $storeIds=[],?array $aggregateCondition=null,string $objectKind='store'): array
     {
         if($shape==='definition') {
             return ['kind'=>'plan','plan'=>['schema_version'=>'mohe-executable-workflow-v1','workflow_code'=>'wf_metric_definition',
                 'query_shape'=>'definition','definition_metric_codes'=>$metrics,'output_format'=>'screen']];
         }
-        if (!in_array($shape,['summary','trend','ranking','comparison'],true)) throw new AiContractException('AI_QUERY_SHAPE_NOT_READY');
+        if (!in_array($shape,['summary','trend','ranking','comparison','threshold_count'],true)) throw new AiContractException('AI_QUERY_SHAPE_NOT_READY');
         $plan = ['schema_version' => 'mohe-executable-workflow-v1', 'workflow_code' => 'wf_performance_'.$shape,
             'query' => ['query_shape' => $shape, 'metric_codes' => $metrics, 'start_date' => $range['start'], 'end_date' => $range['end'],
-                'compare_range' => $compare, 'store_ids' => $storeIds, 'business_filters' => [],'ranking'=>$ranking],
+                'compare_range' => $compare, 'store_ids' => $storeIds,
+                'business_filters' => $shape==='threshold_count'?['object_kind'=>$objectKind]:[],
+                'ranking'=>$ranking,'aggregate_condition'=>$aggregateCondition],
             // Nodes and budgets are compiled from the selected registration; this
             // preliminary plan deliberately carries no editable graph or hash.
             'output_format' => $format];

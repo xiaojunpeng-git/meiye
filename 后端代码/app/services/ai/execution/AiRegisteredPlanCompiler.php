@@ -85,7 +85,7 @@ final class AiRegisteredPlanCompiler
             ||$compiled['dependency_versions']!==$this->registry->dependencyVersions($compiled['workflow_code'],$compiled['output_format']==='screen_and_xlsx')
             ||$compiled['scene_code']!==$workflow['scene']||$compiled['supplement_policy']!=='no_registered_supplement_branch') AiRegistryValue::fail('AI_COMPILED_PLAN_INVALID');
         $snapshot=$compiled['capability_snapshot'];
-        $cap=['metric_codes'=>array_keys($snapshot['metrics']),'metric_readiness'=>[], 'query_shapes'=>['summary','trend','ranking','comparison'],
+        $cap=['metric_codes'=>array_keys($snapshot['metrics']),'metric_readiness'=>[], 'query_shapes'=>['summary','trend','ranking','comparison','threshold_count'],
             'output_formats'=>$snapshot['output_formats'],'definition_metric_codes'=>array_keys($snapshot['definitions']),'metadata_readiness'=>[]];
         foreach ($snapshot['metrics'] as $code=>$metric) $cap['metric_readiness'][$code]=$metric+['ai_query_ready'=>true];
         foreach ($snapshot['definitions'] as $code=>$definition) $cap['metadata_readiness'][$code]=$definition+['user_ready'=>true];
@@ -108,8 +108,9 @@ final class AiRegisteredPlanCompiler
     }
     private function query(array $query,array $snapshot,array $capabilities): array
     {
-        AiRegistryValue::exact($query,['query_shape','metric_codes','start_date','end_date','compare_range','store_ids','business_filters','ranking']);
-        if (!in_array($query['query_shape'],['summary','trend','ranking','comparison'],true)) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
+        if (!array_key_exists('aggregate_condition',$query)) $query['aggregate_condition']=null;
+        AiRegistryValue::exact($query,['query_shape','metric_codes','start_date','end_date','compare_range','store_ids','business_filters','ranking','aggregate_condition']);
+        if (!in_array($query['query_shape'],['summary','trend','ranking','comparison','threshold_count'],true)) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
         // This is a bounded Reader batch, not a semantic requirement that a
         // customer must ask for four metrics.  A broad operating question can
         // be answered through several independently registered observations
@@ -138,7 +139,7 @@ final class AiRegisteredPlanCompiler
                 $matches=array_values(array_filter((array)($contract['analysis_dimension_contracts']??[]),static function($dimension)use($objectKind):bool {
                     return is_array($dimension) && ($dimension['object_kind']??null)===$objectKind && ($dimension['filter_keys']??null)===[];
                 }));
-                if (count($matches)!==1 || $query['query_shape']!=='ranking') AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+                if (count($matches)!==1 || !in_array($query['query_shape'],['ranking','threshold_count'],true)) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             }
             if (!$person && $query['business_filters']===[] && $contract['filter_grain']!=='store') AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         }
@@ -157,6 +158,16 @@ final class AiRegisteredPlanCompiler
             if (!in_array($query['ranking']['direction'],['top','bottom','top_and_bottom'],true)
                 || !is_int($query['ranking']['limit'])||$query['ranking']['limit']<1||$query['ranking']['limit']>20) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         } elseif ($query['ranking']!==null) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
+        if ($query['query_shape']==='threshold_count') {
+            $condition=$query['aggregate_condition'];$keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);
+            if ($objectKind!=='member'||$query['business_filters']!==['object_kind'=>'member']
+                ||$keys!==['aggregation','amount_cents','operator','subject']||($condition['subject']??null)!=='member'
+                ||($condition['aggregation']??null)!=='period_total'||!in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)
+                ||!is_int($condition['amount_cents']??null)||$condition['amount_cents']<1||$condition['amount_cents']>100000000000) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+            $threshold=$snapshot['metrics'][$metrics[0]]['threshold_count']??null;
+            if (!is_array($threshold)||($threshold['subject_dimension']??null)!=='member'||($threshold['aggregation']??null)!=='period_total'
+                ||!in_array($condition['operator'],$threshold['operators']??[],true)) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+        } elseif ($query['aggregate_condition']!==null) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
         foreach ($metrics as $metric) {
             $contract=$snapshot['metrics'][$metric];
             if (!in_array($query['query_shape'],$contract['query_shapes'],true)) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');

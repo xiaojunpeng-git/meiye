@@ -20,6 +20,12 @@ final class GroupPerformanceMetricReadServices
         return $this->registered->summary($metricCode, $tenantId, $stores, $range);
     }
 
+    /** @param array{subject:string,aggregation:string,operator:string,amount_cents:int} $condition */
+    public function thresholdCount(string $tenantId, array $stores, array $range, string $metricCode, array $condition): int
+    {
+        return $this->registered->thresholdCount($metricCode, $tenantId, $stores, $range, $condition);
+    }
+
     /** Existing callers receive signed refund cents here until they migrate to refund_performance. */
     public function cashTotals(string $tenantId, array $stores, array $range): array
     {

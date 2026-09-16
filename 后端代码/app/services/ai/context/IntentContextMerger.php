@@ -29,6 +29,7 @@ final class IntentContextMerger
             'has_business_filter'=>($query['business_filters']??[])!==[],
             // IDs, names, refs and results never leave the server.
             'has_object_selection'=>isset($query['business_filters']['selection_ref']),
+            'aggregate_condition'=>is_array($query['aggregate_condition']??null)?$query['aggregate_condition']:null,
             'presentation_origin'=>self::presentationOrigin($contextMeaning)];
     }
 
@@ -59,6 +60,7 @@ final class IntentContextMerger
         $out['operation']=self::field($delta['operation'],$intent['operation'],$prior['operation'],'operation',$pending);
         $out['periods']=self::field($delta['periods'],$intent['periods'],$prior['periods'],'periods',$pending);
         $out['scope']=self::field($delta['scope'],$intent['scope'],$prior['scope'],'scope',$pending);
+        $out['aggregate_condition']=self::field($delta['aggregate_condition'],$intent['aggregate_condition']??null,$prior['aggregate_condition'],'aggregate_condition',$pending);
         $out['object_kind']=self::field($delta['object'],$intent['object_kind'],$prior['object_kind'],'object',$pending);
         // A store-scope replacement carries its target in object_term while
         // the analytical object itself may remain inherited. Keep that target
@@ -129,12 +131,13 @@ final class IntentContextMerger
             $fallback['object_kind']=$prior['object_kind'];
             $fallback['object_term']='';
         }
-        foreach (['metric_codes','operation','periods','scope','object'] as $field) {
+        foreach (['metric_codes','operation','periods','scope','aggregate_condition','object'] as $field) {
             if (!in_array($field,$pending,true)) continue;
             if ($field==='metric_codes') $fallback[$field]=$prior['metric_codes'];
             elseif ($field==='operation') $fallback[$field]=$prior['operation'];
             elseif ($field==='periods') $fallback[$field]=$prior['periods'];
             elseif ($field==='scope') $fallback[$field]=$prior['scope'];
+            elseif ($field==='aggregate_condition') $fallback[$field]=$prior['aggregate_condition'];
             else $fallback[$field]=$prior['object_kind'];
         }
         if (in_array('object',$pending,true)) $fallback['object_kind']=$prior['object_kind'];
@@ -144,7 +147,7 @@ final class IntentContextMerger
         // ambiguous fresh request merely because the model marked this turn's
         // metric delta pending.
         if (in_array('metric_codes',$pending,true)) $fallback['needs_metric_choice']=false;
-        foreach (['metric_codes','operation','periods','scope','object'] as $field) if (in_array($field,$pending,true)) $out[$field]=self::empty($field);
+        foreach (['metric_codes','operation','periods','scope','aggregate_condition','object'] as $field) if (in_array($field,$pending,true)) $out[$field]=self::empty($field);
         if (in_array('ranking_direction',$pending,true)) $out['ranking']['direction']='unspecified';
         if (in_array('ranking_limit',$pending,true)) $out['ranking']['limit']=null;
         return ['intent'=>$out,'prospective_intent'=>$prospective,'constraints'=>$constraints,'pending'=>array_values(array_unique($pending)),
@@ -211,7 +214,7 @@ final class IntentContextMerger
         foreach(['direction'=>'ranking_direction','limit'=>'ranking_limit'] as $key=>$deltaKey){$decision=$delta[$deltaKey]??null;if($decision==='inherit')$out[$key]=$previous[$key];elseif($decision==='replace'){}elseif($decision==='clear')$out[$key]=$key==='direction'?'unspecified':null;elseif($decision==='pending'){$out[$key]=$key==='direction'?'unspecified':null;$pending[]=$deltaKey;}else self::conflict();}
         return $out;
     }
-    private static function empty(string $name){return $name==='metric_codes'||$name==='periods'?[]:($name==='scope'?'unspecified':($name==='object'?'unknown':'unknown'));}
+    private static function empty(string $name){return $name==='metric_codes'||$name==='periods'?[]:($name==='aggregate_condition'?null:($name==='scope'?'unspecified':($name==='object'?'unknown':'unknown')));}
     /** A dimension alone is not a concrete customer restriction. */
     private static function hasObjectSelection(array $filters): bool
     {

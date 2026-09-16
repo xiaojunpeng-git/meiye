@@ -12,6 +12,7 @@ final class AiAnswerRenderer
     {
         $dictionary = new \app\services\metric\MetricDictionaryServices();
         $cards = []; $rows = []; $facts = []; $shape = $view['query']['query_shape'];
+        $threshold = $shape === 'threshold_count' ? $this->thresholdCondition($view['query']) : null;
         foreach ($view['results'] as $row) {
             $registered = MetricReadViewServices::metricCapabilities();
             if (!isset($registered[$row['metric_code'] ?? '']) || !$registered[$row['metric_code']]['ai_query_ready'] || !in_array($row['period'] ?? '', ['current', 'comparison'], true)) {
@@ -20,6 +21,19 @@ final class AiAnswerRenderer
             $tooltip = $dictionary->getTooltip($row['metric_code']);
             if (empty($tooltip['user_ready'])) throw new RuntimeException('AI_METRIC_EXPLANATION_NOT_READY');
             $storageUnit = (string)($row['storage_unit'] ?? 'fen'); $unit = $storageUnit === 'count' ? '个' : '元';
+            $range = $row['period'] === 'current' ? ['start' => $view['query']['start_date'], 'end' => $view['query']['end_date']] : $view['query']['compare_range'];
+            if ($shape === 'threshold_count') {
+                if ($storageUnit !== 'count' || ($row['object_kind'] ?? null) !== 'member'
+                    || !self::same($row['aggregate_condition'] ?? null, $threshold)
+                    || !is_int($row['count'] ?? null) || $row['count'] < 0 || !is_array($range)) {
+                    throw new RuntimeException('AI_EVIDENCE_INVALID');
+                }
+                $facts[$row['metric_code']][$row['period']] = ['name' => $tooltip['name'], 'count' => $row['count']];
+                $cards[] = ['metric_name' => '达标会员数', 'display_value' => (string)$row['count'], 'unit' => '人', 'tooltip' => $tooltip,
+                    'period_label' => ($row['period'] === 'current' ? '查询期间：' : '对比期间：') . $range['start'] . ' 至 ' . $range['end'],
+                    'start_date' => $range['start'], 'end_date' => $range['end'], 'data_as_of' => $view['data_as_of']];
+                continue;
+            }
             if ($shape === 'trend') {
                 foreach ($row['rows'] as $point) $rows[] = ['label' => $point['business_date'], 'metric' => $tooltip['name'], 'value' => $this->metricValue($point['amount_cents'], $storageUnit), 'unit' => $unit];
                 continue;
@@ -34,13 +48,12 @@ final class AiAnswerRenderer
                 continue;
             }
             $display = $this->metricValue($storageUnit === 'count' ? ($row['count'] ?? null) : ($row['amount_cents'] ?? null), $storageUnit);
-            $range = $row['period'] === 'current' ? ['start' => $view['query']['start_date'], 'end' => $view['query']['end_date']] : $view['query']['compare_range'];
             $facts[$row['metric_code']][$row['period']] = ['name' => $tooltip['name'], 'value' => $display, 'unit' => $unit];
             $cards[] = ['metric_name' => $tooltip['name'], 'display_value' => $display, 'unit' => $unit, 'tooltip' => $tooltip,
                 'period_label' => ($row['period'] === 'current' ? '查询期间：' : '对比期间：') . $range['start'] . ' 至 ' . $range['end'],
                 'start_date' => $range['start'], 'end_date' => $range['end'], 'data_as_of' => $view['data_as_of']];
         }
-        $summary = $this->resultSummary($shape, $facts, $rows);
+        $summary = $shape === 'threshold_count' ? $this->thresholdSummary($facts, $threshold) : $this->resultSummary($shape, $facts, $rows);
         $summary .= ($summary === '' ? '' : ' ') . '统计时间：' . $view['query']['start_date'] . ' 至 ' . $view['query']['end_date'] . '。';
         $answer = ['summary' => $summary, 'cards' => $cards];
         $queryMetrics = is_array($view['query']['metric_codes'] ?? null) ? $view['query']['metric_codes'] : [];
@@ -62,7 +75,7 @@ final class AiAnswerRenderer
             $answer['summary'] .= ' 评价指标：' . implode('、', $criteria) . '。';
             if ($shape === 'ranking') $answer['summary'] .= $rows ? '仅按所选指标排序，不代表综合评价；相同金额按稳定人员顺序展示。' : '本期间没有符合条件的人员业绩事实，不能据此评定谁表现最好。';
         }
-        if ($member) {
+        if ($member && $shape === 'ranking') {
             $criteria = []; foreach ($view['query']['metric_codes'] as $code) $criteria[] = $dictionary->getTooltip($code)['name'];
             $answer['summary'] .= ' 会员评价指标：' . implode('、', $criteria) . '。';
             if ($shape === 'ranking') $answer['summary'] .= $rows ? '仅按所选指标排序；相同数值按稳定会员顺序展示。' : '本期间没有符合条件的会员数据。';
@@ -105,6 +118,41 @@ final class AiAnswerRenderer
             return $last['label'] . '的' . $last['metric'] . '为' . $last['value'] . $last['unit'] . '。';
         }
         return '已按您当前报表的数据范围查询。';
+    }
+
+    /** The condition is already compiler-verified; this only turns it into customer wording. */
+    private function thresholdSummary(array $facts, array $condition): string
+    {
+        $parts = [];
+        foreach ($facts as $periods) {
+            $current = $periods['current'] ?? null;
+            if (!is_array($current) || !is_int($current['count'] ?? null)) continue;
+            $operator = ['gte' => '达到', 'gt' => '超过', 'lte' => '不超过', 'lt' => '低于', 'eq' => '等于'][$condition['operator']];
+            $amount = MetricMoneyFormatter::integerYuan($condition['amount_cents']);
+            $parts[] = '累计' . $current['name'] . $operator . $amount . '元的会员共有' . $current['count'] . '人。';
+        }
+        return $parts ? implode('', $parts) : '已按您当前报表的数据范围查询。';
+    }
+
+    /** @return array{subject:string,aggregation:string,operator:string,amount_cents:int} */
+    private function thresholdCondition(array $query): array
+    {
+        $condition = $query['aggregate_condition'] ?? null;
+        $keys = is_array($condition) ? array_keys($condition) : []; sort($keys, SORT_STRING);
+        if ($keys !== ['aggregation', 'amount_cents', 'operator', 'subject']
+            || ($condition['subject'] ?? null) !== 'member' || ($condition['aggregation'] ?? null) !== 'period_total'
+            || !in_array($condition['operator'] ?? null, ['gte', 'gt', 'lte', 'lt', 'eq'], true)
+            || !is_int($condition['amount_cents'] ?? null) || $condition['amount_cents'] < 1) {
+            throw new RuntimeException('AI_EVIDENCE_INVALID');
+        }
+        return $condition;
+    }
+
+    private static function same($left, $right): bool
+    {
+        if (!is_array($left) || !is_array($right) || count($left) !== count($right)) return false;
+        ksort($left); ksort($right);
+        return $left === $right;
     }
 
     private function metricValue($value, string $storageUnit): string

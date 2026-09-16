@@ -1359,7 +1359,7 @@ final class AiGatewayServices
         // the previous personnel selector.
         if ($sourceQuery!==null && $merged['replacement_confirmation'] && $semanticPending) {
             $shape=$sourceQuery['query_shape']??null;
-            if (!in_array($shape,['summary','trend','ranking','comparison'],true)) throw new RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
+            if (!in_array($shape,['summary','trend','ranking','comparison','threshold_count'],true)) throw new RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
             return $finish(['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_'.$shape,
                 'query'=>$sourceQuery,'output_format'=>$body['output_format']]]);
         }
@@ -1382,16 +1382,20 @@ final class AiGatewayServices
         // come from the lower-layer registry.  No report page/object switch is
         // permitted here.
         if (!in_array($intent['object_kind'],['person','store','unknown'],true)) {
-            $dimensionMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,$intent['object_kind'],'ranking');
+            $dimensionOperation=$intent['operation']==='threshold_count'?'threshold_count':'ranking';
+            $dimensionMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,$intent['object_kind'],$dimensionOperation);
             if ($localTerm!==null || !$dimensionMetrics) {
                 $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_dimension_contract_unavailable');
                 throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
             }
-            if ($intent['operation']!=='ranking') {
+            if ($intent['operation']==='threshold_count' && $intent['object_kind']==='member') {
+                // The normal compiler below verifies both the registered
+                // member dimension and the typed threshold contract.
+            } elseif ($intent['operation']!=='ranking') {
                 $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_dimension_shape_unavailable');
                 throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
             }
-            return $finish((new \app\services\ai\execution\AiDimensionGuidancePlanner())->start(
+            if ($intent['operation']!=='threshold_count') return $finish((new \app\services\ai\execution\AiDimensionGuidancePlanner())->start(
                 $intent['object_kind'],$intent,$projection,$dimensionMetrics,$body['output_format'],$today
             ));
         }
@@ -1439,7 +1443,7 @@ final class AiGatewayServices
             }
         }
         // No staff/customer/object restriction may become an unfiltered store query.
-        if ($localTerm!==null || !in_array($intent['object_kind'],['store','unknown'],true)) {
+        if ($localTerm!==null || !in_array($intent['object_kind'],['store','unknown','member'],true)) {
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_object_contract_unavailable');
             throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
         }
@@ -1450,7 +1454,8 @@ final class AiGatewayServices
         if ($intent['needs_metric_choice']) $projection['signals'][]='ambiguous_metric';
         $projection['blocking_reason']=null;$projection['unresolved_condition']=false;$projection['semantic_intent']['constraints']=[];
         $caps['current_store_bound']=\app\services\ai\execution\AiAuthority::currentStoreId($context)!==null;
-        $compiled=(new AiWorkflowPlanner())->compile($projection,['decision'=>'query','query_shape'=>$intent['operation'],'metric_codes'=>$intent['metric_codes'],'ranking'=>$intent['ranking']],$caps,$body['output_format'],$today);
+        $compiled=(new AiWorkflowPlanner())->compile($projection,['decision'=>'query','query_shape'=>$intent['operation'],'metric_codes'=>$intent['metric_codes'],'ranking'=>$intent['ranking'],
+            'aggregate_condition'=>$intent['aggregate_condition']??null,'object_kind'=>$intent['object_kind']],$caps,$body['output_format'],$today);
         return $finish($compiled);
     }
 

@@ -48,7 +48,7 @@ final class AiAuthority
         // will revalidate. It may use it only to reject expansion or accept a
         // narrower, catalog-bound store selection.
         $stores=array_values($context['store_ids']??[]);
-        return ['metric_codes'=>$metrics,'query_shapes'=>['summary','trend','ranking','comparison'],
+        return ['metric_codes'=>$metrics,'query_shapes'=>['summary','trend','ranking','comparison','threshold_count'],
             'output_formats'=>$exportReady?['screen','screen_and_xlsx']:['screen'],'metric_readiness'=>$registered,
             'definition_metric_codes'=>array_keys($metadata),'metadata_readiness'=>$metadata,'store_ids'=>$stores];
     }

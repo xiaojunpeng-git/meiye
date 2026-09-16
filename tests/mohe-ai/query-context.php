@@ -19,7 +19,7 @@ qcCheck($view['has_store_scope_restriction']===true&&$view['has_business_filter'
 qcCheck(!isset($view['store_ids'],$view['business_filters'])&&strpos(json_encode($view),'position:2')===false,'private prior values never leave server');
 $suggestedView=IntentContextMerger::modelView($source,['presentation_origin'=>'platform_observation']);
 qcCheck($suggestedView['presentation_origin']==='platform_observation','model can distinguish a platform first answer from a customer-selected metric');
-qcCheck(array_diff(array_keys($suggestedView),['metric_codes','operation','periods','ranking','scope','object_kind','has_store_scope_restriction','has_business_filter','has_object_selection','presentation_origin'])===[],'presentation provenance adds no answer, identity or result field to the model view');
+qcCheck(array_diff(array_keys($suggestedView),['metric_codes','operation','aggregate_condition','periods','ranking','scope','object_kind','has_store_scope_restriction','has_business_filter','has_object_selection','presentation_origin'])===[],'presentation provenance adds no answer, identity or result field to the model view');
 qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::modelInstruction(true),'one deliberately presented overview group')!==false,
     'binding instruction preserves a model-understood overview group across a contextual follow-up without a metric rule');
 qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::semanticReviewInstruction(),'presentation_origin is platform_observation')!==false,

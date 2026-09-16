@@ -45,7 +45,10 @@ metricRegistryCheck((MetricDefinitionRegistry::get('sales_amount')['category_rea
     'sales amount declares its category reader instead of leaving reports to sum sale facts');
 metricRegistryCheck(MetricDefinitionRegistry::get('sales_collected_amount')['reader_strategy'] === 'sales_payment_collected'
     && MetricDefinitionRegistry::get('sales_collected_amount')['storage_unit'] === 'fen'
-    && MetricDefinitionRegistry::get('sales_collected_amount')['query_shapes'] === ['summary', 'comparison', 'trend', 'ranking'],
+    && MetricDefinitionRegistry::get('sales_collected_amount')['query_shapes'] === ['summary', 'comparison', 'trend', 'ranking', 'threshold_count']
+    && MetricDefinitionRegistry::get('sales_collected_amount')['source']['threshold_count'] === [
+        'subject_dimension' => 'member', 'aggregation' => 'period_total', 'operators' => ['gte', 'gt', 'lte', 'lt', 'eq'],
+    ],
     'actual sales collection stays a separate registered sales-payment metric rather than reusing recharge-inclusive cash performance');
 metricRegistryCheck(
     isset(MetricDefinitionRegistry::get('sales_quantity')['source']['dimensions']['project'], MetricDefinitionRegistry::get('sales_quantity')['source']['dimensions']['product'])
@@ -65,6 +68,10 @@ metricRegistryCheck(strpos($view, "\$metric === 'cash_performance' ?") === false
 metricRegistryCheck(strpos($view, '->metricTotal(') !== false, 'AI read view delegates to the registered reader facade');
 metricRegistryCheck(strpos($reader, "'cash_refund' =>") !== false && strpos($reader, "'derived_subtract' =>") !== false,
     'registered strategies execute refund and the fixed subtraction derivation');
+metricRegistryCheck(strpos($reader, 'public function thresholdCount(') !== false
+    && strpos($reader, "->group('s.member_id')") !== false
+    && strpos($reader, 'member_period_totals') !== false,
+    'member threshold count is database-side registered aggregation rather than a PHP detail scan');
 metricRegistryCheck(strpos($reader, "balance_restored") === false, 'member balance restoration is not a refund metric source');
 metricRegistryCheck(strpos($catalog, 'MetricDefinitionRegistry::all()') !== false
     && strpos($catalog, 'MetricDictionaryServices') !== false

@@ -304,7 +304,7 @@ try {
     $h->semanticIntent=['object_kind'=>'member','object_term'=>'','operation'=>'ranking','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$memberMetricPending,'unresolved_fragments'=>[]];
     $memberMetric=$h->start('换一个评价指标',$memberSource['answer']['context_ref']);
     $memberMetricValues=array_column($memberMetric['clarification']['fields'][0]['options']??[],'value');
-    cdgCheck($memberMetricValues===['retain','metric:cash_performance'],'member ranking metric choices contain only registered executable contracts');
+    cdgCheck($memberMetricValues===['retain','metric:cash_performance','metric:sales_collected_amount'],'member ranking metric choices contain only registered executable contracts');
     cdgCheck($h->choose($memberMetric,['pending_metric_codes'=>'metric:sales_amount'])['status']==='WAITING_CLARIFICATION','a forged incompatible metric cannot pass the clarification boundary');
     cdgCheck($h->choose($memberMetric,['pending_metric_codes'=>'retain'])['status']==='COMPLETED','every displayed member metric choice remains executable');
 

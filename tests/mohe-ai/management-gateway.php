@@ -29,7 +29,7 @@ try {
     mgcheck($state['active_version']==='source','source baseline');
     $metricRegistry=mgcall($h,'metric_registry_get');
     mgcheck(($metricRegistry['registry_version']??'')===\app\services\query\metric\MetricDefinitionRegistry::VERSION
-        && count($metricRegistry['items']??[])===11,'metric registry is a source-owned read-only catalog');
+        && count($metricRegistry['items']??[])===count(\app\services\query\metric\MetricDefinitionRegistry::all()),'metric registry is a source-owned read-only catalog');
     $beforeModels=$h->models;$beforeQueries=$h->queries;
     foreach(['store','merchant'] as $terminal){$context=$h->context;$context['terminal']=$terminal;mgdeny(function()use($h,$context){$h->gateway->handle('management_get',$context,[]);},'AI_PERMISSION_DENIED');mgdeny(function()use($h,$context){$h->gateway->handle('metric_registry_get',$context,[]);},'AI_PERMISSION_DENIED');}
     $context=$h->context;$context['can_configure']=false;$context['_refresh']=function()use($context){return $context;};
