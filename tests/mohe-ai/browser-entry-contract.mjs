@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { webcrypto } from 'node:crypto';
 import { mountMoheAi } from '../../前端代码/shared/mohe-ai/browser-entry.mjs';
+import { DeviceSessions } from '../../前端代码/shared/mohe-ai/device-session.mjs';
 const require = createRequire(import.meta.url);
 const { JSDOM } = require('../../前端代码/admin/node_modules/jsdom');
 const dom = new JSDOM('<!doctype html><body></body>',{url:'https://fixture.test'});
@@ -40,6 +41,7 @@ assert.equal(root.querySelector('option[value="screen_and_xlsx"]').disabled,true
 const input = root.querySelector('textarea'); input.value = '<img src=x onerror=alert(1)>今天现金业绩';
 Array.from(root.querySelectorAll('button')).find(b=>b.textContent==='发送').click(); await flush();
 assert.ok(calls.find(c=>c.path==='/runs').payload.history);
+assert.match(root.textContent, /<img src=x onerror=alert\(1\)>今天现金业绩/);
 assert.ok(calls.filter(c=>c.path==='/bootstrap').every(c=>c.payload.client_session_id===calls.find(r=>r.path==='/runs').payload.client_session_id));
 assert.equal(calls.some(c=>c.path.endsWith('/execute')),false);
 assert.equal(root.querySelector('img'),null);
@@ -143,6 +145,29 @@ const recoveredClosedRoot = document.querySelector('[data-mohe-ai]').shadowRoot;
 recoveredClosedRoot.querySelector('.entry').click(); await flush();
 assert.equal(calls.filter(c=>c.path.endsWith('/cancel')).length,closeBeforePending + 1);
 recoveredClosed();
+// If the browser loses the create acknowledgement entirely, a replacement
+// entry must replay the exact durable admission.  In particular it cannot
+// create a fresh device session: the server receipt is scoped to the original
+// client request and session, and uses that identity to return the same Run.
+window.localStorage.clear(); identityKey = 'fixture:lost-create-ack'; asyncExecution = true; deferCreate = true; finishCreate = null;
+const lostCreateAcknowledgement = mountMoheAi({request}); await flush();
+const lostCreateRoot = document.querySelector('[data-mohe-ai]').shadowRoot;
+lostCreateRoot.querySelector('.entry').click(); await flush();
+lostCreateRoot.querySelector('textarea').value = '丢失接纳回执后必须恢复';
+Array.from(lostCreateRoot.querySelectorAll('button')).find(b=>b.textContent==='发送').click(); await flush();
+const originalCreate = calls.filter(c=>c.path==='/runs').at(-1).payload;
+const lostCreateResolver = finishCreate;
+assert.equal(typeof lostCreateResolver,'function');
+lostCreateAcknowledgement();
+const recoveredCreateAcknowledgement = mountMoheAi({request}); await flush();
+const recoveredCreateRoot = document.querySelector('[data-mohe-ai]').shadowRoot;
+recoveredCreateRoot.querySelector('.entry').click(); await flush();
+const replayedCreate = calls.filter(c=>c.path==='/runs').at(-1).payload;
+assert.equal(replayedCreate.client_request_id,originalCreate.client_request_id);
+assert.equal(replayedCreate.client_session_id,originalCreate.client_session_id);
+assert.notEqual(finishCreate,lostCreateResolver);
+finishCreate({run_id:'r',generation:1,run_delivery_token:'delivery',status:'READY',progress:'已接纳'}); await flush();
+recoveredCreateAcknowledgement(); deferCreate = false;
 // In staged compatibility mode, a page replacement between admission and the
 // synchronous trigger must send that exact durable create input once resumed.
 window.localStorage.clear(); identityKey = 'fixture:compatibility-recovery'; asyncExecution = false; deferCreate = true; finishCreate = null;
@@ -197,4 +222,58 @@ const terminalRounds = JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixtur
 assert.equal(terminalRounds.length,1);
 replacement();
 collectStatusWaiters = false;
-console.log('Browser entry queued create/status polling/cancel/late-admission/recovery-visible-question/expiry/retired-terminal/XSS/capability/admin-no-config: 39 checks PASS');
+// Runtime snapshots written by an earlier client can contain the submitted
+// question only in pending_create. A terminal recovery must still present the
+// complete customer turn, rather than an answer detached from its question.
+window.localStorage.clear(); identityKey = 'fixture:pending-question-recovery'; asyncExecution = true; failStatus = false;
+const recoveryConversation = 'recovery-conversation', recoverySession = 'recovery-session';
+window.localStorage.setItem('mohe-ai:v1:fixture%3Apending-question-recovery', JSON.stringify([{id:recoveryConversation,created_at:Date.now(),rounds:[]}]));
+window.localStorage.setItem('mohe-ai:v1:fixture%3Apending-question-recovery:runtime', JSON.stringify({
+  created_at:Date.now(),session_id:recoverySession,conversation_id:recoveryConversation,
+  run:{run_id:'r',generation:1,run_delivery_token:'delivery',version:1,status:'READY',progress:'已接纳'},
+  pending_create:{client_request_id:'pending-question',question:'恢复后问题必须保留'}
+}));
+const pendingQuestionRecovery = mountMoheAi({request}); await flush();
+const pendingQuestionRecoveryRoot = document.querySelector('[data-mohe-ai]').shadowRoot;
+pendingQuestionRecoveryRoot.querySelector('.entry').click(); await flush();
+assert.match(pendingQuestionRecoveryRoot.textContent,/恢复后问题必须保留/);
+finishStatus({run_id:'r',generation:1,run_delivery_token:'delivery',version:2,status:'COMPLETED',answer:{summary:'恢复后的完整答案',cards:[]}}); await flush();
+const recoveryText = pendingQuestionRecoveryRoot.textContent;
+assert.equal(recoveryText.split('恢复后问题必须保留').length - 1,1);
+assert.equal(recoveryText.split('恢复后的完整答案').length - 1,1);
+pendingQuestionRecovery();
+// The active Run record can lose its local envelope during an old-client
+// remount. The device-only pending marker is the final recovery source and
+// must keep the customer turn intact until the terminal projection is saved.
+window.localStorage.clear(); identityKey = 'fixture:durable-pending-question';
+const durableConversation = 'durable-conversation', durableSession = 'durable-session';
+window.localStorage.setItem('mohe-ai:v1:fixture%3Adurable-pending-question', JSON.stringify([{id:durableConversation,created_at:Date.now(),rounds:[],pending_question:{question:'持久问题不能丢失',created_at:Date.now()}}]));
+window.localStorage.setItem('mohe-ai:v1:fixture%3Adurable-pending-question:runtime', JSON.stringify({
+  created_at:Date.now(),session_id:durableSession,conversation_id:durableConversation,
+  run:{run_id:'r',generation:1,run_delivery_token:'delivery',version:1,status:'READY',progress:'已接纳'}
+}));
+const durablePendingRecovery = mountMoheAi({request}); await flush();
+const durablePendingRecoveryRoot = document.querySelector('[data-mohe-ai]').shadowRoot;
+durablePendingRecoveryRoot.querySelector('.entry').click(); await flush();
+assert.match(durablePendingRecoveryRoot.textContent,/持久问题不能丢失/);
+finishStatus({run_id:'r',generation:1,run_delivery_token:'delivery',version:2,status:'FAILED',message:'当前组合暂不可用'}); await flush();
+const durableText = durablePendingRecoveryRoot.textContent;
+assert.equal(durableText.split('持久问题不能丢失').length - 1,1);
+assert.equal(durableText.split('当前组合暂不可用').length - 1,1);
+assert.equal(JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixture%3Adurable-pending-question'))[0].pending_question,undefined);
+const durableSaved = JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixture%3Adurable-pending-question')).flatMap(s => s.rounds);
+assert.deepEqual(durableSaved.map(r => [r.question,r.answer,r.context_eligible]), [['持久问题不能丢失','当前组合暂不可用',false]]);
+assert.deepEqual((new DeviceSessions(window.localStorage,'fixture:durable-pending-question')).history(durableConversation),[]);
+durablePendingRecovery();
+// Two mounts can observe the same immutable terminal projection.  The second
+// append is intentionally ignored, but it must still discard the recovery
+// marker left by that retired mount.
+window.localStorage.clear();
+const duplicateSessions = new DeviceSessions(window.localStorage, 'fixture:duplicate-pending');
+const duplicateConversation = duplicateSessions.create('duplicate-conversation').id;
+duplicateSessions.setPendingQuestion(duplicateConversation, '重复终态不应留下未完成问题');
+duplicateSessions.append(duplicateConversation, '重复终态不应留下未完成问题', '第一次结果', {}, {run_id:'same-run',generation:1});
+duplicateSessions.setPendingQuestion(duplicateConversation, '重复终态不应留下未完成问题');
+assert.equal(duplicateSessions.append(duplicateConversation, '重复终态不应留下未完成问题', '第一次结果', {}, {run_id:'same-run',generation:1}),false);
+assert.equal(duplicateSessions.pendingQuestion(duplicateConversation),'');
+console.log('Browser entry queued create/status polling/cancel/lost-create-replay/late-admission/recovery-visible-question/expiry/retired-terminal/XSS/capability/admin-no-config: 45 checks PASS');

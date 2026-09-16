@@ -34,14 +34,36 @@ $context=['terminal'=>'merchant','account_id'=>9,'principal_kind'=>'staff'];
 try {
     $method->invoke($gateway,$context,$owner,$run,'execute',$input);
     if (count(glob($directory.'/request-*')?:[])!==1) throw new RuntimeException('initial durable request was not stored exactly once');
-    // The second browser acknowledgement is an idempotent replay. It writes
-    // before the store can answer replay, so the gateway must retire that new
-    // encrypted object immediately instead of retaining it for 24 hours.
-    $method->invoke($gateway,$context,$owner,$run,'execute',$input);
-    if (count(glob($directory.'/request-*')?:[])!==1) throw new RuntimeException('idempotent queue replay leaked an orphaned encrypted request');
+    // A page refresh can repeat the receipt-validated create request after a
+    // worker has already claimed it. The gateway must pass the replay flag all
+    // the way into the durable store, observe the original Run, and retire the
+    // newly written encrypted envelope instead of treating recovery as an
+    // invalid second execution or retaining that duplicate for 24 hours.
+    $runs->queuedExecution($run['run_id']);
+    $runs->startQueuedExecutionWorker($run['run_id'],'fixture-worker',1,'fixture-host');
+    if (!$runs->claim($owner,$run['run_id'],$run['generation'],'claimed-worker-token')) throw new RuntimeException('fixture worker claim failed');
+    $method->invoke($gateway,$context,$owner,$run,'execute',$input,true);
+    if (count(glob($directory.'/request-*')?:[])!==1) throw new RuntimeException('claimed create replay leaked an orphaned encrypted request');
+
+    // HTTP clarification only carries the stable Run identity.  Its encrypted
+    // continuation must take expiry from the server record, rather than
+    // assuming a browser/queue identity projection also carries expires_at.
+    $runs->pauseForClarification($owner,$run['run_id'],$run['generation'],'claimed-worker-token','clarification-fixture');
+    $clarificationInput=[
+        'clarification_id'=>'clarification-fixture',
+        'choices'=>['start_date'=>'2026-09-01','end_date'=>'2026-09-08'],
+        'schema_version'=>'mohe-clarification-v2',
+        'step_revision'=>1,
+        'intent_revision'=>1,
+        'client_submission_id'=>'clarification-submission',
+    ];
+    $method->invoke($gateway,$context,$owner,['run_id'=>$run['run_id'],'generation'=>$run['generation']],'clarify',$clarificationInput);
+    if (count(glob($directory.'/request-*')?:[])!==2) throw new RuntimeException('clarification identity projection did not persist a continuation request');
+    $queued=$runs->queuedExecution($run['run_id']);
+    if (($queued['operation']??null)!=='clarify') throw new RuntimeException('clarification continuation was not durably queued');
 } finally {
     foreach (glob($directory.'/request-*')?:[] as $file) @unlink($file);
     @unlink($directory.'/master.key'); @rmdir($directory);
 }
 
-echo "PASS duplicate acknowledgement retires the unused encrypted request\n";
+echo "PASS async acknowledgement replay and clarification continuation retain only durable encrypted requests\n";

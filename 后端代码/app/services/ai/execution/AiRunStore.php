@@ -127,11 +127,11 @@ final class AiRunStore
      * Run id.  This makes the create response a real acceptance point rather
      * than a promise that a later browser /execute request will arrive.
      */
-    public function queueExecution(array $owner,string $runId,int $generation,string $operation,string $requestRef,string $requestHash): array
+    public function queueExecution(array $owner,string $runId,int $generation,string $operation,string $requestRef,string $requestHash,bool $allowCreateReplay=false): array
     {
         if (!in_array($operation,['execute','clarify'],true) || !preg_match('/^request-[a-f0-9]{48}$/D',$requestRef)
             || !preg_match('/^[a-f0-9]{64}$/D',$requestHash)) throw new RuntimeException('AI_EXECUTION_QUEUE_INVALID');
-        return $this->transaction(function () use($owner,$runId,$generation,$operation,$requestRef,$requestHash) {
+        return $this->transaction(function () use($owner,$runId,$generation,$operation,$requestRef,$requestHash,$allowCreateReplay) {
             $r=$this->read($owner,$runId,$generation); $counts=json_decode($r['counters_json'],true)?:[];
             $expected=$operation==='execute'?'RECEIVED':'WAITING_CLARIFICATION';
             if (($counts['execution_operation']??'')===$operation && ($counts['execution_hash']??'')===$requestHash) {
@@ -145,7 +145,15 @@ final class AiRunStore
                 && in_array($counts['execution_state']??'', ['QUEUED','DISPATCHING'],true)) {
                 throw new RuntimeException('AI_CLARIFICATION_IN_PROGRESS');
             }
-            if ($r['status']!==$expected || $r['worker_token']!=='') throw new RuntimeException('AI_EXECUTION_QUEUE_INVALID');
+            if ($r['status']!==$expected || $r['worker_token']!=='') {
+                // A retried /runs request has already passed receipt/body
+                // idempotency validation in the gateway.  Once its worker has
+                // claimed or terminalized the Run, there is nothing left to
+                // enqueue; returning the current projection lets a refreshed
+                // client resume polling the original task.
+                if ($allowCreateReplay && $operation==='execute') return $this->publicRun($r)+['execution_replayed'=>true];
+                throw new RuntimeException('AI_EXECUTION_QUEUE_INVALID');
+            }
             $counts['execution_operation']=$operation;
             $counts['execution_ref']=$requestRef;
             $counts['execution_hash']=$requestHash;

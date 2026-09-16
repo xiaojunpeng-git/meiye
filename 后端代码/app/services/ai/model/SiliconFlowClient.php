@@ -69,10 +69,23 @@ final class SiliconFlowClient
             ['role'=>'user','content'=>json_encode(['question'=>$safeQuestion,'capabilities'=>$capabilities,'action_codes'=>$actions],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)],
         ];
         if ($repairPredicate!==null) {
-            // A correction asks only for a complete transport shape.  It never
-            // supplies a customer condition, metric, date or scope on behalf
-            // of the model.
-            array_splice($messages,-1,0,[['role'=>'system','content'=>'The previous combined response did not satisfy a required structural contract ('.$repairPredicate.'). Return the complete understanding and intent object again. Preserve the customer meaning, evidence and verified prior context; do not add, remove, broaden or substitute any condition to make the shape fit.']]);
+            // This is one bounded correction of a model-authored envelope. It
+            // must repair both the reported carrier and the rest of the
+            // carrier in the same response: a combined attempt has one
+            // recovery budget, so fixing only one malformed enum can otherwise
+            // turn a sound customer question into a terminal failure.
+            if (AiIntentUnderstandingContract::repairable($repairPredicate)) {
+                $instruction=AiIntentUnderstandingContract::repairInstruction($repairPredicate)
+                    .' Then return the complete intent binding for that unchanged understanding.';
+            } elseif (AiIntentResultContract::repairableFormat($repairPredicate)) {
+                $instruction=self::combinedBindingRepairInstruction($repairPredicate);
+            } else {
+                throw new AiContractException('AI_MODEL_INPUT_INVALID');
+            }
+            // Keep this immediately before the JSON task. It tells the model
+            // how to validate its own protocol fields; it never supplies a
+            // metric, time period, identity, scope or business result.
+            array_splice($messages,-1,0,[['role'=>'system','content'=>$instruction]]);
         }
         $payload=['model'=>$model,'stream'=>false,'max_tokens'=>1800,'temperature'=>0,'response_format'=>['type'=>'json_object'],'messages'=>$messages];
         $decoded=$this->request($payload,$apiKey,$timeoutMs,$checkpoint);
@@ -97,6 +110,30 @@ final class SiliconFlowClient
             return ['understanding'=>$understanding,'intent'=>$raw['intent'],'rank_metric_candidates'=>$rankCandidates,'usage'=>$this->usage($decoded)];
         }
         return ['understanding'=>$understanding,'intent'=>$intent,'usage'=>$this->usage($decoded)];
+    }
+
+    /**
+     * Correction guidance for the combined understanding-and-binding response.
+     *
+     * The choices remain the model's: this method only names the published
+     * transport vocabulary and asks it to revalidate the complete envelope.
+     */
+    private static function combinedBindingRepairInstruction(string $predicate): string
+    {
+        $specific=[
+            'initial_observation_metric_count'=>'If initial_observation is true, it requires two to four independent registered store metric codes. Do not add an arbitrary metric merely to reach that count; instead make the complete binding an ordinary truthful binding when no multi-angle first answer is justified. When the accepted understanding has no specific analytical object, its aggregate carrier is object_kind "store" with an empty object_term; "overall" describes a goal but is not a protocol object_kind.',
+            'initial_observation_query_shape'=>'If initial_observation is true, it requires a broad store summary with no selected object, no ranking and no unresolved metric choice. Otherwise return an ordinary truthful binding.',
+            'bad_value:object_kind'=>'object_kind must be exactly one of store, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization or unknown.',
+            'bad_value:object_relation'=>'object_relation must be analysis or selection.',
+            'bad_value:operation'=>'operation must be summary, trend, ranking, comparison, definition or unknown.',
+            'bad_value:scope'=>'scope must be current_store, authorized or unspecified.',
+            'bad_value:ranking'=>'ranking must be omitted or exactly direction plus limit, using the published values.',
+            'bad_value:periods'=>'periods must contain only complete published period objects that preserve the accepted time meaning.',
+            'bad_value:recommended_initial_answer'=>'recommended_initial_answer must be consistent with the selected model candidate and never accompany an unresolved choice or initial_observation.',
+            'ambiguous_metric_codes_present'=>'Do not mark a selected binding as an unresolved metric choice. Keep a truthful selected candidate only when it preserves the accepted meaning; otherwise leave the choice pending without metric codes.',
+        ];
+        $detail=$specific[$predicate]??'Restore the reported required carrier using the published JSON contract.';
+        return 'The previous combined response failed structural validation at '.$predicate.'. Return one complete understanding and intent object again. Preserve the customer meaning, evidence excerpts and verified prior context exactly; do not add, remove, broaden, substitute or calculate any condition. '.$detail.' Before returning, revalidate the whole intent carrier as well: every required key is present with the right JSON type, object_kind/object_relation/operation/scope use only their published vocabularies, ranking and periods are complete, and initial_observation/recommended_initial_answer/needs_metric_choice are mutually consistent. This is a protocol correction only; do not choose an identity, metric, date, scope or result on behalf of the customer.';
     }
 
     /** Second phase: bind an already accepted understanding to registered capability. */
@@ -126,6 +163,12 @@ final class SiliconFlowClient
                 'missing_metric_codes'=>'The previous response omitted the required metric_codes. Produce the complete intent_result again by understanding the current question together with the verified prior query. If the current question explicitly changes the business fact or metric, use that current meaning. Otherwise preserve the prior metric_codes. Keep every other unchanged condition; do not invent, remove, broaden or substitute any meaning.',
                 'ambiguous_metric_codes_present'=>'The previous response both selected registered metric_codes and marked needs_metric_choice=true. Return one complete binding again. For a clear goal, object and response form, keep one to four compatible professionally useful registered metrics as recommended_initial_answer=true and set needs_metric_choice=false; preserve every accepted condition. Use a pending metric choice only when no useful first reading can be selected, and then return no metric codes. Do not ask the customer to repair this model decision.',
                 'bad_value:recommended_initial_answer'=>'The previous response used recommended_initial_answer inconsistently. Return one complete binding again. A recommended first answer preserves every accepted customer condition and has needs_metric_choice=false. If operation is ranking, metric_codes MUST be a JSON array containing exactly one compatible registered code. Otherwise omit the recommendation label and use the ordinary binding outcome.',
+                'bad_value:object_kind'=>'The previous response used an object_kind outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose object_kind only from store, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization or unknown. Do not select an object identity, metric, period, scope or result.',
+                'bad_value:object_relation'=>'The previous response used an invalid object_relation. Return one complete binding again. Preserve the accepted meaning and every other candidate field; use analysis only for the object being inspected, or selection only for a named object that narrows records. Do not add a filter, identity, metric, period, scope or result.',
+                'bad_value:operation'=>'The previous response used an operation outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose operation only from summary, trend, ranking, comparison, definition or unknown. Do not select a metric, period, scope or result.',
+                'bad_value:scope'=>'The previous response used a scope outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose scope only from current_store, authorized or unspecified. Do not expand authority or select a store.',
+                'bad_value:ranking'=>'The previous response used an invalid ranking carrier. Return one complete binding again. Preserve the accepted meaning and every other candidate field; return ranking exactly as direction plus limit, or omit it when no ranked result is requested. Do not choose a metric, period, scope or result.',
+                'bad_value:periods'=>'The previous response used an invalid periods carrier. Return one complete binding again. Preserve the accepted time meaning and every other candidate field; return only complete published period objects. Do not calculate, shorten, replace or remove a customer-stated time condition.',
                 'provenance_field_not_understood'=>'The previous binding proposed an executable object, response form, period, ranking or scope condition that the accepted understanding did not record. Return one complete binding again. Keep every candidate field neutral unless it is explicitly represented in the accepted understanding. Do not drop an accepted requirement, invent a condition, or alter the accepted meaning to make a binding fit.',
                 'bad_value:result_reference'=>'The previous binding included result_reference without one matching accepted current-request reference, or without a verified prior result. Return one complete binding again. Omit result_reference unless the accepted understanding explicitly contains that same current-request reference. Do not invent a prior result, object, condition or metric.',
             ];

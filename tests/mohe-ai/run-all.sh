@@ -18,6 +18,7 @@ done
 for suite in semantic-guidance registry-execution skill-semantic-projection intent-understanding-contract state-guidance-contract r5-holdout management-core management-gateway management-menu analysis-capability-catalog analysis-object-resolution personnel-analysis query-context context-delta-gateway date-policy; do
     "$php_bin" -d auto_prepend_file="$test_dir/fixture-autoload.php" "$test_dir/$suite.php"
 done
+"$php_bin" "$test_dir/mobile-ai-entry-transport-contract.php"
 
 while IFS= read -r source_file; do
     "$php_bin" -l "$source_file"

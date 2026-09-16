@@ -104,7 +104,9 @@ $normalizedMultipleChoice=AiIntentResultContract::normalize($multipleCandidateCh
 $check($normalizedMultipleChoice['recommended_initial_answer']===true&&count($normalizedMultipleChoice['metric_codes'])===2,
     'compatible model-selected perspectives become one labelled professional first answer, not a customer metric form');
 $singleOverview=$overviewBinding;$singleOverview['metric_codes']=['cash_performance'];$singleOverview['requirement_bindings']=[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']]];
-$reject(static function()use($singleOverview,$overviewQuestion,$overviewUnderstanding){AiIntentResultContract::normalize($singleOverview,['cash_performance','actual_performance','consume_amount'],[],$overviewQuestion,$overviewUnderstanding);},'initial overview cannot silently collapse to one observation');
+$normalizedSingleOverview=AiIntentResultContract::normalize($singleOverview,['cash_performance','actual_performance','consume_amount'],[],$overviewQuestion,$overviewUnderstanding);
+$check($normalizedSingleOverview['initial_observation']===false&&$normalizedSingleOverview['recommended_initial_answer']===true&&$normalizedSingleOverview['metric_codes']===['cash_performance'],
+    'one model-selected broad observation is delivered as a labelled first answer instead of failing or inventing more metrics');
 $badOverview=$overviewBinding;$badOverview['operation']='ranking';$badOverview['ranking']=['direction'=>'top','limit'=>5];
 $reject(static function()use($badOverview,$overviewQuestion,$overviewUnderstanding){AiIntentResultContract::normalize($badOverview,['cash_performance','actual_performance','consume_amount'],[],$overviewQuestion,$overviewUnderstanding);},'initial overview cannot replace a requested response form');
 $check(!AiIntentResultContract::canDeferMetricChoice($overviewUnderstanding,$normalizedOverview,false),'initial overview never falls into the single-metric choice branch');

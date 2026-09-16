@@ -27,6 +27,13 @@ final class AiGatewayServices
 {
     private $runs; private $config; private $private; private $instance; private $views; private $model; private $queryTransaction; private $exports;
     private $management; private $managementDocument; private $managementRevision='source';
+    // The provider's single combined envelope is retained as an optional
+    // optimization, but is not the production default. In live use the
+    // provider repeatedly produced incomplete/duplicate-key envelopes for a
+    // clear broad question. Separate understanding and binding keeps the
+    // same model-owned semantic choices while giving each carrier a smaller,
+    // independently recoverable JSON contract.
+    private const COMBINED_PROVIDER_ENVELOPE_ENABLED=false;
 
     /** Optional injected dependencies are for an isolated integration environment, never request parameters. */
     public function __construct(?AiRunStore $runs = null, ?AiConfigStore $config = null, ?AiPrivateStorage $private = null,
@@ -155,7 +162,12 @@ final class AiGatewayServices
             ][$created['reason']]??'当前使用人数较多，请稍后再问。'];
             $executionMode='compatibility';
             if ($this->asyncExecutionReady()) {
-                $this->queueExecution($context,$owner,$created['run'],'execute',$input);
+                // A lost create response may be retried after its Worker has
+                // already claimed the original Run.  Receipt validation above
+                // proves it is the same request; queueExecution then returns
+                // the current projection instead of treating that recovery as
+                // an invalid second execution.
+                $this->queueExecution($context,$owner,$created['run'],'execute',$input,!empty($created['replayed']));
                 // Redis acknowledgement is not treated as execution proof.
                 // Polling and supervision redeliver a durably queued Run.
                 try { \app\services\ai\execution\AiRunExecutionQueue::push($this->instance,$created['run']['run_id']); } catch (\Throwable $ignored) {}
@@ -227,24 +239,34 @@ final class AiGatewayServices
     }
 
     /** Persist only encrypted request data plus a minimal trusted principal binding. */
-    private function queueExecution(array $context,array $owner,array $run,string $operation,array $input): array
+    private function queueExecution(array $context,array $owner,array $run,string $operation,array $input,bool $allowCreateReplay=false): array
     {
+        // Callers which resume an existing Run deliberately only need its
+        // public identity (run_id + generation).  Retention is server-owned:
+        // never depend on an optional caller projection for the expiry used
+        // to protect the encrypted request envelope.  In particular, a
+        // clarification continuation must be able to be accepted with the
+        // same small identity shape as a Worker queue message.
+        $runId=$this->identifier($run['run_id']??null);
+        $generation=filter_var($run['generation']??null,FILTER_VALIDATE_INT);
+        if ($generation===false || $generation<1) throw new RuntimeException('AI_EXECUTION_QUEUE_INVALID');
+        $storedRun=$this->runs->get($owner,$runId,$generation);
         $projected=AiExecutionEnvelope::project($operation,$input);
         $hash=AiExecutionEnvelope::hash($operation,$projected,$this->private->signingKey());
         if ($operation==='clarify' && ($input['schema_version']??null)==='mohe-clarification-v2') {
             $submissionId=$this->identifier($input['client_submission_id']??null);
-            $state=$this->runs->clarificationSubmissionState($owner,$run['run_id'],(int)$run['generation'],$submissionId,$hash);
+            $state=$this->runs->clarificationSubmissionState($owner,$runId,$generation,$submissionId,$hash);
             // A delayed retry of a previously accepted, rejected, or still
             // running submission must only observe the current Run. It may
             // never replace the durable queue envelope with old choices.
-            if ($state!=='new') return $this->runs->get($owner,$run['run_id'],(int)$run['generation']);
+            if ($state!=='new') return $storedRun;
         }
-        $expires=intdiv((int)$run['expires_at'],1000);
-        $payload=['run_id'=>$run['run_id'],'generation'=>(int)$run['generation'],'operation'=>$operation,'owner'=>$owner,
+        $expires=intdiv((int)$storedRun['expires_at'],1000);
+        $payload=['run_id'=>$runId,'generation'=>$generation,'operation'=>$operation,'owner'=>$owner,
             'binding'=>$this->principalBinding($context),'input'=>$projected];
         $ref=$this->private->put('request',$payload,$expires);
         try {
-            $queued=$this->runs->queueExecution($owner,$run['run_id'],(int)$run['generation'],$operation,$ref,$hash);
+            $queued=$this->runs->queueExecution($owner,$runId,$generation,$operation,$ref,$hash,$allowCreateReplay);
             // The durable store is the idempotency authority. A duplicate
             // browser retry may have written the same envelope just before
             // learning its earlier acknowledgement; it must be deleted now.
@@ -856,7 +878,7 @@ final class AiGatewayServices
         // with a phrase table or a PHP metric default. Injected deterministic
         // models deliberately retain the two-call adapter below so established
         // contract fixtures exercise their original test seam.
-        if ($this->model===null) {
+        if ($this->model===null && self::COMBINED_PROVIDER_ENVELOPE_ENABLED) {
             $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
             $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$summaries,$runtimeSkills],3072));
             $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1800);
@@ -1741,6 +1763,63 @@ final class AiGatewayServices
             || $current['metadata_readiness']!==$evidence['metadata_readiness'] || $current['definitions']!==$evidence['definitions']) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
     }
 
+    /**
+     * A completed Run has already passed the Reader's create-and-replay guard
+     * before its answer was published. Delivering that immutable answer must
+     * verify the signed source snapshot against the account's *current*
+     * authority, but must not turn a transient second Reader replay into an
+     * apparent failed query after the fact.
+     *
+     * Follow-up context deliberately still uses MetricReadViewServices::replay
+     * below: it is a new operation and must rebuild current authority. This
+     * narrow check only protects delivery of the already-completed Run.
+     */
+    private function verifyQueryEvidenceForDelivery(array $context,array $evidence): void
+    {
+        if (!is_array($evidence['query']??null) || !is_string($evidence['view_ref']??null)) {
+            throw new RuntimeException('AI_EVIDENCE_BINDING_INVALID');
+        }
+        $fresh=$this->fresh($context);
+        $binding=\app\services\ai\execution\AiAuthority::reportBinding($fresh,$this->instance,$this->private->signingKey());
+        $view=$this->views->get($evidence['view_ref']);
+        $snapshotBinding=$view['binding']??null;
+        $requestedStores=$evidence['query']['store_ids']??null;
+        if (!is_array($snapshotBinding) || !is_array($requestedStores) || !is_array($view['query']??null)) {
+            throw new RuntimeException('AI_EVIDENCE_BINDING_INVALID');
+        }
+        foreach (['query_shape','metric_codes','start_date','end_date','store_ids','business_filters','ranking'] as $key) {
+            if (($view['query'][$key]??null)!==($evidence['query'][$key]??null)) {
+                throw new RuntimeException('AI_EVIDENCE_BINDING_INVALID');
+            }
+        }
+        $range=function($value): ?array {
+            if ($value===null) return null;
+            if (!is_array($value)) return null;
+            $start=$value['start']??$value['start_date']??null;
+            $end=$value['end']??$value['end_date']??null;
+            return is_string($start)&&is_string($end)?['start'=>$start,'end'=>$end]:null;
+        };
+        if ($range($view['query']['compare_range']??null)!==$range($evidence['query']['compare_range']??null)) {
+            throw new RuntimeException('AI_EVIDENCE_BINDING_INVALID');
+        }
+        // MetricReadViewServices narrows the source binding to the query's
+        // requested stores. An empty stored selection means the full current
+        // authorized range; an explicit selection means that exact subset.
+        // Check the same authority dimensions without invoking a second
+        // Reader replay while rendering an answer that was already published.
+        $expectedStores=$requestedStores===[]?$binding['store_ids']:$requestedStores;
+        $sameAuthority=true;
+        foreach (['instance_id','subject_ref','terminal','tenant_id','permission_version','report_capability_code','scope_provider_code','scope_mode','store_report_authorized','employee_id'] as $key) {
+            if (!array_key_exists($key,$snapshotBinding) || !array_key_exists($key,$binding) || $snapshotBinding[$key]!==$binding[$key]) {
+                $sameAuthority=false; break;
+            }
+        }
+        if (!$sameAuthority || ($snapshotBinding['store_ids']??null)!==$expectedStores
+            || array_diff($expectedStores,$binding['store_ids'])!==[]) {
+            throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
+        }
+    }
+
     private function queryService(array $context,?callable $checkpoint=null): MetricReadViewServices
     {
         return new MetricReadViewServices($this->views,function () use($context): array {
@@ -1887,7 +1966,7 @@ final class AiGatewayServices
         if (in_array($run['status'],['COMPLETED','PARTIAL_SUCCEEDED'],true)) {
             $stored=$this->private->read($run['evidence_ref']); $this->assertBinding($stored,$owner,$run['run_id'],$run['generation']);
             if (isset($stored['definition'])) $this->verifyDefinition($context,$stored['definition']);
-            else $this->queryService($context)->replay([],$stored['query'],$stored['view_ref']);
+            else $this->verifyQueryEvidenceForDelivery($context,$stored);
             $answer=$this->private->read($run['answer_ref']); $this->assertBinding($answer,$owner,$run['run_id'],$run['generation']);
             $result['answer']=$answer['answer'];
             if ($context['terminal']==='platform' && !empty($this->fresh($context)['can_configure'])) {

@@ -16,21 +16,51 @@ export class DeviceSessions {
     let data;
     try { data = JSON.parse(this.storage.getItem(this.key) || '[]'); } catch (_) { data = []; }
     const now = this.clock();
-    const valid = Array.isArray(data) ? data.filter(s => s && typeof s.id === 'string' && Number.isSafeInteger(s.created_at) && s.created_at <= now && s.created_at + RETENTION_MS > now && Array.isArray(s.rounds)).map(s => ({ ...s, rounds: s.rounds.filter(r => r && typeof r.question === 'string' && typeof r.answer === 'string' && Number.isSafeInteger(r.created_at) && r.created_at <= now && r.created_at + RETENTION_MS > now) })) : [];
+    const valid = Array.isArray(data) ? data.filter(s => s && typeof s.id === 'string' && Number.isSafeInteger(s.created_at) && s.created_at <= now && s.created_at + RETENTION_MS > now && Array.isArray(s.rounds)).map(s => {
+      const { pending_question: pendingQuestion, ...session } = s;
+      const rounds = s.rounds.filter(r => r && typeof r.question === 'string' && typeof r.answer === 'string' && Number.isSafeInteger(r.created_at) && r.created_at <= now && r.created_at + RETENTION_MS > now);
+      const pending = pendingQuestion && typeof pendingQuestion.question === 'string' && pendingQuestion.question
+        && Number.isSafeInteger(pendingQuestion.created_at) && pendingQuestion.created_at <= now && pendingQuestion.created_at + RETENTION_MS > now
+        ? { question: pendingQuestion.question, created_at: pendingQuestion.created_at } : null;
+      return { ...session, rounds, ...(pending ? { pending_question: pending } : {}) };
+    }) : [];
     this.save(valid); return valid;
   }
   save(sessions) { this.storage.setItem(this.key, JSON.stringify(sessions)); }
   create(id = newId()) { const sessions = this.load(); const session = { id, created_at: this.clock(), rounds: [] }; sessions.push(session); this.save(sessions); return session; }
-  history(id) { const s = this.load().find(s => s.id === id); return s ? s.rounds.slice(-HISTORY_ROUNDS).map(r => ({ question: r.question, answer: r.answer })) : []; }
+  // A controlled failure belongs in the visible device transcript, but it is
+  // not business context for the next model request.  Otherwise a transport
+  // error such as "please retry" can be mistaken for an earlier answer and
+  // distort an ordinary follow-up.
+  history(id) {
+    const s = this.load().find(s => s.id === id);
+    return s ? s.rounds.filter(r => r.context_eligible !== false).slice(-HISTORY_ROUNDS).map(r => ({ question: r.question, answer: r.answer })) : [];
+  }
   contextRef(id) {
     const session = this.load().find(value => value.id === id);
-    const last = session && session.rounds.length ? session.rounds[session.rounds.length - 1] : null;
+    const last = session && session.rounds.length ? session.rounds.slice().reverse().find(row => row.context_eligible !== false) : null;
     const ref = last && last.presentation && last.presentation.context_ref;
     // Forward an opaque reference only. The server must validate ownership,
     // expiry and whether this new question actually refers to the old answer.
     return typeof ref === 'string' && ref.length > 0 ? ref : null;
   }
-  append(id, question, answer, presentation, delivery = null) {
+  pendingQuestion(id) {
+    const session = this.load().find(value => value.id === id);
+    const pending = session && session.pending_question;
+    return pending && typeof pending.question === 'string' ? pending.question : '';
+  }
+  setPendingQuestion(id, question) {
+    if (typeof question !== 'string' || !question) return false;
+    const sessions = this.load(); const session = sessions.find(value => value.id === id);
+    if (!session) return false;
+    session.pending_question = { question, created_at: this.clock() }; this.save(sessions); return true;
+  }
+  clearPendingQuestion(id) {
+    const sessions = this.load(); const session = sessions.find(value => value.id === id);
+    if (!session || !Object.prototype.hasOwnProperty.call(session, 'pending_question')) return false;
+    delete session.pending_question; this.save(sessions); return true;
+  }
+  append(id, question, answer, presentation, delivery = null, options = {}) {
     const sessions = this.load(); const s = sessions.find(s => s.id === id);
     if (!s) throw new Error('会话已到期，请新建对话。');
     if (typeof question !== 'string' || typeof answer !== 'string') throw new Error('无效对话');
@@ -39,8 +69,15 @@ export class DeviceSessions {
     // completed Run is one conversation round rather than two client events.
     const runId = delivery && typeof delivery.run_id === 'string' ? delivery.run_id : '';
     const generation = delivery && Number.isInteger(delivery.generation) ? delivery.generation : null;
-    if (runId && generation !== null && s.rounds.some(row => row.run_id === runId && row.generation === generation)) return false;
-    s.rounds.push({ question, answer, presentation, ...(runId && generation !== null ? { run_id: runId, generation } : {}), created_at: this.clock() }); this.save(sessions);
+    if (runId && generation !== null && s.rounds.some(row => row.run_id === runId && row.generation === generation)) {
+      // The first observer already saved this terminal turn.  A remounted
+      // observer may still hold its recovery marker; remove that marker here
+      // too so it cannot be mistaken for a later unfinished question.
+      delete s.pending_question; this.save(sessions); return false;
+    }
+    s.rounds.push({ question, answer, presentation,
+      ...(options.contextEligible === false ? { context_eligible: false } : {}),
+      ...(runId && generation !== null ? { run_id: runId, generation } : {}), created_at: this.clock() }); delete s.pending_question; this.save(sessions);
     return true;
   }
   loadRuntime() {

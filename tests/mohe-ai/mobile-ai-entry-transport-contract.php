@@ -16,6 +16,9 @@ $check(strpos($source,"typeof body.message == 'string'")!==false,
 $check(strpos($source,'done({ok:true,data:body})')!==false,
     'AI bootstrap exposes the top-level MobileApiResponse payload to the entry');
 $entry=file_get_contents(dirname(__DIR__,2).'/前端代码/mobile-vue3/src/shared/components/mohe-ai-entry.uvue');
+$bootstrap=file_get_contents(dirname(__DIR__,2).'/前端代码/mobile-vue3/src/app/pages/bootstrap/index.uvue');
+$check(is_string($bootstrap) && strpos($bootstrap,'class="login-command" role="button"')!==false,
+    'the merchant bootstrap login action exposes accessible button semantics for device acceptance');
 $check(is_string($entry) && strpos($entry,'role="button"')!==false && strpos($entry,'aria-label="打开魔核 AI"')!==false,
     'the visible AI entry exposes an accessible interactive control');
 $check(is_string($entry) && strpos($entry,"currentMobilePlatform() === 'MP_WEIXIN'")!==false
@@ -28,6 +31,23 @@ $check(is_string($entry) && strpos($entry,'class="ai-user-turn"')!==false
     && strpos($entry,'class="ai-answer-turn"')!==false
     && strpos($entry,'>魔核 AI</text>')!==false,
     'each retained turn labels the customer question and the AI answer as separate visual blocks');
+$check(is_string($entry) && strpos($entry,'v-if="activeQuestion.length > 0"')!==false
+    && strpos($entry,'showActiveQuestion(pending.question)')!==false
+    && strpos($entry,':scroll-into-view="messageAnchor"')!==false,
+    'a newly submitted customer question is rendered immediately and brought into view instead of waiting for the final answer');
+$check(is_string($entry) && strpos($entry,'},1000)')!==false
+    && strpos($entry,'},1500)')===false,
+    'the mobile status observer has the same one-second terminal-state polling cadence as the browser entry');
+$check(is_string($entry) && strpos($entry,"'/delivery'")!==false
+    && strpos($entry,'client_elapsed_ms:elapsed')!==false
+    && strpos($entry,'Math.min(300000,Math.max(0,Date.now() - startedAt))')!==false,
+    'the mobile entry records a bounded device-observed final-answer delivery duration without sending chat content');
+$check(is_string($entry) && strpos($entry,'client_delivery_started_at:clientDeliveryStartedAt')!==false
+    && strpos($entry,'clientDeliveryStartedAt = Number.isSafeInteger(record.client_delivery_started_at)')!==false,
+    'an active mobile Run preserves delivery timing through page recovery rather than silently resetting it');
+$check(is_string($entry) && strpos($entry,'client_delivery_started_at:stored.client_delivery_started_at')!==false
+    && strpos($entry,'function reportVisibleDeliveryAfterRender(source : any)')!==false,
+    'a late create acknowledgement and the native render turn both preserve an active delivery measurement');
 $check(is_string($entry) && strpos($entry,"runtimeKey = 'mohe-ai:v1:runtime:'")!==false
     && strpos($entry,'function persistActive(retired : boolean = false,claim : boolean = false,replaceResolved : boolean = false)')!==false && strpos($entry,'function resumeActive(record : any)')!==false,
     'an accepted or pending Run survives a panel reload long enough to resume or cancel it');
@@ -75,7 +95,13 @@ $check(is_string($entry) && strpos($entry,'if (r.responseKnown) { guidanceSubmis
     'a known rejected clarification clears its local retry envelope before a later page restore');
 $gateway=file_get_contents(dirname(__DIR__,2).'/后端代码/app/services/ai/AiGatewayServices.php');
 $check(is_string($gateway) && strpos($gateway,'clarificationSubmissionState')!==false
-    && strpos($gateway,"if (\$state!=='new') return \$this->runs->get")!==false,
+    // The gateway intentionally reads the authoritative Run once before it
+    // considers a clarification retry.  A later refactor may return that
+    // local projection rather than issuing the old second get() call; the
+    // contract is that an already-known submission observes that Run and
+    // never writes another encrypted queue envelope.
+    && strpos($gateway,'$storedRun=$this->runs->get')!==false
+    && strpos($gateway,"if (\$state!=='new') return \$storedRun;")!==false,
     'a delayed known clarification observes the current Run instead of replacing a newer queue envelope');
 
 echo 'PASS mobile AI entry transport: '.$checks." checks\n";

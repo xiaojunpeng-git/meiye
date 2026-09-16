@@ -25,9 +25,26 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   // An active Run can outlive a page component.  Keep its submitted wording in
   // the restored transcript before a late terminal projection renders the
   // answer; otherwise a refresh misleadingly shows an answer with no question.
+  function questionFromRecord(record) {
+    if (!record || typeof record !== 'object') return '';
+    // Older runtime snapshots and a late create acknowledgement can carry the
+    // submitted wording only inside the immutable create envelope.  It is the
+    // same customer wording, not a reconstructed or model-generated question.
+    if (typeof record.question === 'string' && record.question) return record.question;
+    return record.pending_create && typeof record.pending_create.question === 'string' ? record.pending_create.question : '';
+  }
+  function persistedQuestion(conversationId = conversation) {
+    return sessions && typeof conversationId === 'string' ? sessions.pendingQuestion(conversationId) : '';
+  }
   function showActiveQuestion() {
-    if (activeQuestionRendered || !question) return;
-    message(question, 'question'); activeQuestionRendered = true;
+    if (!question || !body) return;
+    // Do not rely on an in-memory flag alone: after a route remount, that flag
+    // can describe a previous body while the new panel has no visible question.
+    const previous = body.querySelector('[data-mohe-ai-active-question]');
+    if (previous && previous.textContent === question) { activeQuestionRendered = true; return; }
+    if (previous) previous.remove();
+    const n = el('div', question, 'message question'); n.dataset.moheAiActiveQuestion = 'true';
+    body.appendChild(n); body.scrollTop = body.scrollHeight; activeQuestionRendered = true;
   }
   function validGuidanceSubmission(value) {
     return !!(value && typeof value === 'object' && typeof value.clarification_id === 'string' && value.clarification_id
@@ -71,6 +88,23 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       // A telemetry failure must never turn a rendered answer into a UI error.
     }
   }
+  function reportVisibleDeliveryAfterPaint(source) {
+    const deliver = () => {
+      // A result that is no longer mounted was not visibly delivered by this
+      // page. A replacement entry can report its own visible delivery instead.
+      if (!disposed && run && isTerminal(run.status) && run.run_id === source.run_id && run.generation === source.generation) reportVisibleDelivery(source);
+    };
+    if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(deliver);
+    else setTimeout(deliver, 0);
+  }
+  function ensureQuestionVisible() {
+    if (!question) {
+      const stored = sessions && sessions.loadRuntime();
+      question = questionFromRecord(stored) || (pendingCreate && typeof pendingCreate.question === 'string' ? pendingCreate.question : '') || persistedQuestion();
+    }
+    showActiveQuestion();
+    return question;
+  }
   function sameRequest(value, submitted) {
     return !!(value && value.pending_create && submitted
       && value.pending_create.client_request_id === submitted.client_request_id);
@@ -112,7 +146,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   function abandonUnavailableRun() {
     clearTimeout(pollTimer); run = null; pendingCreate = null; compatibilityExecuting = false;
     clientDeliveryStartedAt=0;
-    clarificationSubmittedId = null; guidanceSubmission = null; clearClarification();
+    clarificationSubmittedId = null; guidanceSubmission = null; clearClarification(); if (sessions) sessions.clearPendingQuestion(conversation);
     cancelling = false; closeRequested = false; clearActive();
     if (send) { send.disabled = false; send.textContent = '发送'; }
     if (progress) progress.textContent = '上一次任务已失效，请重新提问。';
@@ -137,17 +171,32 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       clarificationSubmittedId = null; guidanceSubmission = null; clearClarification();
       clearTimeout(pollTimer); cancelling = false; send.disabled = false;
       if (['COMPLETED', 'PARTIAL_SUCCEEDED'].includes(run.status) && run.answer) {
+        // A recovered terminal projection must render the original customer
+        // wording before its answer. Never leave the customer with an orphaned
+        // answer merely because the page changed while the task was running.
+        const deliveredQuestion = ensureQuestionVisible();
         renderAnswer(run.answer);
-        reportVisibleDelivery(run);
+        reportVisibleDeliveryAfterPaint(run);
         const text = run.answer.summary || (run.answer.cards || []).map(c => `${c.metric_name}：${c.display_value}${c.unit || ''}`).join('\n');
-        try { sessions.append(conversation, question, text, run.answer, run); } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error'); }
+        try { sessions.append(conversation, deliveredQuestion, text, run.answer, run); } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error'); }
       } else {
         // The terminal message is already appended to the conversation.  Do
         // not leave the same failure in the footer status as a second visible
-        // answer; it makes a controlled refusal look like two responses.
+        // answer; it makes a controlled refusal look like two responses. A
+        // refusal is still a complete customer turn, so restore the original
+        // wording before showing it as well.
+        const deliveredQuestion = ensureQuestionVisible();
+        const terminalMessage = run.status === 'CANCELLED' ? '已取消' : run.message || '本次未能完成，请重新提问。';
         progress.textContent = '';
-        message(run.status === 'CANCELLED' ? '已取消' : run.message || '本次未能完成，请重新提问。');
+        message(terminalMessage);
+        // Keep a complete customer-visible turn after refresh.  It is marked
+        // non-contextual so a previous failure never becomes an instruction
+        // or a claimed business fact for the next model request.
+        try { sessions.append(conversation, deliveredQuestion, terminalMessage,
+          { summary: terminalMessage, terminal_status: run.status }, run, { contextEligible: false });
+        } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error'); }
         clientDeliveryStartedAt=0;
+        if (sessions) sessions.clearPendingQuestion(conversation);
       }
       pendingCreate = null; clearActive(); return;
     }
@@ -316,6 +365,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       const contextRef = sessions.contextRef(conversation); if (contextRef) pendingCreate.context_ref = contextRef;
     }
     if (!clientDeliveryStartedAt) clientDeliveryStartedAt=Date.now();
+    if (sessions) sessions.setPendingQuestion(conversation, question);
     input.value = ''; progress.textContent = '正在接纳请求'; run = null; persistActive();
     try {
       const submitted = pendingCreate;
@@ -326,7 +376,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         return;
       }
       if (accepted && accepted.accepted === false) {
-        pendingCreate = null; clientDeliveryStartedAt=0; send.disabled = false; send.textContent = '发送'; progress.textContent = accepted.message || '当前使用人数较多，请稍后再问。'; clearActive(); return;
+        pendingCreate = null; clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); send.disabled = false; send.textContent = '发送'; progress.textContent = accepted.message || '当前使用人数较多，请稍后再问。'; clearActive(); return;
       }
       await update(accepted); persistActive();
       // A page replacement leaves the customer task alive.  An explicit close
@@ -343,14 +393,14 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       progress.textContent = error.responseKnown ? error.message : '请求结果暂未确认。';
       if (run) { persistActive(); clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000); }
       else {
-        if (error.responseKnown) { pendingCreate = null; clientDeliveryStartedAt=0; clearActive(); }
+        if (error.responseKnown) { pendingCreate = null; clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); clearActive(); }
         else persistActive();
         send.disabled = false; send.textContent = error.responseKnown ? '发送' : '重试确认'; input.value = question;
       }
     }
   }
   async function resumeActive(record) {
-    conversation = record.conversation_id; question = typeof record.question === 'string' ? record.question : '';
+    conversation = record.conversation_id; question = questionFromRecord(record) || persistedQuestion(record.conversation_id);
     run = record.run || null; pendingCreate = record.pending_create || null;
     activeQuestionRendered = false; showActiveQuestion();
     clientDeliveryStartedAt=Number.isSafeInteger(record.client_delivery_started_at) && record.client_delivery_started_at>0 ? record.client_delivery_started_at : 0;
@@ -359,7 +409,12 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     closeRequested = record.close_requested === true;
     if (!run) {
       if (!pendingCreate) { clearActive(); return; }
-      pendingCreate.client_session_id = clientSession; pendingCreate.window_token = boot.window_token;
+      // The durable receipt is bound to the original device session.  `open`
+      // has already restored that session before bootstrap; only its short
+      // lived window proof is refreshed.  Reusing the immutable create body
+      // lets the server replay the original Run instead of admitting a second
+      // task after a page refresh.
+      pendingCreate.window_token = boot.window_token;
       input.value = question; persistActive(); await submitQuestion(); return;
     }
     try {

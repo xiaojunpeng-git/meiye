@@ -48,6 +48,10 @@ try {
        if ($repairPredicate===null) unset($intent['unresolved_fragments']);
        return ['intent'=>$complete($intent),'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    }
+   if ($view['question']==='今天消耗业绩对象载体修复') {
+       $intent=['object_kind'=>$repairPredicate===null?'overall':'store','object_term'=>'','operation'=>'summary','metric_codes'=>['consume_amount'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'authorized','unresolved_fragments'=>[]];
+       return ['intent'=>$complete($intent),'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
+   }
    if (in_array($view['question'],['哪些门店业绩好（候选恢复）','哪些门店业绩好（需要澄清）'],true)) return ['intent'=>$complete(['object_kind'=>'store','object_term'=>'','operation'=>'ranking','metric_codes'=>['cash_performance','consume_amount'],'action_codes'=>[],'needs_metric_choice'=>true,'recommended_initial_answer'=>false,'initial_observation'=>false,'ranking'=>['direction'=>'top','limit'=>null],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'authorized','unresolved_fragments'=>[]]),'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    $legacy=(new \app\services\ai\model\AiModelInputProjector())->modelView(['question'=>$view['question'],'history'=>[]]);$signals=$legacy['current']['signals'];$shape='summary';foreach(['trend','ranking','comparison'] as $candidate)if(in_array($candidate,$signals,true))$shape=$candidate;if(in_array('top_5',$signals,true)||in_array('bottom_5',$signals,true))$shape='ranking';$metrics=array_values(array_intersect(['cash_performance','consume_amount'],$signals));$dates=[];if(in_array('TODAY',$signals,true))$dates=[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]];return ['intent'=>$complete(['object_kind'=>'store','object_term'=>'','operation'=>$shape,'metric_codes'=>$metrics,'action_codes'=>[],'needs_metric_choice'=>$metrics===[],'ranking'=>$shape==='ranking'?['direction'=>'top','limit'=>5]:['direction'=>'unspecified','limit'=>null],'periods'=>$dates,'scope'=>'authorized','unresolved_fragments'=>[]]),'usage'=>['input_tokens'=>20,'output_tokens'=>10]];};
  $transaction=function($callback)use(&$queries){$queries++;return $callback(new GroupPerformanceMetricReadServices(function($table){return new GatewayFactFixture($table);},function(){}));};
@@ -72,6 +76,12 @@ try {
  verifyGateway($models===3 && $queries===1,'understanding, binding, independent review and one query');
  $repeat=$gateway->handle('execute',$context,$binding($run)+$input,$run['run_id']);
  verifyGateway($repeat['status']==='COMPLETED' && $models===3 && $queries===1,'idempotent execute no duplicates');
+ $delivered=$gateway->handle('status',$context,$binding($result),$result['run_id']);
+ verifyGateway($delivered['status']==='COMPLETED' && $delivered['answer']['cards'][0]['display_value']==='123',
+     'completed answer delivery validates the immutable signed view without starting another query');
+ $deliveryScope=$auth['store_ids'];$auth['store_ids']=[2];
+ rejectGateway(function()use($gateway,$context,$binding,$result){$gateway->handle('status',$context,$binding($result),$result['run_id']);},'AI_AUTHORIZATION_CHANGED');
+ $auth['store_ids']=$deliveryScope;
  [$rankRecovery,$rankRecoveryInput]=$make('rank-candidate-recovery','哪些门店业绩好（候选恢复）');$modelsBeforeRankRecovery=$models;$queriesBeforeRankRecovery=$queries;
  $rankRecoveryResult=$gateway->handle('execute',$context,$binding($rankRecovery)+$rankRecoveryInput,$rankRecovery['run_id']);
  verifyGateway($rankRecoveryResult['status']==='COMPLETED' && $models===$modelsBeforeRankRecovery+4 && $queries===$queriesBeforeRankRecovery+1,'multiple model candidates for one ranking receive one named professional metric-selection recovery before the Reader query');
@@ -91,6 +101,10 @@ try {
  $repairResult=$gateway->handle('execute',$context,$binding($repairRun)+$repairInput,$repairRun['run_id']);
     verifyGateway($repairResult['status']==='COMPLETED' && $models===$modelsBeforeRepair+3 && $queries===$queriesBeforeRepair+1,'an omitted empty bookkeeping list completes without a model retry or a changed business binding');
     verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($repairRun['run_id'])." AND attempt_code='bind_repair' AND state='SUCCEEDED'")->fetchColumn()===0,'empty bookkeeping omission does not consume the bounded binding-recovery budget');
+    [$objectCarrierRepairRun,$objectCarrierRepairInput]=$make('repair-object-carrier','今天消耗业绩对象载体修复');$modelsBeforeObjectCarrierRepair=$models;$queriesBeforeObjectCarrierRepair=$queries;
+    $objectCarrierRepairResult=$gateway->handle('execute',$context,$binding($objectCarrierRepairRun)+$objectCarrierRepairInput,$objectCarrierRepairRun['run_id']);
+    verifyGateway($objectCarrierRepairResult['status']==='COMPLETED' && $models===$modelsBeforeObjectCarrierRepair+4 && $queries===$queriesBeforeObjectCarrierRepair+1,'an invalid model enum carrier receives one model-owned binding repair without server-side semantic substitution');
+    verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($objectCarrierRepairRun['run_id'])." AND attempt_code='bind_repair' AND state='SUCCEEDED'")->fetchColumn()===1,'enum carrier repair is separately recorded and bounded');
     [$meaningRepairRun,$meaningRepairInput]=$make('repair-meaning','今天消耗业绩理解修复');$modelsBeforeMeaningRepair=$models;$queriesBeforeMeaningRepair=$queries;
     $meaningRepairResult=$gateway->handle('execute',$context,$binding($meaningRepairRun)+$meaningRepairInput,$meaningRepairRun['run_id']);
     verifyGateway($meaningRepairResult['status']==='COMPLETED' && $models===$modelsBeforeMeaningRepair+4 && $queries===$queriesBeforeMeaningRepair+1,'a missing typed meaning receives one model-owned repair before binding');

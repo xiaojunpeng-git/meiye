@@ -35,7 +35,21 @@ foreach (['account_id'=>2,'terminal'=>'platform','conversation_id'=>'other','win
 }
 $otherInstance=new AiRunStore($db,'','fixture.other',$clock);
 rejectsState(function () use ($otherInstance,$owner,$id,$g) { $otherInstance->get($owner,$id,$g); },'AI_RUN_NOT_FOUND');
+$executionRef='request-'.str_repeat('a',48); $executionHash=hash('sha256','initial durable envelope');
+checkState($store->queueExecution($owner,$id,$g,'execute',$executionRef,$executionHash)['status']==='RECEIVED','queue initial execution envelope');
 checkState($store->claim($owner,$id,$g,'worker1'),'claim once');
+// A browser may lose the create response and submit the same receipt while
+// the original worker is already running.  The retry must observe that Run,
+// never turn it into an invalid second execution.
+$replayedExecution=$store->queueExecution($owner,$id,$g,'execute',$executionRef,$executionHash,true);
+checkState(($replayedExecution['execution_replayed']??false)===true && $replayedExecution['status']==='WORKFLOW_EXECUTING','create replay observes claimed run');
+// A refresh can rebuild the private request envelope and therefore its
+// transport hash, after the worker has already claimed the original Run.
+// It is still the same receipt-validated create request: return the current
+// Run for polling instead of dereferencing a second execution.  This covers
+// the replay branch rather than the identical-hash fast path above.
+$replayedClaimed=$store->queueExecution($owner,$id,$g,'execute',$executionRef,hash('sha256','refresh rebuilt envelope'),true);
+checkState(($replayedClaimed['execution_replayed']??false)===true && $replayedClaimed['status']==='WORKFLOW_EXECUTING','create replay accepts claimed run with rebuilt envelope');
 checkState(!$store->claim($owner,$id,$g,'worker2'),'cannot duplicate execute');
 rejectsState(function () use ($store,$owner,$id,$g) { $store->checkpoint($owner,$id,$g,'worker2'); },'AI_WORKER_FENCED');
 $store->assertRequest($owner,$id,$g,$hash);

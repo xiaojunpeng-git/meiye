@@ -16,7 +16,7 @@
 			<input class="field-input" :value="account" placeholder="请输入员工账号" @input="account = $event.detail.value" />
 			<text class="field-label">登录密码</text>
 			<input class="field-input" :value="password" password placeholder="请输入登录密码" @input="password = $event.detail.value" />
-			<view class="login-command" @tap="login"><text>{{ loading ? '正在登录…' : '登录并进入商家端' }}</text></view>
+				<view class="login-command" role="button" :aria-label="loading ? '正在登录' : '登录并进入商家端'" @tap="login"><text>{{ loading ? '正在登录…' : '登录并进入商家端' }}</text></view>
 			<text v-if="message.length > 0" class="message">{{ message }}</text>
 		</view>
 		<view class="status-row">
