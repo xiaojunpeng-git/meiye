@@ -3889,12 +3889,15 @@ function checkoutDebtSummary(line) {
 // 100%，但仍必须是可解释的 0-100 整数；最终金额由后端保存为事实快照。
 function personnelAllocationGroupsAreValid(records = [], weightKey = 'laborWeight') {
   if (!Array.isArray(records) || !records.length) return true
+  const craftsmanAllocation = weightKey === 'laborWeight'
   for (const record of records) {
     const performanceType = String(record?.craftsmanPerformanceType ?? record?.craftsman_performance_type ?? '')
     const isLabor = performanceType === 'labor'
     const weight = Number(record?.[weightKey])
     if (!Number.isInteger(weight) || weight < 0 || weight > 100) return false
-    if (isLabor) {
+    // 服务业绩类型只约束手艺人。员工同时具备销售资格时，不能因为其
+    // 服务类型为“仅手工费”而把合法的销售业绩比例判成无效。
+    if (craftsmanAllocation && isLabor) {
       if (weight !== 0) return false
       continue
     }

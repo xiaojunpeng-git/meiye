@@ -77,9 +77,10 @@ assert.doesNotMatch(component, /if \(item\.role === 'salespeople' && checked\)[\
 assert.match(component, /item\.role === 'salespeople' && checked && !item\.selected/, '售前复选框可直接加入未选中的销售人')
 assert.doesNotMatch(component, /<input :checked="item\.marked" type="checkbox" :disabled="!item\.selected"[^>]*>售前/, '售前复选框不得因未先点整行而禁用')
 assert.doesNotMatch(component, /业绩比例合计必须为 100%/, '普通结账不得再用比例合计拦截')
-assert.match(component, /const commissionSelected = selected\.filter\(\(record\) => craftsmanType\(record\) !== PERFORMANCE_TYPES\.LABOR\)/, '历史调整必须只对可分配消耗业绩的人员校验项目金额')
-assert.match(component, /if \(!commissionSelected\.length\) return true/, '纯手工费人员不得被项目消耗业绩合计拦截')
-assert.match(component, /仅手工费，不分配消耗业绩/, '纯手工费历史调整必须显示准确的分配说明')
+assert.match(component, /function historyAllocationIsValid\(records\)[\s\S]*craftsmanType\(record\) === PERFORMANCE_TYPES\.LABOR && allocationAmountCentsFor\(record\) !== 0/, '历史调整必须拒绝纯手工费人员录入消耗业绩')
+assert.match(component, /function historyAllocationIsValid\(records\)[\s\S]*allocationAmountCentsFor\(record\) % 100 !== 0/, '历史调整的消耗业绩必须按整元保存')
+assert.doesNotMatch(component, /commissionSelected\.reduce/, '历史调整不得再按项目金额强制平衡最终手工录入的消耗业绩')
+assert.match(component, /仅手工费，不记录消耗业绩/, '纯手工费历史调整必须显示准确的分配说明')
 assert.match(component, /if \(props\.showSalespeople\) \{[\s\S]*assignment\.salespeople/, '未启用销售人时确认事件不得携带销售人')
 assert.equal((component.match(/>应用全部人<\/button>/g) || []).length, 1, '应用全部人只能位于底部操作区')
 assert.match(component, /saving: \{ type: Boolean, default: false \}/, '人员弹窗必须接收保存中状态')
@@ -88,6 +89,13 @@ assert.equal((component.match(/v-for="item in selectedRecords"/g) || []).length,
 assert.match(component, /craftsmen: selectedCraftsmenPayload\(\)[\s\S]*salespeople: selectedSalespersonPayload\(\)/, '应用全部必须同时发送当前手艺人和销售人分配')
 assert.match(component, /selectedCraftsmen\.length && selectedSalespeople\.length[\s\S]*\? 'personnel'/, '双角色均已选择时必须提交统一人员意图')
 assert.doesNotMatch(component, /records\.forEach\(\(item\) => \{ item\.selected = true \}\)/, '应用全部人不得全选员工')
+assert.match(component, /function allocationIsValid\(records, role = ''\)[\s\S]*role !== 'craftsmen'/, '仅手工费的零比例限制只能作用于手艺人，不能误伤销售人')
+const applyAllHandler = component.slice(
+  component.indexOf('function applySelectionToAll()'),
+  component.indexOf('\nfunction confirm()', component.indexOf('function applySelectionToAll()'))
+)
+assert.match(applyAllHandler, /if \(mode\.value === 'simple'\)[\s\S]*equalWeights\(craftsmen\.value\)[\s\S]*salespersonDefaultWeights\(salespeople\.value\)/, '简易选择应用全部前必须补齐默认分配')
+assert.doesNotMatch(applyAllHandler, /activateInvalidTab\(/, '应用全部人的校验失败只能原地提示，不能擅自切换到完整分配')
 
 assert.match(workbench, /queryPersonnelCandidates\('service_actual_craftsmen'/, '手艺人必须读取当前门店权威选择源')
 assert.match(workbench, /queryPersonnelCandidates\('sales_performance_assignees'/, '销售人必须读取当前门店权威选择源')
@@ -137,6 +145,7 @@ assert.match(
   '双角色应用全部的请求标识前缀必须在后端登记'
 )
 assert.match(workbench, /const isSavingPersonnelAssignment = ref\(false\)/, '人员写操作必须共享互斥状态')
+assert.match(workbench, /const craftsmanAllocation = weightKey === 'laborWeight'[\s\S]*if \(craftsmanAllocation && isLabor\)/, '工作台提交校验只能将仅手工费限制作用于手艺人')
 assert.match(workbench, /async function confirmPersonnelAssignment[\s\S]*if \(isSavingPersonnelAssignment\.value\) return/, '单行确认必须拒绝重复提交')
 assert.match(workbench, /async function applyPersonnelAssignmentToAll[\s\S]*if \(isSavingPersonnelAssignment\.value\) return/, '应用全部人必须拒绝与确认并发提交')
 assert.match(workbench, /:saving="isSavingPersonnelAssignment"/, '人员弹窗必须展示权威保存中状态')

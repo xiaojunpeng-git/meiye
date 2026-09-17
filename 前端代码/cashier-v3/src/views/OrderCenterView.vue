@@ -1567,7 +1567,7 @@ async function openServiceCraftsmanAdjustment(record) {
     mergeCashierV3PublicVersions([{
       kind: 'service_record', id: String(entry.serviceFactId), version: recordVersion
     }], stateContextId, { requestStateContextId: stateContextId })
-    serviceCraftsmanEntry.value = entry
+    serviceCraftsmanEntry.value = { ...entry, otherCraftsmanCandidates: [] }
     serviceCraftsmanEditorOpen.value = true
   } catch (error) {
     serviceCraftsmanError.value = error instanceof Error && error.message
@@ -1575,6 +1575,54 @@ async function openServiceCraftsmanAdjustment(record) {
       : '手艺人分配读取失败，请刷新后重试。'
   } finally {
     serviceCraftsmanLoading.value = false
+  }
+}
+
+async function searchServiceCraftsmen({ scope, keyword, target } = {}) {
+  if (scope !== 'cashier_other_craftsmen' || target !== 'otherCraftsmen') return
+  const entry = serviceCraftsmanEntry.value
+  const value = String(keyword || '').trim()
+  if (!entry || value.length < 2) return
+  const records = []
+  let page = 1
+  let total = 0
+  try {
+    do {
+      const result = await requestAction('query-query-entities', {
+        entityType: 'person',
+        // 服务记录调整从订单中心发起；服务端仍按当前门店和组织范围判权，
+        // 不接受前端传入的组织或门店范围。
+        selectorEntry: 'order_center',
+        selectorContext: {
+          scope,
+          lineId: `service:${entry.serviceFactId || ''}`,
+          lineRole: 'service',
+          projectId: entry.projectId || '',
+          memberId: '',
+          entitlementInstanceId: '',
+          entitlementSourceDetailId: ''
+        },
+        keyword: value,
+        page,
+        pageSize: 20,
+        silent: true
+      })
+      const data = actionData(result)
+      if (!['success', 'succeeded'].includes(String(actionStatus(result))) || !Array.isArray(data.records)) {
+        throw new Error(result?.result?.message || result?.data?.result?.message || '支援人员搜索失败，请重试。')
+      }
+      records.push(...data.records)
+      total = Math.max(0, Number(data.total) || records.length)
+      page += 1
+    } while (records.length < total && page <= 20)
+    // 编辑窗可能已关闭或已切换到另一条服务记录，不能把旧搜索结果回填。
+    if (serviceCraftsmanEntry.value !== entry) return
+    serviceCraftsmanEntry.value = { ...entry, otherCraftsmanCandidates: records }
+  } catch (error) {
+    if (serviceCraftsmanEntry.value !== entry) return
+    serviceCraftsmanError.value = error instanceof Error && error.message
+      ? error.message
+      : '支援人员搜索失败，请重试。'
   }
 }
 
@@ -2352,7 +2400,9 @@ onBeforeUnmount(() => {
       :show-craftsmen="true"
       :show-salespeople="false"
       :require-craftsmen="true"
+      allow-other-craftsmen
       :craftsmen-candidates="serviceCraftsmanEntry.craftsmenCandidates || []"
+      :other-craftsman-candidates="serviceCraftsmanEntry.otherCraftsmanCandidates || []"
       :selected-craftsmen="serviceCraftsmanEntry.allocations || []"
       :store-id="state.currentStore?.id || state.currentStore?.storeId || 0"
       :allocation-total-amount-cents="serviceCraftsmanEntry.allocationTotalAmountCents || 0"
@@ -2361,6 +2411,7 @@ onBeforeUnmount(() => {
       :saving="serviceCraftsmanSubmitting"
       :load-error="serviceCraftsmanError"
       @close="closeServiceCraftsmanAdjustment"
+      @search-personnel="searchServiceCraftsmen"
       @confirm="prepareServiceCraftsmanReason"
     />
 

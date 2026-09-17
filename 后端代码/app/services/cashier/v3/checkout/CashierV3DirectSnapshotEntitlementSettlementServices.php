@@ -6,6 +6,7 @@ use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3CrossStoreEntitlementPolicy;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3PersonnelIdentity;
 use app\services\cashier\v3\CashierV3ResourceKindCatalog;
 use app\services\cashier\v3\CashierV3ResourceScope;
 use app\services\cashier\v3\CashierV3ResourceVersionServices;
@@ -272,11 +273,16 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             );
 
             foreach ($intents[$lineId]['craftsmanIds'] as $staffId) {
+                $craftsmanSettings = (array)($intents[$lineId]['craftsmanSettingsById'][$staffId] ?? []);
                 $this->addResource(
                     $resources,
                     CashierV3StaffProfileProvider::KIND,
                     (string)$staffId,
-                    $this->staffDiscoveryVersion($dataScope, $staffId),
+                    $this->staffDiscoveryVersion(
+                        $dataScope,
+                        $staffId,
+                        (string)($craftsmanSettings['personnelSource'] ?? 'store')
+                    ),
                     'staff:' . $staffId,
                     $this->staffProfiles->contractVersion()
                 );
@@ -1957,8 +1963,19 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
         ) : 1;
     }
 
-    private function staffDiscoveryVersion(CashierV3DataScopeContext $dataScope, int $staffId): int
+    private function staffDiscoveryVersion(
+        CashierV3DataScopeContext $dataScope,
+        int $staffId,
+        string $personnelSource = 'store'
+    ): int
     {
+        // 支援手艺人使用组织员工的虚拟 staff ID。其没有也不应伪造
+        // system_store_staff 任职；结算门店由当前会话固定，人员身份由
+        // employee + organization_employee 的已锁定选择结果确定。
+        if ($personnelSource === 'other'
+            && CashierV3PersonnelIdentity::isOrganizationStaffId($staffId)) {
+            return $this->organizationStaffDiscoveryVersion($dataScope, $staffId);
+        }
         $staff = $this->row(Db::name('system_store_staff')
             ->where('id', $staffId)
             ->field('id,employee_id,store_id,staff_name,status,is_del,cashier_craftsman_enabled')
@@ -1999,6 +2016,52 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             'employeeTypeCode' => $typeCode,
             'employeeTypeAuthorityVersion' => $typeVersion,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        return $this->staffProfileExpectedVersion($dataScope, $staffId, $fingerprint);
+    }
+
+    private function organizationStaffDiscoveryVersion(
+        CashierV3DataScopeContext $dataScope,
+        int $staffId
+    ): int {
+        $employeeId = CashierV3PersonnelIdentity::employeeIdFromStaffId($staffId);
+        $employee = $employeeId > 0 ? $this->row(Db::name('employee')
+            ->where('id', $employeeId)
+            ->field('id,name,status,is_del,employment_type_code,employment_type_version')
+            ->find()) : [];
+        $typeCode = (string)($employee['employment_type_code'] ?? 'internal');
+        $typeVersion = (int)($employee['employment_type_version'] ?? 1);
+        if (!$employee
+            || (int)($employee['status'] ?? 0) !== 1
+            || (int)($employee['is_del'] ?? 1) !== 0
+            || !in_array($typeCode, CashierV3EntitlementProviderContracts::staffTypes(), true)
+            || $typeVersion <= 0) {
+            throw self::failure('authority_organization_staff_not_active', ['staffId' => $staffId]);
+        }
+        $staffName = trim((string)($employee['name'] ?? ''));
+        if ($staffName === '') {
+            throw self::failure('authority_organization_staff_name_invalid', ['staffId' => $staffId]);
+        }
+        // Keep this fingerprint byte-for-byte aligned with
+        // CashierV3StaffProfileProvider::lockOrganizationProfile().
+        $fingerprint = hash('sha256', json_encode([
+            'staffId' => $staffId,
+            'employeeId' => $employeeId,
+            'storeId' => $dataScope->forcedStoreId(),
+            'staffName' => $staffName,
+            'employeeStatus' => (int)$employee['status'],
+            'employeeIsDel' => (int)$employee['is_del'],
+            'personnelSource' => 'other',
+            'employeeTypeCode' => $typeCode,
+            'employeeTypeAuthorityVersion' => $typeVersion,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        return $this->staffProfileExpectedVersion($dataScope, $staffId, $fingerprint);
+    }
+
+    private function staffProfileExpectedVersion(
+        CashierV3DataScopeContext $dataScope,
+        int $staffId,
+        string $fingerprint
+    ): int {
         $row = $this->row(Db::name(CashierV3StaffProfileProvider::TABLE)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('staff_id', $staffId)

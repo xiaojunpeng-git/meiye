@@ -50,37 +50,58 @@ adjustmentCheck(
     && str_contains($personnelOverlay, "historyAdjustment: { type: Boolean, default: false }")
 );
 adjustmentCheck(
+    'history adjustment retains local selections and supports organisation support craftsmen',
+    str_contains($personnelOverlay, "mergeWithLocalSelections(candidates, selected, craftsmen.value, 'craftsmen')")
+    && str_contains($personnelOverlay, '<div class="personnel-performance-mode" aria-label="分配模式">')
+    && !str_contains($personnelOverlay, 'v-if="!historyAdjustment" class="personnel-performance-mode"')
+    && str_contains($orderView, 'allow-other-craftsmen')
+    && str_contains($orderView, ':other-craftsman-candidates="serviceCraftsmanEntry.otherCraftsmanCandidates || []"')
+    && str_contains($orderView, '@search-personnel="searchServiceCraftsmen"')
+    && str_contains($orderView, "selectorEntry: 'order_center'")
+    && str_contains($adjustment, 'CashierV3PersonnelIdentity::organizationStaffId($employeeId)')
+    && str_contains($adjustment, "'personnelSource' => 'other'")
+    && str_contains($adjustment, '所选支援手艺人已停用或不在当前组织范围内。')
+);
+adjustmentCheck(
+    'checkout-selected support craftsmen remain visible when a zero-value labor fact is intentionally absent',
+    str_contains($adjustment, 'if ($byEmployee === []) return $this->presentSnapshotAllocations($source);')
+    && str_contains($adjustment, 'private function presentSnapshotAllocations(array $source): array')
+    && str_contains($adjustment, 'private function decodeLockedCraftsmenSnapshot(string $json): array')
+    && str_contains($adjustment, "'staff_id', 'employee_id', 'staff_name_snapshot'")
+    && str_contains($adjustment, 'CashierV3CheckoutCraftsmenSnapshot::decode($json)')
+    && str_contains($adjustment, "'personnelSource' => \$sourceKind")
+    && str_contains($adjustment, '不创建用于展示的零值业绩事实')
+);
+adjustmentCheck(
     'reason is collected by a second dialog after assignment confirmation',
     str_contains($orderView, '@confirm="prepareServiceCraftsmanReason"')
-    && str_contains($orderView, 'v-if="serviceCraftsmanPendingAssignment"')
+    && str_contains($orderView, 'serviceCraftsmanPendingAssignment')
     && str_contains($orderView, '填写修改原因')
     && str_contains($orderView, 'maxlength="255"')
 );
 adjustmentCheck(
     'history ratio supports decimals without legacy integer validation',
     str_contains($personnelOverlay, ":step=\"historyAdjustment ? '0.01' : '1'\"")
-    && str_contains($personnelOverlay, '!props.historyAdjustment && !allocationIsValid(selectedCraftsmen)')
+    && str_contains($personnelOverlay, "!props.historyAdjustment && !allocationIsValid(selectedCraftsmen, 'craftsmen')")
     && str_contains($personnelOverlay, '!props.historyAdjustment && ![\'guides\', \'salesManagers\'].includes(role)')
 );
 adjustmentCheck(
-    'amount and ratio are linked and commission allocations keep the full project total',
+    'amount and ratio are linked while final manual allocations are retained',
     str_contains($personnelOverlay, 'syncHistoryAmountFromRatio(item)')
     && str_contains($personnelOverlay, 'syncHistoryRatioFromAmount(item)')
-    && str_contains($adjustment, 'allocationTotalMatches($amountSum, $totalCents, $commissionAllocationCount)')
-    && str_contains($adjustment, '各手艺人的消耗业绩合计必须等于项目核销金额')
+    && !str_contains($adjustment, 'service_adjust_amount_total_mismatch')
+    && !str_contains($personnelOverlay, 'historyAmountIsAutoBalanced(item)')
     && str_contains($personnelOverlay, 'step="1" inputmode="numeric" aria-label="分配消耗业绩"')
     && str_contains($adjustment, 'service_adjust_amount_not_whole_yuan')
-    && str_contains($adjustment, 'service_adjust_total_not_whole_yuan')
-    && str_contains($personnelOverlay, '尾差固定归最后一人')
-    && str_contains($personnelOverlay, 'Math.floor(historyTotalCents.value * ratio / 10000) * 100')
+    && str_contains($adjustment, "'allocationInputMode' => 'manual'")
+    && str_contains($personnelOverlay, '保存时以最终输入金额为准')
 );
 adjustmentCheck(
     'labor-only history adjustment skips consumption allocation and explains it in the UI',
     str_contains($personnelOverlay, 'const historyOnlyLaborFee = computed')
-    && str_contains($personnelOverlay, "if (!commissionSelected.length) return true")
-    && str_contains($personnelOverlay, '仅手工费，不分配消耗业绩')
-    && str_contains($adjustment, '$commissionAllocationCount === 0 ? $amountSum === 0 : $amountSum === $totalCents')
-    && !str_contains($adjustment, 'if ($amountSum !== $totalCents)')
+    && str_contains($personnelOverlay, '仅手工费，不记录消耗业绩')
+    && str_contains($adjustment, "if (\$type === 'labor' && \$amount !== 0)")
+    && !str_contains($adjustment, 'service_adjust_amount_total_mismatch')
 );
 adjustmentCheck(
     'legacy service records fall back to the effective labor-performance net amount',
@@ -140,7 +161,8 @@ adjustmentCheck(
     'adjustment service does not write entitlement order refund or service source tables',
     !preg_match("/Db::name\\('(?:cashier_v3_entitlement_service_fact|cashier_v3_sale_fact|cashier_v3_refund_fact)'\\)\s*->(?:update|delete|insert)/", $adjustment)
     && str_contains($adjustment, '会员权益次数、')
-    && str_contains($adjustment, '销售订单及退款状态均不是本动作的写域')
+    && str_contains($adjustment, '销售订单及')
+    && str_contains($adjustment, '退款状态均不是本动作的写域')
 );
 adjustmentCheck(
     'salary report reads active labor facts and exact half-unit project counts',
@@ -152,15 +174,11 @@ adjustmentCheck(
 
 require_once $reportFile;
 require_once $adjustmentFile;
-$allocationTotalMatches = new ReflectionMethod(
-    \app\services\cashier\v3\order\CashierV3ServiceRecordCraftsmanAdjustmentServices::class,
-    'allocationTotalMatches'
-);
 adjustmentCheck(
-    'labor-only allocation accepts zero while retaining a nonzero project consumption total',
-    $allocationTotalMatches->invoke(null, 0, 11100, 0) === true
-    && $allocationTotalMatches->invoke(null, 11100, 11100, 1) === true
-    && $allocationTotalMatches->invoke(null, 0, 11100, 1) === false
+    'manual final allocation does not use a fixed project-total gate',
+    !str_contains($adjustment, 'allocationTotalMatches(')
+    && !str_contains($adjustment, 'service_adjust_amount_total_mismatch')
+    && str_contains($adjustment, "'allocationInputMode' => 'manual'")
 );
 $reportService = new \app\services\report\StoreUnifiedReportPhaseSixServices();
 $resultMethod = new ReflectionMethod($reportService, 'result');

@@ -19,10 +19,10 @@ $planner = (string)file_get_contents(
 );
 
 $checks = [
-    'labor-only craftsmen may have a zero weight while other performance types still require a valid weight' => strpos(
+    'checkout snapshot accepts a zero craftsman weight without inventing a performance fact' => strpos(
         $snapshot,
-        "if (\$performanceType !== 'labor' && \$laborWeight <= 0) {"
-    ) !== false,
+        "\$laborWeight = self::nonNegativeInt(\$row['laborWeight']);"
+    ) !== false && strpos($snapshot, "\$performanceType !== 'labor' && \$laborWeight <= 0") === false,
     'a zero labor fee remains a valid explicit value' => strpos(
         $snapshot,
         "\$laborFeeCents = \$hasPerformanceFields ? self::nonNegativeInt(\$row['laborFeeCents']) : 0;"
