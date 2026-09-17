@@ -35,7 +35,7 @@ foreach (['inherit','clear'] as $scopeDecision) {
         $periods=[['kind'=>'date_range','start'=>'2026-09-09','end'=>'2026-09-09']];
         $h->understandingOverride=['goal'=>'只修改查询日期','status'=>'understood','requirements'=>[
             ['id'=>'r1','meaning'=>'查询九月九日','fields'=>['periods'],'values'=>['periods'=>$periods],
-                'evidence'=>[['message_id'=>'current','quote'=>'9月9日']]],
+                'evidence'=>[['message_id'=>'current','quote'=>'改成9月9日']]],
         ]];
         $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary',
             'metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,
@@ -46,12 +46,14 @@ foreach (['inherit','clear'] as $scopeDecision) {
         $row=$h->row($answer);
         $after=$row['evidence_ref']?$h->private->read($row['evidence_ref']):[];
         $stores=$after['query']['store_ids']??null;
-        // The ordinary continuation must execute the retained scope. A
-        // fabricated removal must be rejected or require confirmation before
-        // any new Reader call; the server must not reinterpret it silently.
-        $pass=$scopeDecision==='inherit'
-            ? $answer['status']==='COMPLETED' && $stores===[1]
-            : in_array($answer['status'],['FAILED','WAITING_CLARIFICATION'],true) && $h->queries===$queries;
+        // The time-only fast path is entered from the accepted understanding,
+        // not from a binding candidate.  A fabricated scope removal is thus
+        // inert: execution may continue, but it must retain the verified
+        // one-store constraint.  A genuinely stated authorised-scope change
+        // has an additional requirement and is covered below without taking
+        // this fast path.
+        $pass=$answer['status']==='COMPLETED' && $stores===[1]
+            && $h->queries===$queries+1 && $h->models===$models+1;
         if (!$pass) $failures++;
         echo json_encode(['case'=>$scopeDecision,'pass'=>$pass,'source_store_ids'=>[1],
             'status'=>$answer['status'],'reason'=>$answer['reason']??null,'query_store_ids'=>$stores,

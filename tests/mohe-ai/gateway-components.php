@@ -146,13 +146,15 @@ namespace {
     $timeFollowQuestion['recent_questions']=['今天做得最好的技师是谁'];
     $timeFollowQuestion['evidence_messages']=[['id'=>'current','text'=>'那本月呢？'],['id'=>'recent_1','text'=>'今天做得最好的技师是谁']];
     $timeFollowQuestion['prior_query']=['metric_codes'=>['staff_labor_yeji'],'operation'=>'ranking','periods'=>[['kind'=>'relative_days','end_offset_days'=>0,'days'=>1]],'ranking'=>['direction'=>'top','limit'=>1]];
-    $timeOnlyUnderstanding=['goal'=>'查看本月','requirements'=>[['id'=>'r1','meaning'=>'本月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'本月']]]],'status'=>'understood'];
+    $timeOnlyUnderstanding=['goal'=>'查看本月','requirements'=>[['id'=>'r1','meaning'=>'本月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'那本月呢？']]]],'status'=>'understood'];
     $GLOBALS['sfResponse']=$response(json_encode($timeOnlyUnderstanding));
     $client->understandMeaning($timeFollowQuestion,'fixture/model','fixture-key',1000,function(){},$skills);
     $timeFollowWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
     $timeFollowText=implode("\n",array_map(static function($message){return (string)($message['content']??'');},$timeFollowWire['messages']));
     check(strpos($timeFollowText,'Do not restate a verified prior measurement as a current metric_codes requirement')!==false,
         'a verified continuation foregrounds the generic current-evidence rule before the provider request');
+    check(strpos($timeFollowText,'quote the entire current message as its current evidence')!==false,
+        'a time-only continuation is instructed to provide the full-message proof needed by the fast path');
     check(strpos(\app\services\ai\contract\AiIntentResultContract::modelInstruction(false),'recommended_initial_answer')!==false,
         'binding contract permits a model-owned professional first answer without a phrase-specific server rule');
     check(\app\services\ai\contract\AiIntentResultContract::repairableFormat('context_constraint_without_source:business_filters'),
@@ -192,7 +194,7 @@ namespace {
             'has_object_selection'=>false,'has_store_scope_restriction'=>false,'presentation_origin'=>'customer_or_verified_context'],
         'has_unresolved_conditions'=>false,'server_resolved_fields'=>[],'reference_date'=>'2026-09-10'];
     $timeOnlyUnderstanding=['goal'=>'查看上个月','status'=>'understood','requirements'=>[['id'=>'r1','meaning'=>'上个月','fields'=>['periods'],
-        'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>-1]]],'evidence'=>[['message_id'=>'current','quote'=>'上个月']]]]];
+        'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>-1]]],'evidence'=>[['message_id'=>'current','quote'=>'上个月呢？']]]]];
     $timeOnlyCapabilities=array_merge($multiObjectCapabilities,[['metric_code'=>'project_sales_amount','name'=>'项目销售额','summary'=>'项目销售金额',
         'object_contracts'=>[['object_kind'=>'project','action_codes'=>['sale']]]]]);
     $timeOnlyIntent=['object_kind'=>'project','object_term'=>'','operation'=>'ranking','metric_codes'=>['project_sales_amount'],'action_codes'=>[],

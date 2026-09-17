@@ -50,7 +50,7 @@ final class SiliconFlowClient
             // Put this relationship rule immediately before the task payload.
             // It is deliberately about the typed context contract, never a
             // phrase, metric, report or customer-specific fallback.
-            array_splice($messages,-1,0,[['role'=>'system','content'=>'For a continuation, record only meaning actually expressed in the current message. Do not restate a verified prior measurement as a current metric_codes requirement without current evidence. If the current turn changes only time, return only a periods requirement with complete current-message evidence; context later retains the prior measurement.']]);
+            array_splice($messages,-1,0,[['role'=>'system','content'=>'For a continuation, record only meaning actually expressed in the current message. Do not restate a verified prior measurement as a current metric_codes requirement without current evidence. If the current turn changes only time, return only a periods requirement and quote the entire current message as its current evidence; context later retains the prior measurement.']]);
         }
         if ($repairPredicate!==null) {
             if (!AiIntentUnderstandingContract::repairable($repairPredicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');

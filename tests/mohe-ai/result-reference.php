@@ -111,7 +111,7 @@ try {
     $h->understandingOverride=['goal'=>'只修改为今天','status'=>'understood','requirements'=>[
         ['id'=>'r1','meaning'=>'将时间修改为今天','fields'=>['periods'],
             'values'=>['periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]]],
-            'evidence'=>[['message_id'=>'current','quote'=>'今天']]],
+            'evidence'=>[['message_id'=>'current','quote'=>'改成今天']]],
     ]];
     // This is a deliberately malformed binding response: the customer only
     // changed time, but the binding attempts to narrow the old ranking to its
@@ -119,9 +119,20 @@ try {
     $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'ranking','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,
         'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'unspecified',
         'context_delta'=>$delta,'result_reference'=>['group'=>'top','ordinal'=>1],'unresolved_fragments'=>[]];
-    $queries=$h->queries;$blocked=$h->start('改成今天',$source['answer']['context_ref']);
-    if (($blocked['status']??null)!=='FAILED' || ($blocked['reason']??null)!=='AI_MODEL_INTENT_CONTRACT_INVALID' || $h->queries!==$queries) {
-        throw new RuntimeException('unrequested result reference was not stopped before query');
+    // A verified time-only fast path deliberately does not call the binding
+    // model, so this injected binding candidate is never admitted.  The
+    // secure outcome is a normal inherited query without a result-row
+    // selection, not a synthetic failure merely because the unused fixture
+    // carried one.  Compare only executable constraints; the period itself
+    // is expected to change.
+    $sourceEvidence=$h->private->read($h->row($source)['evidence_ref']);
+    $queries=$h->queries;$models=$h->models;$continued=$h->start('改成今天',$source['answer']['context_ref']);
+    $continuedEvidence=$h->private->read($h->row($continued)['evidence_ref']);
+    if (($continued['status']??null)!=='COMPLETED' || $h->queries!==$queries+1 || $h->models!==$models+1
+        || ($continuedEvidence['query']['store_ids']??null)!==($sourceEvidence['query']['store_ids']??null)
+        || ($continuedEvidence['query']['business_filters']??null)!==($sourceEvidence['query']['business_filters']??null)
+        || isset($continuedEvidence['query']['business_filters']['selection_ref'])) {
+        throw new RuntimeException('time-only fast path accepted an unused result reference');
     }
-    echo "PASS result reference requires accepted current-request evidence\n";
+    echo "PASS time-only fast path ignores an unused result reference\n";
 } finally { if ($h) $h->close(); }

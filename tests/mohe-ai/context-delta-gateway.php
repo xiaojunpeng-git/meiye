@@ -66,7 +66,7 @@ try {
     $sameMonthHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'date_range','start'=>$monthStart,'end'=>$monthEnd]],'scope'=>'authorized','unresolved_fragments'=>[]];
     $sameMonthSource=$sameMonthHarness->start($monthStart.'到'.$monthEnd.'现金业绩多少？');
     $sameMonthHarness->understandingOverride=['goal'=>'继续查看本月','status'=>'understood','requirements'=>[
-        ['id'=>'r1','meaning'=>'继续查看本月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'本月']]],
+        ['id'=>'r1','meaning'=>'继续查看本月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'继续看本月']]],
     ]];
     $sameMonthHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'unspecified','context_delta'=>cdgDelta(),'unresolved_fragments'=>[]];
     $sameMonthFollow=$sameMonthHarness->start('继续看本月',$sameMonthSource['answer']['context_ref']);
@@ -250,7 +250,7 @@ try {
     // The accepted month is carried through the binding boundary, while only
     // the genuinely pending presentation decision is shown to the customer.
     $contractHarness->understandingOverride=['goal'=>'改查这个月','status'=>'understood','requirements'=>[
-        ['id'=>'r1','meaning'=>'改查这个月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'这个月']]],
+        ['id'=>'r1','meaning'=>'改查这个月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'这个月呢？']]],
     ]];
     $pendingMismatch=cdgDelta();$pendingMismatch['periods']='replace';$pendingMismatch['operation']='pending';
     $contractHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'unknown','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'date_range','start'=>'2026-09-10','end'=>'2026-09-10']],'scope'=>'unspecified','context_delta'=>$pendingMismatch,'unresolved_fragments'=>[]];

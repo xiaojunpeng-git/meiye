@@ -118,6 +118,27 @@ final class AiIntentUnderstandingContract
             $ids[$requirement['id']] = true;
             $normalized[] = ['id' => $requirement['id'], 'meaning' => trim($requirement['meaning']), 'fields' => array_values($requirement['fields']), 'values'=>$values, 'evidence' => $located];
         }
+        // The period-only reuse path intentionally skips the second model
+        // binding pass. It is safe only when the understanding model anchors
+        // that *entire* current message as a time-only continuation. A short
+        // excerpt such as just the time word could otherwise hide a new
+        // business fact later in the same sentence and replay the verified
+        // predecessor query. This checks evidence coverage, not a vocabulary,
+        // metric name, report, or customer-specific phrase.
+        if (($safeQuestion['prior_query'] ?? null) !== null && count($normalized) === 1
+            && $normalized[0]['fields'] === ['periods']) {
+            $current = $messages['current'] ?? '';
+            $covered = false;
+            foreach ($normalized[0]['evidence'] as $evidence) {
+                if (($evidence['message_id'] ?? null) === 'current'
+                    && ($evidence['start'] ?? null) === 0
+                    && ($evidence['quote'] ?? null) === $current) {
+                    $covered = true;
+                    break;
+                }
+            }
+            if (!$covered) self::fail('period_only_coverage');
+        }
         return ['goal' => trim($value['goal']), 'requirements' => $normalized, 'status' => $value['status']];
     }
 
@@ -136,13 +157,16 @@ final class AiIntentUnderstandingContract
     public static function repairable(?string $predicate): bool
     {
         return is_string($predicate) && $predicate !== ''
-            && preg_match('/^(shape|goal|status|requirements|message_projection|evidence_not_unique|values(?::[a-z_]+)?)$/D',$predicate) === 1;
+            && preg_match('/^(shape|goal|status|requirements|message_projection|evidence_not_unique|period_only_coverage|values(?::[a-z_]+)?)$/D',$predicate) === 1;
     }
 
     /** A structural correction never interprets a customer phrase in PHP. */
     public static function repairInstruction(string $predicate): string
     {
         if (!self::repairable($predicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+        if ($predicate === 'period_only_coverage') {
+            return 'The previous response called this a time-only continuation but its evidence did not cover the complete current customer message. Re-read the whole current message. Return only one periods requirement only when the whole message changes no business fact, object, result form, range, ranking, scope, condition or measurement. Otherwise preserve every additional current meaning with its own requirement and current-message evidence. Do not invent, bind or select a metric.';
+        }
         if (strpos($predicate, 'values:') === 0) {
             $key = substr($predicate, strlen('values:'));
             if ($key === 'missing_typed') {

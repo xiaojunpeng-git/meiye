@@ -111,6 +111,19 @@ final class AiAnswerRenderer
         }
         if ($shape === 'ranking' && $rows) {
             $first = $rows[0];
+            // A short ranking is commonly a continuation such as “第二名
+            // 呢？”.  State every already verified row instead of leading
+            // with the first one and making the customer scan a table for the
+            // requested result.  This is deliberately based only on the
+            // generic read-view rows: no metric, object or Chinese phrase is
+            // special-cased.  Longer rankings remain table-first to keep the
+            // answer readable on mobile.
+            if (count($rows) > 1 && count($rows) <= 3) {
+                return implode('；', array_map(static function (array $row): string {
+                    return ($row['rank'] ?? '首位') . '是' . $row['label'] . '，'
+                        . $row['metric'] . '为' . $row['value'] . $row['unit'];
+                }, $rows)) . '。';
+            }
             return ($first['rank'] ?? '首位') . '是' . $first['label'] . '，' . $first['metric'] . '为' . $first['value'] . $first['unit'] . '。';
         }
         if ($shape === 'trend' && $rows) {

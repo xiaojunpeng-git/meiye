@@ -3,6 +3,17 @@ import { GUIDANCE_SCHEMA, validateClarification, clarificationKey, clarification
 
 // Framework-neutral, shadow-scoped adapter. No business arithmetic or HTML injection.
 export function mountMoheAi({ request, storage = window.localStorage, documentRef = document, entryLeft = '0px', panelLeft = '12px' }) {
+  // The platform shell can briefly retain the previous route component while
+  // mounting its replacement.  Two entries would share one device runtime:
+  // a late terminal projection from the retired entry could otherwise clear
+  // the replacement entry's newer Run.  There is intentionally one browser
+  // entry per document; dispose the previous owner first so it persists any
+  // active Run and stops its polling before the replacement starts.
+  const previousHost = documentRef.querySelector('[data-mohe-ai]');
+  if (previousHost) {
+    if (typeof previousHost.__moheAiDispose === 'function') previousHost.__moheAiDispose();
+    else previousHost.remove();
+  }
   const host = documentRef.createElement('div'); host.dataset.moheAi = 'entry';
   // A terminal with a persistent sidebar can reserve that width while the
   // entry remains fixed at the left-middle of the actual work area.
@@ -79,7 +90,18 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       guidance_submission: guidanceSubmission, client_delivery_started_at: clientDeliveryStartedAt,
       run, pending_create: pendingCreate });
   }
-  function clearActive() { if (sessions) sessions.clearRuntime(); }
+  function activeRuntimeBelongsToThisEntry() {
+    if (!sessions) return false;
+    const current = sessions.loadRuntime();
+    if (!current || current.session_id !== clientSession || current.conversation_id !== conversation) return false;
+    if (run && current.run) return current.run.run_id === run.run_id && current.run.generation === run.generation;
+    return !!(pendingCreate && current.pending_create
+      && current.pending_create.client_request_id === pendingCreate.client_request_id);
+  }
+  // A retired entry is allowed to finish rendering its own terminal Run, but
+  // must never erase another entry's newer recovery record.  The runtime is
+  // shared only as a handoff mechanism, so removal is ownership-checked.
+  function clearActive() { if (activeRuntimeBelongsToThisEntry()) sessions.clearRuntime(); }
   function deliveryBinding(source) { return { client_session_id: clientSession, run_delivery_token: source.run_delivery_token, generation: source.generation }; }
   function reportVisibleDelivery(source) {
     const startedAt=clientDeliveryStartedAt;
@@ -154,10 +176,10 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     return !!(error && error.responseKnown && ['AI_RUN_EXPIRED','AI_RUN_NOT_FOUND'].includes(error.reason));
   }
   function abandonUnavailableRun() {
-    clearTimeout(pollTimer); run = null; pendingCreate = null; compatibilityExecuting = false;
+    clearTimeout(pollTimer); clearActive(); run = null; pendingCreate = null; compatibilityExecuting = false;
     clientDeliveryStartedAt=0;
     clarificationSubmittedId = null; guidanceSubmission = null; clearClarification(); if (sessions) sessions.clearPendingQuestion(conversation);
-    cancelling = false; closeRequested = false; clearActive();
+    cancelling = false; closeRequested = false;
     if (send) { send.disabled = false; send.textContent = '发送'; }
     if (progress) progress.textContent = '上一次任务已失效，请重新提问。';
   }
@@ -388,7 +410,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         return;
       }
       if (accepted && accepted.accepted === false) {
-        pendingCreate = null; clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); send.disabled = false; send.textContent = '发送'; progress.textContent = accepted.message || '当前使用人数较多，请稍后再问。'; clearActive(); return;
+        clearActive(); pendingCreate = null; clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); send.disabled = false; send.textContent = '发送'; progress.textContent = accepted.message || '当前使用人数较多，请稍后再问。'; return;
       }
       await update(accepted); persistActive();
       // A page replacement leaves the customer task alive.  An explicit close
@@ -405,7 +427,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       progress.textContent = error.responseKnown ? error.message : '请求结果暂未确认。';
       if (run) { persistActive(); clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000); }
       else {
-        if (error.responseKnown) { pendingCreate = null; clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); clearActive(); }
+        if (error.responseKnown) { clearActive(); pendingCreate = null; clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); }
         else persistActive();
         send.disabled = false; send.textContent = error.responseKnown ? '发送' : '重试确认'; input.value = question;
       }
@@ -507,5 +529,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   // its signed delivery session and continue polling. The visible buttons are
   // the only cancellation path.
   const unload = () => { persistActive(); }; window.addEventListener('pagehide', unload); window.addEventListener('beforeunload', unload);
-  return () => { persistActive(); disposed = true; clearTimeout(pollTimer); clearInterval(expiryTimer); window.removeEventListener('pagehide', unload); window.removeEventListener('beforeunload', unload); host.remove(); };
+  const dispose = () => { persistActive(); disposed = true; clearTimeout(pollTimer); clearInterval(expiryTimer); window.removeEventListener('pagehide', unload); window.removeEventListener('beforeunload', unload); host.remove(); };
+  host.__moheAiDispose = dispose;
+  return dispose;
 }

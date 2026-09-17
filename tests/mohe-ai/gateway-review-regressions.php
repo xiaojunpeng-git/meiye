@@ -48,6 +48,14 @@ foreach (['trend','ranking'] as $shape) {
     $projected=$renderer->render($cashView);
     $check($projected['table']['rows'][0]['metric']==='现金业绩' && $projected['table']['rows'][0]['value']==='151','cash '.$shape.' never mislabeled consumption');
 }
+$cashView['query']['query_shape']='ranking';
+$cashView['results']=[['metric_code'=>'cash_performance','period'=>'current','rows'=>['top'=>[
+    ['store_id'=>1,'store_name'=>'甲店','amount_cents'=>15050],
+    ['store_id'=>2,'store_name'=>'乙店','amount_cents'=>12000],
+]]]];
+$shortRanking=$renderer->render($cashView);
+$check(strpos($shortRanking['summary'],'前1是甲店，现金业绩为151元；前2是乙店，现金业绩为120元。')===0,
+    'a short verified ranking names every displayed ordinal instead of hiding a follow-up target behind the first row');
 $cashView['query']['query_shape']='summary';
 $cashView['results']=[['metric_code'=>'actual_performance','period'=>'current','amount_cents'=>15050,'storage_unit'=>'fen']];
 $actual=$renderer->render($cashView);
