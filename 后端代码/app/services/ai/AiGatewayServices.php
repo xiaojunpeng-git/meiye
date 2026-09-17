@@ -898,6 +898,13 @@ final class AiGatewayServices
         // reduced to non-sensitive query meaning before the model sees it.
         $sourceContext=isset($body['context_ref'])?$this->restoreContext($context,$owner,$body['context_ref']):null;
         $sourceQuery=$sourceContext['query']??null;
+        if ($sourceQuery!==null) {
+            // The signed context is restored and replayed under current
+            // authority before this point.  It is therefore the only prior
+            // query carrier needed for this follow-up; do not resend the
+            // browser's stale local-question excerpt to the model.
+            $safe['outbound']=(new \app\services\ai\model\AiSafeQuestionProjector())->forVerifiedContext($safe['outbound']);
+        }
         $safe['outbound']['prior_query']=$sourceQuery===null?null:IntentContextMerger::modelView(
             $sourceQuery,(array)($sourceContext['meaning']??[])
         );

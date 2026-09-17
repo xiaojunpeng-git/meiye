@@ -42,13 +42,21 @@ try {
     $wrongMonthDelta=cdgDelta();
     $monthHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'unspecified','context_delta'=>$wrongMonthDelta,'unresolved_fragments'=>[]];
     $queriesBeforeMonthFollow=$monthHarness->queries;$modelsBeforeMonthFollow=$monthHarness->models;
-    $wrongMonthFollow=$monthHarness->start('这个月呢？',$monthSource['answer']['context_ref']);
+    $monthHarness->modelInputs=[];
+    $oldConversation=[
+        ['question'=>'昨天的历史提问','answer'=>[]],
+        ['question'=>'更早的历史提问','answer'=>[]],
+    ];
+    $wrongMonthFollow=$monthHarness->start('这个月呢？',$monthSource['answer']['context_ref'],$oldConversation);
     $wrongMonthEvidence=$monthHarness->private->read($monthHarness->row($wrongMonthFollow)['evidence_ref']);
     cdgCheck($wrongMonthFollow['status']==='COMPLETED'&&$monthHarness->queries===$queriesBeforeMonthFollow+1
         &&($wrongMonthEvidence['query']['start_date']??'')===substr((string)($wrongMonthEvidence['query']['end_date']??''),0,7).'-01',
         'a typed period-only continuation reuses the signed binding instead of risking an inherited-date binding error');
     cdgCheck($monthHarness->models===$modelsBeforeMonthFollow+1,
         'a typed period-only continuation performs understanding but skips the binding-model call');
+    cdgCheck(($monthHarness->modelInputs[0]['recent_questions']??null)===[]
+        &&($monthHarness->modelInputs[0]['evidence_messages']??null)===[['id'=>'current','text'=>'这个月呢？']],
+        'a signed follow-up keeps only current-message evidence and does not resend stale local history');
     $correctMonthDelta=cdgDelta();$correctMonthDelta['periods']='replace';
     $monthHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'unspecified','context_delta'=>$correctMonthDelta,'unresolved_fragments'=>[]];
     $monthFollow=$monthHarness->start('这个月呢？',$monthSource['answer']['context_ref']);

@@ -57,6 +57,27 @@ final class AiSafeQuestionProjector
         return $this->projectWithReferences($question,$configuration,$privateLabels,$references);
     }
 
+    /**
+     * A signed prior-query reference is a stronger, server-verified carrier
+     * for a continuation than locally retained conversational wording.  Once
+     * that reference has been restored, old de-identified questions cannot
+     * add authority or resolve a condition outside the signed query; sending
+     * them again only makes the understanding request larger and lets stale
+     * wording compete with the current turn.  Keep the current evidence
+     * message because the understanding contract still grounds every new
+     * requirement in the actual customer message.
+     */
+    public function forVerifiedContext(array $outbound): array
+    {
+        if (($outbound['schema_version']??null)!=='sanitized-question-v2'
+            || !is_string($outbound['question']??null) || $outbound['question']==='') {
+            throw new \RuntimeException('AI_MODEL_INPUT_INVALID');
+        }
+        $outbound['recent_questions']=[];
+        $outbound['evidence_messages']=[['id'=>'current','text'=>$outbound['question']]];
+        return $outbound;
+    }
+
     private function projectWithReferences(string $question,array $configuration,array $privateLabels,array &$references): array
     {
         if (!AiConfigStore::allowsSanitizedQuestion($configuration)) throw new \RuntimeException('AI_EXTERNAL_SCOPE_REQUIRED');
