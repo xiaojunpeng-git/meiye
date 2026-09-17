@@ -1395,6 +1395,20 @@ final class AiGatewayServices
                 $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_dimension_shape_unavailable');
                 throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
             }
+            // A short object-only continuation may legitimately retain the
+            // preceding metric. If that signed metric cannot serve the newly
+            // accepted registered dimension, do not execute it, silently
+            // substitute another one, or misreport a system mismatch as a
+            // failed customer query. The existing dimension planner presents
+            // only the new dimension's registry-backed metrics. Current-turn
+            // metric selections remain strict and are never discarded here.
+            $selectedMetrics=(array)($intent['metric_codes']??[]);
+            $inheritsMetric=(($intent['context_delta']['metric_codes']??null)==='inherit');
+            if ($inheritsMetric && count($selectedMetrics)===1 && !isset($dimensionMetrics[$selectedMetrics[0]])) {
+                $intent['metric_codes']=[];
+                $intent['needs_metric_choice']=true;
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_dimension_inherited_metric_incompatible');
+            }
             if ($intent['operation']!=='threshold_count') return $finish((new \app\services\ai\execution\AiDimensionGuidancePlanner())->start(
                 $intent['object_kind'],$intent,$projection,$dimensionMetrics,$body['output_format'],$today
             ));
@@ -1505,20 +1519,30 @@ final class AiGatewayServices
             $kind=$requirement['values']['object_kind']??null;
             if (is_string($kind) && $kind!=='') $objectKinds[$kind]=true;
         }
-        // The personnel reader is the only current object-specific catalogue
-        // with a direct person fact grain. Other declared dimensions retain
-        // the full capability list until their own registered reader exists.
-        if (array_keys($objectKinds)!==['person']) return $summaries;
-        $person=[];
+        $objectKinds=array_keys($objectKinds);
+        sort($objectKinds,SORT_STRING);
+        // A store-level question can use every store-capable metric. For one
+        // independently understood analytical dimension, however, bind only
+        // candidates whose lower-layer contract explicitly declares that
+        // dimension. The generic dimension Reader now owns those registered
+        // dimensions; this projection must not keep a historical person-only
+        // exception or let an incompatible metric enter a later follow-up.
+        if (count($objectKinds)!==1 || $objectKinds[0]==='store') return $summaries;
+        $objectKind=$objectKinds[0];
+        $matching=[];
         foreach ($summaries as $summary) {
             foreach ((array)($summary['object_contracts']??[]) as $contract) {
-                if (($contract['object_kind']??null)==='person') {
-                    $person[]=$summary;
+                if (($contract['object_kind']??null)===$objectKind) {
+                    $matching[]=$summary;
                     break;
                 }
             }
         }
-        return $person?:$summaries;
+        // No match means the source registry has not registered this object
+        // relation. Preserve the complete catalogue so the normal controlled
+        // capability boundary can explain the gap; never turn it into a PHP
+        // phrase-to-metric fallback.
+        return $matching?:$summaries;
     }
 
     /**

@@ -18,7 +18,7 @@ try {
     cmrCheck(($source['status']??null)==='COMPLETED'&&isset($source['answer']['context_ref']),'verified source exists');
 
     $h->understandingOverride=['goal'=>'查看本次另一项已登记金额','status'=>'understood','requirements'=>[
-        ['id'=>'r1','meaning'=>'查看另一项金额','fields'=>['metric_codes'],'values'=>['metric_terms'=>['另一项金额']],
+        ['id'=>'r1','meaning'=>'查看另一项金额','fields'=>['metric_codes'],'values'=>['metric_terms'=>['另一项已登记金额']],
             'evidence'=>[['message_id'=>'current','quote'=>'另一项已登记金额']]],
     ]];
     // The first binding mechanically retains its signed source metric. The

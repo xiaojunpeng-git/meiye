@@ -86,6 +86,35 @@ try {
     cdgCheck($directTopFive['status']==='COMPLETED'&&($directTopFiveEvidence['query']['ranking']??null)===['direction'=>'top','limit'=>5],'direct ranking-count follow-up retains the verified direction before execution');
     $directHarness->close();
 
+    // A previously valid store ranking may carry a metric that cannot rank a
+    // newly requested registered dimension. The follow-up must not reuse that
+    // metric, invent a replacement, or collapse into a generic failed run.
+    // It instead asks from the target dimension's registered metric catalogue.
+    $dimensionHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $dimensionHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>1],'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-08']],'scope'=>'authorized','unresolved_fragments'=>[]];
+    $dimensionSource=$dimensionHarness->start('门店现金业绩排名');
+    $dimensionHarness->understandingOverride=['goal'=>'改看产品','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'比较产品','fields'=>['object_kind'],'values'=>['object_kind'=>'product'],'evidence'=>[['message_id'=>'current','quote'=>'产品']]],
+    ]];
+    $dimensionDelta=cdgDelta();$dimensionDelta['object']='replace';
+    $dimensionHarness->semanticIntent=['object_kind'=>'product','object_term'=>'','operation'=>'unknown','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$dimensionDelta,'unresolved_fragments'=>[]];
+    $dimensionQueries=$dimensionHarness->queries;
+    $dimensionFollow=$dimensionHarness->start('产品呢',$dimensionSource['answer']['context_ref']);
+    $dimensionOptions=array_column($dimensionFollow['clarification']['fields'][0]['options']??[],'value');
+    cdgCheck($dimensionFollow['status']==='WAITING_CLARIFICATION'
+        &&($dimensionFollow['clarification']['fields'][0]['key']??null)==='dimension_metric'
+        &&$dimensionOptions===['sales_amount','sales_quantity']
+        &&$dimensionHarness->queries===$dimensionQueries,
+        'an incompatible inherited metric becomes a target-dimension metric choice without another query');
+    $dimensionCompleted=$dimensionHarness->choose($dimensionFollow,['dimension_metric'=>'sales_amount']);
+    $dimensionEvidence=$dimensionHarness->private->read($dimensionHarness->row($dimensionCompleted)['evidence_ref']);
+    cdgCheck($dimensionCompleted['status']==='COMPLETED'
+        &&($dimensionEvidence['query']['metric_codes']??null)===['sales_amount']
+        &&($dimensionEvidence['query']['business_filters']??null)===['object_kind'=>'product']
+        &&($dimensionEvidence['query']['ranking']??null)===['direction'=>'top','limit'=>1],
+        'the customer-selected registered product metric retains the signed ranking context and executes');
+    $dimensionHarness->close();
+
     $h->semanticIntent=$initialIntent;
     $source=$h->start('9月1日到9月8日现金业绩多少？');
     cdgCheck($source['status']==='COMPLETED'&&isset($source['answer']['context_ref']),'verified source query is available');
