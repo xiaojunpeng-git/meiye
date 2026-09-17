@@ -394,6 +394,11 @@ $reject(static function()use($naturalUnderstanding){AiIntentResultContract::norm
     'a semantic rejection must identify a real rejected requirement');
 $check(AiIntentResultContract::normalizeSemanticUniqueness(['decision'=>'unique','metric_code'=>'cash_performance'],['cash_performance'])['metric_code']==='cash_performance',
     'candidate-blind uniqueness can name only a registered metric');
+$uniquenessInstruction=AiIntentResultContract::semanticUniquenessInstruction();
+$check(strpos($uniquenessInstruction,'MUST be ambiguous')!==false
+    && strpos($uniquenessInstruction,'conventional default')!==false
+    && strpos($uniquenessInstruction,'customer choice')!==false,
+    'candidate-blind uniqueness rejects an unspecified measurement without a metric-name or phrase rule');
 $reject(static function(){AiIntentResultContract::normalizeSemanticUniqueness(['decision'=>'unique','metric_code'=>'invented'],['cash_performance']);},
     'candidate-blind uniqueness rejects an unregistered code');
 echo 'PASS intent understanding/binding separation: '.$checks." checks\n";

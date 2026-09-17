@@ -866,7 +866,9 @@ final class AiIntentResultContract
     {
         return 'Evaluate the exact business event or measurement requested in ordinary language, using only the supplied registered descriptions. '
             .'A concrete transaction or activity is not interchangeable with other measurements merely because they involve money or performance. '
-            .'A broad outcome without an identified event or accounting basis can represent multiple distinct metrics and must not be assigned one by default. '
+            .'A broad outcome without an identified event, accounting basis, calculation basis, or other distinguishing measurement property can represent multiple distinct metrics and MUST be ambiguous. '
+            .'Do not treat a familiar category label, a metric display title, a conventional default, or a reasonable professional first reading as an identified basis. '
+            .'Only an open overall operating goal may receive a separately labelled multi-angle observation; a request for one unspecified measurement must remain a customer choice. '
             .'Do not see or assume the proposed candidate. Return exactly {"decision":"unique|ambiguous|unavailable","metric_code":"registered code or empty string"}. '
             .'Use unique only when one registered metric faithfully answers the expressed fact; for ambiguous or unavailable, metric_code is empty. Do not answer with figures.';
     }

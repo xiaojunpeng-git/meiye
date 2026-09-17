@@ -1,0 +1,19 @@
+{
+  "benchmark": "ambiguity_boundary_v1",
+  "recorded_at": "2026-09-17T18:23:00+08:00",
+  "data_scope": "synthetic_deidentified_question_no_reader_query",
+  "model": "Qwen/Qwen2.5-32B-Instruct",
+  "case": "ambiguous_measurement",
+  "result": {
+    "status": "completed",
+    "understand_ms": 3459,
+    "bind_ms": 4630,
+    "review_ms": 1125,
+    "total_ms": 9214,
+    "review": "metric_choice",
+    "proposed_metric": "cash_performance",
+    "semantic_pass": true
+  },
+  "acceptance_criterion": "The independent candidate-blind review must return metric_choice for an unspecified single measurement. A proposed metric is not executable until the user selects a registered metric.",
+  "result_interpretation": "PASS: the reviewer returned metric_choice. The normal gateway clears the proposed binding, presents only registered metric choices, and does not invoke a Reader before selection."
+}
