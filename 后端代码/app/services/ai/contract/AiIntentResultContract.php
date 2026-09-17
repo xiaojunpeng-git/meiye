@@ -59,6 +59,77 @@ final class AiIntentResultContract
     }
 
     /**
+     * A completed language-understanding pass can safely continue a verified
+     * query when it carries exactly one new period and nothing else.  This is
+     * deliberately a typed-contract shortcut, not a phrase, metric or result
+     * shortcut: the model still decides whether the current customer message
+     * is period-only, and the normal merger/compiler re-checks the signed
+     * capability, current authority and Reader boundary afterwards.
+     *
+     * Platform-proposed multi-metric observations stay on the ordinary
+     * binding path.  Their presentation origin is a product decision that
+     * must not be reconstructed from a query snapshot by PHP.
+     */
+    public static function inheritedPeriodOnlyContextIntent(array $understanding,array $sourceQuery,array $contextMeaning=[]): ?array
+    {
+        if (($understanding['status']??null)!=='understood'
+            || ($contextMeaning['presentation_origin']??'customer_or_verified_context')!=='customer_or_verified_context') return null;
+        $requirements=AiIntentUnderstandingContract::requirements($understanding);
+        if (count($requirements)!==1) return null;
+        $requirement=array_values($requirements)[0];
+        if (($requirement['fields']??null)!==['periods']) return null;
+        $periods=$requirement['values']['periods']??null;
+        if (!self::periods($periods) || !self::currentEvidenceOnly($requirement['evidence']??[])) return null;
+        $metrics=$sourceQuery['metric_codes']??null;
+        $shape=$sourceQuery['query_shape']??null;
+        if (!self::codes($metrics) || !in_array($shape,['summary','trend','ranking','comparison','threshold_count'],true)) return null;
+        $ranking=is_array($sourceQuery['ranking']??null)?$sourceQuery['ranking']:[];
+        $direction=$ranking['direction']??'unspecified';
+        if ($direction===null) $direction='unspecified';
+        $limit=$ranking['limit']??null;
+        if (!in_array($direction,['top','bottom','top_and_bottom','unspecified'],true)
+            || (!is_null($limit) && !is_int($limit))) return null;
+        $filters=is_array($sourceQuery['business_filters']??null)?$sourceQuery['business_filters']:[];
+        $objectKind=$filters['object_kind']??'store';
+        if (!in_array($objectKind,['store','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization'],true)) return null;
+        $delta=array_fill_keys(self::DELTA_FIELDS,'inherit');
+        $delta['periods']='replace';
+        return [
+            'object_kind'=>$objectKind,
+            'object_term'=>'',
+            'object_relation'=>isset($filters['selection_ref'])?'selection':'analysis',
+            'operation'=>$shape,
+            'metric_codes'=>array_values($metrics),
+            'action_codes'=>[],
+            'needs_metric_choice'=>false,
+            'ranking'=>['direction'=>$direction,'limit'=>$limit],
+            'periods'=>array_values($periods),
+            'scope'=>'unspecified',
+            'aggregate_condition'=>null,
+            'requirement_bindings'=>[],
+            'unresolved_fragments'=>[],
+            'context_delta'=>$delta,
+            // These are server-private normalization markers normally added
+            // by normalize().  The shortcut has no model binding payload, so
+            // it declares their conservative values explicitly instead of
+            // relying on an undefined-key default later in the gateway.
+            'result_reference'=>null,
+            '_object_term_normalized'=>false,
+            '_scope_supplied'=>false,
+            '_periods_supplied'=>true,
+            '_ranking_supplied'=>false,
+            '_aggregate_condition_supplied'=>false,
+        ];
+    }
+
+    private static function currentEvidenceOnly($evidence): bool
+    {
+        if (!is_array($evidence) || $evidence===[]) return false;
+        foreach ($evidence as $item) if (!is_array($item) || ($item['message_id']??null)!=='current') return false;
+        return true;
+    }
+
+    /**
      * A prior analytical dimension (such as product or project) is not a
      * customer-selected filter. When a binding changes to a new non-ranking
      * answer form but mechanically inherits that old dimension, its own

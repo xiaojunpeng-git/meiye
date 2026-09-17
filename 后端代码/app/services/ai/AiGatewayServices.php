@@ -954,6 +954,17 @@ final class AiGatewayServices
         // the complete catalogue so the normal capability boundary can report
         // the gap without silently changing the subject.
         $bindingSummaries=$this->bindingSummariesForUnderstanding($summaries,$understanding);
+        $reusedPeriodIntent=$sourceQuery===null?null:AiIntentResultContract::inheritedPeriodOnlyContextIntent(
+            $understanding,$sourceQuery,(array)($sourceContext['meaning']??[])
+        );
+        if ($reusedPeriodIntent!==null) {
+            // There is no new metric, object, range, ranking, scope or
+            // exclusion to bind.  Keep the path visible in payload-free Run
+            // diagnostics; it is a protocol optimization, never a business
+            // classification or a hidden fallback.
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'context_period_binding_reused');
+            $reply=['intent'=>$reusedPeriodIntent,'usage'=>[]];
+        } else {
         $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
         $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$understanding,$bindingSummaries,$runtimeSkills],2048));
         $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
@@ -1057,6 +1068,7 @@ final class AiGatewayServices
                 throw $repairError;
             }
             }
+        }
         }
         $checkpoint();$intent=$reply['intent'];
         // The model states only a delta. This named merger is the sole place

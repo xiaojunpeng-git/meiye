@@ -41,9 +41,14 @@ try {
     $monthSource=$monthHarness->start('9月1日到9月8日现金业绩多少？');
     $wrongMonthDelta=cdgDelta();
     $monthHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'unspecified','context_delta'=>$wrongMonthDelta,'unresolved_fragments'=>[]];
-    $queriesBeforeMonthFollow=$monthHarness->queries;
+    $queriesBeforeMonthFollow=$monthHarness->queries;$modelsBeforeMonthFollow=$monthHarness->models;
     $wrongMonthFollow=$monthHarness->start('这个月呢？',$monthSource['answer']['context_ref']);
-    cdgCheck($wrongMonthFollow['status']==='FAILED'&&($wrongMonthFollow['reason']??null)==='AI_MODEL_INTENT_CONTRACT_INVALID'&&$monthHarness->queries===$queriesBeforeMonthFollow,'a contradictory inherited month is rejected before the previous date can execute');
+    $wrongMonthEvidence=$monthHarness->private->read($monthHarness->row($wrongMonthFollow)['evidence_ref']);
+    cdgCheck($wrongMonthFollow['status']==='COMPLETED'&&$monthHarness->queries===$queriesBeforeMonthFollow+1
+        &&($wrongMonthEvidence['query']['start_date']??'')===substr((string)($wrongMonthEvidence['query']['end_date']??''),0,7).'-01',
+        'a typed period-only continuation reuses the signed binding instead of risking an inherited-date binding error');
+    cdgCheck($monthHarness->models===$modelsBeforeMonthFollow+1,
+        'a typed period-only continuation performs understanding but skips the binding-model call');
     $correctMonthDelta=cdgDelta();$correctMonthDelta['periods']='replace';
     $monthHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'unspecified','context_delta'=>$correctMonthDelta,'unresolved_fragments'=>[]];
     $monthFollow=$monthHarness->start('这个月呢？',$monthSource['answer']['context_ref']);
