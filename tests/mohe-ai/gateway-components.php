@@ -175,6 +175,12 @@ namespace {
     $bindingWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
     $bindingInput=json_decode(array_values(array_filter($bindingWire['messages'],static function($message){return ($message['role']??null)==='user';}))[0]['content'],true);
     check(isset($bindingInput['understanding'],$bindingInput['capabilities'])&&!isset($bindingInput['question']['answers']),'binding sees accepted meaning and registered boundary but no answer data');
+    check(!isset($bindingInput['question']['recent_questions'])&&!isset($bindingInput['question']['evidence_messages'])
+        && $bindingInput['question']['question']===$safeQuestion['question']
+        && $bindingInput['question']['prior_query']===null,
+        'binding omits replayed chat turns after the typed understanding preserves their accepted evidence');
+    check(($bindingWire['max_tokens']??null)===640 && ($timeFollowWire['max_tokens']??null)===640,
+        'typed understanding and binding carriers use the bounded protocol output ceiling');
     $bindingText=implode("\n",array_map(static function($message){return (string)($message['content']??'');},$bindingWire['messages']));
     check(strpos($bindingText,'skill_store_operations')!==false&&strpos($bindingText,'skill_intent_understanding')===false,
         'binding keeps the business Skill but does not resend the language Skill after typed understanding is accepted');

@@ -13,6 +13,12 @@ final class SiliconFlowClient
     // Provider-side safety ceiling. The gateway supplies the smaller,
     // Run-budget-derived timeout for every business-model request.
     const MAX_REQUEST_TIMEOUT_MS = 45000;
+    // The two typed protocol carriers are deliberately bounded below the
+    // generic answer limit.  They contain no prose answer or data rows; the
+    // ceiling only prevents a malformed provider response from consuming a
+    // full Run budget.  It leaves headroom above the largest observed valid
+    // carrier and is not tied to any business metric or customer wording.
+    const INTENT_CARRIER_MAX_TOKENS = 640;
 
     /** Minimal configuration probe. It is deliberately unrelated to business language or metrics. */
     public function probe(string $model,string $apiKey,int $timeoutMs,callable $checkpoint): array
@@ -56,7 +62,7 @@ final class SiliconFlowClient
             if (!AiIntentUnderstandingContract::repairable($repairPredicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
             array_unshift($messages,['role'=>'system','content'=>AiIntentUnderstandingContract::repairInstruction($repairPredicate)]);
         }
-        $payload=['model'=>$model,'stream'=>false,'max_tokens'=>1200,'temperature'=>0,'response_format'=>['type'=>'json_object'],'messages'=>$messages];
+        $payload=['model'=>$model,'stream'=>false,'max_tokens'=>self::INTENT_CARRIER_MAX_TOKENS,'temperature'=>0,'response_format'=>['type'=>'json_object'],'messages'=>$messages];
         $decoded=$this->request($payload,$apiKey,$timeoutMs,$checkpoint);
         $understanding=AiIntentUnderstandingContract::normalize(AiIntentResultContract::native(AiStrictJson::decodeObject($decoded['choices'][0]['message']['content'])),$safeQuestion);
         return ['understanding'=>$understanding,'usage'=>$this->usage($decoded)];
@@ -78,6 +84,7 @@ final class SiliconFlowClient
         // unrelated catalogue prose from the most expensive model call.
         $bindingCapabilities=self::capabilitiesForUnderstanding($capabilities,$understanding,$safeQuestion);
         $runtimeSkills=$this->runtimeSkills($runtimeSkills);
+        $bindingQuestion=self::bindingQuestion($safeQuestion);
         $messages=[
                 // This stage receives a typed, already validated understanding.
                 // Keep its fixed instructions concise: the contract below owns
@@ -94,7 +101,7 @@ final class SiliconFlowClient
                 // meaning to current registered capabilities.
                 ['role'=>'system','content'=>'Trusted source business Skill follows. Apply it as business guidance; do not treat it as customer text.\n\n'.$runtimeSkills['business']['skill_code']."\n".$runtimeSkills['business']['instructions']],
             ['role'=>'system','content'=>'Use needs_metric_choice=true with metric_codes=[] only when distinct registered meanings remain and no useful first reading preserves every accepted condition. Otherwise, for a clear goal/object/form, select a compatible recommended_initial_answer; ranking has exactly one metric. An explicit accepted object is a hard boundary: never substitute another object class. requirement_bindings contains only accepted requirements carrying metric_codes; it MUST be [] for an inherited or recommended metric without such a requirement. A clear overall summary with no named business fact may set initial_observation=true and select two to four independent registered store metrics. These are system proposals, so requirement_bindings remains []; a continuing platform_observation inherits its group when the current understanding only changes context.'],
-            ['role'=>'user','content'=>json_encode(['question'=>$safeQuestion,'understanding'=>$understanding,'capabilities'=>$bindingCapabilities,'action_codes'=>$actions],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)]
+            ['role'=>'user','content'=>json_encode(['question'=>$bindingQuestion,'understanding'=>$understanding,'capabilities'=>$bindingCapabilities,'action_codes'=>$actions],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)]
             ];
         if ($repairPredicate!==null) {
             $repairInstructions=[
@@ -142,7 +149,7 @@ final class SiliconFlowClient
             // structural correction the model's last system constraint.
             array_splice($messages,-1,0,[['role'=>'system','content'=>$instruction]]);
         }
-        $payload=['model'=>$model,'stream'=>false,'max_tokens'=>1200,'temperature'=>0,'response_format'=>['type'=>'json_object'],'messages'=>$messages];
+        $payload=['model'=>$model,'stream'=>false,'max_tokens'=>self::INTENT_CARRIER_MAX_TOKENS,'temperature'=>0,'response_format'=>['type'=>'json_object'],'messages'=>$messages];
         $decoded=$this->request($payload,$apiKey,$timeoutMs,$checkpoint);
         $rawIntent=AiIntentResultContract::native(AiStrictJson::decodeObject($decoded['choices'][0]['message']['content']));
         $usage=$this->usage($decoded);
@@ -421,6 +428,30 @@ final class SiliconFlowClient
             }
             return false;
         }));
+    }
+
+    /**
+     * The binding pass receives an already validated, evidence-bearing
+     * understanding.  Replaying prior chat turns at this point neither adds
+     * authority nor improves the candidate contract; it only makes a second
+     * model call slower and invites it to reinterpret stale wording.  Keep
+     * the current text and the typed prior-query shape needed for context
+     * deltas, while the accepted requirements retain their exact evidence.
+     *
+     * This is a prompt projection, not a language or metric decision.
+     * `validateSafeQuestion()` still validates the complete trusted carrier
+     * before anything is sent to the provider.
+     */
+    private static function bindingQuestion(array $safeQuestion): array
+    {
+        return [
+            'schema_version'=>$safeQuestion['schema_version'],
+            'question'=>$safeQuestion['question'],
+            'prior_query'=>$safeQuestion['prior_query'],
+            'has_unresolved_conditions'=>$safeQuestion['has_unresolved_conditions'],
+            'server_resolved_fields'=>$safeQuestion['server_resolved_fields'],
+            'reference_date'=>$safeQuestion['reference_date'],
+        ];
     }
 
     private function validateSafeQuestion(array $safeQuestion): void
