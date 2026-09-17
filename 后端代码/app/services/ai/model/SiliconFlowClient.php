@@ -266,12 +266,6 @@ final class SiliconFlowClient
         return $intent;
     }
 
-    private static function sumUsage(array $left,array $right): array
-    {
-        return ['input_tokens'=>(int)($left['input_tokens']??0)+(int)($right['input_tokens']??0),
-            'output_tokens'=>(int)($left['output_tokens']??0)+(int)($right['output_tokens']??0)];
-    }
-
     /**
      * Review a completed binding without giving the reviewer any ability to
      * edit it. This keeps natural-language meaning in model work while the
