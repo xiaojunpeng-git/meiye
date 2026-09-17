@@ -148,7 +148,11 @@ try {
         app\services\ai\execution\AiExportRuntime::process($task['task_no']);
         $run=$call('status',$binding($run),$run['run_id']);
     }
-    while(in_array($run['status'],['WAITING_EXPORT','WORKFLOW_EXECUTING'],true) && microtime(true)<$pollUntil){usleep(250000);$run=$call('status',$binding($run),$run['run_id']);}
+    // /execute is only an idempotent compatibility dispatch trigger.  A
+    // healthy asynchronous Run remains RECEIVED until the dedicated Worker
+    // claims it, so this acceptance probe must observe that normal queue
+    // state instead of mistaking it for a synchronous-execution failure.
+    while(in_array($run['status'],['RECEIVED','WORKFLOW_EXECUTING','WAITING_EXPORT'],true) && microtime(true)<$pollUntil){usleep(250000);$run=$call('status',$binding($run),$run['run_id']);}
     if ($run['status']!=='COMPLETED') {
         $clockRow=think\facade\Db::name('mohe_ai_run')->where('run_id',$run['run_id'])->field('created_at,last_clock_at,deadline_at,remaining_ms')->find();
         $clockDetail=new ReflectionProperty($probeRuns,'clockRegressionMs');if(PHP_VERSION_ID<80100)$clockDetail->setAccessible(true);
@@ -205,7 +209,7 @@ try {
             $run=$call('status',$binding($run),$run['run_id']);
         }
         $until=microtime(true)+30;
-        while(in_array($run['status'],['WAITING_EXPORT','WORKFLOW_EXECUTING'],true)&&microtime(true)<$until){usleep(250000);$run=$call('status',$binding($run),$run['run_id']);}
+        while(in_array($run['status'],['RECEIVED','WORKFLOW_EXECUTING','WAITING_EXPORT'],true)&&microtime(true)<$until){usleep(250000);$run=$call('status',$binding($run),$run['run_id']);}
         if($run['status']!=='COMPLETED')throw new RuntimeException('LIVE_FOLLOWUP_FAILED_'.($run['reason']??$run['status']));
         $start=date('Y-m-01');$end=date('Y-m-d');
         $monthly=(clone $query)->where('p.business_date','>=',$start)->where('p.business_date','<=',$end)
@@ -224,7 +228,26 @@ try {
         }
         echo "LIVE_FOLLOWUP_MONTH_SCOPE_METRIC_RANK_AND_EXCEL_MATCH\n";
     }
+    // Retain and print only payload-free latency evidence for this exact Run.
+    // A completed answer is the acceptance clock; quick create/execute
+    // acknowledgements are deliberately reported above but never presented as
+    // an answer-speed result.
+    $telemetry=think\facade\Db::name('mohe_ai_run')->where('run_id',$run['run_id'])->field('created_at,counters_json')->find();
+    $counters=json_decode((string)($telemetry['counters_json']??''),true)?:[];
+    $accepted=(int)($counters['execution_accepted_at']??$telemetry['created_at']??0);
+    $queued=(int)($counters['execution_queued_at']??$accepted);
+    $started=(int)($counters['execution_started_at']??$queued);
+    $delivered=(int)($counters['execution_delivered_at']??$started);
+    $modelTotal=0;$readerTotal=0;
+    foreach ((array)($counters['attempt_elapsed_ms']??[]) as $code=>$elapsed) {
+        if (!is_int($elapsed)) continue;
+        $kind=($counters['attempt_kinds'][$code]??'');
+        if ($kind==='model') $modelTotal+=$elapsed;
+        if (($counters['attempt_targets'][$code]??'')==='unified_metric_query') $readerTotal+=$elapsed;
+    }
     echo json_encode(['result'=>'PASS','real_model'=>true,'real_fact_query'=>true,'rendered_rows'=>count($run['answer']['table']['rows']??[]),
+        'server_answer_ms'=>max(0,$delivered-$accepted),'queue_ms'=>max(0,$started-$queued),'execution_ms'=>max(0,$delivered-$started),
+        'model_total_ms'=>$modelTotal,'reader_total_ms'=>$readerTotal,
         'source'=>'local_authorized_instance','business_records_modified'=>false])."\n";
 } catch(Throwable $e) {
     $code=$e->getMessage();if(!preg_match('/^[A-Z][A-Z0-9_]{2,80}$/D',$code))$code='LIVE_INTERNAL_ERROR';
