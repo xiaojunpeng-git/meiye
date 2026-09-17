@@ -25,6 +25,7 @@
           <div class="actions"><button class="primary" :disabled="busy" type="submit">保存基础配置</button><button type="button" :disabled="busy" @click="checkConnection">测试连接（可能消耗客户额度）</button></div>
         </form>
         <div v-if="config && config.runtime_status" class="subbox"><h3>近 24 小时运行概况</h3><div class="metrics"><span v-for="item in runtimeCounts" :key="item.label">{{ item.label }}：{{ item.value }}</span></div><p class="muted">运行数量不能证明模型连接、账号余额或服务可用。{{ monitorText }}</p></div>
+        <div v-if="config && config.runtime_status" class="subbox"><h3>完整答案等待</h3><div class="metrics"><span>异步浏览器完整答案样本：{{ answerTiming.count }}</span><span>中位数：{{ formatMs(answerTiming.p50_ms) }}</span><span>P95：{{ formatMs(answerTiming.p95_ms) }}</span><span>完整答复占已结束任务：{{ completionRate }}</span></div><p class="muted">{{ answerTimingText }}</p></div>
       </section>
 
       <section v-if="tab === 'catalog'" class="box">
@@ -78,6 +79,9 @@ export default {
     activeVersion() { return typeof this.state.active_version === 'object' ? this.state.active_version.version : this.state.active_version; },
     runtimeCounts() { const values = this.config.runtime_status; return [['success', '完整成功'], ['partial', '数据成功、文件失败'], ['technical', '技术失败'], ['active', '处理中']].filter(([key]) => Number.isInteger(values[key])).map(([key, label]) => ({ label, value: values[key] })); },
     monitorText() { const m = this.config.runtime_status.monitoring; return m && m.status === 'ok' ? '已登记监控项当前未触发告警。' : '运行健康尚未确认或存在告警，请检查服务状态。'; },
+    answerTiming() { const status = this.config.runtime_status || {}; const timing = status.latency_cohorts && status.latency_cohorts.async && status.latency_cohorts.async.browser_observed; return timing && Number.isInteger(timing.count) ? timing : { count: 0, p50_ms: null, p95_ms: null }; },
+    completionRate() { const status = this.config.runtime_status || {}; const completed = Number.isInteger(status.success) ? status.success : 0; const total = ['success', 'partial', 'technical', 'neutral', 'capacity', 'export', 'export_unknown', 'security'].reduce((sum, key) => sum + (Number.isInteger(status[key]) ? status[key] : 0), 0); return total ? `${Math.round(completed * 10000 / total) / 100}%（${completed}/${total}）` : '暂无完成样本'; },
+    answerTimingText() { const timing = this.answerTiming; if (!timing.count) return '尚未收到浏览器完整答案耗时，不能据此判断问答是否变快。'; if (timing.count < 20) return `当前仅 ${timing.count} 个异步浏览器样本，先持续积累；不能据此宣称中位数、P95 或提速比例。`; return '该数据包含排队、模型、查询、轮询与页面交付；请结合固定场景、同一模型配置和成功率比较优化前后结果。'; },
     diffs() { const active = this.state.active_document || (this.state.active_version && this.state.active_version.document); if (!active) return ['当前发布配置尚未读取，暂不能对比。']; const out = []; const walk = (a, b, path) => { if (JSON.stringify(a) === JSON.stringify(b)) return; if (a && b && !Array.isArray(a) && typeof a === 'object' && typeof b === 'object') Object.keys(b).forEach(k => walk(a[k], b[k], path ? path + ' / ' + k : k)); else out.push(path + '：' + JSON.stringify(a) + ' → ' + JSON.stringify(b)); }; walk(active, this.document, ''); return out; }
   },
   created() { this.reload(); },
@@ -97,7 +101,7 @@ export default {
     workflowNodes(code) { return (this.catalog.workflows[code] || {}).nodes || []; },
     workflowSkill(flow) { const scene = this.catalog.scenes && this.catalog.scenes[flow.scene]; return scene ? scene.skill_code : '未绑定业务 Skill'; },
     workflowStatus(code) { return this.document.workflows[code].enabled ? '草稿中启用' : '草稿中停用'; },
-    printable(value) { return JSON.stringify(value, null, 2); }, formatTime(value) { return value ? new Date(Number(value) * 1000).toLocaleString() : '—'; },
+    printable(value) { return JSON.stringify(value, null, 2); }, formatTime(value) { return value ? new Date(Number(value) * 1000).toLocaleString() : '—'; }, formatMs(value) { return Number.isInteger(value) ? `${(value / 1000).toFixed(1)} 秒` : '—'; },
     saveDraft() { return this.perform(async () => { this.hydrate(await request('PUT', '/management/draft', { expected_revision: this.state.revision, document: this.document })); this.notice = '草稿已保存，尚未发布。'; }); },
     validateDraft() { return this.perform(async () => { const result = await request('POST', '/management/validate', { expected_revision: this.state.revision }); if (result.valid !== true) throw new Error('尚未取得草稿校验通过结果，请重新校验。'); if (result.draft) this.hydrate(result); this.validated = true; this.notice = '草稿校验通过。'; }); },
     async publishDraft() { if (!await this.confirmAction('发布后，新任务将使用当前草稿；在途任务不受影响。确认发布？', '发布草稿')) return; return this.perform(async () => { this.hydrate(await request('POST', '/management/publish', { expected_revision: this.state.revision })); this.notice = '版本已发布。'; }); },
