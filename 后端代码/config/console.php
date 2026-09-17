@@ -22,6 +22,7 @@ return [
         'install' => \mohe\command\Install::class,
         'makeSalary' => \app\command\MakeSalary::class,
         'clear:cache' => \app\command\ClearCache::class,
+        'system-log:prune' => \app\command\PruneSystemLog::class,
         'reset:password' => \app\command\ResetAdminPwd::class,
 		'get:version' => \app\command\GetVersion::class,
         'reservationJindu' => \app\command\ReservationJindu::class,
