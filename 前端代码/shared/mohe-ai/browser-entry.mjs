@@ -39,15 +39,16 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     .workspace-brand{display:flex;align-items:center;min-height:36px;padding:0 14px;font-size:23px;font-weight:700;letter-spacing:.02em;color:#111827}
     .workspace-new{margin:30px 0 36px;border:0;border-radius:15px;padding:16px 20px;text-align:left;font-size:17px;font-weight:650;color:#1d2f9e;background:#eeecff}.workspace-new:hover{background:#e5e2ff}
     .workspace-recent-label{padding:0 16px 12px;color:#7b8390;font-size:14px}.workspace-history{display:grid;gap:4px;overflow:auto}.workspace-history button{border:0;background:transparent;text-align:left;padding:12px 16px;border-radius:10px;font-size:16px;color:#273143;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.workspace-history button:hover,.workspace-history button[aria-current="true"]{background:#ebeaff;color:#252873}
-    .workspace-retention{margin-top:auto;padding:20px 16px;color:#7b8390;font-size:13px;border-bottom:1px solid #e7e9ee}.workspace-main{min-width:0;flex:1;display:flex;flex-direction:column;background:#fff}.workspace-top{display:flex;align-items:center;min-height:78px;padding:0 28px;border-bottom:1px solid #e7e9ee}.workspace-title{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:23px;font-weight:650}.workspace-close{border:0;padding:8px 12px;font-size:24px;line-height:1;color:#465163}.workspace .body{width:min(1135px,calc(100% - 80px));box-sizing:border-box;margin:0 auto;padding:40px 0 32px}.workspace .message{max-width:100%;margin:0 0 38px;padding:0;border-radius:0;background:transparent;color:#151b27;font-size:21px;line-height:1.7}.workspace .message.muted{font-size:14px;line-height:1.5;color:#778092}.workspace .message.question{width:max-content;max-width:78%;margin:0 0 48px auto;padding:15px 24px;border-radius:22px;background:#17191e;color:#fff;font-size:18px;line-height:1.45}.workspace .card{margin:14px 0;border:1px solid #e7e9ee;border-radius:14px;padding:18px 20px;background:#fff}.workspace .value{color:#111827}.workspace table{width:100%;margin:18px 0;border-collapse:collapse;display:table}.workspace td,.workspace th{border-width:0 0 1px;padding:14px;text-align:left;color:#1f2937}.workspace th{color:#6e7786;font-weight:500}.workspace .footer{width:min(1135px,calc(100% - 80px));box-sizing:border-box;margin:0 auto;padding:0 0 24px;border:0;background:#fff}.workspace textarea{min-height:88px;resize:none;padding:18px 20px;border:1px solid #d9dee7;border-radius:22px;font-size:17px;background:#fff}.workspace .actions{margin-top:8px}.workspace .actions select{flex:0 1 180px;border:0;background:transparent}.workspace .primary{margin-left:auto;width:48px;height:48px;padding:0;border-radius:50%;font-size:0;background:#111;color:#fff}.workspace .primary::after{content:'↑';font-size:25px;line-height:1}.workspace .actions button:not(.primary){border:0;background:transparent;color:#667085}.workspace .entry{display:none}
+    .workspace-retention{margin-top:auto;padding:20px 16px;color:#7b8390;font-size:13px;border-bottom:1px solid #e7e9ee}.workspace-main{min-width:0;flex:1;display:flex;flex-direction:column;background:#fff}.workspace-top{display:flex;align-items:center;min-height:78px;padding:0 28px;border-bottom:1px solid #e7e9ee}.workspace-title{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:23px;font-weight:650}.workspace-close{border:0;padding:8px 12px;font-size:24px;line-height:1;color:#465163}.workspace .body{width:min(1350px,calc(100% - 56px));box-sizing:border-box;margin:0 auto;padding:40px 0 32px}.workspace .message{max-width:100%;margin:0 0 38px;padding:0;border-radius:0;background:transparent;color:#151b27;font-size:21px;line-height:1.7}.workspace .message.muted{font-size:14px;line-height:1.5;color:#778092}.workspace .message.question{width:max-content;max-width:78%;margin:0 0 48px auto;padding:15px 24px;border-radius:22px;background:#17191e;color:#fff;font-size:18px;line-height:1.45}.workspace .card{margin:14px 0;border:1px solid #e7e9ee;border-radius:14px;padding:18px 20px;background:#fff}.workspace .value{color:#111827}.workspace table{width:100%;margin:18px 0;border-collapse:collapse;display:table}.workspace td,.workspace th{border-width:0 0 1px;padding:14px;text-align:left;color:#1f2937}.workspace th{color:#6e7786;font-weight:500}
+    .workspace .footer{width:100%;box-sizing:border-box;margin:0;padding:0 28px 20px;border:0;background:#fff}.workspace-progress{min-height:20px;margin:0 0 8px;color:#667085}.workspace-composer-card{display:grid;grid-template-columns:minmax(0,1fr) 76px;grid-template-rows:minmax(82px,auto) 48px;overflow:hidden;border:1px solid #d9dee7;border-radius:22px;background:#fff;box-shadow:0 8px 22px #17233d0d}.workspace .workspace-composer-card textarea{grid-column:1;grid-row:1;min-height:82px;resize:none;padding:18px 28px 10px;border:0;border-radius:0;font-size:17px;line-height:1.55;background:transparent;outline:0}.workspace-composer-actions{grid-column:1;grid-row:2;display:flex;align-items:center;padding:0 28px}.workspace-excel{display:inline-flex;align-items:center;gap:10px;color:#536070;font-size:16px;cursor:pointer}.workspace-excel input{width:24px;height:24px;margin:0;accent-color:#111}.workspace-excel input:disabled+span{color:#9aa3b0;cursor:not-allowed}.workspace .workspace-send{grid-column:2;grid-row:1 / span 2;place-self:center;width:56px;height:56px;margin:0;padding:0;border:0;border-radius:50%;font-size:0;background:#111;color:#fff}.workspace .workspace-send::after{content:'↑';font-size:30px;line-height:1}.workspace .workspace-send:disabled{background:#98a1ad}.workspace .workspace-cancel{grid-column:2;grid-row:1 / span 2;place-self:end center;margin:0 10px 11px 0;padding:5px 0;border:0;background:transparent;color:#667085;font-size:12px}.workspace-keyboard-hint{padding:12px 4px 0;text-align:right;color:#8a93a1;font-size:14px}.workspace .entry{display:none}
     :host([data-mohe-ai-presentation="workspace"]) .entry{left:auto;right:28px;top:auto;bottom:30px;transform:none}
     :host([data-mohe-ai-presentation="workspace"]) .entry.entry--icon:hover{transform:scale(1.04)}
-    @media (max-width:760px){.panel.workspace{display:block;overflow:auto}.workspace-aside{display:none}.workspace-main{min-height:100vh}.workspace-top{min-height:62px;padding:0 18px}.workspace-title{font-size:19px}.workspace .body,.workspace .footer{width:calc(100% - 32px)}.workspace .body{padding-top:28px}.workspace .message{font-size:17px}.workspace .message.question{font-size:16px;max-width:88%;margin-bottom:30px}.workspace .footer{position:sticky;bottom:0;padding:12px 0 16px}.workspace textarea{min-height:72px;border-radius:18px}.workspace-new{margin-top:16px}:host([data-mohe-ai-presentation="workspace"]) .entry{right:16px;bottom:18px}}
+    @media (max-width:760px){.panel.workspace{display:block;overflow:auto}.workspace-aside{display:none}.workspace-main{min-height:100vh}.workspace-top{min-height:62px;padding:0 18px}.workspace-title{font-size:19px}.workspace .body,.workspace .footer{width:calc(100% - 32px)}.workspace .body{padding-top:28px}.workspace .message{font-size:17px}.workspace .message.question{font-size:16px;max-width:88%;margin-bottom:30px}.workspace .footer{position:sticky;bottom:0;padding:12px 0 16px}.workspace-composer-card{grid-template-columns:minmax(0,1fr) 64px;grid-template-rows:minmax(72px,auto) 44px;border-radius:18px}.workspace .workspace-composer-card textarea{min-height:72px;padding:14px 18px 8px;font-size:16px}.workspace-composer-actions{padding:0 18px}.workspace-excel{font-size:14px}.workspace-excel input{width:21px;height:21px}.workspace .workspace-send{width:48px;height:48px}.workspace-keyboard-hint{display:none}.workspace-new{margin-top:16px}:host([data-mohe-ai-presentation="workspace"]) .entry{right:16px;bottom:18px}}
   `;
   style.textContent += '[hidden]{display:none!important}';
   root.appendChild(style);
   const el = (tag, text, cls) => { const n = documentRef.createElement(tag); if (text != null) n.textContent = String(text); if (cls) n.className = cls; return n; };
-  let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, activeQuestionRendered = false, workspaceTitle = null, workspaceHistory = null;
+  let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, activeQuestionRendered = false, workspaceTitle = null, workspaceHistory = null, workspaceCancel = null;
   let clientSession = newId(); const entry = el('button', entryIconUrl ? null : '魔核 AI', entryIconUrl ? 'entry entry--icon' : 'entry');
   entry.type = 'button'; entry.setAttribute('aria-label', '打开魔核 AI 工作台');
   if (entryIconUrl) { const icon = documentRef.createElement('img'); icon.className = 'entry-icon'; icon.src = entryIconUrl; icon.alt = ''; entry.appendChild(icon); }
@@ -106,6 +107,12 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       };
       workspaceHistory.appendChild(button);
     });
+  }
+  function syncWorkspaceActions() {
+    if (!panel || !panel.classList.contains('workspace')) return;
+    const active = Boolean(pendingCreate || (run && !isTerminal(run.status)));
+    if (workspaceCancel) workspaceCancel.hidden = !active;
+    if (send) send.setAttribute('aria-label', active ? '正在执行，等待结果' : '发送问题');
   }
   // Once the current Run reaches a terminal projection, its question becomes
   // an immutable transcript turn.  Keep it visible, but remove the active
@@ -231,6 +238,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     clarificationSubmittedId = null; guidanceSubmission = null; clearClarification(); if (sessions) sessions.clearPendingQuestion(conversation);
     cancelling = false; closeRequested = false;
     if (send) { send.disabled = false; send.textContent = '发送'; }
+    syncWorkspaceActions();
     if (progress) progress.textContent = '上一次任务已失效，请重新提问。';
   }
   function renderAnswer(answer, live = true) {
@@ -282,7 +290,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         clientDeliveryStartedAt=0;
         if (sessions) sessions.clearPendingQuestion(conversation);
       }
-      pendingCreate = null; clearActive(); return;
+      pendingCreate = null; clearActive(); syncWorkspaceActions(); return;
     }
     if (run.status === 'WAITING_CLARIFICATION' && run.clarification && run.clarification_rejected === true && clarificationSubmittedId === run.clarification.id) {
       clarificationSubmittedId = null;
@@ -290,6 +298,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     }
     if (run.status === 'WAITING_CLARIFICATION' && run.clarification && !cancelling && clarificationSubmittedId !== run.clarification.id) renderClarification(run.clarification);
     else { clearClarification(); pollTimer = setTimeout(poll, 1000); }
+    syncWorkspaceActions();
     persistActive();
   }
   async function poll() {
@@ -451,6 +460,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       // submitted wording instead of a generic title as soon as it is durable.
       updateWorkspaceTitle({ rounds: [{ question }] }); renderWorkspaceHistory();
     }
+    syncWorkspaceActions();
     if (!clientDeliveryStartedAt) clientDeliveryStartedAt=Date.now();
     if (sessions) sessions.setPendingQuestion(conversation, question);
     input.value = ''; progress.textContent = '正在接纳请求'; run = null; persistActive();
@@ -484,6 +494,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         else persistActive();
         send.disabled = false; send.textContent = error.responseKnown ? '发送' : '重试确认'; input.value = question;
       }
+      syncWorkspaceActions();
     }
   }
   async function resumeActive(record) {
@@ -535,6 +546,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     persistActive();
     if (!run || isTerminal(run.status)) return;
     cancelling = true; progress.textContent = '正在取消';
+    syncWorkspaceActions();
     if (clarificationArea) clarificationArea.querySelectorAll('button,input,select').forEach(control => { control.disabled = true; });
     try { const current = await request('POST', '/runs/' + encodeURIComponent(run.run_id) + '/cancel', binding(), { keepalive: true }); if (disposed) return; await update(current); } catch (_) { if (disposed) return; progress.textContent = '暂未确认取消结果，请检查网络。'; }
     if (!disposed && run && !isTerminal(run.status)) { clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000); }
@@ -573,21 +585,47 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     }
     body = el('div', null, 'body'); main.appendChild(body);
     if (!workspace) message('能确定就直接查；有歧义逐步选清，明确后立即查询。聊天只保留在本设备 24 小时。', 'muted');
-    const footer = el('div', null, 'footer'); progress = el('div', '', 'muted'); progress.setAttribute('role', 'status'); footer.appendChild(progress); input = el('textarea'); input.placeholder = workspace ? '继续问，例如：按销量看呢？' : '例如：今天经营情况如何？'; input.maxLength = 4000; footer.appendChild(input); const actions = el('div', null, 'actions'); format = el('select'); [['screen','仅查看数据'],['screen_and_xlsx','数据和 Excel']].forEach(([value,label]) => { const o = el('option', label); o.value = value; format.appendChild(o); }); actions.appendChild(format); send = el('button', '发送', 'primary'); const cancel = el('button', '停止'); actions.append(send,cancel); footer.appendChild(actions); main.appendChild(footer); root.appendChild(panel);
+    const footer = el('div', null, 'footer' + (workspace ? ' workspace-composer' : ''));
+    progress = el('div', '', 'muted' + (workspace ? ' workspace-progress' : '')); progress.setAttribute('role', 'status'); footer.appendChild(progress);
+    input = el('textarea'); input.placeholder = workspace ? '继续问，例如：按销量看呢？' : '例如：今天经营情况如何？'; input.maxLength = 4000;
+    const actions = el('div', null, 'actions');
+    format = el('select'); [['screen','仅查看数据'],['screen_and_xlsx','数据和 Excel']].forEach(([value,label]) => { const o = el('option', label); o.value = value; format.appendChild(o); });
+    send = el('button', '发送', 'primary' + (workspace ? ' workspace-send' : ''));
+    const cancel = el('button', '停止', workspace ? 'workspace-cancel' : '');
+    if (workspace) {
+      const composer = el('div', null, 'workspace-composer-card'); composer.appendChild(input);
+      const composerActions = el('div', null, 'workspace-composer-actions');
+      const excelLabel = el('label', null, 'workspace-excel');
+      const excelToggle = documentRef.createElement('input'); excelToggle.type = 'checkbox'; excelToggle.setAttribute('aria-label', '同时生成 Excel');
+      const excelText = el('span', '同时生成 Excel'); excelLabel.append(excelToggle, excelText); composerActions.appendChild(excelLabel);
+      composer.append(composerActions, send, cancel); footer.appendChild(composer);
+      footer.appendChild(el('div', 'Enter 发送 · Shift + Enter 换行', 'workspace-keyboard-hint'));
+      workspaceCancel = cancel;
+      excelToggle.onchange = () => { format.value = excelToggle.checked ? 'screen_and_xlsx' : 'screen'; };
+      format._excelToggle = excelToggle; format._excelText = excelText;
+    } else {
+      footer.appendChild(input); actions.appendChild(format); actions.append(send, cancel); footer.appendChild(actions);
+    }
+    main.appendChild(footer); root.appendChild(panel);
     const excelOption = format.querySelector('option[value="screen_and_xlsx"]');
     function refreshCapabilities() {
       const capabilities = boot.capabilities || {};
       const ready = (capabilities.output_formats || []).includes('screen_and_xlsx');
       excelOption.disabled = !ready; excelOption.textContent = ready ? '数据和 Excel' : 'Excel 暂未开放';
       if (!ready) format.value = 'screen';
+      if (format._excelToggle) {
+        format._excelToggle.disabled = !ready; format._excelToggle.checked = ready && format.value === 'screen_and_xlsx';
+        format._excelText.textContent = ready ? '同时生成 Excel' : 'Excel 暂未开放';
+      }
     }
     refreshCapabilities();
     // R6: all configuration is maintained in platform Settings by the trusted admin account.
     send.onclick = () => { void submitQuestion(); };
     cancel.onclick = stop; close.onclick = () => { stop(); panel.hidden = true; };
-    fresh.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) { message('请先确认当前任务状态。'); return; } conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; activeQuestionRendered = false; clearActive(); updateWorkspaceTitle(null); renderWorkspaceHistory(); };
+    input.onkeydown = event => { if (event.isComposing || event.key !== 'Enter' || event.shiftKey) return; event.preventDefault(); void submitQuestion(); };
+    fresh.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) { message('请先确认当前任务状态。'); return; } conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; activeQuestionRendered = false; clearActive(); updateWorkspaceTitle(null); renderWorkspaceHistory(); syncWorkspaceActions(); };
     history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; body.textContent = ''; progress.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', conversationTitle(s)); b.onclick = () => { conversation = s.id; body.textContent = ''; progress.textContent = ''; s.rounds.forEach(r => { message(r.question,'question'); renderAnswer(r.presentation || {summary:r.answer},false); }); }; body.appendChild(b); }); };
-    if (workspace) renderWorkspaceHistory();
+    if (workspace) { renderWorkspaceHistory(); syncWorkspaceActions(); }
     if (record) void resumeActive(record);
   }
   entry.onclick = open;
