@@ -2233,7 +2233,7 @@ final class AiGatewayServices
             'AI_METRIC_NOT_READY'=>'该指标尚未通过统一报表口径核验，暂不能查询。',
             'AI_EXPORT_NOT_READY'=>'当前 Excel 能力尚未启用，本次未生成文件或发布数字。',
             'AI_MODEL_ACCOUNT_UNAVAILABLE'=>'客户 AI 账号暂不可用，请联系管理员检查 AI 配置。',
-            'AI_MODEL_RESULT_UNKNOWN'=>'本次 AI 请求结果暂未确认，已停止继续调用，请稍后再问。',
+            'AI_MODEL_RESULT_UNKNOWN'=>'本次模型服务在安全等待时间内未返回。为避免重复调用，系统已停止本次任务，请稍后再问。',
             'ATTEMPT_UNKNOWN'=>'本次 AI 请求结果暂未确认，已停止继续调用，请稍后再问。',
             'AI_MODEL_RESPONSE_TRUNCATED'=>'本次 AI 理解结果未完整返回，系统已停止查询，请稍后重试。',
             'AI_MODEL_RESPONSE_ENVELOPE_INVALID'=>'本次 AI 返回格式异常，系统未执行查询，请稍后重试。',

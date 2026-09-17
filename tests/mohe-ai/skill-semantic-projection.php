@@ -42,6 +42,11 @@ $safe=(new AiSafeQuestionProjector())->project('这个月卖得最好的项目',
 $check($safe['outbound']['question']==='这个月卖得最好的项目'&&!$safe['outbound']['has_unresolved_conditions'],'unfamiliar but meaningful wording reaches the model unchanged');
 $safe=(new AiSafeQuestionProjector())->project('消费能力最强的会员有哪一些？',$config,[]);
 $check(strpos($safe['outbound']['question'],'消费能力')!==false,'member intent is not rejected by a local phrase whitelist');
+$history=[];
+for($index=1;$index<=20;$index++) $history[]=['question'=>'第'.$index.'轮问题'];
+$conversation=(new AiSafeQuestionProjector())->projectConversation('继续看刚才的结果',$history,$config,[]);
+$check($conversation['outbound']['recent_questions']===['第15轮问题','第16轮问题','第17轮问题','第18轮问题','第19轮问题','第20轮问题']
+    && count($conversation['outbound']['evidence_messages'])===7,'external context keeps only the latest six de-identified questions while the local transcript remains untouched');
 
 $capabilities=['metric_codes'=>array_keys(MetricDefinitionRegistry::capabilities()),'metric_readiness'=>MetricDefinitionRegistry::capabilities()];
 $project=AiCapabilityGuidanceCatalog::discover($capabilities,'project','ranking');

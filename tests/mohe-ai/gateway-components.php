@@ -141,10 +141,24 @@ namespace {
     check(strpos($outboundText,'skill_intent_understanding')!==false&&strpos($outboundText,'# 用户意图理解')!==false&&strpos($outboundText,'# 门店运营')===false,
         'understanding receives only the source-owned language Skill; business binding guidance stays in the next phase');
     check(strpos($outboundText,\app\services\ai\contract\AiIntentUnderstandingContract::VERSION)!==false,'understanding prompt uses its independent contract');
+    $timeFollowQuestion=$safeQuestion;
+    $timeFollowQuestion['question']='那本月呢？';
+    $timeFollowQuestion['recent_questions']=['今天做得最好的技师是谁'];
+    $timeFollowQuestion['evidence_messages']=[['id'=>'current','text'=>'那本月呢？'],['id'=>'recent_1','text'=>'今天做得最好的技师是谁']];
+    $timeFollowQuestion['prior_query']=['metric_codes'=>['staff_labor_yeji'],'operation'=>'ranking','periods'=>[['kind'=>'relative_days','end_offset_days'=>0,'days'=>1]],'ranking'=>['direction'=>'top','limit'=>1]];
+    $timeOnlyUnderstanding=['goal'=>'查看本月','requirements'=>[['id'=>'r1','meaning'=>'本月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'本月']]]],'status'=>'understood'];
+    $GLOBALS['sfResponse']=$response(json_encode($timeOnlyUnderstanding));
+    $client->understandMeaning($timeFollowQuestion,'fixture/model','fixture-key',1000,function(){},$skills);
+    $timeFollowWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
+    $timeFollowText=implode("\n",array_map(static function($message){return (string)($message['content']??'');},$timeFollowWire['messages']));
+    check(strpos($timeFollowText,'Do not restate a verified prior measurement as a current metric_codes requirement')!==false,
+        'a verified continuation foregrounds the generic current-evidence rule before the provider request');
     check(strpos(\app\services\ai\contract\AiIntentResultContract::modelInstruction(false),'recommended_initial_answer')!==false,
         'binding contract permits a model-owned professional first answer without a phrase-specific server rule');
     check(\app\services\ai\contract\AiIntentResultContract::repairableFormat('context_constraint_without_source:business_filters'),
         'an ungrounded follow-up restriction change receives one bounded model correction');
+    check(strpos(\app\services\ai\contract\AiIntentUnderstandingContract::repairInstruction('values:metric_terms'),'periods requirement with a complete values.periods carrier')!==false,
+        'time-only continuation recovery keeps the changed typed condition without inventing a current metric');
     $GLOBALS['sfResponse']=$response(json_encode($understanding));
     $repairedUnderstanding=$client->understandMeaning($safeQuestion,'fixture/model','fixture-key',1000,function(){},$skills,'values:periods');
     $repairWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
@@ -162,7 +176,7 @@ namespace {
     $bindingText=implode("\n",array_map(static function($message){return (string)($message['content']??'');},$bindingWire['messages']));
     check(strpos($bindingText,'skill_store_operations')!==false&&strpos($bindingText,'skill_intent_understanding')===false,
         'binding keeps the business Skill but does not resend the language Skill after typed understanding is accepted');
-    check(strpos($bindingText,'requirement_bindings MUST be []')!==false,
+    check(strpos($bindingText,'requirement_bindings contains only accepted requirements carrying metric_codes')!==false,
         'binding prompt keeps a model-selected professional first answer separate from customer metric requirements');
     $multiObjectCapabilities=array_merge($meanings,[['metric_code'=>'cash_performance','name'=>'现金业绩','summary'=>'已收成功金额','object_contracts'=>[['object_kind'=>'store','action_codes'=>['sale']]]]]);
     $GLOBALS['sfResponse']=$response(json_encode($intent));

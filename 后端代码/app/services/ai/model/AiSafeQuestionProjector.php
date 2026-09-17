@@ -10,6 +10,13 @@ use app\services\ai\config\AiConfigStore;
  */
 final class AiSafeQuestionProjector
 {
+    // The browser remains the complete 24-hour conversation store.  The
+    // external model receives a deliberately smaller recency window because
+    // the signed prior query carries the executable context independently.
+    // Six prior questions cover a five-round follow-up while keeping an old
+    // local transcript from inflating every provider request.
+    private const MODEL_RECENT_QUESTION_LIMIT = 6;
+
     /**
      * The device keeps the conversation locally.  When the customer has
      * explicitly authorized the external model, only de-identified *questions*
@@ -21,6 +28,8 @@ final class AiSafeQuestionProjector
         // One conversation has one reference map.  A name mentioned in an
         // earlier question must keep the same opaque reference when the next
         // question uses a pronoun, while a newly mentioned name gets a new one.
+        if (count($history)>20) throw new \RuntimeException('AI_CONVERSATION_INVALID');
+        $history=array_slice($history,-self::MODEL_RECENT_QUESTION_LIMIT);
         $references=[];
         $recent=[];
         foreach ($history as $round) {
