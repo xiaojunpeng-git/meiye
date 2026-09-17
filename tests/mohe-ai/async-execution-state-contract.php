@@ -106,6 +106,15 @@ $technicalReasons=$runs->diagnostics()['technical_reasons']??[];
 if (($technicalReasons['AI_MODEL_RESULT_UNKNOWN']??0)!==1) throw new RuntimeException('technical reason aggregates preserve a safe actionable code count');
 $diagnosticPredicates=$runs->diagnostics()['diagnostic_predicates']??[];
 if (($diagnosticPredicates['intent_contract/unexpected_requirement_binding']??0)!==1) throw new RuntimeException('model diagnostics aggregate only bounded structural predicate counts');
+$runtimeDiagnostic=$runs->create($owner,'runtime-diagnostic',hash('sha256','runtime diagnostic'),$snapshot)['run'];
+if (!$runs->claim($owner,$runtimeDiagnostic['run_id'],$runtimeDiagnostic['generation'],'runtime-diagnostic-worker')) throw new RuntimeException('runtime diagnostic fixture claim');
+// This marker has no provider attempt by design. It records a verified
+// execution-path decision, not customer wording, metrics or a result.
+$runs->recordDiagnostic($owner,$runtimeDiagnostic['run_id'],$runtimeDiagnostic['generation'],'runtime-diagnostic-worker',['stage'=>'analysis_binding','predicate'=>'context_period_binding_reused']);
+$runs->fail($owner,$runtimeDiagnostic['run_id'],$runtimeDiagnostic['generation'],'runtime-diagnostic-worker','AI_DEBUG_DIAGNOSTIC');
+$runs->release($owner,$runtimeDiagnostic['run_id'],$runtimeDiagnostic['generation'],'runtime-diagnostic-worker');
+$runtimePredicates=$runs->diagnostics()['diagnostic_predicates']??[];
+if (($runtimePredicates['analysis_binding/context_period_binding_reused']??0)!==1) throw new RuntimeException('runtime-only diagnostics are visible without requiring a model-attempt record');
 
 // Synchronous compatibility mode is an execution mode, not a missing timing
 // sample.  Its accepted, queued and started timestamps are deliberately the

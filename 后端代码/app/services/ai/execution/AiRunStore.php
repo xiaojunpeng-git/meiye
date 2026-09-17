@@ -1069,6 +1069,12 @@ final class AiRunStore
                         $segmentModelTotals[$segmentIndex]=($segmentModelTotals[$segmentIndex]??0)+max(0,$elapsed);
                     }
                 }
+                // `model_diagnostics` belongs to a named model attempt, while
+                // `model_diagnostic` is also used for a non-model runtime
+                // boundary such as a verified context fast path.  Surface the
+                // latter as well, but do not count the same model failure
+                // twice merely because it is also the latest diagnostic.
+                $seenDiagnostics=[];
                 foreach ((array)($detail['model_diagnostics']??[]) as $diagnostic) {
                     $stage=$diagnostic['stage']??null;
                     $predicate=$diagnostic['predicate']??null;
@@ -1076,6 +1082,15 @@ final class AiRunStore
                         || !is_string($predicate) || !preg_match('/^[a-z0-9_:]{1,96}$/D',$predicate)) continue;
                     $key=$stage.'/'.$predicate;
                     $diagnosticPredicates[$key]=($diagnosticPredicates[$key]??0)+1;
+                    $seenDiagnostics[$key]=true;
+                }
+                $diagnostic=$detail['model_diagnostic']??null;
+                $stage=is_array($diagnostic)?($diagnostic['stage']??null):null;
+                $predicate=is_array($diagnostic)?($diagnostic['predicate']??null):null;
+                if (is_string($stage) && preg_match('/^[a-z_]{1,48}$/D',$stage)
+                    && is_string($predicate) && preg_match('/^[a-z0-9_:]{1,96}$/D',$predicate)) {
+                    $key=$stage.'/'.$predicate;
+                    if (!isset($seenDiagnostics[$key])) $diagnosticPredicates[$key]=($diagnosticPredicates[$key]??0)+1;
                 }
                 foreach ($segments as $segmentIndex=>$segment) {
                     if (!is_array($segment)) continue;
