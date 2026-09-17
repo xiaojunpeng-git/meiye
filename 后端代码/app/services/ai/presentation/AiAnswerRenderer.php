@@ -11,7 +11,7 @@ final class AiAnswerRenderer
     public function render(array $view): array
     {
         $dictionary = new \app\services\metric\MetricDictionaryServices();
-        $cards = []; $rows = []; $facts = []; $shape = $view['query']['query_shape'];
+        $cards = []; $rows = []; $facts = []; $metricNames = []; $shape = $view['query']['query_shape'];
         $threshold = $shape === 'threshold_count' ? $this->thresholdCondition($view['query']) : null;
         foreach ($view['results'] as $row) {
             $registered = MetricReadViewServices::metricCapabilities();
@@ -20,6 +20,7 @@ final class AiAnswerRenderer
             }
             $tooltip = $dictionary->getTooltip($row['metric_code']);
             if (empty($tooltip['user_ready'])) throw new RuntimeException('AI_METRIC_EXPLANATION_NOT_READY');
+            if (!in_array($tooltip['name'], $metricNames, true)) $metricNames[] = $tooltip['name'];
             $storageUnit = (string)($row['storage_unit'] ?? 'fen'); $unit = $storageUnit === 'count' ? '个' : '元';
             $range = $row['period'] === 'current' ? ['start' => $view['query']['start_date'], 'end' => $view['query']['end_date']] : $view['query']['compare_range'];
             if ($shape === 'threshold_count') {
@@ -35,16 +36,36 @@ final class AiAnswerRenderer
                 continue;
             }
             if ($shape === 'trend') {
-                foreach ($row['rows'] as $point) $rows[] = ['label' => $point['business_date'], 'metric' => $tooltip['name'], 'value' => $this->metricValue($point['amount_cents'], $storageUnit), 'unit' => $unit];
+                foreach ($row['rows'] as $point) $rows[] = [
+                    'label' => $point['business_date'], 'metric' => $tooltip['name'],
+                    'value' => $this->metricValue($point['amount_cents'], $storageUnit), 'unit' => $unit,
+                    'period' => $row['period'], 'period_label' => $this->periodLabel($row['period']),
+                ];
                 continue;
             }
             if ($shape === 'ranking') {
                 $metricLabel = $tooltip['name'];
                 if (($row['participant_relation'] ?? false) === true && is_string($row['object_label'] ?? null)) $metricLabel = $row['object_label'] . '关联订单' . $tooltip['name'];
-                foreach ($row['rows'] as $direction => $points) foreach ($points as $index => $point) $rows[] = [
-                    'label' => $point['employee_name'] ?? ($point['member_name'] ?? ($point['entity_name'] ?? ($point['store_name'] ?? ('门店 ID ' . $point['store_id'])))),
-                    'metric' => $metricLabel, 'rank' => ($direction === 'top' ? '前' : '后') . ($index + 1), 'value' => $this->metricValue($point['amount_cents'], $storageUnit), 'unit' => $unit,
-                ];
+                foreach ($row['rows'] as $direction => $points) {
+                    $valueCounts = [];
+                    foreach ($points as $point) {
+                        if (!is_int($point['amount_cents'] ?? null)) throw new RuntimeException('AI_EVIDENCE_VALUE_INVALID');
+                        $value = (string)$point['amount_cents'];
+                        $valueCounts[$value] = ($valueCounts[$value] ?? 0) + 1;
+                    }
+                    $ordinal = 0; $previous = null;
+                    foreach ($points as $index => $point) {
+                        $amount = $point['amount_cents'];
+                        if ($previous === null || $amount !== $previous) $ordinal = $index + 1;
+                        $previous = $amount;
+                        $rank = ($valueCounts[(string)$amount] > 1 ? '并列' : '') . ($direction === 'top' ? '前' : '后') . $ordinal;
+                        $rows[] = [
+                            'label' => $point['employee_name'] ?? ($point['member_name'] ?? ($point['entity_name'] ?? ($point['store_name'] ?? ('门店 ID ' . $point['store_id'])))),
+                            'metric' => $metricLabel, 'rank' => $rank, 'value' => $this->metricValue($amount, $storageUnit), 'unit' => $unit,
+                            'period' => $row['period'], 'period_label' => $this->periodLabel($row['period']),
+                        ];
+                    }
+                }
                 continue;
             }
             $display = $this->metricValue($storageUnit === 'count' ? ($row['count'] ?? null) : ($row['amount_cents'] ?? null), $storageUnit);
@@ -53,7 +74,7 @@ final class AiAnswerRenderer
                 'period_label' => ($row['period'] === 'current' ? '查询期间：' : '对比期间：') . $range['start'] . ' 至 ' . $range['end'],
                 'start_date' => $range['start'], 'end_date' => $range['end'], 'data_as_of' => $view['data_as_of']];
         }
-        $summary = $shape === 'threshold_count' ? $this->thresholdSummary($facts, $threshold) : $this->resultSummary($shape, $facts, $rows);
+        $summary = $shape === 'threshold_count' ? $this->thresholdSummary($facts, $threshold) : $this->resultSummary($shape, $facts, $rows, $metricNames);
         $summary .= ($summary === '' ? '' : ' ') . '统计时间：' . $view['query']['start_date'] . ' 至 ' . $view['query']['end_date'] . '。';
         $answer = ['summary' => $summary, 'cards' => $cards];
         $queryMetrics = is_array($view['query']['metric_codes'] ?? null) ? $view['query']['metric_codes'] : [];
@@ -73,21 +94,22 @@ final class AiAnswerRenderer
             $answer['summary'] .= ' 人员范围：' . $view['personnel_selection_label'] . '（按当前任职筛选）。';
             $criteria = []; foreach ($view['query']['metric_codes'] as $code) $criteria[] = $dictionary->getTooltip($code)['name'];
             $answer['summary'] .= ' 评价指标：' . implode('、', $criteria) . '。';
-            if ($shape === 'ranking') $answer['summary'] .= $rows ? '仅按所选指标排序，不代表综合评价；相同金额按稳定人员顺序展示。' : '本期间没有符合条件的人员业绩事实，不能据此评定谁表现最好。';
+            if ($shape === 'ranking' && $rows) $answer['summary'] .= '仅按所选指标排序，不代表综合评价；相同数值标记为并列，并按稳定人员顺序展示。';
         }
         if ($member && $shape === 'ranking') {
             $criteria = []; foreach ($view['query']['metric_codes'] as $code) $criteria[] = $dictionary->getTooltip($code)['name'];
             $answer['summary'] .= ' 会员评价指标：' . implode('、', $criteria) . '。';
-            if ($shape === 'ranking') $answer['summary'] .= $rows ? '仅按所选指标排序；相同数值按稳定会员顺序展示。' : '本期间没有符合条件的会员数据。';
+            if ($shape === 'ranking' && $rows) $answer['summary'] .= '仅按所选指标排序；相同数值标记为并列，并按稳定会员顺序展示。';
         }
         if ($dimensionLabel !== null) {
             $criteria = []; foreach ($view['query']['metric_codes'] as $code) $criteria[] = $dictionary->getTooltip($code)['name'];
             $answer['summary'] .= $dimensionLabel . '评价指标：' . implode('、', $criteria) . '。';
-            if ($shape === 'ranking') $answer['summary'] .= $rows ? '仅按所选指标排序；相同数值按稳定' . $dimensionLabel . '顺序展示。' : '本期间没有符合条件的' . $dimensionLabel . '数据。';
+            if ($shape === 'ranking' && $rows) $answer['summary'] .= '仅按所选指标排序；相同数值标记为并列，并按稳定' . $dimensionLabel . '顺序展示。';
         }
         if ($view['query']['compare_range']) $answer['summary'] .= '对比时间：' . $view['query']['compare_range']['start'] . ' 至 ' . $view['query']['compare_range']['end'] . '。';
         if ($rows) {
             $columns = [['key' => 'label', 'label' => $shape === 'trend' ? '日期' : ($person ? '人员' : ($member ? '会员' : ($dimensionLabel ?? '门店')))], ['key' => 'metric', 'label' => '指标'], ['key' => 'value', 'label' => '数值'], ['key' => 'unit', 'label' => '单位']];
+            if (count(array_unique(array_column($rows, 'period'))) > 1) array_unshift($columns, ['key' => 'period_label', 'label' => '期间']);
             if ($shape === 'ranking') $columns[] = ['key' => 'rank', 'label' => '名次'];
             $answer['table'] = ['columns' => $columns, 'rows' => $rows];
         }
@@ -95,7 +117,7 @@ final class AiAnswerRenderer
     }
 
     /** Builds the first visible sentence only from the Reader evidence already on screen. */
-    private function resultSummary(string $shape, array $facts, array $rows): string
+    private function resultSummary(string $shape, array $facts, array $rows, array $metricNames): string
     {
         if ($shape === 'summary' && $facts) {
             $parts = [];
@@ -110,27 +132,47 @@ final class AiAnswerRenderer
             return $parts ? implode('。', $parts) . '。' : '';
         }
         if ($shape === 'ranking' && $rows) {
-            $first = $rows[0];
-            // A short ranking is commonly a continuation such as “第二名
-            // 呢？”.  State every already verified row instead of leading
-            // with the first one and making the customer scan a table for the
-            // requested result.  This is deliberately based only on the
-            // generic read-view rows: no metric, object or Chinese phrase is
-            // special-cased.  Longer rankings remain table-first to keep the
-            // answer readable on mobile.
-            if (count($rows) > 1 && count($rows) <= 3) {
-                return implode('；', array_map(static function (array $row): string {
-                    return ($row['rank'] ?? '首位') . '是' . $row['label'] . '，'
-                        . $row['metric'] . '为' . $row['value'] . $row['unit'];
-                }, $rows)) . '。';
+            $periods = [];
+            foreach ($rows as $row) $periods[$row['period'] ?? 'current'][] = $row;
+            if (count($periods) > 1) {
+                $parts = [];
+                foreach (['current', 'comparison'] as $period) if (isset($periods[$period])) {
+                    $parts[] = $this->periodLabel($period) . '：' . $this->rankingNarrative($periods[$period]);
+                }
+                return implode(' ', $parts);
             }
-            return ($first['rank'] ?? '首位') . '是' . $first['label'] . '，' . $first['metric'] . '为' . $first['value'] . $first['unit'] . '。';
+            return $this->rankingNarrative($rows);
         }
         if ($shape === 'trend' && $rows) {
-            $last = $rows[count($rows) - 1];
+            $last = null;
+            foreach ($rows as $row) if (($row['period'] ?? 'current') === 'current') $last = $row;
+            $last = $last ?? $rows[count($rows) - 1];
             return $last['label'] . '的' . $last['metric'] . '为' . $last['value'] . $last['unit'] . '。';
         }
+        if (in_array($shape, ['ranking', 'trend'], true)) return '本期间没有符合当前筛选条件的' . implode('、', $metricNames ?: ['数据']) . '数据。';
         return '已按您当前报表的数据范围查询。';
+    }
+
+    /** @param array<int,array<string,mixed>> $rows */
+    private function rankingNarrative(array $rows): string
+    {
+        $first = $rows[0];
+        // A short ranking is commonly a continuation such as “第二名呢？”.
+        // State every verified row; longer rankings remain table-first.
+        if (count($rows) > 1 && count($rows) <= 3) {
+            return implode('；', array_map(static function (array $row): string {
+                return ($row['rank'] ?? '首位') . '是' . $row['label'] . '，'
+                    . $row['metric'] . '为' . $row['value'] . $row['unit'];
+            }, $rows)) . '。';
+        }
+        return ($first['rank'] ?? '首位') . '是' . $first['label'] . '，' . $first['metric'] . '为' . $first['value'] . $first['unit'] . '。';
+    }
+
+    private function periodLabel(string $period): string
+    {
+        if ($period === 'current') return '本期';
+        if ($period === 'comparison') return '对比期';
+        throw new RuntimeException('AI_EVIDENCE_INVALID');
     }
 
     /** The condition is already compiler-verified; this only turns it into customer wording. */

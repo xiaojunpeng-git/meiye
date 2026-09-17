@@ -56,6 +56,37 @@ $cashView['results']=[['metric_code'=>'cash_performance','period'=>'current','ro
 $shortRanking=$renderer->render($cashView);
 $check(strpos($shortRanking['summary'],'前1是甲店，现金业绩为151元；前2是乙店，现金业绩为120元。')===0,
     'a short verified ranking names every displayed ordinal instead of hiding a follow-up target behind the first row');
+$cashView['results']=[['metric_code'=>'cash_performance','period'=>'current','rows'=>['top'=>[
+    ['store_id'=>1,'store_name'=>'甲店','amount_cents'=>15050],
+    ['store_id'=>2,'store_name'=>'乙店','amount_cents'=>15050],
+    ['store_id'=>3,'store_name'=>'丙店','amount_cents'=>12000],
+]]]];
+$tiedRanking=$renderer->render($cashView);
+$check(array_column($tiedRanking['table']['rows'],'rank')===['并列前1','并列前1','前3']
+    && strpos($tiedRanking['summary'],'并列前1是甲店')===0,
+    'equal verified values retain their shared ordinal instead of becoming false first and second places');
+$cashView['query']['compare_range']=['start'=>'2026-09-07','end'=>'2026-09-07'];
+$cashView['results']=[
+    ['metric_code'=>'cash_performance','period'=>'current','rows'=>['top'=>[['store_id'=>1,'store_name'=>'甲店','amount_cents'=>15050]]]],
+    ['metric_code'=>'cash_performance','period'=>'comparison','rows'=>['top'=>[['store_id'=>2,'store_name'=>'乙店','amount_cents'=>12000]]]],
+];
+$comparisonRanking=$renderer->render($cashView);
+$check(($comparisonRanking['table']['columns'][0]['key'] ?? null)==='period_label'
+    && array_column($comparisonRanking['table']['rows'],'period_label')===['本期','对比期']
+    && strpos($comparisonRanking['summary'],'本期：前1是甲店')===0 && strpos($comparisonRanking['summary'],'对比期：前1是乙店')!==false,
+    'ranking comparisons retain each evidence period in both conclusion and table');
+$cashView['query']['compare_range']=null;
+$cashView['results']=[['metric_code'=>'cash_performance','period'=>'current','rows'=>['top'=>[]]]];
+$emptyRanking=$renderer->render($cashView);
+$check(strpos($emptyRanking['summary'],'本期间没有符合当前筛选条件的现金业绩数据。')===0 && !isset($emptyRanking['table']),
+    'empty verified rankings state no matching data instead of a generic processing claim');
+$trend=$renderer->render(['query'=>['query_shape'=>'trend','start_date'=>'2026-09-08','end_date'=>'2026-09-08','compare_range'=>['start'=>'2026-09-07','end'=>'2026-09-07']],
+    'data_as_of'=>'2026-09-08T12:00:00+08:00','results'=>[
+        ['metric_code'=>'cash_performance','period'=>'current','rows'=>[['business_date'=>'2026-09-08','amount_cents'=>15050]]],
+        ['metric_code'=>'cash_performance','period'=>'comparison','rows'=>[['business_date'=>'2026-09-07','amount_cents'=>12000]]],
+    ]]);
+$check(($trend['table']['columns'][0]['key'] ?? null)==='period_label' && strpos($trend['summary'],'2026-09-08的现金业绩为151元。')===0,
+    'trend comparison labels rows and keeps the conclusion on the current period');
 $cashView['query']['query_shape']='summary';
 $cashView['results']=[['metric_code'=>'actual_performance','period'=>'current','amount_cents'=>15050,'storage_unit'=>'fen']];
 $actual=$renderer->render($cashView);
