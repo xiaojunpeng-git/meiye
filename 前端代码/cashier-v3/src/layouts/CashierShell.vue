@@ -20,6 +20,7 @@ import Settings from '@lucide/vue/dist/esm/icons/settings.mjs'
 import Store from '@lucide/vue/dist/esm/icons/store.mjs'
 import Users from '@lucide/vue/dist/esm/icons/users.mjs'
 import MemberSelectorOverlay from '@/components/common/MemberSelectorOverlay.vue'
+import MoheAiEntry from '@/components/MoheAiEntry.vue'
 import MemberSummaryCard from '@/components/common/MemberSummaryCard.vue'
 import MemberDetailOverlay from '@/components/member/MemberDetailOverlay.vue'
 import MemberDebtOverlay from '@/components/member/MemberDebtOverlay.vue'
@@ -3007,6 +3008,8 @@ onBeforeUnmount(() => {
       </main>
     </section>
   </div>
+
+  <MoheAiEntry />
 
   <Teleport to="body">
     <div v-if="isOperationHelpOpen" class="help-modal" role="dialog" aria-modal="true" aria-label="收银操作说明">

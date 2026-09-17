@@ -3,13 +3,15 @@
 import { onMounted, onBeforeUnmount } from 'vue'
 import { mountMoheAi } from '../../../shared/mohe-ai/browser-entry.mjs'
 import { browserTransport } from '../../../shared/mohe-ai/browser-transport.mjs'
+import moheAiEntryIcon from '../assets/mohe-ai-entry-orbits.gif'
 import { readStoreV3SessionToken } from '../services/storeV3SessionToken.js'
 let dispose
 onMounted(() => {
   dispose = mountMoheAi({
     request: browserTransport('/cashierapi/v3/ai', readStoreV3SessionToken),
     entryLeft: '116px',
-    panelLeft: '128px'
+    panelLeft: '128px',
+    entryIconUrl: moheAiEntryIcon
   })
 })
 onBeforeUnmount(() => { if (dispose) dispose() })

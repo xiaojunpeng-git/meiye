@@ -2,7 +2,7 @@ import { DeviceSessions, newId, isTerminal, acceptRun } from './device-session.m
 import { GUIDANCE_SCHEMA, validateClarification, clarificationKey, clarificationSubmission } from './clarification-state.mjs';
 
 // Framework-neutral, shadow-scoped adapter. No business arithmetic or HTML injection.
-export function mountMoheAi({ request, storage = window.localStorage, documentRef = document, entryLeft = '0px', panelLeft = '12px' }) {
+export function mountMoheAi({ request, storage = window.localStorage, documentRef = document, entryLeft = '0px', panelLeft = '12px', presentation = 'drawer', entryIconUrl = '' }) {
   // The platform shell can briefly retain the previous route component while
   // mounting its replacement.  Two entries would share one device runtime:
   // a late terminal projection from the retired entry could otherwise clear
@@ -14,19 +14,44 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     if (typeof previousHost.__moheAiDispose === 'function') previousHost.__moheAiDispose();
     else previousHost.remove();
   }
-  const host = documentRef.createElement('div'); host.dataset.moheAi = 'entry';
+  const host = documentRef.createElement('div'); host.dataset.moheAi = 'entry'; host.dataset.moheAiPresentation = presentation;
   // A terminal with a persistent sidebar can reserve that width while the
   // entry remains fixed at the left-middle of the actual work area.
   host.style.setProperty('--mohe-ai-entry-left', entryLeft);
   host.style.setProperty('--mohe-ai-panel-left', panelLeft);
   documentRef.body.appendChild(host); const root = host.attachShadow({ mode: 'open' });
   const style = documentRef.createElement('style'); style.textContent = `
-    :host{font:14px/1.5 system-ui,sans-serif;color:#243447}button,input,textarea,select{font:inherit}button{cursor:pointer;border:1px solid #dbe2ec;border-radius:8px;background:white;padding:7px 12px;color:inherit}button:disabled{opacity:.5;cursor:default}.entry{position:fixed;left:var(--mohe-ai-entry-left);top:50%;transform:translateY(-50%);z-index:2147483000;background:#5142b5;color:white;border-radius:0 14px 14px 0;padding:12px 10px}.panel{position:fixed;left:var(--mohe-ai-panel-left);top:50%;transform:translateY(-50%);width:min(440px,calc(100vw - var(--mohe-ai-panel-left) - 12px));height:min(700px,calc(100vh - 32px));z-index:2147483001;background:white;border:1px solid #dce2ed;border-radius:16px;box-shadow:0 16px 60px #17233d33;display:flex;flex-direction:column;overflow:hidden}.head,.footer{padding:14px;border-bottom:1px solid #edf0f4}.head{display:flex;gap:8px;align-items:center}.head strong{flex:1}.body{overflow:auto;padding:14px;flex:1}.message{white-space:pre-wrap;margin:8px 0;padding:10px;border-radius:10px;background:#f5f6fa}.question{background:#eeebff}.card{border:1px solid #e2e8f0;padding:12px;margin:8px 0;border-radius:10px}.value{font-size:26px;color:#1f5f8b}.muted{color:#65758b;font-size:12px}.footer{border-top:1px solid #edf0f4;border-bottom:0}textarea{box-sizing:border-box;width:100%;resize:vertical;min-height:65px;border:1px solid #ccd5e3;border-radius:8px;padding:8px}.actions{display:flex;gap:8px;align-items:center;margin-top:8px}.primary{background:#5142b5;color:white}.error{color:#9a3412}select,input{max-width:100%;padding:6px;margin:5px 0}table{border-collapse:collapse;display:block;overflow:auto}td,th{border:1px solid #e2e8f0;padding:6px;white-space:nowrap}`;
+    :host{--mohe-ai-brand:#1677cc;--mohe-ai-brand-soft:#eaf4ff;font:14px/1.5 system-ui,sans-serif;color:#243447}
+    button,input,textarea,select{font:inherit}button{cursor:pointer;border:1px solid #dbe2ec;border-radius:8px;background:white;padding:7px 12px;color:inherit}button:disabled{opacity:.5;cursor:default}
+    .entry{position:fixed;left:var(--mohe-ai-entry-left);top:50%;transform:translateY(-50%);z-index:2147483000;background:var(--mohe-ai-brand);color:white;border-radius:0 14px 14px 0;padding:12px 10px}
+    .entry.entry--icon{width:58px;height:58px;min-width:58px;min-height:58px;box-sizing:border-box;padding:0;border:0;border-radius:50%;background:transparent;overflow:visible;box-shadow:0 10px 26px #1669ca55}.entry.entry--icon:hover{transform:translateY(-50%) scale(1.04);box-shadow:0 13px 32px #1669ca77}.entry-icon{display:block;width:100%;height:100%;border-radius:50%;object-fit:contain}
+    .panel{position:fixed;left:var(--mohe-ai-panel-left);top:50%;transform:translateY(-50%);width:min(440px,calc(100vw - var(--mohe-ai-panel-left) - 12px));height:min(700px,calc(100vh - 32px));z-index:2147483001;box-sizing:border-box;background:white;border:1px solid #dce2ed;border-radius:16px;box-shadow:0 16px 60px #17233d33;display:flex;flex-direction:column;overflow:hidden}
+    .head,.footer{padding:14px;border-bottom:1px solid #edf0f4}.head{display:flex;gap:8px;align-items:center;min-width:0}.head strong{flex:1;min-width:0}.head button{flex:0 0 auto;white-space:nowrap}
+    .body{min-height:0;overflow:auto;padding:14px;flex:1}.message{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0;padding:10px;border-radius:10px;background:#f5f6fa}.question{background:var(--mohe-ai-brand-soft);color:#174f7d}
+    .card{border:1px solid #e2e8f0;padding:12px;margin:8px 0;border-radius:10px;overflow-wrap:anywhere}.value{font-size:26px;color:#1f5f8b}.muted{color:#65758b;font-size:12px}
+    .footer{flex:0 0 auto;border-top:1px solid #edf0f4;border-bottom:0}textarea{box-sizing:border-box;width:100%;resize:vertical;min-height:65px;max-height:160px;border:1px solid #ccd5e3;border-radius:8px;padding:8px}.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}.actions select{flex:1 1 120px}.primary{background:var(--mohe-ai-brand);color:white}.error{color:#9a3412}select,input{max-width:100%;padding:6px;margin:5px 0}table{border-collapse:collapse;display:block;max-width:100%;overflow:auto}td,th{border:1px solid #e2e8f0;padding:6px;white-space:nowrap}
+    @media (max-width:560px){.panel{left:12px;width:calc(100vw - 24px);height:calc(100vh - 24px);top:12px;transform:none;border-radius:14px}.entry{top:auto;bottom:24px;transform:none}.head{flex-wrap:wrap}.head strong{flex-basis:100%}.head button{padding:6px 10px}.footer{padding:12px}.actions button{flex:1 1 auto}}
+    /* The platform uses the supplied desktop reference as a dedicated AI
+       workspace. Keep this opt-in so the separately approved cashier drawer
+       remains unchanged. */
+    .panel.workspace{inset:0;width:100vw;height:100vh;transform:none;border:0;border-radius:0;box-shadow:none;display:flex;flex-direction:row;background:#fff;color:#111827}
+    .workspace-aside{width:284px;flex:0 0 284px;box-sizing:border-box;display:flex;flex-direction:column;padding:26px 14px 24px;background:#fbfbfc;border-right:1px solid #e7e9ee}
+    .workspace-brand{display:flex;align-items:center;min-height:36px;padding:0 14px;font-size:23px;font-weight:700;letter-spacing:.02em;color:#111827}
+    .workspace-new{margin:30px 0 36px;border:0;border-radius:15px;padding:16px 20px;text-align:left;font-size:17px;font-weight:650;color:#1d2f9e;background:#eeecff}.workspace-new:hover{background:#e5e2ff}
+    .workspace-recent-label{padding:0 16px 12px;color:#7b8390;font-size:14px}.workspace-history{display:grid;gap:4px;overflow:auto}.workspace-history button{border:0;background:transparent;text-align:left;padding:12px 16px;border-radius:10px;font-size:16px;color:#273143;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.workspace-history button:hover,.workspace-history button[aria-current="true"]{background:#ebeaff;color:#252873}
+    .workspace-retention{margin-top:auto;padding:20px 16px;color:#7b8390;font-size:13px;border-bottom:1px solid #e7e9ee}.workspace-main{min-width:0;flex:1;display:flex;flex-direction:column;background:#fff}.workspace-top{display:flex;align-items:center;min-height:78px;padding:0 28px;border-bottom:1px solid #e7e9ee}.workspace-title{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:23px;font-weight:650}.workspace-close{border:0;padding:8px 12px;font-size:24px;line-height:1;color:#465163}.workspace .body{width:min(1135px,calc(100% - 80px));box-sizing:border-box;margin:0 auto;padding:40px 0 32px}.workspace .message{max-width:100%;margin:0 0 38px;padding:0;border-radius:0;background:transparent;color:#151b27;font-size:21px;line-height:1.7}.workspace .message.muted{font-size:14px;line-height:1.5;color:#778092}.workspace .message.question{width:max-content;max-width:78%;margin:0 0 48px auto;padding:15px 24px;border-radius:22px;background:#17191e;color:#fff;font-size:18px;line-height:1.45}.workspace .card{margin:14px 0;border:1px solid #e7e9ee;border-radius:14px;padding:18px 20px;background:#fff}.workspace .value{color:#111827}.workspace table{width:100%;margin:18px 0;border-collapse:collapse;display:table}.workspace td,.workspace th{border-width:0 0 1px;padding:14px;text-align:left;color:#1f2937}.workspace th{color:#6e7786;font-weight:500}.workspace .footer{width:min(1135px,calc(100% - 80px));box-sizing:border-box;margin:0 auto;padding:0 0 24px;border:0;background:#fff}.workspace textarea{min-height:88px;resize:none;padding:18px 20px;border:1px solid #d9dee7;border-radius:22px;font-size:17px;background:#fff}.workspace .actions{margin-top:8px}.workspace .actions select{flex:0 1 180px;border:0;background:transparent}.workspace .primary{margin-left:auto;width:48px;height:48px;padding:0;border-radius:50%;font-size:0;background:#111;color:#fff}.workspace .primary::after{content:'↑';font-size:25px;line-height:1}.workspace .actions button:not(.primary){border:0;background:transparent;color:#667085}.workspace .entry{display:none}
+    :host([data-mohe-ai-presentation="workspace"]) .entry{left:auto;right:28px;top:auto;bottom:30px;transform:none}
+    :host([data-mohe-ai-presentation="workspace"]) .entry.entry--icon:hover{transform:scale(1.04)}
+    @media (max-width:760px){.panel.workspace{display:block;overflow:auto}.workspace-aside{display:none}.workspace-main{min-height:100vh}.workspace-top{min-height:62px;padding:0 18px}.workspace-title{font-size:19px}.workspace .body,.workspace .footer{width:calc(100% - 32px)}.workspace .body{padding-top:28px}.workspace .message{font-size:17px}.workspace .message.question{font-size:16px;max-width:88%;margin-bottom:30px}.workspace .footer{position:sticky;bottom:0;padding:12px 0 16px}.workspace textarea{min-height:72px;border-radius:18px}.workspace-new{margin-top:16px}:host([data-mohe-ai-presentation="workspace"]) .entry{right:16px;bottom:18px}}
+  `;
   style.textContent += '[hidden]{display:none!important}';
   root.appendChild(style);
   const el = (tag, text, cls) => { const n = documentRef.createElement(tag); if (text != null) n.textContent = String(text); if (cls) n.className = cls; return n; };
-  let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, activeQuestionRendered = false;
-  let clientSession = newId(); const entry = el('button', '魔核 AI', 'entry'); entry.hidden = true; root.appendChild(entry);
+  let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, activeQuestionRendered = false, workspaceTitle = null, workspaceHistory = null;
+  let clientSession = newId(); const entry = el('button', entryIconUrl ? null : '魔核 AI', entryIconUrl ? 'entry entry--icon' : 'entry');
+  entry.type = 'button'; entry.setAttribute('aria-label', '打开魔核 AI 工作台');
+  if (entryIconUrl) { const icon = documentRef.createElement('img'); icon.className = 'entry-icon'; icon.src = entryIconUrl; icon.alt = ''; entry.appendChild(icon); }
+  entry.hidden = true; root.appendChild(entry);
   // A clarification POST is durably accepted before the worker can change the
   // public Run status.  Keep polling that same step instead of rendering its
   // old controls again or treating WAITING_CLARIFICATION as an idle state.
@@ -56,6 +81,31 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     if (previous) previous.remove();
     const n = el('div', question, 'message question'); n.dataset.moheAiActiveQuestion = 'true';
     body.appendChild(n); body.scrollTop = body.scrollHeight; activeQuestionRendered = true;
+  }
+  function conversationTitle(value) {
+    const first = value && Array.isArray(value.rounds) && value.rounds[0];
+    return first && typeof first.question === 'string' && first.question.trim() ? first.question.trim() : '新对话';
+  }
+  function updateWorkspaceTitle(value) {
+    if (workspaceTitle) workspaceTitle.textContent = conversationTitle(value);
+  }
+  function renderWorkspaceHistory() {
+    if (!workspaceHistory || !sessions) return;
+    workspaceHistory.textContent = '';
+    // A customer can open and close the workbench without asking anything.
+    // Keep the current draft visible, but do not fill the recent-conversation
+    // list with those empty local shells.
+    sessions.load().filter(item => item.id === conversation || (Array.isArray(item.rounds) && item.rounds.length > 0)).slice().reverse().forEach(item => {
+      const button = el('button', conversationTitle(item));
+      if (item.id === conversation) button.setAttribute('aria-current', 'true');
+      button.onclick = () => {
+        if (pendingCreate || (run && !isTerminal(run.status))) return;
+        conversation = item.id; body.textContent = ''; progress.textContent = '';
+        item.rounds.forEach(row => { message(row.question, 'question'); renderAnswer(row.presentation || { summary: row.answer }, false); });
+        updateWorkspaceTitle(item); renderWorkspaceHistory();
+      };
+      workspaceHistory.appendChild(button);
+    });
   }
   // Once the current Run reaches a terminal projection, its question becomes
   // an immutable transcript turn.  Keep it visible, but remove the active
@@ -397,6 +447,9 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         window_token: boot.window_token, question, history: sessions.history(conversation), output_format: format.value };
       if (activeGuidanceSchema === GUIDANCE_SCHEMA) pendingCreate.guidance_schema_version = GUIDANCE_SCHEMA;
       const contextRef = sessions.contextRef(conversation); if (contextRef) pendingCreate.context_ref = contextRef;
+      // The workspace header is customer-facing context, so show the actual
+      // submitted wording instead of a generic title as soon as it is durable.
+      updateWorkspaceTitle({ rounds: [{ question }] }); renderWorkspaceHistory();
     }
     if (!clientDeliveryStartedAt) clientDeliveryStartedAt=Date.now();
     if (sessions) sessions.setPendingQuestion(conversation, question);
@@ -502,10 +555,25 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       }
       conversation = record ? record.conversation_id : sessions.create().id;
     } catch (_) { return; }
-    panel = el('section', null, 'panel'); panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', '魔核 AI');
-    const head = el('div', null, 'head'); head.appendChild(el('strong', '魔核 AI')); const history = el('button', '历史'); const fresh = el('button', '新对话'); const close = el('button', '关闭'); head.append(history, fresh, close); panel.appendChild(head);
-    body = el('div', null, 'body'); panel.appendChild(body); message('能确定就直接查；有歧义逐步选清，明确后立即查询。聊天只保留在本设备 24 小时。', 'muted');
-    const footer = el('div', null, 'footer'); progress = el('div', '', 'muted'); progress.setAttribute('role', 'status'); footer.appendChild(progress); input = el('textarea'); input.placeholder = '例如：今天经营情况如何？'; input.maxLength = 4000; footer.appendChild(input); const actions = el('div', null, 'actions'); format = el('select'); [['screen','仅查看数据'],['screen_and_xlsx','数据和 Excel']].forEach(([value,label]) => { const o = el('option', label); o.value = value; format.appendChild(o); }); actions.appendChild(format); send = el('button', '发送', 'primary'); const cancel = el('button', '停止'); actions.append(send,cancel); footer.appendChild(actions); panel.appendChild(footer); root.appendChild(panel);
+    const workspace = presentation === 'workspace';
+    panel = el('section', null, 'panel' + (workspace ? ' workspace' : '')); panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', '魔核 AI');
+    const history = el('button', '历史'); const fresh = el('button', '新对话'); const close = el('button', workspace ? '×' : '关闭');
+    let main = panel;
+    if (workspace) {
+      const aside = el('aside', null, 'workspace-aside');
+      aside.appendChild(el('div', '魔核 AI', 'workspace-brand'));
+      fresh.className = 'workspace-new'; aside.appendChild(fresh);
+      aside.appendChild(el('div', '近期对话', 'workspace-recent-label'));
+      workspaceHistory = el('div', null, 'workspace-history'); aside.appendChild(workspaceHistory);
+      aside.appendChild(el('div', '会话仅在本机保留 24 小时', 'workspace-retention'));
+      main = el('div', null, 'workspace-main');
+      const top = el('div', null, 'workspace-top'); workspaceTitle = el('div', conversationTitle(record ? sessions.load().find(item => item.id === conversation) : null), 'workspace-title'); close.className = 'workspace-close'; close.setAttribute('aria-label', '关闭魔核 AI'); top.append(workspaceTitle, close); main.appendChild(top); panel.append(aside, main);
+    } else {
+      const head = el('div', null, 'head'); head.appendChild(el('strong', '魔核 AI')); head.append(history, fresh, close); panel.appendChild(head);
+    }
+    body = el('div', null, 'body'); main.appendChild(body);
+    if (!workspace) message('能确定就直接查；有歧义逐步选清，明确后立即查询。聊天只保留在本设备 24 小时。', 'muted');
+    const footer = el('div', null, 'footer'); progress = el('div', '', 'muted'); progress.setAttribute('role', 'status'); footer.appendChild(progress); input = el('textarea'); input.placeholder = workspace ? '继续问，例如：按销量看呢？' : '例如：今天经营情况如何？'; input.maxLength = 4000; footer.appendChild(input); const actions = el('div', null, 'actions'); format = el('select'); [['screen','仅查看数据'],['screen_and_xlsx','数据和 Excel']].forEach(([value,label]) => { const o = el('option', label); o.value = value; format.appendChild(o); }); actions.appendChild(format); send = el('button', '发送', 'primary'); const cancel = el('button', '停止'); actions.append(send,cancel); footer.appendChild(actions); main.appendChild(footer); root.appendChild(panel);
     const excelOption = format.querySelector('option[value="screen_and_xlsx"]');
     function refreshCapabilities() {
       const capabilities = boot.capabilities || {};
@@ -517,8 +585,9 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     // R6: all configuration is maintained in platform Settings by the trusted admin account.
     send.onclick = () => { void submitQuestion(); };
     cancel.onclick = stop; close.onclick = () => { stop(); panel.hidden = true; };
-    fresh.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) { message('请先确认当前任务状态。'); return; } conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; activeQuestionRendered = false; clearActive(); };
-    history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; body.textContent = ''; progress.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', s.rounds[0] ? s.rounds[0].question.slice(0,30) : '新对话'); b.onclick = () => { conversation = s.id; body.textContent = ''; progress.textContent = ''; s.rounds.forEach(r => { message(r.question,'question'); renderAnswer(r.presentation || {summary:r.answer},false); }); }; body.appendChild(b); }); };
+    fresh.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) { message('请先确认当前任务状态。'); return; } conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; activeQuestionRendered = false; clearActive(); updateWorkspaceTitle(null); renderWorkspaceHistory(); };
+    history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; body.textContent = ''; progress.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', conversationTitle(s)); b.onclick = () => { conversation = s.id; body.textContent = ''; progress.textContent = ''; s.rounds.forEach(r => { message(r.question,'question'); renderAnswer(r.presentation || {summary:r.answer},false); }); }; body.appendChild(b); }); };
+    if (workspace) renderWorkspaceHistory();
     if (record) void resumeActive(record);
   }
   entry.onclick = open;

@@ -19,13 +19,25 @@ $entry=file_get_contents(dirname(__DIR__,2).'/前端代码/mobile-vue3/src/share
 $bootstrap=file_get_contents(dirname(__DIR__,2).'/前端代码/mobile-vue3/src/app/pages/bootstrap/index.uvue');
 $check(is_string($bootstrap) && strpos($bootstrap,'class="login-command" role="button"')!==false,
     'the merchant bootstrap login action exposes accessible button semantics for device acceptance');
-$check(is_string($entry) && strpos($entry,'role="button"')!==false && strpos($entry,'aria-label="打开魔核 AI"')!==false,
+$check(is_string($entry) && strpos($entry,'role="button"')!==false && strpos($entry,'aria-label="打开魔核 AI 工作台"')!==false,
     'the visible AI entry exposes an accessible interactive control');
+$check(is_string($entry) && strpos($entry,'class="ai-entry-icon"')!==false
+    && strpos($entry,'src="/static/mohe-ai-entry-orbits.gif"')!==false
+    && strpos($entry,'.ai-entry{position:fixed;')!==false
+    && strpos($entry,'bottom:calc(92px + env(safe-area-inset-bottom))')!==false
+    && strpos($entry,'width:60px;height:60px;border-radius:50%')!==false,
+    'the merchant launcher uses the approved circular animated three-orbit asset above the tab bar without changing the workspace interaction');
 $check(is_string($entry) && strpos($entry,"currentMobilePlatform() === 'MP_WEIXIN'")!==false
     && strpos($entry,"'ai-panel--native-mini': platformUsesNativeCanvas")!==false,
     'the WeChat panel applies its capsule-safe layout only on the native mini-program target');
-$check(is_string($entry) && strpos($entry,'.ai-panel--native-mini{padding-top:84px}')!==false,
-    'the native mini-program panel reserves the capsule strip before rendering AI actions');
+$check(is_string($entry) && strpos($entry,'.ai-panel--native-mini{padding-top:calc(82px + env(safe-area-inset-top))}')!==false
+    && strpos($entry,'padding:10px 22px calc(18px + env(safe-area-inset-bottom))')!==false,
+    'the native mini-program workspace reserves its capsule strip and the footer reserves the device safe area');
+$check(is_string($entry) && strpos($entry,'class="ai-workspace-head"')!==false
+    && strpos($entry,'class="ai-workspace-context"')!==false
+    && strpos($entry,'class="ai-head ai-footer-actions"')!==false
+    && strpos($entry,'.ai-messages{min-height:0;flex:1;height:0;padding:0 22px}')!==false,
+    'mobile header actions and footer actions have separate responsive layout roles while the transcript remains scrollable');
 $check(is_string($entry) && strpos($entry,'class="ai-user-turn"')!==false
     && strpos($entry,'>你问</text>')!==false
     && strpos($entry,'class="ai-answer-turn"')!==false
@@ -36,7 +48,7 @@ $check(is_string($entry) && strpos($entry,'function toggleCardDetail(key : strin
     && strpos($entry,'<text class="ai-note">{{ tooltipText(card.tooltip) }}</text>')===false
     && strpos($entry,'card.period_label')!==false,
     'mobile cards show the verified value and period first, while the full registered metric definition remains an on-demand disclosure');
-$check(is_string($entry) && strpos($entry,"function questionHint() : string { return '例如：今天经营情况如何？' }")!==false,
+$check(is_string($entry) && strpos($entry,"function questionHint() : string { return '继续问，例如：按销量看呢？' }")!==false,
     'the mobile question example is business-neutral and does not branch on a fixed metric code');
 $check(is_string($entry) && strpos($entry,'function contextEligible(row : any)')!==false
     && strpos($entry,'function appendTranscript(row : any)')!==false

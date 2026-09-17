@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { webcrypto } from 'node:crypto';
+import fs from 'node:fs';
 import { mountMoheAi } from '../../前端代码/shared/mohe-ai/browser-entry.mjs';
 import { DeviceSessions } from '../../前端代码/shared/mohe-ai/device-session.mjs';
 const require = createRequire(import.meta.url);
@@ -32,6 +33,21 @@ const request = async (method,path,payload) => {
 };
 const dispose = mountMoheAi({request}); await flush();
 const root = document.querySelector('[data-mohe-ai]').shadowRoot;
+const presentationStyles = root.querySelector('style').textContent;
+assert.match(presentationStyles, /--mohe-ai-brand:#1677cc/);
+assert.match(presentationStyles, /\.body\{min-height:0;overflow:auto/);
+assert.match(presentationStyles, /@media \(max-width:560px\)/);
+const adminEntrySource = fs.readFileSync(new URL('../../前端代码/admin/src/components/MoheAiEntry.vue', import.meta.url), 'utf8');
+const cashierEntrySource = fs.readFileSync(new URL('../../前端代码/cashier-v3/src/components/MoheAiEntry.vue', import.meta.url), 'utf8');
+const cashierShellSource = fs.readFileSync(new URL('../../前端代码/cashier-v3/src/layouts/CashierShell.vue', import.meta.url), 'utf8');
+assert.match(adminEntrySource, /getBoundingClientRect\(\)/);
+assert.match(adminEntrySource, /--mohe-ai-admin-workarea-left/);
+assert.match(adminEntrySource, /ResizeObserver/);
+assert.match(adminEntrySource, /MutationObserver/);
+assert.match(adminEntrySource, /entryIconUrl: moheAiEntryIcon/);
+assert.match(cashierEntrySource, /entryIconUrl: moheAiEntryIcon/);
+assert.match(cashierShellSource, /import MoheAiEntry from '@\/components\/MoheAiEntry\.vue'/);
+assert.match(cashierShellSource, /<MoheAiEntry\s*\/>/);
 root.querySelector('.entry').click(); await flush();
 assert.ok(root.querySelector('[role=dialog]'));
 assert.equal(Array.from(root.querySelectorAll('button')).some(b=>b.textContent==='配置'),false);
@@ -267,6 +283,31 @@ assert.deepEqual((new DeviceSessions(window.localStorage,'fixture:durable-pendin
   {question:'持久问题不能丢失',answer:'当前组合暂不可用'}
 ]);
 durablePendingRecovery();
+// Platform uses an unobtrusive launcher that enters the separate desktop
+// workspace. Closing it must restore the business page rather than retaining
+// the former side drawer.
+window.localStorage.clear(); identityKey = 'fixture:workspace';
+const workspace = mountMoheAi({request, presentation:'workspace'}); await flush();
+const workspaceRoot = document.querySelector('[data-mohe-ai]').shadowRoot;
+const workspaceEntry = workspaceRoot.querySelector('.entry');
+assert.equal(workspaceEntry.hidden, false);
+workspaceEntry.click(); await flush();
+assert.ok(workspaceRoot.querySelector('.panel.workspace'));
+assert.ok(workspaceRoot.querySelector('.workspace-aside'));
+assert.ok(workspaceRoot.querySelector('.workspace-history'));
+workspaceRoot.querySelector('.workspace-close').click();
+assert.equal(workspaceRoot.querySelector('.panel').hidden, true);
+workspace();
+// Every browser terminal may opt into the same animated circular launcher
+// without altering the query transport or workbench presentation.
+window.localStorage.clear(); identityKey = 'fixture:icon-launcher';
+const iconLauncher = mountMoheAi({request, entryIconUrl:'/assets/mohe-ai-entry-orbits.gif'}); await flush();
+const iconRoot = document.querySelector('[data-mohe-ai]').shadowRoot;
+const iconEntry = iconRoot.querySelector('.entry');
+assert.ok(iconEntry.classList.contains('entry--icon'));
+assert.equal(iconEntry.getAttribute('aria-label'), '打开魔核 AI 工作台');
+assert.equal(iconEntry.querySelector('.entry-icon').getAttribute('src'), '/assets/mohe-ai-entry-orbits.gif');
+iconLauncher();
 // Two mounts can observe the same immutable terminal projection.  The second
 // append is intentionally ignored, but it must still discard the recovery
 // marker left by that retired mount.
@@ -278,4 +319,4 @@ duplicateSessions.append(duplicateConversation, '重复终态不应留下未完�
 duplicateSessions.setPendingQuestion(duplicateConversation, '重复终态不应留下未完成问题');
 assert.equal(duplicateSessions.append(duplicateConversation, '重复终态不应留下未完成问题', '第一次结果', {}, {run_id:'same-run',generation:1}),false);
 assert.equal(duplicateSessions.pendingQuestion(duplicateConversation),'');
-console.log('Browser entry queued create/status polling/cancel/lost-create-replay/late-admission/recovery-visible-question/expiry/retired-terminal/XSS/capability/admin-no-config: 45 checks PASS');
+console.log('Browser entry queued create/status polling/cancel/lost-create-replay/late-admission/recovery-visible-question/expiry/retired-terminal/XSS/capability/admin-no-config/workspace: PASS');
