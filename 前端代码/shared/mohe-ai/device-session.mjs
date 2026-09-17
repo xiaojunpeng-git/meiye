@@ -61,6 +61,18 @@ export class DeviceSessions {
     if (!session || !Object.prototype.hasOwnProperty.call(session, 'pending_question')) return false;
     delete session.pending_question; this.save(sessions); return true;
   }
+  remove(id) {
+    if (typeof id !== 'string' || !id) return false;
+    const sessions = this.load();
+    if (!sessions.some(session => session.id === id)) return false;
+    this.save(sessions.filter(session => session.id !== id));
+    // A removed local conversation must never reappear through the recovery
+    // marker after a page refresh. Active tasks are blocked by the UI before
+    // this method is reached; this extra guard keeps the storage invariant.
+    const runtime = this.loadRuntime();
+    if (runtime && runtime.conversation_id === id) this.clearRuntime();
+    return true;
+  }
   append(id, question, answer, presentation, delivery = null, options = {}) {
     const sessions = this.load(); const s = sessions.find(s => s.id === id);
     if (!s) throw new Error('会话已到期，请新建对话。');

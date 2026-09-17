@@ -38,7 +38,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     .workspace-aside{width:284px;flex:0 0 284px;box-sizing:border-box;display:flex;flex-direction:column;padding:26px 14px 24px;background:#fbfbfc;border-right:1px solid #e7e9ee}
     .workspace-brand{display:flex;align-items:center;min-height:36px;padding:0 14px;font-size:23px;font-weight:700;letter-spacing:.02em;color:#111827}
     .workspace-new{margin:30px 0 36px;border:0;border-radius:15px;padding:16px 20px;text-align:left;font-size:17px;font-weight:650;color:#1d2f9e;background:#eeecff}.workspace-new:hover{background:#e5e2ff}
-    .workspace-recent-label{padding:0 16px 12px;color:#7b8390;font-size:14px}.workspace-history{display:grid;gap:4px;overflow:auto}.workspace-history button{border:0;background:transparent;text-align:left;padding:12px 16px;border-radius:10px;font-size:16px;color:#273143;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.workspace-history button:hover,.workspace-history button[aria-current="true"]{background:#ebeaff;color:#252873}
+    .workspace-recent-label{padding:0 16px 12px;color:#7b8390;font-size:14px}.workspace-history{display:grid;gap:4px;min-width:0;overflow-x:hidden;overflow-y:auto}.workspace-history-row{display:flex;min-width:0;align-items:center;gap:4px;padding:0 6px;border-radius:10px}.workspace-history-open{min-width:0;flex:1;border:0;background:transparent;text-align:left;padding:12px 10px;border-radius:10px;font-size:16px;color:#273143;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.workspace-history-open:hover,.workspace-history-open[aria-current="true"]{background:#ebeaff;color:#252873}.workspace-history-delete{flex:0 0 auto;width:26px;height:26px;padding:0;border:0;border-radius:50%;background:#f0f2f5;color:#6d7788;font-size:18px;line-height:1}.workspace-history-delete:hover{background:#fee2e2;color:#b42318}.workspace-history-delete:focus-visible{outline:2px solid var(--mohe-ai-brand);outline-offset:2px}
     .workspace-retention{margin-top:auto;padding:20px 16px;color:#7b8390;font-size:13px;border-bottom:1px solid #e7e9ee}.workspace-main{min-width:0;flex:1;display:flex;flex-direction:column;background:#fff}.workspace-top{display:flex;align-items:center;min-height:78px;padding:0 28px;border-bottom:1px solid #e7e9ee}.workspace-title{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:23px;font-weight:650}.workspace-close{border:0;padding:8px 12px;font-size:24px;line-height:1;color:#465163}.workspace .body{width:min(1350px,calc(100% - 56px));box-sizing:border-box;margin:0 auto;padding:40px 0 32px}.workspace .message{max-width:100%;margin:0 0 38px;padding:0;border-radius:0;background:transparent;color:#151b27;font-size:21px;line-height:1.7}.workspace .message.muted{font-size:14px;line-height:1.5;color:#778092}.workspace .message.question{width:max-content;max-width:78%;margin:0 0 48px auto;padding:15px 24px;border-radius:22px;background:#17191e;color:#fff;font-size:18px;line-height:1.45}.workspace .card{margin:14px 0;border:1px solid #e7e9ee;border-radius:14px;padding:18px 20px;background:#fff}.workspace .value{color:#111827}.workspace table{width:100%;margin:18px 0;border-collapse:collapse;display:table}.workspace td,.workspace th{border-width:0 0 1px;padding:14px;text-align:left;color:#1f2937}.workspace th{color:#6e7786;font-weight:500}
     .workspace .footer{width:100%;box-sizing:border-box;margin:0;padding:0 28px 20px;border:0;background:#fff}.workspace-progress{min-height:20px;margin:0 0 8px;color:#667085}.workspace-composer-card{display:grid;grid-template-columns:minmax(0,1fr) 76px;grid-template-rows:minmax(82px,auto) 48px;overflow:hidden;border:1px solid #d9dee7;border-radius:22px;background:#fff;box-shadow:0 8px 22px #17233d0d}.workspace .workspace-composer-card textarea{grid-column:1;grid-row:1;min-height:82px;resize:none;padding:18px 28px 10px;border:0;border-radius:0;font-size:17px;line-height:1.55;background:transparent;outline:0}.workspace-composer-actions{grid-column:1;grid-row:2;display:flex;align-items:center;padding:0 28px}.workspace-excel{display:inline-flex;align-items:center;gap:10px;color:#536070;font-size:16px;cursor:pointer}.workspace-excel input{width:24px;height:24px;margin:0;accent-color:#111}.workspace-excel input:disabled+span{color:#9aa3b0;cursor:not-allowed}.workspace .workspace-send{grid-column:2;grid-row:1 / span 2;place-self:center;width:56px;height:56px;margin:0;padding:0;border:0;border-radius:50%;font-size:0;background:#111;color:#fff}.workspace .workspace-send::after{content:'↑';font-size:30px;line-height:1}.workspace .workspace-send:disabled{background:#98a1ad}.workspace .workspace-cancel{grid-column:2;grid-row:1 / span 2;place-self:end center;margin:0 10px 11px 0;padding:5px 0;border:0;background:transparent;color:#667085;font-size:12px}.workspace-keyboard-hint{padding:12px 4px 0;text-align:right;color:#8a93a1;font-size:14px}.workspace .entry{display:none}
     :host([data-mohe-ai-presentation="workspace"]) .entry{left:auto;right:28px;top:auto;bottom:30px;transform:none}
@@ -97,7 +97,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     // Keep the current draft visible, but do not fill the recent-conversation
     // list with those empty local shells.
     sessions.load().filter(item => item.id === conversation || (Array.isArray(item.rounds) && item.rounds.length > 0)).slice().reverse().forEach(item => {
-      const button = el('button', conversationTitle(item));
+      const row = el('div', null, 'workspace-history-row');
+      const title = conversationTitle(item); const button = el('button', title, 'workspace-history-open');
       if (item.id === conversation) button.setAttribute('aria-current', 'true');
       button.onclick = () => {
         if (pendingCreate || (run && !isTerminal(run.status))) return;
@@ -105,7 +106,17 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         item.rounds.forEach(row => { message(row.question, 'question'); renderAnswer(row.presentation || { summary: row.answer }, false); });
         updateWorkspaceTitle(item); renderWorkspaceHistory();
       };
-      workspaceHistory.appendChild(button);
+      const remove = el('button', '×', 'workspace-history-delete'); remove.type = 'button'; remove.setAttribute('aria-label', '删除对话：' + title);
+      remove.onclick = () => {
+        if (pendingCreate || (run && !isTerminal(run.status))) return;
+        const deletingCurrent = item.id === conversation;
+        if (!sessions.remove(item.id)) return;
+        if (deletingCurrent) {
+          conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; activeQuestionRendered = false; clearActive(); updateWorkspaceTitle(null);
+        }
+        renderWorkspaceHistory(); syncWorkspaceActions();
+      };
+      row.append(button, remove); workspaceHistory.appendChild(row);
     });
   }
   function syncWorkspaceActions() {

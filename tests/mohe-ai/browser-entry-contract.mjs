@@ -287,6 +287,9 @@ durablePendingRecovery();
 // workspace. Closing it must restore the business page rather than retaining
 // the former side drawer.
 window.localStorage.clear(); identityKey = 'fixture:workspace';
+const workspaceSessions = new DeviceSessions(window.localStorage, identityKey);
+workspaceSessions.create('workspace-history-to-remove');
+workspaceSessions.append('workspace-history-to-remove', '可删除的历史问题', '可删除的历史回答', {});
 const workspace = mountMoheAi({request, presentation:'workspace'}); await flush();
 const workspaceRoot = document.querySelector('[data-mohe-ai]').shadowRoot;
 const workspaceEntry = workspaceRoot.querySelector('.entry');
@@ -301,6 +304,11 @@ assert.equal(workspaceRoot.querySelector('.workspace-composer-card select'), nul
 assert.equal(workspaceRoot.querySelector('.workspace-cancel').hidden, true);
 assert.match(workspaceRoot.textContent, /Enter 发送 · Shift \+ Enter 换行/);
 assert.match(fs.readFileSync(new URL('../../前端代码/shared/mohe-ai/browser-entry.mjs', import.meta.url), 'utf8'), /input\.onkeydown = event =>/);
+const removeHistory = workspaceRoot.querySelector('[aria-label="删除对话：可删除的历史问题"]');
+assert.ok(removeHistory);
+removeHistory.click(); await flush();
+assert.equal(workspaceRoot.textContent.includes('可删除的历史问题'), false);
+assert.equal(workspaceSessions.history('workspace-history-to-remove').length, 0);
 workspaceRoot.querySelector('.workspace-close').click();
 assert.equal(workspaceRoot.querySelector('.panel').hidden, true);
 workspace();
