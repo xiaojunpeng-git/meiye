@@ -30,21 +30,29 @@ $check(is_string($entry) && strpos($entry,'class="ai-entry-icon"')!==false
 $check(is_string($entry) && strpos($entry,"currentMobilePlatform() === 'MP_WEIXIN'")!==false
     && strpos($entry,"'ai-panel--native-mini': platformUsesNativeCanvas")!==false,
     'the WeChat panel applies its capsule-safe layout only on the native mini-program target');
-$check(is_string($entry) && strpos($entry,'.ai-panel--native-mini{padding-top:calc(82px + env(safe-area-inset-top))}')!==false
-    && strpos($entry,'padding:10px 22px calc(18px + env(safe-area-inset-bottom))')!==false,
-    'the native mini-program workspace reserves its capsule strip and the footer reserves the device safe area');
+$check(is_string($entry) && strpos($entry,'.ai-panel--native-mini{padding-top:calc(72px + env(safe-area-inset-top))}')!==false
+    && strpos($entry,'padding:8px 18px calc(14px + env(safe-area-inset-bottom))')!==false,
+    'the native mini-program workspace reserves its capsule strip and keeps the composer against the bottom safe area');
+$check(is_string($entry) && strpos($entry,'class="ai-history-drawer"')!==false
+    && strpos($entry,'function refreshHistory()')!==false
+    && strpos($entry,'function deleteHistory(id : string)')!==false
+    && strpos($entry,'uni.showActionSheet')===false,
+    'the native menu opens an in-panel recent-conversation drawer and deletes only its matching local session');
 $check(is_string($entry) && strpos($entry,'class="ai-workspace-head"')!==false
-    && strpos($entry,'class="ai-workspace-context"')!==false
-    && strpos($entry,'class="ai-head ai-footer-actions"')!==false
-    && strpos($entry,'.ai-messages{min-height:0;flex:1;height:0;padding:0 22px}')!==false,
-    'mobile header actions and footer actions have separate responsive layout roles while the transcript remains scrollable');
+    && strpos($entry,'class="ai-workspace-context"')===false
+    && strpos($entry,'会话仅存本设备')===false
+    && strpos($entry,'示例数据')===false
+    && strpos($entry,'class="ai-footer-actions"')!==false
+    && strpos($entry,'class="ai-composer"')!==false
+    && strpos($entry,'.ai-messages{min-height:0;flex:1;height:0;padding:0 36px}')!==false,
+    'mobile header actions and footer actions have separate responsive layout roles while the transcript remains scrollable, without a redundant workspace title block');
 $check(is_string($entry) && strpos($entry,'class="ai-user-turn"')!==false
     && strpos($entry,'>你问</text>')!==false
     && strpos($entry,'class="ai-answer-turn"')!==false
     && strpos($entry,'>魔核 AI</text>')!==false,
     'each retained turn labels the customer question and the AI answer as separate visual blocks');
 $check(is_string($entry) && strpos($entry,'function toggleCardDetail(key : string)')!==false
-    && strpos($entry,"'查看统计口径'")!==false
+    && strpos($entry,"'统计口径'")!==false
     && strpos($entry,'<text class="ai-note">{{ tooltipText(card.tooltip) }}</text>')===false
     && strpos($entry,'card.period_label')!==false,
     'mobile cards show the verified value and period first, while the full registered metric definition remains an on-demand disclosure');
