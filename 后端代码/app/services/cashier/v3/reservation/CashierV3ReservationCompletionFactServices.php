@@ -122,6 +122,7 @@ final class CashierV3ReservationCompletionFactServices
             'quantity' => $quantity,
             'project_count' => $quantity,
             'service_object' => 'SELF',
+            'friend_counts_as_customer' => 1,
             'is_experience' => 0,
             'labor_amount_cents' => $laborCents,
             'labor_fee_amount_cents' => 0,

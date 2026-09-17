@@ -430,7 +430,7 @@ final class CashierV3EntitlementCompletionPlanV1
         }
         $service = $line['serviceSnapshot'];
         foreach ([
-            'serviceObject', 'isExperience', 'craftsmen', 'primaryCraftsmanId',
+            'serviceObject', 'friendCountsAsCustomer', 'isExperience', 'craftsmen', 'primaryCraftsmanId',
             'businessDate', 'businessTimezone', 'occurredAt', 'settledAt',
             'recordedAt', 'sourceType', 'serviceOrderId', 'reservationId',
             'occupationContributors',
@@ -508,6 +508,10 @@ final class CashierV3EntitlementCompletionPlanV1
             'consumed_times_at_lock' => self::nonNegativeInt($source['consumedTimesAtLock'], 'line_consumed_times_invalid'),
             'amount_calculation_version' => self::token($source['amountCalculationVersion'], 128, 'line_amount_version_invalid'),
             'service_object' => $serviceObject,
+            'friend_counts_as_customer' => self::booleanInt(
+                $service['friendCountsAsCustomer'],
+                'friend_counts_as_customer_invalid'
+            ),
             'is_experience' => self::booleanInt($service['isExperience'], 'experience_flag_invalid'),
             // 明细备注是后加的可空快照；旧服务单没有该键时等价于空备注。
             'detail_remark_snapshot' => self::text($service['detailRemark'] ?? '', 65535, 'detail_remark_invalid'),
@@ -671,6 +675,7 @@ final class CashierV3EntitlementCompletionPlanV1
             'project_category_name_snapshot' => $line['project_category_name_snapshot'],
             'quantity' => $line['quantity'],
             'service_object' => $line['service_object'],
+            'friend_counts_as_customer' => $line['friend_counts_as_customer'],
             'is_experience' => $line['is_experience'],
             'labor_amount_cents' => $line['labor_amount_cents'],
             'labor_fee_amount_cents' => array_sum(array_map(

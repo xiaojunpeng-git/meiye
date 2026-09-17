@@ -982,6 +982,7 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 'aggregate_name_snapshot' => $projectName,
                 'payload' => array_merge($linePayload, [
                     'serviceObject' => (string)$line['serviceSnapshot']['serviceObject'],
+                    'friendCountsAsCustomer' => (bool)$line['serviceSnapshot']['friendCountsAsCustomer'],
                     'isExperience' => (bool)$line['serviceSnapshot']['isExperience'],
                     'primaryCraftsmanId' => (int)$line['serviceSnapshot']['primaryCraftsmanId'],
                 ]),

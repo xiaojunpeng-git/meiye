@@ -172,7 +172,7 @@ final class StoreUnifiedReportPhaseSixServices
 
     private function salaryDetail(array $stores,array $range):array
     {
-        $facts = $this->salaryFacts($stores, $range);
+        $facts = $this->salaryFactsWithServiceCustomerMetrics($stores, $range);
         $rows = [];
         foreach ($facts as $f) {
             $rows[] = [
@@ -181,6 +181,10 @@ final class StoreUnifiedReportPhaseSixServices
                 'member_name' => $f['member_name'], 'card_type' => (string)($f['card_type'] ?: '-'),
                 'performance_category' => $f['category_path'], 'detail' => $f['item_name'],
                 'project_count' => number_format((float)$f['project_count'], 1, '.', ''),
+                // The common reader has already chosen the one stable labor
+                // line that carries a daily visit share.  All other project
+                // lines for the same employee/customer/day remain zero.
+                'service_visit_count' => $this->tenth((int)($f['service_visit_tenths'] ?? 0)),
                 'consumption_amount' => $this->money((int)$f['consumption_cents']),
                 'cash_amount' => $this->money((int)($f['cash_cents'] ?? 0)),
                 'labor_fee' => $this->money((int)$f['labor_fee_cents']), 'row_key' => $f['row_key'],
@@ -196,6 +200,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('performance_category','业绩分类','统一业绩分类。'),
             $this->column('detail','明细','项目或产品名称。'),
             $this->column('project_count','项目数','服务记录分配给该手艺人的工资项目数；人工调整时只能按0.5递增。',true),
+            $this->column('service_visit_count','服务人次','按服务对象、业务日期及有效实际服务人员计算的员工分配值；本人按会员当日去重，朋友算和游客按服务记录计算，朋友不算不计入。',true),
             $this->column('consumption_amount','消耗业绩','服务完成后的消耗业绩事实。',true),
             $this->column('cash_amount','现金业绩','销售明细现金业绩分摊事实。',true),
             $this->column('labor_fee','手工费','分配手艺人时保存的手工费。',true),
@@ -205,21 +210,36 @@ final class StoreUnifiedReportPhaseSixServices
 
     private function salarySummary(array $stores,array $range):array
     {
-        $detail=$this->salaryDetail($stores,$range);$rows=[];
-        foreach($this->salaryFacts($stores,$range) as $f){
+        $rows=[];
+        foreach($this->salaryFactsWithServiceCustomerMetrics($stores,$range) as $f){
             $key=(int)$f['store_id'].'|'.(int)$f['employee_id'];
-            if(!isset($rows[$key]))$rows[$key]=['company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'project_count'=>0,'consumption_cents'=>0,'cash_cents'=>0,'labor_fee_cents'=>0];
+            if(!isset($rows[$key]))$rows[$key]=['company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'project_count'=>0,'service_visit_tenths'=>0,'service_people_tenths'=>0,'consumption_cents'=>0,'cash_cents'=>0,'labor_fee_cents'=>0];
             $rows[$key]['project_count']+=(float)$f['project_count'];
+            $rows[$key]['service_visit_tenths']+=(int)($f['service_visit_tenths'] ?? 0);
             $rows[$key]['consumption_cents']+=(int)$f['consumption_cents'];
             $rows[$key]['cash_cents']+=(int)($f['cash_cents'] ?? 0);
             $rows[$key]['labor_fee_cents']+=(int)$f['labor_fee_cents'];
         }
-        foreach($rows as &$r){$r['project_count']=number_format((float)$r['project_count'],1,'.','');$r['consumption_amount']=$this->money($r['consumption_cents']);$r['cash_amount']=$this->money($r['cash_cents']);$r['labor_fee']=$this->money($r['labor_fee_cents']);unset($r['consumption_cents'],$r['cash_cents'],$r['labor_fee_cents']);}unset($r);
+        // Service people is a range-level deduplicated metric.  It must come
+        // from the common reader once per store/employee, rather than by
+        // adding detail rows (which would turn a multi-day member into many
+        // people).
+        $summaryMetrics = $this->serviceCustomerMetrics($stores, $range)['summary_by_store_employee'];
+        foreach($rows as $key=>&$r){
+            $r['service_people_tenths']=(int)($summaryMetrics[$key]['people_tenths'] ?? 0);
+            $r['project_count']=number_format((float)$r['project_count'],1,'.','');
+            $r['service_visit_count']=$this->tenth((int)$r['service_visit_tenths']);
+            $r['service_people_count']=$this->tenth((int)$r['service_people_tenths']);
+            $r['consumption_amount']=$this->money($r['consumption_cents']);$r['cash_amount']=$this->money($r['cash_cents']);$r['labor_fee']=$this->money($r['labor_fee_cents']);
+            unset($r['service_visit_tenths'],$r['service_people_tenths'],$r['consumption_cents'],$r['cash_cents'],$r['labor_fee_cents']);
+        }unset($r);
         return $this->result('员工薪资汇总月报表',[
             $this->column('company_name','分公司','员工发生业务时组织快照。',false,true),
             $this->column('store_name','门店','员工发生业务时门店快照。',false,true),
             $this->column('employee_name','销售人','员工历史姓名快照。'),
             $this->column('project_count','项目数','员工薪资明细中工资项目数的合计；人工调整值按0.5递增。',true),
+            $this->column('service_visit_count','服务人次','所选期间内员工每日服务对象份额之和；与薪资明细的服务人次合计一致。',true),
+            $this->column('service_people_count','服务人数','所选期间内服务对象去重后的员工份额；会员跨日期不重复，朋友算和游客每条服务记录独立计算。',true),
             $this->column('consumption_amount','消耗','服务完成或核销形成的消耗业绩。',true),
             $this->column('labor_fee','手工','服务明细手工费。',true),
             $this->column('cash_amount','产品业绩','产品现金业绩事实。',true)
@@ -282,7 +302,7 @@ final class StoreUnifiedReportPhaseSixServices
             ->leftJoin('cashier_v3_entitlement_service_fact sv','sv.tenant_id=pf.tenant_id AND sv.checkout_request_id=pf.checkout_request_id AND sv.source_line_id=pf.source_line_id AND sv.service_status=\'completed\'')
             ->where('pf.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
             ->where('pf.performance_type','labor_performance_allocated')->where('pf.status','effective')
-            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_id row_key,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.labor_fee_amount_cents,pf.project_count_half_units,pf.rule_code_snapshot,pf.fact_direction,sv.member_id,sv.member_name_snapshot member_name,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_name_snapshot category_path,sv.source_document_type source_type')
+            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_id row_key,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.labor_fee_amount_cents,pf.project_count_half_units,pf.rule_code_snapshot,pf.fact_direction,sv.service_fact_id,sv.member_id,sv.member_name_snapshot member_name,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_name_snapshot category_path,sv.source_document_type source_type')
             ->order('pf.id','asc')
             ->select()->toArray();
         $reversed=[];
@@ -304,7 +324,7 @@ final class StoreUnifiedReportPhaseSixServices
             $grouped[$key]['has_explicit_project_count']=$grouped[$key]['has_explicit_project_count']
                 ||(string)$row['rule_code_snapshot']==='SERVICE-RECORD-CRAFTSMAN-ADJUST-V1'
                 ||(int)$row['project_count_half_units']!==0;
-            foreach(['row_key','employee_name','member_id','member_name','store_name','company_name','item_name','category_path','source_type'] as $field)$grouped[$key][$field]=$row[$field]??$grouped[$key][$field]??'';
+            foreach(['row_key','service_fact_id','employee_name','member_id','member_name','store_name','company_name','item_name','category_path','source_type'] as $field)$grouped[$key][$field]=$row[$field]??$grouped[$key][$field]??'';
         }
         $lineGroups=[];
         foreach($grouped as $key=>$row){$lineKey=(int)$row['store_id'].'|'.(string)$row['checkout_request_id'].'|'.(string)$row['source_line_id'];$lineGroups[$lineKey][]=$key;}
@@ -361,10 +381,91 @@ final class StoreUnifiedReportPhaseSixServices
             $row['labor_fee_cents']=(int)$row['labor_fee_amount_cents'];
             $row['cash_cents']=(int)($row['cash_cents']??0);
             $row['card_type']='';$row['item_name']=(string)($row['item_name']??'');$row['category_path']=(string)($row['category_path']??'');
-            if((int)$row['consumption_cents']===0&&(int)$row['labor_fee_cents']===0&&(float)$row['project_count']===0.0&&(int)$row['cash_cents']===0)continue;
+            // A completed service with a zero amount still contributes to
+            // service visits/people.  Pure empty sales rows remain hidden.
+            if((int)$row['consumption_cents']===0&&(int)$row['labor_fee_cents']===0&&(float)$row['project_count']===0.0&&(int)$row['cash_cents']===0&&trim((string)($row['service_fact_id'] ?? ''))==='')continue;
             $out[]=$row;
         }
         return $out;
+    }
+
+    /**
+     * Attach the centrally calculated customer-service metrics to the
+     * employee-level salary rows.  This class deliberately does not recalculate
+     * service-object rules: the shared reader is the only owner of member,
+     * guest, friend-counting and employee-split semantics.
+     */
+    private function salaryFactsWithServiceCustomerMetrics(array $stores, array $range): array
+    {
+        $metrics = $this->serviceCustomerMetrics($stores, $range);
+        $byLaborKey = $metrics['detail_by_labor_key'];
+        $facts = $this->salaryFacts($stores, $range);
+        $present = [];
+        foreach ($facts as &$fact) {
+            $laborKey = $this->laborMetricKey($fact);
+            $present[$laborKey] = true;
+            $metric = $byLaborKey[$laborKey] ?? 0;
+            // The detail map uses a scalar because each stable labor line can
+            // receive at most one accumulated tenth-unit visit share.
+            $fact['service_visit_tenths'] = is_array($metric)
+                ? (int)($metric['visit_tenths'] ?? 0)
+                : (int)$metric;
+        }
+        unset($fact);
+        // Zero-price completed services intentionally have no performance
+        // amount/fact.  The shared reader supplies their immutable service
+        // context, so they still appear as a zero-amount salary-detail row
+        // carrying the service-person share.
+        foreach ($metrics['detail_context_by_labor_key'] as $laborKey => $context) {
+            if (isset($present[$laborKey])) continue;
+            $service = (array)($context['service'] ?? []);
+            $facts[] = [
+                'row_key' => 'service-customer:' . (string)($service['service_fact_id'] ?? $laborKey) . ':' . (int)($context['employee_id'] ?? 0),
+                'store_id' => (int)($context['store_id'] ?? 0),
+                'employee_id' => (int)($context['employee_id'] ?? 0),
+                'employee_name' => (string)($context['employee_name'] ?? ''),
+                'business_date' => (string)($context['business_date'] ?? ''),
+                'checkout_request_id' => (string)($service['request_id'] ?? ''),
+                'source_line_id' => (string)($service['source_line_id'] ?? ''),
+                'service_fact_id' => (string)($service['service_fact_id'] ?? ''),
+                'member_id' => (int)($service['member_id'] ?? 0), 'member_name' => (string)($service['member_name'] ?? ''),
+                'store_name' => (string)($service['store_name'] ?? ''), 'company_name' => (string)($service['company_name'] ?? ''),
+                'item_name' => (string)($service['item_name'] ?? ''), 'category_path' => (string)($service['category_path'] ?? ''),
+                'source_type' => (string)($service['source_type'] ?? ''), 'card_type' => '',
+                'project_count' => 0.0, 'consumption_cents' => 0, 'cash_cents' => 0, 'labor_fee_cents' => 0,
+                'service_visit_tenths' => (int)($byLaborKey[$laborKey] ?? 0),
+            ];
+        }
+        return $facts;
+    }
+
+    /**
+     * @return array{
+     *   detail_by_labor_key:array<string,int>,
+     *   detail_context_by_labor_key:array<string,array<string,mixed>>,
+     *   summary_by_store_employee:array<string,array{visit_tenths:int,people_tenths:int}>
+     * }
+     */
+    private function serviceCustomerMetrics(array $stores, array $range): array
+    {
+        /** @var \app\services\query\metric\ServiceCustomerMetricReadServices $reader */
+        $reader = app()->make(\app\services\query\metric\ServiceCustomerMetricReadServices::class);
+        $metrics = $reader->employeeMetrics(CashierV3ScopeResolver::TENANT_SCOPE_ID, $stores, $range);
+        if (!is_array($metrics)) throw new \LogicException('服务客数读取器返回结果无效');
+        return [
+            'detail_by_labor_key' => is_array($metrics['detail_by_labor_key'] ?? null) ? $metrics['detail_by_labor_key'] : [],
+            'detail_context_by_labor_key' => is_array($metrics['detail_context_by_labor_key'] ?? null) ? $metrics['detail_context_by_labor_key'] : [],
+            'summary_by_store_employee' => is_array($metrics['summary_by_store_employee'] ?? null) ? $metrics['summary_by_store_employee'] : [],
+        ];
+    }
+
+    /** Keep the report key identical to ServiceCustomerMetricReadServices. */
+    private function laborMetricKey(array $fact): string
+    {
+        return (int)($fact['store_id'] ?? 0) . '|'
+            . (int)($fact['employee_id'] ?? 0) . '|'
+            . (string)($fact['checkout_request_id'] ?? '') . '|'
+            . (string)($fact['source_line_id'] ?? '');
     }
 
     private function topCategory(string $path): string
@@ -377,10 +478,11 @@ final class StoreUnifiedReportPhaseSixServices
         $totals=[];foreach($facts as $f){if($this->topCategory((string)($f['category_path']??''))!==$category)continue;$id=(int)($f['member_id']??0);if($id>0)$totals[$id]=($totals[$id]??0)+(int)($f['amount_cents']??0);}return count(array_filter($totals,static fn(int $amount):bool=>$amount>=$thresholdCents));
     }
     private function range(array $range,array $input):array{$start=trim((string)($range['start']??$input['start_date']??''));$end=trim((string)($range['end']??$input['end_date']??''));if($start===''||$end===''){ $year=max(2000,(int)($input['year']??date('Y')));$start=$year.'-01-01';$end=$year.'-12-31'; }if(!preg_match('/^\d{4}-\d{2}-\d{2}$/',$start)||!preg_match('/^\d{4}-\d{2}-\d{2}$/',$end)||$start>$end)throw new \InvalidArgumentException('日期范围不正确');return['start'=>$start,'end'=>$end];}
-    private function result(string $title,array $columns,array $records,array $range):array{$summary=[];foreach($columns as $c){$summary[$c['key']]='-';if(!empty($c['summable'])){$sum=0;$has=false;$moneyKey=(bool)preg_match('/amount|cash|fee|labor|consumption|performance|target|unit_output|average_order|sales_efficiency/i',(string)$c['key']);$halfUnitKey=(string)$c['key']==='project_count';foreach($records as $r){$v=$r[$c['key']]??null;if($moneyKey&&is_string($v)&&preg_match('/^-?\d+(?:\.\d{1,2})?$/',$v)){ $sum+=$this->cents($v);$has=true; }elseif($halfUnitKey&&is_numeric($v)){ $sum+=(int)round((float)$v*2);$has=true; }elseif(!$moneyKey&&is_numeric($v)){ $sum+=(int)$v;$has=true; }}$summary[$c['key']]=$has?($moneyKey?$this->money($sum):($halfUnitKey?number_format($sum/2,1,'.',''):(string)$sum)):'0';}}return['title'=>$title,'columns'=>$columns,'records'=>array_values($records),'summary_row'=>$summary,'column_groups'=>[],'metric_version'=>self::METRIC_VERSION,'data_as_of'=>date('c'),'aggregation_status'=>'caught_up','filters'=>['start_date'=>$range['start'],'end_date'=>$range['end']],'table_layout'=>['fixed'=>true,'summary_fixed'=>true]];}
+    private function result(string $title,array $columns,array $records,array $range):array{$summary=[];foreach($columns as $c){$summary[$c['key']]='-';if(!empty($c['summable'])){$sum=0;$has=false;$moneyKey=(bool)preg_match('/amount|cash|fee|labor|consumption|performance|target|unit_output|average_order|sales_efficiency/i',(string)$c['key']);$halfUnitKey=(string)$c['key']==='project_count';$tenthUnitKey=in_array((string)$c['key'],['service_visit_count','service_people_count'],true);foreach($records as $r){$v=$r[$c['key']]??null;if($moneyKey&&is_string($v)&&preg_match('/^-?\d+(?:\.\d{1,2})?$/',$v)){ $sum+=$this->cents($v);$has=true; }elseif($halfUnitKey&&is_numeric($v)){ $sum+=(int)round((float)$v*2);$has=true; }elseif($tenthUnitKey&&is_numeric($v)){ $sum+=(int)round((float)$v*10);$has=true; }elseif(!$moneyKey&&is_numeric($v)){ $sum+=(int)$v;$has=true; }}$summary[$c['key']]=$has?($moneyKey?$this->money($sum):($halfUnitKey?number_format($sum/2,1,'.',''):($tenthUnitKey?$this->tenth($sum):(string)$sum))):($tenthUnitKey?'0.0':'0');}}return['title'=>$title,'columns'=>$columns,'records'=>array_values($records),'summary_row'=>$summary,'column_groups'=>[],'metric_version'=>self::METRIC_VERSION,'data_as_of'=>date('c'),'aggregation_status'=>'caught_up','filters'=>['start_date'=>$range['start'],'end_date'=>$range['end']],'table_layout'=>['fixed'=>true,'summary_fixed'=>true]];}
     private function column(string $key,string $label,string $explanation,bool $summable=false,bool $fixed=false,int $width=120,array $drilldown=[],string $group=''):array{$c=['key'=>$key,'label'=>$label,'source_explanation'=>$explanation,'summable'=>$summable,'width'=>$width];if($fixed)$c['fixed']='left';if($group!=='')$c['group_label']=$group;if($drilldown)$c['drilldown']=$drilldown;return$c;}
     private function manualColumn(string $key,string $label,string $explanation,string $group=''):array{$c=$this->column($key,$label,$explanation,false,false,120,[],$group);$c['manual_input']=['subject_type'=>'phase_six_row','field_key'=>$key,'value_type'=>'text'];return$c;}
     private function money(int $cents):string{$negative=$cents<0;$cents=abs($cents);$value=intdiv($cents,100).'.'.str_pad((string)($cents%100),2,'0',STR_PAD_LEFT);$value=rtrim(rtrim($value,'0'),'.');return($negative?'-':'').($value===''?'0':$value);}
+    private function tenth(int $tenths): string { return number_format($tenths / 10, 1, '.', ''); }
     private function ratio(int $num,int $den):string{return $den===0?'-':(string)round($num*100/$den,2).'%';}
     private function cents($value):int{$text=trim((string)$value);if($text===''||$text==='-')return 0;$negative=substr($text,0,1)==='-';$text=ltrim($text,'+-');$parts=explode('.',$text,2);$whole=(int)($parts[0]??0);$fraction=str_pad(substr((string)($parts[1]??''),0,2),2,'0');$result=$whole*100+(int)$fraction;return $negative?-abs($result):$result;}
     private function healthWithStaffing(array $stores, array $range): array

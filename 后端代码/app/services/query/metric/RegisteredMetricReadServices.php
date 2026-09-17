@@ -38,6 +38,7 @@ final class RegisteredMetricReadServices
             'fact_sum' => function () use ($contract, $tenantId, $stores, $range): int { return $this->factSummary($contract['source'], $tenantId, $stores, $range); },
             'personnel_fact_sum' => function () use ($contract, $tenantId, $stores, $range): int { return $this->factSummary($contract['source'], $tenantId, $stores, $range); },
             'distinct_member' => function () use ($contract, $tenantId, $stores, $range): int { return $this->distinctSummary($contract['source'], $tenantId, $stores, $range); },
+            'service_customer_personnel' => function () use ($contract, $tenantId, $stores, $range): int { return $this->serviceCustomerSummary($contract['metric_code'], $tenantId, $stores, $range); },
         ];
         $handler = $handlers[$contract['reader_strategy']] ?? null;
         if (!$handler) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
@@ -94,6 +95,7 @@ final class RegisteredMetricReadServices
             'fact_sum' => function () use ($contract, $tenantId, $stores, $range): array { return $this->factGrouped($contract['source'], $tenantId, $stores, $range); },
             'personnel_fact_sum' => function () use ($contract, $tenantId, $stores, $range): array { return $this->factGrouped($contract['source'], $tenantId, $stores, $range); },
             'distinct_member' => function () use ($contract, $tenantId, $stores, $range): array { return $this->distinctGrouped($contract['source'], $tenantId, $stores, $range); },
+            'service_customer_personnel' => function () use ($contract, $tenantId, $stores, $range): array { return $this->serviceCustomerDailyStoreTotals($contract['metric_code'], $tenantId, $stores, $range); },
         ];
         $handler = $handlers[$contract['reader_strategy']] ?? null;
         if (!$handler) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
@@ -134,6 +136,9 @@ final class RegisteredMetricReadServices
     {
         $this->assertScope($tenantId, $stores, $range);
         $contract = MetricDefinitionRegistry::get($metricCode);
+        if (($contract['reader_strategy'] ?? null) === 'service_customer_personnel') {
+            return $this->serviceCustomerStoreTotals($contract['metric_code'], $tenantId, $stores, $range);
+        }
         // This is deliberately not implemented by adding daily distinct
         // counts. A member may appear on more than one day in a period.
         if (($contract['reader_strategy'] ?? null) === 'distinct_member') {
@@ -211,6 +216,9 @@ final class RegisteredMetricReadServices
     public function personnelTotals(string $metricCode, string $tenantId, array $stores, array $range, array $pairs): array
     {
         $contract = MetricDefinitionRegistry::get($metricCode);
+        if (($contract['reader_strategy'] ?? null) === 'service_customer_personnel') {
+            return $this->serviceCustomerPersonnelTotals($contract['metric_code'], $tenantId, $stores, $range, $pairs);
+        }
         if ($contract['reader_strategy'] !== 'personnel_fact_sum') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         return (new PersonnelPerformanceReadServices($this->queryFactory, $this->normalFacts))->totals($tenantId, $stores, $range, $contract['metric_code'], $pairs);
     }
@@ -266,6 +274,9 @@ final class RegisteredMetricReadServices
             },
             'personnel_fact_sum' => function () use ($contract, $tenantId, $stores, $range, $dimensionContract, $limit, $order): array {
                 return $this->factDimensionRanking($contract['source'], $tenantId, $stores, $range, $dimensionContract, $limit, $order);
+            },
+            'service_customer_personnel' => function () use ($contract, $tenantId, $stores, $range, $dimension, $limit, $order): array {
+                return $this->serviceCustomerDimensionRanking($contract['metric_code'], $dimension, $tenantId, $stores, $range, $limit, $order);
             },
         ];
         $handler = $handlers[$contract['reader_strategy']] ?? null;
@@ -353,6 +364,9 @@ final class RegisteredMetricReadServices
     {
         $this->assertScope($tenantId, $stores, $range);
         $contract = MetricDefinitionRegistry::get($metricCode);
+        if (($contract['reader_strategy'] ?? null) === 'service_customer_personnel') {
+            return $this->serviceCustomerPersonnelDailyTotals($contract['metric_code'], $tenantId, $stores, $range, $employeeIds);
+        }
         if (($contract['reader_strategy'] ?? null) !== 'personnel_fact_sum') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $employeeIds = $this->employeeIds($employeeIds);
         $query = $this->factQuery($contract['source'], $tenantId, $stores, $range)->where('p.employee_id', '>', 0);
@@ -1478,6 +1492,149 @@ final class RegisteredMetricReadServices
             $out[$key] = $this->integer($row['metric_value'] ?? null);
         }
         return $out;
+    }
+
+    private function serviceCustomerSummary(string $metricCode, string $tenantId, array $stores, array $range): int
+    {
+        $field = $this->serviceCustomerField($metricCode);
+        $total = 0;
+        foreach ($this->serviceCustomerMetrics($tenantId, $stores, $range)['summary_by_store_employee'] as $row) {
+            $total = $this->add($total, $this->integer($row[$field] ?? null));
+        }
+        return $total;
+    }
+
+    /** @return array<int,array{store_id:int,business_date:string,amount_cents:int}> */
+    private function serviceCustomerDailyStoreTotals(string $metricCode, string $tenantId, array $stores, array $range): array
+    {
+        if ($metricCode !== 'staff_service_num') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $out = [];
+        foreach ($this->serviceCustomerMetrics($tenantId, $stores, $range)['daily_by_store_employee'] as $key => $row) {
+            $parts = explode('|', $key, 3);
+            if (count($parts) !== 3) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            $storeId = $this->integer($parts[0]);
+            $date = (string)$parts[1];
+            if (!in_array($storeId, $stores, true) || !preg_match('/^\d{4}-\d{2}-\d{2}$/D', $date)) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            $groupKey = $storeId . '|' . $date;
+            if (!isset($out[$groupKey])) $out[$groupKey] = ['store_id' => $storeId, 'business_date' => $date, 'amount_cents' => 0];
+            $out[$groupKey]['amount_cents'] = $this->add($out[$groupKey]['amount_cents'], $this->integer($row['visit_tenths'] ?? null));
+        }
+        ksort($out, SORT_STRING);
+        return array_values($out);
+    }
+
+    /** @return array<int,array{store_id:int,metric_value:int}> */
+    private function serviceCustomerStoreTotals(string $metricCode, string $tenantId, array $stores, array $range): array
+    {
+        $field = $this->serviceCustomerField($metricCode);
+        $totals = array_fill_keys($stores, 0);
+        foreach ($this->serviceCustomerMetrics($tenantId, $stores, $range)['summary_by_store_employee'] as $key => $row) {
+            [$store] = explode('|', $key, 2);
+            $storeId = $this->integer($store);
+            if (!array_key_exists($storeId, $totals)) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            $totals[$storeId] = $this->add($totals[$storeId], $this->integer($row[$field] ?? null));
+        }
+        $out = [];
+        foreach ($stores as $storeId) $out[] = ['store_id' => $storeId, 'metric_value' => $totals[$storeId]];
+        return $out;
+    }
+
+    /** @return array<int,array{employee_id:int,business_date:string,metric_value:int,amount_cents:int,fact_count:int}> */
+    private function serviceCustomerPersonnelTotals(string $metricCode, string $tenantId, array $stores, array $range, array $pairs): array
+    {
+        $allowed = [];
+        if ($pairs === [] || count($pairs) > 1000) $this->fail('METRIC_PERSONNEL_SCOPE_INVALID');
+        foreach ($pairs as $pair) {
+            if (!is_array($pair) || count($pair) !== 2 || !is_int($pair['store_id'] ?? null) || !in_array($pair['store_id'], $stores, true)
+                || !is_int($pair['employee_id'] ?? null) || $pair['employee_id'] < 1) $this->fail('METRIC_PERSONNEL_SCOPE_INVALID');
+            $allowed[$pair['store_id'] . '|' . $pair['employee_id']] = true;
+        }
+        $out = [];
+        $metrics = $this->serviceCustomerMetrics($tenantId, $stores, $range);
+        if ($metricCode === 'staff_service_num') {
+            foreach ($metrics['daily_by_store_employee'] as $key => $row) {
+                $parts = explode('|', $key, 3);
+                if (count($parts) !== 3 || !isset($allowed[$parts[0] . '|' . $parts[2]])) continue;
+                $employeeId = $this->integer($parts[2]);
+                $date = (string)$parts[1];
+                $mergedKey = $employeeId . '|' . $date;
+                if (!isset($out[$mergedKey])) $out[$mergedKey] = ['employee_id' => $employeeId, 'business_date' => $date, 'metric_value' => 0, 'amount_cents' => 0, 'fact_count' => 0];
+                $out[$mergedKey]['metric_value'] = $this->add($out[$mergedKey]['metric_value'], $this->integer($row['visit_tenths'] ?? null));
+                $out[$mergedKey]['amount_cents'] = $out[$mergedKey]['metric_value'];
+                ++$out[$mergedKey]['fact_count'];
+            }
+        } else {
+            foreach ($metrics['summary_by_store_employee'] as $key => $row) {
+                if (!isset($allowed[$key])) continue;
+                [, $employee] = explode('|', $key, 2);
+                $employeeId = $this->integer($employee);
+                $mergedKey = $employeeId . '|' . $range['end'];
+                if (!isset($out[$mergedKey])) $out[$mergedKey] = ['employee_id' => $employeeId, 'business_date' => $range['end'], 'metric_value' => 0, 'amount_cents' => 0, 'fact_count' => 0];
+                $out[$mergedKey]['metric_value'] = $this->add($out[$mergedKey]['metric_value'], $this->integer($row['people_tenths'] ?? null));
+                $out[$mergedKey]['amount_cents'] = $out[$mergedKey]['metric_value'];
+                ++$out[$mergedKey]['fact_count'];
+            }
+        }
+        ksort($out, SORT_STRING);
+        return array_values($out);
+    }
+
+    /** @return array<int,array{entity_id:int,entity_name:string,metric_value:int}> */
+    private function serviceCustomerDimensionRanking(string $metricCode, string $dimension, string $tenantId, array $stores, array $range, int $limit, string $order): array
+    {
+        if ($dimension !== 'employee') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $field = $this->serviceCustomerField($metricCode);
+        $rows = [];
+        foreach ($this->serviceCustomerMetrics($tenantId, $stores, $range)['summary_by_store_employee'] as $key => $row) {
+            [, $employee] = explode('|', $key, 2);
+            $employeeId = $this->integer($employee);
+            if (!isset($rows[$employeeId])) $rows[$employeeId] = ['entity_id' => $employeeId, 'entity_name' => (string)($row['employee_name'] ?? ''), 'metric_value' => 0];
+            $rows[$employeeId]['metric_value'] = $this->add($rows[$employeeId]['metric_value'], $this->integer($row[$field] ?? null));
+            if ($rows[$employeeId]['entity_name'] === '') $rows[$employeeId]['entity_name'] = (string)($row['employee_name'] ?? '');
+        }
+        $rows = array_values($rows);
+        usort($rows, static function (array $left, array $right) use ($order): int {
+            $compare = $left['metric_value'] <=> $right['metric_value'];
+            if ($order === 'desc') $compare = -$compare;
+            return $compare ?: strcmp((string)$left['entity_name'], (string)$right['entity_name']) ?: ($left['entity_id'] <=> $right['entity_id']);
+        });
+        return array_slice($rows, 0, $limit);
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    private function serviceCustomerPersonnelDailyTotals(string $metricCode, string $tenantId, array $stores, array $range, array $employeeIds): array
+    {
+        if ($metricCode !== 'staff_service_num') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $employeeIds = $this->employeeIds($employeeIds);
+        $out = [];
+        foreach ($this->serviceCustomerMetrics($tenantId, $stores, $range)['daily_by_store_employee'] as $key => $row) {
+            $parts = explode('|', $key, 3);
+            if (count($parts) !== 3) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            $storeId = $this->integer($parts[0]); $date = (string)$parts[1]; $employeeId = $this->integer($parts[2]);
+            if (($employeeIds !== [] && !in_array($employeeId, $employeeIds, true)) || !in_array($storeId, $stores, true)) continue;
+            $out[] = [
+                'store_id' => $storeId, 'store_name' => '', 'organization_id' => '', 'organization_path_snapshot' => '',
+                'business_date' => $date, 'employee_id' => $employeeId, 'employee_name' => (string)($row['employee_name'] ?? ''),
+                'metric_value' => $this->integer($row['visit_tenths'] ?? null), 'amount_cents' => $this->integer($row['visit_tenths'] ?? null),
+                'labor_fee_amount_cents' => 0, 'rule_name_snapshot' => '',
+            ];
+        }
+        if (count($out) > 10000) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
+        usort($out, static fn(array $left, array $right): int => ($left['employee_id'] <=> $right['employee_id']) ?: strcmp($left['business_date'], $right['business_date']) ?: ($left['store_id'] <=> $right['store_id']));
+        return $out;
+    }
+
+    /** @return array<string,mixed> */
+    private function serviceCustomerMetrics(string $tenantId, array $stores, array $range): array
+    {
+        return (new ServiceCustomerMetricReadServices($this->queryFactory, $this->normalServices))->employeeMetrics($tenantId, $stores, $range);
+    }
+
+    private function serviceCustomerField(string $metricCode): string
+    {
+        if ($metricCode === 'staff_service_num') return 'visit_tenths';
+        if ($metricCode === 'service_people') return 'people_tenths';
+        $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
     }
 
     private function aggregate($query, string $expression): int

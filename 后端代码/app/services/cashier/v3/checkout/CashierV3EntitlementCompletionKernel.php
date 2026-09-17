@@ -228,6 +228,7 @@ final class CashierV3EntitlementCompletionKernel
                 ],
                 'serviceSnapshot' => [
                     'serviceObject' => $intentLine['serviceObject'],
+                    'friendCountsAsCustomer' => $intentLine['friendCountsAsCustomer'],
                     'isExperience' => $intentLine['isExperience'],
                     'detailRemark' => (string)($intentLine['detailRemark'] ?? ''),
                     'craftsmen' => $craftsmen,
@@ -600,6 +601,7 @@ final class CashierV3EntitlementCompletionKernel
         }
         $expectedKeys = array_merge(
             ['lineId', 'quantity', 'serviceObject', 'isExperience', 'craftsmanIds'],
+            array_values(array_intersect(['friendCountsAsCustomer'], array_keys($line))),
             array_values(array_intersect(['detailRemark'], array_keys($line)))
         );
         self::assertExactKeys($line, $expectedKeys, 'command.lines');
@@ -608,6 +610,16 @@ final class CashierV3EntitlementCompletionKernel
         if (!in_array($line['serviceObject'], ['self', 'friend'], true)) {
             throw self::failure('service_object_invalid', ['lineId' => $line['lineId']]);
         }
+        if (array_key_exists('friendCountsAsCustomer', $line)
+            && !is_bool($line['friendCountsAsCustomer'])) {
+            throw self::failure('friend_counts_as_customer_invalid', ['lineId' => $line['lineId']]);
+        }
+        // Older internal completion callers did not carry this service-object
+        // snapshot. Their only compatible value is the historical default: a
+        // friend counts as one customer. Every final service fact still gets a
+        // concrete immutable flag below.
+        $line['friendCountsAsCustomer'] = !array_key_exists('friendCountsAsCustomer', $line)
+            || $line['friendCountsAsCustomer'] === true;
         if (!is_bool($line['isExperience'])) {
             throw self::failure('experience_flag_invalid', ['lineId' => $line['lineId']]);
         }

@@ -659,6 +659,7 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     'lineId' => $line['lineId'],
                     'quantity' => (int)$intent['quantity'],
                     'serviceObject' => (string)$intent['serviceObject'],
+                    'friendCountsAsCustomer' => (bool)$intent['friendCountsAsCustomer'],
                     'isExperience' => (bool)$intent['isExperience'],
                     'craftsmanIds' => array_values($intent['craftsmanIds']),
                     'detailRemark' => (string)($intent['detailRemark'] ?? ''),

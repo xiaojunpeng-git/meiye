@@ -14,7 +14,7 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v7';
+    public const VERSION = 'unified-metric-registry-v8';
     public const COVERAGE_START = '2026-08-10';
 
     /** @return array<string,array<string,mixed>> */
@@ -98,6 +98,37 @@ final class MetricDefinitionRegistry
                 // as cashier performance allocation and personnel authority.
                 'analysis_default_selection_ref' => 'role:craftsman',
             ],
+            // "客数" retains its established code, but its former source was
+            // the legacy write-off table.  New V3 reads are bound to completed
+            // service facts plus active labour allocations instead.
+            'staff_service_num' => self::tenthCount('service_customer_personnel', 'v3-service-customer-visit-person-v1', ['summary', 'ranking'], [
+                'table' => 'cashier_v3_entitlement_service_fact + cashier_v3_performance_fact',
+                'filters' => ['service_status' => 'completed', 'performance_type' => 'labor_performance_allocated', 'performance_status' => 'effective'],
+                'normal_scope' => 'services',
+                'dimensions' => ['employee' => [
+                    'id' => 'employee_id', 'name' => 'employee_name_snapshot',
+                    'analysis_object_kind' => 'person', 'analysis_object_label' => '人员',
+                    'analysis_relation_role' => 'serving_employee', 'analysis_action_codes' => ['service'],
+                    'analysis_filter_keys' => ['selection_ref'],
+                ]],
+            ], 'person', ['selection_ref']) + [
+                'default_ranking_dimension' => 'employee',
+                'analysis_default_selection_ref' => 'role:craftsman',
+            ],
+            'service_people' => self::tenthCount('service_customer_personnel', 'v3-service-customer-period-people-person-v1', ['summary', 'ranking'], [
+                'table' => 'cashier_v3_entitlement_service_fact + cashier_v3_performance_fact',
+                'filters' => ['service_status' => 'completed', 'performance_type' => 'labor_performance_allocated', 'performance_status' => 'effective'],
+                'normal_scope' => 'services',
+                'dimensions' => ['employee' => [
+                    'id' => 'employee_id', 'name' => 'employee_name_snapshot',
+                    'analysis_object_kind' => 'person', 'analysis_object_label' => '人员',
+                    'analysis_relation_role' => 'serving_employee', 'analysis_action_codes' => ['service'],
+                    'analysis_filter_keys' => ['selection_ref'],
+                ]],
+            ], 'person', ['selection_ref']) + [
+                'default_ranking_dimension' => 'employee',
+                'analysis_default_selection_ref' => 'role:craftsman',
+            ],
             'sales_amount' => self::amount('fact_sum', 'v3-sale-completed-lines-v1', ['summary', 'comparison', 'trend', 'ranking'], [
                 'table' => 'cashier_v3_sale_fact', 'amount' => 'sale_amount_cents',
                 'filters' => ['status' => 'effective'], 'normal_scope' => 'facts',
@@ -174,6 +205,9 @@ final class MetricDefinitionRegistry
         return [
             'balance_deduction' => 'balance_deduction_amount',
             'service_count' => 'completed_service_item_count',
+            // 服务客次与员工服务人次使用同一完成服务事实口径；员工维度
+            // 只是这一个指标的已登记分配维度，不再保留旧核销表的第二套算法。
+            'service_visit' => 'staff_service_num',
             'consumption_performance' => 'consume_amount',
             'labor_performance' => 'staff_labor_yeji',
         ];
@@ -246,6 +280,11 @@ final class MetricDefinitionRegistry
     private static function count(string $strategy, string $version, array $shapes, array $source): array
     {
         return self::definition($strategy, $version, $shapes, $source, 'store', [], 'count');
+    }
+
+    private static function tenthCount(string $strategy, string $version, array $shapes, array $source, string $grain = 'store', array $filters = []): array
+    {
+        return self::definition($strategy, $version, $shapes, $source, $grain, $filters, 'customer_tenth');
     }
 
     private static function definition(string $strategy, string $version, array $shapes, array $source, string $grain, array $filters, string $unit): array
