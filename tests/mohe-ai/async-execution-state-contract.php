@@ -95,6 +95,17 @@ $browserTiming=$runs->diagnostics()['segments']['browser_observed']??[];
 if (($browserTiming['count']??0)<1 || ($browserTiming['p50_ms']??null)!==137) throw new RuntimeException('browser-visible timing is one-time bounded telemetry');
 $asyncCohort=$runs->diagnostics()['latency_cohorts']['async']??[];
 foreach (['answer','execution','model_total','browser_observed'] as $name) if (($asyncCohort[$name]['count']??0)<1 || !is_int($asyncCohort[$name]['p50_ms']??null)) throw new RuntimeException('async customer-operation timing cohort is incomplete: '.$name);
+$stageTiming=$runs->diagnostics()['model_stages']['timed-model']??[];
+if (($stageTiming['count']??0)!==1 || ($stageTiming['p50_ms']??null)!==40 || ($stageTiming['p95_ms']??null)!==40) throw new RuntimeException('model stages expose only aggregate technical timings');
+$diagnosticFailure=$runs->create($owner,'diagnostic-failure',hash('sha256','diagnostic failure'),$snapshot)['run'];
+if (!$runs->claim($owner,$diagnosticFailure['run_id'],$diagnosticFailure['generation'],'diagnostic-failure-worker')) throw new RuntimeException('diagnostic failure fixture claim');
+$runs->recordDiagnostic($owner,$diagnosticFailure['run_id'],$diagnosticFailure['generation'],'diagnostic-failure-worker',['stage'=>'intent_contract','predicate'=>'unexpected_requirement_binding'],'diagnostic-model');
+$runs->fail($owner,$diagnosticFailure['run_id'],$diagnosticFailure['generation'],'diagnostic-failure-worker','AI_MODEL_RESULT_UNKNOWN');
+$runs->release($owner,$diagnosticFailure['run_id'],$diagnosticFailure['generation'],'diagnostic-failure-worker');
+$technicalReasons=$runs->diagnostics()['technical_reasons']??[];
+if (($technicalReasons['AI_MODEL_RESULT_UNKNOWN']??0)!==1) throw new RuntimeException('technical reason aggregates preserve a safe actionable code count');
+$diagnosticPredicates=$runs->diagnostics()['diagnostic_predicates']??[];
+if (($diagnosticPredicates['intent_contract/unexpected_requirement_binding']??0)!==1) throw new RuntimeException('model diagnostics aggregate only bounded structural predicate counts');
 
 // Synchronous compatibility mode is an execution mode, not a missing timing
 // sample.  Its accepted, queued and started timestamps are deliberately the

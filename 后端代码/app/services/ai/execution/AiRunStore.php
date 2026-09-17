@@ -1006,8 +1006,27 @@ final class AiRunStore
     {
         return $this->transaction(function () {
             $counts=['success'=>0,'partial'=>0,'technical'=>0,'export'=>0,'export_unknown'=>0,'security'=>0,'capacity'=>0,'neutral'=>0,'active'=>0];
+            // These aggregates are intentionally keyed by server-owned
+            // lifecycle/attempt codes only.  They contain no Run identifier,
+            // question, customer, metric, result or raw provider response,
+            // but make a single "technical failure" counter actionable.
+            $technicalReasons=[];
+            // Model diagnostics are recorded through recordDiagnostic(),
+            // which admits only bounded server-side stage and predicate
+            // carriers. Aggregate those carriers separately from terminal
+            // reasons: a bounded recovery can change the terminal reason,
+            // but the rejected response shape remains useful for fixing the
+            // protocol without retaining customer or provider content.
+            $diagnosticPredicates=[];
             $rows=$this->rows('SELECT status,reason,COUNT(*) AS n FROM '.$this->table('run').' WHERE instance_id=? AND expires_at>? GROUP BY status,reason',[$this->instance,$this->now()]);
-            foreach ($rows as $r) $counts[self::outcomeClass($r)]+=(int)$r['n'];
+            foreach ($rows as $r) {
+                $class=self::outcomeClass($r);
+                $counts[$class]+=(int)$r['n'];
+                if ($class==='technical' && is_string($r['reason']) && preg_match('/^[A-Z][A-Z0-9_]{0,63}$/D',$r['reason'])) {
+                    $technicalReasons[$r['reason']]=($technicalReasons[$r['reason']]??0)+(int)$r['n'];
+                }
+            }
+            $counts['technical_reasons']=self::topReasonCounts($technicalReasons);
             $n=$this->one('SELECT COUNT(*) AS n FROM '.$this->table('receipt').' WHERE instance_id=? AND expires_at>? AND reason=\'CAPACITY_REJECTED\'',[$this->instance,$this->now()]);
             $counts['capacity_rejected']=(int)$n['n'];
             $usage=$this->one('SELECT COALESCE(SUM(input_tokens),0) AS input_tokens,COALESCE(SUM(output_tokens),0) AS output_tokens,SUM(CASE WHEN input_tokens IS NOT NULL AND output_tokens IS NOT NULL THEN 1 ELSE 0 END) AS known_usage_attempts,SUM(CASE WHEN state=\'UNKNOWN\' THEN 1 ELSE 0 END) AS unknown_attempts,SUM(CASE WHEN state<>\'PREPARED\' AND (input_tokens IS NULL OR output_tokens IS NULL) THEN 1 ELSE 0 END) AS usage_unknown_attempts FROM '.$this->table('attempt').' WHERE instance_id=? AND expires_at>? AND kind=\'model\'',[$this->instance,$this->now()]);
@@ -1018,6 +1037,7 @@ final class AiRunStore
             // grammar.  They let operations locate latency without retaining
             // query text, metrics, object names or result values.
             $samples=['acceptance'=>[],'queue'=>[],'model'=>[],'reader'=>[],'delivery'=>[],'answer'=>[],'browser_observed'=>[]];
+            $modelStages=[];
             // A cohort is a completed customer operation, rather than one
             // provider attempt.  This is the only safe basis for comparing
             // compatibility and asynchronous user-visible wait budgets.
@@ -1049,6 +1069,14 @@ final class AiRunStore
                         $segmentModelTotals[$segmentIndex]=($segmentModelTotals[$segmentIndex]??0)+max(0,$elapsed);
                     }
                 }
+                foreach ((array)($detail['model_diagnostics']??[]) as $diagnostic) {
+                    $stage=$diagnostic['stage']??null;
+                    $predicate=$diagnostic['predicate']??null;
+                    if (!is_string($stage) || !preg_match('/^[a-z_]{1,48}$/D',$stage)
+                        || !is_string($predicate) || !preg_match('/^[a-z0-9_:]{1,96}$/D',$predicate)) continue;
+                    $key=$stage.'/'.$predicate;
+                    $diagnosticPredicates[$key]=($diagnosticPredicates[$key]??0)+1;
+                }
                 foreach ($segments as $segmentIndex=>$segment) {
                     if (!is_array($segment)) continue;
                     $mode=($segment['mode']??$runMode)==='async'?'async':'compatibility';
@@ -1077,6 +1105,9 @@ final class AiRunStore
                     $counts['attempt_timing'][$kind]['total_ms']+=$elapsed;
                     $counts['attempt_timing'][$kind]['max_ms']=max($counts['attempt_timing'][$kind]['max_ms'],$elapsed);
                     if ($kind==='model') $samples['model'][]=$elapsed;
+                    if ($kind==='model' && is_string($code) && preg_match('/^[a-z][a-z0-9_-]{0,63}$/D',$code)) {
+                        $modelStages[$code][]=$elapsed;
+                    }
                     if (($detail['attempt_targets'][$code]??'')==='unified_metric_query') $samples['reader'][]=$elapsed;
                 }
                 if ($r['status']==='PARTIAL_SUCCEEDED') { ++$counts['exports']['failed']; if($streakOpen) ++$counts['exports']['consecutive_failed']; }
@@ -1087,6 +1118,8 @@ final class AiRunStore
             foreach ($counts['attempt_timing'] as &$timing) if ($timing['count']) $timing['mean_ms']=(int)round($timing['total_ms']/$timing['count']); unset($timing);
             $counts['segments']=[];
             foreach ($samples as $name=>$values) $counts['segments'][$name]=self::timingSummary($values);
+            $counts['model_stages']=self::stageTimingSummaries($modelStages);
+            $counts['diagnostic_predicates']=self::topReasonCounts($diagnosticPredicates);
             $counts['latency_cohorts']=[];
             foreach ($cohorts as $mode=>$measurements) {
                 $counts['latency_cohorts'][$mode]=[];
@@ -1130,6 +1163,28 @@ final class AiRunStore
         sort($values,SORT_NUMERIC); $n=count($values); $sum=array_sum($values);
         $at=static function(float $quantile) use($values,$n): int { return $values[(int)ceil($quantile*$n)-1]; };
         return ['count'=>$n,'mean_ms'=>(int)round($sum/$n),'p50_ms'=>$at(0.50),'p95_ms'=>$at(0.95),'max_ms'=>$values[$n-1]];
+    }
+
+    /** A bounded ranked reason list avoids turning retained diagnostics into a payload channel. */
+    private static function topReasonCounts(array $reasons): array
+    {
+        uksort($reasons,static function(string $left,string $right) use ($reasons): int {
+            $byCount=($reasons[$right]??0)<=>($reasons[$left]??0);
+            return $byCount!==0?$byCount:strcmp($left,$right);
+        });
+        return array_slice($reasons,0,8,true);
+    }
+
+    /** Model-stage names are server-owned attempt codes, and timing stays aggregate-only. */
+    private static function stageTimingSummaries(array $stages): array
+    {
+        $out=[];
+        foreach ($stages as $stage=>$values) $out[$stage]=self::timingSummary($values);
+        uasort($out,static function(array $left,array $right): int {
+            $byCount=($right['count']??0)<=>($left['count']??0);
+            return $byCount!==0?$byCount:(($right['p95_ms']??0)<=>($left['p95_ms']??0));
+        });
+        return array_slice($out,0,8,true);
     }
 
     private function transaction(callable $fn)
