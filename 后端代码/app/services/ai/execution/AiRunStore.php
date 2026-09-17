@@ -1043,8 +1043,18 @@ final class AiRunStore
             // compatibility and asynchronous user-visible wait budgets.
             $cohorts=['async'=>['answer'=>[],'execution'=>[],'model_total'=>[],'browser_observed'=>[]],
                 'compatibility'=>['answer'=>[],'execution'=>[],'model_total'=>[],'browser_observed'=>[]]];
+            // Keep the completion denominator aligned with the matching
+            // latency cohort. A browser-observed async wait sample must not
+            // be presented beside a success rate that also includes the
+            // synchronous compatibility fallback.
+            $outcomeCohorts=['async'=>self::emptyOutcomeCounts(),'compatibility'=>self::emptyOutcomeCounts()];
+            // A latency comparison is meaningful only inside one immutable
+            // execution profile. Keep just an opaque hash of safe version
+            // references, never model text, questions, answers or business
+            // payloads; management receives the number of profiles only.
+            $comparisonProfiles=['async'=>[],'compatibility'=>[]];
             $counts['exports']=['succeeded'=>0,'failed'=>0,'consecutive_failed'=>0,'eligible'=>0,'failure_rate'=>null];
-            $runs=$this->rows('SELECT status,reason,created_at,last_clock_at,counters_json FROM '.$this->table('run').' WHERE instance_id=? AND expires_at>? AND status IN (\'COMPLETED\',\'PARTIAL_SUCCEEDED\',\'FAILED\',\'CANCELLED\') ORDER BY last_clock_at DESC,created_at DESC',[$this->instance,$this->now()]);
+            $runs=$this->rows('SELECT status,reason,created_at,last_clock_at,snapshot_json,counters_json FROM '.$this->table('run').' WHERE instance_id=? AND expires_at>? AND status IN (\'COMPLETED\',\'PARTIAL_SUCCEEDED\',\'FAILED\',\'CANCELLED\') ORDER BY last_clock_at DESC,created_at DESC',[$this->instance,$this->now()]);
             $streakOpen=true;
             foreach ($runs as $r) {
                 $ms=max(0,(int)$r['last_clock_at']-(int)$r['created_at']);
@@ -1056,6 +1066,9 @@ final class AiRunStore
                 // keep one segment per initial/clarification execution.
                 if (!$segments) $segments=[['accepted_at'=>$detail['execution_accepted_at']??0,'queued_at'=>$detail['execution_queued_at']??0,'started_at'=>$detail['execution_started_at']??0,'publishing_at'=>($detail['phase_started_at']??[])['PUBLISHING']??0,'delivered_at'=>$detail['execution_delivered_at']??0]];
                 $runMode=($detail['execution_mode']??'')==='async'?'async':'compatibility';
+                $outcomeCohorts[$runMode][self::outcomeClass($r)]++;
+                $snapshot=json_decode($r['snapshot_json'],true)?:[];
+                $comparisonProfiles[$runMode][self::comparisonProfile($snapshot)]=true;
                 $segmentModelTotals=[];
                 foreach ((array)($detail['attempt_elapsed_ms']??[]) as $code=>$elapsed) {
                     if (($detail['attempt_kinds'][$code]??'')!=='model' || !is_int($elapsed)) continue;
@@ -1140,6 +1153,8 @@ final class AiRunStore
                 $counts['latency_cohorts'][$mode]=[];
                 foreach ($measurements as $name=>$values) $counts['latency_cohorts'][$mode][$name]=self::timingSummary($values);
             }
+            $counts['outcome_cohorts']=$outcomeCohorts;
+            $counts['comparison_profile_counts']=array_map('count',$comparisonProfiles);
             $x=&$counts['exports']; $x['eligible']=$x['succeeded']+$x['failed']; if($x['eligible'])$x['failure_rate']=$x['failed']/$x['eligible']; unset($x);
             return $counts;
         });
@@ -1164,6 +1179,20 @@ final class AiRunStore
         if (in_array($r['reason'],['AI_EXPORT_FAILED','AI_EXPORT_DEADLINE','DATA_ONLY_EXPORT_FAILED'],true)) return 'export';
         if ($r['reason']==='AI_WORKFLOW_DISABLED') return 'neutral';
         return 'technical';
+    }
+
+    private static function emptyOutcomeCounts(): array
+    {
+        return ['success'=>0,'partial'=>0,'technical'=>0,'export'=>0,'export_unknown'=>0,'security'=>0,'capacity'=>0,'neutral'=>0,'active'=>0];
+    }
+
+    /** Immutable technical refs only; diagnostics exposes the resulting count, never this hash. */
+    private static function comparisonProfile(array $snapshot): string
+    {
+        $keys=['model_config_version','capability_snapshot_hash','budget_profile_version','guidance_profile_version','intent_contract_version','management_revision'];
+        $profile=[];
+        foreach ($keys as $key) $profile[$key]=is_string($snapshot[$key]??null)?$snapshot[$key]:'';
+        return hash('sha256',json_encode($profile));
     }
 
     /** Integer-only aggregate. Raw per-Run timing is never exposed here. */
