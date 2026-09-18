@@ -19,7 +19,7 @@ function metricRegistryCheck(bool $condition, string $label): void
 
 $required = [
     'cash_performance', 'refund_performance', 'actual_performance', 'consume_amount',
-    'staff_sales_yeji', 'staff_labor_yeji', 'staff_service_num', 'service_people',
+    'staff_sales_yeji', 'staff_labor_yeji', 'staff_project_num', 'staff_service_num', 'service_people',
     'sales_amount', 'sales_collected_amount', 'sales_quantity', 'balance_deduction_amount',
     'recharge_amount', 'completed_service_item_count', 'customer_active',
 ];
@@ -43,6 +43,10 @@ metricRegistryCheck(MetricDefinitionRegistry::capabilities()['completed_service_
     && MetricDefinitionRegistry::capabilities()['sales_quantity']['ai_query_ready'] === true
     && MetricDefinitionRegistry::capabilities()['customer_active']['ai_query_ready'] === true,
     'registered quantity and people-count metrics are AI query-ready with their own unit');
+metricRegistryCheck(MetricDefinitionRegistry::get('staff_project_num')['storage_unit'] === 'project_count_micro'
+    && MetricDefinitionRegistry::get('staff_project_num')['source']['filters']['performance_type'] === 'labor_performance_allocated'
+    && MetricDefinitionRegistry::capabilities()['staff_project_num']['ai_query_ready'] === true,
+    'staff project count is an exact labor-allocation metric, not sales quantity');
 metricRegistryCheck((MetricDefinitionRegistry::get('sales_amount')['category_reader']['strategy'] ?? '') === 'sale_completed_allocation',
     'sales amount declares its category reader instead of leaving reports to sum sale facts');
 metricRegistryCheck(MetricDefinitionRegistry::get('sales_collected_amount')['reader_strategy'] === 'sales_payment_collected'

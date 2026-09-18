@@ -157,7 +157,8 @@ $checks = [
         && strpos($service, 'sales_void_attribution_reversal_race') !== false
         && strpos($service, ':service:') !== false
         && strpos($service, "newExecution(\n                'void-service-record'") !== false
-        && strpos($service, "'consumption_performance_recorded', 'labor_performance_allocated'") !== false
+        && strpos($service, "whereIn('reversal_of', \$forwardFactIds)") !== false
+        && strpos($service, '尚无 reversal_of 的同单业绩事实') !== false
         && strpos($service, "Db::name(self::OPERATION_TABLE)->where('tenant_id', \$scope->tenantId())") !== false
         && strpos($service, "Db::name('cashier_v3_sales_order_line')->where('tenant_id', \$scope->tenantId())") !== false,
     'void_cascade_follows_checkout_event_set' => strpos($service, 'occurredCheckoutEvents') !== false

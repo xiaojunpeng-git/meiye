@@ -21,7 +21,8 @@ final class AiAnswerRenderer
             $tooltip = $dictionary->getTooltip($row['metric_code']);
             if (empty($tooltip['user_ready'])) throw new RuntimeException('AI_METRIC_EXPLANATION_NOT_READY');
             if (!in_array($tooltip['name'], $metricNames, true)) $metricNames[] = $tooltip['name'];
-            $storageUnit = (string)($row['storage_unit'] ?? 'fen'); $unit = $storageUnit === 'count' ? '个' : '元';
+            $storageUnit = (string)($row['storage_unit'] ?? 'fen');
+            $unit = $this->displayUnit($tooltip, $storageUnit);
             $range = $row['period'] === 'current' ? ['start' => $view['query']['start_date'], 'end' => $view['query']['end_date']] : $view['query']['compare_range'];
             if ($shape === 'threshold_count') {
                 if ($storageUnit !== 'count' || ($row['object_kind'] ?? null) !== 'member'
@@ -68,7 +69,7 @@ final class AiAnswerRenderer
                 }
                 continue;
             }
-            $display = $this->metricValue($storageUnit === 'count' ? ($row['count'] ?? null) : ($row['amount_cents'] ?? null), $storageUnit);
+            $display = $this->metricValue($storageUnit === 'fen' ? ($row['amount_cents'] ?? null) : ($row['count'] ?? null), $storageUnit);
             $facts[$row['metric_code']][$row['period']] = ['name' => $tooltip['name'], 'value' => $display, 'unit' => $unit];
             $cards[] = ['metric_name' => $tooltip['name'], 'display_value' => $display, 'unit' => $unit, 'tooltip' => $tooltip,
                 'period_label' => ($row['period'] === 'current' ? '查询期间：' : '对比期间：') . $range['start'] . ' 至 ' . $range['end'],
@@ -212,8 +213,45 @@ final class AiAnswerRenderer
 
     private function metricValue($value, string $storageUnit): string
     {
-        if ($storageUnit === 'fen') return MetricMoneyFormatter::integerYuan($value);
+        if ($storageUnit === 'fen') return $this->formatInteger(MetricMoneyFormatter::integerYuan($value));
         if ($storageUnit === 'count' && is_int($value)) return (string)$value;
+        if ($storageUnit === 'project_count_micro' && is_int($value)) return $this->formatProjectCount($value);
+        throw new RuntimeException('AI_EVIDENCE_VALUE_INVALID');
+    }
+
+    /** Integer millionths prevent floating-point drift in the visible project count. */
+    private function formatProjectCount(int $value): string
+    {
+        $negative = $value < 0;
+        $digits = ltrim((string)$value, '-');
+        $digits = str_pad($digits, 7, '0', STR_PAD_LEFT);
+        $whole = ltrim(substr($digits, 0, -6), '0');
+        $whole = $whole === '' ? '0' : $whole;
+        $fraction = rtrim(substr($digits, -6), '0');
+        return ($negative ? '-' : '') . $whole . ($fraction === '' ? '' : '.' . $fraction);
+    }
+
+    /** Adds thousands separators only after the authoritative integer-yuan rounding. */
+    private function formatInteger(string $value): string
+    {
+        $negative = substr($value, 0, 1) === '-';
+        $digits = $negative ? substr($value, 1) : $value;
+        $grouped = preg_replace('/(?<=\\d)(?=(\\d{3})+$)/', ',', $digits);
+        return ($negative ? '-' : '') . $grouped;
+    }
+
+    /** Display vocabulary is metadata from the registered metric dictionary. */
+    private function displayUnit(array $tooltip, string $storageUnit): string
+    {
+        if ($storageUnit === 'fen') return '元';
+        if ($storageUnit === 'count') {
+            $unit = $tooltip['display_unit'] ?? null;
+            return is_string($unit) && $unit !== '' ? $unit : '个';
+        }
+        if ($storageUnit === 'project_count_micro') {
+            $unit = $tooltip['display_unit'] ?? null;
+            return is_string($unit) && $unit !== '' ? $unit : '项';
+        }
         throw new RuntimeException('AI_EVIDENCE_VALUE_INVALID');
     }
 }

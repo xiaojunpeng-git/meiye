@@ -6,6 +6,7 @@ $directory = $root . '/后端代码/app/services/query/metric/';
 require_once $root . '/后端代码/app/services/query/UnifiedQueryException.php';
 require_once $root . '/后端代码/app/services/query/UnifiedQueryJson.php';
 foreach (['MetricQueryContractException', 'MetricQueryCatalog', 'MetricReportCapabilityRegistry', 'MetricQueryReadinessGate'] as $class) require_once $directory . $class . '.php';
+require_once $directory . 'MetricDefinitionRegistry.php';
 require_once $root . '/后端代码/app/services/BaseServices.php';
 require_once $root . '/后端代码/app/services/metric/MetricDictionaryServices.php';
 

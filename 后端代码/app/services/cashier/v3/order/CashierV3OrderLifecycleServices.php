@@ -707,9 +707,28 @@ final class CashierV3OrderLifecycleServices
             $rows = Db::name($table)->where('tenant_id', $scope->tenantId())->where('order_id', $source['sourceId'])
                 ->where('fact_direction', 'forward')->where('status', 'effective')->lock(true)->order('id', 'asc')->select()->toArray();
             if ($action === 'void-sales-order') {
+                $alreadyReversed = [];
+                if ($table === 'cashier_v3_performance_fact' && $rows !== []) {
+                    $forwardFactIds = array_values(array_filter(array_map(static function (array $row): string {
+                        return trim((string)($row['fact_id'] ?? ''));
+                    }, $rows)));
+                    if ($forwardFactIds !== []) {
+                        foreach (Db::name($table)
+                            ->where('tenant_id', $scope->tenantId())
+                            ->where('status', 'effective')
+                            ->where('fact_direction', 'reversal')
+                            ->whereIn('reversal_of', $forwardFactIds)
+                            ->column('reversal_of') as $factId) {
+                            $alreadyReversed[(string)$factId] = true;
+                        }
+                    }
+                }
                 foreach ($rows as $row) {
+                    // 服务域先按自己的服务作废命令冲销其事实；销售域只补齐
+                    // 尚无 reversal_of 的同单业绩事实。这样既不会二次冲销
+                    // 已完成的权益服务，也不会遗漏销售项目的手艺人项目数。
                     if ($table === 'cashier_v3_performance_fact'
-                        && in_array((string)($row['performance_type'] ?? ''), ['consumption_performance_recorded', 'labor_performance_allocated'], true)) {
+                        && isset($alreadyReversed[(string)($row['fact_id'] ?? '')])) {
                         continue;
                     }
                     $reversal = $this->insertReversal($table, $row, $operationId, $commandKey, $event, $operator, $now);
@@ -1244,6 +1263,17 @@ final class CashierV3OrderLifecycleServices
                 ? ['original_amount_cents', 'discount_amount_cents', 'coupon_discount_cents', 'sale_amount_cents', 'debt_amount_cents']
                 : ($table === 'cashier_v3_performance_fact' ? ['allocation_base_amount_cents', 'amount_cents', 'labor_fee_amount_cents'] : ['amount_cents']);
             foreach ($columns as $column) $row[$column] = -(int)($source[$column] ?? 0);
+            if ($table === 'cashier_v3_performance_fact') {
+                // 项目数与金额一样是有符号事实值：报表/工资读取直接汇总
+                // 事实列，不能依赖 fact_direction 在不同读模型中重复取反。
+                $row['project_count_half_units'] = -(int)($source['project_count_half_units'] ?? 0);
+                if (($source['project_count_decimal'] ?? null) !== null
+                    && (string)($source['project_count_decimal'] ?? '') !== '') {
+                    $row['project_count_decimal'] = $this->negateProjectCountDecimal(
+                        (string)$source['project_count_decimal']
+                    );
+                }
+            }
         }
         foreach ($amountOverrides as $column => $amount) $row[$column] = (int)$amount;
         // Sale/payment/performance corrections are signed rows. Readers sum
@@ -1251,6 +1281,17 @@ final class CashierV3OrderLifecycleServices
         $row['immutable_fingerprint'] = hash('sha256', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         if ((int)Db::name($table)->insert($row) !== 1) throw self::failure('order_lifecycle_reversal_insert_failed');
         return $row;
+    }
+
+    /** Preserve the exact six-decimal project-count snapshot when reversing it. */
+    private function negateProjectCountDecimal(string $value): string
+    {
+        $value = trim($value);
+        if (!preg_match('/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $value)) {
+            throw self::failure('order_lifecycle_project_count_snapshot_invalid');
+        }
+        if (trim(str_replace(['-', '.', '0'], '', $value)) === '') return '0';
+        return $value[0] === '-' ? substr($value, 1) : '-' . $value;
     }
 
     private function insertAdjustedPerformance(array $template, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, array $staff, string $role, string $factType, int $amount, string $lineId, bool $marked, int $staffId): void

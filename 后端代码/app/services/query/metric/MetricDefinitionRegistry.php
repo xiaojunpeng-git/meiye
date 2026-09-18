@@ -98,6 +98,23 @@ final class MetricDefinitionRegistry
                 // as cashier performance allocation and personnel authority.
                 'analysis_default_selection_ref' => 'role:craftsman',
             ],
+            // 工资项目数不是销售数量：它是一次已完成服务中分给手艺人的
+            // 最终项目数。使用百万分之一的整数读值，保证 0.3、6.6 等手工
+            // 分配值在聚合、排行和导出中不因浮点计算而漂移。
+            'staff_project_num' => self::projectCount('personnel_fact_sum', 'staff-service-project-count-v2', ['summary', 'ranking'], [
+                'table' => 'cashier_v3_performance_fact',
+                'amount' => 'CAST(ROUND(COALESCE(p.project_count_decimal, p.project_count_half_units / 2) * 1000000, 0) AS SIGNED)',
+                'filters' => ['status' => 'effective', 'performance_type' => 'labor_performance_allocated'],
+                'normal_scope' => 'facts', 'dimensions' => ['employee' => [
+                    'id' => 'employee_id', 'name' => 'employee_name_snapshot',
+                    'analysis_object_kind' => 'person', 'analysis_object_label' => '人员',
+                    'analysis_relation_role' => 'serving_employee', 'analysis_action_codes' => ['service'],
+                    'analysis_filter_keys' => ['selection_ref'],
+                ]],
+            ], 'person', ['selection_ref']) + [
+                'default_ranking_dimension' => 'employee',
+                'analysis_default_selection_ref' => 'role:craftsman',
+            ],
             // "客数" retains its established code, but its former source was
             // the legacy write-off table.  New V3 reads are bound to completed
             // service facts plus active labour allocations instead.
@@ -248,7 +265,7 @@ final class MetricDefinitionRegistry
             // deterministic rendering and the guarded export projection.  Counts
             // are therefore a first-class registered result, not a failed attempt
             // to masquerade as cents.
-            $aiReady = in_array($item['storage_unit'], ['fen', 'count'], true);
+            $aiReady = in_array($item['storage_unit'], ['fen', 'count', 'project_count_micro'], true);
             $out[$code] = [
                 'metric_code' => $code, 'name' => (string)$definition['name'], 'ai_query_ready' => $aiReady,
                 'metric_version' => $item['metric_version'], 'mapping_version' => self::VERSION,
@@ -285,6 +302,12 @@ final class MetricDefinitionRegistry
     private static function tenthCount(string $strategy, string $version, array $shapes, array $source, string $grain = 'store', array $filters = []): array
     {
         return self::definition($strategy, $version, $shapes, $source, $grain, $filters, 'customer_tenth');
+    }
+
+    /** Project counts use integer millionths so arbitrary manual decimals remain exact. */
+    private static function projectCount(string $strategy, string $version, array $shapes, array $source, string $grain = 'store', array $filters = []): array
+    {
+        return self::definition($strategy, $version, $shapes, $source, $grain, $filters, 'project_count_micro');
     }
 
     private static function definition(string $strategy, string $version, array $shapes, array $source, string $grain, array $filters, string $unit): array

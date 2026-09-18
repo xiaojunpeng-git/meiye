@@ -43,7 +43,7 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             // Keep export eligibility explicit; names come from the same registered
             // read contract as the cards, never from model/result display text.
             $storageUnit = $result['storage_unit'] ?? null;
-            if (!isset($capabilities[$code]) || !in_array($storageUnit, ['fen', 'count'], true)
+            if (!isset($capabilities[$code]) || !in_array($storageUnit, ['fen', 'count', 'project_count_micro'], true)
                 || ($capabilities[$code]['storage_unit'] ?? null) !== $storageUnit
                 || ($capabilities[$code]['ai_query_ready']??false)!==true) throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
             if (!in_array($result['period']??null,['current','comparison'],true)) throw new \RuntimeException('METRIC_EXPORT_PERIOD_INVALID');
@@ -64,7 +64,7 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             if (!is_string($label)||$label==='') throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
             $base=['metric_name'=>$capabilities[$code]['name'],'period_name'=>$period==='current'?'本期':'对比期','start_date'=>$range['start'],'end_date'=>$range['end'],
                 'store_name'=>$label.($person?'（按当前任职筛选）':''),'ranking_direction'=>'','business_date'=>'',
-                'unit'=>$storageUnit === 'fen' ? '元' : '个'];
+                'unit'=>$storageUnit === 'fen' ? '元' : ($storageUnit === 'project_count_micro' ? '项' : '个')];
             if (isset($result['amount_cents']) || isset($result['count'])) self::append($rows,$base,$storageUnit==='fen' ? ($result['amount_cents']??null) : ($result['count']??null),$storageUnit);
             elseif ($view['query']['query_shape']==='trend') foreach ($result['rows'] as $point) self::append($rows,array_replace($base,['business_date'=>$point['business_date']]),$point['amount_cents'],$storageUnit);
             elseif ($view['query']['query_shape']==='ranking') foreach ($result['rows'] as $direction=>$points) foreach ($points as $point) {
@@ -92,6 +92,11 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             $display=($value<0?'-':'').substr($digits,0,-2).'.'.substr($digits,-2);
         } elseif ($storageUnit === 'count') {
             $display=(string)$value;
+        } elseif ($storageUnit === 'project_count_micro') {
+            $negative=$value<0;$digits=str_pad(ltrim((string)$value,'-'),7,'0',STR_PAD_LEFT);
+            $whole=ltrim(substr($digits,0,-6),'0');$whole=$whole===''?'0':$whole;
+            $fraction=rtrim(substr($digits,-6),'0');
+            $display=($negative?'-':'').$whole.($fraction===''?'':'.'.$fraction);
         } else throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
         $rows[]=array_merge(['row_id'=>(string)(count($rows)+1)],$base,['metric_value'=>$display]);
     }
