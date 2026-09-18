@@ -29,12 +29,6 @@ final class AiGatewayServices
     // The profile is the authoritative transport cap.  Individual model
     // stages may request a tighter limit, but never a longer one.
     private const MODEL_STAGE_LIMIT_MS = 20000;
-    // Binding is read-only and has one fenced transport recovery. Splitting
-    // its 20-second ceiling into two bounded attempts prevents an unhealthy
-    // first provider request from consuming the whole visible-answer budget.
-    // These values are transport policy, not business or metric rules.
-    private const BIND_INITIAL_STAGE_LIMIT_MS = 10000;
-    private const BIND_RECOVERY_STAGE_LIMIT_MS = 10000;
     private $runs; private $config; private $private; private $instance; private $views; private $model; private $queryTransaction; private $exports;
     private $management; private $managementDocument; private $managementRevision='source';
     /** Optional injected dependencies are for an isolated integration environment, never request parameters. */
@@ -980,7 +974,10 @@ final class AiGatewayServices
         $bindingRankRecovery=false;
         try {
             $checkpoint();
-            $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::BIND_INITIAL_STAGE_LIMIT_MS) : null;
+            // A transport result that times out is not provably absent at the
+            // provider. Give this one binding request the normal bounded
+            // model window rather than sending the same request a second time.
+            $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
             $reply=$this->model
                 ? call_user_func($this->model,$safe['outbound'],$bindingSummaries,$configuration,$checkpoint,null,'binding',$understanding)
                 : (new SiliconFlowClient())->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills);
@@ -1016,32 +1013,6 @@ final class AiGatewayServices
             if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,'bind_intent');
             $firstState=in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_intent',$firstState);
-            // A bind call has no business write and the first understanding
-            // has already passed its contract.  One new, independently
-            // recorded call may therefore recover a transport-unknown result.
-            // Never replay the unknown attempt itself; this keeps its usage
-            // and outcome honest and bounds the customer-visible wait.
-            if ($error instanceof AiContractException && $error->getMessage()==='AI_MODEL_RESULT_UNKNOWN') {
-                try {
-                    $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
-                    $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$understanding,$bindingSummaries,$runtimeSkills],2048));
-                    $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
-                    $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_transport_recovery','model',hash('sha256',json_encode([$safe['outbound'],$understanding,$bindingSummaries,'transport_recovery'])),'siliconflow');
-                    $this->runs->sendAttempt($owner,$id,$generation,$worker,'bind_transport_recovery');
-                    $checkpoint();
-                    $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::BIND_RECOVERY_STAGE_LIMIT_MS) : null;
-                    $reply=$this->model
-                        ? call_user_func($this->model,$safe['outbound'],$bindingSummaries,$configuration,$checkpoint,null,'binding',$understanding)
-                        : (new SiliconFlowClient())->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills);
-                    $reply['intent']=$this->semanticIntent($reply['intent']??null,$bindingSummaries,$safe['outbound'],$understanding);
-                    $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_transport_recovery','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
-                } catch (\Throwable $recoveryError) {
-                    if ($recoveryError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$recoveryError,'bind_transport_recovery');
-                    $recoveryState=in_array($recoveryError->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
-                    try { $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_transport_recovery',$recoveryState); } catch (\Throwable $ignored) {}
-                    throw $recoveryError;
-                }
-            } else {
             $diagnostic=$error instanceof AiContractException?$error->diagnostic():[];
             $repairPredicate=$diagnostic['predicate']??null;
             // A provider may omit a mandatory JSON field on either a fresh
@@ -1073,7 +1044,6 @@ final class AiGatewayServices
                 if ($repairError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$repairError,'bind_repair');
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_repair',in_array($repairError->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');
                 throw $repairError;
-            }
             }
         }
         }
@@ -2276,7 +2246,7 @@ final class AiGatewayServices
             'AI_METRIC_NOT_READY'=>'该指标尚未通过统一报表口径核验，暂不能查询。',
             'AI_EXPORT_NOT_READY'=>'当前 Excel 能力尚未启用，本次未生成文件或发布数字。',
             'AI_MODEL_ACCOUNT_UNAVAILABLE'=>'客户 AI 账号暂不可用，请联系管理员检查 AI 配置。',
-            'AI_MODEL_RESULT_UNKNOWN'=>'本次模型服务在安全等待时间内未返回。为避免重复调用，系统已停止本次任务，请稍后再问。',
+            'AI_MODEL_RESULT_UNKNOWN'=>'模型响应超时，本次尚未执行数据查询。您可以直接重试，无需重新描述问题。',
             'ATTEMPT_UNKNOWN'=>'本次 AI 请求结果暂未确认，已停止继续调用，请稍后再问。',
             'AI_MODEL_RESPONSE_TRUNCATED'=>'本次 AI 理解结果未完整返回，系统已停止查询，请稍后重试。',
             'AI_MODEL_RESPONSE_ENVELOPE_INVALID'=>'本次 AI 返回格式异常，系统未执行查询，请稍后重试。',

@@ -1333,9 +1333,7 @@ final class AiRunStore
         );
     }
 
-    /** An unknown binding request may be superseded only by the one explicit,
-     * successfully completed recovery attempt. Every other unknown call still
-     * blocks guidance, export and publication. */
+    /** Any unknown provider attempt blocks guidance, export and publication. */
     private function hasUnresolvedAttempt(string $runId): bool
     {
         $rows=$this->rows('SELECT attempt_code,state FROM '.$this->table('attempt').' WHERE instance_id=? AND run_id=?',[$this->instance,$runId]);
@@ -1346,7 +1344,6 @@ final class AiRunStore
         }
         foreach ($states as $code=>$state) {
             if ($state!=='UNKNOWN') continue;
-            if ($code==='bind_intent' && ($states['bind_transport_recovery']??null)==='SUCCEEDED') continue;
             return true;
         }
         return false;
