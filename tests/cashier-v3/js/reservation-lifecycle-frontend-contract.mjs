@@ -11,7 +11,12 @@ const bridge = fs.readFileSync(new URL('../../../前端代码/cashier-v3/src/ser
 const shell = fs.readFileSync(new URL('../../../前端代码/cashier-v3/src/layouts/CashierShell.vue', import.meta.url), 'utf8')
 
 assert.doesNotMatch(list, /key: 'pending', label: '待确认'/, '快捷筛选不得重新暴露待确认')
+assert.doesNotMatch(list, /key: 'today', label: '今日预约'/, '预约页不得保留今日预约快捷筛选')
 assert.match(list, /key: 'unstarted', label: '未开始'/, '快捷筛选必须展示未开始')
+assert.match(list, /const activeQuickKey = ref\('all'\)/, '预约页默认应由当天日期范围查询，而非隐藏今日预约筛选')
+assert.match(list, /key: 'appointment_time',[\s\S]*?quickDateRange: true/, '预约日期必须使用默认当天的日期范围')
+assert.doesNotMatch(list, /function changeReservationCalendarDate/, '日历不得保留上一天、今天、下一天导航逻辑')
+assert.doesNotMatch(list, /reservation-calendar-toolbar__date/, '日历不得渲染日期导航区')
 assert.match(list, /:show-keyword-search="false"/, '预约页不得展示综合搜索输入框')
 assert.match(list, /inline-quick-controls/, '预约快捷筛选和常用字段必须使用上方左侧布局')
 assert.match(toolbar, /inlineQuickControls/, '统一工具栏必须支持预约页专用的上方快捷布局')

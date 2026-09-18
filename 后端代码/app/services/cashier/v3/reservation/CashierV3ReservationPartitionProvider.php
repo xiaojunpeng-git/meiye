@@ -55,6 +55,10 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
             $recordsQuery->where('appointment_start_at', '>=', $todayStart)
                 ->where('appointment_start_at', '<', $todayStart + 86400);
         }
+        // 列表和日历共享同一预约主表，但列表的统一查询筛选必须在服务端
+        // 生效。此前预约时间仅停留在工具栏的界面状态，导致选择 9 月 19 日
+        // 后无法精确找到当天的待服务预约。
+        self::applyListTopFilters($recordsQuery, (array)($hints['topFilters'] ?? $hints['top_filters'] ?? []));
         $total = (int)(clone $recordsQuery)->count();
         $rows = $recordsQuery->order('appointment_start_at desc,id desc')->page($page, $pageSize)->select();
         $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
@@ -282,6 +286,79 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         $value = trim((string)$value);
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value, self::businessZone());
         return $date && $date->format('Y-m-d') === $value ? $value : self::businessNow()->format('Y-m-d');
+    }
+
+    /**
+     * Apply the small, explicit subset of the unified toolbar contract that
+     * has a direct reservation-header authority.  Never forward client field
+     * names or operators into SQL; unsupported filters remain unavailable
+     * until their read-model joins are explicitly defined.
+     *
+     * @param mixed $query ThinkPHP query builder
+     */
+    private static function applyListTopFilters($query, array $filters): void
+    {
+        foreach ($filters as $filter) {
+            if (!is_array($filter)) continue;
+            $field = trim((string)($filter['field'] ?? ''));
+            $operator = strtolower(trim((string)($filter['operator'] ?? 'eq')));
+            $value = trim((string)($filter['value'] ?? ''));
+            if ($value === '') continue;
+
+            if ($field === 'appointment_time') {
+                $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value, self::businessZone());
+                if (!$date || $date->format('Y-m-d') !== $value) continue;
+                $start = $date->getTimestamp();
+                if (in_array($operator, ['gte', 'gt'], true)) {
+                    $query->where('appointment_start_at', $operator === 'gt' ? '>' : '>=', $start);
+                } elseif (in_array($operator, ['lte', 'lt'], true)) {
+                    // A date upper bound includes the complete business day.
+                    $query->where('appointment_start_at', '<', $operator === 'lt' ? $start : $start + 86400);
+                } elseif (in_array($operator, ['eq', '='], true)) {
+                    $query->where('appointment_start_at', '>=', $start)
+                        ->where('appointment_start_at', '<', $start + 86400);
+                }
+                continue;
+            }
+
+            if ($field === 'status' && in_array($operator, ['eq', '='], true)) {
+                $status = self::statusCode($value);
+                if ($status !== '') $query->where('status', $status);
+                continue;
+            }
+
+            $column = [
+                'reservation_no' => 'reservation_no',
+                'member_name' => 'member_name_snapshot',
+                'phone' => 'member_phone_snapshot',
+                'room' => 'room_name_snapshot',
+                'remark' => 'remark_snapshot',
+                'creator' => 'creator_name_snapshot',
+            ][$field] ?? '';
+            if ($column !== '') {
+                if (in_array($operator, ['contains', 'like'], true)) {
+                    $query->where($column, 'like', '%' . addcslashes($value, '%_\\') . '%');
+                } elseif (in_array($operator, ['eq', '='], true)) {
+                    $query->where($column, $value);
+                }
+            }
+        }
+    }
+
+    private static function statusCode(string $value): string
+    {
+        $normalized = strtoupper(str_replace([' ', '-'], '_', trim($value)));
+        return [
+            '待确认' => 'PENDING_CONFIRMATION',
+            'PENDING_CONFIRMATION' => 'PENDING_CONFIRMATION',
+            '未开始' => 'UNSTARTED',
+            '待服务' => 'UNSTARTED',
+            'UNSTARTED' => 'UNSTARTED',
+            '服务中' => 'IN_SERVICE',
+            'IN_SERVICE' => 'IN_SERVICE',
+            '已结束' => 'COMPLETED',
+            'COMPLETED' => 'COMPLETED',
+        ][$normalized] ?? '';
     }
 
     private static function quickFilter($value, string $workflow = ''): string

@@ -85,16 +85,30 @@ final class CashierV3ReservationModule
         if (!$handlers->hasProjection('query-reservations')) {
             $handlers->registerProjection('query-reservations', function (array $scope): array {
                 $payload = (array)($scope['payload'] ?? []);
-                $part = (new CashierV3ReservationPartitionProvider())->readPartition((string)($scope['state_context_id'] ?? ''), '', $scope['operator_scope'], $scope['data_scope'], [
+                $queryHints = [
                     'calendarDate' => (string)($payload['calendarDate'] ?? ''),
                     'quickFilter' => (string)($payload['quickFilter'] ?? ''),
                     'workflow' => (string)($payload['workflow'] ?? ''),
+                    // 查询工具栏提交的是统一 topFilters。预约列表必须在
+                    // 服务端消费它们，不能只更新日期控件的显示状态。
+                    'topFilters' => is_array($payload['topFilters'] ?? null) ? $payload['topFilters'] : [],
                     'page' => (int)($payload['page'] ?? 1),
                     // Desktop calendar historically projects up to 100 rows;
                     // mobile callers always pass their own pageSize.
                     'pageSize' => (int)($payload['pageSize'] ?? 100),
-                ]);
-                return ['data' => ['reservation' => $part['payload']], 'versions' => $part['public_versions'], 'return_root_state' => true, 'root_hints' => ['calendarDate' => (string)($part['payload']['calendar']['date'] ?? '')], 'message' => '预约列表已刷新。'];
+                ];
+                $part = (new CashierV3ReservationPartitionProvider())->readPartition((string)($scope['state_context_id'] ?? ''), '', $scope['operator_scope'], $scope['data_scope'], $queryHints);
+                // return_root_state 会再次完整重建根投影。所有已使用的查询
+                // 条件都必须回传给重建器；只保留 calendarDate 会使“未开始”等
+                // 条件回退为默认“今日预约”，并覆盖刚查出的正确列表。
+                return ['data' => ['reservation' => $part['payload']], 'versions' => $part['public_versions'], 'return_root_state' => true, 'root_hints' => [
+                    'calendarDate' => (string)($part['payload']['calendar']['date'] ?? ''),
+                    'quickFilter' => (string)$queryHints['quickFilter'],
+                    'workflow' => (string)$queryHints['workflow'],
+                    'topFilters' => (array)$queryHints['topFilters'],
+                    'page' => (int)$queryHints['page'],
+                    'pageSize' => (int)$queryHints['pageSize'],
+                ], 'message' => '预约列表已刷新。'];
             });
         }
         if (!$handlers->hasProjection('query-reservation-project-catalog')) {
@@ -128,11 +142,23 @@ final class CashierV3ReservationModule
                 if (!$parsed || $parsed->format('Y-m-d') !== $baseDate) $parsed = new \DateTimeImmutable('today', $timezone);
                 $direction = max(-1, min(1, (int)($payload['direction'] ?? 0)));
                 $date = $direction === 0 ? new \DateTimeImmutable('today', $timezone) : $parsed->modify(($direction > 0 ? '+' : '-') . '1 day');
-                $part = (new CashierV3ReservationPartitionProvider())->readPartition((string)($scope['state_context_id'] ?? ''), '', $scope['operator_scope'], $scope['data_scope'], [
+                $queryHints = [
                     'calendarDate' => $date->format('Y-m-d'),
                     'quickFilter' => (string)($payload['quickFilter'] ?? ''),
-                ]);
-                return ['data' => ['reservation' => $part['payload']], 'versions' => $part['public_versions'], 'return_root_state' => true, 'root_hints' => ['calendarDate' => (string)($part['payload']['calendar']['date'] ?? '')], 'message' => '预约日历已更新。'];
+                    'workflow' => (string)($payload['workflow'] ?? ''),
+                    'topFilters' => is_array($payload['topFilters'] ?? null) ? $payload['topFilters'] : [],
+                    'page' => (int)($payload['page'] ?? 1),
+                    'pageSize' => (int)($payload['pageSize'] ?? 100),
+                ];
+                $part = (new CashierV3ReservationPartitionProvider())->readPartition((string)($scope['state_context_id'] ?? ''), '', $scope['operator_scope'], $scope['data_scope'], $queryHints);
+                return ['data' => ['reservation' => $part['payload']], 'versions' => $part['public_versions'], 'return_root_state' => true, 'root_hints' => [
+                    'calendarDate' => (string)($part['payload']['calendar']['date'] ?? ''),
+                    'quickFilter' => (string)$queryHints['quickFilter'],
+                    'workflow' => (string)$queryHints['workflow'],
+                    'topFilters' => (array)$queryHints['topFilters'],
+                    'page' => (int)$queryHints['page'],
+                    'pageSize' => (int)$queryHints['pageSize'],
+                ], 'message' => '预约日历已更新。'];
             });
         }
         if (!$handlers->hasProjection('recalculate-reservation-plan')) {

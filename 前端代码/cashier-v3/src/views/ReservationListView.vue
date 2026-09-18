@@ -17,7 +17,7 @@ const state = useCashierV3State()
 const router = useRouter()
 const viewMode = ref('calendar')
 const calendarResourceMode = ref('staff')
-const activeQuickKey = ref('today')
+const activeQuickKey = ref('all')
 const isEditorOpen = ref(false)
 const isEditorLoading = ref(false)
 const editorLoadMessage = ref('')
@@ -112,7 +112,15 @@ const calendarStyle = computed(() => ({
 
 const queryFields = computed(() => [
   { key: 'reservation_no', label: '预约记录号', defaultVisible: true },
-  { key: 'appointment_time', label: '预约时间', defaultVisible: true, defaultQuick: true, type: 'date' },
+  {
+    key: 'appointment_time',
+    label: '预约时间',
+    defaultVisible: true,
+    defaultQuick: true,
+    quickDateRange: true,
+    quickLabelHidden: true,
+    type: 'date'
+  },
   { key: 'member_name', label: '会员姓名', defaultVisible: true, defaultQuick: true },
   { key: 'phone', label: '手机号', defaultVisible: false },
   { key: 'project', label: '预约项目', defaultVisible: true },
@@ -228,7 +236,7 @@ function normalizeReservationQuery(query = {}, quickFilter = activeQuickKey.valu
       filters: Array.isArray(querySettings.filters) ? querySettings.filters.map((filter) => ({ ...filter })) : [],
       filterRelation: querySettings.filterRelation === 'any' ? 'any' : 'all'
     },
-    quickFilter: typeof quickFilter === 'string' && quickFilter ? quickFilter : 'today',
+    quickFilter: typeof quickFilter === 'string' && quickFilter ? quickFilter : 'all',
     page: Math.max(1, Number(source.page) || 1),
     pageSize: Math.max(1, Number(source.pageSize) || pageSize.value)
   }
@@ -239,14 +247,6 @@ function queryReservations(query = reservationQuerySnapshot.value, resetPage = t
   normalized.page = resetPage ? 1 : normalized.page
   reservationQuerySnapshot.value = normalized
   return requestAction('query-reservations', normalized)
-}
-
-function changeReservationCalendarDate(direction) {
-  return requestAction('change-reservation-calendar-date', {
-    ...normalizeReservationQuery(reservationQuerySnapshot.value, activeQuickKey.value),
-    calendarDate: String(calendar.value.date || ''),
-    direction
-  })
 }
 
 function reservationFieldValue(record, fieldKey) {
@@ -267,7 +267,6 @@ function reservationFieldValue(record, fieldKey) {
 }
 
 const quickFilters = computed(() => [
-  { key: 'today', label: '今日预约', count: quickCounts.value.today, active: activeQuickKey.value === 'today' },
   { key: 'pending_confirmation', label: '待确认', count: quickCounts.value.pendingConfirmation ?? quickCounts.value.pending_confirmation, active: activeQuickKey.value === 'pending_confirmation' },
   { key: 'unstarted', label: '未开始', count: quickCounts.value.unstarted, active: activeQuickKey.value === 'unstarted' },
   { key: 'serving', label: '服务中', count: quickCounts.value.serving, active: activeQuickKey.value === 'serving' },
@@ -1508,12 +1507,6 @@ onBeforeUnmount(() => {
 
     <main v-else class="reservation-calendar-wrap">
       <header class="reservation-calendar-toolbar">
-        <div class="reservation-calendar-toolbar__date">
-          <button type="button" class="button button--secondary" @click="changeReservationCalendarDate(-1)">上一天</button>
-          <button type="button" class="button button--secondary" @click="changeReservationCalendarDate(0)">今天</button>
-          <button type="button" class="button button--secondary" @click="changeReservationCalendarDate(1)">下一天</button>
-          <strong>{{ calendar.date }}</strong>
-        </div>
         <div class="reservation-calendar-toolbar__mode">
           <button type="button" :class="{ 'reservation-calendar-toolbar__mode--active': calendarResourceMode === 'staff' }" @click="calendarResourceMode = 'staff'">按手艺人</button>
           <button type="button" :class="{ 'reservation-calendar-toolbar__mode--active': calendarResourceMode === 'room' }" @click="calendarResourceMode = 'room'">按房间</button>
