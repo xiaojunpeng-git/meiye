@@ -44,6 +44,12 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  // 有固定业务范围的页面不应让操作员切换到另一套数据范围；仍在查询
+  // 契约中发送 normal，确保后端权限与其他页面保持同一表达方式。
+  showDataScope: {
+    type: Boolean,
+    default: true
+  },
   // Some dense operational pages need their status shortcuts and their
   // configured quick fields beside the primary query controls. Keep the
   // default two-row presentation for all existing pages.
@@ -421,6 +427,13 @@ function ensureQuickDateRangeDefaults() {
   })
 }
 
+function ensureQuickFieldDefaults() {
+  activeQuickFields.value.forEach((field) => {
+    if (field.quickDefaultToday !== true || topFieldType(field) !== 'date') return
+    if (!quickFieldValues[field.key]) quickFieldValues[field.key] = localToday()
+  })
+}
+
 function setQuickRangeValue(field, bound, value) {
   if (!quickFieldRanges[field.key]) quickFieldRanges[field.key] = { min: '', max: '' }
   quickFieldRanges[field.key][bound] = value
@@ -507,6 +520,12 @@ function buildQueryPayload() {
   }
 }
 
+function submitQuickDateOnChange(field) {
+  // 单日看板类页面选完日期即可刷新；日期区间保留给用户完整填写后点击“查询”，
+  // 避免刚改开始日期就提交一个尚未完成的范围。
+  if (topFieldType(field) === 'date' && field?.quickSubmitOnChange === true) submitQuery()
+}
+
 function submitQuery() {
   if (!validateQuickRanges()) return
   emit('query', buildQueryPayload())
@@ -579,11 +598,15 @@ function applySettings(settings) {
     if (!(field.key in quickFieldValues)) quickFieldValues[field.key] = ''
   })
   ensureQuickDateRangeDefaults()
+  ensureQuickFieldDefaults()
   emit('settings-applied', { ...activeSettings.value })
   submitQuery()
 }
 
-watch(activeQuickFields, () => ensureQuickDateRangeDefaults(), { immediate: true })
+watch(activeQuickFields, () => {
+  ensureQuickDateRangeDefaults()
+  ensureQuickFieldDefaults()
+}, { immediate: true })
 
 async function saveAliases(aliases, options = {}) {
   if (!canRenameFields.value || !props.onSaveFieldAliases) {
@@ -792,9 +815,10 @@ async function startDirectQueryExport() {
                 v-model="quickFieldValues[field.key]"
                 :type="topFieldType(field)"
                 :placeholder="topFieldPlaceholder(field)"
+                @change="submitQuickDateOnChange(field)"
                 @keyup.enter="submitQuery"
               >
-              <button v-if="!isQuickDateRange(field) && (field.quickRange === true ? (quickFieldRanges[field.key]?.min || quickFieldRanges[field.key]?.max) : quickFieldValues[field.key]) && !isFixedStoreField(field)" type="button" class="unified-query-top-field__clear" :aria-label="`清空${field.label}`" @click="clearTopField(field)">×</button>
+              <button v-if="field.quickClearable !== false && !isQuickDateRange(field) && (field.quickRange === true ? (quickFieldRanges[field.key]?.min || quickFieldRanges[field.key]?.max) : quickFieldValues[field.key]) && !isFixedStoreField(field)" type="button" class="unified-query-top-field__clear" :aria-label="`清空${field.label}`" @click="clearTopField(field)">×</button>
             </div>
           </label>
         </div>
@@ -803,7 +827,7 @@ async function startDirectQueryExport() {
           <input v-model="keyword" type="search" :placeholder="searchPlaceholder" autocomplete="off" @keyup.enter="submitQuery">
         </label>
         <button type="button" class="button button--primary" @click="submitQuery">查询</button>
-        <div class="unified-query-scope" role="group" aria-label="数据范围">
+        <div v-if="showDataScope" class="unified-query-scope" role="group" aria-label="数据范围">
           <span class="unified-query-scope__thumb" :class="{ 'unified-query-scope__thumb--all': dataScope === 'all' }" aria-hidden="true" />
           <button type="button" :aria-pressed="dataScope === 'normal'" :class="{ 'unified-query-scope__active': dataScope === 'normal' }" @click="selectScope('normal')">正常数据</button>
           <button type="button" :aria-pressed="dataScope === 'all'" :class="{ 'unified-query-scope__active': dataScope === 'all' }" @click="selectScope('all')">全部数据</button>
@@ -899,14 +923,15 @@ async function startDirectQueryExport() {
               <option value="">全部</option>
               <option v-for="option in field.options" :key="option.value || option" :value="option.value || option">{{ option.label || option }}</option>
             </select>
-            <input
-              v-else
-              v-model="quickFieldValues[field.key]"
-              :type="topFieldType(field)"
-              :placeholder="topFieldPlaceholder(field)"
-              @keyup.enter="submitQuery"
-            >
-            <button v-if="!isQuickDateRange(field) && (field.quickRange === true ? (quickFieldRanges[field.key]?.min || quickFieldRanges[field.key]?.max) : quickFieldValues[field.key]) && !isFixedStoreField(field)" type="button" class="unified-query-top-field__clear" :aria-label="`清空${field.label}`" @click="clearTopField(field)">×</button>
+              <input
+                v-else
+                v-model="quickFieldValues[field.key]"
+                :type="topFieldType(field)"
+                :placeholder="topFieldPlaceholder(field)"
+                @change="submitQuickDateOnChange(field)"
+                @keyup.enter="submitQuery"
+              >
+            <button v-if="field.quickClearable !== false && !isQuickDateRange(field) && (field.quickRange === true ? (quickFieldRanges[field.key]?.min || quickFieldRanges[field.key]?.max) : quickFieldValues[field.key]) && !isFixedStoreField(field)" type="button" class="unified-query-top-field__clear" :aria-label="`清空${field.label}`" @click="clearTopField(field)">×</button>
           </div>
         </label>
       </div>

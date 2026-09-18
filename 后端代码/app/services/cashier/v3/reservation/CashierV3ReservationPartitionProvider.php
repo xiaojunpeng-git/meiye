@@ -29,6 +29,14 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         $quickFilter = self::quickFilter($hints['quickFilter'] ?? $hints['quick_filter'] ?? '', $workflow);
         $page = max(1, (int)($hints['page'] ?? 1));
         $pageSize = max(1, min(100, (int)($hints['pageSize'] ?? $hints['page_size'] ?? 20)));
+        $topFilters = (array)($hints['topFilters'] ?? $hints['top_filters'] ?? []);
+        $appointmentDateFilters = self::appointmentDateFilters($topFilters);
+        // 日历默认展示当天，且日历卡片、列表和状态括号必须从同一日期集合取数。
+        // 首次进入页面尚未产生 topFilters 时，不能让括号退化为跨日期的全历史统计。
+        $calendarDate = self::calendarDateFromTopFilters(
+            $topFilters,
+            self::calendarDate($hints['calendarDate'] ?? $hints['calendar_date'] ?? '')
+        );
         $dueNotArrivedCount = (int)Db::name('cashier_v3_reservation')->alias('r')
             ->where('r.tenant_id', $tenantId)->where('r.store_id', $storeId)
             ->where('r.lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
@@ -58,7 +66,8 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         // 列表和日历共享同一预约主表，但列表的统一查询筛选必须在服务端
         // 生效。此前预约时间仅停留在工具栏的界面状态，导致选择 9 月 19 日
         // 后无法精确找到当天的待服务预约。
-        self::applyListTopFilters($recordsQuery, (array)($hints['topFilters'] ?? $hints['top_filters'] ?? []));
+        self::applyListTopFilters($recordsQuery, $topFilters);
+        if (!$appointmentDateFilters) self::applyAppointmentDate($recordsQuery, $calendarDate);
         $total = (int)(clone $recordsQuery)->count();
         $rows = $recordsQuery->order('appointment_start_at desc,id desc')->page($page, $pageSize)->select();
         $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
@@ -109,12 +118,15 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         $artisanNames = $artisanIds ? Db::name('system_store_staff')->whereIn('id', array_values($artisanIds))->column('staff_name', 'id') : [];
         $versions = [];
         $records = [];
+        // 快捷按钮的数量是当前日期范围内、各状态的预约数。它不能沿用
+        // 全历史计数，否则操作员改了顶部日期后会看到列表和括号数字不一致。
         $countBase = Db::name('cashier_v3_reservation')->where('tenant_id', $tenantId)->where('store_id', $storeId)
-            ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION);
-        $today = self::businessNow()->format('Y-m-d');
-        $todayStart = self::businessNow()->setTime(0, 0)->getTimestamp();
+            ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
+            ->whereIn('status', ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE', 'COMPLETED']);
+        self::applyListTopFilters($countBase, $appointmentDateFilters);
+        if (!$appointmentDateFilters) self::applyAppointmentDate($countBase, $calendarDate);
         $counts = [
-            'today' => (int)(clone $countBase)->where('appointment_start_at', '>=', $todayStart)->where('appointment_start_at', '<', $todayStart + 86400)->count(),
+            'all' => (int)(clone $countBase)->count(),
             'pendingConfirmation' => (int)(clone $countBase)->where('status', 'PENDING_CONFIRMATION')->count(),
             'unstarted' => (int)(clone $countBase)->where('status', 'UNSTARTED')->count(),
             'serving' => (int)(clone $countBase)->where('status', 'IN_SERVICE')->count(),
@@ -178,7 +190,9 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
                 'primaryAction' => ['action' => 'open-reservation-detail', 'label' => '查看详情', 'enabled' => true],
             ];
         }
-        $calendarDate = self::calendarDate($hints['calendarDate'] ?? $hints['calendar_date'] ?? '');
+        // 日历只有一个时间轴；当顶部使用日期范围时，按起始日渲染，确保
+        // 操作员修改日期后日历与当前查询处在同一个业务日，而不再依赖已移除的
+        // “上一天 / 今天 / 下一天”按钮。
         $calendar = self::calendar($tenantId, $storeId, $calendarDate, $rows, $lines, $artisanStaffByReservation, $artisanNames);
         return ['ready' => true, 'payload' => [
             'availability' => ['contractVersion' => 'cashier-v3-reservation-v1', 'status' => 'active', 'reasonCode' => '', 'dataLoaded' => true, 'businessFactsIncluded' => true],
@@ -345,6 +359,35 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         }
     }
 
+    /** @return array<int,array<string,mixed>> */
+    private static function appointmentDateFilters(array $filters): array
+    {
+        return array_values(array_filter($filters, static function ($filter): bool {
+            return is_array($filter) && trim((string)($filter['field'] ?? '')) === 'appointment_time';
+        }));
+    }
+
+    /** Apply the calendar's single business day when no explicit date filter was submitted. */
+    private static function applyAppointmentDate($query, string $date): void
+    {
+        $businessDate = self::calendarDate($date);
+        $start = (new \DateTimeImmutable($businessDate . ' 00:00:00', self::businessZone()))->getTimestamp();
+        $query->where('appointment_start_at', '>=', $start)
+            ->where('appointment_start_at', '<', $start + 86400);
+    }
+
+    private static function calendarDateFromTopFilters(array $filters, string $fallback): string
+    {
+        foreach (self::appointmentDateFilters($filters) as $filter) {
+            $operator = strtolower(trim((string)($filter['operator'] ?? '')));
+            if (!in_array($operator, ['gte', 'gt', 'eq', '='], true)) continue;
+            $value = trim((string)($filter['value'] ?? ''));
+            $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value, self::businessZone());
+            if ($date && $date->format('Y-m-d') === $value) return $value;
+        }
+        return $fallback;
+    }
+
     private static function statusCode(string $value): string
     {
         $normalized = strtoupper(str_replace([' ', '-'], '_', trim($value)));
@@ -366,7 +409,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         $value = trim((string)$value);
         if ($workflow === 'confirmation') return 'pending_confirmation';
         if ($workflow === 'service' && $value === '') return 'service';
-        return in_array($value, ['today', 'unstarted', 'serving', 'ended', 'all', 'pending_confirmation', 'service'], true) ? $value : 'today';
+        return in_array($value, ['today', 'unstarted', 'serving', 'ended', 'all', 'pending_confirmation', 'service'], true) ? $value : 'all';
     }
 
     private static function timeOfDay(string $value): string

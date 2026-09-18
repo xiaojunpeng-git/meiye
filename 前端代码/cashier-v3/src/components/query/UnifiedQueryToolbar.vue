@@ -14,6 +14,14 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  showDataScope: {
+    type: Boolean,
+    default: true
+  },
+  showSettingsButton: {
+    type: Boolean,
+    default: true
+  },
   onSelectEntity: {
     type: Function,
     default: null
@@ -35,6 +43,8 @@ function selectEntity(payload) {
     v-bind="$attrs"
     :inline-quick-controls="inlineQuickControls"
     :compact-keyword-search="compactKeywordSearch"
+    :show-data-scope="showDataScope"
+    :show-settings-button="showSettingsButton"
     :on-select-entity="selectEntity"
   >
     <template #leading-controls>

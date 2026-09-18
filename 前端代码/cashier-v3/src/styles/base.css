@@ -7149,11 +7149,50 @@ button:disabled {
   flex: 1;
 }
 
+/* 日历使用单日预约日期。通用隐藏标签规则原本服务于双日期区间，
+ * 在本页会被后续工具栏样式压窄，导致原生日期文字无法完整显示。 */
+.reservation-page:not(.reservation-page--list) .unified-query-top-field--label-hidden {
+  display: block;
+  flex: 0 0 168px;
+  width: 168px;
+  min-width: 168px;
+  max-width: 168px;
+}
+
+.reservation-page:not(.reservation-page--list) .unified-query-top-field--label-hidden .unified-query-top-field__control,
+.reservation-page:not(.reservation-page--list) .unified-query-top-field--label-hidden input {
+  width: 100%;
+}
+
+.reservation-page:not(.reservation-page--list) .unified-query-top-field--label-hidden input {
+  padding-right: 9px;
+}
+
+/* 列表保留日期区间：覆盖通用紧凑字段宽度，给两个原生日期和“至”留出
+ * 固定空间，避免日期文字、图标与下一个会员筛选字段挤在一起。 */
+.reservation-page--list .unified-query-top-field--label-hidden {
+  display: block;
+  flex: 0 0 382px;
+  width: 382px;
+  min-width: 382px;
+  max-width: 382px;
+}
+
+.reservation-page--list .unified-query-top-field--label-hidden .unified-query-top-field__control,
+.reservation-page--list .unified-query-top-field--label-hidden .unified-query-top-field__range--date {
+  width: 100%;
+  min-width: 0;
+}
+
+.reservation-page--list .unified-query-top-field--label-hidden .unified-query-top-field__range--date {
+  grid-template-columns: auto minmax(132px, 1fr) auto minmax(132px, 1fr);
+  gap: 8px;
+}
+
 .reservation-page__view-switch {
   flex: none;
   overflow: hidden;
   min-height: 40px;
-  margin-left: auto;
   border: 1px solid #d7e0ea;
   border-radius: 10px;
   background: #fff;
@@ -7414,6 +7453,23 @@ button:disabled {
 .reservation-calendar-toolbar__date,
 .reservation-calendar-toolbar__mode {
   gap: 8px;
+}
+
+.reservation-calendar-toolbar__controls,
+.reservation-calendar-toolbar__quick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reservation-calendar-toolbar__controls {
+  min-width: 0;
+}
+
+.reservation-calendar-toolbar__quick {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 1px;
 }
 
 .reservation-calendar-toolbar__date strong {

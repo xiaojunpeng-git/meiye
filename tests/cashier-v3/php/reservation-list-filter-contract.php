@@ -23,6 +23,14 @@ reservationListFilterOk('预约时间按上海业务日的起止边界在服务�
 reservationListFilterOk('待服务状态和日期筛选在同一预约主表查询中叠加',
     strpos($provider, "self::applyListTopFilters(\$recordsQuery") !== false
     && strpos($provider, "whereIn('status', ['PENDING_CONFIRMATION', 'UNSTARTED'])") !== false);
+reservationListFilterOk('快捷筛选计数与预约日期范围使用同一口径',
+    strpos($provider, "'all' => (int)(clone \$countBase)->count()") !== false
+    && strpos($provider, '$appointmentDateFilters = self::appointmentDateFilters($topFilters);') !== false
+    && strpos($provider, 'private static function calendarDateFromTopFilters') !== false);
+reservationListFilterOk('首次进入日历时，状态括号也必须限定在默认预约日期',
+    strpos($provider, 'if (!$appointmentDateFilters) self::applyAppointmentDate($recordsQuery, $calendarDate);') !== false
+    && strpos($provider, 'if (!$appointmentDateFilters) self::applyAppointmentDate($countBase, $calendarDate);') !== false
+    && strpos($provider, "? \$value : 'all';") !== false);
 reservationListFilterOk('整页投影重建保留当前预约筛选，不能退回今日预约默认条件',
     substr_count($module, "'quickFilter' => (string)\$queryHints['quickFilter']") === 2
     && substr_count($module, "'topFilters' => (array)\$queryHints['topFilters']") === 2

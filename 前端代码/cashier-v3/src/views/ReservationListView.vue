@@ -17,7 +17,17 @@ const state = useCashierV3State()
 const router = useRouter()
 const viewMode = ref('calendar')
 const calendarResourceMode = ref('staff')
-const activeQuickKey = ref('all')
+// 日历是单日资源排班，列表是日期区间记录检索；两种视图的状态筛选
+// 及查询快照必须独立，切换视图不能把另一种日期语义带过来。
+const calendarQuickKey = ref('all')
+const listQuickKey = ref('all')
+const activeQuickKey = computed({
+  get: () => (viewMode.value === 'calendar' ? calendarQuickKey.value : listQuickKey.value),
+  set: (value) => {
+    if (viewMode.value === 'calendar') calendarQuickKey.value = value
+    else listQuickKey.value = value
+  }
+})
 const isEditorOpen = ref(false)
 const isEditorLoading = ref(false)
 const editorLoadMessage = ref('')
@@ -117,7 +127,13 @@ const queryFields = computed(() => [
     label: '预约时间',
     defaultVisible: true,
     defaultQuick: true,
-    quickDateRange: true,
+    // 日历只展示一个业务日；列表才允许按日期区间查看预约记录。
+    quickDateRange: viewMode.value === 'list',
+    quickDefaultToday: viewMode.value === 'calendar',
+    // 日历选的是一个完整业务日，选择完成即刷新；列表区间则由“查询”统一提交。
+    quickSubmitOnChange: viewMode.value === 'calendar',
+    // 单日预约日期必须始终可直接打开原生日历改选；清空叉号会覆盖该入口。
+    quickClearable: viewMode.value === 'list',
     quickLabelHidden: true,
     type: 'date'
   },
@@ -148,18 +164,30 @@ function normalizeQuerySettings(settings) {
 }
 
 const appliedQuerySettings = ref(null)
-const reservationQuerySnapshot = ref({
-  keyword: '',
-  dataScope: 'normal',
-  businessStatus: '',
-  topFilters: [],
-  querySettings: {
-    sorts: [],
-    filters: [],
-    filterRelation: 'all'
-  },
-  quickFilter: activeQuickKey.value
-})
+function emptyReservationQuery(quickFilter = 'all') {
+  return {
+    keyword: '',
+    dataScope: 'normal',
+    businessStatus: '',
+    topFilters: [],
+    querySettings: {
+      sorts: [],
+      filters: [],
+      filterRelation: 'all'
+    },
+    quickFilter
+  }
+}
+const calendarQuerySnapshot = ref(emptyReservationQuery(calendarQuickKey.value))
+const listQuerySnapshot = ref(emptyReservationQuery(listQuickKey.value))
+const reservationQuerySnapshot = ref(emptyReservationQuery(activeQuickKey.value))
+function querySnapshotForView(mode = viewMode.value) {
+  return mode === 'calendar' ? calendarQuerySnapshot.value : listQuerySnapshot.value
+}
+function saveQuerySnapshotForView(query, mode = viewMode.value) {
+  if (mode === 'calendar') calendarQuerySnapshot.value = query
+  else listQuerySnapshot.value = query
+}
 const visibleReservationFields = computed(() => {
   const settings = appliedQuerySettings.value || reservation.value.querySettings || {}
   const configuredKeys = Array.isArray(settings.visibleFields)
@@ -242,11 +270,19 @@ function normalizeReservationQuery(query = {}, quickFilter = activeQuickKey.valu
   }
 }
 
-function queryReservations(query = reservationQuerySnapshot.value, resetPage = true) {
+function queryReservations(query = querySnapshotForView(), resetPage = true) {
   const normalized = normalizeReservationQuery(query, activeQuickKey.value)
   normalized.page = resetPage ? 1 : normalized.page
   reservationQuerySnapshot.value = normalized
+  saveQuerySnapshotForView(normalized)
   return requestAction('query-reservations', normalized)
+}
+
+function switchReservationView(nextViewMode) {
+  if (!['calendar', 'list'].includes(nextViewMode) || nextViewMode === viewMode.value) return
+  viewMode.value = nextViewMode
+  // 重新按目标视图自己的快照读取：日历始终是单日条件，列表保留此前的区间条件。
+  queryReservations(querySnapshotForView(nextViewMode))
 }
 
 function reservationFieldValue(record, fieldKey) {
@@ -267,10 +303,10 @@ function reservationFieldValue(record, fieldKey) {
 }
 
 const quickFilters = computed(() => [
+  { key: 'all', label: '全部', count: quickCounts.value.all, active: activeQuickKey.value === 'all' },
   { key: 'pending_confirmation', label: '待确认', count: quickCounts.value.pendingConfirmation ?? quickCounts.value.pending_confirmation, active: activeQuickKey.value === 'pending_confirmation' },
   { key: 'unstarted', label: '未开始', count: quickCounts.value.unstarted, active: activeQuickKey.value === 'unstarted' },
-  { key: 'serving', label: '服务中', count: quickCounts.value.serving, active: activeQuickKey.value === 'serving' },
-  { key: 'all', label: '全部', active: activeQuickKey.value === 'all' }
+  { key: 'serving', label: '服务中', count: quickCounts.value.serving, active: activeQuickKey.value === 'serving' }
 ])
 
 const timeSlots = computed(() => {
@@ -884,7 +920,7 @@ async function selectQuickFilter(payload = {}) {
   const nextQuickKey = selectedKey === 'pending' ? 'pending_confirmation' : selectedKey
   const suppliedQuery = payload.query && typeof payload.query === 'object'
     ? payload.query
-    : reservationQuerySnapshot.value
+    : querySnapshotForView()
   activeQuickKey.value = nextQuickKey
   await queryReservations(suppliedQuery)
 }
@@ -1413,7 +1449,9 @@ onBeforeUnmount(() => {
       <UnifiedQueryToolbar
         :show-keyword-search="false"
         :inline-quick-controls="true"
-        :quick-filters="quickFilters"
+        :show-data-scope="false"
+        :show-settings-button="false"
+        :quick-filters="viewMode === 'list' ? quickFilters : []"
         :status-options="reservationStatusOptions"
         :fields="queryFields"
         default-sort-field="预约时间"
@@ -1425,10 +1463,10 @@ onBeforeUnmount(() => {
         :on-save-settings="(settings) => requestAction('save-reservation-query-settings', { settings })"
         @settings-applied="applyQuerySettings"
       >
-        <template #primary-actions>
+        <template #leading-controls>
           <div class="reservation-page__view-switch" aria-label="预约视图">
-            <button type="button" :aria-pressed="viewMode === 'list'" :class="{ 'reservation-page__view-switch--active': viewMode === 'list' }" @click="viewMode = 'list'">列表</button>
-            <button type="button" :aria-pressed="viewMode === 'calendar'" :class="{ 'reservation-page__view-switch--active': viewMode === 'calendar' }" @click="viewMode = 'calendar'">日历</button>
+            <button type="button" :aria-pressed="viewMode === 'calendar'" :class="{ 'reservation-page__view-switch--active': viewMode === 'calendar' }" @click="switchReservationView('calendar')">日历</button>
+            <button type="button" :aria-pressed="viewMode === 'list'" :class="{ 'reservation-page__view-switch--active': viewMode === 'list' }" @click="switchReservationView('list')">列表</button>
           </div>
         </template>
       </UnifiedQueryToolbar>
@@ -1507,9 +1545,24 @@ onBeforeUnmount(() => {
 
     <main v-else class="reservation-calendar-wrap">
       <header class="reservation-calendar-toolbar">
-        <div class="reservation-calendar-toolbar__mode">
-          <button type="button" :class="{ 'reservation-calendar-toolbar__mode--active': calendarResourceMode === 'staff' }" @click="calendarResourceMode = 'staff'">按手艺人</button>
-          <button type="button" :class="{ 'reservation-calendar-toolbar__mode--active': calendarResourceMode === 'room' }" @click="calendarResourceMode = 'room'">按房间</button>
+        <div class="reservation-calendar-toolbar__controls">
+          <div class="reservation-calendar-toolbar__mode">
+            <button type="button" :class="{ 'reservation-calendar-toolbar__mode--active': calendarResourceMode === 'staff' }" @click="calendarResourceMode = 'staff'">按手艺人</button>
+            <button type="button" :class="{ 'reservation-calendar-toolbar__mode--active': calendarResourceMode === 'room' }" @click="calendarResourceMode = 'room'">按房间</button>
+          </div>
+          <div class="reservation-calendar-toolbar__quick" aria-label="预约状态筛选">
+            <button
+              v-for="filter in quickFilters"
+              :key="filter.key"
+              type="button"
+              class="unified-query-quick-filter"
+              :aria-pressed="filter.active === true"
+              :class="{ 'unified-query-quick-filter--active': filter.active }"
+              @click="selectQuickFilter({ filter, query: querySnapshotForView('calendar') })"
+            >
+              {{ filter.label }}<span v-if="filter.count !== undefined">（{{ filter.count }}）</span>
+            </button>
+          </div>
         </div>
       </header>
 
