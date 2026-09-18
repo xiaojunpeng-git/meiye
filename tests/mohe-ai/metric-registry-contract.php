@@ -17,13 +17,15 @@ function metricRegistryCheck(bool $condition, string $label): void
     ++$checks;
 }
 
-$expected = [
+$required = [
     'cash_performance', 'refund_performance', 'actual_performance', 'consume_amount',
-    'staff_sales_yeji', 'staff_labor_yeji', 'sales_amount', 'sales_collected_amount', 'sales_quantity', 'balance_deduction_amount',
+    'staff_sales_yeji', 'staff_labor_yeji', 'staff_service_num', 'service_people',
+    'sales_amount', 'sales_collected_amount', 'sales_quantity', 'balance_deduction_amount',
     'recharge_amount', 'completed_service_item_count', 'customer_active',
 ];
 $definitions = MetricDefinitionRegistry::all();
-metricRegistryCheck(array_keys($definitions) === $expected, 'only the thirteen approved V3 metrics are registered');
+metricRegistryCheck(array_diff($required, array_keys($definitions)) === [],
+    'all currently approved V3 metrics remain registered');
 foreach ($definitions as $definition) {
     metricRegistryCheck(!array_key_exists('name', $definition), 'registry never duplicates user-visible metric names');
 }

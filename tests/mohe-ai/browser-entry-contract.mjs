@@ -38,16 +38,16 @@ assert.match(presentationStyles, /--mohe-ai-brand:#1677cc/);
 assert.match(presentationStyles, /\.body\{min-height:0;overflow:auto/);
 assert.match(presentationStyles, /@media \(max-width:560px\)/);
 const adminEntrySource = fs.readFileSync(new URL('../../前端代码/admin/src/components/MoheAiEntry.vue', import.meta.url), 'utf8');
-const cashierEntrySource = fs.readFileSync(new URL('../../前端代码/cashier-v3/src/components/MoheAiEntry.vue', import.meta.url), 'utf8');
 const cashierShellSource = fs.readFileSync(new URL('../../前端代码/cashier-v3/src/layouts/CashierShell.vue', import.meta.url), 'utf8');
 assert.match(adminEntrySource, /getBoundingClientRect\(\)/);
 assert.match(adminEntrySource, /--mohe-ai-admin-workarea-left/);
 assert.match(adminEntrySource, /ResizeObserver/);
 assert.match(adminEntrySource, /MutationObserver/);
 assert.match(adminEntrySource, /entryIconUrl: moheAiEntryIcon/);
-assert.match(cashierEntrySource, /entryIconUrl: moheAiEntryIcon/);
-assert.match(cashierShellSource, /import MoheAiEntry from '@\/components\/MoheAiEntry\.vue'/);
-assert.match(cashierShellSource, /<MoheAiEntry\s*\/>/);
+// 门店端入口按当前发布策略关闭。不能让旧测试反向要求恢复入口，
+// 平台与商家端仍复用上方已验收的单一工作台实现。
+assert.doesNotMatch(cashierShellSource, /import MoheAiEntry from '@\/components\/MoheAiEntry\.vue'/);
+assert.doesNotMatch(cashierShellSource, /<MoheAiEntry\s*\/>/);
 root.querySelector('.entry').click(); await flush();
 assert.ok(root.querySelector('[role=dialog]'));
 assert.equal(Array.from(root.querySelectorAll('button')).some(b=>b.textContent==='配置'),false);
