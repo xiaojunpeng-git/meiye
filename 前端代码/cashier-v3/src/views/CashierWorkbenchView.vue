@@ -376,6 +376,10 @@ const checkoutEntryLabel = computed(() => activeCardOperationUpgrade.value
   : previewCardOperation.value?.mode === 'project-replacement'
     ? '确认替换'
     : (cart.value.primaryActionLabel || activeCheckoutComposition.value?.primaryActionLabel || '立即结账'))
+const isAwaitingCustomCardUpgradeTarget = computed(() => (
+  previewCardOperation.value?.awaitingTarget === true
+  && previewCardOperation.value.mode === 'card-upgrade'
+))
 const productTypes = computed(() => {
   if (previewCardOperation.value?.awaitingTarget) {
     return [previewCardOperation.value.mode === 'card-upgrade' ? '卡项' : '项目']
@@ -411,14 +415,23 @@ const filteredCatalogItems = computed(() => {
   const normalizedKeyword = keyword.value.trim().toLocaleLowerCase()
   const items = Array.isArray(catalog.value.items) ? [...catalog.value.items] : []
   // 定制卡是收银内的配置入口，不依赖某一条演示商品或 URL 参数。
-  items.push({ id: 'custom-card-entry', name: '新建定制卡', kind: '定制卡', category: '全部', price: 0 })
+  const customCardEntry = { id: 'custom-card-entry', name: '新建定制卡', kind: '定制卡', category: '全部', price: 0 }
+  // 卡升级选择目标卡时，入口在“卡项”按钮旁显示，不能伪装成商品卡片。
+  if (!isAwaitingCustomCardUpgradeTarget.value) items.push(customCardEntry)
 
   return items.filter((item) => {
     const expectedTargetKind = previewCardOperation.value?.awaitingTarget
       ? (previewCardOperation.value.mode === 'card-upgrade' ? '卡项' : '项目')
       : ''
-    const typeMatched = item.kind === (expectedTargetKind || selectedType.value)
-    const categoryMatched = !selectedCategory.value || item.category === selectedCategory.value
+    // 普通目标仍只能是卡项；常规售卡场景中的定制卡保持独立入口，
+    // 不得放开任意“定制卡”目录商品来绕过目标校验。
+    const isCustomCardUpgradeTarget = expectedTargetKind === '卡项'
+      && item.id === 'custom-card-entry'
+    const typeMatched = isCustomCardUpgradeTarget
+      || item.kind === (expectedTargetKind || selectedType.value)
+    const categoryMatched = isCustomCardUpgradeTarget
+      || !selectedCategory.value
+      || item.category === selectedCategory.value
     const searchable = `${item.name || ''} ${item.code || ''}`.toLocaleLowerCase()
     const keywordMatched = !normalizedKeyword || searchable.includes(normalizedKeyword)
     return typeMatched && categoryMatched && keywordMatched
@@ -1968,6 +1981,11 @@ async function selectCatalogItem(item) {
     return
   }
   await appendCatalogItemToDraft(item)
+}
+
+function openCustomCardUpgradeTarget() {
+  if (!isAwaitingCustomCardUpgradeTarget.value) return
+  guidedBusinessMode.value = 'custom-card'
 }
 
 let catalogItemAppendQueue = Promise.resolve()
@@ -6808,6 +6826,14 @@ onBeforeUnmount(() => {
               @click="selectCatalogType(type)"
             >
               {{ type }}
+            </button>
+            <button
+              v-if="isAwaitingCustomCardUpgradeTarget"
+              type="button"
+              class="filter-chip"
+              @click="openCustomCardUpgradeTarget"
+            >
+              新建定制卡
             </button>
           </div>
           <div
