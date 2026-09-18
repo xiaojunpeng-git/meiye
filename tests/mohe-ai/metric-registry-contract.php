@@ -8,6 +8,7 @@ require_once $metricDir . 'MetricQueryContractException.php';
 require_once $metricDir . 'MetricDefinitionRegistry.php';
 
 use app\services\query\metric\MetricDefinitionRegistry;
+use app\services\query\metric\MetricSemanticCatalog;
 
 $checks = 0;
 function metricRegistryCheck(bool $condition, string $label): void
@@ -47,6 +48,35 @@ metricRegistryCheck(MetricDefinitionRegistry::get('staff_project_num')['storage_
     && MetricDefinitionRegistry::get('staff_project_num')['source']['filters']['performance_type'] === 'labor_performance_allocated'
     && MetricDefinitionRegistry::capabilities()['staff_project_num']['ai_query_ready'] === true,
     'staff project count is an exact labor-allocation metric, not sales quantity');
+metricRegistryCheck(MetricDefinitionRegistry::get('staff_service_num')['storage_unit'] === 'customer_tenth'
+    && MetricDefinitionRegistry::get('service_people')['storage_unit'] === 'customer_tenth'
+    && MetricDefinitionRegistry::capabilities()['staff_service_num']['ai_query_ready'] === true
+    && MetricDefinitionRegistry::capabilities()['service_people']['ai_query_ready'] === true,
+    'registered service visits and people are AI-ready without losing exact tenth allocations');
+metricRegistryCheck(MetricSemanticCatalog::uniqueCodeForTerms(
+    ['销售业绩'], ['staff_sales_yeji', 'staff_labor_yeji', 'staff_project_num']
+) === 'staff_sales_yeji', 'an exact personnel metric term resolves inside the active registered capability boundary');
+metricRegistryCheck(MetricSemanticCatalog::uniqueCodeForTerms(
+    ['销售人业绩'], ['staff_sales_yeji', 'sales_collected_amount']
+) === null, 'an exact term with two active registered owners remains a controlled ambiguity');
+metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
+    '按服务人次看呢？', ['staff_service_num', 'staff_project_num']
+) === ['metric_code'=>'staff_service_num','term'=>'服务人次'],
+    'an exact registered measurement is recovered from a natural follow-up without a question-specific branch');
+metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
+    '今天劳动业绩第一名是谁？', ['staff_labor_yeji', 'staff_sales_yeji', 'staff_project_num', 'staff_service_num', 'service_people']
+) === ['metric_code'=>'staff_labor_yeji','term'=>'劳动业绩'],
+    'a natural self-contained question binds its longest exact registered measurement without a topic-switch phrase rule');
+metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
+    '销售人业绩怎么样？', ['staff_sales_yeji', 'sales_collected_amount']
+) === null, 'an in-text phrase owned by two active metrics is never auto-bound');
+$memberThreshold=(new app\services\query\metric\AnalysisCapabilityCatalogFactory())->make()->discover([
+    'metric_codes'=>['sales_collected_amount'],'object_kind'=>'member','operation'=>'threshold_count',
+    'filter_keys'=>[],'relation_role'=>'member_sales_collection_total',
+],static function(array $binding):bool{return true;});
+metricRegistryCheck(($memberThreshold['complete_request_supported']??false)===true
+    && (($memberThreshold['items'][0]['binding']['metric_code']??null)==='sales_collected_amount'),
+    'the registered member threshold contract is discoverable without a question-specific capability branch');
 metricRegistryCheck((MetricDefinitionRegistry::get('sales_amount')['category_reader']['strategy'] ?? '') === 'sale_completed_allocation',
     'sales amount declares its category reader instead of leaving reports to sum sale facts');
 metricRegistryCheck(MetricDefinitionRegistry::get('sales_collected_amount')['reader_strategy'] === 'sales_payment_collected'

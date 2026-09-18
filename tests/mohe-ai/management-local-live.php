@@ -40,7 +40,8 @@ try {
     $c=$run['clarification'];
     $run=$call('clarify',$binding($run)+['schema_version'=>'mohe-clarification-v2','clarification_id'=>$c['id'],'step_revision'=>$c['step_revision'],
         'intent_revision'=>$c['intent_revision'],'client_submission_id'=>'selection-'.bin2hex(random_bytes(8)),'choices'=>['metric_code'=>'cash_performance']],$run['run_id']);
-    $assert($run['status']==='COMPLETED'&&!empty($run['answer']['cards']),'REAL_QUERY');
+    $assert($run['status']==='COMPLETED' && is_string($run['answer']['summary'] ?? null)
+        && ($run['answer']['cards'] ?? null)===[],'REAL_QUERY');
     $assert(($run['management_trace']['management_version']??null)===$published['active_version'],'TRACE_VERSION');
     $assert(array_column($run['management_trace']['nodes'],'node_id')===['query','evidence','render'],'TRACE_NODES');
     echo 'PASS local real model/management/query integration: '.$checks." checks; figures and identifiers omitted\n";

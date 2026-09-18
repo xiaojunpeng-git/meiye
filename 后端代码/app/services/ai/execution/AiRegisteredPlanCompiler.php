@@ -116,12 +116,12 @@ final class AiRegisteredPlanCompiler
         // be answered through several independently registered observations
         // in one consistent read, while every explicit query still uses only
         // the metrics its accepted meaning binds.
-        $metrics=AiRegistryValue::strings($query['metric_codes'],4);
+        $metrics=AiRegistryValue::strings($query['metric_codes'],AiOverviewMetricResolver::MAX_METRICS);
         if (!$metrics||array_diff($metrics,array_keys($snapshot['metrics']))) AiRegistryValue::fail('AI_METRIC_NOT_READY');
         $objectKind=$query['business_filters']['object_kind']??null;
         $person=$objectKind==='person';
         if ($query['business_filters']!==[]) {
-            if (!$person && count($metrics)!==1) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+            if (!$person && count($metrics)!==1 && $query['query_shape']!=='summary') AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             if ($person && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref']??null)
                 || !preg_match('/^((position|person):[1-9][0-9]*|role:craftsman|role:salesperson)$/D',$query['business_filters']['selection_ref']))) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             if (!$person && (!is_string($objectKind)||$query['business_filters']!==['object_kind'=>$objectKind])) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
@@ -129,7 +129,7 @@ final class AiRegisteredPlanCompiler
         // Existing two-metric trend/ranking/comparison reads remain legal.
         // The extended batch size is reserved for an unfiltered summary,
         // where all observations share one store scope and one period.
-        if (count($metrics)>2 && ($query['query_shape']!=='summary' || $query['business_filters']!==[])) {
+        if (count($metrics)>2 && $query['query_shape']!=='summary') {
             AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         }
         foreach ($metrics as $metric) {
@@ -139,7 +139,7 @@ final class AiRegisteredPlanCompiler
                 $matches=array_values(array_filter((array)($contract['analysis_dimension_contracts']??[]),static function($dimension)use($objectKind):bool {
                     return is_array($dimension) && ($dimension['object_kind']??null)===$objectKind && ($dimension['filter_keys']??null)===[];
                 }));
-                if (count($matches)!==1 || !in_array($query['query_shape'],['ranking','threshold_count'],true)) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+                if (count($matches)!==1 || !in_array($query['query_shape'],['summary','ranking','threshold_count'],true)) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             }
             if (!$person && $query['business_filters']===[] && $contract['filter_grain']!=='store') AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         }

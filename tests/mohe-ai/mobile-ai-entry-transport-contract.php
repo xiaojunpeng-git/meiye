@@ -51,6 +51,11 @@ $check(is_string($entry) && strpos($entry,'class="ai-user-turn"')!==false
     && strpos($entry,'class="ai-answer-turn"')!==false
     && strpos($entry,'>魔核 AI</text>')!==false,
     'each retained turn labels the customer question and the AI answer as separate visual blocks');
+$check(is_string($entry) && strpos($entry,'function presentationReady(value : any)')!==false
+    && strpos($entry,'class="ai-answer-presentation"')!==false
+    && strpos($entry,'class="ai-answer-facts"')!==false
+    && strpos($entry,"<text v-else class=\"ai-answer\">{{ item.answer }}</text>")!==false,
+    'mobile renders the versioned verified presentation when available and keeps the immutable summary fallback for existing histories');
 $check(is_string($entry) && strpos($entry,'function toggleCardDetail(key : string)')!==false
     && strpos($entry,"'统计口径'")!==false
     && strpos($entry,'<text class="ai-note">{{ tooltipText(card.tooltip) }}</text>')===false

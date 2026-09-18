@@ -27,20 +27,34 @@ $renderer=new app\services\ai\presentation\AiAnswerRenderer();
 $gatewaySource=file_get_contents($base.'ai/AiGatewayServices.php');
 $check(strpos($gatewaySource,'AiFollowupQueryPlanner')===false && strpos($gatewaySource,'registeredSelectionFallback')===false,
     'gateway has no keyword-parser or local fallback execution path');
+$check(strpos($gatewaySource,"strpos(\$currentQuestion,\$currentToken)===false")!==false
+    && strpos($gatewaySource,"!in_array(\$intent['object_kind']??null,['person','position'],true)")!==false,
+    'a replaced analytical object drops only stale prior private selections, never a reference in the current turn');
 $answer=$renderer->render(['query'=>['query_shape'=>'comparison','start_date'=>'2026-09-08','end_date'=>'2026-09-08','compare_range'=>['start'=>'2026-09-07','end'=>'2026-09-07']],
     'data_as_of'=>'2026-09-08T12:00:00+08:00','results'=>[
         ['metric_code'=>'consume_amount','period'=>'current','amount_cents'=>10000],['metric_code'=>'consume_amount','period'=>'comparison','amount_cents'=>20000],
     ]]);
-$check($answer['cards'][0]['start_date']==='2026-09-08' && $answer['cards'][1]['start_date']==='2026-09-07' && $answer['cards'][1]['end_date']==='2026-09-07','comparison card dates belong to their own evidence period');
+$check($answer['cards']===[] && strpos($answer['summary'], '消耗业绩为100元；对比期间为200元')===0,
+    'comparison answers state verified current and comparison facts once without duplicate cards');
 $cashView=['query'=>['query_shape'=>'summary','start_date'=>'2026-09-08','end_date'=>'2026-09-08','compare_range'=>null],
     'data_as_of'=>'2026-09-08T12:00:00+08:00','results'=>[
         ['metric_code'=>'cash_performance','period'=>'current','amount_cents'=>15050],
         ['metric_code'=>'consume_amount','period'=>'current','amount_cents'=>20000],
     ]];
 $cashAnswer=$renderer->render($cashView);
-$check($cashAnswer['cards'][0]['metric_name']==='现金业绩' && $cashAnswer['cards'][0]['display_value']==='151' && $cashAnswer['cards'][1]['metric_name']==='消耗业绩','mixed cards preserve exact metric identity and integer display');
-$check(strpos($cashAnswer['summary'],'现金业绩为151元')===0 && strpos($cashAnswer['summary'],'消耗业绩为200元')!==false,'first answer starts with verified summary facts rather than a generic processing sentence');
-$check(strpos($cashAnswer['cards'][0]['tooltip']['include'],'充值')!==false && strpos($cashAnswer['cards'][0]['tooltip']['exclude'],'尚未收取')!==false && strpos($cashAnswer['cards'][0]['tooltip']['note'],'退款')!==false,'cash tooltip explains recharge received debt and separate refund');
+$check($cashAnswer['cards']===[] && strpos($cashAnswer['summary'],'现金业绩为151元；消耗业绩为200元。')===0,
+    'mixed summaries render each verified metric once in a concise conclusion');
+$check(($cashAnswer['presentation']['version'] ?? null)===1
+    && ($cashAnswer['presentation']['headline'] ?? null)==='本期经营概览'
+    && $cashAnswer['presentation']['facts']=== [
+        ['label'=>'现金业绩','value'=>'151','unit'=>'元','section'=>'收款结果'], ['label'=>'消耗业绩','value'=>'200','unit'=>'元','section'=>'服务消耗'],
+    ] && ($cashAnswer['presentation']['period_label'] ?? null)==='统计时间：2026-09-08 至 2026-09-08。',
+    'multiple verified summary facts use one portable conclusion-first presentation without duplicate cards');
+$check(strpos($cashAnswer['summary'], '我先从')===false,
+    'summary answers omit generic process narration that does not help the operator decide');
+$cashTooltip=(new app\services\metric\MetricDictionaryServices())->getTooltip('cash_performance');
+$check(strpos($cashTooltip['include'],'充值')!==false && strpos($cashTooltip['exclude'],'尚未收取')!==false && strpos($cashTooltip['note'],'退款')!==false,
+    'cash metric explanation remains available from the registered dictionary');
 foreach (['trend','ranking'] as $shape) {
     $cashView['query']['query_shape']=$shape;
     $point=['business_date'=>'2026-09-08','store_id'=>1,'store_name'=>'测试门店','amount_cents'=>15050];
@@ -54,7 +68,7 @@ $cashView['results']=[['metric_code'=>'cash_performance','period'=>'current','ro
     ['store_id'=>2,'store_name'=>'乙店','amount_cents'=>12000],
 ]]]];
 $shortRanking=$renderer->render($cashView);
-$check(strpos($shortRanking['summary'],'前1是甲店，现金业绩为151元；前2是乙店，现金业绩为120元。')===0,
+$check(strpos($shortRanking['summary'],'按现金业绩看，第1名是甲店，现金业绩为151元；第2名是乙店，现金业绩为120元。')===0,
     'a short verified ranking names every displayed ordinal instead of hiding a follow-up target behind the first row');
 $cashView['results']=[['metric_code'=>'cash_performance','period'=>'current','rows'=>['top'=>[
     ['store_id'=>1,'store_name'=>'甲店','amount_cents'=>15050],
@@ -62,8 +76,8 @@ $cashView['results']=[['metric_code'=>'cash_performance','period'=>'current','ro
     ['store_id'=>3,'store_name'=>'丙店','amount_cents'=>12000],
 ]]]];
 $tiedRanking=$renderer->render($cashView);
-$check(array_column($tiedRanking['table']['rows'],'rank')===['并列前1','并列前1','前3']
-    && strpos($tiedRanking['summary'],'并列前1是甲店')===0,
+$check(array_column($tiedRanking['table']['rows'],'rank')===['并列第1名','并列第1名','第3名']
+    && strpos($tiedRanking['summary'],'按现金业绩看，并列第1名是甲店')===0,
     'equal verified values retain their shared ordinal instead of becoming false first and second places');
 $cashView['query']['compare_range']=['start'=>'2026-09-07','end'=>'2026-09-07'];
 $cashView['results']=[
@@ -73,7 +87,7 @@ $cashView['results']=[
 $comparisonRanking=$renderer->render($cashView);
 $check(($comparisonRanking['table']['columns'][0]['key'] ?? null)==='period_label'
     && array_column($comparisonRanking['table']['rows'],'period_label')===['本期','对比期']
-    && strpos($comparisonRanking['summary'],'本期：前1是甲店')===0 && strpos($comparisonRanking['summary'],'对比期：前1是乙店')!==false,
+    && strpos($comparisonRanking['summary'],'本期：按现金业绩看，第1名是甲店')===0 && strpos($comparisonRanking['summary'],'对比期：按现金业绩看，第1名是乙店')!==false,
     'ranking comparisons retain each evidence period in both conclusion and table');
 $cashView['query']['compare_range']=null;
 $cashView['results']=[['metric_code'=>'cash_performance','period'=>'current','rows'=>['top'=>[]]]];
@@ -90,22 +104,81 @@ $check(($trend['table']['columns'][0]['key'] ?? null)==='period_label' && strpos
 $cashView['query']['query_shape']='summary';
 $cashView['results']=[['metric_code'=>'actual_performance','period'=>'current','amount_cents'=>15050,'storage_unit'=>'fen']];
 $actual=$renderer->render($cashView);
-$check($actual['cards'][0]['metric_name']==='实际业绩' && $actual['cards'][0]['display_value']==='151','confirmed actual metric renders through its own registration');
+$check($actual['cards']===[] && strpos($actual['summary'], '实际业绩为151元')===0,
+    'confirmed actual metric renders through its own registration without a duplicate card');
+$check(($actual['presentation']['headline'] ?? null)==='实际业绩为151元。' && ($actual['presentation']['facts'] ?? null)===[],
+    'a single verified metric keeps its conclusion as the first visible answer rather than manufacturing a generic card');
+$large=$renderer->render(['query'=>['query_shape'=>'summary','start_date'=>'2026-09-08','end_date'=>'2026-09-08','compare_range'=>null],
+    'data_as_of'=>'2026-09-08T12:00:00+08:00','results'=>[
+        ['metric_code'=>'cash_performance','period'=>'current','amount_cents'=>4484000],
+    ]]);
+$check(strpos((string)($large['presentation']['headline'] ?? ''),'44,840元')!==false
+    && strpos((string)($large['summary'] ?? ''),'44,840元')!==false,
+    'answer values add only display separators after the authoritative integer-yuan rounding');
 $threshold=$renderer->render(['query'=>['query_shape'=>'threshold_count','metric_codes'=>['sales_collected_amount'],'start_date'=>'2026-09-01','end_date'=>'2026-09-16','compare_range'=>null,
     'business_filters'=>['object_kind'=>'member'],'aggregate_condition'=>['subject'=>'member','aggregation'=>'period_total','operator'=>'gte','amount_cents'=>498000]],
     'data_as_of'=>'2026-09-16T12:00:00+08:00','results'=>[
         ['metric_code'=>'sales_collected_amount','period'=>'current','storage_unit'=>'count','source_storage_unit'=>'fen','object_kind'=>'member',
             'aggregate_condition'=>['subject'=>'member','aggregation'=>'period_total','operator'=>'gte','amount_cents'=>498000],'count'=>3],
     ]]);
-$check($threshold['summary']==='累计实际收款销售额达到4980元的会员共有3人。 统计时间：2026-09-01 至 2026-09-16。'
-    && $threshold['cards'][0]['metric_name']==='达标会员数' && $threshold['cards'][0]['unit']==='人',
+$check($threshold['summary']==='累计实际收款销售额达到4,980元的会员共有3人。 统计时间：2026-09-01 至 2026-09-16。'
+    && $threshold['cards']===[],
     'typed threshold evidence renders a natural member count without a metric-specific answer branch');
+$quantity=$renderer->render(['query'=>['query_shape'=>'summary','start_date'=>'2026-09-08','end_date'=>'2026-09-08','compare_range'=>null],
+    'data_as_of'=>'2026-09-08T12:00:00+08:00','results'=>[
+        ['metric_code'=>'sales_quantity','period'=>'current','storage_unit'=>'count','count'=>2],
+        ['metric_code'=>'completed_service_item_count','period'=>'current','storage_unit'=>'count','count'=>3],
+    ]]);
+$check(strpos($quantity['summary'], '销售数量为2件；完成服务项目数量为3项。')===0,
+    'count units come from metric dictionary metadata instead of renderer metric branches');
+$serviceVisits=$renderer->render(['query'=>['query_shape'=>'ranking','start_date'=>'2026-09-16','end_date'=>'2026-09-16','compare_range'=>null,'business_filters'=>['object_kind'=>'person']],
+    'personnel_selection_label'=>'全部授权人员','data_as_of'=>'2026-09-16T12:00:00+08:00','results'=>[
+        ['metric_code'=>'staff_service_num','period'=>'current','storage_unit'=>'customer_tenth','rows'=>['top'=>[
+            ['employee_name'=>'测试员工','amount_cents'=>13],
+        ]]],
+    ]]);
+$check(strpos($serviceVisits['summary'], '服务人次为1.3人次')!==false
+    && ($serviceVisits['table']['rows'][0]['value']??null)==='1.3'
+    && ($serviceVisits['table']['rows'][0]['unit']??null)==='人次',
+    'personnel service visits retain exact tenth allocations and dictionary units in answers');
 $check(app\services\query\metric\MetricMoneyFormatter::integerYuan(15149)==='151'
     && app\services\query\metric\MetricMoneyFormatter::integerYuan(15150)==='152'
     && app\services\query\metric\MetricMoneyFormatter::integerYuan(-15150)==='-152',
     'integer yuan formatting rounds cents symmetrically instead of truncating');
 $http=file_get_contents(dirname(__DIR__,2).'/后端代码/app/controller/ai/AiHttpActions.php');
 $check(strpos($http,'return new AiGatewayServices();')!==false,'framework adapter does not autowire optional fixture dependencies');
+$siliconFlow=file_get_contents(dirname(__DIR__,2).'/后端代码/app/services/ai/model/SiliconFlowClient.php');
+$check(strpos($siliconFlow,"context_constraint_without_source:business_filters")!==false
+    && strpos($siliconFlow,'use context_delta business_filters=clear so person, position, member or other object-selection filters from the old subject cannot leak into the new subject')!==false,
+    'one bounded model repair clears prior subject filters when a self-contained turn replaces the analytical object');
+$check(strpos($siliconFlow,'a self-contained non-threshold request after a prior threshold must use context_delta aggregate_condition=clear')!==false,
+    'one bounded structural repair prevents an old threshold from leaking into a natural non-threshold topic switch');
+$check(strpos($siliconFlow,'The current customer meaning owns the response form')!==false
+    && strpos($siliconFlow,'must not inherit a previous threshold_count or aggregate_condition')!==false,
+    'binding chooses a natural topic switch from current comparative meaning rather than a literal reset command');
+$check(strpos($siliconFlow,'must preserve both its comparative response form and complete ranking requirement with current-question evidence')!==false,
+    'language understanding retains a self-contained rank instead of treating it as continuation of an earlier threshold');
+$gateway=file_get_contents(dirname(__DIR__,2).'/后端代码/app/services/ai/AiGatewayServices.php');
+$check(strpos($gateway,'$terms===[]?null:')!==false && strpos($gateway,'MetricSemanticCatalog::uniqueTermInText')!==false
+    && strpos($gateway,"\$intent['needs_metric_choice']=false;")!==false,
+    'an exact current registered measurement remains bindable when the language pass omitted only its metric requirement');
+$intentContract=file_get_contents(dirname(__DIR__,2).'/后端代码/app/services/ai/contract/AiIntentResultContract.php');
+$check(strpos($intentContract,"\$hasField('metric_codes',true)")!==false
+    && strpos($intentContract,"\$hasField('operation',true)")!==false
+    && strpos($intentContract,"\$intent['operation']!=='threshold_count' || \$hasField('aggregate_condition',true)")!==false,
+    'a complete current analytical request may release an old selected object without relying on a topic-switch phrase');
+$check(strpos($intentContract,"\$currentUnboundRequest=false;")!==false
+    && strpos($intentContract,"&& !\$currentUnboundRequest")!==false,
+    'a clear unsupported new topic releases the prior selected object but still stops before any data read');
+$check(strpos($intentContract,"\$clearedStaleAggregateCondition=\$aggregateCondition!==null")!==false
+    && strpos($intentContract,"\$currentRankingReplacesThreshold=isset(\$currentFields['ranking'])")!==false
+    && strpos($intentContract,"\$value['operation']='ranking';")!==false
+    && strpos($intentContract,"\$delta['aggregate_condition']='clear';")!==false,
+    'a current non-threshold operation structurally retires an echoed prior threshold without parsing a question phrase');
+$check(strpos($intentContract,'An exact, unambiguous supplied registered metric display title used as the requested measurement is an identified basis')!==false,
+    'candidate-blind review accepts an exact registered measurement title while keeping broad category wording ambiguous');
+$check(strpos($intentContract,'must reject an inherited threshold_count, aggregate condition or aggregate summary')!==false,
+    'independent review rejects a stale aggregate form when the current question requests a ranked object');
 foreach ($failed as $label) echo 'FAIL '.$label."\n";
 echo 'gateway-review-regressions: '.$passed.' passed, '.count($failed)." failed\n";
 exit($failed?1:0);

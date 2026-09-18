@@ -125,6 +125,10 @@ $normalizedMisbookedBroadRanking=AiIntentResultContract::normalize($misbookedBro
 $check($normalizedMisbookedBroadRanking['requirement_bindings']===[]
     && AiIntentResultContract::requiresSemanticBindingReview($broadRankingUnderstanding,$normalizedMisbookedBroadRanking),
     'a model-recommended ranking clears only redundant non-metric audit bookkeeping and still enters semantic review');
+$emptyMisbookedBroadRanking=$misbookedBroadRanking;
+$emptyMisbookedBroadRanking['requirement_bindings'][0]['metric_codes']=[];
+$check(AiIntentResultContract::normalize($emptyMisbookedBroadRanking,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding)['requirement_bindings']===[],
+    'an empty audit row attached to a non-metric ranking condition is ignored without changing the selected metric');
 $followQuestion=['schema_version'=>'sanitized-question-v2','question'=>'产品呢？','has_unresolved_conditions'=>false,
     'server_resolved_fields'=>[],'reference_date'=>'2026-09-12','recent_questions'=>['哪个项目卖得最好？'],
     'evidence_messages'=>[['id'=>'current','text'=>'产品呢？'],['id'=>'recent_1','text'=>'哪个项目卖得最好？']],
@@ -188,6 +192,20 @@ $periodOnlyAfterSelection=$selectedStandaloneQuestion;$periodOnlyAfterSelection[
 $periodOnlyUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'查看本月','status'=>'understood','requirements'=>[
     ['id'=>'r1','meaning'=>'本月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'本月呢？']]],
 ]],$periodOnlyAfterSelection);
+$resolvedPeriodOnly=AiIntentUnderstandingContract::withResolvedPeriodOnly($periodOnlyUnderstanding,[
+    ['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-12'],
+]);
+$check($resolvedPeriodOnly['requirements'][0]['values']['periods']===[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-12']],
+    'a deterministic server date may correct only the carrier of an accepted period-only continuation');
+$check(AiIntentUnderstandingContract::withResolvedPeriodOnly($selectedStandaloneUnderstanding,[
+    ['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-12'],
+])===$selectedStandaloneUnderstanding,'server date resolution cannot rewrite a turn that also states a measurement');
+$resolvedStandalonePeriod=AiIntentUnderstandingContract::withResolvedSinglePeriod($selectedStandaloneUnderstanding,[
+    ['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-12'],
+]);
+$check($resolvedStandalonePeriod['requirements'][1]['values']['periods']===[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-12']]
+    && $resolvedStandalonePeriod['requirements'][0]===$selectedStandaloneUnderstanding['requirements'][0],
+    'a deterministic date grammar can correct one accepted period without changing the turn measurement');
 $unsafePeriodOnlyUnderstanding=['goal'=>'查看本月','status'=>'understood','requirements'=>[
     ['id'=>'r1','meaning'=>'本月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'本月']]],
 ]];
@@ -341,6 +359,10 @@ $reject(static function()use($periodOnlyWithInventedMetric,$periodOnlyMetricQues
     'a metric requirement without an exact customer measurement cannot turn a time-only continuation into a new metric choice');
 $check(AiIntentUnderstandingContract::repairable('values:metric_terms'),
     'a missing metric evidence carrier receives one model-owned repair');
+$check(AiIntentResultContract::repairableFormat('binding_requirement_without_metric'),
+    'a satisfied requirement without its metric receives one bounded model-authored structural repair');
+$check(AiIntentResultContract::repairableFormat('binding_requirement_value_mismatch:object_kind'),
+    'a binding that contradicts one accepted typed object receives one bounded model-authored correction');
 $wrongHistory=['goal'=>$understanding['goal'],'status'=>$understanding['status'],'requirements'=>[['id'=>'r1','meaning'=>'查看上个月服务情况','fields'=>['metric_codes'],'values'=>['metric_terms'=>['服务']], 'evidence'=>[['message_id'=>'recent_1','quote'=>'上个月服务情况']]],['id'=>'r2','meaning'=>'排除退款','fields'=>['metric_codes'],'values'=>['metric_exclusions'=>['退款']],'evidence'=>[['message_id'=>'current','quote'=>'不要退款']]],['id'=>'r3','meaning'=>'列出前五家门店','fields'=>['object_kind','operation','ranking'],'values'=>['object_kind'=>'store','operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>5]],'evidence'=>[['message_id'=>'current','quote'=>'前五家门店']]]]];
 $check(AiIntentUnderstandingContract::normalize($wrongHistory,$question)['requirements'][0]['evidence'][0]['message_id']==='recent_1','specified prior message may be cited explicitly');
 $ambiguous=$understanding;$ambiguous['requirements']=[$ambiguous['requirements'][0]];$ambiguous['requirements'][0]['evidence'][0]['quote']='这个月';$questionRepeated=$question;$questionRepeated['question']='这个月收款，这个月退款';$questionRepeated['evidence_messages'][0]['text']=$questionRepeated['question'];
@@ -372,6 +394,17 @@ $understandingPrompt=AiIntentUnderstandingContract::modelInstruction();
 foreach (['metric_terms','metric_exclusions','object_kind','object_relation','operation','ranking','direction','limit','scope','date_range','relative_days','month_offset','end_offset_days','offset_months'] as $requiredShape) {
     $check(strpos($understandingPrompt,$requiredShape)!==false,'first-stage model is told the bounded shape of '.$requiredShape);
 }
+$check(strpos($understandingPrompt,'inspecting, summarizing or evaluating')!==false
+    && strpos($understandingPrompt,'A broad evaluation or overview of a stated object')!==false,
+    'understanding contract keeps a stated analytical object in broad summaries instead of defaulting it to store');
+$bindingPrompt=AiIntentResultContract::modelInstruction(false);
+$check(strpos($bindingPrompt,'inspected, summarized or evaluated')!==false
+    && strpos($bindingPrompt,'a period never changes it into store')!==false,
+    'binding contract preserves the accepted analytical object independently of the requested period');
+$reviewPrompt=AiIntentResultContract::semanticReviewInstruction();
+$check(strpos($reviewPrompt,'inspect, summarize, evaluate')!==false
+    && strpos($reviewPrompt,'substitutes store for the stated analytical object')!==false,
+    'semantic review rejects an object-summary candidate that falls back to store');
 $missingRankValue=$understanding;
 $missingRankValue['requirements'][2]['values']['ranking']=['direction'=>'top'];
 $reject(static function()use($missingRankValue,$question){AiIntentUnderstandingContract::normalize($missingRankValue,$question);},

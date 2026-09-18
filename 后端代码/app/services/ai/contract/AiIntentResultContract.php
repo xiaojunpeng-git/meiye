@@ -9,6 +9,8 @@ namespace app\services\ai\contract;
 final class AiIntentResultContract
 {
     const VERSION='intent-binding-v5';
+    /** Transport ceiling only; the registry is still the source of membership. */
+    const MAX_OVERVIEW_METRICS=12;
     const REQUIRED_FIELDS=['action_codes','metric_codes','needs_metric_choice','object_kind','object_term','operation','requirement_bindings','unresolved_fragments'];
     const DELTA_FIELDS=['metric_codes','object','business_filters','store_scope','periods','operation','ranking_direction','ranking_limit','scope','aggregate_condition'];
     const DELTA_ACTIONS=['inherit','replace','clear','pending'];
@@ -21,7 +23,8 @@ final class AiIntentResultContract
         // selected metric on the model's behalf.
         if ($predicate==='missing_metric_codes') return true;
         if (in_array($predicate,['bad_value:requirement_bindings','missing_requirement_binding','unexpected_requirement_binding',
-            'binding_row_shape','binding_row_id','binding_row_status','binding_row_codes'],true)) return true;
+            'binding_row_shape','binding_row_id','binding_row_status','binding_row_codes',
+            'binding_requirement_without_metric'],true)) return true;
         if (in_array($predicate,['ambiguous_metric_codes_present','bad_value:recommended_initial_answer',
             'bad_value:initial_observation','initial_observation_metric_count',
             'initial_observation_query_shape','provenance_field_not_understood',
@@ -40,6 +43,7 @@ final class AiIntentResultContract
         // bounded, model-authored delta correction, not a request for the
         // server to fill in business meaning.
         if (is_string($predicate) && strpos($predicate,'binding_requirement_delta_mismatch:')===0) return true;
+        if (is_string($predicate) && preg_match('/^binding_requirement_value_mismatch:(object_kind|object_relation|operation|periods|ranking|scope|aggregate_condition)$/D',$predicate)) return true;
         if (is_string($predicate) && preg_match('/^context_constraint_without_source:(store_scope_clear|store_scope_replace|business_filters)$/D',$predicate)) return true;
         // This is not a business fallback. It detects only a malformed
         // follow-up *relationship*: the binding kept an old analytical
@@ -209,7 +213,8 @@ final class AiIntentResultContract
         $context=$hasPriorQuery
             ? 'A verified prior query exists. Include context_delta with exactly these keys: '.implode(', ',self::DELTA_FIELDS).'. Each value is one of inherit, replace, clear or pending. Use inherit only when the current wording leaves that exact meaning unchanged. Use replace only when current wording supplies a new meaning in the matching ordinary field. Use clear only when the customer explicitly removes a condition or when the accepted current meaning is a complete standalone overall query rather than a continuation. Use pending when clarification is needed. Never omit a delta key and never infer inherit from an omitted field. A short continuation can replace just the analytical object while retaining the verified period, response form, ranking direction, ranking quantity, scope and other unchanged meaning. Conversely, a self-contained current question seeking an overall operating view is a new topic when it does not refer to the earlier result or object: clear the old analytical object/dimension, replace the response form with summary, clear old ranking, and do not let an old product, project, person or ranking become an unspoken condition. This can clear a prior selected analytical object as well; it never clears data authority or widens the authorized range. prior_query.presentation_origin says whether the preceding metric perspective was explicitly selected by the customer or was a platform-suggested first answer. A platform suggestion is context that may be continued when the current wording refers to it, but it is never an unspoken customer condition. When presentation_origin is platform_observation, its metric_codes are one deliberately presented overview group, not competing choices. If the current wording semantically continues that overview and changes only a contextual condition such as the period, inherit the complete group and keep initial_observation=true; do not turn it into needs_metric_choice merely because it contains several metrics. Only request a metric choice when the current wording itself introduces a different measurement or makes the intended continuation genuinely unclear. Set store_scope to clear only when the current request explicitly asks for the authorized/all-store range and supplies scope=authorized; set store_scope to replace only when the current request identifies a store object; clear business_filters when abandoning an earlier analytical dimension. A selected object may be cleared only for a complete standalone overall query, and that transition is independently reviewed before execution; otherwise clear or replace it only when the current request identifies the changed object scope. When that new object cannot legally use the previous metric under capabilities.object_contracts, do not return operation unknown or an unresolved fragment and do not reuse the old metric. Select a compatible registered metric when it faithfully provides a useful first answer to the accepted goal; mark metric_codes pending only when several readings remain and none can be selected without changing that goal.'
             : 'No verified prior query exists. Do not include context_delta.';
-        return 'Return one JSON object following '.self::VERSION.'. Required keys: '.implode(', ',self::REQUIRED_FIELDS).'. Optional keys: object_relation, ranking, periods, scope, aggregate_condition, result_reference, initial_observation, recommended_initial_answer'.($hasPriorQuery?', context_delta':'').'. '.$context.' object_term is an exact customer term or an empty string where no named object is needed. object_relation is analysis when object_kind is the thing being compared, grouped or listed, and selection only when object_term identifies a particular target that must narrow the data. Do not turn an analytical object into a selection; when object_relation is analysis, object_term must be empty. A threshold member count uses object_kind=member, object_relation=analysis, operation=threshold_count and aggregate_condition exactly {"subject":"member","aggregation":"period_total","operator":"gte|gt|lte|lt|eq","amount_cents":positive-integer}; preserve it only when the accepted understanding carries the same condition. For an aggregate operating goal with no named analytical object, use object_kind store and an empty object_term; words such as “overall” describe the goal, not a separate object_kind. The accepted understanding is the primary record of customer meaning. Do not reinterpret, replace or contradict any typed value it already carries; bind its business goal to registered capability only. If that understanding has no typed carrier for a response form, period, ranking, scope, object or object relation that you can still clearly understand from the same question, return the faithful candidate rather than treating the customer as unclear. The server sends such a new carrier to a separate semantic reviewer before it can execute. needs_metric_choice is true only when the intended business measurement is genuinely ambiguous and no professionally useful first reading can be selected; then metric_codes must be empty. A customer may instead ask for a broad overall operating view without naming one measurement. When the accepted understanding is such an open operating goal, no explicit customer condition conflicts with it, and operation is summary, set initial_observation=true and select two to four independent supplied store metrics as observation angles for an initial answer. Those codes are professional observations, not a claim that the customer selected one metric; do not use this exception for a named measurement, exclusion, comparison, ranking, or object-specific request. When the customer has made the analytical object and response form clear but the business measurement has several registered readings, select the most useful compatible professional first reading from the supplied capabilities. Only a summary can intentionally return multiple independent reading angles; a ranking must set metric_codes to exactly one registered code because one ranked result needs one comparable measurement. Set recommended_initial_answer=true, needs_metric_choice=false and label the resulting metric perspective in the answer, so the customer can naturally pursue another perspective afterwards. Never set recommended_initial_answer for an unresolved meaning, an unavailable capability, a changed exclusion, or a result that needs customer confirmation. Set both initial_observation and recommended_initial_answer false or omit them for every other request. Lack of an available metric is not ambiguity. requirement_bindings is a required accountability array. It has exactly one row for every accepted understanding requirement whose fields include metric_codes, and no other rows. Each row is exactly {"requirement_id":"rN","status":"satisfied|unavailable|pending","metric_codes":[registered codes]}. A satisfied row names the registered metric codes that fulfill that one requirement; together all satisfied rows must account for the selected metric_codes. An unavailable or pending row has an empty metric_codes array and therefore cannot accompany an executable metric selection. When there is no accepted metric_codes requirement and you select a professional recommended_initial_answer, requirement_bindings must be an empty array: the recommendation is not customer-selected meaning and must not be attached to object, ranking, period, scope or other requirements. This is an accountability record for the accepted meaning, not a phrase matcher: do not decide it from word overlap, and do not omit an exclusion or another customer requirement. periods, when present, is an ordered array of up to two period objects. A period is exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":positive-integer,"end_offset_days":signed-integer}, or {"kind":"month_offset","offset_months":signed-integer}. Preserve early, future and long periods exactly; execution coverage and length limits are checked by the server later, never reinterpret them as an invalid intent. A calendar-month meaning uses month_offset; relative_days is only for a stated rolling number of days. ranking is {"direction":"top|bottom|top_and_bottom|unspecified","limit":integer-or-null}. Scope and accessible stores are server-owned: omit scope unless current wording explicitly changes current-store versus authorized scope. metric_codes and action_codes are binding candidates inside their required arrays and only contain supplied codes. Do not output provenance: the server records whether a carrier came from accepted meaning, verified context, a system default, or a candidate that still needs semantic admission. result_reference, if used, is only {"group":"top|bottom","ordinal":positive-integer}; emit it only when the accepted understanding has an equal result_reference requirement with current-question evidence. group means the rank section explicitly named by the customer and never contains an ID, name or result value. unresolved_fragments only contains exact current-question text whose meaning cannot be understood, not understood requests that lack a registered binding. Never calculate, query, invent a condition, discard a condition, or copy a previous result value.';
+        $context.=' An analytical object also includes a stated subject being inspected, summarized or evaluated. A broad evaluation or overview of an accepted object must preserve that object_kind with object_relation=analysis; a period never changes it into store.';
+        return 'Return one JSON object following '.self::VERSION.'. Required keys: '.implode(', ',self::REQUIRED_FIELDS).'. Optional keys: object_relation, ranking, periods, scope, aggregate_condition, result_reference, initial_observation, recommended_initial_answer'.($hasPriorQuery?', context_delta':'').'. '.$context.' object_term is an exact customer term or an empty string where no named object is needed. object_relation is analysis when object_kind is the thing being compared, grouped or listed, and selection only when object_term identifies a particular target that must narrow the data. Do not turn an analytical object into a selection; when object_relation is analysis, object_term must be empty. A threshold member count uses object_kind=member, object_relation=analysis, operation=threshold_count and aggregate_condition exactly {"subject":"member","aggregation":"period_total","operator":"gte|gt|lte|lt|eq","amount_cents":positive-integer}; preserve it only when the accepted understanding carries the same condition. For an aggregate operating goal with no named analytical object, use object_kind store and an empty object_term; words such as “overall” describe the goal, not a separate object_kind. The accepted understanding is the primary record of customer meaning. Do not reinterpret, replace or contradict any typed value it already carries; bind its business goal to registered capability only. If that understanding has no typed carrier for a response form, period, ranking, scope, object or object relation that you can still clearly understand from the same question, return the faithful candidate rather than treating the customer as unclear. The server sends such a new carrier to a separate semantic reviewer before it can execute. needs_metric_choice is true only when the intended business measurement is genuinely ambiguous and no professionally useful first reading can be selected; then metric_codes must be empty. A customer may instead ask for an open overview of an understood object without naming one measurement. When the accepted understanding is such an open goal, no explicit customer condition conflicts with it, and operation is summary, set initial_observation=true and select two to four independent supplied metrics compatible with that object as provisional observation angles. The server replaces those provisional codes only through the published registry overview profile; they are professional observations, not a claim that the customer selected one metric. Do not use this exception for a named measurement, exclusion, comparison, or ranking. When the customer has made the analytical object and response form clear but the business measurement has several registered readings, select the most useful compatible professional first reading from the supplied capabilities. Only a summary can intentionally return multiple independent reading angles; a ranking must set metric_codes to exactly one registered code because one ranked result needs one comparable measurement. Set recommended_initial_answer=true, needs_metric_choice=false and label the resulting metric perspective in the answer, so the customer can naturally pursue another perspective afterwards. Never set recommended_initial_answer for an unresolved meaning, an unavailable capability, a changed exclusion, or a result that needs customer confirmation. Set both initial_observation and recommended_initial_answer false or omit them for every other request. Lack of an available metric is not ambiguity. requirement_bindings is a required accountability array. It has exactly one row for every accepted understanding requirement whose fields include metric_codes, and no other rows. Each row is exactly {"requirement_id":"rN","status":"satisfied|unavailable|pending","metric_codes":[registered codes]}. A satisfied row names the registered metric codes that fulfill that one requirement; together all satisfied rows must account for the selected metric_codes. An unavailable or pending row has an empty metric_codes array and therefore cannot accompany an executable metric selection. When there is no accepted metric_codes requirement and you select a professional recommended_initial_answer, requirement_bindings must be an empty array: the recommendation is not customer-selected meaning and must not be attached to object, ranking, period, scope or other requirements. This is an accountability record for the accepted meaning, not a phrase matcher: do not decide it from word overlap, and do not omit an exclusion or another customer requirement. periods, when present, is an ordered array of up to two period objects. A period is exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":positive-integer,"end_offset_days":signed-integer}, or {"kind":"month_offset","offset_months":signed-integer}. Preserve early, future and long periods exactly; execution coverage and length limits are checked by the server later, never reinterpret them as an invalid intent. A calendar-month meaning uses month_offset; relative_days is only for a stated rolling number of days. ranking is {"direction":"top|bottom|top_and_bottom|unspecified","limit":integer-or-null}. Scope and accessible stores are server-owned: omit scope unless current wording explicitly changes current-store versus authorized scope. metric_codes and action_codes are binding candidates inside their required arrays and only contain supplied codes. Do not output provenance: the server records whether a carrier came from accepted meaning, verified context, a system default, or a candidate that still needs semantic admission. result_reference, if used, is only {"group":"top|bottom","ordinal":positive-integer}; emit it only when the accepted understanding has an equal result_reference requirement with current-question evidence. group means the rank section explicitly named by the customer and never contains an ID, name or result value. unresolved_fragments only contains exact current-question text whose meaning cannot be understood, not understood requests that lack a registered binding. Never calculate, query, invent a condition, discard a condition, or copy a previous result value.';
     }
 
     public static function normalize($value,array $metricCodes,array $actionCodes,array $safeQuestion,array $understanding=[]): array
@@ -383,14 +388,43 @@ final class AiIntentResultContract
             $value['recommended_initial_answer']=false;
         }
         if ($initialObservation) {
-            if (count($value['metric_codes'])<2 || count($value['metric_codes'])>4) self::fail('initial_observation_metric_count');
-            if ($value['needs_metric_choice'] || $value['object_kind']!=='store' || $value['object_term']!=='' || $value['operation']!=='summary'
+            if (count($value['metric_codes'])<2 || count($value['metric_codes'])>self::MAX_OVERVIEW_METRICS) self::fail('initial_observation_metric_count');
+            if ($value['needs_metric_choice'] || $value['object_kind']==='unknown' || $value['object_term']!=='' || $value['operation']!=='summary'
                 || $ranking['direction']!=='unspecified' || $ranking['limit']!==null) self::fail('initial_observation_query_shape');
         }
         $periodsSupplied=array_key_exists('periods',$value);$periods=$periodsSupplied?$value['periods']:[];
         if (!self::periods($periods)) self::fail('bad_value:periods');
         $conditionSupplied=array_key_exists('aggregate_condition',$value) && $value['aggregate_condition']!==null;
         $aggregateCondition=$conditionSupplied?$value['aggregate_condition']:null;
+        // A provider can mechanically echo the previous threshold carrier
+        // while correctly understanding a new response form. Remove only
+        // that structurally impossible carry-over: the accepted current
+        // meaning must itself contain operation evidence and must contain no
+        // aggregate-condition evidence. This never interprets customer text,
+        // invents a condition or changes an actual threshold request.
+        $currentFields=[];
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            $current=false;
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (($evidence['message_id']??null)==='current') {$current=true;break;}
+            }
+            if (!$current) continue;
+            foreach ((array)($requirement['fields']??[]) as $field) $currentFields[$field]=true;
+        }
+        $currentRankingReplacesThreshold=isset($currentFields['ranking'])
+            && !isset($currentFields['aggregate_condition']);
+        if ($currentRankingReplacesThreshold && $value['operation']==='threshold_count') {
+            $value['operation']='ranking';
+        }
+        $clearedStaleAggregateCondition=$aggregateCondition!==null
+            && $value['operation']!=='threshold_count'
+            && (isset($currentFields['operation']) || $currentRankingReplacesThreshold || isset($currentFields['metric_codes']))
+            && !isset($currentFields['aggregate_condition']);
+        if ($clearedStaleAggregateCondition) {
+            $value['aggregate_condition']=null;
+            $aggregateCondition=null;
+            $conditionSupplied=false;
+        }
         if ($conditionSupplied && !self::aggregateCondition($aggregateCondition)) self::fail('bad_value:aggregate_condition');
         if (($value['operation']==='threshold_count') !== ($aggregateCondition!==null)) self::fail('bad_value:aggregate_condition');
         // Like an all-null ranking, null scope is an optional transport form,
@@ -412,6 +446,11 @@ final class AiIntentResultContract
         if ($objectRelation==='analysis') $value['object_term']='';
         if ($objectRelation==='selection' && $value['object_term']==='') self::fail('bad_value:object_relation');
         $delta=$hasPrior?self::delta($value['context_delta']):null;
+        if ($clearedStaleAggregateCondition && $delta!==null
+            && is_array($safeQuestion['prior_query']['aggregate_condition']??null)) {
+            $delta['aggregate_condition']='clear';
+            $value['context_delta']['aggregate_condition']='clear';
+        }
         self::normalizeContextOnlyPendingFollowup($understanding,$delta,$value);
         self::normalizeNoopContextChanges($delta,$value,$safeQuestion['prior_query']??null);
         self::assertContextOnlyFollowup($understanding,$delta);
@@ -601,25 +640,36 @@ final class AiIntentResultContract
         // grounded in a current object request. A previous analytical
         // dimension alone has no selected identity and must not trap a later
         // independent business question in its old topic.
-        // A complete current aggregate query may deliberately end a previous
-        // selected analytical object.  This is not a PHP interpretation of
-        // a phrase: the understanding independently carries both a current
-        // measurement and summary response form, and the binding model has
-        // explicitly declared the clear.  The response form may be a
-        // capability-binding decision rather than a separately typed
-        // customer field (for example, a direct amount question). It always
-        // proceeds to the separate semantic reviewer below before a reader
-        // can execute it. A short continuation such as only a new period has
-        // neither a current measurement nor a summary candidate and remains
-        // unable to remove a selected object.
-        $standaloneAggregate=$intent['object_kind']==='store'
-            && $intent['object_term']===''
-            && $intent['operation']==='summary'
-            && $hasField('metric_codes',true);
+        // A complete current analytical request may deliberately end a
+        // previous selected object. This decision is structural rather than
+        // phrase based: the accepted current meaning must independently carry
+        // both a measurement and a response form, and a threshold request
+        // must also carry its complete aggregate condition. The candidate is
+        // still reviewed semantically before any Reader can execute it. A
+        // short continuation such as only a new period has neither pair and
+        // therefore remains unable to remove a selected object.
+        $standaloneAnalyticalRequest=$intent['object_term']===''
+            && in_array($intent['operation'],['summary','ranking','trend','comparison','threshold_count'],true)
+            && $hasField('metric_codes',true)
+            && $hasField('operation',true)
+            && ($intent['operation']!=='threshold_count' || $hasField('aggregate_condition',true));
+        // A clear current business request can be understood before a Reader
+        // contract exists. Releasing the old selected object is safe in that
+        // case because the gateway stops every current `unbound` requirement
+        // as a capability gap before compilation or data access. Keeping the
+        // old object would instead misreport a new topic as a protocol error.
+        $currentUnboundRequest=false;
+        foreach ($requirements as $requirement) {
+            if (!in_array('unbound',(array)($requirement['fields']??[]),true)) continue;
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (($evidence['message_id']??null)==='current') {$currentUnboundRequest=true;break 2;}
+            }
+        }
         if (in_array($delta['business_filters'],['clear','replace'],true)
             && ($priorQuery['has_object_selection']??false)===true
             && !$hasField('object_kind',true)
-            && !$standaloneAggregate) {
+            && !$standaloneAnalyticalRequest
+            && !$currentUnboundRequest) {
             self::fail('context_constraint_without_source:business_filters');
         }
     }
@@ -851,10 +901,10 @@ final class AiIntentResultContract
             .'Accept only if every evaluated customer requirement represented by the proposed binding is faithfully expressed by the current customer question. '
             .'When candidate_binding.initial_observation is true, accept it for a first answer only if the accepted understanding is an open overall operating goal with no specific customer-stated measurement, exclusion, comparison, ranking or object-specific condition that the observation set would replace. A broad everyday evaluation can remain an open operating goal even when the understanding protocol carries a generic metric requirement; decide from the ordinary customer wording whether it names a particular business fact, accounting basis or measurement, rather than treating that carrier by itself as a specific metric. A different case is a verified prior query whose presentation_origin is platform_observation: its metric_codes are one previously presented overview group, not alternatives. If the current accepted understanding only continues that group while changing a contextual condition, accept the complete inherited group; reject only when the current wording adds a conflicting measurement, exclusion, comparison, ranking, object condition or scope change. '
             .'When candidate_binding.recommended_initial_answer is true, review the proposed recommendation as a candidate rather than as a customer-selected metric. Accept a compatible registered metric when it is a reasonable professional first reading of the broad customer goal, object and response form. A broad everyday evaluation without a named accounting basis is not by itself a conflict. Reject only when the candidate changes a stated exclusion, range, ranking, object condition or other explicit requirement, and name the conflicting requirement ids. '
-            .'When the customer asks to identify which comparable person, store, member, project or other object is doing best, leading or weakest, the binding must preserve that comparative result: it needs a ranking response with the requested direction, and must not substitute an aggregate summary. '
+            .'When the customer asks to identify which comparable person, store, member, project or other object is doing best, leading, weakest or at a stated rank, the binding must preserve that comparative result: it needs a ranking response with the requested direction, and must reject an inherited threshold_count, aggregate condition or aggregate summary. '
             .'Reject when a selected metric or result reference substitutes, reverses, ignores or conflicts with any such requirement, including an exclusion. '
             .'When a binding replaces or clears a signed store range, or changes an object filter, accept only if the current customer question itself expresses that exact change. A confirmed request for the authorized range may execute directly, but never expands authority beyond the current Reader permission. '
-            .'An analytical object and a selected object have different meanings. Accept object_relation=analysis only when the customer is asking to compare, group or list that kind; accept object_relation=selection only when the customer identifies a particular target whose records must narrow the query. Reject a candidate that turns one into the other. '
+            .'An analytical object and a selected object have different meanings. Accept object_relation=analysis when the customer is asking to inspect, summarize, evaluate, compare, group or list that kind; accept object_relation=selection only when the customer identifies a particular target whose records must narrow the query. A broad evaluation of a stated object remains analysis of that object even when it also states a period. Reject a candidate that turns one into the other or substitutes store for the stated analytical object. '
             .'The accepted understanding may preserve a clear business goal without materialising every response-form carrier. When candidate binding adds an object kind, response form, period, ranking or scope that has no typed first-pass carrier, decide from the current customer question itself whether that exact candidate is faithful. Do not reject only because the first pass omitted that carrier; reject any candidate that adds, replaces or narrows a condition the customer did not express. '
             .'An excerpt that expresses only a date, ranking, metric or another condition does not support a scope expansion merely because it appears in the same requirement. '
             .'A result reference is valid only when the current question itself asks for the displayed ranked result; it must never be inferred from prior conversation. '
@@ -867,7 +917,7 @@ final class AiIntentResultContract
         return 'Evaluate the exact business event or measurement requested in ordinary language, using only the supplied registered descriptions. '
             .'A concrete transaction or activity is not interchangeable with other measurements merely because they involve money or performance. '
             .'A broad outcome without an identified event, accounting basis, calculation basis, or other distinguishing measurement property can represent multiple distinct metrics and MUST be ambiguous. '
-            .'Do not treat a familiar category label, a metric display title, a conventional default, or a reasonable professional first reading as an identified basis. '
+            .'An exact, unambiguous supplied registered metric display title used as the requested measurement is an identified basis. A loose category label, conventional default, or merely reasonable professional first reading is not. '
             .'Only an open overall operating goal may receive a separately labelled multi-angle observation; a request for one unspecified measurement must remain a customer choice. '
             .'Do not see or assume the proposed candidate. Return exactly {"decision":"unique|ambiguous|unavailable","metric_code":"registered code or empty string"}. '
             .'Use unique only when one registered metric faithfully answers the expressed fact; for ambiguous or unavailable, metric_code is empty. Do not answer with figures.';
@@ -1151,8 +1201,12 @@ final class AiIntentResultContract
             $id=$row['requirement_id']??null;
             if (!is_string($id) || !isset($requirements[$id]) || isset($seen[$id])) self::fail('binding_row_id');
             $seen[$id]=true;
+            if (($row['metric_codes']??null)===[]) {
+                if (($row['status']??null)!=='satisfied') self::fail('binding_row_status');
+                continue;
+            }
             if (($row['status']??null)!=='satisfied') self::fail('binding_row_status');
-            if (!self::codes($row['metric_codes']??null) || $row['metric_codes']===[]) self::fail('binding_row_codes');
+            if (!self::codes($row['metric_codes']??null)) self::fail('binding_row_codes');
             foreach ($row['metric_codes'] as $code) if (!in_array($code,$allowedCodes,true)) self::fail('binding_requirement_metric_unknown');
         }
         return [];

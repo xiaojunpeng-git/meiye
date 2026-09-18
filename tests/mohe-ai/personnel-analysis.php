@@ -54,7 +54,7 @@ paCheck($compiled['workflow_code']==='wf_performance_ranking','existing reusable
 $selfCapabilities=\app\services\ai\execution\AiAuthority::capabilities(false,[
  'scope_mode'=>'self_participant','store_ids'=>[1],'analysis_personnel_ready'=>true,
 ]);
-paCheck($selfCapabilities['metric_codes']===['staff_sales_yeji','staff_labor_yeji'],
+paCheck($selfCapabilities['metric_codes']===['staff_sales_yeji','staff_labor_yeji','staff_project_num','staff_service_num','service_people'],
  'self-participant capability projection contains only Reader-executable person metrics');
 paCheck(\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($selfCapabilities,'store','summary')===[],
  'self-participant never receives a store-total candidate that Reader must reject');

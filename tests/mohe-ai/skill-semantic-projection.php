@@ -50,10 +50,29 @@ $check($conversation['outbound']['recent_questions']===['第15轮问题','第16�
 
 $capabilities=['metric_codes'=>array_keys(MetricDefinitionRegistry::capabilities()),'metric_readiness'=>MetricDefinitionRegistry::capabilities()];
 $project=AiCapabilityGuidanceCatalog::discover($capabilities,'project','ranking');
+$projectSummary=AiCapabilityGuidanceCatalog::discover($capabilities,'project','summary');
 $member=AiCapabilityGuidanceCatalog::discover($capabilities,'member','ranking');
 $person=AiCapabilityGuidanceCatalog::discover($capabilities,'person','ranking');
 $check(isset($project['sales_amount'])&&isset($project['completed_service_item_count'])&&isset($member['cash_performance'])
     && ($project['sales_amount']['action_codes']??[])===['sales'],'objects become available only when the metric registry declares an executable dimension contract');
+$check(array_keys($projectSummary)===['completed_service_item_count','sales_amount','sales_quantity'],
+    'an object summary exposes exactly the metrics opted into its registry overview profile');
+$projectSummaryCodes=array_keys($projectSummary);
+$projectSummaryPlan=(new \app\services\ai\execution\AiWorkflowPlanner())->compile(
+    ['dates'=>[],'date_terms'=>[['code'=>'EXPLICIT','start'=>'2026-09-01','end'=>'2026-09-18']],
+        'signals'=>array_merge($projectSummaryCodes,['summary']),'blocking_reason'=>null,'unresolved_condition'=>false,
+        'semantic_intent'=>['constraints'=>[]]],
+    ['decision'=>'query','query_shape'=>'summary','metric_codes'=>$projectSummaryCodes,
+        'ranking'=>['direction'=>'unspecified','limit'=>null],'object_kind'=>'project'],
+    $capabilities+['query_shapes'=>['summary','trend','ranking','comparison','threshold_count'],'output_formats'=>['screen']],
+    'screen','2026-09-18'
+);
+$compiledProjectCodes=$projectSummaryPlan['plan']['query']['metric_codes']??[];
+sort($compiledProjectCodes,SORT_STRING); sort($projectSummaryCodes,SORT_STRING);
+$check(($projectSummaryPlan['kind']??null)==='plan'
+    && ($projectSummaryPlan['plan']['query']['business_filters']??null)===['object_kind'=>'project']
+    && $compiledProjectCodes===$projectSummaryCodes,
+    'the generic workflow compiles the complete registry-backed object summary without a question-specific branch');
 $check(isset($person['staff_sales_yeji'])&&!isset($person['cash_performance'])
     && ($person['staff_sales_yeji']['default_selection_ref']??null)==='role:salesperson'
     && strpos((string)($person['staff_sales_yeji']['summary']??''),'人员现金业绩')!==false,

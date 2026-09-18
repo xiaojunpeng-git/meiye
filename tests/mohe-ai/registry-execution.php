@@ -109,6 +109,18 @@ try {
         registryCheck($compiled['budget']['counters']['tool_call_count']===1&&$compiled['budget']['counters']['skill_execution_count']===1,'actual calls counted once');
         registryCheck($compiled['scene_code']==='store_operations','business Skill stays separate from reusable shape');
     }
+    $overviewReadiness=MetricReadViewServices::metricCapabilities();
+    $overviewCodes=[];
+    foreach ($overviewReadiness as $code=>$contract) if (($contract['ai_query_ready']??false)===true) $overviewCodes[]=$code;
+    $overviewCap=['metric_codes'=>$overviewCodes,'query_shapes'=>['summary','trend','ranking','comparison','threshold_count'],
+        'output_formats'=>['screen'],'metric_readiness'=>$overviewReadiness,'definition_metric_codes'=>[],'metadata_readiness'=>[]];
+    $storeOverviewCodes=array_column(\app\services\ai\execution\AiOverviewMetricResolver::resolve($overviewCap,'store'),'metric_code');
+    $storeOverviewPlan=['schema_version'=>'mohe-executable-workflow-v1','workflow_code'=>'wf_performance_summary',
+        'query'=>['query_shape'=>'summary','metric_codes'=>$storeOverviewCodes,'start_date'=>'2026-09-08','end_date'=>'2026-09-08',
+            'compare_range'=>null,'store_ids'=>[],'business_filters'=>[],'ranking'=>null,'aggregate_condition'=>null],'output_format'=>'screen'];
+    $storeOverviewCompiled=$compiler->compile($storeOverviewPlan,$overviewCap); $compiler->assertCompiled($storeOverviewCompiled);
+    registryCheck(count($storeOverviewCodes)>8 && $storeOverviewCompiled['query']['metric_codes']===$storeOverviewCodes,
+        'complete registered store overview crosses the legacy eight-selector limit without exceeding the shared bounded profile');
     $thresholdCap=registryCapabilities();
     $thresholdCap['metric_codes']=['sales_collected_amount'];
     $thresholdCap['query_shapes']=['threshold_count'];
@@ -147,6 +159,15 @@ try {
     registryCheck($projectSalesCompiled['query']['business_filters']===['object_kind'=>'project']
         && ($salesDefinition['source']['dimensions']['project']['analysis_source_filters']??null)===['source_type'=>'project'],
         'project sales ranking is a registered sales-fact dimension, never an AI-side fact query');
+    $projectOverviewCap=$cap;
+    $projectOverviewCap['metric_codes']=['sales_amount','sales_quantity','completed_service_item_count'];
+    $projectOverviewPlan=registryPlan('summary');
+    $projectOverviewPlan['query']['metric_codes']=['sales_amount','sales_quantity','completed_service_item_count'];
+    $projectOverviewPlan['query']['business_filters']=['object_kind'=>'project'];
+    $projectOverviewCompiled=$compiler->compile($projectOverviewPlan,$projectOverviewCap); $compiler->assertCompiled($projectOverviewCompiled);
+    registryCheck($projectOverviewCompiled['query']===$projectOverviewPlan['query']
+        && in_array('project',array_column($projectOverviewCompiled['capability_snapshot']['metrics']['sales_amount']['overview'],'object_kind'),true),
+        'registered object overview keeps every project-compatible metric and its frozen profile metadata without a per-object compiler branch');
     foreach (['guide','sales_manager'] as $participantKind) {
         $participantPlan=registryPlan('ranking');
         $participantPlan['query']['metric_codes']=['sales_amount'];

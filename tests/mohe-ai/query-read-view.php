@@ -41,6 +41,10 @@ $reader->dimensionRanking('sales_amount','project','0',[1],$range,5,'desc');
 $projectSalesCalls=json_encode($seen[count($seen)-1][1]->calls);
 queryCheck(strpos($projectSalesCalls,'p.source_type')!==false && strpos($projectSalesCalls,'project')!==false,
     'project sales ranking applies its frozen registered source-type split inside the Reader');
+$reader->dimensionSummary('sales_amount','project','0',[1],$range);
+$projectSummaryCalls=json_encode($seen[count($seen)-1][1]->calls);
+queryCheck(strpos($projectSummaryCalls,'p.source_type')!==false && strpos($projectSummaryCalls,'project')!==false,
+    'project overview totals use the same registered source-type boundary rather than visible ranking rows');
 $capabilities = MetricReadViewServices::metricCapabilities();
 queryCheck($capabilities['consume_amount']['ai_query_ready'] === true && count($capabilities['consume_amount']['query_shapes']) === 4, 'consumption implemented contracts registered');
     queryCheck($capabilities['cash_performance']['ai_query_ready'] === true && count($capabilities['cash_performance']['query_shapes']) === 4 && $capabilities['cash_performance']['readiness_reasons'] === [], 'cash recharge-inclusive contract registered');
@@ -122,8 +126,16 @@ try {
     queryCheck(count($overview['results']) === 4 && array_column($overview['results'], 'metric_code') === $overviewQuery['metric_codes']
         && $overview['query']['metric_codes'] === $overviewQuery['metric_codes'],
         'one authorized summary read can preserve four independently registered first-answer observations');
-    $tooMany = $overviewQuery; $tooMany['metric_codes'][] = 'refund_performance';
-    queryReject(function () use ($service, $principal, $tooMany) { $service->create($principal, $tooMany); }, 'METRIC_QUERY_SCHEMA_INVALID');
+    $fiveMetricOverview = $overviewQuery; $fiveMetricOverview['metric_codes'][] = 'refund_performance';
+    $fiveMetricView=$service->create($principal,$fiveMetricOverview);
+    queryCheck(count($fiveMetricView['results'])===5 && $fiveMetricView['query']['metric_codes']===$fiveMetricOverview['metric_codes'],
+        'summary overview capacity is extended only for the registry-bounded profile');
+    $projectOverview=['query_shape'=>'summary','metric_codes'=>['sales_amount','sales_quantity','completed_service_item_count'],
+        'start_date'=>$range['start'],'end_date'=>$range['end'],'compare_range'=>null,'store_ids'=>[],'business_filters'=>['object_kind'=>'project']];
+    $projectView=$service->create($principal,$projectOverview);
+    queryCheck(array_column($projectView['results'],'object_kind')===['project','project','project']
+        && array_column($projectView['results'],'metric_code')===$projectOverview['metric_codes'],
+        'registered project overview preserves all approved facts through the signed Reader view');
     $binding['store_ids'] = [2];
     queryReject(function () use ($service, $principal, $shrunk, $narrow) { $service->replay($principal, $shrunk, $narrow['read_consistency_ref']); }, 'METRIC_PERMISSION_DENIED');
     $binding['store_ids'] = [1, 2];
@@ -132,7 +144,7 @@ try {
     queryReject(function () use ($store) { $store->get('../outside'); }, 'METRIC_READ_VIEW_UNAVAILABLE');
     $now += 86400;
     queryReject(function () use ($service, $principal, $query, $view) { $service->replay($principal, $query, $view['read_consistency_ref']); }, 'METRIC_READ_VIEW_UNAVAILABLE');
-    queryCheck($store->cleanup() === 6, 'all expired views physically removed');
+    queryCheck($store->cleanup() === 8, 'all expired views physically removed');
     queryCheck(iterator_count(new FilesystemIterator($temp)) === 0, 'no fixture content retained');
 } finally {
     foreach (new DirectoryIterator($temp) as $file) if (!$file->isDot() && $file->isFile() && !$file->isLink()) unlink($file->getPathname());

@@ -30,6 +30,10 @@ checkState((int)$db->query('SELECT input_tokens FROM mohe_ai_attempt')->fetchCol
  $store->recordDiagnostic($owner,$id,$g,'worker',$attemptDiagnostic,'p1');
  $counters=json_decode((string)$db->query('SELECT counters_json FROM mohe_ai_run WHERE run_id='.$db->quote($id))->fetchColumn(),true)?:[];
  checkState(($counters['model_diagnostics']['p1']??null)===$attemptDiagnostic,'diagnostic preserves the failed model attempt without payload');
+ $bindingDiagnostic=['stage'=>'intent_contract','predicate'=>'binding_row_id','metric_requirement_count'=>1,'binding_row_count'=>1,'selected_code_count'=>1,'row_code_count'=>0,'row_status'=>'pending'];
+ $store->recordDiagnostic($owner,$id,$g,'worker',$bindingDiagnostic,'p2');
+ $counters=json_decode((string)$db->query('SELECT counters_json FROM mohe_ai_run WHERE run_id='.$db->quote($id))->fetchColumn(),true)?:[];
+ checkState(($counters['model_diagnostics']['p2']??null)===$bindingDiagnostic,'bounded binding-row diagnostics preserve structural counts without payload');
  rejectsState(function () use ($store,$owner,$id,$g) { $store->recordDiagnostic($owner,$id,$g,'worker',['stage'=>'bad-stage','predicate'=>'unsafe']); },'AI_DIAGNOSTIC_INVALID');
 rejectsState(function () use ($store,$owner,$id,$g) { $store->finishAttempt($owner,$id,$g,'worker','p1','FAILED'); },'AI_ATTEMPT_TERMINAL');
 $store->pauseForClarification($owner,$id,$g,'worker','clarification1');

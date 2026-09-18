@@ -131,7 +131,12 @@ namespace {
     $meanings=[['metric_code'=>'staff_labor_yeji','name'=>'劳动业绩','summary'=>'按规则分配给手艺人的业绩','object_contracts'=>[['object_kind'=>'person','action_codes'=>['service']]]]];
     $understanding=['goal'=>'查询今天劳动业绩最好的技师','requirements'=>[['id'=>'r1','meaning'=>'查询今天劳动业绩最好的技师','fields'=>['object_kind','operation','periods','ranking'],'values'=>['object_kind'=>'person','operation'=>'ranking','periods'=>[['kind'=>'relative_days','end_offset_days'=>0,'days'=>1]],'ranking'=>['direction'=>'top','limit'=>1]],'evidence'=>[['message_id'=>'current','quote'=>'今天做得最好的技师是谁']]]],'status'=>'understood'];
     $GLOBALS['sfResponse']=$response(json_encode($understanding));
-    $understood=$client->understandMeaning($safeQuestion,'fixture/model','fixture-key',1000,function(){},$skills);
+    $understood=$client->understandMeaning($safeQuestion,'fixture/model','fixture-key',1000,function(){},$skills,null,[
+        ['object_kind'=>'person','object_label'=>'人员'],
+        ['object_kind'=>'project','object_label'=>'项目'],
+    ],[
+        ['measurement_label'=>'工时数量','customer_terms'=>['工时数量','工时数'],'meaning'=>'统计期内确认完成的工作小时数量。','analytical_object_kinds'=>['person']],
+    ]);
     check($understood['understanding']['requirements'][0]['id']==='r1','understanding phase preserves a customer requirement without a metric code');
     $outbound=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
     $understandingUser=array_values(array_filter($outbound['messages'],static function($message){return ($message['role']??null)==='user';}));
@@ -141,6 +146,28 @@ namespace {
     check(strpos($outboundText,'skill_intent_understanding')!==false&&strpos($outboundText,'# 用户意图理解')!==false&&strpos($outboundText,'# 门店运营')===false,
         'understanding receives only the source-owned language Skill; business binding guidance stays in the next phase');
     check(strpos($outboundText,\app\services\ai\contract\AiIntentUnderstandingContract::VERSION)!==false,'understanding prompt uses its independent contract');
+    check(strpos($outboundText,'never list object_kind without values.object_kind')!==false,
+        'understanding prompt performs a generic declared-field completeness check before returning');
+    $outboundMessagesText=implode("\n",array_map(static function($message){return (string)($message['content']??'');},$outbound['messages']));
+    check(strpos($outboundMessagesText,'Published analytical object vocabulary follows')!==false
+        && strpos($outboundMessagesText,'"object_kind":"project","object_label":"项目"')!==false
+        && strpos($outboundMessagesText,'A time expression never changes that subject into store')!==false,
+        'understanding receives only the bounded source-registered object vocabulary needed to preserve an analytical subject');
+    check(strpos($outboundMessagesText,'Published business measurement vocabulary follows')!==false
+        && strpos($outboundMessagesText,'"customer_terms":["工时数量","工时数"]')!==false
+        && strpos($outboundMessagesText,'"analytical_object_kinds":["person"]')!==false
+        && strpos($outboundMessagesText,'"metric_code"')===false,
+        'understanding receives registered measurement language without executable metric codes');
+    rejects(function()use($client,$safeQuestion,$skills){
+        $client->understandMeaning($safeQuestion,'fixture/model','fixture-key',1000,function(){},$skills,null,[
+            ['object_kind'=>'project','object_label'=>''],
+        ]);
+    },'AI_MODEL_INPUT_INVALID');
+    rejects(function()use($client,$safeQuestion,$skills){
+        $client->understandMeaning($safeQuestion,'fixture/model','fixture-key',1000,function(){},$skills,null,[],[
+            ['measurement_label'=>'工时数量','customer_terms'=>[],'meaning'=>'统计期内确认完成的工作小时数量。','analytical_object_kinds'=>['person']],
+        ]);
+    },'AI_MODEL_INPUT_INVALID');
     $timeFollowQuestion=$safeQuestion;
     $timeFollowQuestion['question']='那本月呢？';
     $timeFollowQuestion['recent_questions']=['今天做得最好的技师是谁'];
@@ -155,6 +182,16 @@ namespace {
         'a verified continuation foregrounds the generic current-evidence rule before the provider request');
     check(strpos($timeFollowText,'quote the entire current message as its current evidence')!==false,
         'a time-only continuation is instructed to provide the full-message proof needed by the fast path');
+    $overviewFollowQuestion=$timeFollowQuestion;
+    $overviewFollowQuestion['prior_query']['metric_codes']=array_map(static function(int $index): string { return 'overview_metric_'.$index; },range(1,10));
+    $GLOBALS['sfResponse']=$response(json_encode($timeOnlyUnderstanding));
+    $client->understandMeaning($overviewFollowQuestion,'fixture/model','fixture-key',1000,function(){},$skills);
+    check(true,'a follow-up may carry the complete registered overview group through the shared overview capacity');
+    $oversizedOverviewFollow=$overviewFollowQuestion;
+    $oversizedOverviewFollow['prior_query']['metric_codes']=array_map(static function(int $index): string { return 'overview_metric_'.$index; },range(1,13));
+    rejects(function()use($client,$oversizedOverviewFollow,$skills){
+        $client->understandMeaning($oversizedOverviewFollow,'fixture/model','fixture-key',1000,function(){},$skills);
+    },'AI_MODEL_INPUT_INVALID');
     check(strpos(\app\services\ai\contract\AiIntentResultContract::modelInstruction(false),'recommended_initial_answer')!==false,
         'binding contract permits a model-owned professional first answer without a phrase-specific server rule');
     check(\app\services\ai\contract\AiIntentResultContract::repairableFormat('context_constraint_without_source:business_filters'),
@@ -261,6 +298,14 @@ namespace {
     $overviewCandidate=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['cash_performance','actual_performance'],
         'action_codes'=>[],'needs_metric_choice'=>false,'initial_observation'=>true,'ranking'=>['direction'=>'unspecified','limit'=>null],
         'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'authorized','requirement_bindings'=>[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance','actual_performance']]],'unresolved_fragments'=>[]];
+    $GLOBALS['sfResponse']=$response(json_encode($overviewCandidate));
+    $repairedOverview=$client->understand($broadQuestion,$broadCaps,$broadUnderstanding,'fixture/model','fixture-key',1000,function(){},$skills,'initial_observation_metric_count');
+    $overviewRepairWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
+    $overviewRepairMessages=implode("\n",array_map(static function($message){return (string)($message['content']??'');},$overviewRepairWire['messages']));
+    check($repairedOverview['intent']===$overviewCandidate
+        && strpos($overviewRepairMessages,'exactly two to four distinct compatible registered codes')!==false
+        && strpos($overviewRepairMessages,'Do not list every available metric')!==false,
+        'overview metric-count recovery asks the model for a bounded provisional sample before registry expansion');
     $GLOBALS['sfResponse']=$response(json_encode(['decision'=>'accept','rejected_requirement_ids'=>[]]));
     $overviewReview=$client->verifyBinding($broadQuestion,$broadCaps,$broadUnderstanding,$overviewCandidate,'fixture/model','fixture-key',1000,function(){});
     check($overviewReview['review']===['decision'=>'accept','rejected_requirement_ids'=>[]],'initial observation uses the independent coverage reviewer instead of a forced metric choice');

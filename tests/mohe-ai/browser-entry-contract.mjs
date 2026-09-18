@@ -37,6 +37,8 @@ const presentationStyles = root.querySelector('style').textContent;
 assert.match(presentationStyles, /--mohe-ai-brand:#1677cc/);
 assert.match(presentationStyles, /\.body\{min-height:0;overflow:auto/);
 assert.match(presentationStyles, /@media \(max-width:560px\)/);
+assert.match(presentationStyles, /\.answer-presentation\{/);
+assert.match(presentationStyles, /\.answer-facts\{/);
 const adminEntrySource = fs.readFileSync(new URL('../../前端代码/admin/src/components/MoheAiEntry.vue', import.meta.url), 'utf8');
 const cashierShellSource = fs.readFileSync(new URL('../../前端代码/cashier-v3/src/layouts/CashierShell.vue', import.meta.url), 'utf8');
 assert.match(adminEntrySource, /getBoundingClientRect\(\)/);

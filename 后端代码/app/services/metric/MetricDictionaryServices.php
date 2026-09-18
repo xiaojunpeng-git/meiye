@@ -87,6 +87,7 @@ class MetricDictionaryServices extends BaseServices
             [
                 'code' => 'sales_quantity',
                 'name' => '销售数量',
+                'display_unit' => '件',
                 'user_ready' => true,
                 'summary' => '正式结账成功的销售项目或商品件数。',
                 'include' => '有效销售明细中的成交数量。',
@@ -99,6 +100,7 @@ class MetricDictionaryServices extends BaseServices
             [
                 'code' => 'completed_service_item_count',
                 'name' => '完成服务项目数量',
+                'display_unit' => '项',
                 'user_ready' => true,
                 'summary' => '统计期内已经确认完成服务的项目数量。',
                 'include' => '有效完成服务事实中的项目数量。',
@@ -412,6 +414,7 @@ class MetricDictionaryServices extends BaseServices
                 'include' => '会员本人按同一会员、同一门店、同一天去重；朋友算和游客每条完成服务记录各计 1 人次。多人共同服务时平均分配。',
                 'exclude' => '朋友不算、未完成服务、已作废服务，以及已被调整回冲的原劳动业绩不计入。',
                 'timing' => '以完成服务事实的业务日期统计。',
+                'display_unit' => '人次',
                 'note' => '多人服务时按 0.1 人次稳定分配，例如三人分为 0.3、0.3、0.4。',
                 'aliases' => ['客数', 'service_num'],
                 'dev_source' => 'MetricDefinitionRegistry：V3 完成服务事实 + 有效劳动业绩分配事实',
@@ -424,6 +427,7 @@ class MetricDictionaryServices extends BaseServices
                 'include' => '会员本人在同一门店、同一统计周期内只计 1 人；朋友算和游客每条完成服务记录各计 1 人。多人共同服务时平均分配。',
                 'exclude' => '朋友不算、未完成服务、已作废服务，以及已被调整回冲的原劳动业绩不计入。',
                 'timing' => '以完成服务事实的业务日期筛选，按完整查询周期去重。',
+                'display_unit' => '人',
                 'note' => '它不是每日服务人次相加：同一会员跨日到店仍只算 1 人，再按该周期内实际服务人员分配。',
                 'aliases' => ['服务客户数', '服务客人数'],
                 'dev_source' => 'MetricDefinitionRegistry：V3 完成服务事实 + 有效劳动业绩分配事实',
@@ -495,7 +499,7 @@ class MetricDictionaryServices extends BaseServices
                 'aliases' => ['转介绍嘉宾'], 'dev_source' => 'customer lifecycle fact v1',
             ],
             [
-                'code' => 'customer_active', 'name' => '活客', 'user_ready' => true,
+                'code' => 'customer_active', 'name' => '活客', 'display_unit' => '人', 'user_ready' => true,
                 'summary' => '所选期间内发生到店护理/完成服务的去重顾客人头。',
                 'include' => '按月、半年、一年及门店/区域筛选，同一顾客在范围内计 1 人。', 'exclude' => '只有销售没有到店护理完成记录。',
                 'timing' => '以服务完成时间为准。', 'note' => '',

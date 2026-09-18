@@ -91,6 +91,7 @@ final class AiBusinessRegistry
             $dimensions=AiRegistryValue::strings($item['analysis_dimensions']??[],16);
             if (!in_array('store',$dimensions,true)) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             $dimensionContracts=$this->dimensionContracts($item['analysis_dimension_contracts']??[]);
+            $overview=$this->overviewContracts($item['overview']??[]);
             $coverage=\DateTimeImmutable::createFromFormat('!Y-m-d',$item['coverage_start']);
             if (!$coverage||$coverage->format('Y-m-d')!==$item['coverage_start']) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             // This release cannot inherit a new metric merely because a lower catalog gained it.
@@ -100,6 +101,7 @@ final class AiBusinessRegistry
                 || ($registered[$code]['business_filters']??null)!==($item['business_filters']??null)
                 || ($registered[$code]['analysis_dimensions']??null)!==$dimensions
                 || $this->dimensionContracts($registered[$code]['analysis_dimension_contracts']??[])!==$dimensionContracts
+                || $this->overviewContracts($registered[$code]['overview']??[])!==$overview
                 || $this->thresholdContract($registered[$code]['threshold_count']??null)!==$this->thresholdContract($item['threshold_count']??null)) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             $available=array_values(array_intersect($shapes,AiRegistryValue::strings($item['query_shapes']??[],8)));
             if (!$available) continue;
@@ -108,6 +110,7 @@ final class AiBusinessRegistry
                 'mapping_version'=>$item['mapping_version'],'source_metric_version'=>$item['source_metric_version'],
                 'query_shapes'=>$available,'coverage_start'=>$item['coverage_start'],'filter_grain'=>$person?'person':'store','business_filters'=>$person?['selection_ref']:[],
                 'analysis_dimensions'=>$dimensions,'analysis_dimension_contracts'=>$dimensionContracts,
+                'overview'=>$overview,
                 'threshold_count'=>$this->thresholdContract($item['threshold_count']??null)];
         }
         ksort($metrics,SORT_STRING);
@@ -136,7 +139,10 @@ final class AiBusinessRegistry
     {
         $this->assertSnapshot($snapshot);
         AiRegistryValue::exact($selectors,[],['scene_codes','metric_codes','workflow_codes']);
-        foreach ($selectors as $values) AiRegistryValue::strings($values,8);
+        foreach ($selectors as $key=>$values) {
+            $max=$key==='metric_codes'?\app\services\ai\execution\AiOverviewMetricResolver::MAX_METRICS:8;
+            AiRegistryValue::strings($values,$max);
+        }
         if ($level===1) {
             if (isset($selectors['metric_codes'])||isset($selectors['workflow_codes'])) AiRegistryValue::fail('AI_DISCOVERY_LEVEL_INVALID');
             $items=[];
@@ -220,6 +226,23 @@ final class AiBusinessRegistry
         sort($operators, SORT_STRING);
         if (!$operators || array_diff($operators, ['gte','gt','lte','lt','eq'])) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
         return ['subject_dimension' => 'member', 'aggregation' => 'period_total', 'operators' => $operators];
+    }
+
+    /** Explicit overview membership is source metadata, never inferred from a name or unit. */
+    private function overviewContracts($contracts): array
+    {
+        if (!is_array($contracts)||!AiRegistryValue::isList($contracts)||count($contracts)>8) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+        $out=[];
+        foreach ($contracts as $contract) {
+            AiRegistryValue::exact(is_array($contract)?$contract:[],['object_kind','section','order']);
+            if (!is_string($contract['object_kind']??null)||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$contract['object_kind'])
+                || !is_string($contract['section']??null)||trim($contract['section'])===''||mb_strlen($contract['section'],'UTF-8')>40
+                || !is_int($contract['order']??null)||$contract['order']<1||$contract['order']>9999) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+            $out[]=['object_kind'=>$contract['object_kind'],'section'=>$contract['section'],'order'=>$contract['order']];
+        }
+        usort($out,static function(array $left,array $right): int { return [$left['object_kind'],$left['section'],$left['order']] <=> [$right['object_kind'],$right['section'],$right['order']]; });
+        if (count(array_unique(array_map(static function(array $item): string { return $item['object_kind']; },$out)))!==count($out)) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
+        return $out;
     }
     private function validate(): void
     {

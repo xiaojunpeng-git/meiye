@@ -284,6 +284,23 @@ final class RegisteredMetricReadServices
         return $handler();
     }
 
+    /**
+     * A portfolio overview is still a registered fact read. It is not the
+     * sum of visible ranking rows, and callers cannot pass arbitrary filters.
+     */
+    public function dimensionSummary(string $metricCode, string $dimension, string $tenantId, array $stores, array $range): int
+    {
+        $this->assertScope($tenantId, $stores, $range);
+        $contract=MetricDefinitionRegistry::get($metricCode);
+        $dimensionContract=$contract['dimensions'][$dimension] ?? ($contract['source']['dimensions'][$dimension] ?? null);
+        if (!is_array($dimensionContract) || ($contract['reader_strategy'] ?? null)!=='fact_sum') {
+            $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        }
+        $query=$this->factQuery($contract['source'],$tenantId,$stores,$range);
+        $this->dimensionSourceFilters($query,$dimensionContract);
+        return $this->aggregate($query,$contract['source']['amount']);
+    }
+
     /** @return array{dimension:string,rows:array<int,array{entity_id:int,entity_name:string,metric_value:int}>} */
     public function defaultRanking(string $metricCode, string $tenantId, array $stores, array $range, int $limit = 20, string $order = 'desc'): array
     {
@@ -347,7 +364,7 @@ final class RegisteredMetricReadServices
         $query = $this->factQuery($contract['source'], $tenantId, $stores, $range)->where('p.employee_id', $employeeId);
         $metricExpression = (string)$contract['source']['amount'];
         return [
-            'rows' => (clone $query)->fieldRaw('p.id,p.fact_id,p.store_id,p.store_name_snapshot,p.organization_id,p.organization_path_snapshot,p.business_date,p.order_no_snapshot,p.member_name_snapshot,p.source_line_id,p.employee_id,p.employee_name_snapshot,p.fact_direction,' . $metricExpression . ' metric_value,p.labor_fee_amount_cents,p.project_count_half_units,p.rule_name_snapshot')
+            'rows' => (clone $query)->fieldRaw('p.id,p.fact_id,p.store_id,p.store_name_snapshot,p.organization_id,p.organization_path_snapshot,p.business_date,p.order_no_snapshot,p.member_name_snapshot,p.source_line_id,p.employee_id,p.employee_name_snapshot,p.fact_direction,' . $metricExpression . ' metric_value,p.labor_fee_amount_cents,p.project_count_half_units,p.project_count_decimal,p.rule_name_snapshot')
                 ->order('p.business_date', 'desc')->order('p.id', 'desc')->page($page, $pageSize)->select()->toArray(),
             'total' => (int)(clone $query)->count('p.id'),
         ];
@@ -459,7 +476,7 @@ final class RegisteredMetricReadServices
         if ($employeeIds !== []) $query->whereIn('p.employee_id', $employeeIds);
         if ($dayOfMonth > 0) $query->whereRaw('DAY(p.business_date)=?', [$dayOfMonth]);
         $metricExpression = (string)$contract['source']['amount'];
-        $rows = $query->fieldRaw('p.id,p.fact_id,p.store_id,p.store_name_snapshot,p.organization_id,p.organization_path_snapshot,p.business_date,p.order_id,p.order_no_snapshot,p.member_name_snapshot,p.source_line_id,p.employee_id,p.employee_name_snapshot,p.fact_direction,' . $metricExpression . ' metric_value,p.labor_fee_amount_cents,p.project_count_half_units,p.rule_name_snapshot')
+        $rows = $query->fieldRaw('p.id,p.fact_id,p.store_id,p.store_name_snapshot,p.organization_id,p.organization_path_snapshot,p.business_date,p.order_id,p.order_no_snapshot,p.member_name_snapshot,p.source_line_id,p.employee_id,p.employee_name_snapshot,p.fact_direction,' . $metricExpression . ' metric_value,p.labor_fee_amount_cents,p.project_count_half_units,p.project_count_decimal,p.rule_name_snapshot')
             ->order('p.business_date', 'asc')->order('p.id', 'asc')->limit(10001)->select()->toArray();
         if (count($rows) > 10000) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
         $totalMetric = 0;

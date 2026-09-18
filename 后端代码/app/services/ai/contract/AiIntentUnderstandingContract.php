@@ -17,6 +17,7 @@ final class AiIntentUnderstandingContract
             . 'The only top-level keys are goal, requirements and status. Every meaningful part of the customer request needs one or more requirements; do not collapse exclusions, comparison relationships, quantity or time into a vague summary. When status is needs_clarification and no concrete meaning can yet be preserved, requirements may be an empty array; do not use unbound for ambiguity. '
             . 'A requirement has exactly id, meaning, fields, values and evidence. fields may contain metric_codes, object_kind, object_relation, operation, periods, ranking, scope, result_reference or unbound; use only fields actually expressed by this requirement. A field is a completed semantic commitment, never a note or a sketch. values is optional only when the request supplies no safe structured value for that field. When the customer meaning clearly establishes an object kind or relation, result form, period, ranking, scope or result reference, include the matching complete typed value in values so the later binding cannot silently change it. A temporal expression that fixes when the answer concerns is always an independent period requirement, even when the customer asks broadly about overall conditions rather than naming a metric. Before emitting the object, check the complete customer message again: every expressed relative-day, calendar-month or explicit-range condition must have a periods field, a complete values.periods carrier and evidence anchored to that expression. Do not absorb a time condition into a goal or metric term. When present, values may contain only values matching fields and must be complete and valid for each value it carries. Do not omit a field merely because its execution-shaped value is not available in this phase; preserve the natural-language meaning and evidence, and let the later binding phase derive the executable form. id is r followed by a positive number and is valid only in this request. evidence is an array of {"message_id":"current","quote":"exact excerpt"}; message_id must name an entry in question.evidence_messages. Do not output character offsets. The excerpt must occur exactly once in that one de-identified message; include more adjacent text if needed to distinguish repeated words. '
             . 'The values object contains only keys named by fields. Every customer-stated business measurement belongs in fields as metric_codes and carries either values.metric_terms or values.metric_exclusions, even if it is everyday language rather than a registered indicator name; metric_codes is only the name of the later binding slot, never a request to output a code. These are nonempty arrays of exact customer terms present in an evidence excerpt. Never put a registered metric code in values. If the customer asks how many members/people meet a cumulative monetary threshold in a period, preserve aggregate_condition exactly as {"subject":"member","aggregation":"period_total","operator":"gte|gt|lte|lt|eq","amount_cents":positive-integer} and operation=threshold_count; amount_cents is the customer amount converted to cents, never a result. If the current turn changes only time, object, range or response form and names no measurement, do not add a metric_codes field merely because a verified prior query has one; retain that prior meaning through context only. A time, object or response-form requirement does not replace the separate measurement requirement. object_kind is one of store, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization, unknown. object_relation is analysis when that kind is what the customer wants compared, grouped or listed, and selection only when the customer identifies a particular object whose records should narrow the data. An analytical object is never itself a data-range restriction. operation is one of summary, trend, ranking, comparison, threshold_count, definition, unknown. Use ranking when the requested answer identifies leading, trailing or ordered comparable objects; the fact that a ranking compares peer values does not make it operation=comparison. Use comparison only when the customer asks to contrast two stated business sides such as periods, objects or measurements. scope is one of current_store, authorized, unspecified. ranking is exactly {"direction":"top|bottom|top_and_bottom|unspecified","limit":null}. Set limit to an integer from 1 to 999 when the customer asks for a specific count or semantically asks for one winner, leader, best or worst object; leave it null only for an open-ended plural ranking with no count. result_reference is exactly {"group":"top|bottom","ordinal":positive-integer} only when the customer explicitly refers to a displayed rank result; it identifies a position in the previous answer, never a name, ID or value. periods is an array of at most two objects, each exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":1,"end_offset_days":0}, or {"kind":"month_offset","offset_months":0}; numeric examples illustrate JSON types, not defaults. A relative-day count is a positive integer, and a month offset is an integer; preserve the customer meaning without imposing execution coverage limits here. A comparison that expresses both sides in the customer wording must preserve those two periods in stated order; do not leave either side for a date form. Omit a values key and its field when that meaning was not supplied, except a genuinely inherited meaning must remain explicit. '
+            . 'For object_relation, analysis also covers inspecting, summarizing or evaluating a stated object, not only comparing, grouping or listing it. A broad evaluation or overview of a stated object must carry that object_kind with object_relation=analysis; a time condition never replaces or erases it. '
             . 'Do not output metric codes, action codes, object IDs, names hidden behind local references, calculated dates, formulas, SQL, query steps, permissions or result values. An explicit customer date range may be preserved as a period; never calculate a relative period into calendar dates. '
             . 'understood means the business request is clear even when no current capability can perform it. needs_clarification means the business request itself has more than one plausible reading. A broad request to understand overall operating conditions without naming a specific business fact is still understood: retain it as a metric_codes requirement with its exact customer term, so the later binding may propose a clearly labelled initial observation rather than requiring the customer to learn a metric name. If the customer did state a measurement that can reasonably mean several different business facts and neither the current wording nor verified context chooses among them, preserve that measurement requirement and mark needs_clarification; never turn a category label into one of its examples. unbound is allowed only with understood: ambiguity is not an unavailable capability. This object grants nothing and is later bound by the server.';
     }
@@ -150,6 +151,42 @@ final class AiIntentUnderstandingContract
     }
 
     /**
+     * A deterministic server date parser may correct only the typed carrier
+     * of an already accepted period-only follow-up. It cannot create a period
+     * requirement, remove another requirement or change any business meaning.
+     */
+    public static function withResolvedPeriodOnly(array $understanding,array $periods): array
+    {
+        if (!self::periods($periods)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+        if (($understanding['status']??null)!=='understood'
+            || count((array)($understanding['requirements']??[]))!==1
+            || ($understanding['requirements'][0]['fields']??null)!==['periods']) return $understanding;
+        $understanding['requirements'][0]['values']['periods']=$periods;
+        return $understanding;
+    }
+
+    /**
+     * Corrects the value of one period that the model already understood and
+     * grounded. It cannot create a date condition, remove another requirement
+     * or alter a metric, object, ranking, scope or result reference.
+     */
+    public static function withResolvedSinglePeriod(array $understanding,array $periods): array
+    {
+        if (!self::periods($periods) || count($periods)!==1 || ($understanding['status']??null)!=='understood') {
+            throw new AiContractException('AI_MODEL_INPUT_INVALID');
+        }
+        $matches=[];
+        foreach ((array)($understanding['requirements']??[]) as $index=>$requirement) {
+            if (in_array('periods',(array)($requirement['fields']??[]),true)) $matches[]=$index;
+        }
+        if (count($matches)!==1) return $understanding;
+        $index=$matches[0];
+        if (count((array)($understanding['requirements'][$index]['values']['periods']??[]))!==1) return $understanding;
+        $understanding['requirements'][$index]['values']['periods']=$periods;
+        return $understanding;
+    }
+
+    /**
      * A completed provider response may be corrected once only when it failed
      * this structural contract. Transport, authority and unknown outcomes are
      * deliberately never retried as if they were a missing customer detail.
@@ -275,7 +312,7 @@ final class AiIntentUnderstandingContract
         // later binding model from silently changing understood meaning.
         foreach ($fields as $field) {
             if (in_array($field,['metric_codes','unbound'],true)) continue;
-            if (!array_key_exists($field,$value)) self::fail('values:missing_typed');
+            if (!array_key_exists($field,$value)) self::fail('values:missing_typed',$field);
         }
         if (isset($value['object_kind']) && !in_array($value['object_kind'],['store','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization','unknown'],true)) self::fail('values:object_kind');
         if (isset($value['object_relation']) && !in_array($value['object_relation'],['analysis','selection'],true)) self::fail('values:object_relation');
@@ -353,10 +390,12 @@ final class AiIntentUnderstandingContract
         return $date!==false&&$date->format('Y-m-d')===$value;
     }
 
-    private static function fail(string $predicate): void
+    private static function fail(string $predicate,?string $field=null): void
     {
-        throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID', [
+        $diagnostic=[
             'stage' => 'intent_understanding_contract', 'predicate' => $predicate,
-        ]);
+        ];
+        if ($field!==null) $diagnostic['field']=$field;
+        throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',$diagnostic);
     }
 }

@@ -98,6 +98,15 @@ final class MetricReadViewServices
                             'participant_relation'=>$dimensionRanking['participant_relation'],'rows' => $groups];
                         continue;
                     }
+                    $dimensionSummary=$this->dimensionSummary($normalized,$metric);
+                    if ($dimensionSummary!==null) {
+                        $value=$reader->dimensionSummary($metric,$dimensionSummary['dimension'],$binding['tenant_id'],$binding['store_ids'],$range);
+                        $result=['period'=>$period,'metric_code'=>$metric,'storage_unit'=>$metricContract['storage_unit'],
+                            'object_kind'=>$dimensionSummary['object_kind'],'object_label'=>$dimensionSummary['object_label']];
+                        $result[$metricContract['storage_unit']==='fen'?'amount_cents':'count']=$value;
+                        $results[]=$result;
+                        continue;
+                    }
                     if (in_array($normalized['query_shape'], ['trend', 'ranking'], true)) {
                         $points = $reader->dailyStoreTotals($binding['tenant_id'], $binding['store_ids'], $range, $metric);
                         $projector = new MetricGroupedProjection();
@@ -191,17 +200,32 @@ final class MetricReadViewServices
     /** @return array{dimension:string,object_kind:string,object_label:string,participant_relation:bool}|null */
     private function dimensionRanking(array $query): ?array
     {
-        if ($query['query_shape'] === 'threshold_count') return null;
+        if ($query['query_shape'] !== 'ranking') return null;
         $objectKind=$query['business_filters']['object_kind'] ?? null;
         if (!is_string($objectKind) || $objectKind==='person') return null;
         $metric = MetricDefinitionRegistry::get($query['metric_codes'][0]);
         $matches=array_values(array_filter((array)($metric['analysis_dimension_contracts']??[]),static function($dimension)use($objectKind):bool {
             return is_array($dimension) && ($dimension['object_kind']??null)===$objectKind && ($dimension['filter_keys']??null)===[];
         }));
-        if (count($matches)!==1 || $query['query_shape']!=='ranking') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if (count($matches)!==1) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $dimension=$matches[0];
         return ['dimension'=>$dimension['dimension'],'object_kind'=>$dimension['object_kind'],'object_label'=>$dimension['object_label'],
             'participant_relation'=>isset($dimension['analysis_relation_source'])];
+    }
+
+    /** @return array{dimension:string,object_kind:string,object_label:string}|null */
+    private function dimensionSummary(array $query,string $metricCode): ?array
+    {
+        if (($query['query_shape'] ?? null)!=='summary') return null;
+        $objectKind=$query['business_filters']['object_kind']??null;
+        if (!is_string($objectKind) || $objectKind==='person') return null;
+        $metric=MetricDefinitionRegistry::get($metricCode);
+        $matches=array_values(array_filter((array)($metric['analysis_dimension_contracts']??[]),static function($dimension)use($objectKind):bool {
+            return is_array($dimension) && ($dimension['object_kind']??null)===$objectKind && ($dimension['filter_keys']??null)===[];
+        }));
+        if (count($matches)!==1) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $dimension=$matches[0];
+        return ['dimension'=>$dimension['dimension'],'object_kind'=>$dimension['object_kind'],'object_label'=>$dimension['object_label']];
     }
     /** @return array{subject:string,aggregation:string,operator:string,amount_cents:int}|null */
     private function thresholdCount(array $query): ?array
@@ -284,7 +308,7 @@ final class MetricReadViewServices
                 $this->fail('METRIC_QUERY_SCHEMA_INVALID');
             }
         } elseif ($query['aggregate_condition'] !== null) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
-        if (!is_array($query['metric_codes']) || $query['metric_codes'] === [] || count($query['metric_codes']) > 4
+        if (!is_array($query['metric_codes']) || $query['metric_codes'] === [] || count($query['metric_codes']) > \app\services\ai\execution\AiOverviewMetricResolver::MAX_METRICS
             || array_keys($query['metric_codes']) !== range(0, count($query['metric_codes']) - 1)) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         $allowed=[];
         foreach (self::metricCapabilities() as $code=>$capability) {
@@ -296,11 +320,12 @@ final class MetricReadViewServices
         }
         foreach ($query['metric_codes'] as $metric) if (!in_array($metric, $allowed, true)) $this->fail('METRIC_NOT_REGISTERED');
         if ($person && (count($query['metric_codes'])!==1 || !in_array($query['query_shape'],['summary','ranking'],true))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-        if (!$person && $query['business_filters']!==[] && (count($query['metric_codes'])!==1 || !in_array($query['query_shape'],['ranking','threshold_count'],true))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if (!$person && $query['business_filters']!==[] && (!in_array($query['query_shape'],['summary','ranking','threshold_count'],true)
+            || ($query['query_shape']!=='summary' && count($query['metric_codes'])!==1))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         // Preserve the existing two-metric forms.  More than two facts are
         // only batched for an unfiltered summary so a first operating answer
         // cannot combine incompatible object grains or ranking semantics.
-        if (count($query['metric_codes'])>2 && ($query['query_shape']!=='summary' || $query['business_filters']!==[])) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if (count($query['metric_codes'])>2 && $query['query_shape']!=='summary') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if (count(array_unique($query['metric_codes'])) !== count($query['metric_codes'])) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         $this->range(['start' => $query['start_date'], 'end' => $query['end_date']]);
         if ($query['query_shape'] === 'comparison') {

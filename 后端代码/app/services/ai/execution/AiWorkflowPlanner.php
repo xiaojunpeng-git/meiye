@@ -27,7 +27,8 @@ final class AiWorkflowPlanner
         $definition=in_array('definition',$signals,true);
         // Candidate meanings come from the lower-layer provider contracts which
         // this user may use now, not from a report-page or phrase-specific list.
-        $available=$definition?($capabilities['definition_metric_codes']??[]):array_keys(AiCapabilityGuidanceCatalog::discover($capabilities,'store'));
+        $objectKind=$selection['object_kind']??'store';
+        $available=$definition?($capabilities['definition_metric_codes']??[]):array_keys(AiCapabilityGuidanceCatalog::discover($capabilities,$objectKind));
         foreach ($metrics as $metric) if (!in_array($metric, $available, true)) throw new AiContractException('AI_METRIC_NOT_READY');
         $shapes=array_values(array_intersect(['summary','trend','ranking','comparison','threshold_count'],$signals));
         if (in_array('top_5', $signals, true) || in_array('bottom_5', $signals, true)) $shapes[]='ranking';
@@ -37,7 +38,7 @@ final class AiWorkflowPlanner
         $shape=$definition?'definition':($shapes[0]??'summary');
         if ($definition && ($shapes || $projection['date_terms'] || $format!=='screen')) throw new AiContractException('AI_UNSUPPORTED_CONDITION');
         if (!$definition && !in_array($shape, $capabilities['query_shapes'], true)) throw new AiContractException('AI_QUERY_SHAPE_NOT_READY');
-        $shapeAvailable=$definition?$available:array_keys(AiCapabilityGuidanceCatalog::discover($capabilities,'store',$shape));
+        $shapeAvailable=$definition?$available:array_keys(AiCapabilityGuidanceCatalog::discover($capabilities,$objectKind,$shape));
         foreach ($metrics as $metric) if (!$definition && !in_array($metric,$shapeAvailable,true)) throw new AiContractException('AI_QUERY_SHAPE_NOT_READY');
         if (!$definition && $selection['query_shape'] !== $shape) throw new AiContractException('AI_MODEL_SELECTION_MISMATCH');
         $selected = $selection['metric_codes']; sort($selected); $expected = $metrics; sort($expected);
@@ -111,7 +112,7 @@ final class AiWorkflowPlanner
             return $this->step(['kind' => 'clarification', 'fields' => $fields, 'resolved_metrics' => $metrics, 'resolved_range' => $range, 'resolved_compare_range' => $compare, 'query_shape' => $shape,'ranking'=>$ranking,'output_format'=>$format,'semantic_constraints'=>$projection['semantic_intent']??[],'requested_period_terms'=>$projection['date_terms']??[]]);
         }
         return $this->plan($metrics, $range, $shape,$compare,$ranking,$format,[],
-            $selection['aggregate_condition']??null,$selection['object_kind']??'store');
+            $selection['aggregate_condition']??null,$objectKind);
     }
 
     public function choose(array $envelope, array $choices): array
@@ -191,7 +192,7 @@ final class AiWorkflowPlanner
         $plan = ['schema_version' => 'mohe-executable-workflow-v1', 'workflow_code' => 'wf_performance_'.$shape,
             'query' => ['query_shape' => $shape, 'metric_codes' => $metrics, 'start_date' => $range['start'], 'end_date' => $range['end'],
                 'compare_range' => $compare, 'store_ids' => $storeIds,
-                'business_filters' => $shape==='threshold_count'?['object_kind'=>$objectKind]:[],
+                'business_filters' => ($shape==='threshold_count' || ($shape==='summary' && $objectKind!=='store')) ? ['object_kind'=>$objectKind] : [],
                 'ranking'=>$ranking,'aggregate_condition'=>$aggregateCondition],
             // Nodes and budgets are compiled from the selected registration; this
             // preliminary plan deliberately carries no editable graph or hash.

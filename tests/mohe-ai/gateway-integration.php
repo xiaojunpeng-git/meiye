@@ -73,14 +73,16 @@ try {
  verifyGateway($run['status']==='RECEIVED','create reserved');
  $result=$gateway->handle('execute',$context,$binding($run)+$input,$run['run_id']);
  verifyGateway($result['status']==='COMPLETED','create execute complete reason='.($result['reason']??''));
- verifyGateway($result['answer']['cards'][0]['display_value']==='123','deterministic cents display');
- $tooltip=$result['answer']['cards'][0]['tooltip'];
- verifyGateway(is_array($tooltip) && isset($tooltip['summary'],$tooltip['include'],$tooltip['exclude'],$tooltip['timing'],$tooltip['note']),'complete natural language metric tooltip');
+ verifyGateway(($result['answer']['cards']??null)===[] && strpos((string)$result['answer']['summary'],'消耗业绩为123元')===0,
+     'deterministic cents display appears once in the verified conclusion');
+ $tooltip=(new app\services\metric\MetricDictionaryServices())->getTooltip('consume_amount');
+ verifyGateway(is_array($tooltip) && isset($tooltip['summary'],$tooltip['include'],$tooltip['exclude'],$tooltip['timing'],$tooltip['note']),
+     'complete natural language metric tooltip remains available from the dictionary');
  verifyGateway($models===3 && $queries===1,'understanding, binding, independent review and one query');
  $repeat=$gateway->handle('execute',$context,$binding($run)+$input,$run['run_id']);
  verifyGateway($repeat['status']==='COMPLETED' && $models===3 && $queries===1,'idempotent execute no duplicates');
  $delivered=$gateway->handle('status',$context,$binding($result),$result['run_id']);
- verifyGateway($delivered['status']==='COMPLETED' && $delivered['answer']['cards'][0]['display_value']==='123',
+ verifyGateway($delivered['status']==='COMPLETED' && strpos((string)$delivered['answer']['summary'],'消耗业绩为123元')===0,
      'completed answer delivery validates the immutable signed view without starting another query');
  $deliveryScope=$auth['store_ids'];$auth['store_ids']=[2];
  rejectGateway(function()use($gateway,$context,$binding,$result){$gateway->handle('status',$context,$binding($result),$result['run_id']);},'AI_AUTHORIZATION_CHANGED');
@@ -151,11 +153,14 @@ try {
  $compareWait=$gateway->handle('execute',$context,$binding($compare)+$compareInput,$compare['run_id']);
  verifyGateway($compareWait['status']==='WAITING_CLARIFICATION' && count($compareWait['clarification']['fields'])===2,'comparison asks exact other range once');
  $compareDone=$clarify($compare,$compareWait,['compare_start'=>'2026-09-01','compare_end'=>'2026-09-02'],'comparison-answer');
- verifyGateway($compareDone['status']==='COMPLETED' && count($compareDone['answer']['cards'])===2,'comparison two periods');
+ verifyGateway($compareDone['status']==='COMPLETED' && ($compareDone['answer']['cards']??null)===[]
+     && strpos((string)$compareDone['answer']['summary'],'对比期间为')!==false,'comparison two periods');
  foreach (['Q001'=>'今天收了多少钱？','Q002'=>'今天现金业绩多少？'] as $case=>$question) {
    [$cashRun,$cashInput]=$make($case,$question);
    $cashResult=$gateway->handle('execute',$context,$binding($cashRun)+$cashInput,$cashRun['run_id']);
-  verifyGateway($cashResult['status']==='COMPLETED' && $cashResult['answer']['cards'][0]['metric_name']==='现金业绩' && $cashResult['answer']['cards'][0]['display_value']==='323',$case.' gross includes every registered cash source and does not deduct refunds');
+  verifyGateway($cashResult['status']==='COMPLETED' && ($cashResult['answer']['cards']??null)===[]
+      && strpos((string)$cashResult['answer']['summary'],'现金业绩为323元')===0,
+      $case.' gross includes every registered cash source and does not deduct refunds');
  }
  [$permission,$permissionInput]=$make('request5','今天消耗业绩多少？');$auth['permission_version']='v2';
  $permissionResult=$gateway->handle('execute',$context,$binding($permission)+$permissionInput,$permission['run_id']);

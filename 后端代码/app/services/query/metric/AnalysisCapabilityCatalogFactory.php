@@ -21,7 +21,28 @@ final class AnalysisCapabilityCatalogFactory
             // contract; this factory has no object-name allowlist.
             foreach ((array)($capability['analysis_dimension_contracts']??[]) as $dimension) {
                 if (!is_array($dimension)) continue;
-                $operations=array_values(array_intersect((array)$capability['query_shapes'],['ranking']));
+                $dimensionOperations=['ranking'];
+                // An object summary is executable only when the same metric
+                // explicitly opts into that object's overview profile.  This
+                // keeps open project/product summaries registry-driven while
+                // preventing every rankable dimension from silently becoming
+                // a summary capability.
+                foreach ((array)($capability['overview']??[]) as $overview) {
+                    if (is_array($overview) && ($overview['object_kind']??null)===($dimension['object_kind']??null)) {
+                        $dimensionOperations[]='summary';
+                        break;
+                    }
+                }
+                // Aggregate member-threshold queries are also an explicit
+                // object-dimension capability.  Admit them only when the
+                // metric's registered threshold contract names this exact
+                // dimension; ranking metadata alone can never create one.
+                $threshold=$capability['threshold_count']??null;
+                if (is_array($threshold)
+                    && ($threshold['subject_dimension']??null)===($dimension['object_kind']??null)) {
+                    $dimensionOperations[]='threshold_count';
+                }
+                $operations=array_values(array_intersect((array)$capability['query_shapes'],$dimensionOperations));
                 if (!$operations) continue;
                 $kind=$dimension['object_kind']??null;$role=$dimension['relation_role']??null;
                 $filterKeys=$dimension['filter_keys']??null;

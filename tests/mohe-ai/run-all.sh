@@ -10,7 +10,7 @@ php_bin="${MOHE_TEST_PHP:-php}"
 "$php_bin" -v
 for suite in config-contract metric-contract metric-registry-contract round3-reaudit-regressions runtime-contract export-source-contract \
     query-read-view cash-report-projection state-store-contract state-attempt-contract state-concurrency state-export-contract state-admission-contract \
-    gateway-components client-runtime-compat gateway-integration gateway-review-regressions monitor-contract \
+    gateway-components client-runtime-compat gateway-integration gateway-review-regressions overview-metric-resolver monitor-contract \
     http-routing-contract http-actions-contract http-guard-contract principal-resolvers \
     export-worker-contract export-runtime-contract result-reference semantic-binding-guard date-range-guidance context-metric-rebinding r7-context-removal-audit; do
     "$php_bin" -d auto_prepend_file="$test_dir/fixture-autoload.php" "$test_dir/$suite.php"

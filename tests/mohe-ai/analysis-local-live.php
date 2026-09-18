@@ -166,8 +166,8 @@ try {
     if ($input['output_format']==='screen_and_xlsx' && ($run['answer']['export_status']??null)!=='ready') throw new RuntimeException('LIVE_EXPORT_NOT_READY');
     if ($expectedRows!==null) {
         if(getenv('MOHE_ANALYSIS_TEST_NAMED')==='1') {
-            $cards=$run['answer']['cards']??[];
-            if(count($cards)!==1 || $cards[0]['display_value']!==app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$expectedRows[0]['amount_cents'])) throw new RuntimeException('LIVE_NAMED_PARITY_MISMATCH');
+            $value=app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$expectedRows[0]['amount_cents']);
+            if(($run['answer']['cards']??null)!==[] || strpos((string)($run['answer']['summary']??''),$value.'元')===false) throw new RuntimeException('LIVE_NAMED_PARITY_MISMATCH');
             echo "LIVE_NAMED_PERSON_INDEPENDENT_AMOUNT_MATCH\n";
         } else {
         $rendered=$run['answer']['table']['rows']??[];
@@ -176,7 +176,7 @@ try {
         foreach($expectedRows as $i=>$expected) {
             $name=$selection['names'][(int)$expected['employee_id']]??null;
             $value=app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$expected['amount_cents']);
-            if ($rendered[$i]['label']!==$name || $rendered[$i]['value']!==$value || $rendered[$i]['rank']!=='前'.($i+1)) throw new RuntimeException('LIVE_PARITY_VALUE_MISMATCH');
+            if ($rendered[$i]['label']!==$name || $rendered[$i]['value']!==$value || $rendered[$i]['rank']!=='第'.($i+1).'名') throw new RuntimeException('LIVE_PARITY_VALUE_MISMATCH');
         }
         echo "LIVE_INDEPENDENT_SUM_NAME_RANK_AND_ROUNDED_AMOUNT_MATCH\n";
         }
@@ -217,7 +217,7 @@ try {
         $rows=$run['answer']['table']['rows']??[];
         if(count($rows)!==count($monthly)||strpos($run['answer']['summary'],$start.' 至 '.$end)===false||strpos($run['answer']['summary'],'评价指标：劳动业绩')===false)
             throw new RuntimeException('LIVE_FOLLOWUP_CONDITIONS_MISMATCH');
-        foreach($monthly as $i=>$expected)if($rows[$i]['label']!==$selection['names'][(int)$expected['employee_id']]||$rows[$i]['value']!==app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$expected['amount_cents'])||$rows[$i]['rank']!=='前1')
+        foreach($monthly as $i=>$expected)if($rows[$i]['label']!==$selection['names'][(int)$expected['employee_id']]||$rows[$i]['value']!==app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$expected['amount_cents'])||$rows[$i]['rank']!=='第1名')
             throw new RuntimeException('LIVE_FOLLOWUP_PARITY_MISMATCH');
         if($input['output_format']==='screen_and_xlsx') {
             $download=$call('export',$binding($run),$run['run_id']);

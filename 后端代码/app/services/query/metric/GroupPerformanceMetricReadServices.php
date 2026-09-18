@@ -20,6 +20,15 @@ final class GroupPerformanceMetricReadServices
         return $this->registered->summary($metricCode, $tenantId, $stores, $range);
     }
 
+    /**
+     * Returns the total for one registered analytical object class, such as
+     * all project sale lines. The dimension owns any source-type split.
+     */
+    public function dimensionSummary(string $metricCode, string $dimension, string $tenantId, array $stores, array $range): int
+    {
+        return $this->registered->dimensionSummary($metricCode, $dimension, $tenantId, $stores, $range);
+    }
+
     /** @param array{subject:string,aggregation:string,operator:string,amount_cents:int} $condition */
     public function thresholdCount(string $tenantId, array $stores, array $range, string $metricCode, array $condition): int
     {

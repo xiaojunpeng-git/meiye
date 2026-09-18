@@ -14,14 +14,35 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v8';
+    public const VERSION = 'unified-metric-registry-v9';
     public const COVERAGE_START = '2026-08-10';
+
+    /**
+     * Visible subject for a registry-backed overview. Non-store subjects are
+     * taken from their declared analysis dimension, so a newly registered
+     * object needs no renderer branch. Store remains the source-owned default
+     * business subject because it is the base grain rather than a dimension.
+     */
+    public static function overviewObjectLabel(string $objectKind): ?string
+    {
+        if ($objectKind==='store') return '经营';
+        $labels=[];
+        foreach (self::all() as $definition) {
+            foreach (self::analysisDimensionContracts($definition) as $dimension) {
+                if (!is_array($dimension) || ($dimension['object_kind']??null)!==$objectKind
+                    || !is_string($dimension['object_label']??null) || $dimension['object_label']==='') continue;
+                $labels[$dimension['object_label']]=true;
+            }
+        }
+        return count($labels)===1 ? array_key_first($labels) : null;
+    }
 
     /** @return array<string,array<string,mixed>> */
     public static function all(): array
     {
         return [
             'cash_performance' => self::amount('cash_positive', 'cash-collected-recharge-inclusive-v3', ['summary', 'comparison', 'trend', 'ranking']) + [
+                'overview' => [['object_kind' => 'store', 'section' => '收款结果', 'order' => 10]],
                 'dimensions' => [
                     'operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot'],
                     // 会员付款能力排行复用这一已登记收款指标；维度仅决定
@@ -49,11 +70,13 @@ final class MetricDefinitionRegistry
                 'category_reader' => ['strategy' => 'cash_sale_allocation', 'mode' => 'positive'],
             ],
             'refund_performance' => self::amount('cash_refund', 'actual-cash-refund-v1', ['summary', 'comparison', 'trend', 'ranking']) + [
+                'overview' => [['object_kind' => 'store', 'section' => '收款结果', 'order' => 20]],
                 'dimensions' => ['operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot']],
                 'default_ranking_dimension' => 'operator',
                 'category_reader' => ['strategy' => 'cash_sale_allocation', 'mode' => 'refund'],
             ],
             'actual_performance' => self::amount('derived_subtract', 'cash-minus-actual-cash-refund-v1', ['summary', 'comparison', 'trend', 'ranking']) + [
+                'overview' => [['object_kind' => 'store', 'section' => '收款结果', 'order' => 30]],
                 'derivation' => ['operator' => 'subtract', 'left_metric' => 'cash_performance', 'right_metric' => 'refund_performance'],
                 'dimensions' => ['operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot']],
                 'default_ranking_dimension' => 'operator',
@@ -65,7 +88,10 @@ final class MetricDefinitionRegistry
                 'normal_scope' => 'facts', 'requires_completed_service' => true,
                 'dimensions' => ['operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot']],
                 'category_reader' => ['strategy' => 'completed_service_performance'],
-            ]) + ['default_ranking_dimension' => 'operator'],
+            ]) + [
+                'default_ranking_dimension' => 'operator',
+                'overview' => [['object_kind' => 'store', 'section' => '服务消耗', 'order' => 10]],
+            ],
             'staff_sales_yeji' => self::amount('personnel_fact_sum', 'sales-performance-allocated-person-v1', ['summary', 'ranking'], [
                 'table' => 'cashier_v3_performance_fact', 'amount' => 'amount_cents',
                 'filters' => ['status' => 'effective', 'performance_type' => 'sales_performance_allocated'],
@@ -152,6 +178,11 @@ final class MetricDefinitionRegistry
                 'dimensions' => self::saleAmountDimensions(),
             ]) + [
                 'default_ranking_dimension' => 'operator',
+                'overview' => [
+                    ['object_kind' => 'store', 'section' => '销售结果', 'order' => 10],
+                    ['object_kind' => 'project', 'section' => '项目销售', 'order' => 10],
+                    ['object_kind' => 'product', 'section' => '产品销售', 'order' => 10],
+                ],
                 // Direct sales use their frozen sales dimension; card sales use
                 // the immutable component allocation.  The reader owns the
                 // choice so category reports never reopen sale facts to sum it.
@@ -175,7 +206,10 @@ final class MetricDefinitionRegistry
                     'aggregation' => 'period_total',
                     'operators' => ['gte', 'gt', 'lte', 'lt', 'eq'],
                 ],
-            ]) + ['default_ranking_dimension' => 'member'],
+            ]) + [
+                'default_ranking_dimension' => 'member',
+                'overview' => [['object_kind' => 'store', 'section' => '销售结果', 'order' => 20]],
+            ],
             'sales_quantity' => self::count('fact_sum', 'v3-sale-completed-line-quantity-v1', ['summary', 'comparison', 'trend', 'ranking'], [
                 'table' => 'cashier_v3_sale_fact', 'amount' => 'quantity',
                 // A refund adjusts payment amount only. Sold quantity remains
@@ -183,17 +217,30 @@ final class MetricDefinitionRegistry
                 // registered return-quantity fact is introduced.
                 'filters' => ['status' => 'effective'], 'normal_scope' => 'facts',
                 'dimensions' => self::saleItemDimensions(),
-            ]) + ['default_ranking_dimension' => 'operator'],
+            ]) + [
+                'default_ranking_dimension' => 'operator',
+                'overview' => [
+                    ['object_kind' => 'store', 'section' => '经营动作', 'order' => 10],
+                    ['object_kind' => 'project', 'section' => '项目销售', 'order' => 20],
+                    ['object_kind' => 'product', 'section' => '产品销售', 'order' => 20],
+                ],
+            ],
             'balance_deduction_amount' => self::amount('fact_sum', 'v3-balance-order-payment-v1', ['summary', 'comparison', 'trend', 'ranking'], [
                 'table' => 'cashier_v3_balance_fact', 'amount' => '-(principal_delta_cents + bonus_delta_cents)',
                 'filters' => ['status' => 'effective', 'balance_change_type' => 'order_payment'], 'normal_scope' => 'facts',
                 'dimensions' => ['operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot']],
-            ]) + ['default_ranking_dimension' => 'operator'],
+            ]) + [
+                'default_ranking_dimension' => 'operator',
+                'overview' => [['object_kind' => 'store', 'section' => '资金变动', 'order' => 20]],
+            ],
             'recharge_amount' => self::amount('fact_sum', 'v3-recharge-principal-v1', ['summary', 'comparison', 'trend', 'ranking'], [
                 'table' => 'cashier_v3_balance_fact', 'amount' => 'principal_delta_cents',
                 'filters' => ['status' => 'effective', 'balance_change_type' => 'recharge_credit'], 'normal_scope' => 'facts',
                 'dimensions' => ['operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot']],
-            ]) + ['default_ranking_dimension' => 'operator'],
+            ]) + [
+                'default_ranking_dimension' => 'operator',
+                'overview' => [['object_kind' => 'store', 'section' => '资金变动', 'order' => 10]],
+            ],
             'completed_service_item_count' => self::count('fact_sum', 'v3-completed-service-quantity-v1', ['summary', 'comparison', 'trend', 'ranking'], [
                 'table' => 'cashier_v3_entitlement_service_fact', 'amount' => 'quantity',
                 'filters' => ['service_status' => 'completed'], 'normal_scope' => 'services',
@@ -208,7 +255,13 @@ final class MetricDefinitionRegistry
                     'operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot'],
                 ],
                 'category_reader' => ['strategy' => 'completed_service_quantity'],
-            ]) + ['default_ranking_dimension' => 'operator'],
+            ]) + [
+                'default_ranking_dimension' => 'operator',
+                'overview' => [
+                    ['object_kind' => 'store', 'section' => '经营动作', 'order' => 20],
+                    ['object_kind' => 'project', 'section' => '服务完成', 'order' => 10],
+                ],
+            ],
             'customer_active' => self::count('distinct_member', 'v3-completed-service-active-member-v1', ['summary', 'comparison', 'trend'], [
                 'table' => 'cashier_v3_entitlement_service_fact', 'distinct' => 'member_id',
                 'filters' => ['service_status' => 'completed'], 'where_gt' => ['member_id' => 0], 'normal_scope' => 'services',
@@ -265,7 +318,7 @@ final class MetricDefinitionRegistry
             // deterministic rendering and the guarded export projection.  Counts
             // are therefore a first-class registered result, not a failed attempt
             // to masquerade as cents.
-            $aiReady = in_array($item['storage_unit'], ['fen', 'count', 'project_count_micro'], true);
+            $aiReady = in_array($item['storage_unit'], ['fen', 'count', 'project_count_micro', 'customer_tenth'], true);
             $out[$code] = [
                 'metric_code' => $code, 'name' => (string)$definition['name'], 'ai_query_ready' => $aiReady,
                 'metric_version' => $item['metric_version'], 'mapping_version' => self::VERSION,
@@ -278,6 +331,7 @@ final class MetricDefinitionRegistry
                 'analysis_dimensions' => self::analysisDimensions($item),
                 'analysis_dimension_contracts' => self::analysisDimensionContracts($item),
                 'analysis_default_selection_ref' => $item['analysis_default_selection_ref'] ?? null,
+                'overview' => self::overviewContracts($item),
                 // A threshold contract is deliberately narrow: it describes
                 // the only permitted aggregate predicate for this metric,
                 // never arbitrary field filtering.
@@ -317,6 +371,32 @@ final class MetricDefinitionRegistry
             'query_shapes' => $shapes, 'source' => $source, 'filter_grain' => $grain,
             'business_filters' => $filters, 'storage_unit' => $unit,
         ];
+    }
+
+    /**
+     * Overview membership is a source-owned business declaration. It never
+     * grants a dimension, query shape, or permission that the reader contract
+     * has not already registered.
+     *
+     * @return array<int,array{object_kind:string,section:string,order:int}>
+     */
+    private static function overviewContracts(array $item): array
+    {
+        $out=[];
+        foreach ((array)($item['overview'] ?? []) as $entry) {
+            if (!is_array($entry) || array_keys($entry)!==['object_kind','section','order']
+                || !is_string($entry['object_kind']) || !preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$entry['object_kind'])
+                || !is_string($entry['section']) || trim($entry['section'])==='' || mb_strlen($entry['section'],'UTF-8')>40
+                || !is_int($entry['order']) || $entry['order']<1 || $entry['order']>9999) {
+                throw new MetricQueryContractException('METRIC_OVERVIEW_CONTRACT_INVALID', '指标概览声明无效。');
+            }
+            $out[]=['object_kind'=>$entry['object_kind'],'section'=>$entry['section'],'order'=>$entry['order']];
+        }
+        usort($out,static function(array $left,array $right): int { return [$left['object_kind'],$left['order'],$left['section']] <=> [$right['object_kind'],$right['order'],$right['section']]; });
+        if (count(array_unique(array_map(static function(array $item): string { return $item['object_kind']; },$out)))!==count($out)) {
+            throw new MetricQueryContractException('METRIC_OVERVIEW_CONTRACT_INVALID', '同一指标不能重复声明同一种概览对象。');
+        }
+        return $out;
     }
 
     /** Sales item dimensions are shared by sales amount and sold quantity. */
