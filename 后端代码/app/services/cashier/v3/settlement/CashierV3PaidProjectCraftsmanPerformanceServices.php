@@ -60,7 +60,11 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
         $performanceCraftsmen = [];
         $weights = [];
         $fees = [];
-        $hasExplicitProjectCount = array_key_exists('projectCountHalfUnits', $craftsmen[0] ?? []);
+        $hasExplicitProjectCount = in_array(true, array_map(static function (array $craftsman): bool {
+            return array_key_exists('projectCount', $craftsman)
+                || array_key_exists('project_count', $craftsman)
+                || array_key_exists('projectCountHalfUnits', $craftsman);
+        }, $craftsmen), true);
         $projectCounts = [];
         $groupMembers = [];
         foreach ($craftsmen as $index => $craftsman) {
@@ -69,7 +73,13 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
         }
         if ($hasExplicitProjectCount) {
             foreach ($craftsmen as $craftsman) {
-                $projectCounts[(int)$craftsman['staffId']] = max(0, (int)($craftsman['projectCountHalfUnits'] ?? 0));
+                if (array_key_exists('projectCount', $craftsman) || array_key_exists('project_count', $craftsman)) {
+                    $projectCounts[(int)$craftsman['staffId']] = self::projectCount(
+                        $craftsman['projectCount'] ?? $craftsman['project_count']
+                    );
+                } else {
+                    $projectCounts[(int)$craftsman['staffId']] = max(0, (int)($craftsman['projectCountHalfUnits'] ?? 0));
+                }
             }
         } else {
             $totalHalfUnits = $quantity * 2;
@@ -153,7 +163,11 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
                 'laborPerformanceCents' => (int)($performanceByStaff[$staffId] ?? 0),
                 'laborPerformanceAmountManual' => !empty($manualPerformanceByStaff[$staffId]),
                 'laborFeeCents' => (int)($fees[$staffId] ?? 0),
-                'projectCountHalfUnits' => (int)($projectCounts[$staffId] ?? 0),
+                // New manual entries keep their exact decimal value. Legacy
+                // snapshots stay in half-units so prior facts remain stable.
+                array_key_exists('projectCount', $craftsman) || array_key_exists('project_count', $craftsman)
+                    ? 'projectCount'
+                    : 'projectCountHalfUnits' => $projectCounts[$staffId] ?? 0,
             ];
             if (isset($craftsman['positionId'])) {
                 $allocations[count($allocations) - 1]['positionId'] = (int)$craftsman['positionId'];
@@ -172,5 +186,18 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
             'ruleVersion' => $ruleVersion,
             'allocations' => $allocations,
         ];
+    }
+
+    private static function projectCount($value): string
+    {
+        if (is_bool($value) || is_array($value) || is_object($value)) {
+            throw new \InvalidArgumentException('paid_project_count_invalid');
+        }
+        $text = trim((string)$value);
+        if (!preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $text)) {
+            throw new \InvalidArgumentException('paid_project_count_invalid');
+        }
+        $text = rtrim(rtrim($text, '0'), '.');
+        return $text === '' ? '0' : $text;
     }
 }

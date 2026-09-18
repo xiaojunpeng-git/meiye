@@ -580,6 +580,11 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     $craftsmen[count($craftsmen) - 1]['performanceAmountCents'] = max(0, (int)$settings['performanceAmountCents']);
                     $craftsmen[count($craftsmen) - 1]['performanceAmountManual'] = !empty($settings['performanceAmountManual']);
                 }
+                if (array_key_exists('projectCount', $settings)) {
+                    $craftsmen[count($craftsmen) - 1]['projectCount'] = (string)$settings['projectCount'];
+                } elseif (array_key_exists('projectCountHalfUnits', $settings)) {
+                    $craftsmen[count($craftsmen) - 1]['projectCountHalfUnits'] = max(0, (int)$settings['projectCountHalfUnits']);
+                }
             }
             $inventory = $inventorySnapshot['lineInventoryByLineId'][$lineId] ?? null;
             if (!is_array($inventory)) {
@@ -1005,6 +1010,14 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 if (array_key_exists('performanceAmountCents', (array)$craftsman)) {
                     $settingsById[$staffId]['performanceAmountCents'] = max(0, (int)$craftsman['performanceAmountCents']);
                     $settingsById[$staffId]['performanceAmountManual'] = !empty($craftsman['performanceAmountManual']);
+                }
+                if (array_key_exists('projectCount', (array)$craftsman)) {
+                    $settingsById[$staffId]['projectCount'] = (string)$craftsman['projectCount'];
+                } elseif (array_key_exists('projectCountHalfUnits', (array)$craftsman)) {
+                    $settingsById[$staffId]['projectCountHalfUnits'] = max(
+                        0,
+                        (int)$craftsman['projectCountHalfUnits']
+                    );
                 }
                 $positionId = is_array($craftsman) ? max(0, (int)($craftsman['positionId'] ?? $craftsman['position_id'] ?? 0)) : 0;
                 $performanceIndependent = is_array($craftsman) && !empty($craftsman['performanceIndependent']);

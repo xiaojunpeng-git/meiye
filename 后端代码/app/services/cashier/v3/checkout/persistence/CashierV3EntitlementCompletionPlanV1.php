@@ -93,7 +93,9 @@ final class CashierV3EntitlementCompletionPlanV1
                 // snapshot. They do not create labor-performance amount, but
                 // a separately entered labor fee is still an auditable fact.
                 if ((int)$allocation['amount_cents'] === 0
-                    && (int)$allocation['labor_fee_cents'] === 0) {
+                    && (int)$allocation['labor_fee_cents'] === 0
+                    && (int)($allocation['project_count_half_units'] ?? 0) === 0
+                    && (string)($allocation['project_count_decimal'] ?? '0') === '0') {
                     continue;
                 }
                 $performance[] = self::laborPerformanceRow($context, $normalized, $allocation);
@@ -611,6 +613,17 @@ final class CashierV3EntitlementCompletionPlanV1
                 'allocation_group_key' => $allocationGroupKey,
                 'performance_independent' => $performanceIndependent ? 1 : 0,
             ];
+            if (array_key_exists('projectCount', $row)) {
+                $normalized['project_count_decimal'] = self::projectCount(
+                    $row['projectCount'],
+                    'labor_project_count_invalid'
+                );
+            } elseif (array_key_exists('projectCountHalfUnits', $row)) {
+                $normalized['project_count_half_units'] = self::nonNegativeInt(
+                    $row['projectCountHalfUnits'],
+                    'labor_project_count_invalid'
+                );
+            }
             if ($normalized['sequence'] !== $index + 1 || $normalized['is_primary'] !== ($index === 0 ? 1 : 0)) {
                 throw self::failure('labor_allocation_order_invalid', ['lineId' => $lineId]);
             }
@@ -750,6 +763,12 @@ final class CashierV3EntitlementCompletionPlanV1
             'rule_name_snapshot' => '项目劳动业绩',
             'rule_version_snapshot' => 'entitlement-rule:' . $line['performance_rule_version'],
         ]);
+        if (array_key_exists('project_count_half_units', $allocation)) {
+            $row['project_count_half_units'] = $allocation['project_count_half_units'];
+        }
+        if (array_key_exists('project_count_decimal', $allocation)) {
+            $row['project_count_decimal'] = $allocation['project_count_decimal'];
+        }
         $row['immutable_fingerprint'] = self::fingerprintValue($row);
         return $row;
     }
@@ -930,6 +949,20 @@ final class CashierV3EntitlementCompletionPlanV1
             throw self::failure($reason);
         }
         return $value;
+    }
+
+    private static function projectCount($value, string $reason): string
+    {
+        if (is_bool($value) || is_array($value) || $value === null || is_float($value)) {
+            throw self::failure($reason);
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $raw) !== 1) {
+            throw self::failure($reason);
+        }
+        [$whole, $fraction] = array_pad(explode('.', $raw, 2), 2, '');
+        $fraction = rtrim($fraction, '0');
+        return $fraction === '' ? $whole : $whole . '.' . $fraction;
     }
 
     private static function nonNegativeInt($value, string $reason): int

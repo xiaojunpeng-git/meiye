@@ -166,11 +166,46 @@ function syncComputedPerformanceAmounts(records) {
     .forEach((record) => syncPerformanceAmountFromRatio(record))
 }
 
-function projectCountHalfUnitsFor(item = {}) {
+const PROJECT_COUNT_SCALE = 1000000
+
+function projectCountTextFor(item = {}) {
+  // 输入框绑定的是 projectCountText。完整分配确认前若仍读取旧的
+  // projectCount，用户刚输入的 6.6 / 0.3 会被初始值 0 覆盖，最终
+  // 结账快照缺失项目数并在服务记录回退显示为服务次数 1。
+  const explicit = String(item.projectCountText ?? item.projectCount ?? '').trim()
+  if (/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(explicit)) {
+    const [whole, fraction = ''] = explicit.split('.')
+    const normalizedFraction = fraction.replace(/0+$/, '')
+    return normalizedFraction ? `${whole}.${normalizedFraction}` : whole
+  }
+  // 原生 number 输入框在部分浏览器自动换算小数时会吐出
+  // `6.599999904632568` 这一类浮点尾差。界面仍显示 6.6，但旧逻辑会
+  // 因超过 6 位小数直接回退为 0，造成“弹窗填了、结账保存为 0”。
+  // 将它按后端允许的 6 位小数规范化，避免把用户可见的输入静默丢失。
+  const numeric = Number(explicit)
+  if (/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(explicit) && Number.isFinite(numeric) && numeric >= 0) {
+    const microUnits = Math.round(numeric * PROJECT_COUNT_SCALE)
+    if (Number.isSafeInteger(microUnits)) return projectCountTextFromMicroUnits(microUnits)
+  }
   const saved = Number(item.projectCountHalfUnits)
-  if (Number.isInteger(saved) && saved >= 0) return saved
-  const projectCount = Number(item.projectCount ?? 0)
-  return Number.isFinite(projectCount) && projectCount >= 0 ? Math.round(projectCount * 2) : 0
+  if (Number.isInteger(saved) && saved >= 0) return String(saved / 2)
+  return '0'
+}
+
+function projectCountMicroUnitsForText(value) {
+  const raw = String(value ?? '').trim()
+  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(raw)) return null
+  const [whole, fraction = ''] = raw.split('.')
+  const micro = Number(whole) * PROJECT_COUNT_SCALE
+    + Number((fraction + '000000').slice(0, 6))
+  return Number.isSafeInteger(micro) && micro >= 0 ? micro : null
+}
+
+function projectCountTextFromMicroUnits(microUnits) {
+  const value = Math.max(0, Math.trunc(Number(microUnits) || 0))
+  const whole = Math.floor(value / PROJECT_COUNT_SCALE)
+  const fraction = String(value % PROJECT_COUNT_SCALE).padStart(6, '0').replace(/0+$/, '')
+  return fraction ? `${whole}.${fraction}` : String(whole)
 }
 
 function performanceIndependent(item = {}) {
@@ -216,13 +251,14 @@ function distributeProjectCounts(records) {
   if (props.historyAdjustment || !Array.isArray(records)) return
   const selected = records.filter((record) => record.selected && record.role === 'craftsmen')
   if (!selected.length || selected.some((record) => record.projectCountTouched)) return
-  const totalHalfUnits = Math.max(0, Math.trunc(Number(props.projectCountTotal || 0) * 2))
+  const totalMicroUnits = Math.max(0, Math.round(Number(props.projectCountTotal || 0) * PROJECT_COUNT_SCALE))
   selectedByAllocationGroup(selected).forEach((group) => {
-    const base = Math.floor(totalHalfUnits / group.length)
-    const remainder = totalHalfUnits - base * group.length
+    const base = Math.floor(totalMicroUnits / group.length)
+    const remainder = totalMicroUnits - base * group.length
     group.forEach((record, index) => {
-      record.projectCountHalfUnits = base + (index >= group.length - remainder ? 1 : 0)
-      record.projectCountText = (record.projectCountHalfUnits / 2).toFixed(1)
+      record.projectCountText = projectCountTextFromMicroUnits(
+        base + (index >= group.length - remainder ? 1 : 0)
+      )
     })
   })
 }
@@ -350,10 +386,9 @@ function mergeCandidates(candidates, selected, role) {
       performanceAmountYuan: performanceAmountYuanText(saved || {}),
       performanceAmountManual: Boolean(saved?.performanceAmountManual ?? saved?.performance_amount_manual),
       performanceAmountLocked: Boolean(saved?.performanceAmountLocked ?? saved?.performance_amount_locked),
-      projectCountHalfUnits: projectCountHalfUnitsFor(saved || {}),
-      projectCountText: (projectCountHalfUnitsFor(saved || {}) / 2).toFixed(1),
-      projectCountTouched: Object.prototype.hasOwnProperty.call(saved || {}, 'projectCountHalfUnits')
-        || Object.prototype.hasOwnProperty.call(saved || {}, 'projectCount'),
+      projectCountText: projectCountTextFor(saved || {}),
+      projectCountTouched: Object.prototype.hasOwnProperty.call(saved || {}, 'projectCount')
+        || Object.prototype.hasOwnProperty.call(saved || {}, 'projectCountHalfUnits'),
       role
     })
   }
@@ -385,10 +420,9 @@ function mergeCandidates(candidates, selected, role) {
       performanceAmountYuan: performanceAmountYuanText(saved),
       performanceAmountManual: Boolean(saved?.performanceAmountManual ?? saved?.performance_amount_manual),
       performanceAmountLocked: Boolean(saved?.performanceAmountLocked ?? saved?.performance_amount_locked),
-      projectCountHalfUnits: projectCountHalfUnitsFor(saved),
-      projectCountText: (projectCountHalfUnitsFor(saved) / 2).toFixed(1),
-      projectCountTouched: Object.prototype.hasOwnProperty.call(saved || {}, 'projectCountHalfUnits')
-        || Object.prototype.hasOwnProperty.call(saved || {}, 'projectCount'),
+      projectCountText: projectCountTextFor(saved),
+      projectCountTouched: Object.prototype.hasOwnProperty.call(saved || {}, 'projectCount')
+        || Object.prototype.hasOwnProperty.call(saved || {}, 'projectCountHalfUnits'),
       role
     })
   }
@@ -588,10 +622,9 @@ function distributeHistoryAmountsByRatio() {
 }
 
 function normalizeProjectCount(item) {
-  const value = Number(item.projectCountText)
-  if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value * 2)) return
-  item.projectCountHalfUnits = Math.round(value * 2)
-  item.projectCountText = (item.projectCountHalfUnits / 2).toFixed(1)
+  const microUnits = projectCountMicroUnitsForText(item.projectCountText)
+  if (microUnits === null) return
+  item.projectCountText = projectCountTextFromMicroUnits(microUnits)
   item.projectCountTouched = true
   validationMessage.value = ''
 }
@@ -686,8 +719,7 @@ function historyAllocationIsValid(records) {
   const selected = records.filter((record) => record.selected)
   if (!selected.length) return false
   if (selected.some((record) => {
-    const value = Number(record.projectCountText)
-    return !Number.isFinite(value) || value < 0 || !Number.isInteger(value * 2)
+    return projectCountMicroUnitsForText(record.projectCountText) === null
   })) return false
   if (selected.some((record) => craftsmanType(record) === PERFORMANCE_TYPES.LABOR && allocationAmountCentsFor(record) !== 0)) return false
   if (selected.some((record) => craftsmanType(record) === PERFORMANCE_TYPES.COMMISSION && Number(record.laborFeeYuan || 0) !== 0)) return false
@@ -736,6 +768,8 @@ function selectedCraftsmenPayload() {
     positionName: item.position || '在职员工',
     performanceIndependent: performanceIndependent(item),
     allocationGroupKey: allocationGroupKey(item),
+    projectCountText: item.projectCountText,
+    projectCount: projectCountTextFor(item),
     ...(item.personnelSource === 'other' ? { personnelSource: 'other' } : {}),
     isPrimary: index === 0,
     sequence: index + 1
@@ -842,7 +876,7 @@ function confirm() {
     return
   }
   if (props.historyAdjustment && !historyAllocationIsValid(selectedCraftsmen)) {
-    activateInvalidTab('craftsmen', '消耗业绩和手工费按最终输入金额保存；消耗业绩需为整元，项目数只能按0.5递增。')
+    activateInvalidTab('craftsmen', '消耗业绩和手工费按最终输入金额保存；消耗业绩需为整元，项目数必须为非负数字，最多保留六位小数。')
     return
   }
   if (selectedGuides.length && ![1, 2, 3].includes(Number(guideRoundNo.value))) {
@@ -858,10 +892,9 @@ function confirm() {
     return
   }
   if (selectedCraftsmen.some((item) => {
-    const value = Number(item.projectCountText)
-    return !Number.isFinite(value) || value < 0 || !Number.isInteger(value * 2)
+    return projectCountMicroUnitsForText(item.projectCountText) === null
   })) {
-    activateInvalidTab('craftsmen', '项目数只能按 0.5 递增，且不能小于 0。')
+    activateInvalidTab('craftsmen', '项目数必须是非负数字。')
     return
   }
   validationMessage.value = ''
@@ -884,8 +917,8 @@ function confirm() {
       allocationGroupKey: allocationGroupKey(item),
       ...(item.personnelSource === 'other' ? { personnelSource: 'other' } : {}),
       allocationAmountCents: allocationAmountCentsFor(item),
-      projectCountHalfUnits: Math.round(Number(item.projectCountText || 0) * 2),
-      projectCount: Number(item.projectCountText || 0).toFixed(1),
+      projectCountText: item.projectCountText,
+      projectCount: projectCountTextFor(item),
       isPrimary: index === 0,
       sequence: index + 1
     }))
@@ -1003,7 +1036,7 @@ function searchGroupPersonnel(scope) {
             <label v-if="!historyAdjustment && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.performanceAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="业绩金额" :disabled="activeTab === 'craftsmen' && craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="syncManualPerformanceAmount(item)"><b>元</b></label>
             <label v-if="historyAdjustment && activeTab === 'craftsmen'" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.allocationAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="分配消耗业绩" :title="historyAmountInputHint(item)" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="syncHistoryRatioFromAmount(item)"><b>元</b></label>
             <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--labor"><input v-model.number="item.laborFeeYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="每人手工费" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION" @input="item.laborFeeCents = Math.max(0, Number(item.laborFeeYuan || 0) * 100)"><b>元/次</b></label>
-            <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--project"><input v-model.trim="item.projectCountText" type="number" min="0" step="0.5" inputmode="decimal" :aria-label="historyAdjustment ? '工资项目数' : '项目数'" @blur="normalizeProjectCount(item)"><b>个</b></label>
+            <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--project"><input v-model.trim="item.projectCountText" type="number" min="0" step="any" inputmode="decimal" :aria-label="historyAdjustment ? '工资项目数' : '项目数'" @blur="normalizeProjectCount(item)"><b>个</b></label>
             <button type="button" @click="selectRecord(item)">删除</button>
           </div>
           <p v-if="!selectedRecords.length" class="personnel-empty">请先在简易选择中添加人员</p>

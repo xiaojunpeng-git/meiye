@@ -1001,7 +1001,12 @@ class CashierV3RequestNormalizer
                 }
                 $assignment['personnelSource'] = $personnelSource;
             }
-            if (CashierV3AliasResolver::hasAnyKey($row, ['projectCountHalfUnits', 'project_count_half_units'])) {
+            if (CashierV3AliasResolver::hasAnyKey($row, ['projectCount', 'project_count'])) {
+                $assignment['projectCount'] = self::canonicalProjectCount(
+                    $row['projectCount'] ?? $row['project_count'],
+                    'craftsmanProjectCount'
+                );
+            } elseif (CashierV3AliasResolver::hasAnyKey($row, ['projectCountHalfUnits', 'project_count_half_units'])) {
                 $assignment['projectCountHalfUnits'] = self::canonicalNonNegativeInteger(
                     $row['projectCountHalfUnits'] ?? $row['project_count_half_units'],
                     'craftsmanProjectCountHalfUnits'
@@ -1189,6 +1194,20 @@ class CashierV3RequestNormalizer
             throw self::invalidCartLineSetting($field, 'positive_integer_invalid');
         }
         return $normalized;
+    }
+
+    private static function canonicalProjectCount($value, string $field): string
+    {
+        if (is_bool($value) || is_array($value) || $value === null || is_float($value)) {
+            throw self::invalidCartLineSetting($field, 'craftsman_project_count_invalid');
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $raw) !== 1) {
+            throw self::invalidCartLineSetting($field, 'craftsman_project_count_invalid');
+        }
+        [$whole, $fraction] = array_pad(explode('.', $raw, 2), 2, '');
+        $fraction = rtrim($fraction, '0');
+        return $fraction === '' ? $whole : $whole . '.' . $fraction;
     }
 
     private static function canonicalNonNegativeInteger($value, string $field): int

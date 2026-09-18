@@ -525,7 +525,7 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                 'craftsmanPerformanceType', 'laborFeeCents', 'personnelSource',
                 'performanceAmountCents', 'performanceAmountManual',
                 'id', 'employeeId', 'storeId', 'name', 'staffName', 'employeeName',
-                'isPrimary', 'sequence', 'projectCountHalfUnits',
+                'isPrimary', 'sequence', 'projectCount', 'projectCountHalfUnits',
                 'positionId', 'positionName', 'performanceIndependent', 'allocationGroupKey',
             ];
             $actual = array_keys($row);
@@ -588,6 +588,20 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                 $assignment['performanceAmountCents'] = $amount;
                 $assignment['performanceAmountManual'] = !empty($row['performanceAmountManual']);
             }
+            // 项目数是完整分配的业务输入，不能在“草稿 JSON → 权威快照”
+            // 重建时退化为旧的半个单位字段；否则页面填写的小数会在结账后
+            // 被读取端当作缺失并显示默认值 1。
+            if (array_key_exists('projectCount', $row)) {
+                $assignment['projectCount'] = self::projectCount(
+                    $row['projectCount'],
+                    'entitlement.craftsman.project_count'
+                );
+            } elseif (array_key_exists('projectCountHalfUnits', $row)) {
+                $assignment['projectCountHalfUnits'] = self::nonNegativeInt(
+                    $row['projectCountHalfUnits'],
+                    'entitlement.craftsman.project_count_half_units'
+                );
+            }
             if ($personnelSource === 'other') {
                 $assignment['personnelSource'] = 'other';
             }
@@ -602,6 +616,19 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             $result[] = $assignment;
         }
         return $result;
+    }
+
+    private static function projectCount($value, string $reason): string
+    {
+        if (is_bool($value) || is_array($value) || $value === null || is_float($value)) {
+            throw self::failure($reason);
+        }
+        $value = trim((string)$value);
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $value) !== 1) {
+            throw self::failure($reason);
+        }
+        $value = rtrim(rtrim($value, '0'), '.');
+        return $value === '' ? '0' : $value;
     }
 
     private static function failure(

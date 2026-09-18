@@ -1112,6 +1112,7 @@ final class CashierV3EntitlementCompletionKernel
             $optionalKeys = [
                 'craftsmanPerformanceType', 'laborFeeCents', 'personnelSource',
                 'performanceAmountCents', 'performanceAmountManual',
+                'projectCount', 'projectCountHalfUnits',
                 'positionId', 'positionName', 'performanceIndependent', 'allocationGroupKey',
             ];
             $expectedKeys = array_merge($baseKeys, array_values(array_intersect($optionalKeys, array_keys($row))));
@@ -1156,6 +1157,15 @@ final class CashierV3EntitlementCompletionKernel
                     && ((int)$row['performanceAmountCents'] !== 0 || $row['performanceAmountManual'])) {
                     throw self::failure('authority_labor_performance_amount_invalid', ['staffId' => $row['staffId']]);
                 }
+            }
+            if (array_key_exists('projectCount', $row)) {
+                $row['projectCount'] = self::projectCount($row['projectCount'], 'craftsman.projectCount');
+            } elseif (array_key_exists('projectCountHalfUnits', $row)) {
+                self::assertNonnegativeInt(
+                    $row['projectCountHalfUnits'],
+                    'craftsman.projectCountHalfUnits',
+                    self::MAX_TIMES * 2
+                );
             }
             if (array_key_exists('positionId', $row)) {
                 self::assertNonnegativeInt($row['positionId'], 'craftsman.positionId', self::MAX_WEIGHT * self::MAX_WEIGHT);
@@ -1723,6 +1733,11 @@ final class CashierV3EntitlementCompletionKernel
             if (array_key_exists('performanceAmountCents', $row)) {
                 $allocation['performanceAmountCents'] = (int)$row['performanceAmountCents'];
                 $allocation['performanceAmountManual'] = !empty($row['performanceAmountManual']);
+            }
+            if (array_key_exists('projectCount', $row)) {
+                $allocation['projectCount'] = (string)$row['projectCount'];
+            } elseif (array_key_exists('projectCountHalfUnits', $row)) {
+                $allocation['projectCountHalfUnits'] = (int)$row['projectCountHalfUnits'];
             }
             if (isset($row['positionId'])) {
                 $allocation['positionId'] = (int)$row['positionId'];
@@ -2612,6 +2627,20 @@ final class CashierV3EntitlementCompletionKernel
         if (!is_int($value) || $value < 0 || $value > $max) {
             throw self::failure('nonnegative_integer_invalid', ['field' => $field]);
         }
+    }
+
+    private static function projectCount($value, string $field): string
+    {
+        if (is_bool($value) || is_array($value) || $value === null || is_float($value)) {
+            throw self::failure('project_count_invalid', ['field' => $field]);
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $raw) !== 1) {
+            throw self::failure('project_count_invalid', ['field' => $field]);
+        }
+        [$whole, $fraction] = array_pad(explode('.', $raw, 2), 2, '');
+        $fraction = rtrim($fraction, '0');
+        return $fraction === '' ? $whole : $whole . '.' . $fraction;
     }
 
     private static function assertStringList($value, string $field, int $max): void

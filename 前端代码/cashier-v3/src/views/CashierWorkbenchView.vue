@@ -803,7 +803,9 @@ function canonicalCheckoutCraftsmen(records = []) {
         ? explicitGroupKey
         : `independent:${positionId > 0 ? positionId : staffId}`
     }
-    if (Object.prototype.hasOwnProperty.call(record || {}, 'projectCountHalfUnits')
+    if (Object.prototype.hasOwnProperty.call(record || {}, 'projectCount')) {
+      row.projectCount = String(record?.projectCount ?? '0')
+    } else if (Object.prototype.hasOwnProperty.call(record || {}, 'projectCountHalfUnits')
       || Object.prototype.hasOwnProperty.call(record || {}, 'project_count_half_units')) {
       row.projectCountHalfUnits = Math.max(0, Math.trunc(Number(record?.projectCountHalfUnits ?? record?.project_count_half_units ?? 0)))
     }
@@ -834,8 +836,10 @@ function canonicalCheckoutEntitlementCraftsmen(records = []) {
             : {})
         }
       : {}),
-    ...(Object.prototype.hasOwnProperty.call(row, 'projectCountHalfUnits')
-      ? { projectCountHalfUnits: row.projectCountHalfUnits }
+    ...(Object.prototype.hasOwnProperty.call(row, 'projectCount')
+      ? { projectCount: row.projectCount }
+      : Object.prototype.hasOwnProperty.call(row, 'projectCountHalfUnits')
+        ? { projectCountHalfUnits: row.projectCountHalfUnits }
       : {}),
     ...(row.personnelSource === 'other' ? { personnelSource: 'other' } : {})
   }))
@@ -3830,13 +3834,20 @@ function lineSaleAmountCents(line = {}) {
 
 function personnelPerformanceBaseAmountCents(line = {}) {
   if (!isEntitlementLine(line)) return lineSaleAmountCents(line)
-  const amount = Number(
+  // 权益购物车行的 actualAmount 是展示层金额（元），而完整分配组件使用
+  // 的基数是分。优先读取该权益行的锁定单次／本次数金额，避免卡项和时间卡
+  // 打开完整分配时被误初始化为 0；旧投影仍兼容已经以分返回的字段。
+  const amount = Number(line.actualAmount ?? line.finalAmount ?? line.amount)
+  if (Number.isFinite(amount) && amount >= 0) {
+    return Math.max(0, Math.round(amount * 100))
+  }
+  const amountCents = Number(
     line.entitlementActualAmountCents
       ?? line.actualEntitlementAmountCents
       ?? line.amountCents
       ?? 0
   )
-  return Number.isSafeInteger(amount) && amount >= 0 ? amount : 0
+  return Number.isSafeInteger(amountCents) && amountCents >= 0 ? amountCents : 0
 }
 
 function checkoutSaleAmountCents() {
@@ -3925,7 +3936,9 @@ async function confirmPersonnelAssignment(result = {}) {
       isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
       craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
       laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0),
-      projectCountHalfUnits: Math.max(0, Number(record.projectCountHalfUnits ?? record.project_count_half_units ?? 0)),
+      // 优先保存输入框的原始文本；组件同时携带了已规范化 projectCount，
+      // 这里保留双字段兼容，避免跨组件更新时把刚输入的 6.6 回退到旧值 0。
+      projectCount: String(record.projectCountText ?? record.projectCount ?? record.project_count ?? ''),
       positionId: Number(record.positionId ?? record.position_id ?? 0),
       positionName: record.positionName || record.position_name || record.position || '',
       performanceIndependent: record.performanceIndependent === true
@@ -3960,7 +3973,12 @@ async function confirmPersonnelAssignment(result = {}) {
     }))
     const payload = {}
     if (roleScope === 'personnel') {
-      if (isProjectLine(line) && !cardOperationUpgradeBinding(line)) payload.craftsmen = craftsmen
+      // 权益项目同样需要把手艺人及其项目数写回结账草稿。此前这里仅
+      // 识别现金项目，时间卡/卡项权益在完整分配中看似已确认，实际请求
+      // 却没有 craftsmen，结账只能沿用初始化的项目数 0。
+      if ((isProjectLine(line) || isEntitlementLine(line)) && !cardOperationUpgradeBinding(line)) {
+        payload.craftsmen = craftsmen
+      }
       if (!isEntitlementLine(line)) payload.salespeople = salespeople
     } else if (roleScope === 'guide') {
       payload.guideSelections = guideSelections
@@ -4038,7 +4056,7 @@ async function applyPersonnelAssignmentToAll(result = {}) {
     isPointCustomer: Boolean(record.isPointCustomer ?? record.marked),
     craftsmanPerformanceType: record.craftsmanPerformanceType || record.craftsman_performance_type,
     laborFeeCents: Number(record.laborFeeCents ?? record.labor_fee_cents ?? 0),
-    projectCountHalfUnits: Math.max(0, Number(record.projectCountHalfUnits ?? record.project_count_half_units ?? 0)),
+    projectCount: String(record.projectCount ?? record.project_count ?? ''),
     positionId: Number(record.positionId ?? record.position_id ?? 0),
     positionName: record.positionName || record.position_name || record.position || '',
     performanceIndependent: record.performanceIndependent === true

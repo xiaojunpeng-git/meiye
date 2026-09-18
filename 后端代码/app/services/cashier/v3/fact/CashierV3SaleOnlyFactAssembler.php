@@ -301,12 +301,17 @@ final class CashierV3SaleOnlyFactAssembler
                 }
                 foreach ($craftsmanPlan['allocations'] as $allocation) {
                     if ((int)$allocation['laborPerformanceCents'] === 0
-                        && (int)$allocation['laborFeeCents'] === 0) {
+                        && (int)$allocation['laborFeeCents'] === 0
+                        && (int)($allocation['projectCountHalfUnits'] ?? 0) === 0
+                        && (string)($allocation['projectCount'] ?? '0') === '0') {
                         continue;
                     }
                     $staffId = (int)$allocation['staffId'];
                     $naturalKey = 'sale-project-labor:' . (string)$order['order_id'] . ':'
                         . (string)$orderLine['order_line_id'] . ':' . $staffId;
+                    $projectCountSnapshot = array_key_exists('projectCount', $allocation)
+                        ? ['projectCount' => (string)$allocation['projectCount']]
+                        : ['projectCountHalfUnits' => (int)($allocation['projectCountHalfUnits'] ?? 0)];
                     $performanceFacts[] = [
                         'factId' => 'ELP-' . substr(hash('sha256', $naturalKey), 0, 40),
                         'naturalKey' => $naturalKey,
@@ -325,7 +330,10 @@ final class CashierV3SaleOnlyFactAssembler
                         'allocationBaseAmountCents' => (int)$craftsmanPlan['laborAmountCents'],
                         'amountCents' => (int)$allocation['laborPerformanceCents'],
                         'laborFeeAmountCents' => (int)$allocation['laborFeeCents'],
-                        'projectCountHalfUnits' => (int)($allocation['projectCountHalfUnits'] ?? 0),
+                        // PHP 7.4 permits array unpacking only for numeric keys.
+                        // Preserve the exact decimal project count without using
+                        // a string-key unpack while assembling the immutable fact.
+                    ] + $projectCountSnapshot + [
                         'ruleCodeSnapshot' => !empty($allocation['laborPerformanceAmountManual'])
                             ? 'SALE-PROJECT-LABOR-MANUAL-AMOUNT-V1'
                             : 'SALE-PROJECT-LABOR-V1',

@@ -251,7 +251,7 @@ final class CashierV3CheckoutFactPlanV1
             self::assertAllowedKeys(
                 $fact,
                 $requiredKeys,
-                array_merge($requiredKeys, ['laborFeeAmountCents', 'projectCountHalfUnits']),
+                array_merge($requiredKeys, ['laborFeeAmountCents', 'projectCountHalfUnits', 'projectCount']),
                 $domain
             );
         } else {
@@ -402,11 +402,29 @@ final class CashierV3CheckoutFactPlanV1
                 ? self::signedInteger($fact['amountCents'], 'performance_amount_invalid')
                 : self::signedMoney($fact['amountCents'], $direction, 'performance_amount_invalid', true),
             'labor_fee_amount_cents' => self::signedMoney($fact['laborFeeAmountCents'] ?? 0, $direction, 'performance_labor_fee_amount_invalid', true),
-            'project_count_half_units' => self::nonNegativeInt($fact['projectCountHalfUnits'] ?? 0, 'performance_project_count_invalid'),
+            'project_count_half_units' => array_key_exists('projectCount', $fact)
+                ? 0
+                : self::nonNegativeInt($fact['projectCountHalfUnits'] ?? 0, 'performance_project_count_invalid'),
+            'project_count_decimal' => array_key_exists('projectCount', $fact)
+                ? self::projectCount($fact['projectCount'], 'performance_project_count_invalid')
+                : null,
             'rule_code_snapshot' => self::requiredToken($fact['ruleCodeSnapshot'], 64, 'performance_rule_code_invalid'),
             'rule_name_snapshot' => self::text($fact['ruleNameSnapshot'], 128, 'performance_rule_name_invalid'),
             'rule_version_snapshot' => self::requiredToken($fact['ruleVersionSnapshot'], 64, 'performance_rule_version_invalid'),
         ];
+    }
+
+    private static function projectCount($value, string $reason): string
+    {
+        if (is_bool($value) || is_array($value) || is_object($value)) {
+            throw self::failure($reason);
+        }
+        $text = trim((string)$value);
+        if (!preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $text)) {
+            throw self::failure($reason);
+        }
+        $text = rtrim(rtrim($text, '0'), '.');
+        return $text === '' ? '0' : $text;
     }
 
     private static function assertActualPerformanceIsMaterialized(array $payments, array $performance): void

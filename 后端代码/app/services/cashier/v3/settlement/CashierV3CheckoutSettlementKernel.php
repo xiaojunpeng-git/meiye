@@ -1208,6 +1208,43 @@ final class CashierV3CheckoutSettlementKernel
                 'laborFeeCents' => $laborFeeCents,
                 'personnelSource' => $personnelSource,
             ];
+            // 手填业绩是本次服务分配的结果快照，不是可由最终卡项金额
+            // 反推的配置。完整分配已明确填入金额时，必须与手工标记成对
+            // 进入权益结算草稿；否则最终完成内核会按权益单次金额重新计算。
+            $hasPerformanceAmount = array_key_exists('performanceAmountCents', $row)
+                || array_key_exists('performance_amount_cents', $row);
+            $hasPerformanceAmountManual = array_key_exists('performanceAmountManual', $row)
+                || array_key_exists('performance_amount_manual', $row);
+            if ($hasPerformanceAmountManual && !$hasPerformanceAmount) {
+                throw self::failure('entitlement_craftsman_performance_amount_invalid', [
+                    'path' => $path,
+                    'staffId' => $staffId,
+                ]);
+            }
+            if ($hasPerformanceAmount) {
+                $result[count($result) - 1]['performanceAmountCents'] = self::nonNegativeInt(
+                    $row['performanceAmountCents'] ?? $row['performance_amount_cents'],
+                    $path . '.performanceAmountCents'
+                );
+                $result[count($result) - 1]['performanceAmountManual'] = !empty($row['performanceAmountManual'])
+                    || !empty($row['performance_amount_manual']);
+            }
+            // 项目数同样是本次服务对手艺人的分配结果。权益服务后续会
+            // 重新组装最终权威快照；仅在本次明确填写时带上该字段，才能
+            // 保存手填值，同时让旧服务继续按服务次数回退展示。
+            if (array_key_exists('projectCount', $row)
+                || array_key_exists('project_count', $row)) {
+                $result[count($result) - 1]['projectCount'] = self::projectCount(
+                    $row['projectCount'] ?? $row['project_count'],
+                    $path . '.projectCount'
+                );
+            } elseif (array_key_exists('projectCountHalfUnits', $row)
+                || array_key_exists('project_count_half_units', $row)) {
+                $result[count($result) - 1]['projectCountHalfUnits'] = self::nonNegativeInt(
+                    $row['projectCountHalfUnits'] ?? $row['project_count_half_units'],
+                    $path . '.projectCountHalfUnits'
+                );
+            }
             // The selection is persisted before the final entitlement
             // authority locks staff profiles.  Keep the allocation-group
             // identity here: without it an independent-position 100% and a
@@ -1800,6 +1837,20 @@ final class CashierV3CheckoutSettlementKernel
             throw self::failure('non_negative_integer_required', ['path' => $path]);
         }
         return $value;
+    }
+
+    private static function projectCount($value, string $path): string
+    {
+        if (is_bool($value) || is_array($value) || $value === null || is_float($value)) {
+            throw self::failure('project_count_invalid', ['path' => $path]);
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $raw) !== 1) {
+            throw self::failure('project_count_invalid', ['path' => $path]);
+        }
+        [$whole, $fraction] = array_pad(explode('.', $raw, 2), 2, '');
+        $fraction = rtrim($fraction, '0');
+        return $fraction === '' ? $whole : $whole . '.' . $fraction;
     }
 
     private static function timestamp($value, string $path): int
