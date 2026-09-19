@@ -1158,7 +1158,7 @@
 				{
 					"path": "therapist_list/index",
 					"style": {
-						"navigationBarTitleText": "美容/芳疗师",
+						"navigationBarTitleText": "服务老师",
 						"navigationStyle": "custom",
 						"navigationBarTextStyle": "black"
 					}

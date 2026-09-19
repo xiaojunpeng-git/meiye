@@ -1,12 +1,12 @@
 <template>
 	<view class="therapist-page" :style="colorStyle">
 		<!-- #ifdef MP || APP-PLUS -->
-		<NavBar titleText="美容/芳疗师" :iconColor="iconColor" :textColor="iconColor" :bagColor="bagColor" showBack />
+		<NavBar titleText="服务老师" :iconColor="iconColor" :textColor="iconColor" :bagColor="bagColor" showBack />
 		<!-- #endif -->
 		<!-- #ifdef H5 -->
 		<view class="h5-nav acea-row row-center-wrapper">
 			<text class="iconfont icon-ic_leftarrow" @click="goBack"></text>
-			<text class="h5-nav-title">美容/芳疗师</text>
+			<text class="h5-nav-title">服务老师</text>
 		</view>
 		<!-- #endif -->
 		<view class="header">
@@ -214,13 +214,6 @@
 				</view>
 				<view class="card-actions">
 					<view class="action-btn btn-primary" @click="goBooking(item)">立即预约</view>
-					<view class="action-row">
-						<view class="action-btn btn-secondary" @click="goOrder(item)">下单</view>
-						<view class="share-btn" @click="shareStaff(item)">
-							<text class="iconfont icon-ic_share1"></text>
-							<text>分享</text>
-						</view>
-					</view>
 				</view>
 			</view>
 			<view class="pb-safe"></view>
@@ -659,24 +652,6 @@ export default {
 			uni.navigateTo({
 				url: '/pages/users/user_card_list/index',
 			});
-		},
-		goOrder(staff) {
-			if (!this.storeId) {
-				return this.$util.Tips({ title: '请先选择门店' });
-			}
-			this.saveSelectedTeacher(staff);
-			uni.navigateTo({
-				url: `/pages/store/home/index?id=${this.storeId}`,
-			});
-		},
-		shareStaff(staff) {
-			// #ifdef MP
-			uni.showShareMenu({ withShareTicket: true });
-			this.$util.Tips({ title: `分享${staff.staff_name}` });
-			// #endif
-			// #ifndef MP
-			this.$util.Tips({ title: '请使用右上角分享' });
-			// #endif
 		},
 		goBack() {
 			uni.navigateBack({ delta: 1 });
@@ -1171,11 +1146,6 @@ export default {
 	flex-shrink: 0;
 }
 
-.action-row {
-	display: flex;
-	gap: 12rpx;
-}
-
 .action-btn {
 	border-radius: 20rpx;
 	font-size: 26rpx;
@@ -1189,33 +1159,6 @@ export default {
 	box-shadow: 0 6rpx 20rpx rgba(0, 212, 170, 0.4);
 	width: 220rpx;
 	padding: 16rpx 0;
-}
-
-.btn-secondary {
-	background: #fff;
-	color: var(--page-theme);
-	border: 1rpx solid var(--page-theme);
-	width: 104rpx;
-	padding: 14rpx 0;
-	font-size: 24rpx;
-}
-
-.share-btn {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	width: 104rpx;
-	padding: 10rpx 0;
-	border-radius: 20rpx;
-	background: #f0f0f0;
-	color: #666;
-	font-size: 22rpx;
-}
-
-.share-btn .iconfont {
-	font-size: 24rpx;
-	margin-bottom: 4rpx;
 }
 
 .pb-safe {
