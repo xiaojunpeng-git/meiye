@@ -873,6 +873,8 @@ Route::group('adminapi', function () {
         Route::get('coupon/released', 'v1.marketing.coupon.StoreCouponIssue/index')->option(['real_name' => '已发布优惠券列表']);
         //添加优惠券
         Route::post('coupon/save_coupon/:id', 'v1.marketing.coupon.StoreCouponIssue/saveCoupon')->option(['real_name' => '添加优惠券']);
+        //修改已发布优惠券的会员转赠开关
+        Route::post('coupon/transfer-setting/:id', 'v1.marketing.coupon.StoreCouponIssue/transferSetting')->option(['real_name' => '修改优惠券会员转赠设置']);
         //优惠券审核表单
         Route::get('coupon/verify/form/:id', 'v1.marketing.coupon.StoreCouponIssue/verifyForm')->option(['real_name' => '内容审核']);
         //审核表单

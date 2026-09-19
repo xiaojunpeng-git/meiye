@@ -75,10 +75,13 @@
 							<view class="">查看用券规则<text class="iconfont icon-ic_rightarrow"></text></view>
 						</view>
 					</view>
-					<view class="btn-box acea-row row-middle">
+					<view class="btn-box acea-row row-middle" :class="{ 'btn-box--transfer': navOn === 0 && item.can_transfer }">
 						<view class="btn disabled" v-if="navOn == 1">已使用</view>
 						<view class="btn disabled" v-else-if="navOn == 2">已失效</view>
-						<view class="btn" v-else @tap.stop="useCoupon(item)">去使用</view>
+						<template v-else>
+							<view class="btn" @tap.stop="useCoupon(item)">去使用</view>
+							<view v-if="item.can_transfer" class="btn btn-transfer" @tap.stop="goTransfer(item)">转赠</view>
+						</template>
 					</view>
 				</view>
 			</view>
@@ -131,7 +134,8 @@
 				used: 0,
 				shadeRight: true,
 				shadeLeft: true,
-        homeHide: false
+				homeHide: false,
+				needsReload: false
 			};
 		},
 		computed: mapGetters(['isLogin']),
@@ -157,6 +161,10 @@
 		},
 		onShow() {
 			uni.removeStorageSync('form_type_cart');
+			if (this.needsReload && this.isLogin) {
+				this.needsReload = false;
+				this.reloadCoupons();
+			}
 		},
 		onReachBottom() {
 			this.getUseCoupons();
@@ -165,6 +173,14 @@
 			this.homeHide = true;
 		},
 		methods: {
+			reloadCoupons() {
+				this.couponsList = [];
+				this.page = 1;
+				this.finished = false;
+				this.loading = false;
+				this.getCouponsNum();
+				this.getUseCoupons();
+			},
 			getCouponsNum() {
 				getCouponsNum().then(res => {
 					this.used = res.data.used;
@@ -218,6 +234,19 @@
 				}
 				uni.navigateTo({
 					url
+				});
+			},
+			goTransfer(item) {
+				this.needsReload = true;
+				const params = [
+					`coupon_user_id=${Number(item.id)}`,
+					`title=${encodeURIComponent(item.coupon_title || '')}`,
+					`coupon_price=${encodeURIComponent(item.coupon_price || '')}`,
+					`use_min_price=${encodeURIComponent(item.use_min_price || '')}`,
+					`end_time=${encodeURIComponent(item.end_time || '')}`
+				];
+				uni.navigateTo({
+					url: `/pages/users/coupon_transfer/index?${params.join('&')}`
 				});
 			},
 			/**
@@ -534,6 +563,12 @@
 
 		.btn-box {
 			padding: 0 20rpx;
+
+			&--transfer {
+				flex-direction: column;
+				justify-content: center;
+				align-items: center;
+			}
 		}
 
 		.btn {
@@ -545,6 +580,13 @@
 			font-size: 22rpx;
 			line-height: 52rpx;
 			color: var(--view-theme);
+		}
+
+		.btn-transfer {
+			margin-top: 12rpx;
+			background-color: #FFFFFF;
+			border: 1rpx solid var(--view-theme);
+			line-height: 50rpx;
 		}
 
 		.disabled {

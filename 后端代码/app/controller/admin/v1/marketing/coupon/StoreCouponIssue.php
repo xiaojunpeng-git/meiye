@@ -115,7 +115,9 @@ class StoreCouponIssue extends AuthController
             ['applicable_type', 1],//适用门店类型
             ['applicable_store_id', []],//适用门店IDS
             ['rule', ''],
+            ['allow_transfer', 0],//是否允许会员转赠
         ]);
+        $data['allow_transfer'] = (int)!empty($data['allow_transfer']);
         if ($data['applicable_type'] == 1) {
             $data['applicable_store_id'] = [];
         } elseif ($data['applicable_type'] == 2) {
@@ -184,6 +186,33 @@ class StoreCouponIssue extends AuthController
         $id = $id ?: 0;
         $res = $this->services->saveCoupon($data, $id, 0);
         if ($res) return $this->success($id ? '编辑成功' : '添加成功!');
+    }
+
+    /**
+     * 修改已发布优惠券的会员转赠开关。
+     * 该接口只更新 allow_transfer，避免在详情页误改金额、有效期或发行数量。
+     *
+     * @param int $id
+     * @return mixed
+     */
+    public function transferSetting($id)
+    {
+        $id = (int)$id;
+        if ($id <= 0) {
+            return $this->fail('缺少参数');
+        }
+        $info = $this->services->get($id);
+        if (!$info || (int)$info->is_del === 1) {
+            return $this->fail('优惠券不存在');
+        }
+        [$allowTransfer] = $this->request->postMore([
+            ['allow_transfer', 0],
+        ], true);
+        $allowTransfer = (int)$allowTransfer === 1 ? 1 : 0;
+        if (!$this->services->update($id, ['allow_transfer' => $allowTransfer])) {
+            return $this->fail('转赠设置保存失败');
+        }
+        return $this->success('转赠设置已保存');
     }
 
     /**

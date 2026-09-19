@@ -109,6 +109,23 @@
                 手动领取：用户需要在移动端的领券中心领取优惠券；后台发放：后台发放用于后台发放指定用户使用，移动端不能领取；
               </div>
             </FormItem>
+            <FormItem label="会员转赠：">
+              <RadioGroup v-model="formData.allow_transfer">
+                <Radio :label="0">不允许</Radio>
+                <Radio :label="1">允许</Radio>
+              </RadioGroup>
+              <Button
+                v-if="type === 1"
+                type="primary"
+                size="small"
+                class="ml15"
+                :loading="transferSettingSaving"
+                @click="saveTransferSetting"
+              >保存转赠设置</Button>
+              <div class="info">
+                开启后，会员可将未使用且未失效的券转赠一次；有效期不会延长。
+              </div>
+            </FormItem>
             <FormItem label="适用类型：">
               <RadioGroup v-model="formData.type">
                 <Radio :label="0" :disabled="[1].includes(type)">通用券</Radio>
@@ -452,6 +469,7 @@ import {
   couponCategoryApi,
   couponSaveApi,
   couponDetailApi,
+  couponTransferSettingApi,
 } from '@/api/marketing';
 import { brandList } from '@/api/product';
 import Setting from '@/setting';
@@ -469,6 +487,7 @@ export default {
         { name: '折扣券', title: '满N元打N折', id: 2 },
       ],
       disabled: false,
+      transferSettingSaving: false,
       storesList: [],
       formData: {
         coupon_title: '',
@@ -496,6 +515,7 @@ export default {
         applicable_store_id: [],
         rule: '',
         category: 1,
+        allow_transfer: 0,
       },
       categoryList: [],
       brandList: [],
@@ -599,6 +619,7 @@ export default {
           this.formData.use_min_price = parseFloat(data.use_min_price);
           this.formData.coupon_time = data.coupon_time;
           this.formData.receive_type = data.receive_type;
+          this.formData.allow_transfer = Number(data.allow_transfer || 0);
           this.formData.is_permanent = data.is_permanent;
           this.formData.status = data.status;
           this.formData.product_id = data.product_id;
@@ -710,6 +731,25 @@ export default {
         })
         .catch((err) => {
           this.$Message.error(err.msg);
+        });
+    },
+    // 已发布优惠券只保存会员转赠开关，不改动其他券规则。
+    saveTransferSetting() {
+      if (!this.id || this.type !== 1 || this.transferSettingSaving) {
+        return;
+      }
+      this.transferSettingSaving = true;
+      couponTransferSettingApi(this.id, {
+        allow_transfer: Number(this.formData.allow_transfer) === 1 ? 1 : 0,
+      })
+        .then((res) => {
+          this.$Message.success(res.msg);
+        })
+        .catch((err) => {
+          this.$Message.error(err.msg);
+        })
+        .finally(() => {
+          this.transferSettingSaving = false;
         });
     },
     // 使用有效期--时间段

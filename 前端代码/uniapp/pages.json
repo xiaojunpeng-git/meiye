@@ -439,6 +439,13 @@
 					}
 				},
 				{
+					"path": "coupon_transfer/index",
+					"style": {
+						"navigationBarTitleText": "优惠券转赠",
+						"navigationBarTextStyle": "black"
+					}
+				},
+				{
 					"path": "user_spread_user/index",
 					"style": {
 						"navigationStyle": "custom",

@@ -102,6 +102,40 @@ class StoreCoupons
     }
 
     /**
+     * 转赠前按完整手机号精确查询接收会员
+     */
+    public function transferTarget(Request $request, StoreCouponUserServices $services)
+    {
+        [$couponUserId, $phone] = $request->postMore([
+            ['coupon_user_id', 0],
+            ['phone', ''],
+        ], true);
+        return app('json')->successful($services->getTransferTargetByPhone(
+            (int)$request->uid(),
+            (int)$couponUserId,
+            (string)$phone
+        ));
+    }
+
+    /**
+     * 转赠一张会员优惠券
+     */
+    public function transfer(Request $request, StoreCouponUserServices $services)
+    {
+        [$couponUserId, $phone, $requestId] = $request->postMore([
+            ['coupon_user_id', 0],
+            ['phone', ''],
+            ['request_id', ''],
+        ], true);
+        return app('json')->success('转赠成功', $services->transferCoupon(
+            (int)$request->uid(),
+            (int)$couponUserId,
+            (string)$phone,
+            (string)$requestId
+        ));
+    }
+
+    /**
      * 优惠券 订单获取
      * @param Request $request
      * @param $price

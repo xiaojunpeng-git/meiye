@@ -82,7 +82,7 @@ class StoreCouponUser extends BaseModel
      */
     public function issue()
     {
-        return $this->hasOne(StoreCouponIssue::class, 'id', 'cid')->field(['id', 'end_use_time', 'start_use_time', 'coupon_type', 'top_discount_price', 'category', 'type', 'coupon_time', 'product_id', 'category_id', 'brand_id', 'receive_type', 'applicable_type', 'applicable_store_id', 'coupon_issue_type', 'relation_id', 'is_verify', 'rule'])->bind([
+        return $this->hasOne(StoreCouponIssue::class, 'id', 'cid')->field(['id', 'end_use_time', 'start_use_time', 'coupon_type', 'top_discount_price', 'category', 'type', 'coupon_time', 'product_id', 'category_id', 'brand_id', 'receive_type', 'applicable_type', 'applicable_store_id', 'coupon_issue_type', 'relation_id', 'is_verify', 'allow_transfer', 'rule'])->bind([
             'coupon_applicable_type' => 'type',
             'coupon_time' => 'coupon_time',
             'rule',
@@ -96,6 +96,7 @@ class StoreCouponUser extends BaseModel
             'start_use_time',
             'end_use_time',
             'is_verify',
+            'allow_transfer',
             'coupon_issue_type' => 'coupon_issue_type',
             'relation_id',
             'applicable_type',

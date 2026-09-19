@@ -19,6 +19,7 @@ use app\services\user\UserServices;
 use app\dao\activity\coupon\StoreCouponUserDao;
 use app\services\product\category\StoreProductCategoryServices;
 use think\exception\ValidateException;
+use think\facade\Db;
 
 /**
  * Class StoreCouponUserServices
@@ -351,6 +352,16 @@ class StoreCouponUserServices extends BaseServices
         $where['issue_type'] = $type;
         [$page, $limit] = $this->getPageValue();
         $list = $this->dao->getCouponListByOrder($where, 'status ASC,add_time DESC', $page, $limit);
+        $transferredCouponIds = [];
+        if ($list) {
+            $couponUserIds = array_values(array_filter(array_map('intval', array_column($list, 'id'))));
+            if ($couponUserIds) {
+                $transferredCouponIds = Db::name('store_coupon_transfer')
+                    ->whereIn('coupon_user_id', $couponUserIds)
+                    ->column('coupon_user_id');
+                $transferredCouponIds = array_fill_keys(array_map('intval', $transferredCouponIds), true);
+            }
+        }
         /** @var StoreProductCategoryServices $categoryServices */
         $categoryServices = app()->make(StoreProductCategoryServices::class);
         $category = $categoryServices->getColumn([], 'pid,cate_name', 'id');
@@ -358,6 +369,7 @@ class StoreCouponUserServices extends BaseServices
         $storeBrandServices = app()->make(StoreBrandServices::class);
         $brand = $storeBrandServices->getColumn([], 'id,pid,brand_name', 'id');
         foreach ($list as &$item) {
+            $item['has_transfer_record'] = isset($transferredCouponIds[(int)($item['id'] ?? 0)]);
             $item['applicable_type'] = $item['coupon_applicable_type'];
             if ($item['category_id'] && isset($category[$item['category_id']])) {
                 $item['category_type'] = $category[$item['category_id']]['pid'] == 0 ? 1 : 2;
@@ -398,6 +410,7 @@ class StoreCouponUserServices extends BaseServices
     {
         $time = time();
         foreach ($couponList as &$coupon) {
+            $endTimestamp = (int)($coupon['end_time'] ?? 0);
             if ($coupon['status'] == '已使用') {
                 $coupon['_type'] = 0;
                 $coupon['_msg'] = '已使用';
@@ -437,8 +450,155 @@ class StoreCouponUserServices extends BaseServices
             $coupon['end_time'] = $coupon['_end_time'] = date('Y/m/d', $coupon['end_time']);
             $coupon['use_min_price'] = floatval($coupon['use_min_price']);
             $coupon['coupon_price'] = floatval($coupon['coupon_price']);
+            $coupon['can_transfer'] = (int)($coupon['allow_transfer'] ?? 0) === 1
+                && ($coupon['status'] ?? '') === '未使用'
+                && (int)($coupon['is_fail'] ?? 0) === 0
+                && (int)($coupon['use_time'] ?? 0) === 0
+                && $endTimestamp >= $time
+                && empty($coupon['has_transfer_record']);
         }
         return $couponList;
+    }
+
+    /**
+     * 按完整手机号码精确查找同一实例内的接收会员。
+     */
+    public function getTransferTargetByPhone(int $senderUid, int $couponUserId, string $phone): array
+    {
+        $now = time();
+        $coupon = Db::name('store_coupon_user')
+            ->where('id', $couponUserId)
+            ->where('uid', $senderUid)
+            ->where('status', 0)
+            ->where('is_fail', 0)
+            ->where('use_time', 0)
+            ->where('end_time', '>=', $now)
+            ->find();
+        if (!$coupon) {
+            throw new ValidateException('优惠券不存在或当前不可转赠');
+        }
+        $allowTransfer = Db::name('store_coupon_issue')->where('id', (int)$coupon['cid'])->value('allow_transfer');
+        if ((int)$allowTransfer !== 1
+            || Db::name('store_coupon_transfer')->where('coupon_user_id', $couponUserId)->count()) {
+            throw new ValidateException('该优惠券当前不可转赠');
+        }
+        return $this->resolveTransferTarget($senderUid, $phone);
+    }
+
+    /**
+     * 只解析接收会员；公开查询必须先通过券归属与转赠资格校验。
+     */
+    protected function resolveTransferTarget(int $senderUid, string $phone): array
+    {
+        $phone = trim($phone);
+        if (!preg_match('/^1\d{10}$/', $phone)) {
+            throw new ValidateException('请输入正确的11位手机号码');
+        }
+        /** @var UserServices $userServices */
+        $userServices = app()->make(UserServices::class);
+        $target = $userServices->getOne(['phone' => $phone], 'uid,nickname,phone,avatar');
+        if (!$target) {
+            throw new ValidateException('没有查找到该手机号码对应的会员');
+        }
+        $target = is_array($target) ? $target : $target->toArray();
+        if ((int)($target['uid'] ?? 0) === $senderUid) {
+            throw new ValidateException('不能转赠给自己');
+        }
+        return $this->formatTransferTarget($target);
+    }
+
+    /**
+     * 将同一张优惠券实例转给另一会员；券规则和有效期保持不变。
+     */
+    public function transferCoupon(int $senderUid, int $couponUserId, string $phone, string $requestId): array
+    {
+        if ($senderUid <= 0 || $couponUserId <= 0) {
+            throw new ValidateException('转赠参数错误');
+        }
+        $requestId = trim($requestId);
+        if (!preg_match('/^[A-Za-z0-9:_-]{16,64}$/', $requestId)) {
+            throw new ValidateException('转赠请求标识无效，请刷新后重试');
+        }
+        $target = $this->resolveTransferTarget($senderUid, $phone);
+        $targetUid = (int)$target['uid'];
+
+        return $this->transaction(function () use ($senderUid, $couponUserId, $targetUid, $target, $requestId) {
+            $replayed = Db::name('store_coupon_transfer')->where('request_id', $requestId)->lock(true)->find();
+            if ($replayed) {
+                if ((int)$replayed['coupon_user_id'] !== $couponUserId
+                    || (int)$replayed['from_uid'] !== $senderUid
+                    || (int)$replayed['to_uid'] !== $targetUid) {
+                    throw new ValidateException('转赠请求标识已被使用');
+                }
+                return [
+                    'transfer_no' => (string)$replayed['transfer_no'],
+                    'coupon_user_id' => $couponUserId,
+                    'target' => $target,
+                    'idempotent_replay' => true,
+                ];
+            }
+
+            $coupon = Db::name('store_coupon_user')->where('id', $couponUserId)->lock(true)->find();
+            if (!$coupon || (int)$coupon['uid'] !== $senderUid) {
+                throw new ValidateException('优惠券不存在或已不属于当前会员');
+            }
+            $now = time();
+            if ((int)$coupon['status'] !== 0 || (int)$coupon['is_fail'] !== 0
+                || (int)$coupon['use_time'] !== 0 || (int)$coupon['end_time'] < $now) {
+                throw new ValidateException('该优惠券当前不可转赠');
+            }
+            $issue = Db::name('store_coupon_issue')->where('id', (int)$coupon['cid'])->field('id,allow_transfer')->find();
+            if (!$issue || (int)$issue['allow_transfer'] !== 1) {
+                throw new ValidateException('该优惠券未开启转赠');
+            }
+            if (Db::name('store_coupon_transfer')->where('coupon_user_id', $couponUserId)->count()) {
+                throw new ValidateException('该优惠券已经转赠过，不能再次转赠');
+            }
+
+            $updated = Db::name('store_coupon_user')
+                ->where('id', $couponUserId)
+                ->where('uid', $senderUid)
+                ->where('status', 0)
+                ->where('is_fail', 0)
+                ->where('use_time', 0)
+                ->where('end_time', '>=', $now)
+                ->update(['uid' => $targetUid]);
+            if ($updated !== 1) {
+                throw new ValidateException('优惠券状态已变化，请刷新后重试');
+            }
+
+            $transferNo = 'CT' . date('YmdHis', $now) . strtoupper(substr(md5($requestId), 0, 10));
+            Db::name('store_coupon_transfer')->insert([
+                'transfer_no' => $transferNo,
+                'request_id' => $requestId,
+                'coupon_user_id' => $couponUserId,
+                'coupon_id' => (int)$coupon['cid'],
+                'coupon_title' => (string)$coupon['coupon_title'],
+                'from_uid' => $senderUid,
+                'to_uid' => $targetUid,
+                'coupon_start_time' => (int)$coupon['start_time'],
+                'coupon_end_time' => (int)$coupon['end_time'],
+                'occurred_at' => $now,
+                'recorded_at' => $now,
+            ]);
+            return [
+                'transfer_no' => $transferNo,
+                'coupon_user_id' => $couponUserId,
+                'target' => $target,
+                'idempotent_replay' => false,
+            ];
+        });
+    }
+
+    protected function formatTransferTarget(array $target): array
+    {
+        $phone = (string)($target['phone'] ?? '');
+        return [
+            'uid' => (int)($target['uid'] ?? 0),
+            'nickname' => (string)($target['nickname'] ?? ''),
+            'phone_masked' => preg_replace('/^(\d{3})\d{4}(\d{4})$/', '$1****$2', $phone),
+            'avatar' => (string)($target['avatar'] ?? ''),
+        ];
     }
 
     /**

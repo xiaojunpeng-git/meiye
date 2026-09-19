@@ -92,6 +92,14 @@ export function getUserCoupons(types, data) {
 	return request.get('coupons/user/' + types, data)
 }
 
+export function getCouponTransferTarget(data) {
+	return request.post('coupons/transfer/target', data)
+}
+
+export function transferUserCoupon(data) {
+	return request.post('coupons/transfer', data)
+}
+
 /**
  * 首页新人优惠券
  * 

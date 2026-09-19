@@ -421,6 +421,8 @@ Route::group('api', function () {
         Route::post('coupon/receive/batch', 'v1.activity.StoreCoupons/receive_batch')->middleware(BlockerMiddleware::class)->name('couponReceiveBatch'); //批量领取优惠券
         Route::get('coupons/user/num', 'v1.activity.StoreCoupons/userCount')->name('userCount');//我的优惠券数量
         Route::get('coupons/user/:types', 'v1.activity.StoreCoupons/user')->name('couponsUser');//用户已领取优惠券
+        Route::post('coupons/transfer/target', 'v1.activity.StoreCoupons/transferTarget')->middleware(BlockerMiddleware::class)->name('couponTransferTarget');//精确查询转赠接收会员
+        Route::post('coupons/transfer', 'v1.activity.StoreCoupons/transfer')->middleware(BlockerMiddleware::class)->name('couponTransfer');//会员优惠券转赠
         Route::get('coupons/order/:price', 'v1.activity.StoreCoupons/order')->name('couponsOrder');//优惠券 订单列表
 
 

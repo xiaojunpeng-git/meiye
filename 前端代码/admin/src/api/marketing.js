@@ -55,6 +55,17 @@ export function couponSaveApi(id, data) {
 }
 
 /**
+ * @description 已发布优惠券--保存会员转赠设置
+ */
+export function couponTransferSettingApi(id, data) {
+  return request({
+    url: `marketing/coupon/transfer-setting/${id}`,
+    method: 'post',
+    data
+  });
+}
+
+/**
  * @description 优惠券制作--编辑表单
  */
 export function couponEditeApi(id) {
