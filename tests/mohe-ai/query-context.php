@@ -24,10 +24,10 @@ qcCheck($cohortView['has_business_filter']===true&&$cohortView['has_object_selec
 $suggestedView=IntentContextMerger::modelView($source,['presentation_origin'=>'platform_observation']);
 qcCheck($suggestedView['presentation_origin']==='platform_observation','model can distinguish a platform first answer from a customer-selected metric');
 qcCheck(array_diff(array_keys($suggestedView),['metric_codes','operation','aggregate_condition','periods','ranking','scope','object_kind','has_store_scope_restriction','has_business_filter','has_object_selection','presentation_origin'])===[],'presentation provenance adds no answer, identity or result field to the model view');
-qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::modelInstruction(true),'one deliberately presented overview group')!==false,
-    'binding instruction preserves a model-understood overview group across a contextual follow-up without a metric rule');
-qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::semanticReviewInstruction(),'presentation_origin is platform_observation')!==false,
-    'independent review distinguishes a continued platform overview from a new multi-metric answer without a metric rule');
+qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::modelInstruction(true),'one executed metric perspective')!==false,
+    'binding instruction preserves a verified query perspective across a contextual follow-up without a metric rule');
+qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::semanticReviewInstruction(),'For a verified prior query, metric_codes are one executed query perspective')!==false,
+    'independent review distinguishes a continued verified query from new multi-metric alternatives without an origin rule');
 qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::semanticReviewInstruction(),'generic metric requirement')!==false,
     'independent review leaves broad-versus-specific business meaning to the model rather than a protocol-field shortcut');
 qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::semanticReviewInstruction(),'accept|reject|metric_choice')===false,
@@ -182,6 +182,7 @@ $missing=$intent;unset($missing['context_delta']);
 qcReject(function()use($missing,$safe){app\services\ai\contract\AiIntentResultContract::normalize($missing,['staff_labor_yeji'],[],$safe,['requirements'=>[['id'=>'r1','fields'=>['metric_codes','object_kind','operation','periods','ranking','scope']]]]);},'AI_MODEL_INTENT_CONTRACT_INVALID');
 foreach(['context_delta','metric_codes','operation'] as $key)qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('missing_key:'.$key),'one retry requests model-owned structural completion for '.$key);
 qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('bad_value:requirement_bindings'),'one retry can correct an invalid metric requirement row without authorizing it');
+qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('bad_value:metric_codes'),'one retry can correct a malformed model metric array without selecting a business metric in PHP');
 qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('provenance_field_not_understood'),'one retry can align a binding field with accepted understanding without supplying business meaning');
 qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('bad_value:result_reference'),'one retry can remove an ungrounded private-result reference without supplying customer meaning');
 qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('unknown_metric_code'),'one retry can replace a hallucinated metric code only with a supplied registered candidate');

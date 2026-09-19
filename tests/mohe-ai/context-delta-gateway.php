@@ -30,6 +30,71 @@ try {
         'a reviewer-confirmed broad operating question repairs into the registered overview rather than opening a metric selector: '.($choiceFinal['status']??'missing').'/'.($choiceFinal['reason']??'none'));
     $choiceHarness->close();
 
+    // A completed query is a signed context, regardless of whether its
+    // metric perspective originated from the customer or the platform.
+    $overviewMetricCodes=['metric_01','metric_02','metric_03','metric_04','metric_05','metric_06','metric_07','metric_08','metric_09'];
+    $overviewInherited=\app\services\ai\contract\AiIntentResultContract::inheritedPeriodOnlyContextIntent(
+        ['status'=>'understood','requirements'=>[
+            ['id'=>'r1','meaning'=>'查看这个月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'这个月']]],
+        ]],
+        ['metric_codes'=>$overviewMetricCodes,'query_shape'=>'summary','ranking'=>['direction'=>'unspecified','limit'=>null],'business_filters'=>['object_kind'=>'store']],
+        ['presentation_origin'=>'platform_observation']
+    );
+    cdgCheck(is_array($overviewInherited)&&($overviewInherited['metric_codes']??null)===$overviewMetricCodes
+        &&($overviewInherited['initial_observation']??false)===true,
+        'a signed query retains its complete registered profile on a typed period-only continuation');
+    $periodWithPriorEvidence=\app\services\ai\contract\AiIntentResultContract::inheritedPeriodOnlyContextIntent(
+        ['status'=>'understood','requirements'=>[
+            ['id'=>'r1','meaning'=>'查看昨天','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'date_range','start'=>'2026-09-19','end'=>'2026-09-19']]],'evidence'=>[
+                ['message_id'=>'current','quote'=>'昨天呢','start'=>0],
+                ['message_id'=>'recent_1','quote'=>'今天劳动业绩第一名是谁','start'=>0],
+            ]],
+        ]],
+        ['metric_codes'=>['staff_labor_yeji'],'query_shape'=>'ranking','ranking'=>['direction'=>'top','limit'=>1],
+            'business_filters'=>['object_kind'=>'person','selection_ref'=>'role:craftsman']],
+        ['presentation_origin'=>'customer_or_verified_context']
+    );
+    cdgCheck(is_array($periodWithPriorEvidence)
+        &&($periodWithPriorEvidence['metric_codes']??null)===['staff_labor_yeji']
+        &&($periodWithPriorEvidence['operation']??null)==='ranking',
+        'a complete current period anchor may keep explanatory prior evidence without re-binding a signed ranking metric');
+
+    $overviewHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $capabilitiesMethod=new ReflectionMethod($overviewHarness->gateway,'capabilities');
+    if (PHP_VERSION_ID<80100) $capabilitiesMethod->setAccessible(true);
+    $overviewRecoveryMethod=new ReflectionMethod($overviewHarness->gateway,'requiresOpenOverviewRecovery');
+    if (PHP_VERSION_ID<80100) $overviewRecoveryMethod->setAccessible(true);
+    $overviewCapabilities=$capabilitiesMethod->invoke($overviewHarness->gateway,$overviewHarness->context);
+    $periodContinuationUnderstanding=['status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'查看昨天','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'date_range','start'=>'2026-09-19','end'=>'2026-09-19']]],'evidence'=>[['message_id'=>'current','quote'=>'昨天呢','start'=>0]]],
+    ]];
+    $inheritedPersonnelRanking=['object_kind'=>'person','operation'=>'ranking','metric_codes'=>['staff_labor_yeji'],
+        'needs_metric_choice'=>false,'initial_observation'=>false];
+    cdgCheck($overviewRecoveryMethod->invoke($overviewHarness->gateway,$periodContinuationUnderstanding,
+        $inheritedPersonnelRanking,$overviewCapabilities,false)===true,
+        'the regression fixture reproduces the former store-overview recovery collision');
+    cdgCheck($overviewRecoveryMethod->invoke($overviewHarness->gateway,$periodContinuationUnderstanding,
+        $inheritedPersonnelRanking,$overviewCapabilities,true)===false,
+        'a verified context binding cannot be reinterpreted as a new store overview');
+    $overviewHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary',
+        'metric_codes'=>['cash_performance','consume_amount'],'action_codes'=>[],'needs_metric_choice'=>false,
+        'initial_observation'=>true,'ranking'=>['direction'=>'unspecified','limit'=>null],
+        'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'authorized','unresolved_fragments'=>[]];
+    $overviewSource=$overviewHarness->start('今天整体经营怎么样？');
+    cdgCheck($overviewSource['status']==='COMPLETED'&&isset($overviewSource['answer']['context_ref']),
+        'the platform observation source query is available for a date-only continuation');
+    $overviewHarness->understandingOverride=['goal'=>'查看这个月','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'查看这个月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'这个月呢？']]],
+    ]];
+    $overviewQueries=$overviewHarness->queries;$overviewModels=$overviewHarness->models;
+    $overviewFollow=$overviewHarness->start('这个月呢？',$overviewSource['answer']['context_ref']);
+    $overviewEvidence=$overviewHarness->private->read($overviewHarness->row($overviewFollow)['evidence_ref']);
+    cdgCheck($overviewFollow['status']==='COMPLETED'&&$overviewHarness->queries===$overviewQueries+1
+        &&$overviewHarness->models===$overviewModels+1
+        &&($overviewEvidence['query']['start_date']??'')===substr((string)($overviewEvidence['query']['end_date']??''),0,7).'-01',
+        'an exact calendar-only continuation reuses a signed query and skips the binding model');
+    $overviewHarness->close();
+
     $h=new R6GatewayHarness(3,[1,2],'platform');
     $initialIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-08']],'scope'=>'authorized','unresolved_fragments'=>[]];
 

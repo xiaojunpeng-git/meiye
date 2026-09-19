@@ -213,6 +213,36 @@ $reject(static function()use($unsafePeriodOnlyUnderstanding,$selectedStandaloneQ
     'a period-only shortcut cannot omit a different business fact from the same current message');
 $check(AiIntentUnderstandingContract::repairable('period_only_coverage'),
     'an incomplete period-only evidence anchor receives one model-owned understanding repair');
+$periodWithHistoricalMetric=$periodOnlyUnderstanding;
+$periodWithHistoricalMetric['requirements'][]=[
+    'id'=>'r2','meaning'=>'上一问的劳动业绩','fields'=>['metric_codes'],
+    'values'=>['metric_terms'=>['现金业绩']],
+    'evidence'=>[['message_id'=>'recent_1','quote'=>'现金业绩最高的人是谁？']],
+];
+$normalizedHistoricalMetric=AiIntentUnderstandingContract::normalize($periodWithHistoricalMetric,$periodOnlyAfterSelection);
+$check(count($normalizedHistoricalMetric['requirements'])===1
+    &&$normalizedHistoricalMetric['requirements'][0]['fields']===['periods'],
+    'a prior-only metric citation cannot become a new requirement beside a current period continuation');
+$duplicatedPeriodOnly=$periodOnlyUnderstanding;
+$duplicatedPeriodOnly['requirements'][]=[
+    'id'=>'r2','meaning'=>'重复的本月日期','fields'=>['periods'],
+    'values'=>['periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]]],
+    'evidence'=>[['message_id'=>'current','quote'=>'本月呢？']],
+];
+$reject(static function()use($duplicatedPeriodOnly,$periodOnlyAfterSelection){
+    AiIntentUnderstandingContract::normalize($duplicatedPeriodOnly,$periodOnlyAfterSelection);
+},'a time-only continuation cannot duplicate the prior period into a second requirement');
+$check(AiIntentUnderstandingContract::repairable('period_only_multiple'),
+    'duplicated period-only requirements receive one bounded understanding repair');
+$periodAsMetricUnderstanding=['goal'=>'查看本月','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'查看本月','fields'=>['metric_codes','periods'],
+        'values'=>['metric_terms'=>['本月'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
+        'evidence'=>[['message_id'=>'current','quote'=>'本月呢？']]],
+]];
+$reject(static function()use($periodAsMetricUnderstanding,$periodOnlyAfterSelection){AiIntentUnderstandingContract::normalize($periodAsMetricUnderstanding,$periodOnlyAfterSelection);},
+    'a calendar expression cannot be accepted as a replacement business metric');
+$check(AiIntentUnderstandingContract::repairable('period_term_as_metric'),
+    'a temporal term used as a metric receives one understanding repair before any binding query');
 $periodOnlyBinding=$selectedStandaloneBinding;$periodOnlyBinding['metric_codes']=[];$periodOnlyBinding['operation']='summary';$periodOnlyBinding['periods']=[['kind'=>'month_offset','offset_months'=>0]];$periodOnlyBinding['requirement_bindings']=[];
 $periodOnlyBinding['context_delta']['metric_codes']='inherit';$periodOnlyBinding['context_delta']['operation']='inherit';
 $reject(static function()use($periodOnlyBinding,$periodOnlyAfterSelection,$periodOnlyUnderstanding){AiIntentResultContract::normalize($periodOnlyBinding,['cash_performance'],[],$periodOnlyAfterSelection,$periodOnlyUnderstanding);},

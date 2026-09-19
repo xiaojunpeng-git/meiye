@@ -86,10 +86,10 @@ rejected(static function(){build('本月现金前五家10000');},'AI_INTENT_UNRE
 // Neither client answers nor history can silently bind executable slots.
 $view=$parser->modelView($parser->validateConversation('那上个月呢',[['question'=>'本月现金是多少','answer'=>['amount'=>987654321,'scope'=>'ALL','name'=>'SECRET_PERSON']]]));
 verify(!in_array('cash_performance',$view['current']['signals'],true),'follow-up not auto-filled from untrusted history');
-verify($view['current']['semantic_intent']['followup']==='requested','follow-up intent explicit');
+verify(in_array('LAST_MONTH',$view['current']['signals'],true),'date grammar remains available without classifying the conversation relationship locally');
 verify(strpos(json_encode($view),'987654321')===false && strpos(json_encode($view),'SECRET_PERSON')===false,'history answer data not externalized');
 $sameDate=$parser->project('相同日期的现金业绩，生成Excel');
-verify($sameDate['semantic_intent']['followup']==='requested' && $sameDate['blocking_reason']===null
+verify($sameDate['blocking_reason']===null
     && in_array('cash_performance',$sameDate['signals'],true) && in_array('xlsx',$sameDate['signals'],true), 'same-date export is a legal signed-context follow-up');
 $r=build('那上个月呢');verify($r['fields'][0]['key']==='metric_code' && $r['resolved_range']===['start'=>'2026-09-01','end'=>'2026-09-30'],'follow-up keeps new date and asks only missing metric');
 $r=build('换成消耗呢');verify($r['fields'][0]['key']==='start_date' && $r['resolved_metrics']===['consume_amount'],'metric follow-up never inherits untrusted dates');

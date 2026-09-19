@@ -48,7 +48,6 @@ final class AiSemanticIntentParser
         $covered=str_replace('为','',$covered);
         $unparsed=$covered!=='';
         if($unparsed) $constraints[]=['type'=>'unparsed_business_condition','status'=>'unresolved'];
-        $followup=preg_match('/^\s*(那|换成|继续|再看)|条件不变|其他条件别动|相同日期|同样日期|上述日期|原日期|(?:月|天)呢/u',$text)?'requested':'none';
         $signals=array_values(array_unique($signals));
         $limit=count($limits)===1?$limits[0]:null;
         if($limit===5 && !in_array('exclusion',$signals,true)) {
@@ -68,7 +67,7 @@ final class AiSemanticIntentParser
             'date_terms'=>$periods,'date_grouping_ambiguous'=>(bool)preg_match('/(?:今天|昨天|本月|这月|上月)\s*(?:到|至)|[0-9]{4}-[0-9]{2}-[0-9]{2}\s*(?:到|至)\s*(?:今天|昨天|本月|这月|上月)/u',$normalized),
             'unresolved_condition'=>$unparsed,'projection_version'=>'mohe-semantic-intent-v2',
             'semantic_intent'=>['version'=>2,'goal'=>in_array('definition',$signals,true)?'metric_definition':(in_array('ranking',$signals,true)?'store_performance_comparison':'business_results'),
-                'constraints'=>$constraints,'rank_limits'=>$limits,'rank_limit'=>$limit,'followup'=>$followup,
+                'constraints'=>$constraints,'rank_limits'=>$limits,'rank_limit'=>$limit,
                 'status'=>$unparsed?'unresolved':($constraints?'understood_unavailable':'understood')]];
     }
 

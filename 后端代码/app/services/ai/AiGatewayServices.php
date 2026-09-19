@@ -1029,6 +1029,9 @@ final class AiGatewayServices
         $reusedPeriodIntent=$sourceQuery===null?null:AiIntentResultContract::inheritedPeriodOnlyContextIntent(
             $understanding,$sourceQuery,(array)($sourceContext['meaning']??[])
         );
+        $contextBindingReused=$reusedConditionIntent!==null
+            ||$reusedConditionResultFormIntent!==null
+            ||$reusedPeriodIntent!==null;
         if ($reusedConditionIntent!==null) {
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'context_condition_update_binding_reused');
             $reply=['intent'=>$reusedConditionIntent,'usage'=>[]];
@@ -1219,7 +1222,13 @@ final class AiGatewayServices
         // fields with the signed predecessor, otherwise an exclusion could
         // disappear when the customer confirms the presentation choice.
         $bindingCandidate=$merged['prospective_intent'];
-        $openOverviewRecovery=$this->requiresOpenOverviewRecovery($understanding,$intent,$caps);
+        // Context reuse has already bound the accepted current meaning to a
+        // verified predecessor.  Overview recovery is only for an unbound
+        // open observation; running it here would reinterpret a period-only
+        // employee/member/product continuation as a new store overview.
+        $openOverviewRecovery=$this->requiresOpenOverviewRecovery(
+            $understanding,$intent,$caps,$contextBindingReused
+        );
         if ($openOverviewRecovery) {
             // The semantic pass admitted a broad operating goal, but binding
             // returned a selector before proposing the registered overview.
@@ -1800,8 +1809,9 @@ final class AiGatewayServices
      * in the understanding/review passes; registry metadata still owns which
      * metrics appear in that overview.
      */
-    private function requiresOpenOverviewRecovery(array $understanding,array $intent,array $capabilities): bool
+    private function requiresOpenOverviewRecovery(array $understanding,array $intent,array $capabilities,bool $contextBindingReused=false): bool
     {
+        if ($contextBindingReused) return false;
         if (!$this->allowsOpenOverviewRecovery($understanding,$capabilities)) return false;
         $registeredMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($capabilities,'store');
         $selectedMetrics=array_values(array_filter((array)($intent['metric_codes']??[]),static function($code){

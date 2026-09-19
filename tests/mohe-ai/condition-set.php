@@ -586,6 +586,27 @@ csCheck($memberUpdateMerged['metric_codes']===$memberUpdateSource['metric_codes'
     &&$memberUpdateMerged['aggregate_condition']['conditions'][1]['quantity']==='10000'
     &&$memberUpdateMerged['aggregate_condition']['conditions'][1]['metric_code']==='sales_collected_amount',
     'a unique yuan predicate changes while the visit condition, object, relation and registered metric order remain signed');
+$implicitUpdateSafe=['schema_version'=>'sanitized-question-v2','question'=>'改成2000元呢','has_unresolved_conditions'=>false,
+    'server_resolved_fields'=>[],'reference_date'=>'2026-09-20','recent_questions'=>[$memberNaturalSafe['question']],
+    'evidence_messages'=>[['id'=>'current','text'=>'改成2000元呢']],
+    'prior_query'=>IntentContextMerger::modelView($memberUpdateSource)];
+$implicitUpdateUnderstanding=AiIntentUnderstandingContract::normalize([
+    'goal'=>'修改上一条件中唯一的金额门槛','status'=>'understood','requirements'=>[[]+[
+        'id'=>'r1','meaning'=>'把金额门槛改为2000元','fields'=>['condition_update'],
+        // Providers sometimes repeat the signed metric label even though the
+        // terse current turn only states the replacement value.
+        'values'=>['condition_update'=>['target_term'=>'实际收款销售额','operator'=>'gte','quantity'=>'2000','unit'=>'yuan']],
+        'evidence'=>[['message_id'=>'current','quote'=>'改成2000元呢']],
+    ]],
+],$implicitUpdateSafe);
+$implicitUpdateIntent=AiIntentResultContract::inheritedConditionUpdateContextIntent(
+    $implicitUpdateUnderstanding,$memberUpdateSource
+);
+csCheck(is_array($implicitUpdateIntent)
+    &&($implicitUpdateIntent['aggregate_condition']['conditions'][0]??null)===$memberUpdateSource['aggregate_condition']['conditions'][0]
+    &&($implicitUpdateIntent['aggregate_condition']['conditions'][1]['metric_code']??null)==='sales_collected_amount'
+    &&($implicitUpdateIntent['aggregate_condition']['conditions'][1]['quantity']??null)==='2000',
+    'a terse threshold edit may target the one signed predicate with its unit without copying an unstated metric label');
 $ambiguousMoneySource=$memberUpdateSource;
 $ambiguousMoneySource['metric_codes']=['sales_collected_amount','cash_performance'];
 $ambiguousMoneySource['aggregate_condition']['conditions']=[
@@ -594,6 +615,16 @@ $ambiguousMoneySource['aggregate_condition']['conditions']=[
 ];
 csCheck(AiIntentResultContract::inheritedConditionUpdateContextIntent($memberUpdateUnderstanding,$ambiguousMoneySource)===null,
     'an ambiguous amount edit never chooses between two signed yuan predicates by position or guesswork');
+csReject(static function()use($implicitUpdateSafe,$ambiguousMoneySource): void {
+    $safe=$implicitUpdateSafe;$safe['prior_query']=IntentContextMerger::modelView($ambiguousMoneySource);
+    AiIntentUnderstandingContract::normalize([
+        'goal'=>'修改金额门槛','status'=>'understood','requirements'=>[[]+[
+            'id'=>'r1','meaning'=>'把门槛改为2000元','fields'=>['condition_update'],
+            'values'=>['condition_update'=>['target_term'=>'未在当前话语中的指标','operator'=>'gte','quantity'=>'2000','unit'=>'yuan']],
+            'evidence'=>[['message_id'=>'current','quote'=>'改成2000元呢']],
+        ]],
+    ],$safe);
+},'AI_MODEL_INTENT_CONTRACT_INVALID');
 
 $personUpdateSource=$any;
 $personUpdateSafe=['schema_version'=>'sanitized-question-v2','question'=>'销售业绩门槛改成3万元','has_unresolved_conditions'=>false,

@@ -38,6 +38,7 @@ final class AiIntentUnderstandingContract
         $ids = []; $normalized = [];
         foreach ($requirements as $requirement) {
             if ($requirement instanceof \stdClass) $requirement = get_object_vars($requirement);
+            $requirement=self::groundUniqueUnitConditionUpdate($requirement,$safeQuestion,$messages);
             $requirement=self::collapseVerifiedConditionResponseFormContinuation($requirement,$safeQuestion,$messages);
             $requirement=self::projectAggregateConditionFields($requirement);
             $requirementKeys = is_array($requirement) ? array_keys($requirement) : [];
@@ -116,6 +117,18 @@ final class AiIntentUnderstandingContract
                     || in_array('result_reference',(array)$requirement['fields'],true)) throw $error;
                 $values=[];
             }
+            // A calendar expression can establish when a query runs, but it
+            // cannot itself be the business measurement.  Providers
+            // occasionally put "this month" into metric_terms on a short
+            // date continuation; accepting that carrier makes the later
+            // binding model invent a second business change.  This checks a
+            // closed time grammar only.  It does not map customer wording to
+            // any business metric or decide whether the conversation changed
+            // topic.
+            if (in_array('metric_codes',(array)$requirement['fields'],true)
+                && self::metricTermsAreOnlyPeriods($values['metric_terms']??null)) {
+                self::fail('period_term_as_metric');
+            }
             // “unbound” records a clear customer condition that the current
             // product cannot execute.  It is not a generic marker for an
             // ambiguous question: mixing the two previously let a later
@@ -123,6 +136,24 @@ final class AiIntentUnderstandingContract
             if ($value['status'] !== 'understood' && in_array('unbound', (array)$requirement['fields'], true)) self::fail('unbound_requires_understood');
             $ids[$requirement['id']] = true;
             $normalized[] = ['id' => $requirement['id'], 'meaning' => trim($requirement['meaning']), 'fields' => array_values($requirement['fields']), 'values'=>$values, 'evidence' => $located];
+        }
+        if (($safeQuestion['prior_query'] ?? null) !== null) {
+            // prior_query is the only signed carrier of inherited meaning.
+            // A model may cite an earlier sentence to explain a short turn,
+            // but a requirement supported exclusively by that old sentence
+            // is not a new customer requirement and must not be rebound as a
+            // metric, object or condition. Requirements that also cite the
+            // current message remain intact for ordinary semantic review.
+            $currentRequirements=array_values(array_filter($normalized,static function(array $requirement): bool {
+                foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                    if (($evidence['message_id']??null)==='current') return true;
+                }
+                return false;
+            }));
+            // A fully implicit turn still needs the ordinary clarification
+            // path. Filter historical duplication only when the model also
+            // produced at least one current, evidence-backed requirement.
+            if ($currentRequirements!==[]) $normalized=$currentRequirements;
         }
         // A top/bottom ordinal can only point into a verified ranked prior
         // answer.  This is a structural context invariant, not a phrase rule:
@@ -142,8 +173,17 @@ final class AiIntentUnderstandingContract
         // business fact later in the same sentence and replay the verified
         // predecessor query. This checks evidence coverage, not a vocabulary,
         // metric name, report, or customer-specific phrase.
-        if (($safeQuestion['prior_query'] ?? null) !== null && count($normalized) === 1
-            && $normalized[0]['fields'] === ['periods']) {
+        $periodOnly=$normalized!==[];
+        foreach ($normalized as $requirement) {
+            if (($requirement['fields']??null)!==['periods']) {$periodOnly=false;break;}
+        }
+        if (($safeQuestion['prior_query'] ?? null) !== null && $periodOnly) {
+            // Several period requirements for one short continuation are not
+            // several customer conditions. They are provider duplication,
+            // commonly one citation of the current phrase plus one citation
+            // of the prior question. Reject that shape once so downstream
+            // binding can never reinterpret the signed metric or ranking.
+            if (count($normalized)!==1) self::fail('period_only_multiple');
             $current = $messages['current'] ?? '';
             $covered = false;
             foreach ($normalized[0]['evidence'] as $evidence) {
@@ -221,6 +261,40 @@ final class AiIntentUnderstandingContract
         return $requirement;
     }
 
+    /**
+     * A terse threshold edit may omit the previous measurement name. When
+     * exactly one signed predicate has the model-understood unit, its current
+     * evidence uniquely identifies the delta without copying an unstated prior
+     * label into the new turn. Multiple same-unit predicates remain ambiguous.
+     */
+    private static function groundUniqueUnitConditionUpdate($requirement,array $safeQuestion,array $messages)
+    {
+        if (!is_array($requirement) || !is_array($requirement['fields']??null)
+            || !is_array($requirement['values']['condition_update']??null)) return $requirement;
+        $fields=$requirement['fields'];sort($fields,SORT_STRING);
+        if ($fields!==['condition_update']) return $requirement;
+        $update=$requirement['values']['condition_update'];$unit=$update['unit']??null;
+        if (!in_array($unit,['yuan','count','day'],true)) return $requirement;
+        $prior=$safeQuestion['prior_query']['aggregate_condition']??null;
+        if (!is_array($prior) || !is_array($prior['conditions']??null)) return $requirement;
+        $matches=0;
+        foreach ($prior['conditions'] as $condition) {
+            if (is_array($condition) && ($condition['unit']??null)===$unit) $matches++;
+        }
+        if ($matches!==1) return $requirement;
+        $current=$messages['current']??null;
+        if (!is_string($current) || $current==='') return $requirement;
+        $target=$update['target_term']??null;
+        if (is_string($target) && $target!=='' && mb_strpos($current,$target,0,'UTF-8')!==false) return $requirement;
+        foreach ((array)($requirement['evidence']??[]) as $evidence) {
+            if (($evidence['message_id']??null)!=='current' || !is_string($evidence['quote']??null)
+                || $evidence['quote']==='' || mb_strpos($current,$evidence['quote'],0,'UTF-8')===false) continue;
+            $requirement['values']['condition_update']['target_term']=$evidence['quote'];
+            return $requirement;
+        }
+        return $requirement;
+    }
+
     public static function ids(array $understanding): array
     {
         $ids = [];
@@ -272,7 +346,7 @@ final class AiIntentUnderstandingContract
     public static function repairable(?string $predicate): bool
     {
         return is_string($predicate) && $predicate !== ''
-            && preg_match('/^(shape|goal|status|requirements|requirements_collection|requirement_shape|requirement_keys|requirement_id|requirement_meaning|requirement_fields(?:_(?:shape|empty|too_many|duplicate|unknown))?|requirement_evidence_collection|requirement_evidence_shape|requirement_evidence_duplicate|message_projection|evidence_not_unique|period_only_coverage|result_reference_without_ranked_prior|values(?::[a-z_]+)?)$/D',$predicate) === 1;
+            && preg_match('/^(shape|goal|status|requirements|requirements_collection|requirement_shape|requirement_keys|requirement_id|requirement_meaning|requirement_fields(?:_(?:shape|empty|too_many|duplicate|unknown))?|requirement_evidence_collection|requirement_evidence_shape|requirement_evidence_duplicate|message_projection|evidence_not_unique|period_only_coverage|period_only_multiple|period_term_as_metric|result_reference_without_ranked_prior|values(?::[a-z_]+)?)$/D',$predicate) === 1;
     }
 
     /** A structural correction never interprets a customer phrase in PHP. */
@@ -281,6 +355,12 @@ final class AiIntentUnderstandingContract
         if (!self::repairable($predicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         if ($predicate === 'period_only_coverage') {
             return 'The previous response called this a time-only continuation but its evidence did not cover the complete current customer message. Re-read the whole current message. Return only one periods requirement only when the whole message changes no business fact, object, result form, range, ranking, scope, condition or measurement. Otherwise preserve every additional current meaning with its own requirement and current-message evidence. Do not invent, bind or select a metric.';
+        }
+        if ($predicate === 'period_only_multiple') {
+            return 'The previous response duplicated a time-only continuation into several period requirements. Re-read the complete current message and return exactly one periods requirement with complete current-message evidence. Do not repeat the prior question as another requirement and do not add, replace or copy its metric, object, result form, ranking, scope or condition; the verified prior query is inherited later.';
+        }
+        if ($predicate === 'period_term_as_metric') {
+            return 'The previous response used a calendar expression as a business measurement. Re-read the complete current customer message and keep time only in a periods requirement. If the customer changes only the time of a verified prior query, return one periods requirement with complete current-message evidence and no metric_codes. If the customer also names a business measurement, preserve that separate measurement exactly; do not invent one from the date or copy a prior metric into current wording.';
         }
         if ($predicate === 'evidence_not_unique') {
             return 'The previous response used an evidence quote that was not an exact unique excerpt of the de-identified current message. Return the same complete understanding again, but for every current requirement use the complete de-identified current message verbatim as its evidence quote. Do not restore a hidden name, shorten, paraphrase, add, remove, reinterpret or bind any requirement.';
@@ -318,6 +398,30 @@ final class AiIntentUnderstandingContract
                 'fields'=>(array)($requirement['fields']??[]),'values'=>(array)($requirement['values']??[]),'evidence'=>(array)($requirement['evidence']??[])];
         }
         return $out;
+    }
+
+    /**
+     * Validates only that a proposed measurement term is one whole temporal
+     * expression under the shared closed date grammar.  Business vocabulary
+     * remains model-owned and is never inspected here.
+     */
+    private static function metricTermsAreOnlyPeriods($terms): bool
+    {
+        if (!is_array($terms) || $terms===[]) return false;
+        require_once dirname(__DIR__).'/semantic/AiSemanticIntentParser.php';
+        $parser=new \app\services\ai\semantic\AiSemanticIntentParser();
+        foreach ($terms as $term) {
+            if (!is_string($term) || trim($term)==='') return false;
+            $projection=$parser->parse(trim($term));
+            $dateTerms=(array)($projection['date_terms']??[]);
+            $signals=array_values(array_filter((array)($projection['signals']??[]),static function($signal): bool {
+                return is_string($signal) && $signal!=='';
+            }));
+            $date=$dateTerms[0]??null;
+            if (($projection['date_grouping_ambiguous']??true) || count($dateTerms)!==1 || !is_array($date)
+                || !is_string($date['code']??null) || $signals!==[$date['code']]) return false;
+        }
+        return true;
     }
 
     private static function messages(array $safeQuestion): array
