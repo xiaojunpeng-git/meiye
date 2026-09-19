@@ -164,7 +164,9 @@ export default {
 			],
 			imgUrls: [],
 			orderStatusNum: {},
-			userInfo: {},
+			// Tab 页会被复用；先显示登录时已写入的会员资料，再由接口刷新，
+			// 避免已登录会员短暂被渲染成“请点击授权”。
+			userInfo: this.$store.getters.userInfo || {},
 			showStatus: 1,
 			routineContact: 0,
 			// #ifdef H5 || MP
@@ -255,6 +257,8 @@ export default {
 		if (!this.isLogin) {
 			this.userInfo = {};
 			this.balanceStatus = 1;
+		} else {
+			this.userInfo = this.$store.getters.userInfo || {};
 		}
 		this.getCartNum();
 		this.m854f8 = uni.getStorageSync('copyNameInfo');
@@ -561,6 +565,8 @@ export default {
 							break;
 					}
 				});
+			}).catch((err) => {
+				that.$util.Tips({ title: (err && err.msg) || '会员资料加载失败，请重试' });
 			});
 		},
 		getMyMenus: function () {

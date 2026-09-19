@@ -578,6 +578,10 @@
 						title: '请勿重复点击'
 					});
 				}
+				uni.showLoading({
+					title: '登录中',
+					mask: true
+				});
 				loginH5({ account: that.account, password: that.password, spread_spid: that.$Cache.get('spid') })
 					.then(({ data }) => {
 						that.$store.commit('LOGIN', { token: data.token, time: data.expires_time - this.$Cache.time() });
@@ -587,11 +591,17 @@
 							this.keyLock = true;
 							that.$store.commit('SETUID', res.data.uid);
 							that.$store.commit('UPDATE_USERINFO', res.data);
+							uni.hideLoading();
 							uni.reLaunch({ url: backUrl });
-						}).catch(() => { this.keyLock = true; });
+						}).catch((e) => {
+							this.keyLock = true;
+							uni.hideLoading();
+							that.$util.Tips({ title: (e && e.msg) || '会员资料获取失败，请重试' });
+						});
 					})
 					.catch(e => {
 						this.keyLock = true;
+						uni.hideLoading();
 						that.$util.Tips({ title: (e && e.msg) || e });
 					});
 			},
