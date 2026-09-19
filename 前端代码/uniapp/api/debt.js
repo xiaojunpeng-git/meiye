@@ -4,6 +4,10 @@ export function debtSummaryApi() {
 	return request.get('debt/summary');
 }
 
+export function debtListApi(data) {
+	return request.get('debt/list', data);
+}
+
 export function getDebtCashier(orderId) {
 	return request.get(`debt/cashier/${orderId}`);
 }

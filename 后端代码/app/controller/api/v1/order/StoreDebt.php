@@ -12,6 +12,21 @@ use think\exception\ValidateException;
 class StoreDebt
 {
     /**
+     * 会员端待还欠款列表。
+     * 欠款表是金额与状态的权威来源；不依赖历史普通订单是否仍保留。
+     */
+    public function lst(Request $request, StoreDebtServices $services)
+    {
+        [$page, $limit] = $request->getMore([
+            ['page', 1],
+            ['limit', 20],
+        ], true);
+        $page = max(1, (int)$page);
+        $limit = min(50, max(1, (int)$limit));
+        return app('json')->successful($services->getUserReminderList((int)$request->uid(), $page, $limit));
+    }
+
+    /**
      * 欠款汇总
      */
     public function summary(Request $request, StoreDebtServices $services)

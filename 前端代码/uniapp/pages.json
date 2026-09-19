@@ -109,6 +109,12 @@
 			"root": "pages/users",
 			"name": "users",
 			"pages": [{
+					"path": "debt/index",
+					"style": {
+						"navigationBarTitleText": "我的欠款",
+						"navigationBarTextStyle": "black"
+					}
+				}, {
 					"path": "user_vip_areer/index",
 					"style": {
 						"navigationBarTitleText": "经验记录",

@@ -203,12 +203,12 @@
 		 * 生命周期函数--监听页面加载
 		 */
 		onLoad(options) {
+			if (options.status === 'debt') {
+				uni.redirectTo({ url: '/pages/users/debt/index' });
+				return;
+			}
 			if (options.status !== undefined && options.status !== '') {
-				if (options.status === 'debt') {
-					this.orderStatus = 'debt';
-				} else {
-					this.orderStatus = parseInt(options.status);
-				}
+				this.orderStatus = parseInt(options.status);
 			}
 			if (options.type) this.m888edb9 = (options.type == undefined && options.type != 0) ? '' : parseInt(
 					options.type);
@@ -299,6 +299,10 @@
 			 */
 			statusClick: function(status) {
 				if (this.loading) return
+				if (status === 'debt') {
+					uni.navigateTo({ url: '/pages/users/debt/index' });
+					return;
+				}
 				if (status === this.orderStatus) return;
 				this.orderStatus = status;
 				this.loadend = false;

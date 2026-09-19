@@ -138,7 +138,7 @@ export default {
 				{
 					icon: 'icon-ic_money',
 					title: '欠款',
-					url: '/pages/goods/order_list/index?status=debt',
+					url: '/pages/users/debt/index',
 					debt_amount_text: ''
 				},
 				{

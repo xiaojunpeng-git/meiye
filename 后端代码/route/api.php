@@ -465,6 +465,7 @@ Route::group('api', function () {
         Route::get('order/list', 'v1.order.StoreOrder/lst')->name('orderList'); //订单列表
         Route::get('order/detail/:uni', 'v1.order.StoreOrder/detail')->name('orderDetail'); //订单详情
         Route::get('debt/summary', 'v1.order.StoreDebt/summary')->name('debtSummary'); //欠款汇总
+        Route::get('debt/list', 'v1.order.StoreDebt/lst')->name('debtList'); //会员端欠款列表
         Route::get('debt/cashier/:orderId', 'v1.order.StoreDebt/cashier')->name('debtCashier'); //欠款收银台
         Route::post('debt/repay/pay', 'v1.order.StoreDebt/repayPay')->middleware(BlockerMiddleware::class)->name('debtRepayPay'); //欠款还款
         Route::get('card/order/benefits/:id', 'v1.order.StoreOrder/getCardBenefits')->name('getCardBenefits'); //获取卡项权益

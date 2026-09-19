@@ -640,11 +640,13 @@ class StoreDebtServices extends BaseServices
         $orderIds = array_unique(array_filter(array_column($list, 'order_id')));
         $orderStaffMap = [];
         $sourceMap = [];
+        $orderExistsMap = [];
         if ($orderIds) {
             /** @var StoreOrderServices $orderServices */
             $orderServices = app()->make(StoreOrderServices::class);
             $orderStaffMap = $orderServices->getColumn([['id', 'in', $orderIds]], 'staff_id', 'id') ?: [];
             $sourceMap = $orderServices->getColumn([['id', 'in', $orderIds]], 'source', 'id') ?: [];
+            $orderExistsMap = $orderServices->getColumn([['id', 'in', $orderIds]], 'id', 'id') ?: [];
         }
         $resolvedStaffIds = array_unique(array_filter(array_merge(
             array_column($list, 'staff_id'),
@@ -720,6 +722,8 @@ class StoreDebtServices extends BaseServices
                 'debt_no' => $row['debt_no'] ?? '',
                 'order_id' => (int)($row['order_id'] ?? 0),
                 'order_sn' => $row['order_sn'] ?? '',
+                // 历史 V3 直录欠款可能没有同步到普通订单表，不能调起依赖原订单的还款链路。
+                'can_online_repay' => isset($orderExistsMap[(int)($row['order_id'] ?? 0)]),
                 'uid' => (int)($row['uid'] ?? 0),
                 'user' => $user ? [
                     'uid' => (int)$row['uid'],
