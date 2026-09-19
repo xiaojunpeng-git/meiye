@@ -36,7 +36,7 @@ final class AiPlatformPrincipalResolver
         $stores=array_values(array_unique(array_filter(array_map('intval',(array)$stores),static fn($id)=>$id>0)));sort($stores);
         $context=['terminal'=>'platform','account_id'=>$accountId,'scope_mode'=>$mode==='self_participant'?$mode:($stores?'stores':'none'),
             'store_ids'=>$stores,'permission_version'=>hash('sha256',json_encode([$mode,$employeeId,$stores])),
-            'employee_id'=>$employeeId,'personnel_data_authorized'=>!empty($stores),'store_report_authorized'=>true,
+            'employee_id'=>$employeeId,'personnel_data_authorized'=>!empty($stores),'member_data_authorized'=>!empty($stores),'store_report_authorized'=>true,
             'can_configure'=>$configure,'report_capability_code'=>'group_management_dashboard',
             'tenant_id'=>'0','origin_store_id'=>0,'origin_organization_id'=>'0','export_principal_ready'=>true,'principal_kind'=>'platform_admin'];
         $context['can_use']=AiAuthority::canUseDataScope($context);

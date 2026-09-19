@@ -21,7 +21,7 @@ function metricRegistryCheck(bool $condition, string $label): void
 $required = [
     'cash_performance', 'refund_performance', 'actual_performance', 'consume_amount',
     'staff_sales_yeji', 'staff_labor_yeji', 'staff_project_num', 'staff_service_num', 'service_people',
-    'sales_amount', 'sales_collected_amount', 'sales_quantity', 'balance_deduction_amount',
+    'sales_amount', 'sales_collected_amount', 'member_service_visit_count', 'sales_quantity', 'balance_deduction_amount',
     'recharge_amount', 'completed_service_item_count', 'customer_active',
 ];
 $definitions = MetricDefinitionRegistry::all();
@@ -67,6 +67,14 @@ metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
     '今天劳动业绩第一名是谁？', ['staff_labor_yeji', 'staff_sales_yeji', 'staff_project_num', 'staff_service_num', 'service_people']
 ) === ['metric_code'=>'staff_labor_yeji','term'=>'劳动业绩'],
     'a natural self-contained question binds its longest exact registered measurement without a topic-switch phrase rule');
+metricRegistryCheck(MetricSemanticCatalog::uniqueCodeForTerms(
+    ['服务次数'], ['staff_service_num','staff_project_num']
+) === 'staff_service_num',
+    'a user-ready dictionary alias resolves through its canonical registered metric owner');
+metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
+    '服务项目数', ['staff_service_num','staff_project_num']
+) === ['metric_code'=>'staff_project_num','term'=>'项目数'],
+    'a longer natural condition term may contain one uniquely registered metric title');
 metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
     '销售人业绩怎么样？', ['staff_sales_yeji', 'sales_collected_amount']
 ) === null, 'an in-text phrase owned by two active metrics is never auto-bound');
@@ -77,11 +85,26 @@ $memberThreshold=(new app\services\query\metric\AnalysisCapabilityCatalogFactory
 metricRegistryCheck(($memberThreshold['complete_request_supported']??false)===true
     && (($memberThreshold['items'][0]['binding']['metric_code']??null)==='sales_collected_amount'),
     'the registered member threshold contract is discoverable without a question-specific capability branch');
+$memberCondition=(new app\services\query\metric\AnalysisCapabilityCatalogFactory())->make()->discover([
+    'metric_codes'=>['sales_collected_amount'],'object_kind'=>'member','operation'=>'condition_count',
+    'filter_keys'=>[],'relation_role'=>'member_sales_collection_total',
+],static function(array $binding):bool{return true;});
+metricRegistryCheck(($memberCondition['complete_request_supported']??false)===true
+    && (($memberCondition['items'][0]['binding']['metric_code']??null)==='sales_collected_amount'),
+    'generic member conditions are discoverable from the registered metric shape and aggregate dimension');
+$storeCondition=(new app\services\query\metric\AnalysisCapabilityCatalogFactory())->make()->discover([
+    'metric_codes'=>['actual_performance'],'object_kind'=>'store','operation'=>'condition_list',
+    'filter_keys'=>[],'relation_role'=>'store_total',
+],static function(array $binding):bool{return true;});
+metricRegistryCheck(($storeCondition['complete_request_supported']??false)===true
+    && (($storeCondition['items'][0]['binding']['metric_code']??null)==='actual_performance')
+    && MetricDefinitionRegistry::get('actual_performance')['condition_subjects']===['store'],
+    'store conditions require an explicit subject contract and remain discoverable through the shared catalog');
 metricRegistryCheck((MetricDefinitionRegistry::get('sales_amount')['category_reader']['strategy'] ?? '') === 'sale_completed_allocation',
     'sales amount declares its category reader instead of leaving reports to sum sale facts');
 metricRegistryCheck(MetricDefinitionRegistry::get('sales_collected_amount')['reader_strategy'] === 'sales_payment_collected'
     && MetricDefinitionRegistry::get('sales_collected_amount')['storage_unit'] === 'fen'
-    && MetricDefinitionRegistry::get('sales_collected_amount')['query_shapes'] === ['summary', 'comparison', 'trend', 'ranking', 'threshold_count']
+    && MetricDefinitionRegistry::get('sales_collected_amount')['query_shapes'] === ['summary', 'comparison', 'trend', 'ranking', 'threshold_count', 'condition_count', 'condition_list']
     && MetricDefinitionRegistry::get('sales_collected_amount')['source']['threshold_count'] === [
         'subject_dimension' => 'member', 'aggregation' => 'period_total', 'operators' => ['gte', 'gt', 'lte', 'lt', 'eq'],
     ],
@@ -105,6 +128,7 @@ metricRegistryCheck(strpos($view, '->metricTotal(') !== false, 'AI read view del
 metricRegistryCheck(strpos($reader, "'cash_refund' =>") !== false && strpos($reader, "'derived_subtract' =>") !== false,
     'registered strategies execute refund and the fixed subtraction derivation');
 metricRegistryCheck(strpos($reader, 'public function thresholdCount(') !== false
+    && strpos($reader, 'public function thresholdMembers(') !== false
     && strpos($reader, "->group('s.member_id')") !== false
     && strpos($reader, 'member_period_totals') !== false,
     'member threshold count is database-side registered aggregation rather than a PHP detail scan');

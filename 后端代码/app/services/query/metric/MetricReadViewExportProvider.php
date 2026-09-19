@@ -40,10 +40,14 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
         $rows=[]; $capabilities=MetricReadViewServices::metricCapabilities();
         foreach ($view['results'] as $result) {
             $code=$result['metric_code']??null;
+            if (in_array($view['query']['query_shape']??null,['condition_count','condition_list'],true)) {
+                self::appendConditionResult($rows,$view,$result,$capabilities);
+                continue;
+            }
             // Keep export eligibility explicit; names come from the same registered
             // read contract as the cards, never from model/result display text.
             $storageUnit = $result['storage_unit'] ?? null;
-            if (!isset($capabilities[$code]) || !in_array($storageUnit, ['fen', 'count', 'project_count_micro'], true)
+            if (!isset($capabilities[$code]) || !in_array($storageUnit, ['fen', 'count', 'project_count_micro', 'customer_tenth'], true)
                 || ($capabilities[$code]['storage_unit'] ?? null) !== $storageUnit
                 || ($capabilities[$code]['ai_query_ready']??false)!==true) throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
             if (!in_array($result['period']??null,['current','comparison'],true)) throw new \RuntimeException('METRIC_EXPORT_PERIOD_INVALID');
@@ -62,10 +66,13 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             if (!$valid) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
             $label=$person?($view['personnel_selection_label']??''): '当前授权范围';
             if (!is_string($label)||$label==='') throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
+            $tooltip=(new \app\services\metric\MetricDictionaryServices())->getTooltip($code);
+            $displayUnit=$tooltip['display_unit']??null;
+            if (!is_string($displayUnit)||$displayUnit==='') $displayUnit=$storageUnit === 'fen' ? '元' : ($storageUnit === 'project_count_micro' ? '项' : ($storageUnit === 'customer_tenth' ? '人次' : '个'));
             $base=['metric_name'=>$capabilities[$code]['name'],'period_name'=>$period==='current'?'本期':'对比期','start_date'=>$range['start'],'end_date'=>$range['end'],
                 'store_name'=>$label.($person?'（按当前任职筛选）':''),'ranking_direction'=>'','business_date'=>'',
-                'unit'=>$storageUnit === 'fen' ? '元' : ($storageUnit === 'project_count_micro' ? '项' : '个')];
-            if (isset($result['amount_cents']) || isset($result['count'])) self::append($rows,$base,$storageUnit==='fen' ? ($result['amount_cents']??null) : ($result['count']??null),$storageUnit);
+                'unit'=>$displayUnit];
+            if (isset($result['amount_cents']) || isset($result['count'])) self::append($rows,$base,in_array($storageUnit,['fen','customer_tenth'],true) ? ($result['amount_cents']??null) : ($result['count']??null),$storageUnit);
             elseif ($view['query']['query_shape']==='trend') foreach ($result['rows'] as $point) self::append($rows,array_replace($base,['business_date'=>$point['business_date']]),$point['amount_cents'],$storageUnit);
             elseif ($view['query']['query_shape']==='ranking') foreach ($result['rows'] as $direction=>$points) foreach ($points as $point) {
                 if (!in_array($direction,['top','bottom'],true)) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
@@ -82,6 +89,50 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
         }
         return $rows;
     }
+    private static function appendConditionResult(array &$rows,array $view,array $result,array $capabilities): void
+    {
+        $shape=$view['query']['query_shape']??null;$set=$view['query']['condition_set']??null;
+        $subject=$set['subject']??null;$filters=$view['query']['business_filters']??null;
+        $expected=$subject==='person'?['object_kind'=>'person','selection_ref'=>'cohort:active_personnel']:['object_kind'=>$subject];
+        if (!is_string($subject)||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$subject)||$filters!==$expected||($result['object_kind']??null)!==$subject
+            ||($result['storage_unit']??null)!=='count'||($result['condition_set']??null)!==$set
+            ||!is_int($result['count']??null)||$result['count']<0||($result['period']??null)!=='current') {
+            throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
+        }
+        $range=['start'=>$view['query']['start_date'],'end'=>$view['query']['end_date']];
+        $objectLabel=['person'=>'人员','member'=>'客户','store'=>'门店','order'=>'销售订单',
+            'sale_line'=>'销售明细','card'=>'卡项','project'=>'项目','product'=>'产品'][$subject]
+            ??MetricDefinitionRegistry::overviewObjectLabel($subject);
+        if (!is_string($objectLabel)||$objectLabel==='') throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
+        if ($shape==='condition_count') {
+            self::append($rows,['metric_name'=>'符合条件的'.$objectLabel.'数量','period_name'=>'本期','start_date'=>$range['start'],'end_date'=>$range['end'],
+                'store_name'=>'当前授权范围','ranking_direction'=>'','business_date'=>'','unit'=>$subject==='store'?'家':($subject==='order'?'笔':($subject==='sale_line'?'条':($subject==='person'||$subject==='member'?'人':'个')))],$result['count'],'count');
+            return;
+        }
+        if (!is_array($result['rows']??null)) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
+        foreach ($result['rows'] as $object) {
+            $keys=['person'=>['employee_id','employee_name'],'member'=>['member_id','member_name'],'store'=>['store_id','store_name']];
+            [$idKey,$nameKey]=$keys[$subject]??['entity_id','entity_name'];
+            if (!is_int($object[$idKey]??null)||!is_string($object[$nameKey]??null)||$object[$nameKey]===''||!is_array($object['metrics']??null)) {
+                throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
+            }
+            foreach ($set['conditions']??[] as $condition) {
+                $metric=$condition['metric_code']??null;$contract=$capabilities[$metric]??null;$value=$object['metrics'][$metric]??null;
+                if (!is_array($contract)||empty($contract['ai_query_ready'])||!is_int($value)) throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
+                $unit=self::displayUnit($metric,(string)($contract['storage_unit']??''));
+                self::append($rows,['metric_name'=>$contract['name'],'period_name'=>'本期','start_date'=>$range['start'],'end_date'=>$range['end'],
+                    'store_name'=>$object[$nameKey].'；范围：当前授权范围','ranking_direction'=>'','business_date'=>'','unit'=>$unit],
+                    $value,(string)$contract['storage_unit']);
+            }
+        }
+    }
+    private static function displayUnit(string $metricCode,string $storageUnit): string
+    {
+        $tooltip=(new \app\services\metric\MetricDictionaryServices())->getTooltip($metricCode);
+        $unit=$tooltip['display_unit']??null;
+        if (is_string($unit)&&$unit!=='') return $unit;
+        return $storageUnit==='fen'?'元':($storageUnit==='project_count_micro'?'项':($storageUnit==='customer_tenth'?'人次':'个'));
+    }
     private static function append(array &$rows,array $base,$value,string $storageUnit): void
     {
         if (!is_int($value)) {
@@ -97,6 +148,11 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             $whole=ltrim(substr($digits,0,-6),'0');$whole=$whole===''?'0':$whole;
             $fraction=rtrim(substr($digits,-6),'0');
             $display=($negative?'-':'').$whole.($fraction===''?'':'.'.$fraction);
+        } elseif ($storageUnit === 'customer_tenth') {
+            $negative=$value<0;$digits=str_pad(ltrim((string)$value,'-'),2,'0',STR_PAD_LEFT);
+            $whole=ltrim(substr($digits,0,-1),'0');$whole=$whole===''?'0':$whole;
+            $fraction=substr($digits,-1);
+            $display=($negative?'-':'').$whole.($fraction==='0'?'':'.'.$fraction);
         } else throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
         $rows[]=array_merge(['row_id'=>(string)(count($rows)+1)],$base,['metric_value'=>$display]);
     }

@@ -17,7 +17,7 @@ final class AiBusinessManifest
         $tools=AiToolCatalog::definitions();
         $actions=AiWorkflowCatalog::actions();
         $workflows=AiWorkflowCatalog::definitions();
-        return ['registry_version'=>'mohe-business-registry-r9-v1',
+        return ['registry_version'=>'mohe-business-registry-r11-v1',
             'semantic_resource_hash'=>hash('sha256',$intentUnderstanding['source_hash'].$storeOperations['source_hash']),
             'intent_contract'=>\app\services\ai\contract\AiIntentResultContract::manifest(),
             'schemas'=>['query_input','definition_input','business_evidence','metadata_evidence','verified_result','answer_result','export_result'],
@@ -29,7 +29,7 @@ final class AiBusinessManifest
                 'store_operations'=>['version'=>$storeOperations['version'],'skill_code'=>$storeOperations['skill_code'],'skill_version'=>$storeOperations['version'],
                     'skill_source_hash'=>$storeOperations['source_hash'],'skill_source_path'=>$storeOperations['source_path'],
                     'label'=>$storeOperations['label'],'instructions'=>$storeOperations['markdown'],
-                    'actions'=>['performance_summary','performance_trend','registered_metric_ranking','performance_comparison','member_threshold_count','metric_definition_read','verified_result_export']],
+                    'actions'=>['performance_summary','performance_trend','registered_metric_ranking','performance_comparison','member_threshold_count','object_condition_count','object_condition_list','metric_definition_read','verified_result_export']],
             ],
             'workflows'=>$workflows,
             'export_node'=>AiToolCatalog::exportNode(),

@@ -29,10 +29,34 @@ final class GroupPerformanceMetricReadServices
         return $this->registered->dimensionSummary($metricCode, $dimension, $tenantId, $stores, $range);
     }
 
+    /** One locally-bound analytical subject; never an unbounded dimension listing. */
+    public function dimensionSelectionTotal(string $metricCode, string $dimension, string $tenantId, array $stores, array $range, int $entityId): int
+    {
+        return $this->registered->dimensionSelectionTotal($metricCode,$dimension,$tenantId,$stores,$range,$entityId);
+    }
+
     /** @param array{subject:string,aggregation:string,operator:string,amount_cents:int} $condition */
     public function thresholdCount(string $tenantId, array $stores, array $range, string $metricCode, array $condition): int
     {
         return $this->registered->thresholdCount($metricCode, $tenantId, $stores, $range, $condition);
+    }
+
+    /** Exact count plus a bounded member-name page from one registered population. */
+    public function thresholdMembers(string $tenantId, array $stores, array $range, string $metricCode, array $condition, int $limit = 100): array
+    {
+        return $this->registered->thresholdMembers($metricCode, $tenantId, $stores, $range, $condition, $limit);
+    }
+
+    /** Exact count plus a bounded page from one registered member condition set. */
+    public function conditionMembers(string $tenantId, array $stores, array $range, array $conditionSet, int $limit = 100): array
+    {
+        return $this->registered->conditionMembers($tenantId, $stores, $range, $conditionSet, $limit);
+    }
+
+    /** Exact count plus a bounded page for registered fact-dimension objects. */
+    public function conditionDimensions(string $tenantId, array $stores, array $range, array $conditionSet, int $limit = 100): array
+    {
+        return $this->registered->conditionDimensions($tenantId,$stores,$range,$conditionSet,$limit);
     }
 
     /** Existing callers receive signed refund cents here until they migrate to refund_performance. */

@@ -12,10 +12,10 @@ for suite in config-contract metric-contract metric-registry-contract round3-rea
     query-read-view cash-report-projection state-store-contract state-attempt-contract state-concurrency state-export-contract state-admission-contract \
     gateway-components client-runtime-compat gateway-integration gateway-review-regressions overview-metric-resolver monitor-contract \
     http-routing-contract http-actions-contract http-guard-contract principal-resolvers \
-    export-worker-contract export-runtime-contract result-reference semantic-binding-guard date-range-guidance context-metric-rebinding r7-context-removal-audit; do
+    export-worker-contract export-runtime-contract result-reference semantic-binding-guard date-range-guidance context-metric-rebinding r7-context-removal-audit condition-set; do
     "$php_bin" -d auto_prepend_file="$test_dir/fixture-autoload.php" "$test_dir/$suite.php"
 done
-for suite in semantic-guidance registry-execution skill-semantic-projection intent-understanding-contract state-guidance-contract r5-holdout management-core management-gateway management-menu analysis-capability-catalog analysis-object-resolution personnel-analysis query-context context-delta-gateway date-policy; do
+for suite in semantic-guidance registry-execution skill-semantic-projection intent-understanding-contract state-guidance-contract r5-holdout management-core management-gateway management-menu analysis-capability-catalog analysis-object-resolution personnel-analysis member-analysis query-context context-delta-gateway date-policy; do
     "$php_bin" -d auto_prepend_file="$test_dir/fixture-autoload.php" "$test_dir/$suite.php"
 done
 "$php_bin" "$test_dir/mobile-ai-entry-transport-contract.php"

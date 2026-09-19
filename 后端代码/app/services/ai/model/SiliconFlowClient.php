@@ -17,9 +17,21 @@ final class SiliconFlowClient
     // The two typed protocol carriers are deliberately bounded below the
     // generic answer limit.  They contain no prose answer or data rows; the
     // ceiling only prevents a malformed provider response from consuming a
-    // full Run budget.  It leaves headroom above the largest observed valid
-    // carrier and is not tied to any business metric or customer wording.
-    const INTENT_CARRIER_MAX_TOKENS = 640;
+    // full Run budget. Multi-condition carriers contain several grounded
+    // requirements and can exceed the former 640-token ceiling even though
+    // they contain no prose answer or data rows. The Run still reserves and
+    // enforces a smaller typed-output budget independently.
+    const INTENT_CARRIER_MAX_TOKENS = 1024;
+    /**
+     * Protocol object kinds accepted at every model boundary. Keep this one
+     * source of truth in lockstep with the intent contracts: a newly
+     * registered analytical object must not pass the registry and then be
+     * rejected by an older prompt-projection allowlist.
+     */
+    private const ANALYTICAL_OBJECT_KINDS = [
+        'store','person','position','guide','sales_manager','member','product','project',
+        'category','partner','inventory','course','organization','order','sale_line','card',
+    ];
 
     /** Minimal configuration probe. It is deliberately unrelated to business language or metrics. */
     public function probe(string $model,string $apiKey,int $timeoutMs,callable $checkpoint): array
@@ -73,7 +85,7 @@ final class SiliconFlowClient
             // Put this relationship rule immediately before the task payload.
             // It is deliberately about the typed context contract, never a
             // phrase, metric, report or customer-specific fallback.
-            array_splice($messages,-1,0,[['role'=>'system','content'=>'For a continuation, record only meaning actually expressed in the current message. Do not restate a verified prior measurement as a current metric_codes requirement without current evidence. If the current turn changes only time, return only a periods requirement and quote the entire current message as its current evidence; context later retains the prior measurement.']]);
+            array_splice($messages,-1,0,[['role'=>'system','content'=>'For a continuation, record only meaning actually expressed in the current message. Do not restate a verified prior measurement as a current metric_codes requirement without current evidence. A result_reference is structurally eligible only when prior_query.operation is ranking and the current message explicitly identifies a displayed top or bottom ordinal; for every other prior operation omit result_reference completely. When a verified condition_count or legacy member threshold_count is followed only by a request to identify or list the matching objects, preserve that response-form change as operation=condition_list; when a verified condition_list is followed only by a request for the number of matching objects, preserve it as operation=condition_count. Identity-oriented wording such as “哪些”, “有哪些”, “谁”, “名单” or “list/which ones” requests condition_list even when the preceding answer was a number; quantity-oriented wording such as “多少”, “几个”, “几人”, “几家”, “几笔” or “how many” requests condition_count. These are language examples for the response form only: never use them to add, remove or reinterpret an object, metric, predicate, period or scope. In both directions the previous metrics, predicates, relation, thresholds, period and scope remain context rather than new current requirements. Do not change such a response-form continuation into summary or ranking. If the current turn changes only time, return only a periods requirement and quote the entire current message as its current evidence; context later retains the prior measurement.']]);
         }
         if ($repairPredicate!==null) {
             if (!AiIntentUnderstandingContract::repairable($repairPredicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
@@ -96,11 +108,10 @@ final class SiliconFlowClient
         if (count($items)>16 || ($items!==[] && array_keys($items)!==range(0,count($items)-1))) {
             throw new AiContractException('AI_MODEL_INPUT_INVALID');
         }
-        $allowed=['store','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization'];
         $seen=[];$out=[];
         foreach ($items as $item) {
             $keys=is_array($item)?array_keys($item):[];sort($keys,SORT_STRING);
-            if ($keys!==['object_kind','object_label'] || !in_array($item['object_kind']??null,$allowed,true)
+            if ($keys!==['object_kind','object_label'] || !in_array($item['object_kind']??null,self::ANALYTICAL_OBJECT_KINDS,true)
                 || !is_string($item['object_label']??null) || trim($item['object_label'])==='' || mb_strlen($item['object_label'],'UTF-8')>64) {
                 throw new AiContractException('AI_MODEL_INPUT_INVALID');
             }
@@ -135,10 +146,9 @@ final class SiliconFlowClient
                 $normalizedTerms[trim($term)]=true;
             }
             if (count($normalizedTerms)!==count($terms)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
-            $allowedKinds=['store','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization'];
             $normalizedKinds=[];
             foreach ($objectKinds as $kind) {
-                if (!is_string($kind) || !in_array($kind,$allowedKinds,true)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+                if (!is_string($kind) || !in_array($kind,self::ANALYTICAL_OBJECT_KINDS,true)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
                 $normalizedKinds[$kind]=true;
             }
             if (count($normalizedKinds)!==count($objectKinds)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
@@ -191,13 +201,14 @@ final class SiliconFlowClient
                 'missing_metric_codes'=>'The previous response omitted the required metric_codes. Produce the complete intent_result again by understanding the current question together with the verified prior query. If the current question explicitly changes the business fact or metric, use that current meaning. Otherwise preserve the prior metric_codes. Keep every other unchanged condition; do not invent, remove, broaden or substitute any meaning.',
                 'unknown_metric_code'=>'The previous response used a metric code that is not present in the supplied registered capabilities. Produce one complete intent_result again. Use only metric_code values copied exactly from capabilities; bind the accepted current measurement to a compatible supplied code, or keep it pending when no supplied code can faithfully satisfy it. Do not invent a code, change the accepted object, period, ranking, scope or condition, and do not substitute a merely similar metric.',
                 'ambiguous_metric_codes_present'=>'The previous response both selected registered metric_codes and marked needs_metric_choice=true. Return one complete binding again. For a clear goal, object and response form, keep one to four compatible professionally useful registered metrics as recommended_initial_answer=true and set needs_metric_choice=false; preserve every accepted condition. Use a pending metric choice only when no useful first reading can be selected, and then return no metric codes. Do not ask the customer to repair this model decision.',
+                'missing_replacement:aggregate_condition'=>'The previous response declared context_delta.aggregate_condition as replace but omitted the complete bound aggregate_condition. Return one complete binding again. Copy subject, relation, result_form, condition order, operator, quantity and unit exactly from the accepted understanding; in every condition replace only metric_term with the one accountable compatible registered metric_code. Include every condition and do not pair them by guesswork, remove a predicate, change AND/OR, change a threshold, or reuse a prior condition.',
                 'initial_observation_metric_count'=>'The previous response marked initial_observation=true but returned an invalid number of provisional metrics. Return one complete intent_result again. For this open summary, keep initial_observation=true and metric_codes must contain exactly two to four distinct compatible registered codes. These codes are only provisional observation angles; the server expands them through the published object overview profile. Do not list every available metric, change the understood object or response form, add a condition, or ask the customer to choose.',
                 'initial_observation_query_shape'=>'The previous response marked initial_observation=true with an incompatible query shape. Return one complete intent_result again. Preserve the accepted open summary, use operation=summary, an understood object_kind, empty object_term, needs_metric_choice=false, ranking direction=unspecified with null limit, and exactly two to four distinct compatible registered metric_codes. Do not add a named object, ranking, comparison, exclusion, condition or scope change.',
                 'bad_value:recommended_initial_answer'=>'The previous response used recommended_initial_answer inconsistently. Return one complete binding again. A recommended first answer preserves every accepted customer condition and has needs_metric_choice=false. If operation is ranking, metric_codes MUST be a JSON array containing exactly one compatible registered code. Otherwise omit the recommendation label and use the ordinary binding outcome.',
                 'bad_value:object_kind'=>'The previous response used an object_kind outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose object_kind only from store, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization or unknown. Do not select an object identity, metric, period, scope or result.',
                 'bad_value:object_relation'=>'The previous response used an invalid object_relation. Return one complete binding again. Preserve the accepted meaning and every other candidate field; use analysis only for the object being inspected, or selection only for a named object that narrows records. Do not add a filter, identity, metric, period, scope or result.',
-                'bad_value:operation'=>'The previous response used an operation outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose operation only from summary, trend, ranking, comparison, threshold_count, definition or unknown. Do not select a metric, period, scope or result.',
-                'bad_value:aggregate_condition'=>'The previous response made operation and aggregate_condition inconsistent. Return one complete binding again. When the accepted current understanding carries aggregate_condition, copy that complete condition exactly, use operation=threshold_count, and replace the prior aggregate condition when applicable. When the accepted current understanding carries no aggregate_condition, omit it or set it to null; a self-contained non-threshold request after a prior threshold must use context_delta aggregate_condition=clear, while inherit is valid only when the current request genuinely continues threshold_count. Never carry a previous threshold amount or operator into a summary, ranking, trend, comparison or definition, and never invent a new condition.',
+                'bad_value:operation'=>'The previous response used an operation outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose operation only from summary, trend, ranking, comparison, threshold_count, condition_count, condition_list, definition or unknown. Do not select a metric, period, scope or result.',
+                'bad_value:aggregate_condition'=>'The previous response made operation, selected metrics and aggregate_condition inconsistent. Return one complete binding again. When the accepted carrier has a conditions array, preserve its subject, relation, result_form, condition order, operator, quantity and unit exactly; replace only each metric_term with its accountable compatible registered metric_code; use operation=condition_count for result_form=count or condition_list for result_form=list; and return metric_codes in exactly that same condition order. When the accepted carrier instead has legacy amount_cents, preserve it and use operation=threshold_count. When the accepted current understanding carries no aggregate_condition, omit it or set it to null; a self-contained non-condition request after a prior condition must use context_delta aggregate_condition=clear, while inherit is valid only when the current request genuinely continues the same complete condition. Never carry a previous condition into a summary, ranking, trend, comparison or definition, and never invent, remove, reorder or weaken a predicate.',
                 'bad_value:scope'=>'The previous response used a scope outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose scope only from current_store, authorized or unspecified. Do not expand authority or select a store.',
                 'bad_value:ranking'=>'The previous response used an invalid ranking carrier. Return one complete binding again. Preserve the accepted meaning and every other candidate field; return ranking exactly as direction plus limit, or omit it when no ranked result is requested. Do not choose a metric, period, scope or result.',
                 'bad_value:periods'=>'The previous response used an invalid periods carrier. Return one complete binding again. Preserve the accepted time meaning and every other candidate field; return only complete published period objects. Do not calculate, shorten, replace or remove a customer-stated time condition.',
@@ -207,6 +218,10 @@ final class SiliconFlowClient
             if (!AiIntentResultContract::repairableFormat($repairPredicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
             if (strpos($repairPredicate,'binding_requirement_delta_mismatch:')===0) {
                 $instruction='The previous binding marked a customer-supplied field as inherited from the prior query. Produce one complete intent_result again. For each current customer condition, use context_delta replace and preserve that condition in its ordinary field; only use inherit where the current wording leaves that exact meaning unchanged. Do not invent, remove, broaden, or substitute a condition.';
+            } elseif ($repairPredicate==='binding_requirement_value_mismatch:aggregate_condition') {
+                $instruction='The previous binding changed an accepted aggregate condition. Return one complete intent_result again. The accepted understanding is authoritative: copy subject, relation, result_form, condition order, operator, quantity and unit exactly. In each condition replace only metric_term with the one compatible registered metric_code that satisfies that same measurement; do not emit metric_term in the bound carrier. Include the complete bound aggregate_condition and every predicate. Do not change AND/OR, thresholds, units, response form, object or period, and do not reuse a prior condition.';
+            } elseif ($repairPredicate==='binding_requirement_value_mismatch:result_reference') {
+                $instruction='The previous binding added, removed or changed a result_reference that does not exactly match the accepted current request. Return one complete intent_result again. Omit result_reference unless the accepted understanding explicitly contains that same current-question result reference; otherwise copy only that accepted group and ordinal. Preserve the verified prior query, every accepted current condition and the requested response form. Do not infer a ranked row from a generic request for a list or details.';
             } elseif (preg_match('/^binding_requirement_value_mismatch:(object_kind|object_relation|operation|periods|ranking|scope|aggregate_condition)$/D',$repairPredicate,$match)) {
                 $instruction='The previous binding changed the accepted '.$match[1].' value. Produce one complete intent_result again and copy that typed value exactly from the accepted understanding into the matching ordinary field. Use the corresponding context_delta replacement when it differs from the verified prior query. Preserve every other accepted condition; do not infer a different object, response form, period, ranking, scope, condition or metric from conversation history.';
             } elseif ($repairPredicate==='context_constraint_without_source:business_filters') {
@@ -464,7 +479,7 @@ final class SiliconFlowClient
             $seenObjects=[];
             foreach ($capability['object_contracts'] as $contract) {
                 $keys=is_array($contract)?array_keys($contract):[];sort($keys);
-                if ($keys!==['action_codes','object_kind'] || !in_array($contract['object_kind'],['store','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization'],true)
+                if ($keys!==['action_codes','object_kind'] || !in_array($contract['object_kind'],self::ANALYTICAL_OBJECT_KINDS,true)
                     || isset($seenObjects[$contract['object_kind']]) || !is_array($contract['action_codes']) || count($contract['action_codes'])>8
                     || count(array_unique($contract['action_codes']))!==count($contract['action_codes'])) throw new AiContractException('AI_MODEL_INPUT_INVALID');
                 $seenObjects[$contract['object_kind']]=true;
@@ -580,15 +595,14 @@ final class SiliconFlowClient
         $legacyExtended=['has_business_filter','has_object_selection','has_store_scope_restriction','metric_codes','object_kind','operation','periods','presentation_origin','ranking','scope'];
         $extended=['aggregate_condition','has_business_filter','has_object_selection','has_store_scope_restriction','metric_codes','object_kind','operation','periods','presentation_origin','ranking','scope'];
         if (($keys!==$base && $keys!==$legacyExtended && $keys!==$extended) || !is_array($query['metric_codes']) || count($query['metric_codes'])>AiOverviewMetricResolver::MAX_METRICS
-            || !in_array($query['operation'],['summary','trend','ranking','comparison','threshold_count'],true) || !$this->validPeriods($query['periods'])
+            || !in_array($query['operation'],['summary','trend','ranking','comparison','threshold_count','condition_count','condition_list'],true) || !$this->validPeriods($query['periods'])
             || count($query['periods'])!==($query['operation']==='comparison'?2:1)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         if (($keys===$legacyExtended || $keys===$extended) && (!is_bool($query['has_object_selection']) || !is_bool($query['has_store_scope_restriction']) || !is_bool($query['has_business_filter']) || !is_string($query['object_kind'])
             || !preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$query['object_kind'])
             || !in_array($query['scope'],['current_store','authorized','unspecified'],true)
             || !in_array($query['presentation_origin'],['customer_or_verified_context','platform_observation','platform_recommendation'],true)
-            || ($keys===$extended && (!$this->validAggregateCondition($query['aggregate_condition'])
-                || (($query['operation']==='threshold_count') !== ($query['aggregate_condition']!==null))))
-            || ($keys===$legacyExtended && $query['operation']==='threshold_count'))) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+            || ($keys===$extended && !$this->validAggregateCondition($query['aggregate_condition'],$query['operation']))
+            || ($keys!==$extended && in_array($query['operation'],['threshold_count','condition_count','condition_list'],true)))) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         foreach ($query['metric_codes'] as $code) if(!is_string($code)||!preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$code)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         $ranking=$query['ranking'];
         if ($ranking===null) return;
@@ -597,14 +611,35 @@ final class SiliconFlowClient
             || (!is_null($ranking['limit'])&&(!is_int($ranking['limit'])||$ranking['limit']<1||$ranking['limit']>20))) throw new AiContractException('AI_MODEL_INPUT_INVALID');
     }
 
-    private function validAggregateCondition($condition): bool
+    private function validAggregateCondition($condition,string $operation): bool
     {
-        if ($condition===null) return true;
+        if ($condition===null) return !in_array($operation,['threshold_count','condition_count','condition_list'],true);
         $keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);
-        return $keys===['aggregation','amount_cents','operator','subject']
-            && ($condition['subject']??null)==='member' && ($condition['aggregation']??null)==='period_total'
-            && in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)
-            && is_int($condition['amount_cents']??null) && $condition['amount_cents']>=1 && $condition['amount_cents']<=100000000000;
+        if ($keys===['aggregation','amount_cents','operator','subject']) {
+            return $operation==='threshold_count'
+                && ($condition['subject']??null)==='member' && ($condition['aggregation']??null)==='period_total'
+                && in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)
+                && is_int($condition['amount_cents']??null) && $condition['amount_cents']>=1 && $condition['amount_cents']<=100000000000;
+        }
+        if ($keys!==['conditions','relation','result_form','subject']
+            || !in_array($operation,['condition_count','condition_list'],true)
+            || !in_array($condition['subject']??null,['person','member','store','order','sale_line','card','project','product'],true)
+            || !in_array($condition['relation']??null,['all','any'],true)
+            || ($condition['result_form']??null)!==($operation==='condition_count'?'count':'list')
+            || !is_array($condition['conditions']??null) || count($condition['conditions'])<1 || count($condition['conditions'])>4
+            || array_keys($condition['conditions'])!==range(0,count($condition['conditions'])-1)) return false;
+        $codes=[];
+        foreach ($condition['conditions'] as $item) {
+            $itemKeys=is_array($item)?array_keys($item):[];sort($itemKeys,SORT_STRING);
+            $code=$item['metric_code']??null;
+            if ($itemKeys!==['metric_code','operator','quantity','unit'] || !is_string($code)
+                || !preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$code) || isset($codes[$code])
+                || !in_array($item['operator']??null,['gte','gt','lte','lt','eq'],true)
+                || !is_string($item['quantity']??null) || !preg_match('/^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?$/D',$item['quantity'])
+                || !in_array($item['unit']??null,['yuan','count','day'],true)) return false;
+            $codes[$code]=true;
+        }
+        return true;
     }
 
     private function request(array $payload,string $apiKey,int $timeoutMs,callable $checkpoint): array

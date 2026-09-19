@@ -15,13 +15,27 @@ final class MetricSemanticCatalog
     {
         $dictionary = new \app\services\metric\MetricDictionaryServices();
         $capabilities = MetricDefinitionRegistry::capabilities();
+        $language=[];
+        // Dictionary aliases such as a store-level label and its canonical
+        // personnel metric are one registered semantic owner.  Fold every
+        // user-ready alias definition into that canonical owner so natural
+        // terms become available through registration metadata rather than a
+        // question-specific AI branch.
+        foreach ($dictionary->getDefinitions() as $definition) {
+            if (!is_array($definition) || ($definition['user_ready']??false)!==true
+                || !is_string($definition['code']??null)) continue;
+            $canonical=MetricDefinitionRegistry::canonical($definition['code']);
+            foreach (array_merge([(string)($definition['name']??'')],(array)($definition['aliases']??[])) as $term) {
+                if (is_string($term) && trim($term)!=='') $language[$canonical][trim($term)]=true;
+            }
+        }
         $entries = [];
         foreach ($capabilities as $code => $capability) {
             $definition = $dictionary->getByCode($code);
             if (!is_array($definition) || ($definition['user_ready'] ?? false) !== true) {
                 continue;
             }
-            $terms = array_merge([(string)$definition['name']], (array)($definition['aliases'] ?? []));
+            $terms = array_merge([(string)$definition['name']], (array)($definition['aliases'] ?? []),array_keys($language[$code]??[]));
             $terms = array_values(array_unique(array_filter(array_map('trim', $terms), static function ($term) {
                 return $term !== '';
             })));
@@ -155,6 +169,42 @@ final class MetricSemanticCatalog
             return mb_strlen($right, 'UTF-8') <=> mb_strlen($left, 'UTF-8');
         });
         return ['metric_code' => $code, 'term' => $terms[0]];
+    }
+
+    /**
+     * Return every unambiguous registered measurement explicitly present in
+     * the text. This is language accountability only: callers still bind and
+     * admit executable codes through the active capability contract. A term
+     * owned by more than one metric is omitted, and one metric contributes
+     * only its longest stated term.
+     *
+     * @return array<int,array{metric_code:string,term:string,ai_query_ready:bool}>
+     */
+    public static function registeredTermsInText(string $text, array $allowedCodes = []): array
+    {
+        if ($text==='' || preg_match('//u',$text)!==1) return [];
+        $entries=self::entries();
+        $allowed=$allowedCodes===[]?array_fill_keys(array_keys($entries),true)
+            :array_fill_keys(array_values(array_unique(array_filter($allowedCodes,'is_string'))),true);
+        $owners=[];
+        foreach ($entries as $code=>$entry) {
+            if (!isset($allowed[$code])) continue;
+            foreach ((array)($entry['terms']??[]) as $term) if (is_string($term) && $term!==''
+                && mb_strpos($text,$term,0,'UTF-8')!==false) $owners[$term][$code]=true;
+        }
+        $byCode=[];
+        foreach ($owners as $term=>$codes) {
+            if (count($codes)!==1) continue;
+            $code=array_key_first($codes);
+            if (!isset($byCode[$code]) || mb_strlen($term,'UTF-8')>mb_strlen($byCode[$code],'UTF-8')) $byCode[$code]=$term;
+        }
+        $out=[];
+        foreach ($byCode as $code=>$term) $out[]=['metric_code'=>$code,'term'=>$term,
+            'ai_query_ready'=>($entries[$code]['ai_query_ready']??false)===true];
+        usort($out,static function(array $left,array $right)use($text):int {
+            return mb_strpos($text,$left['term'],0,'UTF-8')<=>mb_strpos($text,$right['term'],0,'UTF-8');
+        });
+        return $out;
     }
 
     /** Remove only registered dictionary terms before checking residual conditions. */

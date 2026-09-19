@@ -20,7 +20,7 @@ final class PersonnelPerformanceReadServices
     public function totals(string $tenant,array $stores,array $range,string $metric,array $pairs): array
     {
         $contract=MetricDefinitionRegistry::get($metric);
-        if (($contract['reader_strategy']??null)!=='personnel_fact_sum' || $tenant==='' || !$stores || !$pairs || count($pairs)>1000) $this->fail('METRIC_PERSONNEL_SCOPE_INVALID');
+        if (($contract['reader_strategy']??null)!=='personnel_fact_sum' || $tenant==='' || !$stores || !$pairs || count($pairs)>10000) $this->fail('METRIC_PERSONNEL_SCOPE_INVALID');
         foreach ($stores as $id) if (!is_int($id)||$id<1) $this->fail('METRIC_PERSONNEL_SCOPE_INVALID');
         if (count($range)!==2) $this->fail('METRIC_SOURCE_RANGE_INVALID');
         foreach (['start','end'] as $key) {
@@ -39,8 +39,17 @@ final class PersonnelPerformanceReadServices
             ->where('p.tenant_id',$tenant)->whereIn('p.store_id',$stores)->where('p.status','effective')
             ->where('p.performance_type',$contract['source']['filters']['performance_type'])->whereBetween('p.business_date',[$range['start'],$range['end']]);
         call_user_func($this->normalScope,$query,'p.tenant_id','p.order_id');
-        $query->where(function($scope)use($unique){
-            foreach ($unique as $pair) $scope->whereOr(function($both)use($pair){$both->where('p.store_id',$pair['store_id'])->where('p.employee_id',$pair['employee_id']);});
+        // Preserve exact store+employee membership without emitting one OR
+        // branch per person.  The condition-set population can legitimately
+        // span more than 1,000 active personnel; grouping by store keeps the
+        // SQL bounded by the authorized store count and never widens a person
+        // into another store where they are not currently in the population.
+        $byStore=[];
+        foreach ($unique as $pair) $byStore[$pair['store_id']][$pair['employee_id']]=true;
+        $query->where(function($scope)use($byStore){
+            foreach ($byStore as $storeId=>$employees) $scope->whereOr(function($both)use($storeId,$employees){
+                $both->where('p.store_id',(int)$storeId)->whereIn('p.employee_id',array_map('intval',array_keys($employees)));
+            });
         });
         // No source-row limit: reversals and allocations all contribute before grouping.
         // The amount expression is owned by the registered metric contract.

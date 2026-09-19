@@ -28,7 +28,7 @@ final class IntentContextMerger
             'has_store_scope_restriction'=>($query['store_ids']??[])!==[],
             'has_business_filter'=>($query['business_filters']??[])!==[],
             // IDs, names, refs and results never leave the server.
-            'has_object_selection'=>isset($query['business_filters']['selection_ref']),
+            'has_object_selection'=>self::hasObjectSelection((array)($query['business_filters']??[])),
             'aggregate_condition'=>is_array($query['aggregate_condition']??null)?$query['aggregate_condition']:null,
             'presentation_origin'=>self::presentationOrigin($contextMeaning)];
     }
@@ -61,6 +61,29 @@ final class IntentContextMerger
         $out['periods']=self::field($delta['periods'],$intent['periods'],$prior['periods'],'periods',$pending);
         $out['scope']=self::field($delta['scope'],$intent['scope'],$prior['scope'],'scope',$pending);
         $out['aggregate_condition']=self::field($delta['aggregate_condition'],$intent['aggregate_condition']??null,$prior['aggregate_condition'],'aggregate_condition',$pending);
+        if (in_array($out['operation'],['condition_count','condition_list'],true)
+            && self::legacyMemberThreshold($out['aggregate_condition']??null)
+            && ($prior['operation']??null)==='threshold_count' && ($prior['object_kind']??null)==='member'
+            && count($out['metric_codes']??[])===1) {
+            // Backward-compatible promotion of a verified legacy member count
+            // into the generic object-condition carrier. This changes only the
+            // requested response form; the signed metric, operator, threshold,
+            // period and scope remain identical.
+            $legacy=$out['aggregate_condition'];
+            $out['aggregate_condition']=[
+                'subject'=>'member','relation'=>'all',
+                'result_form'=>$out['operation']==='condition_count'?'count':'list',
+                'conditions'=>[['metric_code'=>$out['metric_codes'][0],'operator'=>$legacy['operator'],
+                    'quantity'=>self::centsToYuan($legacy['amount_cents']),'unit'=>'yuan']],
+            ];
+        }
+        if (in_array($out['operation'],['condition_count','condition_list'],true)
+            && is_array($out['aggregate_condition']??null) && isset($out['aggregate_condition']['conditions'])) {
+            // result_form is the transport mirror of query_shape, not an
+            // independent business condition.  A count/list continuation
+            // keeps every signed predicate and changes only that mirror.
+            $out['aggregate_condition']['result_form']=$out['operation']==='condition_count'?'count':'list';
+        }
         $out['object_kind']=self::field($delta['object'],$intent['object_kind'],$prior['object_kind'],'object',$pending);
         // A store-scope replacement carries its target in object_term while
         // the analytical object itself may remain inherited. Keep that target
@@ -215,11 +238,32 @@ final class IntentContextMerger
         return $out;
     }
     private static function empty(string $name){return $name==='metric_codes'||$name==='periods'?[]:($name==='aggregate_condition'?null:($name==='scope'?'unspecified':($name==='object'?'unknown':'unknown')));}
-    /** A dimension alone is not a concrete customer restriction. */
+    /**
+     * A dimension or a server-owned population is not a concrete customer
+     * selection.  Condition queries use a signed cohort reference only to
+     * define their eligible population; treating that carrier as if the
+     * customer had named one employee traps the next independent question in
+     * the old topic and incorrectly asks to replace a selected person.
+     */
     private static function hasObjectSelection(array $filters): bool
     {
-        return is_string($filters['selection_ref']??null) && $filters['selection_ref']!=='';
+        $ref=$filters['selection_ref']??null;
+        return is_string($ref) && $ref!=='' && strpos($ref,'cohort:')!==0;
     }
     private static function scope(array $query): string {return 'authorized';}
+    private static function legacyMemberThreshold($condition): bool
+    {
+        if (!is_array($condition)) return false;
+        $keys=array_keys($condition);sort($keys,SORT_STRING);
+        return $keys===['aggregation','amount_cents','operator','subject']
+            &&($condition['subject']??null)==='member'&&($condition['aggregation']??null)==='period_total'
+            &&in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)
+            &&is_int($condition['amount_cents']??null)&&$condition['amount_cents']>0;
+    }
+    private static function centsToYuan(int $cents): string
+    {
+        $whole=intdiv($cents,100);$fraction=$cents%100;
+        return $fraction===0?(string)$whole:$whole.'.'.rtrim(str_pad((string)$fraction,2,'0',STR_PAD_LEFT),'0');
+    }
     private static function conflict(): void {throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');}
 }

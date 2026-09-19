@@ -8,16 +8,16 @@ namespace app\services\ai\contract;
  */
 final class AiIntentUnderstandingContract
 {
-    public const VERSION = 'intent-understanding-v6';
+    public const VERSION = 'intent-understanding-v9';
 
     public static function modelInstruction(): string
     {
         return 'Return one JSON object following '.self::VERSION.': '
             . '{"goal":"brief business goal","requirements":[{"id":"r1","meaning":"one part of the customer request","fields":["metric_codes"],"values":{"metric_terms":["exact customer term"]},"evidence":[{"message_id":"current","quote":"exact text from that de-identified message"}]}],"status":"understood|needs_clarification"}. '
             . 'The only top-level keys are goal, requirements and status. Every meaningful part of the customer request needs one or more requirements; do not collapse exclusions, comparison relationships, quantity or time into a vague summary. When status is needs_clarification and no concrete meaning can yet be preserved, requirements may be an empty array; do not use unbound for ambiguity. '
-            . 'A requirement has exactly id, meaning, fields, values and evidence. fields may contain metric_codes, object_kind, object_relation, operation, periods, ranking, scope, result_reference or unbound; use only fields actually expressed by this requirement. A field is a completed semantic commitment, never a note or a sketch. values is optional only when the request supplies no safe structured value for that field. When the customer meaning clearly establishes an object kind or relation, result form, period, ranking, scope or result reference, include the matching complete typed value in values so the later binding cannot silently change it. A temporal expression that fixes when the answer concerns is always an independent period requirement, even when the customer asks broadly about overall conditions rather than naming a metric. Before emitting the object, check the complete customer message again: every expressed relative-day, calendar-month or explicit-range condition must have a periods field, a complete values.periods carrier and evidence anchored to that expression. Do not absorb a time condition into a goal or metric term. When present, values may contain only values matching fields and must be complete and valid for each value it carries. Do not omit a field merely because its execution-shaped value is not available in this phase; preserve the natural-language meaning and evidence, and let the later binding phase derive the executable form. id is r followed by a positive number and is valid only in this request. evidence is an array of {"message_id":"current","quote":"exact excerpt"}; message_id must name an entry in question.evidence_messages. Do not output character offsets. The excerpt must occur exactly once in that one de-identified message; include more adjacent text if needed to distinguish repeated words. '
-            . 'The values object contains only keys named by fields. Every customer-stated business measurement belongs in fields as metric_codes and carries either values.metric_terms or values.metric_exclusions, even if it is everyday language rather than a registered indicator name; metric_codes is only the name of the later binding slot, never a request to output a code. These are nonempty arrays of exact customer terms present in an evidence excerpt. Never put a registered metric code in values. If the customer asks how many members/people meet a cumulative monetary threshold in a period, preserve aggregate_condition exactly as {"subject":"member","aggregation":"period_total","operator":"gte|gt|lte|lt|eq","amount_cents":positive-integer} and operation=threshold_count; amount_cents is the customer amount converted to cents, never a result. If the current turn changes only time, object, range or response form and names no measurement, do not add a metric_codes field merely because a verified prior query has one; retain that prior meaning through context only. A time, object or response-form requirement does not replace the separate measurement requirement. object_kind is one of store, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization, unknown. object_relation is analysis when that kind is what the customer wants compared, grouped or listed, and selection only when the customer identifies a particular object whose records should narrow the data. An analytical object is never itself a data-range restriction. operation is one of summary, trend, ranking, comparison, threshold_count, definition, unknown. Use ranking when the requested answer identifies leading, trailing or ordered comparable objects; the fact that a ranking compares peer values does not make it operation=comparison. Use comparison only when the customer asks to contrast two stated business sides such as periods, objects or measurements. scope is one of current_store, authorized, unspecified. ranking is exactly {"direction":"top|bottom|top_and_bottom|unspecified","limit":null}. Set limit to an integer from 1 to 999 when the customer asks for a specific count or semantically asks for one winner, leader, best or worst object; leave it null only for an open-ended plural ranking with no count. result_reference is exactly {"group":"top|bottom","ordinal":positive-integer} only when the customer explicitly refers to a displayed rank result; it identifies a position in the previous answer, never a name, ID or value. periods is an array of at most two objects, each exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":1,"end_offset_days":0}, or {"kind":"month_offset","offset_months":0}; numeric examples illustrate JSON types, not defaults. A relative-day count is a positive integer, and a month offset is an integer; preserve the customer meaning without imposing execution coverage limits here. A comparison that expresses both sides in the customer wording must preserve those two periods in stated order; do not leave either side for a date form. Omit a values key and its field when that meaning was not supplied, except a genuinely inherited meaning must remain explicit. '
-            . 'When the customer coordinates two or more independently named measurements, preserve every exact measurement term separately, either as separate requirements or as separate metric_terms in one requirement; never collapse the conjunction into one vague measurement or turn it into a choice between terms. A metric_term is copied character-for-character from the de-identified customer message; never rewrite it to a canonical metric title or insert an object qualifier. '
+            . 'A requirement has exactly id, meaning, fields, values and evidence. fields may contain metric_codes, object_kind, object_relation, operation, periods, ranking, scope, result_reference, aggregate_condition, condition_update or unbound; use only fields actually expressed by this requirement. A field is a completed semantic commitment, never a note or a sketch. values is optional only when the request supplies no safe structured value for that field. When the customer meaning clearly establishes an object kind or relation, result form, period, ranking, scope, aggregate condition, condition update or result reference, include the matching complete typed value in values so the later binding cannot silently change it. A temporal expression that fixes when the answer concerns is always an independent period requirement, even when the customer asks broadly about overall conditions rather than naming a metric. Before emitting the object, check the complete customer message again: every expressed relative-day, calendar-month or explicit-range condition must have a periods field, a complete values.periods carrier and evidence anchored to that expression. Do not absorb a time condition into a goal or metric term. When present, values may contain only values matching fields and must be complete and valid for each value it carries. Do not omit a field merely because its execution-shaped value is not available in this phase; preserve the natural-language meaning and evidence, and let the later binding phase derive the executable form. id is r followed by a positive number and is valid only in this request. evidence is an array of {"message_id":"current","quote":"exact excerpt"}; message_id must name an entry in question.evidence_messages. Do not output character offsets. The excerpt must occur exactly once in that one de-identified message; include more adjacent text if needed to distinguish repeated words. '
+            . 'The values object contains only keys named by fields. Every customer-stated business measurement belongs in fields as metric_codes and carries either values.metric_terms or values.metric_exclusions, even if it is everyday language rather than a registered indicator name; metric_codes is only the name of the later binding slot, never a request to output a code. These are nonempty arrays of exact customer terms present in an evidence excerpt. Never put a registered metric code in values. A single cumulative member-money threshold may retain the legacy aggregate_condition {"subject":"member","aggregation":"period_total","operator":"gte|gt|lte|lt|eq","amount_cents":positive-integer} with operation=threshold_count. For one or more conditions over a candidate object set, preserve aggregate_condition as {"subject":"person|member|store|order|sale_line|card|project|product","relation":"all|any","result_form":"count|list","conditions":[{"metric_term":"exact customer measurement","operator":"gte|gt|lte|lt|eq","quantity":"normalized nonnegative decimal","unit":"yuan|count|day"}]} and set operation to condition_count or condition_list to match result_form. Every generic condition item has exactly metric_term, operator, quantity and unit. quantity and unit are always JSON strings. Convert Chinese amount magnitude into yuan: “5万元” is quantity "50000" and unit "yuan"; “24次” is quantity "24" and unit "count"; “超过90天没来” keeps quantity "90" and unit "day". A current positive state such as “有剩余项目次数” is a condition with operator gt, quantity "0" and unit "count"; do not invent a period total for it. Logical relation is part of the requested business meaning, not a default: relation all means every condition must hold (for example, “并且”), while relation any means at least one condition may hold (for example, “或者”). Never default a multi-condition request to all, and never replace an explicit alternative with a conjunction. For example, “销售业绩达到5万元并且劳动业绩达到5万元的员工有几个” uses subject person, relation all, result_form count and two condition items with metric_term “销售业绩” and “劳动业绩”, operator gte, quantity "50000", unit "yuan"; the same request joined by “或者” uses relation any. Preserve every condition in customer order; do not collapse AND/OR, invent a metric, or turn a count request into a list. quantity is a normalized decimal string such as "50000" or "24", never a result. When prior_query contains a verified generic aggregate_condition and the current turn clearly changes exactly one existing predicate while leaving every other condition, object, relation, period and result form unchanged, use only condition_update with values.condition_update={"target_term":"exact current words identifying that prior condition","operator":"gte|gt|lte|lt|eq","quantity":"normalized nonnegative decimal","unit":"yuan|count|day"}. Do not also emit metric_codes, aggregate_condition, object_kind or operation for this one-field delta. condition_update is never a standalone query, never adds or removes a condition, and must not be used when the target could denote more than one prior predicate. If the current turn changes only time, object, range or response form and names no measurement, do not add a metric_codes field merely because a verified prior query has one; retain that prior meaning through context only. A time, object or response-form requirement does not replace the separate measurement requirement. object_kind is one of store, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization, order, sale_line, card, unknown. object_relation is analysis when that kind is what the customer wants compared, grouped or listed, and selection only when the customer identifies a particular object whose records should narrow the data. An analytical object is never itself a data-range restriction. operation is one of summary, trend, ranking, comparison, threshold_count, condition_count, condition_list, definition, unknown. Use ranking when the requested answer identifies leading, trailing or ordered comparable objects; the fact that a ranking compares peer values does not make it operation=comparison. Use comparison only when the customer asks to contrast two stated business sides such as periods, objects or measurements. scope is one of current_store, authorized, unspecified. ranking is exactly {"direction":"top|bottom|top_and_bottom|unspecified","limit":null}. Set limit to an integer from 1 to 999 when the customer asks for a specific count or semantically asks for one winner, leader, best or worst object; leave it null only for an open-ended plural ranking with no count. result_reference is exactly {"group":"top|bottom","ordinal":positive-integer} only when the customer explicitly refers to a displayed rank result; it identifies a position in the previous answer, never a name, ID or value. periods is an array of at most two objects, each exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":1,"end_offset_days":0}, or {"kind":"month_offset","offset_months":0}; numeric examples illustrate JSON types, not defaults. A relative-day count is a positive integer, and a month offset is an integer; preserve the customer meaning without imposing execution coverage limits here. A comparison that expresses both sides in the customer wording must preserve those two periods in stated order; do not leave either side for a date form. Omit a values key and its field when that meaning was not supplied, except a genuinely inherited meaning must remain explicit. '
+            . 'When the customer coordinates two or more independently named measurements, preserve every measurement separately, either as separate requirements or as separate metric_terms in one requirement; never collapse the conjunction into one vague measurement or turn it into a choice between terms. Prefer copying each metric_term character-for-character from the de-identified customer message. For a generic aggregate condition only, you may instead use one exact registered business-language alias that means the same measurement as an exact registered phrase in the evidence; never invent a paraphrase or insert an object qualifier. '
             . 'For object_relation, analysis also covers inspecting, summarizing or evaluating a stated object, not only comparing, grouping or listing it. A broad evaluation or overview of a stated object must carry that object_kind with object_relation=analysis; a time condition never replaces or erases it. '
             . 'Do not output metric codes, action codes, object IDs, names hidden behind local references, calculated dates, formulas, SQL, query steps, permissions or result values. An explicit customer date range may be preserved as a period; never calculate a relative period into calendar dates. '
             . 'understood means the business request is clear even when no current capability can perform it. needs_clarification means the business request itself has more than one plausible reading. A broad request to understand overall operating conditions without naming a specific business fact is still understood: retain it as a metric_codes requirement with its exact customer term, so the later binding may propose a clearly labelled initial observation rather than requiring the customer to learn a metric name. If the customer did state a measurement that can reasonably mean several different business facts and neither the current wording nor verified context chooses among them, preserve that measurement requirement and mark needs_clarification; never turn a category label into one of its examples. unbound is allowed only with understood: ambiguity is not an unavailable capability. This object grants nothing and is later bound by the server.';
@@ -34,19 +34,23 @@ final class AiIntentUnderstandingContract
         $messages = self::messages($safeQuestion);
         $requirements = $value['requirements'];
         if (!is_array($requirements) || (($requirements===[]) && $value['status']!=='needs_clarification') || count($requirements) > 12
-            || ($requirements!==[] && array_keys($requirements) !== range(0, count($requirements) - 1))) self::fail('requirements');
+            || ($requirements!==[] && array_keys($requirements) !== range(0, count($requirements) - 1))) self::fail('requirements_collection');
         $ids = []; $normalized = [];
         foreach ($requirements as $requirement) {
             if ($requirement instanceof \stdClass) $requirement = get_object_vars($requirement);
+            $requirement=self::collapseVerifiedConditionResponseFormContinuation($requirement,$safeQuestion,$messages);
+            $requirement=self::projectAggregateConditionFields($requirement);
             $requirementKeys = is_array($requirement) ? array_keys($requirement) : [];
             sort($requirementKeys, SORT_STRING);
-            if (!in_array($requirementKeys, [['evidence', 'fields', 'id', 'meaning'], ['evidence', 'fields', 'id', 'meaning', 'values']], true)
-                || !is_string($requirement['id'] ?? null)
-                || !preg_match('/^r[1-9][0-9]{0,2}$/D', $requirement['id']) || isset($ids[$requirement['id']])
-                || !self::text($requirement['meaning'] ?? null, 240) || !self::fields($requirement['fields'] ?? null)) self::fail('requirements');
+            if (!in_array($requirementKeys, [['evidence', 'fields', 'id', 'meaning'], ['evidence', 'fields', 'id', 'meaning', 'values']], true)) self::fail('requirement_keys');
+            if (!is_string($requirement['id'] ?? null)
+                || !preg_match('/^r[1-9][0-9]{0,2}$/D', $requirement['id']) || isset($ids[$requirement['id']])) self::fail('requirement_id');
+            if (!self::text($requirement['meaning'] ?? null, 240)) self::fail('requirement_meaning');
+            $fieldIssue=self::fieldIssue($requirement['fields']??null);
+            if ($fieldIssue!==null) self::fail('requirement_fields_'.$fieldIssue);
             $evidence = $requirement['evidence'];
             if (!is_array($evidence) || count($evidence) < 1 || count($evidence) > 6
-                || array_keys($evidence) !== range(0, count($evidence) - 1)) self::fail('requirements');
+                || array_keys($evidence) !== range(0, count($evidence) - 1)) self::fail('requirement_evidence_collection');
             $seen = []; $located = [];
             foreach ($evidence as $item) {
                 if ($item instanceof \stdClass) $item = get_object_vars($item);
@@ -56,9 +60,9 @@ final class AiIntentUnderstandingContract
                 // during the binding phase. Its start offset is never trusted:
                 // we recalculate it below from the same de-identified message.
                 if (!in_array($itemKeys, [['message_id', 'quote'], ['message_id', 'quote', 'start']], true) || !is_string($item['message_id'] ?? null)
-                    || !isset($messages[$item['message_id']]) || !self::text($item['quote'] ?? null, 160)) self::fail('requirements');
+                    || !isset($messages[$item['message_id']]) || !self::text($item['quote'] ?? null, 160)) self::fail('requirement_evidence_shape');
                 $key = $item['message_id']."\0".$item['quote'];
-                if (isset($seen[$key])) self::fail('requirements');
+                if (isset($seen[$key])) self::fail('requirement_evidence_duplicate');
                 $seen[$key] = true;
                 $starts = self::positions($messages[$item['message_id']], $item['quote']);
                 // Selecting the first repeated word would make the model's
@@ -120,6 +124,17 @@ final class AiIntentUnderstandingContract
             $ids[$requirement['id']] = true;
             $normalized[] = ['id' => $requirement['id'], 'meaning' => trim($requirement['meaning']), 'fields' => array_values($requirement['fields']), 'values'=>$values, 'evidence' => $located];
         }
+        // A top/bottom ordinal can only point into a verified ranked prior
+        // answer.  This is a structural context invariant, not a phrase rule:
+        // a count, list, summary or empty prior has no rank group to narrow.
+        // Reject the model carrier once so the language pass can remove its
+        // hallucinated reference while preserving the actual continuation.
+        foreach ($normalized as $requirement) {
+            if (!in_array('result_reference',(array)($requirement['fields']??[]),true)) continue;
+            if (($safeQuestion['prior_query']['operation']??null)!=='ranking') {
+                self::fail('result_reference_without_ranked_prior');
+            }
+        }
         // The period-only reuse path intentionally skips the second model
         // binding pass. It is safe only when the understanding model anchors
         // that *entire* current message as a time-only continuation. A short
@@ -142,6 +157,68 @@ final class AiIntentUnderstandingContract
             if (!$covered) self::fail('period_only_coverage');
         }
         return ['goal' => trim($value['goal']), 'requirements' => $normalized, 'status' => $value['status']];
+    }
+
+    /**
+     * A generic condition object already contains the analytical object,
+     * response form and ordered measurement list. Project those redundant
+     * carriers before validation so provider omission cannot erase a complete
+     * customer condition. This performs no language interpretation and does
+     * not alter relation, operator, quantity, unit or result form.
+     */
+    private static function projectAggregateConditionFields($requirement)
+    {
+        if (!is_array($requirement) || !is_array($requirement['fields']??null)
+            || !is_array($requirement['values']??null)) return $requirement;
+        $condition=$requirement['values']['aggregate_condition']??null;
+        if (!is_array($condition) || !isset($condition['conditions']) || !self::aggregateCondition($condition)) return $requirement;
+        foreach (['metric_codes','object_kind','operation','aggregate_condition'] as $field) {
+            if (!in_array($field,$requirement['fields'],true)) $requirement['fields'][]=$field;
+        }
+        $requirement['values']['metric_terms']=array_column($condition['conditions'],'metric_term');
+        $requirement['values']['object_kind']=$condition['subject'];
+        $requirement['values']['operation']=$condition['result_form']==='count'?'condition_count':'condition_list';
+        return $requirement;
+    }
+
+    /**
+     * Some providers repeat the complete signed predecessor condition when a
+     * customer asks only to switch its presentation from list to count (or
+     * back).  Repeating those metrics in current-turn evidence is invalid.
+     * Collapse only an exact predecessor predicate: subject, relation,
+     * ordered registered metric owners, operators, quantities and units must
+     * all match.  A changed threshold or newly stated metric therefore keeps
+     * the normal grounding gate and cannot be mistaken for inheritance.
+     */
+    private static function collapseVerifiedConditionResponseFormContinuation($requirement,array $safeQuestion,array $messages)
+    {
+        if (!is_array($requirement) || !is_array($requirement['fields']??null)
+            || !is_array($requirement['values']??null)) return $requirement;
+        $candidate=$requirement['values']['aggregate_condition']??null;
+        $prior=$safeQuestion['prior_query']??null;
+        $priorCondition=is_array($prior)?($prior['aggregate_condition']??null):null;
+        if (!self::aggregateCondition($candidate) || !isset($candidate['conditions'])
+            || !is_array($priorCondition) || !isset($priorCondition['conditions'])
+            || !in_array($prior['operation']??null,['condition_count','condition_list'],true)
+            || ($candidate['subject']??null)!==($priorCondition['subject']??null)
+            || ($candidate['relation']??null)!==($priorCondition['relation']??null)
+            || count($candidate['conditions'])!==count($priorCondition['conditions'])) return $requirement;
+        $current=is_string($messages['current']??null)?$messages['current']:'';
+        foreach ($candidate['conditions'] as $index=>$condition) {
+            $previous=$priorCondition['conditions'][$index]??null;
+            $code=\app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms([$condition['metric_term']]);
+            if (!is_array($previous) || $code===null || $code!==($previous['metric_code']??null)
+                || ($condition['operator']??null)!==($previous['operator']??null)
+                || ($condition['quantity']??null)!==($previous['quantity']??null)
+                || ($condition['unit']??null)!==($previous['unit']??null)) return $requirement;
+            if (mb_strpos($current,$condition['metric_term'],0,'UTF-8')!==false
+                || self::registeredTermGroundedInEvidence($condition['metric_term'],[['quote'=>$current]])) return $requirement;
+        }
+        $requirement['fields']=array_values(array_diff($requirement['fields'],['metric_codes','aggregate_condition']));
+        if (!in_array('operation',$requirement['fields'],true)) $requirement['fields'][]='operation';
+        unset($requirement['values']['metric_terms'],$requirement['values']['metric_exclusions'],$requirement['values']['aggregate_condition']);
+        $requirement['values']['operation']=$candidate['result_form']==='count'?'condition_count':'condition_list';
+        return $requirement;
     }
 
     public static function ids(array $understanding): array
@@ -195,7 +272,7 @@ final class AiIntentUnderstandingContract
     public static function repairable(?string $predicate): bool
     {
         return is_string($predicate) && $predicate !== ''
-            && preg_match('/^(shape|goal|status|requirements|message_projection|evidence_not_unique|period_only_coverage|values(?::[a-z_]+)?)$/D',$predicate) === 1;
+            && preg_match('/^(shape|goal|status|requirements|requirements_collection|requirement_shape|requirement_keys|requirement_id|requirement_meaning|requirement_fields(?:_(?:shape|empty|too_many|duplicate|unknown))?|requirement_evidence_collection|requirement_evidence_shape|requirement_evidence_duplicate|message_projection|evidence_not_unique|period_only_coverage|result_reference_without_ranked_prior|values(?::[a-z_]+)?)$/D',$predicate) === 1;
     }
 
     /** A structural correction never interprets a customer phrase in PHP. */
@@ -208,6 +285,9 @@ final class AiIntentUnderstandingContract
         if ($predicate === 'evidence_not_unique') {
             return 'The previous response used an evidence quote that was not an exact unique excerpt of the de-identified current message. Return the same complete understanding again, but for every current requirement use the complete de-identified current message verbatim as its evidence quote. Do not restore a hidden name, shorten, paraphrase, add, remove, reinterpret or bind any requirement.';
         }
+        if ($predicate === 'result_reference_without_ranked_prior') {
+            return 'The previous response added a result_reference although the verified prior query is not a ranking and therefore has no top or bottom rank group to reference. Re-read only the complete current customer message and return its actual continuation meaning. Remove result_reference without removing the requested response form, period, object or other current condition. Do not invent a rank, metric, result or identity.';
+        }
         if (strpos($predicate, 'values:') === 0) {
             $key = substr($predicate, strlen('values:'));
             if ($key === 'missing_typed') {
@@ -218,6 +298,9 @@ final class AiIntentUnderstandingContract
             }
             if ($key === 'metric_terms') {
                 return 'The previous response declared metric_codes without an exact customer measurement or exclusion. Return the complete understanding again. Every metric_codes requirement must carry a valid values.metric_terms or values.metric_exclusions from its evidence. Copy each term character-for-character from the de-identified current message; a shorter exact substring is valid, but a canonical title, inserted object qualifier, paraphrase or combined conjunction is not. Preserve every independently named measurement as its own term. If the customer did not state a measurement in that requirement, remove metric_codes and retain only the actually expressed conditions; do not invent a metric or use a prior metric as current customer wording. For a continuation that only changes time, return a periods requirement with a complete values.periods carrier and current-message evidence, but no metric_codes; the verified prior query is handled later by context, not copied into current customer wording.';
+            }
+            if ($key === 'aggregate_condition') {
+                return 'The previous response used an aggregate condition that was not grounded in the current customer message. Re-read only the complete current message. If it merely changes the response form of a verified prior condition query, such as asking “有几个” after a list, return only an operation requirement with values.operation=condition_count or condition_list and current-message evidence; omit metric_codes, object_kind and aggregate_condition because the signed prior query is inherited later by the context merger. If the current message itself states one or more conditions, return the complete understanding again and preserve all of those current conditions. For a generic object-set condition use exactly subject, relation, result_form and conditions; each condition item uses exactly metric_term, operator, quantity and unit. metric_term must be copied character-for-character from the current de-identified customer evidence, never paraphrased or rewritten to a canonical label. The same requirement must declare metric_codes and values.metric_terms; values.metric_terms must contain exactly the condition metric_term values in the same order. It must also declare object_kind equal to subject and operation equal to condition_count for result_form=count or condition_list for result_form=list. You may keep all current conditions in one requirement or split them into one condition per requirement, but never copy an unstated prior predicate into current evidence. operator is gte, gt, lte, lt or eq. quantity is a JSON string containing the normalized decimal, never a JSON number: “5万元” becomes "50000" with unit "yuan", “24次” becomes "24" with unit "count", and “90天” becomes "90" with unit "day". Do not add a registered metric code, remove a current predicate or change AND/OR.';
             }
             if (in_array($key, ['object_kind', 'object_relation', 'operation', 'periods', 'ranking', 'scope', 'result_reference', 'aggregate_condition'], true)) {
                 return 'The previous response included malformed values.'.$key.'. Return the complete understanding again. Preserve the same already understood customer condition; either emit a complete valid values.'.$key.' in that requirement or omit that optional detail without removing, reinterpreting, binding or replacing the condition.';
@@ -284,10 +367,18 @@ final class AiIntentUnderstandingContract
 
     private static function fields($value): bool
     {
-        $allowed=['metric_codes','object_kind','object_relation','operation','periods','ranking','scope','result_reference','aggregate_condition','unbound'];
-        if (!is_array($value) || $value===[] || count($value)>6 || count(array_unique($value))!==count($value)) return false;
-        foreach ($value as $field) if (!is_string($field) || !in_array($field,$allowed,true)) return false;
-        return true;
+        return self::fieldIssue($value)===null;
+    }
+
+    private static function fieldIssue($value): ?string
+    {
+        $allowed=['metric_codes','object_kind','object_relation','operation','periods','ranking','scope','result_reference','aggregate_condition','condition_update','unbound'];
+        if (!is_array($value) || ($value!==[]&&array_keys($value)!==range(0,count($value)-1))) return 'shape';
+        if ($value===[]) return 'empty';
+        if (count($value)>6) return 'too_many';
+        if (count(array_unique($value))!==count($value)) return 'duplicate';
+        foreach ($value as $field) if (!is_string($field) || !in_array($field,$allowed,true)) return 'unknown';
+        return null;
     }
 
     /**
@@ -298,7 +389,7 @@ final class AiIntentUnderstandingContract
     private static function values($value,array $fields,array $evidence): array
     {
         if (!is_array($value)) self::fail('values:shape');
-        $allowed=['metric_exclusions','metric_terms','object_kind','object_relation','operation','periods','ranking','scope','result_reference','aggregate_condition'];
+        $allowed=['metric_exclusions','metric_terms','object_kind','object_relation','operation','periods','ranking','scope','result_reference','aggregate_condition','condition_update'];
         // `values` is an optional transport carrier, not a place where an
         // unexpected key can grant authority. Drop an unrecognised or
         // field-mismatched extra while preserving valid typed meaning in the
@@ -318,10 +409,42 @@ final class AiIntentUnderstandingContract
             if (in_array($field,['metric_codes','unbound'],true)) continue;
             if (!array_key_exists($field,$value)) self::fail('values:missing_typed',$field);
         }
-        if (isset($value['object_kind']) && !in_array($value['object_kind'],['store','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization','unknown'],true)) self::fail('values:object_kind');
+        if (isset($value['object_kind']) && !in_array($value['object_kind'],['store','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization','order','sale_line','card','unknown'],true)) self::fail('values:object_kind');
         if (isset($value['object_relation']) && !in_array($value['object_relation'],['analysis','selection'],true)) self::fail('values:object_relation');
-        if (isset($value['operation']) && !in_array($value['operation'],['summary','trend','ranking','comparison','threshold_count','definition','unknown'],true)) self::fail('values:operation');
-        if (isset($value['aggregate_condition']) && !self::aggregateCondition($value['aggregate_condition'])) self::fail('values:aggregate_condition');
+        if (isset($value['operation']) && !in_array($value['operation'],['summary','trend','ranking','comparison','threshold_count','condition_count','condition_list','definition','unknown'],true)) self::fail('values:operation');
+        if (isset($value['aggregate_condition'])) {
+            if (!self::aggregateCondition($value['aggregate_condition'])) self::fail('values:aggregate_condition','shape');
+            // A generic condition label is the semantic key later bound to
+            // one registered metric. Prefer an exact excerpt. Natural speech
+            // can separate a registered concept from its counter (for
+            // example a verb followed by “at least N times”), while a model
+            // may return another *registered* alias for that same concept.
+            // Admit only registry-proven alias equivalence; unknown or
+            // cross-metric paraphrases still fail closed. This keeps language
+            // in the dictionary instead of teaching this contract phrases.
+            if (isset($value['aggregate_condition']['conditions'])) {
+                foreach ($value['aggregate_condition']['conditions'] as $condition) {
+                    $found=false;
+                    foreach ($evidence as $item) {
+                        if (mb_strpos($item['quote'],$condition['metric_term'],0,'UTF-8')!==false) {
+                            $found=true;
+                            break;
+                        }
+                    }
+                    if (!$found && !self::registeredTermGroundedInEvidence($condition['metric_term'],$evidence)) {
+                        self::fail('values:aggregate_condition','grounding');
+                    }
+                }
+            }
+        }
+        if (isset($value['condition_update'])) {
+            if (!self::conditionUpdate($value['condition_update'])) self::fail('values:condition_update','shape');
+            $grounded=false;
+            foreach ($evidence as $item) if (mb_strpos($item['quote'],$value['condition_update']['target_term'],0,'UTF-8')!==false) {
+                $grounded=true;break;
+            }
+            if (!$grounded) self::fail('values:condition_update','grounding');
+        }
         if (isset($value['scope']) && !in_array($value['scope'],['current_store','authorized','unspecified'],true)) self::fail('values:scope');
         if (isset($value['ranking'])) {
             $ranking=$value['ranking'];$rankingKeys=is_array($ranking)?array_keys($ranking):[];sort($rankingKeys,SORT_STRING);
@@ -355,13 +478,62 @@ final class AiIntentUnderstandingContract
             foreach ($value[$key] as $term) {
                 if (!self::text($term,160)) { unset($value[$key]); continue 2; }
                 $found=false;foreach($evidence as $item) if (mb_strpos($item['quote'],$term,0,'UTF-8')!==false) {$found=true;break;}
-                if (!$found) { unset($value[$key]); continue 2; }
+                $conditionTerms=isset($value['aggregate_condition']['conditions'])
+                    ? array_column($value['aggregate_condition']['conditions'],'metric_term') : [];
+                if (!$found && !($key==='metric_terms'
+                    && in_array($term,$conditionTerms,true)
+                    && self::registeredTermGroundedInEvidence($term,$evidence))) {
+                    unset($value[$key]); continue 2;
+                }
             }
         }
         if (in_array('metric_codes',$fields,true) && !isset($value['metric_terms']) && !isset($value['metric_exclusions'])) {
             self::fail('values:metric_terms');
         }
+        if (isset($value['aggregate_condition']['conditions'])) {
+            $conditionTerms=array_column($value['aggregate_condition']['conditions'],'metric_term');
+            $expectedOperation=$value['aggregate_condition']['result_form']==='count'?'condition_count':'condition_list';
+            // `metric_terms` is a redundant audit projection for a generic
+            // condition set. Every condition term above has already been
+            // independently grounded in exact evidence or a registry-proven
+            // alias, so project that validated ordered list instead of asking
+            // the provider to repeat the same wording byte-for-byte twice.
+            // Operators, quantities, relation and result form are untouched.
+            if (in_array('metric_codes',$fields,true)) $value['metric_terms']=$conditionTerms;
+            if (!in_array('metric_codes',$fields,true)
+                || !isset($value['metric_terms'])
+                || $value['metric_terms']!==$conditionTerms) self::fail('values:aggregate_condition','metric_audit');
+            if (!in_array('object_kind',$fields,true)
+                || ($value['object_kind']??null)!==$value['aggregate_condition']['subject']) {
+                self::fail('values:aggregate_condition','object_audit');
+            }
+            if (!in_array('operation',$fields,true)
+                || ($value['operation']??null)!==$expectedOperation) self::fail('values:aggregate_condition','operation_audit');
+        }
         return $value;
+    }
+
+    /**
+     * Accept a normalized condition term only when both it and at least one
+     * literal term in the customer's evidence have the same unique,
+     * AI-query-ready registry owner. No fuzzy matching or local synonym list
+     * is used here.
+     */
+    private static function registeredTermGroundedInEvidence(string $term,array $evidence): bool
+    {
+        $catalog='\\app\\services\\query\\metric\\MetricSemanticCatalog';
+        $code=$catalog::uniqueCodeForTerms([$term]);
+        if ($code===null) return false;
+        $entry=$catalog::entries()[$code]??null;
+        if (!is_array($entry)) return false;
+        foreach ($evidence as $item) {
+            $quote=is_string($item['quote']??null)?$item['quote']:'';
+            foreach ((array)($entry['terms']??[]) as $registeredTerm) {
+                if (is_string($registeredTerm) && $registeredTerm!==''
+                    && mb_strpos($quote,$registeredTerm,0,'UTF-8')!==false) return true;
+            }
+        }
+        return false;
     }
 
     private static function periods($periods): bool
@@ -380,11 +552,36 @@ final class AiIntentUnderstandingContract
     private static function aggregateCondition($condition): bool
     {
         $keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);
-        return $keys===['aggregation','amount_cents','operator','subject']
-            && ($condition['subject']??null)==='member' && ($condition['aggregation']??null)==='period_total'
+        if ($keys===['aggregation','amount_cents','operator','subject']) return
+            ($condition['subject']??null)==='member' && ($condition['aggregation']??null)==='period_total'
             && in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)
             && is_int($condition['amount_cents']??null) && $condition['amount_cents']>0
             && $condition['amount_cents']<=100000000000;
+        if ($keys!==['conditions','relation','result_form','subject']
+            ||!in_array($condition['subject']??null,['person','member','store','order','sale_line','card','project','product'],true)
+            ||!in_array($condition['relation']??null,['all','any'],true)||!in_array($condition['result_form']??null,['count','list'],true)
+            ||!is_array($condition['conditions']??null)||count($condition['conditions'])<1||count($condition['conditions'])>4
+            ||array_keys($condition['conditions'])!==range(0,count($condition['conditions'])-1)) return false;
+        foreach ($condition['conditions'] as $item) {
+            $itemKeys=is_array($item)?array_keys($item):[];sort($itemKeys,SORT_STRING);
+            if ($itemKeys!==['metric_term','operator','quantity','unit']||!self::text($item['metric_term']??null,160)
+                ||!in_array($item['operator']??null,['gte','gt','lte','lt','eq'],true)
+                ||!is_string($item['quantity']??null)||!preg_match('/^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?$/D',$item['quantity'])
+                ||!in_array($item['unit']??null,['yuan','count','day'],true)) return false;
+        }
+        return true;
+    }
+
+    /** One bounded mutation of a previously verified condition set. */
+    private static function conditionUpdate($update): bool
+    {
+        $keys=is_array($update)?array_keys($update):[];sort($keys,SORT_STRING);
+        return $keys===['operator','quantity','target_term','unit']
+            &&self::text($update['target_term']??null,160)
+            &&in_array($update['operator']??null,['gte','gt','lte','lt','eq'],true)
+            &&is_string($update['quantity']??null)
+            &&preg_match('/^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?$/D',$update['quantity'])===1
+            &&in_array($update['unit']??null,['yuan','count','day'],true);
     }
 
     private static function date($value): bool

@@ -63,7 +63,7 @@ try {
  $context=$auth;$context['_refresh']=function()use(&$auth){return $auth;};
  $boot=$gateway->handle('bootstrap',$context,['client_session_id'=>'device1']);
  verifyGateway($boot['enabled'] && $boot['history_round_limit']===20,'bootstrap enabled +20');
- $storeMetrics=[];foreach(\app\services\query\metric\MetricReadViewServices::metricCapabilities() as $code=>$contract)if(($contract['filter_grain']??null)!=='person')$storeMetrics[]=$code;
+ $storeMetrics=[];foreach(\app\services\query\metric\MetricReadViewServices::metricCapabilities() as $code=>$contract)if(($contract['filter_grain']??null)!=='person'&&($contract['ai_query_ready']??false)===true)$storeMetrics[]=$code;
  verifyGateway($boot['capabilities']['metric_codes']===$storeMetrics,'all query-ready non-person metrics exposed from the shared catalog');
  verifyGateway(!isset($boot['api_key']),'bootstrap never key');
  $make=function($request,$question,$history=[])use($gateway,$context,$boot){$input=['client_request_id'=>$request,'conversation_id'=>'conversation1','client_session_id'=>'device1','window_token'=>$boot['window_token'],'question'=>$question,'history'=>$history,'output_format'=>'screen','guidance_schema_version'=>'mohe-clarification-v2'];return [$gateway->handle('create',$context,$input),$input];};

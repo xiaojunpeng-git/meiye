@@ -17,6 +17,7 @@ final class AiAnswerRenderer
         // summary prose and metric cards.
         $cards = []; $rows = []; $facts = []; $metricNames = []; $shape = $view['query']['query_shape'];
         $threshold = $shape === 'threshold_count' ? $this->thresholdCondition($view['query']) : null;
+        $conditionSummary = null; $conditionListHasMore = false; $conditionListLimit = null; $conditionObjectLabel = null;
         foreach ($view['results'] as $row) {
             $registered = MetricReadViewServices::metricCapabilities();
             if (!isset($registered[$row['metric_code'] ?? '']) || !$registered[$row['metric_code']]['ai_query_ready'] || !in_array($row['period'] ?? '', ['current', 'comparison'], true)) {
@@ -28,6 +29,36 @@ final class AiAnswerRenderer
             $storageUnit = (string)($row['storage_unit'] ?? 'fen');
             $unit = $this->displayUnit($tooltip, $storageUnit);
             $range = $row['period'] === 'current' ? ['start' => $view['query']['start_date'], 'end' => $view['query']['end_date']] : $view['query']['compare_range'];
+            if (in_array($shape,['condition_count','condition_list'],true)) {
+                $set=$this->conditionSet($view['query']);
+                $subject=$set['subject'];
+                if ($storageUnit!=='count'||($row['object_kind']??null)!==$subject||!self::same($row['condition_set']??null,$set)
+                    ||!is_int($row['count']??null)||$row['count']<0||!is_array($range)) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                $conditionSummary=$this->conditionSummary($row['count'],$set);
+                $conditionObjectLabel=$this->conditionObjectLabel($subject,$row);
+                if ($shape==='condition_list') {
+                    if (!is_array($row['rows']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                    if (array_key_exists('has_more',$row)) {
+                        if (!is_bool($row['has_more'])||!is_int($row['list_limit']??null)||$row['list_limit']<1) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                        $conditionListHasMore=$row['has_more'];$conditionListLimit=$row['list_limit'];
+                    }
+                    foreach ($row['rows'] as $object) {
+                        [$idKey,$nameKey]=$this->conditionObjectKeys($subject);
+                        $identity=$object[$idKey]??null;
+                        $validIdentity=$idKey==='entity_id'?$this->conditionEntityIdentity($identity):is_int($identity);
+                        if (!$validIdentity||!is_string($object[$nameKey]??null)||!is_array($object['metrics']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                        foreach ($set['conditions'] as $condition) {
+                            $code=$condition['metric_code'];$value=$object['metrics'][$code]??null;
+                            $metricTip=$dictionary->getTooltip($code);$metric=$registered[$code]??null;
+                            if (!is_int($value)||!is_array($metric)||empty($metricTip['user_ready'])) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                            $metricUnit=$this->displayUnit($metricTip,(string)$metric['storage_unit']);
+                            $rows[]=['label'=>$object[$nameKey],'metric'=>$metricTip['name'],
+                                'value'=>$this->metricValue($value,(string)$metric['storage_unit']),'unit'=>$metricUnit,'period'=>'current','period_label'=>'本期'];
+                        }
+                    }
+                }
+                continue;
+            }
             if ($shape === 'threshold_count') {
                 if ($storageUnit !== 'count' || ($row['object_kind'] ?? null) !== 'member'
                     || !self::same($row['aggregate_condition'] ?? null, $threshold)
@@ -88,7 +119,7 @@ final class AiAnswerRenderer
         }
         $summary = $shape === 'threshold_count'
             ? $this->thresholdSummary($facts, $threshold)
-            : $this->resultSummary($shape, $facts, $rows, $metricNames);
+            : ($conditionSummary??$this->resultSummary($shape, $facts, $rows, $metricNames));
         $conclusion = $summary;
         $periodLabel = '统计时间：' . $view['query']['start_date'] . ' 至 ' . $view['query']['end_date'] . '。';
         $summary .= ($summary === '' ? '' : ' ') . $periodLabel;
@@ -101,13 +132,14 @@ final class AiAnswerRenderer
         if ($member && $shape === 'ranking') {
             if ($rows) $notes[] = '仅按所选指标排名；相同数值并列。';
         }
+        if ($conditionListHasMore) $notes[]='符合条件的结果较多，当前展示前'.$conditionListLimit.'条；总数以结论中的精确数量为准。';
         if ($dimensionLabel !== null) {
             if ($rows) $notes[] = $dimensionLabel . '按所选指标排名；相同数值并列。';
         }
         if ($view['query']['compare_range']) $notes[] = '对比时间：' . $view['query']['compare_range']['start'] . ' 至 ' . $view['query']['compare_range']['end'] . '。';
         foreach ($notes as $note) $answer['summary'] .= ' ' . $note;
         if ($rows) {
-            $columns = [['key' => 'label', 'label' => $shape === 'trend' ? '日期' : ($person ? '人员' : ($member ? '会员' : ($dimensionLabel ?? '门店')))], ['key' => 'metric', 'label' => '指标'], ['key' => 'value', 'label' => '数值'], ['key' => 'unit', 'label' => '单位']];
+            $columns = [['key' => 'label', 'label' => $shape === 'trend' ? '日期' : ($conditionObjectLabel ?? ($person ? '人员' : ($member ? '会员' : ($dimensionLabel ?? '门店'))))], ['key' => 'metric', 'label' => '指标'], ['key' => 'value', 'label' => '数值'], ['key' => 'unit', 'label' => '单位']];
             if (count(array_unique(array_column($rows, 'period'))) > 1) array_unshift($columns, ['key' => 'period_label', 'label' => '期间']);
             if ($shape === 'ranking') $columns[] = ['key' => 'rank', 'label' => '名次'];
             $answer['table'] = ['columns' => $columns, 'rows' => $rows];
@@ -117,6 +149,59 @@ final class AiAnswerRenderer
         // hierarchy in their own layout; no client derives business values.
         $answer['presentation'] = $this->presentation($shape, $facts, $conclusion, $periodLabel, $notes, $objectKind);
         return $answer;
+    }
+
+    /** The condition payload is compiler-verified too, but rendering keeps an independent evidence guard. */
+    private function conditionSet(array $query): array
+    {
+        $set=$query['condition_set']??null;$keys=is_array($set)?array_keys($set):[];sort($keys,SORT_STRING);
+        if ($keys!==['conditions','relation','subject']||!is_string($set['subject']??null)
+            ||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$set['subject'])||!in_array($set['relation']??null,['all','any'],true)
+            ||!is_array($set['conditions']??null)||!$set['conditions']) throw new RuntimeException('AI_EVIDENCE_INVALID');
+        $capabilities=MetricReadViewServices::metricCapabilities();
+        foreach ($set['conditions'] as $condition) if (!is_array($condition)||!is_string($condition['metric_code']??null)
+            ||!in_array($set['subject'],(array)($capabilities[$condition['metric_code']]['condition_subjects']??[]),true)
+            ||!in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)||!is_int($condition['value']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');
+        return $set;
+    }
+
+    private function conditionSummary(int $count,array $set): string
+    {
+        $relation=$set['relation']==='all'?'全部':'任一';
+        $labels=['member'=>['客户','人'],'person'=>['人员','人'],'store'=>['门店','家'],
+            'order'=>['销售订单','笔'],'sale_line'=>['销售明细','条'],'card'=>['卡项','个'],
+            'project'=>['项目','个'],'product'=>['产品','个']];
+        $fallback=MetricDefinitionRegistry::overviewObjectLabel((string)($set['subject']??''))??'对象';
+        [$label,$unit]=$labels[$set['subject']??'']??[$fallback,'个'];
+        return '符合'.$relation.count($set['conditions']).'项条件的'.$label.'共有'.$count.$unit.'。';
+    }
+
+    /** @return array{0:string,1:string} */
+    private function conditionObjectKeys(string $subject): array
+    {
+        $keys=['person'=>['employee_id','employee_name'],'member'=>['member_id','member_name'],'store'=>['store_id','store_name']];
+        return $keys[$subject]??['entity_id','entity_name'];
+    }
+
+    /**
+     * Order and sale-fact identities are immutable opaque strings, while sold
+     * catalogue items use integer ids. The identity is verified but never
+     * rendered; labels and values still come only from Reader evidence.
+     */
+    private function conditionEntityIdentity($identity): bool
+    {
+        if (is_int($identity)) return $identity>0;
+        return is_string($identity)
+            && preg_match('/^[A-Za-z0-9][A-Za-z0-9:_|.\-]{0,127}$/D',$identity)===1;
+    }
+
+    private function conditionObjectLabel(string $subject,array $row): string
+    {
+        $fixed=['person'=>'人员','member'=>'会员','store'=>'门店'];
+        if (isset($fixed[$subject])) return $fixed[$subject];
+        $label=$row['object_label']??MetricDefinitionRegistry::overviewObjectLabel($subject);
+        if (!is_string($label)||trim($label)==='') throw new RuntimeException('AI_EVIDENCE_INVALID');
+        return $label;
     }
 
     /** @return array{version:int,headline:string,facts:array<int,array<string,string>>,period_label:string,notes:array<int,string>} */

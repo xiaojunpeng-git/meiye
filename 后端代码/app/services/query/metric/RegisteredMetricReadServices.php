@@ -52,6 +52,264 @@ final class RegisteredMetricReadServices
      */
     public function thresholdCount(string $metricCode, string $tenantId, array $stores, array $range, array $condition): int
     {
+        $members = $this->memberThresholdQuery($metricCode, $tenantId, $stores, $range, $condition)
+            ->fieldRaw('s.member_id member_id');
+        $sql = $members->buildSql();
+        return (int) Db::table([$sql => 'member_period_totals'])->count();
+    }
+
+    /**
+     * Returns a bounded presentation page from the exact same registered
+     * per-member population used by thresholdCount().  The count remains
+     * exact; the page bound is presentation metadata rather than a business
+     * predicate. Names come from the frozen sale fact joined by the registered
+     * reader and are never supplied by the model.
+     *
+     * @return array{count:int,rows:array<int,array{member_id:int,member_name:string,metric_value:int}>,limit:int,has_more:bool}
+     */
+    public function thresholdMembers(string $metricCode, string $tenantId, array $stores, array $range, array $condition, int $limit = 100): array
+    {
+        if ($limit < 1 || $limit > 100) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $population = $this->memberThresholdQuery($metricCode, $tenantId, $stores, $range, $condition);
+        $countSql = (clone $population)->fieldRaw('s.member_id member_id')->buildSql();
+        $count = (int)Db::table([$countSql => 'member_period_totals'])->count();
+        $raw = (clone $population)
+            ->fieldRaw("s.member_id member_id,COALESCE(NULLIF(MAX(s.member_name_snapshot),''),'未命名会员') member_name,SUM(p.amount_cents) metric_value")
+            ->order('s.member_id', 'asc')->limit($limit)->select()->toArray();
+        $rows = [];
+        foreach ($raw as $row) {
+            $memberId = $this->integer($row['member_id'] ?? null);
+            $memberName = trim((string)($row['member_name'] ?? ''));
+            if ($memberId < 1 || $memberName === '') $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            $rows[] = ['member_id' => $memberId, 'member_name' => $memberName,
+                'metric_value' => $this->integer($row['metric_value'] ?? null)];
+        }
+        return ['count' => $count, 'rows' => $rows, 'limit' => $limit, 'has_more' => $count > count($rows)];
+    }
+
+    /**
+     * Executes a registered multi-metric member condition set without joining
+     * fact tables to each other. Each metric first aggregates at member grain;
+     * the database then intersects/unions only the qualified member ids. This
+     * prevents sales-payment rows and service rows from multiplying each other.
+     *
+     * @return array{count:int,rows:array<int,array{member_id:int,member_name:string,metrics:array<string,int>}>,limit:int,has_more:bool}
+     */
+    public function conditionMembers(string $tenantId, array $stores, array $range, array $conditionSet, int $limit = 100): array
+    {
+        $this->assertScope($tenantId, $stores, $range);
+        // A count answer must not pay for a hidden 100-row member page and a
+        // second value lookup. limit=0 is the server-owned count-only mode;
+        // callers still cannot request an unbounded page.
+        if ($limit < 0 || $limit > 100 || ($conditionSet['subject'] ?? null) !== 'member'
+            || !in_array($conditionSet['relation'] ?? null, ['all', 'any'], true)
+            || !is_array($conditionSet['conditions'] ?? null) || count($conditionSet['conditions']) < 1
+            || count($conditionSet['conditions']) > 4) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+
+        $queries = []; $metricCodes = [];
+        foreach ($conditionSet['conditions'] as $condition) {
+            $keys = is_array($condition) ? array_keys($condition) : []; sort($keys, SORT_STRING);
+            $code = is_array($condition) ? ($condition['metric_code'] ?? null) : null;
+            if ($keys !== ['metric_code', 'operator', 'value'] || !is_string($code)
+                || isset($metricCodes[$code]) || !is_int($condition['value'] ?? null)
+                || $condition['value'] < 0 || $condition['value'] > 100000000000) {
+                $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            }
+            [$query, $expression] = $this->memberMetricAggregateQuery($code, $tenantId, $stores, $range);
+            $operators = MetricDefinitionRegistry::get($code)['source']['threshold_count']['operators'] ?? [];
+            if (!in_array($condition['operator'], $operators, true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            $operator = $this->conditionSqlOperator((string)($condition['operator'] ?? ''));
+            $query->fieldRaw("s.member_id member_id,'" . $code . "' metric_code," . $expression . ' metric_value')
+                ->having($expression . ' ' . $operator . ' ' . $condition['value']);
+            $queries[] = $query;
+            $metricCodes[$code] = true;
+        }
+
+        $union = array_shift($queries);
+        foreach ($queries as $query) $union->unionAll($query->buildSql(false));
+        $unionSql = $union->buildSql();
+        $requiredMatches = $conditionSet['relation'] === 'all' ? count($metricCodes) : 1;
+        $matches = Db::table([$unionSql => 'condition_matches'])->fieldRaw('member_id')
+            ->group('member_id')->having('COUNT(*) >= ' . $requiredMatches);
+        $inlineValues=[];
+        if ($limit === 0) {
+            $countSql = (clone $matches)->buildSql();
+            $count = (int)Db::table([$countSql => 'qualified_members'])->count();
+            return ['count'=>$count,'rows'=>[],'limit'=>0,'has_more'=>$count>0];
+        }
+        if ($conditionSet['relation'] === 'all') {
+            // MySQL 5.7 has no window count.  For an AND list, every qualified
+            // row already contains every requested metric, so return the
+            // first page and the exact pre-limit group count in one scan.
+            // This prevents the current-entitlement population from being
+            // scanned once for count, once for ids and once per displayed
+            // metric. OR keeps the conservative path below because a member
+            // may qualify without having every metric value in this union.
+            $idRows=(clone $matches)->removeOption('field')
+                ->fieldRaw("SQL_CALC_FOUND_ROWS member_id,GROUP_CONCAT(CONCAT(metric_code,':',metric_value) ORDER BY metric_code SEPARATOR ',') metric_values")
+                ->order('member_id','asc')->limit($limit)->select()->toArray();
+            $found=Db::query('SELECT FOUND_ROWS() qualified_count');
+            $count=$this->integer($found[0]['qualified_count']??null);
+            foreach ($idRows as $row) {
+                $memberId=$this->integer($row['member_id']??null);
+                $serialized=(string)($row['metric_values']??'');
+                if ($memberId<1 || $serialized==='') $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                $inlineValues[$memberId]=[];
+                foreach (explode(',',$serialized) as $pair) {
+                    if (!preg_match('/^([a-z][a-z0-9_]{0,63}):([0-9]+)$/D',$pair,$parts)
+                        || !isset($metricCodes[$parts[1]]) || isset($inlineValues[$memberId][$parts[1]])) {
+                        $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                    }
+                    $inlineValues[$memberId][$parts[1]]=$this->integer($parts[2]);
+                }
+                if (count($inlineValues[$memberId])!==count($metricCodes)) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            }
+        } else {
+            $countSql = (clone $matches)->buildSql();
+            $count = (int)Db::table([$countSql => 'qualified_members'])->count();
+            $idRows = (clone $matches)->order('member_id', 'asc')->limit($limit)->select()->toArray();
+        }
+        $memberIds = [];
+        foreach ($idRows as $row) {
+            $memberId = $this->integer($row['member_id'] ?? null);
+            if ($memberId < 1) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            $memberIds[] = $memberId;
+        }
+        if ($memberIds === []) return ['count'=>$count,'rows'=>[],'limit'=>$limit,'has_more'=>false];
+
+        $names = [];
+        foreach (call_user_func($this->queryFactory, 'user')->whereIn('uid', $memberIds)
+            ->fieldRaw("uid,COALESCE(NULLIF(real_name,''),NULLIF(nickname,''),NULLIF(phone,''),CONCAT('会员#',uid)) member_name")
+            ->select()->toArray() as $row) {
+            $memberId = $this->integer($row['uid'] ?? null);
+            $name = trim((string)($row['member_name'] ?? ''));
+            if ($memberId < 1 || $name === '') $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            $names[$memberId] = $name;
+        }
+        $values = [];
+        foreach ($memberIds as $memberId) {
+            if (!isset($names[$memberId])) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            $values[$memberId] = ['member_id'=>$memberId,'member_name'=>$names[$memberId],
+                'metrics'=>$inlineValues[$memberId]??array_fill_keys(array_keys($metricCodes),0)];
+        }
+        foreach ($inlineValues===[]?array_keys($metricCodes):[] as $metricCode) {
+            [$query, $expression] = $this->memberMetricAggregateQuery($metricCode, $tenantId, $stores, $range);
+            $rows = $query->whereIn('s.member_id', $memberIds)
+                ->fieldRaw('s.member_id member_id,' . $expression . ' metric_value')->select()->toArray();
+            foreach ($rows as $row) {
+                $memberId = $this->integer($row['member_id'] ?? null);
+                if (!isset($values[$memberId])) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                $values[$memberId]['metrics'][$metricCode] = $this->integer($row['metric_value'] ?? null);
+            }
+        }
+        return ['count'=>$count,'rows'=>array_values($values),'limit'=>$limit,'has_more'=>$count>count($values)];
+    }
+
+    /**
+     * Executes condition sets whose candidates are registered dimensions of
+     * the same immutable fact population (orders, sale lines and sold items).
+     * Every metric is aggregated independently before ids are intersected or
+     * unioned, so adding quantity to amount cannot multiply source rows.
+     *
+     * @return array{count:int,rows:array<int,array{entity_id:int|string,entity_name:string,metrics:array<string,int>}>,limit:int,has_more:bool,object_label:string}
+     */
+    public function conditionDimensions(string $tenantId, array $stores, array $range, array $conditionSet, int $limit = 100): array
+    {
+        $this->assertScope($tenantId,$stores,$range);
+        $subject=$conditionSet['subject']??null;
+        if ($limit<1||$limit>100||!is_string($subject)||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$subject)
+            ||!in_array($conditionSet['relation']??null,['all','any'],true)
+            ||!is_array($conditionSet['conditions']??null)||count($conditionSet['conditions'])<1
+            ||count($conditionSet['conditions'])>4) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+
+        $queries=[];$metricCodes=[];$objectLabel=null;$sourceTable=null;$dimensionName=null;
+        foreach ($conditionSet['conditions'] as $condition) {
+            $keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);
+            $code=is_array($condition)?($condition['metric_code']??null):null;
+            if ($keys!==['metric_code','operator','value']||!is_string($code)||isset($metricCodes[$code])
+                ||!is_int($condition['value']??null)||$condition['value']<0||$condition['value']>100000000000) {
+                $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            }
+            [$query,$expression,$dimension,$label,$table]=$this->dimensionMetricAggregateQuery($code,$subject,$tenantId,$stores,$range);
+            if (($sourceTable!==null&&$sourceTable!==$table)||($dimensionName!==null&&$dimensionName!==$dimension)) {
+                $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            }
+            $sourceTable=$table;$dimensionName=$dimension;$objectLabel=$label;
+            $operator=$this->conditionSqlOperator((string)($condition['operator']??''));
+            $contract=MetricDefinitionRegistry::get($code);
+            $dimensionContract=$contract['source']['dimensions'][$dimension]??null;
+            if (!is_array($dimensionContract)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            $id='p.'.(string)$dimensionContract['id'];
+            $query->fieldRaw($id." entity_id,'".$code."' metric_code")
+                ->having($expression.' '.$operator.' '.$condition['value']);
+            $queries[]=$query;$metricCodes[$code]=true;
+        }
+
+        $union=array_shift($queries);
+        foreach ($queries as $query) $union->unionAll($query->buildSql(false));
+        $required=$conditionSet['relation']==='all'?count($metricCodes):1;
+        $matches=Db::table([$union->buildSql()=>'condition_matches'])->fieldRaw('entity_id')
+            ->group('entity_id')->having('COUNT(*) >= '.$required);
+        $count=(int)Db::table([(clone $matches)->buildSql()=>'qualified_entities'])->count();
+        $idRows=(clone $matches)->order('entity_id','asc')->limit($limit)->select()->toArray();
+        $entityIds=[];
+        foreach ($idRows as $row) {
+            $entityId=$this->dimensionIdentity($row['entity_id']??null);
+            $entityIds[]=$entityId;
+        }
+        if ($entityIds===[]) return ['count'=>$count,'rows'=>[],'limit'=>$limit,'has_more'=>false,'object_label'=>(string)$objectLabel];
+
+        $values=[];
+        foreach ($entityIds as $entityId) $values[$entityId]=[
+            'entity_id'=>$entityId,'entity_name'=>'','metrics'=>array_fill_keys(array_keys($metricCodes),0),
+        ];
+        foreach (array_keys($metricCodes) as $metricCode) {
+            [$query,$expression,$dimension]=$this->dimensionMetricAggregateQuery($metricCode,$subject,$tenantId,$stores,$range);
+            $contract=MetricDefinitionRegistry::get($metricCode);
+            $dimensionContract=$contract['source']['dimensions'][$dimension]??null;
+            if (!is_array($dimensionContract)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            $id='p.'.(string)$dimensionContract['id'];$name='p.'.(string)$dimensionContract['name'];
+            $rows=$query->whereIn($id,$entityIds)
+                ->fieldRaw($id.' entity_id,MAX('.$name.') entity_name,'.$expression.' metric_value')->select()->toArray();
+            foreach ($rows as $row) {
+                $entityId=$this->dimensionIdentity($row['entity_id']??null);$nameValue=trim((string)($row['entity_name']??''));
+                if (!isset($values[$entityId])||$nameValue==='') $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                if ($values[$entityId]['entity_name']!==''&&$values[$entityId]['entity_name']!==$nameValue) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                $values[$entityId]['entity_name']=$nameValue;
+                $values[$entityId]['metrics'][$metricCode]=$this->integer($row['metric_value']??null);
+            }
+        }
+        foreach ($values as $row) if ($row['entity_name']==='') $this->fail('METRIC_SOURCE_RESULT_INVALID');
+        return ['count'=>$count,'rows'=>array_values($values),'limit'=>$limit,'has_more'=>$count>count($values),'object_label'=>(string)$objectLabel];
+    }
+
+    /** @return array{0:mixed,1:string,2:string,3:string,4:string} */
+    private function dimensionMetricAggregateQuery(string $metricCode,string $subject,string $tenantId,array $stores,array $range): array
+    {
+        $contract=MetricDefinitionRegistry::get($metricCode);
+        if (($contract['reader_strategy']??null)!=='fact_sum'
+            ||!in_array($subject,(array)($contract['condition_subjects']??[]),true)
+            ||!in_array('condition_count',(array)($contract['query_shapes']??[]),true)
+            ||!in_array('condition_list',(array)($contract['query_shapes']??[]),true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $matches=[];
+        foreach ((array)($contract['analysis_dimension_contracts']??[]) as $dimension) {
+            if (is_array($dimension)&&($dimension['object_kind']??null)===$subject&&($dimension['filter_keys']??null)===[]) $matches[]=$dimension;
+        }
+        if (count($matches)!==1) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $dimension=(string)$matches[0]['dimension'];$label=(string)$matches[0]['object_label'];
+        $source=$contract['source']??null;$dimensionContract=is_array($source)?($source['dimensions'][$dimension]??null):null;
+        if (!is_array($source)||!is_array($dimensionContract)||!is_string($source['table']??null)
+            ||!is_string($source['amount']??null)||!is_string($dimensionContract['id']??null)
+            ||!is_string($dimensionContract['name']??null)||$label==='') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $query=$this->factQuery($source,$tenantId,$stores,$range);
+        $this->dimensionSourceFilters($query,$dimensionContract);
+        $id='p.'.(string)$dimensionContract['id'];
+        $query->where($id,'>',0)->group($id);
+        return [$query,'COALESCE(SUM('.$source['amount'].'),0)',$dimension,$label,(string)$source['table']];
+    }
+
+    private function memberThresholdQuery(string $metricCode, string $tenantId, array $stores, array $range, array $condition)
+    {
         $this->assertScope($tenantId, $stores, $range);
         $contract = MetricDefinitionRegistry::get($metricCode);
         $threshold = $contract['source']['threshold_count'] ?? null;
@@ -69,17 +327,87 @@ final class RegisteredMetricReadServices
         $operators = ['gte' => '>=', 'gt' => '>', 'lte' => '<=', 'lt' => '<', 'eq' => '='];
         $operator = $operators[$condition['operator']] ?? null;
         if ($operator === null) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-        // The member aggregate and its predicate remain in SQL. Selecting
-        // members into PHP would be both slower and unsafe for large stores.
-        // amount_cents is a bounded integer above, so this contains no
-        // customer/model-supplied SQL.
-        $members = $this->saleCashQuery($tenantId, $stores, $range)
+        // The member aggregate and its predicate remain in SQL. Selecting an
+        // unbounded member directory into PHP would be both slower and unsafe.
+        // amount_cents is a bounded integer above, so the generated predicate
+        // contains no customer/model-authored SQL.
+        return $this->saleCashQuery($tenantId, $stores, $range)
             ->where('s.member_id', '>', 0)
-            ->fieldRaw('s.member_id member_id')
             ->group('s.member_id')
             ->having('SUM(p.amount_cents) ' . $operator . ' ' . $condition['amount_cents']);
-        $sql = $members->buildSql();
-        return (int) Db::table([$sql => 'member_period_totals'])->count();
+    }
+
+    /** @return array{0:mixed,1:string} */
+    private function memberMetricAggregateQuery(string $metricCode, string $tenantId, array $stores, array $range): array
+    {
+        $this->assertScope($tenantId, $stores, $range);
+        $contract = MetricDefinitionRegistry::get($metricCode);
+        $threshold = $contract['source']['threshold_count'] ?? null;
+        $dimensions = $contract['analysis_dimension_contracts'] ?? [];
+        $memberDimension = false;
+        foreach ($dimensions as $dimension) if (is_array($dimension) && ($dimension['object_kind'] ?? null) === 'member'
+            && ($dimension['filter_keys'] ?? null) === []) $memberDimension = true;
+        $aggregation=$threshold['aggregation']??null;
+        if (!$memberDimension || !is_array($threshold) || ($threshold['subject_dimension'] ?? null) !== 'member'
+            || !in_array($aggregation,['period_total','current_state','as_of_age_days'],true)
+            || !in_array('condition_count', $contract['query_shapes'] ?? [], true)
+            || !in_array('condition_list', $contract['query_shapes'] ?? [], true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+
+        if (($contract['reader_strategy'] ?? null) === 'sales_payment_collected') {
+            return [$this->saleCashQuery($tenantId, $stores, $range)->where('s.member_id', '>', 0)->group('s.member_id'), 'SUM(p.amount_cents)'];
+        }
+        if (($contract['reader_strategy'] ?? null) === 'member_service_visit_count') {
+            $query = call_user_func($this->queryFactory, 'cashier_v3_entitlement_service_fact')->alias('s')
+                ->where('s.tenant_id', $tenantId)->whereIn('s.store_id', $stores)
+                ->whereBetween('s.business_date', [$range['start'], $range['end']])
+                ->where('s.service_status', 'completed')->where('s.member_id', '>', 0)->group('s.member_id');
+            call_user_func($this->normalServices, $query, 's');
+            return [$query, "COUNT(DISTINCT CONCAT(s.store_id,'|',s.business_date))"];
+        }
+        if (($contract['reader_strategy'] ?? null) === 'member_remaining_project_times'
+            && $aggregation==='current_state') {
+            $source=call_user_func($this->queryFactory,'user_card_holder')->alias('h')
+                // The holder store index is the selective authorization
+                // boundary.  Without this hint MySQL 5.7 starts from the much
+                // larger order table and the all-store count can exceed the
+                // AI read budget even though the result is unchanged.
+                ->force('store_id')
+                ->join('store_order o','o.id=h.oid')
+                // Both columns are source-owned and currently identical for
+                // every valid holder/order relation. Filtering the indexed
+                // holder column first keeps a narrow authorized-store query
+                // from scanning another store's entitlement population; the
+                // order predicate remains the authoritative scope check.
+                ->whereIn('h.store_id',$stores)->whereIn('o.store_id',$stores)
+                ->where('h.is_del',0)->where('h.write_surplus_times','>',0)
+                ->where('o.paid',1)->where('o.is_del',0)->where('o.is_system_del',0)
+                ->where('o.refund_status',0)->where('o.terminal_action',0)
+                ->where('o.card_upgrade_use_oid',0)->where('h.uid','>',0)
+                ->group('h.uid')
+                ->fieldRaw('h.uid member_id,COALESCE(SUM(h.write_surplus_times),0) metric_value');
+            $query=Db::table([$source->buildSql()=>'s'])->group('s.member_id');
+            return [$query,'MAX(s.metric_value)'];
+        }
+        if (($contract['reader_strategy'] ?? null) === 'member_last_visit_age_days'
+            && $aggregation==='as_of_age_days') {
+            $source=call_user_func($this->queryFactory,'cashier_v3_entitlement_service_fact')->alias('sv')
+                ->where('sv.tenant_id',$tenantId)->whereIn('sv.store_id',$stores)
+                ->where('sv.business_date','<=',$range['end'])
+                ->where('sv.service_status','completed')->where('sv.member_id','>',0)
+                ->group('sv.member_id');
+            call_user_func($this->normalServices,$source,'sv');
+            $source->fieldRaw("sv.member_id member_id,DATEDIFF('".$range['end']."',MAX(sv.business_date)) metric_value");
+            $query=Db::table([$source->buildSql()=>'s'])->group('s.member_id');
+            return [$query,'MAX(s.metric_value)'];
+        }
+        $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+    }
+
+    private function conditionSqlOperator(string $operator): string
+    {
+        $operators = ['gte'=>'>=','gt'=>'>','lte'=>'<=','lt'=>'<','eq'=>'='];
+        if (!isset($operators[$operator])) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        return $operators[$operator];
     }
 
     /** @return array<int,array{store_id:int,business_date:string,amount_cents:int}> */
@@ -299,6 +627,32 @@ final class RegisteredMetricReadServices
         $query=$this->factQuery($contract['source'],$tenantId,$stores,$range);
         $this->dimensionSourceFilters($query,$dimensionContract);
         return $this->aggregate($query,$contract['source']['amount']);
+    }
+
+    /**
+     * Reads one already-authorized analytical entity.  This is deliberately
+     * narrower than ranking: it never scans or returns a member list, and the
+     * selected ID is supplied only by a local binding service.
+     */
+    public function dimensionSelectionTotal(string $metricCode, string $dimension, string $tenantId, array $stores, array $range, int $entityId): int
+    {
+        $this->assertScope($tenantId, $stores, $range);
+        if ($entityId<1) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $contract=MetricDefinitionRegistry::get($metricCode);
+        $dimensionContract=$contract['dimensions'][$dimension] ?? ($contract['source']['dimensions'][$dimension] ?? null);
+        if (!is_array($dimensionContract) || ($dimensionContract['analysis_filter_keys']??[])!==['selection_ref']) {
+            $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        }
+        $handlers=[
+            'sales_payment_collected'=>function()use($tenantId,$stores,$range,$dimensionContract,$entityId):int {
+                $key=((string)($dimensionContract['id']??'')).'|'.((string)($dimensionContract['name']??''));
+                if ($key!=='member_id|member_name_snapshot') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+                return $this->aggregate($this->saleCashQuery($tenantId,$stores,$range)->where('s.member_id',$entityId),'p.amount_cents');
+            },
+        ];
+        $handler=$handlers[$contract['reader_strategy']]??null;
+        if (!$handler) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        return $handler();
     }
 
     /** @return array{dimension:string,rows:array<int,array{entity_id:int,entity_name:string,metric_value:int}>} */
@@ -1433,7 +1787,7 @@ final class RegisteredMetricReadServices
         if (!is_array($filters)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         foreach ($filters as $field=>$value) {
             if ($field!=='source_type' || !is_string($value)
-                || !in_array($value,['project','product'],true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+                || !in_array($value,['card','project','product'],true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
             $query->where('p.'.$field,$value);
         }
     }
@@ -1560,7 +1914,7 @@ final class RegisteredMetricReadServices
     private function serviceCustomerPersonnelTotals(string $metricCode, string $tenantId, array $stores, array $range, array $pairs): array
     {
         $allowed = [];
-        if ($pairs === [] || count($pairs) > 1000) $this->fail('METRIC_PERSONNEL_SCOPE_INVALID');
+        if ($pairs === [] || count($pairs) > 10000) $this->fail('METRIC_PERSONNEL_SCOPE_INVALID');
         foreach ($pairs as $pair) {
             if (!is_array($pair) || count($pair) !== 2 || !is_int($pair['store_id'] ?? null) || !in_array($pair['store_id'], $stores, true)
                 || !is_int($pair['employee_id'] ?? null) || $pair['employee_id'] < 1) $this->fail('METRIC_PERSONNEL_SCOPE_INVALID');
@@ -1789,6 +2143,29 @@ final class RegisteredMetricReadServices
         if (is_int($value)) return $value;
         if (!is_string($value) || !preg_match('/^-?(0|[1-9][0-9]*)$/D', $value) || (string)(int)$value !== $value) $this->fail('METRIC_SOURCE_AMOUNT_INVALID');
         return (int)$value;
+    }
+
+    /**
+     * Fact dimensions use either numeric business ids (items) or immutable
+     * opaque ids (orders and sale facts). Both are source-owned values. Keep
+     * opaque identities bounded and character-safe; they are used only for a
+     * parameterized follow-up read and are never rendered to the customer.
+     *
+     * @return int|string
+     */
+    private function dimensionIdentity($value)
+    {
+        if (is_int($value)) {
+            if ($value<1) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            return $value;
+        }
+        if (!is_string($value)) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+        $value=trim($value);
+        if ($value===''||$value==='0'||!preg_match('/^[A-Za-z0-9][A-Za-z0-9:_|.\-]{0,127}$/D',$value)) {
+            $this->fail('METRIC_SOURCE_RESULT_INVALID');
+        }
+        if (preg_match('/^[1-9][0-9]*$/D',$value) && (string)(int)$value===$value) return (int)$value;
+        return $value;
     }
 
     private function add(int $left, int $right): int

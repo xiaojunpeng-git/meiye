@@ -17,6 +17,10 @@ $view=IntentContextMerger::modelView($source);
 qcCheck($view['object_kind']==='person'&&$view['has_object_selection']===true,'model sees only non-sensitive prior shape');
 qcCheck($view['has_store_scope_restriction']===true&&$view['has_business_filter']===true,'model receives only non-sensitive presence markers for actual prior restrictions');
 qcCheck(!isset($view['store_ids'],$view['business_filters'])&&strpos(json_encode($view),'position:2')===false,'private prior values never leave server');
+$cohortSource=$source;$cohortSource['store_ids']=[];$cohortSource['business_filters']=['object_kind'=>'person','selection_ref'=>'cohort:active_personnel'];
+$cohortView=IntentContextMerger::modelView($cohortSource);
+qcCheck($cohortView['has_business_filter']===true&&$cohortView['has_object_selection']===false,
+    'a signed condition population remains a filter but is not exposed as a customer-selected person');
 $suggestedView=IntentContextMerger::modelView($source,['presentation_origin'=>'platform_observation']);
 qcCheck($suggestedView['presentation_origin']==='platform_observation','model can distinguish a platform first answer from a customer-selected metric');
 qcCheck(array_diff(array_keys($suggestedView),['metric_codes','operation','aggregate_condition','periods','ranking','scope','object_kind','has_store_scope_restriction','has_business_filter','has_object_selection','presentation_origin'])===[],'presentation provenance adds no answer, identity or result field to the model view');
@@ -77,6 +81,9 @@ qcCheck($dimensionSwitch['constraints']['business_filters']===null&&$dimensionSw
 $selectedSwitch=IntentContextMerger::merge($source,$emptySwitch);
 qcCheck($selectedSwitch['constraints']['business_filters']===null&&in_array('business_filters',$selectedSwitch['pending'],true)&&$selectedSwitch['replacement_confirmation'],
     'switching away from a signed concrete object still requires an explicit replacement decision');
+$cohortSwitch=IntentContextMerger::merge($cohortSource,$emptySwitch);
+qcCheck($cohortSwitch['constraints']['business_filters']===null&&$cohortSwitch['pending']===[]&&!$cohortSwitch['replacement_confirmation'],
+    'switching away from a server-owned condition population does not pretend a person was selected');
 $analyticalSwitch=$intent;
 $analyticalSwitch['object_kind']='member';
 $analyticalSwitch['object_relation']='analysis';

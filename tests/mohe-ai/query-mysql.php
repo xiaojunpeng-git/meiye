@@ -19,12 +19,13 @@ think\Container::getInstance()->instance('think\DbManager', $db);
 $pdo = new PDO('mysql:host=127.0.0.1;port=' . $port . ';dbname=mohe_query_fixture;charset=utf8mb4', 'root', $password, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
 $schemas = [
     'system_store' => 'id INT PRIMARY KEY,name VARCHAR(128)',
+    'user' => 'uid INT PRIMARY KEY,real_name VARCHAR(128) DEFAULT "",nickname VARCHAR(128) DEFAULT "",phone VARCHAR(32) DEFAULT ""',
     'organization' => 'id INT PRIMARY KEY,pid INT,is_del TINYINT DEFAULT 0',
     'organization_store' => 'store_id INT,org_id INT',
     'cashier_v3_report_organization_dimension' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),dimension_code VARCHAR(64),organization_id VARCHAR(64),organization_name_snapshot VARCHAR(128),enabled TINYINT DEFAULT 1,valid_from DATE NULL,display_order INT DEFAULT 0',
     'cashier_v3_payment_sale_allocation_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),allocation_fact_id VARCHAR(64),sale_fact_id VARCHAR(64),reversal_of VARCHAR(64) NULL,payment_fact_id VARCHAR(64) DEFAULT "",store_id INT,member_id INT DEFAULT 0,business_date DATE,status VARCHAR(32),amount_cents BIGINT,order_id VARCHAR(64),order_no_snapshot VARCHAR(64) DEFAULT "",source_line_id VARCHAR(64) DEFAULT "",organization_id VARCHAR(64) DEFAULT "",occurred_at INT DEFAULT 0,settled_at INT DEFAULT 0,recorded_at INT DEFAULT 0',
     'cashier_v3_sale_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),fact_id VARCHAR(64),store_id INT,member_id INT DEFAULT 0,member_name_snapshot VARCHAR(128) DEFAULT "",business_date DATE,status VARCHAR(32),sale_amount_cents BIGINT,quantity BIGINT DEFAULT 0,item_id INT DEFAULT 0,item_name_snapshot VARCHAR(128) DEFAULT "",order_id VARCHAR(64),source_line_id VARCHAR(64),source_type VARCHAR(32) DEFAULT "product",organization_id VARCHAR(64) DEFAULT "",organization_path_snapshot VARCHAR(128) DEFAULT "",store_name_snapshot VARCHAR(128) DEFAULT "",business_source_primary_id INT DEFAULT 0,business_source_label_snapshot VARCHAR(128) DEFAULT "",operator_id INT DEFAULT 0,operator_name_snapshot VARCHAR(128) DEFAULT ""',
-    'cashier_v3_performance_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,fact_id VARCHAR(64) NULL UNIQUE,fact_direction VARCHAR(32) DEFAULT "forward",tenant_id VARCHAR(64),store_id INT,member_id INT DEFAULT 0,member_name_snapshot VARCHAR(128) DEFAULT "",business_date DATE,status VARCHAR(32),performance_type VARCHAR(64),amount_cents BIGINT,labor_fee_amount_cents BIGINT DEFAULT 0,project_count_half_units INT DEFAULT 0,rule_name_snapshot VARCHAR(128) DEFAULT "",order_id VARCHAR(64),order_no_snapshot VARCHAR(128) DEFAULT "",checkout_request_id VARCHAR(64),source_line_id VARCHAR(64),organization_id VARCHAR(64) DEFAULT "",organization_path_snapshot VARCHAR(128) DEFAULT "",store_name_snapshot VARCHAR(128) DEFAULT "",employee_id INT DEFAULT 0,employee_name_snapshot VARCHAR(128) DEFAULT "",operator_id INT DEFAULT 0,operator_name_snapshot VARCHAR(128) DEFAULT ""',
+    'cashier_v3_performance_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,fact_id VARCHAR(64) NULL UNIQUE,fact_direction VARCHAR(32) DEFAULT "forward",tenant_id VARCHAR(64),store_id INT,member_id INT DEFAULT 0,member_name_snapshot VARCHAR(128) DEFAULT "",business_date DATE,status VARCHAR(32),performance_type VARCHAR(64),amount_cents BIGINT,labor_fee_amount_cents BIGINT DEFAULT 0,project_count_half_units INT DEFAULT 0,project_count_decimal DECIMAL(20,6) NULL DEFAULT NULL,rule_name_snapshot VARCHAR(128) DEFAULT "",order_id VARCHAR(64),order_no_snapshot VARCHAR(128) DEFAULT "",checkout_request_id VARCHAR(64),source_line_id VARCHAR(64),organization_id VARCHAR(64) DEFAULT "",organization_path_snapshot VARCHAR(128) DEFAULT "",store_name_snapshot VARCHAR(128) DEFAULT "",employee_id INT DEFAULT 0,employee_name_snapshot VARCHAR(128) DEFAULT "",operator_id INT DEFAULT 0,operator_name_snapshot VARCHAR(128) DEFAULT ""',
     'cashier_v3_entitlement_service_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),store_id INT,business_date DATE,checkout_request_id VARCHAR(64),source_line_id VARCHAR(64),service_status VARCHAR(32),quantity INT DEFAULT 1,member_id INT DEFAULT 0,order_id VARCHAR(64) DEFAULT "",operator_id INT DEFAULT 0,operator_name_snapshot VARCHAR(128) DEFAULT "",settled_at INT DEFAULT 0,project_id INT DEFAULT 0,project_name_snapshot VARCHAR(128) DEFAULT "",project_category_id_snapshot INT DEFAULT 0,project_category_name_snapshot VARCHAR(128) DEFAULT "",project_category_path_snapshot VARCHAR(512) DEFAULT "",is_experience TINYINT DEFAULT 0',
     'cashier_v3_report_sale_dimension_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),store_id INT,order_id VARCHAR(64),source_line_id VARCHAR(64),sale_fact_id VARCHAR(64),partner_name_snapshot VARCHAR(128),item_id INT DEFAULT 0,item_name_snapshot VARCHAR(128) DEFAULT "",category_id_snapshot INT DEFAULT 0,category_path_snapshot VARCHAR(512) DEFAULT "",product_type_snapshot VARCHAR(32) DEFAULT "project",is_experience TINYINT DEFAULT 0',
     'cashier_v3_card_sale_category_allocation_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),store_id INT,order_id VARCHAR(64),source_line_id VARCHAR(64),sale_fact_id VARCHAR(64),status VARCHAR(32),partner_name_snapshot VARCHAR(128),category_id_snapshot INT DEFAULT 0,category_path_snapshot VARCHAR(512) DEFAULT "",product_type_snapshot VARCHAR(32) DEFAULT "project",component_product_id INT DEFAULT 0,category_name_snapshot VARCHAR(128) DEFAULT "",component_count INT DEFAULT 1,sale_amount_cents BIGINT DEFAULT 0,configured_amount_cents BIGINT DEFAULT 0',
@@ -38,6 +39,7 @@ $schemas = [
 ];
 foreach ($schemas as $name => $schema) $pdo->exec('CREATE TABLE eb_' . $name . ' (' . $schema . ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 $pdo->exec("INSERT INTO eb_system_store VALUES (1,'测试甲店'),(2,'测试乙店'),(3,'无权店')");
+$pdo->exec("INSERT INTO eb_user VALUES (101,'测试会员','',''),(102,'历史欠款会员','','')");
 $pdo->exec("INSERT INTO eb_organization (id,pid,is_del) VALUES (1,0,0)");
 $pdo->exec("INSERT INTO eb_organization_store (store_id,org_id) VALUES (1,1),(2,1),(3,1)");
 $pdo->exec("INSERT INTO eb_cashier_v3_sale_fact (tenant_id,fact_id,store_id,member_id,member_name_snapshot,business_date,status,sale_amount_cents,quantity,item_id,item_name_snapshot,order_id,source_line_id,operator_id,operator_name_snapshot) VALUES
@@ -109,6 +111,25 @@ foreach ($expectedRegistered as $metricCode => $expectedValue) {
 $memberThreshold=['subject'=>'member','aggregation'=>'period_total','operator'=>'gte','amount_cents'=>498000];
 mysqlCheck($registered->thresholdCount('sales_collected_amount', '0', [1], $range, $memberThreshold)===1,
     'registered member cumulative actual-sales collection threshold excludes recharge, debt collection and void allocation facts');
+$memberPopulation=$registered->thresholdMembers('sales_collected_amount','0',[1],$range,$memberThreshold);
+mysqlCheck($memberPopulation['count']===1 && $memberPopulation['has_more']===false
+    && $memberPopulation['rows']===[['member_id'=>101,'member_name'=>'测试会员','metric_value'=>890001]],
+    'member threshold list and exact count share the registered sales-allocation population and frozen member label');
+$memberConditions=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_service_visit_count','operator'=>'gte','value'=>1],
+    ['metric_code'=>'sales_collected_amount','operator'=>'gte','value'=>890001],
+]];
+$memberConditionPopulation=$registered->conditionMembers('0',[1],$range,$memberConditions);
+mysqlCheck($memberConditionPopulation['count']===1 && $memberConditionPopulation['has_more']===false
+    &&$memberConditionPopulation['rows']===[['member_id'=>101,'member_name'=>'测试会员','metrics'=>[
+        'member_service_visit_count'=>1,'sales_collected_amount'=>890001,
+    ]]],'member multi-condition list intersects separately aggregated registered service and sales facts');
+$memberConditionCountOnly=$registered->conditionMembers('0',[1],$range,$memberConditions,0);
+mysqlCheck($memberConditionCountOnly===['count'=>1,'rows'=>[],'limit'=>0,'has_more'=>true],
+    'member condition count does not execute or disclose a hidden list page');
+$memberConditions['conditions'][0]['value']=2;
+mysqlCheck($registered->conditionMembers('0',[1],$range,$memberConditions)['count']===0,
+    'member visit count de-duplicates multiple completed service rows on the same member, store and business date');
 $memberThreshold['operator']='gt';$memberThreshold['amount_cents']=890001;
 mysqlCheck($registered->thresholdCount('sales_collected_amount', '0', [1], $range, $memberThreshold)===0,
     'registered member threshold applies the typed comparison operator to the signed sales-allocation total');
@@ -351,7 +372,7 @@ try {
         'metric read view executes a registered project dimension without an object-specific reader');
     $projectExport=app\services\query\metric\MetricReadViewExportProvider::project($projectView);
     mysqlCheck(count($projectExport)===1 && $projectExport[0]['store_name']==='护理项目；范围：当前授权范围'
-        && $projectExport[0]['metric_value']==='3' && $projectExport[0]['unit']==='个',
+        && $projectExport[0]['metric_value']==='3' && $projectExport[0]['unit']==='项',
         'registered project ranking export keeps the object identity and count unit');
     $memberUnrestricted=$memberRank;$memberUnrestricted['store_ids']=[];
     mysqlReject(function()use($service,$memberUnrestricted,$memberView){$service->replay([],$memberUnrestricted,$memberView['read_consistency_ref']);},'METRIC_READ_BINDING_MISMATCH');

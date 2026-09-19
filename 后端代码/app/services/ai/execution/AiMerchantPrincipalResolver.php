@@ -19,7 +19,7 @@ final class AiMerchantPrincipalResolver
         if ($stores===null) $stores=\think\facade\Db::name('system_store')->where('is_del',0)->where('name','<>','总部')->column('id');
         $stores=array_values(array_unique(array_filter(array_map('intval',$stores),static fn($id)=>$id>0)));sort($stores);
         $context=['terminal'=>'merchant','account_id'=>(int)$current['accountId'],'scope_mode'=>$personal?'self_participant':($stores?'stores':'none'),
-            'store_ids'=>$stores,'personnel_data_authorized'=>!empty($stores),
+            'store_ids'=>$stores,'personnel_data_authorized'=>!empty($stores),'member_data_authorized'=>!empty($stores),
             // Warehouse/page visibility is not a data grant for AI.  The
             // employee scope above is the only query range.
             'store_report_authorized'=>true,

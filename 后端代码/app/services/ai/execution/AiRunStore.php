@@ -659,7 +659,7 @@ final class AiRunStore
         // identities or returned business values.
         $allowed=['stage','predicate','finish_reason','content_bytes','recommended_value_type','transport_errno','http_status','elapsed_ms',
             'initial_observation','needs_metric_choice','selected_metric_count','operation','field','metric_requirement_count',
-            'binding_row_count','selected_code_count','row_code_count','row_status'];
+            'binding_row_count','selected_code_count','row_code_count','row_status','condition_mismatch'];
         if (array_diff(array_keys($diagnostic),$allowed) || !is_string($diagnostic['stage']??null)
             || !preg_match('/^[a-z_]{1,48}$/D',$diagnostic['stage']) || !is_string($diagnostic['predicate']??null)
             || !preg_match('/^[a-z0-9_:]{1,96}$/D',$diagnostic['predicate'])
@@ -678,6 +678,8 @@ final class AiRunStore
             || (isset($diagnostic['binding_row_count']) && (!is_int($diagnostic['binding_row_count']) || $diagnostic['binding_row_count']<0 || $diagnostic['binding_row_count']>12))
             || (isset($diagnostic['selected_code_count']) && (!is_int($diagnostic['selected_code_count']) || $diagnostic['selected_code_count']<0 || $diagnostic['selected_code_count']>64))
             || (isset($diagnostic['row_code_count']) && (!is_int($diagnostic['row_code_count']) || $diagnostic['row_code_count']<0 || $diagnostic['row_code_count']>64))
+            || (isset($diagnostic['condition_mismatch']) && (!is_string($diagnostic['condition_mismatch'])
+                || !in_array($diagnostic['condition_mismatch'],['semantic_shape','bound_shape','subject','relation','result_form','condition_count','condition_operator','condition_quantity','condition_unit','unknown'],true)))
             || (isset($diagnostic['row_status']) && (!is_string($diagnostic['row_status']) || !in_array($diagnostic['row_status'],['satisfied','unavailable','pending','invalid'],true)))) {
             throw new RuntimeException('AI_DIAGNOSTIC_INVALID');
         }

@@ -85,6 +85,50 @@ final class PersonnelAnalysisObjectServices
         return $selection;
     }
 
+    /**
+     * Returns the current authorised personnel population for a registered
+     * condition-set read.  Unlike selection(), this is deliberately a
+     * population, not a model-selected role or a name match: every candidate
+     * must be visible for every requested metric before a zero or a failed
+     * condition can be stated about that person.
+     *
+     * @param array<int,string> $metrics
+     */
+    public function conditionSelection(array $metrics): array
+    {
+        if (!$metrics || count($metrics)>4 || count(array_unique($metrics))!==count($metrics)) {
+            throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+        }
+        foreach ($metrics as $metric) if (!is_string($metric) || $metric==='') throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+
+        $scopes=[];
+        foreach ($metrics as $metric) $scopes[$metric]=$this->scope($metric);
+        $stores=null;
+        foreach ($scopes as $scope) {
+            $current=$scope['store_ids']; sort($current,SORT_NUMERIC);
+            $stores=$stores===null?$current:array_values(array_intersect($stores,$current));
+        }
+        if (!$stores) throw new \RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
+        $scope=$scopes[$metrics[0]]; $scope['store_ids']=$stores;
+        $rows=$this->staff($scope)->field('ss.store_id,ss.employee_id,e.name employee_name')
+            ->order('ss.store_id','asc')->order('ss.employee_id','asc')->limit(10001)->select()->toArray();
+        if (count($rows)>10000) throw new \RuntimeException('AI_OBJECT_SCOPE_TOO_LARGE');
+        $pairs=[];$names=[];
+        foreach ($rows as $row) {
+            $store=(int)($row['store_id']??0);$employee=(int)($row['employee_id']??0);$name=trim((string)($row['employee_name']??''));
+            if (!in_array($store,$stores,true)||$employee<1||$name==='') throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+            $pairs[$store.':'.$employee]=['store_id'=>$store,'employee_id'=>$employee];
+            $names[$employee]=$name;
+        }
+        // Repeat every metric authority after materialising the population so
+        // a permission change cannot turn an omitted person into a reported 0.
+        foreach ($scopes as $metric=>$before) if (call_user_func($this->authorize,$metric)!==$before) throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
+        $selection=['ref'=>'cohort:active_personnel','label'=>'当前有权限的在职人员','pairs'=>array_values($pairs),'names'=>$names,
+            'scope'=>$scope,'metric_codes'=>array_values($metrics)];
+        $selection['binding_hash']=hash('sha256',json_encode($selection,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES));
+        return $selection;
+    }
+
     private function scope(string $metric): array
     {
         $scope=call_user_func($this->authorize,$metric);

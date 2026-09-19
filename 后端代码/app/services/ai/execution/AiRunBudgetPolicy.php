@@ -29,7 +29,7 @@ class AiRunBudgetPolicy
         return [
             'version' => 1, 'run_execution_budget_ms' => 180000,
             'finalization_reserve_ms' => 5000, 'tool_timeout_ms' => 10000,
-            'model_timeout_ms' => 20000, 'clarification_wait_ms' => 600000, 'max_clarification_rounds' => 3,
+            'model_timeout_ms' => 30000, 'clarification_wait_ms' => 600000, 'max_clarification_rounds' => 3,
         ];
     }
 
@@ -41,7 +41,7 @@ class AiRunBudgetPolicy
         }
         if ($profile['run_execution_budget_ms'] > 300000
             || $profile['finalization_reserve_ms'] >= $profile['run_execution_budget_ms']
-            || $profile['tool_timeout_ms'] > 10000 || $profile['model_timeout_ms'] > 20000
+            || $profile['tool_timeout_ms'] > 10000 || $profile['model_timeout_ms'] > 30000
             || $profile['clarification_wait_ms'] > 600000 || !in_array($profile['max_clarification_rounds'], [3,4,5], true)) {
             self::fail('BUDGET_PROFILE_INVALID');
         }

@@ -49,7 +49,7 @@ final class AiTrustedPrincipalResolver
             'can_configure'=>false,
             // The cashier management-center menu controls that page, not the
             // person's AI data scope or AI query admission.
-            'employee_id'=>$employeeId,'personnel_data_authorized'=>!empty($stores),'store_report_authorized'=>true,
+            'employee_id'=>$employeeId,'personnel_data_authorized'=>!empty($stores),'member_data_authorized'=>!empty($stores),'store_report_authorized'=>true,
             'report_capability_code'=>'group_management_dashboard',
             'export_principal_ready'=>!$delegated,'principal_kind'=>$delegated?'delegated_session':'store_staff','origin_store_id'=>$storeId,
             'origin_organization_id'=>$operator->organizationId(),'tenant_id'=>$operator->tenantId()];

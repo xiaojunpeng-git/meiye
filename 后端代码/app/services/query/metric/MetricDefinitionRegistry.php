@@ -14,7 +14,7 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v9';
+    public const VERSION = 'unified-metric-registry-v13';
     public const COVERAGE_START = '2026-08-10';
 
     /**
@@ -75,7 +75,8 @@ final class MetricDefinitionRegistry
                 'default_ranking_dimension' => 'operator',
                 'category_reader' => ['strategy' => 'cash_sale_allocation', 'mode' => 'refund'],
             ],
-            'actual_performance' => self::amount('derived_subtract', 'cash-minus-actual-cash-refund-v1', ['summary', 'comparison', 'trend', 'ranking']) + [
+            'actual_performance' => self::amount('derived_subtract', 'cash-minus-actual-cash-refund-v1', ['summary', 'comparison', 'trend', 'ranking', 'condition_count', 'condition_list']) + [
+                'condition_subjects' => ['store'],
                 'overview' => [['object_kind' => 'store', 'section' => '收款结果', 'order' => 30]],
                 'derivation' => ['operator' => 'subtract', 'left_metric' => 'cash_performance', 'right_metric' => 'refund_performance'],
                 'dimensions' => ['operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot']],
@@ -92,7 +93,7 @@ final class MetricDefinitionRegistry
                 'default_ranking_dimension' => 'operator',
                 'overview' => [['object_kind' => 'store', 'section' => '服务消耗', 'order' => 10]],
             ],
-            'staff_sales_yeji' => self::amount('personnel_fact_sum', 'sales-performance-allocated-person-v1', ['summary', 'ranking'], [
+            'staff_sales_yeji' => self::amount('personnel_fact_sum', 'sales-performance-allocated-person-v1', ['summary', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_performance_fact', 'amount' => 'amount_cents',
                 'filters' => ['status' => 'effective', 'performance_type' => 'sales_performance_allocated'],
                 'normal_scope' => 'facts', 'dimensions' => ['employee' => [
@@ -102,6 +103,7 @@ final class MetricDefinitionRegistry
                     'analysis_filter_keys' => ['selection_ref'],
                 ]],
             ], 'person', ['selection_ref']) + [
+                'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
                 // This registered fact is assigned only to the platform's
                 // sales-qualified people. A broad people-ranking may use that
@@ -109,7 +111,7 @@ final class MetricDefinitionRegistry
                 // a cohort from the customer's wording.
                 'analysis_default_selection_ref' => 'role:salesperson',
             ],
-            'staff_labor_yeji' => self::amount('personnel_fact_sum', 'labor-performance-allocated-person-v1', ['summary', 'ranking'], [
+            'staff_labor_yeji' => self::amount('personnel_fact_sum', 'labor-performance-allocated-person-v1', ['summary', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_performance_fact', 'amount' => 'amount_cents',
                 'filters' => ['status' => 'effective', 'performance_type' => 'labor_performance_allocated'],
                 'normal_scope' => 'facts', 'dimensions' => ['employee' => [
@@ -119,6 +121,7 @@ final class MetricDefinitionRegistry
                     'analysis_filter_keys' => ['selection_ref'],
                 ]],
             ], 'person', ['selection_ref']) + [
+                'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
                 // Labour-performance facts use the same qualification source
                 // as cashier performance allocation and personnel authority.
@@ -127,7 +130,7 @@ final class MetricDefinitionRegistry
             // 工资项目数不是销售数量：它是一次已完成服务中分给手艺人的
             // 最终项目数。使用百万分之一的整数读值，保证 0.3、6.6 等手工
             // 分配值在聚合、排行和导出中不因浮点计算而漂移。
-            'staff_project_num' => self::projectCount('personnel_fact_sum', 'staff-service-project-count-v2', ['summary', 'ranking'], [
+            'staff_project_num' => self::projectCount('personnel_fact_sum', 'staff-service-project-count-v2', ['summary', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_performance_fact',
                 'amount' => 'CAST(ROUND(COALESCE(p.project_count_decimal, p.project_count_half_units / 2) * 1000000, 0) AS SIGNED)',
                 'filters' => ['status' => 'effective', 'performance_type' => 'labor_performance_allocated'],
@@ -138,13 +141,14 @@ final class MetricDefinitionRegistry
                     'analysis_filter_keys' => ['selection_ref'],
                 ]],
             ], 'person', ['selection_ref']) + [
+                'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
                 'analysis_default_selection_ref' => 'role:craftsman',
             ],
             // "客数" retains its established code, but its former source was
             // the legacy write-off table.  New V3 reads are bound to completed
             // service facts plus active labour allocations instead.
-            'staff_service_num' => self::tenthCount('service_customer_personnel', 'v3-service-customer-visit-person-v1', ['summary', 'ranking'], [
+            'staff_service_num' => self::tenthCount('service_customer_personnel', 'v3-service-customer-visit-person-v1', ['summary', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_entitlement_service_fact + cashier_v3_performance_fact',
                 'filters' => ['service_status' => 'completed', 'performance_type' => 'labor_performance_allocated', 'performance_status' => 'effective'],
                 'normal_scope' => 'services',
@@ -155,10 +159,11 @@ final class MetricDefinitionRegistry
                     'analysis_filter_keys' => ['selection_ref'],
                 ]],
             ], 'person', ['selection_ref']) + [
+                'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
                 'analysis_default_selection_ref' => 'role:craftsman',
             ],
-            'service_people' => self::tenthCount('service_customer_personnel', 'v3-service-customer-period-people-person-v1', ['summary', 'ranking'], [
+            'service_people' => self::tenthCount('service_customer_personnel', 'v3-service-customer-period-people-person-v1', ['summary', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_entitlement_service_fact + cashier_v3_performance_fact',
                 'filters' => ['service_status' => 'completed', 'performance_type' => 'labor_performance_allocated', 'performance_status' => 'effective'],
                 'normal_scope' => 'services',
@@ -169,14 +174,19 @@ final class MetricDefinitionRegistry
                     'analysis_filter_keys' => ['selection_ref'],
                 ]],
             ], 'person', ['selection_ref']) + [
+                'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
                 'analysis_default_selection_ref' => 'role:craftsman',
             ],
-            'sales_amount' => self::amount('fact_sum', 'v3-sale-completed-lines-v1', ['summary', 'comparison', 'trend', 'ranking'], [
+            'sales_amount' => self::amount('fact_sum', 'v3-sale-completed-lines-v1', ['summary', 'comparison', 'trend', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_sale_fact', 'amount' => 'sale_amount_cents',
                 'filters' => ['status' => 'effective'], 'normal_scope' => 'facts',
                 'dimensions' => self::saleAmountDimensions(),
             ]) + [
+                // These subjects all use the immutable completed-sale fact.
+                // Their identity/grain is declared by saleItemDimensions();
+                // query shapes alone never make another dimension executable.
+                'condition_subjects' => ['order', 'sale_line', 'card', 'project', 'product'],
                 'default_ranking_dimension' => 'operator',
                 'overview' => [
                     ['object_kind' => 'store', 'section' => '销售结果', 'order' => 10],
@@ -191,7 +201,7 @@ final class MetricDefinitionRegistry
             // 销售收款与销售成交额是两个不同的业务事实。该指标只读取销售
             // 收款分摊事实，不混入充值或历史欠款补交；退款沿同一有符号分摊链
             // 回冲。后续会员累计门槛查询也只能声明性地复用这一事实合同。
-            'sales_collected_amount' => self::amount('sales_payment_collected', 'v3-sale-payment-collected-net-v1', ['summary', 'comparison', 'trend', 'ranking', 'threshold_count'], [
+            'sales_collected_amount' => self::amount('sales_payment_collected', 'v3-sale-payment-collected-net-v1', ['summary', 'comparison', 'trend', 'ranking', 'threshold_count', 'condition_count', 'condition_list'], [
                 'dimensions' => [
                     'member' => [
                         'id' => 'member_id', 'name' => 'member_name_snapshot',
@@ -200,6 +210,22 @@ final class MetricDefinitionRegistry
                         'analysis_relation_role' => 'member_sales_collection_total',
                         'analysis_action_codes' => ['sales', 'payment'],
                     ],
+                    // The selected-subject contract shares the same frozen
+                    // fact columns but is distinct from the aggregate member
+                    // dimension above: count/ranking must remain list-free,
+                    // while a local exact member reference may read one row.
+                    'member_selection' => [
+                        'id' => 'member_id', 'name' => 'member_name_snapshot',
+                        'analysis_object_kind' => 'member',
+                        'analysis_object_label' => '会员',
+                        'analysis_relation_role' => 'member_selected_sales_collection_total',
+                        'analysis_action_codes' => ['sales', 'payment'],
+                        // A named member is a private local selection, never
+                        // a model-authored filter.  The Reader re-resolves
+                        // this opaque reference against the current store
+                        // relation before it reads the same payment facts.
+                        'analysis_filter_keys' => ['selection_ref'],
+                    ],
                 ],
                 'threshold_count' => [
                     'subject_dimension' => 'member',
@@ -207,10 +233,83 @@ final class MetricDefinitionRegistry
                     'operators' => ['gte', 'gt', 'lte', 'lt', 'eq'],
                 ],
             ]) + [
+                'condition_subjects' => ['member'],
                 'default_ranking_dimension' => 'member',
                 'overview' => [['object_kind' => 'store', 'section' => '销售结果', 'order' => 20]],
             ],
-            'sales_quantity' => self::count('fact_sum', 'v3-sale-completed-line-quantity-v1', ['summary', 'comparison', 'trend', 'ranking'], [
+            'member_service_visit_count' => self::count('member_service_visit_count', 'v3-member-completed-service-visit-v1', ['condition_count', 'condition_list'], [
+                'table' => 'cashier_v3_entitlement_service_fact',
+                'filters' => ['service_status' => 'completed'],
+                'normal_scope' => 'services',
+                'dimensions' => [
+                    'member' => [
+                        'id' => 'member_id', 'name' => 'member_name',
+                        'analysis_object_kind' => 'member',
+                        'analysis_object_label' => '会员',
+                        'analysis_relation_role' => 'member_completed_service_visits',
+                        'analysis_action_codes' => ['service'],
+                    ],
+                ],
+                'threshold_count' => [
+                    'subject_dimension' => 'member',
+                    'aggregation' => 'period_total',
+                    'operators' => ['gte', 'gt', 'lte', 'lt', 'eq'],
+                ],
+            ]) + ['condition_subjects' => ['member']],
+            // Current remaining project entitlement is read from the same
+            // holder/order authority as the unified member list. It is a
+            // current-state value: the requested range contributes only its
+            // authorized store scope, never a historical aggregation.
+            'member_remaining_project_times' => self::count('member_remaining_project_times', 'member-current-remaining-project-times-v1', ['condition_count', 'condition_list'], [
+                'table' => 'user_card_holder + store_order',
+                'dimensions' => [
+                    'member' => [
+                        'id' => 'member_id', 'name' => 'member_name',
+                        'analysis_object_kind' => 'member',
+                        'analysis_object_label' => '会员',
+                        'analysis_relation_role' => 'member_current_remaining_project_times',
+                        'analysis_action_codes' => ['service'],
+                    ],
+                ],
+                'threshold_count' => [
+                    'subject_dimension' => 'member',
+                    'aggregation' => 'current_state',
+                    // Zero-value members do not have a physical remaining
+                    // entitlement row. Keep this first slice to the positive
+                    // state that the source can prove without synthesizing 0.
+                    'operators' => ['gt'],
+                ],
+            ]) + ['condition_subjects' => ['member']],
+            // Age is computed as-of the signed query end date from the latest
+            // valid completed-service fact in the authorized store range.
+            // Missing history is excluded rather than treated as infinitely
+            // old, preserving the existing sleeping-member definition.
+            'member_days_since_last_visit' => self::count('member_last_visit_age_days', 'v3-member-last-completed-service-age-days-v1', ['condition_count', 'condition_list'], [
+                'table' => 'cashier_v3_entitlement_service_fact',
+                'dimensions' => [
+                    'member' => [
+                        'id' => 'member_id', 'name' => 'member_name',
+                        'analysis_object_kind' => 'member',
+                        'analysis_object_label' => '会员',
+                        'analysis_relation_role' => 'member_last_completed_service_age',
+                        'analysis_action_codes' => ['service'],
+                    ],
+                ],
+                'threshold_count' => [
+                    'subject_dimension' => 'member',
+                    'aggregation' => 'as_of_age_days',
+                    'operators' => ['gte', 'gt'],
+                ],
+            ]) + [
+                'condition_subjects' => ['member'],
+                'condition_unit' => 'day',
+                // 瑞昊统一服务事实目前只覆盖新系统期间，无法完整证明
+                // “曾服务但超过 N 天未到店”的全量候选集合。保留注册口径
+                // 和 Reader 落点供后续历史覆盖完成后启用，但覆盖完成前绝不
+                // 将缺失历史当作 0 或“从未服务”。
+                'readiness_reasons' => ['HISTORICAL_SERVICE_COVERAGE_INCOMPLETE'],
+            ],
+            'sales_quantity' => self::count('fact_sum', 'v3-sale-completed-line-quantity-v1', ['summary', 'comparison', 'trend', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_sale_fact', 'amount' => 'quantity',
                 // A refund adjusts payment amount only. Sold quantity remains
                 // the original completed-sale quantity until a separately
@@ -218,6 +317,7 @@ final class MetricDefinitionRegistry
                 'filters' => ['status' => 'effective'], 'normal_scope' => 'facts',
                 'dimensions' => self::saleItemDimensions(),
             ]) + [
+                'condition_subjects' => ['order', 'sale_line', 'card', 'project', 'product'],
                 'default_ranking_dimension' => 'operator',
                 'overview' => [
                     ['object_kind' => 'store', 'section' => '经营动作', 'order' => 10],
@@ -318,7 +418,12 @@ final class MetricDefinitionRegistry
             // deterministic rendering and the guarded export projection.  Counts
             // are therefore a first-class registered result, not a failed attempt
             // to masquerade as cents.
-            $aiReady = in_array($item['storage_unit'], ['fen', 'count', 'project_count_micro', 'customer_tenth'], true);
+            $declaredReadinessReasons = array_values(array_filter(
+                (array)($item['readiness_reasons'] ?? []),
+                static function ($reason): bool { return is_string($reason) && $reason !== ''; }
+            ));
+            $storageReady = in_array($item['storage_unit'], ['fen', 'count', 'project_count_micro', 'customer_tenth'], true);
+            $aiReady = $storageReady && $declaredReadinessReasons === [];
             $out[$code] = [
                 'metric_code' => $code, 'name' => (string)$definition['name'], 'ai_query_ready' => $aiReady,
                 'metric_version' => $item['metric_version'], 'mapping_version' => self::VERSION,
@@ -326,6 +431,8 @@ final class MetricDefinitionRegistry
                 'query_shapes' => $item['query_shapes'], 'coverage_start' => self::COVERAGE_START,
                 'filter_grain' => $item['filter_grain'], 'business_filters' => $item['business_filters'],
                 'storage_unit' => $item['storage_unit'],
+                'condition_unit' => $item['condition_unit'] ?? self::defaultConditionUnit((string)$item['storage_unit']),
+                'condition_subjects' => self::conditionSubjects($item),
                 // 可分析对象由指标维度声明派生；Skill 不能自行把任意对象变成
                 // 可执行查询。
                 'analysis_dimensions' => self::analysisDimensions($item),
@@ -337,7 +444,12 @@ final class MetricDefinitionRegistry
                 // never arbitrary field filtering.
                 'threshold_count' => $item['source']['threshold_count'] ?? null,
                 'derivation' => $item['derivation'] ?? null,
-                'readiness_reasons' => $aiReady ? [] : ['AI_STORAGE_UNIT_UNSUPPORTED'],
+                'readiness_reasons' => $aiReady
+                    ? []
+                    : array_values(array_unique(array_merge(
+                        $declaredReadinessReasons,
+                        $storageReady ? [] : ['AI_STORAGE_UNIT_UNSUPPORTED']
+                    ))),
             ];
         }
         return $out;
@@ -373,6 +485,32 @@ final class MetricDefinitionRegistry
         ];
     }
 
+    private static function defaultConditionUnit(string $storageUnit): ?string
+    {
+        if ($storageUnit === 'fen') return 'yuan';
+        if (in_array($storageUnit, ['count', 'project_count_micro', 'customer_tenth'], true)) return 'count';
+        return null;
+    }
+
+    /** A condition shape is executable only for the explicitly registered candidate object. */
+    private static function conditionSubjects(array $item): array
+    {
+        $subjects=$item['condition_subjects']??[];
+        if (!is_array($subjects) || count($subjects)>8) {
+            throw new MetricQueryContractException('METRIC_CONDITION_CONTRACT_INVALID', '指标条件对象声明无效。');
+        }
+        $subjects=array_values(array_unique($subjects));
+        foreach ($subjects as $subject) if (!is_string($subject) || !preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$subject)) {
+            throw new MetricQueryContractException('METRIC_CONDITION_CONTRACT_INVALID', '指标条件对象声明无效。');
+        }
+        sort($subjects,SORT_STRING);
+        $hasShape=(bool)array_intersect(['condition_count','condition_list'],(array)($item['query_shapes']??[]));
+        if ($hasShape!==($subjects!==[])) {
+            throw new MetricQueryContractException('METRIC_CONDITION_CONTRACT_INVALID', '指标条件对象与查询形态不一致。');
+        }
+        return $subjects;
+    }
+
     /**
      * Overview membership is a source-owned business declaration. It never
      * grants a dimension, query shape, or permission that the reader contract
@@ -404,6 +542,25 @@ final class MetricDefinitionRegistry
     {
         return [
             'operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot'],
+            'order' => [
+                'id' => 'order_id', 'name' => 'order_no_snapshot',
+                'analysis_object_kind' => 'order', 'analysis_object_label' => '销售订单',
+                'analysis_relation_role' => 'sold_order', 'analysis_action_codes' => ['sales'],
+            ],
+            // fact_id is the immutable sale-fact identity. source_line_id is
+            // only stable inside its source document and must not be exposed
+            // as a cross-order analytical identity.
+            'sale_line' => [
+                'id' => 'fact_id', 'name' => 'item_name_snapshot',
+                'analysis_object_kind' => 'sale_line', 'analysis_object_label' => '销售明细',
+                'analysis_relation_role' => 'sold_line', 'analysis_action_codes' => ['sales'],
+            ],
+            'card' => [
+                'id' => 'item_id', 'name' => 'item_name_snapshot',
+                'analysis_object_kind' => 'card', 'analysis_object_label' => '卡项',
+                'analysis_relation_role' => 'sold_item', 'analysis_action_codes' => ['sales'],
+                'analysis_source_filters' => ['source_type' => 'card'],
+            ],
             // A sale fact freezes the sold line's type and item snapshot. This
             // makes product/project ranking a registered fact read, never an
             // AI-side table query.

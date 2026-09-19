@@ -182,6 +182,11 @@ namespace {
         'a verified continuation foregrounds the generic current-evidence rule before the provider request');
     check(strpos($timeFollowText,'quote the entire current message as its current evidence')!==false,
         'a time-only continuation is instructed to provide the full-message proof needed by the fast path');
+    check(strpos($timeFollowText,'Identity-oriented wording')!==false
+        &&strpos($timeFollowText,'requests condition_list')!==false
+        &&strpos($timeFollowText,'quantity-oriented wording')!==false
+        &&strpos($timeFollowText,'requests condition_count')!==false,
+        'a condition continuation distinguishes object identity from population quantity without changing the signed predicates');
     $overviewFollowQuestion=$timeFollowQuestion;
     $overviewFollowQuestion['prior_query']['metric_codes']=array_map(static function(int $index): string { return 'overview_metric_'.$index; },range(1,10));
     $GLOBALS['sfResponse']=$response(json_encode($timeOnlyUnderstanding));
@@ -198,6 +203,10 @@ namespace {
         'an ungrounded follow-up restriction change receives one bounded model correction');
     check(strpos(\app\services\ai\contract\AiIntentUnderstandingContract::repairInstruction('values:metric_terms'),'periods requirement with a complete values.periods carrier')!==false,
         'time-only continuation recovery keeps the changed typed condition without inventing a current metric');
+    $conditionRepair=\app\services\ai\contract\AiIntentUnderstandingContract::repairInstruction('values:aggregate_condition');
+    check(strpos($conditionRepair,'return only an operation requirement')!==false
+        &&strpos($conditionRepair,'signed prior query is inherited later')!==false,
+        'response-form-only recovery inherits signed conditions instead of forging current predicate evidence');
     $GLOBALS['sfResponse']=$response(json_encode($understanding));
     $repairedUnderstanding=$client->understandMeaning($safeQuestion,'fixture/model','fixture-key',1000,function(){},$skills,'values:periods');
     $repairWire=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
@@ -216,7 +225,7 @@ namespace {
         && $bindingInput['question']['question']===$safeQuestion['question']
         && $bindingInput['question']['prior_query']===null,
         'binding omits replayed chat turns after the typed understanding preserves their accepted evidence');
-    check(($bindingWire['max_tokens']??null)===640 && ($timeFollowWire['max_tokens']??null)===640,
+    check(($bindingWire['max_tokens']??null)===1024 && ($timeFollowWire['max_tokens']??null)===1024,
         'typed understanding and binding carriers use the bounded protocol output ceiling');
     $bindingText=implode("\n",array_map(static function($message){return (string)($message['content']??'');},$bindingWire['messages']));
     check(strpos($bindingText,'skill_store_operations')!==false&&strpos($bindingText,'skill_intent_understanding')===false,

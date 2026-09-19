@@ -75,7 +75,7 @@ rejectsRuntime('tool per-call hard limit', function () use ($profile) {
     Budget::validateProfile(changedRuntime($profile, 'tool_timeout_ms', 10001));
 }, 'BUDGET_PROFILE_INVALID');
 rejectsRuntime('model per-call hard limit', function () use ($profile) {
-    Budget::validateProfile(changedRuntime($profile, 'model_timeout_ms', 20001));
+    Budget::validateProfile(changedRuntime($profile, 'model_timeout_ms', 30001));
 }, 'BUDGET_PROFILE_INVALID');
 rejectsRuntime('reserve cannot equal total', function () use ($profile) {
     Budget::validateProfile(changedRuntime($profile, 'finalization_reserve_ms', 180000));
@@ -90,7 +90,7 @@ $liveDeadline['remaining_execution_ms'] = 6500;
 $liveDeadline['execution_deadline_ms'] = 96500;
 checkRuntime('model transport timeout preserves finalization reserve from live deadline', Budget::callTimeout($liveDeadline, 'model', 20000, 90000) === 1500);
 checkRuntime('model transport timeout never exceeds stage or configured cap', Budget::callTimeout($liveDeadline, 'model', 5000, 90000) === 1500);
-checkRuntime('binding uses the same bounded model window as other semantic stages', Budget::callTimeout($spent, 'model', 20000, 22000) === 20000);
+checkRuntime('binding uses the same bounded model window as other semantic stages', Budget::callTimeout($spent, 'model', 30000, 22000) === 30000);
 $gatewaySource = file_get_contents(dirname(__DIR__, 2) . '/后端代码/app/services/ai/AiGatewayServices.php');
 checkRuntime('gateway derives model transport timeout at each provider send boundary', is_string($gatewaySource)
     && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS)') === 7

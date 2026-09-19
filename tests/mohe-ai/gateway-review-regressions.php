@@ -162,8 +162,8 @@ $siliconFlow=file_get_contents(dirname(__DIR__,2).'/后端代码/app/services/ai
 $check(strpos($siliconFlow,"context_constraint_without_source:business_filters")!==false
     && strpos($siliconFlow,'use context_delta business_filters=clear so person, position, member or other object-selection filters from the old subject cannot leak into the new subject')!==false,
     'one bounded model repair clears prior subject filters when a self-contained turn replaces the analytical object');
-$check(strpos($siliconFlow,'a self-contained non-threshold request after a prior threshold must use context_delta aggregate_condition=clear')!==false,
-    'one bounded structural repair prevents an old threshold from leaking into a natural non-threshold topic switch');
+$check(strpos($siliconFlow,'a self-contained non-condition request after a prior condition must use context_delta aggregate_condition=clear')!==false,
+    'one bounded structural repair prevents an old threshold or condition set from leaking into a natural topic switch');
 $check(strpos($siliconFlow,'A pronoun or other anaphoric reference to the previously selected object retains both object and business_filters')!==false,
     'binding keeps an anaphoric personnel follow-up on the confirmed person instead of widening it to a whole role');
 $check(strpos($siliconFlow,'do not turn an explicit conjunction into alternatives')!==false,
@@ -243,10 +243,11 @@ $check(strpos($intentContract,'An exact, unambiguous supplied registered metric 
 $understandingContract=file_get_contents(dirname(__DIR__,2).'/后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php');
 $check(strpos($understandingContract,'use the complete de-identified current message verbatim as its evidence quote')!==false,
     'the one structural repair corrects non-unique evidence without restoring a private name or changing meaning');
-$check(strpos($understandingContract,'preserve every exact measurement term separately')!==false,
+$check(strpos($understandingContract,'preserve every measurement separately')!==false,
     'understanding preserves coordinated measurements instead of turning an explicit multi-metric summary into a choice');
-$check(strpos($understandingContract,'never rewrite it to a canonical metric title or insert an object qualifier')!==false,
-    'understanding keeps current customer measurement evidence verbatim even when the catalog uses a more specific title');
+$check(strpos($understandingContract,'Prefer copying each metric_term character-for-character')!==false
+    &&strpos($understandingContract,'never invent a paraphrase or insert an object qualifier')!==false,
+    'understanding keeps literal evidence by default and admits only registry-owned aliases for generic conditions');
 $check(strpos($intentContract,'must reject an inherited threshold_count, aggregate condition or aggregate summary')!==false,
     'independent review rejects a stale aggregate form when the current question requests a ranked object');
 foreach ($failed as $label) echo 'FAIL '.$label."\n";

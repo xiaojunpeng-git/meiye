@@ -82,12 +82,12 @@ $countFixture=['query'=>$view['query'],'results'=>[[
     'metric_code'=>'customer_active','storage_unit'=>'count','period'=>'current','count'=>2,
 ]]];
 $countRows=$project::project($countFixture);
-$check(array_column($countRows,'metric_value')===['3','2'] && array_column($countRows,'unit')===['个','个'],
+$check(array_column($countRows,'metric_value')===['3','2'] && array_column($countRows,'unit')===['项','人'],
     'registered counts export as counts with their own unit');
 $countKey=$write->invoke($worker,'uqe_'.md5('fixture-count'),str_repeat('f',64),$fields,$countRows,[],false,null);
 $verify->invoke($runtime,$fixtureRoot.'/'.$countKey,$countFixture);
 $countBook=\PhpOffice\PhpSpreadsheet\IOFactory::load($fixtureRoot.'/'.$countKey);
-$check((string)(int)$countBook->getActiveSheet()->getCell('I2')->getValue()==='3' && $countBook->getActiveSheet()->getCell('J2')->getValue()==='个',
+$check((string)(int)$countBook->getActiveSheet()->getCell('I2')->getValue()==='3' && $countBook->getActiveSheet()->getCell('J2')->getValue()==='项',
     'count XLSX keeps numeric value and visible unit');
 $countBook->disconnectWorksheets();
 $large=$fixtures['summary'];
