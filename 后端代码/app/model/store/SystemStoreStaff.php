@@ -249,4 +249,26 @@ class SystemStoreStaff extends BaseModel
             $query->where('is_reservable', $value);
         }
     }
+
+    /**
+     * 按岗位 ID 集合缩小员工范围。
+     * 岗位权威关系来自 staff_job_position，不能再读取历史兼容字段 position。
+     */
+    public function searchPositionIdsAttr($query, $value)
+    {
+        $ids = is_array($value) ? $value : explode(',', (string)$value);
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static function (int $id): bool {
+            return $id > 0;
+        })));
+        if ($ids) {
+            $query->whereIn('id', function ($positionQuery) use ($ids) {
+                $positionQuery->name('staff_job_position')
+                    ->whereIn('position_id', $ids)
+                    ->where('is_del', 0)
+                    ->where('status', 1)
+                    ->where('end_time', 0)
+                    ->field('staff_id');
+            });
+        }
+    }
 }

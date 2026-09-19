@@ -618,6 +618,14 @@ export function homeStoreList(data) {
 }
 
 /**
+ * 首页 DIY 员工展示列表
+ * @param {Object} data store_id、limit
+ */
+export function homeStaffList(data) {
+	return request.get("home/staff_list", data, { noAuth: true });
+}
+
+/**
  * 预约单列表
  * @param {Object} data
  */

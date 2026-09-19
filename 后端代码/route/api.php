@@ -199,6 +199,8 @@ Route::group('api', function () {
 		Route::get('belong/staff', 'v1.store.Store/setUserBelongStaff')->name('setUserBelongStaff');
 		//首页展示门店列表
 		Route::get('home/store_list', 'v1.store.Store/getHomeStoreList')->name('homeStoreList');
+		//首页 DIY 员工展示（公开安全字段）
+		Route::get('home/staff_list', 'v1.store.Store/getHomeStaffList')->name('homeStaffList');
 		//下单选择门店列表
 		Route::get('store_list', 'v1.PublicController/store_list')->name('storeList');
 		//获取城市列表

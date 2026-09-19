@@ -841,7 +841,11 @@ class SystemStoreStaff extends AuthController
      */
     public function staffPosition()
     {
-        $list = Db::name('position')->select();
+        $list = Db::name('position')
+            ->where('status', 1)
+            ->field('id,name')
+            ->order('id', 'asc')
+            ->select();
         $options = [];
         foreach ($list as $nv) {
             $options[] = ['label' => $nv['name'], 'value' => $nv['id']];

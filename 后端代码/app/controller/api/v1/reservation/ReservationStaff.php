@@ -38,18 +38,24 @@ class ReservationStaff
      */
     public function list(Request $request): Response
     {
-        [$store_id, $keyword, $service_date, $service_time, $service_duration] = $request->getMore([
+        [$store_id, $keyword, $service_date, $service_time, $service_duration, $position_ids] = $request->getMore([
             [['store_id', 'd'], 0],
             ['keyword', ''],
             ['service_date', ''],
             ['service_time', ''],
             [['service_duration', 'd'], 0],
+            ['position_ids', ''],
         ], true);
+        $position_ids = is_array($position_ids) ? $position_ids : explode(',', (string)$position_ids);
+        $position_ids = array_values(array_unique(array_filter(array_map('intval', $position_ids), static function (int $id): bool {
+            return $id > 0;
+        })));
         $list = $this->services->getReservationStaffList((int)$store_id, [
             'keyword' => $keyword,
             'service_date' => $service_date,
             'service_time' => $service_time,
             'service_duration' => (int)$service_duration,
+            'position_ids' => $position_ids,
         ]);
         return app('json')->success(['list' => $list]);
     }

@@ -19,6 +19,7 @@
 				<!-- 自定义样式 -->
 				<block v-for="(item, index) in styleConfig" :key="index">
 					<storeList v-if="item.name == 'storeList'" ref="storeLists" :dataConfig="item"></storeList>
+					<staffList v-if="item.name == 'staffList'" :dataConfig="item" :storeInfor="storeInfor"></staffList>
 					<userInfor v-if="item.name == 'userInfor'" :dataConfig="item"
 						@changeLogin="changeLogin">
 					</userInfor>
@@ -151,6 +152,7 @@
 	import newVip from './components/newVip';
 	import community from './components/community';
 	import storeList from './components/storeList';
+	import staffList from './components/staffList';
 	import headerSerch from './components/headerSerch';
 	import swipers from './components/swipers';
 	import coupon from './components/coupon';
@@ -242,6 +244,7 @@
 			userInfor,
 			community,
 			storeList,
+			staffList,
 			headerSerch,
 			swipers,
 			coupon,

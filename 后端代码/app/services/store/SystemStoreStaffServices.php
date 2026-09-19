@@ -1156,6 +1156,79 @@ class SystemStoreStaffServices extends BaseServices
     }
 
     /**
+     * 会员端首页员工展示列表。
+     *
+     * 这是面向公开页面的安全投影：只返回装修组件所需字段，
+     * 不返回手机号、UID、密码、业绩等内部信息。首页展示不依赖
+     * 当日排班；真正预约时仍由 V3 预约命令最终校验排班和占用。
+     */
+    public function getHomeDisplayStaffList(int $storeId, int $limit = 6, array $selectedPositionIds = []): array
+    {
+        if ($storeId <= 0) {
+            return [];
+        }
+        $storeExists = Db::name('system_store')
+            ->where('id', $storeId)
+            ->where('is_show', 1)
+            ->where('is_del', 0)
+            ->count();
+        if (!$storeExists) {
+            return [];
+        }
+
+        $limit = max(1, min(12, $limit));
+        $selectedPositionIds = array_values(array_unique(array_filter(
+            array_map('intval', $selectedPositionIds),
+            static function (int $id): bool {
+                return $id > 0;
+            }
+        )));
+        $where = [
+            'store_id' => $storeId,
+            'status' => 1,
+            'is_del' => 0,
+            'is_reservable' => 1,
+        ];
+        if ($selectedPositionIds) {
+            $where['position_ids'] = $selectedPositionIds;
+        }
+        $list = $this->dao->getStoreStaffList(
+            $where,
+            'id,store_id,staff_name,avatar,staff_intro,position,position_level',
+            1,
+            $limit,
+            [],
+            'id ASC'
+        );
+
+        $levelIds = array_values(array_unique(array_filter(array_map(static function (array $item): int {
+            return (int)($item['position_level'] ?? 0);
+        }, $list))));
+        $levelMap = $levelIds ? PositionLevel::whereIn('id', $levelIds)->column('name', 'id') : [];
+        foreach ($list as &$item) {
+            $item['position_level_label'] = (string)($levelMap[(int)($item['position_level'] ?? 0)] ?? '');
+        }
+        unset($item);
+        $this->enrichStaffPositionLabels($list);
+
+        return array_map(static function (array $item): array {
+            return [
+                'id' => (int)($item['id'] ?? 0),
+                'store_id' => (int)($item['store_id'] ?? 0),
+                'staff_name' => trim((string)($item['staff_name'] ?? '')),
+                'avatar' => (string)($item['avatar'] ?? ''),
+                'staff_intro' => trim((string)($item['staff_intro'] ?? '')),
+                'position_id' => (int)(($item['position_ids'] ?? [])[0] ?? 0),
+                'position_ids' => array_values(array_map('intval', $item['position_ids'] ?? [])),
+                'position_label' => (string)($item['position_label'] ?? ''),
+                'position_level_label' => (string)($item['position_level_label'] ?? ''),
+            ];
+        }, array_values(array_filter($list, static function (array $item): bool {
+            return (int)($item['id'] ?? 0) > 0 && trim((string)($item['staff_name'] ?? '')) !== '';
+        })));
+    }
+
+    /**
      * 预约选人：按门店加载可被预约的员工（不做距离筛选）
      * @param int $storeId
      * @param array $params keyword、service_date
@@ -1174,6 +1247,11 @@ class SystemStoreStaffServices extends BaseServices
         }
         $serviceDuration = (int)($params['service_duration'] ?? 0);
         $excludeReservationId = (int)($params['exclude_reservation_id'] ?? 0);
+        $positionIds = $params['position_ids'] ?? [];
+        $positionIds = is_array($positionIds) ? $positionIds : explode(',', (string)$positionIds);
+        $positionIds = array_values(array_unique(array_filter(array_map('intval', $positionIds), static function (int $id): bool {
+            return $id > 0;
+        })));
         if (!$serviceDate) {
             $serviceDate = date('Y-m-d');
         }
@@ -1190,6 +1268,9 @@ class SystemStoreStaffServices extends BaseServices
             $where = ['store_id' => $storeId, 'status' => 1, 'is_del' => 0];
             if ($keyword) {
                 $where['keyword'] = $keyword;
+            }
+            if ($positionIds) {
+                $where['position_ids'] = $positionIds;
             }
             $staffIdSet = array_flip($staffIds);
             $list = array_values(array_filter(
@@ -1210,6 +1291,9 @@ class SystemStoreStaffServices extends BaseServices
         $where = ['store_id' => $storeId, 'status' => 1, 'is_del' => 0, 'is_reservable' => 1];
         if ($keyword) {
             $where['keyword'] = $keyword;
+        }
+        if ($positionIds) {
+            $where['position_ids'] = $positionIds;
         }
         $list = $this->dao->getStoreStaffList($where, 'id,uid,staff_name,phone,avatar,is_reservable,position,position_level,age,birthday_date', 0, 0, []);
         foreach ($list as &$item) {
@@ -1331,6 +1415,8 @@ class SystemStoreStaffServices extends BaseServices
             $item['service_available'] = $available ? 1 : 0;
         }
         unset($item);
+        // 预约列表同样以当前有效岗位任职关系为准；该方法会覆盖历史兼容字段生成的岗位名称。
+        $this->enrichStaffPositionLabels($list);
     }
 
     /**
@@ -1815,21 +1901,25 @@ class SystemStoreStaffServices extends BaseServices
             ->where('j.is_del', 0)
             ->where('j.status', 1)
             ->where('j.end_time', 0)
-            ->field('j.staff_id,p.name AS position_name')
+            ->field('j.staff_id,j.position_id,p.name AS position_name')
             ->order('j.staff_id', 'asc')
             ->order('j.id', 'asc')
             ->select()->toArray();
         $labels = [];
+        $positionIds = [];
         foreach ($rows as $row) {
             $staffId = (int)($row['staff_id'] ?? 0);
+            $positionId = (int)($row['position_id'] ?? 0);
             $label = trim((string)($row['position_name'] ?? ''));
-            if ($staffId <= 0 || $label === '') continue;
+            if ($staffId <= 0 || $positionId <= 0 || $label === '') continue;
             $labels[$staffId][] = $label;
+            $positionIds[$staffId][] = $positionId;
         }
         foreach ($list as &$item) {
             $staffId = (int)($item['id'] ?? 0);
             if ($staffId > 0 && !empty($labels[$staffId])) {
                 $item['position_label'] = implode('、', array_values(array_unique($labels[$staffId])));
+                $item['position_ids'] = array_values(array_unique(array_map('intval', $positionIds[$staffId] ?? [])));
             }
         }
         unset($item);

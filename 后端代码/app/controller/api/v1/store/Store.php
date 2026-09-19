@@ -129,6 +129,25 @@ class Store
     }
 
     /**
+     * 首页 DIY 员工展示列表。
+     */
+    public function getHomeStaffList(Request $request, SystemStoreStaffServices $staffServices)
+    {
+        [$storeId, $limit, $positionIds] = $request->getMore([
+            [['store_id', 'd'], 0],
+            [['limit', 'd'], 6],
+            ['position_ids', ''],
+        ], true);
+        $positionIds = is_array($positionIds) ? $positionIds : explode(',', (string)$positionIds);
+        $positionIds = array_values(array_unique(array_filter(array_map('intval', $positionIds), static function (int $id): bool {
+            return $id > 0;
+        })));
+        return app('json')->success([
+            'list' => $staffServices->getHomeDisplayStaffList((int)$storeId, (int)$limit, $positionIds),
+        ]);
+    }
+
+    /**
      * 附近门店
      * @param Request $request
      * @param SystemStoreServices $services

@@ -252,6 +252,7 @@ export default {
 			storeId: 0,
 			storeName: '',
 			keyword: '',
+			positionIds: [],
 			staffList: [],
 			staffListRaw: [],
 			sortType: 'smart',
@@ -341,6 +342,10 @@ export default {
 		this.dateTabs = initData();
 		this.pendingDate = this.dateTabs[0]?.date || this.formatToday();
 		this.storeId = Number(options.store_id || uni.getStorageSync('user_store_id') || 0);
+		this.positionIds = String(options.position_ids || '')
+			.split(',')
+			.map(Number)
+			.filter((id, index, ids) => id > 0 && ids.indexOf(id) === index);
 		this.initStoreInfo();
 		this.loadStaffList();
 		uni.$on('activeReservation', this.onStoreSelected);
@@ -393,6 +398,7 @@ export default {
 			const params = {
 				store_id: this.storeId,
 				keyword: this.keyword,
+				position_ids: this.positionIds.join(','),
 				service_date: this.serviceDate || this.formatToday(),
 				service_duration: this.serviceDuration,
 			};
