@@ -201,6 +201,14 @@
 	import theme from "@/mixins/theme";
 	import Setting from "@/setting";
 	import QRCode from "qrcodejs2";
+
+	const memberPreviewBaseURL = () => {
+		const configuredBaseURL = Setting.apiBaseURL.replace(/adminapi/, "");
+		if (process.env.NODE_ENV === "development" && window.location.port === "18081") {
+			return `${window.location.protocol}//${window.location.hostname}:8081/`;
+		}
+		return configuredBaseURL;
+	};
 	
     export default {
         inject: ['reload'],
@@ -237,7 +245,7 @@
 		mixins: [theme],
         data() {
             return {
-				BaseURL: Setting.apiBaseURL.replace(/adminapi/, ""),
+				BaseURL: memberPreviewBaseURL(),
 				qrcodeImg: "",
 				modal: false,
                 clientHeight:'',//页面动态高度

@@ -139,6 +139,14 @@ import goodClass from "./goodClass";
 import newGoods from "./newGoods";
 import users from "./users";
 
+const memberPreviewBaseURL = () => {
+  const configuredBaseURL = Setting.apiBaseURL.replace(/adminapi/, "");
+  if (process.env.NODE_ENV === "development" && window.location.port === "18081") {
+    return `${window.location.protocol}//${window.location.hostname}:8081/`;
+  }
+  return configuredBaseURL;
+};
+
 export default {
   name: "devise_list",
   computed: {
@@ -189,7 +197,7 @@ export default {
       list: [],
       imgUrl: "",
       modal: false,
-      BaseURL: Setting.apiBaseURL.replace(/adminapi/, ""),
+      BaseURL: memberPreviewBaseURL(),
       cardShow: 0,
       loadingExist: false,
       isDiy: 1,
