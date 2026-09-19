@@ -19,6 +19,23 @@
         </div>
       </div>
     </div>
+    <div class="main-content bg-fff">
+      <div class="title">订单入口</div>
+      <div class="entry-tip">拖动可排序；名称、显示状态和图标保存后同步到会员端。</div>
+      <draggable class="entry-list" :list="orderData.list" handle=".move-icon">
+        <div class="entry-item" v-for="item in orderData.list" :key="item.key">
+          <span class="iconfont-diy icondrag move-icon"></span>
+          <div class="entry-key">{{ item.key }}</div>
+          <Input v-model="item.title" class="entry-name" placeholder="入口名称" />
+          <Select v-model="item.icon" class="entry-icon" placeholder="请选择图标">
+            <Option v-for="icon in orderIconOptions" :key="icon.value" :value="icon.value">{{ icon.label }}</Option>
+          </Select>
+          <i-switch v-model="item.is_show" :true-value="1" :false-value="0" size="large">
+            <span slot="open">显示</span><span slot="close">隐藏</span>
+          </i-switch>
+        </div>
+      </draggable>
+    </div>
     <Modal
       v-model="changeStyleModal"
       width="900px"
@@ -49,10 +66,12 @@
 <script>
 import uploadPictures from "@/components/uploadPictures";
 import propertyList from "@/plugins/propertyList";
+import draggable from "vuedraggable";
 export default {
   name: "",
   components: {
     uploadPictures,
+    draggable,
   },
   data() {
     return {
@@ -70,6 +89,23 @@ export default {
       changeStyleModal: false,
       propertyList: propertyList,
       orderStyle: 1, // 默认选中风格
+      orderEntryDefaults: [
+        { key: "unpaid", title: "待付款", url: "/pages/goods/order_list/index?status=0", icon: "icon-ic_daifukuan", is_show: 1 },
+        { key: "debt", title: "欠款", url: "/pages/users/debt/index", icon: "icon-ic_money", is_show: 1 },
+        { key: "unshipped", title: "待发货", url: "/pages/goods/order_list/index?status=1", icon: "icon-ic_daifahuo", is_show: 0 },
+        { key: "received", title: "待收货", url: "/pages/goods/order_list/index?status=10", icon: "icon-ic_daishouhuo", is_show: 0 },
+        { key: "evaluated", title: "待评价", url: "/pages/goods/order_list/index?status=3", icon: "icon-ic_daipingjia", is_show: 1 },
+        { key: "refund", title: "售后", url: "/pages/users/user_return_list/index", icon: "icon-ic_returnmoney", is_show: 1 },
+      ],
+      orderIconOptions: [
+        { label: "待付款", value: "icon-ic_daifukuan" },
+        { label: "欠款", value: "icon-ic_money" },
+        { label: "待发货", value: "icon-ic_daifahuo" },
+        { label: "待收货", value: "icon-ic_daishouhuo" },
+        { label: "待评价", value: "icon-ic_daipingjia" },
+        { label: "售后", value: "icon-ic_returnmoney" },
+        { label: "通用订单", value: "icon-ic_order1" },
+      ],
     };
   },
   computed: {
@@ -82,8 +118,14 @@ export default {
   mounted() {
     this.orderStyle =
       this.$store.state.admin.userTemplateConfig.order.style;
+    this.ensureOrderList();
   },
   methods: {
+    ensureOrderList() {
+      if (!Array.isArray(this.orderData.list) || !this.orderData.list.length) {
+        this.$set(this.orderData, "list", this.orderEntryDefaults.map((item) => ({ ...item })));
+      }
+    },
     selectStyle(index) {
       this.orderStyle = index + 1;
     },
@@ -99,6 +141,47 @@ export default {
 }
 
 .main {
+  .entry-tip {
+    margin: -8px 0 16px;
+    font-size: 12px;
+    color: #999999;
+  }
+
+  .entry-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .entry-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid #f0f0f0;
+    border-radius: 6px;
+    background: #fafafa;
+
+    .move-icon {
+      color: #bfbfbf;
+      cursor: move;
+    }
+
+    .entry-key {
+      width: 72px;
+      font-size: 12px;
+      color: #999999;
+    }
+
+    .entry-name {
+      width: 130px;
+    }
+
+    .entry-icon {
+      width: 150px;
+    }
+  }
+
   .main-header {
     font-size: 16px;
     padding: 20px 15px;

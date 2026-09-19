@@ -1,11 +1,11 @@
 <template>
 	<view class="">
-		<view v-if="tab != 2" class="h-100"></view>
+		<view v-if="tab != 2" style="height: 296rpx"></view>
 		<view v-if="tab != 2" class="pb-safe"></view>
 		<view :class="{
 			'bg--w111-fff': tab != 2,
 			'bg--w111-000 dark': tab == 2,
-		}" class="fixed-lb z-1000 w-full">
+		}" class="community-footer fixed-lb z-1000 w-full">
 			<view class="flex h-100 fs-28 text--w111-666">
 				<template v-for="(item, index) in pageList">
 					<view v-if="item.name" :class="{
@@ -20,6 +20,7 @@
 			</view>
 			<view class="pb-safe"></view>
 		</view>
+		<mainPageFooter></mainPageFooter>
 	</view>
 </template>
 
@@ -30,6 +31,7 @@
 	import {
 		toLogin
 	} from '@/libs/login.js';
+	import mainPageFooter from '@/components/pageFooter/index.vue';
 
 	export default {
 		props: {
@@ -38,6 +40,7 @@
 				default: 1,
 			},
 		},
+		components: { mainPageFooter },
 		data() {
 			return {
 				pageList: [],
@@ -101,9 +104,19 @@
 </script>
 
 <style lang="scss" scoped>
+	.community-footer {
+		bottom: calc(184rpx + env(safe-area-inset-bottom));
+		border-top: 1rpx solid rgba(123, 41, 65, .08);
+		box-shadow: 0 -8rpx 22rpx rgba(83,45,54,.06);
+		color: #856b72;
+	}
+
+	.community-footer .bg--w111-fff { background: rgba(255,253,251,.96); }
+	.community-footer .bg-color { background: linear-gradient(135deg, #8e4056, #6d2138); }
+
 	.active {
 		font-weight: 500;
-		color: #1A1A1A;
+		color: #7b2941;
 	}
 
 	.dark .text--w111-666 {

@@ -1,4 +1,6 @@
 <script>
+import { resolveMemberMenuIcon } from '@/utils/memberMenuIcon';
+
 export default {
 	inject: ['goMenuPage'],
 	props: {
@@ -10,6 +12,11 @@ export default {
 			type: Number,
 			default: 0
 		}
+	},
+	methods: {
+		menuIcon(item) {
+			return resolveMemberMenuIcon(item);
+		}
 	}
 };
 </script>
@@ -20,19 +27,19 @@ export default {
 			<view v-for="(item, index) in menuData" :key="index">
 				<!-- #ifdef MP -->
 				<view class="acea-row row-middle item" v-if="item.url!='/pages/extension/customer_list/chat' || (item.url=='/pages/extension/customer_list/chat' && routineContact == 0)" @click="goMenuPage(item.url, item.name)">
-					<image :src="item.pic" class="image"></image>
+					<view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
 					<view class="name">{{ item.name }}</view>
 					<text class="iconfont icon-ic_rightarrow"></text>
 				</view>
 				<button class="acea-row row-middle item" open-type='contact' v-if="item.url=='/pages/extension/customer_list/chat' && routineContact == 1">
-				  <image :src="item.pic" class="image"></image>
+				  <view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
 				  <view class="name">{{ item.name }}</view>
 				  <text class="iconfont icon-ic_rightarrow"></text>
 				</button>
 				<!-- #endif -->
 				<!-- #ifndef MP -->
 				<view class="acea-row row-middle item" @click="goMenuPage(item.url, item.name)">
-					<image :src="item.pic" class="image"></image>
+					<view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
 					<view class="name">{{ item.name }}</view>
 					<text class="iconfont icon-ic_rightarrow"></text>
 				</view>
@@ -53,10 +60,21 @@ export default {
 		padding: 28rpx 20rpx 28rpx 32rpx;
 	}
 
-	.image {
-		width: 40rpx;
-		height: 40rpx;
+	.menu-icon {
+		width: 52rpx;
+		height: 52rpx;
 		margin-right: 24rpx;
+		border-radius: 16rpx;
+		background: #f8eded;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+
+		.iconfont {
+			font-size: 30rpx;
+			line-height: 1;
+			color: var(--view-theme, #7b2941);
+		}
 	}
 
 	.name {

@@ -44,7 +44,7 @@ export default {
     num(nVal) {
       // debugger;
       const value = JSON.parse(JSON.stringify(this.$store.state.admin.mobildConfig.defaultArray[nVal]));
-      this.configObj = value;
+		  this.configObj = this.ensureLayoutConfig(value);
     },
     configObj: {
       handler(nVal, oVal) {
@@ -57,7 +57,11 @@ export default {
 			        var arr = [this.rCom[0]];
 			        if (nVal == 0) {
 			            const tempArr = [
-            {
+							{
+								components: toolCom.c_tab,
+								configNme: 'layoutConfig'
+							},
+							{
               components: toolCom.c_title,
               configNme: 'titleLeft'
             },
@@ -107,10 +111,20 @@ export default {
   mounted() {
     this.$nextTick(() => {
       const value = JSON.parse(JSON.stringify(this.$store.state.admin.mobildConfig.defaultArray[this.num]));
-      this.configObj = value;
+	  this.configObj = this.ensureLayoutConfig(value);
     });
   },
   methods: {
+	ensureLayoutConfig(config) {
+		if (!config.layoutConfig) {
+			this.$set(config, 'layoutConfig', {
+				title: '展示方式',
+				tabVal: 0,
+				tabList: [{ name: '热区图' }, { name: '快捷入口' }]
+			});
+		}
+		return config;
+	},
     // 获取组件参数
     getConfig(data) {}
   }

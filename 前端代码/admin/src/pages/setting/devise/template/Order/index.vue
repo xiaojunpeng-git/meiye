@@ -1,8 +1,8 @@
 <template>
   <div class="main">
-    <template1 v-if="orderType == 1"></template1>
-    <template2 v-else-if="orderType == 2"></template2>
-    <template3 v-else-if="orderType == 3"></template3>
+    <template1 v-if="orderType == 1" :orderData="orderData"></template1>
+    <template2 v-else-if="orderType == 2" :orderData="orderData"></template2>
+    <template3 v-else-if="orderType == 3" :orderData="orderData"></template3>
   </div>
 </template>
 
@@ -17,6 +17,10 @@ export default {
     orderType: {
       type: Number | String,
       default: 1,
+    },
+    orderData: {
+      type: Object,
+      default: () => ({}),
     },
   },
   data() {

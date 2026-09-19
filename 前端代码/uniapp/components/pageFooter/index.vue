@@ -6,14 +6,16 @@
 				<view class="page-footer" :class="{
 					'page-footer2': newData.navStyleConfig.tabVal == 1,
 					'page-footer3': newData.navStyleConfig.tabVal == 2,
-				}" id="target" :style="[componentStyle]">
-					<view class="foot-item flex-1 flex-col flex-center h-96 relative" v-for="(item,index) in newData.menuList" :key="index" @click="goRouter(item)">
-						<template v-if="item.link == activeRouter">
-							<image v-if="newData.navStyleConfig.tabVal != 1" :src="item.imgList[0]"></image>
+				}" id="target" :style="[componentStyle, footerToneStyle]">
+					<view class="foot-item flex-1 flex-col flex-center h-96 relative" :class="{ 'is-active': isActive(item) }" v-for="(item,index) in newData.menuList" :key="index" @click="goRouter(item)">
+						<template v-if="isActive(item)">
+							<text v-if="item.icon && newData.navStyleConfig.tabVal != 1" class="iconfont nav-icon" :class="item.icon"></text>
+							<image v-else-if="newData.navStyleConfig.tabVal != 1" :src="item.imgList[0]"></image>
 							<view v-if="newData.navStyleConfig.tabVal != 2" class="txt active" :style="[txtActiveColor]">{{item.name}}</view>
 						</template>
 						<template v-else>
-							<image v-if="newData.navStyleConfig.tabVal != 1" :src="item.imgList[1]"></image>
+							<text v-if="item.icon && newData.navStyleConfig.tabVal != 1" class="iconfont nav-icon" :class="item.icon"></text>
+							<image v-else-if="newData.navStyleConfig.tabVal != 1" :src="item.imgList[1]"></image>
 							<view v-if="newData.navStyleConfig.tabVal != 2" class="txt" :style="[txtColor]">{{item.name}}</view>
 						</template>
 						<uni-badge v-if="item.link === '/pages/order_addcart/order_addcart' && cartNum>0" class="uni-badge-left-margin" :text="cartNum" absolute="rightTop">
@@ -62,6 +64,13 @@ import {
 					styleObject['color'] = this.newData.txtColor.color[0].item;
 				}
 				return styleObject;
+			},
+			footerToneStyle() {
+				const hasToneConfig = this.newData.toneConfig && this.newData.toneConfig.tabVal;
+				return {
+					'--footer-active-color': hasToneConfig && this.newData.activeTxtColor ? this.newData.activeTxtColor.color[0].item : 'var(--view-theme)',
+					'--footer-inactive-color': hasToneConfig && this.newData.txtColor ? this.newData.txtColor.color[0].item : '#8d777d',
+				};
 			},
 			bgColor() {
 				let styleObject = {};
@@ -130,6 +139,11 @@ import {
 			}
 		},
 		methods: {
+			isActive(item) {
+				const currentPath = (this.activeRouter || '').split('?')[0];
+				const itemPath = ((item && item.link) || '').trim().split('?')[0];
+				return !!itemPath && itemPath === currentPath;
+			},
 			setNavigationInfo(data) {
 				if(this.isTabBar){
 					this.newData = data;
@@ -237,6 +251,7 @@ import {
 
 	.page-footer-wrapper {
 		position: relative;
+		padding: 0 20rpx 16rpx;
 	}
 
 	.page-footer {
@@ -245,22 +260,74 @@ import {
 		bottom: 0;
 		left: 0;
 		display: flex;
+		min-height: 108rpx;
+		box-shadow: 0 12rpx 36rpx rgba(87, 44, 55, 0.12);
+		border: 1rpx solid rgba(255, 255, 255, 0.86);
+		backdrop-filter: blur(16px);
 
 		.foot-item image {
 			display: block;
-			height: 40rpx;
-			width: 40rpx;
+			height: 38rpx;
+			width: 38rpx;
 			margin: 0 auto;
+			position: relative;
+			z-index: 1;
+			transition: opacity .18s ease, transform .18s ease, filter .18s ease;
+		}
+
+		.foot-item::before {
+			content: "";
+			position: absolute;
+			top: 8rpx;
+			width: 62rpx;
+			height: 52rpx;
+			border-radius: 20rpx;
+			background: transparent;
+			transition: background .18s ease, transform .18s ease;
+		}
+
+		.foot-item.is-active::before {
+			background: var(--view-minorColorT, rgba(123, 41, 65, 0.1));
+			transform: scale(1.08);
+		}
+
+		.foot-item:not(.is-active) image {
+			opacity: .62;
+		}
+
+		.foot-item.is-active image {
+			transform: translateY(-2rpx) scale(1.06);
+			filter: drop-shadow(0 4rpx 6rpx rgba(123, 41, 65, 0.18));
+		}
+
+		.foot-item .nav-icon {
+			display: block;
+			height: 40rpx;
+			font-size: 39rpx;
+			line-height: 40rpx;
+			position: relative;
+			z-index: 1;
+			color: var(--footer-inactive-color, #a08c91);
+			transition: color .18s ease, transform .18s ease;
+		}
+
+		.foot-item.is-active .nav-icon {
+			color: var(--footer-active-color, var(--view-theme));
+			transform: translateY(-2rpx) scale(1.08);
 		}
 
 		.foot-item .txt {
 			margin-top: 4rpx;
-			font-size: 20rpx;
-			line-height: 28rpx;
-			color: #333333;
+			font-size: 19rpx;
+			line-height: 30rpx;
+			position: relative;
+			z-index: 1;
+			font-weight: 500;
+			color: var(--footer-inactive-color, #8d777d);
 
 			&.active {
-				color: var(--view-theme);
+				color: var(--footer-active-color, var(--view-theme));
+				font-weight: 700;
 			}
 		}
 	}

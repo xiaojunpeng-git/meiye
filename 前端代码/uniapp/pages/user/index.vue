@@ -129,39 +129,8 @@ export default {
 			// #endif
 			vipStatus: 0,
 			stu: false,
-			orderMenu: [
-				{
-					icon: '',
-					title: '待付款',
-					url: '/pages/goods/order_list/index?status=0'
-				},
-				{
-					icon: 'icon-ic_money',
-					title: '欠款',
-					url: '/pages/users/debt/index',
-					debt_amount_text: ''
-				},
-				{
-					icon: '',
-					title: '待发货',
-					url: '/pages/goods/order_list/index?status=1'
-				},
-				{
-					icon: '',
-					title: '待收货',
-					url: '/pages/goods/order_list/index?status=10'
-				},
-				{
-					icon: '',
-					title: '待评价',
-					url: '/pages/goods/order_list/index?status=3'
-				},
-				{
-					icon: '',
-					title: '售后/退款',
-					url: '/pages/users/user_return_list/index'
-				}
-			],
+			// 订单入口由后台「个人中心装修 → 订单中心」配置返回。
+			orderMenu: [],
 			imgUrls: [],
 			orderStatusNum: {},
 			// Tab 页会被复用；先显示登录时已写入的会员资料，再由接口刷新，
@@ -206,11 +175,6 @@ export default {
 			balanceStatus: 0, // 余额是否展示
 			editModal: false, // 编辑头像信息
 			isScrolling: false,
-			orderStyle: {
-				1: ['icon-ic_daifukuan12', 'icon-ic_daifahuo11', 'icon-ic_daishouhuo1', 'icon-ic_daipingjia1', 'icon-ic_daituikuan1'],
-				2: ['icon-ic_daifukuan2', 'icon-ic_daifahuo2', 'icon-ic_daishouhuo2', 'icon-ic_daipingji2', 'icon-ic_daituikuan2'],
-				3: ['icon-ic_daifukuan', 'icon-ic_daifahuo', 'icon-ic_daishouhuo', 'icon-ic_daipingjia', 'icon-ic_daituikuan']
-			},
 			codeImg:''
 		};
 	},
@@ -281,11 +245,8 @@ export default {
 			this.setVisit();
 			this.getMenuData();
 		}else{
-			this.orderMenu.forEach((item, index) => {
+			this.orderMenu.forEach((item) => {
 				item.num = 0;
-				if (item.title === '欠款') {
-					item.debt_amount_text = '';
-				}
 			});
 		}
 	},
@@ -541,30 +502,8 @@ export default {
 				that.vipStatus = res.data.vip_status;
 				that.$store.commit('SETUID', res.data.uid);
 				that.$store.commit('UPDATE_USERINFO', res.data);
-				that.orderMenu.forEach((item, index) => {
-					switch (item.title) {
-						case '待付款':
-						this.$set(item,'num',res.data.orderStatusNum.unpaid_count);
-							break;
-						case '欠款':
-							this.$set(item, 'num', res.data.orderStatusNum.debt_order_count || 0);
-							const pendingTotal = Number(res.data.orderStatusNum.debt_pending_total || 0);
-							this.$set(item, 'debt_amount_text', pendingTotal > 0 ? `¥${pendingTotal}` : '');
-							break;
-						case '待发货':
-						this.$set(item,'num',res.data.orderStatusNum.unshipped_count);
-							break;
-						case '待收货':
-						this.$set(item,'num',res.data.orderStatusNum.received_count);
-							break;
-						case '待评价':
-						this.$set(item,'num',res.data.orderStatusNum.evaluated_count);
-							break;
-						case '售后/退款':
-						this.$set(item,'num',res.data.orderStatusNum.refunding_count);
-							break;
-					}
-				});
+				that.orderStatusNum = res.data.orderStatusNum || {};
+				that.applyOrderStatus();
 			}).catch((err) => {
 				that.$util.Tips({ title: (err && err.msg) || '会员资料加载失败，请重试' });
 			});
@@ -573,7 +512,10 @@ export default {
 			let that = this;
 			getMenuList().then((res) => {
 				this.diyData = res.data.diy_data;
-				this.switchTab(this.diyData.order.style);
+				this.orderMenu = Array.isArray(this.diyData.order && this.diyData.order.list)
+					? this.diyData.order.list
+					: [];
+				this.applyOrderStatus();
 				this.my_banner_status = res.data.diy_data.my_banner_status;
 				this.menu_status = res.data.diy_data.menu_status;
 				this.service_status = res.data.diy_data.service_status;
@@ -584,15 +526,18 @@ export default {
 				this.routineContact = Number(res.data.routine_contact_type);
 			});
 		},
-		switchTab(style) {
-			let iconIndex = 0;
+		applyOrderStatus() {
+			const statusCountKeys = {
+				unpaid: 'unpaid_count',
+				debt: 'debt_order_count',
+				unshipped: 'unshipped_count',
+				received: 'received_count',
+				evaluated: 'evaluated_count',
+				refund: 'refunding_count'
+			};
 			this.orderMenu.forEach((item) => {
-				if (item.title === '欠款') {
-					item.icon = item.icon || 'icon-ic_money';
-					return;
-				}
-				item.icon = this.orderStyle[style][iconIndex] || '';
-				iconIndex++;
+				const countKey = statusCountKeys[item.key];
+				this.$set(item, 'num', countKey ? (this.orderStatusNum[countKey] || 0) : 0);
 			});
 		},
 		goMenuPage(url, name) {
@@ -729,6 +674,8 @@ export default {
 	height: 98rpx;
 }
 .user-page {
+	min-height: 100vh;
+	background: #fbf7f4;
 	padding-bottom: calc(100rpx + constant(safe-area-inset-bottom));
 	padding-bottom: calc(100rpx + env(safe-area-inset-bottom));
 	padding-bottom: 100rpx;

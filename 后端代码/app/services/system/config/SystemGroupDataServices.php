@@ -355,7 +355,8 @@ class SystemGroupDataServices extends BaseServices
                 foreach ($v as $key => $param) {
                     foreach ($fields as $index => $field) {
                         if ($key == $field["title"]) {
-                            if ($param === "" && $key != 'link') {//跳转链接可以为空
+							$required = !array_key_exists('required', $field) || (bool)$field['required'];
+							if ($param === "" && $key != 'link' && $required) {//跳转链接可以为空
 								throw new AdminException($field["name"] . "不能为空！");
 							} else {
                                 $value[$key]["type"] = $field["type"];

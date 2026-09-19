@@ -1,6 +1,6 @@
 <template>
     <div class="footer" v-if="footConfig">
-        <p class="tips">图片建议宽度81*81px；鼠标拖拽左侧圆点可调整导航顺序</p>
+		<p class="tips">可配置图标、名称和链接；鼠标拖拽左侧圆点可调整导航顺序</p>
         <draggable
                 class="dragArea list-group"
                 :list="footConfig"
@@ -35,6 +35,14 @@
                             <Input v-model="item.name" placeholder="选填不超过10个字"  />
                         </Col>
                     </div>
+					<div class="c_row-item" v-if="navStyle != 1">
+						<Col class="label" span="4">图标样式</Col>
+						<Col class="slider-box" span="20">
+							<Select v-model="item.icon" clearable placeholder="未选择时沿用上传图标">
+								<Option v-for="option in iconOptions" :key="option.value" :value="option.value">{{ option.label }}</Option>
+							</Select>
+						</Col>
+					</div>
                     <div class="c_row-item">
                         <Col class="label" span="4">
                             链接
@@ -108,6 +116,13 @@ export default {
         xs: 12
       },
       navStyle: 0,
+		  iconOptions: [
+			  { label: '首页', value: 'icon-ic_home' },
+			  { label: '服务 / 门店', value: 'icon-ic_store3' },
+			  { label: '社区 / 消息', value: 'icon-ic_message' },
+			  { label: '项目 / 卡包', value: 'icon-ic_card' },
+			  { label: '我的', value: 'icon-ic_user' }
+		  ],
       noPic: require('../../assets/images/noPictrue.png')
     };
   },
@@ -149,6 +164,7 @@ export default {
     addMenu() {
       const obj = {
         imgList: [this.noPic, this.noPic],
+		icon: '',
         name: '自定义',
         link: ''
       };

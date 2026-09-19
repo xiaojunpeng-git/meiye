@@ -163,21 +163,31 @@ export default {
       'menuList': [
         {
           imgList: [require('@/assets/images/foot-001.png'), require('@/assets/images/foot-002.png')],
+		  icon: 'icon-ic_home',
           name: '首页',
           link: '/pages/index/index'
         },
         {
           imgList: [require('@/assets/images/foot-003.png'), require('@/assets/images/foot-004.png')],
-          name: '分类',
-          link: '/pages/goods_cate/goods_cate'
+		  icon: 'icon-ic_store3',
+          name: '服务',
+          link: '/pages/activity/therapist_list/index?position_ids=69'
         },
         {
           imgList: [require('@/assets/images/foot-005.png'), require('@/assets/images/foot-006.png')],
-          name: '购物车',
-          link: '/pages/order_addcart/order_addcart'
+		  icon: 'icon-ic_message',
+          name: '社区',
+          link: '/pages/discover/discoverIndex/index'
+        },
+        {
+          imgList: [require('@/assets/images/foot-005.png'), require('@/assets/images/foot-006.png')],
+		  icon: 'icon-ic_card',
+          name: '项目',
+          link: '/pages/users/user_card_list/index'
         },
         {
           imgList: [require('@/assets/images/foot-007.png'), require('@/assets/images/foot-008.png')],
+		  icon: 'icon-ic_user',
           name: '我的',
           link: '/pages/user/index'
         }

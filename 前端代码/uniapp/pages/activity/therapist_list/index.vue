@@ -187,10 +187,14 @@
 				class="therapist-card"
 			>
 				<image
+					v-if="item.avatar"
 					class="therapist-avatar"
-					:src="item.avatar || defaultAvatar"
+					:src="item.avatar"
 					mode="aspectFill"
 				/>
+				<view v-else class="therapist-avatar therapist-avatar--placeholder">
+					<text class="iconfont icon-ic_user1"></text>
+				</view>
 				<view class="therapist-content">
 					<view class="therapist-header">
 						<text class="therapist-name">{{ item.staff_name }}</text>
@@ -667,35 +671,35 @@ export default {
 <style scoped lang="scss">
 .therapist-page {
 	min-height: 100vh;
-	background: #f5f5f5;
-	--page-theme: #07cd9a;
-	--page-theme-light: #e3fdf7;
-	--page-theme-bg: rgba(0, 212, 170, 0.05);
+	background: #fbf7f4;
+	--page-theme: var(--view-theme, #7b2941);
+	--page-theme-light: var(--view-minorColorT, #f9e9ed);
+	--page-theme-bg: var(--view-minorColorT, rgba(123, 41, 65, 0.07));
 }
 
 .header {
-	background: #fff;
+	background: rgba(255,253,251,.98);
 	padding: 12rpx 24rpx 24rpx;
-	border-bottom: 1rpx solid #f0f0f0;
+	border-bottom: 1rpx solid rgba(123,41,65,.08);
 }
 
 .h5-nav {
 	position: relative;
 	height: 88rpx;
-	background: #fff;
+	background: rgba(255,253,251,.98);
 }
 
 .h5-nav .icon-ic_leftarrow {
 	position: absolute;
 	left: 24rpx;
 	font-size: 36rpx;
-	color: #333;
+	color: #4d3037;
 }
 
 .h5-nav-title {
 	font-size: 34rpx;
 	font-weight: 500;
-	color: #333;
+	color: #4d3037;
 }
 
 .header-title {
@@ -744,7 +748,8 @@ export default {
 	flex: 1;
 	display: flex;
 	align-items: center;
-	background: #f5f5f5;
+	background: #f4ece9;
+	border: 1rpx solid rgba(123,41,65,.08);
 	border-radius: 40rpx;
 	padding: 12rpx 24rpx;
 }
@@ -758,15 +763,15 @@ export default {
 .search-input input {
 	flex: 1;
 	font-size: 28rpx;
-	color: #333;
+	color: #4d3037;
 }
 
 .filter-bar {
 	display: flex;
 	justify-content: space-around;
 	padding: 24rpx 0;
-	background: #fff;
-	border-bottom: 1rpx solid #f0f0f0;
+	background: rgba(255,253,251,.98);
+	border-bottom: 1rpx solid rgba(123,41,65,.08);
 }
 
 .filter-item {
@@ -1045,10 +1050,12 @@ export default {
 
 .therapist-card {
 	display: flex;
-	background: #fff;
+	background: #fffdfb;
 	margin-top: 24rpx;
 	padding: 24rpx;
-	border-radius: 24rpx;
+	border: 1rpx solid rgba(123,41,65,.08);
+	border-radius: 28rpx;
+	box-shadow: 0 12rpx 28rpx rgba(83,45,54,.07);
 }
 
 .therapist-avatar {
@@ -1056,8 +1063,19 @@ export default {
 	height: 140rpx;
 	border-radius: 16rpx;
 	margin-right: 20rpx;
-	background: #f0f0f0;
+	background: #f2e7e4;
 	flex-shrink: 0;
+}
+
+.therapist-avatar--placeholder {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: #9c5869;
+}
+
+.therapist-avatar--placeholder .iconfont {
+	font-size: 58rpx;
 }
 
 .therapist-content {
@@ -1075,12 +1093,12 @@ export default {
 .therapist-name {
 	font-size: 32rpx;
 	font-weight: 600;
-	color: #333;
+	color: #4d3037;
 }
 
 .therapist-type {
 	font-size: 24rpx;
-	color: #999;
+	color: #9a7b82;
 }
 
 .therapist-level {
@@ -1106,7 +1124,7 @@ export default {
 
 .level-text {
 	font-size: 24rpx;
-	color: #666;
+	color: #81666d;
 }
 
 .therapist-stats {
@@ -1154,9 +1172,9 @@ export default {
 }
 
 .btn-primary {
-	background: linear-gradient(135deg, #07cd9a 0%, #07cd9a 100%);
+	background: linear-gradient(135deg, var(--view-gradient, #a45b6d) 0%, var(--view-theme, #7b2941) 100%);
 	color: #fff;
-	box-shadow: 0 6rpx 20rpx rgba(0, 212, 170, 0.4);
+	box-shadow: 0 8rpx 20rpx rgba(123,41,65,0.25);
 	width: 220rpx;
 	padding: 16rpx 0;
 }

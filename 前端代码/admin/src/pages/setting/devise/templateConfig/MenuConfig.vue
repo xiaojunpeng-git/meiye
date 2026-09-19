@@ -78,6 +78,20 @@
                   <Input v-model="item.name" placeholder="请输入标题" />
                 </span>
                 <div class="input-box mt10">
+                  <Select
+                    :value="item.icon || ''"
+                    clearable
+                    placeholder="留空时按名称自动匹配图标"
+                    @on-change="setMenuIcon(item, $event)"
+                  >
+                    <Option
+                      v-for="icon in menuIconOptions"
+                      :key="icon.value"
+                      :value="icon.value"
+                    >{{ icon.label }}</Option>
+                  </Select>
+                </div>
+                <div class="input-box mt10">
                   <Input
                     icon="ios-link"
                     v-model="item.url"
@@ -190,6 +204,24 @@ export default {
       changeStyleModal: false,
       isChoice: "单选",
       menuStyle: 1, // 默认选中风格
+      menuIconOptions: [
+        { label: "自动按名称匹配", value: "" },
+        { label: "预约", value: "icon-ic_clock" },
+        { label: "积分兑换", value: "icon-ic_gift2" },
+        { label: "中奖 / 抽奖", value: "icon-ic_crown2" },
+        { label: "会员等级", value: "icon-huiyuandengji" },
+        { label: "发票", value: "icon-ic_fapiao" },
+        { label: "积分中心", value: "icon-ic_statistics" },
+        { label: "联系客服", value: "icon-ic_customerservice" },
+        { label: "优惠券", value: "icon-ic_coupon" },
+        { label: "收藏", value: "icon-ic_collect" },
+        { label: "地址", value: "icon-ic_location2" },
+        { label: "余额 / 储值", value: "icon-ic_money" },
+        { label: "卡包 / 项目", value: "icon-ic_card" },
+        { label: "砍价", value: "icon-ic_sale" },
+        { label: "订单", value: "icon-ic_order1" },
+        { label: "记录", value: "icon-kefujilu" },
+      ],
       activeIndex: 0,
       indexLast: 0,
     };
@@ -205,12 +237,16 @@ export default {
     this.menuStyle = this.$store.state.admin.userTemplateConfig.menu.style;
   },
   methods: {
+    setMenuIcon(item, icon) {
+      this.$set(item, "icon", icon || "");
+    },
     linkUrl(e) {
       this.menuData.list[this.activeIndex].url = e;
     },
     addHotTxt() {
       this.menuData.list.push({
         pic: "",
+        icon: "",
         name: "",
         url: "",
       });

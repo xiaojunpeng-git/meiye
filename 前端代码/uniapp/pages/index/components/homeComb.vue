@@ -262,8 +262,9 @@
 				};
 			},
 			tabListConfig() {
-				let tabList = this.dataConfig.tabListConfig.list;
-				tabList.unshift({
+				const tabList = (this.dataConfig.tabListConfig.list || []).slice();
+				const hasHome = tabList.some((item) => item && item.classPage && Number(item.classPage.id) === 0);
+				if (!hasHome) tabList.unshift({
 					classPage: {
 						id: 0
 					},
@@ -276,7 +277,7 @@
 					text: {
 						val: '首页'
 					},
-				})
+				});
 				return tabList
 			},
 			hotWords() {
@@ -878,5 +879,37 @@
 
 	::v-deep .dot2 .uni-swiper-dots-horizontal {
 		left: 90%;
+	}
+
+	/* 美业主题：保留装修内容与链接，仅替换阅读层级和视觉质感 */
+	.page_count {
+		background: #fbf7f4;
+
+		.bg-img { opacity: .16; }
+		.bag-gradient { background: linear-gradient(180deg, rgba(251,247,244,.74), rgba(251,247,244,.98)); }
+		.serch-wrapper {
+			.title, .map { color: #5c3d45; }
+			.input, .uninput {
+				background: rgba(255,255,255,.88);
+				border: 1rpx solid rgba(123,41,65,.1);
+				box-shadow: 0 8rpx 20rpx rgba(99,54,64,.08);
+				color: #9a858a;
+			}
+		}
+		.navTabBox {
+			color: #785a61;
+			.longTab .longItem { color: #785a61; font-size: 27rpx; }
+			.longTab .longItem.click { color: #7b2941; font-size: 29rpx; }
+			.category .iconfont { color: #7b2941 !important; }
+			.category::before { background: linear-gradient(135deg, rgba(123,41,65,.35), rgba(216,216,216,0)); }
+		}
+		.swiperBg .page_swiper {
+			padding: 10rpx 20rpx 0;
+			border-radius: 28rpx;
+			box-shadow: 0 18rpx 42rpx rgba(92,53,62,.12);
+			image, .swiper-item, swiper-item, .acea-row.row-between-wrapper { border-radius: 28rpx; }
+			image { transform: scale(1); }
+			.dot1 .dot.active, .dot2 .dot.active, .dot4 .dot.active { background: #7b2941; }
+		}
 	}
 </style>

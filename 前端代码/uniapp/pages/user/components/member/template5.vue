@@ -35,7 +35,7 @@ export default {
 	inject: ['intoPage', 'tapQrCode', 'goMenuPage', 'goEdit', 'bindPhone', 'getPhoneNumber'],
 	computed: {
 		headerBg() {
-			return `url(${HTTP_REQUEST_URL}/statics/images/users/template4_bg.png)`;
+			return 'linear-gradient(135deg, var(--view-theme, #7b2941) 0%, var(--view-gradient, #a45b6d) 100%)';
 		}
 	}
 };
@@ -91,6 +91,7 @@ export default {
 .warp {
 	background-position: bottom;
 	background-size: 100% 100%;
+	box-shadow: inset 0 -26rpx 42rpx rgba(70, 25, 39, .13);
 }
 .user {
 	padding: 60rpx 42rpx 56rpx 30rpx;
@@ -101,12 +102,14 @@ export default {
 		width: 112rpx;
 		height: 112rpx;
 		border-radius: 50%;
+		border: 4rpx solid rgba(255,255,255,.62);
+		box-shadow: 0 8rpx 20rpx rgba(52,14,28,.2);
 	}
 
 	.name-wrap {
 		flex: 1;
 		padding: 0 32rpx;
-		color: #333333;
+		color: #fffaf8;
 	}
 
 	.name {
@@ -120,6 +123,7 @@ export default {
 		font-size: 24rpx;
 		line-height: 34rpx;
 	}
+	.iconfont { color: #fff7f4; }
 	.bind-phone {
 		margin-top: 12rpx;
 		background: #fff;
@@ -128,7 +132,7 @@ export default {
 		text-align: center;
 		font-size: 20rpx;
 		font-weight: 400;
-		color: #333333;
+		color: #6f2b40;
 		line-height: 28rpx;
 		padding: 6rpx 16rpx;
 	}
@@ -149,7 +153,7 @@ export default {
 		white-space: nowrap;
 		font-size: 16rpx;
 		line-height: 28rpx;
-		color: #9e5e1a;
+		color: var(--view-theme, #7b2941);
 	}
 	.tips::before {
 		content: '';
@@ -183,7 +187,7 @@ export default {
 	padding: 0 32rpx 32rpx 32rpx;
 	font-size: 26rpx;
 	line-height: 36rpx;
-	color: #999999;
+	color: rgba(255,250,248,.72);
 
 	.item + .item {
 		margin-left: 40rpx;
@@ -193,7 +197,7 @@ export default {
 		margin-left: 8rpx;
 		font-size: 28rpx;
 		line-height: 32rpx;
-		color: #333333;
+		color: #fffaf8;
 	}
 }
 </style>

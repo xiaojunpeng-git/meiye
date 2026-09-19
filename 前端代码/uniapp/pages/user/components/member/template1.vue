@@ -77,7 +77,7 @@ export default {
 						<text class="iconfont icon-ic_rightarrow"></text>
 					</view>
 				</view>
-				<image :src="`${imgHost}/statics/images/users/user-member.png`" class="image"></image>
+				<view class="member-card-icon"><text class="iconfont icon-huiyuandengji"></text></view>
 
 			</view>
 			<view class="acea-row row-middle row-center item" @click="intoPage('/pages/activity/points_mall/index')">
@@ -88,7 +88,7 @@ export default {
 						<text class="iconfont icon-ic_rightarrow"></text>
 					</view>
 				</view>
-				<image :src="`${imgHost}/statics/images/users/user-points.png`" class="image"></image>
+				<view class="member-card-icon"><text class="iconfont icon-ic_card"></text></view>
 			</view>
 		</view>
 	</view>
@@ -100,7 +100,8 @@ export default {
 	border-bottom-right-radius: 50% 40rpx;
 	border-bottom-left-radius: 50% 40rpx;
 	margin-bottom: 18rpx;
-	background-color: var(--view-theme);
+	background: linear-gradient(135deg, var(--view-theme, #7b2941) 0%, var(--view-gradient, #a45b6d) 100%);
+	box-shadow: inset 0 -26rpx 42rpx rgba(70, 25, 39, .13);
 
 	.user {
 		padding: 0 40rpx 0 30rpx;
@@ -142,6 +143,8 @@ export default {
 		width: 112rpx;
 		height: 112rpx;
 		border-radius: 50%;
+		border: 4rpx solid rgba(255,255,255,.62);
+		box-shadow: 0 8rpx 20rpx rgba(52,14,28,.2);
 	}
 
 	.name-wrap {
@@ -223,9 +226,11 @@ export default {
 }
 
 .member-points {
-	border-radius: 20rpx;
+	border: 1rpx solid rgba(123, 41, 65, .08);
+	border-radius: 24rpx;
 	margin: 20rpx;
 	background-color: #ffffff;
+	box-shadow: 0 12rpx 28rpx rgba(83,45,54,.07);
 
 	.item {
 		position: relative;
@@ -235,7 +240,7 @@ export default {
 		font-weight: 500;
 		font-size: 28rpx;
 		line-height: 34rpx;
-		color: #333333;
+		color: #4d3037;
 
 		&::before {
 			content: '';
@@ -264,11 +269,21 @@ export default {
 		color: #ff7d00;
 	}
 
-	.image {
-		width: 88rpx;
-		height: 88rpx;
-		margin-left: 40rpx;
+	.member-card-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 76rpx;
+		height: 76rpx;
+		margin-left: 32rpx;
+		border: 1rpx solid rgba(123,41,65,.12);
+		border-radius: 24rpx;
+		background: linear-gradient(145deg, #fff8f5, #f4e2e4);
+		box-shadow: 0 8rpx 16rpx rgba(123,41,65,.1);
+		color: var(--view-theme, #7b2941);
 	}
+
+	.member-card-icon .iconfont { margin-left: 0; font-size: 40rpx; }
 
 	.iconfont {
 		margin-left: 2rpx;

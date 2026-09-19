@@ -1,5 +1,6 @@
 <script>
 import countDown from '@/components/countDown';
+import { resolveMemberOrderIcon } from '@/utils/memberMenuIcon';
 export default {
 	components: { countDown },
 	inject: ['intoPage', 'goMenuPage', 'getMenuData'],
@@ -13,11 +14,19 @@ export default {
 			default: () => {}
 		}
 	},
+	computed: {
+		visibleOrderMenu() {
+			return this.orderMenu.filter((item) => item.is_show !== 0);
+		}
+	},
 	methods: {
 		goUserSpread() {
 			uni.navigateTo({
 				url: '/pages/users/user_spread_user/index'
 			});
+		},
+		orderIcon(item) {
+			return resolveMemberOrderIcon(item);
 		}
 	}
 };
@@ -25,7 +34,7 @@ export default {
 
 <template>
 	<view class="">
-		<view class="pr-24 pl-24 bg--w111-fff rd-16rpx mt-20 ml-20 mr-20">
+		<view class="order-card pr-24 pl-24 bg--w111-fff rd-16rpx mt-20 ml-20 mr-20">
 			<view class="acea-row row-middle row-between section-header">
 				<view>订单中心</view>
 				<view class="arrow" @click="intoPage('/pages/goods/order_list/index')">
@@ -34,10 +43,9 @@ export default {
 				</view>
 			</view>
 			<view class="acea-row section-content">
-				<view v-for="item in orderMenu" class="item" @click="intoPage(item.url)">
-					<view class="icon"><text :class="item.icon" class="iconfont"></text></view>
+				<view v-for="item in visibleOrderMenu" class="item" @click="intoPage(item.url)">
+					<view class="order-icon"><text :class="orderIcon(item)" class="iconfont"></text></view>
 					<view class="">{{ item.title }}</view>
-					<view v-if="item.title === '欠款' && item.debt_amount_text" class="debt-amount-text">{{ item.debt_amount_text }}</view>
 					<uni-badge class="uni-badge-left-margin" v-if="item.num > 0" :text="item.num"></uni-badge>
 				</view>
 				<view class="w-full h-120 rd-16rpx bg--w111-f5f5f5 mt-32 p-10 flex-between-center" v-if="notPayOrder" @click="intoPage('/pages/goods/order_list/index?status=0')">
@@ -73,6 +81,11 @@ export default {
 </template>
 
 <style lang="scss" scoped>
+.order-card {
+	border: 1rpx solid rgba(123, 41, 65, .08);
+	border-radius: 24rpx;
+	box-shadow: 0 12rpx 28rpx rgba(83,45,54,.06);
+}
 .section-content {
 	padding: 48rpx 0 36rpx;
 
@@ -82,33 +95,40 @@ export default {
 		text-align: center;
 		font-size: 26rpx;
 		line-height: 36rpx;
-		color: #333333;
+		color: #4d3037;
 		.uni-badge-left-margin {
 			position: absolute;
 			top: -20rpx;
 			right: 26rpx;
 			::v-deep  .uni-badge--error {
-				background-color: var(--view-theme) !important;
+				background-color: var(--view-theme, #7b2941) !important;
 			}
 			.uni-badge {
-				color: var(--view-theme);
-				border: 1px solid var(--view-theme);
+				color: #ffffff;
+				border: 2rpx solid #ffffff;
+				box-shadow: 0 3rpx 8rpx rgba(123, 41, 65, .18);
 				z-index: 29;
 			}
 		}
 	}
 
-	.icon {
-		margin-bottom: 18rpx;
-	}
+	.order-icon {
+		width: 68rpx;
+		height: 68rpx;
+		margin: 0 auto 18rpx;
+		border-radius: 20rpx;
+		background: linear-gradient(145deg, #fbf3f2, #f2e5e8);
+		border: 1rpx solid rgba(123, 41, 65, .08);
+		box-shadow: 0 8rpx 16rpx rgba(83, 45, 54, .08);
+		display: flex;
+		align-items: center;
+		justify-content: center;
 
-	.iconfont {
-		font-size: 48rpx;
-	}
-	.debt-amount-text {
-		font-size: 22rpx;
-		color: #ed4014;
-		margin-top: 6rpx;
+		.iconfont {
+			font-size: 38rpx;
+			line-height: 1;
+			color: var(--view-theme, #7b2941);
+		}
 	}
 	.con_border {
 		color: var(--view-theme);
@@ -120,7 +140,7 @@ export default {
 	font-weight: 500;
 	font-size: 30rpx;
 	line-height: 42rpx;
-	color: #333333;
+	color: #4d3037;
 	.arrow {
 		font-weight: 400;
 		font-size: 26rpx;

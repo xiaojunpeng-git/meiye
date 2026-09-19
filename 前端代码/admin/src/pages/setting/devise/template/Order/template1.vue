@@ -1,47 +1,15 @@
 <script>
 export default {
   props: {
-    userInfo: {
+    orderData: {
       type: Object,
-      default: () => {},
-    },
-    MyMenus: {
-      type: Array,
-      default() {
-        return [];
-      },
+      default: () => ({}),
     },
   },
-  data() {
-    return {
-      orderMenu: [
-        {
-          icon: "icon-ic_daifukuan12",
-          title: "待付款",
-          url: "/pages/goods/order_list/index?status=0",
-        },
-        {
-          icon: "icon-ic_daifahuo11",
-          title: "待发货",
-          url: "/pages/goods/order_list/index?status=1",
-        },
-        {
-          icon: "icon-ic_daishouhuo1",
-          title: "待收货",
-          url: "/pages/goods/order_list/index?status=2",
-        },
-        {
-          icon: "icon-ic_daipingjia1",
-          title: "待评价",
-          url: "/pages/goods/order_list/index?status=3",
-        },
-        {
-          icon: "icon-ic_daituikuan1",
-          title: "售后/退款",
-          url: "/pages/users/user_return_list/index",
-        },
-      ],
-    };
+  computed: {
+    visibleOrderMenu() {
+      return (this.orderData.list || []).filter((item) => item.is_show !== 0);
+    },
   },
   methods: {
     intoPage(url) {
@@ -67,7 +35,7 @@ export default {
         </div>
       </div>
       <div class="acea-row section-content">
-        <div v-for="item in orderMenu" class="item">
+        <div v-for="item in visibleOrderMenu" class="item">
           <div class="icon">
             <span class="mobiconfont" :class="item.icon"></span>
           </div>

@@ -1,5 +1,6 @@
 <script>
 import countDown from '@/components/countDown';
+import { resolveMemberOrderIcon } from '@/utils/memberMenuIcon';
 export default {
 	components: { countDown },
 	inject: ['intoPage', 'goMenuPage'],
@@ -16,6 +17,16 @@ export default {
 			type: Object,
 			default: () => {}
 		}
+	},
+	computed: {
+		visibleOrderMenu() {
+			return this.orderMenu.filter((item) => item.is_show !== 0);
+		}
+	},
+	methods: {
+		orderIcon(item) {
+			return resolveMemberOrderIcon(item);
+		}
 	}
 };
 </script>
@@ -30,11 +41,10 @@ export default {
 					<text class="iconfont icon-ic_rightarrow fs-24"></text>
 				</view>
 			</view>
-			<view class="flex-between-center mt-30" :class="{ theme: orderStyle == 2 }">
-				<view class="w-128 flex-col flex-center item" v-for="item in orderMenu" :key="item.title" @click="intoPage(item.url)">
-					<text :class="item.icon" class="iconfont fs-48"></text>
+			<view class="order-status-list flex-between-center mt-30" :class="{ theme: orderStyle == 2, 'is-four': visibleOrderMenu.length === 4 }">
+				<view class="w-128 flex-col flex-center item" v-for="item in visibleOrderMenu" :key="item.title" @click="intoPage(item.url)">
+					<view class="order-icon"><text :class="orderIcon(item)" class="iconfont"></text></view>
 					<text class="fs-26 lh-36rpx text--w111-282828 pt-22">{{ item.title }}</text>
-					<text v-if="item.title === '欠款' && item.debt_amount_text" class="fs-22 text-red pt-6">{{ item.debt_amount_text }}</text>
 					<uni-badge class="uni-badge-left-margin" v-if="item.num > 0" :text="item.num"></uni-badge>
 				</view>
 			</view>
@@ -71,6 +81,9 @@ export default {
 
 <style lang="scss" scoped>
 .order-wrapper {
+	border: 1rpx solid rgba(123, 41, 65, .08);
+	border-radius: 24rpx;
+	box-shadow: 0 12rpx 28rpx rgba(83,45,54,.06);
 	.uni-badge-left-margin {
 		position: absolute;
 		top: -12rpx;
@@ -79,11 +92,12 @@ export default {
 			background-color: #fff !important;
 		}
 		::v-deep  .uni-badge--error {
-			background-color: var(--view-theme) !important;
+			background-color: var(--view-theme, #7b2941) !important;
 		}
 		.uni-badge {
-			color: var(--view-theme);
-			border: 1px solid var(--view-theme);
+			color: #ffffff;
+			border: 2rpx solid #ffffff;
+			box-shadow: 0 3rpx 8rpx rgba(123, 41, 65, .18);
 			z-index: 29;
 		}
 	}
@@ -95,11 +109,30 @@ export default {
 		width: 48rpx;
 		height: 48rpx;
 	}
-	.theme .iconfont {
-		color: var(--view-theme);
-	}
 	.item {
 		position: relative;
+	}
+	.order-status-list.is-four .item {
+		width: auto;
+		flex: 1;
+	}
+	.order-icon {
+		width: 68rpx;
+		height: 68rpx;
+		margin-bottom: 18rpx;
+		border-radius: 20rpx;
+		background: linear-gradient(145deg, #fbf3f2, #f2e5e8);
+		border: 1rpx solid rgba(123, 41, 65, .08);
+		box-shadow: 0 8rpx 16rpx rgba(83, 45, 54, .08);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+
+		.iconfont {
+			font-size: 38rpx;
+			line-height: 1;
+			color: var(--view-theme, #7b2941);
+		}
 	}
 }
 </style>

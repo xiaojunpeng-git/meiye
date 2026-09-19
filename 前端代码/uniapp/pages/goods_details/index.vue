@@ -2261,6 +2261,10 @@
 					{
 						themeColor: '#E0A558',
 						fontColor: '#DA8C18',
+					},
+					{
+						themeColor: '#7B2941',
+						fontColor: '#7B2941',
 					}
 				];
 				setTimeout(() => {
@@ -2288,6 +2292,10 @@
 						case 6:
 							this.themeColor = color[5].themeColor;
 							this.fontColor = color[5].fontColor;
+							break;
+						case 7:
+							this.themeColor = color[6].themeColor;
+							this.fontColor = color[6].fontColor;
 							break;
 						default:
 							this.themeColor = color[2].themeColor;

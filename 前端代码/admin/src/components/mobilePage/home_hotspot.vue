@@ -7,8 +7,13 @@
 		paddingLeft:prConfig+'px',
 		paddingRight:prConfig+'px'
 		}">
-        <div class="pictrue">
-			<img :src="imgUrl" v-if="imgUrl" :style="{
+		<div class="pictrue">
+			<div class="entry-grid" v-if="isEntryGrid">
+				<div v-for="(item,index) in entryList" :key="item.number || index" class="entry-item">
+					<span>0{{index + 1}}</span>{{item.name || '快捷入口'}}
+				</div>
+			</div>
+			<img :src="imgUrl" v-else-if="imgUrl" :style="{
 				borderRadius:bgRadius
 			}"/>
 			<div class="empty-box" v-else :style="{
@@ -80,6 +85,14 @@ export default {
           url: '',
           list: []
         },
+		layoutConfig: {
+			title: '展示方式',
+			tabVal: 0,
+			tabList: [
+				{ name: '热区图' },
+				{ name: '快捷入口' }
+			]
+		},
         bottomBgColor: {
 					    title: '底部背景',
 					    name: 'bottomBgColor',
@@ -144,7 +157,9 @@ export default {
       prConfig: 0,
       bgRadius: 0,
       imgUrl: '',
-      mTop: 0
+		mTop: 0,
+		isEntryGrid: false,
+		entryList: []
     };
   },
   mounted() {
@@ -163,6 +178,8 @@ export default {
         this.prConfig = data.prConfig.val;
         this.mTop = data.mbConfig.val;
         this.imgUrl = data.picStyle.url;
+		this.isEntryGrid = Number(data.layoutConfig && data.layoutConfig.tabVal) === 1;
+		this.entryList = data.picStyle.list || [];
         const fillet = data.fillet.type;
         const filletVal = data.fillet.val;
         const valList = data.fillet.valList;
@@ -174,23 +191,41 @@ export default {
 </script>
 
 <style scoped lang="stylus">
-	.pictrue{
-		width 100%;
-		height 100%;
-		.empty-box{
-		    width 100%;
-		    height 379px;
-		    border-radius 0;
-			background: #F3F9FF;
-
-		    img {
-				width: 65px;
-				height: 50px;
-			}
-		}
-		img {
-		    width 100%;
-		    height 100%
-		}
-	}
+	.pictrue
+		width 100%
+		height 100%
+		.empty-box
+			width 100%
+			height 379px
+			border-radius 0
+			background #F3F9FF
+			img
+				width 65px
+				height 50px
+		img
+			width 100%
+			height 100%
+		.entry-grid
+			display grid
+			grid-template-columns repeat(2, minmax(0, 1fr))
+			gap 8px
+			padding 10px
+			border-radius 10px
+			background linear-gradient(135deg, #fffdfb, #f6e9e6)
+			.entry-item
+				display flex
+				align-items center
+				min-height 42px
+				padding 0 12px
+				border-radius 8px
+				background rgba(255,255,255,.82)
+				color #5f3040
+				font-size 12px
+				font-weight 600
+				span
+					margin-right 8px
+					color #bd8793
+					font-style italic
+				&:last-child:nth-child(odd)
+					grid-column 1 / -1
 </style>

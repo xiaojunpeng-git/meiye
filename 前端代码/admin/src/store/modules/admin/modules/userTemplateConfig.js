@@ -20,7 +20,15 @@ export default {
     },
     // 订单
     order: {
-      style: 1 // 风格
+      style: 1, // 风格
+      list: [
+        { key: 'unpaid', title: '待付款', url: '/pages/goods/order_list/index?status=0', icon: 'icon-ic_daifukuan', is_show: 1 },
+        { key: 'debt', title: '欠款', url: '/pages/users/debt/index', icon: 'icon-ic_money', is_show: 1 },
+        { key: 'unshipped', title: '待发货', url: '/pages/goods/order_list/index?status=1', icon: 'icon-ic_daifahuo', is_show: 0 },
+        { key: 'received', title: '待收货', url: '/pages/goods/order_list/index?status=10', icon: 'icon-ic_daishouhuo', is_show: 0 },
+        { key: 'evaluated', title: '待评价', url: '/pages/goods/order_list/index?status=3', icon: 'icon-ic_daipingjia', is_show: 1 },
+        { key: 'refund', title: '售后', url: '/pages/users/user_return_list/index', icon: 'icon-ic_returnmoney', is_show: 1 }
+      ]
     },
     // 运营统计
     orderStatic: {
@@ -95,6 +103,7 @@ export default {
               name: el.name,
               pic: el.pic[0],
               url: el.url,
+              icon: el.icon || '',
               type: el.type
             });
           } else if (el.type == '3') {
@@ -102,6 +111,7 @@ export default {
 			    name: el.name,
 			    pic: el.pic[0],
 			    url: el.url,
+			    icon: el.icon || '',
 			    type: el.type
 			  });
 		  } else if (el.type == '4') {
@@ -109,6 +119,7 @@ export default {
 			    name: el.name,
 			    pic: el.pic[0],
 			    url: el.url,
+			    icon: el.icon || '',
 			    type: el.type
 			  });
 		  } else {
@@ -116,6 +127,7 @@ export default {
               name: el.name,
               pic: el.pic[0],
               url: el.url,
+              icon: el.icon || '',
               type: el.type
             });
           }

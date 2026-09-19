@@ -23,6 +23,14 @@
 			}
 		},
 		{
+			"path": "pages/design_preview/index",
+			"style": {
+				"navigationBarTitleText": "会员端视觉预览",
+				"navigationStyle": "custom",
+				"navigationBarTextStyle": "black"
+			}
+		},
+		{
 			"path": "pages/order_addcart/order_addcart",
 			"style": {
 				// "enablePullDownRefresh": true,

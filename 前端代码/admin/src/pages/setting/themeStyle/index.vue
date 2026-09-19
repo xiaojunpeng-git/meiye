@@ -26,12 +26,20 @@
             <Radio :label="4" border class="box pink">魅力粉<i class="iconfont iconxuanzhong6"></i></Radio>
             <Radio :label="5" border class="box orange">活力橙<i class="iconfont iconxuanzhong6"></i></Radio>
             <Radio :label="6" border class="box gold">高端金<i class="iconfont iconxuanzhong6"></i></Radio>
+            <Radio :label="7" border class="box beauty">轻奢酒红<i class="iconfont iconxuanzhong6"></i></Radio>
           </RadioGroup>
         </FormItem>
         <FormItem label="当前风格示例：">
           <div class="acea-row row-top">
-            <div class="pictrue">
-              <img :src="imgColor.image">
+            <div class="pictrue" :class="imgColor.className">
+              <img v-if="imgColor.image" :src="imgColor.image">
+              <div v-else class="beauty-preview">
+                <div class="beauty-preview__banner"></div>
+                <div class="beauty-preview__card"></div>
+                <div class="beauty-preview__row">
+                  <span></span><span></span><span></span><span></span>
+                </div>
+              </div>
             </div>
           </div>
         </FormItem>
@@ -66,7 +74,8 @@ export default {
         {image:require('@/assets/images/red.jpg')},
         {image:require('@/assets/images/pink.jpg')},
         {image:require('@/assets/images/orange.jpg')},
-        {image:require('@/assets/images/gold.jpg')}
+        {image:require('@/assets/images/gold.jpg')},
+        {className:'beauty-preview-wrap'}
       ],
       current:'',
       clientHeight:0,
@@ -114,28 +123,7 @@ export default {
       })
     },
     changeColor(e){
-      switch(e){
-        case 1:
-          this.imgColor = this.picList[0];
-          break;
-        case 2:
-          this.imgColor = this.picList[1];
-          break;
-        case 3:
-          this.imgColor = this.picList[2];
-          break;
-        case 4:
-          this.imgColor = this.picList[3];
-          break;
-        case 5:
-          this.imgColor = this.picList[4];
-          break;
-        case 6:
-          this.imgColor = this.picList[5];
-          break;
-        default:
-          break
-      }
+      this.imgColor = this.picList[Number(e) - 1] || this.picList[2];
     }
   },
 };
@@ -213,6 +201,44 @@ export default {
 }
 .gold/deep/.ivu-radio-inner{
   background-color: #E0A558;
+}
+.beauty/deep/.ivu-radio-inner{
+  background-color: #7B2941;
+}
+.beauty-preview-wrap{
+  min-height: 450px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.beauty-preview{
+  min-height: 450px;
+  padding: 40px;
+  background: linear-gradient(135deg, #fff7f5 0%, #f5e5e8 100%);
+}
+.beauty-preview__banner{
+  height: 180px;
+  border-radius: 18px;
+  background: linear-gradient(120deg, #7B2941 0%, #A45B6D 100%);
+  box-shadow: 0 16px 32px rgba(123, 41, 65, 0.22);
+}
+.beauty-preview__card{
+  height: 100px;
+  margin-top: 26px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(123, 41, 65, 0.08);
+}
+.beauty-preview__row{
+  display: flex;
+  justify-content: space-between;
+  margin-top: 26px;
+}
+.beauty-preview__row span{
+  width: 21%;
+  height: 82px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(123, 41, 65, 0.08);
 }
 /deep/.ivu-radio-border{
   position: relative;

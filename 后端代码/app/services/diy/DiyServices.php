@@ -71,6 +71,14 @@ class DiyServices extends BaseServices
 		],
 		'order' => [// 订单
 			'style' => 1,// 风格
+			'list' => [
+				['key' => 'unpaid', 'title' => '待付款', 'url' => '/pages/goods/order_list/index?status=0', 'icon' => 'icon-ic_daifukuan', 'is_show' => 1],
+				['key' => 'debt', 'title' => '欠款', 'url' => '/pages/users/debt/index', 'icon' => 'icon-ic_money', 'is_show' => 1],
+				['key' => 'unshipped', 'title' => '待发货', 'url' => '/pages/goods/order_list/index?status=1', 'icon' => 'icon-ic_daifahuo', 'is_show' => 0],
+				['key' => 'received', 'title' => '待收货', 'url' => '/pages/goods/order_list/index?status=10', 'icon' => 'icon-ic_daishouhuo', 'is_show' => 0],
+				['key' => 'evaluated', 'title' => '待评价', 'url' => '/pages/goods/order_list/index?status=3', 'icon' => 'icon-ic_daipingjia', 'is_show' => 1],
+				['key' => 'refund', 'title' => '售后', 'url' => '/pages/users/user_return_list/index', 'icon' => 'icon-ic_returnmoney', 'is_show' => 1],
+			],
 		],
 		'orderStatic' => [
 			'style' => 1,//风格
@@ -484,7 +492,7 @@ class DiyServices extends BaseServices
 	* @throws \think\db\exception\DbException
 	* @throws \think\db\exception\ModelNotFoundException
 	 */
-    public function getMemberData()
+	public function getMemberData()
     {
 		$key = 'diy_data_member_3';
 		$info = $this->dao->cacheTag()->remember($key, function () {
@@ -496,13 +504,7 @@ class DiyServices extends BaseServices
 				return null;
 			}
 		});
-		if (!$info) {
-			$member = $this->member;
-		} else {
-			$member = $info;
-			$default = $this->member;
-			$member = $member ? array_merge($default, array_intersect_key($member, $default)) : $this->member;
-		}
+		$member = $this->mergeMemberConfig($info ?: []);
 		$data = [];
 		$data['color_change'] = (int)$this->getColorChange('color_change');
 		/** @var SystemGroupDataServices $systemGroupDataServices */
@@ -604,12 +606,27 @@ class DiyServices extends BaseServices
 			$info = $this->dao->get(['template_name' => $name, 'type' => 3]);
 			if ($info) {
 				$result = json_decode($info['value'], true);
-				$result = array_merge($default, array_intersect_key($result, $default));
+				$result = $this->mergeMemberConfig($result ?: []);
 			} else {
 				$result = $default;
 			}
 			return $result;
 		});
+	}
+
+	/**
+	 * 为历史个人中心配置补齐新增字段，避免旧配置覆盖新的订单入口配置。
+	 *
+	 * @param array $member
+	 * @return array
+	 */
+	private function mergeMemberConfig(array $member): array
+	{
+		$default = $this->member;
+		$result = $member ? array_merge($default, array_intersect_key($member, $default)) : $default;
+		$configuredOrder = is_array($result['order'] ?? null) ? $result['order'] : [];
+		$result['order'] = array_merge($default['order'], $configuredOrder);
+		return $result;
 	}
 
 	/**

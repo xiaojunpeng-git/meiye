@@ -28,6 +28,7 @@
               class="cup module"
               :class="{ active: active === 1 }"
               :orderType="orderData.style"
+			  :orderData="orderData"
               @click.native="editMode(1)"
             ></Order>
           </Tooltip>

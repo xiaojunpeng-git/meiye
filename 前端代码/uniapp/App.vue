@@ -24,6 +24,8 @@
 		'--view-theme: #FE5C2D;--view-priceColor:#FE5C2D;--view-minorColor:rgba(254, 92, 45, 0.5);--view-minorColorT:rgba(254, 92, 45, 0.1);--view-bntColor:#FDB000;--view-gradient:#FF9451'
 	let gold =
 	    '--view-theme: #E0A558;--view-priceColor:#DA8C18;--view-minorColor:rgba(224, 165, 88, 0.5);--view-minorColorT:rgba(224, 165, 88, 0.1);--view-bntColor:#1A1A1A;--view-gradient:#FFCD8C'
+	let beauty =
+		'--view-theme: #7B2941;--view-priceColor:#7B2941;--view-minorColor:rgba(123, 41, 65, 0.5);--view-minorColorT:rgba(123, 41, 65, 0.1);--view-bntColor:#7B2941;--view-gradient:#A45B6D'
 	export default {
 		globalData: {
 			spid: 0,
@@ -128,6 +130,10 @@
 					case 6:
 						uni.setStorageSync('viewColor', gold)
 						uni.$emit('ok', gold)
+						break;
+					case 7:
+						uni.setStorageSync('viewColor', beauty)
+						uni.$emit('ok', beauty)
 						break;
 					default:
 						uni.setStorageSync('viewColor', red)

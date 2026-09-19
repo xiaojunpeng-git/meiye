@@ -1,7 +1,7 @@
 <template>
 	<view class="booking-page" :style="colorStyle">
 	   <!-- #ifdef MP || APP-PLUS -->
-	   <NavBar :titleText="pageTitle" :iconColor="iconColor" :textColor="iconColor" :bagColor="bagColor" :isScrolling="false" showBack></NavBar>
+	   <NavBar :titleText="pageTitle" :iconColor="iconColor" :textColor="iconColor" :bagColor="themeColor" :isScrolling="false" showBack></NavBar>
 	   <!-- #endif -->
 	   <view class="header"></view>
 
@@ -97,8 +97,8 @@
 			   :timeInterval="timeIntervalHours"
 			   :disableTimeSlot="disableTimeSlot"
 			   :selectedQuantum="selectedTimeRange"
-			   selectedTabColor="#07CD9A"
-			   selectedItemColor="#07CD9A"
+		   :selectedTabColor="themeColor"
+		   :selectedItemColor="themeColor"
 			   disableText="不可约"
 			   undisableText="可预约"
 			   @dateChange="onChooseDateChange"
@@ -430,7 +430,7 @@ export default {
 			// 日历组件数据
 			targetDate: 0, //本月
 			iconColor:'#fff',
-			bagColor:'#07CD9A',
+			bagColor:'',
 			timeArrow:false,
 			productId:0,
 			storeId:0,
@@ -530,7 +530,11 @@ export default {
 				reservation_start: this.normalizeClock(this.selectedTimeRange.begin),
 				reservation_end: this.normalizeClock(this.selectedTimeRange.end),
 				service_duration: this.totalServiceDuration,
-			};
+		};
+	},
+		themeColor() {
+			const match = String(this.colorStyle || '').match(/--view-theme:\s*([^;]+)/);
+			return match ? match[1].trim() : '#7B2941';
 		},
 		selectedStaffIds() {
 			return (this.staffChoose || []).map((item) => Number(item.staff_id)).filter(Boolean);
@@ -1583,7 +1587,7 @@ export default {
 <style lang="scss" scoped>
 .booking-page {
 	min-height: 100vh;
-	background: #f5f5f5;
+	background: #fbf7f4;
 	padding-bottom: 20rpx;
 }
 	::v-deep uni-checkbox .uni-checkbox-input{
@@ -1615,15 +1619,15 @@ export default {
 		border-color: #F9F9F9 !important;
 	}
 	.bntActive{
-		color: #07CD9A;
-		background: #e3fdf7;
-		border-color: #07CD9A !important;
+		color: var(--view-theme, #7B2941);
+		background: var(--view-minorColorT, #f9e9ed);
+		border-color: var(--view-theme, #7B2941) !important;
 	}
 	.purchase{
 		background-color: var(--view-bntColor);
 	}
 	.booking-confirm-btn{
-		background: linear-gradient(135deg, #07CD9A 0%, #06b6d4 100%);
+		background: linear-gradient(135deg, var(--view-gradient, #a45b6d) 0%, var(--view-theme, #7B2941) 100%);
 	}
 	.footer{
 		width: 100%;
@@ -1657,7 +1661,7 @@ export default {
 		}
 	}
 	.header{
-		background: linear-gradient(135deg, #07CD9A 0%, #06b6d4 100%);
+		background: linear-gradient(135deg, #5c2035 0%, #8d4055 100%);
 		padding: 0 20rpx 30rpx 24rpx;
 		position: relative;
 		&::before{
@@ -1665,17 +1669,18 @@ export default {
 			content: '';
 			width: 100%;
 			height: 100rpx;
-			background: linear-gradient(135deg, #07CD9A 0%, #06b6d4 100%);
+			background: linear-gradient(135deg, #5c2035 0%, #8d4055 100%);
 			left: 0;
 			bottom: -50rpx;
 			border-radius: 0 0 50% 50%;
 		}
 	}
 	.booking-header{
-		background: linear-gradient(135deg, #07CD9A 0%, #06b6d4 100%);
+		background: linear-gradient(135deg, #6d2138 0%, #9c5265 100%);
 		margin: -20rpx 20rpx 0;
 		padding: 32rpx 24rpx;
-		border-radius: 16rpx;
+		border-radius: 24rpx;
+		box-shadow: 0 14rpx 28rpx rgba(94,32,53,.2);
 		color: #fff;
 		position: relative;
 		z-index: 2;
@@ -1722,14 +1727,16 @@ export default {
 	.info-card{
 		margin-top: 20rpx;
 		padding: 0 24rpx;
-		box-shadow: 0 4rpx 24rpx rgba(0, 0, 0, 0.04);
+		border: 1rpx solid rgba(123,41,65,.08);
+		border-radius: 24rpx;
+		box-shadow: 0 10rpx 26rpx rgba(83,45,54,.06);
 	}
 	.info-row{
 		padding: 28rpx 0;
 	}
 	.info-label{
 		font-size: 28rpx;
-		color: #333;
+		color: #4d3037;
 		font-weight: 500;
 	}
 	.info-note{
@@ -1739,17 +1746,19 @@ export default {
 	}
 	.info-value{
 		font-size: 28rpx;
-		color: #666;
+		color: #80666d;
 	}
 	.info-divider{
 		height: 1rpx;
 		background: #f0f0f0;
 	}
 	.time-section-title{
-		color: #333;
+		color: #4d3037;
 	}
 	.time-section{
-		box-shadow: 0 4rpx 24rpx rgba(0, 0, 0, 0.04);
+		border: 1rpx solid rgba(123,41,65,.08);
+		border-radius: 24rpx;
+		box-shadow: 0 10rpx 26rpx rgba(83,45,54,.06);
 		padding-bottom: 8rpx;
 	}
 	.booking-footer{
@@ -1758,7 +1767,7 @@ export default {
 		right: 0;
 		bottom: 0;
 		padding: 20rpx 24rpx calc(20rpx + env(safe-area-inset-bottom));
-		background: #fff;
+		background: #fffdfb;
 		box-shadow: 0 -4rpx 20rpx rgba(0, 0, 0, 0.06);
 		z-index: 20;
 	}
@@ -1767,7 +1776,7 @@ export default {
 		line-height: 88rpx;
 		text-align: center;
 		border-radius: 44rpx;
-		background: linear-gradient(135deg, #07CD9A 0%, #06b6d4 100%);
+		background: linear-gradient(135deg, #8e4056 0%, #6d2138 100%);
 		color: #fff;
 		font-size: 32rpx;
 		font-weight: 600;
@@ -1804,7 +1813,7 @@ export default {
 		font-size: 28rpx;
 		border-bottom: 1rpx solid #f5f5f5;
 		&.active{
-			color: #07CD9A;
+			color: var(--view-theme, #7B2941);
 		}
 		&.disabled{
 			opacity: 0.55;
@@ -1825,7 +1834,7 @@ export default {
 		color: #ccc;
 	}
 	.staff-item.active .staff-check-icon{
-		color: #07CD9A;
+		color: var(--view-theme, #7B2941);
 	}
 	.staff-item-info{
 		display: flex;
@@ -1851,8 +1860,8 @@ export default {
 		background: #f5f5f5;
 		flex-shrink: 0;
 		&.on{
-			color: #07CD9A;
-			background: #e3fdf7;
+			color: var(--view-theme, #7B2941);
+			background: var(--view-minorColorT, #f9e9ed);
 		}
 	}
 	.staff-busy-tag{
@@ -1877,7 +1886,7 @@ export default {
 		color: #666;
 	}
 	.staff-footer-btn.confirm{
-		background: #07CD9A;
+		background: #7B2941;
 		color: #fff;
 	}
 	.staff-empty{
@@ -1891,7 +1900,7 @@ export default {
 		height: 80rpx;
 		line-height: 80rpx;
 		text-align: center;
-		background: #07CD9A;
+		background: #7B2941;
 		color: #fff;
 		border-radius: 40rpx;
 		font-size: 28rpx;

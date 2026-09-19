@@ -15,7 +15,10 @@
 					class="staff-module__card"
 					:style="cardStyle"
 				>
-					<image class="staff-module__avatar" :src="item.avatar || defaultAvatar" mode="aspectFill" />
+					<image v-if="item.avatar && !failedAvatars[item.id]" class="staff-module__avatar" :src="item.avatar" mode="aspectFill" @error="handleAvatarError(item.id)" />
+					<view v-else class="staff-module__avatar staff-module__avatar--placeholder">
+						<text class="iconfont icon-ic_user1"></text>
+					</view>
 					<view class="staff-module__info">
 						<text class="staff-module__name" :style="titleStyle">{{ item.staff_name }}</text>
 						<text v-if="showField(0) && item.position_label" class="staff-module__meta" :style="textStyle">{{ item.position_label }}</text>
@@ -48,7 +51,7 @@
 			return {
 				staffList: [],
 				requestSerial: 0,
-				defaultAvatar: '/static/images/def_avatar.png'
+				failedAvatars: {}
 			};
 		},
 		computed: {
@@ -150,6 +153,10 @@
 					if (serial === this.requestSerial) this.staffList = [];
 				});
 			},
+			handleAvatarError(id) {
+				if (!id) return;
+				this.$set(this.failedAvatars, id, true);
+			},
 			goMore() {
 				if (!this.currentStoreId) return;
 				const positionQuery = this.selectedPositionIds.length
@@ -178,25 +185,33 @@
 <style scoped lang="scss">
 	.staff-module { box-sizing: border-box; width: 100%; }
 	.staff-module__header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20rpx; }
-	.staff-module__title { color: #282828; font-size: 32rpx; font-weight: 600; }
-	.staff-module__more { display: flex; align-items: center; color: #999; font-size: 22rpx; }
+	.staff-module__title { color: #4d3037; font-size: 34rpx; font-weight: 600; letter-spacing: 1rpx; }
+	.staff-module__more { display: flex; align-items: center; color: #9a7a80; font-size: 22rpx; }
 	.staff-module__scroll { width: 100%; }
 	.staff-module__list { display: flex; box-sizing: border-box; }
 	.staff-module__list--0 { display: inline-flex; min-width: 100%; flex-wrap: nowrap; }
 	.staff-module__list--1 { width: 100%; flex-wrap: wrap; }
 	.staff-module__list--2 { width: 100%; flex-direction: column; }
-	.staff-module__card { position: relative; box-sizing: border-box; display: flex; align-items: center; min-width: 292rpx; margin-right: 16rpx; padding: 20rpx; box-shadow: 0 6rpx 24rpx rgba(0, 0, 0, .04); }
+	.staff-module__card { position: relative; box-sizing: border-box; display: flex; align-items: center; min-width: 292rpx; margin-right: 16rpx; padding: 20rpx; border: 1rpx solid rgba(123,41,65,.07); box-shadow: 0 12rpx 28rpx rgba(80,44,52,.07); }
 	.staff-module__card:last-child { margin-right: 0; }
 	.staff-module__list--1 .staff-module__card { width: calc(50% - 8rpx); min-width: 0; margin-bottom: 16rpx; }
 	.staff-module__list--1 .staff-module__card:nth-child(2n) { margin-right: 0; }
 	.staff-module__list--2 .staff-module__card { width: 100%; min-width: 0; margin-right: 0; margin-bottom: 16rpx; }
 	.staff-module__list--2 .staff-module__card:last-child { margin-bottom: 0; }
-	.staff-module__avatar { flex: none; width: 92rpx; height: 92rpx; border-radius: 50%; background: #f3f3f3; }
+	.staff-module__avatar { flex: none; width: 92rpx; height: 92rpx; border-radius: 50%; background: #f3e9e7; border: 4rpx solid #fff5f2; }
+	.staff-module__avatar--placeholder { display: flex; align-items: center; justify-content: center; color: #9c5869; }
+	.staff-module__avatar--placeholder .iconfont { font-size: 42rpx; }
 	.staff-module__info { display: flex; flex: 1; min-width: 0; margin-left: 16rpx; flex-direction: column; }
-	.staff-module__name { color: #282828; font-size: 28rpx; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-	.staff-module__meta, .staff-module__level, .staff-module__intro { margin-top: 4rpx; color: #666; font-size: 21rpx; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-	.staff-module__button { flex: none; padding: 10rpx 18rpx; border-radius: 28rpx; color: #fff; font-size: 21rpx; }
+	.staff-module__name { color: #4d3037; font-size: 28rpx; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+	.staff-module__meta, .staff-module__level, .staff-module__intro { margin-top: 4rpx; color: #8f747a; font-size: 21rpx; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+	.staff-module__button { flex: none; padding: 10rpx 18rpx; border-radius: 28rpx; color: #fff; font-size: 21rpx; box-shadow: 0 8rpx 16rpx rgba(123,41,65,.18); }
 	.staff-module__list--1 .staff-module__card { align-items: flex-start; flex-direction: column; }
-	.staff-module__list--1 .staff-module__button { width: 100%; box-sizing: border-box; text-align: center; }
-	.staff-module__list--1 .staff-module__avatar { width: 108rpx; height: 108rpx; }
+	.staff-module__list--1 .staff-module__card { min-height: 274rpx; padding: 24rpx; }
+	.staff-module__list--1 .staff-module__info { width: 100%; margin: 14rpx 0 16rpx; }
+	.staff-module__list--1 .staff-module__name { font-size: 27rpx; }
+	.staff-module__list--1 .staff-module__meta,
+	.staff-module__list--1 .staff-module__level,
+	.staff-module__list--1 .staff-module__intro { max-width: 100%; }
+	.staff-module__list--1 .staff-module__button { width: 100%; box-sizing: border-box; padding: 12rpx 10rpx; text-align: center; white-space: nowrap; }
+	.staff-module__list--1 .staff-module__avatar { width: 84rpx; height: 84rpx; }
 </style>

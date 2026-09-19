@@ -1,4 +1,6 @@
 <script>
+import { resolveMemberMenuIcon } from '@/utils/memberMenuIcon';
+
 export default {
 	inject: ['goMenuPage'],
 	props: {
@@ -10,29 +12,34 @@ export default {
 			type: Number,
 			default: 0
 		}
+	},
+	methods: {
+		menuIcon(item) {
+			return resolveMemberMenuIcon(item);
+		}
 	}
 };
 </script>
 
 <template>
 	<view class="">
-		<view class="pt-34 pb-36 bg--w111-fff rd-16rpx mt-20 service ml-20 mr-20">
+		<view class="service-card pt-34 pb-36 bg--w111-fff rd-16rpx mt-20 service ml-20 mr-20">
 			<view class="fs-30 fw-500 lh-42rpx text--w111-333 pl-32">{{ menuData.title }}</view>
 			<view class="grid-column-4 grid-gap-x-40rpx grid-gap-y-54rpx mt-38 pl-14 pr-14">
 				<view v-for="(item, index) in menuData.list" :key="index">
 					<!-- #ifdef MP -->
 					<view class="flex-col flex-center" v-if="item.url!='/pages/extension/customer_list/chat' || (item.url=='/pages/extension/customer_list/chat' && routineContact == 0)" @click="goMenuPage(item.url, item.name)">
-						<image :src="item.pic" class="image"></image>
+						<view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
 						<text class="fs-26 lh-36rpx text--w111-282828 pt-22">{{ item.name }}</text>
 					</view>
 					<button class="flex-col flex-center" open-type='contact' v-if="item.url=='/pages/extension/customer_list/chat' && routineContact == 1">
-					  <image :src="item.pic" class="image"></image>
+					  <view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
 					  <text class="fs-26 lh-36rpx text--w111-282828 pt-22">{{ item.name }}</text>
 					</button>
 					<!-- #endif -->
 					<!-- #ifndef MP -->
 					<view class="flex-col flex-center" @click="goMenuPage(item.url, item.name)">
-						<image :src="item.pic" class="image"></image>
+						<view class="menu-icon"><text class="iconfont" :class="menuIcon(item)"></text></view>
 						<text class="fs-26 lh-36rpx text--w111-282828 pt-22">{{ item.name }}</text>
 					</view>
 					<!-- #endif -->
@@ -44,9 +51,29 @@ export default {
 
 <style scoped lang="scss">
 .service {
-	.image {
-		width: 48rpx;
-		height: 48rpx;
+	border: 1rpx solid rgba(123, 41, 65, .08);
+	border-radius: 24rpx;
+	box-shadow: 0 12rpx 28rpx rgba(83,45,54,.06);
+
+	.menu-icon {
+		width: 68rpx;
+		height: 68rpx;
+		border-radius: 20rpx;
+		background: linear-gradient(145deg, #fbf3f2, #f2e5e8);
+		border: 1rpx solid rgba(123, 41, 65, .08);
+		box-shadow: 0 8rpx 16rpx rgba(83, 45, 54, .08);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+
+		.iconfont {
+			font-size: 38rpx;
+			line-height: 1;
+			color: var(--view-theme, #7b2941);
+		}
 	}
+
+	::v-deep .text--w111-333 { color: #4d3037 !important; }
+	::v-deep .text--w111-282828 { color: #65474e !important; }
 }
 </style>
