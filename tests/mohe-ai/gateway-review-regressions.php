@@ -1,7 +1,7 @@
 <?php
 // Read-only deterministic review regressions: no app boot, database, model or network.
 $base=dirname(__DIR__,2).'/后端代码/app/services/';
-foreach (['BaseServices.php','metric/MetricDictionaryServices.php','query/metric/MetricMoneyFormatter.php','query/metric/MetricSemanticCatalog.php','query/metric/MetricDefinitionRegistry.php','query/metric/MetricReadViewServices.php','ai/contract/AiContractException.php',
+foreach (['BaseServices.php','metric/MetricDictionaryServices.php','query/metric/MetricMoneyFormatter.php','query/metric/MetricSemanticCatalog.php','query/metric/MetricDefinitionRegistry.php','query/metric/MetricReadViewServices.php','ai/contract/AiContractException.php','ai/contract/AiIntentResultContract.php',
     'ai/model/AiModelInputProjector.php','ai/execution/AiWorkflowPlanner.php','ai/presentation/AiAnswerRenderer.php','ai/AiGatewayServices.php'] as $file) require_once $base.$file;
 $passed=0; $failed=[];
 $check=function($ok,$label) use (&$passed,&$failed) {if ($ok) ++$passed; else $failed[]=$label;};
@@ -27,6 +27,8 @@ $renderer=new app\services\ai\presentation\AiAnswerRenderer();
 $gatewaySource=file_get_contents($base.'ai/AiGatewayServices.php');
 $check(strpos($gatewaySource,'AiFollowupQueryPlanner')===false && strpos($gatewaySource,'registeredSelectionFallback')===false,
     'gateway has no keyword-parser or local fallback execution path');
+$check(strpos($gatewaySource,"array_merge([\$o['label']],\$o['aliases'])")!==false,
+    'gateway keeps duplicate exact person aliases as controlled choices instead of widening them to a role');
 $check(strpos($gatewaySource,"strpos(\$currentQuestion,\$currentToken)===false")!==false
     && strpos($gatewaySource,"!in_array(\$intent['object_kind']??null,['person','position'],true)")!==false,
     'a replaced analytical object drops only stale prior private selections, never a reference in the current turn');
@@ -131,6 +133,15 @@ $quantity=$renderer->render(['query'=>['query_shape'=>'summary','start_date'=>'2
     ]]);
 $check(strpos($quantity['summary'], '销售数量为2件；完成服务项目数量为3项。')===0,
     'count units come from metric dictionary metadata instead of renderer metric branches');
+$personOverview=$renderer->render(['query'=>['query_shape'=>'summary','start_date'=>'2026-09-19','end_date'=>'2026-09-19','compare_range'=>null,
+    'business_filters'=>['object_kind'=>'person']],
+    'personnel_selection_label'=>'测试人员（按当前任职）','data_as_of'=>'2026-09-19T12:00:00+08:00','results'=>[
+        ['metric_code'=>'staff_sales_yeji','period'=>'current','storage_unit'=>'fen','amount_cents'=>10000],
+        ['metric_code'=>'staff_project_num','period'=>'current','storage_unit'=>'project_count_micro','count'=>2500000],
+        ['metric_code'=>'staff_service_num','period'=>'current','storage_unit'=>'customer_tenth','count'=>13],
+    ]]);
+$check(strpos($personOverview['summary'], '销售人业绩为100元；项目数为2.5项；服务人次为1.3人次。')===0,
+    'person overview renders mixed registered money and count storage units through their shared evidence contract');
 $serviceVisits=$renderer->render(['query'=>['query_shape'=>'ranking','start_date'=>'2026-09-16','end_date'=>'2026-09-16','compare_range'=>null,'business_filters'=>['object_kind'=>'person']],
     'personnel_selection_label'=>'全部授权人员','data_as_of'=>'2026-09-16T12:00:00+08:00','results'=>[
         ['metric_code'=>'staff_service_num','period'=>'current','storage_unit'=>'customer_tenth','rows'=>['top'=>[
@@ -153,16 +164,65 @@ $check(strpos($siliconFlow,"context_constraint_without_source:business_filters")
     'one bounded model repair clears prior subject filters when a self-contained turn replaces the analytical object');
 $check(strpos($siliconFlow,'a self-contained non-threshold request after a prior threshold must use context_delta aggregate_condition=clear')!==false,
     'one bounded structural repair prevents an old threshold from leaking into a natural non-threshold topic switch');
+$check(strpos($siliconFlow,'A pronoun or other anaphoric reference to the previously selected object retains both object and business_filters')!==false,
+    'binding keeps an anaphoric personnel follow-up on the confirmed person instead of widening it to a whole role');
+$check(strpos($siliconFlow,'do not turn an explicit conjunction into alternatives')!==false,
+    'binding executes compatible coordinated summary metrics together instead of reopening a metric choice');
 $check(strpos($siliconFlow,'The current customer meaning owns the response form')!==false
     && strpos($siliconFlow,'must not inherit a previous threshold_count or aggregate_condition')!==false,
     'binding chooses a natural topic switch from current comparative meaning rather than a literal reset command');
 $check(strpos($siliconFlow,'must preserve both its comparative response form and complete ranking requirement with current-question evidence')!==false,
     'language understanding retains a self-contained rank instead of treating it as continuation of an earlier threshold');
 $gateway=file_get_contents(dirname(__DIR__,2).'/后端代码/app/services/ai/AiGatewayServices.php');
+$check(strpos($siliconFlow,"'unknown_metric_code'=>")!==false
+    && strpos($gateway,"['AI_MODEL_INTENT_CONTRACT_INVALID','AI_MODEL_METRIC_UNKNOWN']")!==false,
+    'a hallucinated metric code gets one bounded repair against supplied registry capabilities');
 $check(strpos($gateway,'$terms===[]?null:')!==false && strpos($gateway,'MetricSemanticCatalog::uniqueTermInText')!==false
     && strpos($gateway,"\$intent['needs_metric_choice']=false;")!==false,
     'an exact current registered measurement remains bindable when the language pass omitted only its metric requirement');
+$check(strpos($gateway,"if ((\$intent['needs_metric_choice']??false)!==true && !empty(\$intent['metric_codes'])) return \$intent;")===false
+    && strpos($gateway,"(\$intent['context_delta']['metric_codes']??null)==='replace'")!==false,
+    'an inherited complete-looking metric cannot bypass a unique exact current-turn registered metric');
+$check(strpos($gateway,'if (count($requirements)>1) {')!==false
+    && strpos($gateway,"mb_strpos(\$exact['term'],\$fragment")!==false
+    && strpos($gateway,'isset($metricRequirementIds[$binding[\'requirement_id\']??\'\'])')!==false,
+    'overlapping fragments of one exact registered title converge while independent metric requirements stay strict');
 $intentContract=file_get_contents(dirname(__DIR__,2).'/后端代码/app/services/ai/contract/AiIntentResultContract.php');
+$check(strpos($gateway,'prepareUniqueExactMetricCandidate($intent,$understanding,$safeQuestion,$metricCodes)')!==false
+    && strpos($intentContract,"\$intent['requirement_bindings']=array_map")!==false
+    && strpos($intentContract,"\$intent['context_delta']['metric_codes']='replace'")!==false,
+    'unique exact registered metric titles are canonicalized before strict JSON audit validation');
+$gatewayReflection=new ReflectionClass(app\services\ai\AiGatewayServices::class);
+$gatewayFixture=$gatewayReflection->newInstanceWithoutConstructor();
+$exactCandidate=$gatewayReflection->getMethod('prepareUniqueExactMetricCandidate');
+if (PHP_VERSION_ID<80100) $exactCandidate->setAccessible(true);
+$candidate=$exactCandidate->invoke($gatewayFixture,[
+    'metric_codes'=>['invented_metric'],'needs_metric_choice'=>false,'requirement_bindings'=>[],
+    'context_delta'=>array_fill_keys(app\services\ai\contract\AiIntentResultContract::DELTA_FIELDS,'inherit'),
+],['requirements'=>[ ['id'=>'r1','fields'=>['metric_codes'],'values'=>['metric_terms'=>['劳动业绩']]] ]],
+    ['question'=>'9月16日哪个手艺人的劳动业绩最高？'],['staff_labor_yeji','staff_sales_yeji']);
+$check(($candidate['metric_codes']??null)===['staff_labor_yeji']
+    && ($candidate['requirement_bindings']??null)===[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['staff_labor_yeji']]]
+    && ($candidate['context_delta']['metric_codes']??null)==='replace',
+    'pre-contract exact binding repairs an unknown code and missing audit row without choosing a fuzzy metric');
+$check(app\services\ai\contract\AiIntentResultContract::isUniqueExactMetricBinding(
+        $candidate,
+        ['requirements'=>[ ['id'=>'r1','fields'=>['metric_codes'],'values'=>['metric_terms'=>['劳动业绩']]] ]],
+        ['question'=>'9月16日哪个手艺人的劳动业绩最高？'],
+        ['staff_labor_yeji','staff_sales_yeji']
+    )
+    && strpos($gateway,'exact_registry_metric_binding_admitted')!==false,
+    'a unique exact registry binding bypasses only the fallible semantic reviewer, not strict execution checks');
+$check(strpos($gateway,"(\$intent['object_relation']??null)==='analysis'")!==false
+    && strpos($gateway,'($privateKindsByReference[$referenceMatch[1]]??null)===($intent[\'object_kind\']??null)')!==false
+    && strpos($gateway,"unset(\$safe['local_conditions'][\$referenceMatch[1]])")!==false
+    && strpos($gateway,'local_analytical_object_reference_bound')!==false,
+    'a proven local analytical-class token is consumed without weakening named-object selection');
+$check(strpos($gateway,'reconcileExactRegisteredAnalyticalObject(')!==false
+    && strpos($gateway,'count($owners)!==1')!==false
+    && strpos($gateway,"'object_relation'=>'analysis'")!==false
+    && strpos($gateway,"preg_match('/\\[local_condition_[0-9]+\\]/D',\$question)")!==false,
+    'one exact registry-published analytical object label corrects a generic overview without touching local identities');
 $check(strpos($intentContract,"\$hasField('metric_codes',true)")!==false
     && strpos($intentContract,"\$hasField('operation',true)")!==false
     && strpos($intentContract,"\$intent['operation']!=='threshold_count' || \$hasField('aggregate_condition',true)")!==false,
@@ -170,6 +230,9 @@ $check(strpos($intentContract,"\$hasField('metric_codes',true)")!==false
 $check(strpos($intentContract,"\$currentUnboundRequest=false;")!==false
     && strpos($intentContract,"&& !\$currentUnboundRequest")!==false,
     'a clear unsupported new topic releases the prior selected object but still stops before any data read');
+$check(strpos($intentContract,"if (count(\$metricRequirementIds)===1 && count(\$value)>1)")!==false
+    && strpos($intentContract,"if (\$duplicates) \$value=[['requirement_id'=>\$metricRequirementIds[0]")!==false,
+    'identical duplicate audit rows for one metric requirement collapse without accepting conflicting semantics');
 $check(strpos($intentContract,"\$clearedStaleAggregateCondition=\$aggregateCondition!==null")!==false
     && strpos($intentContract,"\$currentRankingReplacesThreshold=isset(\$currentFields['ranking'])")!==false
     && strpos($intentContract,"\$value['operation']='ranking';")!==false
@@ -177,6 +240,13 @@ $check(strpos($intentContract,"\$clearedStaleAggregateCondition=\$aggregateCondi
     'a current non-threshold operation structurally retires an echoed prior threshold without parsing a question phrase');
 $check(strpos($intentContract,'An exact, unambiguous supplied registered metric display title used as the requested measurement is an identified basis')!==false,
     'candidate-blind review accepts an exact registered measurement title while keeping broad category wording ambiguous');
+$understandingContract=file_get_contents(dirname(__DIR__,2).'/后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php');
+$check(strpos($understandingContract,'use the complete de-identified current message verbatim as its evidence quote')!==false,
+    'the one structural repair corrects non-unique evidence without restoring a private name or changing meaning');
+$check(strpos($understandingContract,'preserve every exact measurement term separately')!==false,
+    'understanding preserves coordinated measurements instead of turning an explicit multi-metric summary into a choice');
+$check(strpos($understandingContract,'never rewrite it to a canonical metric title or insert an object qualifier')!==false,
+    'understanding keeps current customer measurement evidence verbatim even when the catalog uses a more specific title');
 $check(strpos($intentContract,'must reject an inherited threshold_count, aggregate condition or aggregate summary')!==false,
     'independent review rejects a stale aggregate form when the current question requests a ranked object');
 foreach ($failed as $label) echo 'FAIL '.$label."\n";

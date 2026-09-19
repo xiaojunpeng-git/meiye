@@ -71,7 +71,7 @@ final class AiAnswerRenderer
                 }
                 continue;
             }
-            $value = in_array($storageUnit, ['fen', 'customer_tenth'], true)
+            $value = $storageUnit === 'fen'
                 ? ($row['amount_cents'] ?? null) : ($row['count'] ?? null);
             $display = $this->metricValue($value, $storageUnit);
             $facts[$row['metric_code']][$row['period']] = ['name' => $tooltip['name'], 'value' => $display, 'unit' => $unit];

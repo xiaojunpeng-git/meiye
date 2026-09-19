@@ -15,15 +15,20 @@ final class PersonnelAnalysisObjectServices
         $scope=$this->scope($metric);
         $rows=$this->staff($scope)->leftJoin('staff_job_position jp','jp.staff_id=ss.id AND jp.is_del=0 AND jp.status=1 AND jp.end_time=0')
             ->leftJoin('position p','p.id=jp.position_id AND p.status=1')
-            ->field('ss.store_id,ss.employee_id,e.name employee_name,ss.cashier_craftsman_enabled,ss.cashier_salesperson_enabled,p.id position_id,p.name position_name')
+            ->leftJoin('system_store st','st.id=ss.store_id AND st.is_del=0')
+            ->field('ss.store_id,ss.employee_id,e.name employee_name,st.name store_name,ss.cashier_craftsman_enabled,ss.cashier_salesperson_enabled,p.id position_id,p.name position_name')
             ->order('ss.id','asc')->limit(10001)->select()->toArray();
         if (count($rows)>10000) throw new \RuntimeException('AI_OBJECT_SCOPE_TOO_LARGE');
         $positions=[];$roles=[];$people=[];
         foreach ($rows as $row) {
             $id=(int)($row['position_id']??0); $label=trim((string)($row['position_name']??''));
-            $employee=(int)($row['employee_id']??0);$name=trim((string)($row['employee_name']??''));
-            if ($employee>0 && $name!=='') $people['person:'.$employee]=['ref'=>'person:'.$employee,'kind'=>'person','label'=>$name,'aliases'=>[],
-                'version'=>hash('sha256',$employee.':'.$name),'relations'=>[$metric]];
+            $employee=(int)($row['employee_id']??0);$name=trim((string)($row['employee_name']??''));$storeName=trim((string)($row['store_name']??''));
+            if ($employee>0 && $name!=='') {
+                $key='person:'.$employee;
+                if (!isset($people[$key])) $people[$key]=['ref'=>$key,'kind'=>'person','label'=>$name,'aliases'=>[],
+                    'version'=>'','relations'=>[$metric],'_name'=>$name,'_stores'=>[]];
+                if ($storeName!=='') $people[$key]['_stores'][$storeName]=true;
+            }
             if ($id>0 && $label!=='') $positions['position:'.$id]=['ref'=>'position:'.$id,'kind'=>'position','label'=>$label,'aliases'=>[],
                 'version'=>hash('sha256',$id.':'.$label),'relations'=>[$metric]];
             // These are platform-owned role aliases, not an AI phrase map:
@@ -32,6 +37,23 @@ final class PersonnelAnalysisObjectServices
             if ((int)$row['cashier_craftsman_enabled']===1) $roles['role:craftsman']=['ref'=>'role:craftsman','kind'=>'position','label'=>'有手艺人资格的在职人员（按当前任职）','aliases'=>['手艺人','技师'], 'version'=>'2','relations'=>[$metric]];
             if ((int)$row['cashier_salesperson_enabled']===1) $roles['role:salesperson']=['ref'=>'role:salesperson','kind'=>'position','label'=>'有销售人资格的在职人员（按当前任职）','aliases'=>['销售人','销售顾问'], 'version'=>'2','relations'=>[$metric]];
         }
+        // Two authorized employees may legitimately share one name.  Keep the
+        // plain name as a local matching alias (so it is still masked before a
+        // model call), but give the clarification UI an authoritative store
+        // context instead of two indistinguishable radio choices.  Unique
+        // names remain unchanged and no store/name phrase is hard-coded.
+        $nameCounts=[];
+        foreach ($people as $person) $nameCounts[$person['_name']]=($nameCounts[$person['_name']]??0)+1;
+        foreach ($people as &$person) {
+            $name=$person['_name'];$stores=array_keys($person['_stores']);sort($stores,SORT_STRING);
+            if (($nameCounts[$name]??0)>1) {
+                $context=$stores?implode('、',$stores):'所属门店待核对';
+                $person['label']=$name.'（'.$context.'）';$person['aliases']=[$name];
+            }
+            $person['version']=hash('sha256',$person['ref'].':'.$person['label'].':'.implode('|',$stores));
+            unset($person['_name'],$person['_stores']);
+        }
+        unset($person);
         if (call_user_func($this->authorize,$metric)!==$scope) throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
         return ['objects'=>array_values($positions+$roles+$people),'scope'=>$scope];
     }

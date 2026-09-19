@@ -28,6 +28,20 @@ qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::semanticReviewI
     'independent review leaves broad-versus-specific business meaning to the model rather than a protocol-field shortcut');
 qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::semanticReviewInstruction(),'accept|reject|metric_choice')===false,
     'binding-coverage reviewer is not instructed to emit a decision that only the separate candidate-blind pass may produce');
+$bindingRows=new ReflectionMethod(\app\services\ai\contract\AiIntentResultContract::class,'requirementBindings');
+if (PHP_VERSION_ID<80100) $bindingRows->setAccessible(true);
+$oneRequirement=['r1'=>['fields'=>['metric_codes']]];
+$duplicateRows=[
+    ['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['staff_labor_yeji']],
+    ['requirement_id'=>'r2','status'=>'satisfied','metric_codes'=>['staff_labor_yeji']],
+];
+$collapsed=$bindingRows->invoke(null,$duplicateRows,$oneRequirement,['staff_labor_yeji'],['staff_labor_yeji'],false);
+qcCheck($collapsed===[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['staff_labor_yeji']]],
+    'identical duplicate audit rows collapse to the one accepted metric requirement');
+$conflictingRows=$duplicateRows;$conflictingRows[1]['metric_codes']=['staff_sales_yeji'];
+qcReject(function()use($bindingRows,$conflictingRows,$oneRequirement){
+    $bindingRows->invoke(null,$conflictingRows,$oneRequirement,['staff_labor_yeji','staff_sales_yeji'],['staff_labor_yeji'],false);
+},'AI_MODEL_INTENT_CONTRACT_INVALID');
 $summarySource=$source;$summarySource['query_shape']='summary';$summarySource['ranking']=null;
 qcCheck(IntentContextMerger::modelView($summarySource)['ranking']===['direction'=>'unspecified','limit'=>null],'non-ranking prior shape projects a structural ranking placeholder without inventing a rank');
 $prior=['metric_codes'=>['staff_labor_yeji'],'operation'=>'ranking','periods'=>$view['periods'],'ranking'=>$view['ranking'],'scope'=>'authorized','object_kind'=>'person','has_object_selection'=>true,'has_store_scope_restriction'=>true,'has_business_filter'=>true];
@@ -63,6 +77,26 @@ qcCheck($dimensionSwitch['constraints']['business_filters']===null&&$dimensionSw
 $selectedSwitch=IntentContextMerger::merge($source,$emptySwitch);
 qcCheck($selectedSwitch['constraints']['business_filters']===null&&in_array('business_filters',$selectedSwitch['pending'],true)&&$selectedSwitch['replacement_confirmation'],
     'switching away from a signed concrete object still requires an explicit replacement decision');
+$analyticalSwitch=$intent;
+$analyticalSwitch['object_kind']='member';
+$analyticalSwitch['object_relation']='analysis';
+$analyticalSwitch['object_term']='';
+$analyticalSwitch['operation']='summary';
+$analyticalSwitch['metric_codes']=['staff_labor_yeji'];
+$analyticalSwitch['context_delta']['object']='replace';
+$analyticalSwitch['context_delta']['metric_codes']='replace';
+$analyticalSwitch['context_delta']['operation']='replace';
+$analyticalSwitch['context_delta']['business_filters']='inherit';
+$analyticalUnderstanding=['requirements'=>[['id'=>'r1','fields'=>['metric_codes','object_kind','object_relation','operation'],
+    'values'=>['object_kind'=>'member','object_relation'=>'analysis','operation'=>'summary'],
+    'evidence'=>[['message_id'=>'current','quote'=>'客户有多少']]]]];
+$analyticalSafe=$safe;$analyticalSafe['question']='客户有多少';
+qcReject(function()use($analyticalSwitch,$analyticalSafe,$analyticalUnderstanding){qcNormalize($analyticalSwitch,$analyticalSafe,$analyticalUnderstanding);},'AI_MODEL_INTENT_CONTRACT_INVALID');
+$analyticalSwitch['context_delta']['business_filters']='clear';
+$analyticalCanonical=qcNormalize($analyticalSwitch,$analyticalSafe,$analyticalUnderstanding);
+$analyticalMerged=IntentContextMerger::merge($source,$analyticalCanonical);
+qcCheck($analyticalMerged['constraints']['business_filters']===null&&$analyticalMerged['pending']===[]&&!$analyticalMerged['replacement_confirmation'],
+    'a grounded cohort-analysis topic switch clears an incompatible prior named selection without a redundant confirmation');
 $pending=$intent;$pending['context_delta']['operation']='pending';$pendingMerged=IntentContextMerger::merge($source,qcNormalize($pending,$safe));
 qcCheck(in_array('operation',$pendingMerged['pending'],true)&&$pendingMerged['intent']['operation']==='unknown','uncertain semantic field becomes pending, never a default');
 $pendingScope=$intent;$pendingScope['context_delta']['store_scope']='pending';$pendingScopeMerged=IntentContextMerger::merge($source,qcNormalize($pendingScope,$safe));
@@ -143,6 +177,7 @@ foreach(['context_delta','metric_codes','operation'] as $key)qcCheck(app\service
 qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('bad_value:requirement_bindings'),'one retry can correct an invalid metric requirement row without authorizing it');
 qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('provenance_field_not_understood'),'one retry can align a binding field with accepted understanding without supplying business meaning');
 qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('bad_value:result_reference'),'one retry can remove an ungrounded private-result reference without supplying customer meaning');
+qcCheck(app\services\ai\contract\AiIntentResultContract::repairableFormat('unknown_metric_code'),'one retry can replace a hallucinated metric code only with a supplied registered candidate');
 qcCheck(!app\services\ai\contract\AiIntentResultContract::repairableFormat('missing_replacement:periods'),'server never repairs an absent semantic replacement');
 $candidates=['staff_labor_yeji'=>['name'=>'劳动业绩','summary'=>'劳动分配','query_shapes'=>['summary','ranking']]];
 $catalog=[['ref'=>'position:2','kind'=>'position','label'=>'合成岗位甲','aliases'=>[],'version'=>'1','relations'=>['staff_labor_yeji']]];

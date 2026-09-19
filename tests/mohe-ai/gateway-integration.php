@@ -78,9 +78,9 @@ try {
  $tooltip=(new app\services\metric\MetricDictionaryServices())->getTooltip('consume_amount');
  verifyGateway(is_array($tooltip) && isset($tooltip['summary'],$tooltip['include'],$tooltip['exclude'],$tooltip['timing'],$tooltip['note']),
      'complete natural language metric tooltip remains available from the dictionary');
- verifyGateway($models===3 && $queries===1,'understanding, binding, independent review and one query');
+ verifyGateway($models===2 && $queries===1,'understanding, exact registered binding admission and one query');
  $repeat=$gateway->handle('execute',$context,$binding($run)+$input,$run['run_id']);
- verifyGateway($repeat['status']==='COMPLETED' && $models===3 && $queries===1,'idempotent execute no duplicates');
+ verifyGateway($repeat['status']==='COMPLETED' && $models===2 && $queries===1,'idempotent execute no duplicates');
  $delivered=$gateway->handle('status',$context,$binding($result),$result['run_id']);
  verifyGateway($delivered['status']==='COMPLETED' && strpos((string)$delivered['answer']['summary'],'消耗业绩为123元')===0,
      'completed answer delivery validates the immutable signed view without starting another query');
@@ -116,15 +116,15 @@ try {
  verifyGateway(is_string($repeat['progress']),'frontend progress string');
  [$repairRun,$repairInput]=$make('repair-current','今天消耗业绩格式修复');$modelsBeforeRepair=$models;$queriesBeforeRepair=$queries;
  $repairResult=$gateway->handle('execute',$context,$binding($repairRun)+$repairInput,$repairRun['run_id']);
-    verifyGateway($repairResult['status']==='COMPLETED' && $models===$modelsBeforeRepair+3 && $queries===$queriesBeforeRepair+1,'an omitted empty bookkeeping list completes without a model retry or a changed business binding');
+    verifyGateway($repairResult['status']==='COMPLETED' && $models===$modelsBeforeRepair+2 && $queries===$queriesBeforeRepair+1,'an omitted empty bookkeeping list completes without a model retry or a changed business binding');
     verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($repairRun['run_id'])." AND attempt_code='bind_repair' AND state='SUCCEEDED'")->fetchColumn()===0,'empty bookkeeping omission does not consume the bounded binding-recovery budget');
     [$objectCarrierRepairRun,$objectCarrierRepairInput]=$make('repair-object-carrier','今天消耗业绩对象载体修复');$modelsBeforeObjectCarrierRepair=$models;$queriesBeforeObjectCarrierRepair=$queries;
     $objectCarrierRepairResult=$gateway->handle('execute',$context,$binding($objectCarrierRepairRun)+$objectCarrierRepairInput,$objectCarrierRepairRun['run_id']);
-    verifyGateway($objectCarrierRepairResult['status']==='COMPLETED' && $models===$modelsBeforeObjectCarrierRepair+4 && $queries===$queriesBeforeObjectCarrierRepair+1,'an invalid model enum carrier receives one model-owned binding repair without server-side semantic substitution');
+    verifyGateway($objectCarrierRepairResult['status']==='COMPLETED' && $models===$modelsBeforeObjectCarrierRepair+3 && $queries===$queriesBeforeObjectCarrierRepair+1,'an invalid model enum carrier receives one model-owned binding repair without server-side semantic substitution');
     verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($objectCarrierRepairRun['run_id'])." AND attempt_code='bind_repair' AND state='SUCCEEDED'")->fetchColumn()===1,'enum carrier repair is separately recorded and bounded');
     [$meaningRepairRun,$meaningRepairInput]=$make('repair-meaning','今天消耗业绩理解修复');$modelsBeforeMeaningRepair=$models;$queriesBeforeMeaningRepair=$queries;
     $meaningRepairResult=$gateway->handle('execute',$context,$binding($meaningRepairRun)+$meaningRepairInput,$meaningRepairRun['run_id']);
-    verifyGateway($meaningRepairResult['status']==='COMPLETED' && $models===$modelsBeforeMeaningRepair+4 && $queries===$queriesBeforeMeaningRepair+1,'a missing typed meaning receives one model-owned repair before binding');
+    verifyGateway($meaningRepairResult['status']==='COMPLETED' && $models===$modelsBeforeMeaningRepair+3 && $queries===$queriesBeforeMeaningRepair+1,'a missing typed meaning receives one model-owned repair before binding');
     verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($meaningRepairRun['run_id'])." AND attempt_code='understand_repair' AND state='SUCCEEDED'")->fetchColumn()===1,'typed semantic carrier repair is auditable and bounded');
  [$unbound,$unboundInput]=$make('unbound-goal','查看尚未登记的经营目标');$queriesBefore=$queries;
  $unboundResult=$gateway->handle('execute',$context,$binding($unbound)+$unboundInput,$unbound['run_id']);

@@ -47,6 +47,15 @@ $unselectedObjects=['status'=>'choose','objects'=>[['ref'=>'position:2','label'=
 $defaultIntent=$intent;$defaultIntent['metric_codes']=['staff_labor_yeji'];$defaultIntent['needs_metric_choice']=false;
 $defaultPlan=$planner->start($defaultIntent,$projection,$defaultCandidates,$unselectedObjects,'screen','2026-09-09');
 paCheck($defaultPlan['kind']==='plan' && $defaultPlan['plan']['query']['business_filters']['selection_ref']==='role:craftsman','registered metric cohort supplies a labelled first answer without a role picker');
+$multiIntent=['object_kind'=>'person','object_term'=>'同名员工','operation'=>'summary',
+ 'metric_codes'=>['staff_sales_yeji','staff_labor_yeji'],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null]];
+$multiObjects=['status'=>'choose','objects'=>[['ref'=>'person:7','label'=>'同名员工（合成一店）'],['ref'=>'person:8','label'=>'同名员工（合成二店）']]];
+$multiStep=$planner->start($multiIntent,$projection,$candidates,$multiObjects,'screen','2026-09-09');
+$multiPlan=$planner->choose($multiStep,['analysis_object'=>'person:7']);
+paCheck(($multiPlan['kind']??null)==='plan'
+ && ($multiPlan['plan']['query']['metric_codes']??null)===['staff_sales_yeji','staff_labor_yeji']
+ && ($multiPlan['plan']['query']['business_filters']['selection_ref']??null)==='person:7',
+ 'choosing one duplicate-name person preserves every explicitly requested summary metric');
 paReject(function()use($planner,$step){$planner->choose($step,['analysis_object'=>'position:999']);},'AI_CLARIFICATION_INVALID');
 $caps=['metric_codes'=>array_keys($candidates),'metric_readiness'=>PersonnelPerformanceReadServices::capabilities(),'query_shapes'=>['summary','ranking'],'output_formats'=>['screen']];
 $compiler=new AiRegisteredPlanCompiler();$compiled=$compiler->compile($plan,$caps);$compiler->assertCompiled($compiled);
@@ -72,7 +81,7 @@ class PaQuery {
  public function select(){return $this;}
  public function toArray(){
   if(strpos($this->field,'SUM(')!==false)return [['employee_id'=>'7','business_date'=>'2026-09-09','metric_value'=>self::$amount,'fact_count'=>'2']];
-  if(strpos($this->field,'position_name')!==false)return [['store_id'=>1,'employee_id'=>7,'employee_name'=>'合成人员甲','cashier_craftsman_enabled'=>1,'cashier_salesperson_enabled'=>1,'position_id'=>2,'position_name'=>'护理师']];
+  if(strpos($this->field,'position_name')!==false)return [['store_id'=>1,'employee_id'=>7,'employee_name'=>'合成人员甲','store_name'=>'合成一店','cashier_craftsman_enabled'=>1,'cashier_salesperson_enabled'=>1,'position_id'=>2,'position_name'=>'护理师']];
   return [['store_id'=>1,'employee_id'=>7,'employee_name'=>'合成人员甲']];
  }
 }
@@ -85,9 +94,22 @@ paCheck($selection['pairs']===[['store_id'=>1,'employee_id'=>7]],'selection uses
 paCheck($objectService->selection('staff_labor_yeji','person:7')['pairs']===$selection['pairs'],'named person uses the same authorized store/person pairs');
 $roleCatalog=new AnalysisObjectCatalog($objectService->catalog('staff_labor_yeji')['objects'],static function(){return true;});
 paCheck(($roleCatalog->resolve('技师','position','staff_labor_yeji')['objects'][0]['ref']??null)==='role:craftsman','built-in role aliases resolve a technician to the qualification-backed craftsman object');
+$sameNameObjects=[
+ ['ref'=>'person:71','kind'=>'person','label'=>'同名员工（合成一店）','aliases'=>['同名员工'],'version'=>'1','relations'=>['staff_labor_yeji']],
+ ['ref'=>'person:72','kind'=>'person','label'=>'同名员工（合成二店）','aliases'=>['同名员工'],'version'=>'1','relations'=>['staff_labor_yeji']],
+];
+$sameNameResolution=(new AnalysisObjectCatalog($sameNameObjects,static function(){return true;}))->resolve('同名员工','person','staff_labor_yeji');
+paCheck($sameNameResolution['status']==='choose' && array_column($sameNameResolution['objects'],'label')===['同名员工（合成一店）','同名员工（合成二店）'],
+ 'same-name employees remain a customer choice with distinct authoritative store labels');
 paCheck($objectService->selection('staff_labor_yeji','role:craftsman')['pairs']===$selection['pairs'],'the resolved craftsman role uses the same authorized store/person fact pairs');
 $single=$plan;$single['query']['business_filters']['selection_ref']='person:7';
 paCheck($compiler->compile($single,$caps)['workflow_code']==='wf_performance_ranking','named person reuses the same registered workflow');
+$multiIntent=['object_kind'=>'person','object_term'=>'合成人员甲','operation'=>'summary','metric_codes'=>['staff_labor_yeji','staff_sales_yeji'],
+ 'needs_metric_choice'=>false,'action_codes'=>['service','sales'],'ranking'=>['direction'=>'unspecified','limit'=>null]];
+$multiObjects=['status'=>'resolved','objects'=>[['ref'=>'person:7','label'=>'合成人员甲']]];
+$multi=$planner->start($multiIntent,['date_terms'=>[['code'=>'TODAY']]],$candidates,$multiObjects,'screen','2026-09-09');
+paCheck($multi['kind']==='plan'&&$multi['plan']['query']['metric_codes']===['staff_labor_yeji','staff_sales_yeji'],'one named person can retain two compatible registered summary metrics');
+paCheck($compiler->compile($multi['plan'],$caps)['workflow_code']==='wf_performance_summary','multi-metric personnel summary remains in the shared registered workflow');
 $reader=new GroupPerformanceMetricReadServices($factory,static function($q,$tenant,$order){$q->normalScope($tenant,$order);});
 $range=['start'=>'2026-09-09','end'=>'2026-09-09'];
 $points=$reader->personnelTotals('0',[1],$range,'staff_labor_yeji',$selection['pairs']);
@@ -104,6 +126,8 @@ try {
  $view=$views->create([],$plan['query']);
  paCheck($view['results'][0]['rows']['top'][0]['employee_name']==='合成人员甲','shared immutable view contains validated object label');
  paCheck($views->replay([],$plan['query'],$view['read_consistency_ref'])['result_hash']===$view['result_hash'],'exact replay');
+ $multiView=$views->create([],$multi['plan']['query']);
+ paCheck(array_column($multiView['results'],'metric_code')===['staff_labor_yeji','staff_sales_yeji'],'one immutable personnel view keeps the same selection across both registered metrics');
  $binding['scope_mode']='self_participant';$binding['employee_id']=7;$binding['store_report_authorized']=false;$scope['employee_id']=7;
  $selfQuery=$plan['query'];$selfQuery['query_shape']='summary';$selfQuery['ranking']=null;$selfQuery['business_filters']['selection_ref']='person:7';
  foreach (['platform','store','merchant'] as $terminal) {

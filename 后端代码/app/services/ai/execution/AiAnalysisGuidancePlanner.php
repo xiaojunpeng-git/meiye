@@ -17,12 +17,20 @@ final class AiAnalysisGuidancePlanner
         });
         $actions=$intent['action_codes']??[];
         if (!is_array($actions)||count($actions)>8||count(array_unique($actions))!==count($actions)) throw new \RuntimeException('AI_MODEL_RESPONSE_INVALID');
-        if ($actions) $candidates=array_filter($candidates,static function(array $candidate) use($actions):bool {
+        // A customer can explicitly ask the same person for two registered
+        // measurements (for example sales and labour).  Each metric need not
+        // carry every action label; only an unresolved single-metric choice
+        // is narrowed by the requested action vocabulary.
+        if ($actions && count($intent['metric_codes'])<=1) $candidates=array_filter($candidates,static function(array $candidate) use($actions):bool {
             return array_diff($actions,(array)($candidate['action_codes']??[]))===[];
         });
         ksort($candidates);
         if (!$candidates) throw new \RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
-        if (count($intent['metric_codes'])>1) throw new \RuntimeException('AI_ANALYSIS_PERSON_MULTIPLE_METRICS');
+        if (count($intent['metric_codes'])>4) throw new \RuntimeException('AI_ANALYSIS_PERSON_MULTIPLE_METRICS');
+        if (count($intent['metric_codes'])>1 && ($intent['operation']!=='summary' || $intent['needs_metric_choice'])) {
+            throw new \RuntimeException('AI_ANALYSIS_PERSON_MULTIPLE_METRICS');
+        }
+        foreach ($intent['metric_codes'] as $code) if (!isset($candidates[$code])) throw new \RuntimeException('AI_MODEL_SELECTION_MISMATCH');
         $metric=$intent['metric_codes'][0]??null;
         if ($metric!==null && !isset($candidates[$metric])) throw new \RuntimeException('AI_MODEL_SELECTION_MISMATCH');
         if ($intent['needs_metric_choice']) $metric=null;
@@ -50,7 +58,16 @@ final class AiAnalysisGuidancePlanner
         $direction=$ranking['direction']==='unspecified'?null:$ranking['direction'];
         $limit=$ranking['limit'];
         if ($limit!==null && (!is_int($limit)||$limit<1||$limit>20)) throw new \RuntimeException('AI_RANK_LIMIT_NOT_READY');
-        return $this->next(['metric'=>$metric,'candidates'=>$candidates,'object'=>$selection,'objects'=>$objects['objects'],
+        if (count($intent['metric_codes'])>1) {
+            if ($selection===null || $range===null) return $this->next(['metric'=>$intent['metric_codes'][0],'metrics'=>array_values($intent['metric_codes']),
+                'candidates'=>$candidates,'object'=>$selection,'objects'=>$objects['objects'],
+                'range'=>$range,'operation'=>$intent['operation'],'direction'=>$direction,'limit'=>$limit,'format'=>$format]);
+            return ['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_summary','query'=>[
+                'query_shape'=>'summary','metric_codes'=>array_values($intent['metric_codes']),'start_date'=>$range['start'],'end_date'=>$range['end'],
+                'compare_range'=>null,'store_ids'=>[],'business_filters'=>['object_kind'=>'person','selection_ref'=>$selection],
+                'ranking'=>null,'aggregate_condition'=>null], 'output_format'=>$format]];
+        }
+        return $this->next(['metric'=>$metric,'metrics'=>$metric===null?[]:[$metric],'candidates'=>$candidates,'object'=>$selection,'objects'=>$objects['objects'],
             'range'=>$range,'operation'=>$intent['operation'],'direction'=>$direction,'limit'=>$limit,'format'=>$format]);
     }
 
@@ -66,6 +83,7 @@ final class AiAnalysisGuidancePlanner
             $key=['analysis_object'=>'object','analysis_metric'=>'metric','analysis_direction'=>'direction','analysis_limit'=>'limit'][$field['key']]??null;
             if (!$key) throw new \RuntimeException('AI_CLARIFICATION_INVALID');
             $state[$key]=$key==='limit'?(int)$value:$value;
+            if ($key==='metric') $state['metrics']=[$value];
         }
         if (isset($choices['start_date'])) $state['range']=(new AiWorkflowPlanner())->normalizePeriod(['code'=>'EXPLICIT','start'=>$choices['start_date'],'end'=>$choices['end_date']],'2000-01-01');
         return $this->next($state);
@@ -73,6 +91,7 @@ final class AiAnalysisGuidancePlanner
 
     private function next(array $state): array
     {
+        $state['metrics']=array_values($state['metrics']??($state['metric']===null?[]:[$state['metric']]));
         $fields=[];$question='';
         if ($state['object']===null) {
             $question='您说的是哪一类人员？以下来自当前有权查看的人员结构；按当前任职筛选。';
@@ -91,12 +110,14 @@ final class AiAnalysisGuidancePlanner
         if ($fields) {
             $summary=[];
             foreach ($state['objects'] as $object) if ($object['ref']===$state['object']) $summary[]=['label'=>'人员范围（当前任职）','value'=>$object['label']];
-            if ($state['metric']!==null) $summary[]=['label'=>'评价指标','value'=>$state['candidates'][$state['metric']]['name']];
+            if ($state['metrics']) $summary[]=['label'=>'评价指标','value'=>implode('、',array_map(static function(string $metric)use($state):string {
+                return $state['candidates'][$metric]['name'];
+            },$state['metrics']))];
             if ($state['range']!==null) $summary[]=['label'=>'查询期间','value'=>$state['range']['start'].' 至 '.$state['range']['end']];
             return ['kind'=>'clarification','schema_version'=>'mohe-analysis-guidance-v1','analysis_state'=>$state,'fields'=>$fields,
                 'question'=>$question,'confirmed_summary'=>$summary];
         }
-        $query=['query_shape'=>$state['operation'],'metric_codes'=>[$state['metric']],'start_date'=>$state['range']['start'],'end_date'=>$state['range']['end'],
+        $query=['query_shape'=>$state['operation'],'metric_codes'=>$state['metrics']?:[$state['metric']],'start_date'=>$state['range']['start'],'end_date'=>$state['range']['end'],
             'compare_range'=>null,'store_ids'=>[],'business_filters'=>['object_kind'=>'person','selection_ref'=>$state['object']],
             'ranking'=>$state['operation']==='ranking'?['direction'=>$state['direction'],'limit'=>$state['limit']]:null];
         // The registered compiler chooses and freezes the concrete Workflow from

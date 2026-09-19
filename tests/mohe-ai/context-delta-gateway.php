@@ -89,6 +89,8 @@ try {
     $directHarness=new R6GatewayHarness(3,[1,2],'platform');
     $directHarness->semanticIntent=['object_kind'=>'member','object_term'=>'','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>1],'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-08']],'scope'=>'authorized','unresolved_fragments'=>[]];
     $directSource=$directHarness->start('会员现金业绩排行');
+    cdgCheck($directSource['status']==='COMPLETED',
+        'the direct member ranking source is available before the ranking-count follow-up');
     $directLimit=cdgDelta();$directLimit['ranking_limit']='replace';
     $directHarness->understandingOverride=['goal'=>'将排行改为前五个','status'=>'understood','requirements'=>[
         ['id'=>'r1','meaning'=>'查看前五个','fields'=>['ranking'],'values'=>['ranking'=>['direction'=>'top','limit'=>5]],'evidence'=>[['message_id'=>'current','quote'=>'前五个']]],

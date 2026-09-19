@@ -12,6 +12,84 @@ final class AiIntentResultContract
     /** Transport ceiling only; the registry is still the source of membership. */
     const MAX_OVERVIEW_METRICS=12;
     const REQUIRED_FIELDS=['action_codes','metric_codes','needs_metric_choice','object_kind','object_term','operation','requirement_bindings','unresolved_fragments'];
+
+    /**
+     * Correct only provider bookkeeping for one exact, uniquely registered
+     * metric title that is present in the current customer message. This is
+     * deliberately shared by the provider boundary and the gateway boundary,
+     * so neither path can validate a different candidate. It never performs
+     * fuzzy matching, chooses between metrics, ignores an exclusion, or
+     * collapses independent measurement requirements.
+     */
+    public static function canonicalizeUniqueExactMetricBinding($intent,array $understanding,array $safeQuestion,array $metricCodes)
+    {
+        if (!is_array($intent)) return $intent;
+        $exact=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
+            (string)($safeQuestion['question']??''),$metricCodes
+        );
+        if ($exact===null) return $intent;
+        $requirements=[];
+        foreach ((array)($understanding['requirements']??[]) as $requirement) {
+            if (!is_array($requirement) || !in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
+            if (!empty($requirement['values']['metric_exclusions'])) return $intent;
+            $requirements[]=$requirement;
+        }
+        if ($requirements===[]) return $intent;
+        if (count($requirements)>1) foreach ($requirements as $requirement) {
+            $terms=$requirement['values']['metric_terms']??null;
+            if (!is_array($terms) || $terms===[]) return $intent;
+            foreach ($terms as $term) if (!is_string($term) || $term===''
+                || mb_strpos($exact['term'],$term,0,'UTF-8')===false) return $intent;
+        }
+        $intent['metric_codes']=[$exact['metric_code']];
+        $intent['needs_metric_choice']=false;
+        $intent['initial_observation']=false;
+        $intent['recommended_initial_answer']=false;
+        $intent['requirement_bindings']=array_map(static function(array $requirement)use($exact):array {
+            return ['requirement_id'=>$requirement['id'],'status'=>'satisfied','metric_codes'=>[$exact['metric_code']]];
+        },$requirements);
+        if (is_array($intent['context_delta']??null)) $intent['context_delta']['metric_codes']='replace';
+        return $intent;
+    }
+
+    /**
+     * Whether the selected metric is already proven by one unique exact
+     * registry term in the current message. This is the admission predicate
+     * paired with canonicalizeUniqueExactMetricBinding: it may bypass a
+     * fallible model reviewer, but never the strict intent contract, object
+     * compatibility, authorization or query Reader checks.
+     */
+    public static function isUniqueExactMetricBinding(array $intent,array $understanding,array $safeQuestion,array $metricCodes): bool
+    {
+        $exact=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
+            (string)($safeQuestion['question']??''),$metricCodes
+        );
+        if ($exact===null || ($intent['metric_codes']??null)!==[$exact['metric_code']]
+            || ($intent['needs_metric_choice']??null)!==false) return false;
+        $requirements=[];
+        foreach ((array)($understanding['requirements']??[]) as $requirement) {
+            if (!is_array($requirement) || !in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
+            if (!empty($requirement['values']['metric_exclusions'])) return false;
+            $requirements[]=$requirement;
+        }
+        if ($requirements===[]) return false;
+        if (count($requirements)>1) foreach ($requirements as $requirement) {
+            $terms=$requirement['values']['metric_terms']??null;
+            if (!is_array($terms) || $terms===[]) return false;
+            foreach ($terms as $term) if (!is_string($term) || $term===''
+                || mb_strpos($exact['term'],$term,0,'UTF-8')===false) return false;
+        }
+        $bindings=$intent['requirement_bindings']??null;
+        if (!is_array($bindings) || count($bindings)!==count($requirements)) return false;
+        $expected=[];foreach ($requirements as $requirement) $expected[$requirement['id']]=true;
+        foreach ($bindings as $binding) {
+            if (!is_array($binding) || !isset($expected[$binding['requirement_id']??''])
+                || ($binding['status']??null)!=='satisfied'
+                || ($binding['metric_codes']??null)!==[$exact['metric_code']]) return false;
+            unset($expected[$binding['requirement_id']]);
+        }
+        return $expected===[];
+    }
     const DELTA_FIELDS=['metric_codes','object','business_filters','store_scope','periods','operation','ranking_direction','ranking_limit','scope','aggregate_condition'];
     const DELTA_ACTIONS=['inherit','replace','clear','pending'];
     const PROVENANCE_FIELDS=['metric_codes','object_kind','object_relation','operation','periods','ranking','scope','aggregate_condition'];
@@ -22,6 +100,7 @@ final class AiIntentResultContract
         // never supplies omitted business semantics or repairs an invalid
         // selected metric on the model's behalf.
         if ($predicate==='missing_metric_codes') return true;
+        if ($predicate==='unknown_metric_code') return true;
         if (in_array($predicate,['bad_value:requirement_bindings','missing_requirement_binding','unexpected_requirement_binding',
             'binding_row_shape','binding_row_id','binding_row_status','binding_row_codes',
             'binding_requirement_without_metric'],true)) return true;
@@ -635,6 +714,22 @@ final class AiIntentResultContract
             && !($intent['object_kind']==='store' && $hasField('object_kind',true))) {
             self::fail('context_constraint_without_source:store_scope_replace');
         }
+        // A complete current analytical subject cannot inherit the concrete
+        // identity selected for a different prior subject.  This is a typed
+        // context relationship, not a phrase rule: the language pass must
+        // have grounded both the new object and relation in the current turn,
+        // and an empty object_term proves that this is a dimension/cohort
+        // analysis rather than another named-object selection.  Ask the
+        // binding model to publish `clear`; never clear it here in PHP.
+        if (($priorQuery['has_object_selection']??false)===true
+            && $delta['object']==='replace'
+            && $delta['business_filters']==='inherit'
+            && ($intent['object_relation']??null)==='analysis'
+            && ($intent['object_term']??null)===''
+            && $hasField('object_kind',true)
+            && $hasField('object_relation',true)) {
+            self::fail('context_constraint_without_source:business_filters');
+        }
         // A selected person/member/etc. is a separate restriction from its
         // analytical object kind. Its removal or replacement must still be
         // grounded in a current object request. A previous analytical
@@ -1133,6 +1228,27 @@ final class AiIntentResultContract
         if ($metricRequirementIds===[]) {
             if ($value!==[]) self::fail('unexpected_requirement_binding');
             return [];
+        }
+        // Some providers duplicate the same satisfied audit row while still
+        // selecting one identical registered metric for the one accepted
+        // measurement requirement. This is duplicate bookkeeping, not a
+        // second business instruction. Collapse it only when every row has
+        // the exact protocol shape, the same satisfied status and the same
+        // effective code set. Any conflicting, pending, unavailable or
+        // unknown row continues through the strict validation below.
+        if (count($metricRequirementIds)===1 && count($value)>1) {
+            $duplicates=true;
+            foreach ($value as $row) {
+                $keys=is_array($row)?array_keys($row):[];sort($keys,SORT_STRING);
+                if ($keys!==['metric_codes','requirement_id','status']
+                    || ($row['status']??null)!=='satisfied'
+                    || !self::codes($row['metric_codes']??null)
+                    || !self::sameCodeSet($row['metric_codes'],$effectiveCodes)) {
+                    $duplicates=false;break;
+                }
+            }
+            if ($duplicates) $value=[['requirement_id'=>$metricRequirementIds[0],
+                'status'=>'satisfied','metric_codes'=>array_values($effectiveCodes)]];
         }
         $seen=[];$out=[];$allCodes=[];
         foreach($value as $row) {

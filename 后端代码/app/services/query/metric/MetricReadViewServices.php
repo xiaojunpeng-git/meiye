@@ -17,6 +17,7 @@ final class MetricReadViewServices
     private $authorize;
     private $clock;
     private $personnel;
+    private $member;
 
     /** Implemented shared contracts, not a grant of entry/report access or instance deployment readiness. */
     public static function metricCapabilities(): array
@@ -25,13 +26,14 @@ final class MetricReadViewServices
     }
 
     /** authorize must rebuild report permissions from the authenticated principal on EVERY invocation. */
-    public function __construct(MetricReadViewStore $store, callable $authorize, ?callable $transaction = null, ?callable $clock = null, ?PersonnelAnalysisObjectServices $personnel = null)
+    public function __construct(MetricReadViewStore $store, callable $authorize, ?callable $transaction = null, ?callable $clock = null, ?PersonnelAnalysisObjectServices $personnel = null, ?MemberAnalysisObjectServices $member = null)
     {
         $this->store = $store;
         $this->authorize = $authorize;
         $this->transaction = $transaction ?: [new MetricReadTransaction(), 'run'];
         $this->clock = $clock ?: static function (): int { return time(); };
         $this->personnel = $personnel;
+        $this->member = $member;
     }
 
     public function create(array $principal, array $query, ?int $expiresAt = null): array
@@ -39,6 +41,7 @@ final class MetricReadViewServices
         $normalized = $this->query($query);
         $binding = $this->binding(call_user_func($this->authorize, $principal), $normalized['store_ids']);
         $personnel = $this->personnelSelection($normalized,$binding);
+        $member = $this->memberSelection($normalized,$binding);
         $dimensionRanking = $this->dimensionRanking($normalized);
         $thresholdCount = $this->thresholdCount($normalized);
         $now = $this->now();
@@ -46,7 +49,7 @@ final class MetricReadViewServices
         if ($expiresAt<=$now || $expiresAt>$now+86400) $this->fail('METRIC_READ_EXPIRY_INVALID');
         $ranges = ['current' => ['start' => $normalized['start_date'], 'end' => $normalized['end_date']]];
         if ($normalized['compare_range'] !== null) $ranges['comparison'] = $normalized['compare_range'];
-        $results = call_user_func($this->transaction, function (GroupPerformanceMetricReadServices $reader) use ($normalized, $binding, $ranges,$personnel,$dimensionRanking,$thresholdCount,$now): array {
+        $results = call_user_func($this->transaction, function (GroupPerformanceMetricReadServices $reader) use ($normalized, $binding, $ranges,$personnel,$member,$dimensionRanking,$thresholdCount,$now): array {
             $results = [];
             $storeNames = $normalized['query_shape'] === 'ranking' && $personnel===null && $dimensionRanking===null ? $reader->storeNames($binding['store_ids']) : [];
             foreach ($ranges as $period => $range) {
@@ -68,7 +71,11 @@ final class MetricReadViewServices
                             $sum=$this->addAmount($sum,$point['amount_cents']);
                             $employee=$point['employee_id'];$totals[$employee]=$this->addAmount($totals[$employee]??0,$point['amount_cents']);
                         }
-                        if ($normalized['query_shape']==='summary') $results[]=['period'=>$period,'metric_code'=>$metric,'amount_cents'=>$sum,'storage_unit'=>$metricContract['storage_unit']];
+                        if ($normalized['query_shape']==='summary') {
+                            $result=['period'=>$period,'metric_code'=>$metric,'storage_unit'=>$metricContract['storage_unit']];
+                            $result[$metricContract['storage_unit']==='fen'?'amount_cents':'count']=$sum;
+                            $results[]=$result;
+                        }
                         else {
                             $rows=[];
                             foreach ($totals as $employee=>$amount) {
@@ -82,6 +89,15 @@ final class MetricReadViewServices
                             }
                             $results[]=['period'=>$period,'metric_code'=>$metric,'storage_unit'=>$metricContract['storage_unit'],'rows'=>$groups];
                         }
+                        continue;
+                    }
+                    if ($member!==null) {
+                        $dimension=$this->selectionDimension($metric,'member');
+                        $value=$reader->dimensionSelectionTotal($metric,$dimension,$binding['tenant_id'],$binding['store_ids'],$range,$member['member_id']);
+                        $result=['period'=>$period,'metric_code'=>$metric,'storage_unit'=>$metricContract['storage_unit'],
+                            'object_kind'=>'member','object_label'=>$member['label']];
+                        $result[$metricContract['storage_unit']==='fen'?'amount_cents':'count']=$value;
+                        $results[]=$result;
                         continue;
                     }
                     if ($dimensionRanking!==null) {
@@ -161,6 +177,11 @@ final class MetricReadViewServices
             $view['personnel_binding_hash']=$personnel['binding_hash'];$view['personnel_selection_label']=$personnel['label'];
             $view['result_hash']=hash('sha256',UnifiedQueryJson::encode(['base'=>$view['result_hash'],'personnel_binding_hash'=>$personnel['binding_hash']]));
         }
+        if ($member!==null) {
+            if ($this->memberSelection($normalized,$binding)!==$member) $this->fail('METRIC_PERMISSION_CHANGED');
+            $view['member_binding_hash']=$member['binding_hash'];$view['member_selection_label']=$member['label'];
+            $view['result_hash']=hash('sha256',UnifiedQueryJson::encode(['base'=>$view['result_hash'],'member_binding_hash'=>$member['binding_hash']]));
+        }
         $ref = $this->store->put($view);
         return $this->replay($principal, $normalized, $ref);
     }
@@ -193,6 +214,8 @@ final class MetricReadViewServices
         }
         $personnel=$this->personnelSelection($normalized,$binding);
         if ($personnel!==null && ($view['personnel_binding_hash']??null)!==$personnel['binding_hash']) $this->fail('METRIC_PERMISSION_CHANGED');
+        $member=$this->memberSelection($normalized,$binding);
+        if ($member!==null && ($view['member_binding_hash']??null)!==$member['binding_hash']) $this->fail('METRIC_PERMISSION_CHANGED');
         return $view;
     }
 
@@ -259,6 +282,35 @@ final class MetricReadViewServices
         return $selection;
     }
 
+    private function memberSelection(array $query,array $binding): ?array
+    {
+        if (($query['business_filters']['object_kind']??null)!=='member' || !isset($query['business_filters']['selection_ref'])) {
+            return null;
+        }
+        if (!$this->member || $binding['scope_mode']==='self_participant') $this->fail('METRIC_PERMISSION_GRAIN_UNAVAILABLE');
+        $selection=$this->member->selection($query['business_filters']['selection_ref']);
+        if (array_diff($binding['store_ids'],(array)($selection['scope']['store_ids']??[]))) $this->fail('METRIC_PERMISSION_DENIED');
+        // A user may explicitly narrow an otherwise authorized report to one
+        // store. Preserve that narrower read boundary in the frozen binding;
+        // the member relation was still checked against the complete current
+        // authorized scope above.
+        if ($selection['scope']['store_ids']!==$binding['store_ids']) {
+            $selection['scope']['store_ids']=$binding['store_ids'];
+            $selection['binding_hash']=hash('sha256',UnifiedQueryJson::encode($selection));
+        }
+        return $selection;
+    }
+
+    private function selectionDimension(string $metricCode,string $objectKind): string
+    {
+        $metric=MetricDefinitionRegistry::get($metricCode);
+        $matches=array_values(array_filter((array)($metric['analysis_dimension_contracts']??[]),static function($dimension)use($objectKind):bool {
+            return is_array($dimension) && ($dimension['object_kind']??null)===$objectKind && ($dimension['filter_keys']??null)===['selection_ref'];
+        }));
+        if (count($matches)!==1) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        return $matches[0]['dimension'];
+    }
+
     private function binding($binding, array $requested): array
     {
         $fields = ['instance_id', 'subject_ref', 'terminal', 'tenant_id', 'permission_version', 'report_capability_code', 'scope_provider_code', 'scope_mode', 'store_ids'];
@@ -289,10 +341,13 @@ final class MetricReadViewServices
         if (!in_array($query['query_shape'], ['summary', 'comparison', 'trend', 'ranking', 'threshold_count'], true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $objectKind=$query['business_filters']['object_kind']??null;
         $person=$objectKind==='person';
+        $memberSelection=$objectKind==='member' && isset($query['business_filters']['selection_ref']);
         if ($query['business_filters']!==[] && (!$person && !is_string($objectKind))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if ($person && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref']??null)
             || !preg_match('/^((position|person):[1-9][0-9]*|role:craftsman|role:salesperson)$/D',$query['business_filters']['selection_ref']))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-        if (!$person && $query['business_filters']!==[] && $query['business_filters']!==['object_kind'=>$objectKind]) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if ($memberSelection && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref'])
+            || !preg_match('/^member:[1-9][0-9]*$/D',$query['business_filters']['selection_ref']))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if (!$person && !$memberSelection && $query['business_filters']!==[] && $query['business_filters']!==['object_kind'=>$objectKind]) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if ($query['query_shape'] === 'ranking') {
             $rank = $query['ranking'];
             if (!is_array($rank) || count($rank) !== 2 || !in_array($rank['direction'] ?? null, ['top', 'bottom', 'top_and_bottom'], true)
@@ -314,12 +369,16 @@ final class MetricReadViewServices
         foreach (self::metricCapabilities() as $code=>$capability) {
             $dimensionCapable=false;
             foreach ((array)($capability['analysis_dimension_contracts']??[]) as $dimension) {
-                if (is_array($dimension)&&($dimension['object_kind']??null)===$objectKind&&($dimension['filter_keys']??null)===[]) $dimensionCapable=true;
+                if (!is_array($dimension)||($dimension['object_kind']??null)!==$objectKind) continue;
+                if (($memberSelection && ($dimension['filter_keys']??null)===['selection_ref']) || (!$memberSelection && ($dimension['filter_keys']??null)===[])) $dimensionCapable=true;
             }
             if (($capability['ai_query_ready']??false)===true && (($person && $capability['filter_grain']==='person') || (!$person && $query['business_filters']!==[] && $dimensionCapable) || (!$person && $query['business_filters']===[] && $capability['filter_grain']==='store'))) $allowed[]=$code;
         }
         foreach ($query['metric_codes'] as $metric) if (!in_array($metric, $allowed, true)) $this->fail('METRIC_NOT_REGISTERED');
-        if ($person && (count($query['metric_codes'])!==1 || !in_array($query['query_shape'],['summary','ranking'],true))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if ($person && (!in_array($query['query_shape'],['summary','ranking'],true)
+            || ($query['query_shape']==='ranking' && count($query['metric_codes'])!==1)
+            || ($query['query_shape']==='summary' && count($query['metric_codes'])>4))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if ($memberSelection && (count($query['metric_codes'])!==1 || $query['query_shape']!=='summary')) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if (!$person && $query['business_filters']!==[] && (!in_array($query['query_shape'],['summary','ranking','threshold_count'],true)
             || ($query['query_shape']!=='summary' && count($query['metric_codes'])!==1))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         // Preserve the existing two-metric forms.  More than two facts are
