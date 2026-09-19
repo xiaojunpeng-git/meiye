@@ -25,5 +25,22 @@ class Position extends BaseModel
      */
     protected $name = 'position';
 
+    /**
+     * 岗位表仅保留 Unix 时间戳 update_time；避免 ORM 将整型值按日期字符串解析。
+     * 保持编辑岗位时仍自动写入更新时间。
+     *
+     * @var string|bool
+     */
+    protected $autoWriteTimestamp = 'int';
+
+    /** @var bool */
+    protected $createTime = false;
+
+    /** @var string */
+    protected $updateTime = 'update_time';
+
+    /** @var bool */
+    protected $dateFormat = false;
+
 
 }

@@ -25,7 +25,8 @@ const Setting = {
   assetsDir: 'view_admin',
   // 开发环境每次保存时 lint 代码，会将 lint 错误输出为编译警告
   // true || false || error
-  lintOnSave: true,
+  // 历史页面仍有存量规则告警；开发热更新应继续产出可预览包，规则问题以告警呈现。
+  lintOnSave: 'warning',
   // iView Loader 的选项
   // 详见 https://www.iviewui.com/docs/guide/iview-loader
   iviewLoaderOptions: {

@@ -12,6 +12,25 @@
               <div class="cont_box" :class="currenId==item.id?'on':''" v-for="(item,index) in basicsList" :key="index" @click="getUrl(item)">{{item.name}}</div>
             </div>
           </div>
+          <div v-if="isStaffListSelected" class="staff-link-filter">
+            <div class="cont">人员列表筛选</div>
+            <Form :label-width="104">
+              <FormItem label="岗位（可多选）">
+                <Select
+                  v-model="staffPositionIds"
+                  multiple
+                  clearable
+                  filterable
+                  :loading="staffPositionsLoading"
+                  placeholder="不选择时展示全部岗位"
+                  @on-change="updateStaffListUrl"
+                >
+                  <Option v-for="item in staffPositionOptions" :key="item.id" :value="item.id">{{ item.name }}</Option>
+                </Select>
+              </FormItem>
+            </Form>
+            <div class="staff-link-filter__hint">链接会跳转到人员列表；不选岗位时展示当前门店全部服务老师。</div>
+          </div>
           <div v-if="userList.length">
             <div class="cont">个人中心</div>
             <div class="Box">
@@ -200,6 +219,11 @@ import { pageCategory, pageLink, saveLink } from '@/api/diy';
 import { treeListApi, changeListApi } from '@/api/product';
 import { seckillProductList, combinationListApi, bargainListApi, integralProductListApi } from '@/api/marketing';
 import { cmsListApi } from '@/api/cms';
+import { positionList } from '@/api/position';
+
+const STAFF_LIST_LINK_ID = 'staff_list';
+const STAFF_LIST_PATH = '/pages/activity/therapist_list/index';
+
 export default {
   name: 'linkaddress',
   props: {
@@ -342,6 +366,9 @@ export default {
       luckDraw: [],
       integral: [],
       presale: [],
+      staffPositionIds: [],
+      staffPositionOptions: [],
+      staffPositionsLoading: false,
       currenId: '',
       currenUrl: '',
 	  currenName: '',
@@ -374,6 +401,9 @@ export default {
     };
   },
   computed: {
+    isStaffListSelected() {
+      return this.currenType === 'link' && this.currenId === STAFF_LIST_LINK_ID;
+    },
   },
   watch: {
     isCateTree: {
@@ -514,13 +544,42 @@ export default {
       this.currenUrl = '';
       this.presentId = 0;
       this.currenId = '';
+      this.staffPositionIds = [];
       this.customdate.appid = '';
       this.customdate.mpUrl = '';
     },
     getUrl(item) {
       this.currenId = item.id;
+      this.currenName = item.name;
+      if (item.id === STAFF_LIST_LINK_ID) {
+        this.updateStaffListUrl(this.staffPositionIds);
+        this.loadStaffPositions();
+        return;
+      }
       this.currenUrl = item.url;
-	  this.currenName = item.name;
+    },
+    loadStaffPositions() {
+      if (this.staffPositionsLoading || this.staffPositionOptions.length) return;
+      this.staffPositionsLoading = true;
+      positionList({ page: 1, limit: 100 }).then((res) => {
+        const data = res.data || {};
+        this.staffPositionOptions = (Array.isArray(data.list) ? data.list : [])
+          .filter((item) => Number(item.status) === 1)
+          .map((item) => ({ id: Number(item.id), name: item.name || `岗位${item.id}` }))
+          .filter((item) => item.id > 0);
+      }).catch((err) => {
+        this.$Message.error((err && err.msg) || '岗位列表加载失败');
+      }).finally(() => {
+        this.staffPositionsLoading = false;
+      });
+    },
+    updateStaffListUrl(ids) {
+      const selected = (Array.isArray(ids) ? ids : [])
+        .map(Number)
+        .filter((id, index, values) => id > 0 && values.indexOf(id) === index);
+      this.staffPositionIds = selected;
+      const query = selected.length ? `?position_ids=${encodeURIComponent(selected.join(','))}` : '';
+      this.currenUrl = `${STAFF_LIST_PATH}${query}`;
     },
     getSort() {
       pageCategory().then(res => {
@@ -680,6 +739,13 @@ export default {
                 coupon.push(e);
               }
             });
+            if (this.currenType === 'link' && !basicsList.some((item) => item.id === STAFF_LIST_LINK_ID)) {
+              basicsList.push({
+                id: STAFF_LIST_LINK_ID,
+                name: '人员列表',
+                url: STAFF_LIST_PATH
+              });
+            }
             this.basicsList = basicsList;
             this.distributionList = distributionList;
             this.userList = userList;
@@ -794,6 +860,22 @@ export default {
 .on{
   background-color #2d8cf0!important;
   color #fff!important;
+}
+.staff-link-filter {
+  margin: 16px 0;
+  padding: 12px 16px 2px;
+  border: 1px solid #e8eaec;
+  border-radius: 4px;
+  background: #fafcff;
+}
+.staff-link-filter .cont {
+  margin-bottom: 12px;
+}
+.staff-link-filter__hint {
+  margin: -8px 0 12px 104px;
+  color: #999;
+  font-size: 12px;
+  line-height: 18px;
 }
 .menu-item{
   position: relative;
