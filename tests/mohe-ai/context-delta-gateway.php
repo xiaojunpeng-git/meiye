@@ -17,18 +17,17 @@ try {
         'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],
         'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'authorized',
         'requirement_bindings'=>[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['actual_performance']]],'unresolved_fragments'=>[]];
+    $choiceHarness->semanticIntentByRepair=['open_overview_candidate'=>['object_kind'=>'store','object_term'=>'','operation'=>'summary',
+        'metric_codes'=>['cash_performance','actual_performance'],'action_codes'=>[],'needs_metric_choice'=>false,
+        'initial_observation'=>true,'ranking'=>['direction'=>'unspecified','limit'=>null],
+        'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'authorized',
+        'requirement_bindings'=>[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance','actual_performance']]],'unresolved_fragments'=>[]]];
     $choiceHarness->bindingVerificationOverride=['decision'=>'metric_choice','rejected_requirement_ids'=>[]];
     $choiceHarness->bindingReviewKind='candidate_blind_uniqueness';
     $beforeChoice=$choiceHarness->queries;
-    $choicePending=$choiceHarness->start('今天业绩多少');
-    cdgCheck($choicePending['status']==='WAITING_CLARIFICATION'
-        && ($choicePending['clarification']['fields'][0]['key']??null)==='metric_code'
-        && $choiceHarness->queries===$beforeChoice,'a plausible but non-unique metric cannot execute before a customer choice');
-    $choiceHarness->bindingVerificationOverride=['decision'=>'accept','rejected_requirement_ids'=>[]];
-    $choiceHarness->bindingReviewKind='binding_coverage';
-    $choiceFinal=$choiceHarness->choose($choicePending,['metric_code'=>'cash_performance']);
+    $choiceFinal=$choiceHarness->start('今天业绩多少');
     cdgCheck($choiceFinal['status']==='COMPLETED' && $choiceHarness->queries>$beforeChoice,
-        'the confirmed registered metric is independently reviewed and then queried: '.($choiceFinal['status']??'missing').'/'.($choiceFinal['reason']??'none'));
+        'a reviewer-confirmed broad operating question repairs into the registered overview rather than opening a metric selector: '.($choiceFinal['status']??'missing').'/'.($choiceFinal['reason']??'none'));
     $choiceHarness->close();
 
     $h=new R6GatewayHarness(3,[1,2],'platform');

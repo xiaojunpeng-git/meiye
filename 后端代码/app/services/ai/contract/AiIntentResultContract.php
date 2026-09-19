@@ -193,6 +193,11 @@ final class AiIntentResultContract
             'bad_value:initial_observation','initial_observation_metric_count',
             'initial_observation_query_shape','provenance_field_not_understood',
             'bad_value:result_reference'],true)) return true;
+        // The semantic pass can establish a broad overall summary while the
+        // first binding response still falls back to a metric selector.  One
+        // bounded correction lets the model publish its registered overview
+        // candidate; it never asks PHP to classify a phrase or pick a metric.
+        if ($predicate==='open_overview_candidate') return true;
         if ($predicate==='recommended_initial_answer_with_current_metric_requirement') return true;
         // These are bounded enum carriers, not business decisions made by the
         // server.  A provider can occasionally use a natural-language label

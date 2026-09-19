@@ -1196,8 +1196,8 @@ final class AiGatewayServices
         if (AiIntentResultContract::hasUnboundRequirement($understanding)) {
             throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
         }
-        // A clean, understood store summary with no candidate is a completed
-        // model shape, so the ordinary JSON-format repair path cannot see it.
+        // A clean, understood summary with no candidate is a completed model
+        // shape, so the ordinary JSON-format repair path cannot see it.
         // Give the binding model one bounded chance to reconcile that shape
         // with the registry. The predicate contains no customer phrase or
         // metric choice: the model may select a faithful observation group,
@@ -1219,6 +1219,20 @@ final class AiGatewayServices
         // fields with the signed predecessor, otherwise an exclusion could
         // disappear when the customer confirms the presentation choice.
         $bindingCandidate=$merged['prospective_intent'];
+        $openOverviewRecovery=$this->requiresOpenOverviewRecovery($understanding,$intent,$caps);
+        if ($openOverviewRecovery) {
+            // The semantic pass admitted a broad operating goal, but binding
+            // returned a selector before proposing the registered overview.
+            // Give the model one fenced correction before any clarification is
+            // issued.  PHP neither reads question words nor chooses metrics.
+            $reply=$this->repairBindingCandidate(
+                $owner,$id,$generation,$worker,$safe['outbound'],$bindingSummaries,$understanding,
+                $configuration,$checkpoint,$runtimeSkills,'open_overview_candidate'
+            );
+            $merged=IntentContextMerger::merge($sourceQuery,$reply['intent']);
+            $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
+            $bindingCandidate=$merged['prospective_intent'];
+        }
         $exactRegistryBinding=AiIntentResultContract::isUniqueExactMetricBinding(
             $bindingCandidate,$understanding,$safe['outbound'],array_column($bindingSummaries,'metric_code')
         );
@@ -1256,22 +1270,38 @@ final class AiGatewayServices
                 $reviewDecision=$this->reviewSemanticBinding($owner,$id,$generation,$worker,$safe['outbound'],$bindingSummaries,$understanding,$bindingCandidate,$configuration,$checkpoint,false,'review_binding_repaired');
             }
             if ($reviewDecision==='metric_choice') {
-                // The candidate was only plausible, not uniquely requested.
-                // The registered guidance supplies the choices; the model's
-                // candidate never becomes a default answer or hidden filter.
-                $intent['metric_codes']=[];
-                $intent['needs_metric_choice']=true;
-                // The rejected/ambiguous professional recommendation is no
-                // longer a recommendation once control returns to the
-                // customer. Preserve the understood goal, but never let its
-                // presentation label leak into the selector or a later plan.
-                $intent['recommended_initial_answer']=false;
-                $intent['initial_observation']=false;
-                $intent['requirement_bindings']=array_map(static function(array $row):array {
-                    return ['requirement_id'=>$row['requirement_id'],'status'=>'pending','metric_codes'=>[]];
-                },$intent['requirement_bindings']);
-                $bindingCandidate=$intent;
-                $bindingCandidate['_reviewed_ambiguity']=true;
+                if ($this->allowsOpenOverviewRecovery($understanding,$caps)) {
+                    // The reviewer has proved that a broad observation has
+                    // several valid measurements. Let the model correct that
+                    // one binding into a registered overview before exposing
+                    // a selector. The repair is bounded and the Reader later
+                    // replaces its provisional angles with the source-owned
+                    // profile, so PHP never chooses the business metrics.
+                    $reply=$this->repairBindingCandidate(
+                        $owner,$id,$generation,$worker,$safe['outbound'],$bindingSummaries,$understanding,
+                        $configuration,$checkpoint,$runtimeSkills,'open_overview_candidate'
+                    );
+                    $merged=IntentContextMerger::merge($sourceQuery,$reply['intent']);
+                    $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
+                    $bindingCandidate=$merged['prospective_intent'];
+                } else {
+                    // The candidate was only plausible, not uniquely requested.
+                    // The registered guidance supplies the choices; the model's
+                    // candidate never becomes a default answer or hidden filter.
+                    $intent['metric_codes']=[];
+                    $intent['needs_metric_choice']=true;
+                    // The rejected/ambiguous professional recommendation is no
+                    // longer a recommendation once control returns to the
+                    // customer. Preserve the understood goal, but never let its
+                    // presentation label leak into the selector or a later plan.
+                    $intent['recommended_initial_answer']=false;
+                    $intent['initial_observation']=false;
+                    $intent['requirement_bindings']=array_map(static function(array $row):array {
+                        return ['requirement_id'=>$row['requirement_id'],'status'=>'pending','metric_codes'=>[]];
+                    },$intent['requirement_bindings']);
+                    $bindingCandidate=$intent;
+                    $bindingCandidate['_reviewed_ambiguity']=true;
+                }
             } elseif (is_string($reviewDecision) && strpos($reviewDecision,'model_metric_rebind:')===0) {
                 // The independent candidate-blind reviewer, not PHP, selected
                 // the one registered fact that meets the current requirement.
@@ -1762,6 +1792,49 @@ final class AiGatewayServices
         if (count($records)<2) return $intent;
         $intent['metric_codes']=array_column($records,'metric_code');
         return $intent;
+    }
+
+    /**
+     * Decide only whether the already-understood shape may receive the one
+     * model-owned overview recovery.  Natural-language classification remains
+     * in the understanding/review passes; registry metadata still owns which
+     * metrics appear in that overview.
+     */
+    private function requiresOpenOverviewRecovery(array $understanding,array $intent,array $capabilities): bool
+    {
+        if (!$this->allowsOpenOverviewRecovery($understanding,$capabilities)) return false;
+        $registeredMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($capabilities,'store');
+        $selectedMetrics=array_values(array_filter((array)($intent['metric_codes']??[]),static function($code){
+            return is_string($code) && preg_match('/^[a-z][a-z0-9_]{1,63}$/D',$code);
+        }));
+        // A bound, executable metric is already an intentional answer angle.
+        // Missing or non-executable candidates are not: they may be repaired
+        // from the accepted semantic shape before a selector is shown.
+        return array_intersect($selectedMetrics,array_keys($registeredMetrics))===[];
+    }
+
+    /** Checks whether the accepted semantics, not a candidate label, permit an overview. */
+    private function allowsOpenOverviewRecovery(array $understanding,array $capabilities): bool
+    {
+        if (($understanding['status']??null)!=='understood') return false;
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            $fields=(array)($requirement['fields']??[]);
+            $values=(array)($requirement['values']??[]);
+            // The accepted customer meaning may contain only an observation
+            // request and its time/context. A name, object selection,
+            // comparison, ranking, condition, exclusion or other requirement
+            // has to keep its controlled clarification instead. Binding may
+            // misclassify such an observation as needing a selector, so its
+            // internal selection flag and inferred condition are deliberately
+            // not admission criteria here. This remains structural: no
+            // customer words, metric labels or codes are read here.
+            if (array_diff($fields,['metric_codes','periods','scope'])
+                || in_array('unbound',$fields,true)
+                || in_array('aggregate_condition',$fields,true)
+                || in_array('result_reference',$fields,true)
+                || !empty($values['metric_exclusions'])) return false;
+        }
+        return count(\app\services\ai\execution\AiOverviewMetricResolver::resolve($capabilities,'store'))>=2;
     }
 
     /** Builds the server-owned response shapes for one registered object. */

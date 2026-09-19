@@ -41,15 +41,20 @@ final class AiConfigStore
             || !is_string($input['model'] ?? null) || !preg_match('/^[A-Za-z0-9][A-Za-z0-9_.\/-]{0,127}$/D', $input['model'])
             || !is_int($input['version'] ?? null) || $input['version'] < 0) throw new RuntimeException('AI_CONFIG_INVALID');
         if ($input['enabled'] && !$input['external_processing_authorized']) throw new RuntimeException('AI_EXTERNAL_AUTHORIZATION_REQUIRED');
-        $current = $this->read(true);
+        // Retaining an omitted key needs the existing plaintext. Replacing it
+        // does not: requiring an old decryptable ciphertext here turns a
+        // recoverable private-key rotation into an unrecoverable admin lockout.
+        // A supplied key is still validated below and encrypted only with this
+        // instance's current server-owned key.
+        $key = $input['api_key'] ?? '';
+        if (!is_string($key) || strlen($key) > 1024 || preg_match('/[\x00-\x20\x7f]/', $key)) throw new RuntimeException('AI_CONFIG_INVALID');
+        $current = $this->read($key === '');
         if ($current['version'] !== $input['version']) throw new RuntimeException('AI_CONFIG_VERSION_CONFLICT');
         // Legacy clients may save old settings but can never opt into a new payload.
         $scope = $input['external_scope_version'] ?? $current['external_scope_version'];
         if (array_key_exists('external_scope_version', $input) && !in_array($input['external_scope_version'], ['', self::QUESTION_SCOPE], true)) throw new RuntimeException('AI_CONFIG_INVALID');
         if (!$input['external_processing_authorized']) $scope = '';
         if ($scope !== '' && !$current['external_scope_supported']) throw new RuntimeException('AI_CONFIG_SCOPE_MIGRATION_REQUIRED');
-        $key = $input['api_key'] ?? '';
-        if (!is_string($key) || strlen($key) > 1024 || preg_match('/[\x00-\x20\x7f]/', $key)) throw new RuntimeException('AI_CONFIG_INVALID');
         if ($key === '') $key = $current['api_key'] ?? '';
         if ($key === '') throw new RuntimeException('AI_MODEL_KEY_REQUIRED');
         $nonce = random_bytes(12); $tag = '';
