@@ -1,8 +1,9 @@
 @font-face {
   font-family: "iconfont"; /* Project id 3861873 */
-  src: url('https://at.alicdn.com/t/c/font_3861873_xp0z09z14a.woff2?t=1760154385892') format('woff2'),
-       url('https://at.alicdn.com/t/c/font_3861873_xp0z09z14a.woff?t=1760154385892') format('woff'),
-       url('https://at.alicdn.com/t/c/font_3861873_xp0z09z14a.ttf?t=1760154385892') format('truetype');
+  /* 瑞昊自有 OSS：避免会员端依赖第三方 iconfont CDN。 */
+  src: url('https://ruihaoxitong.oss-cn-beijing.aliyuncs.com/c26-00002/iconfont.woff2') format('woff2'),
+       url('https://ruihaoxitong.oss-cn-beijing.aliyuncs.com/c26-00002/iconfont.woff') format('woff'),
+       url('https://ruihaoxitong.oss-cn-beijing.aliyuncs.com/c26-00002/iconfont.ttf') format('truetype');
 }
 
 .iconfont {
@@ -1048,4 +1049,3 @@
 .icon-ic_leftarrow:before {
   content: "\e65e";
 }
-
