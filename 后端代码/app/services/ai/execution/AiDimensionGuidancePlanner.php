@@ -46,7 +46,13 @@ final class AiDimensionGuidancePlanner
         if (!$requestedActions && ($intent['needs_metric_choice'] ?? false) === true) $metric = null;
         $terms = $projection['date_terms'] ?? [];
         if (count($terms) > 1 || !empty($projection['date_grouping_ambiguous'])) throw new \RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
-        $range = $terms ? (new AiWorkflowPlanner())->normalizePeriod($terms[0], $today) : null;
+        // Dimensions bypass the generic workflow compiler, so they must
+        // apply the same neutral first-answer time policy themselves. A
+        // missing period means the current business day; an explicit or
+        // ambiguous period was already validated above and is never replaced.
+        $range = $terms
+            ? (new AiWorkflowPlanner())->normalizePeriod($terms[0], $today)
+            : (new AiWorkflowPlanner())->normalizePeriod(['code'=>'TODAY'], $today);
         // Result shape belongs to the model's generic language understanding,
         // not to a project/member/person phrase table or a business scene.
         $ranking=$intent['ranking']??null;

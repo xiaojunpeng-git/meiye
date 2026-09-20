@@ -47,6 +47,17 @@ $unselectedObjects=['status'=>'choose','objects'=>[['ref'=>'position:2','label'=
 $defaultIntent=$intent;$defaultIntent['metric_codes']=['staff_labor_yeji'];$defaultIntent['needs_metric_choice']=false;
 $defaultPlan=$planner->start($defaultIntent,$projection,$defaultCandidates,$unselectedObjects,'screen','2026-09-09');
 paCheck($defaultPlan['kind']==='plan' && $defaultPlan['plan']['query']['business_filters']['selection_ref']==='role:craftsman','registered metric cohort supplies a labelled first answer without a role picker');
+$defaultPeriodPlan=$planner->start($defaultIntent,['date_terms'=>[]],$defaultCandidates,$unselectedObjects,'screen','2026-09-09');
+paCheck(($defaultPeriodPlan['kind']??null)==='plan'
+ &&[$defaultPeriodPlan['plan']['query']['start_date'],$defaultPeriodPlan['plan']['query']['end_date']]===['2026-09-09','2026-09-09'],
+ 'a complete person ranking without a stated period uses the current-day first-answer baseline');
+$inheritedPeriodIntent=$defaultIntent;
+$inheritedPeriodIntent['periods']=[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-09']];
+$inheritedPeriodIntent['context_delta']=array_fill_keys(\app\services\ai\contract\AiIntentResultContract::DELTA_FIELDS,'inherit');
+$inheritedPeriodPlan=$planner->start($inheritedPeriodIntent,['date_terms'=>[]],$defaultCandidates,$unselectedObjects,'screen','2026-09-09');
+paCheck(($inheritedPeriodPlan['kind']??null)==='plan'
+ &&[$inheritedPeriodPlan['plan']['query']['start_date'],$inheritedPeriodPlan['plan']['query']['end_date']]===['2026-09-01','2026-09-09'],
+ 'a metric-only people follow-up retains a merged verified period instead of falling back to today');
 $multiIntent=['object_kind'=>'person','object_term'=>'同名员工','operation'=>'summary',
  'metric_codes'=>['staff_sales_yeji','staff_labor_yeji'],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null]];
 $multiObjects=['status'=>'choose','objects'=>[['ref'=>'person:7','label'=>'同名员工（合成一店）'],['ref'=>'person:8','label'=>'同名员工（合成二店）']]];

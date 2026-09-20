@@ -42,6 +42,12 @@ $safe=(new AiSafeQuestionProjector())->project('这个月卖得最好的项目',
 $check($safe['outbound']['question']==='这个月卖得最好的项目'&&!$safe['outbound']['has_unresolved_conditions'],'unfamiliar but meaningful wording reaches the model unchanged');
 $safe=(new AiSafeQuestionProjector())->project('消费能力最强的会员有哪一些？',$config,[]);
 $check(strpos($safe['outbound']['question'],'消费能力')!==false,'member intent is not rejected by a local phrase whitelist');
+$safe=(new AiSafeQuestionProjector())->project('销售人业绩排名第一的是谁？',$config,['销售人'],['销售人业绩']);
+$check($safe['outbound']['question']==='销售人业绩排名第一的是谁？'&&$safe['local_conditions']===[],
+    'a full registry metric title remains intact when it contains a shorter private-object alias');
+$safe=(new AiSafeQuestionProjector())->project('销售人今天怎么样？',$config,['销售人'],['销售人业绩']);
+$check(strpos($safe['outbound']['question'],'[local_condition_1]')!==false,
+    'the metric-title shield does not suppress standalone private-object de-identification');
 $history=[];
 for($index=1;$index<=20;$index++) $history[]=['question'=>'第'.$index.'轮问题'];
 $conversation=(new AiSafeQuestionProjector())->projectConversation('继续看刚才的结果',$history,$config,[]);
@@ -80,6 +86,11 @@ $check(isset($person['staff_sales_yeji'])&&!isset($person['cash_performance'])
 $planner=new AiDimensionGuidancePlanner();
 $plan=$planner->start('member',['object_kind'=>'member','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>['payment'],'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>3]],['date_terms'=>[['code'=>'EXPLICIT','start'=>'2026-09-01','end'=>'2026-09-09']]],['cash_performance'=>$member['cash_performance']],'screen','2026-09-10');
 $check($plan['kind']==='plan'&&$plan['plan']['query']['ranking']['limit']===3,'model-supplied natural count survives registry compilation');
+$defaultDayPlan=$planner->start('project',['object_kind'=>'project','operation'=>'ranking','metric_codes'=>['sales_amount'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>1]],['date_terms'=>[]],$project,'screen','2026-09-10');
+$check(($defaultDayPlan['kind']??null)==='plan'
+    &&($defaultDayPlan['plan']['query']['start_date']??null)==='2026-09-10'
+    &&($defaultDayPlan['plan']['query']['end_date']??null)==='2026-09-10',
+    'a complete dimension ranking without a stated period uses the documented current-day first-answer baseline');
 $missing=$planner->start('project',['object_kind'=>'project','operation'=>'ranking','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'top','limit'=>1]],['date_terms'=>[['code'=>'EXPLICIT','start'=>'2026-09-01','end'=>'2026-09-09']]],$project,'screen','2026-09-10');
 $check($missing['kind']==='clarification'&&$missing['fields'][0]['key']==='dimension_metric','an ambiguous evaluation is guided from registered candidates, not a fixed report scene');
 

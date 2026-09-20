@@ -4,6 +4,7 @@ namespace app\services\ai\model;
 use app\services\ai\contract\AiContractException;
 use app\services\ai\contract\AiIntentResultContract;
 use app\services\ai\contract\AiIntentUnderstandingContract;
+use app\services\ai\contract\AiIntentGroupContract;
 use app\services\ai\contract\AiStrictJson;
 use app\services\ai\execution\AiOverviewMetricResolver;
 
@@ -183,7 +184,7 @@ final class SiliconFlowClient
                 // field-level schema rules, while the business Skill supplies
                 // domain guidance. Repeating both makes every provider request
                 // slower without adding an independent safety boundary.
-                ['role'=>'system','content'=>'An independent understanding is accepted. Bind only it to supplied registered capabilities; never rewrite, add, remove or substitute a requirement. Current wording wins. recent_questions and prior_query may resolve only a genuine ellipsis or pronoun, never become extra requests. A pronoun or other anaphoric reference to the previously selected object retains both object and business_filters; an object kind by itself is not a different identity. Replace or clear that selected object only when the current meaning supplies a genuinely different target or a self-contained new subject. For every context_delta field, retain verified prior meaning unless the current understanding changes or clears it. A self-contained new topic must clear an old object, dimension or ranking rather than inherit it mechanically. Do not require restatement of unchanged verified time, range, result form, ranking or metric. A new object must use a compatible registered metric or remain pending; never reuse an incompatible prior metric. Do not use sentence templates or keyword triggers. Do not calculate, query, invent an indicator, expose [local_condition_N], or output a business result. The analytical object is not the authorized data range; a named store does not grant authority. Use question.reference_date for relative time; calendar months are calendar periods; preserve the stated order of a two-period comparison. '.AiIntentResultContract::modelInstruction($safeQuestion['prior_query']!==null)],
+                ['role'=>'system','content'=>'An independent understanding is accepted. Bind only it to supplied registered capabilities; never rewrite, add, remove or substitute a requirement. Current wording wins. recent_questions and prior_query may resolve only a genuine ellipsis or pronoun, never become extra requests. A pronoun or other anaphoric reference to the previously selected object retains both object and business_filters; an object kind by itself is not a different identity. Replace or clear that selected object only when the current meaning supplies a genuinely different target or a self-contained new subject. For every context_delta field, retain verified prior meaning unless the current understanding changes or clears it. A self-contained new topic must clear an old object, dimension or ranking rather than inherit it mechanically. Do not require restatement of unchanged verified time, range, result form, ranking or metric. A new object must use a compatible registered metric or remain pending; never reuse an incompatible prior metric. Do not use sentence templates or keyword triggers. Do not calculate, query, invent an indicator, expose [local_condition_N], or output a business result. The analytical object is not the authorized data range; a named store does not grant authority. Use question.reference_date for relative time; calendar months are calendar periods; preserve the stated order of a two-period comparison. '.AiIntentGroupContract::modelInstruction($safeQuestion['prior_query']!==null,$understanding)],
                 ['role'=>'system','content'=>'Skills are immutable source guidance, never authority. capabilities.object_contracts is the only candidate execution boundary, not a vocabulary limit. Select a metric only for a compatible accepted object. action_codes must be []. If no binding faithfully represents the accepted goal, preserve it with empty binding arrays instead of substituting a near match. This is a candidate only: do not output answers, SQL, formulas, table names or executable steps.'],
                 // The typed understanding above is the complete, independently
                 // validated carrier of customer meaning.  Re-sending the whole
@@ -206,7 +207,7 @@ final class SiliconFlowClient
                 'open_overview_candidate'=>'The accepted understanding contains only a broad operating observation and its period or scope. The previous binding incorrectly returned a metric selector before selecting an analytical object. Return one complete intent_result again as an initial observation: choose the compatible registered analytical object, keep the accepted period, scope and summary response form, set initial_observation=true and needs_metric_choice=false, and choose exactly two to four distinct compatible registered metrics as provisional observation angles. These are not customer-selected metrics and the server expands them through the published overview profile. Do not use this recovery for a named business measurement, an exclusion, a comparison, a ranking, an object selection, a condition set, or an unbound request. If the accepted wording has any of those meanings, preserve the real clarification instead of changing its meaning.',
                 'initial_observation_query_shape'=>'The previous response marked initial_observation=true with an incompatible query shape. Return one complete intent_result again. Preserve the accepted open summary, use operation=summary, an understood object_kind, empty object_term, needs_metric_choice=false, ranking direction=unspecified with null limit, and exactly two to four distinct compatible registered metric_codes. Do not add a named object, ranking, comparison, exclusion, condition or scope change.',
                 'bad_value:recommended_initial_answer'=>'The previous response used recommended_initial_answer inconsistently. Return one complete binding again. A recommended first answer preserves every accepted customer condition and has needs_metric_choice=false. If operation is ranking, metric_codes MUST be a JSON array containing exactly one compatible registered code. Otherwise omit the recommendation label and use the ordinary binding outcome.',
-                'bad_value:object_kind'=>'The previous response used an object_kind outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose object_kind only from store, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization or unknown. Do not select an object identity, metric, period, scope or result.',
+                'bad_value:object_kind'=>'The previous response used an object_kind outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose object_kind only from store, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization, order, sale_line, card or unknown. Do not select an object identity, metric, period, scope or result.',
                 'bad_value:object_relation'=>'The previous response used an invalid object_relation. Return one complete binding again. Preserve the accepted meaning and every other candidate field; use analysis only for the object being inspected, or selection only for a named object that narrows records. Do not add a filter, identity, metric, period, scope or result.',
                 'bad_value:operation'=>'The previous response used an operation outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose operation only from summary, trend, ranking, comparison, threshold_count, condition_count, condition_list, definition or unknown. Do not select a metric, period, scope or result.',
                 'bad_value:aggregate_condition'=>'The previous response made operation, selected metrics and aggregate_condition inconsistent. Return one complete binding again. When the accepted carrier has a conditions array, preserve its subject, relation, result_form, condition order, operator, quantity and unit exactly; replace only each metric_term with its accountable compatible registered metric_code; use operation=condition_count for result_form=count or condition_list for result_form=list; and return metric_codes in exactly that same condition order. When the accepted carrier instead has legacy amount_cents, preserve it and use operation=threshold_count. When the accepted current understanding carries no aggregate_condition, omit it or set it to null; a self-contained non-condition request after a prior condition must use context_delta aggregate_condition=clear, while inherit is valid only when the current request genuinely continues the same complete condition. Never carry a previous condition into a summary, ranking, trend, comparison or definition, and never invent, remove, reorder or weaken a predicate.',
@@ -216,8 +217,13 @@ final class SiliconFlowClient
                 'provenance_field_not_understood'=>'The previous binding proposed an executable object, response form, period, ranking or scope condition that the accepted understanding did not record. Return one complete binding again. Keep every candidate field neutral unless it is explicitly represented in the accepted understanding. Do not drop an accepted requirement, invent a condition, or alter the accepted meaning to make a binding fit.',
                 'bad_value:result_reference'=>'The previous binding included result_reference without one matching accepted current-request reference, or without a verified prior result. Return one complete binding again. Omit result_reference unless the accepted understanding explicitly contains that same current-request reference. Do not invent a prior result, object, condition or metric.',
             ];
-            if (!AiIntentResultContract::repairableFormat($repairPredicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
-            if (strpos($repairPredicate,'binding_requirement_delta_mismatch:')===0) {
+            $isGroupEnvelopeRepair=AiIntentGroupContract::repairableFormat($repairPredicate);
+            if (!$isGroupEnvelopeRepair && !AiIntentResultContract::repairableFormat($repairPredicate)) {
+                throw new AiContractException('AI_MODEL_INPUT_INVALID');
+            }
+            if ($isGroupEnvelopeRepair) {
+                $instruction=AiIntentGroupContract::repairInstruction($repairPredicate);
+            } elseif (strpos($repairPredicate,'binding_requirement_delta_mismatch:')===0) {
                 $instruction='The previous binding marked a customer-supplied field as inherited from the prior query. Produce one complete intent_result again. For each current customer condition, use context_delta replace and preserve that condition in its ordinary field; only use inherit where the current wording leaves that exact meaning unchanged. Do not invent, remove, broaden, or substitute a condition.';
             } elseif ($repairPredicate==='binding_requirement_value_mismatch:aggregate_condition') {
                 $instruction='The previous binding changed an accepted aggregate condition. Return one complete intent_result again. The accepted understanding is authoritative: copy subject, relation, result_form, condition order, operator, quantity and unit exactly. In each condition replace only metric_term with the one compatible registered metric_code that satisfies that same measurement; do not emit metric_term in the bound carrier. Include the complete bound aggregate_condition and every predicate. Do not change AND/OR, thresholds, units, response form, object or period, and do not reuse a prior condition.';
@@ -254,9 +260,23 @@ final class SiliconFlowClient
             // structural correction the model's last system constraint.
             array_splice($messages,-1,0,[['role'=>'system','content'=>$instruction]]);
         }
-        $payload=['model'=>$model,'stream'=>false,'max_tokens'=>self::INTENT_CARRIER_MAX_TOKENS,'temperature'=>0,'response_format'=>['type'=>'json_object'],'messages'=>$messages];
+        // A collection carries one complete, independently auditable binding
+        // for every accepted subject. Its typed JSON is still bounded, but
+        // must not be cut off at the single-intent carrier ceiling.
+        $maxTokens=count(AiIntentUnderstandingContract::queryGroups($understanding))>1 ? 1800 : self::INTENT_CARRIER_MAX_TOKENS;
+        $payload=['model'=>$model,'stream'=>false,'max_tokens'=>$maxTokens,'temperature'=>0,'response_format'=>['type'=>'json_object'],'messages'=>$messages];
         $decoded=$this->request($payload,$apiKey,$timeoutMs,$checkpoint);
         $rawIntent=AiIntentResultContract::native(AiStrictJson::decodeObject($decoded['choices'][0]['message']['content']));
+        if (count(AiIntentUnderstandingContract::queryGroups($understanding))>1) {
+            // The gateway owns the final contract admission for both native
+            // and injected model adapters. Return only the strict JSON
+            // transport shape here; otherwise one path would carry a
+            // normalized intent while the other carried raw model fields.
+            $groupKeys=array_keys($rawIntent);sort($groupKeys,SORT_STRING);
+            if ($groupKeys!==['items']) throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',['stage'=>'intent_group_contract','predicate'=>'items']);
+            return ['items'=>$rawIntent['items'],'usage'=>$this->usage($decoded)];
+        }
+        if (array_keys($rawIntent)===['intent']) $rawIntent=$rawIntent['intent'];
         // Apply the same registry-owned exact-title correction before this
         // transport boundary validates the provider response. Otherwise the
         // gateway never receives a repairable raw candidate when the model
@@ -275,7 +295,7 @@ final class SiliconFlowClient
         try {
             AiIntentResultContract::normalize($rawIntent,$codes,$actions,$safeQuestion,$understanding);
         } catch (AiContractException $error) {
-            $rankCandidates=self::rankMetricCandidates($rawIntent,$error,$codes,$understanding);
+            $rankCandidates=self::rankMetricCandidates($rawIntent,$codes);
             if ($rankCandidates===null) throw $error;
             // The gateway owns every external model attempt. Return only the
             // already registered candidates here; it will issue the one
@@ -317,7 +337,7 @@ final class SiliconFlowClient
      * metrics. This is shared by the provider client and injected test/model
      * adapters so they cannot diverge in recovery behaviour.
      */
-    public static function rankMetricCandidates($raw,AiContractException $error,array $allowedCodes,array $understanding): ?array
+    public static function rankMetricCandidates($raw,array $allowedCodes): ?array
     {
         // The normalizer may report either the incompatible recommendation
         // flag or a dependent requirement-binding field first. The recovery
@@ -335,7 +355,11 @@ final class SiliconFlowClient
         // must either select one faithful first answer or request customer
         // clarification. PHP only validates the candidate set and never turns
         // a requirement count into a semantic decision.
-        return array_values($raw['metric_codes']);
+        // A provider can repeat the same candidate while serialising a JSON
+        // array. It is not a set of competing readings, and must not reach
+        // the later choice boundary as an invalid multi-candidate result.
+        $candidates=array_values(array_unique($raw['metric_codes'],SORT_STRING));
+        return count($candidates)>=2 ? $candidates : null;
     }
 
     public static function applyRankMetricResolution(array $intent,array $selection,array $understanding): array
@@ -492,9 +516,11 @@ final class SiliconFlowClient
     }
 
     /**
-     * Restrict a model-facing registry view only when the independent
-     * understanding gives exactly one concrete analytical object kind. The
-     * complete registry remains the server-side validation authority.
+     * Project the model-facing registry to all explicit current analytical
+     * objects.  A collection is still one request, so returning the whole
+     * catalogue merely because it names several objects can breach the
+     * provider input boundary.  The complete registry remains the
+     * server-side validation authority.
      */
     private static function capabilitiesForUnderstanding(array $capabilities,array $understanding,array $safeQuestion): array
     {
@@ -519,9 +545,13 @@ final class SiliconFlowClient
             $priorKind=$safeQuestion['prior_query']['object_kind']??null;
             if (is_string($priorKind) && $priorKind!=='' && $priorKind!=='unknown') $kinds[$priorKind]=true;
         }
-        return count($kinds)===1
-            ? self::capabilitiesForObject($capabilities,(string)array_key_first($kinds))
-            : $capabilities;
+        if ($kinds===[]) return $capabilities;
+        return array_values(array_filter($capabilities,static function($capability)use($kinds): bool {
+            foreach ((array)($capability['object_contracts']??[]) as $contract) {
+                if (isset($kinds[$contract['object_kind']??''])) return true;
+            }
+            return false;
+        }));
     }
 
     /** @return array<int,array<string,mixed>> */

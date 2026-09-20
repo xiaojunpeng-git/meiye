@@ -51,20 +51,22 @@ $serviceOptions=$r['fields'][0]['options'];$serviceLast=end($serviceOptions);
 verify($serviceLast['action']==='stop','unknown meaning is not silently replaced');
 rejected(static function()use($planner,$r){$planner->choose($r,['metric_code'=>'other_registered_metric']);},'AI_CAPABILITY_NOT_READY');
 $r=build('今天现金和服务业绩多少');$r=$planner->choose($r,['metric_code'=>'consume_amount']);verify($r['plan']['query']['metric_codes']===['cash_performance','consume_amount'],'explicit joint metric not replaced by clarification');
-$r=build('现金和消耗多少');verify($r['fields'][0]['key']==='start_date','joint goal asks only missing date');
-$r=$planner->choose($r,['start_date'=>'2026-09-01','end_date'=>'2026-09-30']);verify(count($r['plan']['query']['metric_codes'])===2,'joint metrics survive date answer');
+$r=build('现金和消耗多少');verify($r['kind']==='plan'
+    &&[$r['plan']['query']['start_date'],$r['plan']['query']['end_date']]===['2026-10-09','2026-10-09'],
+    'a complete joint goal without a stated time uses the documented current-day first-answer baseline');
+verify(count($r['plan']['query']['metric_codes'])===2,'joint metrics survive the default first-answer period');
 // Multi-step state is separate from root Run counters; no hidden new Run/model call.
 $r=build('哪几家店需要关注');$steps=[];
-foreach([['metric_code'=>'cash_performance'],['start_date'=>'2026-09-01','end_date'=>'2026-09-30'],['rank_direction'=>'bottom']] as $choice) {
+foreach([['metric_code'=>'cash_performance'],['rank_direction'=>'bottom']] as $choice) {
     verify($r['kind']==='clarification' && count($r['fields'])<=2,'one relevant semantic question');$steps[]=$r['guidance_step'];$r=$planner->choose($r,$choice);
 }
-verify($steps===['metric_code','start_date','rank_direction'],'only genuinely missing business meaning is guided');
+verify($steps===['metric_code','rank_direction'],'only genuinely missing business meaning is guided');
 verify($r['kind']==='plan' && $r['plan']['workflow_code']==='wf_performance_ranking','last necessary step chooses a registered workflow');
 verify($r['plan']['query']['ranking']['direction']==='bottom','attention is not automatic diagnosis');
 $initial=build('业绩多少');$cashDate=$planner->choose($initial,['metric_code'=>'cash_performance']);$consumeDate=$planner->choose($initial,['metric_code'=>'consume_amount']);
-verify($cashDate['resolved_metrics']===['cash_performance'] && $consumeDate['resolved_metrics']===['consume_amount'],'replay frozen initial envelope supports correction without old candidate restriction');
+verify($cashDate['plan']['query']['metric_codes']===['cash_performance'] && $consumeDate['plan']['query']['metric_codes']===['consume_amount'],'replay frozen initial envelope supports correction without old candidate restriction');
 rejected(static function()use($planner,$initial){$planner->choose($initial,['metric_code'=>'cash_performance','sql'=>'anything']);},'AI_CLARIFICATION_INVALID');
-rejected(static function()use($planner,$cashDate){$planner->choose($cashDate,['start_date'=>'2026-02-30','end_date'=>'2026-03-01']);},'AI_DATE_INVALID');
+rejected(static function()use($planner){$planner->normalizePeriod(['code'=>'EXPLICIT','start'=>'2026-02-30','end'=>'2026-03-01'],'2026-10-09');},'AI_DATE_INVALID');
 foreach([
  '今天服务了几个人'=>'unparsed_business_condition','今天服务多少人、多少次'=>'unparsed_business_condition',
  '本月项目赚了多少钱'=>'category_filter',
@@ -92,7 +94,9 @@ $sameDate=$parser->project('相同日期的现金业绩，生成Excel');
 verify($sameDate['blocking_reason']===null
     && in_array('cash_performance',$sameDate['signals'],true) && in_array('xlsx',$sameDate['signals'],true), 'same-date export is a legal signed-context follow-up');
 $r=build('那上个月呢');verify($r['fields'][0]['key']==='metric_code' && $r['resolved_range']===['start'=>'2026-09-01','end'=>'2026-09-30'],'follow-up keeps new date and asks only missing metric');
-$r=build('换成消耗呢');verify($r['fields'][0]['key']==='start_date' && $r['resolved_metrics']===['consume_amount'],'metric follow-up never inherits untrusted dates');
+$r=build('换成消耗呢');verify($r['plan']['query']['metric_codes']===['consume_amount']
+    &&[$r['plan']['query']['start_date'],$r['plan']['query']['end_date']]===['2026-10-09','2026-10-09'],
+    'a metric follow-up never inherits an untrusted date and uses the current-day first-answer baseline');
 $r=build('昨天和今天消耗业绩对比');verify($r['plan']['query']['start_date']==='2026-10-08' && $r['plan']['query']['compare_range']['start']==='2026-10-09','comparison order preserved');
 $r=build('本月现金和上月相比');verify($r['plan']['query']['compare_range']===['start'=>'2026-09-01','end'=>'2026-09-30'],'two calendar periods preserved');
 $r=build('2026-09-01到2026-09-03和2026-08-01至2026-08-03消耗对比');verify($r['plan']['query']['end_date']==='2026-09-03' && $r['plan']['query']['compare_range']['end']==='2026-08-03','full explicit comparison ranges');

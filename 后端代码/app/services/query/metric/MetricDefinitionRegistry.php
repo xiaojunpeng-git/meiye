@@ -190,6 +190,7 @@ final class MetricDefinitionRegistry
                 'default_ranking_dimension' => 'operator',
                 'overview' => [
                     ['object_kind' => 'store', 'section' => '销售结果', 'order' => 10],
+                    ['object_kind' => 'card', 'section' => '卡项销售', 'order' => 10],
                     ['object_kind' => 'project', 'section' => '项目销售', 'order' => 10],
                     ['object_kind' => 'product', 'section' => '产品销售', 'order' => 10],
                 ],
@@ -321,6 +322,7 @@ final class MetricDefinitionRegistry
                 'default_ranking_dimension' => 'operator',
                 'overview' => [
                     ['object_kind' => 'store', 'section' => '经营动作', 'order' => 10],
+                    ['object_kind' => 'card', 'section' => '卡项销售', 'order' => 20],
                     ['object_kind' => 'project', 'section' => '项目销售', 'order' => 20],
                     ['object_kind' => 'product', 'section' => '产品销售', 'order' => 20],
                 ],

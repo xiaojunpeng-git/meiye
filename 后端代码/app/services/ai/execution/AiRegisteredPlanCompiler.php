@@ -109,8 +109,12 @@ final class AiRegisteredPlanCompiler
     private function query(array $query,array $snapshot,array $capabilities): array
     {
         if (!array_key_exists('aggregate_condition',$query)) $query['aggregate_condition']=null;
+        // This field carries display-only facts for a ranking. It is derived
+        // again below from the frozen registry, so a planner cannot smuggle a
+        // second sorting metric or a caller-selected formula into a query.
+        if (!array_key_exists('ranking_presentation_metrics',$query)) $query['ranking_presentation_metrics']=[];
         $conditionPopulation=in_array($query['query_shape']??null,['condition_count','condition_list'],true);
-        AiRegistryValue::exact($query,['query_shape','metric_codes','start_date','end_date','compare_range','store_ids','business_filters','ranking','aggregate_condition'],
+        AiRegistryValue::exact($query,['query_shape','metric_codes','start_date','end_date','compare_range','store_ids','business_filters','ranking','aggregate_condition','ranking_presentation_metrics'],
             $conditionPopulation?['condition_set']:[]);
         if (!in_array($query['query_shape'],['summary','trend','ranking','comparison','threshold_count','condition_count','condition_list'],true)) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
         // This is a bounded Reader batch, not a semantic requirement that a
@@ -172,6 +176,19 @@ final class AiRegisteredPlanCompiler
             if (!in_array($query['ranking']['direction'],['top','bottom','top_and_bottom'],true)
                 || !is_int($query['ranking']['limit'])||$query['ranking']['limit']<1||$query['ranking']['limit']>20) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         } elseif ($query['ranking']!==null) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
+        // `metric_codes` is intentionally a list in the query schema, while
+        // a ranking has exactly one primary sort metric. Pass that scalar to
+        // the presentation resolver; the remaining display columns are
+        // registry-derived and cannot change rank order or query population.
+        $expectedPresentation=$query['query_shape']==='ranking'
+            ? AiRankingPresentationMetricResolver::resolve($snapshot['metrics'],$metrics[0],(string)($objectKind??'')) : [];
+        if ($query['ranking_presentation_metrics']!==[] && $query['ranking_presentation_metrics']!==$expectedPresentation) {
+            AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+        }
+        // Persist the registry-derived list in the signed query. A pure date
+        // follow-up therefore keeps the same visible evidence columns without
+        // asking the model to rediscover or rewrite the previous first answer.
+        $query['ranking_presentation_metrics']=$expectedPresentation;
         if ($query['query_shape']==='threshold_count') {
             $condition=$query['aggregate_condition'];$keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);
             if ($objectKind!=='member'||$query['business_filters']!==['object_kind'=>'member']

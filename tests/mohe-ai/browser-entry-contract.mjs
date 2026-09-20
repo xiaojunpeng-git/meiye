@@ -324,6 +324,32 @@ assert.ok(iconEntry.classList.contains('entry--icon'));
 assert.equal(iconEntry.getAttribute('aria-label'), '打开魔核 AI 工作台');
 assert.equal(iconEntry.querySelector('.entry-icon').getAttribute('src'), '/assets/mohe-ai-entry-orbits.gif');
 iconLauncher();
+// An independently bound collection must retain every requested section in
+// the browser projection.  This protects against regressing to the former
+// single-summary renderer when a grouped answer completes asynchronously.
+window.localStorage.clear(); identityKey = 'fixture:collection-sections'; asyncExecution = true; failStatus = false; finishStatus = null;
+const collection = mountMoheAi({request}); await flush();
+const collectionRoot = document.querySelector('[data-mohe-ai]').shadowRoot;
+collectionRoot.querySelector('.entry').click(); await flush();
+collectionRoot.querySelector('textarea').value = '项目、卡项、产品卖得最好的分别是什么';
+Array.from(collectionRoot.querySelectorAll('button')).find(b=>b.textContent==='发送').click();
+await new Promise(resolve=>setTimeout(resolve,1050));
+assert.equal(typeof finishStatus,'function');
+finishStatus({run_id:'r',generation:1,run_delivery_token:'delivery',status:'COMPLETED',answer:{
+  summary:'不得作为单项降级展示',
+  sections:[
+    {id:'q1',title:'项目排行',answer:{summary:'项目第一名',cards:[{metric_name:'销售额',display_value:'100',unit:'元'}]}},
+    {id:'q2',title:'卡项排行',answer:{summary:'卡项第一名',cards:[{metric_name:'销售额',display_value:'200',unit:'元'}]}},
+    {id:'q3',title:'产品排行',answer:{summary:'产品第一名',table:{columns:[{key:'name',label:'名称'}],rows:[{name:'产品甲'}]}}}
+  ]
+}}); await flush();
+assert.equal(collectionRoot.querySelectorAll('.answer-section-title').length,3);
+assert.match(collectionRoot.textContent,/项目排行/);
+assert.match(collectionRoot.textContent,/卡项排行/);
+assert.match(collectionRoot.textContent,/产品排行/);
+assert.match(collectionRoot.textContent,/产品甲/);
+assert.equal(collectionRoot.textContent.includes('不得作为单项降级展示'),false);
+collection();
 // Two mounts can observe the same immutable terminal projection.  The second
 // append is intentionally ignored, but it must still discard the recovery
 // marker left by that retired mount.

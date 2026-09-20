@@ -118,9 +118,16 @@ final class MetricReadViewServices
                                 return ['entity_id' => $point['entity_id'], 'entity_name' => $point['entity_name'], 'amount_cents' => $point['metric_value']];
                             }, $points);
                         }
+                        // The primary metric alone determines rank. Additional
+                        // registered metrics are read only for these returned
+                        // identities, so a display column cannot broaden the
+                        // population, change order, or masquerade as another
+                        // independent ranking.
+                        $presentation=$this->rankingPresentation($reader,$normalized,$dimensionRanking,$binding,$range,$groups);
                         $results[] = ['period' => $period, 'metric_code' => $metric, 'storage_unit' => $metricContract['storage_unit'],
                             'object_kind'=>$dimensionRanking['object_kind'],'object_label'=>$dimensionRanking['object_label'],
-                            'participant_relation'=>$dimensionRanking['participant_relation'],'rows' => $groups];
+                            'participant_relation'=>$dimensionRanking['participant_relation'],'rows' => $groups,
+                            'ranking_presentation_metrics'=>$presentation];
                         continue;
                     }
                     $dimensionSummary=$this->dimensionSummary($normalized,$metric);
@@ -243,6 +250,35 @@ final class MetricReadViewServices
         $dimension=$matches[0];
         return ['dimension'=>$dimension['dimension'],'object_kind'=>$dimension['object_kind'],'object_label'=>$dimension['object_label'],
             'participant_relation'=>isset($dimension['analysis_relation_source'])];
+    }
+
+    /** @return array<int,array{metric_code:string,storage_unit:string,values:array<int,array{entity_id:int,metric_value:int}>}> */
+    private function rankingPresentation(GroupPerformanceMetricReadServices $reader,array $query,array $primaryDimension,array $binding,array $range,array $groups): array
+    {
+        $codes=(array)($query['ranking_presentation_metrics']??[]);
+        if (count($codes)<2) return [];
+        $ids=[];foreach ($groups as $points) foreach ($points as $point) if (is_int($point['entity_id']??null)) $ids[]=$point['entity_id'];
+        $ids=array_values(array_unique($ids));sort($ids,SORT_NUMERIC);
+        if ($ids===[]) return [];
+        $out=[];
+        foreach (array_slice($codes,1) as $code) {
+            $dimension=$this->rankingDimension($code,$primaryDimension['object_kind']);
+            if ($dimension===null || $dimension['dimension']!==$primaryDimension['dimension']) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            $contract=MetricDefinitionRegistry::get($code);
+            $out[]=['metric_code'=>$code,'storage_unit'=>$contract['storage_unit'],
+                'values'=>$reader->dimensionValues($code,$dimension['dimension'],$binding['tenant_id'],$binding['store_ids'],$range,$ids)];
+        }
+        return $out;
+    }
+
+    /** Resolves the registered dimension instead of accepting a caller field name. */
+    private function rankingDimension(string $metricCode,string $objectKind): ?array
+    {
+        $metric=MetricDefinitionRegistry::get($metricCode);
+        $matches=array_values(array_filter((array)($metric['analysis_dimension_contracts']??[]),static function($dimension)use($objectKind):bool {
+            return is_array($dimension) && ($dimension['object_kind']??null)===$objectKind && ($dimension['filter_keys']??null)===[];
+        }));
+        return count($matches)===1?$matches[0]:null;
     }
 
     /** @return array{dimension:string,object_kind:string,object_label:string}|null */
@@ -468,7 +504,11 @@ final class MetricReadViewServices
         if (!array_key_exists('ranking', $query)) $query['ranking'] = null;
         if (!array_key_exists('aggregate_condition', $query)) $query['aggregate_condition'] = null;
         if (!array_key_exists('condition_set', $query)) $query['condition_set'] = null;
-        $fields = ['query_shape', 'metric_codes', 'start_date', 'end_date', 'compare_range', 'store_ids', 'business_filters', 'ranking', 'aggregate_condition','condition_set'];
+        // Older signed views did not carry presentation columns. Treat omission
+        // as the canonical empty list; current compiler output is then checked
+        // against the same registry-derived list below.
+        if (!array_key_exists('ranking_presentation_metrics',$query)) $query['ranking_presentation_metrics']=[];
+        $fields = ['query_shape', 'metric_codes', 'start_date', 'end_date', 'compare_range', 'store_ids', 'business_filters', 'ranking', 'aggregate_condition','condition_set','ranking_presentation_metrics'];
         if (array_diff(array_keys($query), $fields) || array_diff($fields, array_keys($query))) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         if (!in_array($query['query_shape'], ['summary', 'comparison', 'trend', 'ranking', 'threshold_count','condition_count','condition_list'], true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $objectKind=$query['business_filters']['object_kind']??null;
@@ -546,6 +586,10 @@ final class MetricReadViewServices
         }
         foreach ($query['metric_codes'] as $metric) if (!in_array($metric, $allowed, true)) $this->fail('METRIC_NOT_REGISTERED');
         foreach ($query['metric_codes'] as $metric) if (!in_array($query['query_shape'],self::metricCapabilities()[$metric]['query_shapes']??[],true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $expectedPresentation=$query['query_shape']==='ranking'
+            ? \app\services\ai\execution\AiRankingPresentationMetricResolver::resolve(self::metricCapabilities(),$query['metric_codes'][0],is_string($objectKind)?$objectKind:'') : [];
+        if ($query['ranking_presentation_metrics']!==[] && $query['ranking_presentation_metrics']!==$expectedPresentation) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
+        $query['ranking_presentation_metrics']=$expectedPresentation;
         if ($conditionPopulation) foreach ($query['metric_codes'] as $metric) if (!in_array($objectKind,(array)(self::metricCapabilities()[$metric]['condition_subjects']??[]),true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if ($person && (!in_array($query['query_shape'],['summary','ranking'],true)
             || ($query['query_shape']==='ranking' && count($query['metric_codes'])!==1)

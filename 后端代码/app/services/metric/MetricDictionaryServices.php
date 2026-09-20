@@ -83,7 +83,9 @@ class MetricDictionaryServices extends BaseServices
                 'exclude' => '充值、充值欠款补交、历史未分摊欠款补交、赠金、余额扣款和已作废订单不计入。',
                 'timing' => '按销售收款或退款成功的业务日期统计。',
                 'note' => '它与销售成交额不同：成交额反映销售明细金额，实际收款销售额反映已经实际收取的销售款。',
-                'aliases' => ['实际收款销售额', '销售实收', '订单实收', '销售收款', '销售人业绩'],
+                // 人员“销售人业绩”属于另一项按人员分配的事实，不能作为
+                // 门店销售收款的别名；保留该别名会让注册语义目录产生歧义。
+                'aliases' => ['实际收款销售额', '销售实收', '订单实收', '销售收款'],
                 'dev_source' => 'MetricDefinitionRegistry：cashier_v3_payment_sale_allocation_fact 有符号销售收款分摊事实',
                 'dev_time_field' => 'V3 销售收款分摊事实 business_date',
             ],

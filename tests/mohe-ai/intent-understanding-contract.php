@@ -3,8 +3,10 @@
 require_once __DIR__ . '/fixture-autoload.php';
 
 use app\services\ai\contract\AiContractException;
+use app\services\ai\contract\AiIntentGroupContract;
 use app\services\ai\contract\AiIntentResultContract;
 use app\services\ai\contract\AiIntentUnderstandingContract;
+use app\services\ai\execution\AiRankingCollectionGuidancePlanner;
 
 $checks=0;
 $check=static function(bool $ok,string $label)use(&$checks):void {if(!$ok)throw new RuntimeException('FAIL '.$label);$checks++;};
@@ -19,6 +21,21 @@ $understanding=['goal'=>'查看本月收款，排除退款并列出前五家门�
 ]];
 $understanding=AiIntentUnderstandingContract::normalize($understanding,$question);
 $check(AiIntentUnderstandingContract::ids($understanding)===['r1','r2','r3'],'understanding has request-local requirement identities');
+$check(AiIntentUnderstandingContract::repairable('groups')
+    && str_contains(AiIntentUnderstandingContract::repairInstruction('groups'),'requirement_ids'),
+    'a malformed independent-result group carrier receives one bounded structural repair');
+$singleMetricQuestion=['schema_version'=>'sanitized-question-v2','question'=>'按服务次数看呢？','has_unresolved_conditions'=>false,
+    'server_resolved_fields'=>[],'reference_date'=>'2026-09-20','recent_questions'=>[],
+    'evidence_messages'=>[['id'=>'current','text'=>'按服务次数看呢？']], 'prior_query'=>['operation'=>'ranking']];
+$singleMetricWithStaleGroup=AiIntentUnderstandingContract::normalize([
+    'goal'=>'按服务次数继续查看','status'=>'understood','requirements'=>[[
+        'id'=>'r1','meaning'=>'按服务次数查看','fields'=>['metric_codes'],'values'=>['metric_terms'=>['服务次数']],
+        'evidence'=>[['message_id'=>'current','quote'=>'按服务次数看呢？']],
+    ]],'groups'=>[['id'=>'q1','requirement_ids'=>['r1']]],
+],$singleMetricQuestion);
+$check(!isset($singleMetricWithStaleGroup['groups'])
+    &&($singleMetricWithStaleGroup['requirements'][0]['values']['metric_terms']??null)===['服务次数'],
+    'an optional stale one-item group cannot fail an otherwise valid metric continuation');
 $base=['object_kind'=>'store','object_term'=>'','operation'=>'ranking','metric_codes'=>['cash_performance'],'action_codes'=>[],
     'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>5],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],
     'scope'=>'authorized','requirement_bindings'=>[
@@ -35,6 +52,90 @@ $base=['object_kind'=>'store','object_term'=>'','operation'=>'ranking','metric_c
     ]];
 $bound=AiIntentResultContract::normalize($base,['cash_performance'],[],$question,$understanding);
 $check($bound['metric_codes']===['cash_performance']&&$bound['provenance']['ranking']['requirements']===['r3'],'binding separately consumes accepted understanding');
+$grouped=$understanding;
+$grouped['groups']=[
+    ['id'=>'q1','requirement_ids'=>['r1','r2','r3']],
+    ['id'=>'q2','requirement_ids'=>['r1','r2','r3']],
+];
+$grouped=AiIntentUnderstandingContract::normalize($grouped,$question);
+$reorderedGroups=$understanding;
+$reorderedGroups['groups']=[
+    ['requirement_ids'=>['r1','r2','r3'],'id'=>'q1'],
+    ['requirement_ids'=>['r1','r2','r3'],'id'=>'q2'],
+];
+$reorderedGroups=AiIntentUnderstandingContract::normalize($reorderedGroups,$question);
+$check(array_column($reorderedGroups['groups'],'id')===['q1','q2'],
+    'group ownership accepts JSON object key order without weakening allowed-key validation');
+$groupedBinding=AiIntentGroupContract::normalize(['items'=>[
+    ['intent'=>$base,'id'=>'q2'],['id'=>'q1','intent'=>$base],
+]],['cash_performance'],[],$question,$grouped);
+$check(array_column($groupedBinding,'id')===['q2','q1'],'independent grouped bindings retain model order while preserving server-owned group identities');
+$check(AiIntentGroupContract::repairableFormat('items')
+    && str_contains(AiIntentGroupContract::repairInstruction('items'),'"items"'),
+    'a legacy single envelope for a grouped carrier receives exactly one format-only repair');
+$collectionItems=[
+    ['id'=>'q1','intent'=>['operation'=>'ranking','needs_metric_choice'=>false,'object_kind'=>'project','object_term'=>'',
+        'unresolved_fragments'=>[],'scope'=>'unspecified','aggregate_condition'=>null,'metric_codes'=>['project_sales_amount'],
+        'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'ranking'=>['direction'=>'top','limit'=>1]]],
+    ['id'=>'q2','intent'=>['operation'=>'ranking','needs_metric_choice'=>false,'object_kind'=>'card','object_term'=>'',
+        'unresolved_fragments'=>[],'scope'=>'unspecified','aggregate_condition'=>null,'metric_codes'=>['card_sales_amount'],
+        'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'ranking'=>['direction'=>'top','limit'=>1]]],
+];
+$check(AiIntentGroupContract::isExecutableRankingCollection($collectionItems),
+    'a grouped anonymous ranking carrier reaches the bounded collection executor');
+$collectionItems[1]['intent']['scope']='current_store';
+$check(!AiIntentGroupContract::isExecutableRankingCollection($collectionItems)
+    && AiIntentGroupContract::repairableFormat('collection_plan_shape')
+    && str_contains(AiIntentGroupContract::repairInstruction('collection_plan_shape'),'scope=unspecified'),
+    'a grouped binding that invents an executor-incompatible scope receives one model-owned collection repair');
+$collectionItems[1]['intent']['scope']='unspecified';$collectionItems[1]['intent']['ranking']=['direction'=>'unspecified','limit'=>null];
+$check(!AiIntentGroupContract::isExecutableRankingCollection($collectionItems),
+    'a grouped ranking without an explicit direction receives model correction before it can open a clarification mid-collection');
+$collectionGuidance=(new AiRankingCollectionGuidancePlanner())->start([
+    ['id'=>'q1','label'=>'项目排行','dimension_state'=>['object_kind'=>'project','metric'=>'project_sales_amount','candidates'=>['project_sales_amount'=>[]],
+        'range'=>null,'direction'=>'top','limit'=>1,'format'=>'screen','today'=>'2026-09-20']],
+    ['id'=>'q2','label'=>'卡项排行','dimension_state'=>['object_kind'=>'card','metric'=>'card_sales_amount','candidates'=>['card_sales_amount'=>[]],
+        'range'=>null,'direction'=>'top','limit'=>1,'format'=>'screen','today'=>'2026-09-20']],
+]);
+$collectionPlan=(new AiRankingCollectionGuidancePlanner())->choose($collectionGuidance,['start_date'=>'2026-09-01','end_date'=>'2026-09-20']);
+$check(($collectionPlan['plan']['items'][1]['plan']['query']['business_filters']['object_kind']??null)==='card'
+    && ($collectionPlan['plan']['items'][0]['plan']['query']['start_date']??null)==='2026-09-01',
+    'one date choice completes every independently registered ranking without an object-specific fallback');
+$unnamedRankingQuestion=$question;$unnamedRankingQuestion['question']='本月哪个项目卖得最好？';$unnamedRankingQuestion['evidence_messages'][0]['text']=$unnamedRankingQuestion['question'];
+$unnamedRankingUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'查看本月项目排名','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'本月项目卖得最好','fields'=>['metric_codes','object_kind','operation','ranking','periods'],
+        'values'=>['metric_terms'=>['销售额'],'object_kind'=>'project','operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>1],
+            'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
+        'evidence'=>[['message_id'=>'current','quote'=>$unnamedRankingQuestion['question']]]],
+]],$unnamedRankingQuestion);
+$check(($unnamedRankingUnderstanding['requirements'][0]['values']['metric_terms']??null)===null
+    && $unnamedRankingUnderstanding['requirements'][0]['values']['operation']==='ranking',
+    'an unnamed analytical ranking preserves its object and rank while deferring a fake metric term to registered binding');
+$independentQuestion=$question;$independentQuestion['question']='项目、卡项、产品卖得最好的分别是什么';$independentQuestion['evidence_messages'][0]['text']=$independentQuestion['question'];
+$independentRequirements=[];
+foreach (['project','card','product'] as $index=>$object) {
+    $independentRequirements[]=['id'=>'r'.($index+1),'meaning'=>'查看'.$object.'最好结果',
+        'fields'=>['object_kind','object_relation','operation','ranking'],
+        'values'=>['object_kind'=>$object,'object_relation'=>'analysis','operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>1]],
+        'evidence'=>[['message_id'=>'current','quote'=>$independentQuestion['question']]]];
+}
+$derivedInput=['goal'=>'分别查看独立对象排名','status'=>'understood','requirements'=>$independentRequirements,
+    'groups'=>[['id'=>'bad','requirement_ids'=>['r1']]]];
+$derivedGroups=AiIntentUnderstandingContract::normalize($derivedInput,$independentQuestion);
+$check(array_column(AiIntentUnderstandingContract::queryGroups($derivedGroups),'id')===['q1','q2','q3'],
+    'independent analytical rankings derive safe group ownership when a model group carrier is malformed');
+$derivedInputWithoutRelation=$derivedInput;
+foreach ($derivedInputWithoutRelation['requirements'] as &$requirement) {
+    $requirement['fields']=array_values(array_diff($requirement['fields'],['object_relation']));
+    unset($requirement['values']['object_relation']);
+}
+unset($requirement);
+$derivedGroupsWithoutRelation=AiIntentUnderstandingContract::normalize($derivedInputWithoutRelation,$independentQuestion);
+$check(count(AiIntentUnderstandingContract::queryGroups($derivedGroupsWithoutRelation))===3,
+    'a ranking dimension without an explicit relation still derives analytical ownership without a phrase rule');
+$reject(static function()use($grouped,$question,$base){AiIntentGroupContract::normalize(['items'=>[
+    ['id'=>'q1','intent'=>$base],['id'=>'q1','intent'=>$base],
+]],['cash_performance'],[],$question,$grouped);},'grouped bindings reject duplicate independent result identities');
 $multipleRankingRecommendation=$base;$multipleRankingRecommendation['metric_codes']=['cash_performance','actual_performance'];$multipleRankingRecommendation['recommended_initial_answer']=true;
 foreach($multipleRankingRecommendation['requirement_bindings'] as &$row)$row['metric_codes']=['cash_performance','actual_performance'];unset($row);
 $reject(static function()use($multipleRankingRecommendation,$question,$understanding){AiIntentResultContract::normalize($multipleRankingRecommendation,['cash_performance','actual_performance'],[],$question,$understanding);},'a single ranking result cannot carry several competing measurement codes');
@@ -102,8 +203,8 @@ $check($normalizedRedundantOverviewLabel['initial_observation']===true&&$normali
     'a redundant first-answer label does not reject an otherwise valid overall operating observation');
 $recommendedBinding=$naturalBinding;$recommendedBinding['recommended_initial_answer']=true;
 $normalizedRecommendedBinding=AiIntentResultContract::normalize($recommendedBinding,['cash_performance'],[],$naturalQuestion,$naturalUnderstanding);
-$check($normalizedRecommendedBinding['recommended_initial_answer']===false&&$normalizedRecommendedBinding['metric_codes']===['cash_performance'],
-    'a stale recommended label on a customer-stated measurement is removed without retrying or changing the binding');
+$check($normalizedRecommendedBinding['recommended_initial_answer']===true&&$normalizedRecommendedBinding['metric_codes']===['cash_performance'],
+    'a candidate label stays available to the wording-aware semantic reviewer instead of PHP treating every metric carrier as an explicit basis');
 $contradictoryRecommendation=$recommendedBinding;$contradictoryRecommendation['needs_metric_choice']=true;unset($contradictoryRecommendation['recommended_initial_answer']);
 $normalizedContradiction=AiIntentResultContract::normalize($contradictoryRecommendation,['cash_performance'],[],$naturalQuestion,$naturalUnderstanding);
 $check($normalizedContradiction['recommended_initial_answer']===false&&!$normalizedContradiction['needs_metric_choice'],
@@ -117,7 +218,7 @@ $normalizedBroadRanking=AiIntentResultContract::normalize($broadRankingBinding,[
 $check($normalizedBroadRanking['recommended_initial_answer']===true&&!$normalizedBroadRanking['needs_metric_choice']&&$normalizedBroadRanking['metric_codes']===['cash_performance'],
     'a broad singular ranking can retain the model-selected professional first measure without forcing the customer to name one');
 $rankingChoiceCandidate=['operation'=>'ranking','metric_codes'=>['cash_performance'],'needs_metric_choice'=>false];
-$check(AiIntentResultContract::canDeferMetricChoice($naturalUnderstanding,$rankingChoiceCandidate,false),
+$check(AiIntentResultContract::canUseCandidateBlindMetricReview($naturalUnderstanding,$rankingChoiceCandidate),
     'a candidate-bound ranking remains eligible for the independent semantic admission pass');
 $misbookedBroadRanking=$broadRankingBinding;$misbookedBroadRanking['needs_metric_choice']=false;$misbookedBroadRanking['recommended_initial_answer']=true;
 $misbookedBroadRanking['requirement_bindings']=[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']]];
@@ -260,9 +361,9 @@ $check(AiIntentResultContract::repairableFormat('contextual_followup_changed:obj
 $staleRecommendedCurrentMetric=$selectedStandaloneBinding;
 $staleRecommendedCurrentMetric['recommended_initial_answer']=true;
 $normalizedStaleRecommendedCurrentMetric=AiIntentResultContract::normalize($staleRecommendedCurrentMetric,['cash_performance'],[],$selectedStandaloneQuestion,$selectedStandaloneUnderstanding);
-$check($normalizedStaleRecommendedCurrentMetric['recommended_initial_answer']===false
+$check($normalizedStaleRecommendedCurrentMetric['recommended_initial_answer']===true
     && $normalizedStaleRecommendedCurrentMetric['metric_codes']===['cash_performance'],
-    'a stale recommended presentation label never consumes a retry or changes a current metric binding');
+    'a candidate label keeps the complete current metric binding for wording-aware review without changing it');
 $badOverviewCarryover=$normalizedOverviewAfterDimension;
 $badOverviewCarryover['context_delta']['object']='inherit';
 $badOverviewCarryover['context_delta']['business_filters']='inherit';
@@ -281,6 +382,36 @@ $changedSubjectFollow['requirement_bindings'][0]['metric_codes']=['actual_perfor
 $normalizedChangedSubjectFollow=AiIntentResultContract::normalize($changedSubjectFollow,['cash_performance','actual_performance'],[],$followQuestion,$followUnderstanding);
 $check($normalizedChangedSubjectFollow['requirement_bindings']===[]&&$normalizedChangedSubjectFollow['metric_codes']===['actual_performance'],
     'a non-metric object follow-up clears only redundant bookkeeping while preserving its reviewable metric candidate');
+$metricContinuationQuestion=['schema_version'=>'sanitized-question-v2','question'=>'销售业绩第一名呢？','has_unresolved_conditions'=>false,
+    'server_resolved_fields'=>[],'reference_date'=>'2026-09-20','recent_questions'=>['这个月劳动业绩第一名是谁？'],
+    'evidence_messages'=>[['id'=>'current','text'=>'销售业绩第一名呢？'],['id'=>'recent_1','text'=>'这个月劳动业绩第一名是谁？']],
+    'prior_query'=>['metric_codes'=>['staff_labor_yeji'],'operation'=>'ranking','periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-20']],
+        'ranking'=>['direction'=>'top','limit'=>1],'scope'=>'unspecified','object_kind'=>'person',
+        'has_business_filter'=>true,'has_object_selection'=>false,'has_store_scope_restriction'=>false]];
+$metricContinuationUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'查看销售人业绩第一名','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'销售业绩','fields'=>['metric_codes'],'values'=>['metric_terms'=>['销售业绩']],
+        'evidence'=>[['message_id'=>'current','quote'=>'销售业绩']]],
+]],$metricContinuationQuestion);
+$metricContinuationDelta=array_fill_keys(AiIntentResultContract::DELTA_FIELDS,'inherit');
+$metricContinuationDelta['metric_codes']='replace';$metricContinuationDelta['periods']='clear';
+// A sales qualification is a metric-compatible personnel filter change, not
+// customer evidence that the already signed monthly period was abandoned.
+$metricContinuationDelta['business_filters']='replace';
+$metricContinuationBinding=['object_kind'=>'person','object_term'=>'','operation'=>'ranking','metric_codes'=>['staff_sales_yeji'],'action_codes'=>[],
+    'needs_metric_choice'=>false,'ranking'=>['direction'=>'top','limit'=>1],'scope'=>'unspecified','context_delta'=>$metricContinuationDelta,
+    'requirement_bindings'=>[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['staff_sales_yeji']]],'unresolved_fragments'=>[]];
+$normalizedMetricContinuation=AiIntentResultContract::normalize($metricContinuationBinding,['staff_labor_yeji','staff_sales_yeji'],[],$metricContinuationQuestion,$metricContinuationUnderstanding);
+$check($normalizedMetricContinuation['context_delta']['periods']==='inherit',
+    'a same-shape metric follow-up retains its verified period instead of reopening a redundant date decision');
+$reboundMetricContinuation=$metricContinuationBinding;
+// A new registered object may be a new topic, yet it still has no evidence
+// that the customer changed the previous verified period.
+$reboundMetricContinuation['object_kind']='product';
+$reboundMetricContinuation['context_delta']['object']='replace';
+$reboundMetricContinuation['context_delta']['operation']='replace';
+$normalizedReboundMetricContinuation=AiIntentResultContract::normalize($reboundMetricContinuation,['staff_labor_yeji','staff_sales_yeji'],[],$metricContinuationQuestion,$metricContinuationUnderstanding);
+$check($normalizedReboundMetricContinuation['context_delta']['periods']==='inherit',
+    'an executable new topic without a date inherits the verified period rather than forcing a date form');
 $unknownRecommendedBinding=$misbookedBroadRanking;$unknownRecommendedBinding['requirement_bindings'][0]['requirement_id']='r9';
 $reject(static function()use($unknownRecommendedBinding,$broadRankingQuestion,$broadRankingUnderstanding){AiIntentResultContract::normalize($unknownRecommendedBinding,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);},
     'a recommendation never clears an unknown requirement binding');
@@ -307,7 +438,7 @@ $check($normalizedSingleOverview['initial_observation']===false&&$normalizedSing
     'one model-selected broad observation is delivered as a labelled first answer instead of failing or inventing more metrics');
 $badOverview=$overviewBinding;$badOverview['operation']='ranking';$badOverview['ranking']=['direction'=>'top','limit'=>5];
 $reject(static function()use($badOverview,$overviewQuestion,$overviewUnderstanding){AiIntentResultContract::normalize($badOverview,['cash_performance','actual_performance','consume_amount'],[],$overviewQuestion,$overviewUnderstanding);},'initial overview cannot replace a requested response form');
-$check(!AiIntentResultContract::canDeferMetricChoice($overviewUnderstanding,$normalizedOverview,false),'initial overview never falls into the single-metric choice branch');
+$check(!AiIntentResultContract::canUseCandidateBlindMetricReview($overviewUnderstanding,$normalizedOverview),'initial overview never falls into the single-metric choice branch');
 $singleRowWrongId=$naturalBinding;$singleRowWrongId['requirement_bindings'][0]['requirement_id']='r9';
 $check(AiIntentResultContract::normalize($singleRowWrongId,['cash_performance'],[],$naturalQuestion,$naturalUnderstanding)['requirement_bindings'][0]['requirement_id']==='r1','one metric requirement uses its accepted ID while preserving the selected code for semantic review');
 $extraNonMetricRow=$base;$extraNonMetricRow['requirement_bindings'][]=['requirement_id'=>'r3','status'=>'satisfied','metric_codes'=>[]];

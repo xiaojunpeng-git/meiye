@@ -85,6 +85,17 @@ final class AiWorkflowPlanner
                 $dateCode === 'LAST_MONTH' ? $date->format('Y-m-t') : $date->format('Y-m-d'));
         }
         }
+        // A complete analytical request may omit a time expression.  The
+        // platform's neutral first-answer policy is the current business day:
+        // it is a system default, not an inferred customer period, and it is
+        // applied only when no period was supplied or inherited. Explicit or
+        // ambiguous multi-period meanings above remain untouched, while a
+        // comparison still requires both customer periods.
+        if (!$definition && $shape!=='comparison' && $range===null
+            && count((array)($projection['date_terms']??[]))===0
+            && empty($projection['date_grouping_ambiguous'])) {
+            $range=$this->period(['code'=>'TODAY'],$today);
+        }
         $ranking=null;
         if ($shape==='ranking' && isset($selection['ranking'])) {
             $candidate=$selection['ranking'];

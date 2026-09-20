@@ -15,7 +15,7 @@ final class AiAnswerRenderer
         // The verified answer itself is the primary presentation.  Retain the
         // response key for old clients, but do not repeat the same evidence as
         // summary prose and metric cards.
-        $cards = []; $rows = []; $facts = []; $metricNames = []; $shape = $view['query']['query_shape'];
+        $cards = []; $rows = []; $facts = []; $metricNames = []; $rankingPresentationColumns=[]; $shape = $view['query']['query_shape'];
         $threshold = $shape === 'threshold_count' ? $this->thresholdCondition($view['query']) : null;
         $conditionSummary = null; $conditionListHasMore = false; $conditionListLimit = null; $conditionObjectLabel = null;
         foreach ($view['results'] as $row) {
@@ -79,6 +79,8 @@ final class AiAnswerRenderer
             if ($shape === 'ranking') {
                 $metricLabel = $tooltip['name'];
                 if (($row['participant_relation'] ?? false) === true && is_string($row['object_label'] ?? null)) $metricLabel = $row['object_label'] . '关联订单' . $tooltip['name'];
+                $supplements=$this->rankingPresentationValues($row,$registered,$dictionary);
+                foreach ($supplements as $code=>$supplement) $rankingPresentationColumns[$code]=$supplement['label'];
                 foreach ($row['rows'] as $direction => $points) {
                     $valueCounts = [];
                     foreach ($points as $point) {
@@ -93,11 +95,20 @@ final class AiAnswerRenderer
                         $previous = $amount;
                         $rank = ($valueCounts[(string)$amount] > 1 ? '并列' : '')
                             . ($direction === 'top' ? '第' : '倒数第') . $ordinal . '名';
-                        $rows[] = [
+                        $rendered=[
                             'label' => $point['employee_name'] ?? ($point['member_name'] ?? ($point['entity_name'] ?? ($point['store_name'] ?? ('门店 ID ' . $point['store_id'])))),
                             'metric' => $metricLabel, 'rank' => $rank, 'value' => $this->metricValue($amount, $storageUnit), 'unit' => $unit,
                             'period' => $row['period'], 'period_label' => $this->periodLabel($row['period']),
                         ];
+                        // A supplementary column is evidence for the same
+                        // already-ranked entity. Missing source rows display a
+                        // neutral dash instead of inventing a zero or changing
+                        // the rank's population.
+                        foreach ($supplements as $code=>$supplement) {
+                            $value=$supplement['values'][$point['entity_id']]??null;
+                            $rendered['presentation_'.$code]=$value===null?'—':$this->metricValue($value,$supplement['storage_unit']).$supplement['unit'];
+                        }
+                        $rows[]=$rendered;
                     }
                 }
                 continue;
@@ -139,7 +150,15 @@ final class AiAnswerRenderer
         if ($view['query']['compare_range']) $notes[] = '对比时间：' . $view['query']['compare_range']['start'] . ' 至 ' . $view['query']['compare_range']['end'] . '。';
         foreach ($notes as $note) $answer['summary'] .= ' ' . $note;
         if ($rows) {
-            $columns = [['key' => 'label', 'label' => $shape === 'trend' ? '日期' : ($conditionObjectLabel ?? ($person ? '人员' : ($member ? '会员' : ($dimensionLabel ?? '门店'))))], ['key' => 'metric', 'label' => '指标'], ['key' => 'value', 'label' => '数值'], ['key' => 'unit', 'label' => '单位']];
+            $columns = [['key' => 'label', 'label' => $shape === 'trend' ? '日期' : ($conditionObjectLabel ?? ($person ? '人员' : ($member ? '会员' : ($dimensionLabel ?? '门店'))))]];
+            if ($shape==='ranking' && $rankingPresentationColumns!==[]) {
+                // The leading value remains the documented sort metric. Other
+                // registry columns are contextual evidence, not extra ranks.
+                $columns[]=['key'=>'value','label'=>$metricNames[0]??'排序指标'];
+                foreach ($rankingPresentationColumns as $code=>$label) $columns[]=['key'=>'presentation_'.$code,'label'=>$label];
+            } else {
+                $columns=array_merge($columns,[['key' => 'metric', 'label' => '指标'], ['key' => 'value', 'label' => '数值'], ['key' => 'unit', 'label' => '单位']]);
+            }
             if (count(array_unique(array_column($rows, 'period'))) > 1) array_unshift($columns, ['key' => 'period_label', 'label' => '期间']);
             if ($shape === 'ranking') $columns[] = ['key' => 'rank', 'label' => '名次'];
             $answer['table'] = ['columns' => $columns, 'rows' => $rows];
@@ -149,6 +168,26 @@ final class AiAnswerRenderer
         // hierarchy in their own layout; no client derives business values.
         $answer['presentation'] = $this->presentation($shape, $facts, $conclusion, $periodLabel, $notes, $objectKind);
         return $answer;
+    }
+
+    /** @return array<string,array{label:string,storage_unit:string,unit:string,values:array<int,int>}> */
+    private function rankingPresentationValues(array $row,array $registered,\app\services\metric\MetricDictionaryServices $dictionary): array
+    {
+        $out=[];
+        foreach ((array)($row['ranking_presentation_metrics']??[]) as $record) {
+            if (!is_array($record)||!is_string($record['metric_code']??null)||isset($out[$record['metric_code']])) throw new RuntimeException('AI_EVIDENCE_INVALID');
+            $code=$record['metric_code'];$metric=$registered[$code]??null;$storage=$record['storage_unit']??null;
+            if (!is_array($metric)||!is_string($storage)||$storage!==($metric['storage_unit']??null)||!is_array($record['values']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');
+            $tip=$dictionary->getTooltip($code);
+            if (empty($tip['user_ready'])) throw new RuntimeException('AI_METRIC_EXPLANATION_NOT_READY');
+            $values=[];
+            foreach ($record['values'] as $value) {
+                if (!is_array($value)||!is_int($value['entity_id']??null)||$value['entity_id']<1||!is_int($value['metric_value']??null)||isset($values[$value['entity_id']])) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                $values[$value['entity_id']]=$value['metric_value'];
+            }
+            $out[$code]=['label'=>$tip['name'],'storage_unit'=>$storage,'unit'=>$this->displayUnit($tip,$storage),'values'=>$values];
+        }
+        return $out;
     }
 
     /** The condition payload is compiler-verified too, but rendering keeps an independent evidence guard. */

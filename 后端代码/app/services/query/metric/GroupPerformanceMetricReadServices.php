@@ -90,6 +90,16 @@ final class GroupPerformanceMetricReadServices
         return $this->registered->dimensionRanking($metricCode, $dimension, $tenantId, $stores, $range, $limit, $order);
     }
 
+    /**
+     * Decorates identities returned by one registered ranking with another
+     * registry-owned fact. The facade keeps the AI layer out of reader
+     * strategy selection and does not expose a general entity lookup.
+     */
+    public function dimensionValues(string $metricCode,string $dimension,string $tenantId,array $stores,array $range,array $entityIds): array
+    {
+        return $this->registered->dimensionValues($metricCode,$dimension,$tenantId,$stores,$range,$entityIds);
+    }
+
     public function storeNames(array $stores): array
     {
         return $this->registered->storeNames($stores);

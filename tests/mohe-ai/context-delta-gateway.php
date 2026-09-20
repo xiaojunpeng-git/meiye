@@ -58,6 +58,130 @@ try {
         &&($periodWithPriorEvidence['metric_codes']??null)===['staff_labor_yeji']
         &&($periodWithPriorEvidence['operation']??null)==='ranking',
         'a complete current period anchor may keep explanatory prior evidence without re-binding a signed ranking metric');
+    $selfContainedOverviewAfterCollection=\app\services\ai\contract\AiIntentResultContract::inheritedPeriodOnlyContextIntent(
+        ['status'=>'understood','requirements'=>[
+            ['id'=>'r1','meaning'=>'查看今天业绩','fields'=>['metric_codes','periods'],'values'=>[
+                'metric_terms'=>['业绩'],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]]
+            ],'evidence'=>[['message_id'=>'current','quote'=>'今天业绩怎么样','start'=>0]]],
+        ]],
+        ['metric_codes'=>['sales_amount'],'query_shape'=>'ranking','ranking'=>['direction'=>'top','limit'=>1],
+            'business_filters'=>['object_kind'=>'project']],
+        ['presentation_origin'=>'customer_or_verified_context']
+    );
+    cdgCheck($selfContainedOverviewAfterCollection===null,
+        'a self-contained current topic is never admitted as a date-only continuation of a prior collection item');
+    cdgCheck(\app\services\ai\contract\AiIntentUnderstandingContract::hasCurrentTopicAnchor([
+        'requirements'=>[
+            ['fields'=>['metric_codes','periods'],'evidence'=>[['message_id'=>'current','quote'=>'今天业绩怎么样']]],
+        ],
+    ])===true && \app\services\ai\contract\AiIntentUnderstandingContract::hasCurrentTopicAnchor([
+        'requirements'=>[
+            ['fields'=>['periods'],'evidence'=>[['message_id'=>'current','quote'=>'昨天呢']]],
+        ],
+    ])===false && \app\services\ai\contract\AiIntentUnderstandingContract::hasCurrentTopicAnchor([
+        'requirements'=>[
+            ['fields'=>['ranking'],'evidence'=>[['message_id'=>'current','quote'=>'改为前五个']]],
+        ],
+    ])===false,
+        'typed current-topic admission distinguishes a new analytical request from a pure-date continuation without reading question words');
+
+    // A signed query may bypass an unstable model response only for a closed
+    // date grammar. The gateway must reject any added business instruction so
+    // topic changes still go through ordinary natural-language understanding.
+    $localPeriodHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $localPeriodMethod=new ReflectionMethod($localPeriodHarness->gateway,'localVerifiedPeriodOnlyUnderstanding');
+    if (PHP_VERSION_ID<80100) $localPeriodMethod->setAccessible(true);
+    $monthOnly=$localPeriodMethod->invoke($localPeriodHarness->gateway,
+        ['question'=>'这个月呢？','evidence_messages'=>[['id'=>'current','text'=>'这个月呢？']]],
+        ['local_conditions'=>[]],'2026-09-20'
+    );
+    cdgCheck(($monthOnly['requirements'][0]['fields']??null)===['periods']
+        &&($monthOnly['requirements'][0]['values']['periods'][0]['start']??null)==='2026-09-01',
+        'a closed calendar-only continuation derives one server-owned period without a model contract response');
+    cdgCheck($localPeriodMethod->invoke($localPeriodHarness->gateway,
+        ['question'=>'这个月销售额呢？','evidence_messages'=>[['id'=>'current','text'=>'这个月销售额呢？']]],
+        ['local_conditions'=>[]],'2026-09-20'
+    )===null,
+        'a current business measurement cannot enter the local date-only continuation path');
+    $metricOnlyContextMethod=new ReflectionMethod($localPeriodHarness->gateway,'preserveVerifiedMetricOnlyContext');
+    if (PHP_VERSION_ID<80100) $metricOnlyContextMethod->setAccessible(true);
+    $metricOnlyIntent=$metricOnlyContextMethod->invoke($localPeriodHarness->gateway,
+        ['metric_codes'=>['service_count'],'needs_metric_choice'=>false,'context_delta'=>cdgDelta()],
+        ['requirements'=>[['id'=>'r1','fields'=>['metric_codes'],'evidence'=>[['message_id'=>'current','quote'=>'服务次数']]]]],
+        ['metric_codes'=>['staff_sales_yeji'],'query_shape'=>'ranking','start_date'=>'2026-09-01','end_date'=>'2026-09-20']
+    );
+    cdgCheck(($metricOnlyIntent['context_delta']['metric_codes']??null)==='replace'
+        &&array_diff((array)($metricOnlyIntent['context_delta']??[]),['inherit','replace'])===[],
+        'a bound metric-only follow-up replaces only its measurement and retains verified query context');
+    cdgCheck($metricOnlyContextMethod->invoke($localPeriodHarness->gateway,
+        ['metric_codes'=>['service_count'],'needs_metric_choice'=>false,'context_delta'=>cdgDelta()],
+        ['requirements'=>[['id'=>'r1','fields'=>['metric_codes','ranking'],'evidence'=>[['message_id'=>'current','quote'=>'按服务次数前五名']]]]],
+        ['metric_codes'=>['staff_sales_yeji'],'query_shape'=>'ranking','start_date'=>'2026-09-01','end_date'=>'2026-09-20']
+    )['context_delta']===cdgDelta(),
+        'an explicitly changed presentation remains model-owned rather than being overwritten as a metric-only delta');
+    $projectionRecovered=$metricOnlyContextMethod->invoke($localPeriodHarness->gateway,
+        ['metric_codes'=>['service_count'],'needs_metric_choice'=>false,'context_delta'=>cdgDelta()],
+        ['requirements'=>[['id'=>'r1','fields'=>['metric_codes','object_kind','operation'],'evidence'=>[['message_id'=>'current','quote'=>'按服务次数看']]]]],
+        ['metric_codes'=>['staff_sales_yeji'],'query_shape'=>'ranking','start_date'=>'2026-09-01','end_date'=>'2026-09-20'],true
+    );
+    cdgCheck(($projectionRecovered['context_delta']['ranking_limit']??null)==='inherit'
+        &&($projectionRecovered['context_delta']['periods']??null)==='inherit',
+        'a closed registered metric projection restores omitted signed date and ranking context when a model overstates inferred fields');
+    $registeredMetricProjectionMethod=new ReflectionMethod($localPeriodHarness->gateway,'hasClosedRegisteredMetricOnlyProjection');
+    if (PHP_VERSION_ID<80100) $registeredMetricProjectionMethod->setAccessible(true);
+    cdgCheck($registeredMetricProjectionMethod->invoke($localPeriodHarness->gateway,['question'=>'按服务次数看呢？'])===true
+        &&$registeredMetricProjectionMethod->invoke($localPeriodHarness->gateway,['question'=>'这个月按服务次数看呢？'])===false,
+        'registered object-grain metric signals may retain context only when no current date or other semantic delta is present');
+    $closedMetricUnderstandingMethod=new ReflectionMethod($localPeriodHarness->gateway,'reconcileClosedMetricOnlyUnderstanding');
+    if (PHP_VERSION_ID<80100) $closedMetricUnderstandingMethod->setAccessible(true);
+    $overstatedMetricUnderstanding=[
+        'goal'=>'按服务次数继续查看上一排名','status'=>'understood','requirements'=>[[
+            'id'=>'r1','meaning'=>'按服务次数查看','fields'=>['metric_codes','object_kind','operation','ranking'],
+            'values'=>['metric_terms'=>['服务次数'],'object_kind'=>'person','operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>null]],
+            'evidence'=>[['message_id'=>'current','quote'=>'按服务次数看呢？','start'=>0]],
+        ]],
+    ];
+    $closedMetricUnderstanding=$closedMetricUnderstandingMethod->invoke(
+        $localPeriodHarness->gateway,$overstatedMetricUnderstanding,true,
+        ['metric_codes'=>['staff_sales_yeji'],'query_shape'=>'ranking','start_date'=>'2026-09-01','end_date'=>'2026-09-20']
+    );
+    cdgCheck(($closedMetricUnderstanding['requirements'][0]['fields']??null)===['metric_codes']
+        &&($closedMetricUnderstanding['requirements'][0]['values']??null)===['metric_terms'=>['服务次数']]
+        &&!isset($closedMetricUnderstanding['groups']),
+        'a registry-proven metric-only continuation removes model-copied ranking and object fields before binding validation');
+    cdgCheck($closedMetricUnderstandingMethod->invoke(
+        $localPeriodHarness->gateway,$overstatedMetricUnderstanding,false,
+        ['metric_codes'=>['staff_sales_yeji']]
+    )===$overstatedMetricUnderstanding,
+        'a turn with any independent semantic delta keeps the complete model-owned understanding');
+    $rankingOnlyUnderstanding=['status'=>'understood','requirements'=>[[
+        'id'=>'r1','fields'=>['operation','ranking'],'values'=>[
+            'operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>2],
+        ],'evidence'=>[['message_id'=>'current','quote'=>'前两名呢？']],
+    ]]];
+    $rankingSource=['query_shape'=>'ranking','metric_codes'=>['project_sales_amount'],
+        'ranking'=>['direction'=>'top','limit'=>1],'business_filters'=>['object_kind'=>'project']];
+    $rankingOnlyIntent=\app\services\ai\contract\AiIntentResultContract::inheritedRankingOnlyContextIntent(
+        $rankingOnlyUnderstanding,$rankingSource,[]
+    );
+    cdgCheck(($rankingOnlyIntent['ranking']??null)===['direction'=>'top','limit'=>2]
+        &&($rankingOnlyIntent['context_delta']['periods']??null)==='inherit'
+        &&($rankingOnlyIntent['context_delta']['metric_codes']??null)==='inherit',
+        'a ranking-only continuation changes presentation while retaining each signed collection query');
+    $collectionRankingMethod=new ReflectionMethod($localPeriodHarness->gateway,'compileCollectionRankingContinuation');
+    if (PHP_VERSION_ID<80100) $collectionRankingMethod->setAccessible(true);
+    $collectionRankingPlan=$collectionRankingMethod->invoke($localPeriodHarness->gateway,$rankingOnlyUnderstanding,[
+        ['id'=>'q1','label'=>'项目排行','query'=>$rankingSource+['start_date'=>'2026-09-01','end_date'=>'2026-09-20']],
+        ['id'=>'q2','label'=>'产品排行','query'=>array_replace_recursive($rankingSource,[
+            'metric_codes'=>['product_sales_amount'],'business_filters'=>['object_kind'=>'product'],
+            'start_date'=>'2026-09-01','end_date'=>'2026-09-20',
+        ])],
+    ],[],'screen');
+    cdgCheck(count($collectionRankingPlan['plan']['items']??[])===2
+        &&($collectionRankingPlan['plan']['items'][0]['plan']['query']['ranking']['limit']??null)===2
+        &&($collectionRankingPlan['plan']['items'][1]['plan']['query']['metric_codes']??null)===['product_sales_amount'],
+        'a collection ranking continuation updates every item symmetrically without replacing its metric');
+    $localPeriodHarness->close();
 
     $overviewHarness=new R6GatewayHarness(3,[1,2],'platform');
     $capabilitiesMethod=new ReflectionMethod($overviewHarness->gateway,'capabilities');
@@ -90,7 +214,7 @@ try {
     $overviewFollow=$overviewHarness->start('这个月呢？',$overviewSource['answer']['context_ref']);
     $overviewEvidence=$overviewHarness->private->read($overviewHarness->row($overviewFollow)['evidence_ref']);
     cdgCheck($overviewFollow['status']==='COMPLETED'&&$overviewHarness->queries===$overviewQueries+1
-        &&$overviewHarness->models===$overviewModels+1
+        &&$overviewHarness->models===$overviewModels
         &&($overviewEvidence['query']['start_date']??'')===substr((string)($overviewEvidence['query']['end_date']??''),0,7).'-01',
         'an exact calendar-only continuation reuses a signed query and skips the binding model');
     $overviewHarness->close();
@@ -116,11 +240,8 @@ try {
     cdgCheck($wrongMonthFollow['status']==='COMPLETED'&&$monthHarness->queries===$queriesBeforeMonthFollow+1
         &&($wrongMonthEvidence['query']['start_date']??'')===substr((string)($wrongMonthEvidence['query']['end_date']??''),0,7).'-01',
         'a typed period-only continuation reuses the signed binding instead of risking an inherited-date binding error');
-    cdgCheck($monthHarness->models===$modelsBeforeMonthFollow+1,
-        'a typed period-only continuation performs understanding but skips the binding-model call');
-    cdgCheck(($monthHarness->modelInputs[0]['recent_questions']??null)===[]
-        &&($monthHarness->modelInputs[0]['evidence_messages']??null)===[['id'=>'current','text'=>'这个月呢？']],
-        'a signed follow-up keeps only current-message evidence and does not resend stale local history');
+    cdgCheck($monthHarness->models===$modelsBeforeMonthFollow && $monthHarness->modelInputs===[],
+        'a closed date-only continuation reuses signed context without an avoidable model call');
     $correctMonthDelta=cdgDelta();$correctMonthDelta['periods']='replace';
     $monthHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'unspecified','context_delta'=>$correctMonthDelta,'unresolved_fragments'=>[]];
     $monthFollow=$monthHarness->start('这个月呢？',$monthSource['answer']['context_ref']);

@@ -48,8 +48,27 @@ final class AiAnalysisGuidancePlanner
             if (count($matches)===1) $selection=$matches[0]['ref'];
         }
         $periods=$projection['date_terms']??[];
+        // A metric-only continuation carries no newly stated date in the
+        // semantic projection. Its merged intent may nevertheless contain a
+        // signed inherited Reader range. Prefer that range over the generic
+        // current-day first-answer default; a current date expression remains
+        // above and therefore always wins.
+        if ($periods===[] && ($intent['context_delta']['periods']??null)==='inherit'
+            && is_array($intent['periods']??null) && $intent['periods']!==[]) {
+            $periods=$intent['periods'];
+        }
         if (count($periods)>1 || !empty($projection['date_grouping_ambiguous'])) throw new \RuntimeException('AI_ANALYSIS_PERSON_PERIOD_COMBINATION_UNAVAILABLE');
-        $range=$periods?(new AiWorkflowPlanner())->normalizePeriod($periods[0],$today):null;
+        // Person-grain rankings use the same first-answer baseline as every
+        // other registered query path. When no date is expressed, compile the
+        // current business day instead of asking a redundant date question;
+        // explicit and ambiguous date meaning has already been preserved or
+        // rejected above and is never overwritten here.
+        $periodPlanner=new AiWorkflowPlanner();
+        $range=$periods
+            ?(isset($periods[0]['kind'])
+                ?$periodPlanner->normalizeNaturalPeriod($periods[0],$today)
+                :$periodPlanner->normalizePeriod($periods[0],$today))
+            :$periodPlanner->normalizePeriod(['code'=>'TODAY'],$today);
         $ranking=$intent['ranking']??null;
         $rankingKeys=is_array($ranking)?array_keys($ranking):[];sort($rankingKeys);
         if (!is_array($ranking) || $rankingKeys!==['direction','limit']

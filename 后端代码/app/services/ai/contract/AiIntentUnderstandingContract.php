@@ -8,13 +8,13 @@ namespace app\services\ai\contract;
  */
 final class AiIntentUnderstandingContract
 {
-    public const VERSION = 'intent-understanding-v9';
+    public const VERSION = 'intent-understanding-v10';
 
     public static function modelInstruction(): string
     {
         return 'Return one JSON object following '.self::VERSION.': '
             . '{"goal":"brief business goal","requirements":[{"id":"r1","meaning":"one part of the customer request","fields":["metric_codes"],"values":{"metric_terms":["exact customer term"]},"evidence":[{"message_id":"current","quote":"exact text from that de-identified message"}]}],"status":"understood|needs_clarification"}. '
-            . 'The only top-level keys are goal, requirements and status. Every meaningful part of the customer request needs one or more requirements; do not collapse exclusions, comparison relationships, quantity or time into a vague summary. When status is needs_clarification and no concrete meaning can yet be preserved, requirements may be an empty array; do not use unbound for ambiguity. '
+            . 'The only top-level keys are goal, requirements, status and optional groups. Every meaningful part of the customer request needs one or more requirements; do not collapse exclusions, comparison relationships, quantity or time into a vague summary. When status is needs_clarification and no concrete meaning can yet be preserved, requirements may be an empty array; do not use unbound for ambiguity. When the customer explicitly asks independent results for two to four analytical subjects, include groups as [{"id":"q1","requirement_ids":["r1"]}]. Each group lists the requirements needed for one result; a shared date, metric, ranking or scope requirement may occur in every applicable group. Do not create groups for AND/OR predicates over one candidate population, multi-metric summary of one subject, or an ambiguous phrase. '
             . 'A requirement has exactly id, meaning, fields, values and evidence. fields may contain metric_codes, object_kind, object_relation, operation, periods, ranking, scope, result_reference, aggregate_condition, condition_update or unbound; use only fields actually expressed by this requirement. A field is a completed semantic commitment, never a note or a sketch. values is optional only when the request supplies no safe structured value for that field. When the customer meaning clearly establishes an object kind or relation, result form, period, ranking, scope, aggregate condition, condition update or result reference, include the matching complete typed value in values so the later binding cannot silently change it. A temporal expression that fixes when the answer concerns is always an independent period requirement, even when the customer asks broadly about overall conditions rather than naming a metric. Before emitting the object, check the complete customer message again: every expressed relative-day, calendar-month or explicit-range condition must have a periods field, a complete values.periods carrier and evidence anchored to that expression. Do not absorb a time condition into a goal or metric term. When present, values may contain only values matching fields and must be complete and valid for each value it carries. Do not omit a field merely because its execution-shaped value is not available in this phase; preserve the natural-language meaning and evidence, and let the later binding phase derive the executable form. id is r followed by a positive number and is valid only in this request. evidence is an array of {"message_id":"current","quote":"exact excerpt"}; message_id must name an entry in question.evidence_messages. Do not output character offsets. The excerpt must occur exactly once in that one de-identified message; include more adjacent text if needed to distinguish repeated words. '
             . 'The values object contains only keys named by fields. Every customer-stated business measurement belongs in fields as metric_codes and carries either values.metric_terms or values.metric_exclusions, even if it is everyday language rather than a registered indicator name; metric_codes is only the name of the later binding slot, never a request to output a code. These are nonempty arrays of exact customer terms present in an evidence excerpt. Never put a registered metric code in values. A single cumulative member-money threshold may retain the legacy aggregate_condition {"subject":"member","aggregation":"period_total","operator":"gte|gt|lte|lt|eq","amount_cents":positive-integer} with operation=threshold_count. For one or more conditions over a candidate object set, preserve aggregate_condition as {"subject":"person|member|store|order|sale_line|card|project|product","relation":"all|any","result_form":"count|list","conditions":[{"metric_term":"exact customer measurement","operator":"gte|gt|lte|lt|eq","quantity":"normalized nonnegative decimal","unit":"yuan|count|day"}]} and set operation to condition_count or condition_list to match result_form. Every generic condition item has exactly metric_term, operator, quantity and unit. quantity and unit are always JSON strings. Convert Chinese amount magnitude into yuan: “5万元” is quantity "50000" and unit "yuan"; “24次” is quantity "24" and unit "count"; “超过90天没来” keeps quantity "90" and unit "day". A current positive state such as “有剩余项目次数” is a condition with operator gt, quantity "0" and unit "count"; do not invent a period total for it. Logical relation is part of the requested business meaning, not a default: relation all means every condition must hold (for example, “并且”), while relation any means at least one condition may hold (for example, “或者”). Never default a multi-condition request to all, and never replace an explicit alternative with a conjunction. For example, “销售业绩达到5万元并且劳动业绩达到5万元的员工有几个” uses subject person, relation all, result_form count and two condition items with metric_term “销售业绩” and “劳动业绩”, operator gte, quantity "50000", unit "yuan"; the same request joined by “或者” uses relation any. Preserve every condition in customer order; do not collapse AND/OR, invent a metric, or turn a count request into a list. quantity is a normalized decimal string such as "50000" or "24", never a result. When prior_query contains a verified generic aggregate_condition and the current turn clearly changes exactly one existing predicate while leaving every other condition, object, relation, period and result form unchanged, use only condition_update with values.condition_update={"target_term":"exact current words identifying that prior condition","operator":"gte|gt|lte|lt|eq","quantity":"normalized nonnegative decimal","unit":"yuan|count|day"}. Do not also emit metric_codes, aggregate_condition, object_kind or operation for this one-field delta. condition_update is never a standalone query, never adds or removes a condition, and must not be used when the target could denote more than one prior predicate. If the current turn changes only time, object, range or response form and names no measurement, do not add a metric_codes field merely because a verified prior query has one; retain that prior meaning through context only. A time, object or response-form requirement does not replace the separate measurement requirement. object_kind is one of store, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization, order, sale_line, card, unknown. object_relation is analysis when that kind is what the customer wants compared, grouped or listed, and selection only when the customer identifies a particular object whose records should narrow the data. An analytical object is never itself a data-range restriction. operation is one of summary, trend, ranking, comparison, threshold_count, condition_count, condition_list, definition, unknown. Use ranking when the requested answer identifies leading, trailing or ordered comparable objects; the fact that a ranking compares peer values does not make it operation=comparison. Use comparison only when the customer asks to contrast two stated business sides such as periods, objects or measurements. scope is one of current_store, authorized, unspecified. ranking is exactly {"direction":"top|bottom|top_and_bottom|unspecified","limit":null}. Set limit to an integer from 1 to 999 when the customer asks for a specific count or semantically asks for one winner, leader, best or worst object; leave it null only for an open-ended plural ranking with no count. result_reference is exactly {"group":"top|bottom","ordinal":positive-integer} only when the customer explicitly refers to a displayed rank result; it identifies a position in the previous answer, never a name, ID or value. periods is an array of at most two objects, each exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":1,"end_offset_days":0}, or {"kind":"month_offset","offset_months":0}; numeric examples illustrate JSON types, not defaults. A relative-day count is a positive integer, and a month offset is an integer; preserve the customer meaning without imposing execution coverage limits here. A comparison that expresses both sides in the customer wording must preserve those two periods in stated order; do not leave either side for a date form. Omit a values key and its field when that meaning was not supplied, except a genuinely inherited meaning must remain explicit. '
             . 'When the customer coordinates two or more independently named measurements, preserve every measurement separately, either as separate requirements or as separate metric_terms in one requirement; never collapse the conjunction into one vague measurement or turn it into a choice between terms. Prefer copying each metric_term character-for-character from the de-identified customer message. For a generic aggregate condition only, you may instead use one exact registered business-language alias that means the same measurement as an exact registered phrase in the evidence; never invent a paraphrase or insert an object qualifier. '
@@ -28,7 +28,7 @@ final class AiIntentUnderstandingContract
         if ($value instanceof \stdClass) $value = get_object_vars($value);
         $keys = is_array($value) ? array_keys($value) : [];
         sort($keys, SORT_STRING);
-        if ($keys !== ['goal', 'requirements', 'status']) self::fail('shape');
+        if (!in_array($keys,[['goal','requirements','status'],['goal','groups','requirements','status']],true)) self::fail('shape');
         if (!self::text($value['goal'], 240)) self::fail('goal');
         if (!in_array($value['status'], ['understood', 'needs_clarification'], true)) self::fail('status');
         $messages = self::messages($safeQuestion);
@@ -196,7 +196,29 @@ final class AiIntentUnderstandingContract
             }
             if (!$covered) self::fail('period_only_coverage');
         }
-        return ['goal' => trim($value['goal']), 'requirements' => $normalized, 'status' => $value['status']];
+        $out=['goal' => trim($value['goal']), 'requirements' => $normalized, 'status' => $value['status']];
+        if (array_key_exists('groups',$value)) {
+            try {
+                $groups=self::groups($value['groups'],$normalized);
+            } catch (AiContractException $error) {
+                // Groups are ownership metadata, not customer meaning.  When
+                // the independently accepted requirements mechanically prove
+                // their ownership, recover that metadata instead of asking a
+                // model to restate the same analytical request merely because
+                // an array carrier was malformed.
+                $groups=self::derivedIndependentGroups($normalized);
+                // A non-collection request needs no group carrier at all.
+                // Providers occasionally attach a one-item or stale prior
+                // group to a short continuation; rejecting the independently
+                // valid requirements would turn optional routing metadata
+                // into a customer-visible failure. Only a mechanically proven
+                // multi-result request receives derived groups above.
+            }
+        } else {
+            $groups=self::derivedIndependentGroups($normalized);
+        }
+        if ($groups!==null) $out['groups']=$groups;
+        return $out;
     }
 
     /**
@@ -346,7 +368,7 @@ final class AiIntentUnderstandingContract
     public static function repairable(?string $predicate): bool
     {
         return is_string($predicate) && $predicate !== ''
-            && preg_match('/^(shape|goal|status|requirements|requirements_collection|requirement_shape|requirement_keys|requirement_id|requirement_meaning|requirement_fields(?:_(?:shape|empty|too_many|duplicate|unknown))?|requirement_evidence_collection|requirement_evidence_shape|requirement_evidence_duplicate|message_projection|evidence_not_unique|period_only_coverage|period_only_multiple|period_term_as_metric|result_reference_without_ranked_prior|values(?::[a-z_]+)?)$/D',$predicate) === 1;
+            && preg_match('/^(shape|goal|status|requirements|requirements_collection|requirement_shape|requirement_keys|requirement_id|requirement_meaning|requirement_fields(?:_(?:shape|empty|too_many|duplicate|unknown))?|requirement_evidence_collection|requirement_evidence_shape|requirement_evidence_duplicate|groups|message_projection|evidence_not_unique|period_only_coverage|period_only_multiple|period_term_as_metric|result_reference_without_ranked_prior|values(?::[a-z_]+)?)$/D',$predicate) === 1;
     }
 
     /** A structural correction never interprets a customer phrase in PHP. */
@@ -355,6 +377,9 @@ final class AiIntentUnderstandingContract
         if (!self::repairable($predicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         if ($predicate === 'period_only_coverage') {
             return 'The previous response called this a time-only continuation but its evidence did not cover the complete current customer message. Re-read the whole current message. Return only one periods requirement only when the whole message changes no business fact, object, result form, range, ranking, scope, condition or measurement. Otherwise preserve every additional current meaning with its own requirement and current-message evidence. Do not invent, bind or select a metric.';
+        }
+        if ($predicate === 'groups') {
+            return 'The previous response used malformed groups for independently requested analytical results. Return the same complete understanding again with no invented business meaning. If the current customer asks for two to four independent results, groups must be an array of two to four objects, each having exactly id and requirement_ids. Use unique ids q1, q2, q3 or q4. Each requirement_ids value must be a nonempty JSON array of unique existing requirement ids, and every emitted requirement id must appear in at least one group. A shared date, ranking or scope requirement may occur in every applicable group. Do not output groups for conditions over one population, a one-subject summary, or an ambiguous request. Preserve every requirement, its evidence and its customer meaning; correct only the groups carrier.';
         }
         if ($predicate === 'period_only_multiple') {
             return 'The previous response duplicated a time-only continuation into several period requirements. Re-read the complete current message and return exactly one periods requirement with complete current-message evidence. Do not repeat the prior question as another requirement and do not add, replace or copy its metric, object, result form, ranking, scope or condition; the verified prior query is inherited later.';
@@ -396,6 +421,107 @@ final class AiIntentUnderstandingContract
         foreach ((array)($understanding['requirements'] ?? []) as $requirement) {
             if (is_string($requirement['id'] ?? null)) $out[$requirement['id']]=[
                 'fields'=>(array)($requirement['fields']??[]),'values'=>(array)($requirement['values']??[]),'evidence'=>(array)($requirement['evidence']??[])];
+        }
+        return $out;
+    }
+
+    /**
+     * Decides whether the current turn establishes its own analytical topic.
+     * It reads only the already-validated semantic fields and their current
+     * evidence anchor—never customer words, labels, metric codes or a prior
+     * result. A pure period/result continuation consequently remains eligible
+     * for signed-context reuse. A current measurement becomes a new topic
+     * only when it is paired with a current time, object, response form or
+     * condition; an isolated ranking/scope/object edit may still be a genuine
+     * continuation of the signed query.
+     */
+    public static function hasCurrentTopicAnchor(array $understanding): bool
+    {
+        $currentFields=[];
+        foreach ((array)($understanding['requirements']??[]) as $requirement) {
+            if (!is_array($requirement)) continue;
+            $hasCurrentEvidence=false;
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (is_array($evidence) && ($evidence['message_id']??null)==='current') {
+                    $hasCurrentEvidence=true;
+                    break;
+                }
+            }
+            if ($hasCurrentEvidence) foreach ((array)($requirement['fields']??[]) as $field) {
+                if (is_string($field)) $currentFields[$field]=true;
+            }
+        }
+        if (!isset($currentFields['metric_codes'])) return false;
+        return isset($currentFields['periods']) || isset($currentFields['object_kind'])
+            || isset($currentFields['operation']) || isset($currentFields['aggregate_condition']);
+    }
+
+    /** @return array<int,array{id:string,requirement_ids:array<int,string>}> */
+    public static function queryGroups(array $understanding): array
+    {
+        $groups=$understanding['groups']??null;
+        if (!is_array($groups) || $groups===[]) return [['id'=>'q1','requirement_ids'=>self::ids($understanding)]];
+        return $groups;
+    }
+
+    /** Groups are semantic ownership only; they never add an executable query. */
+    private static function groups($groups,array $requirements): array
+    {
+        if (!is_array($groups) || count($groups)<2 || count($groups)>4 || array_keys($groups)!==range(0,count($groups)-1)) self::fail('groups');
+        $known=[];foreach($requirements as $requirement) $known[$requirement['id']]=true;
+        $seen=[];$covered=[];$out=[];
+        foreach($groups as $group) {
+            if ($group instanceof \stdClass) $group=get_object_vars($group);
+            $groupKeys=is_array($group)?array_keys($group):[];sort($groupKeys,SORT_STRING);
+            if (!is_array($group) || $groupKeys!==['id','requirement_ids'] || !is_string($group['id']??null)
+                || !preg_match('/^q[1-4]$/D',$group['id']) || isset($seen[$group['id']])
+                || !is_array($group['requirement_ids']) || $group['requirement_ids']===[] || count($group['requirement_ids'])>12
+                || array_keys($group['requirement_ids'])!==range(0,count($group['requirement_ids'])-1)) self::fail('groups');
+            $local=[];foreach($group['requirement_ids'] as $id) {
+                if (!is_string($id) || !isset($known[$id]) || isset($local[$id])) self::fail('groups');
+                $local[$id]=true;$covered[$id]=true;
+            }
+            $seen[$group['id']]=true;$out[]=['id'=>$group['id'],'requirement_ids'=>array_keys($local)];
+        }
+        if (array_diff_key($known,$covered)!==[]) self::fail('groups');
+        return $out;
+    }
+
+    /**
+     * Derive result ownership only from already accepted typed semantics. This
+     * is deliberately narrower than language interpretation: it admits two
+     * to four distinct analytical ranking dimensions and leaves conditions,
+     * comparisons, selections and one-subject summaries untouched.
+     *
+     * @return array<int,array{id:string,requirement_ids:array<int,string>}>|null
+     */
+    private static function derivedIndependentGroups(array $requirements): ?array
+    {
+        $operation=null;$hasRanking=false;$byObject=[];$shared=[];
+        foreach ($requirements as $requirement) {
+            if (!is_array($requirement) || !is_string($requirement['id']??null)) return null;
+            $fields=(array)($requirement['fields']??[]);$values=(array)($requirement['values']??[]);
+            if (in_array('operation',$fields,true)) {
+                $candidate=$values['operation']??null;
+                if (!is_string($candidate) || ($operation!==null && $operation!==$candidate)) return null;
+                $operation=$candidate;
+            }
+            if (in_array('ranking',$fields,true)) $hasRanking=true;
+            if (!in_array('object_kind',$fields,true)) {$shared[]=$requirement['id'];continue;}
+            $object=$values['object_kind']??null;
+            if (!is_string($object) || in_array($object,['person','store','unknown'],true)
+                // Object relation is optional at the semantic boundary. In a
+                // multi-dimension ranking, the typed operation already makes
+                // an omitted relation analytical; only an explicit selection
+                // may block independent-result ownership.
+                || (($values['object_relation']??'analysis')!=='analysis')) return null;
+            $byObject[$object][]=$requirement['id'];
+        }
+        if ($operation!=='ranking' || !$hasRanking || count($byObject)<2 || count($byObject)>4) return null;
+        $out=[];$index=1;
+        foreach ($byObject as $ids) {
+            $out[]=['id'=>'q'.$index,'requirement_ids'=>array_values(array_unique(array_merge($ids,$shared)))];
+            $index++;
         }
         return $out;
     }
@@ -592,7 +718,15 @@ final class AiIntentUnderstandingContract
             }
         }
         if (in_array('metric_codes',$fields,true) && !isset($value['metric_terms']) && !isset($value['metric_exclusions'])) {
-            self::fail('values:metric_terms');
+            // A clear ranking subject can be expressed without naming a
+            // registered measurement (for example, asking which registered
+            // dimension "does best"). Do not force the language model to
+            // invent a specific metric term merely to cross this semantic
+            // boundary. The later binding stage still selects one compatible
+            // registered metric, and the execution contract rechecks it.
+            // This never applies to a condition, a time-only continuation,
+            // or a question that already contains an exact registered term.
+            if (!self::canDeferUnnamedRankingMetric($fields,$value,$evidence)) self::fail('values:metric_terms');
         }
         if (isset($value['aggregate_condition']['conditions'])) {
             $conditionTerms=array_column($value['aggregate_condition']['conditions'],'metric_term');
@@ -638,6 +772,25 @@ final class AiIntentUnderstandingContract
             }
         }
         return false;
+    }
+
+    /**
+     * A registry-only check distinguishes an unnamed ranking perspective from
+     * a customer-stated measurement. It does not classify phrases, select a
+     * metric, or weaken a condition; it only prevents an invented metric term
+     * from turning a clear analytical request into a model-format failure.
+     */
+    private static function canDeferUnnamedRankingMetric(array $fields,array $value,array $evidence): bool
+    {
+        if (!in_array('object_kind',$fields,true) || !in_array('operation',$fields,true)
+            || !in_array('ranking',$fields,true) || ($value['operation']??null)!=='ranking'
+            || isset($value['aggregate_condition'])) return false;
+        $catalog='\\app\\services\\query\\metric\\MetricSemanticCatalog';
+        foreach ($evidence as $item) {
+            if (($item['message_id']??null)!=='current' || !is_string($item['quote']??null)) continue;
+            if ($catalog::registeredTermsInText($item['quote'])!==[]) return false;
+        }
+        return true;
     }
 
     private static function periods($periods): bool

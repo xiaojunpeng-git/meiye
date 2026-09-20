@@ -35,11 +35,11 @@ try {
         ['id'=>'r1','meaning'=>'查看收款','fields'=>['metric_codes'],'values'=>['metric_terms'=>['收款']],'evidence'=>[['message_id'=>'current','quote'=>'收款']]],
     ]];
     $candidate=['metric_codes'=>['cash_performance'],'needs_metric_choice'=>false];
-    sbgCheck(\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($plain,$candidate,false),'one fresh positive metric may use candidate-blind ambiguity review');
-    sbgCheck(!\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($h->understandingOverride,$candidate,false),'an exclusion makes candidate-blind ambiguity ineligible');
-    sbgCheck(\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($plain,$candidate,true),'a new evidence-backed measurement keeps candidate-blind admission in a follow-up');
+    sbgCheck(\app\services\ai\contract\AiIntentResultContract::canUseCandidateBlindMetricReview($plain,$candidate),'one fresh positive metric may use candidate-blind ambiguity review');
+    sbgCheck(!\app\services\ai\contract\AiIntentResultContract::canUseCandidateBlindMetricReview($h->understandingOverride,$candidate),'an exclusion makes candidate-blind ambiguity ineligible');
+    sbgCheck(\app\services\ai\contract\AiIntentResultContract::canUseCandidateBlindMetricReview($plain,$candidate),'a new evidence-backed measurement keeps candidate-blind admission in a follow-up');
     $rankingCandidate=$candidate+['operation'=>'ranking'];
-    sbgCheck(\app\services\ai\contract\AiIntentResultContract::canDeferMetricChoice($plain,$rankingCandidate,true),'a clear ranking may use the same candidate-blind metric admission');
+    sbgCheck(\app\services\ai\contract\AiIntentResultContract::canUseCandidateBlindMetricReview($plain,$rankingCandidate),'a clear ranking may use the same candidate-blind metric admission');
     $unboundCandidate=['metric_codes'=>[],'needs_metric_choice'=>true];
     sbgCheck(\app\services\ai\contract\AiIntentResultContract::canUseCandidateBlindMetricReview($plain,$unboundCandidate),
         'a fresh measurement may be model-resolved from the registry even when the first binder left it pending');

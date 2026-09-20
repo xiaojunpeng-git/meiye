@@ -613,6 +613,27 @@ final class RegisteredMetricReadServices
     }
 
     /**
+     * Reads display values for identities emitted by an earlier authorized
+     * ranking in the same Reader transaction. This is intentionally not a
+     * second ranking or arbitrary entity search: callers may only decorate
+     * rows that the primary registered metric already returned.
+     *
+     * @return array<int,array{entity_id:int,metric_value:int}>
+     */
+    public function dimensionValues(string $metricCode,string $dimension,string $tenantId,array $stores,array $range,array $entityIds): array
+    {
+        $this->assertScope($tenantId,$stores,$range);
+        $ids=array_values(array_unique(array_filter($entityIds,static function($id): bool { return is_int($id)&&$id>0; })));
+        sort($ids,SORT_NUMERIC);
+        if ($ids===[]||count($ids)>100) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $contract=MetricDefinitionRegistry::get($metricCode);
+        $dimensionContract=$contract['dimensions'][$dimension]??($contract['source']['dimensions'][$dimension]??null);
+        if (($contract['reader_strategy']??null)!=='fact_sum'||!is_array($dimensionContract)
+            ||isset($dimensionContract['analysis_relation_source'])) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        return $this->factDimensionValues($contract['source'],$tenantId,$stores,$range,$dimensionContract,$ids);
+    }
+
+    /**
      * A portfolio overview is still a registered fact read. It is not the
      * sum of visible ranking rows, and callers cannot pass arbitrary filters.
      */
@@ -1740,6 +1761,25 @@ final class RegisteredMetricReadServices
             $name = trim((string)($row['entity_name'] ?? ''));
             if ($id <= 0 || $name === '') $this->fail('METRIC_SOURCE_RESULT_INVALID');
             $out[] = ['entity_id' => $id, 'entity_name' => $name, 'metric_value' => $this->integer($row['metric_value'] ?? null)];
+        }
+        return $out;
+    }
+
+    /** @return array<int,array{entity_id:int,metric_value:int}> */
+    private function factDimensionValues(array $source,string $tenantId,array $stores,array $range,array $dimension,array $entityIds): array
+    {
+        $idField=(string)($dimension['id']??'');
+        if (!preg_match('/^[a-z][a-z0-9_]{0,127}$/D',$idField)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $query=$this->factQuery($source,$tenantId,$stores,$range);
+        $this->dimensionSourceFilters($query,$dimension);
+        $rows=$query->whereIn('p.'.$idField,$entityIds)
+            ->fieldRaw('p.'.$idField.' entity_id,COALESCE(SUM('.$source['amount'].'),0) metric_value')
+            ->group('p.'.$idField)->select()->toArray();
+        $out=[];
+        foreach ($rows as $row) {
+            $entityId=$this->integer($row['entity_id']??null);
+            if ($entityId<1) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            $out[]=['entity_id'=>$entityId,'metric_value'=>$this->integer($row['metric_value']??null)];
         }
         return $out;
     }

@@ -261,8 +261,33 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       || !value.notes.every(note => typeof note === 'string')) return null;
     return value;
   }
-  function renderAnswer(answer, live = true) {
+  function sectionsOf(answer) {
+    const sections = answer && answer.sections;
+    if (!Array.isArray(sections) || sections.length < 2 || sections.length > 4) return null;
+    const seen = new Set();
+    for (const section of sections) {
+      if (!section || typeof section.id !== 'string' || !/^q[1-4]$/.test(section.id) || seen.has(section.id)
+        || typeof section.title !== 'string' || !section.title || section.title.length > 64
+        || !section.answer || typeof section.answer !== 'object' || Array.isArray(section.answer)
+        || Array.isArray(section.answer.sections)) return null;
+      seen.add(section.id);
+    }
+    return sections;
+  }
+  function renderAnswer(answer, live = true, target = body) {
     if (!answer || typeof answer !== 'object') return;
+    const sections = sectionsOf(answer);
+    if (sections) {
+      const collection = el('section', null, 'answer-presentation');
+      sections.forEach(section => {
+        const part = el('section', null, 'answer-section');
+        part.appendChild(el('div', section.title, 'answer-section-title'));
+        renderAnswer(section.answer, false, part);
+        collection.appendChild(part);
+      });
+      target.appendChild(collection);
+      return;
+    }
     const presentation = presentationOf(answer);
     if (presentation) {
       const result = el('section', null, 'answer-presentation');
@@ -274,11 +299,11 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       }
       if (presentation.period_label) result.appendChild(el('div', presentation.period_label, 'answer-period'));
       if (presentation.notes.length) { const notes = el('div', null, 'answer-notes'); presentation.notes.forEach(note => notes.appendChild(el('div', note, 'answer-note'))); result.appendChild(notes); }
-      body.appendChild(result);
-    } else if (answer.summary) message(answer.summary);
-    (answer.cards || []).forEach(card => { const n = el('div', null, 'card'); n.appendChild(el('div', card.metric_name)); n.appendChild(el('div', String(card.display_value) + (card.unit || ''), 'value')); if (card.tooltip) { const details = el('details'); details.appendChild(el('summary', '统计口径')); if (typeof card.tooltip === 'string') details.appendChild(el('div', card.tooltip)); else [['summary',''],['include','包含：'],['exclude','不包含：'],['timing','统计时间：'],['note','说明：']].forEach(([key,label]) => { if (typeof card.tooltip[key] === 'string' && card.tooltip[key]) details.appendChild(el('div', label + card.tooltip[key])); }); n.appendChild(details); } if (card.period_label) n.appendChild(el('div', card.period_label, 'muted')); body.appendChild(n); });
-    if (answer.table && Array.isArray(answer.table.columns) && Array.isArray(answer.table.rows)) { const table = el('table'); const tr = el('tr'); answer.table.columns.forEach(c => tr.appendChild(el('th',c.label))); table.appendChild(tr); answer.table.rows.forEach(row => { const r = el('tr'); answer.table.columns.forEach(c => r.appendChild(el('td',row[c.key] == null ? '-' : row[c.key]))); table.appendChild(r); }); body.appendChild(table); }
-    if (live && answer.export && answer.export.file_ref && run && isTerminal(run.status)) { const source = { ...run }; const download = el('button', '下载 Excel'); download.onclick = async () => { download.disabled = true; try { const blob = await request('GET', '/runs/' + encodeURIComponent(source.run_id) + '/export', { client_session_id: clientSession, run_delivery_token: source.run_delivery_token, generation: source.generation }, {binary:true}); const url = URL.createObjectURL(blob); const link = el('a'); link.href = url; link.download = answer.export.filename || '经营数据.xlsx'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); } catch (_) { message('文件暂不可下载，请重新查询。','error'); } finally { download.disabled = false; } }; body.appendChild(download); }
+      target.appendChild(result);
+    } else if (answer.summary) target.appendChild(el('div', answer.summary, 'message'));
+    (answer.cards || []).forEach(card => { const n = el('div', null, 'card'); n.appendChild(el('div', card.metric_name)); n.appendChild(el('div', String(card.display_value) + (card.unit || ''), 'value')); if (card.tooltip) { const details = el('details'); details.appendChild(el('summary', '统计口径')); if (typeof card.tooltip === 'string') details.appendChild(el('div', card.tooltip)); else [['summary',''],['include','包含：'],['exclude','不包含：'],['timing','统计时间：'],['note','说明：']].forEach(([key,label]) => { if (typeof card.tooltip[key] === 'string' && card.tooltip[key]) details.appendChild(el('div', label + card.tooltip[key])); }); n.appendChild(details); } if (card.period_label) n.appendChild(el('div', card.period_label, 'muted')); target.appendChild(n); });
+    if (answer.table && Array.isArray(answer.table.columns) && Array.isArray(answer.table.rows)) { const table = el('table'); const tr = el('tr'); answer.table.columns.forEach(c => tr.appendChild(el('th',c.label))); table.appendChild(tr); answer.table.rows.forEach(row => { const r = el('tr'); answer.table.columns.forEach(c => r.appendChild(el('td',row[c.key] == null ? '-' : row[c.key]))); table.appendChild(r); }); target.appendChild(table); }
+    if (live && answer.export && answer.export.file_ref && run && isTerminal(run.status)) { const source = { ...run }; const download = el('button', '下载 Excel'); download.onclick = async () => { download.disabled = true; try { const blob = await request('GET', '/runs/' + encodeURIComponent(source.run_id) + '/export', { client_session_id: clientSession, run_delivery_token: source.run_delivery_token, generation: source.generation }, {binary:true}); const url = URL.createObjectURL(blob); const link = el('a'); link.href = url; link.download = answer.export.filename || '经营数据.xlsx'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); } catch (_) { message('文件暂不可下载，请重新查询。','error'); } finally { download.disabled = false; } }; target.appendChild(download); }
   }
   function binding() { return { client_session_id: clientSession, run_delivery_token: run.run_delivery_token, generation: run.generation }; }
   // The create response is authoritative for that specific Run. Bootstrap is
