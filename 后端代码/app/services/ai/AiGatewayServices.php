@@ -1452,6 +1452,23 @@ final class AiGatewayServices
             $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
             $bindingCandidate=$merged['prospective_intent'];
         }
+        // A broad ranking has one source-owned first-answer perspective in
+        // the metric registry. Apply that policy at the common post-merge
+        // boundary so direct binding, empty binding and multi-candidate
+        // recovery cannot disagree. Exact registered customer terms still
+        // win, and exclusions/conditions/unbound goals are rejected by the
+        // shared structural gate before a default can be considered.
+        if (!$contextBindingReused && $groupedItems===null && !$conditionUpdateBindingReused) {
+            $rankDefault=$this->applyRegisteredRankDefaultPolicy(
+                $bindingCandidate,$understanding,$bindingSummaries
+            );
+            if ($rankDefault!==$bindingCandidate) {
+                $bindingCandidate=$rankDefault;
+                $merged=IntentContextMerger::merge($sourceQuery,$bindingCandidate);
+                $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_rank_default_applied');
+            }
+        }
         $exactRegistryBinding=AiIntentResultContract::isUniqueExactMetricBinding(
             $bindingCandidate,$understanding,$safe['outbound'],array_column($bindingSummaries,'metric_code')
         );
@@ -3141,6 +3158,33 @@ final class AiGatewayServices
             if (is_array($kinds) && in_array($objectKind,$kinds,true)) $defaults[$code]=true;
         }
         return count($defaults)===1 ? array_key_first($defaults) : null;
+    }
+
+    /**
+     * Converges every broad-ranking entry path on the registry-owned default.
+     * Exact registered customer wording narrows the candidate boundary first;
+     * PHP never maps a free-form phrase or invents a metric. Unknown goals
+     * retain the normal unbound/clarification outcome.
+     */
+    private function applyRegisteredRankDefaultPolicy(array $intent,array $understanding,array $summaries): array
+    {
+        if (!AiIntentResultContract::canUseRegisteredRankDefault($understanding,$intent)) return $intent;
+        $allowed=array_values(array_filter(array_column($summaries,'metric_code'),'is_string'));
+        $terms=[];
+        foreach (\app\services\ai\contract\AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            if (!in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
+            foreach ((array)($requirement['values']['metric_terms']??[]) as $term) if (is_string($term)) $terms[]=$term;
+        }
+        $exact=\app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms($terms,$allowed);
+        $candidateCodes=$exact===null?$allowed:[$exact];
+        $default=$this->registeredRankDefault($intent,$understanding,$summaries,$candidateCodes);
+        if ($default===null) return $intent;
+        $current=array_values((array)($intent['metric_codes']??[]));
+        if ($current===[$default] && !empty($intent['recommended_initial_answer'])
+            && empty($intent['needs_metric_choice'])) return $intent;
+        return SiliconFlowClient::applyRankMetricResolution(
+            $intent,['decision'=>'select','metric_code'=>$default],$understanding
+        );
     }
 
     /**

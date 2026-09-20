@@ -24,7 +24,7 @@ $objects=['status'=>'choose','objects'=>[['ref'=>'position:2','label'=>'护理�
 $step=$planner->start($intent,$projection,$candidates,$objects,'screen','2026-09-09');
 $reordered=$intent;$reordered['ranking']=['limit'=>1,'direction'=>'top'];
 paCheck($planner->start($reordered,$projection,$candidates,$objects,'screen','2026-09-09')['kind']==='clarification','model JSON member order never changes personnel interpretation');
-paCheck($step['fields'][0]['key']==='analysis_object','actual object choice first, no technician scene');
+paCheck($step['fields'][0]['key']==='analysis_metric','the planner asks for the missing business metric before a dependent personnel range');
 foreach ([
  ['object_kind'=>'store','operation'=>'ranking','metric_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'top','limit'=>1]],
  ['object_kind'=>'person','operation'=>'trend','metric_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'top','limit'=>1]],
@@ -33,9 +33,9 @@ foreach ([
  paReject(fn()=>$planner->start($invalidIntent,$projection,$candidates,$objects,'screen','2026-09-09'),
   $invalidIntent['object_kind']!=='person'?'AI_ANALYSIS_PERSON_OBJECT_UNAVAILABLE':($invalidIntent['operation']!=='ranking'?'AI_ANALYSIS_PERSON_OPERATION_UNAVAILABLE':'AI_ANALYSIS_PERSON_MULTIPLE_METRICS'));
 }
-$next=$planner->choose($step,['analysis_object'=>'position:2']);
-paCheck($next['fields'][0]['key']==='analysis_metric' && count($next['fields'][0]['options'])===2,'best does not guess cash or labor; unsupported operation is not offered');
-$plan=$planner->choose($next,['analysis_metric'=>'staff_labor_yeji'])['plan'];
+$next=$planner->choose($step,['analysis_metric'=>'staff_labor_yeji']);
+paCheck($next['fields'][0]['key']==='analysis_object' && count($step['fields'][0]['options'])===2,'a genuine metric choice stays registered and the dependent personnel range follows it');
+$plan=$planner->choose($next,['analysis_object'=>'position:2'])['plan'];
 // Follow-up language is deliberately not parsed in a PHP fixture. The
 // model-produced delta is covered by query-context.php; this planner remains
 // responsible only for already-normalized, registered values.

@@ -112,13 +112,16 @@ final class AiAnalysisGuidancePlanner
     {
         $state['metrics']=array_values($state['metrics']??($state['metric']===null?[]:[$state['metric']]));
         $fields=[];$question='';
-        if ($state['object']===null) {
-            $question='您说的是哪一类人员？以下是当前有权查看并可明确选择的人员范围。';
-            $fields[]=['key'=>'analysis_object','type'=>'select','label'=>'人员范围','options'=>array_map(static function($o){return ['value'=>$o['ref'],'label'=>$o['label']];},$state['objects'])];
-        } elseif ($state['metric']===null) {
+        // Ask for the actual missing business meaning first. An unresolved
+        // metric cannot acquire its registry-owned default personnel cohort,
+        // so asking for a personnel range first would misdiagnose the gap.
+        if ($state['metric']===null) {
             $question='您希望按什么判断表现？请选择底层已登记的指标。';$options=[];
             foreach ($state['candidates'] as $code=>$metric) $options[]=['value'=>$code,'label'=>$metric['name'].'：'.$metric['summary']];
             $fields[]=['key'=>'analysis_metric','type'=>'select','label'=>'评价指标','options'=>$options];
+        } elseif ($state['object']===null) {
+            $question='您说的是哪一类人员？以下是当前有权查看并可明确选择的人员范围。';
+            $fields[]=['key'=>'analysis_object','type'=>'select','label'=>'人员范围','options'=>array_map(static function($o){return ['value'=>$o['ref'],'label'=>$o['label']];},$state['objects'])];
         } elseif ($state['range']===null) {
             $question='您想查询哪个时间段？';$fields=[['key'=>'start_date','label'=>'开始日期','type'=>'date'],['key'=>'end_date','label'=>'结束日期','type'=>'date']];
         } elseif ($state['operation']==='ranking' && $state['direction']===null) {

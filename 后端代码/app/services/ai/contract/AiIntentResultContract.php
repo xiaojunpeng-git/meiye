@@ -1333,7 +1333,7 @@ final class AiIntentResultContract
      */
     public static function canUseRegisteredRankDefault(array $understanding,array $intent): bool
     {
-        if (($understanding['status']??null)!=='understood'
+        if (($understanding['status']??null)!=='understood' || self::hasUnboundRequirement($understanding)
             || ($intent['operation']??null)!=='ranking'
             || ($intent['object_relation']??'analysis')!=='analysis'
             || ($intent['object_term']??'')!==''
@@ -1418,9 +1418,9 @@ final class AiIntentResultContract
     {
         return 'Evaluate the exact business event or measurement requested in ordinary language, using only the supplied registered descriptions. '
             .'A concrete transaction or activity is not interchangeable with other measurements merely because they involve money or performance. '
-            .'A broad outcome without an identified event, accounting basis, calculation basis, or other distinguishing measurement property can represent multiple distinct metrics and MUST be ambiguous. '
+            .'For a broad ranking without an identified event, accounting basis or calculation basis, use the one compatible capability whose default_rank_object_kinds explicitly declares the requested analytical object as the source-owned first-answer perspective. Use it only when exactly one such default exists; otherwise the request remains ambiguous. '
             .'An exact, unambiguous supplied registered metric display title used as the requested measurement is an identified basis. A loose category label, conventional default, or merely reasonable professional first reading is not. '
-            .'Only an open overall operating goal may receive a separately labelled multi-angle observation; a request for one unspecified measurement must remain a customer choice. '
+            .'An explicit registered measurement, exclusion, alternative, condition or comparison always takes precedence over a ranking default. Only an open overall operating goal may receive a separately labelled multi-angle observation. '
             .'Do not see or assume the proposed candidate. Return exactly {"decision":"unique|ambiguous|unavailable","metric_code":"registered code or empty string"}. '
             .'Use unique only when one registered metric faithfully answers the expressed fact; for ambiguous or unavailable, metric_code is empty. Do not answer with figures.';
     }
