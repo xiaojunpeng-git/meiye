@@ -54,8 +54,16 @@ final class PersonnelAnalysisObjectServices
             unset($person['_name'],$person['_stores']);
         }
         unset($person);
+        // The default cohort is materialised from immutable facts for the
+        // requested period at execution time.  Keeping it out of current
+        // staff/qualification rows prevents a later transfer, resignation or
+        // qualification change from erasing an earlier performance result.
+        $cohorts=[MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF=>[
+            'ref'=>MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF,'kind'=>'cohort','label'=>'本期有业绩归属的人员','aliases'=>[],
+            'version'=>'1','relations'=>[$metric],
+        ]];
         if (call_user_func($this->authorize,$metric)!==$scope) throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
-        return ['objects'=>array_values($positions+$roles+$people),'scope'=>$scope];
+        return ['objects'=>array_values($cohorts+$positions+$roles+$people),'scope'=>$scope];
     }
 
     public function selection(string $metric,string $reference): array
@@ -81,6 +89,68 @@ final class PersonnelAnalysisObjectServices
         }
         if (call_user_func($this->authorize,$metric)!==$catalog['scope']) throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
         $selection=['ref'=>$reference,'label'=>$matches[0]['label'],'pairs'=>array_values($pairs),'names'=>$names,'scope'=>$catalog['scope']];
+        $selection['binding_hash']=hash('sha256',json_encode($selection,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES));
+        return $selection;
+    }
+
+    /**
+     * Builds the ordinary personnel population from facts in the requested
+     * period.  It is intentionally separate from conditionSelection(): a
+     * ranking needs actual participants, while a zero/under-target condition
+     * must keep eligible people who have no fact row at all.
+     *
+     * @param array<int,string> $metrics
+     * @param array{start:string,end:string} $range
+     */
+    public function factParticipantSelection(array $metrics,string $tenant,array $range): array
+    {
+        if (!$metrics || count($metrics)>4 || count(array_unique($metrics))!==count($metrics)
+            || $tenant==='' || !$this->validRange($range)) {
+            throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+        }
+        $scopes=[];$performanceTypes=[];
+        foreach ($metrics as $metric) {
+            if (!is_string($metric)||$metric==='') throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+            $contract=MetricDefinitionRegistry::get($metric);
+            $type=$contract['source']['filters']['performance_type']??null;
+            if (!is_string($type)||$type==='') throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+            $performanceTypes[$type]=true;$scopes[$metric]=$this->scope($metric);
+        }
+        $stores=null;
+        foreach ($scopes as $scope) {
+            $current=$scope['store_ids'];sort($current,SORT_NUMERIC);
+            $stores=$stores===null?$current:array_values(array_intersect($stores,$current));
+        }
+        if (!$stores) throw new \RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
+        $scope=$scopes[$metrics[0]];$scope['store_ids']=$stores;
+        $query=call_user_func($this->query,'cashier_v3_performance_fact');
+        $query->alias('p')->where('p.tenant_id',$tenant)->whereIn('p.store_id',$stores)
+            ->where('p.status','effective')->whereIn('p.performance_type',array_keys($performanceTypes))
+            ->whereBetween('p.business_date',[$range['start'],$range['end']])->where('p.employee_id','>',0);
+        if ($scope['employee_id']>0) $query->where('p.employee_id',$scope['employee_id']);
+        // A person may have more than one historical name snapshot in the
+        // period. Group by that snapshot, sort by its last occurrence, then
+        // keep the first name for the stable employee ID below.
+        $rows=$query->fieldRaw('p.store_id,p.employee_id,p.employee_name_snapshot employee_name,MAX(p.business_date) last_business_date')
+            ->group('p.store_id,p.employee_id,p.employee_name_snapshot')->order('last_business_date','desc')
+            ->order('p.employee_id','asc')->limit(1001)->select()->toArray();
+        if (count($rows)>1000) throw new \RuntimeException('AI_OBJECT_SCOPE_TOO_LARGE');
+        $pairs=[];$names=[];
+        foreach ($rows as $row) {
+            $store=(int)($row['store_id']??0);$employee=(int)($row['employee_id']??0);
+            $name=trim((string)($row['employee_name']??''));
+            if (!in_array($store,$stores,true)||$employee<1||$name==='') throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+            $pairs[$store.':'.$employee]=['store_id'=>$store,'employee_id'=>$employee];
+            if (!isset($names[$employee])) $names[$employee]=$name;
+        }
+        // Recheck every metric permission after reading the population; this
+        // keeps the fact-based cohort from weakening the existing authority
+        // boundary or replay guarantees.
+        foreach ($scopes as $metric=>$before) if (call_user_func($this->authorize,$metric)!==$before) {
+            throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
+        }
+        $selection=['ref'=>MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF,'label'=>'本期有业绩归属的人员','pairs'=>array_values($pairs),
+            'names'=>$names,'scope'=>$scope,'metric_codes'=>array_values($metrics),'range'=>$range];
         $selection['binding_hash']=hash('sha256',json_encode($selection,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES));
         return $selection;
     }
@@ -145,5 +215,14 @@ final class PersonnelAnalysisObjectServices
             ->where('ss.employee_id','>',0)->where('e.status',1)->where('e.is_del',0);
         if ($scope['employee_id']>0) $query->where('e.id',$scope['employee_id']);
         return $query;
+    }
+    private function validRange(array $range): bool
+    {
+        if (array_keys($range)!==['start','end']) return false;
+        foreach (['start','end'] as $key) {
+            $date=is_string($range[$key]??null)?\DateTimeImmutable::createFromFormat('!Y-m-d',$range[$key]):false;
+            if (!$date||$date->format('Y-m-d')!==$range[$key]) return false;
+        }
+        return $range['start']<=$range['end'];
     }
 }

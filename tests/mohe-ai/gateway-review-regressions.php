@@ -194,6 +194,33 @@ $check(strpos($gateway,'prepareUniqueExactMetricCandidate($intent,$understanding
     'unique exact registered metric titles are canonicalized before strict JSON audit validation');
 $gatewayReflection=new ReflectionClass(app\services\ai\AiGatewayServices::class);
 $gatewayFixture=$gatewayReflection->newInstanceWithoutConstructor();
+$attachDefault=$gatewayReflection->getMethod('attachRegisteredDefaultAnalysisObject');
+if (PHP_VERSION_ID<80100) $attachDefault->setAccessible(true);
+$positionObject=['ref'=>'position:2','kind'=>'position','label'=>'美容师','aliases'=>[],'version'=>'1','relations'=>['staff_sales_yeji']];
+$factCohort=['ref'=>app\services\query\metric\MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF,'kind'=>'cohort',
+    'label'=>'本期有业绩归属的人员','aliases'=>[],'version'=>'1','relations'=>['staff_sales_yeji']];
+$defaultObjects=$attachDefault->invoke($gatewayFixture,['status'=>'choose','objects'=>[$positionObject],'catalog_ref'=>'fixture'],
+    [$positionObject,$factCohort],['default_selection_ref'=>app\services\query\metric\MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF],
+    'staff_sales_yeji','');
+$explicitObjects=$attachDefault->invoke($gatewayFixture,['status'=>'choose','objects'=>[$positionObject],'catalog_ref'=>'fixture'],
+    [$positionObject,$factCohort],['default_selection_ref'=>app\services\query\metric\MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF],
+    'staff_sales_yeji','美容师');
+$check(array_column($defaultObjects['objects'],'ref')===['position:2',app\services\query\metric\MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF]
+    && array_column($explicitObjects['objects'],'ref')===['position:2'],
+    'a broad personnel question receives only its registered fact cohort while an explicit personnel term remains customer-selected');
+$replaceCohort=$gatewayReflection->getMethod('replaceInheritedSystemCohortForCurrentLocalSelection');
+if (PHP_VERSION_ID<80100) $replaceCohort->setAccessible(true);
+$cohortIntent=['object_kind'=>'position','object_term'=>'',
+    'context_delta'=>['business_filters'=>'inherit']];
+$replacedCohort=$replaceCohort->invoke($gatewayFixture,$cohortIntent,
+    ['business_filters'=>['object_kind'=>'person','selection_ref'=>app\services\query\metric\MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF]],
+    ['question'=>'本月[local_condition_1]的销售业绩排名第一是谁'],['local_condition_1'=>'position']);
+$retainedExplicit=$replaceCohort->invoke($gatewayFixture,$cohortIntent,
+    ['business_filters'=>['object_kind'=>'person','selection_ref'=>'role:salesperson']],
+    ['question'=>'本月[local_condition_1]的销售业绩排名第一是谁'],['local_condition_1'=>'position']);
+$check(($replacedCohort['context_delta']['business_filters']??null)==='replace'
+    &&($retainedExplicit['context_delta']['business_filters']??null)==='inherit',
+    'a current explicit local personnel selection replaces only a system cohort, never an earlier customer-selected role');
 $exactCandidate=$gatewayReflection->getMethod('prepareUniqueExactMetricCandidate');
 if (PHP_VERSION_ID<80100) $exactCandidate->setAccessible(true);
 $candidate=$exactCandidate->invoke($gatewayFixture,[

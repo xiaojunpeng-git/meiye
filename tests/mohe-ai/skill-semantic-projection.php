@@ -80,7 +80,7 @@ $check(($projectSummaryPlan['kind']??null)==='plan'
     && $compiledProjectCodes===$projectSummaryCodes,
     'the generic workflow compiles the complete registry-backed object summary without a question-specific branch');
 $check(isset($person['staff_sales_yeji'])&&!isset($person['cash_performance'])
-    && ($person['staff_sales_yeji']['default_selection_ref']??null)==='role:salesperson'
+    && ($person['staff_sales_yeji']['default_selection_ref']??null)===\app\services\query\metric\MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF
     && strpos((string)($person['staff_sales_yeji']['summary']??''),'人员现金业绩')!==false,
     'the model receives sales-person allocation as the registered person cash-performance meaning, not store collection totals');
 $planner=new AiDimensionGuidancePlanner();

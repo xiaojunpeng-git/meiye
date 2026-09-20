@@ -131,7 +131,7 @@ final class AiRegisteredPlanCompiler
         if ($query['business_filters']!==[]) {
             if (!$person && count($metrics)!==1 && $query['query_shape']!=='summary' && !$conditionPopulation) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             if ($person && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref']??null)
-                || (!$conditionPopulation && !preg_match('/^((position|person):[1-9][0-9]*|role:craftsman|role:salesperson)$/D',$query['business_filters']['selection_ref']))
+                || (!$conditionPopulation && !preg_match('/^((position|person):[1-9][0-9]*|role:craftsman|role:salesperson|cohort:metric_fact_participants)$/D',$query['business_filters']['selection_ref']))
                 || ($conditionPopulation && $query['business_filters']['selection_ref']!=='cohort:active_personnel'))) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             if ($memberSelection && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref'])
                 || !preg_match('/^member:[1-9][0-9]*$/D',$query['business_filters']['selection_ref']))) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');

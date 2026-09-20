@@ -1111,15 +1111,10 @@ final class AiGatewayServices
                 $understanding,$sourceCollection,(array)($sourceContext['meaning']??[]),$body['output_format']
             );
         }
-        if ($sourceQuery!==null && !$closedMetricOnlyProjection
-            && AiIntentUnderstandingContract::hasCurrentTopicAnchor($understanding)) {
-            // The language stage has established a current analytical anchor,
-            // so the preceding signed query is no longer a binding default.
-            // This applies to any prior result shape, including collections.
-            // It is a typed semantic decision, not a phrase or object list.
-            $sourceQuery=null;
-            $safe['outbound']['prior_query']=null;
-        }
+        // Keep the verified query available to IntentContextMerger. The
+        // model's typed context_delta replaces or clears only fields changed
+        // by this turn, so a new analytical object can retain an applicable
+        // period without carrying incompatible object filters.
         // Understanding is the only natural-language authority here. Once it
         // has independently established an analytical object, the binding
         // model should not be distracted by metrics that the registry says
@@ -1336,10 +1331,32 @@ final class AiGatewayServices
         $reply['intent']=$this->preserveVerifiedMetricOnlyContext(
             $reply['intent'],$understanding,$sourceQuery,$closedMetricOnlyProjection
         );
+        $reply['intent']=$this->replaceInheritedSystemCohortForCurrentLocalSelection(
+            $reply['intent'],$sourceQuery,$safe['outbound'],$privateKindsByReference
+        );
         $checkpoint();$intent=$reply['intent'];
         // The model states only a delta. This named merger is the sole place
         // that may retain verified query meaning across turns.
-        $merged=IntentContextMerger::merge($sourceQuery,$intent);
+        try {
+            $merged=IntentContextMerger::merge($sourceQuery,$intent);
+        } catch (RuntimeException $error) {
+            if ($error->getMessage()==='AI_CONTEXT_DELTA_CONFLICT') {
+                // Store only structural enums and booleans. This makes a real
+                // context failure diagnosable without persisting the question,
+                // object label, identity, result or model response.
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'context_merge_conflict',[
+                    'object_kind'=>(string)($intent['object_kind']??'unknown'),
+                    'object_relation'=>(string)($intent['object_relation']??'unknown'),
+                    'masked_object_term'=>is_string($intent['object_term']??null)
+                        && preg_match('/^\[local_condition_[0-9]+\]$/D',$intent['object_term'])===1,
+                    'prior_system_cohort'=>is_string($sourceQuery['business_filters']['selection_ref']??null)
+                        && strpos($sourceQuery['business_filters']['selection_ref'],'cohort:')===0,
+                    'object_delta'=>(string)($intent['context_delta']['object']??'missing'),
+                    'filter_delta'=>(string)($intent['context_delta']['business_filters']??'missing'),
+                ]);
+            }
+            throw $error;
+        }
         $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
         // Context changes are semantic, but a provider can occasionally
         // produce a self-contradictory delta: it swaps the answer form while
@@ -1958,6 +1975,9 @@ final class AiGatewayServices
             }));
             $objects=$exactPeople?$named:$objectCatalog->resolve($objectTerm,'position',$metric);
             $objects=IntentContextMerger::resolveSelection($objects,$catalog['objects'],$inheritedConstraints,'person',$metric);
+            $objects=$this->attachRegisteredDefaultAnalysisObject(
+                $objects,$catalog['objects'],$personMetrics[$metric]??null,$metric,$objectTerm
+            );
             try {
                 return $finish((new \app\services\ai\execution\AiAnalysisGuidancePlanner())->start($intent,$projection,$personMetrics,$objects,$body['output_format'],$today));
             } catch (\RuntimeException $error) {
@@ -1999,10 +2019,47 @@ final class AiGatewayServices
     }
 
     /**
-     * Makes a broad, already-admitted overview complete without turning PHP
-     * into a natural-language or metric-selection layer.  Only the registry
-     * can opt a metric into this profile; explicit questions never enter it.
+     * Reattaches a metric-owned cohort after customer-selectable people and
+     * positions have been resolved. Cohorts stay out of the selector itself;
+     * they may answer only a broad, object-free question and only when the
+     * already-bound metric registers that exact reference as its default.
      */
+    private function attachRegisteredDefaultAnalysisObject(array $resolved,array $catalog,?array $candidate,?string $metric,string $objectTerm): array
+    {
+        if (($resolved['status']??null)==='resolved' || $objectTerm!=='' || $metric===null || $candidate===null) return $resolved;
+        $defaultRef=$candidate['default_selection_ref']??null;
+        $matches=array_values(array_filter($catalog,static function(array $object)use($defaultRef,$metric):bool {
+            return is_string($defaultRef) && $defaultRef!==''
+                && ($object['ref']??null)===$defaultRef
+                && in_array($metric,(array)($object['relations']??[]),true);
+        }));
+        if (count($matches)===1) $resolved['objects']=array_merge($resolved['objects'],$matches);
+        return $resolved;
+    }
+
+    /**
+     * A server-owned cohort is a default population, not a customer-selected
+     * identity. When the current message contains one exact locally masked
+     * person/position reference, that explicit selection replaces the cohort
+     * before context merging. Named people, positions and roles inherited from
+     * an earlier customer choice are never changed by this normalization.
+     */
+    private function replaceInheritedSystemCohortForCurrentLocalSelection(array $intent,?array $source,array $safeQuestion,array $privateKinds): array
+    {
+        $priorRef=$source['business_filters']['selection_ref']??null;
+        $kind=$intent['object_kind']??null;$question=(string)($safeQuestion['question']??'');$matches=[];
+        foreach ($privateKinds as $reference=>$privateKind) {
+            if (!is_string($reference) || strpos($question,'['.$reference.']')===false) continue;
+            if (($kind==='person' && in_array($privateKind,['person','position'],true))
+                || ($kind==='position' && in_array($privateKind,['person','position'],true))) $matches[]=$reference;
+        }
+        if (!is_string($priorRef) || strpos($priorRef,'cohort:')!==0
+            || ($intent['context_delta']['business_filters']??null)!=='inherit'
+            || !in_array($kind,['person','position'],true) || count($matches)!==1) return $intent;
+        $intent['context_delta']['business_filters']='replace';
+        return $intent;
+    }
+
     /**
      * A date-only continuation reuses every signed query in a verified
      * collection. The model has already established that the current turn
@@ -2702,10 +2759,9 @@ final class AiGatewayServices
 
     /**
      * Copies a model-selected registered code, never a phrase-derived PHP
-     * choice.  A prior cohort is released only when it is mechanically equal
-     * to the prior metric's own declared default and the newly selected
-     * metric declares a different default; a named person or a non-default
-     * restriction remains protected by the regular context confirmation path.
+     * choice. A system-owned default cohort may be replaced only by another
+     * registered default; a named person, position or customer-selected role
+     * remains protected by the regular context confirmation path.
      */
     private function applyReviewedMetricBinding(array $intent,string $metric,?array $sourceQuery,array $summaries): array
     {

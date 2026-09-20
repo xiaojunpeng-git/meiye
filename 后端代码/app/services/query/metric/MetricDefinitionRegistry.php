@@ -11,6 +11,8 @@ namespace app\services\query\metric;
  */
 final class MetricDefinitionRegistry
 {
+    /** Server-owned cohort used when the customer did not request a role or position filter. */
+    public const PERSONNEL_FACT_PARTICIPANT_REF='cohort:metric_fact_participants';
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
@@ -105,11 +107,10 @@ final class MetricDefinitionRegistry
             ], 'person', ['selection_ref']) + [
                 'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
-                // This registered fact is assigned only to the platform's
-                // sales-qualified people. A broad people-ranking may use that
-                // factual cohort as its labelled first view; it does not infer
-                // a cohort from the customer's wording.
-                'analysis_default_selection_ref' => 'role:salesperson',
+                // Ordinary rankings use people who actually own a fact in the
+                // requested period. Current cashier qualifications remain an
+                // explicit customer filter, never a historical fact filter.
+                'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
             ],
             'staff_labor_yeji' => self::amount('personnel_fact_sum', 'labor-performance-allocated-person-v1', ['summary', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_performance_fact', 'amount' => 'amount_cents',
@@ -123,9 +124,7 @@ final class MetricDefinitionRegistry
             ], 'person', ['selection_ref']) + [
                 'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
-                // Labour-performance facts use the same qualification source
-                // as cashier performance allocation and personnel authority.
-                'analysis_default_selection_ref' => 'role:craftsman',
+                'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
             ],
             // 工资项目数不是销售数量：它是一次已完成服务中分给手艺人的
             // 最终项目数。使用百万分之一的整数读值，保证 0.3、6.6 等手工
@@ -143,7 +142,7 @@ final class MetricDefinitionRegistry
             ], 'person', ['selection_ref']) + [
                 'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
-                'analysis_default_selection_ref' => 'role:craftsman',
+                'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
             ],
             // "客数" retains its established code, but its former source was
             // the legacy write-off table.  New V3 reads are bound to completed
@@ -161,7 +160,7 @@ final class MetricDefinitionRegistry
             ], 'person', ['selection_ref']) + [
                 'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
-                'analysis_default_selection_ref' => 'role:craftsman',
+                'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
             ],
             'service_people' => self::tenthCount('service_customer_personnel', 'v3-service-customer-period-people-person-v1', ['summary', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_entitlement_service_fact + cashier_v3_performance_fact',
@@ -176,7 +175,7 @@ final class MetricDefinitionRegistry
             ], 'person', ['selection_ref']) + [
                 'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
-                'analysis_default_selection_ref' => 'role:craftsman',
+                'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
             ],
             'sales_amount' => self::amount('fact_sum', 'v3-sale-completed-lines-v1', ['summary', 'comparison', 'trend', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_sale_fact', 'amount' => 'sale_amount_cents',

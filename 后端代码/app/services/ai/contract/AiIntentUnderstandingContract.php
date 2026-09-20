@@ -425,37 +425,6 @@ final class AiIntentUnderstandingContract
         return $out;
     }
 
-    /**
-     * Decides whether the current turn establishes its own analytical topic.
-     * It reads only the already-validated semantic fields and their current
-     * evidence anchor—never customer words, labels, metric codes or a prior
-     * result. A pure period/result continuation consequently remains eligible
-     * for signed-context reuse. A current measurement becomes a new topic
-     * only when it is paired with a current time, object, response form or
-     * condition; an isolated ranking/scope/object edit may still be a genuine
-     * continuation of the signed query.
-     */
-    public static function hasCurrentTopicAnchor(array $understanding): bool
-    {
-        $currentFields=[];
-        foreach ((array)($understanding['requirements']??[]) as $requirement) {
-            if (!is_array($requirement)) continue;
-            $hasCurrentEvidence=false;
-            foreach ((array)($requirement['evidence']??[]) as $evidence) {
-                if (is_array($evidence) && ($evidence['message_id']??null)==='current') {
-                    $hasCurrentEvidence=true;
-                    break;
-                }
-            }
-            if ($hasCurrentEvidence) foreach ((array)($requirement['fields']??[]) as $field) {
-                if (is_string($field)) $currentFields[$field]=true;
-            }
-        }
-        if (!isset($currentFields['metric_codes'])) return false;
-        return isset($currentFields['periods']) || isset($currentFields['object_kind'])
-            || isset($currentFields['operation']) || isset($currentFields['aggregate_condition']);
-    }
-
     /** @return array<int,array{id:string,requirement_ids:array<int,string>}> */
     public static function queryGroups(array $understanding): array
     {

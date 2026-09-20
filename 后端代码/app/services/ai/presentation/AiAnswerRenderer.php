@@ -137,7 +137,10 @@ final class AiAnswerRenderer
         $answer = ['summary' => $summary, 'cards' => $cards];
         $notes = [];
         if ($person) {
-            $notes[] = '人员范围：' . $view['personnel_selection_label'] . '（按当前任职筛选）。';
+            // The selection label is produced by the executed population.
+            // Do not append a current-employment claim to a historical-fact
+            // cohort or another explicitly selected population.
+            $notes[] = '人员范围：' . $view['personnel_selection_label'] . '。';
             if ($shape === 'ranking' && $rows) $notes[] = '仅按所选指标排名；相同数值并列，不代表综合评价。';
         }
         if ($member && $shape === 'ranking') {

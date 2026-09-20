@@ -42,11 +42,16 @@ $plan=$planner->choose($next,['analysis_metric'=>'staff_labor_yeji'])['plan'];
 paCheck($plan['query']['business_filters']===['object_kind'=>'person','selection_ref'=>'position:2'],'selection survives into executable query');
 paCheck($plan['query']['ranking']===['direction'=>'top','limit'=>1] && $plan['query']['start_date']==='2026-09-09','singular who preserves today and one result');
 $defaultCandidates=$candidates;
-$defaultCandidates['staff_labor_yeji']['default_selection_ref']='role:craftsman';
-$unselectedObjects=['status'=>'choose','objects'=>[['ref'=>'position:2','label'=>'护理师'],['ref'=>'role:craftsman','label'=>'有手艺人资格的在职人员']]];
+$defaultCandidates['staff_labor_yeji']['default_selection_ref']=\app\services\query\metric\MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF;
+$unselectedObjects=['status'=>'choose','objects'=>[
+ ['ref'=>'position:2','label'=>'护理师'],['ref'=>'role:craftsman','label'=>'有手艺人资格的在职人员'],
+ ['ref'=>\app\services\query\metric\MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF,'label'=>'本期有业绩归属的人员'],
+]];
 $defaultIntent=$intent;$defaultIntent['metric_codes']=['staff_labor_yeji'];$defaultIntent['needs_metric_choice']=false;
 $defaultPlan=$planner->start($defaultIntent,$projection,$defaultCandidates,$unselectedObjects,'screen','2026-09-09');
-paCheck($defaultPlan['kind']==='plan' && $defaultPlan['plan']['query']['business_filters']['selection_ref']==='role:craftsman','registered metric cohort supplies a labelled first answer without a role picker');
+paCheck($defaultPlan['kind']==='plan'
+ &&$defaultPlan['plan']['query']['business_filters']['selection_ref']===\app\services\query\metric\MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF,
+ 'registered fact-participant cohort supplies a first answer without imposing a current qualification');
 $defaultPeriodPlan=$planner->start($defaultIntent,['date_terms'=>[]],$defaultCandidates,$unselectedObjects,'screen','2026-09-09');
 paCheck(($defaultPeriodPlan['kind']??null)==='plan'
  &&[$defaultPeriodPlan['plan']['query']['start_date'],$defaultPeriodPlan['plan']['query']['end_date']]===['2026-09-09','2026-09-09'],
@@ -113,6 +118,15 @@ $sameNameResolution=(new AnalysisObjectCatalog($sameNameObjects,static function(
 paCheck($sameNameResolution['status']==='choose' && array_column($sameNameResolution['objects'],'label')===['同名员工（合成一店）','同名员工（合成二店）'],
  'same-name employees remain a customer choice with distinct authoritative store labels');
 paCheck($objectService->selection('staff_labor_yeji','role:craftsman')['pairs']===$selection['pairs'],'the resolved craftsman role uses the same authorized store/person fact pairs');
+PaQuery::$calls=[];
+$factSelection=$objectService->factParticipantSelection(['staff_labor_yeji'],'0',['start'=>'2026-09-09','end'=>'2026-09-09']);
+paCheck($factSelection['ref']===\app\services\query\metric\MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF
+ &&$factSelection['pairs']===$selection['pairs']
+ &&$factSelection['label']==='本期有业绩归属的人员',
+ 'ordinary ranking population comes from period facts rather than the current craftsman switch');
+paCheck(strpos(json_encode(PaQuery::$calls),'cashier_v3_performance_fact')!==false
+ &&strpos(json_encode(PaQuery::$calls),'system_store_staff')===false,
+ 'fact-participant population never reintroduces current staff or qualification filters');
 $single=$plan;$single['query']['business_filters']['selection_ref']='person:7';
 paCheck($compiler->compile($single,$caps)['workflow_code']==='wf_performance_ranking','named person reuses the same registered workflow');
 $multiIntent=['object_kind'=>'person','object_term'=>'合成人员甲','operation'=>'summary','metric_codes'=>['staff_labor_yeji','staff_sales_yeji'],

@@ -434,9 +434,14 @@ final class MetricReadViewServices
         }
         if (!$this->personnel) $this->fail('METRIC_PERMISSION_GRAIN_UNAVAILABLE');
         $conditionPopulation=in_array($query['query_shape'],['condition_count','condition_list'],true);
+        $selectionRef=$query['business_filters']['selection_ref'];
         $selection=$conditionPopulation
             ? $this->personnel->conditionSelection($query['metric_codes'])
-            : $this->personnel->selection($query['metric_codes'][0],$query['business_filters']['selection_ref']);
+            : ($selectionRef===MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF
+                ? $this->personnel->factParticipantSelection($query['metric_codes'],$binding['tenant_id'],[
+                    'start'=>$query['start_date'],'end'=>$query['end_date'],
+                ])
+                : $this->personnel->selection($query['metric_codes'][0],$selectionRef));
         if ($binding['scope_mode']==='self_participant' && ($selection['scope']['employee_id']??0)<1) $this->fail('METRIC_PERMISSION_DENIED');
         if ($binding['scope_mode']==='self_participant' && (int)($binding['employee_id']??0)!==$selection['scope']['employee_id']) $this->fail('METRIC_PERMISSION_DENIED');
         if (array_diff($binding['store_ids'],$selection['scope']['store_ids'])) $this->fail('METRIC_PERMISSION_DENIED');
@@ -517,7 +522,7 @@ final class MetricReadViewServices
         $memberSelection=$objectKind==='member' && isset($query['business_filters']['selection_ref']);
         if ($query['business_filters']!==[] && (!$person && !is_string($objectKind))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if ($person && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref']??null)
-            || (!$conditionPopulation && !preg_match('/^((position|person):[1-9][0-9]*|role:craftsman|role:salesperson)$/D',$query['business_filters']['selection_ref']))
+            || (!$conditionPopulation && !preg_match('/^((position|person):[1-9][0-9]*|role:craftsman|role:salesperson|cohort:metric_fact_participants)$/D',$query['business_filters']['selection_ref']))
             || ($conditionPopulation && $query['business_filters']['selection_ref']!=='cohort:active_personnel'))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if ($memberSelection && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref'])
             || !preg_match('/^member:[1-9][0-9]*$/D',$query['business_filters']['selection_ref']))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');

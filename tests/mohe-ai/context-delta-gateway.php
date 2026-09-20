@@ -70,21 +70,6 @@ try {
     );
     cdgCheck($selfContainedOverviewAfterCollection===null,
         'a self-contained current topic is never admitted as a date-only continuation of a prior collection item');
-    cdgCheck(\app\services\ai\contract\AiIntentUnderstandingContract::hasCurrentTopicAnchor([
-        'requirements'=>[
-            ['fields'=>['metric_codes','periods'],'evidence'=>[['message_id'=>'current','quote'=>'今天业绩怎么样']]],
-        ],
-    ])===true && \app\services\ai\contract\AiIntentUnderstandingContract::hasCurrentTopicAnchor([
-        'requirements'=>[
-            ['fields'=>['periods'],'evidence'=>[['message_id'=>'current','quote'=>'昨天呢']]],
-        ],
-    ])===false && \app\services\ai\contract\AiIntentUnderstandingContract::hasCurrentTopicAnchor([
-        'requirements'=>[
-            ['fields'=>['ranking'],'evidence'=>[['message_id'=>'current','quote'=>'改为前五个']]],
-        ],
-    ])===false,
-        'typed current-topic admission distinguishes a new analytical request from a pure-date continuation without reading question words');
-
     // A signed query may bypass an unstable model response only for a closed
     // date grammar. The gateway must reject any added business instruction so
     // topic changes still go through ordinary natural-language understanding.
@@ -218,6 +203,35 @@ try {
         &&($overviewEvidence['query']['start_date']??'')===substr((string)($overviewEvidence['query']['end_date']??''),0,7).'-01',
         'an exact calendar-only continuation reuses a signed query and skips the binding model');
     $overviewHarness->close();
+
+    // A new analytical object changes the subject but does not implicitly
+    // change the customer's still-applicable period. This runs through the
+    // complete gateway so an eager source-query reset cannot regress silently.
+    $topicHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $topicHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary',
+        'metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,
+        'ranking'=>['direction'=>'unspecified','limit'=>null],
+        'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-08']],
+        'scope'=>'authorized','unresolved_fragments'=>[]];
+    $topicSource=$topicHarness->start('9月1日到9月8日现金业绩多少？');
+    $topicHarness->understandingOverride=['goal'=>'查看项目销售排行','status'=>'understood','requirements'=>[[
+        'id'=>'r1','meaning'=>'查看项目销售第一名','fields'=>['metric_codes','object_kind','operation','ranking'],
+        'values'=>['metric_terms'=>['销售额'],'object_kind'=>'project','operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>1]],
+        'evidence'=>[['message_id'=>'current','quote'=>'项目销售第一名是谁？']],
+    ]]];
+    $topicDelta=cdgDelta();
+    foreach (['metric_codes','operation','object','ranking_direction','ranking_limit','business_filters'] as $field) $topicDelta[$field]='replace';
+    $topicHarness->semanticIntent=['object_kind'=>'project','object_term'=>'','operation'=>'ranking',
+        'metric_codes'=>['sales_amount'],'action_codes'=>['sales'],'needs_metric_choice'=>false,
+        'ranking'=>['direction'=>'top','limit'=>1],'periods'=>[],'scope'=>'authorized',
+        'context_delta'=>$topicDelta,'unresolved_fragments'=>[]];
+    $topicFollow=$topicHarness->start('项目销售第一名是谁？',$topicSource['answer']['context_ref']);
+    $topicEvidence=$topicHarness->private->read($topicHarness->row($topicFollow)['evidence_ref']);
+    cdgCheck($topicFollow['status']==='COMPLETED'
+        &&($topicEvidence['query']['business_filters']['object_kind']??null)==='project'
+        &&[$topicEvidence['query']['start_date']??null,$topicEvidence['query']['end_date']??null]===['2026-09-01','2026-09-08'],
+        'a natural topic switch replaces the analytical object while inheriting the verified period field');
+    $topicHarness->close();
 
     $h=new R6GatewayHarness(3,[1,2],'platform');
     $initialIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-08']],'scope'=>'authorized','unresolved_fragments'=>[]];

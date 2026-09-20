@@ -69,8 +69,12 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             $tooltip=(new \app\services\metric\MetricDictionaryServices())->getTooltip($code);
             $displayUnit=$tooltip['display_unit']??null;
             if (!is_string($displayUnit)||$displayUnit==='') $displayUnit=$storageUnit === 'fen' ? '元' : ($storageUnit === 'project_count_micro' ? '项' : ($storageUnit === 'customer_tenth' ? '人次' : '个'));
+            // The executed selection label already states whether this is a
+            // current role, an explicit position or a period fact cohort.
+            // Export must not invent a current-employment restriction that
+            // was absent from the signed screen query.
             $base=['metric_name'=>$capabilities[$code]['name'],'period_name'=>$period==='current'?'本期':'对比期','start_date'=>$range['start'],'end_date'=>$range['end'],
-                'store_name'=>$label.($person?'（按当前任职筛选）':''),'ranking_direction'=>'','business_date'=>'',
+                'store_name'=>$label,'ranking_direction'=>'','business_date'=>'',
                 'unit'=>$displayUnit];
             if (isset($result['amount_cents']) || isset($result['count'])) self::append($rows,$base,in_array($storageUnit,['fen','customer_tenth'],true) ? ($result['amount_cents']??null) : ($result['count']??null),$storageUnit);
             elseif ($view['query']['query_shape']==='trend') foreach ($result['rows'] as $point) self::append($rows,array_replace($base,['business_date'=>$point['business_date']]),$point['amount_cents'],$storageUnit);
