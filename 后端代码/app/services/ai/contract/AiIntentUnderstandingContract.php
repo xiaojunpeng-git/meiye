@@ -33,6 +33,17 @@ final class AiIntentUnderstandingContract
         if (!in_array($value['status'], ['understood', 'needs_clarification'], true)) self::fail('status');
         $messages = self::messages($safeQuestion);
         $requirements = $value['requirements'];
+        // A provider can duplicate a valid calendar carrier into the metric
+        // slot even after one repair.  Remove only that structurally proven
+        // duplicate: a valid periods carrier must already exist and every
+        // proposed metric term must itself be nothing but one closed-grammar
+        // date expression.  This never chooses a business metric or infers a
+        // query; the later binding and semantic-review gates still have to
+        // understand the complete current question before anything executes.
+        $requirements = self::discardPeriodOnlyMetricProjection(
+            $requirements,
+            array_key_exists('groups', $value)
+        );
         if (!is_array($requirements) || (($requirements===[]) && $value['status']!=='needs_clarification') || count($requirements) > 12
             || ($requirements!==[] && array_keys($requirements) !== range(0, count($requirements) - 1))) self::fail('requirements_collection');
         $ids = []; $normalized = [];
@@ -241,6 +252,46 @@ final class AiIntentUnderstandingContract
         $requirement['values']['object_kind']=$condition['subject'];
         $requirement['values']['operation']=$condition['result_form']==='count'?'condition_count':'condition_list';
         return $requirement;
+    }
+
+    /**
+     * Drops only a redundant model-authored metric projection that is fully
+     * represented by an independently valid period carrier. Grouped requests
+     * stay on the strict repair path because removing one requirement there
+     * could otherwise change ownership between independent requested results.
+     */
+    private static function discardPeriodOnlyMetricProjection($requirements,bool $hasGroups)
+    {
+        if ($hasGroups || !is_array($requirements) || $requirements===[]
+            || array_keys($requirements)!==range(0,count($requirements)-1)) return $requirements;
+        $hasValidPeriod=false;
+        foreach ($requirements as $requirement) {
+            $fields=is_array($requirement)?($requirement['fields']??null):null;
+            $values=is_array($requirement)?($requirement['values']??null):null;
+            if (is_array($fields) && in_array('periods',$fields,true)
+                && is_array($values) && self::periods($values['periods']??null)) {
+                $hasValidPeriod=true;
+                break;
+            }
+        }
+        if (!$hasValidPeriod) return $requirements;
+        $normalized=[];
+        foreach ($requirements as $requirement) {
+            $fields=is_array($requirement)?($requirement['fields']??null):null;
+            $values=is_array($requirement)?($requirement['values']??null):null;
+            $isPeriodOnlyMetric=is_array($fields) && in_array('metric_codes',$fields,true)
+                && is_array($values) && !array_key_exists('metric_exclusions',$values)
+                && self::metricTermsAreOnlyPeriods($values['metric_terms']??null);
+            if (!$isPeriodOnlyMetric) {$normalized[]=$requirement;continue;}
+            $requirement['fields']=array_values(array_diff($fields,['metric_codes']));
+            unset($requirement['values']['metric_terms']);
+            // A requirement containing only the duplicated metric projection
+            // contributes no customer meaning beyond the separate period row.
+            if ($requirement['fields']===[]) continue;
+            if ($requirement['values']===[]) unset($requirement['values']);
+            $normalized[]=$requirement;
+        }
+        return $normalized===[]?$requirements:$normalized;
     }
 
     /**

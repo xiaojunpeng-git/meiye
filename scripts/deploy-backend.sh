@@ -26,15 +26,21 @@ case "$SITE_KEY" in
       exit 3
     fi
     REMOTE="/www/wwwroot/rh.cc3798.com"
-    SSH_HOST="${MOHE_RH_SSH_HOST:-root@47.96.103.107}"
+    # Use the project SSH alias so the configured identity and host policy are
+    # applied consistently; callers can still override it for controlled CI.
+    SSH_HOST="${MOHE_RH_SSH_HOST:-rh-server}"
     ;;
   *) echo "未知站点 $SITE_KEY"; exit 2 ;;
 esac
 
-echo "→ rsync 后端 app/route/mohe 与魔核 AI 配置 → $REMOTE （不覆盖 .env/runtime/public/vendor，且不删除远端文件）"
+echo "→ rsync 后端 app/route/mohe 与魔核 AI 配置 → $REMOTE （不覆盖 .env/runtime/public/vendor）"
 rsync -az \
   --exclude 'runtime/' \
   "$SRC/app/" "$SSH_HOST:$REMOTE/app/"
+# The AI namespace is one source-owned unit and contains no instance data.
+# Mirror it exactly so a source deletion cannot leave an executable-looking
+# legacy planner or validator on a customer server after an additive deploy.
+rsync -az --delete "$SRC/app/services/ai/" "$SSH_HOST:$REMOTE/app/services/ai/"
 rsync -az "$SRC/route/" "$SSH_HOST:$REMOTE/route/"
 rsync -az "$SRC/mohe/" "$SSH_HOST:$REMOTE/mohe/"
 # Deploy only the two source-controlled AI configuration files.  In

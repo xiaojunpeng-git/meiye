@@ -340,10 +340,31 @@ $periodAsMetricUnderstanding=['goal'=>'查看本月','status'=>'understood','req
         'values'=>['metric_terms'=>['本月'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
         'evidence'=>[['message_id'=>'current','quote'=>'本月呢？']]],
 ]];
-$reject(static function()use($periodAsMetricUnderstanding,$periodOnlyAfterSelection){AiIntentUnderstandingContract::normalize($periodAsMetricUnderstanding,$periodOnlyAfterSelection);},
-    'a calendar expression cannot be accepted as a replacement business metric');
+$normalizedPeriodProjection=AiIntentUnderstandingContract::normalize($periodAsMetricUnderstanding,$periodOnlyAfterSelection);
+$check(count($normalizedPeriodProjection['requirements'])===1
+    &&$normalizedPeriodProjection['requirements'][0]['fields']===['periods']
+    &&!isset($normalizedPeriodProjection['requirements'][0]['values']['metric_terms']),
+    'a calendar expression duplicated into the metric slot is discarded without selecting a business metric');
+$freshOverviewQuestion=['schema_version'=>'sanitized-question-v2','question'=>'今天经营得怎么样','has_unresolved_conditions'=>false,
+    'server_resolved_fields'=>[],'reference_date'=>'2026-09-20','recent_questions'=>[],
+    'evidence_messages'=>[['id'=>'current','text'=>'今天经营得怎么样']], 'prior_query'=>null];
+$freshOverviewProjection=['goal'=>'了解今天经营情况','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'今天的经营概览','fields'=>['metric_codes','periods'],
+        'values'=>['metric_terms'=>['今天'],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]]],
+        'evidence'=>[['message_id'=>'current','quote'=>'今天经营得怎么样']]],
+]];
+$normalizedFreshOverview=AiIntentUnderstandingContract::normalize($freshOverviewProjection,$freshOverviewQuestion);
+$check($normalizedFreshOverview['requirements'][0]['fields']===['periods']
+    &&$normalizedFreshOverview['goal']==='了解今天经营情况',
+    'a fresh broad overview keeps its grounded goal and period while a later semantic gate owns metric selection');
+$ungroundedPeriodMetric=$freshOverviewProjection;
+$ungroundedPeriodMetric['requirements'][0]['fields']=['metric_codes'];
+unset($ungroundedPeriodMetric['requirements'][0]['values']['periods']);
+$reject(static function()use($ungroundedPeriodMetric,$freshOverviewQuestion){
+    AiIntentUnderstandingContract::normalize($ungroundedPeriodMetric,$freshOverviewQuestion);
+},'a date-like metric without an independently valid period carrier remains rejected');
 $check(AiIntentUnderstandingContract::repairable('period_term_as_metric'),
-    'a temporal term used as a metric receives one understanding repair before any binding query');
+    'grouped or otherwise unproved temporal metric projections retain the bounded repair path');
 $periodOnlyBinding=$selectedStandaloneBinding;$periodOnlyBinding['metric_codes']=[];$periodOnlyBinding['operation']='summary';$periodOnlyBinding['periods']=[['kind'=>'month_offset','offset_months'=>0]];$periodOnlyBinding['requirement_bindings']=[];
 $periodOnlyBinding['context_delta']['metric_codes']='inherit';$periodOnlyBinding['context_delta']['operation']='inherit';
 $reject(static function()use($periodOnlyBinding,$periodOnlyAfterSelection,$periodOnlyUnderstanding){AiIntentResultContract::normalize($periodOnlyBinding,['cash_performance'],[],$periodOnlyAfterSelection,$periodOnlyUnderstanding);},
