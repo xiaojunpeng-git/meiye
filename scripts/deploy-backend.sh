@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 只同步后端 PHP（app/route/mohe），保留服务器 .env / runtime / public / vendor
+# 同步后端 PHP（app/route/mohe），保留服务器 .env / runtime / public / vendor。
+# rh 在同步后还会成组重启并校验 Swoole、AI Worker 和 Supervisor。
 # 用法：
 #   bash 美容源码/scripts/deploy-backend.sh 008
 #   bash 美容源码/scripts/deploy-backend.sh rh --allow-rh
@@ -48,7 +49,30 @@ rsync -az "$SRC/mohe/" "$SSH_HOST:$REMOTE/mohe/"
 # instance-specific connection settings must remain on the target instance.
 rsync -az "$SRC/config/console.php" "$SSH_HOST:$REMOTE/config/console.php"
 rsync -az "$SRC/config/mohe_ai.php" "$SSH_HOST:$REMOTE/config/mohe_ai.php"
-# 清缓存（不重启 Swoole，调用方按需重启）
+# Clear cached PHP metadata after every source sync. Non-RH instances retain
+# their existing per-instance restart procedure because their process managers
+# are not uniform.
 ssh "$SSH_HOST" "rm -rf '$REMOTE/runtime/cache/'* 2>/dev/null || true; echo CACHE_CLEARED"
+
+if [ "$SITE_KEY" = "rh" ]; then
+  echo "→ 同批重启瑞昊 Swoole、魔核 AI Worker 与 Supervisor"
+  # A source sync is not a completed RH deployment while long-lived processes
+  # still hold different registry versions. Discover every resident worker
+  # instance, validate its systemd unit name, then restart all three runtime
+  # roles from the just-synchronised source before reporting success.
+  AI_WORKERS=$(ssh "$SSH_HOST" "systemctl list-units --all --plain --no-legend 'mohe-ai-execution-worker@*.service' | awk '{print \$1}'")
+  [ -n "$AI_WORKERS" ] || { echo "未发现瑞昊魔核 AI execution worker，停止发布" >&2; exit 4; }
+  for AI_UNIT in $AI_WORKERS; do
+    case "$AI_UNIT" in
+      mohe-ai-execution-worker@*.service) ;;
+      *) echo "发现非法 AI worker unit：$AI_UNIT" >&2; exit 4 ;;
+    esac
+  done
+  # shellcheck disable=SC2086
+  ssh "$SSH_HOST" "set -e; /etc/init.d/ruihao_swoole restart; systemctl restart $AI_WORKERS mohe-ai-supervisor.service; systemctl is-active --quiet $AI_WORKERS mohe-ai-supervisor.service; /etc/init.d/ruihao_swoole status; echo RH_AI_RUNTIME_READY"
+fi
+
 echo "DEPLOY_BACKEND_OK $SITE_KEY"
-echo "若改了业务 PHP：请按该站 Swoole 脚本重启（瑞昊 /etc/init.d/ruihao_swoole；008 按现网进程）。"
+if [ "$SITE_KEY" != "rh" ]; then
+  echo "若改了业务 PHP：请按该站 Swoole 脚本重启（008/007/012 按各自现网进程）。"
+fi

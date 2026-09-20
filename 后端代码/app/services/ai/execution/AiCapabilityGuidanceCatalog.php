@@ -64,6 +64,10 @@ final class AiCapabilityGuidanceCatalog
                     // is a data-grain property. It is never derived from the
                     // customer wording or a page/terminal.
                     'default_selection_ref'=>$readiness[$code]['analysis_default_selection_ref']??null,
+                    // A small registry declaration may offer one disclosed
+                    // ranking perspective for a broad, otherwise executable
+                    // first answer. It is not a role filter or a phrase map.
+                    'default_rank_object_kinds'=>$readiness[$code]['analysis_default_rank_object_kinds']??[],
                 ];
                 $items[$code]['query_shapes'][]=$shape;
                 foreach ((array)($readiness[$code]['analysis_dimension_contracts']??[]) as $dimension) {

@@ -40,6 +40,19 @@ try {
     sbgCheck(\app\services\ai\contract\AiIntentResultContract::canUseCandidateBlindMetricReview($plain,$candidate),'a new evidence-backed measurement keeps candidate-blind admission in a follow-up');
     $rankingCandidate=$candidate+['operation'=>'ranking'];
     sbgCheck(\app\services\ai\contract\AiIntentResultContract::canUseCandidateBlindMetricReview($plain,$rankingCandidate),'a clear ranking may use the same candidate-blind metric admission');
+    $broadRankingUnderstanding=['goal'=>'谁的业绩最好','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'找出表现最佳的人员','fields'=>['object_kind','operation','ranking'],
+            'values'=>['object_kind'=>'person','operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>1]],
+            'evidence'=>[['message_id'=>'current','quote'=>'谁的业绩最好']]],
+    ]];
+    $broadRankingIntent=['object_kind'=>'person','object_term'=>'','object_relation'=>'analysis','operation'=>'ranking',
+        'metric_codes'=>['staff_sales_yeji','staff_labor_yeji'],'needs_metric_choice'=>true,
+        'initial_observation'=>false,'aggregate_condition'=>null,'result_reference'=>null];
+    sbgCheck(\app\services\ai\contract\AiIntentResultContract::canUseRegisteredRankDefault($broadRankingUnderstanding,$broadRankingIntent),
+        'a condition-free broad ranking may use one registered first-answer declaration after semantic review');
+    $conditionalRankingIntent=$broadRankingIntent;$conditionalRankingIntent['aggregate_condition']=['subject'=>'person'];
+    sbgCheck(!\app\services\ai\contract\AiIntentResultContract::canUseRegisteredRankDefault($broadRankingUnderstanding,$conditionalRankingIntent),
+        'a registered ranking default never replaces a customer condition set');
     $unboundCandidate=['metric_codes'=>[],'needs_metric_choice'=>true];
     sbgCheck(\app\services\ai\contract\AiIntentResultContract::canUseCandidateBlindMetricReview($plain,$unboundCandidate),
         'a fresh measurement may be model-resolved from the registry even when the first binder left it pending');

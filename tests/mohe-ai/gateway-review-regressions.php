@@ -158,6 +158,15 @@ $check(app\services\query\metric\MetricMoneyFormatter::integerYuan(15149)==='151
     'integer yuan formatting rounds cents symmetrically instead of truncating');
 $http=file_get_contents(dirname(__DIR__,2).'/后端代码/app/controller/ai/AiHttpActions.php');
 $check(strpos($http,'return new AiGatewayServices();')!==false,'framework adapter does not autowire optional fixture dependencies');
+$deployScript=file_get_contents(dirname(__DIR__,2).'/scripts/deploy-backend.sh');
+// RH uses three long-lived runtime roles. Keep deployment success coupled to
+// restarting and verifying all of them so old and new AI contracts cannot run
+// concurrently after a source sync.
+$check(strpos($deployScript,'/etc/init.d/ruihao_swoole restart')!==false
+    && strpos($deployScript,'systemctl restart $AI_WORKERS mohe-ai-supervisor.service')!==false
+    && strpos($deployScript,'systemctl is-active --quiet $AI_WORKERS mohe-ai-supervisor.service')!==false
+    && strpos($deployScript,'RH_AI_RUNTIME_READY')!==false,
+    'RH backend deployment restarts and verifies web, AI worker and supervisor as one runtime version');
 $siliconFlow=file_get_contents(dirname(__DIR__,2).'/后端代码/app/services/ai/model/SiliconFlowClient.php');
 $check(strpos($siliconFlow,"context_constraint_without_source:business_filters")!==false
     && strpos($siliconFlow,'use context_delta business_filters=clear so person, position, member or other object-selection filters from the old subject cannot leak into the new subject')!==false,

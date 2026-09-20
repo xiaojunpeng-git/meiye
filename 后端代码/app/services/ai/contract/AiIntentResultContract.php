@@ -1325,6 +1325,30 @@ final class AiIntentResultContract
         return $requirements!==[];
     }
 
+    /**
+     * A registry default is a response policy, not a replacement for an
+     * accepted condition. Keep this structural gate narrow so only a broad
+     * analytical ranking can reach the declared first-answer perspective.
+     * Natural-language compatibility is still checked by the model reviewer.
+     */
+    public static function canUseRegisteredRankDefault(array $understanding,array $intent): bool
+    {
+        if (($understanding['status']??null)!=='understood'
+            || ($intent['operation']??null)!=='ranking'
+            || ($intent['object_relation']??'analysis')!=='analysis'
+            || ($intent['object_term']??'')!==''
+            || !empty($intent['initial_observation'])
+            || !empty($intent['aggregate_condition'])
+            || !empty($intent['result_reference'])) return false;
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            $fields=(array)($requirement['fields']??[]);
+            if (array_intersect($fields,['aggregate_condition','result_reference','unbound'])) return false;
+            $values=(array)($requirement['values']??[]);
+            if (!empty($values['metric_exclusions']) || count((array)($values['metric_terms']??[]))>1) return false;
+        }
+        return true;
+    }
+
     /** The accepted understanding is the sole source of this distinction. */
     private static function hasCurrentMetricRequirement(array $understanding): bool
     {

@@ -883,7 +883,11 @@ final class AiGatewayServices
             }
             $summaries[]=['metric_code'=>$code,'name'=>$tooltip['name'],'summary'=>implode("\n",$meaning),'object_contracts'=>$objects,
                 'query_shapes'=>array_values((array)($contract['query_shapes']??[])),
-                'default_selection_ref'=>$contract['analysis_default_selection_ref']??null];
+                'default_selection_ref'=>$contract['analysis_default_selection_ref']??null,
+                // The registry may disclose one default ranking perspective
+                // for a compatible broad first answer. It is deliberately
+                // scoped to object kinds, never inferred from question words.
+                'default_rank_object_kinds'=>array_values((array)($contract['analysis_default_rank_object_kinds']??[]))];
         }
         $measurementVocabulary=$this->analysisMeasurementVocabulary($caps);
         // The prompt-facing candidates and the later controlled choices are both
@@ -3088,6 +3092,19 @@ final class AiGatewayServices
                 || (($selection['decision']??null)==='clarify' && ($selection['metric_code']??null)!==null)) {
                 throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',['stage'=>'intent_contract','predicate'=>'rank_metric_resolution']);
             }
+            if ($selection['decision']==='clarify') {
+                // A model may honestly see several registered candidates for
+                // a broad ranking. Before showing a selector, apply the one
+                // registry-declared first-answer perspective only when the
+                // accepted shape carries no condition, exclusion or selected
+                // object that a default could silently replace. The normal
+                // independent semantic review below remains mandatory.
+                $defaultMetric=$this->registeredRankDefault($reply['intent']??[],$understanding,$summaries,$candidates);
+                if ($defaultMetric!==null) {
+                    $selection=['decision'=>'select','metric_code'=>$defaultMetric];
+                    $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_rank_default_applied');
+                }
+            }
             $reply['intent']=($selection['decision']==='select')
                 ? SiliconFlowClient::applyRankMetricResolution($reply['intent']??[],$selection,$understanding)
                 : SiliconFlowClient::applyRankMetricClarification($reply['intent']??[],$understanding);
@@ -3101,6 +3118,29 @@ final class AiGatewayServices
             try { $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_rank_metric_choice',$state); } catch (\Throwable $ignored) {}
             throw $error;
         }
+    }
+
+    /**
+     * Returns one source-owned ranking default only for a model-proposed
+     * candidate set that is safe to present as a first answer. This does not
+     * interpret customer text or manufacture a metric: the model has already
+     * fixed the analytical object, operation and compatible candidates, while
+     * the registry owns the optional product default and the later reviewer
+     * can still reject a semantic mismatch.
+     */
+    private function registeredRankDefault(array $intent,array $understanding,array $summaries,array $candidateCodes): ?string
+    {
+        if (!AiIntentResultContract::canUseRegisteredRankDefault($understanding,$intent)) return null;
+        $objectKind=$intent['object_kind']??null;
+        if (!is_string($objectKind)) return null;
+        $defaults=[];
+        foreach ($summaries as $summary) {
+            $code=$summary['metric_code']??null;
+            if (!is_string($code) || !in_array($code,$candidateCodes,true)) continue;
+            $kinds=$summary['default_rank_object_kinds']??[];
+            if (is_array($kinds) && in_array($objectKind,$kinds,true)) $defaults[$code]=true;
+        }
+        return count($defaults)===1 ? array_key_first($defaults) : null;
     }
 
     /**

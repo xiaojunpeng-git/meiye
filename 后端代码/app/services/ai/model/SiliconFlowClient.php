@@ -317,7 +317,7 @@ final class SiliconFlowClient
         if (count($candidateCodes)<2 || count($candidateCodes)>4 || count($candidateCapabilities)!==count($candidateCodes)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         $payload=['model'=>$model,'stream'=>false,'max_tokens'=>120,'temperature'=>0,'response_format'=>['type'=>'json_object'],
             'messages'=>[
-                ['role'=>'system','content'=>'The accepted customer meaning requires one ranked result, but a previous model response supplied several registered candidate measurements. Decide whether one supplied measurement can faithfully answer every accepted customer requirement as a clearly labelled professional first answer. If yes, return exactly {"decision":"select","metric_code":"one supplied code"}. If selecting one would omit, replace or guess a customer requirement, return exactly {"decision":"clarify","metric_code":null}. Do not add a condition, calculate, explain, expose data, or select a code that was not supplied.'],
+                ['role'=>'system','content'=>'The accepted customer meaning requires one ranked result, but a previous model response supplied several registered candidate measurements. Select one supplied measurement whenever it is a compatible, clearly labelled professional first answer. A capability may declare default_rank_object_kinds for the current analytical object; that is the registered first-answer perspective for a broad ranking, not a replacement for an explicit customer measurement. Return clarify only when selecting one would omit, replace or guess an explicit customer requirement, exclusion, condition, selected object or requested accounting basis. Return exactly {"decision":"select","metric_code":"one supplied code"} or {"decision":"clarify","metric_code":null}. Do not add a condition, calculate, explain, expose data, or select a code that was not supplied.'],
                 ['role'=>'user','content'=>json_encode(['question'=>['question'=>$safeQuestion['question'],'reference_date'=>$safeQuestion['reference_date']],
                     'understanding'=>$understanding,'candidate_capabilities'=>$candidateCapabilities],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)],
             ]];
@@ -493,7 +493,7 @@ final class SiliconFlowClient
         $actions=array_keys($allowedBusinessActions); sort($actions,SORT_STRING);
         $codes=[];
         foreach ($capabilities as $capability) {
-            if (!is_array($capability) || !in_array(count($capability),[4,5],true) || !is_string($capability['metric_code']??null)
+            if (!is_array($capability) || !in_array(count($capability),[4,5,6],true) || !is_string($capability['metric_code']??null)
                 || !preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$capability['metric_code']) || !is_string($capability['name']??null)
                 || !is_string($capability['summary']??null) || !is_array($capability['object_contracts']??null)
                 || !$capability['object_contracts'] || count($capability['object_contracts'])>12
@@ -501,6 +501,11 @@ final class SiliconFlowClient
                     && $capability['default_selection_ref']!==null
                     && (!is_string($capability['default_selection_ref'])
                         || !preg_match('/^[a-z][a-z0-9_]{0,63}:[a-z0-9_-]{1,63}$/D',$capability['default_selection_ref'])))) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+            if (array_key_exists('default_rank_object_kinds',$capability)) {
+                $kinds=$capability['default_rank_object_kinds'];
+                if (!is_array($kinds) || count($kinds)>8 || count(array_unique($kinds))!==count($kinds)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+                foreach ($kinds as $kind) if (!is_string($kind) || !in_array($kind,self::ANALYTICAL_OBJECT_KINDS,true)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+            }
             $seenObjects=[];
             foreach ($capability['object_contracts'] as $contract) {
                 $keys=is_array($contract)?array_keys($contract):[];sort($keys);

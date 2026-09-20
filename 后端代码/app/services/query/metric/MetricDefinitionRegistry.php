@@ -85,6 +85,10 @@ final class MetricDefinitionRegistry
                     ],
                 ],
                 'default_ranking_dimension' => 'operator',
+                // A broad store ranking may use collection as its disclosed
+                // first-answer perspective. The AI can use this only after it
+                // has already accepted the object and ranking semantics.
+                'analysis_default_rank_object_kinds' => ['store'],
                 'category_reader' => ['strategy' => 'cash_sale_allocation', 'mode' => 'positive'],
             ],
             'refund_performance' => self::amount('cash_refund', 'actual-cash-refund-v1', ['summary', 'comparison', 'trend', 'ranking']) + [
@@ -127,6 +131,10 @@ final class MetricDefinitionRegistry
                 // requested period. Current cashier qualifications remain an
                 // explicit customer filter, never a historical fact filter.
                 'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
+                // “员工谁做得最好” has a useful, disclosed first reading. An
+                // explicit labour, project-count, service-count or people
+                // request is still bound by its own registered measurement.
+                'analysis_default_rank_object_kinds' => ['person'],
             ],
             'staff_labor_yeji' => self::amount('personnel_fact_sum', 'labor-performance-allocated-person-v1', ['summary', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_performance_fact', 'amount' => 'amount_cents',
@@ -203,6 +211,10 @@ final class MetricDefinitionRegistry
                 // query shapes alone never make another dimension executable.
                 'condition_subjects' => ['order', 'sale_line', 'card', 'project', 'product'],
                 'default_ranking_dimension' => 'operator',
+                // “卖得最好” is a sales ranking first reading for these
+                // registered sale objects; the Reader still owns its fact
+                // allocation and a stated quantity/collection metric wins.
+                'analysis_default_rank_object_kinds' => ['card', 'project', 'product'],
                 'overview' => [
                     ['object_kind' => 'store', 'section' => '销售结果', 'order' => 10],
                     ['object_kind' => 'card', 'section' => '卡项销售', 'order' => 10],
@@ -455,6 +467,7 @@ final class MetricDefinitionRegistry
                 'analysis_dimensions' => self::analysisDimensions($item),
                 'analysis_dimension_contracts' => self::analysisDimensionContracts($item),
                 'analysis_default_selection_ref' => $item['analysis_default_selection_ref'] ?? null,
+                'analysis_default_rank_object_kinds' => $item['analysis_default_rank_object_kinds'] ?? [],
                 'overview' => self::overviewContracts($item),
                 // A threshold contract is deliberately narrow: it describes
                 // the only permitted aggregate predicate for this metric,
