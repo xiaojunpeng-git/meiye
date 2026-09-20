@@ -55,15 +55,16 @@ namespace {
     foreach (['今天张三现金业绩多少？'=>'AI_INTENT_UNRESOLVED','今天店长现金业绩多少？'=>'AI_CAPABILITY_NOT_READY','今天生美现金业绩多少？'=>'AI_CAPABILITY_NOT_READY','今天现金业绩排除张三'=>'AI_CAPABILITY_NOT_READY','今天现金业绩和销售数量'=>'AI_METRIC_NOT_READY'] as $unknown=>$expectedError) rejects(function()use($planner,$projector,$selection,$cap,$unknown){$planner->compile($projector->project($unknown),$selection,$cap,'screen','2026-09-08');},$expectedError);
     $envelope = $planner->compile($projector->project('业绩多少？'),$selection,$cap,'screen','2026-09-08');
     check($envelope['kind']==='clarification' && count($envelope['fields'])===1,'only current semantic question displayed');
-    $dateStep=$planner->choose($envelope,['metric_code'=>'consume_amount']);
-    $chosen = $planner->choose($dateStep,['start_date'=>'2026-09-01','end_date'=>'2026-09-08']);
-    check($chosen['kind']==='plan','needed date step completes plan without model call');
-    $actualDateStep=$planner->choose($envelope,['metric_code'=>'actual_performance']);
-    check($actualDateStep['kind']==='clarification','registered actual metric remains available during clarification');
-    rejects(function()use($planner,$dateStep){$planner->choose($dateStep,['start_date'=>'2026-02-30','end_date'=>'2026-09-08']);},'AI_DATE_INVALID');
+    // The current server date is already a verified default in this legacy
+    // planner fixture, so choosing the only unresolved metric completes the
+    // plan directly instead of manufacturing a second date question.
+    $chosen=$planner->choose($envelope,['metric_code'=>'consume_amount']);
+    check($chosen['kind']==='plan','metric clarification completes with the verified default period');
+    $actualPlan=$planner->choose($envelope,['metric_code'=>'actual_performance']);
+    check($actualPlan['kind']==='plan','registered actual metric remains available during clarification');
     rejects(function()use($planner,$envelope){$planner->choose($envelope,['metric_code'=>'cash_performance','start_date'=>'2026-09-01']);},'AI_CLARIFICATION_INVALID');
-    $actualPlan=$planner->compile($projector->project('今天实际业绩'),array_merge($selection,['metric_codes'=>['actual_performance']]),$cap,'screen','2026-09-08');
-    check($actualPlan['kind']==='plan' && $actualPlan['plan']['query']['metric_codes']===['actual_performance'],'registered actual metric compiles directly');
+    $directActualPlan=$planner->compile($projector->project('今天实际业绩'),array_merge($selection,['metric_codes'=>['actual_performance']]),$cap,'screen','2026-09-08');
+    check($directActualPlan['kind']==='plan' && $directActualPlan['plan']['query']['metric_codes']===['actual_performance'],'registered actual metric compiles directly');
     // Source compiler intentionally refuses export until shared export readiness.
     rejects(function()use($planner,$projector,$selection,$cap){$planner->compile($projector->project('今天现金业绩'),$selection,$cap,'screen_and_xlsx','2026-09-08');},'AI_EXPORT_NOT_READY');
     $compareCap=['metric_codes'=>['cash_performance','consume_amount'],'query_shapes'=>['comparison']];

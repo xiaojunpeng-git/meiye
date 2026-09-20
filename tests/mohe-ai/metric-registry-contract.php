@@ -58,7 +58,7 @@ metricRegistryCheck(MetricSemanticCatalog::uniqueCodeForTerms(
 ) === 'staff_sales_yeji', 'an exact personnel metric term resolves inside the active registered capability boundary');
 metricRegistryCheck(MetricSemanticCatalog::uniqueCodeForTerms(
     ['销售人业绩'], ['staff_sales_yeji', 'sales_collected_amount']
-) === null, 'an exact term with two active registered owners remains a controlled ambiguity');
+) === 'staff_sales_yeji', 'personnel sales performance no longer conflicts with the distinct sales-collection fact');
 metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
     '按服务人次看呢？', ['staff_service_num', 'staff_project_num']
 ) === ['metric_code'=>'staff_service_num','term'=>'服务人次'],
@@ -77,7 +77,25 @@ metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
     'a longer natural condition term may contain one uniquely registered metric title');
 metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
     '销售人业绩怎么样？', ['staff_sales_yeji', 'sales_collected_amount']
-) === null, 'an in-text phrase owned by two active metrics is never auto-bound');
+) === ['metric_code'=>'staff_sales_yeji','term'=>'销售人业绩'],
+    'the personnel metric title remains exact after the store sales-collection alias was removed');
+// The answer-row object must narrow a cross-object customer expression before
+// the metric catalogue decides which registered fact owns that expression.
+metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
+    '本月完成服务项目数量最多的员工是谁？', ['staff_project_num','staff_sales_yeji']
+) === ['metric_code'=>'staff_project_num','term'=>'完成服务项目数量'],
+    'the same natural measurement resolves to allocated wage projects inside the personnel boundary');
+metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
+    '本月完成服务项目数量最多的项目是什么？', ['completed_service_item_count','sales_amount']
+) === ['metric_code'=>'completed_service_item_count','term'=>'完成服务项目数量'],
+    'the same natural measurement resolves to completed quantity inside the project boundary');
+metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
+    '本月完成服务项目数量最多的是谁？', ['staff_project_num','completed_service_item_count']
+) === null, 'without an answer-row object the cross-object measurement remains controlled ambiguity');
+$objectAliases=MetricDefinitionRegistry::analysisObjectAliases();
+metricRegistryCheck(in_array('员工',$objectAliases['person']??[],true)
+    && in_array('手艺人',$objectAliases['person']??[],true),
+    'ordinary personnel object names are published by the registry instead of gateway phrase branches');
 $memberThreshold=(new app\services\query\metric\AnalysisCapabilityCatalogFactory())->make()->discover([
     'metric_codes'=>['sales_collected_amount'],'object_kind'=>'member','operation'=>'threshold_count',
     'filter_keys'=>[],'relation_role'=>'member_sales_collection_total',

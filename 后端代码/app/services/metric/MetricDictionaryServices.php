@@ -510,7 +510,10 @@ class MetricDictionaryServices extends BaseServices
                 'exclude' => '销售数量、项目成交件数，以及未分配给本人的服务项目不计入。',
                 'timing' => '按服务完成并确认劳动业绩的归属时间统计；作废服务以反向事实冲回。',
                 'note' => '用于工资计算，不等同于销售数量。',
-                'aliases' => ['project_num'],
+                // 同一客户表达在不同分析对象下可以对应不同事实：
+                // 人员维度是工资/分配项目数，项目维度则由项目完成数指标承载。
+                // 网关会先限定回答对象，再在兼容指标集内解析该词。
+                'aliases' => ['project_num', '工资项目数', '分配项目数', '完成服务项目数量'],
                 'dev_source' => 'MetricDefinitionRegistry：cashier_v3_performance_fact 劳动业绩事实的项目数快照',
                 'dev_note' => '项目数以完整分配确认值为准，按百万分之一计数单位精确汇总。',
             ],

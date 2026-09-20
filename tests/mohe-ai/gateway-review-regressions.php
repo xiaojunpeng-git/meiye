@@ -1,7 +1,7 @@
 <?php
 // Read-only deterministic review regressions: no app boot, database, model or network.
 $base=dirname(__DIR__,2).'/后端代码/app/services/';
-foreach (['BaseServices.php','metric/MetricDictionaryServices.php','query/metric/MetricMoneyFormatter.php','query/metric/MetricSemanticCatalog.php','query/metric/MetricDefinitionRegistry.php','query/metric/MetricReadViewServices.php','ai/contract/AiContractException.php','ai/contract/AiIntentResultContract.php',
+foreach (['BaseServices.php','metric/MetricDictionaryServices.php','query/metric/MetricMoneyFormatter.php','query/metric/MetricSemanticCatalog.php','query/metric/MetricDefinitionRegistry.php','query/metric/MetricReadViewServices.php','ai/contract/AiContractException.php','ai/contract/AiIntentUnderstandingContract.php','ai/contract/AiIntentResultContract.php',
     'ai/model/AiModelInputProjector.php','ai/execution/AiWorkflowPlanner.php','ai/presentation/AiAnswerRenderer.php','ai/AiGatewayServices.php'] as $file) require_once $base.$file;
 $passed=0; $failed=[];
 $check=function($ok,$label) use (&$passed,&$failed) {if ($ok) ++$passed; else $failed[]=$label;};
@@ -250,6 +250,50 @@ $check(strpos($gateway,'reconcileExactRegisteredAnalyticalObject(')!==false
     && strpos($gateway,"'object_relation'=>'analysis'")!==false
     && strpos($gateway,"preg_match('/\\[local_condition_[0-9]+\\]/D',\$question)")!==false,
     'one exact registry-published analytical object label corrects a generic overview without touching local identities');
+$reuseInit=strpos($gateway,'$bindingRankRecovery=false;$groupedItems=null;$groupedUnderstanding=null;');
+$reuseBranch=strpos($gateway,'if ($reusedConditionIntent!==null)');
+$check($reuseInit!==false && $reuseBranch!==false && $reuseInit<$reuseBranch,
+    'collection carriers are initialized before deterministic context-reuse branches');
+// Exercise object-first reconciliation without booting the application: the
+// same measurement wording must bind differently for personnel and projects.
+$gatewayClass=new ReflectionClass(app\services\ai\AiGatewayServices::class);
+$gatewayWithoutDependencies=$gatewayClass->newInstanceWithoutConstructor();
+$objectVocabularyMethod=$gatewayClass->getMethod('analysisObjectVocabulary');
+$objectVocabulary=$objectVocabularyMethod->invoke($gatewayWithoutDependencies,[
+    'metric_readiness'=>app\services\query\metric\MetricDefinitionRegistry::capabilities(),
+]);
+$reconcileObject=$gatewayClass->getMethod('reconcileExactRegisteredAnalyticalObject');
+$questionText='本月完成服务项目数量最多的员工是谁';
+$safeObjectQuestion=['question'=>$questionText,'evidence_messages'=>[['id'=>'current','text'=>$questionText]]];
+$misclassifiedUnderstanding=['goal'=>'查询排行','requirements'=>[[
+    'id'=>'r1','meaning'=>'查询完成服务项目数量最多的员工',
+    'fields'=>['object_kind','object_relation','operation','ranking','metric_codes'],
+    'values'=>['object_kind'=>'project','object_relation'=>'analysis','operation'=>'ranking',
+        'ranking'=>['direction'=>'top','limit'=>1],'metric_terms'=>['完成服务项目数量']],
+    'evidence'=>[['message_id'=>'current','quote'=>$questionText]],
+]],'status'=>'understood'];
+$personReconciled=$reconcileObject->invoke(
+    $gatewayWithoutDependencies,$misclassifiedUnderstanding,$safeObjectQuestion,$objectVocabulary
+);
+$check(($personReconciled['requirements'][0]['values']['object_kind']??null)==='person'
+    && app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
+        $questionText,['staff_project_num','staff_sales_yeji']
+    )===['metric_code'=>'staff_project_num','term'=>'完成服务项目数量'],
+    'an explicit employee answer object wins over the project noun embedded in a metric title and narrows binding to wage projects');
+$projectQuestion='本月完成服务项目数量最多的项目是什么';
+$projectUnderstanding=$misclassifiedUnderstanding;
+$projectUnderstanding['requirements'][0]['evidence'][0]['quote']=$projectQuestion;
+$projectUnderstanding['requirements'][0]['values']['object_kind']='person';
+$projectReconciled=$reconcileObject->invoke(
+    $gatewayWithoutDependencies,$projectUnderstanding,
+    ['question'=>$projectQuestion,'evidence_messages'=>[['id'=>'current','text'=>$projectQuestion]]],
+    $objectVocabulary
+);
+$check(($projectReconciled['requirements'][0]['values']['object_kind']??null)==='project'
+    && app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
+        $projectQuestion,['completed_service_item_count','sales_amount']
+    )===['metric_code'=>'completed_service_item_count','term'=>'完成服务项目数量'],
+    'a separately stated project answer object keeps the project completion metric under the same generic reconciliation');
 $check(strpos($intentContract,"\$hasField('metric_codes',true)")!==false
     && strpos($intentContract,"\$hasField('operation',true)")!==false
     && strpos($intentContract,"\$intent['operation']!=='threshold_count' || \$hasField('aggregate_condition',true)")!==false,

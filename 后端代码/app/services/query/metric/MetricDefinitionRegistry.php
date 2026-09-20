@@ -16,8 +16,24 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v13';
+    public const VERSION = 'unified-metric-registry-v14';
     public const COVERAGE_START = '2026-08-10';
+
+    /**
+     * Customer-facing aliases for registered analytical objects. Canonical
+     * labels still come from each metric dimension; this table only publishes
+     * ordinary names for the same protocol object and never selects a metric.
+     * New object aliases are registered here instead of adding question-text
+     * branches to the AI gateway.
+     *
+     * @return array<string,array<int,string>>
+     */
+    public static function analysisObjectAliases(): array
+    {
+        return [
+            'person' => ['员工', '手艺人', '销售人'],
+        ];
+    }
 
     /**
      * Visible subject for a registry-backed overview. Non-store subjects are

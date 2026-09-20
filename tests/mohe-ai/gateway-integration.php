@@ -143,11 +143,12 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
  [$ask,$askInput]=$make('request2','业绩多少？');
  $waiting=$gateway->handle('execute',$context,$binding($ask)+$askInput,$ask['run_id']);
  verifyGateway($waiting['status']==='WAITING_CLARIFICATION' && count($waiting['clarification']['fields'])===1,'v2 asks metric only');
- $dateWait=$clarify($ask,$waiting,['metric_code'=>'consume_amount'],'metric-answer');
- verifyGateway($dateWait['status']==='WAITING_CLARIFICATION' && count($dateWait['clarification']['fields'])===2,'v2 then asks one date interval');
- $answered=$clarify($ask,$dateWait,['start_date'=>'2026-09-01','end_date'=>'2026-09-08'],'date-answer');
- verifyGateway($answered['status']==='COMPLETED','clarification resumes complete status='.($answered['status']??'').' reason='.($answered['reason']??''));
- verifyGateway((int)$db->query("SELECT clarification_count FROM mohe_ai_run WHERE run_id=".$db->quote($ask['run_id']))->fetchColumn()===2,'two semantic questions budget');
+ // The trusted current period is already available, so the only material
+ // ambiguity is the metric. Resolving it must complete without a redundant
+ // second date question.
+ $answered=$clarify($ask,$waiting,['metric_code'=>'consume_amount'],'metric-answer');
+ verifyGateway($answered['status']==='COMPLETED','metric clarification resumes complete status='.($answered['status']??'').' reason='.($answered['reason']??''));
+ verifyGateway((int)$db->query("SELECT clarification_count FROM mohe_ai_run WHERE run_id=".$db->quote($ask['run_id']))->fetchColumn()===1,'one material semantic question budget');
  [$cancel,$cancelInput]=$make('request3','今天消耗业绩多少？');$before=$models;
  verifyGateway($gateway->handle('cancel',$context,$binding($cancel),$cancel['run_id'])['status']==='CANCELLED','cancel received');
  verifyGateway($gateway->handle('execute',$context,$binding($cancel)+$cancelInput,$cancel['run_id'])['status']==='CANCELLED' && $models===$before,'cancel before execute no model');

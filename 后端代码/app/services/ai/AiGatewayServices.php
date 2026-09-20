@@ -456,6 +456,16 @@ final class AiGatewayServices
             if ($failureKind==='runtime_error' && preg_match('/^[A-Z][A-Z0-9_]{0,63}$/D',$e->getMessage())) {
                 $terminalPredicate.='_'.strtolower($e->getMessage());
             }
+            // A non-coded RuntimeException still needs a payload-free source
+            // coordinate; otherwise every context-merger defect collapses to
+            // the same unhelpful diagnostic. File basename and line contain
+            // no customer text, model output or business value.
+            if ($failureKind==='runtime_error' && $terminalPredicate==='terminal_runtime_error') {
+                $file=basename($e->getFile());
+                $safeFiles=['AiGatewayServices.php'=>'gateway','AiIntentResultContract.php'=>'intent_contract',
+                    'IntentContextMerger.php'=>'context_merger','AiWorkflowPlanner.php'=>'workflow_planner'];
+                if (isset($safeFiles[$file])) $terminalPredicate.='_'.$safeFiles[$file].'_line_'.$e->getLine();
+            }
             // TypeError text can expose argument values. The application file
             // and line are safe structural coordinates, so keep a bounded
             // location marker solely for a reproducible server-side defect.
@@ -1057,8 +1067,17 @@ final class AiGatewayServices
             }
         }
         $understanding=$this->resolveExactStatedSinglePeriod($understanding,$safe['outbound'],$today);
+        // The answer-row object is resolved before the measurement. This is
+        // essential when a measurement title itself contains an object noun:
+        // that noun describes what is counted, not necessarily which rows the
+        // customer wants back. Candidate metrics are then restricted by the
+        // source-owned object contract rather than by a sentence-specific rule.
+        $understanding=$this->reconcileExactRegisteredAnalyticalObject(
+            $understanding,$safe['outbound'],$objectVocabulary
+        );
+        $objectCompatibleSummaries=$this->bindingSummariesForUnderstanding($summaries,$understanding);
         $understanding=$this->reconcileExactRegisteredMeasurement(
-            $understanding,$safe['outbound'],$summaries,$objectVocabulary
+            $understanding,$safe['outbound'],$objectCompatibleSummaries,$objectVocabulary
         );
         $understanding=$this->reconcileStatedRegisteredMeasurements(
             $understanding,$safe['outbound'],$caps
@@ -1087,9 +1106,6 @@ final class AiGatewayServices
                 throw new RuntimeException('AI_CAPABILITY_NOT_READY');
             }
         }
-        $understanding=$this->reconcileExactRegisteredAnalyticalObject(
-            $understanding,$safe['outbound'],$objectVocabulary
-        );
         // A verified collection is reusable only for a proved pure-period
         // continuation. Its mere presence must never turn a self-contained
         // new question into a date edit of the previous collection.
@@ -1140,6 +1156,11 @@ final class AiGatewayServices
         $contextBindingReused=$reusedConditionIntent!==null
             ||$reusedConditionResultFormIntent!==null
             ||$reusedPeriodIntent!==null;
+        // These collection-only carriers are read after every binding path,
+        // including the deterministic period/condition reuse shortcuts. Keep
+        // their neutral state outside the model-only branch so a short context
+        // continuation cannot hit an undefined-variable RuntimeException.
+        $bindingRankRecovery=false;$groupedItems=null;$groupedUnderstanding=null;
         if ($reusedConditionIntent!==null) {
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'context_condition_update_binding_reused');
             $reply=['intent'=>$reusedConditionIntent,'usage'=>[]];
@@ -1182,7 +1203,6 @@ final class AiGatewayServices
         $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',$bindingGroupCount>1 ? 1800 : 1200);
         $this->runs->prepareAttempt($owner,$id,$generation,$worker,'bind_intent','model',hash('sha256',json_encode([$safe['outbound'],$understanding,$bindingSummaries])),'siliconflow');
         $this->runs->sendAttempt($owner,$id,$generation,$worker,'bind_intent');
-        $bindingRankRecovery=false;$groupedItems=null;$groupedUnderstanding=null;
         try {
             $checkpoint();
             // A transport result that times out is not provably absent at the
@@ -2599,6 +2619,11 @@ final class AiGatewayServices
         foreach ($objectVocabulary as $item) {
             $kind=$item['object_kind']??null;$label=$item['object_label']??null;
             if (!is_string($kind) || !is_string($label) || $label==='' || mb_strpos($question,$label,0,'UTF-8')===false) continue;
+            // Ignore an object word only when every occurrence is embedded in
+            // a longer registered measurement term. For example, the noun in
+            // “完成服务项目数量” is measurement language; a separate “项目”
+            // elsewhere in the same question remains an explicit row object.
+            if ($this->objectLabelOccursOnlyInsideMeasurement($question,$label)) continue;
             $length=mb_strlen($label,'UTF-8');
             if ($length>$longest) {$owners=[];$longest=$length;}
             if ($length===$longest) $owners[$kind][$label]=true;
@@ -2634,6 +2659,36 @@ final class AiGatewayServices
         return \app\services\ai\contract\AiIntentUnderstandingContract::normalize([
             'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',
         ],$safeQuestion);
+    }
+
+    /**
+     * True only when all occurrences of an object label are contained in a
+     * longer registered metric term. The registry supplies the vocabulary;
+     * this method contains no business phrase or object-specific branch.
+     */
+    private function objectLabelOccursOnlyInsideMeasurement(string $question,string $label): bool
+    {
+        $measurementSpans=[];
+        foreach (\app\services\query\metric\MetricSemanticCatalog::entries() as $entry) {
+            foreach ((array)($entry['terms']??[]) as $term) {
+                if (!is_string($term) || mb_strlen($term,'UTF-8')<=mb_strlen($label,'UTF-8')) continue;
+                $offset=0;
+                while (($start=mb_strpos($question,$term,$offset,'UTF-8'))!==false) {
+                    $measurementSpans[]=[$start,$start+mb_strlen($term,'UTF-8')];
+                    $offset=$start+1;
+                }
+            }
+        }
+        $found=false;$offset=0;$labelLength=mb_strlen($label,'UTF-8');
+        while (($start=mb_strpos($question,$label,$offset,'UTF-8'))!==false) {
+            $found=true;$end=$start+$labelLength;$contained=false;
+            foreach ($measurementSpans as $span) {
+                if ($start>=$span[0] && $end<=$span[1]) {$contained=true;break;}
+            }
+            if (!$contained) return false;
+            $offset=$start+1;
+        }
+        return $found;
     }
 
     private function bindingSummariesForUnderstanding(array $summaries,array $understanding): array
@@ -2714,6 +2769,18 @@ final class AiGatewayServices
                 $kind=$dimension['object_kind']??null;$label=$dimension['object_label']??null;
                 if (!is_string($kind) || !preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$kind)
                     || !is_string($label) || trim($label)==='' || mb_strlen($label,'UTF-8')>64) continue;
+                $items[$kind."\0".$label]=['object_kind'=>$kind,'object_label'=>$label];
+            }
+        }
+        // Aliases describe the same registered object kind; they grant no
+        // metric or execution capability. Only aliases whose canonical kind
+        // is present in the active capability set are projected.
+        $activeKinds=[];
+        foreach ($items as $item) $activeKinds[$item['object_kind']]=true;
+        foreach (\app\services\query\metric\MetricDefinitionRegistry::analysisObjectAliases() as $kind=>$aliases) {
+            if (!isset($activeKinds[$kind])) continue;
+            foreach ($aliases as $label) {
+                if (!is_string($label) || trim($label)==='' || mb_strlen($label,'UTF-8')>64) continue;
                 $items[$kind."\0".$label]=['object_kind'=>$kind,'object_label'=>$label];
             }
         }

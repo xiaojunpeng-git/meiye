@@ -103,9 +103,12 @@ try {
     $metadata=$cap; unset($metadata['metadata_readiness']['cash_performance']['description_ref']);
     registryReject(function()use($registry,$metadata){$registry->snapshot($metadata);},'AI_METADATA_CONTRACT_INCOMPLETE');
     foreach (['summary','trend','ranking','comparison'] as $shape) {
-        $compiled=$compiler->compile(registryPlan($shape),$cap); $compiler->assertCompiled($compiled);
+        $inputPlan=registryPlan($shape);
+        $compiled=$compiler->compile($inputPlan,$cap); $compiler->assertCompiled($compiled);
         registryCheck($compiled['workflow_code']==='wf_performance_'.$shape,'registered '.$shape.' fragment');
-        registryCheck($compiled['query']===registryPlan($shape)['query'],'all '.$shape.' query slots retained exactly');
+        // Compilation may append a registry-owned display projection, but it
+        // must retain every caller query slot and value without rewriting it.
+        registryCheck(array_intersect_key($compiled['query'],$inputPlan['query'])===$inputPlan['query'],'all '.$shape.' query slots retained exactly');
         registryCheck($compiled['budget']['counters']['tool_call_count']===1&&$compiled['budget']['counters']['skill_execution_count']===1,'actual calls counted once');
         registryCheck($compiled['scene_code']==='store_operations','business Skill stays separate from reusable shape');
     }
@@ -131,7 +134,8 @@ try {
             'aggregate_condition'=>['subject'=>'member','aggregation'=>'period_total','operator'=>'gte','amount_cents'=>498000]],'output_format'=>'screen'];
     $thresholdCompiled=$compiler->compile($thresholdPlan,$thresholdCap);$compiler->assertCompiled($thresholdCompiled);
     registryCheck($thresholdCompiled['workflow_code']==='wf_performance_threshold_count'
-        && $thresholdCompiled['query']===$thresholdPlan['query'],'member threshold preserves the typed registered query without a phrase branch');
+        && array_intersect_key($thresholdCompiled['query'],$thresholdPlan['query'])===$thresholdPlan['query'],
+        'member threshold preserves the typed registered query without a phrase branch');
     $forgedThreshold=$thresholdPlan;$forgedThreshold['query']['aggregate_condition']['subject']='store';
     registryReject(function()use($compiler,$forgedThreshold,$thresholdCap){$compiler->compile($forgedThreshold,$thresholdCap);},'AI_UNSUPPORTED_CONDITION');
     $compiled=$compiler->compile(registryPlan(),$cap);
@@ -165,7 +169,7 @@ try {
     $projectOverviewPlan['query']['metric_codes']=['sales_amount','sales_quantity','completed_service_item_count'];
     $projectOverviewPlan['query']['business_filters']=['object_kind'=>'project'];
     $projectOverviewCompiled=$compiler->compile($projectOverviewPlan,$projectOverviewCap); $compiler->assertCompiled($projectOverviewCompiled);
-    registryCheck($projectOverviewCompiled['query']===$projectOverviewPlan['query']
+    registryCheck(array_intersect_key($projectOverviewCompiled['query'],$projectOverviewPlan['query'])===$projectOverviewPlan['query']
         && in_array('project',array_column($projectOverviewCompiled['capability_snapshot']['metrics']['sales_amount']['overview'],'object_kind'),true),
         'registered object overview keeps every project-compatible metric and its frozen profile metadata without a per-object compiler branch');
     foreach (['guide','sales_manager'] as $participantKind) {
