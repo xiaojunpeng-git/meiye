@@ -316,9 +316,6 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             // 也可发生多张单，但只能算一次到店；不能按服务项目事实行累加。
             ->fieldRaw("member_visit_service.member_id,MAX(member_visit_service.member_name_snapshot) member_name,COUNT(DISTINCT member_visit_service.business_date) total_visits,MONTH(member_visit_service.business_date) month_no,COUNT(DISTINCT member_visit_service.business_date) month_visits")
             ->group('member_visit_service.member_id,MONTH(member_visit_service.business_date)')->select()->toArray();
-        $payments = $this->cashFacts($stores)
-            ->whereBetween('business_date', [$range['start'], $range['end']])->where('status','effective')->where('member_id','>',0)
-            ->fieldRaw('member_id,MONTH(business_date) month_no,SUM(amount_cents) amount_cents')->group('member_id,MONTH(business_date)')->select()->toArray();
         $records = [];
         foreach ($services as $fact) {
             $id = (int)$fact['member_id'];
@@ -326,10 +323,23 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $month = (int)$fact['month_no']; $records[$id]['month_'.$month.'_visits'] = (int)$fact['month_visits'];
             $records[$id]['total_visits'] += (int)$fact['month_visits'];
         }
-        foreach ($payments as $fact) if (isset($records[(int)$fact['member_id']])) {
-            $id=(int)$fact['member_id'];$month=(int)$fact['month_no'];$records[$id]['month_'.$month.'_cash_cents']=(int)$fact['amount_cents'];$records[$id]['annual_cash_cents']+=(int)$fact['amount_cents'];
-        }
         $memberIds = array_keys($records);
+        if ($memberIds) {
+            // 日期筛选决定本表的到店会员名单；全年及 1—12 月现金业绩必须读取
+            // 所选自然年的成功收款（含退款反向事实），不能误用到店日期区间。
+            // 只查这些会员，且绝不将历史权益迁入订单金额冒充本年收款。
+            $payments = $this->cashFacts($stores)
+                ->whereIn('member_id', $memberIds)
+                ->whereBetween('business_date', [sprintf('%04d-01-01', $year), sprintf('%04d-12-31', $year)])
+                ->where('status', 'effective')
+                ->fieldRaw('member_id,MONTH(business_date) month_no,SUM(amount_cents) amount_cents')
+                ->group('member_id,MONTH(business_date)')->select()->toArray();
+            foreach ($payments as $fact) {
+                $id=(int)$fact['member_id'];$month=(int)$fact['month_no'];
+                $records[$id]['month_'.$month.'_cash_cents']=(int)$fact['amount_cents'];
+                $records[$id]['annual_cash_cents']+=(int)$fact['amount_cents'];
+            }
+        }
         $phones = [];
         $annualCardSources = [];
         if ($memberIds) {
@@ -337,17 +347,27 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             foreach (Db::name('user')->whereIn('uid',$memberIds)->field('uid,phone')->select()->toArray() as $row) $phones[(int)$row['uid']] = (string)$row['phone'];
         }
         $columns = $this->columns(['member_name'=>'会员姓名','phone'=>'手机号码','total_visits'=>'总进店数','annual_cash'=>'全年现金业绩','source'=>'来源']);
+        foreach ($columns as &$column) {
+            if ($column['key'] === 'annual_cash') {
+                $column['source_explanation'] = '本行会员在所选年份内的成功记账收款，扣除该年实际发生的现金退款；到店日期筛选只决定本表列出哪些会员，历史权益迁入不计入。';
+            }
+        }
+        unset($column);
         $groups=[];
         foreach (range(1,12) as $month) {
             $keys=['month_'.$month.'_visits','month_'.$month.'_cash'];
-            $columns[]=['key'=>$keys[0],'label'=>'进店次数','group_label'=>$month.'月'];$columns[]=['key'=>$keys[1],'label'=>'现金业绩','group_label'=>$month.'月'];
+            $columns[]=['key'=>$keys[0],'label'=>'进店次数','group_label'=>$month.'月','source_explanation'=>'本行会员在所选到店日期范围内、该月份完成服务的到店天数；同日多项目只算一次。'];
+            $columns[]=['key'=>$keys[1],'label'=>'现金业绩','group_label'=>$month.'月','source_explanation'=>'本行会员在所选年份该月的成功记账收款，扣除当月实际发生的现金退款；历史权益迁入不计入。'];
             $groups[]=['label'=>$month.'月','column_keys'=>$keys];
         }
         foreach ($records as &$row) {
             $id=(int)$row['member_id'];$row['phone']=$phones[$id]??'';$row['source']=(string)($annualCardSources[$id]??'');$row['annual_cash']=$this->money((int)$row['annual_cash_cents']);
             foreach(range(1,12) as $month){$row['month_'.$month.'_visits']=(int)($row['month_'.$month.'_visits']??0);$row['month_'.$month.'_cash']=$this->money((int)($row['month_'.$month.'_cash_cents']??0));}
         } unset($row);
-        return $this->result('会员进店分析表',$columns,array_values($records),$input,$groups,['natural_year'=>$year]);
+        $result = $this->result('会员进店分析表',$columns,array_values($records),$input,$groups,['natural_year'=>$year]);
+        // 单表版本标识本次“到店筛选、自然年现金”边界修正；其他第二阶段报表不变。
+        $result['metric_version'] = 'store-member-visit-analysis-v2';
+        return $result;
     }
 
     private function memberVisitAnnualSummary(array $stores, array $range, array $input): array
