@@ -1,9 +1,21 @@
 <?php
 namespace app\services\query\metric;
 
-/** Display only. Authoritative values and exports retain their original signed cents. */
+/** 权威指标始终按有符号分存储；页面转整数元，导出可转保留分精度的元。 */
 final class MetricMoneyFormatter
 {
+    /** 导出保留分精度并以元表示，避免把保存的整数分值误当成元或经浮点换算。 */
+    public static function exactYuan(int $cents): string
+    {
+        $negative = $cents < 0;
+        $digits = str_pad(ltrim((string)$cents, '-'), 3, '0', STR_PAD_LEFT);
+        $whole = ltrim(substr($digits, 0, -2), '0');
+        if ($whole === '') $whole = '0';
+        $fraction = rtrim(substr($digits, -2), '0');
+        $value = $whole . ($fraction === '' ? '' : '.' . $fraction);
+        return $negative && $value !== '0' ? '-' . $value : $value;
+    }
+
     public static function integerYuan($cents): string
     {
         if (!is_int($cents)) throw new \RuntimeException('METRIC_AMOUNT_INVALID');

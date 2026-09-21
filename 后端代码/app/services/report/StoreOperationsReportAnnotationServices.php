@@ -82,6 +82,8 @@ final class StoreOperationsReportAnnotationServices
         'walk_in' => 'integer',
         'refund_headcount_manual' => 'integer',
         'manual_cash_amount' => 'integer_cents',
+        // 会员消费明细的体验现金业绩由页面按元录入、按分持久化；服务端必须拒绝非整数分值。
+        'experience_cash' => 'integer_cents',
         'experience_card_amount' => 'integer_cents',
         'visit_over_one_hour' => 'integer',
         'complaint_count' => 'nonnegative_integer',

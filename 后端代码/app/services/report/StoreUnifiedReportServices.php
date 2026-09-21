@@ -391,7 +391,7 @@ class StoreUnifiedReportServices extends BaseServices
         // Apply persisted manual overrides after deriving fact defaults.  The
         // annotation is the controlled projection for these two editable
         // columns and must win on every subsequent query/refresh.
-        $rows = $this->attachAnnotations($rows, 'member_consumption_detail', $storeId);
+        $rows = $this->attachAnnotations($rows, 'member_consumption_detail', $storeId, !empty($input['_internal_all']));
         $columns = array_merge($this->organizationDimensionColumns(), [
             ['key'=>'business_date','label'=>'日期'], ['key'=>'consume_type','label'=>'消费类型'], ['key'=>'member_name','label'=>'姓名'],
             ['key'=>'consumption_detail','label'=>'消费明细'], ['key'=>'category','label'=>'分类'], ['key'=>'sales_manager_name','label'=>'销售经理'],
@@ -1218,7 +1218,7 @@ class StoreUnifiedReportServices extends BaseServices
     }
 
     /** Merge only controlled report annotations; never alters V3 fact values. */
-    private function attachAnnotations(array $rows, string $reportCode, $storeId): array
+    private function attachAnnotations(array $rows, string $reportCode, $storeId, bool $export = false): array
     {
         if (!$rows) return $rows;
         $keys = [];
@@ -1251,7 +1251,9 @@ class StoreUnifiedReportServices extends BaseServices
                 [(string)($row['source_line_id'] ?? ''), (string)($row['order_id'] ?? ''), (string)($row['business_source_primary_id'] ?? '')],
                 static fn(string $value): bool => $value !== ''
             );
-            foreach ($candidates as $candidate) foreach ((array)($byKey[$candidate] ?? []) as $field => $value) $row[$field] = $value;
+            foreach ($candidates as $candidate) foreach ((array)($byKey[$candidate] ?? []) as $field => $value) {
+                $row[$field] = $this->annotationDisplayValue($reportCode, $field, $value, $export);
+            }
             foreach (['medical_elevation','medical_followup','expert_name','remark','walk_in_manual_count','refund_headcount_manual','manual_cash_amount','experience_cash','experience_payment_method'] as $field) {
                 if (!array_key_exists($field, $row)) $row[$field] = '';
                 if (!array_key_exists($field . '_version', $row)) $row[$field . '_version'] = 0;
@@ -1259,6 +1261,17 @@ class StoreUnifiedReportServices extends BaseServices
         }
         unset($row);
         return $rows;
+    }
+
+    /** 报表补充金额持久化为分；读回仅投影为整数元，不改写审计值，清空仍为空。 */
+    private function annotationDisplayValue(string $reportCode, string $field, $value, bool $export = false): string
+    {
+        $text = (string)$value;
+        return $reportCode === 'member_consumption_detail' && $field === 'experience_cash' && $text !== ''
+            ? ($export
+                ? \app\services\query\metric\MetricMoneyFormatter::exactYuan((int)$text)
+                : $this->money((int)$text))
+            : $text;
     }
 
     /** Payment columns are configuration-driven; facts only provide row amounts. */

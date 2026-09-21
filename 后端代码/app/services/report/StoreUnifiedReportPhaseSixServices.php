@@ -58,17 +58,19 @@ final class StoreUnifiedReportPhaseSixServices
         if ($stores === []) throw new \InvalidArgumentException('当前账号没有可查看的门店范围');
         $range = $this->range($range, $input);
         switch ($report) {
-            case 'phase_six_garden_item_analysis': return $this->garden($stores, $range);
-            case 'phase_six_monthly_featured_item': return $this->featured($stores, $range);
-            case 'phase_six_headquarters_acquisition': return $this->headquarters($stores, $range);
-            case 'phase_six_other_multi_payment': return $this->multiPayment($stores, $range);
-            case 'phase_six_salary_summary': return $this->salarySummary($stores, $range);
-            case 'phase_six_salary_detail': return $this->salaryDetail($stores, $range);
-            case 'phase_six_training_employee': return $this->trainingV2($stores, $range);
-            case 'phase_six_acquisition_source': return $this->acquisitionSource($stores, $range);
+            case 'phase_six_garden_item_analysis': $result = $this->garden($stores, $range); break;
+            case 'phase_six_monthly_featured_item': $result = $this->featured($stores, $range); break;
+            case 'phase_six_headquarters_acquisition': $result = $this->headquarters($stores, $range); break;
+            case 'phase_six_other_multi_payment': $result = $this->multiPayment($stores, $range); break;
+            case 'phase_six_salary_summary': $result = $this->salarySummary($stores, $range); break;
+            case 'phase_six_salary_detail': $result = $this->salaryDetail($stores, $range); break;
+            case 'phase_six_training_employee': $result = $this->trainingV2($stores, $range); break;
+            case 'phase_six_acquisition_source': $result = $this->acquisitionSource($stores, $range); break;
             case 'phase_six_human_store_health': return $this->healthWithStaffing($stores, $range);
+            default: throw new \InvalidArgumentException('不支持的第六阶段报表类型');
         }
-        throw new \InvalidArgumentException('不支持的第六阶段报表类型');
+        // 事实默认值先生成，手动补充值最后投影；查询和导出共用同一读回路径。
+        return $this->withManualAnnotations($report, $result, $stores, !empty($input['_internal_all']));
     }
 
     /** Current, non-historical headcount maintenance. */
@@ -134,6 +136,9 @@ final class StoreUnifiedReportPhaseSixServices
                 'deal_people' => $member > 0 && (int)($monthly[(string)$member] ?? 0) >= 100000 ? 1 : 0,
                 'item_name' => (string)$fact['item_name'], 'quantity' => (int)$fact['quantity'],
                 'cash_amount' => $this->money((int)$fact['amount_cents']), 'row_key' => (string)$fact['allocation_id'],
+                'store_id' => (int)$fact['store_id'], 'source_line_id' => (string)$fact['source_line_id'],
+                'annotation_subject_type' => 'phase_six_row',
+                'annotation_subject_key' => 'phase_six:garden:' . (string)$fact['allocation_id'],
             ];
         }
         return $this->result('花园品项分析表', [
@@ -158,6 +163,12 @@ final class StoreUnifiedReportPhaseSixServices
         $columns = [$this->column('company_name','区域','组织权限范围。',false,true),$this->column('store_name','门店','门店权限范围。',false,true),$this->manualColumn('target_amount','业绩目标','门店月度目标手动输入。')];
         foreach (array_keys($categories) as $cat) { $safe = 'featured_' . substr(sha1($cat),0,10); $columns[] = $this->column($safe.'_experience',$cat.'/体验人数','当月配置品项且有体验标签的有效记录数。',true,false,110,[],$cat); $columns[] = $this->column($safe.'_deal',$cat.'/成交人数','达到业务门槛的会员或顾客数。',true,false,110,[],$cat); $columns[] = $this->column($safe.'_cash',$cat.'/成交金额','该品项现金业绩分摊事实。',true,false,120,[],$cat); }
         $rows = []; foreach ($groups as &$row) { $row['cash_amount'] = $this->money($row['cash_amount']); foreach (array_keys($categories) as $cat) { $safe='featured_'.substr(sha1($cat),0,10); $matching=array_values(array_filter($facts,static fn(array $f):bool=>(int)$f['store_id']===(int)$row['store_id']&&(string)$f['category_path']===$cat)); $members=[]; $amount=0; foreach($matching as $m){$amount+=(int)$m['amount_cents'];if((int)$m['member_id']>0)$members[(int)$m['member_id']]=true;} $row[$safe.'_experience']=count(array_filter($matching,static fn(array $f):bool=>(int)$f['is_experience']===1));$row[$safe.'_deal']=count($members);$row[$safe.'_cash']=$this->money($amount); } } unset($row);
+        foreach ($groups as &$row) {
+            // 目标按门店和自然月归属；改变查询起止日不应产生另一份目标。
+            $row['annotation_subject_type'] = 'phase_six_row';
+            $row['annotation_subject_key'] = 'phase_six:featured:' . (int)$row['store_id'] . ':' . substr($range['end'], 0, 7);
+        }
+        unset($row);
         return $this->result('月主推数据统计表',$columns,array_values($groups),$range);
     }
 
@@ -168,7 +179,39 @@ final class StoreUnifiedReportPhaseSixServices
         return $this->result('总部拓客数据统计表',[$this->column('source','来源','年度第一笔正常销售订单冻结的来源。',false,true),$this->column('member_count','会员人数','该来源下有效会员人数。',true),$this->column('annual_amount','年度业绩','年度现金业绩事实合计。',true),$this->column('two_order_member_count','二单以上现金人数','年度至少两笔有效现金销售的会员数。',true),$this->column('two_order_amount','二单以上现金业绩','满足二单条件会员年度现金业绩合计。',true)],$rows,$range);
     }
 
-    private function multiPayment(array $stores,array $range):array{$facts=array_values(array_filter($this->cashFacts($stores,$range),static fn(array $f):bool=>(int)$f['is_experience']===1));$rows=[];foreach($facts as $f)$rows[]=['company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'business_date'=>$f['business_date'],'customer_name'=>$f['member_name'],'employee_name'=>$f['salesperson_name'],'category'=>$f['category_path'],'item_name'=>$f['item_name'],'quantity'=>(int)$f['quantity'],'cash_amount'=>$this->money((int)$f['amount_cents']),'row_key'=>$f['allocation_id']];return $this->result('其他多收款业绩表',[$this->column('company_name','分公司','销售事实组织快照。',false,true),$this->column('store_name','门店','销售事实门店快照。',false,true),$this->column('business_date','日期','成功结账业务日期。'),$this->column('customer_name','顾客姓名','会员或顾客快照。'),$this->column('employee_name','员工姓名','销售或操作员工快照。'),$this->column('category','商品分类','销售明细历史分类快照。'),$this->column('item_name','商品名称','销售明细名称。'),$this->manualColumn('unit_price','单价','手动输入并独立保存。'),$this->column('quantity','数量','销售明细数量。',true),$this->column('cash_amount','现金业绩','体验现金业绩事实。',true),$this->manualColumn('领取日期','领取日期','手动输入并独立保存。'),$this->manualColumn('领取数量','领取数量','手动输入并独立保存。'),$this->manualColumn('备注','备注','手动输入并独立保存。')],$rows,$range);}
+    private function multiPayment(array $stores, array $range): array
+    {
+        $facts = array_values(array_filter($this->cashFacts($stores, $range), static fn(array $fact): bool => (int)$fact['is_experience'] === 1));
+        $rows = [];
+        foreach ($facts as $fact) {
+            // 每笔收款分摊事实有独立稳定键；同一销售明细的多种收款不可共用手动值。
+            $rows[] = [
+                'store_id' => (int)$fact['store_id'], 'source_line_id' => (string)$fact['source_line_id'],
+                'annotation_subject_type' => 'phase_six_row',
+                'annotation_subject_key' => 'phase_six:payment:' . (string)$fact['allocation_id'],
+                'company_name' => $fact['company_name'], 'store_name' => $fact['store_name'],
+                'business_date' => $fact['business_date'], 'customer_name' => $fact['member_name'],
+                'employee_name' => $fact['salesperson_name'], 'category' => $fact['category_path'],
+                'item_name' => $fact['item_name'], 'quantity' => (int)$fact['quantity'],
+                'cash_amount' => $this->money((int)$fact['amount_cents']), 'row_key' => $fact['allocation_id'],
+            ];
+        }
+        return $this->result('其他多收款业绩表', [
+            $this->column('company_name','分公司','销售事实组织快照。',false,true),
+            $this->column('store_name','门店','销售事实门店快照。',false,true),
+            $this->column('business_date','日期','成功结账业务日期。'),
+            $this->column('customer_name','顾客姓名','会员或顾客快照。'),
+            $this->column('employee_name','员工姓名','销售或操作员工快照。'),
+            $this->column('category','商品分类','销售明细历史分类快照。'),
+            $this->column('item_name','商品名称','销售明细名称。'),
+            $this->manualColumn('unit_price','单价','手动输入并独立保存。'),
+            $this->column('quantity','数量','销售明细数量。',true),
+            $this->column('cash_amount','现金业绩','体验现金业绩事实。',true),
+            $this->manualColumn('领取日期','领取日期','手动输入并独立保存。'),
+            $this->manualColumn('领取数量','领取数量','手动输入并独立保存。'),
+            $this->manualColumn('备注','备注','手动输入并独立保存。'),
+        ], $rows, $range);
+    }
 
     private function salaryDetail(array $stores,array $range):array
     {
@@ -188,6 +231,9 @@ final class StoreUnifiedReportPhaseSixServices
                 'consumption_amount' => $this->money((int)$f['consumption_cents']),
                 'cash_amount' => $this->money((int)($f['cash_cents'] ?? 0)),
                 'labor_fee' => $this->money((int)$f['labor_fee_cents']), 'row_key' => $f['row_key'],
+                'store_id' => (int)$f['store_id'], 'source_line_id' => (string)$f['source_line_id'],
+                'annotation_subject_type' => 'phase_six_row',
+                'annotation_subject_key' => 'phase_six:salary:' . (string)$f['row_key'],
             ];
         }
         return $this->result('员工薪资明细月报表',[
@@ -480,7 +526,72 @@ final class StoreUnifiedReportPhaseSixServices
     private function range(array $range,array $input):array{$start=trim((string)($range['start']??$input['start_date']??''));$end=trim((string)($range['end']??$input['end_date']??''));if($start===''||$end===''){ $year=max(2000,(int)($input['year']??date('Y')));$start=$year.'-01-01';$end=$year.'-12-31'; }if(!preg_match('/^\d{4}-\d{2}-\d{2}$/',$start)||!preg_match('/^\d{4}-\d{2}-\d{2}$/',$end)||$start>$end)throw new \InvalidArgumentException('日期范围不正确');return['start'=>$start,'end'=>$end];}
     private function result(string $title,array $columns,array $records,array $range):array{$summary=[];foreach($columns as $c){$summary[$c['key']]='-';if(!empty($c['summable'])){$sum=0;$has=false;$moneyKey=(bool)preg_match('/amount|cash|fee|labor|consumption|performance|target|unit_output|average_order|sales_efficiency/i',(string)$c['key']);$halfUnitKey=(string)$c['key']==='project_count';$tenthUnitKey=in_array((string)$c['key'],['service_visit_count','service_people_count'],true);foreach($records as $r){$v=$r[$c['key']]??null;if($moneyKey&&is_string($v)&&preg_match('/^-?\d+(?:\.\d{1,2})?$/',$v)){ $sum+=$this->cents($v);$has=true; }elseif($halfUnitKey&&is_numeric($v)){ $sum+=(int)round((float)$v*2);$has=true; }elseif($tenthUnitKey&&is_numeric($v)){ $sum+=(int)round((float)$v*10);$has=true; }elseif(!$moneyKey&&is_numeric($v)){ $sum+=(int)$v;$has=true; }}$summary[$c['key']]=$has?($moneyKey?$this->money($sum):($halfUnitKey?number_format($sum/2,1,'.',''):($tenthUnitKey?$this->tenth($sum):(string)$sum))):($tenthUnitKey?'0.0':'0');}}return['title'=>$title,'columns'=>$columns,'records'=>array_values($records),'summary_row'=>$summary,'column_groups'=>[],'metric_version'=>self::METRIC_VERSION,'data_as_of'=>date('c'),'aggregation_status'=>'caught_up','filters'=>['start_date'=>$range['start'],'end_date'=>$range['end']],'table_layout'=>['fixed'=>true,'summary_fixed'=>true]];}
     private function column(string $key,string $label,string $explanation,bool $summable=false,bool $fixed=false,int $width=120,array $drilldown=[],string $group=''):array{$c=['key'=>$key,'label'=>$label,'source_explanation'=>$explanation,'summable'=>$summable,'width'=>$width];if($fixed)$c['fixed']='left';if($group!=='')$c['group_label']=$group;if($drilldown)$c['drilldown']=$drilldown;return$c;}
-    private function manualColumn(string $key,string $label,string $explanation,string $group=''):array{$c=$this->column($key,$label,$explanation,false,false,120,[],$group);$c['manual_input']=['subject_type'=>'phase_six_row','field_key'=>$key,'value_type'=>'text'];return$c;}
+    /** 声明与保存接口一致的字段单位，金额由页面元转分，非金额保持原类型。 */
+    private function manualColumn(string $key,string $label,string $explanation,string $group=''):array
+    {
+        $types = ['target_amount' => 'integer_cents', 'unit_price' => 'integer_cents',
+            '领取日期' => 'date', '领取数量' => 'nonnegative_integer'];
+        $column = $this->column($key,$label,$explanation,false,false,120,[],$group);
+        $column['manual_input'] = ['subject_type'=>'phase_six_row','field_key'=>$key,'value_type'=>$types[$key] ?? 'text'];
+        return $column;
+    }
+
+    /** 按门店和明细键读回独立补充记录；空串也覆盖默认值，且不改写业务事实。 */
+    private function withManualAnnotations(string $report, array $result, array $stores, bool $export): array
+    {
+        $manualColumns = [];
+        foreach ((array)($result['columns'] ?? []) as $column) {
+            if (!empty($column['manual_input'])) $manualColumns[(string)$column['key']] = $column['manual_input'];
+        }
+        if (!$manualColumns || empty($result['records'])) return $result;
+        $keys = [];
+        foreach ($result['records'] as $row) {
+            $key = (string)($row['annotation_subject_key'] ?? '');
+            if ($key !== '') $keys[$key] = true;
+        }
+        if (!$keys) return $result;
+        $saved = Db::name(StoreOperationsReportAnnotationServices::ANNOTATION_TABLE)
+            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('report_code', $report)->where('subject_type', 'phase_six_row')
+            ->whereIn('store_id', $stores)->whereIn('subject_key', array_keys($keys))
+            ->field('store_id,subject_key,field_key,field_value,version')->select()->toArray();
+        return $this->projectManualRows($result, $manualColumns, $saved, $export);
+    }
+
+    /** 仅用同门店同明细的白名单值覆盖，版本随行读回供并发写入校验。 */
+    private function projectManualRows(array $result, array $manualColumns, array $saved, bool $export = false): array
+    {
+        $byRow = [];
+        foreach ($saved as $item) {
+            $key = (int)$item['store_id'] . '|' . (string)$item['subject_key'];
+            $field = (string)$item['field_key'];
+            if (isset($manualColumns[$field])) $byRow[$key][$field] = $item;
+        }
+        foreach ($result['records'] as &$row) {
+            $key = (int)($row['store_id'] ?? 0) . '|' . (string)($row['annotation_subject_key'] ?? '');
+            foreach ($manualColumns as $field => $definition) {
+                $item = $byRow[$key][$field] ?? null;
+                if (!array_key_exists($field, $row)) $row[$field] = '';
+                $row[$field . '_version'] = $item === null ? 0 : (int)$item['version'];
+                if ($item !== null) {
+                    $value = (string)$item['field_value'];
+                    $row[$field] = $this->manualDisplayValue($definition, $value, $export);
+                }
+            }
+        }
+        unset($row);
+        return $result;
+    }
+
+    /** 金额仅在报表投影按整数元展示；无效历史文本保持原样以便排查，不能伪造 0。 */
+    private function manualDisplayValue(array $definition, string $value, bool $export = false): string
+    {
+        if ($value === '' || ($definition['value_type'] ?? '') !== 'integer_cents'
+            || !preg_match('/^-?\d+$/D', $value)) return $value;
+        return $export
+            ? \app\services\query\metric\MetricMoneyFormatter::exactYuan((int)$value)
+            : \app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$value);
+    }
     private function money(int $cents):string{$negative=$cents<0;$cents=abs($cents);$value=intdiv($cents,100).'.'.str_pad((string)($cents%100),2,'0',STR_PAD_LEFT);$value=rtrim(rtrim($value,'0'),'.');return($negative?'-':'').($value===''?'0':$value);}
     private function tenth(int $tenths): string { return number_format($tenths / 10, 1, '.', ''); }
     private function ratio(int $num,int $den):string{return $den===0?'-':(string)round($num*100/$den,2).'%';}

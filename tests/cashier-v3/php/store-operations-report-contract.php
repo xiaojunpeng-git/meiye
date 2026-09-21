@@ -100,8 +100,13 @@ foreach (['experience_cash', 'experience_payment_method'] as $field) {
         throw new RuntimeException("annotation whitelist missing {$field}");
     }
 }
+if (strpos($annotation, "'experience_cash' => 'integer_cents'") === false
+    || strpos($service, "\$reportCode === 'member_consumption_detail' && \$field === 'experience_cash' && \$text !== ''") === false
+    || strpos($service, ': $this->money((int)$text)') === false) {
+    throw new RuntimeException('experience cash annotation must persist cents and project integer yuan, preserving a cleared value');
+}
 if (strpos($annotation, "\$value = (string)(\$payload['field_value'] ?? '');") === false
-    || strpos($service, "\$row[\$field] = \$value;") === false
+    || strpos($service, "\$value !== ''") === false
     || strpos($service, "if (!empty(\$value))") !== false) {
     throw new RuntimeException('manual annotation empty-string clear contract missing');
 }
@@ -115,7 +120,7 @@ if (strpos($partnerSummary, "'performance_type','label'=>'分类'") === false) {
     throw new RuntimeException('partner summary performance type label must be 分类');
 }
 $defaultsPos = strpos($memberDetail, "\$row['experience_payment_method'] =");
-$annotationsPos = strpos($memberDetail, "\$rows = \$this->attachAnnotations(\$rows, 'member_consumption_detail', \$storeId);");
+$annotationsPos = strpos($memberDetail, "\$rows = \$this->attachAnnotations(\$rows, 'member_consumption_detail', \$storeId, !empty(\$input['_internal_all']));");
 if ($defaultsPos === false || $annotationsPos === false || $annotationsPos < $defaultsPos) {
     throw new RuntimeException('member detail annotations must override fact defaults after decoration');
 }

@@ -61,7 +61,41 @@ assertPhaseSix(str_contains($store, 'StoreUnifiedReportPhaseSixServices') && str
 assertPhaseSix(str_contains($store, 'platformOnlyReportCodes') && str_contains($cashier, 'platformOnlyReportCodes'), 'store endpoints reject platform-only reports');
 
 require_once $root . '/后端代码/app/services/report/StoreUnifiedReportPhaseSixServices.php';
+require_once $root . '/后端代码/app/services/query/metric/MetricMoneyFormatter.php';
 $phaseSix = new \app\services\report\StoreUnifiedReportPhaseSixServices();
+$manualColumn = new ReflectionMethod($phaseSix, 'manualColumn');
+$manualDisplay = new ReflectionMethod($phaseSix, 'manualDisplayValue');
+foreach (['target_amount', 'unit_price'] as $moneyField) {
+    $column = $manualColumn->invoke($phaseSix, $moneyField, '金额', '手动补充金额');
+    assertPhaseSix(($column['manual_input']['value_type'] ?? '') === 'integer_cents', "{$moneyField} submits integer cents");
+    assertPhaseSix($manualDisplay->invoke($phaseSix, $column['manual_input'], '89100') === '891', "{$moneyField} reads back integer yuan");
+    assertPhaseSix($manualDisplay->invoke($phaseSix, $column['manual_input'], '89123', true) === '891.23', "{$moneyField} exports cent precision");
+    assertPhaseSix($manualDisplay->invoke($phaseSix, $column['manual_input'], '') === '', "{$moneyField} preserves manual clear");
+}
+assertPhaseSix(str_contains($service, "withManualAnnotations(\$report, \$result, \$stores, !empty(\$input['_internal_all']))")
+    && str_contains($service, "->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)")
+    && str_contains($service, "->whereIn('store_id', \$stores)->whereIn('subject_key', array_keys(\$keys))")
+    && str_contains($service, "'annotation_subject_key' => 'phase_six:payment:'"),
+    'manual readback is scoped to the tenant, store and payment allocation');
+$projectManualRows = new ReflectionMethod($phaseSix, 'projectManualRows');
+$projected = $projectManualRows->invoke($phaseSix, [
+    'records' => [
+        ['store_id' => 1, 'annotation_subject_key' => 'phase_six:payment:line-a', 'unit_price' => '', '备注' => '原值'],
+        ['store_id' => 2, 'annotation_subject_key' => 'phase_six:payment:line-a', 'unit_price' => '', '备注' => '另一店'],
+    ],
+], [
+    'unit_price' => ['value_type' => 'integer_cents'], '备注' => ['value_type' => 'text'],
+], [
+    ['store_id' => 1, 'subject_key' => 'phase_six:payment:line-a', 'field_key' => 'unit_price', 'field_value' => '89100', 'version' => 2],
+    ['store_id' => 1, 'subject_key' => 'phase_six:payment:line-a', 'field_key' => '备注', 'field_value' => '', 'version' => 3],
+]);
+assertPhaseSix(($projected['records'][0]['unit_price'] ?? null) === '891'
+    && ($projected['records'][0]['unit_price_version'] ?? null) === 2
+    && ($projected['records'][0]['备注'] ?? null) === ''
+    && ($projected['records'][0]['备注_version'] ?? null) === 3
+    && ($projected['records'][1]['unit_price'] ?? null) === ''
+    && ($projected['records'][1]['备注'] ?? null) === '另一店',
+    'manual values survive readback, clear explicitly and never cross store boundaries');
 $result = new ReflectionMethod($phaseSix, 'result');
 $tenthSummary = $result->invoke($phaseSix, '服务客数十分位合计', [[
     'key' => 'service_visit_count', 'label' => '服务人次', 'source_explanation' => '', 'summable' => true, 'width' => 120,
