@@ -903,6 +903,9 @@ function confirm() {
       id: item.id,
       staffId: item.id,
       employeeId: Number(item.employeeId || item.employee_id || 0),
+      // 单行“确认”与“应用全部人”必须输出同一门店身份。否则远端根投影
+      // 不含 currentStore.id 时，最终结账无法冻结合规的人员快照而被拒绝。
+      storeId: Number(item.storeId || item.store_id || props.storeId || 0),
       name: item.name,
       marked: Boolean(item.marked),
       isPointCustomer: Boolean(item.marked),

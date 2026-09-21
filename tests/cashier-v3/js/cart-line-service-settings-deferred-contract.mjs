@@ -102,8 +102,9 @@ check(
 check(
   /selectedCraftsmenPayload[\s\S]*employeeId/.test(personnelOverlay)
     && /selectedCraftsmenPayload[\s\S]*storeId/.test(personnelOverlay)
+    && /const assignment = \{[\s\S]*?craftsmen: selectedCraftsmen\.map\([\s\S]*?storeId: Number\(item\.storeId \|\| item\.store_id \|\| props\.storeId \|\| 0\)/.test(personnelOverlay)
     && /storeId: \{ type: \[Number, String\]/.test(personnelOverlay),
-  'personnel selection payload carries employee and store identity into the browser snapshot boundary'
+  'both personnel confirmation paths carry employee and store identity into the browser snapshot boundary'
 )
 check(
   /storeId: Number\(record\.storeId \?\? record\.store_id \?\? 0\)/.test(personnelAssignment)
