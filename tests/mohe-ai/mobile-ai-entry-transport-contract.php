@@ -33,9 +33,14 @@ $check(is_file($launcherAsset) && filesize($launcherAsset)>0 && filesize($launch
 $check(is_string($entry) && strpos($entry,"currentMobilePlatform() === 'MP_WEIXIN'")!==false
     && strpos($entry,"'ai-panel--native-mini': platformUsesNativeCanvas")!==false,
     'the WeChat panel applies its capsule-safe layout only on the native mini-program target');
-$check(is_string($entry) && strpos($entry,'.ai-panel--native-mini{padding-top:calc(72px + env(safe-area-inset-top))}')!==false
+$check(is_string($entry) && strpos($entry,'uni.getMenuButtonBoundingClientRect()')!==false
+    && strpos($entry,'capsuleBottom + 8')!==false
+    && strpos($entry,'function openPanel() : void { measureNativePanelTop(); opened.value = true')!==false
+    && strpos($entry,'paddingTop: nativePanelTop')!==false
+    && strpos($entry,"{ top: nativePanelTop + 'px' }")!==false
+    && strpos($entry,'padding-top:calc(72px + env(safe-area-inset-top))')===false
     && strpos($entry,'padding:8px 18px calc(14px + env(safe-area-inset-bottom))')!==false,
-    'the native mini-program workspace reserves its capsule strip and keeps the composer against the bottom safe area');
+    'the native mini-program workspace measures its capsule instead of stacking fixed top and safe-area gaps, while keeping the composer against the bottom safe area');
 $check(is_string($entry) && strpos($entry,'class="ai-history-drawer"')!==false
     && strpos($entry,'function refreshHistory()')!==false
     && strpos($entry,'function deleteHistory(id : string)')!==false
@@ -55,6 +60,11 @@ $check(is_string($entry) && strpos($entry,'aria-label="新建对话" @tap="newCo
     && strpos($entry,'.ai-icon-action__stroke')!==false
     && strpos($entry,'.ai-icon-compose')===false,
     'merchant AI exposes adjacent add and exit icon actions built from one visual primitive, without retaining the retired compose icon');
+$check(is_string($entry) && strpos($entry,'.ai-panel--native-mini .ai-question{font-size:17px;line-height:1.6}')!==false
+    && strpos($entry,'.ai-panel--native-mini .ai-answer{font-size:17px;line-height:1.65}')!==false
+    && strpos($entry,'.ai-panel--native-mini .ai-answer-headline{font-size:19px;line-height:1.55}')!==false
+    && strpos($entry,'.ai-panel--native-mini .ai-answer{font-size:19px}')===false,
+    'mini-program questions and narrative answers use a compact shared reading size while structured headlines retain a restrained hierarchy');
 $check(is_string($entry) && strpos($entry,'class="ai-user-turn"')!==false
     && strpos($entry,'>你问</text>')!==false
     && strpos($entry,'class="ai-answer-turn"')!==false
