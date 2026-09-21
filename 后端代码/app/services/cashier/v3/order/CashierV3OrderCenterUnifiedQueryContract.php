@@ -28,8 +28,9 @@ final class CashierV3OrderCenterUnifiedQueryContract
     {
         $type = self::typeForPage($pageCode);
         $definitions = [
+            // 仅重命名销售页的展示标签；字段 key 保持 business_date，避免改变筛选和导出口径。
             'sales' => ['销售订单', [
-                ['sales_order_no', '销售订单号', 'text', true, true], ['business_date', '业务日期', 'date', true, true],
+                ['sales_order_no', '销售订单号', 'text', true, true], ['business_date', '销售日期', 'date', true, true],
                 ['member_name', '会员姓名／游客'], ['phone', '手机号'], ['store', '销售门店'], ['item_summary', '商品摘要'],
                 ['item_count', '商品数量', 'integer'], ['receivable_amount', '应收金额', 'amount'], ['discount_amount', '优惠金额', 'amount'],
                 ['debt_amount', '欠款金额', 'amount'], ['actual_received_amount', '现金业绩', 'amount'], ['payment_method', '收款方式'],

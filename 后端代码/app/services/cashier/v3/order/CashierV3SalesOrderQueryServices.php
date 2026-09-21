@@ -843,7 +843,7 @@ final class CashierV3SalesOrderQueryServices
             'o.store_id', 'o.order_type', 'o.is_debt_repay', 'o.paid',
             'o.is_del', 'o.is_system_del', 'o.pid',
             'o.terminal_action', 'o.refund_status', 'o.status', 'o.total_num',
-            'o.pay_time', 'o.remark', 'o.order_note', 'o.total_price', 'o.pay_price',
+            'o.add_time', 'o.pay_time', 'o.remark', 'o.order_note', 'o.total_price', 'o.pay_price',
             'o.cash_pay_price', 'o.debt_amount',
         ]);
         if ($operation === 'detail') {
@@ -1977,8 +1977,10 @@ final class CashierV3SalesOrderQueryServices
             'businessTimezone' => $v3Ready
                 ? (string)$v3Header['business_timezone'] : self::BUSINESS_TIMEZONE,
             'businessDateBasis' => $v3Ready ? 'v3_sales_order_authority' : 'legacy_payment_completed_at',
+            // 旧单没有 V3 occurred_at，以原订单创建时间追溯实际下单；不可用支付时间冒充。
             'occurredAt' => $v3Ready
-                ? $this->formatTimestamp((int)$v3Header['occurred_at'], 'Y-m-d H:i:s') : null,
+                ? $this->formatTimestamp((int)$v3Header['occurred_at'], 'Y-m-d H:i:s')
+                : $this->formatTimestamp((int)($row['add_time'] ?? 0), 'Y-m-d H:i:s'),
             'paymentCompletedAt' => $v3Ready
                 ? $this->formatTimestamp((int)$v3Batch['settled_at'], 'Y-m-d H:i:s')
                 : $this->formatTimestamp($payTime, 'Y-m-d H:i:s'),

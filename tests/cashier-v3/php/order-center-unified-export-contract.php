@@ -52,7 +52,9 @@ foreach ($pages as $type => $pageCode) {
     exportOk("{$type} 页签前端绑定同一导出页码", strpos($view, "pageCode: '{$pageCode}'") !== false);
 }
 
-exportOk('八个订单页签的业务日期均为当天默认的起止日期范围', substr_count($view, "field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true })") === 8
+exportOk('销售日期与其余七类业务日期均为当天默认的起止日期范围', substr_count($view, "field('business_date', '销售日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true })") === 1
+    && substr_count($view, "field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true })") === 7
+    && strpos($contract, "['sales_order_no', '销售订单号', 'text', true, true], ['business_date', '销售日期', 'date', true, true]") !== false
     && strpos($contract, "['debt_no', '欠款编号', 'text', true, true], ['business_date', '业务日期', 'date', true, true]") !== false
     && strpos($toolbar, 'function isQuickDateRange(field)') !== false
     && strpos($toolbar, 'function ensureQuickDateRangeDefaults()') !== false
@@ -61,6 +63,12 @@ exportOk('八个订单页签的业务日期均为当天默认的起止日期范�
     && strpos($view, 'inline-quick-controls') !== false
     && strpos($view, 'compact-keyword-search') !== false
     && strpos($toolbar, 'compactKeywordSearch') !== false);
+exportOk('销售列表区分销售归属日与真实下单时间，旧单不以支付时间冒充下单',
+    strpos($view, "<span>销售日期：{{ displayRecordField(record, 'business_date') }}</span>") !== false
+    && strpos($view, "<span>实际下单时间：{{ displayRecordField(record, 'occurred_at') }}</span>") !== false
+    && strpos($view, "occurred_at: ['occurredAt']") !== false
+    && strpos($salesQuery, "'o.add_time', 'o.pay_time'") !== false
+    && strpos($salesQuery, "(int)(\$row['add_time'] ?? 0)") !== false);
 exportOk('订单中心日期范围会传给销售与其余七类记录的真实查询', strpos($view, 'function normalizeOrderCenterDateQuery(query = {})') !== false
     && strpos($view, 'queryRecords(defaultOrderCenterDateQuery(), true)') !== false
     && strpos($recordQuery, 'private function businessDateRange(array $payload): array') !== false

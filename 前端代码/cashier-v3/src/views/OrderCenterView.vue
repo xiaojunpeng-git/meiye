@@ -89,7 +89,8 @@ const ORDER_TABS = [
     emptyText: '暂无正式销售订单。完成结账后可在这里查询订单详情。',
     fields: [
       field('sales_order_no', '销售订单号', 'text', { quickFilterHidden: true }),
-      field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
+      // 销售日期仍筛选权威 business_date；实际下单时间只用于追溯，不改变归属日。
+      field('business_date', '销售日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('member_name', '会员姓名／游客'), field('phone', '手机号'),
       field('store', '销售门店', 'store'), field('item_summary', '商品摘要'),
       field('item_count', '商品数量', 'number'), field('receivable_amount', '应收金额', 'money'),
@@ -245,7 +246,7 @@ const FIELD_ALIASES = {
   payment_method: ['paymentSummary', 'paymentMethod'], salesperson: ['salespersonSummary', 'salespersonName'],
   cashier: ['cashierName', 'operatorName'], source: ['source', 'sourceLabel', 'sourceSecondary', 'sourcePrimary'],
   payment_status: ['paymentStatus'], order_status: ['orderStatus', 'statusLabel'], supplement: ['supplementLabel', 'isSupplement'],
-  payment_completed_at: ['paymentCompletedAt', 'completedAt'], recharge_order_no: ['rechargeOrderNo', 'orderNo'],
+  occurred_at: ['occurredAt'], payment_completed_at: ['paymentCompletedAt', 'completedAt'], recharge_order_no: ['rechargeOrderNo', 'orderNo'],
   recharge_plan: ['rechargePlan', 'planName'], recharge_amount: ['rechargeAmount'], gift_amount: ['giftAmount'],
   operator: ['operatorName', 'operator'], supplement_order_no: ['supplementOrderNo', 'repayNo', 'orderNo'],
   debt_no: ['debtNo'], source_order_no: ['sourceOrderNo'], debt_summary: ['debtSummary', 'summary'],
@@ -2139,7 +2140,8 @@ onBeforeUnmount(() => {
         <tbody v-for="(record, recordIndex) in records" :key="recordKey(record, recordIndex)" class="sales-order-query-group">
           <tr class="sales-order-query-group__header">
             <td :colspan="salesOrderListColumns.length">
-              <span>下单时间：{{ displayRecordField(record, 'payment_completed_at') }}</span>
+              <span>销售日期：{{ displayRecordField(record, 'business_date') }}</span>
+              <span>实际下单时间：{{ displayRecordField(record, 'occurred_at') }}</span>
               <span>订单编号：{{ displayRecordField(record, 'sales_order_no') }}</span>
               <span v-if="record.upgradeTypeLabel" class="sales-order-query-group__upgrade-tag">{{ record.upgradeTypeLabel }}</span>
               <span>门店：{{ displayRecordField(record, 'store') }}</span>
