@@ -1,19 +1,19 @@
 <template>
   <main class="metric-registry">
     <header class="heading">
-      <div><h1>指标注册表</h1><p>统一数据底层中已登记、可由统一 Reader 读取的 V3 指标。</p></div>
+      <div><h1>指标注册表</h1><p>统一数据底层中已登记的指标合同，以及它们的当前基础查询状态。</p></div>
       <button :disabled="loading" @click="reload">刷新</button>
     </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <section class="box">
-      <p class="muted">这里只展示源码登记后的产品化指标合同。不能在此修改公式、取数策略或数据权限；新增指标必须先完成统一数据层注册、对账和发布。</p>
+      <p class="muted">这里展示指标口径、分层、对象和基础可用性。某个具体问题是否可执行，仍由当前权限、对象、日期、条件和查询方式共同决定。</p>
       <div v-if="loading" class="loading">正在读取指标注册表…</div>
       <template v-else-if="registry">
         <div class="meta"><span>登记指标：{{ registry.items.length }} 项</span><span>注册表版本：{{ registry.registry_version }}</span><span>数据覆盖起点：{{ registry.coverage_start }}</span></div>
         <label>筛选指标<input v-model.trim="keyword" type="search" placeholder="按指标名称、代码或口径搜索" aria-label="筛选指标"></label>
         <p class="muted">匹配 {{ items.length }} 项。金额底层以分计算，页面按系统统一规则展示为元。</p>
         <article v-for="item in items" :key="item.metric_code" class="metric">
-          <div class="metric-head"><div><h2>{{ item.name }}</h2><code>{{ item.metric_code }}</code></div><div class="badges"><span>{{ item.derived ? '派生指标' : '事实指标' }}</span><span>{{ item.filter_grain === 'person' ? '人员粒度' : '门店粒度' }}</span><span v-if="item.category_supported">支持分类筛选</span></div></div>
+          <div class="metric-head"><div><h2>{{ item.name }}</h2><code>{{ item.metric_code }}</code></div><div class="badges"><span>{{ metricKindLabel(item.metric_kind) }}</span><span>{{ timeSemanticsLabel(item.time_semantics) }}</span><span :class="item.ai_query_ready ? 'ready' : 'limited'">{{ readinessLabel(item.ai_query_ready) }}</span><span v-if="item.category_supported">支持分类筛选</span></div></div>
           <p>{{ item.summary }}</p>
           <dl>
             <template v-if="item.include"><dt>计入</dt><dd>{{ item.include }}</dd></template>
@@ -21,7 +21,10 @@
             <template v-if="item.timing"><dt>统计时间</dt><dd>{{ item.timing }}</dd></template>
             <template v-if="item.note"><dt>口径说明</dt><dd>{{ item.note }}</dd></template>
             <dt>支持查询</dt><dd>{{ item.query_shapes.map(shapeLabel).join('、') }}</dd>
+            <dt>可分析对象</dt><dd>{{ item.analysis_objects.map(object => object.label).join('、') }}</dd>
+            <template v-if="item.overview_sections.length"><dt>概览归属</dt><dd>{{ item.overview_sections.map(overviewLabel).join('、') }}</dd></template>
             <dt>额外条件</dt><dd>{{ item.business_filters.length ? item.business_filters.map(filterLabel).join('、') : '无；仍始终受当前报表数据权限限制' }}</dd>
+            <template v-if="!item.ai_query_ready"><dt>暂不可执行原因</dt><dd>{{ item.readiness_reasons.map(readinessReasonLabel).join('、') || '当前能力尚未就绪' }}</dd></template>
             <dt>指标版本</dt><dd><code>{{ item.metric_version }}</code></dd>
           </dl>
         </article>
@@ -40,7 +43,7 @@ export default {
   computed: {
     items() {
       const keyword = this.keyword.toLowerCase();
-      return ((this.registry && this.registry.items) || []).filter(item => !keyword || [item.name, item.metric_code, item.summary, item.note].join(' ').toLowerCase().includes(keyword));
+      return ((this.registry && this.registry.items) || []).filter(item => !keyword || [item.name, item.metric_code, item.summary, item.note, ...item.analysis_objects.map(object => object.label)].join(' ').toLowerCase().includes(keyword));
     }
   },
   created() { this.reload(); },
@@ -51,7 +54,14 @@ export default {
       catch (error) { this.error = error.message || '指标注册表读取失败，请刷新后重试。'; }
       finally { this.loading = false; }
     },
-    shapeLabel(value) { return { summary: '汇总', trend: '趋势', ranking: '排行', comparison: '对比' }[value] || value; },
+    // These labels describe server-projected metadata only. They never decide
+    // a query, formula, permission range, or natural-language interpretation.
+    metricKindLabel(value) { return { atomic: '原子指标', derived: '派生指标' }[value] || '未分类指标'; },
+    timeSemanticsLabel(value) { return { period_flow: '期间发生量', current_state: '当前状态', as_of_date: '截至查询日状态' }[value] || '时间语义待完善'; },
+    readinessLabel(ready) { return ready ? '基础查询已就绪' : '基础查询受限'; },
+    readinessReasonLabel(value) { return { HISTORICAL_SERVICE_COVERAGE_INCOMPLETE: '历史服务事实覆盖尚未完整' }[value] || value; },
+    overviewLabel(item) { return `${item.section}（${item.object_label}）`; },
+    shapeLabel(value) { return { summary: '汇总', trend: '趋势', ranking: '排行', comparison: '对比', threshold_count: '阈值计数', condition_count: '条件计数', condition_list: '条件名单' }[value] || value; },
     filterLabel(value) { return { selection_ref: '已授权人员范围' }[value] || value; }
   }
 };

@@ -34,6 +34,27 @@ final class AiOverviewMetricResolver
         return $items;
     }
 
+    /**
+     * Project the registered overview group names owned by one metric.
+     *
+     * These names are language guidance only. They grant neither a metric nor
+     * a query: understanding and binding still preserve the complete customer
+     * request, and the normal Reader contract remains authoritative.
+     *
+     * @return array<int,string>
+     */
+    public static function sectionNamesForMetric(array $contract): array
+    {
+        $sections=[];
+        foreach ((array)($contract['overview'] ?? []) as $entry) {
+            $section=is_array($entry) ? ($entry['section'] ?? null) : null;
+            if (is_string($section) && trim($section)!=='') $sections[trim($section)]=true;
+        }
+        $sections=array_keys($sections);
+        sort($sections,SORT_STRING);
+        return $sections;
+    }
+
     private static function supportsObjectSummary(array $contract,string $objectKind): bool
     {
         if ($objectKind==='store') return ($contract['filter_grain'] ?? null)==='store' && ($contract['business_filters'] ?? null)===[];

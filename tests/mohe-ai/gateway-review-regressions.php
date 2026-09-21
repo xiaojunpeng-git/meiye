@@ -289,6 +289,39 @@ $check(($personReconciled['requirements'][0]['values']['object_kind']??null)==='
         $questionText,['staff_project_num','staff_sales_yeji']
     )===['metric_code'=>'staff_project_num','term'=>'完成服务项目数量'],
     'an explicit employee answer object wins over the project noun embedded in a metric title and narrows binding to wage projects');
+$splitObjectUnderstanding=$misclassifiedUnderstanding;
+$splitObjectUnderstanding['requirements'][]=[
+    'id'=>'r2','meaning'=>'返回员工排行','fields'=>['object_kind','object_relation'],
+    'values'=>['object_kind'=>'person','object_relation'=>'analysis'],
+    'evidence'=>[['message_id'=>'current','quote'=>'员工']],
+];
+$splitObjectReconciled=$reconcileObject->invoke(
+    $gatewayWithoutDependencies,$splitObjectUnderstanding,$safeObjectQuestion,$objectVocabulary
+);
+$check(count($splitObjectReconciled['requirements'])===2
+    && ($splitObjectReconciled['requirements'][0]['values']['object_kind']??null)==='person'
+    && ($splitObjectReconciled['requirements'][1]['values']['object_kind']??null)==='person',
+    'one explicit registered answer object reconciles duplicate model carriers without discarding either accepted requirement');
+$reconcileMetric=$gatewayClass->getMethod('reconcileExactRegisteredMeasurement');
+$duplicatedMetricUnderstanding=$splitObjectUnderstanding;
+$duplicatedMetricUnderstanding['requirements'][0]['values']['metric_terms']=['完成服务项目'];
+$duplicatedMetricUnderstanding['requirements'][]=[
+    'id'=>'r3','meaning'=>'按完成服务项目数量排名','fields'=>['metric_codes','ranking'],
+    'values'=>['metric_terms'=>['完成服务项目数量'],'ranking'=>['direction'=>'top','limit'=>1]],
+    'evidence'=>[['message_id'=>'current','quote'=>$questionText]],
+];
+$deduplicatedMetric=$reconcileMetric->invoke(
+    $gatewayWithoutDependencies,$duplicatedMetricUnderstanding,$safeObjectQuestion,
+    [['metric_code'=>'staff_project_num','object_contracts'=>[['object_kind'=>'person']]]],$objectVocabulary
+);
+$metricCarriers=array_values(array_filter($deduplicatedMetric['requirements'],static function(array $requirement):bool {
+    return in_array('metric_codes',(array)($requirement['fields']??[]),true);
+}));
+$check(count($metricCarriers)===1
+    && ($metricCarriers[0]['values']['metric_terms']??null)===['完成服务项目数量']
+    && count($deduplicatedMetric['requirements'])===3
+    && ($deduplicatedMetric['requirements'][2]['fields']??null)===['ranking'],
+    'duplicate model carriers for one exact registered measurement collapse only their metric field and retain ranking/object meaning');
 $projectQuestion='本月完成服务项目数量最多的项目是什么';
 $projectUnderstanding=$misclassifiedUnderstanding;
 $projectUnderstanding['requirements'][0]['evidence'][0]['quote']=$projectQuestion;

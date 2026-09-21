@@ -4,7 +4,7 @@ namespace app\services\ai\semantic;
 /** Source-owned business language resources. No formulas, SQL or report page identities. */
 final class AiSemanticVocabulary
 {
-    public const VERSION='mohe-semantic-vocabulary-r7-v1';
+    public const VERSION='mohe-semantic-vocabulary-r8-v1';
     public static function patterns(): array
     {
         require_once dirname(__DIR__,2).'/BaseServices.php';
@@ -22,7 +22,13 @@ final class AiSemanticVocabulary
             'history_point'=>'/截至|截止|月末|年末|首年|累计|自然年|今年|去年/u',
             // These phrases identify an incomplete metric slot only.  They do
             // not choose a predefined metric or a predefined business scene.
-            'ambiguous_metric'=>'/服务业绩|耗卡业绩|扣卡业绩|收入|卖了多少|业绩|做了多少|经营情况/u',
+            // Keep broad operating language as an unresolved measurement
+            // family. It authorizes neither a metric nor a report; the model
+            // and registry-backed overview policy still decide the useful
+            // first answer. Centralizing the grammar here prevents a dated
+            // standalone overview from being mistaken for a pure date edit
+            // of the previous customer/person/object query.
+            'ambiguous_metric'=>'/服务业绩|耗卡业绩|扣卡业绩|收入|卖了多少|业绩|做了多少|经营(?:情况|概览|得?怎么样|如何)/u',
             'definition'=>'/是什么意思|什么意思|指什么|是什么|怎么理解|口径说明|统计口径|解释/u',
             'trend'=>'/每天|每日|逐日|按天|趋势/u',
             'comparison'=>'/对比|相比|比较|分别|并排/u',

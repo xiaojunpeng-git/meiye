@@ -189,6 +189,20 @@ final class AiIntentUnderstandingContract
             if (($requirement['fields']??null)!==['periods']) {$periodOnly=false;break;}
         }
         if (($safeQuestion['prior_query'] ?? null) !== null && $periodOnly) {
+            // Full-span evidence proves where the model read, not that it
+            // preserved every meaning in that span. If the local structural
+            // parser still sees a non-calendar business signal, a period-only
+            // result is incomplete and must be repaired before any verified
+            // condition, object or ranking can be inherited. This parser does
+            // not select a metric or answer; it only closes the date-only
+            // shortcut against complete new questions containing a date.
+            $projection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse((string)($safeQuestion['question']??''));
+            $calendarSignals=['TODAY','YESTERDAY','DAY_BEFORE_YESTERDAY','THIS_MONTH','LAST_MONTH'];
+            if (array_diff((array)($projection['signals']??[]),$calendarSignals)!==[]
+                ||($projection['unresolved_condition']??false)
+                ||(array)($projection['semantic_intent']['constraints']??[])!==[]) {
+                self::fail('period_only_business_residue');
+            }
             // Several period requirements for one short continuation are not
             // several customer conditions. They are provider duplication,
             // commonly one citation of the current phrase plus one citation
@@ -419,13 +433,16 @@ final class AiIntentUnderstandingContract
     public static function repairable(?string $predicate): bool
     {
         return is_string($predicate) && $predicate !== ''
-            && preg_match('/^(shape|goal|status|requirements|requirements_collection|requirement_shape|requirement_keys|requirement_id|requirement_meaning|requirement_fields(?:_(?:shape|empty|too_many|duplicate|unknown))?|requirement_evidence_collection|requirement_evidence_shape|requirement_evidence_duplicate|groups|message_projection|evidence_not_unique|period_only_coverage|period_only_multiple|period_term_as_metric|result_reference_without_ranked_prior|values(?::[a-z_]+)?)$/D',$predicate) === 1;
+            && preg_match('/^(shape|goal|status|requirements|requirements_collection|requirement_shape|requirement_keys|requirement_id|requirement_meaning|requirement_fields(?:_(?:shape|empty|too_many|duplicate|unknown))?|requirement_evidence_collection|requirement_evidence_shape|requirement_evidence_duplicate|groups|message_projection|evidence_not_unique|period_only_business_residue|period_only_coverage|period_only_multiple|period_term_as_metric|result_reference_without_ranked_prior|values(?::[a-z_]+)?)$/D',$predicate) === 1;
     }
 
     /** A structural correction never interprets a customer phrase in PHP. */
     public static function repairInstruction(string $predicate): string
     {
         if (!self::repairable($predicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+        if ($predicate === 'period_only_business_residue') {
+            return 'The previous response reduced the complete current message to a date-only continuation, but a separate structural check found non-calendar business meaning in that same current message. Re-read the whole current message and preserve every additional goal, measurement, object, result form, ranking, scope or condition as its own evidence-backed requirement. Do not copy the prior query, guess a metric code, or satisfy this correction merely by expanding the period evidence quote.';
+        }
         if ($predicate === 'period_only_coverage') {
             return 'The previous response called this a time-only continuation but its evidence did not cover the complete current customer message. Re-read the whole current message. Return only one periods requirement only when the whole message changes no business fact, object, result form, range, ranking, scope, condition or measurement. Otherwise preserve every additional current meaning with its own requirement and current-message evidence. Do not invent, bind or select a metric.';
         }

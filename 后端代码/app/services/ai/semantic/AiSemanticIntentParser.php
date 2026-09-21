@@ -44,7 +44,11 @@ final class AiSemanticIntentParser
         if (in_array('attention_goal',$signals,true) || in_array('ranking',$signals,true)) $covered=str_replace(['门店','哪家店','哪家','家店','家','哪','经营','做得'],' ',$covered);
         // Only grammar/phrasing is discarded. Unparsed content is represented
         // separately from known capability gaps, and never becomes no filter.
-        $covered=preg_replace('/(?:午休前|下班前)?核对一下|请帮我|麻烦帮我|麻烦|帮忙|帮我|我想知道|我想了解|我想查|查询|查一下|查查|先不查钱数|看一下|看看|看|多少钱|多少|怎么样|当前权限范围|相同日期|同样日期|上述日期|原日期|生成|导出|一份|数据|情况|一下|请问|请|问|的|是|有|和|与|到|至|从|及|把|给我|呢|那|换成|同时|再|继续|了|吗|列出|列|附|分成两项|分成|两项|展示|显示|都要|各|一起|名单|金额|这个指标|结果|也要|还要|放上|成|就|还是|查|按|[\s？?。，,、！!：:“”"（）()]/u','',$covered);
+        // Calendar edit verbs are grammar, not new business conditions. Keep
+        // them in this shared cleanup list so "change it to today" can use
+        // the same closed date-only continuation as "today?" without adding
+        // a question-specific gateway branch.
+        $covered=preg_replace('/(?:午休前|下班前)?核对一下|请帮我|麻烦帮我|麻烦|帮忙|帮我|我想知道|我想了解|我想查|查询|查一下|查查|先不查钱数|看一下|看看|看|多少钱|多少|怎么样|当前权限范围|相同日期|同样日期|上述日期|原日期|生成|导出|一份|数据|情况|一下|请问|请|问|的|是|有|和|与|到|至|从|及|把|给我|呢|那|换成|改成|改为|同时|再|继续|了|吗|列出|列|附|分成两项|分成|两项|展示|显示|都要|各|一起|名单|金额|这个指标|结果|也要|还要|放上|成|就|还是|查|按|[\s？?。，,、！!：:“”"（）()]/u','',$covered);
         $covered=str_replace('为','',$covered);
         $unparsed=$covered!=='';
         if($unparsed) $constraints[]=['type'=>'unparsed_business_condition','status'=>'unresolved'];

@@ -22,7 +22,7 @@
 
 ## 能力与真实边界
 
-- `metricCapabilities()` 按指标返回实现能力；`MetricQueryCatalog::fromSharedQuery($dictionaryLookup)` 为显式新版目录，旧 `fromDictionary` 保留基础未就绪语义。
+- `metricCapabilities()` 按指标返回实现能力；管理端只读目录由 `MetricRegistryCatalogServices` 从统一指标字典和读取注册表投影，展示指标类型、时间语义、对象与基础可用性。
 - 消耗 `consume_amount` 规范映射既有集团 `consumption_performance`，读取同一项目级完成服务事实、有效状态、冲销符号、业务日及作废排除，规范实现版本 `consumption-completed-service-facts-v1`。
 - 原现金集团源只含销售分摊，充值和充值欠款补收没有 saleFacts。2026-09-08 产品确认后，共享 reader 补入两类互斥付款事实并复用到报表与 AI，采用 `group-management-cash-recharge-v2`；详细验证与未完成门禁见 CASH-RECHARGE-VERIFICATION.md。混合请求仍不得静默删掉任一指标。
 - 实际业绩口径冲突保持关闭。

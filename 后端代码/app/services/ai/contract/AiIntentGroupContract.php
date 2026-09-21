@@ -59,10 +59,12 @@ final class AiIntentGroupContract
         $groups=AiIntentUnderstandingContract::queryGroups($understanding);
         $topKeys=array_keys($value);sort($topKeys,SORT_STRING);
         if (count($groups)===1 && $topKeys===['intent']) {
+            $subset=self::subset($understanding,$groups[0]['requirement_ids']);
             return [[
                 'id'=>$groups[0]['id'], 'requirement_ids'=>$groups[0]['requirement_ids'],
-                'intent'=>AiIntentResultContract::normalize($value['intent'],$metricCodes,$actionCodes,$safeQuestion,
-                    self::subset($understanding,$groups[0]['requirement_ids'])),
+                'intent'=>self::applyAcceptedPeriods(
+                    AiIntentResultContract::normalize($value['intent'],$metricCodes,$actionCodes,$safeQuestion,$subset),$subset
+                ),
             ]];
         }
         if ($topKeys!==['items'] || !is_array($value['items']) || count($value['items'])<2 || count($value['items'])>self::MAX_ITEMS
@@ -79,12 +81,40 @@ final class AiIntentGroupContract
                 throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',['stage'=>'intent_group_contract','predicate'=>'item']);
             }
             $group=$expected[$item['id']];unset($expected[$item['id']]);
+            $subset=self::subset($understanding,$group['requirement_ids']);
             $out[]=['id'=>$group['id'],'requirement_ids'=>$group['requirement_ids'],
-                'intent'=>AiIntentResultContract::normalize($item['intent'],$metricCodes,$actionCodes,$safeQuestion,
-                    self::subset($understanding,$group['requirement_ids']))];
+                'intent'=>self::applyAcceptedPeriods(
+                    AiIntentResultContract::normalize($item['intent'],$metricCodes,$actionCodes,$safeQuestion,$subset),$subset
+                )];
         }
         if ($expected!==[]) throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',['stage'=>'intent_group_contract','predicate'=>'group_coverage']);
         return $out;
+    }
+
+    /**
+     * The meaning contract already owns an explicit period stated by the
+     * customer. A grouped binding model may omit that identical value from
+     * every item; projecting the one accepted typed carrier here prevents the
+     * dimension planner from defaulting the whole collection to today. This
+     * does not parse date words or invent a range, and conflicting period
+     * carriers remain untouched for the strict contract to reject.
+     */
+    private static function applyAcceptedPeriods(array $intent,array $understanding): array
+    {
+        $sets=[];$ids=[];
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            if (!in_array('periods',(array)($requirement['fields']??[]),true)) continue;
+            $periods=$requirement['values']['periods']??null;
+            if (!is_array($periods) || $periods===[]) continue;
+            $key=json_encode($periods,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+            $sets[$key]=$periods;
+            if (is_string($requirement['id']??null)) $ids[]=$requirement['id'];
+        }
+        if (count($sets)!==1) return $intent;
+        $intent['periods']=array_values($sets)[0];
+        $intent['provenance']['periods']=['source'=>'customer','requirements'=>array_values(array_unique($ids))];
+        if (is_array($intent['context_delta']??null)) $intent['context_delta']['periods']='replace';
+        return $intent;
     }
 
     /**

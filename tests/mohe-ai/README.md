@@ -10,7 +10,7 @@
 
 | 模块 | 测试 | 本批次覆盖 |
 |---|---|---|
-| 统一指标与报表能力登记 | metric-contract.php / metric-registry-contract.php | 字典、唯一注册表、Reader 策略分派、禁止 code 分支与旧 actual 事实回退 |
+| 统一指标与报表能力登记 | metric-registry-contract.php | 原子/派生分类、维度与时间语义、唯一注册表、Reader 策略分派及执行就绪状态 |
 | 运行预算与容量策略 | runtime-contract.php | 默认180秒/最高300秒、澄清冻结、循环与调用上限、接纳判断、容量错误归类 |
 | 共享导出来源合同 | export-source-contract.php | REPORT/AI来源不可变、派生分区、双层query、归属和最早到期 |
 | 模型计划输入边界 | plan-contract.php | 严格JSON、重复键、候选归属、日期与指标限制、禁止DAO/公式/未绑定范围 |

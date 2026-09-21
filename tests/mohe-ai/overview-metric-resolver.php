@@ -29,6 +29,11 @@ $check(MetricDefinitionRegistry::overviewObjectLabel('store')==='经营'
     && MetricDefinitionRegistry::overviewObjectLabel('product')==='产品'
     && MetricDefinitionRegistry::overviewObjectLabel('category')===null,
     'overview headings use the registered object label instead of renderer object branches');
+$salesAmount=MetricDefinitionRegistry::capabilities()['sales_amount'];
+$salesAmountSections=AiOverviewMetricResolver::sectionNamesForMetric($salesAmount);
+$check(in_array('销售结果',$salesAmountSections,true) && in_array('项目销售',$salesAmountSections,true)
+    && count($salesAmountSections)===4,
+    'overview section language is projected from the registered metric contract');
 
 $tooMany=$capabilities;
 for ($i=0;$i<=AiOverviewMetricResolver::MAX_METRICS;$i++) {

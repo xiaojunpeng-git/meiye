@@ -76,14 +76,14 @@ try {
     $source=$h->start('门店现金业绩排行');
     if ($source['status']!=='COMPLETED') throw new RuntimeException('semantic-review source did not complete');
     $delta=array_fill_keys(\app\services\ai\contract\AiIntentResultContract::DELTA_FIELDS,'inherit');$delta['periods']='replace';
-    // This deliberately malformed understanding uses the current date phrase
-    // as evidence for an ordinal. The structural contract cannot decide the
-    // sentence meaning, so the independent semantic gate must stop it before
-    // the private snapshot is resolved or Reader is called.
+    // This deliberately malformed understanding turns a vague presentation
+    // word into an ordinal result reference. Unlike a closed calendar edit,
+    // the phrase needs model understanding; the independent semantic gate
+    // must therefore stop the invented row before Reader is called.
     $h->understandingOverride=['goal'=>'只修改为今天','status'=>'understood','requirements'=>[
         ['id'=>'r1','meaning'=>'引用前次排行第一家门店','fields'=>['result_reference'],
             'values'=>['result_reference'=>['group'=>'top','ordinal'=>1]],
-            'evidence'=>[['message_id'=>'current','quote'=>'改成今天']]],
+            'evidence'=>[['message_id'=>'current','quote'=>'表现']]],
         ['id'=>'r2','meaning'=>'将时间修改为今天','fields'=>['periods'],
             'values'=>['periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]]],
             'evidence'=>[['message_id'=>'current','quote'=>'今天']]],
@@ -93,7 +93,7 @@ try {
         'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],
         'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'unspecified',
         'context_delta'=>$delta,'result_reference'=>['group'=>'top','ordinal'=>1],'unresolved_fragments'=>[]];
-    $queries=$h->queries;$blocked=$h->start('改成今天',$source['answer']['context_ref']);
+    $queries=$h->queries;$blocked=$h->start('今天表现怎么样',$source['answer']['context_ref']);
     if (($blocked['status']??null)!=='FAILED' || ($blocked['reason']??null)!=='AI_BINDING_SEMANTIC_REJECTED' || $h->queries!==$queries) {
         throw new RuntimeException('semantic reviewer did not stop invented result reference before query');
     }
@@ -128,7 +128,7 @@ try {
     $sourceEvidence=$h->private->read($h->row($source)['evidence_ref']);
     $queries=$h->queries;$models=$h->models;$continued=$h->start('改成今天',$source['answer']['context_ref']);
     $continuedEvidence=$h->private->read($h->row($continued)['evidence_ref']);
-    if (($continued['status']??null)!=='COMPLETED' || $h->queries!==$queries+1 || $h->models!==$models+1
+    if (($continued['status']??null)!=='COMPLETED' || $h->queries!==$queries+1 || $h->models!==$models
         || ($continuedEvidence['query']['store_ids']??null)!==($sourceEvidence['query']['store_ids']??null)
         || ($continuedEvidence['query']['business_filters']??null)!==($sourceEvidence['query']['business_filters']??null)
         || isset($continuedEvidence['query']['business_filters']['selection_ref'])) {

@@ -35,6 +35,13 @@ metricRegistryCheck(MetricDefinitionRegistry::get('actual_performance')['derivat
 ], 'actual performance formula is immutable registry metadata');
 metricRegistryCheck(MetricDefinitionRegistry::get('actual_performance')['reader_strategy'] === 'derived_subtract',
     'actual performance executes the registered subtraction rather than an unrelated snapshot');
+metricRegistryCheck(MetricDefinitionRegistry::classification('actual_performance') === [
+    'metric_kind' => 'derived', 'time_semantics' => 'period_flow',
+], 'derived classification is projected from the registered derivation');
+metricRegistryCheck(MetricDefinitionRegistry::classification('member_remaining_project_times') === [
+    'metric_kind' => 'atomic', 'time_semantics' => 'current_state',
+] && MetricDefinitionRegistry::classification('member_days_since_last_visit')['time_semantics'] === 'as_of_date',
+    'state and as-of metrics retain their existing registered time semantics');
 metricRegistryCheck(MetricDefinitionRegistry::get('refund_performance')['reader_strategy'] === 'cash_refund', 'refund uses signed cash facts');
 metricRegistryCheck(MetricDefinitionRegistry::canonical('service_count') === 'completed_service_item_count', 'page alias resolves without a second formula');
 metricRegistryCheck(MetricDefinitionRegistry::get('completed_service_item_count')['storage_unit'] === 'count'
@@ -158,6 +165,21 @@ metricRegistryCheck(strpos($catalog, 'MetricDefinitionRegistry::all()') !== fals
     && strpos($catalog, 'MetricDictionaryServices') !== false
     && strpos($catalog, "'source'") === false,
     'administrator catalog projects registry and dictionary without exposing fact source details');
+$catalogProjection = \app\services\query\metric\MetricRegistryCatalogServices::catalog();
+$catalogItems = array_column($catalogProjection['items'], null, 'metric_code');
+metricRegistryCheck(($catalogItems['actual_performance']['metric_kind'] ?? null) === 'derived'
+    && ($catalogItems['actual_performance']['time_semantics'] ?? null) === 'period_flow'
+    && ($catalogItems['actual_performance']['ai_query_ready'] ?? null) === true,
+    'management catalog separates derivation, time semantics and basic query readiness');
+metricRegistryCheck(($catalogItems['member_days_since_last_visit']['metric_kind'] ?? null) === 'atomic'
+    && ($catalogItems['member_days_since_last_visit']['time_semantics'] ?? null) === 'as_of_date'
+    && ($catalogItems['member_days_since_last_visit']['ai_query_ready'] ?? true) === false
+    && in_array('HISTORICAL_SERVICE_COVERAGE_INCOMPLETE', $catalogItems['member_days_since_last_visit']['readiness_reasons'] ?? [], true),
+    'catalog keeps a registered but history-limited metric visible with its real reason');
+metricRegistryCheck(in_array(['kind' => 'person', 'label' => '人员'], $catalogItems['staff_sales_yeji']['analysis_objects'] ?? [], true)
+    && !in_array(['kind' => 'store', 'label' => '门店'], $catalogItems['staff_sales_yeji']['analysis_objects'] ?? [], true)
+    && in_array(['kind' => 'project', 'label' => '项目'], $catalogItems['sales_amount']['analysis_objects'] ?? [], true),
+    'catalog exposes the registered grain and dimensions without inventing store analysis for person metrics');
 metricRegistryCheck(strpos($reader, 'public function categorySummary(') !== false
     && strpos($reader, 'public function categoryDailyStoreTotals(') !== false
     && strpos($reader, 'public function categoryStoreTotals(') !== false,

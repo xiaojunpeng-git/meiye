@@ -433,6 +433,30 @@ final class MetricDefinitionRegistry
         return ['metric_code' => $code] + $item;
     }
 
+    /**
+     * Classify a registered metric from its executable contract.
+     *
+     * This is catalog metadata, not a new query rule. A metric remains atomic
+     * when its Reader owns the business aggregation, even if that aggregation
+     * reads several compatible fact sources. Only a registered derivation is
+     * displayed as derived. Time semantics come from the existing aggregate
+     * condition contract so the catalog never creates a second time vocabulary.
+     *
+     * @return array{metric_kind:string,time_semantics:string}
+     */
+    public static function classification(string $code): array
+    {
+        $item = self::get($code);
+        $aggregation = $item['source']['threshold_count']['aggregation'] ?? null;
+        $timeSemantics = $aggregation === 'current_state'
+            ? 'current_state'
+            : ($aggregation === 'as_of_age_days' ? 'as_of_date' : 'period_flow');
+        return [
+            'metric_kind' => isset($item['derivation']) ? 'derived' : 'atomic',
+            'time_semantics' => $timeSemantics,
+        ];
+    }
+
     /** AI 与报表共享这一份能力声明；注册不等于绕过报表数据权限。 */
     public static function capabilities(): array
     {

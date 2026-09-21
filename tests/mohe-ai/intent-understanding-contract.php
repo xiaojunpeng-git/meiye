@@ -52,6 +52,16 @@ $base=['object_kind'=>'store','object_term'=>'','operation'=>'ranking','metric_c
     ]];
 $bound=AiIntentResultContract::normalize($base,['cash_performance'],[],$question,$understanding);
 $check($bound['metric_codes']===['cash_performance']&&$bound['provenance']['ranking']['requirements']===['r3'],'binding separately consumes accepted understanding');
+$missingSingleAudit=$base;$missingSingleAudit['requirement_bindings']=[];
+$singleRequirementUnderstanding=$understanding;
+$singleRequirementUnderstanding['requirements']=array_values(array_filter($understanding['requirements'],static function(array $requirement): bool {
+    return $requirement['id']==='r1';
+}));
+$singleRequirementUnderstanding=AiIntentUnderstandingContract::normalize($singleRequirementUnderstanding,$question);
+$normalizedMissingSingleAudit=AiIntentResultContract::normalize($missingSingleAudit,['cash_performance'],[],$question,$singleRequirementUnderstanding);
+$check($normalizedMissingSingleAudit['requirement_bindings']===[
+    ['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance']],
+], 'one omitted audit row is rebuilt only from one accepted metric requirement and model-selected codes');
 $grouped=$understanding;
 $grouped['groups']=[
     ['id'=>'q1','requirement_ids'=>['r1','r2','r3']],
@@ -70,6 +80,14 @@ $groupedBinding=AiIntentGroupContract::normalize(['items'=>[
     ['intent'=>$base,'id'=>'q2'],['id'=>'q1','intent'=>$base],
 ]],['cash_performance'],[],$question,$grouped);
 $check(array_column($groupedBinding,'id')===['q2','q1'],'independent grouped bindings retain model order while preserving server-owned group identities');
+$groupedWithoutPeriods=$base;$groupedWithoutPeriods['periods']=[];
+$groupedWithoutPeriods['provenance']['periods']=['source'=>'system','requirements'=>[]];
+$periodBoundGroup=AiIntentGroupContract::normalize(['items'=>[
+    ['id'=>'q1','intent'=>$groupedWithoutPeriods],['id'=>'q2','intent'=>$groupedWithoutPeriods],
+]],['cash_performance'],[],$question,$grouped);
+$check(($periodBoundGroup[0]['intent']['periods']??null)===[['kind'=>'month_offset','offset_months'=>0]]
+    &&($periodBoundGroup[1]['intent']['provenance']['periods']['source']??null)==='customer',
+    'one accepted explicit period is projected symmetrically when a grouped binding omits it');
 $check(AiIntentGroupContract::repairableFormat('items')
     && str_contains(AiIntentGroupContract::repairInstruction('items'),'"items"'),
     'a legacy single envelope for a grouped carrier receives exactly one format-only repair');
@@ -314,6 +332,19 @@ $reject(static function()use($unsafePeriodOnlyUnderstanding,$selectedStandaloneQ
     'a period-only shortcut cannot omit a different business fact from the same current message');
 $check(AiIntentUnderstandingContract::repairable('period_only_coverage'),
     'an incomplete period-only evidence anchor receives one model-owned understanding repair');
+$datedOverviewAfterCondition=$periodOnlyAfterSelection;
+$datedOverviewAfterCondition['question']='今天经营得怎么样';
+$datedOverviewAfterCondition['evidence_messages'][0]['text']='今天经营得怎么样';
+$periodOnlyDatedOverview=['goal'=>'查看今天','status'=>'understood','requirements'=>[[
+    'id'=>'r1','meaning'=>'今天','fields'=>['periods'],
+    'values'=>['periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]]],
+    'evidence'=>[['message_id'=>'current','quote'=>'今天经营得怎么样']],
+]]];
+$reject(static function()use($periodOnlyDatedOverview,$datedOverviewAfterCondition){
+    AiIntentUnderstandingContract::normalize($periodOnlyDatedOverview,$datedOverviewAfterCondition);
+},'complete dated business wording cannot be reduced to a pure period continuation even with full-span evidence');
+$check(AiIntentUnderstandingContract::repairable('period_only_business_residue'),
+    'omitted non-calendar meaning receives one bounded understanding repair instead of inheriting an old topic');
 $periodWithHistoricalMetric=$periodOnlyUnderstanding;
 $periodWithHistoricalMetric['requirements'][]=[
     'id'=>'r2','meaning'=>'上一问的劳动业绩','fields'=>['metric_codes'],

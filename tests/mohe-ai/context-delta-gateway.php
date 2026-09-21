@@ -88,6 +88,59 @@ try {
         ['local_conditions'=>[]],'2026-09-20'
     )===null,
         'a current business measurement cannot enter the local date-only continuation path');
+    cdgCheck($localPeriodMethod->invoke($localPeriodHarness->gateway,
+        ['question'=>'今天经营得怎么样','evidence_messages'=>[['id'=>'current','text'=>'今天经营得怎么样']]],
+        ['local_conditions'=>[]],'2026-09-20'
+    )===null,
+        'a complete dated operating question cannot inherit a prior condition set as a period-only continuation');
+    $editedYesterday=$localPeriodMethod->invoke($localPeriodHarness->gateway,
+        ['question'=>'改成昨天','evidence_messages'=>[['id'=>'current','text'=>'改成昨天']]],
+        ['local_conditions'=>[]],'2026-09-21'
+    );
+    cdgCheck(($editedYesterday['requirements'][0]['values']['periods'][0]??null)===
+        ['kind'=>'date_range','start'=>'2026-09-20','end'=>'2026-09-20'],
+        'a calendar edit verb remains a closed date-only continuation');
+    $collectionPeriodMethod=new ReflectionMethod($localPeriodHarness->gateway,'compileCollectionPeriodContinuation');
+    if (PHP_VERSION_ID<80100) $collectionPeriodMethod->setAccessible(true);
+    $editedCollection=$collectionPeriodMethod->invoke($localPeriodHarness->gateway,$editedYesterday,[
+        ['id'=>'q1','label'=>'项目排行','query'=>['query_shape'=>'ranking','metric_codes'=>['sales_quantity'],'start_date'=>'2026-09-01','end_date'=>'2026-09-21','compare_range'=>null,'store_ids'=>[],
+            'business_filters'=>['object_kind'=>'project'],'ranking'=>['direction'=>'top','limit'=>3],'ranking_presentation_metrics'=>['sales_quantity','sales_amount']]],
+        ['id'=>'q2','label'=>'产品排行','query'=>['query_shape'=>'ranking','metric_codes'=>['sales_quantity'],'start_date'=>'2026-09-01','end_date'=>'2026-09-21','compare_range'=>null,'store_ids'=>[],
+            'business_filters'=>['object_kind'=>'product'],'ranking'=>['direction'=>'top','limit'=>3],'ranking_presentation_metrics'=>['sales_quantity','sales_amount']]],
+    ],['presentation_origin'=>'customer_or_verified_context'],'screen','2026-09-21');
+    cdgCheck(($editedCollection['plan']['items'][0]['plan']['query']['start_date']??null)==='2026-09-20'
+        &&($editedCollection['plan']['items'][1]['plan']['query']['end_date']??null)==='2026-09-20',
+        'a calendar edit replaces the period symmetrically across a signed collection');
+    $localRankingMethod=new ReflectionMethod($localPeriodHarness->gateway,'localVerifiedRankingOnlyUnderstanding');
+    if (PHP_VERSION_ID<80100) $localRankingMethod->setAccessible(true);
+    $topThree=$localRankingMethod->invoke($localPeriodHarness->gateway,
+        ['question'=>'前三名呢','evidence_messages'=>[['id'=>'current','text'=>'前三名呢']]],
+        ['local_conditions'=>[]]
+    );
+    cdgCheck(($topThree['requirements'][0]['values']['ranking']??null)===['direction'=>'top','limit'=>3],
+        'a closed top-three phrase becomes one ranking-presentation requirement');
+    cdgCheck($localRankingMethod->invoke($localPeriodHarness->gateway,
+        ['question'=>'前三名和销售额','evidence_messages'=>[['id'=>'current','text'=>'前三名和销售额']]],
+        ['local_conditions'=>[]]
+    )===null,
+        'a ranking phrase with a metric remains on the natural-language binding path');
+    $overviewUnderstandingMethod=new ReflectionMethod($localPeriodHarness->gateway,'registeredOpenOverviewUnderstanding');
+    if (PHP_VERSION_ID<80100) $overviewUnderstandingMethod->setAccessible(true);
+    $overviewCapabilitiesMethod=new ReflectionMethod($localPeriodHarness->gateway,'capabilities');
+    if (PHP_VERSION_ID<80100) $overviewCapabilitiesMethod->setAccessible(true);
+    $overviewCapabilities=$overviewCapabilitiesMethod->invoke($localPeriodHarness->gateway,$localPeriodHarness->context);
+    $recoveredOverview=$overviewUnderstandingMethod->invoke($localPeriodHarness->gateway,[
+        'question'=>'今天经营得怎么样','prior_query'=>['operation'=>'condition_list'],
+        'evidence_messages'=>[['id'=>'current','text'=>'今天经营得怎么样']],
+    ],'2026-09-20',$overviewCapabilities);
+    cdgCheck(($recoveredOverview['requirements'][0]['fields']??null)===['metric_codes']
+        &&($recoveredOverview['requirements'][1]['values']['periods'][0]??null)===
+            ['kind'=>'date_range','start'=>'2026-09-20','end'=>'2026-09-20']
+        &&$overviewUnderstandingMethod->invoke($localPeriodHarness->gateway,[
+            'question'=>'今天现金业绩多少','prior_query'=>['operation'=>'condition_list'],
+            'evidence_messages'=>[['id'=>'current','text'=>'今天现金业绩多少']],
+        ],'2026-09-20',$overviewCapabilities)===null,
+        'the bounded fallback recovers only a broad registered overview and never an explicit metric question');
     $metricOnlyContextMethod=new ReflectionMethod($localPeriodHarness->gateway,'preserveVerifiedMetricOnlyContext');
     if (PHP_VERSION_ID<80100) $metricOnlyContextMethod->setAccessible(true);
     $metricOnlyIntent=$metricOnlyContextMethod->invoke($localPeriodHarness->gateway,
@@ -115,7 +168,9 @@ try {
     $registeredMetricProjectionMethod=new ReflectionMethod($localPeriodHarness->gateway,'hasClosedRegisteredMetricOnlyProjection');
     if (PHP_VERSION_ID<80100) $registeredMetricProjectionMethod->setAccessible(true);
     cdgCheck($registeredMetricProjectionMethod->invoke($localPeriodHarness->gateway,['question'=>'按服务次数看呢？'])===true
-        &&$registeredMetricProjectionMethod->invoke($localPeriodHarness->gateway,['question'=>'这个月按服务次数看呢？'])===false,
+        &&$registeredMetricProjectionMethod->invoke($localPeriodHarness->gateway,['question'=>'按销量看呢？'])===true
+        &&$registeredMetricProjectionMethod->invoke($localPeriodHarness->gateway,['question'=>'这个月按服务次数看呢？'])===false
+        &&$registeredMetricProjectionMethod->invoke($localPeriodHarness->gateway,['question'=>'哪个产品销量最好？'])===false,
         'registered object-grain metric signals may retain context only when no current date or other semantic delta is present');
     $closedMetricUnderstandingMethod=new ReflectionMethod($localPeriodHarness->gateway,'reconcileClosedMetricOnlyUnderstanding');
     if (PHP_VERSION_ID<80100) $closedMetricUnderstandingMethod->setAccessible(true);
@@ -166,7 +221,49 @@ try {
         &&($collectionRankingPlan['plan']['items'][0]['plan']['query']['ranking']['limit']??null)===2
         &&($collectionRankingPlan['plan']['items'][1]['plan']['query']['metric_codes']??null)===['product_sales_amount'],
         'a collection ranking continuation updates every item symmetrically without replacing its metric');
+    $collectionMetricMethod=new ReflectionMethod($localPeriodHarness->gateway,'compileCollectionMetricContinuation');
+    if (PHP_VERSION_ID<80100) $collectionMetricMethod->setAccessible(true);
+    $registryReadiness=\app\services\query\metric\MetricDefinitionRegistry::capabilities();
+    $collectionMetricPlan=$collectionMetricMethod->invoke($localPeriodHarness->gateway,[
+        'goal'=>'按销量查看','status'=>'understood','requirements'=>[[
+            'id'=>'r1','meaning'=>'按销量查看','fields'=>['metric_codes'],'values'=>['metric_terms'=>['销量']],
+            'evidence'=>[['message_id'=>'current','quote'=>'按销量看呢？']],
+        ]],
+    ],[
+        ['id'=>'q1','label'=>'项目排行','query'=>['query_shape'=>'ranking','metric_codes'=>['sales_amount'],'start_date'=>'2026-09-01','end_date'=>'2026-09-20','compare_range'=>null,'store_ids'=>[],
+            'business_filters'=>['object_kind'=>'project'],'ranking'=>['direction'=>'top','limit'=>3],
+            'ranking_presentation_metrics'=>['sales_amount','completed_service_item_count','sales_quantity']]],
+        ['id'=>'q2','label'=>'卡项排行','query'=>['query_shape'=>'ranking','metric_codes'=>['sales_amount'],'start_date'=>'2026-09-01','end_date'=>'2026-09-20','compare_range'=>null,'store_ids'=>[],
+            'business_filters'=>['object_kind'=>'card'],'ranking'=>['direction'=>'top','limit'=>3],
+            'ranking_presentation_metrics'=>['sales_amount','sales_quantity']]],
+    ],'screen',['question'=>'按销量看呢？'],['metric_codes'=>array_keys($registryReadiness),'metric_readiness'=>$registryReadiness],
+        ['presentation_origin'=>'customer_or_verified_context'],
+        ['account_id'=>3,'terminal'=>'platform'],'collection-metric-fixture',1,'fixture-worker');
+    cdgCheck(($collectionMetricPlan['plan']['items'][0]['plan']['query']['metric_codes']??null)===['sales_quantity']
+        &&($collectionMetricPlan['plan']['items'][0]['plan']['query']['ranking_presentation_metrics']??null)===[]
+        &&($collectionMetricPlan['plan']['items'][1]['plan']['query']['business_filters']['object_kind']??null)==='card'
+        &&($collectionMetricPlan['plan']['items'][1]['plan']['query']['end_date']??null)==='2026-09-20'
+        &&($collectionMetricPlan['_context_meaning']['presentation_origin']??null)==='customer_or_verified_context',
+        'an exact metric-only continuation replaces the metric across every compatible signed collection item');
     $localPeriodHarness->close();
+
+    $singleRankHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $singleRankHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'ranking',
+        'metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,
+        'ranking'=>['direction'=>'top','limit'=>1],
+        'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-21']],
+        'scope'=>'authorized','unresolved_fragments'=>[]];
+    $singleRankSource=$singleRankHarness->start('本月现金业绩最高的门店是谁');
+    cdgCheck($singleRankSource['status']==='COMPLETED','a signed single ranking is available for presentation follow-up');
+    $singleRankModels=$singleRankHarness->models;$singleRankQueries=$singleRankHarness->queries;
+    $singleRankFollow=$singleRankHarness->start('前三名呢',$singleRankSource['answer']['context_ref']);
+    $singleRankEvidence=$singleRankHarness->private->read($singleRankHarness->row($singleRankFollow)['evidence_ref']);
+    cdgCheck($singleRankFollow['status']==='COMPLETED'
+        &&$singleRankHarness->models===$singleRankModels
+        &&$singleRankHarness->queries===$singleRankQueries+1
+        &&($singleRankEvidence['query']['ranking']??null)===['direction'=>'top','limit'=>3],
+        'a closed ranking continuation reuses the signed query without a provider decision');
+    $singleRankHarness->close();
 
     $overviewHarness=new R6GatewayHarness(3,[1,2],'platform');
     $capabilitiesMethod=new ReflectionMethod($overviewHarness->gateway,'capabilities');

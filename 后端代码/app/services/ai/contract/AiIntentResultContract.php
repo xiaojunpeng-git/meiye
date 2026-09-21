@@ -1665,6 +1665,16 @@ final class AiIntentResultContract
             if ($value!==[]) self::fail('unexpected_requirement_binding');
             return [];
         }
+        // With one accepted measurement requirement, non-empty selected
+        // metrics already form the candidate binding. Some providers omit
+        // only its duplicate audit row even after a bounded repair. Rebuild
+        // that bookkeeping row from the accepted requirement id and the
+        // model-selected effective code set; PHP chooses no metric here, and
+        // the independent semantic reviewer still has to admit the binding.
+        if (count($metricRequirementIds)===1 && $value===[] && $effectiveCodes!==[]) {
+            $value=[['requirement_id'=>$metricRequirementIds[0],
+                'status'=>'satisfied','metric_codes'=>array_values($effectiveCodes)]];
+        }
         // Some providers duplicate the same satisfied audit row while still
         // selecting one identical registered metric for the one accepted
         // measurement requirement. This is duplicate bookkeeping, not a

@@ -53,7 +53,7 @@ foreach (['inherit','clear'] as $scopeDecision) {
         // has an additional requirement and is covered below without taking
         // this fast path.
         $pass=$answer['status']==='COMPLETED' && $stores===[1]
-            && $h->queries===$queries+1 && $h->models===$models+1;
+            && $h->queries===$queries+1 && $h->models===$models;
         if (!$pass) $failures++;
         echo json_encode(['case'=>$scopeDecision,'pass'=>$pass,'source_store_ids'=>[1],
             'status'=>$answer['status'],'reason'=>$answer['reason']??null,'query_store_ids'=>$stores,
@@ -99,24 +99,31 @@ try {
         'metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,
         'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>$periods,'scope'=>'authorized',
         'context_delta'=>$delta,'unresolved_fragments'=>[]];
-    $queries=$h->queries;
+    $queries=$h->queries;$models=$h->models;
     $answer=$h->start('改成9月9日',$source['answer']['context_ref'],[
         ['question'=>'全部门店现金业绩排行','answer'=>''],
         ['question'=>'刚才第一家门店的汇总','answer'=>''],
     ]);
-    $pass=in_array($answer['status'],['FAILED','WAITING_CLARIFICATION'],true) && $h->queries===$queries;
+    $row=$h->row($answer);
+    $evidence=$row['evidence_ref']?$h->private->read($row['evidence_ref']):[];
+    // A closed calendar edit inherits only the signed executable context.
+    // Historical prose is never allowed to reopen the wider store scope, and
+    // no model candidate participates in the decision.
+    $pass=$answer['status']==='COMPLETED'
+        &&($evidence['query']['store_ids']??null)===[1]
+        &&$h->queries===$queries+1 &&$h->models===$models;
     if (!$pass) $failures++;
     echo json_encode(['case'=>'historical_authorized_scope','pass'=>$pass,'status'=>$answer['status'],
-        'reason'=>$answer['reason']??null,'reader_transactions'=>$h->queries-$queries],
+        'reason'=>$answer['reason']??null,'query_store_ids'=>$evidence['query']['store_ids']??null,
+        'model_calls'=>$h->models-$models,'reader_transactions'=>$h->queries-$queries],
         JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES).PHP_EOL;
 } finally {
     $h->close();
 }
 
-// Evidence is attached to a requirement, so a structurally valid current
-// date excerpt cannot be reused for scope. The request is rejected before
-// Reader execution; a server form would only make the customer repair a
-// condition that they never supplied.
+// A closed calendar edit is handled before an untrusted binding candidate is
+// admitted. A fabricated scope expansion in the unused model fixture must be
+// inert while the signed one-store constraint is retained for Reader.
 $h=new R6GatewayHarness(3,[1,2],'platform');
 try {
     $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'ranking',
@@ -149,18 +156,21 @@ try {
         'metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,
         'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>$periods,'scope'=>'authorized',
         'context_delta'=>$delta,'unresolved_fragments'=>[]];
-    // Structural evidence merely proves where the excerpt came from.  The
-    // independent semantic reviewer must reject a date excerpt masquerading
-    // as an authorized-scope request; the server deliberately has no phrase
-    // matcher for that judgement.
+    // The injected response deliberately reuses a date excerpt as scope
+    // evidence. The verified date-only path must not call or trust it.
     $h->bindingVerificationOverride=['decision'=>'reject','rejected_requirement_ids'=>['r1']];
     $queries=$h->queries;$models=$h->models;
     $answer=$h->start('改成9月9日',$source['answer']['context_ref']);
-    $pass=$answer['status']==='FAILED' && $h->queries===$queries;
+    $row=$h->row($answer);
+    $evidence=$row['evidence_ref']?$h->private->read($row['evidence_ref']):[];
+    $pass=$answer['status']==='COMPLETED'
+        &&($evidence['query']['store_ids']??null)===[1]
+        &&$h->queries===$queries+1 &&$h->models===$models;
     if (!$pass) $failures++;
     echo json_encode(['case'=>'date_evidence_cannot_expand_scope','pass'=>$pass,'status'=>$answer['status'],
-        'reason'=>$answer['reason']??null,'model_calls'=>$h->models-$models,
-        'reader_transactions'=>0],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES).PHP_EOL;
+        'reason'=>$answer['reason']??null,'query_store_ids'=>$evidence['query']['store_ids']??null,
+        'model_calls'=>$h->models-$models,'reader_transactions'=>$h->queries-$queries],
+        JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES).PHP_EOL;
 } finally {
     $h->close();
 }
