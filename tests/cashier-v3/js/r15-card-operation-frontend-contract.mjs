@@ -34,6 +34,7 @@ assert.match(selector, /operationMode === 'project-replacement' && selectedOpera
 assert.match(selector, /选择目标项目/)
 assert.match(selector, /class="button button--primary cashier-entitlement-selector__operation-target-button" @click="emit\('operation-target'\)">选择目标项目/)
 assert.match(selector, /class="button button--primary cashier-entitlement-selector__operation-target-button" @click="emit\('operation-target'\)">选择目标卡/)
+assert.match(workbench, /v-if="previewCardOperation\.mode === 'card-upgrade' && !previewCardOperation\.target"[\s\S]*?class="cashier-operation-preview__target cashier-operation-preview__target--selectable"[\s\S]*?@click="handleOperationTargetSelection"[\s\S]*?cardOperationTargetPrompt\(previewCardOperation\.mode\)/, '卡升级目标空位应与“选择目标卡”复用同一处理函数')
 assert.match(selector, /operationMode === 'card-upgrade' && operationSourceSelected\(source\)[\s\S]*?'已选择'[\s\S]*?operationMode === 'card-upgrade' && selectedOperationSourceIds\.length[\s\S]*?'添加'/)
 assert.match(workbench, /if \(\['card-upgrade', 'project-upgrade'\]\.includes\(operation\.mode\)\) \{[\s\S]*?result = await confirmPreviewCardOperation\(\)[\s\S]*?catch \(error\)[\s\S]*?awaitingTarget: true/)
 assert.match(workbench, /async function closeSucceededCheckoutAndRefreshWorkbench[\s\S]*?const committedDraft = responseDataBlock\(submissionResponse\)\.cashierDraft[\s\S]*?await requestAction\('open-cashier-workbench', \{ silent: true \}\)/)

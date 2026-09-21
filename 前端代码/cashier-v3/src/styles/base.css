@@ -4435,6 +4435,13 @@ button:disabled {
   justify-content: center;
 }
 
+/* 目标卡空位是可操作入口；按钮复用原占位视觉，不改变其他卡操作的展示。 */
+.cashier-operation-preview__target--selectable {
+  width: 100%;
+  font: inherit;
+  cursor: pointer;
+}
+
 .cashier-operation-preview__target.is-filled {
   border-style: solid;
   justify-content: space-between;

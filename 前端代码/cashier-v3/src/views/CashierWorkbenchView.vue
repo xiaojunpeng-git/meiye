@@ -6954,7 +6954,14 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div class="cashier-operation-preview__arrow" aria-hidden="true">↓</div>
-            <div class="cashier-operation-preview__target" :class="{ 'is-filled': previewCardOperation.target }">
+            <!-- 未选目标卡时复用权益面板的“选择目标卡”处理函数，保持目录筛选与操作上下文一致。 -->
+            <button
+              v-if="previewCardOperation.mode === 'card-upgrade' && !previewCardOperation.target"
+              type="button"
+              class="cashier-operation-preview__target cashier-operation-preview__target--selectable"
+              @click="handleOperationTargetSelection"
+            >{{ cardOperationTargetPrompt(previewCardOperation.mode) }}</button>
+            <div v-else class="cashier-operation-preview__target" :class="{ 'is-filled': previewCardOperation.target }">
               <template v-if="previewCardOperation.target">
                 <strong>{{ previewCardOperation.target.name }}</strong>
                 <span>{{ previewCardOperation.mode === 'card-transfer' ? '新会员' : previewCardOperation.target.kind }}</span>
