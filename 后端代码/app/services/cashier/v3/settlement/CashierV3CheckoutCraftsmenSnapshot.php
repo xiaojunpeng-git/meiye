@@ -36,7 +36,10 @@ final class CashierV3CheckoutCraftsmenSnapshot
                 || array_key_exists('laborFeeCents', $row);
             $hasPerformanceAmount = array_key_exists('performanceAmountCents', $row)
                 || array_key_exists('performanceAmountManual', $row);
-            $hasProjectCount = array_key_exists('projectCountHalfUnits', $row);
+            // 新收银按人员保存十进制服务项目数；旧半单位快照仍需可读。
+            // 两者只能占据同一可选位置，不能把销售数量混作工资项目数。
+            $hasProjectCount = array_key_exists('projectCount', $row)
+                || array_key_exists('projectCountHalfUnits', $row);
             $hasPersonnelSource = array_key_exists('personnelSource', $row);
             $hasPosition = array_key_exists('positionId', $row)
                 || array_key_exists('positionName', $row)
@@ -44,7 +47,11 @@ final class CashierV3CheckoutCraftsmenSnapshot
                 || array_key_exists('allocationGroupKey', $row);
             $optionalKeys = $hasPerformanceFields ? ['craftsmanPerformanceType', 'laborFeeCents'] : [];
             if ($hasPerformanceAmount) $optionalKeys = array_merge($optionalKeys, ['performanceAmountCents', 'performanceAmountManual']);
-            if ($hasProjectCount) $optionalKeys[] = 'projectCountHalfUnits';
+            if ($hasProjectCount) {
+                $optionalKeys[] = array_key_exists('projectCount', $row)
+                    ? 'projectCount'
+                    : 'projectCountHalfUnits';
+            }
             if ($hasPersonnelSource) $optionalKeys[] = 'personnelSource';
             foreach (['positionId', 'positionName', 'performanceIndependent', 'allocationGroupKey'] as $positionKey) {
                 if (array_key_exists($positionKey, $row)) $optionalKeys[] = $positionKey;
@@ -122,10 +129,13 @@ final class CashierV3CheckoutCraftsmenSnapshot
                 $normalized[count($normalized) - 1]['performanceAmountManual'] = $performanceAmountManual;
             }
             if ($hasProjectCount) {
-                $normalized[count($normalized) - 1]['projectCountHalfUnits'] = self::nonNegativeInt(
-                    $row['projectCountHalfUnits'],
-                    'craftsmen_snapshot_project_count_invalid'
-                );
+                if (array_key_exists('projectCount', $row)) {
+                    $normalized[count($normalized) - 1]['projectCount'] = self::projectCount($row['projectCount']);
+                } else {
+                    $normalized[count($normalized) - 1]['projectCountHalfUnits'] = self::nonNegativeInt(
+                        $row['projectCountHalfUnits']
+                    );
+                }
             }
             if ($hasPersonnelSource || $source === 'other') {
                 $normalized[count($normalized) - 1]['personnelSource'] = $source;
@@ -195,6 +205,20 @@ final class CashierV3CheckoutCraftsmenSnapshot
             throw new \InvalidArgumentException('craftsmen_snapshot_non_negative_integer_invalid');
         }
         return $value;
+    }
+
+    private static function projectCount($value): string
+    {
+        if (is_bool($value) || is_array($value) || $value === null || is_float($value)) {
+            throw new \InvalidArgumentException('craftsmen_snapshot_project_count_invalid');
+        }
+        $raw = trim((string)$value);
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $raw) !== 1) {
+            throw new \InvalidArgumentException('craftsmen_snapshot_project_count_invalid');
+        }
+        [$whole, $fraction] = array_pad(explode('.', $raw, 2), 2, '');
+        $fraction = rtrim($fraction, '0');
+        return $fraction === '' ? $whole : $whole . '.' . $fraction;
     }
 
     private static function assertExactKeys(array $row, array $expected): void
