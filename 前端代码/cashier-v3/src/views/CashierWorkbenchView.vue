@@ -163,6 +163,12 @@ const currentMemberId = computed(() => member.value?.id || member.value?.memberI
 const currentCustomerMode = computed(() => (
   Number(currentMemberId.value) > 0 ? 'member' : 'guest'
 ))
+// 宿主页面历史上同时使用 currentStore.id、currentStore.storeId 与根 storeId。
+// 收银人员快照必须始终携带可验证的办理门店，不能仅因投影命名不同退化为 0。
+const currentCashierStoreId = computed(() => Number(
+  state.currentStore?.id || state.currentStore?.storeId || state.currentStore?.store_id
+  || state.storeId || state.store_id || state.store?.id || 0
+) || 0)
 
 watch(
   currentCustomerMode,
@@ -188,7 +194,7 @@ const {
 })
 const cashierScopeIdentity = computed(() => ({
   stateContextId: state.stateContextId || '',
-  storeId: state.currentStore?.id || '',
+  storeId: currentCashierStoreId.value || '',
   workspaceId: state.workspace?.id || '',
   workspaceVersion: state.workspace?.revision,
   customerMode: currentCustomerMode.value,
@@ -759,7 +765,7 @@ function canonicalCheckoutPositiveId(...values) {
 // workspace projection is used here; employee/store identity comes from the
 // selection payload, with the active store as the final local fallback.
 function canonicalCheckoutCraftsmen(records = []) {
-  const storeId = Number(state.currentStore?.id || 0)
+  const storeId = currentCashierStoreId.value
   const input = Array.isArray(records) ? records : []
   const rows = input.map((record, index) => {
     const staffId = canonicalCheckoutPositiveId(
@@ -7381,7 +7387,7 @@ onBeforeUnmount(() => {
         :show-sales-managers="personnelOverlay.showSalesManagers"
         :allow-other-craftsmen="personnelOverlay.showCraftsmen"
         :require-craftsmen="personnelOverlay.requireCraftsmen"
-        :store-id="Number(state.currentStore?.id || 0)"
+        :store-id="currentCashierStoreId"
         :craftsmen-candidates="personnelOverlay.craftsmenCandidates"
         :other-craftsman-candidates="personnelOverlay.otherCraftsmanCandidates"
         :salesperson-candidates="personnelOverlay.salespersonCandidates"

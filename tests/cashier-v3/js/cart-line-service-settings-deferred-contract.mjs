@@ -82,11 +82,14 @@ check(
 check(
   /canonicalCheckoutCraftsmen\(craftsmen\)/.test(localPreview)
     && /function canonicalCheckoutCraftsmen/.test(source)
+    && /const currentCashierStoreId = computed/.test(source)
+    && /state\.currentStore\?\.storeId/.test(source)
+    && /state\.storeId/.test(source)
     && /employeeId/.test(source.slice(source.indexOf('function canonicalCheckoutCraftsmen'), source.indexOf('function commitLocalCashierDraft')))
     && /storeId/.test(source.slice(source.indexOf('function canonicalCheckoutCraftsmen'), source.indexOf('function commitLocalCashierDraft')))
     && /isPrimary/.test(source.slice(source.indexOf('function canonicalCheckoutCraftsmen'), source.indexOf('function commitLocalCashierDraft')))
     && /sequence/.test(source.slice(source.indexOf('function canonicalCheckoutCraftsmen'), source.indexOf('function commitLocalCashierDraft'))),
-  'sale-project craftsmen are canonicalized only when the final browser checkout snapshot is built'
+  'sale-project craftsmen use the compatible active-store identity only when the final browser checkout snapshot is built'
 )
 check(
   /const salespeople = Array\.isArray\(localPersonnel\.salespeople\)/.test(localPreview)

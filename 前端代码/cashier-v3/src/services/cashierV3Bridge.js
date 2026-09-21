@@ -1904,7 +1904,10 @@ function normalizeBootstrap(rawBootstrap = {}) {
     currentStore: {
       ...base.currentStore,
       ...incomingCurrentStore,
-      id: incomingCurrentStore.id || null,
+      // 历史宿主投影存在 storeId / store_id 两种命名。浏览器内所有结账
+      // 快照都依赖统一的 id，不能因兼容层丢失门店身份而产生不可提交人员。
+      id: incomingCurrentStore.id || incomingCurrentStore.storeId || incomingCurrentStore.store_id
+        || raw.storeId || raw.store_id || raw.store?.id || null,
       name: incomingCurrentStore.name || incomingCurrentStore.storeName || raw.storeName || base.currentStore.name
     },
     featurePermissions: {
