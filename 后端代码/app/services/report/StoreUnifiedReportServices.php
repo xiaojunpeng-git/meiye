@@ -192,11 +192,15 @@ class StoreUnifiedReportServices extends BaseServices
     {
         $categoryId = (int)($input['category_id'] ?? 0);
         $path = trim((string)($input['category_path'] ?? ''));
+        $exactPath = trim((string)($input['category_path_exact'] ?? ''));
         $type = trim((string)($input['product_type'] ?? ''));
         $partner = trim((string)($input['partner_name'] ?? ''));
         if ($expandCardCategories) {
             if ($categoryId > 0) $query->whereRaw('COALESCE(c.category_id_snapshot,d.category_id_snapshot)=?', [$categoryId]);
             if ($path !== '') $query->whereRaw('COALESCE(c.category_path_snapshot,d.category_path_snapshot) LIKE ?', [$path . '%']);
+            // A summary-row drilldown must match its frozen full category path;
+            // the ordinary category search above intentionally remains a prefix filter.
+            if ($exactPath !== '') $query->whereRaw('COALESCE(c.category_path_snapshot,d.category_path_snapshot)=?', [$exactPath]);
             if ($type !== '') $query->whereRaw('COALESCE(c.product_type_snapshot,d.product_type_snapshot)=?', [$type]);
             if ($partner !== '') $query->whereRaw('COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)=?', [$partner]);
         } else {
@@ -255,10 +259,10 @@ class StoreUnifiedReportServices extends BaseServices
             $this->applyOrganizationDimensions($fact);
             $month = substr((string)$fact['business_date'], 0, 7);
             $categoryPath = (string)$fact['category_path_snapshot'];
-            $key = implode('|', [
-                $month, (string)$fact['store_id'], (string)$fact['company_dimension_id'],
-                (string)$fact['city_manager_dimension_id'], (string)$fact['partner_name_snapshot'], $categoryPath,
-            ]);
+            // A hidden partner label must not split two rows that display the
+            // same full category. The visible month/store/dimensions/path are
+            // the summary grain; partner filtering is applied before grouping.
+            $key = $this->partnerSummaryGroupKey($month, $fact, $categoryPath);
             if (!isset($grouped[$key])) {
                 $grouped[$key] = [
                     'month' => $month, 'division_name' => (string)$fact['division_name'],
@@ -267,8 +271,9 @@ class StoreUnifiedReportServices extends BaseServices
                     'city_manager_dimension_id' => (string)$fact['city_manager_dimension_id'],
                     'store_id' => (int)$fact['store_id'], 'store_name' => (string)$fact['store_name'],
                     'category_path_snapshot' => $categoryPath,
-                    'partner_name_snapshot' => (string)$fact['partner_name_snapshot'],
-                    'performance_type' => strtok($categoryPath, '/') ?: '',
+                    // Keep the entire sale-time category snapshot visible: rows
+                    // are already grouped by this path, not just its first level.
+                    'performance_type' => $categoryPath,
                     'sale_amount_cents' => 0, 'experience_count' => 0, 'quantity' => 0,
                     'consumption_amount_cents' => 0, 'labor_amount_cents' => 0,
                     '_member_ids' => [],
@@ -300,12 +305,12 @@ class StoreUnifiedReportServices extends BaseServices
         $columns = $this->fixedColumns(array_merge([
             ['key'=>'month','label'=>'月份'],
         ], $this->organizationDimensionColumns(), [
-            ['key'=>'store_summary','label'=>'门店汇总'],['key'=>'performance_type','label'=>'分类'],['key'=>'experience_count','label'=>'体验人次'],['key'=>'member_count','label'=>'成交人头'],['key'=>'consumption_amount','label'=>'消耗业绩'],['key'=>'labor_amount','label'=>'手工汇总'],['key'=>'sale_amount','label'=>'成交业绩'],
-        ]), ['month'=>88, 'division_name'=>130, 'city_manager'=>130, 'store_summary'=>132, 'performance_type'=>106]);
+            ['key'=>'store_summary','label'=>'门店汇总'],['key'=>'performance_type','label'=>'分类','source_explanation'=>'显示成交时卡内项目或商品的完整分类路径；同一完整路径的成交额合并，不同路径分别列示。'],['key'=>'experience_count','label'=>'体验人次'],['key'=>'member_count','label'=>'成交人头'],['key'=>'consumption_amount','label'=>'消耗业绩'],['key'=>'labor_amount','label'=>'手工汇总'],['key'=>'sale_amount','label'=>'成交业绩'],
+        ]), ['month'=>88, 'division_name'=>130, 'city_manager'=>130, 'store_summary'=>132, 'performance_type'=>220]);
         foreach ($columns as &$column) {
             if (!in_array((string)$column['key'], ['experience_count','member_count','consumption_amount','labor_amount','sale_amount'], true)) continue;
             $column['drilldown'] = ['report'=>'partner_item_detail', 'param_map'=>[
-                'store_ids'=>'store_id', 'category_path'=>'category_path_snapshot', 'partner_name'=>'partner_name_snapshot',
+                'store_ids'=>'store_id', 'category_path_exact'=>'category_path_snapshot',
                 'company_dimension_id'=>'company_dimension_id', 'city_manager_dimension_id'=>'city_manager_dimension_id',
             ]];
         }
@@ -323,19 +328,36 @@ class StoreUnifiedReportServices extends BaseServices
         ];
     }
 
+    /**
+     * Partner item totals share one row per visible month, store, organization,
+     * and full frozen category path. Partner labels are filters, not a hidden
+     * grouping dimension; JSON encoding also avoids path delimiter collisions.
+     */
+    private function partnerSummaryGroupKey(string $month, array $fact, string $categoryPath): string
+    {
+        return (string)json_encode([
+            $month,
+            (string)($fact['store_id'] ?? ''),
+            (string)($fact['company_dimension_id'] ?? ''),
+            (string)($fact['city_manager_dimension_id'] ?? ''),
+            $categoryPath,
+        ], JSON_UNESCAPED_UNICODE);
+    }
+
     private function partnerItemDetail($storeId, array $range, array $input): array
     {
         $query = $this->operationSaleQuery($storeId, $range, $input)->whereRaw("COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)<>''");
         $total = (int)(clone $query)->count('s.id');
         $summary = (clone $query)->fieldRaw("COUNT(DISTINCT NULLIF(s.member_id,0)) AS member_count,SUM(s.quantity) AS quantity,SUM((SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective')) AS labor_amount_cents")->find() ?: [];
+        $selectedCategories = (clone $query)->fieldRaw('s.source_line_id,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot')->select()->toArray();
         $summarySales = $this->metricSourceLineCategoryTotals(
-            'sales_amount', $storeId, $range, $input, (clone $query)->column('s.source_line_id')
+            'sales_amount', $storeId, $range, $input, array_column($selectedCategories, 'source_line_id')
         );
-        $summary['sale_amount_cents'] = array_sum($summarySales);
+        $summary['sale_amount_cents'] = $this->selectedCategoryMetricTotal($selectedCategories, $summarySales);
         $summaryConsume = $this->metricSourceLineCategoryTotals(
-            'consume_amount', $storeId, $range, $input, (clone $query)->column('s.source_line_id')
+            'consume_amount', $storeId, $range, $input, array_column($selectedCategories, 'source_line_id')
         );
-        $summary['consumption_amount_cents'] = array_sum($summaryConsume);
+        $summary['consumption_amount_cents'] = $this->selectedCategoryMetricTotal($selectedCategories, $summaryConsume);
         $rows = (clone $query)->leftJoin('user u', 'u.uid = s.member_id')
             ->fieldRaw("s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.member_id,s.member_name_snapshot,u.phone AS member_phone,s.item_name_snapshot,s.source_type,s.quantity,0 AS sale_amount_cents,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.product_type_snapshot,d.product_type_snapshot) AS product_type_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.partner_name_snapshot,d.partner_name_snapshot) AS partner_name_snapshot,d.is_experience,s.source_line_id,s.fact_id,(SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents")
             ->order('s.business_date','desc')->order('s.id','desc')->page($this->page($input),$this->limit($input))->select()->toArray();
@@ -350,11 +372,11 @@ class StoreUnifiedReportServices extends BaseServices
         $rows = $this->attachAnnotations($rows, 'partner_item_detail', $storeId);
         foreach ($rows as &$row) { $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']); $row['consumption_amount'] = $this->money((int)$row['consumption_amount_cents']); $row['labor_amount'] = $this->money((int)$row['labor_amount_cents']); $row['experience'] = (int)$row['is_experience'] === 1 ? '是' : '否'; }
         unset($row);
-        foreach ($rows as &$row) { $this->applyOrganizationDimensions($row); $row['member_phone'] = (string)($row['member_phone'] ?? ''); $row['performance_type'] = strtok((string)$row['category_path_snapshot'], '/'); $row['experience_project'] = $row['experience']; $row['deal_headcount'] = (int)($row['member_id'] ?? 0) > 0 ? 1 : 0; $row['deal_project'] = $row['item_name_snapshot']; $row['consumption'] = $row['consumption_amount'] ?? '0'; $row['consumption_amount'] = $row['consumption_amount'] ?? '0'; $row['labor_fee'] = $row['labor_amount'] ?? '0'; $row['deal_amount'] = $row['sale_amount']; $row['partner_label'] = $row['partner_name_snapshot']; }
+        foreach ($rows as &$row) { $this->applyOrganizationDimensions($row); $row['member_phone'] = (string)($row['member_phone'] ?? ''); $row['performance_type'] = (string)$row['category_path_snapshot']; $row['experience_project'] = $row['experience']; $row['deal_headcount'] = (int)($row['member_id'] ?? 0) > 0 ? 1 : 0; $row['deal_project'] = $row['item_name_snapshot']; $row['consumption'] = $row['consumption_amount'] ?? '0'; $row['consumption_amount'] = $row['consumption_amount'] ?? '0'; $row['labor_fee'] = $row['labor_amount'] ?? '0'; $row['deal_amount'] = $row['sale_amount']; $row['partner_label'] = $row['partner_name_snapshot']; }
         unset($row);
         $columns = $this->fixedColumns(array_merge($this->organizationDimensionColumns(), [
-            ['key'=>'store_name_snapshot','label'=>'门店'],['key'=>'member_name_snapshot','label'=>'会员'],['key'=>'member_phone','label'=>'手机'],['key'=>'performance_type','label'=>'业绩类型'],['key'=>'business_date','label'=>'日期'],['key'=>'experience_project','label'=>'体验项目'],['key'=>'medical_elevation','label'=>'复诊'],['key'=>'medical_followup','label'=>'类型'],['key'=>'deal_headcount','label'=>'成交人头'],['key'=>'deal_project','label'=>'成交项目'],['key'=>'consumption','label'=>'消耗'],['key'=>'consumption_amount','label'=>'消耗金额'],['key'=>'labor_fee','label'=>'手工费'],['key'=>'quantity','label'=>'数量'],['key'=>'deal_amount','label'=>'成交金额'],['key'=>'expert_name','label'=>'专家姓名'],['key'=>'partner_label','label'=>'合作方'],['key'=>'remark','label'=>'备注'],
-        ]), ['division_name'=>130, 'city_manager'=>130, 'store_name_snapshot'=>126, 'member_name_snapshot'=>88, 'member_phone'=>116, 'performance_type'=>96, 'business_date'=>104]);
+            ['key'=>'store_name_snapshot','label'=>'门店'],['key'=>'member_name_snapshot','label'=>'会员'],['key'=>'member_phone','label'=>'手机'],['key'=>'performance_type','label'=>'业绩类型','source_explanation'=>'显示成交时商品或卡内项目的完整分类路径，与合作方品项汇总的分类一致。'],['key'=>'business_date','label'=>'日期'],['key'=>'experience_project','label'=>'体验项目'],['key'=>'medical_elevation','label'=>'复诊'],['key'=>'medical_followup','label'=>'类型'],['key'=>'deal_headcount','label'=>'成交人头'],['key'=>'deal_project','label'=>'成交项目'],['key'=>'consumption','label'=>'消耗'],['key'=>'consumption_amount','label'=>'消耗金额'],['key'=>'labor_fee','label'=>'手工费'],['key'=>'quantity','label'=>'数量'],['key'=>'deal_amount','label'=>'成交金额'],['key'=>'expert_name','label'=>'专家姓名'],['key'=>'partner_label','label'=>'合作方'],['key'=>'remark','label'=>'备注'],
+        ]), ['division_name'=>130, 'city_manager'=>130, 'store_name_snapshot'=>126, 'member_name_snapshot'=>88, 'member_phone'=>116, 'performance_type'=>220, 'business_date'=>104]);
         return [
             'title'=>'合作方品项明细','columns'=>$columns, 'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
@@ -674,6 +696,24 @@ class StoreUnifiedReportServices extends BaseServices
             $metricCode, CashierV3ScopeResolver::TENANT_SCOPE_ID, $stores, $range, $lineIds,
             $this->itemAnalysisMetricFilters($input)
         );
+    }
+
+    /**
+     * A line can contain several card categories. Its detail total must only
+     * include the category pairs left by the report's exact path filter, while
+     * the amount for each pair still comes from the registered metric reader.
+     */
+    private function selectedCategoryMetricTotal(array $selectedCategories, array $amountsByLineCategory): int
+    {
+        $total = 0;
+        $seen = [];
+        foreach ($selectedCategories as $row) {
+            $key = (string)($row['source_line_id'] ?? '') . '|' . (int)($row['category_id_snapshot'] ?? 0);
+            if (isset($seen[$key])) continue;
+            $seen[$key] = true;
+            $total += (int)($amountsByLineCategory[$key] ?? 0);
+        }
+        return $total;
     }
 
     /**

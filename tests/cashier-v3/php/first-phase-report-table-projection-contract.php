@@ -11,9 +11,9 @@ $checks = [
     'fixed identifiers are declared by the report service, not inferred by the browser' => strpos($service, 'private function fixedColumns(array $columns, array $widths): array') !== false,
     'each first-phase report returns a separate first-row total' => substr_count($service, "'summary_row'") >= 5,
     'member-consumption totals aggregate payment allocation and frozen partner share facts' => strpos($service, 'memberConsumptionSummaryValues') !== false && strpos($service, 'cashier_v3_payment_sale_allocation_fact') !== false && strpos($service, 'cashier_v3_card_sale_category_allocation_fact') !== false,
-    'partner summary drilldown carries the exact store category and partner filters' => strpos($service, "'store_ids'=>'store_id', 'category_path'=>'category_path_snapshot', 'partner_name'=>'partner_name_snapshot'") !== false,
+    'partner summary drilldown carries the exact store and category without a hidden partner split' => strpos($service, "'store_ids'=>'store_id', 'category_path_exact'=>'category_path_snapshot'") !== false,
     'shared view enables fixed layout only when the report service declares it' => strpos($view, 'const usesFixedTableLayout') !== false && strpos($view, "'store-business-report--fixed-table': usesFixedTableLayout") !== false,
-    'grouped headers reserve a separate sticky row before the total row' => strpos($view, '.store-business-report--fixed-table thead tr:nth-child(2) th { top: 34px; }') !== false && strpos($view, 'top: var(--report-table-header-height)') !== false,
+    'grouped headers reserve a separate sticky row before the total row' => strpos($view, 'top: calc(var(--report-header-row-index, 0) * 40px)') !== false && strpos($view, 'top: var(--report-table-header-height)') !== false,
 ];
 
 $passed = 0;
