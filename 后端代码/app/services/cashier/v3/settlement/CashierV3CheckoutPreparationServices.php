@@ -16,6 +16,7 @@ use app\services\cashier\v3\card\CashierV3CardOperationCheckoutSettlementService
 use app\services\cashier\v3\card\CashierV3CustomCardConfigurationServices;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use think\facade\Db;
+use think\facade\Log;
 
 /** Server-only resource discovery and checkout-request preparation. */
 final class CashierV3CheckoutPreparationServices
@@ -917,6 +918,17 @@ final class CashierV3CheckoutPreparationServices
                 ? CashierV3CheckoutCraftsmenSnapshot::normalize($line['craftsmen'] ?? [])
                 : [];
         } catch (\Throwable $exception) {
+            // 页面仅收到统一的可恢复提示；日志保留结构而不保留员工姓名，
+            // 使线上快照兼容失败能定位到缺失字段，同时不泄露人员资料。
+            $firstCraftsman = is_array($line['craftsmen'][0] ?? null)
+                ? $line['craftsmen'][0]
+                : [];
+            Log::warning('[cashier_v3_checkout_sale_craftsmen_snapshot_invalid] ' . json_encode([
+                'line_id' => (string)($line['lineId'] ?? ''),
+                'craftsman_count' => is_array($line['craftsmen'] ?? null) ? count($line['craftsmen']) : null,
+                'first_craftsman_keys' => array_values(array_keys($firstCraftsman)),
+                'snapshot_error' => $exception->getMessage(),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
             throw self::incomplete('checkout_sale_craftsmen_snapshot_invalid');
         }
         $result = [
