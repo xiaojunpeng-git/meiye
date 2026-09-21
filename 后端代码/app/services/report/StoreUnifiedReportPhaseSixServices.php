@@ -256,7 +256,7 @@ final class StoreUnifiedReportPhaseSixServices
 
     private function salarySummary(array $stores,array $range):array
     {
-        $rows=[];
+        $rows=[];$observedCategories=[];
         foreach($this->salaryFactsWithServiceCustomerMetrics($stores,$range) as $f){
             $key=(int)$f['store_id'].'|'.(int)$f['employee_id'];
             if(!isset($rows[$key]))$rows[$key]=['company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'project_count'=>0,'service_visit_tenths'=>0,'service_people_tenths'=>0,'consumption_cents'=>0,'cash_cents'=>0,'labor_fee_cents'=>0];
@@ -264,8 +264,18 @@ final class StoreUnifiedReportPhaseSixServices
             $rows[$key]['service_visit_tenths']+=(int)($f['service_visit_tenths'] ?? 0);
             $rows[$key]['consumption_cents']+=(int)$f['consumption_cents'];
             $rows[$key]['cash_cents']+=(int)($f['cash_cents'] ?? 0);
+            // Sales performance belongs to the employee and sale line; card
+            // amounts have already been split by their contained projects.
+            $categoryAmounts=(array)($f['sales_category_cents']??[]);
+            $unclassified=(int)($f['cash_cents']??0)-array_sum($categoryAmounts);
+            if($unclassified!==0)$categoryAmounts[0]=($categoryAmounts[0]??0)+$unclassified;
+            foreach($categoryAmounts as $categoryId=>$cents){
+                $rows[$key]['sales_category_cents'][$categoryId]=($rows[$key]['sales_category_cents'][$categoryId]??0)+(int)$cents;
+                $observedCategories[$categoryId]=(string)($f['sales_category_paths'][$categoryId]??'');
+            }
             $rows[$key]['labor_fee_cents']+=(int)$f['labor_fee_cents'];
         }
+        $categories=$this->salaryCategoryDefinitions($observedCategories);
         // Service people is a range-level deduplicated metric.  It must come
         // from the common reader once per store/employee, rather than by
         // adding detail rows (which would turn a multi-day member into many
@@ -276,10 +286,17 @@ final class StoreUnifiedReportPhaseSixServices
             $r['project_count']=number_format((float)$r['project_count'],1,'.','');
             $r['service_visit_count']=$this->tenth((int)$r['service_visit_tenths']);
             $r['service_people_count']=$this->tenth((int)$r['service_people_tenths']);
-            $r['consumption_amount']=$this->money($r['consumption_cents']);$r['cash_amount']=$this->money($r['cash_cents']);$r['labor_fee']=$this->money($r['labor_fee_cents']);
-            unset($r['service_visit_tenths'],$r['service_people_tenths'],$r['consumption_cents'],$r['cash_cents'],$r['labor_fee_cents']);
+            $r['consumption_amount']=$this->money($r['consumption_cents']);$r['labor_fee']=$this->money($r['labor_fee_cents']);
+            foreach($categories['columns'] as $categoryColumn)$r[$categoryColumn['key']]='0';
+            $projectedCents=[];
+            foreach((array)($r['sales_category_cents']??[]) as $categoryId=>$cents){
+                $columnKey=$categories['targets'][$categoryId]??'salary_category_cash_unclassified';
+                $projectedCents[$columnKey]=($projectedCents[$columnKey]??0)+(int)$cents;
+            }
+            foreach($projectedCents as $columnKey=>$cents)$r[$columnKey]=$this->money($cents);
+            unset($r['service_visit_tenths'],$r['service_people_tenths'],$r['consumption_cents'],$r['cash_cents'],$r['labor_fee_cents'],$r['sales_category_cents']);
         }unset($r);
-        return $this->result('员工薪资汇总月报表',[
+        $columns=[
             $this->column('company_name','分公司','员工发生业务时组织快照。',false,true),
             $this->column('store_name','门店','员工发生业务时门店快照。',false,true),
             $this->column('employee_name','销售人','员工历史姓名快照。'),
@@ -288,8 +305,9 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('service_people_count','服务人数','所选期间内服务对象去重后的员工份额；会员跨日期不重复，朋友算和游客每条服务记录独立计算。',true),
             $this->column('consumption_amount','消耗','服务完成或核销形成的消耗业绩。',true),
             $this->column('labor_fee','手工','服务明细手工费。',true),
-            $this->column('cash_amount','产品业绩','产品现金业绩事实。',true)
-        ],array_values($rows),$range);
+        ];
+        foreach($categories['columns'] as $categoryColumn)$columns[]=$categoryColumn;
+        return $this->result('员工薪资汇总月报表',$columns,array_values($rows),$range);
     }
 
     private function training(array $stores,array $range):array{$rows=Db::name('employee')->where('is_del',0)->where('status',1)->field('id,name,entry_time,store_id')->select()->toArray();$allowed=array_flip($stores);$out=[];$i=1;foreach($rows as $r){if(isset($r['store_id'])&&!isset($allowed[(int)$r['store_id']]))continue;$out[]=['sequence'=>$i++,'company_name'=>'','store_name'=>'','beautician_name'=>(string)$r['name'],'entry_time'=>(string)$r['entry_time'],'mentor_name'=>'','entry_cycle'=>'','entry_level'=>'','exam_apply_time'=>'','exam_level'=>'','passed_level'=>'','skill_score'=>'','professional_score'=>'','in_service_3'=>'-','in_service_6'=>'-','in_service_9'=>'-','in_service_12'=>'-','in_service_over_year'=>'-'];}return $this->result('教培员工需求统计表',[$this->column('sequence','序号','页面稳定行号，不作为业务主键。'),$this->column('company_name','分公司','组织中的分公司统计维度。'),$this->column('store_name','门店','员工组织归属。'),$this->column('beautician_name','美容师','员工档案。'),$this->column('entry_time','入职时间','员工正式入职日期。'),$this->manualColumn('mentor_name','师傅','门店分配师傅关系。'),$this->column('entry_cycle','入职周期','按查询日期和每月15日规则计算。'),$this->column('entry_level','入职等级分类','按入职周期分级。'),$this->manualColumn('exam_apply_time','员工申请考试时间','员工手动输入。'),$this->manualColumn('exam_level','员工申请考试级别','员工手动输入。'),$this->manualColumn('passed_level','对应已考等级','教培人员手动输入。'),$this->manualColumn('skill_score','技能分数','教培人员手动输入。'),$this->manualColumn('professional_score','专业分数','教培人员手动输入。'),$this->column('in_service_3','3月是否在职','对应观察时点的历史员工状态。'),$this->column('in_service_6','6月是否在职','对应观察时点的历史员工状态.'),$this->column('in_service_9','9月是否在职','对应观察时点的历史员工状态.'),$this->column('in_service_12','12月是否在职','对应观察时点的历史员工状态.'),$this->column('in_service_over_year','1年以上是否在职','对应观察时点的历史员工状态.')],$out,$range);}
@@ -340,6 +358,153 @@ final class StoreUnifiedReportPhaseSixServices
             ->whereBetween('sv.business_date',[$range['start'],$range['end']])->where('sv.service_status','completed')
             ->field("sv.service_fact_id fact_id,sv.store_id,sv.member_id,sv.business_date,sv.source_line_id,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.store_name_snapshot store_name,sv.organization_path_snapshot organization_path_snapshot,sv.is_experience,COALESCE(sv.labor_fee_amount_cents,0) labor_fee_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=sv.tenant_id AND pf.checkout_request_id=sv.checkout_request_id AND pf.source_line_id=sv.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') consumption_cents,(SELECT MAX(sf.business_source_label_snapshot) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=sv.tenant_id AND sf.source_line_id=sv.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') source_name")
             ->select()->toArray();
+    }
+
+    /**
+     * Read the immutable component-category facts only for card sale lines in
+     * the already permission-scoped salary facts. The card's outer category is
+     * never a substitute for its contained-project allocation.
+     */
+    private function salaryCardCategoryAllocations(array $salesRows): array
+    {
+        $saleFactIds=[];
+        foreach($salesRows as $sale){
+            if((string)($sale['source_type']??'')==='card' && trim((string)($sale['sale_fact_id']??''))!=='')
+                $saleFactIds[(string)$sale['sale_fact_id']]=true;
+        }
+        if($saleFactIds===[])return [];
+        $facts=Db::name('cashier_v3_card_sale_category_allocation_fact')
+            ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->whereIn('sale_fact_id',array_keys($saleFactIds))->where('status','effective')
+            ->field('sale_fact_id,category_id_snapshot,category_path_snapshot,cash_performance_amount_cents,sale_amount_cents,configured_amount_cents')
+            ->select()->toArray();
+        $bySale=[];
+        foreach($facts as $fact)$bySale[(string)$fact['sale_fact_id']][]=$fact;
+        return $bySale;
+    }
+
+    /**
+     * Allocate one employee's sales-performance cents to sale categories.
+     * The final stable category receives the integer-cent remainder; a card
+     * lacking component facts is reported as unclassified, not as 卡项.
+     */
+    private function salarySaleCategoryAmounts(array $sale,array $cardFacts): array
+    {
+        $amount=(int)($sale['amount_cents']??0);
+        if((string)($sale['source_type']??'')!=='card'){
+            $id=(int)($sale['category_id']??0);
+            return [$id=>['cents'=>$amount,'path'=>(string)($sale['category_path']??'')]];
+        }
+        if($cardFacts===[])return [0=>['cents'=>$amount,'path'=>'未分类']];
+        $weights=[];$paths=[];
+        foreach(['cash_performance_amount_cents','sale_amount_cents','configured_amount_cents'] as $weightField){
+            $weights=[];
+            foreach($cardFacts as $fact){
+                $id=(int)($fact['category_id_snapshot']??0);
+                $weights[$id]=($weights[$id]??0)+abs((int)($fact[$weightField]??0));
+                $paths[$id]=(string)($fact['category_path_snapshot']??'');
+            }
+            if(array_sum($weights)>0)break;
+        }
+        ksort($weights,SORT_NUMERIC);
+        $total=array_sum($weights);
+        if($total===0){foreach($weights as &$weight)$weight=1;unset($weight);$total=count($weights);}
+        $remaining=abs($amount);$sign=$amount<0?-1:1;$lastId=array_key_last($weights);$result=[];
+        foreach($weights as $id=>$weight){
+            $part=$id===$lastId?$remaining:(int)bcdiv(bcmul((string)abs($amount),(string)$weight,0),(string)$total,0);
+            $remaining-=$part;
+            $result[$id]=['cents'=>$sign*$part,'path'=>$paths[$id]??''];
+        }
+        return $result;
+    }
+
+    /**
+     * Current visible product categories define zero-sales columns. Facts
+     * outside the current hierarchy retain a separate historical column so
+     * their amount is never silently moved into a different configured name.
+     *
+     * @return array{columns:array<int,array>,targets:array<int|string,string>}
+     */
+    private function salaryCategoryDefinitions(array $observed): array
+    {
+        $configured=Db::name('store_product_category')->where('type',0)->where('relation_id',0)
+            ->field('id,pid,cate_name,is_show')->select()->toArray();
+        return $this->buildSalaryCategoryDefinitions($configured,$observed);
+    }
+
+    /** Pure category projection shared by the query and its regression test. */
+    private function buildSalaryCategoryDefinitions(array $configured,array $observed): array
+    {
+        $byId=[];$visible=[];$visibleChildren=[];
+        foreach($configured as $category){
+            $id=(int)($category['id']??0);if($id<=0)continue;
+            $byId[$id]=$category;
+            if((int)($category['is_show']??0)===1)$visible[$id]=true;
+        }
+        foreach(array_keys($visible) as $id){
+            $parent=(int)($byId[$id]['pid']??0);
+            if($parent>0 && (int)($byId[$parent]['pid']??-1)===0)$visibleChildren[$parent]=true;
+        }
+        $definitions=[];$targets=[];
+        foreach(array_keys($visible) as $id){
+            $chain=$this->salaryCategoryChain($id,$byId);
+            if($chain===[])continue;
+            $root=(int)$chain[0]['id'];$second=(int)($chain[1]['id']??0);
+            if($second===0 && isset($visibleChildren[$root]))continue;
+            $effective=$second>0 && isset($visible[$second])?$second:$root;
+            if(!isset($visible[$effective]) || isset($definitions[$effective]))continue;
+            $label=$this->salaryCategoryLabel($chain,$effective);
+            $definitions[$effective]=['key'=>'salary_category_cash_'.$effective,'label'=>$label,'id'=>$effective];
+        }
+        foreach($observed as $rawId=>$path){
+            $id=(int)$rawId;$chain=$id>0?$this->salaryCategoryChain($id,$byId):[];
+            $root=(int)($chain[0]['id']??0);$second=(int)($chain[1]['id']??0);
+            $effective=$second>0 && isset($visible[$second])?$second:$root;
+            if($id>0 && $effective>0 && isset($definitions[$effective])
+                && !($second===0 && isset($visibleChildren[$root]))){
+                $targets[$rawId]=$definitions[$effective]['key'];continue;
+            }
+            $label=$id===0?'未分类':$this->salaryCategoryLabel($chain,$id);
+            if($label==='')$label=$this->salaryTwoLevelPath((string)$path);
+            if($label==='')$label='未分类';
+            if($second===0 && $root>0 && isset($visibleChildren[$root]))$label.='/未细分';
+            $key=$id>0?'salary_category_cash_historical_'.$id:'salary_category_cash_unclassified';
+            $definitions[$key]=['key'=>$key,'label'=>$label,'id'=>$id];$targets[$rawId]=$key;
+        }
+        uasort($definitions,static fn(array $a,array $b):int=>strcmp($a['label'],$b['label'])?:strcmp($a['key'],$b['key']));
+        $columns=[];
+        foreach($definitions as $definition){
+            $explanation=$definition['key']==='salary_category_cash_unclassified'
+                ? '销售业绩已分配给员工，但商品或卡项内含项目缺少可核对的分类事实；不擅自归到卡项外层分类。'
+                : '销售完成后分配给该员工的现金业绩；卡项按内含项目分类与分摊金额归属，分类最多显示两级。';
+            $columns[]=$this->column($definition['key'],$definition['label'],$explanation,true,false,140,[],'商品分类业绩');
+        }
+        return ['columns'=>$columns,'targets'=>$targets];
+    }
+
+    /** Build a bounded ancestry path; invalid or cyclic configuration falls back to the fact snapshot. */
+    private function salaryCategoryChain(int $id,array $byId): array
+    {
+        $chain=[];$seen=[];
+        while($id>0 && isset($byId[$id]) && !isset($seen[$id]) && count($chain)<12){
+            $seen[$id]=true;$chain[]=$byId[$id];$id=(int)($byId[$id]['pid']??0);
+        }
+        return $id===0?array_reverse($chain):[];
+    }
+
+    private function salaryCategoryLabel(array $chain,int $effective): string
+    {
+        if($chain===[])return '';
+        $root=trim((string)($chain[0]['cate_name']??''));
+        if($effective===(int)($chain[0]['id']??0))return $root;
+        $second=$chain[1]??null;
+        return $second && $effective===(int)$second['id']?$root.'/'.trim((string)$second['cate_name']):'';
+    }
+
+    private function salaryTwoLevelPath(string $path): string
+    {
+        $parts=array_values(array_filter(array_map('trim',preg_split('/\s*\/\s*/u',$path)?:[]),static fn(string $part):bool=>$part!==''));
+        return implode('/',array_slice($parts,0,2));
     }
 
     private function salaryFacts(array $stores,array $range):array
@@ -394,19 +559,30 @@ final class StoreUnifiedReportPhaseSixServices
             ->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
             ->where('pf.performance_type','sales_performance_allocated')->where('pf.status','effective')
             ->where('pf.employee_id','>',0)
-            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,d.item_name_snapshot item_name,d.category_path_snapshot category_path')
+            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path')
             ->order('pf.id','asc')->select()->toArray();
+        $cardAllocations=$this->salaryCardCategoryAllocations($salesRows);
         $salesReversed=[];
         foreach($salesRows as $sale){if((string)$sale['fact_direction']==='reversal'&&trim((string)$sale['reversal_of'])!=='')$salesReversed[(string)$sale['reversal_of']]=true;}
         $salesGrouped=[];
         foreach($salesRows as $sale){
             if((string)$sale['fact_direction']!=='forward'||isset($salesReversed[(string)$sale['fact_id']]))continue;
+            $allocation=$this->salarySaleCategoryAmounts($sale,$cardAllocations[(string)($sale['sale_fact_id']??'')]??[]);
             $salesKey=(int)$sale['store_id'].'|'.(int)$sale['employee_id'].'|'.(string)$sale['checkout_request_id'].'|'.(string)$sale['source_line_id'];
-            if(!isset($salesGrouped[$salesKey])){$salesGrouped[$salesKey]=$sale;$salesGrouped[$salesKey]['amount_cents']=0;}
+            if(!isset($salesGrouped[$salesKey])){$salesGrouped[$salesKey]=$sale;$salesGrouped[$salesKey]['amount_cents']=0;$salesGrouped[$salesKey]['sales_category_cents']=[];$salesGrouped[$salesKey]['sales_category_paths']=[];}
             $salesGrouped[$salesKey]['amount_cents']+=(int)$sale['amount_cents'];
+            foreach($allocation as $categoryId=>$part){
+                $salesGrouped[$salesKey]['sales_category_cents'][$categoryId]=($salesGrouped[$salesKey]['sales_category_cents'][$categoryId]??0)+(int)$part['cents'];
+                $salesGrouped[$salesKey]['sales_category_paths'][$categoryId]=(string)$part['path'];
+            }
         }
         foreach($salesGrouped as $salesKey=>$sale){
-            if(isset($grouped[$salesKey])){$grouped[$salesKey]['cash_cents']=($grouped[$salesKey]['cash_cents']??0)+(int)$sale['amount_cents'];continue;}
+            if(isset($grouped[$salesKey])){
+                $grouped[$salesKey]['cash_cents']=($grouped[$salesKey]['cash_cents']??0)+(int)$sale['amount_cents'];
+                $grouped[$salesKey]['sales_category_cents']=$sale['sales_category_cents'];
+                $grouped[$salesKey]['sales_category_paths']=$sale['sales_category_paths'];
+                continue;
+            }
             $sale['row_key']=(string)($sale['fact_id']??'');
             $sale['labor_fee_amount_cents']=0;$sale['project_count_half_units']=0;$sale['has_explicit_project_count']=true;
             // 销售事实只产生现金业绩，不产生服务消耗；不能把销售金额复用为消耗金额。

@@ -111,4 +111,34 @@ assertPhaseSix(
     && ($tenthSummary['summary_row']['service_people_count'] ?? null) === '1.0',
     'salary service metrics sum tenth-unit shares exactly'
 );
+$categoryDefinitions = new ReflectionMethod($phaseSix, 'buildSalaryCategoryDefinitions');
+$categoryProjection = $categoryDefinitions->invoke($phaseSix, [
+    ['id' => 1, 'pid' => 0, 'cate_name' => '生美', 'is_show' => 1],
+    ['id' => 2, 'pid' => 1, 'cate_name' => '卡项', 'is_show' => 1],
+    ['id' => 3, 'pid' => 1, 'cate_name' => '项目', 'is_show' => 1],
+    ['id' => 4, 'pid' => 3, 'cate_name' => '三级', 'is_show' => 1],
+    ['id' => 5, 'pid' => 0, 'cate_name' => '花园', 'is_show' => 1],
+], [4 => '生美 / 项目 / 三级', 9 => '历史 / 旧分类']);
+$categoryLabels = array_column($categoryProjection['columns'], 'label');
+assertPhaseSix(in_array('生美/卡项', $categoryLabels, true)
+    && in_array('生美/项目', $categoryLabels, true)
+    && in_array('花园', $categoryLabels, true)
+    && in_array('历史/旧分类', $categoryLabels, true)
+    && !in_array('生美', $categoryLabels, true)
+    && !in_array('生美/项目/三级', $categoryLabels, true),
+    'salary category columns use current two-level config and retain zero-sale and historical categories');
+assertPhaseSix(($categoryProjection['targets'][4] ?? null) === 'salary_category_cash_3',
+    'third-level sale fact rolls into its visible second-level category');
+$allocateCategories = new ReflectionMethod($phaseSix, 'salarySaleCategoryAmounts');
+$cardParts = $allocateCategories->invoke($phaseSix,
+    ['source_type' => 'card', 'amount_cents' => 100], [
+        ['category_id_snapshot' => 2, 'category_path_snapshot' => '生美 / 卡项', 'cash_performance_amount_cents' => 2],
+        ['category_id_snapshot' => 3, 'category_path_snapshot' => '生美 / 项目', 'cash_performance_amount_cents' => 1],
+    ]);
+assertPhaseSix(($cardParts[2]['cents'] ?? null) === 66 && ($cardParts[3]['cents'] ?? null) === 34,
+    'card employee performance is allocated in cents with stable final-category remainder');
+$missingCardParts = $allocateCategories->invoke($phaseSix,
+    ['source_type' => 'card', 'amount_cents' => 148000, 'category_id' => 2, 'category_path' => '生美 / 卡项'], []);
+assertPhaseSix(($missingCardParts[0]['cents'] ?? null) === 148000 && !isset($missingCardParts[2]),
+    'missing card component facts never use the card outer category');
 echo "PASS phase-six backend contract\n";
