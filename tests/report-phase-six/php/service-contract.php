@@ -111,6 +111,28 @@ assertPhaseSix(
     && ($tenthSummary['summary_row']['service_people_count'] ?? null) === '1.0',
     'salary service metrics sum tenth-unit shares exactly'
 );
+assertPhaseSix(
+    str_contains($service, 'pf.project_count_decimal')
+    && str_contains($service, "!empty(\$row['has_project_count_decimal'])")
+    && str_contains($service, '$halfUnits*500000')
+    && str_contains($service, "\$grouped[\$key]['legacy_project_count_half_units']"),
+    'salary project count reads saved decimals first and retains mixed/legacy half-unit fallback'
+);
+$projectCountMicros = new ReflectionMethod($phaseSix, 'projectCountMicros');
+$projectCountText = new ReflectionMethod($phaseSix, 'projectCountText');
+assertPhaseSix(
+    $projectCountText->invoke($phaseSix, $projectCountMicros->invoke($phaseSix, '6.6')) === '6.6'
+    && $projectCountText->invoke($phaseSix, $projectCountMicros->invoke($phaseSix, '0')) === '0'
+    && $projectCountText->invoke($phaseSix, $projectCountMicros->invoke($phaseSix, '0.333333')) === '0.333333',
+    'salary project counts retain zero and all six supported decimal places'
+);
+$projectSummary = $result->invoke($phaseSix, '工资项目数合计', [[
+    'key' => 'project_count', 'label' => '项目数', 'source_explanation' => '', 'summable' => true, 'width' => 120,
+]], [
+    ['project_count' => '0.3'], ['project_count' => '0.4'], ['project_count' => '6.6'], ['project_count' => '0'],
+], ['start' => '2026-09-01', 'end' => '2026-09-30']);
+assertPhaseSix(($projectSummary['summary_row']['project_count'] ?? null) === '7.3',
+    'salary project-count summary never rounds each row to a half project');
 $categoryDefinitions = new ReflectionMethod($phaseSix, 'buildSalaryCategoryDefinitions');
 $categoryProjection = $categoryDefinitions->invoke($phaseSix, [
     ['id' => 1, 'pid' => 0, 'cate_name' => '生美', 'is_show' => 1],

@@ -223,7 +223,7 @@ final class StoreUnifiedReportPhaseSixServices
                 'store_name' => $f['store_name'], 'employee_name' => $f['employee_name'],
                 'member_name' => $f['member_name'], 'card_type' => (string)($f['card_type'] ?: '-'),
                 'performance_category' => $f['category_path'], 'detail' => $f['item_name'],
-                'project_count' => number_format((float)$f['project_count'], 1, '.', ''),
+                'project_count' => (string)$f['project_count'],
                 // The common reader has already chosen the one stable labor
                 // line that carries a daily visit share.  All other project
                 // lines for the same employee/customer/day remain zero.
@@ -245,7 +245,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('card_type','卡类型','卡内项目核销的卡类型，非卡内显示-。'),
             $this->column('performance_category','业绩分类','统一业绩分类。'),
             $this->column('detail','明细','项目或产品名称。'),
-            $this->column('project_count','项目数','服务记录分配给该手艺人的工资项目数；人工调整时只能按0.5递增。',true),
+            $this->column('project_count','项目数','服务记录分配给该手艺人的工资项目数；优先使用保存的小数快照，旧事实按半项目数读取。',true),
             $this->column('service_visit_count','服务人次','按服务对象、业务日期及有效实际服务人员计算的员工分配值；本人按会员当日去重，朋友算和游客按服务记录计算，朋友不算不计入。',true),
             $this->column('consumption_amount','消耗业绩','服务完成后的消耗业绩事实。',true),
             $this->column('cash_amount','现金业绩','销售明细现金业绩分摊事实。',true),
@@ -259,8 +259,9 @@ final class StoreUnifiedReportPhaseSixServices
         $rows=[];$observedCategories=[];
         foreach($this->salaryFactsWithServiceCustomerMetrics($stores,$range) as $f){
             $key=(int)$f['store_id'].'|'.(int)$f['employee_id'];
-            if(!isset($rows[$key]))$rows[$key]=['company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'project_count'=>0,'service_visit_tenths'=>0,'service_people_tenths'=>0,'consumption_cents'=>0,'cash_cents'=>0,'labor_fee_cents'=>0];
-            $rows[$key]['project_count']+=(float)$f['project_count'];
+            if(!isset($rows[$key]))$rows[$key]=['company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'project_count_micros'=>0,'service_visit_tenths'=>0,'service_people_tenths'=>0,'consumption_cents'=>0,'cash_cents'=>0,'labor_fee_cents'=>0];
+            // 工资项目数是人员服务份额，不是销售数量；用百万分位整数累加，保留入库 DECIMAL(20,6) 的精度。
+            $rows[$key]['project_count_micros']+=$this->projectCountMicros((string)$f['project_count']);
             $rows[$key]['service_visit_tenths']+=(int)($f['service_visit_tenths'] ?? 0);
             $rows[$key]['consumption_cents']+=(int)$f['consumption_cents'];
             $rows[$key]['cash_cents']+=(int)($f['cash_cents'] ?? 0);
@@ -283,7 +284,7 @@ final class StoreUnifiedReportPhaseSixServices
         $summaryMetrics = $this->serviceCustomerMetrics($stores, $range)['summary_by_store_employee'];
         foreach($rows as $key=>&$r){
             $r['service_people_tenths']=(int)($summaryMetrics[$key]['people_tenths'] ?? 0);
-            $r['project_count']=number_format((float)$r['project_count'],1,'.','');
+            $r['project_count']=$this->projectCountText((int)$r['project_count_micros']);
             $r['service_visit_count']=$this->tenth((int)$r['service_visit_tenths']);
             $r['service_people_count']=$this->tenth((int)$r['service_people_tenths']);
             $r['consumption_amount']=$this->money($r['consumption_cents']);$r['labor_fee']=$this->money($r['labor_fee_cents']);
@@ -294,13 +295,13 @@ final class StoreUnifiedReportPhaseSixServices
                 $projectedCents[$columnKey]=($projectedCents[$columnKey]??0)+(int)$cents;
             }
             foreach($projectedCents as $columnKey=>$cents)$r[$columnKey]=$this->money($cents);
-            unset($r['service_visit_tenths'],$r['service_people_tenths'],$r['consumption_cents'],$r['cash_cents'],$r['labor_fee_cents'],$r['sales_category_cents']);
+            unset($r['project_count_micros'],$r['service_visit_tenths'],$r['service_people_tenths'],$r['consumption_cents'],$r['cash_cents'],$r['labor_fee_cents'],$r['sales_category_cents']);
         }unset($r);
         $columns=[
             $this->column('company_name','分公司','员工发生业务时组织快照。',false,true),
             $this->column('store_name','门店','员工发生业务时门店快照。',false,true),
             $this->column('employee_name','销售人','员工历史姓名快照。'),
-            $this->column('project_count','项目数','员工薪资明细中工资项目数的合计；人工调整值按0.5递增。',true),
+            $this->column('project_count','项目数','员工薪资明细中工资项目数的合计，保留人工调整的小数精度。',true),
             $this->column('service_visit_count','服务人次','所选期间内员工每日服务对象份额之和；与薪资明细的服务人次合计一致。',true),
             $this->column('service_people_count','服务人数','所选期间内服务对象去重后的员工份额；会员跨日期不重复，朋友算和游客每条服务记录独立计算。',true),
             $this->column('consumption_amount','消耗','服务完成或核销形成的消耗业绩。',true),
@@ -513,7 +514,7 @@ final class StoreUnifiedReportPhaseSixServices
             ->leftJoin('cashier_v3_entitlement_service_fact sv','sv.tenant_id=pf.tenant_id AND sv.checkout_request_id=pf.checkout_request_id AND sv.source_line_id=pf.source_line_id AND sv.service_status=\'completed\'')
             ->where('pf.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
             ->where('pf.performance_type','labor_performance_allocated')->where('pf.status','effective')
-            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_id row_key,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.labor_fee_amount_cents,pf.project_count_half_units,pf.rule_code_snapshot,pf.fact_direction,sv.service_fact_id,sv.member_id,sv.member_name_snapshot member_name,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_name_snapshot category_path,sv.source_document_type source_type')
+            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_id row_key,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.labor_fee_amount_cents,pf.project_count_half_units,pf.project_count_decimal,pf.rule_code_snapshot,pf.fact_direction,sv.service_fact_id,sv.member_id,sv.member_name_snapshot member_name,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_name_snapshot category_path,sv.source_document_type source_type')
             ->order('pf.id','asc')
             ->select()->toArray();
         $reversed=[];
@@ -527,14 +528,26 @@ final class StoreUnifiedReportPhaseSixServices
                 $grouped[$key]['amount_cents']=0;
                 $grouped[$key]['labor_fee_amount_cents']=0;
                 $grouped[$key]['project_count_half_units']=0;
+                $grouped[$key]['project_count_decimal_micros']=0;
+                $grouped[$key]['legacy_project_count_half_units']=0;
+                $grouped[$key]['has_project_count_decimal']=false;
                 $grouped[$key]['has_explicit_project_count']=false;
             }
             $grouped[$key]['amount_cents']+=(int)$row['amount_cents'];
             $grouped[$key]['labor_fee_amount_cents']+=(int)$row['labor_fee_amount_cents'];
             $grouped[$key]['project_count_half_units']+=(int)$row['project_count_half_units'];
+            if($row['project_count_decimal']!==null&&(string)$row['project_count_decimal']!==''){
+                // 新事实以员工服务项目数小数快照为准；即使明确保存 0，也不能退回旧半项目数或销售数量。
+                $grouped[$key]['project_count_decimal_micros']+=$this->projectCountMicros((string)$row['project_count_decimal']);
+                $grouped[$key]['has_project_count_decimal']=true;
+            }else{
+                // 同一服务行混有新旧事实时，仅无小数快照的旧事实使用半项目数，避免覆盖或重复计算。
+                $grouped[$key]['legacy_project_count_half_units']+=(int)$row['project_count_half_units'];
+            }
             $grouped[$key]['has_explicit_project_count']=$grouped[$key]['has_explicit_project_count']
                 ||(string)$row['rule_code_snapshot']==='SERVICE-RECORD-CRAFTSMAN-ADJUST-V1'
-                ||(int)$row['project_count_half_units']!==0;
+                ||(int)$row['project_count_half_units']!==0
+                ||($row['project_count_decimal']!==null&&(string)$row['project_count_decimal']!=='');
             foreach(['row_key','service_fact_id','employee_name','member_id','member_name','store_name','company_name','item_name','category_path','source_type'] as $field)$grouped[$key][$field]=$row[$field]??$grouped[$key][$field]??'';
         }
         $lineGroups=[];
@@ -584,7 +597,7 @@ final class StoreUnifiedReportPhaseSixServices
                 continue;
             }
             $sale['row_key']=(string)($sale['fact_id']??'');
-            $sale['labor_fee_amount_cents']=0;$sale['project_count_half_units']=0;$sale['has_explicit_project_count']=true;
+            $sale['labor_fee_amount_cents']=0;$sale['project_count_half_units']=0;$sale['project_count_decimal_micros']=0;$sale['has_project_count_decimal']=false;$sale['has_explicit_project_count']=true;
             // 销售事实只产生现金业绩，不产生服务消耗；不能把销售金额复用为消耗金额。
             $sale['consumption_cents']=0;
             $sale['cash_cents']=(int)$sale['amount_cents'];$sale['member_id']=(int)($sale['member_id']??0);
@@ -596,7 +609,9 @@ final class StoreUnifiedReportPhaseSixServices
         $out=[];
         foreach($grouped as $row){
             $halfUnits=(int)$row['project_count_half_units'];
-            $row['project_count']=$halfUnits/2;
+            $row['project_count']=$this->projectCountText(!empty($row['has_project_count_decimal'])
+                ? (int)$row['project_count_decimal_micros']+(int)$row['legacy_project_count_half_units']*500000
+                : $halfUnits*500000);
             $row['consumption_cents']=array_key_exists('consumption_cents',$row)
                 ? (int)$row['consumption_cents']
                 : (int)$row['amount_cents'];
@@ -700,7 +715,50 @@ final class StoreUnifiedReportPhaseSixServices
         $totals=[];foreach($facts as $f){if($this->topCategory((string)($f['category_path']??''))!==$category)continue;$id=(int)($f['member_id']??0);if($id>0)$totals[$id]=($totals[$id]??0)+(int)($f['amount_cents']??0);}return count(array_filter($totals,static fn(int $amount):bool=>$amount>=$thresholdCents));
     }
     private function range(array $range,array $input):array{$start=trim((string)($range['start']??$input['start_date']??''));$end=trim((string)($range['end']??$input['end_date']??''));if($start===''||$end===''){ $year=max(2000,(int)($input['year']??date('Y')));$start=$year.'-01-01';$end=$year.'-12-31'; }if(!preg_match('/^\d{4}-\d{2}-\d{2}$/',$start)||!preg_match('/^\d{4}-\d{2}-\d{2}$/',$end)||$start>$end)throw new \InvalidArgumentException('日期范围不正确');return['start'=>$start,'end'=>$end];}
-    private function result(string $title,array $columns,array $records,array $range):array{$summary=[];foreach($columns as $c){$summary[$c['key']]='-';if(!empty($c['summable'])){$sum=0;$has=false;$moneyKey=(bool)preg_match('/amount|cash|fee|labor|consumption|performance|target|unit_output|average_order|sales_efficiency/i',(string)$c['key']);$halfUnitKey=(string)$c['key']==='project_count';$tenthUnitKey=in_array((string)$c['key'],['service_visit_count','service_people_count'],true);foreach($records as $r){$v=$r[$c['key']]??null;if($moneyKey&&is_string($v)&&preg_match('/^-?\d+(?:\.\d{1,2})?$/',$v)){ $sum+=$this->cents($v);$has=true; }elseif($halfUnitKey&&is_numeric($v)){ $sum+=(int)round((float)$v*2);$has=true; }elseif($tenthUnitKey&&is_numeric($v)){ $sum+=(int)round((float)$v*10);$has=true; }elseif(!$moneyKey&&is_numeric($v)){ $sum+=(int)$v;$has=true; }}$summary[$c['key']]=$has?($moneyKey?$this->money($sum):($halfUnitKey?number_format($sum/2,1,'.',''):($tenthUnitKey?$this->tenth($sum):(string)$sum))):($tenthUnitKey?'0.0':'0');}}return['title'=>$title,'columns'=>$columns,'records'=>array_values($records),'summary_row'=>$summary,'column_groups'=>[],'metric_version'=>self::METRIC_VERSION,'data_as_of'=>date('c'),'aggregation_status'=>'caught_up','filters'=>['start_date'=>$range['start'],'end_date'=>$range['end']],'table_layout'=>['fixed'=>true,'summary_fixed'=>true]];}
+    /** 工资项目数按入库 DECIMAL(20,6) 转为百万分位整数，不能沿用旧 0.5 步长或浮点合计。 */
+    private function projectCountMicros(string $value): int
+    {
+        $value=trim($value);
+        if(!preg_match('/^(-?)(\d+)(?:\.(\d{1,6}))?$/D',$value,$match))throw new \InvalidArgumentException('工资项目数精度不正确');
+        $whole=(int)$match[2];
+        $fraction=(int)str_pad($match[3]??'',6,'0');
+        $micros=$whole*1000000+$fraction;
+        return $match[1]==='-'?-$micros:$micros;
+    }
+
+    /** 项目数保留实际小数位，旧半项目数、明确的 0 和冲销值使用同一输出口径。 */
+    private function projectCountText(int $micros): string
+    {
+        $sign=$micros<0?'-':'';
+        $absolute=abs($micros);
+        $fraction=rtrim(str_pad((string)($absolute%1000000),6,'0',STR_PAD_LEFT),'0');
+        return $sign.intdiv($absolute,1000000).($fraction!==''?'.'.$fraction:'');
+    }
+
+    private function result(string $title,array $columns,array $records,array $range):array
+    {
+        $summary=[];
+        foreach($columns as $c){
+            $key=(string)$c['key'];$summary[$key]='-';
+            if(empty($c['summable']))continue;
+            $sum=0;$has=false;
+            $moneyKey=(bool)preg_match('/amount|cash|fee|labor|consumption|performance|target|unit_output|average_order|sales_efficiency/i',$key);
+            $projectCountKey=$key==='project_count';
+            $tenthUnitKey=in_array($key,['service_visit_count','service_people_count'],true);
+            foreach($records as $r){
+                $v=$r[$key]??null;
+                if($moneyKey&&is_string($v)&&preg_match('/^-?\d+(?:\.\d{1,2})?$/',$v)){$sum+=$this->cents($v);$has=true;}
+                elseif($projectCountKey&&is_numeric($v)){
+                    // 页面合计必须与员工汇总同精度；逐行四舍五入到 0.5 会把 0.3 + 0.4 算成 1。
+                    $sum+=$this->projectCountMicros((string)$v);$has=true;
+                }
+                elseif($tenthUnitKey&&is_numeric($v)){$sum+=(int)round((float)$v*10);$has=true;}
+                elseif(!$moneyKey&&is_numeric($v)){$sum+=(int)$v;$has=true;}
+            }
+            $summary[$key]=$has?($moneyKey?$this->money($sum):($projectCountKey?$this->projectCountText($sum):($tenthUnitKey?$this->tenth($sum):(string)$sum))):($tenthUnitKey?'0.0':'0');
+        }
+        return ['title'=>$title,'columns'=>$columns,'records'=>array_values($records),'summary_row'=>$summary,'column_groups'=>[],'metric_version'=>self::METRIC_VERSION,'data_as_of'=>date('c'),'aggregation_status'=>'caught_up','filters'=>['start_date'=>$range['start'],'end_date'=>$range['end']],'table_layout'=>['fixed'=>true,'summary_fixed'=>true]];
+    }
     private function column(string $key,string $label,string $explanation,bool $summable=false,bool $fixed=false,int $width=120,array $drilldown=[],string $group=''):array{$c=['key'=>$key,'label'=>$label,'source_explanation'=>$explanation,'summable'=>$summable,'width'=>$width];if($fixed)$c['fixed']='left';if($group!=='')$c['group_label']=$group;if($drilldown)$c['drilldown']=$drilldown;return$c;}
     /** 声明与保存接口一致的字段单位，金额由页面元转分，非金额保持原类型。 */
     private function manualColumn(string $key,string $label,string $explanation,string $group=''):array
