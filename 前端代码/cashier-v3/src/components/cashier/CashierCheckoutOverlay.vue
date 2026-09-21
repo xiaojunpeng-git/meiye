@@ -1218,14 +1218,6 @@ onBeforeUnmount(() => {
         <h2 id="checkout-dialog-title">{{ isDebtRepayment ? '欠款还款' : '结账' }}</h2>
         <span id="checkout-dialog-description">{{ isDebtRepayment ? '请按步骤核对本条欠款和收款信息。' : hasEntitlementLines ? '请按步骤核对本次购买与使用权益。' : '请按步骤核对订单和收款信息。' }}</span>
       </div>
-      <button
-        type="button"
-        class="button button--secondary"
-        :disabled="!canCloseOverlay"
-        @click="requestClose"
-      >
-        {{ isDebtRepayment ? '返回欠款明细' : '返回收银' }}
-      </button>
     </header>
 
     <ol class="checkout-steps" :aria-label="isDebtRepayment ? '还款步骤' : '结账步骤'">
@@ -1580,6 +1572,16 @@ onBeforeUnmount(() => {
     </div>
 
     <footer class="checkout-overlay__footer">
+      <!-- 两类结账共用底栏退出位置；普通结账成功后使用既有完成按钮，欠款明细入口仍保留。 -->
+      <button
+        v-if="isDebtRepayment || !isSucceeded"
+        type="button"
+        class="button button--secondary"
+        :disabled="!canCloseOverlay"
+        @click="requestClose"
+      >
+        {{ isDebtRepayment ? '返回欠款明细' : '返回收银' }}
+      </button>
       <template v-if="isSucceeded">
         <button v-if="!isDebtRepayment && checkout.salesOrderId" type="button" class="button button--secondary" @click="request('view-sales-order')">查看销售订单</button>
         <button v-if="canPrintReceipt" type="button" class="button button--secondary" :disabled="receiptPrintLoading" @click="printReceipt">
