@@ -40,6 +40,14 @@ const checkoutEntryEnd = source.indexOf('\nasync function openHangOrder', checko
 const checkoutEntry = source.slice(checkoutEntryStart, checkoutEntryEnd)
 const resetContext = body('resetCashierLocalContext()')
 const clearCart = body('confirmClearCart()')
+const personnelAssignment = source.slice(
+  source.indexOf('async function confirmPersonnelAssignment'),
+  source.indexOf('async function applyPersonnelAssignmentToAll')
+)
+const personnelAssignmentAll = source.slice(
+  source.indexOf('async function applyPersonnelAssignmentToAll'),
+  source.indexOf('\nfunction cartLinePersonnelNames', source.indexOf('async function applyPersonnelAssignmentToAll'))
+)
 const checkoutBar = source.match(/<footer class="cashier-checkout-bar">[\s\S]*?<\/footer>/)?.[0] || ''
 const discard = fs.readFileSync(path.join(repo, '后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutDraftDiscardServices.php'), 'utf8')
 
@@ -96,6 +104,11 @@ check(
     && /selectedCraftsmenPayload[\s\S]*storeId/.test(personnelOverlay)
     && /storeId: \{ type: \[Number, String\]/.test(personnelOverlay),
   'personnel selection payload carries employee and store identity into the browser snapshot boundary'
+)
+check(
+  /storeId: Number\(record\.storeId \?\? record\.store_id \?\? 0\)/.test(personnelAssignment)
+    && /storeId: Number\(record\.storeId \?\? record\.store_id \?\? 0\)/.test(personnelAssignmentAll),
+  'single-line and all-line personnel saves retain the selector store identity for final checkout snapshots'
 )
 check(
   /const preview = localCheckoutPreviewSnapshot\(\)/.test(checkoutEntry)

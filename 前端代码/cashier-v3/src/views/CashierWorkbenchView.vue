@@ -3946,6 +3946,9 @@ async function confirmPersonnelAssignment(result = {}) {
     const craftsmen = (result.craftsmen || []).map((record) => ({
       staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
       employeeId: canonicalCheckoutPositiveId(record.employeeId, record.employee_id, record.staffId, record.id),
+      // 选择器已经锁定员工所属门店；不能在保存编辑态时丢掉它并赌根投影
+      // 仍有 currentStore.id。最终结账快照必须能独立冻结该身份。
+      storeId: Number(record.storeId ?? record.store_id ?? 0),
       name: String(record.name || record.staffName || record.employeeName || '').trim(),
       laborWeight: Number(record.laborWeight),
       performanceAmountCents: Math.max(0, Math.trunc(Number(record.performanceAmountCents ?? record.performance_amount_cents ?? 0))),
@@ -4066,6 +4069,9 @@ async function applyPersonnelAssignmentToAll(result = {}) {
   const craftsmen = (result.craftsmen || []).map((record) => ({
     staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
     employeeId: canonicalCheckoutPositiveId(record.employeeId, record.employee_id, record.staffId, record.id),
+    // “应用全部人”与单行确认必须保存同一门店身份，避免后续结账对
+    // 当前根投影产生隐式依赖而写出不可验证的人员快照。
+    storeId: Number(record.storeId ?? record.store_id ?? 0),
     name: String(record.name || record.staffName || record.employeeName || '').trim(),
     laborWeight: Number(record.laborWeight),
     performanceAmountCents: Math.max(0, Math.trunc(Number(record.performanceAmountCents ?? record.performance_amount_cents ?? 0))),
