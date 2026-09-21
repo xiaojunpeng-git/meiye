@@ -27,6 +27,9 @@ $check(is_string($entry) && strpos($entry,'class="ai-entry-icon"')!==false
     && strpos($entry,'bottom:calc(92px + env(safe-area-inset-bottom))')!==false
     && strpos($entry,'width:60px;height:60px;border-radius:50%')!==false,
     'the merchant launcher uses the approved circular animated three-orbit asset above the tab bar without changing the workspace interaction');
+$launcherAsset=dirname(__DIR__,2).'/前端代码/mobile-vue3/static/mohe-ai-entry-orbits.gif';
+$check(is_file($launcherAsset) && filesize($launcherAsset)>0 && filesize($launcherAsset)<=524288,
+    'the animated AI launcher stays within its 512 KiB source budget so the WeChat main package remains uploadable');
 $check(is_string($entry) && strpos($entry,"currentMobilePlatform() === 'MP_WEIXIN'")!==false
     && strpos($entry,"'ai-panel--native-mini': platformUsesNativeCanvas")!==false,
     'the WeChat panel applies its capsule-safe layout only on the native mini-program target');
@@ -46,6 +49,12 @@ $check(is_string($entry) && strpos($entry,'class="ai-workspace-head"')!==false
     && strpos($entry,'class="ai-composer"')!==false
     && strpos($entry,'.ai-messages{min-height:0;flex:1;height:0;padding:0 36px}')!==false,
     'mobile header actions and footer actions have separate responsive layout roles while the transcript remains scrollable, without a redundant workspace title block');
+$check(is_string($entry) && strpos($entry,'aria-label="新建对话" @tap="newConversation"')!==false
+    && strpos($entry,'aria-label="退出魔核 AI" @tap="closePanel"')!==false
+    && strpos($entry,'class="ai-workspace-actions"')!==false
+    && strpos($entry,'.ai-icon-action__stroke')!==false
+    && strpos($entry,'.ai-icon-compose')===false,
+    'merchant AI exposes adjacent add and exit icon actions built from one visual primitive, without retaining the retired compose icon');
 $check(is_string($entry) && strpos($entry,'class="ai-user-turn"')!==false
     && strpos($entry,'>你问</text>')!==false
     && strpos($entry,'class="ai-answer-turn"')!==false
