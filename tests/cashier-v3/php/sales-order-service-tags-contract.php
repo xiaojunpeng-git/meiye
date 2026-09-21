@@ -57,7 +57,14 @@ $check(
     'service tags are constrained by item type and included in the locked-sale fingerprint'
 );
 $check(
-    strpos($preparation, "'serviceObject' => (string)(\$line['serviceObject'] ?? '')") !== false
+    // The browser labels are Chinese display values, while the immutable
+    // settlement kernel accepts only the self/friend enum.  Both the sale
+    // and entitlement snapshot paths must cross the same boundary so an
+    // online checkout cannot depend on a client-side enum conversion.
+    strpos($preparation, "private static function snapshotServiceObject") !== false
+        && strpos($preparation, "\$value === '本人' ? 'self'") !== false
+        && strpos($preparation, "\$value === '朋友' ? 'friend'") !== false
+        && substr_count($preparation, "'serviceObject' => self::snapshotServiceObject(\$line['serviceObject'] ?? '')") === 2
         && strpos($preparation, "'friendCountsAsCustomer' => !array_key_exists('friendCountsAsCustomer', \$line)") !== false
         && strpos($preparation, "'isExperience' => !empty(\$line['isExperience']) ? 1 : 0") !== false
         && strpos($kernel, "'serviceObject' => \$serviceObject") !== false

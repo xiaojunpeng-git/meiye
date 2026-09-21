@@ -637,7 +637,7 @@ final class CashierV3CheckoutPreparationServices
                     // Upgrade entitlement credit is reconciled separately and
                     // must not erase or reinterpret this line-level amount.
                     'debtAmountCents' => (int)($line['debtAmountCents'] ?? 0),
-                    'serviceObject' => (string)($line['serviceObject'] ?? ''),
+                    'serviceObject' => self::snapshotServiceObject($line['serviceObject'] ?? ''),
                     'friendCountsAsCustomer' => !array_key_exists('friendCountsAsCustomer', $line) || !empty($line['friendCountsAsCustomer']),
                     'craftsmen' => is_array($line['craftsmen'] ?? null) ? $line['craftsmen'] : [],
                     'salespeople' => is_array($line['salespeople'] ?? null) ? $line['salespeople'] : [],
@@ -679,7 +679,7 @@ final class CashierV3CheckoutPreparationServices
                     'fullCardNo' => (string)($line['fullCardNo'] ?? ''),
                     'name' => (string)($line['name'] ?? ($line['displaySnapshot']['name'] ?? '')),
                     'craftsmen' => is_array($line['craftsmen'] ?? null) ? $line['craftsmen'] : [],
-                    'serviceObject' => (string)($line['serviceObject'] ?? ''),
+                    'serviceObject' => self::snapshotServiceObject($line['serviceObject'] ?? ''),
                     'friendCountsAsCustomer' => !array_key_exists('friendCountsAsCustomer', $line) || !empty($line['friendCountsAsCustomer']),
                     'isExperience' => !empty($line['isExperience']) ? 1 : 0,
                     'detailRemark' => (string)($line['detailRemark'] ?? ''),
@@ -1067,6 +1067,13 @@ final class CashierV3CheckoutPreparationServices
             'accountVersion' => (int)($authority['accountVersion'] ?? 0),
             'amountCents' => $amount,
         ];
+    }
+
+    /** Convert the browser's display labels to the settlement enum. */
+    private static function snapshotServiceObject($value): string
+    {
+        $value = trim((string)$value);
+        return $value === '本人' ? 'self' : ($value === '朋友' ? 'friend' : $value);
     }
 
     /** Convert a browser Yuan value without introducing floating-point cents. */
