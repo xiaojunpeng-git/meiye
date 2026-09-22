@@ -81,6 +81,9 @@ assert.match(component, /setMarked\(item, \$event\.target\.checked\)">售前/, '
 assert.match(component, /业绩金额/, '手艺人和销售人完整分配必须展示独立业绩金额列')
 assert.match(component, /function syncManualPerformanceAmount\(item\)/, '手工修改业绩金额必须有独立处理，不得反写比例')
 assert.match(component, /function syncPerformanceAmountFromRatio\(item\)/, '修改业绩比例必须重算该人员业绩金额')
+assert.match(component, /function projectCountTextFor\(item = \{\}\) \{[\s\S]*item\.projectCountText \?\? item\.projectCount/, '完整分配确认必须读取当前项目数输入，不能回退覆盖为旧项目数')
+assert.match(component, /const microUnits = Math\.round\(numeric \* PROJECT_COUNT_SCALE\)/, '浏览器 number 控件产生的浮点尾差必须规范化为可保存的项目数')
+assert.match(component, /projectCountText: item\.projectCountText,[\s\S]*projectCount: projectCountTextFor\(item\)/, '完整分配必须同时传递当前项目数文本与规范化项目数')
 assert.match(component, /performanceAmountManual: Boolean\(item\.performanceAmountManual\)/, '人员弹窗确认必须携带手工金额标记')
 assert.match(component, /function setMarked\(item, checked\)\s*\{[\s\S]*item\.marked = checked/, '同一明细允许多名销售人分别标记售前')
 assert.doesNotMatch(component, /if \(item\.role === 'salespeople' && checked\)[\s\S]*salespeople\.value\.forEach/, '售前标记不得强制清除其他销售人')
@@ -124,6 +127,11 @@ assert.match(
 assert.doesNotMatch(workbench, /SalespersonAllocationOverlay/, '不得恢复通用选择器后的二次比例弹窗')
 assert.doesNotMatch(workbench, /openCashierV3QueryEntitySelector/, '购物车人员入口不得再打开通用人员选择器')
 assert.match(workbench, /const showSalespeople = roleScope === 'personnel' && !isEntitlementLine\(line\)/, '权益行不得加载销售人候选')
+assert.match(
+  workbench,
+  /if \(\(isProjectLine\(line\) \|\| isEntitlementLine\(line\)\) && !cardOperationUpgradeBinding\(line\)\) \{\s*payload\.craftsmen = craftsmen/,
+  '权益服务完整分配必须把手艺人及项目数写入权威购物车草稿'
+)
 assert.match(workbench, /initialTab,\n\s+roleScope,/, '人员弹窗必须保留入口对应的角色范围')
 assert.match(workbench, /async function openCartLineAttributions\(line\)/, '购物车必须提供导购/销售经理统一入口')
 assert.match(workbench, /:guest-customer="currentCustomerMode === 'guest'"/, '人员弹窗必须收到权威游客身份')

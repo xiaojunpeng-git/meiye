@@ -2099,7 +2099,13 @@ final class CashierV3CashierWorkspaceServices
                 $requestedPerformanceAmountManual[$staffId] = !empty($selection['performanceAmountManual'])
                     || !empty($selection['performance_amount_manual']);
             }
-            if (array_key_exists('projectCountHalfUnits', $selection)
+            // Explicit decimal counts take precedence over the legacy half-unit
+            // alias; a typed zero must survive the draft and final checkout.
+            if (array_key_exists('projectCount', $selection)
+                || array_key_exists('project_count', $selection)) {
+                $requestedProjectCounts[$staffId] = (string)($selection['projectCount'] ?? $selection['project_count']);
+                $hasProjectCount = true;
+            } elseif (array_key_exists('projectCountHalfUnits', $selection)
                 || array_key_exists('project_count_half_units', $selection)) {
                 $requestedProjectCounts[$staffId] = max(0, (int)($selection['projectCountHalfUnits'] ?? $selection['project_count_half_units'] ?? 0));
                 $hasProjectCount = true;
@@ -2282,7 +2288,12 @@ final class CashierV3CashierWorkspaceServices
                 $craftsman['performanceAmountManual'] = $performanceAmountManual;
             }
             if ($hasProjectCount) {
-                $craftsman['projectCountHalfUnits'] = (int)($requestedProjectCounts[$staffId] ?? 0);
+                $projectCount = $requestedProjectCounts[$staffId] ?? 0;
+                if (is_string($projectCount)) {
+                    $craftsman['projectCount'] = $projectCount;
+                } else {
+                    $craftsman['projectCountHalfUnits'] = (int)$projectCount;
+                }
             }
             $craftsmen[] = $craftsman;
         }
@@ -2471,7 +2482,10 @@ final class CashierV3CashierWorkspaceServices
                 $selection['performanceIndependent'] = true;
                 $selection['allocationGroupKey'] = $groupKey;
             }
-            if (array_key_exists('projectCountHalfUnits', $craftsman)
+            if (array_key_exists('projectCount', $craftsman)
+                || array_key_exists('project_count', $craftsman)) {
+                $selection['projectCount'] = (string)($craftsman['projectCount'] ?? $craftsman['project_count']);
+            } elseif (array_key_exists('projectCountHalfUnits', $craftsman)
                 || array_key_exists('project_count_half_units', $craftsman)) {
                 $selection['projectCountHalfUnits'] = max(0, (int)($craftsman['projectCountHalfUnits'] ?? $craftsman['project_count_half_units'] ?? 0));
             }

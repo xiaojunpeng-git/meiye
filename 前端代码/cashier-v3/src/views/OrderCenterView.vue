@@ -32,6 +32,7 @@ import {
 } from '@/services/salesOrderReceiptPrint'
 import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
 import { queryPlatformOrderCenterScope } from '@/services/platformOrderCenterApi'
+import { salespeoplePerformanceText, serviceCraftsmenPerformanceText } from '@/services/orderCenterPersonnelDisplay'
 
 const field = (key, label, type = 'text', extra = {}) => ({ key, label, type, defaultVisible: true, ...extra })
 const isPrinterSetupOpen = ref(false)
@@ -175,10 +176,9 @@ const ORDER_TABS = [
       field('entitlement_source', '权益来源'), field('source_card', '来源卡名称'),
       field('source_card_no', '完整卡号'), field('used_times', '本次使用次数', 'number'),
       field('detail_remark', '明细备注', 'text', { defaultVisible: false }),
-      field('store', '服务门店', 'store'), field('craftsman', '手艺人', 'person'),
-      field('labor_fee_amount', '手工费', 'money'), field('labor_performance_type', '服务业绩类型'),
+      field('store', '服务门店', 'store'), field('craftsman', '手艺人（类型，业绩，手工、项目数）', 'person'),
+      field('labor_performance_type', '服务业绩类型'),
       field('labor_performance_ratio', '业绩比例'), field('labor_performance_amount', '消耗业绩', 'money'),
-      field('project_count', '工资项目数', 'number'),
       field('operator', '操作人', 'person'),
       field('service_status', '状态', 'status'), field('service_completed_at', '服务完成时间', 'date'),
       field('voided_at', '作废时间', 'date'), field('void_reason', '作废原因'), field('void_operator', '作废操作人', 'person')
@@ -375,7 +375,11 @@ const detailFields = computed(() => {
     ? ['detail_remark', 'voided_at', 'void_reason', 'void_operator']
     : ['detail_remark']
   const extras = queryFields.value.filter((item) => detailOnlyKeys.includes(item.key) && !present.has(item.key))
-  return [...visibleFields.value, ...extras]
+  // The two values remain available in service detail; only the separate
+  // list columns are replaced by the per-craftsman combined cell.
+  const performanceExtras = [field('labor_fee_amount', '手工费', 'money'), field('project_count', '工资项目数', 'number')]
+    .filter((item) => !present.has(item.key))
+  return [...visibleFields.value, ...extras, ...performanceExtras]
 })
 
 const allowedSalesOrderDetailActions = new Set([
@@ -554,6 +558,9 @@ function firstValue(record, keys) {
 }
 
 function recordFieldValue(record, key) {
+  // The service list and detail must show the same per-person snapshot; the
+  // editable action still receives the untouched authority record.
+  if (key === 'craftsman' && activeTabKey.value === 'service') return serviceCraftsmenPerformanceText(record)
   if (key === 'supplement') return record?.isSupplement === true ? '补单' : (record?.isSupplement === false ? '正常办理' : firstValue(record, FIELD_ALIASES[key] || [key]))
   return firstValue(record, [...(FIELD_ALIASES[key] || []), key])
 }
@@ -644,7 +651,7 @@ function giftVoidRecordId(record) {
 }
 
 const salesOrderListColumns = [
-  '商品', '单价', '数量', '手艺人', '销售人', '销售经理', '导购', '金额', '应收金额', '欠款', '已收金额', '记账收款', '下单门店', '状态'
+  '商品', '单价', '数量', '手艺人', '销售人（业绩）', '销售经理', '导购', '金额', '应收金额', '欠款', '已收金额', '记账收款', '下单门店', '状态'
 ]
 
 function salesOrderItems(record) {
@@ -2252,8 +2259,8 @@ onBeforeUnmount(() => {
             <td>x {{ item.quantity ?? '—' }}</td>
             <td>{{ personnelNames(item, 'craftsmen') }}</td>
             <td>
-              <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'salespeople')">{{ personnelNames(item, 'salespeople') }}</button>
-              <span v-else>{{ personnelNames(item, 'salespeople') }}</span>
+              <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'salespeople')">{{ salespeoplePerformanceText(item.salespeople) }}</button>
+              <span v-else>{{ salespeoplePerformanceText(item.salespeople) }}</span>
             </td>
             <td>
               <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'salesManagers')">{{ personnelNames(item, 'salesManagers') }}</button>

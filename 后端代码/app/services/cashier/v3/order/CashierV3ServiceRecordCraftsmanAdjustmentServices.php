@@ -230,9 +230,11 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                 'allocationAmountCents' => max(0, (int)($fact['amount_cents'] ?? 0)),
                 'laborFeeCents' => max(0, (int)($fact['labor_fee_amount_cents'] ?? 0)),
                 'projectCountHalfUnits' => max(0, (int)($fact['project_count_half_units'] ?? 0)),
+                'projectCountDecimal' => $fact['project_count_decimal'] ?? null,
                 'hasExplicitProjectCount' =>
                     (string)($fact['rule_code_snapshot'] ?? '') === 'SERVICE-RECORD-CRAFTSMAN-ADJUST-V1'
-                    || (int)($fact['project_count_half_units'] ?? 0) !== 0,
+                    || (int)($fact['project_count_half_units'] ?? 0) !== 0
+                    || ($fact['project_count_decimal'] ?? null) !== null,
             ];
         }
         // 零金额项目或仅保留服务归属的结账，按既有规则不产生零值劳动业绩
@@ -280,7 +282,9 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                 : 0;
             $row['allocationAmount'] = $this->money((int)$row['allocationAmountCents']);
             $row['laborFeeAmount'] = $this->money((int)$row['laborFeeCents']);
-            $row['projectCount'] = number_format((int)$row['projectCountHalfUnits'] / 2, 1, '.', '');
+            $row['projectCount'] = $row['projectCountDecimal'] !== null
+                ? $this->projectCountText((string)$row['projectCountDecimal'])
+                : number_format((int)$row['projectCountHalfUnits'] / 2, 1, '.', '');
         }
         unset($row);
         return $rows;
@@ -302,8 +306,11 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         );
         if ($craftsmen === []) return [];
 
+        // A saved zero is still an explicit employee allocation: only older
+        // snapshots without either count field may split the service total.
         $hasExplicitProjectCount = in_array(true, array_map(static function (array $row): bool {
-            return array_key_exists('projectCountHalfUnits', $row);
+            return array_key_exists('projectCount', $row)
+                || array_key_exists('projectCountHalfUnits', $row);
         }, $craftsmen), true);
         $totalHalfUnits = max(0, (int)($source['project_count'] ?? 0)) * 2;
         if ($totalHalfUnits === 0) $totalHalfUnits = max(0, (int)($source['quantity'] ?? 0)) * 2;
@@ -318,9 +325,11 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
             if ($staffId <= 0 || $employeeId <= 0) continue;
             $type = (string)($craftsman['craftsmanPerformanceType'] ?? 'commission_labor');
             if (!in_array($type, ['commission', 'labor', 'commission_labor'], true)) $type = 'commission_labor';
-            $halfUnits = $hasExplicitProjectCount
-                ? max(0, (int)($craftsman['projectCountHalfUnits'] ?? 0))
-                : $base + ($index >= $count - $remainder ? 1 : 0);
+            $projectCount = $hasExplicitProjectCount && array_key_exists('projectCount', $craftsman)
+                ? $this->projectCountText((string)$craftsman['projectCount'])
+                : number_format(($hasExplicitProjectCount
+                    ? max(0, (int)($craftsman['projectCountHalfUnits'] ?? 0))
+                    : $base + ($index >= $count - $remainder ? 1 : 0)) / 2, 1, '.', '');
             $feeCents = $type === 'commission'
                 ? 0
                 : max(0, (int)($craftsman['laborFeeCents'] ?? 0));
@@ -341,8 +350,7 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                 'allocationAmount' => $this->money(0),
                 'laborFeeCents' => $feeCents,
                 'laborFeeAmount' => $this->money($feeCents),
-                'projectCountHalfUnits' => $halfUnits,
-                'projectCount' => number_format($halfUnits / 2, 1, '.', ''),
+                'projectCount' => $projectCount,
             ];
         }
         return $rows;
@@ -552,7 +560,7 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                 ]);
             }
             $fee = $this->nonnegativeInteger($raw['laborFeeCents'] ?? 0, '手工费');
-            $halfUnits = $this->halfUnits($raw);
+            $projectCount = $this->projectCount($raw);
             $type = trim((string)($staff['craftsmanPerformanceType'] ?? ''));
             if (!in_array($type, ['commission', 'labor', 'commission_labor'], true)) $type = 'commission_labor';
             if ($type === 'labor' && $amount !== 0) throw CashierV3CommandException::invalidContext('只拿手工费的手艺人不能分配消耗业绩。');
@@ -566,21 +574,34 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                 'craftsmanPerformanceType' => $type,
                 'isPointCustomer' => !empty($raw['isPointCustomer']) || !empty($raw['marked']),
                 'allocationAmountCents' => $amount, 'laborFeeCents' => $fee,
-                'projectCountHalfUnits' => $halfUnits,
-                'projectCount' => number_format($halfUnits / 2, 1, '.', ''),
+                'projectCount' => $projectCount,
             ];
         }
         return $rows;
     }
 
-    private function halfUnits(array $raw): int
+    /** Preserve exact entered decimals while accepting old half-unit snapshots. */
+    private function projectCount(array $raw): string
     {
-        if (isset($raw['projectCountHalfUnits'])) return $this->nonnegativeInteger($raw['projectCountHalfUnits'], '项目数');
-        $value = trim((string)($raw['projectCount'] ?? ''));
-        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[05])?$/D', $value) !== 1) {
-            throw CashierV3CommandException::invalidContext('项目数只能按0.5递增，并保留一位小数。');
+        if (array_key_exists('projectCountHalfUnits', $raw)) {
+            return $this->projectCountText(number_format(
+                $this->nonnegativeInteger($raw['projectCountHalfUnits'], '项目数') / 2,
+                1,
+                '.',
+                ''
+            ));
         }
-        return (int)round((float)$value * 2);
+        $value = trim((string)($raw['projectCount'] ?? ''));
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $value) !== 1) {
+            throw CashierV3CommandException::invalidContext('项目数必须是非负数字，最多保留六位小数。');
+        }
+        return $this->projectCountText($value);
+    }
+
+    private function projectCountText(string $value): string
+    {
+        $value = rtrim(rtrim($value, '0'), '.');
+        return $value === '' ? '0' : $value;
     }
 
     private function nonnegativeInteger($value, string $label): int
@@ -612,6 +633,14 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         $row['allocation_base_amount_cents'] = -(int)$source['allocation_base_amount_cents'];
         $row['labor_fee_amount_cents'] = -(int)($source['labor_fee_amount_cents'] ?? 0);
         $row['project_count_half_units'] = -(int)($source['project_count_half_units'] ?? 0);
+        if (($source['project_count_decimal'] ?? null) !== null) {
+            $row['project_count_decimal'] = $this->projectCountText(number_format(
+                -(float)$source['project_count_decimal'],
+                6,
+                '.',
+                ''
+            ));
+        }
         $row['occurred_at'] = $now; $row['settled_at'] = $now; $row['recorded_at'] = $now;
         $row['immutable_fingerprint'] = hash('sha256', $this->json($row));
         if ((int)Db::name('cashier_v3_performance_fact')->insert($row) !== 1) throw self::failure('service_adjust_reversal_insert_failed');
@@ -635,7 +664,8 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         $row['allocation_weight_denominator'] = max(1, $totalCents);
         $row['allocation_base_amount_cents'] = $totalCents; $row['amount_cents'] = (int)$allocation['allocationAmountCents'];
         $row['labor_fee_amount_cents'] = (int)$allocation['laborFeeCents'];
-        $row['project_count_half_units'] = (int)$allocation['projectCountHalfUnits'];
+        $row['project_count_half_units'] = 0;
+        $row['project_count_decimal'] = (string)$allocation['projectCount'];
         $row['rule_code_snapshot'] = 'SERVICE-RECORD-CRAFTSMAN-ADJUST-V1';
         $row['rule_name_snapshot'] = '服务记录手艺人调整'; $row['rule_version_snapshot'] = 'v1';
         $row['immutable_fingerprint'] = hash('sha256', $this->json($row));

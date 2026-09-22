@@ -2113,6 +2113,10 @@ final class CashierV3SalesOrderQueryServices
                 'employeeId' => (int)$person['employee_id'],
                 'name' => (string)$person['employee_name_snapshot'],
                 'employeeType' => (string)$person['employee_type_snapshot'],
+                // Historical list rows still pass through mapLine; keep the
+                // persisted presale role so their label does not depend on a
+                // mutable product or current personnel selection.
+                'roleSnapshot' => (string)($person['role_snapshot'] ?? ''),
                 'allocationWeight' => (int)$person['allocation_weight_numerator'],
                 'allocationWeightDenominator' => (int)$person['allocation_weight_denominator'],
                 'salesPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents']),

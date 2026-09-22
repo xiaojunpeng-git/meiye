@@ -198,9 +198,11 @@ ok('订单列表中的真实会员可打开既有会员详情，游客保持普�
   assert.match(view, /查看\$\{displayRecordField\(record, fieldItem\.key\)\}的会员详情/)
 })
 
-ok('服务记录列表展示结账事实中的手工费、服务业绩类型与业绩比例', () => {
+ok('服务记录详情保留原始金额和项目数，列表只展示手艺人合并列', () => {
   const view = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/OrderCenterView.vue', import.meta.url), 'utf8')
-  assert.match(view, /field\('labor_fee_amount', '手工费', 'money'\)/)
+  assert.match(view, /performanceExtras = \[field\('labor_fee_amount', '手工费', 'money'\), field\('project_count', '工资项目数', 'number'\)\]/)
+  assert.match(view, /field\('craftsman', '手艺人（类型，业绩，手工、项目数）', 'person'\)/)
+  assert.doesNotMatch(view, /field\('labor_fee_amount', '手工费', 'money'\), field\('labor_performance_type'/)
   assert.match(view, /field\('labor_performance_type', '服务业绩类型'\)/)
   assert.match(view, /field\('labor_performance_ratio', '业绩比例'\)/)
   assert.match(view, /labor_fee_amount: \['laborFeeAmount', 'manualLaborFeeAmount'\]/)

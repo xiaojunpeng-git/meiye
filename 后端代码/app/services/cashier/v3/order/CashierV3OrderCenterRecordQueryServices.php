@@ -933,9 +933,15 @@ final class CashierV3OrderCenterRecordQueryServices
         return [array_map(function (array $row) use ($laborByLine): array {
             $key = $this->serviceLineKey($row);
             $labor = $laborByLine[$key] ?? [
-                'amountCents' => 0, 'laborFeeCents' => 0, 'projectCountHalfUnits' => 0,
+                'amountCents' => 0, 'laborFeeCents' => 0, 'projectCountHalfUnits' => 0, 'projectCountDecimal' => null,
                 'hasExplicitProjectCount' => false, 'names' => [],
             ];
+            // A zero is a valid manually assigned project count.  The labor
+            // fact writer deliberately omits an all-zero allocation, so the
+            // immutable service snapshot must remain the fallback authority
+            // here; using `?: quantity` would incorrectly turn an explicit
+            // zero into the service quantity (usually 1).
+            $snapshotProjectCount = $this->snapshotProjectCount((string)($row['craftsmen_snapshot_json'] ?? ''));
             // 调整后优先展示当前有效员工事实；原始 craftsmen 快照只用于
             // 尚未形成可读业绩分配的历史服务记录。
             $craftsmen = implode('、', $labor['names']);
@@ -958,6 +964,12 @@ final class CashierV3OrderCenterRecordQueryServices
                 'usedTimes' => (int)$row['quantity'],
                 'storeName' => (string)$row['store_name_snapshot'],
                 'craftsmenSummary' => $craftsmen,
+                // This read-only display shape uses the effective employee
+                // fact first. Older all-zero facts have no allocation row, so
+                // only then may the immutable service snapshot fill the cell.
+                'craftsmenListAllocations' => $this->craftsmenListAllocations(
+                    $labor['allocations'] ?? [], (string)($row['craftsmen_snapshot_json'] ?? '')
+                ),
                 // A void is an adjustment fact. Keep the original service
                 // snapshot visible in the detail/list and expose the void
                 // audit fields separately; do not overwrite historical facts
@@ -972,11 +984,14 @@ final class CashierV3OrderCenterRecordQueryServices
                 'laborPerformanceTypeLabel' => $this->laborPerformanceTypeLabel((string)($row['labor_mode'] ?? 'project_rule')),
                 'laborPerformanceRatio' => $this->laborPerformanceRatio($labor['allocations'] ?? []),
                 'laborPerformanceAllocations' => ($labor['allocations'] ?? []),
-                'projectCount' => number_format(
+                'projectCount' => $this->projectCountText(
                     !empty($labor['hasExplicitProjectCount'])
-                        ? (int)$labor['projectCountHalfUnits'] / 2
-                        : (int)($row['project_count'] ?: $row['quantity']),
-                    1, '.', ''
+                        ? ($labor['projectCountDecimal'] !== null
+                            ? (float)$labor['projectCountDecimal']
+                            : (int)$labor['projectCountHalfUnits'] / 2)
+                        : ($snapshotProjectCount['hasExplicitProjectCount']
+                            ? $snapshotProjectCount['projectCount']
+                            : (int)($row['project_count'] ?: $row['quantity'])),
                 ),
                 'operatorName' => (string)$row['operator_name_snapshot'],
                 'serviceStatus' => !empty($row['void_operation_id']) ? '已作废' : '已完成',
@@ -1029,7 +1044,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->where('status', 'effective')
             ->whereIn('checkout_request_id', array_values($checkoutIds))
             ->whereIn('source_line_id', array_values($lineIds))
-            ->field('id,checkout_request_id,source_line_id,fact_direction,amount_cents,labor_fee_amount_cents,project_count_half_units,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,rule_code_snapshot,rule_name_snapshot,rule_version_snapshot')
+            ->field('id,checkout_request_id,source_line_id,fact_direction,amount_cents,labor_fee_amount_cents,project_count_half_units,project_count_decimal,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,rule_code_snapshot,rule_name_snapshot,rule_version_snapshot')
             ->order('id', 'asc')
             ->select()
             ->toArray();
@@ -1043,7 +1058,7 @@ final class CashierV3OrderCenterRecordQueryServices
             if (!isset($grouped[$groupKey])) $grouped[$groupKey] = [
                 'key' => $key, 'employeeId' => $employeeId, 'employeeName' => '', 'employeeType' => '',
                 'roleSnapshot' => '', 'amountCents' => 0, 'laborFeeCents' => 0,
-                'projectCountHalfUnits' => 0, 'hasExplicitProjectCount' => false,
+                'projectCountHalfUnits' => 0, 'projectCountDecimal' => null, 'hasExplicitProjectCount' => false,
                 'allocationWeightNumerator' => 0, 'allocationWeightDenominator' => 0,
                 'hasExplicitAllocationWeight' => false,
                 'ruleCodeSnapshot' => '', 'ruleNameSnapshot' => '',
@@ -1052,6 +1067,10 @@ final class CashierV3OrderCenterRecordQueryServices
             $grouped[$groupKey]['amountCents'] += (int)($fact['amount_cents'] ?? 0);
             $grouped[$groupKey]['laborFeeCents'] += (int)($fact['labor_fee_amount_cents'] ?? 0);
             $grouped[$groupKey]['projectCountHalfUnits'] += (int)($fact['project_count_half_units'] ?? 0);
+            if ($fact['project_count_decimal'] !== null && $fact['project_count_decimal'] !== '') {
+                $grouped[$groupKey]['projectCountDecimal'] = (float)($grouped[$groupKey]['projectCountDecimal'] ?? 0)
+                    + (float)$fact['project_count_decimal'];
+            }
             if ((string)($fact['fact_direction'] ?? '') === 'forward') {
                 $grouped[$groupKey]['employeeName'] = trim((string)($fact['employee_name_snapshot'] ?? ''));
                 $grouped[$groupKey]['employeeType'] = (string)($fact['employee_type_snapshot'] ?? '');
@@ -1071,24 +1090,30 @@ final class CashierV3OrderCenterRecordQueryServices
                     $grouped[$groupKey]['allocationWeightDenominator'] = $weightDenominator;
                     $grouped[$groupKey]['hasExplicitAllocationWeight'] = true;
                 }
-                $grouped[$groupKey]['hasExplicitProjectCount'] =
+                $grouped[$groupKey]['hasExplicitProjectCount'] = $grouped[$groupKey]['hasExplicitProjectCount'] ||
                     (string)($fact['rule_code_snapshot'] ?? '') === 'SERVICE-RECORD-CRAFTSMAN-ADJUST-V1'
-                    || (int)($fact['project_count_half_units'] ?? 0) !== 0;
+                    || (int)($fact['project_count_half_units'] ?? 0) !== 0
+                    || ($fact['project_count_decimal'] !== null && $fact['project_count_decimal'] !== '');
             }
         }
         $result = [];
         foreach ($grouped as $allocation) {
             if ((int)$allocation['amountCents'] === 0 && (int)$allocation['laborFeeCents'] === 0
                 && (int)$allocation['projectCountHalfUnits'] === 0
+                && $allocation['projectCountDecimal'] === null
                 && empty($allocation['hasExplicitProjectCount'])) continue;
             $key = (string)$allocation['key'];
             if (!isset($result[$key])) $result[$key] = [
-                'amountCents' => 0, 'laborFeeCents' => 0, 'projectCountHalfUnits' => 0,
+                'amountCents' => 0, 'laborFeeCents' => 0, 'projectCountHalfUnits' => 0, 'projectCountDecimal' => null,
                 'hasExplicitProjectCount' => false, 'names' => [], 'allocations' => [],
             ];
             $result[$key]['amountCents'] += (int)$allocation['amountCents'];
             $result[$key]['laborFeeCents'] += (int)$allocation['laborFeeCents'];
             $result[$key]['projectCountHalfUnits'] += (int)$allocation['projectCountHalfUnits'];
+            if ($allocation['projectCountDecimal'] !== null) {
+                $result[$key]['projectCountDecimal'] = (float)($result[$key]['projectCountDecimal'] ?? 0)
+                    + (float)$allocation['projectCountDecimal'];
+            }
             $result[$key]['hasExplicitProjectCount'] = $result[$key]['hasExplicitProjectCount']
                 || !empty($allocation['hasExplicitProjectCount']);
             $name = (string)$allocation['employeeName'];
@@ -1115,7 +1140,13 @@ final class CashierV3OrderCenterRecordQueryServices
                 'allocationRatioPercent' => 0,
                 'amount' => $this->centsToMoney((int)$allocation['amountCents']),
                 'laborFeeAmount' => $this->centsToMoney((int)$allocation['laborFeeCents']),
-                'projectCount' => number_format((int)$allocation['projectCountHalfUnits'] / 2, 1, '.', ''),
+                'projectCount' => $this->projectCountText(
+                    $allocation['projectCountDecimal'] !== null
+                        ? (float)$allocation['projectCountDecimal']
+                        : (int)$allocation['projectCountHalfUnits'] / 2,
+                ),
+                'hasExplicitProjectCount' => !empty($allocation['hasExplicitProjectCount']),
+                'projectCountDecimal' => $allocation['projectCountDecimal'],
                 'projectCountHalfUnits' => (int)$allocation['projectCountHalfUnits'],
                 'ruleCodeSnapshot' => (string)$allocation['ruleCodeSnapshot'],
                 'ruleNameSnapshot' => (string)$allocation['ruleNameSnapshot'],
@@ -1150,6 +1181,69 @@ final class CashierV3OrderCenterRecordQueryServices
         $name = trim($name);
         if ($name === '' || $isPointCustomer === null) return $name;
         return $name . ($isPointCustomer ? '（点）' : '（轮）');
+    }
+
+    /**
+     * Build a per-person list projection without changing the employee facts.
+     * Snapshot values only fill older missing facts/counts; an explicit zero
+     * from a later personnel adjustment must never become the old sale count.
+     *
+     * @param array<int,array<string,mixed>> $facts
+     * @return array<int,array<string,mixed>>
+     */
+    private function craftsmenListAllocations(array $facts, string $snapshotJson): array
+    {
+        $snapshotRows = json_decode($snapshotJson, true);
+        $snapshots = [];
+        if (is_array($snapshotRows)) {
+            foreach ($snapshotRows as $person) {
+                if (!is_array($person)) continue;
+                $employeeId = (int)($person['employeeId'] ?? $person['employee_id'] ?? 0);
+                if ($employeeId > 0) $snapshots[$employeeId] = $person;
+            }
+        }
+        $represented = [];
+        $hasAdjustment = false;
+        foreach ($facts as &$person) {
+            $employeeId = (int)($person['employeeId'] ?? 0);
+            $represented[$employeeId] = true;
+            $hasAdjustment = $hasAdjustment
+                || (string)($person['ruleCodeSnapshot'] ?? '') === 'SERVICE-RECORD-CRAFTSMAN-ADJUST-V1';
+            $snapshot = $snapshots[$employeeId] ?? [];
+            if (empty($person['hasExplicitProjectCount'])) {
+                $count = $snapshot['projectCount'] ?? $snapshot['project_count_decimal']
+                    ?? $snapshot['project_count'] ?? null;
+                if ($count === null && isset($snapshot['projectCountHalfUnits'])) {
+                    $count = (float)$snapshot['projectCountHalfUnits'] / 2;
+                }
+                // No count in either authority is unknown, not an assigned zero.
+                $person['projectCount'] = $count !== null && is_numeric($count)
+                    ? $this->projectCountText($count) : null;
+            }
+        }
+        unset($person);
+        // A personnel adjustment replaces the old staff set. For ordinary
+        // checkout facts, the writer may omit an all-zero colleague; keep
+        // that colleague from the same immutable checkout snapshot.
+        if ($hasAdjustment) return $facts;
+        foreach ($snapshots as $employeeId => $person) {
+            if (isset($represented[$employeeId])) continue;
+            $count = $person['projectCount'] ?? $person['project_count_decimal']
+                ?? $person['project_count'] ?? null;
+            if ($count === null && isset($person['projectCountHalfUnits'])) {
+                $count = (float)$person['projectCountHalfUnits'] / 2;
+            }
+            $facts[] = [
+                'employeeName' => (string)($person['name'] ?? $person['employeeName'] ?? ''),
+                'isPointCustomer' => isset($person['isPointCustomer']) ? (bool)$person['isPointCustomer'] : null,
+                'amount' => isset($person['performanceAmountCents'])
+                    ? $this->centsToMoney((int)$person['performanceAmountCents']) : null,
+                'laborFeeAmount' => isset($person['laborFeeCents'])
+                    ? $this->centsToMoney((int)$person['laborFeeCents']) : null,
+                'projectCount' => $count !== null && is_numeric($count) ? $this->projectCountText($count) : null,
+            ];
+        }
+        return $facts;
     }
 
     private function laborPerformanceTypeLabel(string $mode): string
@@ -1208,6 +1302,38 @@ final class CashierV3OrderCenterRecordQueryServices
             if (!in_array($label, $names, true)) $names[] = $label;
         }
         return implode('、', $names);
+    }
+
+    /**
+     * @return array{hasExplicitProjectCount:bool,projectCount:float}
+     */
+    private function snapshotProjectCount(string $json): array
+    {
+        $items = json_decode($json, true);
+        if (!is_array($items)) return ['hasExplicitProjectCount' => false, 'projectCount' => 0.0];
+        $total = 0.0;
+        $explicit = false;
+        foreach ($items as $item) {
+            if (!is_array($item)) continue;
+            if (array_key_exists('project_count_decimal', $item)
+                || array_key_exists('projectCount', $item)
+                || array_key_exists('project_count', $item)) {
+                $value = $item['project_count_decimal'] ?? $item['projectCount'] ?? $item['project_count'];
+                if (is_numeric($value) && (float)$value >= 0) {
+                    $total += (float)$value;
+                    $explicit = true;
+                }
+                continue;
+            }
+            if (array_key_exists('projectCountHalfUnits', $item) || array_key_exists('project_count_half_units', $item)) {
+                $value = $item['projectCountHalfUnits'] ?? $item['project_count_half_units'];
+                if (is_numeric($value) && (float)$value >= 0) {
+                    $total += (float)$value / 2;
+                    $explicit = true;
+                }
+            }
+        }
+        return ['hasExplicitProjectCount' => $explicit, 'projectCount' => $total];
     }
 
     private function serviceEntitlementSource(array $row): string
@@ -2048,6 +2174,12 @@ final class CashierV3OrderCenterRecordQueryServices
         $cents = abs($cents);
         $money = intdiv($cents, 100) . '.' . str_pad((string)($cents % 100), 2, '0', STR_PAD_LEFT);
         return $negative ? '-' . $money : $money;
+    }
+
+    private function projectCountText($value): string
+    {
+        $text = rtrim(rtrim(number_format((float)$value, 6, '.', ''), '0'), '.');
+        return $text === '' ? '0' : $text;
     }
 
     private function date(int $timestamp): string

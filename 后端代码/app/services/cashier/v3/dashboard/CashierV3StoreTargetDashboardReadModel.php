@@ -114,11 +114,10 @@ final class CashierV3StoreTargetDashboardReadModel
             ->where('p.performance_type', 'labor_performance_allocated')->where('p.employee_id', '>', 0);
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 'sv');
         $rows = $query
-            // project_count_half_units is the employee-level allocation
-            // snapshot (it supports 0.5); service_fact.project_count is the
-            // source line total and would duplicate a split project for each
-            // craftsman.
-            ->fieldRaw("p.employee_id,MAX(p.employee_name_snapshot) AS employee_name,SUM(p.amount_cents) AS consumption_performance_cents,SUM(COALESCE(p.labor_fee_amount_cents,0)) AS labor_cents,SUM(COALESCE(p.project_count_half_units,0)) AS project_count_half_units,SUM((CASE WHEN p.fact_direction='reversal' THEN -1 ELSE 1 END) * COALESCE(sv.quantity,0) * COALESCE(p.allocation_weight_numerator,1) / NULLIF(COALESCE(p.allocation_weight_denominator,1),0)) AS service_count,COUNT(DISTINCT NULLIF(p.member_id,0)) AS customer_count")
+            // This is the employee-level allocation snapshot.  New records
+            // carry an exact decimal count; the half-unit field is retained
+            // only for historical rows.
+            ->fieldRaw("p.employee_id,MAX(p.employee_name_snapshot) AS employee_name,SUM(p.amount_cents) AS consumption_performance_cents,SUM(COALESCE(p.labor_fee_amount_cents,0)) AS labor_cents,SUM(CASE WHEN p.project_count_decimal IS NULL THEN COALESCE(p.project_count_half_units,0) / 2 ELSE p.project_count_decimal END) AS project_count,SUM((CASE WHEN p.fact_direction='reversal' THEN -1 ELSE 1 END) * COALESCE(sv.quantity,0) * COALESCE(p.allocation_weight_numerator,1) / NULLIF(COALESCE(p.allocation_weight_denominator,1),0)) AS service_count,COUNT(DISTINCT NULLIF(p.member_id,0)) AS customer_count")
             ->group('p.employee_id')->orderRaw('consumption_performance_cents DESC, p.employee_id ASC')->limit(100)->select()->toArray();
         $records = [];
         foreach ($rows as $row) {
@@ -127,7 +126,7 @@ final class CashierV3StoreTargetDashboardReadModel
                 'employee_id' => (int)$row['employee_id'], 'employee' => (string)$row['employee_name'],
                 'consumption_performance_cents' => $consumption, 'consumption_performance' => $this->money($consumption),
                 'labor_cents' => (int)$row['labor_cents'], 'labor' => $this->money((int)$row['labor_cents']),
-                'project_count' => ((int)$row['project_count_half_units']) / 2, 'service_count' => (int)$row['service_count'],
+                'project_count' => (float)$row['project_count'], 'service_count' => (int)$row['service_count'],
                 'customer_count' => (int)$row['customer_count'],
             ];
         }
