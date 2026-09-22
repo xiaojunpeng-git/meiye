@@ -7,6 +7,8 @@ $service = file_get_contents($root . '/后端代码/app/services/report/StoreUni
 $cashierController = file_get_contents($root . '/后端代码/app/controller/cashier/v3/Report.php');
 $storeController = file_get_contents($root . '/后端代码/app/controller/store/report/UnifiedReport.php');
 $adminController = file_get_contents($root . '/后端代码/app/controller/admin/v1/report/UnifiedReport.php');
+$metricReader = file_get_contents($root . '/后端代码/app/services/query/metric/RegisteredMetricReadServices.php');
+$orderCenter = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php');
 
 function section(string $source, string $start, string $end): string
 {
@@ -20,29 +22,32 @@ $summary = section($service, 'private function craftsmanConsumption', 'private f
 $detail = section($service, 'private function craftsmanConsumptionDetail', 'private function salespersonPerformance');
 
 foreach ([
-    'summary stores drilldown source store id' => "'store_id'=>(int)\$row['store_id']",
     'summary declares daily drilldown' => "'_drilldown']['day_'.\$day.'_consume']",
     'summary declares total drilldown' => "'_drilldown']['total_consume']",
-    'drilldown targets hidden detail report' => "'report' => 'store_craftsman_consumption_detail'",
+    'drilldown targets the order-center service records' => "'report' => 'order_center_service'",
     'drilldown passes trusted row dimensions only' => "'param_map' => ['craftsman_id' => 'employee_id', 'store_ids' => 'store_id']",
 ] as $name => $needle) {
     if (strpos($service, $needle) === false) throw new RuntimeException($name);
 }
 
+if (strpos($summary, "\$this->craftsmanConsumptionDrilldown(\$day)") === false
+    || strpos($service, "'store_ids' => 'store_id'") === false) {
+    throw new RuntimeException('report cell must carry its own store identity');
+}
+
 foreach ([
-    'same effective performance fact source' => "Db::name('cashier_v3_performance_fact')->alias('p')",
-    'same labor fact classification' => "->where('p.performance_type', 'labor_performance_allocated')",
-    'same effective lifecycle filter' => "->where('p.status', 'effective')",
-    'drilldown keeps authorized craftsman filter' => "->where('p.employee_id', (int)\$input['craftsman_id'])",
-    'daily drilldown follows the day bucket, including across months' => "DAY(p.business_date)=?",
-    'detail joins the frozen sales order line identity' => 'sol.tenant_id=p.tenant_id AND sol.order_id=p.order_id AND sol.order_line_id=p.source_line_id',
-    'detail retains signed fact direction' => 'p.fact_direction',
-    'detail summarizes consumption from exact detail facts' => '$summaryConsumption += (int)($row[\'amount_cents\'] ?? 0);',
-    'detail summarizes labor fee from exact detail facts' => '$summaryLabor += (int)($row[\'labor_fee_amount_cents\'] ?? 0);',
-    'detail renders reversal as business status' => "=== 'reversal' ? '冲销' : '正常'",
-    'export retrieves the same full detail set' => "!empty(\$input['_internal_all'])",
+    'summary uses registered signed labor metric' => "personnelDayMatrix('staff_labor_yeji'",
+    'audited fact detail uses the same registered metric' => "personnelDetailResult('staff_labor_yeji'",
+    'daily fact reader keeps day buckets across months' => "DAY(p.business_date)=?",
+    'service records select exact employee facts' => "->where('pf.employee_id', \$performanceDrilldown['employeeId'])",
+    'service records retain reversal direction' => "'direction' => (string)\$fact['fact_direction'] === 'reversal' ? '冲销' : '正常'",
+    'service records use fact dates, not current service dates' => "applyPerformanceDrilldownDate(\$fact, \$performanceDrilldown, 'pf.business_date')",
+    'service records use the same normal sales-order lifecycle scope' => "excludeVoidedSalesOrderFacts(\$fact, 'pf.tenant_id', 'pf.order_id')",
 ] as $name => $needle) {
-    if (strpos($detail, $needle) === false) throw new RuntimeException($name);
+    $source = str_starts_with($name, 'summary') ? $summary
+        : (str_starts_with($name, 'audited') ? $detail
+        : (str_starts_with($name, 'daily') ? $metricReader : $orderCenter));
+    if (strpos($source, $needle) === false) throw new RuntimeException($name);
 }
 
 foreach ([$cashierController, $storeController, $adminController] as $controller) {

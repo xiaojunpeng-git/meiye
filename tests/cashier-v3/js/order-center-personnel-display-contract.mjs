@@ -21,9 +21,14 @@ assert.equal(serviceCraftsmenPerformanceText({ craftsmenListAllocations: [
 ] }), '许长娥（轮、0、45、1），汤静静（点、2980、0、0.3）')
 assert.equal(serviceCraftsmenPerformanceText({ craftsmenSummary: '历史手艺人（轮）' }), '历史手艺人（轮）')
 assert.equal(serviceCraftsmenPerformanceText({ craftsmenListAllocations: [{ employeeName: '未知', amount: null }] }), '未知（—、—、—、—）')
+assert.equal(serviceCraftsmenPerformanceText({ craftsmenListAllocations: [
+  { employeeName: '周琦博', isPointCustomer: null, amount: 0, laborFeeAmount: 5, projectCount: null }
+] }), '周琦博（—、0、5、—）')
 
 const view = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/OrderCenterView.vue', import.meta.url), 'utf8')
 assert.match(view, /'销售人（业绩）'/)
 assert.match(view, /salespeoplePerformanceText\(item\.salespeople\)/)
-assert.match(view, /key === 'craftsman' && activeTabKey\.value === 'service'\) return serviceCraftsmenPerformanceText\(record\)/)
+assert.match(view, /record\?\.serviceStatus === '已作废'/)
+assert.match(view, /record\?\.reportCraftsmenListAllocations/)
+assert.match(view, /return serviceCraftsmenPerformanceText\(record\)/)
 console.log('order center personnel display contract: PASS')

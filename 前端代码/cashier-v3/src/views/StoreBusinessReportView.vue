@@ -138,14 +138,6 @@ const PARTNER_MANUAL_FIELDS = Object.freeze([
   { key: 'expert_name', label: '专家姓名' }
 ])
 const isFieldGuideOpen = ref(false)
-const craftsmanDrilldown = ref({
-  open: false,
-  loading: false,
-  error: '',
-  title: '手艺人消耗明细',
-  request: null,
-  result: {}
-})
 
 const FIELD_LOGIC = Object.freeze({
   month: '按成交日期归入的自然月份。',
@@ -740,13 +732,6 @@ const pageSize = computed(() => Number(result.value.page_size || DEFAULT_LIMIT))
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const canPageBack = computed(() => page.value > 1 && !loading.value)
 const canPageForward = computed(() => page.value < pageCount.value && !loading.value)
-const craftsmanDrilldownColumns = computed(() => Array.isArray(craftsmanDrilldown.value.result?.columns) ? craftsmanDrilldown.value.result.columns : [])
-const craftsmanDrilldownRecords = computed(() => Array.isArray(craftsmanDrilldown.value.result?.records) ? craftsmanDrilldown.value.result.records : [])
-const craftsmanDrilldownSummary = computed(() => craftsmanDrilldown.value.result?.summary_row || craftsmanDrilldown.value.result?.summaryRow || null)
-const craftsmanDrilldownTotal = computed(() => Number(craftsmanDrilldown.value.result?.total || 0))
-const craftsmanDrilldownPage = computed(() => Number(craftsmanDrilldown.value.result?.page || 1))
-const craftsmanDrilldownPageSize = computed(() => Number(craftsmanDrilldown.value.result?.page_size || DEFAULT_LIMIT))
-const craftsmanDrilldownPageCount = computed(() => Math.max(1, Math.ceil(craftsmanDrilldownTotal.value / craftsmanDrilldownPageSize.value)))
 const currentReportDefinition = computed(() => allowedReportTabs.value.find((item) => item.code === activeReport.value))
 const currentReportName = computed(() => currentReportDefinition.value?.name || '门店运营报表')
 const currentReportDescription = computed(() => currentReportDefinition.value?.description || '')
@@ -1259,65 +1244,37 @@ function canDrilldown(row, column) {
 function drilldownRequest(row, column) {
   const config = drilldownConfig(row, column)
   const report = String(config?.report || config?.report_code || '')
-  if (!report || !allowedReportTabs.value.some((tab) => tab.code === report)) return null
+  if (!report || (report !== 'order_center_service' && !allowedReportTabs.value.some((tab) => tab.code === report))) return null
   const params = { ...(config.params || config.query || {}) }
   const mapping = config.param_map || config.paramMap || {}
   Object.entries(mapping).forEach(([target, source]) => { params[target] = row?.[source] ?? '' })
   return { report, params }
 }
 
-async function loadCraftsmanDrilldown(pageNumber = 1) {
-  const request = craftsmanDrilldown.value.request
-  if (!request) return
-  craftsmanDrilldown.value = { ...craftsmanDrilldown.value, loading: true, error: '' }
-  try {
-    const response = await queryStoreBusinessReport(reportParams({
-      report: request.report,
-      ...request.params,
-      page: pageNumber,
-      limit: DEFAULT_LIMIT
-    }), reportRuntime.value)
-    craftsmanDrilldown.value = {
-      ...craftsmanDrilldown.value,
-      loading: false,
-      result: response || {}
-    }
-  } catch (error) {
-    craftsmanDrilldown.value = {
-      ...craftsmanDrilldown.value,
-      loading: false,
-      error: error?.message || '手艺人消耗明细读取失败，请稍后重试。'
-    }
-  }
-}
-
-async function openCraftsmanDrilldown(request) {
-  craftsmanDrilldown.value = {
-    open: true,
-    loading: false,
-    error: '',
-    title: '手艺人消耗明细',
-    request,
-    result: {}
-  }
-  await loadCraftsmanDrilldown(1)
-}
-
-function closeCraftsmanDrilldown() {
-  craftsmanDrilldown.value = {
-    ...craftsmanDrilldown.value,
-    open: false,
-    request: null,
-    result: {},
-    error: ''
-  }
-}
-
 function openDrilldown(row, column) {
   const request = drilldownRequest(row, column)
   if (!request) return
-  if (request.report === 'store_craftsman_consumption_detail') {
-    openCraftsmanDrilldown(request)
+  if (request.report === 'order_center_service') {
+    // 汇总行的门店、员工编号和日期来自服务端声明；订单中心仍用后端
+    // 数据权限收紧范围，并按业绩事实日期找到包含冲销的原服务记录。
+    // 返回地址由当前报表筛选状态生成，避免浏览器刷新后丢失原查询条件。
+    const returnTo = router.resolve({
+      name: reportRouteName.value,
+      params: { report: activeReport.value },
+      query: currentRouteQuery()
+    }).fullPath
+    router.push({
+      name: isPlatformReport.value ? 'cashier-v3-platform-order-center' : 'cashier-v3-order-center',
+      query: {
+        tab: 'service',
+        report_employee_id: request.params.craftsman_id,
+        report_store_id: request.params.store_ids,
+        report_start_date: startDate.value,
+        report_end_date: endDate.value,
+        report_return_to: returnTo,
+        ...(request.params.day_of_month ? { report_day_of_month: request.params.day_of_month } : {})
+      }
+    })
     return
   }
   router.push({
@@ -1588,40 +1545,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         <p v-else class="store-business-report__empty">请先完成查询后查看列名取值来源。</p>
       </section>
     </div>
-    <div v-if="craftsmanDrilldown.open" class="store-business-report__modal" role="dialog" aria-modal="true" aria-label="手艺人消耗明细">
-      <section class="store-business-report__modal-card store-business-report__craftsman-drilldown">
-        <header>
-          <div>
-            <strong>{{ craftsmanDrilldown.title }}</strong>
-            <p>明细与所点击金额使用相同的日期、门店、手艺人及数据权限条件。</p>
-          </div>
-          <button type="button" class="store-business-report__modal-close" aria-label="关闭" @click="closeCraftsmanDrilldown">×</button>
-        </header>
-        <p v-if="craftsmanDrilldown.error" class="store-business-report__error" role="alert">{{ craftsmanDrilldown.error }}</p>
-        <div v-else class="store-business-report__craftsman-drilldown-table">
-          <p v-if="craftsmanDrilldown.loading" class="store-business-report__empty">正在读取明细。</p>
-          <template v-else-if="craftsmanDrilldownColumns.length">
-            <table>
-              <thead><tr><th v-for="column in craftsmanDrilldownColumns" :key="column.key">{{ column.label }}</th></tr></thead>
-              <tbody>
-                <tr v-if="craftsmanDrilldownSummary" class="store-business-report__summary-row">
-                  <td v-for="column in craftsmanDrilldownColumns" :key="column.key">{{ formatCell(craftsmanDrilldownSummary[column.key]) }}</td>
-                </tr>
-                <tr v-for="(detailRow, detailIndex) in craftsmanDrilldownRecords" :key="detailRow.fact_id || `${detailRow.order_no_snapshot}-${detailIndex}`">
-                  <td v-for="column in craftsmanDrilldownColumns" :key="column.key">{{ formatCell(detailRow[column.key]) }}</td>
-                </tr>
-                <tr v-if="!craftsmanDrilldownRecords.length"><td :colspan="craftsmanDrilldownColumns.length" class="store-business-report__empty-cell">当前条件下暂无明细。</td></tr>
-              </tbody>
-            </table>
-            <footer v-if="craftsmanDrilldownTotal > craftsmanDrilldownPageSize" class="store-business-report__pagination">
-              <span>共 {{ craftsmanDrilldownTotal }} 条，第 {{ craftsmanDrilldownPage }} / {{ craftsmanDrilldownPageCount }} 页</span>
-              <button type="button" :disabled="craftsmanDrilldownPage <= 1 || craftsmanDrilldown.loading" @click="loadCraftsmanDrilldown(craftsmanDrilldownPage - 1)">上一页</button>
-              <button type="button" :disabled="craftsmanDrilldownPage >= craftsmanDrilldownPageCount || craftsmanDrilldown.loading" @click="loadCraftsmanDrilldown(craftsmanDrilldownPage + 1)">下一页</button>
-            </footer>
-          </template>
-        </div>
-      </section>
-    </div>
     <div v-if="personnelPicker.open" class="store-business-report__modal" role="dialog" aria-modal="true" :aria-label="personnelPicker.label">
       <section class="store-business-report__modal-card">
         <header>
@@ -1691,13 +1614,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(24, 39, 58, .38); }
 .store-business-report__modal-card { width: min(520px, 100%); max-height: min(620px, 90vh); overflow: auto; border-radius: 10px; padding: 18px; background: #fff; box-shadow: 0 16px 50px rgba(24, 39, 58, .2); }
 .store-business-report__modal-card header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-.store-business-report__craftsman-drilldown { width: min(1180px, 100%); max-height: min(760px, 90vh); }
-.store-business-report__craftsman-drilldown header { align-items: flex-start; }
-.store-business-report__craftsman-drilldown header p { margin: 4px 0 0; color: #7a8699; font-size: 12px; font-weight: 400; }
-.store-business-report__craftsman-drilldown-table { max-height: min(570px, calc(90vh - 150px)); overflow: auto; border: 1px solid #e1e7ef; border-radius: 6px; }
-.store-business-report__craftsman-drilldown-table table { min-width: 100%; width: max-content; border-collapse: collapse; }
-.store-business-report__craftsman-drilldown-table th, .store-business-report__craftsman-drilldown-table td { white-space: nowrap; }
-.store-business-report__craftsman-drilldown-table thead th { position: sticky; top: 0; z-index: 2; background: #f3f7fc; }
 .store-business-report__modal-close { border: 0; background: transparent; color: #657386; font-size: 24px; cursor: pointer; }
 .store-business-report__person-search { display: flex; gap: 8px; }
 .store-business-report__person-search input { flex: 1; min-height: 34px; box-sizing: border-box; border: 1px solid #d8e0ea; border-radius: 6px; padding: 6px 8px; font: inherit; }

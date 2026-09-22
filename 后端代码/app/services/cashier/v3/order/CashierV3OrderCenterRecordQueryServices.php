@@ -4,6 +4,7 @@ namespace app\services\cashier\v3\order;
 
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\report\StoreReportNormalDataScopeServices;
 use think\facade\Db;
 
 /**
@@ -232,6 +233,10 @@ final class CashierV3OrderCenterRecordQueryServices
             'businessDateFrom' => $businessDateRange['from'],
             'businessDateTo' => $businessDateRange['to'],
             'topFilters' => $type === 'service' ? $this->serviceTopFilters($payload) : [],
+            // 报表下钻使用业绩事实的发生日期，而非服务记录原始日期；
+            // 冲销发生在后一天时仍须找回原服务记录，且门店权限照常收紧。
+            'servicePerformanceDrilldown' => $type === 'service'
+                ? $this->servicePerformanceDrilldown($payload) : null,
             'sorts' => $type === 'service' ? $this->serviceSorts($payload) : [],
             'allowedStoreIds' => $this->canonicalStoreIds($dataScope->narrowVisibleStores($requestedStores)),
             'tenantId' => $dataScope->tenantId(),
@@ -896,7 +901,23 @@ final class CashierV3OrderCenterRecordQueryServices
             ->where('sf.tenant_id', $scope->tenantId())
             ->where('sf.service_status', 'completed');
         $this->applyStoreScope($query, 'sf.store_id', $criteria['allowedStoreIds']);
-        $this->applyBusinessDateRange($query, 'sf.business_date', $criteria);
+        $performanceDrilldown = $criteria['servicePerformanceDrilldown'] ?? null;
+        if ($performanceDrilldown === null) {
+            $this->applyBusinessDateRange($query, 'sf.business_date', $criteria);
+        } else {
+            // EXISTS 保持一条服务项目事实只出现一次；按员工编号和事实日期精确筛选，
+            // 不用姓名快照做模糊匹配，也不因同一记录有多次调整而重复列表行。
+            $query->whereExists(function ($fact) use ($performanceDrilldown): void {
+                $fact->name('cashier_v3_performance_fact')->alias('pf')
+                    ->whereRaw('pf.tenant_id=sf.tenant_id AND pf.store_id=sf.store_id AND pf.checkout_request_id=sf.checkout_request_id AND pf.source_line_id=sf.source_line_id')
+                    ->where('pf.performance_type', 'labor_performance_allocated')
+                    ->where('pf.status', 'effective')
+                    ->where('pf.employee_id', $performanceDrilldown['employeeId']);
+                (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($fact, 'pf.tenant_id', 'pf.order_id');
+                $this->applyPerformanceDrilldownDate($fact, $performanceDrilldown, 'pf.business_date');
+            });
+            $query->where('sf.store_id', $performanceDrilldown['storeId']);
+        }
         $this->applyKeyword($query, $criteria['keyword'], [
             'sf.service_record_no', 'sf.member_name_snapshot', 'sf.project_name_snapshot',
             'sf.store_name_snapshot', 'sf.operator_name_snapshot', 'sf.craftsmen_snapshot_json',
@@ -929,8 +950,10 @@ final class CashierV3OrderCenterRecordQueryServices
             'vo.operator_name_snapshot AS void_operator_name', 'vo.operation_no AS void_operation_no',
         ]));
         $laborByLine = $this->laborPerformanceByServiceLine($rows, $scope->tenantId());
+        $reportFactsByLine = $performanceDrilldown === null ? []
+            : $this->servicePerformanceFactsByLine($rows, $scope->tenantId(), $performanceDrilldown);
 
-        return [array_map(function (array $row) use ($laborByLine): array {
+        return [array_map(function (array $row) use ($laborByLine, $reportFactsByLine, $performanceDrilldown): array {
             $key = $this->serviceLineKey($row);
             $labor = $laborByLine[$key] ?? [
                 'amountCents' => 0, 'laborFeeCents' => 0, 'projectCountHalfUnits' => 0, 'projectCountDecimal' => null,
@@ -946,6 +969,13 @@ final class CashierV3OrderCenterRecordQueryServices
             // 尚未形成可读业绩分配的历史服务记录。
             $craftsmen = implode('、', $labor['names']);
             if ($craftsmen === '') $craftsmen = $this->craftsmenSummary((string)$row['craftsmen_snapshot_json']);
+            $reportFacts = $reportFactsByLine[$key] ?? [];
+            $reportAmountCents = array_sum(array_column($reportFacts, 'amountCents'));
+            $reportLaborCents = array_sum(array_column($reportFacts, 'laborFeeCents'));
+            // 作废后当前有效人员分配归零，但历史日报仍包含作废前的正向事实。
+            // 报表下钻单独展示所点日期、所点员工的事实分配，不恢复为当前有效业绩。
+            $reportCraftsmen = $performanceDrilldown !== null && !empty($row['void_operation_id'])
+                ? $this->reportCraftsmenListAllocations($reportFacts) : [];
             return [
                 'id' => 'service:' . $row['id'],
                 'serviceFactId' => (int)$row['id'],
@@ -995,6 +1025,12 @@ final class CashierV3OrderCenterRecordQueryServices
                 ),
                 'operatorName' => (string)$row['operator_name_snapshot'],
                 'serviceStatus' => !empty($row['void_operation_id']) ? '已作废' : '已完成',
+                // 仅报表下钻附加所点单元格的事实贡献；普通订单列表仍展示当前
+                // 有效分配，历史冲销不覆盖原始服务记录及其现状。
+                'reportPerformanceAmount' => $performanceDrilldown === null ? null : $this->centsToMoney($reportAmountCents),
+                'reportLaborAmount' => $performanceDrilldown === null ? null : $this->centsToMoney($reportLaborCents),
+                'reportPerformanceFacts' => $reportFacts,
+                'reportCraftsmenListAllocations' => $reportCraftsmen,
                 'serviceCompletedAt' => $this->dateTime((int)($row['settled_at'] ?: $row['occurred_at'])),
                 'voidedAt' => !empty($row['voided_at']) ? $this->dateTime((int)$row['voided_at']) : '',
                 'voidReason' => (string)($row['void_reason'] ?? ''),
@@ -1002,6 +1038,100 @@ final class CashierV3OrderCenterRecordQueryServices
                 'voidOperationNo' => (string)($row['void_operation_no'] ?? ''),
             ];
         }, $rows), $total];
+    }
+
+    /** @return array{employeeId:int,storeId:int,from:string,to:string,dayOfMonth:int}|null */
+    private function servicePerformanceDrilldown(array $payload): ?array
+    {
+        $raw = $payload['servicePerformanceDrilldown'] ?? null;
+        if (!is_array($raw)) return null;
+        $employeeId = (int)($raw['employeeId'] ?? 0);
+        $storeId = (int)($raw['storeId'] ?? 0);
+        $from = $this->validBusinessDate($raw['from'] ?? '');
+        $to = $this->validBusinessDate($raw['to'] ?? '');
+        $day = (int)($raw['dayOfMonth'] ?? 0);
+        if ($employeeId <= 0 || $storeId <= 0 || $from === '' || $to === '' || $from > $to || $day < 0 || $day > 31) {
+            throw new \InvalidArgumentException('service_performance_drilldown_invalid');
+        }
+        return ['employeeId' => $employeeId, 'storeId' => $storeId, 'from' => $from, 'to' => $to, 'dayOfMonth' => $day];
+    }
+
+    private function applyPerformanceDrilldownDate($query, array $drilldown, string $field): void
+    {
+        $query->where($field, '>=', $drilldown['from'])->where($field, '<=', $drilldown['to']);
+        if ($drilldown['dayOfMonth'] > 0) {
+            $query->whereRaw('DAY(' . $field . ')=?', [$drilldown['dayOfMonth']]);
+        }
+    }
+
+    /**
+     * 按服务来源行取回报表同一批有效业绩事实，逐笔保留正向与冲销。
+     * 返回金额始终为分转换后的展示值，不拿订单页当前净额倒推历史日报。
+     */
+    private function servicePerformanceFactsByLine(array $serviceRows, string $tenantId, array $drilldown): array
+    {
+        if ($serviceRows === []) return [];
+        $checkoutIds = array_values(array_unique(array_column($serviceRows, 'checkout_request_id')));
+        $lineIds = array_values(array_unique(array_column($serviceRows, 'source_line_id')));
+        $query = Db::name('cashier_v3_performance_fact')->alias('pf')
+            ->where('pf.tenant_id', $tenantId)
+            ->where('pf.performance_type', 'labor_performance_allocated')
+            ->where('pf.status', 'effective')
+            ->where('pf.employee_id', $drilldown['employeeId'])
+            ->where('pf.store_id', $drilldown['storeId'])
+            ->whereIn('pf.checkout_request_id', $checkoutIds)
+            ->whereIn('pf.source_line_id', $lineIds);
+        $this->applyPerformanceDrilldownDate($query, $drilldown, 'pf.business_date');
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'pf.tenant_id', 'pf.order_id');
+        $facts = $query->field('pf.store_id,pf.checkout_request_id,pf.source_line_id,pf.business_date,pf.fact_direction,pf.amount_cents,pf.labor_fee_amount_cents,pf.employee_name_snapshot,pf.role_snapshot')
+            ->order('pf.business_date', 'asc')->order('pf.id', 'asc')->select()->toArray();
+        $allowedLines = [];
+        foreach ($serviceRows as $row) $allowedLines[$this->serviceLineKey($row) . '|' . (int)$row['store_id']] = true;
+        $byLine = [];
+        foreach ($facts as $fact) {
+            $key = $this->serviceLineKey($fact);
+            if (!isset($allowedLines[$key . '|' . (int)$fact['store_id']])) continue;
+            $byLine[$key][] = [
+                'businessDate' => (string)$fact['business_date'],
+                'direction' => (string)$fact['fact_direction'] === 'reversal' ? '冲销' : '正常',
+                'amountCents' => (int)$fact['amount_cents'],
+                'amount' => $this->centsToMoney((int)$fact['amount_cents']),
+                'laborFeeCents' => (int)$fact['labor_fee_amount_cents'],
+                'laborFee' => $this->centsToMoney((int)$fact['labor_fee_amount_cents']),
+                'employeeName' => trim((string)$fact['employee_name_snapshot']),
+                'roleSnapshot' => (string)$fact['role_snapshot'],
+            ];
+        }
+        return $byLine;
+    }
+
+    /**
+     * 作废记录的报表人员栏只解释当前点击单元格的历史事实。取事实中的员工姓名
+     * 和点/轮快照，正负金额原样保留；不得从已归零的当前分配反推或重记业绩。
+     */
+    private function reportCraftsmenListAllocations(array $facts): array
+    {
+        if ($facts === []) return [];
+        $name = '';
+        $pointCustomer = null;
+        $amountCents = 0;
+        $laborCents = 0;
+        foreach ($facts as $fact) {
+            if ($name === '' && (string)($fact['employeeName'] ?? '') !== '') $name = (string)$fact['employeeName'];
+            if ($pointCustomer === null) {
+                $pointCustomer = $this->pointCustomerFromRoleSnapshot((string)($fact['roleSnapshot'] ?? ''));
+            }
+            $amountCents += (int)($fact['amountCents'] ?? 0);
+            $laborCents += (int)($fact['laborFeeCents'] ?? 0);
+        }
+        if ($name === '') return [];
+        return [[
+            'employeeName' => $name,
+            'isPointCustomer' => $pointCustomer,
+            'amount' => $this->centsToMoney($amountCents),
+            'laborFeeAmount' => $this->centsToMoney($laborCents),
+            'projectCount' => null,
+        ]];
     }
 
     /**

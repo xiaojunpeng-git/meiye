@@ -275,6 +275,9 @@ const FIELD_ALIASES = {
   labor_performance_amount: ['laborPerformanceAmount'], service_status: ['serviceStatus'],
   project_count: ['projectCount'],
   detail_remark: ['detailRemark'],
+  report_performance_amount: ['reportPerformanceAmount'],
+  report_labor_amount: ['reportLaborAmount'],
+  report_performance_facts: ['reportPerformanceFacts'],
   service_completed_at: ['serviceCompletedAt', 'completedAt'], voided_at: ['voidedAt'],
   void_reason: ['voidReason'], void_operator: ['voidOperatorName']
 }
@@ -283,6 +286,45 @@ const state = useCashierV3State()
 const router = useRouter()
 const route = useRoute()
 const isPlatformReadOnly = computed(() => route.meta.platformReadOnly === true)
+const serviceReportDrilldown = computed(() => {
+  if (String(route.query.tab || '') !== 'service') return null
+  const employeeId = Number(route.query.report_employee_id)
+  const storeId = Number(route.query.report_store_id)
+  const from = String(route.query.report_start_date || '')
+  const to = String(route.query.report_end_date || '')
+  const dayOfMonth = Number(route.query.report_day_of_month || 0)
+  if (!Number.isSafeInteger(employeeId) || employeeId <= 0 || !Number.isSafeInteger(storeId) || storeId <= 0
+    || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to
+    || !Number.isInteger(dayOfMonth) || dayOfMonth < 0 || dayOfMonth > 31) return null
+  return { employeeId, storeId, from, to, dayOfMonth }
+})
+const serviceReportDateLabel = computed(() => {
+  const drill = serviceReportDrilldown.value
+  if (!drill) return ''
+  if (drill.dayOfMonth === 0) return `${drill.from} 至 ${drill.to}`
+  return drill.from.slice(0, 7) === drill.to.slice(0, 7)
+    ? `${drill.from.slice(0, 7)}-${String(drill.dayOfMonth).padStart(2, '0')}`
+    : `${drill.from} 至 ${drill.to} 中的每月 ${drill.dayOfMonth} 日`
+})
+const serviceReportReturnLocation = computed(() => {
+  const drill = serviceReportDrilldown.value
+  if (!drill) return null
+  const reportRouteName = isPlatformReadOnly.value
+    ? 'cashier-v3-platform-store-business-reports'
+    : 'cashier-v3-store-business-reports'
+  const returnTo = route.query.report_return_to
+  if (typeof returnTo === 'string' && returnTo.startsWith('/') && !returnTo.startsWith('//') && returnTo.length <= 4096) {
+    const resolved = router.resolve(returnTo)
+    // 仅接受本端的手艺人消耗报表，不能把 URL 参数当成任意跳转地址。
+    if (resolved.name === reportRouteName && resolved.params.report === 'store_craftsman_consumption') return resolved.fullPath
+  }
+  // 旧下钻链接没有返回地址时，仍可返回同一报表及日期范围。
+  return {
+    name: reportRouteName,
+    params: { report: 'store_craftsman_consumption' },
+    query: { start_date: drill.from, end_date: drill.to }
+  }
+})
 const platformScopePicker = ref({ loading: false, tree: [], allowedStoreIds: [], label: '当前权限范围' })
 const platformScopeStoreIds = ref([])
 const orderCenter = computed(() => state.orderCenter || {})
@@ -293,7 +335,7 @@ const availableTabs = computed(() => {
   // 时把其余七个入口隐藏。
   if (isPlatformReadOnly.value) return ORDER_TABS
   const advertised = Array.isArray(orderCenter.value.businessTypes) ? orderCenter.value.businessTypes : []
-  if (!advertised.length) return ORDER_TABS.filter((tab) => tab.key === 'sales')
+  if (!advertised.length) return serviceReportDrilldown.value ? ORDER_TABS : ORDER_TABS.filter((tab) => tab.key === 'sales')
   const readyKeys = new Set()
   advertised.forEach((item) => {
     if (item && typeof item === 'object' && item.ready === false) return
@@ -365,6 +407,12 @@ const visibleFields = computed(() => {
       const [salesperson] = fields.splice(salespersonIndex, 1)
       fields.splice(amountIndex, 0, salesperson)
     }
+  }
+  if (activeTabKey.value === 'service' && serviceReportDrilldown.value) {
+    // 下钻列只出现在报表入口；普通服务记录列表不改变原有字段配置。
+    fields.push(field('report_performance_amount', '本次报表消耗', 'money'))
+    fields.push(field('report_labor_amount', '本次报表手工', 'money'))
+    fields.push(field('report_performance_facts', '本次报表逐笔明细'))
   }
   return fields
 })
@@ -560,7 +608,20 @@ function firstValue(record, keys) {
 function recordFieldValue(record, key) {
   // The service list and detail must show the same per-person snapshot; the
   // editable action still receives the untouched authority record.
-  if (key === 'craftsman' && activeTabKey.value === 'service') return serviceCraftsmenPerformanceText(record)
+  if (key === 'craftsman' && activeTabKey.value === 'service') {
+    // 报表下钻的作废服务显示所点日期的历史分配；普通列表仍显示当前有效分配。
+    const historical = serviceReportDrilldown.value && record?.serviceStatus === '已作废'
+      ? record?.reportCraftsmenListAllocations : null
+    if (Array.isArray(historical) && historical.length) {
+      return serviceCraftsmenPerformanceText({ craftsmenListAllocations: historical })
+    }
+    return serviceCraftsmenPerformanceText(record)
+  }
+  if (key === 'report_performance_facts') {
+    return (Array.isArray(record?.reportPerformanceFacts) ? record.reportPerformanceFacts : [])
+      .map((fact) => `${fact.businessDate} ${fact.direction} 消耗 ${Number(fact.amountCents) > 0 ? '+' : ''}${formatMoney(fact.amount)}、手工 ${Number(fact.laborFeeCents) > 0 ? '+' : ''}${formatMoney(fact.laborFee)}`)
+      .join('；')
+  }
   if (key === 'supplement') return record?.isSupplement === true ? '补单' : (record?.isSupplement === false ? '正常办理' : firstValue(record, FIELD_ALIASES[key] || [key]))
   return firstValue(record, [...(FIELD_ALIASES[key] || []), key])
 }
@@ -1223,6 +1284,39 @@ function defaultOrderCenterDateQuery() {
   }
 }
 
+function reportServiceDateQuery() {
+  const drill = serviceReportDrilldown.value
+  if (!drill) return null
+  return {
+    // 选择“全部数据”才能看见已作废原服务记录；服务记录的当前状态
+    // 与当日业绩事实并列展示，不能用当前净额覆盖历史发生日金额。
+    dataScope: 'all', businessStatus: '', status: '', keyword: '', sorts: [], storeIds: [drill.storeId],
+    dateFrom: drill.from, dateTo: drill.to,
+    businessDateFrom: drill.from, businessDateTo: drill.to,
+    topFilters: [
+      { field: 'business_date', operator: 'gte', value: drill.from },
+      { field: 'business_date', operator: 'lte', value: drill.to }
+    ],
+    servicePerformanceDrilldown: {
+      employeeId: drill.employeeId, storeId: drill.storeId,
+      from: drill.from, to: drill.to, dayOfMonth: drill.dayOfMonth
+    }
+  }
+}
+
+function initialOrderCenterQuery() {
+  return reportServiceDateQuery() || defaultOrderCenterDateQuery()
+}
+
+function leaveServiceReportDrilldown() {
+  queryModelByType.value = { ...queryModelByType.value, service: {} }
+  router.replace({ name: route.name, query: { tab: 'service' } })
+}
+
+function returnToServiceReport() {
+  if (serviceReportReturnLocation.value) router.push(serviceReportReturnLocation.value)
+}
+
 // 销售订单的范围由统一工具栏驱动：正常数据必须落到后端 normal
 // 状态过滤，全部数据才允许使用空状态；不能在前端拿当前页再隐藏。
 function normalizeSalesOrderQuery(query = {}) {
@@ -1287,6 +1381,7 @@ async function queryRecords(query = {}, resetPage = true) {
     const nextQuery = normalizeOrderCenterDateQuery(applyPlatformScope({
       ...currentQuery,
       ...query,
+      ...(recordType === 'service' ? reportServiceDateQuery() || {} : {}),
       recordType,
       page: targetPage,
       pageSize: requestedPageSize
@@ -2084,7 +2179,7 @@ onMounted(() => {
 watch(isPlatformReadOnly, (readOnly) => {
   if (readOnly) {
     void loadPlatformOrderScope()
-    queryRecords(defaultOrderCenterDateQuery(), true)
+    queryRecords(initialOrderCenterQuery(), true)
   }
 }, { immediate: true })
 
@@ -2095,11 +2190,15 @@ watch(activeTabKey, () => {
 }, { immediate: true })
 
 watch(
-  () => String(route.query.tab || route.query.recordType || '').trim(),
-  (tab) => {
-    if (!isPlatformReadOnly.value || !ORDER_TABS.some((item) => item.key === tab) || tab === activeTabKey.value) return
-    activeTabKey.value = tab
-    queryRecords(defaultOrderCenterDateQuery(), true)
+  () => route.fullPath,
+  () => {
+    const requestedTab = String(route.query.tab || route.query.recordType || '').trim()
+    if (!ORDER_TABS.some((item) => item.key === requestedTab)) return
+    if (!serviceReportDrilldown.value && queryModelByType.value.service?.servicePerformanceDrilldown) {
+      queryModelByType.value = { ...queryModelByType.value, service: {} }
+    }
+    if (requestedTab !== activeTabKey.value) activeTabKey.value = requestedTab
+    if (isPlatformReadOnly.value || state.stateContextId) queryRecords(initialOrderCenterQuery(), true)
   }
 )
 
@@ -2114,7 +2213,7 @@ watch(
     // 首屏的页面能力请求可能发生在工作台上下文建立之前。上下文就绪后重试当前
     // 页签，避免安全降级状态把“导出”一直隐藏到手工刷新为止。
     activeUnifiedQuery.value?.load({ silent: true })
-    queryRecords(defaultOrderCenterDateQuery(), true)
+    queryRecords(initialOrderCenterQuery(), true)
   },
   { immediate: true }
 )
@@ -2153,8 +2252,14 @@ onBeforeUnmount(() => {
 
     <p v-if="!isPlatformReadOnly && serviceVoidNotice" class="order-center-notice" role="status">{{ serviceVoidNotice }}</p>
     <p v-if="!isPlatformReadOnly && servicePrintError" class="order-center-page__inline-error" role="alert">{{ servicePrintError }}</p>
+    <p v-if="activeTabKey === 'service' && serviceReportDrilldown" class="order-center-notice" role="status">
+      正在查看 {{ serviceReportDateLabel }} 的手艺人业绩对应服务记录（含作废记录）。本次报表消耗保留正常与冲销逐笔金额；服务记录的业务日期可能早于冲销日期。
+      <button type="button" class="button button--text" @click="returnToServiceReport">返回报表</button>
+      <button type="button" class="button button--text" @click="leaveServiceReportDrilldown">退出报表筛选</button>
+    </p>
 
     <UnifiedQueryToolbar
+      v-if="!serviceReportDrilldown"
       class="order-center-query-toolbar"
       :key="activeTabKey"
       :search-placeholder="activeTab.searchPlaceholder"

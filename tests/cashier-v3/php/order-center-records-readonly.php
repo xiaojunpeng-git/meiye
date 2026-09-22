@@ -137,11 +137,34 @@ $serviceCall = $calls[count($calls) - 1]['context']['criteria'] ?? [];
 recordOk('服务记录进入同一只读查询契约', $servicePage['recordType'] === 'service'
     && $servicePage['total'] === 1
     && count($calls) === $beforeBlocked + 1);
-recordOk('服务统一查询只接受白名单筛选与排序字段', ($serviceCall['topFilters'] ?? []) === [
-    'business_date' => '2026-08-02', 'member_name' => '会员甲',
-] && ($serviceCall['sorts'] ?? []) === [[
+recordOk('服务统一查询只接受白名单筛选与排序字段', ($serviceCall['businessDateFrom'] ?? '') === '2026-08-02'
+    && ($serviceCall['businessDateTo'] ?? '') === '2026-08-02'
+    && ($serviceCall['topFilters'] ?? []) === ['member_name' => '会员甲']
+    && ($serviceCall['sorts'] ?? []) === [[
     'field' => 'service_completed_at', 'direction' => 'asc',
 ]], $serviceCall);
+$drillPayload = [
+    'recordType' => 'service', 'storeIds' => [133], 'dataScope' => 'all',
+    'servicePerformanceDrilldown' => [
+        'employeeId' => 1233, 'storeId' => 133,
+        'from' => '2026-09-01', 'to' => '2026-09-23', 'dayOfMonth' => 19,
+    ],
+];
+$service->queryRecords($drillPayload, $operator, $storesScope);
+$drillCriteria = $calls[count($calls) - 1]['context']['criteria'] ?? [];
+recordOk('手艺人报表下钻保留员工、门店、事实发生日期和作废审计范围',
+    ($drillCriteria['servicePerformanceDrilldown'] ?? null) === $drillPayload['servicePerformanceDrilldown']
+    && ($drillCriteria['allowedStoreIds'] ?? []) === [133]
+    && ($drillCriteria['dataScope'] ?? '') === 'all');
+$drillCalls = count($calls);
+$blockedDrill = $service->queryRecords(array_replace($drillPayload, ['storeIds' => [999]]), $operator, $storesScope);
+recordOk('手艺人报表下钻不得越过订单中心门店权限',
+    $blockedDrill['total'] === 0 && count($calls) === $drillCalls);
+recordOk('手艺人报表下钻按事实日期而非服务日期过滤原记录',
+    strpos($orderCenterSource, "if (\$performanceDrilldown === null)") !== false
+    && strpos($orderCenterSource, "\$this->applyBusinessDateRange(\$query, 'sf.business_date', \$criteria)") !== false
+    && strpos($orderCenterSource, "\$this->applyPerformanceDrilldownDate(\$fact, \$performanceDrilldown, 'pf.business_date')") !== false
+    && strpos($orderCenterSource, "->whereExists(function (\$fact) use (\$performanceDrilldown)") !== false);
 recordOk('订单中心关键词检索统一转换历史 ascii 编号与中文字段，避免中文查询排序规则冲突',
     strpos($orderCenterSource, 'CONVERT(') !== false
     && strpos($orderCenterSource, 'USING utf8mb4') !== false
@@ -152,7 +175,7 @@ recordOk('订单中心关键词检索统一转换历史 ascii 编号与中文字
 $invalid = $service->queryRecords(['recordType' => 'unknown'], $operator, $storesScope);
 recordOk('不在订单中心清单中的记录类型被拒绝', $invalid['recordType'] === ''
     && $invalid['total'] === 0
-    && count($calls) === $beforeBlocked + 1);
+    && count($calls) === $drillCalls);
 
 $counts = $service->counts($operator, $storesScope);
 recordOk('页签数量使用同一服务端 DataScope', $counts === [

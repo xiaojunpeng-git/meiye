@@ -8,6 +8,7 @@ const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'u
 const router = read('前端代码/cashier-v3/src/router/index.js')
 const shell = read('前端代码/cashier-v3/src/layouts/CashierShell.vue')
 const view = read('前端代码/cashier-v3/src/views/StoreBusinessReportView.vue')
+const orderCenterView = read('前端代码/cashier-v3/src/views/OrderCenterView.vue')
 const selectorService = read('后端代码/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php')
 const api = read('前端代码/cashier-v3/src/services/storeBusinessReportApi.js')
 const route = read('后端代码/route/cashier-v3.php')
@@ -49,8 +50,9 @@ const reportCodes = [
   'store_refund_ledger'
 ]
 check('report functions are upper-page tabs', reportCodes.every((code) => view.includes(`code: '${code}'`)) && view.includes('const REPORT_TABS') && view.includes('store-business-report__tabs') && view.includes('v-for="item in reportTabs"') && !view.includes("activeReport === 'overview'"))
-check('craftsman consumption uses a hidden, server-declared fact-detail drilldown', view.includes("code: 'store_craftsman_consumption_detail', name: '手艺人消耗明细', hidden: true") && view.includes('allowedReportTabs.value.filter((tab) => !tab.hidden)') && view.includes('function drilldownConfig') && view.includes('function openDrilldown'))
-check('craftsman consumption detail opens in a same-condition modal instead of leaving the report', view.includes("request.report === 'store_craftsman_consumption_detail'") && view.includes('openCraftsmanDrilldown(request)') && view.includes('queryStoreBusinessReport(reportParams({') && view.includes('craftsmanDrilldown.open') && view.includes('aria-label="手艺人消耗明细"') && view.includes('明细与所点击金额使用相同的日期、门店、手艺人及数据权限条件。'))
+check('craftsman consumption keeps the audited fact-detail API but does not expose it as a navigation tab', view.includes("code: 'store_craftsman_consumption_detail', name: '手艺人消耗明细', hidden: true") && view.includes('allowedReportTabs.value.filter((tab) => !tab.hidden)') && view.includes('function drilldownConfig'))
+check('craftsman consumption opens exact service records directly instead of the old modal', view.includes("request.report === 'order_center_service'") && view.includes("name: isPlatformReport.value ? 'cashier-v3-platform-order-center' : 'cashier-v3-order-center'") && view.includes('report_employee_id: request.params.craftsman_id') && view.includes('report_day_of_month: request.params.day_of_month') && !view.includes('craftsmanDrilldown.open'))
+check('service-record drilldown can return to the original report filters', view.includes('report_return_to: returnTo') && view.includes('query: currentRouteQuery()') && orderCenterView.includes('返回报表') && orderCenterView.includes('function returnToServiceReport()') && orderCenterView.includes("resolved.params.report === 'store_craftsman_consumption'"))
 check('phase-two reports are dispatched by the unified report service', reportService.includes('StoreUnifiedReportPhaseTwoServices') && reportCodes.slice(6).every((code) => phaseTwoReportService.includes(`'${code}'`)))
 check('report tabs preserve the active runtime in stable deep links', router.includes("path: 'data/reports/:report?'") && router.includes("path: '/platform/reports/:report?'") && view.includes("router.push({ name: reportRouteName.value, params: { report: code } })"))
 check('all 22 store-operation reports default to the first day of the current month', view.includes('All 22 store-operation reports use one date-range default') && view.includes('!route.query?.start_date && !route.query?.end_date') && view.includes("startDate.value = `${today().slice(0, 7)}-01`") && view.includes('endDate.value = today()'))

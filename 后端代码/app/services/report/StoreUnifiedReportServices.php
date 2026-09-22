@@ -899,14 +899,14 @@ class StoreUnifiedReportServices extends BaseServices
     }
 
     /**
-     * 手艺人消耗汇总的每一个可点金额都显式声明其明细条件。日列按“所选范围
-     * 内业务日期的日号”下钻，因而跨月范围也不会被前端误解为某一个自然日期。
+     * 手艺人消耗汇总直接下钻订单中心的服务记录，而非停留在内部事实弹窗。
+     * 日列仍按所选范围内的日号匹配事实发生日，跨月时不得擅自缩成单一天。
      */
     private function craftsmanConsumptionDrilldown(int $dayOfMonth = 0): array
     {
         $params = $dayOfMonth >= 1 && $dayOfMonth <= 31 ? ['day_of_month' => $dayOfMonth] : [];
         return [
-            'report' => 'store_craftsman_consumption_detail',
+            'report' => 'order_center_service',
             'params' => $params,
             'param_map' => ['craftsman_id' => 'employee_id', 'store_ids' => 'store_id'],
         ];
