@@ -861,7 +861,78 @@ final class AiGatewayServices
 
     private function understandAnalysis(array $context,array $owner,string $id,int $generation,string $worker,array $body,array $projection,array $configuration): array
     {
-        $caps=$this->capabilities($this->fresh($context));$runtimeSkills=$this->registry()->modelSkills('store_operations');$dictionary=new \app\services\metric\MetricDictionaryServices();$summaries=[];
+        $freshContext=$this->fresh($context);
+        if ($this->permissionHash($freshContext)!==$this->permissionHash($context)) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
+        $caps=$this->capabilities($freshContext);
+        $checkpoint=function()use($context,$owner,$id,$generation,$worker,$configuration):void {
+            $this->runs->checkpoint($owner,$id,$generation,$worker);
+            $current=$this->config->read();
+            if ($current['version']!==$configuration['version'] || !AiConfigStore::allowsSanitizedQuestion($current)
+                || $this->permissionHash($this->fresh($context))!==$this->permissionHash($context)) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
+        };
+        $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
+        $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
+        // Restore any signed predecessor before deciding whether this complete
+        // question can stand alone. A selected store or business filter is not
+        // discarded merely because the new wording names a metric and date.
+        $sourceContext=isset($body['context_ref'])?$this->restoreContext($context,$owner,$body['context_ref']):null;
+        $priorQueries=isset($sourceContext['items'])?array_column($sourceContext['items'],'query'):
+            (isset($sourceContext['query'])?[$sourceContext['query']]:[]);
+        $independent=true;
+        foreach ($priorQueries as $priorQuery) {
+            if (!is_array($priorQuery) || !empty($priorQuery['store_ids']) || !empty($priorQuery['business_filters'])
+                || !empty($priorQuery['aggregate_condition']) || !empty($priorQuery['condition_set'])) {
+                $independent=false;break;
+            }
+        }
+        $admission=new \app\services\ai\semantic\AiDeterministicSummaryAdmission();
+        if ($independent) {
+            $match=$admission->match(
+                (string)$body['question'],\app\services\query\metric\MetricSemanticCatalog::entries()
+            );
+            if ($match!==null) {
+                $metric=$match['metric_code'];
+                $contract=\app\services\query\metric\MetricDefinitionRegistry::capabilities()[$metric]??null;
+                // Only a registered store summary may enter this narrow path.
+                // Known but unavailable metrics stay a capability result; the
+                // model must not choose a different readable measurement.
+                if (is_array($contract) && ($contract['filter_grain']??null)==='store') {
+                    if (!in_array($metric,$caps['metric_codes'],true)) throw new RuntimeException('AI_CAPABILITY_NOT_READY');
+                    $checkpoint();
+                    $projection['signals']=[$metric,'summary'];
+                    $projection['date_terms']=[$match['date_term']];
+                    $caps['current_store_bound']=\app\services\ai\execution\AiAuthority::currentStoreId($context)!==null;
+                    $compiled=(new AiWorkflowPlanner())->compile($projection,[
+                        'decision'=>'query','query_shape'=>'summary','metric_codes'=>[$metric],'object_kind'=>'store'
+                    ],$caps,$body['output_format'],$today);
+                    if (($compiled['kind']??null)==='plan') {
+                        $compiled['_context_meaning']=['presentation_origin'=>'customer_or_verified_context'];
+                        $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'deterministic_registered_summary_admitted');
+                    }
+                    return $compiled;
+                }
+            }
+        }
+        // A complete calendar-only continuation has no new metric or object
+        // to bind. Reuse the already replayed signed query and change exactly
+        // its period; the normal executor still rechecks every fact and grant.
+        // Comparisons and collections retain their existing contextual path.
+        $periodTerm=isset($sourceContext['query'])?$admission->periodOnly((string)$body['question']):null;
+        if ($periodTerm!==null) {
+            $query=$sourceContext['query'];
+            $shape=$query['query_shape']??null;
+            if (in_array($shape,['summary','trend','ranking','threshold_count','condition_count','condition_list'],true)
+                && ($query['compare_range']??null)===null) {
+                $checkpoint();
+                $range=(new AiWorkflowPlanner())->normalizePeriod($periodTerm,$today);
+                $query['start_date']=$range['start'];$query['end_date']=$range['end'];
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_period_only_summary_reused');
+                return ['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_'.$shape,
+                    'query'=>$query,'output_format'=>$body['output_format']],
+                    '_context_meaning'=>(array)($sourceContext['meaning']??[])];
+            }
+        }
+        $runtimeSkills=$this->registry()->modelSkills('store_operations');$dictionary=new \app\services\metric\MetricDictionaryServices();$summaries=[];
         $objectVocabulary=$this->analysisObjectVocabulary($caps);
         foreach ($caps['metric_codes'] as $code) {
             $tooltip=$dictionary->getTooltip($code);if (($tooltip['user_ready']??false)!==true) continue;
@@ -900,12 +971,6 @@ final class AiGatewayServices
         // definition alone therefore never becomes an executable AI choice.
         $personMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,'person');
         $memberMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,'member','summary');
-        $checkpoint=function()use($context,$owner,$id,$generation,$worker,$configuration):void {
-            $this->runs->checkpoint($owner,$id,$generation,$worker);
-            $current=$this->config->read();
-            if ($current['version']!==$configuration['version'] || !AiConfigStore::allowsSanitizedQuestion($current)
-                || $this->permissionHash($this->fresh($context))!==$this->permissionHash($context)) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
-        };
         $localCatalogs=[];$memberCatalog=['objects'=>[]];$privateLabels=[];$privateKinds=[];$privateKindsByReference=[];
         if ($personMetrics) {
             // Pre-plan metadata discovery is a bounded, server-owned catalog read,
@@ -980,8 +1045,6 @@ final class AiGatewayServices
             if (($message['id']??null)==='current') $safe['outbound']['evidence_messages'][$index]['text']=$safe['outbound']['question'];
         }
         $safe['outbound']['has_unresolved_conditions']=(bool)$safe['local_conditions'];
-        $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
-        $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
         // The reference date is server-owned context, not a guessed reading of
         // customer language.  Relative time is interpreted by the model and
         // then materialized below with this value.
@@ -990,7 +1053,6 @@ final class AiGatewayServices
         // A signed answer reference is useful conversation context, not a
         // shortcut around natural-language understanding.  It is verified and
         // reduced to non-sensitive query meaning before the model sees it.
-        $sourceContext=isset($body['context_ref'])?$this->restoreContext($context,$owner,$body['context_ref']):null;
         $sourceCollection=is_array($sourceContext['items']??null)?$sourceContext['items']:[];
         $sourceQuery=$sourceContext['query']??($sourceCollection[0]['query']??null);
         if ($sourceQuery!==null) {

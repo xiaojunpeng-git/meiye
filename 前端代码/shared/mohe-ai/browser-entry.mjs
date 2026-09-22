@@ -88,7 +88,9 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   }
   function refreshElapsed() {
     if (!activeRunStatus) return;
-    const seconds = Math.max(0, Math.floor((Date.now() - clientDeliveryStartedAt) / 1000));
+    // An admission refusal can clear the start timestamp before a timer tick;
+    // never turn that sentinel into an epoch-length customer-facing wait.
+    const seconds = completedElapsedSeconds();
     activeRunStatus.elapsed.textContent = '已处理 ' + seconds + ' 秒';
   }
   function completedElapsedSeconds() {
@@ -642,7 +644,9 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         return;
       }
       if (accepted && accepted.accepted === false) {
-        clearActive(); pendingCreate = null; clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); send.disabled = false; send.textContent = '发送'; progress.textContent = accepted.message || '当前使用人数较多，请稍后再问。'; return;
+        // Admission refused before a Run exists: retire the transient timer
+        // and controls, but preserve the visible question for a deliberate retry.
+        clearActive(); pendingCreate = null; finishActiveRunStatus(); clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); send.disabled = false; send.textContent = '发送'; progress.textContent = accepted.message || '当前使用人数较多，请稍后再问。'; syncWorkspaceActions(); return;
       }
       await update(accepted); persistActive();
       // A page replacement leaves the customer task alive.  An explicit close
@@ -659,7 +663,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       progress.textContent = error.responseKnown ? error.message : '请求结果暂未确认。';
       if (run) { persistActive(); clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000); }
       else {
-        if (error.responseKnown) { clearActive(); pendingCreate = null; clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); }
+        if (error.responseKnown) { clearActive(); pendingCreate = null; finishActiveRunStatus(); clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); }
         else persistActive();
         send.disabled = false; send.textContent = error.responseKnown ? '发送' : '重试确认'; input.value = question;
       }

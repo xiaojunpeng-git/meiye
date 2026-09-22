@@ -87,9 +87,11 @@ try {
  $tooltip=(new app\services\metric\MetricDictionaryServices())->getTooltip('consume_amount');
  verifyGateway(is_array($tooltip) && isset($tooltip['summary'],$tooltip['include'],$tooltip['exclude'],$tooltip['timing'],$tooltip['note']),
      'complete natural language metric tooltip remains available from the dictionary');
- verifyGateway($models===2 && $queries===1,'understanding, exact registered binding admission and one query');
+ verifyGateway($models===0 && $queries===1,'complete registered summary reaches the shared Reader without model stages');
+ verifyGateway((int)$db->query('SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id='.$db->quote($run['run_id'])." AND kind='model'")->fetchColumn()===0,
+     'deterministic summary records no hidden model attempt');
  $repeat=$gateway->handle('execute',$context,$binding($run)+$input,$run['run_id']);
- verifyGateway($repeat['status']==='COMPLETED' && $models===2 && $queries===1,'idempotent execute no duplicates');
+ verifyGateway($repeat['status']==='COMPLETED' && $models===0 && $queries===1,'idempotent execute no duplicates');
  $delivered=$gateway->handle('status',$context,$binding($result),$result['run_id']);
  verifyGateway($delivered['status']==='COMPLETED' && strpos((string)$delivered['answer']['summary'],'消耗业绩为123元')===0,
      'completed answer delivery validates the immutable signed view without starting another query');
@@ -160,14 +162,16 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
      'the genuine ranking clarification remains one bounded and auditable model decision');
  verifyGateway($gateway->handle('cancel',$clarifyContext,$rankClarifyBinding,$rankClarify['run_id'])['status']==='CANCELLED',
      'the isolated clarification fixture releases its active conversation before later capacity checks');
- $unknownBindingFailure=true;[$unknownBinding,$unknownBindingInput]=$make('binding-result-unknown','今天消耗业绩多少？');$modelsBeforeUnknownBinding=$models;$queriesBeforeUnknownBinding=$queries;
+ // Additional business wording deliberately falls through the narrow direct
+ // admission, preserving the model transport's unknown-result safety test.
+ $unknownBindingFailure=true;[$unknownBinding,$unknownBindingInput]=$make('binding-result-unknown','今天消耗业绩多少？请解释一下');$modelsBeforeUnknownBinding=$models;$queriesBeforeUnknownBinding=$queries;
  $unknownBindingResult=$gateway->handle('execute',$context,$binding($unknownBinding)+$unknownBindingInput,$unknownBinding['run_id']);
  verifyGateway($unknownBindingResult['status']==='FAILED' && $unknownBindingResult['reason']==='AI_MODEL_RESULT_UNKNOWN'
      && $unknownBindingResult['progress']==='模型响应超时，本次尚未执行数据查询。您可以直接重试，无需重新描述问题。','an unknown binding result stops after one full model attempt with an accurate no-query explanation');
  verifyGateway($models===$modelsBeforeUnknownBinding+2 && $queries===$queriesBeforeUnknownBinding,'an unknown binding result is never automatically replayed or sent to the Reader');
  verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownBinding['run_id'])." AND attempt_code='bind_intent' AND state='UNKNOWN'")->fetchColumn()===1,'unknown binding remains auditable');
  verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownBinding['run_id'])." AND attempt_code='bind_transport_recovery'")->fetchColumn()===0,'unknown binding creates no second transport recovery attempt');
- $unknownUnderstandingFailure=true;[$unknownUnderstanding,$unknownUnderstandingInput]=$make('understand-result-unknown','今天消耗业绩多少？');$queriesBeforeUnknownUnderstanding=$queries;
+ $unknownUnderstandingFailure=true;[$unknownUnderstanding,$unknownUnderstandingInput]=$make('understand-result-unknown','今天消耗业绩多少？请解释一下');$queriesBeforeUnknownUnderstanding=$queries;
  $unknownUnderstandingResult=$gateway->handle('execute',$context,$binding($unknownUnderstanding)+$unknownUnderstandingInput,$unknownUnderstanding['run_id']);
  verifyGateway($unknownUnderstandingResult['status']==='FAILED' && $unknownUnderstandingResult['reason']==='AI_MODEL_RESULT_UNKNOWN'
      && $unknownUnderstandingResult['progress']==='模型响应超时，本次尚未执行数据查询。您可以直接重试，无需重新描述问题。','an unknown understanding result is not replayed and gives the user a specific safe explanation');

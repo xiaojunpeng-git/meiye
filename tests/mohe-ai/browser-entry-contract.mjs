@@ -12,12 +12,13 @@ const dom = new JSDOM('<!doctype html><body></body>',{url:'https://fixture.test'
 dom.window.HTMLElement.prototype.attachShadow = function () { const child = dom.window.document.createElement('section'); this.appendChild(child); Object.defineProperty(this,'shadowRoot',{value:child}); return child; };
 globalThis.window = dom.window; globalThis.document = dom.window.document; globalThis.crypto = webcrypto;
 const flush = () => new Promise(r => setTimeout(r,10));
-const calls = []; let finishStatus, finishCreate, rejectStatus, asyncExecution = true, createExecutionMode = null, deferCreate = false, failStatus = false, collectStatusWaiters = false, identityKey = 'fixture:user';
+const calls = []; let finishStatus, finishCreate, rejectStatus, asyncExecution = true, createExecutionMode = null, deferCreate = false, failStatus = false, collectStatusWaiters = false, identityKey = 'fixture:user', rejectAdmission = false;
 const statusWaiters = [];
 const request = async (method,path,payload) => {
   calls.push({method,path,payload});
   if (path === '/bootstrap') return {enabled:true,async_execution:asyncExecution,can_configure:true,identity_key:identityKey,window_token:'w',capabilities:{metric_codes:['consume_amount'],output_formats:['screen']}};
   if (path === '/runs') {
+    if (rejectAdmission) return {accepted:false,message:'您近期提问较频繁，请稍后再问。'};
     if (deferCreate) return new Promise(resolve=>{finishCreate=resolve;});
     return {run_id:'r',generation:1,run_delivery_token:'delivery',status:'READY',progress:'已接纳',...(createExecutionMode ? {execution_mode:createExecutionMode} : {})};
   }
@@ -394,4 +395,17 @@ duplicateSessions.append(duplicateConversation, '重复终态不应留下未完�
 duplicateSessions.setPendingQuestion(duplicateConversation, '重复终态不应留下未完成问题');
 assert.equal(duplicateSessions.append(duplicateConversation, '重复终态不应留下未完成问题', '第一次结果', {}, {run_id:'same-run',generation:1}),false);
 assert.equal(duplicateSessions.pendingQuestion(duplicateConversation),'');
+// Admission limits are not an executing Run. A refusal must clear the
+// elapsed-time timer and restore send controls, including the workspace Stop.
+window.localStorage.clear(); identityKey = 'fixture:admission-refused'; rejectAdmission = true;
+const refused = mountMoheAi({request,presentation:'workspace'}); await flush();
+const refusedRoot = document.querySelector('[data-mohe-ai]').shadowRoot;
+refusedRoot.querySelector('.entry').click(); await flush();
+refusedRoot.querySelector('textarea').value = '今天退款业绩多少';
+Array.from(refusedRoot.querySelectorAll('button')).find(b=>b.textContent==='发送').click(); await flush();
+assert.match(refusedRoot.querySelector('[role=status]').textContent,/提问较频繁/);
+assert.equal(refusedRoot.querySelector('.workspace-run-status'),null);
+assert.equal(refusedRoot.querySelector('.workspace-cancel').hidden,true);
+assert.equal(refusedRoot.querySelector('button[aria-label="发送问题"]').disabled,false);
+refused(); rejectAdmission = false;
 console.log('Browser entry queued create/status polling/cancel/lost-create-replay/late-admission/recovery-visible-question/expiry/retired-terminal/XSS/capability/admin-no-config/workspace: PASS');
