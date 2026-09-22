@@ -14,6 +14,7 @@ use app\services\cashier\v3\cashier\CashierV3EntitlementResourceVersionProvider;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\card\CashierV3CardOperationCheckoutSettlementServices;
 use app\services\cashier\v3\card\CashierV3CustomCardConfigurationServices;
+use app\services\cashier\v3\checkout\CashierV3ServiceProjectCategorySnapshotServices;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use think\facade\Db;
 use think\facade\Log;
@@ -784,7 +785,7 @@ final class CashierV3CheckoutPreparationServices
         $entitlementLines = [];
         foreach ((array)($publicDraft['lines'] ?? []) as $line) {
             if ((string)($line['lineRole'] ?? '') === 'entitlement_service') {
-                $entitlementLines[] = $this->entitlementSnapshotLine((array)$line);
+                $entitlementLines[] = $this->entitlementSnapshotLine((array)$line, $dataScope->forcedStoreId());
             }
         }
         $now = time();
@@ -1127,7 +1128,7 @@ final class CashierV3CheckoutPreparationServices
         return $debt;
     }
 
-    private function entitlementSnapshotLine(array $line): array
+    private function entitlementSnapshotLine(array $line, int $storeId): array
     {
         // The browser line contains business facts only. Resolve the current
         // authority rows inside the final transaction; no client revision is
@@ -1155,6 +1156,9 @@ final class CashierV3CheckoutPreparationServices
                     = (int)($row['current_version'] ?? 0);
             }
         }
+        // 浏览器不决定卡内项目分类；最终结账事务按实际服务项目冻结分类。
+        $category = (new CashierV3ServiceProjectCategorySnapshotServices())
+            ->resolveInTx((int)($line['projectId'] ?? 0), $storeId);
         $result = [
             'authorityKey' => (string)($line['id'] ?? ''),
             'sourceKind' => (string)($line['entitlementSourceKind'] ?? ''),
@@ -1170,8 +1174,8 @@ final class CashierV3CheckoutPreparationServices
             'sourceNameSnapshot' => (string)($line['entitlementSourceName'] ?? ''),
             'sourceCodeSnapshot' => (string)($line['fullCardNo'] ?? ''),
             'projectNameSnapshot' => (string)($line['name'] ?? ''),
-            'projectCategoryIdSnapshot' => 0,
-            'projectCategoryNameSnapshot' => '',
+            'projectCategoryIdSnapshot' => $category['id'],
+            'projectCategoryNameSnapshot' => $category['name'],
             // Service settings belong to the browser checkout snapshot. Keep
             // them when converting the UI line into the immutable authority
             // line; dropping them here would make final completion see an

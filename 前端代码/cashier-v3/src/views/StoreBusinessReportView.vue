@@ -275,11 +275,33 @@ function columnDisplayLabel(column) {
   return labels.join('/') || '未命名字段'
 }
 
+function fieldGuideLabel(column) {
+  if (activeReport.value !== 'store_item_analysis') return columnDisplayLabel(column)
+  // 本报表有多个“当日”和“消耗业绩”；弹窗按服务端列分组补上名称，
+  // 仅帮助识别列，不参与金额计算或重新归类。
+  const key = String(column?.key || '')
+  const groups = Array.isArray(result.value.column_groups) ? result.value.column_groups : []
+  const group = groups.find((item) => Array.isArray(item?.column_keys) && item.column_keys.some((itemKey) => String(itemKey) === key))
+  const label = columnDisplayLabel(column)
+  const groupLabel = String(group?.label || '')
+  return groupLabel && groupLabel !== label ? `${groupLabel}/${label}` : label
+}
+
 const currentFieldExplanations = computed(() => columns.value.map((column) => ({
   key: String(column?.key || ''),
-  label: columnDisplayLabel(column),
+  label: fieldGuideLabel(column),
   logic: fieldLogic(column)
 })))
+// 弹窗导语只解释列的阅读方式；每列实际取值仍以服务端返回的说明为准。
+const fieldGuideIntro = computed(() => {
+  if (['new_customer_analysis', 'new_customer_analysis_summary'].includes(activeReport.value)) {
+    return '顾客首次办理并付清疗程卡时才算新客；未付清、后续购买和已作废订单不算。下方说明各列的数据从哪里来。'
+  }
+  if (activeReport.value === 'store_item_analysis') {
+    return '分类列按当前可见的商品分类显示；每笔金额仍按发生业务时记录的分类归入。旧记录没有可用分类时显示在“未分类”，以后修改项目分类不会改变旧记录。'
+  }
+  return '下面说明每一列的数据从哪里来，以及什么情况下会显示。'
+})
 const scopeTreeOptions = computed(() => {
   const output = []
   const walk = (nodes, depth = 0, parentKey = '') => (Array.isArray(nodes) ? nodes : []).forEach((node, index) => {
@@ -1539,7 +1561,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
     <div v-if="isFieldGuideOpen" class="store-business-report__modal" role="dialog" aria-modal="true" aria-label="列名取值来源">
       <section class="store-business-report__modal-card store-business-report__field-guide">
         <header>
-          <div><strong>{{ currentReportName }}列名取值来源</strong><p>{{ ['new_customer_analysis', 'new_customer_analysis_summary'].includes(activeReport) ? '顾客首次办理并付清疗程卡时才算新客；未付清、后续购买和已作废订单不算。下方说明各列的数据从哪里来。' : '下面说明每一列的数据从哪里来，以及什么情况下会显示。' }}</p></div>
+          <div><strong>{{ currentReportName }}列名取值来源</strong><p>{{ fieldGuideIntro }}</p></div>
           <button type="button" class="store-business-report__modal-close" aria-label="关闭" @click="isFieldGuideOpen = false">×</button>
         </header>
         <div v-if="currentFieldExplanations.length" class="store-business-report__field-guide-list">

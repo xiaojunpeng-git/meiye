@@ -510,9 +510,12 @@ class StoreUnifiedReportServices extends BaseServices
             return strcmp((string)$left['store_name'], (string)$right['store_name']);
         });
 
-        $columns = array_merge($this->organizationDimensionColumns(), [[
+        $organizationColumns = $this->organizationDimensionColumns();
+        // 取值来源面向门店使用者解释，不暴露组织维度等实现术语。
+        $organizationColumns[0]['source_explanation'] = '显示业务门店所属的分公司；按当前分公司设置取名称，未设置时显示“未配置分公司”。';
+        $columns = array_merge($organizationColumns, [[
             'key' => 'store_name', 'label' => '门店',
-            'logic' => '当前数据权限和筛选范围内的门店名称。',
+            'logic' => '产生销售或服务记录的门店；只显示当前账号可以查看且符合筛选条件的门店。',
         ]]);
         $groups = [
             ['label' => '分公司', 'column_keys' => ['division_name'], 'rowspan' => 2, 'tone' => 'basic'],
@@ -520,10 +523,10 @@ class StoreUnifiedReportServices extends BaseServices
             ['label' => '门店', 'column_keys' => ['store_name'], 'rowspan' => 2, 'tone' => 'basic'],
         ];
         foreach ([
-            ['cash', '现金业绩', '成功记账收款按销售明细分摊后的金额；不含余额支付和欠款。', 'payment'],
-            ['share', '分成业绩', '各分类现金业绩按结账时冻结的合作方默认比例计算后的合计。', 'partner'],
-            ['actual', '分成后业绩', '现金业绩扣除分成业绩后的金额；该列不是实际业绩。', 'result'],
-            ['consume', '消耗业绩', '实际完成服务或核销后形成的消耗业绩。', 'consumption'],
+            ['cash', '现金业绩', '成功收款后记下的现金业绩，不含余额支付和欠款。', 'payment'],
+            ['share', '分成业绩', '各分类现金业绩按成交时记录的合作方比例计算后相加。', 'partner'],
+            ['actual', '分成后业绩', '现金业绩减去分成业绩；该列不是实际业绩，也不是实际收款金额。', 'result'],
+            ['consume', '消耗业绩', '已完成服务或核销记下的消耗金额；发生冲销时按冲销日期扣回。', 'consumption'],
         ] as $summary) {
             [$metric, $label, $logic, $tone] = $summary;
             $keys = [];
@@ -531,19 +534,27 @@ class StoreUnifiedReportServices extends BaseServices
                 $key = 'item_analysis_' . $metric . '_' . $periodLabel[0];
                 $keys[] = $key;
                 $timeLogic = $periodLabel[0] === 'today'
-                    ? '统计查询截止日当天。'
-                    : '从 V3 报表覆盖起始日累计至查询截止日。';
+                    ? '只看查询结束日当天。'
+                    : '从 2026-08-10 累计到查询结束日。';
                 $columns[] = ['key' => $key, 'label' => $periodLabel[1], 'logic' => $logic . $timeLogic];
             }
             $groups[] = ['label' => $label, 'column_keys' => $keys, 'tone' => $tone];
         }
         foreach ($definitions as $definition) {
             $keys = [];
-            foreach ([
-                ['cash', '现金业绩', '本分类在所选日期范围内成功记账收款按销售明细分摊后的金额。'],
-                ['share', '现金分成业绩', '本分类现金业绩按结账时冻结的合作方默认比例计算后的金额。'],
-                ['consume', '消耗业绩', '本分类在所选日期范围内实际完成服务或核销后形成的消耗业绩。'],
-            ] as $metric) {
+            // 当前配置决定显示哪些分类列；发生业务时记录的分类决定金额归属。
+            // “未分类”只承接无法可靠归入现行分类的历史金额，不重写旧服务。
+            $isUnclassified = (int)$definition['category_id'] === 0;
+            $metricExplanations = $isUnclassified ? [
+                ['cash', '现金业绩', '所选日期内已有收款记录，但成交时的分类缺失、已失效或无法对应当前分类的现金业绩；不含余额支付和欠款。'],
+                ['share', '现金分成业绩', '上述未分类现金业绩中，成交时已记录合作方分成的金额；未设置分成时为 0。'],
+                ['consume', '消耗业绩', '所选日期内完成的服务或核销，其当时记录的项目分类缺失、已失效或无法对应当前分类时，消耗金额留在这里。冲销按发生日扣回；以后改项目分类不会改动历史记录。'],
+            ] : [
+                ['cash', '现金业绩', '所选日期内成功收款并记下的现金业绩，按成交时记录的商品或卡内项目分类归入本列；不含余额支付和欠款。'],
+                ['share', '现金分成业绩', '本分类的现金业绩按成交时记录的合作方比例计算；以后修改比例不会重算历史金额。'],
+                ['consume', '消耗业绩', '所选日期内已完成服务或核销的消耗金额，按完成时记录的项目分类归入本列；冲销按发生日扣回，以后改项目分类不会重算历史金额。'],
+            ];
+            foreach ($metricExplanations as $metric) {
                 $key = $definition['key'] . '_' . $metric[0];
                 $keys[] = $key;
                 $columns[] = ['key' => $key, 'label' => $metric[1], 'logic' => $metric[2]];
@@ -569,6 +580,14 @@ class StoreUnifiedReportServices extends BaseServices
                 $summaryValues[$definition['key'] . '_' . $metric] = $this->money($cents);
             }
         }
+        // 固定列的通用默认文案会覆盖本报表写明的业务说明；先填入用户实际
+        // 看到的 source_explanation，保证弹窗与导出读到同一段明确文字。
+        foreach ($columns as &$column) {
+            if (trim((string)($column['logic'] ?? '')) !== '') {
+                $column['source_explanation'] = (string)$column['logic'];
+            }
+        }
+        unset($column);
         $columns = $this->fixedColumns($columns, ['division_name'=>130, 'city_manager'=>130, 'store_name'=>140]);
         return [
             'title' => '门店品项分析', 'columns' => $columns,
@@ -744,7 +763,7 @@ class StoreUnifiedReportServices extends BaseServices
             return ['id' => (string)$definition['category_id'], 'label' => $definition['label']];
         }
         $path = $this->itemAnalysisCategoryPath($path);
-        if ($path === '') return null;
+        if ($path === '') return isset($definitions['0']) ? ['id' => '0', 'label' => '未分类'] : null;
 
         $matched = null;
         foreach ($definitions as $definition) {
@@ -756,7 +775,11 @@ class StoreUnifiedReportServices extends BaseServices
                 $matched = ['path' => $configuredPath, 'definition' => $definition];
             }
         }
-        if ($matched === null) return null;
+        if ($matched === null) {
+            // 服务事实已有金额但历史分类被删除或未冻结时，保留在“未分类”列，
+            // 不让分类列合计静默少于门店消耗总额，也不猜入任一现行分类。
+            return isset($definitions['0']) ? ['id' => '0', 'label' => '未分类'] : null;
+        }
         $definition = $matched['definition'];
         return ['id' => (string)$definition['category_id'], 'label' => $definition['label']];
     }
@@ -775,19 +798,23 @@ class StoreUnifiedReportServices extends BaseServices
      */
     private function itemAnalysisCategoryDefinitions($storeId): array
     {
+        $unclassified = ['0' => [
+            'key' => 'item_analysis_category_0', 'label' => '未分类',
+            'category_id' => 0, 'category_path' => '未分类',
+        ]];
         $categories = [];
         foreach (Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
             ->field('id,pid,cate_name,is_show')->select()->toArray() as $category) {
             $id = (int)($category['id'] ?? 0);
             if ($id > 0) $categories[$id] = $category;
         }
-        if ($categories === []) return [];
+        if ($categories === []) return $unclassified;
 
         $visible = [];
         foreach ($categories as $id => $category) {
             if ((int)($category['is_show'] ?? 0) === 1) $visible[$id] = true;
         }
-        if ($visible === []) return [];
+        if ($visible === []) return $unclassified;
 
         // Keep the same two-level projection used by partner columns, but
         // apply it to every visible category. A visible root is replaced by
@@ -836,7 +863,8 @@ class StoreUnifiedReportServices extends BaseServices
             return strcmp((string)$left['category_path'], (string)$right['category_path'])
                 ?: ((int)$left['category_id'] <=> (int)$right['category_id']);
         });
-        return $definitions;
+        // 已发生的服务消耗不能因分类缺失从动态列里消失。
+        return $definitions + $unclassified;
     }
 
     private function craftsmanConsumption($storeId, array $range, array $input): array

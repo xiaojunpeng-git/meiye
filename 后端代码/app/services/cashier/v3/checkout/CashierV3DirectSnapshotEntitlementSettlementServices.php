@@ -590,6 +590,9 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             if (!is_array($inventory)) {
                 throw self::failure('authority_inventory_line_snapshot_missing', ['lineId' => $lineId]);
             }
+            // 已准备快照优先；旧单据没有分类时从项目资料补冻，避免服务事实再落成空分类。
+            $category = (new CashierV3ServiceProjectCategorySnapshotServices())
+                ->resolvePreparedLineInTx($line, $dataScope->forcedStoreId());
             $snapshotLines[] = [
                 'lineId' => $lineId,
                 'sortNo' => $index + 1,
@@ -610,10 +613,8 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 'sourceDetailId' => $detailId,
                 'projectId' => $projectId,
                 'projectNameSnapshot' => (string)$line['project_name_snapshot'],
-                'projectCategoryIdSnapshot' => max(0, (int)($line['category_id_snapshot'] ?? 0)),
-                'projectCategoryNameSnapshot' => trim((string)($line['category_name_snapshot'] ?? '')) !== ''
-                    ? (string)$line['category_name_snapshot']
-                    : (string)$authority['projectCategoryName'],
+                'projectCategoryIdSnapshot' => $category['id'],
+                'projectCategoryNameSnapshot' => $category['name'],
                 'sourceVersion' => $sourceVersion,
                 'detailVersion' => $detailVersion,
                 'holderActive' => true,
