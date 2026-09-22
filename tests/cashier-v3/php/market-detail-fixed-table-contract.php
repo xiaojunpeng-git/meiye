@@ -11,8 +11,11 @@ $checks = [
     'market detail renames dimension to source' => strpos($marketDetail, "'dimension'=>'来源'") !== false,
     'market detail declares the five left-fixed columns' => strpos($marketDetail, "['business_date'=>112, 'store_name_snapshot'=>112, 'member_name_snapshot'=>82, 'member_phone'=>116, 'dimension'=>108]") !== false,
     'shared view applies the server-declared constrained layout' => strpos($view, "'store-business-report--market-detail': activeReport === 'market_detail'") !== false && strpos($view, "'store-business-report--fixed-table': usesFixedTableLayout") !== false && strpos($view, '.store-business-report--market-detail, .store-business-report--fixed-table { grid-template-rows: auto auto minmax(0, 1fr);') !== false,
-    'table header and summary stay sticky inside the result area' => strpos($view, '.store-business-report--market-detail thead th, .store-business-report--fixed-table thead th { position: sticky; top: 0; z-index: 5; }') !== false && strpos($view, '.store-business-report--fixed-table .store-business-report__summary-row td { position: sticky; top: var(--report-table-header-height); z-index: 4; }') !== false,
-    'fixed columns use server positions in all row types' => substr_count($view, ':style="fixedColumnStyle(column)"') === 4 && strpos($view, 'store-business-report__column--sticky-left') !== false,
+    // 多级表头按服务端声明的行序号累加固定高度；合计行则固定在完整表头之后。
+    'table header and summary stay sticky inside the result area' => strpos($view, '.store-business-report--market-detail thead th, .store-business-report--fixed-table thead th { position: sticky; top: calc(var(--report-header-row-index, 0) * 40px); z-index: 5; }') !== false && strpos($view, '.store-business-report--fixed-table .store-business-report__summary-row td { position: sticky; top: var(--report-table-header-height); z-index: 4; }') !== false,
+    // 表头通过 headerCellStyle 固定，合计行与数据行通过 fixedColumnStyle 固定；
+    // 不再依赖旧单行表头模板中已经删除的重复 style 绑定数量。
+    'fixed columns use server positions in all row types' => strpos($view, ':style="headerCellStyle(cell, rowIndex)"') !== false && substr_count($view, ':style="fixedColumnStyle(column)"') === 2 && strpos($view, 'store-business-report__column--sticky-left') !== false,
 ];
 
 $passed = 0;
