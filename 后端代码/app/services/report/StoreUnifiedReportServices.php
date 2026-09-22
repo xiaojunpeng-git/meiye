@@ -976,7 +976,9 @@ class StoreUnifiedReportServices extends BaseServices
             $row['item_name_snapshot'] = $itemName !== '' ? $itemName : '来源行 ' . (string)($row['source_line_id'] ?? '-');
             $row['consumption_amount'] = $this->money((int)($row['metric_value'] ?? 0));
             $row['labor_amount'] = $this->money((int)($row['labor_fee_amount_cents'] ?? 0));
-            $row['project_count'] = ((int)($row['project_count_half_units'] ?? 0)) / 2;
+            $row['project_count'] = ($row['project_count_decimal'] ?? null) !== null
+                ? (float)$row['project_count_decimal']
+                : ((int)($row['project_count_half_units'] ?? 0)) / 2;
             $row['business_status'] = (string)($row['fact_direction'] ?? '') === 'reversal' ? '冲销' : '正常';
         }
         unset($row);
