@@ -205,27 +205,29 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             unset($row['new_deal_cents'], $row['old_deal_cents'], $row['debt_cents'], $row['self_received_cents'], $row['partner_received_cents']);
         }
         unset($row);
+        // 这里的说明直接展示给门店用户：明确新老客只看六维购买历史、
+        // 1,000 元门槛只限制成交列，以及欠款是当前余额而非所选期间收款。
         $columns = [
-            $this->pathColumn('company_name', '分公司', '取业务门店所属组织向上匹配配置为分公司的统计维度名称；未配置显示“未配置分公司”。', ['分公司'], false, true, 130),
-            $this->pathColumn('store_name', '门店', '取业务发生时保存的门店名称快照。', ['门店'], false, true, 140),
-            $this->pathColumn('new_visit_people', '新客人数', '期间内完成六维及下级分类服务且带体验标记、此前未购买过六维的不同会员数。', ['见诊人数', '新客人数'], true, false, 110, [], '见诊人数', 'integer'),
-            $this->pathColumn('old_visit_people', '老客人数', '期间内完成六维及下级分类服务且带体验标记、此前已购买过六维的不同会员数。', ['见诊人数', '老客人数'], true, false, 110, [], '见诊人数', 'integer'),
-            $this->pathColumn('total_visit_people', '合计见诊人数', '新客见诊人数与老客见诊人数之和。', ['合计见诊人数'], true, false, 120, [], '', 'integer'),
-            $this->pathColumn('new_deal_people', '新客人数', '期间内首次购买六维且该会员本期六维现金业绩达到1,000元的不同会员数。', ['成交人数', '新客人数'], true, false, 110, [], '成交人数', 'integer'),
-            $this->pathColumn('old_deal_people', '老客人数', '此前购买过六维、且本期六维现金业绩达到1,000元的不同会员数。', ['成交人数', '老客人数'], true, false, 110, [], '成交人数', 'integer'),
-            $this->pathColumn('total_deal_people', '合计成交人数', '新客成交人数与老客成交人数之和。', ['合计成交人数'], true, false, 120, [], '', 'integer'),
-            $this->pathColumn('new_deal_performance', '新客业绩', '新客首次六维购买的成功收款分摊金额；欠款补交和退款分别按成功日期正负计入。', ['成交业绩', '新客业绩'], true, false, 120, $this->drill('六维'), '成交业绩'),
-            $this->pathColumn('old_deal_performance', '老客业绩', '老客六维购买的成功收款分摊金额；退款按退款成功日期负向计入。', ['成交业绩', '老客业绩'], true, false, 120, $this->drill('六维'), '成交业绩'),
-            $this->pathColumn('total_deal_performance', '合计成交业绩', '新客业绩与老客业绩之和。', ['合计成交业绩'], true, false, 130, $this->drill('六维')),
-            $this->pathColumn('new_deal_rate', '新客成交率', '新客成交人数除以新客见诊人数；分母为零显示“-”。', ['成交率', '新客成交率'], false, false, 120, [], '成交率'),
-            $this->pathColumn('old_deal_rate', '老客成交率', '老客成交人数除以老客见诊人数；分母为零显示“-”。', ['成交率', '老客成交率'], false, false, 120, [], '成交率'),
-            $this->pathColumn('debt', '欠款', '已确认但尚未成功收款的六维销售欠款；没有可追溯欠款事实时为0。', ['欠款'], true),
-            $this->pathColumn('self_received_performance', '自营实收业绩', '期间内六维自营分类及下级的成功收款分摊金额。', ['自营实收业绩'], true, false, 130, $this->drill('六维 / 自营')),
-            $this->pathColumn('self_to_date_performance', '自营截止今日合计业绩', '完全按原表公式，等于“自营实收业绩”。', ['自营截止今日合计业绩'], true, false, 150, $this->drill('六维 / 自营')),
-            $this->pathColumn('new_unit_output', '新客单产', '新客业绩除以新客成交人数；分母为零显示“-”。', ['成交单产', '新客单产'], false, false, 110, [], '成交单产'),
-            $this->pathColumn('old_unit_output', '老客单产', '老客业绩除以老客成交人数；分母为零显示“-”。', ['成交单产', '老客单产'], false, false, 110, [], '成交单产'),
-            $this->pathColumn('partner_received_performance', '合作六维实收业绩', '期间内六维合作分类及下级的成功收款分摊金额。', ['合作六维实收业绩'], true, false, 140, $this->drill('六维 / 合作')),
-            $this->pathColumn('all_received_performance', '六维全部实收业绩', '期间内六维及全部下级分类的成功收款净额，等于自营与合作实收业绩之和。', ['六维全部实收业绩'], true, false, 140, $this->drill('六维')),
+            $this->pathColumn('company_name', '分公司', '按业务门店所属分公司展示；没有配置分公司时显示“未配置分公司”。', ['分公司'], false, true, 130),
+            $this->pathColumn('store_name', '门店', '显示发生六维服务、收款或欠款的门店名称。', ['门店'], false, true, 140),
+            $this->pathColumn('new_visit_people', '新客人数', '所选期间在本店完成所选六维分类的体验服务，且截至服务当天在当前可查看范围内还没有该分类付费购买记录的会员，按会员去重计人数。', ['见诊人数', '新客人数'], true, false, 110, [], '见诊人数', 'integer'),
+            $this->pathColumn('old_visit_people', '老客人数', '所选期间在本店完成所选六维分类的体验服务，且截至服务当天在当前可查看范围内已有该分类付费购买记录的会员，按会员去重计人数。', ['见诊人数', '老客人数'], true, false, 110, [], '见诊人数', 'integer'),
+            $this->pathColumn('total_visit_people', '合计见诊人数', '本店新客见诊人数加老客见诊人数。同一会员如果在所选期间先后符合两种身份，会分别计入两列。', ['合计见诊人数'], true, false, 120, [], '', 'integer'),
+            $this->pathColumn('new_deal_people', '新客人数', '在本店所选期间所选六维分类的收款减退款达到1,000元，且在当前可查看范围内首次购买该分类的付费日期属于本期的会员，按会员去重计人数。', ['成交人数', '新客人数'], true, false, 110, [], '成交人数', 'integer'),
+            $this->pathColumn('old_deal_people', '老客人数', '在本店所选期间所选六维分类的收款减退款达到1,000元，且在当前可查看范围内首次购买该分类的付费日期早于本期的会员，按会员去重计人数。', ['成交人数', '老客人数'], true, false, 110, [], '成交人数', 'integer'),
+            $this->pathColumn('total_deal_people', '合计成交人数', '本店达到1,000元成交条件的新客人数加老客人数；不足1,000元的不计入。', ['合计成交人数'], true, false, 120, [], '', 'integer'),
+            $this->pathColumn('new_deal_performance', '新客业绩', '只合计达到1,000元成交条件的新客在本店所选期间的六维实际收款，扣除本期退款；不是只取首次购买金额。', ['成交业绩', '新客业绩'], true, false, 120, $this->drill('六维'), '成交业绩'),
+            $this->pathColumn('old_deal_performance', '老客业绩', '只合计达到1,000元成交条件的老客在本店所选期间的六维实际收款，扣除本期退款。', ['成交业绩', '老客业绩'], true, false, 120, $this->drill('六维'), '成交业绩'),
+            $this->pathColumn('total_deal_performance', '合计成交业绩', '新客业绩加老客业绩。未达到1,000元成交条件的收款不计入此列，但仍计入实收业绩。', ['合计成交业绩'], true, false, 130, $this->drill('六维')),
+            $this->pathColumn('new_deal_rate', '新客成交率', '新客成交人数除以新客见诊人数；新客见诊人数为0时显示“-”。', ['成交率', '新客成交率'], false, false, 120, [], '成交率'),
+            $this->pathColumn('old_deal_rate', '老客成交率', '老客成交人数除以老客见诊人数；老客见诊人数为0时显示“-”。', ['成交率', '老客成交率'], false, false, 120, [], '成交率'),
+            $this->pathColumn('debt', '欠款', '当前仍未还清的六维销售欠款余额，不是所选期间新产生的欠款；还款成功后余额减少。', ['欠款'], true),
+            $this->pathColumn('self_received_performance', '自营实收业绩', '所选期间六维中非合作分类的实际收款，扣除退款；卡项按卡内六维项目计入，不受1,000元成交条件限制。', ['自营实收业绩'], true, false, 130, $this->drill('六维 / 自营')),
+            $this->pathColumn('self_to_date_performance', '自营截止今日合计业绩', '当前与本表“自营实收业绩”相同，只统计所选期间，不额外累加之前月份。', ['自营截止今日合计业绩'], true, false, 150, $this->drill('六维 / 自营')),
+            $this->pathColumn('new_unit_output', '新客单产', '新客业绩除以新客成交人数；没有新客成交时显示“-”。', ['成交单产', '新客单产'], false, false, 110, [], '成交单产'),
+            $this->pathColumn('old_unit_output', '老客单产', '老客业绩除以老客成交人数；没有老客成交时显示“-”。', ['成交单产', '老客单产'], false, false, 110, [], '成交单产'),
+            $this->pathColumn('partner_received_performance', '合作六维实收业绩', '所选期间六维中合作分类的实际收款，扣除退款；卡项按卡内合作六维项目计入，不受1,000元成交条件限制。', ['合作六维实收业绩'], true, false, 140, $this->drill('六维 / 合作')),
+            $this->pathColumn('all_received_performance', '六维全部实收业绩', '所选期间六维自营与合作实际收款之和，已扣除退款；包括未达到1,000元成交条件的收款。', ['六维全部实收业绩'], true, false, 140, $this->drill('六维')),
         ];
         return $this->result((string)$definition['name'], $columns, array_values($rows), $range, $input, ['category' => true]);
     }
