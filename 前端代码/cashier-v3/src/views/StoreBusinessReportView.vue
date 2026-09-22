@@ -300,6 +300,9 @@ const fieldGuideIntro = computed(() => {
   if (activeReport.value === 'store_item_analysis') {
     return '分类列按当前可见的商品分类显示；每笔金额仍按发生业务时记录的分类归入。旧记录没有可用分类时显示在“未分类”，以后修改项目分类不会改变旧记录。'
   }
+  if (activeReport.value === 'store_craftsman_consumption') {
+    return '本表只显示当前仍有效、未作废的服务。服务一旦作废，原金额和冲销金额在任何日期都不再显示；原始记录仍保留在业务审计中。'
+  }
   return '下面说明每一列的数据从哪里来，以及什么情况下会显示。'
 })
 const scopeTreeOptions = computed(() => {
@@ -1284,7 +1287,7 @@ function openDrilldown(row, column) {
   if (!request) return
   if (request.report === 'order_center_service') {
     // 汇总行的门店、员工编号和日期来自服务端声明；订单中心仍用后端
-    // 数据权限收紧范围，并按业绩事实日期找到包含冲销的原服务记录。
+    // 数据权限收紧范围，并只展示能解释当前有效报表金额的服务记录。
     // 返回地址由当前报表筛选状态生成，避免浏览器刷新后丢失原查询条件。
     const returnTo = router.resolve({
       name: reportRouteName.value,

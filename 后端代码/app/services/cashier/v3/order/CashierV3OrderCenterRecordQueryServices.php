@@ -905,6 +905,9 @@ final class CashierV3OrderCenterRecordQueryServices
         if ($performanceDrilldown === null) {
             $this->applyBusinessDateRange($query, 'sf.business_date', $criteria);
         } else {
+            // 报表下钻只解释当前仍有效的服务。服务作废后，原服务和反向事实
+            // 都保留供审计，但该服务不能再从任何日期的经营报表下钻出来。
+            $query->whereNull('vo.id');
             // EXISTS 保持一条服务项目事实只出现一次；按员工编号和事实日期精确筛选，
             // 不用姓名快照做模糊匹配，也不因同一记录有多次调整而重复列表行。
             $query->whereExists(function ($fact) use ($performanceDrilldown): void {

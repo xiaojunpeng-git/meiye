@@ -877,7 +877,7 @@ class StoreUnifiedReportServices extends BaseServices
         // with that allocation, never a second use of amount_cents.
         $matrix = ($stores === [] || $employeeIds === null)
             ? ['records' => [], 'summary' => ['day_metric_values' => [], 'total_metric_value' => 0, 'day_labor_values' => [], 'total_labor_value' => 0]]
-            : (new \app\services\query\metric\RegisteredMetricReadServices())->personnelDayMatrix('staff_labor_yeji', '0', $stores, $range, $employeeIds);
+            : (new \app\services\query\metric\RegisteredMetricReadServices())->personnelDayMatrix('staff_labor_yeji', '0', $stores, $range, $employeeIds, true);
         $by = $matrix['records'];
         $summaryConsume = $matrix['summary']['day_metric_values'];
         $summaryLabor = $matrix['summary']['day_labor_values'];
@@ -899,9 +899,22 @@ class StoreUnifiedReportServices extends BaseServices
             }
         }
         unset($row);
-        $columns = array_merge($this->organizationDimensionColumns(), [['key'=>'employee_name','label'=>'手艺人']]);
-        foreach (range(1,31) as $day) { $columns[]=['key'=>'day_'.$day.'_consume','label'=>$day.'日消耗','group_label'=>$day.'日']; $columns[]=['key'=>'day_'.$day.'_labor','label'=>$day.'日手工','group_label'=>$day.'日']; }
-        $columns[]=['key'=>'total_consume','label'=>'合计消耗']; $columns[]=['key'=>'total_labor','label'=>'合计手工'];
+        $columns = array_merge($this->organizationDimensionColumns(), [[
+            'key'=>'employee_name','label'=>'手艺人',
+            'source_explanation'=>'显示当前仍有效的服务中，结账或后续调整时记录的手艺人姓名；服务作废后不再显示。',
+        ]]);
+        foreach (range(1,31) as $day) {
+            $columns[] = [
+                'key'=>'day_'.$day.'_consume','label'=>$day.'日消耗','group_label'=>$day.'日',
+                'source_explanation'=>$day.'日当前仍有效、未作废的服务分配给该手艺人的消耗业绩合计；服务作废后，原金额和冲销金额都不显示。',
+            ];
+            $columns[] = [
+                'key'=>'day_'.$day.'_labor','label'=>$day.'日手工','group_label'=>$day.'日',
+                'source_explanation'=>$day.'日当前仍有效、未作废的服务分配给该手艺人的手工费合计；没有手工费时显示 0，服务作废后不再显示。',
+            ];
+        }
+        $columns[] = ['key'=>'total_consume','label'=>'合计消耗','source_explanation'=>'查询日期内当前仍有效、未作废服务的消耗业绩合计；已作废服务在任何日期都不计入。'];
+        $columns[] = ['key'=>'total_labor','label'=>'合计手工','source_explanation'=>'查询日期内当前仍有效、未作废服务的手工费合计；已作废服务在任何日期都不计入。'];
         foreach ($by as &$row) {
             // Compatibility keys mirror a Reader-computed value; they are not
             // recomputed from page rows and remain available to exports/tests.
@@ -941,8 +954,8 @@ class StoreUnifiedReportServices extends BaseServices
     }
 
     /**
-     * 手艺人消耗明细和上层汇总读取同一 performance_fact：只统计有效的劳动
-     * 业绩分配事实，保留正向与冲销事实的带符号金额，故明细合计可精确解释汇总。
+     * 手艺人消耗明细和上层汇总读取同一 performance_fact，并共同排除已经
+     * 作废的服务。原始事实与冲销事实仍留作审计，但不进入当前经营结果。
      */
     private function craftsmanConsumptionDetail($storeId, array $range, array $input): array
     {
@@ -952,7 +965,7 @@ class StoreUnifiedReportServices extends BaseServices
         $dayOfMonth = (int)($input['day_of_month'] ?? 0);
         $detail = ($stores === [] || $employeeIds === null)
             ? ['rows' => [], 'total_metric_value' => 0, 'total_labor_value' => 0]
-            : (new \app\services\query\metric\RegisteredMetricReadServices())->personnelDetailResult('staff_labor_yeji', '0', $stores, $range, $employeeIds, $dayOfMonth);
+            : (new \app\services\query\metric\RegisteredMetricReadServices())->personnelDetailResult('staff_labor_yeji', '0', $stores, $range, $employeeIds, $dayOfMonth, true);
         $allRows = $detail['rows'];
         $itemNames = $this->sourceLineItemNames(CashierV3ScopeResolver::TENANT_SCOPE_ID, $allRows);
         foreach ($allRows as &$row) {

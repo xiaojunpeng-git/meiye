@@ -1288,9 +1288,9 @@ function reportServiceDateQuery() {
   const drill = serviceReportDrilldown.value
   if (!drill) return null
   return {
-    // 选择“全部数据”才能看见已作废原服务记录；服务记录的当前状态
-    // 与当日业绩事实并列展示，不能用当前净额覆盖历史发生日金额。
-    dataScope: 'all', businessStatus: '', status: '', keyword: '', sorts: [], storeIds: [drill.storeId],
+    // 手艺人消耗是当前有效服务报表；作废服务只留在审计查询中，
+    // 不能通过下钻重新混入已排除作废数据的经营结果。
+    dataScope: 'normal', businessStatus: '', status: '', keyword: '', sorts: [], storeIds: [drill.storeId],
     dateFrom: drill.from, dateTo: drill.to,
     businessDateFrom: drill.from, businessDateTo: drill.to,
     topFilters: [
@@ -2253,7 +2253,7 @@ onBeforeUnmount(() => {
     <p v-if="!isPlatformReadOnly && serviceVoidNotice" class="order-center-notice" role="status">{{ serviceVoidNotice }}</p>
     <p v-if="!isPlatformReadOnly && servicePrintError" class="order-center-page__inline-error" role="alert">{{ servicePrintError }}</p>
     <p v-if="activeTabKey === 'service' && serviceReportDrilldown" class="order-center-notice" role="status">
-      正在查看 {{ serviceReportDateLabel }} 的手艺人业绩对应服务记录（含作废记录）。本次报表消耗保留正常与冲销逐笔金额；服务记录的业务日期可能早于冲销日期。
+      正在查看 {{ serviceReportDateLabel }} 的手艺人消耗对应服务记录，仅显示当前仍有效、未作废的服务。
       <button type="button" class="button button--text" @click="returnToServiceReport">返回报表</button>
       <button type="button" class="button button--text" @click="leaveServiceReportDrilldown">退出报表筛选</button>
     </p>

@@ -46,4 +46,25 @@ final class StoreReportNormalDataScopeServices
                 ->where('normal_service_void_operation.status', 'succeeded');
         });
     }
+
+    /**
+     * A successfully voided service is absent from current operating reports on
+     * every date. Match its immutable service identity so both the original
+     * personnel fact and the later reversal disappear together; neither fact
+     * is deleted, and audit queries can still read the complete chain.
+     */
+    public function excludeVoidedServicePerformanceFacts($query, string $factAlias): void
+    {
+        $query->whereNotExists(function ($void) use ($factAlias): void {
+            $void->name('cashier_v3_service_record_void_operation')->alias('normal_record_void')
+                ->join('cashier_v3_entitlement_service_fact normal_record_service',
+                    'normal_record_service.tenant_id=normal_record_void.tenant_id'
+                    . ' AND normal_record_service.id=normal_record_void.service_fact_id')
+                ->whereRaw('normal_record_service.tenant_id=' . $factAlias . '.tenant_id')
+                ->whereRaw('normal_record_service.store_id=' . $factAlias . '.store_id')
+                ->whereRaw('normal_record_service.checkout_request_id=' . $factAlias . '.checkout_request_id')
+                ->whereRaw('normal_record_service.source_line_id=' . $factAlias . '.source_line_id')
+                ->where('normal_record_void.status', 'succeeded');
+        });
+    }
 }

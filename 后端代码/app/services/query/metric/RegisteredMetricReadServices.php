@@ -752,7 +752,7 @@ final class RegisteredMetricReadServices
      *
      * @return array<int,array<string,mixed>>
      */
-    public function personnelDailyTotals(string $metricCode, string $tenantId, array $stores, array $range, array $employeeIds = []): array
+    public function personnelDailyTotals(string $metricCode, string $tenantId, array $stores, array $range, array $employeeIds = [], bool $currentServicesOnly = false): array
     {
         $this->assertScope($tenantId, $stores, $range);
         $contract = MetricDefinitionRegistry::get($metricCode);
@@ -762,6 +762,9 @@ final class RegisteredMetricReadServices
         if (($contract['reader_strategy'] ?? null) !== 'personnel_fact_sum') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $employeeIds = $this->employeeIds($employeeIds);
         $query = $this->factQuery($contract['source'], $tenantId, $stores, $range)->where('p.employee_id', '>', 0);
+        // This report-only view excludes both sides of a voided service;
+        // other registered metric readers retain their established event-time behavior.
+        if ($currentServicesOnly) (new StoreReportNormalDataScopeServices())->excludeVoidedServicePerformanceFacts($query, 'p');
         if ($employeeIds !== []) $query->whereIn('p.employee_id', $employeeIds);
         $metricExpression = (string)$contract['source']['amount'];
         $rows = $query->fieldRaw('p.store_id,p.store_name_snapshot store_name,p.organization_id,p.organization_path_snapshot,p.business_date,p.employee_id,p.employee_name_snapshot employee_name,COALESCE(SUM(' . $metricExpression . '),0) metric_value,COALESCE(SUM(p.labor_fee_amount_cents),0) labor_fee_amount_cents,MAX(p.rule_name_snapshot) rule_name_snapshot')
@@ -789,11 +792,11 @@ final class RegisteredMetricReadServices
      *
      * @return array{records:array<int,array<string,mixed>>,summary:array<string,mixed>}
      */
-    public function personnelDayMatrix(string $metricCode, string $tenantId, array $stores, array $range, array $employeeIds = []): array
+    public function personnelDayMatrix(string $metricCode, string $tenantId, array $stores, array $range, array $employeeIds = [], bool $currentServicesOnly = false): array
     {
         $records = [];
         $summary = ['day_metric_values' => [], 'total_metric_value' => 0, 'day_labor_values' => [], 'total_labor_value' => 0];
-        foreach ($this->personnelDailyTotals($metricCode, $tenantId, $stores, $range, $employeeIds) as $row) {
+        foreach ($this->personnelDailyTotals($metricCode, $tenantId, $stores, $range, $employeeIds, $currentServicesOnly) as $row) {
             $storeId = $this->integer($row['store_id'] ?? null);
             $employeeId = $this->integer($row['employee_id'] ?? null);
             $day = (int)substr((string)($row['business_date'] ?? ''), -2);
@@ -840,7 +843,7 @@ final class RegisteredMetricReadServices
      *
      * @return array{rows:array<int,array<string,mixed>>,total_metric_value:int,total_labor_value:int}
      */
-    public function personnelDetailResult(string $metricCode, string $tenantId, array $stores, array $range, array $employeeIds = [], int $dayOfMonth = 0): array
+    public function personnelDetailResult(string $metricCode, string $tenantId, array $stores, array $range, array $employeeIds = [], int $dayOfMonth = 0, bool $currentServicesOnly = false): array
     {
         $this->assertScope($tenantId, $stores, $range);
         $contract = MetricDefinitionRegistry::get($metricCode);
@@ -848,6 +851,7 @@ final class RegisteredMetricReadServices
         if ($dayOfMonth < 0 || $dayOfMonth > 31) $this->fail('METRIC_SOURCE_SCOPE_INVALID');
         $employeeIds = $this->employeeIds($employeeIds);
         $query = $this->factQuery($contract['source'], $tenantId, $stores, $range)->where('p.employee_id', '>', 0);
+        if ($currentServicesOnly) (new StoreReportNormalDataScopeServices())->excludeVoidedServicePerformanceFacts($query, 'p');
         if ($employeeIds !== []) $query->whereIn('p.employee_id', $employeeIds);
         if ($dayOfMonth > 0) $query->whereRaw('DAY(p.business_date)=?', [$dayOfMonth]);
         $metricExpression = (string)$contract['source']['amount'];

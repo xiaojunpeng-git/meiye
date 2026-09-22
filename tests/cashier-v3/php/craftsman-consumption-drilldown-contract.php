@@ -9,6 +9,8 @@ $storeController = file_get_contents($root . '/后端代码/app/controller/store
 $adminController = file_get_contents($root . '/后端代码/app/controller/admin/v1/report/UnifiedReport.php');
 $metricReader = file_get_contents($root . '/后端代码/app/services/query/metric/RegisteredMetricReadServices.php');
 $orderCenter = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php');
+$normalScope = file_get_contents($root . '/后端代码/app/services/report/StoreReportNormalDataScopeServices.php');
+$orderCenterView = file_get_contents($root . '/前端代码/cashier-v3/src/views/OrderCenterView.vue');
 
 function section(string $source, string $start, string $end): string
 {
@@ -36,11 +38,10 @@ if (strpos($summary, "\$this->craftsmanConsumptionDrilldown(\$day)") === false
 }
 
 foreach ([
-    'summary uses registered signed labor metric' => "personnelDayMatrix('staff_labor_yeji'",
-    'audited fact detail uses the same registered metric' => "personnelDetailResult('staff_labor_yeji'",
+    'summary uses current-service labor metric' => "personnelDayMatrix('staff_labor_yeji', '0', \$stores, \$range, \$employeeIds, true)",
+    'audited fact detail uses the same current-service metric' => "personnelDetailResult('staff_labor_yeji', '0', \$stores, \$range, \$employeeIds, \$dayOfMonth, true)",
     'daily fact reader keeps day buckets across months' => "DAY(p.business_date)=?",
     'service records select exact employee facts' => "->where('pf.employee_id', \$performanceDrilldown['employeeId'])",
-    'service records retain reversal direction' => "'direction' => (string)\$fact['fact_direction'] === 'reversal' ? '冲销' : '正常'",
     'service records use fact dates, not current service dates' => "applyPerformanceDrilldownDate(\$fact, \$performanceDrilldown, 'pf.business_date')",
     'service records use the same normal sales-order lifecycle scope' => "excludeVoidedSalesOrderFacts(\$fact, 'pf.tenant_id', 'pf.order_id')",
 ] as $name => $needle) {
@@ -48,6 +49,22 @@ foreach ([
         : (str_starts_with($name, 'audited') ? $detail
         : (str_starts_with($name, 'daily') ? $metricReader : $orderCenter));
     if (strpos($source, $needle) === false) throw new RuntimeException($name);
+}
+
+foreach ([
+    'reader has an explicit current-service boundary' => 'excludeVoidedServicePerformanceFacts($query, \'p\')',
+    'void filter joins the immutable service identity' => 'normal_record_service.checkout_request_id=',
+    'order-center drilldown excludes voided services server-side' => "\$query->whereNull('vo.id')",
+    'browser requests normal service data' => "dataScope: 'normal'",
+] as $name => $needle) {
+    $source = str_starts_with($name, 'reader') ? $metricReader
+        : (str_starts_with($name, 'void filter') ? $normalScope
+        : (str_starts_with($name, 'browser') ? $orderCenterView : $orderCenter));
+    if (strpos($source, $needle) === false) throw new RuntimeException($name);
+}
+
+foreach (['当前仍有效、未作废', '服务作废后，原金额和冲销金额都不显示', '已作废服务在任何日期都不计入'] as $copy) {
+    if (strpos($summary, $copy) === false) throw new RuntimeException('user-facing source explanation missing: ' . $copy);
 }
 
 foreach ([$cashierController, $storeController, $adminController] as $controller) {
