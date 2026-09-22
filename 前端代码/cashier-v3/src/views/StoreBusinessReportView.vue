@@ -303,6 +303,9 @@ const fieldGuideIntro = computed(() => {
   if (activeReport.value === 'store_craftsman_consumption') {
     return '本表只显示当前仍有效、未作废的服务。服务一旦作废，原金额和冲销金额在任何日期都不再显示；原始记录仍保留在业务审计中。'
   }
+  if (activeReport.value === 'store_salesperson_performance') {
+    return '本表按销售业绩实际分配到人。点击每日业绩或合计业绩可查看对应销售订单；退款或人员调整按发生日冲减，整单作废的数据不显示。'
+  }
   return '下面说明每一列的数据从哪里来，以及什么情况下会显示。'
 })
 const scopeTreeOptions = computed(() => {
@@ -1275,7 +1278,8 @@ function canDrilldown(row, column) {
 function drilldownRequest(row, column) {
   const config = drilldownConfig(row, column)
   const report = String(config?.report || config?.report_code || '')
-  if (!report || (report !== 'order_center_service' && !allowedReportTabs.value.some((tab) => tab.code === report))) return null
+  if (!report || (!['order_center_service', 'order_center_sales'].includes(report)
+    && !allowedReportTabs.value.some((tab) => tab.code === report))) return null
   const params = { ...(config.params || config.query || {}) }
   const mapping = config.param_map || config.paramMap || {}
   Object.entries(mapping).forEach(([target, source]) => { params[target] = row?.[source] ?? '' })
@@ -1299,6 +1303,28 @@ function openDrilldown(row, column) {
       query: {
         tab: 'service',
         report_employee_id: request.params.craftsman_id,
+        report_store_id: request.params.store_ids,
+        report_start_date: startDate.value,
+        report_end_date: endDate.value,
+        report_return_to: returnTo,
+        ...(request.params.day_of_month ? { report_day_of_month: request.params.day_of_month } : {})
+      }
+    })
+    return
+  }
+  if (request.report === 'order_center_sales') {
+    // 销售人业绩读取人员业绩事实，订单中心必须接收服务端声明的员工、门店
+    // 和日序号，才能让列表中的订单逐笔解释被点击的金额。
+    const returnTo = router.resolve({
+      name: reportRouteName.value,
+      params: { report: activeReport.value },
+      query: currentRouteQuery()
+    }).fullPath
+    router.push({
+      name: isPlatformReport.value ? 'cashier-v3-platform-order-center' : 'cashier-v3-order-center',
+      query: {
+        tab: 'sales',
+        report_salesperson_id: request.params.salesperson_id,
         report_store_id: request.params.store_ids,
         report_start_date: startDate.value,
         report_end_date: endDate.value,

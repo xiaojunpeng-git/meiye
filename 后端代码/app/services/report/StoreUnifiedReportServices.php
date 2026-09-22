@@ -1013,14 +1013,45 @@ class StoreUnifiedReportServices extends BaseServices
             : (new \app\services\query\metric\RegisteredMetricReadServices())->personnelDayMatrix('staff_sales_yeji', '0', $stores, $range, $employeeIds);
         $by = $matrix['records'];
         $summaryPerformance = $matrix['summary']['day_metric_values'];
-        // 销售人只产生销售业绩事实，不产生手艺人手工费；日期直接作为列名展示，
-        // 不再返回二级日期分组表头或无意义的手工列。
-        $columns=array_merge($this->organizationDimensionColumns(), [['key'=>'employee_name','label'=>'销售人']]); foreach(range(1,31) as $day){$columns[]=['key'=>'day_'.$day.'_performance','label'=>$day.'日业绩'];} $columns[]=['key'=>'total_performance','label'=>'合计业绩'];
+        // 销售人只产生销售业绩事实，不产生手艺人手工费；每个金额列同时声明
+        // 精确下钻参数，浏览器不得根据姓名或表格位置猜测订单筛选条件。
+        $columns = array_merge($this->organizationDimensionColumns(), [[
+            'key'=>'employee_name','label'=>'销售人',
+            'source_explanation'=>'显示结账完成后实际分到销售业绩的员工；同一笔成交分给多人时，每个人分别统计。',
+        ]]);
+        foreach (range(1,31) as $day) {
+            $columns[] = [
+                'key'=>'day_'.$day.'_performance','label'=>$day.'日业绩',
+                'source_explanation'=>$day.'日分配给该销售人的销售业绩合计；退款或人员调整产生的反向金额按发生日冲减，整单作废后原金额和冲销金额都不显示。',
+            ];
+        }
+        $columns[] = [
+            'key'=>'total_performance','label'=>'合计业绩',
+            'source_explanation'=>'查询日期内分配给该销售人的销售业绩合计；退款或人员调整按发生日冲减，整单作废的数据不计入。',
+        ];
         foreach($by as &$row){
             $this->applyOrganizationDimensions($row);
-            foreach(range(1,31) as $day)$row['day_'.$day.'_performance']=$this->money((int)($row['day_metric_values'][$day]??0));
+            $row['_drilldown'] = [];
+            foreach(range(1,31) as $day) {
+                $key = 'day_'.$day.'_performance';
+                $value = (int)($row['day_metric_values'][$day] ?? 0);
+                $row[$key] = $this->money($value);
+                if ($value !== 0) {
+                    $row['_drilldown'][$key] = [
+                        'report'=>'order_center_sales',
+                        'params'=>['day_of_month'=>$day],
+                        'param_map'=>['salesperson_id'=>'employee_id','store_ids'=>'store_id'],
+                    ];
+                }
+            }
             $row['total_performance_cents']=(int)$row['total_metric_value'];
             $row['total_performance']=$this->money($row['total_performance_cents']);
+            if ($row['total_performance_cents'] !== 0) {
+                $row['_drilldown']['total_performance'] = [
+                    'report'=>'order_center_sales','params'=>['day_of_month'=>0],
+                    'param_map'=>['salesperson_id'=>'employee_id','store_ids'=>'store_id'],
+                ];
+            }
         } unset($row);
         $summaryValues = ['employee_name'=>'合计']; foreach(range(1,31) as $day)$summaryValues['day_'.$day.'_performance']=$this->money((int)($summaryPerformance[$day]??0)); $summaryValues['total_performance']=$this->money((int)$matrix['summary']['total_metric_value']);
         $columns = $this->fixedColumns($columns, ['division_name'=>130, 'city_manager'=>130, 'employee_name'=>120]);

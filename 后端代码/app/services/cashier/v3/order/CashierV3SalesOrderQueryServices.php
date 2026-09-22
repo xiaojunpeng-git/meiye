@@ -6,6 +6,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\settlement\CashierV3CheckoutCraftsmenSnapshot;
+use app\services\report\StoreReportNormalDataScopeServices;
 use think\facade\Db;
 
 /**
@@ -231,6 +232,8 @@ final class CashierV3SalesOrderQueryServices
         if ($memberFilterPresent && $memberId === null) {
             $allowedStores = [];
         }
+        $salesPerformanceDrilldown = $recordType === 'sales'
+            ? $this->salesPerformanceDrilldown($payload) : null;
 
         return [
             'page' => $page,
@@ -240,6 +243,9 @@ final class CashierV3SalesOrderQueryServices
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
             'memberId' => $memberId,
+            // 报表下钻只能由服务端验证过的人员、门店和事实日期组成；普通
+            // 订单查询保持 null，不改变既有销售日期筛选与分页行为。
+            'salesPerformanceDrilldown' => $salesPerformanceDrilldown,
             'allowedStoreIds' => $this->canonicalStoreIds($allowedStores),
             'operatorStoreId' => $operatorScope->storeId(),
             'operatorId' => $operatorScope->operatorId(),
@@ -315,6 +321,23 @@ final class CashierV3SalesOrderQueryServices
             return [];
         }
         return $this->canonicalStoreIds($value) ?: [];
+    }
+
+    /** @return array{employeeId:int,storeId:int,from:string,to:string,dayOfMonth:int}|null */
+    private function salesPerformanceDrilldown(array $payload): ?array
+    {
+        $raw = $payload['salesPerformanceDrilldown'] ?? null;
+        if (!is_array($raw)) return null;
+        $employeeId = $this->positiveInteger($raw['employeeId'] ?? null);
+        $storeId = $this->positiveInteger($raw['storeId'] ?? null);
+        $from = $this->validBusinessDate($raw['from'] ?? '');
+        $to = $this->validBusinessDate($raw['to'] ?? '');
+        $day = $this->nonNegativeInteger($raw['dayOfMonth'] ?? null);
+        if ($employeeId === null || $storeId === null || $from === '' || $to === '' || $from > $to
+            || $day === null || $day > 31) {
+            throw new \InvalidArgumentException('sales_performance_drilldown_invalid');
+        }
+        return ['employeeId'=>$employeeId,'storeId'=>$storeId,'from'=>$from,'to'=>$to,'dayOfMonth'=>$day];
     }
 
     /** @return int[]|null */
@@ -451,6 +474,9 @@ final class CashierV3SalesOrderQueryServices
             'keyword' => $criteria['keyword'],
             'status' => $criteria['status'],
             'memberId' => $criteria['memberId'],
+            'dateFrom' => $criteria['dateFrom'],
+            'dateTo' => $criteria['dateTo'],
+            'salesPerformanceDrilldown' => $criteria['salesPerformanceDrilldown'],
             'pageSize' => (int)$criteria['pageSize'],
             'orderType' => 0,
             'primarySaleCartTypes' => self::PRIMARY_SALE_CART_TYPES,
@@ -686,8 +712,33 @@ final class CashierV3SalesOrderQueryServices
         if ($criteria['memberId'] !== null) {
             $query->where('o.member_id', (int)$criteria['memberId']);
         }
-        if (($criteria['dateFrom'] ?? '') !== '') $query->where('o.business_date', '>=', $criteria['dateFrom']);
-        if (($criteria['dateTo'] ?? '') !== '') $query->where('o.business_date', '<=', $criteria['dateTo']);
+        $drilldown = $criteria['salesPerformanceDrilldown'] ?? null;
+        if ($drilldown === null) {
+            if (($criteria['dateFrom'] ?? '') !== '') $query->where('o.business_date', '>=', $criteria['dateFrom']);
+            if (($criteria['dateTo'] ?? '') !== '') $query->where('o.business_date', '<=', $criteria['dateTo']);
+        } else {
+            // 报表按业绩事实的业务日期统计，退款或人员调整可能晚于原订单日；
+            // 因此从同一事实精确找来源订单，不能再用订单日期二次裁剪。
+            $query->whereExists(function ($fact) use ($drilldown): void {
+                $fact->name('cashier_v3_performance_fact')->alias('report_sales_pf')
+                    ->whereRaw('report_sales_pf.tenant_id=o.tenant_id')
+                    ->whereRaw('report_sales_pf.order_id=o.order_id')
+                    ->where('report_sales_pf.performance_type', 'sales_performance_allocated')
+                    ->where('report_sales_pf.status', 'effective')
+                    ->where('report_sales_pf.employee_id', $drilldown['employeeId'])
+                    ->where('report_sales_pf.store_id', $drilldown['storeId'])
+                    ->where('report_sales_pf.business_date', '>=', $drilldown['from'])
+                    ->where('report_sales_pf.business_date', '<=', $drilldown['to']);
+                if ($drilldown['dayOfMonth'] > 0) {
+                    $fact->whereRaw('DAY(report_sales_pf.business_date)=?', [$drilldown['dayOfMonth']]);
+                }
+                // 与汇总 Reader 一致：整单作废的正向和反向事实都只留审计，
+                // 不允许从经营报表重新下钻出来。
+                (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts(
+                    $fact, 'report_sales_pf.tenant_id', 'report_sales_pf.order_id'
+                );
+            });
+        }
         return $query;
     }
 

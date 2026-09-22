@@ -298,14 +298,29 @@ const serviceReportDrilldown = computed(() => {
     || !Number.isInteger(dayOfMonth) || dayOfMonth < 0 || dayOfMonth > 31) return null
   return { employeeId, storeId, from, to, dayOfMonth }
 })
-const serviceReportDateLabel = computed(() => {
-  const drill = serviceReportDrilldown.value
+const salesReportDrilldown = computed(() => {
+  if (String(route.query.tab || '') !== 'sales') return null
+  const employeeId = Number(route.query.report_salesperson_id)
+  const storeId = Number(route.query.report_store_id)
+  const from = String(route.query.report_start_date || '')
+  const to = String(route.query.report_end_date || '')
+  const dayOfMonth = Number(route.query.report_day_of_month || 0)
+  if (!Number.isSafeInteger(employeeId) || employeeId <= 0 || !Number.isSafeInteger(storeId) || storeId <= 0
+    || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to
+    || !Number.isInteger(dayOfMonth) || dayOfMonth < 0 || dayOfMonth > 31) return null
+  return { employeeId, storeId, from, to, dayOfMonth }
+})
+function reportDateLabel(drill) {
   if (!drill) return ''
   if (drill.dayOfMonth === 0) return `${drill.from} 至 ${drill.to}`
   return drill.from.slice(0, 7) === drill.to.slice(0, 7)
     ? `${drill.from.slice(0, 7)}-${String(drill.dayOfMonth).padStart(2, '0')}`
     : `${drill.from} 至 ${drill.to} 中的每月 ${drill.dayOfMonth} 日`
+}
+const serviceReportDateLabel = computed(() => {
+  return reportDateLabel(serviceReportDrilldown.value)
 })
+const salesReportDateLabel = computed(() => reportDateLabel(salesReportDrilldown.value))
 const serviceReportReturnLocation = computed(() => {
   const drill = serviceReportDrilldown.value
   if (!drill) return null
@@ -322,6 +337,24 @@ const serviceReportReturnLocation = computed(() => {
   return {
     name: reportRouteName,
     params: { report: 'store_craftsman_consumption' },
+    query: { start_date: drill.from, end_date: drill.to }
+  }
+})
+const salesReportReturnLocation = computed(() => {
+  const drill = salesReportDrilldown.value
+  if (!drill) return null
+  const reportRouteName = isPlatformReadOnly.value
+    ? 'cashier-v3-platform-store-business-reports'
+    : 'cashier-v3-store-business-reports'
+  const returnTo = route.query.report_return_to
+  if (typeof returnTo === 'string' && returnTo.startsWith('/') && !returnTo.startsWith('//') && returnTo.length <= 4096) {
+    const resolved = router.resolve(returnTo)
+    // 返回地址只接受本端销售人业绩报表，避免查询参数形成任意站内跳转。
+    if (resolved.name === reportRouteName && resolved.params.report === 'store_salesperson_performance') return resolved.fullPath
+  }
+  return {
+    name: reportRouteName,
+    params: { report: 'store_salesperson_performance' },
     query: { start_date: drill.from, end_date: drill.to }
   }
 })
@@ -1304,8 +1337,28 @@ function reportServiceDateQuery() {
   }
 }
 
+function reportSalesDateQuery() {
+  const drill = salesReportDrilldown.value
+  if (!drill) return null
+  return {
+    // 销售人业绩包含退款或人员调整的反向事实，不能用“正常订单”状态
+    // 提前隐藏来源订单；最终订单集合由后端按同一人员业绩事实精确收敛。
+    dataScope: 'all', businessStatus: '', status: '', keyword: '', sorts: [], storeIds: [drill.storeId],
+    dateFrom: drill.from, dateTo: drill.to,
+    businessDateFrom: drill.from, businessDateTo: drill.to,
+    topFilters: [
+      { field: 'business_date', operator: 'gte', value: drill.from },
+      { field: 'business_date', operator: 'lte', value: drill.to }
+    ],
+    salesPerformanceDrilldown: {
+      employeeId: drill.employeeId, storeId: drill.storeId,
+      from: drill.from, to: drill.to, dayOfMonth: drill.dayOfMonth
+    }
+  }
+}
+
 function initialOrderCenterQuery() {
-  return reportServiceDateQuery() || defaultOrderCenterDateQuery()
+  return reportServiceDateQuery() || reportSalesDateQuery() || defaultOrderCenterDateQuery()
 }
 
 function leaveServiceReportDrilldown() {
@@ -1315,6 +1368,16 @@ function leaveServiceReportDrilldown() {
 
 function returnToServiceReport() {
   if (serviceReportReturnLocation.value) router.push(serviceReportReturnLocation.value)
+}
+
+function leaveSalesReportDrilldown() {
+  queryModelByType.value = { ...queryModelByType.value, sales: {} }
+  salesPageCursors.value = {}
+  router.replace({ name: route.name, query: { tab: 'sales' } })
+}
+
+function returnToSalesReport() {
+  if (salesReportReturnLocation.value) router.push(salesReportReturnLocation.value)
 }
 
 // 销售订单的范围由统一工具栏驱动：正常数据必须落到后端 normal
@@ -1419,6 +1482,7 @@ async function queryRecords(query = {}, resetPage = true) {
   const nextQuery = normalizeSalesOrderQuery(applyPlatformScope({
     ...currentQuery,
     ...query,
+    ...(reportSalesDateQuery() || {}),
     recordType,
     page: targetPage,
     pageSize: requestedPageSize
@@ -2197,6 +2261,10 @@ watch(
     if (!serviceReportDrilldown.value && queryModelByType.value.service?.servicePerformanceDrilldown) {
       queryModelByType.value = { ...queryModelByType.value, service: {} }
     }
+    if (!salesReportDrilldown.value && queryModelByType.value.sales?.salesPerformanceDrilldown) {
+      queryModelByType.value = { ...queryModelByType.value, sales: {} }
+      salesPageCursors.value = {}
+    }
     if (requestedTab !== activeTabKey.value) activeTabKey.value = requestedTab
     if (isPlatformReadOnly.value || state.stateContextId) queryRecords(initialOrderCenterQuery(), true)
   }
@@ -2257,9 +2325,14 @@ onBeforeUnmount(() => {
       <button type="button" class="button button--text" @click="returnToServiceReport">返回报表</button>
       <button type="button" class="button button--text" @click="leaveServiceReportDrilldown">退出报表筛选</button>
     </p>
+    <p v-if="activeTabKey === 'sales' && salesReportDrilldown" class="order-center-notice" role="status">
+      正在查看 {{ salesReportDateLabel }} 的销售人业绩对应销售订单；订单中的“销售人（业绩）”逐笔解释报表金额。
+      <button type="button" class="button button--text" @click="returnToSalesReport">返回报表</button>
+      <button type="button" class="button button--text" @click="leaveSalesReportDrilldown">退出报表筛选</button>
+    </p>
 
     <UnifiedQueryToolbar
-      v-if="!serviceReportDrilldown"
+      v-if="!serviceReportDrilldown && !salesReportDrilldown"
       class="order-center-query-toolbar"
       :key="activeTabKey"
       :search-placeholder="activeTab.searchPlaceholder"
