@@ -139,9 +139,22 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $rows[$storeId]['total_performance_cents'] = (int)($rows[$storeId]['total_performance_cents'] ?? 0) + (int)$fact['amount_cents'];
         }
         $visits = [];
-        foreach ($this->marketServiceVisitFacts($stores, $range, $input) as $fact) {
+        $bServiceOnlyStores = [];
+        $serviceVisitFacts = $this->marketServiceVisitFacts($stores, $range, $input);
+        foreach ($serviceVisitFacts as $fact) {
             $sourceId = (int)($fact['business_source_primary_id'] ?? 0);
             if ($sourceId <= 0) continue;
+            $storeId = (int)$fact['store_id'];
+            // 人次的权威源是完成且未作废的服务，不要求同门店本期先有收款。
+            if (!isset($rows[$storeId]) && isset($sourceById[$sourceId])
+                && $this->sourcePrefix($sourceById[$sourceId]) === 'B') {
+                $rows[$storeId] = [
+                    'store_id' => $storeId, 'division_name' => '',
+                    'store_name' => (string)$fact['store_name_snapshot'],
+                ];
+                $bServiceOnlyStores[$storeId] = true;
+                $this->projectOrganization($rows[$storeId], '', '', $range['end']);
+            }
             $key = (int)$fact['store_id'] . '|' . $sourceId;
             if (!isset($visits[$key])) {
                 $visits[$key] = [
@@ -153,7 +166,11 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $visits[$key]['visit_count']++;
         }
         foreach ($visits as $fact) if (isset($rows[(int)$fact['store_id']])) {
-            $rows[(int)$fact['store_id']]['channel_' . (int)$fact['business_source_primary_id'] . '_visits'] = (int)$fact['visit_count'];
+            $storeId = (int)$fact['store_id'];
+            $sourceId = (int)$fact['business_source_primary_id'];
+            if (isset($bServiceOnlyStores[$storeId])
+                && (!isset($sourceById[$sourceId]) || $this->sourcePrefix($sourceById[$sourceId]) !== 'B')) continue;
+            $rows[$storeId]['channel_' . $sourceId . '_visits'] = (int)$fact['visit_count'];
         }
         foreach ($sources as $source) {
             $sourceId = (int)$source['id'];
@@ -173,10 +190,22 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $bSourceIds = [];
         foreach ($sources as $source) if ($this->sourcePrefix($source) === 'B') $bSourceIds[] = (int)$source['id'];
         if ($bSourceIds) {
-            $bOrders = $this->cashFacts($stores)
+            $bCashOrders = $this->cashFacts($stores)
                 ->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective')
                 ->whereIn('business_source_primary_id', $bSourceIds)
                 ->field('store_id,business_source_primary_id,order_id')->group('store_id,business_source_primary_id,order_id')->select()->toArray();
+            $bOrders = [];
+            foreach ($bCashOrders as $order) {
+                $bOrders[(int)$order['store_id'] . '|' . (int)$order['business_source_primary_id'] . '|' . (string)$order['order_id']] = $order;
+            }
+            // ¥0 服务单的手动进店补充记录也必须参与同口径汇总。
+            foreach ($serviceVisitFacts as $visit) {
+                $sourceId = (int)$visit['business_source_primary_id'];
+                $orderId = (string)($visit['matched_order_id'] ?? '');
+                if (!in_array($sourceId, $bSourceIds, true) || $orderId === '') continue;
+                $order = ['store_id' => (int)$visit['store_id'], 'business_source_primary_id' => $sourceId, 'order_id' => $orderId];
+                $bOrders[$order['store_id'] . '|' . $sourceId . '|' . $orderId] = $order;
+            }
             $manual = $this->annotations('market_detail', $stores, array_values(array_unique(array_column($bOrders, 'order_id'))));
             foreach ($bOrders as $order) {
                 $storeId = (int)$order['store_id']; $sourceId = (int)$order['business_source_primary_id'];
@@ -194,13 +223,18 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             if ($prefix === 'B') {
                 $key = 'channel_' . $sourceId . '_walk_in';
                 $columns[] = ['key'=>$key,'label'=>'进店','group_label'=>(string)$source['name']]; $keys[] = $key;
-                $columns[count($columns)-1]['drilldown']=['report'=>'market_detail','params'=>['dimension_code'=>(string)$sourceId]];
+                $columns[count($columns)-1]['drilldown']=['report'=>'market_detail','params'=>['dimension_code'=>(string)$sourceId,'metric_code'=>'walk_in']];
             }
             foreach ([['visits','人次'],['effective','有效人员'],['amount','金额']] as $definition) {
                 $key = 'channel_' . $sourceId . '_' . $definition[0];
                 $columns[] = ['key'=>$key,'label'=>$definition[1],'group_label'=>(string)$source['name']]; $keys[] = $key;
+                if ($prefix === 'B' && $definition[0] === 'visits') {
+                    $columns[count($columns)-1]['source_explanation'] = 'B 来源已完成且未作废的服务，每条服务记录计 1 人次；不要求当次收款大于 0。';
+                }
                 $params = ['dimension_code'=>(string)$sourceId];
                 if ($definition[0] === 'effective') $params['metric_code'] = 'effective_people';
+                if ($prefix === 'B' && $definition[0] === 'visits') $params['metric_code'] = 'visits';
+                if ($prefix === 'B' && $definition[0] === 'amount') $params['metric_code'] = 'amount';
                 $columns[count($columns)-1]['drilldown']=['report'=>'market_detail','params'=>$params];
             }
             $groups[] = ['label'=>(string)$source['name'],'dimension_code'=>(string)$sourceId,'column_keys'=>$keys];
@@ -254,6 +288,11 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             }));
         }
         $serviceVisits = $this->marketServiceVisitFacts($stores, $range, $input);
+        // B 来源的服务不依赖现金收款事实；仅在未指定收款方式、金额或
+        // 有效人员下钻时补充 ¥0 服务单，避免污染现金口径。
+        if ($method === '' && !in_array($metricCode, ['amount', 'effective_people'], true)) {
+            $rows = array_merge($rows, $this->marketServiceOnlyRows($stores, $serviceVisits, $rows, $dimension));
+        }
         $visitsByCheckout = [];
         $visitsByOrder = [];
         foreach ($serviceVisits as $serviceVisit) {
@@ -262,10 +301,12 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $checkoutKey = (string)($serviceVisit['checkout_request_id'] ?? '');
             $matchedOrderKey = (string)($serviceVisit['matched_order_id'] ?? '');
             $orderKey = (string)($serviceVisit['origin_order_id'] ?? '');
+            $factId = (string)$serviceVisit['service_fact_id'];
             $visit = ['source_id' => $sourceId, 'count' => 1];
-            if ($checkoutKey !== '') $visitsByCheckout[$checkoutKey . '|' . $sourceId][] = $visit;
-            if ($matchedOrderKey !== '') $visitsByOrder[$matchedOrderKey . '|' . $sourceId][] = $visit;
-            if ($orderKey !== '') $visitsByOrder[$orderKey . '|' . $sourceId][] = $visit;
+            // 一个服务事实可能同时命中结账请求和原单，按事实 ID 去重。
+            if ($checkoutKey !== '') $visitsByCheckout[$checkoutKey . '|' . $sourceId][$factId] = $visit;
+            if ($matchedOrderKey !== '') $visitsByOrder[$matchedOrderKey . '|' . $sourceId][$factId] = $visit;
+            if ($orderKey !== '') $visitsByOrder[$orderKey . '|' . $sourceId][$factId] = $visit;
         }
         foreach ($rows as &$row) {
             $row['dimension'] = (string)$row['business_source_label_snapshot'];
@@ -274,7 +315,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $sourceKey = (string)(int)($row['business_source_primary_id'] ?? 0);
             $checkoutVisits = $visitsByCheckout[(string)($row['checkout_request_id'] ?? '') . '|' . $sourceKey] ?? [];
             $orderVisits = $visitsByOrder[(string)($row['order_id'] ?? '') . '|' . $sourceKey] ?? [];
-            $row['visits'] = count($checkoutVisits) > 0 ? count($checkoutVisits) : count($orderVisits);
+            $row['visits'] = count($checkoutVisits + $orderVisits);
             $row['amount'] = $this->money((int)$row['amount_cents']);
             $row['registered_date'] = (string)$row['business_date'];
             $row['reviewer'] = ''; $row['reviewed_at'] = ''; $row['created_at'] = $this->dateTime((int)$row['recorded_at']);
@@ -282,9 +323,29 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $row['annotation_subject_type'] = 'sales_order'; $row['source_order_id'] = (string)$row['order_id'];
         }
         unset($row);
+        if ($metricCode === 'visits') {
+            $rows = array_values(array_filter($rows, static function (array $row): bool {
+                return (int)($row['visits'] ?? 0) > 0;
+            }));
+        }
         $keys=array_values(array_unique(array_column($rows,'order_id')));$manual=$this->annotations('market_detail',$stores,$keys);
         foreach($rows as &$row){$key=(string)$row['order_id'];$row['walk_in']=(int)($manual[$key]['walk_in']['value']??0);$row['walk_in_version']=(int)($manual[$key]['walk_in']['version']??0);}unset($row);
+        if ($metricCode === 'walk_in') {
+            $rows = array_values(array_filter($rows, static function (array $row): bool {
+                return (int)($row['walk_in'] ?? 0) > 0;
+            }));
+        }
+        usort($rows, static function (array $left, array $right): int {
+            return strcmp((string)$right['business_date'], (string)$left['business_date'])
+                ?: strcmp((string)$right['order_id'], (string)$left['order_id']);
+        });
         $columns = $this->columns(['order_no_snapshot'=>'单据号','store_name_snapshot'=>'门店名称','member_name_snapshot'=>'会员','member_phone'=>'手机','dimension'=>'来源','walk_in'=>'进店','visits'=>'人次','effective_people'=>'有效人员','amount'=>'金额','registered_date'=>'登记日期','reviewer'=>'审核人','reviewed_at'=>'审核时间','creator_name'=>'制单人','created_at'=>'制单日期']);
+        foreach ($columns as &$column) {
+            if ($column['key'] === 'visits') {
+                $column['source_explanation'] = '按已完成且未作废的服务记录计数；B 来源即使当次收款为 0，也记录服务人次。';
+            }
+        }
+        unset($column);
         foreach (['order_no_snapshot'=>126, 'store_name_snapshot'=>112, 'member_name_snapshot'=>82, 'member_phone'=>116, 'dimension'=>108] as $key => $width) {
             foreach ($columns as &$column) if ($column['key'] === $key) { $column['fixed'] = 'left'; $column['fixed_width'] = $width; break; }
             unset($column);
@@ -744,6 +805,81 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
 
     private function primarySources():array{return Db::name('cashier_v3_business_source')->where('parent_id',0)->where('status',1)->order('sort','asc')->order('id','asc')->field('id,name,sort')->select()->toArray();}
     /**
+     * Fill B-source detail rows that have completed service facts but no cash
+     * fact. One row represents one source sales order in the selected period;
+     * service_fact_id is still counted separately by the shared visit resolver.
+     * The order is used only for its immutable display snapshots and stable
+     * annotation key, never to infer or fabricate an amount.
+     */
+    private function marketServiceOnlyRows(array $stores, array $serviceVisits, array $cashRows, string $dimension): array
+    {
+        $bSources = [];
+        foreach ($this->primarySources() as $source) {
+            if ($this->sourcePrefix($source) === 'B') $bSources[(int)$source['id']] = $source;
+        }
+        $represented = [];
+        foreach ($cashRows as $row) {
+            $represented[(int)$row['store_id'] . '|' . (string)$row['order_id'] . '|' . (int)$row['business_source_primary_id']] = true;
+        }
+        $candidates = [];
+        foreach ($serviceVisits as $visit) {
+            $sourceId = (int)($visit['business_source_primary_id'] ?? 0);
+            if (!isset($bSources[$sourceId]) || ($dimension !== '' && $sourceId !== (int)$dimension)) continue;
+            $orderId = (string)($visit['matched_order_id'] ?? '');
+            if ($orderId === '') continue;
+            $key = (int)$visit['store_id'] . '|' . $orderId . '|' . $sourceId;
+            if (!isset($represented[$key]) && (!isset($candidates[$key])
+                || strcmp((string)$visit['service_business_date'], (string)$candidates[$key]['service_business_date']) > 0)) {
+                $candidates[$key] = $visit;
+            }
+        }
+        if (!$candidates) return [];
+
+        $orderIds = array_values(array_unique(array_map(static function (array $visit): string {
+            return (string)$visit['matched_order_id'];
+        }, array_values($candidates))));
+        $orders = Db::name('cashier_v3_sales_order')->whereIn('store_id', $stores)
+            ->whereIn('order_id', $orderIds)->where('order_status', 'settled')
+            ->where('order_direction', 'forward')
+            ->field('tenant_id,store_id,order_id,order_no,checkout_request_id,organization_id,organization_path_snapshot,member_id,member_name_snapshot,store_name_snapshot,operator_name_snapshot,business_source_primary_id,business_source_primary_name_snapshot,business_source_label_snapshot,recorded_at')
+            ->select()->toArray();
+        $ordersByKey = [];
+        foreach ($orders as $order) {
+            $ordersByKey[(string)$order['tenant_id'] . '|' . (int)$order['store_id'] . '|' . (string)$order['order_id']] = $order;
+        }
+        $memberIds = array_values(array_unique(array_filter(array_map(static function (array $visit): int {
+            return (int)($visit['member_id'] ?? 0);
+        }, array_values($candidates)))));
+        $phones = $memberIds ? Db::name('user')->whereIn('uid', $memberIds)->column('phone', 'uid') : [];
+        $rows = [];
+        foreach ($candidates as $visit) {
+            $orderId = (string)$visit['matched_order_id'];
+            $order = $ordersByKey[(string)$visit['tenant_id'] . '|' . (int)$visit['store_id'] . '|' . $orderId] ?? null;
+            $sourceId = (int)$visit['business_source_primary_id'];
+            if (!$order || ((int)$order['business_source_primary_id'] > 0
+                && (int)$order['business_source_primary_id'] !== $sourceId)) continue;
+            $memberId = (int)$visit['member_id'];
+            $rows[] = [
+                'store_id' => (int)$visit['store_id'], 'order_id' => $orderId,
+                'checkout_request_id' => (string)$order['checkout_request_id'],
+                'order_no_snapshot' => (string)$order['order_no'],
+                'store_name_snapshot' => (string)$order['store_name_snapshot'],
+                'organization_id' => (string)$order['organization_id'],
+                'organization_path_snapshot' => (string)$order['organization_path_snapshot'],
+                'member_id' => $memberId,
+                'member_name_snapshot' => (string)$visit['member_name_snapshot'],
+                'member_phone' => (string)($phones[$memberId] ?? ''),
+                'business_source_primary_id' => $sourceId,
+                'business_source_primary_name_snapshot' => (string)($order['business_source_primary_name_snapshot'] ?: $bSources[$sourceId]['name']),
+                'business_source_label_snapshot' => (string)($order['business_source_label_snapshot'] ?: $bSources[$sourceId]['name']),
+                'business_date' => (string)$visit['service_business_date'],
+                'creator_name' => (string)$visit['operator_name_snapshot'],
+                'amount_cents' => 0, 'recorded_at' => (int)$visit['recorded_at'],
+            ];
+        }
+        return $rows;
+    }
+    /**
      * Read completed service facts once and resolve their source without making
      * sales_order an existence gate. New rows normally resolve by checkout
      * request; historical/card-service rows can resolve through the immutable
@@ -804,9 +940,14 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'sv');
         $rows = $query
             ->fieldRaw(
-                'sv.store_id,sv.service_fact_id,sv.checkout_request_id,'
+                'sv.tenant_id,sv.store_id,sv.service_fact_id,sv.checkout_request_id,'
+                . 'MAX(sv.store_name_snapshot) store_name_snapshot,'
+                . 'MAX(sv.business_date) service_business_date,'
+                . 'MAX(sv.member_id) member_id,MAX(sv.member_name_snapshot) member_name_snapshot,'
+                . 'MAX(sv.operator_name_snapshot) operator_name_snapshot,'
+                . 'MAX(sv.recorded_at) recorded_at,'
                 . 'COALESCE(NULLIF(wf.origin_order_id,0),0) origin_order_id,'
-                . "COALESCE(NULLIF(MAX(o1.order_id),''),NULLIF(MAX(cr.sales_order_id),''),'') matched_order_id,"
+                . "COALESCE(NULLIF(MAX(o1.order_id),''),NULLIF(MAX(o3.order_id),''),NULLIF(MAX(o2.order_id),''),NULLIF(MAX(p1.order_id),''),NULLIF(MAX(p3.order_id),''),NULLIF(MAX(p2.order_id),''),'') matched_order_id,"
                 . 'COALESCE(NULLIF(MAX(o1.business_source_primary_id),0),'
                 . 'NULLIF(MAX(o3.business_source_primary_id),0),'
                 . 'NULLIF(MAX(o2.business_source_primary_id),0),'
@@ -814,7 +955,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 . 'NULLIF(MAX(p3.business_source_primary_id),0),'
                 . 'NULLIF(MAX(p2.business_source_primary_id),0),0) business_source_primary_id'
             )
-            ->group('sv.store_id,sv.service_fact_id,sv.checkout_request_id,wf.origin_order_id,cr.sales_order_id')
+            ->group('sv.tenant_id,sv.store_id,sv.service_fact_id,sv.checkout_request_id,wf.origin_order_id,cr.sales_order_id')
             ->select()
             ->toArray();
         return array_values(array_filter($rows, static function (array $row): bool {

@@ -24,8 +24,9 @@ $checks = [
     'member visit reports exclude succeeded service void reversals through the shared fact scope' => strpos($service, 'private function completedUnvoidedServiceFacts') !== false
         && strpos($service, "cashier_v3_service_record_void_operation ' . \$voidAlias") !== false
         && strpos($service, "->whereNull(\$voidAlias . '.id')") !== false
-        && strpos($service, "'member_visit_service',\n            'member_visit_void'") !== false
-        && strpos($service, "'annual_visit_service','annual_visit_void'") !== false,
+        // 参数是否并排书写不影响服务作废范围，按调用参数而非空白格式验证。
+        && preg_match("/'member_visit_service'\\s*,\\s*'member_visit_void'/", $service) === 1
+        && preg_match("/'annual_visit_service'\\s*,\\s*'annual_visit_void'/", $service) === 1,
 ];
 
 $passed = 0;
