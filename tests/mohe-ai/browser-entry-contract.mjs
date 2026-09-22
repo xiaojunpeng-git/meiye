@@ -45,6 +45,17 @@ assert.match(presentationStyles, /\.answer-facts\{/);
 const browserEntrySource = fs.readFileSync(new URL('../../前端代码/shared/mohe-ai/browser-entry.mjs', import.meta.url), 'utf8');
 assert.match(browserEntrySource, /function anchorTurnAtReadingTop\(turn\)/);
 assert.match(browserEntrySource, /function appendTranscriptTurn\(questionText, answer\)/);
+assert.match(browserEntrySource, /turn\.scrollIntoView\(\{ block: 'start'/);
+// The newest turn must have enough trailing layout space to reach the reading
+// top even before a streamed/terminal answer has produced its own height.
+assert.match(browserEntrySource, /function ensureReadingRunway\(turn = activeConversationTurn\(\)\)/);
+assert.match(browserEntrySource, /workspace-reading-runway/);
+assert.match(browserEntrySource, /已处理 ' \+ seconds \+ ' 秒'/);
+assert.match(browserEntrySource, /正在思考/);
+// A short question can be non-scrollable until its first answer expands the
+// turn. Terminal delivery must perform the bounded second anchor, rather than
+// leaving that newly completed answer near the composer.
+assert.match(browserEntrySource, /function completeActiveQuestion\(\)[\s\S]*?anchorTurnAtReadingTop\(turn\)/);
 assert.doesNotMatch(browserEntrySource, /body\.scrollTop = body\.scrollHeight/);
 const adminEntrySource = fs.readFileSync(new URL('../../前端代码/admin/src/components/MoheAiEntry.vue', import.meta.url), 'utf8');
 const cashierShellSource = fs.readFileSync(new URL('../../前端代码/cashier-v3/src/layouts/CashierShell.vue', import.meta.url), 'utf8');
