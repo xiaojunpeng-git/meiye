@@ -79,7 +79,7 @@ class UnifiedReport extends AuthController
     private function inputRules(): array
     {
         // Exact path only narrows a grouped report drilldown; free category search keeps its prefix semantics.
-        return [['report','partner_item_summary'],['start_date',''],['end_date',''],['dataset','sale'],['metric','cash_performance'],['item_id',''],['payment_method',''],['operator_id',0],['channel_id',0],['customer_segment','all'],['consumption_metric','cash'],['sleep_months',3],['year',0],['category_id',0],['category_path',''],['category_path_exact',''],['product_type',''],['partner_name',''],['salesperson_id',0],['sales_manager_id',0],['guide_id',0],['craftsman_id',0],['day_of_month',0],['unit_price_min',''],['unit_price_max',''],['page',1],['limit',20]];
+        return [['report','partner_item_summary'],['start_date',''],['end_date',''],['dataset','sale'],['metric','cash_performance'],['item_id',''],['payment_method',''],['operator_id',0],['channel_id',0],['customer_segment','all'],['consumption_metric','cash'],['sleep_months',3],['year',0],['category_id',0],['category_path',''],['category_path_exact',''],['product_type',''],['partner_name',''],['salesperson_id',0],['sales_manager_id',0],['guide_id',0],['craftsman_id',0],['day_of_month',0],['unit_price_min',''],['unit_price_max',''],['employee_name',''],['page',1],['limit',20]];
     }
 
     private function isPlatformOnlyReport(string $report): bool

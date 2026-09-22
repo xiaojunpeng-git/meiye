@@ -62,8 +62,8 @@ final class StoreUnifiedReportPhaseSixServices
             case 'phase_six_monthly_featured_item': $result = $this->featured($stores, $range); break;
             case 'phase_six_headquarters_acquisition': $result = $this->headquarters($stores, $range); break;
             case 'phase_six_other_multi_payment': $result = $this->multiPayment($stores, $range); break;
-            case 'phase_six_salary_summary': $result = $this->salarySummary($stores, $range); break;
-            case 'phase_six_salary_detail': $result = $this->salaryDetail($stores, $range); break;
+            case 'phase_six_salary_summary': $result = $this->salarySummary($stores, $range, $input); break;
+            case 'phase_six_salary_detail': $result = $this->salaryDetail($stores, $range, $input); break;
             case 'phase_six_training_employee': $result = $this->trainingV2($stores, $range); break;
             case 'phase_six_acquisition_source': $result = $this->acquisitionSource($stores, $range); break;
             case 'phase_six_human_store_health': return $this->healthWithStaffing($stores, $range);
@@ -213,9 +213,12 @@ final class StoreUnifiedReportPhaseSixServices
         ], $rows, $range);
     }
 
-    private function salaryDetail(array $stores,array $range):array
+    private function salaryDetail(array $stores,array $range,array $input):array
     {
-        $facts = $this->salaryFactsWithServiceCustomerMetrics($stores, $range);
+        $employeeName=$this->salaryEmployeeName($input);
+        $facts=$this->filterSalaryFactsByEmployeeName(
+            $this->salaryFactsWithServiceCustomerMetrics($stores,$range),$employeeName
+        );
         $rows = [];
         foreach ($facts as $f) {
             $rows[] = [
@@ -236,28 +239,31 @@ final class StoreUnifiedReportPhaseSixServices
                 'annotation_subject_key' => 'phase_six:salary:' . (string)$f['row_key'],
             ];
         }
-        return $this->result('员工薪资明细月报表',[
-            $this->column('business_date','日期','事实业务日期。'),
-            $this->column('company_name','分公司','组织中的分公司统计维度。',false,true),
-            $this->column('store_name','门店','业务发生时门店快照。',false,true),
-            $this->column('employee_name','员工','销售或手艺人历史姓名快照。'),
-            $this->column('member_name','会员','会员历史姓名快照。'),
-            $this->column('card_type','卡类型','卡内项目核销的卡类型，非卡内显示-。'),
-            $this->column('performance_category','业绩分类','统一业绩分类。'),
-            $this->column('detail','明细','项目或产品名称。'),
-            $this->column('project_count','项目数','服务记录分配给该手艺人的工资项目数；优先使用保存的小数快照，旧事实按半项目数读取。',true),
-            $this->column('service_visit_count','服务人次','按服务对象、业务日期及有效实际服务人员计算的员工分配值；本人按会员当日去重，朋友算和游客按服务记录计算，朋友不算不计入。',true),
-            $this->column('consumption_amount','消耗业绩','服务完成后的消耗业绩事实。',true),
-            $this->column('cash_amount','现金业绩','销售明细现金业绩分摊事实。',true),
-            $this->column('labor_fee','手工费','分配手艺人时保存的手工费。',true),
-            $this->manualColumn('备注','备注','手动输入并保留审计.')
-        ],$rows,$range);
+        return $this->salaryResult('员工薪资明细月报表',[
+            $this->column('business_date','日期','该笔服务、核销或销售计入工资的日期；后来已作废的记录不再统计。'),
+            $this->column('company_name','分公司','该笔业务发生门店所属的分公司。',false,true),
+            $this->column('store_name','门店','该笔业务实际发生的门店。',false,true),
+            $this->column('employee_name','员工','该笔项目的手艺人，或现金业绩分配到的员工；按结账时记录的姓名显示。'),
+            $this->column('member_name','会员','该笔业务对应的会员或顾客姓名。'),
+            $this->column('card_type','卡类型','使用会员卡内项目时显示对应卡类型；现金购买或无卡项目显示“-”。'),
+            $this->column('performance_category','业绩分类','按该笔项目或产品结账时所属的分类显示。'),
+            $this->column('detail','明细','该笔业务对应的具体服务项目、卡项或产品名称。'),
+            $this->column('project_count','项目数','该员工实际承担的项目数量；多人服务按分配比例拆分，可显示小数，人工调整后按已保存数值计算。',true),
+            $this->column('service_visit_count','服务人次','本人服务按“同一会员+同一日期”计一次；朋友算和游客每条有效服务记录计一次，朋友不算不计入；多人服务按实际分配计算。',true),
+            $this->column('consumption_amount','消耗业绩','服务完成或卡项核销后计入该员工的消耗金额；作废后不再统计。',true),
+            $this->column('cash_amount','现金业绩','成功收款后分配给该员工的现金业绩；作废后不再统计。',true),
+            $this->column('labor_fee','手工费','结账时分配给该手艺人的手工费；作废后不再统计。',true),
+            $this->manualColumn('备注','备注','有权限的用户手动填写，保存后刷新页面仍会显示。')
+        ],$rows,$range,$employeeName);
     }
 
-    private function salarySummary(array $stores,array $range):array
+    private function salarySummary(array $stores,array $range,array $input):array
     {
+        $employeeName=$this->salaryEmployeeName($input);
         $rows=[];$observedCategories=[];
-        foreach($this->salaryFactsWithServiceCustomerMetrics($stores,$range) as $f){
+        foreach($this->filterSalaryFactsByEmployeeName(
+            $this->salaryFactsWithServiceCustomerMetrics($stores,$range),$employeeName
+        ) as $f){
             $key=(int)$f['store_id'].'|'.(int)$f['employee_id'];
             if(!isset($rows[$key]))$rows[$key]=['company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'project_count_micros'=>0,'service_visit_tenths'=>0,'service_people_tenths'=>0,'consumption_cents'=>0,'cash_cents'=>0,'labor_fee_cents'=>0];
             // 工资项目数是人员服务份额，不是销售数量；用百万分位整数累加，保留入库 DECIMAL(20,6) 的精度。
@@ -298,17 +304,50 @@ final class StoreUnifiedReportPhaseSixServices
             unset($r['project_count_micros'],$r['service_visit_tenths'],$r['service_people_tenths'],$r['consumption_cents'],$r['cash_cents'],$r['labor_fee_cents'],$r['sales_category_cents']);
         }unset($r);
         $columns=[
-            $this->column('company_name','分公司','员工发生业务时组织快照。',false,true),
-            $this->column('store_name','门店','员工发生业务时门店快照。',false,true),
-            $this->column('employee_name','销售人','员工历史姓名快照。'),
-            $this->column('project_count','项目数','员工薪资明细中工资项目数的合计，保留人工调整的小数精度。',true),
-            $this->column('service_visit_count','服务人次','所选期间内员工每日服务对象份额之和；与薪资明细的服务人次合计一致。',true),
-            $this->column('service_people_count','服务人数','所选期间内服务对象去重后的员工份额；会员跨日期不重复，朋友算和游客每条服务记录独立计算。',true),
-            $this->column('consumption_amount','消耗','服务完成或核销形成的消耗业绩。',true),
-            $this->column('labor_fee','手工','服务明细手工费。',true),
+            $this->column('company_name','分公司','该员工业务发生门店所属的分公司。',false,true),
+            $this->column('store_name','门店','该员工业务实际发生的门店。',false,true),
+            $this->column('employee_name','销售人','该行汇总的员工，按业务结账时记录的姓名显示；页面可输入姓名中的任意文字进行筛选。'),
+            $this->column('project_count','项目数','该员工在明细表中的项目数合计；多人服务和人工调整可产生小数。',true),
+            $this->column('service_visit_count','服务人次','该员工在所选日期内的有效服务人次合计；计算规则与明细表一致。',true),
+            $this->column('service_people_count','服务人数','该员工在所选日期内服务的顾客数；本人服务的会员跨日期只计一人，朋友算和游客每条有效服务记录分别计算，多人服务按实际分配计算。',true),
+            $this->column('consumption_amount','消耗','该员工在所选日期内，服务完成或卡项核销后计入的消耗金额；作废后不再统计。',true),
+            $this->column('labor_fee','手工','该员工在所选日期内被分配的手工费合计；作废后不再统计。',true),
         ];
         foreach($categories['columns'] as $categoryColumn)$columns[]=$categoryColumn;
-        return $this->result('员工薪资汇总月报表',$columns,array_values($rows),$range);
+        return $this->salaryResult('员工薪资汇总月报表',$columns,array_values($rows),$range,$employeeName);
+    }
+
+    /** Employee-name filtering always uses the immutable fact snapshot shown in the result. */
+    private function salaryEmployeeName(array $input): string
+    {
+        $name=trim((string)($input['employee_name']??''));
+        if(mb_strlen($name)>64)throw new \InvalidArgumentException('员工姓名最多输入64个字');
+        return $name;
+    }
+
+    /**
+     * Apply the same partial-name match before either salary projection is
+     * aggregated, so detail rows, summary rows, totals and exports stay equal.
+     */
+    private function filterSalaryFactsByEmployeeName(array $facts,string $employeeName): array
+    {
+        if($employeeName==='')return $facts;
+        return array_values(array_filter($facts,static fn(array $fact):bool=>
+            mb_stripos((string)($fact['employee_name']??''),$employeeName)!==false
+        ));
+    }
+
+    /** Add the shared text filter contract without making the frontend infer it from report names. */
+    private function salaryResult(string $title,array $columns,array $records,array $range,string $employeeName): array
+    {
+        $result=$this->result($title,$columns,$records,$range);
+        $result['filter_schema']=[[
+            // 页面隐藏重复的“员工”可见标题，但保留语义标题供读屏和键盘操作识别。
+            'key'=>'employee_name','label'=>'员工','show_label'=>false,'aria_label'=>'员工姓名',
+            'type'=>'text','placeholder'=>'输入员工姓名',
+        ]];
+        $result['filters']['employee_name']=$employeeName;
+        return $result;
     }
 
     private function training(array $stores,array $range):array{$rows=Db::name('employee')->where('is_del',0)->where('status',1)->field('id,name,entry_time,store_id')->select()->toArray();$allowed=array_flip($stores);$out=[];$i=1;foreach($rows as $r){if(isset($r['store_id'])&&!isset($allowed[(int)$r['store_id']]))continue;$out[]=['sequence'=>$i++,'company_name'=>'','store_name'=>'','beautician_name'=>(string)$r['name'],'entry_time'=>(string)$r['entry_time'],'mentor_name'=>'','entry_cycle'=>'','entry_level'=>'','exam_apply_time'=>'','exam_level'=>'','passed_level'=>'','skill_score'=>'','professional_score'=>'','in_service_3'=>'-','in_service_6'=>'-','in_service_9'=>'-','in_service_12'=>'-','in_service_over_year'=>'-'];}return $this->result('教培员工需求统计表',[$this->column('sequence','序号','页面稳定行号，不作为业务主键。'),$this->column('company_name','分公司','组织中的分公司统计维度。'),$this->column('store_name','门店','员工组织归属。'),$this->column('beautician_name','美容师','员工档案。'),$this->column('entry_time','入职时间','员工正式入职日期。'),$this->manualColumn('mentor_name','师傅','门店分配师傅关系。'),$this->column('entry_cycle','入职周期','按查询日期和每月15日规则计算。'),$this->column('entry_level','入职等级分类','按入职周期分级。'),$this->manualColumn('exam_apply_time','员工申请考试时间','员工手动输入。'),$this->manualColumn('exam_level','员工申请考试级别','员工手动输入。'),$this->manualColumn('passed_level','对应已考等级','教培人员手动输入。'),$this->manualColumn('skill_score','技能分数','教培人员手动输入。'),$this->manualColumn('professional_score','专业分数','教培人员手动输入。'),$this->column('in_service_3','3月是否在职','对应观察时点的历史员工状态。'),$this->column('in_service_6','6月是否在职','对应观察时点的历史员工状态.'),$this->column('in_service_9','9月是否在职','对应观察时点的历史员工状态.'),$this->column('in_service_12','12月是否在职','对应观察时点的历史员工状态.'),$this->column('in_service_over_year','1年以上是否在职','对应观察时点的历史员工状态.')],$out,$range);}
@@ -476,8 +515,8 @@ final class StoreUnifiedReportPhaseSixServices
         $columns=[];
         foreach($definitions as $definition){
             $explanation=$definition['key']==='salary_category_cash_unclassified'
-                ? '销售业绩已分配给员工，但商品或卡项内含项目缺少可核对的分类事实；不擅自归到卡项外层分类。'
-                : '销售完成后分配给该员工的现金业绩；卡项按内含项目分类与分摊金额归属，分类最多显示两级。';
+                ? '已分配给该员工，但项目或产品未设置可用分类的现金业绩；不会按卡项名称自动猜测分类。'
+                : '该分类下成功收款并分配给该员工的现金业绩；卡项金额按卡内项目的分类和金额比例拆分，作废后不再统计。';
             $columns[]=$this->column($definition['key'],$definition['label'],$explanation,true,false,140,[],'商品分类业绩');
         }
         return ['columns'=>$columns,'targets'=>$targets];
@@ -517,8 +556,7 @@ final class StoreUnifiedReportPhaseSixServices
             ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_id row_key,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.labor_fee_amount_cents,pf.project_count_half_units,pf.project_count_decimal,pf.rule_code_snapshot,pf.fact_direction,sv.service_fact_id,sv.member_id,sv.member_name_snapshot member_name,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_name_snapshot category_path,sv.source_document_type source_type')
             ->order('pf.id','asc')
             ->select()->toArray();
-        $reversed=[];
-        foreach($rows as $row){if((string)$row['fact_direction']==='reversal'&&trim((string)$row['reversal_of'])!=='')$reversed[(string)$row['reversal_of']]=true;}
+        $reversed=$this->reversedPerformanceFactIds($rows);
         $grouped=[];
         foreach($rows as $row){
             if((string)$row['fact_direction']!=='forward'||isset($reversed[(string)$row['fact_id']]))continue;
@@ -575,8 +613,7 @@ final class StoreUnifiedReportPhaseSixServices
             ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path')
             ->order('pf.id','asc')->select()->toArray();
         $cardAllocations=$this->salaryCardCategoryAllocations($salesRows);
-        $salesReversed=[];
-        foreach($salesRows as $sale){if((string)$sale['fact_direction']==='reversal'&&trim((string)$sale['reversal_of'])!=='')$salesReversed[(string)$sale['reversal_of']]=true;}
+        $salesReversed=$this->reversedPerformanceFactIds($salesRows);
         $salesGrouped=[];
         foreach($salesRows as $sale){
             if((string)$sale['fact_direction']!=='forward'||isset($salesReversed[(string)$sale['fact_id']]))continue;
@@ -624,6 +661,34 @@ final class StoreUnifiedReportPhaseSixServices
             $out[]=$row;
         }
         return $out;
+    }
+
+    /**
+     * Resolve terminal reversals independently of the selected report dates.
+     * A salary query for the original sales day must not revive performance
+     * from an order that was successfully voided on a later day.  Candidate
+     * fact IDs are tenant-scoped first, so the unrestricted reversal date
+     * lookup cannot cross customer instances or widen report permissions.
+     *
+     * @return array<string,bool> original fact ID => reversed
+     */
+    private function reversedPerformanceFactIds(array $candidateRows): array
+    {
+        $forwardIds=[];
+        foreach($candidateRows as $row){
+            $factId=trim((string)($row['fact_id']??''));
+            if((string)($row['fact_direction']??'')==='forward'&&$factId!=='')$forwardIds[$factId]=true;
+        }
+        if($forwardIds===[])return [];
+        $reversed=[];
+        foreach(Db::name('cashier_v3_performance_fact')
+            ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('fact_direction','reversal')->where('status','effective')
+            ->whereIn('reversal_of',array_keys($forwardIds))->field('reversal_of')->select()->toArray() as $row){
+            $original=trim((string)($row['reversal_of']??''));
+            if($original!=='')$reversed[$original]=true;
+        }
+        return $reversed;
     }
 
     /**

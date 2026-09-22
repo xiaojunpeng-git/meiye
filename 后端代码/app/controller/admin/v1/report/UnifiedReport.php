@@ -794,6 +794,7 @@ class UnifiedReport extends AuthController
             ['dimension_as_of', ''], ['drill_month', ''], ['six_dimension_only', 0],
             ['tier_id', ''], ['month', ''],
             ['target_amount', ''], ['target_count', ''], ['visit_count', ''], ['unit_price_min', ''], ['unit_price_max', ''],
+            ['employee_name', ''],
             ['mode', 'count'],
         ];
     }

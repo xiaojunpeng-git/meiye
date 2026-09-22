@@ -59,6 +59,12 @@ assertPhaseSix(
 assertPhaseSix(str_contains($migration, 'uk_tenant_store') && str_contains($migration, 'project_count') && str_contains($migration, 'mentor_employee_id'), 'migration is additive and repeatable');
 assertPhaseSix(str_contains($store, 'StoreUnifiedReportPhaseSixServices') && str_contains($cashier, 'StoreUnifiedReportPhaseSixServices'), 'both store controllers integrate phase six service');
 assertPhaseSix(str_contains($store, 'platformOnlyReportCodes') && str_contains($cashier, 'platformOnlyReportCodes'), 'store endpoints reject platform-only reports');
+assertPhaseSix(
+    str_contains($controller, "['employee_name', '']")
+    && str_contains($store, "['employee_name','']")
+    && str_contains($cashier, "['employee_name', '']"),
+    'platform, store and cashier endpoints preserve the salary employee-name filter'
+);
 
 require_once $root . '/后端代码/app/services/report/StoreUnifiedReportPhaseSixServices.php';
 require_once $root . '/后端代码/app/services/query/metric/MetricMoneyFormatter.php';
@@ -117,6 +123,31 @@ assertPhaseSix(
     && str_contains($service, '$halfUnits*500000')
     && str_contains($service, "\$grouped[\$key]['legacy_project_count_half_units']"),
     'salary project count reads saved decimals first and retains mixed/legacy half-unit fallback'
+);
+assertPhaseSix(
+    str_contains($service, 'reversedPerformanceFactIds($rows)')
+    && str_contains($service, 'reversedPerformanceFactIds($salesRows)')
+    && str_contains($service, "->whereIn('reversal_of',array_keys(\$forwardIds))")
+    && !preg_match('/reversedPerformanceFactIds[\\s\\S]{0,1800}whereBetween/', $service),
+    'salary detail and summary exclude later terminal reversals without limiting the reversal date'
+);
+$salaryFilter = new ReflectionMethod($phaseSix, 'filterSalaryFactsByEmployeeName');
+$filteredSalaryRows = $salaryFilter->invoke($phaseSix, [
+    ['employee_name' => '曹小双'], ['employee_name' => '张丽函'], ['employee_name' => '曹非（陈瑶）'],
+], '曹');
+assertPhaseSix(
+    array_column($filteredSalaryRows, 'employee_name') === ['曹小双', '曹非（陈瑶）']
+    && str_contains($service, "'key'=>'employee_name','label'=>'员工','show_label'=>false,'aria_label'=>'员工姓名'")
+    && str_contains($service, "'placeholder'=>'输入员工姓名'"),
+    'salary summary and detail expose the same partial employee-name text filter without a repeated visible title'
+);
+assertPhaseSix(
+    str_contains($service, '后来已作废的记录不再统计')
+    && str_contains($service, '页面可输入姓名中的任意文字进行筛选')
+    && str_contains($service, '卡项金额按卡内项目的分类和金额比例拆分')
+    && !str_contains($service, "'business_date','日期','事实业务日期。'")
+    && !str_contains($service, "'cash_amount','现金业绩','销售明细现金业绩分摊事实。'"),
+    'salary column-source descriptions use business language and explain filtering, voiding and card allocation'
 );
 $projectCountMicros = new ReflectionMethod($phaseSix, 'projectCountMicros');
 $projectCountText = new ReflectionMethod($phaseSix, 'projectCountText');

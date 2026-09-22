@@ -161,6 +161,7 @@ class Report extends AuthController
             ['store_ids', ''],
             ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''],
             ['unit_price_min', ''], ['unit_price_max', ''],
+            ['employee_name', ''],
             ['mode', 'count'],
             ['page', 1], ['limit', 20],
         ];

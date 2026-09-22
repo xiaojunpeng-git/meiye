@@ -30,5 +30,6 @@ check('platform frame cache-busts the embedded cashier release',
 check('store only exposes three cross-end reports', view.includes('phase_six_other_multi_payment') && view.includes('phase_six_salary_summary') && view.includes('phase_six_salary_detail') && view.includes('PHASE_SIX_CROSS_END_REPORT_TABS'))
 check('platform-only phase six reports are blocked in direct store runtime', view.includes('phaseSixBlocked') && view.includes('isPlatformRuntimeRoute()'))
 check('embedded report re-syncs route after async catalog load', view.includes('catalog.value = Array.isArray(response) ? response : []') && view.includes('syncActiveReportFromRoute()\n    syncFiltersFromRoute()\n    await loadReport()'))
+check('report filters can hide a repeated title without losing accessibility', view.includes('field.show_label !== false') && view.includes('field.aria_label || field.label || field.name || field.key'))
 if (failed) process.exit(1)
 console.log('PASS phase-six frontend contract')

@@ -1446,7 +1446,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? LEGACY_COVERAGE_START : undefined" :max="endDate" /></label>
         <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today()" /></label>
       </template>
-      <label v-for="field in filterSchema" :key="field.key">{{ field.label || field.name || field.key }}
+      <label v-for="field in filterSchema" :key="field.key">
+        <!-- 报表可隐藏重复的可见标题，输入控件仍通过 aria-label 保留可访问语义。 -->
+        <span v-if="field.show_label !== false">{{ field.label || field.name || field.key }}</span>
         <select v-if="['select', 'category_tree'].includes(field.type)" v-model="dynamicFilters[field.key]">
           <option value="">{{ field.placeholder || '全部' }}</option>
           <option v-for="option in filterFieldOptions(field)" :key="String(option.value ?? option.code)" :value="String(option.value ?? option.code)">{{ option.label ?? option.name }}</option>
@@ -1461,6 +1463,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
           :type="['date', 'number'].includes(field.type) ? field.type : 'text'"
           :inputmode="field.type === 'number' ? 'decimal' : undefined"
           :placeholder="field.placeholder || ''"
+          :aria-label="field.aria_label || field.label || field.name || field.key"
         />
       </label>
       <button v-if="isFirstPhaseReport" type="button" class="button button--secondary" @click="isAdvancedFiltersOpen = !isAdvancedFiltersOpen">{{ isAdvancedFiltersOpen ? '收起筛选' : '更多筛选' }}</button>
