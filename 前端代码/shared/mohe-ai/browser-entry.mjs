@@ -43,6 +43,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     .workspace-recent-label{padding:0 16px 12px;color:#7b8390;font-size:14px}.workspace-history{display:grid;gap:4px;min-width:0;overflow-x:hidden;overflow-y:auto}.workspace-history-row{display:flex;min-width:0;align-items:center;gap:4px;padding:0 6px;border-radius:10px}.workspace-history-open{min-width:0;flex:1;border:0;background:transparent;text-align:left;padding:12px 10px;border-radius:10px;font-size:16px;color:#273143;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.workspace-history-open:hover,.workspace-history-open[aria-current="true"]{background:#ebeaff;color:#252873}.workspace-history-delete{flex:0 0 auto;width:26px;height:26px;padding:0;border:0;border-radius:50%;background:#f0f2f5;color:#6d7788;font-size:18px;line-height:1}.workspace-history-delete:hover{background:#fee2e2;color:#b42318}.workspace-history-delete:focus-visible{outline:2px solid var(--mohe-ai-brand);outline-offset:2px}
     .workspace-retention{margin-top:auto;padding:20px 16px;color:#7b8390;font-size:13px;border-bottom:1px solid #e7e9ee}.workspace-main{min-width:0;flex:1;display:flex;flex-direction:column;background:#fff}.workspace-top{display:flex;align-items:center;min-height:78px;padding:0 28px;border-bottom:1px solid #e7e9ee}.workspace-title{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:23px;font-weight:650}.workspace-close{border:0;padding:8px 12px;font-size:24px;line-height:1;color:#465163}.workspace .body{width:min(1350px,calc(100% - 56px));box-sizing:border-box;margin:0 auto;padding:40px 0 32px}.workspace .message{max-width:100%;margin:0 0 38px;padding:0;border-radius:0;background:transparent;color:#151b27;font-size:21px;line-height:1.7}.workspace .message.muted{font-size:14px;line-height:1.5;color:#778092}.workspace .message.question{width:max-content;max-width:78%;margin:0 0 48px auto;padding:15px 24px;border-radius:22px;background:#17191e;color:#fff;font-size:18px;line-height:1.45}.workspace .conversation-turn--active .message.question{margin-bottom:18px}.workspace-run-status{max-width:100%;margin:0 0 34px;color:#98a0aa}.workspace-run-elapsed{font-size:15px;line-height:1.5}.workspace-run-thinking{margin-top:18px;padding-top:18px;border-top:1px solid #edf0f3;font-size:18px;line-height:1.5}.workspace .answer-presentation{max-width:100%;margin:0 0 36px}.workspace .answer-headline{font-size:22px;line-height:1.55}.workspace .answer-facts{max-width:760px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));margin-top:18px}.workspace .answer-fact{padding:14px 16px}.workspace .answer-fact-value{font-size:27px}.workspace .answer-period,.workspace .answer-note{font-size:15px}.workspace .card{margin:14px 0;border:1px solid #e7e9ee;border-radius:14px;padding:18px 20px;background:#fff}.workspace .value{color:#111827}.workspace table{width:100%;margin:18px 0;border-collapse:collapse;display:table}.workspace td,.workspace th{border-width:0 0 1px;padding:14px;text-align:left;color:#1f2937}.workspace th{color:#6e7786;font-weight:500}
     .workspace .footer{width:100%;box-sizing:border-box;margin:0;padding:0 28px 20px;border:0;background:#fff}.workspace-progress{min-height:20px;margin:0 0 8px;color:#667085}.workspace-composer-card{display:grid;grid-template-columns:minmax(0,1fr) 76px;grid-template-rows:minmax(82px,auto) 48px;overflow:hidden;border:1px solid #d9dee7;border-radius:22px;background:#fff;box-shadow:0 8px 22px #17233d0d}.workspace .workspace-composer-card textarea{grid-column:1;grid-row:1;min-height:82px;resize:none;padding:18px 28px 10px;border:0;border-radius:0;font-size:17px;line-height:1.55;background:transparent;outline:0}.workspace-composer-actions{grid-column:1;grid-row:2;display:flex;align-items:center;padding:0 28px}.workspace-excel{display:inline-flex;align-items:center;gap:10px;color:#536070;font-size:16px;cursor:pointer}.workspace-excel input{width:24px;height:24px;margin:0;accent-color:#111}.workspace-excel input:disabled+span{color:#9aa3b0;cursor:not-allowed}.workspace .workspace-send{grid-column:2;grid-row:1 / span 2;place-self:center;width:56px;height:56px;margin:0;padding:0;border:0;border-radius:50%;font-size:0;background:#111;color:#fff}.workspace .workspace-send::after{content:'↑';font-size:30px;line-height:1}.workspace .workspace-send:disabled{background:#98a1ad}.workspace .workspace-cancel{grid-column:2;grid-row:1 / span 2;place-self:end center;margin:0 10px 11px 0;padding:5px 0;border:0;background:transparent;color:#667085;font-size:12px}.workspace-keyboard-hint{padding:12px 4px 0;text-align:right;color:#8a93a1;font-size:14px}.workspace .entry{display:none}
+    .workspace-run-complete{margin:18px 0;color:#7a8493;font-size:15px;line-height:1.5}
     :host([data-mohe-ai-presentation="workspace"]) .entry{left:auto;right:28px;top:auto;bottom:30px;transform:none}
     :host([data-mohe-ai-presentation="workspace"]) .entry.entry--icon:hover{transform:scale(1.04)}
     @media (max-width:760px){.panel.workspace{display:block;overflow:auto}.workspace-aside{display:none}.workspace-main{min-height:100vh}.workspace-top{min-height:62px;padding:0 18px}.workspace-title{font-size:19px}.workspace .body,.workspace .footer{width:calc(100% - 32px)}.workspace .body{padding-top:28px}.workspace .message{font-size:17px}.workspace .message.question{font-size:16px;max-width:88%;margin-bottom:30px}.workspace .footer{position:sticky;bottom:0;padding:12px 0 16px}.workspace-composer-card{grid-template-columns:minmax(0,1fr) 64px;grid-template-rows:minmax(72px,auto) 44px;border-radius:18px}.workspace .workspace-composer-card textarea{min-height:72px;padding:14px 18px 8px;font-size:16px}.workspace-composer-actions{padding:0 18px}.workspace-excel{font-size:14px}.workspace-excel input{width:21px;height:21px}.workspace .workspace-send{width:48px;height:48px}.workspace-keyboard-hint{display:none}.workspace-new{margin-top:16px}:host([data-mohe-ai-presentation="workspace"]) .entry{right:16px;bottom:18px}}
@@ -65,9 +66,10 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   // and asynchronous results cannot repeatedly pull the viewport to the end.
   function message(text, cls, target = body) { const n = el('div', text, 'message ' + (cls || '')); target.appendChild(n); return n; }
   function activeConversationTurn() { return body && body.querySelector('[data-mohe-ai-active-turn]'); }
-  function appendTranscriptTurn(questionText, answer) {
+  function appendTranscriptTurn(questionText, answer, elapsedSeconds = 0) {
     const turn = el('section', null, 'conversation-turn');
     message(questionText, 'question', turn);
+    appendCompletedElapsed(turn, elapsedSeconds);
     renderAnswer(answer, false, turn);
     // Keep the reading runway at the physical transcript end. Reopened
     // history remains chronological instead of being appended after its gap.
@@ -88,6 +90,22 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     if (!activeRunStatus) return;
     const seconds = Math.max(0, Math.floor((Date.now() - clientDeliveryStartedAt) / 1000));
     activeRunStatus.elapsed.textContent = '已处理 ' + seconds + ' 秒';
+  }
+  function completedElapsedSeconds() {
+    return Number.isFinite(clientDeliveryStartedAt) && clientDeliveryStartedAt > 0
+      ? Math.max(0, Math.floor((Date.now() - clientDeliveryStartedAt) / 1000)) : 0;
+  }
+  // This is the time a customer experiences before the first answer is
+  // visible. It deliberately never claims a server-side execution duration.
+  function completedElapsedLabel(seconds) {
+    const value = Number.isSafeInteger(seconds) && seconds > 0 ? seconds : 0;
+    if (!value) return '';
+    const minutes = Math.floor(value / 60), remainder = value % 60;
+    return minutes > 0 ? '用时 ' + minutes + ' 分钟' + (remainder ? ' ' + remainder + ' 秒' : '') : '用时 ' + value + ' 秒';
+  }
+  function appendCompletedElapsed(turn, seconds) {
+    const label = completedElapsedLabel(seconds);
+    if (label && turn) turn.appendChild(el('div', label, 'workspace-run-complete'));
   }
   function startActiveRunStatus(turn = activeConversationTurn()) {
     if (!turn || activeRunStatus) return;
@@ -178,7 +196,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       button.onclick = () => {
         if (pendingCreate || (run && !isTerminal(run.status))) return;
         conversation = item.id; body.textContent = ''; progress.textContent = '';
-        item.rounds.forEach(row => appendTranscriptTurn(row.question, row.presentation || { summary: row.answer }));
+        item.rounds.forEach(row => appendTranscriptTurn(row.question, row.presentation || { summary: row.answer }, row.elapsed_seconds));
         body.scrollTop = 0;
         updateWorkspaceTitle(item); renderWorkspaceHistory();
       };
@@ -406,10 +424,12 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         // wording before its answer. Never leave the customer with an orphaned
         // answer merely because the page changed while the task was running.
         const deliveredQuestion = ensureQuestionVisible();
+        const elapsedSeconds = completedElapsedSeconds();
+        finishActiveRunStatus(); appendCompletedElapsed(activeConversationTurn(), elapsedSeconds);
         renderAnswer(run.answer, true, activeConversationTurn() || body);
         reportVisibleDeliveryAfterPaint(run);
         const text = run.answer.summary || (run.answer.cards || []).map(c => `${c.metric_name}：${c.display_value}${c.unit || ''}`).join('\n');
-        try { sessions.append(conversation, deliveredQuestion, text, run.answer, run); } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error', activeConversationTurn() || body); }
+        try { sessions.append(conversation, deliveredQuestion, text, run.answer, run, { elapsedSeconds }); } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error', activeConversationTurn() || body); }
         completeActiveQuestion();
       } else {
         // The terminal message is already appended to the conversation.  Do
@@ -419,13 +439,14 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         // wording before showing it as well.
         const deliveredQuestion = ensureQuestionVisible();
         const terminalMessage = run.status === 'CANCELLED' ? '已取消' : run.message || '本次未能完成，请重新提问。';
-        finishActiveRunStatus(); progress.textContent = '';
+        const elapsedSeconds = completedElapsedSeconds();
+        finishActiveRunStatus(); appendCompletedElapsed(activeConversationTurn(), elapsedSeconds); progress.textContent = '';
         message(terminalMessage, '', activeConversationTurn() || body);
         // Keep a complete customer-visible turn after refresh.  It is marked
         // non-contextual so a previous failure never becomes an instruction
         // or a claimed business fact for the next model request.
         try { sessions.append(conversation, deliveredQuestion, terminalMessage,
-          { summary: terminalMessage, terminal_status: run.status }, run, { contextEligible: false });
+          { summary: terminalMessage, terminal_status: run.status }, run, { contextEligible: false, elapsedSeconds });
         } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error', activeConversationTurn() || body); }
         completeActiveQuestion();
         clientDeliveryStartedAt=0;
@@ -772,7 +793,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     cancel.onclick = stop; close.onclick = () => { stop(); panel.hidden = true; };
     input.onkeydown = event => { if (event.isComposing || event.key !== 'Enter' || event.shiftKey) return; event.preventDefault(); void submitQuestion(); };
     fresh.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) { message('请先确认当前任务状态。'); return; } finishActiveRunStatus(); conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; clearActive(); updateWorkspaceTitle(null); renderWorkspaceHistory(); syncWorkspaceActions(); };
-    history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; body.textContent = ''; progress.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', conversationTitle(s)); b.onclick = () => { conversation = s.id; body.textContent = ''; progress.textContent = ''; s.rounds.forEach(r => appendTranscriptTurn(r.question, r.presentation || {summary:r.answer})); body.scrollTop = 0; }; body.appendChild(b); }); };
+    history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; body.textContent = ''; progress.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', conversationTitle(s)); b.onclick = () => { conversation = s.id; body.textContent = ''; progress.textContent = ''; s.rounds.forEach(r => appendTranscriptTurn(r.question, r.presentation || {summary:r.answer}, r.elapsed_seconds)); body.scrollTop = 0; }; body.appendChild(b); }); };
     if (workspace) { renderWorkspaceHistory(); syncWorkspaceActions(); }
     if (record) void resumeActive(record);
   }

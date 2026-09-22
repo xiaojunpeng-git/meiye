@@ -44,7 +44,7 @@ assert.match(presentationStyles, /\.answer-facts\{/);
 // to the transcript bottom and interrupt deliberate history reading.
 const browserEntrySource = fs.readFileSync(new URL('../../前端代码/shared/mohe-ai/browser-entry.mjs', import.meta.url), 'utf8');
 assert.match(browserEntrySource, /function anchorTurnAtReadingTop\(turn\)/);
-assert.match(browserEntrySource, /function appendTranscriptTurn\(questionText, answer\)/);
+assert.match(browserEntrySource, /function appendTranscriptTurn\(questionText, answer, elapsedSeconds = 0\)/);
 assert.match(browserEntrySource, /turn\.scrollIntoView\(\{ block: 'start'/);
 // The newest turn must have enough trailing layout space to reach the reading
 // top even before a streamed/terminal answer has produced its own height.
@@ -52,6 +52,8 @@ assert.match(browserEntrySource, /function ensureReadingRunway\(turn = activeCon
 assert.match(browserEntrySource, /workspace-reading-runway/);
 assert.match(browserEntrySource, /已处理 ' \+ seconds \+ ' 秒'/);
 assert.match(browserEntrySource, /正在思考/);
+assert.match(browserEntrySource, /function completedElapsedLabel\(seconds\)/);
+assert.match(browserEntrySource, /workspace-run-complete/);
 // A short question can be non-scrollable until its first answer expands the
 // turn. Terminal delivery must perform the bounded second anchor, rather than
 // leaving that newly completed answer near the composer.

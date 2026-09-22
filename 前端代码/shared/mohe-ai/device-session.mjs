@@ -88,8 +88,14 @@ export class DeviceSessions {
       // too so it cannot be mistaken for a later unfinished question.
       delete s.pending_question; this.save(sessions); return false;
     }
+    // Delivery time is a device-observed reading aid, not a server execution
+    // metric. Retain only a whole, non-negative second so a refreshed history
+    // can render it without persisting a detailed device clock.
+    const elapsedSeconds = Number.isSafeInteger(options.elapsedSeconds) && options.elapsedSeconds > 0
+      ? options.elapsedSeconds : null;
     s.rounds.push({ question, answer, presentation,
       ...(options.contextEligible === false ? { context_eligible: false } : {}),
+      ...(elapsedSeconds !== null ? { elapsed_seconds: elapsedSeconds } : {}),
       ...(runId && generation !== null ? { run_id: runId, generation } : {}), created_at: this.clock() }); delete s.pending_question; this.save(sessions);
     return true;
   }
