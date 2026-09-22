@@ -139,23 +139,28 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $rows[$storeId]['total_performance_cents'] = (int)($rows[$storeId]['total_performance_cents'] ?? 0) + (int)$fact['amount_cents'];
         }
         $visits = [];
-        $bServiceOnlyStores = [];
+        $visitedMemberDays = [];
         $serviceVisitFacts = $this->marketServiceVisitFacts($stores, $range, $input);
         foreach ($serviceVisitFacts as $fact) {
             $sourceId = (int)($fact['business_source_primary_id'] ?? 0);
             if ($sourceId <= 0) continue;
             $storeId = (int)$fact['store_id'];
-            // 人次的权威源是完成且未作废的服务，不要求同门店本期先有收款。
-            if (!isset($rows[$storeId]) && isset($sourceById[$sourceId])
-                && $this->sourcePrefix($sourceById[$sourceId]) === 'B') {
+            // 人次的权威源是完成且未作废的服务；任何来源都不要求本期先有收款。
+            if (!isset($rows[$storeId]) && isset($sourceById[$sourceId])) {
                 $rows[$storeId] = [
                     'store_id' => $storeId, 'division_name' => '',
                     'store_name' => (string)$fact['store_name_snapshot'],
                 ];
-                $bServiceOnlyStores[$storeId] = true;
                 $this->projectOrganization($rows[$storeId], '', '', $range['end']);
             }
-            $key = (int)$fact['store_id'] . '|' . $sourceId;
+            $memberId = (int)($fact['member_id'] ?? 0);
+            if ($memberId <= 0) continue;
+            // 同一会员在同一门店、日期、来源下有多条正常服务，也只算一次人次。
+            // 保留来源维度，确保各来源汇总与其明细下钻使用同一业务范围。
+            $memberDayKey = $storeId . '|' . $sourceId . '|' . (string)$fact['service_business_date'] . '|' . $memberId;
+            if (isset($visitedMemberDays[$memberDayKey])) continue;
+            $visitedMemberDays[$memberDayKey] = true;
+            $key = $storeId . '|' . $sourceId;
             if (!isset($visits[$key])) {
                 $visits[$key] = [
                     'store_id' => (int)$fact['store_id'],
@@ -168,8 +173,6 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         foreach ($visits as $fact) if (isset($rows[(int)$fact['store_id']])) {
             $storeId = (int)$fact['store_id'];
             $sourceId = (int)$fact['business_source_primary_id'];
-            if (isset($bServiceOnlyStores[$storeId])
-                && (!isset($sourceById[$sourceId]) || $this->sourcePrefix($sourceById[$sourceId]) !== 'B')) continue;
             $rows[$storeId]['channel_' . $sourceId . '_visits'] = (int)$fact['visit_count'];
         }
         foreach ($sources as $source) {
@@ -185,33 +188,61 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 if (isset($rows[$storeId])) $rows[$storeId]['channel_' . $sourceId . '_effective'] = (int)($rows[$storeId]['channel_' . $sourceId . '_effective'] ?? 0) + 1;
             }
         }
-        // B 渠道“进店”是订单明细级补充记录的合计。subject_key 固定使用
-        // order_id，不允许把可变化的筛选日期拼成补充记录主键。
+        // B 来源进店优先读取会员每日来源行的补充值。旧逐单值只在该行尚无
+        // 新补充值时回退相加，不能把两种记录同时叠加到市场业绩。
         $bSourceIds = [];
         foreach ($sources as $source) if ($this->sourcePrefix($source) === 'B') $bSourceIds[] = (int)$source['id'];
         if ($bSourceIds) {
             $bCashOrders = $this->cashFacts($stores)
                 ->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective')
                 ->whereIn('business_source_primary_id', $bSourceIds)
-                ->field('store_id,business_source_primary_id,order_id')->group('store_id,business_source_primary_id,order_id')->select()->toArray();
-            $bOrders = [];
+                ->field('store_id,member_id,business_date,business_source_primary_id,order_id')
+                ->group('store_id,member_id,business_date,business_source_primary_id,order_id')->select()->toArray();
+            $bGroups = [];
             foreach ($bCashOrders as $order) {
-                $bOrders[(int)$order['store_id'] . '|' . (int)$order['business_source_primary_id'] . '|' . (string)$order['order_id']] = $order;
+                $key = (int)$order['store_id'] . '|' . (string)$order['business_date'] . '|' . (int)$order['member_id'] . '|' . (int)$order['business_source_primary_id'];
+                if ((int)$order['member_id'] <= 0) $key .= '|' . (string)$order['order_id'];
+                $bGroups[$key]['store_id'] = (int)$order['store_id'];
+                $bGroups[$key]['member_id'] = (int)$order['member_id'];
+                $bGroups[$key]['business_date'] = (string)$order['business_date'];
+                $bGroups[$key]['source_id'] = (int)$order['business_source_primary_id'];
+                $bGroups[$key]['orders'][(string)$order['order_id']] = true;
             }
-            // ¥0 服务单的手动进店补充记录也必须参与同口径汇总。
+            // 无收款的正常服务也要形成可编辑的会员每日行。
             foreach ($serviceVisitFacts as $visit) {
                 $sourceId = (int)$visit['business_source_primary_id'];
                 $orderId = (string)($visit['matched_order_id'] ?? '');
                 if (!in_array($sourceId, $bSourceIds, true) || $orderId === '') continue;
-                $order = ['store_id' => (int)$visit['store_id'], 'business_source_primary_id' => $sourceId, 'order_id' => $orderId];
-                $bOrders[$order['store_id'] . '|' . $sourceId . '|' . $orderId] = $order;
+                $storeId = (int)$visit['store_id'];
+                $memberId = (int)$visit['member_id'];
+                $date = (string)$visit['service_business_date'];
+                $key = $storeId . '|' . $date . '|' . $memberId . '|' . $sourceId;
+                if ($memberId <= 0) $key .= '|' . $orderId;
+                $bGroups[$key]['store_id'] = $storeId;
+                $bGroups[$key]['member_id'] = $memberId;
+                $bGroups[$key]['business_date'] = $date;
+                $bGroups[$key]['source_id'] = $sourceId;
+                $bGroups[$key]['orders'][$orderId] = true;
             }
-            $manual = $this->annotations('market_detail', $stores, array_values(array_unique(array_column($bOrders, 'order_id'))));
-            foreach ($bOrders as $order) {
-                $storeId = (int)$order['store_id']; $sourceId = (int)$order['business_source_primary_id'];
+            $orderIds = []; $dayKeys = [];
+            foreach ($bGroups as $group) {
+                foreach (array_keys($group['orders']) as $orderId) $orderIds[$orderId] = true;
+                if ($group['member_id'] > 0) $dayKeys[$this->marketMemberDayKey($group['store_id'], $group['business_date'], $group['member_id'], $group['source_id'])] = true;
+            }
+            $manual = $this->annotations('market_detail', $stores, array_keys($orderIds));
+            // 个人参与范围可能只包含该会员当天的部分订单，不能读取或改写
+            // 门店完整合并行的手动值；个人视图仍只显示可见原单的旧值。
+            $dailyManual = $this->participantEmployeeId > 0 ? []
+                : $this->annotations('market_detail', $stores, array_keys($dayKeys));
+            foreach ($bGroups as $group) {
+                $storeId = $group['store_id']; $sourceId = $group['source_id'];
                 if (!isset($rows[$storeId])) continue;
+                $legacy = 0;
+                foreach (array_keys($group['orders']) as $orderId) $legacy += (int)($manual[$orderId]['walk_in']['value'] ?? 0);
+                $dayKey = $group['member_id'] > 0 ? $this->marketMemberDayKey($storeId, $group['business_date'], $group['member_id'], $sourceId) : '';
+                $daily = $dayKey !== '' ? ($dailyManual[$dayKey]['walk_in'] ?? null) : null;
                 $rows[$storeId]['channel_'.$sourceId.'_walk_in'] = (int)($rows[$storeId]['channel_'.$sourceId.'_walk_in'] ?? 0)
-                    + (int)($manual[(string)$order['order_id']]['walk_in']['value'] ?? 0);
+                    + ($daily !== null ? (int)$daily['value'] : $legacy);
             }
         }
         $columns = [['key'=>'division_name','label'=>'分公司'], ['key'=>'store_name','label'=>'门店']];
@@ -229,7 +260,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $key = 'channel_' . $sourceId . '_' . $definition[0];
                 $columns[] = ['key'=>$key,'label'=>$definition[1],'group_label'=>(string)$source['name']]; $keys[] = $key;
                 if ($prefix === 'B' && $definition[0] === 'visits') {
-                    $columns[count($columns)-1]['source_explanation'] = 'B 来源已完成且未作废的服务，每条服务记录计 1 人次；不要求当次收款大于 0。';
+                    $columns[count($columns)-1]['source_explanation'] = 'B 来源的同一会员在同一天有正常服务记 1 人次，多条服务仍记 1；不要求当次有收款。';
                 }
                 $params = ['dimension_code'=>(string)$sourceId];
                 if ($definition[0] === 'effective') $params['metric_code'] = 'effective_people';
@@ -288,34 +319,26 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             }));
         }
         $serviceVisits = $this->marketServiceVisitFacts($stores, $range, $input);
-        // B 来源的服务不依赖现金收款事实；仅在未指定收款方式、金额或
-        // 有效人员下钻时补充 ¥0 服务单，避免污染现金口径。
+        // 正常服务不依赖现金收款事实；仅在人次/进店等非金额下钻中
+        // 补充无收款服务行，避免把 ¥0 行误当成现金明细。
         if ($method === '' && !in_array($metricCode, ['amount', 'effective_people'], true)) {
             $rows = array_merge($rows, $this->marketServiceOnlyRows($stores, $serviceVisits, $rows, $dimension));
         }
-        $visitsByCheckout = [];
-        $visitsByOrder = [];
+        $visitedMemberDays = [];
         foreach ($serviceVisits as $serviceVisit) {
             $sourceId = (int)($serviceVisit['business_source_primary_id'] ?? 0);
-            if ($sourceId <= 0) continue;
-            $checkoutKey = (string)($serviceVisit['checkout_request_id'] ?? '');
-            $matchedOrderKey = (string)($serviceVisit['matched_order_id'] ?? '');
-            $orderKey = (string)($serviceVisit['origin_order_id'] ?? '');
-            $factId = (string)$serviceVisit['service_fact_id'];
-            $visit = ['source_id' => $sourceId, 'count' => 1];
-            // 一个服务事实可能同时命中结账请求和原单，按事实 ID 去重。
-            if ($checkoutKey !== '') $visitsByCheckout[$checkoutKey . '|' . $sourceId][$factId] = $visit;
-            if ($matchedOrderKey !== '') $visitsByOrder[$matchedOrderKey . '|' . $sourceId][$factId] = $visit;
-            if ($orderKey !== '') $visitsByOrder[$orderKey . '|' . $sourceId][$factId] = $visit;
+            $memberId = (int)($serviceVisit['member_id'] ?? 0);
+            if ($sourceId <= 0 || $memberId <= 0) continue;
+            // 人次按会员当天是否有正常服务标记，不能按服务条数或销售单数累加。
+            $dayKey = (int)$serviceVisit['store_id'] . '|' . (string)$serviceVisit['service_business_date'] . '|' . $memberId . '|' . $sourceId;
+            $visitedMemberDays[$dayKey] = true;
         }
         foreach ($rows as &$row) {
             $row['dimension'] = (string)$row['business_source_label_snapshot'];
             $row['walk_in'] = 0; $row['visits'] = 0;
             $row['effective_people'] = isset($effectiveMemberKeys[(int)$row['store_id'] . '|' . (int)$row['business_source_primary_id'] . '|' . (int)$row['member_id']]) ? 1 : 0;
-            $sourceKey = (string)(int)($row['business_source_primary_id'] ?? 0);
-            $checkoutVisits = $visitsByCheckout[(string)($row['checkout_request_id'] ?? '') . '|' . $sourceKey] ?? [];
-            $orderVisits = $visitsByOrder[(string)($row['order_id'] ?? '') . '|' . $sourceKey] ?? [];
-            $row['visits'] = count($checkoutVisits + $orderVisits);
+            $dayKey = (int)$row['store_id'] . '|' . (string)$row['business_date'] . '|' . (int)$row['member_id'] . '|' . (int)$row['business_source_primary_id'];
+            $row['visits'] = isset($visitedMemberDays[$dayKey]) ? 1 : 0;
             $row['amount'] = $this->money((int)$row['amount_cents']);
             $row['registered_date'] = (string)$row['business_date'];
             $row['reviewer'] = ''; $row['reviewed_at'] = ''; $row['created_at'] = $this->dateTime((int)$row['recorded_at']);
@@ -323,13 +346,24 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $row['annotation_subject_type'] = 'sales_order'; $row['source_order_id'] = (string)$row['order_id'];
         }
         unset($row);
+        $keys=array_values(array_unique(array_column($rows,'order_id')));$manual=$this->annotations('market_detail',$stores,$keys);
+        foreach($rows as &$row){$key=(string)$row['order_id'];$row['walk_in']=(int)($manual[$key]['walk_in']['value']??0);$row['walk_in_version']=(int)($manual[$key]['walk_in']['version']??0);}unset($row);
+        $rows = $this->marketMemberDailyRows($rows);
+        // 新的会员每日补充值优先于旧逐单补充值；旧值仅在本行尚未保存时作为读回默认值。
+        $dailyKeys = array_values(array_filter(array_column($rows, 'annotation_subject_key')));
+        $dailyManual = $this->participantEmployeeId > 0 ? []
+            : $this->annotations('market_detail', $stores, $dailyKeys);
+        foreach ($rows as &$row) {
+            $daily = $dailyManual[(string)$row['annotation_subject_key']]['walk_in'] ?? null;
+            if ($daily !== null) $row['walk_in'] = (int)$daily['value'];
+            $row['walk_in_version'] = (int)($daily['version'] ?? 0);
+        }
+        unset($row);
         if ($metricCode === 'visits') {
             $rows = array_values(array_filter($rows, static function (array $row): bool {
                 return (int)($row['visits'] ?? 0) > 0;
             }));
         }
-        $keys=array_values(array_unique(array_column($rows,'order_id')));$manual=$this->annotations('market_detail',$stores,$keys);
-        foreach($rows as &$row){$key=(string)$row['order_id'];$row['walk_in']=(int)($manual[$key]['walk_in']['value']??0);$row['walk_in_version']=(int)($manual[$key]['walk_in']['version']??0);}unset($row);
         if ($metricCode === 'walk_in') {
             $rows = array_values(array_filter($rows, static function (array $row): bool {
                 return (int)($row['walk_in'] ?? 0) > 0;
@@ -339,19 +373,20 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             return strcmp((string)$right['business_date'], (string)$left['business_date'])
                 ?: strcmp((string)$right['order_id'], (string)$left['order_id']);
         });
-        $columns = $this->columns(['order_no_snapshot'=>'单据号','store_name_snapshot'=>'门店名称','member_name_snapshot'=>'会员','member_phone'=>'手机','dimension'=>'来源','walk_in'=>'进店','visits'=>'人次','effective_people'=>'有效人员','amount'=>'金额','registered_date'=>'登记日期','reviewer'=>'审核人','reviewed_at'=>'审核时间','creator_name'=>'制单人','created_at'=>'制单日期']);
+        $columns = $this->columns(['business_date'=>'日期','store_name_snapshot'=>'门店名称','member_name_snapshot'=>'会员','member_phone'=>'手机','dimension'=>'来源','walk_in'=>'进店','visits'=>'人次','effective_people'=>'有效人员','amount'=>'金额','registered_date'=>'登记日期','reviewer'=>'审核人','reviewed_at'=>'审核时间','creator_name'=>'制单人','created_at'=>'制单日期']);
         foreach ($columns as &$column) {
             if ($column['key'] === 'visits') {
-                $column['source_explanation'] = '按已完成且未作废的服务记录计数；B 来源即使当次收款为 0，也记录服务人次。';
+                $column['source_explanation'] = '同一会员在同一天、同一来源有正常服务记 1 人次，否则记 0；多条服务仍记 1。';
             }
         }
         unset($column);
-        foreach (['order_no_snapshot'=>126, 'store_name_snapshot'=>112, 'member_name_snapshot'=>82, 'member_phone'=>116, 'dimension'=>108] as $key => $width) {
+        foreach (['business_date'=>112, 'store_name_snapshot'=>112, 'member_name_snapshot'=>82, 'member_phone'=>116, 'dimension'=>108] as $key => $width) {
             foreach ($columns as &$column) if ($column['key'] === $key) { $column['fixed'] = 'left'; $column['fixed_width'] = $width; break; }
             unset($column);
         }
         $result = $this->result('市场明细表', $columns, $rows, $input, [], ['amount_cents'=>$this->sumField($rows,'amount_cents')]);
         $result['summary_row'] = $this->marketDetailSummaryRow($rows);
+        if ($this->participantEmployeeId > 0) $result['editable_fields'] = [];
         return $result;
     }
 
@@ -852,23 +887,23 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
      */
     private function marketServiceOnlyRows(array $stores, array $serviceVisits, array $cashRows, string $dimension): array
     {
-        $bSources = [];
+        $sourcesById = [];
         foreach ($this->primarySources() as $source) {
-            if ($this->sourcePrefix($source) === 'B') $bSources[(int)$source['id']] = $source;
+            $sourcesById[(int)$source['id']] = $source;
         }
         $represented = [];
         foreach ($cashRows as $row) {
-            $represented[(int)$row['store_id'] . '|' . (string)$row['order_id'] . '|' . (int)$row['business_source_primary_id']] = true;
+            $represented[(int)$row['store_id'] . '|' . (string)$row['order_id'] . '|' . (int)$row['business_source_primary_id'] . '|' . (string)$row['business_date']] = true;
         }
         $candidates = [];
         foreach ($serviceVisits as $visit) {
             $sourceId = (int)($visit['business_source_primary_id'] ?? 0);
-            if (!isset($bSources[$sourceId]) || ($dimension !== '' && $sourceId !== (int)$dimension)) continue;
+            if (!isset($sourcesById[$sourceId]) || ($dimension !== '' && $sourceId !== (int)$dimension)) continue;
             $orderId = (string)($visit['matched_order_id'] ?? '');
             if ($orderId === '') continue;
-            $key = (int)$visit['store_id'] . '|' . $orderId . '|' . $sourceId;
-            if (!isset($represented[$key]) && (!isset($candidates[$key])
-                || strcmp((string)$visit['service_business_date'], (string)$candidates[$key]['service_business_date']) > 0)) {
+            // 同一销售单可跨多天产生服务；日期是明细行的必要组成部分。
+            $key = (int)$visit['store_id'] . '|' . $orderId . '|' . $sourceId . '|' . (string)$visit['service_business_date'];
+            if (!isset($represented[$key]) && !isset($candidates[$key])) {
                 $candidates[$key] = $visit;
             }
         }
@@ -909,8 +944,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 'member_name_snapshot' => (string)$visit['member_name_snapshot'],
                 'member_phone' => (string)($phones[$memberId] ?? ''),
                 'business_source_primary_id' => $sourceId,
-                'business_source_primary_name_snapshot' => (string)($order['business_source_primary_name_snapshot'] ?: $bSources[$sourceId]['name']),
-                'business_source_label_snapshot' => (string)($order['business_source_label_snapshot'] ?: $bSources[$sourceId]['name']),
+                'business_source_primary_name_snapshot' => (string)($order['business_source_primary_name_snapshot'] ?: $sourcesById[$sourceId]['name']),
+                'business_source_label_snapshot' => (string)($order['business_source_label_snapshot'] ?: $sourcesById[$sourceId]['name']),
                 'business_date' => (string)$visit['service_business_date'],
                 'creator_name' => (string)$visit['operator_name_snapshot'],
                 'amount_cents' => 0, 'recorded_at' => (int)$visit['recorded_at'],
@@ -1022,6 +1057,68 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         }
         return $keys;
     }
+    /**
+     * 市场明细按门店、日期、会员 ID 和来源投影；不以姓名合并不同会员。
+     * 收款仍从原订单事实累加，人工进店保留各原单据的独立记录及版本。
+     */
+    private function marketMemberDailyRows(array $orders):array
+    {
+        $days = [];
+        foreach ($orders as $order) {
+            $memberId = (int)($order['member_id'] ?? 0);
+            $key = (int)$order['store_id'] . '|' . (string)$order['business_date'] . '|' . $memberId . '|' . (int)$order['business_source_primary_id'];
+            // 没有会员 ID 的历史单不能按空值并成同一位顾客。
+            if ($memberId <= 0) $key .= '|' . (string)$order['order_id'];
+            if (!isset($days[$key])) {
+                $days[$key] = $order;
+                $days[$key]['_market_group_key'] = $key;
+                $days[$key]['_market_orders'] = [];
+                $days[$key]['amount_cents'] = 0;
+                $days[$key]['walk_in'] = 0;
+                $days[$key]['visits'] = 0;
+                $days[$key]['effective_people'] = 0;
+                $days[$key]['_creator_names'] = [];
+            }
+            $days[$key]['amount_cents'] += (int)$order['amount_cents'];
+            // 聚合行不能继续把其中一张单的制单人/制单时间冒充整行来源。
+            $days[$key]['recorded_at'] = max((int)($days[$key]['recorded_at'] ?? 0), (int)($order['recorded_at'] ?? 0));
+            $creator = trim((string)($order['creator_name'] ?? ''));
+            if ($creator !== '') $days[$key]['_creator_names'][$creator] = true;
+            $days[$key]['visits'] = max((int)$days[$key]['visits'], (int)($order['visits'] ?? 0));
+            $days[$key]['effective_people'] = max((int)$days[$key]['effective_people'], (int)($order['effective_people'] ?? 0));
+            $orderId = (string)$order['order_id'];
+            // 同一原单在同一天可能有多种支付方式，人工值只加一次。
+            if (!isset($days[$key]['_market_orders'][$orderId])) {
+                $days[$key]['walk_in'] += (int)($order['walk_in'] ?? 0);
+            }
+            $days[$key]['_market_orders'][$orderId] = [
+                'order_id' => $orderId, 'order_no' => (string)($order['order_no_snapshot'] ?? ''),
+                'walk_in' => (int)($order['walk_in'] ?? 0),
+                'walk_in_version' => (int)($order['walk_in_version'] ?? 0),
+            ];
+        }
+        foreach ($days as &$day) {
+            $day['amount'] = $this->money((int)$day['amount_cents']);
+            $day['_market_orders'] = array_values($day['_market_orders']);
+            $day['creator_name'] = implode('、', array_keys($day['_creator_names']));
+            $day['created_at'] = $this->dateTime((int)$day['recorded_at']);
+            unset($day['_creator_names']);
+            $memberId = (int)$day['member_id'];
+            // 会员每日来源行使用固定主题键；订单 ID 仅保留作旧值回退，不能继续作为新值主键。
+            $day['annotation_subject_key'] = $memberId > 0
+                ? $this->marketMemberDayKey((int)$day['store_id'], (string)$day['business_date'], $memberId, (int)$day['business_source_primary_id'])
+                : '';
+            $day['annotation_subject_type'] = 'market_member_day';
+            $day['source_order_id'] = '';
+        }
+        unset($day);
+        return array_values($days);
+    }
+    /** 同一门店、业务日期、会员和来源共同标识一条可编辑市场明细行。 */
+    private function marketMemberDayKey(int $storeId, string $date, int $memberId, int $sourceId):string
+    {
+        return 'market-day-v1:' . $storeId . ':' . $date . ':' . $memberId . ':' . $sourceId;
+    }
     private function marketDetailSummaryRow(array $rows):array
     {
         $walkIn = $visits = $amountCents = 0; $effectiveMembers = [];
@@ -1032,7 +1129,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             if ((int)($row['effective_people'] ?? 0) === 1 && (int)($row['member_id'] ?? 0) > 0) $effectiveMembers[(int)$row['member_id']] = true;
         }
         return [
-            'order_no_snapshot' => '合计', 'store_name_snapshot' => '-', 'member_name_snapshot' => '-', 'member_phone' => '-',
+            'business_date' => '合计', 'store_name_snapshot' => '-', 'member_name_snapshot' => '-', 'member_phone' => '-',
             'dimension' => '-', 'walk_in' => $walkIn, 'visits' => $visits, 'effective_people' => count($effectiveMembers),
             'amount' => $this->money($amountCents), 'registered_date' => '-', 'reviewer' => '-', 'reviewed_at' => '-',
             'creator_name' => '-', 'created_at' => '-',
@@ -1074,6 +1171,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if($hasOrganizationProjection)$records=array_values(array_filter($records,fn(array $row):bool=>$this->selectedDimensionMatches($row,$input)));
         if($hasOrganizationProjection&&!array_filter($columns,static fn($column)=>(string)($column['key']??'')==='company'))$columns=$this->withDimensions($columns);
         $columns=$this->fixedColumns($title,$this->withColumnExplanations($columns));
+        if($title==='市场明细表')$columns=$this->marketDetailColumnExplanations($columns);
         if(in_array($title,['新客明细表','新客汇总表'],true))$columns=$this->newCustomerColumnExplanations($columns);
         $this->appendDimensionFiltersToColumns($columns);
         $this->appendDimensionFiltersToRows($records);
@@ -1096,6 +1194,33 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if(!empty($metadata['drilldown']))$metadata['drilldown']=$this->withDimensionFilterParams((array)$metadata['drilldown']);
         foreach($metadata as $key=>$value)$result[$key]=$value;
         return$result;
+    }
+    /** 市场明细的说明必须解释按日合并与跨日期去重的差别，不能沿用逐单模板。 */
+    private function marketDetailColumnExplanations(array $columns):array
+    {
+        $descriptions=[
+            'company'=>'显示业务门店当前所属的分公司；门店未配置分公司时显示“未配置分公司”。',
+            'business_date'=>'按业务日期、会员和来源分行；同一会员同一天同一来源的单据合并显示。',
+            'store_name_snapshot'=>'显示这笔销售或服务所属的门店，只展示当前账号有权查看的门店。',
+            'member_name_snapshot'=>'显示销售或服务发生时记录的会员姓名。',
+            'member_phone'=>'显示会员资料中当前保存的手机号码；未填写则留空。',
+            'dimension'=>'显示这笔销售当时记录的来源；B 来源无收款服务行显示其关联订单的来源。',
+            'walk_in'=>'按本行会员、日期和来源手动保存进店数；尚未填写时显示原单据已保存值之和。仅 B 来源参与市场业绩表的进店汇总。',
+            'visits'=>'该会员当天在这一来源下有已完成且未作废的服务记 1，没有记 0；多条正常服务仍记 1，合计直接相加。',
+            'effective_people'=>'所选日期内，同一门店、同一来源的这位会员累计记账收款达到标准，本行显示 1：A 来源至少 1,000 元，其他来源至少 500 元。同一会员跨日期仍可能显示多行 1；合计按会员去重，不把各行的 1 直接相加。',
+            'amount'=>'合计该会员当天在这一门店和来源下的记账收款；退款按发生日期抵减，已作废销售不计。仅有正常服务、没有当次收款时显示 0。',
+            'registered_date'=>'显示收款或服务归属的业务日期；补录业务可能晚于该日期录入系统。',
+            'reviewer'=>'本表目前没有读取审核人，显示“—”；不能据此判断单据是否审核。',
+            'reviewed_at'=>'本表目前没有读取审核时间，显示“—”；不能据此判断单据是否审核。',
+            'creator_name'=>'显示本行合并记录中的制单人；涉及多人时用顿号分隔。',
+            'created_at'=>'显示本行合并记录最后一次写入系统的时间，补录时可能晚于业务日期。',
+        ];
+        foreach($columns as &$column){
+            $key=(string)($column['key']??'');
+            if(isset($descriptions[$key]))$column['source_explanation']=$descriptions[$key];
+        }
+        unset($column);
+        return$columns;
     }
     /** 两张新客表的列名说明直接描述顾客能核对的单据和时间，不使用内部统计术语。 */
     private function newCustomerColumnExplanations(array $columns):array
@@ -1144,7 +1269,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     {
         $maps=[
             '市场业绩表'=>['division_name'=>130,'store_name'=>140],
-            '市场明细表'=>['order_no_snapshot'=>126,'store_name_snapshot'=>112,'member_name_snapshot'=>82,'member_phone'=>116,'dimension'=>108],
+            '市场明细表'=>['business_date'=>112,'store_name_snapshot'=>112,'member_name_snapshot'=>82,'member_phone'=>116,'dimension'=>108],
             '会员进店分析表'=>['member_name'=>100,'phone'=>116],
             '会员进店年度汇总表'=>['row_label'=>82,'year'=>76],
             '地推拓客明细表'=>['division_name'=>120,'store_name_snapshot'=>120,'source'=>110,'member_name_snapshot'=>90,'phone'=>116],

@@ -150,6 +150,9 @@ final class StoreOperationsReportAnnotationServices
         $value = (string)($payload['field_value'] ?? '');
         $valueType = $this->fieldType($fieldKey);
         $this->validateFieldValue($valueType, $value);
+        if ($reportCode === 'market_detail' && $fieldKey === 'walk_in' && $value !== '' && (int)$value < 0) {
+            throw new \InvalidArgumentException('进店数不能小于 0');
+        }
         if (mb_strlen($value, 'UTF-8') > 65535) throw new \InvalidArgumentException('补充字段内容不能超过 65535 个字符');
         $storeId = (int)($payload['store_id'] ?? ($context['store_id'] ?? 0));
         $expectedVersion = (int)($payload['expected_version'] ?? 0);
@@ -158,7 +161,19 @@ final class StoreOperationsReportAnnotationServices
         $sourceFactId = max(0, (int)($payload['source_fact_id'] ?? 0));
         $sourceOrderId = mb_substr(trim((string)($payload['source_order_id'] ?? '')), 0, 64);
         $sourceLineId = mb_substr(trim((string)($payload['source_line_id'] ?? '')), 0, 64);
-        if ($reportCode === 'six_dimension_consumption_refund_detail') {
+        if ($reportCode === 'market_detail' && $subjectType === 'market_member_day') {
+            // 保存目标必须是当前权限下可见的会员每日来源行；客户端不能仅凭
+            // 自报 store_id 伪造一条补充记录，也不能把合计值写回任一原单。
+            $resolved = (new StoreReportParticipantScopeServices())->resolveSubject(
+                $scope['tenant_id'], $subjectType, $subjectKey,
+                $scope['authorization_mode'] === 'self_participant' ? $scope['participant_employee_id'] : 0
+            );
+            if ($resolved === null) throw new \InvalidArgumentException('市场明细行不存在或无权编辑');
+            $storeId = (int)$resolved['store_id'];
+            $sourceFactId = 0;
+            $sourceOrderId = '';
+            $sourceLineId = '';
+        } elseif ($reportCode === 'six_dimension_consumption_refund_detail') {
             if ($subjectType !== 'business_event_line') {
                 throw new \InvalidArgumentException('客诉数量必须绑定真实业务事件');
             }

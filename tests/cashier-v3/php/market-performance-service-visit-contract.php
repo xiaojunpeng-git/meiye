@@ -15,7 +15,8 @@ $checks = [
     'service facts remain deduplicated at service_fact_id grain' => strpos($service, 'sv.store_id,sv.service_fact_id,sv.checkout_request_id') !== false,
     'shared service resolver filters selected array rows rather than the query object' => preg_match('/\\$rows\\s*=\\s*\\$query\\s*->fieldRaw\\(/s', $service) === 1
         && strpos($service, 'return array_values(array_filter($rows, static function (array $row): bool {') !== false,
-    'market detail matches visits by source as well as order identity' => strpos($service, ". '|' . \$sourceKey") !== false,
+    'market detail identifies one normal-service visit per member day and source' => strpos($service, "\$dayKey = (int)\$serviceVisit['store_id'] . '|' . (string)\$serviceVisit['service_business_date'] . '|' . \$memberId . '|' . \$sourceId") !== false,
+    'market performance deduplicates visits by member day and source' => strpos($marketPerformance, 'if (isset($visitedMemberDays[$memberDayKey])) continue;') !== false,
     'successful order void payment reversals are included in report net cash' => strpos($service, "reversal_operation.operation_type IN ('refund','void')") !== false,
     'market performance keeps order void reversals in their original source channel' => strpos($service, 'is_refund_reversal') !== false
         && strpos($service, "refund_operation.operation_type='refund'") !== false

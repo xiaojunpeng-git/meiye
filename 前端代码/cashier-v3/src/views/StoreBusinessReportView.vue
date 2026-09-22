@@ -1113,7 +1113,7 @@ function choosePersonnel(record) {
 }
 
 function rowKey(row) {
-  return String(row?.annotation_subject_key || row?.source_line_id || row?.order_line_id || row?.order_id || row?.order_no_snapshot || '')
+  return String(row?._market_group_key || row?.annotation_subject_key || row?.source_line_id || row?.order_line_id || row?.order_id || row?.order_no_snapshot || '')
 }
 
 function annotationStoreScope(row) {
@@ -1125,6 +1125,11 @@ function annotationStoreScope(row) {
 }
 
 function beginEdit(row) {
+  // 市场明细必须绑定会员每日来源行；缺失会员 ID 的历史单不能伪造可保存主题。
+  if (activeReport.value === 'market_detail' && !row?.annotation_subject_key) {
+    errorMessage.value = '本行缺少会员编号，暂不能保存进店数。'
+    return
+  }
   if (!rowKey(row)) {
     errorMessage.value = '当前报表行缺少明细级唯一标识，无法保存手动字段。'
     return
@@ -1203,7 +1208,8 @@ async function saveEdit() {
         ...annotationStoreScope(row),
         report_code: activeReport.value,
         subject_type: String(row?.annotation_subject_type || field?.subject_type || 'report_row'),
-        subject_key: rowKey(row),
+        // 聚合行的 Vue key 与原单据人工补充记录 key 分开，防止把日期组合键写成订单主键。
+        subject_key: String(row?.annotation_subject_key || rowKey(row)),
         source_fact_id: Number(row?.source_fact_id || 0),
         source_order_id: String(row?.source_order_id || ''),
         source_line_id: String(row?.source_line_id || ''),

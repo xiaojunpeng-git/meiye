@@ -9,9 +9,14 @@ $marketDetail = substr($service, strpos($service, 'private function marketDetail
 
 $checks = [
     'market detail returns a first-row summary separately from records' => strpos($marketDetail, "\$result['summary_row'] = \$this->marketDetailSummaryRow(\$rows)") !== false,
-    'summary labels only the document column and keeps unsuitable fields blank' => strpos($service, "'order_no_snapshot' => '合计', 'store_name_snapshot' => '-', 'member_name_snapshot' => '-', 'member_phone' => '-'") !== false,
+    'summary labels the date column and keeps unsuitable fields blank' => strpos($service, "'business_date' => '合计', 'store_name_snapshot' => '-', 'member_name_snapshot' => '-', 'member_phone' => '-'") !== false,
     'summary adds the applicable count and amount fields' => strpos($service, "'dimension' => '-', 'walk_in' => \$walkIn, 'visits' => \$visits, 'effective_people' => count(\$effectiveMembers)") !== false && strpos($service, "'amount' => \$this->money(\$amountCents)") !== false,
     'effective people are deduplicated by member in the summary' => strpos($service, "\$effectiveMembers[(int)\$row['member_id']] = true") !== false,
+    'market detail explains source-specific effective thresholds and member-level summary' => strpos($service, "if(\$title==='市场明细表')\$columns=\$this->marketDetailColumnExplanations(\$columns)") !== false
+        && strpos($service, 'A 来源至少 1,000 元，其他来源至少 500 元') !== false
+        && strpos($service, '合计按会员去重，不把各行的 1 直接相加') !== false,
+    'market detail explains member-day amount and binary visits' => strpos($service, '合计该会员当天在这一门店和来源下的记账收款') !== false
+        && strpos($service, '多条正常服务仍记 1，合计直接相加') !== false,
     'shared report view renders the summary before ordinary rows' => strpos($view, '<tr v-if="summaryRow" class="store-business-report__summary-row">') !== false && strpos($view, '<tr v-for="(row, rowIndex) in records"') !== false,
 ];
 

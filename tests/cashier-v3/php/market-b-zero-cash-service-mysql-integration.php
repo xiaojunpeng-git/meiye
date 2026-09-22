@@ -10,6 +10,7 @@ $backend = getenv('BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
 require rtrim($backend, '/\\') . '/vendor/autoload.php';
 
 use app\services\report\StoreUnifiedReportServices;
+use app\services\report\StoreOperationsReportAnnotationServices;
 use think\facade\Db;
 
 $app = new \think\App(rtrim($backend, '/\\') . '/');
@@ -77,6 +78,29 @@ try {
     $service['service_status'] = 'completed';
     Db::name('cashier_v3_entitlement_service_fact')->insert($service);
 
+    // 同一会员当天同一来源的第二张 ¥0 服务单，必须并入同一条可编辑记录。
+    $secondOrderRandom = bin2hex(random_bytes(20));
+    $secondOrderId = 'CSO-' . $secondOrderRandom;
+    $secondCheckoutId = 'CKR-' . $secondOrderRandom;
+    $secondOrder = $order;
+    $secondOrder['order_id'] = $secondOrderId;
+    $secondOrder['order_no'] = 'XSTEST' . substr($secondOrderRandom, 0, 16);
+    $secondOrder['checkout_request_id'] = $secondCheckoutId;
+    $secondOrder['natural_key'] = 'market-b-service-' . $secondOrderRandom;
+    $secondOrder['command_idempotency_key'] = 'market-b-service-' . $secondOrderRandom;
+    $secondOrder['immutable_fingerprint'] = hash('sha256', $secondOrderRandom . '|order');
+    Db::name('cashier_v3_sales_order')->insert($secondOrder);
+    $secondOrderService = $service;
+    $secondOrderService['service_fact_id'] = 'ESF-' . $secondOrderRandom;
+    $secondOrderService['checkout_request_id'] = $secondCheckoutId;
+    $secondOrderService['source_line_id'] = 'SL-' . $secondOrderRandom;
+    $secondOrderService['service_record_no'] = 'SRTEST' . substr($secondOrderRandom, 0, 16);
+    $secondOrderService['natural_key'] = 'market-b-service-' . $secondOrderRandom;
+    $secondOrderService['command_idempotency_key'] = 'market-b-service-' . $secondOrderRandom;
+    $secondOrderService['business_event_no'] = 'market-b-service-' . $secondOrderRandom;
+    $secondOrderService['immutable_fingerprint'] = hash('sha256', $secondOrderRandom . '|service');
+    Db::name('cashier_v3_entitlement_service_fact')->insert($secondOrderService);
+
     $summary = $report('market_performance');
     $storeSummary = $summary['records'][0] ?? [];
     $visitsBefore = (int)($beforeSummary[$bKey . '_visits'] ?? 0);
@@ -88,9 +112,10 @@ try {
 
     $detail = $report('market_detail', ['dimension_code' => (string)$bSource['id'], 'metric_code' => 'visits']);
     $matched = array_values(array_filter($detail['records'], static function (array $row) use ($orderId): bool {
-        return (string)($row['order_id'] ?? '') === $orderId;
+        return in_array($orderId, array_column((array)($row['_market_orders'] ?? []), 'order_id'), true);
     }));
-    if (count($matched) !== 1 || (int)$matched[0]['visits'] !== 1 || (int)$matched[0]['amount_cents'] !== 0) {
+    if (count($matched) !== 1 || (int)$matched[0]['visits'] !== 1 || (int)$matched[0]['amount_cents'] !== 0
+        || count($matched[0]['_market_orders'] ?? []) !== 2) {
         throw new RuntimeException('B visit drilldown omitted or miscounted the zero-cash service order');
     }
     if ((int)($detail['summary_row']['visits'] ?? -1) !== $visitsAfter) {
@@ -99,9 +124,9 @@ try {
 
     $cashDetail = $report('market_detail', ['dimension_code' => (string)$bSource['id'], 'metric_code' => 'amount']);
     foreach ($cashDetail['records'] as $row) {
-        if ((string)($row['order_id'] ?? '') === $orderId) throw new RuntimeException('Zero-cash service leaked into amount drilldown');
+        if (in_array($orderId, array_column((array)($row['_market_orders'] ?? []), 'order_id'), true)) throw new RuntimeException('Zero-cash service leaked into amount drilldown');
     }
-    // 同一订单的第二条服务仍记 1 次，结账请求与原单双重匹配不得重复计数。
+    // 同一会员当天第二条正常服务仍只记 1 人次，不能按服务事实条数累加。
     $second = $service;
     $secondRandom = bin2hex(random_bytes(20));
     $second['service_fact_id'] = 'ESF-' . $secondRandom;
@@ -115,11 +140,11 @@ try {
     $twoServiceSummary = $report('market_performance');
     $twoServiceDetail = $report('market_detail', ['dimension_code' => (string)$bSource['id'], 'metric_code' => 'visits']);
     $twoServiceRows = array_values(array_filter($twoServiceDetail['records'], static function (array $row) use ($orderId): bool {
-        return (string)($row['order_id'] ?? '') === $orderId;
+        return in_array($orderId, array_column((array)($row['_market_orders'] ?? []), 'order_id'), true);
     }));
-    if ((int)($twoServiceSummary['records'][0][$bKey . '_visits'] ?? 0) !== $visitsBefore + 2
-        || count($twoServiceRows) !== 1 || (int)$twoServiceRows[0]['visits'] !== 2) {
-        throw new RuntimeException('Two service facts on one B order were not counted exactly twice');
+    if ((int)($twoServiceSummary['records'][0][$bKey . '_visits'] ?? 0) !== $visitsBefore + 1
+        || count($twoServiceRows) !== 1 || (int)$twoServiceRows[0]['visits'] !== 1) {
+        throw new RuntimeException('Two service facts on one member day were counted more than once');
     }
     // 仅用于验证查询端口径；补充记录与测试业务事实都在同一事务回滚。
     Db::name('cashier_v3_report_annotation')->insert([
@@ -132,17 +157,97 @@ try {
     $manualSummary = $report('market_performance');
     $manualDetail = $report('market_detail', ['dimension_code' => (string)$bSource['id'], 'metric_code' => 'walk_in']);
     $manualRows = array_values(array_filter($manualDetail['records'], static function (array $row) use ($orderId): bool {
-        return (string)($row['order_id'] ?? '') === $orderId;
+        return in_array($orderId, array_column((array)($row['_market_orders'] ?? []), 'order_id'), true);
     }));
     if ((int)($manualSummary['records'][0][$bKey . '_walk_in'] ?? 0) !== 2
         || count($manualRows) !== 1 || (int)$manualRows[0]['walk_in'] !== 2) {
         throw new RuntimeException('B zero-cash manual walk-in does not reconcile');
     }
+    // 新的每日来源行覆盖旧逐单值；0 也是明确输入，不能回退成旧值 2。
+    $dailyKey = 'market-day-v1:' . $storeId . ':' . $date . ':' . (int)$order['member_id'] . ':' . (int)$bSource['id'];
+    Db::name('cashier_v3_report_annotation')->insert([
+        'tenant_id' => (string)$order['tenant_id'], 'organization_id' => (string)$order['organization_id'],
+        'store_id' => $storeId, 'report_code' => 'market_detail', 'subject_type' => 'market_member_day',
+        'subject_key' => $dailyKey, 'field_key' => 'walk_in', 'value_type' => 'integer',
+        'field_value' => '4', 'version' => 1, 'created_at' => time(), 'updated_at' => time(),
+    ]);
+    $dailySummary = $report('market_performance');
+    $dailyDetail = $report('market_detail', ['dimension_code' => (string)$bSource['id'], 'metric_code' => 'walk_in']);
+    $dailyRows = array_values(array_filter($dailyDetail['records'], static function (array $row) use ($dailyKey): bool {
+        return (string)($row['annotation_subject_key'] ?? '') === $dailyKey;
+    }));
+    if (count($dailyRows) !== 1 || (int)$dailyRows[0]['walk_in'] !== 4
+        || (int)$dailyRows[0]['walk_in_version'] !== 1
+        || (int)($dailySummary['records'][0][$bKey . '_walk_in'] ?? 0) !== 4) {
+        throw new RuntimeException('Daily row input did not replace legacy order input consistently');
+    }
+    Db::name('cashier_v3_report_annotation')->where('subject_key', $dailyKey)->update(['field_value' => '0', 'version' => 2]);
+    $clearedSummary = $report('market_performance');
+    $clearedDetail = $report('market_detail', ['dimension_code' => (string)$bSource['id']]);
+    $clearedRows = array_values(array_filter($clearedDetail['records'], static function (array $row) use ($dailyKey): bool {
+        return (string)($row['annotation_subject_key'] ?? '') === $dailyKey;
+    }));
+    if (count($clearedRows) !== 1 || (int)$clearedRows[0]['walk_in'] !== 0
+        || (int)$clearedRows[0]['walk_in_version'] !== 2
+        || (int)($clearedSummary['records'][0][$bKey . '_walk_in'] ?? -1) !== 0) {
+        throw new RuntimeException('Explicit daily zero incorrectly fell back to legacy input');
+    }
+    $annotations = new StoreOperationsReportAnnotationServices();
+    $context = [
+        'tenant_id' => (string)$order['tenant_id'], 'organization_id' => (string)$order['organization_id'],
+        'store_id' => $storeId, 'store_ids' => [$storeId], 'authorization_mode' => 'stores',
+        'operator_id' => 1, 'operator_name' => 'report-test',
+    ];
+    $payload = [
+        'report_code' => 'market_detail', 'subject_type' => 'market_member_day',
+        'subject_key' => $dailyKey, 'store_id' => $storeId, 'field_key' => 'walk_in',
+        'field_value' => '5', 'expected_version' => 2,
+        'idempotency_key' => 'market-daily-test-' . $random,
+    ];
+    $saved = $annotations->saveAnnotation($context, $payload);
+    $replayed = $annotations->saveAnnotation($context, $payload);
+    if ((int)$saved['version'] !== 3 || empty($replayed['replayed'])) {
+        throw new RuntimeException('Daily row save did not retain version and idempotency');
+    }
+    try {
+        $annotations->saveAnnotation($context, array_merge($payload, [
+            'field_value' => '6', 'idempotency_key' => 'market-daily-conflict-' . $random,
+        ]));
+        throw new RuntimeException('Stale daily row version was accepted');
+    } catch (InvalidArgumentException $expected) {
+        if (strpos($expected->getMessage(), '已更新') === false) throw $expected;
+    }
+    foreach ([
+        ['field_value' => '-1', 'expected_version' => 3, 'idempotency_key' => 'market-daily-negative-' . $random],
+        ['subject_key' => 'market-day-v1:' . $storeId . ':' . $date . ':999999999:' . (int)$bSource['id'],
+            'expected_version' => 0, 'idempotency_key' => 'market-daily-missing-' . $random],
+    ] as $invalid) {
+        try {
+            $annotations->saveAnnotation($context, array_merge($payload, $invalid));
+            throw new RuntimeException('Invalid daily row input was accepted');
+        } catch (InvalidArgumentException $expected) {
+            // 格式和行存在性都必须在写入前由服务端校验。
+        }
+    }
+    $cleared = $annotations->saveAnnotation($context, array_merge($payload, [
+        'field_value' => '', 'expected_version' => 3,
+        'idempotency_key' => 'market-daily-clear-' . $random,
+    ]));
+    $emptyDetail = $report('market_detail', ['dimension_code' => (string)$bSource['id']]);
+    $emptyRows = array_values(array_filter($emptyDetail['records'], static function (array $row) use ($dailyKey): bool {
+        return (string)($row['annotation_subject_key'] ?? '') === $dailyKey;
+    }));
+    if ((int)$cleared['version'] !== 4 || count($emptyRows) !== 1
+        || (int)$emptyRows[0]['walk_in'] !== 0 || (int)$emptyRows[0]['walk_in_version'] !== 4) {
+        throw new RuntimeException('Empty daily input was not retained as an explicit clear');
+    }
     echo "PASS B completed service counts one visit without payment\n";
     echo "PASS B zero-cash service appears in precise visit drilldown\n";
     echo "PASS B cash amount and amount drilldown remain unchanged\n";
-    echo "PASS two services on one B order count exactly twice\n";
+    echo "PASS two services on one member day count once\n";
     echo "PASS B zero-cash manual walk-in reconciles between summary and detail\n";
+    echo "PASS member-day input replaces legacy order input and clear-to-zero survives readback\n";
+    echo "PASS member-day save checks row existence, version and idempotency\n";
 } finally {
     Db::rollback();
 }

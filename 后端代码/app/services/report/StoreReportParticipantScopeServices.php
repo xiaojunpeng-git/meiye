@@ -98,6 +98,30 @@ final class StoreReportParticipantScopeServices
      */
     public function resolveSubject(string $tenantId, string $subjectType, string $subjectKey, int $employeeId = 0): ?array
     {
+        if ($subjectType === 'market_member_day') {
+            // 合并行不能信任客户端提交的门店和会员 ID；复用报表查询验证
+            // 当前日期与来源下确实存在这一条门店范围内的记录。
+            // 个人参与视图可能只看得到组内部分订单，不能保存全店合并值。
+            if ($employeeId > 0) return null;
+            if (preg_match('/^market-day-v1:([1-9][0-9]*):(\d{4}-\d{2}-\d{2}):([1-9][0-9]*):([1-9][0-9]*)$/D', $subjectKey, $parts) !== 1) return null;
+            [$storeId, $date, $memberId, $sourceId] = [(int)$parts[1], $parts[2], (int)$parts[3], (int)$parts[4]];
+            $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+            if (!$parsed || $parsed->format('Y-m-d') !== $date) return null;
+            // 门店 ID 虽由行键解析，仍须确认归属当前租户，避免跨实例伪造。
+            if (!Db::name('cashier_v3_sales_order')->where('tenant_id', $tenantId)->where('store_id', $storeId)->value('id')) return null;
+            $input = [
+                'report' => 'market_detail', 'start_date' => $date, 'end_date' => $date,
+                'dimension_code' => (string)$sourceId, '_internal_all' => true,
+            ];
+            if ($employeeId > 0) $input['_report_scope'] = ['mode' => 'self_participant', 'employee_id' => $employeeId];
+            $result = (new StoreUnifiedReportServices())->query([$storeId], $input);
+            foreach ((array)($result['records'] ?? []) as $row) {
+                if ((string)($row['annotation_subject_key'] ?? '') !== $subjectKey
+                    || (int)($row['member_id'] ?? 0) !== $memberId) continue;
+                return ['store_id' => $storeId, 'source_fact_id' => 0, 'source_order_id' => '', 'source_line_id' => ''];
+            }
+            return null;
+        }
         if (in_array($subjectType, ['sale_line', 'report_row'], true)) {
             $line = Db::name('cashier_v3_sale_fact')->alias('subject_sale')
                 ->where('subject_sale.tenant_id', $tenantId)->where('subject_sale.source_line_id', $subjectKey)
