@@ -1573,7 +1573,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
     <div v-if="isFieldGuideOpen" class="store-business-report__modal" role="dialog" aria-modal="true" aria-label="列名取值来源">
       <section class="store-business-report__modal-card store-business-report__field-guide">
         <header>
-          <div><strong>{{ currentReportName }}列名取值来源</strong><p>以下说明只解释当前表的显示口径。</p></div>
+          <div><strong>{{ currentReportName }}列名取值来源</strong><p>{{ ['new_customer_analysis', 'new_customer_analysis_summary'].includes(activeReport) ? '顾客首次办理并付清疗程卡时才算新客；未付清、后续购买和已作废订单不算。下方说明各列的数据从哪里来。' : '下面说明每一列的数据从哪里来，以及什么情况下会显示。' }}</p></div>
           <button type="button" class="store-business-report__modal-close" aria-label="关闭" @click="isFieldGuideOpen = false">×</button>
         </header>
         <div v-if="currentFieldExplanations.length" class="store-business-report__field-guide-list">

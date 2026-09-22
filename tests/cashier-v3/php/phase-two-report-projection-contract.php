@@ -48,6 +48,18 @@ foreach ([
     if (strpos($service, $needle) === false) throw new RuntimeException('new-customer drilldown contract missing: ' . $needle);
 }
 foreach ([
+    'firstCompletedCourseOrders',
+    "'first_course_completed'",
+    "whereIn('s.order_id',array_keys(\$firstOrders)",
+    '一笔首次付清事件只记一次新客',
+    '缺少人员归属不影响首次付清的顾客身份',
+    'newCustomerColumnExplanations',
+    '未付清、后续购买和已作废订单不算',
+] as $needle) {
+    $haystack = $needle === '未付清、后续购买和已作废订单不算' ? $view : $service;
+    if (strpos($haystack, $needle) === false) throw new RuntimeException('first-course new-customer contract missing: ' . $needle);
+}
+foreach ([
     "'experience_card_amount_version'",
     "array_key_exists('value',\$experienceCardAmount)",
     "'新客明细表'=>['editable_fields'=>[['key'=>'experience_card_amount'",
