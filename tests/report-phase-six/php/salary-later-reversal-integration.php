@@ -48,10 +48,20 @@ $toCents = static function ($value): int {
 };
 
 $service = new StoreUnifiedReportPhaseSixServices();
+$verifiedDrilldowns = 0;
 foreach ($groups as $group) {
     $range = ['start' => $group['business_date'], 'end' => $group['business_date']];
     $detail = $service->query('phase_six_salary_detail', [$group['store_id']], $range, ['_internal_all' => true]);
     $summary = $service->query('phase_six_salary_summary', [$group['store_id']], $range, ['_internal_all' => true]);
+    foreach ([$detail, $summary] as $salaryReport) {
+        $employeeColumn = null;
+        foreach ($salaryReport['columns'] as $column) {
+            if (($column['key'] ?? '') === 'employee_name') { $employeeColumn = $column; break; }
+        }
+        if (($employeeColumn['label'] ?? '') !== '员工' || ($employeeColumn['fixed'] ?? '') !== 'left') {
+            throw new RuntimeException('salary employee column must be named 员工 and frozen on the left');
+        }
+    }
     foreach ([$detail, $summary] as $salaryReport) {
         foreach ((array)($salaryReport['columns'] ?? []) as $column) {
             $explanation = trim((string)($column['source_explanation'] ?? ''));
@@ -82,6 +92,40 @@ foreach ($groups as $group) {
     }
     if ($summaryCash !== $detailCash) {
         throw new RuntimeException('salary summary cash no longer reconciles with detail after reversal filtering');
+    }
+    // Follow one nonzero salary category exactly as the page does: stable store/employee IDs and
+    // the server-declared category key must produce only matching rows and the clicked amount.
+    $checkedDrilldown = false;
+    foreach ($summary['records'] as $summaryRow) {
+        if ((int)($summaryRow['employee_id'] ?? 0) <= 0) continue;
+        foreach ($summary['columns'] as $column) {
+            $columnKey = (string)($column['key'] ?? '');
+            if (!str_starts_with($columnKey, 'salary_category_cash_') || $toCents($summaryRow[$columnKey] ?? 0) <= 0) continue;
+            $drilldown = (array)($column['drilldown'] ?? []);
+            if (($drilldown['report'] ?? '') !== 'phase_six_salary_detail') {
+                throw new RuntimeException('salary category amount has no detail drilldown');
+            }
+            $input = [
+                '_internal_all' => true,
+                'salary_employee_id' => (int)$summaryRow['employee_id'],
+                'salary_store_id' => (int)$summaryRow['store_id'],
+                'salary_category_key' => $columnKey,
+            ];
+            $drilled = $service->query('phase_six_salary_detail', [$group['store_id']], $range, $input);
+            foreach ($drilled['records'] as $drilledRow) {
+                if ((int)($drilledRow['store_id'] ?? 0) !== (int)$summaryRow['store_id']
+                    || (int)($drilledRow['employee_id'] ?? 0) !== (int)$summaryRow['employee_id']) {
+                    throw new RuntimeException('salary drilldown leaked another store or employee');
+                }
+            }
+            if ($toCents($drilled['summary_row']['cash_amount'] ?? 0) !== $toCents($summaryRow[$columnKey])) {
+                throw new RuntimeException('salary category drilldown cash differs from the clicked summary amount');
+            }
+            $checkedDrilldown = true;
+            $verifiedDrilldowns++;
+            break;
+        }
+        if ($checkedDrilldown) break;
     }
     $firstEmployee = trim((string)($detail['records'][0]['employee_name'] ?? ''));
     if ($firstEmployee !== '') {
@@ -118,7 +162,20 @@ foreach ($groups as $group) {
     }
 }
 
-echo 'PASS salary reports exclude ', count($targets), " cross-date reversed facts and reconcile summary/detail\n";
+if ($verifiedDrilldowns === 0) {
+    throw new RuntimeException('local fixture had no nonzero category amount to exercise the salary drilldown');
+}
+$sample = reset($groups);
+try {
+    $service->query('phase_six_salary_detail', [(int)$sample['store_id']],
+        ['start' => $sample['business_date'], 'end' => $sample['business_date']],
+        ['salary_employee_id' => 1, 'salary_store_id' => 999999, 'salary_category_key' => 'salary_category_cash_unclassified']);
+    throw new RuntimeException('salary drilldown accepted a store outside the authorized scope');
+} catch (InvalidArgumentException $expected) {
+    if (!str_contains($expected->getMessage(), '无权限')) throw $expected;
+}
+
+echo 'PASS salary reports exclude ', count($targets), ' cross-date reversed facts and reconcile summary/detail; ', $verifiedDrilldowns, " category drilldowns verified\n";
 } catch (Throwable $throwable) {
     fwrite(STDERR, 'FAIL salary later-reversal integration: ' . $throwable->getMessage() . PHP_EOL);
     exit(1);

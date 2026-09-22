@@ -216,25 +216,47 @@ final class StoreUnifiedReportPhaseSixServices
     private function salaryDetail(array $stores,array $range,array $input):array
     {
         $employeeName=$this->salaryEmployeeName($input);
-        $facts=$this->filterSalaryFactsByEmployeeName(
-            $this->salaryFactsWithServiceCustomerMetrics($stores,$range),$employeeName
-        );
+        $employeeId=$this->salaryDrilldownId($input,'salary_employee_id');
+        $storeId=$this->salaryDrilldownId($input,'salary_store_id');
+        $categoryKey=trim((string)($input['salary_category_key']??''));
+        if($categoryKey!=='' && !preg_match('/^salary_category_cash_(?:\d+|historical_\d+|unclassified)$/D',$categoryKey))
+            throw new \InvalidArgumentException('商品分类筛选条件不正确');
+        if($categoryKey!=='' && ($employeeId===0 || $storeId===0))
+            throw new \InvalidArgumentException('请从员工薪资汇总表选择员工和门店后查看分类明细');
+        // 下钻使用服务端许可门店内的稳定 ID，不能用同名员工或页面文字扩大查询范围。
+        if($storeId>0 && !in_array($storeId,$stores,true))throw new \InvalidArgumentException('无权限查看该门店的工资明细');
+        $facts=$this->filterSalaryFactsByEmployeeName($this->salaryFactsWithServiceCustomerMetrics($stores,$range),$employeeName);
+        if($employeeId>0)$facts=array_values(array_filter($facts,static fn(array $fact):bool=>(int)$fact['employee_id']===$employeeId));
+        if($storeId>0)$facts=array_values(array_filter($facts,static fn(array $fact):bool=>(int)$fact['store_id']===$storeId));
+        $categories=$categoryKey!==''?$this->salaryCategoryDefinitions($this->observedSalaryCategories($facts)):null;
+        $categoryLabel='';
+        if($categoryKey!=='')foreach($categories['columns'] as $column){
+            if($column['key']===$categoryKey){$categoryLabel=(string)$column['label'];break;}
+        }
         $rows = [];
         foreach ($facts as $f) {
+            $cashCents=(int)($f['cash_cents']??0);
+            if($categoryKey!==''){
+                // 卡项可跨多个二级分类；明细只展示所点分类的分摊金额，合计才与汇总单元格相等。
+                $projected=$this->salaryCategoryAmountsByColumn($f,$categories['targets']);
+                $cashCents=(int)($projected[$categoryKey]??0);
+                if($cashCents===0)continue;
+            }
             $rows[] = [
                 'business_date' => $f['business_date'], 'company_name' => $f['company_name'],
                 'store_name' => $f['store_name'], 'employee_name' => $f['employee_name'],
                 'member_name' => $f['member_name'], 'card_type' => (string)($f['card_type'] ?: '-'),
-                'performance_category' => $f['category_path'], 'detail' => $f['item_name'],
+                'performance_category' => $categoryKey!==''?$categoryLabel:$f['category_path'], 'detail' => $f['item_name'],
                 'project_count' => (string)$f['project_count'],
                 // The common reader has already chosen the one stable labor
                 // line that carries a daily visit share.  All other project
                 // lines for the same employee/customer/day remain zero.
                 'service_visit_count' => $this->tenth((int)($f['service_visit_tenths'] ?? 0)),
                 'consumption_amount' => $this->money((int)$f['consumption_cents']),
-                'cash_amount' => $this->money((int)($f['cash_cents'] ?? 0)),
+                'cash_amount' => $this->money($cashCents), 'cash_amount_cents' => $cashCents,
                 'labor_fee' => $this->money((int)$f['labor_fee_cents']), 'row_key' => $f['row_key'],
-                'store_id' => (int)$f['store_id'], 'source_line_id' => (string)$f['source_line_id'],
+                'store_id' => (int)$f['store_id'], 'employee_id' => (int)$f['employee_id'],
+                'source_line_id' => (string)$f['source_line_id'],
                 'annotation_subject_type' => 'phase_six_row',
                 'annotation_subject_key' => 'phase_six:salary:' . (string)$f['row_key'],
             ];
@@ -243,18 +265,18 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('business_date','日期','该笔服务、核销或销售计入工资的日期；后来已作废的记录不再统计。'),
             $this->column('company_name','分公司','该笔业务发生门店所属的分公司。',false,true),
             $this->column('store_name','门店','该笔业务实际发生的门店。',false,true),
-            $this->column('employee_name','员工','该笔项目的手艺人，或现金业绩分配到的员工；按结账时记录的姓名显示。'),
+            $this->column('employee_name','员工','该笔项目的手艺人，或现金业绩分配到的员工；按结账时记录的姓名显示。',false,true),
             $this->column('member_name','会员','该笔业务对应的会员或顾客姓名。'),
             $this->column('card_type','卡类型','使用会员卡内项目时显示对应卡类型；现金购买或无卡项目显示“-”。'),
-            $this->column('performance_category','业绩分类','按该笔项目或产品结账时所属的分类显示。'),
+            $this->column('performance_category','业绩分类','普通明细显示结账时的分类；从汇总表点击分类金额进入时，显示所点分类，卡项可按卡内项目拆分。'),
             $this->column('detail','明细','该笔业务对应的具体服务项目、卡项或产品名称。'),
             $this->column('project_count','项目数','该员工实际承担的项目数量；多人服务按分配比例拆分，可显示小数，人工调整后按已保存数值计算。',true),
             $this->column('service_visit_count','服务人次','本人服务按“同一会员+同一日期”计一次；朋友算和游客每条有效服务记录计一次，朋友不算不计入；多人服务按实际分配计算。',true),
             $this->column('consumption_amount','消耗业绩','服务完成或卡项核销后计入该员工的消耗金额；作废后不再统计。',true),
-            $this->column('cash_amount','现金业绩','成功收款后分配给该员工的现金业绩；作废后不再统计。',true),
+            $this->column('cash_amount','现金业绩','成功收款后分配给该员工的金额；从汇总表点击分类金额进入时，只显示该分类分得的金额；作废后不再统计。',true),
             $this->column('labor_fee','手工费','结账时分配给该手艺人的手工费；作废后不再统计。',true),
             $this->manualColumn('备注','备注','有权限的用户手动填写，保存后刷新页面仍会显示。')
-        ],$rows,$range,$employeeName);
+        ],$rows,$range,$employeeName,$categoryKey!=='');
     }
 
     private function salarySummary(array $stores,array $range,array $input):array
@@ -265,7 +287,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->salaryFactsWithServiceCustomerMetrics($stores,$range),$employeeName
         ) as $f){
             $key=(int)$f['store_id'].'|'.(int)$f['employee_id'];
-            if(!isset($rows[$key]))$rows[$key]=['company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'project_count_micros'=>0,'service_visit_tenths'=>0,'service_people_tenths'=>0,'consumption_cents'=>0,'cash_cents'=>0,'labor_fee_cents'=>0];
+            if(!isset($rows[$key]))$rows[$key]=['store_id'=>(int)$f['store_id'],'employee_id'=>(int)$f['employee_id'],'company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'project_count_micros'=>0,'service_visit_tenths'=>0,'service_people_tenths'=>0,'consumption_cents'=>0,'cash_cents'=>0,'labor_fee_cents'=>0];
             // 工资项目数是人员服务份额，不是销售数量；用百万分位整数累加，保留入库 DECIMAL(20,6) 的精度。
             $rows[$key]['project_count_micros']+=$this->projectCountMicros((string)$f['project_count']);
             $rows[$key]['service_visit_tenths']+=(int)($f['service_visit_tenths'] ?? 0);
@@ -295,25 +317,29 @@ final class StoreUnifiedReportPhaseSixServices
             $r['service_people_count']=$this->tenth((int)$r['service_people_tenths']);
             $r['consumption_amount']=$this->money($r['consumption_cents']);$r['labor_fee']=$this->money($r['labor_fee_cents']);
             foreach($categories['columns'] as $categoryColumn)$r[$categoryColumn['key']]='0';
-            $projectedCents=[];
-            foreach((array)($r['sales_category_cents']??[]) as $categoryId=>$cents){
-                $columnKey=$categories['targets'][$categoryId]??'salary_category_cash_unclassified';
-                $projectedCents[$columnKey]=($projectedCents[$columnKey]??0)+(int)$cents;
-            }
+            $projectedCents=$this->salaryCategoryAmountsByColumn($r,$categories['targets']);
             foreach($projectedCents as $columnKey=>$cents)$r[$columnKey]=$this->money($cents);
             unset($r['project_count_micros'],$r['service_visit_tenths'],$r['service_people_tenths'],$r['consumption_cents'],$r['cash_cents'],$r['labor_fee_cents'],$r['sales_category_cents']);
         }unset($r);
         $columns=[
             $this->column('company_name','分公司','该员工业务发生门店所属的分公司。',false,true),
             $this->column('store_name','门店','该员工业务实际发生的门店。',false,true),
-            $this->column('employee_name','销售人','该行汇总的员工，按业务结账时记录的姓名显示；页面可输入姓名中的任意文字进行筛选。'),
+            $this->column('employee_name','员工','该行汇总的员工，按业务结账时记录的姓名显示；页面可输入姓名中的任意文字进行筛选。',false,true),
             $this->column('project_count','项目数','该员工在明细表中的项目数合计；多人服务和人工调整可产生小数。',true),
             $this->column('service_visit_count','服务人次','该员工在所选日期内的有效服务人次合计；计算规则与明细表一致。',true),
             $this->column('service_people_count','服务人数','该员工在所选日期内服务的顾客数；本人服务的会员跨日期只计一人，朋友算和游客每条有效服务记录分别计算，多人服务按实际分配计算。',true),
             $this->column('consumption_amount','消耗','该员工在所选日期内，服务完成或卡项核销后计入的消耗金额；作废后不再统计。',true),
             $this->column('labor_fee','手工','该员工在所选日期内被分配的手工费合计；作废后不再统计。',true),
         ];
-        foreach($categories['columns'] as $categoryColumn)$columns[]=$categoryColumn;
+        foreach($categories['columns'] as $categoryColumn){
+            // 分类列自己声明精确下钻条件；页面仅传递 ID 与列键，不推断名称或重算金额。
+            $categoryColumn['drilldown']=[
+                'report'=>'phase_six_salary_detail',
+                'params'=>['employee_name'=>'','salary_category_key'=>$categoryColumn['key']],
+                'param_map'=>['salary_employee_id'=>'employee_id','salary_store_id'=>'store_id'],
+            ];
+            $columns[]=$categoryColumn;
+        }
         return $this->salaryResult('员工薪资汇总月报表',$columns,array_values($rows),$range,$employeeName);
     }
 
@@ -323,6 +349,42 @@ final class StoreUnifiedReportPhaseSixServices
         $name=trim((string)($input['employee_name']??''));
         if(mb_strlen($name)>64)throw new \InvalidArgumentException('员工姓名最多输入64个字');
         return $name;
+    }
+
+    /** Validate stable drilldown IDs before applying them within the already authorized store scope. */
+    private function salaryDrilldownId(array $input,string $key): int
+    {
+        $raw=trim((string)($input[$key]??''));
+        if($raw==='' || $raw==='0')return 0;
+        if(!ctype_digit($raw) || (int)$raw<=0)throw new \InvalidArgumentException('员工或门店筛选条件不正确');
+        return (int)$raw;
+    }
+
+    /** Keep the same observed category mapping for summary columns and category-specific detail. */
+    private function observedSalaryCategories(array $facts): array
+    {
+        $observed=[];
+        foreach($facts as $fact){
+            $amounts=(array)($fact['sales_category_cents']??[]);
+            $unclassified=(int)($fact['cash_cents']??0)-array_sum($amounts);
+            if($unclassified!==0)$amounts[0]=($amounts[0]??0)+$unclassified;
+            foreach($amounts as $id=>$cents)$observed[$id]=(string)($fact['sales_category_paths'][$id]??'');
+        }
+        return $observed;
+    }
+
+    /** Project one salary fact by the same current/historical category targets used in the summary. */
+    private function salaryCategoryAmountsByColumn(array $fact,array $targets): array
+    {
+        $amounts=(array)($fact['sales_category_cents']??[]);
+        $unclassified=(int)($fact['cash_cents']??0)-array_sum($amounts);
+        if($unclassified!==0)$amounts[0]=($amounts[0]??0)+$unclassified;
+        $projected=[];
+        foreach($amounts as $id=>$cents){
+            $key=$targets[$id]??'salary_category_cash_unclassified';
+            $projected[$key]=($projected[$key]??0)+(int)$cents;
+        }
+        return $projected;
     }
 
     /**
@@ -338,9 +400,15 @@ final class StoreUnifiedReportPhaseSixServices
     }
 
     /** Add the shared text filter contract without making the frontend infer it from report names. */
-    private function salaryResult(string $title,array $columns,array $records,array $range,string $employeeName): array
+    private function salaryResult(string $title,array $columns,array $records,array $range,string $employeeName,bool $categoryDrilldown=false): array
     {
         $result=$this->result($title,$columns,$records,$range);
+        if($categoryDrilldown){
+            // Money is rounded only for display; the clicked category's total stays cent-accurate internally.
+            $result['summary_row']['cash_amount']=$this->money(array_sum(array_map(
+                static fn(array $row):int=>(int)($row['cash_amount_cents']??0),$records
+            )));
+        }
         $result['filter_schema']=[[
             // 页面隐藏重复的“员工”可见标题，但保留语义标题供读屏和键盘操作识别。
             'key'=>'employee_name','label'=>'员工','show_label'=>false,'aria_label'=>'员工姓名',

@@ -794,7 +794,8 @@ class UnifiedReport extends AuthController
             ['dimension_as_of', ''], ['drill_month', ''], ['six_dimension_only', 0],
             ['tier_id', ''], ['month', ''],
             ['target_amount', ''], ['target_count', ''], ['visit_count', ''], ['unit_price_min', ''], ['unit_price_max', ''],
-            ['employee_name', ''],
+            // 工资汇总分类下钻只传稳定员工、门店 ID 与服务端列键，查询服务仍按平台权限范围裁剪。
+            ['employee_name', ''], ['salary_employee_id', 0], ['salary_store_id', 0], ['salary_category_key', ''],
             ['mode', 'count'],
         ];
     }

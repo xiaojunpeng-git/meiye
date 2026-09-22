@@ -171,7 +171,7 @@ $categoryProjection = $categoryDefinitions->invoke($phaseSix, [
     ['id' => 3, 'pid' => 1, 'cate_name' => '项目', 'is_show' => 1],
     ['id' => 4, 'pid' => 3, 'cate_name' => '三级', 'is_show' => 1],
     ['id' => 5, 'pid' => 0, 'cate_name' => '花园', 'is_show' => 1],
-], [4 => '生美 / 项目 / 三级', 9 => '历史 / 旧分类']);
+], [2 => '生美 / 卡项', 4 => '生美 / 项目 / 三级', 9 => '历史 / 旧分类']);
 $categoryLabels = array_column($categoryProjection['columns'], 'label');
 assertPhaseSix(in_array('生美/卡项', $categoryLabels, true)
     && in_array('生美/项目', $categoryLabels, true)
@@ -182,6 +182,25 @@ assertPhaseSix(in_array('生美/卡项', $categoryLabels, true)
     'salary category columns use current two-level config and retain zero-sale and historical categories');
 assertPhaseSix(($categoryProjection['targets'][4] ?? null) === 'salary_category_cash_3',
     'third-level sale fact rolls into its visible second-level category');
+$projectCategoryMoney = new ReflectionMethod($phaseSix, 'salaryCategoryAmountsByColumn');
+$splitSale = ['cash_cents' => 200000, 'sales_category_cents' => [2 => 150000, 4 => 50000]];
+$splitColumns = $projectCategoryMoney->invoke($phaseSix, $splitSale, $categoryProjection['targets']);
+assertPhaseSix(($splitColumns['salary_category_cash_2'] ?? null) === 150000
+    && ($splitColumns['salary_category_cash_3'] ?? null) === 50000,
+    'category drilldown preserves each card component in cents instead of repeating the full card price');
+$unclassifiedColumns = $projectCategoryMoney->invoke($phaseSix,
+    ['cash_cents' => 200000, 'sales_category_cents' => [2 => 150000]], $categoryProjection['targets']);
+assertPhaseSix(($unclassifiedColumns['salary_category_cash_unclassified'] ?? null) === 50000,
+    'category drilldown reconciles unclassified remainder with the summary');
+assertPhaseSix(
+    str_contains($service, "'employee_name','员工','该行汇总的员工")
+    && str_contains($service, "'employee_name','员工','该笔项目的手艺人")
+    && str_contains($service, "'param_map'=>['salary_employee_id'=>'employee_id','salary_store_id'=>'store_id']")
+    && str_contains($service, "'report'=>'phase_six_salary_detail'")
+    && str_contains($controller, "['salary_employee_id', 0]")
+    && str_contains($store, "['salary_employee_id',0]")
+    && str_contains($cashier, "['salary_employee_id', 0]"),
+    'salary employee columns and exact category drilldown are declared for all three endpoints');
 $allocateCategories = new ReflectionMethod($phaseSix, 'salarySaleCategoryAmounts');
 $cardParts = $allocateCategories->invoke($phaseSix,
     ['source_type' => 'card', 'amount_cents' => 100], [
