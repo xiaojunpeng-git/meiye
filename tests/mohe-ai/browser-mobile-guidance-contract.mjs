@@ -9,7 +9,7 @@ const source = fs.readFileSync(new URL('../../前端代码/mobile-vue3/src/share
 // its actual state functions, not a copied implementation, but is NOT a native
 // UTS compiler, picker, H5 layout or device lifecycle acceptance test.
 const script = source.match(/<script setup lang="uts">([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '');
-const expose = '\nglobalThis.controller = {openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,editGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,load,resumeActive,refs:{question,progress,clarification,choices,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
+const expose = '\nglobalThis.controller = {openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,editGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,load,resumeActive,refs:{question,progress,clarification,choices,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy,activeQuestion,activeElapsedSeconds,activeRunState,messageAnchor},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
 const code = esbuild.transformSync(script + expose, { loader: 'ts', target: 'es2020' }).code;
 const schema = 'mohe-clarification-v2'; let checks = 0;
 const clean = value => JSON.parse(JSON.stringify(value));
@@ -47,6 +47,16 @@ for (const max of [3,4,5]) {
   eq(f.storage.get(f.api.state().runtimeKey).resolved_run.run_id, 'mobile-run');
   eq(f.calls.filter(call => call.path === '/runs').length, 1); eq(f.calls.filter(call => call.path.endsWith('/execute')).length, 0);
   eq(f.api.load()[0].rounds.length, 1); f.unmount();
+}
+{
+  const f = setup(); f.api.refs.question.value = '等待态阅读锚点'; f.api.submit();
+  // The customer sees a complete local turn immediately, before network
+  // admission or a final answer has had a chance to enlarge the transcript.
+  eq([f.api.refs.activeQuestion.value, f.api.refs.activeElapsedSeconds.value, f.api.refs.activeRunState.value], ['等待态阅读锚点', 0, '正在思考']);
+  eq(f.api.refs.messageAnchor.value.startsWith('ai-active-'), true);
+  f.answer('/runs', { run_id: 'wait-run', generation: 1, version: 1, run_delivery_token: 'wait-delivery', status: 'RECEIVED' });
+  f.api.accept({ run_id: 'wait-run', generation: 1, version: 2, status: 'COMPLETED', answer: { summary: '首答已到达', cards: [] } });
+  eq([f.api.refs.activeQuestion.value, f.api.refs.activeElapsedSeconds.value, f.api.refs.displayed.value[0].answer], ['', 0, '首答已到达']); f.unmount();
 }
 {
   const f = setup(); f.start(fieldsDate); f.api.confirmChoices(); eq(f.calls.filter(call => call.path.endsWith('/clarify')).length, 0);
@@ -150,7 +160,7 @@ for (const max of [3,4,5]) {
   eq(created.body.history.length, 20); eq(created.body.history[0], { question: 'q5', answer: 'a5' });
   eq(Object.keys(created.body.history[0]), ['question', 'answer']); f.unmount();
 }
-for (const marker of ['mode="date"', 'currentGuidanceFields()', '修改已确认条件', '第 {{ clarification.round_no }} 步', 'client_submission_id', 'revise_clarification_id']) { eq(source.includes(marker), true); }
+for (const marker of ['mode="date"', 'currentGuidanceFields()', '修改已确认条件', '第 {{ clarification.round_no }} 步', 'client_submission_id', 'revise_clarification_id', 'class="ai-reading-runway"', '已处理 {{ activeElapsedSeconds }} 秒', 'function startActiveRunStatus()', 'function finishActiveRunStatus()', 'Native scroll-view clamps a newest short turn']) { eq(source.includes(marker), true); }
 {
   const f = setup(); f.start(); f.api.accept(f.finish('fixture-context-a'));
   const key = f.api.state().storageKey; const records = f.storage.get(key);
