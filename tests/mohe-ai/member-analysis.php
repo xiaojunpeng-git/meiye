@@ -29,6 +29,13 @@ maCheck($numericMentions['objects']===[]&&array_intersect(['10','00','100','1000
 $mentions=$members->mentioned('王湘英今天花了多少钱？',['sales_collected_amount']);
 maCheck(count($mentions['objects'])===1&&$mentions['objects'][0]['ref']==='member:19','only exact authorized question fragment becomes a member reference');
 maCheck($mentions['objects'][0]['aliases']===['香香'],'the alternate authoritative label is masked too');
+MemberFixtureQuery::$calls=[];
+$conversationMentions=$members->mentionedConversation(['昨天没有点名会员','王湘英今天花了多少钱？','香香呢？'],['sales_collected_amount']);
+$userQueries=count(array_filter(MemberFixtureQuery::$calls,static function(array $call):bool {
+    return ($call[0]??null)==='table'&&($call[1]??null)==='user';
+}));
+maCheck(count($conversationMentions['objects'])===1&&$userQueries===1,
+    'bounded conversation labels use one permission-scoped member query instead of one scan per turn');
 $catalog=new AnalysisObjectCatalog($mentions['objects'],static function(){return true;});
 maCheck(($catalog->resolve('香香','member','sales_collected_amount')['objects'][0]['ref']??null)==='member:19','nickname resolves only through the local exact catalogue');
 maCheck($members->selection('member:19')['member_id']===19,'selection rechecks current member relation before a fact read');

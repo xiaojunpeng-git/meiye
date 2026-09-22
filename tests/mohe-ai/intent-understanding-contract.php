@@ -21,6 +21,27 @@ $understanding=['goal'=>'查看本月收款，排除退款并列出前五家门�
 ]];
 $understanding=AiIntentUnderstandingContract::normalize($understanding,$question);
 $check(AiIntentUnderstandingContract::ids($understanding)===['r1','r2','r3'],'understanding has request-local requirement identities');
+$overviewTypedQuestion=$question;
+$overviewTypedQuestion['question']='这个月经营情况如何';
+$overviewTypedQuestion['recent_questions']=[];
+$overviewTypedQuestion['evidence_messages']=[['id'=>'current','text'=>$overviewTypedQuestion['question']]];
+$typedOverview=AiIntentUnderstandingContract::normalize([
+    'goal'=>'查看本月门店整体经营概览','request_kind'=>'open_overview','status'=>'understood','requirements'=>[[
+        'id'=>'r1','meaning'=>'查看本月门店整体经营概览',
+        'fields'=>['metric_codes','object_kind','object_relation','operation','periods'],
+        'values'=>['metric_terms'=>['经营情况'],'object_kind'=>'store','object_relation'=>'analysis','operation'=>'summary',
+            'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
+        'evidence'=>[['message_id'=>'current','quote'=>$overviewTypedQuestion['question']]],
+    ]],
+],$overviewTypedQuestion);
+$check(($typedOverview['request_kind']??null)==='open_overview'
+    &&($typedOverview['requirements'][0]['values']['object_relation']??null)==='analysis',
+    'an explicit open overview remains a non-executable typed semantic carrier');
+$reject(static function()use($overviewTypedQuestion){AiIntentUnderstandingContract::normalize([
+    'goal'=>'invalid marker','request_kind'=>'ranking','status'=>'understood','requirements'=>[[
+        'id'=>'r1','meaning'=>'invalid marker','fields'=>['unbound'],'evidence'=>[['message_id'=>'current','quote'=>$overviewTypedQuestion['question']]],
+    ]],
+],$overviewTypedQuestion);},'unknown request-kind markers cannot enter the semantic contract');
 $check(AiIntentUnderstandingContract::repairable('groups')
     && str_contains(AiIntentUnderstandingContract::repairInstruction('groups'),'requirement_ids'),
     'a malformed independent-result group carrier receives one bounded structural repair');

@@ -1001,10 +1001,21 @@ final class AiGatewayServices
             // turn a single request into an unbounded local member lookup.
             foreach (array_slice((array)($body['history']??[]),-6) as $round) if (is_array($round) && is_string($round['question']??null)) $questions[]=$round['question'];
             $questions[]=$body['question'];
-            foreach ($questions as $question) {
+            // Resolve the bounded conversation in one permission-scoped read.
+            // This preserves exact private-label masking while preventing the
+            // same large member table from being scanned once per history turn.
+            $this->runs->prepareAttempt($owner,$id,$generation,$worker,'analysis_members','tool',
+                hash('sha256',json_encode([count($questions),array_keys($memberMetrics)])),'member_catalog_read');
+            $this->runs->sendAttempt($owner,$id,$generation,$worker,'analysis_members');
+            try {
                 $checkpoint();
-                $matched=$this->memberObjects($context)->mentioned($question,array_keys($memberMetrics));
+                $matched=$this->memberObjects($context)->mentionedConversation($questions,array_keys($memberMetrics));
                 foreach ($matched['objects'] as $object) $memberCatalog['objects'][$object['ref']]=$object;
+                $checkpoint();
+                $this->runs->finishAttempt($owner,$id,$generation,$worker,'analysis_members','SUCCEEDED');
+            } catch (\Throwable $error) {
+                $this->runs->finishAttempt($owner,$id,$generation,$worker,'analysis_members','FAILED');
+                throw $error;
             }
             $memberCatalog['objects']=array_values($memberCatalog['objects']);
             foreach ($memberCatalog['objects'] as $object) foreach(array_merge([$object['label']],(array)($object['aliases']??[])) as $label) {
@@ -1166,6 +1177,22 @@ final class AiGatewayServices
             }
         }
         $understanding=$this->resolveExactStatedSinglePeriod($understanding,$safe['outbound'],$today);
+        // Some providers omit the new request-kind marker only when a signed
+        // predecessor is present. Recover it solely when two independent
+        // structural checks agree: the model accepted only a broad observation
+        // plus period/scope, and the local parser proves the complete current
+        // turn is one calendar-bound ambiguous observation with no condition.
+        // This prevents a prior single metric from forcing an otherwise clear
+        // new overview back through binding and review, without matching a
+        // customer phrase or selecting any metric in PHP.
+        if ($sourceQuery!==null && !isset($understanding['request_kind'])
+            && $this->allowsOpenOverviewRecovery($understanding,$caps)) {
+            $typedOverview=$this->registeredOpenOverviewUnderstanding($safe['outbound'],$today,$caps);
+            if ($typedOverview!==null) {
+                $understanding=$typedOverview;
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_open_overview_type_recovered');
+            }
+        }
         // The answer-row object is resolved before the measurement. This is
         // essential when a measurement title itself contains an object noun:
         // that noun describes what is counted, not necessarily which rows the
@@ -1178,6 +1205,18 @@ final class AiGatewayServices
         $understanding=$this->reconcileExactRegisteredMeasurement(
             $understanding,$safe['outbound'],$objectCompatibleSummaries,$objectVocabulary
         );
+        // A model-understood, fully typed store overview can be compiled from
+        // the registry without asking later models to choose the same object,
+        // response form and metric profile again. The admission helper rejects
+        // named metrics, filters, comparisons, rankings and unsafe context, so
+        // all non-deterministic requests retain the ordinary binding/review path.
+        $registeredOverview=$this->compileRegisteredOpenOverview(
+            $understanding,$safe['outbound'],$sourceQuery,$caps,$body['output_format'],$today
+        );
+        if ($registeredOverview!==null) {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_open_overview_admitted');
+            return $registeredOverview;
+        }
         $understanding=$this->reconcileStatedRegisteredMeasurements(
             $understanding,$safe['outbound'],$caps
         );
@@ -2544,6 +2583,89 @@ final class AiGatewayServices
     }
 
     /**
+     * Compiles only a complete model-understood open store overview from the
+     * source registry. This is deliberately stricter than the recovery path:
+     * the model must publish the explicit request type plus current-message
+     * object, relation, operation and one period. Any named metric, grouping,
+     * selection, comparison, ranking, condition, exclusion or authority-
+     * bearing predecessor keeps the ordinary binding and semantic review.
+     */
+    private function compileRegisteredOpenOverview(
+        array $understanding,array $safeQuestion,?array $sourceQuery,array $capabilities,string $format,string $today
+    ): ?array {
+        if (($understanding['status']??null)!=='understood'
+            ||($understanding['request_kind']??null)!=='open_overview'
+            ||array_key_exists('groups',$understanding)) return null;
+        if ($sourceQuery!==null && (!empty($sourceQuery['store_ids'])
+            ||!empty($sourceQuery['business_filters'])
+            ||!empty($sourceQuery['aggregate_condition'])
+            ||!empty($sourceQuery['condition_set'])
+            ||!empty($sourceQuery['compare_range'])
+            ||!empty($sourceQuery['ranking']))) return null;
+
+        $current=(string)($safeQuestion['question']??'');
+        if ($current==='') return null;
+        $allowed=['metric_codes','object_kind','object_relation','operation','periods','scope'];
+        $valuesByField=[];$metricRequirements=0;
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            $fields=(array)($requirement['fields']??[]);$values=(array)($requirement['values']??[]);
+            if ($fields===[] || array_diff($fields,$allowed)!==[] || !empty($values['metric_exclusions'])) return null;
+            // Full current-turn grounding prevents a marker copied from prior
+            // context from clearing a verified object or business filter.
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (($evidence['message_id']??null)!=='current'
+                    ||!is_string($evidence['quote']??null)
+                    ||mb_strpos($current,$evidence['quote'],0,'UTF-8')===false) return null;
+            }
+            foreach ($fields as $field) {
+                // metric_codes names the later binding slot; the first-stage
+                // carrier intentionally contains customer terms, never codes.
+                $valueKey=$field==='metric_codes'?'metric_terms':$field;
+                if (!array_key_exists($valueKey,$values)) return null;
+                $valuesByField[$field][]=$values[$valueKey];
+            }
+            if (in_array('metric_codes',$fields,true)) $metricRequirements++;
+        }
+        if ($metricRequirements!==1
+            ||count($valuesByField['object_kind']??[])!==1
+            ||($valuesByField['object_kind'][0]??null)!=='store'
+            ||count($valuesByField['object_relation']??[])!==1
+            ||($valuesByField['object_relation'][0]??null)!=='analysis'
+            ||count($valuesByField['operation']??[])!==1
+            ||($valuesByField['operation'][0]??null)!=='summary'
+            ||count($valuesByField['periods']??[])!==1
+            ||count((array)$valuesByField['periods'][0])!==1) return null;
+        foreach ((array)($valuesByField['scope']??[]) as $scope) {
+            if (!in_array($scope,['current_store','unspecified'],true)) return null;
+        }
+        $terms=$valuesByField['metric_codes'][0]??null;
+        if (!is_array($terms) || count($terms)!==1 || !is_string($terms[0]) || $terms[0]==='') return null;
+        // A source-registered measurement is a specific metric request, even
+        // when the model mislabeled it as an overview. Never broaden it into
+        // the profile merely to save a model call.
+        $availableCodes=array_keys((array)($capabilities['metric_readiness']??[]));
+        if (\app\services\query\metric\MetricSemanticCatalog::registeredTermsInText($current,$availableCodes)!==[]) return null;
+
+        $records=AiOverviewMetricResolver::resolve($capabilities,'store');
+        if (count($records)<2 || count($records)>AiOverviewMetricResolver::MAX_METRICS) return null;
+        $metrics=array_column($records,'metric_code');
+        if (count(array_unique($metrics))!==count($metrics)) return null;
+        foreach ($metrics as $metric) if (!in_array($metric,$capabilities['metric_codes']??[],true)) return null;
+
+        $planner=new AiWorkflowPlanner();
+        $range=$planner->normalizeNaturalPeriod($valuesByField['periods'][0][0],$today);
+        $projection=['signals'=>array_merge($metrics,['summary']),'date_terms'=>[
+            ['code'=>'EXPLICIT','start'=>$range['start'],'end'=>$range['end']],
+        ],'date_grouping_ambiguous'=>false,'unresolved_condition'=>false,'semantic_intent'=>['constraints'=>[]]];
+        $compiled=$planner->compile($projection,[
+            'decision'=>'query','query_shape'=>'summary','metric_codes'=>$metrics,'object_kind'=>'store',
+        ],$capabilities,$format,$today);
+        if (($compiled['kind']??null)!=='plan') return null;
+        $compiled['_context_meaning']=['presentation_origin'=>'customer_or_verified_context'];
+        return $compiled;
+    }
+
+    /**
      * Decide only whether the already-understood shape may receive the one
      * model-owned overview recovery.  Natural-language classification remains
      * in the understanding/review passes; registry metadata still owns which
@@ -2578,11 +2700,18 @@ final class AiGatewayServices
             // internal selection flag and inferred condition are deliberately
             // not admission criteria here. This remains structural: no
             // customer words, metric labels or codes are read here.
-            if (array_diff($fields,['metric_codes','periods','scope'])
+            if (array_diff($fields,['metric_codes','object_kind','object_relation','operation','periods','scope'])
                 || in_array('unbound',$fields,true)
                 || in_array('aggregate_condition',$fields,true)
                 || in_array('result_reference',$fields,true)
                 || !empty($values['metric_exclusions'])) return false;
+            // Providers may already publish some of the complete overview
+            // carriers. Admit only the neutral store-summary values; a selected
+            // object or another response form must retain ordinary review.
+            if (array_key_exists('object_kind',$values) && $values['object_kind']!=='store') return false;
+            if (array_key_exists('object_relation',$values) && $values['object_relation']!=='analysis') return false;
+            if (array_key_exists('operation',$values) && $values['operation']!=='summary') return false;
+            if (array_key_exists('scope',$values) && !in_array($values['scope'],['current_store','authorized','unspecified'],true)) return false;
         }
         return count(\app\services\ai\execution\AiOverviewMetricResolver::resolve($capabilities,'store'))>=2;
     }
@@ -2799,7 +2928,9 @@ final class AiGatewayServices
      * Recovers only the semantic carrier for a registry-backed open operating
      * observation after two model responses incorrectly reduce it to a date.
      * Admission is structural: exactly one calendar period, one broad metric
-     * signal, no unresolved condition, and a published store overview. The
+     * signal, no concrete local condition, and a published store overview.
+     * The parser's sole generic "unparsed business condition" may corroborate
+     * the model-owned broad observation but can never admit one by itself. The
      * complete de-identified current message remains the audited term; PHP
      * does not extract or map a customer phrase to any executable metric.
      */
@@ -2811,21 +2942,29 @@ final class AiGatewayServices
         $signals=array_values(array_diff((array)($projection['signals']??[]),[
             'TODAY','YESTERDAY','DAY_BEFORE_YESTERDAY','THIS_MONTH','LAST_MONTH',
         ]));
+        $constraints=(array)($projection['semantic_intent']['constraints']??[]);
+        // The legacy parser intentionally cannot execute a broad business
+        // phrase, so it reports one generic unparsed condition. That residue
+        // is acceptable only as corroboration after the model has independently
+        // admitted the broad observation shape; any concrete local condition,
+        // extra constraint or different blocking reason remains ineligible.
+        $genericOpenResidue=($projection['unresolved_condition']??false)===true
+            &&($projection['blocking_reason']??null)==='AI_INTENT_UNRESOLVED'
+            &&$constraints===[['type'=>'unparsed_business_condition','status'=>'unresolved']];
         if ($signals!==['ambiguous_metric']
             ||count((array)($projection['date_terms']??[]))!==1
             ||($projection['date_grouping_ambiguous']??true)
-            ||($projection['unresolved_condition']??true)
-            ||(array)($projection['semantic_intent']['constraints']??[])!==[]
+            ||(!(($projection['unresolved_condition']??true)===false&&$constraints===[])&&!$genericOpenResidue)
             ||count(AiOverviewMetricResolver::resolve($capabilities,'store'))<2) return null;
         $range=(new AiWorkflowPlanner())->normalizePeriod($projection['date_terms'][0],$today);
         return AiIntentUnderstandingContract::normalize([
             'goal'=>'open registered operating observation',
+            'request_kind'=>'open_overview',
             'requirements'=>[
-                ['id'=>'r1','meaning'=>'open operating observation','fields'=>['metric_codes'],
-                    'values'=>['metric_terms'=>[$question]],
-                    'evidence'=>[['message_id'=>'current','quote'=>$question]]],
-                ['id'=>'r2','meaning'=>'observation period','fields'=>['periods'],
-                    'values'=>['periods'=>[['kind'=>'date_range','start'=>$range['start'],'end'=>$range['end']]]],
+                ['id'=>'r1','meaning'=>'open store operating observation',
+                    'fields'=>['metric_codes','object_kind','object_relation','operation','periods'],
+                    'values'=>['metric_terms'=>[$question],'object_kind'=>'store','object_relation'=>'analysis','operation'=>'summary',
+                        'periods'=>[['kind'=>'date_range','start'=>$range['start'],'end'=>$range['end']]]],
                     'evidence'=>[['message_id'=>'current','quote'=>$question]]],
             ],
             'status'=>'understood',

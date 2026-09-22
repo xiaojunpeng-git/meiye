@@ -39,6 +39,14 @@ try {
    if($phase==='rank_metric_selection') {$clarifyRank=in_array($view['question'],['哪些门店业绩好（注册默认）','按现金业绩或消耗业绩，哪些门店排名更好（需要澄清）'],true);return ['selection'=>['decision'=>$clarifyRank?'clarify':'select','metric_code'=>$clarifyRank?null:'cash_performance'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];}
    if($phase==='understanding' && $unknownUnderstandingFailure) {$unknownUnderstandingFailure=false;throw new \app\services\ai\contract\AiContractException('AI_MODEL_RESULT_UNKNOWN',['stage'=>'transport','predicate'=>'timeout','transport_errno'=>28,'http_status'=>0,'elapsed_ms'=>30000]);}
    if($phase==='binding' && $unknownBindingFailure) {$unknownBindingFailure=false;throw new \app\services\ai\contract\AiContractException('AI_MODEL_RESULT_UNKNOWN',['stage'=>'transport','predicate'=>'timeout','transport_errno'=>28,'http_status'=>0,'elapsed_ms'=>30000]);}
+   if($phase==='understanding' && $view['question']==='这个月经营情况如何（确定性概览）') return ['understanding'=>[
+       'goal'=>'查看本月门店整体经营概览','request_kind'=>'open_overview','status'=>'understood','requirements'=>[[
+           'id'=>'r1','meaning'=>$view['question'],'fields'=>['metric_codes','object_kind','object_relation','operation','periods'],
+           'values'=>['metric_terms'=>['经营情况'],'object_kind'=>'store','object_relation'=>'analysis','operation'=>'summary',
+               'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
+           'evidence'=>[['message_id'=>'current','quote'=>$view['question']]],
+       ]],
+   ],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    if($phase==='understanding' && in_array($view['question'],['做得最好的门店是哪家（专业首答）','哪个门店业绩最高（统一默认入口）'],true)) return ['understanding'=>['goal'=>$view['question'],'requirements'=>[['id'=>'r1','meaning'=>$view['question'],'fields'=>['object_kind','operation','periods','ranking'], 'values'=>['object_kind'=>'store','operation'=>'ranking','periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'ranking'=>['direction'=>'top','limit'=>1]],'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]],'status'=>'understood'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    if($phase==='understanding' && $view['question']==='哪个门店消耗业绩最高（明确指标）') return ['understanding'=>['goal'=>$view['question'],'requirements'=>[['id'=>'r1','meaning'=>$view['question'],'fields'=>['metric_codes','object_kind','operation','periods','ranking'],'values'=>['metric_terms'=>['消耗业绩'],'object_kind'=>'store','operation'=>'ranking','periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'ranking'=>['direction'=>'top','limit'=>1]],'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]],'status'=>'understood'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    if($phase==='understanding' && in_array($view['question'],['哪些门店业绩好（候选恢复）','哪些门店业绩好（注册默认）','按现金业绩或消耗业绩，哪些门店排名更好（需要澄清）'],true)) {$values=['metric_terms'=>['业绩'],'object_kind'=>'store','operation'=>'ranking','periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'ranking'=>['direction'=>'top','limit'=>null]];if($view['question']==='按现金业绩或消耗业绩，哪些门店排名更好（需要澄清）')$values['metric_terms']=['现金业绩','消耗业绩'];return ['understanding'=>['goal'=>$view['question'],'requirements'=>[['id'=>'r1','meaning'=>$view['question'],'fields'=>['metric_codes','object_kind','operation','periods','ranking'],'values'=>$values,'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]],'status'=>'understood'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];}
@@ -132,6 +140,27 @@ try {
      'an understood broad store summary repairs a stale metric selector into one reviewed registry overview');
 verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($overviewRecovery['run_id'])." AND attempt_code='bind_candidate_repair' AND state='SUCCEEDED'")->fetchColumn()===1,
     'open overview recovery is one bounded, auditable model correction');
+ // Keep this added path on its own synthetic principal so it does not alter
+ // the original fixture's account-level admission budget.
+ $typedOverviewAuth=$auth;$typedOverviewAuth['account_id']=9;$typedOverviewContext=$typedOverviewAuth;
+ $typedOverviewContext['_refresh']=function()use(&$typedOverviewAuth){return $typedOverviewAuth;};
+ $typedOverviewBoot=$gateway->handle('bootstrap',$typedOverviewContext,['client_session_id'=>'device-typed-overview']);
+ $typedOverviewInput=['client_request_id'=>'typed-overview-fast-path','conversation_id'=>'conversation-typed-overview',
+     'client_session_id'=>'device-typed-overview','window_token'=>$typedOverviewBoot['window_token'],
+     'question'=>'这个月经营情况如何（确定性概览）','history'=>[],'output_format'=>'screen',
+     'guidance_schema_version'=>'mohe-clarification-v2'];
+ $typedOverviewRun=$gateway->handle('create',$typedOverviewContext,$typedOverviewInput);
+ $typedOverviewBinding=['client_session_id'=>'device-typed-overview','generation'=>$typedOverviewRun['generation'],
+     'run_delivery_token'=>$typedOverviewRun['run_delivery_token']];
+ $modelsBeforeTypedOverview=$models;$queriesBeforeTypedOverview=$queries;
+ $typedOverviewResult=$gateway->handle('execute',$typedOverviewContext,$typedOverviewBinding+$typedOverviewInput,$typedOverviewRun['run_id']);
+ verifyGateway($typedOverviewResult['status']==='COMPLETED'
+     &&$models===$modelsBeforeTypedOverview+1&&$queries===$queriesBeforeTypedOverview+1,
+     'a fully typed open overview uses one understanding model call and one registered Reader query');
+ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($typedOverviewRun['run_id'])." AND attempt_code IN ('bind_intent','review_binding')")->fetchColumn()===0,
+     'the strict overview admission does not repeat binding or semantic review');
+ verifyGateway(strpos((string)$db->query('SELECT counters_json FROM mohe_ai_run WHERE run_id='.$db->quote($typedOverviewRun['run_id']))->fetchColumn(),'registered_open_overview_admitted')!==false,
+     'the typed overview shortcut is observable without storing customer wording');
  [$rankRecovery,$rankRecoveryInput]=$make('rank-candidate-recovery','哪些门店业绩好（候选恢复）');$modelsBeforeRankRecovery=$models;$queriesBeforeRankRecovery=$queries;
  $rankRecoveryResult=$gateway->handle('execute',$context,$binding($rankRecovery)+$rankRecoveryInput,$rankRecovery['run_id']);
  verifyGateway($rankRecoveryResult['status']==='COMPLETED' && $models===$modelsBeforeRankRecovery+4 && $queries===$queriesBeforeRankRecovery+1,'multiple model candidates for one ranking receive one named professional metric-selection recovery before the Reader query');

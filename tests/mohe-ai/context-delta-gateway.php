@@ -133,8 +133,10 @@ try {
         'question'=>'今天经营得怎么样','prior_query'=>['operation'=>'condition_list'],
         'evidence_messages'=>[['id'=>'current','text'=>'今天经营得怎么样']],
     ],'2026-09-20',$overviewCapabilities);
-    cdgCheck(($recoveredOverview['requirements'][0]['fields']??null)===['metric_codes']
-        &&($recoveredOverview['requirements'][1]['values']['periods'][0]??null)===
+    cdgCheck(($recoveredOverview['request_kind']??null)==='open_overview'
+        &&($recoveredOverview['requirements'][0]['fields']??null)===
+            ['metric_codes','object_kind','object_relation','operation','periods']
+        &&($recoveredOverview['requirements'][0]['values']['periods'][0]??null)===
             ['kind'=>'date_range','start'=>'2026-09-20','end'=>'2026-09-20']
         &&$overviewUnderstandingMethod->invoke($localPeriodHarness->gateway,[
             'question'=>'今天现金业绩多少','prior_query'=>['operation'=>'condition_list'],

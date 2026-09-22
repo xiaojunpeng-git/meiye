@@ -17,9 +17,37 @@ final class MemberAnalysisObjectServices
     /** @return array{objects:array<int,array<string,mixed>>,scope:array<string,mixed>} */
     public function mentioned(string $question, array $metrics): array
     {
+        return $this->mentionedConversation([$question],$metrics);
+    }
+
+    /**
+     * Resolves labels across one bounded conversation with a single
+     * permission-scoped query.  The former caller queried once per historical
+     * turn, so response time grew linearly even when none of those turns named
+     * a member.  Combining only exact fragments changes no matching or access
+     * rule; it removes duplicate scans while retaining one final authority
+     * recheck for the whole frozen catalogue.
+     *
+     * @param array<int,string> $questions
+     * @return array{objects:array<int,array<string,mixed>>,scope:array<string,mixed>}
+     */
+    public function mentionedConversation(array $questions, array $metrics): array
+    {
         $scope=$this->scope();
-        if ($question==='' || !$metrics) return ['objects'=>[],'scope'=>$scope];
-        $terms=$this->terms($question);
+        if (!$metrics) return ['objects'=>[],'scope'=>$scope];
+        // The gateway exposes at most six historical questions plus the
+        // current one. Enforce the same privacy/performance boundary here so
+        // another caller cannot turn this helper into a directory scan.
+        if (count($questions)>7) $questions=array_slice($questions,-7);
+        $all=[];
+        foreach ($questions as $question) {
+            if (!is_string($question) || $question==='') continue;
+            foreach ($this->terms($question) as $term) {
+                $all[$term]=true;
+                if (count($all)>=512) break 2;
+            }
+        }
+        $terms=array_keys($all);sort($terms,SORT_STRING);
         if (!$terms) return ['objects'=>[],'scope'=>$scope];
         $query=$this->members($scope)->where(function($where)use($terms):void {
             $where->whereIn('u.real_name',$terms)->whereOr('u.nickname','in',$terms);
