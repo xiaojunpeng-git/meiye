@@ -39,6 +39,13 @@ assert.match(presentationStyles, /\.body\{min-height:0;overflow:auto/);
 assert.match(presentationStyles, /@media \(max-width:560px\)/);
 assert.match(presentationStyles, /\.answer-presentation\{/);
 assert.match(presentationStyles, /\.answer-facts\{/);
+// A completed result belongs to the question that started it. The browser
+// adapter must only anchor on a new customer turn, never force every render
+// to the transcript bottom and interrupt deliberate history reading.
+const browserEntrySource = fs.readFileSync(new URL('../../前端代码/shared/mohe-ai/browser-entry.mjs', import.meta.url), 'utf8');
+assert.match(browserEntrySource, /function anchorTurnAtReadingTop\(turn\)/);
+assert.match(browserEntrySource, /function appendTranscriptTurn\(questionText, answer\)/);
+assert.doesNotMatch(browserEntrySource, /body\.scrollTop = body\.scrollHeight/);
 const adminEntrySource = fs.readFileSync(new URL('../../前端代码/admin/src/components/MoheAiEntry.vue', import.meta.url), 'utf8');
 const cashierShellSource = fs.readFileSync(new URL('../../前端代码/cashier-v3/src/layouts/CashierShell.vue', import.meta.url), 'utf8');
 assert.match(adminEntrySource, /getBoundingClientRect\(\)/);
@@ -278,6 +285,10 @@ finishStatus({run_id:'r',generation:1,run_delivery_token:'delivery',version:2,st
 const durableText = durablePendingRecoveryRoot.textContent;
 assert.equal(durableText.split('持久问题不能丢失').length - 1,1);
 assert.equal(durableText.split('当前组合暂不可用').length - 1,1);
+const failedTurn = durablePendingRecoveryRoot.querySelector('.conversation-turn');
+assert.ok(failedTurn);
+assert.match(failedTurn.textContent, /持久问题不能丢失/);
+assert.match(failedTurn.textContent, /当前组合暂不可用/);
 assert.equal(JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixture%3Adurable-pending-question'))[0].pending_question,undefined);
 const durableSaved = JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixture%3Adurable-pending-question')).flatMap(s => s.rounds);
 assert.deepEqual(durableSaved.map(r => [r.question,r.answer,r.context_eligible]), [['持久问题不能丢失','当前组合暂不可用',false]]);
@@ -306,6 +317,11 @@ assert.equal(workspaceRoot.querySelector('.workspace-composer-card select'), nul
 assert.equal(workspaceRoot.querySelector('.workspace-cancel').hidden, true);
 assert.match(workspaceRoot.textContent, /Enter 发送 · Shift \+ Enter 换行/);
 assert.match(fs.readFileSync(new URL('../../前端代码/shared/mohe-ai/browser-entry.mjs', import.meta.url), 'utf8'), /input\.onkeydown = event =>/);
+const openHistory = Array.from(workspaceRoot.querySelectorAll('.workspace-history-open')).find(button => button.textContent === '可删除的历史问题');
+assert.ok(openHistory);
+openHistory.click(); await flush();
+assert.ok(workspaceRoot.querySelector('.conversation-turn .message.question'));
+assert.equal(workspaceRoot.querySelector('.body').scrollTop, 0);
 const removeHistory = workspaceRoot.querySelector('[aria-label="删除对话：可删除的历史问题"]');
 assert.ok(removeHistory);
 removeHistory.click(); await flush();
@@ -349,6 +365,10 @@ assert.match(collectionRoot.textContent,/卡项排行/);
 assert.match(collectionRoot.textContent,/产品排行/);
 assert.match(collectionRoot.textContent,/产品甲/);
 assert.equal(collectionRoot.textContent.includes('不得作为单项降级展示'),false);
+const completedTurn = collectionRoot.querySelector('.conversation-turn');
+assert.ok(completedTurn);
+assert.ok(completedTurn.querySelector('.answer-presentation'));
+assert.equal(collectionRoot.querySelector('[data-mohe-ai-active-turn]'), null);
 collection();
 // Two mounts can observe the same immutable terminal projection.  The second
 // append is intentionally ignored, but it must still discard the recovery

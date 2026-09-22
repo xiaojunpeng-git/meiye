@@ -36,6 +36,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
        workspace. Keep this opt-in so the separately approved cashier drawer
        remains unchanged. */
     .panel.workspace{inset:0;width:100vw;height:100vh;transform:none;border:0;border-radius:0;box-shadow:none;display:flex;flex-direction:row;background:#fff;color:#111827}
+    .conversation-turn{scroll-margin-top:28px}.workspace .conversation-turn{margin:0 0 12px}
     .workspace-aside{width:284px;flex:0 0 284px;box-sizing:border-box;display:flex;flex-direction:column;padding:26px 14px 24px;background:#fbfbfc;border-right:1px solid #e7e9ee}
     .workspace-brand{display:flex;align-items:center;min-height:36px;padding:0 14px;font-size:23px;font-weight:700;letter-spacing:.02em;color:#111827}
     .workspace-new{margin:30px 0 36px;border:0;border-radius:15px;padding:16px 20px;text-align:left;font-size:17px;font-weight:650;color:#1d2f9e;background:#eeecff}.workspace-new:hover{background:#e5e2ff}
@@ -49,7 +50,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   style.textContent += '[hidden]{display:none!important}';
   root.appendChild(style);
   const el = (tag, text, cls) => { const n = documentRef.createElement(tag); if (text != null) n.textContent = String(text); if (cls) n.className = cls; return n; };
-  let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, activeQuestionRendered = false, workspaceTitle = null, workspaceHistory = null, workspaceCancel = null;
+  let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, workspaceTitle = null, workspaceHistory = null, workspaceCancel = null;
   let clientSession = newId(); const entry = el('button', entryIconUrl ? null : '魔核 AI', entryIconUrl ? 'entry entry--icon' : 'entry');
   entry.type = 'button'; entry.setAttribute('aria-label', '打开魔核 AI 工作台');
   if (entryIconUrl) { const icon = documentRef.createElement('img'); icon.className = 'entry-icon'; icon.src = entryIconUrl; icon.alt = ''; entry.appendChild(icon); }
@@ -59,7 +60,32 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   // old controls again or treating WAITING_CLARIFICATION as an idle state.
   let clarificationArea = null, clarificationId = null, clarificationSubmittedId = null, activeGuidanceSchema = null, guidanceSubmission = null;
   function clearClarification() { if (clarificationArea) clarificationArea.remove(); clarificationArea = null; clarificationId = null; }
-  function message(text, cls) { const n = el('div', text, 'message ' + (cls || '')); body.appendChild(n); body.scrollTop = body.scrollHeight; }
+  // Rendering a message must never decide where the customer is reading. The
+  // reading anchor is set only for a newly submitted turn, so history browsing
+  // and asynchronous results cannot repeatedly pull the viewport to the end.
+  function message(text, cls, target = body) { const n = el('div', text, 'message ' + (cls || '')); target.appendChild(n); return n; }
+  function activeConversationTurn() { return body && body.querySelector('[data-mohe-ai-active-turn]'); }
+  function appendTranscriptTurn(questionText, answer) {
+    const turn = el('section', null, 'conversation-turn');
+    message(questionText, 'question', turn);
+    renderAnswer(answer, false, turn);
+    body.appendChild(turn);
+    return turn;
+  }
+  function anchorTurnAtReadingTop(turn) {
+    if (!turn || !body) return;
+    // A question starts a new reading task. Position that task near the top
+    // after layout settles, but do not auto-follow later answer updates: the
+    // customer may have intentionally scrolled to compare an earlier result.
+    const align = () => {
+      if (!turn.isConnected || !body.isConnected) return;
+      const bodyTop = body.getBoundingClientRect().top;
+      const turnTop = turn.getBoundingClientRect().top;
+      body.scrollTop = Math.max(0, body.scrollTop + turnTop - bodyTop - 28);
+    };
+    const schedule = typeof window.requestAnimationFrame === 'function' ? window.requestAnimationFrame.bind(window) : callback => setTimeout(callback, 0);
+    schedule(() => schedule(align));
+  }
   // An active Run can outlive a page component.  Keep its submitted wording in
   // the restored transcript before a late terminal projection renders the
   // answer; otherwise a refresh misleadingly shows an answer with no question.
@@ -79,10 +105,11 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     // Do not rely on an in-memory flag alone: after a route remount, that flag
     // can describe a previous body while the new panel has no visible question.
     const previous = body.querySelector('[data-mohe-ai-active-question]');
-    if (previous && previous.textContent === question) { activeQuestionRendered = true; return; }
-    if (previous) previous.remove();
-    const n = el('div', question, 'message question'); n.dataset.moheAiActiveQuestion = 'true';
-    body.appendChild(n); body.scrollTop = body.scrollHeight; activeQuestionRendered = true;
+    if (previous && previous.textContent === question) return;
+    if (previous) (previous.closest('[data-mohe-ai-active-turn]') || previous).remove();
+    const turn = el('section', null, 'conversation-turn conversation-turn--active'); turn.dataset.moheAiActiveTurn = 'true';
+    const n = message(question, 'question', turn); n.dataset.moheAiActiveQuestion = 'true';
+    body.appendChild(turn); anchorTurnAtReadingTop(turn);
   }
   function conversationTitle(value) {
     const first = value && Array.isArray(value.rounds) && value.rounds[0];
@@ -104,7 +131,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       button.onclick = () => {
         if (pendingCreate || (run && !isTerminal(run.status))) return;
         conversation = item.id; body.textContent = ''; progress.textContent = '';
-        item.rounds.forEach(row => { message(row.question, 'question'); renderAnswer(row.presentation || { summary: row.answer }, false); });
+        item.rounds.forEach(row => appendTranscriptTurn(row.question, row.presentation || { summary: row.answer }));
+        body.scrollTop = 0;
         updateWorkspaceTitle(item); renderWorkspaceHistory();
       };
       const remove = el('button', '×', 'workspace-history-delete'); remove.type = 'button'; remove.setAttribute('aria-label', '删除对话：' + title);
@@ -113,7 +141,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         const deletingCurrent = item.id === conversation;
         if (!sessions.remove(item.id)) return;
         if (deletingCurrent) {
-          conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; activeQuestionRendered = false; clearActive(); updateWorkspaceTitle(null);
+          conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; clearActive(); updateWorkspaceTitle(null);
         }
         renderWorkspaceHistory(); syncWorkspaceActions();
       };
@@ -134,7 +162,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     if (!body) return;
     const current = body.querySelector('[data-mohe-ai-active-question]');
     if (current) current.removeAttribute('data-mohe-ai-active-question');
-    activeQuestionRendered = false;
+    const turn = activeConversationTurn();
+    if (turn) { turn.removeAttribute('data-mohe-ai-active-turn'); turn.classList.remove('conversation-turn--active'); }
   }
   function validGuidanceSubmission(value) {
     return !!(value && typeof value === 'object' && typeof value.clarification_id === 'string' && value.clarification_id
@@ -322,10 +351,10 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         // wording before its answer. Never leave the customer with an orphaned
         // answer merely because the page changed while the task was running.
         const deliveredQuestion = ensureQuestionVisible();
-        renderAnswer(run.answer);
+        renderAnswer(run.answer, true, activeConversationTurn() || body);
         reportVisibleDeliveryAfterPaint(run);
         const text = run.answer.summary || (run.answer.cards || []).map(c => `${c.metric_name}：${c.display_value}${c.unit || ''}`).join('\n');
-        try { sessions.append(conversation, deliveredQuestion, text, run.answer, run); } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error'); }
+        try { sessions.append(conversation, deliveredQuestion, text, run.answer, run); } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error', activeConversationTurn() || body); }
         completeActiveQuestion();
       } else {
         // The terminal message is already appended to the conversation.  Do
@@ -336,13 +365,13 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         const deliveredQuestion = ensureQuestionVisible();
         const terminalMessage = run.status === 'CANCELLED' ? '已取消' : run.message || '本次未能完成，请重新提问。';
         progress.textContent = '';
-        message(terminalMessage);
+        message(terminalMessage, '', activeConversationTurn() || body);
         // Keep a complete customer-visible turn after refresh.  It is marked
         // non-contextual so a previous failure never becomes an instruction
         // or a claimed business fact for the next model request.
         try { sessions.append(conversation, deliveredQuestion, terminalMessage,
           { summary: terminalMessage, terminal_status: run.status }, run, { contextEligible: false });
-        } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error'); }
+        } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error', activeConversationTurn() || body); }
         completeActiveQuestion();
         clientDeliveryStartedAt=0;
         if (sessions) sessions.clearPendingQuestion(conversation);
@@ -495,7 +524,10 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       c.revisable_steps.forEach(step => { const button = el('button', step.question); button.onclick = () => { if (!current() || submitting || pendingSubmission) return; reviseId = step.id; renderFields(step.fields, step.choices, '修改：' + step.question); }; details.appendChild(button); editing.push(button); });
       const back = el('button', '返回当前问题'); back.onclick = () => { if (!current() || submitting || pendingSubmission) return; reviseId = null; renderFields(c.fields, {}, c.question); }; details.appendChild(back); editing.push(back); area.appendChild(details);
     }
-    body.appendChild(area); body.scrollTop = body.scrollHeight;
+    // Clarification belongs to the customer turn that caused it. Keeping it
+    // there avoids an orphaned form at the end of the transcript and preserves
+    // the reader's manual scroll position while the server is deciding.
+    (activeConversationTurn() || body).appendChild(area);
     // Restore an interrupted submission only when it still targets the exact
     // server-projected step.  The server replays the stored result for the
     // same id and never lets it overwrite a newer choice.
@@ -508,7 +540,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     const restoringClosedRequest = pendingCreate !== null && closeRequested;
     question = pendingCreate ? pendingCreate.question : input.value.trim(); send.disabled = true; closeRequested = restoringClosedRequest;
     if (!pendingCreate) {
-      activeQuestionRendered = false; showActiveQuestion(); activeGuidanceSchema = boot.guidance_schema_version || null;
+      showActiveQuestion(); activeGuidanceSchema = boot.guidance_schema_version || null;
       pendingCreate = { client_request_id: newId(), conversation_id: conversation, client_session_id: clientSession,
         window_token: boot.window_token, question, history: sessions.history(conversation), output_format: format.value };
       if (activeGuidanceSchema === GUIDANCE_SCHEMA) pendingCreate.guidance_schema_version = GUIDANCE_SCHEMA;
@@ -557,7 +589,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   async function resumeActive(record) {
     conversation = record.conversation_id; question = questionFromRecord(record) || persistedQuestion(record.conversation_id);
     run = record.run || null; pendingCreate = record.pending_create || null;
-    activeQuestionRendered = false; showActiveQuestion();
+    showActiveQuestion();
     clientDeliveryStartedAt=Number.isSafeInteger(record.client_delivery_started_at) && record.client_delivery_started_at>0 ? record.client_delivery_started_at : 0;
     clarificationSubmittedId = typeof record.queued_clarification_id === 'string' ? record.queued_clarification_id : null;
     guidanceSubmission = validGuidanceSubmission(record.guidance_submission) ? record.guidance_submission : null;
@@ -680,8 +712,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     send.onclick = () => { void submitQuestion(); };
     cancel.onclick = stop; close.onclick = () => { stop(); panel.hidden = true; };
     input.onkeydown = event => { if (event.isComposing || event.key !== 'Enter' || event.shiftKey) return; event.preventDefault(); void submitQuestion(); };
-    fresh.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) { message('请先确认当前任务状态。'); return; } conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; activeQuestionRendered = false; clearActive(); updateWorkspaceTitle(null); renderWorkspaceHistory(); syncWorkspaceActions(); };
-    history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; body.textContent = ''; progress.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', conversationTitle(s)); b.onclick = () => { conversation = s.id; body.textContent = ''; progress.textContent = ''; s.rounds.forEach(r => { message(r.question,'question'); renderAnswer(r.presentation || {summary:r.answer},false); }); }; body.appendChild(b); }); };
+    fresh.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) { message('请先确认当前任务状态。'); return; } conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; clearActive(); updateWorkspaceTitle(null); renderWorkspaceHistory(); syncWorkspaceActions(); };
+    history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; body.textContent = ''; progress.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', conversationTitle(s)); b.onclick = () => { conversation = s.id; body.textContent = ''; progress.textContent = ''; s.rounds.forEach(r => appendTranscriptTurn(r.question, r.presentation || {summary:r.answer})); body.scrollTop = 0; }; body.appendChild(b); }); };
     if (workspace) { renderWorkspaceHistory(); syncWorkspaceActions(); }
     if (record) void resumeActive(record);
   }
