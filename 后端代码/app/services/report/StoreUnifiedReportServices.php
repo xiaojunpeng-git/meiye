@@ -394,10 +394,23 @@ class StoreUnifiedReportServices extends BaseServices
     private function memberConsumptionDetail($storeId, array $range, array $input): array
     {
         $query = $this->operationSaleQuery($storeId, $range, $input, false);
+        // 会员消费明细是“已收款的销售明细”，不是所有已成交明细。
+        // 按同一销售事实的有效分摊净额判断，欠款后续收款可使原行进入报表，
+        // 退款/作废反向分摊抵尽时则退出；列表、合计和导出共用此条件。
+        $query->whereExists(function ($receipt) {
+            $receipt->name('cashier_v3_payment_sale_allocation_fact')->alias('member_receipt')
+                ->whereRaw('member_receipt.tenant_id=s.tenant_id AND member_receipt.store_id=s.store_id AND member_receipt.sale_fact_id=s.fact_id')
+                ->where('member_receipt.status', 'effective')
+                ->group('member_receipt.tenant_id,member_receipt.store_id,member_receipt.sale_fact_id')
+                ->having('SUM(member_receipt.amount_cents)>0');
+        });
         $total = (int)(clone $query)->count('s.id');
         $partnerDefinitions = $this->partnerPerformanceDefinitions($storeId);
         $summaryValues = $this->memberConsumptionSummaryValues($query, $storeId, $partnerDefinitions);
-        $rows = (clone $query)->fieldRaw("s.fact_id,s.tenant_id,s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.item_name_snapshot,d.category_path_snapshot,d.product_type_snapshot,s.source_type,s.quantity,s.sale_amount_cents,d.partner_category_id_snapshot,d.partner_category_path_snapshot,d.partner_share_amount_cents,s.business_source_label_snapshot,s.source_attribution_type_snapshot,d.is_experience")->order('s.business_date','desc')->order('s.id','desc')->page($this->page($input),$this->limit($input))->select()->toArray();
+        $rowQuery = (clone $query)->fieldRaw("s.fact_id,s.tenant_id,s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.item_name_snapshot,d.category_path_snapshot,d.product_type_snapshot,s.source_type,s.quantity,s.sale_amount_cents,d.partner_category_id_snapshot,d.partner_category_path_snapshot,d.partner_share_amount_cents,s.business_source_label_snapshot,s.source_attribution_type_snapshot,d.is_experience")->order('s.business_date','desc')->order('s.id','desc');
+        // 导出沿用相同的后端过滤，但不能被页面分页截断。
+        if (empty($input['_internal_all'])) $rowQuery->page($this->page($input), $this->limit($input));
+        $rows = $rowQuery->select()->toArray();
         $this->decorateMemberConsumptionRows($rows, $storeId, $partnerDefinitions, $this->cardPartnerSharesBySaleFact($rows, $storeId));
         foreach ($rows as &$row) {
             $this->applyOrganizationDimensions($row);
@@ -421,7 +434,7 @@ class StoreUnifiedReportServices extends BaseServices
             ['key'=>'member_source','label'=>'会员来源'],
         ]);
         foreach ($this->paymentMethodDefinitions() as $method) $columns[] = ['key'=>'payment_'.$method['code'],'label'=>$method['label'],'group_label'=>'支付现金业绩方式'];
-        $columns[] = ['key'=>'receipt_total','label'=>'收款总金额','group_label'=>'支付现金业绩方式'];
+        $columns[] = ['key'=>'receipt_total','label'=>'收款总金额','group_label'=>'支付现金业绩方式','source_explanation'=>'本表仅列出销售明细分摊后的有效记账收款净额大于 0 的记录；各收款方式合计为本行收款总金额，退款或作废的反向收款会抵减。'];
         foreach ($partnerDefinitions as $definition) $columns[] = ['key'=>$definition['key'],'label'=>$definition['label'],'group_label'=>'合作方分成业绩'];
         foreach ([['partner_performance','合作方业绩'],['actual_cash_performance','分成后现金业绩'],['experience_cash','体验现金业绩'],['experience_payment_method','体验现金业绩支付方式']] as $column) $columns[] = ['key'=>$column[0],'label'=>$column[1]];
         $columns = $this->fixedColumns($columns, [

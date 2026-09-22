@@ -32,3 +32,14 @@ receiptTotalAssert(
     str_contains($view, "receipt_total: '本行销售明细分摊到的所有成功记账收款方式金额合计；未成功的收款不计入。'"),
     'field guide explains the per-sale-line receipt total definition'
 );
+
+$memberReport = explode('private function storeItemAnalysis', explode('private function memberConsumptionDetail', $service, 2)[1] ?? '', 2)[0];
+receiptTotalAssert(
+    str_contains($memberReport, "->name('cashier_v3_payment_sale_allocation_fact')")
+        && str_contains($memberReport, "->having('SUM(member_receipt.amount_cents)>0')"),
+    'member consumption rows require positive net effective receipt allocation'
+);
+receiptTotalAssert(
+    str_contains($memberReport, "if (empty(\$input['_internal_all'])) \$rowQuery->page"),
+    'export keeps the same paid-row scope without browser pagination'
+);
