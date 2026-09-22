@@ -319,8 +319,8 @@ final class CashierV3QueryEntitySelectorServices
                     ->whereLike('ss.staff_name', $like, 'OR')
                     ->whereLike('ss.account', $like, 'OR');
             })
-            ->group('e.id,e.name')
-            ->field('e.id as employee_id,e.name as employee_name,MIN(ss.id) as staff_id,MAX(ss.store_id) as store_id,MAX(ss.staff_name) as staff_name,MAX(ss.account) as account');
+            ->group('e.id,e.name,e.employment_type_version')
+            ->field('e.id as employee_id,e.name as employee_name,e.employment_type_version,MIN(ss.id) as staff_id,MAX(ss.store_id) as store_id,MAX(ss.staff_name) as staff_name,MAX(ss.account) as account');
         $total = (int)(clone $query)->count();
         $rows = $query->order('e.id asc')->page($page, $pageSize)->select()->toArray();
         $records = [];
@@ -337,12 +337,15 @@ final class CashierV3QueryEntitySelectorServices
                 'staffNo' => (string)($row['account'] ?? ''),
                 'storeName' => '',
                 'employeeTypeCode' => '',
-                'employeeTypeAuthorityVersion' => 0,
+                // 导购正式事实要求人员类型资料已生效；销售经理仍按在职
+                // 身份选择，两个角色在同一搜索入口里不能混用资格门槛。
+                'employeeTypeAuthorityVersion' => (int)($row['employment_type_version'] ?? 0),
                 'salespersonEligible' => true,
                 'craftsmanEligible' => false,
                 'selectable' => true,
                 'groupScoped' => true,
-                'attributionRole' => 'guide_and_sales_manager',
+                'attributionRole' => (int)($row['employment_type_version'] ?? 0) > 0
+                    ? 'guide_and_sales_manager' : 'sales_manager',
             ];
         }
         return ['records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize, 'isLoading' => false, 'requiresKeyword' => false];

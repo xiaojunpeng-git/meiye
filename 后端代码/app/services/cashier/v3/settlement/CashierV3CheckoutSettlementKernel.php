@@ -961,7 +961,7 @@ final class CashierV3CheckoutSettlementKernel
                         'name' => self::text($selection['name'] ?? '', 128, 'saleLine.attribution.name', true),
                     ];
                     if ($attributionKey === 'guideSelections') {
-                        $roundNo = self::positiveInt(
+                        $roundNo = self::nonNegativeInt(
                             $selection['guideRoundNo'] ?? $selection['guide_round_no'] ?? 0,
                             'saleLine.guideRoundNo'
                         );

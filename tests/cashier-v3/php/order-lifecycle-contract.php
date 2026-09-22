@@ -40,6 +40,10 @@ $checks = [
         && strpos($attributionAdjustment, 'cashPerformanceForLine') === false
         && strpos($attributionAdjustment, "'amount_cents' =>") === false
         && strpos($attributionAdjustment, "'allocation_weight_numerator' =>") === false,
+    // 门店预置候选人与集团搜索使用同一导购资格，提交时重验以防绕过前端。
+    'group_attribution_roles_match_save_eligibility' => strpos($service, "'attributionRole' => (int)(\$row['employment_type_version'] ?? 0) > 0") !== false
+        && strpos($attributionAdjustment, "->field('id,name,employment_type_code,employment_type_version')") !== false
+        && strpos($attributionAdjustment, "if (\$role === 'guide' && (int)(\$employee['employment_type_version'] ?? 0) <= 0)") !== false,
     'sales_void_always_closes_effective_attribution_facts' => strpos($service, "if (\$action === 'void-sales-order') {\n                // Attribution facts") !== false
         && strpos($service, "if (\$action === 'void-sales-order' && \$occurredEvents['attribution'])") === false,
     'personnel_adjustment_fact_ids_are_staff_scoped' => strpos($service, "'personnel_adjustment_duplicate_staff'") !== false

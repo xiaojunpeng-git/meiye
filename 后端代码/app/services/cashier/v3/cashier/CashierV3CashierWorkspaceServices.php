@@ -617,7 +617,9 @@ final class CashierV3CashierWorkspaceServices
             $id = (int)($guide['employeeId'] ?? $guide['employee_id'] ?? $guide['id'] ?? 0);
             if ($id <= 0 || isset($ids[$id])) throw $this->incompleteLineSettings('', 'guide_selection_invalid');
             $roundNo = (int)($guide['guideRoundNo'] ?? $guide['guide_round_no'] ?? 0);
-            if ($roundNo < 1 || $roundNo > 3) throw $this->incompleteLineSettings('', 'guide_round_required');
+            // 工作台可暂存游客的“无轮次”导购；正式提交再用锁定的客户
+            // 身份阻止会员借用 0 绕过轮次占用校验。
+            if ($roundNo < 0 || $roundNo > 3) throw $this->incompleteLineSettings('', 'guide_round_required');
             $ids[$id] = true;
             $rounds[$roundNo] = true;
         }

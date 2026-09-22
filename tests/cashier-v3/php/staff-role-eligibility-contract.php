@@ -38,8 +38,9 @@ $check(
     strpos($groupAttributionMethod, "Db::name('employee')->alias('e')") !== false
         && strpos($groupAttributionMethod, "->where('e.status', 1)") !== false
         && strpos($groupAttributionMethod, "->where('e.is_del', 0)") !== false
+        && strpos($groupAttributionMethod, "'attributionRole' => (int)(\$row['employment_type_version'] ?? 0) > 0") !== false
         && strpos($groupAttributionMethod, "join('organization_employee") === false,
-    '导购与销售经理统一入口按全集团在职员工关键词搜索，不依赖当前组织或门店任职',
+    '导购与销售经理统一入口按全集团在职员工关键词搜索，导购另需有效人员类型资料',
     'STAFF-ROLE-GROUP-ATTRIBUTION-01'
 );
 $workspace = $read('app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php');

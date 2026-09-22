@@ -1867,24 +1867,6 @@ function reportPersonnelAssignmentFailure(result, fallback) {
   }))
 }
 
-const guestAttributionBlockedMessage = '游客订单不能记录导购或销售经理，请先选择会员。'
-
-function reportGuestAttributionBlocked() {
-  window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
-    detail: {
-      status: 'failed',
-      message: guestAttributionBlockedMessage
-    }
-  }))
-}
-
-function lineHasCustomerAttribution(line = {}) {
-  const guides = line.guideSelections ?? line.guide_selections
-  const managers = line.salesManagerSelections ?? line.sales_manager_selections
-  return (Array.isArray(guides) && guides.length > 0)
-    || (Array.isArray(managers) && managers.length > 0)
-}
-
 function reportCartQuantityFailure(result, fallback) {
   const status = resultStatus(result)
   const message = resultMessage(result, fallback)
@@ -3697,10 +3679,7 @@ async function openCartLineSalespeople(line) {
 
 async function openCartLineAttributions(line) {
   if (isEntitlementLine(line)) return
-  if (currentCustomerMode.value === 'guest') {
-    reportGuestAttributionBlocked()
-    return
-  }
+  // 游客也可以记录导购和销售经理；导购“无轮次”由服务端按游客身份校验。
   activeCartLineId.value = line.id
   await loadPersonnelOverlay(line, 'guides', 'attribution')
 }
@@ -4108,17 +4087,6 @@ async function applyPersonnelAssignmentToAll(result = {}) {
       || String(record.allocationGroupKey || '').trim().startsWith('independent:'),
     allocationGroupKey: record.allocationGroupKey || ''
   }))
-  const guideSelections = (result.guideSelections || []).map((record) => ({
-    staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
-    employeeId: canonicalCheckoutPositiveId(record.employeeId, record.staffId, record.id, record.employee_id),
-    name: record.name,
-    guideRoundNo: Number(record.guideRoundNo ?? record.guide_round_no ?? 0)
-  }))
-  const salesManagerSelections = (result.salesManagerSelections || []).map((record) => ({
-    staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
-    employeeId: canonicalCheckoutPositiveId(record.employeeId, record.staffId, record.id, record.employee_id),
-    name: record.name
-  }))
   if (craftsmen.length && !personnelAllocationGroupsAreValid(craftsmen, 'laborWeight')) {
     reportPersonnelAssignmentFailure(
       null,
@@ -4133,23 +4101,16 @@ async function applyPersonnelAssignmentToAll(result = {}) {
     )
     return
   }
-  if (!craftsmen.length && !salespeople.length && !guideSelections.length && !salesManagerSelections.length) return
+  if (!craftsmen.length && !salespeople.length) return
   isSavingPersonnelAssignment.value = true
   try {
-    const payload = {
-      craftsmen,
-      salespeople,
-      guideSelections,
-      salesManagerSelections
-    }
+    // 此批量入口只修改手艺人和销售人；导购/销售经理是逐条归属，
+    // 不能将弹窗未启用角色的空选择解释为用户要清空先前已保存的归属。
+    const payload = { craftsmen, salespeople }
     appendLocalCashierDraftOperation({ action: 'apply-cashier-personnel-to-all-lines', payload }, (draft) => {
       for (const line of draft.lines || []) {
         if (craftsmen.length && isProjectLine(line) && !isCustomCardPurchase(line)) line.craftsmen = clonePlain(craftsmen)
         if (salespeople.length && !isEntitlementLine(line)) line.salespeople = clonePlain(result.salespeople || [])
-        if (!isEntitlementLine(line)) {
-          line.guideSelections = clonePlain(result.guideSelections || [])
-          line.salesManagerSelections = clonePlain(result.salesManagerSelections || [])
-        }
       }
     })
     const assignments = { ...localPersonnelAssignments.value }
@@ -4160,10 +4121,6 @@ async function applyPersonnelAssignmentToAll(result = {}) {
       }
       if (salespeople.length && !isEntitlementLine(line)) {
         current.salespeople = clonePlain(result.salespeople || [])
-      }
-      if (!isEntitlementLine(line)) {
-        current.guideSelections = clonePlain(result.guideSelections || [])
-        current.salesManagerSelections = clonePlain(result.salesManagerSelections || [])
       }
       assignments[line.id] = current
     }
@@ -5303,10 +5260,6 @@ async function openCheckout() {
   }
   if (!hasCartLines.value) {
     return { result: { status: 'failed', code: 'CASHIER_CART_EMPTY', message: '请先添加需要结算或服务的项目。' } }
-  }
-  if (currentCustomerMode.value === 'guest' && cartLines.value.some(lineHasCustomerAttribution)) {
-    reportGuestAttributionBlocked()
-    return { result: { status: 'failed', code: 'GUEST_ATTRIBUTION_NOT_ALLOWED', message: guestAttributionBlockedMessage } }
   }
   // The checkout wizard is a browser-only projection. The first write for this
   // order is the final submit-checkout carrying the complete snapshot.
@@ -7392,6 +7345,7 @@ onBeforeUnmount(() => {
         :show-salespeople="personnelOverlay.showSalespeople"
         :show-guides="personnelOverlay.showGuides"
         :show-sales-managers="personnelOverlay.showSalesManagers"
+        :guest-customer="currentCustomerMode === 'guest'"
         :allow-other-craftsmen="personnelOverlay.showCraftsmen"
         :require-craftsmen="personnelOverlay.requireCraftsmen"
         :store-id="currentCashierStoreId"

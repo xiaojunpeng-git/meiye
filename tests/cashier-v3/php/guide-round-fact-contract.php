@@ -9,6 +9,7 @@
  */
 $root = dirname(__DIR__, 3);
 $migration = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-08-13-收银V3导购轮次事实/02-正式升级.sql');
+$guestMigration = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-09-22-游客导购无轮次归属/01-正式升级.sql');
 $service = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/report/CashierV3GuideRoundFactServices.php');
 $submission = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php');
 $workspace = (string)file_get_contents($root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php');
@@ -31,6 +32,10 @@ $checks = [
     'round number is bounded to three' => strpos($service, 'guide_round_no') !== false
         && strpos($service, 'guide_round_required') !== false
         && strpos($service, '$roundNo < 1 || $roundNo > 3') !== false,
+    'guest guide keeps attribution without inventing round zero' => strpos($guestMigration, 'guide_round_no` tinyint(1) unsigned NULL') !== false
+        && strpos($service, "'guide_round_no' => \$roundNo === 0 ? null : \$roundNo") !== false
+        && strpos($service, 'assertCustomerRound') !== false
+        && strpos($service, '$memberId === 0 && $roundNo !== 0') !== false,
     'round is explicitly selected and an order cannot mix rounds' => strpos($service, 'guideRoundNo') !== false
         && strpos($service, 'guide_round_conflict') !== false
         && strpos($service, 'guide_round_order_conflict') !== false,

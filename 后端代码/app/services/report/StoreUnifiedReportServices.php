@@ -1513,7 +1513,13 @@ class StoreUnifiedReportServices extends BaseServices
             $row['cash_receipt_total'] = $this->money($receiptTotal);
             $row['payment_method_names'] = implode('、', $paymentNames);
             $guidesForOrder = $guideByOrder[$order] ?? [];
-            $row['guide_round_no'] = $guidesForOrder ? (int)min(array_map(static function ($item) { return (int)$item['guide_round_no']; }, $guidesForOrder)) : '';
+            // 游客导购事实有人员、无会员轮次：显示“无”，不能把 NULL
+            // 强转为 0 并误导为一个可占用的第 0 轮。
+            $row['guide_round_no'] = $guidesForOrder
+                ? ($guidesForOrder[0]['guide_round_no'] === null
+                    ? '无'
+                    : (int)min(array_map(static function ($item) { return (int)$item['guide_round_no']; }, $guidesForOrder)))
+                : '';
             $row['guide_names'] = implode('、', array_values(array_unique(array_map(static function ($item) { return (string)$item['guide_employee_name_snapshot']; }, $guidesForOrder))));
             $row['sales_manager_name'] = implode('、', array_values(array_unique(array_map(static function ($item) { return (string)$item['sales_manager_name_snapshot']; }, $managerByOrder[$order] ?? []))));
             $line = trim((string)($row['source_line_id'] ?? ''));

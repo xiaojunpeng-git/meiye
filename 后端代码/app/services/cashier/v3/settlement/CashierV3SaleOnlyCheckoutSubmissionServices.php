@@ -555,10 +555,13 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                     ], $guideSelectionsByLine, $operatorScope, $dataScope);
                 } catch (\InvalidArgumentException $exception) {
                     $reason = $exception->getMessage();
+                    // 失败对收银员只展示业务提示；服务端保留不含客户资料的原因码，
+                    // 以便核对草稿、结账快照与正式导购事实之间的边界。
+                    \think\facade\Log::warning('[cashier_v3_guide_round_persist_rejected] ' . json_encode([
+                        'reason' => $reason,
+                        'order_id' => (string)$order['order_id'],
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
                     $message = '导购轮次保存失败，本次结账已回滚。';
-                    if ($reason === 'guide_authority_missing_member_id') {
-                        $message = '游客订单不能记录导购轮次，请先选择会员。';
-                    }
                     if (preg_match('/^guide_round_date_conflict:(\d{4}-\d{2}-\d{2})$/D', $reason, $matches)) {
                         $message = '该会员已于 ' . $matches[1] . ' 使用本轮导购，请选择其他轮次。';
                     }

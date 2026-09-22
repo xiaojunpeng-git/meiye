@@ -11,7 +11,8 @@ use think\facade\Db;
  * 正式结账导购轮次事实写入器。
  *
  * 导购和轮次先随购物车草稿保存；只有正式结账成功才写入本表。
- * 同一顾客的同一轮次允许在同一结账日期重复出现，跨日期则拒绝。
+ * 会员同一轮次允许在同一结账日期重复出现，跨日期则拒绝。
+ * 游客可以记录导购归属，但不属于任何会员轮次，事实列保存 NULL。
  * 每轮可以有任意多名导购，但本表不含金额、比例或业绩字段，避免
  * 把导购归属误当成现金业绩分配。
  */
@@ -43,9 +44,10 @@ final class CashierV3GuideRoundFactServices
         foreach ($normalized as $rows) foreach ($rows as $row) $rounds[(int)$row['guideRoundNo']] = true;
         if (count($rounds) !== 1) throw $this->invalid('guide_round_conflict');
         $roundNo = (int)array_key_first($rounds);
+        $this->assertCustomerRound((int)$authority['member_id'], $roundNo);
         // 只把已成功结账且尚未退款/作废的销售单视为轮次历史。草稿、
         // 失败结账和之后已经撤销的单据均不占用本次导购轮次。
-        $existing = Db::name(self::TABLE)->alias('guide_fact')
+        $existing = $memberId === 0 ? [] : Db::name(self::TABLE)->alias('guide_fact')
             ->where('guide_fact.tenant_id', $tenant)
             ->where('guide_fact.member_id', $memberId)
             ->where('guide_fact.status', 'effective')
@@ -97,7 +99,8 @@ final class CashierV3GuideRoundFactServices
                     'member_id' => $memberId, 'member_name_snapshot' => mb_substr((string)($authority['member_name_snapshot'] ?? ''), 0, 128),
                     'order_id' => (string)$authority['order_id'], 'order_no_snapshot' => mb_substr((string)($authority['order_no_snapshot'] ?? ''), 0, 64),
                     'checkout_request_id' => (string)$authority['checkout_request_id'], 'source_line_id' => $sourceLineId,
-                    'business_date' => $businessDate, 'guide_round_no' => $roundNo, 'guide_employee_id' => $employeeId,
+                    // NULL 表示没有会员轮次，绝不能把游客记录伪装成“第 0 轮”。
+                    'business_date' => $businessDate, 'guide_round_no' => $roundNo === 0 ? null : $roundNo, 'guide_employee_id' => $employeeId,
                     'guide_employee_name_snapshot' => mb_substr($employeeName, 0, 128),
                     'guide_employee_type_snapshot' => mb_substr((string)($employee['employment_type_code'] ?? ''), 0, 16),
                     'operator_id' => (int)$authority['operator_id'], 'operator_name_snapshot' => mb_substr((string)($authority['operator_name_snapshot'] ?? ''), 0, 128),
@@ -152,7 +155,9 @@ final class CashierV3GuideRoundFactServices
         }
         if (count($rounds) !== 1) throw $this->invalid('guide_round_conflict');
         $roundNo = (int)array_key_first($rounds);
-        $existing = $this->effectiveHistoryRowsInTx(
+        $this->assertCustomerRound((int)$authority['member_id'], $roundNo);
+        // 游客共享 member_id=0，不能以此查询或占用其他游客的轮次。
+        $existing = (int)$authority['member_id'] === 0 ? [] : $this->effectiveHistoryRowsInTx(
             (string)$authority['tenant_id'],
             (int)$authority['member_id']
         );
@@ -187,7 +192,7 @@ final class CashierV3GuideRoundFactServices
                 $employeeId = is_array($row) ? (int)($row['employeeId'] ?? $row['employee_id'] ?? 0) : 0;
                 if ($employeeId <= 0 || isset($seen[$employeeId])) throw $this->invalid('guide_selection_duplicate_or_invalid');
                 $roundNo = is_array($row) ? (int)($row['guideRoundNo'] ?? $row['guide_round_no'] ?? 0) : 0;
-                if ($roundNo < 1 || $roundNo > 3) throw $this->invalid('guide_round_required');
+                if ($roundNo < 0 || $roundNo > 3) throw $this->invalid('guide_round_required');
                 $seen[$employeeId] = true; $result[$line][] = ['employeeId' => $employeeId, 'guideRoundNo' => $roundNo];
             }
         }
@@ -208,7 +213,7 @@ final class CashierV3GuideRoundFactServices
     private function assertAuthority(array $authority): void
     {
         foreach (['tenant_id','organization_id','store_id','member_id','order_id','checkout_request_id','business_date','operator_id','command_idempotency_key'] as $key) {
-            if (!array_key_exists($key, $authority) || (is_string($authority[$key]) && trim($authority[$key]) === '') || (is_int($authority[$key]) && $authority[$key] <= 0)) throw $this->invalid('guide_authority_missing_' . $key);
+            if (!array_key_exists($key, $authority) || (is_string($authority[$key]) && trim($authority[$key]) === '') || (is_int($authority[$key]) && $authority[$key] < ($key === 'member_id' ? 0 : 1))) throw $this->invalid('guide_authority_missing_' . $key);
         }
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/D', (string)$authority['business_date'])) throw $this->invalid('guide_business_date_invalid');
     }
@@ -223,7 +228,7 @@ final class CashierV3GuideRoundFactServices
         foreach (['tenant_id', 'organization_id', 'store_id', 'member_id', 'business_date', 'operator_id'] as $key) {
             if (!array_key_exists($key, $authority)
                 || (is_string($authority[$key]) && trim($authority[$key]) === '')
-                || (is_int($authority[$key]) && $authority[$key] <= 0)) {
+                || (is_int($authority[$key]) && $authority[$key] < ($key === 'member_id' ? 0 : 1))) {
                 throw $this->invalid('guide_preflight_authority_missing_' . $key);
             }
         }
@@ -256,6 +261,15 @@ final class CashierV3GuideRoundFactServices
                     ->whereIn('lifecycle.operation_type', ['refund', 'void']);
             })
             ->field('guide_fact.*')->lock(true)->select()->toArray();
+    }
+
+    /** 会员必须选真实轮次，游客只能选“无”；这是服务端权威身份边界。 */
+    private function assertCustomerRound(int $memberId, int $roundNo): void
+    {
+        if ($memberId < 0 || ($memberId === 0 && $roundNo !== 0)
+            || ($memberId > 0 && ($roundNo < 1 || $roundNo > 3))) {
+            throw $this->invalid('guide_round_customer_mode_mismatch');
+        }
     }
 
     private function invalid(string $reason): \InvalidArgumentException { return new \InvalidArgumentException($reason); }

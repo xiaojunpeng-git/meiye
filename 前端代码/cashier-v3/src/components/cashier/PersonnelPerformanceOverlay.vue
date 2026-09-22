@@ -7,6 +7,8 @@ const props = defineProps({
   showSalespeople: { type: Boolean, default: true },
   showGuides: { type: Boolean, default: false },
   showSalesManagers: { type: Boolean, default: false },
+  // 游客没有会员导购轮次；仍可记录导购归属，但不能占用会员的第 1～3 轮。
+  guestCustomer: { type: Boolean, default: false },
   // 订单中心单行调整复用同一控件，但需要直接进入完整分配模式；收银默认行为不变。
   initialMode: { type: String, default: '' },
   requireCraftsmen: { type: Boolean, default: false },
@@ -17,6 +19,8 @@ const props = defineProps({
   salespersonCandidates: { type: Array, default: () => [] },
   guideCandidates: { type: Array, default: () => [] },
   salesManagerCandidates: { type: Array, default: () => [] },
+  attributionSearchLoading: { type: Boolean, default: false },
+  attributionSearchError: { type: String, default: '' },
   selectedCraftsmen: { type: Array, default: () => [] },
   selectedSalespeople: { type: Array, default: () => [] },
   selectedGuides: { type: Array, default: () => [] },
@@ -65,7 +69,7 @@ const otherCraftsmanCandidates = ref([])
 const salespeople = ref([])
 const guides = ref([])
 const salesManagers = ref([])
-const guideRoundNo = ref('')
+const guideRoundNo = ref(props.guestCustomer ? 'none' : '')
 const attributionSearchOpen = ref(false)
 const attributionSearchRole = ref('guide')
 const otherCraftsmanSearchOpen = ref(false)
@@ -471,10 +475,14 @@ watch(
     const rounds = [...new Set((Array.isArray(selected) ? selected : [])
       .map((item) => Number(item?.guideRoundNo ?? item?.guide_round_no ?? 0))
       .filter((round) => Number.isInteger(round) && round >= 1 && round <= 3))]
-    guideRoundNo.value = rounds.length === 1 ? String(rounds[0]) : ''
+    guideRoundNo.value = props.guestCustomer ? 'none' : (rounds.length === 1 ? String(rounds[0]) : '')
   },
   { immediate: true, deep: true }
 )
+watch(() => props.guestCustomer, (guest) => {
+  // 客户身份变化时不能沿用另一身份的轮次选择。
+  guideRoundNo.value = guest ? 'none' : ''
+})
 watch(
   () => [props.salesManagerCandidates, props.selectedSalesManagers],
   ([candidates, selected]) => {
@@ -517,7 +525,9 @@ const selectedGuides = computed(() => guides.value.filter((item) => item.selecte
 const selectedSalesManagers = computed(() => salesManagers.value.filter((item) => item.selected))
 const attributionSearchResults = computed(() => {
   const records = attributionSearchRole.value === 'salesManager' ? salesManagers.value : guides.value
-  return records.filter(matchesGroupKeyword)
+  // 同一集团查询承载两个角色；只展示该角色正式结账能保存的员工。
+  return records.filter((item) => matchesGroupKeyword(item)
+    && attributionRoleAllows(item, attributionSearchRole.value === 'salesManager' ? 'salesManager' : 'guide'))
 })
 const activeRecords = computed(() => activeTab.value === 'craftsmen'
   ? craftsmen.value
@@ -671,7 +681,7 @@ function addOtherCraftsman(item) {
 }
 
 function addGuide(item) {
-  if (!guides.value.some((record) => record.selected)) guideRoundNo.value = ''
+  if (!guides.value.some((record) => record.selected)) guideRoundNo.value = props.guestCustomer ? 'none' : ''
   const guide = guides.value.find((record) => record.id === item.id)
   if (guide) guide.selected = true
   attributionSearchOpen.value = false
@@ -686,7 +696,7 @@ function removeAttribution(item, role) {
   const records = role === 'guide' ? guides.value : salesManagers.value
   const target = records.find((record) => record.id === item.id)
   if (target) target.selected = false
-  if (role === 'guide' && !guides.value.some((record) => record.selected)) guideRoundNo.value = ''
+  if (role === 'guide' && !guides.value.some((record) => record.selected)) guideRoundNo.value = props.guestCustomer ? 'none' : ''
 }
 
 function setMarked(item, checked) {
@@ -809,7 +819,8 @@ function attributionRoleAllows(item = {}, role = '') {
 }
 
 function selectedGuidePayload(records = []) {
-  const roundNo = Number(guideRoundNo.value)
+  // 传输层 0 仅表示游客明确选择“无”；正式事实层使用 NULL，不制造第 0 轮。
+  const roundNo = props.guestCustomer ? 0 : Number(guideRoundNo.value)
   return selectedAttributionPayload(records.filter((record) => attributionRoleAllows(record, 'guide')))
     .map((record) => ({ ...record, guideRoundNo: roundNo }))
 }
@@ -852,9 +863,8 @@ function applySelectionToAll() {
       ? 'personnel'
       : selectedCraftsmen.length ? 'craftsmen' : 'salespeople',
     craftsmen: selectedCraftsmenPayload(),
-    salespeople: selectedSalespersonPayload(),
-    guideSelections: selectedGuidePayload(guides.value),
-    salesManagerSelections: selectedSalesManagerPayload(salesManagers.value)
+    // 导购与销售经理只能逐条保存；应用全部人不得携带空数组清除既有归属。
+    salespeople: selectedSalespersonPayload()
   })
 }
 
@@ -879,7 +889,7 @@ function confirm() {
     activateInvalidTab('craftsmen', '消耗业绩和手工费按最终输入金额保存；消耗业绩需为整元，项目数必须为非负数字，最多保留六位小数。')
     return
   }
-  if (selectedGuides.length && ![1, 2, 3].includes(Number(guideRoundNo.value))) {
+  if (selectedGuides.length && !props.guestCustomer && ![1, 2, 3].includes(Number(guideRoundNo.value))) {
     activateInvalidTab('guides', '已选择导购，请选择本次导购第几轮。')
     return
   }
@@ -996,8 +1006,9 @@ function searchGroupPersonnel(scope) {
               <em v-if="!selectedGuides.length">暂未添加</em>
             </div>
             <fieldset v-if="selectedGuides.length" class="personnel-guide-round" aria-label="本次导购轮次">
-              <legend>导购第几轮<strong>*</strong></legend>
-              <label v-for="round in [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
+              <legend>导购第几轮<strong v-if="!guestCustomer">*</strong></legend>
+              <label v-if="guestCustomer"><input v-model="guideRoundNo" type="radio" value="none"><span>无</span></label>
+              <label v-for="round in guestCustomer ? [] : [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
             </fieldset>
             <button type="button" class="button button--secondary personnel-attribution-add" @click="openAttributionSearch('guide')">查询导购</button>
           </div>
@@ -1025,8 +1036,9 @@ function searchGroupPersonnel(scope) {
           <strong>已选择 {{ selectedRecords.length }} 人<span v-if="historyAdjustment">，{{ historyAllocationSummary }}</span><span v-else-if="!activeIsNonPerformance">，分配合计 {{ activeTotal }}%</span><span v-else>（仅记录归属，不分配比例）</span></strong>
         </div>
         <fieldset v-if="activeTab === 'guides' && selectedGuides.length" class="personnel-guide-round" aria-label="本次导购轮次">
-          <legend>导购第几轮<strong>*</strong></legend>
-          <label v-for="round in [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
+          <legend>导购第几轮<strong v-if="!guestCustomer">*</strong></legend>
+          <label v-if="guestCustomer"><input v-model="guideRoundNo" type="radio" value="none"><span>无</span></label>
+          <label v-for="round in guestCustomer ? [] : [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
         </fieldset>
         <div class="personnel-full-table" :class="{ 'personnel-full-table--craftsmen': activeTab === 'craftsmen' && !activeIsNonPerformance, 'personnel-full-table--history': historyAdjustment && activeTab === 'craftsmen' }" role="table" aria-label="完整人员分配">
           <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance">服务业绩类型</span><span v-if="!activeIsNonPerformance">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">业绩比例</span><span v-if="!historyAdjustment && !activeIsNonPerformance">业绩金额</span><span v-if="historyAdjustment && activeTab === 'craftsmen'">消耗业绩</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">手工费</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">项目数</span><span>操作</span></div>
@@ -1069,9 +1081,11 @@ function searchGroupPersonnel(scope) {
           <header><strong>{{ attributionSearchRole === 'salesManager' ? '查询销售经理' : '查询导购' }}</strong><button type="button" aria-label="关闭人员查询" @click="attributionSearchOpen = false">×</button></header>
           <div class="personnel-attribution-search-toolbar">
             <input v-model="groupKeyword" type="search" placeholder="输入姓名或工号后搜索" @keyup.enter="searchGroupPersonnel('group_attributions')">
-            <button type="button" class="button button--primary" @click="searchGroupPersonnel('group_attributions')">搜索</button>
+            <button type="button" class="button button--primary" :disabled="attributionSearchLoading" @click="searchGroupPersonnel('group_attributions')">搜索</button>
           </div>
           <p v-if="groupKeyword.length < 2" class="personnel-empty">请输入至少 2 个字符后搜索集团人员</p>
+          <p v-else-if="attributionSearchLoading" class="personnel-empty">正在搜索集团人员…</p>
+          <p v-else-if="attributionSearchError" class="personnel-empty" role="alert">{{ attributionSearchError }}</p>
           <div v-else class="personnel-attribution-search-results">
             <article v-for="item in attributionSearchResults" :key="`attribution-search-${item.id}`">
               <div><strong>{{ item.name }}</strong><small>{{ item.storeName || '集团人员' }}</small></div>

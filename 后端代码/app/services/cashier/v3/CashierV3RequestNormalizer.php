@@ -677,7 +677,9 @@ class CashierV3RequestNormalizer
                 $id = (int)($guide['employeeId'] ?? $guide['employee_id'] ?? $guide['id'] ?? 0);
                 if ($id <= 0) throw self::invalidCartLineSetting('guideSelections', 'guide_selection_invalid');
                 $roundNo = (int)($guide['guideRoundNo'] ?? $guide['guide_round_no'] ?? 0);
-                if ($roundNo < 1 || $roundNo > 3) throw self::invalidCartLineSetting('guideSelections', 'guide_round_required');
+                // 0 是游客选择“无轮次”的传输值；会员身份与轮次的对应关系
+                // 在正式结账的导购归属事实写入器中按服务端权威会员 ID 复核。
+                if ($roundNo < 0 || $roundNo > 3) throw self::invalidCartLineSetting('guideSelections', 'guide_round_required');
                 $normalizedGuides[] = ['employeeId' => $id, 'guideRoundNo' => $roundNo];
             }
         }

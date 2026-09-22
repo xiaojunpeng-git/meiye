@@ -60,6 +60,9 @@ const salesPersonnelReason = ref('')
 const salesPersonnelError = ref('')
 const salesPersonnelSubmitting = ref(false)
 const salesPersonnelCommandIds = ref({})
+const salesPersonnelSearchLoading = ref(false)
+const salesPersonnelSearchError = ref('')
+let salesPersonnelSearchSerial = 0
 // Recharge and debt-repayment personnel adjustments use the same personnel
 // selector, but their authority records are not sales-order resources.
 const recordPersonnelEntry = ref(null)
@@ -701,6 +704,9 @@ async function openSalesOrderPersonnelEditor(record, item, role) {
   const lineId = salesOrderPersonnelLineId(item)
   if (!orderId || !lineId || !salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')) return
   salesPersonnelError.value = ''
+  salesPersonnelSearchError.value = ''
+  salesPersonnelSearchLoading.value = false
+  salesPersonnelSearchSerial += 1
   salesPersonnelEntry.value = null
   salesPersonnelTarget.value = { orderId: String(orderId), lineId, role: salesOrderPersonnelTargetRole(role), uiRole: role, recordVersion: record?.revision ?? record?.recordVersion }
   salesPersonnelSubmitting.value = false
@@ -742,6 +748,61 @@ function salesPersonnelCandidates(role) {
   return role === 'guide' ? (entry.guides || []) : role === 'sales_manager' ? (entry.salesManagers || []) : (entry.salespeople || [])
 }
 
+async function searchSalesPersonnelAttributions({ scope, keyword, target } = {}) {
+  const role = target === 'guide' ? 'guide' : target === 'salesManager' ? 'sales_manager' : ''
+  const entry = salesPersonnelEntry.value
+  const activeTarget = salesPersonnelTarget.value
+  const searchKeyword = String(keyword || '').trim()
+  if (scope !== 'group_attributions' || !role || activeTarget?.role !== role
+    || !salesPersonnelEditorOpen.value || !entry || searchKeyword.length < 2) return
+  const serial = ++salesPersonnelSearchSerial
+  salesPersonnelSearchError.value = ''
+  salesPersonnelSearchLoading.value = true
+  try {
+    const records = []
+    let page = 1
+    let total = 0
+    do {
+      const result = await requestAction('query-query-entities', {
+        entityType: 'person',
+        // 订单中心只提交关键词和固定业务入口；集团范围与在职资格均由服务端判定。
+        selectorEntry: 'order_center',
+        selectorContext: {
+          scope: 'group_attributions',
+          lineId: activeTarget.lineId,
+          lineRole: 'sale',
+          memberId: entry.memberId || ''
+        },
+        keyword: searchKeyword,
+        page,
+        pageSize: 20,
+        silent: true
+      })
+      const data = actionData(result)
+      if (!['success', 'succeeded'].includes(String(actionStatus(result))) || !Array.isArray(data.records)) {
+        throw new Error(result?.result?.message || result?.data?.result?.message || '集团人员搜索失败，请重试。')
+      }
+      records.push(...data.records)
+      total = Math.max(0, Number(data.total) || records.length)
+      page += 1
+    } while (records.length < total && page <= 20)
+    // 弹窗切换人员、关闭或再次搜索后，旧响应不得覆盖当前候选与已选归属。
+    if (salesPersonnelSearchSerial !== serial || salesPersonnelEntry.value !== entry
+      || salesPersonnelTarget.value !== activeTarget || !salesPersonnelEditorOpen.value) return
+    salesPersonnelEntry.value = {
+      ...entry,
+      ...(role === 'guide' ? { guides: records } : { salesManagers: records })
+    }
+  } catch (error) {
+    if (salesPersonnelSearchSerial !== serial || salesPersonnelEntry.value !== entry
+      || salesPersonnelTarget.value !== activeTarget || !salesPersonnelEditorOpen.value) return
+    salesPersonnelSearchError.value = error instanceof Error && error.message
+      ? error.message : '集团人员搜索失败，请重试。'
+  } finally {
+    if (salesPersonnelSearchSerial === serial) salesPersonnelSearchLoading.value = false
+  }
+}
+
 function salesPersonnelSelected(role, line) {
   if (role === 'guide') return line?.currentGuides || []
   if (role === 'sales_manager') return line?.currentSalesManagers || []
@@ -772,6 +833,9 @@ function salesPersonnelInitialSelection(role, line) {
 
 function closeSalesPersonnelEditor(force = false) {
   if (salesPersonnelSubmitting.value && !force) return
+  salesPersonnelSearchSerial += 1
+  salesPersonnelSearchLoading.value = false
+  salesPersonnelSearchError.value = ''
   salesPersonnelEditorOpen.value = false
   salesPersonnelEntry.value = null
   salesPersonnelTarget.value = null
@@ -2350,6 +2414,7 @@ onBeforeUnmount(() => {
       :show-salespeople="salesPersonnelTarget.role === 'salesperson'"
       :show-guides="salesPersonnelTarget.role === 'guide'"
       :show-sales-managers="salesPersonnelTarget.role === 'sales_manager'"
+      :guest-customer="Number(salesPersonnelEntry.memberId || 0) === 0"
       :salesperson-candidates="salesPersonnelTarget.role === 'salesperson' ? salesPersonnelCandidates('salesperson') : []"
       :guide-candidates="salesPersonnelTarget.role === 'guide' ? salesPersonnelCandidates('guide') : []"
       :sales-manager-candidates="salesPersonnelTarget.role === 'sales_manager' ? salesPersonnelCandidates('sales_manager') : []"
@@ -2359,7 +2424,10 @@ onBeforeUnmount(() => {
       :performance-base-amount-cents="salesPersonnelEntry.lines?.[0]?.totalAmountCents || 0"
       :saving="salesPersonnelSubmitting"
       :load-error="salesPersonnelError"
+      :attribution-search-loading="salesPersonnelSearchLoading"
+      :attribution-search-error="salesPersonnelSearchError"
       @close="closeSalesPersonnelEditor"
+      @search-personnel="searchSalesPersonnelAttributions"
       @confirm="prepareSalesPersonnelReason"
     />
 

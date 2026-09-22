@@ -179,7 +179,7 @@ const FIELD_LOGIC = Object.freeze({
   member_name: '该笔消费对应的会员姓名。',
   consumption_detail: '本条消费明细中的项目或商品名称。',
   sales_manager_name: '本单已确认的销售经理；多人时并列显示。',
-  guide_round_no: '本单选择导购后的最早导购轮次；没有导购时留空。',
+  guide_round_no: '会员订单显示本单选择导购后的最早导购轮次；游客导购不占会员轮次，显示“无”；没有导购时留空。',
   guide_names: '本单已确认的导购人员；多人时并列显示。',
   guide: '本笔新客业务在结账时确认的导购人员；多人时并列显示。新客业务还会分别显示销售人和销售经理。',
   salesperson: '本笔新客业务结账时确认的销售人员；多人时按事实快照并列显示。',

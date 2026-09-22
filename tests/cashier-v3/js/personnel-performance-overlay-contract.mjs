@@ -13,6 +13,10 @@ const workbench = fs.readFileSync(
   path.join(root, '前端代码/cashier-v3/src/views/CashierWorkbenchView.vue'),
   'utf8'
 )
+const orderCenter = fs.readFileSync(
+  path.join(root, '前端代码/cashier-v3/src/views/OrderCenterView.vue'),
+  'utf8'
+)
 const workspace = fs.readFileSync(
   path.join(root, '后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php'),
   'utf8'
@@ -59,13 +63,19 @@ assert.match(component, /function mergeWithLocalSelections\(candidates, selected
 assert.match(component, /function setSalesManager\(item\)[\s\S]*salesManagers\.value\.forEach/, '销售经理设置必须覆盖上一位人员')
 assert.doesNotMatch(component, /v-else class="personnel-group-search"/, '导购和销售经理外层不得保留搜索框')
 assert.match(component, /salesManagers\.value\.forEach\(\(record\) => \{ record\.selected = false \}\)/, '销售经理选择第二人时必须替换前一人')
-assert.match(component, /guideSelections: selectedGuidePayload/, '导购选择只提交归属快照，不提交业绩比例')
-assert.match(component, /salesManagerSelections: selectedSalesManagerPayload/, '销售经理选择只提交归属快照，不提交业绩比例')
+assert.match(component, /assignment\.guideSelections = selectedGuidePayload/, '单行导购选择只提交归属快照，不提交业绩比例')
+assert.match(component, /assignment\.salesManagerSelections = selectedSalesManagerPayload/, '单行销售经理选择只提交归属快照，不提交业绩比例')
 assert.match(component, /const attributionRole = String\(item\?\.attributionRole \?\? item\?\.attribution_role \?\? ''\)\.trim\(\)/, '归属资格只能读取后端资格字段')
 assert.doesNotMatch(component, /const attributionRole = item\?\.attributionRole \|\| item\?\.role/, '前端导购和销售经理分组标签不得参与归属资格过滤')
 assert.match(component, /search-personnel/, '集团人员必须通过显式关键词搜索事件加载')
 assert.match(component, /attributionSearchRole.value === 'salesManager'/, '查询弹窗必须按导购和销售经理角色切换')
 assert.match(component, /target: attributionSearchRole.value/, '查询结果必须回填到当前归属角色')
+assert.match(component, /attributionSearchLoading/, '集团人员检索期间必须提示等待，不能提前显示未找到')
+assert.match(component, /attributionSearchError/, '集团人员检索失败必须给出可重试的错误信息')
+assert.match(orderCenter, /@search-personnel="searchSalesPersonnelAttributions"/, '订单中心导购和销售经理调整必须接收集团检索事件')
+assert.match(orderCenter, /function searchSalesPersonnelAttributions\([\s\S]*selectorEntry: 'order_center'[\s\S]*scope: 'group_attributions'/, '订单中心检索必须使用服务端授权的集团人员入口')
+assert.match(orderCenter, /role === 'guide' \? \{ guides: records \} : \{ salesManagers: records \}/, '集团检索只能更新当前归属角色候选')
+assert.match(orderCenter, /salesPersonnelSearchSerial !== serial/, '较早的搜索响应不得覆盖新弹窗或新检索结果')
 assert.match(component, /setMarked\(item, \$event\.target\.checked\)">点客/, '手艺人必须支持点客标记')
 assert.match(component, /setMarked\(item, \$event\.target\.checked\)">售前/, '销售人必须支持售前标记')
 assert.match(component, /业绩金额/, '手艺人和销售人完整分配必须展示独立业绩金额列')
@@ -96,6 +106,7 @@ const applyAllHandler = component.slice(
 )
 assert.match(applyAllHandler, /if \(mode\.value === 'simple'\)[\s\S]*equalWeights\(craftsmen\.value\)[\s\S]*salespersonDefaultWeights\(salespeople\.value\)/, '简易选择应用全部前必须补齐默认分配')
 assert.doesNotMatch(applyAllHandler, /activateInvalidTab\(/, '应用全部人的校验失败只能原地提示，不能擅自切换到完整分配')
+assert.doesNotMatch(applyAllHandler, /guideSelections:|salesManagerSelections:/, '应用全部人事件不能用空归属清空已逐条保存的导购和销售经理')
 
 assert.match(workbench, /queryPersonnelCandidates\('service_actual_craftsmen'/, '手艺人必须读取当前门店权威选择源')
 assert.match(workbench, /queryPersonnelCandidates\('sales_performance_assignees'/, '销售人必须读取当前门店权威选择源')
@@ -115,10 +126,11 @@ assert.doesNotMatch(workbench, /openCashierV3QueryEntitySelector/, '购物车人
 assert.match(workbench, /const showSalespeople = roleScope === 'personnel' && !isEntitlementLine\(line\)/, '权益行不得加载销售人候选')
 assert.match(workbench, /initialTab,\n\s+roleScope,/, '人员弹窗必须保留入口对应的角色范围')
 assert.match(workbench, /async function openCartLineAttributions\(line\)/, '购物车必须提供导购/销售经理统一入口')
-assert.match(workbench, /const guestAttributionBlockedMessage = '游客订单不能记录导购或销售经理，请先选择会员。'/, '游客归属必须有明确的前置提示')
-assert.match(workbench, /if \(currentCustomerMode\.value === 'guest'\) \{\s*reportGuestAttributionBlocked\(\)\s*return\s*\}/, '游客不得打开导购/销售经理分配入口')
-assert.match(workbench, /currentCustomerMode\.value === 'guest' && cartLines\.value\.some\(lineHasCustomerAttribution\)/, '结账前必须拦截游客残留导购归属')
-assert.match(workbench, /code: 'GUEST_ATTRIBUTION_NOT_ALLOWED'/, '游客归属拦截必须返回稳定错误码')
+assert.match(workbench, /:guest-customer="currentCustomerMode === 'guest'"/, '人员弹窗必须收到权威游客身份')
+assert.doesNotMatch(workbench, /GUEST_ATTRIBUTION_NOT_ALLOWED|reportGuestAttributionBlocked/, '游客归属不能再被购物车或结账前置拦截')
+assert.match(component, /v-if="guestCustomer"[^\n]*value="none"[^\n]*>无</, '游客导购只能选择无轮次')
+assert.match(component, /guestCustomer \? \[\] : \[1, 2, 3\]/, '会员导购只展示第 1～3 轮')
+assert.match(component, /records\.filter\(\(item\) => matchesGroupKeyword\(item\)[\s\S]*attributionRoleAllows\(item, attributionSearchRole\.value/, '集团查询按导购与销售经理各自资格展示可结账人员')
 assert.match(workbench, /class="cart-line__meta-slot cart-line__meta-slot--attribution"/, '购物车必须展示导购/销售经理按钮')
 assert.match(workbench, /loadPersonnelOverlay\(line, 'guides', 'attribution'\)/, '统一入口必须打开导购/销售经理选择范围')
 assert.match(workbench, /\['group_attributions', 'cashier_other_craftsmen'\]\.includes\(scope\)/, '导购/销售经理必须共用一个集团搜索范围')
@@ -139,6 +151,11 @@ assert.match(
   /appendLocalCashierDraftOperation\(\{ action: 'apply-cashier-personnel-to-all-lines', payload \}/,
   '应用全部人必须把双角色人员意图写入同一份本地结账快照'
 )
+const applyAllWorkbench = workbench.slice(
+  workbench.indexOf('async function applyPersonnelAssignmentToAll('),
+  workbench.indexOf('\nfunction craftsmenDisplaySummary(', workbench.indexOf('async function applyPersonnelAssignmentToAll('))
+)
+assert.doesNotMatch(applyAllWorkbench, /guideSelections|salesManagerSelections/, '批量保存手艺人和销售人时必须保留每条商品原有导购和销售经理')
 assert.match(
   idempotencyKeys,
   /'CASHIER_APPLY_PERSONNEL_ALL'/,

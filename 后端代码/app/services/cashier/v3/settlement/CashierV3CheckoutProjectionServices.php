@@ -1516,7 +1516,7 @@ final class CashierV3CheckoutProjectionServices
                 'name' => (string)($row['name'] ?? $row['employeeNameSnapshot'] ?? ''),
             ];
             if (array_key_exists('guideRoundNo', $row) || array_key_exists('guide_round_no', $row)) {
-                $roundNo = self::positiveInt(
+                $roundNo = self::nonNegativeInt(
                     $row['guideRoundNo'] ?? $row['guide_round_no'] ?? null,
                     'line.guide_round_no'
                 );

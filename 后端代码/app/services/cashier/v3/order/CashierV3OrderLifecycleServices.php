@@ -402,10 +402,14 @@ final class CashierV3OrderLifecycleServices
                 'employeeTypeCode' => (string)($row['employment_type_code'] ?? ''),
                 'storeId' => (int)$operator->storeId(),
                 'storeName' => (string)$source['storeName'],
-                'attributionRole' => 'guide_and_sales_manager',
+                // 当前门店预置候选人与集团检索保持同一资格：无有效人员类型者仅可任销售经理。
+                'attributionRole' => (int)($row['employment_type_version'] ?? 0) > 0
+                    ? 'guide_and_sales_manager' : 'sales_manager',
             ];
         }
         return ['contractVersion' => self::CONTRACT_VERSION, 'salesOrderId' => (string)$source['sourceId'], 'salesOrderNo' => (string)$source['sourceNo'],
+            // 事后人员调整仍需区分游客“无轮次”和会员 1～3 轮。
+            'memberId' => (int)$source['memberId'],
             // Directly opened order-center editors must carry the server's
             // current lifecycle version into the command version store.
             'recordVersion' => $this->nextVersion($source, $scope->tenantId()),
@@ -1108,8 +1112,12 @@ final class CashierV3OrderLifecycleServices
         // 身份校验，不能错误地把跨店销售经理拦在调整之外。
         $employee = (array)Db::name('employee')->where('id', $staffId)
             ->where('status', 1)->where('is_del', 0)
-            ->field('id,name,employment_type_code')->lock(true)->find();
+            ->field('id,name,employment_type_code,employment_type_version')->lock(true)->find();
         if (!$employee || trim((string)($employee['name'] ?? '')) === '') throw self::failure('personnel_adjustment_staff_ineligible');
+        // 导购事实要求有效的集团人员类型；销售经理只要求在职，两者均不以本店任职限制跨店归属。
+        if ($role === 'guide' && (int)($employee['employment_type_version'] ?? 0) <= 0) {
+            throw self::failure('personnel_adjustment_staff_ineligible');
+        }
         $table = $role === 'guide' ? 'cashier_v3_customer_guide_round_fact' : 'cashier_v3_sales_manager_fact';
         $reverseKey = $table . ':' . $lineId;
         $sourceLineId = $this->attributionFactLineId($line);
@@ -1130,11 +1138,15 @@ final class CashierV3OrderLifecycleServices
         ];
         if ($role === 'guide') {
             $round = (int)($item['guideRoundNo'] ?? $item['guide_round_no'] ?? 0);
-            if ($round < 1 || $round > 3) throw self::failure('guide_round_required');
+            if (((int)$source['memberId'] === 0 && $round !== 0)
+                || ((int)$source['memberId'] > 0 && ($round < 1 || $round > 3))) {
+                throw self::failure('guide_round_required');
+            }
             $natural = 'sales-order-adjust:' . $operationId . ':' . $lineId . ':guide:' . $staffId . ':' . $round;
             $row = $common + ['fact_id' => 'GRA-' . strtoupper(substr(hash('sha256', $scope->tenantId() . '|' . $natural), 0, 40)), 'natural_key' => $natural,
                 'immutable_fingerprint' => '', 'member_name_snapshot' => '', 'order_no_snapshot' => $source['sourceNo'], 'checkout_request_id' => $source['checkoutRequestId'],
-                'guide_round_no' => $round, 'guide_employee_id' => $staffId, 'guide_employee_name_snapshot' => $name, 'guide_employee_type_snapshot' => (string)($employee['employment_type_code'] ?? ''), 'operator_name_snapshot' => ''];
+                // 游客导购事实保留员工归属，数据库 NULL 明确表示不占会员轮次。
+                'guide_round_no' => $round === 0 ? null : $round, 'guide_employee_id' => $staffId, 'guide_employee_name_snapshot' => $name, 'guide_employee_type_snapshot' => (string)($employee['employment_type_code'] ?? ''), 'operator_name_snapshot' => ''];
         } else {
             $natural = 'sales-order-adjust:' . $operationId . ':' . $lineId . ':sales_manager:' . $staffId;
             $row = $common + ['fact_id' => 'SMA-' . strtoupper(substr(hash('sha256', $scope->tenantId() . '|' . $natural), 0, 40)), 'natural_key' => $natural,
