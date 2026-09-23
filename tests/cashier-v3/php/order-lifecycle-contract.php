@@ -30,6 +30,11 @@ $checks = [
     'personnel_reverses_then_reallocates' => strpos($service, 'insertReversal') !== false && strpos($service, 'insertAdjustedPerformance') !== false && strpos($service, 'personnel_adjustment_staff_ineligible') !== false
         && strpos($service, 'effectivePersonnelFactsForLine') !== false && strpos($service, 'cashPerformanceForLine') !== false
         && strpos($service, "'ORDER-PERSONNEL-ADJUST-V1'") !== false,
+    'manual_salesperson_amount_is_persisted_and_reopened_as_manual' => strpos($service, 'adjustedSalespersonAmounts') !== false
+        && strpos($service, "['performanceAmountCents']") !== false
+        && strpos($service, "'ORDER-PERSONNEL-ADJUST-MANUAL-AMOUNT-V1'") !== false
+        && strpos($service, 'personnel_adjustment_performance_amount_pair_invalid') !== false
+        && strpos($service, 'personnel_adjustment_performance_amount_invalid') !== false,
     'attribution_adjustment_bridges_checkout_and_order_line_ids' => strpos($service, "field('order_line_id,checkout_line_id,item_type,item_name_snapshot,sale_amount_cents')") !== false
         && strpos($service, 'attributionLineToOrderLine') !== false
         && strpos($service, 'attributionFactLineId') !== false

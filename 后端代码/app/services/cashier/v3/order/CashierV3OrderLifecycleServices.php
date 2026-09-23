@@ -515,6 +515,32 @@ final class CashierV3OrderLifecycleServices
         // line. Never turn a forged multi-row command into several 100%
         // manager performances.
         if ($role === 'sales_manager' && count($rows) !== 1) throw self::failure('personnel_adjustment_sales_manager_single_required');
+        if ($role === 'salesperson') {
+            foreach ($rows as $index => $row) {
+                if (!is_array($row)) throw self::failure('personnel_adjustment_item_invalid');
+                $hasAmount = array_key_exists('performanceAmountCents', $row)
+                    || array_key_exists('performance_amount_cents', $row);
+                $hasManual = array_key_exists('performanceAmountManual', $row)
+                    || array_key_exists('performance_amount_manual', $row);
+                // 金额与手工标记是一个不可拆分的契约。旧客户端可同时省略，
+                // 新客户端一旦提交其中之一就必须同时提交另一项，避免把 0
+                // 或普通按比例金额误判成产品经理明确输入的最终金额。
+                if ($hasAmount !== $hasManual) throw self::failure('personnel_adjustment_performance_amount_pair_invalid');
+                if (!$hasAmount) continue;
+                $manual = $row['performanceAmountManual'] ?? $row['performance_amount_manual'];
+                $amount = $row['performanceAmountCents'] ?? $row['performance_amount_cents'];
+                if (!is_bool($manual) || is_bool($amount) || is_array($amount) || is_float($amount) || $amount === null) {
+                    throw self::failure('personnel_adjustment_performance_amount_invalid');
+                }
+                $rawAmount = trim((string)$amount);
+                if (preg_match('/^(?:0|[1-9][0-9]*)$/D', $rawAmount) !== 1
+                    || (string)(int)$rawAmount !== $rawAmount || (int)$rawAmount % 100 !== 0) {
+                    throw self::failure('personnel_adjustment_performance_amount_invalid');
+                }
+                $rows[$index]['performanceAmountCents'] = (int)$rawAmount;
+                $rows[$index]['performanceAmountManual'] = $manual;
+            }
+        }
         return ['targetOrderLineId' => $lineId, 'targetRole' => $role, 'personnel' => array_values($rows)];
     }
 
@@ -1040,12 +1066,12 @@ final class CashierV3OrderLifecycleServices
         }
         if ($targetRole === 'salesperson') {
             if (!is_array($salespersonState)) throw self::failure('personnel_adjustment_line_ineligible');
-            $amounts = $this->allocateWeightedCentsByGroups((int)$salespersonState['total'], $input['personnel']);
+            $amounts = $this->adjustedSalespersonAmounts((int)$salespersonState['total'], $input['personnel']);
             foreach ($input['personnel'] as $index => $item) {
                 $staffId = (int)($item['staffId'] ?? 0);
                 $staff = (array)Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')->where('s.id', $staffId)->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)->where('e.status', 1)->where('e.is_del', 0)->lock(true)->field('s.id,s.employee_id,s.staff_name,s.cashier_salesperson_enabled,s.cashier_craftsman_enabled,e.name,e.employment_type_code,e.employment_type_version')->find();
                 if (!$staff || (int)$staff['cashier_salesperson_enabled'] !== 1) throw self::failure('personnel_adjustment_staff_ineligible');
-                $this->insertAdjustedPerformance($salespersonState['template'], $operationId, $commandKey, $event, $operator, $now, $staff, 'salesperson', 'sales_performance_allocated', (int)$amounts[$index], $targetLineId, !empty($item['isPreSale']), $staffId);
+                $this->insertAdjustedPerformance($salespersonState['template'], $operationId, $commandKey, $event, $operator, $now, $staff, 'salesperson', 'sales_performance_allocated', (int)$amounts[$index], $targetLineId, !empty($item['isPreSale']), $staffId, !empty($item['performanceAmountManual']));
             }
         }
     }
@@ -1084,6 +1110,25 @@ final class CashierV3OrderLifecycleServices
             foreach ($indices as $offset => $index) $result[$index] = (int)($groupAmounts[$offset] ?? 0);
         }
         return $result;
+    }
+
+    /**
+     * Preserve each explicitly edited salesperson amount as the final fact.
+     * Automatic rows keep the existing ratio/group calculation; a manual row
+     * never rebalances another employee because the editor treats amount and
+     * ratio as independent business inputs.
+     *
+     * @return array<int,int>
+     */
+    private function adjustedSalespersonAmounts(int $total, array $personnel): array
+    {
+        $amounts = $this->allocateWeightedCentsByGroups($total, $personnel);
+        foreach ($personnel as $index => $item) {
+            if (!empty($item['performanceAmountManual'])) {
+                $amounts[$index] = (int)($item['performanceAmountCents'] ?? 0);
+            }
+        }
+        return $amounts;
     }
 
     private function updateSalesOrderNote(array $source, string $note, int $now, CashierV3DataScopeContext $scope): void
@@ -1306,14 +1351,19 @@ final class CashierV3OrderLifecycleServices
         return $value[0] === '-' ? substr($value, 1) : '-' . $value;
     }
 
-    private function insertAdjustedPerformance(array $template, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, array $staff, string $role, string $factType, int $amount, string $lineId, bool $marked, int $staffId): void
+    private function insertAdjustedPerformance(array $template, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, array $staff, string $role, string $factType, int $amount, string $lineId, bool $marked, int $staffId, bool $manualAmount = false): void
     {
         // 事实 ID 必须区分同一条明细/角色下的不同员工；旧算法只拼
         // operation/line/role，多人分配时会生成相同主键并触发 1062。
         $allocationIdentity = $operationId . '|' . $lineId . '|' . $role . '|' . $staffId;
         $factId = 'OLA-' . strtoupper(substr(hash_hmac('sha256', $allocationIdentity, $this->secret()), 0, 40));
         $row = $template; unset($row['id']);
-        $row['fact_id'] = $factId; $row['business_event_no'] = (string)$event['event_no']; $row['fact_type'] = $factType; $row['performance_type'] = $factType; $row['fact_direction'] = 'forward'; $row['natural_key'] = 'order_lifecycle:adjust:' . hash('sha256', $allocationIdentity); $row['command_idempotency_key'] = $commandKey; $row['fact_version'] = 1; $row['reversal_of'] = ''; $row['operator_id'] = $operator->operatorId(); $row['business_date'] = date('Y-m-d', $now); $row['occurred_at'] = $now; $row['settled_at'] = $now; $row['recorded_at'] = $now; $row['source_line_id'] = $lineId; $row['employee_id'] = (int)$staff['employee_id']; $row['employee_name_snapshot'] = trim((string)$staff['name']) ?: (string)$staff['staff_name']; $row['employee_type_snapshot'] = (string)$staff['employment_type_code']; $row['employee_type_authority_version'] = max(1, (int)$staff['employment_type_version']); $row['role_snapshot'] = $role . ($role === 'salesperson' ? ($marked ? ':presale' : ':postsale') : ($marked ? ':point' : ':round')); $row['allocation_weight_numerator'] = $amount > 0 ? $amount : 0; $row['allocation_weight_denominator'] = max(1, $amount); $row['allocation_base_amount_cents'] = $amount; $row['amount_cents'] = $amount; $row['rule_code_snapshot'] = 'ORDER-PERSONNEL-ADJUST-V1'; $row['rule_name_snapshot'] = '订单人员调整'; $row['rule_version_snapshot'] = 'v1'; $row['immutable_fingerprint'] = hash('sha256', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $row['fact_id'] = $factId; $row['business_event_no'] = (string)$event['event_no']; $row['fact_type'] = $factType; $row['performance_type'] = $factType; $row['fact_direction'] = 'forward'; $row['natural_key'] = 'order_lifecycle:adjust:' . hash('sha256', $allocationIdentity); $row['command_idempotency_key'] = $commandKey; $row['fact_version'] = 1; $row['reversal_of'] = ''; $row['operator_id'] = $operator->operatorId(); $row['business_date'] = date('Y-m-d', $now); $row['occurred_at'] = $now; $row['settled_at'] = $now; $row['recorded_at'] = $now; $row['source_line_id'] = $lineId; $row['employee_id'] = (int)$staff['employee_id']; $row['employee_name_snapshot'] = trim((string)$staff['name']) ?: (string)$staff['staff_name']; $row['employee_type_snapshot'] = (string)$staff['employment_type_code']; $row['employee_type_authority_version'] = max(1, (int)$staff['employment_type_version']); $row['role_snapshot'] = $role . ($role === 'salesperson' ? ($marked ? ':presale' : ':postsale') : ($marked ? ':point' : ':round')); $row['allocation_weight_numerator'] = $amount > 0 ? $amount : 0; $row['allocation_weight_denominator'] = max(1, $amount); $row['allocation_base_amount_cents'] = $amount; $row['amount_cents'] = $amount;
+        // 查询端用 MANUAL-AMOUNT 标记恢复“手工金额”状态；没有此快照，
+        // 再次打开弹窗会把已保存金额当成按比例计算并在下一次编辑时覆盖。
+        $row['rule_code_snapshot'] = $manualAmount ? 'ORDER-PERSONNEL-ADJUST-MANUAL-AMOUNT-V1' : 'ORDER-PERSONNEL-ADJUST-V1';
+        $row['rule_name_snapshot'] = $manualAmount ? '订单人员手工调整业绩金额' : '订单人员调整';
+        $row['rule_version_snapshot'] = 'v1'; $row['immutable_fingerprint'] = hash('sha256', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         if ((int)Db::name('cashier_v3_performance_fact')->insert($row) !== 1) throw self::failure('personnel_adjustment_fact_insert_failed');
     }
 

@@ -137,7 +137,9 @@ function calculatedPerformanceAmountCents(ratio) {
 }
 
 function syncPerformanceAmountFromRatio(item) {
-  if (props.historyAdjustment || craftsmanType(item) === PERFORMANCE_TYPES.LABOR) return
+  // 历史调整的手艺人使用单独的“消耗业绩”输入；销售人的金额栏仍是
+  // 可编辑业务字段，不能因共用 historyAdjustment 弹窗而跳过同步。
+  if ((props.historyAdjustment && item.role === 'craftsmen') || craftsmanType(item) === PERFORMANCE_TYPES.LABOR) return
   const ratio = Math.max(0, Math.min(100, Math.trunc(Number(item.performance || 0))))
   item.performance = ratio
   item.performanceAmountCents = calculatedPerformanceAmountCents(ratio)
@@ -147,7 +149,7 @@ function syncPerformanceAmountFromRatio(item) {
 }
 
 function syncManualPerformanceAmount(item) {
-  if (props.historyAdjustment || craftsmanType(item) === PERFORMANCE_TYPES.LABOR) return
+  if ((props.historyAdjustment && item.role === 'craftsmen') || craftsmanType(item) === PERFORMANCE_TYPES.LABOR) return
   const yuan = String(item.performanceAmountYuan ?? '').trim()
   const cents = /^\d+$/.test(yuan) ? Number(yuan) * 100 : 0
   item.performanceAmountCents = Math.max(0, Math.trunc(cents))

@@ -971,7 +971,11 @@ function salesPersonnelPayload() {
       positionId: Number(item.positionId || item.position_id || 0),
       positionName: item.positionName || item.position_name || item.position || '',
       performanceIndependent: Boolean(item.performanceIndependent || item.performance_independent),
-      allocationGroupKey: item.allocationGroupKey || ''
+      allocationGroupKey: item.allocationGroupKey || '',
+      // “业绩金额”是订单调整的最终业务输入，必须与手工标记成对提交；
+      // 只传比例会让服务端按原订单金额重新计算，覆盖用户刚输入的金额。
+      performanceAmountCents: Math.max(0, Math.trunc(Number(item.performanceAmountCents || 0))),
+      performanceAmountManual: Boolean(item.performanceAmountManual)
     }))
   }
   if (target.role === 'guide') {
