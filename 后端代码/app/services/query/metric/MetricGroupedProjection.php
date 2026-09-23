@@ -42,6 +42,38 @@ final class MetricGroupedProjection
         return $out;
     }
 
+    /**
+     * Ranks the already-authorized daily projection without introducing a
+     * second metric formula. Ties remain visible and the stable date order
+     * makes repeated reads deterministic.
+     */
+    public function temporalRanking(array $points,array $range,array $ranking,?string $today=null): array
+    {
+        $rows=$this->trend($points,$range,$today);
+        $out=[];
+        foreach (['top','bottom'] as $direction) {
+            if (($ranking['direction']??null)!=='top_and_bottom' && ($ranking['direction']??null)!==$direction) continue;
+            $sorted=$rows;
+            usort($sorted,static function(array $a,array $b)use($direction):int {
+                if ($a['amount_cents']===$b['amount_cents']) return strcmp($a['business_date'],$b['business_date']);
+                return $direction==='top' ? $b['amount_cents']<=>$a['amount_cents'] : $a['amount_cents']<=>$b['amount_cents'];
+            });
+            $limit=$ranking['limit'];
+            $selected=array_slice($sorted,0,$limit);
+            // “最高/最低是哪天”不能在并列时只返回第一天。这里仅扩展
+            // 截止值相同的已授权日聚合行，不改变指标、范围或排序方向。
+            if ($selected!==[]) {
+                $cutoff=$selected[count($selected)-1]['amount_cents'];
+                for ($index=$limit,$count=count($sorted);$index<$count;++$index) {
+                    if ($sorted[$index]['amount_cents']!==$cutoff) break;
+                    $selected[]=$sorted[$index];
+                }
+            }
+            $out[$direction]=$selected;
+        }
+        return $out;
+    }
+
     private function add($a, $b): int
     {
         if (!is_int($a) || !is_int($b) || ($b > 0 && $a > PHP_INT_MAX - $b) || ($b < 0 && $a < PHP_INT_MIN - $b)) $this->fail();

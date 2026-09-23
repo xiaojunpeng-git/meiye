@@ -148,11 +148,21 @@ final class AiRegisteredPlanCompiler
             $contract=$snapshot['metrics'][$metric];
             if ($person && $contract['filter_grain']!=='person') AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             if (!$person && $query['business_filters']!==[]) {
+                // business_date is the shared daily grouping of an authorized
+                // store metric. It reuses the metric's registered trend source
+                // and ranking contract; it is not an entity dimension and has
+                // no caller-controlled field or SQL expression.
+                $businessDateRanking=$objectKind==='business_date'
+                    && $query['business_filters']===['object_kind'=>'business_date']
+                    && $query['query_shape']==='ranking'
+                    && $contract['filter_grain']==='store'
+                    && in_array('trend',(array)($contract['query_shapes']??[]),true)
+                    && in_array('ranking',(array)($contract['query_shapes']??[]),true);
                 $storeCondition=$conditionPopulation && $objectKind==='store'
                     && $query['business_filters']===['object_kind'=>'store']
                     && $contract['filter_grain']==='store'
                     && in_array('store',(array)($contract['condition_subjects']??[]),true);
-                if (!$storeCondition) {
+                if (!$storeCondition && !$businessDateRanking) {
                     $expected=$memberSelection?['selection_ref']:[];
                     $matches=array_values(array_filter((array)($contract['analysis_dimension_contracts']??[]),static function($dimension)use($objectKind,$expected):bool {
                         return is_array($dimension) && ($dimension['object_kind']??null)===$objectKind && ($dimension['filter_keys']??null)===$expected;

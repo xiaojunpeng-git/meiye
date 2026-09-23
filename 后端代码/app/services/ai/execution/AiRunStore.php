@@ -663,7 +663,8 @@ final class AiRunStore
         // identities or returned business values.
         $allowed=['stage','predicate','finish_reason','content_bytes','recommended_value_type','transport_errno','http_status','elapsed_ms',
             'initial_observation','needs_metric_choice','selected_metric_count','operation','field','metric_requirement_count',
-            'binding_row_count','selected_code_count','row_code_count','row_status','condition_mismatch'];
+            'binding_row_count','selected_code_count','row_code_count','row_status','condition_mismatch',
+            'component','accepted_direction','accepted_limit','actual_direction','actual_limit'];
         if (array_diff(array_keys($diagnostic),$allowed) || !is_string($diagnostic['stage']??null)
             || !preg_match('/^[a-z_]{1,48}$/D',$diagnostic['stage']) || !is_string($diagnostic['predicate']??null)
             || !preg_match('/^[a-z0-9_:]{1,96}$/D',$diagnostic['predicate'])
@@ -684,6 +685,14 @@ final class AiRunStore
             || (isset($diagnostic['row_code_count']) && (!is_int($diagnostic['row_code_count']) || $diagnostic['row_code_count']<0 || $diagnostic['row_code_count']>64))
             || (isset($diagnostic['condition_mismatch']) && (!is_string($diagnostic['condition_mismatch'])
                 || !in_array($diagnostic['condition_mismatch'],['semantic_shape','bound_shape','subject','relation','result_form','condition_count','condition_operator','condition_quantity','condition_unit','unknown'],true)))
+            // Ranking diagnostics contain only protocol enums and bounded
+            // limits. They make contract failures actionable without storing
+            // customer wording, model output or returned business values.
+            || (isset($diagnostic['component']) && (!is_string($diagnostic['component']) || !in_array($diagnostic['component'],['candidate','ranking_direction','ranking_limit'],true)))
+            || (isset($diagnostic['accepted_direction']) && (!is_string($diagnostic['accepted_direction']) || !in_array($diagnostic['accepted_direction'],['top','bottom','top_and_bottom','unspecified'],true)))
+            || (isset($diagnostic['actual_direction']) && (!is_string($diagnostic['actual_direction']) || !in_array($diagnostic['actual_direction'],['top','bottom','top_and_bottom','unspecified'],true)))
+            || (isset($diagnostic['accepted_limit']) && $diagnostic['accepted_limit']!==null && (!is_int($diagnostic['accepted_limit']) || $diagnostic['accepted_limit']<1 || $diagnostic['accepted_limit']>999))
+            || (isset($diagnostic['actual_limit']) && $diagnostic['actual_limit']!==null && (!is_int($diagnostic['actual_limit']) || $diagnostic['actual_limit']<1 || $diagnostic['actual_limit']>999))
             || (isset($diagnostic['row_status']) && (!is_string($diagnostic['row_status']) || !in_array($diagnostic['row_status'],['satisfied','unavailable','pending','invalid'],true)))) {
             throw new RuntimeException('AI_DIAGNOSTIC_INVALID');
         }

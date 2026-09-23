@@ -21,7 +21,7 @@ function metricRegistryCheck(bool $condition, string $label): void
 $required = [
     'cash_performance', 'refund_performance', 'actual_performance', 'consume_amount',
     'staff_sales_yeji', 'staff_labor_yeji', 'staff_project_num', 'staff_service_num', 'service_people',
-    'sales_amount', 'sales_collected_amount', 'member_service_visit_count', 'sales_quantity', 'balance_deduction_amount',
+    'sales_amount', 'sales_collected_amount', 'member_service_visit_count', 'sales_quantity', 'sales_record_count', 'balance_deduction_amount',
     'recharge_amount', 'completed_service_item_count', 'customer_active',
 ];
 $definitions = MetricDefinitionRegistry::all();
@@ -142,6 +142,11 @@ metricRegistryCheck(
     && !isset(MetricDefinitionRegistry::get('sales_quantity')['source']['dimensions']['guide'], MetricDefinitionRegistry::get('sales_quantity')['source']['dimensions']['sales_manager']),
     'sold quantity is registered for item analysis without inventing guide or sales-manager quantity attribution'
 );
+metricRegistryCheck(MetricDefinitionRegistry::get('sales_record_count')['source']['amount']==='1'
+    && MetricDefinitionRegistry::get('sales_record_count')['source']['filters']===['status'=>'effective','fact_direction'=>'forward']
+    && isset(MetricDefinitionRegistry::get('sales_record_count')['source']['dimensions']['project'])
+    && MetricDefinitionRegistry::capabilities()['sales_record_count']['ai_query_ready']===true,
+    'sales record count owns one effective forward sale-line fact and remains distinct from sold quantity');
 
 $read = static function (string $relative) use ($root): string {
     $source = file_get_contents($root . '/' . $relative);

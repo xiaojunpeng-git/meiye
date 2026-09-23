@@ -965,6 +965,29 @@ final class AiGatewayServices
         }
         $runtimeSkills=$this->registry()->modelSkills('store_operations');$dictionary=new \app\services\metric\MetricDictionaryServices();$summaries=[];
         $objectVocabulary=$this->analysisObjectVocabulary($caps);
+        // Closed extrema do not need two language-model rounds.
+        // Admission is deliberately stricter than understanding: every metric
+        // and object must be an exact active-registry phrase, one common date
+        // carrier must already be structurally valid, and no business residue
+        // may remain. Open or ambiguous language continues through the model.
+        $exactRankingCollectionReason=null;
+        $exactRankingCollection=$this->compileExactRegisteredRankingCollection(
+            (string)$body['question'],$objectVocabulary,$caps,$body['output_format'],$today,
+            $exactRankingCollectionReason
+        );
+        if ($exactRankingCollection!==null) {
+            // The admitted sentence is self-contained and therefore replaces,
+            // rather than inherits, any signed predecessor. Exact metric,
+            // object, time and direction carriers make this safe even when a
+            // browser still submits an older context reference.
+            $checkpoint();
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'deterministic_registered_ranking_collection_admitted');
+            return $exactRankingCollection;
+        }
+        if ($exactRankingCollectionReason!=='semantic_no_match') {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
+                'deterministic_registered_ranking_collection_rejected',['field'=>$exactRankingCollectionReason]);
+        }
         foreach ($caps['metric_codes'] as $code) {
             $tooltip=$dictionary->getTooltip($code);if (($tooltip['user_ready']??false)!==true) continue;
             $contract=$caps['metric_readiness'][$code];$objectContracts=[];
@@ -1668,7 +1691,11 @@ final class AiGatewayServices
         // recovery cannot disagree. Exact registered customer terms still
         // win, and exclusions/conditions/unbound goals are rejected by the
         // shared structural gate before a default can be considered.
-        if (!$contextBindingReused && $groupedItems===null && !$conditionUpdateBindingReused) {
+        $questionExactMetric=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
+            (string)($safe['outbound']['question']??''),array_column($bindingSummaries,'metric_code')
+        );
+        if (!$contextBindingReused && $groupedItems===null && !$conditionUpdateBindingReused
+            && $questionExactMetric===null) {
             $rankDefault=$this->applyRegisteredRankDefaultPolicy(
                 $bindingCandidate,$understanding,$bindingSummaries
             );
@@ -2199,6 +2226,28 @@ final class AiGatewayServices
                 'condition_set'=>$conditionSet,'object_kind'=>$subject
             ],$caps,$body['output_format'],$today));
         }
+        // A business-date extremum reuses the registered daily trend source.
+        // The model must explicitly bind business_date + ranking; this branch
+        // only converts that typed meaning into the common ranking plan and
+        // never scans customer wording or selects a metric on its behalf.
+        if ($intent['object_kind']==='business_date') {
+            $dateMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,'store','trend');
+            if ($localTerm!==null || $intent['operation']!=='ranking' || !$dateMetrics) {
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_business_date_contract_unavailable');
+                throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            }
+            $first=(new \app\services\ai\execution\AiDimensionGuidancePlanner())->start(
+                'business_date',$intent,$projection,$dateMetrics,$body['output_format'],$today
+            );
+            if ($groupedItems!==null) {
+                return $this->compileDimensionRankingCollection(
+                    $groupedItems,$groupedUnderstanding,$intent,$first,$projection,$caps,$body,$today,
+                    $safe['outbound'],$bindingSummaries,$configuration,$checkpoint,$owner,$id,$generation,$worker,
+                    $sourceQuery,$localTerm,$currentStoreRequested
+                );
+            }
+            return $finish($first);
+        }
         // Any registered object dimension follows the same controlled path.
         // Object labels come from the runtime Skill; metrics and dimensions
         // come from the lower-layer registry.  No report page/object switch is
@@ -2553,7 +2602,9 @@ final class AiGatewayServices
             // budget and causing a generic failure. Keep siblings at the same
             // registry and contract boundary rather than silently exceeding
             // that operational limit.
-            $metrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,$intent['object_kind'],'ranking');
+            $metrics=$intent['object_kind']==='business_date'
+                ? \app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,'store','trend')
+                : \app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,$intent['object_kind'],'ranking');
             if (!$metrics) {
                 $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'collection_dimension_unavailable',['field'=>'metric']);
                 throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
@@ -2562,7 +2613,7 @@ final class AiGatewayServices
                 $intent['object_kind'],$intent,$projection,$metrics,'screen',$today
             );
             if (($compiled['kind']??null)!=='plan' || !is_array($compiled['plan']??null)) {
-                $label=\app\services\query\metric\MetricDefinitionRegistry::overviewObjectLabel($intent['object_kind']);
+                $label=$this->analysisObjectLabel($intent['object_kind']);
                 if (($compiled['kind']??null)==='clarification' && is_string($label) && $label!==''
                     && array_column((array)($compiled['fields']??[]),'key')===['start_date','end_date']
                     && is_array($compiled['dimension_state']??null)) {
@@ -2578,7 +2629,7 @@ final class AiGatewayServices
                 $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'collection_item_plan_unavailable',['field'=>$field]);
                 throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
             }
-            $label=\app\services\query\metric\MetricDefinitionRegistry::overviewObjectLabel($intent['object_kind']);
+            $label=$this->analysisObjectLabel($intent['object_kind']);
             if (!is_string($label) || $label==='') {
                 $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'collection_label_unavailable',['field'=>'object_kind']);
                 throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
@@ -2597,6 +2648,59 @@ final class AiGatewayServices
             throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
         }
         return ['kind'=>'plan','plan'=>['items'=>$plans]];
+    }
+
+    /** Shared protocol dimensions have labels even when they are not entity registries. */
+    private function analysisObjectLabel(string $objectKind): ?string
+    {
+        return $objectKind==='business_date'
+            ? '日期'
+            : \app\services\query\metric\MetricDefinitionRegistry::overviewObjectLabel($objectKind);
+    }
+
+    /**
+     * Compile one or more registry-closed extrema through the existing Reader
+     * plans. This method selects no business default: metric, object, period
+     * and direction all come from exact admitted carriers.
+     */
+    private function compileExactRegisteredRankingCollection(
+        string $question,array $objectVocabulary,array $capabilities,string $format,string $today,
+        ?string &$reason=null
+    ): ?array {
+        // The ordinary model path intentionally starts with a neutral empty
+        // projection. This closed admission may read only the shared calendar
+        // grammar locally; its own residue gate below still owns the complete
+        // sentence and rejects every unexplained business instruction.
+        $dateProjection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse($question);
+        if ($format!=='screen' || count((array)($dateProjection['date_terms']??[]))!==1
+            || !empty($dateProjection['date_grouping_ambiguous'])) {$reason='date_or_format';return null;}
+        $items=(new \app\services\ai\semantic\AiExactRankingCollectionAdmission())->match(
+            $question,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[]))
+        );
+        if ($items===null) {$reason='semantic_no_match';return null;}
+        $plans=[];
+        foreach ($items as $index=>$item) {
+            $objectKind=$item['object_kind'];
+            $candidates=$objectKind==='business_date'
+                ? \app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($capabilities,'store','trend')
+                : \app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($capabilities,$objectKind,'ranking');
+            if (!isset($candidates[$item['metric_code']])) {$reason='metric_capability';return null;}
+            $intent=['operation'=>'ranking','metric_codes'=>[$item['metric_code']],'action_codes'=>[],
+                'needs_metric_choice'=>false,'ranking'=>['direction'=>$item['direction'],'limit'=>$item['limit']]];
+            try {
+                $compiled=(new \app\services\ai\execution\AiDimensionGuidancePlanner())->start(
+                    $objectKind,$intent,$dateProjection,$candidates,'screen',$today
+                );
+            } catch (\Throwable $ignored) {$reason='plan_compile';return null;}
+            if (($compiled['kind']??null)!=='plan' || !is_array($compiled['plan']??null)) {$reason='plan_shape';return null;}
+            $label=$this->analysisObjectLabel($objectKind);
+            if (!is_string($label) || $label==='') {$reason='object_label';return null;}
+            $plans[]=['id'=>'q'.($index+1),'label'=>$label.'排行','plan'=>$compiled['plan']];
+        }
+        $reason=null;
+        $plan=count($plans)===1?$plans[0]['plan']:['items'=>$plans];
+        return ['kind'=>'plan','plan'=>$plan,
+            '_context_meaning'=>['presentation_origin'=>'customer_or_verified_context']];
     }
 
     private function resolveOverviewMetrics(array $intent,array $capabilities): array
@@ -3433,7 +3537,16 @@ final class AiGatewayServices
      */
     private function analysisObjectVocabulary(array $capabilities): array
     {
-        $items=[];
+        // business_date is a shared fact dimension declared by the unified
+        // data architecture. Publishing its customer labels lets the model
+        // preserve “哪天/哪一日” as an analytical dimension without teaching
+        // the gateway a question template or granting any metric capability.
+        $items=[
+            "business_date\0日期"=>['object_kind'=>'business_date','object_label'=>'日期'],
+            "business_date\0哪天"=>['object_kind'=>'business_date','object_label'=>'哪天'],
+            "business_date\0哪一天"=>['object_kind'=>'business_date','object_label'=>'哪一天'],
+            "business_date\0哪一日"=>['object_kind'=>'business_date','object_label'=>'哪一日'],
+        ];
         foreach ((array)($capabilities['metric_readiness']??[]) as $contract) {
             if (!is_array($contract) || ($contract['ai_query_ready']??false)!==true) continue;
             foreach ((array)($contract['analysis_dimension_contracts']??[]) as $dimension) {
@@ -3456,7 +3569,7 @@ final class AiGatewayServices
             }
         }
         ksort($items,SORT_STRING);
-        return array_slice(array_values($items),0,16);
+        return array_slice(array_values($items),0,20);
     }
 
     /**

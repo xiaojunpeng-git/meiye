@@ -10,7 +10,7 @@ use app\services\query\UnifiedQueryJson;
  */
 final class MetricReadViewServices
 {
-    const CONTRACT_VERSION = 'group-performance-summary-read-v1';
+    const CONTRACT_VERSION = 'group-performance-summary-read-v2';
     const COVERAGE_START = MetricDefinitionRegistry::COVERAGE_START;
     private $store;
     private $transaction;
@@ -43,6 +43,8 @@ final class MetricReadViewServices
         $personnel = $this->personnelSelection($normalized,$binding);
         $member = $this->memberSelection($normalized,$binding);
         $dimensionRanking = $this->dimensionRanking($normalized);
+        $businessDateRanking=$normalized['query_shape']==='ranking'
+            && ($normalized['business_filters']['object_kind']??null)==='business_date';
         $thresholdCount = $this->thresholdCount($normalized);
         $conditionSet = $this->conditionSet($normalized);
         $now = $this->now();
@@ -50,9 +52,10 @@ final class MetricReadViewServices
         if ($expiresAt<=$now || $expiresAt>$now+86400) $this->fail('METRIC_READ_EXPIRY_INVALID');
         $ranges = ['current' => ['start' => $normalized['start_date'], 'end' => $normalized['end_date']]];
         if ($normalized['compare_range'] !== null) $ranges['comparison'] = $normalized['compare_range'];
-        $results = call_user_func($this->transaction, function (GroupPerformanceMetricReadServices $reader) use ($normalized, $binding, $ranges,$personnel,$member,$dimensionRanking,$thresholdCount,$conditionSet,$now): array {
+        $results = call_user_func($this->transaction, function (GroupPerformanceMetricReadServices $reader) use ($normalized, $binding, $ranges,$personnel,$member,$dimensionRanking,$businessDateRanking,$thresholdCount,$conditionSet,$now): array {
             $results = [];
-            $storeNames = $normalized['query_shape'] === 'ranking' && $personnel===null && $dimensionRanking===null ? $reader->storeNames($binding['store_ids']) : [];
+            $storeNames = $normalized['query_shape'] === 'ranking' && $personnel===null
+                && $dimensionRanking===null && !$businessDateRanking ? $reader->storeNames($binding['store_ids']) : [];
             foreach ($ranges as $period => $range) {
                 foreach ($normalized['metric_codes'] as $metric) {
                     $metricContract = MetricDefinitionRegistry::get($metric);
@@ -142,12 +145,19 @@ final class MetricReadViewServices
                     if (in_array($normalized['query_shape'], ['trend', 'ranking'], true)) {
                         $points = $reader->dailyStoreTotals($binding['tenant_id'], $binding['store_ids'], $range, $metric);
                         $projector = new MetricGroupedProjection();
-                        $rows = $normalized['query_shape'] === 'trend' ? $projector->trend($points, $range, (new \DateTimeImmutable('@'.$now))->setTimezone(new \DateTimeZone(MetricQueryDatePolicy::TIMEZONE))->format('Y-m-d')) : $projector->ranking($points, $binding['store_ids'], $normalized['ranking']);
+                        $today=(new \DateTimeImmutable('@'.$now))->setTimezone(new \DateTimeZone(MetricQueryDatePolicy::TIMEZONE))->format('Y-m-d');
+                        $rows = $normalized['query_shape'] === 'trend'
+                            ? $projector->trend($points, $range, $today)
+                            : ($businessDateRanking
+                                ? $projector->temporalRanking($points,$range,$normalized['ranking'],$today)
+                                : $projector->ranking($points, $binding['store_ids'], $normalized['ranking']));
                         if ($normalized['query_shape'] === 'ranking') {
-                            foreach ($rows as &$direction) foreach ($direction as &$row) $row['store_name'] = $storeNames[$row['store_id']];
+                            if (!$businessDateRanking) foreach ($rows as &$direction) foreach ($direction as &$row) $row['store_name'] = $storeNames[$row['store_id']];
                             unset($row, $direction);
                         }
-                        $results[] = ['period' => $period, 'metric_code' => $metric, 'storage_unit' => $metricContract['storage_unit'], 'rows' => $rows];
+                        $result=['period' => $period, 'metric_code' => $metric, 'storage_unit' => $metricContract['storage_unit'], 'rows' => $rows];
+                        if ($businessDateRanking) $result+=['object_kind'=>'business_date','object_label'=>'日期'];
+                        $results[] = $result;
                         continue;
                     }
                     $value = $reader->metricTotal($binding['tenant_id'], $binding['store_ids'], $range, $metric);
@@ -241,6 +251,7 @@ final class MetricReadViewServices
     {
         if ($query['query_shape'] !== 'ranking') return null;
         $objectKind=$query['business_filters']['object_kind'] ?? null;
+        if ($objectKind==='business_date') return null;
         if (!is_string($objectKind) || $objectKind==='person') return null;
         $metric = MetricDefinitionRegistry::get($query['metric_codes'][0]);
         $matches=array_values(array_filter((array)($metric['analysis_dimension_contracts']??[]),static function($dimension)use($objectKind):bool {
@@ -587,7 +598,12 @@ final class MetricReadViewServices
                 && $query['business_filters']===['object_kind'=>'store']
                 && ($capability['filter_grain']??null)==='store'
                 && in_array('store',(array)($capability['condition_subjects']??[]),true);
-            if (($capability['ai_query_ready']??false)===true && (($person && $capability['filter_grain']==='person') || $storeCondition || (!$person && $query['business_filters']!==[] && $dimensionCapable) || (!$person && $query['business_filters']===[] && $capability['filter_grain']==='store'))) $allowed[]=$code;
+            $businessDateRanking=$objectKind==='business_date' && $query['query_shape']==='ranking'
+                && $query['business_filters']===['object_kind'=>'business_date']
+                && ($capability['filter_grain']??null)==='store'
+                && in_array('trend',(array)($capability['query_shapes']??[]),true)
+                && in_array('ranking',(array)($capability['query_shapes']??[]),true);
+            if (($capability['ai_query_ready']??false)===true && (($person && $capability['filter_grain']==='person') || $storeCondition || $businessDateRanking || (!$person && $query['business_filters']!==[] && $dimensionCapable) || (!$person && $query['business_filters']===[] && $capability['filter_grain']==='store'))) $allowed[]=$code;
         }
         foreach ($query['metric_codes'] as $metric) if (!in_array($metric, $allowed, true)) $this->fail('METRIC_NOT_REGISTERED');
         foreach ($query['metric_codes'] as $metric) if (!in_array($query['query_shape'],self::metricCapabilities()[$metric]['query_shapes']??[],true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');

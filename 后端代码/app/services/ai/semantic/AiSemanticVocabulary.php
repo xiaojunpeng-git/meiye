@@ -4,7 +4,7 @@ namespace app\services\ai\semantic;
 /** Source-owned business language resources. No formulas, SQL or report page identities. */
 final class AiSemanticVocabulary
 {
-    public const VERSION='mohe-semantic-vocabulary-r8-v1';
+    public const VERSION='mohe-semantic-vocabulary-r36-v1';
     public static function patterns(): array
     {
         require_once dirname(__DIR__,2).'/BaseServices.php';
