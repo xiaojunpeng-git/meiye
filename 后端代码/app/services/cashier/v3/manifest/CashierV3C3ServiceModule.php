@@ -114,6 +114,8 @@ class CashierV3C3ServiceModule implements CashierV3ActionModule
         ] as $action) {
             $command[$action] = self::POLICY_RESERVATION_OPERATION;
         }
+        // 结账后的预约提示由收银权限触发，不要求操作人另外拥有预约页权限。
+        $command['complete-checkout-reservations'] = self::FEATURE_CASHIER;
         foreach ([
             'query-reservations',
             'open-reservation-detail',
@@ -127,6 +129,7 @@ class CashierV3C3ServiceModule implements CashierV3ActionModule
         ] as $action) {
             $projection[$action] = self::FEATURE_RESERVATION;
         }
+        $projection['query-checkout-unfinished-reservations'] = self::FEATURE_CASHIER;
 
         // ---- 房间 ----
         foreach ([

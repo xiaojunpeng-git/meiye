@@ -83,6 +83,10 @@ const moreActionValidationMessage = ref('')
 const isSavingMoreAction = ref(false)
 const isClearingCart = ref(false)
 const isCheckoutOpen = ref(false)
+// 结账已成功后才会设置此状态。它是独立的后置预约提示，
+// 不参与收款提交、订单落账或购物车清理的成功判定。
+const checkoutReservationPrompt = ref(null)
+const isCompletingCheckoutReservations = ref(false)
 const checkoutBusinessSourceSelector = ref(null)
 const isSavingCheckoutBusinessSource = ref(false)
 const checkoutInlineBusinessSources = ref([])
@@ -6508,7 +6512,93 @@ async function closeSucceededCheckoutAndRefreshWorkbench(submissionResponse = {}
       })
     : null
   cashierDraftHasUnresolvedCommand.value = false
-  await requestAction('open-cashier-workbench', { silent: true })
+  try {
+    await requestAction('open-cashier-workbench', { silent: true })
+  } catch (error) {
+    // 订单已经结算；后续工作台刷新失败不得把结账改判为失败，
+    // 也不得阻断本次预约状态检查。
+    console.warn('Checkout succeeded but the workbench refresh was unavailable.', error)
+  }
+  await inspectCheckoutReservationsAfterSuccess(submissionResponse)
+}
+
+/**
+ * 只使用成功回执中的正式销售订单标识查询预约。
+ * 查询失败只告知“结账已完成”，不恢复旧购物车、不重试收款。
+ */
+async function inspectCheckoutReservationsAfterSuccess(submissionResponse = {}) {
+  const submission = responseDataBlock(submissionResponse).checkoutSubmission
+  const salesOrderId = String(submission?.salesOrder?.orderId || '').trim()
+  if (!salesOrderId) return
+  try {
+    const result = await requestAction('query-checkout-unfinished-reservations', {
+      salesOrderId,
+      silent: true
+    })
+    if (!['success', 'succeeded'].includes(resultStatus(result))) {
+      throw new Error(resultMessage(result, '预约状态检查失败。'))
+    }
+    const prompt = responseDataBlock(result).checkoutReservationPrompt
+    if (!prompt?.required || Number(prompt.reservationCount || 0) <= 0) return
+    checkoutReservationPrompt.value = {
+      salesOrderId,
+      salesOrderNo: String(prompt.salesOrderNo || submission?.salesOrder?.orderNo || ''),
+      businessDate: String(prompt.businessDate || ''),
+      reservationCount: Number(prompt.reservationCount || 0),
+      idempotencyKey: createCashierV3CommandId('RESERVATION_ACTION')
+    }
+  } catch (error) {
+    console.warn('Checkout succeeded but reservation inspection was unavailable.', error)
+    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: {
+        status: 'failed',
+        message: '结账已成功，但未能检查当日预约，请在预约页确认。'
+      }
+    }))
+  }
+}
+
+function keepCheckoutReservationsUnchanged() {
+  if (isCompletingCheckoutReservations.value) return
+  // 选择“否”仅关闭提示，不发送任何写命令。
+  checkoutReservationPrompt.value = null
+}
+
+async function completeCheckoutReservations() {
+  const prompt = checkoutReservationPrompt.value
+  if (!prompt || isCompletingCheckoutReservations.value) return
+  isCompletingCheckoutReservations.value = true
+  try {
+    const result = await requestAction('complete-checkout-reservations', {
+      salesOrderId: prompt.salesOrderId,
+      idempotencyKey: prompt.idempotencyKey,
+      silent: true
+    })
+    if (!['success', 'succeeded'].includes(resultStatus(result))) {
+      throw new Error(resultMessage(result, '预约记录未能结束。'))
+    }
+    const completion = responseDataBlock(result).checkoutReservationCompletion || {}
+    checkoutReservationPrompt.value = null
+    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: {
+        status: 'success',
+        message: Number(completion.completedCount || 0) > 0
+          ? `已结束 ${Number(completion.completedCount)} 条预约记录。`
+          : '当前已无未结束的预约记录。'
+      }
+    }))
+  } catch (error) {
+    console.warn('Checkout succeeded but reservation completion failed.', error)
+    // 保留提示便于重试，同时明确结账结果未受影响。
+    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: {
+        status: 'failed',
+        message: '结账已成功，但预约记录未能结束，请重试。'
+      }
+    }))
+  } finally {
+    isCompletingCheckoutReservations.value = false
+  }
 }
 
 async function closeSucceededRechargeCheckoutAndRefreshWorkbench() {
@@ -7323,6 +7413,35 @@ onBeforeUnmount(() => {
         @retry-business-sources="loadInlineCheckoutBusinessSources"
         @sales-date-change="saveCheckoutSalesDate"
       />
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="checkoutReservationPrompt"
+        class="cashier-card-operation-editor"
+        role="dialog"
+        aria-modal="true"
+        aria-label="是否结束当日预约"
+      >
+        <div class="cashier-card-operation-editor__panel">
+          <header><strong>结束预约记录</strong></header>
+          <span>该客户有未结束的预约记录，是否结束？</span>
+          <footer>
+            <button
+              type="button"
+              class="button button--secondary"
+              :disabled="isCompletingCheckoutReservations"
+              @click="keepCheckoutReservationsUnchanged"
+            >否</button>
+            <button
+              type="button"
+              class="button button--primary"
+              :disabled="isCompletingCheckoutReservations"
+              @click="completeCheckoutReservations"
+            >{{ isCompletingCheckoutReservations ? '处理中…' : '是' }}</button>
+          </footer>
+        </div>
+      </div>
     </Teleport>
 
     <CheckoutBusinessSourceOverlay

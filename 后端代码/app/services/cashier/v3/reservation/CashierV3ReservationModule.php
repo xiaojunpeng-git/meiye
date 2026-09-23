@@ -111,6 +111,15 @@ final class CashierV3ReservationModule
                 ], 'message' => '预约列表已刷新。'];
             });
         }
+        $checkoutReservationClosure = new CashierV3CheckoutReservationClosureServices();
+        if (!$handlers->hasProjection('query-checkout-unfinished-reservations')) {
+            $handlers->registerProjection('query-checkout-unfinished-reservations', function (array $scope) use ($checkoutReservationClosure): array {
+                return [
+                    'data' => ['checkoutReservationPrompt' => $checkoutReservationClosure->preview($scope)],
+                    'message' => '结账后预约状态已检查。',
+                ];
+            });
+        }
         if (!$handlers->hasProjection('query-reservation-project-catalog')) {
             $handlers->registerProjection('query-reservation-project-catalog', function (array $scope) use ($catalog): array {
                 $payload = (array)($scope['payload'] ?? []);
@@ -223,6 +232,17 @@ final class CashierV3ReservationModule
             }
             return ['data' => $data, 'business_no' => $result['reservationNo'], 'touched' => ['reservation'], 'message' => $message];
         });
+        self::registerCommand($handlers, 'complete-checkout-reservations', function (array $scope) use ($checkoutReservationClosure): array {
+            $result = $checkoutReservationClosure->complete($scope);
+            return [
+                'data' => ['checkoutReservationCompletion' => $result],
+                'business_no' => (string)($result['salesOrderNo'] ?? ''),
+                // 本命令的预约集合由服务端在事务内按订单重新发现并锁定；
+                // 不接受浏览器拼出的单条 reservation context。
+                'touched' => [],
+                'message' => ((int)($result['completedCount'] ?? 0)) > 0 ? '预约记录已结束。' : '当前已无未结束的预约记录。',
+            ];
+        });
 
         foreach (['create-reservation', 'update-reservation'] as $action) {
             if (!$dispatcher->policies()->has($action)) {
@@ -230,6 +250,11 @@ final class CashierV3ReservationModule
                 // header 锁定/CAS 已覆盖重复提交与并发覆盖。
                 $dispatcher->policies()->register(new CashierV3ContextPolicy($action, [], [], null, [], [], [], true));
             }
+        }
+        if (!$dispatcher->policies()->has('complete-checkout-reservations')) {
+            // 订单与预约均由领域事务按当前门店和数据范围重新发现并锁定，
+            // 允许空 contexts 是为了禁止前端决定批量写入边界。
+            $dispatcher->policies()->register(new CashierV3ContextPolicy('complete-checkout-reservations', [], [], null, [], [], [], true));
         }
         foreach (['cancel-reservation', 'confirm-reservation', 'reject-reservation', 'start-reservation-service', 'end-reservation-service'] as $action) {
             if (!$dispatcher->policies()->has($action)) {

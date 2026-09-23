@@ -533,6 +533,24 @@ class CashierV3ActionManifest
                 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['reservation.completed' => []],
             ],
+            'complete-checkout-reservations' => [
+                // 前端查询和最终确认之间可能已被其他终端处理完，因此合法结果可以是 0 个事件；
+                // 但每一条实际修改的预约都必须写入一个可追溯事件。
+                'required_event_types' => [],
+                'allowed_event_types' => ['reservation.checkout_completed'],
+                'event_rules' => [
+                    'reservation.checkout_completed' => [
+                        'min_count' => 0,
+                        'max_count' => 1000,
+                        'aggregate_type' => 'reservation',
+                        'source_type' => 'complete-checkout-reservations',
+                        'aggregate_version' => null,
+                    ],
+                ],
+                'eventless_reason' => '幂等确认时可能已无未结束预约，此时不发生业务变更。',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => ['reservation.checkout_completed' => []],
+            ],
             'cancel-reservation' => [
                 'required_event_types' => ['reservation.cancelled'],
                 'allowed_event_types' => ['reservation.cancelled'],

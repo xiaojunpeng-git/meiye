@@ -2772,6 +2772,11 @@ function resolveCommandContexts(action, payload) {
   if (action === 'void-service-record') {
     return { invalid: false, contexts: [] }
   }
+  // 结账后批量结束预约时，作用集合必须由服务端从已结算订单反推，
+  // 不接受浏览器指定或遗漏某一条预约 context。
+  if (action === 'complete-checkout-reservations') {
+    return { invalid: false, contexts: [] }
+  }
   // 欠款补交从当前欠款明细进入。选客和明细都是浏览器局部投影，不能把
   // 工作台或欠款的展示版本当成准入条件；服务端会在同一事务中锁定欠款、
   // 按最新未还金额生成唯一收款草稿。否则跨店或刷新后的正常欠款会被前端
