@@ -15,6 +15,11 @@ try {
     checkState(in_array('EXECUTION_OUTCOME_UNKNOWN',$codes,true)&&in_array('SECURITY_INTEGRITY_FAILURES',$codes,true)&&in_array('CAPACITY_PRESSURE',$codes,true)&&!in_array('EXPORT_FILE_FAILURES',$codes,true),'unknown/security/capacity separate from file denominator');
     $stats['exports']=['eligible'=>5,'failure_rate'=>1,'consecutive_failed'=>5];
     checkState(in_array('EXPORT_FILE_FAILURES',array_column($monitor->evaluate($stats)['alerts'],'code'),true),'low-flow five consecutive file failures alert');
+    $stats['exports']=['eligible'=>0,'failure_rate'=>null,'consecutive_failed'=>0];
+    $stats['task_exports']=['status'=>'ok','eligible'=>5,'failure_rate'=>1,'consecutive_failed'=>5];
+    checkState(in_array('EXPORT_TASK_FAILURES',array_column($monitor->evaluate($stats)['alerts'],'code'),true),'independent task failures are monitored after answer completion');
+    $stats['task_exports']=['status'=>'unavailable'];
+    checkState(in_array('EXPORT_TASK_MONITOR_UNAVAILABLE',array_column($monitor->evaluate($stats)['alerts'],'code'),true),'unreadable task outcomes cannot appear healthy');
     $monitor->recordCleanup(false);
     checkState(in_array('CLEANUP_FAILED',array_column($monitor->evaluate($stats)['alerts'],'code'),true),'supervisor failure persists for same-permission admin');
     $unregistered=new \app\services\ai\execution\AiRuntimeMonitor([],$dir,function()use(&$clock){return $clock;});
@@ -34,4 +39,4 @@ $r=$store->create($owner,'duration',$hash,$snapshot)['run']; $store->claim($owne
 $store->publish($owner,$r['run_id'],$r['generation'],'worker','evidence','answer','data_only_export_failed');
 $stats=$store->diagnostics();
 checkState($stats['duration']['mean_ms']===1234&&$stats['exports']['failed']===1&&$stats['exports']['eligible']===1,'actual terminal elapsed duration and safe partial file sample');
-echo "PASS 8 monitor/real-store duration/token/probe/retention checks.\n";
+echo "PASS 10 monitor/real-store duration/token/probe/retention checks.\n";

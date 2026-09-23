@@ -2,7 +2,7 @@
 declare(strict_types=1);
 namespace app\services\ai\execution;
 
-/** On-site administrator alerts only; no subject, Run, payload or external notification sink. */
+/** Aggregate-only administrator and supervisor alerts; no subject, Run, payload or external notification sink. */
 final class AiRuntimeMonitor
 {
     private $profile; private $directory; private $clock;
@@ -41,6 +41,12 @@ final class AiRuntimeMonitor
         if(($stats['export_unknown']??0)+($stats['usage']['unknown_attempts']??0)>=$p['unknown_count'])$alerts[]=['code'=>'EXECUTION_OUTCOME_UNKNOWN','severity'=>'error'];
         $exports=$stats['exports']??[];
         if((($exports['eligible']??0)>=$p['export_min_samples'] && ($exports['failure_rate']??0)>=$p['export_failure_rate']) || ($exports['consecutive_failed']??0)>=$p['export_consecutive_failures'])$alerts[]=['code'=>'EXPORT_FILE_FAILURES','severity'=>'error'];
+        // Independent Excel completes after the answer, so its task outcomes
+        // cannot be inferred from the old Run-level export-delivery counters.
+        $tasks=$stats['task_exports']??[];
+        if (in_array($tasks['status']??null,['unavailable','not_installed'],true)) $alerts[]=['code'=>'EXPORT_TASK_MONITOR_UNAVAILABLE','severity'=>'error'];
+        if ((($tasks['eligible']??0)>=$p['export_min_samples'] && ($tasks['failure_rate']??0)>$p['export_failure_rate'])
+            || ($tasks['consecutive_failed']??0)>=$p['export_consecutive_failures']) $alerts[]=['code'=>'EXPORT_TASK_FAILURES','severity'=>'error'];
         if(($stats['duration']['max_ms']??0)>=$p['duration_ms'])$alerts[]=['code'=>'RUN_DURATION_HIGH','severity'=>'warning'];
         if(!isset($health['checked_at']) || $now-$health['checked_at']>$p['cleanup_stale_seconds'])$alerts[]=['code'=>'CLEANUP_NOT_CONFIRMED','severity'=>'error'];
         return ['status'=>$alerts?'alert':'ok','alerts'=>$alerts,'cleanup_health'=>$health,'window_seconds'=>86400];

@@ -91,6 +91,15 @@ final class AiGatewayServices
         }
     }
 
+    /** Server-owned, aggregate-only health for administrator UI and the resident supervisor. */
+    public function monitorStatus(): array
+    {
+        $this->initialize();
+        $stats=$this->runs->diagnostics();
+        $stats['task_exports']=\app\services\ai\execution\AiExportRuntime::taskDiagnostics();
+        return $this->monitor()->evaluate($stats);
+    }
+
     /** Dedicated queue entry point.  It is intentionally not an HTTP action. */
     public function executeQueued(array $context,array $owner,string $runId,int $generation,string $operation,array $input): array
     {
@@ -125,6 +134,7 @@ final class AiGatewayServices
             if ($context['terminal']!=='platform' || empty($this->fresh($context)['can_configure'])) throw new RuntimeException('AI_PERMISSION_DENIED');
             if ($operation==='config_get') {
                 $diagnostics=$this->runs->diagnostics();
+                $diagnostics['task_exports']=\app\services\ai\execution\AiExportRuntime::taskDiagnostics();
                 $diagnostics['monitoring']=$this->monitor()->evaluate($diagnostics);
                 return array_merge($this->config->read(),['runtime_status'=>$diagnostics]);
             }

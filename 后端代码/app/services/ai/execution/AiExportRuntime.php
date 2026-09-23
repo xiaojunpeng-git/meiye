@@ -86,6 +86,29 @@ final class AiExportRuntime
         } catch (\Throwable $e) { return false; }
     }
 
+    /** Count retained AI file-task outcomes only; never read bindings, questions or result files for monitoring. */
+    public static function taskDiagnostics(): array
+    {
+        try {
+            $query=Db::name(Q\UnifiedQueryExportTaskServices::TABLE)->where('source_type','AI')
+                ->where('created_at','>=',time()-Q\UnifiedQueryExportWorkerServices::RETENTION_SECONDS)->where('expires_at','>',time())
+                ->whereIn('status',['succeeded','failed']);
+            $rows=(clone $query)->field('status,COUNT(*) AS n')->group('status')->select()->toArray();
+            $counts=['status'=>'ok','succeeded'=>0,'failed'=>0,'eligible'=>0,'failure_rate'=>null,'consecutive_failed'=>0];
+            foreach ($rows as $row) $counts[$row['status']]=(int)$row['n'];
+            $counts['eligible']=$counts['succeeded']+$counts['failed'];
+            if ($counts['eligible']>0) $counts['failure_rate']=$counts['failed']/$counts['eligible'];
+            // A bounded suffix is sufficient for the registered consecutive-failure threshold.
+            $limit=max(1,min(100,(int)(config('mohe_ai.monitoring.export_consecutive_failures')??5)));
+            $latest=(clone $query)->field('status')->order('completed_at','desc')->order('id','desc')->limit($limit)->select()->toArray();
+            foreach ($latest as $row) { if ($row['status']!=='failed') break; ++$counts['consecutive_failed']; }
+            return $counts;
+        } catch (\Throwable $ignored) {
+            // A broken task source is an alarm, never an empty healthy sample.
+            return ['status'=>'unavailable'];
+        }
+    }
+
     public function queue(array $context,array $owner,array $run,string $workerToken,string $evidenceRef,string $answerRef,array $view): array
     {
         if (!$this->ready($context)) throw new \RuntimeException('AI_EXPORT_NOT_READY');

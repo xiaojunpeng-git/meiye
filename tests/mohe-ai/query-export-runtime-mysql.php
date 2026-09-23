@@ -127,6 +127,17 @@ function app() { return new class { public function getRuntimePath(){return $GLO
                 mysqlCheck($partialObject['answer']['export_status']==='failed' && $partial['evidence_ref']===$nextEvidence,'partial keeps exact original evidence and failed file status');
             }
         }
+        $taskStats=$export::taskDiagnostics();
+        mysqlCheck($taskStats['status']==='ok' && $taskStats['succeeded']>=2 && $taskStats['failed']===0,
+            'monitor reads retained AI task outcomes after the answer is complete');
+        // Disposable fixture only: a terminal task failure must reach the
+        // monitoring numerator without altering the already-published Run.
+        think\facade\Db::name('unified_query_export_task')->where('task_no',$failedTask)
+            ->update(['status'=>'failed','error_reason'=>'AI_EXPORT_FAILED','completed_at'=>time(),'updated_at'=>time()]);
+        $taskStats=$export::taskDiagnostics();
+        mysqlCheck($taskStats['failed']>=1 && $taskStats['eligible']>=$taskStats['failed']
+            && $runs->get($owner,$fileFailure['run_id'],$fileFailure['generation'])['status']==='COMPLETED',
+            'independent file failure is observable while the answer stays complete');
     } finally {
         foreach(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($temp,FilesystemIterator::SKIP_DOTS),RecursiveIteratorIterator::CHILD_FIRST) as $file) {if($file->isDir())rmdir($file->getPathname());else unlink($file->getPathname());} rmdir($temp);
     }
