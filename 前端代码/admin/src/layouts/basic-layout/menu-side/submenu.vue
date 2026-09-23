@@ -4,7 +4,8 @@
             <i-menu-side-title :menu="menuData" />
         </template>
         <template v-for="(item, index) in menuData.children.filter(j => !j.auth)">
-            <i-menu-side-item :menu="toSidebarEntry(item)" :key="index" />
+            <!-- 侧栏父分组属于二级菜单，其直接入口统一是三级菜单。 -->
+            <i-menu-side-item :menu="toSidebarEntry(item)" :key="index" hide-icon />
         </template>
     </Submenu>
 </template>

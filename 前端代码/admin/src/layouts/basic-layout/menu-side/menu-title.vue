@@ -1,6 +1,6 @@
 <template>
     <span class="i-layout-menu-side-title" @click="menuClick">
-        <span class="i-layout-menu-side-title-icon" :class="{ 'i-layout-menu-side-title-icon-single': hideTitle }" v-if="menu.icon || menu.custom">
+        <span class="i-layout-menu-side-title-icon" :class="{ 'i-layout-menu-side-title-icon-single': hideTitle }" v-if="!hideIcon && (menu.icon || menu.custom)">
             <Icon :type="menu.icon" v-if="menu.icon" />
             <Icon :custom="menu.custom" v-else-if="menu.custom" />
         </span>
@@ -24,6 +24,12 @@ export default {
       }
     },
     hideTitle: {
+      type: Boolean,
+      default: false
+    },
+    // 三级菜单只保留文字，图标字段仍保留在权限菜单模型中，避免影响
+    // 顶栏、二级菜单以及其他依赖同一菜单数据的入口。
+    hideIcon: {
       type: Boolean,
       default: false
     },

@@ -6,7 +6,7 @@
             <i-menu-side-title :menu="menuData" hide-title v-else/>
         </li>
         <DropdownItem v-else>
-            <i-menu-side-title :menu="menuData" :selected="openNames.indexOf(menuData.path) >= 0" />
+            <i-menu-side-title :menu="menuData" :selected="openNames.indexOf(menuData.path) >= 0" hide-icon />
             <!-- <Icon type="ios-arrow-forward" class="i-layout-menu-side-arrow" /> -->
         </DropdownItem>
         <DropdownMenu slot="list">
@@ -18,7 +18,8 @@
             <template v-for="(item, index) in menuData.children">
                 <i-link :to="item.path" :target="item.target" v-if="item.children === undefined || !item.children.length" :key="index">
                     <DropdownItem :divided="item.divided" :class="{ 'i-layout-menu-side-collapse-item-selected': item.path === activePath }">
-                        <i-menu-side-title :menu="item" />
+                        <!-- 折叠侧栏的下拉入口与展开状态保持同一三级菜单口径。 -->
+                        <i-menu-side-title :menu="item" hide-icon />
                     </DropdownItem>
                 </i-link>
                 <i-menu-side-collapse v-else :menu="item" :key="index" />
