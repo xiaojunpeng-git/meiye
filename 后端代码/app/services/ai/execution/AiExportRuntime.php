@@ -35,7 +35,7 @@ final class AiExportRuntime
                         if ($count>=$this->settings['reserved_slots']) throw new \RuntimeException('AI_EXPORT_CAPACITY_REJECTED');
                     }
                     return $action();
-                });
+                },($binding['mode']??'')==='independent_v1');
         });
         $factory=new Q\UnifiedQueryContextFactory($pages);
         $this->resolver=new AiExportWorkerContextResolver($factory,function(array $task):array {
@@ -43,8 +43,14 @@ final class AiExportRuntime
             $binding=Q\UnifiedQueryJson::decode((string)$task['ai_binding']);
             $this->validateBinding($binding,'status');
             $run=$this->runtime['runs']->get($this->owner($binding),$binding['run_id'],$binding['generation']);
-            $handoff=$this->runtime['private']->read($run['answer_ref']);
-            if (($handoff['export_task_no']??null)!==($task['task_no']??null)) throw new \RuntimeException('AI_EXPORT_TASK_BINDING_INVALID');
+            if (($binding['mode']??'')==='independent_v1') {
+                if ($run['status']!=='COMPLETED' || $run['evidence_ref']!==$binding['evidence_ref']
+                    || $run['answer_ref']!==$binding['canonical_result_ref']
+                    || $this->taskNo($binding)!==($task['task_no']??null)) throw new \RuntimeException('AI_EXPORT_TASK_BINDING_INVALID');
+            } else {
+                $handoff=$this->runtime['private']->read($run['answer_ref']);
+                if (($handoff['export_task_no']??null)!==($task['task_no']??null)) throw new \RuntimeException('AI_EXPORT_TASK_BINDING_INVALID');
+            }
             $this->binding=$binding; return $binding;
         },$this->principalResolver);
         $this->readViews=new M\MetricReadViewServices($this->runtime['views'],function():array {
@@ -134,6 +140,74 @@ final class AiExportRuntime
         return $waiting;
     }
 
+    /** Start a file task from an already delivered answer; this never changes the answer Run. */
+    public function queueCompleted(array $context,array $owner,array $run): array
+    {
+        if ($run['status']!=='COMPLETED' || !$this->ready($context)) throw new \RuntimeException('AI_EXPORT_NOT_READY');
+        $evidence=$this->runtime['private']->read($run['evidence_ref']);
+        if (($evidence['owner']??null)!==$owner || ($evidence['run_id']??null)!==$run['run_id']
+            || !isset($evidence['query'],$evidence['view_ref'])) throw new \RuntimeException('AI_EXPORT_SOURCE_MISMATCH');
+        // Both private objects must belong to this completed Run. The file
+        // task may only reuse its immutable, already verified answer source.
+        $this->assertObjectOwner($this->runtime['private']->read($run['answer_ref']),[
+            'terminal'=>$owner['terminal'],'account_id'=>$owner['account_id'],'conversation_id'=>$owner['conversation_id'],
+            'window_id'=>$owner['window_id'],'run_id'=>$run['run_id'],'generation'=>$run['generation']]);
+        $now=time(); $expiry=intdiv($run['expires_at'],1000);
+        $binding=['mode'=>'independent_v1','instance_fingerprint'=>$this->runtime['instance'],
+            'terminal'=>$owner['terminal'],'account_id'=>$owner['account_id'],'conversation_id'=>$owner['conversation_id'],
+            'window_id'=>$owner['window_id'],'run_id'=>$run['run_id'],'generation'=>$run['generation'],
+            'worker_token'=>'','evidence_ref'=>$run['evidence_ref'],'canonical_result_ref'=>$run['answer_ref'],
+            'read_consistency_ref'=>$evidence['view_ref'],'created_at'=>$now,'expires_at'=>$expiry,
+            'source_expires_at'=>[$expiry],'execution_deadline_at'=>min($expiry,$now+180),
+            'queue_deadline_ms'=>(int)floor(microtime(true)*1000)+$this->settings['queue_wait_budget_ms'],
+            'result_hash'=>'','permission_hash'=>AiAuthority::permissionHash($context),
+            'model_config_version'=>(string)$this->runtime['config']->read()['version']];
+        foreach (['principal_kind','origin_store_id','origin_organization_id','employee_id','staff_id'] as $key)
+            if (array_key_exists($key,$context)) $binding[$key]=$context[$key];
+        $this->binding=$binding;
+        $view=$this->readViews->replay([],$evidence['query'],$evidence['view_ref']);
+        $binding['result_hash']=$view['result_hash'];
+        $binding['expires_at']=min($expiry,(int)$view['expires_at']);
+        $binding['source_expires_at']=[$expiry,(int)$view['expires_at']];
+        $binding['execution_deadline_at']=min($binding['expires_at'],$now+180);
+        $binding['signature']=$this->signature($binding); $this->binding=$binding;
+        $this->validateBinding($binding,'create'); $this->assertCurrentVersions($binding);
+        $seed=['source_type'=>'AI','account_id'=>$owner['account_id'],'operator_id'=>$owner['account_id'],
+            'tenant_id'=>(string)($context['tenant_id']??0),
+            'query_cutoff_date'=>date('Y-m-d',strtotime($view['data_as_of'])),'data_as_of'=>strtotime($view['data_as_of'])];
+        $factoryContext=$this->creationContext($binding,$seed);
+        $task=$this->tasks->createAi($factoryContext,['page_code'=>M\MetricReadViewExportProvider::PAGE_CODE,'scope'=>'query',
+            'fields'=>array_keys(M\MetricReadViewExportRegistrar::fields()),'includeSummary'=>false,
+            'query'=>['visibleFields'=>array_keys(M\MetricReadViewExportRegistrar::fields()),'export'=>['scope'=>'query']]],$binding);
+        if ($task['status']==='pending') {
+            // Duplicate queue messages are harmless: the shared Task lease
+            // and source-bound worker accept a pending task only once.
+            try { if ($this->dispatch) call_user_func($this->dispatch,$task['taskId']);
+                else AiExportQueue::push($this->runtime['instance'],$task['taskId']); }
+            catch (\Throwable $ignored) { /* Status polling can dispatch the same durable task again. */ }
+        }
+        return $this->statusCompleted($context,$owner,$run);
+    }
+
+    /** Expose only task progress for this signed answer; no query or business rows leave the server. */
+    public function statusCompleted(array $context,array $owner,array $run): array
+    {
+        if ($run['status']!=='COMPLETED') throw new \RuntimeException('AI_EXPORT_NOT_PUBLISHED');
+        $task=Db::name(Q\UnifiedQueryExportTaskServices::TABLE)->where('task_no',$this->taskNo([
+            'instance_fingerprint'=>$this->runtime['instance'],'run_id'=>$run['run_id'],'generation'=>$run['generation']]))->find();
+        if (!$task) return ['status'=>'not_requested'];
+        $binding=Q\UnifiedQueryJson::decode((string)$task['ai_binding']);
+        if (($binding['mode']??'')!=='independent_v1' || $this->owner($binding)!==$owner
+            || ($context['account_id']??null)!==$owner['account_id']) throw new \RuntimeException('AI_EXPORT_OWNER_MISMATCH');
+        $this->binding=$binding; $this->validateBinding($binding,'status');
+        return ['status'=>$task['status'],'created_at'=>(int)$task['created_at'],
+            'completed_at'=>(int)$task['completed_at'],'filename'=>(string)$task['file_name']];
+    }
+
+    /** File identity is stable for one verified answer and never includes customer text. */
+    private function taskNo(array $binding): string
+    { return 'uqe_'.substr(hash('sha256',$binding['instance_fingerprint'].'|'.$binding['run_id'].'|'.$binding['generation']),0,32); }
+
     public static function process(string $taskNo): bool
     {
         try { return (new self())->execute($taskNo); }
@@ -167,6 +241,9 @@ final class AiExportRuntime
             $view=$this->replay();
             if ($result['status']==='succeeded') $this->verifyFile($this->worker->absolutePath($result['storageKey']),$view);
             elseif (($result['exportFailureClass']??'')!=='FILE_GENERATION_FAILED') throw new \RuntimeException('AI_EXPORT_UNSAFE_FAILURE');
+            // The independent task is already represented by the shared
+            // export receipt.  Its completion never reopens the answer Run.
+            if (($binding['mode']??'')==='independent_v1') return true;
             $newToken=bin2hex(random_bytes(24));
             $run=$this->runtime['runs']->resumeAfterExport($this->owner($binding),$binding['run_id'],$binding['generation'],$binding['worker_token'],$newToken,(int)config('mohe_ai.execution_slots',4));
             if ($run['status']!=='WORKFLOW_EXECUTING') return true;
@@ -181,6 +258,13 @@ final class AiExportRuntime
                 $result['status']==='succeeded'?'complete':'data_only_export_failed');
         } catch (\Throwable $e) {
             if ($trusted && $binding) {
+                if (($binding['mode']??'')==='independent_v1') {
+                    try {
+                        $this->tasks->invalidateAiCompleted((string)$task['tenant_id'],$taskNo);
+                        $this->tasks->cancelAiTask((string)$task['tenant_id'],$taskNo);
+                    } catch (\Throwable $ignored) {}
+                    return true;
+                }
                 $reason=preg_match('/^(AI_EXPORT_[A-Z_]+|METRIC_PERMISSION_[A-Z_]+|AI_AUTHORIZATION_CHANGED|AI_CAPABILITY_CHANGED)$/D',$e->getMessage())?$e->getMessage():'AI_EXPORT_UNSAFE_FAILURE';
                 try { $this->runtime['runs']->fail($this->owner($binding),$binding['run_id'],$binding['generation'],$newToken??$binding['worker_token'],$reason); } catch (\Throwable $ignored) {}
                 try { $this->tasks->cancelAiTask((string)($task['tenant_id']??''),$taskNo); } catch (\Throwable $ignored) {}
@@ -197,12 +281,18 @@ final class AiExportRuntime
     public function download(array $context,array $owner,array $run): array
     {
         $answer=$this->runtime['private']->read($run['answer_ref']);
-        $binding=$answer['export_binding']??[];
+        $task=null; $binding=$answer['export_binding']??[];
+        if (!$binding && $run['status']==='COMPLETED') {
+            $task=Db::name(Q\UnifiedQueryExportTaskServices::TABLE)->where('task_no',$this->taskNo([
+                'instance_fingerprint'=>$this->runtime['instance'],'run_id'=>$run['run_id'],'generation'=>$run['generation']]))->find();
+            if (!$task || ($task['source_type']??null)!=='AI') throw new \RuntimeException('AI_EXPORT_NOT_READY');
+            $binding=Q\UnifiedQueryJson::decode((string)$task['ai_binding']);
+        }
         if ($owner!==$this->owner($binding) || ($context['account_id']??null)!==$owner['account_id'] || ($context['terminal']??null)!==$owner['terminal']) throw new \RuntimeException('AI_EXPORT_OWNER_MISMATCH');
         $this->binding=$binding; $this->validateBinding($binding,'download'); $view=$this->replay();
-        $task=Db::name(Q\UnifiedQueryExportTaskServices::TABLE)->where('task_no',$answer['export_task_no'])->find();
+        $task=$task?:Db::name(Q\UnifiedQueryExportTaskServices::TABLE)->where('task_no',$answer['export_task_no'])->find();
         $queryContext=$this->resolver->resolve($task);
-        $descriptor=$this->tasks->resolveDownloadDescriptor($queryContext,$answer['export_task_no']);
+        $descriptor=$this->tasks->resolveDownloadDescriptor($queryContext,$task['task_no']);
         $this->verifyFile($this->worker->absolutePath($descriptor['storageKey']),$view);
         return $descriptor;
     }
@@ -231,13 +321,20 @@ final class AiExportRuntime
         foreach ($rows as $task) {
             try {
                 $binding=Q\UnifiedQueryJson::decode($task['ai_binding']); $run=$this->validateBinding($binding,'status');
+                if ($task['status']==='pending' && ($binding['mode']??'')==='independent_v1'
+                    && $binding['queue_deadline_ms']>(int)floor(microtime(true)*1000) && $this->ready()) {
+                    // A lost queue message can be retried by supervision; the
+                    // Task lease prevents duplicate file generation.
+                    AiExportQueue::push($this->runtime['instance'],$task['task_no']); continue;
+                }
                 if ($task['status']==='pending' && $run['status']==='WAITING_EXPORT' && $binding['execution_deadline_at']>time()
                     && $binding['queue_deadline_ms']<=(int)floor(microtime(true)*1000) && $this->ready()) {
                     $this->execute($task['task_no']); continue; // Safe data-only continuation after confirmed not-started cancellation.
                 }
                 $expired=$binding['execution_deadline_at']<=time() || ($task['status']==='pending' && $binding['queue_deadline_ms']<=(int)floor(microtime(true)*1000));
                 if (in_array($run['status'],['FAILED','CANCELLED'],true) || $expired) {
-                    if ($expired) $this->runtime['runs']->fail($this->owner($binding),$binding['run_id'],$binding['generation'],$binding['worker_token'],'AI_EXPORT_DEADLINE');
+                    // File expiry must not turn a delivered answer into failure.
+                    if ($expired && ($binding['mode']??'')!=='independent_v1') $this->runtime['runs']->fail($this->owner($binding),$binding['run_id'],$binding['generation'],$binding['worker_token'],'AI_EXPORT_DEADLINE');
                     if ($this->tasks->cancelAiTask((string)$task['tenant_id'],$task['task_no'])) ++$stopped;
                 }
             } catch (\Throwable $ignored) { /* Invalid/expired ownership is never reconstructed; TTL erasure below owns it. */ }
@@ -263,8 +360,11 @@ final class AiExportRuntime
         if (!is_string($binding['signature']??null) || !hash_equals($this->signature($binding),$binding['signature'])
             || ($binding['instance_fingerprint']??null)!==$this->runtime['instance']) throw new \RuntimeException('AI_EXPORT_SIGNATURE_INVALID');
         $run=$this->runtime['runs']->get($this->owner($binding),$binding['run_id'],$binding['generation']);
+        $independent=($binding['mode']??'')==='independent_v1';
         if ($binding['expires_at']>intdiv($run['expires_at'],1000) || $binding['expires_at']<=time()
-            || $binding['execution_deadline_at']>intdiv($run['deadline_at'],1000)) throw new \RuntimeException('AI_EXPORT_EXPIRED');
+            || (!$independent && $binding['execution_deadline_at']>intdiv($run['deadline_at'],1000))) throw new \RuntimeException('AI_EXPORT_EXPIRED');
+        if ($independent && ($run['status']!=='COMPLETED' || $run['evidence_ref']!==$binding['evidence_ref']
+            || $run['answer_ref']!==$binding['canonical_result_ref'])) throw new \RuntimeException('AI_EXPORT_TASK_BINDING_INVALID');
         if (!in_array($phase,['download','status','cancel'],true) && $binding['execution_deadline_at']<=time()) throw new \RuntimeException('AI_EXPORT_DEADLINE');
         $this->binding=$binding; $this->evidence($binding);
         if (!in_array($phase,['cancel','status'],true)) $this->assertCurrentVersions($binding);

@@ -518,12 +518,16 @@ final class AiRunStore
     }
 
     /** Short Task lifecycle CAS only; never put model/query/file I/O inside this lock. */
-    public function exportFence(array $owner,string $runId,int $generation,string $workerToken,string $phase,callable $action)
+    public function exportFence(array $owner,string $runId,int $generation,string $workerToken,string $phase,callable $action,bool $independent=false)
     {
-        return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$phase,$action) {
+        return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$phase,$action,$independent) {
             $r=$this->read($owner,$runId,$generation);
             if (!in_array($phase,['create','claim','complete','heartbeat','failure','cancel','status','download'],true)) { throw new RuntimeException('AI_EXPORT_PHASE_INVALID'); }
-            if ($phase==='download') {
+            // A completed answer is immutable. Its file task has its own
+            // deadline and must never reacquire the answer's execution slot.
+            if ($independent) {
+                if ($r['status']!=='COMPLETED' || $r['evidence_ref']==='' || $r['answer_ref']==='') throw new RuntimeException('AI_EXPORT_NOT_PUBLISHED');
+            } elseif ($phase==='download') {
                 if ($r['status']!=='COMPLETED') { throw new RuntimeException('AI_EXPORT_NOT_PUBLISHED'); }
             } elseif (in_array($phase,['cancel','status'],true)) {
                 // Ownership remains mandatory after logical cancellation; no new execution is allowed.

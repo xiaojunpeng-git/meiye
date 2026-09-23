@@ -29,7 +29,7 @@ done < <(rg --files "$source_root/后端代码/app/services/ai" "$source_root/�
 "$php_bin" "$source_root/tests/cashier-v3/php/order-center-unified-export-contract.php"
 
 node_bin="${MOHE_TEST_NODE:-node}"
-for suite in device-session-contract browser-entry-contract browser-single-entry-contract browser-transport-contract browser-workflow-contract browser-guidance-contract browser-mobile-guidance-contract order-export-snapshot; do
+for suite in device-session-contract browser-entry-contract browser-single-entry-contract browser-transport-contract browser-workflow-contract browser-independent-export-contract browser-guidance-contract browser-mobile-guidance-contract order-export-snapshot; do
     "$node_bin" "$test_dir/$suite.mjs"
 done
 "$node_bin" "$test_dir/management-ui-contract.mjs"

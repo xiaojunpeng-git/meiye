@@ -34,6 +34,20 @@ case "$SITE_KEY" in
   *) echo "未知站点 $SITE_KEY"; exit 2 ;;
 esac
 
+if [ "$SITE_KEY" = "rh" ]; then
+  # An enabled Excel checkbox must have a resident, restartable consumer.
+  # Refuse the release before copying code if that target instance has not
+  # installed its own dedicated export service.
+  AI_EXPORT_WORKERS=$(ssh "$SSH_HOST" "systemctl list-units --all --plain --no-legend 'mohe-ai-export-worker@*.service' | awk '{print \$1}'")
+  [ -n "$AI_EXPORT_WORKERS" ] || { echo "瑞昊缺少独立 Excel worker；请先按实例安装服务" >&2; exit 4; }
+  for AI_UNIT in $AI_EXPORT_WORKERS; do
+    case "$AI_UNIT" in
+      mohe-ai-export-worker@*.service) ;;
+      *) echo "发现非法 Excel worker unit：$AI_UNIT" >&2; exit 4 ;;
+    esac
+  done
+fi
+
 echo "→ rsync 后端 app/route/mohe 与魔核 AI 配置 → $REMOTE （不覆盖 .env/runtime/public/vendor）"
 rsync -az \
   --exclude 'runtime/' \
@@ -55,7 +69,7 @@ rsync -az "$SRC/config/mohe_ai.php" "$SSH_HOST:$REMOTE/config/mohe_ai.php"
 ssh "$SSH_HOST" "rm -rf '$REMOTE/runtime/cache/'* 2>/dev/null || true; echo CACHE_CLEARED"
 
 if [ "$SITE_KEY" = "rh" ]; then
-  echo "→ 同批重启瑞昊 Swoole、魔核 AI Worker 与 Supervisor"
+  echo "→ 同批重启瑞昊 Swoole、魔核 AI Worker、Excel Worker 与 Supervisor"
   # A source sync is not a completed RH deployment while long-lived processes
   # still hold different registry versions. Discover every resident worker
   # instance, validate its systemd unit name, then restart all three runtime
@@ -69,7 +83,7 @@ if [ "$SITE_KEY" = "rh" ]; then
     esac
   done
   # shellcheck disable=SC2086
-  ssh "$SSH_HOST" "set -e; /etc/init.d/ruihao_swoole restart; systemctl restart $AI_WORKERS mohe-ai-supervisor.service; systemctl is-active --quiet $AI_WORKERS mohe-ai-supervisor.service; /etc/init.d/ruihao_swoole status; echo RH_AI_RUNTIME_READY"
+  ssh "$SSH_HOST" "set -e; /etc/init.d/ruihao_swoole restart; systemctl restart $AI_WORKERS $AI_EXPORT_WORKERS mohe-ai-supervisor.service; systemctl is-active --quiet $AI_WORKERS $AI_EXPORT_WORKERS mohe-ai-supervisor.service; /etc/init.d/ruihao_swoole status; echo RH_AI_RUNTIME_READY"
 fi
 
 echo "DEPLOY_BACKEND_OK $SITE_KEY"

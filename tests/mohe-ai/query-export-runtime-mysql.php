@@ -54,6 +54,46 @@ function app() { return new class { public function getRuntimePath(){return $GLO
         mysqlCheck(!empty($descriptor['storageKey']),'download rechecks current permission and exact file');
         $execute->invoke($export,$dispatched[0]);
         mysqlCheck($runs->get($owner,$run['run_id'],$run['generation'])['answer_ref']===$done['answer_ref'],'duplicate job cannot republish');
+        // The answer is published before file creation. A later file failure
+        // or duplicate task request must not reopen or replace that answer.
+        $separate=$runs->create($owner,'independent-request',hash('sha256','independent'),$snapshot)['run'];
+        $separateToken=bin2hex(random_bytes(24));
+        $runs->claim($owner,$separate['run_id'],$separate['generation'],$separateToken);
+        $separate=$runs->get($owner,$separate['run_id'],$separate['generation']);
+        $separateExpiry=intdiv($separate['expires_at'],1000);
+        $separateView=$service->create([],$query,$separateExpiry);
+        $separateBase=['owner'=>$owner,'run_id'=>$separate['run_id'],'generation'=>$separate['generation']];
+        $separateEvidence=$private->put('evidence',$separateBase+['view_ref'=>$separateView['read_consistency_ref'],'query'=>$query],$separateExpiry);
+        $separateAnswer=$private->put('answer',$separateBase+['answer'=>['summary'=>'fixture','cards'=>[]]],$separateExpiry);
+        $published=$runs->publish($owner,$separate['run_id'],$separate['generation'],$separateToken,$separateEvidence,$separateAnswer);
+        mysqlCheck($published['status']==='COMPLETED','answer is visible before file task');
+        $queued=$export->queueCompleted($context,$owner,$published);
+        mysqlCheck($queued['status']==='pending' && $runs->get($owner,$separate['run_id'],$separate['generation'])['status']==='COMPLETED','file queues without reopening answer');
+        $duplicate=$export->queueCompleted($context,$owner,$published);
+        mysqlCheck($duplicate['status']==='pending' && count($dispatched)>=2,'repeated file request returns same task');
+        $separateTask=end($dispatched);
+        $execute->invoke($export,$separateTask);
+        $fileStatus=$export->statusCompleted($context,$owner,$published);
+        mysqlCheck($fileStatus['status']==='succeeded','independent file completes');
+        $separateDownload=$export->download($context,$owner,$published);
+        mysqlCheck(!empty($separateDownload['storageKey']) && $runs->get($owner,$separate['run_id'],$separate['generation'])['answer_ref']===$separateAnswer,'download preserves original answer');
+        $fileFailure=$runs->create($owner,'independent-capacity',hash('sha256','independent-capacity'),$snapshot)['run'];
+        $failureToken=bin2hex(random_bytes(24)); $runs->claim($owner,$fileFailure['run_id'],$fileFailure['generation'],$failureToken);
+        $fileFailure=$runs->get($owner,$fileFailure['run_id'],$fileFailure['generation']);
+        $failureExpiry=intdiv($fileFailure['expires_at'],1000); $failureView=$service->create([],$query,$failureExpiry);
+        $failureBase=['owner'=>$owner,'run_id'=>$fileFailure['run_id'],'generation'=>$fileFailure['generation']];
+        $failureEvidence=$private->put('evidence',$failureBase+['view_ref'=>$failureView['read_consistency_ref'],'query'=>$query],$failureExpiry);
+        $failureAnswer=$private->put('answer',$failureBase+['answer'=>['summary'=>'fixture','cards'=>[]]],$failureExpiry);
+        $fileFailure=$runs->publish($owner,$fileFailure['run_id'],$fileFailure['generation'],$failureToken,$failureEvidence,$failureAnswer);
+        $export->queueCompleted($context,$owner,$fileFailure); $failedTask=end($dispatched);
+        $held=[];
+        try {
+            for($i=0;$i<2;$i++) {$handle=fopen($temp.'/runtime/private/mohe-ai-export-locks/'.hash('sha256','fixture.instance').'/slot-'.$i,'c+b'); flock($handle,LOCK_EX|LOCK_NB); $held[]=$handle;}
+            $execute->invoke($export,$failedTask);
+        } finally {foreach($held as $handle){flock($handle,LOCK_UN);fclose($handle);}}
+        mysqlCheck($export->statusCompleted($context,$owner,$fileFailure)['status']==='cancelled'
+            && $runs->get($owner,$fileFailure['run_id'],$fileFailure['generation'])['status']==='COMPLETED',
+            'independent file capacity failure leaves the published answer complete');
         $context['permission_version']='revoked'; $denied=false;
         try {$export->download($context,$owner,$done);} catch(Throwable $e){$denied=true;}
         mysqlCheck($denied,'permission changed blocks original file download');

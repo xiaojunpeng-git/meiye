@@ -15,6 +15,8 @@ trait AiHttpActions
     public function aiClarify(string $runId) { return $this->callAi('clarify',$runId); }
     public function aiCancel(string $runId) { return $this->callAi('cancel',$runId); }
     public function aiExport(string $runId) { return $this->callAi('export',$runId); }
+    public function aiExportCreate(string $runId) { return $this->callAi('export_create',$runId); }
+    public function aiExportStatus(string $runId) { return $this->callAi('export_status',$runId); }
     public function aiConfigGet() { return $this->callAi('config_get'); }
     public function aiConfigSave() { return $this->callAi('config_save'); }
     public function aiConfigCheck() { return $this->callAi('config_check'); }

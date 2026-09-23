@@ -172,14 +172,21 @@ $check(app\services\query\metric\MetricMoneyFormatter::integerYuan(15149)==='151
 $http=file_get_contents(dirname(__DIR__,2).'/后端代码/app/controller/ai/AiHttpActions.php');
 $check(strpos($http,'return new AiGatewayServices();')!==false,'framework adapter does not autowire optional fixture dependencies');
 $deployScript=file_get_contents(dirname(__DIR__,2).'/scripts/deploy-backend.sh');
-// RH uses three long-lived runtime roles. Keep deployment success coupled to
-// restarting and verifying all of them so old and new AI contracts cannot run
-// concurrently after a source sync.
+// RH now uses four long-lived runtime roles. Deployment must refuse a missing
+// file consumer and restart every role so the Excel switch cannot be enabled
+// against a queue with no resident worker.
 $check(strpos($deployScript,'/etc/init.d/ruihao_swoole restart')!==false
-    && strpos($deployScript,'systemctl restart $AI_WORKERS mohe-ai-supervisor.service')!==false
-    && strpos($deployScript,'systemctl is-active --quiet $AI_WORKERS mohe-ai-supervisor.service')!==false
+    && strpos($deployScript,'[ -n "$AI_EXPORT_WORKERS" ]')!==false
+    && strpos($deployScript,'systemctl restart $AI_WORKERS $AI_EXPORT_WORKERS mohe-ai-supervisor.service')!==false
+    && strpos($deployScript,'systemctl is-active --quiet $AI_WORKERS $AI_EXPORT_WORKERS mohe-ai-supervisor.service')!==false
     && strpos($deployScript,'RH_AI_RUNTIME_READY')!==false,
-    'RH backend deployment restarts and verifies web, AI worker and supervisor as one runtime version');
+    'RH backend deployment requires and verifies web, AI worker, Excel worker and supervisor as one runtime version');
+$installer=file_get_contents(dirname(__DIR__,2).'/scripts/install-mohe-ai-systemd.sh');
+$exportUnit=file_get_contents(dirname(__DIR__,2).'/scripts/systemd/mohe-ai-export-worker@.service');
+$check(strpos($installer,'AiUnifiedQueryExportJob::queueName()')!==false
+    && strpos($installer,'systemctl enable --now "mohe-ai-export-worker@$i.service"')!==false
+    && strpos($exportUnit,'queue:work --queue=@QUEUE_NAME@')!==false,
+    'installed Excel worker consumes only the current instance queue and restarts after host reboot');
 $siliconFlow=file_get_contents(dirname(__DIR__,2).'/后端代码/app/services/ai/model/SiliconFlowClient.php');
 $check(strpos($siliconFlow,"context_constraint_without_source:business_filters")!==false
     && strpos($siliconFlow,'use context_delta business_filters=clear so person, position, member or other object-selection filters from the old subject cannot leak into the new subject')!==false,

@@ -14,6 +14,8 @@ $aiActions=function () {
     Route::post('runs/:runId/clarify','Ai/aiClarify')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
     Route::post('runs/:runId/cancel','Ai/aiCancel')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
     Route::get('runs/:runId/export','Ai/aiExport')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
+    Route::post('runs/:runId/export','Ai/aiExportCreate')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
+    Route::get('runs/:runId/export-status','Ai/aiExportStatus')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
     Route::get('config','Ai/aiConfigGet')->completeMatch();
     Route::put('config','Ai/aiConfigSave')->completeMatch();
     Route::post('config/check','Ai/aiConfigCheck')->completeMatch();

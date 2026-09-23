@@ -349,7 +349,11 @@ class UnifiedQueryExportTaskServices
             $maximumRows,
             $includeSummary
         );
-        $taskNo = 'uqe_' . bin2hex(random_bytes(16));
+        // An AI answer has one stable export identity across HTTP retries.
+        // The random identifier remains appropriate for ordinary report exports.
+        $taskNo = $sourceType === 'AI'
+            ? 'uqe_' . substr(hash('sha256', $aiBinding['instance_fingerprint'].'|'.$aiBinding['run_id'].'|'.$aiBinding['generation']), 0, 32)
+            : 'uqe_' . bin2hex(random_bytes(16));
         $now = time();
         $dataAsOf = (int)($context['data_as_of'] ?? $now);
         $permissionFingerprint = hash('sha256', UnifiedQueryJson::encode([
@@ -385,6 +389,21 @@ class UnifiedQueryExportTaskServices
             $sourceType,
             $aiBinding
         ) {
+            if ($sourceType === 'AI') {
+                // The Run fence serializes creation, while the stable task key
+                // lets a repeated request return its original receipt.
+                $existing = Db::name(self::TABLE)->where('task_no', $taskNo)->find();
+                if ($existing) {
+                    $bound = UnifiedQueryJson::decode((string)$existing['ai_binding']);
+                    if (($existing['source_type'] ?? null) !== 'AI'
+                        || ($existing['account_id'] ?? null) != $aiBinding['account_id']
+                        || ($bound['run_id'] ?? null) !== $aiBinding['run_id']
+                        || ($bound['generation'] ?? null) !== $aiBinding['generation']) {
+                        throw new \RuntimeException('AI_EXPORT_TASK_BINDING_INVALID');
+                    }
+                    return $this->present($existing);
+                }
+            }
             $insert = [
                 'task_no' => $taskNo,
                 'tenant_id' => $context['tenant_id'],
@@ -1127,6 +1146,18 @@ class UnifiedQueryExportTaskServices
                 if ($changed) $this->references->release($tenantId, 'export_task', $taskNo);
                 return (int)$changed === 1;
             });
+        });
+    }
+
+    /** A generated file is never advertised when its read-back differs from the verified AI view. */
+    public function invalidateAiCompleted(string $tenantId, string $taskNo): void
+    {
+        $task = $this->lifecycleTask($tenantId, $taskNo);
+        if ($this->sourceType($task) !== 'AI') throw new \InvalidArgumentException('EXPORT_AI_SOURCE_REQUIRED');
+        $this->withAiFence($task, 'failure', function () use ($tenantId, $taskNo): void {
+            Db::name(self::TABLE)->where('tenant_id', $tenantId)->where('task_no', $taskNo)
+                ->where('source_type', 'AI')->where('status', 'succeeded')
+                ->update(['status'=>'failed','error_reason'=>'AI_EXPORT_CONTENT_MISMATCH','updated_at'=>time()]);
         });
     }
 

@@ -108,7 +108,7 @@ fi
 docker rm -f mohe-app mohe-nginx \
   mohe-platform-app mohe-platform-nginx \
   mohe-cashier-app mohe-cashier-nginx mohe-cashier-api \
-  mohe-ai-execution-worker mohe-ai-supervisor >/dev/null 2>&1 || true
+  mohe-ai-execution-worker mohe-ai-export-worker mohe-ai-supervisor >/dev/null 2>&1 || true
 
 # 使用预构建镜像 mohe-app:local（含 gd，登录验证码需要）；没有则先构建
 if ! docker image inspect mohe-app:local >/dev/null 2>&1; then
@@ -167,6 +167,18 @@ docker run -d --name mohe-ai-execution-worker $APP_PLATFORM --network mohe-net \
   -w /var/www/html \
   --entrypoint /bin/sh \
   mohe-app:local -lc 'exec php think mohe-ai:execution-worker --sleep=1'
+
+# Excel runs after the answer on an instance-specific Redis queue. Resolve
+# its name from this backend config and keep its consumer restartable; a
+# missing consumer must not leave a misleading enabled export option.
+AI_EXPORT_QUEUE=$(docker exec -w /var/www/html mohe-platform-app php -r 'require "vendor/autoload.php"; $app=new think\App(); $app->initialize(); echo app\jobs\query\AiUnifiedQueryExportJob::queueName();')
+[[ "$AI_EXPORT_QUEUE" =~ ^MOHE_PRO_AI_EXPORT:[a-f0-9]{32}$ ]] || { echo '无法确定本地魔核 AI Excel 队列' >&2; exit 2; }
+docker run -d --name mohe-ai-export-worker $APP_PLATFORM --network mohe-net \
+  --restart unless-stopped \
+  -v "$PROJECT:/var/www/html" \
+  -w /var/www/html \
+  --entrypoint /bin/sh \
+  mohe-app:local -lc "exec php think queue:work --queue='$AI_EXPORT_QUEUE' --timeout=245 --memory=512 --sleep=1 --tries=1 -q"
 
 docker run -d --name mohe-ai-supervisor $APP_PLATFORM --network mohe-net \
   --restart unless-stopped \

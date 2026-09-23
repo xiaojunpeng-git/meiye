@@ -95,8 +95,9 @@ $check(is_string($entry) && strpos($entry,'v-if="activeQuestion.length > 0"')!==
     && strpos($entry,':scroll-into-view="messageAnchor"')!==false,
     'a newly submitted customer question is rendered immediately and brought into view instead of waiting for the final answer');
 $check(is_string($entry) && strpos($entry,'},1000)')!==false
-    && strpos($entry,'},1500)')===false,
-    'the mobile status observer has the same one-second terminal-state polling cadence as the browser entry');
+    && strpos($entry,"'/export-status'")!==false
+    && strpos($entry,'},1500)')!==false,
+    'the mobile answer keeps its one-second observer while the separate Excel task polls less often');
 $check(is_string($entry) && strpos($entry,"'/delivery'")!==false
     && strpos($entry,'client_elapsed_ms:elapsed')!==false
     && strpos($entry,'Math.min(300000,Math.max(0,Date.now() - startedAt))')!==false,
@@ -139,7 +140,7 @@ $check(is_string($entry) && strpos($entry,'function ownsActiveRecord()')!==false
     && strpos($entry,'function mayWriteActiveRecord(claim : boolean = false,replaceResolved : boolean = false)')!==false
     && strpos($entry,'persistActive(retired : boolean = false,claim : boolean = false,replaceResolved : boolean = false)')!==false
     && strpos($entry,'clearActive(force : boolean = false)')!==false
-    && strpos($entry,'onUnmounted(() => { lifecycle++; persistActive(true)')!==false
+    && strpos($entry,'onUnmounted(() => { lifecycle++; exportLifecycle++; persistActive(true)')!==false
     && strpos($entry,'onUnmounted(() => { cancelRun()')===false,
     'page navigation preserves only the owning component’s Run and does not turn component disposal into a customer cancellation');
 $check(is_string($entry) && strpos($entry,'let isNewRequest = pending == null')!==false

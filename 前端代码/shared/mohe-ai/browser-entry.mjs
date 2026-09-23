@@ -51,7 +51,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   style.textContent += '[hidden]{display:none!important}';
   root.appendChild(style);
   const el = (tag, text, cls) => { const n = documentRef.createElement(tag); if (text != null) n.textContent = String(text); if (cls) n.className = cls; return n; };
-  let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, elapsedTimer, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, workspaceTitle = null, workspaceHistory = null, workspaceCancel = null, readingRunway = null, activeRunStatus = null;
+  let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, elapsedTimer, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, workspaceTitle = null, workspaceHistory = null, workspaceCancel = null, readingRunway = null, activeRunStatus = null, exportRequested = false;
   let clientSession = newId(); const entry = el('button', entryIconUrl ? null : '魔核 AI', entryIconUrl ? 'entry entry--icon' : 'entry');
   entry.type = 'button'; entry.setAttribute('aria-label', '打开魔核 AI 工作台');
   if (entryIconUrl) { const icon = documentRef.createElement('img'); icon.className = 'entry-icon'; icon.src = entryIconUrl; icon.alt = ''; entry.appendChild(icon); }
@@ -409,6 +409,36 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     if (live && answer.export && answer.export.file_ref && run && isTerminal(run.status)) { const source = { ...run }; const download = el('button', '下载 Excel'); download.onclick = async () => { download.disabled = true; try { const blob = await request('GET', '/runs/' + encodeURIComponent(source.run_id) + '/export', { client_session_id: clientSession, run_delivery_token: source.run_delivery_token, generation: source.generation }, {binary:true}); const url = URL.createObjectURL(blob); const link = el('a'); link.href = url; link.download = answer.export.filename || '经营数据.xlsx'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); } catch (_) { message('文件暂不可下载，请重新查询。','error'); } finally { download.disabled = false; } }; target.appendChild(download); }
   }
   function binding() { return { client_session_id: clientSession, run_delivery_token: run.run_delivery_token, generation: run.generation }; }
+  // An Excel receipt belongs to one completed answer, not to the mutable
+  // current Run. Polling it must never hold the composer or delay the answer.
+  function startIndependentExport(source, target) {
+    if (!target || !source?.run_delivery_token) return;
+    const proof = { client_session_id: clientSession, run_delivery_token: source.run_delivery_token, generation: source.generation };
+    const card = el('div', 'Excel 正在排队…', 'card muted'); target.appendChild(card);
+    const path = '/runs/' + encodeURIComponent(source.run_id);
+    const updateFile = receipt => {
+      if (disposed || !card.isConnected) return;
+      if (receipt.status === 'succeeded') {
+        card.textContent = 'Excel 已生成。';
+        const download = el('button', '下载 Excel');
+        download.onclick = async () => { download.disabled = true; try {
+          const blob = await request('GET', path + '/export', proof, { binary:true });
+          const url = URL.createObjectURL(blob), link = el('a'); link.href = url;
+          link.download = receipt.filename || '经营数据.xlsx'; link.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (_) { message('文件暂不可下载，请重试。', 'error', card); }
+        finally { download.disabled = false; } };
+        card.appendChild(download); return;
+      }
+      if (['failed','cancelled','expired'].includes(receipt.status)) { card.textContent = 'Excel 生成失败，问答结果不受影响。'; return; }
+      card.textContent = receipt.status === 'running' ? 'Excel 正在生成…' : 'Excel 正在排队…';
+      setTimeout(async () => { if (disposed || !card.isConnected) return;
+        try { updateFile(await request('GET', path + '/export-status', proof)); }
+        catch (_) { card.textContent = 'Excel 状态暂不可用，请稍后重试。'; }
+      }, 1500);
+    };
+    request('POST', path + '/export', proof).then(updateFile).catch(() => { if (card.isConnected) card.textContent = 'Excel 暂无法生成，问答结果不受影响。'; });
+  }
   // The create response is authoritative for that specific Run. Bootstrap is
   // only a capability snapshot and can change while a request is in flight.
   function needsCompatibilityExecution(value) { return value && (value.execution_mode === 'compatibility' || (value.execution_mode == null && boot.async_execution !== true)); }
@@ -428,7 +458,10 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         const deliveredQuestion = ensureQuestionVisible();
         const elapsedSeconds = completedElapsedSeconds();
         finishActiveRunStatus(); appendCompletedElapsed(activeConversationTurn(), elapsedSeconds);
-        renderAnswer(run.answer, true, activeConversationTurn() || body);
+        const answerTurn = activeConversationTurn() || body;
+        renderAnswer(run.answer, true, answerTurn);
+        if (exportRequested && run.status === 'COMPLETED') startIndependentExport({ ...run }, answerTurn);
+        exportRequested = false;
         reportVisibleDeliveryAfterPaint(run);
         const text = run.answer.summary || (run.answer.cards || []).map(c => `${c.metric_name}：${c.display_value}${c.unit || ''}`).join('\n');
         try { sessions.append(conversation, deliveredQuestion, text, run.answer, run, { elapsedSeconds }); } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error', activeConversationTurn() || body); }
@@ -623,8 +656,11 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       // so it honestly covers every visible wait before a first answer.
       if (!clientDeliveryStartedAt) clientDeliveryStartedAt = Date.now();
       showActiveQuestion(); activeGuidanceSchema = boot.guidance_schema_version || null;
+      // Keep the question on the screen-only path; the selected Excel file is
+      // requested only after the answer has been published and shown.
+      exportRequested = format.value === 'screen_and_xlsx';
       pendingCreate = { client_request_id: newId(), conversation_id: conversation, client_session_id: clientSession,
-        window_token: boot.window_token, question, history: sessions.history(conversation), output_format: format.value };
+        window_token: boot.window_token, question, history: sessions.history(conversation), output_format: 'screen' };
       if (activeGuidanceSchema === GUIDANCE_SCHEMA) pendingCreate.guidance_schema_version = GUIDANCE_SCHEMA;
       const contextRef = sessions.contextRef(conversation); if (contextRef) pendingCreate.context_ref = contextRef;
       // The workspace header is customer-facing context, so show the actual

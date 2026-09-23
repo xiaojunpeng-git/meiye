@@ -107,6 +107,8 @@ final class AiGatewayServices
             'execute'=>['client_request_id','conversation_id','client_session_id','window_token','question','history','output_format','generation','run_delivery_token','guidance_schema_version','context_ref'],
             'status'=>['client_session_id','generation','run_delivery_token'], 'delivery'=>['client_session_id','generation','run_delivery_token','client_elapsed_ms'], 'cancel'=>['client_session_id','generation','run_delivery_token'],
             'export'=>['client_session_id','generation','run_delivery_token'],
+            'export_create'=>['client_session_id','generation','run_delivery_token'],
+            'export_status'=>['client_session_id','generation','run_delivery_token'],
             'clarify'=>['client_session_id','generation','run_delivery_token','clarification_id','choices','schema_version','step_revision','intent_revision','client_submission_id','revise_clarification_id'],
             'config_get'=>[], 'config_save'=>['version','enabled','model','api_key','external_processing_authorized','external_scope_version'], 'config_check'=>['confirm_cost'],
             'management_get'=>[], 'management_save'=>['expected_revision','document'], 'management_validate'=>['expected_revision'],
@@ -232,6 +234,14 @@ final class AiGatewayServices
             $descriptor=$this->exportRuntime()->download($context,$owner,$this->runs->get($owner,$runId,$generation));
             $path=(new \app\services\query\UnifiedQueryExportStorage())->absolutePath($descriptor['storageKey']);
             return download($path,$descriptor['fileName'])->header(['Cache-Control'=>'no-store','X-Content-Type-Options'=>'nosniff']);
+        }
+        if ($operation==='export_create' || $operation==='export_status') {
+            // The answer Run is already final. File creation uses its verified
+            // evidence and a separate task lifecycle, never a second question.
+            $answered=$this->runs->get($owner,$runId,$generation);
+            return $operation==='export_create'
+                ? $this->exportRuntime()->queueCompleted($context,$owner,$answered)
+                : $this->exportRuntime()->statusCompleted($context,$owner,$answered);
         }
         if (!in_array($operation,['execute','clarify'],true)) throw new RuntimeException('AI_OPERATION_INVALID');
         if ($this->asyncExecutionReady()) {
