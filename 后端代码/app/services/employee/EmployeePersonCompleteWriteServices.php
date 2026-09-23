@@ -18,7 +18,10 @@ class EmployeePersonCompleteWriteServices extends BaseServices
 {
     public const ACTION = 'employee_person_complete_save';
     public const ACTION_DEFAULT_INTERNAL = 'employee_employment_type_default_internal';
+    public const ACTION_EDUCATION = 'employee_education_update';
     public const FAIL_INJECT_FLAG = 'ALLOW_PERSON_WRITE_FAIL_INJECT';
+    /** 学历只接受产品确认的六档；空串表示尚未填写，不自动推断。 */
+    public const EDUCATION_LEVELS = ['本科以上', '本科', '大专', '高中', '高中以下', '其他'];
 
     /**
      * @return array{msg:string,data:array,replay:bool}
@@ -43,6 +46,26 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             if ($source === 'hq') {
                 $typeAuthority->assertManagePermission($adminInfo);
             }
+        }
+
+        $educationPresent = array_key_exists('education', $input);
+        if ($educationPresent !== array_key_exists('education_version', $input)) {
+            throw new AdminException('学历与版本必须同时提交');
+        }
+        if ($educationPresent) {
+            if ($source !== 'hq') {
+                throw new AdminException('仅平台端可维护员工学历');
+            }
+            $education = trim((string)$input['education']);
+            if ($education !== '' && !in_array($education, self::EDUCATION_LEVELS, true)) {
+                throw new AdminException('请选择有效的学历');
+            }
+            // 版本零是新员工首次填写的合法期望版本，必须与无效值区分。
+            if (filter_var($input['education_version'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]) === false) {
+                throw new AdminException('学历版本无效');
+            }
+            $input['education'] = $education;
+            $input['education_version'] = (int)$input['education_version'];
         }
 
         $employeeIdHint = (int)($input['employee_id'] ?? 0);
@@ -120,6 +143,9 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'employment_type_present' => $typeCodePresent ? 1 : 0,
             'employment_type_code' => $employmentTypeCode,
             'employment_type_version' => $employmentTypeVersion,
+            'education_present' => $educationPresent ? 1 : 0,
+            'education' => $educationPresent ? $input['education'] : null,
+            'education_version' => $educationPresent ? $input['education_version'] : null,
         ];
 
         if (empty($requestCtx['body_token']) && isset($input['request_token'])) {
@@ -363,6 +389,8 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 ? (int)($staff['cashier_craftsman_enabled'] ?? 1) : 1,
             'is_fencheng' => $staff ? (int)($staff['is_fencheng'] ?? 0) : 0,
             'status' => (int)($emp['status'] ?? 1),
+            'education' => (string)($emp['education'] ?? ''),
+            'education_version' => (int)($emp['education_version'] ?? 0),
         ];
         $craftsmanType = $staff
             ? (string)($staff['craftsman_performance_type'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION)
@@ -513,6 +541,20 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         // 新建任职时若按手机号命中既有员工主档，人员类型属于该主档，不能拿
         // “新员工”表单默认的版本 0 覆盖或触发其乐观锁冲突。
         $reusedExistingEmployee = $employeeIdHint <= 0 && !empty($employeeUpsert['reused_existing']);
+        if (array_key_exists('education', $input)) {
+            if ($reusedExistingEmployee) {
+                // 新任职按手机号复用既有主档时，不能以新建表单的版本零覆盖该人的学历。
+                throw new AdminException('该手机号已有员工档案，请从员工编辑页设置学历');
+            }
+            $educationOut = $this->saveEducationInTx(
+                $employeeId,
+                (string)$input['education'],
+                (int)$input['education_version'],
+                $opCtx
+            );
+        } else {
+            $educationOut = null;
+        }
 
         // 2) organization_employee
         $this->maybeFail('org_employee', $input);
@@ -771,6 +813,10 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 : ($this->hasEmployeeMobileAuthTable()
                     && (int)Db::name('employee_mobile_auth')->where('employee_id', $employeeId)->where('is_del', 0)->where('status', 1)->count() > 0 ? 1 : 0),
             'auth_version' => (int)($authProjection['auth_version'] ?? 0),
+            'education' => $educationOut !== null ? $educationOut['education']
+                : (string)Db::name('employee')->where('id', $employeeId)->value('education'),
+            'education_version' => $educationOut !== null ? $educationOut['education_version']
+                : (int)Db::name('employee')->where('id', $employeeId)->value('education_version'),
         ];
         $out = array_merge($out, app()->make(EmployeeCraftsmanPerformanceTypeServices::class)
             ->project((string)($out['craftsman_performance_type'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION)));
@@ -806,6 +852,47 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         ]);
 
         return $out;
+    }
+
+    /**
+     * 员工学历是当前主档属性，不是经营事实；版本校验和变更审计与人员完整保存共用事务。
+     * 相同值不生成新版本，旧客户端未提交学历时也不会改变该字段。
+     */
+    protected function saveEducationInTx(int $employeeId, string $education, int $expectedVersion, array $opCtx): array
+    {
+        $current = Db::name('employee')->where('id', $employeeId)->where('is_del', 0)
+            ->field('education,education_version')->lock(true)->find();
+        if (!$current || (int)$current['education_version'] !== $expectedVersion) {
+            throw new AdminException('学历已被其他人修改，请刷新员工档案后重试');
+        }
+        $before = (string)$current['education'];
+        if ($before === $education) {
+            return ['education' => $before, 'education_version' => $expectedVersion];
+        }
+        $nextVersion = $expectedVersion + 1;
+        $updated = Db::name('employee')->where('id', $employeeId)->where('is_del', 0)
+            ->where('education_version', $expectedVersion)
+            ->update(['education' => $education, 'education_version' => $nextVersion, 'update_time' => time()]);
+        if ($updated !== 1) {
+            throw new AdminException('学历已被其他人修改，请刷新员工档案后重试');
+        }
+        Db::name('employee_change_log')->insert([
+            'employee_id' => $employeeId,
+            'action' => self::ACTION_EDUCATION,
+            'target_type' => 'employee',
+            'target_id' => $employeeId,
+            'source' => 'admin',
+            'before_data' => json_encode(['education' => $before, 'education_version' => $expectedVersion], JSON_UNESCAPED_UNICODE),
+            'after_data' => json_encode(['education' => $education, 'education_version' => $nextVersion], JSON_UNESCAPED_UNICODE),
+            'reason' => '更新员工学历',
+            'operator_type' => 'admin',
+            'operator_id' => (int)($opCtx['operator_id'] ?? 0),
+            'operator_name' => (string)($opCtx['operator_name'] ?? ''),
+            'operator_ip' => (string)($opCtx['operator_ip'] ?? ''),
+            'request_id' => (string)($opCtx['request_id'] ?? ''),
+            'add_time' => time(),
+        ]);
+        return ['education' => $education, 'education_version' => $nextVersion];
     }
 
     private function hasEmployeeMobileAuthTable(): bool

@@ -68,7 +68,7 @@ final class EmployeeDashboardServices
             ->leftJoin('position p', 'p.id=jp.position_id AND p.status=1')
             ->whereIn('ss.store_id', $stores)->where('ss.status', 1)->where('ss.is_del', 0)
             ->where('e.status', 1)->where('e.is_del', 0)
-            ->field('ss.id staff_id,MAX(ss.store_id) store_id,MAX(ss.employee_id) employee_id,MAX(ss.cashier_craftsman_enabled) cashier_craftsman_enabled,MAX(e.name) name,MAX(ss.age) age,MAX(ss.birthday_date) birthday,MAX(ss.join_date) entry_time,MAX(p.name) position_name')
+            ->field('ss.id staff_id,MAX(ss.store_id) store_id,MAX(ss.employee_id) employee_id,MAX(ss.cashier_craftsman_enabled) cashier_craftsman_enabled,MAX(e.name) name,MAX(e.education) education,MAX(ss.age) age,MAX(ss.birthday_date) birthday,MAX(ss.join_date) entry_time,MAX(p.name) position_name')
             ->group('ss.id')->order('ss.id', 'asc');
         if ($role !== '' && $role !== '全部岗位') $q->whereLike('p.name', '%' . $role . '%');
         return $q->select()->toArray();
@@ -83,12 +83,13 @@ final class EmployeeDashboardServices
         }
         $staff = array_values($unique ?: $staff);
         $now = strtotime($end . ' 23:59:59') ?: time();
-        $total = count($staff); $ages = ['18-25岁'=>0,'26-35岁'=>0,'36-45岁'=>0,'46-55岁'=>0,'56岁以上'=>0]; $tenure = ['1年以内'=>0,'1-3年'=>0,'3-5年'=>0,'5-10年'=>0,'10年以上'=>0]; $edu = ['本科'=>0,'大专'=>0,'高中及以下'=>0,'其他'=>0];
+        // 学历与员工编辑页共用六档；历史未填写归入“其他”，保证分布合计等于当前员工数。
+        $total = count($staff); $ages = ['18-25岁'=>0,'26-35岁'=>0,'36-45岁'=>0,'46-55岁'=>0,'56岁以上'=>0]; $tenure = ['1年以内'=>0,'1-3年'=>0,'3-5年'=>0,'5-10年'=>0,'10年以上'=>0]; $edu = ['本科以上'=>0,'本科'=>0,'大专'=>0,'高中'=>0,'高中以下'=>0,'其他'=>0];
         $ageSum = 0; $tenureSum = 0;
         foreach ($staff as $row) {
             $birthday = $this->timestamp($row['birthday'] ?? 0); $storedAge = (int)($row['age'] ?? 0); if ($storedAge > 0) { $age = $storedAge; $bucket = $age<=25?'18-25岁':($age<=35?'26-35岁':($age<=45?'36-45岁':($age<=55?'46-55岁':'56岁以上'))); $ages[$bucket]++; $ageSum += $age; } elseif ($birthday > 0) { $age = max(0, (int)date('Y',$now)-(int)date('Y',$birthday) - (date('md',$now)<date('md',$birthday)?1:0)); if ($age < 18) $age = 18; $bucket = $age<=25?'18-25岁':($age<=35?'26-35岁':($age<=45?'36-45岁':($age<=55?'46-55岁':'56岁以上'))); $ages[$bucket]++; $ageSum += $age; }
             $entry = $this->timestamp($row['entry_time'] ?? 0); if ($entry > 0) { $years = max(0, ($now-$entry)/31557600); $bucket = $years<1?'1年以内':($years<3?'1-3年':($years<5?'3-5年':($years<10?'5-10年':'10年以上'))); $tenure[$bucket]++; $tenureSum += $years; }
-            $education = trim((string)($row['education'] ?? '')); $edu[$education !== '' && isset($edu[$education]) ? $education : (str_contains($education,'本')?'本科':(str_contains($education,'专')?'大专':'其他'))]++;
+            $education = trim((string)($row['education'] ?? '')); $edu[isset($edu[$education]) ? $education : '其他']++;
         }
         return ['cards' => [
             $this->card('total','员工总人数',$total,'人','在职且启用员工档案统计','blue'), $this->card('average_age','平均年龄',$total?round($ageSum/$total,1):null,'岁','有生日资料员工按查询截止日计算','green'), $this->card('average_tenure','平均工龄',$total?round($tenureSum/$total,1):null,'年','有入职日期员工按查询截止日计算','teal'), $this->card('active_staff','在职人数',$total,'人','当前权限范围内有效门店任职统计','purple'), $this->card('beautician_count', '美容师人数', count(array_filter($staff, fn($r)=>(int)($r['cashier_craftsman_enabled']??0)===1)), '人','启用美容师能力的有效任职统计','amber'), $this->card('departures','期间流失人数',0,'人','员工离职事实接入后按离职日期统计','red')], 'education'=>$this->rows($edu), 'ages'=>$this->rows($ages), 'tenure'=>$this->rows($tenure)];
@@ -129,7 +130,7 @@ final class EmployeeDashboardServices
     private function sumPerformance(array $stores,array $range,string $metric): int { return (new \app\services\query\metric\RegisteredMetricReadServices())->summary($metric,'0',$stores,$range); }
     private function card(string $key,string $label,$value,string $unit,string $source,string $tone): array { return ['key'=>$key,'label'=>$label,'value'=>$value,'unit'=>$unit,'source'=>$source,'tone'=>$tone]; }
     private function registeredCard(string $key,string $metricCode,$value,string $unit,string $tone,string $contextLabel='',?int $valueCents=null): array { $definition=(new \app\services\metric\MetricDictionaryServices())->getTooltip($metricCode);if(($definition['user_ready']??false)!==true)throw new \RuntimeException('EMPLOYEE_METRIC_DICTIONARY_NOT_READY');$card=$this->card($key,$contextLabel!==''?$contextLabel:(string)$definition['name'],$value,$unit,(string)$definition['summary'],$tone);if($valueCents!==null)$card['value_cents']=$valueCents;return $card; }
-    private function rows(array $values): array { $colors=['#3984ad','#3f9c92','#d29b45','#7a6ca8','#bb6d57'];$i=0;$out=[];foreach($values as $label=>$value)$out[]=['label'=>$label,'value'=>(int)$value,'color'=>$colors[$i++%count($colors)]];return $out; }
+    private function rows(array $values): array { $colors=['#3984ad','#3f9c92','#d29b45','#7a6ca8','#bb6d57','#6283a1'];$i=0;$out=[];foreach($values as $label=>$value)$out[]=['label'=>$label,'value'=>(int)$value,'color'=>$colors[$i++%count($colors)]];return $out; }
     private function months(array $range): array { $out=[];$cursor=date('Y-m-01',strtotime($range['start']));$end=date('Y-m-01',strtotime($range['end']));while($cursor<=$end){$out[]=$cursor;$cursor=date('Y-m-01',strtotime($cursor.' +1 month'));}return $out; }
     private function timestamp($value): int { if(is_numeric($value)){ $v=(int)$value; return $v>1000000000?$v:0; } return strtotime((string)$value)?:0; }
 }

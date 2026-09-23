@@ -276,6 +276,18 @@
           <TabPane label="其他信息" name="other">
             <Row :gutter="24">
               <Col :span="12">
+                <FormItem label="学历：">
+                  <Select v-model="formInline.education" clearable transfer :disabled="editId > 0 && !educationLoaded" :placeholder="editId > 0 && !detailLoaded ? '学历资料加载中…' : '请选择学历（可不填）'">
+                    <Option v-for="level in educationOptions" :key="level" :value="level">{{ level }}</Option>
+                  </Select>
+                  <!-- 详情未完成时暂不编辑以保护旧值；只有请求结束仍无版本才提示真正的读取失败。 -->
+                  <div v-if="editId > 0 && !detailLoaded" class="form-tip">正在读取员工学历，读取完成后即可选择。</div>
+                  <div v-else-if="editId > 0 && !educationLoaded" class="form-tip scope-warn">学历资料未读取成功，请关闭后重新打开；本次不会覆盖原值。</div>
+                </FormItem>
+              </Col>
+            </Row>
+            <Row :gutter="24">
+              <Col :span="12">
                 <FormItem label="关联企微：">
                   <Select v-model="formInline.work_member_id" clearable filterable transfer placeholder="请选择企微员工">
                     <Option v-for="item in workList" :value="item.value" :key="item.value">{{ item.label }}</Option>
@@ -583,6 +595,8 @@ function getDefaultStaffForm() {
     salary_status: 1,
     department: '',
     employee_number: '',
+    education: '',
+    education_version: 0,
     join_date: '',
     id_card: '',
     birthday_date: '',
@@ -657,6 +671,9 @@ export default {
       submitting: false,
       detailLoaded: false,
       employmentTypeLoaded: true,
+      /** 编辑时必须读到学历版本，防止详情降级后用空值覆盖主档。 */
+      educationLoaded: true,
+      educationOptions: ['本科以上', '本科', '大专', '高中', '高中以下', '其他'],
       /** 编辑人员时必须由完整详情回显授权状态，防止读取失败后误撤权。 */
       mobileAuthLoaded: true,
       /** 新建人员自动默认值只应用一次，员工手工关闭后不再被岗位选择覆盖。 */
@@ -876,6 +893,7 @@ export default {
       this.appointmentStorePickerLabel = '';
       this.formInline = this.getDefaultForm();
       this.employmentTypeLoaded = !(Number(this.editId) > 0);
+      this.educationLoaded = !(Number(this.editId) > 0);
       this.mobileAuthLoaded = !(Number(this.editId) > 0);
       this.mobileEnabledTouched = false;
       this.$nextTick(() => {
@@ -1005,6 +1023,9 @@ export default {
       const employmentTypeLoaded = !!(data
         && Object.prototype.hasOwnProperty.call(data, 'employment_type_code')
         && Object.prototype.hasOwnProperty.call(data, 'employment_type_version'));
+      const educationLoaded = !!(data
+        && Object.prototype.hasOwnProperty.call(data, 'education')
+        && Object.prototype.hasOwnProperty.call(data, 'education_version'));
       const mobileAuthLoaded = !!(data
         && Object.prototype.hasOwnProperty.call(data, 'mobile_enabled'));
       this.formInline = {
@@ -1046,6 +1067,8 @@ export default {
         employment_type_version: employmentTypeLoaded
           ? Number(data.employment_type_version || 0)
           : 0,
+        education: educationLoaded ? String(data.education || '') : '',
+        education_version: educationLoaded ? Number(data.education_version || 0) : 0,
         status: Number((data && data.status) != null ? data.status : base.status),
       };
       const selectedOrganization = this.organizationMemberships
@@ -1058,6 +1081,7 @@ export default {
       this.appointmentStorePickerIds = storeId > 0 ? [storeId] : [];
       this.appointmentStorePickerLabel = String((data && data.store_name) || '').trim();
       this.employmentTypeLoaded = employmentTypeLoaded;
+      this.educationLoaded = educationLoaded;
       this.mobileAuthLoaded = mobileAuthLoaded;
       this.mobileEnabledTouched = false;
       this.positionIdsTouched = false;
@@ -1315,6 +1339,14 @@ export default {
       } else {
         delete payload.employment_type_code;
         delete payload.employment_type_version;
+      }
+      // 新建空值无需写入；编辑仅在读到权威版本后提交，允许显式清空已填学历。
+      if (Number(this.editId) > 0 ? this.educationLoaded : !!String(this.formInline.education || '').trim()) {
+        payload.education = String(this.formInline.education || '').trim();
+        payload.education_version = Number(this.formInline.education_version || 0);
+      } else {
+        delete payload.education;
+        delete payload.education_version;
       }
       payload.request_token = newRequestToken();
       return payload;

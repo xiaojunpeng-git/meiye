@@ -641,6 +641,12 @@ class SystemStoreStaff extends AuthController
                 $input[$k] = $raw[$k];
             }
         }
+        // 学历属于统一员工主档；只转发显式提交的值与版本，避免旧客户端保存时清空它。
+        foreach (['education', 'education_version'] as $k) {
+            if (array_key_exists($k, $raw)) {
+                $input[$k] = $raw[$k];
+            }
+        }
         if (array_key_exists('mobile_enabled', $raw)) {
             $input['mobile_enabled'] = (int)$raw['mobile_enabled'] === 1 ? 1 : 0;
         }
