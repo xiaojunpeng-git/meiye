@@ -479,7 +479,7 @@ class StoreUnifiedReportServices extends BaseServices
                 $row['item_analysis_' . $metric . '_cumulative'] = '0';
             }
             foreach ($definitions as $definition) {
-                foreach (['cash', 'share', 'consume'] as $metric) {
+                foreach (['cash', 'after_split', 'consume'] as $metric) {
                     $row[$definition['key'] . '_' . $metric] = '0';
                 }
             }
@@ -502,7 +502,7 @@ class StoreUnifiedReportServices extends BaseServices
                 if (!isset($definitions[$categoryKey])) continue;
                 $base = $definitions[$categoryKey]['key'];
                 $rows[$storeIdKey][$base . '_cash'] = $this->money((int)$amounts['cash_cents']);
-                $rows[$storeIdKey][$base . '_share'] = $this->money((int)$amounts['share_cents']);
+                $rows[$storeIdKey][$base . '_after_split'] = $this->money($this->itemAnalysisAfterSplitCents($amounts));
                 $rows[$storeIdKey][$base . '_consume'] = $this->money((int)$amounts['consume_cents']);
             }
         }
@@ -547,11 +547,11 @@ class StoreUnifiedReportServices extends BaseServices
             $isUnclassified = (int)$definition['category_id'] === 0;
             $metricExplanations = $isUnclassified ? [
                 ['cash', '现金业绩', '所选日期内已有收款记录，但成交时的分类缺失、已失效或无法对应当前分类的现金业绩；不含余额支付和欠款。'],
-                ['share', '现金分成业绩', '上述未分类现金业绩中，成交时已记录合作方分成的金额；未设置分成时为 0。'],
+                ['after_split', '分成后业绩', '上述未分类现金业绩减去成交时已记录的合作方分成金额；未设置分成时等于现金业绩。'],
                 ['consume', '消耗业绩', '所选日期内完成的服务或核销，其当时记录的项目分类缺失、已失效或无法对应当前分类时，消耗金额留在这里。冲销按发生日扣回；以后改项目分类不会改动历史记录。'],
             ] : [
                 ['cash', '现金业绩', '所选日期内成功收款并记下的现金业绩，按成交时记录的商品或卡内项目分类归入本列；不含余额支付和欠款。'],
-                ['share', '现金分成业绩', '本分类的现金业绩按成交时记录的合作方比例计算；以后修改比例不会重算历史金额。'],
+                ['after_split', '分成后业绩', '本分类现金业绩减去成交时已记录的合作方分成金额；以后修改分类或比例不会重算历史金额。'],
                 ['consume', '消耗业绩', '所选日期内已完成服务或核销的消耗金额，按完成时记录的项目分类归入本列；冲销按发生日扣回，以后改项目分类不会重算历史金额。'],
             ];
             foreach ($metricExplanations as $metric) {
@@ -574,11 +574,15 @@ class StoreUnifiedReportServices extends BaseServices
         }
         foreach ($definitions as $definition) {
             $categoryId = (string)$definition['category_id'];
-            foreach (['cash', 'share', 'consume'] as $metric) {
-                $cents = 0;
-                foreach ($period['categories'] as $categories) $cents += (int)($categories[$categoryId][$metric . '_cents'] ?? 0);
-                $summaryValues[$definition['key'] . '_' . $metric] = $this->money($cents);
+            $categoryTotals = ['cash_cents' => 0, 'share_cents' => 0, 'consume_cents' => 0];
+            foreach ($period['categories'] as $categories) {
+                foreach (array_keys($categoryTotals) as $amountKey) {
+                    $categoryTotals[$amountKey] += (int)($categories[$categoryId][$amountKey] ?? 0);
+                }
             }
+            $summaryValues[$definition['key'] . '_cash'] = $this->money($categoryTotals['cash_cents']);
+            $summaryValues[$definition['key'] . '_after_split'] = $this->money($this->itemAnalysisAfterSplitCents($categoryTotals));
+            $summaryValues[$definition['key'] . '_consume'] = $this->money($categoryTotals['consume_cents']);
         }
         // 固定列的通用默认文案会覆盖本报表写明的业务说明；先填入用户实际
         // 看到的 source_explanation，保证弹窗与导出读到同一段明确文字。
@@ -713,6 +717,15 @@ class StoreUnifiedReportServices extends BaseServices
         if (!isset($categories[$storeId][$category['id']])) {
             $categories[$storeId][$category['id']] = ['label' => $category['label'], 'cash_cents' => 0, 'share_cents' => 0, 'consume_cents' => 0];
         }
+    }
+
+    /**
+     * 分类“分成后业绩”必须复用成交时冻结的现金与合作方分成事实。
+     * 页面、合计和导出都调用这里，避免把分成金额本身误当成经营结果。
+     */
+    private function itemAnalysisAfterSplitCents(array $amounts): int
+    {
+        return (int)($amounts['cash_cents'] ?? 0) - (int)($amounts['share_cents'] ?? 0);
     }
 
     private function metricSourceLineCategoryTotals(string $metricCode, $storeId, array $range, array $input, array $sourceLineIds): array

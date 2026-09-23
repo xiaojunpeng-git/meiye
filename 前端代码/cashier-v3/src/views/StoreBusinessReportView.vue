@@ -465,6 +465,8 @@ function tableHeaderTone(column) {
   const key = String(column?.key || '')
   if (key.startsWith('item_analysis_')) {
     if (key.includes('_share_') || key.endsWith('_share')) return 'partner'
+    // 分类列的分成后业绩是现金减去合作方分成后的经营结果，不再按分成金额着色。
+    if (key.includes('_after_split_') || key.endsWith('_after_split')) return 'result'
     if (key.includes('_actual_')) return 'result'
     if (key.includes('_consume_') || key.endsWith('_consume')) return 'consumption'
     if (key.includes('_cash_') || key.endsWith('_cash')) return 'payment'

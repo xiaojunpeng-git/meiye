@@ -32,10 +32,18 @@ itemAnalysisAssert(
 );
 itemAnalysisAssert(
     str_contains($service, '$this->money($cash - $share)')
-        && str_contains($service, "'现金分成业绩'")
+        && str_contains($service, "['share', '分成业绩'")
         && str_contains($service, '该列不是实际业绩')
         && str_contains($service, 'array_slice($parts, 0, 2)'),
     'after-split performance subtracts share and is not mislabeled as actual performance'
+);
+itemAnalysisAssert(
+    str_contains($service, "['after_split', '分成后业绩'")
+        && str_contains($service, "['cash', 'after_split', 'consume']")
+        && str_contains($service, "_after_split'] = \$this->money(\$this->itemAnalysisAfterSplitCents(")
+        && !str_contains($service, "['share', '现金分成业绩', '本分类")
+        && str_contains($view, "key.includes('_after_split_') || key.endsWith('_after_split')"),
+    'dynamic category result shows cash after frozen partner share, not the share amount itself'
 );
 itemAnalysisAssert(
     str_contains($service, '$definitions = $this->itemAnalysisCategoryDefinitions($storeId);')

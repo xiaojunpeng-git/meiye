@@ -101,6 +101,10 @@ try {
     $definitions = $definitionsMethod->invoke($report, [133]);
     $matchMethod = $reportClass->getMethod('itemAnalysisConfiguredCategory');
     $matchMethod->setAccessible(true);
+    $afterSplitMethod = $reportClass->getMethod('itemAnalysisAfterSplitCents');
+    $afterSplitMethod->setAccessible(true);
+    assertCategoryCheckout($afterSplitMethod->invoke($report, ['cash_cents' => 200000, 'share_cents' => 60000]) === 140000,
+        'category after-split performance subtracts the frozen 600 yuan share from 2000 yuan cash');
     assertCategoryCheckout(isset($definitions['0'])
         && $matchMethod->invoke($report, $definitions, 0, '') === ['id' => '0', 'label' => '未分类']
         && $matchMethod->invoke($report, $definitions, 21560, '') === ['id' => '0', 'label' => '未分类'],
@@ -110,14 +114,18 @@ try {
     $exported = (new StoreUnifiedReportServices())->export([133], $reportInput);
     assertCategoryCheckout(in_array('未分类', array_column($queried['column_groups'], 'label'), true)
         && array_column($queried['columns'], 'key') === array_column($exported['columns'], 'key')
+        && isset($queried['summary_row']['item_analysis_category_0_after_split'])
+        && !isset($queried['summary_row']['item_analysis_category_0_share'])
         && isset($queried['summary_row']['item_analysis_category_0_consume']),
-        'local report query and export both expose the same unclassified amount column');
+        'local report query and export expose the same unclassified cash, after-split and consumption columns');
     // The modal prioritizes source_explanation over logic; test what users
     // actually see, not only the backend's unused fallback field.
     $explanations = array_column($queried['columns'], 'source_explanation', 'key');
     $unclassifiedExplanation = (string)($explanations['item_analysis_category_0_consume'] ?? '');
+    $unclassifiedAfterSplitExplanation = (string)($explanations['item_analysis_category_0_after_split'] ?? '');
     assertCategoryCheckout(str_contains($unclassifiedExplanation, '以后改项目分类不会改动历史记录')
         && str_contains($unclassifiedExplanation, '冲销按发生日扣回')
+        && str_contains($unclassifiedAfterSplitExplanation, '现金业绩减去')
         && str_contains((string)($explanations['item_analysis_consume_today'] ?? ''), '查询结束日当天')
         && str_contains((string)($explanations['store_name'] ?? ''), '当前账号可以查看')
         && !str_contains(implode(' ', $explanations), '口径'),
