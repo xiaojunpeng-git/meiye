@@ -57,6 +57,10 @@ $checks = [
     'current sku locked cost' => strpos($service, "->field('id,product_id,cost,price,ot_price')") !== false
         && strpos($service, "'price_change_below_configured_cost'") !== false
         && strpos($service, '$minimumLineAmountCents') !== false,
+    'exact zero price bypasses cost floor but positive prices do not' => strpos(
+        $service,
+        '$lineAmountCents !== 0 && $lineAmountCents < $minimumLineAmountCents'
+    ) !== false,
     'price change requires whole yuan and rounds cost floor upward' => strpos($service, "'price_change_whole_yuan_required'") !== false
         && strpos($service, '$lineAmountCents % 100 !== 0') !== false
         && strpos($service, 'roundUpToWholeYuan(') !== false,
@@ -86,7 +90,7 @@ $checks = [
         $preparation,
         "'businessDate' => \$supplementEnabled"
     ) !== false
-        && strpos($preparation, "'occurredAt' => \$now") !== false
+        && strpos($preparation, "'occurredAt' => \$snapshotOccurredAt") !== false
         && strpos($preparation, "'orderNote' =>") !== false
         && strpos($preparation, "'configuredCostCents' =>") !== false,
     'ordinary browser business date does not enable supplement audit' => strpos(
@@ -94,7 +98,7 @@ $checks = [
         "\$browserBusinessDate = trim((string)(\$browserSnapshot['businessDate'] ?? ''))"
     ) !== false
         && strpos($preparation, "\$supplementEnabled = true") === false
-        && strpos($preparation, "\$browserBusinessDate !== '' ? \$browserBusinessDate : date('Y-m-d', \$now)") !== false,
+        && strpos($preparation, "\$browserBusinessDate !== '' ? \$browserBusinessDate : date('Y-m-d', \$snapshotOccurredAt)") !== false,
     'checkout request and lines persist full audit' => strpos($kernel, "'orderNote' => \$snapshot['orderNote']") !== false
         && strpos($kernel, "'supplementOperatedAt' => \$snapshot['supplement']['operatedAt']") !== false
         && strpos($kernel, "'configuredCostCents' => \$line['configuredCostCents']") !== false

@@ -171,7 +171,9 @@ final class CashierV3CashierMoreActionServices
         $minimumLineAmountCents = self::roundUpToWholeYuan(
             self::multiply($configuredCostCents, $quantity, 'price_change_cost_overflow')
         );
-        if ($lineAmountCents < $minimumLineAmountCents) {
+        // 0 元代表操作员明确的免费成交，必须保留订单行与改价审计；
+        // 仅对正数成交价继续执行成本下限，不得把 1 分至成本价之间的价格伪装成免费。
+        if ($lineAmountCents !== 0 && $lineAmountCents < $minimumLineAmountCents) {
             $name = trim((string)($product['store_name'] ?? '')) ?: '该商品';
             throw new CashierV3CommandException(
                 CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,

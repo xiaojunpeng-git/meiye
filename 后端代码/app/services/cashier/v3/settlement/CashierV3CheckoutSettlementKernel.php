@@ -765,10 +765,14 @@ final class CashierV3CheckoutSettlementKernel
             }
             $costOverflow = $configuredCost > 0
                 && $quantity > intdiv(PHP_INT_MAX, $configuredCost);
+            // 零元改价仍是可追溯的正式销售；它不产生收款，但必须保留完整改价审计。
+            // 成本下限只限制正数成交价，避免把免费成交误判为低于成本。
+            $positiveSaleBelowCost = $sale !== 0
+                && ($costOverflow || $sale < $configuredCost * $quantity);
             if ($priceChangedAt === 0
                 ? ($priceChangeReason !== '' || $priceChangedBy !== 0 || $priceChangedByName !== '')
                 : ($priceChangeReason === '' || $priceChangedBy <= 0 || $priceChangedByName === ''
-                    || $costOverflow || $sale < $configuredCost * $quantity)) {
+                    || $positiveSaleBelowCost)) {
                 throw self::failure('sale_line_price_audit_invalid', ['authorityKey' => $authorityKey]);
             }
             $categoryId = self::nonNegativeInt($line['categoryIdSnapshot'], 'saleLine.categoryIdSnapshot');

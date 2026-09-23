@@ -896,10 +896,14 @@ final class CashierV3SalesOrderPlanV1
         }
         $costOverflow = $configuredCost > 0
             && $quantity > intdiv(PHP_INT_MAX, $configuredCost);
+        // 订单持久化必须与结账锁定口径一致：精确 0 元可带审计入账，
+        // 其他正数改价仍不得低于锁定成本，防止下游重新改写业务口径。
+        $positiveSaleBelowCost = $sale !== 0
+            && ($costOverflow || $sale < $configuredCost * $quantity);
         if ($priceChangedAt === 0
             ? ($priceChangeReason !== '' || $priceChangedBy !== 0 || $priceChangedByName !== '')
             : ($priceChangeReason === '' || $priceChangedBy <= 0 || $priceChangedByName === ''
-                || $costOverflow || $sale < $configuredCost * $quantity)) {
+                || $positiveSaleBelowCost)) {
             throw self::failure('sales_order_line_price_audit_invalid');
         }
         $categoryId = self::nonNegativeInt(

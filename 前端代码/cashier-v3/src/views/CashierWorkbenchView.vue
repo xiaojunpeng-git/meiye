@@ -4714,8 +4714,9 @@ async function saveMoreActionEditor() {
   } else if (editor.type === 'price-change') {
     const rawAmount = String(moreActionValue.value || '').trim()
     const reason = String(moreActionReason.value || '').trim()
-    if (!/^[1-9]\d*$/.test(rawAmount) || !reason) {
-      moreActionValidationMessage.value = !reason ? '请输入改价原因。' : '改价金额必须为正整数。'
+    // 0 元是明确的免费成交价；仍禁止负数、小数和前导零，避免同一金额出现多种命令表示。
+    if (!/^(?:0|[1-9]\d*)$/.test(rawAmount) || !reason) {
+      moreActionValidationMessage.value = !reason ? '请输入改价原因。' : '改价金额必须为0或正整数。'
       return
     }
     const lineAmountCents = Number(rawAmount) * 100

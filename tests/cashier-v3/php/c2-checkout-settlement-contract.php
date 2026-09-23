@@ -978,6 +978,29 @@ checkoutAssert('audited price change equal to configured cost is accepted',
         );
     }) === '');
 
+$zeroPrice = $snapshot;
+$zeroPrice['saleLines'][0]['discountAmountCents'] = 10000;
+$zeroPrice['saleLines'][0]['saleAmountCents'] = 0;
+$zeroPrice['saleLines'][0]['debtAmountCents'] = 0;
+$zeroPrice['paymentDetails'][0]['amountCents'] = 0;
+$zeroPrice['paymentDetails'][1]['amountCents'] = 0;
+$zeroPrice['balanceDeduction'] = [
+    'authorityKey' => '', 'accountId' => '', 'accountVersion' => 0, 'amountCents' => 0,
+];
+$zeroPrice['debt'] = ['authorityKey' => '', 'policyVersion' => 0, 'amountCents' => 0];
+checkoutResign($zeroPrice);
+$zeroPriceDraft = CashierV3CheckoutSettlementKernel::saveDraft(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 33),
+    $zeroPrice,
+    null,
+    $secret
+);
+checkoutAssert('audited exact-zero price remains a formal sale with no collection',
+    ($zeroPriceDraft['persistencePlan']['request']['salesAmountCents'] ?? null) === 0
+        && ($zeroPriceDraft['persistencePlan']['request']['receivableAmountCents'] ?? null) === 0
+        && ($zeroPriceDraft['persistencePlan']['request']['selectedPaymentAmountCents'] ?? null) === 0
+        && ($zeroPriceDraft['persistencePlan']['lineDrafts'][0]['saleAmountCents'] ?? null) === 0);
+
 $fractionalCents = $snapshot;
 $fractionalCents['saleLines'][0]['saleAmountCents'] = 8901;
 checkoutResign($fractionalCents);
