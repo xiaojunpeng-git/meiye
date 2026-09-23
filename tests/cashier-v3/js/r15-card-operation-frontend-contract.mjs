@@ -47,7 +47,7 @@ assert.match(workbench, /activeCardOperationUpgrade[\s\S]*?line\?\.cardOperation
 assert.match(workbench, /class="cart-line__upgrade-flow"[\s\S]*?sourceCardName[\s\S]*?sourceCardNo[\s\S]*?旧权益抵扣[\s\S]*?本次应收/)
 assert.match(workbench, /balancePaymentAmount: \(Math\.min\([\s\S]*?activeCardOperationUpgrade\.value\.sourceRemainingValueCents[\s\S]*?activeCardOperationUpgrade\.value\.targetPriceCents/)
 assert.match(workbench, /const isAwaitingCustomCardUpgradeTarget = computed\(\(\) => \([\s\S]*?previewCardOperation\.value\.mode === 'card-upgrade'/)
-assert.match(workbench, /if \(!isAwaitingCustomCardUpgradeTarget\.value\) items\.push\(customCardEntry\)/)
+assert.match(workbench, /if \(type === '定制卡'\) \{[\s\S]*?selectCatalogItem\(\{ id: 'custom-card-entry' \}\)/)
 assert.match(workbench, /v-if="isAwaitingCustomCardUpgradeTarget"[\s\S]*?@click="openCustomCardUpgradeTarget"[\s\S]*?新建定制卡/)
 assert.match(workbench, /const isCustomCardUpgradeTarget = expectedTargetKind === '卡项'[\s\S]*?item\.id === 'custom-card-entry'[\s\S]*?const typeMatched = isCustomCardUpgradeTarget[\s\S]*?const categoryMatched = isCustomCardUpgradeTarget/)
 assert.match(workbench, /activeCardOperationUpgrade\.value[\s\S]*?'立即结账'/)

@@ -408,6 +408,12 @@ function selectCategory(category) {
 }
 
 function selectCatalogType(type) {
+  if (type === '定制卡') {
+    // 定制卡是一个独立创建流程，不是需要再选商品的目录分类。
+    // 点击类型即进入创建；已有购物车内容时由同一入口执行隔离保护。
+    selectCatalogItem({ id: 'custom-card-entry' })
+    return
+  }
   if (type === '卡项' && currentCustomerMode.value === 'guest') {
     window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
       detail: { status: 'error', message: '游客无法选择卡项，请选择会员。' }
@@ -420,10 +426,6 @@ function selectCatalogType(type) {
 const filteredCatalogItems = computed(() => {
   const normalizedKeyword = keyword.value.trim().toLocaleLowerCase()
   const items = Array.isArray(catalog.value.items) ? [...catalog.value.items] : []
-  // 定制卡是收银内的配置入口，不依赖某一条演示商品或 URL 参数。
-  const customCardEntry = { id: 'custom-card-entry', name: '新建定制卡', kind: '定制卡', category: '全部', price: 0 }
-  // 卡升级选择目标卡时，入口在“卡项”按钮旁显示，不能伪装成商品卡片。
-  if (!isAwaitingCustomCardUpgradeTarget.value) items.push(customCardEntry)
 
   return items.filter((item) => {
     const expectedTargetKind = previewCardOperation.value?.awaitingTarget
@@ -1910,6 +1912,8 @@ async function selectCatalogItem(item) {
   if (item.id === 'custom-card-entry' && !(previewCardOperation.value?.mode === 'card-upgrade' && previewCardOperation.value?.awaitingTarget)) {
     if (hasCartLines.value) isCustomCardConflictOpen.value = true
     else if (currentCustomerMode.value === 'guest') {
+      // 选中会员后必须续接本次定制卡意图，不能退回普通收银目录。
+      pendingCustomCardEntry.value = true
       window.dispatchEvent(new CustomEvent('cashier-v3:open-member-selector', {
         detail: { context: 'cashier', selectorContext: 'cashier' }
       }))
@@ -4606,9 +4610,14 @@ async function appendMultiCardUpgradeCustomTarget(operation = {}, payload = {}, 
   return localDraftResult('定制目标卡已加入本次购物车。')
 }
 
-function continueCustomCard() {
+async function continueCustomCard() {
+  // 后端禁止定制卡与普通商品混合结账。必须先通过收银台的唯一清空命令
+  // 提交本地草稿，成功后才能进入创建页，避免只关弹窗造成旧行残留。
+  const cleared = await confirmClearCart()
+  if (!['success', 'succeeded'].includes(resultStatus(cleared))) return cleared
   isCustomCardConflictOpen.value = false
   guidedBusinessMode.value = 'custom-card'
+  return cleared
 }
 
 function handleMemberSelectorClosedForEntitlement(event = {}) {
@@ -6616,7 +6625,9 @@ watch(
       return
     }
     const businessScopeChanged = true
-    const preservePending = shouldPreservePendingEntitlementSelector({
+    // 会员选择会改变收银业务范围，但这次变化本身就是定制卡/权益
+    // 入口的必要步骤；不能把触发选会员的原始意图当成过期上下文清掉。
+    const preservePending = pendingCustomCardEntry.value || shouldPreservePendingEntitlementSelector({
       pending: pendingEntitlementSelector.value,
       current,
       previous
@@ -7539,8 +7550,7 @@ onBeforeUnmount(() => {
           <span>定制卡不能与其他商品同时结账，请先处理当前订单。</span>
           <footer>
             <button type="button" class="button button--secondary" @click="isCustomCardConflictOpen = false">取消</button>
-            <button type="button" class="button button--secondary" @click="isCustomCardConflictOpen = false; openHangOrder()">先挂当前订单</button>
-            <button type="button" class="button button--primary" @click="continueCustomCard">清空并继续</button>
+            <button type="button" class="button button--primary" :disabled="isClearingCart" @click="continueCustomCard">清空并继续</button>
           </footer>
         </div>
       </div>
