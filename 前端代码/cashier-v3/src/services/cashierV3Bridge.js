@@ -3741,8 +3741,18 @@ export async function requestCashierV3Action(action, payload = {}) {
     if (!silent) emitCashierV3UiResult(invalidPreparationRequest)
     return invalidPreparationRequest
   }
-  const serverDiscoverableContextAction = ['void-order-center-supplement', 'void-service-record'].includes(canonicalAction)
-    || ['void-order-center-supplement', 'void-service-record'].includes(action)
+  // 作废和结账后预约收口都以服务端权威单据反查实际作用集合：
+  // 浏览器不得伪造或遗漏某条预约 context，因此这些命令允许空 contexts，
+  // 再由领域事务锁定销售订单及候选预约。
+  const serverDiscoverableContextAction = [
+    'void-order-center-supplement',
+    'void-service-record',
+    'complete-checkout-reservations'
+  ].includes(canonicalAction) || [
+    'void-order-center-supplement',
+    'void-service-record',
+    'complete-checkout-reservations'
+  ].includes(action)
   if (!readOnly && !reservationDataWrite && !directCheckoutSnapshot && !liveProjectReplacement && !serverDiscoverableContextAction && !serverLockedDebtRepaymentPreparation
     && (resolvedContexts.invalid || hasInvalidWriteContexts(contexts))) {
     // No command has been sent yet, so a single automatic root recovery is

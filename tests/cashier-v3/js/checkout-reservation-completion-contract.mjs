@@ -38,8 +38,12 @@ assert.match(
   '预约失败提示必须明确原结账已成功'
 )
 assert.match(bridge, /action === 'complete-checkout-reservations'[\s\S]*?contexts: \[\]/, '浏览器不得决定预约批量写入集合')
+assert.match(
+  bridge,
+  /serverDiscoverableContextAction[\s\S]*?'complete-checkout-reservations'[\s\S]*?!serverDiscoverableContextAction[\s\S]*?hasInvalidWriteContexts/,
+  '结账后预约收口必须绕过浏览器空 contexts 门禁，由服务端根据销售订单反查并锁定预约'
+)
 assert.match(manifest, /'complete-checkout-reservations': FEATURE_CASHIER/, '写动作必须登记收银权限')
 assert.match(manifest, /'query-checkout-unfinished-reservations': FEATURE_CASHIER/, '查询动作必须登记收银权限')
 
 console.log('CHECKOUT_RESERVATION_COMPLETION_FRONTEND_CONTRACT=PASS')
-
