@@ -4,7 +4,7 @@ namespace app\services\ai\semantic;
 use app\services\query\metric\MetricSemanticCatalog;
 
 /**
- * Admits only a fully closed collection of explicit metric extrema.
+ * Admits only one or more fully closed explicit metric extrema.
  *
  * The admission layer does not infer synonyms, formulas or default metrics.
  * Every measurement and analytical object must come from the active source
@@ -23,7 +23,7 @@ final class AiExactRankingCollectionAdmission
     {
         if ($question==='' || preg_match('//u',$question)!==1) return null;
         $clauses=preg_split('/[，,；;。]+/u',$question,-1,PREG_SPLIT_NO_EMPTY);
-        if (!is_array($clauses) || count($clauses)<2 || count($clauses)>6) return null;
+        if (!is_array($clauses) || $clauses===[] || count($clauses)>6) return null;
 
         $objects=$this->objects($objectVocabulary);$items=[];
         foreach ($clauses as $rawClause) {
@@ -47,7 +47,7 @@ final class AiExactRankingCollectionAdmission
             $items[]=['metric_code'=>$metric['metric_code'],'object_kind'=>$object['object_kind'],
                 'direction'=>$direction,'limit'=>1];
         }
-        if (count($items)<2 || count($items)>4) return null;
+        if ($items===[] || count($items)>4) return null;
         return $items;
     }
 

@@ -29,7 +29,17 @@ $verify($admission->match('这个月销售额最高是哪天，顺便分析原�
     'open analysis residue must remain on the model path');
 $verify($admission->match('这个月业绩最高是哪天，销售记录最多的项目是哪个',$objects,$metrics)===null,
     'an unregistered or ambiguous measurement must not receive a guessed metric');
-$verify($admission->match('这个月销售额最高是哪天',$objects,$metrics)===null,
-    'the collection shortcut must not absorb a single-result request');
+$singleDate=$admission->match('这个月销售额最高是哪天',$objects,$metrics);
+$verify(is_array($singleDate)&&count($singleDate)===1
+    &&($singleDate[0]['metric_code']??null)==='sales_amount'
+    &&($singleDate[0]['object_kind']??null)==='business_date'
+    &&($singleDate[0]['direction']??null)==='top',
+    'a fully closed single date extremum uses the same exact semantic boundary');
+$singleHeadTail=$admission->match('这个月销售记录最多的项目是哪个，最低又是哪个',$objects,$metrics);
+$verify(is_array($singleHeadTail)&&count($singleHeadTail)===1
+    &&($singleHeadTail[0]['metric_code']??null)==='sales_record_count'
+    &&($singleHeadTail[0]['object_kind']??null)==='project'
+    &&($singleHeadTail[0]['direction']??null)==='top_and_bottom',
+    'one metric may preserve a coordinated highest-and-lowest result without becoming two subjects');
 
 echo "exact ranking collection admission: {$checks} checks PASS\n";

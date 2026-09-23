@@ -965,7 +965,7 @@ final class AiGatewayServices
         }
         $runtimeSkills=$this->registry()->modelSkills('store_operations');$dictionary=new \app\services\metric\MetricDictionaryServices();$summaries=[];
         $objectVocabulary=$this->analysisObjectVocabulary($caps);
-        // Closed multi-result extrema do not need two language-model rounds.
+        // Closed extrema do not need two language-model rounds.
         // Admission is deliberately stricter than understanding: every metric
         // and object must be an exact active-registry phrase, one common date
         // carrier must already be structurally valid, and no business residue
@@ -2659,9 +2659,9 @@ final class AiGatewayServices
     }
 
     /**
-     * Compile a registry-closed compound extremum into the existing atomic
-     * collection executor. This method selects no business default: metric,
-     * object, period and direction all come from exact admitted carriers.
+     * Compile one or more registry-closed extrema through the existing Reader
+     * plans. This method selects no business default: metric, object, period
+     * and direction all come from exact admitted carriers.
      */
     private function compileExactRegisteredRankingCollection(
         string $question,array $objectVocabulary,array $capabilities,string $format,string $today,
@@ -2698,7 +2698,8 @@ final class AiGatewayServices
             $plans[]=['id'=>'q'.($index+1),'label'=>$label.'排行','plan'=>$compiled['plan']];
         }
         $reason=null;
-        return ['kind'=>'plan','plan'=>['items'=>$plans],
+        $plan=count($plans)===1?$plans[0]['plan']:['items'=>$plans];
+        return ['kind'=>'plan','plan'=>$plan,
             '_context_meaning'=>['presentation_origin'=>'customer_or_verified_context']];
     }
 
