@@ -98,6 +98,9 @@ export function saveStoreStaff(staffId, values) {
       work_member_id: Number(values.workMemberId) || 0,
       notify: normalizedBoolean(values.notify),
       status: normalizedBoolean(values.status),
+      // 门店端关闭在职状态等同完整员工离职；状态与读取到的版本必须成对提交，
+      // 由后端在事务末尾统一关闭任职、岗位和权限。
+      status_version: Number(values.statusVersion),
       cashier_salesperson_enabled: normalizedBoolean(values.salespersonEnabled),
       cashier_craftsman_enabled: normalizedBoolean(values.craftsmanEnabled),
       craftsman_performance_type: ['commission', 'labor', 'commission_labor'].includes(String(values.craftsmanPerformanceType || ''))

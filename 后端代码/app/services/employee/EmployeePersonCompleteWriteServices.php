@@ -68,10 +68,10 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             $input['education_version'] = (int)$input['education_version'];
         }
 
-        // 门店端 status 只控制本店任职；平台端 status 才是员工全局在职状态，
-        // 并必须携带主档版本以防止两个编辑窗口互相覆盖。
-        $statusPresent = $source === 'hq' && array_key_exists('status', $input);
-        if ($source === 'hq' && $statusPresent !== array_key_exists('status_version', $input)) {
+        // 完整人员编辑中的“在职状态”在平台端和门店端都指员工全局状态。
+        // 两端必须携带同一次详情读取的版本，避免并发编辑覆盖离职/复职事实。
+        $statusPresent = array_key_exists('status', $input);
+        if ($statusPresent !== array_key_exists('status_version', $input)) {
             throw new AdminException('在职状态与版本必须同时提交');
         }
         if ($statusPresent) {
@@ -594,11 +594,10 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         ], $opCtx, ['use_outer_transaction' => true]);
         $orgEmployeeId = (int)($oeRet['id'] ?? 0);
 
-        // 平台端的 status 是员工全局状态。离职必须留到编排末尾一次性关闭
+        // 两端完整编辑的 status 都是员工全局状态。离职必须留到编排末尾一次性关闭
         // 员工、任职、岗位、入口与任职期间，不能在保存普通任职资料时抢先
         // 把 staff 置为无效，否则手机端授权校验会报错且离职事实会丢失任职。
-        $targetGlobalLeave = $source === 'hq'
-            && array_key_exists('status', $input)
+        $targetGlobalLeave = array_key_exists('status', $input)
             && (int)$input['status'] === 0;
 
         // 3) staff（仅 store_id>0；禁止 store_id=0 伪造任职）
@@ -828,7 +827,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         // 7) 编排审计
         $this->maybeFail('audit', $input);
         $statusOut = null;
-        if ($source === 'hq' && array_key_exists('status', $input)) {
+        if (array_key_exists('status', $input)) {
             $statusCtx = array_merge($opCtx, [
                 'reason' => (int)$input['status'] === 0 ? '人员编辑切换为离职' : '人员编辑恢复在职',
             ]);

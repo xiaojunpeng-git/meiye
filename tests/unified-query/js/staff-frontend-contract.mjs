@@ -22,7 +22,11 @@ const expect = (condition, message) => {
 expect(staffView.includes("const PAGE_CODE = 'staff_list'"), '员工页未绑定 staff_list')
 expect(staffView.includes("requestAction('query-staff'"), '员工页未走统一查询动作')
 expect(staffView.includes('<UnifiedQueryToolbar'), '员工页未使用统一查询工具栏')
-expect(staffView.includes(':on-create-export="unifiedQuery.createExport"'), '员工页未接统一导出')
+expect(
+  staffView.includes(':on-create-export="createStaffExport"')
+    && staffView.includes('return unifiedQuery.createExport(payload)'),
+  '员工页未接统一导出'
+)
 expect(
   staffView.includes('const capability = await unifiedQuery.load({ silent: true })')
     && staffView.includes('await queryStaff(initialQuery(capability))')
@@ -33,8 +37,8 @@ expect(staffView.includes("key: 'uid', label: '商城用户ID'"), '员工页缺�
 expect(staffView.includes('salespersonEnabled') && staffView.includes('craftsmanEnabled'), '员工编辑缺少独立资格开关')
 expect(router.includes("path: 'management-center/staff'"), '员工列表路由未登记')
 expect(
-  management.includes("{ id: 'staff', label: '人员管理' }")
-    && management.includes('<StaffListView v-if="activeTab === \'staff\'" />'),
+  management.includes("import StaffListView from '@/views/StaffListView.vue'")
+    && management.includes('<StaffListView />'),
   '管理菜单未登记员工列表'
 )
 expect(
@@ -43,6 +47,11 @@ expect(
   '员工编辑接口未使用门店 V3 Bearer 会话'
 )
 expect(staffApi.includes('cashier_salesperson_enabled') && staffApi.includes('cashier_craftsman_enabled'), '员工编辑未提交两个资格字段')
+expect(
+  staffView.includes('statusVersion: Number(detail?.status_version ?? 0)')
+    && staffApi.includes('status_version: Number(values.statusVersion)'),
+  '门店端在职状态未携带完整详情的乐观锁版本'
+)
 expect(
   staffApi.includes('crypto.randomUUID')
     && staffApi.includes('crypto.getRandomValues')
@@ -86,8 +95,10 @@ expect(
 )
 expect(
   storeStaffController.includes("'work_member_id', 'notify', 'is_customer', 'customer_url', 'is_reservable'")
+    && storeStaffController.includes("'status_version' => $raw['status_version'] ?? null")
     && personCompleteWriter.includes("'work_member_id', 'notify', 'is_customer', 'customer_url', 'is_reservable'")
-    && personCompleteWriter.includes("'source_type' => $source === 'store'"),
+    && personCompleteWriter.includes("'source_type' => $source === 'store'")
+    && personCompleteWriter.includes("$statusPresent = array_key_exists('status', $input)"),
   '员工完整资料未进入权威事务写链或数据范围来源错误'
 )
 expect(

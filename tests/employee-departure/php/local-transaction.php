@@ -165,3 +165,68 @@ if ((int)$restoredAfterComplete['status'] !== 1
     throw new RuntimeException('完整保存回滚后员工状态未恢复');
 }
 echo "PASS 人员完整保存回滚恢复\n";
+
+// 门店端员工编辑与平台端使用同一完整保存内核。关闭在职状态时不能先把
+// 本店任职置为无效再保存手机端授权；离职、岗位/权限关闭和记录必须同事务完成。
+Db::startTrans();
+try {
+    /** @var EmployeePersonCompleteWriteServices $complete */
+    $complete = app()->make(EmployeePersonCompleteWriteServices::class);
+    $detail = $complete->getComplete($employeeId, $staffId, 'store');
+    $token = sprintf('10000000-0000-4000-8000-%012d', $employeeId);
+    $input = [
+        'employee_id' => $employeeId,
+        'staff_id' => $staffId,
+        'org_id' => (int)($detail['org_id'] ?? 0),
+        'store_id' => (int)($detail['store_id'] ?? 0),
+        'staff_name' => (string)($detail['staff_name'] ?? ''),
+        'phone' => (string)($detail['phone'] ?? ''),
+        'avatar' => (string)($detail['avatar'] ?? ''),
+        'scope_mode' => (string)($detail['scope']['scope_mode'] ?? 'personal'),
+        'org_ids' => [],
+        'store_ids' => [],
+        'can_choose' => (int)($detail['can_choose'] ?? 1),
+        'cashier_salesperson_enabled' => (int)($detail['cashier_salesperson_enabled'] ?? 1),
+        'cashier_craftsman_enabled' => (int)($detail['cashier_craftsman_enabled'] ?? 1),
+        'craftsman_performance_type' => (string)($detail['craftsman_performance_type'] ?? 'commission'),
+        'mobile_enabled' => (int)($detail['mobile_enabled'] ?? 0),
+        // 本用例只验证离职编排；人员类型权限由独立合同覆盖，避免把测试执行人
+        // 伪造成目标门店管理员而扩大真实业务权限。
+        'status' => 0,
+        'status_version' => (int)($detail['status_version'] ?? 0),
+        'request_token' => $token,
+    ];
+    $result = $complete->saveComplete($input, [
+        'id' => 1,
+        'account' => 'store-local-regression',
+        'real_name' => '门店事务测试',
+        'level' => 1,
+        'admin_type' => 3,
+    ], [
+        'header_token' => $token,
+        'body_token' => $token,
+        'operator_ip' => '127.0.0.1',
+    ], 'store');
+    if ((int)($result['data']['status'] ?? 1) !== 0
+        || (int)($result['data']['status_version'] ?? 0) !== $version + 1
+        || empty($result['data']['departure_records'])) {
+        throw new RuntimeException('门店端完整保存未生成离职状态、版本或离职记录');
+    }
+    $inactiveStaff = Db::name('system_store_staff')->where('id', $staffId)->field('status')->find();
+    if ((int)($inactiveStaff['status'] ?? 1) !== 0) {
+        throw new RuntimeException('门店端完整保存未在事务末尾关闭任职');
+    }
+    echo "PASS 门店端完整编辑保存离职\n";
+} finally {
+    Db::rollback();
+}
+
+$restoredAfterStoreComplete = Db::name('employee')->where('id', $employeeId)
+    ->field('status,status_version')->find();
+$restoredStoreStaff = Db::name('system_store_staff')->where('id', $staffId)->field('status')->find();
+if ((int)$restoredAfterStoreComplete['status'] !== 1
+    || (int)$restoredAfterStoreComplete['status_version'] !== $version
+    || (int)$restoredStoreStaff['status'] !== 1) {
+    throw new RuntimeException('门店端完整保存回滚后员工或任职状态未恢复');
+}
+echo "PASS 门店端人员完整保存回滚恢复\n";

@@ -258,6 +258,7 @@ class StoreStaff extends AuthController
             'org_ids' => [],
             'store_ids' => [],
             'status' => (int)($raw['status'] ?? 1),
+            'status_version' => $raw['status_version'] ?? null,
             'cashier_salesperson_enabled' => (int)($raw['cashier_salesperson_enabled'] ?? 1),
             'cashier_craftsman_enabled' => (int)($raw['cashier_craftsman_enabled'] ?? 1),
             'craftsman_performance_type' => (string)($raw['craftsman_performance_type'] ?? 'commission'),
