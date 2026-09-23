@@ -389,6 +389,107 @@ $memberNatural=AiIntentUnderstandingContract::normalize(['goal'=>'列出同时�
 ]]],$memberNaturalSafe);
 csCheck($memberNatural['requirements'][0]['values']['metric_terms']===['到店次数','实际收款销售额'],
     'generic conditions admit only registry-proven alias normalization grounded by literal customer evidence');
+$spokenVisitSafe=$memberNaturalSafe;
+$spokenVisitSafe['question']='最近30天到店至少2次，而且实际收款销售额达到1万元的会员有哪些？';
+$spokenVisitSafe['evidence_messages'][0]['text']=$spokenVisitSafe['question'];
+$spokenVisit=$memberNatural;
+$spokenVisit['requirements'][0]['values']['aggregate_condition']['conditions'][0]['quantity']='2';
+$spokenVisit['requirements'][0]['values']['aggregate_condition']['conditions'][1]['quantity']='10000';
+$spokenVisit['requirements'][0]['evidence'][0]['quote']=$spokenVisitSafe['question'];
+$spokenVisit=AiIntentUnderstandingContract::normalize($spokenVisit,$spokenVisitSafe);
+csCheck($spokenVisit['requirements'][0]['values']['metric_terms']===['到店次数','实际收款销售额'],
+    'spoken "visit N times" is proven by the central metric alias without a full-sentence template');
+$wrongPopulationForm=$spokenVisit;
+$wrongPopulationForm['requirements'][0]['values']['aggregate_condition']['result_form']='count';
+$wrongPopulationForm['requirements'][0]['values']['operation']='condition_count';
+$correctedPopulationForm=AiIntentUnderstandingContract::normalize($wrongPopulationForm,$spokenVisitSafe);
+csCheck(($correctedPopulationForm['requirements'][0]['values']['aggregate_condition']['result_form']??null)==='list'
+    &&($correctedPopulationForm['requirements'][0]['values']['operation']??null)==='condition_list',
+    'explicit member-list wording corrects only a provider response-form error without changing predicates');
+$countPopulationSafe=$spokenVisitSafe;
+$countPopulationSafe['question']='最近30天到店至少2次，而且实际收款销售额达到1万元的会员有多少个？';
+$countPopulationSafe['evidence_messages'][0]['text']=$countPopulationSafe['question'];
+$countPopulation=$wrongPopulationForm;
+$countPopulation['requirements'][0]['evidence'][0]['quote']=$countPopulationSafe['question'];
+$countPopulation=AiIntentUnderstandingContract::normalize($countPopulation,$countPopulationSafe);
+csCheck(($countPopulation['requirements'][0]['values']['aggregate_condition']['result_form']??null)==='count'
+    &&($countPopulation['requirements'][0]['values']['operation']??null)==='condition_count',
+    'explicit member-count wording remains count and is not confused with an amount threshold');
+$nonOverlapping=MetricSemanticCatalog::registeredNonOverlappingTermsInText($spokenVisitSafe['question']);
+csCheck(array_column($nonOverlapping,'metric_code')===['member_service_visit_count','sales_collected_amount'],
+    'a complete collected-sales title suppresses a shorter sales metric contained only inside the same text span');
+csCheck(MetricSemanticCatalog::containingSelectedOwnerCode(
+    '销售额',$spokenVisitSafe['question'],[],['member_service_visit_count','sales_collected_amount']
+)==='sales_collected_amount',
+    'a redundant short audit term resolves to the selected longer registry owner');
+csCheck(MetricSemanticCatalog::containingSelectedOwnerCode(
+    '销售额',$spokenVisitSafe['question'].'，另外单独看销售额',[],['member_service_visit_count','sales_collected_amount']
+)===null,
+    'an independently stated short metric is never swallowed by a longer registry owner');
+$gateway=new \app\services\ai\AiGatewayServices();
+$registeredCondition=(new ReflectionMethod($gateway,'registeredConditionIntent'));
+$compiledSpokenVisit=$registeredCondition->invoke($gateway,$spokenVisit,[
+    ['metric_code'=>'member_service_visit_count','object_contracts'=>[]],
+    ['metric_code'=>'sales_collected_amount','object_contracts'=>[]],
+],$spokenVisitSafe);
+csCheck(($compiledSpokenVisit['operation']??null)==='condition_list'
+    &&($compiledSpokenVisit['metric_codes']??null)===['member_service_visit_count','sales_collected_amount']
+    &&array_column($compiledSpokenVisit['aggregate_condition']['conditions']??[],'metric_code')===['member_service_visit_count','sales_collected_amount'],
+    'accepted member conditions compile all uniquely registered bindings without a second model decision');
+$spokenVisitWithNestedAudit=$spokenVisit;
+$spokenVisitWithNestedAudit['requirements'][]=[
+    'id'=>'r2','meaning'=>'销售额指标审计回声','fields'=>['metric_codes'],
+    'values'=>['metric_terms'=>['销售额']],
+    'evidence'=>[['message_id'=>'current','quote'=>$spokenVisitSafe['question']]],
+];
+$spokenVisitWithNestedAudit=AiIntentUnderstandingContract::normalize($spokenVisitWithNestedAudit,$spokenVisitSafe);
+$compiledNestedAudit=$registeredCondition->invoke($gateway,$spokenVisitWithNestedAudit,[
+    ['metric_code'=>'member_service_visit_count','object_contracts'=>[]],
+    ['metric_code'=>'sales_collected_amount','object_contracts'=>[]],
+],$spokenVisitSafe);
+csCheck(($compiledNestedAudit['metric_codes']??null)===['member_service_visit_count','sales_collected_amount']
+    &&count($compiledNestedAudit['requirement_bindings']??[])===2,
+    'a nested short registry audit row is accounted to its selected longer condition owner');
+$fragmentVisit=$spokenVisit;
+$fragmentVisit['requirements'][0]['values']['aggregate_condition']['conditions'][0]['metric_term']='至少2次';
+$fragmentVisit['requirements'][0]['values']['metric_terms']=['至少2次','实际收款销售额'];
+$fragmentVisit=AiIntentUnderstandingContract::normalize($fragmentVisit,$spokenVisitSafe);
+$compiledFragmentVisit=$registeredCondition->invoke($gateway,$fragmentVisit,[
+    ['metric_code'=>'member_service_visit_count','object_contracts'=>[]],
+    ['metric_code'=>'sales_collected_amount','object_contracts'=>[]],
+],$spokenVisitSafe);
+csCheck(($compiledFragmentVisit['metric_codes']??null)===['member_service_visit_count','sales_collected_amount'],
+    'a predicate fragment binds only through the question ordered owners with matching subject and units');
+$reversedFragmentVisit=$fragmentVisit;
+$reversedFragmentVisit['requirements'][0]['values']['aggregate_condition']['conditions']=array_reverse(
+    $reversedFragmentVisit['requirements'][0]['values']['aggregate_condition']['conditions']
+);
+$reversedFragmentVisit['requirements'][0]['values']['metric_terms']=array_reverse(
+    $reversedFragmentVisit['requirements'][0]['values']['metric_terms']
+);
+$reversedFragmentVisit=AiIntentUnderstandingContract::normalize($reversedFragmentVisit,$spokenVisitSafe);
+$compiledReversedFragmentVisit=$registeredCondition->invoke($gateway,$reversedFragmentVisit,[
+    ['metric_code'=>'member_service_visit_count','object_contracts'=>[]],
+    ['metric_code'=>'sales_collected_amount','object_contracts'=>[]],
+],$spokenVisitSafe);
+csCheck(($compiledReversedFragmentVisit['metric_codes']??null)===['sales_collected_amount','member_service_visit_count'],
+    'unique subject-and-unit matching preserves accepted condition order even when it differs from wording order');
+$spokenVisitWithPrior=$spokenVisitSafe;
+$spokenVisitWithPrior['prior_query']=[
+    'metric_codes'=>['cash_performance'],'operation'=>'ranking',
+    'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-24']],
+    'ranking'=>['direction'=>'top','limit'=>1],'scope'=>'authorized','object_kind'=>'member',
+    'has_business_filter'=>true,'has_object_selection'=>false,'has_store_scope_restriction'=>false,
+    'presentation_origin'=>'customer_or_verified_context',
+];
+$compiledSpokenVisitWithPrior=$registeredCondition->invoke($gateway,$spokenVisit,[
+    ['metric_code'=>'member_service_visit_count','object_contracts'=>[]],
+    ['metric_code'=>'sales_collected_amount','object_contracts'=>[]],
+],$spokenVisitWithPrior);
+csCheck(($compiledSpokenVisitWithPrior['context_delta']['business_filters']??null)==='replace'
+    &&($compiledSpokenVisitWithPrior['context_delta']['aggregate_condition']??null)==='replace'
+    &&($compiledSpokenVisitWithPrior['context_delta']['ranking_direction']??null)==='clear',
+    'a complete member condition replaces an earlier topic through explicit context deltas');
 $omittedRedundant=$memberNatural;
 $omittedRedundant['requirements'][0]['fields']=['periods','aggregate_condition'];
 unset($omittedRedundant['requirements'][0]['values']['metric_terms'],$omittedRedundant['requirements'][0]['values']['object_kind'],$omittedRedundant['requirements'][0]['values']['operation']);

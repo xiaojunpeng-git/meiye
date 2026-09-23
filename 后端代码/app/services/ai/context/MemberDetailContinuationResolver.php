@@ -1,0 +1,66 @@
+<?php
+namespace app\services\ai\context;
+
+use RuntimeException;
+
+/**
+ * Resolves a model-understood member-detail continuation only against the
+ * replayed, permission-checked result set from the preceding answer. It never
+ * searches by a display name and never lets an ordinal escape that frozen set.
+ */
+final class MemberDetailContinuationResolver
+{
+    /** @return array{selection_ref:string,label:string,view:string} */
+    public function resolve(array $query,array $view,array $request): array
+    {
+        // VerifiedQueryContext has already replayed the stored query and
+        // checked its signed read-view reference. Use the Reader-normalized
+        // query carried by that replay; comparing it byte-for-byte with the
+        // planner input would reject harmless normalization such as ranges.
+        $effectiveQuery=$view['query']??null;
+        if (!is_array($effectiveQuery)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        $shape=$effectiveQuery['query_shape']??null;
+        if ($shape==='condition_list'&&($effectiveQuery['condition_set']['subject']??null)==='member') {
+            $rows=$view['results'][0]['rows']??null;
+        } elseif ($shape==='ranking') {
+            $rows=$this->rankingRows($view);
+        } else {
+            throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        }
+        if (!is_array($rows)||$rows===[]) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        $target=$request['target']??null;$ordinal=$request['ordinal']??null;
+        // One detail answer must name exactly one row. "This member" is safe
+        // only for a singleton result; otherwise the customer must identify an
+        // ordinal. This avoids silently choosing the first displayed person.
+        if ($target!=='single') throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+        if ($ordinal===null) {
+            if (count($rows)!==1) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+            $index=0;
+        } else {
+            if (!is_int($ordinal)||$ordinal<1||$ordinal>count($rows)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+            $index=$ordinal-1;
+        }
+        $row=$rows[$index]??null;$memberId=$row['member_id']??null;$label=$row['member_name']??null;
+        if (!is_array($row)||!is_int($memberId)||$memberId<1||!is_string($label)||trim($label)==='') {
+            throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        }
+        return ['selection_ref'=>'member:'.$memberId,'label'=>trim($label),'view'=>$request['view']??'summary'];
+    }
+
+    /** Ranking groups may repeat one tied member; keep first display order and one identity. */
+    private function rankingRows(array $view): array
+    {
+        $rows=[];$seen=[];
+        foreach ((array)($view['results']??[]) as $result) {
+            if (($result['object_kind']??null)!=='member'||!is_array($result['rows']??null)) continue;
+            foreach (['top','bottom'] as $group) foreach ((array)($result['rows'][$group]??[]) as $row) {
+                $memberId=$row['member_id']??($row['entity_id']??null);
+                if (!is_int($memberId)||$memberId<1||isset($seen[$memberId])) continue;
+                $label=$row['member_name']??($row['entity_name']??null);
+                if (!is_string($label)||trim($label)==='') continue;
+                $seen[$memberId]=true;$rows[]=['member_id'=>$memberId,'member_name'=>trim($label)];
+            }
+        }
+        return $rows;
+    }
+}

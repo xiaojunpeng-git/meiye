@@ -207,6 +207,86 @@ final class MetricSemanticCatalog
         return $out;
     }
 
+    /**
+     * Return ordered exact registry terms after choosing the longest
+     * non-overlapping spans. This prevents a complete measurement such as a
+     * compound registered title from also emitting a shorter metric whose
+     * label appears only inside that title. Separate occurrences remain
+     * independent; unknown and ambiguously owned terms are still omitted.
+     *
+     * @return array<int,array{metric_code:string,term:string,ai_query_ready:bool}>
+     */
+    public static function registeredNonOverlappingTermsInText(string $text,array $allowedCodes=[]): array
+    {
+        if ($text===''||preg_match('//u',$text)!==1) return [];
+        $entries=self::entries();$allowed=$allowedCodes===[]?array_fill_keys(array_keys($entries),true)
+            :array_fill_keys(array_values(array_unique(array_filter($allowedCodes,'is_string'))),true);
+        $owners=[];
+        foreach ($entries as $code=>$entry) {
+            if (!isset($allowed[$code])||($entry['ai_query_ready']??false)!==true) continue;
+            foreach ((array)($entry['terms']??[]) as $term) if (is_string($term)&&$term!=='') $owners[$term][$code]=true;
+        }
+        $candidates=[];
+        foreach ($owners as $term=>$codes) {
+            if (count($codes)!==1) continue;
+            $code=array_key_first($codes);$offset=0;$length=mb_strlen($term,'UTF-8');
+            while (($start=mb_strpos($text,$term,$offset,'UTF-8'))!==false) {
+                $candidates[]=['metric_code'=>$code,'term'=>$term,'start'=>$start,'end'=>$start+$length,
+                    'ai_query_ready'=>true];
+                $offset=$start+1;
+            }
+        }
+        usort($candidates,static function(array $left,array $right):int {
+            $lengthOrder=($right['end']-$right['start'])<=>($left['end']-$left['start']);
+            return $lengthOrder!==0?$lengthOrder:$left['start']<=>$right['start'];
+        });
+        $selected=[];$seen=[];
+        foreach ($candidates as $candidate) {
+            if (isset($seen[$candidate['metric_code']])) continue;
+            $overlap=false;
+            foreach ($selected as $kept) if ($candidate['start']<$kept['end']&&$candidate['end']>$kept['start']) {
+                $overlap=true;break;
+            }
+            if ($overlap) continue;
+            $seen[$candidate['metric_code']]=true;$selected[]=$candidate;
+        }
+        usort($selected,static function(array $left,array $right):int{return $left['start']<=>$right['start'];});
+        return array_map(static function(array $item):array {
+            return ['metric_code'=>$item['metric_code'],'term'=>$item['term'],'ai_query_ready'=>$item['ai_query_ready']];
+        },$selected);
+    }
+
+    /**
+     * Resolve a shorter audit term to an already selected longer registry
+     * owner only when every occurrence of that short term is contained by
+     * the same longer owner in the current message. An independently stated
+     * occurrence therefore cannot be swallowed as a duplicate condition.
+     */
+    public static function containingSelectedOwnerCode(string $term,string $text,array $allowedCodes,array $selectedCodes): ?string
+    {
+        if ($term===''||$text===''||preg_match('//u',$term)!==1||preg_match('//u',$text)!==1) return null;
+        $selected=array_values(array_filter(self::registeredNonOverlappingTermsInText($text,$allowedCodes),
+            static function(array $item)use($selectedCodes):bool {
+                return is_string($item['metric_code']??null)&&in_array($item['metric_code'],$selectedCodes,true)
+                    &&is_string($item['term']??null)&&$item['term']!=='';
+            }));
+        if ($selected===[]) return null;
+        $owners=[];$found=false;$offset=0;$termLength=mb_strlen($term,'UTF-8');
+        while (($start=mb_strpos($text,$term,$offset,'UTF-8'))!==false) {
+            $found=true;$end=$start+$termLength;$contained=[];
+            foreach ($selected as $owner) {
+                $ownerOffset=0;$ownerLength=mb_strlen($owner['term'],'UTF-8');
+                while (($ownerStart=mb_strpos($text,$owner['term'],$ownerOffset,'UTF-8'))!==false) {
+                    if ($start>=$ownerStart&&$end<=$ownerStart+$ownerLength) $contained[$owner['metric_code']]=true;
+                    $ownerOffset=$ownerStart+1;
+                }
+            }
+            if (count($contained)!==1) return null;
+            $owners[array_key_first($contained)]=true;$offset=$start+1;
+        }
+        return $found&&count($owners)===1?array_key_first($owners):null;
+    }
+
     /** Remove only registered dictionary terms before checking residual conditions. */
     public static function stripTerms(string $text, array $codes = []): string
     {

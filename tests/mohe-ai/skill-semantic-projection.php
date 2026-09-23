@@ -48,6 +48,9 @@ $check($safe['outbound']['question']==='销售人业绩排名第一的是谁？'
 $safe=(new AiSafeQuestionProjector())->project('销售人今天怎么样？',$config,['销售人'],['销售人业绩']);
 $check(strpos($safe['outbound']['question'],'[local_condition_1]')!==false,
     'the metric-title shield does not suppress standalone private-object de-identification');
+$safe=(new AiSafeQuestionProjector())->project('会员有哪些',$config,['会员'],['会员']);
+$check($safe['outbound']['question']==='会员有哪些'&&$safe['local_conditions']===[],
+    'a registered analytical object label cannot become a same-named private-member selection');
 $history=[];
 for($index=1;$index<=20;$index++) $history[]=['question'=>'第'.$index.'轮问题'];
 $conversation=(new AiSafeQuestionProjector())->projectConversation('继续看刚才的结果',$history,$config,[]);

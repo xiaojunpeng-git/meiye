@@ -21,10 +21,18 @@ final class AiIntentResultContract
      * fuzzy matching, chooses between metrics, ignores an exclusion, or
      * collapses independent measurement requirements.
      */
-    public static function canonicalizeUniqueExactMetricBinding($intent,array $understanding,array $safeQuestion,array $metricCodes)
+    public static function canonicalizeUniqueExactMetricBinding($intent,array $understanding,array $safeQuestion,array $metricCodes,?string &$conditionFailure=null)
     {
         if (!is_array($intent)) return $intent;
-        $intent=self::canonicalizeExactConditionMetricBindings($intent,$understanding,$metricCodes);
+        $intent=self::canonicalizeExactConditionMetricBindings($intent,$understanding,$metricCodes,$safeQuestion,$conditionFailure);
+        // A complete condition carrier already owns an ordered set of metrics.
+        // Do not let the later single-exact-term recovery collapse it merely
+        // because one of several customer conditions happens to use the
+        // registry's full display name while another uses a registered alias.
+        if (in_array($intent['operation']??null,['condition_count','condition_list'],true)
+            && is_array($intent['aggregate_condition']['conditions']??null)
+            && count($intent['aggregate_condition']['conditions'])===count($intent['metric_codes']??[])
+            && count($intent['metric_codes'])>0) return $intent;
         $exact=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
             (string)($safeQuestion['question']??''),$metricCodes
         );
@@ -87,13 +95,15 @@ final class AiIntentResultContract
      * with the registry's total one-to-one projection. Ambiguous, repeated or
      * unavailable terms remain on the normal model/clarification path.
      */
-    private static function canonicalizeExactConditionMetricBindings(array $intent,array $understanding,array $metricCodes): array
+    private static function canonicalizeExactConditionMetricBindings(array $intent,array $understanding,array $metricCodes,array $safeQuestion,?string &$failure=null): array
     {
         $semantic=self::combinedSemanticAggregateCondition($understanding);
-        if (!is_array($semantic) || !is_array($semantic['conditions']??null) || $semantic['conditions']===[]) return $intent;
+        if (!is_array($semantic) || !is_array($semantic['conditions']??null) || $semantic['conditions']===[]) {
+            $failure='semantic';return $intent;
+        }
         $operation=($semantic['result_form']??null)==='count'?'condition_count'
             :(($semantic['result_form']??null)==='list'?'condition_list':null);
-        if ($operation===null) return $intent;
+        if ($operation===null) {$failure='operation';return $intent;}
         $resolve=static function($term)use($metricCodes):?string {
             if (!is_string($term) || trim($term)==='') return null;
             $code=\app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms([trim($term)],$metricCodes);
@@ -101,29 +111,87 @@ final class AiIntentResultContract
             $exact=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(trim($term),$metricCodes);
             return is_array($exact)&&is_string($exact['metric_code']??null)?$exact['metric_code']:null;
         };
-        $codes=[];
-        foreach ($semantic['conditions'] as $condition) {
+        $codes=[];$unresolved=[];$used=[];
+        foreach ($semantic['conditions'] as $index=>$condition) {
             $code=$resolve($condition['metric_term']??null);
-            if ($code===null) return $intent;
-            $codes[]=$code;
+            if ($code===null) {$codes[$index]=null;$unresolved[]=$index;continue;}
+            if (isset($used[$code])) {$failure='duplicate_direct_code';return $intent;}
+            $codes[$index]=$code;$used[$code]=true;
         }
-        if (count(array_unique($codes))!==count($codes)) return $intent;
+        // The understanding carrier may preserve a predicate fragment such
+        // as a counter phrase instead of repeating the nearby metric label.
+        // Recover only from the complete current question when it contains
+        // exactly one ordered registered owner per condition and every owner
+        // independently declares the same subject and condition unit. This is
+        // a registry proof, not fuzzy matching or a sentence template.
+        if ($unresolved!==[]) {
+            $matches=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText(
+                (string)($safeQuestion['question']??''),$metricCodes
+            );
+            $contracts=\app\services\query\metric\MetricDefinitionRegistry::capabilities();
+            foreach ($unresolved as $index) {
+                $condition=$semantic['conditions'][$index];$candidates=[];
+                foreach ($matches as $match) {
+                    $code=$match['metric_code']??null;
+                    if (!is_string($code)||isset($used[$code])||!is_array($contracts[$code]??null)) continue;
+                    $contract=$contracts[$code];
+                    if (($contract['ai_query_ready']??false)===true
+                        &&($contract['condition_unit']??null)===($condition['unit']??null)
+                        &&in_array($semantic['subject'],(array)($contract['condition_subjects']??[]),true)) $candidates[]=$code;
+                }
+                if (count(array_unique($candidates))!==1) {$failure='unresolved_candidate_count';return $intent;}
+                $code=$candidates[0];$codes[$index]=$code;$used[$code]=true;
+            }
+        }
+        ksort($codes,SORT_NUMERIC);$codes=array_values($codes);
+        if (count(array_unique($codes))!==count($codes)) {$failure='duplicate_code';return $intent;}
+        $fallbackByTerm=[];
+        foreach ($semantic['conditions'] as $index=>$condition) {
+            $term=$condition['metric_term']??null;
+            if (!is_string($term)||$term===''||isset($fallbackByTerm[$term])) {$failure='condition_term';return $intent;}
+            $fallbackByTerm[$term]=$codes[$index];
+        }
         $requirements=[];$accounted=[];
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
             if (!is_array($requirement) || !in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
-            if (!empty($requirement['values']['metric_exclusions'])) return $intent;
-            $terms=$requirement['values']['metric_terms']??null;
-            if (!is_array($terms) || $terms===[] || !is_string($requirement['id']??null)) return $intent;
+            if (!empty($requirement['values']['metric_exclusions'])) {$failure='exclusion';return $intent;}
+            if (!is_string($requirement['id']??null)) {$failure='requirement_id';return $intent;}
             $bound=[];
-            foreach ($terms as $term) {
-                $code=$resolve($term);
-                if ($code===null || !in_array($code,$codes,true)) return $intent;
-                if (!in_array($code,$bound,true)) $bound[]=$code;
-                $accounted[$code]=true;
+            $ownedConditions=$requirement['values']['aggregate_condition']['conditions']??null;
+            if (is_array($ownedConditions)&&$ownedConditions!==[]) {
+                foreach ($ownedConditions as $ownedCondition) {
+                    $indexes=[];
+                    foreach ($semantic['conditions'] as $index=>$semanticCondition) {
+                        if ($ownedCondition===$semanticCondition) $indexes[]=$index;
+                    }
+                    if (count($indexes)!==1) {$failure='condition_ownership';return $intent;}
+                    $code=$codes[$indexes[0]];
+                    if (!in_array($code,$bound,true)) $bound[]=$code;
+                    $accounted[$code]=true;
+                }
+            } else {
+                $terms=$requirement['values']['metric_terms']??null;
+                if (!is_array($terms)||$terms===[]) {$failure='requirement_terms';return $intent;}
+                foreach ($terms as $term) {
+                    $code=$resolve($term)??($fallbackByTerm[$term]??null);
+                    if ($code===null || !in_array($code,$codes,true)) {
+                        // A model may repeat the short registry label inside a
+                        // longer accepted measurement as another audit row.
+                        // Collapse it only when every occurrence is contained
+                        // by one selected longer owner in this same message;
+                        // an independently stated metric remains a conflict.
+                        $code=\app\services\query\metric\MetricSemanticCatalog::containingSelectedOwnerCode(
+                            is_string($term)?$term:'',(string)($safeQuestion['question']??''),$metricCodes,$codes
+                        );
+                    }
+                    if ($code===null || !in_array($code,$codes,true)) {$failure='requirement_term_binding';return $intent;}
+                    if (!in_array($code,$bound,true)) $bound[]=$code;
+                    $accounted[$code]=true;
+                }
             }
             $requirements[]=['requirement_id'=>$requirement['id'],'status'=>'satisfied','metric_codes'=>$bound];
         }
-        if ($requirements===[] || array_diff($codes,array_keys($accounted))) return $intent;
+        if ($requirements===[] || array_diff($codes,array_keys($accounted))) {$failure='requirement_accounting';return $intent;}
         $projected=['subject'=>$semantic['subject'],'relation'=>$semantic['relation'],
             'result_form'=>$semantic['result_form'],'conditions'=>[]];
         foreach ($semantic['conditions'] as $index=>$condition) {
@@ -160,6 +228,7 @@ final class AiIntentResultContract
             $intent['context_delta']['metric_codes']='replace';
             $intent['context_delta']['aggregate_condition']='replace';
         }
+        $failure=null;
         return $intent;
     }
 
