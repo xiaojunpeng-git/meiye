@@ -412,7 +412,9 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   // An Excel receipt belongs to one completed answer, not to the mutable
   // current Run. Polling it must never hold the composer or delay the answer.
   function startIndependentExport(source, target) {
-    if (!target || !source?.run_delivery_token) return;
+    // The admin production compiler does not parse optional chaining in this
+    // shared module; keep the same null guard usable by both web and mobile.
+    if (!target || !source || !source.run_delivery_token) return;
     const proof = { client_session_id: clientSession, run_delivery_token: source.run_delivery_token, generation: source.generation };
     const card = el('div', 'Excel 正在排队…', 'card muted'); target.appendChild(card);
     const path = '/runs/' + encodeURIComponent(source.run_id);
