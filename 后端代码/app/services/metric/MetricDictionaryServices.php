@@ -103,6 +103,21 @@ class MetricDictionaryServices extends BaseServices
                 'dev_source' => 'MetricDefinitionRegistry：cashier_v3_sale_fact.quantity',
             ],
             [
+                'code' => 'sales_record_count',
+                'name' => '销售记录数',
+                'display_unit' => '条',
+                'user_ready' => true,
+                'summary' => '正式结账成功的有效销售明细记录数。',
+                'include' => '每一条有效的正向销售明细计一条，不受该明细成交数量影响。',
+                'exclude' => '作废、未完成销售、充值、余额变动和退款冲销记录不重复计入。',
+                'timing' => '以销售结账成功日期统计。',
+                'note' => '项目或产品排行只比较统计期内实际产生过有效销售记录的对象；零销售记录对象不参与排行。',
+                // 别名只表达“成交明细条数”，不吸收“销量/卖了几件”，
+                // 以免模型再次把记录数和 quantity 做简单同义映射。
+                'aliases' => ['销售记录', '成交记录数', '销售明细数', '销售明细记录数'],
+                'dev_source' => 'MetricDefinitionRegistry：cashier_v3_sale_fact 有效正向销售明细按事实行计数',
+            ],
+            [
                 'code' => 'completed_service_item_count',
                 'name' => '完成服务项目数量',
                 'display_unit' => '项',

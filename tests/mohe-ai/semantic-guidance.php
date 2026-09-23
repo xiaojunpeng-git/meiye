@@ -32,11 +32,12 @@ foreach(['上个月','上月'] as $month) {
 $r=build('今天店里收得怎么样？');verify($r['kind']==='plan','receipt scenario without report title');
 rejected(static function(){build('今天店里收得怎么样？',['current_store_bound'=>false]);},'AI_UNSUPPORTED_CONDITION');
 $r=build('本月每天现金与消耗');verify($r['plan']['query']['query_shape']==='trend' && $r['plan']['query']['metric_codes']===['cash_performance','consume_amount'],'joint daily goal retained');
-foreach(['本月现金最高和最低的五家店','本月现金最高的前5家店和最低的后5家店'] as $q) {
+foreach(['本月现金门店排行，最高和最低各五家','本月现金门店排名，最高前5家和最低后5家'] as $q) {
     $r=build($q);verify($r['plan']['query']['ranking']===['direction'=>'top_and_bottom','limit'=>5],'both directions five');
 }
 foreach(['本月前十家店的现金业绩','给我全部前十名，不是前五名','本月现金前6家店'] as $q) rejected(static function()use($q){build($q);},'AI_RANK_LIMIT_NOT_READY');
-$r=build('本月现金最好的门店');verify($r['kind']==='plan' && $r['plan']['query']['ranking']['limit']===20,'ranking with no requested count uses only the Reader presentation bound');
+rejected(static function(){build('本月现金最好的门店');},'AI_INTENT_UNRESOLVED');
+$r=build('本月现金门店排行，从高到低');verify($r['kind']==='plan' && $r['plan']['query']['ranking']['limit']===20,'explicit ranking with no requested count uses only the Reader presentation bound');
 $r=build('今天业绩多少');$metricOptions=array_values(array_filter($r['fields'][0]['options'],static function($option){return ($option['action']??null)!=='stop';}));$expectedOptions=$cap['metric_codes'];sort($expectedOptions);
 verify(count($r['fields'])===1 && array_column($metricOptions,'value')===$expectedOptions,'all executable metric options come from current registry contracts');
 $restricted=$cap;$restricted['metric_codes']=['refund_performance','recharge_amount'];$restricted['metric_readiness']=array_intersect_key($cap['metric_readiness'],array_flip($restricted['metric_codes']));

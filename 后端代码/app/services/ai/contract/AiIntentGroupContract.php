@@ -41,8 +41,8 @@ final class AiIntentGroupContract
                 . 'by the registered independent-ranking collection path. Return exactly {"items":[{"id":"q1","intent":{...}}]}. '
                 . 'Preserve every supplied group and its accepted requirements. Each item must be an anonymous ranking: '
                 . 'operation=ranking, exactly one supplied metric_code, needs_metric_choice=false, empty object_term, no unresolved_fragments, '
-                . 'no aggregate_condition, scope=unspecified, and the same explicit top, bottom or top_and_bottom ranking direction '
-                . '(never unspecified) plus limit for every item. '
+                . 'no aggregate_condition, scope=unspecified, and each item must preserve its own accepted explicit top, bottom or '
+                . 'top_and_bottom ranking direction (never unspecified) plus limit. '
                 . 'Do not merge groups, add a store/person identity, choose a different period, calculate data, omit a group, or output prose.';
         }
         return 'The previous response used a single-intent envelope for an accepted independent-query collection. '
@@ -60,10 +60,13 @@ final class AiIntentGroupContract
         $topKeys=array_keys($value);sort($topKeys,SORT_STRING);
         if (count($groups)===1 && $topKeys===['intent']) {
             $subset=self::subset($understanding,$groups[0]['requirement_ids']);
+            $candidate=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
+                $value['intent'],$subset,$safeQuestion,$metricCodes
+            );
             return [[
                 'id'=>$groups[0]['id'], 'requirement_ids'=>$groups[0]['requirement_ids'],
                 'intent'=>self::applyAcceptedPeriods(
-                    AiIntentResultContract::normalize($value['intent'],$metricCodes,$actionCodes,$safeQuestion,$subset),$subset
+                    AiIntentResultContract::normalize($candidate,$metricCodes,$actionCodes,$safeQuestion,$subset),$subset
                 ),
             ]];
         }
@@ -82,9 +85,12 @@ final class AiIntentGroupContract
             }
             $group=$expected[$item['id']];unset($expected[$item['id']]);
             $subset=self::subset($understanding,$group['requirement_ids']);
+            $candidate=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
+                $item['intent'],$subset,$safeQuestion,$metricCodes
+            );
             $out[]=['id'=>$group['id'],'requirement_ids'=>$group['requirement_ids'],
                 'intent'=>self::applyAcceptedPeriods(
-                    AiIntentResultContract::normalize($item['intent'],$metricCodes,$actionCodes,$safeQuestion,$subset),$subset
+                    AiIntentResultContract::normalize($candidate,$metricCodes,$actionCodes,$safeQuestion,$subset),$subset
                 )];
         }
         if ($expected!==[]) throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',['stage'=>'intent_group_contract','predicate'=>'group_coverage']);
@@ -127,7 +133,7 @@ final class AiIntentGroupContract
     public static function isExecutableRankingCollection(array $items): bool
     {
         if (count($items)<2 || count($items)>self::MAX_ITEMS) return false;
-        $periods=null;$ranking=null;
+        $periods=null;
         foreach ($items as $item) {
             $intent=is_array($item['intent']??null)?$item['intent']:null;
             if ($intent===null || ($intent['operation']??null)!=='ranking' || !empty($intent['needs_metric_choice'])
@@ -138,8 +144,11 @@ final class AiIntentGroupContract
             $itemPeriods=$intent['periods']??[];$itemRanking=$intent['ranking']??null;
             if (!is_array($itemRanking) || !in_array($itemRanking['direction']??null,['top','bottom','top_and_bottom'],true)
                 || (!is_null($itemRanking['limit']??null) && !is_int($itemRanking['limit']))) return false;
-            if ($periods===null) {$periods=$itemPeriods;$ranking=$itemRanking;continue;}
-            if ($itemPeriods!==$periods || $itemRanking!==$ranking) return false;
+            if ($periods===null) {$periods=$itemPeriods;continue;}
+            // 复合问句共享统计期，但每个独立对象保留自己的极值方向。
+            // 例如“销售额最高的日期”是 top，而“项目最多和最少”是
+            // top_and_bottom；强迫两者相同会让合法自然语言在执行前失败。
+            if ($itemPeriods!==$periods) return false;
         }
         return true;
     }

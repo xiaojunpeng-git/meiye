@@ -96,7 +96,7 @@ final class AiAnswerRenderer
                         $rank = ($valueCounts[(string)$amount] > 1 ? '并列' : '')
                             . ($direction === 'top' ? '第' : '倒数第') . $ordinal . '名';
                         $rendered=[
-                            'label' => $point['employee_name'] ?? ($point['member_name'] ?? ($point['entity_name'] ?? ($point['store_name'] ?? ('门店 ID ' . $point['store_id'])))),
+                            'label' => $point['business_date'] ?? ($point['employee_name'] ?? ($point['member_name'] ?? ($point['entity_name'] ?? ($point['store_name'] ?? ('门店 ID ' . $point['store_id']))))),
                             'metric' => $metricLabel, 'rank' => $rank, 'value' => $this->metricValue($amount, $storageUnit), 'unit' => $unit,
                             'period' => $row['period'], 'period_label' => $this->periodLabel($row['period']),
                         ];

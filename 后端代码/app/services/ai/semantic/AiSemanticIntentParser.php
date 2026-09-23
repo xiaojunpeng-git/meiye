@@ -35,9 +35,8 @@ final class AiSemanticIntentParser
         preg_match_all('/(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])/',$text,$dates);
         $covered=preg_replace('/(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])/',' ',$covered);
         $covered=preg_replace('/(?:[0-9]{4}年)?[0-9]{1,2}月[0-9]{1,2}[日号]|最近[一二两三四五六七八九十0-9]+天/u',' ',$covered);
-        if(array_intersect($signals,['rank_top','rank_bottom','ranking'])) {
+        if(in_array('ranking',$signals,true)) {
             $covered=str_replace(['名单','家店','门店','家','名'],' ',$covered);
-            $signals[]='ranking';
         }
         $limits=array_values(array_unique($limits));
         foreach(['person_filter','category_filter','source_filter','exclusion','page_reference','history_point'] as $type) if(in_array($type,$signals,true)) $constraints[]=['type'=>$type,'status'=>'not_bound'];
@@ -70,7 +69,9 @@ final class AiSemanticIntentParser
         return ['signals'=>array_values(array_unique($signals)),'dates'=>$dates[0],'blocking_reason'=>$blocking,
             'date_terms'=>$periods,'date_grouping_ambiguous'=>(bool)preg_match('/(?:今天|昨天|本月|这月|上月)\s*(?:到|至)|[0-9]{4}-[0-9]{2}-[0-9]{2}\s*(?:到|至)\s*(?:今天|昨天|本月|这月|上月)/u',$normalized),
             'unresolved_condition'=>$unparsed,'projection_version'=>'mohe-semantic-intent-v2',
-            'semantic_intent'=>['version'=>2,'goal'=>in_array('definition',$signals,true)?'metric_definition':(in_array('ranking',$signals,true)?'store_performance_comparison':'business_results'),
+            // “最高/最低”只说明取值方式，不能单独决定按门店、日期或业务对象分组。
+            // 只有客户明确表达“排行/排名”时，辅助投影才保留通用排名目标；完整对象仍由模型理解并经契约核对。
+            'semantic_intent'=>['version'=>2,'goal'=>in_array('definition',$signals,true)?'metric_definition':(in_array('ranking',$signals,true)?'object_metric_ranking':'business_results'),
                 'constraints'=>$constraints,'rank_limits'=>$limits,'rank_limit'=>$limit,
                 'status'=>$unparsed?'unresolved':($constraints?'understood_unavailable':'understood')]];
     }

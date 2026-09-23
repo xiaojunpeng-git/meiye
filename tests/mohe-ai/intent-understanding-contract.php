@@ -122,6 +122,9 @@ $collectionItems=[
 ];
 $check(AiIntentGroupContract::isExecutableRankingCollection($collectionItems),
     'a grouped anonymous ranking carrier reaches the bounded collection executor');
+$collectionItems[1]['intent']['ranking']=['direction'=>'top_and_bottom','limit'=>1];
+$check(AiIntentGroupContract::isExecutableRankingCollection($collectionItems),
+    'independent grouped objects keep different extrema directions inside one shared period');
 $collectionItems[1]['intent']['scope']='current_store';
 $check(!AiIntentGroupContract::isExecutableRankingCollection($collectionItems)
     && AiIntentGroupContract::repairableFormat('collection_plan_shape')
@@ -150,6 +153,84 @@ $unnamedRankingUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'
 $check(($unnamedRankingUnderstanding['requirements'][0]['values']['metric_terms']??null)===null
     && $unnamedRankingUnderstanding['requirements'][0]['values']['operation']==='ranking',
     'an unnamed analytical ranking preserves its object and rank while deferring a fake metric term to registered binding');
+$exactMetricRankingQuestion=$question;
+$exactMetricRankingQuestion['question']='这个月销售记录最多的项目是哪个';
+$exactMetricRankingQuestion['evidence_messages'][0]['text']=$exactMetricRankingQuestion['question'];
+$exactMetricRanking=AiIntentUnderstandingContract::normalize(['goal'=>'查看项目销售记录排名','status'=>'understood','requirements'=>[[
+    'id'=>'r1','meaning'=>'查看本月项目销售记录最多的结果',
+    'fields'=>['metric_codes','object_kind','operation','ranking','periods'],
+    // The provider paraphrase is not accepted as evidence. The exact unique
+    // registry term in the customer sentence lets binding continue instead
+    // of spending a second model call repairing this optional echo.
+    'values'=>['metric_terms'=>['项目成交记录'],'object_kind'=>'project','operation'=>'ranking',
+        'ranking'=>['direction'=>'top','limit'=>1],'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
+    'evidence'=>[['message_id'=>'current','quote'=>$exactMetricRankingQuestion['question']]],
+]]],$exactMetricRankingQuestion);
+$check(!isset($exactMetricRanking['requirements'][0]['values']['metric_terms'])
+    &&($exactMetricRanking['requirements'][0]['values']['ranking']['direction']??null)==='top',
+    'one exact registered ranking metric avoids a repair round-trip when only the optional model echo is malformed');
+
+$headTailQuestion=$question;
+$headTailQuestion['question']='这个月销售记录最多的项目是哪个，最低又是哪个';
+$headTailQuestion['evidence_messages'][0]['text']=$headTailQuestion['question'];
+$headTailUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'查看项目销售记录最高和最低结果','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'查看本月项目销售记录最多的结果','fields'=>['metric_codes','object_kind','object_relation','operation','ranking','periods'],
+        'values'=>['metric_terms'=>['销售记录'],'object_kind'=>'project','object_relation'=>'analysis','operation'=>'ranking',
+            'ranking'=>['direction'=>'top','limit'=>1],'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
+        'evidence'=>[['message_id'=>'current','quote'=>$headTailQuestion['question']]]],
+    ['id'=>'r2','meaning'=>'同时查看最低结果','fields'=>['ranking'],
+        'values'=>['ranking'=>['direction'=>'bottom','limit'=>1]],
+        'evidence'=>[['message_id'=>'current','quote'=>'最低又是哪个']]],
+]],$headTailQuestion);
+$headTailBinding=$base;
+$headTailBinding['object_kind']='project';
+$headTailBinding['metric_codes']=['sales_record_count'];
+$headTailBinding['ranking']=['direction'=>'top','limit'=>1];
+$headTailBinding['periods']=[['kind'=>'month_offset','offset_months'=>0]];
+$headTailBinding['requirement_bindings']=[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['sales_record_count']]];
+$headTailResult=AiIntentResultContract::normalize($headTailBinding,['sales_record_count'],[],$headTailQuestion,$headTailUnderstanding);
+$check($headTailResult['ranking']===['direction'=>'top_and_bottom','limit'=>1],
+    'separately understood top and bottom requirements become one faithful head-and-tail result');
+$repeatedMetricHeadTail=$headTailUnderstanding;
+$repeatedMetricHeadTail['requirements'][1]['fields']=['metric_codes','ranking'];
+$repeatedMetricHeadTail['requirements'][1]['values']['metric_terms']=['销售记录'];
+$repeatedMetricHeadTail['requirements'][1]['evidence']=[['message_id'=>'current','quote'=>$headTailQuestion['question']]];
+$repeatedMetricHeadTail=AiIntentUnderstandingContract::normalize($repeatedMetricHeadTail,$headTailQuestion);
+$repeatedMetricResult=AiIntentResultContract::normalize($headTailBinding,['sales_record_count'],[],$headTailQuestion,$repeatedMetricHeadTail);
+$check(array_column($repeatedMetricResult['requirement_bindings'],'requirement_id')===['r1','r2'],
+    'repeated exact metric requirements share complete audit rows without another model repair');
+$misboundRepeated=$headTailBinding;
+$misboundRepeated['metric_codes']=['sales_quantity'];
+$misboundRepeated['requirement_bindings']=[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['sales_quantity']]];
+$canonicalRepeated=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
+    $misboundRepeated,$repeatedMetricHeadTail,$headTailQuestion,['sales_record_count','sales_quantity']
+);
+$check($canonicalRepeated['metric_codes']===['sales_record_count']
+    &&array_column($canonicalRepeated['requirement_bindings'],'requirement_id')===['r1','r2'],
+    'one exact question metric corrects a repeated head-and-tail provider binding before strict validation');
+$qualifiedRepeated=$repeatedMetricHeadTail;
+$qualifiedRepeated['requirements'][1]['values']['metric_terms']=['销售记录最低'];
+$qualifiedCanonical=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
+    $misboundRepeated,$qualifiedRepeated,$headTailQuestion,['sales_record_count','sales_quantity']
+);
+$check($qualifiedCanonical['metric_codes']===['sales_record_count'],
+    'a provider noun phrase containing the unique exact registry term remains the same metric without fuzzy matching');
+$check(AiIntentResultContract::isUniqueExactMetricBinding(
+    $canonicalRepeated,$repeatedMetricHeadTail,$headTailQuestion,['sales_record_count','sales_quantity']
+), 'the same repeated exact metric binding is admitted without reopening a metric selector');
+$multiMetricQuestion=$headTailQuestion;
+$multiMetricQuestion['question']='这个月销售额最高是哪天，销售记录最多的项目是哪个';
+$multiMetricQuestion['evidence_messages'][0]['text']=$multiMetricQuestion['question'];
+$groupSubset=$repeatedMetricHeadTail;
+foreach ($groupSubset['requirements'] as &$requirement) {
+    $requirement['evidence']=[['message_id'=>'current','quote'=>$multiMetricQuestion['question']]];
+}
+unset($requirement);
+$groupCanonical=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
+    $misboundRepeated,$groupSubset,$multiMetricQuestion,['sales_amount','sales_record_count','sales_quantity']
+);
+$check($groupCanonical['metric_codes']===['sales_record_count'],
+    'one group derives its exact metric from accepted terms when the complete question names several metrics');
 $independentQuestion=$question;$independentQuestion['question']='项目、卡项、产品卖得最好的分别是什么';$independentQuestion['evidence_messages'][0]['text']=$independentQuestion['question'];
 $independentRequirements=[];
 foreach (['project','card','product'] as $index=>$object) {

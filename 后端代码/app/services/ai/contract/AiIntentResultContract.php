@@ -8,7 +8,7 @@ namespace app\services\ai\contract;
  */
 final class AiIntentResultContract
 {
-    const VERSION='intent-binding-v5';
+    const VERSION='intent-binding-v6';
     /** Transport ceiling only; the registry is still the source of membership. */
     const MAX_OVERVIEW_METRICS=12;
     const REQUIRED_FIELDS=['action_codes','metric_codes','needs_metric_choice','object_kind','object_term','operation','requirement_bindings','unresolved_fragments'];
@@ -28,6 +28,25 @@ final class AiIntentResultContract
         $exact=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
             (string)($safeQuestion['question']??''),$metricCodes
         );
+        // A grouped question can contain several exact measurements overall,
+        // while this independently accepted group owns only one of them.
+        // Resolve that group from its model-grounded metric terms, never from
+        // neighbouring groups or from a local phrase map.
+        if ($exact===null) {
+            $groupMatches=[];
+            foreach ((array)($understanding['requirements']??[]) as $requirement) {
+                if (!is_array($requirement) || !in_array('metric_codes',(array)($requirement['fields']??[]),true)
+                    || !empty($requirement['values']['metric_exclusions'])) continue;
+                foreach ((array)($requirement['values']['metric_terms']??[]) as $term) {
+                    if (!is_string($term) || $term==='') continue;
+                    $match=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText($term,$metricCodes);
+                    if (is_array($match) && is_string($match['metric_code']??null)) {
+                        $groupMatches[$match['metric_code']]=$match;
+                    }
+                }
+            }
+            if (count($groupMatches)===1) $exact=array_values($groupMatches)[0];
+        }
         if ($exact===null) return $intent;
         $requirements=[];
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
@@ -36,11 +55,18 @@ final class AiIntentResultContract
             $requirements[]=$requirement;
         }
         if ($requirements===[]) return $intent;
-        if (count($requirements)>1) foreach ($requirements as $requirement) {
-            $terms=$requirement['values']['metric_terms']??null;
-            if (!is_array($terms) || $terms===[]) return $intent;
-            foreach ($terms as $term) if (!is_string($term) || $term===''
-                || mb_strpos($exact['term'],$term,0,'UTF-8')===false) return $intent;
+        if (count($requirements)>1) {
+            $byId=[];
+            foreach ($requirements as $requirement) {
+                if (!is_string($requirement['id']??null)) return $intent;
+                $byId[$requirement['id']]=$requirement;
+            }
+            // Repeated top/bottom requirements are one measurement only when
+            // the complete current question has one exact registry owner and
+            // no requirement names a different metric. This canonicalizes
+            // provider bookkeeping before strict validation; it never merges
+            // two independently named measurements.
+            if (!self::sameExactMetricRequirements(array_keys($byId),$byId,$exact['metric_code'],$exact['term'])) return $intent;
         }
         $intent['metric_codes']=[$exact['metric_code']];
         $intent['needs_metric_choice']=false;
@@ -163,11 +189,13 @@ final class AiIntentResultContract
         // row is needed to admit that metric identity. Exclusions remain
         // protected above whenever the model actually supplied one.
         if ($requirements===[]) return true;
-        if (count($requirements)>1) foreach ($requirements as $requirement) {
-            $terms=$requirement['values']['metric_terms']??null;
-            if (!is_array($terms) || $terms===[]) return false;
-            foreach ($terms as $term) if (!is_string($term) || $term===''
-                || mb_strpos($exact['term'],$term,0,'UTF-8')===false) return false;
+        if (count($requirements)>1) {
+            $byId=[];
+            foreach ($requirements as $requirement) {
+                if (!is_string($requirement['id']??null)) return false;
+                $byId[$requirement['id']]=$requirement;
+            }
+            if (!self::sameExactMetricRequirements(array_keys($byId),$byId,$exact['metric_code'],$exact['term'])) return false;
         }
         $bindings=$intent['requirement_bindings']??null;
         if (!is_array($bindings) || count($bindings)!==count($requirements)) return false;
@@ -284,7 +312,7 @@ final class AiIntentResultContract
             || (!is_null($limit) && !is_int($limit))) return null;
         $filters=is_array($sourceQuery['business_filters']??null)?$sourceQuery['business_filters']:[];
         $objectKind=$filters['object_kind']??'store';
-        if (!in_array($objectKind,['store','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization','order','sale_line','card'],true)) return null;
+        if (!in_array($objectKind,['store','business_date','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization','order','sale_line','card'],true)) return null;
         $delta=array_fill_keys(self::DELTA_FIELDS,'inherit');
         $delta['periods']='replace';
         return [
@@ -349,7 +377,7 @@ final class AiIntentResultContract
             ||(!is_null($limit)&&(!is_int($limit)||$limit<1||$limit>999))) return null;
         $filters=is_array($sourceQuery['business_filters']??null)?$sourceQuery['business_filters']:[];
         $objectKind=$filters['object_kind']??'store';
-        if (!in_array($objectKind,['store','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization','order','sale_line','card'],true)) return null;
+        if (!in_array($objectKind,['store','business_date','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization','order','sale_line','card'],true)) return null;
         $delta=array_fill_keys(self::DELTA_FIELDS,'inherit');
         $delta['ranking_direction']='replace';$delta['ranking_limit']='replace';
         return [
@@ -651,7 +679,7 @@ final class AiIntentResultContract
         if (!$hasPrior && array_key_exists('context_delta',$value)) self::fail('unexpected_context_delta');
         if (!is_bool($value['needs_metric_choice'])) self::fail('bad_type:needs_metric_choice');
         if (!is_string($value['object_term']) || mb_strlen($value['object_term'],'UTF-8')>160) self::fail('bad_value:object_term');
-        if (!in_array($value['object_kind'],['store','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization','order','sale_line','card','unknown'],true)) self::fail('bad_value:object_kind');
+        if (!in_array($value['object_kind'],['store','business_date','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization','order','sale_line','card','unknown'],true)) self::fail('bad_value:object_kind');
         $objectRelation=$value['object_relation']??($value['object_term']===''?'analysis':'selection');
         if (!in_array($objectRelation,['analysis','selection'],true)) {
             // Binding is not a second authority on the customer's object
@@ -902,12 +930,17 @@ final class AiIntentResultContract
         // independently accepted understanding and the candidate values.
         self::assertRequirementValues($understanding,$value,$ranking,$periods,$scope,$objectRelation,$aggregateCondition,$delta,
             $safeQuestion['prior_query']??null,$safeQuestion['reference_date']??null);
+        $effectiveCodes=self::effectiveMetricCodes($value['metric_codes'],$delta,$safeQuestion['prior_query']??null);
+        $exactQuestionMetric=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
+            (string)($safeQuestion['question']??''),$effectiveCodes
+        );
         $requirementBindings=self::requirementBindings(
             $value['requirement_bindings'],
             AiIntentUnderstandingContract::requirements($understanding),
             $metricCodes,
-            self::effectiveMetricCodes($value['metric_codes'],$delta,$safeQuestion['prior_query']??null),
-            $initialObservation
+            $effectiveCodes,
+            $initialObservation,
+            is_array($exactQuestionMetric)?($exactQuestionMetric['metric_code']??null):null
         );
         $provenance=self::provenance(
             $understanding,$hasPrior,$value,$ranking,$periods,$scope,$objectRelation,$aggregateCondition,$delta,
@@ -1510,18 +1543,22 @@ final class AiIntentResultContract
                 if ($field==='periods' && self::incompleteComparisonPeriods($requirements,$intent,$actual)) continue;
                 if ($field==='ranking' && $delta!==null) {
                     foreach(['direction'=>'ranking_direction','limit'=>'ranking_limit'] as $key=>$deltaField) {
-                        if (($delta[$deltaField]??null)==='replace'
-                            && !self::equivalent($actual[$key]??null,$values[$field][$key]??null)) {
-                            self::fail('binding_requirement_value_mismatch:ranking');
+                        $matches=$key==='direction'
+                            ? self::rankingMeaningMatches($values[$field],$actual)
+                            : self::equivalent($actual[$key]??null,$values[$field][$key]??null);
+                        if (($delta[$deltaField]??null)==='replace' && !$matches) {
+                            self::failRankingMismatch($values[$field],$actual,$deltaField);
                         }
                     }
                     continue;
                 }
                 $same=$field==='periods'
                     ? self::equivalentPeriods($actual,$values[$field],$referenceDate)
+                    : ($field==='ranking'
+                        ? self::rankingMeaningMatches($values[$field],$actual)
                     : ($field==='aggregate_condition' && self::semanticAggregateCondition($values[$field])
                         ? self::conditionMeaningMatches($values[$field],$actual)
-                        : self::equivalent($actual,$values[$field]));
+                        : self::equivalent($actual,$values[$field])));
                 if (!$same && $field==='aggregate_condition') {
                     throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',[
                         'stage'=>'intent_contract',
@@ -1532,9 +1569,37 @@ final class AiIntentResultContract
                         'needs_metric_choice'=>(bool)($intent['needs_metric_choice']??false),
                     ]);
                 }
+                if (!$same && $field==='ranking') self::failRankingMismatch($values[$field],$actual,'candidate');
                 if (!$same) self::fail('binding_requirement_value_mismatch:'.$field);
             }
         }
+    }
+
+    /** Keep ranking contract failures diagnosable without storing questions or business data. */
+    private static function failRankingMismatch($accepted,$actual,string $component): void
+    {
+        throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',[
+            'stage'=>'intent_contract','predicate'=>'binding_requirement_value_mismatch:ranking',
+            'component'=>$component,
+            'accepted_direction'=>is_array($accepted)?($accepted['direction']??null):null,
+            'accepted_limit'=>is_array($accepted)?($accepted['limit']??null):null,
+            'actual_direction'=>is_array($actual)?($actual['direction']??null):null,
+            'actual_limit'=>is_array($actual)?($actual['limit']??null):null,
+        ]);
+    }
+
+    /**
+     * A combined head-and-tail result fulfils each accepted top and bottom
+     * requirement without weakening either. The reverse is intentionally not
+     * true: a one-sided candidate cannot satisfy a requested two-sided rank.
+     */
+    private static function rankingMeaningMatches($accepted,$actual): bool
+    {
+        if (self::equivalent($accepted,$actual)) return true;
+        if (!is_array($accepted) || !is_array($actual)
+            || ($actual['direction']??null)!=='top_and_bottom'
+            || !in_array($accepted['direction']??null,['top','bottom'],true)) return false;
+        return self::equivalent($accepted['limit']??null,$actual['limit']??null);
     }
 
     /**
@@ -1545,16 +1610,19 @@ final class AiIntentResultContract
      */
     private static function anchorUnderstandingValues(array $understanding,array $intent,array $ranking,array $periods,string $scope,string $objectRelation,?array $aggregateCondition,bool $rankingSupplied,bool $periodsSupplied,bool $scopeSupplied,bool $aggregateConditionSupplied): array
     {
-        $values=[];$scopeExpressed=false;
+        $values=[];$scopeExpressed=false;$rankingValues=[];
         foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
             if (in_array('scope',(array)($requirement['fields']??[]),true)) $scopeExpressed=true;
             foreach (['object_kind','object_relation','operation','periods','ranking','scope','aggregate_condition'] as $field) {
                 if (!array_key_exists($field,(array)($requirement['values']??[]))) continue;
                 $candidate=$requirement['values'][$field];
+                if ($field==='ranking') {$rankingValues[]=$candidate;continue;}
                 if (!isset($values[$field])) {$values[$field]=['value'=>$candidate,'conflict'=>false];continue;}
                 if (!self::equivalent($values[$field]['value'],$candidate)) $values[$field]['conflict']=true;
             }
         }
+        $combinedRanking=self::combineUnderstoodRankings($rankingValues);
+        if ($combinedRanking!==null) $values['ranking']=['value'=>$combinedRanking,'conflict'=>false];
         foreach ($values as $field=>$record) {
             if ($record['conflict']) continue;
             $candidate=$record['value'];
@@ -1590,6 +1658,31 @@ final class AiIntentResultContract
         if (!$scopeExpressed) {$scope='unspecified';$scopeSupplied=false;}
         return ['intent'=>$intent,'ranking'=>$ranking,'periods'=>$periods,'scope'=>$scope,'object_relation'=>$objectRelation,'aggregate_condition'=>$aggregateCondition,
             'ranking_supplied'=>$rankingSupplied,'periods_supplied'=>$periodsSupplied,'scope_supplied'=>$scopeSupplied,'aggregate_condition_supplied'=>$aggregateConditionSupplied];
+    }
+
+    /**
+     * Merge only ranking directions that the accepted semantic pass already
+     * authored for one answer. A top and a bottom requirement with the same
+     * limit is the typed meaning of a head-and-tail result; unrelated limits
+     * or any other disagreement remain a conflict for the model to resolve.
+     */
+    private static function combineUnderstoodRankings(array $rankings): ?array
+    {
+        if ($rankings===[]) return null;
+        $limit=null;$limitSet=false;$directions=[];
+        foreach ($rankings as $ranking) {
+            if (!is_array($ranking) || !array_key_exists('direction',$ranking) || !array_key_exists('limit',$ranking)) return null;
+            if (!$limitSet) {$limit=$ranking['limit'];$limitSet=true;}
+            elseif (!self::equivalent($limit,$ranking['limit'])) return null;
+            $direction=$ranking['direction'];
+            if (!in_array($direction,['top','bottom','top_and_bottom'],true)) return null;
+            $directions[$direction]=true;
+        }
+        if (isset($directions['top_and_bottom']) || (isset($directions['top'])&&isset($directions['bottom']))) {
+            return ['direction'=>'top_and_bottom','limit'=>$limit];
+        }
+        if (count($directions)!==1) return null;
+        return ['direction'=>array_key_first($directions),'limit'=>$limit];
     }
 
     /**
@@ -1632,7 +1725,7 @@ final class AiIntentResultContract
      * understood. This is intentionally a structural coverage check, never a
      * server-side comparison between customer words and metric aliases.
      */
-    private static function requirementBindings($value,array $requirements,array $allowedCodes,array $effectiveCodes,bool $initialObservation=false): array
+    private static function requirementBindings($value,array $requirements,array $allowedCodes,array $effectiveCodes,bool $initialObservation=false,?string $exactQuestionMetricCode=null): array
     {
         if (!is_array($value) || count($value)>12 || ($value!==[]&&array_keys($value)!==range(0,count($value)-1))) self::fail('bad_value:requirement_bindings');
         $metricRequirementIds=[];
@@ -1674,6 +1767,32 @@ final class AiIntentResultContract
         if (count($metricRequirementIds)===1 && $value===[] && $effectiveCodes!==[]) {
             $value=[['requirement_id'=>$metricRequirementIds[0],
                 'status'=>'satisfied','metric_codes'=>array_values($effectiveCodes)]];
+        }
+        // A provider may repeat the same explicitly named measurement in the
+        // top and bottom semantic requirements, then emit only one duplicate
+        // audit row at binding time. Complete that audit table only when every
+        // metric requirement independently contains one exact registry phrase
+        // owned by the same single model-selected code. This changes no query
+        // value and does not equate different words or metrics.
+        if (count($metricRequirementIds)>1 && count($effectiveCodes)===1
+            && $exactQuestionMetricCode===$effectiveCodes[0]
+            && self::sameExactMetricRequirements($metricRequirementIds,$requirements,$effectiveCodes[0])) {
+            $rowsAreSameBinding=true;
+            foreach ($value as $row) {
+                $keys=is_array($row)?array_keys($row):[];sort($keys,SORT_STRING);
+                if ($keys!==['metric_codes','requirement_id','status']
+                    || !in_array($row['requirement_id']??null,$metricRequirementIds,true)
+                    || ($row['status']??null)!=='satisfied'
+                    || ($row['metric_codes']??null)!==[$effectiveCodes[0]]) {
+                    $rowsAreSameBinding=false;break;
+                }
+            }
+            if ($rowsAreSameBinding) {
+                $value=[];
+                foreach ($metricRequirementIds as $requirementId) $value[]=[
+                    'requirement_id'=>$requirementId,'status'=>'satisfied','metric_codes'=>[$effectiveCodes[0]],
+                ];
+            }
         }
         // Some providers duplicate the same satisfied audit row while still
         // selecting one identical registered metric for the one accepted
@@ -1757,6 +1876,49 @@ final class AiIntentResultContract
             if ($allCodes!==$effective) self::fail('binding_requirement_metric_mismatch');
         }
         return $out;
+    }
+
+    /**
+     * All repeated metric requirements must either prove the same registry
+     * owner or be a ranking-only repetition inside the same current question.
+     * The caller separately proves that complete question contains exactly
+     * one registered measurement and that the binding selected that owner.
+     */
+    private static function sameExactMetricRequirements(array $ids,array $requirements,string $effectiveCode,?string $exactQuestionTerm=null): bool
+    {
+        $catalog='\\app\\services\\query\\metric\\MetricSemanticCatalog';
+        foreach ($ids as $id) {
+            $requirement=$requirements[$id]??null;
+            if (!is_array($requirement) || !empty($requirement['values']['metric_exclusions'])) return false;
+            $terms=$requirement['values']['metric_terms']??null;
+            if (is_array($terms) && $terms!==[]) {
+                $sameOwner=$catalog::uniqueCodeForTerms($terms,[$effectiveCode])===$effectiveCode;
+                if (!$sameOwner && is_string($exactQuestionTerm) && $exactQuestionTerm!=='') {
+                    // The provider may preserve the complete noun phrase
+                    // (for example, registered term plus “最多”) rather than
+                    // only its noun. Literal containment is safe here because
+                    // the complete question has already proved exactly one
+                    // registry owner; no synonym or fuzzy similarity is used.
+                    $sameOwner=true;
+                    foreach ($terms as $term) if (!is_string($term)
+                        || mb_strpos($term,$exactQuestionTerm,0,'UTF-8')===false) {$sameOwner=false;break;}
+                }
+                if (!$sameOwner) return false;
+                continue;
+            }
+            // A provider can repeat metric_codes on the bottom half of one
+            // head-and-tail request without repeating the noun. Only that
+            // typed ranking repetition may share the question-level owner.
+            if (in_array('ranking',(array)($requirement['fields']??[]),true)) continue;
+            $matched=false;
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (!is_string($evidence['quote']??null)) continue;
+                $exact=$catalog::uniqueTermInText($evidence['quote'],[$effectiveCode]);
+                if (($exact['metric_code']??null)===$effectiveCode) {$matched=true;break;}
+            }
+            if (!$matched) return false;
+        }
+        return true;
     }
 
     /**

@@ -16,7 +16,7 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v14';
+    public const VERSION = 'unified-metric-registry-v15';
     public const COVERAGE_START = '2026-08-10';
 
     /**
@@ -353,6 +353,16 @@ final class MetricDefinitionRegistry
                     ['object_kind' => 'project', 'section' => '项目销售', 'order' => 20],
                     ['object_kind' => 'product', 'section' => '产品销售', 'order' => 20],
                 ],
+            ],
+            // 销售记录数和销售数量是两个不同的原子指标：一条已结账的
+            // 销售明细无论 quantity 是 1 还是 10，都只计一条记录。仅统计正向
+            // 事实，避免退款或冲销事实被误当成新的销售记录。
+            'sales_record_count' => self::count('fact_sum', 'v3-sale-completed-forward-line-record-count-v1', ['summary', 'comparison', 'trend', 'ranking'], [
+                'table' => 'cashier_v3_sale_fact', 'amount' => '1',
+                'filters' => ['status' => 'effective', 'fact_direction' => 'forward'],
+                'normal_scope' => 'facts', 'dimensions' => self::saleItemDimensions(),
+            ]) + [
+                'default_ranking_dimension' => 'operator',
             ],
             'balance_deduction_amount' => self::amount('fact_sum', 'v3-balance-order-payment-v1', ['summary', 'comparison', 'trend', 'ranking'], [
                 'table' => 'cashier_v3_balance_fact', 'amount' => '-(principal_delta_cents + bonus_delta_cents)',
