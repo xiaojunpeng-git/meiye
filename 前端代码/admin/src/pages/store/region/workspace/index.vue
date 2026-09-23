@@ -294,7 +294,7 @@
                         <td>{{ person.phone_masked }}</td>
                         <td><span class="status">在职</span></td>
                         <td @click.stop>
-                          <div class="person-ops" data-person-ops>
+                          <div class="person-ops">
                             <button class="button secondary compact-button ops-btn" type="button" @click="openPersonDrawer(person)">查看档案</button>
                             <button
                               v-auth="['setting-staff-index']"
@@ -304,41 +304,6 @@
                               :disabled="!canEditStaff"
                               @click="openEditStaff(person)"
                             >编辑人员</button>
-                            <div class="ops-more" :class="{ open: personOpsKey === listOpsKey(person) }">
-                              <button
-                                class="button secondary compact-button ops-btn"
-                                type="button"
-                                @click="togglePersonOps(listOpsKey(person), $event)"
-                              >更多 ▾</button>
-                              <div v-if="personOpsKey === listOpsKey(person)" class="ops-dropdown" @click.stop>
-                                <button
-                                  v-auth="['setting-staff-index']"
-                                  class="ops-dropdown-item ops-edit-in-more"
-                                  type="button"
-                                  :class="{ 'is-readonly-disabled': !canEditStaff }"
-                                  :disabled="!canEditStaff"
-                                  @click="openEditStaff(person); closePersonOps()"
-                                >编辑人员</button>
-                                <button
-                                  v-if="canWrite && personHasCurrentTenure(person)"
-                                  class="ops-dropdown-item"
-                                  type="button"
-                                  @click="openCreateTransferApply(person); closePersonOps()"
-                                >发起调店申请</button>
-                                <button
-                                  v-if="canEditStaff"
-                                  class="ops-dropdown-item danger"
-                                  type="button"
-                                  @click="confirmLeavePerson(person); closePersonOps()"
-                                >办理离职</button>
-                                <button
-                                  v-if="canWrite"
-                                  class="ops-dropdown-item danger"
-                                  type="button"
-                                  @click="confirmSoftDeletePerson(person); closePersonOps()"
-                                >删除人员档案</button>
-                              </div>
-                            </div>
                           </div>
                         </td>
                       </tr>
@@ -499,27 +464,6 @@
                 type="button"
                 @click="openCreateTransferApply(drawer.person, true)"
               >发起调店申请</button>
-              <div class="ops-more" :class="{ open: personOpsKey === 'drawer-person' }">
-                <button
-                  class="button secondary compact-button"
-                  type="button"
-                  @click="togglePersonOps('drawer-person', $event)"
-                >更多 ▾</button>
-                <div v-if="personOpsKey === 'drawer-person'" class="ops-dropdown ops-dropdown-right" @click.stop>
-                  <button
-                    v-if="canEditStaff"
-                    class="ops-dropdown-item danger"
-                    type="button"
-                    @click="confirmLeavePerson(drawer.person); closePersonOps()"
-                  >办理离职</button>
-                  <button
-                    v-if="canWrite"
-                    class="ops-dropdown-item danger"
-                    type="button"
-                    @click="confirmSoftDeletePerson(drawer.person); closePersonOps()"
-                  >删除人员档案</button>
-                </div>
-              </div>
             </template>
             <button class="icon-button" type="button" @click="closeDrawer"><svg-icon name="x" /></button>
           </div>
@@ -1383,7 +1327,6 @@ import {
   deleteOrganizationOrgEmployee,
   removeOrganizationEmployeeCompletely,
   leaveOrganizationEmployee,
-  softDeleteOrganizationEmployeeArchive,
   getOrganizationTransferApplies,
   createOrganizationTransferApply,
   approveOrganizationTransferApply,
@@ -1596,7 +1539,6 @@ export default {
       },
       /** 调店目标：全部门店（启用），不限当前组织 */
       transferAllStoreOptions: [],
-      personOpsKey: '',
       grantSearch: '',
       grantCandidates: [],
       grantForm: { employee_id: 0, admin_id: 0, scope_mode: 'inherit', allowed_store_ids: [] },
@@ -1913,17 +1855,6 @@ export default {
     this.loadWriteStatus().finally(() => {
       this.loadTree();
     });
-    this._onDocClickCloseOps = (e) => {
-      const t = e && e.target;
-      if (!t || !t.closest) {
-        this.closePersonOps();
-        return;
-      }
-      if (!t.closest('.ops-more') && !t.closest('[data-person-ops]')) {
-        this.closePersonOps();
-      }
-    };
-    document.addEventListener('click', this._onDocClickCloseOps);
   },
   activated() {
     this.applyReturnQuery(true);
@@ -1958,9 +1889,6 @@ export default {
     }
   },
   beforeDestroy() {
-    if (this._onDocClickCloseOps) {
-      document.removeEventListener('click', this._onDocClickCloseOps);
-    }
     clearTimeout(this.toastTimer);
     this.clearLoadTimers(this.treeState);
     this.clearLoadTimers(this.overviewState);
@@ -3098,16 +3026,6 @@ export default {
     leaveEmployeeGlobal(row) {
       this.confirmLeavePerson(row);
     },
-    listOpsKey(person) {
-      return `list-${Number((person && person.employee_id) || 0)}`;
-    },
-    togglePersonOps(key, evt) {
-      if (evt && evt.stopPropagation) evt.stopPropagation();
-      this.personOpsKey = this.personOpsKey === key ? '' : key;
-    },
-    closePersonOps() {
-      this.personOpsKey = '';
-    },
     personHasCurrentTenure(person, preferAuth = false) {
       if (preferAuth && this.drawer && this.drawer.mode === 'person') {
         return !!(this.currentPersonTenure && Number(this.currentPersonTenure.id) > 0);
@@ -3194,25 +3112,6 @@ export default {
           if (this.drawer.open && this.drawer.mode === 'person') this.refreshPersonAuth();
         })
         .catch((err) => this.showToast((err && err.msg) || '离职失败'));
-    },
-    confirmSoftDeletePerson(person) {
-      if (!this.canWrite || !person || !person.employee_id) return;
-      const name = person.name || person.employee_id;
-      const ok = window.confirm(
-        `确认软删除「${name}」的人员档案？\n这是数据清理操作：档案将不再出现在人员列表中，但不会物理删除订单、工资依据和任职历史。\n此操作不可通过本页一键恢复。`
-      );
-      if (!ok) return;
-      const again = window.confirm('再次确认：确定软删除该人员档案？');
-      if (!again) return;
-      const token = newRequestToken();
-      softDeleteOrganizationEmployeeArchive(person.employee_id, {}, { 'X-Request-Token': token })
-        .then(() => {
-          this.showToast('已软删除人员档案');
-          this.closeDrawer();
-          this.loadEmployees();
-          this.loadOrgDirectList && this.loadOrgDirectList();
-        })
-        .catch((err) => this.showToast((err && err.msg) || '删除失败'));
     },
     ensureTransferAllStoreOptions() {
       if ((this.transferAllStoreOptions || []).length) {
@@ -4497,7 +4396,6 @@ export default {
     },
     closeDrawer() {
       this.drawer.open = false;
-      this.closePersonOps();
     }
   }
 };

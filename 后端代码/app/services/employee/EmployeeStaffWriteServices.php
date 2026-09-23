@@ -15,6 +15,8 @@ use think\facade\Db;
  */
 class EmployeeStaffWriteServices extends BaseServices
 {
+    public const ACTION_GLOBAL_LEAVE = 'employee_global_leave';
+    public const ACTION_GLOBAL_RESUME = 'employee_global_resume';
     public const PHONE_REGEX = EmployeeMigrateServices::PHONE_REGEX;
     public const DEFAULT_AVATAR = EmployeeMigrateServices::DEFAULT_AVATAR;
 
@@ -353,19 +355,97 @@ class EmployeeStaffWriteServices extends BaseServices
     }
 
     /**
+     * 人员完整保存事务内同步在职状态。
+     *
+     * expectedVersion 防止两个编辑窗口静默覆盖；从在职切到离职时，员工主档、
+     * 任职、岗位、入口、账号和离职事实必须在同一事务中落定。重复保存同一状态
+     * 不递增版本，也不重复生成离职记录。
+     *
+     * @return array{status:int,status_version:int,changed:bool}
+     */
+    public function syncEmploymentStatusInCurrentTransaction(
+        int $employeeId,
+        int $targetStatus,
+        int $expectedVersion,
+        array $operatorContext = []
+    ): array {
+        $targetStatus = $targetStatus === 1 ? 1 : 0;
+        $employee = Db::name('employee')->where('id', $employeeId)->where('is_del', 0)->lock(true)->find();
+        if (!$employee) {
+            throw new AdminException('员工不存在');
+        }
+        $currentVersion = (int)($employee['status_version'] ?? 0);
+        if ($currentVersion !== $expectedVersion) {
+            throw new AdminException('在职状态已被其他人修改，请刷新员工档案后重试');
+        }
+        $currentStatus = (int)($employee['status'] ?? 1) === 1 ? 1 : 0;
+        if ($targetStatus === 0) {
+            // 即使员工原本已离职，也重新收拢本次完整保存可能临时恢复的关联状态；
+            // leaveEmployeeGloballyCore 只在真实 1→0 时追加离职事实。
+            $changed = $this->leaveEmployeeGloballyCore($employeeId, $operatorContext);
+            return [
+                'status' => 0,
+                'status_version' => $changed ? $currentVersion + 1 : $currentVersion,
+                'changed' => $changed,
+            ];
+        }
+        if ($currentStatus === 1) {
+            return ['status' => 1, 'status_version' => $currentVersion, 'changed' => false];
+        }
+
+        $nextVersion = $currentVersion + 1;
+        $updated = Db::name('employee')->where('id', $employeeId)->where('status_version', $currentVersion)->update([
+            'status' => 1,
+            'status_version' => $nextVersion,
+            'update_time' => time(),
+        ]);
+        if ($updated !== 1) {
+            throw new AdminException('在职状态已被其他人修改，请刷新员工档案后重试');
+        }
+        $this->openTenureForGlobalResume($employeeId, $operatorContext);
+        $this->writeChangeLog($employeeId, self::ACTION_GLOBAL_RESUME, 'employee', $employeeId, [
+            'status' => 1,
+            'status_version' => $nextVersion,
+        ], array_merge($operatorContext, ['reason' => (string)($operatorContext['reason'] ?? '人员编辑恢复在职')]));
+        return ['status' => 1, 'status_version' => $nextVersion, 'changed' => true];
+    }
+
+    /**
      * 全局离职内核：不自行开事务，由调用方事务包裹。
      * - leaveEmployeeGlobally：自开事务后调用
      * - softDeleteEmployeeArchive：与软删同事务调用，保证原子性
      */
-    protected function leaveEmployeeGloballyCore(int $employeeId, array $operatorContext = []): void
+    protected function leaveEmployeeGloballyCore(int $employeeId, array $operatorContext = []): bool
     {
         $employee = Db::name('employee')->where('id', $employeeId)->lock(true)->find();
         if (!$employee || (int)($employee['is_del'] ?? 0) === 1) {
             throw new AdminException('员工不存在');
         }
         $now = time();
+        $wasActive = (int)($employee['status'] ?? 1) === 1;
+        $currentStatusVersion = (int)($employee['status_version'] ?? 0);
+        $activeStaff = Db::name('system_store_staff')
+            ->where('employee_id', $employeeId)
+            ->where('is_del', 0)
+            ->where('status', 1)
+            ->lock(true)
+            ->select()->toArray();
+        $activeStaffIds = array_values(array_map(static function (array $row): int {
+            return (int)$row['id'];
+        }, $activeStaff));
+        $storeIds = array_values(array_unique(array_filter(array_map(static function (array $row): int {
+            return (int)($row['store_id'] ?? 0);
+        }, $activeStaff))));
+
+        // 任职期间是期间流失人数的权威事实；按员工一次离职、每个有效门店任职一条结束记录。
+        if ($wasActive) {
+            foreach ($activeStaff as $staff) {
+                $this->closeTenureForGlobalLeave($staff, $now, $operatorContext);
+            }
+        }
         Db::name('employee')->where('id', $employeeId)->update([
             'status' => 0,
+            'status_version' => $wasActive ? $currentStatusVersion + 1 : $currentStatusVersion,
             'update_time' => $now,
         ]);
         /** @var MobileAuthRevocationServices $mobileSessions */
@@ -388,6 +468,31 @@ class EmployeeStaffWriteServices extends BaseServices
                 'is_manager' => 0,
                 'is_store' => 0,
             ]);
+        if ($activeStaffIds) {
+            Db::name('staff_job_position')
+                ->whereIn('staff_id', $activeStaffIds)
+                ->where('is_del', 0)
+                ->where('status', 1)
+                ->where('end_time', 0)
+                ->update([
+                    'status' => 0,
+                    'end_time' => $now,
+                    'reason' => (string)($operatorContext['reason'] ?? '员工离职'),
+                    'operator_id' => (int)($operatorContext['operator_id'] ?? 0),
+                    'operator_name' => (string)($operatorContext['operator_name'] ?? ''),
+                    'update_time' => $now,
+                ]);
+            Db::name('staff_channel_entry')
+                ->whereIn('staff_id', $activeStaffIds)
+                ->where('is_del', 0)
+                ->where('status', 1)
+                ->update([
+                    'status' => 0,
+                    'operator_id' => (int)($operatorContext['operator_id'] ?? 0),
+                    'operator_name' => (string)($operatorContext['operator_name'] ?? ''),
+                    'update_time' => $now,
+                ]);
+        }
         $oeUpdate = [
             'is_del' => 1,
             'update_time' => $now,
@@ -415,12 +520,115 @@ class EmployeeStaffWriteServices extends BaseServices
                 ->where('is_del', 0)
                 ->update(['is_del' => 1, 'update_time' => $now]);
         }
-        $this->writeChangeLog($employeeId, 'employee_global_leave', 'employee', $employeeId, [
+        if ($wasActive) {
+            $storeNames = $storeIds
+                ? Db::name('system_store')->whereIn('id', $storeIds)->column('name', 'id')
+                : [];
+            $this->writeChangeLog($employeeId, self::ACTION_GLOBAL_LEAVE, 'employee', $employeeId, [
+                'status' => 0,
+                'status_version' => $currentStatusVersion + 1,
+                'staff_closed' => true,
+                'org_employee_closed' => true,
+                'admin_disabled' => (bool)$adminIds,
+                'store_ids' => $storeIds,
+                'store_names' => array_values(array_map(static function (int $storeId) use ($storeNames): string {
+                    return (string)($storeNames[$storeId] ?? ('门店 #' . $storeId));
+                }, $storeIds)),
+            ], $operatorContext);
+        }
+        return $wasActive;
+    }
+
+    /**
+     * 关闭门店任职期间；历史尚无进行中期间时补一条已结束记录，确保离职可统计、可追溯。
+     */
+    protected function closeTenureForGlobalLeave(array $staff, int $now, array $operatorContext): void
+    {
+        $staffId = (int)($staff['id'] ?? 0);
+        if ($staffId <= 0) {
+            return;
+        }
+        $operatorId = (int)($operatorContext['operator_id'] ?? 0);
+        $operatorName = (string)($operatorContext['operator_name'] ?? '');
+        $reason = trim((string)($operatorContext['reason'] ?? '员工离职')) ?: '员工离职';
+        $active = Db::name('staff_tenure_period')
+            ->where('staff_id', $staffId)
+            ->where('is_del', 0)
+            ->where('status', 1)
+            ->where('end_time', 0)
+            ->lock(true)
+            ->select()->toArray();
+        if ($active) {
+            foreach ($active as $period) {
+                Db::name('staff_tenure_period')->where('id', (int)$period['id'])->update([
+                    'status' => 0,
+                    'end_time' => $now,
+                    'action' => 'leave',
+                    'reason' => $reason,
+                    'operator_id' => $operatorId,
+                    'operator_name' => $operatorName,
+                    'update_time' => $now,
+                ]);
+            }
+            return;
+        }
+        $joinDate = trim((string)($staff['join_date'] ?? ''));
+        $startTime = $joinDate !== '' ? (int)strtotime($joinDate . ' 00:00:00') : (int)($staff['add_time'] ?? 0);
+        if ($startTime <= 0 || $startTime > $now) {
+            $startTime = $now;
+        }
+        $requestId = trim((string)($operatorContext['request_id'] ?? ''));
+        $tokenSeed = ($requestId !== '' ? $requestId : (string)$now) . '|leave|' . $staffId;
+        Db::name('staff_tenure_period')->insert([
+            'employee_id' => (int)($staff['employee_id'] ?? 0),
+            'store_id' => (int)($staff['store_id'] ?? 0),
+            'staff_id' => $staffId,
             'status' => 0,
-            'staff_closed' => true,
-            'org_employee_closed' => true,
-            'admin_disabled' => (bool)$adminIds,
-        ], $operatorContext);
+            'start_time' => $startTime,
+            'end_time' => $now,
+            'action' => 'leave',
+            'reason' => $reason,
+            'is_del' => 0,
+            'request_token' => 'leave-' . substr(hash('sha256', $tokenSeed), 0, 52),
+            'operator_id' => $operatorId,
+            'operator_name' => $operatorName,
+            'add_time' => $now,
+            'update_time' => $now,
+        ]);
+    }
+
+    /** 恢复在职时为当前有效任职开启新期间；已有进行中期间时保持不变。 */
+    protected function openTenureForGlobalResume(int $employeeId, array $operatorContext): void
+    {
+        $now = time();
+        $staffRows = Db::name('system_store_staff')->where('employee_id', $employeeId)
+            ->where('status', 1)->where('is_del', 0)->lock(true)->select()->toArray();
+        foreach ($staffRows as $staff) {
+            $staffId = (int)$staff['id'];
+            $exists = Db::name('staff_tenure_period')->where('staff_id', $staffId)
+                ->where('status', 1)->where('end_time', 0)->where('is_del', 0)->lock(true)->find();
+            if ($exists) {
+                continue;
+            }
+            $requestId = trim((string)($operatorContext['request_id'] ?? ''));
+            $tokenSeed = ($requestId !== '' ? $requestId : (string)$now) . '|resume|' . $staffId;
+            Db::name('staff_tenure_period')->insert([
+                'employee_id' => $employeeId,
+                'store_id' => (int)($staff['store_id'] ?? 0),
+                'staff_id' => $staffId,
+                'status' => 1,
+                'start_time' => $now,
+                'end_time' => 0,
+                'action' => 'resume',
+                'reason' => trim((string)($operatorContext['reason'] ?? '人员编辑恢复在职')) ?: '人员编辑恢复在职',
+                'is_del' => 0,
+                'request_token' => 'resume-' . substr(hash('sha256', $tokenSeed), 0, 51),
+                'operator_id' => (int)($operatorContext['operator_id'] ?? 0),
+                'operator_name' => (string)($operatorContext['operator_name'] ?? ''),
+                'add_time' => $now,
+                'update_time' => $now,
+            ]);
+        }
     }
 
     /**

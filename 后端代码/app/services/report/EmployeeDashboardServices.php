@@ -24,7 +24,7 @@ final class EmployeeDashboardServices
         $range = $this->range($range);
         $role = trim((string)($input['role'] ?? ''));
         $staff = $this->staffRows($stores, $role);
-        $overview = $this->overview($staff, $range['end']);
+        $overview = $this->overview($staff, $range['end'], $this->departureCount($stores, $range, $role));
         $roles = $this->roles($staff, $stores);
         $performance = $this->performance($stores, $range);
         $target = $this->target($stores, $range, $performance);
@@ -74,7 +74,7 @@ final class EmployeeDashboardServices
         return $q->select()->toArray();
     }
 
-    private function overview(array $staff, string $end): array
+    private function overview(array $staff, string $end, int $departureCount = 0): array
     {
         $unique = [];
         foreach ($staff as $row) {
@@ -85,14 +85,36 @@ final class EmployeeDashboardServices
         $now = strtotime($end . ' 23:59:59') ?: time();
         // 学历与员工编辑页共用六档；历史未填写归入“其他”，保证分布合计等于当前员工数。
         $total = count($staff); $ages = ['18-25岁'=>0,'26-35岁'=>0,'36-45岁'=>0,'46-55岁'=>0,'56岁以上'=>0]; $tenure = ['1年以内'=>0,'1-3年'=>0,'3-5年'=>0,'5-10年'=>0,'10年以上'=>0]; $edu = ['本科以上'=>0,'本科'=>0,'大专'=>0,'高中'=>0,'高中以下'=>0,'其他'=>0];
-        $ageSum = 0; $tenureSum = 0;
+        $ageSum = 0; $ageCount = 0; $tenureSum = 0; $tenureCount = 0;
         foreach ($staff as $row) {
-            $birthday = $this->timestamp($row['birthday'] ?? 0); $storedAge = (int)($row['age'] ?? 0); if ($storedAge > 0) { $age = $storedAge; $bucket = $age<=25?'18-25岁':($age<=35?'26-35岁':($age<=45?'36-45岁':($age<=55?'46-55岁':'56岁以上'))); $ages[$bucket]++; $ageSum += $age; } elseif ($birthday > 0) { $age = max(0, (int)date('Y',$now)-(int)date('Y',$birthday) - (date('md',$now)<date('md',$birthday)?1:0)); if ($age < 18) $age = 18; $bucket = $age<=25?'18-25岁':($age<=35?'26-35岁':($age<=45?'36-45岁':($age<=55?'46-55岁':'56岁以上'))); $ages[$bucket]++; $ageSum += $age; }
-            $entry = $this->timestamp($row['entry_time'] ?? 0); if ($entry > 0) { $years = max(0, ($now-$entry)/31557600); $bucket = $years<1?'1年以内':($years<3?'1-3年':($years<5?'3-5年':($years<10?'5-10年':'10年以上'))); $tenure[$bucket]++; $tenureSum += $years; }
+            $birthday = $this->timestamp($row['birthday'] ?? 0); $storedAge = (int)($row['age'] ?? 0); if ($storedAge > 0) { $age = $storedAge; $bucket = $age<=25?'18-25岁':($age<=35?'26-35岁':($age<=45?'36-45岁':($age<=55?'46-55岁':'56岁以上'))); $ages[$bucket]++; $ageSum += $age; $ageCount++; } elseif ($birthday > 0) { $age = max(0, (int)date('Y',$now)-(int)date('Y',$birthday) - (date('md',$now)<date('md',$birthday)?1:0)); if ($age < 18) $age = 18; $bucket = $age<=25?'18-25岁':($age<=35?'26-35岁':($age<=45?'36-45岁':($age<=55?'46-55岁':'56岁以上'))); $ages[$bucket]++; $ageSum += $age; $ageCount++; }
+            $entry = $this->timestamp($row['entry_time'] ?? 0); if ($entry > 0) { $years = max(0, ($now-$entry)/31557600); $bucket = $years<1?'1年以内':($years<3?'1-3年':($years<5?'3-5年':($years<10?'5-10年':'10年以上'))); $tenure[$bucket]++; $tenureSum += $years; $tenureCount++; }
             $education = trim((string)($row['education'] ?? '')); $edu[isset($edu[$education]) ? $education : '其他']++;
         }
         return ['cards' => [
-            $this->card('total','员工总人数',$total,'人','在职且启用员工档案统计','blue'), $this->card('average_age','平均年龄',$total?round($ageSum/$total,1):null,'岁','有生日资料员工按查询截止日计算','green'), $this->card('average_tenure','平均工龄',$total?round($tenureSum/$total,1):null,'年','有入职日期员工按查询截止日计算','teal'), $this->card('active_staff','在职人数',$total,'人','当前权限范围内有效门店任职统计','purple'), $this->card('beautician_count', '美容师人数', count(array_filter($staff, fn($r)=>(int)($r['cashier_craftsman_enabled']??0)===1)), '人','启用美容师能力的有效任职统计','amber'), $this->card('departures','期间流失人数',0,'人','员工离职事实接入后按离职日期统计','red')], 'education'=>$this->rows($edu), 'ages'=>$this->rows($ages), 'tenure'=>$this->rows($tenure)];
+            $this->card('total','员工总人数',$total,'人','在职且启用员工档案统计','blue'), $this->card('average_age','平均年龄',$ageCount?round($ageSum/$ageCount,1):null,'岁','仅按已填写年龄或生日的员工计算','green'), $this->card('average_tenure','平均工龄',$tenureCount?round($tenureSum/$tenureCount,1):null,'年','仅按已填写入职日期的员工计算','teal'), $this->card('active_staff','在职人数',$total,'人','当前权限范围内有效门店任职统计','purple'), $this->card('beautician_count', '美容师人数', count(array_filter($staff, fn($r)=>(int)($r['cashier_craftsman_enabled']??0)===1)), '人','启用美容师能力的有效任职统计','amber'), $this->card('departures','期间流失人数',$departureCount,'人','按离职记录的离职时间及门店统计','red')], 'education'=>$this->rows($edu), 'ages'=>$this->rows($ages), 'tenure'=>$this->rows($tenure)];
+    }
+
+    /**
+     * 期间流失只读取 action=leave 的任职结束事实，按员工去重；调店、停职和删除均不冒充离职。
+     * 岗位筛选使用离职同时结束的岗位历史，前端传入范围不能扩大后端门店权限。
+     */
+    private function departureCount(array $stores, array $range, string $role): int
+    {
+        $start = strtotime($range['start'] . ' 00:00:00') ?: 0;
+        $end = strtotime($range['end'] . ' 23:59:59') ?: 0;
+        $query = Db::name('staff_tenure_period')->alias('tp')
+            ->whereIn('tp.store_id', $stores)
+            ->where('tp.is_del', 0)
+            ->where('tp.status', 0)
+            ->where('tp.action', 'leave')
+            ->whereBetween('tp.end_time', [$start, $end]);
+        if ($role !== '' && $role !== '全部岗位') {
+            $query->join('staff_job_position jp', 'jp.staff_id=tp.staff_id AND jp.end_time=tp.end_time')
+                ->join('position p', 'p.id=jp.position_id')
+                ->whereLike('p.name', '%' . $role . '%');
+        }
+        return (int)$query->distinct(true)->count('tp.employee_id');
     }
 
     private function roles(array $staff, array $stores): array

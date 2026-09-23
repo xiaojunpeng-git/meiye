@@ -628,7 +628,6 @@ class SystemStoreStaff extends AuthController
             'verify_status' => (int)($raw['verify_status'] ?? 1),
             'is_cashier' => (int)($raw['is_cashier'] ?? 0),
             'is_customer' => (int)($raw['is_customer'] ?? 0),
-            'status' => (int)($raw['status'] ?? 1),
             'request_token' => $bodyToken,
         ];
         foreach (['roles', 'role_ids', 'save_roles', 'is_manager', 'is_butler', 'position', 'position_level'] as $k) {
@@ -643,6 +642,12 @@ class SystemStoreStaff extends AuthController
         }
         // 学历属于统一员工主档；只转发显式提交的值与版本，避免旧客户端保存时清空它。
         foreach (['education', 'education_version'] as $k) {
+            if (array_key_exists($k, $raw)) {
+                $input[$k] = $raw[$k];
+            }
+        }
+        // 在职状态是会产生离职事实的受控字段；状态与乐观锁版本必须成对转发。
+        foreach (['status', 'status_version'] as $k) {
             if (array_key_exists($k, $raw)) {
                 $input[$k] = $raw[$k];
             }

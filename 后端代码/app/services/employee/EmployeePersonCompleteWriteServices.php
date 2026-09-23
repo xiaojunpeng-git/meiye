@@ -68,6 +68,20 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             $input['education_version'] = (int)$input['education_version'];
         }
 
+        // 门店端 status 只控制本店任职；平台端 status 才是员工全局在职状态，
+        // 并必须携带主档版本以防止两个编辑窗口互相覆盖。
+        $statusPresent = $source === 'hq' && array_key_exists('status', $input);
+        if ($source === 'hq' && $statusPresent !== array_key_exists('status_version', $input)) {
+            throw new AdminException('在职状态与版本必须同时提交');
+        }
+        if ($statusPresent) {
+            $input['status'] = (int)$input['status'] === 1 ? 1 : 0;
+            if (filter_var($input['status_version'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]) === false) {
+                throw new AdminException('在职状态版本无效');
+            }
+            $input['status_version'] = (int)$input['status_version'];
+        }
+
         $employeeIdHint = (int)($input['employee_id'] ?? 0);
         $staffIdHint = (int)($input['staff_id'] ?? 0);
         if ($employeeIdHint <= 0 && $staffIdHint > 0) {
@@ -146,6 +160,9 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'education_present' => $educationPresent ? 1 : 0,
             'education' => $educationPresent ? $input['education'] : null,
             'education_version' => $educationPresent ? $input['education_version'] : null,
+            'status_present' => $statusPresent ? 1 : 0,
+            'status' => $statusPresent ? $input['status'] : null,
+            'status_version' => $statusPresent ? $input['status_version'] : null,
         ];
 
         if (empty($requestCtx['body_token']) && isset($input['request_token'])) {
@@ -303,6 +320,12 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         if ($orgId <= 0 && $storeId > 0) {
             $orgId = (int)Db::name('organization_store')->where('store_id', $storeId)->value('org_id');
         }
+        // 历史员工可能只有门店归属、尚无 organization_employee 关系。
+        // 详情仍须返回门店反推的真实组织名称，保证编辑器显示的是当前有效归属，
+        // 而不是明明已有 org_id 却展示“请选择所属组织”。
+        $orgName = $orgId > 0
+            ? (string)Db::name('organization')->where('id', $orgId)->where('is_del', 0)->value('name')
+            : '';
 
         /** @var EmployeeInternalAccountServices $acctSvc */
         $acctSvc = app()->make(EmployeeInternalAccountServices::class);
@@ -367,6 +390,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'employee_id' => $employeeId,
             'staff_id' => $staffId,
             'org_id' => $orgId,
+            'org_name' => $orgName,
             'store_id' => $storeId,
             'store_name' => $storeName,
             'org_employee_id' => $oe ? (int)$oe['id'] : 0,
@@ -389,8 +413,10 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 ? (int)($staff['cashier_craftsman_enabled'] ?? 1) : 1,
             'is_fencheng' => $staff ? (int)($staff['is_fencheng'] ?? 0) : 0,
             'status' => (int)($emp['status'] ?? 1),
+            'status_version' => (int)($emp['status_version'] ?? 0),
             'education' => (string)($emp['education'] ?? ''),
             'education_version' => (int)($emp['education_version'] ?? 0),
+            'departure_records' => $this->departureRecords($employeeId),
         ];
         $craftsmanType = $staff
             ? (string)($staff['craftsman_performance_type'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION)
@@ -568,9 +594,17 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         ], $opCtx, ['use_outer_transaction' => true]);
         $orgEmployeeId = (int)($oeRet['id'] ?? 0);
 
+        // 平台端的 status 是员工全局状态。离职必须留到编排末尾一次性关闭
+        // 员工、任职、岗位、入口与任职期间，不能在保存普通任职资料时抢先
+        // 把 staff 置为无效，否则手机端授权校验会报错且离职事实会丢失任职。
+        $targetGlobalLeave = $source === 'hq'
+            && array_key_exists('status', $input)
+            && (int)$input['status'] === 0;
+
         // 3) staff（仅 store_id>0；禁止 store_id=0 伪造任职）
         $staffId = 0;
         $legacyOrderStatus = null;
+        $existingAssignmentStatus = null;
         if ($storeId > 0) {
             $this->maybeFail('staff', $input);
             if ($staffIdHint > 0) {
@@ -583,6 +617,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                     throw new AdminException('任职与员工不匹配');
                 }
                 $staffId = $staffIdHint;
+                $existingAssignmentStatus = (int)($existStaff['status'] ?? 0) === 1 ? 1 : 0;
                 if (!$positionIdsPresent) {
                     $legacyOrderStatus = (int)($existStaff['order_status'] ?? 0) === 1 ? 1 : 0;
                 }
@@ -594,6 +629,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                     ->find();
                 if ($existStaff) {
                     $staffId = (int)$existStaff['id'];
+                    $existingAssignmentStatus = (int)($existStaff['status'] ?? 0) === 1 ? 1 : 0;
                 }
             }
 
@@ -602,7 +638,9 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 'staff_name' => $staffName,
                 'phone' => $phone,
                 'avatar' => $avatar,
-                'status' => (int)($input['status'] ?? 1) === 1 ? 1 : 0,
+                'status' => $targetGlobalLeave && $existingAssignmentStatus !== null
+                    ? $existingAssignmentStatus
+                    : ((int)($input['status'] ?? 1) === 1 ? 1 : 0),
                 'can_choose' => (int)($input['can_choose'] ?? 1) === 1 ? 1 : 0,
                 'cashier_salesperson_enabled' => (int)($input['cashier_salesperson_enabled'] ?? 1) === 1 ? 1 : 0,
                 'cashier_craftsman_enabled' => (int)($input['cashier_craftsman_enabled'] ?? 1) === 1 ? 1 : 0,
@@ -771,7 +809,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         // 员工只写员工授权，后续由组织数据权限限定可见、可操作门店。
         // 未提交该字段的旧调用只重投影岗位，绝不根据岗位擅自把历史关闭授权重新打开。
         $mobileAccessOut = null;
-        if ($mobileEnabledPresent) {
+        if ($mobileEnabledPresent && !$targetGlobalLeave) {
             $mobileAccessOut = $jobSvc->setEmployeeMobileAccessInTx(
                 $employeeId,
                 $staffId,
@@ -782,11 +820,25 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             );
             $authProjection = ['auth_version' => $mobileAccessOut['auth_version']];
         } else {
+            // 离职由后续全局状态同步统一撤销手机端授权；此处不得对已离职
+            // 任职重复执行“保存授权”，否则会把合法的重复保存误判为无效任职。
             $authProjection = $jobSvc->afterEmployeeAuthChanged($employeeId);
         }
 
         // 7) 编排审计
         $this->maybeFail('audit', $input);
+        $statusOut = null;
+        if ($source === 'hq' && array_key_exists('status', $input)) {
+            $statusCtx = array_merge($opCtx, [
+                'reason' => (int)$input['status'] === 0 ? '人员编辑切换为离职' : '人员编辑恢复在职',
+            ]);
+            $statusOut = $staffWrite->syncEmploymentStatusInCurrentTransaction(
+                $employeeId,
+                (int)$input['status'],
+                (int)$input['status_version'],
+                $statusCtx
+            );
+        }
         $out = [
             'employee_id' => $employeeId,
             'staff_id' => $staffId,
@@ -817,6 +869,11 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 : (string)Db::name('employee')->where('id', $employeeId)->value('education'),
             'education_version' => $educationOut !== null ? $educationOut['education_version']
                 : (int)Db::name('employee')->where('id', $employeeId)->value('education_version'),
+            'status' => $statusOut !== null ? (int)$statusOut['status']
+                : (int)Db::name('employee')->where('id', $employeeId)->value('status'),
+            'status_version' => $statusOut !== null ? (int)$statusOut['status_version']
+                : (int)Db::name('employee')->where('id', $employeeId)->value('status_version'),
+            'departure_records' => $this->departureRecords($employeeId),
         ];
         $out = array_merge($out, app()->make(EmployeeCraftsmanPerformanceTypeServices::class)
             ->project((string)($out['craftsman_performance_type'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION)));
@@ -893,6 +950,37 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'add_time' => time(),
         ]);
         return ['education' => $education, 'education_version' => $nextVersion];
+    }
+
+    /**
+     * 离职记录只读取不可变员工变更日志；页面刷新、跨端重进均恢复相同结果。
+     * 门店名称使用离职发生时写入的快照，避免后续改名改变历史展示。
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    protected function departureRecords(int $employeeId): array
+    {
+        $rows = Db::name('employee_change_log')
+            ->where('employee_id', $employeeId)
+            ->where('action', EmployeeStaffWriteServices::ACTION_GLOBAL_LEAVE)
+            ->order('id', 'desc')
+            ->limit(50)
+            ->select()->toArray();
+        return array_map(static function (array $row): array {
+            $after = json_decode((string)($row['after_data'] ?? ''), true);
+            $after = is_array($after) ? $after : [];
+            $storeNames = array_values(array_filter(array_map('strval', (array)($after['store_names'] ?? []))));
+            return [
+                'id' => (int)($row['id'] ?? 0),
+                'left_at' => (int)($row['add_time'] ?? 0),
+                'left_at_text' => (int)($row['add_time'] ?? 0) > 0
+                    ? date('Y-m-d H:i:s', (int)$row['add_time']) : '-',
+                'store_names' => $storeNames,
+                'store_text' => $storeNames ? implode('、', $storeNames) : '无门店直属',
+                'operator_name' => (string)($row['operator_name'] ?? ''),
+                'reason' => (string)($row['reason'] ?? '员工离职'),
+            ];
+        }, $rows);
     }
 
     private function hasEmployeeMobileAuthTable(): bool

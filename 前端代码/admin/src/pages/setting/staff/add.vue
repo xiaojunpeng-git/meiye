@@ -449,6 +449,28 @@
               </Col>
             </Row>
           </TabPane>
+
+          <TabPane label="离职记录" name="departure" :disabled="!(editId > 0)">
+            <Alert show-icon>
+              在“基本信息”把在职状态切换为“离职”并保存后，系统自动生成离职记录。记录用于员工看板的期间流失统计，不支持手工删除或改写。
+            </Alert>
+            <div v-if="departureRecords.length" class="departure-records">
+              <table>
+                <thead>
+                  <tr><th>离职时间</th><th>离职门店</th><th>操作人</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="record in departureRecords" :key="record.id">
+                    <td>{{ record.left_at_text || '-' }}</td>
+                    <td>{{ record.store_text || '无门店直属' }}</td>
+                    <td>{{ record.operator_name || '-' }}</td>
+                    <td>{{ record.reason || '员工离职' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else class="departure-empty">暂无离职记录</div>
+          </TabPane>
         </Tabs>
       </Form>
       <div slot="footer">
@@ -592,6 +614,7 @@ function getDefaultStaffForm() {
     employment_type_version: 0,
     customer_url: '',
     status: 1,
+    status_version: 0,
     salary_status: 1,
     department: '',
     employee_number: '',
@@ -617,6 +640,8 @@ export default {
     value: { type: Boolean, default: false },
     /** 编辑主键：组织场景必须为 employee_id；店员列表场景为 staff_id */
     editId: { type: Number, default: 0 },
+    /** 店员列表已知 employee_id 时用于直读完整档案，避免先调慢速旧 read 接口 */
+    employeeId: { type: Number, default: 0 },
     /** 组织场景可选：当前任职 staff_id，仅作 person_complete 的 query，不得当作路径 id */
     staffId: { type: Number, default: 0 },
     /** organization：组织工作台新建/编辑人员场景 */
@@ -674,6 +699,8 @@ export default {
       /** 编辑时必须读到学历版本，防止详情降级后用空值覆盖主档。 */
       educationLoaded: true,
       educationOptions: ['本科以上', '本科', '大专', '高中', '高中以下', '其他'],
+      /** 离职记录由服务端不可变审计投影返回，不能在前端编辑或拼算。 */
+      departureRecords: [],
       /** 编辑人员时必须由完整详情回显授权状态，防止读取失败后误撤权。 */
       mobileAuthLoaded: true,
       /** 新建人员自动默认值只应用一次，员工手工关闭后不再被岗位选择覆盖。 */
@@ -693,6 +720,7 @@ export default {
       appointmentStorePickerLabel: '',
       /** 详情加载序号：连续切换人员时丢弃过期响应，防止串人 */
       loadSeq: 0,
+      formReloadScheduled: false,
       jobOptions: [],
       workList: [],
       defaultAvatars: { ...DEFAULT_AVATARS },
@@ -792,7 +820,7 @@ export default {
   watch: {
     value(val) {
       if (val) {
-        this.openForm();
+        this.scheduleOpenForm();
       } else {
         // 关闭时作废进行中的详情请求，并清空表单，避免下次打开短暂显示上一人
         this.loadSeq += 1;
@@ -802,12 +830,17 @@ export default {
     },
     editId() {
       if (this.value) {
-        this.openForm();
+        this.scheduleOpenForm();
       }
     },
     staffId() {
       if (this.value && Number(this.editId) > 0) {
-        this.openForm();
+        this.scheduleOpenForm();
+      }
+    },
+    employeeId() {
+      if (this.value && Number(this.editId) > 0) {
+        this.scheduleOpenForm();
       }
     },
     'formInline.position_ids': {
@@ -834,6 +867,18 @@ export default {
     this.workMember();
   },
   methods: {
+    /**
+     * 父组件同一轮会更新弹窗开关、employee_id 和 staff_id，
+     * 将多个 watcher 合并到一次 nextTick，避免并发重复请求同一员工档案。
+     */
+    scheduleOpenForm() {
+      if (this.formReloadScheduled) return;
+      this.formReloadScheduled = true;
+      this.$nextTick(() => {
+        this.formReloadScheduled = false;
+        if (this.value) this.openForm();
+      });
+    },
     /** 仅当前端 info 明确 level=0 且非代理时视为总部超管（access 空时的唯一放行例外） */
     isExplicitHqSuperAdmin(info) {
       if (!info || typeof info !== 'object') return false;
@@ -891,6 +936,7 @@ export default {
       this.organizationPickerLabel = '';
       this.appointmentStorePickerIds = [];
       this.appointmentStorePickerLabel = '';
+      this.departureRecords = [];
       this.formInline = this.getDefaultForm();
       this.employmentTypeLoaded = !(Number(this.editId) > 0);
       this.educationLoaded = !(Number(this.editId) > 0);
@@ -1070,7 +1116,11 @@ export default {
         education: educationLoaded ? String(data.education || '') : '',
         education_version: educationLoaded ? Number(data.education_version || 0) : 0,
         status: Number((data && data.status) != null ? data.status : base.status),
+        status_version: Number((data && data.status_version) != null ? data.status_version : base.status_version),
       };
+      this.departureRecords = Array.isArray(data && data.departure_records)
+        ? data.departure_records.map((record) => ({ ...record, id: Number(record.id || 0) }))
+        : [];
       const selectedOrganization = this.organizationMemberships
         .find((item) => item.org_id === Number(this.formInline.org_id || 0));
       this.organizationPickerLabel = String(
@@ -1128,6 +1178,29 @@ export default {
             if (seq !== this.loadSeq || !this.value) return;
             const data = (cres && cres.data) || {};
             if (!this.assertDetailMatchesRequest(data, employeeId, staffId)) {
+              this.detailLoaded = true;
+              this.$Message.error('人员详情与所选人员不一致，已取消回填');
+              return;
+            }
+            this.applyPersonComplete(data);
+          })
+          .catch((err) => {
+            if (seq !== this.loadSeq || !this.value) return;
+            this.detailLoaded = true;
+            this.$Message.error((err && err.msg) || '加载人员失败');
+          });
+        return;
+      }
+
+      // 店员列表已有稳定 employee_id + staff_id，直读人员完整契约。
+      // 返回后仍校验双主键，防止快速切换编辑对象时异步串人。
+      const employeeIdHint = Number(this.employeeId || 0);
+      if (employeeIdHint > 0) {
+        getPersonComplete(employeeIdHint, { staff_id: editId })
+          .then((cres) => {
+            if (seq !== this.loadSeq || !this.value) return;
+            const data = (cres && cres.data) || {};
+            if (!this.assertDetailMatchesRequest(data, employeeIdHint, editId)) {
               this.detailLoaded = true;
               this.$Message.error('人员详情与所选人员不一致，已取消回填');
               return;
@@ -1349,6 +1422,8 @@ export default {
         delete payload.education_version;
       }
       payload.request_token = newRequestToken();
+      payload.status = Number(this.formInline.status) === 1 ? 1 : 0;
+      payload.status_version = Number(this.formInline.status_version || 0);
       return payload;
     },
     handleSubmit() {
@@ -1589,4 +1664,33 @@ export default {
   border-radius 8px
   font-size 12px
   line-height 1.4
+
+.departure-records
+  overflow-x auto
+  border 1px solid #e8eaec
+  border-radius 6px
+
+  table
+    width 100%
+    min-width 720px
+    border-collapse collapse
+
+  th, td
+    padding 12px 14px
+    text-align left
+    border-bottom 1px solid #e8eaec
+    font-size 13px
+
+  th
+    color #515a6e
+    background #f8f8f9
+    font-weight 600
+
+  tbody tr:last-child td
+    border-bottom 0
+
+.departure-empty
+  padding 64px 0
+  text-align center
+  color #999
 </style>

@@ -99,7 +99,7 @@
               <template slot-scope="{ row }" slot="action">
                 <div class="action-ops">
                   <div class="action-row">
-                    <a @click="openForm(resolveEditId(row))">编辑</a>
+                    <a @click="openForm(row)">编辑</a>
                     <Divider type="vertical" />
                     <a @click="openTransfer(row)">调店</a>
                     <Divider type="vertical" />
@@ -138,7 +138,14 @@
       </div>
     </Card>
 
-    <form-modal v-model="formModal" :edit-id="formEditId" @success="getList" />
+    <form-modal
+      v-model="formModal"
+      :edit-id="formEditId"
+      :employee-id="formEmployeeId"
+      :staff-id="formStaffId"
+      :scene="formScene"
+      @success="getList"
+    />
     <column-setting
       v-model="showColumnSetting"
       :columns-meta="columnsMeta"
@@ -339,6 +346,9 @@ export default {
       options: timeOptions,
       formModal: false,
       formEditId: 0,
+      formEmployeeId: 0,
+      formStaffId: 0,
+      formScene: '',
       showColumnSetting: false,
       showTransferModal: false,
       showTransferLogModal: false,
@@ -505,8 +515,26 @@ export default {
           this.$Message.error(err.msg);
         });
     },
-    openForm(id = 0) {
-      this.formEditId = Number(id) || 0;
+    /**
+     * 列表已返回 employee_id 与 staff_id，编辑时直接传入完整详情契约，
+     * 不再为了解析 employee_id 先调用慢速旧 read 接口。组织直属人员
+     * 仍以 employee_id 为保存主键，禁止把负数占位 staff_id 传给写接口。
+     */
+    openForm(row = null) {
+      if (row && typeof row === 'object') {
+        const staffId = Number(row.id || 0);
+        const employeeId = Number(row.employee_id || 0);
+        const organizationDirect = Number(row.is_organization_direct || 0) === 1 || staffId <= 0;
+        this.formEmployeeId = employeeId;
+        this.formStaffId = organizationDirect ? 0 : staffId;
+        this.formScene = organizationDirect ? 'organization' : '';
+        this.formEditId = organizationDirect ? employeeId : staffId;
+      } else {
+        this.formEditId = Number(row) || 0;
+        this.formEmployeeId = 0;
+        this.formStaffId = 0;
+        this.formScene = '';
+      }
       this.formModal = true;
     },
     /**
