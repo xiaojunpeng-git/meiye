@@ -379,57 +379,14 @@ class SystemStoreStaffServices extends BaseServices
             }
         ]);
         [$page, $limit] = $this->getPageValue();
-        // 当前正式员工目录规模为千级；先在组织范围内合并，再统一分页，避免直属员工永远被门店行挤出第一页。
-        $storeRows = $this->dao->getStoreStaffList($where, '*', 0, 0, $with);
-        $allRole = $storeRows ? $this->loadRoleMapForStaffList($storeRows) : [];
-        /** @var UserServices $userService */
-        $userService = app()->make(UserServices::class);
-        $employeeIds = array_values(array_unique(array_filter(array_map(static function ($row) {
-            return (int)($row['employee_id'] ?? 0);
-        }, $storeRows ?: []))));
-        $employmentTypeByEmployee = $employeeIds
-            ? Db::name('employee')->whereIn('id', $employeeIds)->column('employment_type_code', 'id')
-            : [];
-
-        // 组织与任职门店是两条独立关系：门店行的组织取门店绑定组织，
-        // 不能再把组织名称塞进 store_name。
-        $storeIds = array_values(array_unique(array_filter(array_map(static function ($row) {
-            return (int)($row['store_id'] ?? 0);
-        }, $storeRows ?: []))));
-        $organizationNameByStore = [];
-        if ($storeIds) {
-            $organizationNameRows = Db::name('organization_store')->alias('os')
-                ->leftJoin('organization o', 'o.id = os.org_id')
-                ->whereIn('os.store_id', $storeIds)
-                ->where('o.is_del', 0)
-                ->field('os.store_id,os.org_id,o.name as org_name')
-                ->select()->toArray();
-            foreach ($organizationNameRows as $organizationNameRow) {
-                $sid = (int)($organizationNameRow['store_id'] ?? 0);
-                if ($sid <= 0 || isset($organizationNameByStore[$sid])) {
-                    continue;
-                }
-                $organizationNameByStore[$sid] = [
-                    'id' => (int)($organizationNameRow['org_id'] ?? 0),
-                    'name' => (string)($organizationNameRow['org_name'] ?? ''),
-                ];
-            }
-        }
+        // 合并和去重仍覆盖整个授权组织，但候选只读主键；角色、用户、岗位等明细仅处理当前页。
+        $storeRows = $this->dao->getStoreStaffList($where, 'id,employee_id,store_id', 0, 0, []);
         $byEmployee = [];
-        foreach ($storeRows as &$row) {
-            $row['employment_type_code'] = (string)($employmentTypeByEmployee[(int)($row['employee_id'] ?? 0)] ?? 'internal');
-            $this->enrichStaffListItem($row, $allRole, $userService, $hideFencheng);
+        foreach ($storeRows as $row) {
             $row['is_organization_direct'] = 0;
-            $storeOrganization = $organizationNameByStore[(int)($row['store_id'] ?? 0)] ?? null;
-            $row['organization_id'] = (int)($storeOrganization['id'] ?? 0);
-            $row['organization_name'] = (string)($storeOrganization['name'] ?? '');
-            $row['organization_names'] = $row['organization_name'] !== ''
-                ? [$row['organization_name']]
-                : [];
             $employeeId = (int)($row['employee_id'] ?? 0);
             $byEmployee[$employeeId > 0 ? $employeeId : ('staff:' . (int)$row['id'])] = $row;
         }
-        unset($row);
 
         // 组织树选择范围默认包含下级，和门店列表的 org_id 语义保持一致。
         $orgIds = $this->collectOrganizationIds($organizationId);
@@ -464,80 +421,117 @@ class SystemStoreStaffServices extends BaseServices
                 ->toArray();
         }
 
-        // 直属人员可以同时归属多个组织。列表需要展示完整有效组织关系，
-        // 不能只展示当前筛选树节点，更不能伪装成任职门店。
-        $directEmployeeIds = array_values(array_unique(array_filter(array_map(static function ($row) {
-            return (int)($row['employee_id'] ?? 0);
-        }, $directRows))));
-        $organizationNamesByEmployee = [];
-        if ($directEmployeeIds) {
-            $organizationMembershipRows = Db::name('organization_employee')->alias('oe')
-                ->leftJoin('organization o', 'o.id = oe.org_id')
-                ->whereIn('oe.employee_id', $directEmployeeIds)
-                ->where('oe.is_del', 0)
-                ->where('o.is_del', 0)
-                ->field('oe.employee_id,oe.org_id,o.name as org_name')
-                ->order('oe.id', 'asc')
-                ->select()->toArray();
-            foreach ($organizationMembershipRows as $organizationMembershipRow) {
-                $eid = (int)($organizationMembershipRow['employee_id'] ?? 0);
-                $name = trim((string)($organizationMembershipRow['org_name'] ?? ''));
-                if ($eid <= 0 || $name === '') {
-                    continue;
-                }
-                $organizationNamesByEmployee[$eid][(int)($organizationMembershipRow['org_id'] ?? 0)] = $name;
-            }
-        }
+        $directRowsByEmployee = [];
         foreach ($directRows as $row) {
             $employeeId = (int)$row['employee_id'];
             // 同一人员已有当前组织内门店任职时保留真实门店行，避免重复；其直属关系仍保存在组织工作台。
             if (isset($byEmployee[$employeeId])) {
                 continue;
             }
-            $byEmployee[$employeeId] = [
-                // 负 ID 为只读占位，防止历史编辑/调店/业绩接口误把直属人员当店员。
-                'id' => -$employeeId,
-                'employee_id' => $employeeId,
-                'store_id' => 0,
-                'store_name' => '',
-                'organization_id' => (int)($row['org_id'] ?? 0),
-                'organization_name' => implode('、', array_values($organizationNamesByEmployee[$employeeId] ?? []))
-                    ?: (string)($row['org_name'] ?? ''),
-                'organization_names' => array_values($organizationNamesByEmployee[$employeeId] ?? [])
-                    ?: array_values(array_filter([(string)($row['org_name'] ?? '')])),
-                'department' => (string)($row['org_name'] ?? ''),
-                'staff_name' => (string)($row['name'] ?? ''),
-                'nickname' => (string)($row['nickname'] ?? ''),
-                'phone' => (string)($row['phone'] ?? ''),
-                'avatar' => (string)($row['avatar'] ?? ''),
-                'roles' => '组织直属（无门店权限）',
-                'position_label' => (string)($row['job_title'] ?? '未设职位'),
-                'position_level_label' => '-',
-                'status' => (int)($row['status'] ?? 0),
-                'is_manager' => 0,
-                'can_choose' => 0,
-                'cashier_salesperson_enabled' => 0,
-                'cashier_craftsman_enabled' => 0,
-                'craftsman_performance_type' => 'commission',
-                'employment_type_code' => (string)($row['employment_type_code'] ?? 'internal'),
-                'mobile_enabled' => 0,
-                'is_fencheng' => 0,
-                'has_pwd' => 0,
-                'is_customer' => 0,
-                'is_reservable' => 0,
-                'customer_num' => 0,
-                'is_organization_direct' => 1,
-            ];
+            $byEmployee[$employeeId] = ['id' => -$employeeId, 'employee_id' => $employeeId, 'is_organization_direct' => 1];
+            $directRowsByEmployee[$employeeId] = $row;
         }
         $list = array_values($byEmployee);
-        $this->enrichStaffPositionLabels($list);
-        $this->enrichMobileEnabled($list);
         usort($list, static function (array $left, array $right): int {
             return ((int)($left['is_organization_direct'] ?? 0) <=> (int)($right['is_organization_direct'] ?? 0))
                 ?: ((int)($left['id'] ?? 0) <=> (int)($right['id'] ?? 0));
         });
         $count = count($list);
         $list = array_slice($list, ($page - 1) * $limit, $limit);
+        $pageStoreIds = array_values(array_filter(array_map(static function ($row) {
+            return (int)($row['is_organization_direct'] ?? 0) === 0 ? (int)$row['id'] : 0;
+        }, $list)));
+        $pageStoreRows = $this->dao->getStoreStaffRowsByIds($where, $pageStoreIds, $with);
+        $staffById = [];
+        $allRole = $pageStoreRows ? $this->loadRoleMapForStaffList($pageStoreRows) : [];
+        /** @var UserServices $userService */
+        $userService = app()->make(UserServices::class);
+        $bulkLookups = $this->loadStaffListLookups($pageStoreRows);
+        $pageEmployeeIds = array_values(array_unique(array_filter(array_map(static function ($row) {
+            return (int)($row['employee_id'] ?? 0);
+        }, $pageStoreRows))));
+        $employmentTypeByEmployee = $pageEmployeeIds
+            ? Db::name('employee')->whereIn('id', $pageEmployeeIds)->column('employment_type_code', 'id') : [];
+        $pageStoreIdsForOrg = array_values(array_unique(array_filter(array_map(static function ($row) {
+            return (int)($row['store_id'] ?? 0);
+        }, $pageStoreRows))));
+        $organizationNameByStore = [];
+        if ($pageStoreIdsForOrg) {
+            $organizationNameRows = Db::name('organization_store')->alias('os')
+                ->leftJoin('organization o', 'o.id = os.org_id')
+                ->whereIn('os.store_id', $pageStoreIdsForOrg)->where('o.is_del', 0)
+                ->field('os.store_id,os.org_id,o.name as org_name')->select()->toArray();
+            foreach ($organizationNameRows as $organizationNameRow) {
+                $sid = (int)($organizationNameRow['store_id'] ?? 0);
+                if ($sid <= 0 || isset($organizationNameByStore[$sid])) continue;
+                $organizationNameByStore[$sid] = [
+                    'id' => (int)($organizationNameRow['org_id'] ?? 0),
+                    'name' => (string)($organizationNameRow['org_name'] ?? ''),
+                ];
+            }
+        }
+        foreach ($pageStoreRows as $row) {
+            $row['employment_type_code'] = (string)($employmentTypeByEmployee[(int)($row['employee_id'] ?? 0)] ?? 'internal');
+            $this->enrichStaffListItem($row, $allRole, $userService, $hideFencheng, $bulkLookups);
+            $row['is_organization_direct'] = 0;
+            // 组织与任职门店是独立关系；名称来自当前门店绑定组织。
+            $storeOrganization = $organizationNameByStore[(int)($row['store_id'] ?? 0)] ?? null;
+            $row['organization_id'] = (int)($storeOrganization['id'] ?? 0);
+            $row['organization_name'] = (string)($storeOrganization['name'] ?? '');
+            $row['organization_names'] = $row['organization_name'] !== '' ? [$row['organization_name']] : [];
+            $staffById[(int)$row['id']] = $row;
+        }
+        $pageDirectIds = array_values(array_filter(array_map(static function ($row) {
+            return (int)($row['is_organization_direct'] ?? 0) === 1 ? (int)$row['employee_id'] : 0;
+        }, $list)));
+        $organizationNamesByEmployee = [];
+        if ($pageDirectIds) {
+            // 直属人员可属于多个组织，只有进入当前页时才补全其所有有效组织名称。
+            $organizationMembershipRows = Db::name('organization_employee')->alias('oe')
+                ->leftJoin('organization o', 'o.id = oe.org_id')
+                ->whereIn('oe.employee_id', $pageDirectIds)
+                ->where('oe.is_del', 0)->where('o.is_del', 0)
+                ->field('oe.employee_id,oe.org_id,o.name as org_name')
+                ->order('oe.id', 'asc')->select()->toArray();
+            foreach ($organizationMembershipRows as $organizationMembershipRow) {
+                $eid = (int)($organizationMembershipRow['employee_id'] ?? 0);
+                $name = trim((string)($organizationMembershipRow['org_name'] ?? ''));
+                if ($eid > 0 && $name !== '') $organizationNamesByEmployee[$eid][(int)($organizationMembershipRow['org_id'] ?? 0)] = $name;
+            }
+        }
+        foreach ($list as &$row) {
+            if ((int)($row['is_organization_direct'] ?? 0) !== 1) {
+                $row = $staffById[(int)$row['id']] ?? $row;
+                continue;
+            }
+            $employeeId = (int)$row['employee_id'];
+            $direct = $directRowsByEmployee[$employeeId];
+            $names = array_values($organizationNamesByEmployee[$employeeId] ?? []);
+            $row = [
+                // 负 ID 保留只读占位语义，防止编辑/调店接口误认为门店员工。
+                'id' => -$employeeId, 'employee_id' => $employeeId, 'store_id' => 0, 'store_name' => '',
+                'organization_id' => (int)($direct['org_id'] ?? 0),
+                'organization_name' => $names ? implode('、', $names) : (string)($direct['org_name'] ?? ''),
+                'organization_names' => $names ?: array_values(array_filter([(string)($direct['org_name'] ?? '')])),
+                'department' => (string)($direct['org_name'] ?? ''),
+                'staff_name' => (string)($direct['name'] ?? ''),
+                'nickname' => (string)($direct['nickname'] ?? ''),
+                'phone' => (string)($direct['phone'] ?? ''),
+                'avatar' => (string)($direct['avatar'] ?? ''),
+                'roles' => '组织直属（无门店权限）',
+                'position_label' => (string)($direct['job_title'] ?? '未设职位'),
+                'position_level_label' => '-', 'status' => (int)($direct['status'] ?? 0),
+                'is_manager' => 0, 'can_choose' => 0, 'cashier_salesperson_enabled' => 0,
+                'cashier_craftsman_enabled' => 0, 'craftsman_performance_type' => 'commission',
+                'employment_type_code' => (string)($direct['employment_type_code'] ?? 'internal'),
+                'mobile_enabled' => 0, 'is_fencheng' => 0, 'has_pwd' => 0,
+                'is_customer' => 0, 'is_reservable' => 0, 'customer_num' => 0,
+                'is_organization_direct' => 1,
+            ];
+        }
+        unset($row);
+        $this->enrichStaffPositionLabels($list);
+        $this->enrichMobileEnabled($list);
         return compact('list', 'count');
     }
 
@@ -1794,14 +1788,43 @@ class SystemStoreStaffServices extends BaseServices
     }
 
     /**
-     * 列表项字段增强
+     * 当前页的常用标签和专属客户数一次读齐；其他调用方继续沿用单行查询语义。
+     * 列表只有详情页行参与批量查询，避免集团视角的 N+1 查询。
      */
-    public function enrichStaffListItem(array &$item, array $allRole = [], $userService = null, bool $hideFencheng = false): void
+    protected function loadStaffListLookups(array $list): array
+    {
+        if (!$list) return ['positions' => [], 'levels' => [], 'customers' => [], 'nicknames' => [], 'stores' => []];
+        $ids = array_values(array_unique(array_filter(array_map(static function ($row) { return (int)($row['id'] ?? 0); }, $list))));
+        $positionIds = array_values(array_unique(array_filter(array_map(static function ($row) { return (int)($row['position'] ?? 0); }, $list))));
+        $levelIds = array_values(array_unique(array_filter(array_map(static function ($row) { return (int)($row['position_level'] ?? 0); }, $list))));
+        $uids = array_values(array_unique(array_filter(array_map(static function ($row) { return (int)($row['uid'] ?? 0); }, $list))));
+        $storeIds = array_values(array_unique(array_filter(array_map(static function ($row) { return (int)($row['store_id'] ?? 0); }, $list))));
+        $customerRows = $ids ? Db::name('user')->whereIn('salesman_id', $ids)
+            ->field('salesman_id,COUNT(*) AS customer_count')->group('salesman_id')->select()->toArray() : [];
+        $customers = [];
+        foreach ($customerRows as $row) $customers[(int)$row['salesman_id']] = (int)$row['customer_count'];
+        return [
+            'positions' => $positionIds ? Position::whereIn('id', $positionIds)->column('name', 'id') : [],
+            'levels' => $levelIds ? PositionLevel::whereIn('id', $levelIds)->column('name', 'id') : [],
+            'customers' => $customers,
+            'nicknames' => $uids ? Db::name('user')->whereIn('uid', $uids)->column('nickname', 'uid') : [],
+            'stores' => $storeIds ? Db::name('system_store')->whereIn('id', $storeIds)->column('name', 'id') : [],
+        ];
+    }
+
+    /**
+     * 列表项字段增强；批量映射仅供分页列表使用，其他调用方保持原取值路径。
+     */
+    public function enrichStaffListItem(array &$item, array $allRole = [], $userService = null, bool $hideFencheng = false, ?array $bulkLookups = null): void
     {
         $item['has_pwd'] = !empty($item['pwd']) ? 1 : 0;
         unset($item['pwd']);
-        $item['position_label'] = Position::where('id', $item['position'] ?? 0)->value('name') ?: '-';
-        $item['position_level_label'] = PositionLevel::where('id', $item['position_level'] ?? 0)->value('name') ?: '-';
+        $item['position_label'] = $bulkLookups !== null
+            ? ($bulkLookups['positions'][(int)($item['position'] ?? 0)] ?? '-')
+            : (Position::where('id', $item['position'] ?? 0)->value('name') ?: '-');
+        $item['position_level_label'] = $bulkLookups !== null
+            ? ($bulkLookups['levels'][(int)($item['position_level'] ?? 0)] ?? '-')
+            : (PositionLevel::where('id', $item['position_level'] ?? 0)->value('name') ?: '-');
         if ($item['level']) {
             if (!empty($item['roles'])) {
                 $roles = [];
@@ -1822,13 +1845,21 @@ class SystemStoreStaffServices extends BaseServices
             $userService = app()->make(UserServices::class);
         }
         if (empty($item['nickname']) && !empty($item['uid'])) {
-            $item['nickname'] = $userService->value(['uid' => $item['uid']], 'nickname') ?: '';
+            $item['nickname'] = $bulkLookups !== null
+                ? ($bulkLookups['nicknames'][(int)$item['uid']] ?? '')
+                : ($userService->value(['uid' => $item['uid']], 'nickname') ?: '');
         }
-        $item['customer_num'] = $userService->getCount(['salesman_id' => $item['id']]);
+        $item['customer_num'] = $bulkLookups !== null
+            ? ($bulkLookups['customers'][(int)$item['id']] ?? 0)
+            : $userService->getCount(['salesman_id' => $item['id']]);
         if (empty($item['name']) && !empty($item['store_id'])) {
-            /** @var SystemStoreServices $storeServices */
-            $storeServices = app()->make(SystemStoreServices::class);
-            $item['name'] = (string)$storeServices->value(['id' => (int)$item['store_id']], 'name');
+            if ($bulkLookups !== null) {
+                $item['name'] = (string)($bulkLookups['stores'][(int)$item['store_id']] ?? '');
+            } else {
+                /** @var SystemStoreServices $storeServices */
+                $storeServices = app()->make(SystemStoreServices::class);
+                $item['name'] = (string)$storeServices->value(['id' => (int)$item['store_id']], 'name');
+            }
         }
         $item['store_name'] = $item['name'] ?? '-';
         $item['is_fencheng'] = (int)($item['is_fencheng'] ?? 0);
@@ -2073,14 +2104,8 @@ class SystemStoreStaffServices extends BaseServices
         }
         /** @var SystemRoleServices $service */
         $service = app()->make(SystemRoleServices::class);
-        $allRole = [];
-        foreach ($storeIds as $storeId) {
-            $roles = $service->getRoleArray(['type' => 1, 'store_id' => $storeId, 'status' => 1]);
-            if ($roles) {
-                $allRole = array_merge($allRole, $roles);
-            }
-        }
-        return $allRole;
+        // 角色搜索器支持门店 ID 数组，一次查询与逐店合并的权限结果相同。
+        return $service->getRoleArray(['type' => 1, 'store_id' => $storeIds, 'status' => 1]);
     }
 
 }

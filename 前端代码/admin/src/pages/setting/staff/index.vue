@@ -362,6 +362,7 @@ export default {
       data: [],
       scopeStoreIds: [],
       rootOrganizationId: 0,
+      rootOrganizationLoaded: false,
       total: 0,
       currentId: 0,
       modal1: false,
@@ -419,7 +420,8 @@ export default {
     window.addEventListener('resize', this.updateTableHeight);
   },
   activated() {
-    this.getList();
+    // 首次进入由组织根节点加载完成后发起查询；缓存页再次激活才主动刷新，避免首屏重复全范围请求。
+    if (this.rootOrganizationLoaded) this.getList();
     this.$nextTick(this.updateTableHeight);
   },
   beforeDestroy() {
@@ -457,10 +459,12 @@ export default {
           const root = (res.data || [])[0];
           this.rootOrganizationId = root ? Number(root.id) || 0 : 0;
           this.formData.org_id = this.rootOrganizationId;
+          this.rootOrganizationLoaded = true;
           this.getList();
         })
         .catch((err) => {
           this.$Message.error(err.msg);
+          this.rootOrganizationLoaded = true;
           this.getList();
         });
     },

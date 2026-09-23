@@ -121,6 +121,20 @@ class SystemStoreStaffDao extends BaseDao
     }
 
     /**
+     * 组织范围列表先计算轻量候选 ID，再按同一后端筛选条件读取当前页详情。
+     * 保留权限条件可防止候选 ID 与详情读取之间扩大可见范围。
+     */
+    public function getStoreStaffRowsByIds(array $where, array $ids, array $with = []): array
+    {
+        if (!$ids) return [];
+        return $this->search($where)
+            ->whereIn('id', $ids)
+            ->where('is_del', 0)
+            ->with(array_merge($with, ['store', 'user']))
+            ->select()->toArray();
+    }
+
+    /**
      * 获取店员select
      * @param array $where
      * @return array
