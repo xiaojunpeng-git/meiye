@@ -116,7 +116,11 @@ final class AiAnswerRenderer
             $value = $storageUnit === 'fen'
                 ? ($row['amount_cents'] ?? null) : ($row['count'] ?? null);
             $display = $this->metricValue($value, $storageUnit);
-            $facts[$row['metric_code']][$row['period']] = ['name' => $tooltip['name'], 'value' => $display, 'unit' => $unit];
+            // Preserve the Reader's integer storage value until both periods
+            // have been paired. Differences and rates must never use rounded
+            // yuan or formatted text as their arithmetic inputs.
+            $facts[$row['metric_code']][$row['period']] = ['name' => $tooltip['name'], 'value' => $display,
+                'unit' => $unit, 'raw' => $value, 'storage_unit' => $storageUnit];
         }
         $objectKind = $view['query']['business_filters']['object_kind'] ?? 'store';
         $person = $objectKind === 'person';
@@ -265,6 +269,15 @@ final class AiAnswerRenderer
                 if ($section!==null) $item['section']=$section;
                 $items[]=$item;
             }
+            if ($shape==='comparison' && isset($periods['current'],$periods['comparison'])) {
+                $change=$this->comparisonChange($periods['current'],$periods['comparison']);
+                foreach ([['label'=>'增减值','value'=>$change['difference'],'unit'=>$periods['current']['unit']],
+                          ['label'=>'变化率','value'=>$change['rate'],'unit'=>'']] as $measure) {
+                    $measure['label']=$periods['current']['name'].'·'.$measure['label'];
+                    if ($section!==null) $measure['section']=$section;
+                    $items[]=$measure;
+                }
+            }
         }
         $isMetricOverview = in_array($shape, ['summary', 'comparison'], true) && count($items) > 1;
         return [
@@ -304,7 +317,11 @@ final class AiAnswerRenderer
                 if (!is_array($current)) continue;
                 $text = $current['name'] . '为' . $current['value'] . $current['unit'];
                 $comparison = $periods['comparison'] ?? null;
-                if (is_array($comparison)) $text .= '；对比期间为' . $comparison['value'] . $comparison['unit'];
+                if (is_array($comparison)) {
+                    $change=$this->comparisonChange($current,$comparison);
+                    $text .= '；对比期间为' . $comparison['value'] . $comparison['unit']
+                        . '；增减' . $change['difference'] . $current['unit'] . '；变化率' . $change['rate'];
+                }
                 $parts[] = $text;
             }
             return $parts ? implode('；', $parts) . '。' : '';
@@ -398,6 +415,26 @@ final class AiAnswerRenderer
         if ($storageUnit === 'project_count_micro' && is_int($value)) return $this->formatProjectCount($value);
         if ($storageUnit === 'customer_tenth' && is_int($value)) return $this->formatTenths($value);
         throw new RuntimeException('AI_EVIDENCE_VALUE_INVALID');
+    }
+
+    /** Compare one registered metric with itself using signed Reader integers. */
+    private function comparisonChange(array $current,array $comparison): array
+    {
+        $currentValue=$current['raw']??null;$baseValue=$comparison['raw']??null;
+        if (!is_int($currentValue)||!is_int($baseValue)
+            ||($current['storage_unit']??null)!==($comparison['storage_unit']??null)) {
+            throw new RuntimeException('AI_EVIDENCE_VALUE_INVALID');
+        }
+        $difference=$currentValue-$baseValue;
+        if (!is_int($difference)) throw new RuntimeException('AI_EVIDENCE_VALUE_INVALID');
+        $formatted=$this->metricValue($difference,$current['storage_unit']);
+        if ($difference>0) $formatted='+'.$formatted;
+        // A zero or negative base has no ordinary business growth rate. A
+        // zero-to-zero comparison is explicitly flat instead of NaN or 100%.
+        $rate=$baseValue===0?($currentValue===0?'持平':'基期为0，无法计算'):
+            ($baseValue<0?'基期为负，无法计算':
+                sprintf('%+.1f%%',round(($difference/$baseValue)*100,1)));
+        return ['difference'=>$formatted,'rate'=>$rate];
     }
 
     /** Service allocations are stored as integer tenths so three-person splits stay exact. */

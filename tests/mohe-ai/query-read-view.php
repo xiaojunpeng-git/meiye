@@ -110,8 +110,16 @@ try {
     queryReject(function () use ($service, $principal, $query) { $service->create($principal, $query + ['sql' => 'forbidden']); }, 'METRIC_QUERY_SCHEMA_INVALID');
     queryReject(function () use ($service, $principal, $query) { $q = $query; $q['start_date'] = '2026-08-09'; $service->create($principal, $q); }, 'METRIC_QUERY_COVERAGE_UNAVAILABLE');
     $compare = $query; $compare['query_shape'] = 'comparison'; $compare['compare_range'] = ['start' => '2026-09-07', 'end' => '2026-09-07'];
+    // One comparison may contain different registered storage units while
+    // preserving every metric and both periods in the same authorized view.
+    $compare['metric_codes']=['cash_performance','consume_amount','sales_quantity','completed_service_item_count'];
     $comparison = $service->create($principal, $compare);
-    queryCheck(count($comparison['results']) === 4 && $reads === 2, 'both comparison periods inside one transaction');
+    queryCheck(count($comparison['results']) === 8 && $reads === 2
+        && array_column($comparison['results'],'metric_code')===array_merge($compare['metric_codes'],$compare['metric_codes']),
+        'mixed-unit multi-metric comparison keeps both periods inside one transaction');
+    queryReject(function () use ($service,$principal,$compare) {
+        $q=$compare;$q['compare_range']=['start'=>'2026-08-01','end'=>'2026-08-31'];$service->create($principal,$q);
+    },'METRIC_QUERY_COVERAGE_UNAVAILABLE');
     $shrunk = $query; $shrunk['store_ids'] = [1];
     $narrow = $service->create($principal, $shrunk);
     queryCheck($narrow['binding']['store_ids'] === [1], 'requested scope narrows');

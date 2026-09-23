@@ -124,6 +124,21 @@ try {
     $storeOverviewCompiled=$compiler->compile($storeOverviewPlan,$overviewCap); $compiler->assertCompiled($storeOverviewCompiled);
     registryCheck(count($storeOverviewCodes)>8 && $storeOverviewCompiled['query']['metric_codes']===$storeOverviewCodes,
         'complete registered store overview crosses the legacy eight-selector limit without exceeding the shared bounded profile');
+    // Comparison keeps every registered observation on both sides. The same
+    // compiler rejects a partial historical range before any Reader call.
+    $storeComparisonPlan=$storeOverviewPlan;
+    $storeComparisonPlan['workflow_code']='wf_performance_comparison';
+    $storeComparisonPlan['query']['query_shape']='comparison';
+    $storeComparisonPlan['query']['compare_range']=['start'=>'2026-08-10','end'=>'2026-08-17'];
+    $storeComparisonCompiled=$compiler->compile($storeComparisonPlan,$overviewCap);
+    registryCheck($storeComparisonCompiled['query']['metric_codes']===$storeOverviewCodes
+        && $storeComparisonCompiled['query']['compare_range']===$storeComparisonPlan['query']['compare_range'],
+        'bounded registered overview comparison retains all metrics and the full baseline range');
+    $incompleteComparison=$storeComparisonPlan;
+    $incompleteComparison['query']['compare_range']=['start'=>'2026-08-01','end'=>'2026-08-31'];
+    registryReject(function()use($compiler,$incompleteComparison,$overviewCap){
+        $compiler->compile($incompleteComparison,$overviewCap);
+    },'AI_DATA_COVERAGE_INCOMPLETE');
     $thresholdCap=registryCapabilities();
     $thresholdCap['metric_codes']=['sales_collected_amount'];
     $thresholdCap['query_shapes']=['threshold_count'];

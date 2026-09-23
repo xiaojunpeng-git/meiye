@@ -47,6 +47,24 @@ try {
            'evidence'=>[['message_id'=>'current','quote'=>$view['question']]],
        ]],
    ],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
+   // A typed broad comparison should retain both explicit periods and use
+   // the registry profile without a second model binding/review round trip.
+   if($phase==='understanding' && $view['question']==='9月8日经营情况对比9月7日（确定性比较）') return ['understanding'=>[
+       'goal'=>'比较两个日期的门店经营概览','request_kind'=>'overview_comparison','status'=>'understood','requirements'=>[[
+           'id'=>'r1','meaning'=>$view['question'],'fields'=>['metric_codes','object_kind','object_relation','operation','periods'],
+           'values'=>['metric_terms'=>['经营情况'],'object_kind'=>'store','object_relation'=>'analysis','operation'=>'comparison',
+               'periods'=>[['kind'=>'date_range','start'=>'2026-09-08','end'=>'2026-09-08'],['kind'=>'date_range','start'=>'2026-09-07','end'=>'2026-09-07']]],
+           'evidence'=>[['message_id'=>'current','quote'=>$view['question']]],
+       ]],
+   ],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
+   if($phase==='understanding' && $view['question']==='9月10日经营情况对比9月9日（拆分语义）') return ['understanding'=>[
+       'goal'=>'比较两个日期的经营情况','request_kind'=>'overview_comparison','status'=>'understood','requirements'=>[
+           ['id'=>'r1','meaning'=>'本期','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'date_range','start'=>'2026-09-10','end'=>'2026-09-10']]],
+               'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]],
+           ['id'=>'r2','meaning'=>'对比期','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'date_range','start'=>'2026-09-09','end'=>'2026-09-09']]],
+               'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]],
+       ],
+   ],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    if($phase==='understanding' && in_array($view['question'],['做得最好的门店是哪家（专业首答）','哪个门店业绩最高（统一默认入口）'],true)) return ['understanding'=>['goal'=>$view['question'],'requirements'=>[['id'=>'r1','meaning'=>$view['question'],'fields'=>['object_kind','operation','periods','ranking'], 'values'=>['object_kind'=>'store','operation'=>'ranking','periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'ranking'=>['direction'=>'top','limit'=>1]],'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]],'status'=>'understood'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    if($phase==='understanding' && $view['question']==='哪个门店消耗业绩最高（明确指标）') return ['understanding'=>['goal'=>$view['question'],'requirements'=>[['id'=>'r1','meaning'=>$view['question'],'fields'=>['metric_codes','object_kind','operation','periods','ranking'],'values'=>['metric_terms'=>['消耗业绩'],'object_kind'=>'store','operation'=>'ranking','periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'ranking'=>['direction'=>'top','limit'=>1]],'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]],'status'=>'understood'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    if($phase==='understanding' && in_array($view['question'],['哪些门店业绩好（候选恢复）','哪些门店业绩好（注册默认）','按现金业绩或消耗业绩，哪些门店排名更好（需要澄清）'],true)) {$values=['metric_terms'=>['业绩'],'object_kind'=>'store','operation'=>'ranking','periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'ranking'=>['direction'=>'top','limit'=>null]];if($view['question']==='按现金业绩或消耗业绩，哪些门店排名更好（需要澄清）')$values['metric_terms']=['现金业绩','消耗业绩'];return ['understanding'=>['goal'=>$view['question'],'requirements'=>[['id'=>'r1','meaning'=>$view['question'],'fields'=>['metric_codes','object_kind','operation','periods','ranking'],'values'=>$values,'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]],'status'=>'understood'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];}
@@ -161,6 +179,66 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
      'the strict overview admission does not repeat binding or semantic review');
  verifyGateway(strpos((string)$db->query('SELECT counters_json FROM mohe_ai_run WHERE run_id='.$db->quote($typedOverviewRun['run_id']))->fetchColumn(),'registered_open_overview_admitted')!==false,
      'the typed overview shortcut is observable without storing customer wording');
+ $comparisonInput=$typedOverviewInput;
+ $comparisonInput['client_request_id']='typed-overview-comparison';
+ $comparisonInput['conversation_id']='conversation-typed-overview-comparison';
+ $comparisonInput['question']='9月8日经营情况对比9月7日（确定性比较）';
+ $comparisonRun=$gateway->handle('create',$typedOverviewContext,$comparisonInput);
+ $comparisonBinding=['client_session_id'=>'device-typed-overview','generation'=>$comparisonRun['generation'],
+     'run_delivery_token'=>$comparisonRun['run_delivery_token']];
+ $modelsBeforeComparison=$models;$queriesBeforeComparison=$queries;
+ $comparisonResult=$gateway->handle('execute',$typedOverviewContext,$comparisonBinding+$comparisonInput,$comparisonRun['run_id']);
+ verifyGateway($comparisonResult['status']==='COMPLETED'
+     &&$models===$modelsBeforeComparison+1&&$queries===$queriesBeforeComparison+1,
+     'a typed multi-indicator comparison uses one understanding call and one registered Reader query');
+ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($comparisonRun['run_id'])." AND attempt_code IN ('bind_intent','review_binding')")->fetchColumn()===0,
+     'typed overview comparison does not repeat model binding or review');
+ verifyGateway(strpos((string)$db->query('SELECT counters_json FROM mohe_ai_run WHERE run_id='.$db->quote($comparisonRun['run_id']))->fetchColumn(),'registered_overview_comparison_admitted')!==false,
+     'typed comparison admission is observable without retaining customer wording');
+ $splitComparisonInput=$comparisonInput;
+ $splitComparisonInput['client_request_id']='split-overview-comparison';
+ $splitComparisonInput['conversation_id']='conversation-split-overview-comparison';
+ $splitComparisonInput['question']='9月10日经营情况对比9月9日（拆分语义）';
+ $splitComparisonRun=$gateway->handle('create',$typedOverviewContext,$splitComparisonInput);
+ $splitComparisonBinding=['client_session_id'=>'device-typed-overview','generation'=>$splitComparisonRun['generation'],
+     'run_delivery_token'=>$splitComparisonRun['run_delivery_token']];
+ $modelsBeforeSplit=$models;$queriesBeforeSplit=$queries;
+ $splitComparisonResult=$gateway->handle('execute',$typedOverviewContext,$splitComparisonBinding+$splitComparisonInput,$splitComparisonRun['run_id']);
+ verifyGateway($splitComparisonResult['status']==='COMPLETED'
+     &&$models===$modelsBeforeSplit+1&&$queries===$queriesBeforeSplit+1,
+     'a typed comparison with separately grounded periods also avoids redundant binding');
+ // The existing local semantic slots prove this complete broad comparison;
+ // real model variability must not send it through three repair stages.
+ $directAuth=$auth;$directAuth['account_id']=11;$directContext=$directAuth;
+ $directContext['_refresh']=function()use(&$directAuth){return $directAuth;};
+ $directBoot=$gateway->handle('bootstrap',$directContext,['client_session_id'=>'device-direct-comparison']);
+ $directInput=['client_request_id'=>'direct-overview-comparison','conversation_id'=>'conversation-direct-comparison',
+     'client_session_id'=>'device-direct-comparison','window_token'=>$directBoot['window_token'],
+     'question'=>'9月8日经营情况对比9月7日','history'=>[],'output_format'=>'screen',
+     'guidance_schema_version'=>'mohe-clarification-v2'];
+ $directRun=$gateway->handle('create',$directContext,$directInput);
+ $directBinding=['client_session_id'=>'device-direct-comparison','generation'=>$directRun['generation'],
+     'run_delivery_token'=>$directRun['run_delivery_token']];
+ $modelsBeforeDirect=$models;$queriesBeforeDirect=$queries;
+ $directResult=$gateway->handle('execute',$directContext,$directBinding+$directInput,$directRun['run_id']);
+ verifyGateway($directResult['status']==='COMPLETED'
+     &&$models===$modelsBeforeDirect&&$queries===$queriesBeforeDirect+1,
+     'a structurally complete broad comparison uses the registered profile without a model call');
+ verifyGateway(strpos((string)$db->query('SELECT counters_json FROM mohe_ai_run WHERE run_id='.$db->quote($directRun['run_id']))->fetchColumn(),'deterministic_registered_comparison_admitted')!==false,
+     'deterministic comparison remains auditable without storing customer wording');
+ $directMethod=new ReflectionMethod(AiGatewayServices::class,'compileRegisteredComparison');
+ $directCaps=(new ReflectionMethod(AiGatewayServices::class,'capabilities'))->invoke($gateway,$directContext);
+ // Exact named measurements can use the same safe path, including a single
+ // metric and mixed money/count metrics; no broad profile is invented.
+ foreach (['9月8日现金业绩对比9月7日'=>1,'9月8日现金业绩和销售数量对比9月7日'=>2] as $namedQuestion=>$expectedCount) {
+     $namedPlan=$directMethod->invoke($gateway,$namedQuestion,$directCaps,'screen','2026-09-08');
+     verifyGateway(($namedPlan['kind']??null)==='plan'&&count((array)($namedPlan['plan']['query']['metric_codes']??[]))===$expectedCount,
+         'exact named comparison compiles the requested metric count through the registered planner');
+ }
+ foreach (['9月8日经营情况和销售额对比9月7日','9月8日员工业绩对比9月7日','9月8日经营情况对比9月7日，排除退款'] as $unsafeQuestion) {
+     verifyGateway($directMethod->invoke($gateway,$unsafeQuestion,$directCaps,'screen','2026-09-08')===null,
+         'mixed broad-and-named wording, personnel and exclusions cannot enter deterministic comparison');
+ }
  [$rankRecovery,$rankRecoveryInput]=$make('rank-candidate-recovery','哪些门店业绩好（候选恢复）');$modelsBeforeRankRecovery=$models;$queriesBeforeRankRecovery=$queries;
  $rankRecoveryResult=$gateway->handle('execute',$context,$binding($rankRecovery)+$rankRecoveryInput,$rankRecovery['run_id']);
  verifyGateway($rankRecoveryResult['status']==='COMPLETED' && $models===$modelsBeforeRankRecovery+4 && $queries===$queriesBeforeRankRecovery+1,'multiple model candidates for one ranking receive one named professional metric-selection recovery before the Reader query');

@@ -38,6 +38,19 @@ $answer=$renderer->render(['query'=>['query_shape'=>'comparison','start_date'=>'
     ]]);
 $check($answer['cards']===[] && strpos($answer['summary'], '消耗业绩为100元；对比期间为200元')===0,
     'comparison answers state verified current and comparison facts once without duplicate cards');
+$check(strpos($answer['summary'],'增减-100元；变化率-50.0%')!==false
+    && ($answer['presentation']['facts'][2]['value']??null)==='-100',
+    'comparison difference and rate are calculated from signed Reader values');
+$roundedComparison=$renderer->render(['query'=>['query_shape'=>'comparison','start_date'=>'2026-09-08','end_date'=>'2026-09-08',
+    'compare_range'=>['start'=>'2026-09-07','end'=>'2026-09-07']], 'results'=>[
+    ['metric_code'=>'cash_performance','period'=>'current','amount_cents'=>15050],
+    ['metric_code'=>'cash_performance','period'=>'comparison','amount_cents'=>10049],
+    ['metric_code'=>'sales_quantity','period'=>'current','storage_unit'=>'count','count'=>3],
+    ['metric_code'=>'sales_quantity','period'=>'comparison','storage_unit'=>'count','count'=>0],
+]]);
+$check(strpos($roundedComparison['summary'],'增减+50元；变化率+49.8%')!==false
+    && strpos($roundedComparison['summary'],'基期为0，无法计算')!==false,
+    'mixed-unit comparison uses raw cents and marks zero baselines instead of dividing by zero');
 $cashView=['query'=>['query_shape'=>'summary','start_date'=>'2026-09-08','end_date'=>'2026-09-08','compare_range'=>null],
     'data_as_of'=>'2026-09-08T12:00:00+08:00','results'=>[
         ['metric_code'=>'cash_performance','period'=>'current','amount_cents'=>15050],

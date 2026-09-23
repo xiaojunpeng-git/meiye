@@ -604,10 +604,10 @@ final class MetricReadViewServices
         if ($memberSelection && (count($query['metric_codes'])!==1 || $query['query_shape']!=='summary')) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if (!$person && $query['business_filters']!==[] && (!in_array($query['query_shape'],['summary','ranking','threshold_count','condition_count','condition_list'],true)
             || (!$conditionPopulation && $query['query_shape']!=='summary' && count($query['metric_codes'])!==1))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-        // Preserve the existing two-metric forms.  More than two facts are
-        // only batched for an unfiltered summary so a first operating answer
-        // cannot combine incompatible object grains or ranking semantics.
-        if (count($query['metric_codes'])>2 && !in_array($query['query_shape'],['summary','condition_count','condition_list'],true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        // Both comparison periods use the same bounded, unfiltered store
+        // metric set and permission binding. Object selection and ranking
+        // retain their stricter guards above; no incompatible grains are mixed.
+        if (count($query['metric_codes'])>2 && !in_array($query['query_shape'],['summary','comparison','condition_count','condition_list'],true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if (count(array_unique($query['metric_codes'])) !== count($query['metric_codes'])) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         $this->range(['start' => $query['start_date'], 'end' => $query['end_date']]);
         if ($query['query_shape'] === 'comparison') {

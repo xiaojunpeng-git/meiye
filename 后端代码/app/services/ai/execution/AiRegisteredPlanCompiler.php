@@ -137,10 +137,11 @@ final class AiRegisteredPlanCompiler
                 || !preg_match('/^member:[1-9][0-9]*$/D',$query['business_filters']['selection_ref']))) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             if (!$person&&!$memberSelection&&(!is_string($objectKind)||$query['business_filters']!==['object_kind'=>$objectKind])) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         }
-        // Existing two-metric trend/ranking/comparison reads remain legal.
-        // The extended batch size is reserved for an unfiltered summary,
-        // where all observations share one store scope and one period.
-        if (count($metrics)>2 && !in_array($query['query_shape'],['summary','condition_count','condition_list'],true)) {
+        // A comparison reads the same bounded registered store metrics for
+        // both periods under one permission snapshot. Ranking and trends keep
+        // their separate result-shape limits; object filters cannot inherit
+        // this store-only expansion.
+        if (count($metrics)>2 && !in_array($query['query_shape'],['summary','comparison','condition_count','condition_list'],true)) {
             AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         }
         foreach ($metrics as $metric) {

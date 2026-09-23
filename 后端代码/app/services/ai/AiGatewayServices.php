@@ -372,9 +372,9 @@ final class AiGatewayServices
                 || $this->permissionHash($this->fresh($context))!==$snapshot['authorization_version']) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
             if ($operation==='execute') {
                 $this->runs->progress($owner,$id,$generation,$worker,'UNDERSTANDING');
-                // There is one interpretation path. A frozen configuration
-                // without the de-identified natural-language contract cannot
-                // fall back to phrase matching or a local legacy parser.
+                // Only narrowly provable registered admissions run before
+                // natural-language understanding. A model failure never
+                // falls back to the old approximate parser.
                 if (!AiConfigStore::allowsSanitizedQuestion($configuration)) throw new RuntimeException('AI_MODEL_CONFIG_UPGRADE_REQUIRED');
                 $projection=['dates'=>[],'date_terms'=>[],'signals'=>[],'semantic_intent'=>['constraints'=>[]],'blocking_reason'=>null,'unresolved_condition'=>false];
                 $compiled=$this->understandAnalysis($context,$owner,$id,$generation,$worker,$body,$projection,$configuration);
@@ -912,6 +912,17 @@ final class AiGatewayServices
                     return $compiled;
                 }
             }
+            // Complete two-period comparisons use either the exact named
+            // registered metrics or the broad store overview profile. Extra
+            // objects, filters and unresolved words remain model work.
+            $registeredComparison=$this->compileRegisteredComparison(
+                (string)$body['question'],$caps,$body['output_format'],$today
+            );
+            if ($registeredComparison!==null) {
+                $checkpoint();
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'deterministic_registered_comparison_admitted');
+                return $registeredComparison;
+            }
         }
         // A complete calendar-only continuation has no new metric or object
         // to bind. Reuse the already replayed signed query and change exactly
@@ -1205,16 +1216,17 @@ final class AiGatewayServices
         $understanding=$this->reconcileExactRegisteredMeasurement(
             $understanding,$safe['outbound'],$objectCompatibleSummaries,$objectVocabulary
         );
-        // A model-understood, fully typed store overview can be compiled from
-        // the registry without asking later models to choose the same object,
-        // response form and metric profile again. The admission helper rejects
-        // named metrics, filters, comparisons, rankings and unsafe context, so
-        // all non-deterministic requests retain the ordinary binding/review path.
+        // A model-understood, fully typed store overview or two-period
+        // comparison can be compiled from the registry without asking later
+        // models to choose the same metric profile. The admission helper
+        // rejects named metrics, filters, rankings and unsafe context.
         $registeredOverview=$this->compileRegisteredOpenOverview(
             $understanding,$safe['outbound'],$sourceQuery,$caps,$body['output_format'],$today
         );
         if ($registeredOverview!==null) {
-            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_open_overview_admitted');
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
+                ($understanding['request_kind']??null)==='overview_comparison'
+                    ?'registered_overview_comparison_admitted':'registered_open_overview_admitted');
             return $registeredOverview;
         }
         $understanding=$this->reconcileStatedRegisteredMeasurements(
@@ -2582,19 +2594,69 @@ final class AiGatewayServices
         return $intent;
     }
 
+    /** Admit only a structurally complete store comparison; named measurements
+     * and broad overview profiles both come from the frozen metric registry. */
+    private function compileRegisteredComparison(
+        string $question,array $capabilities,string $format,string $today
+    ): ?array {
+        // This parser provides only semantic slots for admission. It cannot
+        // supply a metric, formula or authority; those remain registry-owned.
+        $projection=(new AiModelInputProjector())->project($question);
+        $signals=(array)($projection['signals']??[]);
+        $dateTerms=(array)($projection['date_terms']??[]);
+        $availableCodes=array_keys((array)($capabilities['metric_readiness']??[]));
+        $allowed=array_merge($availableCodes,['ambiguous_metric','comparison','THIS_MONTH','LAST_MONTH','TODAY','YESTERDAY','DAY_BEFORE_YESTERDAY']);
+        if (!in_array('comparison',$signals,true)||array_diff($signals,$allowed)!==[]||count($dateTerms)!==2
+            ||!empty($projection['date_grouping_ambiguous'])||!empty($projection['unresolved_condition'])
+            ||!empty($projection['semantic_intent']['constraints'])) return null;
+        $stated=\app\services\query\metric\MetricSemanticCatalog::registeredTermsInText($question,$availableCodes);
+        if (in_array('ambiguous_metric',$signals,true)) {
+            // Only an explicit broad operating expression may expand into a
+            // profile; an ambiguous but narrower “业绩” does not silently
+            // become a full经营概览, and named metrics stay on their own path.
+            if ($stated!==[]||preg_match('/经营(?:情况|概览|得?怎么样|如何)/u',$question)!==1) return null;
+            $metrics=array_column(AiOverviewMetricResolver::resolve($capabilities,'store'),'metric_code');
+        } else {
+            $metrics=array_values(array_intersect($signals,$availableCodes));
+            $statedCodes=array_values(array_unique(array_column($stated,'metric_code')));
+            if ($metrics===[]||array_diff($metrics,$statedCodes)!==[]||array_diff($statedCodes,$metrics)!==[]) return null;
+        }
+        // A named comparison may contain one metric; only a broad overview
+        // needs multiple registry measurements to justify profile expansion.
+        $minimum=in_array('ambiguous_metric',$signals,true)?2:1;
+        if (count($metrics)<$minimum||count($metrics)>AiOverviewMetricResolver::MAX_METRICS) return null;
+        foreach ($metrics as $metric) {
+            if (!in_array($metric,$capabilities['metric_codes']??[],true)
+                ||($capabilities['metric_readiness'][$metric]['filter_grain']??null)!=='store'
+                ||!in_array('comparison',(array)($capabilities['metric_readiness'][$metric]['query_shapes']??[]),true)) return null;
+        }
+        $planner=new AiWorkflowPlanner();$periods=[];
+        foreach ($dateTerms as $term) {
+            $range=$planner->normalizePeriod($term,$today);
+            $periods[]=['code'=>'EXPLICIT','start'=>$range['start'],'end'=>$range['end']];
+        }
+        $projection['signals']=array_merge($metrics,['comparison']);
+        $projection['date_terms']=$periods;
+        $compiled=$planner->compile($projection,[
+            'decision'=>'query','query_shape'=>'comparison','metric_codes'=>$metrics,'object_kind'=>'store',
+        ],$capabilities,$format,$today);
+        if (($compiled['kind']??null)!=='plan') return null;
+        $compiled['_context_meaning']=['presentation_origin'=>'customer_or_verified_context'];
+        return $compiled;
+    }
+
     /**
-     * Compiles only a complete model-understood open store overview from the
-     * source registry. This is deliberately stricter than the recovery path:
-     * the model must publish the explicit request type plus current-message
-     * object, relation, operation and one period. Any named metric, grouping,
-     * selection, comparison, ranking, condition, exclusion or authority-
-     * bearing predecessor keeps the ordinary binding and semantic review.
+     * Compiles a complete model-understood store overview from the source
+     * registry. One-period summaries and two-period comparisons share this
+     * admission: explicit metrics, grouping, selection, ranking, conditions,
+     * exclusions and authority-bearing predecessors stay on their own path.
      */
     private function compileRegisteredOpenOverview(
         array $understanding,array $safeQuestion,?array $sourceQuery,array $capabilities,string $format,string $today
     ): ?array {
-        if (($understanding['status']??null)!=='understood'
-            ||($understanding['request_kind']??null)!=='open_overview'
+        $requestKind=$understanding['request_kind']??null;
+        $shape=$requestKind==='open_overview'?'summary':($requestKind==='overview_comparison'?'comparison':null);
+        if (($understanding['status']??null)!=='understood' || $shape===null
             ||array_key_exists('groups',$understanding)) return null;
         if ($sourceQuery!==null && (!empty($sourceQuery['store_ids'])
             ||!empty($sourceQuery['business_filters'])
@@ -2606,7 +2668,7 @@ final class AiGatewayServices
         $current=(string)($safeQuestion['question']??'');
         if ($current==='') return null;
         $allowed=['metric_codes','object_kind','object_relation','operation','periods','scope'];
-        $valuesByField=[];$metricRequirements=0;
+        $valuesByField=[];
         foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
             $fields=(array)($requirement['fields']??[]);$values=(array)($requirement['values']??[]);
             if ($fields===[] || array_diff($fields,$allowed)!==[] || !empty($values['metric_exclusions'])) return null;
@@ -2621,25 +2683,45 @@ final class AiGatewayServices
                 // metric_codes names the later binding slot; the first-stage
                 // carrier intentionally contains customer terms, never codes.
                 $valueKey=$field==='metric_codes'?'metric_terms':$field;
-                if (!array_key_exists($valueKey,$values)) return null;
+                if (!array_key_exists($valueKey,$values)) {
+                    // The comparison marker is a complete broad-overview
+                    // semantic commitment. Some models express the same
+                    // comparison as separate grounded time/operation clauses
+                    // without repeating its broad metric carrier.
+                    if ($shape==='comparison' && $field==='metric_codes') continue;
+                    return null;
+                }
                 $valuesByField[$field][]=$values[$valueKey];
             }
-            if (in_array('metric_codes',$fields,true)) $metricRequirements++;
         }
-        if ($metricRequirements!==1
+        if ($shape==='summary' && (count($valuesByField['metric_codes']??[])!==1
             ||count($valuesByField['object_kind']??[])!==1
-            ||($valuesByField['object_kind'][0]??null)!=='store'
             ||count($valuesByField['object_relation']??[])!==1
-            ||($valuesByField['object_relation'][0]??null)!=='analysis'
-            ||count($valuesByField['operation']??[])!==1
-            ||($valuesByField['operation'][0]??null)!=='summary'
-            ||count($valuesByField['periods']??[])!==1
-            ||count((array)$valuesByField['periods'][0])!==1) return null;
+            ||count($valuesByField['operation']??[])!==1)) return null;
+        // A typed comparison may be split into several grounded clauses;
+        // still reject any explicit object/operation that conflicts with the
+        // marker and never guess a missing second period.
+        foreach (['object_kind'=>'store','object_relation'=>'analysis','operation'=>$shape] as $field=>$expected) {
+            foreach ((array)($valuesByField[$field]??[]) as $value) if ($value!==$expected) return null;
+        }
+        $periods=[];
+        foreach ((array)($valuesByField['periods']??[]) as $group) {
+            if (!is_array($group)) return null;
+            foreach ($group as $period) $periods[]=$period;
+        }
+        if (count($periods)!==($shape==='comparison'?2:1)) return null;
         foreach ((array)($valuesByField['scope']??[]) as $scope) {
             if (!in_array($scope,['current_store','unspecified'],true)) return null;
         }
-        $terms=$valuesByField['metric_codes'][0]??null;
-        if (!is_array($terms) || count($terms)!==1 || !is_string($terms[0]) || $terms[0]==='') return null;
+        $terms=[];
+        foreach ((array)($valuesByField['metric_codes']??[]) as $group) {
+            if (!is_array($group)) return null;
+            foreach ($group as $term) {
+                if (!is_string($term)||$term===''||mb_strpos($current,$term,0,'UTF-8')===false) return null;
+                $terms[]=$term;
+            }
+        }
+        if ($shape==='summary' && count($terms)!==1) return null;
         // A source-registered measurement is a specific metric request, even
         // when the model mislabeled it as an overview. Never broaden it into
         // the profile merely to save a model call.
@@ -2650,15 +2732,22 @@ final class AiGatewayServices
         if (count($records)<2 || count($records)>AiOverviewMetricResolver::MAX_METRICS) return null;
         $metrics=array_column($records,'metric_code');
         if (count(array_unique($metrics))!==count($metrics)) return null;
-        foreach ($metrics as $metric) if (!in_array($metric,$capabilities['metric_codes']??[],true)) return null;
+        foreach ($metrics as $metric) {
+            $contract=$capabilities['metric_readiness'][$metric]??null;
+            if (!in_array($metric,$capabilities['metric_codes']??[],true)
+                ||!is_array($contract)||!in_array($shape,(array)($contract['query_shapes']??[]),true)) return null;
+        }
 
         $planner=new AiWorkflowPlanner();
-        $range=$planner->normalizeNaturalPeriod($valuesByField['periods'][0][0],$today);
-        $projection=['signals'=>array_merge($metrics,['summary']),'date_terms'=>[
-            ['code'=>'EXPLICIT','start'=>$range['start'],'end'=>$range['end']],
-        ],'date_grouping_ambiguous'=>false,'unresolved_condition'=>false,'semantic_intent'=>['constraints'=>[]]];
+        $dateTerms=[];
+        foreach ($periods as $period) {
+            $range=$planner->normalizeNaturalPeriod($period,$today);
+            $dateTerms[]=['code'=>'EXPLICIT','start'=>$range['start'],'end'=>$range['end']];
+        }
+        $projection=['signals'=>array_merge($metrics,[$shape]),'date_terms'=>$dateTerms,
+            'date_grouping_ambiguous'=>false,'unresolved_condition'=>false,'semantic_intent'=>['constraints'=>[]]];
         $compiled=$planner->compile($projection,[
-            'decision'=>'query','query_shape'=>'summary','metric_codes'=>$metrics,'object_kind'=>'store',
+            'decision'=>'query','query_shape'=>$shape,'metric_codes'=>$metrics,'object_kind'=>'store',
         ],$capabilities,$format,$today);
         if (($compiled['kind']??null)!=='plan') return null;
         $compiled['_context_meaning']=['presentation_origin'=>'customer_or_verified_context'];
