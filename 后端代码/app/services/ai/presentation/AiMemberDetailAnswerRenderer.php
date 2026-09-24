@@ -10,6 +10,35 @@ use RuntimeException;
  */
 final class AiMemberDetailAnswerRenderer
 {
+    /** One bounded population, two tables at most; never one UI section per person. */
+    public function renderSet(array $members,string $view): array
+    {
+        $rows=[];$rights=[];$rightColumns=[];
+        foreach ($members as $member) {
+            $answer=$this->render($member['detail'],$member['label'],$view);
+            $row=['member'=>$member['label']];
+            foreach ($answer['presentation']['facts'] as $i=>$fact) $row['f'.$i]=$fact['value'];
+            $rows[]=$row;
+            if (isset($answer['table'])) {
+                $rightColumns=$answer['table']['columns'];
+                foreach ($answer['table']['rows'] as $right) $rights[]=['member'=>$member['label']]+$right;
+            }
+        }
+        if ($rows===[]) throw new RuntimeException('AI_EVIDENCE_INVALID');
+        $columns=[['key'=>'member','label'=>'会员']];
+        foreach (['账户余额（元）','本金余额（元）','赠送余额（元）','有效卡项（张）','剩余项目（次）','剩余项目金额（元）'] as $i=>$label) {
+            $columns[]=['key'=>'f'.$i,'label'=>$label];
+        }
+        $summary=['summary'=>'共'.count($rows).'位会员的当前权益，包含其所有门店权益。','cards'=>[],
+            'table'=>['columns'=>$columns,'rows'=>$rows]];
+        if ($view!=='rights'||$rights===[]) return $summary;
+        return ['summary'=>$summary['summary'],'cards'=>[],'sections'=>[
+            ['id'=>'q1','title'=>'会员权益汇总','answer'=>$summary],
+            ['id'=>'q2','title'=>'会员卡项明细','answer'=>['summary'=>'各会员的有效卡项明细如下。','cards'=>[],
+                'table'=>['columns'=>array_merge([['key'=>'member','label'=>'会员']],$rightColumns),'rows'=>$rights]]],
+        ]];
+    }
+
     public function render(array $detail,string $expectedLabel,string $view): array
     {
         if (($detail['projectionContractVersion']??null)!=='cashier-v3-member-detail-v3'

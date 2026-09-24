@@ -323,6 +323,29 @@ $check(count($splitObjectReconciled['requirements'])===2
     && ($splitObjectReconciled['requirements'][1]['values']['object_kind']??null)==='person',
     'one explicit registered answer object reconciles duplicate model carriers without discarding either accepted requirement');
 $reconcileMetric=$gatewayClass->getMethod('reconcileExactRegisteredMeasurement');
+// One recognized registry term must not erase a second everyday measurement
+// or the evidence proving its threshold in the same condition carrier.
+$conditionQuestion='最近30天到店2次，消费1万元以上的会员详情';
+$conditionUnderstanding=['goal'=>'筛选会员详情','status'=>'understood','requirements'=>[[
+    'id'=>'r1','meaning'=>'按到店与消费条件筛选会员',
+    'fields'=>['metric_codes','object_kind','operation','aggregate_condition'],
+    'values'=>['metric_terms'=>['到店','消费'],'object_kind'=>'member','operation'=>'condition_list',
+        'aggregate_condition'=>['subject'=>'member','relation'=>'all','result_form'=>'list','conditions'=>[
+            ['metric_term'=>'到店','operator'=>'eq','quantity'=>'2','unit'=>'count'],
+            ['metric_term'=>'消费','operator'=>'gte','quantity'=>'10000','unit'=>'yuan'],
+        ]]],'evidence'=>[['message_id'=>'current','quote'=>$conditionQuestion]],
+]]];
+$preservedConditions=$reconcileMetric->invoke($gatewayWithoutDependencies,$conditionUnderstanding,
+    ['question'=>$conditionQuestion,'evidence_messages'=>[['id'=>'current','text'=>$conditionQuestion]]],
+    [['metric_code'=>'member_service_visit_count','object_contracts'=>[['object_kind'=>'member']]]],[]);
+$check($preservedConditions===$conditionUnderstanding,
+    'single exact registry match cannot collapse a compound condition or replace its evidence');
+$aliasConditions=$conditionUnderstanding;
+$aliasConditions['requirements'][0]['values']['metric_terms']=['客户到店次数','消费'];
+$reconcileStated=$gatewayClass->getMethod('reconcileStatedRegisteredMeasurements');
+$check($reconcileStated->invoke($gatewayWithoutDependencies,$aliasConditions,
+    ['question'=>$conditionQuestion],['metric_readiness'=>['member_service_visit_count'=>true]])===$aliasConditions,
+    'an already owned registered alias cannot create a second binding requirement for the same visit measurement');
 $duplicatedMetricUnderstanding=$splitObjectUnderstanding;
 $duplicatedMetricUnderstanding['requirements'][0]['values']['metric_terms']=['完成服务项目'];
 $duplicatedMetricUnderstanding['requirements'][]=[

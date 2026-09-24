@@ -30,6 +30,7 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
         $resolved=call_user_func($this->resolve,$context,$refs[0]);
         if (!is_array($resolved) || !is_array($resolved['principal']??null) || !is_array($resolved['query']??null)) throw new \RuntimeException('METRIC_EXPORT_CONTEXT_INVALID');
         $view=$this->views->replay($resolved['principal'],$resolved['query'],$refs[0]);
+        $view=self::withMemberRights($view,$resolved['member_rights_export']??null);
         if (($view['ai_query_ready']??false)!==true || ($view['result_status']??null)!=='complete') throw new \RuntimeException('METRIC_EXPORT_SOURCE_NOT_READY');
         $rows=self::project($view);
         UnifiedQueryExportTaskServices::assertCellBudget(count($fieldKeys),count($rows),false);
@@ -37,6 +38,9 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
     }
     public static function project(array $view): array
     {
+        if (isset($view['member_rights_export'])) {
+            return \app\services\ai\presentation\AiMemberRightsExportProjection::validate($view['member_rights_export'])['rows'];
+        }
         $rows=[]; $capabilities=MetricReadViewServices::metricCapabilities();
         foreach ($view['results'] as $result) {
             $code=$result['metric_code']??null;
@@ -92,6 +96,18 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             } else throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
         }
         return $rows;
+    }
+    /** Only the trusted server resolver may attach an immutable asset snapshot.
+     * The composite hash prevents a metric-list file from passing verification
+     * for an asset answer that happens to share the same conversation view.
+     */
+    public static function withMemberRights(array $view,$snapshot): array
+    {
+        if ($snapshot===null) return $view;
+        $snapshot=\app\services\ai\presentation\AiMemberRightsExportProjection::validate($snapshot);
+        $view['member_rights_export']=$snapshot;
+        $view['result_hash']=hash('sha256',$view['result_hash'].':'.$snapshot['hash']);
+        return $view;
     }
     private static function appendConditionResult(array &$rows,array $view,array $result,array $capabilities): void
     {

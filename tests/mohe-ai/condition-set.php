@@ -542,6 +542,17 @@ csCheck($canonicalExactBound['metric_codes']===['staff_sales_yeji','staff_servic
 $bound=AiIntentResultContract::normalize($binding,['staff_sales_yeji','staff_service_num'],[],$safe,$semantic);
 csCheck($bound['aggregate_condition']===$boundCondition&&$bound['metric_codes']===['staff_sales_yeji','staff_service_num'],
     'understood condition meanings bind to registered codes without changing thresholds, relation or order');
+$currentConditionSafe=$safe;
+$currentConditionSafe['prior_query']=IntentContextMerger::modelView($query);
+$currentConditionBinding=$binding;
+$currentConditionBinding['context_delta']=['metric_codes'=>'replace','object'=>'replace',
+    'business_filters'=>'replace','store_scope'=>'inherit','periods'=>'replace','operation'=>'replace',
+    'ranking_direction'=>'clear','ranking_limit'=>'clear','scope'=>'inherit','aggregate_condition'=>'inherit'];
+$currentConditionBound=AiIntentResultContract::normalize($currentConditionBinding,
+    ['staff_sales_yeji','staff_service_num'],[],$currentConditionSafe,$semantic);
+csCheck($currentConditionBound['aggregate_condition']===$boundCondition
+    &&$currentConditionBound['context_delta']['aggregate_condition']==='replace',
+    'complete current condition replaces an inherited carrier without comparing metric terms to prior metric codes');
 $partialBinding=$binding;
 $partialBinding['aggregate_condition']['conditions']=[$partialBinding['aggregate_condition']['conditions'][0]];
 $projectedBound=AiIntentResultContract::normalize($partialBinding,['staff_sales_yeji','staff_service_num'],[],$safe,$semantic);

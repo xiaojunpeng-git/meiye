@@ -117,6 +117,35 @@ $badView=$fixtures['summary']; $badView['results'][0]['storage_unit']='yuan';
 try {$project::project($badView); throw new LogicException('expected unit rejection');} catch (RuntimeException $e) {$check($e->getMessage()==='METRIC_EXPORT_METRIC_NOT_READY','unit cannot silently change');}
 $book=\PhpOffice\PhpSpreadsheet\IOFactory::load($fixtureRoot.'/'.$key); $book->getActiveSheet()->setCellValue('I2',999); (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($book))->save($fixtureRoot.'/'.$key); $book->disconnectWorksheets();
 try {$verify->invoke($runtime,$fixtureRoot.'/'.$key,$view); throw new LogicException('expected mismatch');} catch (RuntimeException $e) {$check($e->getMessage()==='AI_EXPORT_CONTENT_MISMATCH','Tampered amount prevents publication');}
+// Exercise the same production writer/readback fence for rights; these are
+// synthetic assets, with cents chosen to differ from rounded screen amounts.
+$assetDetail=['projectionContractVersion'=>'cashier-v3-member-detail-v3','dataAsOf'=>'2026-09-24T20:00:00+08:00',
+    'member'=>['memberId'=>101,'name'=>'测试会员'],'summary'=>[
+        'accountBalance'=>'1288.60','principalBalance'=>'1000.00','giftBalance'=>'288.60',
+        'activeCardCount'=>1,'remainingProjectTimes'=>6,'remainingProjectAmount'=>'1800.49'],
+    'cards'=>[['cardName'=>'护理卡','statusLabel'=>'有效','remainingTimes'=>6,'remainingAmount'=>'1800.49','expiresAt'=>'2027-09-24']]];
+$assets=\app\services\ai\presentation\AiMemberRightsExportProjection::capture(
+    [['detail'=>$assetDetail,'label'=>'测试会员','selection_ref'=>'member:101']],'rights');
+// Retaining general AI permission is not enough to download private assets.
+// This deny must happen before any member or card query is attempted.
+$principalProperty=$reflect->getProperty('principalResolver');$principalProperty->setAccessible(true);
+$principalProperty->setValue($runtime,static function(){return ['can_use'=>true,'member_data_authorized'=>false,
+    'permission_version'=>'fixture','scope_mode'=>'stores','store_ids'=>[1]];});
+$assetGuard=$reflect->getMethod('assertMetricExportSource');$assetGuard->setAccessible(true);
+try {$assetGuard->invoke($runtime,['workflow_code'=>'wf_member_detail_read','member_rights_export'=>$assets]);
+    throw new LogicException('accepted revoked member capability');}
+catch(RuntimeException $e){$check($e->getMessage()==='AI_MEMBER_PERMISSION_REQUIRED','revoked member capability blocks asset export before DB access');}
+$principalProperty->setValue($runtime,null);
+$assetView=$project::withMemberRights($view+['result_hash'=>'fixture-context'],$assets);
+$assetKey=$write->invoke($worker,'uqe_'.md5('fixture-rights'),str_repeat('f',64),$fields,$project::project($assetView),[],false,null);
+$verify->invoke($runtime,$fixtureRoot.'/'.$assetKey,$assetView);
+$assetBook=\PhpOffice\PhpSpreadsheet\IOFactory::load($fixtureRoot.'/'.$assetKey);
+$check((string)$assetBook->getActiveSheet()->getCell('I2')->getValue()==='1288.6'
+    &&(string)$assetBook->getActiveSheet()->getCell('I9')->getValue()==='1800.49',
+    'rights XLSX is numeric, exact to cents and agrees with original asset evidence');
+$assetBook->disconnectWorksheets();
+try {$verify->invoke($runtime,$fixtureRoot.'/'.$assetKey,$view);throw new LogicException('accepted rights file as metrics');}
+catch(RuntimeException $e){$check($e->getMessage()==='AI_EXPORT_CONTENT_MISMATCH','asset file cannot pass a metric-only evidence fence');}
 // Exact newly-created isolated fixture root; contains no application or user artifacts.
 $iterator=new RecursiveIteratorIterator(new RecursiveDirectoryIterator($fixtureRoot,FilesystemIterator::SKIP_DOTS),RecursiveIteratorIterator::CHILD_FIRST);
 foreach ($iterator as $file) { if ($file->isDir()) rmdir($file->getPathname()); else unlink($file->getPathname()); } rmdir($fixtureRoot);

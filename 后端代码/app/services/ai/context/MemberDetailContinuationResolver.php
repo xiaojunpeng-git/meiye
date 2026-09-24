@@ -10,7 +10,7 @@ use RuntimeException;
  */
 final class MemberDetailContinuationResolver
 {
-    /** @return array{selection_ref:string,label:string,view:string} */
+    /** Resolve one ordinal or the complete bounded, verified displayed set. */
     public function resolve(array $query,array $view,array $request): array
     {
         // VerifiedQueryContext has already replayed the stored query and
@@ -29,18 +29,37 @@ final class MemberDetailContinuationResolver
         }
         if (!is_array($rows)||$rows===[]) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
         $target=$request['target']??null;$ordinal=$request['ordinal']??null;
-        // One detail answer must name exactly one row. "This member" is safe
-        // only for a singleton result; otherwise the customer must identify an
-        // ordinal. This avoids silently choosing the first displayed person.
-        if ($target!=='single') throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+        // "This member" is safe only for a singleton result. Explicit plural
+        // requests may read the verified set; an ambiguous singular must not
+        // silently choose its first row.
+        if ($target==='set') {
+            // The query service already limits condition lists to 100. Do not
+            // silently expand a truncated list into all matching identities.
+            $total=$view['results'][0]['count']??count($rows);
+            if (!empty($view['results'][0]['has_more'])||(int)$total>count($rows)||count($rows)>100) throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+            $members=[];$seen=[];
+            foreach ($rows as $row) {
+                $member=$this->member($row,$request);
+                if (isset($seen[$member['selection_ref']])) continue;
+                $seen[$member['selection_ref']]=true;$members[]=$member;
+            }
+            return ['members'=>$members,'view'=>$request['view']??'summary'];
+        }
+        if ($target!=='single') throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
         if ($ordinal===null) {
-            if (count($rows)!==1) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+            if (count($rows)!==1) throw new RuntimeException('AI_MEMBER_DETAIL_SELECTION_REQUIRED');
             $index=0;
         } else {
             if (!is_int($ordinal)||$ordinal<1||$ordinal>count($rows)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
             $index=$ordinal-1;
         }
-        $row=$rows[$index]??null;$memberId=$row['member_id']??null;$label=$row['member_name']??null;
+        return $this->member($rows[$index]??null,$request);
+    }
+
+    /** Identity is always a validated source row, never a model-generated ID. */
+    private function member($row,array $request): array
+    {
+        $memberId=$row['member_id']??null;$label=$row['member_name']??null;
         if (!is_array($row)||!is_int($memberId)||$memberId<1||!is_string($label)||trim($label)==='') {
             throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
         }

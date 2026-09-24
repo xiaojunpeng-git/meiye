@@ -644,7 +644,10 @@ final class CashierV3MemberDetailQueryServices
         }
         if ($dateFrom !== '') $holderQuery->where('h.add_time', '>=', strtotime($dateFrom . ' 00:00:00'));
         if ($dateTo !== '') $holderQuery->where('h.add_time', '<=', strtotime($dateTo . ' 23:59:59'));
-        $this->applyStoreScope($holderQuery, 'h.store_id', $dataScope);
+        // 会员详情的卡项权益跟随已通过可见性校验的会员读取；卡项历史可能
+        // 来自多个门店，不能再用当前操作门店过滤，否则摘要有权益而明细为空。
+        // 门店数据权限仍由 assertVisible() 控制会员是否可打开，服务记录和赠送
+        // 等独立事实继续按各自事实层的门店权限查询。
         $this->applyDetailKeyword($holderQuery, $keyword, ['h.card_name', 'h.card_no']);
         $holders = $holderQuery
             ->field('h.id,h.oid,h.card_name,h.card_no,h.store_id,h.write_start,h.write_end,h.add_time,o.pay_price as order_pay_price')

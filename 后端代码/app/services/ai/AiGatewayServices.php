@@ -423,6 +423,9 @@ final class AiGatewayServices
                     $response=$this->present($context,$owner,$r); $response['message']='所选条件格式不完整，请检查后重新确认。'; return $response;
                 }
                 if ($submission!==null) $this->runs->acceptClarification($owner,$id,$generation,$worker,$submission['request_id']);
+                if (isset($stored['envelope']['_member_detail_request'])) {
+                    $compiled['_member_detail_request']=$stored['envelope']['_member_detail_request'];
+                }
                 if ($compiled['kind']==='clarification') {
                     $r=$this->issueGuidance($owner,$id,$generation,$worker,$compiled,$stored['origin']??$stored['envelope'],$steps); $paused=true;
                     return $this->present($context,$owner,$r);
@@ -446,7 +449,9 @@ final class AiGatewayServices
             try {
                 $result=($compiled['kind']??null)==='member_detail'
                     ?$this->executeMemberDetail($context,$owner,$id,$generation,$worker,$snapshot,$compiled,$contextMeaning)
-                    :$this->executeRegistered($context,$owner,$id,$generation,$worker,$snapshot,$compiled['plan'],$contextMeaning);
+                    :(isset($compiled['_member_detail_request'])
+                        ?$this->executeMemberConditionDetails($context,$owner,$id,$generation,$worker,$snapshot,$compiled,$contextMeaning)
+                        :$this->executeRegistered($context,$owner,$id,$generation,$worker,$snapshot,$compiled['plan'],$contextMeaning));
             } catch (\RuntimeException $error) {
                 // These are execution boundaries, not failed language understanding.
                 // Offer only server-built ranges and require customer confirmation.
@@ -503,7 +508,15 @@ final class AiGatewayServices
                     $terminalPredicate.='_origin_'.strtolower(substr($file,0,-4));
                 }
             }
-            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,$terminalPredicate);
+            // Preserve the contract's payload-free predicate even when it is
+            // raised after the model transport completed (for example during
+            // semantic reconciliation). A generic terminal category would
+            // hide the actionable boundary and make live failures untraceable.
+            if ($e instanceof AiContractException) {
+                $this->recordModelDiagnostic($owner,$id,$generation,$worker,$e,'terminal_contract');
+            } else {
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,$terminalPredicate);
+            }
             $reason=preg_match('/^[A-Z][A-Z0-9_]{0,63}$/D',$e->getMessage())?$e->getMessage():'AI_EXECUTION_FAILED';
             return $this->present($context,$owner,$this->runs->fail($owner,$id,$generation,$worker,$reason));
         } finally {
@@ -1253,7 +1266,11 @@ final class AiGatewayServices
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_member_detail_continuation_admitted');
             return $memberDetail;
         }
-        $understanding=$this->deferMemberDetailToConditionList($understanding);
+        $requestedMemberDetail=null;
+        foreach ((array)($understanding['requirements']??[]) as $requirement) {
+            if (isset($requirement['values']['member_detail'])) $requestedMemberDetail=$requirement['values']['member_detail'];
+        }
+        $understanding=$this->separateMemberDetailFromConditions($understanding);
         // Some providers omit the new request-kind marker only when a signed
         // predecessor is present. Recover it solely when two independent
         // structural checks agree: the model accepted only a broad observation
@@ -2128,7 +2145,7 @@ final class AiGatewayServices
         );
         $operationOptions=$this->registeredOperationOptions($caps,$intent['object_kind']??'unknown');
         $replacementOperationOptions=$this->registeredOperationOptions($caps,$merged['prospective_intent']['object_kind']??'unknown');
-        $finish=function(array $compiled)use($context,$term,$contextDecisions,$owner,$id,$generation,$worker,$inheritedConstraints,$merged,$metricOptions,$replacementMetricOptions,$operationOptions,$replacementOperationOptions,$currentStoreRequested,$understanding,$safe,$summaries,$bindingCandidate,$objectReplacementWithoutFilterConfirmation):array {
+        $finish=function(array $compiled)use($context,$term,$contextDecisions,$owner,$id,$generation,$worker,$inheritedConstraints,$merged,$metricOptions,$replacementMetricOptions,$operationOptions,$currentStoreRequested,$understanding,$safe,$summaries,$bindingCandidate,$objectReplacementWithoutFilterConfirmation,$requestedMemberDetail):array {
             $compiled=$this->bindNamedStoreScope($compiled,$context,$term,$contextDecisions,$owner,$id,$generation,$worker);
             $compiled=$this->bindCurrentStoreScope($compiled,$context,$currentStoreRequested);
             if ($merged['replacement_confirmation']) {
@@ -2177,6 +2194,9 @@ final class AiGatewayServices
                     !empty($bindingCandidate['initial_observation'])?'platform_observation':
                     (!empty($bindingCandidate['recommended_initial_answer'])?'platform_recommendation':'customer_or_verified_context')];
             }
+            // Presentation follows the authorised filter query; it is not a
+            // new metric and must not disappear while the filters are bound.
+            if ($requestedMemberDetail!==null) $compiled['_member_detail_request']=$requestedMemberDetail;
             return $compiled;
         };
         // The model Skill identifies the semantic subject from the complete
@@ -3277,6 +3297,14 @@ final class AiGatewayServices
         if (($understanding['status']??null)!=='understood') return $understanding;
         $question=$safeQuestion['question']??null;
         if (!is_string($question) || $question==='') return $understanding;
+        // A condition set owns several independent measurements and their
+        // evidence. Finding only one exact registry term does not prove the
+        // other natural-language measurements mean that same metric. Leave
+        // this carrier to condition binding; never replace its full evidence
+        // with the one recognized word or collapse its predicate audit.
+        foreach ((array)($understanding['requirements']??[]) as $requirement) {
+            if (isset($requirement['values']['aggregate_condition'])) return $understanding;
+        }
         $allowed=[];
         foreach ($summaries as $summary) if (is_array($summary) && is_string($summary['metric_code']??null)) {
             $allowed[]=$summary['metric_code'];
@@ -3417,16 +3445,23 @@ final class AiGatewayServices
         if (($understanding['status']??null)!=='understood') return $understanding;
         $question=$safeQuestion['question']??null;
         if (!is_string($question) || $question==='') return $understanding;
-        $requirements=(array)($understanding['requirements']??[]);$accounted=[];$used=[];
+        $requirements=(array)($understanding['requirements']??[]);$accounted=[];$used=[];$accountedCodes=[];
+        $allowed=array_keys((array)($capabilities['metric_readiness']??[]));
         foreach ($requirements as $requirement) {
             if (!is_array($requirement)) continue;
             if (is_string($requirement['id']??null)) $used[$requirement['id']]=true;
             if (!in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
-            foreach ((array)($requirement['values']['metric_terms']??[]) as $term) if (is_string($term) && $term!=='') $accounted[$term]=true;
+            foreach ((array)($requirement['values']['metric_terms']??[]) as $term) if (is_string($term) && $term!=='') {
+                $accounted[$term]=true;
+                // Registered aliases are one measurement, not extra customer
+                // requirements. Retain every independently understood clause;
+                // only avoid adding a duplicate audit row for the same owner.
+                $code=\app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms([$term],$allowed);
+                if ($code!==null) $accountedCodes[$code]=true;
+            }
         }
-        $allowed=array_keys((array)($capabilities['metric_readiness']??[]));
         foreach (\app\services\query\metric\MetricSemanticCatalog::registeredTermsInText($question,$allowed) as $match) {
-            if (isset($accounted[$match['term']])) continue;
+            if (isset($accounted[$match['term']])||isset($accountedCodes[$match['metric_code']])) continue;
             if (count($requirements)>=12) return $understanding;
             $next=1;while(isset($used['r'.$next])&&$next<1000)$next++;
             if ($next>999) return $understanding;
@@ -4238,9 +4273,8 @@ final class AiGatewayServices
     }
 
     /**
-     * Admits only a pure detail continuation. Mixed filter-and-detail requests
-     * remain on the registered condition-list path so a large result set is
-     * never expanded into an unbounded member-detail fan-out.
+     * Admits only a pure detail continuation. Mixed requests establish their
+     * authorised population through the condition-list path before assets.
      */
     private function compileMemberDetailContinuation(array $understanding,$sourceContext): ?array
     {
@@ -4273,10 +4307,11 @@ final class AiGatewayServices
     /**
      * A compound first turn such as "members matching X and Y, show details"
      * must establish its authorised population before any private asset read.
-     * Keep the complete registered filter request and defer only the detail
-     * presentation carrier; the returned list can then be referenced safely.
+     * Keep the complete registered filter request and separate only the detail
+     * presentation carrier. The caller retains that carrier for execution,
+     * including through clarification; it must not be silently discarded.
      */
-    private function deferMemberDetailToConditionList(array $understanding): array
+    private function separateMemberDetailFromConditions(array $understanding): array
     {
         $hasCondition=false;
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
@@ -4298,9 +4333,10 @@ final class AiGatewayServices
     }
 
     /**
-     * Reads one currently authorised member's asset projection. The preceding
-     * report view identifies the member; MemberAnalysisObjectServices checks
-     * the live store relation again immediately before the cashier read.
+     * Reads assets for a bounded verified member set. Every identity passes a
+     * live store-relation check. Once authorised, rights span all that member's
+     * stores, as confirmed by the product owner on 2026-09-24; this never grants
+     * access to another member outside the original population.
      */
     private function executeMemberDetail(array $context,array $owner,string $id,int $generation,string $worker,array $snapshot,array $compiled,array $contextMeaning=[]): array
     {
@@ -4320,7 +4356,8 @@ final class AiGatewayServices
         };
         $fresh=$guard();
         $this->runs->progress($owner,$id,$generation,$worker,'QUERYING');
-        $attemptHash=hash('sha256',json_encode([$spec['selection_ref'],$spec['view'],$spec['source_view_ref']]));
+        $members=$spec['members']??[$spec];
+        $attemptHash=hash('sha256',json_encode([$members,$spec['view'],$spec['source_view_ref']]));
         $this->runs->prepareAttempt($owner,$id,$generation,$worker,'member_detail_read','tool',$attemptHash,'cashier_v3_member_detail');
         if (!$this->runs->sendAttempt($owner,$id,$generation,$worker,'member_detail_read')) throw new RuntimeException('AI_ATTEMPT_CONFLICT');
         try {
@@ -4329,7 +4366,6 @@ final class AiGatewayServices
             // the original trusted context, which owns that refresh callback;
             // the returned permission snapshot intentionally contains no
             // executable callback and must never be treated as a new context.
-            $selection=$this->memberObjects($context)->selection($spec['selection_ref']);
             $store=(int)($fresh['origin_store_id']??0);
             if ($store<1||!in_array($store,(array)($fresh['store_ids']??[]),true)) $store=(int)($fresh['store_ids'][0]??0);
             if ($store<1) throw new RuntimeException('AI_MEMBER_PERMISSION_REQUIRED');
@@ -4342,20 +4378,36 @@ final class AiGatewayServices
                 \app\services\cashier\v3\CashierV3DataScopeContext::MODE_STORES,[],false,'',
                 $this->permissionHash($fresh),[],[],true
             );
-            $detail=(new \app\services\cashier\v3\member\CashierV3MemberDetailQueryServices())->read(
-                (int)$selection['member_id'],$operator,$dataScope,['tab'=>'assets','status'=>'active']
-            );
+            $details=[];
+            foreach ($members as $member) {
+                // Recheck each identity and the remaining run budget. A set
+                // grants no more access than the same members read separately.
+                $guard();
+                $selection=$this->memberObjects($context)->selection($member['selection_ref']);
+                $detail=(new \app\services\cashier\v3\member\CashierV3MemberDetailQueryServices())->read(
+                    (int)$selection['member_id'],$operator,$dataScope,['tab'=>'assets','status'=>'active']
+                );
+                if ((int)($detail['member']['memberId']??0)!==(int)$selection['member_id']) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                $details[]=['detail'=>$detail,'label'=>(string)$selection['label'],'selection_ref'=>$member['selection_ref']];
+            }
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'member_detail_read','SUCCEEDED');
         } catch (\Throwable $error) {
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'member_detail_read','FAILED');
             throw $error;
         }
         $guard();$this->runs->progress($owner,$id,$generation,$worker,'VERIFYING');
-        if ((int)($detail['member']['memberId']??0)!==(int)$selection['member_id']) throw new RuntimeException('AI_EVIDENCE_INVALID');
         $this->runs->progress($owner,$id,$generation,$worker,'RENDERING');
-        $answer=(new \app\services\ai\presentation\AiMemberDetailAnswerRenderer())->render(
-            $detail,(string)$selection['label'],(string)$spec['view']
-        );
+        $renderer=new \app\services\ai\presentation\AiMemberDetailAnswerRenderer();
+        $answer=isset($spec['members'])?$renderer->renderSet($details,(string)$spec['view'])
+            :$renderer->render($details[0]['detail'],$details[0]['label'],(string)$spec['view']);
+        if (isset($spec['population_answer'])) {
+            // Keep the verified membership evidence visible alongside assets;
+            // the user must be able to see which metrics selected this set.
+            $parts=$answer['sections']??[['title'=>'会员权益汇总','answer'=>$answer]];
+            $sections=[['id'=>'q1','title'=>'会员筛选依据','answer'=>$spec['population_answer']]];
+            foreach ($parts as $part) $sections[]=['id'=>'q'.(count($sections)+1),'title'=>$part['title'],'answer'=>$part['answer']];
+            $answer=['summary'=>$spec['population_answer']['summary'].' '.$answer['summary'],'cards'=>[],'sections'=>$sections];
+        }
         $guard();$this->runs->progress($owner,$id,$generation,$worker,'PUBLISHING');
         $run=$this->runs->get($owner,$id,$generation);
         $expires=min($spec['source_expires_at'],intdiv($run['expires_at'],1000));
@@ -4364,12 +4416,43 @@ final class AiGatewayServices
         // later follow-up therefore replays the original filtered population
         // and never treats this presentation object as a new source of truth.
         $evidence=$binding+['query'=>$spec['source_query'],'view_ref'=>$spec['source_view_ref'],
+            // Freeze exact values before publishing. The separate XLSX task
+            // projects these authorised assets, not the context filter list.
+            'member_rights_export'=>\app\services\ai\presentation\AiMemberRightsExportProjection::capture(
+                $details,(string)$spec['view'],$spec['population_export_rows']??[]),
             'context_meaning'=>$contextMeaning,'compiled_run_hash'=>$attemptHash,
             'execution_trace'=>[['code'=>'member_detail_read','status'=>'SUCCEEDED']],
             'workflow_code'=>'wf_member_detail_read','management_version'=>$this->managementRevision];
         $evidenceRef=$this->private->put('evidence',$evidence,$expires);
         $answerRef=$this->private->put('answer',$binding+['answer'=>$answer],$expires);
         return $this->runs->publish($owner,$id,$generation,$worker,$evidenceRef,$answerRef);
+    }
+
+    /** Filter first, then read details from that exact signed population; no second name search. */
+    private function executeMemberConditionDetails(array $context,array $owner,string $id,int $generation,string $worker,array $snapshot,array $compiled,array $contextMeaning): array
+    {
+        $plan=$compiled['plan'];
+        if (isset($plan['items'])||($plan['query']['query_shape']??null)!=='condition_list'
+            ||($plan['query']['condition_set']['subject']??null)!=='member') throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+        // Population execution never starts the file worker. Clients request
+        // the separate export only after the asset answer has been published.
+        $plan['output_format']='screen';
+        $result=$this->executeRegisteredSingle($context,$owner,$id,$generation,$worker,$snapshot,$plan,$contextMeaning,false);
+        $view=$result['evidence'];
+        // An empty population has no private assets to read; retain its exact
+        // empty answer instead of pretending that a member could be selected.
+        if (empty($view['results'][0]['rows'])) {
+            [$evidenceRef,$answerRef]=$this->saveResults($owner,$id,$generation,$result['plan'],$view,$result['answer'],$result['trace'],$contextMeaning);
+            return $this->runs->publish($owner,$id,$generation,$worker,$evidenceRef,$answerRef);
+        }
+        $request=$compiled['_member_detail_request'];$request['target']='set';$request['ordinal']=null;
+        $resolved=(new \app\services\ai\context\MemberDetailContinuationResolver())->resolve($view['query'],$view,$request);
+        return $this->executeMemberDetail($context,$owner,$id,$generation,$worker,$snapshot,
+            ['member_detail'=>$resolved+['source_query'=>$view['query'],'source_view_ref'=>$view['read_consistency_ref'],
+                'source_expires_at'=>$view['expires_at'],'population_answer'=>$result['answer'],
+                // Reuse the exact signed selection metrics, without re-query
+                // or rounding, so the combined answer's file stays complete.
+                'population_export_rows'=>\app\services\query\metric\MetricReadViewExportProvider::project($view)]],$contextMeaning);
     }
 
     private function executeRegistered(array $context,array $owner,string $id,int $generation,string $worker,array $snapshot,array $plannerPlan,array $contextMeaning=[]): array
@@ -4937,6 +5020,8 @@ final class AiGatewayServices
             'AI_CAPABILITY_NOT_READY'=>'已识别您的需求，但对应的数据能力或筛选组合尚未接入，暂不能准确提供结果。',
             'AI_CONTEXT_REQUIRED'=>'这句追问缺少可核对的前文条件。请补充您想延续的对象、时间或查看结果，我会按当前权限重新查询。',
             'AI_RESULT_REFERENCE_UNAVAILABLE'=>'无法在原查询结果中安全确认您指的对象，未改用新结果中的同名或同序对象。请重新说明对象。',
+            'AI_MEMBER_DETAIL_SELECTION_REQUIRED'=>'上一份名单有多位会员，请说明要看第几位会员的权益，例如“第一个会员的权益明细”。本次没有替您选择会员。',
+            'AI_MEMBER_DETAIL_SET_NOT_READY'=>'这份会员名单尚未完整展示，请缩小筛选范围后查看全部权益，或说明要看已展示名单中的第几位。',
             'AI_FOLLOWUP_CONDITION_REQUIRED'=>'我已找到上次查询，但还不能准确确认这次要改变的内容。请补充您要改看的对象、时间或查看方式；已确认条件会保留。',
             'AI_RANK_LIMIT_NOT_READY'=>'当前门店排行最多展示前20或后20项，暂不支持您要求的数量；本次未更改您的条件。',
             'AI_DIMENSION_RANK_LIMIT_NOT_READY'=>'当前分析对象最多支持前20、后20排行，暂不支持您要求的数量；本次未更改您的条件。',

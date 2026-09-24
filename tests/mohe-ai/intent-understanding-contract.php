@@ -749,4 +749,30 @@ $check(strpos($uniquenessInstruction,'default_rank_object_kinds')!==false
     'candidate-blind uniqueness uses one registry-owned broad-ranking default while preserving explicit measurements');
 $reject(static function(){AiIntentResultContract::normalizeSemanticUniqueness(['decision'=>'unique','metric_code'=>'invented'],['cash_performance']);},
     'candidate-blind uniqueness rejects an unregistered code');
+// Calendar-shape recovery is restricted to one independently provable range;
+// it cannot choose a comparison side or alter an already valid model carrier.
+$calendarText='最近30天';
+$calendarQuestion=['question'=>$calendarText,'reference_date'=>'2026-09-24',
+    'evidence_messages'=>[['id'=>'current','text'=>$calendarText]],'recent_questions'=>[]];
+$calendarUnderstanding=['goal'=>'查看最近30天','status'=>'understood','requirements'=>[[
+    'id'=>'r1','meaning'=>'最近30天','fields'=>['periods'],
+    'values'=>['periods'=>[['kind'=>'relative_days','days'=>'30']]],
+    'evidence'=>[['message_id'=>'current','quote'=>$calendarText]],
+]]];
+$calendarNormalized=AiIntentUnderstandingContract::normalize($calendarUnderstanding,$calendarQuestion);
+$check($calendarNormalized['requirements'][0]['values']['periods']===
+    [['kind'=>'date_range','start'=>'2026-08-26','end'=>'2026-09-24']],
+    'one malformed relative date carrier uses the shared calendar without another model call');
+$validCalendar=$calendarUnderstanding;
+$validCalendar['requirements'][0]['values']['periods']=[['kind'=>'relative_days','days'=>30,'end_offset_days'=>0]];
+$check(AiIntentUnderstandingContract::normalize($validCalendar,$calendarQuestion)['requirements'][0]['values']['periods']===
+    $validCalendar['requirements'][0]['values']['periods'],'valid calendar carriers remain unchanged');
+$comparisonCalendar=$calendarUnderstanding;
+$comparisonQuestion=$calendarQuestion;
+$comparisonQuestion['question']='这个月对比上个月';
+$comparisonQuestion['evidence_messages']=[['id'=>'current','text'=>$comparisonQuestion['question']]];
+$comparisonCalendar['requirements'][0]['evidence'][0]['quote']=$comparisonQuestion['question'];
+$reject(static function()use($comparisonCalendar,$comparisonQuestion){
+    AiIntentUnderstandingContract::normalize($comparisonCalendar,$comparisonQuestion);
+},'malformed comparison periods cannot be repaired by choosing one calendar side');
 echo 'PASS intent understanding/binding separation: '.$checks." checks\n";

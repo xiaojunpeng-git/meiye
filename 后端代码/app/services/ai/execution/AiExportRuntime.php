@@ -66,7 +66,8 @@ final class AiExportRuntime
         $providers=new Q\UnifiedQueryProviderRegistry($pages);
         $providers->register(new M\MetricReadViewExportProvider($this->readViews,function(array $context,string $ref):array {
             if (!$this->binding || $ref!==$this->binding['read_consistency_ref']) throw new \RuntimeException('AI_EXPORT_SOURCE_MISMATCH');
-            $evidence=$this->evidence($this->binding); return ['principal'=>[],'query'=>$evidence['query']];
+            $evidence=$this->evidence($this->binding);
+            return ['principal'=>[],'query'=>$evidence['query'],'member_rights_export'=>$evidence['member_rights_export']??null];
         })); $providers->freeze();
         $resolvers=new Q\UnifiedQueryWorkerContextResolverRegistry($pages); $resolvers->register($this->resolver); $resolvers->freeze();
         $this->worker=new Q\UnifiedQueryExportWorkerServices($this->tasks,$providers,$resolvers,'AI_EXPORT');
@@ -188,7 +189,10 @@ final class AiExportRuntime
         foreach (['principal_kind','origin_store_id','origin_organization_id','employee_id','staff_id'] as $key)
             if (array_key_exists($key,$context)) $binding[$key]=$context[$key];
         $this->binding=$binding;
-        $view=$this->readViews->replay([],$evidence['query'],$evidence['view_ref']);
+        // Identity revalidation needs the trusted principal restored from this
+        // run binding; never resolve it before the binding has been installed.
+        $this->assertMetricExportSource($evidence);
+        $view=$this->exportView($evidence,$evidence['view_ref']);
         $binding['result_hash']=$view['result_hash'];
         $binding['expires_at']=min($expiry,(int)$view['expires_at']);
         $binding['source_expires_at']=[$expiry,(int)$view['expires_at']];
@@ -408,12 +412,41 @@ final class AiExportRuntime
     private function evidence(array $binding): array
     {
         $evidence=$this->runtime['private']->read($binding['evidence_ref']); $this->assertObjectOwner($evidence,$binding);
+        $this->assertMetricExportSource($evidence);
         if (($evidence['view_ref']??null)!==$binding['read_consistency_ref']) throw new \RuntimeException('AI_EXPORT_SOURCE_MISMATCH');
         return $evidence;
     }
+
+    /** A rights answer retains a metric view only for conversation identity.
+     * Its file needs the exact asset snapshot plus a live identity check;
+     * neither an old unsnapshotted answer nor revoked access may be exported.
+     */
+    private function assertMetricExportSource(array $evidence): void
+    {
+        if (($evidence['workflow_code']??null)==='wf_member_detail_read') {
+            $snapshot=\app\services\ai\presentation\AiMemberRightsExportProjection::validate($evidence['member_rights_export']??null);
+            $members=new M\MemberAnalysisObjectServices(static function(string $table){return Db::name($table);},function():array {
+                $current=$this->current();
+                // Export keeps the same member-data capability gate as the
+                // answer reader, even when the account can still use general AI.
+                $allowed=!empty($current['can_use']) && ($current['member_data_authorized']??false)===true
+                    && \app\services\ai\config\AiConfigStore::allowsSanitizedQuestion($this->runtime['config']->read());
+                return ['member_authorized'=>$allowed,
+                    'store_ids'=>$current['store_ids']??[],'scope_mode'=>$current['scope_mode']??null,
+                    'permission_version'=>AiAuthority::permissionHash($current)];
+            });
+            foreach ($snapshot['member_refs'] as $ref) $members->selection($ref);
+        }
+    }
+    /** Bind file content to BOTH the context view and immutable exact assets. */
+    private function exportView(array $evidence,string $ref): array
+    {
+        $view=$this->readViews->replay([],$evidence['query'],$ref);
+        return M\MetricReadViewExportProvider::withMemberRights($view,$evidence['member_rights_export']??null);
+    }
     private function replay(): array
     {
-        $view=$this->readViews->replay([],$this->evidence($this->binding)['query'],$this->binding['read_consistency_ref']);
+        $view=$this->exportView($this->evidence($this->binding),$this->binding['read_consistency_ref']);
         if ($view['result_hash']!==$this->binding['result_hash'] || $view['expires_at']<$this->binding['expires_at']) throw new \RuntimeException('AI_EXPORT_SOURCE_MISMATCH');
         return $view;
     }

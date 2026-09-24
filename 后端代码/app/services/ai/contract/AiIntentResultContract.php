@@ -982,6 +982,21 @@ final class AiIntentResultContract
         if ($objectRelation==='analysis') $value['object_term']='';
         if ($objectRelation==='selection' && $value['object_term']==='') self::fail('bad_value:object_relation');
         $delta=$hasPrior?self::delta($value['context_delta']):null;
+        // A complete current, evidence-backed condition has already been
+        // projected from accepted semantics and accountable metric candidates.
+        // It replaces the condition carrier even if the binding model calls
+        // it "inherit". Comparing semantic metric_term keys with a prior
+        // metric_code carrier cannot establish equality. Do not apply this
+        // to implicit continuations or unresolved metric choices.
+        if ($delta!==null && ($delta['aggregate_condition']??null)==='inherit'
+            && isset($currentFields['aggregate_condition'])
+            && self::semanticAggregateCondition($semanticCondition)
+            && self::boundAggregateCondition($aggregateCondition)
+            && !$value['needs_metric_choice']
+            && count($value['metric_codes'])===count($semanticCondition['conditions'])) {
+            $delta['aggregate_condition']='replace';
+            $value['context_delta']['aggregate_condition']='replace';
+        }
         if ($clearedStaleAggregateCondition && $delta!==null
             && is_array($safeQuestion['prior_query']['aggregate_condition']??null)) {
             $delta['aggregate_condition']='clear';

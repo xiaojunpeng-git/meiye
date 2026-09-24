@@ -22,6 +22,7 @@ final class AiIntentUnderstandingContract
             . 'A metric term is the measured business fact, not every noun or modifier in the sentence. Never mark an analytical object noun, date expression, question word, or ranking direction such as highest, lowest, most, least, best or worst as metric_codes. For “which project has the most sales records and which has the least”, sales records is the one measurement, project is the analytical object, and most plus least are the two ranking directions; do not create extra measurement requirements for project, most or least. '
             . 'For object_relation, analysis also covers inspecting, summarizing or evaluating a stated object, not only comparing, grouping or listing it. A broad evaluation or overview of a stated object must carry that object_kind with object_relation=analysis; a time condition never replaces or erases it. object_kind may be store, business_date, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization, order, sale_line, card or unknown. '
             . 'Member-detail continuations must not be forced into an analytical query shape. For example, “这个会员的权益明细给我看一下” is understood as one requirement with fields ["object_kind","object_relation","member_detail"] and values {"object_kind":"member","object_relation":"analysis","member_detail":{"view":"rights","target":"single","ordinal":null}}. It has no metric_codes, operation or ranking. “第二个会员的详情” uses view=summary, target=single and ordinal=2. “这些会员的权益” uses view=rights, target=set and ordinal=null. These examples explain semantic structure only; copy evidence from the actual current message and never invent an identity. '
+            . 'A first-turn population filter can also request member details. In that case preserve BOTH the complete aggregate_condition (result_form=list) AND a separate member_detail requirement (target=set, ordinal=null, view=summary for details or view=rights for entitlement/card details). A condition list answers who qualifies; member_detail answers what those members currently hold. One cannot replace the other. This applies equally to exact registry names and everyday measurement language. Before returning, check whether a requested detail or rights view has been lost merely because conditions were also present. Do not add member_detail for a request that asks only who qualifies or how many qualify. '
             . 'Do not output metric codes, action codes, object IDs, names hidden behind local references, calculated dates, formulas, SQL, query steps, permissions or result values. An explicit customer date range may be preserved as a period; never calculate a relative period into calendar dates. '
             . 'understood means the business request is clear even when no current capability can perform it. needs_clarification means the business request itself has more than one plausible reading. A broad request to understand overall operating conditions without naming a specific business fact is still understood: retain it as a metric_codes requirement with its exact customer term, so the later binding may propose a clearly labelled initial observation rather than requiring the customer to learn a metric name. If the customer did state a measurement that can reasonably mean several different business facts and neither the current wording nor verified context chooses among them, preserve that measurement requirement and mark needs_clarification; never turn a category label into one of its examples. unbound is allowed only with understood: ambiguity is not an unavailable capability. For a two-period comparison, copy the entire de-identified current question into each evidence.quote; do not paraphrase, alter date words or quote a repeated fragment. This object grants nothing and is later bound by the server.';
     }
@@ -42,6 +43,30 @@ final class AiIntentUnderstandingContract
         if (!in_array($value['status'], ['understood', 'needs_clarification'], true)) self::fail('status');
         $messages = self::messages($safeQuestion);
         $requirements = $value['requirements'];
+        // Repair only a malformed calendar carrier when the shared calendar
+        // parser independently proves one explicit current range. This saves
+        // a second model call for JSON-shape errors without choosing a metric,
+        // changing a threshold, or guessing either side of a comparison.
+        if (!isset($value['groups']) && is_array($requirements)) {
+            $periodIndexes=[];
+            foreach ($requirements as $index=>$requirement) {
+                if (is_array($requirement) && in_array('periods',(array)($requirement['fields']??[]),true)) $periodIndexes[]=$index;
+            }
+            if (count($periodIndexes)===1) {
+                $index=$periodIndexes[0];
+                if (!self::periods($requirements[$index]['values']['periods']??null)
+                    && is_string($safeQuestion['reference_date']??null)
+                    && array_filter((array)($requirements[$index]['evidence']??[]),static function($e): bool {
+                        return is_array($e)&&($e['message_id']??null)==='current';
+                    })) {
+                    $projection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse((string)($safeQuestion['question']??''));
+                    if (($projection['date_grouping_ambiguous']??true)===false && count((array)($projection['date_terms']??[]))===1) {
+                        $range=(new \app\services\ai\execution\AiWorkflowPlanner())->normalizePeriod($projection['date_terms'][0],$safeQuestion['reference_date']);
+                        $requirements[$index]['values']['periods']=[['kind'=>'date_range','start'=>$range['start'],'end'=>$range['end']]];
+                    }
+                }
+            }
+        }
         // A provider can duplicate a valid calendar carrier into the metric
         // slot even after one repair.  Remove only that structurally proven
         // duplicate: a valid periods carrier must already exist and every
