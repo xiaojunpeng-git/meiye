@@ -1187,6 +1187,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if($hasOrganizationProjection)$records=array_values(array_filter($records,fn(array $row):bool=>$this->selectedDimensionMatches($row,$input)));
         if($hasOrganizationProjection&&!array_filter($columns,static fn($column)=>(string)($column['key']??'')==='company'))$columns=$this->withDimensions($columns);
         $columns=$this->fixedColumns($title,$this->withColumnExplanations($columns));
+        if($title==='市场业绩表')$columns=$this->marketPerformanceColumnExplanations($columns);
         if($title==='市场明细表')$columns=$this->marketDetailColumnExplanations($columns);
         if(in_array($title,['新客明细表','新客汇总表'],true))$columns=$this->newCustomerColumnExplanations($columns);
         $this->appendDimensionFiltersToColumns($columns);
@@ -1211,25 +1212,65 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         foreach($metadata as $key=>$value)$result[$key]=$value;
         return$result;
     }
+    /**
+     * 市场业绩的动态来源列必须说明真实计入口径。分组名称来自当前来源配置，
+     * 但人次、有效人员和金额的解释固定由后端给出，页面不能按列名猜算法。
+     */
+    private function marketPerformanceColumnExplanations(array $columns):array
+    {
+        foreach($columns as &$column){
+            $key=(string)($column['key']??'');
+            $label=trim((string)($column['label']??''));
+            $source=trim((string)($column['group_label']??''));
+            if($key==='division_name'){
+                $column['source_explanation']='显示业务门店当前所属的分公司；门店未配置分公司时显示“未配置分公司”。';
+                continue;
+            }
+            if($key==='store_name'){
+                $column['source_explanation']='显示收款或服务实际归属的门店；只汇总当前账号有权查看的门店。';
+                continue;
+            }
+            if(preg_match('/^channel_\d+_(walk_in|visits|effective|amount)$/',$key,$parts)){
+                $source=$source!==''?$source:'该来源';
+                $descriptions=[
+                    'walk_in'=>'汇总有权限人员在市场明细表为“门店＋业务日期＋会员＋来源”保存的进店数；新合并行尚未保存时读取原单据已保存值，新旧值不会重复相加。仅 B 来源显示该列。',
+                    'visits'=>'统计所选日期内归属“'.$source.'”、已完成且未作废的服务人次。会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
+                    'effective'=>'统计所选日期内归属“'.$source.'”且净记账收款达到标准的会员人数：A 来源每位会员至少 1,000 元，其他来源至少 500 元；按门店、来源和会员去重，游客不计。退款会抵减，已作废销售不计。',
+                    'amount'=>'合计所选日期内归属“'.$source.'”的有效记账收款净额。现金退款在退款发生日计入 K退款顾客并冲减金额；作废销售冲减原来源；余额支付和旧卡录入不计。',
+                ];
+                $column['source_explanation']=$descriptions[$parts[1]];
+                continue;
+            }
+            if(strpos($key,'payment_')===0){
+                $column['source_explanation']='合计所选日期内使用“'.$label.'”完成的有效记账收款净额；退款和作废产生的反向收款按实际发生日冲减，余额支付和旧卡录入不计。';
+                continue;
+            }
+            if($key==='total_performance'){
+                $column['source_explanation']='合计所选日期内全部有效记账收款方式的净额；退款和作废按实际发生日冲减，余额支付、赠金和旧卡录入不计。该值等于本表各系统收款方式金额之和。';
+            }
+        }
+        unset($column);
+        return$columns;
+    }
     /** 市场明细的说明必须解释按日合并与跨日期去重的差别，不能沿用逐单模板。 */
     private function marketDetailColumnExplanations(array $columns):array
     {
         $descriptions=[
             'company'=>'显示业务门店当前所属的分公司；门店未配置分公司时显示“未配置分公司”。',
-            'business_date'=>'按业务日期、会员和来源分行；同一会员同一天同一来源的单据合并显示。',
-            'store_name_snapshot'=>'显示这笔销售或服务所属的门店，只展示当前账号有权查看的门店。',
-            'member_name_snapshot'=>'有会员身份时显示销售或服务发生时记录的会员姓名；没有会员身份时显示“游客”。',
+            'business_date'=>'显示收款或服务归属的业务日期；同一门店、同一会员、同一天、同一来源的记录合并为一行。',
+            'store_name_snapshot'=>'显示收款或服务实际归属的门店；只展示当前账号有权查看的门店。',
+            'member_name_snapshot'=>'有会员身份时显示业务发生时记录的会员姓名；没有会员身份时显示“游客”，不同游客不会按姓名合并。',
             'member_phone'=>'显示会员资料中当前保存的手机号码；未填写则留空。',
-            'dimension'=>'显示这笔销售当时记录的来源；B 来源无收款服务行显示其关联订单的来源。',
-            'walk_in'=>'按本行会员、日期和来源手动保存进店数；尚未填写时显示原单据已保存值之和。仅 B 来源参与市场业绩表的进店汇总。',
-            'visits'=>'有已完成且未作废的服务即计算人次：会员当天在同一来源记 1，游客每张有效服务单记 1；同单多项目不重复，合计直接相加。',
-            'effective_people'=>'所选日期内，同一门店、同一来源的这位会员累计记账收款达到标准，本行显示 1：A 来源至少 1,000 元，其他来源至少 500 元。同一会员跨日期仍可能显示多行 1；合计按会员去重，不把各行的 1 直接相加。',
-            'amount'=>'合计该会员当天在这一门店和来源下的记账收款；退款按发生日期抵减，已作废销售不计。仅有正常服务、没有当次收款时显示 0。',
-            'registered_date'=>'显示收款或服务归属的业务日期；补录业务可能晚于该日期录入系统。',
+            'dimension'=>'显示销售发生时记录的客户来源；只有服务、没有当次收款的行，显示该服务所关联销售单的来源。',
+            'walk_in'=>'显示有权限人员为本行“门店＋业务日期＋会员＋来源”保存的进店数；新合并行尚未保存时显示原单据已保存值之和。仅 B 来源汇总到市场业绩表的进店列。',
+            'visits'=>'有已完成且未作废的服务即计人次：会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
+            'effective_people'=>'所选日期内，同一门店、同一来源的会员净记账收款达到标准时显示 1：A 来源至少 1,000 元，其他来源至少 500 元；游客不计。同一会员跨日期可能显示多行 1，但合计按会员去重。',
+            'amount'=>'合计本行会员当天在该门店和来源下的有效记账收款净额；退款按退款发生日抵减，已作废销售不计。只有正常服务、没有当次收款时显示 0。',
+            'registered_date'=>'显示本行收款或服务归属的业务日期；补录业务的系统录入时间可能晚于该日期。',
             'reviewer'=>'本表目前没有读取审核人，显示“—”；不能据此判断单据是否审核。',
             'reviewed_at'=>'本表目前没有读取审核时间，显示“—”；不能据此判断单据是否审核。',
-            'creator_name'=>'显示本行合并记录中的制单人；涉及多人时用顿号分隔。',
-            'created_at'=>'显示本行合并记录最后一次写入系统的时间，补录时可能晚于业务日期。',
+            'creator_name'=>'显示本行所合并业务记录的制单人；涉及多人时用顿号分隔，未记录则显示“—”。',
+            'created_at'=>'显示本行合并记录最后一次写入系统的时间；这是系统录入时间，不是业务归属日期。',
         ];
         foreach($columns as &$column){
             $key=(string)($column['key']??'');
