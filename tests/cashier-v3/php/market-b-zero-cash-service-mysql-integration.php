@@ -181,7 +181,7 @@ try {
     }));
     if ((int)($guestSummary['records'][0][$bKey . '_visits'] ?? 0) !== $visitsBefore + 2
         || count($guestRows) !== 1 || (int)$guestRows[0]['visits'] !== 1
-        || (int)$guestRows[0]['member_id'] !== 0) {
+        || (int)$guestRows[0]['member_id'] !== 0 || (string)$guestRows[0]['member_name_snapshot'] !== '游客') {
         throw new RuntimeException('Guest service order was omitted or its projects were counted more than once');
     }
     // 仅用于验证查询端口径；补充记录与测试业务事实都在同一事务回滚。

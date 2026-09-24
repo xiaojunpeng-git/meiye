@@ -335,6 +335,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         }
         foreach ($rows as &$row) {
             $row['dimension'] = (string)$row['business_source_label_snapshot'];
+            // 会员 ID 才是会员身份的权威依据；无会员身份的服务单统一显示“游客”，
+            // 仅改变报表展示，不把游客补写成会员，也不改变金额或人次归属。
+            if ((int)($row['member_id'] ?? 0) <= 0) $row['member_name_snapshot'] = '游客';
             $row['walk_in'] = 0; $row['visits'] = 0;
             $row['effective_people'] = isset($effectiveMemberKeys[(int)$row['store_id'] . '|' . (int)$row['business_source_primary_id'] . '|' . (int)$row['member_id']]) ? 1 : 0;
             $visitIdentity = $this->marketVisitIdentity($row);
@@ -1215,7 +1218,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'company'=>'显示业务门店当前所属的分公司；门店未配置分公司时显示“未配置分公司”。',
             'business_date'=>'按业务日期、会员和来源分行；同一会员同一天同一来源的单据合并显示。',
             'store_name_snapshot'=>'显示这笔销售或服务所属的门店，只展示当前账号有权查看的门店。',
-            'member_name_snapshot'=>'显示销售或服务发生时记录的会员姓名。',
+            'member_name_snapshot'=>'有会员身份时显示销售或服务发生时记录的会员姓名；没有会员身份时显示“游客”。',
             'member_phone'=>'显示会员资料中当前保存的手机号码；未填写则留空。',
             'dimension'=>'显示这笔销售当时记录的来源；B 来源无收款服务行显示其关联订单的来源。',
             'walk_in'=>'按本行会员、日期和来源手动保存进店数；尚未填写时显示原单据已保存值之和。仅 B 来源参与市场业绩表的进店汇总。',
