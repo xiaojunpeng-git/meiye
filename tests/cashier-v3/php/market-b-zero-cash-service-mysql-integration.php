@@ -146,6 +146,44 @@ try {
         || count($twoServiceRows) !== 1 || (int)$twoServiceRows[0]['visits'] !== 1) {
         throw new RuntimeException('Two service facts on one member day were counted more than once');
     }
+    // 游客没有会员 ID，必须按有效服务单计 1；同一服务单的多个项目仍只算一次。
+    $guestRandom = bin2hex(random_bytes(20));
+    $guestOrderId = 'CSO-' . $guestRandom;
+    $guestCheckoutId = 'CKR-' . $guestRandom;
+    $guestOrder = $order;
+    $guestOrder['order_id'] = $guestOrderId;
+    $guestOrder['order_no'] = 'XSTEST' . substr($guestRandom, 0, 16);
+    $guestOrder['checkout_request_id'] = $guestCheckoutId;
+    $guestOrder['member_id'] = 0;
+    $guestOrder['member_name_snapshot'] = '';
+    $guestOrder['natural_key'] = 'market-b-guest-' . $guestRandom;
+    $guestOrder['command_idempotency_key'] = 'market-b-guest-' . $guestRandom;
+    $guestOrder['immutable_fingerprint'] = hash('sha256', $guestRandom . '|order');
+    Db::name('cashier_v3_sales_order')->insert($guestOrder);
+    foreach (['first', 'second'] as $index => $suffix) {
+        $guestService = $service;
+        $guestService['service_fact_id'] = 'ESF-' . substr(hash('sha256', $guestRandom . '|fact|' . $suffix), 0, 40);
+        $guestService['checkout_request_id'] = $guestCheckoutId;
+        $guestService['member_id'] = 0;
+        $guestService['member_name_snapshot'] = '';
+        $guestService['source_line_id'] = 'SL-' . $guestRandom . '-' . $index;
+        $guestService['service_record_no'] = 'SRTEST' . substr($guestRandom, 0, 14) . $index;
+        $guestService['natural_key'] = 'market-b-guest-' . $guestRandom . '-' . $suffix;
+        $guestService['command_idempotency_key'] = 'market-b-guest-' . $guestRandom . '-' . $suffix;
+        $guestService['business_event_no'] = 'market-b-guest-' . $guestRandom . '-' . $suffix;
+        $guestService['immutable_fingerprint'] = hash('sha256', $guestRandom . '|service|' . $suffix);
+        Db::name('cashier_v3_entitlement_service_fact')->insert($guestService);
+    }
+    $guestSummary = $report('market_performance');
+    $guestDetail = $report('market_detail', ['dimension_code' => (string)$bSource['id'], 'metric_code' => 'visits']);
+    $guestRows = array_values(array_filter($guestDetail['records'], static function (array $row) use ($guestOrderId): bool {
+        return in_array($guestOrderId, array_column((array)($row['_market_orders'] ?? []), 'order_id'), true);
+    }));
+    if ((int)($guestSummary['records'][0][$bKey . '_visits'] ?? 0) !== $visitsBefore + 2
+        || count($guestRows) !== 1 || (int)$guestRows[0]['visits'] !== 1
+        || (int)$guestRows[0]['member_id'] !== 0) {
+        throw new RuntimeException('Guest service order was omitted or its projects were counted more than once');
+    }
     // 仅用于验证查询端口径；补充记录与测试业务事实都在同一事务回滚。
     Db::name('cashier_v3_report_annotation')->insert([
         'tenant_id' => (string)$order['tenant_id'], 'organization_id' => (string)$order['organization_id'],
@@ -245,6 +283,7 @@ try {
     echo "PASS B zero-cash service appears in precise visit drilldown\n";
     echo "PASS B cash amount and amount drilldown remain unchanged\n";
     echo "PASS two services on one member day count once\n";
+    echo "PASS guest service order counts once and its projects do not duplicate visits\n";
     echo "PASS B zero-cash manual walk-in reconciles between summary and detail\n";
     echo "PASS member-day input replaces legacy order input and clear-to-zero survives readback\n";
     echo "PASS member-day save checks row existence, version and idempotency\n";

@@ -139,7 +139,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $rows[$storeId]['total_performance_cents'] = (int)($rows[$storeId]['total_performance_cents'] ?? 0) + (int)$fact['amount_cents'];
         }
         $visits = [];
-        $visitedMemberDays = [];
+        $visitedSubjects = [];
         $serviceVisitFacts = $this->marketServiceVisitFacts($stores, $range, $input);
         foreach ($serviceVisitFacts as $fact) {
             $sourceId = (int)($fact['business_source_primary_id'] ?? 0);
@@ -153,13 +153,13 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 ];
                 $this->projectOrganization($rows[$storeId], '', '', $range['end']);
             }
-            $memberId = (int)($fact['member_id'] ?? 0);
-            if ($memberId <= 0) continue;
-            // 同一会员在同一门店、日期、来源下有多条正常服务，也只算一次人次。
-            // 保留来源维度，确保各来源汇总与其明细下钻使用同一业务范围。
-            $memberDayKey = $storeId . '|' . $sourceId . '|' . (string)$fact['service_business_date'] . '|' . $memberId;
-            if (isset($visitedMemberDays[$memberDayKey])) continue;
-            $visitedMemberDays[$memberDayKey] = true;
+            $visitIdentity = $this->marketVisitIdentity($fact);
+            if ($visitIdentity === '') continue;
+            // 会员按“会员日”去重；游客没有会员身份，只能按关联的有效服务单去重。
+            // 来源保留在键中，确保汇总与明细下钻始终使用同一业务范围。
+            $visitKey = $storeId . '|' . $sourceId . '|' . (string)$fact['service_business_date'] . '|' . $visitIdentity;
+            if (isset($visitedSubjects[$visitKey])) continue;
+            $visitedSubjects[$visitKey] = true;
             $key = $storeId . '|' . $sourceId;
             if (!isset($visits[$key])) {
                 $visits[$key] = [
@@ -260,7 +260,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $key = 'channel_' . $sourceId . '_' . $definition[0];
                 $columns[] = ['key'=>$key,'label'=>$definition[1],'group_label'=>(string)$source['name']]; $keys[] = $key;
                 if ($prefix === 'B' && $definition[0] === 'visits') {
-                    $columns[count($columns)-1]['source_explanation'] = 'B 来源的同一会员在同一天有正常服务记 1 人次，多条服务仍记 1；不要求当次有收款。';
+                    $columns[count($columns)-1]['source_explanation'] = 'B 来源有正常服务即计算人次：会员同一天记 1，游客每张有效服务单记 1；同单多项目不重复，不要求当次有收款。';
                 }
                 $params = ['dimension_code'=>(string)$sourceId];
                 if ($definition[0] === 'effective') $params['metric_code'] = 'effective_people';
@@ -324,21 +324,22 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if ($method === '' && !in_array($metricCode, ['amount', 'effective_people'], true)) {
             $rows = array_merge($rows, $this->marketServiceOnlyRows($stores, $serviceVisits, $rows, $dimension));
         }
-        $visitedMemberDays = [];
+        $visitedSubjects = [];
         foreach ($serviceVisits as $serviceVisit) {
             $sourceId = (int)($serviceVisit['business_source_primary_id'] ?? 0);
-            $memberId = (int)($serviceVisit['member_id'] ?? 0);
-            if ($sourceId <= 0 || $memberId <= 0) continue;
-            // 人次按会员当天是否有正常服务标记，不能按服务条数或销售单数累加。
-            $dayKey = (int)$serviceVisit['store_id'] . '|' . (string)$serviceVisit['service_business_date'] . '|' . $memberId . '|' . $sourceId;
-            $visitedMemberDays[$dayKey] = true;
+            $visitIdentity = $this->marketVisitIdentity($serviceVisit);
+            if ($sourceId <= 0 || $visitIdentity === '') continue;
+            // 人次不能按项目数累加：会员按当天去重，游客按有效服务单去重。
+            $dayKey = (int)$serviceVisit['store_id'] . '|' . (string)$serviceVisit['service_business_date'] . '|' . $sourceId . '|' . $visitIdentity;
+            $visitedSubjects[$dayKey] = true;
         }
         foreach ($rows as &$row) {
             $row['dimension'] = (string)$row['business_source_label_snapshot'];
             $row['walk_in'] = 0; $row['visits'] = 0;
             $row['effective_people'] = isset($effectiveMemberKeys[(int)$row['store_id'] . '|' . (int)$row['business_source_primary_id'] . '|' . (int)$row['member_id']]) ? 1 : 0;
-            $dayKey = (int)$row['store_id'] . '|' . (string)$row['business_date'] . '|' . (int)$row['member_id'] . '|' . (int)$row['business_source_primary_id'];
-            $row['visits'] = isset($visitedMemberDays[$dayKey]) ? 1 : 0;
+            $visitIdentity = $this->marketVisitIdentity($row);
+            $dayKey = (int)$row['store_id'] . '|' . (string)$row['business_date'] . '|' . (int)$row['business_source_primary_id'] . '|' . $visitIdentity;
+            $row['visits'] = $visitIdentity !== '' && isset($visitedSubjects[$dayKey]) ? 1 : 0;
             $row['amount'] = $this->money((int)$row['amount_cents']);
             $row['registered_date'] = (string)$row['business_date'];
             $row['reviewer'] = ''; $row['reviewed_at'] = ''; $row['created_at'] = $this->dateTime((int)$row['recorded_at']);
@@ -376,7 +377,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $columns = $this->columns(['business_date'=>'日期','store_name_snapshot'=>'门店名称','member_name_snapshot'=>'会员','member_phone'=>'手机','dimension'=>'来源','walk_in'=>'进店','visits'=>'人次','effective_people'=>'有效人员','amount'=>'金额','registered_date'=>'登记日期','reviewer'=>'审核人','reviewed_at'=>'审核时间','creator_name'=>'制单人','created_at'=>'制单日期']);
         foreach ($columns as &$column) {
             if ($column['key'] === 'visits') {
-                $column['source_explanation'] = '同一会员在同一天、同一来源有正常服务记 1 人次，否则记 0；多条服务仍记 1。';
+                $column['source_explanation'] = '有正常服务即计算人次：会员同一天同一来源记 1，游客每张有效服务单记 1；同单多项目不重复。';
             }
         }
         unset($column);
@@ -1036,6 +1037,18 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             return (int)($row['business_source_primary_id'] ?? 0) > 0;
         }));
     }
+    /**
+     * 人次身份必须同时适配实名会员和游客：会员使用稳定会员 ID，保持同日去重；
+     * 游客没有会员 ID，只能使用关联销售单作为一次服务的边界，避免同单多个项目重复计数。
+     * 无法关联销售单的游客历史事实不计入，防止汇总出现无法下钻核对的孤立人次。
+     */
+    private function marketVisitIdentity(array $row): string
+    {
+        $memberId = (int)($row['member_id'] ?? 0);
+        if ($memberId > 0) return 'member:' . $memberId;
+        $orderId = trim((string)($row['matched_order_id'] ?? $row['order_id'] ?? ''));
+        return $orderId === '' ? '' : 'guest-order:' . $orderId;
+    }
     private function marketEffectiveMemberKeys(array $rows):array
     {
         $sources = [];
@@ -1206,7 +1219,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'member_phone'=>'显示会员资料中当前保存的手机号码；未填写则留空。',
             'dimension'=>'显示这笔销售当时记录的来源；B 来源无收款服务行显示其关联订单的来源。',
             'walk_in'=>'按本行会员、日期和来源手动保存进店数；尚未填写时显示原单据已保存值之和。仅 B 来源参与市场业绩表的进店汇总。',
-            'visits'=>'该会员当天在这一来源下有已完成且未作废的服务记 1，没有记 0；多条正常服务仍记 1，合计直接相加。',
+            'visits'=>'有已完成且未作废的服务即计算人次：会员当天在同一来源记 1，游客每张有效服务单记 1；同单多项目不重复，合计直接相加。',
             'effective_people'=>'所选日期内，同一门店、同一来源的这位会员累计记账收款达到标准，本行显示 1：A 来源至少 1,000 元，其他来源至少 500 元。同一会员跨日期仍可能显示多行 1；合计按会员去重，不把各行的 1 直接相加。',
             'amount'=>'合计该会员当天在这一门店和来源下的记账收款；退款按发生日期抵减，已作废销售不计。仅有正常服务、没有当次收款时显示 0。',
             'registered_date'=>'显示收款或服务归属的业务日期；补录业务可能晚于该日期录入系统。',

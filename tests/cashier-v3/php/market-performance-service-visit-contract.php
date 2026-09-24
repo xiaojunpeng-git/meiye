@@ -15,8 +15,11 @@ $checks = [
     'service facts remain deduplicated at service_fact_id grain' => strpos($service, 'sv.store_id,sv.service_fact_id,sv.checkout_request_id') !== false,
     'shared service resolver filters selected array rows rather than the query object' => preg_match('/\\$rows\\s*=\\s*\\$query\\s*->fieldRaw\\(/s', $service) === 1
         && strpos($service, 'return array_values(array_filter($rows, static function (array $row): bool {') !== false,
-    'market detail identifies one normal-service visit per member day and source' => strpos($service, "\$dayKey = (int)\$serviceVisit['store_id'] . '|' . (string)\$serviceVisit['service_business_date'] . '|' . \$memberId . '|' . \$sourceId") !== false,
-    'market performance deduplicates visits by member day and source' => strpos($marketPerformance, 'if (isset($visitedMemberDays[$memberDayKey])) continue;') !== false,
+    'member visits keep stable member-day identity' => strpos($service, "return 'member:' . \$memberId") !== false,
+    'guest visits use their associated service order identity' => strpos($service, "return \$orderId === '' ? '' : 'guest-order:' . \$orderId") !== false,
+    'market detail and performance share the same visit identity resolver' => substr_count($service, '$this->marketVisitIdentity(') >= 3,
+    'market performance deduplicates both member and guest visits' => strpos($marketPerformance, 'if (isset($visitedSubjects[$visitKey])) continue;') !== false,
+    'guest visit explanation exposes its order-level rule' => strpos($service, '游客每张有效服务单记 1') !== false && strpos($service, '同单多项目不重复') !== false,
     'successful order void payment reversals are included in report net cash' => strpos($service, "reversal_operation.operation_type IN ('refund','void')") !== false,
     'market performance keeps order void reversals in their original source channel' => strpos($service, 'is_refund_reversal') !== false
         && strpos($service, "refund_operation.operation_type='refund'") !== false

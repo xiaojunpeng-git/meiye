@@ -15,8 +15,9 @@ $checks = [
     'market detail explains source-specific effective thresholds and member-level summary' => strpos($service, "if(\$title==='市场明细表')\$columns=\$this->marketDetailColumnExplanations(\$columns)") !== false
         && strpos($service, 'A 来源至少 1,000 元，其他来源至少 500 元') !== false
         && strpos($service, '合计按会员去重，不把各行的 1 直接相加') !== false,
-    'market detail explains member-day amount and binary visits' => strpos($service, '合计该会员当天在这一门店和来源下的记账收款') !== false
-        && strpos($service, '多条正常服务仍记 1，合计直接相加') !== false,
+    'market detail explains member-day amount and member-or-guest visits' => strpos($service, '合计该会员当天在这一门店和来源下的记账收款') !== false
+        && strpos($service, '游客每张有效服务单记 1') !== false
+        && strpos($service, '同单多项目不重复，合计直接相加') !== false,
     'shared report view renders the summary before ordinary rows' => strpos($view, '<tr v-if="summaryRow" class="store-business-report__summary-row">') !== false && strpos($view, '<tr v-for="(row, rowIndex) in records"') !== false,
 ];
 
