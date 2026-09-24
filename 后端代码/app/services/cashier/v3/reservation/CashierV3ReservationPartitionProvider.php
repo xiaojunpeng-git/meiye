@@ -139,8 +139,10 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
             }
             foreach ((array)json_decode((string)($link['craftsmen_snapshot_json'] ?? '[]'), true) as $craftsman) {
                 if (!is_array($craftsman)) continue;
-                $staffId = (int)($craftsman['staffId'] ?? $craftsman['id'] ?? 0);
-                $name = trim((string)($craftsman['name'] ?? ''));
+                // 结账服务事实使用 snake_case 快照；兼容驼峰只服务旧夹具。
+                // 日历和列表必须展示本次结账的实际人员，不能退回原预约排班。
+                $staffId = (int)($craftsman['staff_id'] ?? $craftsman['staffId'] ?? $craftsman['id'] ?? 0);
+                $name = trim((string)($craftsman['staff_name_snapshot'] ?? $craftsman['name'] ?? ''));
                 if ($staffId <= 0 || $name === '') continue;
                 $artisanStaffByReservation[$reservationId][$staffId] = $staffId;
                 $checkoutArtisanNames[$staffId] = $name;

@@ -42,6 +42,29 @@ $reservations = Db::name('cashier_v3_reservation')
 if (!$fixtureService || !$order || count($reservations) < 2) {
     throw new RuntimeException('CHECKOUT_RESERVATION_FIXTURE_MISSING');
 }
+$entitlementOnlyRequest = (array)Db::name('cashier_v3_checkout_request')->alias('request')
+    ->join(
+        'cashier_v3_entitlement_completion_receipt receipt',
+        "receipt.tenant_id=request.tenant_id AND receipt.checkout_request_id=request.request_id AND receipt.status='completed'"
+    )
+    ->join(
+        'cashier_v3_entitlement_service_fact service',
+        "service.tenant_id=request.tenant_id AND service.checkout_request_id=request.request_id AND service.service_status='completed'"
+    )
+    ->leftJoin(
+        'cashier_v3_sales_order sales_order',
+        'sales_order.tenant_id=request.tenant_id AND sales_order.store_id=request.store_id AND sales_order.checkout_request_id=request.request_id'
+    )
+    ->where('request.request_status', 'succeeded')->where('request.composition', 'entitlement_only')
+    ->where('request.member_id', '>', 0)->whereNull('sales_order.id')
+    ->field('request.request_id,request.tenant_id,request.organization_id,request.store_id,request.member_id,request.business_date,request.operator_id,receipt.receipt_id')
+    ->order('request.id desc')->find();
+if (!$entitlementOnlyRequest) throw new RuntimeException('ENTITLEMENT_ONLY_CHECKOUT_FIXTURE_MISSING');
+$entitlementOnlyServices = Db::name('cashier_v3_entitlement_service_fact')
+    ->where('tenant_id', (string)$entitlementOnlyRequest['tenant_id'])
+    ->where('checkout_request_id', (string)$entitlementOnlyRequest['request_id'])
+    ->where('service_status', 'completed')->order('id asc')->select()->toArray();
+if (!$entitlementOnlyServices) throw new RuntimeException('ENTITLEMENT_ONLY_SERVICE_FIXTURE_MISSING');
 $reservation = (array)$reservations[0];
 $secondReservation = (array)$reservations[1];
 
@@ -75,6 +98,13 @@ Db::startTrans();
 try {
     $originalVersion = (int)$reservation['version'];
     $secondOriginalVersion = (int)$secondReservation['version'];
+    // The local database may already contain checkout links from a previous
+    // real UI acceptance run. Clear only the two transaction-scoped fixture
+    // reservations so this rollback test always verifies one fresh sync batch.
+    Db::name('cashier_v3_reservation_checkout_service_link')
+        ->where('tenant_id', (string)$order['tenant_id'])
+        ->whereIn('reservation_id', [(int)$reservation['id'], (int)$secondReservation['id']])
+        ->delete();
     $appointmentStart = (new DateTimeImmutable(
         (string)$order['business_date'] . ' 12:00:00',
         new DateTimeZone('Asia/Shanghai')
@@ -173,7 +203,7 @@ try {
     $sourceStaffIds = [];
     foreach ($checkoutServices as $checkoutService) {
         foreach ((array)json_decode((string)$checkoutService['craftsmen_snapshot_json'], true) as $craftsman) {
-            $staffId = (int)($craftsman['staffId'] ?? $craftsman['id'] ?? 0);
+            $staffId = (int)($craftsman['staff_id'] ?? $craftsman['staffId'] ?? $craftsman['id'] ?? 0);
             if ($staffId > 0) $sourceStaffIds[$staffId] = $staffId;
         }
     }
@@ -202,7 +232,7 @@ try {
     $staffNames = [];
     foreach ($checkoutServices as $checkoutService) {
         foreach ((array)json_decode((string)$checkoutService['craftsmen_snapshot_json'], true) as $craftsman) {
-            $name = trim((string)($craftsman['name'] ?? ''));
+            $name = trim((string)($craftsman['staff_name_snapshot'] ?? $craftsman['name'] ?? ''));
             if ($name !== '') $staffNames[$name] = $name;
         }
     }
@@ -262,7 +292,71 @@ try {
         throw new RuntimeException('VOIDED_ORDER_CHANGED_RESERVATION');
     }
 
+    // 纯权益完成没有销售订单。只提交成功回执中的 checkout_request_id，
+    // 服务端仍应从结账请求、完成回执和服务事实反查并结束预约。
+    $entitlementVersion = (int)$afterVoided['version'];
+    Db::name('cashier_v3_reservation')->where('id', (int)$reservation['id'])->update([
+        'tenant_id' => (string)$entitlementOnlyRequest['tenant_id'],
+        'store_id' => (int)$entitlementOnlyRequest['store_id'],
+        'member_id' => (int)$entitlementOnlyRequest['member_id'],
+        'business_date' => (string)$entitlementOnlyRequest['business_date'],
+        'status' => 'IN_SERVICE', 'actual_service_ended_at' => 0,
+        'version' => $entitlementVersion,
+    ]);
+    $entitlementOperatorId = max(1, (int)$entitlementOnlyRequest['operator_id']);
+    $entitlementOperator = new CashierV3OperatorScope(
+        (int)$entitlementOnlyRequest['store_id'], $entitlementOperatorId,
+        (string)$entitlementOnlyRequest['organization_id'], (string)$entitlementOnlyRequest['tenant_id']
+    );
+    $entitlementDataScope = new CashierV3DataScopeContext(
+        $entitlementOperatorId, 1, (int)$entitlementOnlyRequest['store_id'],
+        (string)$entitlementOnlyRequest['tenant_id'], (string)$entitlementOnlyRequest['organization_id'],
+        null, CashierV3DataScopeContext::MODE_ALL, [], true, 'integration', '1', ['cashier.v3.cashier'], [
+            'id' => $entitlementOperatorId, 'employee_id' => 1,
+            'staff_name' => '纯权益测试操作员', 'account' => '纯权益测试操作员',
+        ]
+    );
+    $entitlementKey = 'CHECKOUT-RESERVATION-ENTITLEMENT-' . bin2hex(random_bytes(12));
+    $entitlementScope = [
+        'action' => 'complete-checkout-reservations',
+        'payload' => ['checkoutRequestId' => (string)$entitlementOnlyRequest['request_id']],
+        'idempotency_key' => $entitlementKey,
+        'operator_scope' => $entitlementOperator, 'data_scope' => $entitlementDataScope,
+        'state_context_id' => 'checkout-reservation-entitlement-integration',
+        'event_recorder' => $recorder,
+        'event_execution' => $recorder->newExecution(
+            'complete-checkout-reservations', $entitlementKey, $entitlementOperator,
+            $entitlementDataScope, 'checkout-reservation-entitlement-integration'
+        ),
+        'event_contract' => CashierV3ActionManifest::eventContractFor('complete-checkout-reservations'),
+    ];
+    $entitlementPreview = $service->preview($entitlementScope);
+    if (empty($entitlementPreview['required'])
+        || (string)$entitlementPreview['checkoutRequestId'] !== (string)$entitlementOnlyRequest['request_id']) {
+        throw new RuntimeException('ENTITLEMENT_ONLY_PREVIEW_DID_NOT_FIND_RESERVATION');
+    }
+    $entitlementCompleted = $service->complete($entitlementScope);
+    $entitlementReservation = (array)Db::name('cashier_v3_reservation')->where('id', (int)$reservation['id'])->find();
+    $entitlementServiceIds = array_column($entitlementOnlyServices, 'service_fact_id');
+    $entitlementLinks = Db::name('cashier_v3_reservation_checkout_service_link')
+        ->where('tenant_id', (string)$entitlementOnlyRequest['tenant_id'])
+        ->where('reservation_id', (int)$reservation['id'])
+        ->whereIn('service_fact_id', $entitlementServiceIds)->select()->toArray();
+    if ((int)$entitlementCompleted['completedCount'] !== 1
+        || (string)$entitlementCompleted['checkoutRequestId'] !== (string)$entitlementOnlyRequest['request_id']
+        || (string)$entitlementReservation['status'] !== 'COMPLETED'
+        || (int)$entitlementReservation['version'] !== $entitlementVersion + 1
+        || count($entitlementLinks) !== count($entitlementOnlyServices)) {
+        throw new RuntimeException('ENTITLEMENT_ONLY_CHECKOUT_DID_NOT_COMPLETE_RESERVATION');
+    }
+    foreach ($entitlementLinks as $link) {
+        if ((string)$link['sales_order_id'] !== '') {
+            throw new RuntimeException('ENTITLEMENT_ONLY_LINK_FABRICATED_SALES_ORDER');
+        }
+    }
+
     echo "PASS checkout reservation completion mysql integration\n";
+    echo "PASS entitlement-only checkout completes reservation through checkout request authority\n";
     Db::rollback();
 } catch (Throwable $exception) {
     Db::rollback();

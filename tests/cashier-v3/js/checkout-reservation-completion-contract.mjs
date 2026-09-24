@@ -8,13 +8,23 @@ const manifest = fs.readFileSync(new URL('前端代码/cashier-v3/src/services/c
 
 assert.match(
   workbench,
-  /closeSucceededCheckoutAndRefreshWorkbench[\s\S]*?cashierDraftHasUnresolvedCommand\.value = false[\s\S]*?open-cashier-workbench[\s\S]*?inspectCheckoutReservationsAfterSuccess\(submissionResponse\)/,
-  '必须先完成原结账成功收口和空工作台刷新，再执行独立预约检查'
+  /closeSucceededCheckoutAndRefreshWorkbench[\s\S]*?settledCheckoutAuthority[\s\S]*?cashierDraftHasUnresolvedCommand\.value = false[\s\S]*?inspectCheckoutReservationsAfterSuccess\(submissionResponse, settledCheckoutAuthority\)[\s\S]*?open-cashier-workbench/,
+  '必须先完成结账成功收口并立即执行预约检查，再静默刷新空工作台'
 )
 assert.match(
   workbench,
-  /responseDataBlock\(submissionResponse\)\.checkoutSubmission[\s\S]*?submission\?\.salesOrder\?\.orderId/,
-  '预约检查只能使用权威结账回执中的销售订单标识'
+  /settledCheckoutAuthority = Object\.freeze\([\s\S]*?checkoutLocalOutcome\.value\?\.checkoutRequestId[\s\S]*?checkoutLocalOutcome\.value\?\.salesOrderId/,
+  '关闭成功结账层前必须保留服务端已投影的结账权威标识'
+)
+assert.match(
+  workbench,
+  /responseDataBlock\(submissionResponse\)\.checkoutSubmission[\s\S]*?submission\?\.salesOrder\?\.orderId \|\| settledCheckoutAuthority\?\.salesOrderId[\s\S]*?submission\?\.checkoutRequestId \|\| settledCheckoutAuthority\?\.checkoutRequestId/,
+  '预约检查必须兼容原始提交回执和已投影的成功结账标识'
+)
+assert.match(
+  workbench,
+  /if \(!salesOrderId && !checkoutRequestId\) return/,
+  '纯权益结账没有销售订单时仍必须继续预约检查'
 )
 assert.match(workbench, /该客户有未结束的预约记录，是否结束？/, '需要展示产品确认的提示语')
 assert.match(
@@ -29,8 +39,8 @@ assert.doesNotMatch(
 )
 assert.match(
   workbench,
-  /completeCheckoutReservations\(\)[\s\S]*?requestAction\('complete-checkout-reservations'[\s\S]*?salesOrderId: prompt\.salesOrderId/,
-  '选择是只携带销售订单标识执行服务端批量收口'
+  /completeCheckoutReservations\(\)[\s\S]*?requestAction\('complete-checkout-reservations'[\s\S]*?salesOrderId: prompt\.salesOrderId[\s\S]*?checkoutRequestId: prompt\.checkoutRequestId/,
+  '选择是只携带结账回执标识执行服务端批量收口'
 )
 assert.match(
   workbench,

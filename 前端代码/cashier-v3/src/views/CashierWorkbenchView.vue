@@ -6483,6 +6483,14 @@ async function closeSucceededCheckoutAndRefreshWorkbench(submissionResponse = {}
   // it must never make the pre-settlement cart visible again.
   // 唯一快照已落账，接下来的空工作台投影是终态，不能再按本地升级草稿恢复。
   localMultiCardUpgradeMemberCheckpoint.value = null
+  // 纯权益结账的成功页可能只保留已投影的结算结果，而子组件回传的
+  // 原始响应不保证带有 checkoutSubmission。在关闭结账层清空本地结果前先固化
+  // 同一次成功结账的标识；它们仍然来自服务端成功回执，不接受浏览器自行推断。
+  const settledCheckoutAuthority = Object.freeze({
+    checkoutRequestId: String(checkoutLocalOutcome.value?.checkoutRequestId || ''),
+    salesOrderId: String(checkoutLocalOutcome.value?.salesOrderId || ''),
+    salesOrderNo: String(checkoutLocalOutcome.value?.salesOrderNo || '')
+  })
   const committedDraft = responseDataBlock(submissionResponse).cashierDraft
   let resolvedCommittedDraft = committedDraft
   let canRenderCommittedDraft = isResponseBoundCommittedCashierDraft(resolvedCommittedDraft)
@@ -6512,6 +6520,10 @@ async function closeSucceededCheckoutAndRefreshWorkbench(submissionResponse = {}
       })
     : null
   cashierDraftHasUnresolvedCommand.value = false
+  // 预约提示必须先于体积较大的工作台根投影刷新完成。否则收银员在刷新
+  // 等待间隙切换页面时，已经查到的待处理预约会随组件卸载而丢失，服务端
+  // 也就永远收不到后续“是”的完成命令。这里仍只展示选择，不自动改预约。
+  await inspectCheckoutReservationsAfterSuccess(submissionResponse, settledCheckoutAuthority)
   try {
     await requestAction('open-cashier-workbench', { silent: true })
   } catch (error) {
@@ -6519,20 +6531,27 @@ async function closeSucceededCheckoutAndRefreshWorkbench(submissionResponse = {}
     // 也不得阻断本次预约状态检查。
     console.warn('Checkout succeeded but the workbench refresh was unavailable.', error)
   }
-  await inspectCheckoutReservationsAfterSuccess(submissionResponse)
 }
 
 /**
- * 只使用成功回执中的正式销售订单标识查询预约。
+ * 只使用成功回执中的销售订单或结账请求标识查询预约。
  * 查询失败只告知“结账已完成”，不恢复旧购物车、不重试收款。
  */
-async function inspectCheckoutReservationsAfterSuccess(submissionResponse = {}) {
+async function inspectCheckoutReservationsAfterSuccess(submissionResponse = {}, settledCheckoutAuthority = {}) {
   const submission = responseDataBlock(submissionResponse).checkoutSubmission
-  const salesOrderId = String(submission?.salesOrder?.orderId || '').trim()
-  if (!salesOrderId) return
+  const salesOrderId = String(
+    submission?.salesOrder?.orderId || settledCheckoutAuthority?.salesOrderId || ''
+  ).trim()
+  const checkoutRequestId = String(
+    submission?.checkoutRequestId || settledCheckoutAuthority?.checkoutRequestId || ''
+  ).trim()
+  // 纯权益完成不会生成销售订单，但仍会生成已成功的结账请求和服务事实。
+  // 两种标识都来自结账成功回执；会员、门店和日期继续由后端权威反查。
+  if (!salesOrderId && !checkoutRequestId) return
   try {
     const result = await requestAction('query-checkout-unfinished-reservations', {
       salesOrderId,
+      checkoutRequestId,
       silent: true
     })
     if (!['success', 'succeeded'].includes(resultStatus(result))) {
@@ -6541,8 +6560,14 @@ async function inspectCheckoutReservationsAfterSuccess(submissionResponse = {}) 
     const prompt = responseDataBlock(result).checkoutReservationPrompt
     if (!prompt?.required || Number(prompt.reservationCount || 0) <= 0) return
     checkoutReservationPrompt.value = {
-      salesOrderId,
-      salesOrderNo: String(prompt.salesOrderNo || submission?.salesOrder?.orderNo || ''),
+      salesOrderId: String(prompt.salesOrderId || salesOrderId || ''),
+      checkoutRequestId: String(prompt.checkoutRequestId || checkoutRequestId || ''),
+      salesOrderNo: String(
+        prompt.salesOrderNo
+        || submission?.salesOrder?.orderNo
+        || settledCheckoutAuthority?.salesOrderNo
+        || ''
+      ),
       businessDate: String(prompt.businessDate || ''),
       reservationCount: Number(prompt.reservationCount || 0),
       idempotencyKey: createCashierV3CommandId('RESERVATION_ACTION')
@@ -6571,6 +6596,7 @@ async function completeCheckoutReservations() {
   try {
     const result = await requestAction('complete-checkout-reservations', {
       salesOrderId: prompt.salesOrderId,
+      checkoutRequestId: prompt.checkoutRequestId,
       idempotencyKey: prompt.idempotencyKey,
       silent: true
     })

@@ -255,7 +255,7 @@ final class CashierV3ReservationModule
             $result = $checkoutReservationClosure->complete($scope);
             return [
                 'data' => ['checkoutReservationCompletion' => $result],
-                'business_no' => (string)($result['salesOrderNo'] ?? ''),
+                'business_no' => (string)($result['salesOrderNo'] ?: ($result['checkoutReferenceNo'] ?? '')),
                 // 本命令的预约集合由服务端在事务内按订单重新发现并锁定；
                 // 不接受浏览器拼出的单条 reservation context。
                 'touched' => [],

@@ -12,6 +12,8 @@ use think\facade\Db;
  * 结账后预约状态收口。
  *
  * 这个服务只把同门店、同会员、同业务日期的未结束预约主记录改为 COMPLETED。
+ * 普通/混合结账从已结算销售订单取边界；纯权益结账没有销售订单，改从
+ * 已成功结账请求、完成回执和未作废服务事实共同确认同一边界。
  * 它故意不调用“结束服务”生命周期，因此不核销权益、不写服务/业绩事实、
  * 不释放或重建任何排班资源，也不会因后续订单作废而回滚预约状态。
  */
@@ -22,12 +24,12 @@ final class CashierV3CheckoutReservationClosureServices
     private const SERVICE_LINK_TABLE = 'cashier_v3_reservation_checkout_service_link';
 
     /**
-     * 只读判断是否需要向收银员提示。会员、门店和日期全部从已结算订单取值，
-     * 不接受浏览器传入这些统计边界。
+     * 只读判断是否需要向收银员提示。会员、门店和日期全部从已结算订单，
+     * 或纯权益结账权威事实取值，不接受浏览器传入这些统计边界。
      */
     public function preview(array $scope): array
     {
-        $order = $this->settledForwardOrder($scope, false);
+        $order = $this->checkoutAuthority($scope, false);
         if ($order === null || (int)$order['member_id'] <= 0) {
             return $this->promptResult($order, 0);
         }
@@ -50,7 +52,7 @@ final class CashierV3CheckoutReservationClosureServices
      */
     public function complete(array $scope): array
     {
-        $order = $this->settledForwardOrder($scope, true);
+        $order = $this->checkoutAuthority($scope, true);
         if ($order === null || (int)$order['member_id'] <= 0) {
             return $this->completionResult($order, []);
         }
@@ -109,29 +111,90 @@ final class CashierV3CheckoutReservationClosureServices
     }
 
     /** @return array<string,mixed>|null */
-    private function settledForwardOrder(array $scope, bool $lock): ?array
+    private function checkoutAuthority(array $scope, bool $lock): ?array
     {
         $payload = (array)($scope['payload'] ?? []);
         $orderId = trim((string)($payload['salesOrderId'] ?? $payload['orderId'] ?? ''));
-        if ($orderId === '' || strlen($orderId) > 64 || !preg_match('/^[A-Za-z0-9_.:-]+$/', $orderId)) {
+        $requestId = trim((string)($payload['checkoutRequestId'] ?? ''));
+        if ($orderId !== '') {
+            if (strlen($orderId) > 64 || !preg_match('/^[A-Za-z0-9_.:-]+$/', $orderId)) {
+                throw new CashierV3CommandException(
+                    CashierV3ResultCode::INVALID_COMMAND_CONTEXT,
+                    '结账订单标识无效。'
+                );
+            }
+            $operator = $scope['operator_scope'];
+            $dataScope = $scope['data_scope'];
+            $query = Db::name('cashier_v3_sales_order')
+                ->where('order_id', $orderId)
+                ->where('tenant_id', $dataScope->tenantId())
+                ->where('store_id', $operator->storeId())
+                ->where('order_status', 'settled')
+                ->where('order_direction', 'forward');
+            if ($lock) $query->lock(true);
+            $row = $query->field('id,order_id,order_no,checkout_request_id,tenant_id,store_id,member_id,business_date,order_status,order_direction')->find();
+            if (!$row) return null;
+            $authority = (array)$row;
+            $authority['completion_reference_no'] = (string)$authority['order_no'];
+            return $authority;
+        }
+        if (!preg_match('/^CKR-[0-9a-f]{40}$/D', $requestId)) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::INVALID_COMMAND_CONTEXT,
-                '结账订单标识无效。'
+                '结账请求标识无效。'
             );
         }
         $operator = $scope['operator_scope'];
         $dataScope = $scope['data_scope'];
-        $query = Db::name('cashier_v3_sales_order')
-            ->where('order_id', $orderId)
+        $query = Db::name('cashier_v3_checkout_request')
+            ->where('request_id', $requestId)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $operator->storeId())
-            ->where('order_status', 'settled')
-            ->where('order_direction', 'forward');
-        if ($lock) {
-            $query->lock(true);
-        }
-        $row = $query->field('id,order_id,order_no,tenant_id,store_id,member_id,business_date,order_status,order_direction')->find();
-        return $row ? (array)$row : null;
+            ->where('request_status', 'succeeded')
+            // 只有确实不产生销售订单的纯权益结账允许走请求回退；
+            // 普通/混合结账必须继续使用销售订单，防止浏览器规避订单状态检查。
+            ->where('composition', 'entitlement_only');
+        if ($lock) $query->lock(true);
+        $request = $query->field('id,request_id,tenant_id,store_id,member_id,business_date,request_status,composition')->find();
+        if (!$request || (int)$request['member_id'] <= 0) return null;
+
+        $receiptQuery = Db::name('cashier_v3_entitlement_completion_receipt')
+            ->where('tenant_id', (string)$request['tenant_id'])
+            ->where('store_id', (int)$request['store_id'])
+            ->where('member_id', (int)$request['member_id'])
+            ->where('checkout_request_id', (string)$request['request_id'])
+            ->where('status', 'completed');
+        if ($lock) $receiptQuery->lock(true);
+        $receipt = $receiptQuery->field('receipt_id')->find();
+        if (!$receipt || !$this->hasCompletedCheckoutService((array)$request, $lock)) return null;
+
+        return [
+            'id' => (int)$request['id'], 'order_id' => '', 'order_no' => '',
+            'checkout_request_id' => (string)$request['request_id'],
+            'completion_reference_no' => (string)$receipt['receipt_id'],
+            'tenant_id' => (string)$request['tenant_id'], 'store_id' => (int)$request['store_id'],
+            'member_id' => (int)$request['member_id'], 'business_date' => (string)$request['business_date'],
+            'order_status' => 'settled', 'order_direction' => 'forward',
+        ];
+    }
+
+    /** 纯权益回退必须至少存在一条同结账请求的完成且未作废服务事实。 */
+    private function hasCompletedCheckoutService(array $request, bool $lock): bool
+    {
+        $query = Db::name('cashier_v3_entitlement_service_fact')->alias('service')
+            ->leftJoin(
+                'cashier_v3_service_record_void_operation service_void',
+                "service_void.tenant_id=service.tenant_id AND service_void.service_fact_id=service.id AND service_void.status='succeeded'"
+            )
+            ->where('service.tenant_id', (string)$request['tenant_id'])
+            ->where('service.store_id', (int)$request['store_id'])
+            ->where('service.member_id', (int)$request['member_id'])
+            ->where('service.business_date', (string)$request['business_date'])
+            ->where('service.checkout_request_id', (string)$request['request_id'])
+            ->where('service.service_status', 'completed')
+            ->whereNull('service_void.id');
+        if ($lock) $query->lock(true);
+        return (bool)$query->field('service.id')->find();
     }
 
     /** @param array<string,mixed>|null $order */
@@ -142,6 +205,8 @@ final class CashierV3CheckoutReservationClosureServices
             'reservationCount' => max(0, $count),
             'salesOrderId' => (string)($order['order_id'] ?? ''),
             'salesOrderNo' => (string)($order['order_no'] ?? ''),
+            'checkoutRequestId' => (string)($order['checkout_request_id'] ?? ''),
+            'checkoutReferenceNo' => (string)($order['completion_reference_no'] ?? ''),
             'businessDate' => (string)($order['business_date'] ?? ''),
         ];
     }
@@ -155,6 +220,8 @@ final class CashierV3CheckoutReservationClosureServices
             'status' => 'succeeded',
             'salesOrderId' => (string)($order['order_id'] ?? ''),
             'salesOrderNo' => (string)($order['order_no'] ?? ''),
+            'checkoutRequestId' => (string)($order['checkout_request_id'] ?? ''),
+            'checkoutReferenceNo' => (string)($order['completion_reference_no'] ?? ''),
             'businessDate' => (string)($order['business_date'] ?? ''),
             'completedCount' => count($completed),
             'syncedServiceLinkCount' => $syncedServiceLinkCount,
@@ -165,15 +232,22 @@ final class CashierV3CheckoutReservationClosureServices
     /** @return array<int,array<string,mixed>> */
     private function checkoutProjectServices(array $order): array
     {
-        return $this->rows(Db::name('cashier_v3_entitlement_service_fact')
-            ->where('tenant_id', (string)$order['tenant_id'])
-            ->where('store_id', (int)$order['store_id'])
-            ->where('member_id', (int)$order['member_id'])
-            ->where('business_date', (string)$order['business_date'])
-            ->where('source_document_type', 'sales_order')
-            ->where('document_id', (string)$order['order_id'])
-            ->where('service_status', 'completed')
-            ->order('id asc')
+        return $this->rows(Db::name('cashier_v3_entitlement_service_fact')->alias('service')
+            ->leftJoin(
+                'cashier_v3_service_record_void_operation service_void',
+                "service_void.tenant_id=service.tenant_id AND service_void.service_fact_id=service.id AND service_void.status='succeeded'"
+            )
+            ->where('service.tenant_id', (string)$order['tenant_id'])
+            ->where('service.store_id', (int)$order['store_id'])
+            ->where('service.member_id', (int)$order['member_id'])
+            ->where('service.business_date', (string)$order['business_date'])
+            // checkout_request_id 同时存在于销售订单和纯权益服务事实，
+            // 是两种结账组成共享且不会由浏览器拼接的服务批次边界。
+            ->where('service.checkout_request_id', (string)$order['checkout_request_id'])
+            ->where('service.service_status', 'completed')
+            ->whereNull('service_void.id')
+            ->field('service.*')
+            ->order('service.id asc')
             ->lock(true)
             ->select());
     }
@@ -261,6 +335,7 @@ final class CashierV3CheckoutReservationClosureServices
                 'statusAfter' => self::COMPLETED_STATUS,
                 'actualEndAt' => $now,
                 'salesOrderId' => (string)$order['order_id'],
+                'checkoutRequestId' => (string)$order['checkout_request_id'],
                 'salesOrderNo' => (string)$order['order_no'],
                 'completionReason' => 'checkout_prompt_confirmation',
                 'sideEffectsApplied' => false,
@@ -279,6 +354,7 @@ final class CashierV3CheckoutReservationClosureServices
             'reservationStatus' => self::COMPLETED_STATUS,
             'version' => $nextVersion,
             'salesOrderId' => (string)$order['order_id'],
+            'checkoutRequestId' => (string)$order['checkout_request_id'],
             'syncedServiceFactIds' => array_values(array_column($syncedServices, 'service_fact_id')),
         ];
         $encoded = json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

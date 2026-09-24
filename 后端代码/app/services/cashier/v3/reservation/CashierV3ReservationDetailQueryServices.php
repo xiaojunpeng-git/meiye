@@ -395,16 +395,19 @@ final class CashierV3ReservationDetailQueryServices
             $craftsmen = json_decode((string)($link['craftsmen_snapshot_json'] ?? '[]'), true);
             foreach (is_array($craftsmen) ? $craftsmen : [] as $craftsman) {
                 if (!is_array($craftsman)) continue;
-                $staffId = (int)($craftsman['staffId'] ?? $craftsman['id'] ?? 0);
-                $employeeId = (int)($craftsman['employeeId'] ?? 0);
-                $name = trim((string)($craftsman['name'] ?? ''));
+                // 服务事实持久化的是 snake_case 权威快照；camelCase 仅兼容
+                // 早期测试夹具。预约详情必须优先读取事实字段，不能因字段风格
+                // 不同把已经随结账完成的实际手艺人显示成“尚未形成记录”。
+                $staffId = (int)($craftsman['staff_id'] ?? $craftsman['staffId'] ?? $craftsman['id'] ?? 0);
+                $employeeId = (int)($craftsman['employee_id'] ?? $craftsman['employeeId'] ?? 0);
+                $name = trim((string)($craftsman['staff_name_snapshot'] ?? $craftsman['name'] ?? ''));
                 if ($staffId <= 0 || $name === '') continue;
                 $items[$staffId] = [
                     'staffId' => $staffId,
                     'employeeId' => $employeeId,
                     'name' => $name,
-                    'isPointCustomer' => !empty($craftsman['isPointCustomer']),
-                    'isPrimary' => !empty($craftsman['isPrimary']),
+                    'isPointCustomer' => !empty($craftsman['is_point_customer']) || !empty($craftsman['isPointCustomer']),
+                    'isPrimary' => !empty($craftsman['is_primary']) || !empty($craftsman['isPrimary']),
                 ];
             }
         }
