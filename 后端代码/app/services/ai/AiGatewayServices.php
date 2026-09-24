@@ -1774,6 +1774,7 @@ final class AiGatewayServices
         $questionExactMetric=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
             (string)($safe['outbound']['question']??''),array_column($bindingSummaries,'metric_code')
         );
+        $registeredBreakdownDefaultApplied=false;
         if (!$contextBindingReused && $groupedItems===null && !$conditionUpdateBindingReused
             && $questionExactMetric===null) {
             $rankDefault=$this->applyRegisteredRankDefaultPolicy(
@@ -1801,6 +1802,8 @@ final class AiGatewayServices
                 $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_breakdown_default_applied',[],
                     'registered_breakdown_default');
             }
+            $registeredBreakdownDefaultApplied=$explicitBreakdownTerms===[]
+                &&$this->isRegisteredBreakdownDefaultBinding($bindingCandidate,$understanding,$bindingSummaries);
         }
         $exactRegistryBinding=AiIntentResultContract::isUniqueExactMetricBinding(
             $bindingCandidate,$understanding,$safe['outbound'],array_column($bindingSummaries,'metric_code')
@@ -1880,6 +1883,7 @@ final class AiGatewayServices
         // condition-compiler and Reader gates still run below.
         if (!$contextBindingReused && $groupedItems===null && !$conditionUpdateBindingReused
             && $registeredConditionIntent===null && !$exactRegistryBinding
+            && !$registeredBreakdownDefaultApplied
             && AiIntentResultContract::requiresSemanticBindingReview($understanding,$bindingCandidate)) {
             try {
                 $reviewDecision=$this->reviewSemanticBinding($owner,$id,$generation,$worker,$safe['outbound'],$bindingSummaries,$understanding,$bindingCandidate,$configuration,$checkpoint);
@@ -4233,23 +4237,39 @@ final class AiGatewayServices
      */
     private function applyRegisteredBreakdownDefaultPolicy(array $intent,array $understanding,array $summaries): array
     {
-        if (!AiIntentResultContract::canUseRegisteredBreakdownDefault($understanding,$intent)) return $intent;
-        $objectKind=$intent['object_kind']??null;
-        if (!is_string($objectKind)) return $intent;
-        $defaults=[];
-        foreach ($summaries as $summary) {
-            $code=$summary['metric_code']??null;
-            $kinds=$summary['default_breakdown_object_kinds']??[];
-            if (is_string($code) && is_array($kinds) && in_array($objectKind,$kinds,true)) $defaults[$code]=true;
-        }
-        if (count($defaults)!==1) return $intent;
-        $default=array_key_first($defaults);
+        $default=$this->registeredBreakdownDefaultCode($intent,$understanding,$summaries);
+        if ($default===null) return $intent;
         if (($intent['metric_codes']??null)===[$default]
             && empty($intent['needs_metric_choice'])
             && !empty($intent['recommended_initial_answer'])) return $intent;
         return SiliconFlowClient::applyRankMetricResolution(
             $intent,['decision'=>'select','metric_code'=>$default],$understanding
         );
+    }
+
+    /** A source-owned broad default is already semantically admitted by its
+     * narrow structural gate and visible metric label; it needs no second
+     * model opinion that can turn the same policy into a random failure. */
+    private function isRegisteredBreakdownDefaultBinding(array $intent,array $understanding,array $summaries): bool
+    {
+        $default=$this->registeredBreakdownDefaultCode($intent,$understanding,$summaries);
+        return $default!==null && ($intent['metric_codes']??null)===[$default]
+            && !empty($intent['recommended_initial_answer']) && empty($intent['needs_metric_choice']);
+    }
+
+    /** Return the sole registry-owned default for this accepted object. */
+    private function registeredBreakdownDefaultCode(array $intent,array $understanding,array $summaries): ?string
+    {
+        if (!AiIntentResultContract::canUseRegisteredBreakdownDefault($understanding,$intent)) return null;
+        $objectKind=$intent['object_kind']??null;
+        if (!is_string($objectKind)) return null;
+        $defaults=[];
+        foreach ($summaries as $summary) {
+            $code=$summary['metric_code']??null;
+            $kinds=$summary['default_breakdown_object_kinds']??[];
+            if (is_string($code)&&is_array($kinds)&&in_array($objectKind,$kinds,true)) $defaults[$code]=true;
+        }
+        return count($defaults)===1?array_key_first($defaults):null;
     }
 
     /**

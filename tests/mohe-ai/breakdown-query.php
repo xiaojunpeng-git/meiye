@@ -119,7 +119,7 @@ try {
 
     $context=['scope_mode'=>'stores','store_ids'=>[1,2],'analysis_personnel_ready'=>true];
     $capabilities=AiAuthority::capabilities(false,$context);
-    foreach (['store','person','project'] as $objectKind) {
+    foreach (['store','person','member','project'] as $objectKind) {
         $items=AiCapabilityGuidanceCatalog::discover($capabilities,$objectKind,'breakdown');
         bdCheck($items!==[],'registry exposes breakdown for '.$objectKind);
     }
@@ -127,9 +127,12 @@ try {
         'cash performance can be listed by store');
     bdCheck(isset(AiCapabilityGuidanceCatalog::discover($capabilities,'person','breakdown')['staff_sales_yeji']),
         'staff sales performance can be listed by person');
+    bdCheck(isset(AiCapabilityGuidanceCatalog::discover($capabilities,'member','breakdown')['cash_performance']),
+        'cash performance can be listed by member through its registered fact dimension');
     $definitions=MetricDefinitionRegistry::capabilities();
     bdCheck(($definitions['actual_performance']['analysis_default_breakdown_object_kinds']??null)===['store']
-        &&($definitions['staff_sales_yeji']['analysis_default_breakdown_object_kinds']??null)===['person'],
+        &&($definitions['staff_sales_yeji']['analysis_default_breakdown_object_kinds']??null)===['person']
+        &&($definitions['cash_performance']['analysis_default_breakdown_object_kinds']??null)===['member'],
         'registry owns one broad breakdown first-answer perspective per supported object');
     $bindingBoundary=Closure::bind(static function(SiliconFlowClient $client,array $items): array {
         return $client->bindingBoundary($items);
@@ -191,22 +194,30 @@ try {
     $personPlan=$planner->compile($personProjection,$personSelection,$capabilities,'screen','2026-09-24');
     bdCheck(($personPlan['plan']['query']['business_filters']??null)===['object_kind'=>'person'],
         'person breakdown is a population query, not a selected-person lookup');
+    $memberSelection=$personSelection;$memberSelection['metric_codes']=['cash_performance'];$memberSelection['object_kind']='member';
+    $memberPlan=$planner->compile($projection,$memberSelection,$capabilities,'screen','2026-09-24');
+    bdCheck(($memberPlan['plan']['query']['business_filters']??null)===['object_kind'=>'member'],
+        'member breakdown uses the same generic population plan');
 
     $view=[
         'query'=>['query_shape'=>'breakdown','metric_codes'=>['cash_performance'],
             'start_date'=>'2026-09-24','end_date'=>'2026-09-24','compare_range'=>null,
             'store_ids'=>[1,2],'business_filters'=>['object_kind'=>'store'],'ranking'=>null,'aggregate_condition'=>null],
         'results'=>[['period'=>'current','metric_code'=>'cash_performance','storage_unit'=>'fen',
-            'object_kind'=>'store','object_label'=>'门店','has_more'=>false,'object_count'=>2,'list_limit'=>99,
+            'object_kind'=>'store','object_label'=>'门店','has_more'=>false,'object_count'=>3,'list_limit'=>99,
+            'active_object_count'=>2,'aggregate_value'=>1229500,
             'rows'=>[
                 ['entity_id'=>1,'entity_name'=>'甲店','amount_cents'=>1234500],
                 ['entity_id'=>2,'entity_name'=>'乙店','amount_cents'=>0],
+                ['entity_id'=>3,'entity_name'=>'丙店','amount_cents'=>-5000],
             ]]],
     ];
     $answer=(new AiAnswerRenderer())->render($view);
     bdCheck(($answer['table']['columns'][0]['label']??null)==='门店'
-        && array_column($answer['table']['rows'],'label')===['甲店','乙店'],
-        'renderer presents one row per object including zero activity');
+        && array_column($answer['table']['rows'],'label')===['甲店','丙店']
+        && strpos($answer['summary'],'本期有2家门店产生现金业绩，合计12,295元')!==false
+        && strpos($answer['summary'],'已隐藏1家0值门店')!==false,
+        'renderer leads with an exact concise total, preserves negative values and hides zeros');
     bdCheck(strpos($answer['summary'],'排名')===false && !array_key_exists('rank',$answer['table']['rows'][0]),
         'breakdown answer never claims or fabricates ranking');
     bdCheck(array_column($answer['table']['columns'],'label')===['门店','现金业绩（元）']
@@ -216,19 +227,21 @@ try {
     $multi=$view;
     $multi['query']['metric_codes']=['cash_performance','sales_amount'];
     $multi['results'][]=['period'=>'current','metric_code'=>'sales_amount','storage_unit'=>'fen',
-        'object_kind'=>'store','object_label'=>'门店','has_more'=>false,'object_count'=>2,'list_limit'=>99,
+        'object_kind'=>'store','object_label'=>'门店','has_more'=>false,'object_count'=>3,'list_limit'=>99,
         'rows'=>[
             ['entity_id'=>1,'entity_name'=>'甲店','amount_cents'=>2234500],
             ['entity_id'=>2,'entity_name'=>'乙店','amount_cents'=>50000],
+            ['entity_id'=>3,'entity_name'=>'丙店','amount_cents'=>0],
         ]];
     $multiAnswer=(new AiAnswerRenderer())->render($multi);
-    bdCheck(count($multiAnswer['table']['rows'])===2
+    bdCheck(count($multiAnswer['table']['rows'])===3
         &&array_column($multiAnswer['table']['columns'],'label')===['门店','现金业绩（元）','销售额（元）']
         &&($multiAnswer['table']['rows'][0]['metric_cash_performance']??null)==='12,345'
         &&($multiAnswer['table']['rows'][0]['metric_sales_amount']??null)==='22,345',
         'explicit multiple metrics stay on one row per object');
     $sparse=$multi;
     $sparse['results'][1]['rows']=[$sparse['results'][1]['rows'][0]];
+    $sparse['results'][0]['rows'][1]['amount_cents']=10000;
     $sparseAnswer=(new AiAnswerRenderer())->render($sparse);
     bdCheck(!array_key_exists('metric_sales_amount',$sparseAnswer['table']['rows'][1]),
         'missing metric evidence is not fabricated as zero');
@@ -236,20 +249,26 @@ try {
     foreach ($sameName['results'] as &$metricResult) $metricResult['rows'][1]['entity_name']='甲店';
     unset($metricResult);
     $sameNameAnswer=(new AiAnswerRenderer())->render($sameName);
-    bdCheck(count($sameNameAnswer['table']['rows'])===2
+    bdCheck(count($sameNameAnswer['table']['rows'])===3
         &&$sameNameAnswer['table']['rows'][1]['metric_sales_amount']==='500',
         'identically named objects keep separate stable-identity rows');
     $export=MetricReadViewExportProvider::project($view);
-    bdCheck(count($export)===2 && array_column($export,'store_name')===['甲店；范围：当前授权范围','乙店；范围：当前授权范围'],
+    bdCheck(count($export)===3 && array_column($export,'store_name')===['甲店；范围：当前授权范围','乙店；范围：当前授权范围','丙店；范围：当前授权范围'],
         'Excel projection uses the same immutable breakdown rows');
 
     $truncated=$view;
     $truncated['results'][0]['has_more']=true;
     $truncated['results'][0]['object_count']=120;
+    $truncated['results'][0]['active_object_count']=21;
+    $truncated['results'][0]['rows']=[];
+    for ($i=1;$i<=21;++$i) $truncated['results'][0]['rows'][]=[
+        'entity_id'=>$i,'entity_name'=>'门店'.$i,'amount_cents'=>(22-$i)*100,
+    ];
     $limited=(new AiAnswerRenderer())->render($truncated);
-    bdCheck(strpos($limited['summary'],'当前显示前99条')!==false
-        && strpos($limited['summary'],'Excel 查看完整结果')===false,
-        'bounded answer states its limit without promising unseen Excel rows');
+    bdCheck(count($limited['table']['rows'])===20
+        && strpos($limited['summary'],'当前显示前20条')!==false
+        && strpos($limited['summary'],'缩小范围')!==false,
+        'bounded answer keeps the first screen concise without overstating unseen export coverage');
 
     echo 'breakdown-query: PASS ('.$checks." checks; offline fixtures)\n";
 } catch (Throwable $error) {

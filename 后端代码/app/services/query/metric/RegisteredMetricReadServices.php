@@ -617,7 +617,7 @@ final class RegisteredMetricReadServices
      * extra probe row is used only to state whether more objects exist; it is
      * never exposed as a customer result or treated as a requested top list.
      *
-     * @return array{rows:array<int,array{entity_id:int,entity_name:string,amount_cents:int}>,count:?int,limit:int,has_more:bool}
+     * @return array{rows:array<int,array{entity_id:int,entity_name:string,amount_cents:int}>,count:?int,limit:int,has_more:bool,active_count:?int,aggregate_value:?int}
      */
     public function dimensionBreakdown(string $metricCode,string $dimension,string $tenantId,array $stores,array $range,int $limit=99): array
     {
@@ -628,7 +628,19 @@ final class RegisteredMetricReadServices
         $rows=array_map(static function(array $point): array {
             return ['entity_id'=>$point['entity_id'],'entity_name'=>$point['entity_name'],'amount_cents'=>$point['metric_value']];
         },$points);
-        return ['rows'=>$rows,'count'=>$hasMore?null:count($rows),'limit'=>$limit,'has_more'=>$hasMore];
+        $activeCount=null;$aggregateValue=null;
+        if (!$hasMore) {
+            $activeCount=0;$aggregateValue=0;
+            foreach ($rows as $row) {
+                if ($row['amount_cents']!==0) ++$activeCount;
+                $aggregateValue=$this->add($aggregateValue,$row['amount_cents']);
+            }
+        }
+        // When more groups exist, a visible-page sum would be misleading.
+        // Keep summary metadata unknown until a source-owned full aggregate is
+        // available rather than presenting the first page as the whole set.
+        return ['rows'=>$rows,'count'=>$hasMore?null:count($rows),'limit'=>$limit,'has_more'=>$hasMore,
+            'active_count'=>$activeCount,'aggregate_value'=>$aggregateValue];
     }
 
     /**

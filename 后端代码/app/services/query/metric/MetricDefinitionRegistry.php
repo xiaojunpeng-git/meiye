@@ -16,7 +16,7 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v17';
+    public const VERSION = 'unified-metric-registry-v18';
     public const COVERAGE_START = '2026-08-10';
 
     /**
@@ -89,6 +89,10 @@ final class MetricDefinitionRegistry
                 // first-answer perspective. The AI can use this only after it
                 // has already accepted the object and ranking semantics.
                 'analysis_default_rank_object_kinds' => ['store'],
+                // A broad member breakdown uses the same registered cash fact
+                // as member payment-strength analysis. The visible metric name
+                // discloses this perspective; explicit member metrics win.
+                'analysis_default_breakdown_object_kinds' => ['member'],
                 'category_reader' => ['strategy' => 'cash_sale_allocation', 'mode' => 'positive'],
             ],
             'refund_performance' => self::amount('cash_refund', 'actual-cash-refund-v1', ['summary', 'comparison', 'trend', 'ranking']) + [

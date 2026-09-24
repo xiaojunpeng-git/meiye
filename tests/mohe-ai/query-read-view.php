@@ -46,12 +46,17 @@ $projectSummaryCalls=json_encode($seen[count($seen)-1][1]->calls);
 queryCheck(strpos($projectSummaryCalls,'p.source_type')!==false && strpos($projectSummaryCalls,'project')!==false,
     'project overview totals use the same registered source-type boundary rather than visible ranking rows');
 $capabilities = MetricReadViewServices::metricCapabilities();
-queryCheck($capabilities['consume_amount']['ai_query_ready'] === true && count($capabilities['consume_amount']['query_shapes']) === 4, 'consumption implemented contracts registered');
-    queryCheck($capabilities['cash_performance']['ai_query_ready'] === true && count($capabilities['cash_performance']['query_shapes']) === 4 && $capabilities['cash_performance']['readiness_reasons'] === [], 'cash recharge-inclusive contract registered');
-    queryCheck($capabilities['actual_performance']['ai_query_ready'] === true, 'confirmed actual formula is registered');
-    queryCheck($capabilities['completed_service_item_count']['ai_query_ready'] === true
-        && $capabilities['customer_active']['ai_query_ready'] === true,
-        'registered count contracts are query-ready without becoming cents');
+queryCheck($capabilities['consume_amount']['ai_query_ready'] === true
+    && in_array('breakdown',$capabilities['consume_amount']['query_shapes'],true),
+    'consumption implemented contracts include the generic registered breakdown');
+queryCheck($capabilities['cash_performance']['ai_query_ready'] === true
+    && in_array('breakdown',$capabilities['cash_performance']['query_shapes'],true)
+    && $capabilities['cash_performance']['readiness_reasons'] === [],
+    'cash recharge-inclusive contract includes the generic registered breakdown');
+queryCheck($capabilities['actual_performance']['ai_query_ready'] === true, 'confirmed actual formula is registered');
+queryCheck($capabilities['completed_service_item_count']['ai_query_ready'] === true
+    && $capabilities['customer_active']['ai_query_ready'] === true,
+    'registered count contracts are query-ready without becoming cents');
 foreach ([[], [0], ['1'], [1, 1], [1 => 1]] as $stores) queryReject(function () use ($reader, $range, $stores) { $reader->cashTotals('0', $stores, $range); }, 'METRIC_SOURCE_SCOPE_INVALID');
 queryReject(function () use ($reader, $range) { $reader->metricTotal('0', [1], $range, 'invented'); }, 'METRIC_NOT_REGISTERED');
 foreach (['1.00', '1e3', '9223372036854775808', 1.5, null] as $bad) {

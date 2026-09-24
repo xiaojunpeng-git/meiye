@@ -98,12 +98,14 @@ mysqlCheck($storeBreakdown===[
 ], 'store breakdown keeps every authorized store, including zero activity');
 $personBreakdown=$registered->dimensionBreakdown('staff_sales_yeji','employee','0',[1,2],$range,99);
 mysqlCheck($personBreakdown['has_more']===false && $personBreakdown['count']===2
+    && $personBreakdown['active_count']===2 && $personBreakdown['aggregate_value']===10000
     && $personBreakdown['rows']===[
         ['entity_id'=>11,'entity_name'=>'销售甲','amount_cents'=>7000],
         ['entity_id'=>12,'entity_name'=>'销售乙','amount_cents'=>3000],
     ], 'person breakdown uses the registered employee fact dimension');
 $projectBreakdown=$registered->dimensionBreakdown('completed_service_item_count','project','0',[1,2],$range,99);
-mysqlCheck($projectBreakdown['rows']===[['entity_id'=>31,'entity_name'=>'护理项目','amount_cents'=>3]],
+mysqlCheck($projectBreakdown['rows']===[['entity_id'=>31,'entity_name'=>'护理项目','amount_cents'=>3]]
+    &&$projectBreakdown['active_count']===1&&$projectBreakdown['aggregate_value']===3,
     'future objects reuse the registered dimension breakdown without phrase branches');
 $expectedRegistered = [
     'cash_performance' => 903001,

@@ -77,22 +77,36 @@ final class MetricReadViewServices
                         }
                         if ($breakdown['object_kind']==='store') {
                             $names=$reader->storeNames($binding['store_ids']);$points=$reader->storeTotals($binding['tenant_id'],$binding['store_ids'],$range,$metric);
-                            $rows=[];
+                            $rows=[];$aggregateValue=0;$activeObjectCount=0;
                             foreach ($points as $point) {
                                 $storeId=$point['store_id']??null;
                                 if (!is_int($storeId)||!isset($names[$storeId])||!is_int($point['metric_value']??null)) $this->fail('METRIC_SOURCE_RESULT_INVALID');
-                                $rows[]=['entity_id'=>$storeId,'entity_name'=>$names[$storeId],'amount_cents'=>$point['metric_value']];
+                                $value=$point['metric_value'];
+                                $aggregateValue=$this->addAmount($aggregateValue,$value);
+                                if ($value!==0) ++$activeObjectCount;
+                                $rows[]=['entity_id'=>$storeId,'entity_name'=>$names[$storeId],'amount_cents'=>$value];
                             }
+                            // Breakdown is not a rank: this order only keeps every
+                            // informative non-zero row (including negative values)
+                            // ahead of zero rows so a bounded page cannot hide it.
+                            usort($rows,static function(array $left,array $right): int {
+                                $leftZero=$left['amount_cents']===0;$rightZero=$right['amount_cents']===0;
+                                if ($leftZero!==$rightZero) return $leftZero?1:-1;
+                                $valueOrder=$right['amount_cents']<=>$left['amount_cents'];
+                                return $valueOrder!==0?$valueOrder:$left['entity_id']<=>$right['entity_id'];
+                            });
                             // The screen read has the same bounded-result rule as every
                             // other analytical object. Keep the exact population count,
                             // but never let an unusually large store scope flood one turn.
-                            $page=['rows'=>array_slice($rows,0,99),'has_more'=>count($rows)>99,'count'=>count($rows),'limit'=>99];
+                            $page=['rows'=>array_slice($rows,0,99),'has_more'=>count($rows)>99,'count'=>count($rows),'limit'=>99,
+                                'active_count'=>$activeObjectCount,'aggregate_value'=>$aggregateValue];
                         } else {
                             $page=$reader->dimensionBreakdown($metric,$breakdown['dimension'],$binding['tenant_id'],$binding['store_ids'],$range,99);
                         }
                         $results[]=['period'=>$period,'metric_code'=>$metric,'storage_unit'=>$metricContract['storage_unit'],
                             'object_kind'=>$breakdown['object_kind'],'object_label'=>$breakdown['object_label'],
-                            'rows'=>$page['rows'],'has_more'=>$page['has_more'],'object_count'=>$page['count'],'list_limit'=>$page['limit']];
+                            'rows'=>$page['rows'],'has_more'=>$page['has_more'],'object_count'=>$page['count'],'list_limit'=>$page['limit'],
+                            'active_object_count'=>$page['active_count'],'aggregate_value'=>$page['aggregate_value']];
                         continue;
                     }
                     if ($thresholdCount !== null) {
