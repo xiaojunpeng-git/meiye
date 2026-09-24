@@ -76,6 +76,16 @@ exportOk('订单中心日期范围会传给销售与其余七类记录的真实�
     && strpos($recordQuery, 'private function applyTimestampBusinessDateRange($query, string $field, array $criteria): void') !== false
     && substr_count($recordQuery, 'applyBusinessDateRange($query') >= 6
     && substr_count($recordQuery, 'applyTimestampBusinessDateRange($query') >= 7);
+exportOk('八类订单首屏与平台只读入口均把真实查询锁定为当天', strpos($view, 'function defaultOrderCenterDateQuery()') !== false
+    && substr_count($view, 'dateFrom: today') === 1
+    && substr_count($view, 'dateTo: today') === 1
+    && substr_count($view, 'businessDateFrom: today') === 1
+    && substr_count($view, 'businessDateTo: today') === 1
+    && substr_count($view, "{ field: 'business_date', operator: 'gte', value: today }") === 1
+    && substr_count($view, "{ field: 'business_date', operator: 'lte', value: today }") === 1
+    && strpos($view, 'return { business_date: { min: today, max: today } }') !== false
+    && strpos($view, '`${to.slice(0, 8)}01`') === false
+    && strpos($view, '本月截至今天') === false);
 
 exportOk('订单中心统一查询 registrar 已登记', strpos($config, 'CashierV3OrderCenterUnifiedQueryRegistrar::class') !== false);
 exportOk('八类订单记录 provider 已登记', substr_count($config, 'CashierV3') >= 10

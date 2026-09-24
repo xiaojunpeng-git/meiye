@@ -34,6 +34,9 @@ $assert('snapshot checkout inherits the server-side resumed-hang reference', str
     && strpos($preparation, "'resumed_hang_order_id' => (string)(\$workspaceMetadata['resumed_hang_order_id'] ?? '')") !== false);
 $assert('resumed-hang metadata cannot be supplied by the browser snapshot', strpos($workspace, 'public function checkoutDraftMetadata(') !== false
     && strpos($workspace, "'resumed_hang_order_id' => trim((string)(\$draft['resumed_hang_order_id'] ?? ''))") !== false);
+$assert('fresh browser-snapshot checkout treats a missing server draft as a non-hang checkout', strpos($workspace, 'if (!$draft) {') !== false
+    && strpos($workspace, "return ['resumed_hang_order_id' => ''];") !== false
+    && strpos($workspace, '$this->assertWorkspaceIdentity($workspaceId, $stateContextId, $operatorScope);') !== false);
 $assert('request repository binds the reference only while editing', strpos($repository, "->where('request_status', 'editing')") !== false);
 $assert('completion reads the request-local internal reference', strpos($binding, "resumed_hang_order_id") !== false);
 $assert('completion no longer scans generic checkout sources for the hang', strpos($binding, 'function hangSource') === false);

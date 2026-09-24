@@ -1812,6 +1812,13 @@ final class CashierV3CashierWorkspaceServices
         $draft = Db::name(self::DRAFT_TABLE)
             ->where('workspace_id', $workspaceId)
             ->find();
+        // 普通销售和权益结账由浏览器最终快照直接提交，新会话在结账前
+        // 可以完全没有服务端 workspace 草稿。这里读取的只是可选的来源挂单
+        // 引用；草稿不存在表示“非挂单来源”，不能误报为工作台绑定变化。
+        if (!$draft) {
+            $this->assertWorkspaceIdentity($workspaceId, $stateContextId, $operatorScope);
+            return ['resumed_hang_order_id' => ''];
+        }
         $this->assertDraftBinding($draft, $workspaceId, $stateContextId, $operatorScope);
         return [
             'resumed_hang_order_id' => trim((string)($draft['resumed_hang_order_id'] ?? '')),

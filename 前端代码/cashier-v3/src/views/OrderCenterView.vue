@@ -530,8 +530,10 @@ const unifiedQueryPages = Object.fromEntries(ORDER_TABS.map((tab) => [tab.key, u
 const activeUnifiedQuery = computed(() => unifiedQueryPages[activeTabKey.value] || unifiedQueryPages.sales)
 const platformOrderCenterDefaultDateRanges = computed(() => {
   if (!isPlatformReadOnly.value) return {}
-  const to = orderCenterToday()
-  return { business_date: { min: `${to.slice(0, 8)}01`, max: to } }
+  const today = orderCenterToday()
+  // 平台与门店必须使用同一首屏口径：日期框显示今天时，真实请求也只能
+  // 查询今天，不能用隐藏的整月范围扩大结果集。
+  return { business_date: { min: today, max: today } }
 })
 const activeQueryCapability = computed(() => {
   const capability = activeUnifiedQuery.value?.capability?.value || {}
@@ -1303,20 +1305,19 @@ function normalizeOrderCenterDateQuery(query = {}) {
 }
 
 function defaultOrderCenterDateQuery() {
-  // 订单中心是跨门店查询入口。默认只查“今天”会让刚打开页面的人
-  // 在当天尚未结账时误以为历史订单丢失；统一按本月截至今天查询。
-  const to = orderCenterToday()
-  const from = `${to.slice(0, 8)}01`
+  // 八个页签的首屏日期框都显示今天，发送给后端的日期别名和结构化
+  // business_date 过滤也必须同时锁定今天，避免展示范围与真实数据不一致。
+  const today = orderCenterToday()
   return {
     dataScope: 'normal',
     businessStatus: '',
-    dateFrom: from,
-    dateTo: to,
-    businessDateFrom: from,
-    businessDateTo: to,
+    dateFrom: today,
+    dateTo: today,
+    businessDateFrom: today,
+    businessDateTo: today,
     topFilters: [
-      { field: 'business_date', operator: 'gte', value: from },
-      { field: 'business_date', operator: 'lte', value: to }
+      { field: 'business_date', operator: 'gte', value: today },
+      { field: 'business_date', operator: 'lte', value: today }
     ]
   }
 }
@@ -2243,7 +2244,7 @@ onMounted(() => {
 
 // Vue Router 在首帧可能尚未把嵌套路由 meta 写入 route；若只在 mounted
 // 判断，会漏掉平台页的首个查询，页面于是错误地显示 0 条。等只读路由身份
-// 已确认后执行一次本月查询，同时保留普通收银入口原有流程。
+// 已确认后执行一次当天查询，同时保留普通收银入口原有流程。
 watch(isPlatformReadOnly, (readOnly) => {
   if (readOnly) {
     void loadPlatformOrderScope()
@@ -2252,8 +2253,8 @@ watch(isPlatformReadOnly, (readOnly) => {
 }, { immediate: true })
 
 watch(activeTabKey, () => {
-  // 平台页没有可保存的统一查询设置；加载它会触发工具栏的“今天”默认
-  // 查询并覆盖本页约定的“本月截至今天”。
+  // 平台页没有可保存的统一查询设置；它与门店页都由当天默认查询直接
+  // 驱动，避免工具栏显示值与首屏后端结果再次分叉。
   if (!isPlatformReadOnly.value) activeUnifiedQuery.value?.load({ silent: true })
 }, { immediate: true })
 
