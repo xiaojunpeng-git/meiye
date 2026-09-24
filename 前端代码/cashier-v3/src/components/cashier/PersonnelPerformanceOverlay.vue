@@ -476,8 +476,11 @@ watch(
   (selected) => {
     const rounds = [...new Set((Array.isArray(selected) ? selected : [])
       .map((item) => Number(item?.guideRoundNo ?? item?.guide_round_no ?? 0))
-      .filter((round) => Number.isInteger(round) && round >= 1 && round <= 3))]
-    guideRoundNo.value = props.guestCustomer ? 'none' : (rounds.length === 1 ? String(rounds[0]) : '')
+      .filter((round) => Number.isInteger(round) && round >= 0 && round <= 3))]
+    // 游客继续默认“无”；会员只有已保存明确选择时才回显，0 对应可选的“无”。
+    guideRoundNo.value = props.guestCustomer
+      ? 'none'
+      : (rounds.length === 1 ? (rounds[0] === 0 ? 'none' : String(rounds[0])) : '')
   },
   { immediate: true, deep: true }
 )
@@ -821,8 +824,9 @@ function attributionRoleAllows(item = {}, role = '') {
 }
 
 function selectedGuidePayload(records = []) {
-  // 传输层 0 仅表示游客明确选择“无”；正式事实层使用 NULL，不制造第 0 轮。
-  const roundNo = props.guestCustomer ? 0 : Number(guideRoundNo.value)
+  // 传输层 0 表示明确选择“无”；正式事实层使用 NULL，不制造第 0 轮，
+  // 且“无”不占用会员第 1～3 轮的跨日期名额。
+  const roundNo = guideRoundNo.value === 'none' ? 0 : Number(guideRoundNo.value)
   return selectedAttributionPayload(records.filter((record) => attributionRoleAllows(record, 'guide')))
     .map((record) => ({ ...record, guideRoundNo: roundNo }))
 }
@@ -891,7 +895,8 @@ function confirm() {
     activateInvalidTab('craftsmen', '消耗业绩和手工费按最终输入金额保存；消耗业绩需为整元，项目数必须为非负数字，最多保留六位小数。')
     return
   }
-  if (selectedGuides.length && !props.guestCustomer && ![1, 2, 3].includes(Number(guideRoundNo.value))) {
+  const selectedGuideRoundNo = guideRoundNo.value === 'none' ? 0 : Number(guideRoundNo.value)
+  if (selectedGuides.length && ![0, 1, 2, 3].includes(selectedGuideRoundNo)) {
     activateInvalidTab('guides', '已选择导购，请选择本次导购第几轮。')
     return
   }
@@ -1009,7 +1014,7 @@ function searchGroupPersonnel(scope) {
             </div>
             <fieldset v-if="selectedGuides.length" class="personnel-guide-round" aria-label="本次导购轮次">
               <legend>导购第几轮<strong v-if="!guestCustomer">*</strong></legend>
-              <label v-if="guestCustomer"><input v-model="guideRoundNo" type="radio" value="none"><span>无</span></label>
+              <label><input v-model="guideRoundNo" type="radio" value="none"><span>无</span></label>
               <label v-for="round in guestCustomer ? [] : [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
             </fieldset>
             <button type="button" class="button button--secondary personnel-attribution-add" @click="openAttributionSearch('guide')">查询导购</button>
@@ -1039,7 +1044,7 @@ function searchGroupPersonnel(scope) {
         </div>
         <fieldset v-if="activeTab === 'guides' && selectedGuides.length" class="personnel-guide-round" aria-label="本次导购轮次">
           <legend>导购第几轮<strong v-if="!guestCustomer">*</strong></legend>
-          <label v-if="guestCustomer"><input v-model="guideRoundNo" type="radio" value="none"><span>无</span></label>
+          <label><input v-model="guideRoundNo" type="radio" value="none"><span>无</span></label>
           <label v-for="round in guestCustomer ? [] : [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
         </fieldset>
         <div class="personnel-full-table" :class="{ 'personnel-full-table--craftsmen': activeTab === 'craftsmen' && !activeIsNonPerformance, 'personnel-full-table--history': historyAdjustment && activeTab === 'craftsmen' }" role="table" aria-label="完整人员分配">

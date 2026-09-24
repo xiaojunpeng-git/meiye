@@ -12,7 +12,8 @@ use think\facade\Db;
  *
  * 导购和轮次先随购物车草稿保存；只有正式结账成功才写入本表。
  * 会员同一轮次允许在同一结账日期重复出现，跨日期则拒绝。
- * 游客可以记录导购归属，但不属于任何会员轮次，事实列保存 NULL。
+ * 游客默认无轮次；会员也可明确选择“无”。无轮次事实列统一保存 NULL，
+ * 且不占用会员第 1～3 轮的跨日期名额。
  * 每轮可以有任意多名导购，但本表不含金额、比例或业绩字段，避免
  * 把导购归属误当成现金业绩分配。
  */
@@ -71,6 +72,14 @@ final class CashierV3GuideRoundFactServices
         $businessDate = (string)$authority['business_date'];
         foreach ($existing as $row) {
             $round = (int)$row['guide_round_no'];
+            // NULL/0 是明确的“无轮次”，保留归属事实但不参与轮次占用。
+            // 同一订单若重放成其他轮次仍必须拒绝，避免生成两套归属事实。
+            if ($round === 0) {
+                if ((string)$row['order_id'] === (string)$authority['order_id'] && $roundNo !== 0) {
+                    throw $this->invalid('guide_round_order_conflict');
+                }
+                continue;
+            }
             if ($round < 1 || $round > 3) throw $this->invalid('guide_round_history_invalid');
             if ((string)$row['order_id'] === (string)$authority['order_id'] && $round !== $roundNo) {
                 throw $this->invalid('guide_round_order_conflict');
@@ -99,7 +108,7 @@ final class CashierV3GuideRoundFactServices
                     'member_id' => $memberId, 'member_name_snapshot' => mb_substr((string)($authority['member_name_snapshot'] ?? ''), 0, 128),
                     'order_id' => (string)$authority['order_id'], 'order_no_snapshot' => mb_substr((string)($authority['order_no_snapshot'] ?? ''), 0, 64),
                     'checkout_request_id' => (string)$authority['checkout_request_id'], 'source_line_id' => $sourceLineId,
-                    // NULL 表示没有会员轮次，绝不能把游客记录伪装成“第 0 轮”。
+                    // NULL 表示明确选择“无轮次”，绝不能制造“第 0 轮”。
                     'business_date' => $businessDate, 'guide_round_no' => $roundNo === 0 ? null : $roundNo, 'guide_employee_id' => $employeeId,
                     'guide_employee_name_snapshot' => mb_substr($employeeName, 0, 128),
                     'guide_employee_type_snapshot' => mb_substr((string)($employee['employment_type_code'] ?? ''), 0, 16),
@@ -163,6 +172,8 @@ final class CashierV3GuideRoundFactServices
         );
         foreach ($existing as $row) {
             $round = (int)$row['guide_round_no'];
+            // “无轮次”不占用任何真实轮次，预检只校验第 1～3 轮历史。
+            if ($round === 0) continue;
             if ($round < 1 || $round > 3) throw $this->invalid('guide_round_history_invalid');
             if ($round === $roundNo && (string)$row['business_date'] !== (string)$authority['business_date']) {
                 throw $this->invalid('guide_round_date_conflict:' . (string)$row['business_date']);
@@ -263,11 +274,11 @@ final class CashierV3GuideRoundFactServices
             ->field('guide_fact.*')->lock(true)->select()->toArray();
     }
 
-    /** 会员必须选真实轮次，游客只能选“无”；这是服务端权威身份边界。 */
+    /** 游客只能是“无”；会员可选“无”或第 1～3 轮，服务端按权威身份复核。 */
     private function assertCustomerRound(int $memberId, int $roundNo): void
     {
         if ($memberId < 0 || ($memberId === 0 && $roundNo !== 0)
-            || ($memberId > 0 && ($roundNo < 1 || $roundNo > 3))) {
+            || ($memberId > 0 && ($roundNo < 0 || $roundNo > 3))) {
             throw $this->invalid('guide_round_customer_mode_mismatch');
         }
     }

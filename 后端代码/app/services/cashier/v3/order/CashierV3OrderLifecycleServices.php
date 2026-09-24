@@ -408,7 +408,7 @@ final class CashierV3OrderLifecycleServices
             ];
         }
         return ['contractVersion' => self::CONTRACT_VERSION, 'salesOrderId' => (string)$source['sourceId'], 'salesOrderNo' => (string)$source['sourceNo'],
-            // 事后人员调整仍需区分游客“无轮次”和会员 1～3 轮。
+            // 事后人员调整仍以权威会员身份限制游客只能“无”；会员可选“无”或 1～3 轮。
             'memberId' => (int)$source['memberId'],
             // Directly opened order-center editors must carry the server's
             // current lifecycle version into the command version store.
@@ -1184,13 +1184,13 @@ final class CashierV3OrderLifecycleServices
         if ($role === 'guide') {
             $round = (int)($item['guideRoundNo'] ?? $item['guide_round_no'] ?? 0);
             if (((int)$source['memberId'] === 0 && $round !== 0)
-                || ((int)$source['memberId'] > 0 && ($round < 1 || $round > 3))) {
+                || ((int)$source['memberId'] > 0 && ($round < 0 || $round > 3))) {
                 throw self::failure('guide_round_required');
             }
             $natural = 'sales-order-adjust:' . $operationId . ':' . $lineId . ':guide:' . $staffId . ':' . $round;
             $row = $common + ['fact_id' => 'GRA-' . strtoupper(substr(hash('sha256', $scope->tenantId() . '|' . $natural), 0, 40)), 'natural_key' => $natural,
                 'immutable_fingerprint' => '', 'member_name_snapshot' => '', 'order_no_snapshot' => $source['sourceNo'], 'checkout_request_id' => $source['checkoutRequestId'],
-                // 游客导购事实保留员工归属，数据库 NULL 明确表示不占会员轮次。
+                // “无轮次”仍保留导购归属，数据库 NULL 明确表示不占会员第 1～3 轮。
                 'guide_round_no' => $round === 0 ? null : $round, 'guide_employee_id' => $staffId, 'guide_employee_name_snapshot' => $name, 'guide_employee_type_snapshot' => (string)($employee['employment_type_code'] ?? ''), 'operator_name_snapshot' => ''];
         } else {
             $natural = 'sales-order-adjust:' . $operationId . ':' . $lineId . ':sales_manager:' . $staffId;

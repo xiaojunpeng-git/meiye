@@ -29,13 +29,16 @@ $checks = [
     'fact stores formal checkout and business-date snapshots' => strpos($migration, 'checkout_request_id') !== false
         && strpos($migration, 'business_date') !== false
         && strpos($migration, 'order_no_snapshot') !== false,
-    'round number is bounded to three' => strpos($service, 'guide_round_no') !== false
+    'round number is bounded to zero through three' => strpos($service, 'guide_round_no') !== false
         && strpos($service, 'guide_round_required') !== false
-        && strpos($service, '$roundNo < 1 || $roundNo > 3') !== false,
-    'guest guide keeps attribution without inventing round zero' => strpos($guestMigration, 'guide_round_no` tinyint(1) unsigned NULL') !== false
+        && strpos($service, '$roundNo < 0 || $roundNo > 3') !== false,
+    'guest and member no-round guide keeps attribution without inventing round zero' => strpos($guestMigration, 'guide_round_no` tinyint(1) unsigned NULL') !== false
         && strpos($service, "'guide_round_no' => \$roundNo === 0 ? null : \$roundNo") !== false
         && strpos($service, 'assertCustomerRound') !== false
-        && strpos($service, '$memberId === 0 && $roundNo !== 0') !== false,
+        && strpos($service, '$memberId === 0 && $roundNo !== 0') !== false
+        && strpos($service, '$memberId > 0 && ($roundNo < 0 || $roundNo > 3)') !== false,
+    'no-round member facts do not occupy numbered rounds' => substr_count($service, 'if ($round === 0)') >= 2
+        && strpos($service, 'if ($round === 0) continue;') !== false,
     'round is explicitly selected and an order cannot mix rounds' => strpos($service, 'guideRoundNo') !== false
         && strpos($service, 'guide_round_conflict') !== false
         && strpos($service, 'guide_round_order_conflict') !== false,

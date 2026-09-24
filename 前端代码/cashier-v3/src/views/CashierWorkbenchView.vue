@@ -3722,7 +3722,7 @@ async function openCartLineSalespeople(line) {
 
 async function openCartLineAttributions(line) {
   if (isEntitlementLine(line)) return
-  // 游客也可以记录导购和销售经理；导购“无轮次”由服务端按游客身份校验。
+  // 游客默认“无轮次”，会员也可明确选“无”；最终身份与轮次组合由服务端校验。
   activeCartLineId.value = line.id
   await loadPersonnelOverlay(line, 'guides', 'attribution')
 }

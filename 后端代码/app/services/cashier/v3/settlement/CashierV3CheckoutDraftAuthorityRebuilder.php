@@ -332,7 +332,7 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             $id = (int)($row['employeeId'] ?? $row['employee_id'] ?? $row['id'] ?? 0);
             if ($id <= 0) throw self::failure('checkout_draft_attribution_snapshot_invalid');
             $snapshot = ['employeeId' => $id];
-            // 重建必须保留导购身份及其轮次选择。0 仅是游客“无轮次”的
+            // 重建必须保留导购身份及其轮次选择。0 是明确的“无轮次”
             // 传输值；最终事实层按权威会员 ID 验证后存成 NULL。
             if (array_key_exists('guideRoundNo', $row) || array_key_exists('guide_round_no', $row)) {
                 $roundNo = (int)($row['guideRoundNo'] ?? $row['guide_round_no'] ?? 0);
