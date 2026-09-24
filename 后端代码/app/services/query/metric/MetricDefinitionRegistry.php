@@ -16,7 +16,7 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v16';
+    public const VERSION = 'unified-metric-registry-v17';
     public const COVERAGE_START = '2026-08-10';
 
     /**
@@ -103,6 +103,11 @@ final class MetricDefinitionRegistry
                 'derivation' => ['operator' => 'subtract', 'left_metric' => 'cash_performance', 'right_metric' => 'refund_performance'],
                 'dimensions' => ['operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot']],
                 'default_ranking_dimension' => 'operator',
+                // A broad per-store performance breakdown needs one concise
+                // first reading. This source-owned declaration is consumed
+                // only when exactly one compatible default exists; explicit
+                // customer metrics always take precedence.
+                'analysis_default_breakdown_object_kinds' => ['store'],
                 'category_reader' => ['strategy' => 'cash_sale_allocation', 'mode' => 'net'],
             ],
             'consume_amount' => self::amount('fact_sum', 'consumption-completed-service-facts-v1', ['summary', 'comparison', 'trend', 'ranking'], [
@@ -127,6 +132,7 @@ final class MetricDefinitionRegistry
             ], 'person', ['selection_ref']) + [
                 'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
+                'analysis_default_breakdown_object_kinds' => ['person'],
                 // Ordinary rankings use people who actually own a fact in the
                 // requested period. Current cashier qualifications remain an
                 // explicit customer filter, never a historical fact filter.
@@ -503,6 +509,7 @@ final class MetricDefinitionRegistry
                 'analysis_dimension_contracts' => self::analysisDimensionContracts($item),
                 'analysis_default_selection_ref' => $item['analysis_default_selection_ref'] ?? null,
                 'analysis_default_rank_object_kinds' => $item['analysis_default_rank_object_kinds'] ?? [],
+                'analysis_default_breakdown_object_kinds' => $item['analysis_default_breakdown_object_kinds'] ?? [],
                 'overview' => self::overviewContracts($item),
                 // A threshold contract is deliberately narrow: it describes
                 // the only permitted aggregate predicate for this metric,

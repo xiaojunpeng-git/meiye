@@ -1032,7 +1032,11 @@ final class AiGatewayServices
                 // The registry may disclose one default ranking perspective
                 // for a compatible broad first answer. It is deliberately
                 // scoped to object kinds, never inferred from question words.
-                'default_rank_object_kinds'=>array_values((array)($contract['analysis_default_rank_object_kinds']??[]))];
+                'default_rank_object_kinds'=>array_values((array)($contract['analysis_default_rank_object_kinds']??[])),
+                // The same source-owned policy can provide one concise first
+                // column for a broad per-object breakdown. Explicit metrics
+                // still bypass this default completely.
+                'default_breakdown_object_kinds'=>array_values((array)($contract['analysis_default_breakdown_object_kinds']??[]))];
         }
         $measurementVocabulary=$this->analysisMeasurementVocabulary($caps);
         // The prompt-facing candidates and the later controlled choices are both
@@ -1781,6 +1785,21 @@ final class AiGatewayServices
                 $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
                 $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_rank_default_applied',[],
                     'registered_rank_default');
+            }
+            // Several explicit metrics must not be mistaken for no metric
+            // merely because the unique-term lookup above returned null.
+            $explicitBreakdownTerms=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText(
+                (string)($safe['outbound']['question']??''),array_column($bindingSummaries,'metric_code')
+            );
+            $breakdownDefault=$explicitBreakdownTerms!==[]?$bindingCandidate:$this->applyRegisteredBreakdownDefaultPolicy(
+                $bindingCandidate,$understanding,$bindingSummaries
+            );
+            if ($breakdownDefault!==$bindingCandidate) {
+                $bindingCandidate=$breakdownDefault;
+                $merged=IntentContextMerger::merge($sourceQuery,$bindingCandidate);
+                $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_breakdown_default_applied',[],
+                    'registered_breakdown_default');
             }
         }
         $exactRegistryBinding=AiIntentResultContract::isUniqueExactMetricBinding(
@@ -4200,6 +4219,34 @@ final class AiGatewayServices
         $current=array_values((array)($intent['metric_codes']??[]));
         if ($current===[$default] && !empty($intent['recommended_initial_answer'])
             && empty($intent['needs_metric_choice'])) return $intent;
+        return SiliconFlowClient::applyRankMetricResolution(
+            $intent,['decision'=>'select','metric_code'=>$default],$understanding
+        );
+    }
+
+    /**
+     * Select one registered first-answer column for a broad per-object
+     * breakdown. The understanding model has already fixed the object and
+     * response form; the registry, rather than a phrase branch, owns the
+     * professional default. Zero or several declarations remain a normal
+     * customer choice so configuration mistakes fail closed.
+     */
+    private function applyRegisteredBreakdownDefaultPolicy(array $intent,array $understanding,array $summaries): array
+    {
+        if (!AiIntentResultContract::canUseRegisteredBreakdownDefault($understanding,$intent)) return $intent;
+        $objectKind=$intent['object_kind']??null;
+        if (!is_string($objectKind)) return $intent;
+        $defaults=[];
+        foreach ($summaries as $summary) {
+            $code=$summary['metric_code']??null;
+            $kinds=$summary['default_breakdown_object_kinds']??[];
+            if (is_string($code) && is_array($kinds) && in_array($objectKind,$kinds,true)) $defaults[$code]=true;
+        }
+        if (count($defaults)!==1) return $intent;
+        $default=array_key_first($defaults);
+        if (($intent['metric_codes']??null)===[$default]
+            && empty($intent['needs_metric_choice'])
+            && !empty($intent['recommended_initial_answer'])) return $intent;
         return SiliconFlowClient::applyRankMetricResolution(
             $intent,['decision'=>'select','metric_code'=>$default],$understanding
         );

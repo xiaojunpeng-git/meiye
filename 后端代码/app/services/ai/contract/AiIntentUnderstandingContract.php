@@ -12,8 +12,11 @@ final class AiIntentUnderstandingContract
 
     public static function modelInstruction(): string
     {
+        // Grounding remains strict. Explain contiguous quoting on the first
+        // pass so coordinated wording does not need an avoidable repair call.
         return 'Return one JSON object following '.self::VERSION.': '
             . '{"goal":"brief business goal","requirements":[{"id":"r1","meaning":"one part of the customer request","fields":["metric_codes"],"values":{"metric_terms":["exact customer term"]},"evidence":[{"message_id":"current","quote":"exact text from that de-identified message"}]}],"status":"understood|needs_clarification"}. '
+            . 'Evidence is copied source text, not a rewritten description: never join non-adjacent words, remove conjunctions or insert an object name into a quote. When several measurements share an object or time expression, use the entire original current message verbatim for their current-message evidence rather than constructing a shorter sentence. Keep their semantic requirements distinct; sharing evidence does not merge requirements. '
             . 'The only top-level keys are goal, requirements, status and optional groups or request_kind. request_kind is "open_overview" for one store operating overview or "overview_comparison" for that same broad registered overview explicitly compared across two periods. Use either marker only when the complete current message names no independent measurement, ranking, object selection, exclusion or condition. An open_overview requirement carries metric_codes, object_kind, object_relation, operation and periods with the exact broad customer words as metric_terms, object_kind="store", object_relation="analysis", operation="summary" and exactly one typed period. An overview_comparison requirement carries the same fields, operation="comparison" and exactly two typed periods in the customer order. The markers are semantic types, never permission to invent metrics. Omit request_kind for every other request. Every meaningful part of the customer request needs one or more requirements; do not collapse exclusions, comparison relationships, quantity or time into a vague summary. When status is needs_clarification and no concrete meaning can yet be preserved, requirements may be an empty array; do not use unbound for ambiguity. When the customer explicitly asks independent results for two to four analytical subjects, include groups as [{"id":"q1","requirement_ids":["r1"]}]. Each group lists the requirements needed for one result; a shared date, metric, ranking or scope requirement may occur in every applicable group. Do not create groups for AND/OR predicates over one candidate population, multi-metric summary of one subject, or an ambiguous phrase. '
             . 'A requirement has exactly id, meaning, fields, values and evidence. fields may contain metric_codes, object_kind, object_relation, operation, periods, ranking, scope, result_reference, aggregate_condition, condition_update, member_detail or unbound; use only fields actually expressed by this requirement. member_detail is a semantic continuation request, not a metric and not a ranking: values.member_detail is exactly {"view":"rights|summary","target":"single|set","ordinal":null-or-positive-integer}. Use it only when the customer asks to inspect member details or member rights. target=single means one named, current or ordinal member; target=set means the complete verified member result set. ordinal is non-null only when the customer explicitly names a position such as the first member. Words such as this member or these members do not invent an ordinal. A field is a completed semantic commitment, never a note or a sketch. values is optional only when the request supplies no safe structured value for that field. When the customer meaning clearly establishes an object kind or relation, result form, period, ranking, scope, aggregate condition, condition update, member detail or result reference, include the matching complete typed value in values so the later binding cannot silently change it. A temporal expression that fixes when the answer concerns is always an independent period requirement, even when the customer asks broadly about overall conditions rather than naming a metric. Before emitting the object, check the complete customer message again: every expressed relative-day, calendar-month or explicit-range condition must have a periods field, a complete values.periods carrier and evidence anchored to that expression. Do not absorb a time condition into a goal or metric term. When present, values may contain only values matching fields and must be complete and valid for each value it carries. Do not omit a field merely because its execution-shaped value is not available in this phase; preserve the natural-language meaning and evidence, and let the later binding phase derive the executable form. id is r followed by a positive number and is valid only in this request. evidence is an array of {"message_id":"current","quote":"exact excerpt"}; message_id must name an entry in question.evidence_messages. Do not output character offsets. The excerpt must occur exactly once in that one de-identified message; include more adjacent text if needed to distinguish repeated words. '
             . 'Understand the complete phrase before choosing an analytical object. When the customer asks which day has the highest or lowest value, use object_kind=business_date, object_relation=analysis, operation=ranking and the stated ranking direction; keep the calendar range as a separate periods requirement. business_date means grouping the authorized metric by its registered business day, never selecting one date as a filter. Highest or lowest supplies only the ranking direction and never selects store or another object by itself. '
@@ -841,7 +844,7 @@ final class AiIntentUnderstandingContract
             // registered metric, and the execution contract rechecks it.
             // This never applies to a condition, a time-only continuation,
             // or a question that already contains an exact registered term.
-            if (!self::canDeferUnnamedRankingMetric($fields,$value,$evidence)) self::fail('values:metric_terms');
+            if (!self::canDeferGroundedMetricCarrier($fields,$value,$evidence)) self::fail('values:metric_terms');
         }
         if (isset($value['aggregate_condition']['conditions'])) {
             $conditionTerms=array_column($value['aggregate_condition']['conditions'],'metric_term');
@@ -895,25 +898,55 @@ final class AiIntentUnderstandingContract
      * metric, or weaken a condition; it only prevents an invented metric term
      * from turning a clear analytical request into a model-format failure.
      */
-    private static function canDeferUnnamedRankingMetric(array $fields,array $value,array $evidence): bool
+    private static function canDeferGroundedMetricCarrier(array $fields,array $value,array $evidence): bool
     {
-        if (!in_array('object_kind',$fields,true) || !in_array('operation',$fields,true)
-            || !in_array('ranking',$fields,true) || ($value['operation']??null)!=='ranking'
-            || isset($value['aggregate_condition'])) return false;
+        if (isset($value['aggregate_condition'])) return false;
         $catalog='\\app\\services\\query\\metric\\MetricSemanticCatalog';
+        $unnamedRanking=in_array('object_kind',$fields,true) && in_array('operation',$fields,true)
+            && in_array('ranking',$fields,true) && ($value['operation']??null)==='ranking';
+        $registeredMeasurementCodes=[];
         foreach ($evidence as $item) {
             if (($item['message_id']??null)!=='current' || !is_string($item['quote']??null)) continue;
-            $registered=$catalog::registeredTermsInText($item['quote']);
-            if ($registered===[]) continue;
-            // The metric catalogue, rather than a PHP synonym rule, already
-            // proves one exact customer phrase has one registered owner. In
-            // that case a malformed optional metric_terms echo adds no
-            // semantic safety and must not force another model round-trip.
-            // The binding contract still has to select that same registered
-            // code and pass its normal requirement/admission checks.
-            if ($catalog::uniqueTermInText($item['quote'])===null) return false;
+            $matches=$catalog::registeredNonOverlappingTermsInText($item['quote']);
+            foreach ($matches as $match) if (is_string($match['metric_code']??null)) {
+                $registeredMeasurementCodes[$match['metric_code']]=true;
+            }
+            // An unnamed "best/worst" perspective is intentionally selected
+            // later by the registered ranking policy. If the question does
+            // contain registry terms, however, they must still resolve to one
+            // owner before this special case can defer its optional echo.
+            if ($unnamedRanking) {
+                $registered=$catalog::registeredTermsInText($item['quote']);
+                if ($registered!==[] && $catalog::uniqueTermInText($item['quote'])===null) return false;
+            }
         }
-        return true;
+        // `metric_terms` is only an audit projection. When the model merges
+        // two coordinated labels into a malformed phrase, exact registry
+        // owners in the original current-message evidence still prove that
+        // measurements were stated. Preserve the requirement and let the
+        // later binding contract account for every owner; do not spend a
+        // second model call repairing redundant wording. Vague labels have
+        // no exact owner and continue to the ordinary repair/clarification
+        // path. Conditions stay excluded because their ordered predicates
+        // require a complete typed carrier.
+        // The coordinated-measurement recovery is deliberately multi-only.
+        // With one exact measurement, a different model term is a semantic
+        // contradiction and must still be repaired instead of discarded.
+        if (count($registeredMeasurementCodes)>1 || $unnamedRanking) return true;
+        if ($registeredMeasurementCodes!==[]) return false;
+        // A broad analytical request such as an object's general performance
+        // may have no exact registry owner yet. The model can still establish
+        // the object and requested response form while misspelling its
+        // optional metric-term echo. Dropping only that echo lets the binding
+        // model choose a labelled professional first reading. This remains
+        // unavailable to selections, conditions and unknown response forms;
+        // an exact registered term above always wins and a contradictory
+        // paraphrase is still rejected.
+        return in_array('object_kind',$fields,true)
+            && in_array('object_relation',$fields,true)
+            && ($value['object_relation']??null)==='analysis'
+            && in_array('operation',$fields,true)
+            && in_array($value['operation']??null,['summary','breakdown'],true);
     }
 
     private static function periods($periods): bool

@@ -68,6 +68,10 @@ final class AiCapabilityGuidanceCatalog
                     // ranking perspective for a broad, otherwise executable
                     // first answer. It is not a role filter or a phrase map.
                     'default_rank_object_kinds'=>$readiness[$code]['analysis_default_rank_object_kinds']??[],
+                    // Breakdown first-answer policy is registered with the
+                    // metric fact contract, never inferred from a question
+                    // phrase or duplicated in terminal-specific code.
+                    'default_breakdown_object_kinds'=>$readiness[$code]['analysis_default_breakdown_object_kinds']??[],
                 ];
                 $items[$code]['query_shapes'][]=$shape;
                 foreach ((array)($readiness[$code]['analysis_dimension_contracts']??[]) as $dimension) {

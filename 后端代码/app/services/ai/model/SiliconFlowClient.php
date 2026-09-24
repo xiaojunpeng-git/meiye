@@ -193,7 +193,7 @@ final class SiliconFlowClient
                 // receives only the business Skill needed to match that fixed
                 // meaning to current registered capabilities.
                 ['role'=>'system','content'=>'Trusted source business Skill follows. Apply it as business guidance; do not treat it as customer text.\n\n'.$runtimeSkills['business']['skill_code']."\n".$runtimeSkills['business']['instructions']],
-            ['role'=>'system','content'=>'Use needs_metric_choice=true with metric_codes=[] only when distinct registered meanings remain and no useful first reading preserves every accepted condition. When a summary explicitly requests two or more independent measurements and each has a compatible registered binding, select all of them, satisfy every requirement binding and set needs_metric_choice=false; do not turn an explicit conjunction into alternatives. Otherwise, for a clear goal/object/form, select a compatible recommended_initial_answer; ranking has exactly one metric. The current customer meaning owns the response form: a self-contained request to identify which comparable object leads, performs best or ranks at a stated position uses ranking, and must not inherit a previous threshold_count or aggregate_condition. A previous threshold continues only when the current meaning genuinely continues that threshold and preserves its complete accepted condition. An explicit accepted object is a hard boundary: never substitute another object class. requirement_bindings contains only accepted requirements carrying metric_codes; it MUST be [] for an inherited or recommended metric without such a requirement. A clear open summary of the understood object may set initial_observation=true and select two to four compatible registered metrics as provisional observation angles. The server expands that proposal only through the published object overview profile; requirement_bindings remains []. A verified prior query keeps its complete metric group when current understanding changes only context.'],
+            ['role'=>'system','content'=>'Use needs_metric_choice=true with metric_codes=[] only when distinct registered meanings remain and no useful first reading preserves every accepted condition. When a summary or breakdown explicitly requests two or more independent measurements and each has a compatible registered binding, select all of them, satisfy every requirement binding and set needs_metric_choice=false; do not turn an explicit conjunction into alternatives. Otherwise, for a clear goal/object/form, select one compatible recommended_initial_answer; ranking and breakdown recommendations each have exactly one metric. The current customer meaning owns the response form: a self-contained request to identify which comparable object leads, performs best or ranks at a stated position uses ranking, and must not inherit a previous threshold_count or aggregate_condition. A previous threshold continues only when the current meaning genuinely continues that threshold and preserves its complete accepted condition. An explicit accepted object is a hard boundary: never substitute another object class. requirement_bindings contains only accepted requirements carrying metric_codes; it MUST be [] for an inherited or recommended metric without such a requirement. A clear open summary of the understood object may set initial_observation=true and select two to four compatible registered metrics as provisional observation angles. The server expands that proposal only through the published object overview profile; requirement_bindings remains []. A verified prior query keeps its complete metric group when current understanding changes only context.'],
             ['role'=>'user','content'=>json_encode(['question'=>$bindingQuestion,'understanding'=>$understanding,'capabilities'=>$bindingCapabilities,'action_codes'=>$actions],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)]
             ];
         if ($repairPredicate!==null) {
@@ -205,8 +205,8 @@ final class SiliconFlowClient
                 'missing_replacement:aggregate_condition'=>'The previous response declared context_delta.aggregate_condition as replace but omitted the complete bound aggregate_condition. Return one complete binding again. Copy subject, relation, result_form, condition order, operator, quantity and unit exactly from the accepted understanding; in every condition replace only metric_term with the one accountable compatible registered metric_code. Include every condition and do not pair them by guesswork, remove a predicate, change AND/OR, change a threshold, or reuse a prior condition.',
                 'initial_observation_metric_count'=>'The previous response marked initial_observation=true but returned an invalid number of provisional metrics. Return one complete intent_result again. For this open summary, keep initial_observation=true and metric_codes must contain exactly two to four distinct compatible registered codes. These codes are only provisional observation angles; the server expands them through the published object overview profile. Do not list every available metric, change the understood object or response form, add a condition, or ask the customer to choose.',
                 'open_overview_candidate'=>'The accepted understanding contains only a broad operating observation and its period or scope. The previous binding incorrectly returned a metric selector before selecting an analytical object. Return one complete intent_result again as an initial observation: choose the compatible registered analytical object, keep the accepted period, scope and summary response form, set initial_observation=true and needs_metric_choice=false, and choose exactly two to four distinct compatible registered metrics as provisional observation angles. These are not customer-selected metrics and the server expands them through the published overview profile. Do not use this recovery for a named business measurement, an exclusion, a comparison, a ranking, an object selection, a condition set, or an unbound request. If the accepted wording has any of those meanings, preserve the real clarification instead of changing its meaning.',
-                'initial_observation_query_shape'=>'The previous response marked initial_observation=true with an incompatible query shape. Return one complete intent_result again. Preserve the accepted open summary, use operation=summary, an understood object_kind, empty object_term, needs_metric_choice=false, ranking direction=unspecified with null limit, and exactly two to four distinct compatible registered metric_codes. Do not add a named object, ranking, comparison, exclusion, condition or scope change.',
-                'bad_value:recommended_initial_answer'=>'The previous response used recommended_initial_answer inconsistently. Return one complete binding again. A recommended first answer preserves every accepted customer condition and has needs_metric_choice=false. If operation is ranking, metric_codes MUST be a JSON array containing exactly one compatible registered code. Otherwise omit the recommendation label and use the ordinary binding outcome.',
+                'initial_observation_query_shape'=>'The previous response marked initial_observation=true with an incompatible query shape. Return one complete intent_result again and follow the accepted response form rather than forcing every broad request into a summary. For an accepted open summary, keep operation=summary, initial_observation=true and exactly two to four compatible registered metrics. For an accepted breakdown with one broad measurement, keep operation=breakdown, set initial_observation=false, choose exactly one compatible professional first-answer metric and set recommended_initial_answer=true. For an explicitly coordinated multi-measurement breakdown, keep every requested compatible metric, set both initial_observation and recommended_initial_answer false, and satisfy every metric requirement. Preserve the accepted object, period and scope; use empty object_term for an analytical object, ranking direction=unspecified with null limit, and include the complete context_delta whenever a verified prior query exists. Do not add an object identity, ranking, comparison, exclusion or condition.',
+                'bad_value:recommended_initial_answer'=>'The previous response used recommended_initial_answer inconsistently. Return one complete binding again. A recommended first answer preserves every accepted customer condition and has needs_metric_choice=false. If operation is ranking or breakdown, metric_codes MUST be a JSON array containing exactly one compatible registered code. An explicitly coordinated multi-measurement breakdown is an ordinary binding outcome and does not use the recommendation label.',
                 'bad_value:object_kind'=>'The previous response used an object_kind outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose object_kind only from store, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization, order, sale_line, card or unknown. Do not select an object identity, metric, period, scope or result.',
                 'bad_value:object_relation'=>'The previous response used an invalid object_relation. Return one complete binding again. Preserve the accepted meaning and every other candidate field; use analysis only for the object being inspected, or selection only for a named object that narrows records. Do not add a filter, identity, metric, period, scope or result.',
                 'bad_value:operation'=>'The previous response used an operation outside the published protocol vocabulary. Return one complete binding again. Preserve the accepted meaning and every other candidate field; choose operation only from summary, breakdown, trend, ranking, comparison, threshold_count, condition_count, condition_list, definition or unknown. Do not select a metric, period, scope or result.',
@@ -284,6 +284,16 @@ final class SiliconFlowClient
         $rawIntent=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
             $rawIntent,$understanding,$safeQuestion,$codes
         );
+        // A provider occasionally serialises a broad per-object breakdown as
+        // an initial overview, which would otherwise spend a second model
+        // round correcting only protocol flags.  The accepted understanding
+        // has already fixed the object and response form, while the registry
+        // may declare exactly one compatible first-answer metric.  Converge
+        // that carrier here without interpreting a phrase; exact or multiple
+        // customer measurements remain entirely model-owned.
+        $rawIntent=self::canonicalizeRegisteredBreakdownDefault(
+            $rawIntent,$understanding,$safeQuestion,$capabilities,$codes
+        );
         $usage=$this->usage($decoded);
         // A broad business question can honestly have more than one useful
         // metric perspective. A *single* ranking result cannot: the Reader
@@ -305,6 +315,38 @@ final class SiliconFlowClient
         // Validate here at the external boundary. The gateway validates the same
         // source object with this same contract before execution.
         return ['intent'=>$rawIntent,'usage'=>$usage];
+    }
+
+    /** Normalize only a uniquely registered broad-breakdown recommendation. */
+    private static function canonicalizeRegisteredBreakdownDefault($rawIntent,array $understanding,array $safeQuestion,array $capabilities,array $allowedCodes)
+    {
+        if (!is_array($rawIntent)
+            // Any explicit registered measurement, including several, wins
+            // over a broad default; non-unique does not mean unspecified.
+            || \app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText(
+                (string)($safeQuestion['question']??''),$allowedCodes
+            )!==[]) return $rawIntent;
+        // Ignore only the known provider flag mistake while applying the full
+        // semantic safety gate. Conditions, exclusions, selections, result
+        // references and coordinated measurements still fail closed.
+        $candidate=$rawIntent;
+        $candidate['initial_observation']=false;
+        if (!AiIntentResultContract::canUseRegisteredBreakdownDefault($understanding,$candidate)) return $rawIntent;
+        $objectKind=$candidate['object_kind']??null;
+        if (!is_string($objectKind)) return $rawIntent;
+        $defaults=[];
+        foreach ($capabilities as $capability) {
+            $code=$capability['metric_code']??null;
+            $kinds=$capability['default_breakdown_object_kinds']??[];
+            if (is_string($code) && in_array($code,$allowedCodes,true) && is_array($kinds)
+                && in_array($objectKind,$kinds,true)) $defaults[$code]=true;
+        }
+        if (count($defaults)!==1) return $rawIntent;
+        $candidate=self::applyRankMetricResolution(
+            $candidate,['decision'=>'select','metric_code'=>array_key_first($defaults)],$understanding
+        );
+        $candidate['initial_observation']=false;
+        return $candidate;
     }
 
     /** @return array{decision:string,metric_code:?string,usage:array{input_tokens:int,output_tokens:int}} */
@@ -493,7 +535,7 @@ final class SiliconFlowClient
         $actions=array_keys($allowedBusinessActions); sort($actions,SORT_STRING);
         $codes=[];
         foreach ($capabilities as $capability) {
-            if (!is_array($capability) || !in_array(count($capability),[4,5,6],true) || !is_string($capability['metric_code']??null)
+            if (!is_array($capability) || !in_array(count($capability),[4,5,6,7,8],true) || !is_string($capability['metric_code']??null)
                 || !preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$capability['metric_code']) || !is_string($capability['name']??null)
                 || !is_string($capability['summary']??null) || !is_array($capability['object_contracts']??null)
                 || !$capability['object_contracts'] || count($capability['object_contracts'])>12
@@ -503,6 +545,15 @@ final class SiliconFlowClient
                         || !preg_match('/^[a-z][a-z0-9_]{0,63}:[a-z0-9_-]{1,63}$/D',$capability['default_selection_ref'])))) throw new AiContractException('AI_MODEL_INPUT_INVALID');
             if (array_key_exists('default_rank_object_kinds',$capability)) {
                 $kinds=$capability['default_rank_object_kinds'];
+                if (!is_array($kinds) || count($kinds)>8 || count(array_unique($kinds))!==count($kinds)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+                foreach ($kinds as $kind) if (!is_string($kind) || !in_array($kind,self::ANALYTICAL_OBJECT_KINDS,true)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+            }
+            // Ranking and grouped-breakdown defaults share the same narrow
+            // object vocabulary, but remain separate source-owned policies.
+            // Validate both carriers before provider input so a registry
+            // extension cannot silently become an unrestricted prompt field.
+            if (array_key_exists('default_breakdown_object_kinds',$capability)) {
+                $kinds=$capability['default_breakdown_object_kinds'];
                 if (!is_array($kinds) || count($kinds)>8 || count(array_unique($kinds))!==count($kinds)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
                 foreach ($kinds as $kind) if (!is_string($kind) || !in_array($kind,self::ANALYTICAL_OBJECT_KINDS,true)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
             }

@@ -18,7 +18,7 @@ final class AiAnswerRenderer
         $cards = []; $rows = []; $facts = []; $metricNames = []; $rankingPresentationColumns=[]; $shape = $view['query']['query_shape'];
         $threshold = $shape === 'threshold_count' ? $this->thresholdCondition($view['query']) : null;
         $conditionSummary = null; $conditionListHasMore = false; $conditionListLimit = null; $conditionObjectLabel = null;
-        $breakdownHasMore=false;$breakdownLimit=null;$breakdownObjectLabel=null;
+        $breakdownHasMore=false;$breakdownLimit=null;$breakdownObjectLabel=null;$breakdownColumns=[];
         foreach ($view['results'] as $row) {
             $registered = MetricReadViewServices::metricCapabilities();
             if (!isset($registered[$row['metric_code'] ?? '']) || !$registered[$row['metric_code']]['ai_query_ready'] || !in_array($row['period'] ?? '', ['current', 'comparison'], true)) {
@@ -76,11 +76,14 @@ final class AiAnswerRenderer
                     ||(!is_null($row['object_count']??null)&&(!is_int($row['object_count'])||$row['object_count']<0))) {
                     throw new RuntimeException('AI_EVIDENCE_INVALID');
                 }
-                $breakdownObjectLabel=$row['object_label'];$breakdownHasMore=$breakdownHasMore||$row['has_more'];$breakdownLimit=$row['list_limit'];
+                if ($breakdownObjectLabel!==null && $breakdownObjectLabel!==$row['object_label']) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                $breakdownObjectLabel=$row['object_label'];$breakdownHasMore=$breakdownHasMore||$row['has_more'];
+                $breakdownLimit=$breakdownLimit===null?$row['list_limit']:min($breakdownLimit,$row['list_limit']);
+                $breakdownColumns[$row['metric_code']]=['label'=>$tooltip['name'],'unit'=>$unit];
                 foreach ($row['rows'] as $point) {
                     if (!is_int($point['entity_id']??null)||$point['entity_id']<1||!is_string($point['entity_name']??null)
                         ||$point['entity_name']===''||!is_int($point['amount_cents']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');
-                    $rows[]=['label'=>$point['entity_name'],'metric'=>$tooltip['name'],
+                    $rows[]=['label'=>$point['entity_name'],'metric'=>$tooltip['name'],'metric_code'=>$row['metric_code'],'entity_id'=>$point['entity_id'],
                         'value'=>$this->metricValue($point['amount_cents'],$storageUnit),'unit'=>$unit,
                         'period'=>$row['period'],'period_label'=>$this->periodLabel($row['period'])];
                 }
@@ -140,6 +143,12 @@ final class AiAnswerRenderer
             $facts[$row['metric_code']][$row['period']] = ['name' => $tooltip['name'], 'value' => $display,
                 'unit' => $unit, 'raw' => $value, 'storage_unit' => $storageUnit];
         }
+        if ($shape==='breakdown') {
+            // All visible columns are projected from the same verified Reader
+            // evidence. One entity stays on one row; missing evidence remains
+            // absent so clients render a neutral dash instead of inventing 0.
+            $rows=$this->pivotBreakdownRows($rows,$breakdownColumns,$breakdownLimit,$breakdownHasMore);
+        }
         $objectKind = $view['query']['business_filters']['object_kind'] ?? 'store';
         $person = $objectKind === 'person';
         $member = $objectKind === 'member';
@@ -153,6 +162,9 @@ final class AiAnswerRenderer
         $summary = $shape === 'threshold_count'
             ? $this->thresholdSummary($facts, $threshold)
             : ($conditionSummary??$this->resultSummary($shape, $facts, $rows, $metricNames));
+        if ($shape==='breakdown' && $rows) {
+            $summary='已列出'.($breakdownObjectLabel??'对象').'的'.implode('、',$metricNames ?: ['所选指标']).'。';
+        }
         $conclusion = $summary;
         $periodLabel = '统计时间：' . $view['query']['start_date'] . ' 至 ' . $view['query']['end_date'] . '。';
         $summary .= ($summary === '' ? '' : ' ') . $periodLabel;
@@ -169,7 +181,7 @@ final class AiAnswerRenderer
             if ($rows) $notes[] = '仅按所选指标排名；相同数值并列。';
         }
         if ($conditionListHasMore) $notes[]='符合条件的结果较多，当前展示前'.$conditionListLimit.'条；总数以结论中的精确数量为准。';
-        if ($breakdownHasMore) $notes[]='结果较多，当前展示前'.$breakdownLimit.'条；可继续按更具体范围查询。';
+        if ($breakdownHasMore) $notes[]='结果较多，当前显示前'.$breakdownLimit.'条，仍有更多结果；可继续按更具体范围查询。';
         if ($dimensionLabel !== null && $shape==='ranking') {
             if ($rows) $notes[] = $dimensionLabel . '按所选指标排名；相同数值并列。';
         }
@@ -177,7 +189,11 @@ final class AiAnswerRenderer
         foreach ($notes as $note) $answer['summary'] .= ' ' . $note;
         if ($rows) {
             $columns = [['key' => 'label', 'label' => $shape === 'trend' ? '日期' : ($breakdownObjectLabel ?? ($conditionObjectLabel ?? ($person ? '人员' : ($member ? '会员' : ($dimensionLabel ?? '门店')))))]];
-            if ($shape==='ranking' && $rankingPresentationColumns!==[]) {
+            if ($shape==='breakdown') {
+                foreach ($breakdownColumns as $code=>$column) {
+                    $columns[]=['key'=>'metric_'.$code,'label'=>$column['label'].($column['unit']===''?'':'（'.$column['unit'].'）')];
+                }
+            } elseif ($shape==='ranking' && $rankingPresentationColumns!==[]) {
                 // The leading value remains the documented sort metric. Other
                 // registry columns are contextual evidence, not extra ranks.
                 $columns[]=['key'=>'value','label'=>$metricNames[0]??'排序指标'];
@@ -194,6 +210,48 @@ final class AiAnswerRenderer
         // hierarchy in their own layout; no client derives business values.
         $answer['presentation'] = $this->presentation($shape, $facts, $conclusion, $periodLabel, $notes, $objectKind);
         return $answer;
+    }
+
+    /**
+     * Merge independently verified metric evidence by stable object identity.
+     * The first Reader order remains authoritative for display. A missing
+     * metric cell is deliberately omitted: only the metric Reader may decide
+     * whether absence means zero, unavailable data, or an inapplicable fact.
+     *
+     * @param array<int,array<string,mixed>> $rows
+     * @param array<string,array{label:string,unit:string}> $columns
+     * @return array<int,array<string,mixed>>
+     */
+    private function pivotBreakdownRows(array $rows,array $columns,?int $limit,bool &$hasMore): array
+    {
+        $grouped=[];$order=[];
+        foreach ($rows as $row) {
+            $code=$row['metric_code']??null;$entity=$row['entity_id']??null;$period=$row['period']??null;
+            if (!is_string($code)||!isset($columns[$code])||!is_int($entity)||$entity<1
+                ||!is_string($period)||!in_array($period,['current','comparison'],true)
+                ||!is_string($row['label']??null)||!is_string($row['value']??null)) {
+                throw new RuntimeException('AI_EVIDENCE_INVALID');
+            }
+            $key=$period.':'.$entity;
+            if (!isset($grouped[$key])) {
+                $grouped[$key]=['label'=>$row['label'],'entity_id'=>$entity,
+                    'period'=>$period,'period_label'=>$row['period_label']];
+                $order[]=$key;
+            } elseif ($grouped[$key]['label']!==$row['label']) {
+                throw new RuntimeException('AI_EVIDENCE_INVALID');
+            }
+            $cell='metric_'.$code;
+            if (array_key_exists($cell,$grouped[$key]) && $grouped[$key][$cell]!==$row['value']) {
+                throw new RuntimeException('AI_EVIDENCE_INVALID');
+            }
+            $grouped[$key][$cell]=$row['value'];
+        }
+        $projected=array_map(static function(string $key)use($grouped):array {return $grouped[$key];},$order);
+        if ($limit!==null && count($projected)>$limit) {
+            $hasMore=true;
+            $projected=array_slice($projected,0,$limit);
+        }
+        return $projected;
     }
 
     /** @return array<string,array{label:string,storage_unit:string,unit:string,values:array<int,int>}> */

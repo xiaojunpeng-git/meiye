@@ -132,7 +132,9 @@ metricRegistryCheck((MetricDefinitionRegistry::get('sales_amount')['category_rea
     'sales amount declares its category reader instead of leaving reports to sum sale facts');
 metricRegistryCheck(MetricDefinitionRegistry::get('sales_collected_amount')['reader_strategy'] === 'sales_payment_collected'
     && MetricDefinitionRegistry::get('sales_collected_amount')['storage_unit'] === 'fen'
-    && MetricDefinitionRegistry::get('sales_collected_amount')['query_shapes'] === ['summary', 'comparison', 'trend', 'ranking', 'threshold_count', 'condition_count', 'condition_list']
+    // The shared dimension contract also exposes breakdown; this does not
+    // change the sales-payment fact source or its stored fen precision.
+    && MetricDefinitionRegistry::get('sales_collected_amount')['query_shapes'] === ['summary', 'comparison', 'trend', 'ranking', 'threshold_count', 'condition_count', 'condition_list', 'breakdown']
     && MetricDefinitionRegistry::get('sales_collected_amount')['source']['threshold_count'] === [
         'subject_dimension' => 'member', 'aggregation' => 'period_total', 'operators' => ['gte', 'gt', 'lte', 'lt', 'eq'],
     ],
