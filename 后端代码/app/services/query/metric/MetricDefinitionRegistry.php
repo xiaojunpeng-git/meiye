@@ -16,7 +16,7 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v15';
+    public const VERSION = 'unified-metric-registry-v16';
     public const COVERAGE_START = '2026-08-10';
 
     /**
@@ -436,6 +436,7 @@ final class MetricDefinitionRegistry
             throw new MetricQueryContractException('METRIC_NOT_REGISTERED', '当前指标尚未注册。');
         }
         $item=$all[$code];
+        $item['query_shapes']=self::executableQueryShapes($item);
         // Readers and capability snapshots consume the same derived dimension
         // contract.  Keep it on the authoritative definition too so execution
         // never relies on a separately reconstructed object mapping.
@@ -491,7 +492,7 @@ final class MetricDefinitionRegistry
                 'metric_code' => $code, 'name' => (string)$definition['name'], 'ai_query_ready' => $aiReady,
                 'metric_version' => $item['metric_version'], 'mapping_version' => self::VERSION,
                 'source_metric_code' => $code, 'source_metric_version' => $item['metric_version'],
-                'query_shapes' => $item['query_shapes'], 'coverage_start' => self::COVERAGE_START,
+                'query_shapes' => self::executableQueryShapes($item), 'coverage_start' => self::COVERAGE_START,
                 'filter_grain' => $item['filter_grain'], 'business_filters' => $item['business_filters'],
                 'storage_unit' => $item['storage_unit'],
                 'condition_unit' => $item['condition_unit'] ?? self::defaultConditionUnit((string)$item['storage_unit']),
@@ -717,5 +718,22 @@ final class MetricDefinitionRegistry
         }
         usort($out,static function(array $left,array $right): int { return [$left['object_kind'],$left['dimension']] <=> [$right['object_kind'],$right['dimension']]; });
         return $out;
+    }
+
+    /**
+     * Breakdown is a presentation grain over an already registered summary,
+     * not a second metric formula. Store-grain metrics use authorized store
+     * totals; metrics with an explicit analysis dimension use that source-owned
+     * dimension. Adding a future registered dimension therefore enables the
+     * same query form without adding customer-phrase or metric-code branches.
+     */
+    private static function executableQueryShapes(array $item): array
+    {
+        $shapes=array_values(array_unique((array)($item['query_shapes']??[])));
+        if (in_array('summary',$shapes,true)
+            && (($item['filter_grain']??null)==='store' || self::analysisDimensionContracts($item)!==[])) {
+            $shapes[]='breakdown';
+        }
+        return array_values(array_unique($shapes));
     }
 }

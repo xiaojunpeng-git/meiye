@@ -13,8 +13,8 @@ final class AiCapabilityGuidanceCatalog
 {
     public static function discover(array $capabilities, string $objectKind, ?string $operation=null): array
     {
-        $operations=$operation===null ? ['summary','trend','ranking','comparison','threshold_count','condition_count','condition_list'] : [$operation];
-        if (array_diff($operations, ['summary','trend','ranking','comparison','threshold_count','condition_count','condition_list'])) return [];
+        $operations=$operation===null ? ['summary','breakdown','trend','ranking','comparison','threshold_count','condition_count','condition_list'] : [$operation];
+        if (array_diff($operations, ['summary','breakdown','trend','ranking','comparison','threshold_count','condition_count','condition_list'])) return [];
         $allowed=array_flip($capabilities['metric_codes']??[]);
         $readiness=$capabilities['metric_readiness']??[];
         $hasReadiness=is_array($readiness) && $readiness!==[];

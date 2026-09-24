@@ -73,6 +73,12 @@ final class GroupPerformanceMetricReadServices
         return $this->registered->dailyStoreTotals($metricCode, $tenantId, $stores, $range);
     }
 
+    /** Registered per-store values, including authorized stores with zero activity. */
+    public function storeTotals(string $tenantId,array $stores,array $range,string $metricCode): array
+    {
+        return $this->registered->storeTotals($metricCode,$tenantId,$stores,$range);
+    }
+
     public function personnelTotals(string $tenantId, array $stores, array $range, string $metricCode, array $pairs): array
     {
         return $this->registered->personnelTotals($metricCode, $tenantId, $stores, $range, $pairs);
@@ -88,6 +94,12 @@ final class GroupPerformanceMetricReadServices
     public function dimensionRanking(string $metricCode, string $dimension, string $tenantId, array $stores, array $range, int $limit = 20, string $order = 'desc'): array
     {
         return $this->registered->dimensionRanking($metricCode, $dimension, $tenantId, $stores, $range, $limit, $order);
+    }
+
+    /** Bounded object page for an unordered breakdown; identities stay Reader-owned. */
+    public function dimensionBreakdown(string $metricCode,string $dimension,string $tenantId,array $stores,array $range,int $limit=99): array
+    {
+        return $this->registered->dimensionBreakdown($metricCode,$dimension,$tenantId,$stores,$range,$limit);
     }
 
     /**

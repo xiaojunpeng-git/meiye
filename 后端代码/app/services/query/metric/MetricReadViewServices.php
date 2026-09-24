@@ -40,7 +40,11 @@ final class MetricReadViewServices
     {
         $normalized = $this->query($query);
         $binding = $this->binding(call_user_func($this->authorize, $principal), $normalized['store_ids']);
-        $personnel = $this->personnelSelection($normalized,$binding);
+        // A breakdown reads the registered analytical population directly.
+        // It must not be mistaken for a selected-person query, whose
+        // selection_ref has different permission and identity semantics.
+        $breakdown=$this->breakdown($normalized);
+        $personnel = $breakdown===null ? $this->personnelSelection($normalized,$binding) : null;
         $member = $this->memberSelection($normalized,$binding);
         $dimensionRanking = $this->dimensionRanking($normalized);
         $businessDateRanking=$normalized['query_shape']==='ranking'
@@ -52,7 +56,7 @@ final class MetricReadViewServices
         if ($expiresAt<=$now || $expiresAt>$now+86400) $this->fail('METRIC_READ_EXPIRY_INVALID');
         $ranges = ['current' => ['start' => $normalized['start_date'], 'end' => $normalized['end_date']]];
         if ($normalized['compare_range'] !== null) $ranges['comparison'] = $normalized['compare_range'];
-        $results = call_user_func($this->transaction, function (GroupPerformanceMetricReadServices $reader) use ($normalized, $binding, $ranges,$personnel,$member,$dimensionRanking,$businessDateRanking,$thresholdCount,$conditionSet,$now): array {
+        $results = call_user_func($this->transaction, function (GroupPerformanceMetricReadServices $reader) use ($normalized, $binding, $ranges,$personnel,$member,$dimensionRanking,$breakdown,$businessDateRanking,$thresholdCount,$conditionSet,$now): array {
             $results = [];
             $storeNames = $normalized['query_shape'] === 'ranking' && $personnel===null
                 && $dimensionRanking===null && !$businessDateRanking ? $reader->storeNames($binding['store_ids']) : [];
@@ -65,6 +69,30 @@ final class MetricReadViewServices
                         // this layer only evaluates the already-normalized values.
                         if ($metric!==$normalized['metric_codes'][0]) continue;
                         $results[]=$this->conditionResult($reader,$binding,$range,$conditionSet,$personnel,$normalized['query_shape']);
+                        continue;
+                    }
+                    if ($breakdown!==null) {
+                        if ($binding['scope_mode']==='self_participant' && $breakdown['object_kind']==='person') {
+                            $this->fail('METRIC_PERMISSION_DENIED');
+                        }
+                        if ($breakdown['object_kind']==='store') {
+                            $names=$reader->storeNames($binding['store_ids']);$points=$reader->storeTotals($binding['tenant_id'],$binding['store_ids'],$range,$metric);
+                            $rows=[];
+                            foreach ($points as $point) {
+                                $storeId=$point['store_id']??null;
+                                if (!is_int($storeId)||!isset($names[$storeId])||!is_int($point['metric_value']??null)) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                                $rows[]=['entity_id'=>$storeId,'entity_name'=>$names[$storeId],'amount_cents'=>$point['metric_value']];
+                            }
+                            // The screen read has the same bounded-result rule as every
+                            // other analytical object. Keep the exact population count,
+                            // but never let an unusually large store scope flood one turn.
+                            $page=['rows'=>array_slice($rows,0,99),'has_more'=>count($rows)>99,'count'=>count($rows),'limit'=>99];
+                        } else {
+                            $page=$reader->dimensionBreakdown($metric,$breakdown['dimension'],$binding['tenant_id'],$binding['store_ids'],$range,99);
+                        }
+                        $results[]=['period'=>$period,'metric_code'=>$metric,'storage_unit'=>$metricContract['storage_unit'],
+                            'object_kind'=>$breakdown['object_kind'],'object_label'=>$breakdown['object_label'],
+                            'rows'=>$page['rows'],'has_more'=>$page['has_more'],'object_count'=>$page['count'],'list_limit'=>$page['limit']];
                         continue;
                     }
                     if ($thresholdCount !== null) {
@@ -238,7 +266,7 @@ final class MetricReadViewServices
             || UnifiedQueryJson::encode($storedQuery) !== UnifiedQueryJson::encode($normalized)) {
             $this->fail('METRIC_READ_BINDING_MISMATCH');
         }
-        $personnel=$this->personnelSelection($normalized,$binding);
+        $personnel=$normalized['query_shape']==='breakdown'?null:$this->personnelSelection($normalized,$binding);
         if ($personnel!==null && ($view['personnel_binding_hash']??null)!==$personnel['binding_hash']) $this->fail('METRIC_PERMISSION_CHANGED');
         $member=$this->memberSelection($normalized,$binding);
         if ($member!==null && ($view['member_binding_hash']??null)!==$member['binding_hash']) $this->fail('METRIC_PERMISSION_CHANGED');
@@ -261,6 +289,35 @@ final class MetricReadViewServices
         $dimension=$matches[0];
         return ['dimension'=>$dimension['dimension'],'object_kind'=>$dimension['object_kind'],'object_label'=>$dimension['object_label'],
             'participant_relation'=>isset($dimension['analysis_relation_source'])];
+    }
+
+    /**
+     * Resolves one source-owned grouping dimension. Store is the authorized
+     * base grain; every other object must be declared by the metric itself.
+     * This method never accepts a model-supplied column or display label.
+     *
+     * @return array{dimension:?string,object_kind:string,object_label:string}|null
+     */
+    private function breakdown(array $query): ?array
+    {
+        if (($query['query_shape']??null)!=='breakdown') return null;
+        $objectKind=$query['business_filters']['object_kind']??null;
+        if (!is_string($objectKind)||$objectKind==='business_date') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if ($objectKind==='store') return ['dimension'=>null,'object_kind'=>'store','object_label'=>'门店'];
+        $dimension=null;$label=null;
+        foreach ($query['metric_codes'] as $metricCode) {
+            $metric=MetricDefinitionRegistry::get($metricCode);
+            $matches=array_values(array_filter((array)($metric['analysis_dimension_contracts']??[]),static function($candidate)use($objectKind):bool {
+                if (!is_array($candidate)||($candidate['object_kind']??null)!==$objectKind) return false;
+                $keys=$candidate['filter_keys']??null;
+                return $keys===[] || ($objectKind==='person' && $keys===['selection_ref']);
+            }));
+            if (count($matches)!==1) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            if ($dimension!==null && ($dimension!==$matches[0]['dimension']||$label!==$matches[0]['object_label'])) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            $dimension=$matches[0]['dimension'];$label=$matches[0]['object_label'];
+        }
+        if (!is_string($dimension)||!is_string($label)||$label==='') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        return ['dimension'=>$dimension,'object_kind'=>$objectKind,'object_label'=>$label];
     }
 
     /** @return array<int,array{metric_code:string,storage_unit:string,values:array<int,array{entity_id:int,metric_value:int}>}> */
@@ -526,13 +583,14 @@ final class MetricReadViewServices
         if (!array_key_exists('ranking_presentation_metrics',$query)) $query['ranking_presentation_metrics']=[];
         $fields = ['query_shape', 'metric_codes', 'start_date', 'end_date', 'compare_range', 'store_ids', 'business_filters', 'ranking', 'aggregate_condition','condition_set','ranking_presentation_metrics'];
         if (array_diff(array_keys($query), $fields) || array_diff($fields, array_keys($query))) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
-        if (!in_array($query['query_shape'], ['summary', 'comparison', 'trend', 'ranking', 'threshold_count','condition_count','condition_list'], true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if (!in_array($query['query_shape'], ['summary', 'breakdown', 'comparison', 'trend', 'ranking', 'threshold_count','condition_count','condition_list'], true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $objectKind=$query['business_filters']['object_kind']??null;
         $person=$objectKind==='person';
         $conditionPopulation=in_array($query['query_shape'],['condition_count','condition_list'],true);
         $memberSelection=$objectKind==='member' && isset($query['business_filters']['selection_ref']);
         if ($query['business_filters']!==[] && (!$person && !is_string($objectKind))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-        if ($person && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref']??null)
+        $personBreakdown=$person && $query['query_shape']==='breakdown' && $query['business_filters']===['object_kind'=>'person'];
+        if ($person && !$personBreakdown && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref']??null)
             || (!$conditionPopulation && !preg_match('/^((position|person):[1-9][0-9]*|role:craftsman|role:salesperson|cohort:metric_fact_participants)$/D',$query['business_filters']['selection_ref']))
             || ($conditionPopulation && $query['business_filters']['selection_ref']!=='cohort:active_personnel'))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if ($memberSelection && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref'])
@@ -598,12 +656,19 @@ final class MetricReadViewServices
                 && $query['business_filters']===['object_kind'=>'store']
                 && ($capability['filter_grain']??null)==='store'
                 && in_array('store',(array)($capability['condition_subjects']??[]),true);
+            // Store breakdown is the row-wise form of an already authorized
+            // store-grain metric. It has no analysis-dimension contract because
+            // store_id is the metric's native grain, so admit it explicitly at
+            // the Reader boundary just as the signed compiler does.
+            $storeBreakdown=$query['query_shape']==='breakdown' && $objectKind==='store'
+                && $query['business_filters']===['object_kind'=>'store']
+                && ($capability['filter_grain']??null)==='store';
             $businessDateRanking=$objectKind==='business_date' && $query['query_shape']==='ranking'
                 && $query['business_filters']===['object_kind'=>'business_date']
                 && ($capability['filter_grain']??null)==='store'
                 && in_array('trend',(array)($capability['query_shapes']??[]),true)
                 && in_array('ranking',(array)($capability['query_shapes']??[]),true);
-            if (($capability['ai_query_ready']??false)===true && (($person && $capability['filter_grain']==='person') || $storeCondition || $businessDateRanking || (!$person && $query['business_filters']!==[] && $dimensionCapable) || (!$person && $query['business_filters']===[] && $capability['filter_grain']==='store'))) $allowed[]=$code;
+            if (($capability['ai_query_ready']??false)===true && (($person && $capability['filter_grain']==='person') || $storeCondition || $storeBreakdown || $businessDateRanking || (!$person && $query['business_filters']!==[] && $dimensionCapable) || (!$person && $query['business_filters']===[] && $capability['filter_grain']==='store'))) $allowed[]=$code;
         }
         foreach ($query['metric_codes'] as $metric) if (!in_array($metric, $allowed, true)) $this->fail('METRIC_NOT_REGISTERED');
         foreach ($query['metric_codes'] as $metric) if (!in_array($query['query_shape'],self::metricCapabilities()[$metric]['query_shapes']??[],true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
@@ -612,18 +677,18 @@ final class MetricReadViewServices
         if ($query['ranking_presentation_metrics']!==[] && $query['ranking_presentation_metrics']!==$expectedPresentation) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         $query['ranking_presentation_metrics']=$expectedPresentation;
         if ($conditionPopulation) foreach ($query['metric_codes'] as $metric) if (!in_array($objectKind,(array)(self::metricCapabilities()[$metric]['condition_subjects']??[]),true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-        if ($person && (!in_array($query['query_shape'],['summary','ranking'],true)
+        if ($person && (!in_array($query['query_shape'],['summary','breakdown','ranking'],true)
             || ($query['query_shape']==='ranking' && count($query['metric_codes'])!==1)
-            || ($query['query_shape']==='summary' && count($query['metric_codes'])>4))) {
+            || (in_array($query['query_shape'],['summary','breakdown'],true) && count($query['metric_codes'])>4))) {
             if (!$conditionPopulation) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         }
         if ($memberSelection && (count($query['metric_codes'])!==1 || $query['query_shape']!=='summary')) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-        if (!$person && $query['business_filters']!==[] && (!in_array($query['query_shape'],['summary','ranking','threshold_count','condition_count','condition_list'],true)
-            || (!$conditionPopulation && $query['query_shape']!=='summary' && count($query['metric_codes'])!==1))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if (!$person && $query['business_filters']!==[] && (!in_array($query['query_shape'],['summary','breakdown','ranking','threshold_count','condition_count','condition_list'],true)
+            || (!$conditionPopulation && !in_array($query['query_shape'],['summary','breakdown'],true) && count($query['metric_codes'])!==1))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         // Both comparison periods use the same bounded, unfiltered store
         // metric set and permission binding. Object selection and ranking
         // retain their stricter guards above; no incompatible grains are mixed.
-        if (count($query['metric_codes'])>2 && !in_array($query['query_shape'],['summary','comparison','condition_count','condition_list'],true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if (count($query['metric_codes'])>2 && !in_array($query['query_shape'],['summary','breakdown','comparison','condition_count','condition_list'],true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if (count(array_unique($query['metric_codes'])) !== count($query['metric_codes'])) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         $this->range(['start' => $query['start_date'], 'end' => $query['end_date']]);
         if ($query['query_shape'] === 'comparison') {

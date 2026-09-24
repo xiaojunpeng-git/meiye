@@ -76,7 +76,7 @@ final class AiBusinessRegistry
         $codes=AiRegistryValue::strings($capabilities['metric_codes']??[],32);
         $shapes=AiRegistryValue::strings($capabilities['query_shapes']??[],8);
         $formats=AiRegistryValue::strings($capabilities['output_formats']??['screen'],2);
-        if (array_diff($shapes,['summary','trend','ranking','comparison','threshold_count','condition_count','condition_list']) || array_diff($formats,['screen','screen_and_xlsx'])) AiRegistryValue::fail('AI_CAPABILITY_INVALID');
+        if (array_diff($shapes,['summary','breakdown','trend','ranking','comparison','threshold_count','condition_count','condition_list']) || array_diff($formats,['screen','screen_and_xlsx'])) AiRegistryValue::fail('AI_CAPABILITY_INVALID');
         $metrics=[];
         foreach ($codes as $code) {
             $item=$capabilities['metric_readiness'][$code]??null;

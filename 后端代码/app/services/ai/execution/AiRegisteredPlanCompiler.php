@@ -85,7 +85,7 @@ final class AiRegisteredPlanCompiler
             ||$compiled['dependency_versions']!==$this->registry->dependencyVersions($compiled['workflow_code'],$compiled['output_format']==='screen_and_xlsx')
             ||$compiled['scene_code']!==$workflow['scene']||$compiled['supplement_policy']!=='no_registered_supplement_branch') AiRegistryValue::fail('AI_COMPILED_PLAN_INVALID');
         $snapshot=$compiled['capability_snapshot'];
-        $cap=['metric_codes'=>array_keys($snapshot['metrics']),'metric_readiness'=>[], 'query_shapes'=>['summary','trend','ranking','comparison','threshold_count','condition_count','condition_list'],
+        $cap=['metric_codes'=>array_keys($snapshot['metrics']),'metric_readiness'=>[], 'query_shapes'=>['summary','breakdown','trend','ranking','comparison','threshold_count','condition_count','condition_list'],
             'output_formats'=>$snapshot['output_formats'],'definition_metric_codes'=>array_keys($snapshot['definitions']),'metadata_readiness'=>[]];
         foreach ($snapshot['metrics'] as $code=>$metric) $cap['metric_readiness'][$code]=$metric+['ai_query_ready'=>true];
         foreach ($snapshot['definitions'] as $code=>$definition) $cap['metadata_readiness'][$code]=$definition+['user_ready'=>true];
@@ -116,7 +116,7 @@ final class AiRegisteredPlanCompiler
         $conditionPopulation=in_array($query['query_shape']??null,['condition_count','condition_list'],true);
         AiRegistryValue::exact($query,['query_shape','metric_codes','start_date','end_date','compare_range','store_ids','business_filters','ranking','aggregate_condition','ranking_presentation_metrics'],
             $conditionPopulation?['condition_set']:[]);
-        if (!in_array($query['query_shape'],['summary','trend','ranking','comparison','threshold_count','condition_count','condition_list'],true)) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
+        if (!in_array($query['query_shape'],['summary','breakdown','trend','ranking','comparison','threshold_count','condition_count','condition_list'],true)) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
         // This is a bounded Reader batch, not a semantic requirement that a
         // customer must ask for four metrics.  A broad operating question can
         // be answered through several independently registered observations
@@ -129,8 +129,9 @@ final class AiRegisteredPlanCompiler
         $conditionPopulation=in_array($query['query_shape'],['condition_count','condition_list'],true);
         $memberSelection=$objectKind==='member'&&isset($query['business_filters']['selection_ref']);
         if ($query['business_filters']!==[]) {
-            if (!$person && count($metrics)!==1 && $query['query_shape']!=='summary' && !$conditionPopulation) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
-            if ($person && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref']??null)
+            if (!$person && count($metrics)!==1 && !in_array($query['query_shape'],['summary','breakdown'],true) && !$conditionPopulation) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+            $personBreakdown=$person && $query['query_shape']==='breakdown' && $query['business_filters']===['object_kind'=>'person'];
+            if ($person && !$personBreakdown && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref']??null)
                 || (!$conditionPopulation && !preg_match('/^((position|person):[1-9][0-9]*|role:craftsman|role:salesperson|cohort:metric_fact_participants)$/D',$query['business_filters']['selection_ref']))
                 || ($conditionPopulation && $query['business_filters']['selection_ref']!=='cohort:active_personnel'))) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             if ($memberSelection && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref'])
@@ -141,7 +142,7 @@ final class AiRegisteredPlanCompiler
         // both periods under one permission snapshot. Ranking and trends keep
         // their separate result-shape limits; object filters cannot inherit
         // this store-only expansion.
-        if (count($metrics)>2 && !in_array($query['query_shape'],['summary','comparison','condition_count','condition_list'],true)) {
+        if (count($metrics)>2 && !in_array($query['query_shape'],['summary','breakdown','comparison','condition_count','condition_list'],true)) {
             AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         }
         foreach ($metrics as $metric) {
@@ -162,12 +163,15 @@ final class AiRegisteredPlanCompiler
                     && $query['business_filters']===['object_kind'=>'store']
                     && $contract['filter_grain']==='store'
                     && in_array('store',(array)($contract['condition_subjects']??[]),true);
-                if (!$storeCondition && !$businessDateRanking) {
+                $storeBreakdown=$query['query_shape']==='breakdown' && $objectKind==='store'
+                    && $query['business_filters']===['object_kind'=>'store']
+                    && $contract['filter_grain']==='store';
+                if (!$storeCondition && !$businessDateRanking && !$storeBreakdown) {
                     $expected=$memberSelection?['selection_ref']:[];
                     $matches=array_values(array_filter((array)($contract['analysis_dimension_contracts']??[]),static function($dimension)use($objectKind,$expected):bool {
                         return is_array($dimension) && ($dimension['object_kind']??null)===$objectKind && ($dimension['filter_keys']??null)===$expected;
                     }));
-                    if (count($matches)!==1 || !in_array($query['query_shape'],['summary','ranking','threshold_count','condition_count','condition_list'],true)) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+                    if (count($matches)!==1 || !in_array($query['query_shape'],['summary','breakdown','ranking','threshold_count','condition_count','condition_list'],true)) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
                 }
             }
             if (!$person && $query['business_filters']===[] && $contract['filter_grain']!=='store') AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');

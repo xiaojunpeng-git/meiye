@@ -90,6 +90,21 @@ mysqlCheck($reader->cashTotals('0', [1], $range) === ['gross_cents' => 903001, '
 mysqlCheck($reader->metricTotal('0', [1], $range, 'consume_amount') === 9500, 'signed consumed complete service only');
 mysqlCheck($reader->cashTotals('0', [1, 2], $range)['gross_cents'] === 933001, 'complete multistore sum');
 $registered = new app\services\query\metric\RegisteredMetricReadServices();
+$storeBreakdown=$registered->storeTotals('cash_performance','0',[1,2,3],$range);
+mysqlCheck($storeBreakdown===[
+    ['store_id'=>1,'metric_value'=>903001],
+    ['store_id'=>2,'metric_value'=>30000],
+    ['store_id'=>3,'metric_value'=>0],
+], 'store breakdown keeps every authorized store, including zero activity');
+$personBreakdown=$registered->dimensionBreakdown('staff_sales_yeji','employee','0',[1,2],$range,99);
+mysqlCheck($personBreakdown['has_more']===false && $personBreakdown['count']===2
+    && $personBreakdown['rows']===[
+        ['entity_id'=>11,'entity_name'=>'销售甲','amount_cents'=>7000],
+        ['entity_id'=>12,'entity_name'=>'销售乙','amount_cents'=>3000],
+    ], 'person breakdown uses the registered employee fact dimension');
+$projectBreakdown=$registered->dimensionBreakdown('completed_service_item_count','project','0',[1,2],$range,99);
+mysqlCheck($projectBreakdown['rows']===[['entity_id'=>31,'entity_name'=>'护理项目','amount_cents'=>3]],
+    'future objects reuse the registered dimension breakdown without phrase branches');
 $expectedRegistered = [
     'cash_performance' => 903001,
     'refund_performance' => 10200,
@@ -330,6 +345,15 @@ $query = ['query_shape'=>'summary','metric_codes'=>['cash_performance','consume_
 try {
     $view = $service->create([], $query);
     mysqlCheck(array_column($view['results'], 'amount_cents') === [903101,9500], 'real combined summary');
+    $storeBreakdownQuery=$query;
+    $storeBreakdownQuery['query_shape']='breakdown';
+    $storeBreakdownQuery['metric_codes']=['cash_performance'];
+    $storeBreakdownQuery['store_ids']=[1,2];
+    $storeBreakdownQuery['business_filters']=['object_kind'=>'store'];
+    $storeBreakdownView=$service->create([],$storeBreakdownQuery);
+    mysqlCheck(array_column($storeBreakdownView['results'][0]['rows'],'entity_name')===['测试甲店','测试乙店']
+        && array_column($storeBreakdownView['results'][0]['rows'],'amount_cents')===[903101,30000],
+        'read view admits native store-grain breakdown without inventing a dimension contract');
     $pdo->exec("UPDATE eb_cashier_v3_payment_sale_allocation_fact SET amount_cents=901101 WHERE allocation_fact_id='cash'");
     mysqlCheck($service->replay([], $query, $view['read_consistency_ref']) === $view, 'original exact view survives new fact commit');
     $comparison = $query; $comparison['query_shape']='comparison'; $comparison['compare_range']=['start'=>'2026-09-07','end'=>'2026-09-07'];
@@ -407,7 +431,7 @@ try {
     $actualView=$service->create([],$actualQuery);
     mysqlCheck($actualView['results'][0]['amount_cents']
         === $registered->summary('actual_performance','0',[1],$range), 'AI view consumes registered actual performance');
-    $now+=86400; mysqlCheck($store->cleanup()===8,'real views TTL cleanup includes member and project ranking views');
+    $now+=86400; mysqlCheck($store->cleanup()===9,'real views TTL cleanup includes breakdown, member and project views');
 } finally {
     foreach(new DirectoryIterator($tmp) as $file) if(!$file->isDot() && $file->isFile() && !$file->isLink()) unlink($file->getPathname());
     rmdir($tmp);

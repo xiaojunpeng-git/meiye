@@ -27,7 +27,7 @@ final class AnalysisCapabilityCatalogFactory
             // contract; this factory has no object-name allowlist.
             foreach ((array)($capability['analysis_dimension_contracts']??[]) as $dimension) {
                 if (!is_array($dimension)) continue;
-                $dimensionOperations=['ranking'];
+                $dimensionOperations=['ranking','breakdown'];
                 // An object summary is executable only when the same metric
                 // explicitly opts into that object's overview profile.  This
                 // keeps open project/product summaries registry-driven while

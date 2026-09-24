@@ -55,7 +55,7 @@ final class AiPendingContextGuidancePlanner
         elseif($pending==='operation'){
             $options=[];$operations=$this->operationsFor($base,$operationOptions);
             if(in_array($this->currentOperation($base),$operations,true))$options[]=['value'=>'retain','label'=>'沿用上一轮已确认条件'];
-            foreach($operations as $operation)$options[]=['value'=>'operation:'.$operation,'label'=>['summary'=>'汇总','trend'=>'趋势','ranking'=>'排行','comparison'=>'对比'][$operation]];
+            foreach($operations as $operation)$options[]=['value'=>'operation:'.$operation,'label'=>['summary'=>'汇总','breakdown'=>'逐项明细','trend'=>'趋势','ranking'=>'排行','comparison'=>'对比'][$operation]];
         }
         elseif($pending==='ranking_direction')foreach([['value'=>'ranking_direction:top','label'=>'从高到低'],['value'=>'ranking_direction:bottom','label'=>'从低到高']] as $option)$options[]=$option;
         elseif($pending==='ranking_limit')foreach([1,3,5,10,20] as $limit)$options[]=['value'=>'ranking_limit:'.$limit,'label'=>$limit.' 项'];
@@ -74,7 +74,7 @@ final class AiPendingContextGuidancePlanner
         if($value==='clear_store_scope'){$constraints['store_ids']=null;$this->clearStoreScope($base);return '改为当前全部可查看范围';}
         if($value==='clear_business_filter'){$constraints['business_filters']=null;$this->clearBusinessFilter($base);return '不沿用上一轮业务筛选';}
         if($pending==='metric_codes'&&strpos($value,'metric:')===0){$code=substr($value,7);if(!preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$code))throw new \RuntimeException('AI_CLARIFICATION_INVALID');$this->setMetric($base,$code);return $this->optionLabel($fields[0],$value);}
-        if($pending==='operation'&&strpos($value,'operation:')===0){$operation=substr($value,10);if(!in_array($operation,['summary','trend','ranking','comparison'],true))throw new \RuntimeException('AI_CLARIFICATION_INVALID');$this->setOperation($base,$operation);return $this->optionLabel($fields[0],$value);}
+        if($pending==='operation'&&strpos($value,'operation:')===0){$operation=substr($value,10);if(!in_array($operation,['summary','breakdown','trend','ranking','comparison'],true))throw new \RuntimeException('AI_CLARIFICATION_INVALID');$this->setOperation($base,$operation);return $this->optionLabel($fields[0],$value);}
         if($pending==='ranking_direction'&&strpos($value,'ranking_direction:')===0){$direction=substr($value,18);if(!in_array($direction,['top','bottom'],true))throw new \RuntimeException('AI_CLARIFICATION_INVALID');$this->setRanking($base,$direction,null);return $this->optionLabel($fields[0],$value);}
         if($pending==='ranking_limit'&&strpos($value,'ranking_limit:')===0){$limit=filter_var(substr($value,14),FILTER_VALIDATE_INT);if($limit===false||!in_array($limit,[1,3,5,10,20],true))throw new \RuntimeException('AI_CLARIFICATION_INVALID');$this->setRanking($base,null,$limit);return $this->optionLabel($fields[0],$value);}
         throw new \RuntimeException('AI_CLARIFICATION_INVALID');
@@ -90,7 +90,7 @@ final class AiPendingContextGuidancePlanner
     private function ranking(array $base): array {if(($base['kind']??null)==='plan')return $base['plan']['query']['ranking']??['direction'=>'unspecified','limit'=>null];if(isset($base['analysis_state']))return ['direction'=>$base['analysis_state']['direction']??'unspecified','limit'=>$base['analysis_state']['limit']??null];if(isset($base['dimension_state']))return ['direction'=>$base['dimension_state']['direction']??'unspecified','limit'=>$base['dimension_state']['limit']??null];return ['direction'=>'unspecified','limit'=>null];}
     private function optionLabel(array $field,string $value): string {foreach($field['options'] as $option)if($option['value']===$value)return $option['label'];throw new \RuntimeException('AI_CLARIFICATION_INVALID');}
     private function metricOptions(array $options): void {foreach($options as $option)if(!is_array($option)||!preg_match('/^metric:[a-z][a-z0-9_]{0,79}$/D',$option['value']??'')||!is_string($option['label']??null))throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');}
-    private function operationOptions(array $options): void {foreach($options as $metric=>$shapes){if(!is_string($metric)||!preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$metric)||!is_array($shapes)||!$shapes||array_diff($shapes,['summary','trend','ranking','comparison']))throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');}}
+    private function operationOptions(array $options): void {foreach($options as $metric=>$shapes){if(!is_string($metric)||!preg_match('/^[a-z][a-z0-9_]{0,79}$/D',$metric)||!is_array($shapes)||!$shapes||array_diff($shapes,['summary','breakdown','trend','ranking','comparison']))throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');}}
     /** Return only shapes jointly registered for every selected metric. */
     private function operationsFor(array $base,array $options): array
     {
@@ -101,7 +101,7 @@ final class AiPendingContextGuidancePlanner
         if(!is_array($metrics)||!$metrics)throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
         $allowed=null;
         foreach($metrics as $metric){if(!is_string($metric)||!isset($options[$metric]))throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');$shapes=$options[$metric];$allowed=$allowed===null?$shapes:array_values(array_intersect($allowed,$shapes));}
-        $allowed=array_values(array_intersect(['summary','trend','ranking','comparison'],$allowed??[]));
+        $allowed=array_values(array_intersect(['summary','breakdown','trend','ranking','comparison'],$allowed??[]));
         if(!$allowed)throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
         return $allowed;
     }
@@ -127,7 +127,7 @@ final class AiPendingContextGuidancePlanner
         if (!$intent || ($base['kind']??null)!=='plan') return $base;
         $query=$base['plan']['query']??null;if(!is_array($query))throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
         if (is_array($intent['metric_codes']??null)&&$intent['metric_codes'])$query['metric_codes']=array_values($intent['metric_codes']);
-        if (in_array($intent['operation']??null,['summary','trend','ranking','comparison'],true))$query['query_shape']=$intent['operation'];
+        if (in_array($intent['operation']??null,['summary','breakdown','trend','ranking','comparison'],true))$query['query_shape']=$intent['operation'];
         if (is_array($intent['periods']??null)&&isset($intent['periods'][0]['start'],$intent['periods'][0]['end'])){$query['start_date']=$intent['periods'][0]['start'];$query['end_date']=$intent['periods'][0]['end'];}
         // A pending display choice can be resolved by this planner after the
         // model response.  Do not overwrite that confirmed ranking with the
@@ -140,7 +140,7 @@ final class AiPendingContextGuidancePlanner
         }
         if ($query['query_shape']!=='ranking')$query['ranking']=null;
         $kind=$intent['object_kind']??null;
-        if ($kind==='store') $query['business_filters']=[];
+        if ($kind==='store') $query['business_filters']=$query['query_shape']==='breakdown'?['object_kind'=>'store']:[];
         elseif (is_string($kind)&&!in_array($kind,['unknown','person'],true)) $query['business_filters']=['object_kind'=>$kind];
         if ($query['query_shape']==='comparison'&&$query['compare_range']===null) throw new \RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
         $base['plan']=['workflow_code'=>'wf_performance_'.$query['query_shape'],'query'=>$query,'output_format'=>$base['plan']['output_format']??'screen'];

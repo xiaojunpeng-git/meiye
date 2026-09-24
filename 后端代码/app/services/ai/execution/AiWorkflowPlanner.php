@@ -30,7 +30,7 @@ final class AiWorkflowPlanner
         $objectKind=$selection['object_kind']??'store';
         $available=$definition?($capabilities['definition_metric_codes']??[]):array_keys(AiCapabilityGuidanceCatalog::discover($capabilities,$objectKind));
         foreach ($metrics as $metric) if (!in_array($metric, $available, true)) throw new AiContractException('AI_METRIC_NOT_READY');
-        $shapes=array_values(array_intersect(['summary','trend','ranking','comparison','threshold_count','condition_count','condition_list'],$signals));
+        $shapes=array_values(array_intersect(['summary','breakdown','trend','ranking','comparison','threshold_count','condition_count','condition_list'],$signals));
         if (in_array('top_5', $signals, true) || in_array('bottom_5', $signals, true)) $shapes[]='ranking';
         $shapes=array_values(array_unique($shapes));
         if (in_array('comparison',$shapes,true) && count($projection['date_terms']??[])===2) $shapes=array_values(array_diff($shapes,['summary']));
@@ -208,7 +208,7 @@ final class AiWorkflowPlanner
             return ['kind'=>'plan','plan'=>['schema_version'=>'mohe-executable-workflow-v1','workflow_code'=>'wf_metric_definition',
                 'query_shape'=>'definition','definition_metric_codes'=>$metrics,'output_format'=>'screen']];
         }
-        if (!in_array($shape,['summary','trend','ranking','comparison','threshold_count','condition_count','condition_list'],true)) throw new AiContractException('AI_QUERY_SHAPE_NOT_READY');
+        if (!in_array($shape,['summary','breakdown','trend','ranking','comparison','threshold_count','condition_count','condition_list'],true)) throw new AiContractException('AI_QUERY_SHAPE_NOT_READY');
         $conditionPopulation=in_array($shape,['condition_count','condition_list'],true);
         if ($conditionPopulation && (!in_array($objectKind,['person','member','store','order','sale_line','card','project','product'],true)||$conditionSet===null
             ||($conditionSet['subject']??null)!==$objectKind||$ranking!==null||$compare!==null)) throw new AiContractException('AI_UNSUPPORTED_CONDITION');
@@ -218,7 +218,7 @@ final class AiWorkflowPlanner
         $plan = ['schema_version' => 'mohe-executable-workflow-v1', 'workflow_code' => 'wf_performance_'.$shape,
             'query' => ['query_shape' => $shape, 'metric_codes' => $metrics, 'start_date' => $range['start'], 'end_date' => $range['end'],
                 'compare_range' => $compare, 'store_ids' => $storeIds,
-                'business_filters' => $conditionPopulation?$conditionFilters:(($shape==='threshold_count' || ($shape==='summary' && $objectKind!=='store')) ? ['object_kind'=>$objectKind] : []),
+                'business_filters' => $conditionPopulation?$conditionFilters:(($shape==='threshold_count' || $shape==='breakdown' || ($shape==='summary' && $objectKind!=='store')) ? ['object_kind'=>$objectKind] : []),
                 'ranking'=>$ranking,'aggregate_condition'=>$aggregateCondition],
             // Nodes and budgets are compiled from the selected registration; this
             // preliminary plan deliberately carries no editable graph or hash.

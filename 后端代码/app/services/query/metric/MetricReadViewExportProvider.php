@@ -63,12 +63,15 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             $person=$objectKind==='person';
             $dimensionContract=null;
             foreach ((array)($capabilities[$code]['analysis_dimension_contracts']??[]) as $contract) {
-                if (is_array($contract)&&($contract['object_kind']??null)===$objectKind&&($contract['filter_keys']??null)===[]) $dimensionContract=$contract;
+                $keys=$contract['filter_keys']??null;
+                if (is_array($contract)&&($contract['object_kind']??null)===$objectKind
+                    && ($keys===[] || ($view['query']['query_shape']??null)==='breakdown'&&$objectKind==='person'&&$keys===['selection_ref'])) $dimensionContract=$contract;
             }
             $valid=$person ? (($capabilities[$code]['filter_grain']??null)==='person')
-                : ($dimensionContract!==null || (($capabilities[$code]['filter_grain']??null)==='store' && $businessFilters===[]));
+                : ($dimensionContract!==null || (($capabilities[$code]['filter_grain']??null)==='store'
+                    && ($businessFilters===[] || (($view['query']['query_shape']??null)==='breakdown'&&$businessFilters===['object_kind'=>'store']))));
             if (!$valid) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
-            $label=$person?($view['personnel_selection_label']??''): '当前授权范围';
+            $label=$person&&($view['query']['query_shape']??null)!=='breakdown'?($view['personnel_selection_label']??''): '当前授权范围';
             if (!is_string($label)||$label==='') throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
             $tooltip=(new \app\services\metric\MetricDictionaryServices())->getTooltip($code);
             $displayUnit=$tooltip['display_unit']??null;
@@ -81,6 +84,11 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
                 'store_name'=>$label,'ranking_direction'=>'','business_date'=>'',
                 'unit'=>$displayUnit];
             if (isset($result['amount_cents']) || isset($result['count'])) self::append($rows,$base,in_array($storageUnit,['fen','customer_tenth'],true) ? ($result['amount_cents']??null) : ($result['count']??null),$storageUnit);
+            elseif ($view['query']['query_shape']==='breakdown') foreach ($result['rows'] as $point) {
+                $name=$point['entity_name']??null;$value=$point['amount_cents']??null;
+                if (!is_string($name)||$name===''||!is_int($value)) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
+                self::append($rows,array_replace($base,['store_name'=>$name.'；范围：'.$base['store_name']]),$value,$storageUnit);
+            }
             elseif ($view['query']['query_shape']==='trend') foreach ($result['rows'] as $point) self::append($rows,array_replace($base,['business_date'=>$point['business_date']]),$point['amount_cents'],$storageUnit);
             elseif ($view['query']['query_shape']==='ranking') foreach ($result['rows'] as $direction=>$points) foreach ($points as $point) {
                 if (!in_array($direction,['top','bottom'],true)) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');

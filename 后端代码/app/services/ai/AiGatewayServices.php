@@ -967,7 +967,7 @@ final class AiGatewayServices
         if ($periodTerm!==null) {
             $query=$sourceContext['query'];
             $shape=$query['query_shape']??null;
-            if (in_array($shape,['summary','trend','ranking','threshold_count','condition_count','condition_list'],true)
+            if (in_array($shape,['summary','breakdown','trend','ranking','threshold_count','condition_count','condition_list'],true)
                 && ($query['compare_range']??null)===null) {
                 $checkpoint();
                 $range=(new AiWorkflowPlanner())->normalizePeriod($periodTerm,$today);
@@ -2216,7 +2216,7 @@ final class AiGatewayServices
         // the previous personnel selector.
         if ($sourceQuery!==null && $merged['replacement_confirmation'] && $semanticPending) {
             $shape=$sourceQuery['query_shape']??null;
-            if (!in_array($shape,['summary','trend','ranking','comparison','threshold_count'],true)) throw new RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
+            if (!in_array($shape,['summary','breakdown','trend','ranking','comparison','threshold_count'],true)) throw new RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
             return $finish(['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_'.$shape,
                 'query'=>$sourceQuery,'output_format'=>$body['output_format']]]);
         }
@@ -2314,6 +2314,35 @@ final class AiGatewayServices
                 'decision'=>'query','query_shape'=>$intent['operation'],'metric_codes'=>$intent['metric_codes'],
                 'ranking'=>$intent['ranking'],'aggregate_condition'=>$intent['aggregate_condition'],
                 'condition_set'=>$conditionSet,'object_kind'=>$subject
+            ],$caps,$body['output_format'],$today));
+        }
+        // "Each/every" is a result grain, not a store-specific phrase rule.
+        // Once the model has preserved operation=breakdown, every registered
+        // analytical object follows this one capability-driven compiler path.
+        // The registry still decides which metric/object combinations exist;
+        // the gateway neither chooses a fact column nor turns the list into a
+        // ranking merely because values can be ordered.
+        if ($intent['operation']==='breakdown') {
+            $objectKind=$intent['object_kind'];
+            $breakdownMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,$objectKind,'breakdown');
+            if ($localTerm!==null||in_array($objectKind,['unknown','business_date'],true)||!$breakdownMetrics
+                ||count($intent['metric_codes'])>4) {
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_breakdown_shape_unavailable',[
+                    'object_kind'=>(string)$objectKind,'selected_metric_count'=>count($intent['metric_codes']),
+                ],'breakdown_shape_probe');
+                throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            }
+            foreach ($intent['metric_codes'] as $selectedMetric) if (!isset($breakdownMetrics[$selectedMetric])) {
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_breakdown_metric_unavailable',[], 'breakdown_metric_probe');
+                throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            }
+            $projection['signals']=array_values(array_unique(array_merge($intent['metric_codes'],['breakdown'])));
+            if ($intent['needs_metric_choice']) $projection['signals'][]='ambiguous_metric';
+            $projection['blocking_reason']=null;$projection['unresolved_condition']=false;$projection['semantic_intent']['constraints']=[];
+            $caps['current_store_bound']=\app\services\ai\execution\AiAuthority::currentStoreId($context)!==null;
+            return $finish((new AiWorkflowPlanner())->compile($projection,[
+                'decision'=>'query','query_shape'=>'breakdown','metric_codes'=>$intent['metric_codes'],
+                'ranking'=>$intent['ranking'],'object_kind'=>$objectKind,
             ],$caps,$body['output_format'],$today));
         }
         // A business-date extremum reuses the registered daily trend source.
@@ -3025,7 +3054,7 @@ final class AiGatewayServices
         if (!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$objectKind)) return [];
         $options=[];
         foreach (\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($capabilities,$objectKind) as $metric=>$candidate) {
-            $shapes=array_values(array_intersect(['summary','trend','ranking','comparison'],(array)($candidate['query_shapes']??[])));
+            $shapes=array_values(array_intersect(['summary','breakdown','trend','ranking','comparison'],(array)($candidate['query_shapes']??[])));
             if ($shapes) $options[$metric]=$shapes;
         }
         ksort($options);
@@ -3036,7 +3065,7 @@ final class AiGatewayServices
     private function registeredMetricOptions(array $capabilities,array $summaries,string $objectKind,?string $operation): array
     {
         if (!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$objectKind)) return [];
-        if ($operation!==null && !in_array($operation,['summary','trend','ranking','comparison'],true)) return [];
+        if ($operation!==null && !in_array($operation,['summary','breakdown','trend','ranking','comparison'],true)) return [];
         $labels=[];
         foreach ($summaries as $summary) {
             if (is_string($summary['metric_code']??null) && is_string($summary['name']??null)) {
@@ -4508,7 +4537,12 @@ final class AiGatewayServices
                     } elseif ($error instanceof \TypeError) $predicate='query_type_error';
                     elseif ($error instanceof \Error) $predicate='query_php_error';
                     else $predicate='query_unexpected';
-                    $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,$predicate);
+                    // Persist the payload-free query boundary as a separate
+                    // attempt diagnostic. The terminal run reason is purposely
+                    // generic for users, so without this record a fast contract
+                    // failure is overwritten and cannot be distinguished from
+                    // a database or PHP runtime failure during acceptance.
+                    $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,$predicate,[],'query_runtime_probe');
                     throw new RuntimeException('AI_QUERY_FAILED');
                 }
                 return $evidence;

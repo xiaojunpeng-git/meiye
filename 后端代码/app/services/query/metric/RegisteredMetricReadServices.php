@@ -613,6 +613,25 @@ final class RegisteredMetricReadServices
     }
 
     /**
+     * Returns one bounded object page without assigning business rank. The
+     * extra probe row is used only to state whether more objects exist; it is
+     * never exposed as a customer result or treated as a requested top list.
+     *
+     * @return array{rows:array<int,array{entity_id:int,entity_name:string,amount_cents:int}>,count:?int,limit:int,has_more:bool}
+     */
+    public function dimensionBreakdown(string $metricCode,string $dimension,string $tenantId,array $stores,array $range,int $limit=99): array
+    {
+        if ($limit<1||$limit>99) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $points=$this->dimensionRanking($metricCode,$dimension,$tenantId,$stores,$range,$limit+1,'desc');
+        $hasMore=count($points)>$limit;
+        if ($hasMore) $points=array_slice($points,0,$limit);
+        $rows=array_map(static function(array $point): array {
+            return ['entity_id'=>$point['entity_id'],'entity_name'=>$point['entity_name'],'amount_cents'=>$point['metric_value']];
+        },$points);
+        return ['rows'=>$rows,'count'=>$hasMore?null:count($rows),'limit'=>$limit,'has_more'=>$hasMore];
+    }
+
+    /**
      * Reads display values for identities emitted by an earlier authorized
      * ranking in the same Reader transaction. This is intentionally not a
      * second ranking or arbitrary entity search: callers may only decorate

@@ -18,6 +18,7 @@ final class AiAnswerRenderer
         $cards = []; $rows = []; $facts = []; $metricNames = []; $rankingPresentationColumns=[]; $shape = $view['query']['query_shape'];
         $threshold = $shape === 'threshold_count' ? $this->thresholdCondition($view['query']) : null;
         $conditionSummary = null; $conditionListHasMore = false; $conditionListLimit = null; $conditionObjectLabel = null;
+        $breakdownHasMore=false;$breakdownLimit=null;$breakdownObjectLabel=null;
         foreach ($view['results'] as $row) {
             $registered = MetricReadViewServices::metricCapabilities();
             if (!isset($registered[$row['metric_code'] ?? '']) || !$registered[$row['metric_code']]['ai_query_ready'] || !in_array($row['period'] ?? '', ['current', 'comparison'], true)) {
@@ -66,6 +67,23 @@ final class AiAnswerRenderer
                     throw new RuntimeException('AI_EVIDENCE_INVALID');
                 }
                 $facts[$row['metric_code']][$row['period']] = ['name' => $tooltip['name'], 'count' => $row['count']];
+                continue;
+            }
+            if ($shape==='breakdown') {
+                if (!is_string($row['object_kind']??null)||!is_string($row['object_label']??null)
+                    ||!is_array($row['rows']??null)||!is_bool($row['has_more']??null)
+                    ||!is_int($row['list_limit']??null)||$row['list_limit']<1
+                    ||(!is_null($row['object_count']??null)&&(!is_int($row['object_count'])||$row['object_count']<0))) {
+                    throw new RuntimeException('AI_EVIDENCE_INVALID');
+                }
+                $breakdownObjectLabel=$row['object_label'];$breakdownHasMore=$breakdownHasMore||$row['has_more'];$breakdownLimit=$row['list_limit'];
+                foreach ($row['rows'] as $point) {
+                    if (!is_int($point['entity_id']??null)||$point['entity_id']<1||!is_string($point['entity_name']??null)
+                        ||$point['entity_name']===''||!is_int($point['amount_cents']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                    $rows[]=['label'=>$point['entity_name'],'metric'=>$tooltip['name'],
+                        'value'=>$this->metricValue($point['amount_cents'],$storageUnit),'unit'=>$unit,
+                        'period'=>$row['period'],'period_label'=>$this->periodLabel($row['period'])];
+                }
                 continue;
             }
             if ($shape === 'trend') {
@@ -126,7 +144,7 @@ final class AiAnswerRenderer
         $person = $objectKind === 'person';
         $member = $objectKind === 'member';
         $dimensionLabel = null;
-        if (!$person && !$member && $shape === 'ranking') foreach ($view['results'] as $result) {
+        if (!$person && !$member && in_array($shape,['ranking','breakdown'],true)) foreach ($view['results'] as $result) {
             if (($result['object_kind'] ?? null) === $objectKind && is_string($result['object_label'] ?? null)) {
                 $dimensionLabel = $result['object_label'];
                 break;
@@ -140,7 +158,7 @@ final class AiAnswerRenderer
         $summary .= ($summary === '' ? '' : ' ') . $periodLabel;
         $answer = ['summary' => $summary, 'cards' => $cards];
         $notes = [];
-        if ($person) {
+        if ($person && $shape!=='breakdown') {
             // The selection label is produced by the executed population.
             // Do not append a current-employment claim to a historical-fact
             // cohort or another explicitly selected population.
@@ -151,13 +169,14 @@ final class AiAnswerRenderer
             if ($rows) $notes[] = '仅按所选指标排名；相同数值并列。';
         }
         if ($conditionListHasMore) $notes[]='符合条件的结果较多，当前展示前'.$conditionListLimit.'条；总数以结论中的精确数量为准。';
-        if ($dimensionLabel !== null) {
+        if ($breakdownHasMore) $notes[]='结果较多，当前展示前'.$breakdownLimit.'条；可继续按更具体范围查询。';
+        if ($dimensionLabel !== null && $shape==='ranking') {
             if ($rows) $notes[] = $dimensionLabel . '按所选指标排名；相同数值并列。';
         }
         if ($view['query']['compare_range']) $notes[] = '对比时间：' . $view['query']['compare_range']['start'] . ' 至 ' . $view['query']['compare_range']['end'] . '。';
         foreach ($notes as $note) $answer['summary'] .= ' ' . $note;
         if ($rows) {
-            $columns = [['key' => 'label', 'label' => $shape === 'trend' ? '日期' : ($conditionObjectLabel ?? ($person ? '人员' : ($member ? '会员' : ($dimensionLabel ?? '门店'))))]];
+            $columns = [['key' => 'label', 'label' => $shape === 'trend' ? '日期' : ($breakdownObjectLabel ?? ($conditionObjectLabel ?? ($person ? '人员' : ($member ? '会员' : ($dimensionLabel ?? '门店')))))]];
             if ($shape==='ranking' && $rankingPresentationColumns!==[]) {
                 // The leading value remains the documented sort metric. Other
                 // registry columns are contextual evidence, not extra ranks.
@@ -344,9 +363,11 @@ final class AiAnswerRenderer
             $last = $last ?? $rows[count($rows) - 1];
             return $last['label'] . '的' . $last['metric'] . '为' . $last['value'] . $last['unit'] . '。';
         }
-        if (in_array($shape, ['ranking', 'trend'], true)) return '本期间没有符合当前筛选条件的' . implode('、', $metricNames ?: ['数据']) . '数据。';
+        if ($shape==='breakdown' && $rows) return '已按'.implode('、',$metricNames ?: ['所选指标']).'列出分组明细。';
+        if (in_array($shape, ['ranking', 'trend','breakdown'], true)) return '本期间没有符合当前筛选条件的' . implode('、', $metricNames ?: ['数据']) . '数据。';
         return '已按您当前报表的数据范围查询。';
     }
+
 
     /** @param array<int,array<string,mixed>> $rows */
     private function rankingNarrative(array $rows): string
