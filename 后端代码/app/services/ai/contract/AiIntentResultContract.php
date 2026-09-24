@@ -189,7 +189,7 @@ final class AiIntentResultContract
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
             if (!is_array($requirement) || in_array('unbound',(array)($requirement['fields']??[]),true)) {$failure='unbound';return null;}
             $values=(array)($requirement['values']??[]);
-            foreach (['metric_exclusions','ranking','aggregate_condition','condition_update','member_detail','result_reference'] as $unsafe) {
+            foreach (['metric_exclusions','ranking','aggregate_condition','condition_update','object_detail','member_detail','result_reference'] as $unsafe) {
                 if (array_key_exists($unsafe,$values)) {$failure='unsafe_value';return null;}
             }
             foreach (array_keys($owned) as $field) {

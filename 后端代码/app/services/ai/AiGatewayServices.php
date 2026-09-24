@@ -1260,21 +1260,21 @@ final class AiGatewayServices
             }
         }
         $understanding=$this->resolveExactStatedSinglePeriod($understanding,$safe['outbound'],$today);
-        // Member detail is not another report metric. The language model first
-        // has to understand this turn as a typed detail request; only then may
-        // the server resolve it against a replayed, permission-checked member
-        // result. This keeps natural-language interpretation out of PHP while
-        // preventing names or screen order from becoming authority.
-        $memberDetail=$this->compileMemberDetailContinuation($understanding,$sourceContext);
-        if ($memberDetail!==null) {
-            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_member_detail_continuation_admitted');
-            return $memberDetail;
+        // Object detail is not another ranking or metric-binding request. The
+        // model owns the natural-language meaning while the server resolves a
+        // stable person, store or member only from the replayed verified view.
+        // Admitting this before binding also removes an unnecessary model call.
+        $objectDetail=$this->compileObjectDetailContinuation($understanding,$sourceContext,$body['output_format']);
+        if ($objectDetail!==null) {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_object_detail_continuation_admitted');
+            return $objectDetail;
         }
         $requestedMemberDetail=null;
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
-            if (isset($requirement['values']['member_detail'])) $requestedMemberDetail=$requirement['values']['member_detail'];
+            $candidate=$requirement['values']['object_detail']??$requirement['values']['member_detail']??null;
+            if (is_array($candidate)&&($requirement['values']['object_kind']??'member')==='member') $requestedMemberDetail=$candidate;
         }
-        $understanding=$this->separateMemberDetailFromConditions($understanding);
+        $understanding=$this->separateObjectDetailFromConditions($understanding);
         // Some providers omit the new request-kind marker only when a signed
         // predecessor is present. Recover it solely when two independent
         // structural checks agree: the model accepted only a broad observation
@@ -4504,32 +4504,68 @@ final class AiGatewayServices
      * Admits only a pure detail continuation. Mixed requests establish their
      * authorised population through the condition-list path before assets.
      */
-    private function compileMemberDetailContinuation(array $understanding,$sourceContext): ?array
+    private function compileObjectDetailContinuation(array $understanding,$sourceContext,string $outputFormat): ?array
     {
-        if (($understanding['status']??null)!=='understood'||!is_array($sourceContext)
-            ||!is_array($sourceContext['query']??null)||!is_array($sourceContext['view']??null)) return null;
-        $detail=null;
+        if (($understanding['status']??null)!=='understood') return null;
+        $detail=null;$statedObjectKind=null;
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
             $fields=(array)($requirement['fields']??[]);
-            if (in_array('member_detail',$fields,true)) {
+            if (in_array('object_detail',$fields,true)||in_array('member_detail',$fields,true)) {
                 if ($detail!==null) throw new RuntimeException('AI_INTENT_UNRESOLVED');
-                $detail=$requirement['values']['member_detail']??null;
+                // member_detail remains accepted only as a compatibility input
+                // for stored/test envelopes; new model instructions emit the
+                // generic object_detail carrier.
+                $detail=$requirement['values']['object_detail']??$requirement['values']['member_detail']??null;
             }
-            // A pure continuation may restate only its member object. Any
+            // A pure continuation may restate only its referenced object. Any
             // metric, period, condition, ranking or operation must go through
             // the normal registered query planner first.
-            if (array_diff($fields,['member_detail','object_kind','object_relation'])!==[]) return null;
-            if (in_array('object_kind',$fields,true)&&($requirement['values']['object_kind']??null)!=='member') return null;
+            if (array_diff($fields,['object_detail','member_detail','object_kind','object_relation'])!==[]) return null;
+            if (in_array('object_kind',$fields,true)) {
+                $kind=$requirement['values']['object_kind']??null;
+                if (!is_string($kind)||($statedObjectKind!==null&&$statedObjectKind!==$kind)) return null;
+                $statedObjectKind=$kind;
+            }
         }
         if (!is_array($detail)) return null;
-        $resolved=(new \app\services\ai\context\MemberDetailContinuationResolver())->resolve(
+        if (!is_array($sourceContext)||!is_array($sourceContext['query']??null)
+            ||!is_array($sourceContext['view']??null)) throw new RuntimeException('AI_CONTEXT_REQUIRED');
+        $resolved=(new \app\services\ai\context\ObjectDetailContinuationResolver())->resolve(
             $sourceContext['query'],$sourceContext['view'],$detail
         );
-        return ['kind'=>'member_detail','member_detail'=>$resolved+[
-            'source_query'=>$sourceContext['query'],
-            'source_view_ref'=>$sourceContext['view']['read_consistency_ref']??null,
-            'source_expires_at'=>$sourceContext['view']['expires_at']??null,
-        ],'_context_meaning'=>(array)($sourceContext['meaning']??[])];
+        // An explicitly stated object may narrow what the customer means but
+        // may never overwrite the object proven by the preceding result.
+        if ($statedObjectKind!==null&&$statedObjectKind!==($resolved['object_kind']??null)) {
+            throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        }
+        if (($resolved['object_kind']??null)==='member') {
+            unset($resolved['object_kind']);
+            return ['kind'=>'member_detail','member_detail'=>$resolved+[
+                'source_query'=>$sourceContext['query'],
+                'source_view_ref'=>$sourceContext['view']['read_consistency_ref']??null,
+                'source_expires_at'=>$sourceContext['view']['expires_at']??null,
+            ],'_context_meaning'=>(array)($sourceContext['meaning']??[])];
+        }
+        // Person/store detail currently means a context-relevant verified
+        // overview: reuse the exact preceding metric and period, replace only
+        // ranking with one server-resolved object selection, and run through
+        // the ordinary registry compiler and permission checks.
+        $query=$sourceContext['query'];
+        $query['ranking']=null;$query['ranking_presentation_metrics']=[];
+        if ($resolved['object_kind']==='person') {
+            $query['query_shape']='summary';
+            $query['business_filters']=['object_kind'=>'person','selection_ref'=>$resolved['selection_ref']];
+        } elseif ($resolved['object_kind']==='store') {
+            // A one-row store breakdown keeps the verified store name visible
+            // in the answer. A plain summary would show only the amount and
+            // leave the customer unable to verify which prior store it used.
+            $query['query_shape']='breakdown';$query['store_ids']=[$resolved['store_id']];
+            $query['business_filters']=['object_kind'=>'store'];
+        } else {
+            throw new RuntimeException('AI_OBJECT_DETAIL_NOT_READY');
+        }
+        return ['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_'.$query['query_shape'],'query'=>$query,
+            'output_format'=>$outputFormat], '_context_meaning'=>(array)($sourceContext['meaning']??[])];
     }
 
     /**
@@ -4539,7 +4575,7 @@ final class AiGatewayServices
      * presentation carrier. The caller retains that carrier for execution,
      * including through clarification; it must not be silently discarded.
      */
-    private function separateMemberDetailFromConditions(array $understanding): array
+    private function separateObjectDetailFromConditions(array $understanding): array
     {
         $hasCondition=false;
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
@@ -4548,9 +4584,9 @@ final class AiGatewayServices
         }
         if (!$hasCondition) return $understanding;
         foreach ($understanding['requirements'] as &$requirement) {
-            if (!in_array('member_detail',(array)($requirement['fields']??[]),true)) continue;
-            $requirement['fields']=array_values(array_diff($requirement['fields'],['member_detail']));
-            unset($requirement['values']['member_detail']);
+            if (!array_intersect(['object_detail','member_detail'],(array)($requirement['fields']??[]))) continue;
+            $requirement['fields']=array_values(array_diff($requirement['fields'],['object_detail','member_detail']));
+            unset($requirement['values']['object_detail'],$requirement['values']['member_detail']);
             if (($requirement['values']??[])===[]) unset($requirement['values']);
         }
         unset($requirement);
@@ -5253,6 +5289,8 @@ final class AiGatewayServices
             'AI_CAPABILITY_NOT_READY'=>'已识别您的需求，但对应的数据能力或筛选组合尚未接入，暂不能准确提供结果。',
             'AI_CONTEXT_REQUIRED'=>'这句追问缺少可核对的前文条件。请补充您想延续的对象、时间或查看结果，我会按当前权限重新查询。',
             'AI_RESULT_REFERENCE_UNAVAILABLE'=>'无法在原查询结果中安全确认您指的对象，未改用新结果中的同名或同序对象。请重新说明对象。',
+            'AI_OBJECT_DETAIL_SELECTION_REQUIRED'=>'上一份结果包含多个对象，请说明要看第几位或直接说出对象；本次没有替您选择。',
+            'AI_OBJECT_DETAIL_NOT_READY'=>'已理解您想继续查看这个对象，但该对象的这类信息尚未接入统一查询；本次没有改查近似数据。',
             'AI_MEMBER_DETAIL_SELECTION_REQUIRED'=>'上一份名单有多位会员，请说明要看第几位会员的权益，例如“第一个会员的权益明细”。本次没有替您选择会员。',
             'AI_MEMBER_DETAIL_SET_NOT_READY'=>'这份会员名单尚未完整展示，请缩小筛选范围后查看全部权益，或说明要看已展示名单中的第几位。',
             'AI_FOLLOWUP_CONDITION_REQUIRED'=>'我已找到上次查询，但还不能准确确认这次要改变的内容。请补充您要改看的对象、时间或查看方式；已确认条件会保留。',
