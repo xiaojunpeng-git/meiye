@@ -145,6 +145,11 @@ $checks = [
         && strpos($reversalService, 'BENEFIT_REVERSAL_TABLE') !== false
         && strpos($reversalService, "'cancelled_debt_cents'") !== false
         && strpos($reversalService, "'benefit_detail_ids_json'") !== false,
+    'used_card_void_explains_card_usage_to_store_operator' => strpos($reversalService, 'cardUsageFailure($holder)') !== false
+        && strpos($reversalService, '已使用过，不能直接作废原销售订单，使用过的卡项只能停用') !== false
+        && strpos($reversalService, "'cardNameSnapshot' => \$cardName") !== false
+        && strpos($reversalService, "'usedTimes' => \$usedTimes") !== false
+        && strpos($reversalService, "'remainingTimes' => \$remainingTimes") !== false,
     'sales_order_lifecycle_detail_is_tenant_scoped_and_auditable' => strpos($salesQuery, "->where('tenant_id', \$tenantIds[0])") !== false
         && strpos($salesQuery, 'reversed_cash_cents') !== false
         && strpos($salesQuery, "'reversedCashAmount'") !== false

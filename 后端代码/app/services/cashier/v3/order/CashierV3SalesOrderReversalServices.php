@@ -286,9 +286,14 @@ final class CashierV3SalesOrderReversalServices
         $holder = (array)Db::name('user_card_holder')->where('id', (int)$receipt['card_holder_id'])->lock(true)->find();
         $order = (array)Db::name('store_order')->where('id', (int)$receipt['legacy_order_id'])->lock(true)->find();
         if (!$holder || !$order || (int)$holder['uid'] !== (int)$source['memberId'] || (int)$holder['oid'] !== (int)$receipt['legacy_order_id']
-            || (int)$holder['is_del'] !== 0 || (int)$holder['write_surplus_times'] !== (int)$holder['write_times']
-            || (int)$order['paid'] !== 1 || (int)$order['refund_status'] !== 0 || (int)$order['terminal_action'] !== 0) {
+            || (int)$holder['is_del'] !== 0 || (int)$order['paid'] !== 1
+            || (int)$order['refund_status'] !== 0 || (int)$order['terminal_action'] !== 0) {
             throw self::failure('sales_reversal_card_already_changed');
+        }
+        if ((int)$holder['write_surplus_times'] !== (int)$holder['write_times']) {
+            // 已使用的新购卡不能跟原销售订单一起撤销；将卡名和次数口径直接告知门店，
+            // 避免通用的“权益状态不满足”掩盖真实原因，但不放宽作废的账权保护。
+            throw self::cardUsageFailure($holder);
         }
         $details = Db::name('store_order_cart_info')->where('oid', (int)$receipt['legacy_order_id'])->where('cart_type', 2)
             ->lock(true)->order('id', 'asc')->select()->toArray();
@@ -410,5 +415,29 @@ final class CashierV3SalesOrderReversalServices
 
     private function centsToMoney(int $cents): string { return bcdiv((string)$cents, '100', 2); }
     private function secret(): string { $secret = trim((string)config('cashier_v3.checkout_namespace_secret')); if (strlen($secret) < 32) throw self::failure('sales_reversal_secret_missing'); return $secret; }
+    /** 生成门店可直接理解的卡项使用拒绝原因，同时保留日志和客户端可用的结构化次数。 */
+    private static function cardUsageFailure(array $holder): CashierV3CommandException
+    {
+        $cardName = trim((string)($holder['card_name'] ?? '')) ?: '未命名卡项';
+        $totalTimes = max(0, (int)($holder['write_times'] ?? 0));
+        $remainingTimes = max(0, (int)($holder['write_surplus_times'] ?? 0));
+        $usedTimes = max(0, $totalTimes - $remainingTimes);
+        $message = sprintf(
+            '卡项「%s」已使用过，不能直接作废原销售订单，使用过的卡项只能停用。',
+            $cardName
+        );
+        return new CashierV3CommandException(
+            CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+            $message,
+            CashierV3ResultCode::STATUS_FAILED,
+            [
+                'reason' => 'sales_reversal_card_already_changed',
+                'cardNameSnapshot' => $cardName,
+                'totalTimes' => $totalTimes,
+                'usedTimes' => $usedTimes,
+                'remainingTimes' => $remainingTimes,
+            ]
+        );
+    }
     private static function failure(string $reason): CashierV3CommandException { return new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '该订单的资金、欠款或权益状态不满足本次退款/作废条件，未提交任何变更。', CashierV3ResultCode::STATUS_FAILED, ['reason' => $reason]); }
 }
