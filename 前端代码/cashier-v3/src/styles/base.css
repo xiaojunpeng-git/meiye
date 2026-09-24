@@ -4674,9 +4674,8 @@ button:disabled {
 }
 
 .personnel-attribution-role {
-  display: grid;
-  grid-template-columns: 88px 80px minmax(0, 1fr);
-  align-items: center;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   min-height: 52px;
   padding: 10px 12px;
@@ -4684,11 +4683,27 @@ button:disabled {
   border-radius: 6px;
 }
 
-.personnel-attribution-role > strong {
+.personnel-attribution-role-header {
+  /* 角色标题与查询按钮固定同行，按钮紧贴容器最右侧。 */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+}
+
+.personnel-attribution-role-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.personnel-attribution-role-title > strong {
   color: #303844;
 }
 
-.personnel-attribution-role > small,
+.personnel-attribution-role-title > small,
 .personnel-attribution-members em {
   color: #8b97a6;
   font-size: 12px;
@@ -4724,7 +4739,7 @@ button:disabled {
 }
 
 .personnel-attribution-add {
-  align-self: flex-start;
+  flex: 0 0 auto;
 }
 
 .personnel-guide-round {

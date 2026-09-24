@@ -141,6 +141,8 @@ assert.doesNotMatch(workbench, /GUEST_ATTRIBUTION_NOT_ALLOWED|reportGuestAttribu
 assert.match(component, /<label><input v-model="guideRoundNo" type="radio" value="none"><span>无<\/span><\/label>/, '游客和会员均展示无轮次选项')
 assert.match(component, /guideRoundNo = ref\(props\.guestCustomer \? 'none' : ''\)/, '游客默认无轮次，会员不默认代选')
 assert.match(component, /guestCustomer \? \[\] : \[1, 2, 3\]/, '会员除无轮次外继续展示第 1～3 轮')
+assert.match(component, /personnel-attribution-role-header[\s\S]*?<strong>导购<\/strong>[\s\S]*?查询导购<\/button>/, '查询导购必须与导购标题同行')
+assert.match(component, /personnel-attribution-role-header[\s\S]*?<strong>销售经理<\/strong>[\s\S]*?查询销售经理<\/button>/, '查询销售经理必须与销售经理标题同行')
 assert.match(component, /records\.filter\(\(item\) => matchesGroupKeyword\(item\)[\s\S]*attributionRoleAllows\(item, attributionSearchRole\.value/, '集团查询按导购与销售经理各自资格展示可结账人员')
 assert.match(workbench, /class="cart-line__meta-slot cart-line__meta-slot--attribution"/, '购物车必须展示导购/销售经理按钮')
 assert.match(workbench, /loadPersonnelOverlay\(line, 'guides', 'attribution'\)/, '统一入口必须打开导购/销售经理选择范围')
