@@ -19,6 +19,7 @@ final class CashierV3CheckoutReservationClosureServices
 {
     private const UNFINISHED_STATUSES = ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE'];
     private const COMPLETED_STATUS = 'COMPLETED';
+    private const SERVICE_LINK_TABLE = 'cashier_v3_reservation_checkout_service_link';
 
     /**
      * 只读判断是否需要向收银员提示。会员、门店和日期全部从已结算订单取值，
@@ -64,6 +65,9 @@ final class CashierV3CheckoutReservationClosureServices
             ->order('id asc')
             ->lock(true)
             ->select());
+        // 结账项目已经在结账事务中形成唯一服务事实。预约收口只复制其不可变
+        // 快照用于预约展示，绝不能再次生成服务、核销或业绩事实。
+        $checkoutServices = $this->checkoutProjectServices($order);
 
         $now = time();
         $completed = [];
@@ -73,6 +77,7 @@ final class CashierV3CheckoutReservationClosureServices
             if ($beforeVersion <= 0) {
                 throw new \LogicException('checkout_reservation_version_invalid');
             }
+            $syncedServices = $this->syncCheckoutServices($order, $row, $checkoutServices, $now);
             $affected = Db::name('cashier_v3_reservation')
                 ->where('id', (int)$row['id'])
                 ->where('tenant_id', (string)$order['tenant_id'])
@@ -90,12 +95,13 @@ final class CashierV3CheckoutReservationClosureServices
                 throw new \RuntimeException('checkout_reservation_update_conflict');
             }
 
-            $this->recordCompletionEvent($scope, $order, $row, $nextVersion, $now);
-            $this->recordOperation($scope, $order, $row, $nextVersion, $now);
+            $this->recordCompletionEvent($scope, $order, $row, $nextVersion, $now, $syncedServices);
+            $this->recordOperation($scope, $order, $row, $nextVersion, $now, $syncedServices);
             $completed[] = [
                 'reservationId' => (int)$row['id'],
                 'reservationNo' => (string)($row['reservation_no'] ?? ''),
                 'version' => $nextVersion,
+                'syncedServiceCount' => count($syncedServices),
             ];
         }
 
@@ -143,17 +149,91 @@ final class CashierV3CheckoutReservationClosureServices
     /** @param array<int,array<string,mixed>> $completed */
     private function completionResult(?array $order, array $completed): array
     {
+        $syncedServiceLinkCount = 0;
+        foreach ($completed as $item) $syncedServiceLinkCount += (int)($item['syncedServiceCount'] ?? 0);
         return [
             'status' => 'succeeded',
             'salesOrderId' => (string)($order['order_id'] ?? ''),
             'salesOrderNo' => (string)($order['order_no'] ?? ''),
             'businessDate' => (string)($order['business_date'] ?? ''),
             'completedCount' => count($completed),
+            'syncedServiceLinkCount' => $syncedServiceLinkCount,
             'completedReservations' => array_values($completed),
         ];
     }
 
-    private function recordCompletionEvent(array $scope, array $order, array $row, int $nextVersion, int $now): void
+    /** @return array<int,array<string,mixed>> */
+    private function checkoutProjectServices(array $order): array
+    {
+        return $this->rows(Db::name('cashier_v3_entitlement_service_fact')
+            ->where('tenant_id', (string)$order['tenant_id'])
+            ->where('store_id', (int)$order['store_id'])
+            ->where('member_id', (int)$order['member_id'])
+            ->where('business_date', (string)$order['business_date'])
+            ->where('source_document_type', 'sales_order')
+            ->where('document_id', (string)$order['order_id'])
+            ->where('service_status', 'completed')
+            ->order('id asc')
+            ->lock(true)
+            ->select());
+    }
+
+    /**
+     * 同一笔结账服务关联到当天每条未结束预约。唯一键保证命令重试不会重复，
+     * 指纹冲突则整批回滚，避免预约详情出现半新半旧的实际服务快照。
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function syncCheckoutServices(array $order, array $reservation, array $services, int $now): array
+    {
+        $synced = [];
+        foreach ($services as $service) {
+            $craftsmenJson = (string)($service['craftsmen_snapshot_json'] ?? '[]');
+            $craftsmen = json_decode($craftsmenJson, true);
+            if (!is_array($craftsmen)) throw new \LogicException('checkout_reservation_craftsmen_snapshot_invalid');
+            $row = [
+                'tenant_id' => (string)$order['tenant_id'],
+                'reservation_id' => (int)$reservation['id'],
+                'sales_order_id' => (string)$order['order_id'],
+                'sales_order_no_snapshot' => (string)$order['order_no'],
+                'service_fact_id' => (string)($service['service_fact_id'] ?? ''),
+                'source_line_id' => (string)($service['source_line_id'] ?? ''),
+                'project_id' => (int)($service['project_id'] ?? 0),
+                'project_name_snapshot' => mb_substr((string)($service['project_name_snapshot'] ?? ''), 0, 128),
+                'quantity' => max(1, (int)($service['quantity'] ?? 1)),
+                'service_object' => mb_substr((string)($service['service_object'] ?? ''), 0, 24),
+                'primary_craftsman_staff_id' => (int)($service['primary_craftsman_staff_id'] ?? 0),
+                'craftsmen_snapshot_json' => $craftsmenJson,
+                'business_date' => (string)$order['business_date'],
+                'occurred_at' => $now,
+                'recorded_at' => $now,
+                'created_at' => $now,
+            ];
+            if ($row['service_fact_id'] === '' || $row['source_line_id'] === '' || $row['project_id'] <= 0) {
+                throw new \LogicException('checkout_reservation_service_snapshot_invalid');
+            }
+            $fingerprintPayload = $row;
+            unset($fingerprintPayload['occurred_at'], $fingerprintPayload['recorded_at'], $fingerprintPayload['created_at']);
+            ksort($fingerprintPayload, SORT_STRING);
+            $row['immutable_fingerprint'] = hash('sha256', json_encode($fingerprintPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            $existing = Db::name(self::SERVICE_LINK_TABLE)
+                ->where('tenant_id', $row['tenant_id'])
+                ->where('reservation_id', $row['reservation_id'])
+                ->where('service_fact_id', $row['service_fact_id'])
+                ->lock(true)->find();
+            if ($existing) {
+                if ((string)($existing['immutable_fingerprint'] ?? '') !== $row['immutable_fingerprint']) {
+                    throw new \RuntimeException('checkout_reservation_service_link_conflict');
+                }
+            } elseif ((int)Db::name(self::SERVICE_LINK_TABLE)->insert($row) !== 1) {
+                throw new \RuntimeException('checkout_reservation_service_link_insert_failed');
+            }
+            $synced[] = $row;
+        }
+        return $synced;
+    }
+
+    private function recordCompletionEvent(array $scope, array $order, array $row, int $nextVersion, int $now, array $syncedServices): void
     {
         $recorder = $scope['event_recorder'] ?? null;
         $execution = $scope['event_execution'] ?? null;
@@ -184,11 +264,12 @@ final class CashierV3CheckoutReservationClosureServices
                 'salesOrderNo' => (string)$order['order_no'],
                 'completionReason' => 'checkout_prompt_confirmation',
                 'sideEffectsApplied' => false,
+                'syncedServiceFactIds' => array_values(array_column($syncedServices, 'service_fact_id')),
             ],
         ]);
     }
 
-    private function recordOperation(array $scope, array $order, array $row, int $nextVersion, int $now): void
+    private function recordOperation(array $scope, array $order, array $row, int $nextVersion, int $now, array $syncedServices): void
     {
         $key = 'CHK-APPT-' . hash('sha256', (string)($scope['idempotency_key'] ?? '') . ':' . (int)$row['id']);
         $result = [
@@ -198,6 +279,7 @@ final class CashierV3CheckoutReservationClosureServices
             'reservationStatus' => self::COMPLETED_STATUS,
             'version' => $nextVersion,
             'salesOrderId' => (string)$order['order_id'],
+            'syncedServiceFactIds' => array_values(array_column($syncedServices, 'service_fact_id')),
         ];
         $encoded = json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if (!is_string($encoded)) {

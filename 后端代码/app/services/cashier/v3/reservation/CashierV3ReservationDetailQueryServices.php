@@ -36,6 +36,12 @@ final class CashierV3ReservationDetailQueryServices
             ->where('reservation_id', $reservationId)
             ->order('id asc')
             ->select());
+        // 计划项目保持原样用于审计；结账确认后，详情的“实际服务项目”改读
+        // 独立关联快照，避免覆盖预约创建时的计划内容。
+        $checkoutServiceLinks = $this->rows(Db::name('cashier_v3_reservation_checkout_service_link')
+            ->where('tenant_id', $tenantId)
+            ->where('reservation_id', $reservationId)
+            ->order('id asc')->select());
 
         $serviceOrderId = (int)($reservation['service_order_id'] ?? 0);
         $serviceOrder = $serviceOrderId > 0
@@ -108,6 +114,7 @@ final class CashierV3ReservationDetailQueryServices
         $actualEndAt = (int)($reservation['actual_service_ended_at'] ?? $serviceOrder['completed_at'] ?? 0);
         $plannedDurationSeconds = max(60, $endAt - $startAt);
         $version = (int)($reservation['version'] ?? 0);
+        $displayProjectIndex = 0;
 
         $status = (string)($reservation['status'] ?? '');
         return [
@@ -124,21 +131,48 @@ final class CashierV3ReservationDetailQueryServices
                 'name' => (string)($reservation['member_name_snapshot'] ?? ''),
                 'phone' => (string)($reservation['member_phone_snapshot'] ?? ''),
             ],
-            'projects' => array_map(function (array $line) use ($projectOutcomes): array {
+            'projects' => array_map(function (array $line) use ($projectOutcomes, $checkoutServiceLinks, &$displayProjectIndex): array {
                 $minutes = max(0, (int)($line['service_duration_minutes'] ?? 0));
                 $lineId = (int)($line['id'] ?? 0);
-                return array_merge([
+                // 结账事实没有“预约主项目”字段；详情契约要求有项目时必须有且仅需一个主项目。
+                // 因此仅在读模型中稳定地把第一条实际服务标为主项目，绝不反写服务事实或原预约计划。
+                $isMain = $checkoutServiceLinks
+                    ? $displayProjectIndex === 0
+                    : strtoupper((string)($line['role_code'] ?? '')) === 'MAIN';
+                $displayProjectIndex++;
+                $project = [
                     'id' => (int)($line['id'] ?? 0),
                     'projectId' => (int)($line['project_id'] ?? 0),
                     'name' => (string)($line['project_name_snapshot'] ?? ''),
-                    'source' => strtoupper((string)($line['project_source'] ?? '')) === 'ENTITLEMENT' ? 'card' : 'unpaid',
-                    'role' => strtoupper((string)($line['role_code'] ?? '')) === 'MAIN' ? 'main' : 'detail',
-                    'isMain' => strtoupper((string)($line['role_code'] ?? '')) === 'MAIN',
+                    'source' => $checkoutServiceLinks
+                        ? 'checkout'
+                        : (strtoupper((string)($line['project_source'] ?? '')) === 'ENTITLEMENT' ? 'card' : 'unpaid'),
+                    'role' => $isMain ? 'main' : 'detail',
+                    'isMain' => $isMain,
                     'quantity' => max(1, (int)($line['quantity'] ?? 1)),
                     'appliedDurationMinutes' => $minutes,
                     'appliedDurationLabel' => $minutes > 0 ? ($minutes . '分钟') : '',
                     'durationDescription' => $minutes > 0 ? '预约创建时采用的服务时长。' : '',
-                ], (array)($projectOutcomes[$lineId] ?? []));
+                ];
+                if ($checkoutServiceLinks) {
+                    return array_merge($project, [
+                        'serviceFactId' => (string)($line['service_fact_id'] ?? ''),
+                        'salesOrderId' => (string)($line['sales_order_id'] ?? ''),
+                        'serviceObject' => (string)($line['service_object'] ?? ''),
+                        'processingStatus' => 'completed',
+                        'processingStatusLabel' => '已随结账完成',
+                        'processingDescription' => '来自本次结账已经完成的服务项目。',
+                    ]);
+                }
+                return array_merge($project, (array)($projectOutcomes[$lineId] ?? []));
+            }, $checkoutServiceLinks ?: $lines),
+            'plannedProjects' => array_map(static function (array $line): array {
+                return [
+                    'id' => (int)($line['id'] ?? 0),
+                    'projectId' => (int)($line['project_id'] ?? 0),
+                    'name' => (string)($line['project_name_snapshot'] ?? ''),
+                    'quantity' => max(1, (int)($line['quantity'] ?? 1)),
+                ];
             }, $lines),
             'appointmentStartAt' => self::formatTime($startAt),
             'appointmentEndAt' => self::formatTime($endAt),
@@ -167,7 +201,9 @@ final class CashierV3ReservationDetailQueryServices
                     'isPointCustomer' => isset($plannedPointCustomerByStaffId[$staffId]),
                 ];
             }, $plannedStaff),
-            'actualCraftsmen' => $this->actualCraftsmen($serviceLines, $actualPointCustomerByStaffId),
+            'actualCraftsmen' => $checkoutServiceLinks
+                ? $this->checkoutActualCraftsmen($checkoutServiceLinks)
+                : $this->actualCraftsmen($serviceLines, $actualPointCustomerByStaffId),
             'room' => (int)($reservation['room_id'] ?? 0) > 0 ? [
                 'id' => (int)$reservation['room_id'],
                 'name' => (string)($reservation['room_name_snapshot'] ?? ''),
@@ -185,7 +221,7 @@ final class CashierV3ReservationDetailQueryServices
                     'createdAt' => self::formatTime((int)($serviceOrder['created_at'] ?? 0)),
                 ]] : [],
                 'writeoffs' => [],
-                'salesOrders' => [],
+                'salesOrders' => $this->linkedSalesOrders($checkoutServiceLinks),
             ],
             'timeline' => array_map(function (array $operation): array {
                 return [
@@ -349,6 +385,46 @@ final class CashierV3ReservationDetailQueryServices
             ];
         }
         return array_values($items);
+    }
+
+    /** Actual craftsmen are frozen per checkout service line and may differ by project. */
+    private function checkoutActualCraftsmen(array $links): array
+    {
+        $items = [];
+        foreach ($links as $link) {
+            $craftsmen = json_decode((string)($link['craftsmen_snapshot_json'] ?? '[]'), true);
+            foreach (is_array($craftsmen) ? $craftsmen : [] as $craftsman) {
+                if (!is_array($craftsman)) continue;
+                $staffId = (int)($craftsman['staffId'] ?? $craftsman['id'] ?? 0);
+                $employeeId = (int)($craftsman['employeeId'] ?? 0);
+                $name = trim((string)($craftsman['name'] ?? ''));
+                if ($staffId <= 0 || $name === '') continue;
+                $items[$staffId] = [
+                    'staffId' => $staffId,
+                    'employeeId' => $employeeId,
+                    'name' => $name,
+                    'isPointCustomer' => !empty($craftsman['isPointCustomer']),
+                    'isPrimary' => !empty($craftsman['isPrimary']),
+                ];
+            }
+        }
+        return array_values($items);
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    private function linkedSalesOrders(array $links): array
+    {
+        $orders = [];
+        foreach ($links as $link) {
+            $id = (string)($link['sales_order_id'] ?? '');
+            if ($id === '' || isset($orders[$id])) continue;
+            $orders[$id] = [
+                'id' => $id,
+                'orderNo' => (string)($link['sales_order_no_snapshot'] ?? ''),
+                'businessDate' => (string)($link['business_date'] ?? ''),
+            ];
+        }
+        return array_values($orders);
     }
 
     private function positiveIds($json): array

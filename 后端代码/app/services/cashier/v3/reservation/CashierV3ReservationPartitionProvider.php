@@ -113,9 +113,44 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
                 }
             }
         }
+        // 已由结账确认完成的预约，在列表与日历中展示实际结账项目及其手艺人。
+        // 这里只替换读模型，原计划项目和排班关系仍保留在权威表中供审计。
+        $reservationIds = array_values(array_filter(array_map(static function (array $row): int {
+            return (int)($row['id'] ?? 0);
+        }, $rows)));
+        $checkoutLinkRows = $reservationIds ? Db::name('cashier_v3_reservation_checkout_service_link')
+            ->where('tenant_id', $tenantId)->whereIn('reservation_id', $reservationIds)
+            ->order('reservation_id asc,id asc')->select() : [];
+        $checkoutLinkRows = is_object($checkoutLinkRows) && method_exists($checkoutLinkRows, 'toArray')
+            ? $checkoutLinkRows->toArray()
+            : (array)$checkoutLinkRows;
+        $checkoutLinksByReservation = [];
+        $checkoutArtisanNames = [];
+        $checkoutReservationInitialized = [];
+        foreach ($checkoutLinkRows as $link) {
+            $reservationId = (int)($link['reservation_id'] ?? 0);
+            if ($reservationId <= 0) continue;
+            $checkoutLinksByReservation[$reservationId][] = $link;
+            if (!isset($checkoutReservationInitialized[$reservationId])) {
+                // Actual staff replaces planned staff, including the legitimate
+                // case of a checkout project without a selected craftsman.
+                $artisanStaffByReservation[$reservationId] = [];
+                $checkoutReservationInitialized[$reservationId] = true;
+            }
+            foreach ((array)json_decode((string)($link['craftsmen_snapshot_json'] ?? '[]'), true) as $craftsman) {
+                if (!is_array($craftsman)) continue;
+                $staffId = (int)($craftsman['staffId'] ?? $craftsman['id'] ?? 0);
+                $name = trim((string)($craftsman['name'] ?? ''));
+                if ($staffId <= 0 || $name === '') continue;
+                $artisanStaffByReservation[$reservationId][$staffId] = $staffId;
+                $checkoutArtisanNames[$staffId] = $name;
+            }
+        }
+        foreach ($checkoutLinksByReservation as $reservationId => $actualLines) $lines[$reservationId] = $actualLines;
         $artisanIds = [];
         foreach ($artisanStaffByReservation as $staffIds) foreach ($staffIds as $staffId) $artisanIds[$staffId] = $staffId;
         $artisanNames = $artisanIds ? Db::name('system_store_staff')->whereIn('id', array_values($artisanIds))->column('staff_name', 'id') : [];
+        foreach ($checkoutArtisanNames as $staffId => $name) $artisanNames[(int)$staffId] = $name;
         $versions = [];
         $records = [];
         // 快捷按钮的数量是当前日期范围内、各状态的预约数。它不能沿用
@@ -167,7 +202,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
                 'memberName' => (string)($row['member_name_snapshot'] ?? ''),
                 'phone' => (string)($row['member_phone_snapshot'] ?? ''),
                 'projectSummary' => implode('、', array_filter($projectNames)) ?: '未填写项目',
-                'projectSource' => '本次预约',
+                'projectSource' => isset($checkoutLinksByReservation[$id]) ? '本次结账' : '本次预约',
                 'craftsmanSummary' => $reservationArtisans ? implode('、', array_values($reservationArtisans)) : '待分配手艺人',
                 'roomName' => trim((string)($row['room_name_snapshot'] ?? '')) ?: ((int)($row['room_id'] ?? 0) > 0 ? '房间 ' . (int)$row['room_id'] : ''),
                 'remark' => (string)($row['remark_snapshot'] ?? ''),

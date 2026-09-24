@@ -16,7 +16,9 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\manifest\CashierV3ActionManifest;
 use app\services\cashier\v3\reservation\CashierV3CheckoutReservationClosureServices;
+use app\services\cashier\v3\reservation\CashierV3ReservationDetailQueryServices;
 use app\services\cashier\v3\reservation\CashierV3ReservationLifecycleServices;
+use app\services\cashier\v3\reservation\CashierV3ReservationPartitionProvider;
 use think\facade\Config;
 use think\facade\Db;
 
@@ -26,14 +28,18 @@ $app->initialize();
 Config::set(['default' => 'file'], 'cache');
 Db::connect('mysql', true)->query('SELECT 1');
 
+$fixtureService = (array)Db::name('cashier_v3_entitlement_service_fact')
+    ->where('source_document_type', 'sales_order')->where('service_status', 'completed')
+    ->where('member_id', '>', 0)->order('id desc')->find();
 $order = (array)Db::name('cashier_v3_sales_order')
+    ->where('order_id', (string)($fixtureService['document_id'] ?? ''))
     ->where('order_status', 'settled')->where('order_direction', 'forward')->where('member_id', '>', 0)
-    ->order('id desc')->find();
+    ->find();
 $reservations = Db::name('cashier_v3_reservation')
     ->where('tenant_id', (string)($order['tenant_id'] ?? ''))
     ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
     ->order('id desc')->limit(2)->select()->toArray();
-if (!$order || count($reservations) < 2) {
+if (!$fixtureService || !$order || count($reservations) < 2) {
     throw new RuntimeException('CHECKOUT_RESERVATION_FIXTURE_MISSING');
 }
 $reservation = (array)$reservations[0];
@@ -69,11 +75,17 @@ Db::startTrans();
 try {
     $originalVersion = (int)$reservation['version'];
     $secondOriginalVersion = (int)$secondReservation['version'];
+    $appointmentStart = (new DateTimeImmutable(
+        (string)$order['business_date'] . ' 12:00:00',
+        new DateTimeZone('Asia/Shanghai')
+    ))->getTimestamp();
     Db::name('cashier_v3_reservation')->where('id', (int)$reservation['id'])->update([
         'tenant_id' => (string)$order['tenant_id'],
         'store_id' => (int)$order['store_id'],
         'member_id' => (int)$order['member_id'],
         'business_date' => (string)$order['business_date'],
+        'appointment_start_at' => $appointmentStart,
+        'appointment_end_at' => $appointmentStart + 3600,
         'status' => 'UNSTARTED',
         'actual_service_ended_at' => 0,
         'version' => $originalVersion,
@@ -82,6 +94,8 @@ try {
         'store_id' => (int)$order['store_id'],
         'member_id' => (int)$order['member_id'],
         'business_date' => (string)$order['business_date'],
+        'appointment_start_at' => $appointmentStart + 7200,
+        'appointment_end_at' => $appointmentStart + 10800,
         'status' => 'PENDING_CONFIRMATION',
         'actual_service_ended_at' => 0,
         'version' => $secondOriginalVersion,
@@ -100,6 +114,12 @@ try {
     ];
     $occupationBefore = Db::name('cashier_v3_reservation_entitlement_occupation')
         ->where('reservation_id', (int)$reservation['id'])->column('status', 'id');
+    $checkoutServices = Db::name('cashier_v3_entitlement_service_fact')
+        ->where('tenant_id', (string)$order['tenant_id'])
+        ->where('document_id', (string)$order['order_id'])
+        ->where('source_document_type', 'sales_order')->where('service_status', 'completed')
+        ->order('id asc')->select()->toArray();
+    if (!$checkoutServices) throw new RuntimeException('CHECKOUT_PROJECT_SERVICE_FIXTURE_MISSING');
 
     $completed = $service->complete($scope);
     $row = (array)Db::name('cashier_v3_reservation')->where('id', (int)$reservation['id'])->find();
@@ -112,6 +132,95 @@ try {
         || (int)$secondRow['actual_service_ended_at'] <= 0
         || (int)$completed['completedCount'] < 2) {
         throw new RuntimeException('MATCHING_RESERVATION_WAS_NOT_COMPLETED');
+    }
+    foreach ([(int)$reservation['id'], (int)$secondReservation['id']] as $reservationId) {
+        $links = Db::name('cashier_v3_reservation_checkout_service_link')
+            ->where('tenant_id', (string)$order['tenant_id'])
+            ->where('reservation_id', $reservationId)->order('id asc')->select()->toArray();
+        if (count($links) !== count($checkoutServices)) {
+            throw new RuntimeException('ALL_RESERVATIONS_DID_NOT_RECEIVE_ALL_CHECKOUT_SERVICES');
+        }
+        foreach ($links as $index => $link) {
+            $source = (array)$checkoutServices[$index];
+            if ((string)$link['service_fact_id'] !== (string)$source['service_fact_id']
+                || (int)$link['project_id'] !== (int)$source['project_id']
+                || (string)$link['craftsmen_snapshot_json'] !== (string)$source['craftsmen_snapshot_json']) {
+                throw new RuntimeException('CHECKOUT_SERVICE_OR_CRAFTSMAN_SNAPSHOT_MISMATCH');
+            }
+        }
+    }
+    if ((int)$completed['syncedServiceLinkCount'] !== count($checkoutServices) * 2) {
+        throw new RuntimeException('SYNCED_SERVICE_LINK_COUNT_MISMATCH');
+    }
+    $detail = (new CashierV3ReservationDetailQueryServices())->read(
+        ['reservationId' => (int)$reservation['id']],
+        $operator,
+        $dataScope
+    );
+    $actualProjectIds = array_map('intval', array_column((array)($detail['projects'] ?? []), 'projectId'));
+    $sourceProjectIds = array_map('intval', array_column($checkoutServices, 'project_id'));
+    $detailProjects = array_values((array)($detail['projects'] ?? []));
+    if (!$detailProjects || ($detailProjects[0]['isMain'] ?? false) !== true
+        || (string)($detailProjects[0]['role'] ?? '') !== 'main') {
+        throw new RuntimeException('CHECKOUT_PROJECT_DETAIL_HAS_NO_STABLE_MAIN_PROJECT');
+    }
+    foreach (array_slice($detailProjects, 1) as $detailProject) {
+        if (($detailProject['isMain'] ?? false) === true || (string)($detailProject['role'] ?? '') !== 'detail') {
+            throw new RuntimeException('CHECKOUT_PROJECT_DETAIL_HAS_MULTIPLE_MAIN_PROJECTS');
+        }
+    }
+    $actualStaffIds = array_map('intval', array_column((array)($detail['actualCraftsmen'] ?? []), 'staffId'));
+    $sourceStaffIds = [];
+    foreach ($checkoutServices as $checkoutService) {
+        foreach ((array)json_decode((string)$checkoutService['craftsmen_snapshot_json'], true) as $craftsman) {
+            $staffId = (int)($craftsman['staffId'] ?? $craftsman['id'] ?? 0);
+            if ($staffId > 0) $sourceStaffIds[$staffId] = $staffId;
+        }
+    }
+    sort($actualProjectIds);
+    sort($sourceProjectIds);
+    sort($actualStaffIds);
+    $sourceStaffIds = array_values($sourceStaffIds);
+    sort($sourceStaffIds);
+    if ($detail === null || $actualProjectIds !== $sourceProjectIds || $actualStaffIds !== $sourceStaffIds) {
+        throw new RuntimeException('RESERVATION_DETAIL_DID_NOT_SHOW_CHECKOUT_PROJECTS_AND_CRAFTSMEN');
+    }
+    $partition = (new CashierV3ReservationPartitionProvider())->readPartition(
+        'checkout-reservation-integration',
+        '1',
+        $operator,
+        $dataScope,
+        ['calendarDate' => (string)$order['business_date'], 'page' => 1, 'pageSize' => 100]
+    );
+    $recordsById = [];
+    foreach ((array)($partition['payload']['records'] ?? []) as $record) {
+        $recordsById[(int)($record['reservationId'] ?? 0)] = $record;
+    }
+    $projectNames = array_values(array_filter(array_map(static function (array $service): string {
+        return trim((string)($service['project_name_snapshot'] ?? ''));
+    }, $checkoutServices)));
+    $staffNames = [];
+    foreach ($checkoutServices as $checkoutService) {
+        foreach ((array)json_decode((string)$checkoutService['craftsmen_snapshot_json'], true) as $craftsman) {
+            $name = trim((string)($craftsman['name'] ?? ''));
+            if ($name !== '') $staffNames[$name] = $name;
+        }
+    }
+    foreach ([(int)$reservation['id'], (int)$secondReservation['id']] as $reservationId) {
+        $record = (array)($recordsById[$reservationId] ?? []);
+        if (!$record || (string)($record['projectSource'] ?? '') !== '本次结账') {
+            throw new RuntimeException('RESERVATION_LIST_DID_NOT_USE_CHECKOUT_SERVICE_SOURCE');
+        }
+        foreach ($projectNames as $name) {
+            if (!str_contains((string)$record['projectSummary'], $name)) {
+                throw new RuntimeException('RESERVATION_LIST_MISSING_CHECKOUT_PROJECT');
+            }
+        }
+        foreach ($staffNames as $name) {
+            if (!str_contains((string)$record['craftsmanSummary'], $name)) {
+                throw new RuntimeException('RESERVATION_LIST_MISSING_CHECKOUT_CRAFTSMAN');
+            }
+        }
     }
 
     $factCountsAfter = [
@@ -129,6 +238,12 @@ try {
     if ((int)$replayedDomain['completedCount'] !== 0) {
         throw new RuntimeException('SECOND_DOMAIN_EXECUTION_WAS_NOT_IDEMPOTENT');
     }
+    $linkCountAfterReplay = (int)Db::name('cashier_v3_reservation_checkout_service_link')
+        ->where('tenant_id', (string)$order['tenant_id'])
+        ->whereIn('reservation_id', [(int)$reservation['id'], (int)$secondReservation['id']])->count();
+    if ($linkCountAfterReplay !== count($checkoutServices) * 2) {
+        throw new RuntimeException('REPLAY_DUPLICATED_CHECKOUT_SERVICE_LINKS');
+    }
 
     // 作废链路不接入预约：即使预约又是未结束，非 settled 订单也不得修改它。
     Db::name('cashier_v3_reservation')->where('id', (int)$reservation['id'])->update([
@@ -139,7 +254,11 @@ try {
     Db::name('cashier_v3_sales_order')->where('id', (int)$order['id'])->update(['order_status' => 'voided']);
     $voidedOrderResult = $service->complete($scope);
     $afterVoided = (array)Db::name('cashier_v3_reservation')->where('id', (int)$reservation['id'])->find();
-    if ((int)$voidedOrderResult['completedCount'] !== 0 || (string)$afterVoided['status'] !== 'IN_SERVICE') {
+    $linkCountAfterVoid = (int)Db::name('cashier_v3_reservation_checkout_service_link')
+        ->where('tenant_id', (string)$order['tenant_id'])
+        ->whereIn('reservation_id', [(int)$reservation['id'], (int)$secondReservation['id']])->count();
+    if ((int)$voidedOrderResult['completedCount'] !== 0 || (string)$afterVoided['status'] !== 'IN_SERVICE'
+        || $linkCountAfterVoid !== $linkCountAfterReplay) {
         throw new RuntimeException('VOIDED_ORDER_CHANGED_RESERVATION');
     }
 
