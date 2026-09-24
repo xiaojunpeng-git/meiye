@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
@@ -858,35 +858,23 @@ async function handleReservationDetailAction(payload = {}) {
     return { result: { status: 'success', message: '已进入收银并打开会员来源选择。' } }
   }
   if (payload.actionCode === 'edit-reservation') {
-    const result = await openReservationEditor({
-      reservationId: payload.reservationId,
-      reservation: payload.reservation
-    })
-    if (result?.success !== false) closeReservationDetail()
-    return result
+    return openReservationEditorFromDetail(payload)
   }
   const action = normalizedReservationAction(payload.actionCode || payload.action?.code || payload.action?.action)
   if (!action) return { success: false, message: '该预约操作暂未接入。' }
   if (action === 'confirm-reservation') {
-    const result = await openReservationEditor({
-      reservationId: payload.reservationId,
-      reservation: payload.reservation,
-      confirmationMode: true
-    })
-    if (result?.success !== false) closeReservationDetail()
-    return result
+    return openReservationEditorFromDetail(payload, { confirmationMode: true })
   }
   const record = payload.reservation || records.value.find((item) => String(item.id) === String(payload.reservationId))
   if (action === 'start-reservation-service') {
     const missing = reservationStartPrerequisites(record || {})
     if (missing.length) {
-      const opened = await openReservationEditor({
-        reservationId: payload.reservationId,
+      const opened = await openReservationEditorFromDetail({
+        ...payload,
         reservation: record
       })
       if (opened?.success) {
         editorStartServiceHint.value = `开始服务前请补齐：${missing.join('、')}。保存预约后再开始服务。`
-        closeReservationDetail()
       }
       return { success: false, status: 'blocked', message: `开始服务前请补齐：${missing.join('、')}。` }
     }
@@ -909,6 +897,26 @@ async function handleReservationDetailAction(payload = {}) {
   }
   if (resultSucceeded(result) && ['reject-reservation', 'cancel-reservation'].includes(action)) closeReservationDetail()
   if (resultSucceeded(result)) await queryReservations(reservationQuerySnapshot.value, false)
+  return result
+}
+
+async function openReservationEditorFromDetail(payload = {}, options = {}) {
+  const reservationId = payload.reservationId || reservationIdentity(payload.reservation)
+  const reservationRecord = payload.reservation
+
+  // 详情和编辑都是 Teleport 全屏弹窗。必须先让详情层完成卸载和
+  // 背景解锁，再挂载编辑层；否则编辑层会把临时 inert 当成页面
+  // 原始状态，保存关闭后整个预约页会保持不可交互。
+  closeReservationDetail()
+  await nextTick()
+  const result = await openReservationEditor({
+    reservationId,
+    reservation: reservationRecord,
+    ...options
+  })
+  if (result?.success === false && reservationId) {
+    await openReservationDetail({ reservationId })
+  }
   return result
 }
 

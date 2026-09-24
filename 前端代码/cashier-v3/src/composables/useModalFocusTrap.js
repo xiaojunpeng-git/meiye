@@ -1,5 +1,17 @@
 import { nextTick, onBeforeUnmount, onMounted } from 'vue'
 
+// Multiple business dialogs may intentionally overlap while one dialog prepares
+// the next one. Keep one shared lock per background element so the later dialog
+// cannot snapshot an earlier dialog's temporary `inert` value as the permanent
+// page state. Store it on globalThis as well as in the module: Vite HMR can keep
+// two timestamped instances of this composable alive during local acceptance,
+// and those instances must still coordinate the same browser-level lock.
+const BACKGROUND_LOCKS_KEY = Symbol.for('mohe.cashierV3.modalBackgroundLocks')
+const backgroundLocks = globalThis[BACKGROUND_LOCKS_KEY] instanceof WeakMap
+  ? globalThis[BACKGROUND_LOCKS_KEY]
+  : new WeakMap()
+globalThis[BACKGROUND_LOCKS_KEY] = backgroundLocks
+
 const FOCUSABLE_SELECTOR = [
   'a[href]',
   'button:not([disabled])',
@@ -27,6 +39,38 @@ export function useModalFocusTrap({ containerRef, canClose = () => true, onClose
   let previouslyFocusedElement = null
   let backgroundState = []
 
+  function acquireBackgroundLock(element) {
+    const existing = backgroundLocks.get(element)
+    if (existing) {
+      existing.owners += 1
+      return
+    }
+
+    backgroundLocks.set(element, {
+      owners: 1,
+      ariaHidden: element.getAttribute('aria-hidden'),
+      inertAttribute: element.hasAttribute('inert'),
+      inert: element.inert === true
+    })
+    element.setAttribute('aria-hidden', 'true')
+    element.setAttribute('inert', '')
+    element.inert = true
+  }
+
+  function releaseBackgroundLock(element) {
+    const lock = backgroundLocks.get(element)
+    if (!lock) return
+    lock.owners -= 1
+    if (lock.owners > 0) return
+
+    backgroundLocks.delete(element)
+    if (!element.isConnected) return
+    if (lock.ariaHidden === null) element.removeAttribute('aria-hidden')
+    else element.setAttribute('aria-hidden', lock.ariaHidden)
+    if (!lock.inertAttribute) element.removeAttribute('inert')
+    element.inert = lock.inert
+  }
+
   function topLayerElement(container) {
     let current = container
     while (current?.parentElement && current.parentElement !== document.body) {
@@ -40,26 +84,14 @@ export function useModalFocusTrap({ containerRef, canClose = () => true, onClose
     if (!topLayer) return
     backgroundState = [...document.body.children]
       .filter((element) => element instanceof HTMLElement && element !== topLayer && !['SCRIPT', 'STYLE'].includes(element.tagName))
-      .map((element) => ({
-        element,
-        ariaHidden: element.getAttribute('aria-hidden'),
-        inertAttribute: element.hasAttribute('inert'),
-        inert: element.inert === true
-      }))
-    for (const entry of backgroundState) {
-      entry.element.setAttribute('aria-hidden', 'true')
-      entry.element.setAttribute('inert', '')
-      entry.element.inert = true
+    for (const element of backgroundState) {
+      acquireBackgroundLock(element)
     }
   }
 
   function restoreBackground() {
-    for (const entry of backgroundState) {
-      if (!entry.element.isConnected) continue
-      if (entry.ariaHidden === null) entry.element.removeAttribute('aria-hidden')
-      else entry.element.setAttribute('aria-hidden', entry.ariaHidden)
-      if (!entry.inertAttribute) entry.element.removeAttribute('inert')
-      entry.element.inert = entry.inert
+    for (const element of backgroundState) {
+      releaseBackgroundLock(element)
     }
     backgroundState = []
   }

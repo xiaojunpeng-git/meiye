@@ -9,6 +9,7 @@ const toolbar = fs.readFileSync(new URL('../../../前端代码/shared/unified-qu
 const baseCss = fs.readFileSync(new URL('../../../前端代码/cashier-v3/src/styles/base.css', import.meta.url), 'utf8')
 const bridge = fs.readFileSync(new URL('../../../前端代码/cashier-v3/src/services/cashierV3Bridge.js', import.meta.url), 'utf8')
 const shell = fs.readFileSync(new URL('../../../前端代码/cashier-v3/src/layouts/CashierShell.vue', import.meta.url), 'utf8')
+const modalFocusTrap = fs.readFileSync(new URL('../../../前端代码/cashier-v3/src/composables/useModalFocusTrap.js', import.meta.url), 'utf8')
 
 assert.doesNotMatch(list, /key: 'pending', label: '待确认'/, '快捷筛选不得重新暴露待确认')
 assert.doesNotMatch(list, /key: 'today', label: '今日预约'/, '预约页不得保留今日预约快捷筛选')
@@ -95,5 +96,9 @@ assert.match(list, /editorConfirmationMode\.value \? 'confirm-reservation'/, '�
 assert.match(list, /:confirmation-mode="editorConfirmationMode"/, '门店预约编辑器必须明确进入确认模式')
 assert.match(editor, /客户姓名不可修改；核对其余信息后保存并确认。/, '门店确认编辑器必须提示客户不可修改')
 assert.match(editor, /confirmationMode \? '保存并确认'/, '门店确认编辑器必须提供保存并确认按钮')
+assert.match(modalFocusTrap, /Symbol\.for\('mohe\.cashierV3\.modalBackgroundLocks'\)[\s\S]*?globalThis\[BACKGROUND_LOCKS_KEY\]/, '全屏弹窗必须跨热更新模块实例共享背景交互锁')
+assert.match(modalFocusTrap, /existing\.owners \+= 1[\s\S]*?lock\.owners -= 1[\s\S]*?if \(lock\.owners > 0\) return/, '详情与编辑弹窗嵌套时必须按持有者计数，最后一个弹窗关闭后才恢复页面')
+assert.match(modalFocusTrap, /backgroundLocks\.delete\(element\)[\s\S]*?element\.inert = lock\.inert/, '嵌套弹窗全部关闭后必须恢复页面原始 inert 状态')
+assert.match(list, /function openReservationEditorFromDetail[\s\S]*?closeReservationDetail\(\)[\s\S]*?await nextTick\(\)[\s\S]*?openReservationEditor/, '从预约详情进入编辑前必须先完成详情层卸载，避免临时 inert 状态被编辑层继承')
 
 console.log('RESERVATION_LIFECYCLE_FRONTEND_CONTRACT=PASS')
