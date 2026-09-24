@@ -367,6 +367,39 @@ try {
         json_encode(['total' => $storeSelector['total'] ?? null, 'ids' => $storeSelectorIds]),
         'C9-MEM-01'
     );
+    $reservationStoreSelector = c5Projection($dispatcher, 'query-member-selector', [
+        'selectorContext' => 'reservation',
+        'selectorEntry' => 'reservation',
+        'memberScope' => 'store',
+        'keyword' => '范围',
+        'page' => 1,
+        'pageSize' => 20,
+    ], $projectionSession);
+    $reservationStoreIds = array_map('intval', array_column((array)($reservationStoreSelector['records'] ?? []), 'memberId'));
+    $reservationAllSelector = c5Projection($dispatcher, 'query-member-selector', [
+        'selectorContext' => 'reservation',
+        'selectorEntry' => 'reservation',
+        'memberScope' => 'all',
+        'keyword' => '范围',
+        'page' => 1,
+        'pageSize' => 20,
+    ], $projectionSession);
+    $reservationAllIds = array_map('intval', array_column((array)($reservationAllSelector['records'] ?? []), 'memberId'));
+    sort($reservationAllIds);
+    ok(
+        '预约选择器默认本店且可显式切换全部会员',
+        (int)($reservationStoreSelector['total'] ?? -1) === 1
+            && $reservationStoreIds === [201]
+            && (int)($reservationAllSelector['total'] ?? -1) === 3
+            && $reservationAllIds === [201, 202, 203],
+        json_encode([
+            'storeTotal' => $reservationStoreSelector['total'] ?? null,
+            'storeIds' => $reservationStoreIds,
+            'allTotal' => $reservationAllSelector['total'] ?? null,
+            'allIds' => $reservationAllIds,
+        ]),
+        'C9-MEM-02'
+    );
 
     c5Section('display store is stable across selector and selected member');
     $multiStoreData = c5Projection($dispatcher, 'query-member-selector', [

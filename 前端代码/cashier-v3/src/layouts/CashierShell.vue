@@ -3036,7 +3036,7 @@ onBeforeUnmount(() => {
     :is-loading="Boolean(memberSelector.isLoading)"
     :allow-guest="isCashierWorkflowPage && memberSelectorContext !== 'reservation' && !memberSelectorRequiresMember"
     :allow-create="canUseFeature('cashier.v3.member') && (isCashierWorkflowPage || memberSelectorInitialView === 'creator')"
-    :show-scope-toggle="memberSelectorContext === 'cashier'"
+    :show-scope-toggle="['cashier', 'reservation'].includes(memberSelectorContext)"
     :current-store-name="state.storeName || ''"
     :creator-schema="memberCreatorSchema"
     :initial-view="memberSelectorInitialView"

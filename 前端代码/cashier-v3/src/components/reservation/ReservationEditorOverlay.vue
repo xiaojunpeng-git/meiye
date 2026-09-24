@@ -425,6 +425,16 @@ function sourceText(line) {
   return normalizedProjectSource(line) === 'card' ? '已购买' : '未购买'
 }
 
+function entitlementOptionText(option) {
+  if (normalizedProjectSource(option) !== 'card') return ''
+  const parts = []
+  const cardName = String(option?.cardName || '').trim()
+  const remainingTimes = Number(option?.remainingTimes)
+  if (cardName) parts.push(cardName)
+  if (Number.isFinite(remainingTimes) && remainingTimes > 0) parts.push(`剩余 ${remainingTimes} 次`)
+  return parts.join(' · ')
+}
+
 function normalizedProjectSource(line) {
   const source = String(line?.source || line?.projectSource || line?.sourceLabel || '').trim().toLowerCase()
   if (['card', 'entitlement', '已购买', '卡内', '卡内项目'].includes(source)) return 'card'
@@ -1019,7 +1029,10 @@ useModalFocusTrap({
             >
             <span class="reservation-project-picker__item-main">
               <strong>{{ projectName(option) }}</strong>
-              <small>{{ projectCategory(option) }} · {{ sourceText(option) }}</small>
+              <small>
+                {{ projectCategory(option) }} · {{ sourceText(option) }}
+                <template v-if="entitlementOptionText(option)"> · {{ entitlementOptionText(option) }}</template>
+              </small>
             </span>
             <small v-if="option.selectable !== true || !normalizedProjectSource(option)" class="reservation-project-picker__unavailable">
               {{ option.disabledReason || '当前不可选择' }}

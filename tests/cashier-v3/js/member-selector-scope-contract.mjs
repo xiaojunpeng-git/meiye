@@ -13,8 +13,8 @@ const checks = [
   ['cashier selector shows store/all scope radios', overlay.includes('showScopeToggle') && overlay.includes("value=\"store\"") && overlay.includes("value=\"all\"")],
   ['cashier selector defaults to store and sends scope on every query', overlay.includes("const memberScope = ref('store')") && overlay.includes('query.memberScope = memberScope.value')],
   ['scope changes reset to first page and query immediately', overlay.includes('memberScope.value = nextScope') && overlay.includes('runQuery(1)')],
-  ['scope toggle is limited to cashier selector', shell.includes(':show-scope-toggle="memberSelectorContext === \'cashier\'"')],
-  ['backend defaults cashier selector to current store', module.includes('$isCashierSelector') && module.includes('$isAllScope') && module.includes('self::currentStoreIds(')],
+  ['scope toggle is enabled for cashier and reservation selectors', shell.includes(':show-scope-toggle="[\'cashier\', \'reservation\'].includes(memberSelectorContext)"')],
+  ['backend defaults cashier and reservation selectors to current store', module.includes('$supportsExplicitStoreScope') && module.includes("['cashier', 'reservation']") && module.includes('$isAllScope') && module.includes('self::currentStoreIds(')],
   ['member selector all scope remains explicitly opt-in', module.includes("'memberScope' => 'all'") || module.includes("$payload['memberScope']")],
 ]
 

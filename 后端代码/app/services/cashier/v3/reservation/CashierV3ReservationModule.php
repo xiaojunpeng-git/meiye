@@ -7,7 +7,14 @@ use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3ResourceVersionServices;
 use app\services\cashier\v3\CashierV3ResultCode;
+use app\services\cashier\v3\CashierV3ScopeResolver;
+use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
+use app\services\cashier\v3\cashier\CashierV3CashierReadinessGuard;
+use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
+use app\services\cashier\v3\cashier\CashierV3EntitlementProjectionServices;
+use app\services\cashier\v3\cashier\CashierV3EntitlementResourceVersionProvider;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
@@ -31,10 +38,21 @@ final class CashierV3ReservationModule
     {
         $catalog = new CashierV3SaleCatalogServices();
         $rooms = new CashierV3LegacyRoomReadProvider();
+        // 预约已购项目必须与收银“使用权益”共用同一欠款、有效期、卡状态和
+        // 跨店口径；这里只复用只读投影，不接入收银草稿或版本写入。
+        $entitlementReadiness = new CashierV3CashierReadinessGuard();
+        $cardRules = new CashierV3CardRuleEntitlementAuthorityServices();
+        $entitlementProjection = new CashierV3EntitlementProjectionServices(
+            $entitlementReadiness,
+            new CashierV3CashierWorkspaceServices($entitlementReadiness),
+            new CashierV3EntitlementResourceVersionProvider($entitlementReadiness, $cardRules),
+            new CashierV3ResourceVersionServices(new CashierV3ScopeResolver()),
+            $cardRules
+        );
         $handlers = $dispatcher->handlers();
 
         if (!$handlers->hasProjection('open-reservation-editor')) {
-            $handlers->registerProjection('open-reservation-editor', function (array $scope) use ($catalog, $rooms): array {
+            $handlers->registerProjection('open-reservation-editor', function (array $scope) use ($catalog, $rooms, $entitlementProjection): array {
                 $operator = $scope['operator_scope'];
                 $dataScope = $scope['data_scope'];
                 $payload = (array)($scope['payload'] ?? []);
@@ -53,11 +71,11 @@ final class CashierV3ReservationModule
                         throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '服务开始后不能编辑预约。');
                     }
                     $selectedMemberId = (int)$header['member_id'];
-                    $options = self::catalogOptions($catalog, $operator, $dataScope, $selectedMemberId);
+                    $options = self::catalogOptions($catalog, $entitlementProjection, $operator, $dataScope, $selectedMemberId);
                     $draft = self::editorDraft($header, $options);
                     $contexts[] = ['kind' => 'reservation', 'id' => (string)$reservationId, 'expectedVersion' => (int)$header['version']];
                 } else {
-                    $options = self::catalogOptions($catalog, $operator, $dataScope, $selectedMemberId);
+                    $options = self::catalogOptions($catalog, $entitlementProjection, $operator, $dataScope, $selectedMemberId);
                     $stateContextId = (string)($scope['state_context_id'] ?? '');
                     $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($operator->storeId(), $stateContextId);
                     $workspaceVersion = (int)Db::name('cashier_v3_resource_version')
@@ -121,13 +139,14 @@ final class CashierV3ReservationModule
             });
         }
         if (!$handlers->hasProjection('query-reservation-project-catalog')) {
-            $handlers->registerProjection('query-reservation-project-catalog', function (array $scope) use ($catalog): array {
+            $handlers->registerProjection('query-reservation-project-catalog', function (array $scope) use ($catalog, $entitlementProjection): array {
                 $payload = (array)($scope['payload'] ?? []);
                 $memberId = self::positive($payload['memberId'] ?? 0, '请选择会员。');
                 return ['data' => ['reservationProjectCatalog' => [
                     'memberId' => $memberId,
                     'catalogOptions' => self::catalogOptions(
                         $catalog,
+                        $entitlementProjection,
                         $scope['operator_scope'],
                         $scope['data_scope'],
                         $memberId
@@ -562,7 +581,13 @@ final class CashierV3ReservationModule
         return ['id' => (int)$header['id'], 'reservationId' => (int)$header['id'], 'revision' => (int)$header['version'], 'recordVersion' => (int)$header['version'], 'reservationVersion' => (int)$header['version'], 'memberId' => (int)$header['member_id'], 'member' => ['id' => (int)$header['member_id'], 'name' => (string)$header['member_name_snapshot'], 'phone' => (string)$header['member_phone_snapshot']], 'projects' => $projects, 'craftsmen' => $craftsmen, 'appointmentTime' => self::formatTime((int)$header['appointment_start_at']), 'appointmentStartAt' => (int)$header['appointment_start_at'], 'appointmentEndAt' => (int)$header['appointment_end_at'], 'roomId' => (int)$header['room_id'], 'room' => (int)$header['room_id'] > 0 ? ['id' => (int)$header['room_id'], 'name' => (string)$header['room_name_snapshot']] : null, 'remark' => (string)$header['remark_snapshot']];
     }
 
-    private static function catalogOptions(CashierV3SaleCatalogServices $catalog, CashierV3OperatorScope $operator, CashierV3DataScopeContext $dataScope, int $memberId = 0): array
+    private static function catalogOptions(
+        CashierV3SaleCatalogServices $catalog,
+        CashierV3EntitlementProjectionServices $entitlementProjection,
+        CashierV3OperatorScope $operator,
+        CashierV3DataScopeContext $dataScope,
+        int $memberId = 0
+    ): array
     {
         $options = [];
         foreach ((array)($catalog->catalog($operator, $dataScope)['items'] ?? []) as $item) {
@@ -584,95 +609,60 @@ final class CashierV3ReservationModule
             ];
         }
         return $memberId > 0
-            ? array_merge(self::purchasedProjectOptions($memberId, $options, $operator, $dataScope), $options)
+            ? array_merge(self::purchasedProjectOptions(
+                $entitlementProjection->reservationSources($memberId, $operator, $dataScope),
+                $options
+            ), $options)
             : $options;
     }
 
-    /** Project the physical balance minus active new-generation reservations. */
-    private static function purchasedProjectOptions(int $memberId, array $unpaidOptions, CashierV3OperatorScope $operator, CashierV3DataScopeContext $dataScope): array
+    /**
+     * Convert the shared entitlement projection into reservation catalog rows.
+     * Physical remaining times decide visibility; authoritative availability
+     * decides whether the row can be selected and why it is disabled.
+     */
+    private static function purchasedProjectOptions(array $sources, array $unpaidOptions): array
     {
-        $now = time();
-        $holders = self::rows(Db::name('user_card_holder')
-            ->where('uid', $memberId)->where('store_id', $operator->storeId())
-            ->where('is_del', 0)->where('write_surplus_times', '>', 0)
-            ->field('id,oid,write_start,write_end')->select());
-        if (!$holders) return [];
-        $holderByOrder = [];
-        foreach ($holders as $holder) {
-            $holderId = (int)($holder['id'] ?? 0);
-            $orderId = (int)($holder['oid'] ?? 0);
-            $start = (int)($holder['write_start'] ?? 0);
-            $end = (int)($holder['write_end'] ?? 0);
-            if ($holderId > 0 && $orderId > 0 && ($start <= 0 || $start <= $now) && ($end <= 0 || $end >= $now)) $holderByOrder[$orderId] = $holderId;
-        }
-        if (!$holderByOrder) return [];
-        $orders = self::rows(Db::name('store_order')
-            ->whereIn('id', array_keys($holderByOrder))->where('paid', 1)
-            ->where('is_del', 0)->where('is_system_del', 0)->where('is_user_del', 0)
-            ->where('refund_status', 0)->where('terminal_action', 0)->where('card_upgrade_use_oid', 0)
-            ->where('store_id', $operator->storeId())->field('id')->select());
-        $orderIds = array_values(array_unique(array_map('intval', array_column($orders, 'id'))));
-        if (!$orderIds) return [];
-        $carts = self::rows(Db::name('store_order_cart_info')
-            ->whereIn('oid', $orderIds)->where('cart_type', 2)->where('product_type', 6)
-            ->where('is_writeoff', 0)->where('write_surplus_times', '>', 0)
-            ->field('id,oid,product_id,cart_info,write_surplus_times,write_start,write_end')->order('id asc')->select());
-        if (!$carts) return [];
-        $disabledHolders = self::disabledCardHolders(array_values($holderByOrder), $memberId, $dataScope->tenantId());
         $catalogByProject = [];
         foreach ($unpaidOptions as $option) {
             $projectId = (int)($option['projectId'] ?? 0);
             if ($projectId > 0 && !isset($catalogByProject[$projectId])) $catalogByProject[$projectId] = $option;
         }
         $options = [];
-        foreach ($carts as $cart) {
-            $orderId = (int)($cart['oid'] ?? 0);
-            $holderId = (int)($holderByOrder[$orderId] ?? 0);
-            $detailId = (int)($cart['id'] ?? 0);
-            $projectId = (int)($cart['product_id'] ?? 0);
-            $start = (int)($cart['write_start'] ?? 0);
-            $end = (int)($cart['write_end'] ?? 0);
-            if ($holderId <= 0 || $detailId <= 0 || $projectId <= 0 || isset($disabledHolders[$holderId])
-                || ($start > 0 && $start > $now) || ($end > 0 && $end < $now)) continue;
-            $catalog = (array)($catalogByProject[$projectId] ?? []);
-            $availableTimes = max(0, (int)$cart['write_surplus_times']);
-            if ($availableTimes <= 0) continue;
-            $info = json_decode((string)($cart['cart_info'] ?? ''), true);
-            $info = is_array($info) ? $info : [];
-            $name = trim((string)($info['productInfo']['store_name'] ?? $catalog['name'] ?? ''));
-            if ($name === '') $name = '项目';
-            $options[] = [
-                'id' => $projectId,
-                'projectId' => $projectId,
-                'skuId' => 0,
-                'name' => $name,
-                'categoryName' => (string)($catalog['categoryName'] ?? '全部'),
-                'categoryNames' => (array)($catalog['categoryNames'] ?? []),
-                'source' => 'card',
-                'entitlementSourceDetailId' => $detailId,
-                'remainingTimes' => $availableTimes,
-                'availableTimes' => $availableTimes,
-                'selectable' => true,
-                'productVersion' => (int)($catalog['productVersion'] ?? 0),
-                'skuVersion' => 0,
-            ];
+        foreach ($sources as $source) {
+            $sourceSelectable = !empty($source['selectable']);
+            $sourceReason = trim((string)($source['disabledReason'] ?? ''));
+            foreach ((array)($source['projects'] ?? []) as $project) {
+                $remainingTimes = max(0, (int)($project['remainingTimes'] ?? 0));
+                $projectId = (int)($project['projectId'] ?? 0);
+                $detailId = (int)($project['entitlementSourceDetailId'] ?? 0);
+                if ($remainingTimes <= 0 || $projectId <= 0 || $detailId <= 0) continue;
+                $catalog = (array)($catalogByProject[$projectId] ?? []);
+                $projectSelectable = $sourceSelectable && !empty($project['selectable']);
+                $disabledReason = trim((string)($project['disabledReason'] ?? '')) ?: $sourceReason;
+                $options[] = [
+                    'id' => $projectId,
+                    'projectId' => $projectId,
+                    'skuId' => 0,
+                    'name' => trim((string)($project['name'] ?? '')) ?: ((string)($catalog['name'] ?? '') ?: '项目'),
+                    'categoryName' => (string)($catalog['categoryName'] ?? '全部'),
+                    'categoryNames' => (array)($catalog['categoryNames'] ?? []),
+                    'source' => 'card',
+                    'entitlementInstanceId' => (int)($source['entitlementInstanceId'] ?? $source['id'] ?? 0),
+                    'entitlementSourceDetailId' => $detailId,
+                    'cardName' => (string)($source['name'] ?? ''),
+                    'remainingTimes' => $remainingTimes,
+                    'availableTimes' => max(0, (int)($project['availableTimes'] ?? 0)),
+                    'debtBlockedTimes' => max(0, (int)($project['debtBlockedTimes'] ?? 0)),
+                    'debtRestrictionLabel' => (string)($project['debtRestrictionLabel'] ?? ''),
+                    'selectable' => $projectSelectable,
+                    'disabledReason' => $projectSelectable ? '' : ($disabledReason ?: '当前不可选择'),
+                    'productVersion' => (int)($catalog['productVersion'] ?? 0),
+                    'skuVersion' => 0,
+                ];
+            }
         }
         return $options;
-    }
-
-    /** V3 card state is optional during historical migration; disabled cards are never selectable. */
-    private static function disabledCardHolders(array $holderIds, int $memberId, string $tenantId): array
-    {
-        if (!$holderIds) return [];
-        try {
-            $ids = Db::name('cashier_v3_card_state')->where('tenant_id', $tenantId)->whereIn('card_holder_id', $holderIds)
-                ->where('current_member_id', $memberId)->where('card_status', '<>', 'enabled')->column('card_holder_id');
-            return array_fill_keys(array_map('intval', $ids), true);
-        } catch (\Throwable $exception) {
-            $message = strtolower($exception->getMessage());
-            if (strpos($message, 'cashier_v3_card_state') !== false && (strpos($message, "doesn't exist") !== false || strpos($message, 'not found') !== false)) return [];
-            throw $exception;
-        }
     }
 
     private static function projectInput(array $reservation): array

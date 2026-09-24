@@ -47,6 +47,35 @@ final class CashierV3EntitlementProjectionServices
         $this->cardRules = $cardRules ?: new CashierV3CardRuleEntitlementAuthorityServices();
     }
 
+    /**
+     * 预约项目选择器复用“使用权益”的完整可用性投影。
+     *
+     * 这里只返回仍有物理剩余次数的跨店权益来源；欠款、有效期和卡状态不会
+     * 把项目静默删除，而是通过 selectable/disabledReason 明确告诉预约端。
+     * 该读取不签发版本、不写收银草稿，也不占用或扣减任何权益。
+     */
+    public function reservationSources(
+        int $memberId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $this->readiness->assertReady();
+        $snapshot = $this->loadRows(
+            $memberId,
+            $operatorScope,
+            $dataScope->tenantId(),
+            false,
+            null,
+            null,
+            true,
+            true,
+            false,
+            false,
+            false
+        );
+        return $this->buildSources($snapshot, [], [], $dataScope->tenantId(), false, true);
+    }
+
     /** @return array{entitlementSelector:array,versions:array} */
     public function openSelector(
         array $payload,
@@ -787,6 +816,12 @@ final class CashierV3EntitlementProjectionServices
             $operationStatus = (string)($holder['card_operation_status'] ?? 'enabled');
             $cardDisabled = $operationStatus !== 'enabled';
             $order = $orders[(int)$holder['oid']] ?? [];
+            // 权益事实必须同时具备仍有效的来源销售单。卡升级后，原订单会被
+            // 权威查询排除，但历史 holder 可能仍保留物理余次；此时不能把
+            // 孤立 holder 当作可预约权益，更不能用空订单继续计算欠款。
+            if ($order === []) {
+                continue;
+            }
             $sourceOrderUnavailableReason = $this->sourceOrderUnavailableReason($order);
             $remaining = max(0, (int)($holder['write_surplus_times'] ?? 0));
             $purchaseTimes = max(0, (int)($holder['write_times'] ?? 0));

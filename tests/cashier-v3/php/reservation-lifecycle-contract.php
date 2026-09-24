@@ -43,10 +43,11 @@ reservationLifecycleOk('预约项目选择器投影权威分类，且仍只接�
     && strpos($module, "'categoryNames' => \$categoryNames") !== false);
 reservationLifecycleOk('预约项目选择器同时投影已购权益项目及全部可售项目',
     strpos($module, 'private static function purchasedProjectOptions') !== false
+    && strpos($module, 'reservationSources(') !== false
     && strpos($module, "'source' => 'card'") !== false
     && strpos($module, "'source' => 'unpaid'") !== false
     && strpos($module, "'entitlementSourceDetailId' => \$detailId") !== false
-    && strpos($module, "->where('cart_type', 2)->where('product_type', 6)") !== false);
+    && strpos($projection, 'public function reservationSources') !== false);
 reservationLifecycleOk('预约保存仅保留已购项目的权益明细标识校验',
     strpos($module, 'private static function projectPlans(array $projects)') !== false
     && strpos($module, "['entitlementSourceDetailId'] ?? \$project['sourceDetailId']") !== false

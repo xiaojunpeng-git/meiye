@@ -157,18 +157,18 @@ final class CashierV3MemberModule
             $handlers->registerProjection('query-member-selector', function (array $scope): array {
                 $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
                 $selectorContext = (string)($payload['selectorContext'] ?? $payload['selector_context'] ?? $payload['selectorEntry'] ?? $payload['selector_entry'] ?? '');
-                $isCashierSelector = $selectorContext === 'cashier';
+                $supportsExplicitStoreScope = in_array($selectorContext, ['cashier', 'reservation'], true);
                 $isAllScope = strtolower(trim((string)($payload['memberScope'] ?? $payload['member_scope'] ?? 'store'))) === 'all';
                 return [
                     'data' => self::querySelector(
                         $payload,
                         $scope['operator_scope'],
                         $scope['data_scope'],
-                        // 收银选择会员默认只查本店；只有明确选择“全部”才查全集团。
+                        // 收银与预约选择会员默认只查本店；只有明确选择“全部”才查全集团。
                         // 推荐人固定只能查本店，不能通过查询范围扩大权限。
                         $selectorContext !== 'member-referrer'
-                            && (!$isCashierSelector || $isAllScope),
-                        $isCashierSelector && !$isAllScope
+                            && (!$supportsExplicitStoreScope || $isAllScope),
+                        $supportsExplicitStoreScope && !$isAllScope
                     ),
                 ];
             });
@@ -799,7 +799,7 @@ final class CashierV3MemberModule
         $page = max(1, (int)($payload['page'] ?? 1));
         $pageSize = min(100, max(1, (int)($payload['pageSize'] ?? 20)));
         $keyword = trim((string)($payload['keyword'] ?? $payload['search'] ?? ''));
-        // 收银选择器默认只查当前操作门店；调用方明确选择全部时才读取全集团。
+        // 收银和预约选择器默认只查当前操作门店；调用方明确选择全部时才读取全集团。
         // 其他选择器保持原有 DataScope 范围，避免影响会员中心等调用方。
         $storeIds = $globalSelector
             ? null
