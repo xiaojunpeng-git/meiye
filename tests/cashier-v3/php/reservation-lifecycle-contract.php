@@ -101,8 +101,10 @@ reservationLifecycleOk('结束服务同一事务写核销、服务、消耗与�
     && strpos($completionFacts, "consumption_performance_recorded") !== false
     && strpos($completionFacts, "labor_performance_allocated") !== false
     && strpos($completionFacts, 'CustomerLifecycleFactServices') !== false);
-reservationLifecycleOk('结束服务遇到来源权益欠款时完成服务但不直接核销',
-    strpos($lifecycle, 'debtBlockedOccupationIdsInTx') !== false
+reservationLifecycleOk('结束服务按统一欠款折算次数决定是否核销权益',
+    strpos($lifecycle, 'debtLimitedAvailabilityInTx') !== false
+    && strpos($lifecycle, 'calcEffectiveWriteSurplusTimes') !== false
+    && strpos($lifecycle, '$debtLimitedAvailable < $quantity') !== false
     && strpos($lifecycle, 'debtBlockedEntitlementSnapshots') !== false
     && strpos($lifecycle, "'debtBlockedEntitlements'") !== false
     && strpos($lifecycle, "\$facts['manualWriteoffRequired']") !== false

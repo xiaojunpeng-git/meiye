@@ -10,6 +10,7 @@ use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver;
 use app\services\cashier\v3\service\ThinkPhpCashierV3ServiceOrderRepository;
+use app\services\order\store\WriteOffOrderServices;
 use app\services\store\StoreReservationStaffServices;
 use think\facade\Db;
 
@@ -357,26 +358,28 @@ final class CashierV3ReservationLifecycleServices
         $this->releaseInTx($tenantId, $reservationId, $now);
         $candidateResult = $this->liveEntitlementCandidatesInTx($header, $lines);
         $candidates = $candidateResult['candidates'];
-        $debtBlockedOccupationIds = $this->debtBlockedOccupationIdsInTx($candidates, (int)$header['member_id']);
-        $debtBlockedEntitlements = $this->debtBlockedEntitlementSnapshots(
-            $candidates,
-            $lines,
-            $debtBlockedOccupationIds
-        );
+        // 预约结束服务必须与收银“使用权益”共用欠款折算口径：有欠款不等于
+        // 整卡禁用，只有欠款限制后的实时可用次数小于本次数量才阻止扣次。
+        $debtLimitedAvailability = $this->debtLimitedAvailabilityInTx($candidates, (int)$header['member_id']);
 
         $detailRemain = $candidateResult['detailRemain'];
         $holderRemain = $candidateResult['holderRemain'];
         $settledOccupations = [];
+        $debtBlockedOccupationIds = [];
         $insufficientEntitlements = $candidateResult['unavailable'];
         foreach ($candidates as $candidate) {
             $candidateId = (int)$candidate['id'];
-            if (isset($debtBlockedOccupationIds[$candidateId])) continue;
             $detailId = (int)$candidate['entitlement_source_detail_id'];
             $holderId = (int)$candidate['card_holder_id'];
             $quantity = max(1, (int)$candidate['occupied_times']);
             $available = min((int)($detailRemain[$detailId] ?? 0), (int)($holderRemain[$holderId] ?? 0));
             if ($available < $quantity) {
                 $insufficientEntitlements[] = $this->insufficientSnapshot($candidate, $available);
+                continue;
+            }
+            $debtLimitedAvailable = min($available, (int)($debtLimitedAvailability[$candidateId] ?? $available));
+            if ($debtLimitedAvailable < $quantity) {
+                $debtBlockedOccupationIds[$candidateId] = true;
                 continue;
             }
             $candidate['detailSnapshot']['write_surplus_times'] = (int)$detailRemain[$detailId];
@@ -399,6 +402,11 @@ final class CashierV3ReservationLifecycleServices
                 'write_surplus_times' => max(0, (int)$holderRemain[$holderId]),
             ]);
         }
+        $debtBlockedEntitlements = $this->debtBlockedEntitlementSnapshots(
+            $candidates,
+            $lines,
+            $debtBlockedOccupationIds
+        );
 
         $serviceOrderId = (int)($header['service_order_id'] ?? 0);
         if ($serviceOrderId > 0) {
@@ -528,66 +536,90 @@ final class CashierV3ReservationLifecycleServices
         return $snapshots;
     }
 
-    /** @return array<int,true> occupation id map */
-    private function debtBlockedOccupationIdsInTx(array $occupations, int $memberId): array
+    /**
+     * Return the debt-limited available quantity for every candidate line.
+     *
+     * The shared write-off service owns the monetary-to-times conversion. This
+     * method only supplies locked reservation authorities and the authoritative
+     * pending debt, so reservation completion cannot drift from cashier use.
+     *
+     * @param array<int,array<string,mixed>> $occupations
+     * @return array<int,int> reservation line id => debt-limited available times
+     */
+    private function debtLimitedAvailabilityInTx(array $occupations, int $memberId): array
     {
         if (!$occupations) return [];
-        $detailIds = array_values(array_unique(array_filter(array_map(static function (array $occupation): int {
-            return (int)($occupation['entitlement_source_detail_id'] ?? 0);
-        }, $occupations))));
-        if (!$detailIds) return [];
-
-        $detailRows = $this->rows(Db::name('store_order_cart_info')->whereIn('id', $detailIds)
-            ->field('id,oid')->order('oid asc,id asc')->select());
-        $orderIdByDetail = [];
-        foreach ($detailRows as $detail) {
-            $orderIdByDetail[(int)$detail['id']] = (int)$detail['oid'];
+        $orderIds = [];
+        foreach ($occupations as $occupation) {
+            $orderId = (int)($occupation['detailSnapshot']['oid'] ?? 0);
+            if ($orderId > 0) $orderIds[$orderId] = $orderId;
         }
-        $orderIds = array_values(array_unique(array_filter(array_map('intval', array_values($orderIdByDetail)))));
+        $orderIds = array_values($orderIds);
         sort($orderIds, SORT_NUMERIC);
         if (!$orderIds) return [];
 
         $debtRows = $this->rows(Db::name('store_debt')->whereIn('order_id', $orderIds)
             ->field('id,order_id,status,total_debt,repaid_debt')->order('order_id asc,id asc')->lock(true)->select());
-        $ordersWithDebtRow = [];
-        $blockedOrderIds = [];
+        $debtByOrder = [];
         foreach ($debtRows as $debt) {
-            $orderId = (int)$debt['order_id'];
-            $ordersWithDebtRow[$orderId] = true;
-            if ((int)$debt['status'] === 0 && bccomp(bcsub((string)$debt['total_debt'], (string)$debt['repaid_debt'], 2), '0', 2) > 0) {
-                $blockedOrderIds[$orderId] = true;
-            }
+            $debtByOrder[(int)$debt['order_id']] = $debt;
         }
 
-        // Historical orders may not yet have a store_debt row. Preserve the
-        // existing order snapshot fallback used by the cashier entitlement view.
         $orders = $this->rows(Db::name('store_order')->whereIn('id', $orderIds)
-            ->field('id,uid,debt_amount,repaid_debt_amount')->order('id asc')->lock(true)->select());
+            ->order('id asc')->lock(true)->select());
+        $ordersById = [];
+        foreach ($orders as $order) $ordersById[(int)$order['id']] = $order;
+
+        $cartRows = $this->rows(Db::name('store_order_cart_info')->whereIn('oid', $orderIds)
+            ->where('cart_type', 2)->where('product_type', 6)
+            ->field('id,oid,cart_info,cart_type,product_type,write_times,write_surplus_times,pay_price,debt_amount,repaid_debt_amount,is_gift')
+            ->order('oid asc,id asc')->lock(true)->select());
+        $cartRowsByOrder = [];
+        foreach ($cartRows as $cartRow) $cartRowsByOrder[(int)$cartRow['oid']][] = $cartRow;
+
         $v3CardDebtResolver = new CashierV3CardOriginDebtResolver();
+        $pendingByOrder = [];
         foreach ($orders as $order) {
             $orderId = (int)$order['id'];
             $v3CardDebt = $v3CardDebtResolver->pendingV3CardDebt($order, $memberId, true);
             if ($v3CardDebt !== null) {
-                if (bccomp($v3CardDebt, '0', 2) > 0) {
-                    $blockedOrderIds[$orderId] = true;
-                }
+                $pendingByOrder[$orderId] = $v3CardDebt;
                 continue;
             }
-            if (isset($ordersWithDebtRow[$orderId])) continue;
-            if (bccomp(bcsub((string)$order['debt_amount'], (string)$order['repaid_debt_amount'], 2), '0', 2) > 0) {
-                $blockedOrderIds[$orderId] = true;
+            $debt = (array)($debtByOrder[$orderId] ?? []);
+            if ($debt) {
+                $pendingByOrder[$orderId] = (int)$debt['status'] === 0
+                    ? max('0.00', bcsub((string)$debt['total_debt'], (string)$debt['repaid_debt'], 2))
+                    : '0.00';
+                continue;
             }
+            $pendingByOrder[$orderId] = max('0.00', bcsub(
+                (string)($order['debt_amount'] ?? '0'),
+                (string)($order['repaid_debt_amount'] ?? '0'),
+                2
+            ));
         }
 
-        $blockedOccupationIds = [];
+        $writeoff = app()->make(WriteOffOrderServices::class);
+        if (!$writeoff instanceof WriteOffOrderServices) {
+            throw new \LogicException('reservation_writeoff_service_invalid');
+        }
+        $availability = [];
         foreach ($occupations as $occupation) {
             $occupationId = (int)$occupation['id'];
-            $detailId = (int)$occupation['entitlement_source_detail_id'];
-            if (isset($blockedOrderIds[(int)($orderIdByDetail[$detailId] ?? 0)])) {
-                $blockedOccupationIds[$occupationId] = true;
-            }
+            $detail = (array)($occupation['detailSnapshot'] ?? []);
+            $orderId = (int)($detail['oid'] ?? 0);
+            $order = (array)($ordersById[$orderId] ?? []);
+            if ($occupationId <= 0 || !$detail || !$order) continue;
+            $availability[$occupationId] = $writeoff->calcEffectiveWriteSurplusTimes(
+                $detail,
+                (float)($pendingByOrder[$orderId] ?? 0),
+                $order,
+                null,
+                $cartRowsByOrder[$orderId] ?? []
+            );
         }
-        return $blockedOccupationIds;
+        return $availability;
     }
 
     private function lockGuard(string $tenantId, int $detailId, int $now): array
