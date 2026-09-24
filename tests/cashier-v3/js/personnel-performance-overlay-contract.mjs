@@ -13,6 +13,10 @@ const workbench = fs.readFileSync(
   path.join(root, '前端代码/cashier-v3/src/views/CashierWorkbenchView.vue'),
   'utf8'
 )
+const styles = fs.readFileSync(
+  path.join(root, '前端代码/cashier-v3/src/styles/base.css'),
+  'utf8'
+)
 const orderCenter = fs.readFileSync(
   path.join(root, '前端代码/cashier-v3/src/views/OrderCenterView.vue'),
   'utf8'
@@ -143,6 +147,10 @@ assert.match(component, /guideRoundNo = ref\(props\.guestCustomer \? 'none' : ''
 assert.match(component, /guestCustomer \? \[\] : \[1, 2, 3\]/, '会员除无轮次外继续展示第 1～3 轮')
 assert.match(component, /personnel-attribution-role-header[\s\S]*?<strong>导购<\/strong>[\s\S]*?查询导购<\/button>/, '查询导购必须与导购标题同行')
 assert.match(component, /personnel-attribution-role-header[\s\S]*?<strong>销售经理<\/strong>[\s\S]*?查询销售经理<\/button>/, '查询销售经理必须与销售经理标题同行')
+assert.match(styles, /\.personnel-attribution-manager\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/, '导购与销售经理必须左右两栏展示')
+assert.match(styles, /\.personnel-simple-grid\.is-single\s*>\s*\.personnel-attribution-manager\s*\{[\s\S]*?max-width:\s*none/, '左右归属区必须解除单区 760px 限宽并铺满弹窗内容区')
+assert.equal((component.match(/class="personnel-attribution-role-description"/g) || []).length, 2, '导购与销售经理必须各自展示归属口径说明')
+assert.doesNotMatch(component, />导购 \/ 销售经理</, '左右分栏后不得再展示跨栏总标题')
 assert.match(component, /records\.filter\(\(item\) => matchesGroupKeyword\(item\)[\s\S]*attributionRoleAllows\(item, attributionSearchRole\.value/, '集团查询按导购与销售经理各自资格展示可结账人员')
 assert.match(workbench, /class="cart-line__meta-slot cart-line__meta-slot--attribution"/, '购物车必须展示导购/销售经理按钮')
 assert.match(workbench, /loadPersonnelOverlay\(line, 'guides', 'attribution'\)/, '统一入口必须打开导购/销售经理选择范围')

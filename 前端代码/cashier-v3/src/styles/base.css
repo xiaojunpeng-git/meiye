@@ -4664,13 +4664,18 @@ button:disabled {
 }
 
 .personnel-attribution-manager {
-  display: flex !important;
-  flex-direction: column;
+  /* 归属区按角色左右分栏：导购在左，销售经理在右。 */
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-column: 1 / -1;
   gap: 14px;
-  max-width: 760px;
   width: 100%;
   justify-self: center;
+}
+
+.personnel-simple-grid.is-single > .personnel-attribution-manager {
+  /* 这一区需要承载左右两个角色，不沿用单区内容的 760px 居中限宽。 */
+  max-width: none;
 }
 
 .personnel-attribution-role {
@@ -4708,6 +4713,13 @@ button:disabled {
   color: #8b97a6;
   font-size: 12px;
   font-style: normal;
+}
+
+.personnel-attribution-role-description {
+  margin: -4px 0 0;
+  color: #697586;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .personnel-attribution-members {

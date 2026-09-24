@@ -1005,13 +1005,13 @@ function searchGroupPersonnel(scope) {
           <p v-if="!filteredSalespeople.length" class="personnel-empty">暂无可选择的销售人</p>
         </section>
         <section v-if="showGuides || showSalesManagers" class="personnel-attribution-manager">
-          <div class="personnel-role-heading"><h3>导购 / 销售经理</h3><small>仅记录归属，不参与业绩比例分配</small></div>
           <div v-if="showGuides" class="personnel-attribution-role">
-            <!-- 查询入口与角色标题固定同行，人员列表及轮次始终在下方独立展示。 -->
+            <!-- 每个角色独立呈现标题与口径说明，查询入口固定在本栏最右侧。 -->
             <div class="personnel-attribution-role-header">
               <div class="personnel-attribution-role-title"><strong>导购</strong><small>可添加多人</small></div>
               <button type="button" class="button button--secondary personnel-attribution-add" @click="openAttributionSearch('guide')">查询导购</button>
             </div>
+            <p class="personnel-attribution-role-description">仅记录归属，不参与业绩比例分配</p>
             <div class="personnel-attribution-members">
               <span v-for="item in selectedGuides" :key="`selected-guide-${item.id}`">{{ item.name }}<button type="button" :aria-label="`移除导购 ${item.name}`" @click="removeAttribution(item, 'guide')">×</button></span>
               <em v-if="!selectedGuides.length">暂未添加</em>
@@ -1027,6 +1027,7 @@ function searchGroupPersonnel(scope) {
               <div class="personnel-attribution-role-title"><strong>销售经理</strong><small>仅 1 人</small></div>
               <button type="button" class="button button--secondary personnel-attribution-add" @click="openAttributionSearch('salesManager')">查询销售经理</button>
             </div>
+            <p class="personnel-attribution-role-description">仅记录归属，不参与业绩比例分配</p>
             <div class="personnel-attribution-members">
               <span v-for="item in selectedSalesManagers" :key="`selected-manager-${item.id}`">{{ item.name }}<button type="button" :aria-label="`移除销售经理 ${item.name}`" @click="removeAttribution(item, 'salesManager')">×</button></span>
               <em v-if="!selectedSalesManagers.length">暂未添加</em>
