@@ -65,3 +65,18 @@
 - `tests/cashier-v3/evidence/R32-reservation-partial-debt-writeoff-2026-09-24.md`
 
 产品经理已于 2026-09-24 确认本地测试无问题，并明确授权 commit、部署瑞昊和线上验证后 push。
+
+## 瑞昊部署与线上验证
+
+- 业务提交：`ecd3176f R32 预约部分欠款可用次数扣次闭环`。
+- 目标仅为瑞昊 `rh.cc3798.com`，站点 `/www/wwwroot/rh.cc3798.com`，数据库只读核对为 `ruihao`。`007`、`008`、`012` 未连接、未部署。
+- 本次无 SQL、无配置、无前端构建变更；仅从固定提交精准导出并同步 `CashierV3ReservationLifecycleServices.php`，没有上传工作区的其他未提交改动。
+- 部署前运行文件 SHA-256：`88c44cdf327d73e43b2e33a4783d8b57a7fdef0e848caadf61e56f7f02194c1b`。
+- 独立回滚备份：`/www/backups/rh.cc3798.com/20260924-r32-ecd3176f-partial-debt-TWJbgewc/backend-before.tar.gz`，SHA-256 `5d72bd29aa1661dfb0b707d5b2a469603114b82ca04a9e1ffb094bda480c234a`。
+- 部署后运行文件 SHA-256：`c2d7dc8b567079053b86fb9ec84f4822c0f38d74e81541ea84fb0519fb930d30`，与固定提交一致；线上 PHP 语法检查通过。
+- 瑞昊 Swoole 重启后 `manager_count=1`；AI execution worker、Excel worker 和 supervisor 均为 `active`；近期日志 `Fatal error / Parse error / Uncaught` 计数为 0。
+- 正式入口 `/view_cashier_v3/?release=ecd3176f#/reservation` 与 8080 预览入口 `/preview-8080/view_cashier_v3/?release=ecd3176f#/reservation` 均返回 HTTP 200。
+- 对原问题单 `YY2609240076` 做瑞昊线上只读计算：权益明细 `3106913` 物理剩余 30 次，未结欠款 ¥5480，统一折算结果为可用 6 次，`one_use_allowed=true`。这证明新逻辑对该原问题数据不再阻止单次扣次。
+- 线上验证全程只读，未新增、修改或删除瑞昊业务数据；未重写原历史服务结果。
+
+如需回滚，仅恢复上述备份中的后端文件，清理瑞昊运行缓存并重启瑞昊 Swoole 及相关常驻服务；不涉及数据库回滚。
