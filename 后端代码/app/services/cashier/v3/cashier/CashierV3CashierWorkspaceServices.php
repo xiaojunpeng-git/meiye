@@ -1767,9 +1767,15 @@ final class CashierV3CashierWorkspaceServices
         CashierV3OperatorScope $operatorScope
     ): array {
         $this->readiness->assertReady();
+        $this->assertWorkspaceIdentity($workspaceId, $stateContextId, $operatorScope);
         $draft = Db::name(self::DRAFT_TABLE)
             ->where('workspace_id', $workspaceId)
             ->find();
+        // 普通浏览器本地购物车可以在没有服务端草稿的情况下结账。
+        // 无草稿只代表没有需要清理的来源挂单，不能阻断原有结账。
+        if (!$draft) {
+            return ['resumed_hang_order_id' => ''];
+        }
         $this->assertDraftBinding($draft, $workspaceId, $stateContextId, $operatorScope);
         $rows = $this->lineRows($workspaceId, false);
         $public = $this->toPublicDraft($draft, $rows);
@@ -1786,6 +1792,29 @@ final class CashierV3CashierWorkspaceServices
             'rows' => array_values($rows),
             'publicDraft' => $public,
             'fingerprint' => (string)$draft['line_fingerprint'],
+        ];
+    }
+
+    /**
+     * 读取结账快照不承载的服务端草稿元数据。
+     *
+     * 浏览器快照仍是商品、金额和人员选择的唯一结账输入；来源
+     * 挂单标识只能从已绑定的 workspace 读取，不得由客户端传入。
+     * 本读取不获取 workspace 锁，以保持本地快照结账的既有锁集；
+     * 真正删除挂单仍发生在结账成功后，并由挂单绑定服务再校验租户和门店。
+     */
+    public function checkoutDraftMetadata(
+        string $workspaceId,
+        string $stateContextId,
+        CashierV3OperatorScope $operatorScope
+    ): array {
+        $this->readiness->assertReady();
+        $draft = Db::name(self::DRAFT_TABLE)
+            ->where('workspace_id', $workspaceId)
+            ->find();
+        $this->assertDraftBinding($draft, $workspaceId, $stateContextId, $operatorScope);
+        return [
+            'resumed_hang_order_id' => trim((string)($draft['resumed_hang_order_id'] ?? '')),
         ];
     }
 

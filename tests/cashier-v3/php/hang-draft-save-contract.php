@@ -84,6 +84,22 @@ expectContract(strpos($source['resume'], "'sourceRetained' => true") !== false
     && strpos($source['resume'], '$deletedLines') === false
     && strpos($source['resume'], "'hang_status' => 'resumed_checkout'") === false,
     'resume keeps the source hang as an unchanged draft until checkout completion');
+expectContract(strpos($source['resume'], 'CashierV3CashierMemberSummaryServices') !== false
+    && strpos($source['resume'], "'member' => \$this->restoredMember(") !== false
+    && strpos($source['resume'], 'private function restoredMember') !== false,
+    'resume returns the authoritative member summary together with the restored draft');
+expectContract(strpos($source['view'], 'const restoredMemberId = Number(draft.memberId || 0)') !== false
+    && strpos($source['view'], "customerMode: 'member'") !== false
+    && strpos($source['view'], 'member: clonePlain(restoredMember)') !== false
+    && strpos($source['view'], 'commitLocalCashierDraft(clonePlain(local))')
+        > strpos($source['view'], 'member: clonePlain(restoredMember)'),
+    'cashier restores the member scope before committing the resumed browser draft');
+expectContract(strpos($source['view'], 'const restoredHangMemberCheckpoint = ref(null)') !== false
+    && strpos($source['view'], 'isRestoredHangMemberProjectionTransition') !== false
+    && strpos($source['view'], 'restoreHangMemberProjection()') !== false
+    && strpos($source['view'], 'restoringAuthoritativeMember') !== false
+    && strpos($source['view'], 'restoredHangMemberCheckpoint.value = null') !== false,
+    'cashier protects the restored member from a delayed guest projection and releases it at a real scope boundary');
 expectContract(strpos($source['binding'], "resumed_hang_order_id") !== false
     && strpos($source['binding'], "->where('hang_order_id', \$hangOrderId)\n            ->delete();") !== false
     && strpos($source['binding'], 'readResumedHeader(') !== false

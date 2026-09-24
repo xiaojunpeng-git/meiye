@@ -701,10 +701,19 @@ final class CashierV3CheckoutPreparationServices
             'memberId' => (int)($snapshot['memberId'] ?? 0),
             'lines' => $entitlementLines,
         ];
+        // 来源挂单是服务端 workspace 元数据，不属于浏览器可编辑
+        // 的结账快照。仅把这个可信内部引用带入 request，使成功
+        // 结账能够清理原挂单，且不改变现有快照结账和锁集。
+        $workspaceMetadata = $this->workspace->checkoutDraftMetadata(
+            $workspaceId,
+            $stateContextId,
+            $operatorScope
+        );
         $storedDraft = [
             'order_note' => (string)($snapshot['orderNote'] ?? ''),
             'supplement_enabled' => !empty($snapshot['supplement']['enabled']) ? 1 : 0,
             'supplement_reason' => (string)($snapshot['supplement']['reason'] ?? ''),
+            'resumed_hang_order_id' => (string)($workspaceMetadata['resumed_hang_order_id'] ?? ''),
         ];
         // Entitlement-only completion has no collection phase. Clear any
         // stale payment or balance fields that may have survived a previous

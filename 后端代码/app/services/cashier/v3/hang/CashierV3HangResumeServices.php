@@ -7,6 +7,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\cashier\CashierV3CashierMemberSummaryServices;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\hang\authority\CashierV3HangOrderPlanV1;
@@ -31,6 +32,9 @@ final class CashierV3HangResumeServices
     /** @var CashierV3SaleCatalogServices */
     private $saleCatalog;
 
+    /** @var CashierV3CashierMemberSummaryServices */
+    private $memberSummaries;
+
     /** @var RoomOpenServiceGuardVersionProvider */
     private $roomVersions;
 
@@ -41,12 +45,14 @@ final class CashierV3HangResumeServices
         CashierV3CashierWorkspaceServices $workspace,
         CashierV3SaleCatalogServices $saleCatalog,
         ?RoomOpenServiceGuardVersionProvider $roomVersions = null,
-        ?RoomOpenServiceGuardAuthority $roomGuard = null
+        ?RoomOpenServiceGuardAuthority $roomGuard = null,
+        ?CashierV3CashierMemberSummaryServices $memberSummaries = null
     ) {
         $this->workspace = $workspace;
         $this->saleCatalog = $saleCatalog;
         $this->roomVersions = $roomVersions ?: new RoomOpenServiceGuardVersionProvider();
         $this->roomGuard = $roomGuard ?: new RoomOpenServiceGuardAuthority();
+        $this->memberSummaries = $memberSummaries ?: new CashierV3CashierMemberSummaryServices();
     }
 
     /** Callable server discovery for resume-hang-order. */
@@ -129,6 +135,8 @@ final class CashierV3HangResumeServices
             'hangVersion' => (int)$header['hang_version'],
             'status' => 'restored',
             'sourceRetained' => true,
+            'customerMode' => (int)$header['member_id'] > 0 ? 'member' : 'guest',
+            'member' => $this->restoredMember((int)$header['member_id'], $operator->storeId()),
             'cashierDraft' => $cashierDraft,
         ];
     }
@@ -170,6 +178,11 @@ final class CashierV3HangResumeServices
                 'status' => 'restored',
                 'sourceRetained' => true,
                 'hangVersion' => (int)($header['hang_version'] ?? 0),
+                'customerMode' => (int)($header['member_id'] ?? 0) > 0 ? 'member' : 'guest',
+                'member' => $this->restoredMember(
+                    (int)($header['member_id'] ?? 0),
+                    $operator->storeId()
+                ),
                 'cashierDraft' => $cashierDraft,
                 'localDraft' => $localDraft,
             ];
@@ -211,8 +224,23 @@ final class CashierV3HangResumeServices
             'status' => 'restored',
             'sourceRetained' => true,
             'hangVersion' => (int)($header['hang_version'] ?? 0),
+            'customerMode' => (int)($header['member_id'] ?? 0) > 0 ? 'member' : 'guest',
+            'member' => $this->restoredMember(
+                (int)($header['member_id'] ?? 0),
+                $operator->storeId()
+            ),
             'cashierDraft' => $cashierDraft,
         ];
+    }
+
+    /**
+     * Restore the visible cashier member from the same authoritative identity
+     * as the draft. The browser must not reconstruct a stale member from the
+     * hang list snapshot; guests intentionally return null.
+     */
+    private function restoredMember(int $memberId, int $storeId): ?array
+    {
+        return $memberId > 0 ? $this->memberSummaries->read($memberId, $storeId) : null;
     }
 
     /** @return array<string,mixed> */

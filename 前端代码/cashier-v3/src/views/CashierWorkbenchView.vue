@@ -137,6 +137,10 @@ const entitlementSelectorDraftCheckpoint = ref(null)
 const cashierContextEpoch = ref(0)
 const entitlementSelectorSnapshot = ref(null)
 const cashierDraftSnapshot = ref(null)
+// 提单返回的会员摘要与购物车属于同一份服务端恢复结果。路由切换期间
+// 可能仍有一份较早的游客根投影在途；在挂单草稿完成结账或收银员明确
+// 改选客户前，保留这份会员权威摘要，禁止迟到投影拆散会员与购物车。
+const restoredHangMemberCheckpoint = ref(null)
 // 多旧卡升级的购物车仅存在于浏览器，直到最终结账事务提交唯一快照。
 // 在此期间，同一 state context 下的游客根投影不代表用户主动换客，
 // 不能冲掉已选的原卡、目标卡和抵扣金额。
@@ -311,6 +315,37 @@ function restorePendingLocalMultiCardUpgradeProjection() {
     ...(state.cashier || {}),
     customerMode: 'member',
     member: clonePlain(memberSnapshot)
+  }
+  return true
+}
+
+function isRestoredHangMemberProjectionTransition(current = {}, previous = {}) {
+  const checkpoint = restoredHangMemberCheckpoint.value
+  if (!checkpoint || !isRecord(checkpoint.member)) return false
+  if (checkpoint.stateContextId
+    && current.stateContextId
+    && checkpoint.stateContextId !== String(current.stateContextId)) return false
+  if (checkpoint.storeId
+    && current.storeId
+    && checkpoint.storeId !== String(current.storeId)) return false
+  // applyRestoredHangDraft 会先写入会员、再提交本地购物车。
+  // 这次“游客 -> 挂单会员”是同一恢复命令的内部过渡，
+  // 不能走手工换客的 reset 分支，否则会立即丢失检查点。
+  const restoringAuthoritativeMember = String(previous.memberId || '') === ''
+    && String(current.memberId || '') === String(checkpoint.memberId || '')
+  if (restoringAuthoritativeMember) return true
+  if (!cashierDraftSnapshot.value) return false
+  return String(previous.memberId || '') === String(checkpoint.memberId || '')
+    && String(current.memberId || '') === ''
+}
+
+function restoreHangMemberProjection() {
+  const checkpoint = restoredHangMemberCheckpoint.value
+  if (!checkpoint || !isRecord(checkpoint.member)) return false
+  state.cashier = {
+    ...(state.cashier || {}),
+    customerMode: 'member',
+    member: clonePlain(checkpoint.member)
   }
   return true
 }
@@ -4386,6 +4421,9 @@ function handleMemberSelectedForEntitlement(event = {}) {
     return
   }
   if (event.detail?.context !== 'cashier') return
+  // 收银员明确选择会员时，新的选择替代提单恢复摘要；之后的根投影
+  // 可以按正常客户切换流程更新，不能再由旧挂单检查点回写。
+  restoredHangMemberCheckpoint.value = null
   if (pendingCustomCardEntry.value) {
     pendingCustomCardEntry.value = false
     nextTick(() => { guidedBusinessMode.value = 'custom-card' })
@@ -6444,6 +6482,7 @@ function resetCashierLocalContext() {
   isSavingLineCoupon.value = false
   checkoutLocalOutcome.value = {}
   checkoutReceiptSnapshot.value = null
+  restoredHangMemberCheckpoint.value = null
   localCheckoutBusinessDate.value = cashierToday
   localCheckoutBusinessDateReason.value = ''
   localCheckoutBusinessSource.value = {
@@ -6483,6 +6522,9 @@ async function closeSucceededCheckoutAndRefreshWorkbench(submissionResponse = {}
   // it must never make the pre-settlement cart visible again.
   // 唯一快照已落账，接下来的空工作台投影是终态，不能再按本地升级草稿恢复。
   localMultiCardUpgradeMemberCheckpoint.value = null
+  // 结账成功即终止本次提单恢复会话；之后的游客空工作台是新的业务
+  // 边界，不能再由旧会员检查点覆盖。
+  restoredHangMemberCheckpoint.value = null
   // 纯权益结账的成功页可能只保留已投影的结算结果，而子组件回传的
   // 原始响应不保证带有 checkoutSubmission。在关闭结账层清空本地结果前先固化
   // 同一次成功结账的标识；它们仍然来自服务端成功回执，不接受浏览器自行推断。
@@ -6669,6 +6711,35 @@ function closeHangOrderOverlay() {
 
 function applyRestoredHangDraft(detail = {}) {
   const local = detail?.localDraft
+  const draft = isRecord(local) ? local : detail?.cashierDraft
+  if (!isRecord(draft)) return false
+  const restoredMemberId = Number(draft.memberId || 0)
+  const restoredMember = isRecord(detail?.member) ? detail.member : null
+  if (restoredMemberId > 0) {
+    const summaryMemberId = Number(restoredMember?.id || restoredMember?.memberId || 0)
+    if (summaryMemberId !== restoredMemberId) return false
+    // 会员身份是本地草稿作用域的一部分。必须先恢复后端
+    // 权威会员摘要，再写入购物车，否则草稿会被错绑到游客作用域。
+    state.cashier = {
+      ...(state.cashier || {}),
+      customerMode: 'member',
+      member: clonePlain(restoredMember)
+    }
+    restoredHangMemberCheckpoint.value = {
+      hangOrderId: String(detail?.hangOrderId || ''),
+      stateContextId: String(state.stateContextId || ''),
+      storeId: String(currentCashierStoreId.value || ''),
+      memberId: String(restoredMemberId),
+      member: clonePlain(restoredMember)
+    }
+  } else {
+    restoredHangMemberCheckpoint.value = null
+    state.cashier = {
+      ...(state.cashier || {}),
+      customerMode: 'guest',
+      member: null
+    }
+  }
   if (isRecord(local) && Array.isArray(local.lines) && Array.isArray(local.operations)) {
     commitLocalCashierDraft(clonePlain(local))
     localCashierDraftOperations.value = clonePlain(local.operations)
@@ -6676,7 +6747,6 @@ function applyRestoredHangDraft(detail = {}) {
     cashierDraftHasUnresolvedCommand.value = false
     return true
   }
-  const draft = detail?.cashierDraft
   if (!isResponseBoundCommittedCashierDraft(draft)) return false
   if (String(draft.stateContextId || '') !== String(state.stateContextId || '')) return false
   cashierDraftSnapshot.value = Object.freeze({
@@ -6738,6 +6808,10 @@ watch(
     }
     if (isPendingLocalMultiCardUpgradeProjectionTransition(current, previous)) {
       restorePendingLocalMultiCardUpgradeProjection()
+      return
+    }
+    if (isRestoredHangMemberProjectionTransition(current, previous)) {
+      restoreHangMemberProjection()
       return
     }
     const businessScopeChanged = true

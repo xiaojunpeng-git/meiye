@@ -18,6 +18,7 @@ $assert = static function (string $name, bool $condition): void {
 };
 
 $preparation = $read($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php');
+$workspace = $read($root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php');
 $repository = $read($root . '/后端代码/app/services/cashier/v3/settlement/ThinkPhpCashierV3CheckoutRequestRepository.php');
 $binding = $read($root . '/后端代码/app/services/cashier/v3/hang/CashierV3HangCheckoutBindingServices.php');
 $module = $read($root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php');
@@ -29,6 +30,10 @@ $assert('resumed hang is not rediscovered as a checkout resource', strpos($prepa
 $assert('resumed hang is not validated as a checkout source during prepare', strpos($preparation, 'assertWorkspaceBindingInTx') === false);
 $assert('resumed hang is excluded from checkout source-document kinds', strpos($preparation, "'hang_order', 'service_order'") === false);
 $assert('prepared request stores only an internal resumed-hang reference', strpos($preparation, 'bindResumedHangOrderInTx') !== false);
+$assert('snapshot checkout inherits the server-side resumed-hang reference', strpos($preparation, 'checkoutDraftMetadata(') !== false
+    && strpos($preparation, "'resumed_hang_order_id' => (string)(\$workspaceMetadata['resumed_hang_order_id'] ?? '')") !== false);
+$assert('resumed-hang metadata cannot be supplied by the browser snapshot', strpos($workspace, 'public function checkoutDraftMetadata(') !== false
+    && strpos($workspace, "'resumed_hang_order_id' => trim((string)(\$draft['resumed_hang_order_id'] ?? ''))") !== false);
 $assert('request repository binds the reference only while editing', strpos($repository, "->where('request_status', 'editing')") !== false);
 $assert('completion reads the request-local internal reference', strpos($binding, "resumed_hang_order_id") !== false);
 $assert('completion no longer scans generic checkout sources for the hang', strpos($binding, 'function hangSource') === false);
