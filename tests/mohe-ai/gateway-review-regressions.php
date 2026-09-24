@@ -223,6 +223,63 @@ $check(strpos($gateway,'prepareUniqueExactMetricCandidate($intent,$understanding
     'unique exact registered metric titles are canonicalized before strict JSON audit validation');
 $gatewayReflection=new ReflectionClass(app\services\ai\AiGatewayServices::class);
 $gatewayFixture=$gatewayReflection->newInstanceWithoutConstructor();
+$aggregateStoreContext=$gatewayReflection->getMethod('normalizeAggregateStoreContextDelta');
+if (PHP_VERSION_ID<80100) $aggregateStoreContext->setAccessible(true);
+$aggregateIntent=[
+    'object_kind'=>'store','object_relation'=>'analysis','object_term'=>'','operation'=>'summary',
+    'context_delta'=>['business_filters'=>'inherit','store_scope'=>'inherit'],
+];
+$aggregateUnderstanding=['requirements'=>[[
+    'id'=>'r1','fields'=>['metric_codes','object_kind','object_relation','operation'],
+    'values'=>['metric_terms'=>['现金业绩'],'object_kind'=>'store','object_relation'=>'analysis','operation'=>'summary'],
+]]];
+$aggregateNormalized=$aggregateStoreContext->invoke(null,$aggregateIntent,$aggregateUnderstanding,[
+    'business_filters'=>['object_kind'=>'store'],'store_ids'=>[1,2],
+]);
+$check(($aggregateNormalized['context_delta']['business_filters']??null)==='clear'
+    &&($aggregateNormalized['context_delta']['store_scope']??null)==='inherit',
+    'an explicit aggregate store summary clears only an inherited breakdown grain');
+$selectionIntent=$aggregateIntent;$selectionIntent['object_relation']='selection';
+$check($aggregateStoreContext->invoke(null,$selectionIntent,$aggregateUnderstanding,[
+    'business_filters'=>['object_kind'=>'store'],'store_ids'=>[1,2],
+])===$selectionIntent,'a selected store is never widened by aggregate-grain normalization');
+$distribution=$gatewayReflection->getMethod('reconcileCoordinatedMeasurementDistribution');
+if (PHP_VERSION_ID<80100) $distribution->setAccessible(true);
+$distributionQuestion=['question'=>'门店现金业绩、消耗业绩、退款金额分别是多少','evidence_messages'=>[[
+    'id'=>'current','text'=>'门店现金业绩、消耗业绩、退款金额分别是多少',
+]]];
+$distributionUnderstanding=['goal'=>'查看门店多项指标','status'=>'understood','requirements'=>[[
+    'id'=>'r1','meaning'=>'查看门店多项指标','fields'=>['metric_codes','object_kind','object_relation','operation'],
+    'values'=>['metric_terms'=>['现金业绩','消耗业绩','退款金额'],'object_kind'=>'store','object_relation'=>'analysis','operation'=>'breakdown'],
+    'evidence'=>[['message_id'=>'current','quote'=>$distributionQuestion['question']]],
+]]];
+$objectVocabulary=[['object_kind'=>'store','object_label'=>'门店']];
+$metricCodes=['cash_performance','consume_amount','refund_performance'];
+$distributionFixed=$distribution->invoke($gatewayFixture,$distributionUnderstanding,$distributionQuestion,$objectVocabulary,$metricCodes);
+$check(($distributionFixed['requirements'][0]['values']['operation']??null)==='summary',
+    'a trailing distributive over several exact measurements means one aggregate value per measurement');
+$objectDistributedQuestion=$distributionQuestion;
+$objectDistributedQuestion['question']='各门店现金业绩、消耗业绩、退款金额分别是多少';
+$objectDistributedQuestion['evidence_messages'][0]['text']=$objectDistributedQuestion['question'];
+$objectDistributed=$distributionUnderstanding;
+$objectDistributed['requirements'][0]['evidence'][0]['quote']=$objectDistributedQuestion['question'];
+$check($distribution->invoke($gatewayFixture,$objectDistributed,$objectDistributedQuestion,$objectVocabulary,$metricCodes)===$objectDistributed,
+    'an explicit each-object quantifier preserves breakdown semantics');
+$reconcileMeasurements=$gatewayReflection->getMethod('reconcileStatedRegisteredMeasurements');
+if (PHP_VERSION_ID<80100) $reconcileMeasurements->setAccessible(true);
+$orphanMetric=$distributionUnderstanding;
+unset($orphanMetric['requirements'][0]['values']['metric_terms']);
+$reconciledMetrics=$reconcileMeasurements->invoke($gatewayFixture,$orphanMetric,$distributionQuestion,[
+    'metric_readiness'=>array_fill_keys($metricCodes,['ai_query_ready'=>true]),
+]);
+$metricRequirements=array_values(array_filter($reconciledMetrics['requirements'],static function(array $requirement):bool {
+    return in_array('metric_codes',(array)($requirement['fields']??[]),true);
+}));
+$check(count($metricRequirements)===3
+    &&array_merge(...array_map(static function(array $requirement):array {
+        return (array)($requirement['values']['metric_terms']??[]);
+    },$metricRequirements))===['现金业绩','消耗业绩','退款金额'],
+    'an empty deferred metric audit field is replaced by independently evidenced exact measurements');
 $attachDefault=$gatewayReflection->getMethod('attachRegisteredDefaultAnalysisObject');
 if (PHP_VERSION_ID<80100) $attachDefault->setAccessible(true);
 $positionObject=['ref'=>'position:2','kind'=>'position','label'=>'美容师','aliases'=>[],'version'=>'1','relations'=>['staff_sales_yeji']];

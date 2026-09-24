@@ -99,14 +99,39 @@ final class AiIntentResultContract
 
     /**
      * Correct model bookkeeping for two or more exact measurements that the
-     * customer explicitly coordinated in one analytical breakdown. The
-     * registry proves every code from literal current-message terms; this
+     * customer explicitly coordinated in one summary or object breakdown.
+     * The registry proves every code from literal current-message terms; this
      * method never splits prose, applies synonyms, chooses a default metric,
-     * or changes the model-owned object, operation, period or scope.
+     * or changes the model-owned object, operation, period or scope. Ranking,
+     * comparison and trend stay model-owned because their metric/period
+     * relationships cannot be proved from a flat set of exact labels alone.
      */
     private static function canonicalizeExactCoordinatedMetricBindings($intent,array $understanding,array $safeQuestion,array $metricCodes,bool &$coordinated)
     {
-        if (!is_array($intent) || ($intent['operation']??null)!=='breakdown') return $intent;
+        if (!is_array($intent) || !in_array($intent['operation']??null,['summary','breakdown'],true)) return $intent;
+        $projection=self::exactCoordinatedMetricProjection($understanding,$safeQuestion,$metricCodes);
+        if ($projection===null) return $intent;
+
+        $intent['metric_codes']=$projection['metric_codes'];
+        $intent['needs_metric_choice']=false;
+        $intent['initial_observation']=false;
+        $intent['recommended_initial_answer']=false;
+        $intent['requirement_bindings']=$projection['requirement_bindings'];
+        $coordinated=true;
+        if (is_array($intent['context_delta']??null)) $intent['context_delta']['metric_codes']='replace';
+        return $intent;
+    }
+
+    /**
+     * Project exact coordinated labels onto accepted metric requirements.
+     * The returned rows are safe both for bookkeeping repair and for bypassing
+     * a redundant semantic review: every selected code is query-ready, occurs
+     * literally in the current message and is owned by an accepted metric
+     * requirement. A multi-requirement carrier with missing ownership stays
+     * on the model path instead of assigning codes by position.
+     */
+    private static function exactCoordinatedMetricProjection(array $understanding,array $safeQuestion,array $metricCodes): ?array
+    {
         $matches=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText(
             (string)($safeQuestion['question']??''),$metricCodes
         );
@@ -116,15 +141,15 @@ final class AiIntentResultContract
             if (!is_string($code) || in_array($code,$questionCodes,true)) continue;
             $questionCodes[]=$code;
         }
-        if (count($questionCodes)<2) return $intent;
+        if (count($questionCodes)<2) return null;
 
         $requirements=[];
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
             if (!is_array($requirement) || !in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
-            if (!empty($requirement['values']['metric_exclusions']) || !is_string($requirement['id']??null)) return $intent;
+            if (!empty($requirement['values']['metric_exclusions']) || !is_string($requirement['id']??null)) return null;
             $requirements[]=$requirement;
         }
-        if ($requirements===[]) return $intent;
+        if ($requirements===[]) return null;
 
         $bindings=[];$accounted=[];
         foreach ($requirements as $requirement) {
@@ -134,29 +159,78 @@ final class AiIntentResultContract
                 $code=\app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms([trim($term)],$metricCodes);
                 if ($code!==null && in_array($code,$questionCodes,true) && !in_array($code,$owned,true)) $owned[]=$code;
             }
-            // One accepted measurement requirement may legitimately carry
-            // all coordinated labels. If its optional projection was dropped
-            // as malformed by the understanding boundary, the exact terms in
-            // its full current evidence still provide the complete registry
-            // proof. With several requirements we retain strict ownership and
-            // never guess which requirement owns an unprojected code.
+            // A single accepted requirement may carry all coordinated labels.
+            // Several requirements must each retain explicit ownership; code
+            // order alone is never evidence that a requirement owns a metric.
             if ($owned===[] && count($requirements)===1) $owned=$questionCodes;
-            if ($owned===[]) return $intent;
+            if ($owned===[]) return null;
             foreach ($owned as $code) $accounted[$code]=true;
             $bindings[]=['requirement_id'=>$requirement['id'],'status'=>'satisfied','metric_codes'=>$owned];
         }
-        if (array_values(array_filter($questionCodes,static function(string $code)use($accounted):bool {
-            return !isset($accounted[$code]);
-        }))!==[]) return $intent;
+        foreach ($questionCodes as $code) if (!isset($accounted[$code])) return null;
+        return ['metric_codes'=>$questionCodes,'requirement_bindings'=>$bindings];
+    }
 
-        $intent['metric_codes']=$questionCodes;
-        $intent['needs_metric_choice']=false;
-        $intent['initial_observation']=false;
-        $intent['recommended_initial_answer']=false;
-        $intent['requirement_bindings']=$bindings;
-        $coordinated=true;
-        if (is_array($intent['context_delta']??null)) $intent['context_delta']['metric_codes']='replace';
-        return $intent;
+    /**
+     * Compile a complete binding only after the language model has already
+     * produced an accepted, self-contained summary/breakdown meaning and the
+     * active registry proves every coordinated measurement literally. This
+     * removes a second model call that would only duplicate binding audit
+     * rows; it never infers prose, supplies a missing period/object, accepts a
+     * comparison/ranking/condition, or maps requirements by array position.
+     */
+    public static function exactCoordinatedIntent(array $understanding,array $safeQuestion,array $metricCodes,bool $hasPrior,?string &$failure=null): ?array
+    {
+        $failure=null;
+        if (!empty($understanding['groups']) || isset($understanding['request_kind'])) {$failure='group_or_kind';return null;}
+        $projection=self::exactCoordinatedMetricProjection($understanding,$safeQuestion,$metricCodes);
+        if ($projection===null) {$failure='metric_projection';return null;}
+        $owned=['object_kind'=>null,'object_relation'=>null,'operation'=>null,'periods'=>null,'scope'=>null];
+        foreach ((array)($understanding['requirements']??[]) as $requirement) {
+            if (!is_array($requirement) || in_array('unbound',(array)($requirement['fields']??[]),true)) {$failure='unbound';return null;}
+            $values=(array)($requirement['values']??[]);
+            foreach (['metric_exclusions','ranking','aggregate_condition','condition_update','member_detail','result_reference'] as $unsafe) {
+                if (array_key_exists($unsafe,$values)) {$failure='unsafe_value';return null;}
+            }
+            foreach (array_keys($owned) as $field) {
+                if (!array_key_exists($field,$values)) continue;
+                if ($owned[$field]!==null && $owned[$field]!==$values[$field]) {$failure='conflicting_value';return null;}
+                $owned[$field]=$values[$field];
+            }
+        }
+        if (!is_string($owned['object_kind']) || $owned['object_kind']==='unknown') {$failure='object_shape';return null;}
+        // `object_relation` may be omitted when the accepted meaning already
+        // says “summary/breakdown this typed object”: that grammar can only be
+        // analytical.  We may fill that redundant carrier locally, but must
+        // never reinterpret an explicit selected target as an analysis.
+        if ($owned['object_relation']!==null && $owned['object_relation']!=='analysis') {$failure='relation_shape';return null;}
+        if (!in_array($owned['operation'],['summary','breakdown'],true)) {$failure='operation_shape';return null;}
+        if (!is_array($owned['periods']) || count($owned['periods'])!==1) {$failure='period_shape';return null;}
+        $scope=is_string($owned['scope'])?$owned['scope']:'unspecified';
+        $intent=[
+            'object_kind'=>$owned['object_kind'],'object_relation'=>'analysis','object_term'=>'',
+            'operation'=>$owned['operation'],'metric_codes'=>$projection['metric_codes'],'action_codes'=>[],
+            'needs_metric_choice'=>false,'initial_observation'=>false,'recommended_initial_answer'=>false,
+            'requirement_bindings'=>$projection['requirement_bindings'],
+            'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>$owned['periods'],
+            'scope'=>$scope,'aggregate_condition'=>null,'result_reference'=>null,'unresolved_fragments'=>[],
+        ];
+        if ($hasPrior) {
+            // A complete current analytical request replaces presentation
+            // semantics but retains the signed store authorization range.
+            // The new compiler rebuilds any required object dimension filter.
+            $intent['context_delta']=[
+                'metric_codes'=>'replace','object'=>'replace','business_filters'=>'clear','store_scope'=>'inherit',
+                'periods'=>'replace','operation'=>'replace','ranking_direction'=>'clear','ranking_limit'=>'clear',
+                'scope'=>$owned['scope']===null?'inherit':'replace','aggregate_condition'=>'clear',
+            ];
+        }
+        try {
+            return self::normalize($intent,$metricCodes,[],$safeQuestion,$understanding);
+        } catch (AiContractException $error) {
+            $failure='intent_contract';
+            return null;
+        }
     }
 
     /**
@@ -316,7 +390,15 @@ final class AiIntentResultContract
         $exact=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
             (string)($safeQuestion['question']??''),$metricCodes
         );
-        if ($exact===null || ($intent['metric_codes']??null)!==[$exact['metric_code']]
+        if ($exact===null) {
+            $projection=self::exactCoordinatedMetricProjection($understanding,$safeQuestion,$metricCodes);
+            return $projection!==null
+                && in_array($intent['operation']??null,['summary','breakdown'],true)
+                && ($intent['needs_metric_choice']??null)===false
+                && ($intent['metric_codes']??null)===$projection['metric_codes']
+                && ($intent['requirement_bindings']??null)===$projection['requirement_bindings'];
+        }
+        if (($intent['metric_codes']??null)!==[$exact['metric_code']]
             || ($intent['needs_metric_choice']??null)!==false) return false;
         $requirements=[];
         foreach ((array)($understanding['requirements']??[]) as $requirement) {

@@ -1299,6 +1299,9 @@ final class AiGatewayServices
         $understanding=$this->reconcileExactRegisteredAnalyticalObject(
             $understanding,$safe['outbound'],$objectVocabulary
         );
+        $understanding=$this->reconcileCoordinatedMeasurementDistribution(
+            $understanding,$safe['outbound'],$objectVocabulary,array_keys((array)($caps['metric_readiness']??[]))
+        );
         $objectCompatibleSummaries=$this->bindingSummariesForUnderstanding($summaries,$understanding);
         $understanding=$this->reconcileExactRegisteredMeasurement(
             $understanding,$safe['outbound'],$objectCompatibleSummaries,$objectVocabulary
@@ -1435,6 +1438,16 @@ final class AiGatewayServices
         $registeredConditionIntent=$this->registeredConditionIntent(
             $understanding,$summaries,$safe['outbound'],$registeredConditionFailure
         );
+        $registeredCoordinatedFailure=null;
+        $registeredCoordinatedIntent=AiIntentResultContract::exactCoordinatedIntent(
+            $understanding,$safe['outbound'],array_column($bindingSummaries,'metric_code'),$sourceQuery!==null,
+            $registeredCoordinatedFailure
+        );
+        if ($registeredCoordinatedIntent===null && $registeredCoordinatedFailure!==null) {
+            try {$this->runs->recordDiagnostic($owner,$id,$generation,$worker,[
+                'stage'=>'analysis_binding','predicate'=>'registered_coordinated_miss_'.$registeredCoordinatedFailure,
+            ],'registered_coordinated_probe');} catch (\Throwable $ignored) {}
+        }
         if ($registeredConditionIntent===null && is_array($registeredConditionFailure)) {
             // Observability is best effort and must never turn a valid
             // customer question into a technical failure.
@@ -1475,6 +1488,12 @@ final class AiGatewayServices
             // this branch and retain the normal model/clarification path.
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_condition_binding_compiled');
             $reply=['intent'=>$registeredConditionIntent,'usage'=>[]];
+        } elseif ($registeredCoordinatedIntent!==null) {
+            // The language model has already fixed the complete semantic
+            // request. Exact registry ownership now proves every metric and
+            // audit row, so another model round cannot add business meaning.
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_coordinated_binding_compiled');
+            $reply=['intent'=>$registeredCoordinatedIntent,'usage'=>[]];
         } else {
         // Keep a payload-free structural trace when a verified condition-set
         // continuation cannot use either bounded inheritance shortcut.  This
@@ -1655,6 +1674,9 @@ final class AiGatewayServices
         $reply['intent']=$this->replaceInheritedSystemCohortForCurrentLocalSelection(
             $reply['intent'],$sourceQuery,$safe['outbound'],$privateKindsByReference
         );
+        $reply['intent']=self::normalizeAggregateStoreContextDelta(
+            $reply['intent'],$understanding,$sourceQuery
+        );
         $checkpoint();$intent=$reply['intent'];
         // The model states only a delta. This named merger is the sole place
         // that may retain verified query meaning across turns.
@@ -1688,6 +1710,9 @@ final class AiGatewayServices
         // that new candidate may execute.
         if (AiIntentResultContract::requiresContextRebinding($sourceQuery,$understanding,$reply['intent'],$intent)) {
             $reply=$this->repairBindingCandidate($owner,$id,$generation,$worker,$safe['outbound'],$bindingSummaries,$understanding,$configuration,$checkpoint,$runtimeSkills,'context_analytical_dimension_carryover');
+            $reply['intent']=self::normalizeAggregateStoreContextDelta(
+                $reply['intent'],$understanding,$sourceQuery
+            );
             $intent=$reply['intent'];
             $merged=IntentContextMerger::merge($sourceQuery,$intent);
             $intent=$merged['intent'];$inheritedConstraints=$merged['constraints'];
@@ -3497,8 +3522,26 @@ final class AiGatewayServices
         if (($understanding['status']??null)!=='understood') return $understanding;
         $question=$safeQuestion['question']??null;
         if (!is_string($question) || $question==='') return $understanding;
-        $requirements=(array)($understanding['requirements']??[]);$accounted=[];$used=[];$accountedCodes=[];
         $allowed=array_keys((array)($capabilities['metric_readiness']??[]));
+        $stated=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText($question,$allowed);
+        $statedCodes=array_values(array_unique(array_filter(array_column($stated,'metric_code'),'is_string')));
+        $requirements=(array)($understanding['requirements']??[]);
+        if (count($statedCodes)>1) {
+            foreach ($requirements as $index=>$requirement) {
+                if (!is_array($requirement) || !in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
+                $values=(array)($requirement['values']??[]);
+                if (!empty($values['metric_terms']) || !empty($values['metric_exclusions']) || isset($values['aggregate_condition'])) continue;
+                // A deferred malformed echo is not a fourth customer metric.
+                // Keep its object/time/operation semantics, while the exact
+                // registry-backed requirements added below own all metric
+                // audit rows independently.
+                $requirement['fields']=array_values(array_diff((array)$requirement['fields'],['metric_codes']));
+                if ($requirement['fields']===[]) unset($requirements[$index]);
+                else $requirements[$index]=$requirement;
+            }
+            $requirements=array_values($requirements);
+        }
+        $accounted=[];$used=[];$accountedCodes=[];
         foreach ($requirements as $requirement) {
             if (!is_array($requirement)) continue;
             if (is_string($requirement['id']??null)) $used[$requirement['id']]=true;
@@ -3621,6 +3664,63 @@ final class AiGatewayServices
             $offset=$start+1;
         }
         return $found;
+    }
+
+    /**
+     * Resolve the grammatical target of a distributive expression after the
+     * language model has already accepted the object and measurements. Two or
+     * more exact registered measurements followed by “separately” describe
+     * one aggregate answer per measurement unless the sentence explicitly
+     * distributes over the object (each/every/different object). The rule is
+     * registry- and position-driven; it never maps a complete sentence to an
+     * intent, chooses a metric, or touches ranking/comparison/conditions.
+     */
+    private function reconcileCoordinatedMeasurementDistribution(array $understanding,array $safeQuestion,array $objectVocabulary,array $metricCodes): array
+    {
+        if (($understanding['status']??null)!=='understood' || !empty($understanding['groups'])) return $understanding;
+        $question=$safeQuestion['question']??null;
+        if (!is_string($question) || $question==='' || preg_match('/\[local_condition_[0-9]+\]/D',$question)) return $understanding;
+        $matches=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText($question,$metricCodes);
+        $codes=array_values(array_unique(array_column($matches,'metric_code')));
+        if (count($codes)<2) return $understanding;
+        $lastMetricEnd=0;
+        foreach ($matches as $match) {
+            $term=$match['term']??null;
+            if (!is_string($term) || $term==='') return $understanding;
+            $position=mb_strpos($question,$term,0,'UTF-8');
+            if ($position===false) return $understanding;
+            $lastMetricEnd=max($lastMetricEnd,$position+mb_strlen($term,'UTF-8'));
+        }
+        $separately=mb_strpos($question,'分别',0,'UTF-8');
+        if ($separately===false || $separately<$lastMetricEnd) return $understanding;
+
+        $kinds=[];$labels=[];
+        foreach ($objectVocabulary as $item) {
+            $kind=$item['object_kind']??null;$label=$item['object_label']??null;
+            if (!is_string($kind)||!is_string($label)||$label===''||mb_strpos($question,$label,0,'UTF-8')===false) continue;
+            if ($this->objectLabelOccursOnlyInsideMeasurement($question,$label)) continue;
+            $kinds[$kind]=true;$labels[$label]=true;
+        }
+        if (count($kinds)!==1 || $labels===[]) return $understanding;
+        foreach (array_keys($labels) as $label) {
+            // These are grammatical quantifiers, not business synonyms. They
+            // must immediately govern the registered object label to request
+            // one result row per object.
+            if (preg_match('/(?:各(?:个|家|位|名|项)?|每(?:个|家|位|名|项)?|逐(?:个|家|位|名|项)?|不同)\s*'.preg_quote($label,'/').'/u',$question)) {
+                return $understanding;
+            }
+        }
+        $requirements=(array)($understanding['requirements']??[]);$changed=false;
+        foreach ($requirements as &$requirement) {
+            if (!is_array($requirement) || ($requirement['values']['operation']??null)!=='breakdown') continue;
+            if (($requirement['values']['object_relation']??'analysis')!=='analysis') return $understanding;
+            $requirement['values']['operation']='summary';$changed=true;
+        }
+        unset($requirement);
+        if (!$changed) return $understanding;
+        return AiIntentUnderstandingContract::normalize([
+            'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',
+        ],$safeQuestion);
     }
 
     private function bindingSummariesForUnderstanding(array $summaries,array $understanding): array
@@ -4055,6 +4155,38 @@ final class AiGatewayServices
         return AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
             $intent,$understanding,$safeQuestion,$metricCodes
         );
+    }
+
+    /**
+     * A verified per-store breakdown filter describes result grain, not an
+     * authorization restriction. When a self-contained current requirement
+     * explicitly changes that same store subject to an aggregate summary,
+     * clear only the inherited analytical filter while retaining signed store
+     * IDs and every other authority boundary. This is driven by typed accepted
+     * semantics and never by a customer phrase or metric name.
+     */
+    private static function normalizeAggregateStoreContextDelta($intent,array $understanding,?array $sourceQuery)
+    {
+        if (!is_array($intent) || $sourceQuery===null
+            || ($sourceQuery['business_filters']??null)!==['object_kind'=>'store']
+            || ($intent['object_kind']??null)!=='store'
+            || ($intent['object_relation']??null)!=='analysis'
+            || ($intent['object_term']??null)!==''
+            || ($intent['operation']??null)!=='summary'
+            || !is_array($intent['context_delta']??null)) return $intent;
+        $object=false;$operation=false;$metric=false;
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            $values=(array)($requirement['values']??[]);
+            if (($values['object_kind']??null)==='store' && ($values['object_relation']??null)==='analysis') $object=true;
+            if (($values['operation']??null)==='summary') $operation=true;
+            if (in_array('metric_codes',(array)($requirement['fields']??[]),true)) $metric=true;
+        }
+        if (!$object || !$operation || !$metric) return $intent;
+        $intent['context_delta']['business_filters']='clear';
+        // Aggregation changes presentation grain only. A previously selected
+        // authorized store range remains the query boundary.
+        $intent['context_delta']['store_scope']='inherit';
+        return $intent;
     }
 
     /**

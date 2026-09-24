@@ -102,6 +102,130 @@ try {
         &&($coordinatedIntent['requirement_bindings'][0]['metric_codes']??null)===['cash_performance','sales_amount'],
         'exact coordinated measurements repair model bookkeeping without phrase slicing');
 
+    $summaryQuestion=$safeQuestion;
+    $summaryQuestion['question']='这个月的门店现金业绩、消耗业绩、退款金额分别是多少';
+    $summaryQuestion['evidence_messages']=[['id'=>'current','text'=>$summaryQuestion['question']]];
+    $summaryUnderstanding=AiIntentUnderstandingContract::normalize([
+        'goal'=>'查看本月三项门店经营指标','status'=>'understood','requirements'=>[[
+            'id'=>'r1','meaning'=>'查看本月门店现金业绩、消耗业绩和退款金额',
+            'fields'=>['metric_codes','object_kind','object_relation','operation','periods'],
+            'values'=>['metric_terms'=>['现金业绩','消耗业绩','退款金额'],'object_kind'=>'store',
+                'object_relation'=>'analysis','operation'=>'summary','periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
+            'evidence'=>[['message_id'=>'current','quote'=>$summaryQuestion['question']]],
+        ]],
+    ],$summaryQuestion);
+    $summaryCandidate=$coordinatedCandidate;
+    $summaryCandidate['operation']='summary';
+    $summaryCandidate['periods']=[['kind'=>'month_offset','offset_months'=>0]];
+    $summaryCandidate['metric_codes']=['cash_performance'];
+    $summaryCandidate['requirement_bindings']=[[
+        'requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance'],
+    ]];
+    $summaryCandidate=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
+        $summaryCandidate,$summaryUnderstanding,$summaryQuestion,
+        ['cash_performance','consume_amount','refund_performance']
+    );
+    $summaryIntent=AiIntentResultContract::normalize(
+        $summaryCandidate,['cash_performance','consume_amount','refund_performance'],[],
+        $summaryQuestion,$summaryUnderstanding
+    );
+    bdCheck(($summaryIntent['metric_codes']??null)===[
+        'cash_performance','consume_amount','refund_performance',
+    ] && ($summaryIntent['requirement_bindings'][0]['metric_codes']??null)===[
+        'cash_performance','consume_amount','refund_performance',
+    ],'exact coordinated summary metrics are recovered in customer order without another model repair');
+    bdCheck(AiIntentResultContract::isUniqueExactMetricBinding(
+        $summaryIntent,$summaryUnderstanding,$summaryQuestion,
+        ['cash_performance','consume_amount','refund_performance']
+    ),'registry-proven coordinated summary bypasses a redundant model review');
+    $summaryFollowupQuestion=$summaryQuestion;
+    $summaryFollowupQuestion['prior_query']=[
+        'query_shape'=>'breakdown','metric_codes'=>['actual_performance'],
+        'start_date'=>'2026-09-24','end_date'=>'2026-09-24','compare_range'=>null,
+        'store_ids'=>[],'business_filters'=>['object_kind'=>'store'],
+        'ranking'=>null,'aggregate_condition'=>null,
+    ];
+    $compiledSummary=AiIntentResultContract::exactCoordinatedIntent(
+        $summaryUnderstanding,$summaryFollowupQuestion,
+        ['cash_performance','consume_amount','refund_performance'],true
+    );
+    bdCheck(($compiledSummary['operation']??null)==='summary'
+        &&($compiledSummary['context_delta']['business_filters']??null)==='clear'
+        &&($compiledSummary['context_delta']['store_scope']??null)==='inherit',
+        'accepted exact coordinated meaning compiles without a duplicate binding model call');
+    $implicitAnalysis=$summaryUnderstanding;
+    unset($implicitAnalysis['requirements'][0]['values']['object_relation']);
+    $implicitAnalysis['requirements'][0]['fields']=array_values(array_filter(
+        $implicitAnalysis['requirements'][0]['fields'],fn($field)=>$field!=='object_relation'
+    ));
+    bdCheck((AiIntentResultContract::exactCoordinatedIntent(
+        $implicitAnalysis,$summaryQuestion,
+        ['cash_performance','consume_amount','refund_performance'],false
+    )['object_relation']??null)==='analysis',
+        'typed summary object may compile its redundant analytical relation locally');
+    $selectedObject=$summaryUnderstanding;
+    $selectedObject['requirements'][0]['values']['object_relation']='selection';
+    bdCheck(AiIntentResultContract::exactCoordinatedIntent(
+        $selectedObject,$summaryQuestion,
+        ['cash_performance','consume_amount','refund_performance'],false
+    )===null,'an explicit selected target cannot enter the analytical fast path');
+
+    $splitRequirements=$summaryUnderstanding;
+    $splitRequirements['requirements']=[];
+    foreach ([
+        ['r1','现金业绩','现金业绩'],['r2','消耗业绩','消耗业绩'],['r3','退款金额','退款金额'],
+    ] as [$id,$meaning,$term]) {
+        $splitRequirements['requirements'][]=[
+            'id'=>$id,'meaning'=>'查看'.$meaning,'fields'=>['metric_codes'],
+            'values'=>['metric_terms'=>[$term]],
+            'evidence'=>[['message_id'=>'current','quote'=>$summaryQuestion['question']]],
+        ];
+    }
+    $splitRequirements=AiIntentUnderstandingContract::normalize($splitRequirements,$summaryQuestion);
+    $splitCandidate=$summaryCandidate;
+    $splitCandidate['requirement_bindings']=[[
+        'requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['cash_performance'],
+    ]];
+    $splitCandidate=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
+        $splitCandidate,$splitRequirements,$summaryQuestion,
+        ['cash_performance','consume_amount','refund_performance']
+    );
+    bdCheck(array_column($splitCandidate['requirement_bindings'],'metric_codes')===[
+        ['cash_performance'],['consume_amount'],['refund_performance'],
+    ],'separately accepted metric requirements retain one-to-one audit ownership');
+    bdCheck(AiIntentResultContract::isUniqueExactMetricBinding(
+        $splitCandidate,$splitRequirements,$summaryQuestion,
+        ['cash_performance','consume_amount','refund_performance']
+    ),'separate exact requirement owners also satisfy deterministic admission');
+
+    $excludedRequirements=$splitRequirements;
+    $excludedRequirements['requirements'][2]['values']['metric_exclusions']=['退款金额'];
+    $excludedCandidate=$summaryCandidate;
+    $excludedCandidate['metric_codes']=['cash_performance'];
+    $excludedCandidate=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
+        $excludedCandidate,$excludedRequirements,$summaryQuestion,
+        ['cash_performance','consume_amount','refund_performance']
+    );
+    bdCheck($excludedCandidate['metric_codes']===['cash_performance'],
+        'an explicit metric exclusion cannot be converted into a positive coordinated binding');
+
+    $unsafeSummary=$summaryCandidate;
+    $unsafeSummary['operation']='comparison';
+    $unsafeSummary['metric_codes']=['cash_performance'];
+    $unsafeSummary['requirement_bindings'][0]['metric_codes']=['cash_performance'];
+    $unsafeSummary=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
+        $unsafeSummary,$summaryUnderstanding,$summaryQuestion,
+        ['cash_performance','consume_amount','refund_performance']
+    );
+    bdCheck($unsafeSummary['metric_codes']===['cash_performance'],
+        'comparison relationships remain model-owned instead of receiving a flat metric projection');
+    $comparisonUnderstanding=$summaryUnderstanding;
+    $comparisonUnderstanding['requirements'][0]['values']['operation']='comparison';
+    bdCheck(AiIntentResultContract::exactCoordinatedIntent(
+        $comparisonUnderstanding,$summaryQuestion,
+        ['cash_performance','consume_amount','refund_performance'],false
+    )===null,'comparison relationships cannot enter the coordinated summary fast path');
+
     // A model-added second metric must not be mistaken for an explicit
     // customer conjunction and bypass the existing exact-title correction.
     $singleQuestion=$safeQuestion;
