@@ -3641,16 +3641,24 @@ final class AiGatewayServices
             // One current sentence can be split into separate object and
             // measurement requirements by the language model. When the
             // registry proves that the sentence contains exactly one explicit
-            // analytical object, reconcile every duplicated object carrier to
-            // that same kind. This does not collapse genuine multi-object
-            // questions: those expose more than one registered label above
-            // and therefore never reach this branch.
+            // object kind, reconcile every duplicated carrier to that same
+            // kind. Do not manufacture an analytical relation when the model
+            // has not stated one: the same registered noun can be the suffix
+            // of a concrete selection such as a store name. An explicit
+            // selection therefore stays on the identity-binding path, while
+            // an explicit analysis relation remains analytical. This does not
+            // collapse genuine multi-object questions: those expose more than
+            // one registered label above and never reach this branch.
             foreach ($objectIndexes as $index) {
                 $requirement=$requirements[$index];
-                $fields=array_values(array_unique(array_merge((array)$requirement['fields'],['object_kind','object_relation'])));
-                $requirement['fields']=$fields;
+                $relation=$requirement['values']['object_relation']??null;
+                if ($relation==='selection') return $understanding;
                 $requirement['values']['object_kind']=$kind;
-                $requirement['values']['object_relation']='analysis';
+                if ($relation==='analysis') {
+                    $requirement['fields']=array_values(array_unique(array_merge(
+                        (array)$requirement['fields'],['object_kind','object_relation']
+                    )));
+                }
                 // Preserve the original current-message evidence: this
                 // requirement may also carry a metric, period or ranking whose
                 // exact wording is outside the shorter object label. Replacing
@@ -3800,29 +3808,14 @@ final class AiGatewayServices
             // summary into one group per metric. Collapse only the shape that
             // the registry and current wording independently prove is one
             // aggregate subject: every group must own exactly one distinct,
-            // current, registered metric requirement. Providers may repeat
-            // the same analysis object and the same summary/breakdown carrier
-            // on every metric group; those copies are safe only when their
-            // typed values are identical. Any selection relation, differing
-            // object/operation, ranking, condition or response-form carrier
-            // keeps the groups intact, so genuine multi-subject requests are
-            // never merged merely because their measurements share wording.
-            $metricRequirementIds=[];$metricTerms=[];$groupObjectKinds=[];$groupOperations=[];
-            $allowedGroupedFields=['metric_codes'=>true,'periods'=>true,'object_kind'=>true,'object_relation'=>true,'operation'=>true];
+            // current, registered metric requirement and may share only the
+            // period. Any object, filter, ranking, condition or response-form
+            // carrier keeps the groups intact for the ordinary multi-query
+            // compiler, so genuine multi-subject requests are never merged.
+            $metricRequirementIds=[];$metricTerms=[];$allowedGroupedFields=['metric_codes'=>true,'periods'=>true];
             foreach ($requirements as $requirement) {
                 if (!is_array($requirement) || array_diff((array)($requirement['fields']??[]),array_keys($allowedGroupedFields))) {
                     return $understanding;
-                }
-                $fields=(array)($requirement['fields']??[]);$values=(array)($requirement['values']??[]);
-                if (in_array('object_kind',$fields,true)||in_array('object_relation',$fields,true)) {
-                    $kind=$values['object_kind']??null;$relation=$values['object_relation']??null;
-                    if (!is_string($kind)||$kind===''||$kind==='unknown'||$relation!=='analysis') return $understanding;
-                    $groupObjectKinds[$kind]=true;
-                }
-                if (in_array('operation',$fields,true)) {
-                    $operation=$values['operation']??null;
-                    if (!in_array($operation,['summary','breakdown'],true)) return $understanding;
-                    $groupOperations[$operation]=true;
                 }
                 if (!in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
                 $terms=(array)($requirement['values']['metric_terms']??[]);
@@ -3831,8 +3824,6 @@ final class AiGatewayServices
                 }
                 $metricRequirementIds[$requirement['id']]=true;$metricTerms[$terms[0]]=true;
             }
-            if (count($groupObjectKinds)>1||count($groupOperations)>1
-                ||($groupObjectKinds!==[]&&array_key_first($groupObjectKinds)!==array_key_first($kinds))) return $understanding;
             $groupedMetricIds=[];
             foreach ((array)$understanding['groups'] as $group) {
                 if (!is_array($group)) return $understanding;
@@ -3964,8 +3955,21 @@ final class AiGatewayServices
             "business_date\0哪一天"=>['object_kind'=>'business_date','object_label'=>'哪一天'],
             "business_date\0哪一日"=>['object_kind'=>'business_date','object_label'=>'哪一日'],
         ];
+        $registeredAliases=\app\services\query\metric\MetricDefinitionRegistry::analysisObjectAliases();
+        $baseKinds=[];
         foreach ((array)($capabilities['metric_readiness']??[]) as $contract) {
             if (!is_array($contract) || ($contract['ai_query_ready']??false)!==true) continue;
+            // A metric's registered fact grain is also a valid analytical
+            // object even when no extra dimension contract is needed to read
+            // it. Publish only a grain that owns source-registry aliases and
+            // an analytical query shape. This grants neither a Reader nor a
+            // filter; it prevents a base object such as store from vanishing
+            // while optional dimensions remain visible to the language stage.
+            $grain=$contract['filter_grain']??null;
+            if (is_string($grain)&&isset($registeredAliases[$grain])
+                &&array_intersect((array)($contract['query_shapes']??[]),['summary','breakdown','trend','ranking','comparison'])) {
+                $baseKinds[$grain]=true;
+            }
             foreach ((array)($contract['analysis_dimension_contracts']??[]) as $dimension) {
                 $kind=$dimension['object_kind']??null;$label=$dimension['object_label']??null;
                 if (!is_string($kind) || !preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$kind)
@@ -3976,9 +3980,9 @@ final class AiGatewayServices
         // Aliases describe the same registered object kind; they grant no
         // metric or execution capability. Only aliases whose canonical kind
         // is present in the active capability set are projected.
-        $activeKinds=[];
+        $activeKinds=$baseKinds;
         foreach ($items as $item) $activeKinds[$item['object_kind']]=true;
-        foreach (\app\services\query\metric\MetricDefinitionRegistry::analysisObjectAliases() as $kind=>$aliases) {
+        foreach ($registeredAliases as $kind=>$aliases) {
             if (!isset($activeKinds[$kind])) continue;
             foreach ($aliases as $label) {
                 if (!is_string($label) || trim($label)==='' || mb_strlen($label,'UTF-8')>64) continue;

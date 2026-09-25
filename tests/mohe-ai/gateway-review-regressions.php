@@ -255,6 +255,13 @@ $distributionUnderstanding=['goal'=>'查看门店多项指标','status'=>'unders
 ]]];
 $objectVocabulary=[['object_kind'=>'store','object_label'=>'门店']];
 $metricCodes=['cash_performance','consume_amount','refund_performance'];
+$objectVocabularyMethod=$gatewayReflection->getMethod('analysisObjectVocabulary');
+if (PHP_VERSION_ID<80100) $objectVocabularyMethod->setAccessible(true);
+$registeredObjectVocabulary=$objectVocabularyMethod->invoke($gatewayFixture,[
+    'metric_readiness'=>app\services\query\metric\MetricDefinitionRegistry::capabilities(),
+]);
+$check(in_array(['object_kind'=>'store','object_label'=>'门店'],$registeredObjectVocabulary,true),
+    'a registered base fact grain publishes its source-owned analytical object alias even without a dimension contract');
 $distributionFixed=$distribution->invoke($gatewayFixture,$distributionUnderstanding,$distributionQuestion,$objectVocabulary,$metricCodes);
 $check(($distributionFixed['requirements'][0]['values']['operation']??null)==='summary',
     'a trailing distributive over several exact measurements means one aggregate value per measurement');
@@ -266,6 +273,9 @@ $embeddedObject['requirements'][0]['evidence'][0]['quote']=$embeddedObjectQuesti
 $check(($distribution->invoke($gatewayFixture,$embeddedObject,$embeddedObjectQuestion,$objectVocabulary,$metricCodes)
     ['requirements'][0]['values']['operation']??null)==='summary',
     'a typed analytical object remains usable when its noun is embedded in a registered metric title');
+$check(($distribution->invoke($gatewayFixture,$embeddedObject,$embeddedObjectQuestion,$registeredObjectVocabulary,$metricCodes)
+    ['requirements'][0]['values']['operation']??null)==='summary',
+    'the production registry vocabulary exposes the base object needed to coordinate an embedded multi-metric aggregate');
 $splitQuestion=$embeddedObjectQuestion;
 $splitQuestion['prior_query']=['query_shape'=>'breakdown','metric_codes'=>['cash_performance','sales_amount'],
     'start_date'=>'2026-09-01','end_date'=>'2026-09-25','compare_range'=>null,'store_ids'=>[],
@@ -295,34 +305,6 @@ $check(!isset($groupedContinuation['groups'])
     &&($groupedIntent['operation']??null)==='summary'
     &&($groupedIntent['context_delta']['business_filters']??null)==='clear',
     'provider-created metric groups collapse only when every group is one exact metric of the same aggregate subject');
-$repeatedCarrierGroups=$splitContinuation;
-foreach ($repeatedCarrierGroups['requirements'] as &$repeatedRequirement) {
-    if (!in_array('metric_codes',(array)$repeatedRequirement['fields'],true)) continue;
-    $repeatedRequirement['fields'][]='object_kind';
-    $repeatedRequirement['fields'][]='object_relation';
-    $repeatedRequirement['fields'][]='operation';
-    $repeatedRequirement['values']['object_kind']='store';
-    $repeatedRequirement['values']['object_relation']='analysis';
-    $repeatedRequirement['values']['operation']='breakdown';
-}
-unset($repeatedRequirement);
-$repeatedCarrierGroups['groups']=[
-    ['id'=>'q1','requirement_ids'=>['r1','r4']],
-    ['id'=>'q2','requirement_ids'=>['r2','r4']],
-    ['id'=>'q3','requirement_ids'=>['r3','r4']],
-];
-$repeatedCarrierFixed=$distribution->invoke(
-    $gatewayFixture,$repeatedCarrierGroups,$splitQuestion,$objectVocabulary,$metricCodes
-);
-$repeatedCarrierFailure=null;
-$repeatedCarrierIntent=app\services\ai\contract\AiIntentResultContract::exactCoordinatedIntent(
-    $repeatedCarrierFixed,$splitQuestion,$metricCodes,true,$repeatedCarrierFailure
-);
-$check(!isset($repeatedCarrierFixed['groups'])
-    &&($repeatedCarrierIntent['operation']??null)==='summary'
-    &&($repeatedCarrierIntent['object_kind']??null)==='store'
-    &&($repeatedCarrierIntent['context_delta']['business_filters']??null)==='clear',
-    'identical analytical object and breakdown copies on every metric group still collapse to one aggregate subject');
 $independentGrouped=$splitContinuation;
 $independentGrouped['requirements'][1]['fields'][]='object_kind';
 $independentGrouped['requirements'][1]['fields'][]='object_relation';
@@ -337,12 +319,6 @@ $check($distribution->invoke(
     $gatewayFixture,$independentGrouped,$splitQuestion,$objectVocabulary,$metricCodes
 )===$independentGrouped,
     'a grouped request carrying another analytical object is never collapsed into one aggregate subject');
-$differentCarrierGroups=$repeatedCarrierGroups;
-$differentCarrierGroups['requirements'][1]['values']['object_kind']='person';
-$check($distribution->invoke(
-    $gatewayFixture,$differentCarrierGroups,$splitQuestion,$objectVocabulary,$metricCodes
-)===$differentCarrierGroups,
-    'metric groups with different analytical objects remain independent even when every operation is breakdown');
 $splitContinuation=$distribution->invoke(
     $gatewayFixture,$splitContinuation,$splitQuestion,$objectVocabulary,$metricCodes
 );
