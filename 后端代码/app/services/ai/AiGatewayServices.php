@@ -1309,9 +1309,6 @@ final class AiGatewayServices
         $understanding=$this->reconcileExactRegisteredAnalyticalObject(
             $understanding,$safe['outbound'],$objectVocabulary
         );
-        $understanding=$this->reconcileCoordinatedMeasurementDistribution(
-            $understanding,$safe['outbound'],$objectVocabulary,array_keys((array)($caps['metric_readiness']??[]))
-        );
         $objectCompatibleSummaries=$this->bindingSummariesForUnderstanding($summaries,$understanding);
         $understanding=$this->reconcileExactRegisteredMeasurement(
             $understanding,$safe['outbound'],$objectCompatibleSummaries,$objectVocabulary
@@ -1340,6 +1337,14 @@ final class AiGatewayServices
         // remain separate because the reconciler admits only one exact owner.
         $understanding=$this->reconcileExactRegisteredMeasurement(
             $understanding,$safe['outbound'],$objectCompatibleSummaries,$objectVocabulary
+        );
+        // Resolve “respectively” only after the exhaustive metric pass has
+        // removed a provider's empty/unregistered metric echo and rebuilt the
+        // exact current measurements. Running this earlier let optional group
+        // metadata or a fourth generic placeholder bypass the aggregate-grain
+        // decision and inherit the preceding breakdown on a real model run.
+        $understanding=$this->reconcileCoordinatedMeasurementDistribution(
+            $understanding,$safe['outbound'],$objectVocabulary,array_keys((array)($caps['metric_readiness']??[]))
         );
         // The model may explain a short metric view change by copying the
         // predecessor's ranking/object fields into the *current* semantic

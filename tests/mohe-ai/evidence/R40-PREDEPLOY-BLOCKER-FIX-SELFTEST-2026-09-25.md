@@ -103,3 +103,20 @@
 - 补修补丁指纹：`7f15a7859355e1b0f0028876c277a2ff911cb81178df2e84b9c0567f4d993b1a`
 - `后端代码/app/services/ai/AiGatewayServices.php`：`396029b59619d1cd93b27ca2645209aaa9db725d933d8b613c10049c7fced737`
 - `tests/mohe-ai/gateway-review-regressions.php`：`ff9211e26f725e1c5c5e78f71af8c97778db989286ef00ea7441224b0b2843d3`
+
+## 第二次线上验收与最终根因修正
+
+- 第二次候选提交：`3fc260e34673cc1aca790979b35f86bb6f05a95c`。
+- 瑞昊发布批次：`/www/backups/rh.cc3798.com/20260925-r38-r40-3fc260e3-Quq14U/`；发布归档 SHA-256 为 `4e3c7d21937560dd7b22d556f9bb9791529d3b69bca0397bb44a22806770c57c`，部署前备份归档 SHA-256 为 `d38284c7fa91f7361fd925e3412a77b98aacced3c24dfb11c126b1a3263a8938`。
+- 连续问答在线复测仍失败：前置门店分组用时 12 秒，三指标续问用时 20 秒，仍返回门店分组。失败后再次按该批次精确回滚，Swoole、执行 Worker、Excel Worker 和 Supervisor 均恢复运行，未 push。
+- 第二次结果证明“可选 groups 包装”只是表象。最终根因是执行顺序：多指标粒度协调发生在完整注册指标校正之前；真实模型额外生成的第四个未注册“门店经营指标”占位当时仍存在，使粒度协调提前跳过。后续指标校正虽然删除了该占位并还原三个精确指标，却没有再次执行粒度判断，因此错误继承上一问的门店分组。
+- 最终修正把多指标粒度协调移动到完整注册指标校正之后。该顺序不依赖门店、固定问句或固定三指标；人员、会员和其他登记对象同样走统一的“先确认当前指标，再决定聚合或分组”流程。代码注释明确保护这一模型契约边界。
+- 新增与线上结构一致的回归：三个精确指标分组外加一个通用指标回声；先清理未注册占位，再确认切换为聚合并清除继承分组。同时保留真实多对象分组不折叠的反例。
+- 最终自动化结果：全部 16 组核心/导出测试通过；`gateway-review-regressions.php` 增至 82 项；PHP 语法与 `git diff --check` 通过。
+
+最终修正固定信息：
+
+- 基线 HEAD：`3fc260e34673cc1aca790979b35f86bb6f05a95c`
+- 代码与测试补丁指纹：`d37900706191d5b75635c46465b0783939d29f697f3e2c7cfb0542e7a0d0b691`
+- `后端代码/app/services/ai/AiGatewayServices.php`：`53007e8b21da642b2d2e753a8546d32bf6f59484ed72f42dda5aabefedd99087`
+- `tests/mohe-ai/gateway-review-regressions.php`：`bcc9a69f84baf8a6b901f48a9884556db1711478a39d9538bc19860f3e40243d`

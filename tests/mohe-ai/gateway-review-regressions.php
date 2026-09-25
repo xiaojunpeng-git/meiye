@@ -356,6 +356,28 @@ $check(count($unregisteredRequirements)===3
         return (array)($requirement['values']['metric_terms']??[]);
     },$unregisteredRequirements))===['现金业绩','消耗业绩','退款金额'],
     'an unregistered model echo cannot block complete exact coordinated metric ownership');
+$groupedEcho=['goal'=>$splitContinuation['goal'],'status'=>'understood',
+    'requirements'=>array_slice($splitContinuation['requirements'],0,4)];
+$groupedEcho['requirements'][]=['id'=>'r5','meaning'=>'按门店经营指标分别查看','fields'=>['metric_codes','operation'],
+    'values'=>['metric_terms'=>['门店经营指标'],'operation'=>'breakdown'],
+    'evidence'=>[['message_id'=>'current','quote'=>$embeddedObjectQuestion['question']]]];
+$groupedEcho['groups']=[
+    ['id'=>'q1','requirement_ids'=>['r1','r4','r5']],
+    ['id'=>'q2','requirement_ids'=>['r2','r4','r5']],
+    ['id'=>'q3','requirement_ids'=>['r3','r4','r5']],
+];
+$groupedEcho=$reconcileMeasurements->invoke($gatewayFixture,$groupedEcho,$splitQuestion,[
+    'metric_readiness'=>array_fill_keys($metricCodes,['ai_query_ready'=>true]),
+]);
+$groupedEcho=$distribution->invoke($gatewayFixture,$groupedEcho,$splitQuestion,$objectVocabulary,$metricCodes);
+$groupedEchoFailure=null;
+$groupedEchoIntent=app\services\ai\contract\AiIntentResultContract::exactCoordinatedIntent(
+    $groupedEcho,$splitQuestion,$metricCodes,true,$groupedEchoFailure
+);
+$check(!isset($groupedEcho['groups'])
+    &&($groupedEchoIntent['operation']??null)==='summary'
+    &&($groupedEchoIntent['context_delta']['business_filters']??null)==='clear',
+    'metric reconciliation precedes distribution so a grouped generic echo cannot preserve the prior breakdown');
 $attachDefault=$gatewayReflection->getMethod('attachRegisteredDefaultAnalysisObject');
 if (PHP_VERSION_ID<80100) $attachDefault->setAccessible(true);
 $positionObject=['ref'=>'position:2','kind'=>'position','label'=>'美容师','aliases'=>[],'version'=>'1','relations'=>['staff_sales_yeji']];
