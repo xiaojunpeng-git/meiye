@@ -31,6 +31,7 @@ final class MetricDefinitionRegistry
     public static function analysisObjectAliases(): array
     {
         return [
+            'store' => ['门店'],
             'person' => ['员工', '手艺人', '销售人'],
         ];
     }

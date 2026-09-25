@@ -2203,7 +2203,7 @@ final class AiGatewayServices
         );
         $operationOptions=$this->registeredOperationOptions($caps,$intent['object_kind']??'unknown');
         $replacementOperationOptions=$this->registeredOperationOptions($caps,$merged['prospective_intent']['object_kind']??'unknown');
-        $finish=function(array $compiled)use($context,$term,$contextDecisions,$owner,$id,$generation,$worker,$inheritedConstraints,$merged,$metricOptions,$replacementMetricOptions,$operationOptions,$currentStoreRequested,$understanding,$safe,$summaries,$bindingCandidate,$objectReplacementWithoutFilterConfirmation,$requestedMemberDetail):array {
+        $finish=function(array $compiled)use($context,$term,$contextDecisions,$owner,$id,$generation,$worker,$inheritedConstraints,$merged,$metricOptions,$replacementMetricOptions,$operationOptions,$replacementOperationOptions,$currentStoreRequested,$understanding,$safe,$summaries,$bindingCandidate,$objectReplacementWithoutFilterConfirmation,$requestedMemberDetail):array {
             $compiled=$this->bindNamedStoreScope($compiled,$context,$term,$contextDecisions,$owner,$id,$generation,$worker);
             $compiled=$this->bindCurrentStoreScope($compiled,$context,$currentStoreRequested);
             if ($merged['replacement_confirmation']) {
@@ -3187,7 +3187,11 @@ final class AiGatewayServices
         $limit=$projection['semantic_intent']['rank_limit']??null;
         $top=in_array('rank_top',$signals,true)||in_array('top_5',$signals,true);
         $bottom=in_array('rank_bottom',$signals,true)||in_array('bottom_5',$signals,true);
-        if (!in_array('ranking',$signals,true) || $top===$bottom || !is_int($limit) || $limit<1 || $limit>50
+        // In a verified ranking context, one closed ordinal shorthand such
+        // as “前三名” already carries direction plus row count. It need not
+        // contain a second literal “排行”; the strict signal allow-list below
+        // still rejects any new metric, object, period or filter instruction.
+        if ($top===$bottom || !is_int($limit) || $limit<1 || $limit>50
             || ($projection['date_terms']??[])!==[] || ($projection['date_grouping_ambiguous']??true)
             || ($projection['unresolved_condition']??true)
             || (array)($projection['semantic_intent']['constraints']??[])!==[]
@@ -3540,12 +3544,21 @@ final class AiGatewayServices
             foreach ($requirements as $index=>$requirement) {
                 if (!is_array($requirement) || !in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
                 $values=(array)($requirement['values']??[]);
-                if (!empty($values['metric_terms']) || !empty($values['metric_exclusions']) || isset($values['aggregate_condition'])) continue;
-                // A deferred malformed echo is not a fourth customer metric.
-                // Keep its object/time/operation semantics, while the exact
-                // registry-backed requirements added below own all metric
-                // audit rows independently.
+                if (!empty($values['metric_exclusions']) || isset($values['aggregate_condition'])) continue;
+                $owned=[];
+                foreach ((array)($values['metric_terms']??[]) as $term) {
+                    if (!is_string($term) || trim($term)==='') continue;
+                    $code=\app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms([trim($term)],$allowed);
+                    if ($code!==null && in_array($code,$statedCodes,true)) $owned[$code]=true;
+                }
+                if ($owned!==[]) continue;
+                // A deferred empty or unregistered model echo is not a fourth
+                // customer metric. Keep its independently accepted object,
+                // time and operation semantics, while exact registry-backed
+                // requirements below own every metric audit row. Exclusions
+                // and conditions are never removed by this cleanup.
                 $requirement['fields']=array_values(array_diff((array)$requirement['fields'],['metric_codes']));
+                unset($requirement['values']['metric_terms']);
                 if ($requirement['fields']===[]) unset($requirements[$index]);
                 else $requirements[$index]=$requirement;
             }
@@ -3704,12 +3717,68 @@ final class AiGatewayServices
         $separately=mb_strpos($question,'分别',0,'UTF-8');
         if ($separately===false || $separately<$lastMetricEnd) return $understanding;
 
-        $kinds=[];$labels=[];
+        $kinds=[];$labels=[];$typedKinds=[];$registryOwnedObject=false;
         foreach ($objectVocabulary as $item) {
             $kind=$item['object_kind']??null;$label=$item['object_label']??null;
             if (!is_string($kind)||!is_string($label)||$label===''||mb_strpos($question,$label,0,'UTF-8')===false) continue;
             if ($this->objectLabelOccursOnlyInsideMeasurement($question,$label)) continue;
             $kinds[$kind]=true;$labels[$label]=true;
+        }
+        // A registry title may legitimately include the analytical noun (for
+        // example “门店现金业绩”). If the accepted semantic contract already
+        // identifies one analytical object, use its published labels only to
+        // resolve which noun the trailing distributive applies to. This does
+        // not infer an object from a substring or override a selected target.
+        if ($kinds===[]) {
+            foreach ((array)($understanding['requirements']??[]) as $requirement) {
+                $values=(array)($requirement['values']??[]);
+                if (($values['object_relation']??'analysis')!=='analysis') continue;
+                $kind=$values['object_kind']??null;
+                if (is_string($kind)&&$kind!==''&&$kind!=='unknown') $typedKinds[$kind]=true;
+            }
+            if (count($typedKinds)===1) {
+                $typedKind=array_key_first($typedKinds);
+                foreach ($objectVocabulary as $item) {
+                    $label=$item['object_label']??null;
+                    if (($item['object_kind']??null)!==$typedKind || !is_string($label) || $label===''
+                        || mb_strpos($question,$label,0,'UTF-8')===false) continue;
+                    $kinds[$typedKind]=true;$labels[$label]=true;
+                }
+            }
+        }
+        // A complete coordinated request may be split by the model into one
+        // requirement per measurement and omit a redundant aggregate object
+        // on a continuation. Recover that object only when every exact metric
+        // independently publishes the same overview owner and the owner's
+        // published label is present in the current question. This is a
+        // registry intersection, not a sentence or customer-specific mapping.
+        if ($kinds===[] && $typedKinds===[]) {
+            $contracts=\app\services\query\metric\MetricDefinitionRegistry::capabilities();$common=null;
+            foreach ($codes as $code) {
+                $contract=$contracts[$code]??null;
+                if (!is_array($contract) || !in_array('summary',(array)($contract['query_shapes']??[]),true)) {
+                    $common=[];break;
+                }
+                $owners=[];
+                foreach ((array)($contract['overview']??[]) as $item) {
+                    $kind=$item['object_kind']??null;
+                    if (is_string($kind)&&$kind!==''&&$kind!=='unknown') $owners[$kind]=true;
+                }
+                $owners=array_keys($owners);
+                $common=$common===null?$owners:array_values(array_intersect($common,$owners));
+            }
+            if (is_array($common) && count($common)===1) {
+                $registeredKind=$common[0];
+                $registeredLabels=(array)(\app\services\query\metric\MetricDefinitionRegistry::analysisObjectAliases()[$registeredKind]??[]);
+                foreach ($objectVocabulary as $item) {
+                    $label=$item['object_label']??null;
+                    if (($item['object_kind']??null)===$registeredKind && is_string($label) && $label!=='') $registeredLabels[]=$label;
+                }
+                foreach (array_values(array_unique($registeredLabels)) as $label) {
+                    if (!is_string($label) || $label==='' || mb_strpos($question,$label,0,'UTF-8')===false) continue;
+                    $kinds[$registeredKind]=true;$labels[$label]=true;$registryOwnedObject=true;
+                }
+            }
         }
         if (count($kinds)!==1 || $labels===[]) return $understanding;
         foreach (array_keys($labels) as $label) {
@@ -3720,13 +3789,36 @@ final class AiGatewayServices
                 return $understanding;
             }
         }
-        $requirements=(array)($understanding['requirements']??[]);$changed=false;
+        $requirements=(array)($understanding['requirements']??[]);$changed=false;$hasObject=false;$hasOperation=false;
         foreach ($requirements as &$requirement) {
-            if (!is_array($requirement) || ($requirement['values']['operation']??null)!=='breakdown') continue;
-            if (($requirement['values']['object_relation']??'analysis')!=='analysis') return $understanding;
-            $requirement['values']['operation']='summary';$changed=true;
+            if (!is_array($requirement)) continue;
+            $values=(array)($requirement['values']??[]);
+            if (isset($values['object_relation']) && $values['object_relation']!=='analysis') return $understanding;
+            if (in_array('object_kind',(array)($requirement['fields']??[]),true)) $hasObject=true;
+            if (!in_array('operation',(array)($requirement['fields']??[]),true)) continue;
+            $hasOperation=true;
+            if (($values['operation']??null)==='breakdown') {
+                $requirement['values']['operation']='summary';$changed=true;
+            } elseif (($values['operation']??null)!=='summary') return $understanding;
         }
         unset($requirement);
+        $objectNeedsCarrier=!$hasObject && ($registryOwnedObject || count($kinds)===1);
+        if (!$hasOperation || $objectNeedsCarrier) {
+            if (count($requirements)>=12) return $understanding;
+            $used=[];$next=1;
+            foreach ($requirements as $requirement) if (is_array($requirement)&&is_string($requirement['id']??null)) $used[$requirement['id']]=true;
+            while (isset($used['r'.$next])&&$next<1000) $next++;
+            if ($next>999) return $understanding;
+            $fields=[];$values=[];
+            if (!$hasOperation) {$fields[]='operation';$values['operation']='summary';}
+            if ($objectNeedsCarrier) {
+                $fields[]='object_kind';$fields[]='object_relation';
+                $values['object_kind']=array_key_first($kinds);$values['object_relation']='analysis';
+            }
+            $requirements[]=['id'=>'r'.$next,'meaning'=>'按已登记经营主体汇总多个指标','fields'=>$fields,
+                'values'=>$values,'evidence'=>[['message_id'=>'current','quote'=>$question]]];
+            $changed=true;
+        }
         if (!$changed) return $understanding;
         return AiIntentUnderstandingContract::normalize([
             'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',

@@ -258,6 +258,38 @@ $metricCodes=['cash_performance','consume_amount','refund_performance'];
 $distributionFixed=$distribution->invoke($gatewayFixture,$distributionUnderstanding,$distributionQuestion,$objectVocabulary,$metricCodes);
 $check(($distributionFixed['requirements'][0]['values']['operation']??null)==='summary',
     'a trailing distributive over several exact measurements means one aggregate value per measurement');
+$embeddedObjectQuestion=$distributionQuestion;
+$embeddedObjectQuestion['question']='这个月的门店现金业绩、消耗业绩、退款金额分别是多少';
+$embeddedObjectQuestion['evidence_messages'][0]['text']=$embeddedObjectQuestion['question'];
+$embeddedObject=$distributionUnderstanding;
+$embeddedObject['requirements'][0]['evidence'][0]['quote']=$embeddedObjectQuestion['question'];
+$check(($distribution->invoke($gatewayFixture,$embeddedObject,$embeddedObjectQuestion,$objectVocabulary,$metricCodes)
+    ['requirements'][0]['values']['operation']??null)==='summary',
+    'a typed analytical object remains usable when its noun is embedded in a registered metric title');
+$splitQuestion=$embeddedObjectQuestion;
+$splitQuestion['prior_query']=['query_shape'=>'breakdown','metric_codes'=>['cash_performance','sales_amount'],
+    'start_date'=>'2026-09-01','end_date'=>'2026-09-25','compare_range'=>null,'store_ids'=>[],
+    'business_filters'=>['object_kind'=>'store'],'ranking'=>null,'aggregate_condition'=>null];
+$splitContinuation=['goal'=>'查看本月三项经营指标','status'=>'understood','requirements'=>[]];
+foreach ([['现金业绩','r1'],['消耗业绩','r2'],['退款金额','r3']] as [$term,$id]) {
+    $splitContinuation['requirements'][]=['id'=>$id,'meaning'=>'查看'.$term,'fields'=>['metric_codes'],
+        'values'=>['metric_terms'=>[$term]],'evidence'=>[['message_id'=>'current','quote'=>$embeddedObjectQuestion['question']]]];
+}
+$splitContinuation['requirements'][]=['id'=>'r4','meaning'=>'查看本月','fields'=>['periods'],
+    'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
+    'evidence'=>[['message_id'=>'current','quote'=>$embeddedObjectQuestion['question']]]];
+$splitContinuation=$distribution->invoke(
+    $gatewayFixture,$splitContinuation,$splitQuestion,$objectVocabulary,$metricCodes
+);
+$splitFailure=null;
+$splitIntent=app\services\ai\contract\AiIntentResultContract::exactCoordinatedIntent(
+    $splitContinuation,$splitQuestion,$metricCodes,true,$splitFailure
+);
+$check(($splitIntent['operation']??null)==='summary'
+    &&($splitIntent['object_kind']??null)==='store'
+    &&($splitIntent['context_delta']['operation']??null)==='replace'
+    &&($splitIntent['context_delta']['business_filters']??null)==='clear',
+    'a complete coordinated continuation rebuilds aggregate grain when the model splits metrics and omits redundant object fields');
 $objectDistributedQuestion=$distributionQuestion;
 $objectDistributedQuestion['question']='各门店现金业绩、消耗业绩、退款金额分别是多少';
 $objectDistributedQuestion['evidence_messages'][0]['text']=$objectDistributedQuestion['question'];
@@ -280,6 +312,19 @@ $check(count($metricRequirements)===3
         return (array)($requirement['values']['metric_terms']??[]);
     },$metricRequirements))===['现金业绩','消耗业绩','退款金额'],
     'an empty deferred metric audit field is replaced by independently evidenced exact measurements');
+$unregisteredEcho=$distributionUnderstanding;
+$unregisteredEcho['requirements'][0]['values']['metric_terms']=['门店经营指标'];
+$unregisteredReconciled=$reconcileMeasurements->invoke($gatewayFixture,$unregisteredEcho,$distributionQuestion,[
+    'metric_readiness'=>array_fill_keys($metricCodes,['ai_query_ready'=>true]),
+]);
+$unregisteredRequirements=array_values(array_filter($unregisteredReconciled['requirements'],static function(array $requirement):bool {
+    return in_array('metric_codes',(array)($requirement['fields']??[]),true);
+}));
+$check(count($unregisteredRequirements)===3
+    &&array_merge(...array_map(static function(array $requirement):array {
+        return (array)($requirement['values']['metric_terms']??[]);
+    },$unregisteredRequirements))===['现金业绩','消耗业绩','退款金额'],
+    'an unregistered model echo cannot block complete exact coordinated metric ownership');
 $attachDefault=$gatewayReflection->getMethod('attachRegisteredDefaultAnalysisObject');
 if (PHP_VERSION_ID<80100) $attachDefault->setAccessible(true);
 $positionObject=['ref'=>'position:2','kind'=>'position','label'=>'美容师','aliases'=>[],'version'=>'1','relations'=>['staff_sales_yeji']];

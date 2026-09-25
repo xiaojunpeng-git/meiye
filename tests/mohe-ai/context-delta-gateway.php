@@ -119,6 +119,12 @@ try {
     );
     cdgCheck(($topThree['requirements'][0]['values']['ranking']??null)===['direction'=>'top','limit'=>3],
         'a closed top-three phrase becomes one ranking-presentation requirement');
+    $topTen=$localRankingMethod->invoke($localPeriodHarness->gateway,
+        ['question'=>'前十名呢','evidence_messages'=>[['id'=>'current','text'=>'前十名呢']]],
+        ['local_conditions'=>[]]
+    );
+    cdgCheck(($topTen['requirements'][0]['values']['ranking']??null)===['direction'=>'top','limit'=>10],
+        'verified ranking continuation supports a generic explicit row count');
     cdgCheck($localRankingMethod->invoke($localPeriodHarness->gateway,
         ['question'=>'前三名和销售额','evidence_messages'=>[['id'=>'current','text'=>'前三名和销售额']]],
         ['local_conditions'=>[]]
@@ -416,7 +422,7 @@ try {
     $dimensionOptions=array_column($dimensionFollow['clarification']['fields'][0]['options']??[],'value');
     cdgCheck($dimensionFollow['status']==='WAITING_CLARIFICATION'
         &&($dimensionFollow['clarification']['fields'][0]['key']??null)==='dimension_metric'
-        &&$dimensionOptions===['sales_amount','sales_quantity']
+        &&$dimensionOptions===['sales_amount','sales_quantity','sales_record_count']
         &&$dimensionHarness->queries===$dimensionQueries,
         'an incompatible inherited metric becomes a target-dimension metric choice without another query');
     $dimensionCompleted=$dimensionHarness->choose($dimensionFollow,['dimension_metric'=>'sales_amount']);
@@ -634,7 +640,7 @@ try {
     $memberOperationPending=cdgDelta();$memberOperationPending['operation']='pending';
     $h->semanticIntent=['object_kind'=>'member','object_term'=>'','operation'=>'unknown','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$memberOperationPending,'unresolved_fragments'=>[]];
     $memberOperation=$h->start('展示方式未确定',$memberSource['answer']['context_ref']);
-    cdgCheck(array_column($memberOperation['clarification']['fields'][0]['options']??[],'value')===['retain','operation:ranking'],'operation guidance lists only shapes registered for the selected member metric');
+    cdgCheck(array_column($memberOperation['clarification']['fields'][0]['options']??[],'value')===['retain','operation:breakdown','operation:ranking'],'operation guidance lists only shapes registered for the selected member metric');
     $forgedOperation=$h->choose($memberOperation,['pending_operation'=>'operation:summary']);
     cdgCheck($forgedOperation['status']==='WAITING_CLARIFICATION'&&($forgedOperation['clarification']['fields'][0]['key']??null)==='pending_operation','a forged unavailable operation is rejected at the clarification boundary');
     cdgCheck($h->choose($memberOperation,['pending_operation'=>'retain'])['status']==='COMPLETED','the supported prior member ranking remains executable after confirmation');
@@ -674,7 +680,7 @@ try {
     $h->semanticIntent=['object_kind'=>'member','object_term'=>'','operation'=>'unknown','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$replacePending,'unresolved_fragments'=>[]];
     $replacement=$h->start('改查看会员，但展示方式未确定',$source['answer']['context_ref']);
     cdgCheck($replacement['status']==='WAITING_CLARIFICATION'&&($replacement['clarification']['fields'][0]['key']??null)==='pending_operation','an object replacement after an unrestricted aggregate asks only for the missing response form');
-    cdgCheck(array_column($replacement['clarification']['fields'][0]['options']??[],'value')===['operation:ranking'],'object replacement regenerates response choices from the new member contract and cannot retain an unsupported store summary');
+    cdgCheck(array_column($replacement['clarification']['fields'][0]['options']??[],'value')===['operation:breakdown','operation:ranking'],'object replacement regenerates response choices from the new member contract and cannot retain an unsupported store summary');
     $replacement=$h->choose($replacement,['pending_operation'=>'operation:ranking']);
     $replacement=$h->choose($replacement,['pending_ranking_direction'=>'top','pending_ranking_limit'=>'5']);
     $replacementEvidence=$h->private->read($h->row($replacement)['evidence_ref']);
