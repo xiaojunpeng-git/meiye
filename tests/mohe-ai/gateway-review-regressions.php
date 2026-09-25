@@ -278,6 +278,37 @@ foreach ([['现金业绩','r1'],['消耗业绩','r2'],['退款金额','r3']] as 
 $splitContinuation['requirements'][]=['id'=>'r4','meaning'=>'查看本月','fields'=>['periods'],
     'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
     'evidence'=>[['message_id'=>'current','quote'=>$embeddedObjectQuestion['question']]]];
+$groupedContinuation=$splitContinuation;
+$groupedContinuation['groups']=[
+    ['id'=>'q1','requirement_ids'=>['r1','r4']],
+    ['id'=>'q2','requirement_ids'=>['r2','r4']],
+    ['id'=>'q3','requirement_ids'=>['r3','r4']],
+];
+$groupedContinuation=$distribution->invoke(
+    $gatewayFixture,$groupedContinuation,$splitQuestion,$objectVocabulary,$metricCodes
+);
+$groupedFailure=null;
+$groupedIntent=app\services\ai\contract\AiIntentResultContract::exactCoordinatedIntent(
+    $groupedContinuation,$splitQuestion,$metricCodes,true,$groupedFailure
+);
+$check(!isset($groupedContinuation['groups'])
+    &&($groupedIntent['operation']??null)==='summary'
+    &&($groupedIntent['context_delta']['business_filters']??null)==='clear',
+    'provider-created metric groups collapse only when every group is one exact metric of the same aggregate subject');
+$independentGrouped=$splitContinuation;
+$independentGrouped['requirements'][1]['fields'][]='object_kind';
+$independentGrouped['requirements'][1]['fields'][]='object_relation';
+$independentGrouped['requirements'][1]['values']['object_kind']='person';
+$independentGrouped['requirements'][1]['values']['object_relation']='analysis';
+$independentGrouped['groups']=[
+    ['id'=>'q1','requirement_ids'=>['r1','r4']],
+    ['id'=>'q2','requirement_ids'=>['r2','r4']],
+    ['id'=>'q3','requirement_ids'=>['r3','r4']],
+];
+$check($distribution->invoke(
+    $gatewayFixture,$independentGrouped,$splitQuestion,$objectVocabulary,$metricCodes
+)===$independentGrouped,
+    'a grouped request carrying another analytical object is never collapsed into one aggregate subject');
 $splitContinuation=$distribution->invoke(
     $gatewayFixture,$splitContinuation,$splitQuestion,$objectVocabulary,$metricCodes
 );

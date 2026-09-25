@@ -3700,7 +3700,7 @@ final class AiGatewayServices
      */
     private function reconcileCoordinatedMeasurementDistribution(array $understanding,array $safeQuestion,array $objectVocabulary,array $metricCodes): array
     {
-        if (($understanding['status']??null)!=='understood' || !empty($understanding['groups'])) return $understanding;
+        if (($understanding['status']??null)!=='understood') return $understanding;
         $question=$safeQuestion['question']??null;
         if (!is_string($question) || $question==='' || preg_match('/\[local_condition_[0-9]+\]/D',$question)) return $understanding;
         $matches=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText($question,$metricCodes);
@@ -3790,6 +3790,42 @@ final class AiGatewayServices
             }
         }
         $requirements=(array)($understanding['requirements']??[]);$changed=false;$hasObject=false;$hasOperation=false;
+        if (!empty($understanding['groups'])) {
+            // Some providers incorrectly turn a one-subject multi-metric
+            // summary into one group per metric. Collapse only the shape that
+            // the registry and current wording independently prove is one
+            // aggregate subject: every group must own exactly one distinct,
+            // current, registered metric requirement and may share only the
+            // period. Any object, filter, ranking, condition or response-form
+            // carrier keeps the groups intact for the ordinary multi-query
+            // compiler, so genuine multi-subject requests are never merged.
+            $metricRequirementIds=[];$metricTerms=[];$allowedGroupedFields=['metric_codes'=>true,'periods'=>true];
+            foreach ($requirements as $requirement) {
+                if (!is_array($requirement) || array_diff((array)($requirement['fields']??[]),array_keys($allowedGroupedFields))) {
+                    return $understanding;
+                }
+                if (!in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
+                $terms=(array)($requirement['values']['metric_terms']??[]);
+                if (!is_string($requirement['id']??null) || count($terms)!==1 || !is_string($terms[0]) || $terms[0]==='') {
+                    return $understanding;
+                }
+                $metricRequirementIds[$requirement['id']]=true;$metricTerms[$terms[0]]=true;
+            }
+            $groupedMetricIds=[];
+            foreach ((array)$understanding['groups'] as $group) {
+                if (!is_array($group)) return $understanding;
+                $owned=array_values(array_intersect((array)($group['requirement_ids']??[]),array_keys($metricRequirementIds)));
+                if (count($owned)!==1) return $understanding;
+                $groupedMetricIds[$owned[0]]=true;
+            }
+            $matchedTerms=[];
+            foreach ($matches as $match) if (is_string($match['term']??null)) $matchedTerms[$match['term']]=true;
+            if (count($metricRequirementIds)!==count($codes)
+                || count($groupedMetricIds)!==count($metricRequirementIds)
+                || array_diff_key($metricRequirementIds,$groupedMetricIds)!==[]
+                || array_diff_key($metricTerms,$matchedTerms)!==[]) return $understanding;
+            unset($understanding['groups']);$changed=true;
+        }
         foreach ($requirements as &$requirement) {
             if (!is_array($requirement)) continue;
             $values=(array)($requirement['values']??[]);
