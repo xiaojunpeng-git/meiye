@@ -2875,6 +2875,18 @@ final class AiGatewayServices
                 );
             } catch (\Throwable $ignored) {$reason='plan_compile';return null;}
             if (($compiled['kind']??null)!=='plan' || !is_array($compiled['plan']??null)) {$reason='plan_shape';return null;}
+            $metricContract=$capabilities['metric_readiness'][$item['metric_code']]??null;
+            if (is_array($metricContract)
+                &&($metricContract['filter_grain']??null)===$objectKind
+                &&($metricContract['business_filters']??null)===[]) {
+                // Ranking a metric at its own registered fact grain needs no
+                // analytical-dimension filter. Keeping a redundant
+                // object_kind filter would falsely route the base grain
+                // through the optional-dimension compiler and reject an
+                // otherwise registered query. This rule is contract-driven
+                // for every future base object, not a store phrase exception.
+                $compiled['plan']['query']['business_filters']=[];
+            }
             $label=$this->analysisObjectLabel($objectKind);
             if (!is_string($label) || $label==='') {$reason='object_label';return null;}
             $plans[]=['id'=>'q'.($index+1),'label'=>$label.'排行','plan'=>$compiled['plan']];

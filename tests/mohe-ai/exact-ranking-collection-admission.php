@@ -42,4 +42,24 @@ $verify(is_array($singleHeadTail)&&count($singleHeadTail)===1
     &&($singleHeadTail[0]['direction']??null)==='top_and_bottom',
     'one metric may preserve a coordinated highest-and-lowest result without becoming two subjects');
 
+// The exact admission and the registered compiler must agree on base grain:
+// store is a valid ranked object for a store-grain metric, but it is not an
+// optional analytical-dimension filter that should be sent to the compiler.
+$gatewayReflection=new ReflectionClass(app\services\ai\AiGatewayServices::class);
+$gateway=$gatewayReflection->newInstanceWithoutConstructor();
+$vocabularyMethod=$gatewayReflection->getMethod('analysisObjectVocabulary');
+$rankingMethod=$gatewayReflection->getMethod('compileExactRegisteredRankingCollection');
+if (PHP_VERSION_ID<80100) {$vocabularyMethod->setAccessible(true);$rankingMethod->setAccessible(true);}
+$contracts=app\services\query\metric\MetricDefinitionRegistry::capabilities();
+$vocabulary=$vocabularyMethod->invoke($gateway,['metric_readiness'=>$contracts]);
+$capabilities=['metric_codes'=>array_keys($contracts),'metric_readiness'=>$contracts,
+    'query_shapes'=>['summary','breakdown','trend','ranking','comparison','condition_count','condition_list'],
+    'output_formats'=>['screen']];
+$reason=null;
+$args=['这个月销售额最高的门店是哪个',$vocabulary,$capabilities,'screen','2026-09-25',&$reason];
+$baseGrainRanking=$rankingMethod->invokeArgs($gateway,$args);
+$verify(($baseGrainRanking['plan']['query']['business_filters']??null)===[]
+    &&($baseGrainRanking['plan']['query']['ranking']??null)===['direction'=>'top','limit'=>1],
+    'an exact ranking at the metric base grain does not invent a redundant analytical-dimension filter');
+
 echo "exact ranking collection admission: {$checks} checks PASS\n";
