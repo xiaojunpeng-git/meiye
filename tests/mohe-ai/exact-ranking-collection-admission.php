@@ -25,6 +25,19 @@ $verify(($compound[1]['metric_code']??null)==='sales_record_count'
     &&($compound[1]['object_kind']??null)==='project'
     &&($compound[1]['direction']??null)==='top_and_bottom','coordinated bottom tail stays with the preceding project metric');
 
+$saleObjects=$objects;
+$saleObjects[]=['object_kind'=>'product','object_label'=>'产品'];
+$saleObjects[]=['object_kind'=>'card','object_label'=>'卡项'];
+$sharedDefaults=['sales_amount'=>['card','project','product'],'cash_performance'=>['store']];
+$shared=$admission->match('这个月项目、产品、卡项业绩最高的分别是什么',$saleObjects,$metrics,$sharedDefaults);
+$verify(is_array($shared)&&array_column($shared,'object_kind')===['project','product','card']
+    &&array_unique(array_column($shared,'metric_code'))===['sales_amount'],
+    'a distributive object list uses its one shared registered ranking default in customer order');
+$verify($admission->match('这个月门店、产品业绩最高的分别是什么',$saleObjects,$metrics,$sharedDefaults)===null,
+    'objects without one shared registered ranking default remain model work');
+$verify($admission->match('这个月项目、产品、卡项业绩最高的原因分别是什么',$saleObjects,$metrics,$sharedDefaults)===null,
+    'open analysis residue cannot enter the shared-default ranking path');
+
 $verify($admission->match('这个月销售额最高是哪天，顺便分析原因',$objects,$metrics)===null,
     'open analysis residue must remain on the model path');
 $verify($admission->match('这个月业绩最高是哪天，销售记录最多的项目是哪个',$objects,$metrics)===null,
@@ -61,5 +74,12 @@ $baseGrainRanking=$rankingMethod->invokeArgs($gateway,$args);
 $verify(($baseGrainRanking['plan']['query']['business_filters']??null)===[]
     &&($baseGrainRanking['plan']['query']['ranking']??null)===['direction'=>'top','limit'=>1],
     'an exact ranking at the metric base grain does not invent a redundant analytical-dimension filter');
+$reason=null;
+$sharedArgs=['这个月项目、产品、卡项业绩最高的分别是什么',$vocabulary,$capabilities,'screen','2026-09-25',&$reason];
+$sharedPlan=$rankingMethod->invokeArgs($gateway,$sharedArgs);
+$verify(array_column($sharedPlan['plan']['items']??[],'label')===['项目排行','产品排行','卡项排行']
+    &&array_map(static function(array $item):array{return $item['plan']['query']['metric_codes'];},$sharedPlan['plan']['items'])
+        ===[['sales_amount'],['sales_amount'],['sales_amount']],
+    'the shared registry default compiles three independent existing Reader plans');
 
 echo "exact ranking collection admission: {$checks} checks PASS\n";

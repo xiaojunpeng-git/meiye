@@ -231,9 +231,9 @@ $groupCanonical=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
 );
 $check($groupCanonical['metric_codes']===['sales_record_count'],
     'one group derives its exact metric from accepted terms when the complete question names several metrics');
-$independentQuestion=$question;$independentQuestion['question']='项目、卡项、产品卖得最好的分别是什么';$independentQuestion['evidence_messages'][0]['text']=$independentQuestion['question'];
+$independentQuestion=$question;$independentQuestion['question']='这个月项目、产品、卡项业绩最高的分别是什么';$independentQuestion['evidence_messages'][0]['text']=$independentQuestion['question'];
 $independentRequirements=[];
-foreach (['project','card','product'] as $index=>$object) {
+foreach (['project','product','card'] as $index=>$object) {
     $independentRequirements[]=['id'=>'r'.($index+1),'meaning'=>'查看'.$object.'最好结果',
         'fields'=>['object_kind','object_relation','operation','ranking'],
         'values'=>['object_kind'=>$object,'object_relation'=>'analysis','operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>1]],

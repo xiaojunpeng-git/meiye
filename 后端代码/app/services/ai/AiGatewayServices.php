@@ -35,6 +35,11 @@ final class AiGatewayServices
     // call bounded, but leave enough room for that single semantic stage so a
     // valid request is not reported as failed before any Reader is executed.
     private const MODEL_STAGE_LIMIT_MS = 30000;
+    // Only the first natural-language understanding call has a bounded
+    // transport retry. The two windows add up to the former single-call cap,
+    // so recovery does not double the customer's wait when a provider stalls.
+    private const UNDERSTANDING_PRIMARY_LIMIT_MS = 22000;
+    private const UNDERSTANDING_TRANSPORT_RETRY_LIMIT_MS = 8000;
     private $runs; private $config; private $private; private $instance; private $views; private $model; private $queryTransaction; private $exports;
     private $management; private $managementDocument; private $managementRevision='source';
     /** Optional injected dependencies are for an isolated integration environment, never request parameters. */
@@ -1200,7 +1205,7 @@ final class AiGatewayServices
             $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand_meaning');
             try {
             $checkpoint();
-            $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
+            $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::UNDERSTANDING_PRIMARY_LIMIT_MS) : null;
             $meaningReply=$this->model
                 ? call_user_func($this->model,$safe['outbound'],[],$configuration,$checkpoint,null,'understanding')
                 : (new SiliconFlowClient())->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,null,$objectVocabulary,$measurementVocabulary);
@@ -1208,10 +1213,34 @@ final class AiGatewayServices
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_meaning','SUCCEEDED',$meaningReply['usage']['input_tokens']??null,$meaningReply['usage']['output_tokens']??null);
             } catch (\Throwable $error) {
             if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,'understand_meaning');
-            $firstState=in_array($error->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
-            $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_meaning',$firstState);
             $diagnostic=$error instanceof AiContractException?$error->diagnostic():[];
             $repairPredicate=$diagnostic['predicate']??null;
+            $transportTimeout=$error instanceof AiContractException
+                &&$error->getMessage()==='AI_MODEL_RESULT_UNKNOWN'
+                &&($diagnostic['stage']??null)==='transport'
+                &&$repairPredicate==='timeout'
+                &&(int)($diagnostic['transport_errno']??0)===28
+                &&(int)($diagnostic['http_status']??-1)===0;
+            // This read-only model attempt produced no usable response. When
+            // it qualifies for the bounded replay below, close it as failed
+            // while retaining its timeout diagnostic and unknown token usage;
+            // an UNKNOWN attempt would correctly block publication for an
+            // external side effect, but understanding has no such side effect.
+            $firstState=$transportTimeout?'FAILED':(in_array($error->getMessage(),
+                ['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');
+            $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_meaning',$firstState);
+            // A provider that returned no HTTP response supplied no customer
+            // meaning to repair. Replay the identical sanitized request once,
+            // before any Reader call, using the remaining part of the former
+            // 30-second understanding window. Other unknown outcomes, model
+            // contract defects, cancellation and authority changes keep their
+            // existing fail-closed paths.
+            if ($transportTimeout) {
+                $understanding=$this->retryUnderstandingAfterTransportTimeout(
+                    $owner,$id,$generation,$worker,$safe['outbound'],$configuration,$checkpoint,
+                    $runtimeSkills,$objectVocabulary,$measurementVocabulary
+                );
+            } else {
             if ($repairPredicate==='binding_requirement_unavailable') {
                 throw new RuntimeException('AI_CAPABILITY_NOT_READY');
             }
@@ -1256,6 +1285,7 @@ final class AiGatewayServices
                 } else {
                 throw $repairError;
                 }
+            }
             }
             }
         }
@@ -2876,8 +2906,13 @@ final class AiGatewayServices
         $dateProjection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse($question);
         if ($format!=='screen' || count((array)($dateProjection['date_terms']??[]))!==1
             || !empty($dateProjection['date_grouping_ambiguous'])) {$reason='date_or_format';return null;}
+        $defaultRankObjects=[];
+        foreach ((array)($capabilities['metric_readiness']??[]) as $code=>$contract) {
+            if (!is_string($code) || !is_array($contract)) continue;
+            $defaultRankObjects[$code]=array_values((array)($contract['analysis_default_rank_object_kinds']??[]));
+        }
         $items=(new \app\services\ai\semantic\AiExactRankingCollectionAdmission())->match(
-            $question,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[]))
+            $question,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[])),$defaultRankObjects
         );
         if ($items===null) {$reason='semantic_no_match';return null;}
         $plans=[];
@@ -4422,6 +4457,49 @@ final class AiGatewayServices
         $state['remaining_execution_ms']=min($profile['run_execution_budget_ms'],$remaining);
         $state['execution_deadline_ms']=$now+$state['remaining_execution_ms'];
         return AiRunBudgetPolicy::callTimeout($state,'model',$stageLimitMs,$now);
+    }
+
+    /**
+     * Replays one unchanged sanitized understanding request after a proven
+     * provider transport timeout. This path owns the Run's only recovery slot
+     * and therefore cannot cascade into another semantic or binding repair.
+     * No business query has been compiled or executed at this point.
+     */
+    private function retryUnderstandingAfterTransportTimeout(array $owner,string $id,int $generation,string $worker,
+        array $safeQuestion,array $configuration,callable $checkpoint,array $runtimeSkills,
+        array $objectVocabulary,array $measurementVocabulary): array
+    {
+        $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
+        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',
+            $this->inputTokenReservation([$safeQuestion,$runtimeSkills,$objectVocabulary,$measurementVocabulary],1024));
+        $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
+        $attempt='understand_transport_retry';
+        $this->runs->prepareAttempt($owner,$id,$generation,$worker,$attempt,'model',
+            hash('sha256',json_encode([$safeQuestion,$runtimeSkills,$objectVocabulary,$measurementVocabulary,'transport-retry'])),'siliconflow');
+        $this->runs->sendAttempt($owner,$id,$generation,$worker,$attempt);
+        try {
+            $checkpoint();
+            $modelTimeout=$this->model===null
+                ?$this->modelCallTimeout($owner,$id,$generation,$worker,self::UNDERSTANDING_TRANSPORT_RETRY_LIMIT_MS)
+                :null;
+            $reply=$this->model
+                ?call_user_func($this->model,$safeQuestion,[],$configuration,$checkpoint,null,'understanding')
+                :(new SiliconFlowClient())->understandMeaning($safeQuestion,$configuration['model'],$configuration['api_key'],
+                    $modelTimeout,$checkpoint,$runtimeSkills,null,$objectVocabulary,$measurementVocabulary);
+            $understanding=AiIntentUnderstandingContract::normalize($reply['understanding']??null,$safeQuestion);
+            $this->runs->finishAttempt($owner,$id,$generation,$worker,$attempt,'SUCCEEDED',
+                $reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'understanding_transport_timeout_recovered');
+            return $understanding;
+        } catch (\Throwable $retryError) {
+            if ($retryError instanceof AiContractException) {
+                $this->recordModelDiagnostic($owner,$id,$generation,$worker,$retryError,$attempt);
+            }
+            $state=in_array($retryError->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)
+                ?'UNKNOWN':'FAILED';
+            $this->runs->finishAttempt($owner,$id,$generation,$worker,$attempt,$state);
+            throw $retryError;
+        }
     }
 
     /**

@@ -1,0 +1,52 @@
+# 第42轮补修：多对象排行与理解超时恢复自测记录
+
+## 结论
+
+- 日期：2026-09-25（Asia/Shanghai）。
+- 环境：本地平台端 `http://127.0.0.1:18081/admin/setting/mohe-ai`，平台管理员登录态、真实本地瑞昊数据、当前配置模型。
+- 基线 commit：`0fc0d7d9`（第42轮会员排名详情复合查询闭环）。
+- 状态：补修开发和本地自测通过；未 commit、未部署、未 push，待产品经理确认验收。
+
+## 问题与修复
+
+失败原句为“这个月项目、产品、卡项业绩最高的分别是什么”。失败 Run `1d38697a267595f45c268b1aa9c5a00ce723d741213ebdbc` 在首次语义理解等待 30,029ms 后发生纯传输超时，Reader 未执行。该三对象能力曾在第31轮通过，因此本次没有重建指标、Reader 或展示链。
+
+本次只补两个边界：
+
+1. 首次语义理解发生 `curl 28 + HTTP 0` 的纯传输超时时，在尚未查询数据的前提下允许一次短时恢复。主等待 22 秒、恢复等待 8 秒，两段合计不超过原单次约 30 秒的模型等待；取消、权限变化、模型格式错误及绑定阶段超时不进入该路径。
+2. 对“多个明确注册对象 + 分别/各自 + 宽泛排行”的完整闭合句，复用已有精确排行编译器。只有所有对象在指标注册表中恰好共享一个默认排行指标时才直接执行；对象顺序、期间和排行方向来自句子，指标来自注册表交集。额外分析要求、无共同默认指标、多个候选指标或未解释文字都会退出到普通模型理解。
+
+本例的项目、产品、卡项共同且唯一的注册默认排行指标是销售额，所以复用现有三个统一 Reader 排行计划。没有增加客户名称判断、完整问句匹配、新指标公式、新查询服务或前端分支。
+
+## 自动化验证
+
+- 10 个相关脚本通过，其中 9 个可计数脚本共 912 项检查，另有异步执行状态契约通过。
+- 覆盖：原句三对象顺序及共同默认指标、无共同指标拒绝、开放分析残留拒绝、单次超时恢复、连续两次超时终止且零查询、绑定超时不重放、运行预算、Attempt 状态、上下文及网关回归。
+- 两个修改 PHP 文件语法检查和目标文件 `git diff --check` 均通过。
+
+## 真人页面测试（会话保留）
+
+1. 仅加入受控重试后的首次复测：Run `2d37407e6c5fdfc1164bd00cb7209dcfb717e0bd91a6c6a2`。
+   - 首次理解 22,036ms，短时恢复 8,030ms；供应商两次均无响应，因此按原边界失败且没有执行数据查询。
+   - 该结果证明重试有界，但仅靠重试不能稳定交付这条已注册能力。
+2. 接入共享注册默认排行后再次用新对话提交相同原句：Run `d72f62714a2f26a43b93ffba451ab42e6fbf90c3a16641b5`。
+   - 页面用时 2 秒，一次返回项目、产品、卡项三组结果，顺序与问题一致，均明确标注销售额和统计期间。
+   - 模型调用 0 次；三次统一查询分别约 193ms、100ms、88ms；最终状态 `COMPLETED`。
+
+## 数据与代码边界
+
+- 统计事实、对象兼容性、默认指标及排行执行继续由统一指标注册表和统一 Reader 负责。
+- 本轮没有数据库结构或业务数据写入，没有修改前端，没有生成 Excel，没有部署或生产操作。
+- 新增或更新职责与关键边界注释的文件：
+  - `后端代码/app/services/ai/AiGatewayServices.php`
+  - `后端代码/app/services/ai/semantic/AiExactRankingCollectionAdmission.php`
+
+## 固定版本指纹
+
+- `fdbfa9c312c462c9fc0a7c3247b0fb7d8f45ce54bf90665022ff307a9d9c713c`  `后端代码/app/services/ai/AiGatewayServices.php`
+- `4552bce156012dd143c0a25c2512cc5b2bf57cba595e0966b0a0b1a370729d81`  `后端代码/app/services/ai/semantic/AiExactRankingCollectionAdmission.php`
+- `659e61750eca8f76635f9fc735e15ebe3bd4ad6ea06e088843a52ea0edcc1d5e`  `tests/mohe-ai/exact-ranking-collection-admission.php`
+- `360dbfd836bbccb8c759b00b267df738bad61a8f6329c7c026e4a01c9ea779ed`  `tests/mohe-ai/gateway-integration.php`
+- `b0a6de1eba181f110b83bd88b19347308c3e1fec5090c910015aa92caafce182`  `tests/mohe-ai/intent-understanding-contract.php`
+- `9f16d66fd2840f2ec0e727f5b10e2d296ed4fbec095d44f14c58ac38a9c370d0`  `tests/mohe-ai/runtime-contract.php`
+

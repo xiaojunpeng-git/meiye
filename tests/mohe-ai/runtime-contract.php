@@ -93,7 +93,11 @@ checkRuntime('model transport timeout never exceeds stage or configured cap', Bu
 checkRuntime('binding uses the same bounded model window as other semantic stages', Budget::callTimeout($spent, 'model', 30000, 22000) === 30000);
 $gatewaySource = file_get_contents(dirname(__DIR__, 2) . '/后端代码/app/services/ai/AiGatewayServices.php');
 checkRuntime('gateway derives model transport timeout at each provider send boundary', is_string($gatewaySource)
-    && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS)') === 7
+    && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS)') === 6
+    && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::UNDERSTANDING_PRIMARY_LIMIT_MS)') === 1
+    && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::UNDERSTANDING_TRANSPORT_RETRY_LIMIT_MS)') === 1
+    && strpos($gatewaySource, 'private const UNDERSTANDING_PRIMARY_LIMIT_MS = 22000;') !== false
+    && strpos($gatewaySource, 'private const UNDERSTANDING_TRANSPORT_RETRY_LIMIT_MS = 8000;') !== false
     && strpos($gatewaySource, 'BIND_INITIAL_STAGE_LIMIT_MS') === false
     && strpos($gatewaySource, 'BIND_RECOVERY_STAGE_LIMIT_MS') === false
     && strpos($gatewaySource, ',45000,$checkpoint') === false

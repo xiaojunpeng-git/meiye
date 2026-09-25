@@ -17,15 +17,19 @@ final class AiExactRankingCollectionAdmission
     /**
      * @param array<int,array{object_kind:string,object_label:string}> $objectVocabulary
      * @param array<int,string> $allowedMetricCodes
+     * @param array<string,array<int,string>> $defaultRankObjectKinds
      * @return array<int,array{metric_code:string,object_kind:string,direction:string,limit:int}>|null
      */
-    public function match(string $question,array $objectVocabulary,array $allowedMetricCodes): ?array
+    public function match(string $question,array $objectVocabulary,array $allowedMetricCodes,array $defaultRankObjectKinds=[]): ?array
     {
         if ($question==='' || preg_match('//u',$question)!==1) return null;
+        $objects=$this->objects($objectVocabulary);
+        $shared=$this->sharedDefaultRanking($question,$objects,$allowedMetricCodes,$defaultRankObjectKinds);
+        if ($shared!==null) return $shared;
         $clauses=preg_split('/[，,；;。]+/u',$question,-1,PREG_SPLIT_NO_EMPTY);
         if (!is_array($clauses) || $clauses===[] || count($clauses)>6) return null;
 
-        $objects=$this->objects($objectVocabulary);$items=[];
+        $items=[];
         foreach ($clauses as $rawClause) {
             $clause=trim($rawClause);
             if ($clause==='') continue;
@@ -49,6 +53,66 @@ final class AiExactRankingCollectionAdmission
         }
         if ($items===[] || count($items)>4) return null;
         return $items;
+    }
+
+    /**
+     * A distributive list of registered objects may share one registry-owned
+     * broad ranking perspective. The grammar proves only object order,
+     * direction and distribution; the metric is admitted only when the
+     * intersection of active registry defaults contains exactly one code.
+     */
+    private function sharedDefaultRanking(string $question,array $objects,array $allowedMetricCodes,array $defaults): ?array
+    {
+        if (!preg_match('/分别|各自/u',$question)) return null;
+        if (MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes)!==null) return null;
+        $matched=$this->objectsInText($question,$objects);
+        if ($matched===null || count($matched)<2 || count($matched)>4) return null;
+        $direction=$this->direction($question);
+        if ($direction===null || $this->sharedDefaultResidue($question,array_column($matched,'object_label'))!=='') return null;
+        $objectKinds=array_column($matched,'object_kind');$candidateCodes=[];
+        foreach ($allowedMetricCodes as $code) {
+            $kinds=array_values(array_unique(array_filter((array)($defaults[$code]??[]),'is_string')));
+            if (array_diff($objectKinds,$kinds)===[]) $candidateCodes[]=$code;
+        }
+        if (count($candidateCodes)!==1) return null;
+        return array_map(static function(array $object)use($candidateCodes,$direction):array{
+            return ['metric_code'=>$candidateCodes[0],'object_kind'=>$object['object_kind'],
+                'direction'=>$direction,'limit'=>1];
+        },$matched);
+    }
+
+    /** Ordered unique registered objects; ambiguous labels fail closed. */
+    private function objectsInText(string $text,array $objects): ?array
+    {
+        $byKind=[];$labelKinds=[];
+        foreach ($objects as $object) {
+            $label=$object['object_label'];$position=mb_strpos($text,$label,0,'UTF-8');
+            if ($position===false) continue;
+            $labelKinds[$label][$object['object_kind']]=true;
+            $length=mb_strlen($label,'UTF-8');$current=$byKind[$object['object_kind']]??null;
+            if ($current===null || $length>$current['length']) {
+                $byKind[$object['object_kind']]=['object_kind'=>$object['object_kind'],
+                    'object_label'=>$label,'position'=>$position,'length'=>$length];
+            }
+        }
+        foreach ($labelKinds as $kinds) if (count($kinds)>1) return null;
+        $matched=array_values($byKind);
+        usort($matched,static function(array $left,array $right):int{return $left['position']<=>$right['position'];});
+        return array_map(static function(array $item):array{
+            return ['object_kind'=>$item['object_kind'],'object_label'=>$item['object_label']];
+        },$matched);
+    }
+
+    /** Remove only closed broad-ranking grammar; any business residue rejects. */
+    private function sharedDefaultResidue(string $question,array $objectLabels): string
+    {
+        $residue=$question;
+        foreach ($objectLabels as $label) $residue=str_replace($label,' ',$residue);
+        $residue=preg_replace('/最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
+        $residue=preg_replace('/这个月|这一个月|本月|这月|上个月|上月|今天|今日|昨天|昨日|前天/u',' ',$residue);
+        $residue=preg_replace('/业绩|卖得/u',' ',$residue);
+        $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪个|哪一个|什么)(?:又)?|分别|各自|同时|以及|和|与|的|是|又|、|，|,|；|;|。|\s+/u','',$residue);
+        return is_string($residue)?trim($residue):$question;
     }
 
     /** Prefer the longest registered label and reject labels owned by different object kinds. */

@@ -33,11 +33,11 @@ try {
  $private=new AiPrivateStorage($temp);$views=new MetricReadViewStore($temp.'/views',$private->signingKey());
  $config=new AiConfigStore($db,'','fixture.instance',$private);
  $config->save(['enabled'=>true,'external_processing_authorized'=>true,'external_scope_version'=>AiConfigStore::QUESTION_SCOPE,'model'=>'fixture/model','api_key'=>'fixture-only-key','version'=>0]);
- $runs=new AiRunStore($db,'','fixture.instance');$models=0;$queries=0;$unknownBindingFailure=false;$unknownUnderstandingFailure=false;
- $model=function($view,$candidates,$configuration,$checkpoint,$repairPredicate=null,$phase='binding',$understanding=null)use(&$models,&$unknownBindingFailure,&$unknownUnderstandingFailure){$models++;$checkpoint();
+ $runs=new AiRunStore($db,'','fixture.instance');$models=0;$queries=0;$unknownBindingFailure=false;$unknownUnderstandingFailures=0;
+ $model=function($view,$candidates,$configuration,$checkpoint,$repairPredicate=null,$phase='binding',$understanding=null)use(&$models,&$unknownBindingFailure,&$unknownUnderstandingFailures){$models++;$checkpoint();
    if($phase==='binding_verification') return ['review'=>['decision'=>'accept','rejected_requirement_ids'=>[]],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    if($phase==='rank_metric_selection') {$clarifyRank=in_array($view['question'],['哪些门店业绩好（注册默认）','按现金业绩或消耗业绩，哪些门店排名更好（需要澄清）'],true);return ['selection'=>['decision'=>$clarifyRank?'clarify':'select','metric_code'=>$clarifyRank?null:'cash_performance'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];}
-   if($phase==='understanding' && $unknownUnderstandingFailure) {$unknownUnderstandingFailure=false;throw new \app\services\ai\contract\AiContractException('AI_MODEL_RESULT_UNKNOWN',['stage'=>'transport','predicate'=>'timeout','transport_errno'=>28,'http_status'=>0,'elapsed_ms'=>30000]);}
+   if($phase==='understanding' && $unknownUnderstandingFailures>0) {$unknownUnderstandingFailures--;throw new \app\services\ai\contract\AiContractException('AI_MODEL_RESULT_UNKNOWN',['stage'=>'transport','predicate'=>'timeout','transport_errno'=>28,'http_status'=>0,'elapsed_ms'=>30000]);}
    if($phase==='binding' && $unknownBindingFailure) {$unknownBindingFailure=false;throw new \app\services\ai\contract\AiContractException('AI_MODEL_RESULT_UNKNOWN',['stage'=>'transport','predicate'=>'timeout','transport_errno'=>28,'http_status'=>0,'elapsed_ms'=>30000]);}
    if($phase==='understanding' && $view['question']==='这个月经营情况如何（确定性概览）') return ['understanding'=>[
        'goal'=>'查看本月门店整体经营概览','request_kind'=>'open_overview','status'=>'understood','requirements'=>[[
@@ -288,12 +288,29 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
  verifyGateway($models===$modelsBeforeUnknownBinding+2 && $queries===$queriesBeforeUnknownBinding,'an unknown binding result is never automatically replayed or sent to the Reader');
  verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownBinding['run_id'])." AND attempt_code='bind_intent' AND state='UNKNOWN'")->fetchColumn()===1,'unknown binding remains auditable');
  verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownBinding['run_id'])." AND attempt_code='bind_transport_recovery'")->fetchColumn()===0,'unknown binding creates no second transport recovery attempt');
- $unknownUnderstandingFailure=true;[$unknownUnderstanding,$unknownUnderstandingInput]=$make('understand-result-unknown','今天消耗业绩多少？请解释一下');$queriesBeforeUnknownUnderstanding=$queries;
+ $unknownUnderstandingFailures=1;[$unknownUnderstanding,$unknownUnderstandingInput]=$make('understand-result-unknown','今天消耗业绩多少？请解释一下');$queriesBeforeUnknownUnderstanding=$queries;
  $unknownUnderstandingResult=$gateway->handle('execute',$context,$binding($unknownUnderstanding)+$unknownUnderstandingInput,$unknownUnderstanding['run_id']);
- verifyGateway($unknownUnderstandingResult['status']==='FAILED' && $unknownUnderstandingResult['reason']==='AI_MODEL_RESULT_UNKNOWN'
-     && $unknownUnderstandingResult['progress']==='模型响应超时，本次尚未执行数据查询。您可以直接重试，无需重新描述问题。','an unknown understanding result is not replayed and gives the user a specific safe explanation');
- verifyGateway($queries===$queriesBeforeUnknownUnderstanding,'an unknown understanding result cannot issue a fact query');
- verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownUnderstanding['run_id'])." AND attempt_code='understand_meaning' AND state='UNKNOWN'")->fetchColumn()===1,'unknown understanding remains auditable without a blind replay');
+ verifyGateway($unknownUnderstandingResult['status']==='COMPLETED' && $queries===$queriesBeforeUnknownUnderstanding+1,
+     'one pure understanding transport timeout recovers before the only fact query status='.
+     ($unknownUnderstandingResult['status']??'missing').' reason='.($unknownUnderstandingResult['reason']??'').
+     ' query_delta='.($queries-$queriesBeforeUnknownUnderstanding));
+ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownUnderstanding['run_id'])." AND attempt_code='understand_meaning' AND state='FAILED' AND input_tokens IS NULL AND output_tokens IS NULL")->fetchColumn()===1,
+     'the unusable read-only response closes with unknown usage while its timeout diagnostic remains auditable');
+ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownUnderstanding['run_id'])." AND attempt_code='understand_transport_retry' AND state='SUCCEEDED'")->fetchColumn()===1,
+     'the single bounded understanding recovery is recorded separately');
+ $timeoutAuth=$auth;$timeoutAuth['account_id']=9;$timeoutContext=$timeoutAuth;
+ $timeoutContext['_refresh']=function()use(&$timeoutAuth){return $timeoutAuth;};
+ $timeoutBoot=$gateway->handle('bootstrap',$timeoutContext,['client_session_id'=>'device-timeout-retry']);
+ $repeatedTimeoutInput=['client_request_id'=>'understand-result-timeout-twice','conversation_id'=>'conversation-timeout-retry',
+     'client_session_id'=>'device-timeout-retry','window_token'=>$timeoutBoot['window_token'],'question'=>'今天消耗业绩多少？请解释一下',
+     'history'=>[],'output_format'=>'screen','guidance_schema_version'=>'mohe-clarification-v2'];
+ $unknownUnderstandingFailures=2;$repeatedTimeout=$gateway->handle('create',$timeoutContext,$repeatedTimeoutInput);$queriesBeforeRepeatedTimeout=$queries;
+ $repeatedTimeoutBinding=['client_session_id'=>'device-timeout-retry','generation'=>$repeatedTimeout['generation'],'run_delivery_token'=>$repeatedTimeout['run_delivery_token']];
+ $repeatedTimeoutResult=$gateway->handle('execute',$timeoutContext,$repeatedTimeoutBinding+$repeatedTimeoutInput,$repeatedTimeout['run_id']);
+ verifyGateway($repeatedTimeoutResult['status']==='FAILED' && $repeatedTimeoutResult['reason']==='AI_MODEL_RESULT_UNKNOWN'
+     && $queries===$queriesBeforeRepeatedTimeout,'a second transport timeout stops without a fact query or another replay');
+ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($repeatedTimeout['run_id'])." AND ((attempt_code='understand_meaning' AND state='FAILED') OR (attempt_code='understand_transport_retry' AND state='UNKNOWN'))")->fetchColumn()===2,
+     'both bounded timeout attempts retain their distinct terminal evidence');
  verifyGateway(is_string($repeat['progress']),'frontend progress string');
  [$repairRun,$repairInput]=$make('repair-current','今天消耗业绩格式修复');$modelsBeforeRepair=$models;$queriesBeforeRepair=$queries;
  $repairResult=$gateway->handle('execute',$context,$binding($repairRun)+$repairInput,$repairRun['run_id']);
