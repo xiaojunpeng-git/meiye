@@ -56,13 +56,13 @@ final class CashierV3OrderCenterUnifiedQueryContract
                 ['remaining_amount', '剩余', 'amount'], ['debt_status', '状态'], ['store', '欠款门店'], ['created_at', '创建时间', 'datetime'],
             ], ['debt_no', 'source_order_no', 'member_name', 'phone']],
             'service' => ['服务记录', [
-                ['service_record_no', '服务记录号', 'text', true, true], ['business_date', '业务日期', 'date', true, true],
+                ['service_record_no', '服务记录号', 'text', true, true], ['source', '来源'], ['business_date', '业务日期', 'date', true, true],
                 ['member_name', '会员姓名'], ['service_project', '服务项目'], ['entitlement_source', '权益来源'], ['source_card', '来源卡名称'],
                 ['source_card_no', '完整卡号'], ['used_times', '本次使用次数', 'integer'], ['store', '服务门店'], ['craftsman', '手艺人'],
                 ['labor_fee_amount', '手工费', 'amount'], ['labor_performance_type', '服务业绩类型'], ['labor_performance_ratio', '业绩比例'],
                 ['labor_performance_amount', '劳动业绩', 'amount'], ['project_count', '工资项目数', 'integer'], ['operator', '操作人'], ['service_status', '状态'], ['service_completed_at', '服务完成时间', 'datetime'],
                 ['voided_at', '作废时间', 'datetime'], ['void_reason', '作废原因'], ['void_operator', '作废操作人'],
-            ], ['service_record_no', 'member_name', 'service_project', 'entitlement_source', 'source_card_no', 'craftsman']],
+            ], ['service_record_no', 'source', 'member_name', 'service_project', 'entitlement_source', 'source_card_no', 'craftsman']],
             'supplement' => ['补交记录', [
                 ['supplement_order_no', '补交单号', 'text', true, true], ['business_date', '业务日期', 'date', true, true],
                 ['debt_no', '欠款编号'], ['source_order_no', '来源订单号'], ['member_name', '会员姓名'], ['phone', '手机号'],

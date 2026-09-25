@@ -107,6 +107,10 @@ exportOk('导出切换账号或门店时清除旧快照', strpos($view, 'execute
 exportOk('订单中心导出快照不会携带旧列表 status 参数', strpos($view, 'status: ignoredStatus') !== false);
 exportOk('服务记录前后端字段合同一致，能力不会因工资项目数字段降级', strpos($contract, "['project_count', '工资项目数', 'integer']") !== false
     && strpos($view, "field('project_count', '工资项目数', 'number')") !== false);
+exportOk('服务记录号右侧展示结账时冻结的来源且导出合同一致',
+    strpos($contract, "['service_record_no', '服务记录号', 'text', true, true], ['source', '来源']") !== false
+    && strpos($view, "field('service_record_no', '服务记录号', 'text', { quickFilterHidden: true }),\n      field('source', '来源'),") !== false
+    && strpos($recordQuery, "'source' => \$this->serviceBusinessSourceLabel(\$row)") !== false);
 exportOk('工作台上下文就绪后会重试当前页签统一查询能力', strpos($view, "activeUnifiedQuery.value?.load({ silent: true })") !== false);
 exportOk('订单中心导出位于设置右侧且固定导出当前查询结果', strpos($view, 'export-button-after-settings') !== false
     && strpos($view, 'direct-query-export') !== false

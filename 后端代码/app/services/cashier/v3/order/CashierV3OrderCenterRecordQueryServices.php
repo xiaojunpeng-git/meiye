@@ -890,6 +890,12 @@ final class CashierV3OrderCenterRecordQueryServices
         bool $countOnly
     ): array {
         $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+            // 服务记录展示结账当时冻结在销售订单上的来源，不能回读会员当前来源。
+            // tenant + checkout_request_id 在销售订单表有唯一约束，因此联表不会放大服务事实行。
+            ->leftJoin(
+                'cashier_v3_sales_order so',
+                'so.tenant_id = sf.tenant_id AND so.checkout_request_id = sf.checkout_request_id'
+            )
             ->leftJoin(
                 'cashier_v3_entitlement_writeoff_fact wf',
                 'wf.tenant_id = sf.tenant_id AND wf.checkout_request_id = sf.checkout_request_id AND wf.source_line_id = sf.source_line_id'
@@ -925,6 +931,8 @@ final class CashierV3OrderCenterRecordQueryServices
             'sf.service_record_no', 'sf.member_name_snapshot', 'sf.project_name_snapshot',
             'sf.store_name_snapshot', 'sf.operator_name_snapshot', 'sf.craftsmen_snapshot_json',
             'wf.source_name_snapshot', 'wf.source_code_snapshot',
+            'so.business_source_label_snapshot', 'so.business_source_primary_name_snapshot',
+            'so.business_source_secondary_name_snapshot',
         ]);
         $this->applyServiceTopFilters($query, $criteria['topFilters']);
         // “正常数据” is the default view and must contain completed service
@@ -946,6 +954,9 @@ final class CashierV3OrderCenterRecordQueryServices
             'sf.operator_id', 'sf.operator_name_snapshot', 'sf.settled_at', 'sf.occurred_at',
             'sf.craftsmen_snapshot_json', 'sf.service_status', 'sf.source_document_type', 'wf.is_gift', 'wf.source_kind',
             'sf.detail_remark_snapshot',
+            'so.business_source_label_snapshot',
+            'so.business_source_primary_name_snapshot',
+            'so.business_source_secondary_name_snapshot',
             'wf.source_name_snapshot AS source_name_snapshot',
             'wf.source_code_snapshot AS source_code_snapshot',
             'sf.labor_amount_cents', 'sf.labor_fee_amount_cents', 'sf.labor_mode',
@@ -986,6 +997,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 // service document number. ESF remains only an internal fallback
                 // for historical rows created before that number was allocated.
                 'serviceRecordNo' => (string)($row['service_record_no'] ?: $row['service_fact_id']),
+                'source' => $this->serviceBusinessSourceLabel($row),
                 'businessDate' => (string)$row['business_date'],
                 'memberId' => (int)$row['member_id'],
                 'memberName' => (string)$row['member_name_snapshot'],
@@ -1485,11 +1497,28 @@ final class CashierV3OrderCenterRecordQueryServices
         return $labels[$kind] ?? '卡项权益';
     }
 
+    /**
+     * 来源使用结账销售订单的不可变快照。选择了二级来源时展示最具体的二级名称，
+     * 否则展示一级名称；历史服务没有对应销售订单快照时保留空值供前端统一显示“—”。
+     */
+    private function serviceBusinessSourceLabel(array $row): string
+    {
+        foreach ([
+            $row['business_source_secondary_name_snapshot'] ?? '',
+            $row['business_source_primary_name_snapshot'] ?? '',
+            $row['business_source_label_snapshot'] ?? '',
+        ] as $value) {
+            $label = trim((string)$value);
+            if ($label !== '') return $label;
+        }
+        return '';
+    }
+
     /** @return array<string,string> */
     private function serviceTopFilters(array $payload): array
     {
         $allowed = [
-            'service_record_no', 'member_name', 'service_project',
+            'service_record_no', 'source', 'member_name', 'service_project',
             'entitlement_source', 'source_card', 'source_card_no', 'craftsman',
             'service_status',
         ];
@@ -1529,6 +1558,7 @@ final class CashierV3OrderCenterRecordQueryServices
     {
         $likeFields = [
             'service_record_no' => 'sf.service_record_no',
+            'source' => 'so.business_source_label_snapshot',
             'member_name' => 'sf.member_name_snapshot',
             'service_project' => 'sf.project_name_snapshot',
             'entitlement_source' => 'wf.source_name_snapshot',

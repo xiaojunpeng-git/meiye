@@ -209,6 +209,11 @@ recordOk('服务记录只读取完成态服务事实，不从销售订单回推'
 recordOk('服务记录使用会员详情同源的可见服务单号并携带会员编号', strpos($source, "'sf.service_record_no'") !== false
     && strpos($source, "'serviceRecordNo' => (string)(\$row['service_record_no'] ?: \$row['service_fact_id'])") !== false
     && strpos($source, "'memberId' => (int)\$row['member_id']") !== false);
+recordOk('服务记录来源读取结账销售订单快照且不回读会员当前来源', strpos($source, "'cashier_v3_sales_order so'") !== false
+    && strpos($source, 'so.tenant_id = sf.tenant_id AND so.checkout_request_id = sf.checkout_request_id') !== false
+    && strpos($source, "'source' => \$this->serviceBusinessSourceLabel(\$row)") !== false
+    && strpos($source, 'business_source_secondary_name_snapshot') !== false
+    && strpos($source, 'serviceBusinessSourceLabel') !== false);
 recordOk('劳动业绩汇总有效事实的正负净额，服务记录调整后不保留旧分配', strpos($source, "->where('performance_type', 'labor_performance_allocated')") !== false
     && strpos($source, "->where('status', 'effective')") !== false
     && strpos($source, "'fact_direction'") !== false
