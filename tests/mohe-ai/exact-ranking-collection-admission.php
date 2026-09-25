@@ -25,10 +25,14 @@ $verify(($compound[0]['metric_code']??null)==='sales_amount'
 $verify(($compound[1]['metric_code']??null)==='sales_record_count'
     &&($compound[1]['object_kind']??null)==='project'
     &&($compound[1]['direction']??null)==='top_and_bottom','coordinated bottom tail stays with the preceding project metric');
+$prefixedCompound=$admission->match('那这个月的销售额最高是哪天，销售记录最多的项目是哪个，最低是哪个',$objects,$metrics);
+$verify($prefixedCompound===$compound,
+    'a leading conversational connector preserves the exact compound ranking plan');
 
 $saleObjects=$objects;
 $saleObjects[]=['object_kind'=>'product','object_label'=>'产品'];
 $saleObjects[]=['object_kind'=>'card','object_label'=>'卡项'];
+$saleObjects[]=['object_kind'=>'store','object_label'=>'哪家店'];
 $sharedDefaults=['sales_amount'=>['card','project','product'],'cash_performance'=>['store','member']];
 $shared=$admission->match('这个月项目、产品、卡项业绩最高的分别是什么',$saleObjects,$metrics,$sharedDefaults);
 $verify(is_array($shared)&&array_column($shared,'object_kind')===['project','product','card']
@@ -38,6 +42,11 @@ $verify($admission->match('这个月门店、产品业绩最高的分别是什�
     'objects without one shared registered ranking default remain model work');
 $verify($admission->match('这个月项目、产品、卡项业绩最高的原因分别是什么',$saleObjects,$metrics,$sharedDefaults)===null,
     'open analysis residue cannot enter the shared-default ranking path');
+$singleStore=$admission->match('今天业绩最高是哪家店',$saleObjects,$metrics,$sharedDefaults);
+$verify($singleStore===[['metric_code'=>'cash_performance','object_kind'=>'store','direction'=>'top','limit'=>1]],
+    'one registered object with one registry default can use a closed broad ranking path');
+$verify($admission->match('那家店业绩最高是哪家店',$saleObjects,$metrics,$sharedDefaults)===null,
+    'a referential store phrase stays outside the broad all-store ranking path');
 
 $memberDetail=$admission->matchMemberPopulationDetail(
     '会员业绩最高的前五名详情',$saleObjects,$metrics,$sharedDefaults,5
@@ -79,7 +88,7 @@ $vocabularyMethod=$gatewayReflection->getMethod('analysisObjectVocabulary');
 $rankingMethod=$gatewayReflection->getMethod('compileExactRegisteredRankingCollection');
 if (PHP_VERSION_ID<80100) {$vocabularyMethod->setAccessible(true);$rankingMethod->setAccessible(true);}
 $contracts=app\services\query\metric\MetricDefinitionRegistry::capabilities();
-$vocabulary=$vocabularyMethod->invoke($gateway,['metric_readiness'=>$contracts]);
+$vocabulary=$vocabularyMethod->invoke($gateway,['metric_readiness'=>$contracts],null);
 $capabilities=['metric_codes'=>array_keys($contracts),'metric_readiness'=>$contracts,
     'query_shapes'=>['summary','breakdown','trend','ranking','comparison','condition_count','condition_list'],
     'output_formats'=>['screen']];
@@ -89,6 +98,12 @@ $baseGrainRanking=$rankingMethod->invokeArgs($gateway,$args);
 $verify(($baseGrainRanking['plan']['query']['business_filters']??null)===[]
     &&($baseGrainRanking['plan']['query']['ranking']??null)===['direction'=>'top','limit'=>1],
     'an exact ranking at the metric base grain does not invent a redundant analytical-dimension filter');
+$reason=null;
+$prefixedArgs=['那这个月的销售额最高是哪天，销售记录最多的项目是哪个，最低是哪个',$vocabulary,$capabilities,'screen','2026-09-25',&$reason];
+$prefixedPlan=$rankingMethod->invokeArgs($gateway,$prefixedArgs);
+$verify($reason===null && count($prefixedPlan['plan']['items']??[])===2
+    &&array_column($prefixedPlan['plan']['items'],'label')===['日期排行','项目排行'],
+    'date parsing and exact ranking admission share leading-connector normalization');
 $reason=null;
 $sharedArgs=['这个月项目、产品、卡项业绩最高的分别是什么',$vocabulary,$capabilities,'screen','2026-09-25',&$reason];
 $sharedPlan=$rankingMethod->invokeArgs($gateway,$sharedArgs);
@@ -104,5 +119,11 @@ $verify(($memberPlan['plan']['query']['metric_codes']??null)===['cash_performanc
     &&($memberPlan['plan']['query']['ranking']??null)===['direction'=>'top','limit'=>5]
     &&($memberPlan['_member_detail_request']??null)===['view'=>'summary','target'=>'set','ordinal'=>null],
     'the closed member population compiles one registered ranking and keeps its set-detail presentation');
+$reason=null;
+$storeArgs=['今天业绩最高是哪家店',$vocabulary,$capabilities,'screen','2026-09-25',&$reason];
+$storePlan=$rankingMethod->invokeArgs($gateway,$storeArgs);
+$verify($reason===null && ($storePlan['plan']['query']['metric_codes']??null)===['cash_performance']
+    &&($storePlan['plan']['query']['ranking']??null)===['direction'=>'top','limit'=>1],
+    'a broad store question compiles one registry-owned Reader ranking without model understanding');
 
 echo "exact ranking collection admission: {$checks} checks PASS\n";

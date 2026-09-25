@@ -31,7 +31,11 @@ final class MetricDefinitionRegistry
     public static function analysisObjectAliases(): array
     {
         return [
-            'store' => ['门店'],
+            // “哪家店” is an ordinary interrogative form of the registered
+            // store object. Publishing it here keeps that linguistic form in
+            // the same source-owned vocabulary as “门店”; it does not choose
+            // a metric or turn a referential “那家店” into an all-store query.
+            'store' => ['门店', '哪家店'],
             'person' => ['员工', '手艺人', '销售人'],
         ];
     }

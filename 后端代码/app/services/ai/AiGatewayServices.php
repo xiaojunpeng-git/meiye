@@ -985,6 +985,12 @@ final class AiGatewayServices
         }
         $runtimeSkills=$this->registry()->modelSkills('store_operations');$dictionary=new \app\services\metric\MetricDictionaryServices();$summaries=[];
         $objectVocabulary=$this->analysisObjectVocabulary($caps);
+        // The model transport has a vocabulary budget, while exact admission
+        // must inspect every active registry alias before deciding that a
+        // question is closed. Keeping these projections separate prevents a
+        // newly registered natural alias from evicting its canonical label or
+        // silently losing deterministic coverage.
+        $exactObjectVocabulary=$this->analysisObjectVocabulary($caps,null);
         // Closed extrema do not need two language-model rounds.
         // Admission is deliberately stricter than understanding: every metric
         // and object must be an exact active-registry phrase, one common date
@@ -992,7 +998,7 @@ final class AiGatewayServices
         // may remain. Open or ambiguous language continues through the model.
         $exactRankingCollectionReason=null;
         $exactRankingCollection=$this->compileExactRegisteredRankingCollection(
-            (string)$body['question'],$objectVocabulary,$caps,$body['output_format'],$today,
+            (string)$body['question'],$exactObjectVocabulary,$caps,$body['output_format'],$today,
             $exactRankingCollectionReason
         );
         if ($exactRankingCollection!==null) {
@@ -2903,7 +2909,13 @@ final class AiGatewayServices
         // projection. This closed admission may read only the shared calendar
         // grammar locally; its own residue gate below still owns the complete
         // sentence and rejects every unexplained business instruction.
-        $dateProjection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse($question);
+        $admission=new \app\services\ai\semantic\AiExactRankingCollectionAdmission();
+        // Date parsing and closed-ranking admission must see the same
+        // sentence. A leading conversational connector is grammar only; if
+        // it remains before date parsing, “那这个月” falsely loses its one
+        // calendar carrier and needlessly falls through to the model.
+        $normalizedQuestion=$admission->normalizeLeadingDiscourseConnector($question);
+        $dateProjection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse($normalizedQuestion);
         $dateTermCount=count((array)($dateProjection['date_terms']??[]));
         if ($format!=='screen' || $dateTermCount>1
             || !empty($dateProjection['date_grouping_ambiguous'])) {$reason='date_or_format';return null;}
@@ -2912,14 +2924,13 @@ final class AiGatewayServices
             if (!is_string($code) || !is_array($contract)) continue;
             $defaultRankObjects[$code]=array_values((array)($contract['analysis_default_rank_object_kinds']??[]));
         }
-        $admission=new \app\services\ai\semantic\AiExactRankingCollectionAdmission();
         // A ranked member set followed by its details is one authorised
         // population workflow, not an invitation for the model to invent a
         // second metric. Admit it only through the same registry defaults and
         // exact residue boundary as other closed extrema, then let the normal
         // population executor read details for those verified member IDs.
         $memberPopulationDetail=$admission->matchMemberPopulationDetail(
-            $question,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[])),
+            $normalizedQuestion,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[])),
             $defaultRankObjects,$dateProjection['semantic_intent']['rank_limit']??null
         );
         // Ordinary exact extrema require an explicit period. A closed member
@@ -2930,7 +2941,7 @@ final class AiGatewayServices
         if ($memberPopulationDetail===null && $dateTermCount!==1) {$reason='date_or_format';return null;}
         $memberDetailRequest=$memberPopulationDetail['detail']??null;
         $items=$memberPopulationDetail!==null?[$memberPopulationDetail['ranking']]:$admission->match(
-            $question,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[])),$defaultRankObjects
+            $normalizedQuestion,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[])),$defaultRankObjects
         );
         if ($items===null) {$reason='semantic_no_match';return null;}
         $plans=[];
@@ -4030,7 +4041,7 @@ final class AiGatewayServices
      *
      * @return array<int,array{object_kind:string,object_label:string}>
      */
-    private function analysisObjectVocabulary(array $capabilities): array
+    private function analysisObjectVocabulary(array $capabilities,?int $maxItems=16): array
     {
         // business_date is a shared fact dimension declared by the unified
         // data architecture. Publishing its customer labels lets the model
@@ -4083,15 +4094,28 @@ final class AiGatewayServices
         // drop a later kind such as store and recreate the semantic gap this
         // projection closes. This is a transport budget only and grants no
         // priority, metric or execution capability to any object kind.
-        $primary=[];$aliases=[];$seenKinds=[];
+        $primary=[];$aliases=[];$seenKinds=[];$canonicalLabels=[];
+        foreach ($registeredAliases as $kind=>$labels) {
+            $label=$labels[0]??null;
+            if (is_string($label) && $label!=='') $canonicalLabels[$kind]=$label;
+        }
+        // Prefer one canonical registered label for each base object. Aliases
+        // remain available in the exact projection below and fill spare model
+        // vocabulary slots, but cannot replace the model-facing object name.
         foreach ($items as $item) {
+            if (($canonicalLabels[$item['object_kind']]??null)!==$item['object_label']) continue;
+            $primary[]=$item;$seenKinds[$item['object_kind']]=true;
+        }
+        foreach ($items as $item) {
+            if (($canonicalLabels[$item['object_kind']]??null)===$item['object_label']) continue;
             if (!isset($seenKinds[$item['object_kind']])) {
                 $primary[]=$item;$seenKinds[$item['object_kind']]=true;
             } else {
                 $aliases[]=$item;
             }
         }
-        return array_slice(array_merge($primary,$aliases),0,16);
+        $vocabulary=array_merge($primary,$aliases);
+        return $maxItems===null?$vocabulary:array_slice($vocabulary,0,$maxItems);
     }
 
     /**

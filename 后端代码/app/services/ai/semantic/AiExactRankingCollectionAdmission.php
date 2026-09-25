@@ -36,6 +36,7 @@ final class AiExactRankingCollectionAdmission
         array $defaultRankObjectKinds,?int $limit
     ): ?array {
         if ($question==='' || preg_match('//u',$question)!==1 || !is_int($limit) || $limit<1 || $limit>20) return null;
+        $question=$this->normalizeLeadingDiscourseConnector($question);
         if (!preg_match('/详情|明细|情况|具体/u',$question)) return null;
         if (MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes)!==null) return null;
         $matched=$this->objectsInText($question,$this->objects($objectVocabulary));
@@ -67,9 +68,12 @@ final class AiExactRankingCollectionAdmission
     public function match(string $question,array $objectVocabulary,array $allowedMetricCodes,array $defaultRankObjectKinds=[]): ?array
     {
         if ($question==='' || preg_match('//u',$question)!==1) return null;
+        $question=$this->normalizeLeadingDiscourseConnector($question);
         $objects=$this->objects($objectVocabulary);
         $shared=$this->sharedDefaultRanking($question,$objects,$allowedMetricCodes,$defaultRankObjectKinds);
         if ($shared!==null) return $shared;
+        $singleDefault=$this->singleDefaultRanking($question,$objects,$allowedMetricCodes,$defaultRankObjectKinds);
+        if ($singleDefault!==null) return $singleDefault;
         $clauses=preg_split('/[，,；;。]+/u',$question,-1,PREG_SPLIT_NO_EMPTY);
         if (!is_array($clauses) || $clauses===[] || count($clauses)>6) return null;
 
@@ -97,6 +101,30 @@ final class AiExactRankingCollectionAdmission
         }
         if ($items===[] || count($items)>4) return null;
         return $items;
+    }
+
+    /**
+     * Admit one broad ranked object only when its first-answer metric is
+     * uniquely declared by the active registry. The grammar contributes the
+     * object and direction; it never selects a metric from a phrase map.
+     */
+    private function singleDefaultRanking(string $question,array $objects,array $allowedMetricCodes,array $defaults): ?array
+    {
+        if (MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes)!==null) return null;
+        $object=$this->uniqueObjectInText($question,$objects);
+        $direction=$this->direction($question);
+        if ($object===null || $direction===null
+            || $this->singleDefaultResidue($question,$object['object_label'])!=='') return null;
+        $candidateCodes=[];
+        foreach ($allowedMetricCodes as $code) {
+            $kinds=array_values(array_unique(array_filter((array)($defaults[$code]??[]),'is_string')));
+            if (in_array($object['object_kind'],$kinds,true)) $candidateCodes[]=$code;
+        }
+        if (count($candidateCodes)!==1) return null;
+        return [[
+            'metric_code'=>$candidateCodes[0],'object_kind'=>$object['object_kind'],
+            'direction'=>$direction,'limit'=>1,
+        ]];
     }
 
     /**
@@ -156,6 +184,17 @@ final class AiExactRankingCollectionAdmission
         $residue=preg_replace('/这个月|这一个月|本月|这月|上个月|上月|今天|今日|昨天|昨日|前天/u',' ',$residue);
         $residue=preg_replace('/业绩|卖得/u',' ',$residue);
         $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪个|哪一个|什么)(?:又)?|分别|各自|同时|以及|和|与|的|是|又|、|，|,|；|;|。|\s+/u','',$residue);
+        return is_string($residue)?trim($residue):$question;
+    }
+
+    /** Remove only the closed grammar of one registry-owned broad ranking. */
+    private function singleDefaultResidue(string $question,string $objectLabel): string
+    {
+        $residue=str_replace($objectLabel,' ',$question);
+        $residue=preg_replace('/最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
+        $residue=preg_replace('/这个月|这一个月|本月|这月|上个月|上月|今天|今日|昨天|昨日|前天/u',' ',$residue);
+        $residue=preg_replace('/业绩|卖得/u',' ',$residue);
+        $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪家|哪位|哪个|哪一个|谁|什么)(?:又)?|的|是|又|、|，|,|；|;|。|\\s+/u','',$residue);
         return is_string($residue)?trim($residue):$question;
     }
 
@@ -228,5 +267,19 @@ final class AiExactRankingCollectionAdmission
         $residue=preg_replace('/这个月|这一个月|本月|这月|上个月|上月|今天|今日|昨天|昨日|前天/u',' ',$residue);
         $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪个|哪一个|什么)(?:又)?|分别|同时|以及|和|与|的|是|又|、|\s+/u','',$residue);
         return is_string($residue)?trim($residue):$clause;
+    }
+
+    /**
+     * Remove a sentence-leading conversational bridge only in a closed
+     * calendar question. Demonstratives such as “那家店” are deliberately
+     * outside this grammar and remain available to the normal context path.
+     */
+    public function normalizeLeadingDiscourseConnector(string $question): string
+    {
+        $normalized=preg_replace(
+            '/^(?:那么|那就|那)(?=(?:这个月|这一个月|本月|这月|上个月|上月|今天|今日|昨天|昨日|前天|[，,\\s]))[，,\\s]*/u',
+            '',$question
+        );
+        return is_string($normalized)?$normalized:$question;
     }
 }
