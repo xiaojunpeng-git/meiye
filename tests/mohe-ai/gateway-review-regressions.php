@@ -260,6 +260,8 @@ if (PHP_VERSION_ID<80100) $objectVocabularyMethod->setAccessible(true);
 $registeredObjectVocabulary=$objectVocabularyMethod->invoke($gatewayFixture,[
     'metric_readiness'=>app\services\query\metric\MetricDefinitionRegistry::capabilities(),
 ]);
+$check(count($registeredObjectVocabulary)<=16,
+    'the registered object vocabulary stays within the model transport budget');
 $check(in_array(['object_kind'=>'store','object_label'=>'门店'],$registeredObjectVocabulary,true),
     'a registered base fact grain publishes its source-owned analytical object alias even without a dimension contract');
 $distributionFixed=$distribution->invoke($gatewayFixture,$distributionUnderstanding,$distributionQuestion,$objectVocabulary,$metricCodes);

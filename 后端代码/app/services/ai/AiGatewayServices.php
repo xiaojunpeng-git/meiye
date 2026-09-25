@@ -3990,7 +3990,21 @@ final class AiGatewayServices
             }
         }
         ksort($items,SORT_STRING);
-        return array_slice(array_values($items),0,20);
+        // The model transport accepts at most 16 vocabulary rows. Preserve
+        // one source-owned label for every active kind before spending the
+        // remaining budget on aliases; an alphabetical prefix would otherwise
+        // drop a later kind such as store and recreate the semantic gap this
+        // projection closes. This is a transport budget only and grants no
+        // priority, metric or execution capability to any object kind.
+        $primary=[];$aliases=[];$seenKinds=[];
+        foreach ($items as $item) {
+            if (!isset($seenKinds[$item['object_kind']])) {
+                $primary[]=$item;$seenKinds[$item['object_kind']]=true;
+            } else {
+                $aliases[]=$item;
+            }
+        }
+        return array_slice(array_merge($primary,$aliases),0,16);
     }
 
     /**
