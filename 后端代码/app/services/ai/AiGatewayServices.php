@@ -3800,14 +3800,29 @@ final class AiGatewayServices
             // summary into one group per metric. Collapse only the shape that
             // the registry and current wording independently prove is one
             // aggregate subject: every group must own exactly one distinct,
-            // current, registered metric requirement and may share only the
-            // period. Any object, filter, ranking, condition or response-form
-            // carrier keeps the groups intact for the ordinary multi-query
-            // compiler, so genuine multi-subject requests are never merged.
-            $metricRequirementIds=[];$metricTerms=[];$allowedGroupedFields=['metric_codes'=>true,'periods'=>true];
+            // current, registered metric requirement. Providers may repeat
+            // the same analysis object and the same summary/breakdown carrier
+            // on every metric group; those copies are safe only when their
+            // typed values are identical. Any selection relation, differing
+            // object/operation, ranking, condition or response-form carrier
+            // keeps the groups intact, so genuine multi-subject requests are
+            // never merged merely because their measurements share wording.
+            $metricRequirementIds=[];$metricTerms=[];$groupObjectKinds=[];$groupOperations=[];
+            $allowedGroupedFields=['metric_codes'=>true,'periods'=>true,'object_kind'=>true,'object_relation'=>true,'operation'=>true];
             foreach ($requirements as $requirement) {
                 if (!is_array($requirement) || array_diff((array)($requirement['fields']??[]),array_keys($allowedGroupedFields))) {
                     return $understanding;
+                }
+                $fields=(array)($requirement['fields']??[]);$values=(array)($requirement['values']??[]);
+                if (in_array('object_kind',$fields,true)||in_array('object_relation',$fields,true)) {
+                    $kind=$values['object_kind']??null;$relation=$values['object_relation']??null;
+                    if (!is_string($kind)||$kind===''||$kind==='unknown'||$relation!=='analysis') return $understanding;
+                    $groupObjectKinds[$kind]=true;
+                }
+                if (in_array('operation',$fields,true)) {
+                    $operation=$values['operation']??null;
+                    if (!in_array($operation,['summary','breakdown'],true)) return $understanding;
+                    $groupOperations[$operation]=true;
                 }
                 if (!in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
                 $terms=(array)($requirement['values']['metric_terms']??[]);
@@ -3816,6 +3831,8 @@ final class AiGatewayServices
                 }
                 $metricRequirementIds[$requirement['id']]=true;$metricTerms[$terms[0]]=true;
             }
+            if (count($groupObjectKinds)>1||count($groupOperations)>1
+                ||($groupObjectKinds!==[]&&array_key_first($groupObjectKinds)!==array_key_first($kinds))) return $understanding;
             $groupedMetricIds=[];
             foreach ((array)$understanding['groups'] as $group) {
                 if (!is_array($group)) return $understanding;

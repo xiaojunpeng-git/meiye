@@ -120,3 +120,20 @@
 - 代码与测试补丁指纹：`d37900706191d5b75635c46465b0783939d29f697f3e2c7cfb0542e7a0d0b691`
 - `后端代码/app/services/ai/AiGatewayServices.php`：`53007e8b21da642b2d2e753a8546d32bf6f59484ed72f42dda5aabefedd99087`
 - `tests/mohe-ai/gateway-review-regressions.php`：`bcc9a69f84baf8a6b901f48a9884556db1711478a39d9538bc19860f3e40243d`
+
+## 第三次线上验收与同对象分组载体修正
+
+- 第三次候选提交：`c12bfc3e`；发布批次：`/www/backups/rh.cc3798.com/20260925-r38-r40-c12bfc3e-dHideC/`。
+- 发布归档 SHA-256：`88c40673f50c35f1a4982f93bfebd2f630c86ebee46cab4e23dd66d3625c71b0`；部署前备份归档 SHA-256：`7668efdb603054baead9c114a3a4c3a22f18dc7808939140238e1c721c5327e9`。
+- 生产前置门店分组问法用时 15 秒并正确返回；三指标续问用时 23 秒但仍错误返回门店分组，Run `d3582800795fe36f47a7323f0c3f92ee6860e378ad136073`。失败后立即按本批次精确回滚，服务全部恢复，未 push。
+- 脱敏运行证据确认：三个注册指标及三条绑定均完整，最终查询却仍为 `breakdown` 且 `business_filters.object_kind=store`。这排除了指标缺失、读取失败和上下文合并顺序问题。
+- 最终遗漏是分组安全门禁过窄：真实模型不只把每个指标分组，还在每个指标组重复同一个 `store + analysis + breakdown` 载体。原门禁只允许指标和期间字段，因此把“同对象、同操作的重复载体”误当成独立多主题并拒绝折叠。
+- 修正后只在每组恰有一个不同的当前精确指标、所有对象载体均为同一个分析对象、所有操作载体均为同一种 summary/breakdown，且不存在选择关系、排行、条件或其他响应形式时折叠。组内对象与当前问题解析出的登记对象不一致，或不同组出现不同对象/操作时仍保持独立。
+- 新增两个针对性回归：相同 `store + breakdown` 载体可折叠；不同分析对象即使操作相同也不得折叠。全套 16 组自动化通过，`gateway-review-regressions.php` 增至 84 项。
+
+最终候选固定信息：
+
+- 基线 HEAD：`c12bfc3e`
+- 代码与测试补丁指纹：`fede67a1519967ae2e71ade4631d095af66dbeaa75feb39af0682b2aa48b943f`
+- `后端代码/app/services/ai/AiGatewayServices.php`：`9d43260220672a386454eff7d953b09116dca0e598f80f42881f351c8bdafa12`
+- `tests/mohe-ai/gateway-review-regressions.php`：`6673775769fcdef9002e79b6b5afa4319011b5ca5ebdc11ef14381342ffa252c`
