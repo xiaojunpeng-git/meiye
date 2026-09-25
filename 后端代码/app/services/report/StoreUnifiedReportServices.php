@@ -394,16 +394,9 @@ class StoreUnifiedReportServices extends BaseServices
     private function memberConsumptionDetail($storeId, array $range, array $input): array
     {
         $query = $this->operationSaleQuery($storeId, $range, $input, false);
-        // 会员消费明细是“已收款的销售明细”，不是所有已成交明细。
-        // 按同一销售事实的有效分摊净额判断，欠款后续收款可使原行进入报表，
-        // 退款/作废反向分摊抵尽时则退出；列表、合计和导出共用此条件。
-        $query->whereExists(function ($receipt) {
-            $receipt->name('cashier_v3_payment_sale_allocation_fact')->alias('member_receipt')
-                ->whereRaw('member_receipt.tenant_id=s.tenant_id AND member_receipt.store_id=s.store_id AND member_receipt.sale_fact_id=s.fact_id')
-                ->where('member_receipt.status', 'effective')
-                ->group('member_receipt.tenant_id,member_receipt.store_id,member_receipt.sale_fact_id')
-                ->having('SUM(member_receipt.amount_cents)>0');
-        });
+        // 会员消费明细以有效销售明细为展示边界，不再以已分摊收款净额 > 0
+        // 作为入表门槛。欠款、零元或其他尚无收款的真实成交行仍展示，
+        // 收款列依然只读有效收款分摊，不伪造现金业绩。
         $total = (int)(clone $query)->count('s.id');
         $partnerDefinitions = $this->partnerPerformanceDefinitions($storeId);
         $summaryValues = $this->memberConsumptionSummaryValues($query, $storeId, $partnerDefinitions);
@@ -434,7 +427,7 @@ class StoreUnifiedReportServices extends BaseServices
             ['key'=>'member_source','label'=>'会员来源'],
         ]);
         foreach ($this->paymentMethodDefinitions() as $method) $columns[] = ['key'=>'payment_'.$method['code'],'label'=>$method['label'],'group_label'=>'支付现金业绩方式'];
-        $columns[] = ['key'=>'receipt_total','label'=>'收款总金额','group_label'=>'支付现金业绩方式','source_explanation'=>'本表仅列出销售明细分摊后的有效记账收款净额大于 0 的记录；各收款方式合计为本行收款总金额，退款或作废的反向收款会抵减。'];
+        $columns[] = ['key'=>'receipt_total','label'=>'收款总金额','group_label'=>'支付现金业绩方式','source_explanation'=>'显示本行销售明细已分摊的有效记账收款净额；各收款方式合计为本行收款总金额，退款或作废的反向收款会抵减。收款为 0 的有效销售明细也会展示。'];
         foreach ($partnerDefinitions as $definition) $columns[] = ['key'=>$definition['key'],'label'=>$definition['label'],'group_label'=>'合作方分成业绩'];
         foreach ([['partner_performance','合作方业绩'],['actual_cash_performance','分成后现金业绩'],['experience_cash','体验现金业绩'],['experience_payment_method','体验现金业绩支付方式']] as $column) $columns[] = ['key'=>$column[0],'label'=>$column[1]];
         $columns = $this->fixedColumns($columns, [

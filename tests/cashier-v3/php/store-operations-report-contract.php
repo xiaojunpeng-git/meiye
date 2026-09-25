@@ -113,6 +113,10 @@ if (strpos($annotation, "\$value = (string)(\$payload['field_value'] ?? '');") =
 $memberDetailStart = strpos($service, 'private function memberConsumptionDetail');
 $memberDetailEnd = strpos($service, 'private function storeItemAnalysis', $memberDetailStart);
 $memberDetail = substr($service, $memberDetailStart, $memberDetailEnd - $memberDetailStart);
+if (strpos($memberDetail, "having('SUM(member_receipt.amount_cents)>0')") !== false
+    || strpos($memberDetail, '收款为 0 的有效销售明细也会展示') === false) {
+    throw new RuntimeException('member detail must not hide valid sales merely because allocated receipt is zero');
+}
 $partnerSummaryStart = strpos($service, 'private function partnerItemSummary');
 $partnerSummaryEnd = strpos($service, 'private function partnerItemDetail', $partnerSummaryStart);
 $partnerSummary = substr($service, $partnerSummaryStart, $partnerSummaryEnd - $partnerSummaryStart);
