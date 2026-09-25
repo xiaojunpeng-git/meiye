@@ -1264,6 +1264,16 @@ final class AiGatewayServices
         // model owns the natural-language meaning while the server resolves a
         // stable person, store or member only from the replayed verified view.
         // Admitting this before binding also removes an unnecessary model call.
+        // Keep only typed, non-sensitive shape metadata so a refused follow-up
+        // can be diagnosed without retaining model prose, names or identities.
+        foreach ((array)($understanding['requirements']??[]) as $requirement) {
+            $detail=$requirement['values']['object_detail']??null;
+            if (!is_array($detail)) continue;
+            $shape=$sourceContext['view']['query']['query_shape']??'missing';
+            if (!in_array($shape,['ranking','summary','breakdown','condition_list'],true)) $shape='other';
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
+                'object_detail_'.$detail['target'].'_'.$detail['view'].'_from_'.$shape,[],'object_detail_probe');
+        }
         $objectDetail=$this->compileObjectDetailContinuation($understanding,$sourceContext,$body['output_format']);
         if ($objectDetail!==null) {
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_object_detail_continuation_admitted');

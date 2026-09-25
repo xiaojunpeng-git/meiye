@@ -10,7 +10,7 @@ use RuntimeException;
  */
 final class ObjectDetailContinuationResolver
 {
-    /** Resolve a member asset request or one displayed ranking object. */
+    /** Resolve a member asset request, a ranking row, or an already selected object. */
     public function resolve(array $query,array $view,array $request): array
     {
         $effective=$view['query']??null;
@@ -30,11 +30,17 @@ final class ObjectDetailContinuationResolver
             $member=(new MemberDetailContinuationResolver())->resolve($query,$view,$request);
             return $member+['object_kind'=>'member'];
         }
-        if ($shape!=='ranking'||!in_array($kind,['person','store'],true)
-            ||($request['target']??null)!=='single'||($request['view']??null)!=='summary') {
+        if (!in_array($kind,['person','store'],true)
+            ||!in_array($request['target']??null,['single','set'],true)||($request['view']??null)!=='summary') {
             throw new RuntimeException('AI_OBJECT_DETAIL_NOT_READY');
         }
-        $rows=$this->rankingRows($view,$kind);
+        $rows=$shape==='ranking'?$this->rankingRows($view,$kind):$this->selectedRows($effective,$view,$kind);
+        // “The current result set” and “this object” denote the same identity
+        // when the verified set is a singleton. Never collapse a plural set
+        // to its first row; multi-object overviews need an explicit selection.
+        if ($request['target']==='set'&&(count($rows)!==1||($request['ordinal']??null)!==null)) {
+            throw new RuntimeException('AI_OBJECT_DETAIL_SELECTION_REQUIRED');
+        }
         $ordinal=$request['ordinal']??null;
         if ($ordinal===null) {
             if (count($rows)!==1) throw new RuntimeException('AI_OBJECT_DETAIL_SELECTION_REQUIRED');
@@ -47,6 +53,43 @@ final class ObjectDetailContinuationResolver
         return $kind==='person'
             ?['object_kind'=>'person','selection_ref'=>'person:'.$row['id'],'label'=>$row['label'],'view'=>'summary']
             :['object_kind'=>'store','store_id'=>$row['id'],'label'=>$row['label'],'view'=>'summary'];
+    }
+
+    /**
+     * A second follow-up sees the previous single-object overview, not its
+     * original ranking. Reuse only its signed, permission-replayed selection;
+     * an aggregate/cohort or a multi-store breakdown is not one identity.
+     * Do not infer an ordinal from breakdown rows: the renderer may hide zero
+     * rows and paginate them differently from the underlying read view.
+     */
+    private function selectedRows(array $query,array $view,string $kind): array
+    {
+        if ($kind==='person'&&($query['query_shape']??null)==='summary') {
+            $ref=$query['business_filters']['selection_ref']??'';
+            $label=$view['personnel_selection_label']??null;
+            if (is_string($ref)&&preg_match('/^person:([1-9][0-9]*)$/D',$ref,$match)
+                &&is_string($label)&&trim($label)!=='') {
+                return [['id'=>(int)$match[1],'label'=>trim($label)]];
+            }
+        }
+        if ($kind==='store'&&($query['query_shape']??null)==='breakdown') {
+            $ids=$query['store_ids']??[];
+            if (count($ids)!==1) throw new RuntimeException('AI_OBJECT_DETAIL_NOT_READY');
+            if (!is_int($ids[0])||$ids[0]<1) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+            $label=null;
+            foreach ((array)($view['results']??[]) as $result) {
+                if (($result['object_kind']??null)!=='store'||!empty($result['has_more'])
+                    ||count($result['rows']??[])!==1) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+                $row=$result['rows'][0];
+                if (($row['entity_id']??null)!==$ids[0]||!is_string($row['entity_name']??null)
+                    ||trim($row['entity_name'])===''||($label!==null&&$label!==trim($row['entity_name']))) {
+                    throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+                }
+                $label=trim($row['entity_name']);
+            }
+            if ($label!==null) return [['id'=>$ids[0],'label'=>$label]];
+        }
+        throw new RuntimeException('AI_OBJECT_DETAIL_NOT_READY');
     }
 
     /** Keep visible order while collapsing tied rows for one stable identity. */

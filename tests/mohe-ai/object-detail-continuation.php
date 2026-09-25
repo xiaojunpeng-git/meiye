@@ -88,6 +88,39 @@ $check(($storeDetailQuery['query_shape']??null)==='breakdown'
     &&($compiledStore['plan']['workflow_code']??null)==='wf_performance_breakdown',
     'store detail stays a one-row named breakdown instead of an unlabeled total');
 
+// Repeated continuations must retain one verified identity after the ranking
+// has become a summary/breakdown. Cohorts and mismatched rows remain rejected.
+$summaryView=['query'=>$query,'personnel_selection_label'=>'测试员工','results'=>[]];
+$again=$resolver->resolve($query,$summaryView,['view'=>'summary','target'=>'single','ordinal'=>null]);
+$check(($again['selection_ref']??null)==='person:7','person summary supports a second continuation');
+$detailView=['query'=>$storeDetailQuery,'results'=>[['object_kind'=>'store','has_more'=>false,
+    'rows'=>[['entity_id'=>3,'entity_name'=>'测试门店','amount_cents'=>998800]]]]];
+$again=$resolver->resolve($storeDetailQuery,$detailView,['view'=>'summary','target'=>'single','ordinal'=>null]);
+$check(($again['store_id']??null)===3,'single-store breakdown supports a second continuation');
+foreach ([$personView,$summaryView,$storeView,$detailView] as $singleton) {
+    $one=$resolver->resolve($singleton['query'],$singleton,['view'=>'summary','target'=>'single','ordinal'=>null]);
+    $set=$resolver->resolve($singleton['query'],$singleton,['view'=>'summary','target'=>'set','ordinal'=>null]);
+    $check($one===$set,'a verified singleton set is the same target as one object');
+}
+try {$resolver->resolve($personQuery,$many,['view'=>'summary','target'=>'set','ordinal'=>null]);
+    throw new LogicException('plural selection collapsed');
+} catch (RuntimeException $error) {$check($error->getMessage()==='AI_OBJECT_DETAIL_SELECTION_REQUIRED','plural target never collapses to the first person');}
+$recompiled=$compile->invoke($gateway,$understanding,['query'=>$storeDetailQuery,'view'=>$detailView],'screen');
+$check($recompiled['plan']['query']===$storeDetailQuery,'repeated store continuation preserves metrics dates and scope');
+$invalidSummary=$summaryView;$invalidSummary['query']['business_filters']['selection_ref']='cohort:metric_fact_participants';
+$invalidStore=$detailView;$invalidStore['results'][0]['rows'][0]['entity_id']=99;
+$multipleStores=$detailView;$multipleStores['query']['store_ids']=[3,4];
+$truncatedStore=$detailView;$truncatedStore['results'][0]['has_more']=true;
+foreach ([[$invalidSummary,'AI_OBJECT_DETAIL_NOT_READY'],[$invalidStore,'AI_RESULT_REFERENCE_UNAVAILABLE'],
+    [$multipleStores,'AI_OBJECT_DETAIL_NOT_READY'],[$truncatedStore,'AI_RESULT_REFERENCE_UNAVAILABLE']] as [$view,$reason]) {
+    try {$resolver->resolve($view['query'],$view,['view'=>'summary','target'=>'single','ordinal'=>null]);
+        throw new LogicException('unverified singleton accepted');
+    } catch (RuntimeException $error) {$check($error->getMessage()===$reason,'repeated detail protects '.$reason);}
+}
+try {$resolver->resolve($query,$summaryView,['view'=>'summary','target'=>'single','ordinal'=>2]);
+    throw new LogicException('summary ordinal escaped');
+} catch (RuntimeException $error) {$check($error->getMessage()==='AI_RESULT_REFERENCE_UNAVAILABLE','summary ordinal cannot escape the selected object');}
+
 try {$compile->invoke($gateway,$understanding,null,'screen');throw new LogicException('context-free detail accepted');}
 catch (RuntimeException $error) {$check($error->getMessage()==='AI_CONTEXT_REQUIRED',
     'a context-free continuation fails immediately instead of entering metric binding');}

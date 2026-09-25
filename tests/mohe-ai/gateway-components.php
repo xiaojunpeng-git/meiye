@@ -36,7 +36,11 @@ namespace {
     check($projector->project('今天收了多少钱？')['signals'] === ['cash_performance','TODAY'], 'Q001 vocabulary');
     check($projector->project('今天消耗业绩多少？')['signals'] === ['consume_amount','TODAY'], 'Q003 vocabulary');
     foreach (['本月现金业绩最高的前五家店','本月现金业绩最高的前5家店'] as $q) {
-        $p=$projector->project($q); check(!$p['unresolved_condition'] && in_array('top_5',$p['signals'],true),'explicit top five phrasing');
+        // The vocabulary layer retains the requested limit but no longer
+        // turns an extremum word into a complete analytical operation. The
+        // natural-language understanding contract owns that decision.
+        $p=$projector->project($q); check($p['unresolved_condition'] && in_array('top_5',$p['signals'],true)
+            && !in_array('ranking',$p['signals'],true),'extremum preserves limit without inventing a ranking operation');
     }
     check($projector->project('本月现金业绩最高的前五家店排除张三')['unresolved_condition'],'ranking alias retains unknown filter');
     check($projector->project('本月现金业绩最高的前十家店')['blocking_reason']==='AI_RANK_LIMIT_NOT_READY','ranking alias does not silently change requested limit');
