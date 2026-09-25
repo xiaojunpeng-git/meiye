@@ -64,6 +64,28 @@ $check(($second['selection_ref']??null)==='person:8','explicit ordinal stays ins
 // registered summary plan, preserving the preceding metric, period and scope.
 $gatewayClass=new ReflectionClass(AiGatewayServices::class);
 $gateway=$gatewayClass->newInstanceWithoutConstructor();
+$separatePopulationDetail=$gatewayClass->getMethod('separateMemberPopulationDetail');
+$compoundUnderstanding=['goal'=>'查看会员业绩前五名及详情','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'分析会员','fields'=>['object_kind','object_relation'],
+        'values'=>['object_kind'=>'member','object_relation'=>'analysis']],
+    ['id'=>'r2','meaning'=>'按会员业绩衡量','fields'=>['metric_codes'],
+        'values'=>['metric_codes'=>[],'metric_terms'=>['会员业绩']]],
+    ['id'=>'r3','meaning'=>'取最高的前五名','fields'=>['operation','ranking'],
+        'values'=>['operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>5]]],
+    ['id'=>'r4','meaning'=>'同时查看这些会员详情','fields'=>['object_detail'],
+        'values'=>['object_detail'=>['view'=>'summary','target'=>'set','ordinal'=>null]]],
+]];
+[$populationUnderstanding,$detailRequest]=$separatePopulationDetail->invoke($gateway,$compoundUnderstanding);
+$populationFields=array_merge(...array_column($populationUnderstanding['requirements'],'fields'));
+$check($detailRequest===['view'=>'summary','target'=>'set','ordinal'=>null]
+    &&!in_array('object_detail',$populationFields,true)
+    &&in_array('metric_codes',$populationFields,true)&&in_array('ranking',$populationFields,true),
+    'one typed member ranking plus detail request binds the population first and retains its presentation request');
+$personCompound=$compoundUnderstanding;
+$personCompound['requirements'][0]['values']['object_kind']='person';
+[$unchangedPerson,$personDetail]=$separatePopulationDetail->invoke($gateway,$personCompound);
+$check($personDetail===null&&$unchangedPerson===$personCompound,
+    'member asset orchestration does not silently capture a different object kind');
 $compile=$gatewayClass->getMethod('compileObjectDetailContinuation');
 $understanding=['goal'=>'继续查看','status'=>'understood','requirements'=>[[
     'id'=>'r1','meaning'=>'展开上一对象','fields'=>['object_detail'],

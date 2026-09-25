@@ -450,7 +450,7 @@ final class AiGatewayServices
                 $result=($compiled['kind']??null)==='member_detail'
                     ?$this->executeMemberDetail($context,$owner,$id,$generation,$worker,$snapshot,$compiled,$contextMeaning)
                     :(isset($compiled['_member_detail_request'])
-                        ?$this->executeMemberConditionDetails($context,$owner,$id,$generation,$worker,$snapshot,$compiled,$contextMeaning)
+                        ?$this->executeMemberPopulationDetails($context,$owner,$id,$generation,$worker,$snapshot,$compiled,$contextMeaning)
                         :$this->executeRegistered($context,$owner,$id,$generation,$worker,$snapshot,$compiled['plan'],$contextMeaning));
             } catch (\RuntimeException $error) {
                 // These are execution boundaries, not failed language understanding.
@@ -1279,12 +1279,13 @@ final class AiGatewayServices
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_object_detail_continuation_admitted');
             return $objectDetail;
         }
-        $requestedMemberDetail=null;
-        foreach ((array)($understanding['requirements']??[]) as $requirement) {
-            $candidate=$requirement['values']['object_detail']??$requirement['values']['member_detail']??null;
-            if (is_array($candidate)&&($requirement['values']['object_kind']??'member')==='member') $requestedMemberDetail=$candidate;
-        }
-        $understanding=$this->separateObjectDetailFromConditions($understanding);
+        // A self-contained member population request may ask for both the
+        // ranked/filtered set and its details. Keep the presentation request
+        // beside the plan while binding only the population query; otherwise
+        // the binding model must account for a non-metric field and can drop
+        // it during format repair. The typed understanding, rather than a
+        // phrase matcher, proves the object, response form and set target.
+        [$understanding,$requestedMemberDetail]=$this->separateMemberPopulationDetail($understanding);
         // Some providers omit the new request-kind marker only when a signed
         // predecessor is present. Recover it solely when two independent
         // structural checks agree: the model accepted only a broad observation
@@ -4778,20 +4779,38 @@ final class AiGatewayServices
     }
 
     /**
-     * A compound first turn such as "members matching X and Y, show details"
-     * must establish its authorised population before any private asset read.
-     * Keep the complete registered filter request and separate only the detail
-     * presentation carrier. The caller retains that carrier for execution,
-     * including through clarification; it must not be silently discarded.
+     * Separates a typed member-set presentation from its population query.
+     * Both condition lists and rankings must first establish an authorised,
+     * bounded set; only then may execution read those exact members' details.
+     * Other objects and singular/ambiguous targets remain on the normal
+     * detail path, where their own registered capability decides support.
+     *
+     * @return array{0:array,1:?array}
      */
-    private function separateObjectDetailFromConditions(array $understanding): array
+    private function separateMemberPopulationDetail(array $understanding): array
     {
-        $hasCondition=false;
+        $objectKinds=[];$operations=[];$hasMemberConditionList=false;$detail=null;
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
+            $fields=(array)($requirement['fields']??[]);$values=(array)($requirement['values']??[]);
+            if (in_array('object_kind',$fields,true)&&is_string($values['object_kind']??null)) {
+                $objectKinds[$values['object_kind']]=true;
+            }
+            if (in_array('operation',$fields,true)&&is_string($values['operation']??null)) {
+                $operations[$values['operation']]=true;
+            }
             if (in_array('aggregate_condition',(array)($requirement['fields']??[]),true)
-                &&($requirement['values']['aggregate_condition']['result_form']??null)==='list') $hasCondition=true;
+                &&($values['aggregate_condition']['subject']??null)==='member'
+                &&($values['aggregate_condition']['result_form']??null)==='list') $hasMemberConditionList=true;
+            if (!array_intersect(['object_detail','member_detail'],$fields)) continue;
+            $candidate=$values['object_detail']??$values['member_detail']??null;
+            if (!is_array($candidate)||$detail!==null) return [$understanding,null];
+            $detail=$candidate;
         }
-        if (!$hasCondition) return $understanding;
+        $memberPopulation=isset($objectKinds['member'])&&count($objectKinds)===1
+            &&(isset($operations['ranking'])||isset($operations['condition_list'])||$hasMemberConditionList);
+        if (!$memberPopulation||!is_array($detail)||($detail['target']??null)!=='set'
+            ||!in_array($detail['view']??null,['summary','rights'],true)
+            ||($detail['ordinal']??null)!==null) return [$understanding,null];
         foreach ($understanding['requirements'] as &$requirement) {
             if (!array_intersect(['object_detail','member_detail'],(array)($requirement['fields']??[]))) continue;
             $requirement['fields']=array_values(array_diff($requirement['fields'],['object_detail','member_detail']));
@@ -4802,7 +4821,7 @@ final class AiGatewayServices
         $understanding['requirements']=array_values(array_filter($understanding['requirements'],static function(array $requirement): bool {
             return ($requirement['fields']??[])!==[];
         }));
-        return $understanding;
+        return [$understanding,$detail];
     }
 
     /**
@@ -4901,12 +4920,15 @@ final class AiGatewayServices
         return $this->runs->publish($owner,$id,$generation,$worker,$evidenceRef,$answerRef);
     }
 
-    /** Filter first, then read details from that exact signed population; no second name search. */
-    private function executeMemberConditionDetails(array $context,array $owner,string $id,int $generation,string $worker,array $snapshot,array $compiled,array $contextMeaning): array
+    /** Rank or filter first, then read details from that exact signed population. */
+    private function executeMemberPopulationDetails(array $context,array $owner,string $id,int $generation,string $worker,array $snapshot,array $compiled,array $contextMeaning): array
     {
         $plan=$compiled['plan'];
-        if (isset($plan['items'])||($plan['query']['query_shape']??null)!=='condition_list'
-            ||($plan['query']['condition_set']['subject']??null)!=='member') throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+        $query=$plan['query']??[];$shape=$query['query_shape']??null;
+        $memberPopulation=$shape==='condition_list'&&($query['condition_set']['subject']??null)==='member';
+        $memberPopulation=$memberPopulation||($shape==='ranking'
+            &&($query['business_filters']['object_kind']??null)==='member');
+        if (isset($plan['items'])||!$memberPopulation) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
         // Population execution never starts the file worker. Clients request
         // the separate export only after the asset answer has been published.
         $plan['output_format']='screen';

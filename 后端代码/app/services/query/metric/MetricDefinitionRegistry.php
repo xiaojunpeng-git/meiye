@@ -89,7 +89,10 @@ final class MetricDefinitionRegistry
                 // A broad store ranking may use collection as its disclosed
                 // first-answer perspective. The AI can use this only after it
                 // has already accepted the object and ranking semantics.
-                'analysis_default_rank_object_kinds' => ['store'],
+                // “会员业绩排行”没有点名收款口径时，现金业绩是产品确认
+                // 的首答视角。明确的实际收款销售额等指标仍优先，且
+                // Reader 会把采用的指标名称展示给用户。
+                'analysis_default_rank_object_kinds' => ['store', 'member'],
                 // A broad member breakdown uses the same registered cash fact
                 // as member payment-strength analysis. The visible metric name
                 // discloses this perspective; explicit member metrics win.

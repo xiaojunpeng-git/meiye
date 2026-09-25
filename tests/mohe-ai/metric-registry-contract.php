@@ -56,7 +56,8 @@ metricRegistryCheck(MetricDefinitionRegistry::get('staff_project_num')['storage_
     && MetricDefinitionRegistry::capabilities()['staff_project_num']['ai_query_ready'] === true,
     'staff project count is an exact labor-allocation metric, not sales quantity');
 metricRegistryCheck(MetricDefinitionRegistry::capabilities()['staff_sales_yeji']['analysis_default_rank_object_kinds'] === ['person']
-    && MetricDefinitionRegistry::capabilities()['sales_amount']['analysis_default_rank_object_kinds'] === ['card', 'project', 'product'],
+    && MetricDefinitionRegistry::capabilities()['sales_amount']['analysis_default_rank_object_kinds'] === ['card', 'project', 'product']
+    && MetricDefinitionRegistry::capabilities()['cash_performance']['analysis_default_rank_object_kinds'] === ['store', 'member'],
     'broad ranking defaults are declared by registered object contracts, not gateway question branches');
 metricRegistryCheck(MetricDefinitionRegistry::get('staff_service_num')['storage_unit'] === 'customer_tenth'
     && MetricDefinitionRegistry::get('service_people')['storage_unit'] === 'customer_tenth'

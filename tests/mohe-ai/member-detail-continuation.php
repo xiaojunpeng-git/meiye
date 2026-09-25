@@ -52,6 +52,14 @@ $rankingMember=(new MemberDetailContinuationResolver())->resolve(
 );
 $check($rankingMember['selection_ref']==='member:101',
     'a singleton member ranking can be continued as this member without a name lookup');
+$rankingView['results'][0]['rows']['top'][]=[
+    'entity_id'=>102,'entity_name'=>'另一会员','amount_cents'=>100000,
+];
+$rankingSet=(new MemberDetailContinuationResolver())->resolve(
+    $rankingQuery,$rankingView,['view'=>'summary','target'=>'set','ordinal'=>null]
+);
+$check(array_column($rankingSet['members'],'selection_ref')===['member:101','member:102'],
+    'a ranked member set can read details for those exact verified members in display order');
 
 $detail=['projectionContractVersion'=>'cashier-v3-member-detail-v3','dataAsOf'=>'2026-09-24T20:00:00+08:00',
     'member'=>['memberId'=>101,'name'=>'测试会员'],'summary'=>[
