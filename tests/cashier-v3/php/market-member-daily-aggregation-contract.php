@@ -24,8 +24,10 @@ $rows = $method->invoke($service, [
     $make('2026-09-22', 42, 4, 'C', 5000, 1, 0),
     $make('2026-09-23', 42, 3, 'D', 8000, 0, 0),
     $make('2026-09-22', 43, 3, 'E', 7000, 0, 0),
+    $make('2026-09-22', 0, 3, 'GUEST-A', 3000, 1, 0),
+    $make('2026-09-22', 0, 3, 'GUEST-B', 4000, 1, 0),
 ]);
-if (count($rows) !== 4) throw new RuntimeException('Different dates, members or sources were merged');
+if (count($rows) !== 6) throw new RuntimeException('Different dates, members, sources or guest orders were merged');
 $daily = $rows[0];
 if ((int)$daily['amount_cents'] !== 12500 || (string)$daily['amount'] !== '125'
     || (int)$daily['visits'] !== 1 || (int)$daily['walk_in'] !== 3
@@ -35,4 +37,15 @@ if ((int)$daily['amount_cents'] !== 12500 || (string)$daily['amount'] !== '125'
     || array_column($daily['_market_orders'], 'order_id') !== ['A', 'B']) {
     throw new RuntimeException('Same-day member/source aggregation is incorrect');
 }
+$guests = array_values(array_filter($rows, static function (array $row): bool {
+    return (int)$row['member_id'] === 0;
+}));
+if (count($guests) !== 2
+    || (string)$guests[0]['annotation_subject_type'] !== 'market_guest_order'
+    || (string)$guests[0]['source_order_id'] !== 'GUEST-A'
+    || (string)$guests[0]['annotation_subject_key'] !== 'market-guest-v1:133:2026-09-22:3:' . hash('sha256', 'GUEST-A')
+    || (string)$guests[1]['annotation_subject_key'] !== 'market-guest-v1:133:2026-09-22:3:' . hash('sha256', 'GUEST-B')) {
+    throw new RuntimeException('Guest orders do not have independent stable annotation subjects');
+}
 echo "PASS market member-day-source amount, visits and legacy walk-in aggregation\n";
+echo "PASS market guest orders retain independent stable annotation subjects\n";

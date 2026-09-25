@@ -1155,9 +1155,10 @@ function annotationStoreScope(row) {
 }
 
 function beginEdit(row) {
-  // 市场明细必须绑定会员每日来源行；缺失会员 ID 的历史单不能伪造可保存主题。
+  // 市场明细的会员日行和游客订单行都由后端下发稳定主键；
+  // 前端不用姓名、空会员 ID 或显示文本猜测可写对象。
   if (activeReport.value === 'market_detail' && !row?.annotation_subject_key) {
-    errorMessage.value = '本行缺少会员编号，暂不能保存进店数。'
+    errorMessage.value = '当前市场明细行缺少可保存的业务标识，暂不能编辑进店数。'
     return
   }
   if (!rowKey(row)) {

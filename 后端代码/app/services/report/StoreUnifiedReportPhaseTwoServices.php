@@ -227,7 +227,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $orderIds = []; $dayKeys = [];
             foreach ($bGroups as $group) {
                 foreach (array_keys($group['orders']) as $orderId) $orderIds[$orderId] = true;
-                if ($group['member_id'] > 0) $dayKeys[$this->marketMemberDayKey($group['store_id'], $group['business_date'], $group['member_id'], $group['source_id'])] = true;
+                $annotationKey = $group['member_id'] > 0
+                    ? $this->marketMemberDayKey($group['store_id'], $group['business_date'], $group['member_id'], $group['source_id'])
+                    : $this->marketGuestOrderKey($group['store_id'], $group['business_date'], $group['source_id'], (string)array_key_first($group['orders']));
+                $dayKeys[$annotationKey] = true;
             }
             $manual = $this->annotations('market_detail', $stores, array_keys($orderIds));
             // 个人参与范围可能只包含该会员当天的部分订单，不能读取或改写
@@ -239,8 +242,12 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 if (!isset($rows[$storeId])) continue;
                 $legacy = 0;
                 foreach (array_keys($group['orders']) as $orderId) $legacy += (int)($manual[$orderId]['walk_in']['value'] ?? 0);
-                $dayKey = $group['member_id'] > 0 ? $this->marketMemberDayKey($storeId, $group['business_date'], $group['member_id'], $sourceId) : '';
-                $daily = $dayKey !== '' ? ($dailyManual[$dayKey]['walk_in'] ?? null) : null;
+                // 游客不能按空会员 ID 合并，因此以原始订单作为独立边界；
+                // 新补充值与会员日行一样优先，旧逐单值仅作兼容回退。
+                $dayKey = $group['member_id'] > 0
+                    ? $this->marketMemberDayKey($storeId, $group['business_date'], $group['member_id'], $sourceId)
+                    : $this->marketGuestOrderKey($storeId, $group['business_date'], $sourceId, (string)array_key_first($group['orders']));
+                $daily = $dailyManual[$dayKey]['walk_in'] ?? null;
                 $rows[$storeId]['channel_'.$sourceId.'_walk_in'] = (int)($rows[$storeId]['channel_'.$sourceId.'_walk_in'] ?? 0)
                     + ($daily !== null ? (int)$daily['value'] : $legacy);
             }
@@ -1120,12 +1127,14 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $day['created_at'] = $this->dateTime((int)$day['recorded_at']);
             unset($day['_creator_names']);
             $memberId = (int)$day['member_id'];
-            // 会员每日来源行使用固定主题键；订单 ID 仅保留作旧值回退，不能继续作为新值主键。
+            // 会员按“日+来源”合并；游客则必须保留原始订单边界，
+            // 避免空会员 ID 把不同顾客的手工值合并或互相覆盖。
+            $guestOrderId = $memberId <= 0 ? (string)($day['_market_orders'][0]['order_id'] ?? '') : '';
             $day['annotation_subject_key'] = $memberId > 0
                 ? $this->marketMemberDayKey((int)$day['store_id'], (string)$day['business_date'], $memberId, (int)$day['business_source_primary_id'])
-                : '';
-            $day['annotation_subject_type'] = 'market_member_day';
-            $day['source_order_id'] = '';
+                : $this->marketGuestOrderKey((int)$day['store_id'], (string)$day['business_date'], (int)$day['business_source_primary_id'], $guestOrderId);
+            $day['annotation_subject_type'] = $memberId > 0 ? 'market_member_day' : 'market_guest_order';
+            $day['source_order_id'] = $guestOrderId;
         }
         unset($day);
         return array_values($days);
@@ -1134,6 +1143,11 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function marketMemberDayKey(int $storeId, string $date, int $memberId, int $sourceId):string
     {
         return 'market-day-v1:' . $storeId . ':' . $date . ':' . $memberId . ':' . $sourceId;
+    }
+    /** 游客行以门店、业务日、来源和原始订单共同定位；哈希避免将不透明单号直接嵌入主键。 */
+    private function marketGuestOrderKey(int $storeId, string $date, int $sourceId, string $orderId):string
+    {
+        return 'market-guest-v1:' . $storeId . ':' . $date . ':' . $sourceId . ':' . hash('sha256', $orderId);
     }
     private function marketDetailSummaryRow(array $rows):array
     {
@@ -1233,7 +1247,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             if(preg_match('/^channel_\d+_(walk_in|visits|effective|amount)$/',$key,$parts)){
                 $source=$source!==''?$source:'该来源';
                 $descriptions=[
-                    'walk_in'=>'汇总有权限人员在市场明细表为“门店＋业务日期＋会员＋来源”保存的进店数；新合并行尚未保存时读取原单据已保存值，新旧值不会重复相加。仅 B 来源显示该列。',
+                    'walk_in'=>'汇总有权限人员在市场明细表保存的进店数：会员按“门店＋业务日期＋会员＋来源”汇总，游客按原始订单独立记录；新行尚未保存时读取原单据已保存值，新旧值不会重复相加。仅 B 来源显示该列。',
                     'visits'=>'统计所选日期内归属“'.$source.'”、已完成且未作废的服务人次。会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
                     'effective'=>'统计所选日期内归属“'.$source.'”且净记账收款达到标准的会员人数：A 来源每位会员至少 1,000 元，其他来源至少 500 元；按门店、来源和会员去重，游客不计。退款会抵减，已作废销售不计。',
                     'amount'=>'合计所选日期内归属“'.$source.'”的有效记账收款净额。现金退款在退款发生日计入 K退款顾客并冲减金额；作废销售冲减原来源；余额支付和旧卡录入不计。',
@@ -1262,7 +1276,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'member_name_snapshot'=>'有会员身份时显示业务发生时记录的会员姓名；没有会员身份时显示“游客”，不同游客不会按姓名合并。',
             'member_phone'=>'显示会员资料中当前保存的手机号码；未填写则留空。',
             'dimension'=>'显示销售发生时记录的客户来源；只有服务、没有当次收款的行，显示该服务所关联销售单的来源。',
-            'walk_in'=>'显示有权限人员为本行“门店＋业务日期＋会员＋来源”保存的进店数；新合并行尚未保存时显示原单据已保存值之和。仅 B 来源汇总到市场业绩表的进店列。',
+            'walk_in'=>'显示有权限人员为本行保存的进店数：会员按“门店＋业务日期＋会员＋来源”合并，游客按原始订单独立显示和编辑；新行尚未保存时显示原单据已保存值。仅 B 来源汇总到市场业绩表的进店列。',
             'visits'=>'有已完成且未作废的服务即计人次：会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
             'effective_people'=>'所选日期内，同一门店、同一来源的会员净记账收款达到标准时显示 1：A 来源至少 1,000 元，其他来源至少 500 元；游客不计。同一会员跨日期可能显示多行 1，但合计按会员去重。',
             'amount'=>'合计本行会员当天在该门店和来源下的有效记账收款净额；退款按退款发生日抵减，已作废销售不计。只有正常服务、没有当次收款时显示 0。',

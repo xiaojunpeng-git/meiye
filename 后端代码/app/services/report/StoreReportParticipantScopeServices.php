@@ -122,6 +122,31 @@ final class StoreReportParticipantScopeServices
             }
             return null;
         }
+        if ($subjectType === 'market_guest_order') {
+            // 游客没有会员 ID，只能由服务端用“门店+业务日+来源+原单”
+            // 重建报表行后反查。客户端自报的 store_id/source_order_id 均不可信。
+            if ($employeeId > 0) return null;
+            if (preg_match('/^market-guest-v1:([1-9][0-9]*):(\d{4}-\d{2}-\d{2}):([1-9][0-9]*):([a-f0-9]{64})$/D', $subjectKey, $parts) !== 1) return null;
+            [$storeId, $date, $sourceId] = [(int)$parts[1], $parts[2], (int)$parts[3]];
+            $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+            if (!$parsed || $parsed->format('Y-m-d') !== $date) return null;
+            if (!Db::name('cashier_v3_sales_order')->where('tenant_id', $tenantId)->where('store_id', $storeId)->value('id')) return null;
+            $result = (new StoreUnifiedReportServices())->query([$storeId], [
+                'report' => 'market_detail', 'start_date' => $date, 'end_date' => $date,
+                'dimension_code' => (string)$sourceId, '_internal_all' => true,
+            ]);
+            foreach ((array)($result['records'] ?? []) as $row) {
+                if ((string)($row['annotation_subject_key'] ?? '') !== $subjectKey
+                    || (int)($row['member_id'] ?? 0) > 0) continue;
+                $orders = array_values((array)($row['_market_orders'] ?? []));
+                if (count($orders) !== 1 || trim((string)($orders[0]['order_id'] ?? '')) === '') return null;
+                return [
+                    'store_id' => $storeId, 'source_fact_id' => 0,
+                    'source_order_id' => (string)$orders[0]['order_id'], 'source_line_id' => '',
+                ];
+            }
+            return null;
+        }
         if (in_array($subjectType, ['sale_line', 'report_row'], true)) {
             $line = Db::name('cashier_v3_sale_fact')->alias('subject_sale')
                 ->where('subject_sale.tenant_id', $tenantId)->where('subject_sale.source_line_id', $subjectKey)
