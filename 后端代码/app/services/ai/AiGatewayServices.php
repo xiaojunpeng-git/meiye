@@ -1458,6 +1458,17 @@ final class AiGatewayServices
             $understanding,$safe['outbound'],array_column($bindingSummaries,'metric_code'),$sourceQuery!==null,
             $registeredCoordinatedFailure
         );
+        $registeredBreakdownContinuationFailure=null;
+        $registeredBreakdownContinuationIntent=$sourceQuery===null?null:
+            AiIntentResultContract::registeredBreakdownContinuationIntent(
+                $understanding,$safe['outbound'],$bindingSummaries,$sourceQuery,
+                $registeredBreakdownContinuationFailure
+            );
+        if ($registeredBreakdownContinuationIntent===null && $registeredBreakdownContinuationFailure!==null) {
+            try {$this->runs->recordDiagnostic($owner,$id,$generation,$worker,[
+                'stage'=>'analysis_binding','predicate'=>'registered_breakdown_continuation_miss_'.$registeredBreakdownContinuationFailure,
+            ],'registered_breakdown_continuation_probe');} catch (\Throwable $ignored) {}
+        }
         if ($registeredCoordinatedIntent===null && $registeredCoordinatedFailure!==null) {
             try {$this->runs->recordDiagnostic($owner,$id,$generation,$worker,[
                 'stage'=>'analysis_binding','predicate'=>'registered_coordinated_miss_'.$registeredCoordinatedFailure,
@@ -1494,6 +1505,14 @@ final class AiGatewayServices
             // over the already verified metric, object, date and scope.
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'context_ranking_binding_reused');
             $reply=['intent'=>$reusedRankingIntent,'usage'=>[]];
+        } elseif ($registeredBreakdownContinuationIntent!==null) {
+            // Understanding owns the new plural analytical object; the
+            // registry owns its sole broad first-answer perspective. Reusing
+            // the signed date and authority here avoids a redundant binding
+            // call and cannot retain the predecessor's analytical filter.
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_breakdown_continuation_compiled');
+            $reply=['intent'=>$registeredBreakdownContinuationIntent,'usage'=>[]];
+            $contextBindingReused=true;
         } elseif ($registeredConditionIntent!==null) {
             // The understanding model already owns every customer semantic
             // choice. When all condition terms have one unique active

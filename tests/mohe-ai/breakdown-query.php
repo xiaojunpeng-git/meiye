@@ -258,6 +258,86 @@ try {
         &&($definitions['staff_sales_yeji']['analysis_default_breakdown_object_kinds']??null)===['person']
         &&($definitions['cash_performance']['analysis_default_breakdown_object_kinds']??null)===['member'],
         'registry owns one broad breakdown first-answer perspective per supported object');
+    $continuationQuestion=$safeQuestion;
+    $continuationQuestion['question']='各对象的经营详情呢';
+    $continuationQuestion['evidence_messages']=[['id'=>'current','text'=>$continuationQuestion['question']]];
+    $continuationQuestion['prior_query']=[
+        'query_shape'=>'summary','metric_codes'=>['cash_performance','actual_performance'],
+        'start_date'=>'2026-09-01','end_date'=>'2026-09-24','compare_range'=>null,
+        'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-24']],
+        'store_ids'=>[1,2],'has_store_scope_restriction'=>true,
+        'business_filters'=>['object_kind'=>'store'],'has_business_filter'=>true,
+        'ranking'=>null,'aggregate_condition'=>null,
+    ];
+    $continuationCapabilities=[];
+    foreach ([
+        ['actual_performance','store'],['staff_sales_yeji','person'],['cash_performance','member'],
+    ] as [$code,$kind]) $continuationCapabilities[]=[
+        'metric_code'=>$code,'default_breakdown_object_kinds'=>[$kind],
+    ];
+    foreach ([
+        'store'=>'actual_performance','person'=>'staff_sales_yeji','member'=>'cash_performance',
+    ] as $kind=>$expectedCode) {
+        $continuationUnderstanding=AiIntentUnderstandingContract::normalize([
+            'goal'=>'按对象查看经营详情','status'=>'understood','requirements'=>[[
+                'id'=>'r1','meaning'=>'按对象查看经营详情',
+                'fields'=>['object_kind','object_relation','operation'],
+                'values'=>['object_kind'=>$kind,'object_relation'=>'analysis','operation'=>'breakdown'],
+                'evidence'=>[['message_id'=>'current','quote'=>$continuationQuestion['question']]],
+            ]],
+        ],$continuationQuestion);
+        $continuationIntent=AiIntentResultContract::registeredBreakdownContinuationIntent(
+            $continuationUnderstanding,$continuationQuestion,$continuationCapabilities,
+            $continuationQuestion['prior_query']
+        );
+        bdCheck(($continuationIntent['metric_codes']??null)===[$expectedCode]
+            &&($continuationIntent['operation']??null)==='breakdown'
+            &&($continuationIntent['context_delta']['periods']??null)==='inherit'
+            &&($continuationIntent['context_delta']['business_filters']??null)==='clear',
+            'typed '.$kind.' continuation uses its sole registry default while retaining date and authority');
+        $implicitRelation=$continuationUnderstanding;
+        unset($implicitRelation['requirements'][0]['values']['object_relation']);
+        $implicitRelation['requirements'][0]['fields']=array_values(array_filter(
+            $implicitRelation['requirements'][0]['fields'],static fn($field):bool=>$field!=='object_relation'
+        ));
+        bdCheck((AiIntentResultContract::registeredBreakdownContinuationIntent(
+            $implicitRelation,$continuationQuestion,$continuationCapabilities,$continuationQuestion['prior_query']
+        )['object_relation']??null)==='analysis',
+            'typed '.$kind.' breakdown may compile its redundant analytical relation locally');
+        $restatedPeriod=$continuationUnderstanding;
+        $restatedPeriod['requirements'][0]['fields'][]='periods';
+        $restatedPeriod['requirements'][0]['values']['periods']=[[
+            'kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-24',
+        ]];
+        bdCheck((AiIntentResultContract::registeredBreakdownContinuationIntent(
+            $restatedPeriod,$continuationQuestion,$continuationCapabilities,$continuationQuestion['prior_query']
+        )['context_delta']['periods']??null)==='inherit',
+            'typed '.$kind.' continuation may restate only the same signed predecessor period');
+    }
+    $explicitContinuation=$continuationQuestion;
+    $explicitContinuation['question']='各门店现金业绩详情';
+    $explicitContinuation['evidence_messages']=[['id'=>'current','text'=>$explicitContinuation['question']]];
+    $explicitUnderstanding=AiIntentUnderstandingContract::normalize([
+        'goal'=>'查看各门店现金业绩','status'=>'understood','requirements'=>[[
+            'id'=>'r1','meaning'=>'查看各门店现金业绩',
+            'fields'=>['metric_codes','object_kind','object_relation','operation'],
+            'values'=>['metric_terms'=>['现金业绩'],'object_kind'=>'store','object_relation'=>'analysis','operation'=>'breakdown'],
+            'evidence'=>[['message_id'=>'current','quote'=>$explicitContinuation['question']]],
+        ]],
+    ],$explicitContinuation);
+    bdCheck(AiIntentResultContract::registeredBreakdownContinuationIntent(
+        $explicitUnderstanding,$explicitContinuation,$continuationCapabilities,$explicitContinuation['prior_query']
+    )===null,'an explicit registered measurement never enters the broad continuation default');
+    $detailUnderstanding=AiIntentUnderstandingContract::normalize([
+        'goal'=>'查看具体对象详情','status'=>'understood','requirements'=>[[
+            'id'=>'r1','meaning'=>'查看具体对象详情','fields'=>['object_detail'],
+            'values'=>['object_detail'=>['view'=>'summary','target'=>'single','ordinal'=>null]],
+            'evidence'=>[['message_id'=>'current','quote'=>$continuationQuestion['question']]],
+        ]],
+    ],$continuationQuestion);
+    bdCheck(AiIntentResultContract::registeredBreakdownContinuationIntent(
+        $detailUnderstanding,$continuationQuestion,$continuationCapabilities,$continuationQuestion['prior_query']
+    )===null,'a concrete object-detail continuation cannot be rewritten as a population breakdown');
     $bindingBoundary=Closure::bind(static function(SiliconFlowClient $client,array $items): array {
         return $client->bindingBoundary($items);
     },null,SiliconFlowClient::class);

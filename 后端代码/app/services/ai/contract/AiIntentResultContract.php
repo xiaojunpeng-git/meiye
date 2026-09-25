@@ -234,6 +234,122 @@ final class AiIntentResultContract
     }
 
     /**
+     * Compile a pure analytical-dimension continuation from accepted meaning
+     * and registry-owned response policy. The language stage must already
+     * have identified one plural analytical object and a breakdown; this
+     * method never reads customer words to discover either fact. It is
+     * intentionally limited to a completed summary predecessor, one broad or
+     * absent measurement requirement, and one declared default for the new
+     * object. Explicit measurements, selections, conditions, object details,
+     * exclusions and ambiguous defaults remain on the normal model path.
+     *
+     * The prior period and authorization are inherited, while the old
+     * analytical filter is cleared. This prevents a follow-up such as a new
+     * personnel/member/store dimension from accidentally retaining the prior
+     * dimension, without teaching PHP any natural-language phrase mapping.
+     */
+    public static function registeredBreakdownContinuationIntent(
+        array $understanding,array $safeQuestion,array $capabilities,array $sourceQuery,?string &$failure=null
+    ): ?array {
+        $failure=null;
+        if (($understanding['status']??null)!=='understood'
+            || !empty($understanding['groups']) || isset($understanding['request_kind'])
+            || ($sourceQuery['query_shape']??null)!=='summary'
+            || !self::verifiedQueryCodes($sourceQuery['metric_codes']??null)
+            || !is_string($sourceQuery['start_date']??null)
+            || !is_string($sourceQuery['end_date']??null)) {$failure='source_shape';return null;}
+
+        $objectKind=null;$relation=null;$operation=null;$metricRequirements=[];
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirementId=>$requirement) {
+            $fields=(array)($requirement['fields']??[]);
+            $values=(array)($requirement['values']??[]);
+            $unsafeFields=array_values(array_intersect($fields,[
+                'ranking','scope','result_reference','aggregate_condition',
+                'condition_update','object_detail','member_detail','unbound',
+            ]));
+            if ($unsafeFields!==[]) {$failure='unsafe_field_'.$unsafeFields[0];return null;}
+            foreach (['metric_exclusions','ranking','aggregate_condition','condition_update','object_detail','member_detail','result_reference'] as $unsafe) {
+                if (array_key_exists($unsafe,$values)) {$failure='unsafe_value';return null;}
+            }
+            if (in_array('object_kind',$fields,true)) {
+                $candidate=$values['object_kind']??null;
+                if (!is_string($candidate) || ($objectKind!==null && $candidate!==$objectKind)) {$failure='object_conflict';return null;}
+                $objectKind=$candidate;
+            }
+            if (in_array('object_relation',$fields,true)) {
+                $candidate=$values['object_relation']??null;
+                if (!is_string($candidate) || ($relation!==null && $candidate!==$relation)) {$failure='relation_conflict';return null;}
+                $relation=$candidate;
+            }
+            if (in_array('operation',$fields,true)) {
+                $candidate=$values['operation']??null;
+                if (!is_string($candidate) || ($operation!==null && $candidate!==$operation)) {$failure='operation_conflict';return null;}
+                $operation=$candidate;
+            }
+            // A model may restate the verified predecessor's period while it
+            // changes only the analytical dimension. normalize() proves exact
+            // equivalence before `inherit` can execute; a changed or invented
+            // range therefore fails closed without another phrase rule here.
+            if (in_array('periods',$fields,true) && !self::periods($values['periods']??null)) {
+                $failure='period_shape';return null;
+            }
+            if (in_array('metric_codes',$fields,true)) {
+                $termCount=count((array)($values['metric_terms']??[]));
+                if (!is_string($requirementId) || $requirementId==='') {$failure='metric_id';return null;}
+                if ($termCount>1) {$failure='metric_term_count_'.$termCount;return null;}
+                $requirement['id']=$requirementId;
+                $metricRequirements[]=$requirement;
+            }
+        }
+        if (!is_string($objectKind) || $objectKind==='unknown'
+            || ($relation!==null && $relation!=='analysis') || $operation!=='breakdown'
+            || count($metricRequirements)>1) {$failure='meaning_shape';return null;}
+
+        $allowedCodes=[];$defaults=[];
+        foreach ($capabilities as $capability) {
+            $code=$capability['metric_code']??null;
+            if (!is_string($code) || $code==='') continue;
+            $allowedCodes[$code]=true;
+            $kinds=$capability['default_breakdown_object_kinds']??[];
+            if (is_array($kinds) && in_array($objectKind,$kinds,true)) $defaults[$code]=true;
+        }
+        if (count($defaults)!==1) {$failure='default_count';return null;}
+        $allowedCodes=array_keys($allowedCodes);
+        // A literal registered measurement is customer-owned and must use the
+        // exact/coordinated binding path, never the broad default policy.
+        if (\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText(
+            (string)($safeQuestion['question']??''),$allowedCodes
+        )!==[]) {$failure='explicit_metric';return null;}
+
+        $default=array_key_first($defaults);$bindings=[];
+        foreach ($metricRequirements as $requirement) $bindings[]=[
+            'requirement_id'=>$requirement['id'],'status'=>'satisfied','metric_codes'=>[$default],
+        ];
+        $delta=array_fill_keys(self::DELTA_FIELDS,'inherit');
+        $delta['metric_codes']='replace';
+        $delta['object']='replace';
+        $delta['business_filters']='clear';
+        $delta['operation']='replace';
+        $delta['ranking_direction']='clear';
+        $delta['ranking_limit']='clear';
+        $delta['aggregate_condition']='clear';
+        $candidate=[
+            'object_kind'=>$objectKind,'object_relation'=>'analysis','object_term'=>'',
+            'operation'=>'breakdown','metric_codes'=>[$default],'action_codes'=>[],
+            'needs_metric_choice'=>false,'initial_observation'=>false,'recommended_initial_answer'=>true,
+            'requirement_bindings'=>$bindings,'ranking'=>['direction'=>'unspecified','limit'=>null],
+            'scope'=>'unspecified','aggregate_condition'=>null,'result_reference'=>null,
+            'unresolved_fragments'=>[],'context_delta'=>$delta,
+        ];
+        try {
+            return self::normalize($candidate,$allowedCodes,[],$safeQuestion,$understanding);
+        } catch (AiContractException $error) {
+            $failure='intent_contract_'.($error->diagnostic()['predicate']??'invalid');
+            return null;
+        }
+    }
+
+    /**
      * Bind every condition measurement only when the accepted understanding
      * quoted an exact, uniquely-owned term from the active metric registry.
      * The language model still owns the object, time, relation, operators and
