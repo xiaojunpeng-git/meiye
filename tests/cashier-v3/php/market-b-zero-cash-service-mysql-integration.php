@@ -184,6 +184,69 @@ try {
         || (int)$guestRows[0]['member_id'] !== 0 || (string)$guestRows[0]['member_name_snapshot'] !== '游客') {
         throw new RuntimeException('Guest service order was omitted or its projects were counted more than once');
     }
+    $guestKey = 'market-guest-v1:' . $storeId . ':' . $date . ':' . (int)$bSource['id'] . ':' . hash('sha256', $guestOrderId);
+    if ((string)($guestRows[0]['annotation_subject_key'] ?? '') !== $guestKey
+        || (string)($guestRows[0]['annotation_subject_type'] ?? '') !== 'market_guest_order'
+        || (string)($guestRows[0]['source_order_id'] ?? '') !== $guestOrderId) {
+        throw new RuntimeException('Guest detail row did not expose its independent editable subject');
+    }
+    $annotations = new StoreOperationsReportAnnotationServices();
+    $context = [
+        'tenant_id' => (string)$order['tenant_id'], 'organization_id' => (string)$order['organization_id'],
+        'store_id' => $storeId, 'store_ids' => [$storeId], 'authorization_mode' => 'stores',
+        'operator_id' => 1, 'operator_name' => 'report-test',
+    ];
+    $guestWalkInBefore = (int)($guestSummary['records'][0][$bKey . '_walk_in'] ?? 0);
+    $guestPayload = [
+        'report_code' => 'market_detail', 'subject_type' => 'market_guest_order',
+        'subject_key' => $guestKey, 'store_id' => $storeId, 'field_key' => 'walk_in',
+        'field_value' => '3', 'expected_version' => 0,
+        'idempotency_key' => 'market-guest-test-' . $random,
+    ];
+    $guestSaved = $annotations->saveAnnotation($context, $guestPayload);
+    $guestReplayed = $annotations->saveAnnotation($context, $guestPayload);
+    $guestSavedDetail = $report('market_detail', ['dimension_code' => (string)$bSource['id']]);
+    $guestSavedRows = array_values(array_filter($guestSavedDetail['records'], static function (array $row) use ($guestKey): bool {
+        return (string)($row['annotation_subject_key'] ?? '') === $guestKey;
+    }));
+    $guestSavedSummary = $report('market_performance');
+    if ((int)$guestSaved['version'] !== 1 || empty($guestReplayed['replayed'])
+        || count($guestSavedRows) !== 1 || (int)$guestSavedRows[0]['walk_in'] !== 3
+        || (int)$guestSavedRows[0]['walk_in_version'] !== 1
+        || (int)($guestSavedSummary['records'][0][$bKey . '_walk_in'] ?? -1) !== $guestWalkInBefore + 3) {
+        throw new RuntimeException('Guest walk-in save did not persist and reconcile with market performance');
+    }
+    try {
+        $annotations->saveAnnotation($context, array_merge($guestPayload, [
+            'field_value' => '4', 'idempotency_key' => 'market-guest-conflict-' . $random,
+        ]));
+        throw new RuntimeException('Stale guest row version was accepted');
+    } catch (InvalidArgumentException $expected) {
+        if (strpos($expected->getMessage(), '已更新') === false) throw $expected;
+    }
+    try {
+        $annotations->saveAnnotation($context, array_merge($guestPayload, [
+            'subject_key' => substr($guestKey, 0, -1) . ($guestKey[-1] === '0' ? '1' : '0'),
+            'idempotency_key' => 'market-guest-missing-' . $random,
+        ]));
+        throw new RuntimeException('Forged guest row key was accepted');
+    } catch (InvalidArgumentException $expected) {
+        // 游客主键必须由后端反查到当前门店下的唯一原单。
+    }
+    $guestCleared = $annotations->saveAnnotation($context, array_merge($guestPayload, [
+        'field_value' => '', 'expected_version' => 1,
+        'idempotency_key' => 'market-guest-clear-' . $random,
+    ]));
+    $guestClearedDetail = $report('market_detail', ['dimension_code' => (string)$bSource['id']]);
+    $guestClearedRows = array_values(array_filter($guestClearedDetail['records'], static function (array $row) use ($guestKey): bool {
+        return (string)($row['annotation_subject_key'] ?? '') === $guestKey;
+    }));
+    $guestClearedSummary = $report('market_performance');
+    if ((int)$guestCleared['version'] !== 2 || count($guestClearedRows) !== 1
+        || (int)$guestClearedRows[0]['walk_in'] !== 0 || (int)$guestClearedRows[0]['walk_in_version'] !== 2
+        || (int)($guestClearedSummary['records'][0][$bKey . '_walk_in'] ?? -1) !== $guestWalkInBefore) {
+        throw new RuntimeException('Guest walk-in clear did not survive readback or summary aggregation');
+    }
     // 仅用于验证查询端口径；补充记录与测试业务事实都在同一事务回滚。
     Db::name('cashier_v3_report_annotation')->insert([
         'tenant_id' => (string)$order['tenant_id'], 'organization_id' => (string)$order['organization_id'],
@@ -230,12 +293,6 @@ try {
         || (int)($clearedSummary['records'][0][$bKey . '_walk_in'] ?? -1) !== 0) {
         throw new RuntimeException('Explicit daily zero incorrectly fell back to legacy input');
     }
-    $annotations = new StoreOperationsReportAnnotationServices();
-    $context = [
-        'tenant_id' => (string)$order['tenant_id'], 'organization_id' => (string)$order['organization_id'],
-        'store_id' => $storeId, 'store_ids' => [$storeId], 'authorization_mode' => 'stores',
-        'operator_id' => 1, 'operator_name' => 'report-test',
-    ];
     $payload = [
         'report_code' => 'market_detail', 'subject_type' => 'market_member_day',
         'subject_key' => $dailyKey, 'store_id' => $storeId, 'field_key' => 'walk_in',
@@ -284,6 +341,7 @@ try {
     echo "PASS B cash amount and amount drilldown remain unchanged\n";
     echo "PASS two services on one member day count once\n";
     echo "PASS guest service order counts once and its projects do not duplicate visits\n";
+    echo "PASS guest walk-in saves, replays, conflicts, clears and reconciles with market performance\n";
     echo "PASS B zero-cash manual walk-in reconciles between summary and detail\n";
     echo "PASS member-day input replaces legacy order input and clear-to-zero survives readback\n";
     echo "PASS member-day save checks row existence, version and idempotency\n";
