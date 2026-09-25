@@ -40,9 +40,16 @@ export function nextSalesOrderQueryWithCursor(query, cursor) {
   const token = typeof cursor === 'string' ? cursor.trim() : ''
   if (token) next.queryCursor = token
   else delete next.queryCursor
+  // 查询模型可能来自旧版路由／导出快照，其中保留的蛇形字段
+  // 与新字段具有同一后端语义。写入后回刷首页必须全部清除，
+  // 否则会把写入前的签名游标带回服务端，造成“修改成功但页面报错”。
+  delete next.query_cursor
   delete next.querySnapshot
+  delete next.query_snapshot
   delete next.queryCutoffTimestamp
+  delete next.query_cutoff_timestamp
   delete next.snapshotMaxOrderId
+  delete next.snapshot_max_order_id
   return next
 }
 

@@ -416,6 +416,11 @@ final class CashierV3SalesOrderQueryServices
         $now = (int)$criteria['nowTimestamp'];
         $fingerprint = $this->cursorFingerprint($criteria, $operatorScope, $dataScope);
         $token = $this->scalarString($payload['queryCursor'] ?? $payload['query_cursor'] ?? '');
+        // 第一页本身就是新查询快照的起点，不需要也不应复用旧游标。
+        // 写命令成功后前端状态可能短暂携带写入前游标；首页强制
+        // 重建快照可避免将已成功的人员修改误报为失败。第二页起仍
+        // 必须验证签名、筛选指纹、权限版本和页码，不放宽翻页边界。
+        if ((int)$criteria['page'] === 1) $token = '';
         if ($token === '') {
             if ((int)$criteria['page'] !== 1) {
                 throw new \InvalidArgumentException('sales_order_query_cursor_required');
@@ -672,6 +677,9 @@ final class CashierV3SalesOrderQueryServices
         $now = (int)$criteria['nowTimestamp'];
         $fingerprint = $this->cursorFingerprint($criteria, $operatorScope, $dataScope);
         $token = $this->scalarString($payload['queryCursor'] ?? $payload['query_cursor'] ?? '');
+        // 权威订单投影与历史投影使用同一首页语义：首页总是
+        // 新快照，仅后续页依赖并严格验证不透明签名游标。
+        if ((int)$criteria['page'] === 1) $token = '';
         if ($token === '') {
             if ((int)$criteria['page'] !== 1) {
                 throw new \InvalidArgumentException('sales_order_query_cursor_required');

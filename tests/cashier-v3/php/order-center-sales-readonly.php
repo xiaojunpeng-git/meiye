@@ -345,6 +345,17 @@ echo "== opaque cursor security ==\n";
 $nextCursor = (string)($first['paginationCursor']['next'] ?? '');
 $tamperedCursor = substr($nextCursor, 0, -1)
     . (substr($nextCursor, -1) === 'A' ? 'B' : 'A');
+$freshFirst = $service->querySalesOrders([
+    'page' => 1,
+    'pageSize' => 1,
+    'storeIds' => [8, 9],
+    'query_cursor' => $tamperedCursor,
+], $operator, $storesScope);
+orderOk('首页忽略写入前旧游标并重建新快照',
+    ($freshFirst['records'][0]['orderId'] ?? 0) === 102
+    && ($freshFirst['paginationCursor']['current'] ?? '') !== $tamperedCursor,
+    $freshFirst
+);
 $cursorCases = [
     ['篡改签名', ['page' => 2, 'pageSize' => 1, 'storeIds' => [8, 9], 'queryCursor' => $tamperedCursor], $storesScope],
     ['跨筛选重放', ['page' => 2, 'pageSize' => 1, 'storeIds' => [8, 9], 'status' => 'normal', 'queryCursor' => $nextCursor], $storesScope],

@@ -1085,7 +1085,10 @@ async function submitSalesPersonnelAdjustment() {
       // sales cursor is a signed pre-write snapshot, so reuse would be
       // rejected even though the write succeeded. Refresh the first page with
       // a new cursor instead of showing a false failure message.
-      await queryRecords({}, true)
+      // 写命令已成功时不得再把后续列表回刷异常展示为
+      // “修改失败”。回刷使用新的首页游标且静默执行，写入结果
+      // 仍以上方已校验的服务端命令回执为准。
+      await queryRecords({ silent: true }, true)
       return
     }
     salesPersonnelError.value = result?.result?.message || result?.data?.result?.message || '人员修改未完成，请稍后重试。'
@@ -1989,7 +1992,10 @@ async function submitServiceCraftsmanAdjustment() {
     if (isTerminalActionStatus(status)) serviceCraftsmanCommandIds.value = { ...serviceCraftsmanCommandIds.value, [commandKey]: null }
     if (['success', 'succeeded'].includes(String(status))) {
       closeServiceCraftsmanAdjustment(true)
-      await queryRecords({}, false)
+      // 销售订单中的购买项目可能关联服务事实，因此会复用
+      // 本服务记录调整命令。写入后旧的销售列表签名游标已失效，
+      // 必须静默重建首页，不能把回刷拒绝误报为“手艺人修改失败”。
+      await queryRecords({ silent: true }, true)
       return
     }
     serviceCraftsmanError.value = result?.result?.message || result?.data?.result?.message || '手艺人修改未完成，请稍后重试。'
