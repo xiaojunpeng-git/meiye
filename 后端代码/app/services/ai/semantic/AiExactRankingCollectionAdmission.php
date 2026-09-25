@@ -15,6 +15,50 @@ use app\services\query\metric\MetricSemanticCatalog;
 final class AiExactRankingCollectionAdmission
 {
     /**
+     * Admit one broad member ranking together with a bounded set-detail view.
+     *
+     * Natural-language understanding remains the default. This narrow path is
+     * available only when the sentence itself closes every execution carrier:
+     * one registered member object, one direction, one explicit row limit and
+     * a genuine detail request. The caller accepts at most one calendar range;
+     * if it is omitted, the existing dimension planner owns the same-day
+     * default used by all broad dimension rankings.
+     * The business metric is never inferred from wording; it must be the sole
+     * active registry default shared by the member ranking capability.
+     *
+     * @param array<int,array{object_kind:string,object_label:string}> $objectVocabulary
+     * @param array<int,string> $allowedMetricCodes
+     * @param array<string,array<int,string>> $defaultRankObjectKinds
+     * @return array{ranking:array{metric_code:string,object_kind:string,direction:string,limit:int},detail:array{view:string,target:string,ordinal:null}}|null
+     */
+    public function matchMemberPopulationDetail(
+        string $question,array $objectVocabulary,array $allowedMetricCodes,
+        array $defaultRankObjectKinds,?int $limit
+    ): ?array {
+        if ($question==='' || preg_match('//u',$question)!==1 || !is_int($limit) || $limit<1 || $limit>20) return null;
+        if (!preg_match('/详情|明细|情况|具体/u',$question)) return null;
+        if (MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes)!==null) return null;
+        $matched=$this->objectsInText($question,$this->objects($objectVocabulary));
+        if ($matched===null || count($matched)!==1 || $matched[0]['object_kind']!=='member') return null;
+        $direction=$this->direction($question);
+        if (!in_array($direction,['top','bottom'],true)) return null;
+        $candidateCodes=[];
+        foreach ($allowedMetricCodes as $code) {
+            if (in_array('member',array_values(array_unique(array_filter(
+                (array)($defaultRankObjectKinds[$code]??[]),'is_string'
+            ))),true)) $candidateCodes[]=$code;
+        }
+        if (count($candidateCodes)!==1 || $this->memberPopulationDetailResidue(
+            $question,$matched[0]['object_label']
+        )!=='') return null;
+        return [
+            'ranking'=>['metric_code'=>$candidateCodes[0],'object_kind'=>'member',
+                'direction'=>$direction,'limit'=>$limit],
+            'detail'=>['view'=>'summary','target'=>'set','ordinal'=>null],
+        ];
+    }
+
+    /**
      * @param array<int,array{object_kind:string,object_label:string}> $objectVocabulary
      * @param array<int,string> $allowedMetricCodes
      * @param array<string,array<int,string>> $defaultRankObjectKinds
@@ -112,6 +156,18 @@ final class AiExactRankingCollectionAdmission
         $residue=preg_replace('/这个月|这一个月|本月|这月|上个月|上月|今天|今日|昨天|昨日|前天/u',' ',$residue);
         $residue=preg_replace('/业绩|卖得/u',' ',$residue);
         $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪个|哪一个|什么)(?:又)?|分别|各自|同时|以及|和|与|的|是|又|、|，|,|；|;|。|\s+/u','',$residue);
+        return is_string($residue)?trim($residue):$question;
+    }
+
+    /** Remove only the closed member-ranking/detail presentation grammar. */
+    private function memberPopulationDetailResidue(string $question,string $objectLabel): string
+    {
+        $residue=str_replace($objectLabel,' ',$question);
+        $residue=preg_replace('/(?:前|后|最高|最低|最好|最差)(?:的)?\s*(?:[0-9]+|[一二两三四五六七八九十百]+)\s*(?:名)?/u',' ',$residue);
+        $residue=preg_replace('/最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
+        $residue=preg_replace('/这个月|这一个月|本月|这月|上个月|上月|今天|今日|昨天|昨日|前天/u',' ',$residue);
+        $residue=preg_replace('/业绩|详情|明细|具体情况|情况/u',' ',$residue);
+        $residue=preg_replace('/(?:的)?(?:是)?(?:哪些|哪个|哪一个|什么)|分别|各自|同时|以及|和|与|的|是|看看|查看|看|给我|、|，|,|；|;|。|\s+/u','',$residue);
         return is_string($residue)?trim($residue):$question;
     }
 

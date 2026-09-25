@@ -2904,14 +2904,32 @@ final class AiGatewayServices
         // grammar locally; its own residue gate below still owns the complete
         // sentence and rejects every unexplained business instruction.
         $dateProjection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse($question);
-        if ($format!=='screen' || count((array)($dateProjection['date_terms']??[]))!==1
+        $dateTermCount=count((array)($dateProjection['date_terms']??[]));
+        if ($format!=='screen' || $dateTermCount>1
             || !empty($dateProjection['date_grouping_ambiguous'])) {$reason='date_or_format';return null;}
         $defaultRankObjects=[];
         foreach ((array)($capabilities['metric_readiness']??[]) as $code=>$contract) {
             if (!is_string($code) || !is_array($contract)) continue;
             $defaultRankObjects[$code]=array_values((array)($contract['analysis_default_rank_object_kinds']??[]));
         }
-        $items=(new \app\services\ai\semantic\AiExactRankingCollectionAdmission())->match(
+        $admission=new \app\services\ai\semantic\AiExactRankingCollectionAdmission();
+        // A ranked member set followed by its details is one authorised
+        // population workflow, not an invitation for the model to invent a
+        // second metric. Admit it only through the same registry defaults and
+        // exact residue boundary as other closed extrema, then let the normal
+        // population executor read details for those verified member IDs.
+        $memberPopulationDetail=$admission->matchMemberPopulationDetail(
+            $question,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[])),
+            $defaultRankObjects,$dateProjection['semantic_intent']['rank_limit']??null
+        );
+        // Ordinary exact extrema require an explicit period. A closed member
+        // population-detail request may omit it and deliberately inherits the
+        // existing dimension planner's documented same-day default; this is
+        // the same period used by the former model path, not a new gateway
+        // date rule. More than one date was already rejected above.
+        if ($memberPopulationDetail===null && $dateTermCount!==1) {$reason='date_or_format';return null;}
+        $memberDetailRequest=$memberPopulationDetail['detail']??null;
+        $items=$memberPopulationDetail!==null?[$memberPopulationDetail['ranking']]:$admission->match(
             $question,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[])),$defaultRankObjects
         );
         if ($items===null) {$reason='semantic_no_match';return null;}
@@ -2948,8 +2966,10 @@ final class AiGatewayServices
         }
         $reason=null;
         $plan=count($plans)===1?$plans[0]['plan']:['items'=>$plans];
-        return ['kind'=>'plan','plan'=>$plan,
+        $compiled=['kind'=>'plan','plan'=>$plan,
             '_context_meaning'=>['presentation_origin'=>'customer_or_verified_context']];
+        if (is_array($memberDetailRequest)) $compiled['_member_detail_request']=$memberDetailRequest;
+        return $compiled;
     }
 
     private function resolveOverviewMetrics(array $intent,array $capabilities): array
