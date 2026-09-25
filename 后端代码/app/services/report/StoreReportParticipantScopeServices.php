@@ -126,7 +126,9 @@ final class StoreReportParticipantScopeServices
             // 游客没有会员 ID，只能由服务端用“门店+业务日+来源+原单”
             // 重建报表行后反查。客户端自报的 store_id/source_order_id 均不可信。
             if ($employeeId > 0) return null;
-            if (preg_match('/^market-guest-v1:([1-9][0-9]*):(\d{4}-\d{2}-\d{2}):([1-9][0-9]*):([a-f0-9]{64})$/D', $subjectKey, $parts) !== 1) return null;
+            // 历史游客单可能未选择市场来源，此时 sourceId=0 仍是真实行维度，
+            // 不能因为页面显示“-”就拒绝保存；门店 ID 仍必须为正数。
+            if (preg_match('/^market-guest-v1:([1-9][0-9]*):(\d{4}-\d{2}-\d{2}):([0-9]+):([a-f0-9]{64})$/D', $subjectKey, $parts) !== 1) return null;
             [$storeId, $date, $sourceId] = [(int)$parts[1], $parts[2], (int)$parts[3]];
             $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
             if (!$parsed || $parsed->format('Y-m-d') !== $date) return null;
