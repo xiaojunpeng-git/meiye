@@ -1259,6 +1259,29 @@ final class CashierV3SalesOrderQueryServices
             ->order('order_id', 'asc')->order('line_no', 'asc')->select()->toArray() as $line) {
             $linesByOrder[(string)$line['order_id']][] = $line;
         }
+        // 销售单是混合结账的资金单据，服务事实是项目履约单据。列表只在
+        // 同一 checkout_request_id 下合并展示两者；权益服务行不得进入销售金额、
+        // 欠款、退款范围或商品数量计算。
+        $serviceFactsByOrder = [];
+        $serviceFactIds = [];
+        if ($requestIds !== []) {
+            $serviceRows = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+                ->leftJoin(
+                    'cashier_v3_service_record_void_operation vo',
+                    "vo.tenant_id=sf.tenant_id AND vo.service_fact_id=sf.id AND vo.status='succeeded'"
+                )
+                ->where('sf.tenant_id', $tenantIds[0])
+                ->whereIn('sf.checkout_request_id', $requestIds)
+                ->where('sf.service_status', 'completed')
+                ->field('sf.id,sf.service_fact_id,sf.service_record_no,sf.checkout_request_id,sf.source_line_id,sf.project_id,sf.project_name_snapshot,sf.quantity,sf.project_count,sf.craftsmen_snapshot_json,sf.service_status,sf.detail_remark_snapshot,vo.id AS void_operation_id,vo.occurred_at AS voided_at')
+                ->order('sf.id', 'asc')->select()->toArray();
+            foreach ($serviceRows as $serviceRow) {
+                $orderId = $requestToOrder[(string)($serviceRow['checkout_request_id'] ?? '')] ?? '';
+                if ($orderId === '' || !isset($headersByOrder[$orderId])) continue;
+                $serviceFactsByOrder[$orderId][] = $serviceRow;
+                $serviceFactIds[] = (int)$serviceRow['id'];
+            }
+        }
         $batchesByOrder = [];
         foreach (Db::name('cashier_v3_payment_collection_batch')
             ->whereIn('sales_order_id', $orderIds)
@@ -1353,7 +1376,7 @@ final class CashierV3SalesOrderQueryServices
         $craftsmenByOrderAndLine = [];
         $guidesByOrderAndLine = [];
         $salesManagersByOrderAndLine = [];
-        foreach ($this->effectivePersonnelFacts($orderIds, $tenantIds[0]) as $fact) {
+        foreach ($this->effectivePersonnelFacts($orderIds, $tenantIds[0], $serviceFactIds) as $fact) {
             $lineKey = (string)$fact['source_line_id'];
             if ((string)$fact['performance_type'] === 'sales_performance_allocated') {
                 $salespeopleByOrderAndLine[(string)$fact['order_id']][$lineKey][] = $fact;
@@ -1443,6 +1466,7 @@ final class CashierV3SalesOrderQueryServices
                 'batch' => $batchesByOrder[$orderId],
                 'request' => $requestId === '' ? [] : $requestsById[$requestId],
                 'lines' => $linesByOrder[$orderId],
+                'serviceFacts' => $serviceFactsByOrder[$orderId] ?? [],
                 'collections' => $collectionsByOrder[$orderId] ?? [],
                 'salespeopleByLine' => $salespeopleByOrderAndLine[$orderId] ?? [],
                 'craftsmenByLine' => $craftsmenByOrderAndLine[$orderId] ?? [],
@@ -1517,9 +1541,16 @@ final class CashierV3SalesOrderQueryServices
             $balanceCents = 0;
         }
         $items = [];
+        $purchaseLineIds = [];
+        $serviceFactsBySourceLine = [];
+        foreach ((array)($snapshot['serviceFacts'] ?? []) as $serviceFact) {
+            $sourceLineId = trim((string)($serviceFact['source_line_id'] ?? ''));
+            if ($sourceLineId !== '') $serviceFactsBySourceLine[$sourceLineId] = $serviceFact;
+        }
         $salespersonNames = [];
         foreach ($snapshot['lines'] as $line) {
             $lineId = (string)$line['order_line_id'];
+            $purchaseLineIds[$lineId] = true;
             $checkoutLineId = trim((string)($line['checkout_line_id'] ?? ''));
             $salesManagers = $snapshot['salesManagersByLine'][$lineId] ?? [];
             if ($salesManagers === [] && $checkoutLineId !== '') {
@@ -1534,12 +1565,23 @@ final class CashierV3SalesOrderQueryServices
                 $snapshot['salespeopleByLine'][$lineId] ?? [],
                 $snapshot['craftsmenByLine'][$lineId] ?? [],
                 $salesManagers,
-                $guides
+                $guides,
+                $serviceFactsBySourceLine[$lineId] ?? null
             );
             foreach ($snapshot['salespeopleByLine'][$lineId] ?? [] as $person) {
                 $name = $this->salespersonDisplayName($person);
                 if ($name !== '') $salespersonNames[$name] = true;
             }
+        }
+        // 直接购买项目会同时产生服务事实，但它仍是上面的“购买”行。
+        // 只有没有对应正式销售明细的服务事实，才作为“权益”行附加展示。
+        foreach ((array)($snapshot['serviceFacts'] ?? []) as $serviceFact) {
+            $sourceLineId = trim((string)($serviceFact['source_line_id'] ?? ''));
+            if ($sourceLineId === '' || isset($purchaseLineIds[$sourceLineId])) continue;
+            $items[] = $this->mapEntitlementServiceLine(
+                $serviceFact,
+                $snapshot['craftsmenByLine'][$sourceLineId] ?? []
+            );
         }
         $itemNames = array_values(array_unique(array_filter(array_map(function (array $item): string {
             return trim((string)$item['name']);
@@ -1558,8 +1600,9 @@ final class CashierV3SalesOrderQueryServices
             ? count((array)($terminal['refund_lines'] ?? [])) : 0;
         $refundTotalCents = 0;
         foreach ((array)($terminal['refund_lines'] ?? []) as $refundLine) $refundTotalCents += (int)($refundLine['total_refund_cents'] ?? 0);
+        $purchaseLineCount = count((array)$snapshot['lines']);
         $isPartialRefund = $terminal && (string)$terminal['operation_type'] === 'refund'
-            && ($refundLineCount < count($items) || $refundTotalCents < (int)$header['sale_amount_cents']);
+            && ($refundLineCount < $purchaseLineCount || $refundTotalCents < (int)$header['sale_amount_cents']);
         $orderStatus = !$settlementEquationValid
             ? '数据异常'
             : ($terminal ? ((string)$terminal['operation_type'] === 'void' ? '已作废' : ($isPartialRefund ? '部分退款' : '已退款')) : '正常');
@@ -1588,8 +1631,9 @@ final class CashierV3SalesOrderQueryServices
             'paymentCompletedAt' => $this->formatTimestamp((int)$batch['settled_at'], 'Y-m-d H:i:s'),
             'settledAt' => $this->formatTimestamp((int)$header['settled_at'], 'Y-m-d H:i:s'),
             'itemSummary' => $itemSummary, 'item_summary' => $itemSummary,
-            'itemCount' => array_sum(array_map(function (array $item): int { return (int)$item['quantity']; }, $items)),
-            'item_count' => array_sum(array_map(function (array $item): int { return (int)$item['quantity']; }, $items)),
+            // 权益服务行只是关联展示，订单商品数仍以正式销售行为准。
+            'itemCount' => array_sum(array_map(static function (array $line): int { return (int)$line['quantity']; }, (array)$snapshot['lines'])),
+            'item_count' => array_sum(array_map(static function (array $line): int { return (int)$line['quantity']; }, (array)$snapshot['lines'])),
             'orderStatus' => $orderStatus, 'order_status' => $orderStatus,
             'paymentStatus' => $paymentStatus, 'payment_status' => $paymentStatus,
             'receivableAmount' => $settlementEquationValid ? $this->moneyFromCents($receivableCents) : null,
@@ -1762,12 +1806,14 @@ final class CashierV3SalesOrderQueryServices
         ][$status] ?? (preg_match('/[\\x{4e00}-\\x{9fff}]/u', $status) === 1 ? $status : '处理中');
     }
 
-    private function mapAuthorityLine(array $line, array $salespeople, array $craftsmen = [], array $salesManagers = [], array $guides = []): array
+    private function mapAuthorityLine(array $line, array $salespeople, array $craftsmen = [], array $salesManagers = [], array $guides = [], ?array $serviceFact = null): array
     {
         $quantity = max(0, (int)$line['quantity']);
         $type = strtolower((string)$line['item_type']) === 'card' ? '卡项' : (strtolower((string)$line['item_type']) === 'project' ? '项目' : '商品');
         return [
             'id' => (string)$line['order_line_id'], 'orderItemId' => (string)$line['order_line_id'], 'itemType' => $type,
+            // 直接购买项目即使产生了服务记录，交易性质仍是购买，不标成权益。
+            'businessTag' => '购买',
             'name' => (string)$line['item_name_snapshot'], 'purchaseSpec' => '', 'quantity' => $quantity,
             'unitPrice' => $quantity > 0 ? $this->moneyFromCents((int)$line['original_amount_cents']) / $quantity : null,
             'originalAmount' => $this->moneyFromCents((int)$line['original_amount_cents']),
@@ -1794,20 +1840,60 @@ final class CashierV3SalesOrderQueryServices
                     'performanceAmountCents' => max(0, (int)$person['amount_cents']),
                     'performanceAmountManual' => strpos((string)($person['rule_code_snapshot'] ?? ''), 'MANUAL-AMOUNT') !== false,
                 ];
-            }, $salespeople), 'craftsmen' => $craftsmen !== []
-                ? array_map(function (array $person): array {
-                    return [
-                        'id' => (string)$person['fact_id'],
-                        'employeeId' => (int)$person['employee_id'],
-                        'name' => (string)$person['employee_name_snapshot'],
-                        'isPointCustomer' => strpos((string)($person['role_snapshot'] ?? ''), ':point') !== false,
-                        'laborPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents']),
-                        'laborFeeAmount' => $this->moneyFromCents((int)($person['labor_fee_amount_cents'] ?? 0)),
-                    ];
-            }, $craftsmen)
-                : $this->craftsmenForLine($line),
+            }, $salespeople),
+            'craftsmen' => $this->salesLineCraftsmen($craftsmen, $line),
+            'craftsmenListAllocations' => $this->craftsmenDisplayAllocations(
+                $craftsmen,
+                (string)($serviceFact['craftsmen_snapshot_json'] ?? $line['craftsmen_snapshot_json'] ?? '')
+            ),
+            'serviceFactId' => $serviceFact !== null ? (int)($serviceFact['id'] ?? 0) : null,
+            'serviceRecordNo' => $serviceFact !== null
+                ? (string)(($serviceFact['service_record_no'] ?? '') ?: ($serviceFact['service_fact_id'] ?? '')) : '',
+            'serviceStatus' => $serviceFact !== null ? (string)($serviceFact['service_status'] ?? '') : '',
+            'voidedAt' => $serviceFact !== null && !empty($serviceFact['void_operation_id'])
+                ? (int)($serviceFact['voided_at'] ?? 0) : null,
             'salesManagers' => array_values($salesManagers),
             'guides' => array_values($guides),
+        ];
+    }
+
+    /**
+     * 权益行是同次结账中已完成的服务事实，不是销售明细。因此它只提供
+     * 项目、次数和服务人员信息，金额字段必须保持空值，避免前端误将其计入销售。
+     */
+    private function mapEntitlementServiceLine(array $serviceFact, array $craftsmen): array
+    {
+        return [
+            'id' => 'service:' . (int)$serviceFact['id'],
+            'orderItemId' => '',
+            'itemType' => '项目',
+            'businessTag' => '权益',
+            'name' => (string)$serviceFact['project_name_snapshot'],
+            'purchaseSpec' => '',
+            'quantity' => max(0, (int)$serviceFact['quantity']),
+            'unitPrice' => null,
+            'originalAmount' => null,
+            'priceChangeDiscountAmount' => null,
+            'couponDiscountAmount' => null,
+            'couponName' => '',
+            'payableAmount' => null,
+            'debtAmount' => null,
+            'actualReceivedAmount' => null,
+            'economicsDataStatus' => 'not_applicable',
+            'snapshotStatus' => 'ready',
+            'detailRemark' => (string)($serviceFact['detail_remark_snapshot'] ?? ''),
+            'salespeople' => [],
+            'salesManagers' => [],
+            'guides' => [],
+            'craftsmen' => $this->salesLineCraftsmen($craftsmen, ['craftsmen_snapshot_json' => $serviceFact['craftsmen_snapshot_json'] ?? '']),
+            'craftsmenListAllocations' => $this->craftsmenDisplayAllocations(
+                $craftsmen,
+                (string)($serviceFact['craftsmen_snapshot_json'] ?? '')
+            ),
+            'serviceFactId' => (int)$serviceFact['id'],
+            'serviceRecordNo' => (string)(($serviceFact['service_record_no'] ?? '') ?: ($serviceFact['service_fact_id'] ?? '')),
+            'serviceStatus' => (string)($serviceFact['service_status'] ?? ''),
+            'voidedAt' => !empty($serviceFact['void_operation_id']) ? (int)($serviceFact['voided_at'] ?? 0) : null,
         ];
     }
 
@@ -1818,7 +1904,7 @@ final class CashierV3SalesOrderQueryServices
      *
      * @return array<int,array<string,mixed>>
      */
-    private function effectivePersonnelFacts(array $orderIds, string $tenantId): array
+    private function effectivePersonnelFacts(array $orderIds, string $tenantId, array $serviceFactIds = []): array
     {
         $adjustmentCommandKeys = [];
         foreach (Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
@@ -1828,11 +1914,22 @@ final class CashierV3SalesOrderQueryServices
             $commandKey = trim((string)($operation['command_idempotency_key'] ?? ''));
             if ($commandKey !== '') $adjustmentCommandKeys[$commandKey] = true;
         }
+        // 服务记录修改与销售单人员修改使用不同操作表，但都以
+        // reversal_of 替换旧事实。合并展示时必须同时识别两类命令，
+        // 否则修改手艺人后会把新旧人员一起显示。
+        if ($serviceFactIds !== []) {
+            foreach (Db::name('cashier_v3_service_record_adjustment_operation')
+                ->where('tenant_id', $tenantId)->whereIn('service_fact_id', array_values(array_unique($serviceFactIds)))
+                ->where('status', 'succeeded')->field('command_idempotency_key')->select()->toArray() as $operation) {
+                $commandKey = trim((string)($operation['command_idempotency_key'] ?? ''));
+                if ($commandKey !== '') $adjustmentCommandKeys[$commandKey] = true;
+            }
+        }
         $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)->whereIn('order_id', $orderIds)
             ->whereIn('performance_type', ['sales_performance_allocated', 'labor_performance_allocated'])
             ->where('status', 'effective')
             ->whereIn('fact_direction', ['forward', 'reversal'])
-            ->field('id,fact_id,order_id,source_line_id,performance_type,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,amount_cents,labor_fee_amount_cents,rule_code_snapshot,fact_direction,reversal_of,command_idempotency_key')
+            ->field('id,fact_id,order_id,source_line_id,performance_type,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,amount_cents,labor_fee_amount_cents,project_count_half_units,project_count_decimal,rule_code_snapshot,fact_direction,reversal_of,command_idempotency_key')
             ->order('id', 'asc')->select()->toArray();
         return $this->displayedPersonnelFacts($rows, $adjustmentCommandKeys);
     }
@@ -2258,6 +2355,102 @@ final class CashierV3SalesOrderQueryServices
         } catch (\Throwable $exception) {
             throw new \RuntimeException('sales_order_craftsmen_snapshot_invalid');
         }
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    private function salesLineCraftsmen(array $facts, array $line): array
+    {
+        if ($facts === []) return $this->craftsmenForLine($line);
+        return array_map(function (array $person): array {
+            return [
+                'id' => (string)$person['fact_id'],
+                'employeeId' => (int)$person['employee_id'],
+                'name' => (string)$person['employee_name_snapshot'],
+                'isPointCustomer' => $this->pointCustomerFromRole((string)($person['role_snapshot'] ?? '')),
+                'laborPerformanceAmount' => $this->moneyFromCents((int)$person['amount_cents']),
+                'laborFeeAmount' => $this->moneyFromCents((int)($person['labor_fee_amount_cents'] ?? 0)),
+            ];
+        }, $facts);
+    }
+
+    /**
+     * 产出与“服务记录”列相同的每人展示契约。有效业绩事实是当前权威，
+     * 结账快照只在历史事实缺失时补齐人员类型和项目数。
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function craftsmenDisplayAllocations(array $facts, string $snapshotJson): array
+    {
+        $snapshotRows = json_decode($snapshotJson, true);
+        $snapshots = [];
+        if (is_array($snapshotRows)) {
+            foreach ($snapshotRows as $person) {
+                if (!is_array($person)) continue;
+                $employeeId = (int)($person['employeeId'] ?? $person['employee_id'] ?? 0);
+                if ($employeeId > 0) $snapshots[$employeeId] = $person;
+            }
+        }
+        if ($facts === []) {
+            $fallback = [];
+            foreach ($snapshots as $employeeId => $person) {
+                $fallback[] = $this->craftsmanAllocationFromSnapshot($employeeId, $person);
+            }
+            return $fallback;
+        }
+        return array_map(function (array $person) use ($snapshots): array {
+            $employeeId = (int)($person['employee_id'] ?? 0);
+            $snapshot = $snapshots[$employeeId] ?? [];
+            $projectCount = $person['project_count_decimal'] ?? null;
+            if ($projectCount === null || $projectCount === '') {
+                $halfUnits = (int)($person['project_count_half_units'] ?? 0);
+                $projectCount = $halfUnits !== 0 ? $halfUnits / 2 : ($snapshot['projectCount'] ?? $snapshot['project_count'] ?? null);
+            }
+            $point = $this->pointCustomerFromRole((string)($person['role_snapshot'] ?? ''));
+            if ($point === null && array_key_exists('isPointCustomer', $snapshot)) $point = (bool)$snapshot['isPointCustomer'];
+            return [
+                'employeeId' => $employeeId,
+                'employeeName' => (string)($person['employee_name_snapshot'] ?? ''),
+                'employeeType' => (string)($person['employee_type_snapshot'] ?? ''),
+                'isPointCustomer' => $point,
+                'amount' => $this->moneyFromCents((int)($person['amount_cents'] ?? 0)),
+                'laborFeeAmount' => $this->moneyFromCents((int)($person['labor_fee_amount_cents'] ?? 0)),
+                'projectCount' => $this->projectCountDisplay($projectCount),
+            ];
+        }, $facts);
+    }
+
+    /** @return array<string,mixed> */
+    private function craftsmanAllocationFromSnapshot(int $employeeId, array $person): array
+    {
+        $projectCount = $person['projectCount'] ?? $person['project_count_decimal'] ?? $person['project_count'] ?? null;
+        if ($projectCount === null && isset($person['projectCountHalfUnits'])) $projectCount = (float)$person['projectCountHalfUnits'] / 2;
+        return [
+            'employeeId' => $employeeId,
+            'employeeName' => (string)($person['name'] ?? $person['employeeName'] ?? ''),
+            'employeeType' => (string)($person['employeeType'] ?? ''),
+            'isPointCustomer' => array_key_exists('isPointCustomer', $person) ? (bool)$person['isPointCustomer'] : null,
+            'amount' => isset($person['performanceAmountCents']) ? $this->moneyFromCents((int)$person['performanceAmountCents']) : null,
+            'laborFeeAmount' => isset($person['laborFeeCents']) ? $this->moneyFromCents((int)$person['laborFeeCents']) : null,
+            'projectCount' => $this->projectCountDisplay($projectCount),
+        ];
+    }
+
+    private function pointCustomerFromRole(string $role): ?bool
+    {
+        $role = strtolower(trim($role));
+        if ($role === '' || $role === 'craftsman') return null;
+        if (strpos($role, 'point') !== false) return true;
+        if (strpos($role, 'round') !== false) return false;
+        return null;
+    }
+
+    /** @param mixed $value */
+    private function projectCountDisplay($value): ?string
+    {
+        if ($value === null || $value === '' || !is_numeric($value)) return null;
+        $number = round((float)$value, 6);
+        if (abs($number - round($number)) < 0.000001) return (string)(int)round($number);
+        return rtrim(rtrim(number_format($number, 6, '.', ''), '0'), '.');
     }
 
     private function assertV3SnapshotMatchesLegacy(array $legacy, array $header, array $batch): void

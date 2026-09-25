@@ -304,7 +304,7 @@ final class CashierV3OrderLifecycleServices
             ->leftJoin('position p', 'p.id = sjp.position_id AND p.status = 1')
             ->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)
             ->where('e.status', 1)->where('e.is_del', 0)
-            ->field('s.id,s.employee_id,s.staff_name,s.cashier_salesperson_enabled,s.cashier_craftsman_enabled,sjp.position_id,p.name as position_name,p.performance_independent,e.name,e.employment_type_code,e.employment_type_version')->order('s.id asc')->select()->toArray();
+            ->field('s.id,s.employee_id,s.store_id,s.staff_name,s.cashier_salesperson_enabled,s.cashier_craftsman_enabled,s.craftsman_performance_type,sjp.position_id,p.name as position_name,p.performance_independent,e.name,e.employment_type_code,e.employment_type_version')->order('s.id asc')->select()->toArray();
         // Personnel adjustments are append-only: the latest effective
         // allocation is represented by forward facts whose originals have
         // not been reversed. Reading every forward row here would resurrect
@@ -316,6 +316,7 @@ final class CashierV3OrderLifecycleServices
             $eligibleByStaffId[(int)($eligibleRow['employee_id'] ?? 0)] = $eligibleRow;
         }
         $salespeople = [];
+        $craftsmen = [];
         foreach ($lines as $line) {
             $lineId = (string)$line['order_line_id'];
             $facts = $this->effectivePersonnelFactsForLine(
@@ -356,6 +357,37 @@ final class CashierV3OrderLifecycleServices
                     'positionName' => trim((string)($staffRow['position_name'] ?? '')),
                     'performanceIndependent' => $independent,
                     'allocationGroupKey' => $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal',
+                ];
+            }
+            // 直接购买项目可能没有服务记录，但结账时的劳动业绩事实仍是
+            // 销售订单手艺人归属的权威来源。订单行 ID 与早期 checkout
+            // 行 ID 必须合并读取，否则“贵族”这类项目会只显示、不能编辑。
+            $laborFacts = $this->effectivePersonnelFactsForLineKeys(
+                $scope->tenantId(),
+                $source['sourceId'],
+                $this->attributionFactLineIds($line),
+                'labor_performance_allocated'
+            );
+            foreach ($laborFacts as $fact) {
+                $employeeId = (int)($fact['employee_id'] ?? 0);
+                $staffRow = $eligibleByStaffId[$employeeId] ?? [];
+                $staffId = (int)($staffRow['id'] ?? 0);
+                if ($employeeId <= 0 || $staffId <= 0) continue;
+                $craftsmen[$lineId][] = [
+                    'id' => $staffId,
+                    'staffId' => $staffId,
+                    'employeeId' => $employeeId,
+                    'storeId' => (int)($staffRow['store_id'] ?? $operator->storeId()),
+                    'name' => (string)($fact['employee_name_snapshot'] ?? ''),
+                    'isPointCustomer' => strpos((string)($fact['role_snapshot'] ?? ''), ':point') !== false,
+                    'marked' => strpos((string)($fact['role_snapshot'] ?? ''), ':point') !== false,
+                    'craftsmanPerformanceType' => $this->craftsmanPerformanceType((string)($fact['role_snapshot'] ?? ''), (string)($staffRow['craftsman_performance_type'] ?? '')),
+                    'allocationAmountCents' => max(0, (int)($fact['amount_cents'] ?? 0)),
+                    'performanceAmountCents' => max(0, (int)($fact['amount_cents'] ?? 0)),
+                    'laborFeeCents' => max(0, (int)($fact['labor_fee_amount_cents'] ?? 0)),
+                    'projectCount' => $fact['project_count_decimal'] !== null
+                        ? $this->projectCountText((string)$fact['project_count_decimal'])
+                        : $this->projectCountText(number_format(max(0, (int)($fact['project_count_half_units'] ?? 0)) / 2, 1, '.', '')),
                 ];
             }
         }
@@ -413,11 +445,11 @@ final class CashierV3OrderLifecycleServices
             // Directly opened order-center editors must carry the server's
             // current lifecycle version into the command version store.
             'recordVersion' => $this->nextVersion($source, $scope->tenantId()),
-            'lines' => array_map(static function (array $line) use ($salespeople, $guides, $salesManagers): array {
+            'lines' => array_map(static function (array $line) use ($salespeople, $craftsmen, $guides, $salesManagers): array {
                 $lineId = (string)$line['order_line_id'];
                 return ['orderLineId' => $lineId, 'itemType' => (string)$line['item_type'], 'itemName' => (string)$line['item_name_snapshot'],
                     'totalAmountCents' => max(0, (int)($line['sale_amount_cents'] ?? 0)),
-                    'currentSalespeople' => $salespeople[$lineId] ?? [], 'currentGuides' => $guides[$lineId] ?? [],
+                    'currentSalespeople' => $salespeople[$lineId] ?? [], 'currentCraftsmen' => $craftsmen[$lineId] ?? [], 'currentGuides' => $guides[$lineId] ?? [],
                     'currentSalesManagers' => $salesManagers[$lineId] ?? [], 'canAdjustCraftsman' => (string)$line['item_type'] === 'project'];
             }, $lines),
             'salespeople' => array_values(array_map(static function (array $row): array {
@@ -426,6 +458,9 @@ final class CashierV3OrderLifecycleServices
                 return [
                     'staffId' => (int)$row['id'], 'employeeId' => (int)$row['employee_id'],
                     'name' => trim((string)$row['name']) ?: (string)$row['staff_name'],
+                    'storeId' => (int)$row['store_id'],
+                    'craftsmanPerformanceType' => in_array((string)($row['craftsman_performance_type'] ?? ''), ['commission', 'labor', 'commission_labor'], true)
+                        ? (string)$row['craftsman_performance_type'] : 'commission_labor',
                     'positionId' => $positionId, 'positionName' => trim((string)($row['position_name'] ?? '')),
                     'performanceIndependent' => $independent,
                     'allocationGroupKey' => $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal',
@@ -506,7 +541,7 @@ final class CashierV3OrderLifecycleServices
         $lineId = trim((string)($payload['targetOrderLineId'] ?? $payload['target_order_line_id'] ?? ''));
         $role = trim((string)($payload['targetRole'] ?? $payload['target_role'] ?? ''));
         if ($lineId === '' || preg_match('/^[A-Za-z0-9_.:-]{1,64}$/D', $lineId) !== 1
-            || !in_array($role, ['salesperson', 'guide', 'sales_manager'], true)) {
+            || !in_array($role, ['salesperson', 'craftsman', 'guide', 'sales_manager'], true)) {
             throw self::failure('personnel_adjustment_target_invalid');
         }
         $rows = $payload['personnel'] ?? null;
@@ -515,6 +550,18 @@ final class CashierV3OrderLifecycleServices
         // line. Never turn a forged multi-row command into several 100%
         // manager performances.
         if ($role === 'sales_manager' && count($rows) !== 1) throw self::failure('personnel_adjustment_sales_manager_single_required');
+        if ($role === 'craftsman') {
+            foreach ($rows as $index => $row) {
+                if (!is_array($row)) throw self::failure('personnel_adjustment_item_invalid');
+                $amount = $this->nonnegativeIntegerInput($row['allocationAmountCents'] ?? $row['performanceAmountCents'] ?? null, 'personnel_adjustment_craftsman_amount_invalid');
+                $fee = $this->nonnegativeIntegerInput($row['laborFeeCents'] ?? 0, 'personnel_adjustment_craftsman_labor_fee_invalid');
+                if ($amount % 100 !== 0 || $fee % 100 !== 0) throw self::failure('personnel_adjustment_craftsman_whole_yuan_required');
+                $projectCount = $this->projectCountInput($row['projectCount'] ?? $row['projectCountText'] ?? null);
+                $rows[$index]['allocationAmountCents'] = $amount;
+                $rows[$index]['laborFeeCents'] = $fee;
+                $rows[$index]['projectCount'] = $projectCount;
+            }
+        }
         if ($role === 'salesperson') {
             foreach ($rows as $index => $row) {
                 if (!is_array($row)) throw self::failure('personnel_adjustment_item_invalid');
@@ -1024,6 +1071,10 @@ final class CashierV3OrderLifecycleServices
             if (array_filter($weightByGroup, static fn (int $sum): bool => $sum !== 100)) throw self::failure('personnel_adjustment_salesperson_weight_total_invalid');
             $input['personnel'] = $authoritativePersonnel;
         }
+        if ($targetRole === 'craftsman') {
+            $this->adjustCraftsmanFacts($source, $input, $operationId, $commandKey, $event, $operator, $scope, $now);
+            return;
+        }
         $reversedAttributions = [];
         $salespersonState = null;
         foreach ($input['personnel'] as $item) {
@@ -1073,6 +1124,46 @@ final class CashierV3OrderLifecycleServices
                 if (!$staff || (int)$staff['cashier_salesperson_enabled'] !== 1) throw self::failure('personnel_adjustment_staff_ineligible');
                 $this->insertAdjustedPerformance($salespersonState['template'], $operationId, $commandKey, $event, $operator, $now, $staff, 'salesperson', 'sales_performance_allocated', (int)$amounts[$index], $targetLineId, !empty($item['isPreSale']), $staffId, !empty($item['performanceAmountManual']));
             }
+        }
+    }
+
+    /**
+     * Replace one purchased project's craftsmen without changing sale money.
+     * The submitted performance, labor fee and project count are operational
+     * facts only; the settled order line and payment facts remain immutable.
+     */
+    private function adjustCraftsmanFacts(array $source, array $input, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
+    {
+        $lineId = (string)$input['targetOrderLineId'];
+        $line = (array)Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())
+            ->where('order_id', $source['sourceId'])->where('order_line_id', $lineId)
+            ->where('line_direction', 'forward')->where('line_status', 'settled')->lock(true)->find();
+        if (!$line || (string)($line['item_type'] ?? '') !== 'project') throw self::failure('personnel_adjustment_line_ineligible');
+        $facts = $this->effectivePersonnelFactsForLineKeys(
+            $scope->tenantId(), $source['sourceId'], $this->attributionFactLineIds($line), 'labor_performance_allocated'
+        );
+        foreach ($facts as $fact) $this->insertReversal('cashier_v3_performance_fact', $fact, $operationId, $commandKey, $event, $operator, $now);
+        $template = $facts[0] ?? $this->personnelAdjustmentTemplate($scope->tenantId(), $source['sourceId']);
+        foreach ($input['personnel'] as $item) {
+            $staffId = (int)($item['staffId'] ?? 0);
+            $staff = (array)Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')
+                ->where('s.id', $staffId)->where('s.store_id', $operator->storeId())
+                ->where('s.status', 1)->where('s.is_del', 0)->where('e.status', 1)->where('e.is_del', 0)
+                ->where('s.cashier_craftsman_enabled', 1)->lock(true)
+                ->field('s.id,s.employee_id,s.staff_name,s.craftsman_performance_type,e.name,e.employment_type_code,e.employment_type_version')->find();
+            if (!$staff) throw self::failure('personnel_adjustment_staff_ineligible');
+            $type = in_array((string)($staff['craftsman_performance_type'] ?? ''), ['commission', 'labor', 'commission_labor'], true)
+                ? (string)$staff['craftsman_performance_type'] : 'commission_labor';
+            $amount = (int)$item['allocationAmountCents'];
+            $fee = (int)$item['laborFeeCents'];
+            if (($type === 'labor' && $amount !== 0) || ($type === 'commission' && $fee !== 0)) {
+                throw self::failure('personnel_adjustment_craftsman_type_amount_invalid');
+            }
+            $this->insertAdjustedPerformance(
+                $template, $operationId, $commandKey, $event, $operator, $now, $staff,
+                'craftsman', 'labor_performance_allocated', $amount, $lineId,
+                !empty($item['isPointCustomer']), $staffId, true, $fee, (string)$item['projectCount'], $type
+            );
         }
     }
 
@@ -1224,8 +1315,14 @@ final class CashierV3OrderLifecycleServices
     /** @return array<int,array<string,mixed>> */
     private function effectivePersonnelFactsForLine(string $tenantId, string $orderId, string $lineId, string $factType): array
     {
+        return $this->effectivePersonnelFactsForLineKeys($tenantId, $orderId, [$lineId], $factType);
+    }
+
+    /** Read one logical sales line across current and legacy source-line IDs. */
+    private function effectivePersonnelFactsForLineKeys(string $tenantId, string $orderId, array $lineIds, string $factType): array
+    {
         $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)->where('order_id', $orderId)
-            ->where('source_line_id', $lineId)->where('performance_type', $factType)->where('status', 'effective')
+            ->whereIn('source_line_id', $lineIds)->where('performance_type', $factType)->where('status', 'effective')
             ->whereIn('fact_direction', ['forward', 'reversal'])->lock(true)->order('id', 'asc')->select()->toArray();
         $reversed = [];
         foreach ($rows as $row) {
@@ -1351,20 +1448,57 @@ final class CashierV3OrderLifecycleServices
         return $value[0] === '-' ? substr($value, 1) : '-' . $value;
     }
 
-    private function insertAdjustedPerformance(array $template, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, array $staff, string $role, string $factType, int $amount, string $lineId, bool $marked, int $staffId, bool $manualAmount = false): void
+    private function insertAdjustedPerformance(array $template, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, array $staff, string $role, string $factType, int $amount, string $lineId, bool $marked, int $staffId, bool $manualAmount = false, int $laborFeeCents = 0, ?string $projectCount = null, string $craftsmanType = ''): void
     {
         // 事实 ID 必须区分同一条明细/角色下的不同员工；旧算法只拼
         // operation/line/role，多人分配时会生成相同主键并触发 1062。
         $allocationIdentity = $operationId . '|' . $lineId . '|' . $role . '|' . $staffId;
         $factId = 'OLA-' . strtoupper(substr(hash_hmac('sha256', $allocationIdentity, $this->secret()), 0, 40));
         $row = $template; unset($row['id']);
-        $row['fact_id'] = $factId; $row['business_event_no'] = (string)$event['event_no']; $row['fact_type'] = $factType; $row['performance_type'] = $factType; $row['fact_direction'] = 'forward'; $row['natural_key'] = 'order_lifecycle:adjust:' . hash('sha256', $allocationIdentity); $row['command_idempotency_key'] = $commandKey; $row['fact_version'] = 1; $row['reversal_of'] = ''; $row['operator_id'] = $operator->operatorId(); $row['business_date'] = date('Y-m-d', $now); $row['occurred_at'] = $now; $row['settled_at'] = $now; $row['recorded_at'] = $now; $row['source_line_id'] = $lineId; $row['employee_id'] = (int)$staff['employee_id']; $row['employee_name_snapshot'] = trim((string)$staff['name']) ?: (string)$staff['staff_name']; $row['employee_type_snapshot'] = (string)$staff['employment_type_code']; $row['employee_type_authority_version'] = max(1, (int)$staff['employment_type_version']); $row['role_snapshot'] = $role . ($role === 'salesperson' ? ($marked ? ':presale' : ':postsale') : ($marked ? ':point' : ':round')); $row['allocation_weight_numerator'] = $amount > 0 ? $amount : 0; $row['allocation_weight_denominator'] = max(1, $amount); $row['allocation_base_amount_cents'] = $amount; $row['amount_cents'] = $amount;
+        $row['fact_id'] = $factId; $row['business_event_no'] = (string)$event['event_no']; $row['fact_type'] = $factType; $row['performance_type'] = $factType; $row['fact_direction'] = 'forward'; $row['natural_key'] = 'order_lifecycle:adjust:' . hash('sha256', $allocationIdentity); $row['command_idempotency_key'] = $commandKey; $row['fact_version'] = 1; $row['reversal_of'] = ''; $row['operator_id'] = $operator->operatorId(); $row['business_date'] = date('Y-m-d', $now); $row['occurred_at'] = $now; $row['settled_at'] = $now; $row['recorded_at'] = $now; $row['source_line_id'] = $lineId; $row['employee_id'] = (int)$staff['employee_id']; $row['employee_name_snapshot'] = trim((string)$staff['name']) ?: (string)$staff['staff_name']; $row['employee_type_snapshot'] = (string)$staff['employment_type_code']; $row['employee_type_authority_version'] = max(1, (int)$staff['employment_type_version']); $row['role_snapshot'] = $role . ($role === 'salesperson' ? ($marked ? ':presale' : ':postsale') : ($marked ? ':point' : ':round')) . ($role === 'craftsman' ? ':' . $craftsmanType : ''); $row['allocation_weight_numerator'] = $amount > 0 ? $amount : 0; $row['allocation_weight_denominator'] = max(1, $amount); $row['allocation_base_amount_cents'] = $amount; $row['amount_cents'] = $amount;
+        if ($role === 'craftsman') {
+            // 手艺人调整保存的是三个独立业务量，不得从售价或比例反推。
+            $row['labor_fee_amount_cents'] = $laborFeeCents;
+            $row['project_count_half_units'] = 0;
+            $row['project_count_decimal'] = $projectCount;
+        }
         // 查询端用 MANUAL-AMOUNT 标记恢复“手工金额”状态；没有此快照，
         // 再次打开弹窗会把已保存金额当成按比例计算并在下一次编辑时覆盖。
         $row['rule_code_snapshot'] = $manualAmount ? 'ORDER-PERSONNEL-ADJUST-MANUAL-AMOUNT-V1' : 'ORDER-PERSONNEL-ADJUST-V1';
         $row['rule_name_snapshot'] = $manualAmount ? '订单人员手工调整业绩金额' : '订单人员调整';
         $row['rule_version_snapshot'] = 'v1'; $row['immutable_fingerprint'] = hash('sha256', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         if ((int)Db::name('cashier_v3_performance_fact')->insert($row) !== 1) throw self::failure('personnel_adjustment_fact_insert_failed');
+    }
+
+    private function nonnegativeIntegerInput($value, string $reason): int
+    {
+        if (is_bool($value) || is_array($value) || is_float($value) || $value === null) throw self::failure($reason);
+        $raw = trim((string)$value);
+        if (preg_match('/^(?:0|[1-9][0-9]*)$/D', $raw) !== 1 || (string)(int)$raw !== $raw) throw self::failure($reason);
+        return (int)$raw;
+    }
+
+    /** Preserve up to six decimal places exactly; floats are never accepted. */
+    private function projectCountInput($value): string
+    {
+        if (is_bool($value) || is_array($value) || is_float($value) || $value === null) throw self::failure('personnel_adjustment_project_count_invalid');
+        return $this->projectCountText((string)$value);
+    }
+
+    private function projectCountText(string $value): string
+    {
+        $value = trim($value);
+        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $value) !== 1) throw self::failure('personnel_adjustment_project_count_invalid');
+        $value = rtrim(rtrim($value, '0'), '.');
+        return $value === '' ? '0' : $value;
+    }
+
+    private function craftsmanPerformanceType(string $roleSnapshot, string $fallback): string
+    {
+        foreach (['commission_labor', 'commission', 'labor'] as $type) {
+            if (str_ends_with($roleSnapshot, ':' . $type)) return $type;
+        }
+        return in_array($fallback, ['commission', 'labor', 'commission_labor'], true) ? $fallback : 'commission_labor';
     }
 
     private function createReopenDraft(array $source, array $input, string $operationId, string $commandKey, int $now, CashierV3DataScopeContext $scope): string

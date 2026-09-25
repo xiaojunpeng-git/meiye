@@ -780,6 +780,36 @@ function personnelNames(item, key) {
   return records.map((person) => person?.name || person?.employeeName || person?.employee_name_snapshot || '').filter(Boolean).join('、') || '—'
 }
 
+function salesItemCraftsmenText(item) {
+  // 销售单中的关联服务行与“服务记录”共用同一展示契约，
+  // 避免同一服务在两个页签显示不同的业绩、手工费和项目数。
+  if (Array.isArray(item?.craftsmenListAllocations)) return serviceCraftsmenPerformanceText(item)
+  return personnelNames(item, 'craftsmen')
+}
+
+function salesItemCraftsmanAdjustable(item = {}) {
+  return !isPlatformReadOnly.value
+    && serviceCraftsmanAdjustable(item)
+    && canUseCashierV3Operation('cashier.v3.order.service_detail')
+}
+
+function salesPurchaseCraftsmanAdjustable(record = {}, item = {}) {
+  return !isPlatformReadOnly.value
+    && !item?.serviceFactId
+    && ['project', '项目'].includes(String(item?.itemType || ''))
+    && salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')
+}
+
+function openSalesItemCraftsmanEditor(record, item) {
+  // 有服务事实的权益行继续走服务记录调整；只有没有服务事实的直接购买
+  // 项目才走销售订单行调整，避免同一劳动事实出现两个写入口。
+  if (salesItemCraftsmanAdjustable(item)) {
+    openServiceCraftsmanAdjustment(item)
+    return
+  }
+  if (salesPurchaseCraftsmanAdjustable(record, item)) openSalesOrderPersonnelEditor(record, item, 'craftsmen')
+}
+
 function salesOrderActionAvailable(record, action, permission) {
   if (isPlatformReadOnly.value) return false
   const actions = record?.availableActions
@@ -808,7 +838,9 @@ function salesOrderPersonnelLineId(item) {
 }
 
 function salesOrderPersonnelTargetRole(role) {
-  return role === 'salespeople' ? 'salesperson' : role === 'salesManagers' ? 'sales_manager' : 'guide'
+  return role === 'salespeople' ? 'salesperson'
+    : role === 'craftsmen' ? 'craftsman'
+      : role === 'salesManagers' ? 'sales_manager' : 'guide'
 }
 
 async function openSalesOrderPersonnelEditor(record, item, role) {
@@ -857,7 +889,9 @@ async function openSalesOrderPersonnelEditor(record, item, role) {
 
 function salesPersonnelCandidates(role) {
   const entry = salesPersonnelEntry.value || {}
-  return role === 'guide' ? (entry.guides || []) : role === 'sales_manager' ? (entry.salesManagers || []) : (entry.salespeople || [])
+  return role === 'guide' ? (entry.guides || [])
+    : role === 'sales_manager' ? (entry.salesManagers || [])
+      : role === 'craftsman' ? (entry.craftsmen || []) : (entry.salespeople || [])
 }
 
 async function searchSalesPersonnelAttributions({ scope, keyword, target } = {}) {
@@ -918,6 +952,7 @@ async function searchSalesPersonnelAttributions({ scope, keyword, target } = {})
 function salesPersonnelSelected(role, line) {
   if (role === 'guide') return line?.currentGuides || []
   if (role === 'sales_manager') return line?.currentSalesManagers || []
+  if (role === 'craftsman') return line?.currentCraftsmen || []
   return line?.currentSalespeople || []
 }
 
@@ -995,6 +1030,19 @@ function salesPersonnelPayload() {
       role: target.role,
       staffId: Number(item.employeeId || item.staffId || item.id || 0),
       guideRoundNo: Number(item.guideRoundNo || 0)
+    }))
+  }
+  if (target.role === 'craftsman') {
+    return (assignment.craftsmen || []).map((item) => ({
+      orderLineId: target.lineId,
+      role: target.role,
+      staffId: Number(item.staffId || item.id || 0),
+      isPointCustomer: Boolean(item.isPointCustomer || item.marked),
+      // 销售订单直接购买项目没有服务事实，三个劳动指标必须以用户
+      // 输入的最终值提交，不能再按售价 ¥120 或百分比重新推导。
+      allocationAmountCents: Math.max(0, Math.trunc(Number(item.allocationAmountCents || item.performanceAmountCents || 0))),
+      laborFeeCents: Math.max(0, Math.trunc(Number(item.laborFeeCents || 0))),
+      projectCount: String(item.projectCount ?? item.projectCountText ?? '0')
     }))
   }
   return (assignment.salesManagerSelections || []).map((item) => ({
@@ -1782,12 +1830,22 @@ async function printSalesOrderRecord(record = {}) {
   }
 }
 
+function serviceCraftsmanAdjustable(record = {}) {
+  const serviceFactId = record.serviceFactId || String(record.id || '').replace(/^service:/, '')
+  return /^[1-9][0-9]*$/.test(String(serviceFactId))
+    && !record.voidedAt
+    && record.serviceStatus !== '已作废'
+    && record.serviceStatus !== 'voided'
+}
+
 function serviceRecordIsNormal(record = {}) {
-  return activeTabKey.value === 'service' && !record.voidedAt && record.serviceStatus !== '已作废'
+  return activeTabKey.value === 'service' && serviceCraftsmanAdjustable(record)
 }
 
 async function openServiceCraftsmanAdjustment(record) {
-  if (!serviceRecordIsNormal(record) || !canUseCashierV3Operation('cashier.v3.order.service_detail')) return
+  // 销售单的项目行只提供服务事实 ID；打开、版本校验、提交和
+  // 幂等保护仍完整复用服务记录命令，不新建销售单人员修改通道。
+  if (!serviceCraftsmanAdjustable(record) || !canUseCashierV3Operation('cashier.v3.order.service_detail')) return
   const serviceFactId = record.serviceFactId || String(record.id || '').replace(/^service:/, '')
   if (!/^[1-9][0-9]*$/.test(String(serviceFactId))) return
   serviceCraftsmanLoading.value = true
@@ -2444,12 +2502,16 @@ onBeforeUnmount(() => {
             <td class="sales-order-query-item-cell">
               <span class="sales-order-query-item-cell__line">
                 <strong class="sales-order-query-item-cell__name">{{ item.name || '未命名商品' }}</strong>
+                <small v-if="item.businessTag" class="sales-order-query-item-cell__business-tag" :class="`is-${item.businessTag === '权益' ? 'entitlement' : 'purchase'}`">{{ item.businessTag }}</small>
                 <small v-if="item.itemType" class="sales-order-query-item-cell__type">{{ item.itemType }}</small>
               </span>
             </td>
             <td>{{ itemMoney(item.unitPrice) }}</td>
             <td>x {{ item.quantity ?? '—' }}</td>
-            <td>{{ personnelNames(item, 'craftsmen') }}</td>
+            <td>
+              <button v-if="salesItemCraftsmanAdjustable(item) || salesPurchaseCraftsmanAdjustable(record, item)" type="button" class="order-link" @click="openSalesItemCraftsmanEditor(record, item)">{{ salesItemCraftsmenText(item) }}</button>
+              <span v-else>{{ salesItemCraftsmenText(item) }}</span>
+            </td>
             <td>
               <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'salespeople')">{{ salespeoplePerformanceText(item.salespeople) }}</button>
               <span v-else>{{ salespeoplePerformanceText(item.salespeople) }}</span>
@@ -2485,7 +2547,12 @@ onBeforeUnmount(() => {
           </tr>
         </tbody>
       </table>
-      <table v-else class="order-center-list-table" :style="{ '--order-column-count': visibleFields.length }">
+      <table
+        v-else
+        class="order-center-list-table"
+        :class="{ 'service-record-query-table': activeTabKey === 'service' }"
+        :style="{ '--order-column-count': visibleFields.length }"
+      >
         <thead>
           <tr>
             <th v-for="fieldItem in visibleFields" :key="fieldItem.key">{{ fieldItem.label }}</th>
@@ -2609,17 +2676,25 @@ onBeforeUnmount(() => {
       v-if="!isPlatformReadOnly && salesPersonnelEditorOpen && salesPersonnelEntry && salesPersonnelTarget"
       :initial-tab="salesPersonnelTarget.uiRole"
       initial-mode="full"
-      :show-craftsmen="false"
+      :show-craftsmen="salesPersonnelTarget.role === 'craftsman'"
       :show-salespeople="salesPersonnelTarget.role === 'salesperson'"
       :show-guides="salesPersonnelTarget.role === 'guide'"
       :show-sales-managers="salesPersonnelTarget.role === 'sales_manager'"
+      :require-craftsmen="salesPersonnelTarget.role === 'craftsman'"
       :guest-customer="Number(salesPersonnelEntry.memberId || 0) === 0"
       :salesperson-candidates="salesPersonnelTarget.role === 'salesperson' ? salesPersonnelCandidates('salesperson') : []"
       :guide-candidates="salesPersonnelTarget.role === 'guide' ? salesPersonnelCandidates('guide') : []"
       :sales-manager-candidates="salesPersonnelTarget.role === 'sales_manager' ? salesPersonnelCandidates('sales_manager') : []"
+      :craftsmen-candidates="salesPersonnelTarget.role === 'craftsman' ? salesPersonnelCandidates('craftsman') : []"
       :selected-salespeople="salesPersonnelTarget.role === 'salesperson' ? salesPersonnelInitialSelection('salesperson', salesPersonnelEntry.lines?.[0]) : []"
       :selected-guides="salesPersonnelTarget.role === 'guide' ? salesPersonnelInitialSelection('guide', salesPersonnelEntry.lines?.[0]) : []"
       :selected-sales-managers="salesPersonnelTarget.role === 'sales_manager' ? salesPersonnelInitialSelection('sales_manager', salesPersonnelEntry.lines?.[0]) : []"
+      :selected-craftsmen="salesPersonnelTarget.role === 'craftsman' ? salesPersonnelInitialSelection('craftsman', salesPersonnelEntry.lines?.[0]) : []"
+      :store-id="state.currentStore?.id || state.currentStore?.storeId || 0"
+      :history-adjustment="salesPersonnelTarget.role === 'craftsman'"
+      history-adjustment-title="修改销售订单手艺人"
+      history-adjustment-subtitle="直接购买项目调整"
+      :allocation-total-amount-cents="salesPersonnelTarget.role === 'craftsman' ? (salesPersonnelEntry.lines?.[0]?.currentCraftsmen || []).reduce((sum, item) => sum + Number(item.allocationAmountCents || 0), 0) : 0"
       :performance-base-amount-cents="salesPersonnelEntry.lines?.[0]?.totalAmountCents || 0"
       :saving="salesPersonnelSubmitting"
       :load-error="salesPersonnelError"
@@ -2800,6 +2875,12 @@ onBeforeUnmount(() => {
 .service-void-modal__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
 .sales-order-query-table { min-width: 1320px; }
+/* 销售订单与服务记录共用同一阅读基线：表头和列值都从左侧起排，
+ * 不让金额、状态或操作列因内容类型切换对齐方式。 */
+.sales-order-query-table th,
+.sales-order-query-table td,
+.service-record-query-table th,
+.service-record-query-table td { text-align: left; }
 .sales-order-query-table th,
 .sales-order-query-table td { white-space: nowrap; }
 .sales-order-query-table th { background: #f6f7f9; }
@@ -2850,6 +2931,21 @@ onBeforeUnmount(() => {
 }
 .sales-order-query-item-cell__line { display: inline-flex; align-items: flex-end; gap: 8px; }
 .sales-order-query-item-cell__name { display: inline-block; line-height: 1.2; }
+.sales-order-query-item-cell__business-tag {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid #b7d4fe;
+  border-radius: 4px;
+  background: #eff6ff;
+  color: #175cd3;
+  font-size: 11px;
+  line-height: 1.1;
+}
+.sales-order-query-item-cell__business-tag.is-entitlement {
+  border-color: #abefc6;
+  background: #ecfdf3;
+  color: #067647;
+}
 .sales-order-query-item-cell__type {
   display: inline-block;
   color: #98a2b3;

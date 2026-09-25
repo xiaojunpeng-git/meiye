@@ -30,6 +30,10 @@ const props = defineProps({
   allowLaborOverride: { type: Boolean, default: false },
   projectCountTotal: { type: [Number, String], default: 1 },
   historyAdjustment: { type: Boolean, default: false },
+  // 同一个追加式劳动事实编辑器同时服务“服务记录”和“直接购买项目”；
+  // 标题由入口明确传入，避免把没有服务记录的销售行误称为服务记录。
+  historyAdjustmentTitle: { type: String, default: '修改服务记录手艺人' },
+  historyAdjustmentSubtitle: { type: String, default: '历史服务调整' },
   allocationTotalAmountCents: { type: [Number, String], default: 0 },
   // 当前收银行的业绩基数只用于“改比例时”的即时展示。最终结账仍以
   // 服务端锁定后的实际业务基数重算自动金额；手工金额则原样进入快照。
@@ -966,7 +970,7 @@ function searchGroupPersonnel(scope) {
   <div class="personnel-performance-overlay" role="dialog" aria-modal="true" aria-label="业绩分配">
     <section class="personnel-performance-panel">
       <header>
-        <div><strong>{{ historyAdjustment ? '修改服务记录手艺人' : '业绩分配' }}</strong><span>{{ historyAdjustment ? '历史服务调整' : (mode === 'simple' ? '简易选择' : '完整分配') }}</span></div>
+        <div><strong>{{ historyAdjustment ? historyAdjustmentTitle : '业绩分配' }}</strong><span>{{ historyAdjustment ? historyAdjustmentSubtitle : (mode === 'simple' ? '简易选择' : '完整分配') }}</span></div>
         <button type="button" aria-label="关闭" title="关闭" @click="emit('close')">×</button>
       </header>
 
