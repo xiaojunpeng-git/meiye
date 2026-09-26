@@ -9,7 +9,7 @@ const source = fs.readFileSync(new URL('../../前端代码/mobile-vue3/src/share
 // its actual state functions, not a copied implementation, but is NOT a native
 // UTS compiler, picker, H5 layout or device lifecycle acceptance test.
 const script = source.match(/<script setup lang="uts">([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '');
-const expose = '\nglobalThis.controller = {openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,editGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,load,resumeActive,elapsedLabel,refs:{question,progress,clarification,choices,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy,activeQuestion,activeElapsedSeconds,activeRunState,messageAnchor},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
+const expose = '\nglobalThis.controller = {answerPresentation,presentationGroups,openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,editGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,load,resumeActive,elapsedLabel,refs:{question,progress,clarification,choices,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy,activeQuestion,activeElapsedSeconds,activeRunState,messageAnchor},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
 const code = esbuild.transformSync(script + expose, { loader: 'ts', target: 'es2020' }).code;
 const schema = 'mohe-clarification-v2'; let checks = 0;
 const clean = value => JSON.parse(JSON.stringify(value));
@@ -349,3 +349,18 @@ for (const marker of ['mode="date"', 'currentGuidanceFields()', '修改已确认
   f.api.accept(f.finish()); eq(f.api.load()[0].rounds.length, 1); eq(f.api.refs.displayed.value.length, 1); f.unmount();
 }
 console.log(`R5 mobile production-controller: ${checks} checks PASS (TS-lowered controller + callback fixtures; not H5/native UI acceptance)`);
+
+// R45: desktop and mobile consume the same nested presentation; no query or metric recomputation.
+{
+  const f = setup(); const facts = [{label:'现金业绩',value:'11,059',unit:'元',section:'收款'}, {label:'退款业绩',value:'0',unit:'元',section:'收款'}, {label:'服务项目数',value:'137',unit:'项',section:'服务'}];
+  const p = {version:1,headline:'今日经营概览',period_label:'测试日期',facts,notes:[]};
+  const before = f.calls.length;
+  eq(f.api.answerPresentation({presentation:p}), p);
+  eq(f.api.answerPresentation(p), p);
+  eq(f.api.answerPresentation({summary:'查询失败'}), null);
+  eq(f.api.presentationGroups(facts), [{section:'收款',facts:facts.slice(0,2)}, {section:'服务',facts:facts.slice(2)}]);
+  eq(f.calls.length,before);
+  assert.ok(!source.includes('@tap="showHistory"'));
+  f.unmount();
+  console.log('R45 nested presentation, grouped facts and no additional requests: PASS');
+}
