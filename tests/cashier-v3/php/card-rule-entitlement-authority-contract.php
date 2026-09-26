@@ -164,6 +164,11 @@ ruleAuthorityCheck('CARD-RULE-12 selector and final adapter both consume issued 
     && strpos($projectionSource, "'unlimited'") !== false
     && strpos($adapterSource, 'authorityForDetail(') !== false
     && strpos($adapterSource, "'issued-card-rule-'") !== false);
+ruleAuthorityCheck('CARD-RULE-13 replacement targets compare physical detail remainder before shared deduction',
+    strpos($authoritySource, 'replacementPhysicalRemainingInTx') !== false
+    && strpos($authoritySource, "'cashier_v3_project_replacement'") !== false
+    && strpos($authoritySource, "'replacementOperationId'") !== false
+    && strpos($authoritySource, "->lock(true)") !== false);
 
 echo "CARD_RULE_ENTITLEMENT_AUTHORITY_CONTRACT passed={$passed} failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

@@ -569,6 +569,32 @@ final class CashierV3CardOperationCheckoutSettlementServices
         if ($targetDetailId <= 0) {
             throw self::failure('card_operation_project_upgrade_target_create_failed');
         }
+        // Register the upgraded right before any version reader resolves it.
+        // The old rule counters and the target component belong to this same
+        // settlement transaction; failure must roll back the entire transfer.
+        (new CashierV3CardRuleEntitlementAuthorityServices())->replaceProjectComponentsInTx(
+            $dataScope->tenantId(),
+            (int)$operation['source_card_holder_id'],
+            array_map(static function (array $mutation): array {
+                return [
+                    'detailId' => (int)$mutation['sourceDetailId'],
+                    'quantity' => -(int)$mutation['quantityDelta'],
+                ];
+            }, $mutations),
+            $targetQuantity,
+            $targetPrice,
+            $target,
+            $targetDetailId,
+            (string)$operation['operation_id'],
+            $now,
+            'project_upgrade'
+        );
+        // Source versions also include rule counters, now updated above.
+        foreach ($mutations as $mutation) {
+            $this->versions->synchronizeProjectionVersion(
+                'member_benefit_pool', (string)$mutation['sourceDetailId'], $operatorScope, $dataScope
+            );
+        }
         Db::name('store_order')->where('id', $targetLegacyOrderId)
             ->update(['cart_id' => self::json([(string)$targetDetailId])]);
         $this->advanceSourceStateInTx($state, $operation, $now);

@@ -157,7 +157,16 @@ final class CashierV3CardRuleEntitlementAuthorityServices
                 continue;
             }
             $state = $snapshot['state'];
-            if ((int)$state['member_id'] !== $memberId || (string)$state['status'] !== 'active') {
+            // Issuance keeps the original purchaser for audit. After transfer,
+            // authorize consumption against the locked current holder instead
+            // of rewriting that historical member snapshot.
+            $currentMemberId = (int)$state['member_id'];
+            $currentHolder = $this->row(Db::name('user_card_holder')
+                ->where('id', $holderId)->where('is_del', 0)->lock(true)->find());
+            if ($currentHolder) {
+                $currentMemberId = (int)$currentHolder['uid'];
+            }
+            if ($currentMemberId !== $memberId || (string)$state['status'] !== 'active') {
                 throw self::failure('card_rule_state_not_active', ['holderId' => $holderId]);
             }
             $this->assertUsableAt($state, $occurredAt);
@@ -178,7 +187,17 @@ final class CashierV3CardRuleEntitlementAuthorityServices
                     throw self::failure('card_rule_deduction_component_invalid', ['detailId' => $detailId]);
                 }
                 $authority = $this->normalizeAuthority($state, $component);
-                if ((int)$authority['remainingTimes'] !== $expected || $quantity > $expected) {
+                // A replacement target owns an independent legacy entitlement
+                // line even when its source card uses one shared choice-count
+                // pool. The shared pool remains the rule-level service limit,
+                // but concurrency for this target must compare its own locked
+                // remainder; comparing 1 target use with (for example) 62
+                // shared card uses makes every valid replacement fail checkout.
+                $replacementRemaining = $this->replacementPhysicalRemainingInTx($component);
+                $expectedAuthorityRemaining = $replacementRemaining === null
+                    ? (int)$authority['remainingTimes']
+                    : $replacementRemaining;
+                if ($expectedAuthorityRemaining !== $expected || $quantity > $expected) {
                     throw self::failure('card_rule_deduction_version_conflict', ['detailId' => $detailId]);
                 }
                 if ($ruleType === 'choice_kind'
@@ -244,6 +263,54 @@ final class CashierV3CardRuleEntitlementAuthorityServices
     }
 
     /**
+     * Return the physical remainder of an operation-created replacement line.
+     * The immutable component snapshot must match both the operation id and
+     * the legacy cart snapshot, preventing a normal component from opting into
+     * this independent-count path merely through mutable row values.
+     */
+    private function replacementPhysicalRemainingInTx(array $component): ?int
+    {
+        $snapshot = json_decode((string)($component['component_snapshot_json'] ?? ''), true);
+        $snapshot = is_array($snapshot) ? $snapshot : [];
+        // Both replacement and upgrade create bounded rights on the same card.
+        // Match the immutable operation identity to the physical detail before
+        // using its own counter instead of the card's shared count.
+        $isUpgrade = isset($snapshot['upgradeOperationId']);
+        $operationId = trim((string)($snapshot[$isUpgrade ? 'upgradeOperationId' : 'replacementOperationId'] ?? ''));
+        if ($operationId === '') {
+            return null;
+        }
+        $detailId = (int)($component['legacy_detail_id'] ?? 0);
+        $projectId = (int)($component['project_product_id'] ?? 0);
+        if ($detailId <= 0 || $projectId <= 0) {
+            throw self::failure('card_rule_replacement_detail_invalid');
+        }
+        $detail = $this->row(Db::name('store_order_cart_info')
+            ->where('id', $detailId)
+            ->where('product_id', $projectId)
+            ->where('cart_type', 2)
+            ->where('product_type', 6)
+            ->lock(true)
+            ->find());
+        // A missing locked row is a stale or forged replacement snapshot. Fail
+        // before decoding fields so the rejection is deterministic and does
+        // not depend on PHP's undefined-offset warning behavior.
+        if (!$detail) {
+            throw self::failure('card_rule_replacement_detail_invalid', ['detailId' => $detailId]);
+        }
+        $cartSnapshot = json_decode((string)($detail['cart_info'] ?? ''), true);
+        $cartSnapshot = is_array($cartSnapshot) ? $cartSnapshot : [];
+        $total = (int)($detail['write_times'] ?? 0);
+        $remaining = (int)($detail['write_surplus_times'] ?? -1);
+        if ((string)($cartSnapshot['sourceType'] ?? '') !== ($isUpgrade ? 'cashier_v3_project_upgrade' : 'cashier_v3_project_replacement')
+            || !hash_equals($operationId, (string)($cartSnapshot['cardOperationId'] ?? ''))
+            || $total <= 0 || $remaining < 0 || $remaining > $total) {
+            throw self::failure('card_rule_replacement_detail_invalid', ['detailId' => $detailId]);
+        }
+        return $remaining;
+    }
+
+    /**
      * A project replacement changes current rights, rather than the card's
      * issue-time definition. Keep the rule-component projection aligned with
      * the legacy entitlement rows in the same transaction so the next
@@ -260,9 +327,15 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         array $target,
         int $targetDetailId,
         string $operationId,
-        int $occurredAt
+        int $occurredAt,
+        string $operationType = 'project_replacement'
     ): void {
         CashierV3TransactionGuard::assertInTransaction('cardRuleProjectReplacement');
+        // Upgrades share the atomic source-to-target rule transfer, but freeze
+        // the paid target value and their own operation type for later writeoff.
+        if (!in_array($operationType, ['project_replacement', 'project_upgrade'], true)) {
+            throw self::failure('card_rule_replacement_context_invalid');
+        }
         if ($tenantId === '' || $holderId <= 0 || $targetQuantity <= 0 || $targetValueCents < 0
             || $targetDetailId <= 0 || $operationId === '' || $occurredAt <= 0
             || (int)($target['catalogId'] ?? 0) <= 0 || (int)($target['skuId'] ?? 0) <= 0
@@ -377,8 +450,8 @@ final class CashierV3CardRuleEntitlementAuthorityServices
             // divided evenly by the independently selected target quantity.
             'configuredAmountCents' => $targetValueCents,
             'writeoffAmountCents' => $writeoffAmountCents,
-            'replacementOperationId' => $operationId,
-            'replacementSourceDetails' => $sourceDetails,
+            ($operationType === 'project_upgrade' ? 'upgradeOperationId' : 'replacementOperationId') => $operationId,
+            ($operationType === 'project_upgrade' ? 'upgradeSourceDetails' : 'replacementSourceDetails') => $sourceDetails,
         ];
         $componentStateId = 'CRC-' . strtoupper(substr(hash(
             'sha256',

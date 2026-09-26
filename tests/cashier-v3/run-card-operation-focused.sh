@@ -33,6 +33,18 @@ DOCUMENT_NUMBER_UPGRADE="$UPGRADE_DIR/2026-08-03-收银V3业务单号统一"
 BUSINESS_SOURCE_UPGRADE="$UPGRADE_DIR/2026-08-06-收银V3来源与记账配置"
 REPORT_CHANNEL_UPGRADE="$UPGRADE_DIR/2026-08-10-报表渠道事实快照"
 CUSTOMER_LIFECYCLE_UPGRADE="$UPGRADE_DIR/2026-08-10-顾客生命周期与首次疗程归因"
+SERVICE_DOCUMENT_NO_UPGRADE="$UPGRADE_DIR/2026-08-05-收银V3服务记录单号"
+SALE_SKU_FREEZE_UPGRADE="$UPGRADE_DIR/2026-07-30-收银V3销售SKU冻结链路"
+SALES_ORDER_SERVICE_TAGS_UPGRADE="$UPGRADE_DIR/2026-08-02-收银V3销售订单服务标签快照"
+CHECKOUT_DRAFT_SERVICE_TAGS_UPGRADE="$UPGRADE_DIR/2026-08-03-收银V3结账草稿服务标签快照"
+SALES_ORDER_CRAFTSMEN_UPGRADE="$UPGRADE_DIR/2026-08-04-收银V3销售订单手艺人快照"
+ATTRIBUTION_PROJECTION_UPGRADE="$UPGRADE_DIR/2026-08-13-收银V3结账归属快照投影"
+MANUAL_LABOR_FEE_UPGRADE="$UPGRADE_DIR/2026-08-14-收银V3完整模式临时手工费"
+LABOR_FEE_SPLIT_UPGRADE="$UPGRADE_DIR/2026-08-14-收银V3劳动业绩与手工费分离"
+SERVICE_CATEGORY_SNAPSHOT_UPGRADE="$UPGRADE_DIR/2026-08-15-收银V3服务分类路径报表快照"
+DETAIL_REMARK_SNAPSHOT_UPGRADE="$UPGRADE_DIR/2026-09-16-收银V3购物车明细备注唯一快照"
+SERVICE_CUSTOMER_SNAPSHOT_UPGRADE="$UPGRADE_DIR/2026-09-17-收银V3服务对象客数快照"
+CARD_PURCHASE_SNAPSHOT_UPGRADE="$UPGRADE_DIR/2026-08-20-收银V3购卡唯一快照"
 MORE_ACTIONS_UPGRADE="$UPGRADE_DIR/2026-08-05-收银V3更多操作权威"
 RESUMED_HANG_REFERENCE_UPGRADE="$UPGRADE_DIR/2026-08-10-收银V3提单结账内部引用"
 LINE_COUPON_UPGRADE="$UPGRADE_DIR/2026-08-11-收银V3销售行优惠券快照"
@@ -98,6 +110,13 @@ fi
 (cd "$DOCUMENT_NUMBER_UPGRADE" && shasum -a 256 -c SHA256SUMS.txt)
 (cd "$BUSINESS_SOURCE_UPGRADE" && shasum -a 256 -c SHA256SUMS.txt)
 (cd "$CUSTOMER_LIFECYCLE_UPGRADE" && shasum -a 256 -c SHA256SUMS.txt)
+(cd "$SERVICE_DOCUMENT_NO_UPGRADE" && shasum -a 256 -c SHA256SUMS.txt)
+(cd "$SALE_SKU_FREEZE_UPGRADE" && shasum -a 256 -c SHA256SUMS.txt)
+(cd "$SALES_ORDER_SERVICE_TAGS_UPGRADE" && shasum -a 256 -c SHA256SUMS.txt)
+(cd "$CHECKOUT_DRAFT_SERVICE_TAGS_UPGRADE" && shasum -a 256 -c SHA256SUMS.txt)
+(cd "$SALES_ORDER_CRAFTSMEN_UPGRADE" && shasum -a 256 -c SHA256SUMS.txt)
+(cd "$DETAIL_REMARK_SNAPSHOT_UPGRADE" && shasum -a 256 -c SHA256SUMS.txt)
+(cd "$SERVICE_CUSTOMER_SNAPSHOT_UPGRADE" && shasum -a 256 -c SHA256SUMS.txt)
 
 printf '%s\n' \
   'APP_DEBUG = true' \
@@ -268,6 +287,51 @@ mysql_file "$ENTITLEMENT_COMPLETION_UPGRADE/02-正式升级.sql"
 mysql_expect "$ENTITLEMENT_COMPLETION_UPGRADE/03-升级后验证.sql" 'POSTCHECK_OK'
 register_upgrade '20260729-014-cashier-v3-entitlement-completion-persistence-v1' 'card operation focused dependency' "$ENTITLEMENT_COMPLETION_UPGRADE/02-正式升级.sql"
 
+# The production completion writer persists labor-fee snapshots on both the
+# service fact and performance fact. Install the additive production migration
+# instead of weakening the writer or creating test-only compatibility columns.
+echo 'CARD_OPERATION_PHASE=sale-sku-freeze'
+mysql_expect "$SALE_SKU_FREEZE_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
+mysql_expect "$SALE_SKU_FREEZE_UPGRADE/02-正式升级.sql" 'APPLY_OK'
+mysql_expect "$SALE_SKU_FREEZE_UPGRADE/03-升级后验证.sql" 'POSTCHECK_OK'
+register_upgrade '20260730-001-cashier-v3-sale-sku-freeze-v1' 'card operation focused dependency' "$SALE_SKU_FREEZE_UPGRADE/02-正式升级.sql"
+
+echo 'CARD_OPERATION_PHASE=sales-order-service-tags'
+mysql_expect "$SALES_ORDER_SERVICE_TAGS_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
+mysql_expect "$SALES_ORDER_SERVICE_TAGS_UPGRADE/02-正式升级.sql" 'APPLY_OK'
+mysql_expect "$SALES_ORDER_SERVICE_TAGS_UPGRADE/03-升级后验证.sql" 'POSTCHECK_OK'
+register_upgrade '20260802-001-cashier-v3-sales-order-service-tags-v1' 'card operation focused dependency' "$SALES_ORDER_SERVICE_TAGS_UPGRADE/02-正式升级.sql"
+
+echo 'CARD_OPERATION_PHASE=checkout-draft-service-tags'
+mysql_expect "$CHECKOUT_DRAFT_SERVICE_TAGS_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
+mysql_expect "$CHECKOUT_DRAFT_SERVICE_TAGS_UPGRADE/02-正式升级.sql" 'APPLY_OK'
+mysql_expect "$CHECKOUT_DRAFT_SERVICE_TAGS_UPGRADE/03-升级后验证.sql" 'POSTCHECK_OK'
+register_upgrade '20260803-004-cashier-v3-checkout-draft-service-tags-v1' 'card operation focused dependency' "$CHECKOUT_DRAFT_SERVICE_TAGS_UPGRADE/02-正式升级.sql"
+
+echo 'CARD_OPERATION_PHASE=sales-order-craftsmen-snapshot'
+mysql_expect "$SALES_ORDER_CRAFTSMEN_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
+mysql_expect "$SALES_ORDER_CRAFTSMEN_UPGRADE/02-正式升级.sql" 'APPLY_OK'
+mysql_expect "$SALES_ORDER_CRAFTSMEN_UPGRADE/03-升级后验证.sql" 'POSTCHECK_OK'
+register_upgrade '20260804-002-cashier-v3-sales-order-craftsmen-snapshot-v1' 'card operation focused dependency' "$SALES_ORDER_CRAFTSMEN_UPGRADE/02-正式升级.sql"
+
+echo 'CARD_OPERATION_PHASE=checkout-attribution-projection'
+mysql_file "$ATTRIBUTION_PROJECTION_UPGRADE/01-升级前检查.sql"
+mysql_expect "$ATTRIBUTION_PROJECTION_UPGRADE/02-正式升级.sql" 'APPLY_OK'
+mysql_file "$ATTRIBUTION_PROJECTION_UPGRADE/03-升级后验证.sql"
+register_upgrade '20260813-003-cashier-v3-attribution-snapshot-projection' 'card operation focused dependency' "$ATTRIBUTION_PROJECTION_UPGRADE/02-正式升级.sql"
+
+echo 'CARD_OPERATION_PHASE=manual-labor-fee-override'
+mysql_expect "$MANUAL_LABOR_FEE_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
+mysql_expect "$MANUAL_LABOR_FEE_UPGRADE/02-正式升级.sql" 'APPLY_OK'
+mysql_expect "$MANUAL_LABOR_FEE_UPGRADE/03-升级后验证.sql" 'POSTCHECK_OK'
+register_upgrade '20260814-001-cashier-v3-manual-labor-fee-override' 'card operation focused dependency' "$MANUAL_LABOR_FEE_UPGRADE/02-正式升级.sql"
+
+echo 'CARD_OPERATION_PHASE=labor-performance-fee-split'
+mysql_expect "$LABOR_FEE_SPLIT_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
+mysql_expect "$LABOR_FEE_SPLIT_UPGRADE/02-正式升级.sql" 'APPLY_OK'
+mysql_expect "$LABOR_FEE_SPLIT_UPGRADE/03-升级后验证.sql" 'POSTCHECK_OK'
+register_upgrade '20260814-002-cashier-v3-labor-performance-fee-split' 'card operation focused dependency' "$LABOR_FEE_SPLIT_UPGRADE/02-正式升级.sql"
+
 echo 'CARD_OPERATION_PHASE=more-actions-authority'
 mysql_expect "$MORE_ACTIONS_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
 mysql_expect "$MORE_ACTIONS_UPGRADE/02-正式升级.sql" 'APPLY_OK'
@@ -294,6 +358,36 @@ mysql_file "$CUSTOMER_LIFECYCLE_UPGRADE/02-正式升级.sql"
 echo 'CARD_OPERATION_PHASE=customer-lifecycle-postcheck'
 mysql_expect "$CUSTOMER_LIFECYCLE_UPGRADE/03-升级后验证.sql" 'POSTCHECK_OK'
 register_upgrade '20260810-002-customer-lifecycle-first-course-attribution' 'card operation focused dependency' "$CUSTOMER_LIFECYCLE_UPGRADE/02-正式升级.sql"
+
+# Final completion decorates every immutable service fact with the category
+# path snapshot used by reports. Install the real additive migration before
+# exercising replacement-target completion through the production writer.
+echo 'CARD_OPERATION_PHASE=service-category-snapshot'
+mysql_file "$SERVICE_CATEGORY_SNAPSHOT_UPGRADE/01-升级前检查.sql"
+mysql_expect "$SERVICE_CATEGORY_SNAPSHOT_UPGRADE/02-正式升级.sql" 'APPLY_OK'
+mysql_expect "$SERVICE_CATEGORY_SNAPSHOT_UPGRADE/03-升级后验证.sql" 'VERIFY_OK'
+register_upgrade '20260815-007-cashier-v3-service-category-path-report-snapshot' 'card operation focused dependency' "$SERVICE_CATEGORY_SNAPSHOT_UPGRADE/02-正式升级.sql"
+
+# Current service facts freeze customer-count treatment and detail remarks.
+# These migrations write their own upgrade-log rows and are intentionally
+# installed unchanged so the isolated gate matches a current real instance.
+echo 'CARD_OPERATION_PHASE=service-customer-snapshot'
+mysql_file "$SERVICE_CUSTOMER_SNAPSHOT_UPGRADE/01-升级前检查.sql"
+mysql_expect "$SERVICE_CUSTOMER_SNAPSHOT_UPGRADE/02-正式升级.sql" 'APPLY_OK'
+mysql_expect "$SERVICE_CUSTOMER_SNAPSHOT_UPGRADE/03-升级后验证.sql" 'POSTCHECK_OK'
+
+# Detail remarks are positioned after the immutable card-purchase snapshot in
+# both checkout and sales-order lines, so replay the production predecessor.
+echo 'CARD_OPERATION_PHASE=card-purchase-snapshot'
+mysql_file "$CARD_PURCHASE_SNAPSHOT_UPGRADE/01-升级前检查.sql"
+mysql_file "$CARD_PURCHASE_SNAPSHOT_UPGRADE/02-正式升级.sql"
+mysql_file "$CARD_PURCHASE_SNAPSHOT_UPGRADE/03-升级后验证.sql"
+register_upgrade '20260820-001-cashier-v3-card-purchase-snapshot' 'card operation focused dependency' "$CARD_PURCHASE_SNAPSHOT_UPGRADE/02-正式升级.sql"
+
+echo 'CARD_OPERATION_PHASE=detail-remark-snapshot'
+mysql_expect "$DETAIL_REMARK_SNAPSHOT_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
+mysql_expect "$DETAIL_REMARK_SNAPSHOT_UPGRADE/02-正式升级.sql" 'APPLY_OK'
+mysql_expect "$DETAIL_REMARK_SNAPSHOT_UPGRADE/03-升级后验证.sql" 'POSTCHECK_OK'
 
 echo 'CARD_OPERATION_PHASE=sale-cart-authority'
 mysql_expect "$SALE_CART_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
@@ -363,6 +457,14 @@ mysql_expect "$DOCUMENT_NUMBER_UPGRADE/02-正式升级.sql" 'APPLY_OK'
 mysql_expect "$DOCUMENT_NUMBER_UPGRADE/03-升级后验证.sql" 'POSTCHECK_OK'
 register_upgrade '20260803-005-cashier-v3-business-document-numbers' 'card operation focused dependency' "$DOCUMENT_NUMBER_UPGRADE/02-正式升级.sql"
 
+# Service facts receive their customer-facing FW number in the same
+# transaction as completion. The allocator tables above are a prerequisite.
+echo 'CARD_OPERATION_PHASE=service-document-number'
+mysql_expect "$SERVICE_DOCUMENT_NO_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
+mysql_expect "$SERVICE_DOCUMENT_NO_UPGRADE/02-正式升级.sql" 'APPLY_OK'
+mysql_expect "$SERVICE_DOCUMENT_NO_UPGRADE/03-升级后验证.sql" 'POSTCHECK_OK'
+register_upgrade '20260805-001-cashier-v3-service-document-no' 'card operation focused dependency' "$SERVICE_DOCUMENT_NO_UPGRADE/02-正式升级.sql"
+
 echo 'CARD_OPERATION_PHASE=card-operation-authority'
 echo 'CARD_OPERATION_PHASE=card-operation-authority-precheck'
 mysql_expect "$CARD_UPGRADE/01-升级前检查.sql" 'PRECHECK_OK'
@@ -398,6 +500,7 @@ register_upgrade '20260803-005-cashier-v3-issued-card-rule-state-v1' 'card opera
 echo 'CARD_OPERATION_PHASE=php-contract-and-integration'
 run_php '
   php -l /tests/cashier-v3/php/card-operation-integration.php
+  php -l /tests/cashier-v3/php/card-rule-entitlement-authority-integration.php
   php /tests/cashier-v3/php/card-operation-kernel-contract.php
 '
 if ! card_operation_integration="$(run_php 'php /tests/cashier-v3/php/card-operation-integration.php')"; then
@@ -405,6 +508,17 @@ if ! card_operation_integration="$(run_php 'php /tests/cashier-v3/php/card-opera
   exit 1
 fi
 printf '%s\n' "$card_operation_integration"
+grep -q 'RUNNER_OK=card-operation-integration' <<< "$card_operation_integration"
+# Project replacement changes both legacy entitlement rows and issued-rule
+# components. Exercise the rule authority in the same production-like schema
+# so a replacement target cannot regress into comparing its own remainder with
+# a whole-card choice-count pool.
+if ! card_rule_integration="$(run_php 'CASHIER_V3_TEST_ROOT=/tests/cashier-v3 php /tests/cashier-v3/php/card-rule-entitlement-authority-integration.php')"; then
+  printf '%s\n' "$card_rule_integration" >&2
+  exit 1
+fi
+printf '%s\n' "$card_rule_integration"
+grep -q 'RUNNER_OK=CARD_RULE_ENTITLEMENT_AUTHORITY_MYSQL56' <<< "$card_rule_integration"
 echo 'CARD_OPERATION_PHASE=current-document-number-postcheck'
 # The card-operation migration's own postcheck ran immediately after it was
 # applied above.  Its historical CO+hash format must not be re-run after the
