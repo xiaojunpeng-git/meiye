@@ -256,13 +256,15 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         int $holderId,
         array $sourceLines,
         int $targetQuantity,
+        int $targetValueCents,
         array $target,
         int $targetDetailId,
         string $operationId,
         int $occurredAt
     ): void {
         CashierV3TransactionGuard::assertInTransaction('cardRuleProjectReplacement');
-        if ($tenantId === '' || $holderId <= 0 || $targetQuantity <= 0 || $targetDetailId <= 0 || $operationId === '' || $occurredAt <= 0
+        if ($tenantId === '' || $holderId <= 0 || $targetQuantity <= 0 || $targetValueCents < 0
+            || $targetDetailId <= 0 || $operationId === '' || $occurredAt <= 0
             || (int)($target['catalogId'] ?? 0) <= 0 || (int)($target['skuId'] ?? 0) <= 0
             || trim((string)($target['skuUnique'] ?? '')) === '') {
             throw self::failure('card_rule_replacement_context_invalid');
@@ -286,7 +288,6 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         $selectionStatus = null;
         $selectedAt = null;
         $selectedStoreId = null;
-        $configuredPriceCents = null;
         $writeoffAmountCents = null;
         foreach ($sourceLines as $line) {
             $detailId = (int)($line['detailId'] ?? 0);
@@ -302,17 +303,18 @@ final class CashierV3CardRuleEntitlementAuthorityServices
             if (!is_array($componentSnapshot)) {
                 throw self::failure('card_rule_component_fingerprint_invalid');
             }
-            $componentConfiguredPrice = (int)($componentSnapshot['configuredPriceCents'] ?? 0);
             $componentWriteoffAmount = (int)($component['writeoff_amount_cents'] ?? 0);
             $componentSelection = (string)$component['selection_status'];
-            if ($configuredPriceCents !== null && $configuredPriceCents !== $componentConfiguredPrice
-                || $writeoffAmountCents !== null && $writeoffAmountCents !== $componentWriteoffAmount
+            // Different purchase prices are valid replacement sources. Rule
+            // selection and write-off semantics remain compatible-only until
+            // the product defines how unlike choice slots or labor values are
+            // merged; silently taking either source would corrupt authority.
+            if ($writeoffAmountCents !== null && $writeoffAmountCents !== $componentWriteoffAmount
                 || $selectionStatus !== null && $selectionStatus !== $componentSelection
                 || $selectedAt !== null && $selectedAt !== (int)$component['selected_at']
                 || $selectedStoreId !== null && $selectedStoreId !== (int)$component['selected_store_id']) {
                 throw self::failure('card_rule_replacement_sources_incompatible');
             }
-            $configuredPriceCents = $componentConfiguredPrice;
             $writeoffAmountCents = $componentWriteoffAmount;
             $selectionStatus = $componentSelection;
             $selectedAt = (int)$component['selected_at'];
@@ -332,11 +334,16 @@ final class CashierV3CardRuleEntitlementAuthorityServices
             $sourceDetails[$detailId] = $quantity;
             $totalQuantity += $quantity;
         }
-        if (!$sourceDetails || $totalQuantity <= 0 || $configuredPriceCents === null
-            || $writeoffAmountCents === null || $selectionStatus === null
-            || $selectedAt === null || $selectedStoreId === null) {
+        if (!$sourceDetails || $totalQuantity <= 0 || $writeoffAmountCents === null
+            || $selectionStatus === null || $selectedAt === null || $selectedStoreId === null) {
             throw self::failure('card_rule_replacement_source_invalid');
         }
+
+        // Replacement is allowed to merge projects with different configured
+        // prices. The target freezes the exact value that
+        // the operation authority already allocated from all selected source
+        // rights; inheriting the first source silently loses or invents value.
+        $configuredPriceCents = intdiv($targetValueCents, $targetQuantity);
 
         if ($targetDetailId > PHP_INT_MAX - self::REPLACEMENT_RELATION_OFFSET) {
             throw self::failure('card_rule_replacement_relation_invalid');
@@ -366,6 +373,9 @@ final class CashierV3CardRuleEntitlementAuthorityServices
             'nameSnapshot' => trim((string)($target['catalogName'] ?? '')) ?: '项目',
             'writeTimes' => $targetTimes,
             'configuredPriceCents' => $configuredPriceCents,
+            // The total is authoritative when the source value cannot be
+            // divided evenly by the independently selected target quantity.
+            'configuredAmountCents' => $targetValueCents,
             'writeoffAmountCents' => $writeoffAmountCents,
             'replacementOperationId' => $operationId,
             'replacementSourceDetails' => $sourceDetails,
@@ -424,6 +434,12 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         $unitAmount = $ruleType === 'time'
             ? (int)$component['writeoff_amount_cents']
             : (int)($componentSnapshot['configuredPriceCents'] ?? 0);
+        $configuredAmount = array_key_exists('configuredAmountCents', $componentSnapshot)
+            ? (int)$componentSnapshot['configuredAmountCents']
+            : null;
+        if ($configuredAmount !== null && $configuredAmount < 0) {
+            throw self::failure('card_rule_component_amount_invalid');
+        }
         $selected = (string)$component['selection_status'];
         $choiceAvailable = $ruleType !== 'choice_kind'
             || $selected === 'selected'
@@ -443,7 +459,7 @@ final class CashierV3CardRuleEntitlementAuthorityServices
             'remainingTimes' => $remaining,
             'totalTimes' => $total,
             'unitAmountCents' => $unitAmount,
-            'purchaseAmountCents' => $this->multiply($unitAmount, $total),
+            'purchaseAmountCents' => $configuredAmount ?? $this->multiply($unitAmount, $total),
             'writeoffAmountCents' => (int)$component['writeoff_amount_cents'],
             'selectionStatus' => $selected,
             'choiceAvailable' => $choiceAvailable,

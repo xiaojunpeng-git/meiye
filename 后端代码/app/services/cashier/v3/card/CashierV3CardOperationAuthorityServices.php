@@ -844,6 +844,7 @@ final class CashierV3CardOperationAuthorityServices
             (int)$source['holderId'],
             $ruleSourceLines,
             $targetQuantity,
+            $totalValueCents,
             $target,
             $targetDetailId,
             (string)$plan['operationId'],

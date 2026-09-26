@@ -402,6 +402,7 @@ final class MemberIntegrationFixture
               `product_id` int unsigned NOT NULL DEFAULT 0,
               `cart_type` tinyint NOT NULL DEFAULT 0,
               `product_type` tinyint NOT NULL DEFAULT 0,
+              `source_type` varchar(32) NOT NULL DEFAULT '',
               `cart_info` mediumtext,
               `write_times` int unsigned NOT NULL DEFAULT 0,
               `write_surplus_times` int unsigned NOT NULL DEFAULT 0,

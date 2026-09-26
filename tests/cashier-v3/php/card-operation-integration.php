@@ -134,6 +134,10 @@ function cardOpBody(
     array $contexts,
     string $idempotencyKey
 ): array {
+    // The Gateway context is the only accepted browser concurrency version.
+    // Keep fixture planner versions out of the strict request payload just as
+    // production does; the authority service derives them from the lock.
+    unset($payload['sourceCardHolderVersion']);
     return array_merge($payload, [
         'action' => 'submit-card-operation',
         'clientSessionId' => (string)$session['client_session_id'],
@@ -278,6 +282,24 @@ try {
         'repaid_debt_amount' => '0.00',
         'is_gift' => 0,
     ]);
+    Db::name('store_order_cart_info')->insert([
+        'id' => 4702,
+        'oid' => 4501,
+        'cart_id' => 'CART-CARDOP-4702',
+        'product_id' => 4804,
+        'cart_type' => 2,
+        'product_type' => 6,
+        'cart_info' => json_encode(['productInfo' => ['store_name' => '不同价格护理项目']], JSON_UNESCAPED_UNICODE),
+        'write_times' => 3,
+        'write_surplus_times' => 3,
+        'is_writeoff' => 0,
+        'write_start' => $now - 3600,
+        'write_end' => $now + 86400,
+        'pay_price' => '45.00',
+        'debt_amount' => '0.00',
+        'repaid_debt_amount' => '0.00',
+        'is_gift' => 0,
+    ]);
     // Target is a current, store-scoped project SKU. The replacement command
     // receives only this SKU id; product identity and price are re-read by
     // server authority and never trusted from the browser preview.
@@ -357,9 +379,26 @@ try {
         'configuredPriceCents' => 1000,
         'writeoffAmountCents' => 0,
     ];
+    $differentPriceRuleComponent = [
+        'relationId' => 9502,
+        'productId' => 4804,
+        'skuId' => 4903,
+        'skuUnique' => 'CARDOP-SOURCE-4804',
+        'productType' => 6,
+        'nameSnapshot' => '不同价格护理项目',
+        'writeTimes' => 3,
+        'configuredPriceCents' => 1500,
+        'writeoffAmountCents' => 0,
+    ];
     $ruleWriter = new CashierV3IssuedCardRuleStateServices();
     $ruleAuthority = new CashierV3CardRuleEntitlementAuthorityServices();
-    Db::transaction(function () use ($ruleWriter, $ruleAuthority, $ruleComponent, $now): void {
+    Db::transaction(function () use (
+        $ruleWriter,
+        $ruleAuthority,
+        $ruleComponent,
+        $differentPriceRuleComponent,
+        $now
+    ): void {
         $ruleWriter->issueInTx(
             'CARDOP-RULE-4601',
             ['tenant_id' => '0', 'order_id' => 'SO-CARDOP-4501', 'member_id' => 4101, 'store_id' => 8],
@@ -367,17 +406,21 @@ try {
             ['catalog_product_id' => 4803, 'catalog_sku_id' => 4901],
             [
                 'ruleType' => 'normal', 'ruleVersion' => 1, 'definitionVersion' => 1,
-                'choiceLimit' => 0, 'sharedTimes' => 0, 'components' => [$ruleComponent],
+                'choiceLimit' => 0, 'sharedTimes' => 0,
+                'components' => [$ruleComponent, $differentPriceRuleComponent],
             ],
             ['writeValid' => 2, 'writeStart' => $now - 3600, 'writeEnd' => $now + 86400],
-            ['issuedComponents' => [['detailId' => 4701, 'snapshot' => $ruleComponent]]],
+            ['issuedComponents' => [
+                ['detailId' => 4701, 'snapshot' => $ruleComponent],
+                ['detailId' => 4702, 'snapshot' => $differentPriceRuleComponent],
+            ]],
             ['holderId' => 4601],
             $now
         );
         $ruleAuthority->applyDeductionsInTx([[
             'holder_id' => 4601, 'source_detail_id' => 4701, 'project_id' => 4801,
             'deduct_physical_times' => 2, 'expected_physical_remaining_times' => 10,
-        ]], ['tenant_id' => '0', 'store_id' => 8, 'member_id' => 4101, 'recorded_at' => $now]);
+        ]], ['tenant_id' => '0', 'store_id' => 8, 'member_id' => 4101, 'occurred_at' => $now]);
     });
     ok('新卡项规则来源权益与既有剩余次数一致',
         (int)Db::name('cashier_v3_card_rule_component')->where('legacy_detail_id', 4701)->value('remaining_times') === 8,
@@ -396,6 +439,7 @@ try {
         $provider->synchronizeProjectionVersion('member', '4103', $operatorScope, $dataScope);
         $provider->synchronizeProjectionVersion('card_holder', '4601', $operatorScope, $dataScope);
         $provider->synchronizeProjectionVersion('member_benefit_pool', '4701', $operatorScope, $dataScope);
+        $provider->synchronizeProjectionVersion('member_benefit_pool', '4702', $operatorScope, $dataScope);
     });
     $session = cardOpSession();
     $sourceVersion = cardOpVersion('card_holder', 4601);
@@ -669,7 +713,7 @@ try {
         && (int)Db::name('store_order')->where('id', 4501)->value('uid') === 4101,
         json_encode($extensionAudit, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12A');
 
-    cardOpSection('project replacement grants the independently selected target count');
+    cardOpSection('project replacement merges differently priced sources and grants the selected target count');
     $replacementVersion = cardOpVersion('card_holder', 4601);
     $replacementKey = 'CARD_OPERATION-' . MemberIntegrationFixture::uuid();
     $replacementBody = cardOpBody($session, [
@@ -677,7 +721,10 @@ try {
         'sourceCardHolderId' => 4601,
         'sourceCardHolderVersion' => $replacementVersion,
         'targetCatalogId' => 4902,
-        'projectLines' => [['sourceDetailId' => 4701, 'quantity' => 2]],
+        'projectLines' => [
+            ['sourceDetailId' => 4701, 'quantity' => 2],
+            ['sourceDetailId' => 4702, 'quantity' => 2],
+        ],
         'targetQuantity' => 3,
         'reason' => '客户确认更换护理项目',
     ], [cardOpContext('card_holder', 4601, $replacementVersion)], $replacementKey);
@@ -692,10 +739,11 @@ try {
     ok('项目替换扣减来源权益并按所选次数创建目标权益',
         ($replacement['result']['status'] ?? '') === 'success'
         && (int)Db::name('store_order_cart_info')->where('id', 4701)->value('write_surplus_times') === 6
+        && (int)Db::name('store_order_cart_info')->where('id', 4702)->value('write_surplus_times') === 1
         && (int)($replacementTarget['write_times'] ?? 0) === 3
         && (int)($replacementTarget['write_surplus_times'] ?? 0) === 3
         && (int)($replacementTarget['uid'] ?? 0) === 4101
-        && (string)($replacementTarget['pay_price'] ?? '') === '20.00'
+        && (string)($replacementTarget['pay_price'] ?? '') === '50.00'
         && (string)($replacementTargetCartInfo['productInfo']['store_name'] ?? '') === '卡操作替换目标项目'
         && (int)Db::name('user_card_holder')->where('id', 4601)->value('write_surplus_times') === 8,
         json_encode(['result' => $replacement, 'target' => $replacementTarget], JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12B');
@@ -703,8 +751,8 @@ try {
         (string)($replacementAudit['operation_type'] ?? '') === 'project_replacement'
         && (string)($replacementAudit['operation_status'] ?? '') === 'succeeded'
         && (int)($replacementAudit['target_catalog_id'] ?? 0) === 4802
-        && (int)($replacementAudit['source_remaining_value_cents'] ?? 0) === 2000
-        && (int)Db::name('cashier_v3_card_operation_line')->where('operation_id', (string)($replacementAudit['operation_id'] ?? ''))->count() === 2
+        && (int)($replacementAudit['source_remaining_value_cents'] ?? 0) === 5000
+        && (int)Db::name('cashier_v3_card_operation_line')->where('operation_id', (string)($replacementAudit['operation_id'] ?? ''))->count() === 3
         && (int)Db::name('store_order')->where('id', 4501)->value('uid') === 4101
         && (int)Db::name('store_order')->count() === 1,
         json_encode($replacementAudit, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12C');
@@ -712,7 +760,8 @@ try {
     ok('项目替换幂等重放不会重复扣权益或创建目标项目',
         !empty($replacementReplay['replay'])
         && (int)Db::name('store_order_cart_info')->where('oid', 4501)->where('product_id', 4802)->count() === 1
-        && (int)Db::name('store_order_cart_info')->where('id', 4701)->value('write_surplus_times') === 6,
+        && (int)Db::name('store_order_cart_info')->where('id', 4701)->value('write_surplus_times') === 6
+        && (int)Db::name('store_order_cart_info')->where('id', 4702)->value('write_surplus_times') === 1,
         json_encode($replacementReplay, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12D');
     $replacementTargetRule = $ruleAuthority->authorityForDetail(
         '0',
@@ -720,15 +769,30 @@ try {
         (int)($replacementTarget['id'] ?? 0)
     );
     $replacementSourceRule = $ruleAuthority->authorityForDetail('0', 4601, 4701);
+    $replacementSecondSourceRule = $ruleAuthority->authorityForDetail('0', 4601, 4702);
     $replacementTargetComponent = (array)Db::name('cashier_v3_card_rule_component')
         ->where('legacy_detail_id', (int)($replacementTarget['id'] ?? 0))
         ->find();
     ok('项目替换在同一事务同步规则组件，后续权益选择可读取目标项目',
         (int)($replacementSourceRule['remainingTimes'] ?? -1) === 6
+        && (int)($replacementSecondSourceRule['remainingTimes'] ?? -1) === 1
         && (int)($replacementTargetRule['remainingTimes'] ?? -1) === 3
+        && (int)($replacementTargetRule['purchaseAmountCents'] ?? -1) === 5000
         && (int)($replacementTargetComponent['project_product_id'] ?? 0) === 4802
         && (string)($replacementTargetComponent['status'] ?? '') === 'active',
         json_encode($replacementTargetComponent, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12E');
+
+    // The browser closes the replacement selector and reopens current rights
+    // before a later card operation. Reproduce that projection sync here so
+    // the following upgrade uses the post-replacement holder fingerprint.
+    $postReplacementProjection = $dispatcher->dispatch(
+        cardOpProjectionBody($targetSession, 4102),
+        $targetSession
+    );
+    ok('项目替换后重新打开权益会同步卡级版本供后续卡操作使用',
+        cardOpSelectorHasHolder($postReplacementProjection, 4601)
+        && cardOpVersion('card_holder', 4601) > $replacementVersion,
+        json_encode($postReplacementProjection, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12F');
 
     cardOpSection('permission and pending upgrade safety');
     $beforeDenied = (int)Db::name('cashier_v3_card_operation')->count();
