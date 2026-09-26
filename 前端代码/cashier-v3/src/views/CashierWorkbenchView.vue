@@ -7155,7 +7155,7 @@ onBeforeUnmount(() => {
               </template>
               <span v-else>{{ cardOperationTargetPrompt(previewCardOperation.mode) }}</span>
             </div>
-            <label v-if="cardOperationReasonModes.has(previewCardOperation.mode) && previewCardOperation.target" class="cashier-operation-preview__reason">
+            <label v-if="cardOperationReasonModes.has(previewCardOperation.mode) && previewCardOperation.target" class="cashier-operation-preview__reason" :class="{ 'cashier-operation-preview__reason--transfer': previewCardOperation.mode === 'card-transfer' }">
               <span>{{ cardOperationReasonLabel(previewCardOperation.mode) }}</span>
               <textarea v-model.trim="previewCardOperation.reason" rows="2" maxlength="500" :placeholder="`请填写${cardOperationReasonLabel(previewCardOperation.mode)}`"></textarea>
             </label>

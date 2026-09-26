@@ -4448,6 +4448,14 @@ button:disabled {
   background: #eaf4ff;
 }
 
+/* 卡转让原因采用上下排列；仅约束转让，不改变其他卡操作的输入布局。 */
+.cashier-operation-preview__reason--transfer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
 .cashier-operation-preview__confirm {
   justify-self: end;
   min-width: 112px;
