@@ -47,6 +47,27 @@ $filter=[['field'=>'salesperson','operator'=>'eq','value'=>$staff]];
 $selected=$query('sales',['topFilters'=>$filter]);
 check($selected['total']===1 && $selected['records'][0]['salesOrderNo']==='XS26092600006','salesperson identity mismatch');
 $base=$query('sales');
+// 表格明细列必须可查，且命中后仍保留整单的购买行与权益行，不改动任何业务记录。
+$craftStaff=(int)Db::name('system_store_staff')->where('store_id',133)->where('staff_name','徐勤')->value('id');
+check($craftStaff>0,'missing craftsman fixture');
+$craft=$query('sales',['topFilters'=>[['field'=>'craftsman','operator'=>'eq','value'=>$craftStaff]]]);
+check($craft['total']===1 && $craft['records'][0]['salesOrderNo']==='XS26092600006' && count($craft['records'][0]['items'])===3,'craftsman line identity mismatch');
+foreach (['item_name'=>'头部放松','unit_price'=>100,'line_amount'=>100,'quantity'=>1] as $key=>$value) {
+    $result=$query('sales',['topFilters'=>[['field'=>$key,'operator'=>'eq','value'=>$value]]]);
+    check(in_array('XS26092600006',array_column($result['records'],'salesOrderNo'),true),'missing line filter '.$key);
+    $none=$query('sales',['topFilters'=>[['field'=>$key,'operator'=>'eq','value'=>$key==='item_name'?'__NOT_EXISTS__':999999999]]]);
+    check($none['total']===0,'line filter ignored '.$key);
+}
+foreach (['sales_manager','guide'] as $key) {
+    check($query('sales',['topFilters'=>[['field'=>$key,'operator'=>'eq','value'=>999999999]]])['total']===0,'role filter ignored '.$key);
+}
+// 本地无经理/导购正例时，以授权单据的内存投影验证身份映射，不伪称真实业务正例。
+$employee=(int)Db::name('system_store_staff')->where('id',$craftStaff)->value('employee_id');
+$fixture=$selected['records'][0];
+$fixture['items'][0]['salesManagers']=[['employeeId'=>$employee,'name'=>'徐勤']];
+$fixture['items'][0]['guides']=[['employeeId'=>$employee,'name'=>'徐勤']];
+$identified=(new \app\services\cashier\v3\order\CashierV3OrderCenterQueryIdentities())->attach('sales',[$fixture],'0')[0];
+foreach (['sales_manager_query_ids','guide_query_ids'] as $key) check(in_array((string)$craftStaff,$identified[$key],true),'role identity mapping failed');
 $negative=$query('sales',['topFilters'=>[['field'=>'salesperson','operator'=>'neq','value'=>$staff]]]);
 check($negative['total']===$base['total']-1,'person negative relation wrong');
 $missing=$query('sales',['topFilters'=>[['field'=>'salesperson','operator'=>'eq','value'=>'999999999']]]);
@@ -72,6 +93,11 @@ $plan=$runtime['execution']->validatedPlan(Contract::PAGE_BY_TYPE['sales'],[],[
 ],$context);
 $frozen=$provider->executeFrozenPlan($context,$plan,'query',['sales_order_no','salesperson']);
 check(count($frozen['exportRows'])===1 && $frozen['exportRows'][0]['sales_order_no']==='XS26092600006','frozen export differs from selected person/date');
+$linePlan=$runtime['execution']->validatedPlan(Contract::PAGE_BY_TYPE['sales'],[],[
+    'topFilters'=>[['field'=>'craftsman','operator'=>'eq','value'=>$craftStaff],['field'=>'business_date','operator'=>'eq','value'=>'2026-09-26']], 'dataScope'=>'all'
+],$context);
+$lineExport=$provider->executeFrozenPlan($context,$linePlan,'query',['sales_order_no','craftsman','unit_price','line_amount']);
+check(count($lineExport['exportRows'])===1 && $lineExport['exportRows'][0]['line_amount']==='2980、100、1000','line export lost amounts');
 foreach(['2026-09-26','2026-09-26T17:08'] as $time) {
     $dateResult=$execution->execute(Contract::PAGE_BY_TYPE['sales'],[['record_id'=>'a','payment_completed_at'=>'2026-09-26 17:08:00']],[],
         ['topFilters'=>[['field'=>'payment_completed_at','operator'=>'eq','value'=>$time]]],$context,static fn()=>true);

@@ -72,7 +72,16 @@ final class CashierV3OrderCenterQueryIdentities
             foreach ($row['items'] ?? [] as $item) foreach ($item['salespeople'] ?? [] as $person) $people[]=$person['employeeId']??0;
             $row['salesperson_query_ids']=$this->ids(array_merge($people,$salesIds[$row['id']]??[]));
             $row['craftsman_query_ids']=$this->ids(array_column($row['craftsmenListAllocations']??[], 'employeeId'));
-            $employeeIds=array_merge($employeeIds,$row['salesperson_query_ids'],$row['craftsman_query_ids']);
+            $row['sales_manager_query_ids']=[];
+            $row['guide_query_ids']=[];
+            // 消费单的人员位于各商品/权益明细；服务记录仍沿用记录级人员，不能只读主单漏掉手艺人。
+            foreach ($row['items'] ?? [] as $item) {
+                foreach (['craftsman'=>'craftsmenListAllocations','sales_manager'=>'salesManagers','guide'=>'guides'] as $key=>$source) {
+                    $people=$item[$source]??($key==='craftsman'?($item['craftsmen']??[]):[]);
+                    $row[$key.'_query_ids']=array_merge($row[$key.'_query_ids'],array_column($people,'employeeId'));
+                }
+            }
+            foreach (['salesperson','craftsman','sales_manager','guide'] as $key) $employeeIds=array_merge($employeeIds,$row[$key.'_query_ids']);
         }
         unset($row);
         // 选择器 ID 是门店任职 ID，事实 ID 是 employee ID；显式关系转换，不靠两者数字巧合。
@@ -80,7 +89,7 @@ final class CashierV3OrderCenterQueryIdentities
         if ($employeeIds) foreach(Db::name('system_store_staff')->whereIn('employee_id',$employeeIds)->field('id,employee_id')->select()->toArray() as $staff) {
             $staffByEmployee[(string)$staff['employee_id']][]=(string)$staff['id'];
         }
-        foreach($rows as &$row) foreach(['salesperson_query_ids','craftsman_query_ids'] as $field) {
+        foreach($rows as &$row) foreach(['salesperson_query_ids','craftsman_query_ids','sales_manager_query_ids','guide_query_ids'] as $field) {
             $ids=[];
             foreach($row[$field] as $employee) $ids=array_merge($ids,$staffByEmployee[$employee]??[]);
             $row[$field]=$this->ids($ids);

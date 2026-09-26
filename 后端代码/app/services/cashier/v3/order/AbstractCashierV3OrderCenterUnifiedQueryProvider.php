@@ -250,7 +250,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             foreach ($payload[$group] as &$filter) {
                 $keyName = isset($filter['fieldKey']) ? 'fieldKey' : (isset($filter['field_key']) ? 'field_key' : 'field');
                 $field = $filter[$keyName] ?? '';
-                if (!in_array($field, ['salesperson','cashier','operator','craftsman','void_operator','store'], true)) continue;
+                if (!in_array($field, ['salesperson','cashier','operator','craftsman','sales_manager','guide','void_operator','store'], true)) continue;
                 $values = (array)($filter['value'] ?? []);
                 if (!$values) continue;
                 $numeric = true;
@@ -275,7 +275,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             'actual_received_amount' => ['actualReceivedAmount'], 'payment_method' => ['paymentSummary', 'paymentMethod'], 'salesperson' => ['salespersonSummary', 'salespersonName'],
             'cashier' => ['cashierName', 'operatorName'], 'source' => ['source', 'sourceLabel', 'sourceSecondary', 'sourcePrimary'],
             'payment_status' => ['paymentStatus'], 'order_status' => ['orderStatus', 'statusLabel'], 'supplement' => ['supplementLabel'],
-            'payment_completed_at' => ['paymentCompletedAt', 'completedAt'], 'recharge_order_no' => ['rechargeOrderNo', 'orderNo'],
+            'occurred_at' => ['occurredAt'], 'payment_completed_at' => ['paymentCompletedAt', 'completedAt'], 'recharge_order_no' => ['rechargeOrderNo', 'orderNo'],
             'recharge_plan' => ['rechargePlan', 'planName'], 'recharge_amount' => ['rechargeAmount'], 'gift_amount' => ['giftAmount'],
             'operator' => ['operatorName', 'operator'], 'refund_order_no' => ['refundOrderNo', 'refundNo'], 'source_order_no' => ['sourceOrderNo'],
             'refund_summary' => ['refundSummary', 'summary'], 'refund_amount' => ['refundAmount'], 'refund_method' => ['refundMethod'],
@@ -310,6 +310,24 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                 $row[$field] = $this->firstValue($record, array_merge($aliases[$field] ?? [], [$field]));
                 // 未就绪的金额/日期不是零，保留空值语义，避免区间筛选把缺失值当零。
                 if ($row[$field] === '' && in_array($types[$field], ['integer','decimal','amount','date','datetime'], true)) $row[$field] = null;
+            }
+            if ($type === 'sales') {
+                // 直接使用表格的权威明细，不重算价格、不把权益价值计入整单收款。
+                foreach (['item_name','unit_price','quantity','line_amount','craftsman','sales_manager','guide'] as $key) $row[$key] = [];
+                foreach ($record['items'] ?? [] as $item) {
+                    foreach (['item_name'=>'name','unit_price'=>'unitPrice','quantity'=>'quantity'] as $key=>$source) {
+                        if (isset($item[$source]) && $item[$source] !== '') $row[$key][] = $item[$source];
+                    }
+                    $amount = $item[($item['businessTag'] ?? '') === '权益' ? 'entitlementAmount' : 'payableAmount'] ?? null;
+                    if ($amount !== null) $row['line_amount'][] = $amount;
+                    foreach (['craftsman'=>'craftsmenListAllocations','sales_manager'=>'salesManagers','guide'=>'guides'] as $key=>$source) {
+                        $people = $item[$source] ?? ($key === 'craftsman' ? ($item['craftsmen'] ?? []) : []);
+                        foreach ($people as $person) {
+                            $name = $person['employeeName'] ?? $person['name'] ?? '';
+                            if ($name !== '') $row[$key][] = $name;
+                        }
+                    }
+                }
             }
             if (($row['supplement'] ?? null) === null) $row['supplement'] = ($record['isSupplement'] ?? null) === true ? '补单' : (($record['isSupplement'] ?? null) === false ? '正常办理' : '');
             $row['record_id'] = $type . ':' . (string)($record['id'] ?? $row[$definition['keywordFields'][0]] ?? $index + 1);

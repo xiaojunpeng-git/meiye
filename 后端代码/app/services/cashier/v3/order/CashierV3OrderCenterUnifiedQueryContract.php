@@ -31,11 +31,14 @@ final class CashierV3OrderCenterUnifiedQueryContract
             // 仅重命名销售页的展示标签；字段 key 保持 business_date，避免改变筛选和导出口径。
             'sales' => ['销售订单', [
                 ['sales_order_no', '销售订单号', 'text', true, true], ['business_date', '销售日期', 'date', true, true],
-                ['member_name', '会员姓名／游客'], ['phone', '手机号'], ['store', '销售门店'], ['item_summary', '商品摘要'],
+                ['member_name', '会员姓名／游客'], ['phone', '手机号'], ['store', '下单门店'], ['item_summary', '商品摘要'],
+                ['item_name', '商品'], ['unit_price', '单价', 'amount'], ['quantity', '数量', 'integer'],
+                ['craftsman', '手艺人（类型，业绩，手工、项目数）'], ['sales_manager', '销售经理'], ['guide', '导购'],
+                ['line_amount', '金额', 'amount'], ['occurred_at', '实际下单时间', 'datetime'],
                 ['item_count', '商品数量', 'integer'], ['receivable_amount', '应收金额', 'amount'], ['discount_amount', '优惠金额', 'amount'],
-                ['debt_amount', '欠款金额', 'amount'], ['actual_received_amount', '现金业绩', 'amount'], ['payment_method', '收款方式'],
-                ['salesperson', '销售人'], ['cashier', '收银员／操作人'], ['source', '客户来源'],
-                ['payment_status', '支付状态'], ['order_status', '订单状态'], ['supplement', '补单标记'], ['payment_completed_at', '支付完成时间', 'datetime'],
+                ['debt_amount', '欠款', 'amount'], ['actual_received_amount', '已收金额', 'amount'], ['payment_method', '记账收款'],
+                ['salesperson', '销售人（业绩）'], ['cashier', '收银员／操作人'], ['source', '客户来源'],
+                ['payment_status', '支付状态'], ['order_status', '状态'], ['supplement', '补单标记'], ['payment_completed_at', '支付完成时间', 'datetime'],
             ], ['sales_order_no', 'member_name', 'phone', 'item_summary']],
             'recharge' => ['充值订单', [
                 ['recharge_order_no', '充值订单号', 'text', true, true], ['business_date', '业务日期', 'date', true, true],
@@ -90,10 +93,13 @@ final class CashierV3OrderCenterUnifiedQueryContract
             $fieldType = $field[2] ?? 'text';
             $visible = $field[3] ?? true;
             $quick = $field[4] ?? false;
-            $registered[] = UnifiedQueryPageRegistry::field($key, $fieldLabel, $fieldType, $visible, $quick);
+            // 一单多值字段只支持展示/筛选/导出，不能隐式取第一项排序或将明细金额当整单合计。
+            $operations = $type === 'sales' && in_array($key, ['item_name','unit_price','quantity','line_amount','craftsman','sales_manager','guide'], true)
+                ? ['display','filter','quick','export'] : [];
+            $registered[] = UnifiedQueryPageRegistry::field($key, $fieldLabel, $fieldType, $visible, $quick, $operations);
         }
         // 名称用于展示/文本查询，选择器提交的实体 ID 走独立隐藏列；不改变导出名称。
-        foreach (['salesperson', 'cashier', 'operator', 'craftsman', 'void_operator', 'store'] as $identity) {
+        foreach (['salesperson', 'cashier', 'operator', 'craftsman', 'sales_manager', 'guide', 'void_operator', 'store'] as $identity) {
             if (!in_array($identity, array_column($fields, 0), true)) continue;
             $registered[] = ['key' => $identity . '_query_ids', 'label' => $identity . '身份',
                 'type' => 'text', 'defaultVisible' => false, 'defaultQuick' => false,
