@@ -276,6 +276,7 @@ final class CashierV3CardOperationKernel
                 'remainingValueCents' => self::nonnegativeInt($project['remainingValueCents'] ?? null, 'source_project_value_invalid'),
                 'totalTimes' => self::positiveInt($project['totalTimes'] ?? $project['remainingTimes'] ?? null, 'source_project_total_times_invalid'),
                 'totalValueCents' => self::nonnegativeInt($project['totalValueCents'] ?? $project['remainingValueCents'] ?? null, 'source_project_total_value_invalid'),
+                'centCapable' => !empty($project['centCapable']),
             ];
         }
         $selectedByDetail = [];
@@ -305,11 +306,15 @@ final class CashierV3CardOperationKernel
                     $detailId
                 );
             }
-            // Allocate from the original right price and original configured
-            // times, exactly as the transactional writer does. Allocating
-            // twice from a rounded remaining value would otherwise make the
-            // immutable plan disagree with the concrete target right.
-            $lineValue = self::allocateValue($project['totalValueCents'], $project['totalTimes'], $quantity);
+            // 替换沿用来源快照的剩余金额口径，目标只接收整元；历史分角
+            // 单独记为取整扣减，不增加目标权益，也不改写原销售金额。
+            $allocation = $isUpgrade ? null : self::replacementAllocation(
+                $project['totalValueCents'], $project['totalTimes'],
+                $project['remainingTimes'], $quantity, $project['centCapable']
+            );
+            $lineValue = $isUpgrade
+                ? self::allocateValue($project['totalValueCents'], $project['totalTimes'], $quantity)
+                : $allocation['targetValueCents'];
             $sourceValue += $lineValue;
             $totalQuantity += $quantity;
             $mutations[] = [
@@ -319,6 +324,7 @@ final class CashierV3CardOperationKernel
                 'quantityBefore' => $project['remainingTimes'],
                 'quantityDelta' => -$quantity,
                 'quantityAfter' => $project['remainingTimes'] - $quantity,
+                'replacementAmountAllocation' => $allocation,
             ];
             $lines[] = [
                 'lineNo' => ++$lineNo,
@@ -330,7 +336,8 @@ final class CashierV3CardOperationKernel
                 'quantityBefore' => $project['remainingTimes'],
                 'quantityDelta' => -$quantity,
                 'quantityAfter' => $project['remainingTimes'] - $quantity,
-                'amountCents' => $lineValue,
+                'amountCents' => $allocation['sourceDeductionCents'] ?? $lineValue,
+                'replacementAmountAllocation' => $allocation,
             ];
         }
         // A replacement creates the explicitly selected target-right count.
@@ -362,6 +369,33 @@ final class CashierV3CardOperationKernel
             'sourceValueCents' => $sourceValue,
             'mutations' => $mutations,
             'lines' => $lines,
+        ];
+    }
+
+    /**
+     * 来源按已冻结的整元/历史分级口径扣除，末次扣清；目标截去不足一元。
+     * 同一纯函数供计划和锁内写入复核，差额必须随操作行快照保存，不能静默丢失。
+     */
+    public static function replacementAllocation(int $totalCents, int $totalTimes, int $remainingTimes, int $quantity, bool $centCapable = false): array
+    {
+        if ($totalCents < 0 || $totalTimes <= 0 || $remainingTimes <= 0
+            || $remainingTimes > $totalTimes || $quantity <= 0 || $quantity > $remainingTimes) {
+            throw self::invalid('project_value_allocation_invalid');
+        }
+        $unit = $centCapable || $totalCents % 100 !== 0
+            ? intdiv($totalCents, $totalTimes)
+            : intdiv(intdiv($totalCents, 100), $totalTimes) * 100;
+        $before = $totalCents - $unit * ($totalTimes - $remainingTimes);
+        $debit = $quantity === $remainingTimes ? $before : $unit * $quantity;
+        $target = intdiv($debit, 100) * 100;
+        return [
+            'calculationVersion' => 'replacement-whole-yuan-v1',
+            'sourceValueBeforeCents' => $before,
+            'sourceDeductionCents' => $debit,
+            'sourceValueAfterCents' => $before - $debit,
+            'targetValueCents' => $target,
+            'roundingDeductionCents' => $debit - $target,
+            'roundingDeductionLabel' => '取整扣减',
         ];
     }
 

@@ -831,7 +831,7 @@ final class CashierV3MemberDetailQueryServices
         // issued card reads its immutable rule component amount, not the
         // legacy cart's configured value. Cent-capable operation snapshots
         // remain on their own explicit source path.
-        if (!CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($snapshot)
+        if (!CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($snapshot)
             && is_array($ruleAuthority)) {
             $rulePurchaseAmountCents = (int)($ruleAuthority['purchaseAmountCents'] ?? -1);
             if ($rulePurchaseAmountCents >= 0 && $rulePurchaseAmountCents % 100 === 0) {

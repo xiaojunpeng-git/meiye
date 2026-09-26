@@ -136,7 +136,7 @@ final class CashierV3EntitlementProjectionServices
                 $holderIdsForProjection[$holderId] = true;
             }
         }
-        $holderVersions = Db::transaction(function () use ($holderIdsForProjection, $operatorScope, $dataScope): array {
+        $holderVersions = Db::transaction(function () use ($holderIdsForProjection, $operatorScope, $dataScope, $snapshot, $ordersById): array {
             $versions = [];
             foreach (array_keys($holderIdsForProjection) as $holderId) {
                 $versions[$holderId] = $this->provider->synchronizeProjectionVersion(
@@ -144,6 +144,19 @@ final class CashierV3EntitlementProjectionServices
                     (string)$holderId,
                     $operatorScope,
                     $dataScope
+                );
+            }
+            // 修复旧替换目标没有项目版本的存量情况。只同步当前有效来源单
+            // 上尚有余次的操作生成权益；不写业务事实，不接受客户端伪造版本。
+            foreach ((array)($snapshot['carts'] ?? []) as $cart) {
+                $detailSnapshot = json_decode((string)($cart['cart_info'] ?? ''), true) ?: [];
+                if (!isset($ordersById[(int)($cart['oid'] ?? 0)])
+                    || (int)($cart['write_surplus_times'] ?? 0) <= 0
+                    || !CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($detailSnapshot)) {
+                    continue;
+                }
+                $this->provider->synchronizeProjectionVersion(
+                    'member_benefit_pool', (string)$cart['id'], $operatorScope, $dataScope, true
                 );
             }
             return $versions;
@@ -695,7 +708,8 @@ final class CashierV3EntitlementProjectionServices
                 ? json_decode((string)$cart['cart_info'], true)
                 : ($cart['cart_info'] ?? []);
             $decoded = is_array($decoded) ? $decoded : [];
-            $centCapableOperationDetail = CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($decoded);
+            // 新替换虽按整元分摊，仍使用目标项目自身金额/次数，不能退回整卡共享池。
+            $centCapableOperationDetail = CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($decoded);
             // Replacement/upgrade-created details are independently purchased
             // entitlement lines. Their own write surplus is authoritative for
             // selection and amount allocation; a choice-count card's shared

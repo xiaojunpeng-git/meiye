@@ -172,9 +172,35 @@ $replacementRounding = CashierV3CardOperationKernel::plan([
     'projectLines' => [['sourceDetailId' => 302, 'quantity' => 1]],
 ], $roundingSource, ['catalogId' => 501, 'catalogName' => '目标项目'], $context);
 check_card_operation(
-    (int)($replacementRounding['lines'][0]['amountCents'] ?? -1) === 33,
-    'replacement allocation uses original total price instead of rounded remaining value'
+    (int)($replacementRounding['lines'][0]['amountCents'] ?? -1) === 0,
+    'whole-yuan replacement keeps indivisible value for the final use'
 );
+
+// 整元尾差归末次，历史分角扣减必须可对账，且目标金额永远整元。
+$regular = CashierV3CardOperationKernel::replacementAllocation(100000, 3, 3, 1);
+$final = CashierV3CardOperationKernel::replacementAllocation(100000, 3, 1, 1);
+$historic = CashierV3CardOperationKernel::replacementAllocation(25660, 1, 1, 1, true);
+check_card_operation($regular['targetValueCents'] === 33300 && $final['targetValueCents'] === 33400
+    && $final['sourceValueAfterCents'] === 0, 'whole-yuan allocation assigns all remainder to final use');
+check_card_operation($historic['sourceDeductionCents'] === 25660
+    && $historic['targetValueCents'] === 25600 && $historic['roundingDeductionCents'] === 60
+    && $historic['sourceValueAfterCents'] === 0, 'historic final use clears source and audits fractional deduction');
+
+$historicalSource = $source;
+$historicalSource['projects'] = [[
+    'detailId' => 302, 'detailVersion' => 4, 'projectId' => 402,
+    'remainingTimes' => 1, 'remainingValueCents' => 25660,
+    'totalTimes' => 1, 'totalValueCents' => 25660, 'centCapable' => true,
+]];
+$historicalPlan = CashierV3CardOperationKernel::plan([
+    'operationType' => 'project_replacement', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+    'idempotencyKey' => 'R36-HISTORICAL-FRACTION', 'reason' => '历史分角取整',
+    'projectLines' => [['sourceDetailId' => 302, 'quantity' => 1]],
+], $historicalSource, ['catalogId' => 501, 'catalogName' => '目标项目'], $context);
+check_card_operation($historicalPlan['lines'][0]['amountCents'] === 25660
+    && $historicalPlan['lines'][1]['amountCents'] === 25600
+    && $historicalPlan['lines'][0]['replacementAmountAllocation']['roundingDeductionCents'] === 60,
+    'historical source debit and target credit preserve an explicit auditable difference');
 
 $upgrade = CashierV3CardOperationKernel::plan([
     'operationType' => 'card_upgrade', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,

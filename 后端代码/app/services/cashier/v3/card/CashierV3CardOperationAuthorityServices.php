@@ -10,6 +10,8 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\cashier\CashierV3CashierReadinessGuard;
+use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
+use app\services\cashier\v3\cashier\CashierV3EntitlementResourceVersionProvider;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
@@ -79,7 +81,8 @@ final class CashierV3CardOperationAuthorityServices
             $holderId,
             $operatorScope,
             trim((string)($payload['operationType'] ?? '')),
-            $payload
+            $payload,
+            $directSnapshot ? $dataScope : null
         );
         $isReplacementSnapshot = (string)($payload['operationType'] ?? '')
             === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT
@@ -200,6 +203,20 @@ final class CashierV3CardOperationAuthorityServices
             $operatorScope->tenantId(),
             $now
         ) : $state;
+        if ($type === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT) {
+            // 新权益不是客户端既有资源，但创建完成后必须在同事务内登记
+            // 权威版本，供下一次升级/核销使用；不能以版本 0 绕过并发校验。
+            $targetDetailId = (int)Db::name('store_order_cart_info')
+                ->where('oid', (int)$source['originOrderId'])
+                ->where('cart_id', 'cop' . substr(hash('sha256', (string)$plan['operationId']), 0, 28))
+                ->value('id');
+            if ($targetDetailId <= 0) {
+                throw self::failure('project_replacement_target_missing');
+            }
+            (new CashierV3EntitlementResourceVersionProvider(new CashierV3CashierReadinessGuard(), $this->cardRules))->synchronizeProjectionVersion(
+                'member_benefit_pool', (string)$targetDetailId, $operatorScope, $dataScope
+            );
+        }
         $auditSnapshots = $this->lockAuditSnapshotsInTx($source, $operationState, $operatorScope);
         $operation = $this->insertOperation(
             $plan,
@@ -393,7 +410,8 @@ final class CashierV3CardOperationAuthorityServices
         int $holderId,
         CashierV3OperatorScope $operatorScope,
         string $operationType,
-        array $payload
+        array $payload,
+        ?CashierV3DataScopeContext $snapshotDataScope = null
     ): array
     {
         $holder = $this->row(Db::name('user_card_holder')
@@ -434,7 +452,9 @@ final class CashierV3CardOperationAuthorityServices
             'projects' => $this->loadSelectedProjectRightsForUpdate(
                 (int)$order['id'],
                 $operationType,
-                $payload
+                $payload,
+                $operatorScope,
+                $snapshotDataScope
             ),
             'legacyHolder' => $holder,
             'legacyOrder' => $order,
@@ -757,7 +777,17 @@ final class CashierV3CardOperationAuthorityServices
                 throw self::failure('project_replacement_source_quantity_invalid');
             }
             $quantity = -$delta;
-            $value = self::allocateCents(self::moneyToCents($row['pay_price'] ?? null), $times, $quantity);
+            $snapshot = json_decode((string)($row['cart_info'] ?? ''), true) ?: [];
+            $allocation = CashierV3CardOperationKernel::replacementAllocation(
+                self::moneyToCents($row['pay_price'] ?? null), $times, $before, $quantity,
+                CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($snapshot)
+            );
+            // 计划、来源扣除和目标转入必须同口径；锁内不允许临时换金额而
+            // 留下与真实权益不一致的操作审计。差额由计划行快照永久保留。
+            if (($mutation['replacementAmountAllocation'] ?? null) !== $allocation) {
+                throw self::failure('project_replacement_amount_changed');
+            }
+            $value = $allocation['targetValueCents'];
             $affected = Db::name('store_order_cart_info')
                 ->where('id', $detailId)
                 ->where('write_surplus_times', $before)
@@ -785,6 +815,7 @@ final class CashierV3CardOperationAuthorityServices
         $targetLine = count($targetLines) === 1 ? $targetLines[0] : null;
         $targetQuantity = (int)($targetLine['quantityAfter'] ?? 0);
         if (!$targetLine
+            || (int)($targetLine['amountCents'] ?? -1) !== $totalValueCents
             || (int)($targetLine['targetCatalogId'] ?? 0) !== (int)$target['catalogId']
             || (int)($targetLine['quantityBefore'] ?? -1) !== 0
             || (int)($targetLine['quantityDelta'] ?? 0) !== $targetQuantity
@@ -812,6 +843,7 @@ final class CashierV3CardOperationAuthorityServices
             'pay_price' => $money,
             'cardOperationId' => (string)$plan['operationId'],
             'sourceType' => 'cashier_v3_project_replacement',
+            'amountCalculationVersion' => CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION,
         ];
         $targetDetailId = (int)Db::name('store_order_cart_info')->insertGetId([
             // 目标权益仍属于原会员；不能只靠 oid 反推，旧表上不少读取和
@@ -853,7 +885,13 @@ final class CashierV3CardOperationAuthorityServices
     }
 
     /** @return array<int,array> */
-    private function loadSelectedProjectRightsForUpdate(int $orderId, string $operationType, array $payload): array
+    private function loadSelectedProjectRightsForUpdate(
+        int $orderId,
+        string $operationType,
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        ?CashierV3DataScopeContext $snapshotDataScope = null
+    ): array
     {
         if (!in_array($operationType, [
             CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT,
@@ -908,8 +946,21 @@ final class CashierV3CardOperationAuthorityServices
                     ->lock(true)
                     ->find());
                 if ((int)($version['current_version'] ?? 0) <= 0) {
+                    // 已打开的完整结账快照也可遇到旧操作遗漏。仅在来源订单、
+                    // 持卡人和明细已经锁定且确认为操作生成权益时补建缺失项；
+                    // 不覆盖任何既有版本，后续金额/次数快照校验仍正常执行。
+                    if (!$version && $snapshotDataScope !== null
+                        && CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($cartInfo ?: [])) {
+                        $version['current_version'] = (new CashierV3EntitlementResourceVersionProvider(
+                            new CashierV3CashierReadinessGuard(), $this->cardRules
+                        ))->synchronizeProjectionVersion(
+                            'member_benefit_pool', (string)$detailId, $operatorScope, $snapshotDataScope
+                        );
+                    }
+                }
+                if ((int)($version['current_version'] ?? 0) <= 0) {
                     throw CashierV3CommandException::versionConflict(
-                        '卡内项目版本尚未同步，请重新打开使用权益后再办理。',
+                        '暂时无法确认该项目的可用权益，本次升级未完成。请稍后重试。',
                         ['reason' => 'project_source_version_missing', 'source_detail_id' => $detailId]
                     );
                 }
@@ -928,6 +979,9 @@ final class CashierV3CardOperationAuthorityServices
                 ),
                 'totalTimes' => $times,
                 'totalValueCents' => self::moneyToCents($row['pay_price'] ?? null),
+                'centCapable' => CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot(
+                    json_decode((string)($row['cart_info'] ?? ''), true) ?: []
+                ),
             ];
         }
         if (count($projects) !== count($ids)) {

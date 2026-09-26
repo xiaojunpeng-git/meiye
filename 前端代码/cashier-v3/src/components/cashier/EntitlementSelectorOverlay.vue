@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { formatMoney } from '@/services/cashierV3Bridge'
 import {
   entitlementBenefitPoolId,
   entitlementCardHolderId
@@ -208,6 +209,15 @@ function sourceTypeLabel(source = {}) {
   return '—'
 }
 
+// 权益金额仅在展示边界按元取整；不得回写到权益快照或用于核销计算。
+// 沿用统一金额格式化的千分位，列表已有金额列语义，不重复显示货币符号。
+function displayAmount(value) {
+  if (value === null || value === undefined || value === '') return '—'
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return '—'
+  return formatMoney(Math.round(amount)).replace(/^¥/, '')
+}
+
 function displayNumber(value) {
   if (value === null || value === undefined || value === '') return '—'
   const number = Number(value)
@@ -238,7 +248,7 @@ function displayProjectRemainingTimes(source = {}, project = {}) {
 }
 
 function displayProjectRemainingAmount(source = {}, project = {}) {
-  return isTimeCardSource(source) ? '—' : displayNumber(project.remainingAmount)
+  return isTimeCardSource(source) ? '—' : displayAmount(project.remainingAmount)
 }
 
 function sourceCardNo(source = {}) {
@@ -453,8 +463,8 @@ function operationProjectSelected(source = {}, project = {}) {
                 <small :title="source.disabledReason || sourceCardNo(source)">{{ source.disabledReason || sourceCardNo(source) }}</small>
               </div>
               <span>{{ displaySourceRemainingTimes(source) }}</span>
-              <span>{{ displayNumber(source.remainingAmount) }}</span>
-              <span>{{ displayNumber(source.outstandingDebtAmount) }}</span>
+              <span>{{ displayAmount(source.remainingAmount) }}</span>
+              <span>{{ displayAmount(source.outstandingDebtAmount) }}</span>
               <span>{{ sourceExpiryDate(source) }}</span>
               <button
                 v-if="sourceOperationLabel()"

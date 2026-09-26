@@ -1141,7 +1141,7 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             $totalTimes = (int)($detail['write_times'] ?? 0);
             $amountCalculationVersion = $this->amountCalculationVersion($decoded);
             if (is_array($ruleAuthority)
-                && !CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($decoded)) {
+                && !CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($decoded)) {
                 $remaining = (int)$ruleAuthority['remainingTimes'];
                 $amount = $this->centsToMoney((int)$ruleAuthority['purchaseAmountCents']);
                 $totalTimes = (int)$ruleAuthority['totalTimes'];

@@ -771,6 +771,19 @@ try {
         && (int)Db::name('store_order')->where('id', 4501)->value('uid') === 4101
         && (int)Db::name('store_order')->count() === 1,
         json_encode($replacementAudit, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12C');
+    // 新生成的权益明确冻结整元口径；核销/再替换均把不能均分的整元留给末次。
+    $amountAllocator = new \app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator();
+    $auditLine = (array)Db::name('cashier_v3_card_operation_line')
+        ->where('operation_id', (string)$replacementAudit['operation_id'])->where('line_no', 1)->find();
+    $auditLineSnapshot = json_decode((string)($auditLine['line_snapshot_json'] ?? ''), true) ?: [];
+    ok('替换目标整元分摊、末次尾差和金额扣减审计一致',
+        ($replacementTargetCartInfo['amountCalculationVersion'] ?? '') === $amountAllocator::CALCULATION_VERSION
+        && !$amountAllocator::isCentCapableSnapshot($replacementTargetCartInfo)
+        && $amountAllocator::usesIndependentAmountSnapshot($replacementTargetCartInfo)
+        && $amountAllocator::allocateForSnapshot('50.00', 3, 0, 1, $replacementTargetCartInfo) === '16.00'
+        && $amountAllocator::allocateForSnapshot('50.00', 3, 2, 1, $replacementTargetCartInfo) === '18.00'
+        && isset($auditLineSnapshot['replacementAmountAllocation']['roundingDeductionCents']),
+        json_encode($auditLineSnapshot, JSON_UNESCAPED_UNICODE), 'R36-REPLACEMENT-WHOLE-YUAN');
     $replacementReplay = $dispatcher->dispatch($replacementBody, $session);
     ok('项目替换幂等重放不会重复扣权益或创建目标项目',
         !empty($replacementReplay['replay'])
@@ -797,6 +810,14 @@ try {
         && (string)($replacementTargetComponent['status'] ?? '') === 'active',
         json_encode($replacementTargetComponent, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12E');
 
+    // 隔离夹具先验证创建即登记，再模拟旧版本遗漏；重开选择器必须修复技术
+    // 版本，而不增加任何替换记录或改变目标余次。
+    ok('替换目标创建即登记既有资源正版本',
+        cardOpVersion('member_benefit_pool', (int)$replacementTarget['id']) > 0,
+        '', 'R36-REPLACEMENT-TARGET-VERSION');
+    Db::name('cashier_v3_entitlement_resource_version')
+        ->where('resource_kind', 'member_benefit_pool')
+        ->where('resource_id', (string)$replacementTarget['id'])->delete();
     // The browser closes the replacement selector and reopens current rights
     // before a later card operation. Reproduce that projection sync here so
     // the following upgrade uses the post-replacement holder fingerprint.
@@ -809,6 +830,34 @@ try {
         4601,
         (int)($replacementTarget['id'] ?? 0)
     );
+    ok('旧替换目标重开权益自动补齐版本且不改权益',
+        cardOpVersion('member_benefit_pool', (int)$replacementTarget['id']) > 0
+        && (int)Db::name('store_order_cart_info')->where('id', (int)$replacementTarget['id'])->value('write_surplus_times') === 3,
+        json_encode($postReplacementProjection, JSON_UNESCAPED_UNICODE), 'R36-REPLACEMENT-LEGACY-VERSION');
+    // 已经停在结账确认页的旧快照不要求重新选卡。复用真实锁内来源读取，
+    // 验证只补缺失登记且下一次读取不重置已有并发校验信息。
+    Db::name('cashier_v3_entitlement_resource_version')
+        ->where('resource_kind', 'member_benefit_pool')
+        ->where('resource_id', (string)$replacementTarget['id'])->delete();
+    $authority = new \app\services\cashier\v3\card\CashierV3CardOperationAuthorityServices();
+    $loadSource = new ReflectionMethod($authority, 'loadSourceCardForUpdate');
+    $loadSource->setAccessible(true);
+    $recoveredSource = Db::transaction(function () use ($loadSource, $authority, $operatorScope, $dataScope, $replacementTarget): array {
+        return $loadSource->invoke($authority, 4601, $operatorScope, 'project_upgrade', [
+            'projectLines' => [['sourceDetailId' => (int)$replacementTarget['id'], 'quantity' => 1]],
+        ], $dataScope);
+    });
+    $existingVersion = cardOpVersion('member_benefit_pool', (int)$replacementTarget['id']);
+    Db::transaction(function () use ($loadSource, $authority, $operatorScope, $dataScope, $replacementTarget): void {
+        $loadSource->invoke($authority, 4601, $operatorScope, 'project_upgrade', [
+            'projectLines' => [['sourceDetailId' => (int)$replacementTarget['id'], 'quantity' => 1]],
+        ], $dataScope);
+    });
+    ok('已打开结账的旧替换项目锁内自动补齐且保留权益',
+        (int)($recoveredSource['projects'][0]['detailVersion'] ?? 0) > 0
+        && cardOpVersion('member_benefit_pool', (int)$replacementTarget['id']) === $existingVersion
+        && (int)($recoveredSource['projects'][0]['remainingTimes'] ?? 0) === 3,
+        json_encode($recoveredSource, JSON_UNESCAPED_UNICODE), 'R36-REPLACEMENT-CHECKOUT-RECOVERY');
     ok('项目替换后重新打开权益会同步卡级版本供后续卡操作使用',
         cardOpSelectorHasHolder($postReplacementProjection, 4601)
         && cardOpVersion('card_holder', 4601) > $replacementVersion,

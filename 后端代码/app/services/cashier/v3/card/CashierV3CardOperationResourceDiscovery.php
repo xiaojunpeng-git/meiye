@@ -143,7 +143,7 @@ final class CashierV3CardOperationResourceDiscovery
         }
         if (count($versionMap) !== count($ids)) {
             throw CashierV3CommandException::versionConflict(
-                '卡内项目版本尚未同步，请重新打开使用权益后再办理。',
+                '暂时无法确认该项目的可用权益，本次升级未完成。请稍后重试。',
                 ['reason' => 'project_source_version_missing']
             );
         }

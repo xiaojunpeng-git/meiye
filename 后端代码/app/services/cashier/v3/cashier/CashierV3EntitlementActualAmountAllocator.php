@@ -6,7 +6,7 @@ namespace app\services\cashier\v3\cashier;
  * 权益项目“实际购买金额”的分摊器。
  *
  * 这里处理的是购买金额按权益次数的展示／草稿分摊，不是核销后台计价。
- * 普通历史卡项继续使用整元分摊；项目替换/升级生成的权益使用分级分摊。
+ * 普通卡项及新替换权益使用整元分摊；旧操作权益按冻结版本保留分级分摊。
  */
 final class CashierV3EntitlementActualAmountAllocator
 {
@@ -18,8 +18,20 @@ final class CashierV3EntitlementActualAmountAllocator
         'cashier_v3_project_upgrade',
     ];
 
+    /** 操作生成的项目金额独立于整卡共享次数池，与是否保留分精度无关。 */
+    public static function usesIndependentAmountSnapshot(array $snapshot): bool
+    {
+        return in_array((string)($snapshot['sourceType'] ?? ''), self::CENT_CAPABLE_SOURCE_TYPES, true)
+            || self::isCentCapableSnapshot($snapshot);
+    }
+
     public static function isCentCapableSnapshot(array $snapshot): bool
     {
+        // 新替换权益按整元分摊，尾差归末次；旧操作快照保持原金额口径，
+        // 只在再次替换时由操作审计记录实际发生的不足一元扣减。
+        if (($snapshot['amountCalculationVersion'] ?? '') === self::CALCULATION_VERSION) {
+            return false;
+        }
         $sourceType = (string)($snapshot['sourceType'] ?? '');
         $version = (string)($snapshot['amountCalculationVersion'] ?? '');
         return in_array($sourceType, self::CENT_CAPABLE_SOURCE_TYPES, true)
