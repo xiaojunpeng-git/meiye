@@ -575,6 +575,44 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         }
     }
 
+    /**
+     * 服务作废返还已扣次数；调用方必须先锁定服务并检查作废幂等账本。
+     * 与旧卡余额及返还事实处于同一事务，不单独提交。不重置任选种类的历史选择，
+     * 不延长时间卡有效期；旧卡无规则返回null沿用旧余额，时间卡返回0禁止虚增次数。
+     */
+    public function restoreServiceTimesInTx(string $tenantId, int $holderId, int $detailId, int $quantity, int $time): ?int
+    {
+        CashierV3TransactionGuard::assertInTransaction('cardRuleServiceRestore');
+        if ($quantity <= 0 || $holderId <= 0 || $detailId <= 0) throw self::failure('card_rule_restore_context_invalid');
+        $snapshot = $this->snapshotForHolder($tenantId, $holderId, true);
+        if ($snapshot === null) return null;
+        $state = $snapshot['state'];
+        $component = null;
+        foreach ($snapshot['components'] as $candidate) {
+            if ((int)$candidate['legacy_detail_id'] === $detailId) { $component = $candidate; break; }
+        }
+        // 不得把已转移/取消的权益重新激活；异常时整笔作废回滚，不能留下半返还。
+        if (!$component || !in_array($state['status'], ['active', 'exhausted'], true)
+            || !in_array($component['status'], ['active', 'exhausted'], true)) {
+            throw self::failure('card_rule_restore_state_invalid');
+        }
+        $type = (string)$state['rule_type'];
+        if ($type === 'time') return 0;
+        if ($type === 'choice_count') {
+            $remaining = (int)$state['shared_remaining_times'];
+            if ($quantity > (int)$state['shared_total_times'] - $remaining) throw self::failure('card_rule_restore_overflow');
+            $this->updateState($state, ['shared_remaining_times' => $remaining + $quantity, 'status' => 'active'], $time);
+        } elseif (in_array($type, ['normal', 'choice_kind'], true)) {
+            $remaining = (int)$component['remaining_times'];
+            if ($quantity > (int)$component['total_times'] - $remaining) throw self::failure('card_rule_restore_overflow');
+            $this->updateComponent($component, ['remaining_times' => $remaining + $quantity, 'status' => 'active'], $time);
+            $this->updateState($state, ['status' => 'active'], $time);
+        } else {
+            throw self::failure('card_rule_restore_type_invalid');
+        }
+        return $quantity;
+    }
+
     private function updateState(array $state, array $changes, int $time): void
     {
         $version = (int)$state['state_version'];

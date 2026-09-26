@@ -604,6 +604,38 @@ try {
         $staleBlocked
         && (int)Db::name('cashier_v3_card_rule_state')->where('id', $race['stateId'])->value('state_version') === 2,
         '', 'CARD-RULE-MYSQL-07');
+    // 作废必须同步权威次数；任选种类不解除历史选定，时间卡不能虚增次数或有效期。
+    foreach (['normal', 'choice_kind', 'choice_count', 'time'] as $index => $type) {
+        $h = $holderBase + 100 + $index; $d = $detailBase + 100 + $index;
+        $restore = insertRuleFixture($suffix . '-restore-' . $type, $type, $h, $memberId, 1, 2, [[
+            'detailId'=>$d, 'projectId'=>600+$index, 'totalTimes'=>2, 'remainingTimes'=>0,
+            'writeoffAmountCents'=>0, 'configuredPriceCents'=>1000,
+            'selectionStatus'=>$type === 'choice_kind' ? 'selected' : 'not_applicable',
+        ]], $now-100, $now+100);
+        $fixtureStateIds[]=$restore['stateId'];
+        Db::name('cashier_v3_card_rule_state')->where('id',$restore['stateId'])->update([
+            'shared_remaining_times'=>0, 'status'=>$type === 'time' ? 'active' : 'exhausted',
+        ]);
+        $returned=$service->restoreServiceTimesInTx('0',$h,$d,2,$now);
+        $snapshot=$service->snapshotForHolder('0',$h,true);
+        $remaining=$type === 'choice_count' ? $snapshot['state']['shared_remaining_times'] : $snapshot['components'][0]['remaining_times'];
+        ok('void restores exhausted ' . $type . ' without changing validity/selection',
+            $returned === ($type === 'time' ? 0 : 2)
+            && (int)$remaining === ($type === 'time' ? 0 : 2)
+            && $snapshot['state']['status'] === 'active'
+            && (int)$snapshot['state']['valid_through'] === $now+100
+            && ($type !== 'choice_kind' || $snapshot['components'][0]['selection_status'] === 'selected'),
+            '', 'CARD-RULE-RESTORE-' . $type);
+        if ($type !== 'time') {
+            $blocked=false;
+            try { $service->restoreServiceTimesInTx('0',$h,$d,1,$now); }
+            catch (CashierV3CommandException $e) { $blocked=($e->getDetail()['reason'] ?? '') === 'card_rule_restore_overflow'; }
+            ok('restore cannot exceed original total ' . $type,$blocked,'','CARD-RULE-RESTORE-LIMIT-' . $type);
+        }
+    }
+    ok('legacy card without a rule retains legacy restore path',
+        $service->restoreServiceTimesInTx('0',$holderBase+999,$detailBase+999,1,$now) === null,
+        '', 'CARD-RULE-RESTORE-LEGACY');
 } finally {
     Db::rollback();
 }
