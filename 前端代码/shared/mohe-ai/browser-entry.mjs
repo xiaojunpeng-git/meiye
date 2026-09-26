@@ -798,7 +798,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     if (!workspace) message('能确定就直接查；有歧义逐步选清，明确后立即查询。聊天只保留在本设备 24 小时。', 'muted');
     const footer = el('div', null, 'footer' + (workspace ? ' workspace-composer' : ''));
     progress = el('div', '', 'muted' + (workspace ? ' workspace-progress' : '')); progress.setAttribute('role', 'status'); footer.appendChild(progress);
-    input = el('textarea'); input.placeholder = workspace ? '继续问，例如：按销量看呢？' : '例如：今天经营情况如何？'; input.maxLength = 4000;
+    // Keep the default suggestion consistent with mobile; it never becomes submitted input.
+    input = el('textarea'); input.placeholder = '你可以问我今天的现金业绩、消耗业绩、退款业绩等问题?'; input.maxLength = 4000;
     const actions = el('div', null, 'actions');
     format = el('select'); [['screen','仅查看数据'],['screen_and_xlsx','数据和 Excel']].forEach(([value,label]) => { const o = el('option', label); o.value = value; format.appendChild(o); });
     send = el('button', '发送', 'primary' + (workspace ? ' workspace-send' : ''));
