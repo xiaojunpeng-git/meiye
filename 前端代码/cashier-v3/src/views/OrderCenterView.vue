@@ -1549,7 +1549,9 @@ async function queryRecords(query = {}, resetPage = true) {
   const targetPage = resetPage || pageSizeChanged ? 1 : Math.max(1, Number(query.page) || page.value)
   if (resetPage || pageSizeChanged) salesPageCursors.value = {}
   const cursor = salesPageCursors.value[targetPage] || ''
-  if (targetPage > 1 && !cursor) {
+  // 统一查询在完整授权候选上筛选后分页；仅旧 keyset 响应需要签名游标。
+  const unifiedOffset = state.orderCenter?.pagesByType?.sales?.paginationMode === 'offset'
+  if (targetPage > 1 && !cursor && !unifiedOffset) {
     return {
       result: {
         status: 'failed',

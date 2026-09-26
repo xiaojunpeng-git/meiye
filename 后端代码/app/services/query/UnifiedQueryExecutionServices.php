@@ -1033,6 +1033,18 @@ class UnifiedQueryExecutionServices
             return bccomp((string)$left, (string)$right, StructuredExpressionEvaluator::INTERNAL_SCALE);
         }
         if (in_array($type, ['date', 'datetime'], true)) {
+            // 查询日期控件可按整天筛选时间列；分钟控件使用 HTML datetime-local。
+            // 仅规范比较精度，不改写源记录时间，列表与冻结导出保持同一边界。
+            if ($type === 'datetime') {
+                $left = str_replace('T', ' ', (string)$left);
+                $right = str_replace('T', ' ', (string)$right);
+                if (strlen($left) === 10 || strlen($right) === 10) {
+                    $left = substr($left, 0, 10); $right = substr($right, 0, 10);
+                } else {
+                    if (strlen($left) === 16) $left .= ':00';
+                    if (strlen($right) === 16) $right .= ':00';
+                }
+            }
             return strcmp((string)$left, (string)$right);
         }
         if ($type === 'boolean') {
@@ -1128,6 +1140,10 @@ class UnifiedQueryExecutionServices
                 }
             } elseif ($type === 'date' || $type === 'datetime') {
                 $format = $type === 'date' ? 'Y-m-d' : 'Y-m-d H:i:s';
+                if ($type === 'datetime') {
+                    if (strlen((string)$item) === 10) $format = 'Y-m-d';
+                    elseif (strlen((string)$item) === 16) $format = strpos((string)$item, 'T') !== false ? 'Y-m-d\\TH:i' : 'Y-m-d H:i';
+                }
                 $date = \DateTimeImmutable::createFromFormat('!' . $format, (string)$item);
                 $errors = \DateTimeImmutable::getLastErrors();
                 if ($date === false
