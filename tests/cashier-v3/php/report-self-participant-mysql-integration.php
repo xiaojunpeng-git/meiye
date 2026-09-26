@@ -75,6 +75,14 @@ ok('SELF query and export use the same order scope', $queryOrders === $exportOrd
 
 $allRowsAuthorized = true;
 foreach ($queryOrders as $orderId) {
+    // 纯权益服务没有销售资金单，必须按同一结账的参与事实验证权限，不能因无销售单误判越权。
+    if (strpos($orderId, 'service:') === 0) {
+        $check = Db::name('cashier_v3_entitlement_service_fact')->alias('result_service')
+            ->where('result_service.checkout_request_id', substr($orderId, strlen('service:')));
+        $participant->applyCheckout($check, 'result_service.checkout_request_id', $employeeId);
+        if ((int)$check->count() === 0) { $allRowsAuthorized = false; break; }
+        continue;
+    }
     $check = Db::name('cashier_v3_sales_order')->alias('result_order')->where('result_order.order_id', $orderId);
     $participant->applyOrder($check, 'result_order.order_id', $employeeId);
     if ((int)$check->count() === 0) { $allRowsAuthorized = false; break; }
