@@ -607,20 +607,20 @@ final class CashierV3MemberDetailQueryServices
 
     private function assertVisible(int $memberId, CashierV3DataScopeContext $dataScope): void
     {
-        if ($dataScope->authorizationMode() === CashierV3DataScopeContext::MODE_ALL) {
+        if ($dataScope->authorizationMode() === CashierV3DataScopeContext::MODE_ALL
+            || $dataScope->authorizationMode() === CashierV3DataScopeContext::MODE_STORES
+            || $dataScope->authorizationMode() === CashierV3DataScopeContext::MODE_SELF_PARTICIPANT) {
+            // 会员详情按会员主档和会员权益读取，不能因为当前操作门店与会员归属门店
+            // 不同就把会员判定为不存在；否则会员摘要可以显示，权益明细却会被清空。
+            // 卡项权益在 cards() 中按会员关联事实返回，服务记录、赠送记录等独立事实
+            // 仍分别执行自己的门店数据权限过滤。NONE 模式继续拒绝，保留无权限会话的
+            // fail-closed 行为。
             return;
         }
-        if ($dataScope->authorizationMode() !== CashierV3DataScopeContext::MODE_STORES) {
+        if ($dataScope->authorizationMode() === CashierV3DataScopeContext::MODE_NONE) {
             throw $this->notFound();
         }
-        $storeIds = array_values(array_unique(array_filter(array_map('intval', (array)$dataScope->visibleStoreIds()))));
-        if (!$storeIds || !Db::name('store_user')
-            ->where('uid', $memberId)
-            ->where('status', 1)
-            ->whereIn('store_id', $storeIds)
-            ->value('uid')) {
-            throw $this->notFound();
-        }
+        throw $this->notFound();
     }
 
     /** @return array<int,array<string,mixed>> */
