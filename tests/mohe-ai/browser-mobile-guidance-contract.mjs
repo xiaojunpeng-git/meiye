@@ -5,11 +5,13 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const esbuild = require('../../前端代码/cashier-v3/node_modules/esbuild');
 const source = fs.readFileSync(new URL('../../前端代码/mobile-vue3/src/shared/components/mohe-ai-entry.uvue', import.meta.url), 'utf8');
-// Both terminal placeholders must use the approved copy without filling the input value.
-const approvedHint = '你可以问我今天的现金业绩、消耗业绩、退款业绩等问题?';
+// Neither terminal displays a default hint; retain an accessible input name.
 const browserEntry = fs.readFileSync(new URL('../../前端代码/shared/mohe-ai/browser-entry.mjs', import.meta.url), 'utf8');
-assert.ok(source.includes(`function questionHint() : string { return '${approvedHint}' }`));
-assert.ok(browserEntry.includes(`input.placeholder = '${approvedHint}'`));
+assert.ok(!source.includes('questionHint'));
+assert.ok(!source.match(/<textarea[^>]*placeholder/));
+assert.ok(source.includes('aria-label="输入问题"'));
+assert.ok(!browserEntry.includes('input.placeholder'));
+assert.ok(browserEntry.includes("input.setAttribute('aria-label', '输入问题')"));
 // Execute the production UVue controller after TS syntax lowering. This checks
 // its actual state functions, not a copied implementation, but is NOT a native
 // UTS compiler, picker, H5 layout or device lifecycle acceptance test.

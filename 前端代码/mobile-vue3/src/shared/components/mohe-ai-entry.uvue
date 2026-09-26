@@ -50,7 +50,8 @@
       <!-- A single line stays between the two actions; wrapped text grows above them. -->
       <view class="ai-composer" :class="{ 'ai-composer--expanded': composerExpanded }">
         <button class="ai-composer-more" :class="{ 'ai-composer-more--selected': wantExcel && excelAvailable }" aria-label="展开输入选项" :aria-expanded="composerOptionsOpen" @tap="composerOptionsOpen = !composerOptionsOpen"><view class="ai-icon-action"><view class="ai-icon-action__stroke"></view><view class="ai-icon-action__stroke ai-icon-action__stroke--plus"></view></view></button>
-        <textarea v-model="question" :placeholder="questionHint()" :maxlength="4000" :auto-height="true" class="ai-input" @linechange="onComposerLineChange"/>
+        <!-- 双端不展示默认提示；无障碍名称不填入用户问题。 -->
+        <textarea v-model="question" aria-label="输入问题" :maxlength="4000" :auto-height="true" class="ai-input" @linechange="onComposerLineChange"/>
         <button v-if="!busy" class="ai-submit" :disabled="question.trim().length == 0" aria-label="发送问题" @tap="submit"><view class="ai-icon-send"><view class="ai-icon-send__shaft"></view><view class="ai-icon-send__head-left"></view><view class="ai-icon-send__head-right"></view></view></button>
         <button v-else class="ai-submit ai-submit--stop" aria-label="停止回答" @tap="cancelRun">停止</button>
       </view>
@@ -156,8 +157,6 @@ function showActiveQuestion(value : string) : void {
 }
 // A terminal error already rendered in its turn must not be repeated above the composer.
 function showFooterProgress() : boolean { if (progress.value.length == 0 || activeQuestion.value.length > 0) return false; const last = displayed.value.length > 0 ? displayed.value[displayed.value.length - 1] : null; return last == null || String(last.answer || '').trim() != progress.value.trim() }
-// 与电脑端保持同一默认提示；仅展示，不作为用户问题发送。
-function questionHint() : string { return '你可以问我今天的现金业绩、消耗业绩、退款业绩等问题?' }
 function presentationReady(value : any) : boolean { return value != null && value.version == 1 && typeof value.headline == 'string' && typeof value.period_label == 'string' && Array.isArray(value.facts) && Array.isArray(value.notes) && value.facts.every((item : any) => item != null && typeof item.label == 'string' && typeof item.value == 'string' && typeof item.unit == 'string' && (item.section == null || typeof item.section == 'string')) && value.notes.every((note : any) => typeof note == 'string') }
 function collectionSections(value : any) : Array<any> { if (value == null || !Array.isArray(value.sections) || value.sections.length < 2 || value.sections.length > 4) return []; let seen : Array<string> = [], out : Array<any> = []; value.sections.forEach((section : any) => { if (section != null && typeof section.id == 'string' && /^q[1-4]$/.test(section.id) && seen.indexOf(section.id) < 0 && typeof section.title == 'string' && section.title.length > 0 && section.title.length <= 64 && section.answer != null && typeof section.answer == 'object' && !Array.isArray(section.answer) && !Array.isArray(section.answer.sections)) { seen.push(section.id); out.push(section) } }); return out.length == value.sections.length ? out : [] }
 // Stored turns contain the whole answer, as on desktop. Older flat presentations remain readable.
