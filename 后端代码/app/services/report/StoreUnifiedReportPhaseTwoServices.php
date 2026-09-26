@@ -890,11 +890,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
 
     private function primarySources():array{return Db::name('cashier_v3_business_source')->where('parent_id',0)->where('status',1)->order('sort','asc')->order('id','asc')->field('id,name,sort')->select()->toArray();}
     /**
-     * Fill B-source detail rows that have completed service facts but no cash
-     * fact. One row represents one source sales order in the selected period;
-     * service_fact_id is still counted separately by the shared visit resolver.
-     * The order is used only for its immutable display snapshots and stable
-     * annotation key, never to infer or fabricate an amount.
+     * 为各来源补充无现金服务行：先按业务日、来源和销售/纯权益服务单投影，
+     * 再交给会员日聚合统一去重。销售单或本次服务快照只提供展示和稳定键，
+     * 不推导现金金额，不写入业务事实；游客按服务结账请求独立识别。
      */
     private function marketServiceOnlyRows(array $stores, array $serviceVisits, array $cashRows, string $dimension): array
     {
@@ -940,6 +938,19 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         foreach ($candidates as $visit) {
             $orderId = (string)$visit['matched_order_id'];
             $order = $ordersByKey[(string)$visit['tenant_id'] . '|' . (int)$visit['store_id'] . '|' . $orderId] ?? null;
+            // 纯权益没有销售资金单：只读投影使用结账快照和服务单稳定键，绝不补造销售/收款事实。
+            if (!$order && strpos($orderId, 'service:') === 0) {
+                $order = [
+                    'checkout_request_id' => $visit['checkout_request_id'],
+                    'order_no' => $visit['service_record_no'],
+                    'store_name_snapshot' => $visit['store_name_snapshot'],
+                    'organization_id' => $visit['organization_id'],
+                    'organization_path_snapshot' => $visit['organization_path_snapshot'],
+                    'business_source_primary_id' => $visit['business_source_primary_id'],
+                    'business_source_primary_name_snapshot' => $visit['service_source_name'],
+                    'business_source_label_snapshot' => $visit['service_source_label'],
+                ];
+            }
             $sourceId = (int)$visit['business_source_primary_id'];
             if (!$order || ((int)$order['business_source_primary_id'] > 0
                 && (int)$order['business_source_primary_id'] !== $sourceId)) continue;
@@ -967,7 +978,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     /**
      * Read completed service facts once and resolve their source without making
      * sales_order an existence gate. New rows normally resolve by checkout
-     * request; historical/card-service rows can resolve through the immutable
+     * request and frozen checkout source (including entitlement-only receipts);
+     * historical/card-service rows can resolve through the immutable
      * card-purchase receipt, then the origin order and its payment fact. A
      * successful service void is excluded as a reversal, and service_fact_id
      * remains the deduplication grain.
@@ -983,6 +995,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ),
             'sv.checkout_request_id'
         )
+            // 当前结账冻结的来源优先于历史购卡来源，与订单中心纯权益单保持一致。
+            ->leftJoin('cashier_v3_checkout_business_source_selection bs',
+                "bs.tenant_id=sv.tenant_id AND bs.store_id=sv.store_id AND bs.checkout_request_id=sv.checkout_request_id AND bs.checkout_kind='sale'")
             ->leftJoin(
                 'cashier_v3_entitlement_writeoff_fact wf',
                 "wf.tenant_id=sv.tenant_id AND wf.checkout_request_id=sv.checkout_request_id AND wf.source_line_id=sv.source_line_id AND wf.status='effective'"
@@ -1026,14 +1041,19 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $rows = $query
             ->fieldRaw(
                 'sv.tenant_id,sv.store_id,sv.service_fact_id,sv.checkout_request_id,'
+                . 'MAX(sv.service_record_no) service_record_no,MAX(sv.organization_id) organization_id,'
+                . 'MAX(sv.organization_path_snapshot) organization_path_snapshot,'
+                . 'MAX(bs.primary_source_name_snapshot) service_source_name,MAX(bs.source_label_snapshot) service_source_label,'
                 . 'MAX(sv.store_name_snapshot) store_name_snapshot,'
                 . 'MAX(sv.business_date) service_business_date,'
                 . 'MAX(sv.member_id) member_id,MAX(sv.member_name_snapshot) member_name_snapshot,'
                 . 'MAX(sv.operator_name_snapshot) operator_name_snapshot,'
                 . 'MAX(sv.recorded_at) recorded_at,'
                 . 'COALESCE(NULLIF(wf.origin_order_id,0),0) origin_order_id,'
-                . "COALESCE(NULLIF(MAX(o1.order_id),''),NULLIF(MAX(o3.order_id),''),NULLIF(MAX(o2.order_id),''),NULLIF(MAX(p1.order_id),''),NULLIF(MAX(p3.order_id),''),NULLIF(MAX(p2.order_id),''),'') matched_order_id,"
+                // 无当前销售单但有本次冻结来源时，按结账请求表示服务单；禁止借历史购卡单合并不同游客。
+                . "COALESCE(NULLIF(MAX(o1.order_id),''),CASE WHEN MAX(bs.primary_source_id)>0 AND sv.checkout_request_id<>'' THEN CONCAT('service:',sv.checkout_request_id) END,NULLIF(MAX(o3.order_id),''),NULLIF(MAX(o2.order_id),''),NULLIF(MAX(p1.order_id),''),NULLIF(MAX(p3.order_id),''),NULLIF(MAX(p2.order_id),''),'') matched_order_id,"
                 . 'COALESCE(NULLIF(MAX(o1.business_source_primary_id),0),'
+                . 'NULLIF(MAX(bs.primary_source_id),0),'
                 . 'NULLIF(MAX(o3.business_source_primary_id),0),'
                 . 'NULLIF(MAX(o2.business_source_primary_id),0),'
                 . 'NULLIF(MAX(p1.business_source_primary_id),0),'
@@ -1275,7 +1295,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'store_name_snapshot'=>'显示收款或服务实际归属的门店；只展示当前账号有权查看的门店。',
             'member_name_snapshot'=>'有会员身份时显示业务发生时记录的会员姓名；没有会员身份时显示“游客”，不同游客不会按姓名合并。',
             'member_phone'=>'显示会员资料中当前保存的手机号码；未填写则留空。',
-            'dimension'=>'显示销售发生时记录的客户来源；只有服务、没有当次收款的行，显示该服务所关联销售单的来源。',
+            'dimension'=>'显示业务发生时保存的客户来源；纯权益服务优先读取本次结账保存的来源，历史服务没有该快照时读取关联购卡或销售记录，不按会员当前资料改写历史来源。',
             'walk_in'=>'显示有权限人员为本行保存的进店数：会员按“门店＋业务日期＋会员＋来源”合并，游客按原始订单独立显示和编辑；新行尚未保存时显示原单据已保存值。仅 B 来源汇总到市场业绩表的进店列。',
             'visits'=>'有已完成且未作废的服务即计人次：会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
             'effective_people'=>'所选日期内，同一门店、同一来源的会员净记账收款达到标准时显示 1：A 来源至少 1,000 元，其他来源至少 500 元；游客不计。同一会员跨日期可能显示多行 1，但合计按会员去重。',
