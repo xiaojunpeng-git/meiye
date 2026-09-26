@@ -691,13 +691,20 @@ final class CashierV3EntitlementProjectionServices
             $ruleAuthority = $ruleAuthoritiesByHolder[(int)$holder['id']][$detailId] ?? null;
             $sourceOrderUnavailableReason = $this->sourceOrderUnavailableReason($order);
             $pendingDebt = $this->pendingDebt($order, $debts[(int)$order['id']] ?? null);
-            $rawSurplus = is_array($ruleAuthority)
-                ? max(0, (int)$ruleAuthority['remainingTimes'])
-                : max(0, (int)$cart['write_surplus_times']);
             $decoded = is_string($cart['cart_info'] ?? null)
                 ? json_decode((string)$cart['cart_info'], true)
                 : ($cart['cart_info'] ?? []);
             $decoded = is_array($decoded) ? $decoded : [];
+            $centCapableOperationDetail = CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($decoded);
+            // Replacement/upgrade-created details are independently purchased
+            // entitlement lines. Their own write surplus is authoritative for
+            // selection and amount allocation; a choice-count card's shared
+            // remaining count only governs whether the rule stays available.
+            $rawSurplus = $centCapableOperationDetail
+                ? max(0, (int)$cart['write_surplus_times'])
+                : (is_array($ruleAuthority)
+                    ? max(0, (int)$ruleAuthority['remainingTimes'])
+                    : max(0, (int)$cart['write_surplus_times']));
             $name = trim((string)($decoded['productInfo']['store_name'] ?? ''));
             if ($name === '') {
                 $name = '项目';
@@ -709,7 +716,7 @@ final class CashierV3EntitlementProjectionServices
             if ($actualSaleAmountCents >= 0) {
                 $amounts = $this->projectActualSaleAmount($cart, $rawSurplus, $actualSaleAmountCents, $decoded);
             } else {
-                $amounts = CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($decoded)
+                $amounts = $centCapableOperationDetail
                     ? $this->projectAmounts($cart, $rawSurplus)
                     : (is_array($ruleAuthority)
                         ? $this->ruleProjectAmounts($ruleAuthority)
@@ -801,7 +808,10 @@ final class CashierV3EntitlementProjectionServices
                 $project['version'] = (int)$detailVersions[$detailId];
                 $project['amountSourceVersion'] = (int)$detailVersions[$detailId];
             }
-            if (is_array($ruleAuthority)) {
+            if (is_array($ruleAuthority) && !$centCapableOperationDetail) {
+                // Issued-card components normally inherit their purchase count
+                // from the rule authority. Operation-created details are the
+                // exception because they own a separate paid count and amount.
                 $project['purchaseTimes'] = (int)$ruleAuthority['totalTimes'];
             }
             $projectsByHolder[(int)$holder['id']][] = $project;

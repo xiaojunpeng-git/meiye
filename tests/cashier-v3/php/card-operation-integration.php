@@ -182,6 +182,21 @@ function cardOpSelectorHasHolder(array $projection, int $holderId): bool
     return false;
 }
 
+function cardOpSelectorProject(array $projection, int $holderId, int $detailId): array
+{
+    foreach ((array)($projection['data']['entitlementSelector']['sources'] ?? []) as $source) {
+        if ((int)($source['entitlementInstanceId'] ?? $source['id'] ?? 0) !== $holderId) {
+            continue;
+        }
+        foreach ((array)($source['projects'] ?? []) as $project) {
+            if ((int)($project['entitlementSourceDetailId'] ?? $project['id'] ?? 0) === $detailId) {
+                return $project;
+            }
+        }
+    }
+    return [];
+}
+
 function cardOpRejectCode(callable $callable, array &$detail = []): string
 {
     try {
@@ -789,10 +804,24 @@ try {
         cardOpProjectionBody($targetSession, 4102),
         $targetSession
     );
+    $replacementTargetProjection = cardOpSelectorProject(
+        $postReplacementProjection,
+        4601,
+        (int)($replacementTarget['id'] ?? 0)
+    );
     ok('项目替换后重新打开权益会同步卡级版本供后续卡操作使用',
         cardOpSelectorHasHolder($postReplacementProjection, 4601)
         && cardOpVersion('card_holder', 4601) > $replacementVersion,
         json_encode($postReplacementProjection, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12F');
+    ok('项目替换生成权益按自身购买次数和金额正常选择',
+        (string)($replacementTargetProjection['purchaseAmount'] ?? '') === '50.00'
+        && (string)($replacementTargetProjection['remainingAmount'] ?? '') === '50.00'
+        && (int)($replacementTargetProjection['purchaseTimes'] ?? 0) === 3
+        && (int)($replacementTargetProjection['remainingTimes'] ?? 0) === 3
+        && (int)($replacementTargetProjection['availableTimes'] ?? 0) === 3
+        && !empty($replacementTargetProjection['selectable'])
+        && empty($replacementTargetProjection['disabledReason']),
+        json_encode($replacementTargetProjection, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-12G');
 
     cardOpSection('permission and pending upgrade safety');
     $beforeDenied = (int)Db::name('cashier_v3_card_operation')->count();

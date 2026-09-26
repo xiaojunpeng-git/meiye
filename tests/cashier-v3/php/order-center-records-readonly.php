@@ -55,6 +55,7 @@ $operator = new CashierV3OperatorScope(133, 71, 'organization:8', 'tenant:defaul
 $orderCenterSource = (string)file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php');
 $salesOrderQuerySource = (string)file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3SalesOrderQueryServices.php');
 $orderProjectionSource = (string)file_get_contents($root . '/前端代码/cashier-v3/src/services/cashierV3OrderProjectionContract.js');
+$recordDetailOverlaySource = (string)file_get_contents($root . '/前端代码/cashier-v3/src/components/order/BusinessRecordDetailOverlay.vue');
 $calls = [];
 $reader = function (string $operation, array $context) use (&$calls): array {
     $calls[] = ['operation' => $operation, 'context' => $context];
@@ -111,6 +112,24 @@ recordOk('卡升级和项目升级的关联销售订单号只从结算权威记�
 recordOk('卡转让进入订单中心卡操作白名单并使用中文筛选标签',
     strpos($orderCenterSource, "'card_transfer',") !== false
     && strpos($orderCenterSource, "'card_transfer' => '卡转让'") !== false);
+// Historical replacement details must render from the immutable operation
+// snapshot, so later card changes cannot erase or rename their source lines.
+$sourceContentMethod = new ReflectionMethod($service, 'cardOperationSourceContent');
+$replacementSourceContent = $sourceContentMethod->invoke($service, [
+    'operation_type' => 'project_replacement',
+    'card_name_snapshot' => '6980随心挑',
+    'result_snapshot_json' => json_encode([
+        'replacementSnapshot' => ['sourceLines' => [
+            ['projectName' => '面部补水', 'quantity' => 2],
+            ['projectName' => '润享精华套', 'quantity' => 1],
+        ]],
+    ], JSON_UNESCAPED_UNICODE),
+]);
+recordOk('项目替换详情展示冻结的多来源项目明细',
+    $replacementSourceContent === "6980随心挑\n面部补水 × 2次\n润享精华套 × 1次",
+    $replacementSourceContent);
+recordOk('订单详情保留来源项目换行展示',
+    strpos($recordDetailOverlaySource, 'white-space: pre-line;') !== false);
 
 $beforeBlocked = count($calls);
 $blocked = $service->queryRecords([

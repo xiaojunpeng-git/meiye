@@ -1894,6 +1894,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'c.card_no_snapshot', 'c.target_catalog_name_snapshot', 'c.source_remaining_value_cents',
             'c.settlement_delta_cents', 'o.order_no AS sales_order_no', 'c.reason_snapshot',
             'c.operator_name_snapshot', 'c.business_date', 'c.occurred_at', 'c.settled_at',
+            'c.result_snapshot_json',
         ]))->order('c.occurred_at', 'desc')->order('c.id', 'desc')->limit($limit)->select()->toArray();
         return [array_map(function (array $row): array {
             $time = (int)($row['settled_at'] ?: $row['occurred_at']);
@@ -1905,7 +1906,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'businessDate' => (string)$row['business_date'],
                 'memberId' => (int)($row['member_id_after'] ?: $row['member_id_before'] ?: $row['origin_member_id']),
                 'memberName' => $row['member_name_after_snapshot'],
-                'sourceCard' => $row['card_name_snapshot'],
+                'sourceCard' => $this->cardOperationSourceContent($row),
                 'targetContent' => $row['target_catalog_name_snapshot'],
                 'amount' => $this->centsToMoney((int)$row['settlement_delta_cents']),
                 'salesOrderNo' => $row['sales_order_no'],
@@ -1916,6 +1917,36 @@ final class CashierV3OrderCenterRecordQueryServices
                 '_sortTime' => (int)$row['occurred_at'],
             ]);
         }, $rows), $total];
+    }
+
+    /**
+     * 项目替换的来源明细以操作完成时冻结的结果快照为准，避免卡内项目后续变化后
+     * 详情被改写；无有效明细或非替换操作时保持原有卡名展示。
+     */
+    private function cardOperationSourceContent(array $row): string
+    {
+        $cardName = trim((string)($row['card_name_snapshot'] ?? ''));
+        if ((string)($row['operation_type'] ?? '') !== 'project_replacement') {
+            return $cardName;
+        }
+        $snapshot = json_decode((string)($row['result_snapshot_json'] ?? ''), true);
+        $sourceLines = is_array($snapshot['replacementSnapshot']['sourceLines'] ?? null)
+            ? $snapshot['replacementSnapshot']['sourceLines']
+            : [];
+        $details = [];
+        foreach (array_slice($sourceLines, 0, 20) as $line) {
+            if (!is_array($line)) {
+                continue;
+            }
+            $name = trim((string)($line['projectName'] ?? ''));
+            $quantity = max(0, (int)($line['quantity'] ?? 0));
+            if ($name === '' || $quantity <= 0) {
+                continue;
+            }
+            $details[$name . "\0" . $quantity] = sprintf('%s × %d次', $name, $quantity);
+        }
+        $lines = $cardName === '' ? [] : [$cardName];
+        return implode("\n", array_merge($lines, array_values($details)));
     }
 
     private function readLegacyReplacements(array $criteria, bool $countOnly): array

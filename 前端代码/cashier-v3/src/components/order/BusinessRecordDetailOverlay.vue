@@ -252,6 +252,7 @@ async function submitLifecycleAction() {
 .business-record-detail__grid dd {
   margin: 0;
   overflow-wrap: anywhere;
+  white-space: pre-line;
   color: #303640;
   font-size: 14px;
   line-height: 21px;
