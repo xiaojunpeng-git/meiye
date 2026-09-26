@@ -41,7 +41,8 @@ final class PlatformOrderCenterReadServices
     }
 
     /**
-     * @return array{readOnly:bool,scope:array,businessTypes:array,countsByType:array}
+     * 导航元数据不读取各业务数量；平台复用同一无计数页签契约。
+     * @return array{readOnly:bool,scope:array,businessTypes:array}
      */
     public function metadata(array $adminInfo): array
     {
@@ -51,19 +52,13 @@ final class PlatformOrderCenterReadServices
                 'readOnly' => true,
                 'scope' => ['mode' => 'none'],
                 'businessTypes' => $this->businessTypes(),
-                'countsByType' => $this->emptyCounts(),
             ];
         }
-        [, $scope, $scopeMeta] = $context;
-        $counts = $this->recordQueries->counts($context[0], $scope);
-        // 销售计数必须使用同一 V3 权威查询；不要从旧 order 表猜测。
-        $sales = $this->salesQueries->querySalesOrders(['recordType' => 'sales', 'page' => 1, 'pageSize' => 1], $context[0], $scope);
-        $counts['sales'] = max(0, (int)($sales['total'] ?? 0));
+        [, , $scopeMeta] = $context;
         return [
             'readOnly' => true,
             'scope' => $scopeMeta,
             'businessTypes' => $this->businessTypes(),
-            'countsByType' => $counts,
         ];
     }
 
@@ -277,7 +272,7 @@ final class PlatformOrderCenterReadServices
     private function businessTypes(): array
     {
         return [
-            ['key' => 'sales', 'label' => '销售订单', 'ready' => true],
+            ['key' => 'sales', 'label' => '消费订单', 'ready' => true],
             ['key' => 'recharge', 'label' => '充值订单', 'ready' => true],
             ['key' => 'refund', 'label' => '退款记录', 'ready' => true],
             ['key' => 'debt', 'label' => '欠款管理', 'ready' => true],
@@ -286,11 +281,6 @@ final class PlatformOrderCenterReadServices
             ['key' => 'gift', 'label' => '赠送记录', 'ready' => true],
             ['key' => 'card_operation', 'label' => '卡操作记录', 'ready' => true],
         ];
-    }
-
-    private function emptyCounts(): array
-    {
-        return array_fill_keys(array_column($this->businessTypes(), 'key'), 0);
     }
 
     private function emptyPage(array $payload): array
@@ -322,9 +312,6 @@ final class PlatformOrderCenterReadServices
             'performancePolicy' => $page['performancePolicy'] ?? [],
             'statusOptions' => $page['statusOptions'] ?? [],
             'statusOptionsByType' => ['sales' => $page['statusOptions'] ?? []],
-            // 平台页不执行门店工作台 bootstrap，页签计数须随本次真实查询
-            // 返回，不能遗留初始化时的 0。
-            'countsByType' => ['sales' => (int)($page['total'] ?? 0)],
             'salesOrders' => $page['records'] ?? [],
             'recordsByType' => ['sales' => $page['records'] ?? []],
             'pagesByType' => ['sales' => [

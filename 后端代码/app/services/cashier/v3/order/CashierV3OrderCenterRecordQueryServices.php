@@ -77,61 +77,15 @@ final class CashierV3OrderCenterRecordQueryServices
         return $this->pagePayload($criteria, $records, $total, 'authoritative_business_records');
     }
 
-    public function counts(
-        CashierV3OperatorScope $operatorScope,
-        CashierV3DataScopeContext $dataScope
-    ): array {
-        $counts = array_fill_keys(self::TYPES, 0);
-        if (!$dataScope->hasFeature('cashier.v3.order_center')) {
-            return $counts;
-        }
-        $allowed = $this->canonicalStoreIds($dataScope->narrowVisibleStores(null));
-        if ($allowed === []) {
-            return $counts;
-        }
-        if ($this->reader !== null) {
-            $result = call_user_func($this->reader, 'counts', [
-                'allowedStoreIds' => $allowed,
-                'operatorScope' => $operatorScope,
-                'dataScope' => $dataScope,
-            ]);
-            if (!is_array($result)) throw new \RuntimeException('order_center_record_reader_result_invalid');
-            foreach (self::TYPES as $type) {
-                $counts[$type] = max(0, (int)($result[$type] ?? 0));
-            }
-            return $counts;
-        }
-        foreach (self::TYPES as $type) {
-            $criteria = [
-                'type' => $type,
-                'page' => 1,
-                'pageSize' => 1,
-                'keyword' => '',
-                'status' => '',
-                'dataScope' => 'normal',
-                'operationType' => '',
-                // Counts traverse every record type, including service. Keep the
-                // same normalized empty query shape as a service-page request.
-                'topFilters' => [],
-                'sorts' => [],
-                'allowedStoreIds' => $allowed,
-                'tenantId' => $dataScope->tenantId(),
-            ];
-            [, $counts[$type]] = $this->readType($criteria, $operatorScope, true);
-        }
-        return $counts;
-    }
-
     public function augmentInitialPartition(
         array $partition,
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope
     ): array {
-        $counts = $this->counts($operatorScope, $dataScope);
-        $counts['sales'] = max(0, (int)($partition['total'] ?? 0));
+        // 导航只声明类型，不跨业务扫描数量；当前列表分页总数仍由各查询返回。
         $partition['contractVersion'] = self::CONTRACT_VERSION;
         $partition['businessTypes'] = [
-            ['key' => 'sales', 'label' => '销售订单', 'ready' => true],
+            ['key' => 'sales', 'label' => '消费订单', 'ready' => true],
             ['key' => 'recharge', 'label' => '充值订单', 'ready' => true],
             ['key' => 'refund', 'label' => '退款记录', 'ready' => true],
             ['key' => 'debt', 'label' => '欠款管理', 'ready' => true],
@@ -140,7 +94,6 @@ final class CashierV3OrderCenterRecordQueryServices
             ['key' => 'gift', 'label' => '赠送记录', 'ready' => true],
             ['key' => 'card_operation', 'label' => '卡操作记录', 'ready' => true],
         ];
-        $partition['countsByType'] = $counts;
         $partition['recordsByType'] = array_merge([
             'sales' => [],
             'recharge' => [],
@@ -269,29 +222,29 @@ final class CashierV3OrderCenterRecordQueryServices
         return preg_match('/^\\d{4}-\\d{2}-\\d{2}$/D', $date) === 1 ? $date : '';
     }
 
-    private function readType(array $criteria, CashierV3OperatorScope $scope, bool $countOnly = false): array
+    private function readType(array $criteria, CashierV3OperatorScope $scope): array
     {
         switch ($criteria['type']) {
             case 'recharge':
-                return $this->readRecharge($criteria, $countOnly);
+                return $this->readRecharge($criteria);
             case 'supplement':
-                return $this->readSupplement($criteria, $countOnly);
+                return $this->readSupplement($criteria);
             case 'refund':
-                return $this->readRefund($criteria, $countOnly);
+                return $this->readRefund($criteria);
             case 'debt':
-                return $this->readDebts($criteria, $countOnly);
+                return $this->readDebts($criteria);
             case 'service':
-                return $this->readServices($criteria, $scope, $countOnly);
+                return $this->readServices($criteria, $scope);
             case 'gift':
-                return $this->readGift($criteria, $countOnly);
+                return $this->readGift($criteria);
             case 'card_operation':
-                return $this->readCardOperations($criteria, $scope, $countOnly);
+                return $this->readCardOperations($criteria, $scope);
             default:
                 return [[], 0];
         }
     }
 
-    private function readRecharge(array $criteria, bool $countOnly): array
+    private function readRecharge(array $criteria): array
     {
         $tenantId = (string)($criteria['tenantId'] ?? '');
         $query = Db::name('user_recharge')->alias('r')
@@ -320,7 +273,6 @@ final class CashierV3OrderCenterRecordQueryServices
                 ->whereNotExists($this->rechargeLifecycleOperationQuery($tenantId, ['void']));
         }
         $total = (int)(clone $query)->count('r.id');
-        if ($countOnly) return [[], $total];
         $rows = $this->pageRows($query, $criteria, 'r.pay_time', 'r.id', implode(',', [
             'r.id', 'r.order_id', 'r.uid', 'r.store_id', 'r.staff_id', 'r.price', 'r.give_price',
             'r.refund_price', 'r.recharge_type', 'r.combination_info', 'r.channel_type', 'r.paid', 'r.terminal_action',
@@ -531,15 +483,14 @@ final class CashierV3OrderCenterRecordQueryServices
         return $storeId . "\0" . trim($orderNo);
     }
 
-    private function readSupplement(array $criteria, bool $countOnly): array
+    private function readSupplement(array $criteria): array
     {
         $sources = [
-            $this->readV3SalesDebtRepayments($criteria, $countOnly),
-            $this->readV3RechargeDebtRepayments($criteria, $countOnly),
-            $this->readLegacySupplements($criteria, $countOnly),
+            $this->readV3SalesDebtRepayments($criteria),
+            $this->readV3RechargeDebtRepayments($criteria),
+            $this->readLegacySupplements($criteria),
         ];
         $total = array_sum(array_column($sources, 1));
-        if ($countOnly) return [[], $total];
         $records = [];
         foreach ($sources as $source) {
             $records = array_merge($records, $source[0]);
@@ -558,7 +509,7 @@ final class CashierV3OrderCenterRecordQueryServices
     /**
      * V3 销售欠款补交的权威来源。销售补交独立落账，不写入旧 store_debt_repay。
      */
-    private function readV3SalesDebtRepayments(array $criteria, bool $countOnly): array
+    private function readV3SalesDebtRepayments(array $criteria): array
     {
         $query = Db::name('cashier_v3_debt_repayment')->alias('r')
             ->leftJoin('user u', 'u.uid = r.member_id')
@@ -576,7 +527,6 @@ final class CashierV3OrderCenterRecordQueryServices
             'u.real_name', 'u.nickname', 'u.phone',
         ]);
         $total = (int)(clone $query)->count('r.id');
-        if ($countOnly) return [[], $total];
 
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
@@ -630,7 +580,7 @@ final class CashierV3OrderCenterRecordQueryServices
     /**
      * V3 充值欠款补交的权威来源。不得为订单中心展示而回写旧 store_debt_repay。
      */
-    private function readV3RechargeDebtRepayments(array $criteria, bool $countOnly): array
+    private function readV3RechargeDebtRepayments(array $criteria): array
     {
         $query = Db::name('cashier_v3_recharge_debt_repayment')->alias('r')
             ->leftJoin('store_debt d', 'd.id = r.debt_id')
@@ -648,7 +598,6 @@ final class CashierV3OrderCenterRecordQueryServices
             'r.repayment_no', 'd.debt_no', 'd.order_sn', 'u.real_name', 'u.nickname', 'u.phone',
         ]);
         $total = (int)(clone $query)->count('r.id');
-        if ($countOnly) return [[], $total];
         // Read enough records from each authority for the requested global page, then merge by settled time.
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
@@ -697,7 +646,7 @@ final class CashierV3OrderCenterRecordQueryServices
         }, $rows), $total];
     }
 
-    private function readLegacySupplements(array $criteria, bool $countOnly): array
+    private function readLegacySupplements(array $criteria): array
     {
         $query = Db::name('store_debt_repay')->alias('r')
             ->leftJoin('cashier_v3_business_document_no bd', "bd.source_type = 'legacy_store_debt_repayment' AND bd.source_id = CAST(r.id AS CHAR) AND bd.document_type = 'debt_repayment' AND bd.tenant_id = '0'")
@@ -711,7 +660,6 @@ final class CashierV3OrderCenterRecordQueryServices
             'r.repay_no', 'bd.document_no', 'd.debt_no', 'r.order_sn', 'u.real_name', 'u.nickname', 'u.phone',
         ]);
         $total = (int)(clone $query)->count('r.id');
-        if ($countOnly) return [[], $total];
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
             'r.id', 'COALESCE(bd.document_no, r.repay_no) AS repay_no', 'r.order_sn', 'r.repay_amount', 'r.pay_type',
@@ -769,7 +717,7 @@ final class CashierV3OrderCenterRecordQueryServices
      * 欠款管理只读取欠款主表及 V3 authority/repaid facts。销售订单只作为
      * authority 记录的来源快照，绝不用于临时汇总欠款余额。
      */
-    private function readDebts(array $criteria, bool $countOnly): array
+    private function readDebts(array $criteria): array
     {
         $query = Db::name('store_debt')->alias('d')
             ->leftJoin('user u', 'u.uid = d.uid')
@@ -791,7 +739,6 @@ final class CashierV3OrderCenterRecordQueryServices
         // store_debt readable as well, but label it rather than pretending it
         // carries V3 source precision.
         $total = (int)(clone $query)->count('d.id');
-        if ($countOnly) return [[], $total];
         $rows = $this->pageRows($query, $criteria, 'd.add_time', 'd.id', implode(',', [
             'd.id,d.debt_no,d.order_id,d.order_sn,d.uid,d.store_id,d.total_debt,d.repaid_debt,d.status,d.remark,d.add_time,d.update_time',
             'u.real_name,u.nickname,u.phone,s.name AS store_name',
@@ -833,7 +780,7 @@ final class CashierV3OrderCenterRecordQueryServices
         }, $rows), $total];
     }
 
-    private function readRefund(array $criteria, bool $countOnly): array
+    private function readRefund(array $criteria): array
     {
         // Refund records are append-only V3 lifecycle facts.  The retired
         // store_order_refund table is intentionally not a source or a
@@ -852,7 +799,6 @@ final class CashierV3OrderCenterRecordQueryServices
             'rlo.reason_snapshot',
         ]);
         $total = (int)(clone $query)->count('rlo.id');
-        if ($countOnly) return [[], $total];
         $rows = $this->pageRows($query, $criteria, 'rlo.settled_at', 'rlo.id', implode(',', [
             'rlo.id', 'rlo.operation_id', 'rlo.operation_no', 'rlo.source_type', 'rlo.source_order_no_snapshot',
             'rlo.member_id', 'rlo.store_id', 'rlo.reason_snapshot', 'rlo.cash_refund_cents',
@@ -886,8 +832,7 @@ final class CashierV3OrderCenterRecordQueryServices
      */
     private function readServices(
         array $criteria,
-        CashierV3OperatorScope $scope,
-        bool $countOnly
+        CashierV3OperatorScope $scope
     ): array {
         $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
             // 服务记录展示结账当时冻结在销售订单上的来源，不能回读会员当前来源。
@@ -945,7 +890,6 @@ final class CashierV3OrderCenterRecordQueryServices
             return [[], 0];
         }
         $total = (int)(clone $query)->count('sf.id');
-        if ($countOnly) return [[], $total];
 
         $rows = $this->pageServiceRows($query, $criteria, implode(',', [
             'sf.id', 'sf.service_fact_id', 'sf.service_record_no', 'sf.tenant_id', 'sf.checkout_request_id', 'sf.source_line_id',
@@ -1605,15 +1549,14 @@ final class CashierV3OrderCenterRecordQueryServices
             ->toArray();
     }
 
-    private function readGift(array $criteria, bool $countOnly): array
+    private function readGift(array $criteria): array
     {
         $sources = [
-            $this->readV3RechargeGifts($criteria, $countOnly),
-            $this->readV3DirectGifts($criteria, $countOnly),
-            $this->readLegacyGifts($criteria, $countOnly),
+            $this->readV3RechargeGifts($criteria),
+            $this->readV3DirectGifts($criteria),
+            $this->readLegacyGifts($criteria),
         ];
         $total = array_sum(array_column($sources, 1));
-        if ($countOnly) return [[], $total];
         $records = [];
         foreach ($sources as $source) {
             $records = array_merge($records, $source[0]);
@@ -1632,7 +1575,7 @@ final class CashierV3OrderCenterRecordQueryServices
     /**
      * 充值套餐赠送以 V3 gift fact 为展示权威；一项项目或一张券均是一条可追溯记录。
      */
-    private function readV3RechargeGifts(array $criteria, bool $countOnly): array
+    private function readV3RechargeGifts(array $criteria): array
     {
         $query = Db::name('cashier_v3_gift_fact')->alias('gf')
             ->join('cashier_v3_recharge_gift_authority ga', 'ga.gift_id = gf.source_id')
@@ -1654,7 +1597,6 @@ final class CashierV3OrderCenterRecordQueryServices
         ]);
         if ($criteria['status'] === 'refunded') return [[], 0];
         $total = (int)(clone $query)->count('gf.id');
-        if ($countOnly) return [[], $total];
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
             'gf.id', 'gf.gift_fact_id', 'gf.source_id', 'gf.source_detail_id', 'gf.gift_kind',
@@ -1692,7 +1634,7 @@ final class CashierV3OrderCenterRecordQueryServices
     /**
      * 独立赠送以 V3 gift fact 为唯一展示来源；兼容权益投影只供会员资产读取。
      */
-    private function readV3DirectGifts(array $criteria, bool $countOnly): array
+    private function readV3DirectGifts(array $criteria): array
     {
         $query = Db::name('cashier_v3_gift_fact')->alias('gf')
             ->join('cashier_v3_direct_gift_authority ga', 'ga.gift_id = gf.source_id')
@@ -1727,7 +1669,6 @@ final class CashierV3OrderCenterRecordQueryServices
         ]);
         if ($criteria['status'] === 'refunded') return [[], 0];
         $total = (int)(clone $query)->count('gf.id');
-        if ($countOnly) return [[], $total];
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
             'gf.id', 'gf.gift_fact_id', 'gf.source_id', 'gf.source_detail_id', 'gf.gift_kind',
@@ -1775,7 +1716,7 @@ final class CashierV3OrderCenterRecordQueryServices
         }, $rows), $total];
     }
 
-    private function readLegacyGifts(array $criteria, bool $countOnly): array
+    private function readLegacyGifts(array $criteria): array
     {
         $query = Db::name('store_order_cart_info')->alias('ci')
             ->join('store_order o', 'o.id = ci.oid')
@@ -1802,7 +1743,6 @@ final class CashierV3OrderCenterRecordQueryServices
             });
         }
         $total = (int)(clone $query)->count('ci.id');
-        if ($countOnly) return [[], $total];
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
             'ci.id', 'ci.oid', 'ci.cart_num', 'ci.product_type', 'ci.cart_info',
@@ -1838,16 +1778,14 @@ final class CashierV3OrderCenterRecordQueryServices
 
     private function readCardOperations(
         array $criteria,
-        CashierV3OperatorScope $scope,
-        bool $countOnly
+        CashierV3OperatorScope $scope
     ): array {
         $sources = [
-            $this->readV3CardOperations($criteria, $scope, $countOnly),
-            $this->readLegacyReplacements($criteria, $countOnly),
-            $this->readLegacyCardUpgrades($criteria, $countOnly),
+            $this->readV3CardOperations($criteria, $scope),
+            $this->readLegacyReplacements($criteria),
+            $this->readLegacyCardUpgrades($criteria),
         ];
         $total = array_sum(array_column($sources, 1));
-        if ($countOnly) return [[], $total];
         $rows = [];
         foreach ($sources as $source) {
             $rows = array_merge($rows, $source[0]);
@@ -1863,7 +1801,7 @@ final class CashierV3OrderCenterRecordQueryServices
         return [$rows, $total];
     }
 
-    private function readV3CardOperations(array $criteria, CashierV3OperatorScope $scope, bool $countOnly): array
+    private function readV3CardOperations(array $criteria, CashierV3OperatorScope $scope): array
     {
         $query = Db::name('cashier_v3_card_operation')->alias('c')
             // A checkout request id is an idempotency/processing reference, not
@@ -1886,7 +1824,6 @@ final class CashierV3OrderCenterRecordQueryServices
             $query->where('c.operation_status', $criteria['status']);
         }
         $total = (int)(clone $query)->count('c.id');
-        if ($countOnly) return [[], $total];
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
             'c.id', 'c.operation_no', 'c.operation_type', 'c.operation_status', 'c.store_id',
@@ -1950,7 +1887,7 @@ final class CashierV3OrderCenterRecordQueryServices
         return implode("\n", array_merge($lines, array_values($details)));
     }
 
-    private function readLegacyReplacements(array $criteria, bool $countOnly): array
+    private function readLegacyReplacements(array $criteria): array
     {
         if ($criteria['operationType'] !== '' && $criteria['operationType'] !== 'project_replacement') {
             return [[], 0];
@@ -1969,7 +1906,6 @@ final class CashierV3OrderCenterRecordQueryServices
             return [[], 0];
         }
         $total = (int)(clone $query)->count('r.id');
-        if ($countOnly) return [[], $total];
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
             'r.id', 'r.replacement_no', 'r.oid', 'r.target_amount', 'r.snapshot_json',
@@ -2006,7 +1942,7 @@ final class CashierV3OrderCenterRecordQueryServices
         }, $rows), $total];
     }
 
-    private function readLegacyCardUpgrades(array $criteria, bool $countOnly): array
+    private function readLegacyCardUpgrades(array $criteria): array
     {
         if ($criteria['operationType'] !== '' && $criteria['operationType'] !== 'card_upgrade') {
             return [[], 0];
@@ -2032,7 +1968,6 @@ final class CashierV3OrderCenterRecordQueryServices
             return [[], 0];
         }
         $total = (int)(clone $query)->count('o.id');
-        if ($countOnly) return [[], $total];
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
             'o.id', 'o.order_id', 'o.card_upgrade_use_oid', 'o.pay_price', 'o.debt_amount',

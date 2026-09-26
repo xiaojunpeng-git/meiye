@@ -156,7 +156,8 @@ ok('页面使用列表/详情独立序号，六类记录走已安装只读 handl
   assert.match(source, /availableTabs/)
   assert.match(source, /requestAction\('query-order-center-records'/)
   assert.match(source, /key: 'card_operation'/)
-  assert.match(source, /countsByType/)
+  assert.doesNotMatch(source, /countsByType|tabCount|order-center-tabs__count/)
+  assert.match(source, /label: '消费订单'/)
   assert.doesNotMatch(source, /requestAction\('save-order-center-query-settings'/)
 })
 

@@ -24,7 +24,8 @@ export function mergeSalesOrderCenterProjection(current, incoming) {
   const base = isRecord(current) ? current : {}
   if (!isRecord(incoming) || incoming.contractVersion !== ORDER_CONTRACT_VERSION) return base
   const merged = { ...base, ...incoming }
-  for (const key of ['statusOptionsByType', 'recordsByType', 'pagesByType', 'querySettingsByType', 'countsByType']) {
+  // 页签不再带数量；仅合并当前列表和分页元数据。
+  for (const key of ['statusOptionsByType', 'recordsByType', 'pagesByType', 'querySettingsByType']) {
     if (isRecord(base[key]) || isRecord(incoming[key])) {
       merged[key] = {
         ...(isRecord(base[key]) ? base[key] : {}),

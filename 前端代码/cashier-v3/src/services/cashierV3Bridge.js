@@ -440,7 +440,6 @@ const EMPTY_BOOTSTRAP = {
     cardUpgradeRecords: [],
     projectUpgradeRecords: [],
     cardOperationRecords: [],
-    countsByType: {},
     recordsByType: {},
     pagesByType: {},
     querySettingsByType: {},
@@ -1726,7 +1725,6 @@ export function validateRootStateSchema(state = {}) {
     checkArrayField(orderCenter, 'cardUpgradeRecords', 'orderCenter_cardUpgradeRecords')
     checkArrayField(orderCenter, 'projectUpgradeRecords', 'orderCenter_projectUpgradeRecords')
     checkArrayField(orderCenter, 'cardOperationRecords', 'orderCenter_cardOperationRecords')
-    checkObjectField(orderCenter, 'countsByType', 'orderCenter_countsByType')
     checkObjectField(orderCenter, 'recordsByType', 'orderCenter_recordsByType')
     checkObjectField(orderCenter, 'pagesByType', 'orderCenter_pagesByType')
     checkObjectField(orderCenter, 'querySettingsByType', 'orderCenter_querySettingsByType')
@@ -2134,9 +2132,6 @@ function normalizeBootstrap(rawBootstrap = {}) {
       cardUpgradeRecords: Array.isArray(incomingOrderCenter.cardUpgradeRecords) ? incomingOrderCenter.cardUpgradeRecords : [],
       projectUpgradeRecords: Array.isArray(incomingOrderCenter.projectUpgradeRecords) ? incomingOrderCenter.projectUpgradeRecords : [],
       cardOperationRecords: Array.isArray(incomingOrderCenter.cardOperationRecords) ? incomingOrderCenter.cardOperationRecords : [],
-      countsByType: incomingOrderCenter.countsByType && typeof incomingOrderCenter.countsByType === 'object'
-        ? incomingOrderCenter.countsByType
-        : {},
       recordsByType: incomingOrderCenter.recordsByType && typeof incomingOrderCenter.recordsByType === 'object'
         ? incomingOrderCenter.recordsByType
         : {},

@@ -86,7 +86,7 @@ const ORDER_TABS = [
   {
     key: 'sales',
     pageCode: 'order_center_sales',
-    label: '销售订单',
+    label: '消费订单',
     stateKey: 'salesOrders',
     primaryField: 'sales_order_no',
     searchPlaceholder: '搜索销售订单号、会员姓名、手机号或商品',
@@ -405,7 +405,6 @@ const records = computed(() => {
   const legacy = orderCenter.value[activeTab.value.stateKey]
   return Array.isArray(legacy) ? legacy : []
 })
-const tabCount = (key) => Math.max(0, Number(orderCenter.value.countsByType?.[key]) || 0)
 const pageMeta = computed(() => orderCenter.value.pagesByType?.[activeTabKey.value] || {})
 const total = computed(() => Math.max(Number(pageMeta.value.total ?? (activeTabKey.value === 'sales' ? orderCenter.value.total : 0)) || 0, records.value.length))
 const page = computed(() => Math.max(1, Number(pageMeta.value.page ?? (activeTabKey.value === 'sales' ? orderCenter.value.page : 1)) || 1))
@@ -2388,7 +2387,6 @@ onBeforeUnmount(() => {
           @click="switchTab(tab)"
         >
           <span>{{ tab.label }}</span>
-          <strong class="order-center-tabs__count">{{ tabCount(tab.key) }}</strong>
         </button>
       </nav>
       <span v-if="isPlatformReadOnly" class="order-center-page__readonly-note">平台只读查询；业务操作请前往门店端处理</span>

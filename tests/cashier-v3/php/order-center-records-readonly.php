@@ -59,9 +59,6 @@ $recordDetailOverlaySource = (string)file_get_contents($root . '/前端代码/ca
 $calls = [];
 $reader = function (string $operation, array $context) use (&$calls): array {
     $calls[] = ['operation' => $operation, 'context' => $context];
-    if ($operation === 'counts') {
-        return ['recharge' => 17, 'refund' => 7, 'debt' => 2, 'service' => 3, 'supplement' => 0, 'gift' => 1, 'card_operation' => 4];
-    }
     return [
         'records' => [[
             'id' => 'legacy-card-upgrade:1',
@@ -196,16 +193,7 @@ recordOk('不在订单中心清单中的记录类型被拒绝', $invalid['record
     && $invalid['total'] === 0
     && count($calls) === $drillCalls);
 
-$counts = $service->counts($operator, $storesScope);
-recordOk('页签数量使用同一服务端 DataScope', $counts === [
-    'recharge' => 17,
-    'refund' => 7,
-    'debt' => 2,
-    'service' => 3,
-    'supplement' => 0,
-    'gift' => 1,
-    'card_operation' => 4,
-], $counts);
+$beforeNavigationCalls = count($calls);
 
 $partition = $service->augmentInitialPartition([
     'total' => 2472,
@@ -213,15 +201,14 @@ $partition = $service->augmentInitialPartition([
     'pagesByType' => ['sales' => ['total' => 2472]],
     'statusOptionsByType' => ['sales' => []],
 ], $operator, $storesScope);
-recordOk('根分区包含权威欠款管理且销售数量并入同一数字映射', count($partition['businessTypes']) === 8
-    && $partition['countsByType']['sales'] === 2472
-    && $partition['countsByType']['debt'] === 2
-    && $partition['countsByType']['service'] === 3
-    && $partition['countsByType']['card_operation'] === 4);
+recordOk('导航仅包含八类名称，不调用统计且保留列表分页', count($partition['businessTypes']) === 8
+    && !isset($partition['countsByType']) && count($calls) === $beforeNavigationCalls
+    && $partition['businessTypes'][0]['label'] === '消费订单'
+    && $partition['pagesByType']['sales']['total'] === 2472);
 
 $source = file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php');
-recordOk('初始化统计为服务记录提供空筛选与排序，不能因缺省键让订单中心降级为空页', strpos($source, "'topFilters' => []") !== false
-    && strpos($source, "'sorts' => []") !== false);
+recordOk('页签专用数量方法及分支已删除', strpos($source, 'function counts(') === false
+    && strpos($source, '$countOnly') === false);
 recordOk('服务记录只读取完成态服务事实，不从销售订单回推', strpos($source, "Db::name('cashier_v3_entitlement_service_fact')") !== false
     && strpos($source, "->where('sf.service_status', 'completed')") !== false
     && strpos($source, "case 'service':") !== false);
@@ -310,8 +297,8 @@ $noneService = new CashierV3OrderCenterRecordQueryServices(function () use (&$no
     $noneCalls++;
     return [];
 });
-$noneCounts = $noneService->counts($operator, recordScope(CashierV3DataScopeContext::MODE_NONE, []));
-recordOk('NONE 权限数量全部为零且不访问读取器', array_sum($noneCounts) === 0 && $noneCalls === 0);
+$nonePartition = $noneService->augmentInitialPartition([], $operator, recordScope(CashierV3DataScopeContext::MODE_NONE, []));
+recordOk('NONE 权限导航不访问读取器', !isset($nonePartition['countsByType']) && $noneCalls === 0);
 
 $noFeature = $service->queryRecords(
     ['recordType' => 'recharge'],

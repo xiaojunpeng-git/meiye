@@ -180,7 +180,6 @@ final class CashierV3OrderCenterPartitionProvider implements CashierV3RootPartit
             'cardUpgradeRecords' => [],
             'projectUpgradeRecords' => [],
             'cardOperationRecords' => [],
-            'countsByType' => new \stdClass(),
             'recordsByType' => new \stdClass(),
             'pagesByType' => new \stdClass(),
             'querySettingsByType' => new \stdClass(),

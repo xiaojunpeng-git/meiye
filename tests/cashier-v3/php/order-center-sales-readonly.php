@@ -501,19 +501,15 @@ orderOk('读取器只返回赠送或权益子行时服务层再次 fail-closed',
 
 echo "== root partition and isolated module boundary ==\n";
 $recordQueries = new CashierV3OrderCenterRecordQueryServices(function (string $operation): array {
-    if ($operation === 'counts') {
-        return ['recharge' => 2, 'supplement' => 3, 'refund' => 4, 'service' => 5, 'gift' => 6, 'card_operation' => 7];
-    }
     return ['records' => [], 'total' => 0];
 });
 $provider = new CashierV3OrderCenterPartitionProvider($service, $recordQueries);
 $partition = $provider->readPartition('ctx:test', '1', $operator, $storesScope);
-orderOk('orderCenter provider 返回七类正式记录入口与同权限数量', $provider->partitionKey() === 'orderCenter'
+orderOk('orderCenter provider 返回八类正式记录入口但不返回导航数量', $provider->partitionKey() === 'orderCenter'
     && ($partition['ready'] ?? false) === true
     && isset($partition['payload']['recordsByType']['sales'])
-    && count($partition['payload']['businessTypes'] ?? []) === 7
-    && ($partition['payload']['countsByType']['service'] ?? 0) === 5
-    && ($partition['payload']['countsByType']['card_operation'] ?? 0) === 7, $partition);
+    && count($partition['payload']['businessTypes'] ?? []) === 8
+    && !isset($partition['payload']['countsByType']), $partition);
 $brokenProvider = new CashierV3OrderCenterPartitionProvider(new CashierV3SalesOrderQueryServices(function (): array {
     throw new RuntimeException('database unavailable');
 }), $recordQueries);
