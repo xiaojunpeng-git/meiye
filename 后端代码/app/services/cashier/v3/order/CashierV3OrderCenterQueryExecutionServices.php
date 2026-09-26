@@ -10,7 +10,7 @@ final class CashierV3OrderCenterQueryExecutionServices extends UnifiedQueryExecu
     {
         $index = parent::fieldIndex($pageCode, $permissions, $definitions);
         // 隐藏身份列只继承可读业务字段的筛选权限，不开放显示、导出或自定义表达式。
-        foreach (['salesperson','cashier','operator','craftsman','void_operator','store'] as $key) {
+        foreach (['salesperson','cashier','operator','craftsman','sales_manager','guide','void_operator','store'] as $key) {
             if (isset($index[$key])) $index[$key . '_query_ids'] = ['type'=>'text','operations'=>['filter']];
         }
         return $index;
@@ -28,5 +28,16 @@ final class CashierV3OrderCenterQueryExecutionServices extends UnifiedQueryExecu
             if (parent::matches((string)$id, $positive, $expected, $type)) return !$negative;
         }
         return $negative;
+    }
+
+    /** 一单多明细仍导出一行；按原顺序列出各明细值，不能转成一个虚构金额或数组字符串。 */
+    protected function exportRows(array $allRows, array $pageRows, array $export, array $fieldIndex): array
+    {
+        $rows = parent::exportRows($allRows, $pageRows, $export, $fieldIndex);
+        foreach ($rows as &$row) foreach ($row as &$value) {
+            if (is_array($value)) $value = implode('、', array_map('strval', $value));
+        }
+        unset($row, $value);
+        return $rows;
     }
 }

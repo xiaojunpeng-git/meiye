@@ -95,13 +95,18 @@ const ORDER_TABS = [
       // 销售日期仍筛选权威 business_date；实际下单时间只用于追溯，不改变归属日。
       field('business_date', '销售日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('member_name', '会员姓名／游客'), field('phone', '手机号'),
-      field('store', '销售门店', 'store'), field('item_summary', '商品摘要'),
+      field('store', '下单门店', 'store'), field('item_summary', '商品摘要'),
+      // 明细集合参与整单筛选；列名与下方表头共用，不能只增加一个无后端映射的选项。
+      field('item_name', '商品'), field('unit_price', '单价', 'money'), field('quantity', '数量', 'number'),
+      field('craftsman', '手艺人（类型，业绩，手工、项目数）', 'person'),
+      field('sales_manager', '销售经理', 'person'), field('guide', '导购', 'person'),
+      field('line_amount', '金额', 'money'), field('occurred_at', '实际下单时间', 'date'),
       field('item_count', '商品数量', 'number'), field('receivable_amount', '应收金额', 'money'),
-      field('discount_amount', '优惠金额', 'money'), field('debt_amount', '欠款金额', 'money'),
-      field('actual_received_amount', '现金业绩', 'money'), field('payment_method', '收款方式'),
-      field('salesperson', '销售人', 'person'), field('cashier', '收银员／操作人', 'person'),
+      field('discount_amount', '优惠金额', 'money'), field('debt_amount', '欠款', 'money'),
+      field('actual_received_amount', '已收金额', 'money'), field('payment_method', '记账收款'),
+      field('salesperson', '销售人（业绩）', 'person'), field('cashier', '收银员／操作人', 'person'),
       field('source', '客户来源'),
-      field('payment_status', '支付状态', 'status'), field('order_status', '订单状态', 'status'),
+      field('payment_status', '支付状态', 'status'), field('order_status', '状态', 'status'),
       field('supplement', '补单标记'), field('payment_completed_at', '支付完成时间', 'date')
     ]
   },
@@ -755,9 +760,9 @@ function giftVoidRecordId(record) {
   return ''
 }
 
-const salesOrderListColumns = [
-  '商品', '单价', '数量', '手艺人（类型，业绩，手工、项目数）', '销售人（业绩）', '销售经理', '导购', '金额', '应收金额', '欠款', '已收金额', '记账收款', '下单门店', '状态'
-]
+// 固定明细布局只保存字段键，标签复用查询定义，避免表格增加列后设置仍是另一套名称。
+const salesOrderListColumnKeys = ['item_name', 'unit_price', 'quantity', 'craftsman', 'salesperson', 'sales_manager', 'guide', 'line_amount', 'receivable_amount', 'debt_amount', 'actual_received_amount', 'payment_method', 'store', 'order_status']
+const salesOrderListColumns = salesOrderListColumnKeys.map((key) => ORDER_TABS[0].fields.find((item) => item.key === key).label)
 
 function salesOrderItems(record) {
   if (Array.isArray(record?.items) && record.items.length) return record.items
