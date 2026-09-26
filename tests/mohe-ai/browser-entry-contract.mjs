@@ -96,6 +96,29 @@ const savedRounds = JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixture%3
 assert.equal(savedRounds.some(r => r.answer.includes('迟到结果') || (r.presentation?.cards || []).some(c => c.display_value === '999')), false);
 dispose(); assert.equal(document.querySelector('[data-mohe-ai]'),null);
 assert.equal(calls.some(c=>c.path.startsWith('/config')),false);
+// Workspace presentation deliberately keeps the native checkbox as its state
+// source: the rounded visible label is only presentation, preserving keyboard
+// access and leaving the established export request path outside this UI test.
+const workspacePresentation = mountMoheAi({
+  presentation: 'workspace',
+  request: async (method, path, payload) => {
+    const response = await request(method, path, payload);
+    return path === '/bootstrap'
+      ? {...response, capabilities: {...response.capabilities, output_formats: ['screen', 'screen_and_xlsx']}}
+      : response;
+  }
+});
+await flush();
+const presentationWorkspaceRoot = document.querySelector('[data-mohe-ai]').shadowRoot;
+presentationWorkspaceRoot.querySelector('.entry').click(); await flush();
+const presentationExcelToggle = presentationWorkspaceRoot.querySelector('.workspace-excel input[type="checkbox"]');
+assert.ok(presentationExcelToggle);
+assert.equal(presentationExcelToggle.getAttribute('aria-label'), 'Execl');
+assert.equal(presentationWorkspaceRoot.querySelector('.workspace-excel span').textContent, 'Execl');
+assert.equal(presentationExcelToggle.checked, false);
+presentationExcelToggle.click();
+assert.equal(presentationExcelToggle.checked, true);
+workspacePresentation();
 // Staged instances keep synchronous execution until their queue release gate
 // is enabled.  This catches a reference typo that would otherwise leave a
 // newly accepted Run polling forever without sending /execute.
@@ -326,7 +349,14 @@ assert.ok(workspaceRoot.querySelector('.panel.workspace'));
 assert.ok(workspaceRoot.querySelector('.workspace-aside'));
 assert.ok(workspaceRoot.querySelector('.workspace-history'));
 assert.ok(workspaceRoot.querySelector('.workspace-composer-card'));
-assert.ok(workspaceRoot.querySelector('.workspace-excel input[type="checkbox"]'));
+const workspaceExcelToggle = workspaceRoot.querySelector('.workspace-excel input[type="checkbox"]');
+assert.ok(workspaceExcelToggle);
+assert.equal(workspaceExcelToggle.getAttribute('aria-label'), 'Execl');
+assert.match(workspaceRoot.querySelector('.workspace-excel').textContent, /Execl 暂未开放/);
+// Keep the native checkbox as the accessible state source, but render its
+// visible label as the requested rounded button in both state colors.
+assert.match(presentationStyles, /\.workspace-excel span\{[^}]*border-radius:999px[^}]*background:#fff[^}]*color:#111/);
+assert.match(presentationStyles, /\.workspace-excel input:checked\+span\{background:#111;color:#fff/);
 assert.equal(workspaceRoot.querySelector('.workspace-composer-card select'), null);
 assert.equal(workspaceRoot.querySelector('.workspace-cancel').hidden, true);
 assert.match(workspaceRoot.textContent, /Enter 发送 · Shift \+ Enter 换行/);
