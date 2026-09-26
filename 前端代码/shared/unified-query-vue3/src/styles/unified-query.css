@@ -210,7 +210,11 @@
 .unified-query-toolbar__toggle { flex: none; margin-left: auto; }
 .unified-query-toolbar .unified-query-toolbar__secondary { flex-wrap: wrap; overflow: visible; }
 .unified-query-toolbar .unified-query-toolbar__secondary .unified-query-toolbar__top-fields {
-  flex: 1 1 100%; min-width: 0; flex-wrap: wrap;
+  /* 所有接入页面共用：第二行占满可用宽度，按字段顺序从左到右，空间不足再换行。 */
+  display: flex;
+  flex: 1 1 100%;
+  min-width: 0;
+  flex-flow: row wrap;
 }
 
 .unified-query-toolbar--quick-controls-inline {
@@ -226,8 +230,9 @@
 }
 
 /* 订单中心将日期范围放在第一行时，两个日期输入与综合查询都必须保留
- * 各自的占位宽度；默认 flex shrink 会把搜索框压到日期区间下方。 */
-.order-center-query-toolbar.unified-query-toolbar--quick-controls-inline .unified-query-toolbar__top-fields {
+ * 各自的占位宽度；默认 flex shrink 会把搜索框压到日期区间下方。
+ * 365px 仅限第一行日期容器，不能限制第二行自定义字段，否则会被挤成单列。 */
+.order-center-query-toolbar.unified-query-toolbar--quick-controls-inline .unified-query-toolbar__primary .unified-query-toolbar__top-fields {
   flex: 0 0 365px;
   min-width: 365px;
 }
