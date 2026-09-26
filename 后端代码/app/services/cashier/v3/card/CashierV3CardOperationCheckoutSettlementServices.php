@@ -423,7 +423,9 @@ final class CashierV3CardOperationCheckoutSettlementServices
             ->where('is_del', 0)
             ->lock(true)
             ->find();
-        if (!$holder || (int)($holder['store_id'] ?? 0) !== $operatorScope->storeId()) {
+        // 项目升级允许跨购卡门店结算，不能在最终收款阶段重新施加来源门店限制。
+        // 操作单自身仍须属于当前门店，持卡人和来源订单由锁定的卡状态约束。
+        if (!$holder) {
             throw CashierV3CommandException::versionConflict(
                 '原卡归属已经变化，结账未提交。',
                 ['reason' => 'card_operation_project_upgrade_holder_changed']

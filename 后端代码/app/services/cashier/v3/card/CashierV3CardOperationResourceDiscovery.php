@@ -93,7 +93,8 @@ final class CashierV3CardOperationResourceDiscovery
             ->where('is_del', 0)
             ->field('id,oid,uid,store_id')
             ->find();
-        if (!$holder || (int)($holder['store_id'] ?? 0) !== $operator->storeId()) {
+        // 来源卡可在其他门店购买；这里只验证存在，归属和权益由事务内权威源校验。
+        if (!$holder) {
             throw self::notFound('source_card_not_available');
         }
 

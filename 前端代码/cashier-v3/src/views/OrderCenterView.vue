@@ -2448,7 +2448,14 @@ onBeforeUnmount(() => {
               <span>订单编号：{{ displayRecordField(record, 'sales_order_no') }}</span>
               <span v-if="record.upgradeTypeLabel" class="sales-order-query-group__upgrade-tag">{{ record.upgradeTypeLabel }}</span>
               <span>门店：{{ displayRecordField(record, 'store') }}</span>
-              <span>客户：{{ displayRecordField(record, 'member_name') }}</span>
+              <!-- 复用服务记录的会员详情入口和权限投影；游客不按姓名猜测关联。 -->
+              <span>客户：<button
+                v-if="canOpenMemberDetail(record)"
+                type="button"
+                class="order-link"
+                :title="`查看${displayRecordField(record, 'member_name')}的会员详情`"
+                @click="openMemberDetail(record)"
+              >{{ displayRecordField(record, 'member_name') }}</button><template v-else>{{ displayRecordField(record, 'member_name') }}</template></span>
               <span>来源：{{ displayRecordField(record, 'source') }}</span>
               <!-- 纯权益可以查看/打印及作废服务，但不进入销售退款。 -->
               <span v-if="!isPlatformReadOnly" class="sales-order-query-group__actions">
