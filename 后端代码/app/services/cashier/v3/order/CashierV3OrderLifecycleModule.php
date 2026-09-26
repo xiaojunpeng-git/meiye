@@ -220,7 +220,9 @@ final class CashierV3OrderLifecycleModule
             [],
             static function (array $payload): array {
                 $serviceFactId = trim((string)($payload['serviceFactId'] ?? $payload['service_fact_id'] ?? ''));
-                if (preg_match('/^[1-9][0-9]*$/D', $serviceFactId) !== 1) {
+                // 整组来源在事务内反查；客户端不能提交一组任意服务ID。
+                $requestId = trim((string)($payload['checkoutRequestId'] ?? ''));
+                if (preg_match('/^[1-9][0-9]*$/D', $serviceFactId) !== 1 && preg_match('/^[A-Za-z0-9_-]{1,64}$/D', $requestId) !== 1) {
                     throw CashierV3CommandException::invalidContext('未找到需要作废的服务记录，请重新打开记录。', ['reason' => 'service_void_identity_missing']);
                 }
                 return [

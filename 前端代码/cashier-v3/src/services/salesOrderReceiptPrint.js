@@ -78,6 +78,8 @@ function itemQuantity(item) {
 }
 
 function itemAmount(item) {
+  // 小票展示核销快照金额，不把权益金额加进订单收款汇总。
+  if (item.businessTag === '权益') return item.entitlementAmount
   return pickValue(item, ['payableAmount', 'receivableAmount', 'amountDue', 'actualReceivedAmount', 'amount'])
 }
 

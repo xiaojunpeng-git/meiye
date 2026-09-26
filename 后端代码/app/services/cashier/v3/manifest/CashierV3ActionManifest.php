@@ -760,7 +760,8 @@ class CashierV3ActionManifest
             'void-service-record' => [
                 'required_event_types' => ['service_record.voided'],
                 'allowed_event_types' => ['service_record.voided'],
-                'event_rules' => ['service_record.voided' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'service_record', 'source_type' => 'void-service-record']],
+                // 纯权益整单在同一事务内对每条服务追加独立冲销事件。
+                'event_rules' => ['service_record.voided' => ['min_count' => 1, 'max_count' => 1000, 'aggregate_type' => 'service_record', 'source_type' => 'void-service-record']],
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['service_record.voided' => []],
             ],

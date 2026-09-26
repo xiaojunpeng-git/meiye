@@ -76,7 +76,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'void-entitlement-order'])
 const pendingAction = ref('')
 const actionError = ref('')
 const activeLifecycleForm = ref('')
@@ -206,7 +206,8 @@ function peopleFor(item, keys) {
   for (const key of keys) {
     const value = item?.[key]
     if (Array.isArray(value) && value.length) return value
-    if (value && typeof value === 'object') return [value]
+    // 空人员数组不是一个“未命名人员”；纯权益没有销售分配时应保持空。
+    if (value && typeof value === 'object' && !Array.isArray(value)) return [value]
     if (typeof value === 'string' && value.trim()) return [{ name: value }]
   }
   return []
@@ -252,6 +253,8 @@ function cardPurchaseTimesLabel(item) {
 }
 
 function amountRowsForItem(item) {
+  // 权益有实际价值但不是现金应付，明细单独命名避免误认为再次收费。
+  if (item.businessTag === '权益') return [{ label: '权益金额', value: item.entitlementAmount }].filter((row) => hasValue(row.value))
   const rows = [
     { label: '原价', value: pickValue(item, ['originalAmount', 'originalTotalAmount', 'listAmount']) },
     { label: '改价优惠', value: pickValue(item, ['priceChangeDiscountAmount', 'changePriceDiscountAmount', 'modifiedPriceDiscountAmount']) },
@@ -633,6 +636,8 @@ async function runAction(action, payload = {}) {
         <span v-if="orderNo">{{ orderNo }}</span>
       </div>
       <div class="sales-order-detail-overlay__header-actions">
+        <!-- 纯权益作废交回服务组入口，不复用销售退款表单。 -->
+        <button v-if="sourceOrder.entitlementOnly && sourceOrder.orderStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.service_void')" type="button" class="sales-order-detail-button sales-order-detail-button--secondary" :disabled="isLoading" @click="emit('void-entitlement-order', sourceOrder)">作废订单</button>
         <button
           v-if="!actionOnly"
           v-for="item in quickActions"
@@ -704,6 +709,8 @@ async function runAction(action, payload = {}) {
               <header class="sales-order-detail-item__header">
                 <div>
                   <span v-if="itemType(item)" class="sales-order-detail-tag">{{ itemType(item) }}</span>
+                  <!-- 复用权威明细业务标签，不能按金额是否为零推断权益。 -->
+                  <span v-if="item.businessTag" class="sales-order-detail-tag">{{ item.businessTag }}</span>
                   <h4>{{ itemName(item) }}</h4>
                   <p v-if="pickValue(item, ['purchaseSpec', 'specification', 'specName', 'packageName', 'cardSpecification'])">购买规格：{{ pickValue(item, ['purchaseSpec', 'specification', 'specName', 'packageName', 'cardSpecification']) }}</p>
                   <p v-if="cardPurchaseTimesText(item)">{{ cardPurchaseTimesLabel(item) }}：{{ cardPurchaseTimesText(item) }}</p>

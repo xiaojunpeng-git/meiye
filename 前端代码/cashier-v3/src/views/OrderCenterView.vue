@@ -2005,7 +2005,8 @@ async function submitServiceCraftsmanAdjustment() {
 }
 
 function openServiceVoid(record) {
-  if (!record || activeTabKey.value !== 'service' || record.serviceStatus === '已作废' || record.voidedAt) return
+  // 纯权益组作废交给后端整组事务，不在浏览器逐条提交。
+  if (!record || (activeTabKey.value !== 'service' && !record.entitlementOnly) || record.serviceStatus === '已作废' || record.voidedAt) return
   serviceVoidRecord.value = record
   serviceVoidReason.value = ''
   serviceVoidError.value = ''
@@ -2031,17 +2032,18 @@ async function submitServiceVoid() {
     return
   }
   const serviceFactId = record.serviceFactId || String(record.id || '').replace(/^service:/, '')
-  if (!/^[1-9][0-9]*$/.test(String(serviceFactId))) {
+  const checkoutRequestId = record.entitlementOnly ? String(record.id || '').replace(/^service:/, '') : ''
+  if (!checkoutRequestId && !/^[1-9][0-9]*$/.test(String(serviceFactId))) {
     serviceVoidError.value = '服务记录标识无效，请刷新后重试。'
     return
   }
-  const key = String(serviceFactId)
+  const key = checkoutRequestId || String(serviceFactId)
   const idempotencyKey = serviceVoidCommandIds.value[key] || createCashierV3CommandId()
   serviceVoidCommandIds.value = { ...serviceVoidCommandIds.value, [key]: idempotencyKey }
   serviceVoidSubmitting.value = true
   serviceVoidError.value = ''
   try {
-    const result = await requestAction('void-service-record', { serviceFactId, reason, idempotencyKey })
+    const result = await requestAction('void-service-record', { ...(checkoutRequestId ? { checkoutRequestId } : { serviceFactId }), reason, idempotencyKey })
     const status = actionStatus(result)
     if (isTerminalActionStatus(status)) {
       serviceVoidCommandIds.value = { ...serviceVoidCommandIds.value, [key]: null }
@@ -2474,8 +2476,8 @@ onBeforeUnmount(() => {
               <span>门店：{{ displayRecordField(record, 'store') }}</span>
               <span>客户：{{ displayRecordField(record, 'member_name') }}</span>
               <span>来源：{{ displayRecordField(record, 'source') }}</span>
-              <!-- 纯权益复用服务行及手艺人调整，不提供不存在的销售资金单操作。 -->
-              <span v-if="!isPlatformReadOnly && !record.entitlementOnly" class="sales-order-query-group__actions">
+              <!-- 纯权益可以查看/打印及作废服务，但不进入销售退款。 -->
+              <span v-if="!isPlatformReadOnly" class="sales-order-query-group__actions">
                 <button type="button" class="button button--text" @click="openRecordDetail(record)">订单详情</button>
                 <button
                   v-if="canUseCashierV3Operation('cashier.v3.order.receipt_print')"
@@ -2496,6 +2498,7 @@ onBeforeUnmount(() => {
                   class="button button--text"
                   @click="openSalesOrderLifecycle(record, 'void-sales-order', 'cashier.v3.order.void')"
                 >作废</button>
+                <button v-if="record.entitlementOnly && record.orderStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.service_void')" type="button" class="button button--text" @click="openServiceVoid(record)">作废</button>
                 <button
                   v-if="salesOrderActionAvailable(record, 'update-sales-order-note', 'cashier.v3.order_center')"
                   type="button"
@@ -2531,7 +2534,8 @@ onBeforeUnmount(() => {
               <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'guides')">{{ personnelNames(item, 'guides') }}</button>
               <span v-else>{{ personnelNames(item, 'guides') }}</span>
             </td>
-            <td>{{ itemMoney(item.payableAmount) }}</td>
+            <!-- 权益价值仅展示，整单应收/已收继续读取销售资金事实。 -->
+            <td>{{ itemMoney(item.businessTag === '权益' ? item.entitlementAmount : item.payableAmount) }}</td>
             <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
               {{ itemMoney(record.receivableAmount ?? record.receivable_amount) }}
             </td>
@@ -2666,6 +2670,7 @@ onBeforeUnmount(() => {
     />
 
     <SalesOrderDetailOverlay
+      @void-entitlement-order="(record) => { closeSalesDetail(); openServiceVoid(record) }"
       v-if="!isPlatformReadOnly && isSalesDetailOpen"
       :order="salesDetailOrder"
       :is-loading="isSalesDetailLoading"
@@ -2776,10 +2781,11 @@ onBeforeUnmount(() => {
       <div class="service-void-modal__backdrop" @click="closeServiceVoid"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">
-          <h2 id="service-void-title">作废服务记录</h2>
+          <h2 id="service-void-title">{{ serviceVoidRecord.entitlementOnly ? '作废纯权益订单' : '作废服务记录' }}</h2>
           <button type="button" class="service-void-modal__close" :disabled="serviceVoidSubmitting" @click="closeServiceVoid">×</button>
         </header>
-        <p class="service-void-modal__record">{{ serviceVoidRecord.serviceRecordNo || serviceVoidRecord.serviceFactId }}</p>
+        <p class="service-void-modal__record">{{ serviceVoidRecord.serviceRecordNo || serviceVoidRecord.orderNo || serviceVoidRecord.serviceFactId }}</p>
+        <p v-if="serviceVoidRecord.entitlementOnly">将作废本单尚未作废的全部服务记录，退回对应权益并冲销业绩；已作废记录不会重复退回。</p>
         <label class="service-void-modal__label" for="service-void-reason">作废原因</label>
         <textarea id="service-void-reason" v-model="serviceVoidReason" class="service-void-modal__textarea" maxlength="255" rows="4" placeholder="请输入作废原因"></textarea>
         <p v-if="serviceVoidError" class="service-void-modal__error" role="alert">{{ serviceVoidError }}</p>

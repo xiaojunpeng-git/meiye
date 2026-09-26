@@ -298,12 +298,13 @@ final class CashierV3SalesOrderQueryServices
         $id = $this->positiveInteger($idValue);
         $orderNo = $this->scalarString($payload['salesOrderNo'] ?? $payload['orderNo'] ?? '');
         if ($id === null
-            && preg_match('/^[A-Za-z0-9_-]{1,64}$/D', $authorityOrderId) !== 1
+            && preg_match('/^(?:service:)?[A-Za-z0-9_-]{1,64}$/D', $authorityOrderId) !== 1
             && preg_match('/^[A-Za-z0-9_-]{1,64}$/D', $orderNo) !== 1) {
             return null;
         }
         $base['orderId'] = $id;
-        $base['authorityOrderId'] = $id === null && preg_match('/^[A-Za-z0-9_-]{1,64}$/D', $authorityOrderId) === 1
+        // 纯权益组使用服务请求标识，仍由同一个租户/门店权限查询读取详情。
+        $base['authorityOrderId'] = $id === null && preg_match('/^(?:service:)?[A-Za-z0-9_-]{1,64}$/D', $authorityOrderId) === 1
             ? $authorityOrderId : '';
         $base['orderNo'] = $id === null ? $orderNo : '';
         return $base;
@@ -1363,6 +1364,8 @@ final class CashierV3SalesOrderQueryServices
         $serviceFactIds = [];
         if ($requestIds !== []) {
             $serviceRows = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+                // 单次金额取核销时冻结的权益金额，不取当前项目售价或可调整的手艺人业绩。
+                ->leftJoin('cashier_v3_entitlement_writeoff_fact wf', 'wf.tenant_id=sf.tenant_id AND wf.checkout_request_id=sf.checkout_request_id AND wf.source_line_id=sf.source_line_id')
                 ->leftJoin(
                     'cashier_v3_service_record_void_operation vo',
                     "vo.tenant_id=sf.tenant_id AND vo.service_fact_id=sf.id AND vo.status='succeeded'"
@@ -1370,7 +1373,7 @@ final class CashierV3SalesOrderQueryServices
                 ->where('sf.tenant_id', $tenantIds[0])
                 ->whereIn('sf.checkout_request_id', $requestIds)
                 ->where('sf.service_status', 'completed')
-                ->field('sf.id,sf.service_fact_id,sf.service_record_no,sf.checkout_request_id,sf.source_line_id,sf.project_id,sf.project_name_snapshot,sf.quantity,sf.project_count,sf.craftsmen_snapshot_json,sf.service_status,sf.detail_remark_snapshot,vo.id AS void_operation_id,vo.occurred_at AS voided_at')
+                ->field('sf.id,sf.service_fact_id,sf.service_record_no,sf.checkout_request_id,sf.source_line_id,sf.project_id,sf.project_name_snapshot,sf.quantity,sf.project_count,sf.craftsmen_snapshot_json,sf.service_status,sf.detail_remark_snapshot,wf.actual_entitlement_amount_cents,vo.id AS void_operation_id,vo.occurred_at AS voided_at')
                 ->order('sf.id', 'asc')->select()->toArray();
             foreach ($serviceRows as $serviceRow) {
                 $orderId = $requestToOrder[(string)($serviceRow['checkout_request_id'] ?? '')] ?? '';
@@ -1770,7 +1773,7 @@ final class CashierV3SalesOrderQueryServices
         // 查询列表也需要明细行来保持“正常列表”的分组展示；明细页继续复用同一份权威快照。
         $mapped['items'] = $items;
         if (!empty($header['entitlement_only'])) {
-            // 服务单据复用项目展示，但不能进入销售退款、销售作废或销售打印。
+            // 服务单据可复用详情/打印，作废走服务冲销；不授予销售资金操作。
             $mapped['entitlementOnly'] = true;
             $mapped['lifecycleOrderId'] = '';
             $mapped['availableActions'] = [];
@@ -1974,10 +1977,12 @@ final class CashierV3SalesOrderQueryServices
 
     /**
      * 权益行是同次结账中已完成的服务事实，不是销售明细。因此它只提供
-     * 项目、次数和服务人员信息，金额字段必须保持空值，避免前端误将其计入销售。
+     * 展示核销权益单次金额和总金额；销售应付/收款仍为空，不进入销售合计。
      */
     private function mapEntitlementServiceLine(array $serviceFact, array $craftsmen): array
     {
+        $quantity = max(0, (int)$serviceFact['quantity']);
+        $actualCents = isset($serviceFact['actual_entitlement_amount_cents']) ? max(0, (int)$serviceFact['actual_entitlement_amount_cents']) : null;
         return [
             'id' => 'service:' . (int)$serviceFact['id'],
             'orderItemId' => '',
@@ -1986,7 +1991,8 @@ final class CashierV3SalesOrderQueryServices
             'name' => (string)$serviceFact['project_name_snapshot'],
             'purchaseSpec' => '',
             'quantity' => max(0, (int)$serviceFact['quantity']),
-            'unitPrice' => null,
+            'unitPrice' => $actualCents !== null && $quantity > 0 ? $this->moneyFromCents(intdiv($actualCents + intdiv($quantity, 2), $quantity)) : null,
+            'entitlementAmount' => $actualCents !== null ? $this->moneyFromCents($actualCents) : null,
             'originalAmount' => null,
             'priceChangeDiscountAmount' => null,
             'couponDiscountAmount' => null,

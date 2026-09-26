@@ -47,6 +47,10 @@ final class CashierV3ServiceRecordVoidServices
         $commandKey = trim((string)($scope['idempotency_key'] ?? ''));
         if ($commandKey === '') throw self::failure('service_void_idempotency_missing');
 
+        if (!empty($payload['checkoutRequestId'])) {
+            return $this->voidCheckoutGroupInTx($action, $scope, $operator, $dataScope);
+        }
+
         $source = $this->source($payload, $operator, $dataScope, true);
         $existing = Db::name(self::OPERATION_TABLE)
             ->where('tenant_id', $dataScope->tenantId())
@@ -111,6 +115,54 @@ final class CashierV3ServiceRecordVoidServices
             throw self::failure('service_void_operation_insert_failed');
         }
         return $this->result($row, false);
+    }
+
+    /**
+     * 纯权益组只作为服务集合，不创建销售或退款事实。来源由服务端按门店/租户
+     * 反查并稳定加锁，复用逐条冲销；任一失败由外层命令事务全部回滚。
+     */
+    private function voidCheckoutGroupInTx(string $action, array $scope, CashierV3OperatorScope $operator, CashierV3DataScopeContext $dataScope): array
+    {
+        $requestId = trim((string)$scope['payload']['checkoutRequestId']);
+        if (preg_match('/^[A-Za-z0-9_-]{1,64}$/D', $requestId) !== 1) {
+            throw self::failure('service_void_group_identity_invalid');
+        }
+        $detail = (new CashierV3SalesOrderQueryServices())->salesOrderDetail(
+            ['orderId' => 'service:' . $requestId], $operator, $dataScope
+        );
+        if (!$detail || empty($detail['entitlementOnly'])) {
+            throw CashierV3CommandException::invalidContext('未找到可操作的纯权益订单。');
+        }
+        // 混合销售必须走销售单生命周期，禁止用服务组入口绕过资金校验。
+        $sale = Db::name('cashier_v3_sales_order')->where('tenant_id', $dataScope->tenantId())
+            ->where('checkout_request_id', $requestId)->lock(true)->find();
+        if ($sale) throw CashierV3CommandException::invalidContext('该单包含销售项目，请从销售订单办理。');
+        $rows = Db::name('cashier_v3_entitlement_service_fact')
+            ->where('tenant_id', $dataScope->tenantId())->where('store_id', $operator->storeId())
+            ->where('checkout_request_id', $requestId)->where('service_status', 'completed')
+            ->order('id', 'asc')->lock(true)->select()->toArray();
+        if (!$rows || count($rows) > 1000) throw self::failure('service_void_group_not_found_or_too_large');
+        $voided = Db::name(self::OPERATION_TABLE)->where('tenant_id', $dataScope->tenantId())
+            ->where('checkout_request_id', $requestId)->where('status', 'succeeded')->column('service_fact_id');
+        $rows = array_values(array_filter($rows, static function (array $row) use ($voided): bool {
+            return !in_array((int)$row['id'], array_map('intval', $voided), true);
+        }));
+        if (!$rows) throw CashierV3CommandException::invalidContext('本单服务已全部作废，无需重复操作。');
+        $results = [];
+        foreach ($rows as $row) {
+            $child = $scope;
+            unset($child['payload']['checkoutRequestId']);
+            $child['payload']['serviceFactId'] = (string)$row['id'];
+            $child['idempotency_key'] = (string)$scope['idempotency_key'] . ':service:' . $row['id'];
+            $results[] = $this->executeInTx($action, $child);
+        }
+        $result = $results[0];
+        $result['records'] = $results;
+        $result['touchedRoles'] = array_values(array_unique(array_merge(...array_map(static function (array $item): array {
+            return (array)($item['touchedRoles'] ?? []);
+        }, $results))));
+        $result['message'] = '纯权益订单已作废，相关权益已退回。';
+        return $result;
     }
 
     /** @return array<string,mixed> */
