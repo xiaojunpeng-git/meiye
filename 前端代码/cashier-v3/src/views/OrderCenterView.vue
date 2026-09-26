@@ -2440,6 +2440,7 @@ onBeforeUnmount(() => {
       :on-query-export-task="queryActiveExportTask"
       :on-download-export="downloadActiveExport"
       compact-keyword-search
+      compact-scope-labels
       inline-quick-controls
       export-button-after-settings
       direct-query-export
@@ -2518,10 +2519,10 @@ onBeforeUnmount(() => {
           <tr v-for="(item, itemIndex) in salesOrderItems(record)" :key="item.id || item.orderItemId || `${recordKey(record, recordIndex)}-${item.name}-${itemIndex}`">
             <td class="sales-order-query-item-cell">
               <span class="sales-order-query-item-cell__line">
-                <!-- 购买/权益仅调整到名称前展示，仍使用原业务标签，不重算商品类型。 -->
+                <!-- 购买/权益和商品类型统一放在名称前，仍使用原字段，不重算商品类型。 -->
                 <small v-if="item.businessTag" class="sales-order-query-item-cell__business-tag" :class="`is-${item.businessTag === '权益' ? 'entitlement' : 'purchase'}`">{{ item.businessTag }}</small>
-                <strong class="sales-order-query-item-cell__name">{{ item.name || '未命名商品' }}</strong>
                 <small v-if="item.itemType" class="sales-order-query-item-cell__type">{{ item.itemType }}</small>
+                <strong class="sales-order-query-item-cell__name">{{ item.name || '未命名商品' }}</strong>
               </span>
             </td>
             <td>{{ itemMoney(item.unitPrice) }}</td>
@@ -2946,7 +2947,8 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 /* 抵消旧商品单元格对 small 的统一上边距，标签与名称保持垂直居中。 */
-.sales-order-query-table td:first-child small.sales-order-query-item-cell__business-tag { margin-top: 0; }
+.sales-order-query-table td:first-child small.sales-order-query-item-cell__business-tag,
+.sales-order-query-table td:first-child small.sales-order-query-item-cell__type { margin-top: 0; }
 .sales-order-query-item-cell__business-tag.is-entitlement {
   border-color: #abefc6;
   background: #ecfdf3;
@@ -3032,6 +3034,13 @@ onBeforeUnmount(() => {
 .order-center-page :deep(.unified-query-scope button) { color: #52627a; }
 .order-center-page :deep(.unified-query-scope button[aria-pressed='true']) { background: #4568f5; border-color: #4568f5; color: #fff; }
 .order-center-page :deep(.unified-query-toolbar__toggle) { border: 1px solid #cbd7e7; background: #eef2f8; color: #344054; font: inherit; }
+/* 查询区控件统一触控高度与装饰；不改变按钮次序、权限或事件。 */
+.order-center-page :deep(.unified-query-toolbar__primary) { justify-content: flex-start; gap: 8px; }
+.order-center-page :deep(.unified-query-toolbar__primary > .button) { height: 36px; min-height: 36px; padding: 0 14px; font-size: 14px; font-weight: 600; box-shadow: 0 1px 2px #2538580d, inset 0 1px 0 #ffffff80; }
+.order-center-page :deep(.unified-query-toolbar__primary > .button:hover) { border-color: #aebfdf; box-shadow: 0 2px 5px #25385814; }
+.order-center-page :deep(.unified-query-scope) { height: 36px; min-height: 36px; box-sizing: border-box; border-radius: 8px; }
+.order-center-page :deep(.unified-query-scope button) { min-width: 54px; height: 30px; min-height: 30px; border-radius: 6px; font-size: 14px; font-weight: 600; }
+.order-center-page :deep(.unified-query-scope button[aria-pressed='true']) { box-shadow: 0 1px 3px #2947ae26, inset 0 1px 0 #ffffff40; }
 .order-center-page :deep(.unified-query-toolbar input),
 .order-center-page :deep(.unified-query-top-field__entity),
 .order-center-page :deep(.uq-period-trigger) { border-color: #dce4ef; background: #fff; color: #344054; border-radius: 8px; }

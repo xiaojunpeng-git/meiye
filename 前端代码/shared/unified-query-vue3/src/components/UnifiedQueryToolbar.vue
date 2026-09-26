@@ -14,6 +14,8 @@ import {
 } from '../contracts/unifiedQueryContract.js'
 
 const props = defineProps({
+  // 只控制展示文案，normal/all 查询值和刷新路径保持不变。
+  compactScopeLabels: { type: Boolean, default: false },
   localSettingsKey: { type: String, default: '' },
   searchPlaceholder: {
     type: String,
@@ -878,8 +880,8 @@ async function startDirectQueryExport() {
         <button type="button" class="button button--primary" @click="submitQuery">查询</button>
         <div v-if="showDataScope" class="unified-query-scope" role="group" aria-label="数据范围">
           <span class="unified-query-scope__thumb" :class="{ 'unified-query-scope__thumb--all': dataScope === 'all' }" aria-hidden="true" />
-          <button type="button" :aria-pressed="dataScope === 'normal'" :class="{ 'unified-query-scope__active': dataScope === 'normal' }" @click="selectScope('normal')">正常数据</button>
-          <button type="button" :aria-pressed="dataScope === 'all'" :class="{ 'unified-query-scope__active': dataScope === 'all' }" @click="selectScope('all')">全部数据</button>
+          <button type="button" :aria-pressed="dataScope === 'normal'" :class="{ 'unified-query-scope__active': dataScope === 'normal' }" @click="selectScope('normal')">{{ compactScopeLabels ? '正常' : '正常数据' }}</button>
+          <button type="button" :aria-pressed="dataScope === 'all'" :class="{ 'unified-query-scope__active': dataScope === 'all' }" @click="selectScope('all')">{{ compactScopeLabels ? '全部' : '全部数据' }}</button>
         </div>
         <select v-if="normalizedStatusOptions.length && dataScope === 'all'" v-model="businessStatus" class="unified-query-status" aria-label="其他状态" @change="submitQuery">
           <option value="">其他状态</option>

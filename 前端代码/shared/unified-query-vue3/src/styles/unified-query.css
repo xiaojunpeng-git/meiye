@@ -229,12 +229,10 @@
   padding-top: 0;
 }
 
-/* 订单中心将日期范围放在第一行时，两个日期输入与综合查询都必须保留
- * 各自的占位宽度；默认 flex shrink 会把搜索框压到日期区间下方。
- * 365px 仅限第一行日期容器，不能限制第二行自定义字段，否则会被挤成单列。 */
+/* 周期已合并为单入口，第一行按实际内容占位，不再保留双日期输入的空白。 */
 .order-center-query-toolbar.unified-query-toolbar--quick-controls-inline .unified-query-toolbar__primary .unified-query-toolbar__top-fields {
-  flex: 0 0 365px;
-  min-width: 365px;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .order-center-query-toolbar .unified-query-toolbar__primary .search-field {
