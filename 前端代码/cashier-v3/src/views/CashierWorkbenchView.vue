@@ -606,6 +606,16 @@ const cardOperationTypeByMode = Object.freeze({
 })
 
 const cardOperationUpgradeTypes = new Set(['card_upgrade', 'project_upgrade'])
+// 延期、转让、停用、启用只改变既有卡权益，不产生销售额、收款或补差。
+// 它们必须在原因确认后立即走卡操作事务，绝不能伪装成 ¥0 的购物车行
+// 再依赖结账触发；升级类则仍需以同次销售结算为唯一生效边界。
+const directCardOperationTypes = new Set([
+  'card_extension',
+  'card_transfer',
+  'card_disable',
+  'card_enable',
+  'project_replacement'
+])
 const cardOperationProjectTypes = new Set(['project_replacement', 'project_upgrade'])
 const cardOperationTargetCatalogTypes = new Set([
   'card_upgrade',
@@ -2539,9 +2549,8 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
         operationType,
         sourceCardHolderId: sourceContext.id,
         idempotencyKey: createCashierV3CommandId('CARD_OPERATION'),
-        // This intent is retained locally until final checkout. Persist the
-        // selection exactly as displayed so final settlement never re-prices it
-        // from a later catalogue projection.
+        // 直接卡操作同样带来源卡与版本上下文，由服务端在确认时原子校验。
+        // 目标快照只用于卡升级/项目升级的后续结账，不能把延期等操作降级成购物车草稿。
         targetSnapshot,
         ...(commandContexts ? { commandContexts } : {})
       }
@@ -2637,30 +2646,26 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
     return { result: { status: 'success', preview: true } }
   }
 
-  // 项目替换是纯卡权益变更，不产生销售金额或收款单。确认替换时
-  // 直接提交正式卡操作事务；只有项目升级仍需保留到结账时收取补差价。
-  if (operationType === 'project_replacement') {
+  // 这五类操作都只变更既有权益：卡延期、转让、停用、启用与项目替换。
+  // 原因确认即为业务命令的最终确认，服务端在同一事务内锁定卡状态、
+  // 执行变更并写审计；前端不得把它们加入购物车或要求零金额结账。
+  if (directCardOperationTypes.has(operationType)) {
     isSubmittingCardOperation.value = true
-    cardOperationNotice.value = '正在替换…'
+    const operationLabel = String(operation.label || '卡操作')
+    cardOperationNotice.value = `正在${operationLabel}…`
     if (cardOperationNoticeTimer) window.clearTimeout(cardOperationNoticeTimer)
     await nextTick()
     const selectedMember = member.value ? clonePlain(member.value) : null
     try {
       const result = await requestAction('submit-card-operation', {
         ...payload,
-        // Project replacement owns its local status UI. Do not let a failed
-        // command emit the shell-wide refresh event and overwrite the local
-        // member selection with a guest root projection.
+        // 直接卡操作不拥有完整收银工作台投影。避免把命令回执附带的
+        // 诊断投影覆盖为游客态，当前会员选择仅在浏览器本地保持。
         silent: true,
-        // The replacement transaction returns its own command result, but it
-        // does not own the browser's complete cashier projection. Keep the
-        // selected member/cart root and let the local success branch close
-        // this preview explicitly.
         preserveRootState: true,
       })
-      // The command response may carry a guest-shaped root projection because
-      // the replacement itself does not persist browser customer selection.
-      // Restore the local member draft before any success/failure branch.
+      // 直接卡操作返回的是卡权益结果而不是收银草稿；恢复原会员选择，
+      // 不让与本次命令无关的根投影覆盖正在使用的收银上下文。
       if (selectedMember) {
         state.cashier = {
           ...(state.cashier || {}),
@@ -2672,18 +2677,19 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
       if (['success', 'succeeded'].includes(operationStatus)) {
         finalizeEntitlementSelector()
         previewCardOperation.value = null
-        cardOperationNotice.value = '项目替换成功'
+        // 项目替换沿用既有成功文案；本轮新增的四类直接操作明确提示“已生效”，
+        // 让用户知道不需要再进入结账流程，也不误以为创建了销售订单。
+        const successMessage = operationType === 'project_replacement'
+          ? '项目替换成功。'
+          : `${operationLabel}已生效。`
+        cardOperationNotice.value = successMessage
         if (cardOperationNoticeTimer) window.clearTimeout(cardOperationNoticeTimer)
         cardOperationNoticeTimer = window.setTimeout(() => {
           cardOperationNotice.value = ''
           cardOperationNoticeTimer = null
         }, 2800)
-        // 项目替换事务已经锁定并更新了权威权益行。这里不能调用
-        // open-cashier-workbench 重开完整
-        // cashier workspace：会员选择属于浏览器本地草稿，根投影刷新会
-        // 将它错误地覆盖成游客态。下次打开权益选择器时再读取最新权益。
         window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
-          detail: { status: 'success', message: '项目替换成功。' }
+          detail: { status: 'success', message: successMessage }
         }))
       } else {
         if (selectedMember) {
@@ -2693,12 +2699,16 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
             member: selectedMember
           }
         }
-        cardOperationNotice.value = resultMessage(result, '项目替换未完成，请重试。')
+        const failureMessage = resultMessage(result, `${operationLabel}未完成，请重试。`)
+        cardOperationNotice.value = failureMessage
         if (cardOperationNoticeTimer) window.clearTimeout(cardOperationNoticeTimer)
         cardOperationNoticeTimer = window.setTimeout(() => {
           cardOperationNotice.value = ''
           cardOperationNoticeTimer = null
         }, 4200)
+        window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+          detail: { status: operationStatus === 'conflict' ? 'conflict' : 'failed', message: failureMessage }
+        }))
       }
       return result
     } catch (error) {
@@ -2709,12 +2719,16 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
           member: selectedMember
         }
       }
-      cardOperationNotice.value = String(error?.message || '项目替换未完成，请重试。')
+      const failureMessage = String(error?.message || `${operationLabel}未完成，请重试。`)
+      cardOperationNotice.value = failureMessage
       if (cardOperationNoticeTimer) window.clearTimeout(cardOperationNoticeTimer)
       cardOperationNoticeTimer = window.setTimeout(() => {
         cardOperationNotice.value = ''
         cardOperationNoticeTimer = null
       }, 4200)
+      window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+        detail: { status: 'failed', message: failureMessage }
+      }))
       throw error
     } finally {
       isSubmittingCardOperation.value = false
@@ -2774,32 +2788,11 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
     return localDraftResult('升级项目已加入本次购物车。')
   }
 
-  // Other non-upgrade card operations remain browser draft intents. Project
-  // replacement has already returned above after its direct rights mutation.
-  const localLineId = `local-card-operation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  appendLocalCashierDraftOperation({
-    action: 'submit-card-operation',
-    localLineId,
-    payload
-  }, (draft) => {
-    draft.lines.push({
-      id: localLineId,
-      lineRole: 'card_operation',
-      name: String(operation.label || '卡操作'),
-      kind: '卡操作',
-      quantity: 1,
-      amount: 0,
-      finalAmount: 0,
-      originalAmount: 0,
-      localCardOperation: clonePlain(payload)
-    })
-  })
-  finalizeEntitlementSelector()
-  previewCardOperation.value = null
-  window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
-    detail: { status: 'success', message: '卡操作已加入本次购物车。' }
-  }))
-  return localDraftResult('卡操作已加入本次购物车。')
+  // 操作类型必须属于直接生效或结账升级两类白名单。拒绝未知类型而不是
+  // 退化为 ¥0 购物车行，避免未来新增入口绕开已确认的生效时点。
+  const message = '当前卡操作类型无效，请重新选择。'
+  reportEntitlementContractError({ message })
+  return { result: { status: 'failed', code: 'CARD_OPERATION_TYPE_UNSUPPORTED', message } }
 }
 
 function multiCardUpgradeSourceSnapshot(source = {}) {
@@ -2877,6 +2870,15 @@ async function appendMultiCardUpgradeTarget(operation = {}) {
 }
 
 async function handleOperationConfirm({ source, date, reason } = {}) {
+  const operation = previewCardOperation.value || {}
+  // 延期、停用、启用由权益选择器直接确认，不会经过“选择来源卡”的中间步骤。
+  // 因此必须在这里绑定本次只读快照签发的来源卡版本；缺失版本不能靠页面行
+  // 猜测或跳过校验，否则服务端无法区分过期选择与并发修改。
+  previewCardOperation.value = {
+    ...operation,
+    sources: source ? [clonePlain(source)] : [],
+    selectorContexts: clonePlain(entitlementSelector.value?.commandContexts || [])
+  }
   return submitDirectCardOperation({ source, date, reason })
 }
 

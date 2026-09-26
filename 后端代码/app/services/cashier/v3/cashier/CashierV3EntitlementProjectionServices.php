@@ -116,31 +116,22 @@ final class CashierV3EntitlementProjectionServices
             false,
             true
         );
-        // Only card holders that actually contribute a projected cart line
-        // can be selected from this read model. Legacy data may contain an
-        // orphan holder whose oid no longer exists in store_order; trying to
-        // synchronize that holder would fail the entire selector with a
-        // generic RESOURCE_NOT_FOUND error and hide valid cards for the same
-        // member. Keep the read model fail-closed for the orphan while
-        // allowing valid sources to load normally.
+        // 这个选择器既展示可核销项目，也承担卡延期、转让、停用和启用的
+        // 来源卡选择。后四种操作可以面对没有项目明细的时间卡，因此不能
+        // 只为“有购物车明细”的 holder 签发版本；否则页面能选中卡，却在
+        // 提交时因为没有既有资源版本被 Gateway 拒绝。仍只同步存在有效
+        // 来源销售单的 holder，避免旧孤儿 holder 影响同会员的可用卡。
         $ordersById = [];
+        $holderIdsForProjection = [];
         foreach ((array)($snapshot['orders'] ?? []) as $order) {
             $orderId = (int)($order['id'] ?? 0);
             if ($orderId > 0 && $this->sourceOrderUnavailableReason($order) === '') {
                 $ordersById[$orderId] = true;
             }
         }
-        $holdersByOrder = [];
         foreach ((array)($snapshot['holders'] ?? []) as $holder) {
             $orderId = (int)($holder['oid'] ?? 0);
-            if ($orderId > 0) {
-                $holdersByOrder[$orderId] = (int)($holder['id'] ?? 0);
-            }
-        }
-        $holderIdsForProjection = [];
-        foreach ((array)($snapshot['carts'] ?? []) as $cart) {
-            $orderId = (int)($cart['oid'] ?? 0);
-            $holderId = (int)($holdersByOrder[$orderId] ?? 0);
+            $holderId = (int)($holder['id'] ?? 0);
             if ($holderId > 0 && isset($ordersById[$orderId])) {
                 $holderIdsForProjection[$holderId] = true;
             }
@@ -158,6 +149,16 @@ final class CashierV3EntitlementProjectionServices
             return $versions;
         });
         $sources = $this->buildSources($snapshot, [], [], $operatorScope->tenantId(), false, true);
+        // 展示行不能充当并发版本来源。选择器把本次读取时签发的 holder
+        // 版本作为命令上下文返回，前端仅从中挑选用户最终选中的来源卡；
+        // Gateway 仍会在写事务内核对该版本并拒绝任何过期操作。
+        $commandContexts = array_map(static function (int $version, int $holderId): array {
+            return [
+                'kind' => 'card_holder',
+                'id' => (string)$holderId,
+                'expectedVersion' => $version,
+            ];
+        }, $holderVersions, array_keys($holderVersions));
         return [
             'entitlementSelector' => [
                 'ready' => true,
@@ -169,6 +170,7 @@ final class CashierV3EntitlementProjectionServices
                 ])),
                 'member' => $this->publicMember($snapshot['member']),
                 'sources' => $sources,
+                'commandContexts' => $commandContexts,
                 'dataAsOf' => date('c'),
             ],
             'versions' => array_map(static function (int $version, int $holderId): array {

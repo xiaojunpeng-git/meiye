@@ -96,12 +96,13 @@ final class CashierV3CardOperationAuthorityServices
             $directSnapshot,
             trim((string)($payload['operationType'] ?? ''))
         );
-        // The final checkout command owns the current entitlement read. An
-        // old selector version is never an authority input for a browser
-        // snapshot and must not turn into a conflict inside the planner.
-        if ($directSnapshot) {
-            $payload['sourceCardHolderVersion'] = $source['holderVersion'];
-        }
+        // The planner requires the source version as part of its immutable
+        // audit identity. Both direct operations and checkout snapshots must
+        // receive it only from the Gateway-locked context: the request
+        // normalizer intentionally strips a duplicate browser version, so
+        // letting either path depend on that payload would reject a valid
+        // operation or weaken the concurrency boundary.
+        $payload['sourceCardHolderVersion'] = $source['holderVersion'];
         $state = $this->lockOrCreateState($source, $operatorScope->tenantId());
         $this->assertStateMatchesCurrentHolder($state, $source);
         // Replacement has no browser/resource-version context. The locked

@@ -49,6 +49,10 @@ upgradeContract(strpos($source['entitlementProjection'], "if ((string)\$state['c
 upgradeContract(strpos($source['resourceDiscovery'], "\$sourceProjectAccessMode = \$type === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT") !== false
     && strpos($source['resourceDiscovery'], "'accessMode' => \$sourceProjectAccessMode") !== false,
     'project upgrade reads the source project until normal checkout settles it, while replacement mutates immediately');
+upgradeContract(strpos($source['resourceDiscovery'], 'self::sourceHolderVersion($scope, $holderId)') !== false
+    && strpos($source['resourceDiscovery'], "\$payload['sourceCardHolderVersion'] ?? null") === false
+    && strpos($source['authority'], "\$payload['sourceCardHolderVersion'] = \$source['holderVersion'];") !== false,
+    'direct card operations derive their planner version from the Gateway-locked source context, not a duplicate browser payload');
 upgradeContract(strpos($source['settlement'], "(int)(\$oldOrder['uid'] ?? 0) !== (int)\$operation['origin_member_id']") !== false
     && strpos($source['settlement'], "(int)(\$oldOrder['uid'] ?? 0) !== (int)\$operation['member_id_before']") === false,
     'a transferred card upgrade validates the immutable original-order owner, not the current holder');

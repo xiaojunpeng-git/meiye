@@ -3245,6 +3245,20 @@ function applyCashierV3EnvelopeState(rawResult, requestMeta = {}, options = {}) 
   // result and ignore only that root state for this explicitly scoped flow.
   //
   if (requestMeta.preserveRootState === true) {
+    // 选择权益和直接卡操作时，服务端可能附带一个会把本地已选会员覆盖成
+    // 游客的旧根投影，所以这里只保留本地根状态。版本却是同一份已验证响应
+    // 对当前 state context 签发的并发令牌，不能随根投影一起丢弃；否则卡已
+    // 正确展示但下一步写操作会因没有版本而在浏览器侧被拒绝。上下文不一致
+    // 时仍整包拒绝 versions，绝不把跨工作台版本合并进当前会话。
+    if (Array.isArray(response?.versions)) {
+      const responseContextId = String(response.stateContextId || stateContextIdOf(response.state) || '')
+      const requestContextId = String(requestMeta?.stateContextId || stateContextIdOf(cashierV3State) || '')
+      if (responseContextId && requestContextId && responseContextId === requestContextId) {
+        mergeCashierV3PublicVersions(response.versions, responseContextId, {
+          requestStateContextId: requestContextId
+        })
+      }
+    }
     return {
       accepted: true,
       envelopeRejected: false,

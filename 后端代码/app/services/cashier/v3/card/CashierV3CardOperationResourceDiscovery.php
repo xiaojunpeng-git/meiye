@@ -11,11 +11,12 @@ use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use think\facade\Db;
 
 /**
- * Finds project-replacement dependencies before the Gateway acquires locks.
- * The browser submits only the holder and requested source detail ids.  The
- * current benefit-pool versions and the target SKU resources are always read
- * from server authority, so a page cannot substitute another member's right
- * or an out-of-store project.
+ * Finds card-operation dependencies before the Gateway acquires locks.
+ * The browser submits only resource identities; the source-holder version is
+ * taken from the Gateway-validated command context, while benefit-pool
+ * versions and target SKU resources always come from server authority. This
+ * prevents a page from pairing a legitimate card id with another snapshot or
+ * an out-of-store project.
  */
 final class CashierV3CardOperationResourceDiscovery
 {
@@ -47,7 +48,7 @@ final class CashierV3CardOperationResourceDiscovery
         }
         if ($type === CashierV3CardOperationKernel::TYPE_CARD_UPGRADE) {
             $holderId = self::positiveId($payload['sourceCardHolderId'] ?? null, 'source_card_missing');
-            $version = self::positiveId($payload['sourceCardHolderVersion'] ?? null, 'source_card_version_missing');
+            $version = self::sourceHolderVersion($scope, $holderId);
             $targetSkuId = self::positiveId($payload['targetCatalogId'] ?? null, 'target_card_missing');
             $resources = [[
                 'kind' => 'card_holder',
@@ -69,11 +70,12 @@ final class CashierV3CardOperationResourceDiscovery
             CashierV3CardOperationKernel::TYPE_PROJECT_UPGRADE,
         ], true)) {
             $holderId = self::positiveId($payload['sourceCardHolderId'] ?? null, 'source_card_missing');
-            // Direct holder operations have no hidden dependency. Their one
-            // client context remains the normal Gateway version contract;
-            // duplicating it only lets the same stale version reach the
-            // provider and produce the canonical resource-conflict response.
-            $version = self::positiveId($payload['sourceCardHolderVersion'] ?? null, 'source_card_version_missing');
+            // Discovery runs before row locking, so it needs the observed
+            // holder version to build its exact resource plan. Read it from
+            // the Gateway-validated context instead of a duplicate payload
+            // field: two independently supplied versions could otherwise
+            // drift and make a valid direct operation fail as malformed.
+            $version = self::sourceHolderVersion($scope, $holderId);
             return ['contractVersion' => self::CONTRACT_VERSION, 'resources' => [[
                 'kind' => 'card_holder',
                 'id' => (string)$holderId,
@@ -196,6 +198,28 @@ final class CashierV3CardOperationResourceDiscovery
             (string)($row['current_version'] ?? ''),
             (string)($row['source_fingerprint'] ?? ''),
         ]));
+    }
+
+    /**
+     * Resolves the one source-holder snapshot already validated by Gateway.
+     * A direct card operation must never trust a second client payload version;
+     * the returned value is later compared again when the Gateway expands and
+     * locks the same physical resource.
+     */
+    private static function sourceHolderVersion(array $scope, int $holderId): int
+    {
+        foreach ((array)($scope['contexts'] ?? []) as $context) {
+            if (!is_array($context)
+                || (string)($context['kind'] ?? '') !== 'card_holder'
+                || (string)($context['id'] ?? '') !== (string)$holderId) {
+                continue;
+            }
+            return self::positiveId(
+                $context['expected_version'] ?? $context['expectedVersion'] ?? null,
+                'source_card_version_missing'
+            );
+        }
+        throw self::invalid('source_card_context_missing');
     }
 
     private static function rows($rows): array
