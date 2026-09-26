@@ -421,6 +421,11 @@ const checkoutEntryLabel = computed(() => activeCardOperationUpgrade.value
   : previewCardOperation.value?.mode === 'project-replacement'
     ? '确认替换'
     : (cart.value.primaryActionLabel || activeCheckoutComposition.value?.primaryActionLabel || '立即结账'))
+// 卡转让与项目替换是独立生效的权益命令，不应混入收银订单或让用户看到无关的
+// 清空、改价、挂单和结账入口；仅在这两类预览期间隐藏整条收银结账栏。
+const hidesCheckoutBarForCardOperation = computed(() => (
+  ['card-transfer', 'project-replacement'].includes(String(previewCardOperation.value?.mode || ''))
+))
 const isAwaitingCustomCardUpgradeTarget = computed(() => (
   previewCardOperation.value?.awaitingTarget === true
   && previewCardOperation.value.mode === 'card-upgrade'
@@ -7111,9 +7116,9 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div class="cashier-operation-preview__arrow" aria-hidden="true">↓</div>
-            <!-- 未选目标卡时复用权益面板的“选择目标卡”处理函数，保持目录筛选与操作上下文一致。 -->
+            <!-- 未选目标卡或项目时复用权益面板的目标选择处理，保持目录筛选与操作上下文一致。 -->
             <button
-              v-if="previewCardOperation.mode === 'card-upgrade' && !previewCardOperation.target"
+              v-if="['card-upgrade', 'project-replacement'].includes(previewCardOperation.mode) && !previewCardOperation.target"
               type="button"
               class="cashier-operation-preview__target cashier-operation-preview__target--selectable"
               @click="handleOperationTargetSelection"
@@ -7458,7 +7463,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-      <footer class="cashier-checkout-bar">
+      <footer v-if="!hidesCheckoutBarForCardOperation" class="cashier-checkout-bar">
       <div class="cashier-checkout-bar__purchase">
         <div class="cashier-checkout-summary">
           <span>原价<strong>{{ formatPlainAmount(summary.originalAmount) }}</strong></span>
