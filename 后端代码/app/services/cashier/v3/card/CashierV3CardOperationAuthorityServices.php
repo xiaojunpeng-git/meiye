@@ -431,11 +431,12 @@ final class CashierV3CardOperationAuthorityServices
             || (int)($holder['store_id'] ?? 0) <= 0) {
             throw self::notFound('card_source_order_not_active');
         }
-        // 项目替换/升级不以购卡门店限制办理，不设临时放行或跨店开关。
+        // 项目替换/升级及整卡升级不以购卡门店限制办理，不设临时放行或跨店开关。
         // 其它卡操作保留原边界；账号权限由命令网关校验，原卡与原订单仍须一致。
         if (!in_array($operationType, [
             CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT,
             CashierV3CardOperationKernel::TYPE_PROJECT_UPGRADE,
+            CashierV3CardOperationKernel::TYPE_CARD_UPGRADE,
         ], true) && (int)$holder['store_id'] !== $operatorScope->storeId()) {
             throw self::notFound('card_source_store_not_allowed');
         }

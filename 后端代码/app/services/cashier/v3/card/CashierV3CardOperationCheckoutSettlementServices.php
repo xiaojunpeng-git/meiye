@@ -369,9 +369,9 @@ final class CashierV3CardOperationCheckoutSettlementServices
         // The card may have been transferred before it is upgraded.  The
         // legacy source order is immutable and remains owned by the original
         // member, whereas member_id_before is the card's current holder.
+        // 跨店升级保留原卡历史门店；新卡按本次销售门店签发，不比较原卡门店。
         if (!$oldOrder
             || (int)($oldOrder['uid'] ?? 0) !== (int)$operation['origin_member_id']
-            || (int)($oldOrder['store_id'] ?? 0) !== $operatorScope->storeId()
             || (int)($oldOrder['paid'] ?? 0) !== 1
             || (int)($oldOrder['card_upgrade_use_oid'] ?? -1) !== 0) {
             throw CashierV3CommandException::versionConflict(

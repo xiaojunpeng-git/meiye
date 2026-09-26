@@ -161,7 +161,9 @@ final class CashierV3MultiCardUpgradeSettlementServices
 
     private function lockSource(int $holderId, array $request, CashierV3OperatorScope $operatorScope, CashierV3DataScopeContext $dataScope): array {
         $holder = Db::name('user_card_holder')->where('id', $holderId)->where('uid', (int)$request['member_id'])->where('is_del', 0)->lock(true)->find();
-        if (!$holder || (int)($holder['store_id'] ?? 0) !== $operatorScope->storeId()) throw self::conflict('multi_card_upgrade_holder_changed');
+        // 原卡购卡门店不限制升级；会员归属仍由上面的 uid 条件锁定。
+        // 新卡由当前门店销售签发，不能把原卡历史门店复制为新卡归属。
+        if (!$holder) throw self::conflict('multi_card_upgrade_holder_changed');
         // Card-state is only an optional read overlay.  A multi-card upgrade
         // never creates or mutates that overlay: the locked legacy holder,
         // order and benefit rows are both the authority and the concurrency

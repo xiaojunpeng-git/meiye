@@ -16,7 +16,7 @@ $row = Db::name('user_card_holder')->alias('h')
     ->where('o.paid',1)->where('o.is_del',0)->where('o.is_system_del',0)->where('o.is_user_del',0)
     ->where('o.refund_status',0)->where('o.terminal_action',0)->where('o.card_upgrade_use_oid',0)
     ->where('d.cart_type',2)->where('d.product_type',6)->where('d.write_surplus_times','>',0)->where('d.is_writeoff',0)
-    ->field('h.id,h.store_id,d.id AS detail_id')->find();
+    ->field('h.id,h.uid,h.store_id,d.id AS detail_id')->find();
 if (!$row) throw new RuntimeException('missing valid source fixture');
 $store = (int)$row['store_id'] === 133 ? 134 : 133;
 $operator = new CashierV3OperatorScope($store,71,'test','0');
@@ -27,11 +27,22 @@ Db::startTrans();
 try {
     // 两种操作均不要求来源门店相同；权限由命令网关负责，不在来源读取重复加跨店门禁。
     $scope = new Scope(71,701,$store,'0','test',[$store],Scope::MODE_STORES,[],false,'','test',[],[]);
-    foreach ([Kernel::TYPE_PROJECT_REPLACEMENT, Kernel::TYPE_PROJECT_UPGRADE] as $type) {
+    foreach ([Kernel::TYPE_PROJECT_REPLACEMENT, Kernel::TYPE_PROJECT_UPGRADE, Kernel::TYPE_CARD_UPGRADE] as $type) {
             $source = $method->invoke($writer,(int)$row['id'],$operator,$type,
                 ['projectLines'=>[['sourceDetailId'=>(int)$row['detail_id'],'quantity'=>1]]],$scope);
-            if ($source['holderId'] !== (int)$row['id'] || !$source['projects']) throw new RuntimeException('source mismatch');
+            if ($source['holderId'] !== (int)$row['id'] || ($type !== Kernel::TYPE_CARD_UPGRADE && !$source['projects'])) throw new RuntimeException('source mismatch');
             echo "PASS cross-store source: {$type}\n";
+    }
+    // 当前收银整卡升级走多卡统一链路；检查跨店读取通过且错误会员仍拒绝。
+    $multi = new \app\services\cashier\v3\card\CashierV3MultiCardUpgradeSettlementServices();
+    $lock = new ReflectionMethod($multi, 'lockSource'); $lock->setAccessible(true);
+    $source = $lock->invoke($multi,(int)$row['id'],['member_id'=>(int)$row['uid']],$operator,$scope);
+    if ($source['holderId'] !== (int)$row['id']) throw new RuntimeException('multi source mismatch');
+    try {
+        $lock->invoke($multi,(int)$row['id'],['member_id'=>0],$operator,$scope);
+        throw new RuntimeException('wrong member accepted');
+    } catch (\app\services\cashier\v3\CashierV3CommandException $expected) {
+        echo "PASS multi-card cross-store source and wrong-member rejection\n";
     }
 } finally { Db::rollback(); }
 echo "PASS rollback; no business writes\n";
