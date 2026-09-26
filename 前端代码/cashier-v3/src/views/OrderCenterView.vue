@@ -2737,11 +2737,10 @@ onBeforeUnmount(() => {
       <div class="service-void-modal__backdrop" @click="closeServiceVoid"></div>
       <section class="service-void-modal__panel">
         <header class="service-void-modal__head">
-          <h2 id="service-void-title">{{ serviceVoidRecord.entitlementOnly ? '作废纯权益订单' : '作废服务记录' }}</h2>
+          <h2 id="service-void-title">作废</h2>
           <button type="button" class="service-void-modal__close" :disabled="serviceVoidSubmitting" @click="closeServiceVoid">×</button>
         </header>
         <p class="service-void-modal__record">{{ serviceVoidRecord.serviceRecordNo || serviceVoidRecord.orderNo || serviceVoidRecord.serviceFactId }}</p>
-        <p v-if="serviceVoidRecord.entitlementOnly">将作废本单尚未作废的全部服务记录，退回对应权益并冲销业绩；已作废记录不会重复退回。</p>
         <label class="service-void-modal__label" for="service-void-reason">作废原因</label>
         <textarea id="service-void-reason" v-model="serviceVoidReason" class="service-void-modal__textarea" maxlength="255" rows="4" placeholder="请输入作废原因"></textarea>
         <p v-if="serviceVoidError" class="service-void-modal__error" role="alert">{{ serviceVoidError }}</p>
