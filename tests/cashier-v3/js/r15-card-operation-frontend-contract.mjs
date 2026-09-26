@@ -11,6 +11,13 @@ const bridge = fs.readFileSync(path.join(repo, '前端代码/cashier-v3/src/serv
 const selector = fs.readFileSync(path.join(repo, '前端代码/cashier-v3/src/components/cashier/EntitlementSelectorOverlay.vue'), 'utf8')
 const checkout = fs.readFileSync(path.join(repo, '前端代码/cashier-v3/src/components/cashier/CashierCheckoutOverlay.vue'), 'utf8')
 
+// 停用只调整反馈呈现，不影响其他卡操作预览，也不移除原命令的提交锁。
+assert.match(workbench, /v-if="cardOperationNotice && cardOperationNoticeType !== 'card_disable'"/)
+assert.match(workbench, /previewCardOperation\?\.sources\?\.length && previewCardOperation\.mode !== 'card-disable'/)
+assert.match(workbench, /v-if="isSubmittingCardOperation && cardOperationNoticeType === 'card_disable'"[\s\S]*?role="dialog" aria-modal="true" aria-label="卡停用处理中" aria-busy="true"/)
+assert.match(workbench, /cardOperationNoticeType\.value = operationType\s+isSubmittingCardOperation\.value = true/)
+assert.match(workbench, /finally\s*\{\s*isSubmittingCardOperation\.value = false/)
+
 assert.match(workbench, /async function handleOpenCardOperation[\s\S]*?if \(hasCartLines\.value\) \{[\s\S]*?await confirmClearCart\(\)/)
 assert.match(workbench, /if \(operation && operation\.awaitingTarget !== true\)[\s\S]*?当前只能办理/)
 assert.match(workbench, /const cardOperationReasonModes = new Set\(\[[\s\S]*?'card-extension'[\s\S]*?'card-transfer'[\s\S]*?'card-disable'[\s\S]*?'card-enable'[\s\S]*?\]\)/)
