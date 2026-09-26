@@ -8874,12 +8874,13 @@ button:disabled {
   min-width: max(100%, calc((var(--order-column-count, 20) * 122px) + 148px));
 }
 
+/* 消费订单末列是状态而非操作：不参与右侧吸附，与表头按同一横向滚动位置展示。 */
 .hang-order-list-table th:last-child,
 .hang-order-list-table td:last-child,
 .member-list-table th:last-child,
 .member-list-table td:last-child,
-.order-center-list-table th:last-child,
-.order-center-list-table td:last-child {
+.order-center-list-table:not(.sales-order-query-table) th:last-child,
+.order-center-list-table:not(.sales-order-query-table) td:last-child {
   position: sticky;
   z-index: 2;
   right: 0;
@@ -8890,14 +8891,14 @@ button:disabled {
 
 .hang-order-list-table th:last-child,
 .member-list-table th:last-child,
-.order-center-list-table th:last-child {
+.order-center-list-table:not(.sales-order-query-table) th:last-child {
   z-index: 3;
   background: #f7f9fc;
 }
 
 .hang-order-list-table tbody tr:hover td:last-child,
 .member-list-table tbody tr:hover td:last-child,
-.order-center-list-table tbody tr:hover td:last-child {
+.order-center-list-table:not(.sales-order-query-table) tbody tr:hover td:last-child {
   background: #f7fbff;
 }
 
