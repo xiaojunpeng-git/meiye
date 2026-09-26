@@ -435,7 +435,8 @@
   font-size: 13px;
 }
 
-.unified-query-top-field--label-hidden {
+/* 无标签日期只占一列，优先于宿主旧版双列字段样式，避免边框仅包住首段日期。 */
+.unified-query-top-field.unified-query-top-field--label-hidden {
   grid-template-columns: minmax(0, 1fr);
   flex: 0 0 365px;
   width: 365px;
@@ -443,16 +444,20 @@
   max-width: 365px;
 }
 
+/* 单入口周期按日期和图标的自然宽度排布，不沿用双日期输入的固定占位。 */
+.unified-query-top-field.unified-query-top-field--label-hidden:has(.uq-period-trigger) {
+  grid-template-columns: max-content;
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 0;
+  max-width: none;
+}
+
 .unified-query-top-field__range {
   display: grid;
   grid-template-columns: minmax(92px, 1fr) auto minmax(92px, 1fr);
   align-items: center;
   gap: 6px;
-}
-
-.unified-query-top-field__range--date {
-  grid-template-columns: auto minmax(126px, 1fr) auto minmax(126px, 1fr);
-  min-width: 350px;
 }
 
 .unified-query-top-field__range > span {

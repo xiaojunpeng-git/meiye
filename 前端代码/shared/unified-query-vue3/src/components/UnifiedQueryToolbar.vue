@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import Download from '@lucide/vue/dist/esm/icons/download.mjs'
+import UnifiedQueryDateRange from './UnifiedQueryDateRange.vue'
 import UnifiedQueryCustomFieldDrawer from './UnifiedQueryCustomFieldDrawer.vue'
 import UnifiedQueryExportDrawer from './UnifiedQueryExportDrawer.vue'
 import UnifiedQueryFieldRenameDrawer from './UnifiedQueryFieldRenameDrawer.vue'
@@ -487,6 +488,13 @@ function setQuickRangeValue(field, bound, value) {
   quickRangeError.value = ''
 }
 
+// 周期控件一次提交完整日期范围，沿用同一查询按钮路径，避免选起点时就发送半个周期。
+function applyDateRange(field, range) {
+  setQuickRangeValue(field, 'min', range.min)
+  setQuickRangeValue(field, 'max', range.max)
+  submitQuery()
+}
+
 function validateQuickRanges() {
   for (const field of activeQuickFields.value) {
     if (field.quickRange !== true && !isQuickDateRange(field)) continue
@@ -816,24 +824,7 @@ async function startDirectQueryExport() {
           <label v-for="field in primaryQuickFields" :key="field.key" class="unified-query-top-field" :class="{ 'unified-query-top-field--label-hidden': field.quickLabelHidden === true }">
             <span v-if="field.quickLabelHidden !== true">{{ field.label }}</span>
             <div class="unified-query-top-field__control">
-              <div v-if="isQuickDateRange(field)" class="unified-query-top-field__range unified-query-top-field__range--date">
-                <span>从</span>
-                <input
-                  :value="quickRangeValue(field, 'min')"
-                  type="date"
-                  aria-label="开始日期"
-                  @input="setQuickRangeValue(field, 'min', $event.target.value)"
-                  @change="submitQuery"
-                >
-                <span>至</span>
-                <input
-                  :value="quickRangeValue(field, 'max')"
-                  type="date"
-                  aria-label="结束日期"
-                  @input="setQuickRangeValue(field, 'max', $event.target.value)"
-                  @change="submitQuery"
-                >
-              </div>
+              <UnifiedQueryDateRange v-if="isQuickDateRange(field)" :model-value="{ min: quickRangeValue(field, 'min'), max: quickRangeValue(field, 'max') }" :label="`${field.label}周期`" @change="applyDateRange(field, $event)" />
               <div v-else-if="field.quickRange === true" class="unified-query-top-field__range">
                 <input
                   :value="quickRangeValue(field, 'min')"
@@ -931,24 +922,7 @@ async function startDirectQueryExport() {
         <label v-for="field in secondaryQuickFields" :key="field.key" class="unified-query-top-field" :class="{ 'unified-query-top-field--label-hidden': field.quickLabelHidden === true }">
           <span v-if="field.quickLabelHidden !== true">{{ field.label }}</span>
           <div class="unified-query-top-field__control">
-            <div v-if="isQuickDateRange(field)" class="unified-query-top-field__range unified-query-top-field__range--date">
-              <span>从</span>
-              <input
-                :value="quickRangeValue(field, 'min')"
-                type="date"
-                aria-label="开始日期"
-                @input="setQuickRangeValue(field, 'min', $event.target.value)"
-                @change="submitQuery"
-              >
-              <span>至</span>
-              <input
-                :value="quickRangeValue(field, 'max')"
-                type="date"
-                aria-label="结束日期"
-                @input="setQuickRangeValue(field, 'max', $event.target.value)"
-                @change="submitQuery"
-              >
-            </div>
+            <UnifiedQueryDateRange v-if="isQuickDateRange(field)" :model-value="{ min: quickRangeValue(field, 'min'), max: quickRangeValue(field, 'max') }" :label="`${field.label}周期`" @change="applyDateRange(field, $event)" />
             <div v-else-if="field.quickRange === true" class="unified-query-top-field__range">
               <input
                 :value="quickRangeValue(field, 'min')"
