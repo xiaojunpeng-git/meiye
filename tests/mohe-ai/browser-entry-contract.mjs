@@ -349,6 +349,10 @@ assert.ok(workspaceRoot.querySelector('.panel.workspace'));
 assert.ok(workspaceRoot.querySelector('.workspace-aside'));
 assert.ok(workspaceRoot.querySelector('.workspace-history'));
 assert.ok(workspaceRoot.querySelector('.workspace-composer-card'));
+// 电脑端导出选项直接可见，不再依赖加号；第一列与输入文字共用左边距。
+assert.equal(workspaceRoot.querySelector('.workspace-more'), null);
+assert.equal(workspaceRoot.querySelector('.workspace-composer-actions').hidden, false);
+assert.match(presentationStyles, /\.workspace-composer-actions\{grid-column:1;grid-row:2;[^}]*padding:0 22px 12px/);
 const workspaceExcelToggle = workspaceRoot.querySelector('.workspace-excel input[type="checkbox"]');
 assert.ok(workspaceExcelToggle);
 assert.equal(workspaceExcelToggle.getAttribute('aria-label'), 'Execl');
