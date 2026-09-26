@@ -12,6 +12,9 @@ assert.ok(!source.match(/<textarea[^>]*placeholder/));
 assert.ok(source.includes('aria-label="输入问题"'));
 assert.ok(!browserEntry.includes('input.placeholder'));
 assert.ok(browserEntry.includes("input.setAttribute('aria-label', '输入问题')"));
+// Approved tagline is shared visible brand copy, independent from the empty composer.
+assert.ok(source.includes('<text class="ai-brand-tagline">够智能、够准确、够便捷</text>'));
+assert.ok(browserEntry.includes("el('small', '够智能、够准确、够便捷', 'workspace-brand-tagline')"));
 // Execute the production UVue controller after TS syntax lowering. This checks
 // its actual state functions, not a copied implementation, but is NOT a native
 // UTS compiler, picker, H5 layout or device lifecycle acceptance test.

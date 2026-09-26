@@ -7,6 +7,8 @@
         <view class="ai-back-button" role="button" aria-label="退出魔核 AI" @tap="closePanel"><text class="ai-back-chevron">‹</text></view>
         <text class="ai-title">魔核AI 1.0</text>
       </view>
+      <!-- 标语独立放在标题行下方，保留原生胶囊对齐和返回按钮触控区域。 -->
+      <text class="ai-brand-tagline">够智能、够准确、够便捷</text>
     </view>
     <scroll-view scroll-y="true" class="ai-messages" :scroll-into-view="messageAnchor">
       <view v-for="(item,index) in displayed" :key="index" :id="turnAnchor(item,index)" class="ai-message">
@@ -505,6 +507,7 @@ onMounted(() => { sessionId = id(); bootstrapSession(); expiryTimer = setInterva
 onUnmounted(() => { lifecycle++; exportLifecycle++; persistActive(true); if (timer != null) clearTimeout(timer); if (expiryTimer != null) clearInterval(expiryTimer); finishActiveRunStatus() })
 </script>
 <style>
+.ai-brand-tagline{display:block;width:100%;margin-top:4px;font-size:12px;line-height:18px;font-weight:400;color:#667085;text-align:center}
 .ai-entry{position:fixed;right:24px;bottom:calc(92px + env(safe-area-inset-bottom));z-index:9999;width:60px;height:60px;border-radius:50%;box-shadow:0 10px 26px rgba(31,99,199,.32)}.ai-entry-icon{display:block;width:60px;height:60px;border-radius:50%}
 .ai-panel{position:fixed;left:0;right:0;top:0;bottom:0;z-index:10000;box-sizing:border-box;background-color:#fff;display:flex;flex-direction:column;overflow:hidden;color:#111827}
 .ai-workspace-head{flex:0 0 auto;padding:0 14px 8px;border-bottom:1px solid #dde2eb}.ai-title-row{position:relative;height:44px;width:100%;box-sizing:border-box;padding:0 44px;display:flex;flex-direction:row;align-items:center;justify-content:center}.ai-back-button{position:absolute;left:0;top:0;bottom:0;width:44px;display:flex;align-items:center;justify-content:center}.ai-back-button:active{background-color:#f2f5fa;border-radius:12px}.ai-back-chevron{font-size:34px;line-height:32px;font-weight:400}.ai-title{min-width:0;white-space:nowrap;font-size:20px;font-weight:700;letter-spacing:.01em;text-align:center}
