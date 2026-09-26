@@ -2468,20 +2468,21 @@ onBeforeUnmount(() => {
         <tbody v-for="(record, recordIndex) in records" :key="recordKey(record, recordIndex)" class="sales-order-query-group">
           <tr class="sales-order-query-group__header">
             <td :colspan="salesOrderListColumns.length">
-              <span>销售日期：{{ displayRecordField(record, 'business_date') }}</span>
-              <span>实际下单时间：{{ displayRecordField(record, 'occurred_at') }}</span>
-              <span>订单编号：{{ displayRecordField(record, 'sales_order_no') }}</span>
-              <span v-if="record.upgradeTypeLabel" class="sales-order-query-group__upgrade-tag">{{ record.upgradeTypeLabel }}</span>
-              <span>门店：{{ displayRecordField(record, 'store') }}</span>
+              <!-- 主项固定列槽，业务标签放在来源之后，避免标签或名称长度推移后续字段。 -->
+              <span class="sales-order-query-meta sales-order-query-meta--date">销售日期：{{ displayRecordField(record, 'business_date') }}</span>
+              <span class="sales-order-query-meta sales-order-query-meta--time">实际下单时间：{{ displayRecordField(record, 'occurred_at') }}</span>
+              <span class="sales-order-query-meta sales-order-query-meta--number" :title="displayRecordField(record, 'sales_order_no')">订单编号：{{ displayRecordField(record, 'sales_order_no') }}</span>
+              <span class="sales-order-query-meta sales-order-query-meta--store" :title="displayRecordField(record, 'store')">门店：{{ displayRecordField(record, 'store') }}</span>
               <!-- 复用服务记录的会员详情入口和权限投影；游客不按姓名猜测关联。 -->
-              <span>客户：<button
+              <span class="sales-order-query-meta sales-order-query-meta--member" :title="displayRecordField(record, 'member_name')">客户：<button
                 v-if="canOpenMemberDetail(record)"
                 type="button"
                 class="order-link"
                 :title="`查看${displayRecordField(record, 'member_name')}的会员详情`"
                 @click="openMemberDetail(record)"
               >{{ displayRecordField(record, 'member_name') }}</button><template v-else>{{ displayRecordField(record, 'member_name') }}</template></span>
-              <span>来源：{{ displayRecordField(record, 'source') }}</span>
+              <span class="sales-order-query-meta sales-order-query-meta--source" :title="displayRecordField(record, 'source')">来源：{{ displayRecordField(record, 'source') }}</span>
+              <span v-if="record.upgradeTypeLabel" class="sales-order-query-group__upgrade-tag">{{ record.upgradeTypeLabel }}</span>
               <!-- 纯权益可以查看/打印及作废服务，但不进入销售退款。 -->
               <span v-if="!isPlatformReadOnly" class="sales-order-query-group__actions">
                 <button type="button" class="button button--text" @click="openRecordDetail(record)">详情</button>
@@ -2517,8 +2518,9 @@ onBeforeUnmount(() => {
           <tr v-for="(item, itemIndex) in salesOrderItems(record)" :key="item.id || item.orderItemId || `${recordKey(record, recordIndex)}-${item.name}-${itemIndex}`">
             <td class="sales-order-query-item-cell">
               <span class="sales-order-query-item-cell__line">
-                <strong class="sales-order-query-item-cell__name">{{ item.name || '未命名商品' }}</strong>
+                <!-- 购买/权益仅调整到名称前展示，仍使用原业务标签，不重算商品类型。 -->
                 <small v-if="item.businessTag" class="sales-order-query-item-cell__business-tag" :class="`is-${item.businessTag === '权益' ? 'entitlement' : 'purchase'}`">{{ item.businessTag }}</small>
+                <strong class="sales-order-query-item-cell__name">{{ item.name || '未命名商品' }}</strong>
                 <small v-if="item.itemType" class="sales-order-query-item-cell__type">{{ item.itemType }}</small>
               </span>
             </td>
@@ -2929,18 +2931,22 @@ onBeforeUnmount(() => {
   min-height: 22px;
   padding: 0 6px;
 }
-.sales-order-query-item-cell__line { display: inline-flex; align-items: flex-end; gap: 8px; }
+.sales-order-query-item-cell__line { display: inline-flex; align-items: center; gap: 8px; }
 .sales-order-query-item-cell__name { display: inline-block; line-height: 1.2; }
 .sales-order-query-item-cell__business-tag {
   display: inline-block;
-  padding: 1px 5px;
+  padding: 2px 6px;
   border: 1px solid #b7d4fe;
-  border-radius: 4px;
+  border-radius: 5px;
   background: #eff6ff;
   color: #175cd3;
-  font-size: 11px;
-  line-height: 1.1;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  flex-shrink: 0;
 }
+/* 抵消旧商品单元格对 small 的统一上边距，标签与名称保持垂直居中。 */
+.sales-order-query-table td:first-child small.sales-order-query-item-cell__business-tag { margin-top: 0; }
 .sales-order-query-item-cell__business-tag.is-entitlement {
   border-color: #abefc6;
   background: #ecfdf3;
@@ -2956,6 +2962,14 @@ onBeforeUnmount(() => {
 .sales-order-query-payment-cell { white-space: normal; }
 .sales-order-query-payment-cell__line { display: block; white-space: nowrap; }
 .sales-order-query-group__header td > span { display: inline-block; margin-right: 24px; }
+/* 明确列宽仅用于订单主行；超长值悬停可读，会员按钮与业务操作仍沿用原入口。 */
+.sales-order-query-group__header td > .sales-order-query-meta { vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 16px; }
+.sales-order-query-meta--date { width: 150px; }
+.sales-order-query-meta--time { width: 236px; }
+.sales-order-query-meta--number { width: 180px; }
+.sales-order-query-meta--store { width: 140px; }
+.sales-order-query-meta--member { width: 110px; }
+.sales-order-query-meta--source { width: 150px; }
 .sales-order-query-group__header .sales-order-query-group__upgrade-tag {
   margin-right: 24px;
   padding: 1px 7px;
@@ -3000,4 +3014,38 @@ onBeforeUnmount(() => {
 }
 
 .order-center-printer-button:hover { border-color: #84adcf; color: #175cd3; }
+
+/* R37 订单中心视觉皮肤：仅作用本页的颜色与装饰，不改变字段、尺寸布局、滚动定位或业务事件。 */
+.order-center-page { background: #f5f7fa; }
+.order-center-page__head { border: 1px solid #e3e9f2; border-radius: 10px; }
+.order-center-tabs { border-radius: 10px; }
+.order-center-tabs__button { color: #42526b; border-radius: 8px 8px 0 0; }
+.order-center-tabs__button:hover { color: #315bea; background: #f0f5ff; }
+.order-center-tabs__button--active { color: #315bea; background: #e7efff; }
+.order-center-tabs__button--active::after { background: #4568f5; }
+.order-center-page :deep(.unified-query-toolbar) { background: #fff; border-color: #e3e9f2; box-shadow: 0 1px 3px #21355205; }
+.order-center-page :deep(.unified-query-toolbar .button),
+.order-center-printer-button { border-radius: 8px; border-color: #dce4ef; color: #344054; background: #fff; box-shadow: 0 1px 2px #25385806; }
+.order-center-page :deep(.unified-query-toolbar .button--primary) { background: #4568f5; border-color: #4568f5; color: #fff; }
+.order-center-page :deep(.unified-query-toolbar .button--primary:hover) { background: #3555dc; }
+.order-center-page :deep(.unified-query-scope) { border-color: #e0e7f1; background: #f0f3f8; }
+.order-center-page :deep(.unified-query-scope button) { color: #52627a; }
+.order-center-page :deep(.unified-query-scope button[aria-pressed='true']) { background: #4568f5; border-color: #4568f5; color: #fff; }
+.order-center-page :deep(.unified-query-toolbar__toggle) { border: 1px solid #cbd7e7; background: #eef2f8; color: #344054; font: inherit; }
+.order-center-page :deep(.unified-query-toolbar input),
+.order-center-page :deep(.unified-query-top-field__entity),
+.order-center-page :deep(.uq-period-trigger) { border-color: #dce4ef; background: #fff; color: #344054; border-radius: 8px; }
+.order-center-page :deep(button:focus-visible) { outline: 2px solid #4568f5; outline-offset: -2px; }
+.order-center-list-table th,
+.sales-order-query-table > thead > tr > th,
+.sales-order-query-table > thead > tr > th:first-child { background: #f0f4f9; color: #435771; font-weight: 600; }
+.order-center-list-table .sales-order-query-group__header td { background: #e6ecf3; color: #465b75; }
+.sales-order-query-group > tr:not(.sales-order-query-group__header) td { border-bottom-color: #edf1f6; color: #202c3c; }
+.sales-order-query-group > tr:not(.sales-order-query-group__header):hover td { background: #f7faff; }
+.order-center-page .button--text,
+.sales-order-query-group__header .button { color: #315bea; }
+.sales-order-query-table td:first-child small.sales-order-query-item-cell__business-tag.is-purchase { background: #e7effd; color: #3565ac; border-color: transparent; }
+.sales-order-query-table td:first-child small.sales-order-query-item-cell__business-tag.is-entitlement { background: #d7f2e8; color: #19735b; border-color: transparent; }
+.sales-order-query-group__header .sales-order-query-group__upgrade-tag { background: #eaf1ff; color: #2858b8; border-color: #cbdcf7; }
+.sales-order-query-item-cell__type { color: #66758b; }
 </style>
