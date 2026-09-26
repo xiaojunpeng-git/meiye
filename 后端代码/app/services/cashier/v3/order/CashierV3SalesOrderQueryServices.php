@@ -24,7 +24,7 @@ final class CashierV3SalesOrderQueryServices
     public const KEYWORD_SEARCH_WINDOW_DAYS = 366;
     public const MAX_PAGE_SIZE = 100;
     public const CURSOR_TTL_SECONDS = 1800;
-    private const CURSOR_VERSION = 1;
+    private const CURSOR_VERSION = 2;
     private const PRIMARY_SALE_CART_TYPES = [0, 3];
 
     /** @var callable|null function(string $operation, array $criteria): array */
@@ -709,7 +709,7 @@ final class CashierV3SalesOrderQueryServices
 
     private function authorityOrderBaseQuery(array $criteria)
     {
-        $query = Db::name('cashier_v3_sales_order')->alias('o')
+        $query = Db::table($this->salesAndServiceHeaders($criteria) . ' o')
             ->where('o.tenant_id', (string)$criteria['tenantId'])
             ->where('o.order_status', 'settled')
             ->where('o.order_direction', 'forward')
@@ -750,6 +750,53 @@ final class CashierV3SalesOrderQueryServices
         return $query;
     }
 
+    /**
+     * 纯权益结账只有服务事实，没有销售资金单。这里只合并只读单据索引，
+     * 按同一结账请求分组；已存在销售单的混合结账由原销售单承载，禁止重复。
+     * 奇偶 ID 仅用于有签名的分页锚点，不作为任何写命令的资源 ID。
+     */
+    private function salesAndServiceHeaders(array $criteria): string
+    {
+        $columns = explode(',', str_replace('o.', '', $this->authorityOrderFields()));
+        $salesFields = [];
+        $serviceFields = [];
+        foreach ($columns as $column) {
+            $salesFields[] = $column === 'id' ? 's.id * 2 AS id'
+                : ($column === 'entitlement_only' ? '0 AS entitlement_only' : 's.' . $column);
+            if ($column === 'id') $value = 'MIN(sf.id) * 2 + 1';
+            elseif ($column === 'order_id') $value = "CONCAT('service:', sf.checkout_request_id)";
+            elseif ($column === 'order_no') $value = "MIN(COALESCE(NULLIF(sf.service_record_no,''),sf.service_fact_id))";
+            elseif ($column === 'order_version' || $column === 'entitlement_only') $value = '1';
+            elseif (in_array($column, ['original_amount_cents','discount_amount_cents','sale_amount_cents','business_source_primary_id','business_source_secondary_id'], true)) $value = '0';
+            elseif (in_array($column, ['order_note','business_source_primary_name_snapshot','business_source_secondary_name_snapshot','business_source_label_snapshot'], true)) $value = "''";
+            else $value = 'MIN(sf.' . $column . ')';
+            $serviceFields[] = $value . ' AS ' . $column;
+        }
+        $sales = Db::name('cashier_v3_sales_order')->alias('s')
+            ->where('s.tenant_id', $criteria['tenantId'])->where('s.order_status', 'settled')->where('s.order_direction', 'forward');
+        $services = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+            ->where('sf.tenant_id', $criteria['tenantId'])->where('sf.service_status', 'completed')
+            ->where('sf.checkout_request_id', '<>', '')
+            ->whereNotExists(function ($q): void {
+                $q->name('cashier_v3_sales_order')->alias('existing_sale')
+                    ->whereRaw('existing_sale.tenant_id=sf.tenant_id AND existing_sale.checkout_request_id=sf.checkout_request_id')
+                    ->where('existing_sale.order_status', 'settled')->where('existing_sale.order_direction', 'forward');
+            });
+        // 权限和日期下推到两个源，避免为当前门店页面物化整个实例历史。
+        foreach ([[$sales, 's'], [$services, 'sf']] as [$query, $alias]) {
+            if ($criteria['allowedStoreIds'] !== null) $query->whereIn($alias . '.store_id', $criteria['allowedStoreIds']);
+            if ($criteria['memberId'] !== null) $query->where($alias . '.member_id', (int)$criteria['memberId']);
+            if (empty($criteria['salesPerformanceDrilldown'])) {
+                if (!empty($criteria['dateFrom'])) $query->where($alias . '.business_date', '>=', $criteria['dateFrom']);
+                if (!empty($criteria['dateTo'])) $query->where($alias . '.business_date', '<=', $criteria['dateTo']);
+            }
+        }
+        // 统一外层字段保留原来的状态、权限和游标过滤契约。
+        return '(' . $sales->field(implode(',', $salesFields))->fieldRaw("'settled' AS order_status,'forward' AS order_direction")->buildSql(false)
+            . ' UNION ALL ' . $services->field(implode(',', $serviceFields))->fieldRaw("'settled' AS order_status,'forward' AS order_direction")
+                ->group('sf.tenant_id,sf.checkout_request_id')->buildSql(false) . ')';
+    }
+
     private function authorityOrderQuery(array $criteria)
     {
         $query = $this->authorityOrderBaseQuery($criteria)
@@ -771,6 +818,17 @@ final class CashierV3SalesOrderQueryServices
                 ->where(function ($nested) use ($like) {
                     $this->whereUtf8Like($nested, 'o.order_no', $like);
                     $this->whereUtf8Like($nested, 'o.member_name_snapshot', $like, true);
+                    // 服务单据支持按任一服务编号或项目查到整组，不能只匹配首行编号。
+                    $nested->whereOr(function ($serviceMatch) use ($like): void {
+                        $serviceMatch->whereExists(function ($service) use ($like): void {
+                            $service->name('cashier_v3_entitlement_service_fact')->alias('search_sf')
+                                ->whereRaw('search_sf.tenant_id=o.tenant_id AND search_sf.checkout_request_id=o.checkout_request_id')
+                                ->where(function ($names) use ($like): void {
+                                    $this->whereUtf8Like($names, 'search_sf.project_name_snapshot', $like);
+                                    $this->whereUtf8Like($names, 'search_sf.service_record_no', $like, true);
+                                });
+                        });
+                    });
                     $nested
                         ->whereOr(function ($lineMatch) use ($like) {
                             $lineMatch->whereExists(function ($line) use ($like) {
@@ -800,6 +858,36 @@ final class CashierV3SalesOrderQueryServices
         if ($status === '') {
             return;
         }
+        // 纯权益的正常/作废取服务事实，不能借用不存在的销售冲销记录。
+        $query->where(function ($scope) use ($status): void {
+            $scope->where(function ($sales) use ($status): void {
+                $sales->where('o.entitlement_only', 0);
+                $this->applySalesOnlyStatusFilter($sales, $status);
+            })->whereOr(function ($service) use ($status): void {
+                $service->where('o.entitlement_only', 1);
+                if (!in_array($status, ['normal', 'voided'], true)) {
+                    $service->whereRaw('1=0');
+                    return;
+                }
+                $hasActive = function ($active): void {
+                    $active->name('cashier_v3_entitlement_service_fact')->alias('active_sf')
+                        ->whereRaw('active_sf.tenant_id=o.tenant_id AND active_sf.checkout_request_id=o.checkout_request_id')
+                        ->where('active_sf.service_status', 'completed')
+                        ->whereNotExists(function ($void): void {
+                            $void->name('cashier_v3_service_record_void_operation')->alias('active_vo')
+                                ->whereRaw('active_vo.tenant_id=active_sf.tenant_id AND active_vo.service_fact_id=active_sf.id')
+                                ->where('active_vo.status', 'succeeded');
+                        });
+                };
+                if ($status === 'normal') $service->whereExists($hasActive);
+                else $service->whereNotExists($hasActive);
+            });
+        });
+    }
+
+    /** 正式销售单仍沿用销售生命周期状态；与纯服务状态分开。 */
+    private function applySalesOnlyStatusFilter($query, string $status): void
+    {
         if ($status === 'normal') {
             $query->whereNotExists(function ($operation) {
                 $operation->name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('olo')
@@ -835,6 +923,7 @@ final class CashierV3SalesOrderQueryServices
             // select it for both list and detail reads; otherwise a freshly
             // settled order silently appears to have no main-order remark.
             'o.original_amount_cents,o.discount_amount_cents,o.sale_amount_cents,o.order_version,o.order_note',
+            'o.entitlement_only',
         ]);
     }
 
@@ -1384,12 +1473,13 @@ final class CashierV3SalesOrderQueryServices
         $craftsmenByOrderAndLine = [];
         $guidesByOrderAndLine = [];
         $salesManagersByOrderAndLine = [];
-        foreach ($this->effectivePersonnelFacts($orderIds, $tenantIds[0], $serviceFactIds) as $fact) {
+        foreach ($this->effectivePersonnelFacts($orderIds, $tenantIds[0], $serviceFactIds, $requestIds) as $fact) {
             $lineKey = (string)$fact['source_line_id'];
+            $factOrderId = $requestToOrder[(string)($fact['checkout_request_id'] ?? '')] ?? (string)$fact['order_id'];
             if ((string)$fact['performance_type'] === 'sales_performance_allocated') {
                 $salespeopleByOrderAndLine[(string)$fact['order_id']][$lineKey][] = $fact;
             } elseif ((string)$fact['performance_type'] === 'labor_performance_allocated') {
-                $craftsmenByOrderAndLine[(string)$fact['order_id']][$lineKey][] = $fact;
+                $craftsmenByOrderAndLine[$factOrderId][$lineKey][] = $fact;
             }
         }
         foreach (Db::name('cashier_v3_customer_guide_round_fact')
@@ -1462,17 +1552,22 @@ final class CashierV3SalesOrderQueryServices
         }
         $snapshots = [];
         foreach ($headersByOrder as $orderId => $header) {
-            if (empty($linesByOrder[$orderId]) || !isset($batchesByOrder[$orderId])) {
+            if (!empty($header['entitlement_only'])) {
+                // 纯权益只是零资金展示适配，不创建销售单或收款批次。
+                $linesByOrder[$orderId] = [];
+                $batchesByOrder[$orderId] = ['receivable_amount_cents' => 0, 'cash_performance_amount_cents' => 0,
+                    'collected_amount_cents' => 0, 'settled_at' => (int)$header['settled_at']];
+            } elseif (empty($linesByOrder[$orderId]) || !isset($batchesByOrder[$orderId])) {
                 throw new \RuntimeException('sales_order_authority_snapshot_incomplete');
             }
             $requestId = trim((string)($header['checkout_request_id'] ?? ''));
-            if ($requestId !== '' && !isset($requestsById[$requestId])) {
+            if (empty($header['entitlement_only']) && $requestId !== '' && !isset($requestsById[$requestId])) {
                 throw new \RuntimeException('sales_order_authority_checkout_request_missing');
             }
             $snapshots[$orderId] = [
                 'header' => $header,
                 'batch' => $batchesByOrder[$orderId],
-                'request' => $requestId === '' ? [] : $requestsById[$requestId],
+                'request' => !empty($header['entitlement_only']) || $requestId === '' ? [] : $requestsById[$requestId],
                 'lines' => $linesByOrder[$orderId],
                 'serviceFacts' => $serviceFactsByOrder[$orderId] ?? [],
                 'collections' => $collectionsByOrder[$orderId] ?? [],
@@ -1674,6 +1769,18 @@ final class CashierV3SalesOrderQueryServices
         ];
         // 查询列表也需要明细行来保持“正常列表”的分组展示；明细页继续复用同一份权威快照。
         $mapped['items'] = $items;
+        if (!empty($header['entitlement_only'])) {
+            // 服务单据复用项目展示，但不能进入销售退款、销售作废或销售打印。
+            $mapped['entitlementOnly'] = true;
+            $mapped['lifecycleOrderId'] = '';
+            $mapped['availableActions'] = [];
+            $mapped['businessDateBasis'] = 'v3_service_fact';
+            $mapped['paymentStatus'] = $mapped['payment_status'] = '无需收款';
+            $allVoided = $items !== [] && count(array_filter($items, static function (array $item): bool {
+                return !empty($item['voidedAt']);
+            })) === count($items);
+            $mapped['orderStatus'] = $mapped['order_status'] = $allVoided ? '已作废' : '正常';
+        }
         // 列表与详情复用同一批已结算记账收款事实，避免前端按金额反推收款方式。
         $mapped['paymentDetails'] = !$settlementEquationValid ? [] : array_map(function (array $collection): array {
             return [
@@ -1912,7 +2019,7 @@ final class CashierV3SalesOrderQueryServices
      *
      * @return array<int,array<string,mixed>>
      */
-    private function effectivePersonnelFacts(array $orderIds, string $tenantId, array $serviceFactIds = []): array
+    private function effectivePersonnelFacts(array $orderIds, string $tenantId, array $serviceFactIds = [], array $requestIds = []): array
     {
         $adjustmentCommandKeys = [];
         foreach (Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
@@ -1933,11 +2040,15 @@ final class CashierV3SalesOrderQueryServices
                 if ($commandKey !== '') $adjustmentCommandKeys[$commandKey] = true;
             }
         }
-        $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)->whereIn('order_id', $orderIds)
+        $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)
+            ->where(function ($query) use ($orderIds, $requestIds): void {
+                $query->whereIn('order_id', $orderIds);
+                if ($requestIds !== []) $query->whereOr('checkout_request_id', 'in', $requestIds);
+            })
             ->whereIn('performance_type', ['sales_performance_allocated', 'labor_performance_allocated'])
             ->where('status', 'effective')
             ->whereIn('fact_direction', ['forward', 'reversal'])
-            ->field('id,fact_id,order_id,source_line_id,performance_type,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,amount_cents,labor_fee_amount_cents,project_count_half_units,project_count_decimal,rule_code_snapshot,fact_direction,reversal_of,command_idempotency_key')
+            ->field('id,fact_id,order_id,checkout_request_id,source_line_id,performance_type,employee_id,employee_name_snapshot,employee_type_snapshot,role_snapshot,allocation_weight_numerator,allocation_weight_denominator,amount_cents,labor_fee_amount_cents,project_count_half_units,project_count_decimal,rule_code_snapshot,fact_direction,reversal_of,command_idempotency_key')
             ->order('id', 'asc')->select()->toArray();
         return $this->displayedPersonnelFacts($rows, $adjustmentCommandKeys);
     }
@@ -2419,7 +2530,8 @@ final class CashierV3SalesOrderQueryServices
                 'employeeId' => $employeeId,
                 'employeeName' => (string)($person['employee_name_snapshot'] ?? ''),
                 'employeeType' => (string)($person['employee_type_snapshot'] ?? ''),
-                'isPointCustomer' => $point,
+                // 明确点/轮事实优先，历史缺省只补轮客，不重写金额事实。
+                'isPointCustomer' => $point ?? (bool)($snapshot['is_point_customer'] ?? false),
                 'amount' => $this->moneyFromCents((int)($person['amount_cents'] ?? 0)),
                 'laborFeeAmount' => $this->moneyFromCents((int)($person['labor_fee_amount_cents'] ?? 0)),
                 'projectCount' => $this->projectCountDisplay($projectCount),
@@ -2436,7 +2548,7 @@ final class CashierV3SalesOrderQueryServices
             'employeeId' => $employeeId,
             'employeeName' => (string)($person['name'] ?? $person['employeeName'] ?? ''),
             'employeeType' => (string)($person['employeeType'] ?? ''),
-            'isPointCustomer' => array_key_exists('isPointCustomer', $person) ? (bool)$person['isPointCustomer'] : null,
+            'isPointCustomer' => (bool)($person['isPointCustomer'] ?? $person['is_point_customer'] ?? false),
             'amount' => isset($person['performanceAmountCents']) ? $this->moneyFromCents((int)$person['performanceAmountCents']) : null,
             'laborFeeAmount' => isset($person['laborFeeCents']) ? $this->moneyFromCents((int)$person['laborFeeCents']) : null,
             'projectCount' => $this->projectCountDisplay($projectCount),

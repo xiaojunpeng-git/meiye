@@ -567,6 +567,8 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     'craftsmanEligible' => !empty($profile['craftsmanEligible']),
                     'sequence' => $sequence + 1,
                     'isPrimary' => $sequence === 0,
+                    // 页面单行与应用全部的点客选择必须进入核销权威快照。
+                    'isPointCustomer' => !empty($settings['isPointCustomer']),
                     'laborWeight' => (int)($settings['laborWeight'] ?? 0),
                     'craftsmanPerformanceType' => (string)($settings['craftsmanPerformanceType'] ?? 'commission_labor'),
                     'laborFeeCents' => max(0, (int)($settings['laborFeeCents'] ?? 0)),

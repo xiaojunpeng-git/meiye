@@ -1142,7 +1142,7 @@ final class CashierV3OrderCenterRecordQueryServices
         if ($name === '') return [];
         return [[
             'employeeName' => $name,
-            'isPointCustomer' => $pointCustomer,
+            'isPointCustomer' => $pointCustomer ?? false,
             'amount' => $this->centsToMoney($amountCents),
             'laborFeeAmount' => $this->centsToMoney($laborCents),
             'projectCount' => null,
@@ -1264,7 +1264,8 @@ final class CashierV3OrderCenterRecordQueryServices
             $name = (string)$allocation['employeeName'];
             $pointCustomer = $this->pointCustomerFromRoleSnapshot((string)$allocation['roleSnapshot']);
             if ($pointCustomer === null) {
-                $pointCustomer = $pointCustomerByLineAndEmployeeId[$key][(int)$allocation['employeeId']] ?? null;
+                // 先尊重明确的历史点客快照，再按未选即轮的业务口径补齐。
+                $pointCustomer = $pointCustomerByLineAndEmployeeId[$key][(int)$allocation['employeeId']] ?? false;
             }
             $displayName = $this->craftsmanDisplayName($name, $pointCustomer);
             if ($displayName !== '' && !in_array($displayName, $result[$key]['names'], true)) $result[$key]['names'][] = $displayName;
@@ -1380,7 +1381,7 @@ final class CashierV3OrderCenterRecordQueryServices
             }
             $facts[] = [
                 'employeeName' => (string)($person['name'] ?? $person['employeeName'] ?? ''),
-                'isPointCustomer' => isset($person['isPointCustomer']) ? (bool)$person['isPointCustomer'] : null,
+                'isPointCustomer' => (bool)($person['isPointCustomer'] ?? $person['is_point_customer'] ?? false),
                 'amount' => isset($person['performanceAmountCents'])
                     ? $this->centsToMoney((int)$person['performanceAmountCents']) : null,
                 'laborFeeAmount' => isset($person['laborFeeCents'])

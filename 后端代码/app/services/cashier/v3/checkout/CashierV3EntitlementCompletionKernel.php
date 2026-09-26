@@ -1110,6 +1110,7 @@ final class CashierV3EntitlementCompletionKernel
                 'laborWeight',
             ];
             $optionalKeys = [
+                'isPointCustomer',
                 'craftsmanPerformanceType', 'laborFeeCents', 'personnelSource',
                 'performanceAmountCents', 'performanceAmountManual',
                 'projectCount', 'projectCountHalfUnits',
@@ -1143,6 +1144,11 @@ final class CashierV3EntitlementCompletionKernel
                 throw self::failure('authority_craftsman_duplicate', ['staffId' => $row['staffId']]);
             }
             $seen[$row['staffId']] = true;
+            // 老的内部调用缺省按轮；显式标记必须是布尔值，避免字符串 false 变成点。
+            if (array_key_exists('isPointCustomer', $row) && !is_bool($row['isPointCustomer'])) {
+                throw self::failure('authority_craftsman_flags_invalid', ['staffId' => $row['staffId']]);
+            }
+            $row['isPointCustomer'] = $row['isPointCustomer'] ?? false;
             $row['craftsmanPerformanceType'] = $performanceType;
             $row['laborFeeCents'] = $laborFeeCents;
             if (array_key_exists('performanceAmountCents', $row)
@@ -1725,6 +1731,8 @@ final class CashierV3EntitlementCompletionKernel
                 'amountCents' => (int)($amountByStaffId[$staffId] ?? 0),
             ];
             $allocation['staffVersion'] = $row['staffVersion'];
+            // 该分配同时写入服务快照和劳动事实，类型不得只留在浏览器草稿。
+            $allocation['isPointCustomer'] = $row['isPointCustomer'] ?? false;
             $allocation['staffName'] = $row['staffName'];
             $allocation['storeId'] = $row['storeId'];
             $allocation['laborWeight'] = $row['laborWeight'];

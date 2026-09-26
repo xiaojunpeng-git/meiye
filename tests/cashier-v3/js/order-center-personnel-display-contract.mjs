@@ -20,10 +20,10 @@ assert.equal(serviceCraftsmenPerformanceText({ craftsmenListAllocations: [
   { employeeName: '汤静静', isPointCustomer: true, amount: 2980, laborFeeAmount: 0, projectCount: '0.3' }
 ] }), '许长娥（轮、0、45、1），汤静静（点、2980、0、0.3）')
 assert.equal(serviceCraftsmenPerformanceText({ craftsmenSummary: '历史手艺人（轮）' }), '历史手艺人（轮）')
-assert.equal(serviceCraftsmenPerformanceText({ craftsmenListAllocations: [{ employeeName: '未知', amount: null }] }), '未知（—、—、—、—）')
+assert.equal(serviceCraftsmenPerformanceText({ craftsmenListAllocations: [{ employeeName: '未知', amount: null }] }), '未知（轮、—、—、—）')
 assert.equal(serviceCraftsmenPerformanceText({ craftsmenListAllocations: [
   { employeeName: '周琦博', isPointCustomer: null, amount: 0, laborFeeAmount: 5, projectCount: null }
-] }), '周琦博（—、0、5、—）')
+] }), '周琦博（轮、0、5、—）')
 
 const view = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/OrderCenterView.vue', import.meta.url), 'utf8')
 assert.match(view, /'销售人（业绩）'/)

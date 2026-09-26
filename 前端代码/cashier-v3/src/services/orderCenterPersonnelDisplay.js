@@ -30,7 +30,8 @@ export function serviceCraftsmenPerformanceText(record) {
   return allocations.map((person) => {
     const name = personName(person)
     if (!name) return ''
-    const type = person?.isPointCustomer === true ? '点' : person?.isPointCustomer === false ? '轮' : '—'
+    // 历史未选择点客的记录统一为轮客；不修改其业绩或项目数。
+    const type = person?.isPointCustomer === true ? '点' : '轮'
     const projectCount = person?.projectCount === undefined || person?.projectCount === null || person?.projectCount === ''
       ? '—' : String(person.projectCount)
     return `${name}（${type}、${wholeYuan(person?.amount)}、${wholeYuan(person?.laborFeeAmount)}、${projectCount}）`

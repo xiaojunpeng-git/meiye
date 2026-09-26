@@ -159,6 +159,8 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
                 'employeeId' => max(1, (int)($craftsman['employeeId'] ?? $staffId)),
                 'name' => (string)($craftsman['name'] ?? ''),
                 'isPrimary' => !empty($craftsman['isPrimary']),
+                // 购买项目同样保留点/轮，供销售劳动事实真实落库。
+                'isPointCustomer' => !empty($craftsman['isPointCustomer']),
                 'laborWeight' => (int)($craftsman['laborWeight'] ?? 0),
                 'laborPerformanceCents' => (int)($performanceByStaff[$staffId] ?? 0),
                 'laborPerformanceAmountManual' => !empty($manualPerformanceByStaff[$staffId]),

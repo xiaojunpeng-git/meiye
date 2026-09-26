@@ -324,7 +324,9 @@ final class CashierV3SaleOnlyFactAssembler
                         'employeeNameSnapshot' => (string)$allocation['name'],
                         'employeeTypeSnapshot' => 'internal',
                         'employeeTypeAuthorityVersion' => 1,
-                        'roleSnapshot' => !empty($allocation['isPrimary']) ? 'primary_craftsman' : 'craftsman',
+                        // 与权益核销一致，未勾选点客必须真实记录为轮客。
+                        'roleSnapshot' => (!empty($allocation['isPrimary']) ? 'primary_craftsman' : 'craftsman')
+                            . (!empty($allocation['isPointCustomer']) ? ':point' : ':round'),
                         'allocationWeightNumerator' => (int)$allocation['laborWeight'],
                         'allocationWeightDenominator' => 100,
                         'allocationBaseAmountCents' => (int)$craftsmanPlan['laborAmountCents'],

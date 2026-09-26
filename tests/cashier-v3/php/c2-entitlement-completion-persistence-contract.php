@@ -155,6 +155,8 @@ namespace {
             ],
             'serviceSnapshot' => [
                 'serviceObject' => $serviceObject,
+                // 与当前服务对象客数快照契约一致，测试不能依赖废弃的缺字段输入。
+                'friendCountsAsCustomer' => false,
                 'isExperience' => $experience,
                 'craftsmen' => $allocations,
                 'primaryCraftsmanId' => $allocations[0]['staffId'],
@@ -298,6 +300,36 @@ namespace {
     $laborRows = array_values(array_filter($performance, static function (array $row): bool {
         return $row['performance_type'] === 'labor_performance_allocated';
     }));
+    // R37：类型必须保存在数据库写计划中，而非只由列表兜底显示。
+    ecpAssert('R37 unselected point writes explicit round role and snapshot',
+        count(array_filter($laborRows, static function (array $row): bool {
+            return substr($row['role_snapshot'], -6) === ':round';
+        })) === count($laborRows)
+        && array_key_exists('is_point_customer', json_decode($plan->serviceRows()[0]['craftsmen_snapshot_json'], true)[0]));
+    $pointKernel = ecpKernelPlan();
+    $pointKernel['linePlans'][0]['laborPerformance']['allocations'][0]['isPointCustomer'] = true;
+    $pointKernel['linePlans'][0]['serviceSnapshot']['craftsmen'][0]['isPointCustomer'] = true;
+    $pointPlan = CashierV3EntitlementCompletionPlanV1::fromKernelPlan($pointKernel, $context);
+    $pointLabor = array_values(array_filter($pointPlan->performanceRows(), static function (array $row): bool {
+        return $row['performance_type'] === 'labor_performance_allocated';
+    }));
+    ecpAssert('R37 explicit point survives alongside default round',
+        substr($pointLabor[0]['role_snapshot'], -6) === ':point'
+        && substr($pointLabor[1]['role_snapshot'], -6) === ':round');
+    // 覆盖写计划之前的内核规范化及分配，防止上游先丢字段、下游一律补轮。
+    $normalizeCraftsmen = new ReflectionMethod(CashierV3EntitlementCompletionKernel::class, 'normalizeAuthorityCraftsmen');
+    $normalizeCraftsmen->setAccessible(true);
+    $allocateCraftsmen = new ReflectionMethod(CashierV3EntitlementCompletionKernel::class, 'craftsmanPlan');
+    $allocateCraftsmen->setAccessible(true);
+    foreach ([true, false] as $pointFlag) {
+        $normalizedCraftsmen = $normalizeCraftsmen->invoke(null, [[
+            'staffId'=>11,'staffVersion'=>111,'staffName'=>'手艺人甲','storeId'=>7,
+            'active'=>true,'craftsmanEligible'=>true,'sequence'=>1,'isPrimary'=>true,
+            'laborWeight'=>100,'isPointCustomer'=>$pointFlag,
+        ]], 'r37');
+        $allocatedCraftsmen = $allocateCraftsmen->invoke(null, [11], $normalizedCraftsmen, 7, 10000);
+        ecpAssert('R37 kernel retains ' . ($pointFlag ? 'point' : 'round'), $allocatedCraftsmen[0]['isPointCustomer'] === $pointFlag);
+    }
     ecpAssert('ECP-05 consumption performance remains line-grained',
         count($consumptionRows) === 2
         && array_sum(array_column($consumptionRows, 'amount_cents')) === 10000);

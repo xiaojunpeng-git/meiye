@@ -2474,7 +2474,8 @@ onBeforeUnmount(() => {
               <span>门店：{{ displayRecordField(record, 'store') }}</span>
               <span>客户：{{ displayRecordField(record, 'member_name') }}</span>
               <span>来源：{{ displayRecordField(record, 'source') }}</span>
-              <span v-if="!isPlatformReadOnly" class="sales-order-query-group__actions">
+              <!-- 纯权益复用服务行及手艺人调整，不提供不存在的销售资金单操作。 -->
+              <span v-if="!isPlatformReadOnly && !record.entitlementOnly" class="sales-order-query-group__actions">
                 <button type="button" class="button button--text" @click="openRecordDetail(record)">订单详情</button>
                 <button
                   v-if="canUseCashierV3Operation('cashier.v3.order.receipt_print')"

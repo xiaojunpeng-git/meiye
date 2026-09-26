@@ -600,6 +600,8 @@ final class CashierV3EntitlementCompletionPlanV1
                 'store_id' => $storeId,
                 'sequence' => self::positiveInt($row['sequence'], 'labor_sequence_invalid'),
                 'is_primary' => self::booleanInt($row['isPrimary'], 'labor_primary_flag_invalid'),
+                // 点客是明确选择；未选择时按轮客冻结，不能在规范化时丢失该标记。
+                'is_point_customer' => !empty($row['isPointCustomer'] ?? $craftsman['isPointCustomer'] ?? false),
                 'labor_weight' => $laborWeight,
                 'craftsman_performance_type' => $performanceType,
                 'labor_fee_cents' => self::nonNegativeInt(
@@ -753,7 +755,9 @@ final class CashierV3EntitlementCompletionPlanV1
             'employee_name_snapshot' => $allocation['staff_name_snapshot'],
             'employee_type_snapshot' => $allocation['employee_type_snapshot'],
             'employee_type_authority_version' => $allocation['employee_type_authority_version'],
-            'role_snapshot' => $allocation['is_primary'] ? 'primary_craftsman' : 'craftsman',
+            // 主手艺人身份与点/轮是两个维度，均保留供历史展示和调整读回。
+            'role_snapshot' => ($allocation['is_primary'] ? 'primary_craftsman' : 'craftsman')
+                . (!empty($allocation['is_point_customer']) ? ':point' : ':round'),
             'allocation_weight_numerator' => $allocation['labor_weight'],
             'allocation_weight_denominator' => $allocationWeightDenominator,
             'allocation_base_amount_cents' => $line['labor_amount_cents'],
