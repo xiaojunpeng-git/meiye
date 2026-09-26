@@ -125,7 +125,7 @@ const pendingEntitlementAfterSource = ref(false)
 const isCreatingCustomCard = ref(false)
 const isSubmittingCardOperation = ref(false)
 const cardOperationNotice = ref('')
-// 停用只用阻塞式进度弹窗，不在工作台重复绘制进度区；独立保存提交类型，
+// 停用、启用只用阻塞式进度弹窗，不在工作台重复绘制进度区；独立保存提交类型，
 // 避免成功后清空操作预览时，旧提示短暂重新占据工作台布局。
 const cardOperationNoticeType = ref('')
 const entitlementSelectorRequestId = ref(null)
@@ -6943,7 +6943,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <div
-      v-if="cardOperationNotice && cardOperationNoticeType !== 'card_disable'"
+      v-if="cardOperationNotice && !['card_disable', 'card_enable'].includes(cardOperationNoticeType)"
       class="cashier-card-operation-notice"
       role="status"
       aria-live="polite"
@@ -7082,7 +7082,7 @@ onBeforeUnmount(() => {
 
       <section class="cart-panel" aria-label="会员和购物车">
         <div class="cart-panel__content">
-          <section v-if="previewCardOperation?.sources?.length && previewCardOperation.mode !== 'card-disable'" class="cashier-operation-preview" :aria-label="previewCardOperation.label">
+          <section v-if="previewCardOperation?.sources?.length && !['card-disable', 'card-enable'].includes(previewCardOperation.mode)" class="cashier-operation-preview" :aria-label="previewCardOperation.label">
             <header>
               <strong>{{ previewCardOperation.label }}</strong>
               <span>{{ cardOperationTargetModes.has(previewCardOperation.mode) ? '待确认' : '正在确认' }}</span>
@@ -7506,12 +7506,12 @@ onBeforeUnmount(() => {
     </div>
 
     <Teleport to="body">
-      <!-- 停用提交中不可关闭或重复操作；请求结束后由既有结果反馈展示成功/失败。 -->
-      <div v-if="isSubmittingCardOperation && cardOperationNoticeType === 'card_disable'" class="cashier-ui-feedback-backdrop">
-        <section class="cashier-ui-feedback" role="dialog" aria-modal="true" aria-label="卡停用处理中" aria-busy="true">
+      <!-- 停用、启用提交中不可关闭或重复操作；请求结束后由既有结果反馈展示成功/失败。 -->
+      <div v-if="isSubmittingCardOperation && ['card_disable', 'card_enable'].includes(cardOperationNoticeType)" class="cashier-ui-feedback-backdrop">
+        <section class="cashier-ui-feedback" role="dialog" aria-modal="true" :aria-label="cardOperationNoticeType === 'card_enable' ? '卡启用处理中' : '卡停用处理中'" aria-busy="true">
           <div role="status" aria-live="polite">
             <span class="checkout-spinner" aria-hidden="true"></span>
-            <strong>正在卡停用…</strong>
+            <strong>{{ cardOperationNotice }}</strong>
           </div>
         </section>
       </div>
