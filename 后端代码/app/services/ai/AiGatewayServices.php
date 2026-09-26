@@ -3468,6 +3468,11 @@ final class AiGatewayServices
         ],$safeQuestion);
     }
 
+    /**
+     * Both terminals resolve explicit calendar wording against the run's server
+     * date. Only one unambiguous current period may correct model date values;
+     * the contract preserves independent carriers and all non-date semantics.
+     */
     private function resolveExactStatedSinglePeriod(array $understanding,array $safeQuestion,string $today): array
     {
         if (($understanding['status']??null)!=='understood') return $understanding;

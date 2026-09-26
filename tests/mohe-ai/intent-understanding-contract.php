@@ -427,6 +427,55 @@ $resolvedStandalonePeriod=AiIntentUnderstandingContract::withResolvedSinglePerio
 $check($resolvedStandalonePeriod['requirements'][1]['values']['periods']===[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-12']]
     && $resolvedStandalonePeriod['requirements'][0]===$selectedStandaloneUnderstanding['requirements'][0],
     'a deterministic date grammar can correct one accepted period without changing the turn measurement');
+// R46: the same explicit calendar condition can be repeated across metrics.
+// Exercise the real shared gateway resolver without a provider or customer DB.
+$calendarGateway=(new ReflectionClass(\app\services\ai\AiGatewayServices::class))->newInstanceWithoutConstructor();
+$calendarResolver=new ReflectionMethod($calendarGateway,'resolveExactStatedSinglePeriod');
+if (PHP_VERSION_ID<80100) $calendarResolver->setAccessible(true);
+$multiCalendar=['status'=>'understood','requirements'=>[]];
+foreach (['现金业绩','消耗业绩','退款业绩'] as $index=>$term) {
+    $multiCalendar['requirements'][]=['id'=>'r'.($index+1),'meaning'=>$term,
+        'fields'=>['metric_codes','periods'],'values'=>['metric_terms'=>[$term],
+            'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-30']]],
+        'evidence'=>[['message_id'=>'current','quote'=>$term]]];
+}
+$monthToDate=[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-26']];
+foreach (['门店','人员','会员'] as $dimension) {
+    $resolved=$calendarResolver->invoke($calendarGateway,$multiCalendar,
+        ['question'=>'这个月每个'.$dimension.'现金业绩、消耗业绩、退款业绩分别是什么'],'2026-09-26');
+    $expected=$multiCalendar;
+    foreach ($expected['requirements'] as &$carrier) $carrier['values']['periods']=$monthToDate;
+    unset($carrier);
+    $check($resolved===$expected,'shared month-to-date correction preserves all non-date values for '.$dimension);
+}
+$differentWindows=$multiCalendar;
+$differentWindows['requirements'][1]['values']['periods'][0]['start']='2026-08-01';
+$check(AiIntentUnderstandingContract::withResolvedSinglePeriod($differentWindows,$monthToDate)===$differentWindows,
+    'independent windows are left unchanged atomically');
+$historicalWindow=$multiCalendar;
+$historicalWindow['requirements'][1]['evidence'][0]['message_id']='recent_1';
+$check(AiIntentUnderstandingContract::withResolvedSinglePeriod($historicalWindow,$monthToDate)===$historicalWindow,
+    'a historical period cannot be rewritten by the current calendar phrase');
+$comparisonWindow=$multiCalendar;
+$comparisonWindow['requirements'][1]['values']['periods'][]=['kind'=>'month_offset','offset_months'=>-1];
+$check(AiIntentUnderstandingContract::withResolvedSinglePeriod($comparisonWindow,$monthToDate)===$comparisonWindow,
+    'comparison periods cannot be collapsed to one date');
+foreach (['分别是多少','本月和上月分别是多少'] as $questionText) {
+    $check($calendarResolver->invoke($calendarGateway,$multiCalendar,['question'=>$questionText],'2026-09-26')===$multiCalendar,
+        'no single explicit current period means no correction: '.$questionText);
+}
+$futureResolved=$calendarResolver->invoke($calendarGateway,$multiCalendar,
+    ['question'=>'2026-10-01每家门店现金业绩、消耗业绩、退款业绩分别是多少'],'2026-09-26');
+$futureRange=$futureResolved['requirements'][0]['values']['periods'][0];
+$check($futureRange===['kind'=>'date_range','start'=>'2026-10-01','end'=>'2026-10-01'],
+    'an explicit future date is preserved exactly for downstream validation');
+try {
+    \app\services\query\metric\MetricQueryDatePolicy::assertExecutable(
+        ['start'=>$futureRange['start'],'end'=>$futureRange['end']],null,'2026-09-26');
+    throw new RuntimeException('FAIL explicit future period was accepted');
+} catch (\app\services\query\metric\MetricQueryContractException $error) {
+    $check($error->getErrorCode()==='METRIC_QUERY_FUTURE_UNAVAILABLE','explicit future dates remain rejected, not clamped');
+}
 $unsafePeriodOnlyUnderstanding=['goal'=>'查看本月','status'=>'understood','requirements'=>[
     ['id'=>'r1','meaning'=>'本月','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'本月']]],
 ]];

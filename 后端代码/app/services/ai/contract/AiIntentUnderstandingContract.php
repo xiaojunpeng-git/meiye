@@ -447,9 +447,11 @@ final class AiIntentUnderstandingContract
     }
 
     /**
-     * Corrects the value of one period that the model already understood and
-     * grounded. It cannot create a date condition, remove another requirement
-     * or alter a metric, object, ranking, scope or result reference.
+     * Corrects one explicitly stated period, including identical copies carried
+     * by several metrics. The caller must establish a single unambiguous date
+     * in the current question. Multiple carriers must agree and cite only the
+     * current turn; comparisons and historical windows are never collapsed.
+     * This cannot create conditions or change measurements/nested predicates.
      */
     public static function withResolvedSinglePeriod(array $understanding,array $periods): array
     {
@@ -460,10 +462,24 @@ final class AiIntentUnderstandingContract
         foreach ((array)($understanding['requirements']??[]) as $index=>$requirement) {
             if (in_array('periods',(array)($requirement['fields']??[]),true)) $matches[]=$index;
         }
-        if (count($matches)!==1) return $understanding;
-        $index=$matches[0];
-        if (count((array)($understanding['requirements'][$index]['values']['periods']??[]))!==1) return $understanding;
-        $understanding['requirements'][$index]['values']['periods']=$periods;
+        if ($matches===[]) return $understanding;
+        $shared=null;
+        // Validate every carrier before updating any: an independent window
+        // must not leave a partially corrected multi-metric request behind.
+        foreach ($matches as $index) {
+            $requirement=$understanding['requirements'][$index];
+            $original=(array)($requirement['values']['periods']??[]);
+            if (count($original)!==1 || !self::periods($original)) return $understanding;
+            if (count($matches)>1) {
+                if (empty($requirement['evidence'])) return $understanding;
+                foreach ($requirement['evidence'] as $evidence) {
+                    if (($evidence['message_id']??null)!=='current') return $understanding;
+                }
+                if ($shared!==null && $original!=$shared) return $understanding;
+            }
+            $shared=$original;
+        }
+        foreach ($matches as $index) $understanding['requirements'][$index]['values']['periods']=$periods;
         return $understanding;
     }
 
