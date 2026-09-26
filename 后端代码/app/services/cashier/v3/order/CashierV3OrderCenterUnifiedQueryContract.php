@@ -61,7 +61,7 @@ final class CashierV3OrderCenterUnifiedQueryContract
                 ['source_card_no', '完整卡号'], ['used_times', '本次使用次数', 'integer'], ['store', '服务门店'], ['craftsman', '手艺人'],
                 ['labor_fee_amount', '手工费', 'amount'], ['labor_performance_type', '服务业绩类型'], ['labor_performance_ratio', '业绩比例'],
                 ['labor_performance_amount', '劳动业绩', 'amount'], ['project_count', '工资项目数', 'integer'], ['operator', '操作人'], ['service_status', '状态'], ['service_completed_at', '服务完成时间', 'datetime'],
-                ['voided_at', '作废时间', 'datetime'], ['void_reason', '作废原因'], ['void_operator', '作废操作人'],
+                ['voided_at', '作废时间', 'datetime'], ['void_reason', '作废原因'], ['void_operator', '作废操作人'], ['detail_remark', '明细备注'],
             ], ['service_record_no', 'source', 'member_name', 'service_project', 'entitlement_source', 'source_card_no', 'craftsman']],
             'supplement' => ['补交记录', [
                 ['supplement_order_no', '补交单号', 'text', true, true], ['business_date', '业务日期', 'date', true, true],
@@ -91,6 +91,13 @@ final class CashierV3OrderCenterUnifiedQueryContract
             $visible = $field[3] ?? true;
             $quick = $field[4] ?? false;
             $registered[] = UnifiedQueryPageRegistry::field($key, $fieldLabel, $fieldType, $visible, $quick);
+        }
+        // 名称用于展示/文本查询，选择器提交的实体 ID 走独立隐藏列；不改变导出名称。
+        foreach (['salesperson', 'cashier', 'operator', 'craftsman', 'void_operator', 'store'] as $identity) {
+            if (!in_array($identity, array_column($fields, 0), true)) continue;
+            $registered[] = ['key' => $identity . '_query_ids', 'label' => $identity . '身份',
+                'type' => 'text', 'defaultVisible' => false, 'defaultQuick' => false,
+                'allowedOperations' => ['filter'], 'hidden' => true];
         }
         // The provider emits a domain-prefixed string key. Declare it explicitly
         // as text so the generic sorter never coerces every row to numeric zero.

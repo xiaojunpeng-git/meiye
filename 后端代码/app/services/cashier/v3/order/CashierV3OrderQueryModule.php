@@ -26,11 +26,7 @@ final class CashierV3OrderQueryModule
         }
 
         $handlers->registerProjection('query-sales-orders', function (array $scope) use ($queries, $recordQueries): array {
-            $page = $queries->querySalesOrders(
-                is_array($scope['payload'] ?? null) ? $scope['payload'] : [],
-                $scope['operator_scope'],
-                $scope['data_scope']
-            );
+            $page = self::unifiedPage($scope, 'sales');
             return [
                 'data' => ['orderCenter' => self::pagePartition($page)],
                 'versions' => (new CashierV3OrderCenterPartitionProvider($queries, $recordQueries))
@@ -40,11 +36,7 @@ final class CashierV3OrderQueryModule
         });
 
         $handlers->registerProjection('query-order-center-records', function (array $scope) use ($queries, $recordQueries): array {
-            $page = $recordQueries->queryRecords(
-                is_array($scope['payload'] ?? null) ? $scope['payload'] : [],
-                $scope['operator_scope'],
-                $scope['data_scope']
-            );
+            $page = self::unifiedPage($scope, (string)($scope['payload']['recordType'] ?? ''));
             $partition = $recordQueries->pagePartition($page);
             return [
                 'data' => ['orderCenter' => $partition],
@@ -79,6 +71,24 @@ final class CashierV3OrderQueryModule
 
         $assembler->registerPartitionProvider(new CashierV3OrderCenterPartitionProvider($queries, $recordQueries));
         return $queries;
+    }
+
+    /** 所有列表条件进入同一执行器；底层 Reader 只作授权数据源，详情与写操作不改。 */
+    private static function unifiedPage(array $scope, string $type): array
+    {
+        $pageCode = CashierV3OrderCenterUnifiedQueryContract::PAGE_BY_TYPE[$type] ?? '';
+        if ($pageCode === '') throw new \InvalidArgumentException('order_center_record_type_invalid');
+        $runtime = \app\services\cashier\v3\query\UnifiedQueryModule::runtime();
+        $payload = (array)($scope['payload'] ?? []);
+        $payload['pageCode'] = $pageCode;
+        try {
+            $context = $runtime['contextFactory']->make($scope['operator_scope'], $scope['data_scope'], $payload);
+            // Runtime 注册表可被复用；每次读取独占临时查询状态，不能串入别的账号/门店。
+            $provider = clone $runtime['providers']->resolve($pageCode);
+            return $provider->queryPage($context, $payload, $scope['operator_scope'], $scope['data_scope']);
+        } catch (\app\services\query\UnifiedQueryException $e) {
+            throw new CashierV3CommandException($e->getErrorCode(), $e->getMessage());
+        }
     }
 
     private static function pagePartition(array $page): array
