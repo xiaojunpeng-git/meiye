@@ -197,16 +197,12 @@ final class CashierV3ServiceRecordVoidServices
         // 时间卡以有效期作为可用条件，legacy 的百万次数仅是兼容投影，
         // 从未在核销时扣减。因此作废也不能把它当作普通次卡回加，否则
         // 每一次“核销后作废”都会虚增该投影次数。
-        $unlimitedTimeCard = $holderId > 0 && $detailId > 0 && (bool)Db::name('cashier_v3_card_rule_component')
-            ->alias('c')
-            ->join('cashier_v3_card_rule_state s', 's.id=c.rule_state_id AND s.tenant_id=c.tenant_id')
-            ->where('c.tenant_id', $scope->tenantId())
-            ->where('c.card_holder_id', $holderId)
-            ->where('c.legacy_detail_id', $detailId)
-            ->where('s.member_id', (int)$source['member_id'])
-            ->where('s.rule_type', 'time')
-            ->lock(true)
-            ->value('c.id');
+        // 混合整单作废和纯权益整组作废都进入此处：先同步权威规则，不能只恢复旧展示余额。
+        $ruleRestored = $holderId > 0 && $detailId > 0
+            ? (new \app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices())
+                ->restoreServiceTimesInTx($scope->tenantId(), $holderId, $detailId, $quantity, $now)
+            : null;
+        $unlimitedTimeCard = $ruleRestored === 0;
         $restoredQuantity = $unlimitedTimeCard ? 0 : $quantity;
         if (!$unlimitedTimeCard && $detailId > 0) {
             $remaining = (int)($detail['write_surplus_times'] ?? 0) + $quantity;
