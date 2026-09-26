@@ -12,8 +12,8 @@ for (const key of keys) {
   assert.ok(fields.has(key), `missing front field ${key}`)
   assert.ok(contract.includes(`['${key}', '${fields.get(key)}'`), `backend label mismatch ${key}`)
 }
-// 以本轮上次已提交版本为准，比较所有函数体；本次仅允许字段/表头元数据改变。
+// R38 首屏参数修复由 r38-initial-query 独立行为测试覆盖；其余函数继续逐字保护，尤其所有写操作。
 const baseline = execFileSync('git',['show',`7ee36755:${path}`],{encoding:'utf8'})
-const functions = (text) => [...text.matchAll(/^(?:async )?function [\s\S]*?^}/gm)].map((m)=>m[0])
+const functions = (text) => [...text.matchAll(/^(?:async )?function [\s\S]*?^}/gm)].map((m)=>m[0]).filter((body) => !body.startsWith('function initialOrderCenterQuery('))
 assert.deepEqual(functions(source), functions(baseline))
 console.log(`PASS: ${keys.length} table columns registered with matching labels; all page operation functions unchanged`)

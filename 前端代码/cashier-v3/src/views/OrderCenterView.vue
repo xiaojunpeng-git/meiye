@@ -10,7 +10,7 @@ import Printer from '@lucide/vue/dist/esm/icons/printer.mjs'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
 import { useUnifiedQueryPage } from '@mohe/unified-query-vue3/composable'
-import { queryPreferenceKey, readQueryPreferences, mergeQueryRefresh } from '@mohe/unified-query-vue3'
+import { queryPreferenceKey, readQueryPreferences, mergeQueryRefresh, normalizeUnifiedQuerySettings } from '@mohe/unified-query-vue3'
 import {
   createCashierV3CommandId,
   canUseCashierV3Operation,
@@ -1429,10 +1429,11 @@ function reportSalesDateQuery() {
 
 function initialOrderCenterQuery() {
   // 首屏复用本地规则，但不恢复过去的日期或人员输入；默认业务日仍是当天。
-  const settings = querySettings.value || {}
+  // 首屏与工具栏共用配置归一化，空配置/旧 and 不能绕过 all/any 契约；不修改本地偏好或业务命令。
+  const settings = normalizeUnifiedQuerySettings(querySettings.value)
   return reportServiceDateQuery() || reportSalesDateQuery() || {
     ...defaultOrderCenterDateQuery(),
-    filters: settings.filters || [], filterRelation: settings.filterRelation || 'and',
+    filters: settings.filters || [], filterRelation: settings.filterRelation,
     sorts: settings.sorts || [], visibleFields: settings.visibleFields || [],
     groupBy: settings.groupBy || [], summaries: settings.summaries || []
   }
