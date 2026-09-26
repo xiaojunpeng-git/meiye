@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { requestOrderVoidReceipt } from './orderVoidReceiptRecovery'
 import {
   CASHIER_V3_ACTION_MANIFEST,
   CHECKOUT_ACTION_ALIASES,
@@ -3802,7 +3803,9 @@ export async function requestCashierV3Action(action, payload = {}) {
 
   if (adapter && typeof adapter.request === 'function') {
     try {
-      const result = await adapter.request(canonicalAction, requestPayload)
+      const result = canonicalAction === 'void-service-record'
+        ? await requestOrderVoidReceipt(adapter, canonicalAction, requestPayload, isTrustedV3Envelope)
+        : await adapter.request(canonicalAction, requestPayload)
       // 预约创建／编辑是独立单据保存，不接入收银工作台回执绑定、根状态
       // 投影或结果追查。页面仅按服务端保存结果处理成功和普通失败。
       if (reservationDataWrite) return result || {}

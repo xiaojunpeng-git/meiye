@@ -389,22 +389,6 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
   }
 }
 
-export function serviceRecordReceiptFromRecord(record = {}) {
-  const source = record && typeof record === 'object' ? record : {}
-  return {
-    ...source,
-    receiptMode: 'service',
-    serviceRecordNo: pickValue(source, ['serviceRecordNo', 'serviceFactId']),
-    orderNo: pickValue(source, ['serviceRecordNo', 'serviceFactId']),
-    memberName: pickValue(source, ['memberName']),
-    storeName: pickValue(source, ['storeName']),
-    businessDate: pickValue(source, ['businessDate', 'serviceCompletedAt']),
-    cashierName: pickValue(source, ['operatorName']),
-    serviceRecords: [source],
-    paymentDetails: []
-  }
-}
-
 export function mountSalesOrderReceiptPreview(order, hostWindow = window, options = {}) {
   const documentRef = hostWindow?.document
   if (!documentRef?.createElement || !documentRef?.body) return null

@@ -21,6 +21,16 @@ foreach ($full['records'] as $record) {
     $ids[$record['id']]=true;
     if (empty($record['entitlementOnly'])) continue;
     $pure++;
+    // 来源必须来自这次结账的冻结选择，验证列表和详情都不再丢失；只读不回填。
+    $selectedSource = Db::name('cashier_v3_checkout_business_source_selection')
+        ->where('tenant_id', $tenant)->where('store_id', $store)->where('checkout_kind', 'sale')
+        ->where('checkout_request_id', substr($record['id'], strlen('service:')))->find();
+    if ($selectedSource && $selectedSource['primary_source_name_snapshot'] !== '') {
+        $expectedSource = $selectedSource['secondary_source_name_snapshot'] ?: $selectedSource['primary_source_name_snapshot'];
+        if ($record['source'] !== $expectedSource) throw new RuntimeException('pure entitlement source missing in list');
+        $sourceDetail = $reader->salesOrderDetail(['orderId'=>$record['id']], $operator, $scope);
+        if (($sourceDetail['source'] ?? '') !== $expectedSource) throw new RuntimeException('pure entitlement source missing in detail');
+    }
     if ($record['availableActions'] !== [] || $record['lifecycleOrderId'] !== '' || (float)$record['actualReceivedAmount'] !== 0.0) throw new RuntimeException('service group leaked sales authority');
     foreach ($record['items'] as $item) {
         if ($item['businessTag'] !== '权益' || $item['payableAmount'] !== null || $item['serviceFactId'] <= 0) throw new RuntimeException('invalid entitlement item');

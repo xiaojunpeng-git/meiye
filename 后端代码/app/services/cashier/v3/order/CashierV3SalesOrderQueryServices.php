@@ -768,14 +768,28 @@ final class CashierV3SalesOrderQueryServices
             elseif ($column === 'order_id') $value = "CONCAT('service:', sf.checkout_request_id)";
             elseif ($column === 'order_no') $value = "MIN(COALESCE(NULLIF(sf.service_record_no,''),sf.service_fact_id))";
             elseif ($column === 'order_version' || $column === 'entitlement_only') $value = '1';
-            elseif (in_array($column, ['original_amount_cents','discount_amount_cents','sale_amount_cents','business_source_primary_id','business_source_secondary_id'], true)) $value = '0';
-            elseif (in_array($column, ['order_note','business_source_primary_name_snapshot','business_source_secondary_name_snapshot','business_source_label_snapshot'], true)) $value = "''";
+            elseif (strpos($column, 'business_source_') === 0) {
+                // 纯权益没有销售资金单，但来源已随结账冻结；按同请求读取快照，
+                // 不用会员当前来源或配置名称覆盖历史选择，也不虚构销售事实。
+                $sourceColumns = [
+                    'business_source_primary_id' => 'primary_source_id',
+                    'business_source_secondary_id' => 'secondary_source_id',
+                    'business_source_primary_name_snapshot' => 'primary_source_name_snapshot',
+                    'business_source_secondary_name_snapshot' => 'secondary_source_name_snapshot',
+                    'business_source_label_snapshot' => 'source_label_snapshot',
+                ];
+                $fallback = substr($column, -3) === '_id' ? '0' : "''";
+                $value = 'COALESCE(MAX(bs.' . $sourceColumns[$column] . '),' . $fallback . ')';
+            }
+            elseif (in_array($column, ['original_amount_cents','discount_amount_cents','sale_amount_cents'], true)) $value = '0';
+            elseif ($column === 'order_note') $value = "''";
             else $value = 'MIN(sf.' . $column . ')';
             $serviceFields[] = $value . ' AS ' . $column;
         }
         $sales = Db::name('cashier_v3_sales_order')->alias('s')
             ->where('s.tenant_id', $criteria['tenantId'])->where('s.order_status', 'settled')->where('s.order_direction', 'forward');
         $services = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+            ->leftJoin('cashier_v3_checkout_business_source_selection bs', "bs.checkout_request_id=sf.checkout_request_id AND bs.tenant_id=sf.tenant_id AND bs.store_id=sf.store_id AND bs.checkout_kind='sale'")
             ->where('sf.tenant_id', $criteria['tenantId'])->where('sf.service_status', 'completed')
             ->where('sf.checkout_request_id', '<>', '')
             ->whereNotExists(function ($q): void {

@@ -27,8 +27,7 @@ import {
   salesOrderProjectionFromResult
 } from '@/services/cashierV3OrderProjectionContract'
 import {
-  openSalesOrderReceiptPrint,
-  serviceRecordReceiptFromRecord
+  openSalesOrderReceiptPrint
 } from '@/services/salesOrderReceiptPrint'
 import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
 import { queryPlatformOrderCenterScope } from '@/services/platformOrderCenterApi'
@@ -42,7 +41,6 @@ const serviceVoidReason = ref('')
 const serviceVoidError = ref('')
 const serviceVoidSubmitting = ref(false)
 const serviceVoidCommandIds = ref({})
-const servicePrintLoading = ref({})
 const servicePrintError = ref('')
 const serviceCraftsmanRecord = ref(null)
 const serviceCraftsmanEntry = ref(null)
@@ -755,7 +753,7 @@ function giftVoidRecordId(record) {
 }
 
 const salesOrderListColumns = [
-  '商品', '单价', '数量', '手艺人', '销售人（业绩）', '销售经理', '导购', '金额', '应收金额', '欠款', '已收金额', '记账收款', '下单门店', '状态'
+  '商品', '单价', '数量', '手艺人（类型，业绩，手工、项目数）', '销售人（业绩）', '销售经理', '导购', '金额', '应收金额', '欠款', '已收金额', '记账收款', '下单门店', '状态'
 ]
 
 function salesOrderItems(record) {
@@ -1784,27 +1782,6 @@ function openRecordDetail(record) {
   return null
 }
 
-function serviceRecordPrintKey(record = {}) {
-  return String(record.serviceFactId || record.id || record.serviceRecordNo || '')
-}
-
-function printServiceRecord(record = {}) {
-  const key = serviceRecordPrintKey(record)
-  if (!key || servicePrintLoading.value[key]) return
-  servicePrintError.value = ''
-  servicePrintLoading.value = { ...servicePrintLoading.value, [key]: true }
-  try {
-    const result = openSalesOrderReceiptPrint(serviceRecordReceiptFromRecord(record))
-    if (!result.ok) servicePrintError.value = result.message
-  } catch (error) {
-    servicePrintError.value = error?.message || '服务小票暂时无法生成，请稍后重试。'
-  } finally {
-    const next = { ...servicePrintLoading.value }
-    delete next[key]
-    servicePrintLoading.value = next
-  }
-}
-
 async function printSalesOrderRecord(record = {}) {
   const orderId = String(record?.id || record?.orderId || record?.salesOrderId || '').trim()
   if (!orderId || salesPrintLoading.value[orderId]) return
@@ -2005,7 +1982,7 @@ async function submitServiceCraftsmanAdjustment() {
 
 function openServiceVoid(record) {
   // 纯权益组作废交给后端整组事务，不在浏览器逐条提交。
-  if (!record || (activeTabKey.value !== 'service' && !record.entitlementOnly) || record.serviceStatus === '已作废' || record.voidedAt) return
+  if (!record?.entitlementOnly || record.orderStatus === '已作废' || record.voidedAt) return
   serviceVoidRecord.value = record
   serviceVoidReason.value = ''
   serviceVoidError.value = ''
@@ -2030,19 +2007,18 @@ async function submitServiceVoid() {
     serviceVoidError.value = '作废原因不能超过255字。'
     return
   }
-  const serviceFactId = record.serviceFactId || String(record.id || '').replace(/^service:/, '')
   const checkoutRequestId = record.entitlementOnly ? String(record.id || '').replace(/^service:/, '') : ''
-  if (!checkoutRequestId && !/^[1-9][0-9]*$/.test(String(serviceFactId))) {
-    serviceVoidError.value = '服务记录标识无效，请刷新后重试。'
+  if (!checkoutRequestId) {
+    serviceVoidError.value = '消费订单标识无效，请刷新后重试。'
     return
   }
-  const key = checkoutRequestId || String(serviceFactId)
+  const key = checkoutRequestId
   const idempotencyKey = serviceVoidCommandIds.value[key] || createCashierV3CommandId()
   serviceVoidCommandIds.value = { ...serviceVoidCommandIds.value, [key]: idempotencyKey }
   serviceVoidSubmitting.value = true
   serviceVoidError.value = ''
   try {
-    const result = await requestAction('void-service-record', { ...(checkoutRequestId ? { checkoutRequestId } : { serviceFactId }), reason, idempotencyKey })
+    const result = await requestAction('void-service-record', { checkoutRequestId, reason, idempotencyKey })
     const status = actionStatus(result)
     if (isTerminalActionStatus(status)) {
       serviceVoidCommandIds.value = { ...serviceVoidCommandIds.value, [key]: null }
@@ -2476,14 +2452,14 @@ onBeforeUnmount(() => {
               <span>来源：{{ displayRecordField(record, 'source') }}</span>
               <!-- 纯权益可以查看/打印及作废服务，但不进入销售退款。 -->
               <span v-if="!isPlatformReadOnly" class="sales-order-query-group__actions">
-                <button type="button" class="button button--text" @click="openRecordDetail(record)">订单详情</button>
+                <button type="button" class="button button--text" @click="openRecordDetail(record)">详情</button>
                 <button
                   v-if="canUseCashierV3Operation('cashier.v3.order.receipt_print')"
                   type="button"
                   class="button button--text"
                   :disabled="Boolean(salesPrintLoading[String(record.id || record.orderId || record.salesOrderId || '')])"
                   @click="printSalesOrderRecord(record)"
-                >{{ salesPrintLoading[String(record.id || record.orderId || record.salesOrderId || '')] ? '生成中…' : '打印销售小票' }}</button>
+                >{{ salesPrintLoading[String(record.id || record.orderId || record.salesOrderId || '')] ? '生成中…' : '打印' }}</button>
                 <button
                   v-if="salesOrderActionAvailable(record, 'refund-sales-order', 'cashier.v3.order.refund')"
                   type="button"
@@ -2619,26 +2595,8 @@ onBeforeUnmount(() => {
                 type="button"
                 class="button button--text"
                 @click="openRecordDetail(record)"
-              >查看详情</button>
-              <button
-                v-if="serviceRecordIsNormal(record) && canUseCashierV3Operation('cashier.v3.order.service_detail')"
-                type="button"
-                class="button button--text"
-                @click="openServiceCraftsmanAdjustment(record)"
-              >修改手艺人</button>
-              <button
-                v-if="activeTabKey === 'service' && canUseCashierV3Operation('cashier.v3.order.receipt_print')"
-                type="button"
-                class="button button--text"
-                :disabled="Boolean(servicePrintLoading[serviceRecordPrintKey(record)])"
-                @click="printServiceRecord(record)"
-              >{{ servicePrintLoading[serviceRecordPrintKey(record)] ? '生成中…' : '打印服务小票' }}</button>
-              <button
-                v-if="activeTabKey === 'service' && !record.voidedAt && record.serviceStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.service_void')"
-                type="button"
-                class="button button--text button--danger"
-                @click="openServiceVoid(record)"
-              >作废</button>
+              >{{ activeTabKey === 'service' ? '详情' : '查看详情' }}</button>
+              <!-- 服务只保留详情入口；打印与作废统一按消费订单处理，避免拆单操作。 -->
               <button
                 v-if="activeTabKey === 'debt' && record.canRepay"
                 type="button"

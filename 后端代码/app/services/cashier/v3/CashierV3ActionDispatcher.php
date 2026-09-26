@@ -534,6 +534,9 @@ class CashierV3ActionDispatcher
         // 请求重建。
         $skipDefaultRootProjection = (in_array($canonical, ['choose-catalog-item', 'remove-cart-line'], true)
                 && !$wantCurrentState)
+            // 整单服务作废已提交正式回执，订单页会独立重查列表。不要再加载无关
+            // 收银根投影，否则其异常或超时会让已成功退权益被误报为结果未知。
+            || ($canonical === 'void-service-record' && !$wantCurrentState)
             || (in_array($canonical, [
                 'prepare-recharge-checkout',
                 'add-recharge-checkout-payment-method',
@@ -554,12 +557,17 @@ class CashierV3ActionDispatcher
 
         if ($shouldProject) {
             // returnCurrentState：必须用当前 DataScope 重建；无法重建 → requiresRefresh
-            $rebuilt = $this->rootProjector->rebuild(
-                $outcome['state_context_id'],
-                $operatorScope,
-                $dataScope,
-                []
-            );
+            try {
+                $rebuilt = $this->rootProjector->rebuild(
+                    $outcome['state_context_id'],
+                    $operatorScope,
+                    $dataScope,
+                    []
+                );
+            } catch (\Throwable $exception) {
+                // 事务已经提交，投影失败不能把成功命令改成失败或诱导重新记账。
+                return self::projectionRebuildFallback($envelope);
+            }
             if ($rebuilt === null) {
                 unset($envelope['state'], $envelope['stateRevision'], $envelope['versions']);
                 $envelope['requiresRefresh'] = true;

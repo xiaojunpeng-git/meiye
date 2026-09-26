@@ -11,7 +11,6 @@ import {
   openSalesOrderReceiptPrint,
   saveSalesOrderReceiptPrintSettings,
   salesOrderReceiptFromCheckout,
-  serviceRecordReceiptFromRecord,
   setSalesOrderReceiptPageSize
 } from '../../../前端代码/cashier-v3/src/services/salesOrderReceiptPrint.js'
 
@@ -134,8 +133,8 @@ ok('旧结账快照适配器兼容完整快照', () => {
   assert.equal(receipt.paymentDetails[0].name, '微信')
 })
 
-ok('服务记录小票只展示服务区块', () => {
-  const html = buildSalesOrderReceiptHtml(serviceRecordReceiptFromRecord({
+ok('纯权益订单小票只展示服务区块', () => {
+  const html = buildSalesOrderReceiptHtml({ receiptMode: 'service', serviceRecords: [{
     serviceRecordNo: 'FW-1001',
     storeName: '测试门店',
     memberName: '测试会员',
@@ -143,7 +142,7 @@ ok('服务记录小票只展示服务区块', () => {
     entitlementSource: '6980随心挑',
     craftsmenSummary: '冯燕',
     usedTimes: 1
-  }))
+  }] })
   assert.match(html, /服务明细/)
   assert.match(html, /东方熏蒸/)
   assert.match(html, /<th>项目<\/th><th class="right">次数<\/th><th>来源<\/th>/)
@@ -326,9 +325,9 @@ ok('结账成功页直接使用成功快照打开本地小票预览', () => {
   assert.match(checkoutOverlay, /openSalesOrderReceiptPrint\(checkoutReceipt\)/)
   assert.doesNotMatch(checkoutOverlay, /request\('print-sales-order-receipt'/)
   assert.match(checkoutOverlay, /打印服务小票/)
-  assert.match(receiptPrint, /serviceRecordReceiptFromRecord/)
-  assert.match(orderCenter, /打印销售小票/)
-  assert.match(orderCenter, /打印服务小票/)
+  assert.doesNotMatch(receiptPrint, /serviceRecordReceiptFromRecord/)
+  assert.match(orderCenter, /'生成中…' : '打印'/)
+  assert.doesNotMatch(orderCenter, /打印服务小票/)
   assert.match(checkoutOverlay, /正在加载小票/)
   assert.match(cashierWorkbench, /requestAction\('open-sales-order-detail', \{ orderId: salesOrderId \}\)/)
   assert.match(cashierWorkbench, /checkoutReceiptSnapshot/)
