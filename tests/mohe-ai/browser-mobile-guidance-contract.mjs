@@ -361,6 +361,11 @@ console.log(`R5 mobile production-controller: ${checks} checks PASS (TS-lowered 
   eq(f.api.presentationGroups(facts), [{section:'收款',facts:facts.slice(0,2)}, {section:'服务',facts:facts.slice(2)}]);
   eq(f.calls.length,before);
   assert.ok(!source.includes('@tap="showHistory"'));
+  // 单行导航移除新建操作行，但保留底部加号及关闭面板原有行为。
+  assert.ok(!source.includes('class="ai-workspace-actions"'));
+  assert.match(source, /class="ai-back-button"[^>]*@tap="closePanel"/);
+  assert.match(source, /paddingLeft: nativeCapsuleSpace/);
+  assert.match(source, /class="ai-composer-more"/);
   f.unmount();
   console.log('R45 nested presentation, grouped facts and no additional requests: PASS');
 }
