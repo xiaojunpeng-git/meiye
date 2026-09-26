@@ -1580,6 +1580,15 @@ async function queryQueryEntities(query = {}) {
   })
   const envelope = response?.data?.result ? response.data : response
   const page = envelope?.data
+  if (queryEntitySelectorRequest.value?.requestId !== requestId) return response
+  // 初次自动查询也必须向弹窗传播失败；不改任何人员分配或写命令。
+  if (envelope?.result?.status && envelope.result.status !== 'success') {
+    state.queryEntitySelector = { ...state.queryEntitySelector, [request.entityType]: {
+      records: [], total: 0, page: 1, pageSize: 20, isLoading: false,
+      error: envelope.result.message || '人员查询失败，请重试。'
+    } }
+    return { success: false, message: envelope.result.message || '人员查询失败，请重试。' }
+  }
   if (queryEntitySelectorRequest.value?.requestId !== requestId || !page || !Array.isArray(page.records)) {
     return response
   }
@@ -3103,6 +3112,7 @@ onBeforeUnmount(() => {
     :multiple="queryEntitySelectorRequest?.multiple === true"
     :selected-records="queryEntitySelectorRequest?.selectedRecords || []"
     :records="queryEntitySelector.records || []"
+    :load-error="queryEntitySelector.error || ''"
     :total="queryEntitySelector.total || 0"
     :page="queryEntitySelector.page || 1"
     :page-size="queryEntitySelector.pageSize || 20"

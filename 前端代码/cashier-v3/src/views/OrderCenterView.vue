@@ -10,6 +10,7 @@ import Printer from '@lucide/vue/dist/esm/icons/printer.mjs'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
 import { useUnifiedQueryPage } from '@mohe/unified-query-vue3/composable'
+import { queryPreferenceKey, readQueryPreferences, mergeQueryRefresh } from '@mohe/unified-query-vue3'
 import {
   createCashierV3CommandId,
   canUseCashierV3Operation,
@@ -488,9 +489,11 @@ const salesOrderLifecycleResourceActions = new Set([
 ])
 
 watch(
-  () => [activeTabKey.value, orderCenter.value.querySettingsByType, orderCenter.value.querySettings],
+  () => [activeTabKey.value, state.operator?.account, state.currentStore?.id, orderCenter.value.querySettingsByType, orderCenter.value.querySettings],
   () => {
-    const settings = orderCenter.value.querySettingsByType?.[activeTabKey.value]
+    // 本地配置优先；操作响应中的旧根投影不能覆盖用户刚保存的查询规则。
+    const localKey = queryPreferenceKey(state.operator?.account, state.currentStore?.id, activeTab.value.pageCode)
+    const settings = readQueryPreferences(localKey)?.settings || orderCenter.value.querySettingsByType?.[activeTabKey.value]
       || (activeTabKey.value === 'sales' ? orderCenter.value.querySettings : null)
     querySettings.value = settings && typeof settings === 'object' ? { ...settings } : {}
   },
@@ -1420,7 +1423,14 @@ function reportSalesDateQuery() {
 }
 
 function initialOrderCenterQuery() {
-  return reportServiceDateQuery() || reportSalesDateQuery() || defaultOrderCenterDateQuery()
+  // 首屏复用本地规则，但不恢复过去的日期或人员输入；默认业务日仍是当天。
+  const settings = querySettings.value || {}
+  return reportServiceDateQuery() || reportSalesDateQuery() || {
+    ...defaultOrderCenterDateQuery(),
+    filters: settings.filters || [], filterRelation: settings.filterRelation || 'and',
+    sorts: settings.sorts || [], visibleFields: settings.visibleFields || [],
+    groupBy: settings.groupBy || [], summaries: settings.summaries || []
+  }
 }
 
 function leaveServiceReportDrilldown() {
@@ -1498,6 +1508,11 @@ function changePlatformOrderScope({ storeIds = [], label = '当前权限范围' 
 
 async function queryRecords(query = {}, resetPage = true) {
   const recordType = activeTabKey.value
+  // 只统一读取/刷新，不介入作废和人员调整命令。无新筛选的调用复用最后成功快照。
+  const explicitQuery = Object.prototype.hasOwnProperty.call(query, 'topFilters')
+  const previous = executedQueryByType.value[recordType] || queryModelByType.value[recordType] || {}
+  query = mergeQueryRefresh(previous, query)
+  if (!explicitQuery && previous.page) resetPage = false
   if (recordType !== 'sales') {
     const currentQuery = queryModelByType.value[recordType] || {}
     const requestedPageSize = Math.max(1, Number(query.pageSize ?? query.limit) || pageSize.value)
@@ -1520,10 +1535,12 @@ async function queryRecords(query = {}, resetPage = true) {
       if (projection && sequence === recordQuerySequence && activeTabKey.value === recordType) {
         state.orderCenter = mergeSalesOrderCenterProjection(state.orderCenter, projection)
         saveExecutedQuery(recordType, nextQuery)
+        // 删除/作废后的末页可能变空，只回退查询页码，不再次执行业务操作。
+        if (!records.value.length && targetPage > 1) return await queryRecords({ ...nextQuery, page: targetPage - 1 }, false)
       }
       return result
     } finally {
-      isOrderQueryLoading.value = false
+      if (sequence === recordQuerySequence) isOrderQueryLoading.value = false
     }
   }
   const currentQuery = queryModelByType.value[recordType] || {}
@@ -1570,10 +1587,11 @@ async function queryRecords(query = {}, resetPage = true) {
         sales: cursorQuery
       }
       saveExecutedQuery(recordType, cursorQuery)
+      if (!records.value.length && targetPage > 1) return await queryRecords({ ...nextQuery, page: targetPage - 1 }, false)
     }
     return result
   } finally {
-    isOrderQueryLoading.value = false
+    if (sequence === salesQuerySequence) isOrderQueryLoading.value = false
   }
 }
 

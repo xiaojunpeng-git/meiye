@@ -5,6 +5,7 @@ import UnifiedQueryCustomFieldDrawer from './UnifiedQueryCustomFieldDrawer.vue'
 import UnifiedQueryExportDrawer from './UnifiedQueryExportDrawer.vue'
 import UnifiedQueryFieldRenameDrawer from './UnifiedQueryFieldRenameDrawer.vue'
 import UnifiedQuerySettingsDrawer from './UnifiedQuerySettingsDrawer.vue'
+import { readQueryPreferences, writeQueryPreferences } from '../contracts/localQueryPreferences.js'
 import {
   cloneUnifiedQuerySnapshot,
   normalizeUnifiedQuerySettings,
@@ -12,6 +13,7 @@ import {
 } from '../contracts/unifiedQueryContract.js'
 
 const props = defineProps({
+  localSettingsKey: { type: String, default: '' },
   searchPlaceholder: {
     type: String,
     default: '请输入查询内容'
@@ -189,6 +191,7 @@ const dataScope = ref('normal')
 const businessStatus = ref('')
 const isSettingsOpen = ref(false)
 const quickRangeError = ref('')
+const customFiltersExpanded = ref(true)
 
 function openSettings() {
   isSettingsOpen.value = true
@@ -233,9 +236,19 @@ const defaultQuickFieldKeys = computed(() => props.fields
   .slice(0, props.maxQuickFields))
 const activeQuickFieldKeys = computed(() => {
   const configured = activeSettings.value.quickFields.filter((key) => quickFieldMap.value.has(key)).slice(0, props.maxQuickFields)
-  return activeSettings.value.hasQuickFields ? configured : defaultQuickFieldKeys.value
+  // 固定日期等默认字段不因用户只勾选销售人而消失；自定义字段只补充筛选。
+  return [...new Set([...defaultQuickFieldKeys.value, ...(activeSettings.value.hasQuickFields ? configured : [])])]
 })
 const activeQuickFields = computed(() => activeQuickFieldKeys.value.map((key) => quickFieldMap.value.get(key)).filter(Boolean))
+const primaryQuickFields = computed(() => inlineFields(true))
+const secondaryQuickFields = computed(() => inlineFields(false))
+// 收起后仍提示正在使用的自定义条件，避免把隐藏误认为清空。
+const customFilterCount = computed(() => new Set(exportTopFilters()
+  .filter((filter) => secondaryQuickFields.value.some((field) => field.key === filter.field))
+  .map((filter) => filter.field)).size + (activeSettings.value.filters?.length || 0))
+function inlineFields(primary) {
+  return activeQuickFields.value.filter((field) => (props.inlineQuickControls && defaultQuickFieldKeys.value.includes(field.key)) === primary)
+}
 const capabilityMatchesPage = computed(() => Boolean(
   props.pageCode
   && props.queryCapability?.enabled === true
@@ -305,10 +318,44 @@ watch(dataScope, () => {
 watch(
   () => props.settings,
   (settings) => {
-    activeSettings.value = normalizeSettings(settings)
+    activeSettings.value = normalizeSettings(readQueryPreferences(props.localSettingsKey)?.settings || settings)
   },
   { deep: true }
 )
+
+watch(() => props.localSettingsKey, (key) => {
+  const saved = readQueryPreferences(key)
+  activeSettings.value = normalizeSettings(saved?.settings || props.settings)
+  customFiltersExpanded.value = saved?.expanded !== false
+}, { immediate: true })
+
+function toggleCustomFilters() {
+  customFiltersExpanded.value = !customFiltersExpanded.value
+  if (!props.localSettingsKey) return
+  try {
+    writeQueryPreferences(props.localSettingsKey, { settings: activeSettings.value, expanded: customFiltersExpanded.value })
+  } catch (error) { quickRangeError.value = error.message }
+}
+
+// 重置只清查询值，不删除用户选择的字段和排序；日期恢复当天后走同一查询出口。
+function resetQuery() {
+  keyword.value = ''
+  dataScope.value = 'normal'
+  businessStatus.value = ''
+  Object.keys(quickFieldValues).forEach((key) => { delete quickFieldValues[key] })
+  Object.keys(quickFieldRanges).forEach((key) => { delete quickFieldRanges[key] })
+  activeSettings.value = { ...activeSettings.value, filters: [] }
+  activeQuickFields.value.forEach((field) => {
+    if (isQuickDateRange(field)) quickFieldRanges[field.key] = { min: localToday(), max: localToday() }
+    else if (field.defaultQuick && topFieldType(field) === 'date') quickFieldValues[field.key] = localToday()
+  })
+  if (props.localSettingsKey) {
+    try { writeQueryPreferences(props.localSettingsKey, { settings: activeSettings.value, expanded: customFiltersExpanded.value }) }
+    catch (error) { quickRangeError.value = error.message; return }
+  }
+  emit('settings-applied', { ...activeSettings.value })
+  submitQuery()
+}
 
 watch(
   () => props.stateContextKey,
@@ -528,7 +575,7 @@ function submitQuickDateOnChange(field) {
 
 function submitQuery() {
   if (!validateQuickRanges()) return
-  emit('query', buildQueryPayload())
+  emit('query', { ...buildQueryPayload(), page: 1 })
 }
 
 function selectQuickFilter(filter) {
@@ -552,6 +599,12 @@ function selectScope(scope) {
 }
 
 async function persistSettings(settings, options = {}) {
+  if (props.localSettingsKey) {
+    try {
+      writeQueryPreferences(props.localSettingsKey, { settings, expanded: true })
+      return { result: { status: 'success' } }
+    } catch (error) { return { result: { status: 'failed', message: error.message } } }
+  }
   if (!props.onSaveSettings) {
     emit('save-settings', settings)
     return { success: true }
@@ -591,6 +644,11 @@ function clearTopField(field) {
 
 function applySettings(settings) {
   activeSettings.value = normalizeSettings(settings)
+  customFiltersExpanded.value = true
+  // 删除配置时也删除旧输入，防止重新勾选后恢复不可见的旧筛选。
+  const keys = new Set(activeQuickFieldKeys.value)
+  Object.keys(quickFieldValues).forEach((key) => { if (!keys.has(key)) delete quickFieldValues[key] })
+  Object.keys(quickFieldRanges).forEach((key) => { if (!keys.has(key)) delete quickFieldRanges[key] })
   activeQuickFields.value.forEach((field) => {
     if ((field.quickRange === true || isQuickDateRange(field)) && !(field.key in quickFieldRanges)) {
       quickFieldRanges[field.key] = { min: '', max: '' }
@@ -754,8 +812,8 @@ async function startDirectQueryExport() {
             {{ filter.label }}<span v-if="filter.count !== undefined">（{{ filter.count }}）</span>
           </button>
         </div>
-        <div v-if="inlineQuickControls && activeQuickFields.length" class="unified-query-toolbar__top-fields" aria-label="常用查询字段">
-          <label v-for="field in activeQuickFields" :key="field.key" class="unified-query-top-field" :class="{ 'unified-query-top-field--label-hidden': field.quickLabelHidden === true }">
+        <div v-if="primaryQuickFields.length" class="unified-query-toolbar__top-fields" aria-label="常用查询字段">
+          <label v-for="field in primaryQuickFields" :key="field.key" class="unified-query-top-field" :class="{ 'unified-query-top-field--label-hidden': field.quickLabelHidden === true }">
             <span v-if="field.quickLabelHidden !== true">{{ field.label }}</span>
             <div class="unified-query-top-field__control">
               <div v-if="isQuickDateRange(field)" class="unified-query-top-field__range unified-query-top-field__range--date">
@@ -838,6 +896,7 @@ async function startDirectQueryExport() {
         </select>
         <button v-if="canExport && !exportButtonAfterSettings" type="button" class="button button--secondary unified-query-export-button" @click="isExportOpen = true"><Download :size="16" />导出</button>
         <button v-if="showSettingsButton" type="button" class="button button--secondary" @click="openSettings">{{ settingsButtonLabel }}</button>
+        <button type="button" class="button button--secondary" @click="resetQuery">重置</button>
         <button
           v-if="canExport && exportButtonAfterSettings"
           type="button"
@@ -847,13 +906,14 @@ async function startDirectQueryExport() {
         ><Download :size="16" />{{ isDirectExporting ? '正在创建…' : '导出' }}</button>
         <slot name="primary-actions" />
       </div>
+      <button v-if="secondaryQuickFields.length" type="button" class="button unified-query-toolbar__toggle" :aria-expanded="customFiltersExpanded" @click="toggleCustomFilters">{{ customFiltersExpanded ? '收起' : '展开' }}<span v-if="customFilterCount">（{{ customFilterCount }}）</span></button>
       <div v-if="$slots['context-actions']" class="unified-query-toolbar__context-actions">
         <slot name="context-actions" />
       </div>
     </div>
 
-    <div v-if="!inlineQuickControls && (quickFilters.length || activeQuickFields.length)" class="unified-query-toolbar__secondary">
-      <div v-if="quickFilters.length" class="unified-query-toolbar__quick">
+    <div v-if="customFiltersExpanded && (secondaryQuickFields.length || (!inlineQuickControls && quickFilters.length))" class="unified-query-toolbar__secondary">
+      <div v-if="!inlineQuickControls && quickFilters.length" class="unified-query-toolbar__quick">
         <button
           v-for="filter in quickFilters"
           :key="filter.key"
@@ -867,8 +927,8 @@ async function startDirectQueryExport() {
         </button>
       </div>
 
-      <div v-if="activeQuickFields.length" class="unified-query-toolbar__top-fields" aria-label="常用查询字段">
-        <label v-for="field in activeQuickFields" :key="field.key" class="unified-query-top-field" :class="{ 'unified-query-top-field--label-hidden': field.quickLabelHidden === true }">
+      <div v-if="secondaryQuickFields.length" class="unified-query-toolbar__top-fields" aria-label="自定义查询字段">
+        <label v-for="field in secondaryQuickFields" :key="field.key" class="unified-query-top-field" :class="{ 'unified-query-top-field--label-hidden': field.quickLabelHidden === true }">
           <span v-if="field.quickLabelHidden !== true">{{ field.label }}</span>
           <div class="unified-query-top-field__control">
             <div v-if="isQuickDateRange(field)" class="unified-query-top-field__range unified-query-top-field__range--date">

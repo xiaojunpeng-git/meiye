@@ -205,6 +205,14 @@
   gap: 8px;
 }
 
+/* 展开入口留在第一行右端；自定义条件另起行并换行，不挤入日期容器。 */
+.unified-query-toolbar__topline > .unified-query-toolbar__primary { flex: 1; min-width: 0; }
+.unified-query-toolbar__toggle { flex: none; margin-left: auto; }
+.unified-query-toolbar .unified-query-toolbar__secondary { flex-wrap: wrap; overflow: visible; }
+.unified-query-toolbar .unified-query-toolbar__secondary .unified-query-toolbar__top-fields {
+  flex: 1 1 100%; min-width: 0; flex-wrap: wrap;
+}
+
 .unified-query-toolbar--quick-controls-inline {
   grid-template-rows: auto;
 }

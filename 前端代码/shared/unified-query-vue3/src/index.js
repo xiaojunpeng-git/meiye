@@ -6,3 +6,4 @@ export { default as UnifiedQuerySettingsDrawer } from './components/UnifiedQuery
 export { default as UnifiedQueryToolbar } from './components/UnifiedQueryToolbar.vue'
 export { useUnifiedQueryPage } from './composables/useUnifiedQueryPage.js'
 export * from './contracts/unifiedQueryContract.js'
+export * from './contracts/localQueryPreferences.js'

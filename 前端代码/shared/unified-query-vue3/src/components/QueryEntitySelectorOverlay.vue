@@ -14,6 +14,8 @@ import { computed, ref } from 'vue'
  * - 组织：organizationId、organizationName、organizationCode、organizationPath、parentOrganizationName
  */
 const props = defineProps({
+  // 宿主发起的首次查询不经过 runQuery，也需要展示其失败原因。
+  loadError: { type: String, default: '' },
   entityType: {
     type: String,
     default: 'person',
@@ -253,6 +255,11 @@ function unavailableReason(record) {
 }
 
 function resultError(result, fallback) {
+  // V3 查询使用 result.status；失败必须展示业务错误，不伪装成零条记录。
+  const envelope = result?.data?.result ? result.data : result
+  if (envelope?.result?.status && envelope.result.status !== 'success') {
+    return envelope.result.message || fallback
+  }
   if (result === false || result?.success === false || result?.ok === false) {
     return firstValue(result, ['message', 'errorMessage', 'error']) || fallback
   }
@@ -399,13 +406,13 @@ async function confirmMultiple() {
       </form>
 
       <div class="query-entity-selector__feedback" aria-live="polite">
-        <p v-if="queryError" class="query-entity-selector__message query-entity-selector__message--error" role="alert">{{ queryError }}</p>
+        <p v-if="queryError || loadError" class="query-entity-selector__message query-entity-selector__message--error" role="alert">{{ queryError || loadError }}</p>
         <p v-if="selectError" class="query-entity-selector__message query-entity-selector__message--error" role="alert">{{ selectError }}</p>
       </div>
 
       <div class="query-entity-selector__content" :aria-busy="isBusy">
         <div v-if="isBusy && !records.length" class="query-entity-selector__loading">正在加载{{ definition.label }}…</div>
-        <div v-else-if="!records.length" class="query-entity-selector__empty">
+        <div v-else-if="!records.length && !queryError && !loadError" class="query-entity-selector__empty">
           <strong>暂无可显示的{{ definition.label }}</strong>
           <span>可直接查询，或清空条件后分页浏览全部{{ definition.label }}。</span>
         </div>

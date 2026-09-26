@@ -17,6 +17,7 @@ use think\facade\Db;
 final class CashierV3QueryEntitySelectorServices
 {
     private const PERSON_SCOPES = [
+        'query_filter' => false,
         'sales_performance_assignees' => true,
         'service_actual_craftsmen' => false,
         // 可被收银临时加入手艺人分配的当前门店在职人员；不要求
@@ -31,6 +32,32 @@ final class CashierV3QueryEntitySelectorServices
         'group_guides' => true,
         'group_attributions' => true,
     ];
+
+    /** 仅按后端当前门店读取任职身份，分页去重；不提供分配资格、不允许扩大门店范围。 */
+    private function queryFilterPeople(array $payload, CashierV3OperatorScope $operatorScope): array
+    {
+        $page = max(1, (int)($payload['page'] ?? 1));
+        $size = min(20, max(1, (int)($payload['pageSize'] ?? 20)));
+        $keyword = trim((string)($payload['keyword'] ?? ''));
+        $query = Db::name('system_store_staff')->alias('ss')
+            ->leftJoin('employee e', 'e.id=ss.employee_id')
+            ->where('ss.store_id', $operatorScope->storeId());
+        if ($keyword !== '') {
+            $like = '%' . addcslashes($keyword, '%_') . '%';
+            $query->where(function ($sub) use ($like) {
+                $sub->whereLike('e.name', $like)->whereLike('ss.staff_name', $like, 'OR')->whereLike('ss.account', $like, 'OR');
+            });
+        }
+        $total = (int)(clone $query)->count();
+        $rows = $query->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,ss.account,e.name as employee_name')
+            ->order('ss.id asc')->page($page, $size)->select()->toArray();
+        $records = array_map(static function (array $row): array {
+            $name = trim((string)($row['employee_name'] ?? '')) ?: (trim((string)$row['staff_name']) ?: (string)$row['account']);
+            return ['id' => (int)$row['id'], 'staffId' => (int)$row['id'], 'employeeId' => (int)$row['employee_id'],
+                'storeId' => (int)$row['store_id'], 'name' => $name, 'staffNo' => (string)$row['account'], 'selectable' => true];
+        }, $rows);
+        return ['records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $size, 'isLoading' => false];
+    }
 
     /**
      * @return array{records:array,total:int,page:int,pageSize:int,isLoading:bool}
@@ -54,6 +81,12 @@ final class CashierV3QueryEntitySelectorServices
         }
         if ($dataScope->forcedStoreId() !== $operatorScope->storeId()) {
             throw $this->invalid('当前门店上下文已变化，请刷新页面后重试。', 'query_entity_store_context_mismatch');
+        }
+
+        // 查询候选不是可分配人员：保留历史任职，不套用在职/销售资格限制。
+        // 独立只读分支，不能改变下方结账和人员调整使用的候选口径。
+        if ($selectorScope === 'query_filter') {
+            return $this->queryFilterPeople($payload, $operatorScope);
         }
 
         $page = max(1, (int)($payload['page'] ?? 1));
