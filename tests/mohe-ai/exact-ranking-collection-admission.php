@@ -48,17 +48,17 @@ $verify($singleStore===[['metric_code'=>'cash_performance','object_kind'=>'store
 $verify($admission->match('那家店业绩最高是哪家店',$saleObjects,$metrics,$sharedDefaults)===null,
     'a referential store phrase stays outside the broad all-store ranking path');
 
-$memberDetail=$admission->matchMemberPopulationDetail(
+$memberDetail=$admission->matchPopulationDetail(
     '会员业绩最高的前五名详情',$saleObjects,$metrics,$sharedDefaults,5
 );
 $verify(($memberDetail['ranking']??null)===['metric_code'=>'cash_performance','object_kind'=>'member',
         'direction'=>'top','limit'=>5]
     &&($memberDetail['detail']??null)===['view'=>'summary','target'=>'set','ordinal'=>null],
     'one closed broad member ranking uses the sole registry default before reading set details');
-$verify($admission->matchMemberPopulationDetail(
+$verify($admission->matchPopulationDetail(
     '会员业绩最高的前五名详情并分析原因',$saleObjects,$metrics,$sharedDefaults,5
 )===null,'open analysis remains model work instead of entering member detail execution');
-$verify($admission->matchMemberPopulationDetail(
+$verify($admission->matchPopulationDetail(
     '会员现金业绩最高的前五名详情',$saleObjects,$metrics,$sharedDefaults,5
 )===null,'an explicitly named metric remains on the ordinary exact-metric understanding path');
 
@@ -126,4 +126,13 @@ $verify($reason===null && ($storePlan['plan']['query']['metric_codes']??null)===
     &&($storePlan['plan']['query']['ranking']??null)===['direction'=>'top','limit'=>1],
     'a broad store question compiles one registry-owned Reader ranking without model understanding');
 
+foreach (['这个月门店业绩前三的门店详情'=>'store','这个月员工业绩前三名详情'=>'person'] as $question=>$kind) {
+    $args=[$question,$vocabulary,$capabilities,'screen','2026-09-27',&$reason];
+    $detailPlan=$rankingMethod->invokeArgs($gateway,$args);
+    $verify($reason===null && ($detailPlan['plan']['query']['ranking']??null)===['direction'=>'top','limit'=>3]
+        && count($detailPlan['plan']['query']['ranking_presentation_metrics']??[])>=3
+        && !isset($detailPlan['_member_detail_request']), 'R48 '.$kind.' ranking and details form one registered query');
+}
+$verify($admission->matchPopulationDetail('这个月门店业绩前三名的后两名详情',$vocabulary,array_keys($contracts),$sharedDefaults,3)===null,
+    'conflicting population directions cannot enter the closed path');
 echo "exact ranking collection admission: {$checks} checks PASS\n";

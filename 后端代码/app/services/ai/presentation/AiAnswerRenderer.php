@@ -133,7 +133,8 @@ final class AiAnswerRenderer
                         // neutral dash instead of inventing a zero or changing
                         // the rank's population.
                         foreach ($supplements as $code=>$supplement) {
-                            $value=$supplement['values'][$point['entity_id']]??null;
+                            $entityId=$point['entity_id']??$point['employee_id']??$point['store_id']??null;
+                            $value=$supplement['values'][$entityId]??null;
                             $rendered['presentation_'.$code]=$value===null?'—':$this->metricValue($value,$supplement['storage_unit']).$supplement['unit'];
                         }
                         $rows[]=$rendered;
@@ -180,6 +181,11 @@ final class AiAnswerRenderer
         if ($shape==='breakdown') {
             $summary=$this->breakdownSummary($breakdownObjectLabel??'对象',$metricNames,$breakdownEvidence,$rows);
         }
+        if ($shape==='ranking' && $rankingPresentationColumns!==[] && $rows) {
+            // The compact table already gives every rank and exact value;
+            // avoid repeating the whole table in the introductory sentence.
+            $summary='已按'.$metricNames[0].'排序，列出'.count($rows).'条结果及相关指标。';
+        }
         $conclusion = $summary;
         $periodLabel = '统计时间：' . $view['query']['start_date'] . ' 至 ' . $view['query']['end_date'] . '。';
         $summary .= ($summary === '' ? '' : ' ') . $periodLabel;
@@ -212,7 +218,7 @@ final class AiAnswerRenderer
             } elseif ($shape==='ranking' && $rankingPresentationColumns!==[]) {
                 // The leading value remains the documented sort metric. Other
                 // registry columns are contextual evidence, not extra ranks.
-                $columns[]=['key'=>'value','label'=>$metricNames[0]??'排序指标'];
+                $columns[]=['key'=>'value','label'=>($metricNames[0]??'排序指标').'（'.$rows[0]['unit'].'）'];
                 foreach ($rankingPresentationColumns as $code=>$label) $columns[]=['key'=>'presentation_'.$code,'label'=>$label];
             } else {
                 $columns=array_merge($columns,[['key' => 'metric', 'label' => '指标'], ['key' => 'value', 'label' => '数值'], ['key' => 'unit', 'label' => '单位']]);

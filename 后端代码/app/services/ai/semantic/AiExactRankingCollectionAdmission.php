@@ -15,23 +15,23 @@ use app\services\query\metric\MetricSemanticCatalog;
 final class AiExactRankingCollectionAdmission
 {
     /**
-     * Admit one broad member ranking together with a bounded set-detail view.
+     * Admit one registry-backed ranking together with a bounded set-detail view.
      *
      * Natural-language understanding remains the default. This narrow path is
      * available only when the sentence itself closes every execution carrier:
-     * one registered member object, one direction, one explicit row limit and
+     * one registered analytical object, one direction, one explicit row limit and
      * a genuine detail request. The caller accepts at most one calendar range;
      * if it is omitted, the existing dimension planner owns the same-day
      * default used by all broad dimension rankings.
      * The business metric is never inferred from wording; it must be the sole
-     * active registry default shared by the member ranking capability.
+     * active registry default shared by the selected ranking capability.
      *
      * @param array<int,array{object_kind:string,object_label:string}> $objectVocabulary
      * @param array<int,string> $allowedMetricCodes
      * @param array<string,array<int,string>> $defaultRankObjectKinds
      * @return array{ranking:array{metric_code:string,object_kind:string,direction:string,limit:int},detail:array{view:string,target:string,ordinal:null}}|null
      */
-    public function matchMemberPopulationDetail(
+    public function matchPopulationDetail(
         string $question,array $objectVocabulary,array $allowedMetricCodes,
         array $defaultRankObjectKinds,?int $limit
     ): ?array {
@@ -40,20 +40,27 @@ final class AiExactRankingCollectionAdmission
         if (!preg_match('/详情|明细|情况|具体/u',$question)) return null;
         if (MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes)!==null) return null;
         $matched=$this->objectsInText($question,$this->objects($objectVocabulary));
-        if ($matched===null || count($matched)!==1 || $matched[0]['object_kind']!=='member') return null;
+        if ($matched===null || count($matched)!==1) return null;
+        $kind=$matched[0]['object_kind'];
         $direction=$this->direction($question);
+        // An explicit bounded 前N/后N is itself a direction. Conflicting
+        // carriers are not guessed and stay on the semantic model path.
+        $hasTop=(bool)preg_match('/前[0-9一二两三四五六七八九十百]+/u',$question);
+        $hasBottom=(bool)preg_match('/后[0-9一二两三四五六七八九十百]+/u',$question);
+        if ($hasTop && $hasBottom || $hasTop && $direction==='bottom' || $hasBottom && $direction==='top') return null;
+        if ($direction===null) $direction=$hasTop?'top':($hasBottom?'bottom':null);
         if (!in_array($direction,['top','bottom'],true)) return null;
         $candidateCodes=[];
         foreach ($allowedMetricCodes as $code) {
-            if (in_array('member',array_values(array_unique(array_filter(
+            if (in_array($kind,array_values(array_unique(array_filter(
                 (array)($defaultRankObjectKinds[$code]??[]),'is_string'
             ))),true)) $candidateCodes[]=$code;
         }
-        if (count($candidateCodes)!==1 || $this->memberPopulationDetailResidue(
+        if (count($candidateCodes)!==1 || $this->populationDetailResidue(
             $question,$matched[0]['object_label']
         )!=='') return null;
         return [
-            'ranking'=>['metric_code'=>$candidateCodes[0],'object_kind'=>'member',
+            'ranking'=>['metric_code'=>$candidateCodes[0],'object_kind'=>$kind,
                 'direction'=>$direction,'limit'=>$limit],
             'detail'=>['view'=>'summary','target'=>'set','ordinal'=>null],
         ];
@@ -198,8 +205,8 @@ final class AiExactRankingCollectionAdmission
         return is_string($residue)?trim($residue):$question;
     }
 
-    /** Remove only the closed member-ranking/detail presentation grammar. */
-    private function memberPopulationDetailResidue(string $question,string $objectLabel): string
+    /** Remove only closed ranking/detail grammar; unexplained intent fails closed. */
+    private function populationDetailResidue(string $question,string $objectLabel): string
     {
         $residue=str_replace($objectLabel,' ',$question);
         $residue=preg_replace('/(?:前|后|最高|最低|最好|最差)(?:的)?\s*(?:[0-9]+|[一二两三四五六七八九十百]+)\s*(?:名)?/u',' ',$residue);

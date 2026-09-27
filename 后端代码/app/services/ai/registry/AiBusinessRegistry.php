@@ -115,6 +115,7 @@ final class AiBusinessRegistry
                 || ($registered[$code]['analysis_dimensions']??null)!==$dimensions
                 || $this->dimensionContracts($registered[$code]['analysis_dimension_contracts']??[])!==$dimensionContracts
                 || $this->overviewContracts($registered[$code]['overview']??[])!==$overview
+                || ($registered[$code]['ranking_detail_object_kinds']??[])!==($item['ranking_detail_object_kinds']??[])
                 || ($registered[$code]['condition_subjects']??[])!==$conditionSubjects
                 || $this->thresholdContract($registered[$code]['threshold_count']??null)!==$this->thresholdContract($item['threshold_count']??null)) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             $available=array_values(array_intersect($shapes,AiRegistryValue::strings($item['query_shapes']??[],8)));
@@ -126,6 +127,9 @@ final class AiBusinessRegistry
                 'storage_unit'=>$storageUnit,'condition_unit'=>$conditionUnit,
                 'analysis_dimensions'=>$dimensions,'analysis_dimension_contracts'=>$dimensionContracts,
                 'overview'=>$overview,
+                // Detail profiles are source-owned, validated above, and
+                // frozen with the same registry snapshot as sorting metrics.
+                'ranking_detail_object_kinds'=>$item['ranking_detail_object_kinds']??[],
                 'condition_subjects'=>$conditionSubjects,
                 'threshold_count'=>$this->thresholdContract($item['threshold_count']??null)];
         }

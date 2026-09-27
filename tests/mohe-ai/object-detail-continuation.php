@@ -64,7 +64,7 @@ $check(($second['selection_ref']??null)==='person:8','explicit ordinal stays ins
 // registered summary plan, preserving the preceding metric, period and scope.
 $gatewayClass=new ReflectionClass(AiGatewayServices::class);
 $gateway=$gatewayClass->newInstanceWithoutConstructor();
-$separatePopulationDetail=$gatewayClass->getMethod('separateMemberPopulationDetail');
+$separatePopulationDetail=$gatewayClass->getMethod('separatePopulationDetail');
 $compoundUnderstanding=['goal'=>'查看会员业绩前五名及详情','status'=>'understood','requirements'=>[
     ['id'=>'r1','meaning'=>'分析会员','fields'=>['object_kind','object_relation'],
         'values'=>['object_kind'=>'member','object_relation'=>'analysis']],
@@ -84,8 +84,8 @@ $check($detailRequest===['view'=>'summary','target'=>'set','ordinal'=>null]
 $personCompound=$compoundUnderstanding;
 $personCompound['requirements'][0]['values']['object_kind']='person';
 [$unchangedPerson,$personDetail]=$separatePopulationDetail->invoke($gateway,$personCompound);
-$check($personDetail===null&&$unchangedPerson===$personCompound,
-    'member asset orchestration does not silently capture a different object kind');
+$check(($personDetail['_ranking_object_kind']??null)==='person' && $unchangedPerson!==$personCompound,
+    'person ranking detail is retained as registered presentation, not member assets');
 $compile=$gatewayClass->getMethod('compileObjectDetailContinuation');
 $understanding=['goal'=>'继续查看','status'=>'understood','requirements'=>[[
     'id'=>'r1','meaning'=>'展开上一对象','fields'=>['object_detail'],
@@ -96,7 +96,7 @@ $compiled=$compile->invoke($gateway,$understanding,['query'=>$personQuery,'view'
     'meaning'=>['presentation_origin'=>'customer_or_verified_context']],'screen');
 $query=$compiled['plan']['query']??[];
 $check(($compiled['kind']??null)==='plan'&&($query['query_shape']??null)==='summary'
-    &&($query['metric_codes']??null)===['staff_sales_yeji']
+    &&($query['metric_codes']??null)===['staff_sales_yeji','staff_labor_yeji','staff_project_num']
     &&($query['business_filters']??null)===['object_kind'=>'person','selection_ref'=>'person:7']
     &&array_key_exists('ranking',$query)&&$query['ranking']===null,
     'detail continuation skips binding and changes only ranking into stable-object summary');
@@ -124,9 +124,8 @@ foreach ([$personView,$summaryView,$storeView,$detailView] as $singleton) {
     $set=$resolver->resolve($singleton['query'],$singleton,['view'=>'summary','target'=>'set','ordinal'=>null]);
     $check($one===$set,'a verified singleton set is the same target as one object');
 }
-try {$resolver->resolve($personQuery,$many,['view'=>'summary','target'=>'set','ordinal'=>null]);
-    throw new LogicException('plural selection collapsed');
-} catch (RuntimeException $error) {$check($error->getMessage()==='AI_OBJECT_DETAIL_SELECTION_REQUIRED','plural target never collapses to the first person');}
+$plural=$resolver->resolve($personQuery,$many,['view'=>'summary','target'=>'set','ordinal'=>null]);
+$check(array_column($plural['objects'],'id')===[7,8],'plural target retains the complete verified display order');
 $recompiled=$compile->invoke($gateway,$understanding,['query'=>$storeDetailQuery,'view'=>$detailView],'screen');
 $check($recompiled['plan']['query']===$storeDetailQuery,'repeated store continuation preserves metrics dates and scope');
 $invalidSummary=$summaryView;$invalidSummary['query']['business_filters']['selection_ref']='cohort:metric_fact_participants';

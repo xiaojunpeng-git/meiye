@@ -196,7 +196,7 @@ final class AiRegisteredPlanCompiler
         // the presentation resolver; the remaining display columns are
         // registry-derived and cannot change rank order or query population.
         $expectedPresentation=$query['query_shape']==='ranking'
-            ? AiRankingPresentationMetricResolver::resolve($snapshot['metrics'],$metrics[0],(string)($objectKind??'')) : [];
+            ? AiRankingPresentationMetricResolver::expected($snapshot['metrics'],$metrics[0],(string)($objectKind??''),$query['ranking_presentation_metrics']) : [];
         if ($query['ranking_presentation_metrics']!==[] && $query['ranking_presentation_metrics']!==$expectedPresentation) {
             AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         }

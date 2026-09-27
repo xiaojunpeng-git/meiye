@@ -100,7 +100,20 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
                 $name=$person?($point['employee_name']??($point['member_name']??null))
                     :($dimensionContract!==null?($point['entity_name']??($point['member_name']??null)):($point['store_name']??null));
                 if (!is_string($name) || $name==='') throw new \RuntimeException('METRIC_EXPORT_STORE_NAME_INVALID');
-                self::append($rows,array_replace($base,['store_name'=>$name.(($person||$dimensionContract!==null)?'；范围：'.$base['store_name']:''),'ranking_direction'=>$direction==='top'?'前列':'后列']),$point['amount_cents'],$storageUnit);
+                $scopedName=$name.(($person||$dimensionContract!==null)?'；范围：'.$base['store_name']:'');
+                self::append($rows,array_replace($base,['store_name'=>$scopedName,'ranking_direction'=>$direction==='top'?'前列':'后列']),$point['amount_cents'],$storageUnit);
+                // Export the same immutable supplementary values as the
+                // screen, retaining source precision rather than rounded text.
+                $entityId=$point['entity_id']??$point['employee_id']??$point['store_id']??null;
+                foreach ((array)($result['ranking_presentation_metrics']??[]) as $supplement) {
+                    $extraCode=$supplement['metric_code']??null;$extra=$capabilities[$extraCode]??null;
+                    if (!is_array($extra) || empty($extra['ai_query_ready']) || ($supplement['storage_unit']??null)!==$extra['storage_unit']) throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
+                    foreach ($supplement['values'] as $value) if ($value['entity_id']===$entityId) {
+                        self::append($rows,array_replace($base,['metric_name'=>$extra['name'],'store_name'=>$scopedName,
+                            'ranking_direction'=>$direction==='top'?'前列':'后列','unit'=>self::displayUnit($extraCode,$extra['storage_unit'])]),
+                            $value['metric_value'],$extra['storage_unit']);
+                    }
+                }
             } else throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
         }
         return $rows;

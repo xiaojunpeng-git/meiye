@@ -431,6 +431,9 @@ final class AiGatewayServices
                 if (isset($stored['envelope']['_member_detail_request'])) {
                     $compiled['_member_detail_request']=$stored['envelope']['_member_detail_request'];
                 }
+                if (isset($stored['envelope']['_ranking_detail_request'])) {
+                    $compiled=$this->attachPopulationDetail($compiled,$stored['envelope']['_ranking_detail_request']);
+                }
                 if ($compiled['kind']==='clarification') {
                     $r=$this->issueGuidance($owner,$id,$generation,$worker,$compiled,$stored['origin']??$stored['envelope'],$steps); $paused=true;
                     return $this->present($context,$owner,$r);
@@ -452,6 +455,9 @@ final class AiGatewayServices
             unset($compiled['_context_meaning']);
             if (!is_array($contextMeaning)) throw new RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
             try {
+                if (($compiled['kind']??null)==='verified_ranking_detail') {
+                    return $this->present($context,$owner,$this->executeVerifiedRankingDetail($context,$owner,$id,$generation,$worker,$snapshot,$compiled,$contextMeaning));
+                }
                 $result=($compiled['kind']??null)==='member_detail'
                     ?$this->executeMemberDetail($context,$owner,$id,$generation,$worker,$snapshot,$compiled,$contextMeaning)
                     :(isset($compiled['_member_detail_request'])
@@ -1321,7 +1327,7 @@ final class AiGatewayServices
         // the binding model must account for a non-metric field and can drop
         // it during format repair. The typed understanding, rather than a
         // phrase matcher, proves the object, response form and set target.
-        [$understanding,$requestedMemberDetail]=$this->separateMemberPopulationDetail($understanding);
+        [$understanding,$requestedMemberDetail]=$this->separatePopulationDetail($understanding);
         // Some providers omit the new request-kind marker only when a signed
         // predecessor is present. Recover it solely when two independent
         // structural checks agree: the model accepted only a broad observation
@@ -2315,7 +2321,7 @@ final class AiGatewayServices
             }
             // Presentation follows the authorised filter query; it is not a
             // new metric and must not disappear while the filters are bound.
-            if ($requestedMemberDetail!==null) $compiled['_member_detail_request']=$requestedMemberDetail;
+            if ($requestedMemberDetail!==null) $compiled=$this->attachPopulationDetail($compiled,$requestedMemberDetail);
             return $compiled;
         };
         // The model Skill identifies the semantic subject from the complete
@@ -2929,7 +2935,7 @@ final class AiGatewayServices
         // second metric. Admit it only through the same registry defaults and
         // exact residue boundary as other closed extrema, then let the normal
         // population executor read details for those verified member IDs.
-        $memberPopulationDetail=$admission->matchMemberPopulationDetail(
+        $memberPopulationDetail=$admission->matchPopulationDetail(
             $normalizedQuestion,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[])),
             $defaultRankObjects,$dateProjection['semantic_intent']['rank_limit']??null
         );
@@ -2970,6 +2976,12 @@ final class AiGatewayServices
                 // otherwise registered query. This rule is contract-driven
                 // for every future base object, not a store phrase exception.
                 $compiled['plan']['query']['business_filters']=[];
+            } elseif (is_array($metricContract) && ($metricContract['business_filters']??null)===['selection_ref']
+                && is_string($metricContract['analysis_default_selection_ref']??null)) {
+                // A closed broad ranking still needs the source-owned fact
+                // cohort; an analytical noun alone grants no personnel scope.
+                $compiled['plan']['query']['business_filters']=['object_kind'=>$objectKind,
+                    'selection_ref'=>$metricContract['analysis_default_selection_ref']];
             }
             $label=$this->analysisObjectLabel($objectKind);
             if (!is_string($label) || $label==='') {$reason='object_label';return null;}
@@ -2979,7 +2991,11 @@ final class AiGatewayServices
         $plan=count($plans)===1?$plans[0]['plan']:['items'=>$plans];
         $compiled=['kind'=>'plan','plan'=>$plan,
             '_context_meaning'=>['presentation_origin'=>'customer_or_verified_context']];
-        if (is_array($memberDetailRequest)) $compiled['_member_detail_request']=$memberDetailRequest;
+        if (is_array($memberDetailRequest)) {
+            $kind=$memberPopulationDetail['ranking']['object_kind'];
+            if ($kind!=='member') $memberDetailRequest['_ranking_object_kind']=$kind;
+            $compiled=$this->attachPopulationDetail($compiled,$memberDetailRequest);
+        }
         return $compiled;
     }
 
@@ -4883,12 +4899,24 @@ final class AiGatewayServices
                 'source_expires_at'=>$sourceContext['view']['expires_at']??null,
             ],'_context_meaning'=>(array)($sourceContext['meaning']??[])];
         }
+        if (isset($resolved['objects'])) {
+            // A repeated request for an already materialized detail set must
+            // replay it, not re-run TOP N and silently replace its identities.
+            $details=$sourceContext['view']['results'][0]['ranking_detail_metrics']??$sourceContext['view']['results'][0]['ranking_presentation_metrics']??[];
+            if (!$details) throw new RuntimeException('AI_OBJECT_DETAIL_NOT_READY');
+            return ['kind'=>'verified_ranking_detail','query'=>$sourceContext['query'],
+                'view_ref'=>$sourceContext['view']['read_consistency_ref']??null,
+                '_context_meaning'=>(array)($sourceContext['meaning']??[])];
+        }
         // Person/store detail currently means a context-relevant verified
         // overview: reuse the exact preceding metric and period, replace only
         // ranking with one server-resolved object selection, and run through
         // the ordinary registry compiler and permission checks.
         $query=$sourceContext['query'];
         $query['ranking']=null;$query['ranking_presentation_metrics']=[];
+        $profile=\app\services\ai\execution\AiRankingPresentationMetricResolver::detail(
+            MetricReadViewServices::metricCapabilities(),$query['metric_codes'][0],$resolved['object_kind']);
+        if ($profile) $query['metric_codes']=$profile;
         if ($resolved['object_kind']==='person') {
             $query['query_shape']='summary';
             $query['business_filters']=['object_kind'=>'person','selection_ref'=>$resolved['selection_ref']];
@@ -4906,15 +4934,15 @@ final class AiGatewayServices
     }
 
     /**
-     * Separates a typed member-set presentation from its population query.
+     * Separates typed set presentation from its population query.
      * Both condition lists and rankings must first establish an authorised,
      * bounded set; only then may execution read those exact members' details.
-     * Other objects and singular/ambiguous targets remain on the normal
+     * Ranked object profiles are applied by the server; singular/ambiguous targets remain on the normal
      * detail path, where their own registered capability decides support.
      *
      * @return array{0:array,1:?array}
      */
-    private function separateMemberPopulationDetail(array $understanding): array
+    private function separatePopulationDetail(array $understanding): array
     {
         $objectKinds=[];$operations=[];$hasMemberConditionList=false;$detail=null;
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
@@ -4935,7 +4963,10 @@ final class AiGatewayServices
         }
         $memberPopulation=isset($objectKinds['member'])&&count($objectKinds)===1
             &&(isset($operations['ranking'])||isset($operations['condition_list'])||$hasMemberConditionList);
-        if (!$memberPopulation||!is_array($detail)||($detail['target']??null)!=='set'
+        $kind=count($objectKinds)===1?array_key_first($objectKinds):null;
+        $rankingDetail=isset($operations['ranking']) && is_string($kind) && $kind!=='member'
+            && ($detail['view']??null)==='summary';
+        if ((!$memberPopulation && !$rankingDetail)||!is_array($detail)||($detail['target']??null)!=='set'
             ||!in_array($detail['view']??null,['summary','rights'],true)
             ||($detail['ordinal']??null)!==null) return [$understanding,null];
         foreach ($understanding['requirements'] as &$requirement) {
@@ -4948,7 +4979,64 @@ final class AiGatewayServices
         $understanding['requirements']=array_values(array_filter($understanding['requirements'],static function(array $requirement): bool {
             return ($requirement['fields']??[])!==[];
         }));
+        if ($rankingDetail) $detail['_ranking_object_kind']=$kind;
         return [$understanding,$detail];
+    }
+
+    /** Details are a presentation of the verified ranked population, not a
+     * second intent for the model to bind. Keep unsupported profiles closed;
+     * member assets retain their separately authorised existing workflow. */
+    private function attachPopulationDetail(array $compiled,array $detail): array
+    {
+        if (!isset($detail['_ranking_object_kind'])) {
+            $compiled['_member_detail_request']=$detail;
+            return $compiled;
+        }
+        if (($compiled['kind']??null)==='clarification') {
+            $compiled['_ranking_detail_request']=$detail;
+            return $compiled;
+        }
+        $query=$compiled['plan']['query']??null;
+        if (!is_array($query) || ($query['query_shape']??null)!=='ranking') throw new RuntimeException('AI_OBJECT_DETAIL_NOT_READY');
+        $codes=\app\services\ai\execution\AiRankingPresentationMetricResolver::detail(
+            \app\services\query\metric\MetricReadViewServices::metricCapabilities(),
+            $query['metric_codes'][0],$detail['_ranking_object_kind']
+        );
+        if (!$codes) throw new RuntimeException('AI_OBJECT_DETAIL_NOT_READY');
+        $compiled['plan']['query']['ranking_presentation_metrics']=$codes;
+        return $compiled;
+    }
+
+    /** Re-present a signed detail set without querying or re-ranking facts.
+     * The normal Reader rechecks current authority and snapshot expiration. */
+    private function executeVerifiedRankingDetail(array $context,array $owner,string $id,int $generation,string $worker,array $snapshot,array $compiled,array $meaning): array
+    {
+        // A signed result is not permanent permission: recheck both before
+        // replay and before publication, just as for a fresh detail query.
+        $guard=function()use($context,$owner,$id,$generation,$worker,$snapshot):void {
+            $this->runs->checkpoint($owner,$id,$generation,$worker);
+            if ($this->permissionHash($this->fresh($context))!==$snapshot['authorization_version']
+                || (string)$this->config->read()['version']!==$snapshot['model_config_version']) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
+        };
+        $guard();
+        $this->runs->progress($owner,$id,$generation,$worker,'QUERYING');
+        $view=$this->queryService($context)->rankingDetails($context,$compiled['query'],$compiled['view_ref']);
+        $compiled['query']=$view['query'];$compiled['view_ref']=$view['read_consistency_ref'];
+        $this->runs->progress($owner,$id,$generation,$worker,'VERIFYING');
+        $this->runs->progress($owner,$id,$generation,$worker,'RENDERING');
+        $answer=(new AiAnswerRenderer())->render($view);
+        $guard();
+        $this->queryService($context)->replay($context,$compiled['query'],$compiled['view_ref']);
+        $this->runs->progress($owner,$id,$generation,$worker,'PUBLISHING');
+        $run=$this->runs->get($owner,$id,$generation);
+        $expires=min($view['expires_at'],intdiv($run['expires_at'],1000));
+        $binding=['owner'=>$owner,'run_id'=>$id,'generation'=>$generation];
+        $evidence=$binding+['query'=>$compiled['query'],'view_ref'=>$compiled['view_ref'],'context_meaning'=>$meaning,
+            'compiled_run_hash'=>hash('sha256',$compiled['view_ref']),
+            'execution_trace'=>[['code'=>'verified_ranking_detail','status'=>'SUCCEEDED']],
+            'workflow_code'=>'wf_performance_ranking','management_version'=>$this->managementRevision];
+        return $this->runs->publish($owner,$id,$generation,$worker,
+            $this->private->put('evidence',$evidence,$expires),$this->private->put('answer',$binding+['answer'=>$answer],$expires));
     }
 
     /**

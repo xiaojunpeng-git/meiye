@@ -16,7 +16,7 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v18';
+    public const VERSION = 'unified-metric-registry-v19';
     public const COVERAGE_START = '2026-08-10';
 
     /**
@@ -65,6 +65,9 @@ final class MetricDefinitionRegistry
     {
         return [
             'cash_performance' => self::amount('cash_positive', 'cash-collected-recharge-inclusive-v3', ['summary', 'comparison', 'trend', 'ranking']) + [
+                // Display-only detail profile; calculation still belongs to
+                // the existing registered fact readers, never the AI model.
+                'ranking_detail_object_kinds' => ['store'],
                 'overview' => [['object_kind' => 'store', 'section' => '收款结果', 'order' => 10]],
                 'dimensions' => [
                     'operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot'],
@@ -104,12 +107,14 @@ final class MetricDefinitionRegistry
                 'category_reader' => ['strategy' => 'cash_sale_allocation', 'mode' => 'positive'],
             ],
             'refund_performance' => self::amount('cash_refund', 'actual-cash-refund-v1', ['summary', 'comparison', 'trend', 'ranking']) + [
+                'ranking_detail_object_kinds' => ['store'],
                 'overview' => [['object_kind' => 'store', 'section' => '收款结果', 'order' => 20]],
                 'dimensions' => ['operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot']],
                 'default_ranking_dimension' => 'operator',
                 'category_reader' => ['strategy' => 'cash_sale_allocation', 'mode' => 'refund'],
             ],
             'actual_performance' => self::amount('derived_subtract', 'cash-minus-actual-cash-refund-v1', ['summary', 'comparison', 'trend', 'ranking', 'condition_count', 'condition_list']) + [
+                'ranking_detail_object_kinds' => ['store'],
                 'condition_subjects' => ['store'],
                 'overview' => [['object_kind' => 'store', 'section' => '收款结果', 'order' => 30]],
                 'derivation' => ['operator' => 'subtract', 'left_metric' => 'cash_performance', 'right_metric' => 'refund_performance'],
@@ -131,6 +136,7 @@ final class MetricDefinitionRegistry
             ]) + [
                 'default_ranking_dimension' => 'operator',
                 'overview' => [['object_kind' => 'store', 'section' => '服务消耗', 'order' => 10]],
+                'ranking_detail_object_kinds' => ['store'],
             ],
             'staff_sales_yeji' => self::amount('personnel_fact_sum', 'sales-performance-allocated-person-v1', ['summary', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_performance_fact', 'amount' => 'amount_cents',
@@ -153,6 +159,7 @@ final class MetricDefinitionRegistry
                 // explicit labour, project-count, service-count or people
                 // request is still bound by its own registered measurement.
                 'analysis_default_rank_object_kinds' => ['person'],
+                'ranking_detail_object_kinds' => ['person'],
             ],
             'staff_labor_yeji' => self::amount('personnel_fact_sum', 'labor-performance-allocated-person-v1', ['summary', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_performance_fact', 'amount' => 'amount_cents',
@@ -164,6 +171,7 @@ final class MetricDefinitionRegistry
                     'analysis_filter_keys' => ['selection_ref'],
                 ]],
             ], 'person', ['selection_ref']) + [
+                'ranking_detail_object_kinds' => ['person'],
                 'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
                 'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
@@ -182,6 +190,7 @@ final class MetricDefinitionRegistry
                     'analysis_filter_keys' => ['selection_ref'],
                 ]],
             ], 'person', ['selection_ref']) + [
+                'ranking_detail_object_kinds' => ['person'],
                 'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
                 'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
@@ -523,6 +532,7 @@ final class MetricDefinitionRegistry
                 'analysis_default_rank_object_kinds' => $item['analysis_default_rank_object_kinds'] ?? [],
                 'analysis_default_breakdown_object_kinds' => $item['analysis_default_breakdown_object_kinds'] ?? [],
                 'overview' => self::overviewContracts($item),
+                'ranking_detail_object_kinds' => $item['ranking_detail_object_kinds'] ?? [],
                 // A threshold contract is deliberately narrow: it describes
                 // the only permitted aggregate predicate for this metric,
                 // never arbitrary field filtering.

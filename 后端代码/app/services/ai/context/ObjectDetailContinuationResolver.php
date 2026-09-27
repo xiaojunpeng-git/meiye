@@ -35,9 +35,11 @@ final class ObjectDetailContinuationResolver
             throw new RuntimeException('AI_OBJECT_DETAIL_NOT_READY');
         }
         $rows=$shape==='ranking'?$this->rankingRows($view,$kind):$this->selectedRows($effective,$view,$kind);
-        // “The current result set” and “this object” denote the same identity
-        // when the verified set is a singleton. Never collapse a plural set
-        // to its first row; multi-object overviews need an explicit selection.
+        // A plural request denotes the entire displayed ranked population,
+        // never its first row. Identities and order come only from this view.
+        if ($shape==='ranking' && $request['target']==='set' && count($rows)>1 && ($request['ordinal']??null)===null) {
+            return ['object_kind'=>$kind,'objects'=>$rows,'view'=>'summary'];
+        }
         if ($request['target']==='set'&&(count($rows)!==1||($request['ordinal']??null)!==null)) {
             throw new RuntimeException('AI_OBJECT_DETAIL_SELECTION_REQUIRED');
         }

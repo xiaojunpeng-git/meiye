@@ -14,6 +14,34 @@ final class AiRankingPresentationMetricResolver
 {
     public const MAX_METRICS = 4;
 
+    /** A detail request may select only a complete registry-owned profile,
+     * never arbitrary extra columns supplied by a model or client. Ordinary
+     * rankings retain their existing lightweight presentation. */
+    public static function detail(array $metrics, string $primaryMetric, ?string $objectKind): array
+    {
+        if (!isset($metrics[$primaryMetric])) return [];
+        $kind=$objectKind ?: ($metrics[$primaryMetric]['filter_grain']??null);
+        $records=[];
+        foreach ($metrics as $code=>$metric) {
+            // A compiler snapshot contains ready metrics only; raw Reader
+            // capabilities additionally carry the explicit readiness flag.
+            if (($metric['ai_query_ready']??true)!==true || !in_array($kind,(array)($metric['ranking_detail_object_kinds']??[]),true)) continue;
+            $records[]=['code'=>$code,'order'=>self::overviewOrder($metric,(string)$kind)];
+        }
+        if (!$records) return [];
+        usort($records,static function(array $a,array $b): int { return [$a['order'],$a['code']]<=>[$b['order'],$b['code']]; });
+        $codes=[$primaryMetric];
+        foreach ($records as $record) if (!in_array($record['code'],$codes,true) && count($codes)<self::MAX_METRICS) $codes[]=$record['code'];
+        return count($codes)>1?$codes:[];
+    }
+
+    /** Both the signed compiler and Reader enforce the same closed profile. */
+    public static function expected(array $metrics,string $primaryMetric,?string $objectKind,array $requested): array
+    {
+        $detail=self::detail($metrics,$primaryMetric,$objectKind);
+        return $detail!==[] && $requested===$detail ? $detail : self::resolve($metrics,$primaryMetric,$objectKind);
+    }
+
     /** @return array<int,string> primary sort metric followed by display-only metrics */
     public static function resolve(array $metrics, string $primaryMetric, ?string $objectKind): array
     {

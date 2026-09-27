@@ -141,7 +141,10 @@ final class MetricReadViewServices
                                 $sorted=$rows;usort($sorted,static function($a,$b)use($direction){return ($direction==='top'?($b['amount_cents']<=>$a['amount_cents']):($a['amount_cents']<=>$b['amount_cents']))?:($a['employee_id']<=>$b['employee_id']);});
                                 $groups[$direction]=array_slice($sorted,0,$rank['limit']);
                             }
-                            $results[]=['period'=>$period,'metric_code'=>$metric,'storage_unit'=>$metricContract['storage_unit'],'rows'=>$groups];
+                            $detailMetrics=$this->baseRankingPresentation($reader,$normalized,$binding,$range,$groups,$personnel);
+                            $results[]=['period'=>$period,'metric_code'=>$metric,'storage_unit'=>$metricContract['storage_unit'],'rows'=>$groups,
+                                'ranking_detail_metrics'=>$detailMetrics,
+                                'ranking_presentation_metrics'=>count($normalized['ranking_presentation_metrics'])>1?$detailMetrics:[]];
                         }
                         continue;
                     }
@@ -199,6 +202,11 @@ final class MetricReadViewServices
                         }
                         $result=['period' => $period, 'metric_code' => $metric, 'storage_unit' => $metricContract['storage_unit'], 'rows' => $rows];
                         if ($businessDateRanking) $result+=['object_kind'=>'business_date','object_label'=>'日期'];
+                        elseif ($normalized['query_shape']==='ranking') {
+                            $detailMetrics=$this->baseRankingPresentation($reader,$normalized,$binding,$range,$rows,null);
+                            $result['ranking_detail_metrics']=$detailMetrics;
+                            $result['ranking_presentation_metrics']=count($normalized['ranking_presentation_metrics'])>1?$detailMetrics:[];
+                        }
                         $results[] = $result;
                         continue;
                     }
@@ -214,7 +222,11 @@ final class MetricReadViewServices
         if ($this->binding(call_user_func($this->authorize, $principal), $normalized['store_ids']) !== $binding) $this->fail('METRIC_PERMISSION_CHANGED');
         $capabilities = self::metricCapabilities();
         $readiness = []; $metricVersions = []; $allReady = true;
-        foreach ($normalized['metric_codes'] as $metric) {
+        // Supplementary details are evidence too: freeze their readiness and
+        // source versions, not just the metric that selected the population.
+        $detailCodes=$normalized['query_shape']==='ranking'
+            ? \app\services\ai\execution\AiRankingPresentationMetricResolver::detail($capabilities,$normalized['metric_codes'][0],$normalized['business_filters']['object_kind']??null) : [];
+        foreach (array_unique(array_merge($normalized['metric_codes'],$normalized['ranking_presentation_metrics'],$detailCodes)) as $metric) {
             $readiness[$metric] = $capabilities[$metric];
             if ($capabilities[$metric]['ai_query_ready']) $metricVersions[$metric] = $capabilities[$metric]['metric_version'];
             else $allReady = false;
@@ -351,6 +363,66 @@ final class MetricReadViewServices
                 'values'=>$reader->dimensionValues($code,$dimension['dimension'],$binding['tenant_id'],$binding['store_ids'],$range,$ids)];
         }
         return $out;
+    }
+
+    /** Batch-read only ranked identities in the original fact transaction.
+     * Personnel pairs retain the original store authority; supplemental
+     * values never affect rank, identity, or the primary measurement. */
+    private function baseRankingPresentation(GroupPerformanceMetricReadServices $reader,array $query,array $binding,array $range,array $groups,?array $personnel): array
+    {
+        // Freeze the small detail profile with the original ranking snapshot.
+        // A later “展开这些” can reveal it without fresh TOP N or mixed-time
+        // values. Ordinary ranking presentation remains unchanged.
+        $profile=\app\services\ai\execution\AiRankingPresentationMetricResolver::detail(self::metricCapabilities(),$query['metric_codes'][0],$personnel===null?'store':'person');
+        $codes=array_slice($profile,1);
+        if (!$codes) return [];
+        $ids=[];
+        foreach ($groups as $points) foreach ($points as $point) $ids[]=$point[$personnel===null?'store_id':'employee_id'];
+        $ids=array_values(array_unique($ids));
+        if (!$ids) return [];
+        $out=[];
+        foreach ($codes as $code) {
+            $values=array_fill_keys($ids,0);
+            if ($personnel===null) {
+                foreach ($reader->storeTotals($binding['tenant_id'],$ids,$range,$code) as $point) $values[$point['store_id']]=$point['metric_value'];
+            } else {
+                // A ranked salesperson may perform service in another
+                // authorised store. Resolve that metric's fact pairs before
+                // intersecting identities; primary sales pairs would omit it.
+                $selection=($query['business_filters']['selection_ref']??null)===MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF
+                    ? $this->personnel->factParticipantSelection([$code],$binding['tenant_id'],$range) : $personnel;
+                $pairs=array_values(array_filter($selection['pairs'],static function(array $pair)use($ids): bool { return in_array($pair['employee_id'],$ids,true); }));
+                foreach ($pairs?$reader->personnelTotals($binding['tenant_id'],$binding['store_ids'],$range,$code,$pairs):[] as $point) {
+                    $values[$point['employee_id']]=$this->addAmount($values[$point['employee_id']],$point['amount_cents']);
+                }
+            }
+            $rows=[];foreach ($values as $entityId=>$value) $rows[]=['entity_id'=>$entityId,'metric_value'=>$value];
+            $out[]=['metric_code'=>$code,'storage_unit'=>MetricDefinitionRegistry::get($code)['storage_unit'],'values'=>$rows];
+        }
+        return $out;
+    }
+
+    /** Reveals only details captured in the original ranked read transaction.
+     * Never refresh a historical set or extend its validity on a follow-up. */
+    public function rankingDetails(array $principal,array $query,string $ref): array
+    {
+        $view=$this->replay($principal,$query,$ref);
+        if ($view['query']['query_shape']!=='ranking') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $codes=\app\services\ai\execution\AiRankingPresentationMetricResolver::detail(self::metricCapabilities(),$query['metric_codes'][0],$query['business_filters']['object_kind']??null);
+        if (!$codes) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        foreach ($view['results'] as &$result) {
+            $details=$result['ranking_detail_metrics']??$result['ranking_presentation_metrics']??[];
+            // Ranking groups may exist with no rows (for example top=[]).
+            // No identities means there are no supplementary values to verify.
+            if (array_filter($result['rows'])!==[] && array_column($details,'metric_code')!==array_slice($codes,1)) $this->fail('METRIC_READ_BINDING_MISMATCH');
+            $result['ranking_presentation_metrics']=$details;
+        }
+        unset($result);
+        $view['query']['ranking_presentation_metrics']=$codes;
+        $view['query']=$this->query($view['query']);
+        $view['query_hash']=hash('sha256',UnifiedQueryJson::encode($view['query']));
+        $view['result_hash']=hash('sha256',UnifiedQueryJson::encode(['source_result_hash'=>$view['result_hash'],'query'=>$view['query'],'results'=>$view['results']]));
+        return $this->replay($principal,$view['query'],$this->store->put($view));
     }
 
     /** Resolves the registered dimension instead of accepting a caller field name. */
@@ -687,7 +759,7 @@ final class MetricReadViewServices
         foreach ($query['metric_codes'] as $metric) if (!in_array($metric, $allowed, true)) $this->fail('METRIC_NOT_REGISTERED');
         foreach ($query['metric_codes'] as $metric) if (!in_array($query['query_shape'],self::metricCapabilities()[$metric]['query_shapes']??[],true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $expectedPresentation=$query['query_shape']==='ranking'
-            ? \app\services\ai\execution\AiRankingPresentationMetricResolver::resolve(self::metricCapabilities(),$query['metric_codes'][0],is_string($objectKind)?$objectKind:'') : [];
+            ? \app\services\ai\execution\AiRankingPresentationMetricResolver::expected(self::metricCapabilities(),$query['metric_codes'][0],is_string($objectKind)?$objectKind:'',$query['ranking_presentation_metrics']) : [];
         if ($query['ranking_presentation_metrics']!==[] && $query['ranking_presentation_metrics']!==$expectedPresentation) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         $query['ranking_presentation_metrics']=$expectedPresentation;
         if ($conditionPopulation) foreach ($query['metric_codes'] as $metric) if (!in_array($objectKind,(array)(self::metricCapabilities()[$metric]['condition_subjects']??[]),true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');

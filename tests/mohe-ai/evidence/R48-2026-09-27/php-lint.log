@@ -1,0 +1,14 @@
+No syntax errors detected in 后端代码/app/services/ai/AiGatewayServices.php
+No syntax errors detected in 后端代码/app/services/ai/context/ObjectDetailContinuationResolver.php
+No syntax errors detected in 后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php
+No syntax errors detected in 后端代码/app/services/ai/execution/AiRankingPresentationMetricResolver.php
+No syntax errors detected in 后端代码/app/services/ai/execution/AiRegisteredPlanCompiler.php
+No syntax errors detected in 后端代码/app/services/ai/presentation/AiAnswerRenderer.php
+No syntax errors detected in 后端代码/app/services/ai/registry/AiBusinessRegistry.php
+No syntax errors detected in 后端代码/app/services/ai/semantic/AiExactRankingCollectionAdmission.php
+No syntax errors detected in 后端代码/app/services/query/metric/MetricDefinitionRegistry.php
+No syntax errors detected in 后端代码/app/services/query/metric/MetricReadViewExportProvider.php
+No syntax errors detected in 后端代码/app/services/query/metric/MetricReadViewServices.php
+No syntax errors detected in tests/mohe-ai/exact-ranking-collection-admission.php
+No syntax errors detected in tests/mohe-ai/object-detail-continuation.php
+No syntax errors detected in tests/mohe-ai/r48-ranking-details-local.php
