@@ -113,18 +113,20 @@ try {
     queryReject(function () use ($service, $principal, $query) { $q = $query; $q['business_filters'] = ['person' => 1]; $service->create($principal, $q); }, 'METRIC_QUERY_SHAPE_UNAVAILABLE');
     queryReject(function () use ($service, $principal, $query) { $q = $query; $q['store_ids'] = [3]; $service->create($principal, $q); }, 'METRIC_PERMISSION_DENIED');
     queryReject(function () use ($service, $principal, $query) { $service->create($principal, $query + ['sql' => 'forbidden']); }, 'METRIC_QUERY_SCHEMA_INVALID');
-    queryReject(function () use ($service, $principal, $query) { $q = $query; $q['start_date'] = '2026-08-09'; $service->create($principal, $q); }, 'METRIC_QUERY_COVERAGE_UNAVAILABLE');
+    // R50: earlier requested dates read existing facts without moving the start.
+    $early=$query;$early['start_date']='2026-08-09';
+    queryCheck($service->create($principal,$early)['query']['start_date']==='2026-08-09','original early date preserved');
     $compare = $query; $compare['query_shape'] = 'comparison'; $compare['compare_range'] = ['start' => '2026-09-07', 'end' => '2026-09-07'];
     // One comparison may contain different registered storage units while
     // preserving every metric and both periods in the same authorized view.
     $compare['metric_codes']=['cash_performance','consume_amount','sales_quantity','completed_service_item_count'];
     $comparison = $service->create($principal, $compare);
-    queryCheck(count($comparison['results']) === 8 && $reads === 2
+    queryCheck(count($comparison['results']) === 8 && $reads === 3
         && array_column($comparison['results'],'metric_code')===array_merge($compare['metric_codes'],$compare['metric_codes']),
         'mixed-unit multi-metric comparison keeps both periods inside one transaction');
-    queryReject(function () use ($service,$principal,$compare) {
-        $q=$compare;$q['compare_range']=['start'=>'2026-08-01','end'=>'2026-08-31'];$service->create($principal,$q);
-    },'METRIC_QUERY_COVERAGE_UNAVAILABLE');
+    $earlyCompare=$compare;$earlyCompare['compare_range']=['start'=>'2026-08-01','end'=>'2026-08-31'];
+    $earlyCompared=$service->create($principal,$earlyCompare)['query']['compare_range'];
+    queryCheck($earlyCompared['start']==='2026-08-01'&&$earlyCompared['end']==='2026-08-31','early comparison retains requested dates');
     $shrunk = $query; $shrunk['store_ids'] = [1];
     $narrow = $service->create($principal, $shrunk);
     queryCheck($narrow['binding']['store_ids'] === [1], 'requested scope narrows');
@@ -157,7 +159,7 @@ try {
     queryReject(function () use ($store) { $store->get('../outside'); }, 'METRIC_READ_VIEW_UNAVAILABLE');
     $now += 86400;
     queryReject(function () use ($service, $principal, $query, $view) { $service->replay($principal, $query, $view['read_consistency_ref']); }, 'METRIC_READ_VIEW_UNAVAILABLE');
-    queryCheck($store->cleanup() === 8, 'all expired views physically removed');
+    queryCheck($store->cleanup() === 10, 'all expired views including two early-date cases physically removed');
     queryCheck(iterator_count(new FilesystemIterator($temp)) === 0, 'no fixture content retained');
 } finally {
     foreach (new DirectoryIterator($temp) as $file) if (!$file->isDot() && $file->isFile() && !$file->isLink()) unlink($file->getPathname());

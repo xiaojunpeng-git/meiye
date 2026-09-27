@@ -1,7 +1,6 @@
 <?php
 namespace app\services\ai\execution;
 
-use app\services\query\metric\MetricDefinitionRegistry;
 use app\services\query\metric\MetricQueryContractException;
 use app\services\query\metric\MetricQueryDatePolicy;
 
@@ -16,7 +15,7 @@ final class AiDateRangeGuidancePlanner
         if (is_array($query['compare_range']??null)) $ranges['comparison']=$query['compare_range'];
         $pending=[];
         foreach ($ranges as $key=>$range) {
-            $options=$this->options($range,MetricDefinitionRegistry::COVERAGE_START,$today);
+            $options=$this->options($range,$today);
             if ($options===null) continue;
             if ($options===[]) return null; // Future/invalid ranges retain their own accurate reason.
             $pending[$key]=$options;
@@ -42,7 +41,7 @@ final class AiDateRangeGuidancePlanner
     }
 
     /** null=already valid, []=another date condition owns the failure. */
-    private function options(array $range,string $coverageStart,string $today): ?array
+    private function options(array $range,string $today): ?array
     {
         MetricQueryDatePolicy::normalize($range);
         // An explicit future end is not a range the server may reinterpret.
@@ -50,18 +49,19 @@ final class AiDateRangeGuidancePlanner
         // that also reaches the future remains a future-data request.
         if ($range['end']>$today) return [];
         try {
-            MetricQueryDatePolicy::assertExecutable($range,$coverageStart,$today);
+            MetricQueryDatePolicy::assertExecutable($range,$today);
             return null;
         } catch (MetricQueryContractException $error) {
-            if (!in_array($error->getErrorCode(),['METRIC_QUERY_COVERAGE_UNAVAILABLE','METRIC_QUERY_RANGE_TOO_LONG'],true)) return [];
+            if ($error->getErrorCode()!=='METRIC_QUERY_RANGE_TOO_LONG') return [];
         }
-        $start=max($range['start'],$coverageStart); $end=min($range['end'],$today);
+        // 只为超出执行跨度的请求提供选择；历史接入时间不再触发确认或缩短期间。
+        $start=$range['start']; $end=$range['end'];
         if ($start>$end) return [];
         $firstEnd=min($end,$this->addDays($start,MetricQueryDatePolicy::MAX_DAYS-1));
         $lastStart=max($start,$this->addDays($end,-(MetricQueryDatePolicy::MAX_DAYS-1)));
         $unique=[];
         foreach ([['start'=>$start,'end'=>$firstEnd],['start'=>$lastStart,'end'=>$end]] as $candidate) {
-            MetricQueryDatePolicy::assertExecutable($candidate,$coverageStart,$today);
+            MetricQueryDatePolicy::assertExecutable($candidate,$today);
             $value=$candidate['start'].'/'.$candidate['end'];
             $unique[$value]=['value'=>$value,'label'=>$candidate['start'].' 至 '.$candidate['end'],'range'=>$candidate];
         }

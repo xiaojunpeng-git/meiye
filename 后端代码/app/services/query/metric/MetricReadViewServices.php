@@ -789,7 +789,9 @@ final class MetricReadViewServices
     private function range(array $range): void
     {
         $today=(new \DateTimeImmutable('@'.$this->now()))->setTimezone(new \DateTimeZone(MetricQueryDatePolicy::TIMEZONE))->format('Y-m-d');
-        MetricQueryDatePolicy::assertExecutable($range,self::COVERAGE_START,$today);
+        // AI只读视图保留请求起止日，查询区间内已有事实；不把事实接入日当作筛选下限。
+        // 日期合法性、未来日期、跨度预算及后端权限仍由原契约保护。
+        MetricQueryDatePolicy::assertExecutable($range,$today);
     }
 
     private function ids($ids): array

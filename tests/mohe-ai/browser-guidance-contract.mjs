@@ -58,7 +58,9 @@ for (const rounds of [3, 4, 5]) {
   const f = setup({ rounds }); await f.start();
   eq(f.calls.find(call => call.path === '/runs').payload.guidance_schema_version, GUIDANCE_SCHEMA);
   for (let i = 1; i <= rounds; i++) {
-    eq(f.area().textContent.includes(`第 ${i} 步 · 最多 ${rounds} 步`), true);
+    eq(f.area().textContent.includes(`第 ${i} 步`), true);
+    eq(f.area().classList.contains('guidance-card'), true);
+    eq([...f.area().querySelectorAll('.guidance-number')].map(n => n.textContent), ['1','2']);
     eq(f.area().querySelectorAll('input[type=radio]').length, 2);
     eq(f.area().querySelectorAll('input:checked').length, 0);
     eq(f.root().querySelectorAll('.value').length, 0);
@@ -71,6 +73,7 @@ for (const rounds of [3, 4, 5]) {
   eq(f.calls.filter(call => call.path === '/runs').length, 1);
   eq(f.calls.filter(call => call.path.endsWith('/execute')).length, 1);
   eq(f.area(), null); eq(f.root().querySelectorAll('.value').length, 2);
+  eq(f.root().textContent.includes('已接纳选择，正在继续查询。'), false);
   const local = JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixture%3Astore%3Amanager'));
   eq(local[0].rounds.length, 1); eq(JSON.stringify(local).includes('client_submission_id'), false); f.dispose();
 }

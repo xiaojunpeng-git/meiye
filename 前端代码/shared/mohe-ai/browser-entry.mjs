@@ -48,7 +48,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     :host([data-mohe-ai-presentation="workspace"]) .entry.entry--icon:hover{transform:scale(1.04)}
     @media (max-width:760px){.panel.workspace{display:block;overflow:auto}.workspace-aside{display:none}.workspace-main{min-height:100vh}.workspace-top{min-height:62px;padding:0 18px}.workspace-title{font-size:19px}.workspace .body,.workspace .footer{width:calc(100% - 32px)}.workspace .body{padding-top:28px}.workspace .message{font-size:17px}.workspace .message.question{font-size:16px;max-width:88%;margin-bottom:30px}.workspace .footer{position:sticky;bottom:0;padding:12px 0 16px}.workspace-composer-card{grid-template-columns:minmax(0,1fr) 64px;grid-template-rows:minmax(64px,auto) auto;border-radius:18px}.workspace .workspace-composer-card textarea{min-height:64px;padding:14px 18px 8px;font-size:16px}.workspace-composer-actions{padding:0 18px}.workspace-excel span{min-height:28px;padding:0 12px;font-size:14px}.workspace .workspace-send{width:48px;height:48px}.workspace-keyboard-hint{display:none}.workspace-new{margin-top:16px}:host([data-mohe-ai-presentation="workspace"]) .entry{right:16px;bottom:18px}}
   `;
-  style.textContent += '[hidden]{display:none!important}';
+  // 两端确认卡共用黑白层级；视觉序号不参与业务选项与权限判断。
+  style.textContent += `.card.guidance-card{padding:22px;border:1px solid #e5e5e7;border-radius:22px;background:#fff;color:#202124}.guidance-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;color:#777;font-size:14px}.guidance-cancel{border:0;background:transparent;color:#777;font-size:13px}.guidance-question{margin:10px 0 18px;font-size:18px;font-weight:600;line-height:1.65}.guidance-label{margin:12px 0 8px;color:#777;font-size:13px}.guidance-option{position:relative;display:flex;align-items:center;gap:12px;margin:6px 0;padding:12px;border:1px solid transparent;border-radius:16px;cursor:pointer}.guidance-option:has(input:checked){background:#f3f3f4;border-color:#d9d9dc}.guidance-option:focus-within{outline:2px solid #737377;outline-offset:2px}.guidance-option input{position:absolute;width:1px;height:1px;opacity:0}.guidance-number{display:flex;align-items:center;justify-content:center;flex:0 0 30px;height:30px;border:1px solid #dedee1;border-radius:50%;background:#f3f3f4;color:#737377;font-size:14px}.guidance-option-label{min-width:0;font-size:16px;line-height:1.5;overflow-wrap:anywhere}.guidance-confirm.primary{display:block;margin:18px 0 0 auto;padding:10px 18px;min-height:44px;border:0;border-radius:24px;background:#17191e;color:#fff}.guidance-confirm:disabled{background:#aaa}.guidance-card input[type=date],.guidance-card select{box-sizing:border-box;max-width:100%;min-height:44px}[hidden]{display:none!important}`;
   root.appendChild(style);
   const el = (tag, text, cls) => { const n = documentRef.createElement(tag); if (text != null) n.textContent = String(text); if (cls) n.className = cls; return n; };
   let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, elapsedTimer, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, workspaceTitle = null, workspaceHistory = null, workspaceCancel = null, readingRunway = null, activeRunStatus = null, exportRequested = false;
@@ -120,6 +121,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   }
   function setActiveRunState(text) {
     if (!activeRunStatus) return false;
+    activeRunStatus.area.hidden = false;
+    if (!elapsedTimer) { refreshElapsed(); elapsedTimer = setInterval(refreshElapsed, 250); }
     activeRunStatus.thinking.textContent = text || '正在思考';
     if (progress) progress.textContent = '';
     return true;
@@ -541,12 +544,17 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     try { validateClarification(c, activeGuidanceSchema); } catch (error) { clearClarification(); progress.textContent = error.message; return; }
     if (c.schema_version === GUIDANCE_SCHEMA) activeGuidanceSchema = GUIDANCE_SCHEMA;
     const key = clarificationKey(c);
+    // 人工确认不属于处理中；暂停计时并隐藏思考提示，重复投影也保持等待状态。
+    clearInterval(elapsedTimer); elapsedTimer = null;
+    if (activeRunStatus) activeRunStatus.area.hidden = true;
     if (clarificationArea && clarificationArea.isConnected && clarificationId === key) return;
     clearClarification();
-    const area = el('div', null, 'card'); area.dataset.guidance = 'step';
+    const area = el('div', null, 'card guidance-card'); area.dataset.guidance = 'step';
     clarificationArea = area; clarificationId = key;
+    const heading = el('div', null, 'guidance-heading'); heading.appendChild(el('span', '请确认'));
+    const cancel = el('button', '取消查询', 'guidance-cancel'); cancel.onclick = () => { if (!cancel.disabled) void stop(); }; heading.appendChild(cancel); area.appendChild(heading);
     if (c.schema_version === GUIDANCE_SCHEMA) {
-      area.appendChild(el('div', `第 ${c.round_no} 步 · 最多 ${c.max_clarification_rounds} 步，明确后立即查询`, 'muted'));
+      area.appendChild(el('div', `第 ${c.round_no} 步`, 'muted'));
       if (c.confirmed_summary.length) {
         const summary = el('div', null, 'muted'); summary.dataset.guidance = 'summary'; summary.appendChild(el('div', '已确认条件'));
         c.confirmed_summary.forEach(item => summary.appendChild(el('div', item.label + '：' + item.value))); area.appendChild(summary);
@@ -560,13 +568,13 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     let submitting = false, controls = [], reviseId = pendingSubmission && pendingSubmission.revise_clarification_id || null;
     const editing = [];
     function current() { return !disposed && clarificationArea === area && clarificationId === key && run && run.status === 'WAITING_CLARIFICATION' && !cancelling; }
-    function setDisabled(value) { controls.forEach(item => item.elements.forEach(control => { control.disabled = value; })); editing.forEach(button => { button.disabled = value; }); }
+    function setDisabled(value) { cancel.disabled = value; controls.forEach(item => item.elements.forEach(control => { control.disabled = value; })); editing.forEach(button => { button.disabled = value; }); }
     function renderFields(fields, initial, title) {
       if (submitting) return;
-      form.textContent = ''; controls = []; form.appendChild(el('div', title || '请选择本次要查询的内容'));
+      form.textContent = ''; controls = []; form.appendChild(el('div', title || '请选择本次要查询的内容', 'guidance-question'));
       const hint = el('div', '', 'error'); hint.setAttribute('role', 'alert');
       fields.forEach(field => {
-        const label = el('div', field.label); form.appendChild(label);
+        const label = el('div', field.label, 'guidance-label'); form.appendChild(label);
         if (field.type === 'date') {
           const control = el('input'); control.type = 'date'; control.required = true; control.setAttribute('aria-label', field.label);
           if (typeof field.min === 'string') control.min = field.min;
@@ -576,7 +584,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         } else if (field.options.length <= 3) {
           const group = el('div'); group.setAttribute('role', 'radiogroup'); group.setAttribute('aria-label', field.label);
           const name = 'guidance-' + newId(); const inputs = [];
-          field.options.forEach(option => { const optionLabel = el('label'); const control = el('input'); control.type = 'radio'; control.name = name; control.value = option.value; control.checked = initial[field.key] === option.value; optionLabel.append(control, el('span', option.label)); group.appendChild(optionLabel); inputs.push(control); });
+          // 原生radio保持键盘与读屏语义，编号与高亮只负责呈现，不替代后端选项值。
+          field.options.forEach((option, index) => { const optionLabel = el('label', null, 'guidance-option'); const control = el('input'); control.type = 'radio'; control.name = name; control.value = option.value; control.checked = initial[field.key] === option.value; optionLabel.append(control, el('span', String(index + 1), 'guidance-number'), el('span', option.label, 'guidance-option-label')); group.appendChild(optionLabel); inputs.push(control); });
           form.appendChild(group); controls.push({ field, elements: inputs, read: () => { const selected = inputs.find(control => control.checked); return selected ? selected.value : ''; } });
         } else {
           const control = el('select'); control.setAttribute('aria-label', field.label); const empty = el('option', '请选择'); empty.value = ''; control.appendChild(empty);
@@ -585,7 +594,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         }
       });
       form.appendChild(hint);
-      const confirm = el('button', c.schema_version === GUIDANCE_SCHEMA ? '确认并继续' : '确认查询', 'primary');
+      const confirm = el('button', c.schema_version === GUIDANCE_SCHEMA ? '确认并继续' : '确认查询', 'primary guidance-confirm');
       confirm.onclick = async () => {
         if (!current() || submitting) return;
         if (!pendingSubmission) {
@@ -599,7 +608,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
           // This click begins a new execution segment after the customer has
           // made a choice.  Do not include time spent reading the form in the
           // answer latency for that continuation.
-          clientDeliveryStartedAt=Date.now(); persistActive();
+          clientDeliveryStartedAt=Date.now(); setActiveRunState('正在继续查询'); persistActive();
           const accepted = await request('POST', '/runs/' + encodeURIComponent(run.run_id) + '/clarify', submitted);
           if (disposed || !current()) return;
           // The durable acknowledgement legitimately still projects the old
@@ -608,6 +617,10 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
           clarificationSubmittedId = c.id;
           pendingSubmission = null; guidanceSubmission = null;
           await update(accepted);
+          // A late selection may return an expired run, or execution may have
+          // finished already. Preserve that final message instead of restarting
+          // polling and incorrectly telling the customer to keep waiting.
+          if (!run || isTerminal(run.status)) return;
           // A worker can already have published the next clarification in the
           // acknowledgement.  Do not clear that newer step after update()
           // rendered it; only hide the old controls while the same step waits.
@@ -621,6 +634,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
           clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000);
         } catch (error) {
           if (current()) {
+            clearInterval(elapsedTimer); elapsedTimer = null;
+            if (activeRunStatus) activeRunStatus.area.hidden = true;
             // An uncertain send is retried byte-for-byte with the same ID;
             // changing choices before confirmation could create two answers.
             if (error.responseKnown) { pendingSubmission = null; guidanceSubmission = null; setDisabled(false); }
@@ -642,6 +657,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     // there avoids an orphaned form at the end of the transcript and preserves
     // the reader's manual scroll position while the server is deciding.
     (activeConversationTurn() || body).appendChild(area);
+    // 仅新确认步骤滚到卡片，不在状态轮询中反复抢走用户的滚动位置。
+    if (typeof area.scrollIntoView === 'function') area.scrollIntoView({ block: 'nearest', behavior: 'auto' });
     // Restore an interrupted submission only when it still targets the exact
     // server-projected step.  The server replays the stored result for the
     // same id and never lets it overwrite a newer choice.

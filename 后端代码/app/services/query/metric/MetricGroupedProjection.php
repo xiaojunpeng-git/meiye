@@ -7,7 +7,8 @@ final class MetricGroupedProjection
 {
     public function trend(array $points, array $range, ?string $today = null): array
     {
-        MetricQueryDatePolicy::assertExecutable($range,MetricDefinitionRegistry::COVERAGE_START,$today);
+        // 与AI读取视图同一日期口径：保留请求范围，仅投影已授权事实，不截到接入日期。
+        MetricQueryDatePolicy::assertExecutable($range,$today);
         $totals = [];
         foreach ($points as $point) $totals[$point['business_date']] = $this->add($totals[$point['business_date']] ?? 0, $point['amount_cents']);
         $out = [];
@@ -22,7 +23,10 @@ final class MetricGroupedProjection
 
     public function ranking(array $points, array $stores, array $ranking): array
     {
-        $totals = array_fill_keys($stores, 0);
+        // No facts means no ranking, not a fabricated zero-valued winner.
+        // When facts exist, keep the existing authorized population and zero
+        // totals (including real records that cancel out) unchanged.
+        $totals = $points===[] ? [] : array_fill_keys($stores, 0);
         foreach ($points as $point) {
             if (!array_key_exists($point['store_id'], $totals)) $this->fail();
             $totals[$point['store_id']] = $this->add($totals[$point['store_id']], $point['amount_cents']);
@@ -50,6 +54,9 @@ final class MetricGroupedProjection
     public function temporalRanking(array $points,array $range,array $ranking,?string $today=null): array
     {
         $rows=$this->trend($points,$range,$today);
+        // Trend's zero-filled calendar is useful for display, but cannot create
+        // a highest/lowest date when the requested interval contains no facts.
+        if ($points===[]) $rows=[];
         $out=[];
         foreach (['top','bottom'] as $direction) {
             if (($ranking['direction']??null)!=='top_and_bottom' && ($ranking['direction']??null)!==$direction) continue;

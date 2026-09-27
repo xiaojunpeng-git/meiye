@@ -471,7 +471,7 @@ $check($futureRange===['kind'=>'date_range','start'=>'2026-10-01','end'=>'2026-1
     'an explicit future date is preserved exactly for downstream validation');
 try {
     \app\services\query\metric\MetricQueryDatePolicy::assertExecutable(
-        ['start'=>$futureRange['start'],'end'=>$futureRange['end']],null,'2026-09-26');
+        ['start'=>$futureRange['start'],'end'=>$futureRange['end']],'2026-09-26');
     throw new RuntimeException('FAIL explicit future period was accepted');
 } catch (\app\services\query\metric\MetricQueryContractException $error) {
     $check($error->getErrorCode()==='METRIC_QUERY_FUTURE_UNAVAILABLE','explicit future dates remain rejected, not clamped');

@@ -29,14 +29,13 @@ foreach($cases as [$term,$start,$end]){
 }
 dateReject(function()use($planner,$today){$planner->normalizeNaturalPeriod(['kind'=>'relative_days','days'=>PHP_INT_MAX,'end_offset_days'=>0],$today);},'AI_DATE_INVALID');
 $range=['start'=>'2027-09-13','end'=>'2028-09-12'];
-Dates::assertExecutable($range,'2026-08-10',$today);dateCheck(true,'inclusive 366 passes');
+Dates::assertExecutable($range,$today);dateCheck(true,'inclusive 366 passes');
 $projection=new \app\services\query\metric\MetricGroupedProjection();
 dateCheck(count($projection->trend([],$range,$today))===Dates::MAX_DAYS,'trend emits exactly 366 inclusive points');
 dateReject(function()use($projection,$today){$projection->trend([],['start'=>'2027-09-12','end'=>$today],$today);},'METRIC_QUERY_RANGE_TOO_LONG');
 $failures=[
     [['start'=>'2027-09-12','end'=>$today],'METRIC_QUERY_RANGE_TOO_LONG'],
     [['start'=>'2028-09-13','end'=>'2028-09-13'],'METRIC_QUERY_FUTURE_UNAVAILABLE'],
-    [['start'=>'2026-08-09','end'=>'2026-08-09'],'METRIC_QUERY_COVERAGE_UNAVAILABLE'],
     [['start'=>'2028-09-12','end'=>'2028-09-11'],'METRIC_QUERY_RANGE_REVERSED'],
     [['start'=>'2028-02-30','end'=>'2028-03-01'],'METRIC_QUERY_RANGE_INVALID'],
 ];
@@ -45,7 +44,7 @@ $compiler=new AiRegisteredPlanCompiler(null,static function()use($today){return 
 $query=['query_shape'=>'summary','metric_codes'=>['cash_performance'],'start_date'=>$range['start'],'end_date'=>$range['end'],'compare_range'=>null,'store_ids'=>[],'business_filters'=>[],'ranking'=>null];
 $compiler->compile(['query'=>$query,'output_format'=>'screen'],$cap);dateCheck(true,'compiler allows inclusive 366');
 foreach($failures as [$bad,$reason]){
-    dateReject(function()use($bad,$today){Dates::assertExecutable($bad,'2026-08-10',$today);},$reason);
+    dateReject(function()use($bad,$today){Dates::assertExecutable($bad,$today);},$reason);
     foreach(['summary','comparison'] as $shape){
         $q=$query;$q['query_shape']=$shape;
         if($shape==='comparison')$q['compare_range']=$bad;else{$q['start_date']=$bad['start'];$q['end_date']=$bad['end'];}
@@ -57,6 +56,20 @@ $viewClass=new ReflectionClass(MetricReadViewServices::class);$view=$viewClass->
 $clock=$viewClass->getProperty('clock');if(PHP_VERSION_ID<80100)$clock->setAccessible(true);$clock->setValue($view,static function()use($today){return Dates::date($today)->getTimestamp();});
 $validate=$viewClass->getMethod('range');if(PHP_VERSION_ID<80100)$validate->setAccessible(true);
 $validate->invoke($view,$range);dateCheck(true,'read view allows inclusive 366');
+// R50产品口径：AI查询现有记录，早于接入日不拒绝、不裁剪，比较期同样保留。
+$early=['start'=>'2026-03-01','end'=>'2026-08-09'];
+$validate->invoke($view,$early);dateCheck(true,'read view accepts original early period');
+foreach(['summary','comparison'] as $shape){
+    $q=$query;$q['query_shape']=$shape;
+    if($shape==='comparison')$q['compare_range']=$early;else{$q['start_date']=$early['start'];$q['end_date']=$early['end'];}
+    $compiled=$compiler->compile(['query'=>$q,'output_format'=>'screen'],$cap);
+    dateCheck($shape==='comparison'?$compiled['query']['compare_range']===$early:$compiled['query']['start_date']===$early['start'],'AI compiler retains early period');
+}
+dateCheck(count($projection->trend([],$early,$today))===162,'early trend preserves complete requested dates');
+$rank=['direction'=>'top_and_bottom','limit'=>1];
+dateCheck($projection->ranking([],[1,2],$rank)===['top'=>[],'bottom'=>[]],'empty facts do not invent store winner');
+dateCheck($projection->temporalRanking([],$early,$rank,$today)===['top'=>[],'bottom'=>[]],'empty facts do not invent winning date');
+dateCheck(count($projection->ranking([['store_id'=>1,'amount_cents'=>0]],[1,2],$rank)['top'])===1,'real zero facts retain existing ranking semantics');
 foreach($failures as [$bad,$reason])dateReject(function()use($validate,$view,$bad){$validate->invoke($view,$bad);},$reason);
 $outcome=new ReflectionMethod(\app\services\ai\execution\AiRunStore::class,'outcomeClass');if(PHP_VERSION_ID<80100)$outcome->setAccessible(true);
 foreach($failures as [$bad,$reason])foreach([$reason,Dates::aiReason($reason)] as $code)dateCheck($outcome->invoke(null,['status'=>'FAILED','reason'=>$code])==='neutral','date capability refusal never user/model technical failure');

@@ -29,9 +29,9 @@ const fieldsDate = [{ key: 'start_date', label: '开始日期', type: 'date' }, 
 function setup(max = 3, asyncExecution = true, deferBootstrap = false, sharedStorage = null, initialOpen = true) {
   const calls = [], mounted = [], unmounted = [], storage = sharedStorage || new Map(); let now = 1788912000000;
   class FixtureDate extends Date { static now() { return now; } }
-  let scheduled = 0;
-  const context = { ref: value => ({ value }), onMounted: fn => mounted.push(fn), onUnmounted: fn => unmounted.push(fn), currentMobilePlatform: () => 'H5', Date: FixtureDate,
-    setTimeout: () => ++scheduled, clearTimeout: () => {}, setInterval: () => 1, clearInterval: () => {},
+  let scheduled = 0; const intervals = new Map(); let intervalId = 0;
+  const context = { ref: value => ({ value }), nextTick: fn => fn(), onMounted: fn => mounted.push(fn), onUnmounted: fn => unmounted.push(fn), currentMobilePlatform: () => 'H5', Date: FixtureDate,
+    setTimeout: () => ++scheduled, clearTimeout: () => {}, setInterval: fn => { intervals.set(++intervalId,fn); return intervalId; }, clearInterval: key => intervals.delete(key),
     uni: { getStorageSync: key => storage.get(key), setStorageSync: (key, value) => storage.set(key, clean(value)), removeStorageSync: key => storage.delete(key), showActionSheet: () => {} },
     mobileAiRequest: (method, path, body, done) => calls.push({ method, path, body: clean(body), done, answered: false }), downloadMobileAi: () => {} };
   vm.runInNewContext(code, context); mounted.forEach(fn => fn()); const api = context.controller;
@@ -42,7 +42,19 @@ function setup(max = 3, asyncExecution = true, deferBootstrap = false, sharedSto
   let state = { run_id: 'mobile-run', generation: 1, version: 1, run_delivery_token: 'delivery', status: 'RECEIVED' };
   const step = (round, fields = [metric], extra = {}) => state = { ...state, version: round + 1, status: 'WAITING_CLARIFICATION', clarification: { id: 'step-' + round, schema_version: schema, step_revision: 1, intent_revision: round, round_no: round, max_clarification_rounds: max, question: '确认条件', fields, confirmed_summary: [{ label: '指标', value: '现金业绩、消耗业绩' }], revisable_steps: [], ...extra } };
   const start = (fields = [metric]) => { api.refs.question.value = '移动引导测试'; api.submit(); answer('/runs', state); api.accept(step(1, fields)); };
-  return { api, answer, bootstrap, calls, storage, scheduled: () => scheduled, step, start, finish: (contextRef = null) => ({ ...state, version: state.version + 1, status: 'COMPLETED', answer: { summary: '已校验', ...(contextRef ? {context_ref:contextRef} : {}), cards: [{ metric_name: '现金业绩', display_value: '123', unit: '元' }, { metric_name: '消耗业绩', display_value: '456', unit: '元' }] } }), expire: () => { now += 86400000; }, unmount: () => unmounted.forEach(fn => fn()) };
+  return { api, answer, bootstrap, calls, storage, advance: ms => { now += ms; intervals.forEach(fn => fn()); }, scheduled: () => scheduled, step, start, finish: (contextRef = null) => ({ ...state, version: state.version + 1, status: 'COMPLETED', answer: { summary: '已校验', ...(contextRef ? {context_ref:contextRef} : {}), cards: [{ metric_name: '现金业绩', display_value: '123', unit: '元' }, { metric_name: '消耗业绩', display_value: '456', unit: '元' }] } }), expire: () => { now += 86400000; }, unmount: () => unmounted.forEach(fn => fn()) };
+}
+// R50：等待不计处理耗时；每次人工确认开启新处理段，原会话恢复仍展示确认卡。
+{
+  const f = setup(); f.start(); const frozen = f.api.refs.activeElapsedSeconds.value;
+  f.advance(240000);
+  eq([f.api.refs.activeElapsedSeconds.value,f.api.refs.activeRunState.value,f.api.refs.messageAnchor.value], [frozen,'请确认下方问题','ai-guidance-current']);
+  f.api.chooseValue(metric,metric.options[0]); f.api.confirmChoices(); f.advance(2000);
+  eq([f.api.refs.activeElapsedSeconds.value,f.api.refs.activeRunState.value],[2,'正在思考']);
+  f.answer('/runs/mobile-run/clarify',f.step(2)); f.advance(300000);
+  eq(f.api.refs.activeElapsedSeconds.value,2);
+  assert.ok(source.indexOf('id="ai-guidance-current"') < source.indexOf('class="ai-reading-runway"'));
+  f.unmount();
 }
 for (const max of [3,4,5]) {
   const f = setup(max); f.start(); eq(f.calls.find(call => call.path === '/runs').body.guidance_schema_version, schema);

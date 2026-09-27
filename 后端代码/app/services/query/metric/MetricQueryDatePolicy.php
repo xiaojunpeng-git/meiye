@@ -25,8 +25,9 @@ final class MetricQueryDatePolicy
         return $range;
     }
 
-    /** Validates, never clamps. Each comparison period is checked independently. */
-    public static function assertExecutable(array $range, ?string $coverageStart = null, ?string $today = null): void
+    /** Validates calendar/span only, never clamps to historical ingestion dates.
+     * Each comparison period is checked independently against the same rules. */
+    public static function assertExecutable(array $range, ?string $today = null): void
     {
         self::normalize($range);
         $today = $today ?? (new \DateTimeImmutable('now', new \DateTimeZone(self::TIMEZONE)))->format('Y-m-d');
@@ -37,10 +38,6 @@ final class MetricQueryDatePolicy
         if ($range['end'] > $today) self::fail('METRIC_QUERY_FUTURE_UNAVAILABLE');
         $days = self::date($range['start'])->diff(self::date($range['end']))->days + 1;
         if ($days > self::MAX_DAYS) self::fail('METRIC_QUERY_RANGE_TOO_LONG');
-        if ($coverageStart !== null) {
-            self::date($coverageStart);
-            if ($range['start'] < $coverageStart) self::fail('METRIC_QUERY_COVERAGE_UNAVAILABLE');
-        }
     }
 
     /** Protocol translation, not a second set of execution rules. */
@@ -51,7 +48,6 @@ final class MetricQueryDatePolicy
             'METRIC_QUERY_RANGE_REVERSED' => 'AI_DATE_REVERSED',
             'METRIC_QUERY_RANGE_TOO_LONG' => 'AI_DATE_RANGE_TOO_LONG',
             'METRIC_QUERY_FUTURE_UNAVAILABLE' => 'AI_FUTURE_ACTUALS_UNAVAILABLE',
-            'METRIC_QUERY_COVERAGE_UNAVAILABLE' => 'AI_DATA_COVERAGE_INCOMPLETE',
         ][$reason] ?? $reason;
     }
 

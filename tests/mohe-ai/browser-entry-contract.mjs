@@ -75,7 +75,8 @@ root.querySelector('.entry').click(); await flush();
 assert.ok(root.querySelector('[role=dialog]'));
 assert.equal(Array.from(root.querySelectorAll('button')).some(b=>b.textContent==='配置'),false);
 assert.equal(root.querySelector('input[type=password]'),null);
-assert.equal(root.querySelector('textarea').placeholder,'例如：今天经营情况如何？');
+// R46已确认双端留空，不让旧夹具反向恢复废弃提示。
+assert.equal(root.querySelector('textarea').placeholder,'');
 assert.equal(root.querySelector('option[value="screen_and_xlsx"]').disabled,true);
 const input = root.querySelector('textarea'); input.value = '<img src=x onerror=alert(1)>今天现金业绩';
 Array.from(root.querySelectorAll('button')).find(b=>b.textContent==='发送').click(); await flush();

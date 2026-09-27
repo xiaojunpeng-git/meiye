@@ -167,7 +167,10 @@ if ($runs->clarificationSubmissionState($owner,$paused['run_id'],$paused['genera
 $delayed=$runs->resume($owner,$paused['run_id'],$paused['generation'],'delayed-old-submission',4,$submission);
 if (empty($delayed['submission_replayed']) || $delayed['status']!=='WAITING_CLARIFICATION') throw new RuntimeException('delayed rejected submission remains an inert idempotent replay');
 $clarifyRef='request-'.str_repeat('b',48);
+// R50：阅读4分钟已跨越原180秒执行deadline，但仍在独立确认有效期内。
+$now+=240000;
 $runs->queueExecution($owner,$paused['run_id'],$paused['generation'],'clarify',$clarifyRef,hash('sha256','next choices'));
+if (!in_array($paused['run_id'],$runs->pendingExecutionIds(),true)) throw new RuntimeException('R50 paused continuation remains supervisor-visible after old deadline');
 $raw=$db->query("SELECT counters_json FROM mohe_ai_run WHERE run_id=".$db->quote($paused['run_id']))->fetch(PDO::FETCH_ASSOC);
 $segments=json_decode($raw['counters_json'],true)['execution_segments']??[];
 if (count($segments)!==2 || ($segments[0]['operation']??'')!=='execute' || ($segments[0]['started_at']??0)<1 || ($segments[1]['operation']??'')!=='clarify') throw new RuntimeException('initial and clarification execution timings must remain separate');
@@ -184,10 +187,11 @@ try {
 // A completion after a clarification has two retained segments. The browser
 // receipt must attach to the latest continuation, never retroactively to the
 // initial request that ended in a human choice.
-$runs->queuedExecution($paused['run_id']);
+if (!$runs->queuedExecution($paused['run_id'])) throw new RuntimeException('R50 delayed confirmation must dispatch');
 $runs->startQueuedExecutionWorker($paused['run_id'],'fixture-worker',1234,'fixture-host');
 $finalSubmission=['request_id'=>'clarification-final','request_hash'=>hash('sha256','final choices'),'clarification_ref'=>'clarification-step','intent_revision'=>1,'step_revision'=>1];
-$runs->resume($owner,$paused['run_id'],$paused['generation'],'clarification-final-worker',4,$finalSubmission);
+$resumed=$runs->resume($owner,$paused['run_id'],$paused['generation'],'clarification-final-worker',4,$finalSubmission);
+if ($resumed['deadline_at']-$now>=180000 || $resumed['deadline_at']<=$now) throw new RuntimeException('R50 resume preserves remaining budget instead of granting fresh execution time');
 $runs->acceptClarification($owner,$paused['run_id'],$paused['generation'],'clarification-final-worker',$finalSubmission['request_id']);
 $runs->reserve($owner,$paused['run_id'],$paused['generation'],'clarification-final-worker','stage_count',1);
 $runs->prepareAttempt($owner,$paused['run_id'],$paused['generation'],'clarification-final-worker','clarification-final-model','model',hash('sha256','clarification-final-model'),'siliconflow');
@@ -210,4 +214,16 @@ $cancelRef='request-'.str_repeat('f',48);
 $runs->queueExecution($owner,$cancelled['run_id'],$cancelled['generation'],'execute',$cancelRef,hash('sha256','cancelled input'));
 $runs->cancel($owner,$cancelled['run_id'],$cancelled['generation']);
 if ($runs->discardUnclaimedExecutionInput($owner,$cancelled['run_id'],$cancelled['generation'])!==$cancelRef) throw new RuntimeException('unclaimed cancelled input must be disposable immediately');
+// R50：允许跨越暂停前的deadline，不等于允许越过独立确认有效期。
+$waitExpired=$runs->create($owner,'wait-expired-request',hash('sha256','wait expired'),$snapshot)['run'];
+$runs->claim($owner,$waitExpired['run_id'],$waitExpired['generation'],'wait-expired-worker');
+$runs->pauseForClarification($owner,$waitExpired['run_id'],$waitExpired['generation'],'wait-expired-worker','wait-expired-step');
+$runs->queueExecution($owner,$waitExpired['run_id'],$waitExpired['generation'],'clarify','request-'.str_repeat('8',48),hash('sha256','expired choice'));
+$now+=600001;
+if ($runs->queuedExecution($waitExpired['run_id'])!==null) throw new RuntimeException('R50 expired clarification never starts');
+$waitExpiredState=$runs->get($owner,$waitExpired['run_id'],$waitExpired['generation']);
+if ($waitExpiredState['status']!=='FAILED' || $waitExpiredState['reason']!=='CLARIFICATION_EXPIRED') throw new RuntimeException('R50 expired clarification becomes explicit terminal state');
+// supervisor已结束的任务收到迟到确认时，展示终态而非通用队列错误。
+$lateChoice=$runs->queueExecution($owner,$waitExpired['run_id'],$waitExpired['generation'],'clarify','request-'.str_repeat('a',48),hash('sha256','late-choice'));
+if ($lateChoice['status']!=='FAILED' || $lateChoice['reason']!=='CLARIFICATION_EXPIRED') throw new RuntimeException('R50 late confirmation preserves expiry explanation');
 echo "PASS async execution acceptance/replay contract\n";

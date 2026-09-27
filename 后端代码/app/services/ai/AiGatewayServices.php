@@ -464,11 +464,11 @@ final class AiGatewayServices
                         ?$this->executeMemberPopulationDetails($context,$owner,$id,$generation,$worker,$snapshot,$compiled,$contextMeaning)
                         :$this->executeRegistered($context,$owner,$id,$generation,$worker,$snapshot,$compiled['plan'],$contextMeaning));
             } catch (\RuntimeException $error) {
-                // These are execution boundaries, not failed language understanding.
-                // Offer only server-built ranges and require customer confirmation.
+                // Only the execution span limit needs a confirmed smaller range.
+                // Historical ingestion dates must not crop the user's interval.
                 $today=(new \DateTimeImmutable('@'.intdiv($this->runs->get($owner,$id,$generation)['created_at'],1000)))
                     ->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
-                $guidance=in_array($error->getMessage(),['AI_DATA_COVERAGE_INCOMPLETE','AI_DATE_RANGE_TOO_LONG'],true)
+                $guidance=$error->getMessage()==='AI_DATE_RANGE_TOO_LONG'
                     ? (new \app\services\ai\execution\AiDateRangeGuidancePlanner())->start($compiled['plan'],$today) : null;
                 if ($guidance===null) throw $error;
                 $guidance=$this->decorateGuidance($guidance);

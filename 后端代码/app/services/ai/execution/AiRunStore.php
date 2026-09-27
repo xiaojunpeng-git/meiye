@@ -134,6 +134,9 @@ final class AiRunStore
         return $this->transaction(function () use($owner,$runId,$generation,$operation,$requestRef,$requestHash,$allowCreateReplay) {
             $r=$this->read($owner,$runId,$generation); $counts=json_decode($r['counters_json'],true)?:[];
             $expected=$operation==='execute'?'RECEIVED':'WAITING_CLARIFICATION';
+            // 用户读题期间任务可能已到确认期限；返回原任务终态供两端解释，
+            // 不把已结束的任务重新入队，也不以通用队列错误遮蔽实际原因。
+            if ($operation==='clarify' && $this->terminal($r)) return $this->publicRun($r)+['execution_replayed'=>true];
             if (($counts['execution_operation']??'')===$operation && ($counts['execution_hash']??'')===$requestHash) {
                 return $this->publicRun($r)+['execution_replayed'=>true];
             }
@@ -261,9 +264,14 @@ final class AiRunStore
                 || !is_string($counts['execution_hash']??null) || !preg_match('/^[a-f0-9]{64}$/D',$counts['execution_hash'])) return null;
             $expected=$counts['execution_operation']==='execute'?'RECEIVED':'WAITING_CLARIFICATION';
             if ($r['status']!==$expected || $r['worker_token']!=='') return null;
-            // A queued message is only an invitation to start work, never an
-            // extension of the Run's original execution budget.
-            if ((int)$r['deadline_at']<=$this->now()) {
+            // 澄清暂停执行预算；用户阅读时间受独立累计10分钟限制。
+            // 旧deadline不能拦截合法续查，resume仍只恢复remaining_ms，绝不续满预算。
+            if ($r['status']==='WAITING_CLARIFICATION') {
+                if ($this->now()<(int)$r['pause_at'] || $this->now()-(int)$r['pause_at']+(int)($counts['clarification_wait_ms']??0)>=600000) {
+                    $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\',reason=\'CLARIFICATION_EXPIRED\',version=version+1,last_clock_at=? WHERE instance_id=? AND run_id=?',[$this->now(),$this->instance,$runId]);
+                    return null;
+                }
+            } elseif ((int)$r['deadline_at']<=$this->now()) {
                 $this->expireRun($r);
                 return null;
             }
@@ -339,7 +347,8 @@ final class AiRunStore
             // must never consume a supervisor page merely because it shares a
             // WAITING_CLARIFICATION status with a queued follow-up.
             $now=$this->now();
-            $rows=$this->rows('SELECT run_id,counters_json FROM '.$this->table('run').' WHERE instance_id=? AND status IN (\'RECEIVED\',\'WAITING_CLARIFICATION\') AND worker_token=\'\' AND expires_at>? AND deadline_at>? AND (counters_json LIKE ? OR counters_json LIKE ?) ORDER BY created_at ASC LIMIT '.$limit,[
+            // 恢复队列同样不能用暂停前deadline筛掉续查；最终有效期由queuedExecution复核。
+            $rows=$this->rows('SELECT run_id,counters_json FROM '.$this->table('run').' WHERE instance_id=? AND status IN (\'RECEIVED\',\'WAITING_CLARIFICATION\') AND worker_token=\'\' AND expires_at>? AND (status=\'WAITING_CLARIFICATION\' OR deadline_at>?) AND (counters_json LIKE ? OR counters_json LIKE ?) ORDER BY created_at ASC LIMIT '.$limit,[
                 $this->instance,$now,$now,'%' . '"execution_state":"QUEUED"' . '%','%' . '"execution_state":"DISPATCHING"' . '%'
             ]);
             foreach ($rows as $row) {

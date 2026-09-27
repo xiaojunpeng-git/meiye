@@ -27,22 +27,25 @@
       </view>
       <view v-if="activeQuestion.length > 0" :id="activeQuestionAnchor" class="ai-message ai-message--active">
         <view class="ai-user-turn"><text class="ai-turn-label">你问</text><text class="ai-question">{{ activeQuestion }}</text></view>
-        <view class="ai-run-status"><text class="ai-run-elapsed">已处理 {{ activeElapsedSeconds }} 秒</text><text class="ai-run-thinking">{{ activeRunState }}</text></view>
+        <view v-if="clarification == null" class="ai-run-status"><text class="ai-run-elapsed">已处理 {{ activeElapsedSeconds }} 秒</text><text class="ai-run-thinking">{{ activeRunState }}</text></view>
       </view>
-      <view v-if="activeQuestion.length > 0" class="ai-reading-runway"></view>
-      <view v-if="clarification != null" class="ai-message">
-        <text v-if="clarification.schema_version == guidanceSchema" class="ai-note">第 {{ clarification.round_no }} 步 · 最多 {{ clarification.max_clarification_rounds }} 步，明确后立即查询</text>
+      <!-- 确认卡属于当前提问，必须位于阅读占位之前；不能让用户穿过整屏空白寻找操作。 -->
+      <view v-if="clarification != null" id="ai-guidance-current" class="ai-message ai-guidance">
+        <view class="ai-guidance-head"><text>请确认</text><button class="ai-guidance-cancel" :disabled="guidanceBusy || closeRequestedState" @tap="cancelRun">取消查询</button></view>
+        <text v-if="clarification.schema_version == guidanceSchema" class="ai-note">第 {{ clarification.round_no }} 步</text>
         <view v-for="(item,si) in clarification.confirmed_summary || []" :key="si"><text class="ai-note">{{ item.label }}：{{ item.value }}</text></view>
-        <text>{{ currentGuidanceQuestion() }}</text>
+        <text class="ai-guidance-question">{{ currentGuidanceQuestion() }}</text>
         <view v-for="field in currentGuidanceFields()" :key="field.key">
-          <text>{{ field.label }}</text>
+          <text class="ai-guidance-label">{{ field.label }}</text>
           <picker v-if="field.type == 'date'" mode="date" :start="field.min || ''" :end="field.max || ''" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @change="selectDate(field.key,$event)"><text class="ai-choice">{{ choices[field.key] || '选择日期' }}</text></picker>
-          <view v-else-if="field.options.length <= 3"><button v-for="option in field.options" :key="option.value" size="mini" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="chooseValue(field,option)">{{ choices[field.key] == option.value ? '● ' : '○ ' }}{{ option.label }}</button></view>
+          <view v-else-if="field.options.length <= 3" role="radiogroup" :aria-label="field.label"><button v-for="(option,oi) in field.options" :key="option.value" class="ai-guidance-option" :class="{ 'ai-guidance-option--selected': choices[field.key] == option.value }" role="radio" :aria-checked="choices[field.key] == option.value" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="chooseValue(field,option)"><text class="ai-guidance-number">{{ oi + 1 }}</text><text class="ai-guidance-option-label">{{ option.label }}</text></button></view>
           <picker v-else :range="field.options" range-key="label" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @change="selectOption(field,$event)"><text class="ai-choice">{{ choiceLabels[field.key] || '请选择' }}</text></picker>
         </view>
-        <button size="mini" :disabled="guidanceBusy || closeRequestedState" @tap="confirmChoices">{{ guidanceUnknown ? '重试确认' : clarification.schema_version == guidanceSchema ? '确认并继续' : '确认查询' }}</button>
+        <text v-if="progress.length > 0" class="ai-guidance-error" role="alert">{{ progress }}</text>
+        <view class="ai-guidance-actions"><button class="ai-guidance-confirm" :disabled="guidanceBusy || closeRequestedState" @tap="confirmChoices">{{ guidanceBusy ? '正在提交' : guidanceUnknown ? '重试确认' : '确认并继续' }}</button></view>
         <view v-if="clarification.revisable_steps != null && clarification.revisable_steps.length > 0"><text class="ai-note">修改已确认条件</text><button v-for="oldStep in clarification.revisable_steps" :key="oldStep.id" size="mini" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="editGuidance(oldStep)">{{ oldStep.question }}</button><button v-if="revisingId.length > 0" size="mini" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="resetGuidanceChoices">返回当前问题</button></view>
       </view>
+      <view v-if="activeQuestion.length > 0 && clarification == null" class="ai-reading-runway"></view>
     </scroll-view>
     <view class="ai-footer">
       <text v-if="showFooterProgress()" class="ai-note ai-progress">{{ progress }}</text>
@@ -156,6 +159,14 @@ function startActiveRunStatus() : void {
   activeRunState.value = '正在思考'; refreshActiveElapsed()
   if (elapsedTimer != null) clearInterval(elapsedTimer)
   elapsedTimer = setInterval(() => refreshActiveElapsed(),250)
+}
+// 等待用户选择不是模型处理时间；每次确认重新计时，恢复旧会话也不得继续累加等待。
+function pauseForGuidance() : void {
+  if (elapsedTimer != null) clearInterval(elapsedTimer)
+  elapsedTimer = null
+  activeRunState.value = '请确认下方问题'
+  messageAnchor.value = ''
+  nextTick(() => { messageAnchor.value = 'ai-guidance-current' })
 }
 function completedElapsedSeconds() : number { return Number.isSafeInteger(clientDeliveryStartedAt) && clientDeliveryStartedAt > 0 ? Math.max(0,Math.floor((Date.now() - clientDeliveryStartedAt) / 1000)) : 0 }
 // Keep the visible duration customer-centred: it measures send-to-first-answer
@@ -333,6 +344,7 @@ function accept(value : any) : void {
     if (c.schema_version == guidanceSchema) activeGuidanceSchema = guidanceSchema
     let same = clarification.value != null && clarification.value.id == c.id && clarification.value.step_revision == c.step_revision && clarification.value.intent_revision == c.intent_revision
     clarification.value = c; if (!same) clearGuidance()
+    pauseForGuidance()
   } else { queuedClarificationId = ''; clarification.value = null; clearGuidance(); schedulePoll() }
   persistActive()
 }
@@ -459,6 +471,7 @@ function confirmChoices() : void {
   // spent reading the previous guidance, while still measuring the complete
   // post-confirmation execution until the verified answer is visible.
   clientDeliveryStartedAt = Date.now()
+  startActiveRunStatus()
   // Persist before I/O. If the app is interrupted after sending but before a
   // response arrives, the identical client_submission_id remains available
   // for a safe idempotent retry after the next status read.
@@ -482,6 +495,7 @@ function confirmChoices() : void {
     guidanceBusy.value = false
     if (r.responseKnown) { guidanceSubmission = null; guidanceUnknown.value = false; progress.value = r.message; persistActive() }
     else { guidanceUnknown.value = true; progress.value = '提交结果暂未确认，请重试确认同一次选择。'; persistActive() }
+    pauseForGuidance()
   })
 }
 function resumeActive(record : any) : void {
@@ -514,6 +528,7 @@ function resumeActive(record : any) : void {
       if (run.status == 'WAITING_CLARIFICATION' && clarification.value == null && queuedClarificationId != restoredClarificationId && validGuidance(run.clarification)) {
         clarification.value = run.clarification
         if (run.clarification.schema_version == guidanceSchema) activeGuidanceSchema = guidanceSchema
+        pauseForGuidance()
       }
       // Retry only the exact saved submission for the step the server still
       // presents. A newer guidance step or final answer discards the old
@@ -576,4 +591,19 @@ onUnmounted(() => { lifecycle++; exportLifecycle++; persistActive(true); if (tim
 .ai-panel--native-mini .ai-messages{padding:0 20px}.ai-panel--native-mini .ai-message{margin:26px 0 34px}.ai-panel--native-mini .ai-answer-turn{margin-top:20px}.ai-panel--native-mini .ai-question{font-size:17px;line-height:1.6}.ai-panel--native-mini .ai-run-status{margin-top:20px}.ai-panel--native-mini .ai-run-elapsed{font-size:14px}.ai-panel--native-mini .ai-run-thinking{margin-top:14px;padding-top:14px;font-size:16px}.ai-panel--native-mini .ai-reading-runway{min-height:420px}.ai-panel--native-mini .ai-answer{font-size:17px;line-height:1.65}.ai-panel--native-mini .ai-answer-headline{font-size:19px;line-height:1.55}.ai-panel--native-mini .ai-card{padding:14px;margin-top:12px}.ai-panel--native-mini .ai-card-label{font-size:16px}.ai-panel--native-mini .ai-card-detail-toggle{font-size:14px}.ai-panel--native-mini .ai-footer{padding:8px 18px calc(14px + env(safe-area-inset-bottom))}.ai-panel--native-mini .ai-export-toggle{min-height:30px;padding:0 12px;font-size:14px;line-height:28px}.ai-panel--native-mini .ai-icon-send{width:24px;height:24px}.ai-panel--native-mini .ai-icon-send__shaft{left:11px;top:2px;height:20px}.ai-panel--native-mini .ai-icon-send__head-left{left:7px;top:2px}.ai-panel--native-mini .ai-icon-send__head-right{right:7px;top:2px}
 /* 窄屏优先完整显示数值；只改变排版，不截断或重新计算指标。 */
 @media (max-width:360px){.ai-answer-fact-wrap{width:100%}.ai-title{font-size:17px}}
+/* 确认卡沿用黑白工作台，编号只作选项顺序，提交仍使用后端 option.value。 */
+.ai-message.ai-guidance{padding:18px;border:1px solid #e5e5e7;border-radius:22px;background-color:#fff;margin-top:0}
+.ai-guidance-head{display:flex;flex-direction:row;align-items:center;justify-content:space-between;color:#777;font-size:14px;margin-bottom:8px}
+.ai-guidance-cancel{margin:0;padding:4px 0;background-color:transparent;color:#777;font-size:13px;line-height:24px}
+.ai-guidance-cancel::after,.ai-guidance-option::after,.ai-guidance-confirm::after{border:0}
+.ai-guidance-question{display:block;margin:10px 0 18px;color:#202124;font-size:17px;font-weight:600;line-height:1.65}
+.ai-guidance-label{display:block;margin:12px 0 8px;color:#777;font-size:13px}
+.ai-guidance-option{display:flex;flex-direction:row;align-items:center;box-sizing:border-box;width:100%;margin:6px 0;padding:12px;border:1px solid transparent;border-radius:16px;background-color:#fff;color:#202124;text-align:left;line-height:1.5}
+.ai-guidance-option--selected{background-color:#f3f3f4;border-color:#d9d9dc}
+.ai-guidance-number{flex-shrink:0;display:flex;align-items:center;justify-content:center;width:30px;height:30px;margin-right:12px;border:1px solid #dedee1;border-radius:50%;background-color:#f3f3f4;color:#737377;font-size:14px}
+.ai-guidance-option-label{flex:1;min-width:0;font-size:16px;white-space:normal}
+.ai-guidance-actions{display:flex;flex-direction:row;justify-content:flex-end;margin-top:18px}
+.ai-guidance-confirm{margin:0;padding:0 18px;border-radius:24px;background-color:#17191e;color:#fff;font-size:15px;line-height:44px}
+.ai-guidance-confirm[disabled]{background-color:#aaa;color:#fff}
+.ai-guidance-error{display:block;margin-top:12px;color:#b42318;font-size:14px;line-height:1.5}
 </style>

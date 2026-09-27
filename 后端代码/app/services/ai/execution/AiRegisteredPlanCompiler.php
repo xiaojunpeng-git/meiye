@@ -243,14 +243,15 @@ final class AiRegisteredPlanCompiler
         foreach ($metrics as $metric) {
             $contract=$snapshot['metrics'][$metric];
             if (!in_array($query['query_shape'],$contract['query_shapes'],true)) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
-            $this->range($query['start_date'],$query['end_date'],$contract['coverage_start']);
-            if ($query['compare_range']!==null) $this->range($query['compare_range']['start'],$query['compare_range']['end'],$contract['coverage_start']);
         }
+        // R50：用户期间就是查询期间。按统一事实层现有记录统计，不以接入日期裁剪或拦截。
+        $this->range($query['start_date'],$query['end_date']);
+        if ($query['compare_range']!==null) $this->range($query['compare_range']['start'],$query['compare_range']['end']);
         return $query;
     }
-    private function range($start,$end,?string $coverageStart=null): void
+    private function range($start,$end): void
     {
-        try { MetricQueryDatePolicy::assertExecutable(['start'=>$start,'end'=>$end],$coverageStart,$this->today?call_user_func($this->today):null); }
+        try { MetricQueryDatePolicy::assertExecutable(['start'=>$start,'end'=>$end],$this->today?call_user_func($this->today):null); }
         catch (MetricQueryContractException $error) { AiRegistryValue::fail(MetricQueryDatePolicy::aiReason($error->getErrorCode())); }
     }
 }

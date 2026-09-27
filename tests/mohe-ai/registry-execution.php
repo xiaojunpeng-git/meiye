@@ -136,9 +136,8 @@ try {
         'bounded registered overview comparison retains all metrics and the full baseline range');
     $incompleteComparison=$storeComparisonPlan;
     $incompleteComparison['query']['compare_range']=['start'=>'2026-08-01','end'=>'2026-08-31'];
-    registryReject(function()use($compiler,$incompleteComparison,$overviewCap){
-        $compiler->compile($incompleteComparison,$overviewCap);
-    },'AI_DATA_COVERAGE_INCOMPLETE');
+    // R50: metadata coverage start does not restrict explicitly requested dates.
+    registryCheck($compiler->compile($incompleteComparison,$overviewCap)['query']['compare_range']===$incompleteComparison['query']['compare_range'],'early overview comparison is preserved');
     $thresholdCap=registryCapabilities();
     $thresholdCap['metric_codes']=['sales_collected_amount'];
     $thresholdCap['query_shapes']=['threshold_count'];
@@ -219,7 +218,7 @@ try {
     $invalid=registryPlan('ranking'); $invalid['query']['ranking']['limit']=10;
     registryCheck($compiler->compile($invalid,$cap)['query']['ranking']['limit']===10,'registered ranking count is preserved instead of being rewritten to five');
     $invalid=registryPlan('comparison'); $invalid['query']['compare_range']['start']='2026-08-01';
-    registryReject(function()use($compiler,$cap,$invalid){$compiler->compile($invalid,$cap);},'AI_DATA_COVERAGE_INCOMPLETE');
+    registryCheck($compiler->compile($invalid,$cap)['query']['compare_range']===$invalid['query']['compare_range'],'early comparison date is preserved');
     $invalid=registryPlan(); $invalid['query']['start_date']='2026-02-30';
     registryReject(function()use($compiler,$cap,$invalid){$compiler->compile($invalid,$cap);},'AI_DATE_INVALID');
     registryReject(function()use($compiler,$cap){$compiler->compile(registryPlan(),$cap,['remaining_execution_ms'=>44000]);},'AI_WORKFLOW_BUDGET_EXHAUSTED');
