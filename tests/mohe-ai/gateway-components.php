@@ -100,7 +100,9 @@ namespace {
     $chosen=$planner->choose($secondPeriod,['compare_start'=>'2026-09-03','compare_end'=>'2026-09-03']);
     check($chosen['kind']==='plan','two needed period steps complete without losing either period');
     $grouping=$planner->compile($projector->project('昨天到今天消耗业绩对比'),$compareSelection,$compareCap,'screen','2026-09-08');
-    check(array_column($grouping['fields'],'key')===['start_date','end_date'] && count($grouping['pending_fields'])===2,'range connector cannot be silently reinterpreted as two comparison periods');
+    check(array_column($grouping['fields'],'key')===['compare_start','compare_end'],'connected endpoints resolve one complete interval, not two comparison periods');
+    $groupedChoice=$planner->choose($grouping,['compare_start'=>'2026-09-01','compare_end'=>'2026-09-02']);
+    check($groupedChoice['plan']['query']['start_date']==='2026-09-07' && $groupedChoice['plan']['query']['end_date']==='2026-09-08','comparison clarification preserves the complete stated interval');
     $ordered=$projector->project('昨天和今天张三消耗业绩对比');
     check(array_column($ordered['date_terms'],'code')===['YESTERDAY','TODAY'],'date order is independent of lexicon signal order');
     check(strpos(json_encode($ordered,JSON_UNESCAPED_UNICODE),'张三')===false,'date projection never forwards raw user text');

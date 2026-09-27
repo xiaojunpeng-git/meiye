@@ -76,6 +76,11 @@ final class AiExactRankingCollectionAdmission
     {
         if ($question==='' || preg_match('//u',$question)!==1) return null;
         $question=$this->normalizeLeadingDiscourseConnector($question);
+        // Remove a fully covered shared calendar prefix before clause splitting;
+        // a comma between the period and the ranking is not a second question.
+        $calendar=AiSemanticIntentParser::calendarEvidence($question);
+        if (!$calendar['complete']) return null;
+        $question=trim($calendar['remainder']);
         $objects=$this->objects($objectVocabulary);
         $shared=$this->sharedDefaultRanking($question,$objects,$allowedMetricCodes,$defaultRankObjectKinds);
         if ($shared!==null) return $shared;
@@ -188,7 +193,9 @@ final class AiExactRankingCollectionAdmission
         $residue=$question;
         foreach ($objectLabels as $label) $residue=str_replace($label,' ',$residue);
         $residue=preg_replace('/最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
-        $residue=preg_replace('/这个月|这一个月|本月|这月|上个月|上月|今天|今日|昨天|昨日|前天/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return $question;
+        $residue=$calendar['remainder'];
         $residue=preg_replace('/业绩|卖得/u',' ',$residue);
         $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪个|哪一个|什么)(?:又)?|分别|各自|同时|以及|和|与|的|是|又|、|，|,|；|;|。|\s+/u','',$residue);
         return is_string($residue)?trim($residue):$question;
@@ -199,7 +206,9 @@ final class AiExactRankingCollectionAdmission
     {
         $residue=str_replace($objectLabel,' ',$question);
         $residue=preg_replace('/最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
-        $residue=preg_replace('/这个月|这一个月|本月|这月|上个月|上月|今天|今日|昨天|昨日|前天/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return $question;
+        $residue=$calendar['remainder'];
         $residue=preg_replace('/业绩|卖得/u',' ',$residue);
         $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪家|哪位|哪个|哪一个|谁|什么)(?:又)?|的|是|又|、|，|,|；|;|。|\\s+/u','',$residue);
         return is_string($residue)?trim($residue):$question;
@@ -211,7 +220,9 @@ final class AiExactRankingCollectionAdmission
         $residue=str_replace($objectLabel,' ',$question);
         $residue=preg_replace('/(?:前|后|最高|最低|最好|最差)(?:的)?\s*(?:[0-9]+|[一二两三四五六七八九十百]+)\s*(?:名)?/u',' ',$residue);
         $residue=preg_replace('/最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
-        $residue=preg_replace('/这个月|这一个月|本月|这月|上个月|上月|今天|今日|昨天|昨日|前天/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return $question;
+        $residue=$calendar['remainder'];
         $residue=preg_replace('/业绩|详情|明细|具体情况|情况/u',' ',$residue);
         $residue=preg_replace('/(?:的)?(?:是)?(?:哪些|哪个|哪一个|什么)|分别|各自|同时|以及|和|与|的|是|看看|查看|看|给我|、|，|,|；|;|。|\s+/u','',$residue);
         return is_string($residue)?trim($residue):$question;
@@ -271,7 +282,9 @@ final class AiExactRankingCollectionAdmission
         $residue=$clause;
         foreach (array_filter([$metricTerm,$objectLabel]) as $term) $residue=str_replace($term,' ',$residue);
         $residue=preg_replace('/最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
-        $residue=preg_replace('/这个月|这一个月|本月|这月|上个月|上月|今天|今日|昨天|昨日|前天/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return $clause;
+        $residue=$calendar['remainder'];
         $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪个|哪一个|什么)(?:又)?|分别|同时|以及|和|与|的|是|又|、|\s+/u','',$residue);
         return is_string($residue)?trim($residue):$clause;
     }

@@ -31,10 +31,11 @@ final class AiSemanticIntentParser
         $relative=['这个月'=>'THIS_MONTH','这一个月'=>'THIS_MONTH','上个月'=>'LAST_MONTH','本月'=>'THIS_MONTH','这月'=>'THIS_MONTH','上月'=>'LAST_MONTH','今天'=>'TODAY','今日'=>'TODAY','昨天'=>'YESTERDAY','昨日'=>'YESTERDAY','前天'=>'DAY_BEFORE_YESTERDAY','明天'=>'TOMORROW'];
         // Normalize date synonyms only locally. Original text is never retained.
         $normalized=strtr($text,['这个月'=>'本月','这一个月'=>'本月','上个月'=>'上月','今日'=>'今天','昨日'=>'昨天']);
-        foreach($relative as $word=>$code) $take('/'.preg_quote($word,'/').'/u',$code);
+        // Consume full calendar spans before individual relative words so the
+        // start of a connected interval cannot become an unresolved business filter.
+        $covered=self::calendarEvidence($covered)['remainder'];
+        foreach($relative as $word=>$code) if (strpos($text,$word)!==false) $signals[]=$code;
         preg_match_all('/(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])/',$text,$dates);
-        $covered=preg_replace('/(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])/',' ',$covered);
-        $covered=preg_replace('/(?:[0-9]{4}年)?[0-9]{1,2}月[0-9]{1,2}[日号]|最近[一二两三四五六七八九十0-9]+天/u',' ',$covered);
         if(in_array('ranking',$signals,true)) {
             $covered=str_replace(['名单','家店','门店','家','名'],' ',$covered);
         }
@@ -64,10 +65,11 @@ final class AiSemanticIntentParser
         // contract. Object dimensions bypass it and use model result shapes.
         if($limits && ($limits!==[5])) $blocking='AI_RANK_LIMIT_NOT_READY';
         if(in_array('TOMORROW',$signals,true)) $blocking='AI_FUTURE_ACTUALS_UNAVAILABLE';
-        $periods=$this->periods($normalized);
+        $calendar=self::calendarEvidence($normalized);
+        $periods=$calendar['periods'];
         if(count($periods)===2 && preg_match('/分别|并排|各.*昨天|各.*今天/u',$text) && !in_array('comparison',$signals,true)) $signals[]='comparison';
         return ['signals'=>array_values(array_unique($signals)),'dates'=>$dates[0],'blocking_reason'=>$blocking,
-            'date_terms'=>$periods,'date_grouping_ambiguous'=>(bool)preg_match('/(?:今天|昨天|本月|这月|上月)\s*(?:到|至)|[0-9]{4}-[0-9]{2}-[0-9]{2}\s*(?:到|至)\s*(?:今天|昨天|本月|这月|上月)/u',$normalized),
+            'date_terms'=>$periods,'date_grouping_ambiguous'=>!$calendar['complete'],
             'unresolved_condition'=>$unparsed,'projection_version'=>'mohe-semantic-intent-v2',
             // “最高/最低”只说明取值方式，不能单独决定按门店、日期或业务对象分组。
             // 只有客户明确表达“排行/排名”时，辅助投影才保留通用排名目标；完整对象仍由模型理解并经契约核对。
@@ -85,18 +87,29 @@ final class AiSemanticIntentParser
         return 1000000;
     }
 
-    private function periods(string $text): array
+    /** Connected endpoints form one interval; unrecognised temporal residue
+     * disables deterministic correction rather than silently dropping a bound.
+     * Ranking and model correction consume the same calendar evidence. */
+    public static function calendarEvidence(string $text): array
     {
-        preg_match_all('/今天|昨天|前天|明天|本月|这月|上月|最近[一二两三四五六七八九十0-9]+天|(?:[0-9]{4}年)?[0-9]{1,2}月[0-9]{1,2}[日号]|(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])/u',$text,$matches,PREG_OFFSET_CAPTURE);
-        $codes=['今天'=>'TODAY','昨天'=>'YESTERDAY','前天'=>'DAY_BEFORE_YESTERDAY','明天'=>'TOMORROW','本月'=>'THIS_MONTH','这月'=>'THIS_MONTH','上月'=>'LAST_MONTH'];$terms=[];$skip=-1;
-        foreach($matches[0] as $i=>$token) {
-            if($i===$skip) continue; [$value,$offset]=$token;
-            if(isset($codes[$value])) { $terms[]=['code'=>$codes[$value]];continue; }
-            if(preg_match('/^最近(.+)天$/u',$value,$rolling)) { $terms[]=['code'=>'ROLLING_DAYS','days'=>$this->number($rolling[1])];continue; }
-            $end=$value;$next=$matches[0][$i+1]??null;
-            if($next && !isset($codes[$next[0]]) && preg_match('/^\s*(到|至)\s*$/uD',substr($text,$offset+strlen($value),$next[1]-$offset-strlen($value)))) { $end=$next[0];$skip=$i+1; }
-            $terms[]=['code'=>strpos($value,'月')!==false || strpos($end,'月')!==false?'CALENDAR_DATES':'EXPLICIT','start'=>$value,'end'=>$end];
-        }
-        return $terms;
+        $text=strtr($text,['这一个月'=>'本月','这个月'=>'本月','上个月'=>'上月','今日'=>'今天','昨日'=>'昨天','至今为止'=>'至今天','至今'=>'至今天']);
+        $number='[0-9一二两三四五六七八九十]+';
+        $endpoint='(?:今天|昨天|前天|明天|本月|这月|上月|最近'.$number.'天|(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])|(?:[0-9]{4}年|今年|去年)?'.$number.'月(?:份)?(?:'.$number.'[日号])?)';
+        $pattern='/(?:从|自)?(?<start>'.$endpoint.')(?:\s*(?:开始)?\s*(?:一直到|截至|截止到|到|至)\s*(?<end>'.$endpoint.'|现在|目前))?(?:为止)?/u';
+        $terms=[];$codes=['今天'=>'TODAY','昨天'=>'YESTERDAY','前天'=>'DAY_BEFORE_YESTERDAY','明天'=>'TOMORROW','本月'=>'THIS_MONTH','这月'=>'THIS_MONTH','上月'=>'LAST_MONTH'];
+        $remainder=preg_replace_callback($pattern,static function(array $m) use(&$terms,$codes): string {
+            $start=$m['start'];$end=$m['end']??'';
+            if ($end!=='') $terms[]=['code'=>'CALENDAR_DATES','start'=>$start,'end'=>$end];
+            elseif (isset($codes[$start])) $terms[]=['code'=>$codes[$start]];
+            elseif (preg_match('/^最近(.+)天$/u',$start,$rolling)) $terms[]=['code'=>'ROLLING_DAYS','days'=>(new self())->number($rolling[1])];
+            else $terms[]=['code'=>strpos($start,'月')!==false?'CALENDAR_DATES':'EXPLICIT','start'=>$start,'end'=>$start];
+            return '【日期】';
+        },$text);
+        // Unsupported calendar qualifiers must retain model ownership. The
+        // recognised endpoint alone cannot prove a complete customer interval.
+        $remaining=str_replace('【日期】',' ',$remainder);
+        $complete=!preg_match('/年|月|日|号|季度|星期|周|半年|以来|至今|截至|截止|上旬|中旬|下旬|月初|月底/u',$remaining)
+            && !preg_match('/(?:到|至)\s*【日期】|【日期】\s*(?:初|底|末|到|至)|(?:从|自)\s*$/u',$remainder);
+        return ['periods'=>$terms,'complete'=>$complete,'remainder'=>$remaining];
     }
 }

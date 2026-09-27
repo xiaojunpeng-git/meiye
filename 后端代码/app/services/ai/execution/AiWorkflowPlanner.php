@@ -231,11 +231,12 @@ final class AiWorkflowPlanner
         if (($term['code'] ?? '') === 'EXPLICIT') return $this->range($term['start'] ?? null, $term['end'] ?? null);
         $code=$term['code']??'';
         if ($code==='CALENDAR_DATES') {
-            $normalize=function($value) use($today) {
-                if (is_string($value) && preg_match('/^(?:([0-9]{4})年)?([0-9]{1,2})月([0-9]{1,2})[日号]$/uD',$value,$m)) return sprintf('%04d-%02d-%02d',$m[1]!==''?(int)$m[1]:(int)substr($today,0,4),(int)$m[2],(int)$m[3]);
-                return $value;
-            };
-            return $this->range($normalize($term['start']??null),$normalize($term['end']??null));
+            $start=$this->calendarEndpoint($term['start']??null,$today,false);
+            // An omitted year on the second month inherits the stated start
+            // year, never an unrelated server year. Reversed ranges remain invalid.
+            $end=$term['end']??null;
+            if (is_string($end) && preg_match('/^[0-9一二两三四五六七八九十]+月/u',$end)) $end=substr($start,0,4).'年'.$end;
+            return $this->range($start,$this->calendarEndpoint($end,$today,true));
         }
         if ($code==='ROLLING_DAYS') {
             return $this->normalizeNaturalPeriod(['kind'=>'relative_days','days'=>$term['days']??null,'end_offset_days'=>0],$today);
@@ -251,6 +252,28 @@ final class AiWorkflowPlanner
     }
     /** Shared date normalization for capability-driven planners; no model date arithmetic. */
     public function normalizePeriod(array $term,string $today): array { return $this->period($term,$today); }
+    /** Month precision means first/last day, with the current month to date.
+     * Both endpoints use the server business day; strict date validation is
+     * retained, so invalid dates cannot roll over into another month. */
+    private function calendarEndpoint($value,string $today,bool $end): string
+    {
+        $relative=['今天'=>'TODAY','现在'=>'TODAY','目前'=>'TODAY','昨天'=>'YESTERDAY','前天'=>'DAY_BEFORE_YESTERDAY','明天'=>'TOMORROW','本月'=>'THIS_MONTH','这月'=>'THIS_MONTH','上月'=>'LAST_MONTH'];
+        if (is_string($value) && isset($relative[$value])) return $this->period(['code'=>$relative[$value]],$today)[$end?'end':'start'];
+        if (is_string($value) && preg_match('/^(?:(?<year>[0-9]{4})年|(?<relative>今年|去年))?(?<month>[0-9一二两三四五六七八九十]+)月(?:份)?(?:(?<day>[0-9一二两三四五六七八九十]+)[日号])?$/uD',$value,$m)) {
+            $number=static function(string $text): int {
+                if (ctype_digit($text)) return (int)$text;
+                $digits=['一'=>1,'二'=>2,'两'=>2,'三'=>3,'四'=>4,'五'=>5,'六'=>6,'七'=>7,'八'=>8,'九'=>9];
+                if (isset($digits[$text])) return $digits[$text];
+                if (preg_match('/^([一二三])?十([一二三四五六七八九])?$/u',$text,$parts)) return ($digits[$parts[1]??'']??1)*10+($digits[$parts[2]??'']??0);
+                throw new AiContractException('AI_DATE_INVALID');
+            };
+            $year=($m['year']??'')!==''?(int)$m['year']:(int)substr($today,0,4)-(($m['relative']??'')==='去年'?1:0);
+            $date=$this->date(sprintf('%04d-%02d-%02d',$year,$number($m['month']),($m['day']??'')!==''?$number($m['day']):1));
+            if (($m['day']??'')!=='' || !$end) return $date->format('Y-m-d');
+            return $date->format('Y-m')===substr($today,0,7)?$today:$date->format('Y-m-t');
+        }
+        return $this->date($value)->format('Y-m-d');
+    }
     /** Resolves meaning only. Bounds here are calendar representation, not query capacity. */
     public function normalizeNaturalPeriod(array $period,string $today): array
     {
