@@ -19,7 +19,7 @@ assert.ok(browserEntry.includes("el('small', '够智能、够准确、够便捷'
 // its actual state functions, not a copied implementation, but is NOT a native
 // UTS compiler, picker, H5 layout or device lifecycle acceptance test.
 const script = source.match(/<script setup lang="uts">([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '');
-const expose = '\nglobalThis.controller = {answerPresentation,presentationGroups,openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,editGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,load,resumeActive,elapsedLabel,refs:{question,progress,clarification,choices,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy,activeQuestion,activeElapsedSeconds,activeRunState,messageAnchor},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
+const expose = '\nglobalThis.controller = {onComposerLineChange,onComposerInput,resetComposerSize,answerPresentation,presentationGroups,openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,editGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,load,resumeActive,elapsedLabel,refs:{composerInputHeight,composerExpanded,question,progress,clarification,choices,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy,activeQuestion,activeElapsedSeconds,activeRunState,messageAnchor},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
 const code = esbuild.transformSync(script + expose, { loader: 'ts', target: 'es2020' }).code;
 const schema = 'mohe-clarification-v2'; let checks = 0;
 const clean = value => JSON.parse(JSON.stringify(value));
@@ -358,7 +358,25 @@ for (const marker of ['mode="date"', 'currentGuidanceFields()', '修改已确认
   records[0].rounds.push({ question: '移动引导测试', answer: '已校验', run_id: 'mobile-run', generation: 1, created_at: records[0].created_at }); f.storage.set(key, records);
   f.api.accept(f.finish()); eq(f.api.load()[0].rounds.length, 1); eq(f.api.refs.displayed.value.length, 1); f.unmount();
 }
-console.log(`R5 mobile production-controller: ${checks} checks PASS (TS-lowered controller + callback fixtures; not H5/native UI acceptance)`);
+// R47: execute real sizing handlers, including linechange arriving before v-model.
+{
+  const f = setup(); const r = f.api.refs;
+  const line = n => f.api.onComposerLineChange({detail:{lineCount:n}});
+  line(2); eq([r.composerInputHeight.value,r.composerExpanded.value], [66,true]);
+  line(3); eq(r.composerInputHeight.value,94);
+  line(20); eq(r.composerInputHeight.value,144);
+  line(1); eq([r.composerInputHeight.value,r.composerExpanded.value],[38,false]);
+  line(NaN); line(0); eq(r.composerInputHeight.value,38);
+  line(4); f.api.onComposerInput({detail:{value:''}});
+  eq([r.composerInputHeight.value,r.composerExpanded.value],[38,false]);
+  line(3); r.question.value='测试长文本'; f.api.submit();
+  eq([r.composerInputHeight.value,r.composerExpanded.value],[38,false]);
+  assert.match(source, /:fixed="platformUsesNativeCanvas" :auto-height="false"/);
+  assert.match(source, /height: composerInputHeight/);
+  assert.match(source, /ai-composer--expanded\{padding:12px 54px 56px/);
+  f.unmount();
+}
+console.log(`R5/R47 mobile production-controller: ${checks} checks PASS (TS-lowered controller + callback fixtures; not H5/native UI acceptance)`);
 
 // R45: desktop and mobile consume the same nested presentation; no query or metric recomputation.
 {
