@@ -471,7 +471,9 @@ final class AiAnswerRenderer
             return $last['label'] . '的' . $last['metric'] . '为' . $last['value'] . $last['unit'] . '。';
         }
         if ($shape==='breakdown' && $rows) return '已按'.implode('、',$metricNames ?: ['所选指标']).'列出分组明细。';
-        if (in_array($shape, ['ranking', 'trend','breakdown'], true)) return '本期间没有符合当前筛选条件的' . implode('、', $metricNames ?: ['数据']) . '数据。';
+        // Empty query results are successful answers. Name the measurement
+        // plainly; the existing date note supplies the exact queried period.
+        if (in_array($shape, ['ranking', 'trend','breakdown'], true)) return '所选时段暂无符合条件的' . implode('、', $metricNames ?: ['业务']) . '记录。';
         return '已按您当前报表的数据范围查询。';
     }
 

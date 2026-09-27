@@ -30,14 +30,23 @@ final class ObjectDetailContinuationResolver
             $member=(new MemberDetailContinuationResolver())->resolve($query,$view,$request);
             return $member+['object_kind'=>'member'];
         }
-        if (!in_array($kind,['person','store'],true)
+        // A plural continuation can replay any registry-backed ranked detail
+        // profile already captured for these identities. It does not grant a
+        // new single-object query capability or read different objects.
+        $rankedSet=$shape==='ranking' && ($request['target']??null)==='set'
+            && ($request['ordinal']??null)===null && is_string($kind)
+            && \app\services\ai\execution\AiRankingPresentationMetricResolver::detail(
+                \app\services\query\metric\MetricReadViewServices::metricCapabilities(),
+                $effective['metric_codes'][0]??'', $kind
+            )!==[];
+        if ((!in_array($kind,['person','store'],true) && !$rankedSet)
             ||!in_array($request['target']??null,['single','set'],true)||($request['view']??null)!=='summary') {
             throw new RuntimeException('AI_OBJECT_DETAIL_NOT_READY');
         }
         $rows=$shape==='ranking'?$this->rankingRows($view,$kind):$this->selectedRows($effective,$view,$kind);
         // A plural request denotes the entire displayed ranked population,
         // never its first row. Identities and order come only from this view.
-        if ($shape==='ranking' && $request['target']==='set' && count($rows)>1 && ($request['ordinal']??null)===null) {
+        if ($rankedSet && (count($rows)>1 || !in_array($kind,['person','store'],true))) {
             return ['object_kind'=>$kind,'objects'=>$rows,'view'=>'summary'];
         }
         if ($request['target']==='set'&&(count($rows)!==1||($request['ordinal']??null)!==null)) {

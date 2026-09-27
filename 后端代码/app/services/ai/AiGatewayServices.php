@@ -1005,13 +1005,12 @@ final class AiGatewayServices
         $exactRankingCollectionReason=null;
         $exactRankingCollection=$this->compileExactRegisteredRankingCollection(
             (string)$body['question'],$exactObjectVocabulary,$caps,$body['output_format'],$today,
-            $exactRankingCollectionReason
+            $exactRankingCollectionReason,$sourceContext
         );
         if ($exactRankingCollection!==null) {
-            // The admitted sentence is self-contained and therefore replaces,
-            // rather than inherits, any signed predecessor. Exact metric,
-            // object, time and direction carriers make this safe even when a
-            // browser still submits an older context reference.
+            // Exact metric, object and ranking carriers replace those fields;
+            // the shared context policy retains only a compatible store scope
+            // and, when omitted here, the verified preceding period.
             $checkpoint();
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'deterministic_registered_ranking_collection_admitted');
             return $exactRankingCollection;
@@ -2909,7 +2908,7 @@ final class AiGatewayServices
      */
     private function compileExactRegisteredRankingCollection(
         string $question,array $objectVocabulary,array $capabilities,string $format,string $today,
-        ?string &$reason=null
+        ?string &$reason=null,?array $sourceContext=null
     ): ?array {
         // The ordinary model path intentionally starts with a neutral empty
         // projection. This closed admission may read only the shared calendar
@@ -2939,12 +2938,14 @@ final class AiGatewayServices
             $normalizedQuestion,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[])),
             $defaultRankObjects,$dateProjection['semantic_intent']['rank_limit']??null
         );
-        // Ordinary exact extrema require an explicit period. A closed member
-        // population-detail request may omit it and deliberately inherits the
-        // existing dimension planner's documented same-day default; this is
-        // the same period used by the former model path, not a new gateway
-        // date rule. More than one date was already rejected above.
+        // A missing period may use one compatible verified predecessor. Only
+        // a genuinely new conversation uses the planner's same-day default.
+        // Unresolved source constraints stay on the existing understanding path.
         if ($memberPopulationDetail===null && $dateTermCount!==1) {$reason='date_or_format';return null;}
+        $priorQueries=isset($sourceContext['items'])?array_column($sourceContext['items'],'query'):
+            (isset($sourceContext['query'])?[$sourceContext['query']]:[]);
+        $inherited=IntentContextMerger::rankingConstraints($priorQueries,$dateTermCount===0,$capabilities['metric_readiness']??[]);
+        if ($inherited===null) {$reason='context_constraints';return null;}
         $memberDetailRequest=$memberPopulationDetail['detail']??null;
         $items=$memberPopulationDetail!==null?[$memberPopulationDetail['ranking']]:$admission->match(
             $normalizedQuestion,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[])),$defaultRankObjects
@@ -2965,6 +2966,7 @@ final class AiGatewayServices
                 );
             } catch (\Throwable $ignored) {$reason='plan_compile';return null;}
             if (($compiled['kind']??null)!=='plan' || !is_array($compiled['plan']??null)) {$reason='plan_shape';return null;}
+            foreach ($inherited as $field=>$value) $compiled['plan']['query'][$field]=$value;
             $metricContract=$capabilities['metric_readiness'][$item['metric_code']]??null;
             if (is_array($metricContract)
                 &&($metricContract['filter_grain']??null)===$objectKind
@@ -5151,12 +5153,13 @@ final class AiGatewayServices
         $view=$result['evidence'];
         // An empty population has no private assets to read; retain its exact
         // empty answer instead of pretending that a member could be selected.
-        if (empty($view['results'][0]['rows'])) {
+        $memberResolver=new \app\services\ai\context\MemberDetailContinuationResolver();
+        if ($memberResolver->isEmptyPopulation($view)) {
             [$evidenceRef,$answerRef]=$this->saveResults($owner,$id,$generation,$result['plan'],$view,$result['answer'],$result['trace'],$contextMeaning);
             return $this->runs->publish($owner,$id,$generation,$worker,$evidenceRef,$answerRef);
         }
         $request=$compiled['_member_detail_request'];$request['target']='set';$request['ordinal']=null;
-        $resolved=(new \app\services\ai\context\MemberDetailContinuationResolver())->resolve($view['query'],$view,$request);
+        $resolved=$memberResolver->resolve($view['query'],$view,$request);
         return $this->executeMemberDetail($context,$owner,$id,$generation,$worker,$snapshot,
             ['member_detail'=>$resolved+['source_query'=>$view['query'],'source_view_ref'=>$view['read_consistency_ref'],
                 'source_expires_at'=>$view['expires_at'],'population_answer'=>$result['answer'],
@@ -5734,7 +5737,7 @@ final class AiGatewayServices
             'AI_INTENT_UNRESOLVED'=>'我还没准确理解这句话最想了解的经营情况。请换一种日常说法补充您想看的内容；已经确认的条件会保留，本次没有查询近似数据。',
             'AI_CAPABILITY_NOT_READY'=>'已识别您的需求，但对应的数据能力或筛选组合尚未接入，暂不能准确提供结果。',
             'AI_CONTEXT_REQUIRED'=>'这句追问缺少可核对的前文条件。请补充您想延续的对象、时间或查看结果，我会按当前权限重新查询。',
-            'AI_RESULT_REFERENCE_UNAVAILABLE'=>'无法在原查询结果中安全确认您指的对象，未改用新结果中的同名或同序对象。请重新说明对象。',
+            'AI_RESULT_REFERENCE_UNAVAILABLE'=>'暂时无法确认要查看的详情，请补充名称或重新查询列表。',
             'AI_OBJECT_DETAIL_SELECTION_REQUIRED'=>'上一份结果包含多个对象，请说明要看第几位或直接说出对象；本次没有替您选择。',
             'AI_OBJECT_DETAIL_NOT_READY'=>'已理解您想继续查看这个对象，但该对象的这类信息尚未接入统一查询；本次没有改查近似数据。',
             'AI_MEMBER_DETAIL_SELECTION_REQUIRED'=>'上一份名单有多位会员，请说明要看第几位会员的权益，例如“第一个会员的权益明细”。本次没有替您选择会员。',

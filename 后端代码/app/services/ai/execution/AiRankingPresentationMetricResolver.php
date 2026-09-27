@@ -28,7 +28,13 @@ final class AiRankingPresentationMetricResolver
             if (($metric['ai_query_ready']??true)!==true || !in_array($kind,(array)($metric['ranking_detail_object_kinds']??[]),true)) continue;
             $records[]=['code'=>$code,'order'=>self::overviewOrder($metric,(string)$kind)];
         }
-        if (!$records) return [];
+        if (!$records) {
+            // Sale-object rankings already carry a verified multi-column
+            // overview. An explicit detail request reuses that same profile;
+            // absence of a second profile must not disable existing facts.
+            $overview=self::resolve($metrics,$primaryMetric,$objectKind);
+            return count($overview)>1?$overview:[];
+        }
         usort($records,static function(array $a,array $b): int { return [$a['order'],$a['code']]<=>[$b['order'],$b['code']]; });
         $codes=[$primaryMetric];
         foreach ($records as $record) if (!in_array($record['code'],$codes,true) && count($codes)<self::MAX_METRICS) $codes[]=$record['code'];

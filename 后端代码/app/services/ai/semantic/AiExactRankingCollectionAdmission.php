@@ -21,8 +21,8 @@ final class AiExactRankingCollectionAdmission
      * available only when the sentence itself closes every execution carrier:
      * one registered analytical object, one direction, one explicit row limit and
      * a genuine detail request. The caller accepts at most one calendar range;
-     * if it is omitted, the existing dimension planner owns the same-day
-     * default used by all broad dimension rankings.
+     * if it is omitted, the gateway first applies verified context. A new
+     * conversation retains the dimension planner's same-day default.
      * The business metric is never inferred from wording; it must be the sole
      * active registry default shared by the selected ranking capability.
      *

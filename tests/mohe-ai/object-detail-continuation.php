@@ -161,4 +161,15 @@ foreach (['AI_OBJECT_DETAIL_SELECTION_REQUIRED','AI_OBJECT_DETAIL_NOT_READY'] as
         &&$outcome->invoke(null,$run)==='neutral','detail boundary is actionable rather than a technical failure');
 }
 
+// R49 sale-object detail follow-ups reuse the already captured profile and
+// IDs. A plural request stays a set even when just one result exists.
+foreach (['project','product'] as $kind) {
+    $q=$personQuery;$q['metric_codes']=['sales_amount'];$q['business_filters']=['object_kind'=>$kind];
+    $v=['query'=>$q,'results'=>[['object_kind'=>$kind,'rows'=>['top'=>[
+        ['entity_id'=>71,'entity_name'=>'测试对象','amount_cents'=>0]
+    ]]]]];
+    $set=$resolver->resolve($q,$v,['view'=>'summary','target'=>'set','ordinal'=>null]);
+    $check($set['object_kind']===$kind && $set['objects']===[['id'=>71,'label'=>'测试对象']],
+        $kind.' singleton plural detail keeps the original zero-valued identity');
+}
 echo "object-detail-continuation: {$checks} checks passed\n";

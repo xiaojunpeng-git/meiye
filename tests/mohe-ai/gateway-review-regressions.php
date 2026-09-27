@@ -107,7 +107,7 @@ $check(($comparisonRanking['table']['columns'][0]['key'] ?? null)==='period_labe
 $cashView['query']['compare_range']=null;
 $cashView['results']=[['metric_code'=>'cash_performance','period'=>'current','rows'=>['top'=>[]]]];
 $emptyRanking=$renderer->render($cashView);
-$check(strpos($emptyRanking['summary'],'本期间没有符合当前筛选条件的现金业绩数据。')===0 && !isset($emptyRanking['table']),
+$check(strpos($emptyRanking['summary'],'所选时段暂无符合条件的现金业绩记录。')===0 && !isset($emptyRanking['table']),
     'empty verified rankings state no matching data instead of a generic processing claim');
 $trend=$renderer->render(['query'=>['query_shape'=>'trend','start_date'=>'2026-09-08','end_date'=>'2026-09-08','compare_range'=>['start'=>'2026-09-07','end'=>'2026-09-07']],
     'data_as_of'=>'2026-09-08T12:00:00+08:00','results'=>[

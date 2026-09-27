@@ -135,4 +135,49 @@ foreach (['这个月门店业绩前三的门店详情'=>'store','这个月员工
 }
 $verify($admission->matchPopulationDetail('这个月门店业绩前三名的后两名详情',$vocabulary,array_keys($contracts),$sharedDefaults,3)===null,
     'conflicting population directions cannot enter the closed path');
+// R49: a named new ranking replaces the old dimension/ranking, while only
+// compatible verified dates and store scope survive across turns.
+$prior=$prefixedPlan['plan']['items'][1]['plan']['query'];
+$prior['store_ids']=[12];
+$source=['query'=>$prior];
+$args=['会员业绩最高的前五名详情',$vocabulary,$capabilities,'screen','2026-09-27',&$reason,$source];
+$continued=$rankingMethod->invokeArgs($gateway,$args);
+$q=$continued['plan']['query'];
+$verify($q['start_date']==='2026-09-01' && $q['end_date']==='2026-09-25'
+    && $q['store_ids']===[12] && $q['business_filters']===['object_kind'=>'member']
+    && $q['ranking']===['direction'=>'top','limit'=>5], 'R49 carries the verified period/scope without project or bottom-ranking residue');
+$args[0]='今天会员业绩最高的前五名详情';
+$explicit=$rankingMethod->invokeArgs($gateway,$args);
+$verify($explicit['plan']['query']['start_date']==='2026-09-27'
+    &&$explicit['plan']['query']['store_ids']===[12], 'explicit date wins without dropping store scope');
+$verify($memberPlan['plan']['query']['start_date']==='2026-09-25','new conversation retains the documented same-day default');
+$args[0]='会员业绩最高的前五名详情';
+foreach (['selection','comparison','mixed_dates'] as $case) {
+    $bad=$source;
+    if ($case==='selection') $bad['query']['business_filters']['selection_ref']='project:1';
+    if ($case==='comparison') $bad['query']['compare_range']=['start'=>'2026-08-01','end'=>'2026-08-25'];
+    if ($case==='mixed_dates') {
+        $other=$prior;$other['start_date']='2026-09-20';
+        $bad=['items'=>[['query'=>$prior],['query'=>$other]]];
+    }
+    $args[6]=$bad;
+    $verify($rankingMethod->invokeArgs($gateway,$args)===null && $reason==='context_constraints',
+        'R49 '.$case.' retains ordinary contextual understanding instead of silently replacing restrictions');
+}
+$args[6]=['items'=>[['query'=>$prior],['query'=>$prior]]];
+$verify($rankingMethod->invokeArgs($gateway,$args)['plan']['query']['start_date']==='2026-09-01',
+    'consistent collection dates can be reused without an extra model call');
+// Cross-dimension continuations include registered personnel cohorts. Those
+// defaults follow their own metric, unlike a specifically selected employee.
+$source=['query'=>$prior];
+foreach (['门店'=>'store','员工'=>'person','项目'=>'project','产品'=>'product','会员'=>'member'] as $label=>$kind) {
+    $args=[$label.'业绩最高的前五名详情',$vocabulary,$capabilities,'screen','2026-09-27',&$reason,$source];
+    $next=$rankingMethod->invokeArgs($gateway,$args);
+    $nextQuery=$next['plan']['query']??[];
+    $actualKind=$nextQuery['business_filters']['object_kind']??'store';
+    $verify($reason===null && $actualKind===$kind && ($nextQuery['start_date']??null)==='2026-09-01'
+        &&($nextQuery['store_ids']??null)===[12] && ($nextQuery['ranking']['limit']??null)===5,
+        'R49 sequential switch to '.$kind.' keeps only compatible context');
+    $source=['query'=>$nextQuery];
+}
 echo "exact ranking collection admission: {$checks} checks PASS\n";

@@ -8,6 +8,41 @@ namespace app\services\ai\context;
 final class IntentContextMerger
 {
     /**
+     * Closed rankings replace their metric, dimension and ranking explicitly.
+     * Only a common verified period and store scope can survive that change.
+     * Concrete selections or incompatible sources remain on the normal
+     * contextual understanding path instead of silently widening the query.
+     */
+    public static function rankingConstraints(array $queries,bool $inheritPeriod,array $metricReadiness=[]): ?array
+    {
+        $constraints=null;
+        foreach ($queries as $query) {
+            if (!is_array($query) || !is_array($query['store_ids']??null)
+                || !is_array($query['business_filters']??null)
+                || !empty($query['condition_set']) || !empty($query['aggregate_condition'])) return null;
+            $filters=$query['business_filters'];
+            // A registry-owned default cohort describes who contributes to
+            // this metric, not a customer-selected person/project. It changes
+            // with the metric; concrete selections must still be understood.
+            $metric=$metricReadiness[$query['metric_codes'][0]??'']??[];
+            if (count($query['metric_codes']??[])===1 && isset($filters['selection_ref'])
+                && $filters['selection_ref']===($metric['analysis_default_selection_ref']??null)
+                && ($filters['object_kind']??null)===($metric['filter_grain']??null)) unset($filters['selection_ref']);
+            if (array_diff(array_keys($filters),['object_kind'])!==[]) return null;
+            $candidate=['store_ids'=>$query['store_ids']];
+            sort($candidate['store_ids']);
+            if ($inheritPeriod) {
+                if (!empty($query['compare_range']) || !is_string($query['start_date']??null)
+                    || !is_string($query['end_date']??null)) return null;
+                $candidate['start_date']=$query['start_date'];$candidate['end_date']=$query['end_date'];
+            }
+            if ($constraints!==null && $constraints!==$candidate) return null;
+            $constraints=$candidate;
+        }
+        return $constraints??[];
+    }
+
+    /**
      * Project only the verified query meaning that the model may reuse.  The
      * optional origin says whether the preceding metric perspective came from
      * the customer or from the platform's first-answer suggestion; it contains

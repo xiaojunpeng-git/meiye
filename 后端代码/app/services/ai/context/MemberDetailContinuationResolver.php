@@ -10,6 +10,26 @@ use RuntimeException;
  */
 final class MemberDetailContinuationResolver
 {
+    /** Empty is a valid query outcome, never a substitute for malformed rows. */
+    public function isEmptyPopulation(array $view): bool
+    {
+        return $this->populationRows($view)===[];
+    }
+
+    /** Both the execution guard and detail selection inspect actual members. */
+    private function populationRows(array $view): array
+    {
+        $query=$view['query']??null;
+        if (!is_array($query)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        if (($query['query_shape']??null)==='ranking') return $this->rankingRows($view);
+        if (($query['query_shape']??null)!=='condition_list'
+            || ($query['condition_set']['subject']??null)!=='member'
+            || !is_array($view['results'][0]['rows']??null)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        $rows=$view['results'][0]['rows'];
+        foreach ($rows as $row) $this->member($row,[]);
+        return $rows;
+    }
+
     /** Resolve one ordinal or the complete bounded, verified displayed set. */
     public function resolve(array $query,array $view,array $request): array
     {
@@ -17,17 +37,8 @@ final class MemberDetailContinuationResolver
         // checked its signed read-view reference. Use the Reader-normalized
         // query carried by that replay; comparing it byte-for-byte with the
         // planner input would reject harmless normalization such as ranges.
-        $effectiveQuery=$view['query']??null;
-        if (!is_array($effectiveQuery)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
-        $shape=$effectiveQuery['query_shape']??null;
-        if ($shape==='condition_list'&&($effectiveQuery['condition_set']['subject']??null)==='member') {
-            $rows=$view['results'][0]['rows']??null;
-        } elseif ($shape==='ranking') {
-            $rows=$this->rankingRows($view);
-        } else {
-            throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
-        }
-        if (!is_array($rows)||$rows===[]) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        $rows=$this->populationRows($view);
+        if ($rows===[]) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
         $target=$request['target']??null;$ordinal=$request['ordinal']??null;
         // "This member" is safe only for a singleton result. Explicit plural
         // requests may read the verified set; an ambiguous singular must not
@@ -69,17 +80,28 @@ final class MemberDetailContinuationResolver
     /** Ranking groups may repeat one tied member; keep first display order and one identity. */
     private function rankingRows(array $view): array
     {
-        $rows=[];$seen=[];
+        $rows=[];$seen=[];$matched=false;
         foreach ((array)($view['results']??[]) as $result) {
-            if (($result['object_kind']??null)!=='member'||!is_array($result['rows']??null)) continue;
-            foreach (['top','bottom'] as $group) foreach ((array)($result['rows'][$group]??[]) as $row) {
-                $memberId=$row['member_id']??($row['entity_id']??null);
-                if (!is_int($memberId)||$memberId<1||isset($seen[$memberId])) continue;
-                $label=$row['member_name']??($row['entity_name']??null);
-                if (!is_string($label)||trim($label)==='') continue;
-                $seen[$memberId]=true;$rows[]=['member_id'=>$memberId,'member_name'=>trim($label)];
+            if (($result['object_kind']??null)!=='member') continue;
+            $groups=$result['rows']??null;
+            if (!is_array($groups) || array_intersect(array_keys($groups),['top','bottom'])===[]
+                || array_diff(array_keys($groups),['top','bottom'])!==[]) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+            $matched=true;
+            foreach ($groups as $groupRows) {
+                if (!is_array($groupRows)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+                foreach ($groupRows as $row) {
+                    if (!is_array($row)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+                    $memberId=$row['member_id']??($row['entity_id']??null);
+                    $label=$row['member_name']??($row['entity_name']??null);
+                    // Validate before deduplicating: a damaged row cannot become
+                    // an empty success or silently shrink the requested member set.
+                    $this->member(['member_id'=>$memberId,'member_name'=>$label],[]);
+                    if (isset($seen[$memberId])) continue;
+                    $seen[$memberId]=true;$rows[]=['member_id'=>$memberId,'member_name'=>trim($label)];
+                }
             }
         }
+        if (!$matched) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
         return $rows;
     }
 }

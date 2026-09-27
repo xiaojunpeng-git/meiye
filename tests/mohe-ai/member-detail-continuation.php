@@ -128,4 +128,22 @@ foreach (['AI_MEMBER_DETAIL_SELECTION_REQUIRED','AI_MEMBER_DETAIL_SET_NOT_READY'
         &&$outcome->invoke(null,$run)==='neutral','member boundary offers an ordinal and is not a technical outage');
 }
 
+// R49: a valid empty ranking ends normally; malformed identities remain an
+// error, and a real zero-valued member still has a selectable detail record.
+$resolver=new MemberDetailContinuationResolver();
+$empty=$rankingView;$empty['results'][0]['rows']=['top'=>[]];
+$check($resolver->isEmptyPopulation($empty),'nested empty ranking is a normal empty population');
+$zero=$rankingView;$zero['results'][0]['rows']['top'][0]['amount_cents']=0;
+$check(!$resolver->isEmptyPopulation($zero),'zero money is not an empty member');
+$check(count($resolver->resolve($rankingQuery,$zero,['target'=>'set'])['members'])===2,
+    'fewer than five results retain the actual two members without padding');
+foreach (['missing_groups','bad_id','bad_name','bad_group'] as $case) {
+    $bad=$rankingView;
+    if ($case==='missing_groups') $bad['results'][0]['rows']=[];
+    if ($case==='bad_id') $bad['results'][0]['rows']['top'][0]['entity_id']=null;
+    if ($case==='bad_name') $bad['results'][0]['rows']['top'][0]['entity_name']='';
+    if ($case==='bad_group') $bad['results'][0]['rows']['top']=null;
+    try {$resolver->isEmptyPopulation($bad);throw new LogicException('accepted damaged ranking '.$case);}
+    catch (RuntimeException $e) {$check($e->getMessage()==='AI_RESULT_REFERENCE_UNAVAILABLE','reject damaged '.$case);}
+}
 echo "member-detail-continuation: {$checks} checks passed\n";
