@@ -17,11 +17,11 @@ $app->instance('json',new class {
 });
 $controller=new class {
     use \app\controller\ai\AiHttpActions;
-    public $request; public $refreshes=0;
+    public $request; public $refreshes=0; public $mobile=false; public $contextFailure=null;
     protected function aiGateway() { return app()->make(\app\services\ai\AiGatewayServices::class); }
-    protected function buildAiContext() { return ['account_id'=>1,'terminal'=>'platform','can_use'=>true]; }
+    protected function buildAiContext() { if ($this->contextFailure) throw $this->contextFailure; return ['account_id'=>1,'terminal'=>'platform','can_use'=>true]; }
     protected function refreshAiContext() { ++$this->refreshes; return $this->buildAiContext(); }
-    protected function isMobileAi() { return false; }
+    protected function isMobileAi() { return $this->mobile; }
 };
 $checks=0;
 $check=function ($condition,$label) use (&$checks) { if (!$condition) { throw new RuntimeException($label); } ++$checks; };
@@ -52,4 +52,18 @@ $check(($data['data']['error_code']??null)==='AI_PERMISSION_DENIED','Known AI de
 foreach ([\app\controller\admin\v1\ai\Ai::class,\app\controller\cashier\v3\Ai::class,\app\controller\mobile\merchant\Ai::class] as $class) {
     $check(class_exists($class) && method_exists($class,'aiExecute') && method_exists($class,'aiManagementRebase'),'Actual controller inheritance loads');
 }
+// Expired merchant auth fails before any query, preserving the shared public
+// contract without exposing arbitrary exceptions from the AI gateway.
+$controller->mobile=true;
+$controller->request->setPathinfo('api/mobile/merchant/ai/runs')->withHeader(['x-mobile-request-id'=>'fixture-request']);
+$controller->contextFailure=\app\services\mobile\protocol\MobileApiException::business('MERCHANT_SESSION_EXPIRED','商家会话已失效，请重新进入。','SESSION_TIMEOUT');
+foreach (['aiCreate','aiBootstrap'] as $action) {
+    $before=count($gateway->calls); $response=$controller->$action(); $data=$response->getData();
+    $check($response->getCode()===401 && $data['errorCode']==='MERCHANT_SESSION_EXPIRED','Expired login remains a 401 mobile contract error');
+    $check($data['sessionEndCause']==='SESSION_TIMEOUT' && $data['requestId']==='fixture-request','Session cause and request tracing survive AI handling');
+    $check(count($gateway->calls)===$before && $response->getHeader('Cache-Control')==='no-store','Expired login never reaches data/model gateway or cache');
+}
+$controller->contextFailure=null; $gateway->throws=true;
+$data=$controller->aiCreate()->getData();
+$check($data['errorCode']==='AI_REQUEST_FAILED' && strpos(json_encode($data),'SECRET_SQL_PROMPT')===false,'Mobile raw exceptions still redacted');
 echo 'PASS '.$checks." HTTP action assertions; no DB/model/application boot.\n";

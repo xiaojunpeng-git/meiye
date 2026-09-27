@@ -3,6 +3,7 @@ namespace app\controller\ai;
 
 use app\services\ai\AiGatewayServices;
 use app\services\mobile\protocol\MobileApiResponse;
+use app\services\mobile\protocol\MobileApiException;
 
 /** Explicit action list; never route user-controlled operation names to the gateway. */
 trait AiHttpActions
@@ -59,6 +60,11 @@ trait AiHttpActions
                 : app('json')->success('ok',$result);
             return $response->header(['Cache-Control'=>'no-store']);
         } catch (\Throwable $exception) {
+            // Preserve the shared mobile login/protocol contract. Only typed,
+            // public contract failures bypass AI redaction, never raw errors.
+            if ($this->isMobileAi() && $exception instanceof MobileApiException) {
+                return MobileApiResponse::failure($exception,$this->request)->header(['Cache-Control'=>'no-store']);
+            }
             // Never return/log SQL, request content, tokens, prompts or provider errors here.
             $message=[
                 'AI_PERMISSION_DENIED'=>'当前账号没有此项操作权限。',

@@ -5,10 +5,12 @@ import { mobileApiOrigin } from '../platform/mobile-runtime-config.uts'
 
 export function mobileAiRequest(method : string, suffix : string, payload : any, done : (value : any) => void) : void {
   let session = merchantRequestSession(currentMerchantRoot())
-  if (session == null) { done({ ok:false, message:'请先登录商家端。' }); return }
+  // Local admission failures are known not to have reached the server; they
+  // must not enter the unknown-network retry path.
+  if (session == null) { done({ok:false,responseKnown:true,reason:'MERCHANT_SESSION_EXPIRED',message:'登录已失效，请重新登录商家端。'}); return }
   let contract : any = { contractVersion:'mobile-merchant-v1', endpoints:{ ai:{method:method,path:'/mobile/merchant/ai' + suffix,requestMetadataProfile:'MERCHANT_SESSION'} }, requestMetadataProfiles:{MERCHANT_SESSION:{required:{'X-Mobile-Contract-Version':'contractVersion','X-Mobile-Client-Session-Id':'clientSessionId','X-Mobile-Platform':'platform','X-Mobile-Request-Id':'requestId',Authorization:'Bearer <merchantToken>','X-Mobile-Active-Context-Id':'activeContextId','X-Mobile-State-Context-Id':'stateContextId'},forbidden:['Cookie']}} }
   let plan = buildMobileRequestPlan(contract,'ai',session)
-  if (plan == null) { done({ok:false,message:'登录上下文已失效。'}); return }
+  if (plan == null) { done({ok:false,responseKnown:true,reason:'MERCHANT_SESSION_EXPIRED',message:'登录已失效，请重新登录商家端。'}); return }
   let body = payload
   if (method == 'GET') {
     let names : any = {client_session_id:'X-Mohe-Ai-Client-Session-Id',run_delivery_token:'X-Mohe-Ai-Run-Delivery-Token',generation:'X-Mohe-Ai-Generation',window_token:'X-Mohe-Ai-Window-Token'}

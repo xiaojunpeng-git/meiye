@@ -163,6 +163,23 @@ function completedElapsedSeconds() : number { return Number.isSafeInteger(client
 // quiet so the label only appears when it adds useful reading context.
 function elapsedLabel(value : any) : string { let seconds = Number.isSafeInteger(value) && value > 0 ? Number(value) : 0; if (seconds == 0) return ''; let minutes = Math.floor(seconds / 60), remainder = seconds % 60; return minutes > 0 ? '用时 ' + String(minutes) + ' 分钟' + (remainder > 0 ? ' ' + String(remainder) + ' 秒' : '') : '用时 ' + String(seconds) + ' 秒' }
 function finishActiveRunStatus() : void { if (elapsedTimer != null) clearInterval(elapsedTimer); elapsedTimer = null; activeElapsedSeconds.value = 0; activeRunState.value = '正在思考' }
+// Admission failure is not a running query. Remove only its waiting bubble;
+// retained history and an uncertain request's idempotency key stay untouched.
+function stopQuestionWait() : void {
+  finishActiveRunStatus(); activeQuestion.value = ''; activeQuestionAnchor.value = ''; busy.value = false
+}
+// Authentication loss stops observation, not the server task. Preserve its
+// recovery envelope for the same account after login; never claim cancellation
+// or automatically replay the question with a different login context.
+function pauseForExpiredLogin(result : any) : boolean {
+  if (result == null || result.ok === true || result.reason != 'MERCHANT_SESSION_EXPIRED') return false
+  lifecycle++; if (timer != null) clearTimeout(timer); timer = null
+  if (pending != null && typeof pending.question == 'string') question.value = pending.question
+  stopQuestionWait(); guidanceBusy.value = false; clarification.value = null
+  if (run != null || pending != null) persistActive(true)
+  progress.value = '登录已失效，请退出魔核 AI，重新登录商家端后再试。'
+  return true
+}
 function showActiveQuestion(value : string) : void {
   activeQuestion.value = value; activeQuestionAnchor.value = 'ai-active-' + id()
   // Native scroll-view clamps a newest short turn at its lower edge unless
@@ -283,6 +300,7 @@ function schedulePoll() : void {
     if (source == null || expectedLifecycle != lifecycle || run == null || terminal() || run.run_id != source.run_id || run.generation != source.generation) return
     mobileAiRequest('GET','/runs/' + source.run_id,binding(),(r : any) => {
       if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+      if (pauseForExpiredLogin(r)) return
       if (r.ok) { accept(r.data); if (!terminal() && (run.status != 'WAITING_CLARIFICATION' || closeRequestedState.value || (run.clarification != null && queuedClarificationId == run.clarification.id))) schedulePoll() }
       else { if (unavailable(r)) { abandonUnavailableRun(); return }; progress.value = closeRequestedState.value ? '暂未确认取消结果。' : '连接中断，暂未确认任务结果。'; persistActive(); schedulePoll() }
     })
@@ -329,20 +347,23 @@ function submit() : void {
   let isNewRequest = pending == null
   if (isNewRequest) { activeGuidanceSchema = String(bootstrap.guidance_schema_version || ''); pending = {client_request_id:id(),conversation_id:conversation,client_session_id:sessionId,window_token:bootstrap.window_token,question:question.value.trim(),history:history,output_format:'screen',want_excel:wantExcel.value}; if (activeGuidanceSchema == guidanceSchema) pending.guidance_schema_version = guidanceSchema; if (contextRef.length > 0) pending.context_ref = contextRef; closeRequested = false; closeRequestedState.value = false; clientDeliveryStartedAt = Date.now(); showActiveQuestion(pending.question) }
   let restoringCancelledRequest = !isNewRequest && closeRequested
+  // Retrying an uncertain admission reuses its key, but restores the waiting
+  // bubble that was stopped when transport failed.
+  if (!isNewRequest) showActiveQuestion(pending.question)
   composerOptionsOpen.value = false; resetComposerSize()
   busy.value = true; closeRequested = restoringCancelledRequest; closeRequestedState.value = restoringCancelledRequest; run = null; question.value = ''; progress.value = '正在接纳请求'
   // A new customer question may replace only a completion tombstone.  It must
   // never take over another still-active page's Run.
   persistActive(false,false,isNewRequest)
   let stored = activeRecord()
-  if (stored == null || stored.owner_id != entryId || !samePendingRecord(stored,pending)) { let unsentQuestion = pending.question; pending = null; busy.value = stored != null; question.value = unsentQuestion; progress.value = stored == null ? '暂未保存请求，请重试发送。' : '正在恢复已开始的查询，完成后可继续提问。'; if (stored != null) { sessionId = stored.session_id; bootstrapSession(true) }; return }
+  if (stored == null || stored.owner_id != entryId || !samePendingRecord(stored,pending)) { let unsentQuestion = pending.question; pending = null; stopQuestionWait(); busy.value = stored != null; question.value = unsentQuestion; progress.value = stored == null ? '暂未保存请求，请重试发送。' : '正在恢复已开始的查询，完成后可继续提问。'; if (stored != null) { sessionId = stored.session_id; bootstrapSession(true) }; return }
   let expectedLifecycle = lifecycle, submitted = pending
   // Local file preference is not part of the AI question schema.
   let createBody : any = {...submitted}; delete createBody.want_excel
   mobileAiRequest('POST','/runs',createBody,(r : any) => {
     if (expectedLifecycle != lifecycle) { if (r.ok && r.data != null && r.data.accepted !== false) { let retained = retainLateAdmission(r.data,submitted); cancelLateAdmission(submitted,retained) }; return }
-    if (!r.ok) { busy.value = false; question.value = pending.question; if (r.responseKnown) { pending = null; clearActive(); progress.value = r.message } else { progress.value = '请求结果暂未确认，再次发送将重试同一任务。'; persistActive() }; return }
-    if (r.data.accepted === false) { busy.value = false; pending = null; clearActive(); progress.value = r.data.message || '当前使用人数较多，请稍后再问。'; return }
+    if (!r.ok) { question.value = submitted.question; stopQuestionWait(); if (r.responseKnown) { pending = null; clearActive(); progress.value = r.message } else { progress.value = '请求结果暂未确认，再次发送将重试同一任务。'; persistActive() }; pauseForExpiredLogin(r); return }
+    if (r.data.accepted === false) { question.value = submitted.question; stopQuestionWait(); pending = null; clearActive(); progress.value = r.data.message || '当前使用人数较多，请稍后再问。'; return }
     // New servers accept only after durable queueing.  During a staged rollout
     // keep the old synchronous trigger for a server that has not enabled its
     // compatible consumer yet.
@@ -361,6 +382,7 @@ function executeCompatibility(source : any,expectedLifecycle : number) : void {
   mobileAiRequest('POST','/runs/' + source.run_id + '/execute',body,(e : any) => {
     compatibilityExecuting = false
     if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+    if (pauseForExpiredLogin(e)) return
     if (e.ok) accept(e.data)
     else if (unavailable(e)) abandonUnavailableRun()
     else schedulePoll()
@@ -376,6 +398,7 @@ function cancelRun() : void {
     // delayed cancellation response from this retired component must not clear
     // that replacement's durable recovery record.
     if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+    if (pauseForExpiredLogin(r)) return
     if (r.ok) accept(r.data); else { progress.value = '暂未确认取消结果。'; schedulePoll() }
   })
 }
@@ -443,6 +466,7 @@ function confirmChoices() : void {
   let source = run, expectedLifecycle = lifecycle
   mobileAiRequest('POST','/runs/' + source.run_id + '/clarify',submitted,(r : any) => {
     if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+    if (pauseForExpiredLogin(r)) return
     if (r.ok) {
       queuedClarificationId = c.id
       guidanceSubmission = null; guidanceUnknown.value = false; guidanceBusy.value = false
@@ -475,6 +499,7 @@ function resumeActive(record : any) : void {
   let source = run, expectedLifecycle = lifecycle
   mobileAiRequest('GET','/runs/' + source.run_id,binding(),(r : any) => {
     if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
+    if (pauseForExpiredLogin(r)) return
     if (r.ok) {
       // A reload often reads exactly the last persisted version.  It still
       // represents an active Run and must continue polling even when accept
@@ -508,10 +533,27 @@ function resumeActive(record : any) : void {
     }
     if (unavailable(r)) { abandonUnavailableRun(); return }
     if (!r.responseKnown) { progress.value = closeRequestedState.value ? '暂未确认取消结果。' : '连接中断，正在重新确认任务状态。'; persistActive(); schedulePoll(); return }
-    busy.value = false; pending = null; run = null; closeRequested = false; closeRequestedState.value = false; clearActive(); progress.value = '上一次任务已失效，请重新提问。'
+    abandonUnavailableRun()
   })
 }
-function bootstrapSession(restore : boolean = false) : void { let expectedLifecycle = lifecycle; mobileAiRequest('GET','/bootstrap',{client_session_id:sessionId},(r : any) => { if (expectedLifecycle != lifecycle) return; if (!r.ok || r.data == null || r.data.enabled !== true) { if (restore) { busy.value = false; progress.value = '暂未恢复查询，请重试发送。' }; return }; bootstrap = r.data; storageKey = 'mohe-ai:v1:' + encodeURIComponent(String(bootstrap.identity_key)); runtimeKey = 'mohe-ai:v1:runtime:' + encodeURIComponent(String(bootstrap.identity_key)); let record = activeRecord(); if (!restore && record != null && record.session_id != sessionId) { sessionId = record.session_id; bootstrapSession(true); return }; excelAvailable.value = bootstrap.capabilities != null && Array.isArray(bootstrap.capabilities.output_formats) && bootstrap.capabilities.output_formats.indexOf('screen_and_xlsx') >= 0; enabled.value = true; if (record != null) resumeActive(record); else if (restore) { busy.value = false; progress.value = '上一次任务已结束，可以继续提问。' } }) }
+// Bootstrap uses the same authentication failure path as active observation;
+// a restore failure must never leave an invisible or endless waiting turn.
+function bootstrapSession(restore : boolean = false) : void {
+  let expectedLifecycle = lifecycle
+  mobileAiRequest('GET','/bootstrap',{client_session_id:sessionId},(r : any) => {
+    if (expectedLifecycle != lifecycle || pauseForExpiredLogin(r)) return
+    if (!r.ok || r.data == null || r.data.enabled !== true) { if (restore) { stopQuestionWait(); progress.value = '暂未恢复查询，请重试发送。' }; return }
+    bootstrap = r.data
+    storageKey = 'mohe-ai:v1:' + encodeURIComponent(String(bootstrap.identity_key))
+    runtimeKey = 'mohe-ai:v1:runtime:' + encodeURIComponent(String(bootstrap.identity_key))
+    let record = activeRecord()
+    if (!restore && record != null && record.session_id != sessionId) { sessionId = record.session_id; bootstrapSession(true); return }
+    excelAvailable.value = bootstrap.capabilities != null && Array.isArray(bootstrap.capabilities.output_formats) && bootstrap.capabilities.output_formats.indexOf('screen_and_xlsx') >= 0
+    enabled.value = true
+    if (record != null) resumeActive(record)
+    else if (restore) { busy.value = false; progress.value = '上一次任务已结束，可以继续提问。' }
+  })
+}
 onMounted(() => { sessionId = id(); bootstrapSession(); expiryTimer = setInterval(() => { if (storageKey.length > 0 && !load().some((s : any) => s.id == conversation)) { displayed.value = []; progress.value = '会话已到期，请新建对话。' } },30000) })
 // The entry is mounted on each merchant page.  Page navigation and native
 // component recycling are not an instruction to abandon a customer's query;
