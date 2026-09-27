@@ -249,7 +249,9 @@ final class IntentContextMerger
         if ($kind==='store') {
             if (!is_array($reference['store_ids']??null) || !is_array($reference['business_filters']??null)) self::conflict();
             $constraints['store_ids']=$reference['store_ids'];
-            $constraints['business_filters']=$reference['business_filters'];
+            // Store scope and the current analytical population are separate:
+            // selecting a ranked store must preserve the new people/product
+            // filter (or null so the compiler can bind that new population).
             return $constraints;
         }
         if ($kind==='person' && is_array($reference['business_filters']??null)) {

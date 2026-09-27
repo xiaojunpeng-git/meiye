@@ -103,6 +103,14 @@ metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
 metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
     '本月完成服务项目数量最多的是谁？', ['staff_project_num','completed_service_item_count']
 ) === null, 'without an answer-row object the cross-object measurement remains controlled ambiguity');
+// R51: latest approved business meaning reuses wage project counts, without
+// introducing an independent order-count reader or changing its fact grain.
+metricRegistryCheck(MetricSemanticCatalog::uniqueTermInText(
+    '这个门店技师做的单数最多的是哪个，最低的是哪个', ['staff_project_num','staff_service_num','staff_sales_yeji']
+) === ['metric_code'=>'staff_project_num','term'=>'做的单数'],
+    'technician colloquial order count resolves to the approved project-count metric');
+metricRegistryCheck(!isset($definitions['staff_service_order_count']),
+    'R51 does not introduce a separate completed-order metric');
 $objectAliases=MetricDefinitionRegistry::analysisObjectAliases();
 metricRegistryCheck(in_array('员工',$objectAliases['person']??[],true)
     && in_array('手艺人',$objectAliases['person']??[],true),

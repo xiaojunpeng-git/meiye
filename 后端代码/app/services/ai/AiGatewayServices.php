@@ -733,10 +733,29 @@ final class AiGatewayServices
     }
 
     /**
-     * Converts a model-understood named store into a stable scope only after
-     * looking it up in the current report-authorized store catalog. The model
-     * never receives this catalog and never supplies an ID.
+     * Recover one typed local store reference cited by a current accepted
+     * location requirement. This selects no ID or authority; the existing
+     * catalogue resolver still rechecks both before a query can execute.
      */
+    private function currentNamedStoreReference(array $understanding,array $safe,array $privateKinds): ?string
+    {
+        $references=[];
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            if (!in_array('store_term',(array)($requirement['fields']??[]),true)) continue;
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (($evidence['message_id']??null)!=='current') continue;
+                foreach ((array)($safe['local_conditions']??[]) as $reference=>$unusedValue) {
+                    $token='['.$reference.']';
+                    if (($privateKinds[$reference]??null)==='store'
+                        && strpos((string)($safe['outbound']['question']??''),$token)!==false
+                        && strpos((string)($evidence['quote']??''),$token)!==false) $references[$reference]=true;
+                }
+            }
+        }
+        return count($references)===1?'['.array_key_first($references).']':null;
+    }
+
+    /** Resolve a named location only through the current report-authorized catalogue. */
     private function bindNamedStoreScope(array $compiled,array $context,string $term,array $conditions,array $owner,string $id,int $generation,string $worker): array
     {
         // Replacing a signed store constraint without an authoritative target
@@ -1088,7 +1107,12 @@ final class AiGatewayServices
             // Keep the same bounded recency horizon as the de-identified
             // conversation projection. Older browser history cannot quietly
             // turn a single request into an unbounded local member lookup.
-            foreach (array_slice((array)($body['history']??[]),-6) as $round) if (is_array($round) && is_string($round['question']??null)) $questions[]=$round['question'];
+            // Verified query context replaces browser history in the outgoing
+            // model request below. Do not scan discarded historical text for
+            // member names; the current question still receives full masking.
+            if ($sourceContext===null) {
+                foreach (array_slice((array)($body['history']??[]),-6) as $round) if (is_array($round) && is_string($round['question']??null)) $questions[]=$round['question'];
+            }
             $questions[]=$body['question'];
             // Resolve the bounded conversation in one permission-scoped read.
             // This preserves exact private-label masking while preventing the
@@ -1110,6 +1134,19 @@ final class AiGatewayServices
             foreach ($memberCatalog['objects'] as $object) foreach(array_merge([$object['label']],(array)($object['aliases']??[])) as $label) {
                 $privateLabels[]=$label;$privateKinds[$label]['member']=true;
             }
+        }
+        // Resolve overlapping local identities only when a private person or
+        // member label actually occurs in this question. Complete authorized
+        // store names take part in the same longest-first mask; ordinary
+        // anonymous rankings incur no extra catalogue read.
+        $identityOverlap=false;
+        foreach ($privateKinds as $label=>$kinds) {
+            if ((isset($kinds['member'])||isset($kinds['person']))
+                && strpos($body['question'],(string)$label)!==false) {$identityOverlap=true;break;}
+        }
+        if ($identityOverlap) foreach ($this->authorizedStoreObjects($context) as $storeObject) {
+            $label=$storeObject['label'];
+            $privateLabels[]=$label;$privateKinds[$label]['store']=true;
         }
         $protectedSemanticTerms=[];$registeredCodes=array_keys((array)($caps['metric_readiness']??[]));
         // Registered analytical object labels are public capability words,
@@ -1141,10 +1178,10 @@ final class AiGatewayServices
             if(in_array($value,$privateLabels,true)) {
                 $kinds=$privateKinds[$value]??[];
                 $kindCount=count($kinds);
-                $descriptor=isset($kinds['position'])&&!isset($kinds['person'])&&!isset($kinds['member'])?'岗位'
+                $descriptor=$kindCount===1&&isset($kinds['store'])?'门店':(isset($kinds['position'])&&!isset($kinds['person'])&&!isset($kinds['member'])?'岗位'
                     :(isset($kinds['member'])&&!isset($kinds['person'])&&!isset($kinds['position'])?'会员'
-                    :($kindCount>1?'对象':'人员'));
-                $privateKindsByReference[$reference]=$descriptor==='岗位'?'position':($descriptor==='会员'?'member':($descriptor==='对象'?'object':'person'));
+                    :($kindCount>1?'对象':'人员')));
+                $privateKindsByReference[$reference]=$descriptor==='门店'?'store':($descriptor==='岗位'?'position':($descriptor==='会员'?'member':($descriptor==='对象'?'object':'person')));
                 $safe['outbound']['question']=str_replace('['.$reference.']',$descriptor.' ['.$reference.']',$safe['outbound']['question']);
             }
         }
@@ -1175,6 +1212,13 @@ final class AiGatewayServices
         $safe['outbound']['prior_query']=$sourceQuery===null?null:IntentContextMerger::modelView(
             $sourceQuery,(array)($sourceContext['meaning']??[])
         );
+        // A singular follow-up may refer to the sole displayed result. Only
+        // its position leaves the server; ties must never become a guessed ID.
+        if ($sourceQuery!==null) {
+            $safe['outbound']['prior_query']['sole_result_reference']=ResultReferenceResolver::soleReference(
+                $sourceQuery,(array)($sourceContext['view']??[])
+            );
+        }
         // A locally closed registered metric view is a bounded continuation
         // candidate, not a self-contained topic replacement. Keep this
         // structural fact beside the signed predecessor so later model
@@ -2084,7 +2128,11 @@ final class AiGatewayServices
         if ($intent['result_reference']!==null) {
             if ($sourceContext===null) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
             $resultReference=ResultReferenceResolver::resolve($sourceContext['query'],$sourceContext['view'],$intent['result_reference']);
-            if (!in_array($intent['object_kind'],['unknown',$resultReference['object_kind']],true)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+            // A referenced store limits where to query, while the requested
+            // analytical object may be its people/products/projects. Other
+            // cross-object references have no registered scope relationship.
+            if ($resultReference['object_kind']!=='store'
+                && !in_array($intent['object_kind'],['unknown',$resultReference['object_kind']],true)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
         }
         // Pending is a model-owned statement that more information is needed,
         // not an execution failure. Empty fields below deliberately reach the
@@ -2138,8 +2186,10 @@ final class AiGatewayServices
         // or its signed fallback.  A clarification must never silently drop
         // the user's reference and expand the follow-up back to every row.
         if ($resultReference!==null) {
-            $intent['object_kind']=$resultReference['object_kind'];
-            $intent['object_term']='';
+            if ($resultReference['object_kind']!=='store' || in_array($intent['object_kind'],['unknown','store'],true)) {
+                $intent['object_kind']=$resultReference['object_kind'];
+                $intent['object_term']='';
+            }
             $inheritedConstraints=IntentContextMerger::applyResultReference($inheritedConstraints,$resultReference);
         }
         // On the first turn a named store is not inherited state; it is an
@@ -2148,6 +2198,7 @@ final class AiGatewayServices
         // used to discard the term and accidentally read every authorized
         // store.  This branches on the semantic carrier, not on a Chinese
         // phrase or an entry point.
+        $storeTerm=AiIntentResultContract::understoodStoreTerm($understanding);
         $contextDecisions=$sourceQuery===null
             // An object selection is not automatically a store selection.
             // A role, person, member or product term may be a precise
@@ -2156,6 +2207,23 @@ final class AiGatewayServices
             // authorized store-name resolver.
             ? ['store_scope'=>(($intent['object_relation']??'analysis')==='selection' && ($intent['object_kind']??null)==='store' ? 'replace' : 'inherit'),'business_filters'=>'inherit']
             : ['store_scope'=>$intent['context_delta']['store_scope'],'business_filters'=>$intent['context_delta']['business_filters']];
+        if ($storeTerm!==null) {
+            $contextDecisions['store_scope']='replace';
+            // As with a selected person below, the model need not reproduce
+            // opaque-token punctuation. Bind only one current store reference
+            // actually cited by the accepted store requirement. Unrelated
+            // references, multiple stores and historical evidence stay strict.
+            if (!preg_match('/^\[local_condition_[0-9]+\]$/D',$storeTerm)) {
+                $storeTerm=$this->currentNamedStoreReference($understanding,$safe,$privateKindsByReference)??$storeTerm;
+            }
+            if (preg_match('/^\[(local_condition_[0-9]+)\]$/D',$storeTerm,$storeMatch)) {
+                $storeReference=$storeMatch[1];
+                if (($privateKindsByReference[$storeReference]??null)!=='store') throw new RuntimeException('AI_STORE_SCOPE_UNAVAILABLE');
+                $storeTerm=($safe['reference_values']??[])[$storeReference]??null;
+                if (!is_string($storeTerm)||$storeTerm==='') throw new RuntimeException('AI_STORE_SCOPE_UNAVAILABLE');
+                unset($safe['local_conditions'][$storeReference]);
+            }
+        }
         if ($intent['_object_term_normalized']) {
             try { $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'intent_contract','predicate'=>'object_term_not_verbatim']); } catch (\Throwable $ignored) {}
         }
@@ -2242,7 +2310,19 @@ final class AiGatewayServices
             }
         }
         // All remaining opaque conditions are meaningful. Never query a reduced request.
-        if ($safe['local_conditions']) throw new RuntimeException('AI_LOCAL_CONDITION_REQUIRED');
+        if ($safe['local_conditions']) {
+            // Keep only protocol kinds in diagnostics: an unresolved private
+            // condition must be traceable without logging its name or token.
+            $remainingKinds=[];
+            foreach ($safe['local_conditions'] as $reference=>$unusedValue) {
+                $remainingKinds[]=$privateKindsByReference[$reference]??'unknown';
+            }
+            sort($remainingKinds);
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
+                'local_condition_unbound:'.($intent['object_kind']??'unknown').':'.($intent['object_relation']??'unknown').':named'.($storeTerm===null?'0':'1').':ref'.(isset($storeReference)?'1':'0'),
+                ['field'=>count(array_unique($remainingKinds))===1?$remainingKinds[0]:'mixed'], 'local_condition_probe');
+            throw new RuntimeException('AI_LOCAL_CONDITION_REQUIRED');
+        }
         if (($intent['object_kind']??null)==='position' || ($localTerm!==null && (($privateKindsByReference[$localReference??'']??null)==='position'))) $intent['object_kind']='person';
         if ($intent['periods']!==[]) {
             $projection['dates']=[];
@@ -2269,8 +2349,8 @@ final class AiGatewayServices
         );
         $operationOptions=$this->registeredOperationOptions($caps,$intent['object_kind']??'unknown');
         $replacementOperationOptions=$this->registeredOperationOptions($caps,$merged['prospective_intent']['object_kind']??'unknown');
-        $finish=function(array $compiled)use($context,$term,$contextDecisions,$owner,$id,$generation,$worker,$inheritedConstraints,$merged,$metricOptions,$replacementMetricOptions,$operationOptions,$replacementOperationOptions,$currentStoreRequested,$understanding,$safe,$summaries,$bindingCandidate,$objectReplacementWithoutFilterConfirmation,$requestedMemberDetail):array {
-            $compiled=$this->bindNamedStoreScope($compiled,$context,$term,$contextDecisions,$owner,$id,$generation,$worker);
+        $finish=function(array $compiled)use($context,$term,$storeTerm,$contextDecisions,$owner,$id,$generation,$worker,$inheritedConstraints,$merged,$metricOptions,$replacementMetricOptions,$operationOptions,$replacementOperationOptions,$currentStoreRequested,$understanding,$safe,$summaries,$bindingCandidate,$objectReplacementWithoutFilterConfirmation,$requestedMemberDetail):array {
+            $compiled=$this->bindNamedStoreScope($compiled,$context,$storeTerm??$term,$contextDecisions,$owner,$id,$generation,$worker);
             $compiled=$this->bindCurrentStoreScope($compiled,$context,$currentStoreRequested);
             if ($merged['replacement_confirmation']) {
                 $remaining=array_values(array_filter($merged['pending'],static function(string $field): bool { return $field!=='business_filters'; }));
@@ -4701,6 +4781,11 @@ final class AiGatewayServices
         $terms=[];
         foreach (\app\services\ai\contract\AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
             if (!in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
+            // An already bound customer measurement must survive even when
+            // its ordinary-language wording has no exact dictionary alias.
+            // Registry recommendations may only replace an explicitly
+            // recommended perspective, never an unmarked quantity request.
+            if (!empty($intent['metric_codes']) && empty($intent['recommended_initial_answer'])) return $intent;
             foreach ((array)($requirement['values']['metric_terms']??[]) as $term) if (is_string($term)) $terms[]=$term;
         }
         $exact=\app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms($terms,$allowed);

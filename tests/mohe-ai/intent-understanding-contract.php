@@ -496,6 +496,27 @@ $reject(static function()use($periodOnlyDatedOverview,$datedOverviewAfterConditi
 },'complete dated business wording cannot be reduced to a pure period continuation even with full-span evidence');
 $check(AiIntentUnderstandingContract::repairable('period_only_business_residue'),
     'omitted non-calendar meaning receives one bounded understanding repair instead of inheriting an old topic');
+// Temporal-only restriction modifiers must not create a business exclusion,
+// while a genuine non-calendar restriction must still block shortcut reuse.
+foreach (['那只看今天呢','仅查昨天','只看2026年3月到今天','改回这个月','换回昨天'] as $temporalQuestion) {
+    $temporalSafe=$periodOnlyAfterSelection;
+    $temporalSafe['question']=$temporalQuestion;
+    $temporalSafe['evidence_messages'][0]['text']=$temporalQuestion;
+    $temporalUnderstanding=$periodOnlyDatedOverview;
+    $temporalUnderstanding['requirements'][0]['evidence'][0]['quote']=$temporalQuestion;
+    $check(AiIntentUnderstandingContract::normalize($temporalUnderstanding,$temporalSafe)['status']==='understood',
+        'calendar-attached restriction remains time-only: '.$temporalQuestion);
+}
+foreach (['只看今天不含退款','只看今天现金业绩','只看会员'] as $businessQuestion) {
+    $businessSafe=$periodOnlyAfterSelection;
+    $businessSafe['question']=$businessQuestion;
+    $businessSafe['evidence_messages'][0]['text']=$businessQuestion;
+    $businessUnderstanding=$periodOnlyDatedOverview;
+    $businessUnderstanding['requirements'][0]['evidence'][0]['quote']=$businessQuestion;
+    $reject(static function()use($businessUnderstanding,$businessSafe){
+        AiIntentUnderstandingContract::normalize($businessUnderstanding,$businessSafe);
+    },'calendar modifier cleanup cannot discard business meaning: '.$businessQuestion);
+}
 $periodWithHistoricalMetric=$periodOnlyUnderstanding;
 $periodWithHistoricalMetric['requirements'][]=[
     'id'=>'r2','meaning'=>'上一问的劳动业绩','fields'=>['metric_codes'],
@@ -606,6 +627,16 @@ $metricContinuationBinding=['object_kind'=>'person','object_term'=>'','operation
 $normalizedMetricContinuation=AiIntentResultContract::normalize($metricContinuationBinding,['staff_labor_yeji','staff_sales_yeji'],[],$metricContinuationQuestion,$metricContinuationUnderstanding);
 $check($normalizedMetricContinuation['context_delta']['periods']==='inherit',
     'a same-shape metric follow-up retains its verified period instead of reopening a redundant date decision');
+// R51: a stale inheritance flag cannot overwrite the accountable current
+// metric; conflicting accountability cannot authorize the replacement.
+$staleMetricDelta=$metricContinuationBinding;
+$staleMetricDelta['context_delta']['metric_codes']='inherit';
+$reconciledMetric=AiIntentResultContract::normalize($staleMetricDelta,['staff_labor_yeji','staff_sales_yeji'],[],$metricContinuationQuestion,$metricContinuationUnderstanding);
+$check($reconciledMetric['context_delta']['metric_codes']==='replace'
+    && $reconciledMetric['metric_codes']===['staff_sales_yeji'],'R51 current accounted metric replaces stale inherited metric');
+$unaccountedMetric=$staleMetricDelta;$unaccountedMetric['requirement_bindings'][0]['metric_codes']=['staff_labor_yeji'];
+$unchangedMetric=AiIntentResultContract::normalize($unaccountedMetric,['staff_labor_yeji','staff_sales_yeji'],[],$metricContinuationQuestion,$metricContinuationUnderstanding);
+$check($unchangedMetric['context_delta']['metric_codes']==='inherit','R51 conflicting metric accountability cannot authorize replacement');
 $reboundMetricContinuation=$metricContinuationBinding;
 // A new registered object may be a new topic, yet it still has no evidence
 // that the customer changed the previous verified period.
@@ -713,6 +744,20 @@ $selectedStoreBinding=$inventedRanking;$selectedStoreBinding['object_term']='二
 $normalizedSelectedStore=AiIntentResultContract::normalize($selectedStoreBinding,['cash_performance'],[],$selectedStoreQuestion,$selectedStoreUnderstanding);
 $check($normalizedSelectedStore['object_relation']==='selection'&&$normalizedSelectedStore['object_term']==='二号门店',
     'a model-understood particular store remains an authorized catalog selection candidate');
+// R51: final accepted meaning owns the relation. Preserve the identity until
+// that decision is applied; an intermediate analytical flag cannot erase it.
+$staleRelation=$selectedStoreBinding;$staleRelation['object_relation']='analysis';
+$retainedSelection=AiIntentResultContract::normalize($staleRelation,['cash_performance'],[],$selectedStoreQuestion,$selectedStoreUnderstanding);
+$check($retainedSelection['object_relation']==='selection'&&$retainedSelection['object_term']==='二号门店',
+    'accepted selection retains its current identity across a stale analytical binding');
+$staleSelection=$analyticalStore;$staleSelection['object_relation']='selection';$staleSelection['object_term']='';
+$retainedAnalysis=AiIntentResultContract::normalize($staleSelection,['cash_performance'],[],$analyticalRelationQuestion,$analyticalRelationUnderstanding);
+$check($retainedAnalysis['object_relation']==='analysis'&&$retainedAnalysis['object_term']==='',
+    'accepted analytical meaning is applied before validating a stale empty selection');
+$missingSelection=$selectedStoreBinding;$missingSelection['object_term']='';
+$reject(static function()use($missingSelection,$selectedStoreQuestion,$selectedStoreUnderstanding){
+    AiIntentResultContract::normalize($missingSelection,['cash_performance'],[],$selectedStoreQuestion,$selectedStoreUnderstanding);
+},'an actual selection without an identity still fails closed');
 $periodOnlyWithInventedMetric=['goal'=>'查看本月情况','status'=>'understood','requirements'=>[
     ['id'=>'r1','meaning'=>'查看本月情况','fields'=>['metric_codes','periods'],
         'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
@@ -824,4 +869,60 @@ $comparisonCalendar['requirements'][0]['evidence'][0]['quote']=$comparisonQuesti
 $reject(static function()use($comparisonCalendar,$comparisonQuestion){
     AiIntentUnderstandingContract::normalize($comparisonCalendar,$comparisonQuestion);
 },'malformed comparison periods cannot be repaired by choosing one calendar side');
+// R51: store identity and the people being ranked are independent meanings.
+$storeScopeQuestion=$question;$storeScopeQuestion['question']='二号门店的技师项目数最多的是哪个';
+$storeScopeQuestion['recent_questions']=[];
+$storeScopeQuestion['evidence_messages']=[['id'=>'current','text'=>$storeScopeQuestion['question']]];
+$storeScopeMeaning=['goal'=>'查看指定门店技师项目数','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'限定门店','fields'=>['store_term'],'values'=>['store_term'=>'二号门店'],
+        'evidence'=>[['message_id'=>'current','quote'=>'二号门店']]],
+    ['id'=>'r2','meaning'=>'比较技师','fields'=>['object_kind','object_relation'],'values'=>['object_kind'=>'person','object_relation'=>'analysis'],
+        'evidence'=>[['message_id'=>'current','quote'=>'技师']]],
+]];
+$storeScopeMeaning=AiIntentUnderstandingContract::normalize($storeScopeMeaning,$storeScopeQuestion);
+$check(AiIntentResultContract::understoodStoreTerm($storeScopeMeaning)==='二号门店','current grounded store scope survives independently of analytical person');
+$shortStoreEvidence=$storeScopeMeaning;$shortStoreEvidence['requirements'][0]['evidence']=[['message_id'=>'current','quote'=>'技师']];
+$expandedStoreEvidence=AiIntentUnderstandingContract::normalize($shortStoreEvidence,$storeScopeQuestion);
+$check($expandedStoreEvidence['requirements'][0]['evidence'][0]['quote']===$storeScopeQuestion['question'],
+    'a verbatim current store carrier can extend a short excerpt only to the actual current question');
+$ungroundedStore=$storeScopeMeaning;$ungroundedStore['requirements'][0]['values']['store_term']='其他门店';
+$reject(static function()use($ungroundedStore,$storeScopeQuestion){AiIntentUnderstandingContract::normalize($ungroundedStore,$storeScopeQuestion);},'a guessed store identity is rejected');
+$masked=(new \app\services\ai\model\AiSafeQuestionProjector())->project(
+    '乙水晶店技师项目数', ['enabled'=>true,'external_processing_authorized'=>true,'external_scope_supported'=>true,'external_scope_version'=>\app\services\ai\config\AiConfigStore::QUESTION_SCOPE],
+    ['水晶','乙水晶店','技师']);
+$check(in_array('乙水晶店',$masked['local_conditions'],true)&&!in_array('水晶',$masked['local_conditions'],true),
+    'complete store label masks before an overlapping member nickname');
+$decoratedQuestion=$storeScopeQuestion;$decoratedQuestion['question']='门店 [local_condition_1] 的项目数';
+$decoratedQuestion['evidence_messages']=[['id'=>'current','text'=>$decoratedQuestion['question']]];
+$decoratedMeaning=['goal'=>'限定门店','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'门店条件','fields'=>['store_term'],'values'=>['store_term'=>'门店 [local_condition_1]'],
+        'evidence'=>[['message_id'=>'current','quote'=>$decoratedQuestion['question']]]],
+    ['id'=>'r2','meaning'=>'同一门店条件','fields'=>['store_term'],'values'=>['store_term'=>'[local_condition_1]'],
+        'evidence'=>[['message_id'=>'current','quote'=>$decoratedQuestion['question']]]],
+]];
+$decoratedMeaning=AiIntentUnderstandingContract::normalize($decoratedMeaning,$decoratedQuestion);
+$check(AiIntentResultContract::understoodStoreTerm($decoratedMeaning)==='[local_condition_1]',
+    'the same grounded opaque identity is deduplicated independently of descriptive text');
+$describedScope=$decoratedMeaning;
+$describedScope['requirements'][0]['values']['store_term']='门店 [local_condition_1] 的项目数';
+$check(AiIntentResultContract::understoodStoreTerm($describedScope)==='[local_condition_1]',
+    'one accepted store identity is extracted without interpreting descriptive prose');
+$bareStoreToken=$decoratedMeaning;$bareStoreToken['requirements'][0]['values']['store_term']='local_condition_1';
+$check(AiIntentResultContract::understoodStoreTerm($bareStoreToken)==='[local_condition_1]',
+    'display brackets are not required for an otherwise grounded exact opaque identity');
+$conflictingScope=$decoratedMeaning;
+$conflictingScope['requirements'][1]['values']['store_term']='[local_condition_2]';
+$conflictingScope['requirements'][1]['evidence']=[['message_id'=>'current','quote'=>'[local_condition_2]']];
+$reject(static function()use($conflictingScope){AiIntentResultContract::understoodStoreTerm($conflictingScope);},'two distinct store identities are not silently reduced to one');
+$completeQuestion=$storeScopeQuestion;$completeQuestion['question']='今天二号门店技师项目数最多的是哪个';
+$completeQuestion['evidence_messages']=[['id'=>'current','text'=>$completeQuestion['question']]];
+$completeMeaning=['goal'=>'指定门店项目数最高的技师','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>$completeQuestion['question'],
+        'fields'=>['store_term','metric_codes','object_kind','object_relation','operation','periods','ranking'],
+        'values'=>['store_term'=>'二号门店','metric_terms'=>['项目数'],'object_kind'=>'person','object_relation'=>'analysis','operation'=>'ranking',
+            'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'ranking'=>['direction'=>'top','limit'=>1]],
+        'evidence'=>[['message_id'=>'current','quote'=>$completeQuestion['question']]]],
+]];
+$check(count(AiIntentUnderstandingContract::normalize($completeMeaning,$completeQuestion)['requirements'][0]['fields'])===7,
+    'all seven declared and validated meanings fit one requirement without a formatting repair');
 echo 'PASS intent understanding/binding separation: '.$checks." checks\n";

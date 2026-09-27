@@ -532,7 +532,9 @@ class MetricDictionaryServices extends BaseServices
                 // 同一客户表达在不同分析对象下可以对应不同事实：
                 // 人员维度是工资/分配项目数，项目维度则由项目完成数指标承载。
                 // 网关会先限定回答对象，再在兼容指标集内解析该词。
-                'aliases' => ['project_num', '工资项目数', '分配项目数', '完成服务项目数量'],
+                // R51 产品口径：技师口语中的“单数”就是本指标项目数，
+                // 不另建订单去重指标；仍由人员分析对象限定别名适用范围。
+                'aliases' => ['project_num', '工资项目数', '分配项目数', '完成服务项目数量', '单数', '做的单数'],
                 'dev_source' => 'MetricDefinitionRegistry：cashier_v3_performance_fact 劳动业绩事实的项目数快照',
                 'dev_note' => '项目数以完整分配确认值为准，按百万分之一计数单位精确汇总。',
             ],

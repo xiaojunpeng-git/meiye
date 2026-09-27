@@ -9,6 +9,22 @@ use RuntimeException;
  */
 final class ResultReferenceResolver
 {
+    /** Only disclose a unique displayed position, never its identity or value.
+     * A top-1 request can contain ties: uniqueness must come from its actual
+     * immutable rows, not the requested limit or the first array element.
+     */
+    public static function soleReference(array $query,array $view): ?array
+    {
+        if (($query['query_shape']??null)!=='ranking' || count($view['results']??[])!==1) return null;
+        $references=[];
+        foreach (['top','bottom'] as $group) {
+            foreach ((array)($view['results'][0]['rows'][$group]??[]) as $index=>$row) {
+                $references[]=['group'=>$group,'ordinal'=>$index+1];
+            }
+        }
+        return count($references)===1 ? $references[0] : null;
+    }
+
     public static function resolve(array $query,array $view,array $reference): array
     {
         if (($query['query_shape']??null)!=='ranking' || !is_int($reference['ordinal']??null)

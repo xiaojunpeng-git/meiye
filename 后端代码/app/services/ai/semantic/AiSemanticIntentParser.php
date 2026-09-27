@@ -25,14 +25,16 @@ final class AiSemanticIntentParser
         };
         // Specific meanings precede generic wording; unsupported meanings stay
         // explicit constraints rather than disappearing into an available metric.
+        // A restriction attached to a complete calendar span narrows time,
+        // not a business population. Remove only its attached modifier before
+        // exclusion detection, retaining the date for historical-point rules.
+        $covered=self::calendarEvidence($covered)['without_scope_modifiers'];
         require_once __DIR__.'/AiSemanticVocabulary.php';
         $patterns=AiSemanticVocabulary::patterns();
         foreach($patterns as $code=>$pattern) $take($pattern,$code);
         $relative=['这个月'=>'THIS_MONTH','这一个月'=>'THIS_MONTH','上个月'=>'LAST_MONTH','本月'=>'THIS_MONTH','这月'=>'THIS_MONTH','上月'=>'LAST_MONTH','今天'=>'TODAY','今日'=>'TODAY','昨天'=>'YESTERDAY','昨日'=>'YESTERDAY','前天'=>'DAY_BEFORE_YESTERDAY','明天'=>'TOMORROW'];
         // Normalize date synonyms only locally. Original text is never retained.
         $normalized=strtr($text,['这个月'=>'本月','这一个月'=>'本月','上个月'=>'上月','今日'=>'今天','昨日'=>'昨天']);
-        // Consume full calendar spans before individual relative words so the
-        // start of a connected interval cannot become an unresolved business filter.
         $covered=self::calendarEvidence($covered)['remainder'];
         foreach($relative as $word=>$code) if (strpos($text,$word)!==false) $signals[]=$code;
         preg_match_all('/(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])/',$text,$dates);
@@ -48,7 +50,7 @@ final class AiSemanticIntentParser
         // them in this shared cleanup list so "change it to today" can use
         // the same closed date-only continuation as "today?" without adding
         // a question-specific gateway branch.
-        $covered=preg_replace('/(?:午休前|下班前)?核对一下|请帮我|麻烦帮我|麻烦|帮忙|帮我|我想知道|我想了解|我想查|查询|查一下|查查|先不查钱数|看一下|看看|看|多少钱|多少|怎么样|当前权限范围|相同日期|同样日期|上述日期|原日期|生成|导出|一份|数据|情况|一下|请问|请|问|的|是|有|和|与|到|至|从|及|把|给我|呢|那|换成|改成|改为|同时|再|继续|了|吗|列出|列|附|分成两项|分成|两项|展示|显示|都要|各|一起|名单|金额|这个指标|结果|也要|还要|放上|成|就|还是|查|按|[\s？?。，,、！!：:“”"（）()]/u','',$covered);
+        $covered=preg_replace('/(?:午休前|下班前)?核对一下|请帮我|麻烦帮我|麻烦|帮忙|帮我|我想知道|我想了解|我想查|查询|查一下|查查|先不查钱数|看一下|看看|看|多少钱|多少|怎么样|当前权限范围|相同日期|同样日期|上述日期|原日期|生成|导出|一份|数据|情况|一下|请问|请|问|的|是|有|和|与|到|至|从|及|把|给我|呢|那|(?:换|改)(?:成|为|回)|同时|再|继续|了|吗|列出|列|附|分成两项|分成|两项|展示|显示|都要|各|一起|名单|金额|这个指标|结果|也要|还要|放上|成|就|还是|查|按|[\s？?。，,、！!：:“”"（）()]/u','',$covered);
         $covered=str_replace('为','',$covered);
         $unparsed=$covered!=='';
         if($unparsed) $constraints[]=['type'=>'unparsed_business_condition','status'=>'unresolved'];
@@ -95,9 +97,14 @@ final class AiSemanticIntentParser
         $text=strtr($text,['这一个月'=>'本月','这个月'=>'本月','上个月'=>'上月','今日'=>'今天','昨日'=>'昨天','至今为止'=>'至今天','至今'=>'至今天']);
         $number='[0-9一二两三四五六七八九十]+';
         $endpoint='(?:今天|昨天|前天|明天|本月|这月|上月|最近'.$number.'天|(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])|(?:[0-9]{4}年|今年|去年)?'.$number.'月(?:份)?(?:'.$number.'[日号])?)';
-        $pattern='/(?:从|自)?(?<start>'.$endpoint.')(?:\s*(?:开始)?\s*(?:一直到|截至|截止到|到|至)\s*(?<end>'.$endpoint.'|现在|目前))?(?:为止)?/u';
+        $pattern='/(?:(?:只|仅)(?:看|查)\s*)?(?:从|自)?(?<start>'.$endpoint.')(?:\s*(?:开始)?\s*(?:一直到|截至|截止到|到|至)\s*(?<end>'.$endpoint.'|现在|目前))?(?:为止)?/u';
         $terms=[];$codes=['今天'=>'TODAY','昨天'=>'YESTERDAY','前天'=>'DAY_BEFORE_YESTERDAY','明天'=>'TOMORROW','本月'=>'THIS_MONTH','这月'=>'THIS_MONTH','上月'=>'LAST_MONTH'];
-        $remainder=preg_replace_callback($pattern,static function(array $m) use(&$terms,$codes): string {
+        $withoutScopeModifiers=$text;
+        $remainder=preg_replace_callback($pattern,static function(array $m) use(&$terms,$codes,&$withoutScopeModifiers): string {
+            // Match the complete calendar expression, never a bare “only”:
+            // “only members” must remain an independent business condition.
+            $calendarText=preg_replace('/^(?:只|仅)(?:看|查)\s*/u','',$m[0]);
+            if ($calendarText!==$m[0]) $withoutScopeModifiers=str_replace($m[0],$calendarText,$withoutScopeModifiers);
             $start=$m['start'];$end=$m['end']??'';
             if ($end!=='') $terms[]=['code'=>'CALENDAR_DATES','start'=>$start,'end'=>$end];
             elseif (isset($codes[$start])) $terms[]=['code'=>$codes[$start]];
@@ -110,6 +117,6 @@ final class AiSemanticIntentParser
         $remaining=str_replace('【日期】',' ',$remainder);
         $complete=!preg_match('/年|月|日|号|季度|星期|周|半年|以来|至今|截至|截止|上旬|中旬|下旬|月初|月底/u',$remaining)
             && !preg_match('/(?:到|至)\s*【日期】|【日期】\s*(?:初|底|末|到|至)|(?:从|自)\s*$/u',$remainder);
-        return ['periods'=>$terms,'complete'=>$complete,'remainder'=>$remaining];
+        return ['periods'=>$terms,'complete'=>$complete,'remainder'=>$remaining,'without_scope_modifiers'=>$withoutScopeModifiers];
     }
 }

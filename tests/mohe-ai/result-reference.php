@@ -21,6 +21,60 @@ try {
 }
 echo "PASS result reference needs current-turn evidence\n";
 
+// R51: a singular displayed store may scope a new population, but a requested
+// top-one limit cannot authorize silently choosing one of several tied rows.
+$storeQuery=['query_shape'=>'ranking','business_filters'=>['object_kind'=>'store']];
+$singleView=['results'=>[['rows'=>['top'=>[['store_id'=>2]],'bottom'=>[]]]]];
+$resolver=\app\services\ai\context\ResultReferenceResolver::class;
+if ($resolver::soleReference($storeQuery,$singleView)!==['group'=>'top','ordinal'=>1]) {
+    throw new RuntimeException('unique displayed store reference missing');
+}
+$tiedView=$singleView;$tiedView['results'][0]['rows']['top'][]=['store_id'=>3];
+if ($resolver::soleReference($storeQuery,$tiedView)!==null
+    || $resolver::soleReference(['query_shape'=>'summary'],$singleView)!==null) {
+    throw new RuntimeException('ambiguous or nonranking result became a singular reference');
+}
+$storeReference=$resolver::resolve($storeQuery,$singleView,['group'=>'top','ordinal'=>1]);
+foreach (['person','project','product'] as $subject) {
+    $filters=['object_kind'=>$subject,'selection_ref'=>'fixture:requested'];
+    $scoped=\app\services\ai\context\IntentContextMerger::applyResultReference(
+        ['store_ids'=>[1,2],'business_filters'=>$filters],$storeReference
+    );
+    if ($scoped['store_ids']!==[2] || $scoped['business_filters']!==$filters) {
+        throw new RuntimeException('store reference overwrote the new analytical subject: '.$subject);
+    }
+}
+echo "PASS R51 unique result and cross-subject store scope\n";
+
+// A quantity phrased in ordinary language must not be overwritten by the
+// registry's monetary first-answer default before semantic verification.
+$policy=(new ReflectionClass(\app\services\ai\AiGatewayServices::class))->newInstanceWithoutConstructor();
+$method=new ReflectionMethod($policy,'applyRegisteredRankDefaultPolicy');
+$measurement=['status'=>'understood','requirements'=>[
+    ['id'=>'r1','fields'=>['metric_codes'],'values'=>['metric_terms'=>['做的单数']]],
+]];
+$quantityIntent=['operation'=>'ranking','object_kind'=>'person','object_term'=>'',
+    'metric_codes'=>['staff_project_num'],'needs_metric_choice'=>false,'recommended_initial_answer'=>false];
+$monetaryDefault=[['metric_code'=>'staff_sales_yeji','default_rank_object_kinds'=>['person']]];
+if ($method->invoke($policy,$quantityIntent,$measurement,$monetaryDefault)!==$quantityIntent) {
+    throw new RuntimeException('ordinary quantity was overwritten by monetary ranking default');
+}
+echo "PASS R51 customer measurement survives registry default policy\n";
+
+$storeReferenceMethod=new ReflectionMethod($policy,'currentNamedStoreReference');
+$storeEvidence=['requirements'=>[['id'=>'r1','fields'=>['store_term'],'values'=>['store_term'=>'这个门店'],
+    'evidence'=>[['message_id'=>'current','quote'=>'门店 [local_condition_1] 这个门店的技师']]]]];
+$storeSafe=['outbound'=>['question'=>'门店 [local_condition_1] 这个门店的技师'],'local_conditions'=>['local_condition_1'=>'合成门店']];
+$storeKinds=['local_condition_1'=>'store'];
+if ($storeReferenceMethod->invoke($policy,$storeEvidence,$storeSafe,$storeKinds)!=='[local_condition_1]') throw new RuntimeException('current named scope lost its uniquely cited store token');
+$oldStoreEvidence=$storeEvidence;$oldStoreEvidence['requirements'][0]['evidence'][0]['message_id']='recent_1';
+if ($storeReferenceMethod->invoke($policy,$oldStoreEvidence,$storeSafe,$storeKinds)!==null) throw new RuntimeException('historical store evidence incorrectly selected a current location');
+if ($storeReferenceMethod->invoke($policy,$storeEvidence,$storeSafe,['local_condition_1'=>'member'])!==null) throw new RuntimeException('member identity incorrectly became a store scope');
+$twoStores=$storeSafe;$twoStores['outbound']['question'].=' [local_condition_2]';$twoStores['local_conditions']['local_condition_2']='另一门店';
+$twoEvidence=$storeEvidence;$twoEvidence['requirements'][0]['evidence'][0]['quote']=$twoStores['outbound']['question'];
+if ($storeReferenceMethod->invoke($policy,$twoEvidence,$twoStores,$storeKinds+['local_condition_2'=>'store'])!==null) throw new RuntimeException('two named stores were silently reduced to one');
+echo "PASS R51 current named-store reference requires unique typed evidence\n";
+
 $h=null;
 try {
     $h=new R6GatewayHarness(3,[1,2],'platform');
@@ -35,6 +89,9 @@ try {
             'evidence'=>[['message_id'=>'current','quote'=>'刚才第一个门店']]],
     ]];
     $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$delta,'result_reference'=>['group'=>'top','ordinal'=>1],'unresolved_fragments'=>[]];
+    // R51: binding may omit a reference that understanding already accepted.
+    // Its verified position must be carried, not reinterpreted or re-queried.
+    $h->semanticIntent['result_reference']=null;
     $answer=$h->start('刚才第一个门店的汇总',$source['answer']['context_ref']);
     if ($answer['status']!=='COMPLETED') throw new RuntimeException('referenced query did not complete');
     $evidence=$h->private->read($h->row($answer)['evidence_ref']);

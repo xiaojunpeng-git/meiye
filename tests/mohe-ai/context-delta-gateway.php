@@ -594,6 +594,34 @@ try {
     $evidence=$h->private->read($h->row($switched)['evidence_ref']);
     cdgCheck(($evidence['query']['store_ids']??null)===[2],'replacement store plan contains only the authorized chosen store');
 
+    // R51: independently accepted location must narrow the query even when
+    // the analytical dimension has no selected-object identity of its own.
+    $scopeHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $scopeText='今天二号门店的现金业绩';
+    $scopeHarness->understandingOverride=['goal'=>$scopeText,'status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'现金业绩','fields'=>['metric_codes','periods','object_kind','object_relation','operation'],
+            'values'=>['metric_terms'=>['现金业绩'],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'object_kind'=>'store','object_relation'=>'analysis','operation'=>'summary'],
+            'evidence'=>[['message_id'=>'current','quote'=>$scopeText]]],
+        ['id'=>'r2','meaning'=>'限定门店','fields'=>['store_term'],'values'=>['store_term'=>'二号门店'],
+            'evidence'=>[['message_id'=>'current','quote'=>'二号门店']]],
+    ]];
+    $scoped=$scopeHarness->start($scopeText);
+    cdgCheck($scoped['status']==='COMPLETED','an independent current store scope executes without a redundant selection question');
+    $scopeProof=$scopeHarness->private->read($scopeHarness->row($scoped)['evidence_ref']);
+    cdgCheck(($scopeProof['query']['store_ids']??null)===[2],'accepted store term narrows a first-turn analytical query');
+    $replacementText='今天一号门店的现金业绩';
+    foreach ($scopeHarness->understandingOverride['requirements'] as &$scopeRequirement) {
+        foreach ($scopeRequirement['evidence'] as &$scopeEvidenceItem) $scopeEvidenceItem['quote']=str_replace('二号门店','一号门店',$scopeEvidenceItem['quote']);
+        unset($scopeEvidenceItem);
+        if (isset($scopeRequirement['values']['store_term'])) $scopeRequirement['values']['store_term']='一号门店';
+    }
+    unset($scopeRequirement);
+    $replaced=$scopeHarness->start($replacementText,$scoped['answer']['context_ref']);
+    cdgCheck($replaced['status']==='COMPLETED','an accepted named scope can replace a signed prior store without a second identity field');
+    $replacementProof=$scopeHarness->private->read($scopeHarness->row($replaced)['evidence_ref']);
+    cdgCheck(($replacementProof['query']['store_ids']??null)===[1],'the previous store does not overwrite a named current replacement');
+    $scopeHarness->close();
+
     // A missing store scope must retain the signed store restriction until the
     // customer chooses otherwise; it may never be compiled as all stores.
     $scopePending=cdgDelta();$scopePending['store_scope']='pending';
