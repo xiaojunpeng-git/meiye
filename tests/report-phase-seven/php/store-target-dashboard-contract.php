@@ -20,7 +20,7 @@ $checks = [
     'store target reader and contract version' => str_contains($reader, 'final class CashierV3StoreTargetDashboardReadModel')
         && str_contains($reader, "CONTRACT_VERSION = 'cashier-v3-store-target-dashboard-v1'"),
     'current store is enforced server side' => str_contains($reader, 'allowsStore($operator->storeId())')
-        && (str_contains($reader, '->where(\'store_id\', $storeId)') || str_contains($reader, '->where(\'p.store_id\', $storeId)'))
+        && (str_contains($reader, '->where(\'pf.store_id\', $storeId)') || str_contains($reader, '->where(\'p.store_id\', $storeId)'))
         && str_contains($reader, "'forced' => true"),
     'target progress uses month and annual target facts' => str_contains($reader, 'GroupManagementDashboardTargetServices')
         && str_contains($reader, '$monthTotals')
@@ -44,9 +44,12 @@ $checks = [
         && str_contains($reader, 'COUNT(DISTINCT NULLIF(p.member_id,0)) AS customer_count'),
     'goal actual cash nets signed reversal facts' => preg_match('/private function cashTotal\([^}]+?\n    }/s', $reader, $cashTotalMatch) === 1
         && str_contains($cashTotalMatch[0], 'cashier_v3_payment_fact')
-        && str_contains($cashTotalMatch[0], 'SUM(amount_cents)')
-        && str_contains($cashTotalMatch[0], "where('status', 'effective')")
+        && str_contains($cashTotalMatch[0], 'SUM(pf.amount_cents)')
+        && str_contains($cashTotalMatch[0], "where('pf.status', 'effective')")
         && !str_contains($cashTotalMatch[0], "where('fact_direction', 'forward')"),
+    'cash total void filter uses the prefixed table alias' => str_contains($cashTotalMatch[0] ?? '', "Db::name('cashier_v3_payment_fact')->alias('pf')")
+        && str_contains($cashTotalMatch[0] ?? '', "excludeVoidedSalesOrderFacts(\$query, 'pf.tenant_id', 'pf.order_id')")
+        && !str_contains($cashTotalMatch[0] ?? '', 'cashier_v3_payment_fact.tenant_id'),
     'range defaults to month and rejects invalid or oversized windows' => str_contains($reader, "date('Y-m-01')")
         && str_contains($reader, "date('Y-m-d')")
         && str_contains($reader, 'strtotime($end) - strtotime($start) > 366 * 86400'),

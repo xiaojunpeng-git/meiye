@@ -66,13 +66,14 @@ final class CashierV3StoreTargetDashboardReadModel
 
     private function cashTotal(string $tenantId, int $storeId, string $start, string $end): int
     {
-        $query = Db::name('cashier_v3_payment_fact')->where('tenant_id', $tenantId)->where('store_id', $storeId)
-            ->whereBetween('business_date', [$start, $end])->where('status', 'effective')
+        // 作废过滤器使用原生关联条件，必须引用查询别名；逻辑表名在本地库会被 ORM 加上 eb_ 前缀。
+        $query = Db::name('cashier_v3_payment_fact')->alias('pf')->where('pf.tenant_id', $tenantId)->where('pf.store_id', $storeId)
+            ->whereBetween('pf.business_date', [$start, $end])->where('pf.status', 'effective')
             // Reversal facts carry their signed negative amount and must remain
             // in the same sum so partial refunds produce the correct net value.
             ;
-        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'cashier_v3_payment_fact.tenant_id', 'cashier_v3_payment_fact.order_id');
-        $row = $query->fieldRaw('COALESCE(SUM(amount_cents),0) AS amount_cents')->find();
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'pf.tenant_id', 'pf.order_id');
+        $row = $query->fieldRaw('COALESCE(SUM(pf.amount_cents),0) AS amount_cents')->find();
         return (int)($row['amount_cents'] ?? 0);
     }
 
