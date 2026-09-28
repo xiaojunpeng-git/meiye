@@ -57,6 +57,9 @@ final class InventoryErrorMessage
         'inventory_stock_count_stock_changed' => '账面库存已变化，请重新核对盘点数量后提交。',
         'inventory_stock_count_duplicate_sku' => '盘点单中有重复商品规格，请删除重复行。',
         'inventory_stock_count_no_difference' => '实盘库存与账面库存没有差异，未生成盘点单。',
+        'inventory_stock_count_draft_changed' => '盘点草稿已被修改或完成，请重新打开。',
+        'inventory_stock_count_draft_missing' => '盘点草稿不存在，或当前账号无权查看。',
+        'inventory_stock_count_draft_lines_invalid' => '盘点草稿明细不完整，请核对商品和数量。',
     ];
 
     /** @return array{code: string, message: string}|null */

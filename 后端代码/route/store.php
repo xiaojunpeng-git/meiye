@@ -634,7 +634,10 @@ Route::group('storeapi', function () {
 		Route::get('v3/movement', 'product.inventory.InventoryMovementQuery/index')->option(['real_name' => '批次事实出入库记录查询']);
 		Route::get('v3/movement-statistics', 'product.inventory.InventoryMovementAnalytics/index')->option(['real_name' => '批次事实出入库统计']);
 		Route::post('v3/count/confirm', 'product.inventory.InventoryStockCount/confirm')->option(['real_name' => '批次库存盘点确认']);
+		Route::post('v3/count/draft', 'product.inventory.InventoryStockCount/saveDraft')->option(['real_name' => '保存盘点草稿']);
+		Route::get('v3/count/draft/:id', 'product.inventory.InventoryStockCount/draftDetail')->pattern(['id' => '\\d+'])->option(['real_name' => '读取盘点草稿']);
 		Route::get('v3/count', 'product.inventory.InventoryStockCountQuery/index')->option(['real_name' => '批次库存盘点单查询']);
+		Route::get('v3/count/:id/detail', 'product.inventory.InventoryStockCountQuery/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '批次库存盘点单详情']);
 		Route::get('v3/request', 'product.inventory.InventoryStockRequestQuery/index')->option(['real_name' => '批次库存请货单查询']);
 		Route::get('v3/request/:id/detail', 'product.inventory.InventoryStockRequestQuery/detail')->option(['real_name' => '批次库存请货单详情']);
 		Route::post('v3/request/apply', 'product.inventory.InventoryStockRequest/apply')->option(['real_name' => '批次库存请货申请']);

@@ -29,4 +29,17 @@ final class InventoryStockCountQuery extends AuthController
             $canViewCost
         ));
     }
+
+    /** 与列表使用同一登录门店及成本权限；详情请求只接受单据 ID。 */
+    public function detail(int $id)
+    {
+        try {
+            $canViewCost = in_array('inventory.cost.view', (new InventoryStoreAccessPolicy())->features((int)$this->storeId, (int)$this->storeStaffId), true);
+            return $this->success($this->services->detail((int)$this->storeId, (int)$this->storeStaffId, $id, $canViewCost));
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('盘点单不存在或无权查看。', ['code' => $exception->getMessage()]);
+        } catch (\RuntimeException $exception) {
+            return $this->fail('盘点单详情读取失败，请核对当前门店权限。', ['code' => $exception->getMessage()]);
+        }
+    }
 }

@@ -43,6 +43,9 @@ const inboundRemark = ref('')
 const outboundDate = ref(new Date().toISOString().slice(0, 10))
 const outboundRemark = ref('')
 const countRemark = ref('')
+const countDraftId = ref(0)
+const countDraftVersion = ref(0)
+const countDraftSavedSnapshot = ref('')
 const requestDate = ref(new Date().toISOString().slice(0, 10))
 const requestRemark = ref('')
 const requesterName = ref('')
@@ -86,6 +89,7 @@ const requestEditIdempotencyKey = ref('')
 const isDetail = computed(() => props.modalKind.endsWith('-detail'))
 const isInboundOutboundDetail = computed(() => props.modalKind === 'inbound-outbound-detail')
 const isRequestEdit = computed(() => props.modalKind === 'request-edit')
+const isCountEdit = computed(() => props.modalKind === 'count-edit')
 const isUsageReturn = computed(() => props.modalKind === 'usage-return')
 const isImport = computed(() => props.modalKind === 'import')
 const isPlatformHeadquarters = computed(() => props.mode === 'platform')
@@ -129,6 +133,7 @@ const title = computed(() => {
   if (isImport.value) return '库存导入'
   if (isInboundOutboundDetail.value) return '入库批次出库明细'
   if (isDetail.value) return `${pageLabel.value}详情`
+  if (isCountEdit.value) return '编辑盘点草稿'
   if (isUsageReturn.value) return '院装耗材退回'
   if (isRequestEdit.value) return '编辑请货单'
   return {
@@ -333,6 +338,18 @@ async function hydrateRequestEditor(detail) {
 }
 
 watch(() => props.detail, (detail) => { hydrateRequestEditor(detail) }, { immediate: true })
+
+/** Resume the exact selected SKU set and entered quantities; final confirmation still rechecks live stock. */
+watch([() => props.detail, isCountEdit], ([detail]) => {
+  if (!isCountEdit.value || !detail?.draft_id) return
+  countDraftId.value = Number(detail.draft_id)
+  countDraftVersion.value = Number(detail.version)
+  inboundDate.value = String(detail.business_date || inboundDate.value)
+  countRemark.value = String(detail.remark || '')
+  selectedRows.value = (Array.isArray(detail.lines) ? detail.lines : []).map((line) => ({ ...line }))
+  countDraftSavedSnapshot.value = JSON.stringify(countDraftContent())
+  countProgress.value = `已恢复草稿中的 ${selectedRows.value.length} 行；完成盘点时会重新校验账面库存。`
+}, { immediate: true })
 
 function hydrateUsageReturn(detail) {
   if (!isUsageReturn.value || !detail?.document) return
@@ -718,6 +735,44 @@ function selectedTransferTarget() {
 }
 
 function countIdempotencyKey() { return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? `count-${crypto.randomUUID()}` : `count-${Date.now()}-${Math.random().toString(36).slice(2)}` }
+
+/** Persist all selected rows as an editable snapshot; this command never touches stock or facts. */
+function countDraftContent() {
+  return {
+    business_date: inboundDate.value, remark: countRemark.value,
+    lines: selectedRows.value.map((row) => ({
+      product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: String(row.sku_unique || ''),
+      product_name: String(row.product_name || ''), sku_name: String(row.sku_name || ''), barcode: String(row.barcode || ''),
+      book_quantity: String(row.book_quantity ?? '0'), counted_quantity: String(row.counted_quantity ?? ''),
+      surplus_batch_no: String(row.surplus_batch_no || ''), surplus_unit_cost: String(row.surplus_unit_cost || ''),
+      surplus_manufactured_date: String(row.surplus_manufactured_date || ''), surplus_expire_date: String(row.surplus_expire_date || '')
+    }))
+  }
+}
+
+async function persistCountDraft() {
+  const content = countDraftContent()
+  const result = await inventoryApi.saveCountDraft({
+    draft_id: countDraftId.value, expected_version: countDraftVersion.value, ...content
+  })
+  countDraftId.value = Number(result.draft_id)
+  countDraftVersion.value = Number(result.version)
+  countDraftSavedSnapshot.value = JSON.stringify(content)
+  return result
+}
+
+async function saveCountDraft() {
+  if (props.pageKey !== 'count' || isPlatformHeadquarters.value || !selectedRows.value.length || countLoading.value || submitting.value) return
+  submitting.value = true
+  submitError.value = ''
+  try {
+    await persistCountDraft()
+    emit('saved')
+    close()
+  } catch (error) { submitError.value = error instanceof Error ? error.message : '盘点草稿保存失败。' }
+  finally { submitting.value = false }
+}
+
 async function submitCount() {
   if (props.pageKey !== 'count' || countLoading.value || submitting.value) return
   // 保留加载全部商品的草稿体验，但不得把未盘或无库存变化的规格写入正式盘点单。
@@ -729,8 +784,12 @@ async function submitCount() {
   submitting.value = true
   submitError.value = ''
   try {
+    // A resumed draft is saved before confirmation so failed stock validation does not lose edits.
+    if (countDraftId.value > 0 && JSON.stringify(countDraftContent()) !== countDraftSavedSnapshot.value) await persistCountDraft()
     const payload = {
-      idempotency_key: countIdempotencyKey(), business_date: inboundDate.value, remark: countRemark.value,
+      idempotency_key: countDraftId.value > 0 ? `count-draft-${countDraftId.value}` : countIdempotencyKey(),
+      draft_id: countDraftId.value, draft_version: countDraftVersion.value,
+      business_date: inboundDate.value, remark: countRemark.value,
       lines: changedRows.map((row) => ({
         product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique,
         counted_quantity: row.counted_quantity, surplus_batch_no: row.surplus_batch_no,
@@ -917,8 +976,13 @@ async function submitWarehouse() {
 <template>
   <section class="inventory-editor" :aria-label="title">
         <header class="inventory-editor__header">
-          <div><p>{{ mode === 'platform' ? '平台端' : '门店端' }} · {{ modalScopeName }}</p><h2>{{ title }}</h2></div>
-          <button class="modal-icon-button" title="返回列表" @click="close"><X :size="20" /></button>
+          <div><p>{{ mode === 'platform' ? '平台端' : '门店端' }} · {{ modalScopeName }}</p><h2>{{ title }}</h2><p v-if="pageKey === 'count' && submitError" class="inventory-editor__submit-error" role="alert">{{ submitError }}</p></div>
+          <div class="inventory-editor__header-actions">
+            <!-- 大批量盘点时提交入口必须保持在表格上方；沿用原提交方法与防重入条件。 -->
+            <button v-if="pageKey === 'count' && !isDetail && !isImport && !isPlatformHeadquarters" class="modal-secondary" :disabled="submitting || countLoading || !selectedRows.length" @click="saveCountDraft">{{ submitting ? '保存中' : '保存草稿' }}</button>
+            <button v-if="pageKey === 'count' && !isDetail && !isImport" class="modal-primary" :disabled="submitting || countLoading || !selectedRows.length" @click="submitCount">{{ submitting ? '提交中' : '完成盘点' }}</button>
+            <button class="modal-icon-button" title="返回列表" @click="close"><X :size="20" /></button>
+          </div>
         </header>
 
         <main class="inventory-modal__body">
@@ -1027,14 +1091,14 @@ async function submitWarehouse() {
           </section>
 
           <aside v-if="!isDetail && ['request', 'transfer'].includes(pageKey)" class="modal-notice"><AlertTriangle :size="17" /><div><strong>操作注意事项</strong><p>{{ pageKey === 'request' ? '请货不会变动库存；供货方发货时，系统会优先扣减最早到期的可用批次。收货完成后，已收数量会累计到请货单。' : '保存草稿不变动库存；调出方发货后进入在途，调入方确认收货才增加库存。' }}</p></div></aside>
-          <p v-if="submitError" class="catalog-error">{{ submitError }}</p>
+          <p v-if="submitError && pageKey !== 'count'" class="catalog-error">{{ submitError }}</p>
         </main>
 
         <footer class="inventory-modal__footer">
           <button class="modal-secondary" @click="close">取消</button>
-          <template v-if="!isDetail && !isImport"><button class="modal-primary" :disabled="submitting || (pageKey === 'count' && countLoading) || (['inbound', 'outbound', 'count', 'request', 'transfer', 'usage'].includes(pageKey) && !selectedRows.length) || (pageKey === 'usage' && (!Number(usageProjectId) || !usageProjectName.trim())) || (pageKey === 'request' && (!supplyPartySelection || !requesterName.trim())) || (pageKey === 'transfer' && (!transferTargetSelection || (isPlatformHeadquarters && !transferStaffOptions.length))) || (pageKey === 'warehouse' && (Number(warehouseStoreId) <= 0 || !warehouseName.trim()))" @click="pageKey === 'inbound' ? submitInbound() : pageKey === 'outbound' ? submitOutbound() : pageKey === 'count' ? submitCount() : pageKey === 'request' ? submitRequest() : pageKey === 'transfer' ? submitTransfer() : pageKey === 'usage' ? submitUsage() : pageKey === 'warehouse' ? submitWarehouse() : null">{{ (['inbound', 'outbound', 'count', 'request', 'transfer', 'usage', 'warehouse'].includes(pageKey) && submitting) ? '提交中' : pageKey === 'count' ? '完成盘点' : pageKey === 'request' ? (isRequestEdit ? '保存修改' : '确认申请') : pageKey === 'transfer' ? '保存调拨草稿' : pageKey === 'usage' ? (isUsageReturn ? '确认退回' : '确认领用') : pageKey === 'warehouse' ? '创建仓库' : '保存' }}</button></template>
+          <template v-if="!isDetail && !isImport && pageKey !== 'count'"><button class="modal-primary" :disabled="submitting || (['inbound', 'outbound', 'request', 'transfer', 'usage'].includes(pageKey) && !selectedRows.length) || (pageKey === 'usage' && (!Number(usageProjectId) || !usageProjectName.trim())) || (pageKey === 'request' && (!supplyPartySelection || !requesterName.trim())) || (pageKey === 'transfer' && (!transferTargetSelection || (isPlatformHeadquarters && !transferStaffOptions.length))) || (pageKey === 'warehouse' && (Number(warehouseStoreId) <= 0 || !warehouseName.trim()))" @click="pageKey === 'inbound' ? submitInbound() : pageKey === 'outbound' ? submitOutbound() : pageKey === 'request' ? submitRequest() : pageKey === 'transfer' ? submitTransfer() : pageKey === 'usage' ? submitUsage() : pageKey === 'warehouse' ? submitWarehouse() : null">{{ (['inbound', 'outbound', 'request', 'transfer', 'usage', 'warehouse'].includes(pageKey) && submitting) ? '提交中' : pageKey === 'request' ? (isRequestEdit ? '保存修改' : '确认申请') : pageKey === 'transfer' ? '保存调拨草稿' : pageKey === 'usage' ? (isUsageReturn ? '确认退回' : '确认领用') : pageKey === 'warehouse' ? '创建仓库' : '保存' }}</button></template>
           <button v-else-if="isImport" class="modal-secondary" :disabled="importBusy" @click="close">返回列表</button>
-          <button v-else class="modal-primary" @click="close">关闭</button>
+          <button v-else-if="isDetail" class="modal-primary" @click="close">关闭</button>
         </footer>
   </section>
   <InventoryProductSelector :visible="productSelectorVisible" :selected-rows="selectedRows" :catalog-api="catalogApi" :catalog-query="catalogQuery" @close="productSelectorVisible = false" @confirm="acceptCatalogRows" />
@@ -1042,6 +1106,8 @@ async function submitWarehouse() {
 
 <style scoped>
 .count-file-input { display: none; }.count-progress { margin: 0; padding: 8px 14px; color: #42637e; font-size: 12px; background: #f4f9ff; }
+.inventory-editor__header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.inventory-editor__submit-error { max-width: 620px; margin: 6px 0 0 !important; color: #c34141 !important; font-size: 12px !important; }
 .inventory-editor { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: calc(100vh - 112px); overflow: hidden; border: 1px solid #d8e3ed; border-radius: 8px; background: #f5f7fa; }.inventory-editor__header, .inventory-modal__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 20px; border-bottom: 1px solid #e0e7ef; background: #fff; }.inventory-editor__header p { margin: 0 0 4px; color: #8a97a5; font-size: 11px; }.inventory-editor__header h2 { margin: 0; color: #253a50; font-size: 18px; }.inventory-modal__footer { justify-content: flex-end; border-top: 1px solid #e0e7ef; border-bottom: 0; }.modal-icon-button { display: inline-grid; width: 34px; height: 34px; place-items: center; padding: 0; border: 1px solid #dce5ee; border-radius: 8px; background: #fff; color: #47627d; }.modal-icon-button:hover { border-color: #91caff; color: #176fd1; }
 .inventory-modal__body { overflow: auto; padding: 18px 20px 22px; }.form-section { margin-bottom: 15px; padding: 14px; border: 1px solid #e0e7ef; border-radius: 10px; background: #fff; }.form-section__heading { margin-bottom: 12px; }.form-section__heading h3 { margin: 0; color: #314b65; font-size: 14px; }.form-label { display: block; margin-bottom: 10px; color: #5c7187; font-size: 12px; }.form-section i, .form-grid i, .line-section h3 i { margin-left: 3px; color: #e05252; font-style: normal; }.type-radio-group { display: flex; flex-wrap: wrap; gap: 8px; }.type-radio-group button { min-height: 31px; padding: 0 12px; border: 1px solid #dbe5ee; border-radius: 7px; background: #fff; color: #5b7086; font-size: 12px; }.type-radio-group button.active { border-color: #176fd1; background: #eaf3ff; color: #176fd1; font-weight: 700; }.type-tip { margin: 9px 0 0; color: #8491a0; font-size: 11px; }.form-grid { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 13px 18px; margin-bottom: 15px; padding: 15px; border: 1px solid #e0e7ef; border-radius: 10px; background: #fff; }.form-grid--embedded { margin: 14px 0 0; padding: 14px 0 0; border-width: 1px 0 0; border-radius: 0; }.form-grid--single { grid-template-columns: 1fr; }.form-grid label { display: grid; align-content: start; gap: 6px; color: #60748a; font-size: 12px; }.form-grid__inline { grid-template-columns: max-content minmax(0, 1fr); align-items: center !important; gap: 8px !important; }.field-label { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }.form-grid input, .form-grid select, .input-like { width: 100%; height: 34px; padding: 0 9px; border: 1px solid #d8e3ed; border-radius: 8px; outline: 0; background: #fff; color: #40566d; }.input-like { display: inline-flex; align-items: center; gap: 6px; }.input-like--action { border-color: #b8d8f7; background: #f6fbff; color: #176fd1; }.form-grid__full { grid-column: 1 / -1; }
 .line-section { overflow: hidden; border: 1px solid #dfe8f0; border-radius: 10px; background: #fff; }.line-section > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 15px; border-bottom: 1px solid #e8eef4; }.line-section h3 { margin: 0; color: #30465d; font-size: 14px; }.line-section p { margin: 4px 0 0; color: #8795a5; font-size: 11px; }.line-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }.scanner-entry { display: flex; align-items: end; gap: 9px; padding: 12px 15px; border-bottom: 1px solid #e8eef4; background: #f7fbff; color: #176fd1; }.scanner-entry label { display: grid; flex: 1; gap: 4px; color: #60748a; font-size: 11px; }.scanner-entry input { height: 31px; padding: 0 8px; border: 1px solid #bcd6ed; border-radius: 6px; color: #40566d; }.bulk-editor { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)) auto; gap: 9px; align-items: end; padding: 12px 15px; border-bottom: 1px solid #e8eef4; background: #f7fbff; }.bulk-editor strong { grid-column: 1 / -1; color: #36526e; font-size: 12px; }.bulk-editor label { display: grid; gap: 5px; color: #60748a; font-size: 11px; }.bulk-editor input { height: 30px; padding: 0 7px; border: 1px solid #bcd6ed; border-radius: 6px; color: #40566d; }.bulk-editor div { display: flex; gap: 7px; }.modal-primary, .modal-secondary, .modal-danger { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 33px; padding: 0 12px; border-radius: 8px; font-size: 12px; }.modal-primary { border: 1px solid #176fd1; background: #176fd1; color: #fff; }.modal-secondary { border: 1px solid #d5e1ee; background: #fff; color: #47627d; }.modal-danger { border: 1px solid #f0d1d1; background: #fff8f8; color: #ca4c4c; }.line-search { display: flex; align-items: center; gap: 8px; margin: 14px; padding: 0 9px; border: 1px solid #dbe5ee; border-radius: 8px; color: #7f8fa0; background: #fbfdff; }.line-search input { width: 240px; height: 34px; border: 0; outline: 0; background: transparent; }.modal-table-scroll { overflow: auto; }.modal-table-scroll table { width: 100%; min-width: 1180px; border-collapse: collapse; }.modal-table-scroll th { height: 39px; padding: 0 11px; border-bottom: 1px solid #e7edf3; background: #f7f9fc; color: #60748a; font-size: 11px; font-weight: 600; text-align: left; white-space: nowrap; }.modal-table-scroll td { height: 51px; padding: 0 11px; border-bottom: 1px solid #edf1f5; color: #40566d; font-size: 12px; white-space: nowrap; }.table-input { width: 76px; height: 29px; padding: 0 6px; border: 1px solid #bcd6ed; border-radius: 6px; color: #344d68; font-size: 12px; }.table-input[type='date'] { width: 142px; min-width: 142px; }.modal-link { border: 0; background: transparent; color: #d05252; font-size: 12px; }.line-total { display: flex; justify-content: space-between; padding: 12px 15px; background: #fbfdff; color: #7d8c9c; font-size: 12px; }.line-total strong { color: #1f4e80; }.modal-notice { display: flex; gap: 8px; margin-top: 14px; padding: 12px 14px; border: 1px solid #f0ddae; border-radius: 9px; background: #fffbef; color: #a86d12; }.modal-notice div { display: grid; gap: 4px; }.modal-notice strong { font-size: 12px; }.modal-notice p { margin: 0; color: #857040; font-size: 11px; }.detail-meta { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-bottom: 14px; padding: 12px 14px; border: 1px solid #dfe8f0; border-radius: 9px; background: #fff; color: #61758b; font-size: 12px; }.detail-meta b { color: #26835f; }.detail-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 15px; }.detail-summary article { padding: 14px; border: 1px solid #e0e7ef; border-radius: 10px; background: #fff; }.detail-summary span { display: block; color: #8291a2; font-size: 11px; }.detail-summary strong { display: block; margin-top: 7px; color: #284868; font-size: 17px; }.import-workflow { display: grid; gap: 14px; }.import-modal { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 18px; border: 1px solid #cfe1f5; border-radius: 10px; background: #f2f8ff; color: #176fd1; }.import-modal div { display: grid; gap: 4px; }.import-modal strong { color: #304d69; font-size: 14px; }.import-modal p { margin: 0; color: #71849a; font-size: 12px; }.import-rules { display: grid; gap: 5px; padding: 14px 16px; border: 1px solid #f0dfb2; border-radius: 8px; background: #fffbf1; color: #846225; font-size: 12px; line-height: 1.55; }.import-rules strong { color: #76520d; }.import-upload { display: grid; justify-items: center; gap: 7px; padding: 28px 18px; border: 1px dashed #a9c8e3; border-radius: 8px; background: #fafdff; color: #3275ae; cursor: pointer; }.import-upload input { display: none; }.import-upload strong { color: #3a5268; font-size: 13px; }.import-upload small { color: #8292a1; }.import-actions { display: flex; gap: 9px; justify-content: flex-end; }.import-success { margin: 0; color: #26835f; font-size: 13px; }

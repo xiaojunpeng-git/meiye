@@ -75,7 +75,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
             case 'inventory_inbound': $rows = $this->documentRows($tenantId, $storeId, $locationIds, 'manual_inbound', $canViewCost); break;
             case 'inventory_outbound': $rows = $this->documentRows($tenantId, $storeId, $locationIds, ['manual_outbound', 'presale_claim_outbound'], $canViewCost); break;
             case 'inventory_movement': $rows = $this->movementRows($tenantId, $storeId, $locationIds, $canViewCost); break;
-            case 'inventory_count': $rows = $this->countRows($tenantId, $storeId, $locationIds, $canViewCost); break;
+            case 'inventory_count': $rows = $this->countRows($tenantId, $storeId, $locationIds, $canViewCost, $context); break;
             case 'inventory_request': $rows = $this->requestRows($tenantId, $storeId, $locationIds, $canViewCost); break;
             case 'inventory_transfer': $rows = $this->transferRows($tenantId, $storeId, $locationIds, $canViewCost); break;
             case 'inventory_salon_usage': $rows = $this->usageRows($tenantId, $storeId, $locationIds); break;
@@ -159,7 +159,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
         unset($row); return $this->bounded($rows);
     }
 
-    private function countRows(string $tenantId, int $storeId, array $locationIds, bool $canViewCost): array
+    private function countRows(string $tenantId, int $storeId, array $locationIds, bool $canViewCost, array $context): array
     {
         $rows = Db::name('inventory_stock_count_document')->alias('d')->leftJoin('inventory_stock_count_line l', 'l.document_id=d.id')->leftJoin('inventory_location p', 'p.id=d.location_id')
             ->where('d.tenant_id', $tenantId)->whereIn('d.location_id', $locationIds)
@@ -170,7 +170,30 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
                 ->field('source_id, SUM(CASE WHEN direction=1 THEN cost_amount_cents ELSE -cost_amount_cents END) change_amount_cents')->group('source_id')->select()->toArray();
             $index = array_column($amounts, 'change_amount_cents', 'source_id'); foreach ($rows as &$row) $row['change_amount_cents'] = (int)($index[(string)$row['order_sn']] ?? 0); unset($row);
         } else foreach ($rows as &$row) $row['change_amount_cents'] = null;
-        unset($row); return $this->bounded($rows);
+        unset($row);
+        // Drafts are editing snapshots, not confirmed count facts. Only the creator's store session
+        // sees them in this list; platform reporting continues to read confirmed documents alone.
+        if ($storeId > 0 && (string)($context['organization_id'] ?? '') !== 'platform') {
+            $drafts = Db::name('inventory_stock_count_draft')->alias('d')
+                ->leftJoin('inventory_location p', 'p.id=d.location_id')
+                ->where('d.tenant_id', $tenantId)->where('d.store_id', $storeId)
+                ->whereIn('d.location_id', $locationIds)
+                ->where('d.operator_id', (int)($context['operator_id'] ?? 0))
+                ->where('d.document_status', 'DRAFT')
+                ->field('d.id draft_id,d.business_date,d.updated_at operation_at,d.updated_at add_time,d.location_id,d.line_count detail_count,p.location_name')
+                ->order('d.updated_at desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
+            foreach ($drafts as $draft) {
+                $rows[] = [
+                    'id' => 'draft-' . (int)$draft['draft_id'], 'draft_id' => (int)$draft['draft_id'],
+                    'order_sn' => '草稿-' . (int)$draft['draft_id'], 'status_name' => 'DRAFT',
+                    'business_date' => (string)$draft['business_date'], 'operation_at' => (int)$draft['operation_at'],
+                    'add_time' => (int)$draft['add_time'], 'location_id' => (int)$draft['location_id'],
+                    'location_name' => (string)$draft['location_name'], 'detail_count' => (int)$draft['detail_count'],
+                    'change_amount_cents' => null,
+                ];
+            }
+        }
+        return $this->bounded($rows);
     }
 
     private function requestRows(string $tenantId, int $storeId, array $locationIds, bool $canViewCost): array
