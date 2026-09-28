@@ -16,20 +16,23 @@ class InventoryStoreCatalog extends AuthController
         $this->services = $services;
     }
 
+    /** Count callers request the current locked-stock projection; store scope still comes only from the session. */
     public function search()
     {
-        [$keyword, $categoryId, $page, $limit] = $this->request->getMore([
+        [$keyword, $categoryId, $page, $limit, $forCount] = $this->request->getMore([
             ['keyword', ''],
             ['category_id', 0],
             ['page', 1],
             ['limit', 20],
+            ['for_count', 0],
         ], true);
         return $this->success($this->services->search(
             (int)$this->storeId,
             (string)$keyword,
             (int)$categoryId,
             (int)$page,
-            (int)$limit
+            (int)$limit,
+            (int)$forCount === 1
         ));
     }
 

@@ -5,6 +5,7 @@ import { inventoryApi, platformInventoryApi } from '../services/inventoryApi'
 import InventoryProductSelector from './InventoryProductSelector.vue'
 import InventoryStoreSelector from './InventoryStoreSelector.vue'
 import { inventoryStatusLabel } from '../statusLabels'
+import { exportCountCsv, parseCountCsv } from './countWorksheet'
 
 const props = defineProps({
   pageKey: { type: String, default: '' },
@@ -30,6 +31,9 @@ const bulkEditorVisible = ref(false)
 const bulkValues = ref({})
 const catalogError = ref('')
 const productSelectorVisible = ref(false)
+const countFileInput = ref(null)
+const countLoading = ref(false)
+const countProgress = ref('')
 const scannerVisible = ref(false)
 const scannerCode = ref('')
 const scannerLoading = ref(false)
@@ -91,7 +95,8 @@ const platformImportStores = computed(() => {
 })
 const catalogApi = computed(() => isPlatformHeadquarters.value ? platformInventoryApi : inventoryApi)
 const catalogQuery = computed(() => {
-  if (!isPlatformHeadquarters.value) return {}
+  // 盘点的账面数要与确认命令锁定的当前库存一致；普通选品仍沿用原目录口径。
+  if (!isPlatformHeadquarters.value) return props.pageKey === 'count' ? { for_count: 1 } : {}
   // 请货明细仍按“请货方”目录保存，保证后端可校验请求商品；
   // “当前库存”则必须来自供货方库存主体，不能误展示请货方库存。
   const selection = props.pageKey === 'request'
@@ -455,23 +460,114 @@ async function acceptCatalogRows(rows) {
     if (selectedSkuIds.has(Number(row.sku_id))) continue
     const selected = { ...row, batch_no: '', manufactured_date: '', expire_date: '', quantity: '1', unit_cost: '0.00', book_quantity: '0', counted_quantity: '0', surplus_batch_no: '', surplus_unit_cost: '', surplus_manufactured_date: '', surplus_expire_date: '', available_quantity: String(row.available_quantity ?? '0'), reference_unit_cost: '-' }
     if (props.pageKey === 'count') {
-      try {
-        const stock = await (isPlatformHeadquarters.value ? platformInventoryApi : inventoryApi).list('stock', {
-          keyword: row.sku_unique,
-          ...(isPlatformHeadquarters.value ? { location_id: Number(props.hqLocationId) } : {})
-        })
-        const list = Array.isArray(stock?.list) ? stock.list : []
-        selected.book_quantity = String(list.filter((item) => Number(item.sku_id) === Number(row.sku_id)).reduce((sum, item) => sum + Number(item.batch_balance_quantity || 0), 0))
-        selected.counted_quantity = selected.book_quantity
-      } catch (error) {
-        catalogError.value = error instanceof Error ? error.message : '账面库存读取失败。'
-        continue
-      }
+      // 商品目录已经按当前库存主体返回权威可用数；避免对每个 SKU 再发一次库存查询。
+      selected.book_quantity = String(row.available_quantity ?? '0')
+      selected.counted_quantity = selected.book_quantity
     }
     selectedRows.value.push(selected)
     selectedSkuIds.add(Number(row.sku_id))
   }
   productSelectorVisible.value = false
+}
+
+/** 只下载当前表格行；导入与清零均为前端草稿操作，不调用库存写接口。 */
+function exportCountRows() {
+  if (props.pageKey !== 'count' || !selectedRows.value.length) return
+  saveBlob(new Blob([exportCountCsv(productRows.value)], { type: 'text/csv;charset=utf-8' }), `盘点资料-${new Date().toISOString().slice(0, 10)}.csv`)
+}
+
+function zeroVisibleCountRows() {
+  if (props.pageKey !== 'count' || !selectedRows.value.length) return
+  if (!window.confirm(`将当前表格 ${selectedRows.value.length} 行的实盘库存全部填为 0？此时不会修改系统库存，完成盘点后才会入账。`)) return
+  selectedRows.value.forEach((row) => { row.counted_quantity = '0' })
+}
+
+/** 后端目录本身按门店/库存主体过滤；逐页取完，不按库存数量或前 100 行截断。 */
+async function allCountCatalog() {
+  const rows = [], seen = new Set()
+  let page = 1, total = 0
+  do {
+    const response = await catalogApi.value.searchCatalog({ ...catalogQuery.value, keyword: '', category_id: 0, page, limit: 50 })
+    const current = Array.isArray(response?.list) ? response.list : []
+    total = Number(response?.total || 0)
+    if (!current.length && rows.length < total) throw new Error('商品目录未返回完整数据，请稍后重试。')
+    for (const item of current) {
+      const skuId = Number(item.sku_id)
+      if (skuId <= 0 || seen.has(skuId)) continue
+      rows.push(item); seen.add(skuId)
+    }
+    countProgress.value = `已读取 ${Math.min(page * 50, total)} / ${total} 个商品规格`
+    page++
+  } while ((page - 1) * 50 < total)
+  if (rows.length !== total) throw new Error('加载期间商品目录发生变化，请重新加载。')
+  return rows
+}
+
+function countDraftRow(row) {
+  const book = String(row.available_quantity ?? '0')
+  return { ...row, batch_no: '', manufactured_date: '', expire_date: '', quantity: '1', unit_cost: '0.00',
+    book_quantity: book, counted_quantity: book, surplus_batch_no: '', surplus_unit_cost: '',
+    surplus_manufactured_date: '', surplus_expire_date: '', available_quantity: book, reference_unit_cost: '-' }
+}
+
+async function loadAllCountProducts() {
+  if (props.pageKey !== 'count' || countLoading.value) return
+  countLoading.value = true; catalogError.value = ''; countProgress.value = '正在读取当前门店全部库存商品…'
+  try {
+    const catalog = await allCountCatalog()
+    const existing = new Set(selectedRows.value.map((row) => Number(row.sku_id)))
+    const additions = catalog.filter((row) => !existing.has(Number(row.sku_id))).map(countDraftRow)
+    for (const row of additions) selectedRows.value.push(row)
+    countProgress.value = `已加载 ${catalog.length} 个有效规格，新增 ${additions.length} 行；原有实盘数保持不变。`
+  } catch (error) { catalogError.value = error instanceof Error ? error.message : '加载全部商品失败。' }
+  finally { countLoading.value = false }
+}
+
+function countRowKey(row) {
+  return [String(row.product_id), String(row.product_name), String(row.sku_name || ''), String(row.barcode || '')].join('\u001F')
+}
+
+async function importCountRows(event) {
+  const file = event?.target?.files?.[0]
+  if (event?.target) event.target.value = ''
+  if (!file || props.pageKey !== 'count' || countLoading.value) return
+  countLoading.value = true; catalogError.value = ''; countProgress.value = '正在核对盘点文件…'
+  try {
+    if (!/\.csv$/i.test(String(file.name))) throw new Error('请导入本页导出的 CSV 盘点资料。')
+    const imported = parseCountCsv(await file.text())
+    const catalog = await allCountCatalog()
+    const catalogByKey = new Map()
+    for (const item of catalog) {
+      const key = countRowKey(item)
+      if (catalogByKey.has(key)) catalogByKey.set(key, null)
+      else catalogByKey.set(key, item)
+    }
+    const existing = new Map(selectedRows.value.map((row) => [Number(row.sku_id), row]))
+    const matched = [], seen = new Set()
+    for (let index = 0; index < imported.length; index++) {
+      const cells = imported[index]
+      const key = [cells[0], cells[1], cells[2], cells[3]].join('\u001F')
+      const sku = catalogByKey.get(key)
+      if (!sku || seen.has(Number(sku.sku_id))) throw new Error(`第 ${index + 2} 行的商品规格不存在、标识重复或不唯一，请重新导出核对。`)
+      seen.add(Number(sku.sku_id))
+      if (!/^\d+(?:\.\d{1,4})?$/.test(cells[4]) || !/^\d+(?:\.\d{1,4})?$/.test(cells[5])) throw new Error(`第 ${index + 2} 行库存数量无效。`)
+      // 文件的账面值必须与导入时目录一致；过期文件不能覆盖更新后的入出库结果。
+      if (Number(cells[4]) !== Number(sku.available_quantity ?? 0)) throw new Error(`第 ${index + 2} 行账面库存已变化，请重新导出盘点资料。`)
+      const difference = Number(cells[5]) - Number(cells[4])
+      if (!/^-?\d+(?:\.\d{1,4})?$/.test(cells[6]) || Math.abs(Number(cells[6]) - difference) > 0.0001) throw new Error(`第 ${index + 2} 行库存盈亏与实盘数不一致。`)
+      if (cells[8] && !/^\d+(?:\.\d{1,2})?$/.test(cells[8])) throw new Error(`第 ${index + 2} 行盘盈单价无效。`)
+      if ([cells[9], cells[10]].some((value) => value && !/^\d{4}-\d{2}-\d{2}$/.test(value))) throw new Error(`第 ${index + 2} 行日期格式无效。`)
+      const row = { ...(existing.get(Number(sku.sku_id)) || countDraftRow(sku)),
+        book_quantity: cells[4], counted_quantity: cells[5], surplus_batch_no: cells[7],
+        surplus_unit_cost: cells[8], surplus_manufactured_date: cells[9], surplus_expire_date: cells[10] }
+      matched.push(row)
+    }
+    // 全文件校验成功后才一次性更新表格；不删除当前表格里未出现在文件中的行。
+    const importedIds = new Set(matched.map((row) => Number(row.sku_id)))
+    selectedRows.value = [...selectedRows.value.filter((row) => !importedIds.has(Number(row.sku_id))), ...matched]
+    countProgress.value = `已导入 ${matched.length} 行到盘点单；完成盘点前系统库存不变。`
+  } catch (error) { catalogError.value = error instanceof Error ? error.message : '盘点资料导入失败。' }
+  finally { countLoading.value = false }
 }
 
 async function loadSupplyParties() {
@@ -621,7 +717,7 @@ function selectedTransferTarget() {
 }
 
 function countIdempotencyKey() { return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? `count-${crypto.randomUUID()}` : `count-${Date.now()}-${Math.random().toString(36).slice(2)}` }
-async function submitCount() { if (props.pageKey !== 'count' || !selectedRows.value.length) return; submitting.value = true; submitError.value = ''; try { const payload = { idempotency_key: countIdempotencyKey(), business_date: inboundDate.value, remark: countRemark.value, lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, counted_quantity: row.counted_quantity, surplus_batch_no: row.surplus_batch_no, surplus_unit_cost: row.surplus_unit_cost, surplus_manufactured_date: row.surplus_manufactured_date, surplus_expire_date: row.surplus_expire_date })) }; if (isPlatformHeadquarters.value) await platformInventoryApi.confirmHqCount({ ...payload, hq_location_id: Number(props.hqLocationId) }); else await inventoryApi.confirmCount(payload); emit('saved'); close() } catch (error) { submitError.value = error instanceof Error ? error.message : '盘点提交失败。' } finally { submitting.value = false } }
+async function submitCount() { if (props.pageKey !== 'count' || !selectedRows.value.length || countLoading.value) return; submitting.value = true; submitError.value = ''; try { const payload = { idempotency_key: countIdempotencyKey(), business_date: inboundDate.value, remark: countRemark.value, lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, counted_quantity: row.counted_quantity, surplus_batch_no: row.surplus_batch_no, surplus_unit_cost: row.surplus_unit_cost, surplus_manufactured_date: row.surplus_manufactured_date, surplus_expire_date: row.surplus_expire_date, expected_book_quantity: String(row.book_quantity) })) }; if (isPlatformHeadquarters.value) await platformInventoryApi.confirmHqCount({ ...payload, hq_location_id: Number(props.hqLocationId) }); else await inventoryApi.confirmCount(payload); emit('saved'); close() } catch (error) { submitError.value = error instanceof Error ? error.message : '盘点提交失败。' } finally { submitting.value = false } }
 
 function removeCatalogRow(rowIndex) {
   selectedRows.value.splice(rowIndex, 1)
@@ -894,9 +990,9 @@ async function submitWarehouse() {
           <section v-if="!isImport && !isDetail && pageKey !== 'warehouse'" class="line-section">
             <header>
               <div><h3>{{ pageKey === 'count' ? '盘点商品' : pageKey === 'request' ? '请货商品' : pageKey === 'transfer' ? '调拨商品' : pageKey === 'inbound' ? '入库商品' : pageKey === 'outbound' ? '出库商品' : '业务明细' }}<i v-if="!isDetail">*</i></h3><p v-if="pageKey === 'inbound'">扫描商品条码可自动添加；批次、生产日期、到期日和入库单价在商品明细中填写。</p><p v-else-if="pageKey === 'outbound'">系统会优先扣减最早到期的可用批次，并自动计算成本。</p></div>
-              <div v-if="!isDetail" class="line-actions"><button v-if="!isUsageReturn" class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="!isUsageReturn && ['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button></div>
+              <div v-if="!isDetail" class="line-actions"><template v-if="pageKey === 'count' && !isPlatformHeadquarters"><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="exportCountRows">导出盘点资料</button><button class="modal-secondary" :disabled="countLoading" @click="countFileInput?.click()">导入盘点</button><input ref="countFileInput" class="count-file-input" type="file" accept=".csv,text/csv" @change="importCountRows" /><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="zeroVisibleCountRows">库存清零</button><button class="modal-secondary" :disabled="countLoading" @click="loadAllCountProducts">{{ countLoading ? '加载中…' : '加载全部商品' }}</button></template><button v-if="!isUsageReturn" class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="!isUsageReturn && ['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button></div>
             </header>
-            <p v-if="catalogError" class="catalog-error">{{ catalogError }}</p>
+            <p v-if="catalogError" class="catalog-error">{{ catalogError }}</p><p v-if="pageKey === 'count' && countProgress" class="count-progress">{{ countProgress }}</p>
             <section v-if="scannerVisible" class="scanner-entry"><Barcode :size="17" /><label>扫描条码<input v-model="scannerCode" autofocus placeholder="请扫描或输入商品条码" @keyup.enter="addScannedProduct" /></label><button class="modal-secondary" @click="scannerVisible = false">取消</button><button class="modal-primary" :disabled="!scannerCode.trim() || scannerLoading" @click="addScannedProduct">{{ scannerLoading ? '添加中' : '添加' }}</button></section>
             <section v-if="bulkEditorVisible" class="bulk-editor"><strong>批量填写已选 {{ selectedLineIndexes.length }} 项</strong><label v-for="field in bulkFields" :key="field.key">{{ field.label }}<input v-model="bulkValues[field.key]" :type="field.type" :placeholder="`不填写则不覆盖`" /></label><div><button class="modal-secondary" @click="bulkEditorVisible = false">取消</button><button class="modal-primary" @click="applyBulkValues">应用到已选行</button></div></section>
             <div class="modal-table-scroll"><table><thead><tr><th><input type="checkbox" :checked="allLinesSelected" @change="toggleAllLines" /></th><th v-for="column in columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="!productRows.length && ['inbound', 'outbound', 'count', 'request', 'transfer', 'usage'].includes(pageKey)"><td :colspan="columns.length + 2" class="modal-empty">请扫描商品条码或搜索并选择商品</td></tr><tr v-for="(row, rowIndex) in productRows" :key="rowIndex"><td><input v-model="selectedLineIndexes" type="checkbox" :value="rowIndex" /></td><td v-for="(cell, cellIndex) in row" :key="cellIndex"><template v-if="pageKey === 'inbound' && cellIndex === 4"><input v-model="selectedRows[rowIndex].batch_no" class="table-input" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 5"><input v-model="selectedRows[rowIndex].manufactured_date" class="table-input" type="date" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 6"><input v-model="selectedRows[rowIndex].expire_date" class="table-input" type="date" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 7"><input v-model="selectedRows[rowIndex].quantity" class="table-input" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 8"><input v-model="selectedRows[rowIndex].unit_cost" class="table-input" /></template><template v-else-if="(pageKey === 'outbound' && cellIndex === 6) || (pageKey === 'request' && cellIndex === 5) || (pageKey === 'transfer' && cellIndex === 6) || (pageKey === 'usage' && cellIndex === 4)"><input v-model="selectedRows[rowIndex].quantity" class="table-input" /></template><template v-else-if="pageKey === 'count' && cellIndex === 5"><input v-model="selectedRows[rowIndex].counted_quantity" class="table-input" /></template><template v-else-if="pageKey === 'count' && cellIndex === 7"><input v-model="selectedRows[rowIndex].surplus_batch_no" class="table-input" placeholder="盘盈必填" /></template><template v-else-if="pageKey === 'count' && cellIndex === 8"><input v-model="selectedRows[rowIndex].surplus_unit_cost" class="table-input" placeholder="盘盈必填" /></template><template v-else-if="pageKey === 'count' && cellIndex === 9"><input v-model="selectedRows[rowIndex].surplus_manufactured_date" class="table-input" type="date" /></template><template v-else-if="pageKey === 'count' && cellIndex === 10"><input v-model="selectedRows[rowIndex].surplus_expire_date" class="table-input" type="date" /></template><template v-else>{{ cell }}</template></td><td><button class="modal-link" @click="removeCatalogRow(rowIndex)">删除</button></td></tr></tbody></table></div>
@@ -909,7 +1005,7 @@ async function submitWarehouse() {
 
         <footer class="inventory-modal__footer">
           <button class="modal-secondary" @click="close">取消</button>
-          <template v-if="!isDetail && !isImport"><button class="modal-primary" :disabled="submitting || (['inbound', 'outbound', 'count', 'request', 'transfer', 'usage'].includes(pageKey) && !selectedRows.length) || (pageKey === 'usage' && (!Number(usageProjectId) || !usageProjectName.trim())) || (pageKey === 'request' && (!supplyPartySelection || !requesterName.trim())) || (pageKey === 'transfer' && (!transferTargetSelection || (isPlatformHeadquarters && !transferStaffOptions.length))) || (pageKey === 'warehouse' && (Number(warehouseStoreId) <= 0 || !warehouseName.trim()))" @click="pageKey === 'inbound' ? submitInbound() : pageKey === 'outbound' ? submitOutbound() : pageKey === 'count' ? submitCount() : pageKey === 'request' ? submitRequest() : pageKey === 'transfer' ? submitTransfer() : pageKey === 'usage' ? submitUsage() : pageKey === 'warehouse' ? submitWarehouse() : null">{{ (['inbound', 'outbound', 'count', 'request', 'transfer', 'usage', 'warehouse'].includes(pageKey) && submitting) ? '提交中' : pageKey === 'count' ? '完成盘点' : pageKey === 'request' ? (isRequestEdit ? '保存修改' : '确认申请') : pageKey === 'transfer' ? '保存调拨草稿' : pageKey === 'usage' ? (isUsageReturn ? '确认退回' : '确认领用') : pageKey === 'warehouse' ? '创建仓库' : '保存' }}</button></template>
+          <template v-if="!isDetail && !isImport"><button class="modal-primary" :disabled="submitting || (pageKey === 'count' && countLoading) || (['inbound', 'outbound', 'count', 'request', 'transfer', 'usage'].includes(pageKey) && !selectedRows.length) || (pageKey === 'usage' && (!Number(usageProjectId) || !usageProjectName.trim())) || (pageKey === 'request' && (!supplyPartySelection || !requesterName.trim())) || (pageKey === 'transfer' && (!transferTargetSelection || (isPlatformHeadquarters && !transferStaffOptions.length))) || (pageKey === 'warehouse' && (Number(warehouseStoreId) <= 0 || !warehouseName.trim()))" @click="pageKey === 'inbound' ? submitInbound() : pageKey === 'outbound' ? submitOutbound() : pageKey === 'count' ? submitCount() : pageKey === 'request' ? submitRequest() : pageKey === 'transfer' ? submitTransfer() : pageKey === 'usage' ? submitUsage() : pageKey === 'warehouse' ? submitWarehouse() : null">{{ (['inbound', 'outbound', 'count', 'request', 'transfer', 'usage', 'warehouse'].includes(pageKey) && submitting) ? '提交中' : pageKey === 'count' ? '完成盘点' : pageKey === 'request' ? (isRequestEdit ? '保存修改' : '确认申请') : pageKey === 'transfer' ? '保存调拨草稿' : pageKey === 'usage' ? (isUsageReturn ? '确认退回' : '确认领用') : pageKey === 'warehouse' ? '创建仓库' : '保存' }}</button></template>
           <button v-else-if="isImport" class="modal-secondary" :disabled="importBusy" @click="close">返回列表</button>
           <button v-else class="modal-primary" @click="close">关闭</button>
         </footer>
@@ -918,6 +1014,7 @@ async function submitWarehouse() {
 </template>
 
 <style scoped>
+.count-file-input { display: none; }.count-progress { margin: 0; padding: 8px 14px; color: #42637e; font-size: 12px; background: #f4f9ff; }
 .inventory-editor { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: calc(100vh - 112px); overflow: hidden; border: 1px solid #d8e3ed; border-radius: 8px; background: #f5f7fa; }.inventory-editor__header, .inventory-modal__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 20px; border-bottom: 1px solid #e0e7ef; background: #fff; }.inventory-editor__header p { margin: 0 0 4px; color: #8a97a5; font-size: 11px; }.inventory-editor__header h2 { margin: 0; color: #253a50; font-size: 18px; }.inventory-modal__footer { justify-content: flex-end; border-top: 1px solid #e0e7ef; border-bottom: 0; }.modal-icon-button { display: inline-grid; width: 34px; height: 34px; place-items: center; padding: 0; border: 1px solid #dce5ee; border-radius: 8px; background: #fff; color: #47627d; }.modal-icon-button:hover { border-color: #91caff; color: #176fd1; }
 .inventory-modal__body { overflow: auto; padding: 18px 20px 22px; }.form-section { margin-bottom: 15px; padding: 14px; border: 1px solid #e0e7ef; border-radius: 10px; background: #fff; }.form-section__heading { margin-bottom: 12px; }.form-section__heading h3 { margin: 0; color: #314b65; font-size: 14px; }.form-label { display: block; margin-bottom: 10px; color: #5c7187; font-size: 12px; }.form-section i, .form-grid i, .line-section h3 i { margin-left: 3px; color: #e05252; font-style: normal; }.type-radio-group { display: flex; flex-wrap: wrap; gap: 8px; }.type-radio-group button { min-height: 31px; padding: 0 12px; border: 1px solid #dbe5ee; border-radius: 7px; background: #fff; color: #5b7086; font-size: 12px; }.type-radio-group button.active { border-color: #176fd1; background: #eaf3ff; color: #176fd1; font-weight: 700; }.type-tip { margin: 9px 0 0; color: #8491a0; font-size: 11px; }.form-grid { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 13px 18px; margin-bottom: 15px; padding: 15px; border: 1px solid #e0e7ef; border-radius: 10px; background: #fff; }.form-grid--embedded { margin: 14px 0 0; padding: 14px 0 0; border-width: 1px 0 0; border-radius: 0; }.form-grid--single { grid-template-columns: 1fr; }.form-grid label { display: grid; align-content: start; gap: 6px; color: #60748a; font-size: 12px; }.form-grid__inline { grid-template-columns: max-content minmax(0, 1fr); align-items: center !important; gap: 8px !important; }.field-label { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }.form-grid input, .form-grid select, .input-like { width: 100%; height: 34px; padding: 0 9px; border: 1px solid #d8e3ed; border-radius: 8px; outline: 0; background: #fff; color: #40566d; }.input-like { display: inline-flex; align-items: center; gap: 6px; }.input-like--action { border-color: #b8d8f7; background: #f6fbff; color: #176fd1; }.form-grid__full { grid-column: 1 / -1; }
 .line-section { overflow: hidden; border: 1px solid #dfe8f0; border-radius: 10px; background: #fff; }.line-section > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 15px; border-bottom: 1px solid #e8eef4; }.line-section h3 { margin: 0; color: #30465d; font-size: 14px; }.line-section p { margin: 4px 0 0; color: #8795a5; font-size: 11px; }.line-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }.scanner-entry { display: flex; align-items: end; gap: 9px; padding: 12px 15px; border-bottom: 1px solid #e8eef4; background: #f7fbff; color: #176fd1; }.scanner-entry label { display: grid; flex: 1; gap: 4px; color: #60748a; font-size: 11px; }.scanner-entry input { height: 31px; padding: 0 8px; border: 1px solid #bcd6ed; border-radius: 6px; color: #40566d; }.bulk-editor { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)) auto; gap: 9px; align-items: end; padding: 12px 15px; border-bottom: 1px solid #e8eef4; background: #f7fbff; }.bulk-editor strong { grid-column: 1 / -1; color: #36526e; font-size: 12px; }.bulk-editor label { display: grid; gap: 5px; color: #60748a; font-size: 11px; }.bulk-editor input { height: 30px; padding: 0 7px; border: 1px solid #bcd6ed; border-radius: 6px; color: #40566d; }.bulk-editor div { display: flex; gap: 7px; }.modal-primary, .modal-secondary, .modal-danger { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 33px; padding: 0 12px; border-radius: 8px; font-size: 12px; }.modal-primary { border: 1px solid #176fd1; background: #176fd1; color: #fff; }.modal-secondary { border: 1px solid #d5e1ee; background: #fff; color: #47627d; }.modal-danger { border: 1px solid #f0d1d1; background: #fff8f8; color: #ca4c4c; }.line-search { display: flex; align-items: center; gap: 8px; margin: 14px; padding: 0 9px; border: 1px solid #dbe5ee; border-radius: 8px; color: #7f8fa0; background: #fbfdff; }.line-search input { width: 240px; height: 34px; border: 0; outline: 0; background: transparent; }.modal-table-scroll { overflow: auto; }.modal-table-scroll table { width: 100%; min-width: 1180px; border-collapse: collapse; }.modal-table-scroll th { height: 39px; padding: 0 11px; border-bottom: 1px solid #e7edf3; background: #f7f9fc; color: #60748a; font-size: 11px; font-weight: 600; text-align: left; white-space: nowrap; }.modal-table-scroll td { height: 51px; padding: 0 11px; border-bottom: 1px solid #edf1f5; color: #40566d; font-size: 12px; white-space: nowrap; }.table-input { width: 76px; height: 29px; padding: 0 6px; border: 1px solid #bcd6ed; border-radius: 6px; color: #344d68; font-size: 12px; }.table-input[type='date'] { width: 142px; min-width: 142px; }.modal-link { border: 0; background: transparent; color: #d05252; font-size: 12px; }.line-total { display: flex; justify-content: space-between; padding: 12px 15px; background: #fbfdff; color: #7d8c9c; font-size: 12px; }.line-total strong { color: #1f4e80; }.modal-notice { display: flex; gap: 8px; margin-top: 14px; padding: 12px 14px; border: 1px solid #f0ddae; border-radius: 9px; background: #fffbef; color: #a86d12; }.modal-notice div { display: grid; gap: 4px; }.modal-notice strong { font-size: 12px; }.modal-notice p { margin: 0; color: #857040; font-size: 11px; }.detail-meta { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-bottom: 14px; padding: 12px 14px; border: 1px solid #dfe8f0; border-radius: 9px; background: #fff; color: #61758b; font-size: 12px; }.detail-meta b { color: #26835f; }.detail-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 15px; }.detail-summary article { padding: 14px; border: 1px solid #e0e7ef; border-radius: 10px; background: #fff; }.detail-summary span { display: block; color: #8291a2; font-size: 11px; }.detail-summary strong { display: block; margin-top: 7px; color: #284868; font-size: 17px; }.import-workflow { display: grid; gap: 14px; }.import-modal { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 18px; border: 1px solid #cfe1f5; border-radius: 10px; background: #f2f8ff; color: #176fd1; }.import-modal div { display: grid; gap: 4px; }.import-modal strong { color: #304d69; font-size: 14px; }.import-modal p { margin: 0; color: #71849a; font-size: 12px; }.import-rules { display: grid; gap: 5px; padding: 14px 16px; border: 1px solid #f0dfb2; border-radius: 8px; background: #fffbf1; color: #846225; font-size: 12px; line-height: 1.55; }.import-rules strong { color: #76520d; }.import-upload { display: grid; justify-items: center; gap: 7px; padding: 28px 18px; border: 1px dashed #a9c8e3; border-radius: 8px; background: #fafdff; color: #3275ae; cursor: pointer; }.import-upload input { display: none; }.import-upload strong { color: #3a5268; font-size: 13px; }.import-upload small { color: #8292a1; }.import-actions { display: flex; gap: 9px; justify-content: flex-end; }.import-success { margin: 0; color: #26835f; font-size: 13px; }

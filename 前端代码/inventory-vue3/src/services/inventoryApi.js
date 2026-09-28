@@ -54,6 +54,9 @@ function messageOf(body, fallback) {
     inventory_manual_inbound_batch_changed: '批次库存刚发生变化，请刷新后重新提交。',
     inventory_manual_inbound_idempotency_conflict: '本次入库内容与已提交记录不一致，请刷新后重新操作。',
     inventory_manual_outbound_stock_insufficient: '当前库存不足，请核对出库数量后重试。',
+    inventory_stock_count_catalog_not_found: '盘点商品已失效，请重新选择商品。',
+    inventory_stock_count_stock_changed: '账面库存已变化，请重新核对盘点数量后提交。',
+    inventory_stock_count_duplicate_sku: '盘点单中有重复商品规格，请删除重复行。',
     inventory_salon_usage_date_invalid: '院装业务日期格式不正确，请重新选择日期。',
     inventory_salon_usage_project_not_found: '所选项目不存在、已停用或不属于当前门店。',
     inventory_salon_usage_return_exceeds_issue: '退回数量不能超过原领用数量。',
@@ -85,7 +88,8 @@ export function createInventoryApi(options = {}) {
 
   async function request(path, requestOptions = {}, requestPrefix = prefix) {
     const controller = typeof AbortController === 'function' ? new AbortController() : null
-    const timer = controller ? setTimeout(() => controller.abort(), TIMEOUT_MS) : null
+    // 大盘点仍是一张原子单据；仅延长该命令的等待时间，不拆成会部分入账的小单。
+    const timer = controller ? setTimeout(() => controller.abort(), requestOptions.timeoutMs || TIMEOUT_MS) : null
     const token = tokenFromBrowser(browserWindow)
     const [rawPath, pathQuery = ''] = String(path).split('?', 2)
     const queryParams = new URLSearchParams(pathQuery)
@@ -237,7 +241,7 @@ export function createInventoryApi(options = {}) {
     createOutbound(body) { return request('/v3/outbound', { method: 'POST', body }) },
     outboundDetail(id) { return request(`/v3/outbound/${encodeURIComponent(String(id || ''))}/detail`) },
     voidOutbound(id, body) { return request(`/v3/outbound/${encodeURIComponent(String(id || ''))}/void`, { method: 'POST', body }) },
-    confirmCount(body) { return request('/v3/count/confirm', { method: 'POST', body }) },
+    confirmCount(body) { return request('/v3/count/confirm', { method: 'POST', body, timeoutMs: 300000 }) },
     applyRequest(body) { return request('/v3/request/apply', { method: 'POST', body }) },
     requestCounterparties() { return request('/v3/request/counterparties') },
     requestRequester() { return request('/v3/request/requester') },

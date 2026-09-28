@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS `eb_store_product` (
 CREATE TABLE IF NOT EXISTS `eb_system_store` (
   `id` bigint(20) unsigned NOT NULL,
   `name` varchar(100) NOT NULL DEFAULT '',
+  `status` tinyint(3) unsigned NOT NULL DEFAULT '1',
   `is_del` tinyint(3) unsigned NOT NULL DEFAULT '0',
   `is_show` tinyint(3) unsigned NOT NULL DEFAULT '1',
   PRIMARY KEY (`id`)
@@ -42,6 +43,34 @@ CREATE TABLE IF NOT EXISTS `eb_organization_store` (
   `store_id` bigint(20) unsigned NOT NULL,
   `org_id` bigint(20) unsigned NOT NULL DEFAULT '0',
   PRIMARY KEY (`store_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Current inventory upgrades register platform routes even in the isolated test schema.
+CREATE TABLE IF NOT EXISTS `eb_system_menus` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `pid` bigint(20) unsigned NOT NULL DEFAULT '0', `type` tinyint(3) unsigned NOT NULL DEFAULT '0',
+  `icon` varchar(100) NOT NULL DEFAULT '', `menu_name` varchar(100) NOT NULL DEFAULT '',
+  `module` varchar(100) NOT NULL DEFAULT '', `controller` varchar(100) NOT NULL DEFAULT '',
+  `action` varchar(100) NOT NULL DEFAULT '', `api_url` varchar(255) NOT NULL DEFAULT '',
+  `methods` varchar(16) NOT NULL DEFAULT '', `params` varchar(255) NOT NULL DEFAULT '',
+  `sort` int(11) NOT NULL DEFAULT '0', `is_show` tinyint(3) NOT NULL DEFAULT '0',
+  `is_show_path` tinyint(3) NOT NULL DEFAULT '0', `access` tinyint(3) NOT NULL DEFAULT '0',
+  `menu_path` varchar(255) NOT NULL DEFAULT '', `path` varchar(255) NOT NULL DEFAULT '',
+  `auth_type` tinyint(3) NOT NULL DEFAULT '0', `header` varchar(100) NOT NULL DEFAULT '',
+  `is_header` tinyint(3) NOT NULL DEFAULT '0', `unique_auth` varchar(255) NOT NULL DEFAULT '',
+  `is_del` tinyint(3) NOT NULL DEFAULT '0', PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Empty category fixtures let catalog pagination run without inventing product classifications.
+CREATE TABLE IF NOT EXISTS `eb_store_product_category` (
+  `id` bigint(20) unsigned NOT NULL, `cate_name` varchar(100) NOT NULL DEFAULT '',
+  `pid` bigint(20) unsigned NOT NULL DEFAULT '0', `is_show` tinyint(3) unsigned NOT NULL DEFAULT '1',
+  `sort` int(11) NOT NULL DEFAULT '0', PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS `eb_store_product_relation` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT, `product_id` bigint(20) unsigned NOT NULL DEFAULT '0',
+  `relation_id` bigint(20) unsigned NOT NULL DEFAULT '0', `type` tinyint(3) unsigned NOT NULL DEFAULT '0',
+  `status` tinyint(3) unsigned NOT NULL DEFAULT '1', PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `eb_store_product_attr_value` (
