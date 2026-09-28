@@ -70,6 +70,14 @@ if ($storeReferenceMethod->invoke($policy,$storeEvidence,$storeSafe,$storeKinds)
 $shortStoreEvidence=$storeEvidence;$shortStoreEvidence['requirements'][0]['evidence'][0]['quote']='这个门店';
 if ($storeReferenceMethod->invoke($policy,$shortStoreEvidence,$storeSafe,$storeKinds)!=='[local_condition_1]')
     throw new RuntimeException('one current named store was left unresolved only because model evidence quoted its generic reference');
+$roleMisfiledAsStore=$storeEvidence;
+$roleMisfiledAsStore['requirements'][0]['values']['store_term']='[local_condition_2]';
+$roleMisfiledAsStore['requirements'][0]['evidence'][0]['quote']='[local_condition_2]';
+$storeAndRole=$storeSafe;$storeAndRole['outbound']['question'].=' 技师 [local_condition_2]';
+$storeAndRole['local_conditions']['local_condition_2']='合成岗位';
+if ($storeReferenceMethod->invoke($policy,$roleMisfiledAsStore,$storeAndRole,
+    ['local_condition_1'=>'store','local_condition_2'=>'position'])!=='[local_condition_1]')
+    throw new RuntimeException('an accepted current store restriction must not consume the separate role token');
 $twoStores=$storeSafe;$twoStores['outbound']['question'].=' 和 [local_condition_2]';
 $twoStores['local_conditions']['local_condition_2']='另一合成门店';
 if ($storeReferenceMethod->invoke($policy,$shortStoreEvidence,$twoStores,

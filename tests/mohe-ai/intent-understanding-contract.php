@@ -735,6 +735,10 @@ $spuriousScope=$inventedRanking;$spuriousScope['scope']='current_store';
 $normalizedSpuriousScope=AiIntentResultContract::normalize($spuriousScope,['cash_performance'],[],$plainQuestion,$plainUnderstanding);
 $check($normalizedSpuriousScope['scope']==='unspecified'&&!$normalizedSpuriousScope['_scope_supplied'],
     'an analytical store candidate cannot silently narrow an otherwise unscoped authorized range');
+$bindingPrompt=AiIntentResultContract::modelInstruction(false);
+$check(str_contains($bindingPrompt,'A named store is not a scope enum')
+    &&str_contains($bindingPrompt,'omit it when understanding has no explicit scope requirement'),
+    'binding prompt separates a named store from the fixed scope vocabulary before model repair is needed');
 $currentScopeQuestion=$plainQuestion;$currentScopeQuestion['question']='本店本月收款';$currentScopeQuestion['evidence_messages'][0]['text']=$currentScopeQuestion['question'];
 $currentScopeUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'查看本店本月收款','status'=>'understood','requirements'=>[
     ['id'=>'r1','meaning'=>'查看本月收款','fields'=>['metric_codes','periods'],'values'=>['metric_terms'=>['收款'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>'本店本月收款']]],
@@ -922,6 +926,43 @@ $check($personRole['requirements'][1]['values']['object_kind']==='person'
     && $personRole['requirements'][1]['values']['object_relation']==='analysis'
     && AiIntentResultContract::understoodStoreTerm($personRole)==='[local_condition_1]',
     'one current opaque position narrows personnel rather than becoming a rankable position row');
+$rankedRoleQuestion=$maskedRoleQuestion;
+$rankedRoleQuestion['question']='这个月'.$maskedRoleQuestion['question'].'，最低的是哪个';
+$rankedRoleQuestion['evidence_messages'][0]['text']=$rankedRoleQuestion['question'];
+$rankedRoleUnderstanding=$personRole;
+$rankedRoleUnderstanding['requirements'][2]['fields']=array_values(array_unique(array_merge(
+    $rankedRoleUnderstanding['requirements'][2]['fields'],['periods','ranking']
+)));
+$rankedRoleUnderstanding['requirements'][2]['values']['periods']=[['kind'=>'month_offset','offset_months'=>0]];
+$rankedRoleUnderstanding['requirements'][2]['values']['ranking']=['direction'=>'top_and_bottom','limit'=>1];
+$rankedRoleUnderstanding['requirements'][2]['evidence']=[['message_id'=>'current','quote'=>$rankedRoleQuestion['question']]];
+$rankedRoleUnderstanding=AiIntentUnderstandingContract::normalize($rankedRoleUnderstanding,$rankedRoleQuestion);
+$exactRoleRank=AiIntentResultContract::exactSingleRankingIntent(
+    $rankedRoleUnderstanding,$rankedRoleQuestion,['staff_project_num']
+);
+$check(is_array($exactRoleRank) && $exactRoleRank['object_kind']==='person'
+    && $exactRoleRank['metric_codes']===['staff_project_num']
+    && $exactRoleRank['ranking']===['direction'=>'top_and_bottom','limit'=>1]
+    && AiIntentResultContract::understoodStoreTerm($rankedRoleUnderstanding)==='[local_condition_1]',
+    'one literal registered ranking metric avoids a duplicate model binding without losing named store or role');
+$rankWithoutPeriod=$rankedRoleUnderstanding;
+unset($rankWithoutPeriod['requirements'][2]['values']['periods']);
+$rankWithoutPeriod['requirements'][2]['fields']=array_values(array_diff($rankWithoutPeriod['requirements'][2]['fields'],['periods']));
+$check(AiIntentResultContract::exactSingleRankingIntent($rankWithoutPeriod,$rankedRoleQuestion,['staff_project_num'])===null,
+    'missing typed period never receives a fast-path default');
+$rankWithoutLimit=$rankedRoleUnderstanding;
+$rankWithoutLimit['requirements'][2]['values']['ranking']['limit']=null;
+$check(AiIntentResultContract::exactSingleRankingIntent($rankWithoutLimit,$rankedRoleQuestion,['staff_project_num'])===null,
+    'an open-ended ranking still needs the ordinary binding path');
+$rankWithPrior=$rankedRoleQuestion;$rankWithPrior['prior_query']=['object_kind'=>'person'];
+$check(AiIntentResultContract::exactSingleRankingIntent($rankedRoleUnderstanding,$rankWithPrior,['staff_project_num'])===null,
+    'a continuation never bypasses context-delta binding');
+$rankOtherObject=$rankedRoleUnderstanding;$rankOtherObject['requirements'][1]['values']['object_kind']='store';
+$check(AiIntentResultContract::exactSingleRankingIntent($rankOtherObject,$rankedRoleQuestion,['staff_project_num'])===null,
+    'the scoped personnel fast path cannot be reused for another analytical object');
+$check(AiIntentResultContract::exactSingleRankingIntent($rankedRoleUnderstanding,$rankedRoleQuestion,
+    ['staff_project_num','staff_sales_yeji'])!==null,
+    'unrelated registered metrics do not block the one exact current measurement');
 $positionAnalysis=$maskedRoleUnderstanding;
 $positionAnalysis['requirements'][1]['values']['object_relation']='analysis';
 $check(AiIntentUnderstandingContract::reconcileSelectedPositionAsPersonnel($positionAnalysis,$maskedRoleQuestion,

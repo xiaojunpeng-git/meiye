@@ -95,9 +95,8 @@ $gatewaySource = file_get_contents(dirname(__DIR__, 2) . '/后端代码/app/serv
 checkRuntime('gateway derives model transport timeout at each provider send boundary', is_string($gatewaySource)
     && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS)') === 6
     && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::UNDERSTANDING_PRIMARY_LIMIT_MS)') === 1
-    && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::UNDERSTANDING_TRANSPORT_RETRY_LIMIT_MS)') === 1
-    && strpos($gatewaySource, 'private const UNDERSTANDING_PRIMARY_LIMIT_MS = 22000;') !== false
-    && strpos($gatewaySource, 'private const UNDERSTANDING_TRANSPORT_RETRY_LIMIT_MS = 8000;') !== false
+    && strpos($gatewaySource, 'private const UNDERSTANDING_PRIMARY_LIMIT_MS = 30000;') !== false
+    && strpos($gatewaySource, 'UNDERSTANDING_TRANSPORT_RETRY_LIMIT_MS') === false
     && strpos($gatewaySource, 'BIND_INITIAL_STAGE_LIMIT_MS') === false
     && strpos($gatewaySource, 'BIND_RECOVERY_STAGE_LIMIT_MS') === false
     && strpos($gatewaySource, ',45000,$checkpoint') === false

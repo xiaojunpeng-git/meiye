@@ -290,27 +290,13 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
  verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownBinding['run_id'])." AND attempt_code='bind_transport_recovery'")->fetchColumn()===0,'unknown binding creates no second transport recovery attempt');
  $unknownUnderstandingFailures=1;[$unknownUnderstanding,$unknownUnderstandingInput]=$make('understand-result-unknown','今天消耗业绩多少？请解释一下');$queriesBeforeUnknownUnderstanding=$queries;
  $unknownUnderstandingResult=$gateway->handle('execute',$context,$binding($unknownUnderstanding)+$unknownUnderstandingInput,$unknownUnderstanding['run_id']);
- verifyGateway($unknownUnderstandingResult['status']==='COMPLETED' && $queries===$queriesBeforeUnknownUnderstanding+1,
-     'one pure understanding transport timeout recovers before the only fact query status='.
-     ($unknownUnderstandingResult['status']??'missing').' reason='.($unknownUnderstandingResult['reason']??'').
-     ' query_delta='.($queries-$queriesBeforeUnknownUnderstanding));
- verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownUnderstanding['run_id'])." AND attempt_code='understand_meaning' AND state='FAILED' AND input_tokens IS NULL AND output_tokens IS NULL")->fetchColumn()===1,
-     'the unusable read-only response closes with unknown usage while its timeout diagnostic remains auditable');
- verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownUnderstanding['run_id'])." AND attempt_code='understand_transport_retry' AND state='SUCCEEDED'")->fetchColumn()===1,
-     'the single bounded understanding recovery is recorded separately');
- $timeoutAuth=$auth;$timeoutAuth['account_id']=9;$timeoutContext=$timeoutAuth;
- $timeoutContext['_refresh']=function()use(&$timeoutAuth){return $timeoutAuth;};
- $timeoutBoot=$gateway->handle('bootstrap',$timeoutContext,['client_session_id'=>'device-timeout-retry']);
- $repeatedTimeoutInput=['client_request_id'=>'understand-result-timeout-twice','conversation_id'=>'conversation-timeout-retry',
-     'client_session_id'=>'device-timeout-retry','window_token'=>$timeoutBoot['window_token'],'question'=>'今天消耗业绩多少？请解释一下',
-     'history'=>[],'output_format'=>'screen','guidance_schema_version'=>'mohe-clarification-v2'];
- $unknownUnderstandingFailures=2;$repeatedTimeout=$gateway->handle('create',$timeoutContext,$repeatedTimeoutInput);$queriesBeforeRepeatedTimeout=$queries;
- $repeatedTimeoutBinding=['client_session_id'=>'device-timeout-retry','generation'=>$repeatedTimeout['generation'],'run_delivery_token'=>$repeatedTimeout['run_delivery_token']];
- $repeatedTimeoutResult=$gateway->handle('execute',$timeoutContext,$repeatedTimeoutBinding+$repeatedTimeoutInput,$repeatedTimeout['run_id']);
- verifyGateway($repeatedTimeoutResult['status']==='FAILED' && $repeatedTimeoutResult['reason']==='AI_MODEL_RESULT_UNKNOWN'
-     && $queries===$queriesBeforeRepeatedTimeout,'a second transport timeout stops without a fact query or another replay');
- verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($repeatedTimeout['run_id'])." AND ((attempt_code='understand_meaning' AND state='FAILED') OR (attempt_code='understand_transport_retry' AND state='UNKNOWN'))")->fetchColumn()===2,
-     'both bounded timeout attempts retain their distinct terminal evidence');
+ verifyGateway($unknownUnderstandingResult['status']==='FAILED' && $unknownUnderstandingResult['reason']==='AI_MODEL_RESULT_UNKNOWN'
+     && $queries===$queriesBeforeUnknownUnderstanding,
+     'an unknown understanding result stops before the fact query without a second short transport attempt');
+ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownUnderstanding['run_id'])." AND attempt_code='understand_meaning' AND state='UNKNOWN' AND input_tokens IS NULL AND output_tokens IS NULL")->fetchColumn()===1,
+     'the unusable read-only response preserves unknown usage and its timeout diagnostic');
+ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownUnderstanding['run_id'])." AND attempt_code='understand_transport_retry'")->fetchColumn()===0,
+     'the large understanding prompt is not replayed inside a shorter timeout window');
  verifyGateway(is_string($repeat['progress']),'frontend progress string');
  [$repairRun,$repairInput]=$make('repair-current','今天消耗业绩格式修复');$modelsBeforeRepair=$models;$queriesBeforeRepair=$queries;
  $repairResult=$gateway->handle('execute',$context,$binding($repairRun)+$repairInput,$repairRun['run_id']);

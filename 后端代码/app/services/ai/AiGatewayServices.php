@@ -35,11 +35,10 @@ final class AiGatewayServices
     // call bounded, but leave enough room for that single semantic stage so a
     // valid request is not reported as failed before any Reader is executed.
     private const MODEL_STAGE_LIMIT_MS = 30000;
-    // Only the first natural-language understanding call has a bounded
-    // transport retry. The two windows add up to the former single-call cap,
-    // so recovery does not double the customer's wait when a provider stalls.
-    private const UNDERSTANDING_PRIMARY_LIMIT_MS = 22000;
-    private const UNDERSTANDING_TRANSPORT_RETRY_LIMIT_MS = 8000;
+    // Give the first semantic request its full bounded window. Replaying the
+    // same large prompt in a shorter remainder was slower and did not recover
+    // provider timeouts in the observed fresh-chat path.
+    private const UNDERSTANDING_PRIMARY_LIMIT_MS = 30000;
     private $runs; private $config; private $private; private $instance; private $views; private $model; private $queryTransaction; private $exports;
     private $management; private $managementDocument; private $managementRevision='source';
     /** Optional injected dependencies are for an isolated integration environment, never request parameters. */
@@ -1281,32 +1280,13 @@ final class AiGatewayServices
             if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,'understand_meaning');
             $diagnostic=$error instanceof AiContractException?$error->diagnostic():[];
             $repairPredicate=$diagnostic['predicate']??null;
-            $transportTimeout=$error instanceof AiContractException
-                &&$error->getMessage()==='AI_MODEL_RESULT_UNKNOWN'
-                &&($diagnostic['stage']??null)==='transport'
-                &&$repairPredicate==='timeout'
-                &&(int)($diagnostic['transport_errno']??0)===28
-                &&(int)($diagnostic['http_status']??-1)===0;
-            // This read-only model attempt produced no usable response. When
-            // it qualifies for the bounded replay below, close it as failed
-            // while retaining its timeout diagnostic and unknown token usage;
-            // an UNKNOWN attempt would correctly block publication for an
-            // external side effect, but understanding has no such side effect.
-            $firstState=$transportTimeout?'FAILED':(in_array($error->getMessage(),
-                ['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');
+            // A timed-out understanding request has no usable meaning. Keep
+            // its outcome UNKNOWN and do not replay the same large prompt in
+            // a shorter window; the full 30-second limit belongs to the
+            // original request, before any business data is queried.
+            $firstState=in_array($error->getMessage(),
+                ['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_meaning',$firstState);
-            // A provider that returned no HTTP response supplied no customer
-            // meaning to repair. Replay the identical sanitized request once,
-            // before any Reader call, using the remaining part of the former
-            // 30-second understanding window. Other unknown outcomes, model
-            // contract defects, cancellation and authority changes keep their
-            // existing fail-closed paths.
-            if ($transportTimeout) {
-                $understanding=$this->retryUnderstandingAfterTransportTimeout(
-                    $owner,$id,$generation,$worker,$safe['outbound'],$configuration,$checkpoint,
-                    $runtimeSkills,$objectVocabulary,$measurementVocabulary
-                );
-            } else {
             if ($repairPredicate==='binding_requirement_unavailable') {
                 throw new RuntimeException('AI_CAPABILITY_NOT_READY');
             }
@@ -1352,8 +1332,7 @@ final class AiGatewayServices
                 throw $repairError;
                 }
             }
-            }
-            }
+        }
         }
         $understanding=$this->resolveExactStatedSinglePeriod($understanding,$safe['outbound'],$today);
         // Object detail is not another ranking or metric-binding request. The
@@ -1558,6 +1537,10 @@ final class AiGatewayServices
             $understanding,$safe['outbound'],array_column($bindingSummaries,'metric_code'),$sourceQuery!==null,
             $registeredCoordinatedFailure
         );
+        $registeredSingleRankingIntent=$sourceQuery===null
+            ?AiIntentResultContract::exactSingleRankingIntent(
+                $understanding,$safe['outbound'],array_column($bindingSummaries,'metric_code')
+            ):null;
         $registeredBreakdownContinuationFailure=null;
         $registeredBreakdownContinuationIntent=$sourceQuery===null?null:
             AiIntentResultContract::registeredBreakdownContinuationIntent(
@@ -1628,6 +1611,12 @@ final class AiGatewayServices
             // audit row, so another model round cannot add business meaning.
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_coordinated_binding_compiled');
             $reply=['intent'=>$registeredCoordinatedIntent,'usage'=>[]];
+        } elseif ($registeredSingleRankingIntent!==null) {
+            // Only the model-accepted rank/object/period and one exact active
+            // registry metric enter this fast path. The common compiler still
+            // resolves private store/role filters and checks data authority.
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_single_ranking_binding_compiled');
+            $reply=['intent'=>$registeredSingleRankingIntent,'usage'=>[]];
         } else {
         // Keep a payload-free structural trace when a verified condition-set
         // continuation cannot use either bounded inheritance shortcut.  This
@@ -2232,7 +2221,20 @@ final class AiGatewayServices
             }
             if (preg_match('/^\[(local_condition_[0-9]+)\]$/D',$storeTerm,$storeMatch)) {
                 $storeReference=$storeMatch[1];
-                if (($privateKindsByReference[$storeReference]??null)!=='store') throw new RuntimeException('AI_STORE_SCOPE_UNAVAILABLE');
+                if (($privateKindsByReference[$storeReference]??null)!=='store') {
+                    // The model may put the current role token in store_term
+                    // while the same turn has exactly one real store token.
+                    // Rebind only from that typed, current store requirement;
+                    // the displaced role stays unresolved for personnel
+                    // selection. Ambiguous or historical stores still fail.
+                    $currentStore=$this->currentNamedStoreReference($understanding,$safe,$privateKindsByReference);
+                    if ($currentStore===null || !preg_match('/^\[(local_condition_[0-9]+)\]$/D',$currentStore,$storeMatch)) {
+                        throw new RuntimeException('AI_STORE_SCOPE_UNAVAILABLE');
+                    }
+                    $storeReference=$storeMatch[1];
+                    if (($privateKindsByReference[$storeReference]??null)!=='store') throw new RuntimeException('AI_STORE_SCOPE_UNAVAILABLE');
+                    $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'current_typed_store_reference_recovered');
+                }
                 $storeTerm=($safe['reference_values']??[])[$storeReference]??null;
                 if (!is_string($storeTerm)||$storeTerm==='') throw new RuntimeException('AI_STORE_SCOPE_UNAVAILABLE');
                 unset($safe['local_conditions'][$storeReference]);
@@ -4624,49 +4626,6 @@ final class AiGatewayServices
         $state['remaining_execution_ms']=min($profile['run_execution_budget_ms'],$remaining);
         $state['execution_deadline_ms']=$now+$state['remaining_execution_ms'];
         return AiRunBudgetPolicy::callTimeout($state,'model',$stageLimitMs,$now);
-    }
-
-    /**
-     * Replays one unchanged sanitized understanding request after a proven
-     * provider transport timeout. This path owns the Run's only recovery slot
-     * and therefore cannot cascade into another semantic or binding repair.
-     * No business query has been compiled or executed at this point.
-     */
-    private function retryUnderstandingAfterTransportTimeout(array $owner,string $id,int $generation,string $worker,
-        array $safeQuestion,array $configuration,callable $checkpoint,array $runtimeSkills,
-        array $objectVocabulary,array $measurementVocabulary): array
-    {
-        $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
-        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',
-            $this->inputTokenReservation([$safeQuestion,$runtimeSkills,$objectVocabulary,$measurementVocabulary],1024));
-        $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
-        $attempt='understand_transport_retry';
-        $this->runs->prepareAttempt($owner,$id,$generation,$worker,$attempt,'model',
-            hash('sha256',json_encode([$safeQuestion,$runtimeSkills,$objectVocabulary,$measurementVocabulary,'transport-retry'])),'siliconflow');
-        $this->runs->sendAttempt($owner,$id,$generation,$worker,$attempt);
-        try {
-            $checkpoint();
-            $modelTimeout=$this->model===null
-                ?$this->modelCallTimeout($owner,$id,$generation,$worker,self::UNDERSTANDING_TRANSPORT_RETRY_LIMIT_MS)
-                :null;
-            $reply=$this->model
-                ?call_user_func($this->model,$safeQuestion,[],$configuration,$checkpoint,null,'understanding')
-                :(new SiliconFlowClient())->understandMeaning($safeQuestion,$configuration['model'],$configuration['api_key'],
-                    $modelTimeout,$checkpoint,$runtimeSkills,null,$objectVocabulary,$measurementVocabulary);
-            $understanding=AiIntentUnderstandingContract::normalize($reply['understanding']??null,$safeQuestion);
-            $this->runs->finishAttempt($owner,$id,$generation,$worker,$attempt,'SUCCEEDED',
-                $reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
-            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'understanding_transport_timeout_recovered');
-            return $understanding;
-        } catch (\Throwable $retryError) {
-            if ($retryError instanceof AiContractException) {
-                $this->recordModelDiagnostic($owner,$id,$generation,$worker,$retryError,$attempt);
-            }
-            $state=in_array($retryError->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)
-                ?'UNKNOWN':'FAILED';
-            $this->runs->finishAttempt($owner,$id,$generation,$worker,$attempt,$state);
-            throw $retryError;
-        }
     }
 
     /**
