@@ -14,12 +14,65 @@ final class InventoryStockCountServices
 {
     public function confirm(int $storeId, int $operatorId, array $input): array
     {
-        $command = $this->normalize($input);
-        return Db::transaction(function () use ($storeId, $operatorId, $command): array {
+        $draftId = (int)($input['draft_id'] ?? 0);
+        $draftVersion = (int)($input['draft_version'] ?? 0);
+        $command = $this->normalize([
+            'idempotency_key' => $input['idempotency_key'] ?? '', 'business_date' => $input['business_date'] ?? '',
+            'remark' => $input['remark'] ?? '', 'lines' => $input['lines'] ?? [],
+        ]);
+        if ($draftId < 0 || ($draftId === 0 && $draftVersion !== 0)
+            || ($draftId > 0 && ($draftVersion <= 0 || $command['key'] !== 'count-draft-' . $draftId))) {
+            throw new \InvalidArgumentException('inventory_stock_count_draft_invalid');
+        }
+        return Db::transaction(function () use ($storeId, $operatorId, $command, $draftId, $draftVersion): array {
             $scope = $this->scope($storeId, $operatorId);
             $location = $this->location($scope);
-            return $this->confirmAtScope($scope, $location, $command);
+            if ($draftId > 0) {
+                $scope['locationId'] = (int)$location['id'];
+                $draft = (new InventoryStockCountDraftServices())->lockForConfirmation($scope, $draftId, $draftVersion);
+                $this->assertDraftCommandMatches($draft, $command);
+                if ((string)$draft['document_status'] === 'CONFIRMED') {
+                    $existing = Db::name('inventory_stock_count_document')->where('id', (int)$draft['confirmed_document_id'])
+                        ->where('tenant_id', $scope['tenantId'])->where('location_id', (int)$location['id'])->find();
+                    if (!$existing || (string)$existing['idempotency_key'] !== $command['key']
+                        || (string)$existing['request_fingerprint'] !== $command['fingerprint']) {
+                        throw new \RuntimeException('inventory_stock_count_idempotency_conflict');
+                    }
+                    return ['count_document_id' => (int)$existing['id'], 'count_no' => (string)$existing['count_no'], 'idempotent' => true];
+                }
+            }
+            $result = $this->confirmAtScope($scope, $location, $command);
+            if ($draftId > 0) (new InventoryStockCountDraftServices())->markConfirmed($draftId, (int)$result['count_document_id'], $draftVersion);
+            return $result;
         });
+    }
+
+    /** A resumed draft must settle exactly its saved differences, never an unrelated client-substituted line set. */
+    private function assertDraftCommandMatches(array $draft, array $command): void
+    {
+        $savedLines = json_decode((string)$draft['lines_json'], true, 512, JSON_THROW_ON_ERROR);
+        $changed = [];
+        foreach ($savedLines as $line) {
+            $counted = trim((string)$line['counted_quantity']);
+            if ($counted === '' || (float)$counted === (float)$line['book_quantity']) continue;
+            $changed[] = [
+                'product_id' => (int)$line['product_id'], 'sku_id' => (int)$line['sku_id'],
+                'sku_unique' => (string)$line['sku_unique'], 'counted_quantity' => $counted,
+                'surplus_batch_no' => (string)$line['surplus_batch_no'],
+                'surplus_unit_cost' => (string)$line['surplus_unit_cost'],
+                'surplus_manufactured_date' => (string)$line['surplus_manufactured_date'],
+                'surplus_expire_date' => (string)$line['surplus_expire_date'],
+                'expected_book_quantity' => (string)$line['book_quantity'],
+            ];
+        }
+        if (!$changed) throw new \RuntimeException('inventory_stock_count_no_difference');
+        $savedCommand = $this->normalize([
+            'idempotency_key' => $command['key'], 'business_date' => (string)$draft['business_date'],
+            'remark' => (string)$draft['remark'], 'lines' => $changed,
+        ]);
+        if ($savedCommand['fingerprint'] !== $command['fingerprint']) {
+            throw new \RuntimeException('inventory_stock_count_draft_changed');
+        }
     }
 
     /** Confirms a count against a platform-authenticated headquarters location. */

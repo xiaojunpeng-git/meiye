@@ -569,8 +569,14 @@ function openEditor(kind = active.value, row = null) {
     openUsageDetail(row)
     return
   }
-  if (kind === 'count-detail' && mode.value === 'platform') {
-    openCountDetail(row)
+  if (kind === 'count-detail') {
+    // The list action reopens a creator-owned draft for editing; confirmed documents remain read-only.
+    if (Number(row?.draft_id || 0) > 0) openCountDraft(row)
+    else openCountDetail(row)
+    return
+  }
+  if (kind === 'count-edit') {
+    openCountDraft(row)
     return
   }
   // Import chooses one or more inventory warehouses inside its own dialog;
@@ -649,14 +655,23 @@ async function openRequestDetail(row) {
 
 async function openCountDetail(row) {
   try {
-    if (mode.value !== 'platform') {
-      openEditor('count-detail', row)
-      return
-    }
-    selectedDetail.value = await platformInventoryApi.hqCountDetail(row.id, { hq_location_id: Number(platformHqLocationId.value) })
+    // 列表行只有汇总列；两个终端均须读取已授权的权威盘点单及明细后再展示。
+    selectedDetail.value = mode.value === 'platform'
+      ? await platformInventoryApi.hqCountDetail(row.id, { hq_location_id: Number(platformHqLocationId.value) })
+      : await inventoryApi.countDetail(row.id)
     editor.value = 'count-detail'
   } catch (error) {
     listError.value = error instanceof Error ? error.message : '盘点详情读取失败。'
+  }
+}
+
+async function openCountDraft(row) {
+  try {
+    // A draft ID is not a settled count document ID; read the creator-scoped draft endpoint.
+    selectedDetail.value = await inventoryApi.countDraftDetail(row.draft_id)
+    editor.value = 'count-edit'
+  } catch (error) {
+    listError.value = error instanceof Error ? error.message : '盘点草稿读取失败。'
   }
 }
 
@@ -819,7 +834,7 @@ function mapApiRow(page, row) {
 function countStatusName(status) {
   // Keep the explicit count labels here for the existing contract; all other
   // inventory document statuses share the central human-readable projection.
-  return { CONFIRMED: '已确认', CANCELLED: '已取消' }[String(status || '')] || inventoryStatusLabel(status)
+  return { DRAFT: '草稿', CONFIRMED: '已确认', CANCELLED: '已取消' }[String(status || '')] || inventoryStatusLabel(status)
 }
 
 // The query service returns batch facts so filters can remain batch-accurate.
