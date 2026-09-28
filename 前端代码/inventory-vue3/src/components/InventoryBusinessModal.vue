@@ -6,6 +6,7 @@ import InventoryProductSelector from './InventoryProductSelector.vue'
 import InventoryStoreSelector from './InventoryStoreSelector.vue'
 import { inventoryStatusLabel } from '../statusLabels'
 import { exportCountCsv, parseCountCsv } from './countWorksheet'
+import { changedCountRows } from '../utils/countSubmission'
 
 const props = defineProps({
   pageKey: { type: String, default: '' },
@@ -717,7 +718,33 @@ function selectedTransferTarget() {
 }
 
 function countIdempotencyKey() { return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? `count-${crypto.randomUUID()}` : `count-${Date.now()}-${Math.random().toString(36).slice(2)}` }
-async function submitCount() { if (props.pageKey !== 'count' || !selectedRows.value.length || countLoading.value) return; submitting.value = true; submitError.value = ''; try { const payload = { idempotency_key: countIdempotencyKey(), business_date: inboundDate.value, remark: countRemark.value, lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, counted_quantity: row.counted_quantity, surplus_batch_no: row.surplus_batch_no, surplus_unit_cost: row.surplus_unit_cost, surplus_manufactured_date: row.surplus_manufactured_date, surplus_expire_date: row.surplus_expire_date, expected_book_quantity: String(row.book_quantity) })) }; if (isPlatformHeadquarters.value) await platformInventoryApi.confirmHqCount({ ...payload, hq_location_id: Number(props.hqLocationId) }); else await inventoryApi.confirmCount(payload); emit('saved'); close() } catch (error) { submitError.value = error instanceof Error ? error.message : '盘点提交失败。' } finally { submitting.value = false } }
+async function submitCount() {
+  if (props.pageKey !== 'count' || countLoading.value || submitting.value) return
+  // 保留加载全部商品的草稿体验，但不得把未盘或无库存变化的规格写入正式盘点单。
+  const changedRows = changedCountRows(selectedRows.value)
+  if (!changedRows.length) {
+    submitError.value = '请至少填写一项与账面库存不同的实盘库存。'
+    return
+  }
+  submitting.value = true
+  submitError.value = ''
+  try {
+    const payload = {
+      idempotency_key: countIdempotencyKey(), business_date: inboundDate.value, remark: countRemark.value,
+      lines: changedRows.map((row) => ({
+        product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique,
+        counted_quantity: row.counted_quantity, surplus_batch_no: row.surplus_batch_no,
+        surplus_unit_cost: row.surplus_unit_cost, surplus_manufactured_date: row.surplus_manufactured_date,
+        surplus_expire_date: row.surplus_expire_date, expected_book_quantity: String(row.book_quantity)
+      }))
+    }
+    if (isPlatformHeadquarters.value) await platformInventoryApi.confirmHqCount({ ...payload, hq_location_id: Number(props.hqLocationId) })
+    else await inventoryApi.confirmCount(payload)
+    emit('saved')
+    close()
+  } catch (error) { submitError.value = error instanceof Error ? error.message : '盘点提交失败。' }
+  finally { submitting.value = false }
+}
 
 function removeCatalogRow(rowIndex) {
   selectedRows.value.splice(rowIndex, 1)

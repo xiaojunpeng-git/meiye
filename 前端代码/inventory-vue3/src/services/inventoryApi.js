@@ -57,6 +57,7 @@ function messageOf(body, fallback) {
     inventory_stock_count_catalog_not_found: '盘点商品已失效，请重新选择商品。',
     inventory_stock_count_stock_changed: '账面库存已变化，请重新核对盘点数量后提交。',
     inventory_stock_count_duplicate_sku: '盘点单中有重复商品规格，请删除重复行。',
+    inventory_stock_count_no_difference: '实盘库存与账面库存没有差异，未生成盘点单。',
     inventory_salon_usage_date_invalid: '院装业务日期格式不正确，请重新选择日期。',
     inventory_salon_usage_project_not_found: '所选项目不存在、已停用或不属于当前门店。',
     inventory_salon_usage_return_exceeds_issue: '退回数量不能超过原领用数量。',

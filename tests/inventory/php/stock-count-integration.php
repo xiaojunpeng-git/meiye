@@ -13,7 +13,7 @@ cassert('count loss uses FEFO and preserves later batch', (int)$batches['TEST-CO
 cassert('count gain requires and creates an auditable new batch', (int)$batches['TEST-COUNT-SURPLUS']===2&&(int)$stock['available_quantity_units']===8&&(int)Db::name('inventory_stock_count_document')->where('id',(int)$gain['count_document_id'])->count()===1);
 cassert('count idempotency returns the original confirmed document', $lossReplay['idempotent']&&(int)$loss['count_document_id']===(int)$lossReplay['count_document_id']);
 cassert('surplus without complete batch details rejects without a document', reason(static function()use($count){$count->confirm(99008,990008,cmd('TEST-count-missing-20260730',line('9')));})==='inventory_stock_count_surplus_batch_required'&&(int)Db::name('inventory_stock_count_document')->where('idempotency_key','TEST-count-missing-20260730')->count()===0);
-// A large, all-zero count is one atomic document; zero-stock catalog SKUs must not require prior inbound stock rows.
+// 加载全部商品的未变动行不得生成空盘点单或零库存主体；大量真实盘盈仍须一单原子入账。
 ensure('store_product',['id'=>990082,'type'=>1,'relation_id'=>99008,'is_del'=>0,'is_inventory'=>1,'store_name'=>'TEST-零库存盘点','code'=>'TEST-P-990082','bar_code'=>'','salon_stock_enabled'=>0,'sort'=>1,'keyword'=>'TEST-零库存盘点']);
 $largeLines=[];
 for($index=1;$index<=151;$index++){
@@ -21,10 +21,19 @@ for($index=1;$index<=151;$index++){
     ensure('store_product_attr_value',['id'=>$skuId,'product_id'=>990082,'type'=>0,'unique'=>'testsku'.$skuId,'suk'=>'规格'.$index,'bar_code'=>'','code'=>'TEST-S-'.$skuId,'stock_unit'=>'件']);
     $largeLines[]=['product_id'=>990082,'sku_id'=>$skuId,'sku_unique'=>'testsku'.$skuId,'counted_quantity'=>'0','surplus_batch_no'=>'','surplus_unit_cost'=>'','surplus_manufactured_date'=>'','surplus_expire_date'=>'','expected_book_quantity'=>'0'];
 }
-$large=$count->confirm(99008,990008,['idempotency_key'=>'TEST-count-151-zero-20260928','business_date'=>'2026-09-28','remark'=>'TEST-151零库存规格','lines'=>$largeLines]);
-cassert('151 zero-stock SKUs confirm in one count document', (int)Db::name('inventory_stock_count_line')->where('document_id',(int)$large['count_document_id'])->count()===151 && (int)Db::name('inventory_stock')->where('store_id',99008)->where('consumable_product_id',990082)->count()===151);
+$stockBefore=(int)Db::name('inventory_stock')->where('store_id',99008)->where('consumable_product_id',990082)->count();
+cassert('all-zero unchanged rows leave no document or stock', reason(static function()use($count,$largeLines){$count->confirm(99008,990008,['idempotency_key'=>'TEST-count-151-noop-20260928','business_date'=>'2026-09-28','remark'=>'TEST-151零差异规格','lines'=>$largeLines]);})==='inventory_stock_count_no_difference' && (int)Db::name('inventory_stock_count_document')->where('idempotency_key','TEST-count-151-noop-20260928')->count()===0 && (int)Db::name('inventory_stock')->where('store_id',99008)->where('consumable_product_id',990082)->count()===$stockBefore);
 $catalog=new InventoryStoreCatalogServices();$firstPage=$catalog->search(99008,'',0,1,50,true);$lastPage=$catalog->search(99008,'',0,4,50,true);
 cassert('count catalog pages all active inventory-managed SKUs including zero stock', (int)$firstPage['total']>=152 && count($firstPage['list'])===50 && count($lastPage['list'])>=2 && in_array('0',array_column($firstPage['list'],'available_quantity'),true));
+$largeGain=$largeLines;
+foreach($largeGain as $index=>&$line){$line['counted_quantity']='1';$line['surplus_batch_no']='TEST-COUNT-GAIN-'.($index+1);$line['surplus_unit_cost']='2.30';$line['surplus_manufactured_date']='2026-06-07';$line['surplus_expire_date']='2027-07-07';}
+unset($line);
+$large=$count->confirm(99008,990008,['idempotency_key'=>'TEST-count-151-gain-20260928','business_date'=>'2026-09-28','remark'=>'TEST-151盘盈规格','lines'=>$largeGain]);
+cassert('151 changed SKUs confirm in one count document', (int)Db::name('inventory_stock_count_line')->where('document_id',(int)$large['count_document_id'])->count()===151 && (int)Db::name('inventory_stock')->where('store_id',99008)->where('consumable_product_id',990082)->count()===151);
+$unchanged=$largeGain[0];$unchanged['surplus_batch_no']='';$unchanged['surplus_unit_cost']='';$unchanged['surplus_manufactured_date']='';$unchanged['surplus_expire_date']='';$unchanged['expected_book_quantity']='1';
+$changed=line('9','TEST-COUNT-MIXED-GAIN','2.30','2026-06-07','2027-07-07');$changed['expected_book_quantity']='8';
+$mixed=$count->confirm(99008,990008,['idempotency_key'=>'TEST-count-mixed-20260928','business_date'=>'2026-09-28','remark'=>'TEST-仅保存变动','lines'=>[$unchanged,$changed]]);
+cassert('mixed count saves only changed SKU', (int)Db::name('inventory_stock_count_line')->where('document_id',(int)$mixed['count_document_id'])->count()===1 && (int)Db::name('inventory_stock_count_line')->where('document_id',(int)$mixed['count_document_id'])->where('product_id',990081)->count()===1);
 $stale=line('8');$stale['expected_book_quantity']='7';
 cassert('stale book snapshot rolls back the whole count', reason(static function()use($count,$stale){$count->confirm(99008,990008,cmd('TEST-count-stale-20260928',$stale));})==='inventory_stock_count_stock_changed'&&(int)Db::name('inventory_stock_count_document')->where('idempotency_key','TEST-count-stale-20260928')->count()===0);
 echo "INVENTORY_STOCK_COUNT_RESULT failed={$failed}\n";exit($failed?1:0);
