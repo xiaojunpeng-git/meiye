@@ -53,13 +53,19 @@ final class InventoryStockCountServices
             ]);
             $document = Db::name('inventory_stock_count_document')->where('id', $documentId)->lock(true)->find();
             $ordered = $command['lines']; usort($ordered, static fn(array $a, array $b): int => [$a['productId'], $a['skuId'], $a['unique'], $a['index']] <=> [$b['productId'], $b['skuId'], $b['unique'], $b['index']]);
-            foreach ($ordered as $line) $this->confirmLine($scope, $location, $document, $line, $command);
+            $changed = 0;
+            foreach ($ordered as $line) {
+                if ($this->confirmLine($scope, $location, $document, $line, $command)) $changed++;
+            }
+            // 全部等于账面数时回滚单头及任何中间写入，不留下空盘点单。
+            if ($changed === 0) throw new \RuntimeException('inventory_stock_count_no_difference');
             return ['count_document_id' => $documentId, 'count_no' => (string)$document['count_no'], 'idempotent' => false];
     }
 
-    private function confirmLine(array $scope, array $location, array $document, array $line, array $command): void
+    /** 未变动规格只校验权威账面值，不创建库存主体、盘点明细或移动事实。 */
+    private function confirmLine(array $scope, array $location, array $document, array $line, array $command): bool
     {
-        $stock = $this->countableStock($scope, $location, $line, $command['now']);
+        $stock = $this->countableStock($scope, $location, $line, $command['now'], false);
         if ((int)$stock['quantity_scale'] < 0 || (int)$stock['quantity_scale'] > 4) throw new \RuntimeException('inventory_stock_count_stock_not_found');
         $scale = (int)$stock['quantity_scale']; $book = (int)$stock['available_quantity_units']; $counted = $this->countUnits($line['counted'], $scale); $difference = $counted - $book;
         // 导出后的账面数若变化，必须重新核对，避免“清零”误清后来入库的数量。
@@ -67,6 +73,8 @@ final class InventoryStockCountServices
             && $this->countUnits($line['expectedBook'], $scale) !== $book) {
             throw new \RuntimeException('inventory_stock_count_stock_changed');
         }
+        if ($difference === 0) return false;
+        if ((int)$stock['id'] === 0) $stock = $this->countableStock($scope, $location, $line, $command['now']);
         $surplus = ['batchNo' => '', 'cost' => 0, 'manufacturedDate' => null, 'expireDate' => null];
         if ($difference < 0) $this->countLoss($scope, $location, $stock, -$difference, $document, $line, $command);
         if ($difference > 0) $surplus = $this->countGain($scope, $location, $stock, $difference, $document, $line, $command);
@@ -74,6 +82,7 @@ final class InventoryStockCountServices
             'document_id' => (int)$document['id'], 'line_no' => $line['index'], 'stock_id' => (int)$stock['id'], 'product_id' => $line['productId'], 'sku_id' => $line['skuId'], 'sku_unique' => $line['unique'], 'quantity_scale' => $scale,
             'book_quantity_units' => $book, 'counted_quantity_units' => $counted, 'difference_quantity_units' => $difference, 'surplus_batch_no' => $surplus['batchNo'], 'surplus_unit_cost_cents' => $surplus['cost'], 'surplus_manufactured_date' => $surplus['manufacturedDate'], 'surplus_expire_date' => $surplus['expireDate'], 'created_at' => $command['now'],
         ]);
+        return true;
     }
 
     /** Physical and book counts may be zero; quantity precision and overflow remain governed by the inventory contract. */
@@ -88,7 +97,7 @@ final class InventoryStockCountServices
     }
 
     /** A catalog SKU with no historical stock is still countable; its zero authority is created only on final confirmation. */
-    private function countableStock(array $scope, array $location, array $line, int $now): array
+    private function countableStock(array $scope, array $location, array $line, int $now, bool $createMissing = true): array
     {
         $catalog = Db::name('store_product_attr_value')->alias('a')->join('store_product p', 'p.id=a.product_id')
             ->where('p.id', $line['productId'])->where('p.type', (string)$location['location_type'] === 'HQ' ? 0 : 1)
@@ -104,6 +113,11 @@ final class InventoryStockCountServices
             ->where('stock_status', InventoryEntitlementCompletionContract::STOCK_STATUS_GOOD);
         $stock = $query->lock(true)->find();
         if ($stock) return (array)$stock;
+        // 未盘或零差异的全量目录行不能因确认请求而创建零库存主体。
+        if (!$createMissing) return [
+            'id' => 0, 'quantity_scale' => (int)$catalog['salon_stock_enabled'] === 1 ? 2 : 0,
+            'available_quantity_units' => 0,
+        ];
         // 与手工入库使用同一库存主体与规格精度；并发创建由唯一键保护后重读。
         try {
             $id = (int)Db::name('inventory_stock')->insertGetId([

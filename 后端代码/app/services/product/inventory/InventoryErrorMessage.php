@@ -56,6 +56,7 @@ final class InventoryErrorMessage
         'inventory_stock_count_catalog_not_found' => '盘点商品已失效，请重新选择商品。',
         'inventory_stock_count_stock_changed' => '账面库存已变化，请重新核对盘点数量后提交。',
         'inventory_stock_count_duplicate_sku' => '盘点单中有重复商品规格，请删除重复行。',
+        'inventory_stock_count_no_difference' => '实盘库存与账面库存没有差异，未生成盘点单。',
     ];
 
     /** @return array{code: string, message: string}|null */
