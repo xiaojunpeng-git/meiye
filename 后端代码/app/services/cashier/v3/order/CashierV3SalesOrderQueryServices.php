@@ -1997,6 +1997,9 @@ final class CashierV3SalesOrderQueryServices
     {
         $quantity = max(0, (int)$serviceFact['quantity']);
         $actualCents = isset($serviceFact['actual_entitlement_amount_cents']) ? max(0, (int)$serviceFact['actual_entitlement_amount_cents']) : null;
+        // 权益服务事实保存的是服务核销快照，早期直通结算使用 snake_case；
+        // 它不是销售明细的结账快照，不能交给 salesLineCraftsmen 的兜底解码。
+        $snapshotJson = (string)($serviceFact['craftsmen_snapshot_json'] ?? '');
         return [
             'id' => 'service:' . (int)$serviceFact['id'],
             'orderItemId' => '',
@@ -2020,10 +2023,12 @@ final class CashierV3SalesOrderQueryServices
             'salespeople' => [],
             'salesManagers' => [],
             'guides' => [],
-            'craftsmen' => $this->salesLineCraftsmen($craftsmen, ['craftsmen_snapshot_json' => $serviceFact['craftsmen_snapshot_json'] ?? '']),
+            'craftsmen' => $craftsmen === []
+                ? $this->craftsmenForEntitlementServiceFact($snapshotJson)
+                : $this->salesLineCraftsmen($craftsmen, []),
             'craftsmenListAllocations' => $this->craftsmenDisplayAllocations(
                 $craftsmen,
-                (string)($serviceFact['craftsmen_snapshot_json'] ?? '')
+                $snapshotJson
             ),
             'serviceFactId' => (int)$serviceFact['id'],
             'serviceRecordNo' => (string)(($serviceFact['service_record_no'] ?? '') ?: ($serviceFact['service_fact_id'] ?? '')),
@@ -2496,6 +2501,94 @@ final class CashierV3SalesOrderQueryServices
         }
     }
 
+    /**
+     * 只读兼容服务事实的三种不可变人员快照：早期仅身份的 camelCase、
+     * 直通结算的 snake_case 和标准结账的 camelCase。转换只影响展示，
+     * 缺失的业绩/权重不推断，也不回写事实或借当前员工资料补人。
+     * 真正缺字段/损坏的快照仍报错，不能把历史人员静默清空。
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function craftsmenForEntitlementServiceFact(string $snapshotJson): array
+    {
+        try {
+            return CashierV3CheckoutCraftsmenSnapshot::decode($snapshotJson);
+        } catch (\InvalidArgumentException $exception) {
+            // Only the known persisted service-fact schema may use this adapter.
+        }
+        $rows = json_decode($snapshotJson, true);
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($rows)
+            || array_keys($rows) !== ($rows === [] ? [] : range(0, count($rows) - 1))) {
+            throw new \RuntimeException('sales_order_service_craftsmen_snapshot_invalid');
+        }
+        $mapped = [];
+        $seenStaffIds = [];
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                throw new \RuntimeException('sales_order_service_craftsmen_snapshot_invalid');
+            }
+            // 最早的服务事实只有身份快照；保留实际存在的字段，不伪造门店、
+            // 人员权重或业绩金额。空的点/轮标记也不能解释为已选择轮客。
+            if (isset($row['staffId'], $row['employeeId'], $row['name'])
+                && array_key_exists('isPrimary', $row)) {
+                $staffId = (int)$row['staffId'];
+                if ($staffId <= 0 || (int)$row['employeeId'] <= 0
+                    || trim((string)$row['name']) === ''
+                    || !is_bool($row['isPrimary'])
+                    || $row['isPrimary'] !== ($index === 0)
+                    || isset($seenStaffIds[$staffId])) {
+                    throw new \RuntimeException('sales_order_service_craftsmen_snapshot_invalid');
+                }
+                $seenStaffIds[$staffId] = true;
+                $person = [
+                    'id' => $staffId, 'staffId' => $staffId,
+                    'employeeId' => (int)$row['employeeId'],
+                    'name' => (string)$row['name'],
+                    'isPrimary' => $row['isPrimary'],
+                ];
+                if (array_key_exists('isPointCustomer', $row)) {
+                    $person['isPointCustomer'] = (bool)$row['isPointCustomer'];
+                }
+                $mapped[] = $person;
+                continue;
+            }
+            foreach (['staff_id', 'employee_id', 'staff_name_snapshot', 'store_id', 'sequence', 'is_primary', 'labor_weight'] as $key) {
+                if (!array_key_exists($key, $row)) {
+                    throw new \RuntimeException('sales_order_service_craftsmen_snapshot_invalid');
+                }
+            }
+            $staffId = (int)$row['staff_id'];
+            if ($staffId <= 0 || isset($seenStaffIds[$staffId])) {
+                throw new \RuntimeException('sales_order_service_craftsmen_snapshot_invalid');
+            }
+            $seenStaffIds[$staffId] = true;
+            $mappedRow = [
+                'id' => $staffId,
+                'staffId' => $staffId,
+                'employeeId' => (int)$row['employee_id'],
+                'storeId' => (int)$row['store_id'],
+                'name' => (string)$row['staff_name_snapshot'],
+                'isPrimary' => (int)$row['is_primary'] === 1,
+                'sequence' => (int)$row['sequence'],
+                'laborWeight' => (int)$row['labor_weight'],
+                'isPointCustomer' => !empty($row['is_point_customer']),
+            ];
+            if (array_key_exists('project_count_decimal', $row)) {
+                $mappedRow['projectCount'] = (string)$row['project_count_decimal'];
+            } elseif (array_key_exists('project_count_half_units', $row)) {
+                $mappedRow['projectCountHalfUnits'] = (int)$row['project_count_half_units'];
+            }
+            $mapped[] = $mappedRow;
+        }
+        // 最早的服务事实不是标准结账快照，不能强行要求当时尚不存在的字段。
+        if ($mapped !== [] && !isset($mapped[0]['storeId'])) return $mapped;
+        try {
+            return CashierV3CheckoutCraftsmenSnapshot::normalize($mapped);
+        } catch (\InvalidArgumentException $exception) {
+            throw new \RuntimeException('sales_order_service_craftsmen_snapshot_invalid', 0, $exception);
+        }
+    }
+
     /** @return array<int,array<string,mixed>> */
     private function salesLineCraftsmen(array $facts, array $line): array
     {
@@ -2564,13 +2657,17 @@ final class CashierV3SalesOrderQueryServices
     {
         $projectCount = $person['projectCount'] ?? $person['project_count_decimal'] ?? $person['project_count'] ?? null;
         if ($projectCount === null && isset($person['projectCountHalfUnits'])) $projectCount = (float)$person['projectCountHalfUnits'] / 2;
+        if ($projectCount === null && isset($person['project_count_half_units'])) $projectCount = (float)$person['project_count_half_units'] / 2;
         return [
             'employeeId' => $employeeId,
-            'employeeName' => (string)($person['name'] ?? $person['employeeName'] ?? ''),
-            'employeeType' => (string)($person['employeeType'] ?? ''),
+            // 服务事实按原始人员/金额快照展示，不能由当前员工档案或销售行快照反推。
+            'employeeName' => (string)($person['name'] ?? $person['employeeName'] ?? $person['staff_name_snapshot'] ?? ''),
+            'employeeType' => (string)($person['employeeType'] ?? $person['employee_type_snapshot'] ?? ''),
             'isPointCustomer' => (bool)($person['isPointCustomer'] ?? $person['is_point_customer'] ?? false),
-            'amount' => isset($person['performanceAmountCents']) ? $this->moneyFromCents((int)$person['performanceAmountCents']) : null,
-            'laborFeeAmount' => isset($person['laborFeeCents']) ? $this->moneyFromCents((int)$person['laborFeeCents']) : null,
+            'amount' => isset($person['performanceAmountCents']) || isset($person['amount_cents'])
+                ? $this->moneyFromCents((int)($person['performanceAmountCents'] ?? $person['amount_cents'])) : null,
+            'laborFeeAmount' => isset($person['laborFeeCents']) || isset($person['labor_fee_cents'])
+                ? $this->moneyFromCents((int)($person['laborFeeCents'] ?? $person['labor_fee_cents'])) : null,
             'projectCount' => $this->projectCountDisplay($projectCount),
         ];
     }
