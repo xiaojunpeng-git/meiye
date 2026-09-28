@@ -234,7 +234,7 @@ final class AiIntentResultContract
     }
 
     /**
-     * Skip redundant binding only for a first-turn ranking whose complete
+     * Skip redundant binding only for a ranking whose complete current-turn
      * answer shape is already typed by the accepted understanding and whose
      * sole measurement has one literal, active registry owner. This never
      * derives a date, object, rank or scope from prose; named conditions stay
@@ -242,8 +242,10 @@ final class AiIntentResultContract
      */
     public static function exactSingleRankingIntent(array $understanding,array $safeQuestion,array $metricCodes): ?array
     {
-        if (($safeQuestion['prior_query']??null)!==null || ($understanding['status']??null)!=='understood'
+        if (($understanding['status']??null)!=='understood'
             || isset($understanding['groups']) || isset($understanding['request_kind'])) return null;
+        $priorQuery=$safeQuestion['prior_query']??null;
+        if ($priorQuery!==null && !is_array($priorQuery)) return null;
         $exact=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
             (string)($safeQuestion['question']??''),$metricCodes
         );
@@ -254,6 +256,14 @@ final class AiIntentResultContract
             $fields=(array)($requirement['fields']??[]);$values=(array)($requirement['values']??[]);
             if (array_diff($fields,['metric_codes','object_kind','object_relation','operation','periods','ranking','scope','store_term'])) return null;
             if (array_diff(array_keys($values),['metric_terms','object_kind','object_relation','operation','periods','ranking','scope','store_term'])) return null;
+            // An old answer may explain context, but it cannot supply any
+            // execution field for this complete ranking shortcut. Mixed or
+            // historical evidence stays on the ordinary model path.
+            $current=false;
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (($evidence['message_id']??null)==='current') {$current=true;break;}
+            }
+            if ($priorQuery!==null && !$current) return null;
             if (in_array('metric_codes',$fields,true)) {
                 if (!is_string($requirement['id']??null) || !empty($values['metric_exclusions'])) return null;
                 $metricRequirements[$requirement['id']]=$requirement;
@@ -284,6 +294,21 @@ final class AiIntentResultContract
             'scope'=>$owned['scope']??'unspecified','aggregate_condition'=>null,'result_reference'=>null,
             'unresolved_fragments'=>[],
         ];
+        if ($priorQuery!==null) {
+            // A current named store replaces the prior store; otherwise only
+            // an unrestricted predecessor can enter this shortcut. Rebuild
+            // the personnel population from current meaning instead of
+            // carrying an old selected person or role into a new ranking.
+            try {$storeTerm=self::understoodStoreTerm($understanding);}
+            catch (AiContractException $error) {return null;}
+            if ($storeTerm===null && ($priorQuery['has_store_scope_restriction']??true)) return null;
+            $candidate['context_delta']=[
+                'metric_codes'=>'replace','object'=>'replace','business_filters'=>'clear',
+                'store_scope'=>$storeTerm===null?'inherit':'replace','periods'=>'replace',
+                'operation'=>'replace','ranking_direction'=>'replace','ranking_limit'=>'replace',
+                'scope'=>$owned['scope']===null?'inherit':'replace','aggregate_condition'=>'clear',
+            ];
+        }
         try {
             $normalized=self::normalize($candidate,$metricCodes,[],$safeQuestion,$understanding);
             return self::isUniqueExactMetricBinding($normalized,$understanding,$safeQuestion,$metricCodes)
@@ -2135,11 +2160,16 @@ final class AiIntentResultContract
             $terms[$term]=true;
         }
         if (count($terms)>1) {
-            $shapes=[];
-            foreach (array_keys($terms) as $term) $shapes[]=preg_match('/^\[local_condition_([0-9]+)\]$/D',$term,$match)?'ref'.$match[1]:'phrase';
+            // Opaque reference ordinals are not needed for diagnosis and
+            // violate the Run store's payload-free field schema.
+            $opaqueCount=0;
+            foreach (array_keys($terms) as $term) {
+                if (preg_match('/^\[local_condition_[0-9]+\]$/D',$term)) $opaqueCount++;
+            }
+            $shape=$opaqueCount===0?'phrases':($opaqueCount===count($terms)?'references':'mixed_ref_phrase');
             throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',[
                 'stage'=>'intent_contract','predicate'=>'conflicting_store_terms','binding_row_count'=>count($terms),
-                'field'=>substr(implode('_',$shapes),0,32),
+                'field'=>$shape,
             ]);
         }
         return $terms===[]?null:array_key_first($terms);

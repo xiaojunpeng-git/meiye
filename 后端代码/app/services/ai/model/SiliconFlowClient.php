@@ -89,7 +89,7 @@ final class SiliconFlowClient
             // Reference and analytical subject are independent semantic roles.
             // This generic instruction also covers member/product follow-ups;
             // it supplies neither an executable metric nor a private identity.
-            array_splice($messages,-1,0,[['role'=>'system','content'=>'Distinguish the referenced location from the requested analytical subject. In a question about people or items within a previously displayed store, object_kind is the people/item kind and result_reference identifies the previous store. If the current question explicitly refers to a singular prior result and prior_query.sole_result_reference is non-null, use that exact position even when the customer did not repeat its ordinal. Never choose the first row when sole_result_reference is null and no ordinal is stated. Preserve both extremes as top_and_bottom when requested. Highest and lowest for the same measurement constitute one metric requirement, not two different measurements. Keep the named measurement separate from ranking direction and the referenced location; quantities must not become revenue merely because the prior query measured money. Copy evidence quotes verbatim from the provided message; do not paraphrase them.']]);
+            array_splice($messages,-1,0,[['role'=>'system','content'=>'Distinguish the location restricting records from the people or items being ranked. Read the complete current noun phrase first: an explicitly identified current location owns its store requirement; a reference to the prior displayed store is eligible only when the current wording actually refers back to that result. Never create two store requirements for one location mention, or add a prior store merely because the question says "this store" after naming a current store. If the current question explicitly refers to a singular prior result and prior_query.sole_result_reference is non-null, use that exact position even when the customer did not repeat its ordinal. Never choose the first row when sole_result_reference is null and no ordinal is stated. Preserve both extremes as top_and_bottom when requested. Highest and lowest for the same measurement constitute one metric requirement, not two different measurements. Keep the named measurement separate from ranking direction and the location; quantities must not become revenue merely because the prior query measured money. Copy evidence quotes verbatim from the provided message; do not paraphrase them.']]);
             // Put this relationship rule immediately before the task payload.
             // It is deliberately about the typed context contract, never a
             // phrase, metric, report or customer-specific fallback.
@@ -104,11 +104,11 @@ final class SiliconFlowClient
             // This changes no business meaning and supplies no missing value.
             array_splice($messages,-1,0,[['role'=>'system','content'=>AiIntentUnderstandingContract::repairInstruction($repairPredicate)]]);
         }
-        // The final check is phrased in the customer's language to keep the
-        // scope role separate from object/metric carriers in long prompts.
-        // It never chooses a result position not supplied by signed context.
+        // A verified prior result can resolve a genuine reference, but an
+        // explicitly named current store must win. Keep this final reminder
+        // short so it does not override the complete noun phrase above.
         if (($safeQuestion['prior_query']['sole_result_reference']??null)!==null) {
-            array_splice($messages,-1,0,[['role'=>'system','content'=>'最终检查：如果当前问题明确说“这家店”“这个门店”等，指的是上一条唯一门店结果，必须单独保留 result_reference 要求，值使用 prior_query.sole_result_reference，证据引用当前指代原文。店内员工、项目或产品是新的分析对象，不可因此漏掉门店限定。只问员工或产品而没有指代上一条门店时，不得添加这个限定。同一个指标同时问最多和最少时，指标只列一个要求，ranking 使用 top_and_bottom；最多、最少本身不是指标。']]);
+            array_splice($messages,-1,0,[['role'=>'system','content'=>'最终检查：先看完整的当前对象表达。当前明确指定的门店优先；只有当前问题确实回指上一条唯一门店结果时，才使用 prior_query.sole_result_reference，并用当前原文作证据。店内员工、项目或产品仍是本次分析对象。最多和最少属于同一指标的两个排名方向。']]);
         }
         $payload=['model'=>$model,'stream'=>false,'max_tokens'=>self::INTENT_CARRIER_MAX_TOKENS,'temperature'=>0,'response_format'=>['type'=>'json_object'],'messages'=>$messages];
         $decoded=$this->request($payload,$apiKey,$timeoutMs,$checkpoint);

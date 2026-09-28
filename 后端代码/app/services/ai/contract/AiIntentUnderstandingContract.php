@@ -16,6 +16,90 @@ final class AiIntentUnderstandingContract
     private const LEGACY_FIELDS = ['member_detail'];
 
     /**
+     * Keep one current named store when the model also calls a typed role a
+     * store, or repeats the same store in an adjacent deictic. Both repairs
+     * require current evidence and a unique local store type. Distinct names,
+     * conjunctions and historical references remain separate.
+     */
+    public static function reconcileCurrentStoreRequirements(array $understanding,array $safeQuestion,array $privateKinds): array
+    {
+        if (($understanding['status']??null)!=='understood' || isset($understanding['groups'])) return $understanding;
+        $question=(string)($safeQuestion['question']??'');$requirements=(array)($understanding['requirements']??[]);
+        // A model can mistakenly copy the adjacent position token into a
+        // store requirement. Local catalogue kinds, unlike its wording, are
+        // authoritative: only one typed store may own store_term. The role
+        // token remains in the safe question and must still bind as a person
+        // filter later, or the common unresolved-condition guard rejects it.
+        $typedStores=[];$misplaced=[];
+        foreach ($requirements as $index=>$requirement) {
+            if (!in_array('store_term',(array)($requirement['fields']??[]),true)) continue;
+            $term=$requirement['values']['store_term']??null;
+            if (!is_string($term)) return $understanding;
+            preg_match_all('/local_condition_[0-9]+/',$term,$found);
+            foreach (array_unique($found[0]) as $reference) {
+                $token='['.$reference.']';$currentEvidence=false;
+                foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                    if (($evidence['message_id']??null)==='current'
+                        && strpos((string)($evidence['quote']??''),$token)!==false) $currentEvidence=true;
+                }
+                if (strpos($question,$token)===false || !$currentEvidence) return $understanding;
+                $kind=$privateKinds[$reference]??null;
+                if ($kind==='store') $typedStores[$reference]=true;
+                elseif ($kind==='position') {
+                    // Only local relation words may surround this position
+                    // token. Another store name, conjunction or unexplained
+                    // condition cannot be shortened to the typed store.
+                    $residual=preg_replace('/\s+/u','',str_replace($token,'',$term));
+                    if (!is_string($residual) || !preg_match('/^(?:(?:(?:这|那|该)(?:个|家|间)?)?(?:门店|店))?(?:岗位)?$/uD',$residual)) return $understanding;
+                    $misplaced[$index]=true;
+                }
+                else return $understanding;
+            }
+        }
+        if (count($typedStores)===1 && $misplaced!==[]) {
+            $storeToken='['.array_key_first($typedStores).']';
+            foreach (array_keys($misplaced) as $index) {
+                $term=$requirements[$index]['values']['store_term'];
+                if (strpos($term,$storeToken)!==false) return $understanding;
+                $fields=array_values(array_diff((array)$requirements[$index]['fields'],['store_term']));
+                unset($requirements[$index]['values']['store_term']);
+                if ($fields===[]) unset($requirements[$index]);
+                else $requirements[$index]['fields']=$fields;
+            }
+            $requirements=array_values($requirements);
+        }
+        $storeIndexes=[];$reference=null;$deictic=null;$deicticIndex=null;
+        foreach ($requirements as $index=>$requirement) {
+            if (!in_array('store_term',(array)($requirement['fields']??[]),true)) continue;
+            $term=$requirement['values']['store_term']??null;
+            if (!is_string($term)) return $understanding;
+            $storeIndexes[]=$index;
+            $current=false;
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (($evidence['message_id']??null)==='current' && strpos((string)($evidence['quote']??''),$term)!==false) $current=true;
+            }
+            if (!$current) return $understanding;
+            if (preg_match('/\[(local_condition_[0-9]+)\]/D',$term,$match)) {
+                if (($privateKinds[$match[1]]??null)!=='store' || $reference!==null) return $understanding;
+                $reference='['.$match[1].']';
+            } else {
+                if ($deictic!==null || !preg_match('/^(?:这|那|该)(?:个|家|间)?(?:门店|店)$/uD',$term)) return $understanding;
+                $deictic=$term;$deicticIndex=$index;
+            }
+        }
+        if (count($storeIndexes)===2 && $reference!==null && $deictic!==null && $deicticIndex!==null
+            && preg_match('/'.preg_quote($reference,'/').'\s*'.preg_quote($deictic,'/').'/u',$question)) {
+            $fields=array_values(array_diff((array)$requirements[$deicticIndex]['fields'],['store_term']));
+            unset($requirements[$deicticIndex]['values']['store_term']);
+            if ($fields===[]) unset($requirements[$deicticIndex]);
+            else $requirements[$deicticIndex]['fields']=$fields;
+        } elseif ($misplaced===[]) return $understanding;
+        return self::normalize([
+            'goal'=>$understanding['goal'],'requirements'=>array_values($requirements),'status'=>'understood',
+        ],$safeQuestion);
+    }
+
+    /**
      * A locally masked, uniquely named position restricts the personnel
      * cohort; it is not a separate rankable answer-row kind. Normalize that
      * typed role carrier to person before capability binding, while leaving
@@ -61,6 +145,55 @@ final class AiIntentUnderstandingContract
                 (array)$requirements[$index]['fields'],['object_kind','object_relation']
             )));
         }
+        return self::normalize([
+            'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',
+        ],$safeQuestion);
+    }
+
+    /**
+     * A metric's registered fact grain can disambiguate a ranking noun that
+     * occurs only inside that metric's title. With one current typed position
+     * and one person-grain metric, rank personnel within that position; a
+     * separately stated project/product object is never rewritten.
+     */
+    public static function reconcileRankedRoleMetricObject(
+        array $understanding,array $safeQuestion,array $privateKinds,array $personMetricCodes,array $allMetricCodes,array $objectVocabulary
+    ): array {
+        if (($understanding['status']??null)!=='understood' || isset($understanding['groups']) || isset($understanding['request_kind'])) return $understanding;
+        $question=(string)($safeQuestion['question']??'');$positions=[];
+        foreach ($privateKinds as $reference=>$kind) if ($kind==='position' && is_string($reference)
+            && preg_match('/^local_condition_[0-9]+$/D',$reference)
+            && strpos($question,'['.$reference.']')!==false) $positions[]=$reference;
+        if (count($positions)!==1) return $understanding;
+        $match=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText($question,$allMetricCodes);
+        if (!is_array($match) || !in_array($match['metric_code']??null,$personMetricCodes,true)) return $understanding;
+        $requirements=(array)($understanding['requirements']??[]);$objectIndex=null;$hasRanking=false;
+        foreach ($requirements as $index=>$requirement) {
+            $values=(array)($requirement['values']??[]);
+            if (isset($values['aggregate_condition']) || isset($values['result_reference']) || isset($values['object_detail'])
+                || isset($values['condition_update']) || isset($values['metric_exclusions'])) return $understanding;
+            if (($values['operation']??null)==='ranking' && isset($values['ranking'])) $hasRanking=true;
+            if (!in_array('object_kind',(array)($requirement['fields']??[]),true)) continue;
+            if ($objectIndex!==null || ($values['object_relation']??null)!=='analysis') return $understanding;
+            $objectIndex=$index;
+        }
+        if (!$hasRanking || $objectIndex===null) return $understanding;
+        $kind=$requirements[$objectIndex]['values']['object_kind']??null;
+        if ($kind==='person' || !is_string($kind)) return $understanding;
+        // The only competing object label must be part of the exact metric
+        // phrase, not a separate customer-stated object elsewhere in the turn.
+        $labels=[];
+        foreach ($objectVocabulary as $item) if (($item['object_kind']??null)===$kind && is_string($item['object_label']??null)) {
+            $labels[]=$item['object_label'];
+        }
+        if ($labels===[]) return $understanding;
+        $remainder=str_replace((string)$match['term'],'',$question);$overlap=false;
+        foreach ($labels as $label) {
+            if ($label!=='' && mb_strpos((string)$match['term'],$label,0,'UTF-8')!==false) $overlap=true;
+            if ($label!=='' && mb_strpos($remainder,$label,0,'UTF-8')!==false) return $understanding;
+        }
+        if (!$overlap) return $understanding;
+        $requirements[$objectIndex]['values']['object_kind']='person';
         return self::normalize([
             'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',
         ],$safeQuestion);

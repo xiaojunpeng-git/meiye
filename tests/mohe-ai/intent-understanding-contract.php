@@ -6,6 +6,7 @@ use app\services\ai\contract\AiContractException;
 use app\services\ai\contract\AiIntentGroupContract;
 use app\services\ai\contract\AiIntentResultContract;
 use app\services\ai\contract\AiIntentUnderstandingContract;
+use app\services\ai\context\IntentContextMerger;
 use app\services\ai\execution\AiRankingCollectionGuidancePlanner;
 
 $checks=0;
@@ -907,6 +908,15 @@ $storeScopeMeaning=['goal'=>'查看指定门店技师项目数','status'=>'under
 ]];
 $storeScopeMeaning=AiIntentUnderstandingContract::normalize($storeScopeMeaning,$storeScopeQuestion);
 $check(AiIntentResultContract::understoodStoreTerm($storeScopeMeaning)==='二号门店','current grounded store scope survives independently of analytical person');
+$conflictingStore=$storeScopeMeaning;
+$conflictingStore['requirements'][]=['id'=>'r3','meaning'=>'另一个门店','fields'=>['store_term'],
+    'values'=>['store_term'=>'技师'],'evidence'=>[['message_id'=>'current','quote'=>'技师']]];
+$storeConflictDiagnostic=null;
+try {AiIntentResultContract::understoodStoreTerm($conflictingStore);}
+catch (AiContractException $error) {$storeConflictDiagnostic=$error->diagnostic();}
+$check($storeConflictDiagnostic===['stage'=>'intent_contract','predicate'=>'conflicting_store_terms',
+    'binding_row_count'=>2,'field'=>'phrases'],
+    'conflicting store diagnostic contains only Run-store-accepted structural fields');
 $maskedRoleQuestion=$storeScopeQuestion;
 $maskedRoleQuestion['question']='[local_condition_1]这个门店[local_condition_2]项目数最多的是哪个';
 $maskedRoleQuestion['evidence_messages']=[['id'=>'current','text'=>$maskedRoleQuestion['question']]];
@@ -920,6 +930,70 @@ $maskedRoleUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'指�
         'values'=>['metric_terms'=>['项目数'],'operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>1]],
         'evidence'=>[['message_id'=>'current','quote'=>'项目数最多的是哪个']]],
 ]],$maskedRoleQuestion);
+$appositionQuestion=$maskedRoleQuestion;
+$appositionQuestion['question']='[local_condition_1] 这个门店[local_condition_2]项目数最多的是哪个';
+$appositionQuestion['evidence_messages'][0]['text']=$appositionQuestion['question'];
+$appositionMeaning=$maskedRoleUnderstanding;
+$appositionMeaning['requirements'][]=['id'=>'r4','meaning'=>'当前门店','fields'=>['store_term'],
+    'values'=>['store_term'=>'这个门店'],'evidence'=>[['message_id'=>'current','quote'=>'这个门店']]];
+$appositionMeaning=AiIntentUnderstandingContract::normalize($appositionMeaning,$appositionQuestion);
+$collapsedApposition=AiIntentUnderstandingContract::reconcileCurrentStoreRequirements($appositionMeaning,$appositionQuestion,
+    ['local_condition_1'=>'store','local_condition_2'=>'position']);
+$check(AiIntentResultContract::understoodStoreTerm($collapsedApposition)==='[local_condition_1]'
+    && count($collapsedApposition['requirements'])===3,
+    'immediate current-store apposition keeps the one typed store without dropping the role or metric');
+$separateStoreQuestion=$appositionQuestion;
+$separateStoreQuestion['question']='[local_condition_1]和这个门店[local_condition_2]项目数最多的是哪个';
+$separateStoreQuestion['evidence_messages'][0]['text']=$separateStoreQuestion['question'];
+$check(AiIntentUnderstandingContract::reconcileCurrentStoreRequirements($appositionMeaning,$separateStoreQuestion,
+    ['local_condition_1'=>'store','local_condition_2'=>'position'])===$appositionMeaning,
+    'a conjunction between store mentions cannot silently collapse two conditions');
+$wrongStoreRole=$maskedRoleUnderstanding;
+$wrongStoreRole['requirements'][]=['id'=>'r4','meaning'=>'岗位条件','fields'=>['store_term'],
+    'values'=>['store_term'=>'[local_condition_2]'],'evidence'=>[['message_id'=>'current','quote'=>'[local_condition_2]']]];
+$wrongStoreRole=AiIntentUnderstandingContract::normalize($wrongStoreRole,$maskedRoleQuestion);
+$correctedStoreRole=AiIntentUnderstandingContract::reconcileCurrentStoreRequirements($wrongStoreRole,$maskedRoleQuestion,
+    ['local_condition_1'=>'store','local_condition_2'=>'position']);
+$check(AiIntentResultContract::understoodStoreTerm($correctedStoreRole)==='[local_condition_1]'
+    && count($correctedStoreRole['requirements'])===3,
+    'a typed position token mistakenly copied into store_term cannot create a second store');
+$wrappedStoreRole=$wrongStoreRole;
+$wrappedStoreRole['requirements'][3]['values']['store_term']='这个门店[local_condition_2]';
+$wrappedStoreRole['requirements'][3]['evidence'][0]['quote']=$maskedRoleQuestion['question'];
+$wrappedStoreRole=AiIntentUnderstandingContract::normalize($wrappedStoreRole,$maskedRoleQuestion);
+$check(AiIntentResultContract::understoodStoreTerm(AiIntentUnderstandingContract::reconcileCurrentStoreRequirements(
+    $wrappedStoreRole,$maskedRoleQuestion,['local_condition_1'=>'store','local_condition_2'=>'position']
+))==='[local_condition_1]','a local store/role descriptor cannot turn its position token into another store');
+$foreignStoreRole=$wrappedStoreRole;
+$foreignStoreRole['requirements'][3]['values']['store_term']='其他门店岗位 [local_condition_2]';
+$foreignQuestion=$maskedRoleQuestion;
+$foreignQuestion['question']='[local_condition_1]和其他门店岗位 [local_condition_2]项目数最多的是哪个';
+$foreignQuestion['evidence_messages'][0]['text']=$foreignQuestion['question'];
+$foreignStoreRole['requirements'][3]['evidence'][0]['quote']='其他门店岗位 [local_condition_2]';
+$foreignStoreRole=AiIntentUnderstandingContract::normalize($foreignStoreRole,$foreignQuestion);
+$check(AiIntentUnderstandingContract::reconcileCurrentStoreRequirements($foreignStoreRole,$foreignQuestion,
+    ['local_condition_1'=>'store','local_condition_2'=>'position'])===$foreignStoreRole,
+    'an unexplained second location cannot be silently discarded from a role carrier');
+$twoRealStores=AiIntentUnderstandingContract::reconcileCurrentStoreRequirements($wrongStoreRole,$maskedRoleQuestion,
+    ['local_condition_1'=>'store','local_condition_2'=>'store']);
+$check($twoRealStores===$wrongStoreRole,'two typed stores remain a conflict rather than a guessed single location');
+$misreadRoleRank=$maskedRoleUnderstanding;
+$misreadRoleRank['requirements'][1]['values']['object_kind']='project';
+$misreadRoleRank['requirements'][1]['values']['object_relation']='analysis';
+$misreadRoleRank=AiIntentUnderstandingContract::normalize($misreadRoleRank,$maskedRoleQuestion);
+$correctedRoleRank=AiIntentUnderstandingContract::reconcileRankedRoleMetricObject(
+    $misreadRoleRank,$maskedRoleQuestion,['local_condition_1'=>'store','local_condition_2'=>'position'],
+    ['staff_project_num'],['staff_project_num'],[['object_kind'=>'project','object_label'=>'项目']]
+);
+$check(($correctedRoleRank['requirements'][1]['values']['object_kind']??null)==='person',
+    'one registered person-grain project-count metric ranks the masked role, not the noun inside its metric title');
+$separateProjectQuestion=$maskedRoleQuestion;
+$separateProjectQuestion['question']='[local_condition_1]这个门店[local_condition_2]项目数哪个项目最多';
+$separateProjectQuestion['evidence_messages'][0]['text']=$separateProjectQuestion['question'];
+$check(AiIntentUnderstandingContract::reconcileRankedRoleMetricObject(
+    $misreadRoleRank,$separateProjectQuestion,['local_condition_1'=>'store','local_condition_2'=>'position'],
+    ['staff_project_num'],['staff_project_num'],[['object_kind'=>'project','object_label'=>'项目']]
+)===$misreadRoleRank,'an independently stated project subject cannot be converted into a personnel ranking');
 $personRole=AiIntentUnderstandingContract::reconcileSelectedPositionAsPersonnel($maskedRoleUnderstanding,$maskedRoleQuestion,
     ['local_condition_1'=>'store','local_condition_2'=>'position']);
 $check($personRole['requirements'][1]['values']['object_kind']==='person'
@@ -954,9 +1028,40 @@ $rankWithoutLimit=$rankedRoleUnderstanding;
 $rankWithoutLimit['requirements'][2]['values']['ranking']['limit']=null;
 $check(AiIntentResultContract::exactSingleRankingIntent($rankWithoutLimit,$rankedRoleQuestion,['staff_project_num'])===null,
     'an open-ended ranking still needs the ordinary binding path');
-$rankWithPrior=$rankedRoleQuestion;$rankWithPrior['prior_query']=['object_kind'=>'person'];
-$check(AiIntentResultContract::exactSingleRankingIntent($rankedRoleUnderstanding,$rankWithPrior,['staff_project_num'])===null,
-    'a continuation never bypasses context-delta binding');
+$rankWithPrior=$rankedRoleQuestion;$rankWithPrior['prior_query']=[
+    'object_kind'=>'person','has_store_scope_restriction'=>true,'has_business_filter'=>true,
+    'has_object_selection'=>true,'scope'=>'authorized','metric_codes'=>['staff_sales_yeji'],
+    'operation'=>'ranking','periods'=>[['kind'=>'month_offset','offset_months'=>-1]],
+    'ranking'=>['direction'=>'top','limit'=>3],'aggregate_condition'=>null,
+];
+$contextRoleRank=AiIntentResultContract::exactSingleRankingIntent(
+    $rankedRoleUnderstanding,$rankWithPrior,['staff_project_num','staff_sales_yeji']
+);
+$check(is_array($contextRoleRank) && $contextRoleRank['context_delta']['store_scope']==='replace'
+    && $contextRoleRank['context_delta']['business_filters']==='clear'
+    && $contextRoleRank['context_delta']['metric_codes']==='replace',
+    'complete current personnel ranking replaces signed old metric, store and selection through explicit delta');
+$oldRankQuery=['query_shape'=>'ranking','metric_codes'=>['staff_sales_yeji'],
+    'start_date'=>'2026-08-01','end_date'=>'2026-08-31','compare_range'=>null,
+    'store_ids'=>[9],'business_filters'=>['object_kind'=>'person','selection_ref'=>'person:old'],
+    'ranking'=>['direction'=>'top','limit'=>3],'aggregate_condition'=>null];
+$mergedRoleRank=IntentContextMerger::merge($oldRankQuery,$contextRoleRank);
+$check($mergedRoleRank['pending']===[] && $mergedRoleRank['constraints']===['store_ids'=>null,'business_filters'=>null]
+    && $mergedRoleRank['intent']['metric_codes']===['staff_project_num']
+    && $mergedRoleRank['intent']['ranking']===['direction'=>'top_and_bottom','limit'=>1],
+    'current complete ranking cannot retain a stale selected person, old store or old metric after context merge');
+$rankWithoutCurrentStore=$rankedRoleUnderstanding;
+$rankWithoutCurrentStore['requirements']=array_values(array_filter($rankWithoutCurrentStore['requirements'],
+    static function(array $requirement):bool {return !in_array('store_term',$requirement['fields'],true);}
+));
+$check(AiIntentResultContract::exactSingleRankingIntent($rankWithoutCurrentStore,$rankWithPrior,
+    ['staff_project_num','staff_sales_yeji'])===null,
+    'a restricted prior store cannot silently become the current store in the complete-question shortcut');
+$rankWithHistoricalEvidence=$rankedRoleUnderstanding;
+$rankWithHistoricalEvidence['requirements'][2]['evidence'][0]['message_id']='prior';
+$check(AiIntentResultContract::exactSingleRankingIntent($rankWithHistoricalEvidence,$rankWithPrior,
+    ['staff_project_num','staff_sales_yeji'])===null,
+    'historical metric and date evidence cannot authorize a current complete-question shortcut');
 $rankOtherObject=$rankedRoleUnderstanding;$rankOtherObject['requirements'][1]['values']['object_kind']='store';
 $check(AiIntentResultContract::exactSingleRankingIntent($rankOtherObject,$rankedRoleQuestion,['staff_project_num'])===null,
     'the scoped personnel fast path cannot be reused for another analytical object');

@@ -1335,6 +1335,12 @@ final class AiGatewayServices
         }
         }
         $understanding=$this->resolveExactStatedSinglePeriod($understanding,$safe['outbound'],$today);
+        // One current opaque store followed by its immediate deictic is one
+        // location, not two filters. Keep distinct or historical locations
+        // untouched so no customer condition can disappear silently.
+        $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::reconcileCurrentStoreRequirements(
+            $understanding,$safe['outbound'],$privateKindsByReference
+        );
         // Object detail is not another ranking or metric-binding request. The
         // model owns the natural-language meaning while the server resolves a
         // stable person, store or member only from the replayed verified view.
@@ -1407,6 +1413,13 @@ final class AiGatewayServices
         }
         $understanding=$this->reconcileStatedRegisteredMeasurements(
             $understanding,$safe['outbound'],$caps
+        );
+        // A unique role plus a person-grain registered measurement determines
+        // the rankable row only when the competing noun occurs solely inside
+        // that metric title; independently named objects remain untouched.
+        $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::reconcileRankedRoleMetricObject(
+            $understanding,$safe['outbound'],$privateKindsByReference,array_keys($personMetrics),
+            array_keys((array)($caps['metric_readiness']??[])),$objectVocabulary
         );
         // The exhaustive registry pass above can add the same surface title
         // once for each base-grain owner (for example store/project and
@@ -1537,10 +1550,9 @@ final class AiGatewayServices
             $understanding,$safe['outbound'],array_column($bindingSummaries,'metric_code'),$sourceQuery!==null,
             $registeredCoordinatedFailure
         );
-        $registeredSingleRankingIntent=$sourceQuery===null
-            ?AiIntentResultContract::exactSingleRankingIntent(
-                $understanding,$safe['outbound'],array_column($bindingSummaries,'metric_code')
-            ):null;
+        $registeredSingleRankingIntent=AiIntentResultContract::exactSingleRankingIntent(
+            $understanding,$safe['outbound'],array_column($bindingSummaries,'metric_code')
+        );
         $registeredBreakdownContinuationFailure=null;
         $registeredBreakdownContinuationIntent=$sourceQuery===null?null:
             AiIntentResultContract::registeredBreakdownContinuationIntent(
