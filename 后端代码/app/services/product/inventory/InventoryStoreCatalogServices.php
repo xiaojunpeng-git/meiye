@@ -44,7 +44,7 @@ final class InventoryStoreCatalogServices
      * The store ID is always derived from the authenticated store session. Client
      * category and page inputs can only narrow a catalog already scoped to it.
      */
-    public function search(int $storeId, string $keyword, int $categoryId = 0, int $page = 1, int $limit = 20): array
+    public function search(int $storeId, string $keyword, int $categoryId = 0, int $page = 1, int $limit = 20, bool $forCount = false): array
     {
         $keyword = trim($keyword);
         if ($storeId <= 0 || $categoryId < 0 || mb_strlen($keyword) > 64) {
@@ -112,8 +112,37 @@ final class InventoryStoreCatalogServices
             ->select()
             ->toArray();
 
-        $list = $this->withAvailableQuantity($storeId, $list);
+        // Count confirmation compares the current stock projection under lock; only count callers use that same book basis.
+        $list = $forCount ? $this->withCountBookQuantity($storeId, $list) : $this->withAvailableQuantity($storeId, $list);
         return compact('list', 'total', 'page', 'limit', 'categories');
+    }
+
+    /** Read only the requested page's SKU balances, so loading all SKUs does not hit the batch-report 10k-row window. */
+    private function withCountBookQuantity(int $storeId, array $rows): array
+    {
+        if (!$rows) return [];
+        $location = Db::name('inventory_location')
+            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('store_id', $storeId)->where('location_type', 'STORE')
+            ->where('is_default', 1)->where('location_status', 'ACTIVE')->field('id')->find();
+        if (!$location) throw new \RuntimeException('inventory_catalog_source_scope_denied');
+        $stockRows = Db::name('inventory_stock')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('location_id', (int)$location['id'])->where('store_id', $storeId)
+            ->where('stock_status', 'GOOD')
+            ->whereIn('sku_id', array_map(static fn(array $row): int => (int)$row['sku_id'], $rows))
+            ->field('consumable_product_id,sku_id,available_quantity_units,quantity_scale')->select()->toArray();
+        $available = [];
+        foreach ($stockRows as $stock) {
+            // SKU ID 是库存唯一键；历史规格编码更新不能把非零账面数误读为 0。
+            $key = (int)$stock['consumable_product_id'] . ':' . (int)$stock['sku_id'];
+            $available[$key] = InventoryBatchStockQueryContract::unitsToDecimal((int)$stock['available_quantity_units'], (int)$stock['quantity_scale']);
+        }
+        foreach ($rows as &$row) {
+            $key = (int)$row['product_id'] . ':' . (int)$row['sku_id'];
+            $row['available_quantity'] = $available[$key] ?? '0';
+        }
+        unset($row);
+        return $rows;
     }
 
     /** Store-session catalog inventory is projected from settled batch facts. */
