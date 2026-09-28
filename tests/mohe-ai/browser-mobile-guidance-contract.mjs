@@ -19,7 +19,7 @@ assert.ok(browserEntry.includes("el('small', '够智能、够准确、够便捷'
 // its actual state functions, not a copied implementation, but is NOT a native
 // UTS compiler, picker, H5 layout or device lifecycle acceptance test.
 const script = source.match(/<script setup lang="uts">([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '');
-const expose = '\nglobalThis.controller = {onComposerLineChange,onComposerInput,resetComposerSize,answerPresentation,presentationGroups,openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,editGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,load,resumeActive,elapsedLabel,refs:{composerInputHeight,composerExpanded,question,progress,clarification,choices,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy,activeQuestion,activeElapsedSeconds,activeRunState,messageAnchor},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
+const expose = '\nglobalThis.controller = {onComposerLineChange,onComposerInput,resetComposerSize,answerPresentation,presentationGroups,openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,editGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,load,resumeActive,elapsedLabel,toggleComposerOptions,toggleExcel,createConversationFromMenu,confirmClearConversation,openHistory,selectConversation,refs:{composerInputHeight,composerExpanded,question,progress,clarification,choices,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy,activeQuestion,activeElapsedSeconds,activeRunState,messageAnchor,composerOptionsOpen,historyOpen,recentConversations,wantExcel,excelAvailable},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
 const code = esbuild.transformSync(script + expose, { loader: 'ts', target: 'es2020' }).code;
 const schema = 'mohe-clarification-v2'; let checks = 0;
 const clean = value => JSON.parse(JSON.stringify(value));
@@ -27,12 +27,12 @@ const eq = (actual, expected) => { assert.deepEqual(clean(actual), expected); ch
 const metric = { key: 'metric_code', label: '业绩指标', type: 'select', options: [{ label: '现金业绩', value: 'cash_performance' }, { label: '消耗业绩', value: 'consume_amount' }] };
 const fieldsDate = [{ key: 'start_date', label: '开始日期', type: 'date' }, { key: 'end_date', label: '结束日期', type: 'date' }];
 function setup(max = 3, asyncExecution = true, deferBootstrap = false, sharedStorage = null, initialOpen = true) {
-  const calls = [], mounted = [], unmounted = [], storage = sharedStorage || new Map(); let now = 1788912000000;
+  const calls = [], modals = [], mounted = [], unmounted = [], storage = sharedStorage || new Map(); let now = 1788912000000;
   class FixtureDate extends Date { static now() { return now; } }
   let scheduled = 0; const intervals = new Map(); let intervalId = 0;
   const context = { ref: value => ({ value }), nextTick: fn => fn(), onMounted: fn => mounted.push(fn), onUnmounted: fn => unmounted.push(fn), currentMobilePlatform: () => 'H5', Date: FixtureDate,
     setTimeout: () => ++scheduled, clearTimeout: () => {}, setInterval: fn => { intervals.set(++intervalId,fn); return intervalId; }, clearInterval: key => intervals.delete(key),
-    uni: { getStorageSync: key => storage.get(key), setStorageSync: (key, value) => storage.set(key, clean(value)), removeStorageSync: key => storage.delete(key), showActionSheet: () => {} },
+    uni: { getStorageSync: key => storage.get(key), setStorageSync: (key, value) => storage.set(key, clean(value)), removeStorageSync: key => storage.delete(key), showActionSheet: () => {}, showModal: options => modals.push(options) },
     mobileAiRequest: (method, path, body, done) => calls.push({ method, path, body: clean(body), done, answered: false }), downloadMobileAi: () => {} };
   vm.runInNewContext(code, context); mounted.forEach(fn => fn()); const api = context.controller;
   const answer = (path, data, error = null) => { const call = calls.find(item => !item.answered && item.path === path); assert.ok(call, path); call.answered = true; call.done(error || { ok: true, data: clean(data) }); return call; };
@@ -42,7 +42,7 @@ function setup(max = 3, asyncExecution = true, deferBootstrap = false, sharedSto
   let state = { run_id: 'mobile-run', generation: 1, version: 1, run_delivery_token: 'delivery', status: 'RECEIVED' };
   const step = (round, fields = [metric], extra = {}) => state = { ...state, version: round + 1, status: 'WAITING_CLARIFICATION', clarification: { id: 'step-' + round, schema_version: schema, step_revision: 1, intent_revision: round, round_no: round, max_clarification_rounds: max, question: '确认条件', fields, confirmed_summary: [{ label: '指标', value: '现金业绩、消耗业绩' }], revisable_steps: [], ...extra } };
   const start = (fields = [metric]) => { api.refs.question.value = '移动引导测试'; api.submit(); answer('/runs', state); api.accept(step(1, fields)); };
-  return { api, answer, bootstrap, calls, storage, advance: ms => { now += ms; intervals.forEach(fn => fn()); }, scheduled: () => scheduled, step, start, finish: (contextRef = null) => ({ ...state, version: state.version + 1, status: 'COMPLETED', answer: { summary: '已校验', ...(contextRef ? {context_ref:contextRef} : {}), cards: [{ metric_name: '现金业绩', display_value: '123', unit: '元' }, { metric_name: '消耗业绩', display_value: '456', unit: '元' }] } }), expire: () => { now += 86400000; }, unmount: () => unmounted.forEach(fn => fn()) };
+  return { api, answer, bootstrap, calls, modals, storage, advance: ms => { now += ms; intervals.forEach(fn => fn()); }, scheduled: () => scheduled, step, start, finish: (contextRef = null) => ({ ...state, version: state.version + 1, status: 'COMPLETED', answer: { summary: '已校验', ...(contextRef ? {context_ref:contextRef} : {}), cards: [{ metric_name: '现金业绩', display_value: '123', unit: '元' }, { metric_name: '消耗业绩', display_value: '456', unit: '元' }] } }), expire: () => { now += 86400000; }, unmount: () => unmounted.forEach(fn => fn()) };
 }
 // R50：等待不计处理耗时；每次人工确认开启新处理段，原会话恢复仍展示确认卡。
 {
@@ -408,4 +408,30 @@ console.log(`R5/R47 mobile production-controller: ${checks} checks PASS (TS-lowe
   assert.match(source, /class="ai-composer-more"/);
   f.unmount();
   console.log('R45 nested presentation, grouped facts and no additional requests: PASS');
+}
+
+// R52: the four actions stay in one vertical menu. Local session changes must
+// not issue a new query, delete another conversation, or cross an active Run.
+{
+  for (const label of ['生成Execl','新增对话','清空对话','历史对话']) assert.match(source, new RegExp('class="ai-composer-option"[^>]*>' + label));
+  assert.match(source, /\.ai-composer-options__actions\{display:flex;flex-direction:column/);
+  const f = setup(); const r = f.api.refs;
+  r.excelAvailable.value = true; f.api.toggleComposerOptions(); eq(r.composerOptionsOpen.value,true);
+  f.api.toggleExcel(); eq(r.wantExcel.value,true); eq(f.calls.filter(call => call.path == '/runs').length,0);
+  const original = f.api.state().conversation;
+  f.start(); f.api.createConversationFromMenu(); eq(f.api.state().conversation,original);
+  f.api.accept(f.finish()); eq(f.api.load().find(s => s.id == original).rounds.length,1);
+  f.api.createConversationFromMenu(); const second = f.api.state().conversation;
+  eq([second == original,r.displayed.value.length,r.composerOptionsOpen.value],[false,0,false]);
+  f.api.toggleComposerOptions(); f.api.openHistory();
+  eq(r.recentConversations.value.some(s => s.id == original),true);
+  f.api.selectConversation(original); eq([f.api.state().conversation,r.displayed.value.length,r.historyOpen.value],[original,1,false]);
+  f.api.toggleComposerOptions(); f.api.confirmClearConversation();
+  eq([f.modals.length,f.api.load().some(s => s.id == original)],[1,true]);
+  f.modals[0].success({confirm:false}); eq(f.api.load().some(s => s.id == original),true);
+  f.api.confirmClearConversation(); f.modals[1].success({confirm:true});
+  eq([f.api.load().some(s => s.id == original),f.api.load().some(s => s.id == second),r.displayed.value.length],[false,true,0]);
+  eq(f.calls.filter(call => call.path == '/runs').length,1);
+  f.unmount();
+  console.log('R52 one-column composer menu, history isolation and clear confirmation: PASS');
 }

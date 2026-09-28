@@ -50,11 +50,18 @@
     <view class="ai-footer">
       <text v-if="showFooterProgress()" class="ai-note ai-progress">{{ progress }}</text>
       <view v-if="composerOptionsOpen" class="ai-composer-options">
-        <button class="ai-export-toggle" :class="{ 'ai-export-toggle--selected': wantExcel && excelAvailable }" :disabled="!excelAvailable" aria-label="Execl" :aria-pressed="wantExcel && excelAvailable" @tap="toggleExcel">Execl</button>
+        <view class="ai-composer-options__head"><text>{{ historyOpen ? '历史对话' : '更多操作' }}</text><button class="ai-composer-options__close" aria-label="关闭菜单" @tap="closeComposerOptions">×</button></view>
+        <view v-if="!historyOpen" class="ai-composer-options__actions">
+          <button class="ai-composer-option" :class="{ 'ai-composer-option--selected': wantExcel && excelAvailable }" :disabled="!excelAvailable" :aria-pressed="wantExcel && excelAvailable" @tap="toggleExcel">生成Execl<text class="ai-composer-option__state">{{ wantExcel && excelAvailable ? '已选中' : '' }}</text></button>
+          <button class="ai-composer-option" :disabled="busy || pending != null" @tap="createConversationFromMenu">新增对话</button>
+          <button class="ai-composer-option" :disabled="busy || pending != null || displayed.length == 0" @tap="confirmClearConversation">清空对话</button>
+          <button class="ai-composer-option" :disabled="busy || pending != null" @tap="openHistory">历史对话</button>
+        </view>
+        <view v-else class="ai-composer-history"><button class="ai-composer-history__back" @tap="historyOpen = false">‹ 返回</button><scroll-view v-if="recentConversations.length > 0" scroll-y="true" class="ai-composer-history__list"><button v-for="session in recentConversations" :key="session.id" class="ai-composer-history__item" :class="{ 'ai-composer-history__item--current': session.id == conversation }" @tap="selectConversation(session.id)">{{ conversationTitle(session) }}</button></scroll-view><text v-else class="ai-composer-history__empty">暂无历史对话</text></view>
       </view>
       <!-- A single line stays between the two actions; wrapped text grows above them. -->
       <view class="ai-composer" :class="{ 'ai-composer--expanded': composerExpanded }">
-        <button class="ai-composer-more" :class="{ 'ai-composer-more--selected': wantExcel && excelAvailable }" aria-label="展开输入选项" :aria-expanded="composerOptionsOpen" @tap="composerOptionsOpen = !composerOptionsOpen"><view class="ai-icon-action"><view class="ai-icon-action__stroke"></view><view class="ai-icon-action__stroke ai-icon-action__stroke--plus"></view></view></button>
+        <button class="ai-composer-more" :class="{ 'ai-composer-more--selected': composerOptionsOpen }" aria-label="更多操作" :aria-expanded="composerOptionsOpen" @tap="toggleComposerOptions"><view class="ai-icon-action"><view class="ai-icon-action__stroke"></view><view class="ai-icon-action__stroke ai-icon-action__stroke--plus"></view></view></button>
         <!-- 双端不展示默认提示；无障碍名称不填入用户问题。 -->
         <textarea v-model="question" aria-label="输入问题" :maxlength="4000" :fixed="platformUsesNativeCanvas" :auto-height="false" :style="{ height: composerInputHeight + 'px' }" class="ai-input" @input="onComposerInput" @linechange="onComposerLineChange"/>
         <button v-if="!busy" class="ai-submit" :disabled="question.trim().length == 0" aria-label="发送问题" @tap="submit"><view class="ai-icon-send"><view class="ai-icon-send__shaft"></view><view class="ai-icon-send__head-left"></view><view class="ai-icon-send__head-right"></view></view></button>
@@ -87,7 +94,7 @@ const clarification = ref<any>(null), choices = ref<any>({}), choiceLabels = ref
 const guidanceSchema = 'mohe-clarification-v2'
 const guidanceBusy = ref(false), guidanceUnknown = ref(false), closeRequestedState = ref(false), revisingId = ref('')
 let guidanceSubmission : any = null, queuedClarificationId = '', activeGuidanceSchema = ''
-const composerOptionsOpen = ref(false), composerExpanded = ref(false)
+const composerOptionsOpen = ref(false), historyOpen = ref(false), recentConversations = ref<Array<any>>([]), composerExpanded = ref(false)
 const composerInputHeight = ref(38)
 // 原生textarea以真实换行事件驱动显式高度，不依赖模拟器的auto-height布局。
 // 28px行高+10px内边距，与ai-input保持一致；最多144px，超出由原生输入框滚动。
@@ -114,6 +121,8 @@ function toggleExcel() : void {
   if (!excelAvailable.value) return
   wantExcel.value = !wantExcel.value
 }
+function closeComposerOptions() : void { composerOptionsOpen.value = false; historyOpen.value = false }
+function toggleComposerOptions() : void { if (composerOptionsOpen.value) closeComposerOptions(); else { historyOpen.value = false; composerOptionsOpen.value = true } }
 // Delivery proofs are transient device state, never serialized into chat history.
 let exportSources : Array<any> = []
 let exportLifecycle = 0
@@ -282,8 +291,60 @@ function cancelLateAdmission(submitted : any,retained : any) : void {
 }
 function unavailable(value : any) : boolean { return value != null && value.responseKnown === true && ['AI_RUN_EXPIRED','AI_RUN_NOT_FOUND'].indexOf(String(value.reason || '')) >= 0 }
 function abandonUnavailableRun() : void { if (timer != null) clearTimeout(timer); finishActiveRunStatus(); run = null; pending = null; compatibilityExecuting = false; busy.value = false; queuedClarificationId = ''; clarification.value = null; clearGuidance(); closeRequested = false; closeRequestedState.value = false; clientDeliveryStartedAt = 0; activeQuestion.value = ''; activeQuestionAnchor.value = ''; messageAnchor.value = ''; clearActive(); progress.value = '上一次任务已失效，请重新提问。' }
-function newConversation() : void { if (busy.value || (pending != null && run == null)) return; lifecycle++; finishActiveRunStatus(); queuedClarificationId = ''; let all = load(); conversation = id(); all.push({id:conversation,created_at:Date.now(),rounds:[]}); uni.setStorageSync(storageKey,all); displayed.value = []; expandedCardKeys.value = []; activeQuestion.value = ''; activeQuestionAnchor.value = ''; messageAnchor.value = ''; run = null; clarification.value = null; clearGuidance(); let stored = activeRecord(); if (stored == null || !validResolvedRun(stored.resolved_run)) clearActive() }
-function openPanel() : void { measureNativePanelTop(); opened.value = true; if (conversation.length == 0) newConversation() }
+function newConversation() : void {
+  if (busy.value || pending != null) return
+  lifecycle++; finishActiveRunStatus(); queuedClarificationId = ''
+  let all = load(); conversation = id(); all.push({id:conversation,created_at:Date.now(),rounds:[]})
+  uni.setStorageSync(storageKey,all); uni.setStorageSync(storageKey + ':current',conversation)
+  displayed.value = []; expandedCardKeys.value = []; activeQuestion.value = ''; activeQuestionAnchor.value = ''; messageAnchor.value = ''
+  run = null; clarification.value = null; clearGuidance()
+  // Retain a completed Run tombstone until it expires: late callbacks from a
+  // recycled page must not repopulate the new conversation.
+  let stored = activeRecord(); if (stored == null || !validResolvedRun(stored.resolved_run)) clearActive()
+}
+// The menu only reads this account's 24-hour local sessions. Empty drafts from
+// other visits are hidden, while the current draft stays selectable.
+function conversationTitle(value : any) : string { let first = value != null && Array.isArray(value.rounds) && value.rounds.length > 0 ? value.rounds[0] : null; return first != null && typeof first.question == 'string' && first.question.trim().length > 0 ? first.question.trim() : '新对话' }
+function openHistory() : void {
+  if (busy.value || pending != null) return
+  recentConversations.value = load().filter((session : any) => session.id == conversation || session.rounds.length > 0).reverse()
+  historyOpen.value = true
+}
+// Switching conversations changes only the visible local transcript; an
+// unfinished Run cannot be silently moved under another conversation ID.
+function selectConversation(targetId : string) : void {
+  if (busy.value || pending != null) return
+  let selected : any = null
+  load().some((session : any) => { if (session.id == targetId) { selected = session; return true }; return false })
+  if (selected == null) { closeComposerOptions(); return }
+  conversation = targetId; uni.setStorageSync(storageKey + ':current',conversation); displayed.value = selected.rounds.slice(); expandedCardKeys.value = []
+  question.value = ''; progress.value = ''; messageAnchor.value = ''; resetComposerSize()
+  closeComposerOptions()
+}
+function createConversationFromMenu() : void {
+  if (busy.value || pending != null) return
+  newConversation(); question.value = ''; progress.value = ''; resetComposerSize(); closeComposerOptions()
+}
+// Clear means deleting only this local conversation after confirmation. Other
+// sessions and independently generated Excel files remain untouched.
+function confirmClearConversation() : void {
+  if (busy.value || pending != null || displayed.value.length == 0) return
+  let targetId = conversation
+  uni.showModal({title:'清空对话',content:'清空当前对话记录？其他历史对话不会删除。',confirmText:'清空',success:(result : any) => {
+    if (!result.confirm || !opened.value || busy.value || pending != null || conversation != targetId) return
+    uni.setStorageSync(storageKey,load().filter((session : any) => session.id != targetId))
+    newConversation(); question.value = ''; progress.value = ''; resetComposerSize(); closeComposerOptions()
+  }})
+}
+function openPanel() : void {
+  measureNativePanelTop(); opened.value = true
+  if (conversation.length > 0 || storageKey.length == 0) return
+  let targetId = String(uni.getStorageSync(storageKey + ':current') || '')
+  let selected : any = null
+  load().some((session : any) => { if (session.id == targetId) { selected = session; return true }; return false })
+  if (selected != null) { conversation = targetId; displayed.value = selected.rounds.slice() }
+  else newConversation()
+}
 function binding() : any { return {client_session_id:sessionId,generation:run.generation,run_delivery_token:run.run_delivery_token} }
 // The device reports only the bounded, user-observed time at which a verified
 // final answer becomes visible.  This best-effort diagnostic never includes
@@ -415,7 +476,7 @@ function cancelRun() : void {
   })
 }
 // 头部“退出”只关闭魔核 AI 工作区；复用既有取消链路，避免留下不可见的运行中任务。
-function closePanel() : void { cancelRun(); opened.value = false; composerOptionsOpen.value = false }
+function closePanel() : void { cancelRun(); opened.value = false; closeComposerOptions() }
 function downloadExcel(item : any) : void { let source = exportSource(item); if (source == null) return; downloadMobileAi(source,sessionId,'经营数据.xlsx',(message : string) => { progress.value = message }) }
 function validGuidance(c : any) : boolean {
   if (c == null || typeof c.id != 'string' || c.id.length == 0 || !Array.isArray(c.fields) || c.fields.length == 0) return false
@@ -565,7 +626,10 @@ function bootstrapSession(restore : boolean = false) : void {
     if (!restore && record != null && record.session_id != sessionId) { sessionId = record.session_id; bootstrapSession(true); return }
     excelAvailable.value = bootstrap.capabilities != null && Array.isArray(bootstrap.capabilities.output_formats) && bootstrap.capabilities.output_formats.indexOf('screen_and_xlsx') >= 0
     enabled.value = true
-    if (record != null) resumeActive(record)
+    // A completed Run tombstone protects against late callbacks, but must not
+    // reopen a different conversation after the merchant selected history.
+    let selectedId = String(uni.getStorageSync(storageKey + ':current') || '')
+    if (record != null && (!validResolvedRun(record.resolved_run) || selectedId.length == 0 || selectedId == record.conversation_id)) resumeActive(record)
     else if (restore) { busy.value = false; progress.value = '上一次任务已结束，可以继续提问。' }
   })
 }
@@ -581,14 +645,18 @@ onUnmounted(() => { lifecycle++; exportLifecycle++; persistActive(true); if (tim
 .ai-entry{position:fixed;right:24px;bottom:calc(92px + env(safe-area-inset-bottom));z-index:9999;width:60px;height:60px;border-radius:50%;box-shadow:0 10px 26px rgba(31,99,199,.32)}.ai-entry-icon{display:block;width:60px;height:60px;border-radius:50%}
 .ai-panel{position:fixed;left:0;right:0;top:0;bottom:0;z-index:10000;box-sizing:border-box;background-color:#fff;display:flex;flex-direction:column;overflow:hidden;color:#111827}
 .ai-workspace-head{flex:0 0 auto;padding:0 14px 8px;border-bottom:1px solid #dde2eb}.ai-title-row{position:relative;height:44px;width:100%;box-sizing:border-box;padding:0 44px;display:flex;flex-direction:row;align-items:center;justify-content:center}.ai-back-button{position:absolute;left:0;top:0;bottom:0;width:44px;display:flex;align-items:center;justify-content:center}.ai-back-button:active{background-color:#f2f5fa;border-radius:12px}.ai-back-chevron{font-size:34px;line-height:32px;font-weight:400}.ai-title{min-width:0;white-space:nowrap;font-size:20px;font-weight:700;letter-spacing:.01em;text-align:center}
-/* 底部输入区仍使用加号展开导出选项，与顶部单行退出导航相互独立。 */
+/* 底部加号承载会话与导出操作，与顶部单行退出导航相互独立。 */
 .ai-icon-action{position:relative;width:26px;height:26px}.ai-icon-action__stroke{position:absolute;left:4px;top:12px;width:18px;height:2px;border-radius:2px;background-color:#101827}.ai-icon-action__stroke--plus{transform:rotate(90deg)}
 .ai-messages{min-height:0;flex:1;height:0;padding:0 36px}.ai-message{padding:0;margin:38px 0 48px;background-color:#fff}.ai-user-turn{max-width:82%;margin-left:auto;padding:16px 22px;background-color:#17191e;border-radius:27px 27px 6px 27px;color:#fff}.ai-answer-turn{padding:0;margin-top:20px}.ai-turn-label{display:none}.ai-question{display:block;color:#fff;font-size:20px;font-weight:400;line-height:1.55}.ai-message--active .ai-user-turn{margin-bottom:0}.ai-run-status{margin:26px 0 0;color:#98a0aa}.ai-run-elapsed{display:block;font-size:15px;line-height:1.5}.ai-run-thinking{display:block;margin-top:18px;padding-top:18px;border-top:1px solid #edf0f3;font-size:18px;line-height:1.5}.ai-reading-runway{min-height:520px;pointer-events:none}.ai-answer{display:block;color:#101827;font-size:24px;font-weight:400;line-height:1.75;white-space:pre-wrap}.ai-answer-presentation{display:block}.ai-answer-headline{display:block;color:#101827;font-size:25px;font-weight:600;line-height:1.55}.ai-number--count{color:#357a72}.ai-unit{font-size:14px;font-weight:400;margin-left:4px;color:#65758b}.ai-answer-section-group{margin-top:16px}.ai-answer-facts{display:flex;flex-direction:row;flex-wrap:wrap;gap:10px;margin-top:18px}.ai-answer-fact-wrap{min-width:0;width:calc(50% - 5px);flex-grow:0}.ai-answer-section{display:block;margin:4px 0 8px;color:#53647d;font-size:14px;font-weight:600}.ai-answer-fact{box-sizing:border-box;padding:13px 14px;border:1px solid #e2e8f0;border-radius:14px;background-color:#f6f9fd}.ai-answer-fact__label{display:block;color:#62708a;font-size:15px;line-height:1.5}.ai-answer-fact__value{display:block;margin-top:3px;color:#1f5f8b;font-size:24px;font-weight:600;line-height:1.35}.ai-note{font-size:15px;color:#758198;line-height:1.65}.ai-answer-period{display:block;margin-top:14px}.ai-answer-note{display:block;margin-top:4px}
 .ai-card{padding:16px;margin-top:14px;background-color:#f6f9fd;border:1px solid #e2e8f0;border-radius:14px}.ai-card-label{display:block;margin-bottom:5px;color:#111827;font-size:18px;font-weight:500}.ai-number{display:block;font-size:28px;font-weight:600;color:#1f5f8b}.ai-card-detail-toggle{display:flex;flex-direction:row;align-items:center;margin-top:14px;padding:10px 0;color:#6c7890;font-size:16px}.ai-card-detail-chevron{margin-right:8px;font-size:27px;font-weight:300;line-height:16px}.ai-card-detail{display:block;margin-top:8px;white-space:pre-wrap;font-size:14px;line-height:1.8;color:#65758b}.ai-result-table{margin-top:30px;border-top:1px solid #d9dee7}.ai-result-table__row{display:flex;flex-direction:row;align-items:center;min-height:56px;border-bottom:1px solid #d9dee7}.ai-result-table__head{min-height:48px}.ai-result-table__cell{min-width:0;flex:1;box-sizing:border-box;padding:0 4px;color:#111827;font-size:17px;line-height:1.35;text-align:left}.ai-result-table__cell:last-child{text-align:right}.ai-result-table__head .ai-result-table__cell{color:#758198;font-size:15px}
-.ai-footer{flex:0 0 auto;padding:12px 36px calc(22px + env(safe-area-inset-bottom));background-color:#fff}.ai-progress{display:block;margin-bottom:8px}.ai-composer{position:relative;box-sizing:border-box;min-height:56px;padding:8px 54px;border:1px solid #d4dbe7;border-radius:28px;background-color:#fff;box-shadow:0 4px 16px rgba(22,36,61,.04)}.ai-composer--expanded{padding:12px 54px 56px;border-radius:24px}.ai-composer-options{display:flex;align-items:center;padding:0 0 10px 6px}.ai-composer-more{position:absolute;left:8px;bottom:8px;display:flex;align-items:center;justify-content:center;width:38px;height:38px;margin:0;padding:0;border:0;border-radius:50%;background-color:transparent;color:#111}.ai-composer-more--selected{background-color:#eeecff}.ai-composer-more::after,.ai-submit::after{border:0}.ai-input{box-sizing:border-box;min-height:38px;max-height:144px;width:100%;padding:5px 0;background-color:transparent;border:0;font-size:17px;line-height:28px}.ai-export-toggle{display:flex;align-items:center;justify-content:center;margin:0;padding:0 14px;min-height:32px;border:1px solid #111;border-radius:999px;background-color:#fff;color:#111;font-size:15px;font-weight:600;line-height:30px}.ai-export-toggle::after{border:0}.ai-export-toggle--selected{background-color:#111;color:#fff}.ai-export-toggle[disabled]{border-color:#d3d7de;background-color:#f7f8fa;color:#9aa3b0}.ai-submit{position:absolute;right:8px;bottom:8px;display:flex;align-items:center;justify-content:center;width:38px;height:38px;margin:0;padding:0;border:0;border-radius:50%;background-color:#111;color:#fff;line-height:38px}.ai-submit[disabled]{background-color:#9eabbf;color:#fff}.ai-submit--stop{font-size:12px}.ai-icon-send{position:relative;width:27px;height:27px}.ai-icon-send__shaft{position:absolute;left:12px;top:3px;width:3px;height:21px;border-radius:3px;background-color:#fff}.ai-icon-send__head-left{position:absolute;left:8px;top:3px;width:3px;height:12px;border-radius:3px;background-color:#fff;transform:rotate(45deg)}.ai-icon-send__head-right{position:absolute;right:8px;top:3px;width:3px;height:12px;border-radius:3px;background-color:#fff;transform:rotate(-45deg)}.ai-choice{padding:8px;display:block;color:#1f63c7}
+.ai-footer{flex:0 0 auto;padding:12px 36px calc(22px + env(safe-area-inset-bottom));background-color:#fff}.ai-progress{display:block;margin-bottom:8px}.ai-composer{position:relative;box-sizing:border-box;min-height:56px;padding:8px 54px;border:1px solid #d4dbe7;border-radius:28px;background-color:#fff;box-shadow:0 4px 16px rgba(22,36,61,.04)}.ai-composer--expanded{padding:12px 54px 56px;border-radius:24px}
+/* 加号菜单沿输入框上缘纵向排列，保留原生键盘和安全区；不另做平行业务入口。 */
+.ai-composer-options{display:flex;flex-direction:column;box-sizing:border-box;width:100%;margin-bottom:10px;padding:14px;border:1px solid #e3e6eb;border-radius:20px;background-color:#fff;box-shadow:0 8px 30px rgba(22,36,61,.1)}
+.ai-composer-options__head{display:flex;flex-direction:row;align-items:center;justify-content:space-between;margin-bottom:8px;color:#687386;font-size:14px}.ai-composer-options__close{width:32px;height:32px;margin:0;padding:0;border:0;background-color:transparent;color:#6b7280;font-size:24px;line-height:32px}.ai-composer-options__actions{display:flex;flex-direction:column;gap:4px}.ai-composer-option{display:flex;flex-direction:row;align-items:center;justify-content:space-between;box-sizing:border-box;width:100%;min-height:48px;margin:0;padding:0 12px;border:0;border-radius:12px;background-color:#fff;color:#111827;font-size:16px;text-align:left}.ai-composer-option--selected{background-color:#17191e;color:#fff}.ai-composer-option[disabled]{color:#a3aab5}.ai-composer-option__state{font-size:13px}.ai-composer-history__back{margin:0 0 6px;padding:6px 10px;border:0;background-color:transparent;color:#53647d;text-align:left;font-size:15px}.ai-composer-history__list{max-height:240px;height:240px}.ai-composer-history__item{display:block;box-sizing:border-box;width:100%;min-height:46px;margin:0;padding:10px 12px;border:0;border-bottom:1px solid #edf0f3;background-color:#fff;color:#111827;text-align:left;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ai-composer-history__item--current{background-color:#f1f4f8}.ai-composer-history__empty{display:block;padding:12px;color:#8792a2;font-size:14px}.ai-composer-option::after,.ai-composer-options__close::after,.ai-composer-history__back::after,.ai-composer-history__item::after{border:0}
+.ai-composer-more{position:absolute;left:8px;bottom:8px;display:flex;align-items:center;justify-content:center;width:38px;height:38px;margin:0;padding:0;border:0;border-radius:50%;background-color:transparent;color:#111}.ai-composer-more--selected{background-color:#eeecff}.ai-composer-more::after,.ai-submit::after{border:0}.ai-input{box-sizing:border-box;min-height:38px;max-height:144px;width:100%;padding:5px 0;background-color:transparent;border:0;font-size:17px;line-height:28px}.ai-submit{position:absolute;right:8px;bottom:8px;display:flex;align-items:center;justify-content:center;width:38px;height:38px;margin:0;padding:0;border:0;border-radius:50%;background-color:#111;color:#fff;line-height:38px}.ai-submit[disabled]{background-color:#9eabbf;color:#fff}.ai-submit--stop{font-size:12px}.ai-icon-send{position:relative;width:27px;height:27px}.ai-icon-send__shaft{position:absolute;left:12px;top:3px;width:3px;height:21px;border-radius:3px;background-color:#fff}.ai-icon-send__head-left{position:absolute;left:8px;top:3px;width:3px;height:12px;border-radius:3px;background-color:#fff;transform:rotate(45deg)}.ai-icon-send__head-right{position:absolute;right:8px;top:3px;width:3px;height:12px;border-radius:3px;background-color:#fff;transform:rotate(-45deg)}.ai-choice{padding:8px;display:block;color:#1f63c7}
 .ai-run-complete{display:block;margin-top:18px;color:#7a8493;font-size:15px;line-height:1.5}
 /* 小程序问答正文参考同机手机阅读密度：提问、各类摘要及标题统一收敛；指标卡保留数值层级。 */
-.ai-panel--native-mini .ai-messages{padding:0 20px}.ai-panel--native-mini .ai-message{margin:26px 0 34px}.ai-panel--native-mini .ai-answer-turn{margin-top:20px}.ai-panel--native-mini .ai-question{font-size:17px;line-height:1.6}.ai-panel--native-mini .ai-run-status{margin-top:20px}.ai-panel--native-mini .ai-run-elapsed{font-size:14px}.ai-panel--native-mini .ai-run-thinking{margin-top:14px;padding-top:14px;font-size:16px}.ai-panel--native-mini .ai-reading-runway{min-height:420px}.ai-panel--native-mini .ai-answer{font-size:17px;line-height:1.65}.ai-panel--native-mini .ai-answer-headline{font-size:19px;line-height:1.55}.ai-panel--native-mini .ai-card{padding:14px;margin-top:12px}.ai-panel--native-mini .ai-card-label{font-size:16px}.ai-panel--native-mini .ai-card-detail-toggle{font-size:14px}.ai-panel--native-mini .ai-footer{padding:8px 18px calc(14px + env(safe-area-inset-bottom))}.ai-panel--native-mini .ai-export-toggle{min-height:30px;padding:0 12px;font-size:14px;line-height:28px}.ai-panel--native-mini .ai-icon-send{width:24px;height:24px}.ai-panel--native-mini .ai-icon-send__shaft{left:11px;top:2px;height:20px}.ai-panel--native-mini .ai-icon-send__head-left{left:7px;top:2px}.ai-panel--native-mini .ai-icon-send__head-right{right:7px;top:2px}
+.ai-panel--native-mini .ai-messages{padding:0 20px}.ai-panel--native-mini .ai-message{margin:26px 0 34px}.ai-panel--native-mini .ai-answer-turn{margin-top:20px}.ai-panel--native-mini .ai-question{font-size:17px;line-height:1.6}.ai-panel--native-mini .ai-run-status{margin-top:20px}.ai-panel--native-mini .ai-run-elapsed{font-size:14px}.ai-panel--native-mini .ai-run-thinking{margin-top:14px;padding-top:14px;font-size:16px}.ai-panel--native-mini .ai-reading-runway{min-height:420px}.ai-panel--native-mini .ai-answer{font-size:17px;line-height:1.65}.ai-panel--native-mini .ai-answer-headline{font-size:19px;line-height:1.55}.ai-panel--native-mini .ai-card{padding:14px;margin-top:12px}.ai-panel--native-mini .ai-card-label{font-size:16px}.ai-panel--native-mini .ai-card-detail-toggle{font-size:14px}.ai-panel--native-mini .ai-footer{padding:8px 18px calc(14px + env(safe-area-inset-bottom))}.ai-panel--native-mini .ai-icon-send{width:24px;height:24px}.ai-panel--native-mini .ai-icon-send__shaft{left:11px;top:2px;height:20px}.ai-panel--native-mini .ai-icon-send__head-left{left:7px;top:2px}.ai-panel--native-mini .ai-icon-send__head-right{right:7px;top:2px}
 /* 窄屏优先完整显示数值；只改变排版，不截断或重新计算指标。 */
 @media (max-width:360px){.ai-answer-fact-wrap{width:100%}.ai-title{font-size:17px}}
 /* 确认卡沿用黑白工作台，编号只作选项顺序，提交仍使用后端 option.value。 */
