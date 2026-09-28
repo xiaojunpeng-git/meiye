@@ -12,8 +12,9 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@mohe/unified-query-vue3": "file:../shared/unified-query-vue3",
     "@lucide/vue": "^1.27.0",
+    "@mohe/unified-query-vue3": "file:../shared/unified-query-vue3",
+    "exceljs": "^4.4.0",
     "vue": "^3.4.38"
   },
   "devDependencies": {

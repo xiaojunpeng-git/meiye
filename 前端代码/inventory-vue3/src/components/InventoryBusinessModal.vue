@@ -5,7 +5,7 @@ import { inventoryApi, platformInventoryApi } from '../services/inventoryApi'
 import InventoryProductSelector from './InventoryProductSelector.vue'
 import InventoryStoreSelector from './InventoryStoreSelector.vue'
 import { inventoryStatusLabel } from '../statusLabels'
-import { exportCountCsv, parseCountCsv } from './countWorksheet'
+import { exportCountXlsx, parseCountXlsx } from './countWorksheet'
 import { changedCountRows } from '../utils/countSubmission'
 
 const props = defineProps({
@@ -488,10 +488,15 @@ async function acceptCatalogRows(rows) {
   productSelectorVisible.value = false
 }
 
-/** 只下载当前表格行；导入与清零均为前端草稿操作，不调用库存写接口。 */
-function exportCountRows() {
-  if (props.pageKey !== 'count' || !selectedRows.value.length) return
-  saveBlob(new Blob([exportCountCsv(productRows.value)], { type: 'text/csv;charset=utf-8' }), `盘点资料-${new Date().toISOString().slice(0, 10)}.csv`)
+/** 只下载当前表格行的 Excel 工作簿；导入与清零均为草稿操作，不调用库存写接口。 */
+async function exportCountRows() {
+  if (props.pageKey !== 'count' || !selectedRows.value.length || countLoading.value) return
+  countLoading.value = true; catalogError.value = ''
+  try {
+    const bytes = await exportCountXlsx(productRows.value)
+    saveBlob(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `盘点资料-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  } catch (error) { catalogError.value = error instanceof Error ? error.message : '盘点资料导出失败。' }
+  finally { countLoading.value = false }
 }
 
 function zeroVisibleCountRows() {
@@ -551,8 +556,8 @@ async function importCountRows(event) {
   if (!file || props.pageKey !== 'count' || countLoading.value) return
   countLoading.value = true; catalogError.value = ''; countProgress.value = '正在核对盘点文件…'
   try {
-    if (!/\.csv$/i.test(String(file.name))) throw new Error('请导入本页导出的 CSV 盘点资料。')
-    const imported = parseCountCsv(await file.text())
+    if (!/\.xlsx$/i.test(String(file.name))) throw new Error('请导入本页导出的 Excel（.xlsx）盘点资料。')
+    const imported = await parseCountXlsx(await file.arrayBuffer())
     const catalog = await allCountCatalog()
     const catalogByKey = new Map()
     for (const item of catalog) {
@@ -1081,7 +1086,7 @@ async function submitWarehouse() {
           <section v-if="!isImport && !isDetail && pageKey !== 'warehouse'" class="line-section">
             <header>
               <div><h3>{{ pageKey === 'count' ? '盘点商品' : pageKey === 'request' ? '请货商品' : pageKey === 'transfer' ? '调拨商品' : pageKey === 'inbound' ? '入库商品' : pageKey === 'outbound' ? '出库商品' : '业务明细' }}<i v-if="!isDetail">*</i></h3><p v-if="pageKey === 'inbound'">扫描商品条码可自动添加；批次、生产日期、到期日和入库单价在商品明细中填写。</p><p v-else-if="pageKey === 'outbound'">系统会优先扣减最早到期的可用批次，并自动计算成本。</p></div>
-              <div v-if="!isDetail" class="line-actions"><template v-if="pageKey === 'count' && !isPlatformHeadquarters"><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="exportCountRows">导出盘点资料</button><button class="modal-secondary" :disabled="countLoading" @click="countFileInput?.click()">导入盘点</button><input ref="countFileInput" class="count-file-input" type="file" accept=".csv,text/csv" @change="importCountRows" /><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="zeroVisibleCountRows">库存清零</button><button class="modal-secondary" :disabled="countLoading" @click="loadAllCountProducts">{{ countLoading ? '加载中…' : '加载全部商品' }}</button></template><button v-if="!isUsageReturn" class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="!isUsageReturn && ['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button></div>
+              <div v-if="!isDetail" class="line-actions"><template v-if="pageKey === 'count' && !isPlatformHeadquarters"><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="exportCountRows">导出盘点资料</button><button class="modal-secondary" :disabled="countLoading" @click="countFileInput?.click()">导入盘点</button><input ref="countFileInput" class="count-file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="importCountRows" /><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="zeroVisibleCountRows">库存清零</button><button class="modal-secondary" :disabled="countLoading" @click="loadAllCountProducts">{{ countLoading ? '加载中…' : '加载全部商品' }}</button></template><button v-if="!isUsageReturn" class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="!isUsageReturn && ['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button></div>
             </header>
             <p v-if="catalogError" class="catalog-error">{{ catalogError }}</p><p v-if="pageKey === 'count' && countProgress" class="count-progress">{{ countProgress }}</p>
             <section v-if="scannerVisible" class="scanner-entry"><Barcode :size="17" /><label>扫描条码<input v-model="scannerCode" autofocus placeholder="请扫描或输入商品条码" @keyup.enter="addScannedProduct" /></label><button class="modal-secondary" @click="scannerVisible = false">取消</button><button class="modal-primary" :disabled="!scannerCode.trim() || scannerLoading" @click="addScannedProduct">{{ scannerLoading ? '添加中' : '添加' }}</button></section>
