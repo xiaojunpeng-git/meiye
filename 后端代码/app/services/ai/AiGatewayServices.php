@@ -739,20 +739,31 @@ final class AiGatewayServices
      */
     private function currentNamedStoreReference(array $understanding,array $safe,array $privateKinds): ?string
     {
-        $references=[];
+        $references=[];$currentStores=[];$hasCurrentStoreRequirement=false;
         foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
             if (!in_array('store_term',(array)($requirement['fields']??[]),true)) continue;
             foreach ((array)($requirement['evidence']??[]) as $evidence) {
                 if (($evidence['message_id']??null)!=='current') continue;
+                $hasCurrentStoreRequirement=true;
                 foreach ((array)($safe['local_conditions']??[]) as $reference=>$unusedValue) {
                     $token='['.$reference.']';
                     if (($privateKinds[$reference]??null)==='store'
-                        && strpos((string)($safe['outbound']['question']??''),$token)!==false
-                        && strpos((string)($evidence['quote']??''),$token)!==false) $references[$reference]=true;
+                        && strpos((string)($safe['outbound']['question']??''),$token)!==false) {
+                        $currentStores[$reference]=true;
+                        if (strpos((string)($evidence['quote']??''),$token)!==false) $references[$reference]=true;
+                    }
                 }
             }
         }
-        return count($references)===1?'['.array_key_first($references).']':null;
+        if (count($references)===1) return '['.array_key_first($references).']';
+        // A model may cite only "this store" while the same current question
+        // contains one opaque named store. The accepted store_term already
+        // proves this turn requests a store restriction; use that sole local
+        // reference rather than leaving it unbound. Multiple current stores
+        // never reach this fallback, and the authorized catalogue still
+        // resolves the identity before any query.
+        return $hasCurrentStoreRequirement && count($currentStores)===1
+            ? '['.array_key_first($currentStores).']' : null;
     }
 
     /** Resolve a named location only through the current report-authorized catalogue. */
@@ -1394,6 +1405,9 @@ final class AiGatewayServices
         // source-owned object contract rather than by a sentence-specific rule.
         $understanding=$this->reconcileExactRegisteredAnalyticalObject(
             $understanding,$safe['outbound'],$objectVocabulary
+        );
+        $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::reconcileSelectedPositionAsPersonnel(
+            $understanding,$safe['outbound'],$privateKindsByReference
         );
         $objectCompatibleSummaries=$this->bindingSummariesForUnderstanding($summaries,$understanding);
         $understanding=$this->reconcileExactRegisteredMeasurement(
@@ -2634,7 +2648,13 @@ final class AiGatewayServices
             $intent['metric_codes']=array_values($intent['metric_codes']);
             $catalog=$localCatalogs[$metric??array_key_first($personMetrics)];
             $objectCatalog=new \app\services\query\metric\AnalysisObjectCatalog($catalog['objects'],static function(){return true;});
-            $objectTerm=$contextDecisions['store_scope']==='replace' && $contextDecisions['business_filters']==='inherit' ? '' : $term;
+            // A named store and a selected person/position are independent
+            // filters. Clearing the person term merely because the store
+            // changed erased an explicitly named technician role on a fresh
+            // question. Only an absent current local selection may defer to
+            // the verified inherited person filter or registered cohort.
+            $objectTerm=$contextDecisions['store_scope']==='replace'
+                && $contextDecisions['business_filters']==='inherit' && $localTerm===null ? '' : $term;
             $named=$objectCatalog->resolve($objectTerm,'person',$metric);
             // Exact local names may bind a person; a missing name is never fuzzily
             // replaced with someone else. Otherwise resolve actual position metadata.

@@ -1962,6 +1962,10 @@ final class AiIntentResultContract
                 ? self::equivalentPeriods($value,self::priorValue($field,$priorQuery),$referenceDate)
                 : self::equivalent($value,self::priorValue($field,$priorQuery));
             if ($deltaField!==null && ($delta[$deltaField]??null)==='inherit' && !$same) {
+                if ($field==='object_kind') throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',[
+                    'stage'=>'intent_contract','predicate'=>'binding_requirement_delta_mismatch:object_kind',
+                    'field'=>substr((string)self::priorValue($field,$priorQuery).'_to_'.$value,0,32),
+                ]);
                 if ($field==='scope') throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',[
                     'stage'=>'intent_contract','predicate'=>'binding_requirement_delta_mismatch:scope',
                     'field'=>(string)self::priorValue($field,$priorQuery).'_to_'.$value,
@@ -2010,6 +2014,10 @@ final class AiIntentResultContract
                     ]);
                 }
                 if (!$same && $field==='ranking') self::failRankingMismatch($values[$field],$actual,'candidate');
+                if (!$same && $field==='object_kind') throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',[
+                    'stage'=>'intent_contract','predicate'=>'binding_requirement_value_mismatch:object_kind',
+                    'field'=>substr((string)$values[$field].'_to_'.$actual,0,32),
+                ]);
                 if (!$same) self::fail('binding_requirement_value_mismatch:'.$field);
             }
         }

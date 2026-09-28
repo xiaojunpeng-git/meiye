@@ -21,6 +21,28 @@ $understanding=['goal'=>'查看本月收款，排除退款并列出前五家门�
 ]];
 $understanding=AiIntentUnderstandingContract::normalize($understanding,$question);
 $check(AiIntentUnderstandingContract::ids($understanding)===['r1','r2','r3'],'understanding has request-local requirement identities');
+// A model values key in fields must remain a failed first attempt. The
+// diagnostic classifies its shape without retaining customer or model text,
+// and the bounded repair still has to preserve every original requirement.
+$wrongField=$understanding;
+$wrongField['requirements'][0]['fields'][]='metric_terms';
+$wrongFieldRejected=false;
+try { AiIntentUnderstandingContract::normalize($wrongField,$question); }
+catch (AiContractException $error) {
+    $wrongFieldRejected=$error->diagnostic()===['stage'=>'intent_understanding_contract','predicate'=>'requirement_fields_unknown','field'=>'value_key'];
+}
+$check($wrongFieldRejected,'values-only key in fields is rejected with a payload-free diagnostic');
+$unknownField=$understanding;
+$unknownField['requirements'][0]['fields'][]='customer private words';
+$unknownFieldRejected=false;
+try { AiIntentUnderstandingContract::normalize($unknownField,$question); }
+catch (AiContractException $error) {
+    $unknownFieldRejected=$error->diagnostic()===['stage'=>'intent_understanding_contract','predicate'=>'requirement_fields_unknown','field'=>'other'];
+}
+$check($unknownFieldRejected,'unknown model field is rejected without copying it into diagnostics');
+$fieldRepair=AiIntentUnderstandingContract::repairInstruction('requirement_fields_unknown');
+$check(strpos($fieldRepair,'values.metric_terms')!==false && strpos($fieldRepair,'Keep every customer condition')!==false,
+    'field repair corrects the carrier without dropping customer conditions');
 $overviewTypedQuestion=$question;
 $overviewTypedQuestion['question']='这个月经营情况如何';
 $overviewTypedQuestion['recent_questions']=[];
@@ -881,6 +903,42 @@ $storeScopeMeaning=['goal'=>'查看指定门店技师项目数','status'=>'under
 ]];
 $storeScopeMeaning=AiIntentUnderstandingContract::normalize($storeScopeMeaning,$storeScopeQuestion);
 $check(AiIntentResultContract::understoodStoreTerm($storeScopeMeaning)==='二号门店','current grounded store scope survives independently of analytical person');
+$maskedRoleQuestion=$storeScopeQuestion;
+$maskedRoleQuestion['question']='[local_condition_1]这个门店[local_condition_2]项目数最多的是哪个';
+$maskedRoleQuestion['evidence_messages']=[['id'=>'current','text'=>$maskedRoleQuestion['question']]];
+$maskedRoleUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'指定门店岗位人员项目数排行','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'限定门店','fields'=>['store_term'],'values'=>['store_term'=>'[local_condition_1]'],
+        'evidence'=>[['message_id'=>'current','quote'=>'[local_condition_1]']]],
+    ['id'=>'r2','meaning'=>'限定岗位','fields'=>['object_kind','object_relation'],
+        'values'=>['object_kind'=>'position','object_relation'=>'selection'],
+        'evidence'=>[['message_id'=>'current','quote'=>'[local_condition_2]']]],
+    ['id'=>'r3','meaning'=>'项目数排行','fields'=>['metric_codes','operation','ranking'],
+        'values'=>['metric_terms'=>['项目数'],'operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>1]],
+        'evidence'=>[['message_id'=>'current','quote'=>'项目数最多的是哪个']]],
+]],$maskedRoleQuestion);
+$personRole=AiIntentUnderstandingContract::reconcileSelectedPositionAsPersonnel($maskedRoleUnderstanding,$maskedRoleQuestion,
+    ['local_condition_1'=>'store','local_condition_2'=>'position']);
+$check($personRole['requirements'][1]['values']['object_kind']==='person'
+    && $personRole['requirements'][1]['values']['object_relation']==='analysis'
+    && AiIntentResultContract::understoodStoreTerm($personRole)==='[local_condition_1]',
+    'one current opaque position narrows personnel rather than becoming a rankable position row');
+$positionAnalysis=$maskedRoleUnderstanding;
+$positionAnalysis['requirements'][1]['values']['object_relation']='analysis';
+$check(AiIntentUnderstandingContract::reconcileSelectedPositionAsPersonnel($positionAnalysis,$maskedRoleQuestion,
+    ['local_condition_2'=>'position'])['requirements'][1]['values']['object_kind']==='person',
+    'a masked position mislabeled as an analytical row still becomes personnel within that role');
+$shortRoleEvidence=$maskedRoleUnderstanding;
+$shortRoleEvidence['requirements'][1]['evidence'][0]['quote']='项目数';
+$check(AiIntentUnderstandingContract::reconcileSelectedPositionAsPersonnel($shortRoleEvidence,$maskedRoleQuestion,
+    ['local_condition_2'=>'position'])['requirements'][1]['values']['object_kind']==='person',
+    'one current role is preserved even when model evidence cites only adjacent generic words');
+$check(AiIntentUnderstandingContract::reconcileSelectedPositionAsPersonnel($maskedRoleUnderstanding,$maskedRoleQuestion,
+    ['local_condition_2'=>'person'])===$maskedRoleUnderstanding,
+    'a non-position private identity cannot be coerced to a personnel role');
+$ambiguousRoles=$maskedRoleQuestion;$ambiguousRoles['question'].='和[local_condition_3]';
+$check(AiIntentUnderstandingContract::reconcileSelectedPositionAsPersonnel($maskedRoleUnderstanding,$ambiguousRoles,
+    ['local_condition_2'=>'position','local_condition_3'=>'position'])===$maskedRoleUnderstanding,
+    'two selected positions remain model-owned instead of choosing one');
 $shortStoreEvidence=$storeScopeMeaning;$shortStoreEvidence['requirements'][0]['evidence']=[['message_id'=>'current','quote'=>'技师']];
 $expandedStoreEvidence=AiIntentUnderstandingContract::normalize($shortStoreEvidence,$storeScopeQuestion);
 $check($expandedStoreEvidence['requirements'][0]['evidence'][0]['quote']===$storeScopeQuestion['question'],

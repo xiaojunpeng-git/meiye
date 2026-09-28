@@ -67,6 +67,14 @@ $storeEvidence=['requirements'=>[['id'=>'r1','fields'=>['store_term'],'values'=>
 $storeSafe=['outbound'=>['question'=>'门店 [local_condition_1] 这个门店的技师'],'local_conditions'=>['local_condition_1'=>'合成门店']];
 $storeKinds=['local_condition_1'=>'store'];
 if ($storeReferenceMethod->invoke($policy,$storeEvidence,$storeSafe,$storeKinds)!=='[local_condition_1]') throw new RuntimeException('current named scope lost its uniquely cited store token');
+$shortStoreEvidence=$storeEvidence;$shortStoreEvidence['requirements'][0]['evidence'][0]['quote']='这个门店';
+if ($storeReferenceMethod->invoke($policy,$shortStoreEvidence,$storeSafe,$storeKinds)!=='[local_condition_1]')
+    throw new RuntimeException('one current named store was left unresolved only because model evidence quoted its generic reference');
+$twoStores=$storeSafe;$twoStores['outbound']['question'].=' 和 [local_condition_2]';
+$twoStores['local_conditions']['local_condition_2']='另一合成门店';
+if ($storeReferenceMethod->invoke($policy,$shortStoreEvidence,$twoStores,
+    ['local_condition_1'=>'store','local_condition_2'=>'store'])!==null)
+    throw new RuntimeException('generic store evidence must not select one of multiple named stores');
 $oldStoreEvidence=$storeEvidence;$oldStoreEvidence['requirements'][0]['evidence'][0]['message_id']='recent_1';
 if ($storeReferenceMethod->invoke($policy,$oldStoreEvidence,$storeSafe,$storeKinds)!==null) throw new RuntimeException('historical store evidence incorrectly selected a current location');
 if ($storeReferenceMethod->invoke($policy,$storeEvidence,$storeSafe,['local_condition_1'=>'member'])!==null) throw new RuntimeException('member identity incorrectly became a store scope');
