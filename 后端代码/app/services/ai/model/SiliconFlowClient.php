@@ -58,6 +58,7 @@ final class SiliconFlowClient
         $runtimeSkills=$this->runtimeSkills($runtimeSkills);
         $objectVocabulary=self::objectVocabulary($objectVocabulary);
         $measurementVocabulary=self::measurementVocabulary($measurementVocabulary);
+        $measurementVocabulary=self::focusedMeasurementVocabulary($measurementVocabulary,$safeQuestion);
         $messages=[
             // Ranking and named-location rules live in the understanding
             // contract below; a second system message repeated them on every
@@ -172,6 +173,27 @@ final class SiliconFlowClient
             $seen[$key]=true;$out[]=$row;
         }
         return $out;
+    }
+
+    /**
+     * A fresh question containing exact published measurement language needs
+     * only the matching source-owned explanations. This changes prompt size,
+     * not interpretation or authority: all matches are retained, the model
+     * still sees the complete question, and unmatched or contextual questions
+     * keep the full vocabulary so unknown wording is never silently dropped.
+     */
+    private static function focusedMeasurementVocabulary(array $items,array $safeQuestion): array
+    {
+        if ($items===[] || ($safeQuestion['prior_query']??null)!==null) return $items;
+        $question=(string)($safeQuestion['question']??'');$matched=[];
+        foreach ($items as $item) {
+            foreach (array_merge([$item['measurement_label']],$item['customer_terms']) as $term) {
+                if (mb_strlen($term,'UTF-8')<2 || mb_strpos($question,$term,0,'UTF-8')===false) continue;
+                $matched[]=$item;
+                break;
+            }
+        }
+        return $matched===[]?$items:$matched;
     }
 
     /** Second phase: bind an already accepted understanding to registered capability. */

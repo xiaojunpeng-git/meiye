@@ -190,7 +190,7 @@ final class AiIntentResultContract
             if (!is_array($requirement) || in_array('unbound',(array)($requirement['fields']??[]),true)) {$failure='unbound';return null;}
             $values=(array)($requirement['values']??[]);
             foreach (['metric_exclusions','ranking','aggregate_condition','condition_update','object_detail','member_detail','result_reference'] as $unsafe) {
-                if (array_key_exists($unsafe,$values)) {$failure='unsafe_value';return null;}
+                if (array_key_exists($unsafe,$values)) {$failure='unsafe_'.$unsafe;return null;}
             }
             foreach (array_keys($owned) as $field) {
                 if (!array_key_exists($field,$values)) continue;
@@ -1339,6 +1339,15 @@ final class AiIntentResultContract
         if ($objectRelation==='analysis') $value['object_term']='';
         if ($objectRelation==='selection' && $value['object_term']==='') self::fail('bad_value:object_relation');
         $delta=$hasPrior?self::delta($value['context_delta']):null;
+        // A deictic result reference narrows the verified store separately;
+        // it is not a request to replace the authorization scope enum. When
+        // the accepted current meaning supplies no scope and the provider
+        // emits replace without a scope value, retain the signed scope rather
+        // than failing the entire follow-up or guessing current_store.
+        if ($delta!==null && $delta['scope']==='replace' && !$scopeSupplied
+            && !isset($currentFields['scope'])) {
+            $delta['scope']='inherit';$value['context_delta']['scope']='inherit';
+        }
         // A named store is a scope, independent of the analytical subject.
         // Only accepted current evidence can author this replacement; the
         // binding model is not asked to rediscover or carry a second identity.

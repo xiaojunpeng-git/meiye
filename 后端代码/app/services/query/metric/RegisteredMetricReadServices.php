@@ -106,7 +106,7 @@ final class RegisteredMetricReadServices
             || !is_array($conditionSet['conditions'] ?? null) || count($conditionSet['conditions']) < 1
             || count($conditionSet['conditions']) > 4) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
 
-        $queries = []; $metricCodes = [];
+        $queries = []; $metricCodes = []; $observedAgeProbe = null;
         foreach ($conditionSet['conditions'] as $condition) {
             $keys = is_array($condition) ? array_keys($condition) : []; sort($keys, SORT_STRING);
             $code = is_array($condition) ? ($condition['metric_code'] ?? null) : null;
@@ -121,8 +121,24 @@ final class RegisteredMetricReadServices
             $operator = $this->conditionSqlOperator((string)($condition['operator'] ?? ''));
             $query->fieldRaw("s.member_id member_id,'" . $code . "' metric_code," . $expression . ' metric_value')
                 ->having($expression . ' ' . $operator . ' ' . $condition['value']);
+            // For an AND query, an observed last-visit predicate
+            // can prove the intersection empty before the much larger
+            // entitlement population is scanned. This is an actual scoped
+            // Reader query, never a fabricated zero or a client-side metric.
+            if ($conditionSet['relation'] === 'all'
+                && (MetricDefinitionRegistry::get($code)['source']['threshold_count']['aggregation'] ?? null) === 'as_of_age_days') {
+                $observedAgeProbe = clone $query;
+            }
             $queries[] = $query;
             $metricCodes[$code] = true;
+        }
+
+        if ($observedAgeProbe !== null) {
+            $ageSql = $observedAgeProbe->buildSql();
+            $ageCount = (int)Db::table([$ageSql => 'observed_age_members'])->count();
+            if ($ageCount === 0 || (count($queries) === 1 && $limit === 0)) {
+                return ['count'=>$ageCount,'rows'=>[],'limit'=>$limit,'has_more'=>$ageCount>0];
+            }
         }
 
         $union = array_shift($queries);

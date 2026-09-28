@@ -189,9 +189,9 @@ metricRegistryCheck(($catalogItems['actual_performance']['metric_kind'] ?? null)
     'management catalog separates derivation, time semantics and basic query readiness');
 metricRegistryCheck(($catalogItems['member_days_since_last_visit']['metric_kind'] ?? null) === 'atomic'
     && ($catalogItems['member_days_since_last_visit']['time_semantics'] ?? null) === 'as_of_date'
-    && ($catalogItems['member_days_since_last_visit']['ai_query_ready'] ?? true) === false
-    && in_array('HISTORICAL_SERVICE_COVERAGE_INCOMPLETE', $catalogItems['member_days_since_last_visit']['readiness_reasons'] ?? [], true),
-    'catalog keeps a registered but history-limited metric visible with its real reason');
+    && ($catalogItems['member_days_since_last_visit']['ai_query_ready'] ?? false) === true
+    && (\app\services\query\metric\MetricDefinitionRegistry::capabilities()['member_days_since_last_visit']['observed_answer_prefix'] ?? null) === '现有有效服务记录中',
+    'catalog admits observed completed-service records without claiming all older history is imported');
 metricRegistryCheck(in_array(['kind' => 'person', 'label' => '人员'], $catalogItems['staff_sales_yeji']['analysis_objects'] ?? [], true)
     && !in_array(['kind' => 'store', 'label' => '门店'], $catalogItems['staff_sales_yeji']['analysis_objects'] ?? [], true)
     && in_array(['kind' => 'project', 'label' => '项目'], $catalogItems['sales_amount']['analysis_objects'] ?? [], true),

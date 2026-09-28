@@ -151,11 +151,76 @@ $check(AiIntentGroupContract::isExecutableRankingCollection($collectionItems),
 $collectionItems[1]['intent']['scope']='current_store';
 $check(!AiIntentGroupContract::isExecutableRankingCollection($collectionItems)
     && AiIntentGroupContract::repairableFormat('collection_plan_shape')
-    && str_contains(AiIntentGroupContract::repairInstruction('collection_plan_shape'),'scope=unspecified'),
-    'a grouped binding that invents an executor-incompatible scope receives one model-owned collection repair');
+    && str_contains(AiIntentGroupContract::repairInstruction('collection_plan_shape'),'summary or breakdown must not become a ranking'),
+    'an incompatible grouped binding receives one repair without changing the accepted response form');
 $collectionItems[1]['intent']['scope']='unspecified';$collectionItems[1]['intent']['ranking']=['direction'=>'unspecified','limit'=>null];
 $check(!AiIntentGroupContract::isExecutableRankingCollection($collectionItems),
     'a grouped ranking without an explicit direction receives model correction before it can open a clarification mid-collection');
+$storeCollection=[
+    ['id'=>'q1','intent'=>['operation'=>'breakdown','object_kind'=>'store','object_relation'=>'analysis','object_term'=>'',
+        'needs_metric_choice'=>false,'unresolved_fragments'=>[],'scope'=>'authorized','aggregate_condition'=>null,
+        'metric_codes'=>['cash_performance','refund_amount'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],
+        'ranking'=>['direction'=>'unspecified','limit'=>null]]],
+    ['id'=>'q2','intent'=>['operation'=>'ranking','object_kind'=>'store','object_relation'=>'analysis','object_term'=>'',
+        'needs_metric_choice'=>false,'unresolved_fragments'=>[],'scope'=>'authorized','aggregate_condition'=>null,
+        'metric_codes'=>['actual_performance'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],
+        'ranking'=>['direction'=>'bottom','limit'=>1]]],
+];
+$check(AiIntentGroupContract::isExecutableStoreCollection($storeCollection),
+    'one store breakdown and one store extremum can share a bounded registered collection');
+$storeCollection[1]['intent']['periods']=[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]];
+$check(!AiIntentGroupContract::isExecutableStoreCollection($storeCollection),
+    'a mixed store collection never hides different requested periods');
+$mixedQuestion=$question;
+$mixedQuestion['question']='把这个月各门店现金业绩和退款业绩列出来，再告诉我实际业绩最低的是哪家';
+$mixedQuestion['evidence_messages']=[['id'=>'current','text'=>$mixedQuestion['question']]];
+$mixedRequirements=[];
+foreach ([['现金业绩','breakdown'],['退款业绩','breakdown'],['实际业绩','ranking']] as $index=>$part) {
+    $mixedRequirements[]=['id'=>'r'.($index+1),'meaning'=>'门店结果',
+        'fields'=>['metric_codes','object_kind','object_relation','operation','periods','ranking'],
+        'values'=>['metric_terms'=>[$part[0]],'object_kind'=>'store','object_relation'=>'analysis',
+            'operation'=>$part[1],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],
+            'ranking'=>['direction'=>$part[1]==='ranking'?'bottom':'unspecified','limit'=>$part[1]==='ranking'?1:null]],
+        'evidence'=>[['message_id'=>'current','quote'=>$mixedQuestion['question']]]];
+}
+$derivedMixed=AiIntentUnderstandingContract::normalize([
+    'goal'=>'分别列门店明细并找最低门店','status'=>'understood','requirements'=>$mixedRequirements,
+],$mixedQuestion);
+$check(($derivedMixed['groups']??null)===[
+    ['id'=>'q1','requirement_ids'=>['r1','r2']],['id'=>'q2','requirement_ids'=>['r3']],
+], 'an omitted group carrier keeps accepted store breakdown and ranking as separate answers');
+$exactMixed=AiIntentGroupContract::exactStoreViewCollection($derivedMixed,$mixedQuestion,
+    ['cash_performance','refund_performance','actual_performance']);
+$check(is_array($exactMixed) && count($exactMixed)===2
+    && ($exactMixed[0]['intent']['metric_codes']??null)===['cash_performance','refund_performance']
+    && ($exactMixed[1]['intent']['metric_codes']??null)===['actual_performance'],
+    'exact registered store groups skip a second model without losing either answer');
+$mixedRequirements[2]['values']['periods']=[['kind'=>'month_offset','offset_months'=>-1]];
+$check(!isset(AiIntentUnderstandingContract::normalize([
+    'goal'=>'不同期间','status'=>'understood','requirements'=>$mixedRequirements,
+],$mixedQuestion)['groups']), 'different accepted periods are never silently grouped');
+$deicticQuestion=$question;
+$deicticQuestion['question']='这个门店技师做的单数最多的是哪个';
+$deicticQuestion['evidence_messages']=[['id'=>'current','text'=>$deicticQuestion['question']]];
+$deicticQuestion['prior_query']=['operation'=>'ranking','object_kind'=>'store',
+    'sole_result_reference'=>['group'=>'top','ordinal'=>1]];
+$deicticUnderstanding=AiIntentUnderstandingContract::normalize([
+    'goal'=>'查看该店技师项目数','status'=>'understood','requirements'=>[[
+        'id'=>'r1','meaning'=>'这个门店','fields'=>['store_term'],'values'=>['store_term'=>'这个门店'],
+        'evidence'=>[['message_id'=>'current','quote'=>$deicticQuestion['question']]],
+    ]],
+],$deicticQuestion);
+$resolvedDeictic=AiIntentUnderstandingContract::reconcileSoleStoreReference($deicticUnderstanding,$deicticQuestion);
+$check(($resolvedDeictic['requirements'][0]['values']['result_reference']??null)===['group'=>'top','ordinal'=>1]
+    && !isset($resolvedDeictic['requirements'][0]['values']['store_term']),
+    'a sole verified ranked store narrows a deictic continuation without a second store choice');
+$deicticQuestion['prior_query']['sole_result_reference']=null;
+$check(AiIntentUnderstandingContract::reconcileSoleStoreReference($deicticUnderstanding,$deicticQuestion)===$deicticUnderstanding,
+    'a tied or missing ranked store never becomes a guessed reference');
+$deicticQuestion['prior_query']['sole_result_reference']=['group'=>'top','ordinal'=>1];
+$deicticQuestion['prior_query']['object_kind']='person';
+$check(AiIntentUnderstandingContract::reconcileSoleStoreReference($deicticUnderstanding,$deicticQuestion)===$deicticUnderstanding,
+    'a prior person ranking cannot be misread as a store reference');
 $collectionGuidance=(new AiRankingCollectionGuidancePlanner())->start([
     ['id'=>'q1','label'=>'项目排行','dimension_state'=>['object_kind'=>'project','metric'=>'project_sales_amount','candidates'=>['project_sales_amount'=>[]],
         'range'=>null,'direction'=>'top','limit'=>1,'format'=>'screen','today'=>'2026-09-20']],
@@ -393,6 +458,10 @@ $followBinding=['object_kind'=>'product','object_term'=>'','operation'=>'unknown
 $normalizedFollow=AiIntentResultContract::normalize($followBinding,['cash_performance','actual_performance'],[],$followQuestion,$followUnderstanding);
 $check($normalizedFollow['requirement_bindings']===[]&&$normalizedFollow['metric_codes']===[],
     'an inherited metric attached to a current object-only requirement is removed as structural bookkeeping');
+$scopeDrift=$followBinding;$scopeDrift['context_delta']['scope']='replace';unset($scopeDrift['scope']);
+$normalizedScopeDrift=AiIntentResultContract::normalize($scopeDrift,['cash_performance','actual_performance'],[],$followQuestion,$followUnderstanding);
+$check($normalizedScopeDrift['context_delta']['scope']==='inherit',
+    'an omitted replacement scope cannot override the verified prior authorization in a follow-up');
 $overviewAfterDimensionQuestion=$overviewQuestion;
 $overviewAfterDimensionQuestion['prior_query']=$followQuestion['prior_query'];
 $overviewAfterDimensionQuestion['prior_query']['has_business_filter']=true;

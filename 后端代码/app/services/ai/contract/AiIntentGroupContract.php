@@ -37,18 +37,80 @@ final class AiIntentGroupContract
     {
         if (!self::repairableFormat($predicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         if ($predicate==='collection_plan_shape') {
-            return 'The previous response used the correct grouped envelope but one or more item bindings could not be executed '
-                . 'by the registered independent-ranking collection path. Return exactly {"items":[{"id":"q1","intent":{...}}]}. '
-                . 'Preserve every supplied group and its accepted requirements. Each item must be an anonymous ranking: '
-                . 'operation=ranking, exactly one supplied metric_code, needs_metric_choice=false, empty object_term, no unresolved_fragments, '
-                . 'no aggregate_condition, scope=unspecified, and each item must preserve its own accepted explicit top, bottom or '
-                . 'top_and_bottom ranking direction (never unspecified) plus limit. '
-                . 'Do not merge groups, add a store/person identity, choose a different period, calculate data, omit a group, or output prose.';
+            return 'The previous response used the correct grouped envelope but its item bindings did not match the accepted independent queries. '
+                . 'Return exactly {"items":[{"id":"q1","intent":{...}}]}, one item for every supplied group id. '
+                . 'Preserve each group’s accepted object, operation, metric, period, and ranking direction; a summary or breakdown must not become a ranking. '
+                . 'Bind only measurements supplied by the active registry, with no unresolved fragments or invented selection, condition, identity, '
+                . 'period, or business value. Do not merge groups, omit a group, calculate data, or output prose.';
         }
         return 'The previous response used a single-intent envelope for an accepted independent-query collection. '
             . 'Return exactly {"items":[{"id":"q1","intent":{...}}]}. Include exactly one item for every supplied group id, '
             . 'with no other top-level key. Preserve every group requirement exactly; do not merge subjects, omit a group, invent a '
             . 'metric, substitute an object, calculate data, or output any prose.';
+    }
+
+    /**
+     * Skip a redundant binding model call only for a complete, first-turn
+     * breakdown-plus-ranking store request. The language model must already
+     * own every object, operation, period and rank; exact current-question
+     * catalogue terms alone may fill metric codes. The ordinary grouped
+     * contract still rejects any missing or conflicting requirement.
+     */
+    public static function exactStoreViewCollection(array $understanding,array $safeQuestion,array $metricCodes): ?array
+    {
+        if (($safeQuestion['prior_query']??null)!==null || ($understanding['status']??null)!=='understood') return null;
+        $groups=AiIntentUnderstandingContract::queryGroups($understanding);
+        if (count($groups)!==2) return null;
+        $items=[];$shapes=[];$periods=null;
+        foreach ($groups as $group) {
+            $subset=self::subset($understanding,$group['requirement_ids']);
+            $requirements=AiIntentUnderstandingContract::requirements($subset);
+            if ($requirements===[] || count($requirements)>3) return null;
+            $codes=[];$bindings=[];$operation=null;$ranking=null;$scope='unspecified';
+            foreach ($requirements as $requirementId=>$requirement) {
+                $fields=(array)($requirement['fields']??[]);$values=(array)($requirement['values']??[]);
+                if (array_diff($fields,['metric_codes','object_kind','object_relation','operation','periods','ranking','scope'])
+                    || !in_array('metric_codes',$fields,true) || !in_array('operation',$fields,true)
+                    || ($values['object_kind']??null)!=='store'
+                    || ($values['object_relation']??'analysis')!=='analysis'
+                    || !in_array($values['operation']??null,['breakdown','ranking'],true)
+                    || !is_array($values['periods']??null) || count($values['periods'])!==1
+                    || !is_array($values['metric_terms']??null) || count($values['metric_terms'])!==1
+                    || !is_string($values['metric_terms'][0])) return null;
+                if ($operation!==null && $operation!==$values['operation']) return null;
+                if ($periods!==null && $periods!==$values['periods']) return null;
+                if (isset($values['scope']) && $scope!=='unspecified' && $scope!==$values['scope']) return null;
+                $operation=$values['operation'];$periods=$values['periods'];
+                $scope=$values['scope']??$scope;
+                $term=$values['metric_terms'][0];
+                if ($term==='' || mb_strpos((string)($safeQuestion['question']??''),$term,0,'UTF-8')===false) return null;
+                $code=\app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms([$term],$metricCodes);
+                if ($code===null) return null;
+                if (!in_array($code,$codes,true)) $codes[]=$code;
+                $bindings[]=['requirement_id'=>$requirementId,'status'=>'satisfied','metric_codes'=>[$code]];
+                if (isset($values['ranking'])) {
+                    if ($ranking!==null && $ranking!==$values['ranking']) return null;
+                    $ranking=$values['ranking'];
+                }
+            }
+            if ($operation==='ranking' && (count($requirements)!==1 || count($codes)!==1
+                || !is_array($ranking) || !in_array($ranking['direction']??null,['top','bottom','top_and_bottom'],true))) return null;
+            if ($operation==='breakdown' && $ranking!==null && ($ranking['direction']??null)!=='unspecified') return null;
+            $shapes[$operation]=true;
+            $items[]=['id'=>$group['id'],'intent'=>[
+                'object_kind'=>'store','object_relation'=>'analysis','object_term'=>'','operation'=>$operation,
+                'metric_codes'=>$codes,'action_codes'=>[],'needs_metric_choice'=>false,
+                'initial_observation'=>false,'recommended_initial_answer'=>false,
+                'requirement_bindings'=>$bindings,'ranking'=>$ranking??['direction'=>'unspecified','limit'=>null],
+                'periods'=>$periods,'scope'=>$scope,'aggregate_condition'=>null,'result_reference'=>null,
+                'unresolved_fragments'=>[],
+            ]];
+        }
+        if (!isset($shapes['breakdown'],$shapes['ranking'])) return null;
+        try {
+            $normalized=self::normalize(['items'=>$items],$metricCodes,[],$safeQuestion,$understanding);
+            return self::isExecutableStoreCollection($normalized)?$normalized:null;
+        } catch (AiContractException $error) {return null;}
     }
 
     /** @return array<int,array{id:string,requirement_ids:array<int,string>,intent:array}> */
@@ -151,6 +213,44 @@ final class AiIntentGroupContract
             if ($itemPeriods!==$periods) return false;
         }
         return true;
+    }
+
+    /**
+     * A store can be both the breakdown grain and the ranked object in one
+     * question. Admit only independent, fully bound store views over one
+     * accepted period; the registered planner and Reader still verify each
+     * child before the collection publishes anything. Named selections,
+     * conditions, comparisons and mixed periods cannot borrow this path.
+     */
+    public static function isExecutableStoreCollection(array $items): bool
+    {
+        if (count($items)<2 || count($items)>self::MAX_ITEMS) return false;
+        $periods=null;$shapes=[];
+        foreach ($items as $item) {
+            $intent=is_array($item['intent']??null)?$item['intent']:null;
+            if ($intent===null || ($intent['object_kind']??null)!=='store'
+                || ($intent['object_relation']??'analysis')!=='analysis'
+                || !in_array($intent['operation']??null,['breakdown','ranking'],true)
+                || !empty($intent['needs_metric_choice']) || ($intent['object_term']??'')!==''
+                || ($intent['unresolved_fragments']??[])!==[]
+                || !in_array($intent['scope']??'unspecified',['unspecified','authorized'],true)
+                || ($intent['aggregate_condition']??null)!==null
+                || ($intent['result_reference']??null)!==null
+                || count((array)($intent['metric_codes']??[]))<1
+                || count((array)($intent['metric_codes']??[]))>4) return false;
+            $itemPeriods=$intent['periods']??null;
+            if (!is_array($itemPeriods) || count($itemPeriods)!==1) return false;
+            if ($periods!==null && $itemPeriods!==$periods) return false;
+            $periods=$itemPeriods;
+            $ranking=$intent['ranking']??null;
+            if (!is_array($ranking)) return false;
+            $shapes[$intent['operation']]=true;
+            if ($intent['operation']==='ranking') {
+                if (!in_array($ranking['direction']??null,['top','bottom','top_and_bottom'],true)
+                    || (!is_null($ranking['limit']??null) && (!is_int($ranking['limit']) || $ranking['limit']<1))) return false;
+            } elseif (($ranking['direction']??null)!=='unspecified' || ($ranking['limit']??null)!==null) return false;
+        }
+        return isset($shapes['breakdown'],$shapes['ranking']);
     }
 
     /** @return array{goal:string,status:string,requirements:array<int,array>} */

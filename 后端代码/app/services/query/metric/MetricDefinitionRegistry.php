@@ -16,7 +16,7 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v19';
+    public const VERSION = 'unified-metric-registry-v20';
     public const COVERAGE_START = '2026-08-10';
 
     /**
@@ -358,11 +358,12 @@ final class MetricDefinitionRegistry
             ]) + [
                 'condition_subjects' => ['member'],
                 'condition_unit' => 'day',
-                // 瑞昊统一服务事实目前只覆盖新系统期间，无法完整证明
-                // “曾服务但超过 N 天未到店”的全量候选集合。保留注册口径
-                // 和 Reader 落点供后续历史覆盖完成后启用，但覆盖完成前绝不
-                // 将缺失历史当作 0 或“从未服务”。
-                'readiness_reasons' => ['HISTORICAL_SERVICE_COVERAGE_INCOMPLETE'],
+                // This reader can answer only from effective service facts
+                // already present in the unified source. Its result is an
+                // observed-record answer, not proof that every older visit
+                // was imported; never present an empty match as a complete
+                // historical zero or treat a missing visit as old.
+                'observed_answer_prefix' => '现有有效服务记录中',
             ],
             'sales_quantity' => self::count('fact_sum', 'v3-sale-completed-line-quantity-v1', ['summary', 'comparison', 'trend', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_sale_fact', 'amount' => 'quantity',
@@ -538,6 +539,10 @@ final class MetricDefinitionRegistry
                 // never arbitrary field filtering.
                 'threshold_count' => $item['source']['threshold_count'] ?? null,
                 'derivation' => $item['derivation'] ?? null,
+                // A bounded source can be queried without claiming complete
+                // history. The renderer carries this source-owned qualifier
+                // into both empty and nonempty condition answers.
+                'observed_answer_prefix' => $item['observed_answer_prefix'] ?? null,
                 'readiness_reasons' => $aiReady
                     ? []
                     : array_values(array_unique(array_merge(

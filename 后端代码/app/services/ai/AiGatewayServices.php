@@ -1341,6 +1341,9 @@ final class AiGatewayServices
         $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::reconcileCurrentStoreRequirements(
             $understanding,$safe['outbound'],$privateKindsByReference
         );
+        $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::reconcileSoleStoreReference(
+            $understanding,$safe['outbound']
+        );
         // Object detail is not another ranking or metric-binding request. The
         // model owns the natural-language meaning while the server resolves a
         // stable person, store or member only from the replayed verified view.
@@ -1520,6 +1523,21 @@ final class AiGatewayServices
         // above. Keep the long-standing model-facing capability schema stable.
         foreach ($bindingSummaries as &$bindingSummary) unset($bindingSummary['query_shapes']);
         unset($bindingSummary);
+        // Both answer forms were already accepted by the language stage.
+        // Exact current-turn registry owners can bind this narrow collection
+        // without another model round; the common child compilers still
+        // validate every capability before either result is published.
+        $exactStoreItems=$sourceContext===null && ($body['output_format']??null)==='screen'
+            ?\app\services\ai\contract\AiIntentGroupContract::exactStoreViewCollection(
+                $understanding,$safe['outbound'],array_column($bindingSummaries,'metric_code')
+            ):null;
+        if ($exactStoreItems!==null) {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_store_collection_binding_compiled');
+            return $this->compileRegisteredStoreCollection(
+                $exactStoreItems,$understanding,$projection,$caps,$body,$today,
+                $safe['outbound'],$sourceContext,$checkpoint
+            );
+        }
         $reusedConditionIntent=$sourceQuery===null?null:AiIntentResultContract::inheritedConditionUpdateContextIntent(
             $understanding,$sourceQuery,(array)($sourceContext['meaning']??[])
         );
@@ -1691,7 +1709,8 @@ final class AiGatewayServices
                 $groupedItems=\app\services\ai\contract\AiIntentGroupContract::normalize(
                     ['items'=>$reply['items']],array_column($bindingSummaries,'metric_code'),[],$safe['outbound'],$understanding
                 );
-                if (!\app\services\ai\contract\AiIntentGroupContract::isExecutableRankingCollection($groupedItems)) {
+                if (!\app\services\ai\contract\AiIntentGroupContract::isExecutableRankingCollection($groupedItems)
+                    && !\app\services\ai\contract\AiIntentGroupContract::isExecutableStoreCollection($groupedItems)) {
                     throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',[
                         'stage'=>'intent_group_contract','predicate'=>'collection_plan_shape',
                     ]);
@@ -1758,7 +1777,8 @@ final class AiGatewayServices
                     $groupedItems=\app\services\ai\contract\AiIntentGroupContract::normalize(
                         ['items'=>$reply['items']],array_column($bindingSummaries,'metric_code'),[],$safe['outbound'],$understanding
                     );
-                    if (!\app\services\ai\contract\AiIntentGroupContract::isExecutableRankingCollection($groupedItems)) {
+                    if (!\app\services\ai\contract\AiIntentGroupContract::isExecutableRankingCollection($groupedItems)
+                        && !\app\services\ai\contract\AiIntentGroupContract::isExecutableStoreCollection($groupedItems)) {
                         throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',[
                             'stage'=>'intent_group_contract','predicate'=>'collection_plan_shape',
                         ]);
@@ -1813,6 +1833,13 @@ final class AiGatewayServices
             $reply['intent'],$understanding,$sourceQuery
         );
         $checkpoint();$intent=$reply['intent'];
+        if ($groupedItems!==null
+            && \app\services\ai\contract\AiIntentGroupContract::isExecutableStoreCollection($groupedItems)) {
+            return $this->compileRegisteredStoreCollection(
+                $groupedItems,$groupedUnderstanding,$projection,$caps,$body,$today,
+                $safe['outbound'],$sourceContext,$checkpoint
+            );
+        }
         // The model states only a delta. This named merger is the sole place
         // that may retain verified query meaning across turns.
         try {
@@ -2535,6 +2562,18 @@ final class AiGatewayServices
             }
             $conditionCompiler=new AiConditionSetCompiler();
             $conditionSet=$conditionCompiler->compile($intent['aggregate_condition'],$caps,$intent['operation']);
+            // A model may correctly bind every condition yet omit an explicit
+            // calendar carrier such as “本月”. Reuse only the existing local
+            // grammar's single unambiguous period in that case; otherwise
+            // the planner's neutral TODAY default would silently narrow the
+            // customer's requested range and produce a wrong count.
+            if ($intent['periods']===[] && ($projection['date_terms']??[])===[]) {
+                $literalCalendar=(new AiModelInputProjector())->project((string)($safe['outbound']['question']??''));
+                if (count((array)($literalCalendar['date_terms']??[]))===1
+                    && empty($literalCalendar['date_grouping_ambiguous'])) {
+                    $projection['date_terms']=$literalCalendar['date_terms'];
+                }
+            }
             if (($projection['date_terms']??[])===[]
                 &&$conditionCompiler->usesCurrentSnapshot($conditionSet,$caps)) {
                 $projection['date_terms']=[['code'=>'TODAY']];
@@ -2906,10 +2945,70 @@ final class AiGatewayServices
     }
 
     /**
+     * Compile a mixed store answer only after the language contract has kept
+     * its independent subjects separate. Every selected metric must have an
+     * exact current-question registry owner and every child must independently
+     * pass the ordinary workflow and capability compiler before any read.
+     * This does not infer a metric, split prose, inherit an earlier selection,
+     * or return a partial answer when one child is unsupported.
+     */
+    private function compileRegisteredStoreCollection(
+        array $items,array $understanding,array $projection,array $caps,array $body,string $today,
+        array $safeQuestion,?array $sourceContext,callable $checkpoint
+    ): array {
+        if ($sourceContext!==null || ($body['output_format']??null)!=='screen'
+            || AiIntentResultContract::hasUnboundRequirement($understanding)) {
+            throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+        }
+        $available=array_values((array)($caps['metric_codes']??[]));
+        $matches=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText(
+            (string)($safeQuestion['question']??''),$available
+        );
+        $literalCodes=array_fill_keys(array_column($matches,'metric_code'),true);
+        $plans=[];
+        foreach ($items as $item) {
+            $checkpoint();
+            $intent=$item['intent'];$shape=$intent['operation'];$codes=$intent['metric_codes'];
+            foreach ($codes as $code) if (!isset($literalCodes[$code])) {
+                throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            }
+            $subset=\app\services\ai\contract\AiIntentGroupContract::subset($understanding,$item['requirement_ids']);
+            $owned=[];
+            foreach (AiIntentUnderstandingContract::requirements($subset) as $requirement) {
+                if (!in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
+                if (!empty($requirement['values']['metric_exclusions'])) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+                foreach ((array)($requirement['values']['metric_terms']??[]) as $term) {
+                    $owner=\app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms([$term],$available);
+                    if ($owner===null || !in_array($owner,$codes,true)) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+                    $owned[$owner]=true;
+                }
+            }
+            foreach ($codes as $code) if (!isset($owned[$code])) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            $shapeMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,'store',$shape);
+            foreach ($codes as $code) if (!isset($shapeMetrics[$code])) throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            $child=$projection;
+            $child['signals']=array_merge($codes,[$shape]);
+            $child['date_terms']=$this->naturalPeriodTerms($intent['periods'],$today);
+            $child['date_grouping_ambiguous']=false;
+            $child['blocking_reason']=null;$child['unresolved_condition']=false;
+            $child['semantic_intent']['constraints']=[];
+            $compiled=(new AiWorkflowPlanner())->compile($child,[
+                'decision'=>'query','query_shape'=>$shape,'metric_codes'=>$codes,
+                'ranking'=>$intent['ranking'],'object_kind'=>'store',
+            ],$caps,'screen',$today);
+            if (($compiled['kind']??null)!=='plan') throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
+            $label=\app\services\query\metric\MetricDefinitionRegistry::overviewObjectLabel('store');
+            $plans[]=['id'=>$item['id'],'label'=>$label.($shape==='ranking'?'排行':'明细'),'plan'=>$compiled['plan']];
+        }
+        return ['kind'=>'plan','plan'=>['items'=>$plans],
+            '_context_meaning'=>['presentation_origin'=>'customer_or_verified_context']];
+    }
+
+    /**
      * Builds a bounded set of independent ranking plans from one accepted
-     * grouped understanding.  It deliberately accepts only the shape that
+     * grouped understanding. It deliberately accepts only the shape that
      * can use the existing dimension planner unchanged: fresh screen-only
-     * rankings with no selected identity or scope mutation.  Other compound
+     * rankings with no selected identity or scope mutation. Other compound
      * requests stop before any Reader call rather than returning a subset.
      */
     private function compileDimensionRankingCollection(

@@ -84,6 +84,12 @@ $memberQuery=['query_shape'=>'condition_list','metric_codes'=>['sales_collected_
     'condition_set'=>['subject'=>'member','relation'=>'all','conditions'=>[
         ['metric_code'=>'sales_collected_amount','operator'=>'gte','value'=>100000],
     ]]];
+$explicitMonth=(new \app\services\ai\model\AiModelInputProjector())->project(
+    '本月累计实际收款销售额达到1000元的客户有多少？'
+);
+csCheck(($explicitMonth['date_terms']??null)===[['code'=>'THIS_MONTH']]
+    && empty($explicitMonth['date_grouping_ambiguous']),
+    'an explicit month in a condition count cannot fall through to the neutral today default');
 $memberCapabilities=['metric_codes'=>['sales_collected_amount'],'query_shapes'=>['condition_count','condition_list'],'output_formats'=>['screen'],
     'metric_readiness'=>MetricReadViewServices::metricCapabilities(),'definition_metric_codes'=>[],'metadata_readiness'=>[],'store_ids'=>[]];
 $memberCompiled=(new AiRegisteredPlanCompiler())->compile(['query'=>$memberQuery,'output_format'=>'screen'],$memberCapabilities);
@@ -299,21 +305,24 @@ csCheck(count($productExport)===2&&$productExport[0]['store_name']==='测试产�
 $memberStateCaps=MetricReadViewServices::metricCapabilities();
 $statedStateTerms=MetricSemanticCatalog::registeredTermsInText('现在有剩余项目次数，但是超过90天没来的客户有多少？');
 csCheck(array_column($statedStateTerms,'metric_code')===['member_remaining_project_times','member_days_since_last_visit']
-    &&array_column($statedStateTerms,'ai_query_ready')===[true,false],
-    'combined natural wording retains every unambiguous registered measurement including a non-ready one');
+    &&array_column($statedStateTerms,'ai_query_ready')===[true,true],
+    'combined natural wording retains both registered measurements under observed-service scope');
+$staffConditionTerms=MetricSemanticCatalog::registeredNonOverlappingTermsInText(
+    '近30天员工业绩达到5万元且服务次数达到24次的有哪些'
+);
+csCheck(array_column($staffConditionTerms,'metric_code')===['staff_sales_yeji','staff_service_num'],
+    'employee performance uses the registered first-reading metric while service count stays independent');
 csCheck(($memberStateCaps['member_remaining_project_times']['condition_unit']??null)==='count'
     &&($memberStateCaps['member_days_since_last_visit']['condition_unit']??null)==='day'
     &&($memberStateCaps['member_days_since_last_visit']['condition_subjects']??null)===['member']
-    &&($memberStateCaps['member_days_since_last_visit']['ai_query_ready']??true)===false
-    &&($memberStateCaps['member_days_since_last_visit']['readiness_reasons']??null)===['HISTORICAL_SERVICE_COVERAGE_INCOMPLETE'],
-    'member entitlement stays available while incomplete last-visit history is explicitly unavailable');
+    &&($memberStateCaps['member_days_since_last_visit']['ai_query_ready']??false)===true
+    &&($memberStateCaps['member_days_since_last_visit']['observed_answer_prefix']??null)==='现有有效服务记录中',
+    'last-visit age is readable only as a qualified observed-record answer');
 $memberStateBinding=['subject'=>'member','relation'=>'all','result_form'=>'list','conditions'=>[
     ['metric_code'=>'member_remaining_project_times','operator'=>'gt','quantity'=>'0','unit'=>'count'],
     ['metric_code'=>'member_days_since_last_visit','operator'=>'gt','quantity'=>'90','unit'=>'day'],
 ]];
 $memberStateCompilerCaps=$memberStateCaps;
-$memberStateCompilerCaps['member_days_since_last_visit']['ai_query_ready']=true;
-$memberStateCompilerCaps['member_days_since_last_visit']['readiness_reasons']=[];
 $memberStateSet=(new AiConditionSetCompiler())->compile(
     $memberStateBinding,['metric_readiness'=>$memberStateCompilerCaps],'condition_list'
 );
@@ -335,9 +344,8 @@ $memberStateQuery=['query_shape'=>'condition_list','metric_codes'=>['member_rema
     'start_date'=>'2026-09-19','end_date'=>'2026-09-19','compare_range'=>null,'store_ids'=>[],
     'business_filters'=>['object_kind'=>'member'],'ranking'=>null,
     'aggregate_condition'=>$memberStateBinding,'condition_set'=>$memberStateSet];
-csReject(static function()use($normalizeMetricQuery,$views,$memberStateQuery): void {
-    $normalizeMetricQuery($views,$memberStateQuery);
-},'METRIC_NOT_REGISTERED');
+csCheck(($normalizeMetricQuery($views,$memberStateQuery)['condition_set']['conditions'][1]['value']??null)===90,
+    'last-visit predicate is admitted through the same validated member condition query');
 $memberStateEvidence=['query'=>$memberStateQuery,'results'=>[[
     'period'=>'current','metric_code'=>'member_remaining_project_times','storage_unit'=>'count','object_kind'=>'member',
     'condition_set'=>$memberStateSet,'count'=>1,'list_limit'=>100,'has_more'=>false,
@@ -348,8 +356,16 @@ $memberStateEvidence=['query'=>$memberStateQuery,'results'=>[[
 $memberStateAnswer=(new AiAnswerRenderer())->render($memberStateEvidence);
 csCheck(($memberStateAnswer['table']['rows'][0]['unit']??null)==='次'
     &&($memberStateAnswer['table']['rows'][1]['unit']??null)==='天'
-    &&($memberStateAnswer['table']['rows'][1]['value']??null)==='121',
+    &&($memberStateAnswer['table']['rows'][1]['value']??null)==='121'
+    &&strpos($memberStateAnswer['summary'],'现有有效服务记录中查到')===0,
     'member state evidence keeps entitlement counts and elapsed days visibly distinct');
+$memberStateEmpty=$memberStateEvidence;
+$memberStateEmpty['results'][0]['count']=0;
+$memberStateEmpty['results'][0]['rows']=[];
+$memberStateNoData=(new AiAnswerRenderer())->render($memberStateEmpty);
+csCheck(strpos($memberStateNoData['summary'],'现有有效服务记录中未查到符合条件的会员。')===0
+    &&strpos($memberStateNoData['summary'],'共有0人')===false,
+    'empty observed-service results are reported as no matching records, never a complete historical zero');
 csCheck(strpos(AiIntentUnderstandingContract::modelInstruction(),'unit":"yuan|count|day"')!==false
     &&strpos(AiIntentResultContract::modelInstruction(false),'yuan, count or day')!==false,
     'both semantic stages publish the elapsed-day unit instead of forcing a day threshold into count');

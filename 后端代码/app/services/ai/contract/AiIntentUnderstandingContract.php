@@ -100,6 +100,46 @@ final class AiIntentUnderstandingContract
     }
 
     /**
+     * A deictic store in the current turn can name the sole row of a verified
+     * prior ranking, but never the user's current login store. Transfer that
+     * already-understood reference to the signed ordinal only when the prior
+     * view proves exactly one row; named, plural and tied stores stay strict.
+     */
+    public static function reconcileSoleStoreReference(array $understanding,array $safeQuestion): array
+    {
+        $sole=$safeQuestion['prior_query']['sole_result_reference']??null;
+        if (($understanding['status']??null)!=='understood' || isset($understanding['groups'])
+            || ($safeQuestion['prior_query']['object_kind']??null)!=='store'
+            || !is_array($sole) || !in_array($sole['group']??null,['top','bottom'],true)
+            || ($sole['ordinal']??null)!==1) return $understanding;
+        $requirements=(array)($understanding['requirements']??[]);$candidate=null;
+        foreach ($requirements as $index=>$requirement) {
+            $fields=(array)($requirement['fields']??[]);
+            if (in_array('result_reference',$fields,true)) return $understanding;
+            if (!in_array('store_term',$fields,true)) continue;
+            $term=$requirement['values']['store_term']??null;
+            if ($candidate!==null || !is_string($term)
+                || !preg_match('/^(?:这|那|该)(?:个|家|间)?(?:门店|店)$/uD',$term)) return $understanding;
+            $grounded=false;
+            foreach ((array)($requirement['evidence']??[]) as $evidence) {
+                if (($evidence['message_id']??null)==='current'
+                    && mb_strpos((string)($evidence['quote']??''),$term,0,'UTF-8')!==false) $grounded=true;
+            }
+            if (!$grounded) return $understanding;
+            $candidate=$index;
+        }
+        if ($candidate===null) return $understanding;
+        $requirements[$candidate]['fields']=array_values(array_map(static function($field): string {
+            return $field==='store_term'?'result_reference':$field;
+        },$requirements[$candidate]['fields']));
+        unset($requirements[$candidate]['values']['store_term']);
+        $requirements[$candidate]['values']['result_reference']=$sole;
+        return self::normalize([
+            'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',
+        ],$safeQuestion);
+    }
+
+    /**
      * A locally masked, uniquely named position restricts the personnel
      * cohort; it is not a separate rankable answer-row kind. Normalize that
      * typed role carrier to person before capability binding, while leaving
@@ -213,7 +253,7 @@ final class AiIntentUnderstandingContract
             . 'Understand the complete phrase before choosing an analytical object. When the customer asks which day has the highest or lowest value, use object_kind=business_date, object_relation=analysis, operation=ranking and the stated ranking direction; keep the calendar range as a separate periods requirement. business_date means grouping the authorized metric by its registered business day, never selecting one date as a filter. Highest or lowest supplies only the ranking direction and never selects store or another object by itself. '
             . 'Every customer-stated business measurement belongs in fields as metric_codes and carries either values.metric_terms or values.metric_exclusions, even if it is everyday language rather than a registered indicator name; metric_codes is only the name of the later binding slot, never a request to output a code. These are nonempty arrays of exact customer terms present in an evidence excerpt. Never put a registered metric code in values. A single cumulative member-money threshold may retain the legacy aggregate_condition {"subject":"member","aggregation":"period_total","operator":"gte|gt|lte|lt|eq","amount_cents":positive-integer} with operation=threshold_count. For one or more conditions over a candidate object set, preserve aggregate_condition as {"subject":"person|member|store|order|sale_line|card|project|product","relation":"all|any","result_form":"count|list","conditions":[{"metric_term":"exact customer measurement","operator":"gte|gt|lte|lt|eq","quantity":"normalized nonnegative decimal","unit":"yuan|count|day"}]} and set operation to condition_count or condition_list to match result_form. Every generic condition item has exactly metric_term, operator, quantity and unit. quantity and unit are always JSON strings. Convert Chinese amount magnitude into yuan: “5万元” is quantity "50000" and unit "yuan"; “24次” is quantity "24" and unit "count"; “超过90天没来” keeps quantity "90" and unit "day". A current positive state such as “有剩余项目次数” is a condition with operator gt, quantity "0" and unit "count"; do not invent a period total for it. Logical relation is part of the requested business meaning, not a default: relation all means every condition must hold (for example, “并且”), while relation any means at least one condition may hold (for example, “或者”). Never default a multi-condition request to all, and never replace an explicit alternative with a conjunction. For example, “销售业绩达到5万元并且劳动业绩达到5万元的员工有几个” uses subject person, relation all, result_form count and two condition items with metric_term “销售业绩” and “劳动业绩”, operator gte, quantity "50000", unit "yuan"; the same request joined by “或者” uses relation any. Preserve every condition in customer order; do not collapse AND/OR, invent a metric, or turn a count request into a list. quantity is a normalized decimal string such as "50000" or "24", never a result. When prior_query contains a verified generic aggregate_condition and the current turn clearly changes exactly one existing predicate while leaving every other condition, object, relation, period and result form unchanged, use only condition_update with values.condition_update={"target_term":"exact current words identifying that prior condition","operator":"gte|gt|lte|lt|eq","quantity":"normalized nonnegative decimal","unit":"yuan|count|day"}. Do not also emit metric_codes, aggregate_condition, object_kind or operation for this one-field delta. condition_update is never a standalone query, never adds or removes a condition, and must not be used when the target could denote more than one prior predicate. If the current turn changes only time, object, range or response form and names no measurement, do not add a metric_codes field merely because a verified prior query has one; retain that prior meaning through context only. A time, object or response-form requirement does not replace the separate measurement requirement. object_kind is one of store, business_date, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization, order, sale_line, card, unknown. object_relation is analysis when that kind is what the customer wants compared, grouped or listed, and selection only when the customer identifies a particular object whose records should narrow the data. An analytical object is never itself a data-range restriction. operation is one of summary, breakdown, trend, ranking, comparison, threshold_count, condition_count, condition_list, definition, unknown. Use breakdown when the customer asks for each, every, individual or separately listed object value without requesting an order, winner or threshold; “各个门店业绩” and “每位员工业绩” are breakdowns, not summaries and not rankings. Use ranking when the requested answer identifies leading, trailing or ordered comparable objects; the fact that a ranking compares peer values does not make it operation=comparison. Use comparison only when the customer asks to contrast two stated business sides such as periods, objects or measurements. scope is one of current_store, authorized, unspecified. ranking is exactly {"direction":"top|bottom|top_and_bottom|unspecified","limit":null}. Set limit to an integer from 1 to 999 when the customer asks for a specific count or semantically asks for one winner, leader, best or worst object; leave it null only for an open-ended plural ranking with no count. A breakdown always keeps ranking direction=unspecified and limit=null. result_reference is exactly {"group":"top|bottom","ordinal":positive-integer} only when the customer explicitly refers to a displayed rank result; it identifies a position in the previous answer, never a name, ID or value. periods is an array of at most two objects, each exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":1,"end_offset_days":0}, or {"kind":"month_offset","offset_months":0}; numeric examples illustrate JSON types, not defaults. A relative-day count is a positive integer, and a month offset is an integer; preserve the customer meaning without imposing execution coverage limits here. A comparison that expresses both sides in the customer wording must preserve those two periods in stated order; do not leave either side for a date form. Omit a values key and its field when that meaning was not supplied, except a genuinely inherited meaning must remain explicit. '
             . 'One explicitly singular highest or lowest object has ranking limit=1; both singular extremes share one measurement with direction=top_and_bottom and limit=1. Tied objects are resolved by the registered query, not by asking for a count. '
-            . 'When the customer coordinates two or more independently named measurements, preserve every measurement separately, either as separate requirements or as separate metric_terms in one requirement; never collapse the conjunction into one vague measurement or turn it into a choice between terms. Interpret a distributive word from its grammatical target, not from a nearby noun: when “separately” applies to a coordinated list of measurements, return those measurements in one summary; use breakdown only when the customer distributes the answer across each object, such as each/every store or each employee. A singular object label followed by several measurements does not by itself request one row per object. Prefer copying each metric_term character-for-character from the de-identified customer message. Do not declare metric_codes on a requirement that describes only the analytical object. In a natural construction such as “每位员工销售业绩多少”, “员工” is the person object, “销售业绩” is the exact measurement term, and “每位” requests breakdown; metric_terms must contain “销售业绩”, never an invented contraction such as “员工业绩”. Apply the same grammatical separation to any registered object and measurement rather than memorizing this example. For a generic aggregate condition only, you may instead use one exact registered business-language alias that means the same measurement as an exact registered phrase in the evidence; never invent a paraphrase or insert an object qualifier. '
+            . 'When the customer coordinates two or more independently named measurements, preserve every measurement separately, either as separate requirements or as separate metric_terms in one requirement; never collapse the conjunction into one vague measurement or turn it into a choice between terms. Interpret a distributive word from its grammatical target, not from a nearby noun: when “separately” applies to a coordinated list of measurements, return those measurements in one summary; use breakdown only when the customer distributes the answer across each object, such as each/every store or each employee. A singular object label followed by several measurements does not by itself request one row per object. If one sentence asks for both a per-object value list and a different metric’s highest/lowest object, these are independent answer forms even when both concern the same object kind: put the breakdown metrics and their operation in one group and the ranked metric, direction and operation in another, sharing only the stated period. Do not let the ranking operation overwrite the breakdown operation, or group a plain multi-metric summary by metric. Prefer copying each metric_term character-for-character from the de-identified customer message. Do not declare metric_codes on a requirement that describes only the analytical object. In a natural construction such as “每位员工销售业绩多少”, “员工” is the person object, “销售业绩” is the exact measurement term, and “每位” requests breakdown; metric_terms must contain “销售业绩”, never an invented contraction such as “员工业绩”. Apply the same grammatical separation to any registered object and measurement rather than memorizing this example. For a generic aggregate condition only, you may instead use one exact registered business-language alias that means the same measurement as an exact registered phrase in the evidence; never invent a paraphrase or insert an object qualifier. '
             . 'A metric term is the measured business fact, not every noun or modifier in the sentence. Never mark an analytical object noun, date expression, question word, or ranking direction such as highest, lowest, most, least, best or worst as metric_codes. For “which project has the most sales records and which has the least”, sales records is the one measurement, project is the analytical object, and most plus least are the two ranking directions; do not create extra measurement requirements for project, most or least. '
             . 'For object_relation, analysis also covers inspecting, summarizing or evaluating a stated object, not only comparing, grouping or listing it. A broad evaluation or overview of a stated object must carry that object_kind with object_relation=analysis; a time condition never replaces or erases it. object_kind may be store, business_date, person, position, guide, sales_manager, member, product, project, category, partner, inventory, course, organization, order, sale_line, card or unknown. '
             . 'Object-detail continuations must not be forced into a new analytical ranking or a result-reference binding. For example, after one verified person is shown, “详情呢”, “具体看看”, “展开说说” or “他怎么样” is one requirement with fields ["object_detail"] and values {"object_detail":{"view":"summary","target":"single","ordinal":null}}. After one verified store, the same semantic form applies. “第二个会员的详情” uses view=summary, target=single and ordinal=2. “这些会员的权益” uses view=rights, target=set and ordinal=null. “这个会员的权益明细给我看一下” may also carry object_kind=member and object_relation=analysis, but still uses object_detail. A request about every or all objects of a kind is not object_detail merely because it also says details, expand or be specific: when no concrete prior object or verified result set is selected, retain the plural object as object_relation=analysis and use operation=breakdown. If that continuation changes only the analytical object or answer grain and states no concrete business measurement, do not copy a previous metric into a new metric_codes requirement and do not manufacture a metric term from a broad word such as operating details; verified context and the registered capability policy handle that boundary. These examples explain semantic structure rather than a phrase list: infer the customer intent from the complete conversation, copy evidence from the actual current message and never invent an identity. '
@@ -480,7 +520,7 @@ final class AiIntentUnderstandingContract
                 // their ownership, recover that metadata instead of asking a
                 // model to restate the same analytical request merely because
                 // an array carrier was malformed.
-                $groups=self::derivedIndependentGroups($normalized);
+                $groups=self::derivedIndependentGroups($normalized)??self::derivedStoreViewGroups($normalized);
                 // A non-collection request needs no group carrier at all.
                 // Providers occasionally attach a one-item or stale prior
                 // group to a short continuation; rejecting the independently
@@ -489,7 +529,7 @@ final class AiIntentUnderstandingContract
                 // multi-result request receives derived groups above.
             }
         } else {
-            $groups=self::derivedIndependentGroups($normalized);
+            $groups=self::derivedIndependentGroups($normalized)??self::derivedStoreViewGroups($normalized);
         }
         if ($groups!==null) $out['groups']=$groups;
         return $out;
@@ -853,6 +893,44 @@ final class AiIntentUnderstandingContract
             $index++;
         }
         return $out;
+    }
+
+    /**
+     * Recover omitted grouping only when the model already accepted two
+     * different store result forms over the same explicit period. The grouped
+     * breakdown and ranking still pass independent metric binding and Reader
+     * capability checks; this never divides a condition or guesses a metric.
+     */
+    private static function derivedStoreViewGroups(array $requirements): ?array
+    {
+        if (count($requirements)<2 || count($requirements)>8) return null;
+        $byOperation=[];$period=null;
+        foreach ($requirements as $requirement) {
+            if (!is_array($requirement) || !is_string($requirement['id']??null)) return null;
+            $values=(array)($requirement['values']??[]);
+            $operation=$values['operation']??null;
+            if (!in_array($operation,['breakdown','ranking'],true)
+                || ($values['object_kind']??null)!=='store'
+                || ($values['object_relation']??'analysis')!=='analysis'
+                || !is_array($values['periods']??null) || count($values['periods'])!==1
+                || !is_array($values['metric_terms']??null) || $values['metric_terms']===[]
+                || isset($values['aggregate_condition']) || isset($values['store_term'])
+                || isset($values['result_reference'])
+                || isset($values['metric_exclusions'])) return null;
+            if ($period!==null && $period!==$values['periods']) return null;
+            $period=$values['periods'];
+            $ranking=$values['ranking']??null;
+            if ($operation==='ranking' && (!is_array($ranking)
+                || !in_array($ranking['direction']??null,['top','bottom','top_and_bottom'],true))) return null;
+            if ($operation==='breakdown' && is_array($ranking)
+                && ($ranking['direction']??'unspecified')!=='unspecified') return null;
+            $byOperation[$operation][]=$requirement['id'];
+        }
+        if (count($byOperation)!==2 || !isset($byOperation['breakdown'],$byOperation['ranking'])) return null;
+        return [
+            ['id'=>'q1','requirement_ids'=>$byOperation['breakdown']],
+            ['id'=>'q2','requirement_ids'=>$byOperation['ranking']],
+        ];
     }
 
     /**

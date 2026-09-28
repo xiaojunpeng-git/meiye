@@ -22,8 +22,8 @@ final class AiAnswerRenderer
         $conditionSummary = null; $conditionListHasMore = false; $conditionListLimit = null; $conditionObjectLabel = null;
         $breakdownHasMore=false;$breakdownObjectLabel=null;$breakdownColumns=[];
         $breakdownEvidence=[];$breakdownHiddenZeroCount=0;
+        $registered = MetricReadViewServices::metricCapabilities();
         foreach ($view['results'] as $row) {
-            $registered = MetricReadViewServices::metricCapabilities();
             if (!isset($registered[$row['metric_code'] ?? '']) || !$registered[$row['metric_code']]['ai_query_ready'] || !in_array($row['period'] ?? '', ['current', 'comparison'], true)) {
                 throw new RuntimeException('AI_EVIDENCE_INVALID');
             }
@@ -38,7 +38,7 @@ final class AiAnswerRenderer
                 $subject=$set['subject'];
                 if ($storageUnit!=='count'||($row['object_kind']??null)!==$subject||!self::same($row['condition_set']??null,$set)
                     ||!is_int($row['count']??null)||$row['count']<0||!is_array($range)) throw new RuntimeException('AI_EVIDENCE_INVALID');
-                $conditionSummary=$this->conditionSummary($row['count'],$set);
+                $conditionSummary=$this->conditionSummary($row['count'],$set,$registered);
                 $conditionObjectLabel=$this->conditionObjectLabel($subject,$row);
                 if ($shape==='condition_list') {
                     if (!is_array($row['rows']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');
@@ -337,7 +337,7 @@ final class AiAnswerRenderer
         return $set;
     }
 
-    private function conditionSummary(int $count,array $set): string
+    private function conditionSummary(int $count,array $set,array $registered): string
     {
         $relation=$set['relation']==='all'?'全部':'任一';
         $labels=['member'=>['客户','人'],'person'=>['人员','人'],'store'=>['门店','家'],
@@ -345,6 +345,23 @@ final class AiAnswerRenderer
             'project'=>['项目','个'],'product'=>['产品','个']];
         $fallback=MetricDefinitionRegistry::overviewObjectLabel((string)($set['subject']??''))??'对象';
         [$label,$unit]=$labels[$set['subject']??'']??[$fallback,'个'];
+        // An observed-only source can prove matches in its existing facts,
+        // but an empty result must not be presented as a complete historical
+        // zero. This qualifier comes from the registered metric, never from
+        // question text or a client-supplied display option.
+        $prefixes=[];
+        foreach ($set['conditions'] as $condition) {
+            $prefix=$registered[$condition['metric_code']]['observed_answer_prefix']??null;
+            if (is_string($prefix) && $prefix!=='') $prefixes[$prefix]=true;
+        }
+        if ($prefixes!==[]) {
+            $prefix=count($prefixes)===1?array_key_first($prefixes):'现有记录中';
+            $base='符合'.$relation.count($set['conditions']).'项条件的'.$label;
+            // 会员未命中时用业务方确认的简短说法；条件明细仍在结果表中，
+            // 不把现有记录之外的历史解释成“0 人”。
+            if ($count===0 && $set['subject']==='member') return $prefix.'未查到符合条件的会员。';
+            return $count===0?$prefix.'未查到'.$base.'。':$prefix.'查到'.$base.$count.$unit.'。';
+        }
         return '符合'.$relation.count($set['conditions']).'项条件的'.$label.'共有'.$count.$unit.'。';
     }
 
