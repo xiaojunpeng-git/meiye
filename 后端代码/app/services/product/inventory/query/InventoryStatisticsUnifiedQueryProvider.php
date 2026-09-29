@@ -53,7 +53,7 @@ abstract class InventoryStatisticsUnifiedQueryProvider extends InventoryOperatio
         return $this->boundedStatistics($rows);
     }
 
-    /** 只有 AND 周期控件能限定聚合前日期；其他日期谓词会改变统计口径，必须拒绝。 */
+    /** 周期控件的起止日会规范成 >= 和 <= 两条 AND 条件；先下推事实范围，其他日期谓词不能在聚合后重解释。 */
     private function movementPeriod(array $payload, string $cutoff): array
     {
         $from = '2000-01-01';
@@ -68,11 +68,17 @@ abstract class InventoryStatisticsUnifiedQueryProvider extends InventoryOperatio
         foreach ((array)($payload['topFilterConditions'] ?? []) as $filter) {
             if ((string)($filter['field_key'] ?? '') !== 'business_date') continue;
             $value = $filter['value'] ?? null;
-            if ((string)($filter['operator'] ?? '') !== 'between' || !is_array($value) || count($value) !== 2) {
+            $operator = (string)($filter['operator'] ?? '');
+            if ($operator === 'between' && is_array($value) && count($value) === 2) {
+                $from = max($from, (string)$value[0]);
+                $to = min($to, (string)$value[1]);
+            } elseif ($operator === 'greater_or_equal' && is_string($value)) {
+                $from = max($from, $value);
+            } elseif ($operator === 'less_or_equal' && is_string($value)) {
+                $to = min($to, $value);
+            } else {
                 throw new UnifiedQueryException('UNIFIED_QUERY_STATISTICS_PERIOD_INVALID', '请使用业务日期周期筛选库存统计。', []);
             }
-            $from = max($from, (string)$value[0]);
-            $to = min($to, (string)$value[1]);
         }
         return [$from, $to];
     }
