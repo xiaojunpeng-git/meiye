@@ -98,6 +98,8 @@ assert.match(modal, /inventory-editor__header-actions[\s\S]*pageKey === 'count' 
 assert.match(modal, /!isDetail && !isImport && pageKey !== 'count'/, '盘点不再在底部重复显示提交按钮')
 assert.match(modal, /盘点明细/, '盘点详情展示逐商品盘点明细')
 assert.match(modal, /账面库存.*实盘库存.*库存盈亏/s, '盘点明细展示账面、实盘与盈亏数量')
+assert.match(modal, /<th>盘盈单价<\/th><th>金额<\/th>/, '盘点明细包含独立的金额列')
+assert.match(modal, /countAmount\(line\.change_amount_cents\)/, '盘点金额显示服务端流水汇总值而非前端重算')
 assert.match(app, /kind === 'count-detail'[\s\S]*?openCountDetail\(row\)/, '门店与平台盘点查看均读取受权限保护的详情接口')
 assert.match(app, /inventoryApi\.countDetail\(row\.id\)/, '门店盘点查看使用当前门店详情接口')
 assert.match(app, /CONFIRMED: '已确认'/, '盘点状态不直接显示英文枚举值')

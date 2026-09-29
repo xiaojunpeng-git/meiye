@@ -14,8 +14,11 @@ cassert('count gain requires and creates an auditable new batch', (int)$batches[
 $countQuery=new InventoryStockCountQueryServices();
 $gainDetail=$countQuery->detail(99008,990008,(int)$gain['count_document_id'],true);
 $hiddenCostDetail=$countQuery->detail(99008,990008,(int)$gain['count_document_id'],false);
+$lossDetail=$countQuery->detail(99008,990008,(int)$loss['count_document_id'],true);
 cassert('store count detail reads immutable quantities and batch cost through current store scope', $gainDetail['document']['order_sn']===$gain['count_no'] && $gainDetail['document']['detail_count']===1 && $gainDetail['lines'][0]['product_name']==='TEST-盘点精华' && $gainDetail['lines'][0]['book_quantity']==='6' && $gainDetail['lines'][0]['counted_quantity']==='8' && $gainDetail['lines'][0]['difference_quantity']==='+2' && (int)$gainDetail['lines'][0]['surplus_unit_cost_cents']===9950);
-cassert('store count detail hides cost without permission and rejects another store', $hiddenCostDetail['lines'][0]['surplus_unit_cost_cents']===null && reason(static function()use($countQuery,$gain){$countQuery->detail(99009,990008,(int)$gain['count_document_id']);})==='inventory_stock_count_query_scope_denied');
+// 盘亏取 FEFO 实际批次流水成本，盘盈取新批次入账成本，权限不足时两类成本字段都不可泄露。
+cassert('count detail amount follows settled gain and loss facts', (int)$gainDetail['lines'][0]['change_amount_cents']===19900 && (int)$lossDetail['lines'][0]['change_amount_cents']===-23250);
+cassert('store count detail hides cost without permission and rejects another store', $hiddenCostDetail['lines'][0]['surplus_unit_cost_cents']===null && $hiddenCostDetail['lines'][0]['change_amount_cents']===null && reason(static function()use($countQuery,$gain){$countQuery->detail(99009,990008,(int)$gain['count_document_id']);})==='inventory_stock_count_query_scope_denied');
 cassert('count idempotency returns the original confirmed document', $lossReplay['idempotent']&&(int)$loss['count_document_id']===(int)$lossReplay['count_document_id']);
 cassert('surplus without complete batch details rejects without a document', reason(static function()use($count){$count->confirm(99008,990008,cmd('TEST-count-missing-20260730',line('9')));})==='inventory_stock_count_surplus_batch_required'&&(int)Db::name('inventory_stock_count_document')->where('idempotency_key','TEST-count-missing-20260730')->count()===0);
 // 加载全部商品的未变动行不得生成空盘点单或零库存主体；大量真实盘盈仍须一单原子入账。

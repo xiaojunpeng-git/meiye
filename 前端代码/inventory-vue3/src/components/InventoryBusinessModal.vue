@@ -194,6 +194,15 @@ function detailStatus(detail, fallback = '-') {
   return inventoryStatusLabel(detail?.status_name || detail?.document_status, fallback)
 }
 
+// 盘点金额由服务端已结算库存流水返回分值；这里只按统一页面口径取整展示，不能在浏览器用数量重算。
+function countAmount(cents) {
+  if (cents === null || cents === undefined || cents === '') return '-'
+  const value = Number(cents)
+  if (!Number.isFinite(value)) return '-'
+  const yuan = Math.sign(value) * Math.round(Math.abs(value) / 100)
+  return `${yuan < 0 ? '-' : ''}¥${Math.abs(yuan).toLocaleString('zh-CN')}`
+}
+
 const productRows = computed(() => {
   if (['inbound', 'outbound'].includes(props.pageKey)) {
     return selectedRows.value.map((row) => props.pageKey === 'inbound'
@@ -1018,7 +1027,7 @@ async function submitWarehouse() {
             </template>
             <template v-else-if="pageKey === 'count' && detail?.document">
               <div class="detail-meta"><span>盘点单号：<b>{{ detail.document.order_sn || '-' }}</b></span><span>库存仓：{{ detail.document.location_name || scopeName }}</span><span>盘点日期：{{ detail.document.count_date || '-' }}</span><span>盘点状态：{{ detailStatus(detail.document) }}</span></div>
-              <section class="line-section"><header><div><h3>盘点明细</h3><p>{{ detail.document.remark || '盘点数据已确认，明细仅供查看。' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>账面库存</th><th>实盘库存</th><th>库存盈亏</th><th>库存单位</th><th>盘盈批次号</th><th>盘盈单价</th><th>生产日期</th><th>到期日</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="11" class="modal-empty">该盘点单没有商品明细</td></tr><tr v-for="line in detail.lines || []" :key="line.id"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.book_quantity }}</td><td>{{ line.counted_quantity }}</td><td>{{ line.difference_quantity }}</td><td>{{ line.stock_unit || '-' }}</td><td>{{ line.surplus_batch_no || '-' }}</td><td>{{ line.surplus_unit_cost_cents === null || line.surplus_unit_cost_cents === undefined ? '-' : `¥${(Number(line.surplus_unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.surplus_manufactured_date || '-' }}</td><td>{{ line.surplus_expire_date || '-' }}</td></tr></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>盘点明细</h3><p>{{ detail.document.remark || '盘点数据已确认，明细仅供查看。' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>账面库存</th><th>实盘库存</th><th>库存盈亏</th><th>库存单位</th><th>盘盈批次号</th><th>盘盈单价</th><th>金额</th><th>生产日期</th><th>到期日</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="12" class="modal-empty">该盘点单没有商品明细</td></tr><tr v-for="line in detail.lines || []" :key="line.id"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.book_quantity }}</td><td>{{ line.counted_quantity }}</td><td>{{ line.difference_quantity }}</td><td>{{ line.stock_unit || '-' }}</td><td>{{ line.surplus_batch_no || '-' }}</td><td>{{ line.surplus_unit_cost_cents === null || line.surplus_unit_cost_cents === undefined ? '-' : `¥${(Number(line.surplus_unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ countAmount(line.change_amount_cents) }}</td><td>{{ line.surplus_manufactured_date || '-' }}</td><td>{{ line.surplus_expire_date || '-' }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'usage' && detail?.document">
               <div class="detail-meta"><span>院装单号：<b>{{ detail.document.usage_no }}</b></span><span>关联项目：{{ detail.document.project_name_snapshot }}</span><span>业务日期：{{ detail.document.business_date }}</span><span>类型：{{ detail.document.operation_type === 'RETURN' ? '退回' : '领用' }}</span></div>

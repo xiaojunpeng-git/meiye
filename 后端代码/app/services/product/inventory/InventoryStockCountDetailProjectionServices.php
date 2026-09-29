@@ -21,6 +21,8 @@ final class InventoryStockCountDetailProjectionServices
             ->where('l.document_id', (int)$document['id'])
             ->field('l.id,l.line_no,l.product_id,l.sku_id,l.sku_unique,l.quantity_scale,l.book_quantity_units,l.counted_quantity_units,l.difference_quantity_units,l.surplus_batch_no,l.surplus_unit_cost_cents,l.surplus_manufactured_date,l.surplus_expire_date,p.store_name product_name,p.code product_code,a.suk sku_name,a.bar_code barcode,s.stock_unit')
             ->order('l.line_no asc')->select()->toArray();
+        // 金额必须取已结算批次流水；盘亏可能跨多个成本批次，不能用实盘差额乘盘盈单价推算。
+        $amountByLine = $canViewCost ? $this->settledAmountByLine($document, $location) : [];
 
         foreach ($lines as &$line) {
             $scale = (int)$line['quantity_scale'];
@@ -30,6 +32,8 @@ final class InventoryStockCountDetailProjectionServices
             $line['product_name'] = (string)($line['product_name'] ?: '商品已停用');
             $line['sku_name'] = (string)($line['sku_name'] ?: '默认规格');
             $line['stock_unit'] = (string)($line['stock_unit'] ?: '');
+            $line['change_amount_cents'] = $canViewCost && array_key_exists((int)$line['line_no'], $amountByLine)
+                ? $amountByLine[(int)$line['line_no']] : null;
             // 只有盘盈明细存在新批次；无成本权限时保留批次追溯但隐藏单价。
             if ((int)$line['difference_quantity_units'] <= 0) {
                 $line['surplus_batch_no'] = '';
@@ -58,6 +62,32 @@ final class InventoryStockCountDetailProjectionServices
             ],
             'lines' => $lines,
         ];
+    }
+
+    /** 只聚合当前已授权单据的已结算盘点流水；来源明细号的首段对应原始盘点行号。 */
+    private function settledAmountByLine(array $document, array $location): array
+    {
+        $facts = Db::name('inventory_batch_movement_fact')
+            ->where('tenant_id', (string)$document['tenant_id'])
+            ->where('store_id', (int)$document['store_id'])
+            ->where('location_id', (int)$location['id'])
+            ->where('fact_status', 'SETTLED')
+            ->whereIn('source_type', ['stock_count_gain', 'stock_count_loss'])
+            ->where('source_id', (string)$document['count_no'])
+            ->field('source_detail_id,direction,cost_amount_cents')->select()->toArray();
+        $amountByLine = [];
+        foreach ($facts as $fact) {
+            $sourceParts = explode(':', (string)$fact['source_detail_id'], 2);
+            if (!ctype_digit($sourceParts[0]) || (isset($sourceParts[1]) && !ctype_digit($sourceParts[1]))) {
+                throw new \RuntimeException('inventory_stock_count_fact_line_invalid');
+            }
+            $lineNo = (int)$sourceParts[0];
+            $direction = (int)$fact['direction'];
+            if ($direction !== 1 && $direction !== -1) throw new \RuntimeException('inventory_stock_count_fact_direction_invalid');
+            $amountByLine[$lineNo] = ($amountByLine[$lineNo] ?? 0)
+                + $direction * (int)$fact['cost_amount_cents'];
+        }
+        return $amountByLine;
     }
 
     private function quantity(int $units, int $scale): string
