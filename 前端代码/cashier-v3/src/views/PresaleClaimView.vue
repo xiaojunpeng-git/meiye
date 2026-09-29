@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import FileClock from '@lucide/vue/dist/esm/icons/file-clock.mjs'
 import PackageCheck from '@lucide/vue/dist/esm/icons/package-check.mjs'
 import X from '@lucide/vue/dist/esm/icons/x.mjs'
+import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
+import '@mohe/unified-query-vue3/styles.css'
 import {
   createStorePresaleClaim,
   listStorePresaleClaims,
@@ -18,8 +20,8 @@ const loading = ref(false)
 const keyword = ref('')
 const status = ref('AVAILABLE')
 const sourceKind = ref('PRESALE')
-const salesStartDate = ref('')
-const salesEndDate = ref('')
+// 可领用余额必须跨销售日期完整展示；仅查询非可领用记录时按销售日筛选，默认当天。
+const salesDateRange = ref({ min: today(), max: today() })
 const feedback = ref('')
 const selectedLine = ref(null)
 const detail = ref({ claimable: null, claims: [] })
@@ -83,7 +85,8 @@ async function load(nextPage = page.value) {
     const result = await listStorePresaleClaims({
       page: Math.max(1, Number(nextPage) || 1), limit: pageSize,
       keyword: keyword.value.trim(), status: status.value, source_kind: sourceKind.value,
-      start_date: salesStartDate.value, end_date: salesEndDate.value
+      start_date: shouldShowSalesDateFilter.value ? salesDateRange.value.min : '',
+      end_date: shouldShowSalesDateFilter.value ? salesDateRange.value.max : ''
     })
     rows.value = Array.isArray(result?.list) ? result.list : []
     total.value = Math.max(0, Number(result?.count || 0))
@@ -96,20 +99,23 @@ async function load(nextPage = page.value) {
 }
 
 function query() { load(1) }
+/** 确认后的周期用于服务端销售日筛选，清空周期则恢复不限日期。 */
+function applySalesDateRange(value) {
+  salesDateRange.value = { min: String(value?.min || ''), max: String(value?.max || '') }
+  load(1)
+}
 function switchSource(nextSource) {
   if (!['PRESALE', 'GIFT'].includes(nextSource) || sourceKind.value === nextSource) return
   sourceKind.value = nextSource
   status.value = 'AVAILABLE'
-  salesStartDate.value = ''
-  salesEndDate.value = ''
+  salesDateRange.value = { min: today(), max: today() }
   load(1)
 }
 function reset() {
   keyword.value = ''
   status.value = 'AVAILABLE'
   sourceKind.value = 'PRESALE'
-  salesStartDate.value = ''
-  salesEndDate.value = ''
+  salesDateRange.value = { min: today(), max: today() }
   load(1)
 }
 
@@ -235,16 +241,9 @@ onMounted(() => load(1))
           <option v-for="option in statusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </label>
-      <template v-if="shouldShowSalesDateFilter">
-        <label class="presale-claim-filter__date">
-          <span>销售日期 从</span>
-          <input v-model="salesStartDate" type="date" />
-        </label>
-        <label class="presale-claim-filter__date">
-          <span>至</span>
-          <input v-model="salesEndDate" type="date" />
-        </label>
-      </template>
+      <div v-if="shouldShowSalesDateFilter" class="presale-claim-filter__period">
+        <UnifiedQueryDateRange :model-value="salesDateRange" label="销售日期周期" @change="applySalesDateRange" />
+      </div>
       <button class="button button--primary" type="submit">查询</button>
       <button class="button button--secondary" type="button" @click="reset">重置</button>
     </form>
@@ -331,5 +330,7 @@ onMounted(() => load(1))
 
 <style scoped>
 .presale-claim-view { min-height: 100%; padding: 24px; background: #f6f8fa; color: #17212b; }
+/* 已领用/已关闭记录按销售周期查询；可领用记录不按销售日缩小范围。 */
+.presale-claim-filter__period { width: min(290px, 100%); }
 .presale-claim-view__header { display: flex; justify-content: space-between; align-items: end; margin-bottom: 18px; }.presale-claim-view__eyebrow, .presale-modal header p { margin: 0 0 4px; color: #6b7785; font-size: 12px; }.presale-claim-view h1, .presale-modal h2 { margin: 0; font-size: 22px; font-weight: 650; }.presale-claim-filter { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }.presale-claim-source-switch { position: relative; display: grid; grid-template-columns: repeat(2, 72px); isolation: isolate; min-height: 36px; padding: 2px; border: 1px solid #d7dee5; border-radius: 4px; background: #fff; }.presale-claim-source-switch__thumb { position: absolute; z-index: -1; inset: 2px auto 2px 2px; width: 72px; border-radius: 3px; background: #e8f3ee; transition: transform .18s ease; }.presale-claim-source-switch__thumb.is-gift { transform: translateX(72px); }.presale-claim-source-switch button { min-height: 30px; border: 0; border-radius: 3px; background: transparent; color: #687481; cursor: pointer; }.presale-claim-source-switch button.is-active { color: #155d50; font-weight: 600; }.presale-claim-filter input, .presale-claim-filter select, .presale-modal__field input, .presale-modal__field textarea { box-sizing: border-box; width: 100%; min-height: 36px; border: 1px solid #d7dee5; border-radius: 4px; padding: 7px 10px; background: #fff; color: inherit; }.presale-claim-filter input { width: 260px; }.presale-claim-filter select { width: 130px; }.presale-claim-filter__date { display: flex; align-items: center; gap: 6px; color: #53606d; font-size: 12px; white-space: nowrap; }.presale-claim-filter__date input { width: 142px; }.presale-feedback { margin: 0 0 12px; padding: 10px 12px; border-left: 3px solid #167d68; background: #edf8f4; color: #155d50; }.presale-claim-table-wrap { overflow: auto; background: #fff; border: 1px solid #e1e7ec; }.presale-claim-table, .presale-detail-table { width: 100%; min-width: 1000px; border-collapse: collapse; font-size: 13px; }.presale-claim-table th, .presale-claim-table td, .presale-detail-table th, .presale-detail-table td { padding: 12px; border-bottom: 1px solid #edf0f2; text-align: left; vertical-align: middle; }.presale-claim-table th, .presale-detail-table th { background: #f7f9fa; color: #53606d; font-weight: 600; white-space: nowrap; }.presale-claim-table small { display: block; margin-top: 3px; color: #768391; }.align-right { text-align: right !important; }.presale-claim-table__actions { white-space: nowrap; }.button--text { padding: 0; min-height: auto; border: 0; background: transparent; color: #167d68; cursor: pointer; }.button--text + .button--text { margin-left: 12px; }.button--danger { border-color: #c83c3c; background: #c83c3c; color: #fff; }.button--text.button--danger { color: #c83c3c; background: transparent; }.muted { color: #9aa5af; }.presale-status { display: inline-block; padding: 3px 7px; border-radius: 3px; background: #eff3f5; color: #687481; white-space: nowrap; }.presale-status--available { background: #e9f7f0; color: #167d68; }.presale-status--fully_claimed { background: #eaf2fb; color: #276ba7; }.presale-status--closed_after_sale_reversal { background: #f8eded; color: #9d3a3a; }.presale-pagination { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 12px; color: #65727e; }.presale-empty { padding: 32px !important; text-align: center !important; color: #7d8994; }.presale-modal-backdrop { position: fixed; z-index: 2000; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(23, 33, 43, .46); }.presale-modal-backdrop--alert { z-index: 2100; }.presale-modal { width: min(440px, 100%); max-height: calc(100vh - 48px); overflow: auto; padding: 20px; border-radius: 6px; background: #fff; box-shadow: 0 18px 56px rgba(10, 20, 30, .28); }.presale-modal--wide { width: min(1040px, 100%); }.presale-modal--alert { width: min(380px, 100%); }.presale-modal header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 20px; }.icon-button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #5a6875; cursor: pointer; }.icon-button:hover { background: #eef2f4; }.presale-modal__summary { display: grid; grid-template-columns: 84px 1fr; gap: 8px 12px; margin: 0 0 18px; }.presale-modal__summary dt { color: #71808d; }.presale-modal__summary dd { margin: 0; }.presale-modal__field { display: grid; gap: 7px; margin-bottom: 16px; color: #46535f; font-size: 13px; }.presale-modal footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }.presale-detail-summary, .presale-void-note, .presale-alert-message { margin: 0 0 14px; padding: 10px; background: #f4f7f8; color: #475561; font-size: 13px; }.presale-alert-message { border-left: 3px solid #c83c3c; background: #fff4f4; color: #8a3030; }.presale-loading { display: grid; min-height: 160px; place-content: center; gap: 10px; color: #71808d; text-align: center; }@media (max-width: 760px) { .presale-claim-view { padding: 16px; }.presale-claim-filter { align-items: stretch; flex-wrap: wrap; }.presale-claim-source-switch { width: 148px; }.presale-claim-filter input { width: 100%; }.presale-claim-filter label:first-child { width: 100%; }.presale-claim-filter__date { flex: 1 1 100%; }.presale-claim-filter__date input { width: auto; flex: 1; }.presale-modal-backdrop { padding: 12px; }.presale-modal { padding: 16px; } }
 </style>

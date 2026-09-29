@@ -47,6 +47,7 @@ final class InventoryStockCountDetailProjectionServices
                 'id' => (int)$document['id'],
                 'order_sn' => (string)$document['count_no'],
                 'business_date' => (string)$document['business_date'],
+                'count_date' => InventoryStockCountDate::fromConfirmedAt((int)$document['confirmed_at']),
                 'recorded_at' => (int)$document['recorded_at'],
                 'operation_at' => (int)$document['confirmed_at'],
                 'location_name' => (string)($location['location_name'] ?? ((string)($location['location_type'] ?? '') === 'HQ' ? '总部仓' : '库存仓')),

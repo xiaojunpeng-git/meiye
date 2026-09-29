@@ -9,6 +9,7 @@ use app\services\query\UnifiedQueryExecutionServices;
 use app\services\query\UnifiedQueryException;
 use app\services\query\UnifiedQueryPreferenceServices;
 use app\services\query\UnifiedQueryProvider;
+use app\services\product\inventory\InventoryStockCountDate;
 use think\facade\Db;
 
 /** Shared UQ adapter for V3 operational read models. */
@@ -163,8 +164,13 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
     {
         $rows = Db::name('inventory_stock_count_document')->alias('d')->leftJoin('inventory_stock_count_line l', 'l.document_id=d.id')->leftJoin('inventory_location p', 'p.id=d.location_id')
             ->where('d.tenant_id', $tenantId)->whereIn('d.location_id', $locationIds)
-            ->field(['d.id', 'd.count_no' => 'order_sn', 'd.document_status' => 'status_name', 'd.business_date', 'd.recorded_at' => 'add_time', 'd.recorded_at' => 'operation_at', 'd.location_id', 'p.location_name', 'COUNT(l.id)' => 'detail_count'])
-            ->group('d.id,d.count_no,d.document_status,d.business_date,d.recorded_at,d.location_id,p.location_name')->order('d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
+            ->field(['d.id', 'd.count_no' => 'order_sn', 'd.document_status' => 'status_name', 'd.business_date', 'd.confirmed_at', 'd.recorded_at' => 'add_time', 'd.confirmed_at' => 'operation_at', 'd.location_id', 'p.location_name', 'COUNT(l.id)' => 'detail_count'])
+            ->group('d.id,d.count_no,d.document_status,d.business_date,d.confirmed_at,d.recorded_at,d.location_id,p.location_name')->order('d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
+        // 已确认单据只用服务端完成时间形成盘点日期；草稿无完成时间，周期筛选时自然排除。
+        foreach ($rows as &$row) {
+            $row['count_date'] = InventoryStockCountDate::fromConfirmedAt((int)$row['confirmed_at']);
+        }
+        unset($row);
         if ($canViewCost && $rows) {
             $amounts = Db::name('inventory_batch_movement_fact')->where('tenant_id', $tenantId)->where('store_id', $storeId)->whereIn('location_id', $locationIds)->where('fact_status', 'SETTLED')->whereIn('source_type', ['stock_count_gain', 'stock_count_loss'])
                 ->field('source_id, SUM(CASE WHEN direction=1 THEN cost_amount_cents ELSE -cost_amount_cents END) change_amount_cents')->group('source_id')->select()->toArray();
@@ -187,6 +193,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
                     'id' => 'draft-' . (int)$draft['draft_id'], 'draft_id' => (int)$draft['draft_id'],
                     'order_sn' => '草稿-' . (int)$draft['draft_id'], 'status_name' => 'DRAFT',
                     'business_date' => (string)$draft['business_date'], 'operation_at' => (int)$draft['operation_at'],
+                    'count_date' => '',
                     'add_time' => (int)$draft['add_time'], 'location_id' => (int)$draft['location_id'],
                     'location_name' => (string)$draft['location_name'], 'detail_count' => (int)$draft['detail_count'],
                     'change_amount_cents' => null,

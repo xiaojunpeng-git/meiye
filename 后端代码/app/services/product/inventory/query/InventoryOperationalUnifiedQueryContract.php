@@ -22,10 +22,14 @@ final class InventoryOperationalUnifiedQueryContract
     {
         $common = [
             UnifiedQueryPageRegistry::field('record_id', '记录标识', 'text', false, false, ['sort']),
-            UnifiedQueryPageRegistry::field('business_date', '业务日期', 'date', true, true),
+            // 盘点新周期按完成时刻；保留旧业务日期字段以兼容已保存的查询设置，但不再默认展示。
+            UnifiedQueryPageRegistry::field('business_date', '业务日期', 'date', $pageCode !== 'inventory_count', $pageCode !== 'inventory_count'),
             UnifiedQueryPageRegistry::field('order_sn', '业务单号', 'text', true, true),
             UnifiedQueryPageRegistry::field('status_name', '状态', 'text', true, true),
         ];
+        if ($pageCode === 'inventory_count') {
+            $common[] = UnifiedQueryPageRegistry::field('count_date', '盘点日期', 'date', true, true);
+        }
         $specific = [
             'inventory_inbound' => [
                 ['order_type_name', '入库类型', 'text', ''], ['location_name', '入库仓/门店', 'text', ''],

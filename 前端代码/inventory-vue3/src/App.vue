@@ -13,7 +13,7 @@ import InventoryRecipeModal from './components/InventoryRecipeModal.vue'
 import InventoryStoreSelector from './components/InventoryStoreSelector.vue'
 import { inventoryStatusLabel } from './statusLabels'
 import { inventoryApi, inventoryCommandIdempotencyKey, platformInventoryApi, setInventoryEmbeddedSessionToken, clearInventoryEmbeddedSessionToken } from './services/inventoryApi'
-import { UnifiedQueryToolbar, useUnifiedQueryPage } from '@mohe/unified-query-vue3'
+import { UnifiedQueryDateRange, UnifiedQueryToolbar, useUnifiedQueryPage } from '@mohe/unified-query-vue3'
 import '@mohe/unified-query-vue3/styles.css'
 
 const props = defineProps({
@@ -57,9 +57,15 @@ const todayDate = () => {
   const day = String(now.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
-const businessDateFrom = ref(todayDate())
-const businessDateTo = ref(todayDate())
-const businessDatePages = new Set(['request', 'transfer', 'inbound', 'outbound', 'usage'])
+// 库存单据周期只决定查询日期，不改变单据业务时间；默认按门店本地当天筛选。
+const todayRange = () => ({ min: todayDate(), max: todayDate() })
+const businessDateRange = ref(todayRange())
+// 草稿尚无完成日期；清空盘点周期仍可重新查找并编辑历史草稿。
+const countDateRange = ref(todayRange())
+const statisticsDateRange = ref(todayRange())
+const statisticsExecutedQuery = ref({})
+const businessDatePages = new Set(['request', 'transfer', 'inbound', 'outbound', 'usage', 'import'])
+const usesBusinessDatePeriod = (page = active.value) => businessDatePages.has(page) && (page !== 'import' || mode.value === 'store')
 const storeOperationalDataScope = ref('normal')
 const storeOperationalStatus = ref('')
 const recipeStatus = ref('')
@@ -165,7 +171,7 @@ const platformStockQueryBaseFields = [
 const operationalQueryPages = {
   inbound: { pageCode: 'inventory_inbound', fields: [['order_sn', '入库单号'], ['order_type_name', '入库类型'], ['location_name', '入库仓/门店'], ['product_summary', '商品摘要'], ['detail_count', '入库项数', 'integer'], ['status_name', '状态'], ['business_date', '业务日期', 'date']] },
   outbound: { pageCode: 'inventory_outbound', fields: [['order_sn', '出库单号'], ['order_type_name', '出库类型'], ['location_name', '出库仓/门店'], ['product_summary', '商品摘要'], ['detail_count', '出库项数', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '业务日期', 'date']] },
-  count: { pageCode: 'inventory_count', fields: [['order_sn', '盘点单号'], ['location_name', '盘点主体'], ['detail_count', '差异项', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '盘点日期', 'date']] },
+  count: { pageCode: 'inventory_count', fields: [['order_sn', '盘点单号'], ['location_name', '盘点主体'], ['detail_count', '差异项', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['count_date', '盘点日期', 'date']] },
   request: { pageCode: 'inventory_request', fields: [['order_sn', '请货单号'], ['request_party_name', '请货方'], ['supply_party_name', '供货方'], ['detail_count', '商品项数', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '申请日期', 'date']] },
   transfer: { pageCode: 'inventory_transfer', fields: [['order_sn', '调拨单号'], ['from_party_name', '调出方'], ['to_party_name', '调入方'], ['detail_count', '商品项数', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '发起日期', 'date']] },
   usage: { pageCode: 'inventory_salon_usage', fields: [['order_sn', '业务单号'], ['operation_name', '领退类型'], ['project_name_snapshot', '关联项目'], ['detail_count', '耗材项数', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '业务日期', 'date'], ['remark', '备注']] },
@@ -307,7 +313,7 @@ const pages = {
     crumb: '库存管理 / 库存盘点',
     filters: ['盘点状态', '盘点单号', '盘点日期', '创建时间'],
     action: '新建盘点单',
-    columns: ['盘点单号', '盘点主体', '盘点范围', '差异项', '盈亏金额', '操作时间', '状态']
+    columns: ['盘点单号', '盘点主体', '盘点范围', '差异项', '盈亏金额', '盘点日期', '操作时间', '状态']
   },
   request: {
     title: '请货管理',
@@ -507,11 +513,17 @@ function selectPage(key, options = {}) {
     return
   }
   active.value = key
+  if (usesBusinessDatePeriod(key)) businessDateRange.value = todayRange()
+  if (key === 'count') countDateRange.value = todayRange()
+  if (key === 'statistics') statisticsDateRange.value = todayRange()
   listDateRange.value = null
   statusFocus.value = options.focus || ''
   storeOperationalStatus.value = ''
   if (options.tab) activeStatisticsTab.value = options.tab
-  if (key === 'statistics') statisticsInitialQuery.value = options.query && typeof options.query === 'object' ? options.query : {}
+  if (key === 'statistics') {
+    statisticsInitialQuery.value = options.query && typeof options.query === 'object' ? options.query : {}
+    statisticsExecutedQuery.value = statisticsInitialQuery.value
+  }
   sidebarOpen.value = false
   editor.value = ''
   if (key !== 'statistics' && key !== 'overview') {
@@ -532,6 +544,8 @@ watch(() => props.entryPage, (page) => {
 function selectStatisticsTab(key) {
   activeStatisticsTab.value = key
   statisticsInitialQuery.value = {}
+  statisticsExecutedQuery.value = {}
+  statisticsDateRange.value = todayRange()
   if (mode.value === 'platform') queryStatisticsPage({})
 }
 
@@ -820,7 +834,7 @@ function mapApiRow(page, row) {
     case 'stock': return row.available_quantity !== undefined
       ? [text(row.product_name), text(row.sku_name), text(row.available_quantity), row.inventory_amount_cents !== undefined ? centsMoney(row.inventory_amount_cents) : money(row.inventory_amount)]
       : [text(row.product_name), text(row.sku_name), text(row.batch_balance_quantity), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
-    case 'count': return [text(row.order_sn), text(row.store_name_label || row.store_name || row.store_name_snapshot || row.location_name || scopeName.value), text(row.count_type || '全盘'), text(row.detail_count), centsMoney(row.change_amount_cents), operationTime(row.operation_at), countStatusName(row.status_name)]
+    case 'count': return [text(row.order_sn), text(row.store_name_label || row.store_name || row.store_name_snapshot || row.location_name || scopeName.value), text(row.count_type || '全盘'), text(row.detail_count), centsMoney(row.change_amount_cents), text(row.count_date), operationTime(row.operation_at), countStatusName(row.status_name)]
     case 'request': return [text(row.order_sn), text(row.request_party_name || row.request_store_name), text(row.supply_party_name || row.supply_store_name), text(row.detail_count), operationTime(row.operation_at), inventoryStatusLabel(row.status_name)]
     case 'transfer': return [text(row.order_sn), text(row.from_party_name || row.from_store_name), text(row.to_party_name || row.to_store_name), text(row.detail_count), operationTime(row.operation_at), inventoryStatusLabel(row.status_name)]
     case 'usage': return [text(row.usage_no), '耗材明细见单据', text(row.project_name_snapshot), `${text(row.detail_count, '0')} 项`, '-', text(row.operation_type === 'RETURN' ? '退回' : '领用'), operationTime(row.operation_at), inventoryStatusLabel(row.document_status, '已完成')]
@@ -922,14 +936,15 @@ async function loadCurrentList(unifiedQuery = null) {
       if (toType === 'HQ' || toType === 'STORE') { query.to_party_type = toType; query.to_party_id = Number(toId) || 0 }
       if (platformTransferStatus.value) query.status = platformTransferStatus.value
     }
-    if (businessDatePages.has(active.value) && mode.value === 'platform') {
-      query.business_date_from = businessDateFrom.value
-      query.business_date_to = businessDateTo.value
+    const businessPeriod = businessDateRange.value
+    if (usesBusinessDatePeriod() && mode.value === 'platform' && businessPeriod.min && businessPeriod.max) {
+      query.business_date_from = businessPeriod.min
+      query.business_date_to = businessPeriod.max
       if (active.value === 'usage') {
-        query.from = businessDateFrom.value
-        query.to = businessDateTo.value
-        query.start_time = `${businessDateFrom.value} 00:00:00`
-        query.end_time = `${businessDateTo.value} 23:59:59`
+        query.from = businessPeriod.min
+        query.to = businessPeriod.max
+        query.start_time = `${businessPeriod.min} 00:00:00`
+        query.end_time = `${businessPeriod.max} 23:59:59`
       }
     }
     const [listWarehouseType, listWarehouseId] = String(platformListWarehouseSelection.value || 'HQ:0').split(':')
@@ -937,15 +952,21 @@ async function loadCurrentList(unifiedQuery = null) {
     // contract. Legacy list endpoints consume business_date_from/to directly,
     // so remove those keys when a selected store uses unified query.
     const { business_date_from, business_date_to, ...unifiedOperationalQuery } = query
+    // 周期只筛服务端确认日期；清空周期时保留草稿，且平台/门店共用同一过滤契约。
+    const countDateConditions = active.value === 'count' && countDateRange.value.min && countDateRange.value.max
+      ? [{ field: 'count_date', operator: 'between', value: [countDateRange.value.min, countDateRange.value.max] }]
+      : []
     const platformCountQuery = listWarehouseType === 'STORE'
-      ? { ...unifiedOperationalQuery, pageCode: 'inventory_count', subject: 'STORE', storeId: Number(listWarehouseId) || 0 }
-      : { ...unifiedOperationalQuery, pageCode: 'inventory_count', subject: 'HQ', hq_location_id: Number(listWarehouseId) || Number(platformHqLocationId.value) }
+      ? { ...unifiedOperationalQuery, pageCode: 'inventory_count', subject: 'STORE', storeId: Number(listWarehouseId) || 0,
+          topFilterConditions: [...(Array.isArray(unifiedOperationalQuery.topFilterConditions) ? unifiedOperationalQuery.topFilterConditions : []), ...countDateConditions] }
+      : { ...unifiedOperationalQuery, pageCode: 'inventory_count', subject: 'HQ', hq_location_id: Number(listWarehouseId) || Number(platformHqLocationId.value),
+          topFilterConditions: [...(Array.isArray(unifiedOperationalQuery.topFilterConditions) ? unifiedOperationalQuery.topFilterConditions : []), ...countDateConditions] }
     const listWarehouseQuery = listWarehouseType === 'STORE'
       ? { ...unifiedOperationalQuery, pageCode: `inventory_${active.value}`, subject: 'STORE', storeId: Number(listWarehouseId) || 0,
           topFilterConditions: [
             ...(Array.isArray(unifiedOperationalQuery.topFilterConditions) ? unifiedOperationalQuery.topFilterConditions : []),
-            ...(businessDatePages.has(active.value) && businessDateFrom.value && businessDateTo.value
-              ? [{ field: 'business_date', operator: 'between', value: [businessDateFrom.value, businessDateTo.value] }]
+            ...(usesBusinessDatePeriod() && businessPeriod.min && businessPeriod.max
+              ? [{ field: 'business_date', operator: 'between', value: [businessPeriod.min, businessPeriod.max] }]
               : [])
           ] }
       : { hq_location_id: Number(listWarehouseId) || Number(platformHqLocationId.value), ...query }
@@ -973,8 +994,9 @@ async function loadCurrentList(unifiedQuery = null) {
           topFilterConditions: [
             ...(Array.isArray(query.topFilterConditions) ? query.topFilterConditions : []),
             ...(storeOperationalStatus.value ? [{ field: 'status_name', operator: 'eq', value: storeOperationalStatus.value }] : []),
-            ...(businessDatePages.has(active.value) && businessDateFrom.value && businessDateTo.value
-              ? [{ field: 'business_date', operator: 'between', value: [businessDateFrom.value, businessDateTo.value] }]
+            ...countDateConditions,
+            ...(usesBusinessDatePeriod() && businessPeriod.min && businessPeriod.max
+              ? [{ field: 'business_date', operator: 'between', value: [businessPeriod.min, businessPeriod.max] }]
               : [])
           ]
         })
@@ -1028,9 +1050,30 @@ async function queryStoreOperationalPage() {
   })
 }
 
+/** 周期控件确认后才发布区间，并在当前库存功能的服务端筛选条件中生效。 */
+function applyBusinessDateRange(value) {
+  businessDateRange.value = { min: String(value?.min || ''), max: String(value?.max || '') }
+  if (mode.value === 'store') queryStoreOperationalPage()
+  else loadCurrentList()
+}
+
+/** 周期控件发布完整区间后再执行查询；草稿日期不参与盘点完成日筛选。 */
+function applyCountDateRange(value) {
+  countDateRange.value = { min: String(value?.min || ''), max: String(value?.max || '') }
+  if (mode.value === 'store') queryStoreOperationalPage()
+  else loadCurrentList()
+}
+
+/** 入出库统计使用业务发生日；临期和库龄仍以当天库存快照为准，不套用流水周期。 */
+function applyStatisticsDateRange(value) {
+  statisticsDateRange.value = { min: String(value?.min || ''), max: String(value?.max || '') }
+  queryStatisticsPage(statisticsExecutedQuery.value)
+}
+
 async function queryStatisticsPage(query) {
   if (!statisticsQueryPage.value) return
   const isMovement = ['inbound', 'outbound'].includes(activeStatisticsTab.value)
+  statisticsExecutedQuery.value = query && typeof query === 'object' ? { ...query } : {}
   if (isMovement) { movementStatisticsLoading.value = true; movementStatisticsError.value = '' }
   else { analysisLoading.value = true; analysisError.value = '' }
   try {
@@ -1041,7 +1084,19 @@ async function queryStatisticsPage(query) {
         }
       : {}
     const client = mode.value === 'platform' ? platformInventoryApi : inventoryApi
-    const response = await client.unifiedOperationalQuery({ ...(query || {}), ...platformScope, pageCode: statisticsQueryPage.value.pageCode })
+    const period = statisticsDateRange.value
+    const response = await client.unifiedOperationalQuery({
+      ...statisticsExecutedQuery.value,
+      ...platformScope,
+      pageCode: statisticsQueryPage.value.pageCode,
+      // 只把当前统计页选定的日期送入权威查询；清空周期则不增加日期约束。
+      topFilterConditions: [
+        ...(Array.isArray(statisticsExecutedQuery.value.topFilterConditions) ? statisticsExecutedQuery.value.topFilterConditions : []),
+        ...(isMovement && period.min && period.max
+          ? [{ field: 'business_date', operator: 'between', value: [period.min, period.max] }]
+          : [])
+      ]
+    })
     const records = Array.isArray(response?.records) ? response.records : []
     if (isMovement) {
       movementStatistics.value = { list: records, count: Number(response?.total || 0) }
@@ -1331,6 +1386,7 @@ onBeforeUnmount(() => {
         <template v-else-if="active === 'statistics'">
           <div class="page-heading"><div><p>库存管理 / 库存统计</p><h1>库存统计</h1><span>入库、出库、临期与库龄均按批次事实统一查询</span></div><div class="heading-actions"><span class="page-heading__note">当前统计导出将在对应权威导出任务接入后开放</span><button v-if="mode === 'store' && statisticsQueryPage" class="secondary-button" @click="openCurrentQuerySettings"><SlidersHorizontal :size="16" />查询设置</button></div></div>
           <div class="statistics-tabs"><button v-for="tab in statisticsTabs" :key="tab.key" :class="{ active: activeStatisticsTab === tab.key }" @click="selectStatisticsTab(tab.key)">{{ tab.label }}</button></div>
+          <div v-if="['inbound', 'outbound'].includes(activeStatisticsTab)" class="inventory-period-filter inventory-statistics-period"><UnifiedQueryDateRange :model-value="statisticsDateRange" label="业务日期周期" @change="applyStatisticsDateRange" /></div>
           <component
             :is="InventoryOperationalUnifiedQueryToolbar"
             v-if="statisticsQueryPage && mode === 'store'"
@@ -1416,7 +1472,8 @@ onBeforeUnmount(() => {
             <div class="filter-search"><Search :size="17" /><input v-model="keyword" :placeholder="`搜索${currentPage.title}记录`" @keyup.enter="queryStoreOperationalPage" /></div>
             <label>数据范围<select v-model="storeOperationalDataScope" @change="queryStoreOperationalPage"><option value="normal">正常数据</option><option value="all">全部数据</option></select></label>
             <label>状态<select v-model="storeOperationalStatus" @change="queryStoreOperationalPage"><option value="">全部</option><option v-for="status in storeOperationalStatusOptions" :key="status" :value="status">{{ status }}</option></select></label>
-            <div v-if="businessDatePages.has(active)" class="business-date-filter business-date-filter--inline"><label>业务日期</label><input v-model="businessDateFrom" type="date" :max="businessDateTo" /><span>至</span><input v-model="businessDateTo" type="date" :min="businessDateFrom" /></div>
+            <div v-if="usesBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="active === 'import' ? '导入日期周期' : '业务日期周期'" @change="applyBusinessDateRange" /></div>
+            <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
             <button class="primary-button" :disabled="listLoading" @click="queryStoreOperationalPage">{{ listLoading ? '查询中' : '查询' }}</button>
           </section>
           <section v-else-if="active === 'recipe'" class="filter-card">
@@ -1431,7 +1488,8 @@ onBeforeUnmount(() => {
             <template v-else-if="mode === 'platform' && active === 'transfer'"><label>调出方<InventoryStoreSelector v-model="platformTransferFromParty" :options="platformWarehouseSelectorOptions" placeholder="全部调出方" /></label><label>调入方<InventoryStoreSelector v-model="platformTransferToParty" :options="platformWarehouseSelectorOptions" placeholder="全部调入方" /></label><label>调拨状态<select v-model="platformTransferStatus"><option value="">全部</option><option value="DRAFT">草稿</option><option value="DISPATCHED">在途</option><option value="RECEIVED">已收货</option><option value="CANCELLED">已取消</option><option value="REVERSED">已作废</option></select></label></template>
             <label v-else-if="mode === 'platform'">{{ active === 'usage' ? '门店' : '库存仓' }}<InventoryStoreSelector v-model="platformListWarehouseSelection" :options="active === 'usage' ? platformUsageStoreSelectorOptions : platformListWarehouseOptions" :placeholder="active === 'usage' ? '选择门店' : '选择门店库存仓'" :presentation="['inbound', 'outbound', 'count', 'usage'].includes(active) ? 'dropdown' : 'modal'" /></label>
             <label v-if="!(['inbound', 'outbound'].includes(active) || (mode === 'platform' && ['request', 'transfer'].includes(active)))" v-for="filter in currentPage.filters.slice(0, 2)" :key="filter">{{ filter }}<select><option>全部</option></select></label>
-            <div v-if="businessDatePages.has(active)" class="business-date-filter business-date-filter--inline"><label>业务日期</label><input v-model="businessDateFrom" type="date" :max="businessDateTo" @change="loadCurrentList" /><span>至</span><input v-model="businessDateTo" type="date" :min="businessDateFrom" @change="loadCurrentList" /></div>
+            <div v-if="usesBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="active === 'import' ? '导入日期周期' : '业务日期周期'" @change="applyBusinessDateRange" /></div>
+            <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
             <button class="primary-button" :disabled="listLoading || (platformFilterRequiresHqLocation && !platformHqLocationId) || (platformUsageRequiresStore && !platformUsageStoreId)" @click="loadCurrentList">{{ listLoading ? '查询中' : '查询' }}</button>
           </section>
           <section class="content-card table-card"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div><button v-if="['store', 'platform'].includes(mode) && ['inbound', 'outbound'].includes(active)" class="text-button" @click="openEditor('import')">导入</button><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else class="table-scroll"><table><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="cellIndex === row.length - 2 && active === 'inbound'" class="state-tag">{{ cell }}</span><span v-else-if="cellIndex === row.length - 1 && ['outbound', 'count', 'request', 'transfer', 'usage', 'import'].includes(active)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'transfer'"><button class="text-button" @click="openTransferDetail(sourceRows[index])">查看</button><button v-if="sourceRows[index].can_dispatch" class="text-button" @click="runTransferAction('dispatch', sourceRows[index])">发货</button><button v-if="sourceRows[index].can_receive" class="text-button" @click="runTransferAction('receive', sourceRows[index])">收货</button><button v-if="sourceRows[index].can_cancel" class="text-button" @click="runTransferAction('cancel', sourceRows[index])">取消</button><button v-if="sourceRows[index].can_reverse" class="text-button" @click="runTransferAction('reverse', sourceRows[index])">作废</button></template><template v-else-if="active === 'request'"><button class="text-button" @click="openRequestDetail(sourceRows[index])">查看</button><button v-if="sourceRows[index].can_edit" class="text-button" @click="openRequestEditor(sourceRows[index])">编辑</button><button v-if="sourceRows[index].can_cancel" class="text-button" @click="runDocumentAction('cancelRequest', sourceRows[index], 'request')">取消</button><button v-if="sourceRows[index].can_terminate" class="text-button" @click="runDocumentAction('terminateRequest', sourceRows[index], 'request')">终止剩余</button></template><template v-else-if="['inbound', 'outbound'].includes(active)"><button class="text-button" @click="active === 'inbound' ? openInboundDetail(sourceRows[index]) : openOutboundDetail(sourceRows[index])">查看</button><button v-if="active === 'inbound'" class="text-button" @click="openInboundOutboundDetails(sourceRows[index])">出库明细</button><button v-if="sourceRows[index].can_void" class="text-button" @click="runDocumentAction('void', sourceRows[index], active)">作废</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><button v-else class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">查看</button></td></tr></tbody></table></div></section>
