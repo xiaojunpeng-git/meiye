@@ -196,6 +196,47 @@ final class CashierV3MemberBalanceProvider implements CashierV3DataScopedVersion
         return $snapshot;
     }
 
+    /**
+     * Read-only bounded set projection for AI detail. One readiness check and
+     * one user-row read replace N identical checks; every row still passes the
+     * same active-member, balance invariant and data-scope validation as a
+     * single snapshot. Checkout mutations continue using locked single reads.
+     *
+     * @param array<int,int> $memberIds
+     * @return array<int,array<string,mixed>>
+     */
+    public function readSnapshots(array $memberIds, CashierV3OperatorScope $operatorScope, CashierV3DataScopeContext $dataScope): array
+    {
+        if (!$memberIds || count($memberIds)>100 || count(array_unique($memberIds))!==count($memberIds)) {
+            throw self::failure('member_balance_identity_invalid');
+        }
+        foreach ($memberIds as $memberId) {
+            if (!is_int($memberId) || $memberId<=0) throw self::failure('member_balance_identity_invalid');
+        }
+        $this->assertBaseDataScope($operatorScope,$dataScope);
+        $this->assertStoreAccess($dataScope);
+        if (empty($this->readinessStatus()['ready'])) throw self::failure('member_balance_provider_not_ready');
+        try {
+            $rows=Db::name(self::TABLE)->whereIn('uid',$memberIds)
+                ->field('uid,now_money,ben_money,give_money,balance_version,status,is_del,delete_time,belong_store_id')
+                ->select()->toArray();
+        } catch (\Throwable $exception) {
+            throw self::failure('member_balance_provider_not_ready');
+        }
+        $snapshots=[];
+        foreach ($rows as $row) {
+            $memberId=(int)($row['uid']??0);
+            if (!in_array($memberId,$memberIds,true) || isset($snapshots[$memberId]) || !$this->activeMember($row)) {
+                throw self::failure('member_balance_member_not_found');
+            }
+            $snapshot=$this->snapshot($row,$dataScope);
+            $snapshot['operatorId']=$operatorScope->operatorId();
+            $snapshots[$memberId]=$snapshot;
+        }
+        if (count($snapshots)!==count($memberIds)) throw self::failure('member_balance_member_not_found');
+        return $snapshots;
+    }
+
     private function snapshot(array $member, CashierV3DataScopeContext $dataScope): array
     {
         $principal = $this->moneyToCents($member['ben_money'] ?? null);

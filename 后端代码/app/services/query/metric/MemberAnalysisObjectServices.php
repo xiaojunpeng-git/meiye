@@ -70,15 +70,51 @@ final class MemberAnalysisObjectServices
     /** Rebuilds the current authoritative member/store relation for a frozen reference. */
     public function selection(string $reference): array
     {
-        if (!preg_match('/^member:([1-9][0-9]*)$/D',$reference,$match)) throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
-        $scope=$this->scope();$uid=(int)$match[1];
-        $row=$this->members($scope)->where('u.uid',$uid)->field('u.uid,u.real_name,u.nickname')->find();
-        $real=trim((string)($row['real_name']??''));$nickname=trim((string)($row['nickname']??''));$label=$real!==''?$real:$nickname;
-        if ((int)($row['uid']??0)!==$uid || $label==='') throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+        return $this->selections([$reference])[$reference];
+    }
+
+    /**
+     * Revalidate a bounded signed result set against the same live member and
+     * store relation as one selection. The query and permission snapshot are
+     * shared, while every requested identity must still be present; a missing
+     * or newly unauthorized member fails the complete detail read.
+     *
+     * @param array<int,string> $references
+     * @return array<string,array<string,mixed>>
+     */
+    public function selections(array $references): array
+    {
+        if (!$references || count($references)>100 || count(array_unique($references))!==count($references)) {
+            throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+        }
+        $ids=[];
+        foreach ($references as $reference) {
+            if (!is_string($reference) || !preg_match('/^member:([1-9][0-9]*)$/D',$reference,$match)) {
+                throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+            }
+            $ids[$reference]=(int)$match[1];
+        }
+        $scope=$this->scope();
+        $rows=$this->members($scope)->whereIn('u.uid',array_values($ids))
+            ->field('u.uid,u.real_name,u.nickname')->select()->toArray();
+        $byId=[];
+        foreach ($rows as $row) {
+            $uid=(int)($row['uid']??0);
+            if ($uid<1 || isset($byId[$uid])) throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+            $byId[$uid]=$row;
+        }
         if (call_user_func($this->authorize)!==$scope) throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
-        $selection=['ref'=>$reference,'label'=>$label,'member_id'=>$uid,'scope'=>$scope];
-        $selection['binding_hash']=hash('sha256',json_encode($selection,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES));
-        return $selection;
+        $out=[];
+        foreach ($ids as $reference=>$uid) {
+            $row=$byId[$uid]??null;
+            $real=trim((string)($row['real_name']??''));$nickname=trim((string)($row['nickname']??''));
+            $label=$real!==''?$real:$nickname;
+            if (!is_array($row) || $label==='') throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+            $selection=['ref'=>$reference,'label'=>$label,'member_id'=>$uid,'scope'=>$scope];
+            $selection['binding_hash']=hash('sha256',json_encode($selection,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES));
+            $out[$reference]=$selection;
+        }
+        return $out;
     }
 
     private function scope(): array

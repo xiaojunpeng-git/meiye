@@ -14,10 +14,15 @@ use app\services\query\metric\MetricReadViewStore;
 use app\services\query\metric\MetricReadViewExportProvider;
 use app\services\query\metric\MetricSemanticCatalog;
 use app\services\query\metric\PersonnelAnalysisObjectServices;
+use app\services\ai\semantic\AiConditionResponseFormResolver;
 
 $checks=0;
 function csCheck($ok,string $label): void { global $checks; if (!$ok) throw new RuntimeException($label); $checks++; }
 function csReject(callable $call,string $expected): void { try {$call();} catch (Throwable $e) {$code=method_exists($e,'getErrorCode')?$e->getErrorCode():$e->getMessage();csCheck($code===$expected,'expected '.$expected.', got '.$code);return;} throw new RuntimeException('expected rejection '.$expected); }
+csCheck(AiConditionResponseFormResolver::resolve('2026年消费4980的有多少个人')==='count',
+    'population count is an answer form rather than a second spend metric');
+csCheck(AiConditionResponseFormResolver::resolve('今天收了多少钱')===null,
+    'money amount question is not misclassified as a population count');
 
 $understandingInstruction=AiIntentUnderstandingContract::modelInstruction();
 csCheck(strpos($understandingInstruction,'relation all means every condition must hold')!==false
@@ -444,6 +449,46 @@ csCheck(MetricSemanticCatalog::containingSelectedOwnerCode(
     'an independently stated short metric is never swallowed by a longer registry owner');
 $gateway=new \app\services\ai\AiGatewayServices();
 $registeredCondition=(new ReflectionMethod($gateway,'registeredConditionIntent'));
+$countQuestion='2026年消费4980的有多少个人';
+$countSafe=$memberNaturalSafe;
+$countSafe['question']=$countQuestion;
+$countSafe['evidence_messages'][0]['text']=$countQuestion;
+$countSafe['reference_date']='2026-09-29';
+$countSemantic=['goal'=>'统计期间消费金额符合条件的客户人数','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'期间消费金额条件与客户人数','fields'=>['metric_codes','object_kind','operation','periods','aggregate_condition'],
+        'values'=>['metric_terms'=>['消费'],'object_kind'=>'member','operation'=>'condition_count',
+            'periods'=>[['kind'=>'date_range','start'=>'2026-01-01','end'=>'2026-09-29']],
+            'aggregate_condition'=>['subject'=>'member','relation'=>'all','result_form'=>'count','conditions'=>[
+                ['metric_term'=>'消费','operator'=>'eq','quantity'=>'4980','unit'=>'yuan'],
+            ]]],'evidence'=>[['message_id'=>'current','quote'=>$countQuestion]]],
+    ['id'=>'r2','meaning'=>'询问符合条件的人数','fields'=>['metric_codes'],
+        'values'=>['metric_terms'=>['有多少个人']],
+        'evidence'=>[['message_id'=>'current','quote'=>'有多少个人']]],
+]];
+$normalizedCount=AiIntentUnderstandingContract::normalize($countSemantic,$countSafe);
+csCheck(count($normalizedCount['requirements'])===1
+    &&($normalizedCount['requirements'][0]['values']['aggregate_condition']['conditions'][0]['operator']??null)==='eq',
+    'a separately repeated count phrase cannot become a second financial metric or alter equality');
+$compiledCount=$registeredCondition->invoke($gateway,$normalizedCount,[
+    ['metric_code'=>'cash_performance','object_contracts'=>[]],
+],$countSafe);
+csCheck(($compiledCount['metric_codes']??null)===['cash_performance']
+    &&($compiledCount['aggregate_condition']['conditions'][0]['quantity']??null)==='4980'
+    &&($compiledCount['periods'][0]['end']??null)==='2026-09-29',
+    'registered consumption condition retains amount and year-to-date period');
+$independentCount=$countSemantic;
+$independentCount['requirements'][1]['values']['metric_terms']=['积分'];
+$independentCount['requirements'][1]['evidence'][0]['quote']='积分';
+$independentSafe=$countSafe;
+$independentSafe['question']='2026年消费4980并且积分等于2的有多少个人';
+$independentSafe['evidence_messages'][0]['text']=$independentSafe['question'];
+$independentCount['requirements'][0]['evidence'][0]['quote']=$independentSafe['question'];
+$independentCount=AiIntentUnderstandingContract::normalize($independentCount,$independentSafe);
+csCheck(count($independentCount['requirements'])===2
+    &&$registeredCondition->invoke($gateway,$independentCount,[
+        ['metric_code'=>'cash_performance','object_contracts'=>[]],
+    ],$independentSafe)===null,
+    'an independent unregistered measurement cannot be discarded as count wording');
 $compiledSpokenVisit=$registeredCondition->invoke($gateway,$spokenVisit,[
     ['metric_code'=>'member_service_visit_count','object_contracts'=>[]],
     ['metric_code'=>'sales_collected_amount','object_contracts'=>[]],
@@ -719,6 +764,36 @@ csCheck($memberUpdateMerged['metric_codes']===$memberUpdateSource['metric_codes'
     &&$memberUpdateMerged['aggregate_condition']['conditions'][1]['quantity']==='10000'
     &&$memberUpdateMerged['aggregate_condition']['conditions'][1]['metric_code']==='sales_collected_amount',
     'a unique yuan predicate changes while the visit condition, object, relation and registered metric order remain signed');
+$singleUpdateSource=$memberUpdateSource;
+$singleUpdateSource['metric_codes']=['sales_collected_amount'];
+$singleUpdateSource['aggregate_condition']['conditions']=[$memberUpdateSource['aggregate_condition']['conditions'][1]];
+$closedQuestion='把条件改成大于2980元，仍看2026年，人数是多少';
+$closedSafe=$memberUpdateSafe;
+$closedSafe['question']=$closedQuestion;
+$closedSafe['evidence_messages']=[['id'=>'current','text'=>$closedQuestion]];
+$closedSafe['prior_query']=IntentContextMerger::modelView($singleUpdateSource);
+$closedAdmission=(new ReflectionClass(\app\services\ai\AiGatewayServices::class))->getMethod('localVerifiedConditionDeltaUnderstanding');
+$closedGateway=(new ReflectionClass(\app\services\ai\AiGatewayServices::class))->newInstanceWithoutConstructor();
+$closedResult=$closedAdmission->invoke($closedGateway,$closedSafe,['local_conditions'=>[]],'2026-09-29');
+csCheck(is_array($closedResult)
+    &&($closedResult['requirements'][0]['values']['condition_update']['quantity']??null)==='2980'
+    &&($closedResult['requirements'][1]['values']['periods'][0]['start']??null)==='2026-01-01',
+    'complete numeric/date continuation reuses one signed condition without a model request');
+$closedIntent=AiIntentResultContract::inheritedConditionContinuationContextIntent($closedResult,$singleUpdateSource);
+$closedMerged=IntentContextMerger::merge($singleUpdateSource,$closedIntent)['intent'];
+csCheck(($closedMerged['aggregate_condition']['conditions'][0]['operator']??null)==='gt'
+    &&($closedMerged['aggregate_condition']['conditions'][0]['quantity']??null)==='2980'
+    &&($closedMerged['metric_codes']??null)===$singleUpdateSource['metric_codes'],
+    'closed numeric edit preserves the signed metric and changes only the requested predicate');
+$unknownQuestion='把条件改成大于2980元，再加上积分条件，仍看2026年，人数是多少';
+$unknownSafe=$closedSafe;$unknownSafe['question']=$unknownQuestion;
+csCheck($closedAdmission->invoke($closedGateway,$unknownSafe,['local_conditions'=>[]],'2026-09-29')===null,
+    'an extra business condition cannot enter the closed numeric continuation path');
+$ambiguousClosedSource=$singleUpdateSource;
+$ambiguousClosedSource['aggregate_condition']['conditions'][]=$singleUpdateSource['aggregate_condition']['conditions'][0];
+$ambiguousClosedSafe=$closedSafe;$ambiguousClosedSafe['prior_query']=IntentContextMerger::modelView($ambiguousClosedSource);
+csCheck($closedAdmission->invoke($closedGateway,$ambiguousClosedSafe,['local_conditions'=>[]],'2026-09-29')===null,
+    'two signed predicates require ordinary language understanding rather than a guessed target');
 $combinedSafe=$memberUpdateSafe;
 $combinedSafe['question']='把金额门槛改成980元，只看本月并列出客户';
 $combinedSafe['evidence_messages']=[['id'=>'current','text'=>$combinedSafe['question']]];

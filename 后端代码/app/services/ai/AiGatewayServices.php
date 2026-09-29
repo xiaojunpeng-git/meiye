@@ -1257,14 +1257,16 @@ final class AiGatewayServices
         // business understanding so provider variation cannot reject a plain
         // "top three" continuation or change any executable business field.
         $localRankingUnderstanding=$sourceQuery===null?null:$this->localVerifiedRankingOnlyUnderstanding($safe['outbound'],$safe);
+        $localConditionUnderstanding=$sourceQuery===null?null:$this->localVerifiedConditionDeltaUnderstanding($safe['outbound'],$safe,$today);
         // Understanding has no metric catalogue. Binding receives accepted
         // meaning afterwards and may only propose registered execution fields.
-        if ($localPeriodUnderstanding!==null || $localRankingUnderstanding!==null) {
+        if ($localPeriodUnderstanding!==null || $localRankingUnderstanding!==null || $localConditionUnderstanding!==null) {
             // Keep this observable without inventing a model attempt: the
             // date-only grammar gate is a server-owned context optimization.
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
-                $localPeriodUnderstanding!==null?'context_period_only_local_reuse':'context_ranking_only_local_reuse');
-            $understanding=$localPeriodUnderstanding??$localRankingUnderstanding;
+                $localPeriodUnderstanding!==null?'context_period_only_local_reuse':($localRankingUnderstanding!==null
+                    ?'context_ranking_only_local_reuse':'context_condition_delta_local_reuse'));
+            $understanding=$localPeriodUnderstanding??$localRankingUnderstanding??$localConditionUnderstanding;
         } else {
             $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
             $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$runtimeSkills,$objectVocabulary,$measurementVocabulary],1024));
@@ -3563,6 +3565,62 @@ final class AiGatewayServices
     }
 
     /**
+     * Admit a complete numeric edit to one signed condition without a model
+     * round trip. The closed grammar carries no metric or member identity: it
+     * only changes the comparator/quantity of the unique same-unit predicate,
+     * plus an explicit date or count-form delta. Any extra business wording,
+     * second condition, unknown unit or unparsed date falls back to the full
+     * language path; this is never a phrase-to-metric shortcut.
+     */
+    private function localVerifiedConditionDeltaUnderstanding(array $outbound,array $safe,string $today): ?array
+    {
+        $question=$outbound['question']??null;
+        $prior=$outbound['prior_query']??null;
+        $condition=is_array($prior)?($prior['aggregate_condition']??null):null;
+        if (!is_string($question) || $question==='' || !empty($safe['local_conditions']??[])
+            || !in_array($prior['operation']??null,['condition_count','condition_list'],true)
+            || !is_array($condition) || count((array)($condition['conditions']??[]))!==1) return null;
+        $sourceCondition=$condition['conditions'][0]??null;
+        if (!is_array($sourceCondition) || !in_array($sourceCondition['unit']??null,['yuan','count','day'],true)) return null;
+        $projection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse($question);
+        $dateTerms=(array)($projection['date_terms']??[]);
+        if (count($dateTerms)>1 || ($projection['date_grouping_ambiguous']??true)) return null;
+        $remainder=$question;$period=null;
+        if ($dateTerms!==[]) {
+            $term=$dateTerms[0];
+            $quote=$term['start']??null;
+            if (!is_string($quote) || $quote==='' || $quote!==($term['end']??null)
+                || mb_substr_count($question,$quote,'UTF-8')!==1) return null;
+            $pattern='/(?:仍看|还是看|只看)?'.preg_quote($quote,'/').'/u';
+            $remainder=preg_replace($pattern,'',$remainder,1,$removed);
+            if (!is_string($remainder) || $removed!==1) return null;
+            $period=(new \app\services\ai\execution\AiWorkflowPlanner())->normalizePeriod($term,$today);
+        }
+        $remainder=preg_replace('/[\s，,。？?！!、]+/u','',$remainder);
+        if (!is_string($remainder)) return null;
+        $hasCount=(bool)preg_match('/(?:人数是多少|有多少个人|有多少人|多少个人|多少人|几个人)$/u',$remainder,$countMatch);
+        if ($hasCount) $remainder=mb_substr($remainder,0,mb_strlen($remainder,'UTF-8')-mb_strlen($countMatch[0],'UTF-8'),'UTF-8');
+        if (!preg_match('/^((?:把|将)?(?:条件|金额|数值)(?:改|调整)(?:成|为)?(大于|超过|小于|低于|等于|不少于|不超过|至少|至多)((?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?)(元|次|天))$/u',$remainder,$match)
+            || mb_strpos($question,$match[1],0,'UTF-8')===false) return null;
+        $operator=['大于'=>'gt','超过'=>'gt','小于'=>'lt','低于'=>'lt','等于'=>'eq',
+            '不少于'=>'gte','至少'=>'gte','不超过'=>'lte','至多'=>'lte'][$match[2]];
+        $unit=['元'=>'yuan','次'=>'count','天'=>'day'][$match[4]];
+        if ($unit!==$sourceCondition['unit']) return null;
+        $requirements=[['id'=>'r1','meaning'=>'change one verified condition','fields'=>['condition_update'],
+            'values'=>['condition_update'=>['target_term'=>$match[1],'operator'=>$operator,'quantity'=>$match[3],'unit'=>$unit]],
+            'evidence'=>[['message_id'=>'current','quote'=>$match[1]]]]];
+        if ($period!==null) $requirements[]=['id'=>'r2','meaning'=>'change verified query period','fields'=>['periods'],
+            'values'=>['periods'=>[['kind'=>'date_range','start'=>$period['start'],'end'=>$period['end']]]],
+            'evidence'=>[['message_id'=>'current','quote'=>$quote]]];
+        if ($hasCount && $prior['operation']==='condition_list') $requirements[]=[
+            'id'=>'r'.(count($requirements)+1),'meaning'=>'count the verified condition set','fields'=>['operation'],
+            'values'=>['operation'=>'condition_count'],'evidence'=>[['message_id'=>'current','quote'=>$countMatch[0]]]];
+        return \app\services\ai\contract\AiIntentUnderstandingContract::normalize([
+            'goal'=>'update verified condition','requirements'=>$requirements,'status'=>'understood',
+        ],$outbound);
+    }
+
+    /**
      * A bound, current-turn metric with no other stated semantic field is a
      * metric view change of the signed result, not permission to reset its
      * period, object or ranking presentation. This reads typed requirement
@@ -5296,15 +5354,23 @@ final class AiGatewayServices
                 \app\services\cashier\v3\CashierV3DataScopeContext::MODE_STORES,[],false,'',
                 $this->permissionHash($fresh),[],[],true
             );
+            // Resolve every signed member against one current permission-scoped
+            // relation, then read balances in one bounded batch. The cashier
+            // projection still validates each member/card and the run guard
+            // still prevents an expired authorization from publishing a set.
+            $references=array_column($members,'selection_ref');
+            $selections=$this->memberObjects($context)->selections($references);
+            $memberIds=[];
+            foreach ($references as $reference) $memberIds[]=(int)$selections[$reference]['member_id'];
+            $rights=(new \app\services\cashier\v3\member\CashierV3MemberDetailQueryServices())
+                ->readAiRightsSet($memberIds,$operator,$dataScope,$guard);
             $details=[];
             foreach ($members as $member) {
-                // Recheck each identity and the remaining run budget. A set
-                // grants no more access than the same members read separately.
-                $guard();
-                $selection=$this->memberObjects($context)->selection($member['selection_ref']);
-                $detail=(new \app\services\cashier\v3\member\CashierV3MemberDetailQueryServices())->readAiRights(
-                    (int)$selection['member_id'],$operator,$dataScope
-                );
+                // This only assembles already checked rows; the rights reader
+                // checkpoints per member and the final guard gates delivery.
+                $selection=$selections[$member['selection_ref']];
+                $detail=$rights[(int)$selection['member_id']]??null;
+                if (!is_array($detail)) throw new RuntimeException('AI_EVIDENCE_INVALID');
                 if ((int)($detail['member']['memberId']??0)!==(int)$selection['member_id']) throw new RuntimeException('AI_EVIDENCE_INVALID');
                 $details[]=['detail'=>$detail,'label'=>(string)$selection['label'],'selection_ref'=>$member['selection_ref']];
             }

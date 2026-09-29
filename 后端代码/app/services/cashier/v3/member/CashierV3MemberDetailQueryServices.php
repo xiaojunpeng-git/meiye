@@ -33,6 +33,40 @@ final class CashierV3MemberDetailQueryServices
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope
     ): array {
+        return $this->readAiRightsWithBalance($memberId,$operatorScope,$dataScope);
+    }
+
+    /**
+     * AI set reads share the authoritative balance query but retain the same
+     * per-member card calculation and visibility checks as a single detail.
+     * The caller must supply only identities revalidated against the live
+     * member/store relation; no partial set is returned on a missing member.
+     *
+     * @param array<int,int> $memberIds
+     * @return array<int,array<string,mixed>>
+     */
+    public function readAiRightsSet(array $memberIds,CashierV3OperatorScope $operatorScope,CashierV3DataScopeContext $dataScope,?callable $checkpoint=null): array
+    {
+        // Deny an unusable detail scope before the shared balance query.
+        foreach ($memberIds as $memberId) {
+            if (!is_int($memberId) || $memberId<=0) throw $this->notFound();
+            $this->assertVisible($memberId,$dataScope);
+        }
+        $snapshots=(new CashierV3MemberBalanceProvider())->readSnapshots($memberIds,$operatorScope,$dataScope);
+        $details=[];
+        foreach ($memberIds as $memberId) {
+            // AI runs can be cancelled or lose authorization mid-batch; keep
+            // the former per-member checkpoint instead of hiding all work in
+            // one uninterruptible projection call.
+            if ($checkpoint!==null) $checkpoint();
+            $details[$memberId]=$this->readAiRightsWithBalance($memberId,$operatorScope,$dataScope,$snapshots[$memberId]);
+        }
+        return $details;
+    }
+
+    /** The supplied snapshot was validated against the cashier balance authority. */
+    private function readAiRightsWithBalance(int $memberId,CashierV3OperatorScope $operatorScope,CashierV3DataScopeContext $dataScope,?array $balanceSnapshot=null): array
+    {
         if ($memberId <= 0) throw $this->notFound();
         $this->assertVisible($memberId, $dataScope);
         $member = Db::name('user')->where('uid', $memberId)
@@ -49,7 +83,7 @@ final class CashierV3MemberDetailQueryServices
             if (($card['cardRuleType'] ?? '') !== 'time') $remainingTimes += (int)($card['remainingTimes'] ?? 0);
             $remainingAmount = bcadd($remainingAmount, (string)($card['remainingAmount'] ?? '0.00'), 2);
         }
-        $balanceSnapshot = (new CashierV3MemberBalanceProvider())->readSnapshot($memberId, $operatorScope, $dataScope);
+        $balanceSnapshot=$balanceSnapshot??(new CashierV3MemberBalanceProvider())->readSnapshot($memberId,$operatorScope,$dataScope);
         $storeId = (int)($member['belong_store_id'] ?? 0);
         $storeName = $storeId > 0 ? (string)Db::name('system_store')->where('id', $storeId)->value('name') : '';
         $name = trim((string)($member['real_name'] ?? ''));

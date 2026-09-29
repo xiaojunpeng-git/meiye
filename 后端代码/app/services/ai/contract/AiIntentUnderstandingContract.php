@@ -359,6 +359,9 @@ final class AiIntentUnderstandingContract
             $requirements,
             array_key_exists('groups', $value)
         );
+        $requirements = self::discardConditionCountMetricProjection(
+            $requirements,$safeQuestion,array_key_exists('groups',$value)
+        );
         if (!is_array($requirements) || (($requirements===[]) && $value['status']!=='needs_clarification') || count($requirements) > 12
             || ($requirements!==[] && array_keys($requirements) !== range(0, count($requirements) - 1))) self::fail('requirements_collection');
         $ids = []; $normalized = [];
@@ -641,6 +644,61 @@ final class AiIntentUnderstandingContract
             $normalized[]=$requirement;
         }
         return $normalized===[]?$requirements:$normalized;
+    }
+
+    /**
+     * A count-form phrase describes the output grain, not a second financial
+     * measurement. Remove only a provider's metric field wholly contained in
+     * that explicit phrase when another accepted requirement already carries
+     * one complete, registry-owned condition. Every predicate and any other
+     * fields on the provider row survive; unknown independent measurements,
+     * exclusions and grouped requests still fail through the normal gate.
+     */
+    private static function discardConditionCountMetricProjection($requirements,array $safeQuestion,bool $hasGroups)
+    {
+        if ($hasGroups || !is_array($requirements) || count($requirements)<2) return $requirements;
+        $question=$safeQuestion['question']??null;
+        if (!is_string($question) || \app\services\ai\semantic\AiConditionResponseFormResolver::resolve($question)!=='count') return $requirements;
+        $conditions=[];
+        foreach ($requirements as $requirement) {
+            $candidate=is_array($requirement)?($requirement['values']['aggregate_condition']??null):null;
+            if (!is_array($candidate) || !isset($candidate['conditions'])) continue;
+            if (!self::aggregateCondition($candidate) || ($candidate['result_form']??null)!=='count') return $requirements;
+            foreach ($candidate['conditions'] as $condition) $conditions[]=$condition;
+        }
+        if (count($conditions)!==1) return $requirements;
+        $conditionTerm=$conditions[0]['metric_term']??null;
+        $owner=is_string($conditionTerm)
+            ?\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText($conditionTerm):null;
+        $stated=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText($question);
+        if (!is_array($owner) || count($stated)!==1
+            || ($stated[0]['metric_code']??null)!==$owner['metric_code']) return $requirements;
+        $out=[];$changed=false;
+        foreach ($requirements as $requirement) {
+            $fields=is_array($requirement)?($requirement['fields']??null):null;
+            $values=is_array($requirement)?($requirement['values']??null):null;
+            if (!is_array($fields) || !in_array('metric_codes',$fields,true) || !is_array($values)
+                || isset($values['aggregate_condition']) || !empty($values['metric_exclusions'])) {
+                $out[]=$requirement;continue;
+            }
+            $terms=$values['metric_terms']??null;
+            if (!is_array($terms) || $terms===[]) {$out[]=$requirement;continue;}
+            foreach ($terms as $term) {
+                if (!is_string($term) || $term===''
+                    || mb_strpos($question,$term,0,'UTF-8')===false
+                    || !\app\services\ai\semantic\AiConditionResponseFormResolver::countPhraseContains($question,$term)
+                    || \app\services\query\metric\MetricSemanticCatalog::uniqueTermInText($term)!==null) {
+                    $out[]=$requirement;continue 2;
+                }
+            }
+            $changed=true;
+            $requirement['fields']=array_values(array_diff($fields,['metric_codes']));
+            unset($requirement['values']['metric_terms']);
+            if ($requirement['fields']===[]) continue;
+            if ($requirement['values']===[]) unset($requirement['values']);
+            $out[]=$requirement;
+        }
+        return $changed && $out!==[]?array_values($out):$requirements;
     }
 
     /**

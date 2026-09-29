@@ -39,6 +39,12 @@ maCheck(count($conversationMentions['objects'])===1&&$userQueries===1,
 $catalog=new AnalysisObjectCatalog($mentions['objects'],static function(){return true;});
 maCheck(($catalog->resolve('香香','member','sales_collected_amount')['objects'][0]['ref']??null)==='member:19','nickname resolves only through the local exact catalogue');
 maCheck($members->selection('member:19')['member_id']===19,'selection rechecks current member relation before a fact read');
+MemberFixtureQuery::$calls=[];
+$selectedSet=$members->selections(['member:19']);
+maCheck(($selectedSet['member:19']['member_id']??null)===19,'batch selection rechecks the same current member relation');
+maCheck(count(array_filter(MemberFixtureQuery::$calls,static fn(array $call):bool => ($call[0]??null)==='table'&&($call[1]??null)==='user'))===1,
+    'bounded selection set uses one permission-scoped member query');
+maReject(fn()=>$members->selections(['member:19','member:19']),'AI_OBJECT_BINDING_UNAVAILABLE');
 $scope['scope_mode']='self_participant';maReject(fn()=>$members->selection('member:19'),'AI_MEMBER_PERMISSION_REQUIRED');$scope['scope_mode']='stores';
 
 $reader=new GroupPerformanceMetricReadServices($factory,static function($query,$tenant,$order){$query->normalScope($tenant,$order);});
