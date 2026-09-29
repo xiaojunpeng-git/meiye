@@ -8,7 +8,8 @@ use app\services\query\UnifiedQueryException;
 
 abstract class InventoryStatisticsUnifiedQueryProvider extends InventoryOperationalUnifiedQueryProvider
 {
-    protected function sourceRows(array $context): array
+    /** 入出库使用周期事实聚合，临期与库龄仍使用截止日批次快照，二者不混算。 */
+    protected function sourceRows(array $context, array $payload = []): array
     {
         $pageCode = $this->pageCode();
         $storeId = (int)$context['store_id'];
@@ -17,9 +18,15 @@ abstract class InventoryStatisticsUnifiedQueryProvider extends InventoryOperatio
         if (!$locationIds) throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '库存统计缺少服务端仓库范围。', []);
         if (in_array($pageCode, ['inventory_statistics_inbound', 'inventory_statistics_outbound'], true)) {
             $kind = $pageCode === 'inventory_statistics_inbound' ? 'inbound' : 'outbound';
-            $rows = (new InventoryMovementAnalyticsServices())->listForLocations($locationIds, $kind, '2000-01-01', (string)$context['query_cutoff_date'], $canViewCost)['list'];
-            foreach ($rows as $index => &$row) {
-                $row['record_id'] = $pageCode . ':' . $index;
+            [$from, $to] = $this->movementPeriod($payload, (string)$context['query_cutoff_date']);
+            if ($from > $to) return [];
+            // 日期必须先进入事实 SQL 的 where，再以业务类型、商品与 SKU 汇总；权限、导出与分页共用这一批周期行。
+            $rows = (new InventoryMovementAnalyticsServices())->listForLocations($locationIds, $kind, $from, $to, $canViewCost, true)['list'];
+            foreach ($rows as &$row) {
+                $row['record_id'] = $pageCode . ':' . hash('sha256', json_encode([
+                    $row['source_type'], $row['product_id'], $row['sku_id'], $row['stock_unit'],
+                    $row['quantity_scale'], $row['product_name'], $row['sku_name'],
+                ], JSON_UNESCAPED_UNICODE));
                 $row['tenant_id'] = (string)$context['tenant_id'];
                 $row['store_id'] = $storeId;
             }
@@ -44,6 +51,30 @@ abstract class InventoryStatisticsUnifiedQueryProvider extends InventoryOperatio
         }
         unset($row);
         return $this->boundedStatistics($rows);
+    }
+
+    /** 只有 AND 周期控件能限定聚合前日期；其他日期谓词会改变统计口径，必须拒绝。 */
+    private function movementPeriod(array $payload, string $cutoff): array
+    {
+        $from = '2000-01-01';
+        $to = $cutoff;
+        foreach (['filters', 'quickFilters', 'keywordFilters'] as $key) {
+            foreach ((array)($payload[$key] ?? []) as $filter) {
+                if ((string)($filter['field_key'] ?? '') === 'business_date') {
+                    throw new UnifiedQueryException('UNIFIED_QUERY_STATISTICS_PERIOD_INVALID', '请使用业务日期周期筛选库存统计。', []);
+                }
+            }
+        }
+        foreach ((array)($payload['topFilterConditions'] ?? []) as $filter) {
+            if ((string)($filter['field_key'] ?? '') !== 'business_date') continue;
+            $value = $filter['value'] ?? null;
+            if ((string)($filter['operator'] ?? '') !== 'between' || !is_array($value) || count($value) !== 2) {
+                throw new UnifiedQueryException('UNIFIED_QUERY_STATISTICS_PERIOD_INVALID', '请使用业务日期周期筛选库存统计。', []);
+            }
+            $from = max($from, (string)$value[0]);
+            $to = min($to, (string)$value[1]);
+        }
+        return [$from, $to];
     }
 
     private function boundedStatistics(array $rows): array

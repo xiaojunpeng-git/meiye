@@ -202,7 +202,7 @@ const statisticsQueryPages = {
 }
 const statisticsQueryPage = computed(() => active.value === 'statistics' ? statisticsQueryPages[activeStatisticsTab.value] || null : null)
 const statisticsQueryFields = computed(() => (statisticsQueryPage.value?.fields || []).map(([key, label, type = 'text']) => ({
-  key, label, type, defaultVisible: true,
+  key, label, type, defaultVisible: key !== 'business_date',
   // 入出库统计只保留一处业务日期入口，统一查询栏直接提交周期条件。
   ...(key === 'business_date' ? { defaultQuick: true, quickDateRange: true } : {})
 })))
@@ -482,7 +482,7 @@ const analysisRows = computed(() => batchAnalysis.value.list.map((row) => active
   ? [text(row.product_name), text(row.sku_name), text(row.batch_no), text(row.batch_balance_quantity), text(row.expire_date), text(row.remaining_shelf_life_days), text(row.remaining_shelf_life_band), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
   : [text(row.product_name), text(row.sku_name), text(row.batch_no), text(row.received_date), text(row.inventory_age_days), text(row.inventory_age_band), row.inventory_amount === null ? '-' : money(row.inventory_amount)]))
 const movementStatisticRows = computed(() => movementStatistics.value.list.map((row) => [
-  text(row.business_date), text(row.source_type_name), text(row.product_name), text(row.sku_name), text(row.document_count, '0'),
+  text(row.source_type_name), text(row.product_name), text(row.sku_name), text(row.document_count, '0'),
   text(row.movement_count, '0'), `${text(row.quantity, '0')} ${text(row.stock_unit, '')}`.trim(), centsMoney(row.cost_amount_cents)
 ]))
 const dashboardCards = computed(() => [
@@ -1415,7 +1415,8 @@ onBeforeUnmount(() => {
             @query="queryStatisticsPage"
           />
           <section class="content-card statistics-board">
-            <header class="card-heading"><div><h2>{{ statisticsTabs.find((tab) => tab.key === activeStatisticsTab)?.label }}</h2><p>筛选、排序与分页均按当前门店的权威批次事实执行</p></div><button class="text-button" @click="activeStatisticsTab === 'inbound' ? selectPage('inbound') : activeStatisticsTab === 'outbound' ? selectPage('outbound') : selectPage('stock')">查看明细</button></header>
+            <!-- 流水统计直接展示结果表，避免重复标题和说明占用查询空间；批次快照页保留明细入口。 -->
+            <header v-if="['expiry', 'age'].includes(activeStatisticsTab)" class="card-heading"><div><h2>{{ statisticsTabs.find((tab) => tab.key === activeStatisticsTab)?.label }}</h2><p>筛选、排序与分页均按当前门店的权威批次事实执行</p></div><button class="text-button" @click="selectPage('stock')">查看明细</button></header>
             <template v-if="['expiry', 'age'].includes(activeStatisticsTab)">
               <div v-if="analysisLoading" class="statistics-empty"><ChartNoAxesCombined :size="28" /><strong>正在读取批次分析</strong></div>
               <div v-else-if="analysisError" class="statistics-empty"><AlertTriangle :size="28" /><strong>{{ analysisError }}</strong></div>
@@ -1428,8 +1429,7 @@ onBeforeUnmount(() => {
               <div v-if="movementStatisticsLoading" class="statistics-empty"><ChartNoAxesCombined :size="28" /><strong>正在读取批次事实统计</strong></div>
               <div v-else-if="movementStatisticsError" class="statistics-empty"><AlertTriangle :size="28" /><strong>{{ movementStatisticsError }}</strong></div>
               <template v-else>
-                <div class="statistics-summary"><article><span>当前查询</span><strong>{{ movementStatistics.count }} 行</strong><small>按业务日、商品与 SKU 汇总</small></article><article><span>事实来源</span><strong>批次流水</strong><small>按统一查询条件过滤</small></article></div>
-                <div class="table-scroll statistics-table"><table><thead><tr><th>业务日期</th><th>业务类型</th><th>商品</th><th>规格</th><th>单据数</th><th>批次流水数</th><th>数量</th><th>成本金额</th></tr></thead><tbody><tr v-if="!movementStatisticRows.length"><td colspan="8" class="table-empty">统计期间暂无{{ activeStatisticsTab === 'inbound' ? '入库' : '出库' }}流水</td></tr><tr v-for="(row, index) in movementStatisticRows" :key="index"><td v-for="cell in row" :key="cell">{{ cell }}</td></tr></tbody></table></div>
+                <div class="table-scroll statistics-table"><table><thead><tr><th>业务类型</th><th>商品</th><th>规格</th><th>单据数</th><th>批次流水数</th><th>数量</th><th>成本金额</th></tr></thead><tbody><tr v-if="!movementStatisticRows.length"><td colspan="7" class="table-empty">统计期间暂无{{ activeStatisticsTab === 'inbound' ? '入库' : '出库' }}流水</td></tr><tr v-for="(row, index) in movementStatisticRows" :key="index"><td v-for="cell in row" :key="cell">{{ cell }}</td></tr></tbody></table></div>
               </template>
             </template>
           </section>

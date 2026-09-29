@@ -57,7 +57,8 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
 
     private function execute(array $context, array $payload, array $definitions): array
     {
-        $rows = $this->sourceRows($context);
+        // 已验证的查询条件传入领域投影，允许统计在事实层按同一周期先聚合，再交给统一查询做权限和分页。
+        $rows = $this->sourceRows($context, $payload);
         return $this->execution->execute($this->pageCode(), $rows, $definitions, $payload, $context,
             static function (array $row) use ($context): bool {
                 return (string)($row['tenant_id'] ?? '') === (string)$context['tenant_id']
@@ -65,7 +66,8 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
             });
     }
 
-    protected function sourceRows(array $context): array
+    /** 从服务端权限上下文读取业务行；子类可消费已验证的筛选计划进行安全下推。 */
+    protected function sourceRows(array $context, array $payload = []): array
     {
         $storeId = (int)$context['store_id'];
         $tenantId = (string)$context['tenant_id'];

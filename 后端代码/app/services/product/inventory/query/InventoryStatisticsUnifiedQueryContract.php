@@ -14,7 +14,8 @@ final class InventoryStatisticsUnifiedQueryContract
         $movement = in_array($pageCode, ['inventory_statistics_inbound', 'inventory_statistics_outbound'], true);
         $fields = $movement ? [
             UnifiedQueryPageRegistry::field('record_id', '记录标识', 'text', false, false, ['sort']),
-            UnifiedQueryPageRegistry::field('business_date', '业务日期', 'date', true, true),
+            // 日期仅作周期条件，不作为跨日合并后的结果列或默认导出列。
+            UnifiedQueryPageRegistry::field('business_date', '业务日期', 'date', false, true),
             UnifiedQueryPageRegistry::field('source_type_name', '业务类型', 'text', true, true),
             UnifiedQueryPageRegistry::field('product_name', '商品名称', 'text', true, true),
             UnifiedQueryPageRegistry::field('sku_name', '商品规格', 'text', true, true),

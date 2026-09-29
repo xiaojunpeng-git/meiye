@@ -15,8 +15,8 @@ final class InventoryMovementAnalyticsServices
         return $this->listForLocations($locationIds, $kind, $from, $to, $canViewCost);
     }
 
-    /** Uses an already authenticated server-side location scope (store or HQ). */
-    public function listForLocations(array $locationIds, string $kind, string $from, string $to, bool $canViewCost = false): array
+    /** 使用已认证的门店/总部仓范围；默认逐日返回，周期模式在事实层跨日汇总且不改变原列表调用方。 */
+    public function listForLocations(array $locationIds, string $kind, string $from, string $to, bool $canViewCost = false, bool $groupByPeriod = false): array
     {
         $locationIds = array_values(array_unique(array_filter(array_map('intval', $locationIds))));
         if (!$locationIds) throw new \RuntimeException('inventory_movement_statistics_scope_denied');
@@ -24,7 +24,16 @@ final class InventoryMovementAnalyticsServices
         if ($direction === null) throw new \InvalidArgumentException('inventory_movement_statistics_kind_invalid');
         $from = $this->date($from); $to = $this->date($to);
         if ($from > $to) throw new \InvalidArgumentException('inventory_movement_statistics_date_range_invalid');
-        $rows = Db::name('inventory_batch_movement_fact')->alias('f')
+        // 旧列表仍按日分组；统一统计页传入已验证周期后，直接在事实层跨日合并，避免客户端相加造成单据数漂移。
+        $dimensions = 'f.source_type,s.consumable_product_id,s.sku_id,s.stock_unit,s.quantity_scale,b.product_name_snapshot,b.sku_name_snapshot';
+        $fields = [
+            'f.source_type', 's.consumable_product_id' => 'product_id', 's.sku_id', 's.stock_unit', 's.quantity_scale',
+            'b.product_name_snapshot' => 'product_name', 'b.sku_name_snapshot' => 'sku_name',
+            'COUNT(DISTINCT f.source_id)' => 'document_count', 'COUNT(f.id)' => 'movement_count',
+            'SUM(f.quantity_units)' => 'quantity_units', 'SUM(f.cost_amount_cents)' => 'cost_amount_cents',
+        ];
+        if (!$groupByPeriod) array_unshift($fields, 'f.business_date');
+        $query = Db::name('inventory_batch_movement_fact')->alias('f')
             ->join('inventory_batch b', 'b.id=f.batch_id')->join('inventory_stock s', 's.id=f.stock_id')
             ->where('f.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('f.location_id', $locationIds)
             ->leftJoin('cashier_v3_presale_claim pc', 'pc.tenant_id=f.tenant_id AND pc.claim_id=f.source_id AND f.source_type=\'presale_claim_outbound\'')
@@ -36,14 +45,12 @@ final class InventoryMovementAnalyticsServices
                         $or->whereNull('pc.claim_status');
                     });
             })
-            ->field([
-                'f.business_date', 'f.source_type', 's.consumable_product_id' => 'product_id', 's.sku_id', 's.stock_unit', 's.quantity_scale',
-                'b.product_name_snapshot' => 'product_name', 'b.sku_name_snapshot' => 'sku_name',
-                'COUNT(DISTINCT f.source_id)' => 'document_count', 'COUNT(f.id)' => 'movement_count',
-                'SUM(f.quantity_units)' => 'quantity_units', 'SUM(f.cost_amount_cents)' => 'cost_amount_cents',
-            ])->group('f.business_date,f.source_type,s.consumable_product_id,s.sku_id,s.stock_unit,s.quantity_scale,b.product_name_snapshot,b.sku_name_snapshot')
-            ->order('f.business_date desc,product_id asc,sku_id asc')->select()->toArray();
+            ->field($fields);
+        $rows = $query->group(($groupByPeriod ? '' : 'f.business_date,') . $dimensions)
+            ->order($groupByPeriod ? 'product_id asc,sku_id asc' : 'f.business_date desc,product_id asc,sku_id asc')->select()->toArray();
         foreach ($rows as &$row) {
+            // 周期行只用终点日期供旧查询契约识别；真实业务日期已经在 SQL whereBetween 内精确筛选。
+            if ($groupByPeriod) $row['business_date'] = $to;
             $scale = max(0, min(4, (int)$row['quantity_scale']));
             $row['quantity'] = $this->decimal((int)$row['quantity_units'], $scale);
             $row['source_type_name'] = $this->sourceTypeName((string)$row['source_type']);
@@ -73,6 +80,8 @@ final class InventoryMovementAnalyticsServices
 
     private function decimal(int $units, int $scale): string
     {
+        // 仅小数位允许去尾零；整数 100 不得被 rtrim 截成 1。
+        if ($scale === 0) return (string)$units;
         return rtrim(rtrim(number_format($units / (10 ** $scale), $scale, '.', ''), '0'), '.');
     }
 
