@@ -20,7 +20,7 @@ const props = defineProps({
   mode: { type: String, default: 'store' }
 })
 
-const emit = defineEmits(['close', 'saved', 'start-usage-return'])
+const emit = defineEmits(['close', 'saved', 'start-usage-return', 'edit-count-draft'])
 
 const inboundType = ref('采购入库')
 const outboundType = ref('过期退货')
@@ -90,6 +90,7 @@ const isDetail = computed(() => props.modalKind.endsWith('-detail'))
 const isInboundOutboundDetail = computed(() => props.modalKind === 'inbound-outbound-detail')
 const isRequestEdit = computed(() => props.modalKind === 'request-edit')
 const isCountEdit = computed(() => props.modalKind === 'count-edit')
+const isCountDraftDetail = computed(() => props.modalKind === 'count-draft-detail')
 const isUsageReturn = computed(() => props.modalKind === 'usage-return')
 const isImport = computed(() => props.modalKind === 'import')
 const isPlatformHeadquarters = computed(() => props.mode === 'platform')
@@ -781,6 +782,7 @@ async function saveCountDraft() {
   submitError.value = ''
   try {
     await persistCountDraft()
+    // 保存只刷新原列表；不自动切换筛选，也不触发加载全部商品。
     emit('saved')
     close()
   } catch (error) { submitError.value = error instanceof Error ? error.message : '盘点草稿保存失败。' }
@@ -1028,6 +1030,10 @@ async function submitWarehouse() {
             <template v-else-if="pageKey === 'count' && detail?.document">
               <div class="detail-meta"><span>盘点单号：<b>{{ detail.document.order_sn || '-' }}</b></span><span>库存仓：{{ detail.document.location_name || scopeName }}</span><span>盘点日期：{{ detail.document.count_date || '-' }}</span><span>盘点状态：{{ detailStatus(detail.document) }}</span></div>
               <section class="line-section"><header><div><h3>盘点明细</h3><p>{{ detail.document.remark || '盘点数据已确认，明细仅供查看。' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>账面库存</th><th>实盘库存</th><th>库存盈亏</th><th>库存单位</th><th>盘盈批次号</th><th>盘盈单价</th><th>金额</th><th>生产日期</th><th>到期日</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="12" class="modal-empty">该盘点单没有商品明细</td></tr><tr v-for="line in detail.lines || []" :key="line.id"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.book_quantity }}</td><td>{{ line.counted_quantity }}</td><td>{{ line.difference_quantity }}</td><td>{{ line.stock_unit || '-' }}</td><td>{{ line.surplus_batch_no || '-' }}</td><td>{{ line.surplus_unit_cost_cents === null || line.surplus_unit_cost_cents === undefined ? '-' : `¥${(Number(line.surplus_unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ countAmount(line.change_amount_cents) }}</td><td>{{ line.surplus_manufactured_date || '-' }}</td><td>{{ line.surplus_expire_date || '-' }}</td></tr></tbody></table></div></section>
+            </template>
+            <template v-else-if="isCountDraftDetail && detail?.draft_id">
+              <div class="detail-meta"><span>草稿编号：<b>草稿-{{ detail.draft_id }}</b></span><span>盘点日期：未完成盘点</span><span>业务日期：{{ detail.business_date || '-' }}</span><span>状态：草稿</span><span>备注：{{ detail.remark || '-' }}</span></div>
+              <section class="line-section"><header><div><h3>草稿明细</h3><p>保存的数据仅供查看；点击编辑后才能继续填写或完成盘点。</p></div><button class="modal-primary" @click="emit('edit-count-draft')">编辑草稿</button></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>账面库存</th><th>实盘库存</th><th>库存盈亏</th><th>盘盈批次号</th><th>盘盈单价</th><th>生产日期</th><th>到期日</th></tr></thead><tbody><tr v-for="(line, index) in detail.lines || []" :key="`${line.sku_id}-${index}`"><td>{{ line.product_name || '-' }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.book_quantity }}</td><td>{{ line.counted_quantity === '' ? '未填写' : line.counted_quantity }}</td><td>{{ line.counted_quantity === '' ? '-' : Number(line.counted_quantity) - Number(line.book_quantity) }}</td><td>{{ line.surplus_batch_no || '-' }}</td><td>{{ line.surplus_unit_cost || '-' }}</td><td>{{ line.surplus_manufactured_date || '-' }}</td><td>{{ line.surplus_expire_date || '-' }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'usage' && detail?.document">
               <div class="detail-meta"><span>院装单号：<b>{{ detail.document.usage_no }}</b></span><span>关联项目：{{ detail.document.project_name_snapshot }}</span><span>业务日期：{{ detail.document.business_date }}</span><span>类型：{{ detail.document.operation_type === 'RETURN' ? '退回' : '领用' }}</span></div>

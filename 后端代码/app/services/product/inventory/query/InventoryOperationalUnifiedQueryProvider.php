@@ -59,11 +59,35 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
     {
         // 已验证的查询条件传入领域投影，允许统计在事实层按同一周期先聚合，再交给统一查询做权限和分页。
         $rows = $this->sourceRows($context, $payload);
+        [$rows, $payload] = $this->includeDraftsOutsideCompletionPeriod($rows, $payload);
         return $this->execution->execute($this->pageCode(), $rows, $definitions, $payload, $context,
             static function (array $row) use ($context): bool {
                 return (string)($row['tenant_id'] ?? '') === (string)$context['tenant_id']
                     && (int)($row['store_id'] ?? 0) === (int)$context['store_id'];
             });
+    }
+
+    /** 盘点周期只约束已完成单据；创建人草稿没有完成日期，仍须留在列表供查看和续编。
+     * 只消费已校验的顶部盘点日期区间，其他状态/关键字/权限筛选仍交统一查询执行器处理。
+     */
+    private function includeDraftsOutsideCompletionPeriod(array $rows, array $payload): array
+    {
+        if ($this->pageCode() !== 'inventory_count') return [$rows, $payload];
+        $remaining = [];
+        foreach ((array)($payload['topFilterConditions'] ?? []) as $condition) {
+            if (($condition['field_key'] ?? '') !== 'count_date' || ($condition['operator'] ?? '') !== 'between') {
+                $remaining[] = $condition;
+                continue;
+            }
+            [$from, $to] = $condition['value'];
+            $rows = array_values(array_filter($rows, static function (array $row) use ($from, $to): bool {
+                if ((int)($row['draft_id'] ?? 0) > 0) return true;
+                $date = (string)($row['count_date'] ?? '');
+                return $date !== '' && $date >= $from && $date <= $to;
+            }));
+        }
+        $payload['topFilterConditions'] = $remaining;
+        return [$rows, $payload];
     }
 
     /** 从服务端权限上下文读取业务行；子类可消费已验证的筛选计划进行安全下推。 */
@@ -168,7 +192,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
             ->where('d.tenant_id', $tenantId)->whereIn('d.location_id', $locationIds)
             ->field(['d.id', 'd.count_no' => 'order_sn', 'd.document_status' => 'status_name', 'd.business_date', 'd.confirmed_at', 'd.recorded_at' => 'add_time', 'd.confirmed_at' => 'operation_at', 'd.location_id', 'p.location_name', 'COUNT(l.id)' => 'detail_count'])
             ->group('d.id,d.count_no,d.document_status,d.business_date,d.confirmed_at,d.recorded_at,d.location_id,p.location_name')->order('d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
-        // 已确认单据只用服务端完成时间形成盘点日期；草稿无完成时间，周期筛选时自然排除。
+        // 已确认单据只用服务端完成时间形成盘点日期；草稿不借用保存日伪造完成日期。
         foreach ($rows as &$row) {
             $row['count_date'] = InventoryStockCountDate::fromConfirmedAt((int)$row['confirmed_at']);
         }

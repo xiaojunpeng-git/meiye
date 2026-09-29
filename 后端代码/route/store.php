@@ -636,6 +636,7 @@ Route::group('storeapi', function () {
 		Route::post('v3/count/confirm', 'product.inventory.InventoryStockCount/confirm')->option(['real_name' => '批次库存盘点确认']);
 		Route::post('v3/count/draft', 'product.inventory.InventoryStockCount/saveDraft')->option(['real_name' => '保存盘点草稿']);
 		Route::get('v3/count/draft/:id', 'product.inventory.InventoryStockCount/draftDetail')->pattern(['id' => '\\d+'])->option(['real_name' => '读取盘点草稿']);
+		Route::post('v3/count/draft/:id/delete', 'product.inventory.InventoryStockCount/deleteDraft')->pattern(['id' => '\\d+'])->option(['real_name' => '永久删除盘点草稿']);
 		Route::get('v3/count', 'product.inventory.InventoryStockCountQuery/index')->option(['real_name' => '批次库存盘点单查询']);
 		Route::get('v3/count/:id/detail', 'product.inventory.InventoryStockCountQuery/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '批次库存盘点单详情']);
 		Route::get('v3/request', 'product.inventory.InventoryStockRequestQuery/index')->option(['real_name' => '批次库存请货单查询']);

@@ -248,6 +248,8 @@ export function createInventoryApi(options = {}) {
     confirmCount(body) { return request('/v3/count/confirm', { method: 'POST', body, timeoutMs: 300000 }) },
     saveCountDraft(body) { return request('/v3/count/draft', { method: 'POST', body, timeoutMs: 300000 }) },
     countDraftDetail(id) { return request(`/v3/count/draft/${Number(id)}`) },
+    // Physical deletion requires the creator-scoped draft ID and the server's latest version.
+    deleteCountDraft(id, expectedVersion) { return request(`/v3/count/draft/${Number(id)}/delete`, { method: 'POST', body: { expected_version: Number(expectedVersion) } }) },
     countDetail(id) { return request(`/v3/count/${Number(id)}/detail`) },
     applyRequest(body) { return request('/v3/request/apply', { method: 'POST', body }) },
     requestCounterparties() { return request('/v3/request/counterparties') },

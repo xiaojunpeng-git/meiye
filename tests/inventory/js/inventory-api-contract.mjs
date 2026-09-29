@@ -309,12 +309,17 @@ check('store count detail reads the protected current-store document endpoint', 
 const countDraftCallOffset = calls.length
 await api.saveCountDraft({ draft_id: 0, expected_version: 0, business_date: '2026-09-28', remark: '', lines: [{ product_id: 1, sku_id: 2 }] })
 await api.countDraftDetail(19)
+await api.deleteCountDraft(19, 3)
 check('count draft save and resume use authenticated store endpoints distinct from final confirmation',
   calls[countDraftCallOffset].url === '/storeapi/product/inventory/v3/count/draft'
   && calls[countDraftCallOffset].options.method === 'POST'
   && JSON.parse(calls[countDraftCallOffset].options.body).expected_version === 0
   && calls[countDraftCallOffset + 1].url === '/storeapi/product/inventory/v3/count/draft/19'
   && calls[countDraftCallOffset + 1].options.method === 'GET')
+check('count draft hard delete uses the protected command endpoint with an explicit version',
+  calls[countDraftCallOffset + 2].url === '/storeapi/product/inventory/v3/count/draft/19/delete'
+  && calls[countDraftCallOffset + 2].options.method === 'POST'
+  && JSON.parse(calls[countDraftCallOffset + 2].options.body).expected_version === 3)
 
 console.log(`INVENTORY_API_RESULT passed=${passed} failed=${failed}`)
 process.exit(failed === 0 ? 0 : 1)

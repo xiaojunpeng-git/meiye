@@ -31,4 +31,13 @@ final class InventoryStockCount extends AuthController
     {
         return $this->success((new InventoryStockCountDraftServices())->detail((int)$this->storeId, (int)$this->storeStaffId, $id));
     }
+
+    /** Only the authenticated creator can permanently remove an unconfirmed draft at its current version. */
+    public function deleteDraft(int $id)
+    {
+        $data = $this->request->postMore([['expected_version', 0]]);
+        return $this->success((new InventoryStockCountDraftServices())->delete(
+            (int)$this->storeId, (int)$this->storeStaffId, $id, (int)$data['expected_version']
+        ));
+    }
 }

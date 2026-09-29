@@ -61,6 +61,26 @@ final class InventoryStockCountDraftServices
             'lines' => json_decode((string)$draft['lines_json'], true, 512, JSON_THROW_ON_ERROR)];
     }
 
+    /** Permanently removes only an unconfirmed creator-owned draft; settled documents and facts are never deleted. */
+    public function delete(int $storeId, int $operatorId, int $id, int $expectedVersion): array
+    {
+        if ($expectedVersion <= 0) throw new \InvalidArgumentException('inventory_stock_count_draft_changed');
+        $scope = $this->scope($storeId, $operatorId);
+        return Db::transaction(function () use ($scope, $id, $expectedVersion): array {
+            $draft = $this->scopedDraft($scope, $id, true);
+            if ((string)$draft['document_status'] !== 'DRAFT' || (int)$draft['version'] !== $expectedVersion) {
+                throw new \RuntimeException('inventory_stock_count_draft_changed');
+            }
+            // The lock and version predicate stop a simultaneous save/confirm from turning deletion into a lost update.
+            $deleted = Db::name('inventory_stock_count_draft')->where('id', $id)
+                ->where('tenant_id', $scope['tenant_id'])->where('store_id', $scope['store_id'])
+                ->where('location_id', $scope['location_id'])->where('operator_id', $scope['operator_id'])
+                ->where('document_status', 'DRAFT')->where('version', $expectedVersion)->delete();
+            if ($deleted !== 1) throw new \RuntimeException('inventory_stock_count_draft_changed');
+            return ['draft_id' => $id, 'deleted' => true];
+        });
+    }
+
     /** Called inside the confirmation transaction so a draft cannot be confirmed twice. */
     public function lockForConfirmation(array $scope, int $draftId, int $version): array
     {
