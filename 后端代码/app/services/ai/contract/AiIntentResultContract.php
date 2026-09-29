@@ -837,86 +837,37 @@ final class AiIntentResultContract
     }
 
     /**
-     * A count/list-only continuation changes the presentation of a verified
-     * condition population, not its population definition. The independent
-     * understanding model must still publish exactly one typed operation
-     * requirement with current-message evidence. PHP then copies only the
-     * signed prior condition and changes its matching result form; it never
-     * classifies customer wording or invents an object, metric or threshold.
+     * Compose only model-understood changes to one signed condition population.
+     * Each changed predicate must resolve uniquely inside that population;
+     * periods and response form are independent typed changes. A count result
+     * has no object identities, so a request to inspect its set first obtains
+     * the same authorised list. Unknown fields retain the normal model path.
      */
-    public static function inheritedConditionResultFormContextIntent(array $understanding,array $sourceQuery,array $contextMeaning=[]): ?array
+    public static function inheritedConditionContinuationContextIntent(array $understanding,array $sourceQuery,array $contextMeaning=[]): ?array
     {
         if (($understanding['status']??null)!=='understood'
             ||($contextMeaning['presentation_origin']??'customer_or_verified_context')!=='customer_or_verified_context') return null;
         $requirements=AiIntentUnderstandingContract::requirements($understanding);
-        if (count($requirements)!==1) return null;
-        $requirement=array_values($requirements)[0];
-        if (($requirement['fields']??null)!==['operation']
-            ||!self::currentEvidenceOnly($requirement['evidence']??[])) return null;
-        $operation=$requirement['values']['operation']??null;
-        if (!in_array($operation,['condition_count','condition_list'],true)) return null;
-        $metrics=$sourceQuery['metric_codes']??null;
-        $sourceShape=$sourceQuery['query_shape']??null;
-        $condition=$sourceQuery['aggregate_condition']??null;
-        if (!in_array($sourceShape,['condition_count','condition_list'],true)||!self::codes($metrics)
-            ||!self::boundAggregateCondition($condition)
-            ||count($condition['conditions'])!==count($metrics)) return null;
-        foreach ($condition['conditions'] as $index=>$item) {
-            if (($item['metric_code']??null)!==($metrics[$index]??null)) return null;
-        }
-        $condition['result_form']=$operation==='condition_count'?'count':'list';
-        $ranking=is_array($sourceQuery['ranking']??null)?$sourceQuery['ranking']:[];
-        $direction=$ranking['direction']??'unspecified';if($direction===null)$direction='unspecified';
-        $limit=$ranking['limit']??null;
-        if (!in_array($direction,['top','bottom','top_and_bottom','unspecified'],true)
-            ||(!is_null($limit)&&!is_int($limit))) return null;
-        $filters=is_array($sourceQuery['business_filters']??null)?$sourceQuery['business_filters']:[];
-        $objectKind=$filters['object_kind']??$condition['subject'];
-        if (($condition['subject']??null)!==$objectKind) return null;
-        $delta=array_fill_keys(self::DELTA_FIELDS,'inherit');
-        $delta['operation']='replace';$delta['aggregate_condition']='replace';
-        return [
-            'object_kind'=>$objectKind,'object_term'=>'','object_relation'=>'analysis',
-            'operation'=>$operation,'metric_codes'=>array_values($metrics),'action_codes'=>[],
-            'needs_metric_choice'=>false,'ranking'=>['direction'=>$direction,'limit'=>$limit],
-            'periods'=>[],'scope'=>'unspecified','aggregate_condition'=>$condition,
-            'requirement_bindings'=>[],'unresolved_fragments'=>[],'context_delta'=>$delta,
-            'result_reference'=>null,'_object_term_normalized'=>false,'_scope_supplied'=>false,
-            '_periods_supplied'=>false,'_ranking_supplied'=>false,'_aggregate_condition_supplied'=>true,
-        ];
-    }
-
-    /**
-     * Apply one model-understood predicate edit to a verified generic
-     * condition set. The model decides that this turn is an edit and supplies
-     * the new typed predicate. PHP only proves that its target is unique
-     * inside the signed prior set, then preserves every other signed field.
-     * A globally ambiguous word may use its typed unit only when exactly one
-     * prior predicate has that unit; otherwise the normal clarification path
-     * remains in control.
-     */
-    public static function inheritedConditionUpdateContextIntent(array $understanding,array $sourceQuery,array $contextMeaning=[]): ?array
-    {
-        if (($understanding['status']??null)!=='understood'
-            ||($contextMeaning['presentation_origin']??'customer_or_verified_context')!=='customer_or_verified_context') return null;
-        $requirements=AiIntentUnderstandingContract::requirements($understanding);
-        if ($requirements===[] || count($requirements)>2) return null;
-        $update=null;$metricTerms=[];$hasRedundantMetric=false;
+        if ($requirements===[] || count($requirements)>8 || isset($understanding['groups'])) return null;
+        $updates=[];$metricTerms=[];$operation=null;$periods=null;$detail=null;$statedObject=null;
         foreach ($requirements as $requirement) {
             $fields=$requirement['fields']??null;
             if (!is_array($fields) || !self::currentEvidenceOnly($requirement['evidence']??[])) return null;
             $sortedFields=$fields;sort($sortedFields,SORT_STRING);
-            // Providers may preserve the explicitly named measurement either
-            // beside condition_update in one requirement or as a separate
-            // requirement.  Both are the same auditable meaning, provided the
-            // metric resolves to the exact same signed predicate below.
-            if (!in_array($sortedFields,[['condition_update'],['metric_codes'],['condition_update','metric_codes']],true)) return null;
+            if ($sortedFields===[] || array_diff($sortedFields,
+                ['condition_update','metric_codes','object_detail','object_kind','object_relation','operation','periods'])!==[]) return null;
+            if (in_array('object_kind',$sortedFields,true)) {
+                $kind=$requirement['values']['object_kind']??null;
+                if (!is_string($kind)||($statedObject!==null&&$statedObject!==$kind)) return null;
+                $statedObject=$kind;
+            }
+            if (in_array('object_relation',$sortedFields,true)
+                &&($requirement['values']['object_relation']??null)!=='analysis') return null;
             if (in_array('condition_update',$sortedFields,true)) {
-                if ($update!==null || !is_array($requirement['values']['condition_update']??null)) return null;
-                $update=$requirement['values']['condition_update'];
+                if (!is_array($requirement['values']['condition_update']??null)) return null;
+                $updates[]=$requirement['values']['condition_update'];
             }
             if (in_array('metric_codes',$sortedFields,true)) {
-                $hasRedundantMetric=true;
                 if (!empty($requirement['values']['metric_exclusions'])) return null;
                 $terms=$requirement['values']['metric_terms']??null;
                 if (!is_array($terms) || $terms===[]) return null;
@@ -925,62 +876,101 @@ final class AiIntentResultContract
                     $metricTerms[]=trim($term);
                 }
             }
+            if (in_array('operation',$sortedFields,true)) {
+                $candidate=$requirement['values']['operation']??null;
+                if ($operation!==null || !in_array($candidate,['condition_count','condition_list'],true)) return null;
+                $operation=$candidate;
+            }
+            if (in_array('periods',$sortedFields,true)) {
+                $candidate=$requirement['values']['periods']??null;
+                if ($periods!==null || !self::periods($candidate) || count($candidate)!==1) return null;
+                $periods=$candidate;
+            }
+            if (in_array('object_detail',$sortedFields,true)) {
+                $candidate=$requirement['values']['object_detail']??null;
+                if ($detail!==null || !is_array($candidate)) return null;
+                $detail=$candidate;
+            }
         }
-        if ($update===null) return null;
         $shape=$sourceQuery['query_shape']??null;
         $metrics=$sourceQuery['metric_codes']??null;
         $condition=$sourceQuery['aggregate_condition']??null;
         if (!in_array($shape,['condition_count','condition_list'],true)||!self::codes($metrics)
             ||!self::boundAggregateCondition($condition)
             ||($condition['result_form']??null)!==($shape==='condition_count'?'count':'list')
-            ||count($condition['conditions'])!==count($metrics)) return null;
+            ||count($condition['conditions'])!==count($metrics)
+            ||!empty($sourceQuery['compare_range'])) return null;
         foreach ($condition['conditions'] as $index=>$item) {
             if (($item['metric_code']??null)!==($metrics[$index]??null)) return null;
         }
-        $target=null;
-        $exact=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
-            (string)($update['target_term']??''),$metrics
-        );
-        if (is_array($exact)) {
-            foreach ($condition['conditions'] as $index=>$item) if (($item['metric_code']??null)===$exact['metric_code']) {
-                if ($target!==null) return null;
-                $target=$index;
+        $filters=is_array($sourceQuery['business_filters']??null)?$sourceQuery['business_filters']:[];
+        $objectKind=$filters['object_kind']??$condition['subject'];
+        if ($objectKind!==$condition['subject']
+            ||($statedObject!==null&&$statedObject!==$objectKind)) return null;
+        if ($detail!==null) {
+            // A count contains no ordered identities. The first safe step for
+            // either a singular or plural overview is the bounded list; an
+            // ordinal or rights request still needs the normal detail path.
+            if ($shape!=='condition_count' || $condition['subject']!=='member'
+                ||($detail['view']??null)!=='summary'
+                ||!in_array($detail['target']??null,['single','set'],true)
+                ||($detail['ordinal']??null)!==null
+                ||($operation!==null && $operation!=='condition_list')) return null;
+            $operation='condition_list';
+        }
+        if ($updates===[] && $operation===null) return null;
+        if ($metricTerms!==[] && count($updates)!==1) return null;
+        $usedTargets=[];
+        foreach ($updates as $update) {
+            $target=null;
+            $exact=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
+                (string)($update['target_term']??''),$metrics
+            );
+            if (is_array($exact)) {
+                foreach ($condition['conditions'] as $index=>$item) if (($item['metric_code']??null)===$exact['metric_code']) {
+                    if ($target!==null) return null;
+                    $target=$index;
+                }
             }
-        }
-        if ($target===null) {
-            $unitMatches=[];
-            foreach ($condition['conditions'] as $index=>$item) if (($item['unit']??null)===($update['unit']??null)) $unitMatches[]=$index;
-            if (count($unitMatches)!==1) return null;
-            $target=$unitMatches[0];
-        }
-        if ($hasRedundantMetric) {
-            $targetMetric=$condition['conditions'][$target]['metric_code']??null;
+            if ($target===null) {
+                $unitMatches=[];
+                foreach ($condition['conditions'] as $index=>$item) if (($item['unit']??null)===($update['unit']??null)) $unitMatches[]=$index;
+                if (count($unitMatches)!==1) return null;
+                $target=$unitMatches[0];
+            }
+            if (isset($usedTargets[$target])) return null;
+            $usedTargets[$target]=true;
             foreach ($metricTerms as $term) {
                 $code=\app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms([$term],$metrics);
                 if ($code===null) {
                     $exactTerm=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText($term,$metrics);
                     $code=is_array($exactTerm)&&is_string($exactTerm['metric_code']??null)?$exactTerm['metric_code']:null;
                 }
-                if ($code!==$targetMetric) return null;
+                if ($code!==($condition['conditions'][$target]['metric_code']??null)) return null;
             }
+            $condition['conditions'][$target]['operator']=$update['operator'];
+            $condition['conditions'][$target]['quantity']=$update['quantity'];
+            $condition['conditions'][$target]['unit']=$update['unit'];
         }
-        $condition['conditions'][$target]['operator']=$update['operator'];
-        $condition['conditions'][$target]['quantity']=$update['quantity'];
-        $condition['conditions'][$target]['unit']=$update['unit'];
+        $operation=$operation??$shape;
+        $condition['result_form']=$operation==='condition_count'?'count':'list';
         $ranking=is_array($sourceQuery['ranking']??null)?$sourceQuery['ranking']:[];
         $direction=$ranking['direction']??'unspecified';if ($direction===null) $direction='unspecified';
         $limit=$ranking['limit']??null;
         if (!in_array($direction,['top','bottom','top_and_bottom','unspecified'],true)
             ||(!is_null($limit)&&!is_int($limit))) return null;
-        $delta=array_fill_keys(self::DELTA_FIELDS,'inherit');$delta['aggregate_condition']='replace';
+        $delta=array_fill_keys(self::DELTA_FIELDS,'inherit');
+        $delta['aggregate_condition']='replace';
+        if ($operation!==$shape) $delta['operation']='replace';
+        if ($periods!==null) $delta['periods']='replace';
         return [
             'object_kind'=>$condition['subject'],'object_term'=>'','object_relation'=>'analysis',
-            'operation'=>$shape,'metric_codes'=>array_values($metrics),'action_codes'=>[],
+            'operation'=>$operation,'metric_codes'=>array_values($metrics),'action_codes'=>[],
             'needs_metric_choice'=>false,'ranking'=>['direction'=>$direction,'limit'=>$limit],
-            'periods'=>[],'scope'=>'unspecified','aggregate_condition'=>$condition,
+            'periods'=>$periods??[],'scope'=>'unspecified','aggregate_condition'=>$condition,
             'requirement_bindings'=>[],'unresolved_fragments'=>[],'context_delta'=>$delta,
             'result_reference'=>null,'_object_term_normalized'=>false,'_scope_supplied'=>false,
-            '_periods_supplied'=>false,'_ranking_supplied'=>false,'_aggregate_condition_supplied'=>true,
+            '_periods_supplied'=>$periods!==null,'_ranking_supplied'=>false,'_aggregate_condition_supplied'=>true,
         ];
     }
 

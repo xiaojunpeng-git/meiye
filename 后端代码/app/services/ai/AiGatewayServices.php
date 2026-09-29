@@ -1211,8 +1211,11 @@ final class AiGatewayServices
         // shortcut around natural-language understanding.  It is verified and
         // reduced to non-sensitive query meaning before the model sees it.
         $sourceCollection=is_array($sourceContext['items']??null)?$sourceContext['items']:[];
-        $sourceQuery=$sourceContext['query']??($sourceCollection[0]['query']??null);
-        if ($sourceQuery!==null) {
+        // A collection has several peer answers. Its first item is not a
+        // default referent for an unqualified follow-up; only collection
+        // operations that explicitly apply to every item may inspect it.
+        $sourceQuery=$sourceContext['query']??(count($sourceCollection)===1?($sourceCollection[0]['query']??null):null);
+        if ($sourceContext!==null) {
             // The signed context is restored and replayed under current
             // authority before this point.  It is therefore the only prior
             // query carrier needed for this follow-up; do not resend the
@@ -1353,12 +1356,28 @@ final class AiGatewayServices
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
             $detail=$requirement['values']['object_detail']??null;
             if (!is_array($detail)) continue;
-            $shape=$sourceContext['view']['query']['query_shape']??'missing';
-            if (!in_array($shape,['ranking','summary','breakdown','condition_list'],true)) $shape='other';
+            $shape=$sourceQuery['query_shape']??'missing';
+            if (!is_string($shape) || !preg_match('/^[a-z_]{1,32}$/D',$shape)) $shape='other';
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
                 'object_detail_'.$detail['target'].'_'.$detail['view'].'_from_'.$shape,[],'object_detail_probe');
         }
-        $objectDetail=$this->compileObjectDetailContinuation($understanding,$sourceContext,$body['output_format']);
+        // A count view intentionally has no identities. When the accepted
+        // continuation asks to inspect that population, reuse its signed
+        // predicates to obtain a bounded list before any object selection.
+        // This is the same typed condition merger used by amount/date/form
+        // edits, not a phrase-specific detail shortcut.
+        $conditionDetailIntent=null;
+        if (($sourceQuery['query_shape']??null)==='condition_count') {
+            foreach ((array)($understanding['requirements']??[]) as $requirement) {
+                if (!in_array('object_detail',(array)($requirement['fields']??[]),true)) continue;
+                $conditionDetailIntent=AiIntentResultContract::inheritedConditionContinuationContextIntent(
+                    $understanding,$sourceQuery,(array)($sourceContext['meaning']??[])
+                );
+                break;
+            }
+        }
+        $objectDetail=$conditionDetailIntent===null
+            ?$this->compileObjectDetailContinuation($understanding,$sourceContext,$body['output_format']):null;
         if ($objectDetail!==null) {
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_object_detail_continuation_admitted');
             return $objectDetail;
@@ -1369,7 +1388,9 @@ final class AiGatewayServices
         // the binding model must account for a non-metric field and can drop
         // it during format repair. The typed understanding, rather than a
         // phrase matcher, proves the object, response form and set target.
-        [$understanding,$requestedMemberDetail]=$this->separatePopulationDetail($understanding);
+        if ($conditionDetailIntent===null) {
+            [$understanding,$requestedMemberDetail]=$this->separatePopulationDetail($understanding);
+        } else $requestedMemberDetail=null;
         // Some providers omit the new request-kind marker only when a signed
         // predecessor is present. Recover it solely when two independent
         // structural checks agree: the model accepted only a broad observation
@@ -1489,18 +1510,18 @@ final class AiGatewayServices
         // closed-calendar grammar has proved that no other business signal is
         // present. Other date-bearing requests continue through normal
         // binding, where the model may clear or replace the old topic.
-        $collectionPeriodIntent=$sourceCollection===[]||$sourceQuery===null||$localPeriodUnderstanding===null?null
+        $collectionPeriodIntent=$sourceCollection===[]||$localPeriodUnderstanding===null?null
             :AiIntentResultContract::inheritedPeriodOnlyContextIntent(
-                $understanding,$sourceQuery,(array)($sourceContext['meaning']??[])
+                $understanding,$sourceCollection[0]['query'],(array)($sourceContext['meaning']??[])
             );
         if ($collectionPeriodIntent!==null) {
             return $this->compileCollectionPeriodContinuation(
                 $understanding,$sourceCollection,(array)($sourceContext['meaning']??[]),$body['output_format'],$today
             );
         }
-        $collectionRankingIntent=$sourceCollection===[]||$sourceQuery===null||$localRankingUnderstanding===null?null
+        $collectionRankingIntent=$sourceCollection===[]||$localRankingUnderstanding===null?null
             :AiIntentResultContract::inheritedRankingOnlyContextIntent(
-                $understanding,$sourceQuery,(array)($sourceContext['meaning']??[])
+                $understanding,$sourceCollection[0]['query'],(array)($sourceContext['meaning']??[])
             );
         if ($collectionRankingIntent!==null) {
             return $this->compileCollectionRankingContinuation(
@@ -1538,12 +1559,10 @@ final class AiGatewayServices
                 $safe['outbound'],$sourceContext,$checkpoint
             );
         }
-        $reusedConditionIntent=$sourceQuery===null?null:AiIntentResultContract::inheritedConditionUpdateContextIntent(
-            $understanding,$sourceQuery,(array)($sourceContext['meaning']??[])
-        );
-        $reusedConditionResultFormIntent=$sourceQuery===null?null:AiIntentResultContract::inheritedConditionResultFormContextIntent(
-            $understanding,$sourceQuery,(array)($sourceContext['meaning']??[])
-        );
+        $reusedConditionIntent=$conditionDetailIntent??($sourceQuery===null?null:
+            AiIntentResultContract::inheritedConditionContinuationContextIntent(
+                $understanding,$sourceQuery,(array)($sourceContext['meaning']??[])
+            ));
         $conditionUpdateBindingReused=$reusedConditionIntent!==null;
         // The same closed-calendar proof guards the single-query shortcut.
         // This prevents a complete new question that happens to contain a
@@ -1556,7 +1575,6 @@ final class AiGatewayServices
             $understanding,$sourceQuery,(array)($sourceContext['meaning']??[])
         );
         $contextBindingReused=$reusedConditionIntent!==null
-            ||$reusedConditionResultFormIntent!==null
             ||$reusedPeriodIntent!==null
             ||$reusedRankingIntent!==null;
         $registeredConditionFailure=null;
@@ -1600,11 +1618,8 @@ final class AiGatewayServices
         // continuation cannot hit an undefined-variable RuntimeException.
         $bindingRankRecovery=false;$groupedItems=null;$groupedUnderstanding=null;
         if ($reusedConditionIntent!==null) {
-            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'context_condition_update_binding_reused');
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'context_condition_continuation_binding_reused');
             $reply=['intent'=>$reusedConditionIntent,'usage'=>[]];
-        } elseif ($reusedConditionResultFormIntent!==null) {
-            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'context_condition_result_form_binding_reused');
-            $reply=['intent'=>$reusedConditionResultFormIntent,'usage'=>[]];
         } elseif ($reusedPeriodIntent!==null) {
             // There is no new metric, object, range, ranking, scope or
             // exclusion to bind.  Keep the path visible in payload-free Run

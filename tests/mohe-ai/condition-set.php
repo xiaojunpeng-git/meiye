@@ -640,7 +640,7 @@ $followUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'列出�
     'id'=>'r1','meaning'=>'查看名单','fields'=>['operation'],'values'=>['operation'=>'condition_list'],
     'evidence'=>[['message_id'=>'current','quote'=>'明细有哪些？']],
 ]]],$followSafe);
-$reusedResultForm=AiIntentResultContract::inheritedConditionResultFormContextIntent(
+$reusedResultForm=AiIntentResultContract::inheritedConditionContinuationContextIntent(
     $followUnderstanding,$priorQuery,['presentation_origin'=>'customer_or_verified_context']
 );
 csCheck(($reusedResultForm['operation']??null)==='condition_list'
@@ -651,9 +651,14 @@ csCheck(($reusedResultForm['operation']??null)==='condition_list'
     'a typed count/list-only continuation reuses the complete signed condition population');
 $notResultForm=$followUnderstanding;$notResultForm['requirements'][0]['fields']=['operation','periods'];
 $notResultForm['requirements'][0]['values']['periods']=[['kind'=>'month_offset','offset_months'=>0]];
-csCheck(AiIntentResultContract::inheritedConditionResultFormContextIntent(
+$combinedResultForm=AiIntentResultContract::inheritedConditionContinuationContextIntent(
     $notResultForm,$priorQuery,['presentation_origin'=>'customer_or_verified_context']
-)===null,'the result-form shortcut rejects every continuation carrying another meaning');
+);
+csCheck(($combinedResultForm['operation']??null)==='condition_list'
+    &&($combinedResultForm['periods']??null)===[['kind'=>'month_offset','offset_months'=>0]]
+    &&($combinedResultForm['context_delta']['periods']??null)==='replace'
+    &&($combinedResultForm['aggregate_condition']['conditions']??null)===$priorQuery['aggregate_condition']['conditions'],
+    'one typed turn changes month and answer form while preserving every signed predicate');
 $repeatedPriorCondition=['goal'=>'列出上一条件集合的员工名单','status'=>'understood','requirements'=>[[
     'id'=>'r1','meaning'=>'查看名单','fields'=>['metric_codes','object_kind','operation','aggregate_condition'],'values'=>[
         'metric_terms'=>['销售业绩','劳动业绩'],'object_kind'=>'person','operation'=>'condition_list',
@@ -701,7 +706,7 @@ $memberUpdateUnderstanding=AiIntentUnderstandingContract::normalize([
         'evidence'=>[['message_id'=>'current','quote'=>'金额门槛改成1万元']],
     ]],
 ],$memberUpdateSafe);
-$memberUpdateIntent=AiIntentResultContract::inheritedConditionUpdateContextIntent(
+$memberUpdateIntent=AiIntentResultContract::inheritedConditionContinuationContextIntent(
     $memberUpdateUnderstanding,$memberUpdateSource
 );
 csCheck(is_array($memberUpdateIntent)
@@ -714,6 +719,71 @@ csCheck($memberUpdateMerged['metric_codes']===$memberUpdateSource['metric_codes'
     &&$memberUpdateMerged['aggregate_condition']['conditions'][1]['quantity']==='10000'
     &&$memberUpdateMerged['aggregate_condition']['conditions'][1]['metric_code']==='sales_collected_amount',
     'a unique yuan predicate changes while the visit condition, object, relation and registered metric order remain signed');
+$combinedSafe=$memberUpdateSafe;
+$combinedSafe['question']='把金额门槛改成980元，只看本月并列出客户';
+$combinedSafe['evidence_messages']=[['id'=>'current','text'=>$combinedSafe['question']]];
+$combinedUnderstanding=AiIntentUnderstandingContract::normalize([
+    'goal'=>'修改条件、期间并查看名单','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'修改金额条件','fields'=>['condition_update'],
+            'values'=>['condition_update'=>['target_term'=>'金额门槛','operator'=>'eq','quantity'=>'980','unit'=>'yuan']],
+            'evidence'=>[['message_id'=>'current','quote'=>'金额门槛改成980元']]],
+        ['id'=>'r2','meaning'=>'只看本月','fields'=>['periods'],
+            'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
+            'evidence'=>[['message_id'=>'current','quote'=>'本月']]],
+        ['id'=>'r3','meaning'=>'列出客户','fields'=>['operation'],
+            'values'=>['operation'=>'condition_list'],
+            'evidence'=>[['message_id'=>'current','quote'=>'列出客户']]],
+    ],
+],$combinedSafe);
+$combinedIntent=AiIntentResultContract::inheritedConditionContinuationContextIntent($combinedUnderstanding,$memberUpdateSource);
+$combinedMerged=IntentContextMerger::merge($memberUpdateSource,$combinedIntent)['intent'];
+csCheck($combinedMerged['operation']==='condition_list'
+    &&$combinedMerged['periods']===[['kind'=>'month_offset','offset_months'=>0]]
+    &&$combinedMerged['aggregate_condition']['conditions'][0]===$memberUpdateSource['aggregate_condition']['conditions'][0]
+    &&$combinedMerged['aggregate_condition']['conditions'][1]['operator']==='eq'
+    &&$combinedMerged['aggregate_condition']['conditions'][1]['quantity']==='980'
+    &&$combinedMerged['context_delta']['store_scope']==='inherit',
+    'one current turn composes amount, operator, month and list form without losing the other predicate or store scope');
+$detailSafe=$memberUpdateSafe;
+$detailSafe['question']='客户详情';
+$detailSafe['evidence_messages']=[['id'=>'current','text'=>'客户详情']];
+$detailUnderstanding=AiIntentUnderstandingContract::normalize([
+    'goal'=>'查看上一条件集合的客户','status'=>'understood','requirements'=>[[
+        'id'=>'r1','meaning'=>'查看客户详情','fields'=>['object_detail'],
+        'values'=>['object_detail'=>['view'=>'summary','target'=>'set','ordinal'=>null]],
+        'evidence'=>[['message_id'=>'current','quote'=>'客户详情']],
+    ]],
+],$detailSafe);
+$detailIntent=AiIntentResultContract::inheritedConditionContinuationContextIntent($detailUnderstanding,$memberUpdateSource);
+csCheck(($detailIntent['operation']??null)==='condition_list'
+    &&($detailIntent['aggregate_condition']['conditions']??null)===$memberUpdateSource['aggregate_condition']['conditions'],
+    'a count-backed detail request first reads the same bounded member list because count evidence has no identities');
+$explicitMemberDetail=$detailUnderstanding;
+$explicitMemberDetail['requirements'][0]['fields']=['object_kind','object_relation','object_detail'];
+$explicitMemberDetail['requirements'][0]['values']+=['object_kind'=>'member','object_relation'=>'analysis'];
+csCheck((AiIntentResultContract::inheritedConditionContinuationContextIntent(
+    $explicitMemberDetail,$memberUpdateSource
+)['operation']??null)==='condition_list',
+    'an explicitly restated member kind can still inherit the signed member population');
+$detailWithListForm=$detailUnderstanding;
+$detailWithListForm['requirements'][0]['fields'][]='operation';
+$detailWithListForm['requirements'][0]['values']['operation']='condition_list';
+csCheck((AiIntentResultContract::inheritedConditionContinuationContextIntent(
+    $detailWithListForm,$memberUpdateSource
+)['operation']??null)==='condition_list',
+    'a model may state both inspect-the-set and list form without losing the verified count population');
+$ordinalDetail=$detailUnderstanding;
+$ordinalDetail['requirements'][0]['values']['object_detail']['ordinal']=2;
+csCheck(AiIntentResultContract::inheritedConditionContinuationContextIntent($ordinalDetail,$memberUpdateSource)===null,
+    'an ordinal cannot be resolved from a count without verified list order');
+$otherSubjectDetail=$explicitMemberDetail;
+$otherSubjectDetail['requirements'][0]['values']['object_kind']='person';
+csCheck(AiIntentResultContract::inheritedConditionContinuationContextIntent($otherSubjectDetail,$memberUpdateSource)===null,
+    'a changed analytical subject cannot silently inherit the member population');
+$groupedDetail=$detailUnderstanding;
+$groupedDetail['groups']=[['id'=>'q1','requirement_ids'=>['r1']],['id'=>'q2','requirement_ids'=>['r1']]];
+csCheck(AiIntentResultContract::inheritedConditionContinuationContextIntent($groupedDetail,$memberUpdateSource)===null,
+    'multi-result context cannot select one group as the implicit detail source');
 $implicitUpdateSafe=['schema_version'=>'sanitized-question-v2','question'=>'改成2000元呢','has_unresolved_conditions'=>false,
     'server_resolved_fields'=>[],'reference_date'=>'2026-09-20','recent_questions'=>[$memberNaturalSafe['question']],
     'evidence_messages'=>[['id'=>'current','text'=>'改成2000元呢']],
@@ -727,7 +797,7 @@ $implicitUpdateUnderstanding=AiIntentUnderstandingContract::normalize([
         'evidence'=>[['message_id'=>'current','quote'=>'改成2000元呢']],
     ]],
 ],$implicitUpdateSafe);
-$implicitUpdateIntent=AiIntentResultContract::inheritedConditionUpdateContextIntent(
+$implicitUpdateIntent=AiIntentResultContract::inheritedConditionContinuationContextIntent(
     $implicitUpdateUnderstanding,$memberUpdateSource
 );
 csCheck(is_array($implicitUpdateIntent)
@@ -741,7 +811,7 @@ $ambiguousMoneySource['aggregate_condition']['conditions']=[
     ['metric_code'=>'sales_collected_amount','operator'=>'gte','quantity'=>'20000','unit'=>'yuan'],
     ['metric_code'=>'cash_performance','operator'=>'gte','quantity'=>'5000','unit'=>'yuan'],
 ];
-csCheck(AiIntentResultContract::inheritedConditionUpdateContextIntent($memberUpdateUnderstanding,$ambiguousMoneySource)===null,
+csCheck(AiIntentResultContract::inheritedConditionContinuationContextIntent($memberUpdateUnderstanding,$ambiguousMoneySource)===null,
     'an ambiguous amount edit never chooses between two signed yuan predicates by position or guesswork');
 csReject(static function()use($implicitUpdateSafe,$ambiguousMoneySource): void {
     $safe=$implicitUpdateSafe;$safe['prior_query']=IntentContextMerger::modelView($ambiguousMoneySource);
@@ -768,7 +838,7 @@ $personUpdateUnderstanding=AiIntentUnderstandingContract::normalize([
         'evidence'=>[['message_id'=>'current','quote'=>'销售业绩门槛改成3万元']],
     ]],
 ],$personUpdateSafe);
-$personUpdateIntent=AiIntentResultContract::inheritedConditionUpdateContextIntent(
+$personUpdateIntent=AiIntentResultContract::inheritedConditionContinuationContextIntent(
     $personUpdateUnderstanding,$personUpdateSource
 );
 csCheck(is_array($personUpdateIntent)
@@ -792,7 +862,7 @@ $splitPersonUpdate=AiIntentUnderstandingContract::normalize([
         ],
     ],
 ],$personUpdateSafe);
-$splitPersonIntent=AiIntentResultContract::inheritedConditionUpdateContextIntent($splitPersonUpdate,$personUpdateSource);
+$splitPersonIntent=AiIntentResultContract::inheritedConditionContinuationContextIntent($splitPersonUpdate,$personUpdateSource);
 csCheck(is_array($splitPersonIntent)
     &&($splitPersonIntent['metric_codes']??null)===$personUpdateSource['metric_codes']
     &&($splitPersonIntent['context_delta']['metric_codes']??null)==='inherit'
@@ -802,7 +872,7 @@ csCheck(is_array($splitPersonIntent)
     'a provider split between condition update and named metric updates one predicate without replacing the signed metric set');
 $wrongMetricUpdate=$personUpdateUnderstanding;
 $wrongMetricUpdate['requirements'][0]['values']['metric_terms']=['服务次数'];
-csCheck(AiIntentResultContract::inheritedConditionUpdateContextIntent($wrongMetricUpdate,$personUpdateSource)===null,
+csCheck(AiIntentResultContract::inheritedConditionContinuationContextIntent($wrongMetricUpdate,$personUpdateSource)===null,
     'a redundant metric carrier that points at another predicate cannot authorize a threshold update');
 
 $legacyPrior=['query_shape'=>'threshold_count','metric_codes'=>['sales_collected_amount'],'start_date'=>'2026-09-01','end_date'=>'2026-09-19',
