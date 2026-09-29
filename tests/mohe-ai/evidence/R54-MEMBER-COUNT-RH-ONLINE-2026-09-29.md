@@ -29,3 +29,8 @@
 - 前端源码：无；后端源码：固定提交中的 6 个 PHP；数据库迁移：无；自动化测试：`condition-set.php` 等专项回归；工程脚本：无；生成物：发布归档和线上短期 Run；验收证据：本记录、[本地自测](R54-MEMBER-COUNT-LOCAL-FIX-SELFTEST-2026-09-29.md)、[前次失败与回滚](R54-RH-FAILED-DEPLOY-2026-09-29.md)。
 - 代码职责与安全边界注释在 `AiGatewayServices.php`、`AiIntentUnderstandingContract.php`、`AiConditionResponseFormResolver.php`、以及先前 R54 的批量权益读取相关文件补充；没有保留一套平行 Reader。冻结 R5 holdout 的 13 项旧题不匹配仍是独立已知缺口，不能称 `run-all.sh` 全绿。
 - 本次小程序前端包未改、未重新上传；本记录验证的是瑞昊平台页面与线上共享后端，不冒称实体手机验收。
+
+## 独立推送（2026-09-30）
+
+- 当前本地混合分支包含库存、收银等其他任务，未直接 push。以既有 Gitee 魔核 AI 发布基线 `c812e59d` 为父，仅取本轮已提交的魔核 AI 文件生成独立发布提交 `c50365d127be7d6932bcee7b6d31579b440eb1e8`；与父版本比较仅有 13 个本轮魔核 AI 源码、测试与证据文件，`git diff --check` 通过。
+- 已推送到 `origin/release/mohe-ai-r46-20260927`，远端 SHA 复核为 `c50365d1`。未推送其他业务任务或 GitHub，也未上传新的小程序包。
