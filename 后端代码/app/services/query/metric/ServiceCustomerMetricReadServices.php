@@ -116,6 +116,9 @@ final class ServiceCustomerMetricReadServices
                     'subject' => $subject,
                     'employee_id' => $employeeId,
                     'employee_name' => trim((string)($row['employee_name'] ?? '')),
+                    // The point/round choice is frozen on the employee role,
+                    // not on the calculation rule (which may be shared).
+                    'point' => substr((string)($row['role_snapshot'] ?? ''), -6) === ':point',
                     'service_line_key' => $serviceLineKey,
                     'service' => $services[$serviceLineKey],
                 ];
@@ -130,12 +133,14 @@ final class ServiceCustomerMetricReadServices
         foreach ($services as $serviceLineKey => $service) {
             if ($service['subject'] === null || $service['had_labor_fact']
                 || (int)$service['labor_amount_cents'] !== 0 || (int)$service['labor_fee_amount_cents'] !== 0) continue;
+            $pointEmployees = $this->snapshotPointEmployeeIds((string)$service['craftsmen_snapshot_json'], (int)$service['store_id']);
             foreach ($this->snapshotEmployees((string)$service['craftsmen_snapshot_json'], (int)$service['store_id']) as $employeeId => $employeeName) {
                 $lineKey = (int)$service['store_id'] . '|' . $employeeId . '|' . $service['request_id'] . '|' . $service['source_line_id'];
                 $lines[$lineKey] = [
                     'store_id' => $service['store_id'], 'business_date' => $service['business_date'],
                     'subject' => $service['subject'], 'employee_id' => $employeeId,
-                    'employee_name' => $employeeName, 'service_line_key' => $serviceLineKey,
+                    'employee_name' => $employeeName, 'point' => isset($pointEmployees[$employeeId]),
+                    'service_line_key' => $serviceLineKey,
                     'service' => $service,
                 ];
             }
@@ -151,10 +156,11 @@ final class ServiceCustomerMetricReadServices
             $employeeName = (string)$line['employee_name'];
             $dailyKey = $storeId . '|' . (string)$line['business_date'] . '|' . (string)$line['subject'];
             $periodKey = $storeId . '|' . (string)$line['subject'];
-            if (!isset($daily[$dailyKey])) $daily[$dailyKey] = ['employees' => [], 'lines' => []];
+            if (!isset($daily[$dailyKey])) $daily[$dailyKey] = ['employees' => [], 'lines' => [], 'point_employees' => []];
             if (!isset($period[$periodKey])) $period[$periodKey] = ['employees' => []];
             $daily[$dailyKey]['employees'][$employeeId] = $this->name($daily[$dailyKey]['employees'][$employeeId] ?? '', $employeeName);
             $daily[$dailyKey]['lines'][$employeeId][] = $lineKey;
+            if (!empty($line['point'])) $daily[$dailyKey]['point_employees'][$employeeId] = true;
             $period[$periodKey]['employees'][$employeeId] = $this->name($period[$periodKey]['employees'][$employeeId] ?? '', $employeeName);
         }
 
@@ -172,6 +178,9 @@ final class ServiceCustomerMetricReadServices
                 $this->initSummary($summary, $summaryKey, $employeeName);
                 if (!isset($dailyTotals[$dailyTotalKey])) $dailyTotals[$dailyTotalKey] = ['visit_tenths' => 0, 'employee_name' => $employeeName];
                 $summary[$summaryKey]['visit_tenths'] += $tenths;
+                // 点客属于被明确指定的技师，不按共同服务人数分摊。
+                // 同一客人在同门店同一天的多项目只计一次点客次。
+                if (isset($group['point_employees'][$employeeId])) $summary[$summaryKey]['point_visit_tenths'] += 10;
                 $dailyTotals[$dailyTotalKey]['visit_tenths'] += $tenths;
                 $dailyTotals[$dailyTotalKey]['employee_name'] = $this->name($dailyTotals[$dailyTotalKey]['employee_name'], $employeeName);
                 $lineKeys = $group['lines'][$employeeId] ?? [];
@@ -215,7 +224,7 @@ final class ServiceCustomerMetricReadServices
             ->whereBetween('sv.business_date', [$range['start'], $range['end']])
             ->where('sv.service_status', 'completed')->order('p.id', 'asc');
         call_user_func($this->normalServices, $query, 'sv');
-        return $query->field('p.id,p.fact_id,p.fact_direction,p.reversal_of,p.store_id,p.employee_id,p.employee_name_snapshot employee_name,sv.checkout_request_id,sv.source_line_id,sv.service_fact_id,sv.store_id service_store_id,sv.business_date,sv.member_id,sv.member_name_snapshot member_name,sv.service_object,sv.friend_counts_as_customer,sv.craftsmen_snapshot_json,sv.labor_amount_cents,sv.labor_fee_amount_cents,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.source_document_type source_type')->select()->toArray();
+        return $query->field('p.id,p.fact_id,p.fact_direction,p.reversal_of,p.store_id,p.employee_id,p.employee_name_snapshot employee_name,p.role_snapshot,sv.checkout_request_id,sv.source_line_id,sv.service_fact_id,sv.store_id service_store_id,sv.business_date,sv.member_id,sv.member_name_snapshot member_name,sv.service_object,sv.friend_counts_as_customer,sv.craftsmen_snapshot_json,sv.labor_amount_cents,sv.labor_fee_amount_cents,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.source_document_type source_type')->select()->toArray();
     }
 
     /** @return array<int,string> */
@@ -226,11 +235,25 @@ final class ServiceCustomerMetricReadServices
         $out = [];
         foreach ($rows as $row) {
             if (!is_array($row)) continue;
-            $employeeId = $this->integer($row['employeeId'] ?? 0);
+            $employeeId = $this->integer($row['employee_id'] ?? $row['employeeId'] ?? 0);
             if ($employeeId <= 0) continue;
-            $snapshotStoreId = $this->integer($row['storeId'] ?? $storeId);
+            $snapshotStoreId = $this->integer($row['store_id'] ?? $row['storeId'] ?? $storeId);
             if ($snapshotStoreId !== $storeId) continue;
-            $out[$employeeId] = $this->name($out[$employeeId] ?? '', trim((string)($row['name'] ?? '')));
+            $out[$employeeId] = $this->name($out[$employeeId] ?? '', trim((string)($row['staff_name_snapshot'] ?? $row['name'] ?? '')));
+        }
+        return $out;
+    }
+
+    /** Zero-price completed services use the immutable allocation snapshot. */
+    private function snapshotPointEmployeeIds(string $json,int $storeId): array
+    {
+        $rows=json_decode($json,true);
+        if (!is_array($rows)) return [];
+        $out=[];
+        foreach ($rows as $row) {
+            if (!is_array($row) || empty($row['is_point_customer']??$row['isPointCustomer']??false)) continue;
+            $employeeId=$this->integer($row['employee_id']??$row['employeeId']??0);
+            if ($employeeId>0 && $this->integer($row['store_id']??$row['storeId']??$storeId)===$storeId) $out[$employeeId]=true;
         }
         return $out;
     }
@@ -265,7 +288,8 @@ final class ServiceCustomerMetricReadServices
     /** @param array<string,array{visit_tenths:int,people_tenths:int,employee_name:string}> $summary */
     private function initSummary(array &$summary, string $key, string $employeeName): void
     {
-        if (!isset($summary[$key])) $summary[$key] = ['visit_tenths' => 0, 'people_tenths' => 0, 'employee_name' => $employeeName];
+        if (!isset($summary[$key])) $summary[$key] = ['visit_tenths' => 0, 'people_tenths' => 0,
+            'point_visit_tenths' => 0, 'employee_name' => $employeeName];
         else $summary[$key]['employee_name'] = $this->name($summary[$key]['employee_name'], $employeeName);
     }
 

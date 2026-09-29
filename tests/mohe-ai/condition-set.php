@@ -758,6 +758,13 @@ $detailIntent=AiIntentResultContract::inheritedConditionContinuationContextInten
 csCheck(($detailIntent['operation']??null)==='condition_list'
     &&($detailIntent['aggregate_condition']['conditions']??null)===$memberUpdateSource['aggregate_condition']['conditions'],
     'a count-backed detail request first reads the same bounded member list because count evidence has no identities');
+$gatewayReflection=new ReflectionClass(app\services\ai\AiGatewayServices::class);
+$gatewayWithoutDependencies=$gatewayReflection->newInstanceWithoutConstructor();
+$displayRequest=$gatewayReflection->getMethod('inheritedCountDetailRequest')->invoke($gatewayWithoutDependencies,$detailUnderstanding);
+$attached=$gatewayReflection->getMethod('attachPopulationDetail')->invoke($gatewayWithoutDependencies,
+    ['kind'=>'plan','plan'=>['query'=>['query_shape'=>'condition_list']]],$displayRequest);
+csCheck(($attached['_member_detail_request']??null)===['view'=>'summary','target'=>'set','ordinal'=>null],
+    'count-to-list continuation retains the detail request instead of publishing only its filter list');
 $explicitMemberDetail=$detailUnderstanding;
 $explicitMemberDetail['requirements'][0]['fields']=['object_kind','object_relation','object_detail'];
 $explicitMemberDetail['requirements'][0]['values']+=['object_kind'=>'member','object_relation'=>'analysis'];

@@ -153,7 +153,7 @@ $personOverview=$renderer->render(['query'=>['query_shape'=>'summary','start_dat
         ['metric_code'=>'staff_project_num','period'=>'current','storage_unit'=>'project_count_micro','count'=>2500000],
         ['metric_code'=>'staff_service_num','period'=>'current','storage_unit'=>'customer_tenth','count'=>13],
     ]]);
-$check(strpos($personOverview['summary'], '销售人业绩为100元；项目数为2.5项；服务人次为1.3人次。')===0,
+$check(strpos($personOverview['summary'], '销售人业绩为100元；项目数为2.5项；服务客次为1.3客次。')===0,
     'person overview renders mixed registered money and count storage units through their shared evidence contract');
 $serviceVisits=$renderer->render(['query'=>['query_shape'=>'ranking','start_date'=>'2026-09-16','end_date'=>'2026-09-16','compare_range'=>null,'business_filters'=>['object_kind'=>'person']],
     'personnel_selection_label'=>'全部授权人员','data_as_of'=>'2026-09-16T12:00:00+08:00','results'=>[
@@ -161,9 +161,9 @@ $serviceVisits=$renderer->render(['query'=>['query_shape'=>'ranking','start_date
             ['employee_name'=>'测试员工','amount_cents'=>13],
         ]]],
     ]]);
-$check(strpos($serviceVisits['summary'], '服务人次为1.3人次')!==false
+$check(strpos($serviceVisits['summary'], '服务客次为1.3客次')!==false
     && ($serviceVisits['table']['rows'][0]['value']??null)==='1.3'
-    && ($serviceVisits['table']['rows'][0]['unit']??null)==='人次',
+    && ($serviceVisits['table']['rows'][0]['unit']??null)==='客次',
     'personnel service visits retain exact tenth allocations and dictionary units in answers');
 $check(app\services\query\metric\MetricMoneyFormatter::integerYuan(15149)==='151'
     && app\services\query\metric\MetricMoneyFormatter::integerYuan(15150)==='152'

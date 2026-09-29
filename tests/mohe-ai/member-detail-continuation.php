@@ -62,14 +62,15 @@ $check(array_column($rankingSet['members'],'selection_ref')===['member:101','mem
     'a ranked member set can read details for those exact verified members in display order');
 
 $detail=['projectionContractVersion'=>'cashier-v3-member-detail-v3','dataAsOf'=>'2026-09-24T20:00:00+08:00',
-    'member'=>['memberId'=>101,'name'=>'测试会员'],'summary'=>[
+    'member'=>['memberId'=>101,'name'=>'测试会员','storeId'=>8,'storeName'=>'测试门店'],'summary'=>[
         'accountBalance'=>'1288.60','principalBalance'=>'1000.00','giftBalance'=>'288.60',
         'activeCardCount'=>2,'remainingProjectTimes'=>6,'remainingProjectAmount'=>'1800.49',
     ],'cards'=>[[
         'cardName'=>'护理卡','statusLabel'=>'有效','remainingTimes'=>6,'remainingAmount'=>'1800.49','expiresAt'=>'2027-09-24',
     ]]];
 $answer=(new AiMemberDetailAnswerRenderer())->render($detail,'测试会员','rights');
-$check(($answer['presentation']['facts'][0]['value']??null)==='1,289'
+$check(($answer['presentation']['facts'][0]['value']??null)==='测试门店'
+    &&($answer['presentation']['facts'][1]['value']??null)==='1,289'
     &&($answer['table']['rows'][0]['card']??null)==='护理卡'
     &&strpos(json_encode($answer,JSON_UNESCAPED_UNICODE),'memberId')===false,
     'the renderer applies integer-yuan display and excludes internal member identity');
@@ -79,6 +80,9 @@ $batch=(new AiMemberDetailAnswerRenderer())->renderSet([
 $check(count($batch['sections'])===2&&count($batch['sections'][1]['answer']['table']['rows'])===2
     &&$batch['sections'][0]['answer']['table']['rows'][0]['f0']==='1,289',
     'member batches reuse the two-section cross-terminal contract and exact money formatting');
+$check($batch['sections'][0]['answer']['table']['rows'][0]['store']==='测试门店'
+    &&strpos($batch['summary'],'权益读取时间')!==false,
+    'set detail exposes real belonging store and separates current rights time from the filter period');
 $projection=app\services\ai\presentation\AiMemberRightsExportProjection::class;
 $members=[['detail'=>$detail,'label'=>'测试会员','selection_ref'=>'member:101']];
 $assets=$projection::capture($members,'rights');

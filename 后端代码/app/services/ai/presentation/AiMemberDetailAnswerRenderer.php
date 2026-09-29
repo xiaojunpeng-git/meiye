@@ -13,23 +13,33 @@ final class AiMemberDetailAnswerRenderer
     /** One bounded population, two tables at most; never one UI section per person. */
     public function renderSet(array $members,string $view): array
     {
-        $rows=[];$rights=[];$rightColumns=[];
+        $rows=[];$rights=[];$rightColumns=[];$firstAsOf='';$lastAsOf='';
         foreach ($members as $member) {
             $answer=$this->render($member['detail'],$member['label'],$view);
-            $row=['member'=>$member['label']];
-            foreach ($answer['presentation']['facts'] as $i=>$fact) $row['f'.$i]=$fact['value'];
+            $row=['member'=>$member['label'],'store'=>$this->belongingStore($member['detail']['member'])];
+            // The store has its own identity column; money/count facts retain
+            // their fixed index so the set table cannot relabel a value.
+            foreach ($answer['presentation']['facts'] as $i=>$fact) {
+                if ($i>0) $row['f'.($i-1)]=$fact['value'];
+            }
             $rows[]=$row;
+            $currentAsOf=(string)($member['detail']['dataAsOf']??'');
+            if ($currentAsOf!=='') {
+                if ($firstAsOf==='' || $currentAsOf<$firstAsOf) $firstAsOf=$currentAsOf;
+                if ($lastAsOf==='' || $currentAsOf>$lastAsOf) $lastAsOf=$currentAsOf;
+            }
             if (isset($answer['table'])) {
                 $rightColumns=$answer['table']['columns'];
                 foreach ($answer['table']['rows'] as $right) $rights[]=['member'=>$member['label']]+$right;
             }
         }
         if ($rows===[]) throw new RuntimeException('AI_EVIDENCE_INVALID');
-        $columns=[['key'=>'member','label'=>'会员']];
+        $columns=[['key'=>'member','label'=>'会员'],['key'=>'store','label'=>'所属门店']];
         foreach (['账户余额（元）','本金余额（元）','赠送余额（元）','有效卡项（张）','剩余项目（次）','剩余项目金额（元）'] as $i=>$label) {
             $columns[]=['key'=>'f'.$i,'label'=>$label];
         }
-        $summary=['summary'=>'共'.count($rows).'位会员的当前权益，包含其所有门店权益。','cards'=>[],
+        $readPeriod=$firstAsOf===$lastAsOf?$firstAsOf:$firstAsOf.' 至 '.$lastAsOf;
+        $summary=['summary'=>'共'.count($rows).'位会员的当前权益，包含其所有门店权益。权益读取时间：'.$readPeriod.'。','cards'=>[],
             'table'=>['columns'=>$columns,'rows'=>$rows]];
         if ($view!=='rights'||$rights===[]) return $summary;
         return ['summary'=>$summary['summary'],'cards'=>[],'sections'=>[
@@ -49,6 +59,7 @@ final class AiMemberDetailAnswerRenderer
         $member=$detail['member'];$summary=$detail['summary'];$name=trim((string)($member['name']??''));
         if ($name===''||$name!==$expectedLabel) throw new RuntimeException('AI_EVIDENCE_INVALID');
         $facts=[
+            ['label'=>'所属门店','value'=>$this->belongingStore($member),'unit'=>''],
             ['label'=>'账户余额','value'=>$this->yuan($summary['accountBalance']??null),'unit'=>'元'],
             ['label'=>'本金余额','value'=>$this->yuan($summary['principalBalance']??null),'unit'=>'元'],
             ['label'=>'赠送余额','value'=>$this->yuan($summary['giftBalance']??null),'unit'=>'元'],
@@ -74,6 +85,14 @@ final class AiMemberDetailAnswerRenderer
             ],'rows'=>$rows];
         }
         return $answer;
+    }
+
+    /** Never infer an unset belonging store from the operator's store. */
+    private function belongingStore(array $member): string
+    {
+        if ((int)($member['storeId']??0)<=0) return '未设置';
+        $name=trim((string)($member['storeName']??''));
+        return $name!==''?$name:'原门店不可用';
     }
 
     /** Money is read as exact yuan text and rounded for the product-wide display rule. */

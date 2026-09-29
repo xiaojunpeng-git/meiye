@@ -22,6 +22,57 @@ use think\facade\Db;
  */
 final class CashierV3MemberDetailQueryServices
 {
+    /**
+     * AI uses the same authoritative balance/card readers as cashier detail,
+     * but does not load unrelated service, care or history tabs for each member.
+     * The belonging store is the member's actual registration value: an unset
+     * store must never be replaced with the operator's current store.
+     */
+    public function readAiRights(
+        int $memberId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        if ($memberId <= 0) throw $this->notFound();
+        $this->assertVisible($memberId, $dataScope);
+        $member = Db::name('user')->where('uid', $memberId)
+            ->field('uid,nickname,real_name,belong_store_id,status,is_del,delete_time')->find();
+        if (!$this->isActiveMember($member)) throw $this->notFound();
+
+        $cards = $this->cards($memberId, $operatorScope->tenantId(), $dataScope);
+        $remainingTimes = 0;
+        $remainingAmount = '0.00';
+        $activeCardCount = 0;
+        foreach ($cards as $card) {
+            if (($card['statusCode'] ?? '') !== 'enabled') continue;
+            $activeCardCount++;
+            if (($card['cardRuleType'] ?? '') !== 'time') $remainingTimes += (int)($card['remainingTimes'] ?? 0);
+            $remainingAmount = bcadd($remainingAmount, (string)($card['remainingAmount'] ?? '0.00'), 2);
+        }
+        $balanceSnapshot = (new CashierV3MemberBalanceProvider())->readSnapshot($memberId, $operatorScope, $dataScope);
+        $storeId = (int)($member['belong_store_id'] ?? 0);
+        $storeName = $storeId > 0 ? (string)Db::name('system_store')->where('id', $storeId)->value('name') : '';
+        $name = trim((string)($member['real_name'] ?? ''));
+        if ($name === '') $name = trim((string)($member['nickname'] ?? ''));
+        return [
+            'member' => [
+                'memberId' => $memberId, 'name' => $name !== '' ? $name : '未命名会员',
+                'storeId' => $storeId, 'storeName' => $storeName,
+            ],
+            'summary' => [
+                'accountBalance' => $this->moneyFromCents((int)$balanceSnapshot['totalCents']),
+                'principalBalance' => $this->moneyFromCents((int)$balanceSnapshot['principalCents']),
+                'giftBalance' => $this->moneyFromCents((int)$balanceSnapshot['giftCents']),
+                'activeCardCount' => $activeCardCount,
+                'remainingProjectTimes' => $remainingTimes,
+                'remainingProjectAmount' => $remainingAmount,
+            ],
+            'cards' => $cards,
+            'dataAsOf' => date('c'),
+            'projectionContractVersion' => 'cashier-v3-member-detail-v3',
+        ];
+    }
+
     public function read(
         int $memberId,
         CashierV3OperatorScope $operatorScope,

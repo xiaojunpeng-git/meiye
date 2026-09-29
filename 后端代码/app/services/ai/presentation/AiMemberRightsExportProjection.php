@@ -28,8 +28,14 @@ final class AiMemberRightsExportProjection
             $refs[$ref]=true;
             $date=substr((string)($detail['dataAsOf']??''),0,10);
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/D',$date)) self::fail();
+            // Identity metadata travels with every exported metric; the
+            // entitlement scope remains all stores, not the belonging store.
+            $belongingStore=(int)($detail['member']['storeId']??0)>0
+                ? trim((string)($detail['member']['storeName']??'')) : '未设置';
+            if ($belongingStore==='') $belongingStore='原门店不可用';
             $base=['period_name'=>'当前权益','start_date'=>$date,'end_date'=>$date,
-                'store_name'=>$member['label'].'；范围：该会员所有门店权益','ranking_direction'=>'','business_date'=>$date];
+                'store_name'=>$member['label'].'；所属门店：'.$belongingStore.'；范围：该会员所有门店权益',
+                'ranking_direction'=>'','business_date'=>$date];
             foreach (['accountBalance'=>'账户余额','principalBalance'=>'本金余额','giftBalance'=>'赠送余额',
                 'activeCardCount'=>'有效卡项','remainingProjectTimes'=>'剩余项目次数','remainingProjectAmount'=>'剩余项目金额'] as $key=>$label) {
                 $unit=$key==='activeCardCount'?'张':($key==='remainingProjectTimes'?'次':'元');

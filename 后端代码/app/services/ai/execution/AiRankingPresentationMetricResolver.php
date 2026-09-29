@@ -12,7 +12,9 @@ namespace app\services\ai\execution;
  */
 final class AiRankingPresentationMetricResolver
 {
-    public const MAX_METRICS = 4;
+    // Employee detail has six independently registered measurements. Other
+    // object profiles still expose only their own registry-declared columns.
+    public const MAX_METRICS = 6;
 
     /** A detail request may select only a complete registry-owned profile,
      * never arbitrary extra columns supplied by a model or client. Ordinary
@@ -26,7 +28,8 @@ final class AiRankingPresentationMetricResolver
             // A compiler snapshot contains ready metrics only; raw Reader
             // capabilities additionally carry the explicit readiness flag.
             if (($metric['ai_query_ready']??true)!==true || !in_array($kind,(array)($metric['ranking_detail_object_kinds']??[]),true)) continue;
-            $records[]=['code'=>$code,'order'=>self::overviewOrder($metric,(string)$kind)];
+            $order=$metric['ranking_detail_order']??null;
+            $records[]=['code'=>$code,'order'=>is_int($order)?$order:self::overviewOrder($metric,(string)$kind)];
         }
         if (!$records) {
             // Sale-object rankings already carry a verified multi-column

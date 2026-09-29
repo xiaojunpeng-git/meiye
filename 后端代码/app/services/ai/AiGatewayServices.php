@@ -1390,7 +1390,12 @@ final class AiGatewayServices
         // phrase matcher, proves the object, response form and set target.
         if ($conditionDetailIntent===null) {
             [$understanding,$requestedMemberDetail]=$this->separatePopulationDetail($understanding);
-        } else $requestedMemberDetail=null;
+        } else {
+            // The inherited count has no identities. Its typed continuation
+            // compiles a fresh authorised list, but the requested detail must
+            // survive beside that plan or the user sees only the filter list.
+            $requestedMemberDetail=$this->inheritedCountDetailRequest($understanding);
+        }
         // Some providers omit the new request-kind marker only when a signed
         // predecessor is present. Recover it solely when two independent
         // structural checks agree: the model accepted only a broad observation
@@ -5175,6 +5180,20 @@ final class AiGatewayServices
         return [$understanding,$detail];
     }
 
+    /** The contract already proved this is a member count-to-list follow-up;
+     * preserve only its typed display request, never a model-supplied member. */
+    private function inheritedCountDetailRequest(array $understanding): ?array
+    {
+        foreach ((array)($understanding['requirements']??[]) as $requirement) {
+            if (!in_array('object_detail',(array)($requirement['fields']??[]),true)) continue;
+            $candidate=$requirement['values']['object_detail']??null;
+            return is_array($candidate) && ($candidate['view']??null)==='summary'
+                && in_array($candidate['target']??null,['single','set'],true)
+                && ($candidate['ordinal']??null)===null ? $candidate : null;
+        }
+        return null;
+    }
+
     /** Details are a presentation of the verified ranked population, not a
      * second intent for the model to bind. Keep unsupported profiles closed;
      * member assets retain their separately authorised existing workflow. */
@@ -5283,8 +5302,8 @@ final class AiGatewayServices
                 // grants no more access than the same members read separately.
                 $guard();
                 $selection=$this->memberObjects($context)->selection($member['selection_ref']);
-                $detail=(new \app\services\cashier\v3\member\CashierV3MemberDetailQueryServices())->read(
-                    (int)$selection['member_id'],$operator,$dataScope,['tab'=>'assets','status'=>'active']
+                $detail=(new \app\services\cashier\v3\member\CashierV3MemberDetailQueryServices())->readAiRights(
+                    (int)$selection['member_id'],$operator,$dataScope
                 );
                 if ((int)($detail['member']['memberId']??0)!==(int)$selection['member_id']) throw new RuntimeException('AI_EVIDENCE_INVALID');
                 $details[]=['detail'=>$detail,'label'=>(string)$selection['label'],'selection_ref'=>$member['selection_ref']];

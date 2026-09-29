@@ -58,9 +58,19 @@ $verify(($memberDetail['ranking']??null)===['metric_code'=>'cash_performance','o
 $verify($admission->matchPopulationDetail(
     '会员业绩最高的前五名详情并分析原因',$saleObjects,$metrics,$sharedDefaults,5
 )===null,'open analysis remains model work instead of entering member detail execution');
-$verify($admission->matchPopulationDetail(
+$explicitMemberDetail=$admission->matchPopulationDetail(
     '会员现金业绩最高的前五名详情',$saleObjects,$metrics,$sharedDefaults,5
-)===null,'an explicitly named metric remains on the ordinary exact-metric understanding path');
+);
+$verify(($explicitMemberDetail['ranking']['metric_code']??null)==='cash_performance'
+    &&($explicitMemberDetail['ranking']['limit']??null)===5,
+    'an explicitly named registered metric keeps the bounded ranking and detail together');
+$verify(($admission->matchPopulationDetail(
+    '本月销售额最高的项目详情',$saleObjects,$metrics,$sharedDefaults,null
+)['ranking']??null)===['metric_code'=>'sales_amount','object_kind'=>'project','direction'=>'top','limit'=>1],
+    'a named metric and a single superlative admit one exact ranked detail');
+$verify($admission->matchPopulationDetail(
+    '本月销售额最高的项目详情并分析原因',$saleObjects,$metrics,$sharedDefaults,null
+)===null,'an unexplained analysis request cannot enter the closed detail path');
 
 $verify($admission->match('这个月销售额最高是哪天，顺便分析原因',$objects,$metrics)===null,
     'open analysis residue must remain on the model path');
@@ -133,6 +143,22 @@ foreach (['这个月门店业绩前三的门店详情'=>'store','这个月员工
         && count($detailPlan['plan']['query']['ranking_presentation_metrics']??[])>=3
         && !isset($detailPlan['_member_detail_request']), 'R48 '.$kind.' ranking and details form one registered query');
 }
+$reason=null;
+$singlePersonArgs=['本月销售人业绩最高的员工详情',$vocabulary,$capabilities,'screen','2026-09-29',&$reason];
+$singlePersonDetail=$rankingMethod->invokeArgs($gateway,$singlePersonArgs);
+$verify($reason===null
+    &&($singlePersonDetail['plan']['query']['metric_codes']??null)===['staff_sales_yeji']
+    &&($singlePersonDetail['plan']['query']['ranking']??null)===['direction'=>'top','limit'=>1]
+    &&($singlePersonDetail['plan']['query']['ranking_presentation_metrics']??null)===[
+        'staff_sales_yeji','staff_labor_yeji','staff_project_num','staff_labor_fee',
+        'staff_service_num','staff_point_visit_num'],
+    'a first-turn explicit employee superlative keeps its six-field detail profile');
+$compiledPersonDetail=(new app\services\ai\execution\AiRegisteredPlanCompiler())->compile(
+    $singlePersonDetail['plan'],$capabilities
+);
+$verify(($compiledPersonDetail['query']['ranking_presentation_metrics']??null)
+    ===$singlePersonDetail['plan']['query']['ranking_presentation_metrics'],
+    'the frozen business registry preserves detail ordering during compilation');
 $verify($admission->matchPopulationDetail('这个月门店业绩前三名的后两名详情',$vocabulary,array_keys($contracts),$sharedDefaults,3)===null,
     'conflicting population directions cannot enter the closed path');
 // R49: a named new ranking replaces the old dimension/ranking, while only

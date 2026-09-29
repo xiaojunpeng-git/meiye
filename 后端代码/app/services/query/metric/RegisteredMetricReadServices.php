@@ -703,8 +703,18 @@ final class RegisteredMetricReadServices
         if ($ids===[]||count($ids)>100) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $contract=MetricDefinitionRegistry::get($metricCode);
         $dimensionContract=$contract['dimensions'][$dimension]??($contract['source']['dimensions'][$dimension]??null);
-        if (($contract['reader_strategy']??null)!=='fact_sum'||!is_array($dimensionContract)
-            ||isset($dimensionContract['analysis_relation_source'])) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if (!is_array($dimensionContract) || isset($dimensionContract['analysis_relation_source'])) {
+            $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        }
+        if (($contract['reader_strategy']??null)==='service_customer_personnel' && $dimension==='employee') {
+            return $this->serviceCustomerDimensionValues($metricCode,$tenantId,$stores,$range,$ids);
+        }
+        // Registered personnel facts are the same immutable source as their
+        // ranking, so supplementary detail values may use the common batch
+        // projection without reinterpreting an employee or a metric.
+        if (!in_array($contract['reader_strategy']??null,['fact_sum','personnel_fact_sum'],true)) {
+            $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        }
         return $this->factDimensionValues($contract['source'],$tenantId,$stores,$range,$dimensionContract,$ids);
     }
 
@@ -776,7 +786,6 @@ final class RegisteredMetricReadServices
         }
         return $result;
     }
-
 
     /** Registered detail page; cash uses the same sales/recharge populations as summary. */
     public function detailPage(string $metricCode, string $tenantId, array $stores, array $range, int $page, int $pageSize): array
@@ -1826,10 +1835,10 @@ final class RegisteredMetricReadServices
         if (isset($dimension['analysis_relation_source'])) {
             return $this->relationFactDimensionRanking($source, $tenantId, $stores, $range, $dimension, $limit, $order);
         }
-        $idField = (string)$dimension['id'];
-        $nameField = (string)$dimension['name'];
         $query=$this->factQuery($source, $tenantId, $stores, $range);
         $this->dimensionSourceFilters($query,$dimension);
+        $idField = (string)$dimension['id'];
+        $nameField = (string)$dimension['name'];
         $rows = $query->where('p.' . $idField, '>', 0)
             ->fieldRaw('p.' . $idField . ' entity_id,MAX(p.' . $nameField . ') entity_name,COALESCE(SUM(' . $source['amount'] . '),0) metric_value')
             ->group('p.' . $idField)->orderRaw('metric_value ' . strtoupper($order) . ',entity_id ASC')
@@ -1847,10 +1856,10 @@ final class RegisteredMetricReadServices
     /** @return array<int,array{entity_id:int,metric_value:int}> */
     private function factDimensionValues(array $source,string $tenantId,array $stores,array $range,array $dimension,array $entityIds): array
     {
-        $idField=(string)($dimension['id']??'');
-        if (!preg_match('/^[a-z][a-z0-9_]{0,127}$/D',$idField)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $query=$this->factQuery($source,$tenantId,$stores,$range);
         $this->dimensionSourceFilters($query,$dimension);
+        $idField=(string)($dimension['id']??'');
+        if (!preg_match('/^[a-z][a-z0-9_]{0,127}$/D',$idField)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $rows=$query->whereIn('p.'.$idField,$entityIds)
             ->fieldRaw('p.'.$idField.' entity_id,COALESCE(SUM('.$source['amount'].'),0) metric_value')
             ->group('p.'.$idField)->select()->toArray();
@@ -1910,6 +1919,7 @@ final class RegisteredMetricReadServices
             $query->where('p.'.$field,$value);
         }
     }
+
 
     private function distinctSummary(array $source, string $tenantId, array $stores, array $range): int
     {
@@ -2054,13 +2064,17 @@ final class RegisteredMetricReadServices
                 ++$out[$mergedKey]['fact_count'];
             }
         } else {
+            // Period-distinct people and point visits are already aggregated
+            // by the completed-service owner; neither may be reconstructed
+            // by summing the ordinary shared-visit daily rows here.
+            $field=$this->serviceCustomerField($metricCode);
             foreach ($metrics['summary_by_store_employee'] as $key => $row) {
                 if (!isset($allowed[$key])) continue;
                 [, $employee] = explode('|', $key, 2);
                 $employeeId = $this->integer($employee);
                 $mergedKey = $employeeId . '|' . $range['end'];
                 if (!isset($out[$mergedKey])) $out[$mergedKey] = ['employee_id' => $employeeId, 'business_date' => $range['end'], 'metric_value' => 0, 'amount_cents' => 0, 'fact_count' => 0];
-                $out[$mergedKey]['metric_value'] = $this->add($out[$mergedKey]['metric_value'], $this->integer($row['people_tenths'] ?? null));
+                $out[$mergedKey]['metric_value'] = $this->add($out[$mergedKey]['metric_value'], $this->integer($row[$field] ?? null));
                 $out[$mergedKey]['amount_cents'] = $out[$mergedKey]['metric_value'];
                 ++$out[$mergedKey]['fact_count'];
             }
@@ -2089,6 +2103,24 @@ final class RegisteredMetricReadServices
             return $compare ?: strcmp((string)$left['entity_name'], (string)$right['entity_name']) ?: ($left['entity_id'] <=> $right['entity_id']);
         });
         return array_slice($rows, 0, $limit);
+    }
+
+    /** Batch-decorate only identities returned by an authorised ranking. */
+    private function serviceCustomerDimensionValues(string $metricCode,string $tenantId,array $stores,array $range,array $entityIds): array
+    {
+        $field=$this->serviceCustomerField($metricCode);
+        $allowed=array_fill_keys($entityIds,true);
+        $totals=[];
+        foreach ($this->serviceCustomerMetrics($tenantId,$stores,$range)['summary_by_store_employee'] as $key=>$row) {
+            [, $employee]=explode('|',$key,2);
+            $id=$this->integer($employee);
+            if (!isset($allowed[$id])) continue;
+            $totals[$id]=$this->add($totals[$id]??0,$this->integer($row[$field]??null));
+        }
+        ksort($totals,SORT_NUMERIC);
+        $out=[];
+        foreach ($totals as $id=>$value) $out[]=['entity_id'=>(int)$id,'metric_value'=>$value];
+        return $out;
     }
 
     /** @return array<int,array<string,mixed>> */
@@ -2123,6 +2155,7 @@ final class RegisteredMetricReadServices
     private function serviceCustomerField(string $metricCode): string
     {
         if ($metricCode === 'staff_service_num') return 'visit_tenths';
+        if ($metricCode === 'staff_point_visit_num') return 'point_visit_tenths';
         if ($metricCode === 'service_people') return 'people_tenths';
         $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
     }

@@ -96,10 +96,25 @@ $compiled=$compile->invoke($gateway,$understanding,['query'=>$personQuery,'view'
     'meaning'=>['presentation_origin'=>'customer_or_verified_context']],'screen');
 $query=$compiled['plan']['query']??[];
 $check(($compiled['kind']??null)==='plan'&&($query['query_shape']??null)==='summary'
-    &&($query['metric_codes']??null)===['staff_sales_yeji','staff_labor_yeji','staff_project_num']
+    &&($query['metric_codes']??null)===['staff_sales_yeji','staff_labor_yeji','staff_project_num',
+        'staff_labor_fee','staff_service_num','staff_point_visit_num']
     &&($query['business_filters']??null)===['object_kind'=>'person','selection_ref'=>'person:7']
     &&array_key_exists('ranking',$query)&&$query['ranking']===null,
     'detail continuation skips binding and changes only ranking into stable-object summary');
+$readViewClass=new ReflectionClass(app\services\query\metric\MetricReadViewServices::class);
+$readView=$readViewClass->newInstanceWithoutConstructor();
+$readViewClass->getProperty('clock')->setValue($readView,static function():int { return strtotime('2026-09-25 12:00:00'); });
+$readerQuery=$readViewClass->getMethod('query');
+$check(($readerQuery->invoke($readView,$query)['metric_codes']??null)===$query['metric_codes'],
+    'the Reader admits the exact registered six-column single-person detail profile');
+$forgedSix=$query;$forgedSix['metric_codes'][5]='service_people';
+try {
+    $readerQuery->invoke($readView,$forgedSix);
+    throw new LogicException('arbitrary six-column person summary accepted');
+} catch (app\services\query\metric\MetricQueryContractException $error) {
+    $check($error->getErrorCode()==='METRIC_QUERY_SHAPE_UNAVAILABLE',
+        'the Reader still rejects arbitrary wide person summaries');
+}
 
 $compiledStore=$compile->invoke($gateway,$understanding,['query'=>$storeQuery,'view'=>$storeView,
     'meaning'=>['presentation_origin'=>'customer_or_verified_context']],'screen');

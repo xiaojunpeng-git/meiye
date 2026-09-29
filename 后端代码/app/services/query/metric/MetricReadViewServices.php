@@ -763,9 +763,18 @@ final class MetricReadViewServices
         if ($query['ranking_presentation_metrics']!==[] && $query['ranking_presentation_metrics']!==$expectedPresentation) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         $query['ranking_presentation_metrics']=$expectedPresentation;
         if ($conditionPopulation) foreach ($query['metric_codes'] as $metric) if (!in_array($objectKind,(array)(self::metricCapabilities()[$metric]['condition_subjects']??[]),true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        // A verified single-person detail may reveal the complete registry
+        // profile (six columns). Ordinary person summaries and breakdowns
+        // retain their four-metric bound; a caller cannot assemble a wider
+        // arbitrary query by claiming that it is a detail request.
+        $personDetailProfile=$person && $query['query_shape']==='summary'
+            && preg_match('/^person:[1-9][0-9]*$/D',(string)($query['business_filters']['selection_ref']??''))===1
+            && $query['metric_codes']===\app\services\ai\execution\AiRankingPresentationMetricResolver::detail(
+                self::metricCapabilities(),$query['metric_codes'][0], 'person'
+            );
         if ($person && (!in_array($query['query_shape'],['summary','breakdown','ranking'],true)
             || ($query['query_shape']==='ranking' && count($query['metric_codes'])!==1)
-            || (in_array($query['query_shape'],['summary','breakdown'],true) && count($query['metric_codes'])>4))) {
+            || (in_array($query['query_shape'],['summary','breakdown'],true) && count($query['metric_codes'])>4 && !$personDetailProfile))) {
             if (!$conditionPopulation) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         }
         if ($memberSelection && (count($query['metric_codes'])!==1 || $query['query_shape']!=='summary')) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');

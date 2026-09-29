@@ -169,6 +169,7 @@ final class MetricDefinitionRegistry
                 // request is still bound by its own registered measurement.
                 'analysis_default_rank_object_kinds' => ['person'],
                 'ranking_detail_object_kinds' => ['person'],
+                'ranking_detail_order' => 10,
             ],
             'staff_labor_yeji' => self::amount('personnel_fact_sum', 'labor-performance-allocated-person-v1', ['summary', 'ranking', 'condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_performance_fact', 'amount' => 'amount_cents',
@@ -181,6 +182,25 @@ final class MetricDefinitionRegistry
                 ]],
             ], 'person', ['selection_ref']) + [
                 'ranking_detail_object_kinds' => ['person'],
+                'ranking_detail_order' => 20,
+                'condition_subjects' => ['person'],
+                'default_ranking_dimension' => 'employee',
+                'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
+            ],
+            // Handwork fee is a separate frozen allocation value on the same
+            // effective labour fact; it is not inferred from labour revenue.
+            'staff_labor_fee' => self::amount('personnel_fact_sum', 'labor-fee-allocated-person-v1', ['summary', 'ranking', 'condition_count', 'condition_list'], [
+                'table' => 'cashier_v3_performance_fact', 'amount' => 'labor_fee_amount_cents',
+                'filters' => ['status' => 'effective', 'performance_type' => 'labor_performance_allocated'],
+                'normal_scope' => 'facts', 'dimensions' => ['employee' => [
+                    'id' => 'employee_id', 'name' => 'employee_name_snapshot',
+                    'analysis_object_kind' => 'person', 'analysis_object_label' => '人员',
+                    'analysis_relation_role' => 'serving_employee', 'analysis_action_codes' => ['service'],
+                    'analysis_filter_keys' => ['selection_ref'],
+                ]],
+            ], 'person', ['selection_ref']) + [
+                'ranking_detail_object_kinds' => ['person'],
+                'ranking_detail_order' => 40,
                 'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
                 'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
@@ -200,6 +220,7 @@ final class MetricDefinitionRegistry
                 ]],
             ], 'person', ['selection_ref']) + [
                 'ranking_detail_object_kinds' => ['person'],
+                'ranking_detail_order' => 30,
                 'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
                 'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
@@ -218,6 +239,28 @@ final class MetricDefinitionRegistry
                     'analysis_filter_keys' => ['selection_ref'],
                 ]],
             ], 'person', ['selection_ref']) + [
+                'ranking_detail_object_kinds' => ['person'],
+                'ranking_detail_order' => 50,
+                'condition_subjects' => ['person'],
+                'default_ranking_dimension' => 'employee',
+                'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
+            ],
+            // An explicitly selected technician receives one point-customer
+            // visit per customer/store/day; unlike shared service visits this
+            // measurement is never divided among co-serving technicians.
+            'staff_point_visit_num' => self::tenthCount('service_customer_personnel', 'v3-point-customer-visit-person-v1', ['summary', 'ranking', 'condition_count', 'condition_list'], [
+                'table' => 'cashier_v3_entitlement_service_fact + cashier_v3_performance_fact',
+                'filters' => ['service_status' => 'completed', 'performance_type' => 'labor_performance_allocated', 'performance_status' => 'effective'],
+                'normal_scope' => 'services',
+                'dimensions' => ['employee' => [
+                    'id' => 'employee_id', 'name' => 'employee_name_snapshot',
+                    'analysis_object_kind' => 'person', 'analysis_object_label' => '人员',
+                    'analysis_relation_role' => 'serving_employee', 'analysis_action_codes' => ['service'],
+                    'analysis_filter_keys' => ['selection_ref'],
+                ]],
+            ], 'person', ['selection_ref']) + [
+                'ranking_detail_object_kinds' => ['person'],
+                'ranking_detail_order' => 60,
                 'condition_subjects' => ['person'],
                 'default_ranking_dimension' => 'employee',
                 'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
@@ -543,6 +586,7 @@ final class MetricDefinitionRegistry
                 'analysis_default_breakdown_object_kinds' => $item['analysis_default_breakdown_object_kinds'] ?? [],
                 'overview' => self::overviewContracts($item),
                 'ranking_detail_object_kinds' => $item['ranking_detail_object_kinds'] ?? [],
+                'ranking_detail_order' => $item['ranking_detail_order'] ?? null,
                 // A threshold contract is deliberately narrow: it describes
                 // the only permitted aggregate predicate for this metric,
                 // never arbitrary field filtering.

@@ -19,12 +19,14 @@ final class AiExactRankingCollectionAdmission
      *
      * Natural-language understanding remains the default. This narrow path is
      * available only when the sentence itself closes every execution carrier:
-     * one registered analytical object, one direction, one explicit row limit and
-     * a genuine detail request. The caller accepts at most one calendar range;
+     * one registered analytical object, one direction, a bounded row limit and
+     * a genuine detail request. "Highest/lowest" alone bounds the set to one;
+     * an expressly named metric must resolve uniquely in the active registry.
+     * The caller accepts at most one calendar range;
      * if it is omitted, the gateway first applies verified context. A new
      * conversation retains the dimension planner's same-day default.
-     * The business metric is never inferred from wording; it must be the sole
-     * active registry default shared by the selected ranking capability.
+     * An unnamed business metric must be the sole active registry default
+     * shared by the selected ranking capability; no synonym is invented here.
      *
      * @param array<int,array{object_kind:string,object_label:string}> $objectVocabulary
      * @param array<int,string> $allowedMetricCodes
@@ -35,11 +37,21 @@ final class AiExactRankingCollectionAdmission
         string $question,array $objectVocabulary,array $allowedMetricCodes,
         array $defaultRankObjectKinds,?int $limit
     ): ?array {
-        if ($question==='' || preg_match('//u',$question)!==1 || !is_int($limit) || $limit<1 || $limit>20) return null;
+        if ($question==='' || preg_match('//u',$question)!==1
+            || ($limit!==null && ($limit<1 || $limit>20))) return null;
         $question=$this->normalizeLeadingDiscourseConnector($question);
         if (!preg_match('/详情|明细|情况|具体/u',$question)) return null;
-        if (MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes)!==null) return null;
-        $matched=$this->objectsInText($question,$this->objects($objectVocabulary));
+        $explicitMetric=MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes);
+        // A metric name may itself contain an object noun (e.g. 销售人业绩).
+        // Remove that proved metric span before selecting the ranked object,
+        // or the inner noun can mask an explicit "员工" target.
+        $objectText=$explicitMetric!==null
+            ?str_replace($explicitMetric['term'],' ',$question):$question;
+        $matched=$this->objectsInText($objectText,$this->objects($objectVocabulary));
+        // "员工业绩前三名详情" has no second noun outside its registered
+        // measurement; its sole noun may still supply the object after the
+        // outer-text check found none. Ambiguous labels still fail closed.
+        if ($matched===[]) $matched=$this->objectsInText($question,$this->objects($objectVocabulary));
         if ($matched===null || count($matched)!==1) return null;
         $kind=$matched[0]['object_kind'];
         $direction=$this->direction($question);
@@ -50,14 +62,25 @@ final class AiExactRankingCollectionAdmission
         if ($hasTop && $hasBottom || $hasTop && $direction==='bottom' || $hasBottom && $direction==='top') return null;
         if ($direction===null) $direction=$hasTop?'top':($hasBottom?'bottom':null);
         if (!in_array($direction,['top','bottom'],true)) return null;
+        // A superlative without an explicit 前N/后N denotes only the first
+        // ranked object. Other unbounded detail collections stay with the
+        // semantic model rather than expanding an arbitrary population.
+        if ($limit===null) {
+            if ($hasTop || $hasBottom) return null;
+            $limit=1;
+        }
         $candidateCodes=[];
-        foreach ($allowedMetricCodes as $code) {
-            if (in_array($kind,array_values(array_unique(array_filter(
-                (array)($defaultRankObjectKinds[$code]??[]),'is_string'
-            ))),true)) $candidateCodes[]=$code;
+        if ($explicitMetric!==null) {
+            $candidateCodes[]=$explicitMetric['metric_code'];
+        } else {
+            foreach ($allowedMetricCodes as $code) {
+                if (in_array($kind,array_values(array_unique(array_filter(
+                    (array)($defaultRankObjectKinds[$code]??[]),'is_string'
+                ))),true)) $candidateCodes[]=$code;
+            }
         }
         if (count($candidateCodes)!==1 || $this->populationDetailResidue(
-            $question,$matched[0]['object_label']
+            $question,$matched[0]['object_label'],$explicitMetric['term']??null
         )!=='') return null;
         return [
             'ranking'=>['metric_code'=>$candidateCodes[0],'object_kind'=>$kind,
@@ -215,9 +238,10 @@ final class AiExactRankingCollectionAdmission
     }
 
     /** Remove only closed ranking/detail grammar; unexplained intent fails closed. */
-    private function populationDetailResidue(string $question,string $objectLabel): string
+    private function populationDetailResidue(string $question,string $objectLabel,?string $metricTerm=null): string
     {
         $residue=str_replace($objectLabel,' ',$question);
+        if ($metricTerm!==null) $residue=str_replace($metricTerm,' ',$residue);
         $residue=preg_replace('/(?:前|后|最高|最低|最好|最差)(?:的)?\s*(?:[0-9]+|[一二两三四五六七八九十百]+)\s*(?:名)?/u',' ',$residue);
         $residue=preg_replace('/最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
         $calendar=AiSemanticIntentParser::calendarEvidence($residue);

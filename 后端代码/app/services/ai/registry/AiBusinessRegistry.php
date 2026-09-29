@@ -100,6 +100,8 @@ final class AiBusinessRegistry
             }
             $dimensionContracts=$this->dimensionContracts($item['analysis_dimension_contracts']??[]);
             $overview=$this->overviewContracts($item['overview']??[]);
+            $detailOrder=$item['ranking_detail_order']??null;
+            if ($detailOrder!==null && (!is_int($detailOrder) || $detailOrder<1)) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             $conditionSubjects=AiRegistryValue::strings($item['condition_subjects']??[],8);
             if (array_diff($conditionSubjects,['person','member','store','order','sale_line','card','project','product'])) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             sort($conditionSubjects,SORT_STRING);
@@ -116,6 +118,7 @@ final class AiBusinessRegistry
                 || $this->dimensionContracts($registered[$code]['analysis_dimension_contracts']??[])!==$dimensionContracts
                 || $this->overviewContracts($registered[$code]['overview']??[])!==$overview
                 || ($registered[$code]['ranking_detail_object_kinds']??[])!==($item['ranking_detail_object_kinds']??[])
+                || ($registered[$code]['ranking_detail_order']??null)!==$detailOrder
                 || ($registered[$code]['condition_subjects']??[])!==$conditionSubjects
                 || $this->thresholdContract($registered[$code]['threshold_count']??null)!==$this->thresholdContract($item['threshold_count']??null)) AiRegistryValue::fail('AI_METRIC_CONTRACT_INCOMPLETE');
             $available=array_values(array_intersect($shapes,AiRegistryValue::strings($item['query_shapes']??[],8)));
@@ -130,6 +133,7 @@ final class AiBusinessRegistry
                 // Detail profiles are source-owned, validated above, and
                 // frozen with the same registry snapshot as sorting metrics.
                 'ranking_detail_object_kinds'=>$item['ranking_detail_object_kinds']??[],
+                'ranking_detail_order'=>$detailOrder,
                 'condition_subjects'=>$conditionSubjects,
                 'threshold_count'=>$this->thresholdContract($item['threshold_count']??null)];
         }
