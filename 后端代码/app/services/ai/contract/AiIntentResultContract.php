@@ -250,12 +250,13 @@ final class AiIntentResultContract
             (string)($safeQuestion['question']??''),$metricCodes
         );
         if (!is_array($exact) || !is_string($exact['metric_code']??null)) return null;
-        $owned=['object_kind'=>null,'object_relation'=>null,'operation'=>null,'periods'=>null,'scope'=>null];
+        $owned=['object_kind'=>null,'object_relation'=>null,'operation'=>null,'periods'=>null,'scope'=>null,
+            'result_reference'=>null];
         $rankings=[];$metricRequirements=[];
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
             $fields=(array)($requirement['fields']??[]);$values=(array)($requirement['values']??[]);
-            if (array_diff($fields,['metric_codes','object_kind','object_relation','operation','periods','ranking','scope','store_term'])) return null;
-            if (array_diff(array_keys($values),['metric_terms','object_kind','object_relation','operation','periods','ranking','scope','store_term'])) return null;
+            if (array_diff($fields,['metric_codes','object_kind','object_relation','operation','periods','ranking','scope','store_term','result_reference'])) return null;
+            if (array_diff(array_keys($values),['metric_terms','object_kind','object_relation','operation','periods','ranking','scope','store_term','result_reference'])) return null;
             // An old answer may explain context, but it cannot supply any
             // execution field for this complete ranking shortcut. Mixed or
             // historical evidence stays on the ordinary model path.
@@ -276,12 +277,29 @@ final class AiIntentResultContract
             }
         }
         $ranking=self::combineUnderstoodRankings($rankings);
+        $reference=$owned['result_reference'];
+        $sole=$priorQuery['sole_result_reference']??null;
+        $inheritedPeriod=$owned['periods']===null && is_array($reference)
+            && $reference===$sole && is_array($priorQuery['periods']??null)
+            && count($priorQuery['periods'])===1;
+        if ($inheritedPeriod) {
+            // An omitted date may be inherited only from the signed source
+            // of this exact row reference, and only when the current turn
+            // contains no separate calendar request. Unsupported date words
+            // remain with the model instead of silently reusing old dates.
+            $calendar=\app\services\ai\semantic\AiSemanticIntentParser::calendarEvidence(
+                (string)($safeQuestion['question']??'')
+            );
+            if ($calendar['periods']!==[] || !$calendar['complete']) return null;
+        }
+        $periods=$inheritedPeriod?$priorQuery['periods']:$owned['periods'];
         if ($owned['operation']!=='ranking' || $owned['object_kind']!=='person'
-            || $owned['object_relation']!=='analysis' || !is_array($owned['periods'])
-            || count($owned['periods'])!==1 || $ranking===null || !is_int($ranking['limit'])
+            || $owned['object_relation']!=='analysis' || !is_array($periods)
+            || count($periods)!==1 || $ranking===null || !is_int($ranking['limit'])
             || $ranking['limit']<1 || $ranking['limit']>20 || $metricRequirements===[]
             || !self::sameExactMetricRequirements(array_keys($metricRequirements),$metricRequirements,
                 $exact['metric_code'],$exact['term'])) return null;
+        if ($reference!==null && (!is_array($sole) || $reference!==$sole)) return null;
         $bindings=[];
         foreach ($metricRequirements as $requirement) $bindings[]=[
             'requirement_id'=>$requirement['id'],'status'=>'satisfied','metric_codes'=>[$exact['metric_code']],
@@ -290,8 +308,8 @@ final class AiIntentResultContract
             'object_kind'=>$owned['object_kind'],'object_relation'=>'analysis','object_term'=>'',
             'operation'=>'ranking','metric_codes'=>[$exact['metric_code']],'action_codes'=>[],
             'needs_metric_choice'=>false,'initial_observation'=>false,'recommended_initial_answer'=>false,
-            'requirement_bindings'=>$bindings,'ranking'=>$ranking,'periods'=>$owned['periods'],
-            'scope'=>$owned['scope']??'unspecified','aggregate_condition'=>null,'result_reference'=>null,
+            'requirement_bindings'=>$bindings,'ranking'=>$ranking,'periods'=>$periods,
+            'scope'=>$owned['scope']??'unspecified','aggregate_condition'=>null,'result_reference'=>$reference,
             'unresolved_fragments'=>[],
         ];
         if ($priorQuery!==null) {
@@ -301,10 +319,13 @@ final class AiIntentResultContract
             // carrying an old selected person or role into a new ranking.
             try {$storeTerm=self::understoodStoreTerm($understanding);}
             catch (AiContractException $error) {return null;}
-            if ($storeTerm===null && ($priorQuery['has_store_scope_restriction']??true)) return null;
+            // A selected row and a separately named store are two location
+            // claims; the ordinary binding path must decide their relation.
+            if ($reference!==null && $storeTerm!==null) return null;
+            if ($storeTerm===null && $reference===null && ($priorQuery['has_store_scope_restriction']??true)) return null;
             $candidate['context_delta']=[
                 'metric_codes'=>'replace','object'=>'replace','business_filters'=>'clear',
-                'store_scope'=>$storeTerm===null?'inherit':'replace','periods'=>'replace',
+                'store_scope'=>$storeTerm===null?'inherit':'replace','periods'=>$inheritedPeriod?'inherit':'replace',
                 'operation'=>'replace','ranking_direction'=>'replace','ranking_limit'=>'replace',
                 'scope'=>$owned['scope']===null?'inherit':'replace','aggregate_condition'=>'clear',
             ];

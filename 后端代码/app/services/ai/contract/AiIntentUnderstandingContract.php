@@ -101,41 +101,84 @@ final class AiIntentUnderstandingContract
 
     /**
      * A deictic store in the current turn can name the sole row of a verified
-     * prior ranking, but never the user's current login store. Transfer that
-     * already-understood reference to the signed ordinal only when the prior
-     * view proves exactly one row; named, plural and tied stores stay strict.
+     * prior ranking, but never the user's current login store. Some valid
+     * model responses omit the store field altogether while preserving the
+     * requested metric and ranking; ground that one missing field in the
+     * current wording and signed ordinal without changing any other meaning.
+     * Named, plural and tied stores stay on the normal clarification path.
      */
-    public static function reconcileSoleStoreReference(array $understanding,array $safeQuestion): array
+    public static function reconcileSoleStoreReference(array $understanding,array $safeQuestion,array $privateKinds=[]): array
     {
         $sole=$safeQuestion['prior_query']['sole_result_reference']??null;
         if (($understanding['status']??null)!=='understood' || isset($understanding['groups'])
             || ($safeQuestion['prior_query']['object_kind']??null)!=='store'
             || !is_array($sole) || !in_array($sole['group']??null,['top','bottom'],true)
             || ($sole['ordinal']??null)!==1) return $understanding;
-        $requirements=(array)($understanding['requirements']??[]);$candidate=null;
+        $question=(string)($safeQuestion['question']??'');
+        if (preg_match_all('/(?:这|那|该)(?:个|家|间)?(?:门店|店)/u',$question,$mentions)!==1
+            || preg_match('/除(?:了|外)|以外|之外|不是|不包括|另(?:外|一个)|其他(?:门店|店)/u',$question)) return $understanding;
+        preg_match_all('/\[(local_condition_[0-9]+)\]/',$question,$conditionTokens);
+        foreach (array_unique($conditionTokens[1]) as $token) {
+            // An opaque current store is an independent location. A role
+            // token describes the personnel being ranked, not another shop.
+            if (($privateKinds[$token]??null)!=='position') return $understanding;
+        }
+        $deictic=$mentions[0][0];
+        // A second location word makes a model's extra store carrier
+        // potentially independent; only one current location mention may
+        // collapse into the prior signed row.
+        $outsideMention=preg_replace('/'.preg_quote($deictic,'/').'/u','',$question,1);
+        if (!is_string($outsideMention) || preg_match('/门店|店/u',$outsideMention)) return $understanding;
+        $requirements=(array)($understanding['requirements']??[]);$storeCandidates=[];$referencePresent=false;
         foreach ($requirements as $index=>$requirement) {
             $fields=(array)($requirement['fields']??[]);
-            if (in_array('result_reference',$fields,true)) return $understanding;
+            if (in_array('result_reference',$fields,true)) {
+                if (($requirement['values']['result_reference']??null)!==$sole) return $understanding;
+                $referencePresent=true;
+            }
             if (!in_array('store_term',$fields,true)) continue;
             $term=$requirement['values']['store_term']??null;
-            if ($candidate!==null || !is_string($term)
-                || !preg_match('/^(?:这|那|该)(?:个|家|间)?(?:门店|店)$/uD',$term)) return $understanding;
+            // With no second location in the current question, any extra
+            // store_term is a duplicate or a mistyped adjacent subject. It
+            // must still be grounded in this turn before it can be removed.
+            if (!is_string($term)) return $understanding;
             $grounded=false;
             foreach ((array)($requirement['evidence']??[]) as $evidence) {
                 if (($evidence['message_id']??null)==='current'
                     && mb_strpos((string)($evidence['quote']??''),$term,0,'UTF-8')!==false) $grounded=true;
             }
             if (!$grounded) return $understanding;
-            $candidate=$index;
+            $storeCandidates[]=$index;
         }
-        if ($candidate===null) return $understanding;
-        $requirements[$candidate]['fields']=array_values(array_map(static function($field): string {
-            return $field==='store_term'?'result_reference':$field;
-        },$requirements[$candidate]['fields']));
-        unset($requirements[$candidate]['values']['store_term']);
-        $requirements[$candidate]['values']['result_reference']=$sole;
+        if ($storeCandidates===[] && $referencePresent) return $understanding;
+        if ($storeCandidates===[]) {
+            if (count($requirements)>=12) return $understanding;
+            $used=array_column($requirements,'id');$id=null;
+            for ($number=1;$number<=999;$number++) {
+                if (!in_array('r'.$number,$used,true)) {$id='r'.$number;break;}
+            }
+            if ($id===null) return $understanding;
+            $requirements[]=['id'=>$id,'meaning'=>$deictic,'fields'=>['result_reference'],
+                'values'=>['result_reference'=>$sole],
+                'evidence'=>[['message_id'=>'current','quote'=>$question]]];
+        } else {
+            foreach ($storeCandidates as $candidate) {
+                // One singular current store cannot also request a separate
+                // catalog lookup. Keep its other independently understood
+                // fields, but remove redundant deictic store carriers.
+                $requirements[$candidate]['fields']=array_values(array_diff($requirements[$candidate]['fields'],['store_term']));
+                unset($requirements[$candidate]['values']['store_term']);
+                if (!$referencePresent) {
+                    $requirements[$candidate]['fields'][]='result_reference';
+                    $requirements[$candidate]['values']['result_reference']=$sole;
+                    $referencePresent=true;
+                }
+                if ($requirements[$candidate]['fields']===[]) unset($requirements[$candidate]);
+                elseif ($requirements[$candidate]['values']===[]) unset($requirements[$candidate]['values']);
+            }
+        }
         return self::normalize([
-            'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',
+            'goal'=>$understanding['goal'],'requirements'=>array_values($requirements),'status'=>'understood',
         ],$safeQuestion);
     }
 

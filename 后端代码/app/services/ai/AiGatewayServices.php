@@ -1342,7 +1342,7 @@ final class AiGatewayServices
             $understanding,$safe['outbound'],$privateKindsByReference
         );
         $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::reconcileSoleStoreReference(
-            $understanding,$safe['outbound']
+            $understanding,$safe['outbound'],$privateKindsByReference
         );
         // Object detail is not another ranking or metric-binding request. The
         // model owns the natural-language meaning while the server resolves a

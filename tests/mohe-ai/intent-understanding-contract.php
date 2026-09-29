@@ -214,6 +214,80 @@ $resolvedDeictic=AiIntentUnderstandingContract::reconcileSoleStoreReference($dei
 $check(($resolvedDeictic['requirements'][0]['values']['result_reference']??null)===['group'=>'top','ordinal'=>1]
     && !isset($resolvedDeictic['requirements'][0]['values']['store_term']),
     'a sole verified ranked store narrows a deictic continuation without a second store choice');
+$wideDeictic=$deicticUnderstanding;
+$wideDeictic['requirements'][0]['values']['store_term']='这个门店技师做的单数';
+$wideDeictic['requirements'][0]['evidence']=[['message_id'=>'current','quote'=>$deicticQuestion['question'],'start'=>0]];
+$wideDeictic=AiIntentUnderstandingContract::normalize($wideDeictic,$deicticQuestion);
+$check((AiIntentUnderstandingContract::reconcileSoleStoreReference($wideDeictic,$deicticQuestion)
+    ['requirements'][0]['values']['result_reference']??null)===['group'=>'top','ordinal'=>1],
+    'a model store carrier spanning the adjacent analytical words still uses the one grounded store reference');
+$bothDeictic=AiIntentUnderstandingContract::normalize([
+    'goal'=>'比较技师项目数','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'当前唯一门店','fields'=>['result_reference'],
+            'values'=>['result_reference'=>['group'=>'top','ordinal'=>1]],
+            'evidence'=>[['message_id'=>'current','quote'=>$deicticQuestion['question']]]],
+        ['id'=>'r2','meaning'=>'这个门店技师','fields'=>['store_term'],
+            'values'=>['store_term'=>'这个门店技师'],
+            'evidence'=>[['message_id'=>'current','quote'=>$deicticQuestion['question']]]],
+    ],
+],$deicticQuestion);
+$deduplicatedDeictic=AiIntentUnderstandingContract::reconcileSoleStoreReference($bothDeictic,$deicticQuestion);
+$check(count($deduplicatedDeictic['requirements'])===1
+    &&($deduplicatedDeictic['requirements'][0]['values']['result_reference']??null)===['group'=>'top','ordinal'=>1],
+    'one signed result reference never leaves a second generic store lookup behind');
+$nounDeictic=$bothDeictic;
+$nounDeictic['requirements'][1]['values']['store_term']='门店';
+$nounDeictic=AiIntentUnderstandingContract::normalize($nounDeictic,$deicticQuestion);
+$check(count(AiIntentUnderstandingContract::reconcileSoleStoreReference($nounDeictic,$deicticQuestion)['requirements'])===1,
+    'a generic store noun in the unique deictic phrase cannot trigger another store picker');
+$mistypedDeictic=$bothDeictic;
+$mistypedDeictic['requirements'][1]['values']['store_term']='技师';
+$mistypedDeictic=AiIntentUnderstandingContract::normalize($mistypedDeictic,$deicticQuestion);
+$check(count(AiIntentUnderstandingContract::reconcileSoleStoreReference($mistypedDeictic,$deicticQuestion)['requirements'])===1,
+    'an adjacent analytical subject mistyped as store does not open a second store lookup');
+$roleDeictic=$deicticQuestion;
+$roleDeictic['question']='这个门店[local_condition_1]做的单数最多的是哪个，最低的是哪个';
+$roleDeictic['evidence_messages']=[['id'=>'current','text'=>$roleDeictic['question']]];
+$roleUnderstanding=AiIntentUnderstandingContract::normalize([
+    'goal'=>'比较该店岗位人员项目数','status'=>'understood','requirements'=>[[
+        'id'=>'r1','meaning'=>'这个门店','fields'=>['store_term'],'values'=>['store_term'=>'这个门店'],
+        'evidence'=>[['message_id'=>'current','quote'=>$roleDeictic['question']]],
+    ]],
+],$roleDeictic);
+$check((AiIntentUnderstandingContract::reconcileSoleStoreReference($roleUnderstanding,$roleDeictic,
+    ['local_condition_1'=>'position'])['requirements'][0]['values']['result_reference']??null)===['group'=>'top','ordinal'=>1],
+    'a typed role token beside the store deictic does not hide its unique prior location');
+$check(AiIntentUnderstandingContract::reconcileSoleStoreReference($roleUnderstanding,$roleDeictic,
+    ['local_condition_1'=>'store'])===$roleUnderstanding,
+    'a second typed store token remains an independent current location');
+// The provider may understand the metric, subject and rank yet omit the
+// deictic store field. A current singular phrase plus one signed result row
+// supplies only that missing scope, never a metric or a row identity.
+$metricOnlyDeictic=AiIntentUnderstandingContract::normalize([
+    'goal'=>'比较技师项目数','status'=>'understood','requirements'=>[[
+        'id'=>'r1','meaning'=>'技师项目数最多和最低','fields'=>['object_kind','metric_codes','operation','ranking'],
+        'values'=>['object_kind'=>'person','metric_terms'=>['做的单数'],'operation'=>'ranking',
+            'ranking'=>['direction'=>'top_and_bottom','limit'=>1]],
+        'evidence'=>[['message_id'=>'current','quote'=>$deicticQuestion['question']]],
+    ]],
+],$deicticQuestion);
+$repairedMetricOnly=AiIntentUnderstandingContract::reconcileSoleStoreReference($metricOnlyDeictic,$deicticQuestion);
+$check(count($repairedMetricOnly['requirements'])===2
+    &&($repairedMetricOnly['requirements'][1]['values']['result_reference']??null)===['group'=>'top','ordinal'=>1]
+    &&($repairedMetricOnly['requirements'][0]['values']['object_kind']??null)==='person',
+    'a model-omitted deictic store uses the signed sole row without changing the analytical person');
+$namedDeictic=$deicticQuestion;$namedDeictic['question']='[local_condition_1] 这个门店技师项目数最多的是谁';
+$namedDeictic['evidence_messages']=[['id'=>'current','text'=>$namedDeictic['question']]];
+$check(AiIntentUnderstandingContract::reconcileSoleStoreReference($metricOnlyDeictic,$namedDeictic)===$metricOnlyDeictic,
+    'a current named condition prevents inherited sole-store scope');
+$pluralDeictic=$deicticQuestion;$pluralDeictic['question']='这个门店和那个门店技师项目数最多的是谁';
+$pluralDeictic['evidence_messages']=[['id'=>'current','text'=>$pluralDeictic['question']]];
+$check(AiIntentUnderstandingContract::reconcileSoleStoreReference($metricOnlyDeictic,$pluralDeictic)===$metricOnlyDeictic,
+    'two current store references cannot silently collapse to one prior row');
+$excludedDeictic=$deicticQuestion;$excludedDeictic['question']='除了这个门店，技师项目数最多的是谁';
+$excludedDeictic['evidence_messages']=[['id'=>'current','text'=>$excludedDeictic['question']]];
+$check(AiIntentUnderstandingContract::reconcileSoleStoreReference($metricOnlyDeictic,$excludedDeictic)===$metricOnlyDeictic,
+    'a store exclusion cannot become the selected store scope');
 $deicticQuestion['prior_query']['sole_result_reference']=null;
 $check(AiIntentUnderstandingContract::reconcileSoleStoreReference($deicticUnderstanding,$deicticQuestion)===$deicticUnderstanding,
     'a tied or missing ranked store never becomes a guessed reference');
@@ -1110,6 +1184,39 @@ $check(is_array($contextRoleRank) && $contextRoleRank['context_delta']['store_sc
     && $contextRoleRank['context_delta']['business_filters']==='clear'
     && $contextRoleRank['context_delta']['metric_codes']==='replace',
     'complete current personnel ranking replaces signed old metric, store and selection through explicit delta');
+$soleRoleQuestion=$rankedRoleQuestion;
+$soleRoleQuestion['question']='这个门店[local_condition_2]做的单数最多的是哪个，最低的是哪个';
+$soleRoleQuestion['evidence_messages'][0]['text']=$soleRoleQuestion['question'];
+$soleRoleQuestion['prior_query']=['operation'=>'ranking','object_kind'=>'store',
+    'sole_result_reference'=>['group'=>'top','ordinal'=>1],
+    'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-29']],
+    'has_store_scope_restriction'=>false,'has_business_filter'=>false,'scope'=>'authorized',
+    'metric_codes'=>['cash_performance'],'ranking'=>['direction'=>'top','limit'=>1]];
+$soleRoleMeaning=$rankedRoleUnderstanding;
+$soleRoleMeaning['requirements'][0]['fields']=['result_reference'];
+$soleRoleMeaning['requirements'][0]['values']=['result_reference'=>['group'=>'top','ordinal'=>1]];
+$soleRoleMeaning['requirements'][0]['evidence']=[['message_id'=>'current','quote'=>'这个门店']];
+$soleRoleMeaning['requirements'][2]['fields']=array_values(array_diff(
+    $soleRoleMeaning['requirements'][2]['fields'],['periods']));
+unset($soleRoleMeaning['requirements'][2]['values']['periods']);
+$soleRoleMeaning['requirements'][2]['values']['metric_terms']=['做的单数'];
+$soleRoleMeaning['requirements'][2]['evidence']=[['message_id'=>'current','quote'=>$soleRoleQuestion['question']]];
+$soleRoleMeaning=AiIntentUnderstandingContract::normalize($soleRoleMeaning,$soleRoleQuestion);
+$soleRoleRank=AiIntentResultContract::exactSingleRankingIntent($soleRoleMeaning,$soleRoleQuestion,
+    ['staff_project_num','cash_performance']);
+$check(is_array($soleRoleRank) && $soleRoleRank['result_reference']===['group'=>'top','ordinal'=>1]
+    && $soleRoleRank['context_delta']['periods']==='inherit'
+    && $soleRoleRank['metric_codes']===['staff_project_num'],
+    'one signed store row and one exact current metric inherit its verified period without another model call');
+$soleRoleNoReference=$soleRoleQuestion;
+$soleRoleNoReference['prior_query']['sole_result_reference']=null;
+$check(AiIntentResultContract::exactSingleRankingIntent($soleRoleMeaning,$soleRoleNoReference,
+    ['staff_project_num','cash_performance'])===null,
+    'a deictic store cannot inherit the period without a signed unique source row');
+$soleRoleNewDate=$soleRoleQuestion;$soleRoleNewDate['question']='昨天'.$soleRoleQuestion['question'];
+$check(AiIntentResultContract::exactSingleRankingIntent($soleRoleMeaning,$soleRoleNewDate,
+    ['staff_project_num','cash_performance'])===null,
+    'a newly stated calendar expression never inherits the old date through the shortcut');
 $oldRankQuery=['query_shape'=>'ranking','metric_codes'=>['staff_sales_yeji'],
     'start_date'=>'2026-08-01','end_date'=>'2026-08-31','compare_range'=>null,
     'store_ids'=>[9],'business_filters'=>['object_kind'=>'person','selection_ref'=>'person:old'],
