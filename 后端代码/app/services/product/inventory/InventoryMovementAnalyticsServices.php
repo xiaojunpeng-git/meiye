@@ -89,8 +89,10 @@ final class InventoryMovementAnalyticsServices
 
     private function sourceTypeName(string $type): string
     {
+        // 业务类型代码是库存事实的稳定来源标识；仅在查询展示层翻译，不改写事实、筛选键或汇总口径。
         return [
             'manual_inbound' => '手工入库', 'manual_outbound' => '手工出库',
+            'cashier_sale' => '收银销售出库',
             'stock_count_gain' => '盘盈', 'stock_count_loss' => '盘亏',
             'batch_transfer_in' => '调拨入库', 'batch_transfer_out' => '调拨出库',
             'salon_usage_issue' => '院装领用', 'salon_usage_return' => '院装退回',
