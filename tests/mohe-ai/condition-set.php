@@ -490,6 +490,20 @@ $localCountIntent=$registeredCondition->invoke($gateway,$localCountMeaning,[
 csCheck(($localCountIntent['metric_codes']??null)===['cash_performance']
     &&($localCountIntent['operation']??null)==='condition_count',
     'closed first-turn meaning still binds through the registered condition compiler');
+$independentSafe=$countSafe;
+$independentSafe['question']='2026年9月消费大于1980元的客户有多少人';
+$independentSafe['evidence_messages'][0]['text']=$independentSafe['question'];
+$independentSafe['prior_query']=['operation'=>'condition_count','aggregate_condition'=>[
+    'subject'=>'member','relation'=>'all','result_form'=>'count','conditions'=>[
+        ['metric_code'=>'cash_performance','operator'=>'gt','quantity'=>'980','unit'=>'yuan'],
+    ],
+]];
+$independentMeaning=$localCount->invoke($gateway,$independentSafe,['local_conditions'=>[]],'2026-09-29',$localCountCaps);
+csCheck(($independentMeaning['requirements'][0]['values']['aggregate_condition']['conditions'][0]['quantity']??null)==='1980'
+    &&($independentMeaning['requirements'][0]['values']['aggregate_condition']['conditions'][0]['operator']??null)==='gt'
+    &&($independentMeaning['requirements'][0]['values']['periods'][0]??null)===[
+        'kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-29'],
+    'R55 a complete new member-count sentence does not inherit an older amount or date');
 $localWrongQuestion=$countSafe;
 $localWrongQuestion['question']='2026年消费4980并且积分200的有多少个人';
 $localWrongQuestion['evidence_messages'][0]['text']=$localWrongQuestion['question'];
@@ -767,6 +781,18 @@ csCheck(($combinedResultForm['operation']??null)==='condition_list'
     &&($combinedResultForm['context_delta']['periods']??null)==='replace'
     &&($combinedResultForm['aggregate_condition']['conditions']??null)===$priorQuery['aggregate_condition']['conditions'],
     'one typed turn changes month and answer form while preserving every signed predicate');
+$periodOnly=$followUnderstanding;
+$periodOnly['requirements'][0]['fields']=['periods'];
+$periodOnly['requirements'][0]['values']=['periods'=>[['kind'=>'month_offset','offset_months'=>0]]];
+$periodOnly['requirements'][0]['evidence']=[['message_id'=>'current','quote'=>'只看本月，条件不变']];
+$periodIntent=AiIntentResultContract::inheritedConditionContinuationContextIntent(
+    $periodOnly,$priorQuery,['presentation_origin'=>'customer_or_verified_context']
+);
+csCheck(($periodIntent['operation']??null)===$priorQuery['query_shape']
+    &&($periodIntent['periods']??null)===[['kind'=>'month_offset','offset_months'=>0]]
+    &&($periodIntent['aggregate_condition']['conditions']??null)===$priorQuery['aggregate_condition']['conditions']
+    &&($periodIntent['context_delta']['periods']??null)==='replace',
+    'R55 a period-only continuation preserves the signed customer predicate and result form');
 $repeatedPriorCondition=['goal'=>'列出上一条件集合的员工名单','status'=>'understood','requirements'=>[[
     'id'=>'r1','meaning'=>'查看名单','fields'=>['metric_codes','object_kind','operation','aggregate_condition'],'values'=>[
         'metric_terms'=>['销售业绩','劳动业绩'],'object_kind'=>'person','operation'=>'condition_list',
@@ -848,6 +874,23 @@ csCheck(($closedMerged['aggregate_condition']['conditions'][0]['operator']??null
     &&($closedMerged['aggregate_condition']['conditions'][0]['quantity']??null)==='2980'
     &&($closedMerged['metric_codes']??null)===$singleUpdateSource['metric_codes'],
     'closed numeric edit preserves the signed metric and changes only the requested predicate');
+$sameConditionSafe=$closedSafe;
+$sameConditionSafe['question']='只看本月，条件不变，有多少人';
+$sameConditionSafe['evidence_messages']=[['id'=>'current','text'=>$sameConditionSafe['question']]];
+$sameCondition=$closedAdmission->invoke($closedGateway,$sameConditionSafe,['local_conditions'=>[]],'2026-09-29');
+$sameConditionIntent=is_array($sameCondition)
+    ?AiIntentResultContract::inheritedConditionContinuationContextIntent($sameCondition,$singleUpdateSource):null;
+$sameConditionMerged=is_array($sameConditionIntent)
+    ?IntentContextMerger::merge($singleUpdateSource,$sameConditionIntent)['intent']:null;
+csCheck(is_array($sameConditionMerged)
+    &&($sameConditionMerged['periods'][0]['start']??null)==='2026-09-01'
+    &&($sameConditionMerged['aggregate_condition']['conditions']??null)===$singleUpdateSource['aggregate_condition']['conditions']
+    &&($sameConditionMerged['operation']??null)==='condition_count',
+    'R55 month-only count follow-up keeps the exact signed greater-than condition');
+$changedConditionSafe=$sameConditionSafe;
+$changedConditionSafe['question']='只看本月，条件不变，再加上积分条件，有多少人';
+csCheck($closedAdmission->invoke($closedGateway,$changedConditionSafe,['local_conditions'=>[]],'2026-09-29')===null,
+    'R55 unknown extra condition cannot hide inside the same-condition shorthand');
 $unknownQuestion='把条件改成大于2980元，再加上积分条件，仍看2026年，人数是多少';
 $unknownSafe=$closedSafe;$unknownSafe['question']=$unknownQuestion;
 csCheck($closedAdmission->invoke($closedGateway,$unknownSafe,['local_conditions'=>[]],'2026-09-29')===null,

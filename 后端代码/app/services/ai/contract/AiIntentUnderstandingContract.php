@@ -532,9 +532,20 @@ final class AiIntentUnderstandingContract
             // shortcut against complete new questions containing a date.
             $projection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse((string)($safeQuestion['question']??''));
             $calendarSignals=['TODAY','YESTERDAY','DAY_BEFORE_YESTERDAY','THIS_MONTH','LAST_MONTH'];
-            if (array_diff((array)($projection['signals']??[]),$calendarSignals)!==[]
+            $calendar=\app\services\ai\semantic\AiSemanticIntentParser::calendarEvidence((string)($safeQuestion['question']??''));
+            $remainder=preg_replace('/[\s，,。？?！!、]+/u','',(string)($calendar['remainder']??''));
+            // A signed condition set may explicitly say its condition stays
+            // unchanged while only the reporting period moves. The bounded
+            // residue is evidence of preservation, not a new business fact;
+            // unknown extra words still fail the ordinary period-only gate.
+            $sameCondition=isset($safeQuestion['prior_query']['aggregate_condition'])
+                && ($calendar['complete']??false)===true
+                && count($calendar['periods']??[])===1
+                && in_array($remainder,['条件不变','其他条件不变','条件不变有多少人','其他条件不变有多少人',
+                    '条件不变人数是多少','其他条件不变人数是多少'],true);
+            if (!$sameCondition && (array_diff((array)($projection['signals']??[]),$calendarSignals)!==[]
                 ||($projection['unresolved_condition']??false)
-                ||(array)($projection['semantic_intent']['constraints']??[])!==[]) {
+                ||(array)($projection['semantic_intent']['constraints']??[])!==[])) {
                 self::fail('period_only_business_residue');
             }
             // Several period requirements for one short continuation are not

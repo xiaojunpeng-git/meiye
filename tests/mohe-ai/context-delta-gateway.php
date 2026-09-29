@@ -8,6 +8,18 @@ function cdgDelta(): array {return array_fill_keys(\app\services\ai\contract\AiI
 
 $h=null;
 try {
+    $collectionHarness=new R6GatewayHarness(3,[1,2],'platform');
+    $firstCollection=$collectionHarness->start('这个月项目、卡项、产品业绩最高的分别是什么');
+    $nextRanks=$collectionHarness->start('前两名',$firstCollection['answer']['context_ref']??null);
+    $nextDay=$collectionHarness->start('昨天呢',$nextRanks['answer']['context_ref']??null);
+    cdgCheck(($firstCollection['status']??null)==='COMPLETED'
+        &&($nextRanks['status']??null)==='COMPLETED'
+        &&($nextDay['status']??null)==='COMPLETED'
+        &&count($nextRanks['answer']['sections']??[])===3
+        &&count($nextDay['answer']['sections']??[])===3
+        &&$collectionHarness->models===0,
+        'R55 one signed three-object collection retains every peer through rank and date follow-ups without model calls');
+    $collectionHarness->close();
     $choiceHarness=new R6GatewayHarness(3,[1,2],'platform');
     $choiceHarness->understandingOverride=['goal'=>'查看今天的业绩','status'=>'understood','requirements'=>[
         ['id'=>'r1','meaning'=>'查看业绩','fields'=>['metric_codes'],'values'=>['metric_terms'=>['业绩']],'evidence'=>[['message_id'=>'current','quote'=>'业绩']]],

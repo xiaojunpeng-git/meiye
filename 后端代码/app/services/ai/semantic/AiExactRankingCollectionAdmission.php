@@ -15,6 +15,35 @@ use app\services\query\metric\MetricSemanticCatalog;
 final class AiExactRankingCollectionAdmission
 {
     /**
+     * A customer may explicitly replace a previously selected store/person
+     * with the entire authorised population. Strip only this scope carrier;
+     * the caller may clear private store IDs only after the remaining ranking
+     * also passes exact registry admission and normal Reader permissions.
+     *
+     * @return array{question:string,all_authorized:bool}
+     */
+    public function authorizedPopulation(string $question,array $objectVocabulary): array
+    {
+        $labels=array_values(array_unique(array_column($this->objects($objectVocabulary),'object_label')));
+        usort($labels,static function(string $a,string $b):int{return mb_strlen($b,'UTF-8')<=>mb_strlen($a,'UTF-8');});
+        foreach ($labels as $label) {
+            $pattern='/(?:我)?(?:有权限的)?(?:所有|全部|全体)(?=\s*'.preg_quote($label,'/').')/u';
+            $stripped=preg_replace($pattern,'',$question,1,$count);
+            if ($count===1 && is_string($stripped)) {
+                // A leading negation of the previous private selection is
+                // redundant once the customer explicitly requests every
+                // authorised object. Admit no trailing negative filter here:
+                // the remaining sentence must still pass exact ranking proof.
+                $withoutPrior=preg_replace('/^\s*不要只看[^，,。]{1,40}[，,]\s*(?:统计)?/u','',$stripped,1);
+                if (!is_string($withoutPrior)) return ['question'=>$question,'all_authorized'=>false];
+                $stripped=$withoutPrior;
+                return ['question'=>$stripped,'all_authorized'=>true];
+            }
+        }
+        return ['question'=>$question,'all_authorized'=>false];
+    }
+
+    /**
      * Admit one registry-backed ranking together with a bounded set-detail view.
      *
      * Natural-language understanding remains the default. This narrow path is
@@ -109,6 +138,8 @@ final class AiExactRankingCollectionAdmission
         if ($shared!==null) return $shared;
         $singleDefault=$this->singleDefaultRanking($question,$objects,$allowedMetricCodes,$defaultRankObjectKinds);
         if ($singleDefault!==null) return $singleDefault;
+        $bounded=$this->boundedSingleRanking($question,$objects,$allowedMetricCodes);
+        if ($bounded!==null) return $bounded;
         $clauses=preg_split('/[，,；;。]+/u',$question,-1,PREG_SPLIT_NO_EMPTY);
         if (!is_array($clauses) || $clauses===[] || count($clauses)>6) return null;
 
@@ -159,6 +190,39 @@ final class AiExactRankingCollectionAdmission
         return [[
             'metric_code'=>$candidateCodes[0],'object_kind'=>$object['object_kind'],
             'direction'=>$direction,'limit'=>1,
+        ]];
+    }
+
+    /**
+     * Bound one explicitly measured ranking without inventing a metric or
+     * object. The shared calendar parser supplies the row limit; leftover
+     * business language keeps the request on the ordinary understanding path.
+     */
+    private function boundedSingleRanking(string $question,array $objects,array $allowedMetricCodes): ?array
+    {
+        $metric=MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes);
+        if ($metric===null) return null;
+        $objectText=str_replace($metric['term'],' ',$question);
+        $matched=$this->objectsInText($objectText,$objects);
+        if ($matched===null || count($matched)!==1) return null;
+        $top=(bool)preg_match('/前[0-9一二两三四五六七八九十百]+(?:名|家|位|款|个)?/u',$question);
+        $bottom=(bool)preg_match('/后[0-9一二两三四五六七八九十百]+(?:名|家|位|款|个)?/u',$question);
+        if ($top===$bottom) return null;
+        $direction=$this->direction($question);
+        if ($direction==='top_and_bottom' || ($top && $direction==='bottom')
+            || ($bottom && $direction==='top')) return null;
+        $projection=(new AiSemanticIntentParser())->parse($question);
+        $limit=$projection['semantic_intent']['rank_limit']??null;
+        if (!is_int($limit) || $limit<1 || $limit>20) return null;
+        $residue=str_replace([$metric['term'],$matched[0]['object_label']],' ',$question);
+        $residue=preg_replace('/(?:前|后)[0-9一二两三四五六七八九十百]+(?:名|家|位|款|个)?|最高|最多|最好|最大|最低|最少|最差|最小/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return null;
+        $residue=preg_replace('/(?:的)?(?:是)?(?:哪些|哪个|哪一个|什么|谁)|分别|的|是|、|，|,|；|;|。|？|\?|！|!|\s+/u','', $calendar['remainder']);
+        if (!is_string($residue) || trim($residue)!=='') return null;
+        return [[
+            'metric_code'=>$metric['metric_code'],'object_kind'=>$matched[0]['object_kind'],
+            'direction'=>$top?'top':'bottom','limit'=>$limit,
         ]];
     }
 
@@ -220,7 +284,7 @@ final class AiExactRankingCollectionAdmission
         if (!$calendar['complete']) return $question;
         $residue=$calendar['remainder'];
         $residue=preg_replace('/业绩|卖得/u',' ',$residue);
-        $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪个|哪一个|什么)(?:又)?|分别|各自|同时|以及|和|与|的|是|又|、|，|,|；|;|。|\s+/u','',$residue);
+        $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪个|哪一个|什么)(?:又)?|分别|各自|同时|以及|和|与|的|是|又|、|，|,|；|;|。|？|\?|！|!|\s+/u','',$residue);
         return is_string($residue)?trim($residue):$question;
     }
 
@@ -233,7 +297,7 @@ final class AiExactRankingCollectionAdmission
         if (!$calendar['complete']) return $question;
         $residue=$calendar['remainder'];
         $residue=preg_replace('/业绩|卖得/u',' ',$residue);
-        $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪家|哪位|哪个|哪一个|谁|什么)(?:又)?|的|是|又|、|，|,|；|;|。|\\s+/u','',$residue);
+        $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪家|哪位|哪个|哪一个|谁|什么)(?:又)?|的|是|又|、|，|,|；|;|。|？|\\?|！|!|\\s+/u','',$residue);
         return is_string($residue)?trim($residue):$question;
     }
 
@@ -248,7 +312,7 @@ final class AiExactRankingCollectionAdmission
         if (!$calendar['complete']) return $question;
         $residue=$calendar['remainder'];
         $residue=preg_replace('/业绩|详情|明细|具体情况|情况/u',' ',$residue);
-        $residue=preg_replace('/(?:的)?(?:是)?(?:哪些|哪个|哪一个|什么)|分别|各自|同时|以及|和|与|的|是|看看|查看|看|给我|、|，|,|；|;|。|\s+/u','',$residue);
+        $residue=preg_replace('/(?:的)?(?:是)?(?:哪些|哪个|哪一个|什么)|分别|各自|同时|以及|和|与|的|是|看看|查看|看|给我|、|，|,|；|;|。|？|\?|！|!|\s+/u','',$residue);
         return is_string($residue)?trim($residue):$question;
     }
 
@@ -309,7 +373,7 @@ final class AiExactRankingCollectionAdmission
         $calendar=AiSemanticIntentParser::calendarEvidence($residue);
         if (!$calendar['complete']) return $clause;
         $residue=$calendar['remainder'];
-        $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪个|哪一个|什么)(?:又)?|分别|同时|以及|和|与|的|是|又|、|\s+/u','',$residue);
+        $residue=preg_replace('/(?:的)?(?:是)?(?:哪一天|哪一日|哪天|哪个|哪一个|什么)(?:又)?|分别|同时|以及|和|与|的|是|又|、|，|,|；|;|。|？|\?|！|!|\s+/u','',$residue);
         return is_string($residue)?trim($residue):$clause;
     }
 

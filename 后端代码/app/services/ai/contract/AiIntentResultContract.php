@@ -918,7 +918,10 @@ final class AiIntentResultContract
                 ||($operation!==null && $operation!=='condition_list')) return null;
             $operation='condition_list';
         }
-        if ($updates===[] && $operation===null) return null;
+        // A time-only follow-up changes the reporting window, not the signed
+        // population predicate or count/list form. Keeping it here prevents
+        // the generic binder from silently dropping the inherited condition.
+        if ($updates===[] && $operation===null && $periods===null) return null;
         if ($metricTerms!==[] && count($updates)!==1) return null;
         $usedTargets=[];
         foreach ($updates as $update) {

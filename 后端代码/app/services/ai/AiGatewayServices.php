@@ -1248,7 +1248,10 @@ final class AiGatewayServices
         // intent.  This is a grammar-bound date delta, not a phrase-to-metric
         // shortcut: any object, metric, ranking, condition or unresolved
         // content leaves the normal natural-language understanding path.
-        $localPeriodUnderstanding=$sourceQuery===null?null:$this->localVerifiedPeriodOnlyUnderstanding($safe['outbound'],$safe,$today);
+        // A multi-answer collection intentionally has no single sourceQuery;
+        // its verified peer queries still allow a shared date/rank edit.
+        $localPeriodUnderstanding=$sourceQuery===null && $sourceCollection===[]?null
+            :$this->localVerifiedPeriodOnlyUnderstanding($safe['outbound'],$safe,$today);
         // Row-count/direction follow-ups have the same stability property as
         // calendar-only edits: when the shared structural parser proves that
         // the complete current turn contains only a ranking presentation
@@ -1256,15 +1259,16 @@ final class AiGatewayServices
         // period and authority. Keep this separate from natural-language
         // business understanding so provider variation cannot reject a plain
         // "top three" continuation or change any executable business field.
-        $localRankingUnderstanding=$sourceQuery===null?null:$this->localVerifiedRankingOnlyUnderstanding($safe['outbound'],$safe);
+        $localRankingUnderstanding=$sourceQuery===null && $sourceCollection===[]?null
+            :$this->localVerifiedRankingOnlyUnderstanding($safe['outbound'],$safe);
         $localConditionUnderstanding=$sourceQuery===null?null:$this->localVerifiedConditionDeltaUnderstanding($safe['outbound'],$safe,$today);
-        // A complete first-turn money predicate plus population count can be
-        // proved against the metric registry before asking the provider to
-        // split it. This prevents a provider-only second "metric" from
-        // blocking an otherwise exact query and avoids a model round trip.
-        $localCountUnderstanding=$sourceQuery===null?$this->localClosedMemberMoneyCountUnderstanding(
+        // A complete current money predicate is independent of whether this
+        // conversation already contains a signed query. The closed residue
+        // proof below replaces old conditions; only a deliberately omitted
+        // store scope can be inherited by the normal context contract.
+        $localCountUnderstanding=$this->localClosedMemberMoneyCountUnderstanding(
             $safe['outbound'],$safe,$today,$caps
-        ):null;
+        );
         // Understanding has no metric catalogue. Binding receives accepted
         // meaning afterwards and may only propose registered execution fields.
         if ($localPeriodUnderstanding!==null || $localRankingUnderstanding!==null
@@ -3164,6 +3168,8 @@ final class AiGatewayServices
         // it remains before date parsing, “那这个月” falsely loses its one
         // calendar carrier and needlessly falls through to the model.
         $normalizedQuestion=$admission->normalizeLeadingDiscourseConnector($question);
+        $population=$admission->authorizedPopulation($normalizedQuestion,$objectVocabulary);
+        $normalizedQuestion=$population['question'];
         $dateProjection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse($normalizedQuestion);
         $dateTermCount=count((array)($dateProjection['date_terms']??[]));
         if ($format!=='screen' || $dateTermCount>1
@@ -3185,10 +3191,14 @@ final class AiGatewayServices
         // A missing period may use one compatible verified predecessor. Only
         // a genuinely new conversation uses the planner's same-day default.
         // Unresolved source constraints stay on the existing understanding path.
-        if ($memberPopulationDetail===null && $dateTermCount!==1) {$reason='date_or_format';return null;}
+        // An omitted period is a legitimate contextual continuation. The
+        // same signed-period compatibility check below guards inheritance;
+        // only a new conversation uses the planner's documented day default.
         $priorQueries=isset($sourceContext['items'])?array_column($sourceContext['items'],'query'):
             (isset($sourceContext['query'])?[$sourceContext['query']]:[]);
-        $inherited=IntentContextMerger::rankingConstraints($priorQueries,$dateTermCount===0,$capabilities['metric_readiness']??[]);
+        $inherited=IntentContextMerger::rankingConstraints(
+            $priorQueries,$dateTermCount===0,$population['all_authorized']
+        );
         if ($inherited===null) {$reason='context_constraints';return null;}
         $memberDetailRequest=$memberPopulationDetail['detail']??null;
         $items=$memberPopulationDetail!==null?[$memberPopulationDetail['ranking']]:$admission->match(
@@ -3574,7 +3584,7 @@ final class AiGatewayServices
     }
 
     /**
-     * Admit only a complete first-turn member count with one explicit money
+     * Admit only a complete current-turn member count with one explicit money
      * predicate and one exact registry-owned measurement. The shared calendar
      * parser owns dates; the registry owns metric meaning and condition
      * readiness; the normal condition compiler and Reader still enforce scope,
@@ -3645,18 +3655,36 @@ final class AiGatewayServices
         $remainder=$question;$period=null;
         if ($dateTerms!==[]) {
             $term=$dateTerms[0];
-            $quote=$term['start']??null;
-            if (!is_string($quote) || $quote==='' || $quote!==($term['end']??null)
-                || mb_substr_count($question,$quote,'UTF-8')!==1) return null;
-            $pattern='/(?:仍看|还是看|只看)?'.preg_quote($quote,'/').'/u';
-            $remainder=preg_replace($pattern,'',$remainder,1,$removed);
-            if (!is_string($remainder) || $removed!==1) return null;
+            $calendar=\app\services\ai\semantic\AiSemanticIntentParser::calendarEvidence($question);
+            if (($calendar['complete']??false)!==true || count($calendar['periods']??[])!==1
+                || (($term['start']??null)!==null && ($term['start']??null)!==($term['end']??null))) return null;
+            // The shared calendar parser also owns relative words such as
+            // "本月" whose date term has a code but no literal start/end.
+            // Use its proven remainder, never a second date-word matcher.
+            $remainder=preg_replace('/(?:仍看|还是看|只看|仅看)/u','',$calendar['remainder']);
+            if (!is_string($remainder)) return null;
+            $quote=is_string($term['start']??null)?$term['start']:$question;
             $period=(new \app\services\ai\execution\AiWorkflowPlanner())->normalizePeriod($term,$today);
         }
         $remainder=preg_replace('/[\s，,。？?！!、]+/u','',$remainder);
         if (!is_string($remainder)) return null;
         $hasCount=(bool)preg_match('/(?:人数是多少|有多少个人|有多少人|多少个人|多少人|几个人)$/u',$remainder,$countMatch);
         if ($hasCount) $remainder=mb_substr($remainder,0,mb_strlen($remainder,'UTF-8')-mb_strlen($countMatch[0],'UTF-8'),'UTF-8');
+        // An explicit "same condition, new period" reuses the signed
+        // predicate verbatim. In particular, a month change cannot turn a
+        // strict greater-than comparison into equality or a fresh cohort.
+        if ($period!==null && in_array($remainder,['条件不变','其他条件不变'],true)) {
+            $requirements=[['id'=>'r1','meaning'=>'change verified query period','fields'=>['periods'],
+                'values'=>['periods'=>[['kind'=>'date_range','start'=>$period['start'],'end'=>$period['end']]]],
+                'evidence'=>[['message_id'=>'current','quote'=>$quote]]]];
+            if ($hasCount && $prior['operation']==='condition_list') $requirements[]=[
+                'id'=>'r2','meaning'=>'count the verified condition set','fields'=>['operation'],
+                'values'=>['operation'=>'condition_count'],
+                'evidence'=>[['message_id'=>'current','quote'=>$countMatch[0]]]];
+            return \app\services\ai\contract\AiIntentUnderstandingContract::normalize([
+                'goal'=>'change verified condition period','requirements'=>$requirements,'status'=>'understood',
+            ],$outbound);
+        }
         if (!preg_match('/^((?:把|将)?(?:条件|金额|数值)(?:改|调整)(?:成|为)?(大于|超过|小于|低于|等于|不少于|不超过|至少|至多)((?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?)(元|次|天))$/u',$remainder,$match)
             || mb_strpos($question,$match[1],0,'UTF-8')===false) return null;
         $operator=['大于'=>'gt','超过'=>'gt','小于'=>'lt','低于'=>'lt','等于'=>'eq',

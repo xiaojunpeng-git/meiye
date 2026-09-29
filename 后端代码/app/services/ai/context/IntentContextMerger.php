@@ -10,26 +10,29 @@ final class IntentContextMerger
     /**
      * Closed rankings replace their metric, dimension and ranking explicitly.
      * Only a common verified period and store scope can survive that change.
-     * Concrete selections or incompatible sources remain on the normal
-     * contextual understanding path instead of silently widening the query.
+     * The admission grammar has already proved a complete new object and
+     * metric, so an old selected person/item is not a filter on this ranking.
+     * Other business filters or incompatible sources still fail closed.
      */
-    public static function rankingConstraints(array $queries,bool $inheritPeriod,array $metricReadiness=[]): ?array
+    public static function rankingConstraints(array $queries,bool $inheritPeriod,bool $allAuthorized=false): ?array
     {
         $constraints=null;
         foreach ($queries as $query) {
             if (!is_array($query) || !is_array($query['store_ids']??null)
-                || !is_array($query['business_filters']??null)
-                || !empty($query['condition_set']) || !empty($query['aggregate_condition'])) return null;
+                || !is_array($query['business_filters']??null)) return null;
+            // A self-contained registered ranking replaces the preceding
+            // predicate. Only its compatible store scope and (when omitted)
+            // period may survive; never copy member conditions into it.
             $filters=$query['business_filters'];
-            // A registry-owned default cohort describes who contributes to
-            // this metric, not a customer-selected person/project. It changes
-            // with the metric; concrete selections must still be understood.
-            $metric=$metricReadiness[$query['metric_codes'][0]??'']??[];
-            if (count($query['metric_codes']??[])===1 && isset($filters['selection_ref'])
-                && $filters['selection_ref']===($metric['analysis_default_selection_ref']??null)
-                && ($filters['object_kind']??null)===($metric['filter_grain']??null)) unset($filters['selection_ref']);
+            // The exact current ranking is a new analytical population.
+            // Its object/metric replace both a prior selected identity and a
+            // prior registry-default cohort; neither may leak across turns.
+            unset($filters['selection_ref']);
             if (array_diff(array_keys($filters),['object_kind'])!==[]) return null;
-            $candidate=['store_ids'=>$query['store_ids']];
+            // An explicit whole-population request removes only the private
+            // prior store selection; Reader still intersects tenant/role
+            // authority before reading facts.
+            $candidate=['store_ids'=>$allAuthorized?[]:$query['store_ids']];
             sort($candidate['store_ids']);
             if ($inheritPeriod) {
                 if (!empty($query['compare_range']) || !is_string($query['start_date']??null)
