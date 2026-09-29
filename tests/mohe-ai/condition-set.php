@@ -476,6 +476,69 @@ csCheck(($compiledCount['metric_codes']??null)===['cash_performance']
     &&($compiledCount['aggregate_condition']['conditions'][0]['quantity']??null)==='4980'
     &&($compiledCount['periods'][0]['end']??null)==='2026-09-29',
     'registered consumption condition retains amount and year-to-date period');
+$localCount=(new ReflectionMethod($gateway,'localClosedMemberMoneyCountUnderstanding'));
+$localCountCaps=['metric_codes'=>array_keys(MetricReadViewServices::metricCapabilities()),
+    'metric_readiness'=>MetricReadViewServices::metricCapabilities()];
+$localCountMeaning=$localCount->invoke($gateway,$countSafe,['local_conditions'=>[]],'2026-09-29',$localCountCaps);
+csCheck(($localCountMeaning['requirements'][0]['values']['aggregate_condition']['conditions'][0]['quantity']??null)==='4980'
+    &&($localCountMeaning['requirements'][0]['values']['aggregate_condition']['conditions'][0]['operator']??null)==='eq'
+    &&($localCountMeaning['requirements'][0]['values']['periods'][0]['end']??null)==='2026-09-29',
+    'closed first-turn count uses the exact registry metric, amount and calendar before model splitting');
+$localCountIntent=$registeredCondition->invoke($gateway,$localCountMeaning,[
+    ['metric_code'=>'cash_performance','object_contracts'=>[]],
+],$countSafe);
+csCheck(($localCountIntent['metric_codes']??null)===['cash_performance']
+    &&($localCountIntent['operation']??null)==='condition_count',
+    'closed first-turn meaning still binds through the registered condition compiler');
+$localWrongQuestion=$countSafe;
+$localWrongQuestion['question']='2026年消费4980并且积分200的有多少个人';
+$localWrongQuestion['evidence_messages'][0]['text']=$localWrongQuestion['question'];
+csCheck($localCount->invoke($gateway,$localWrongQuestion,['local_conditions'=>[]],'2026-09-29',$localCountCaps)===null,
+    'first-turn local path refuses a second independently stated condition');
+$localCountUnitQuestion=$countSafe;
+$localCountUnitQuestion['question']='2026年到店次数3的有多少个人';
+$localCountUnitQuestion['evidence_messages'][0]['text']=$localCountUnitQuestion['question'];
+csCheck($localCount->invoke($gateway,$localCountUnitQuestion,['local_conditions'=>[]],'2026-09-29',$localCountCaps)===null,
+    'a registered count-unit metric cannot be treated as a monetary predicate');
+$providerProjectedCount=$countSemantic;
+$providerProjectedCount['requirements'][1]['values']['metric_terms']=['消费人数','客户数量'];
+$providerProjectedCount['requirements'][1]['evidence'][0]['quote']=$countQuestion;
+$providerProjectedCount=AiIntentUnderstandingContract::normalize($providerProjectedCount,$countSafe);
+csCheck(count($providerProjectedCount['requirements'])===1
+    &&($registeredCondition->invoke($gateway,$providerProjectedCount,[
+        ['metric_code'=>'cash_performance','object_contracts'=>[]],
+    ],$countSafe)['aggregate_condition']['conditions'][0]['quantity']??null)==='4980',
+    'provider-only extra count metrics are removed only after the complete customer sentence proves one amount');
+$wrongAmountCount=$countSemantic;
+$wrongAmountCount['requirements'][0]['values']['aggregate_condition']['conditions'][0]['quantity']='980';
+$wrongAmountCount['requirements'][1]['values']['metric_terms']=['消费'];
+$wrongAmountCount['requirements'][1]['evidence'][0]['quote']=$countQuestion;
+$wrongAmountCount=AiIntentUnderstandingContract::normalize($wrongAmountCount,$countSafe);
+csCheck(count($wrongAmountCount['requirements'])===2,
+    'an amount invented by the provider cannot use the closed count repair');
+$greaterCount=$countSemantic;
+$greaterSafe=$countSafe;
+$greaterSafe['question']='2026年消费大于980元的客户有多少人';
+$greaterSafe['evidence_messages'][0]['text']=$greaterSafe['question'];
+$greaterCount['requirements'][0]['values']['aggregate_condition']['conditions'][0]['operator']='gt';
+$greaterCount['requirements'][0]['values']['aggregate_condition']['conditions'][0]['quantity']='980';
+$greaterCount['requirements'][0]['evidence'][0]['quote']=$greaterSafe['question'];
+$greaterCount['requirements'][1]['values']['metric_terms']=['客户数量'];
+$greaterCount['requirements'][1]['evidence'][0]['quote']=$greaterSafe['question'];
+$greaterCount=AiIntentUnderstandingContract::normalize($greaterCount,$greaterSafe);
+csCheck(count($greaterCount['requirements'])===1,
+    'the same safety proof supports a stated greater-than threshold without hardcoding one amount');
+$localGreater=$localCount->invoke($gateway,$greaterSafe,['local_conditions'=>[]],'2026-09-29',$localCountCaps);
+csCheck(($localGreater['requirements'][0]['values']['aggregate_condition']['conditions'][0]['operator']??null)==='gt'
+    &&($localGreater['requirements'][0]['values']['aggregate_condition']['conditions'][0]['quantity']??null)==='980',
+    'first-turn local path retains a different threshold and explicit comparator');
+$wrongOperatorCount=$countSemantic;
+$wrongOperatorCount['requirements'][0]['values']['aggregate_condition']['conditions'][0]['operator']='gt';
+$wrongOperatorCount['requirements'][1]['values']['metric_terms']=['消费'];
+$wrongOperatorCount['requirements'][1]['evidence'][0]['quote']=$countQuestion;
+$wrongOperatorCount=AiIntentUnderstandingContract::normalize($wrongOperatorCount,$countSafe);
+csCheck(count($wrongOperatorCount['requirements'])===2,
+    'a greater-than operator cannot be silently substituted for bare equality');
 $independentCount=$countSemantic;
 $independentCount['requirements'][1]['values']['metric_terms']=['积分'];
 $independentCount['requirements'][1]['evidence'][0]['quote']='积分';

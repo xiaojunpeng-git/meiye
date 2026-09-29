@@ -1258,15 +1258,24 @@ final class AiGatewayServices
         // "top three" continuation or change any executable business field.
         $localRankingUnderstanding=$sourceQuery===null?null:$this->localVerifiedRankingOnlyUnderstanding($safe['outbound'],$safe);
         $localConditionUnderstanding=$sourceQuery===null?null:$this->localVerifiedConditionDeltaUnderstanding($safe['outbound'],$safe,$today);
+        // A complete first-turn money predicate plus population count can be
+        // proved against the metric registry before asking the provider to
+        // split it. This prevents a provider-only second "metric" from
+        // blocking an otherwise exact query and avoids a model round trip.
+        $localCountUnderstanding=$sourceQuery===null?$this->localClosedMemberMoneyCountUnderstanding(
+            $safe['outbound'],$safe,$today,$caps
+        ):null;
         // Understanding has no metric catalogue. Binding receives accepted
         // meaning afterwards and may only propose registered execution fields.
-        if ($localPeriodUnderstanding!==null || $localRankingUnderstanding!==null || $localConditionUnderstanding!==null) {
+        if ($localPeriodUnderstanding!==null || $localRankingUnderstanding!==null
+            || $localConditionUnderstanding!==null || $localCountUnderstanding!==null) {
             // Keep this observable without inventing a model attempt: the
             // date-only grammar gate is a server-owned context optimization.
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
                 $localPeriodUnderstanding!==null?'context_period_only_local_reuse':($localRankingUnderstanding!==null
-                    ?'context_ranking_only_local_reuse':'context_condition_delta_local_reuse'));
-            $understanding=$localPeriodUnderstanding??$localRankingUnderstanding??$localConditionUnderstanding;
+                    ?'context_ranking_only_local_reuse':($localConditionUnderstanding!==null
+                        ?'context_condition_delta_local_reuse':'registered_member_count_local_understanding')));
+            $understanding=$localPeriodUnderstanding??$localRankingUnderstanding??$localConditionUnderstanding??$localCountUnderstanding;
         } else {
             $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
             $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$runtimeSkills,$objectVocabulary,$measurementVocabulary],1024));
@@ -3562,6 +3571,54 @@ final class AiGatewayServices
             'status'=>'understood',
         ];
         return \app\services\ai\contract\AiIntentUnderstandingContract::normalize($candidate,$outbound);
+    }
+
+    /**
+     * Admit only a complete first-turn member count with one explicit money
+     * predicate and one exact registry-owned measurement. The shared calendar
+     * parser owns dates; the registry owns metric meaning and condition
+     * readiness; the normal condition compiler and Reader still enforce scope,
+     * permissions and fact grain. Unparsed words or a second condition return
+     * to model understanding rather than silently narrowing the request.
+     */
+    private function localClosedMemberMoneyCountUnderstanding(array $outbound,array $safe,string $today,array $caps): ?array
+    {
+        $question=$outbound['question']??null;
+        if (!is_string($question) || $question==='' || !empty($safe['local_conditions']??[])) return null;
+        $matches=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText(
+            $question,array_keys((array)($caps['metric_readiness']??[]))
+        );
+        if (count($matches)!==1) return null;
+        $match=$matches[0];$code=$match['metric_code']??null;$term=$match['term']??null;
+        $readiness=is_string($code)?($caps['metric_readiness'][$code]??null):null;
+        if (!is_string($code) || !is_string($term) || !is_array($readiness)
+            || ($readiness['condition_unit']??null)!=='yuan' || !isset(
+            \app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,'member','condition_count')[$code]
+        )) return null;
+        $predicate=\app\services\ai\semantic\AiConditionResponseFormResolver::parseClosedMemberMoneyCount($question,$term);
+        $calendar=\app\services\ai\semantic\AiSemanticIntentParser::calendarEvidence($question);
+        // Require one explicit, complete period here: otherwise "spent N"
+        // could mean today or lifetime, and the model must resolve that scope.
+        if ($predicate===null || ($calendar['complete']??false)!==true
+            || count($calendar['periods']??[])!==1) return null;
+        $projection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse($question);
+        if (count((array)($projection['date_terms']??[]))!==1
+            || ($projection['date_grouping_ambiguous']??true)) return null;
+        $range=(new \app\services\ai\execution\AiWorkflowPlanner())->normalizePeriod($projection['date_terms'][0],$today);
+        $predicate['metric_term']=$term;
+        return \app\services\ai\contract\AiIntentUnderstandingContract::normalize([
+            'goal'=>'count members meeting one registered monetary condition',
+            'requirements'=>[[
+                'id'=>'r1','meaning'=>'registered monetary condition and member count',
+                'fields'=>['metric_codes','object_kind','operation','periods','aggregate_condition'],
+                'values'=>['metric_terms'=>[$term],'object_kind'=>'member','operation'=>'condition_count',
+                    'periods'=>[['kind'=>'date_range','start'=>$range['start'],'end'=>$range['end']]],
+                    'aggregate_condition'=>['subject'=>'member','relation'=>'all','result_form'=>'count',
+                        'conditions'=>[$predicate]]],
+                'evidence'=>[['message_id'=>'current','quote'=>$question]],
+            ]],
+            'status'=>'understood',
+        ],$outbound);
     }
 
     /**

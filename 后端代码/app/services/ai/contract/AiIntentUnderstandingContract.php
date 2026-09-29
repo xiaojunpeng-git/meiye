@@ -663,7 +663,8 @@ final class AiIntentUnderstandingContract
         foreach ($requirements as $requirement) {
             $candidate=is_array($requirement)?($requirement['values']['aggregate_condition']??null):null;
             if (!is_array($candidate) || !isset($candidate['conditions'])) continue;
-            if (!self::aggregateCondition($candidate) || ($candidate['result_form']??null)!=='count') return $requirements;
+            if (!self::aggregateCondition($candidate) || ($candidate['result_form']??null)!=='count'
+                || ($candidate['subject']??null)!=='member') return $requirements;
             foreach ($candidate['conditions'] as $condition) $conditions[]=$condition;
         }
         if (count($conditions)!==1) return $requirements;
@@ -673,6 +674,13 @@ final class AiIntentUnderstandingContract
         $stated=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText($question);
         if (!is_array($owner) || count($stated)!==1
             || ($stated[0]['metric_code']??null)!==$owner['metric_code']) return $requirements;
+        // When the customer's entire sentence proves one registered money
+        // predicate and one population count, provider-only extra metric names
+        // cannot be independent customer conditions. The proof also checks the
+        // operator and quantity, so a wrong model predicate is never repaired.
+        $closedCount=\app\services\ai\semantic\AiConditionResponseFormResolver::closedMemberMoneyCount(
+            $question,(string)$stated[0]['term'],$conditions[0]
+        );
         $out=[];$changed=false;
         foreach ($requirements as $requirement) {
             $fields=is_array($requirement)?($requirement['fields']??null):null;
@@ -683,7 +691,7 @@ final class AiIntentUnderstandingContract
             }
             $terms=$values['metric_terms']??null;
             if (!is_array($terms) || $terms===[]) {$out[]=$requirement;continue;}
-            foreach ($terms as $term) {
+            if (!$closedCount) foreach ($terms as $term) {
                 if (!is_string($term) || $term===''
                     || mb_strpos($question,$term,0,'UTF-8')===false
                     || !\app\services\ai\semantic\AiConditionResponseFormResolver::countPhraseContains($question,$term)
