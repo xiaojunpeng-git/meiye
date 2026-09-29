@@ -45,7 +45,9 @@ $provider = (new ReflectionClass(InventoryCountUnifiedQueryProvider::class))->ne
 $source = new ReflectionMethod($provider, 'sourceRows'); $source->setAccessible(true);
 $sourceRows = $source->invoke($provider, [
     'tenant_id' => (string)$stock['tenant_id'], 'store_id' => 99008, 'operator_id' => 990008,
-    'organization_id' => '99008', 'scope_dimensions' => ['location_id' => [(int)$stock['location_id']]],
+    'organization_id' => '99008', 'inventory_count_operator_type' => 'STORE_STAFF',
+    'inventory_count_creator_id' => 990008,
+    'scope_dimensions' => ['location_id' => [(int)$stock['location_id']]],
     'permissions' => [],
 ]);
 draftCheck('creator sees an editable draft in the count list without a settled cost impact',
@@ -53,7 +55,7 @@ draftCheck('creator sees an editable draft in the count list without a settled c
         && (string)$row['status_name'] === 'DRAFT' && (int)$row['detail_count'] === 1
         && $row['change_amount_cents'] === null)) === 1);
 draftCheck('another operator cannot read a creator-owned draft',
-    draftReason(static fn() => $drafts->detail(99008, 990009, $draftId)) === 'inventory_stock_count_query_scope_denied');
+    draftReason(static fn() => $drafts->detail(99008, 990009, $draftId)) === 'inventory_stock_count_scope_denied');
 $edited = $drafts->save(99008, 990008, ['draft_id' => $draftId, 'expected_version' => 1,
     'business_date' => '2026-09-28', 'remark' => 'TEST-已修改草稿', 'lines' => [$line]]);
 draftCheck('stale editor revision cannot overwrite a newer draft',
@@ -96,6 +98,62 @@ $bulkDetail = $drafts->detail(99008, 990008, (int)$bulkSaved['draft_id']);
 draftCheck('draft persists all 1001 selected SKUs without turning unchanged rows into differences',
     count($bulkDetail['lines']) === 1001
     && (int)Db::name('inventory_stock_count_draft')->where('id', (int)$bulkSaved['draft_id'])->value('line_count') === 1);
+
+// A multi-store organization session uses its stable employee identity, never its rotating session PK.
+$organizationSession = static fn(int $sessionId): array => [
+    'id' => $sessionId, 'employee_id' => 990008, 'store_id' => 99008,
+    '_cashier_v3_organization' => 1, 'session_mode' => 'store_organization',
+    'read_only' => false, 'operation_features' => ['cashier.v3.inventory.count'],
+];
+$organizationDraft = $drafts->save(99008, 880001, ['draft_id' => 0, 'expected_version' => 0,
+    'business_date' => '2026-09-29', 'remark' => 'TEST-组织会话草稿', 'lines' => [$line]], $organizationSession(880001));
+$organizationDraftId = (int)$organizationDraft['draft_id'];
+$organizationRow = Db::name('inventory_stock_count_draft')->where('id', $organizationDraftId)->find();
+draftCheck('organization creator is the typed stable employee, not the session id',
+    (string)$organizationRow['operator_type'] === 'EMPLOYEE' && (int)$organizationRow['operator_id'] === 990008
+    && count($drafts->detail(99008, 880002, $organizationDraftId, $organizationSession(880002))['lines']) === 1);
+draftCheck('same numeric staff id cannot read the employee-owned draft',
+    draftReason(static fn() => $drafts->detail(99008, 990008, $organizationDraftId)) === 'inventory_stock_count_draft_missing');
+$organizationRows = $source->invoke($provider, [
+    'tenant_id' => (string)$stock['tenant_id'], 'store_id' => 99008, 'operator_id' => 990008,
+    'organization_id' => '99008', 'inventory_count_operator_type' => 'EMPLOYEE',
+    'inventory_count_creator_id' => 990008,
+    'scope_dimensions' => ['location_id' => [(int)$stock['location_id']]], 'permissions' => [],
+]);
+draftCheck('organization creator sees the draft in the count list after changing sessions',
+    count(array_filter($organizationRows, static fn(array $row): bool => (int)($row['draft_id'] ?? 0) === $organizationDraftId)) === 1);
+draftCheck('read-only delegated session cannot save a count draft',
+    draftReason(static fn() => $drafts->save(99008, 880003, ['draft_id' => 0, 'expected_version' => 0,
+        'business_date' => '2026-09-29', 'lines' => [$line]], [
+            'id' => 880003, 'store_id' => 99008, '_cashier_v3_delegated' => 1,
+        ])) === 'inventory_stock_count_scope_denied');
+$organizationBook = (int)Db::name('inventory_stock')->where('id', (int)$stock['id'])->value('available_quantity_units');
+$organizationLine = array_merge($line, ['book_quantity' => (string)$organizationBook,
+    'counted_quantity' => (string)($organizationBook + 1),
+    'surplus_batch_no' => 'TEST-ORG-DRAFT-GAIN-' . $organizationDraftId]);
+$ready = $drafts->save(99008, 880004, ['draft_id' => 0, 'expected_version' => 0,
+    'business_date' => '2026-09-29', 'remark' => 'TEST-组织盘点确认',
+    'lines' => [$organizationLine]], $organizationSession(880004));
+$readyId = (int)$ready['draft_id'];
+$orgCommand = ['idempotency_key' => 'count-draft-' . $readyId, 'draft_id' => $readyId,
+    'draft_version' => 1, 'business_date' => '2026-09-29', 'remark' => 'TEST-组织盘点确认',
+    'lines' => [[
+        'product_id' => 990081, 'sku_id' => 9900811, 'sku_unique' => 'testsku9900811',
+        'counted_quantity' => (string)($organizationBook + 1),
+        'surplus_batch_no' => $organizationLine['surplus_batch_no'], 'surplus_unit_cost' => '2.30',
+        'surplus_manufactured_date' => '2026-06-07', 'surplus_expire_date' => '2027-07-07',
+        'expected_book_quantity' => (string)$organizationBook,
+    ]]];
+$orgFactsBefore = (int)Db::name('inventory_batch_movement_fact')->where('store_id', 99008)->count();
+$orgConfirmed = (new InventoryStockCountServices())->confirm(99008, 880005, $orgCommand, $organizationSession(880005));
+$orgReplay = (new InventoryStockCountServices())->confirm(99008, 880006, $orgCommand, $organizationSession(880006));
+$orgDocument = Db::name('inventory_stock_count_document')->where('id', (int)$orgConfirmed['count_document_id'])->find();
+draftCheck('organization draft confirms once after re-login with an auditable employee operator',
+    (string)$orgDocument['operator_type'] === 'EMPLOYEE'
+    && (int)$orgDocument['operator_id'] === 990008
+    && (int)Db::name('inventory_batch_movement_fact')->where('store_id', 99008)->count() === $orgFactsBefore + 1
+    && $orgReplay['idempotent'] === true
+    && (int)$orgReplay['count_document_id'] === (int)$orgConfirmed['count_document_id']);
 
 echo "INVENTORY_STOCK_COUNT_DRAFT_RESULT failed={$failed}\n";
 exit($failed ? 1 : 0);

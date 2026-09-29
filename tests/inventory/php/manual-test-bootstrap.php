@@ -90,6 +90,7 @@ $files = [
     $backend . '/database/upgrades/2026-08-02-库存V3跨主体调拨在途收货/02-正式升级.sql',
     $backend . '/database/upgrades/2026-08-03-库存V3业务单号统一/02-正式升级.sql',
     $backend . '/database/upgrades/2026-09-28-库存盘点草稿/01-正式升级.sql',
+    $backend . '/database/upgrades/2026-09-29-盘点操作人身份类型/02-正式升级.sql',
 ];
 if (getenv('INVENTORY_SKIP_SCHEMA_BOOTSTRAP') !== '1') {
     foreach ($files as $file) executeInventorySqlFile($file);

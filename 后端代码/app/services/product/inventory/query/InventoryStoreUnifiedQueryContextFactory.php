@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace app\services\product\inventory\query;
 
 use app\services\product\inventory\InventoryStoreAccessPolicy;
+use app\services\product\inventory\InventoryStockCountActorServices;
 use app\services\query\UnifiedQueryContextFactory;
 use app\services\query\UnifiedQueryException;
 use think\facade\Db;
@@ -71,9 +72,16 @@ final class InventoryStoreUnifiedQueryContextFactory
             throw new UnifiedQueryException('UNIFIED_QUERY_CONTEXT_INVALID', '库存查询功能未配置权限映射。', []);
         }
         $features = (new InventoryStoreAccessPolicy())->features($storeId, $operatorId, self::PAGE_FEATURES[$pageCode]);
-        return $this->core->make([
+        // Count drafts belong to a stable typed creator, not a replaceable organization session id.
+        // Delegated read-only sessions may query confirmed facts but must never discover a draft.
+        $countActor = null;
+        if ($pageCode === 'inventory_count' && empty($sessionInfo['_cashier_v3_delegated'])) {
+            $countActor = (new InventoryStockCountActorServices())->resolve($storeId, $operatorId, $sessionInfo);
+        }
+        $context = $this->core->make([
             'tenant_id' => (string)array_key_first($tenantIds),
             'account_id' => $operatorId,
+            // Neutral UQ receipts/preferences/export tasks remain keyed by this authenticated session.
             'operator_id' => $operatorId,
             'store_id' => $storeId,
             'organization_id' => $organizationId,
@@ -89,5 +97,11 @@ final class InventoryStoreUnifiedQueryContextFactory
             'query_cutoff_date' => InventoryBatchStockQueryContract::assertCutoffDate($cutoffDate),
             'data_as_of' => time(),
         ], ['pageCode' => $pageCode]);
+        // Host-only discriminator is appended after the neutral context factory's strict allowlist.
+        if ($pageCode === 'inventory_count') {
+            $context['inventory_count_operator_type'] = $countActor['type'] ?? '';
+            $context['inventory_count_creator_id'] = $countActor['id'] ?? 0;
+        }
+        return $context;
     }
 }

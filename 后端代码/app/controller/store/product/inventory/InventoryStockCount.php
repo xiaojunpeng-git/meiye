@@ -17,19 +17,19 @@ final class InventoryStockCount extends AuthController
     public function confirm()
     {
         $data = $this->request->postMore([['idempotency_key',''],['business_date',''],['remark',''],['lines',[]],['draft_id',0],['draft_version',0]]);
-        return $this->success($this->services->confirm((int)$this->storeId, (int)$this->storeStaffId, $data));
+        return $this->success($this->services->confirm((int)$this->storeId, (int)$this->storeStaffId, $data, (array)$this->storeStaffInfo));
     }
 
     /** Saving does not call the confirming service or create inventory movement facts. */
     public function saveDraft()
     {
         $data = $this->request->postMore([['draft_id',0],['expected_version',0],['business_date',''],['remark',''],['lines',[]]]);
-        return $this->success((new InventoryStockCountDraftServices())->save((int)$this->storeId, (int)$this->storeStaffId, $data));
+        return $this->success((new InventoryStockCountDraftServices())->save((int)$this->storeId, (int)$this->storeStaffId, $data, (array)$this->storeStaffInfo));
     }
 
     public function draftDetail(int $id)
     {
-        return $this->success((new InventoryStockCountDraftServices())->detail((int)$this->storeId, (int)$this->storeStaffId, $id));
+        return $this->success((new InventoryStockCountDraftServices())->detail((int)$this->storeId, (int)$this->storeStaffId, $id, (array)$this->storeStaffInfo));
     }
 
     /** Only the authenticated creator can permanently remove an unconfirmed draft at its current version. */
@@ -37,7 +37,7 @@ final class InventoryStockCount extends AuthController
     {
         $data = $this->request->postMore([['expected_version', 0]]);
         return $this->success((new InventoryStockCountDraftServices())->delete(
-            (int)$this->storeId, (int)$this->storeStaffId, $id, (int)$data['expected_version']
+            (int)$this->storeId, (int)$this->storeStaffId, $id, (int)$data['expected_version'], (array)$this->storeStaffInfo
         ));
     }
 }

@@ -12,7 +12,7 @@ use think\facade\Db;
 /** Confirms one physical stock count against the location-scoped batch authority. */
 final class InventoryStockCountServices
 {
-    public function confirm(int $storeId, int $operatorId, array $input): array
+    public function confirm(int $storeId, int $operatorId, array $input, array $sessionInfo = []): array
     {
         $draftId = (int)($input['draft_id'] ?? 0);
         $draftVersion = (int)($input['draft_version'] ?? 0);
@@ -24,8 +24,8 @@ final class InventoryStockCountServices
             || ($draftId > 0 && ($draftVersion <= 0 || $command['key'] !== 'count-draft-' . $draftId))) {
             throw new \InvalidArgumentException('inventory_stock_count_draft_invalid');
         }
-        return Db::transaction(function () use ($storeId, $operatorId, $command, $draftId, $draftVersion): array {
-            $scope = $this->scope($storeId, $operatorId);
+        return Db::transaction(function () use ($storeId, $operatorId, $sessionInfo, $command, $draftId, $draftVersion): array {
+            $scope = $this->scope($storeId, $operatorId, $sessionInfo);
             $location = $this->location($scope);
             if ($draftId > 0) {
                 $scope['locationId'] = (int)$location['id'];
@@ -102,7 +102,9 @@ final class InventoryStockCountServices
             $documentId = (int)Db::name('inventory_stock_count_document')->insertGetId([
                 'count_no' => (new InventoryBusinessDocumentNumberServices())->next($scope['tenantId'], InventoryBusinessDocumentNumberServices::COUNT, $command['businessDate'], $command['now']), 'idempotency_key' => $command['key'], 'request_fingerprint' => $command['fingerprint'],
                 'tenant_id' => $scope['tenantId'], 'organization_id' => $scope['organizationId'], 'organization_path' => $scope['organizationPath'], 'location_id' => (int)$location['id'],
-                'store_id' => $scope['storeId'], 'operator_id' => $operatorId, 'document_status' => 'CONFIRMED', 'remark' => $command['remark'], 'business_date' => $command['businessDate'], 'confirmed_at' => $command['now'], 'recorded_at' => $command['now'],
+                'store_id' => $scope['storeId'], 'operator_id' => $operatorId,
+                'operator_type' => $scope['operatorType'] ?? 'PLATFORM_ADMIN',
+                'document_status' => 'CONFIRMED', 'remark' => $command['remark'], 'business_date' => $command['businessDate'], 'confirmed_at' => $command['now'], 'recorded_at' => $command['now'],
             ]);
             $document = Db::name('inventory_stock_count_document')->where('id', $documentId)->lock(true)->find();
             $ordered = $command['lines']; usort($ordered, static fn(array $a, array $b): int => [$a['productId'], $a['skuId'], $a['unique'], $a['index']] <=> [$b['productId'], $b['skuId'], $b['unique'], $b['index']]);
@@ -221,7 +223,31 @@ final class InventoryStockCountServices
 
     private function fact(array $scope, array $stock, array $batch, int $direction, int $units, string $type, string $source, string $detail, array $command): void { $scale = (int)$stock['quantity_scale']; (new InventoryBatchMovementFactServices())->append(['factKey' => 'stock-count:' . hash('sha256', $source . ':' . $detail), 'tenantId' => $scope['tenantId'], 'organizationId' => $scope['organizationId'], 'organizationPath' => $scope['organizationPath'], 'storeId' => $scope['storeId'], 'stockId' => (int)$stock['id'], 'batchId' => (int)$batch['id'], 'direction' => $direction, 'quantityUnits' => $units, 'unitCostCents' => (int)$batch['unit_cost_cents'], 'costAmountCents' => intdiv($units * (int)$batch['unit_cost_cents'], 10 ** $scale), 'sourceType' => $type, 'sourceId' => $source, 'sourceDetailId' => $detail, 'reversalOf' => 0, 'businessDate' => $command['businessDate'], 'occurredAt' => $command['now'], 'settledAt' => $command['now'], 'recordedAt' => $command['now']]); }
 
-    private function scope(int $storeId, int $operatorId): array { $store = Db::name('system_store')->where('id',$storeId)->where('is_del',0)->where('is_show',1)->lock(true)->find(); $staff = Db::name('system_store_staff')->where('id',$operatorId)->where('store_id',$storeId)->where('status',1)->where('is_del',0)->lock(true)->find(); $binding = Db::name('organization_store')->where('store_id',$storeId)->lock(true)->find(); $org=(int)($binding['org_id']??0); if(!$store||!$staff||$org<=0) throw new \RuntimeException('inventory_stock_count_scope_denied'); $path=[];$seen=[];$current=$org; for($i=0;$i<64;$i++){if(isset($seen[$current]))throw new \RuntimeException('inventory_stock_count_scope_denied');$seen[$current]=true;$node=Db::name('organization')->where('id',$current)->where('is_del',0)->lock(true)->find();if(!$node)throw new \RuntimeException('inventory_stock_count_scope_denied');$path[]=(int)$node['id'];$parent=(int)$node['pid'];if($parent===0)break;if($parent<0)throw new \RuntimeException('inventory_stock_count_scope_denied');$current=$parent;} if(!$path||(int)end($path)!==$current)throw new \RuntimeException('inventory_stock_count_scope_denied'); return ['tenantId'=>CashierV3ScopeResolver::TENANT_SCOPE_ID,'organizationId'=>(string)$org,'organizationPath'=>'/'.implode('/',array_reverse($path)).'/','storeId'=>$storeId,'operatorId'=>$operatorId]; }
+    /** Lock the store and organization path, while the creator identity stays stable across organization logins. */
+    private function scope(int $storeId, int $operatorId, array $sessionInfo): array
+    {
+        $actor = (new InventoryStockCountActorServices())->resolve($storeId, $operatorId, $sessionInfo);
+        $store = Db::name('system_store')->where('id', $storeId)->where('is_del', 0)->where('is_show', 1)->lock(true)->find();
+        $binding = Db::name('organization_store')->where('store_id', $storeId)->lock(true)->find();
+        $org = (int)($binding['org_id'] ?? 0);
+        if (!$store || $org <= 0) throw new \RuntimeException('inventory_stock_count_scope_denied');
+        $path = []; $seen = []; $current = $org;
+        for ($i = 0; $i < 64; $i++) {
+            if (isset($seen[$current])) throw new \RuntimeException('inventory_stock_count_scope_denied');
+            $seen[$current] = true;
+            $node = Db::name('organization')->where('id', $current)->where('is_del', 0)->lock(true)->find();
+            if (!$node) throw new \RuntimeException('inventory_stock_count_scope_denied');
+            $path[] = (int)$node['id'];
+            $parent = (int)$node['pid'];
+            if ($parent === 0) break;
+            if ($parent < 0) throw new \RuntimeException('inventory_stock_count_scope_denied');
+            $current = $parent;
+        }
+        if (!$path || (int)end($path) !== $current) throw new \RuntimeException('inventory_stock_count_scope_denied');
+        return ['tenantId' => CashierV3ScopeResolver::TENANT_SCOPE_ID,
+            'organizationId' => (string)$org, 'organizationPath' => '/' . implode('/', array_reverse($path)) . '/',
+            'storeId' => $storeId, 'operatorId' => $actor['id'], 'operatorType' => $actor['type']];
+    }
     private function location(array $scope): array { $rows=Db::name('inventory_location')->where('tenant_id',$scope['tenantId'])->where('store_id',$scope['storeId'])->where('location_type','STORE')->where('is_default',1)->where('location_status','ACTIVE')->limit(2)->lock(true)->select()->toArray(); if(count($rows)!==1||(string)$rows[0]['organization_id']!==$scope['organizationId']||(string)$rows[0]['organization_path']!==$scope['organizationPath']) throw new \RuntimeException('inventory_stock_count_location_invalid'); return $rows[0]; }
     /** One document remains atomic regardless of its SKU count; duplicate SKUs are rejected before stock changes. */
     private function normalize(array $input): array

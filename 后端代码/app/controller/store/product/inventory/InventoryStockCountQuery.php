@@ -26,7 +26,8 @@ final class InventoryStockCountQuery extends AuthController
             (string)$data['keyword'],
             (int)$data['page'],
             (int)$data['limit'],
-            $canViewCost
+            $canViewCost,
+            (array)$this->storeStaffInfo
         ));
     }
 
@@ -35,7 +36,7 @@ final class InventoryStockCountQuery extends AuthController
     {
         try {
             $canViewCost = (new InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.count');
-            return $this->success($this->services->detail((int)$this->storeId, (int)$this->storeStaffId, $id, $canViewCost));
+            return $this->success($this->services->detail((int)$this->storeId, (int)$this->storeStaffId, $id, $canViewCost, (array)$this->storeStaffInfo));
         } catch (\InvalidArgumentException $exception) {
             return $this->fail('盘点单不存在或无权查看。', ['code' => $exception->getMessage()]);
         } catch (\RuntimeException $exception) {

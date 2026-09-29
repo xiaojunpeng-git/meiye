@@ -10,9 +10,9 @@ use think\facade\Db;
 final class InventoryStockCountDraftServices
 {
     /** Only the creating active store operator may resume a draft; warehouse scope is resolved server-side. */
-    public function save(int $storeId, int $operatorId, array $input): array
+    public function save(int $storeId, int $operatorId, array $input, array $sessionInfo = []): array
     {
-        $scope = $this->scope($storeId, $operatorId);
+        $scope = $this->scope($storeId, $operatorId, $sessionInfo);
         $date = trim((string)($input['business_date'] ?? ''));
         $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
         if (!$parsed || $parsed->format('Y-m-d') !== $date) throw new \InvalidArgumentException('inventory_stock_count_date_invalid');
@@ -43,6 +43,7 @@ final class InventoryStockCountDraftServices
             $id = (int)Db::name('inventory_stock_count_draft')->insertGetId(array_merge([
                 'tenant_id' => $scope['tenant_id'], 'store_id' => $scope['store_id'],
                 'location_id' => $scope['location_id'], 'operator_id' => $scope['operator_id'],
+                'operator_type' => $scope['operator_type'],
                 'document_status' => 'DRAFT', 'version' => 1, 'confirmed_document_id' => 0,
                 'created_at' => $now,
             ], $fields));
@@ -51,9 +52,9 @@ final class InventoryStockCountDraftServices
     }
 
     /** Reads only the saved form fields; no mutable stock balance is presented as a settled fact. */
-    public function detail(int $storeId, int $operatorId, int $id): array
+    public function detail(int $storeId, int $operatorId, int $id, array $sessionInfo = []): array
     {
-        $scope = $this->scope($storeId, $operatorId);
+        $scope = $this->scope($storeId, $operatorId, $sessionInfo);
         $draft = $this->scopedDraft($scope, $id);
         if ((string)$draft['document_status'] !== 'DRAFT') throw new \RuntimeException('inventory_stock_count_draft_changed');
         return ['draft_id' => (int)$draft['id'], 'version' => (int)$draft['version'],
@@ -62,10 +63,10 @@ final class InventoryStockCountDraftServices
     }
 
     /** Permanently removes only an unconfirmed creator-owned draft; settled documents and facts are never deleted. */
-    public function delete(int $storeId, int $operatorId, int $id, int $expectedVersion): array
+    public function delete(int $storeId, int $operatorId, int $id, int $expectedVersion, array $sessionInfo = []): array
     {
         if ($expectedVersion <= 0) throw new \InvalidArgumentException('inventory_stock_count_draft_changed');
-        $scope = $this->scope($storeId, $operatorId);
+        $scope = $this->scope($storeId, $operatorId, $sessionInfo);
         return Db::transaction(function () use ($scope, $id, $expectedVersion): array {
             $draft = $this->scopedDraft($scope, $id, true);
             if ((string)$draft['document_status'] !== 'DRAFT' || (int)$draft['version'] !== $expectedVersion) {
@@ -75,6 +76,7 @@ final class InventoryStockCountDraftServices
             $deleted = Db::name('inventory_stock_count_draft')->where('id', $id)
                 ->where('tenant_id', $scope['tenant_id'])->where('store_id', $scope['store_id'])
                 ->where('location_id', $scope['location_id'])->where('operator_id', $scope['operator_id'])
+                ->where('operator_type', $scope['operator_type'])
                 ->where('document_status', 'DRAFT')->where('version', $expectedVersion)->delete();
             if ($deleted !== 1) throw new \RuntimeException('inventory_stock_count_draft_changed');
             return ['draft_id' => $id, 'deleted' => true];
@@ -87,6 +89,7 @@ final class InventoryStockCountDraftServices
         $draft = $this->scopedDraft([
             'tenant_id' => $scope['tenantId'], 'store_id' => $scope['storeId'],
             'location_id' => $scope['locationId'], 'operator_id' => $scope['operatorId'],
+            'operator_type' => $scope['operatorType'],
         ], $draftId, true);
         if ((string)$draft['document_status'] === 'CONFIRMED' && (int)$draft['version'] === $version + 1) return $draft;
         if ((string)$draft['document_status'] !== 'DRAFT' || (int)$draft['version'] !== $version) {
@@ -105,17 +108,16 @@ final class InventoryStockCountDraftServices
         if ($updated !== 1) throw new \RuntimeException('inventory_stock_count_draft_changed');
     }
 
-    private function scope(int $storeId, int $operatorId): array
+    private function scope(int $storeId, int $operatorId, array $sessionInfo): array
     {
-        $staff = Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)
-            ->where('status', 1)->where('is_del', 0)->find();
-        if (!$staff) throw new \RuntimeException('inventory_stock_count_query_scope_denied');
+        $actor = (new InventoryStockCountActorServices())->resolve($storeId, $operatorId, $sessionInfo);
         $locations = Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->where('store_id', $storeId)->where('location_type', 'STORE')->where('is_default', 1)
             ->where('location_status', 'ACTIVE')->limit(2)->select()->toArray();
         if (count($locations) !== 1) throw new \RuntimeException('inventory_stock_count_location_invalid');
         return ['tenant_id' => CashierV3ScopeResolver::TENANT_SCOPE_ID, 'store_id' => $storeId,
-            'location_id' => (int)$locations[0]['id'], 'operator_id' => $operatorId];
+            'location_id' => (int)$locations[0]['id'], 'operator_id' => $actor['id'],
+            'operator_type' => $actor['type']];
     }
 
     private function scopedDraft(array $scope, int $id, bool $lock = false): array
@@ -123,7 +125,8 @@ final class InventoryStockCountDraftServices
         if ($id <= 0) throw new \InvalidArgumentException('inventory_stock_count_draft_invalid');
         $query = Db::name('inventory_stock_count_draft')->where('id', $id)
             ->where('tenant_id', $scope['tenant_id'])->where('store_id', $scope['store_id'])
-            ->where('location_id', $scope['location_id'])->where('operator_id', $scope['operator_id']);
+            ->where('location_id', $scope['location_id'])->where('operator_id', $scope['operator_id'])
+            ->where('operator_type', $scope['operator_type']);
         $draft = ($lock ? $query->lock(true) : $query)->find();
         if (!$draft) throw new \RuntimeException('inventory_stock_count_draft_missing');
         return (array)$draft;

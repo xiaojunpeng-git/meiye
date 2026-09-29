@@ -10,11 +10,10 @@ use think\facade\Db;
 final class InventoryStockCountQueryServices
 {
     /** 门店详情必须由当前任职和默认仓共同限定，不能凭单据 ID 读取其他门店。 */
-    public function detail(int $storeId, int $operatorId, int $documentId, bool $canViewCost = false): array
+    public function detail(int $storeId, int $operatorId, int $documentId, bool $canViewCost = false, array $sessionInfo = []): array
     {
         if ($documentId <= 0) throw new \InvalidArgumentException('inventory_stock_count_detail_invalid');
-        $staff = Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)->find();
-        if (!$staff) throw new \RuntimeException('inventory_stock_count_query_scope_denied');
+        (new InventoryStockCountActorServices())->resolve($storeId, $operatorId, $sessionInfo);
 
         $location = Db::name('inventory_location')
             ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
@@ -32,10 +31,10 @@ final class InventoryStockCountQueryServices
         return (new InventoryStockCountDetailProjectionServices())->project($document, $location, $canViewCost);
     }
 
-    public function list(int $storeId, int $operatorId, string $keyword, int $page = 1, int $limit = 20, bool $canViewCost = false): array
+    public function list(int $storeId, int $operatorId, string $keyword, int $page = 1, int $limit = 20, bool $canViewCost = false, array $sessionInfo = []): array
     {
-        $staff = Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)->find();
-        if (!$staff) throw new \RuntimeException('inventory_stock_count_query_scope_denied');
+        // Confirmed documents are shared within the current store; drafts remain creator-owned elsewhere.
+        (new InventoryStockCountActorServices())->resolve($storeId, $operatorId, $sessionInfo);
 
         $location = Db::name('inventory_location')
             ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)

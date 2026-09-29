@@ -203,14 +203,16 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
             $index = array_column($amounts, 'change_amount_cents', 'source_id'); foreach ($rows as &$row) $row['change_amount_cents'] = (int)($index[(string)$row['order_sn']] ?? 0); unset($row);
         } else foreach ($rows as &$row) $row['change_amount_cents'] = null;
         unset($row);
-        // Drafts are editing snapshots, not confirmed count facts. Only the creator's store session
-        // sees them in this list; platform reporting continues to read confirmed documents alone.
-        if ($storeId > 0 && (string)($context['organization_id'] ?? '') !== 'platform') {
+        // Drafts are editing snapshots, not confirmed facts. A typed, stable creator sees only
+        // their own draft even after re-login; platform reporting reads confirmed documents alone.
+        if ($storeId > 0 && (string)($context['organization_id'] ?? '') !== 'platform'
+            && (string)($context['inventory_count_operator_type'] ?? '') !== '') {
             $drafts = Db::name('inventory_stock_count_draft')->alias('d')
                 ->leftJoin('inventory_location p', 'p.id=d.location_id')
                 ->where('d.tenant_id', $tenantId)->where('d.store_id', $storeId)
                 ->whereIn('d.location_id', $locationIds)
-                ->where('d.operator_id', (int)($context['operator_id'] ?? 0))
+                ->where('d.operator_id', (int)($context['inventory_count_creator_id'] ?? 0))
+                ->where('d.operator_type', (string)$context['inventory_count_operator_type'])
                 ->where('d.document_status', 'DRAFT')
                 ->field('d.id draft_id,d.business_date,d.updated_at operation_at,d.updated_at add_time,d.location_id,d.line_count detail_count,p.location_name')
                 ->order('d.updated_at desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
