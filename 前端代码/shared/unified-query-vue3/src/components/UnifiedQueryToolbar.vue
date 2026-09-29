@@ -200,7 +200,8 @@ function openSettings() {
   isSettingsOpen.value = true
 }
 
-defineExpose({ openSettings })
+// 外层页面在能力加载完成后读取与可见控件一致的查询快照，确保默认周期首查生效。
+defineExpose({ openSettings, querySnapshot: buildQueryPayload })
 const isCustomFieldOpen = ref(false)
 const isFieldRenameOpen = ref(false)
 const isExportOpen = ref(false)
@@ -340,7 +341,7 @@ function toggleCustomFilters() {
   } catch (error) { quickRangeError.value = error.message }
 }
 
-// 重置只清查询值，不删除用户选择的字段和排序；日期恢复当天后走同一查询出口。
+// 重置只清查询值，不删除用户选择的字段和排序；周期恢复页面配置的默认范围。
 function resetQuery() {
   keyword.value = ''
   dataScope.value = 'normal'
@@ -349,7 +350,7 @@ function resetQuery() {
   Object.keys(quickFieldRanges).forEach((key) => { delete quickFieldRanges[key] })
   activeSettings.value = { ...activeSettings.value, filters: [] }
   activeQuickFields.value.forEach((field) => {
-    if (isQuickDateRange(field)) quickFieldRanges[field.key] = { min: localToday(), max: localToday() }
+    if (isQuickDateRange(field)) quickFieldRanges[field.key] = defaultQuickDateRange(field)
     else if (field.defaultQuick && topFieldType(field) === 'date') quickFieldValues[field.key] = localToday()
   })
   if (props.localSettingsKey) {

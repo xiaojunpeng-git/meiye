@@ -59,10 +59,16 @@ const todayDate = () => {
 }
 // 库存单据周期只决定查询日期，不改变单据业务时间；默认按门店本地当天筛选。
 const todayRange = () => ({ min: todayDate(), max: todayDate() })
+// 流水统计默认看本月业务归属日；快照类统计不套用业务日期周期。
+const statisticsMonthRange = () => {
+  const now = new Date()
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  return { min: `${month}-01`, max: `${month}-${String(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()).padStart(2, '0')}` }
+}
 const businessDateRange = ref(todayRange())
 // 草稿尚无完成日期；清空盘点周期仍可重新查找并编辑历史草稿。
 const countDateRange = ref(todayRange())
-const statisticsDateRange = ref(todayRange())
+const statisticsDateRange = ref(statisticsMonthRange())
 const statisticsExecutedQuery = ref({})
 const businessDatePages = new Set(['request', 'transfer', 'inbound', 'outbound', 'usage', 'import'])
 const usesBusinessDatePeriod = (page = active.value) => businessDatePages.has(page) && (page !== 'import' || mode.value === 'store')
@@ -195,7 +201,11 @@ const statisticsQueryPages = {
   age: { pageCode: 'inventory_statistics_age', fields: [['product_name', '商品名称'], ['sku_name', '商品规格'], ['batch_no', '批次号'], ['received_date', '正式入库日期', 'date'], ['inventory_age_days', '库龄天数', 'integer'], ['inventory_age_band', '库龄分档'], ['expire_date', '到期日', 'date']] },
 }
 const statisticsQueryPage = computed(() => active.value === 'statistics' ? statisticsQueryPages[activeStatisticsTab.value] || null : null)
-const statisticsQueryFields = computed(() => (statisticsQueryPage.value?.fields || []).map(([key, label, type = 'text']) => ({ key, label, type, defaultVisible: true })))
+const statisticsQueryFields = computed(() => (statisticsQueryPage.value?.fields || []).map(([key, label, type = 'text']) => ({
+  key, label, type, defaultVisible: true,
+  // 入出库统计只保留一处业务日期入口，统一查询栏直接提交周期条件。
+  ...(key === 'business_date' ? { defaultQuick: true, quickDateRange: true } : {})
+})))
 
 async function stockQueryRequestAction(action, payload = {}) {
   const client = mode.value === 'platform' ? platformInventoryApi : inventoryApi
@@ -515,7 +525,7 @@ function selectPage(key, options = {}) {
   active.value = key
   if (usesBusinessDatePeriod(key)) businessDateRange.value = todayRange()
   if (key === 'count') countDateRange.value = todayRange()
-  if (key === 'statistics') statisticsDateRange.value = todayRange()
+  if (key === 'statistics') statisticsDateRange.value = statisticsMonthRange()
   listDateRange.value = null
   statusFocus.value = options.focus || ''
   storeOperationalStatus.value = ''
@@ -545,7 +555,7 @@ function selectStatisticsTab(key) {
   activeStatisticsTab.value = key
   statisticsInitialQuery.value = {}
   statisticsExecutedQuery.value = {}
-  statisticsDateRange.value = todayRange()
+  statisticsDateRange.value = statisticsMonthRange()
   if (mode.value === 'platform') queryStatisticsPage({})
 }
 
@@ -1064,7 +1074,7 @@ function applyCountDateRange(value) {
   else loadCurrentList()
 }
 
-/** 入出库统计使用业务发生日；临期和库龄仍以当天库存快照为准，不套用流水周期。 */
+/** 平台端入出库统计沿用独立周期入口；门店端周期由统一查询栏单独提交。 */
 function applyStatisticsDateRange(value) {
   statisticsDateRange.value = { min: String(value?.min || ''), max: String(value?.max || '') }
   queryStatisticsPage(statisticsExecutedQuery.value)
@@ -1089,10 +1099,11 @@ async function queryStatisticsPage(query) {
       ...statisticsExecutedQuery.value,
       ...platformScope,
       pageCode: statisticsQueryPage.value.pageCode,
-      // 只把当前统计页选定的日期送入权威查询；清空周期则不增加日期约束。
+      // 门店端的业务日期周期已在统一查询 topFilters 中，避免重复日期条件；
+      // 平台端仍由本页周期控件收窄同一权威查询。
       topFilterConditions: [
         ...(Array.isArray(statisticsExecutedQuery.value.topFilterConditions) ? statisticsExecutedQuery.value.topFilterConditions : []),
-        ...(isMovement && period.min && period.max
+        ...(mode.value === 'platform' && isMovement && period.min && period.max
           ? [{ field: 'business_date', operator: 'between', value: [period.min, period.max] }]
           : [])
       ]
@@ -1386,7 +1397,7 @@ onBeforeUnmount(() => {
         <template v-else-if="active === 'statistics'">
           <div class="page-heading"><div><p>库存管理 / 库存统计</p><h1>库存统计</h1><span>入库、出库、临期与库龄均按批次事实统一查询</span></div><div class="heading-actions"><span class="page-heading__note">当前统计导出将在对应权威导出任务接入后开放</span><button v-if="mode === 'store' && statisticsQueryPage" class="secondary-button" @click="openCurrentQuerySettings"><SlidersHorizontal :size="16" />查询设置</button></div></div>
           <div class="statistics-tabs"><button v-for="tab in statisticsTabs" :key="tab.key" :class="{ active: activeStatisticsTab === tab.key }" @click="selectStatisticsTab(tab.key)">{{ tab.label }}</button></div>
-          <div v-if="['inbound', 'outbound'].includes(activeStatisticsTab)" class="inventory-period-filter inventory-statistics-period"><UnifiedQueryDateRange :model-value="statisticsDateRange" label="业务日期周期" @change="applyStatisticsDateRange" /></div>
+          <div v-if="mode === 'platform' && ['inbound', 'outbound'].includes(activeStatisticsTab)" class="inventory-period-filter inventory-statistics-period"><UnifiedQueryDateRange :model-value="statisticsDateRange" label="业务日期周期" @change="applyStatisticsDateRange" /></div>
           <component
             :is="InventoryOperationalUnifiedQueryToolbar"
             v-if="statisticsQueryPage && mode === 'store'"
@@ -1400,6 +1411,7 @@ onBeforeUnmount(() => {
             :is-query-loading="['inbound', 'outbound'].includes(activeStatisticsTab) ? movementStatisticsLoading : analysisLoading"
             :request-action="inventoryUnifiedQueryRequestAction"
             :initial-query="statisticsInitialQuery"
+            :default-quick-date-ranges="{ business_date: statisticsDateRange }"
             @query="queryStatisticsPage"
           />
           <section class="content-card statistics-board">

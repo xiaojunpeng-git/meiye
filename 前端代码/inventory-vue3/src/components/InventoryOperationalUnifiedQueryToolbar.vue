@@ -11,6 +11,7 @@ const props = defineProps({
   isQueryLoading: { type: Boolean, default: false },
   requestAction: { type: Function, required: true },
   initialQuery: { type: Object, default: () => ({}) },
+  defaultQuickDateRanges: { type: Object, default: () => ({}) },
 })
 const emit = defineEmits(['query'])
 const toolbar = ref(null)
@@ -40,8 +41,12 @@ function openSettings() { toolbar.value?.openSettings() }
 
 defineExpose({ openSettings })
 
-onMounted(async () => { await unifiedQuery.load(); emit('query', { ...props.initialQuery }) })
-watch(() => props.pageCode, async () => { unifiedQuery.reset(); await unifiedQuery.load(); emit('query', {}) })
+// 首次查询使用页面上实际显示的默认周期，避免结果为全时段而控件显示本月。
+function emitInitialQuery() {
+  emit('query', { ...toolbar.value?.querySnapshot(), ...props.initialQuery })
+}
+onMounted(async () => { await unifiedQuery.load(); emitInitialQuery() })
+watch(() => props.pageCode, async () => { unifiedQuery.reset(); await unifiedQuery.load(); emitInitialQuery() })
 </script>
 
 <template>
@@ -54,6 +59,7 @@ watch(() => props.pageCode, async () => { unifiedQuery.reset(); await unifiedQue
       :fields="queryFields"
       :page-code="pageCode"
       :page-name="pageName"
+      :default-quick-date-ranges="defaultQuickDateRanges"
       :result-count="resultCount"
       :page-size="20"
       :current-page="1"

@@ -26,7 +26,7 @@ check('risk bucket clicks enter the expiry page with a structured server filter'
 check('store statistics toolbar applies the selected dashboard filter on first load',
   app.includes(':initial-query="statisticsInitialQuery"')
     && toolbar.includes('initialQuery: { type: Object')
-    && toolbar.includes("emit('query', { ...props.initialQuery })"))
+    && toolbar.includes("emit('query', { ...toolbar.value?.querySnapshot(), ...props.initialQuery })"))
 
 console.log(`INVENTORY_EXPIRY_RISK_FRONTEND_RESULT failed=${failed}`)
 process.exit(failed === 0 ? 0 : 1)
