@@ -24,6 +24,9 @@ assert.equal(sheet.getCell('D2').value, '0000123')
 assert.equal(sheet.getCell('B2').value, '=测试,"商品"')
 assert.equal(sheet.getCell('E2').value, 0)
 assert.equal(sheet.getCell('G2').value.formula, 'F2-E2')
+assert.equal(sheet.getCell('H2').numFmt, '@')
+assert.equal(sheet.getCell('J2').numFmt, '@')
+assert.equal(sheet.getCell('K2').numFmt, '@')
 sheet.getCell('B2').value = { formula: '1+1', result: 2 }
 await assert.rejects(parseCountXlsx(await workbook.xlsx.writeBuffer()), /公式/)
 sheet.getCell('B2').value = '商品'
@@ -40,6 +43,28 @@ assert.equal(edited[0][5], '100')
 assert.equal(edited[0][6], '100')
 assert.equal(edited[0][9], '2026-06-07')
 
+// Excel may keep dates typed into text-formatted cells without zero padding. Normalize
+// only real calendar dates so the API receives ISO dates and invalid dates cannot pass.
+editable.worksheets[0].getCell('J2').value = '2026-2-2'
+editable.worksheets[0].getCell('K2').value = '2027-9-9'
+const normalizedDates = await parseCountXlsx(await editable.xlsx.writeBuffer())
+assert.equal(normalizedDates[0][9], '2026-02-02')
+assert.equal(normalizedDates[0][10], '2027-09-09')
+editable.worksheets[0].getCell('J2').value = '2026-2-30'
+await assert.rejects(parseCountXlsx(await editable.xlsx.writeBuffer()), /日期格式无效/)
+
 const decimal = await parseCountXlsx(await exportCountXlsx([['21', '小数商品', '默认', '0007', '0.3', '0.4', '0.1', '', '', '', '']]))
 assert.equal(decimal[0][6], '0.1')
+
+// Excel can coalesce adjacent盈亏公式 into one shared formula; resolved formulas must still
+// match each row's F-E expression, while a changed shared formula remains untrusted.
+const shared = new ExcelJS.Workbook()
+await shared.xlsx.load(await exportCountXlsx([
+  ['31', '冰袖', '默认', '', '0', '200', '200', '', '', '', ''],
+  ['32', '拖鞋', '默认', '', '0', '200', '200', '', '', '', ''],
+]))
+shared.worksheets[0].fillFormula('G2:G3', 'F2-E2', [200, 200])
+assert.equal((await parseCountXlsx(await shared.xlsx.writeBuffer()))[1][6], '200')
+shared.worksheets[0].fillFormula('G2:G3', 'F2+E2', [200, 200])
+await assert.rejects(parseCountXlsx(await shared.xlsx.writeBuffer()), /库存盈亏公式已被修改/)
 console.log('COUNT_WORKSHEET_CONTRACT_OK')
