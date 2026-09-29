@@ -17,7 +17,8 @@ use think\facade\Db;
  * 1. 有唯一有效任职门店的门店人员：直接进入该门店，不走选店票据；
  * 2. 没有任职门店、但具备组织数据权限和门店端入口的组织人员：从权限范围选店，
  *    进入后按该组织岗位的门店端规则使用当前门店，不写入或恢复 system_store_staff 任职；
- * 3. 无论哪种入口，选定门店都会绑定到当前会话，登录后不支持切店。
+ * 3. 门店任职仍固定在唯一任职店；组织人员可在其当前入口和数据权限
+ *    同时允许的候选门店间重新签发会话，旧工作台不得跨店沿用。
  *
  * 组织人员的多门店选店不能被误判为“门店人员多店任职”。两者是不同的登录模式。
  */
@@ -131,10 +132,51 @@ class CashierV3StoreLoginServices extends BaseServices
         ));
     }
 
-    /** 登录后不开放切店，门店在会话签发时固定。 */
-    public function switchStore(int $employeeId, int $storeId): array
+    /**
+     * 只向当前组织会话返回与登录时同口径的候选门店；每次读取都重算岗位、
+     * 数据权限和门店状态，不能信任登录时缓存的组织树。
+     */
+    public function switchableStores(int $employeeId, int $currentStoreId): array
     {
-        throw new AdminException('当前门店已在登录时固定，不支持登录后切换');
+        $stores = $this->organizationLoginCandidates($employeeId);
+        $currentAllowed = false;
+        foreach ($stores as $store) {
+            if ((int)($store['store_id'] ?? 0) === $currentStoreId) {
+                $currentAllowed = true;
+                break;
+            }
+        }
+        if (!$currentAllowed || count($stores) < 2) {
+            return ['current_store_id' => $currentStoreId, 'stores' => [], 'organization_tree' => []];
+        }
+        return [
+            'current_store_id' => $currentStoreId,
+            'stores' => $this->presentStores($stores),
+            'organization_tree' => $this->presentOrganizationTree($stores),
+        ];
+    }
+
+    /**
+     * 切店不改员工任职或旧会话的门店。服务端重新按登录候选集校验目标，
+     * 再签发绑定目标店的新会话；客户端成功装载新工作台后撤销旧会话。
+     */
+    public function switchStore(int $employeeId, int $currentStoreId, int $targetStoreId): array
+    {
+        if ($targetStoreId <= 0 || $targetStoreId === $currentStoreId) {
+            throw new AdminException('请选择其他可进入的门店');
+        }
+        $stores = $this->organizationLoginCandidates($employeeId);
+        $currentAllowed = false;
+        $targetAllowed = false;
+        foreach ($stores as $store) {
+            $id = (int)($store['store_id'] ?? 0);
+            $currentAllowed = $currentAllowed || $id === $currentStoreId;
+            $targetAllowed = $targetAllowed || $id === $targetStoreId;
+        }
+        if (!$currentAllowed || !$targetAllowed || count($stores) < 2) {
+            throw new AdminException('当前账号没有切换到该门店的权限');
+        }
+        return $this->issueSelectedStore($employeeId, $targetStoreId, 0, $stores);
     }
 
     /** @return array<int, array> */

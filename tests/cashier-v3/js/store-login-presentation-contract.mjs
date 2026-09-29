@@ -20,7 +20,7 @@ const assertions = [
   ,['organization store selection reuses the Vue 3 two-pane organization/store picker in embedded mode', source.includes('OrganizationStoreScopePicker') && source.includes(':embedded="true"') && source.includes(':single-store-only="true"')]
   ,['organization store selection state is rendered', source.includes('storeChoices') && source.includes('loginTicket') && source.includes('选择门店后登录')]
   ,['selected store is submitted through the server ticket', source.includes('login_ticket: loginTicket.value') && source.includes('store_id: Number(store?.store_id || 0)') && source.includes('selectStoreFromOrganization')]
-  ,['login page explains the selected store is fixed', source.includes('工作台内不再切换门店')]
+  ,['login page explains the multi-store entry after login', source.includes('有多门店管理权限时，进入工作台后也可从左上角切换')]
 ]
 
 let failed = 0

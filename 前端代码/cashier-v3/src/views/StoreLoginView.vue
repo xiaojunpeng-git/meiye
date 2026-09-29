@@ -172,7 +172,7 @@ function backToAccountLogin() {
             <p>请选择进入门店</p>
             <h1 id="store-picker-title">选择门店后登录</h1>
           </header>
-          <p class="store-login__hint">按组织选择一间门店登录；进入后工作台内不再切换门店。</p>
+          <p class="store-login__hint">按组织选择一间门店登录；有多门店管理权限时，进入工作台后也可从左上角切换。</p>
           <OrganizationStoreScopePicker
             v-model="selectedStoreIds"
             class="store-login__organization-picker"

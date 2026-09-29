@@ -44,6 +44,8 @@ Route::group('cashierapi/v3', function () {
      * 需登录、强制门店、按角色校验
      */
     Route::group(function () {
+        Route::get('session/stores', 'StoreLogin/switchableStores')
+            ->option(['real_name' => '门店端可切换门店']);
         Route::post('session/switch-store', 'StoreLogin/switchStore')
             ->option(['real_name' => '门店端切换门店']);
         Route::post('session/change-password', 'StoreLogin/changePassword')

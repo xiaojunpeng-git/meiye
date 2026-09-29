@@ -18,11 +18,20 @@ class StoreLogin extends \app\controller\cashier\AuthController
         ));
     }
 
+    /** 候选列表只依据已认证员工与会话门店，不接受客户端传入组织范围。 */
+    public function switchableStores(CashierV3StoreLoginServices $services)
+    {
+        return app('json')->success($services->switchableStores(
+            (int)($this->cashierInfo['employee_id'] ?? 0), (int)$this->storeId
+        ));
+    }
+
+    /** target_store_id 与业务接口的强制 store_id 分离，目标仍由服务端重新校验。 */
     public function switchStore(Request $request, CashierV3StoreLoginServices $services)
     {
-        $storeId = (int)$request->post('store_id', 0);
+        $storeId = (int)$request->post('target_store_id', 0);
         return app('json')->success($services->switchStore(
-            (int)($this->cashierInfo['employee_id'] ?? 0), $storeId
+            (int)($this->cashierInfo['employee_id'] ?? 0), (int)$this->storeId, $storeId
         ));
     }
 

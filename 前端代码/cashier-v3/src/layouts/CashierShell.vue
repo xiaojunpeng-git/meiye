@@ -18,7 +18,9 @@ import PanelLeftOpen from '@lucide/vue/dist/esm/icons/panel-left-open.mjs'
 import ReceiptText from '@lucide/vue/dist/esm/icons/receipt-text.mjs'
 import Settings from '@lucide/vue/dist/esm/icons/settings.mjs'
 import Store from '@lucide/vue/dist/esm/icons/store.mjs'
+import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import Users from '@lucide/vue/dist/esm/icons/users.mjs'
+import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import MemberSelectorOverlay from '@/components/common/MemberSelectorOverlay.vue'
 import MemberSummaryCard from '@/components/common/MemberSummaryCard.vue'
 import MemberDetailOverlay from '@/components/member/MemberDetailOverlay.vue'
@@ -39,10 +41,12 @@ import {
   createCashierV3CommandId,
   openCashierV3QueryEntitySelector,
   requestCashierV3Action,
-  useCashierV3State
+  useCashierV3State,
+  applyCashierV3LoginFeatures
 } from '@/services/cashierV3Bridge'
-import { changeStoreV3Password, clearStoreV3Token, logoutStoreV3 } from '@/services/storeV3LoginApi'
+import { changeStoreV3Password, clearStoreV3Token, listSwitchableStoreV3Stores, logoutStoreV3, persistStoreV3Token, switchStoreV3 } from '@/services/storeV3LoginApi'
 import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
+import { onCashierStoreOrAccountChanged } from '@/services/cashierV3SessionLifecycle'
 import { requestCustomerCareAction } from '@/services/customerCareApi'
 import { roomOpenIntentFromRouteQuery } from '@/services/cashierV3RoomOpenIntent'
 import {
@@ -120,7 +124,116 @@ const isPasswordDialogOpen = ref(false)
 const isPasswordSubmitting = ref(false)
 const passwordChange = ref({ account: '', currentPassword: '', newPassword: '', confirmation: '' })
 const passwordChangeError = ref('')
+const switchableStores = ref([])
+const switchableOrganizationTree = ref([])
+const selectedSwitchStoreIds = ref([])
+const isStoreSwitchOpen = ref(false)
+const isStoreSwitchLoading = ref(false)
+const storeSwitchError = ref('')
 let feedbackTimeoutId = null
+
+const canSwitchStores = computed(() => switchableStores.value.length > 1)
+const switchableStoreIds = computed(() => switchableStores.value.map((store) => Number(store.store_id || 0)).filter(Boolean))
+
+/** 切店入口只按服务端实时授权显示；请求失败时不把缓存候选门店当作权限。 */
+async function refreshSwitchableStores() {
+  try {
+    const result = await listSwitchableStoreV3Stores()
+    switchableStores.value = Array.isArray(result.stores) ? result.stores : []
+    switchableOrganizationTree.value = Array.isArray(result.organization_tree) ? result.organization_tree : []
+    return true
+  } catch (error) {
+    switchableStores.value = []
+    switchableOrganizationTree.value = []
+    storeSwitchError.value = error instanceof Error ? error.message : '可切换门店读取失败。'
+    return false
+  }
+}
+
+async function openStoreSwitch() {
+  if (isStoreSwitchLoading.value || !canSwitchStores.value) return
+  isStoreSwitchOpen.value = true
+  storeSwitchError.value = ''
+  selectedSwitchStoreIds.value = []
+  isStoreSwitchLoading.value = true
+  await refreshSwitchableStores()
+  isStoreSwitchLoading.value = false
+}
+
+function closeStoreSwitch() {
+  if (isStoreSwitchLoading.value) return
+  isStoreSwitchOpen.value = false
+  selectedSwitchStoreIds.value = []
+  storeSwitchError.value = ''
+}
+
+/** 新会话先完成完整投影装仓，成功后才撤销旧令牌；失败则恢复旧工作台。 */
+async function selectSwitchStore(payload) {
+  const storeId = Number(payload?.storeIds?.[0] || 0)
+  const currentStoreId = Number(state.currentStore?.id || state.storeId || state.store?.id || 0)
+  if (!storeId || isStoreSwitchLoading.value) return
+  if (storeId === currentStoreId) {
+    closeStoreSwitch()
+    return
+  }
+  const store = switchableStores.value.find((item) => Number(item.store_id) === storeId)
+  if (!store) {
+    selectedSwitchStoreIds.value = []
+    return
+  }
+  const previousToken = readStoreV3SessionToken()
+  let nextToken = ''
+  isStoreSwitchLoading.value = true
+  storeSwitchError.value = ''
+  try {
+    const login = await switchStoreV3(storeId)
+    nextToken = String(login.token || '')
+    persistStoreV3Token(nextToken)
+    const bootstrap = await onCashierStoreOrAccountChanged({ reason: 'store', storeId, silent: true })
+    const outcome = bootstrap?.data?.result && typeof bootstrap.data.result === 'object'
+      ? bootstrap.data.result : bootstrap?.result
+    if (!['success', 'succeeded'].includes(String(outcome?.status || '').toLowerCase())) {
+      throw new Error(String(outcome?.message || '目标门店工作台初始化失败。'))
+    }
+    applyCashierV3LoginFeatures(login.features, {
+      readOnly: login.read_only === true,
+      sessionMode: login.session_mode,
+      visibleFeatures: Array.isArray(login.visible_features) ? login.visible_features : login.features,
+      operationFeatures: Array.isArray(login.operation_features) ? login.operation_features : []
+    })
+    inventorySessionToken.value = nextToken
+    isInventoryWorkspaceOpen.value = false
+    isStoreSwitchOpen.value = false
+    selectedSwitchStoreIds.value = []
+    await router.replace('/cashier')
+    // 旧令牌撤销失败不回滚已成功装载的新会话；它将按原会话有效期失效。
+    try { await logoutStoreV3(previousToken) } catch (_) {}
+    await refreshSwitchableStores()
+  } catch (error) {
+    if (previousToken) persistStoreV3Token(previousToken)
+    if (nextToken) {
+      try { await logoutStoreV3(nextToken) } catch (_) {}
+      try {
+        const restored = await onCashierStoreOrAccountChanged({ reason: 'store', storeId: currentStoreId, silent: true })
+        const restoredOutcome = restored?.data?.result && typeof restored.data.result === 'object'
+          ? restored.data.result : restored?.result
+        if (!['success', 'succeeded'].includes(String(restoredOutcome?.status || '').toLowerCase())) {
+          throw new Error('原门店会话恢复失败')
+        }
+      } catch (_) {
+        // 原会话若恰好过期，不允许页面继续持有错误门店的工作台投影。
+        clearStoreV3Token()
+        isStoreSwitchOpen.value = false
+        await router.replace({ name: 'cashier-v3-login' })
+        return
+      }
+    }
+    storeSwitchError.value = error instanceof Error ? error.message : '门店切换失败，请稍后重试。'
+    selectedSwitchStoreIds.value = []
+  } finally {
+    isStoreSwitchLoading.value = false
+  }
+}
 
 function openToolbarBusinessSource() {
   window.dispatchEvent(new CustomEvent('cashier-v3:open-toolbar-business-source'))
@@ -1977,6 +2090,10 @@ function handleStateContextChanged() {
   latestRoomAssignmentPreparationIntent.value = null
   serviceCompletionPreparationRequests.value = {}
   latestServiceCompletionPreparationIntent.value = null
+  // 门店切换后库存挂载令牌和浏览器内的商品／会员操作都不能指向旧店。
+  isInventoryWorkspaceOpen.value = false
+  inventorySessionToken.value = readStoreV3SessionToken()
+  toolbarBusinessSource.value = { displayNameSnapshot: '', primarySourceId: 0, secondarySourceId: 0 }
 }
 
 function roomAssignmentCommandPayload() {
@@ -2567,6 +2684,7 @@ watch(
 )
 
 onMounted(() => {
+  void refreshSwitchableStores()
   window.addEventListener('cashier-v3:ui-result', handleUiResult)
   window.addEventListener('cashier-v3:clear-negative-state', clearCashierNegativeState)
   window.addEventListener('cashier-v3:state-context-changing', handleStateContextChanged)
@@ -2610,6 +2728,23 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="cashier-shell" :class="{ 'cashier-shell--sidebar-collapsed': isSidebarCollapsed }">
+    <div v-if="isStoreSwitchOpen" class="cashier-account-dialog-backdrop" @click.self="closeStoreSwitch">
+      <section class="cashier-account-dialog cashier-store-switch-dialog" aria-label="切换门店" role="dialog" aria-modal="true">
+        <header><h2>切换门店</h2><button type="button" class="cashier-account-dialog__close" aria-label="关闭" :disabled="isStoreSwitchLoading" @click="closeStoreSwitch">×</button></header>
+        <p class="cashier-store-switch-dialog__hint">按组织选择一间可进入的门店。切换会关闭当前未保存的操作。</p>
+        <OrganizationStoreScopePicker
+          v-model="selectedSwitchStoreIds"
+          :tree="switchableOrganizationTree"
+          :allowed-store-ids="switchableStoreIds"
+          :embedded="true"
+          :single-store-only="true"
+          :show-scope-footer="false"
+          :loading="isStoreSwitchLoading"
+          @change="selectSwitchStore"
+        />
+        <p v-if="storeSwitchError" class="cashier-account-dialog__error" role="alert">{{ storeSwitchError }}</p>
+      </section>
+    </div>
     <div v-if="isPasswordDialogOpen" class="cashier-account-dialog-backdrop" @click.self="closePasswordDialog">
       <form class="cashier-account-dialog" aria-label="修改登录账号和密码" @submit.prevent="submitPasswordChange">
         <header><h2>修改登录账号和密码</h2><button type="button" class="cashier-account-dialog__close" aria-label="关闭" @click="closePasswordDialog">×</button></header>
@@ -2637,11 +2772,13 @@ onBeforeUnmount(() => {
       @submit="submitDirectGift"
     />
     <aside class="cashier-sidebar" :class="{ 'cashier-sidebar--collapsed': isSidebarCollapsed }" aria-label="门店端菜单">
-      <div class="cashier-brand" :title="isSidebarCollapsed ? state.storeName : undefined">
+      <button v-if="canSwitchStores" type="button" class="cashier-brand cashier-brand--switchable" :title="isSidebarCollapsed ? `切换门店：${state.storeName}` : undefined" aria-label="切换门店" @click="openStoreSwitch">
+        <span class="cashier-brand__mark" aria-hidden="true"><RefreshCw :size="21" :stroke-width="1.9" /></span>
+        <span v-if="!isSidebarCollapsed" class="cashier-brand__copy"><strong>{{ state.storeName }}</strong></span>
+      </button>
+      <div v-else class="cashier-brand" :title="isSidebarCollapsed ? state.storeName : undefined">
         <span class="cashier-brand__mark" aria-hidden="true"><Store :size="21" :stroke-width="1.9" /></span>
-        <div v-if="!isSidebarCollapsed" class="cashier-brand__copy">
-          <strong>{{ state.storeName }}</strong>
-        </div>
+        <div v-if="!isSidebarCollapsed" class="cashier-brand__copy"><strong>{{ state.storeName }}</strong></div>
       </div>
 
       <nav id="cashier-primary-nav" class="cashier-nav" aria-label="日常业务">

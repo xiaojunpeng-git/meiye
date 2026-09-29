@@ -100,7 +100,7 @@ const assertions = [
       && storeLogin.indexOf('if ($direct)') < storeLogin.lastIndexOf('organizationLoginCandidates($employeeId)'),
   ],
   [
-    'the legacy context-switch endpoint cannot enter another store',
+    'direct-tenure staff cannot use the organization-only switch candidate path',
     storeLogin.includes('员工只能进入当前任职门店')
       && storeLogin.match(/resolveUniqueStoreV3Staff\(\$employeeId\)/g)?.length >= 2
       && !storeLogin.includes('$employees->listEligibleStoreV3Staff($employeeId)'),
