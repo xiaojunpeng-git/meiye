@@ -83,6 +83,21 @@ button { cursor: pointer; }
 .inventory-period-filter, .count-period-filter { width: min(290px, 100%); align-self: end; }
 .inventory-statistics-period { margin-bottom: 12px; }
 
+/* 统计页的业务日期是单个周期按钮，按其内容预留独立宽度并让后续字段正常换行。 */
+.inventory-unified-query--statistics .unified-query-top-field:has(.uq-period-trigger) {
+  flex: 0 0 340px;
+  width: 340px;
+  min-width: min(340px, 100%);
+  max-width: 100%;
+}
+
+@media (max-width: 700px) {
+  .inventory-unified-query--statistics .unified-query-top-field:has(.uq-period-trigger) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+
 /* 业务筛选行使用控件内占位/选项表达当前字段，隐藏重复的小标题。 */
 .filter-card > label {
   font-size: 0;

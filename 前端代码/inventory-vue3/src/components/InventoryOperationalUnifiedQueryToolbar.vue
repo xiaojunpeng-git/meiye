@@ -50,7 +50,7 @@ watch(() => props.pageCode, async () => { unifiedQuery.reset(); await unifiedQue
 </script>
 
 <template>
-  <section class="inventory-unified-query" aria-label="统一查询">
+  <section class="inventory-unified-query" :class="{ 'inventory-unified-query--statistics': pageCode.startsWith('inventory_statistics_') }" aria-label="统一查询">
     <UnifiedQueryToolbar
       ref="toolbar"
       :search-placeholder="`搜索${pageName}记录`"
