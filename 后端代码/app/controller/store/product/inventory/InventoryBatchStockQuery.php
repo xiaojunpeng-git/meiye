@@ -35,7 +35,7 @@ class InventoryBatchStockQuery extends AuthController
         if (!$locations) {
             return $this->success(['list' => [], 'count' => 0, 'query_cutoff_date' => (string)$cutoffDate]);
         }
-        $scope = $scopeResolver->resolve($storeId, $locations, $this->canViewCost());
+        $scope = $scopeResolver->resolve($storeId, $locations, $this->canViewCost('stock'));
         $rows = $this->services->sourceRows([
             'queryCutoffDate' => (string)$cutoffDate,
             'locationIds' => [],
@@ -69,7 +69,7 @@ class InventoryBatchStockQuery extends AuthController
                 'query_cutoff_date' => (string)$cutoffDate,
             ]);
         }
-        $scope = $scopeResolver->resolve($storeId, $locations, $this->canViewCost());
+        $scope = $scopeResolver->resolve($storeId, $locations, $this->canViewCost('statistics'));
         $rows = $this->services->sourceRows([
             'queryCutoffDate' => (string)$cutoffDate,
             'locationIds' => [],
@@ -78,12 +78,10 @@ class InventoryBatchStockQuery extends AuthController
         return $this->success($projectionServices->project($rows, (string)$cutoffDate));
     }
 
-    private function canViewCost(): bool
+    private function canViewCost(string $feature): bool
     {
-        return in_array(
-            'inventory.cost.view',
-            (new \app\services\product\inventory\InventoryStoreAccessPolicy())->features((int)$this->storeId, (int)$this->storeStaffId),
-            true
+        return (new \app\services\product\inventory\InventoryStoreAccessPolicy())->canViewCostForFeature(
+            (int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.' . $feature
         );
     }
 }

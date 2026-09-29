@@ -171,11 +171,12 @@ try {
     uqCommandAssert('non-super platform inventory access needs the menu grant and resolves only organization-authorized stores',
         empty($scopedAccess['is_super_admin'])
         && $scopedAccess['store_ids'] === [$storeId]
-        && $scopedAccess['features'] === [InventoryBatchStockQueryContract::PERMISSION_VIEW]);
-    $costDenied = false;
+        && $scopedAccess['features'] === [InventoryBatchStockQueryContract::PERMISSION_VIEW, InventoryBatchStockQueryContract::PERMISSION_COST]);
+    // 平台库存查看授权范围内的单价/金额不再要求另一项独立成本菜单。
+    $costVisible = true;
     try { (new InventoryPlatformAccessPolicy())->assertFeature($scopedAccess, InventoryBatchStockQueryContract::PERMISSION_COST, '成本权限不足'); }
-    catch (\Throwable $exception) { $costDenied = $exception instanceof \app\services\query\UnifiedQueryException; }
-    uqCommandAssert('non-super platform inventory cost is denied unless its separate capability is granted', $costDenied);
+    catch (\Throwable $exception) { $costVisible = false; }
+    uqCommandAssert('non-super platform inventory view includes cost within its authorized locations', $costVisible);
 
     if (!Db::name('system_admin')->where('id', $platformOperatorId)->find()) {
         Db::name('system_admin')->insert([

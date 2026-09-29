@@ -52,10 +52,10 @@ uqInventoryAssert('store context calculates location scope from the authenticate
     $contextSource !== false
     && strpos($contextSource, "where('store_id', \$storeId)") !== false
     && strpos($contextSource, "'scope_dimensions' => ['location_id' => array_keys(\$locationIds)]") !== false);
-uqInventoryAssert('store unified query derives cost visibility from the dedicated role capability while retaining non-sensitive controls',
+uqInventoryAssert('store unified query derives cost visibility from the current inventory page feature while retaining non-sensitive controls',
     $contextSource !== false
     && strpos($contextSource, 'InventoryStoreAccessPolicy') !== false
-    && strpos($contextSource, '(new InventoryStoreAccessPolicy())->features($storeId, $operatorId)') !== false
+    && strpos($contextSource, '(new InventoryStoreAccessPolicy())->features($storeId, $operatorId, self::PAGE_FEATURES[$pageCode])') !== false
     && strpos($contextSource, "'manage_shared_fields' => true") !== false
     && strpos($contextSource, "'share_tenant_fields' => true") !== false);
 

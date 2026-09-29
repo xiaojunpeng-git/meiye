@@ -64,7 +64,7 @@ final class InventoryCrossSubjectTransfer extends AuthController
 
     private function canViewCost(): bool
     {
-        return in_array('inventory.cost.view', (new InventoryStoreAccessPolicy())->features((int)$this->storeId, (int)$this->storeStaffId), true);
+        return (new InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.transfer');
     }
 
     private function run(callable $operation, string $successMessage = '')

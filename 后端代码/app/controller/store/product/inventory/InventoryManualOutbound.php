@@ -29,11 +29,7 @@ class InventoryManualOutbound extends AuthController
     public function detail(string $id, InventoryMovementQueryServices $readServices)
     {
         try {
-            $canViewCost = in_array(
-                'inventory.cost.view',
-                (new InventoryStoreAccessPolicy())->features((int)$this->storeId, (int)$this->storeStaffId),
-                true
-            );
+            $canViewCost = (new InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.outbound');
             return $this->success($readServices->outboundDetail(
                 (int)$this->storeId,
                 (int)$this->storeStaffId,

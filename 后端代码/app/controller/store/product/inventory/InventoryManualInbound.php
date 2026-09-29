@@ -29,11 +29,7 @@ class InventoryManualInbound extends AuthController
     public function detail(string $id, InventoryManualInboundReadServices $readServices)
     {
         try {
-            $canViewCost = in_array(
-                'inventory.cost.view',
-                (new InventoryStoreAccessPolicy())->features((int)$this->storeId, (int)$this->storeStaffId),
-                true
-            );
+            $canViewCost = (new InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.inbound');
             return $this->success($readServices->detail(
                 (int)$this->storeId,
                 (int)$this->storeStaffId,
@@ -50,11 +46,7 @@ class InventoryManualInbound extends AuthController
     public function outboundDetails(string $id, InventoryManualInboundReadServices $readServices)
     {
         try {
-            $canViewCost = in_array(
-                'inventory.cost.view',
-                (new InventoryStoreAccessPolicy())->features((int)$this->storeId, (int)$this->storeStaffId),
-                true
-            );
+            $canViewCost = (new InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.inbound');
             return $this->success($readServices->outboundDetails(
                 (int)$this->storeId, (int)$this->storeStaffId, $id, $canViewCost
             ));

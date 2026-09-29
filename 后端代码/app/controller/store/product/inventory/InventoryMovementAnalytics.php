@@ -14,7 +14,7 @@ final class InventoryMovementAnalytics extends AuthController
     public function index()
     {
         $input = $this->request->getMore([['kind', 'inbound'], ['from', date('Y-m-01')], ['to', date('Y-m-d')]]);
-        $canViewCost = in_array('inventory.cost.view', (new InventoryStoreAccessPolicy())->features((int)$this->storeId, (int)$this->storeStaffId), true);
+        $canViewCost = (new InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.statistics');
         return $this->success($this->services->list((int)$this->storeId, (int)$this->storeStaffId, (string)$input['kind'], (string)$input['from'], (string)$input['to'], $canViewCost));
     }
 }

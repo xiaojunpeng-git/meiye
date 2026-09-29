@@ -37,10 +37,10 @@ readModelAssert('count variance amount is signed from settled count facts instea
     && strpos($count, 'CASE WHEN direction = 1 THEN cost_amount_cents ELSE -cost_amount_cents END') !== false
     && strpos($count, "'change_amount_cents'") !== false);
 
-readModelAssert('count variance amount has the same server-side cost permission gate as other store read models',
+readModelAssert('count variance amount follows the server-side count feature grant',
     $countController !== false
     && strpos($countController, 'InventoryStoreAccessPolicy') !== false
-    && strpos($countController, "in_array('inventory.cost.view'") !== false
+    && strpos($countController, "canViewCostForFeature((int)\$this->storeId, (int)\$this->storeStaffId, 'cashier.v3.inventory.count')") !== false
     && strpos($count, '$canViewCost ? (int)($amountByDocument') !== false
     && strpos($count, ': null') !== false);
 
@@ -88,9 +88,9 @@ readModelAssert('dashboard and product summary are read from settled batch facts
     && strpos($app, 'dashboard.value = await client.dashboard()') !== false
     && strpos($app, "client.list('productSummary'") !== false);
 
-readModelAssert('inventory home keeps quantity metrics while the server redacts cost metrics without cost permission',
+readModelAssert('inventory home keeps quantity metrics while cost follows the overview feature grant',
     $storeReadController !== false
-    && strpos($storeReadController, 'dashboard((int)$this->storeId, (int)$this->storeStaffId, true)') !== false
+    && strpos($storeReadController, "dashboard((int)\$this->storeId, (int)\$this->storeStaffId, \$this->canViewCost('overview'))") !== false
     && $platformWarehouse !== false
     && strpos($platformWarehouse, "...(array)(\$access['features'] ?? []),\n            'inventory.cost.view',") === false
     && strpos($platformWarehouse, "'stock_amount_cents' => \$totalCents") !== false

@@ -19,11 +19,14 @@ final class InventoryMovementQuery extends AuthController
     public function index()
     {
         $input = $this->request->getMore([['kind', 'movement'], ['keyword', ''], ['page', 1], ['limit', 20]]);
-        $canViewCost = in_array('inventory.cost.view', (new InventoryStoreAccessPolicy())->features((int)$this->storeId, (int)$this->storeStaffId), true);
+        $kind = (string)$input['kind'];
+        // 同一旧接口承载入库、出库与流水列表，金额按所请求功能的岗位权限分别判断。
+        $canViewCost = in_array($kind, ['inbound', 'outbound', 'movement'], true)
+            && (new InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.' . $kind);
         return $this->success($this->services->list(
             (int)$this->storeId,
             (int)$this->storeStaffId,
-            (string)$input['kind'],
+            $kind,
             (string)$input['keyword'],
             (int)$input['page'],
             (int)$input['limit'],

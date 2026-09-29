@@ -70,10 +70,9 @@ final class InventoryPlatformAccessPolicy
         // store scope is checked later when the STORE subject is requested.
         $headquartersOnly = !$isSuperAdmin && !$storeIds;
 
-        $features = [InventoryBatchStockQueryContract::PERMISSION_VIEW];
-        if ($isSuperAdmin || in_array(self::AUTH_COST, $uniqueAuth, true)) {
-            $features[] = InventoryBatchStockQueryContract::PERMISSION_COST;
-        }
+        // 平台库存查看即包含当前已授权库存范围内的单价和金额；
+        // 旧独立成本菜单仍保留作历史权限记录，但不再是查看金额的前提。
+        $features = [InventoryBatchStockQueryContract::PERMISSION_VIEW, InventoryBatchStockQueryContract::PERMISSION_COST];
         if ($isSuperAdmin || in_array(self::AUTH_EXPORT, $uniqueAuth, true)) {
             $features[] = InventoryBatchStockQueryContract::PERMISSION_EXPORT;
         }

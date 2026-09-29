@@ -11,6 +11,22 @@ use think\facade\Db;
 /** Builds an inventory UQ context exclusively from the authenticated store session. */
 final class InventoryStoreUnifiedQueryContextFactory
 {
+    /** 每个统一查询页面只继承自身 V3 库存功能的成本查看能力。 */
+    private const PAGE_FEATURES = [
+        'inventory_batch_stock' => 'cashier.v3.inventory.stock',
+        'inventory_inbound' => 'cashier.v3.inventory.inbound',
+        'inventory_outbound' => 'cashier.v3.inventory.outbound',
+        'inventory_count' => 'cashier.v3.inventory.count',
+        'inventory_movement' => 'cashier.v3.inventory.movement',
+        'inventory_request' => 'cashier.v3.inventory.request',
+        'inventory_transfer' => 'cashier.v3.inventory.transfer',
+        'inventory_salon_usage' => 'cashier.v3.inventory.usage',
+        'inventory_import' => 'cashier.v3.inventory.import',
+        'inventory_statistics_inbound' => 'cashier.v3.inventory.statistics',
+        'inventory_statistics_outbound' => 'cashier.v3.inventory.statistics',
+        'inventory_statistics_expiry' => 'cashier.v3.inventory.statistics',
+        'inventory_statistics_age' => 'cashier.v3.inventory.statistics',
+    ];
     /** @var UnifiedQueryContextFactory */
     private $core;
 
@@ -51,7 +67,10 @@ final class InventoryStoreUnifiedQueryContextFactory
             throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '当前门店缺少组织归属，查询已停止。', []);
         }
         $rules = array_values(array_unique(array_filter(array_map('strval', $rules))));
-        $features = (new InventoryStoreAccessPolicy())->features($storeId, $operatorId);
+        if (!isset(self::PAGE_FEATURES[$pageCode])) {
+            throw new UnifiedQueryException('UNIFIED_QUERY_CONTEXT_INVALID', '库存查询功能未配置权限映射。', []);
+        }
+        $features = (new InventoryStoreAccessPolicy())->features($storeId, $operatorId, self::PAGE_FEATURES[$pageCode]);
         return $this->core->make([
             'tenant_id' => (string)array_key_first($tenantIds),
             'account_id' => $operatorId,
