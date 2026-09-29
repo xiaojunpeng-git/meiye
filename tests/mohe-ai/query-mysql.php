@@ -456,4 +456,33 @@ try {
     $connection->rollback();
 }
 if (getenv('MOHE_QUERY_TEST_SCALE')==='yes') require __DIR__.'/cash-recharge-scale-mysql.php';
+// One customer's period spending crosses sale, recharge and unallocated
+// historical debt. The count must not multiply facts or disclose a list when
+// count-only was requested; fixture changes are rolled back before exit.
+$connection->startTrans();
+try {
+    $connection->execute("INSERT INTO eb_user (uid,real_name) VALUES (103,'累计付款顾客')");
+    $connection->execute("INSERT INTO eb_cashier_v3_sale_fact (tenant_id,fact_id,store_id,member_id,member_name_snapshot,business_date,status,sale_amount_cents,order_id,source_line_id) VALUES ('0','spend-sale',1,103,'累计付款顾客','2026-09-08','effective',200000,'spend-order','spend-line')");
+    $connection->execute("INSERT INTO eb_cashier_v3_payment_sale_allocation_fact (tenant_id,allocation_fact_id,sale_fact_id,store_id,member_id,business_date,status,amount_cents,order_id) VALUES ('0','spend-allocation','spend-sale',1,103,'2026-09-08','effective',200000,'spend-order')");
+    $connection->execute("INSERT INTO eb_cashier_v3_payment_fact (fact_id,tenant_id,store_id,member_id,member_name_snapshot,business_date,status,fact_type,source_document_type,payment_method,amount_cents,order_id) VALUES
+        ('spend-recharge','0',1,103,'累计付款顾客','2026-09-08','effective','payment_collected','recharge','wechat',200000,'spend-recharge-order'),
+        ('spend-old-debt','0',1,103,'累计付款顾客','2026-09-08','effective','payment_collected','debt_repayment','wechat',98000,'spend-debt-order'),
+        ('spend-refund','0',1,103,'累计付款顾客','2026-09-08','effective','payment_collected','recharge','wechat',-1000,'spend-recharge-order')");
+    $spendCondition=['subject'=>'member','relation'=>'all','conditions'=>[
+        ['metric_code'=>'cash_performance','operator'=>'eq','value'=>498000],
+    ]];
+    mysqlCheck($registered->conditionMembers('0',[1],$range,$spendCondition,0)
+        === ['count'=>1,'rows'=>[],'limit'=>0,'has_more'=>true],
+        'member spending count sums the registered positive cash sources once and remains count-only');
+    $spendRows=$registered->conditionMembers('0',[1],$range,$spendCondition);
+    mysqlCheck($spendRows['count']===1 && $spendRows['rows']===[
+        ['member_id'=>103,'member_name'=>'累计付款顾客','metrics'=>['cash_performance'=>498000]],
+    ], 'member spending count and bounded detail use the same authorized positive-payment grain');
+    $spendThreshold=['subject'=>'member','aggregation'=>'period_total','operator'=>'eq','amount_cents'=>498000];
+    mysqlCheck($registered->thresholdCount('cash_performance','0',[1],$range,$spendThreshold)===1
+        && $registered->thresholdMembers('cash_performance','0',[1],$range,$spendThreshold)['count']===1,
+        'legacy single member-money condition uses the same registered cash population');
+} finally {
+    $connection->rollback();
+}
 echo 'query-mysql: PASS (' . $checks . ' real MySQL ' . $pdo->getAttribute(PDO::ATTR_SERVER_VERSION) . " checks; disposable fixture, no customer DB)\n";

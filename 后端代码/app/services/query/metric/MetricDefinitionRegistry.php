@@ -64,7 +64,16 @@ final class MetricDefinitionRegistry
     public static function all(): array
     {
         return [
-            'cash_performance' => self::amount('cash_positive', 'cash-collected-recharge-inclusive-v3', ['summary', 'comparison', 'trend', 'ranking']) + [
+            'cash_performance' => self::amount('cash_positive', 'cash-collected-recharge-inclusive-v3', ['summary', 'comparison', 'trend', 'ranking', 'threshold_count', 'condition_count', 'condition_list'], [
+                // A member's money-paid condition uses the same three scoped
+                // receipt populations as cashSummary; it cannot fall back to
+                // sale amount or silently omit recharge and debt payments.
+                'threshold_count' => [
+                    'subject_dimension' => 'member', 'aggregation' => 'period_total',
+                    'operators' => ['gte', 'gt', 'lte', 'lt', 'eq'],
+                ],
+            ]) + [
+                'condition_subjects' => ['member'],
                 // Display-only detail profile; calculation still belongs to
                 // the existing registered fact readers, never the AI model.
                 'ranking_detail_object_kinds' => ['store'],

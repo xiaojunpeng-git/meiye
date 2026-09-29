@@ -63,7 +63,7 @@ final class RegisteredMetricReadServices
      * per-member population used by thresholdCount().  The count remains
      * exact; the page bound is presentation metadata rather than a business
      * predicate. Names come from the frozen sale fact joined by the registered
-     * reader and are never supplied by the model.
+     * reader or current member directory and are never supplied by the model.
      *
      * @return array{count:int,rows:array<int,array{member_id:int,member_name:string,metric_value:int}>,limit:int,has_more:bool}
      */
@@ -73,9 +73,19 @@ final class RegisteredMetricReadServices
         $population = $this->memberThresholdQuery($metricCode, $tenantId, $stores, $range, $condition);
         $countSql = (clone $population)->fieldRaw('s.member_id member_id')->buildSql();
         $count = (int)Db::table([$countSql => 'member_period_totals'])->count();
-        $raw = (clone $population)
-            ->fieldRaw("s.member_id member_id,COALESCE(NULLIF(MAX(s.member_name_snapshot),''),'未命名会员') member_name,SUM(p.amount_cents) metric_value")
-            ->order('s.member_id', 'asc')->limit($limit)->select()->toArray();
+        $strategy = MetricDefinitionRegistry::get($metricCode)['reader_strategy'];
+        if ($strategy === 'cash_positive') {
+            // Cash combines sale, recharge and unallocated debt facts; the
+            // member directory supplies its display name without changing
+            // the already scoped payment population or the exact count.
+            $raw = (clone $population)->leftJoin('user u', 'u.uid=s.member_id')
+                ->fieldRaw("s.member_id member_id,COALESCE(NULLIF(MAX(u.real_name),''),NULLIF(MAX(u.nickname),''),NULLIF(MAX(u.phone),''),CONCAT('会员#',s.member_id)) member_name,SUM(s.amount_cents) metric_value")
+                ->order('s.member_id', 'asc')->limit($limit)->select()->toArray();
+        } else {
+            $raw = (clone $population)
+                ->fieldRaw("s.member_id member_id,COALESCE(NULLIF(MAX(s.member_name_snapshot),''),'未命名会员') member_name,SUM(p.amount_cents) metric_value")
+                ->order('s.member_id', 'asc')->limit($limit)->select()->toArray();
+        }
         $rows = [];
         foreach ($raw as $row) {
             $memberId = $this->integer($row['member_id'] ?? null);
@@ -329,7 +339,7 @@ final class RegisteredMetricReadServices
         $this->assertScope($tenantId, $stores, $range);
         $contract = MetricDefinitionRegistry::get($metricCode);
         $threshold = $contract['source']['threshold_count'] ?? null;
-        if (($contract['reader_strategy'] ?? null) !== 'sales_payment_collected' || !is_array($threshold)
+        if (!in_array($contract['reader_strategy'] ?? null, ['sales_payment_collected', 'cash_positive'], true) || !is_array($threshold)
             || ($threshold['subject_dimension'] ?? null) !== 'member' || ($threshold['aggregation'] ?? null) !== 'period_total') {
             $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         }
@@ -347,10 +357,8 @@ final class RegisteredMetricReadServices
         // unbounded member directory into PHP would be both slower and unsafe.
         // amount_cents is a bounded integer above, so the generated predicate
         // contains no customer/model-authored SQL.
-        return $this->saleCashQuery($tenantId, $stores, $range)
-            ->where('s.member_id', '>', 0)
-            ->group('s.member_id')
-            ->having('SUM(p.amount_cents) ' . $operator . ' ' . $condition['amount_cents']);
+        [$query, $expression] = $this->memberMetricAggregateQuery($metricCode, $tenantId, $stores, $range);
+        return $query->having($expression . ' ' . $operator . ' ' . $condition['amount_cents']);
     }
 
     /** @return array{0:mixed,1:string} */
@@ -369,6 +377,26 @@ final class RegisteredMetricReadServices
             || !in_array('condition_count', $contract['query_shapes'] ?? [], true)
             || !in_array('condition_list', $contract['query_shapes'] ?? [], true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
 
+        if (($contract['reader_strategy'] ?? null) === 'cash_positive') {
+            // Keep the member predicate at the same payment-fact grain as
+            // cashSummary. Unioning source rows before grouping prevents a
+            // member's recharge or old debt payment from being lost or added
+            // twice; refunds remain a separate registered metric.
+            $sources = [
+                [$this->saleCashQuery($tenantId, $stores, $range), 's.member_id'],
+                [$this->rechargeCashQuery($tenantId, $stores, $range), 'p.member_id'],
+                [$this->unallocatedSalesDebtRepaymentCashQuery($tenantId, $stores, $range), 'p.member_id'],
+            ];
+            $queries = [];
+            foreach ($sources as [$source, $memberId]) {
+                $this->applyCashDirection($source, 'positive', 'p.amount_cents');
+                $queries[] = $source->where($memberId, '>', 0)
+                    ->fieldRaw($memberId . ' member_id,p.amount_cents amount_cents');
+            }
+            $union = array_shift($queries);
+            foreach ($queries as $source) $union->unionAll($source->buildSql(false));
+            return [Db::table([$union->buildSql() => 's'])->group('s.member_id'), 'SUM(s.amount_cents)'];
+        }
         if (($contract['reader_strategy'] ?? null) === 'sales_payment_collected') {
             return [$this->saleCashQuery($tenantId, $stores, $range)->where('s.member_id', '>', 0)->group('s.member_id'), 'SUM(p.amount_cents)'];
         }

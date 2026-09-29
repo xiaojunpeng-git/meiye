@@ -68,6 +68,23 @@ $initial=build('业绩多少');$cashDate=$planner->choose($initial,['metric_code
 verify($cashDate['plan']['query']['metric_codes']===['cash_performance'] && $consumeDate['plan']['query']['metric_codes']===['consume_amount'],'replay frozen initial envelope supports correction without old candidate restriction');
 rejected(static function()use($planner,$initial){$planner->choose($initial,['metric_code'=>'cash_performance','sql'=>'anything']);},'AI_CLARIFICATION_INVALID');
 rejected(static function()use($planner){$planner->normalizePeriod(['code'=>'EXPLICIT','start'=>'2026-02-30','end'=>'2026-03-01'],'2026-10-09');},'AI_DATE_INVALID');
+// A year stated without an endpoint is year-to-date only for the current
+// business year; a connected explicit future endpoint must not be clipped.
+foreach (['2026年消费4980的有多少个人','今年消费4980的有多少个人'] as $question) {
+    $calendar=\app\services\ai\semantic\AiSemanticIntentParser::calendarEvidence($question);
+    verify($calendar['complete'] && count($calendar['periods'])===1,'bare current-year evidence is complete');
+    verify($planner->normalizePeriod($calendar['periods'][0],'2026-09-29')===['start'=>'2026-01-01','end'=>'2026-09-29'],
+        'bare current-year actuals stop at trusted business day');
+}
+$calendar=\app\services\ai\semantic\AiSemanticIntentParser::calendarEvidence('2025年消费多少');
+verify($planner->normalizePeriod($calendar['periods'][0],'2026-09-29')===['start'=>'2025-01-01','end'=>'2025-12-31'],
+    'past calendar year remains complete');
+$calendar=\app\services\ai\semantic\AiSemanticIntentParser::calendarEvidence('2026年3月到今天消费多少');
+verify($planner->normalizePeriod($calendar['periods'][0],'2026-09-29')===['start'=>'2026-03-01','end'=>'2026-09-29'],
+    'month-to-today interval keeps both stated endpoints');
+$calendar=\app\services\ai\semantic\AiSemanticIntentParser::calendarEvidence('2026年到2027年消费多少');
+verify($planner->normalizePeriod($calendar['periods'][0],'2026-09-29')===['start'=>'2026-01-01','end'=>'2027-12-31'],
+    'an explicit future endpoint is retained for the later actuals policy');
 foreach([
  '今天服务了几个人'=>'unparsed_business_condition','今天服务多少人、多少次'=>'unparsed_business_condition',
  '本月项目赚了多少钱'=>'category_filter',

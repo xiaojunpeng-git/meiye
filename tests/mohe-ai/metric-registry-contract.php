@@ -129,6 +129,18 @@ $memberCondition=(new app\services\query\metric\AnalysisCapabilityCatalogFactory
 metricRegistryCheck(($memberCondition['complete_request_supported']??false)===true
     && (($memberCondition['items'][0]['binding']['metric_code']??null)==='sales_collected_amount'),
     'generic member conditions are discoverable from the registered metric shape and aggregate dimension');
+$cashMemberCondition=(new app\services\query\metric\AnalysisCapabilityCatalogFactory())->make()->discover([
+    'metric_codes'=>['cash_performance'],'object_kind'=>'member','operation'=>'condition_count',
+    'filter_keys'=>[],'relation_role'=>'member_metric_total',
+],static function(array $binding):bool{return true;});
+metricRegistryCheck(($cashMemberCondition['complete_request_supported']??false)===true
+    && (($cashMemberCondition['items'][0]['binding']['metric_code']??null)==='cash_performance')
+    && MetricDefinitionRegistry::get('cash_performance')['condition_subjects']===['member'],
+    'member spending conditions reuse the registered cash fact instead of a question-specific metric');
+metricRegistryCheck(MetricSemanticCatalog::uniqueCodeForTerms(['消费'])==='cash_performance',
+    'ordinary spending language resolves through the shared metric dictionary');
+metricRegistryCheck(MetricSemanticCatalog::uniqueCodeForTerms(['消耗'])==='consume_amount',
+    'rights consumed remains the service fact and is not confused with money paid');
 $storeCondition=(new app\services\query\metric\AnalysisCapabilityCatalogFactory())->make()->discover([
     'metric_codes'=>['actual_performance'],'object_kind'=>'store','operation'=>'condition_list',
     'filter_keys'=>[],'relation_role'=>'store_total',

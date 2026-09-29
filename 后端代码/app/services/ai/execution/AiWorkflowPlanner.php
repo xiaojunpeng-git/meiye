@@ -230,6 +230,11 @@ final class AiWorkflowPlanner
     {
         if (($term['code'] ?? '') === 'EXPLICIT') return $this->range($term['start'] ?? null, $term['end'] ?? null);
         $code=$term['code']??'';
+        if ($code==='CALENDAR_YEAR') {
+            $year=$this->calendarYear($term['start']??null,$today);
+            $start=sprintf('%04d-01-01',$year);
+            return $this->range($start,$year===(int)substr($today,0,4)?$today:sprintf('%04d-12-31',$year));
+        }
         if ($code==='CALENDAR_DATES') {
             $start=$this->calendarEndpoint($term['start']??null,$today,false);
             // An omitted year on the second month inherits the stated start
@@ -257,6 +262,10 @@ final class AiWorkflowPlanner
      * retained, so invalid dates cannot roll over into another month. */
     private function calendarEndpoint($value,string $today,bool $end): string
     {
+        if (is_string($value) && preg_match('/^(?:[0-9]{4}年|今年|去年)$/uD',$value)) {
+            $year=$this->calendarYear($value,$today);
+            return $end?sprintf('%04d-12-31',$year):sprintf('%04d-01-01',$year);
+        }
         $relative=['今天'=>'TODAY','现在'=>'TODAY','目前'=>'TODAY','昨天'=>'YESTERDAY','前天'=>'DAY_BEFORE_YESTERDAY','明天'=>'TOMORROW','本月'=>'THIS_MONTH','这月'=>'THIS_MONTH','上月'=>'LAST_MONTH'];
         if (is_string($value) && isset($relative[$value])) return $this->period(['code'=>$relative[$value]],$today)[$end?'end':'start'];
         if (is_string($value) && preg_match('/^(?:(?<year>[0-9]{4})年|(?<relative>今年|去年))?(?<month>[0-9一二两三四五六七八九十]+)月(?:份)?(?:(?<day>[0-9一二两三四五六七八九十]+)[日号])?$/uD',$value,$m)) {
@@ -273,6 +282,15 @@ final class AiWorkflowPlanner
             return $date->format('Y-m')===substr($today,0,7)?$today:$date->format('Y-m-t');
         }
         return $this->date($value)->format('Y-m-d');
+    }
+    /** Resolve a year label against the trusted business day, never system clock. */
+    private function calendarYear($value,string $today): int
+    {
+        $current=(int)substr($this->date($today)->format('Y-m-d'),0,4);
+        if ($value==='今年') return $current;
+        if ($value==='去年') return $current-1;
+        if (!is_string($value)||!preg_match('/^([1-9][0-9]{3})年$/D',$value,$match)) throw new AiContractException('AI_DATE_INVALID');
+        return (int)$match[1];
     }
     /** Resolves meaning only. Bounds here are calendar representation, not query capacity. */
     public function normalizeNaturalPeriod(array $period,string $today): array

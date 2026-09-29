@@ -96,7 +96,7 @@ final class AiSemanticIntentParser
     {
         $text=strtr($text,['这一个月'=>'本月','这个月'=>'本月','上个月'=>'上月','今日'=>'今天','昨日'=>'昨天','至今为止'=>'至今天','至今'=>'至今天']);
         $number='[0-9一二两三四五六七八九十]+';
-        $endpoint='(?:今天|昨天|前天|明天|本月|这月|上月|最近'.$number.'天|(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])|(?:[0-9]{4}年|今年|去年)?'.$number.'月(?:份)?(?:'.$number.'[日号])?)';
+        $endpoint='(?:今天|昨天|前天|明天|本月|这月|上月|最近'.$number.'天|(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}(?![0-9])|(?:[0-9]{4}年|今年|去年)?'.$number.'月(?:份)?(?:'.$number.'[日号])?|(?<![0-9])[0-9]{4}年(?!'.$number.'月)|今年|去年)';
         $pattern='/(?:(?:只|仅)(?:看|查)\s*)?(?:从|自)?(?<start>'.$endpoint.')(?:\s*(?:开始)?\s*(?:一直到|截至|截止到|到|至)\s*(?<end>'.$endpoint.'|现在|目前))?(?:为止)?/u';
         $terms=[];$codes=['今天'=>'TODAY','昨天'=>'YESTERDAY','前天'=>'DAY_BEFORE_YESTERDAY','明天'=>'TOMORROW','本月'=>'THIS_MONTH','这月'=>'THIS_MONTH','上月'=>'LAST_MONTH'];
         $withoutScopeModifiers=$text;
@@ -109,7 +109,10 @@ final class AiSemanticIntentParser
             if ($end!=='') $terms[]=['code'=>'CALENDAR_DATES','start'=>$start,'end'=>$end];
             elseif (isset($codes[$start])) $terms[]=['code'=>$codes[$start]];
             elseif (preg_match('/^最近(.+)天$/u',$start,$rolling)) $terms[]=['code'=>'ROLLING_DAYS','days'=>(new self())->number($rolling[1])];
-            else $terms[]=['code'=>strpos($start,'月')!==false?'CALENDAR_DATES':'EXPLICIT','start'=>$start,'end'=>$start];
+            // A standalone calendar year is not a requested future endpoint:
+            // the period planner alone decides whether it ends today or at
+            // year-end. A stated end remains a connected interval above.
+            else $terms[]=['code'=>preg_match('/^(?:[0-9]{4}年|今年|去年)$/uD',$start)?'CALENDAR_YEAR':(strpos($start,'月')!==false?'CALENDAR_DATES':'EXPLICIT'),'start'=>$start,'end'=>$start];
             return '【日期】';
         },$text);
         // Unsupported calendar qualifiers must retain model ownership. The
