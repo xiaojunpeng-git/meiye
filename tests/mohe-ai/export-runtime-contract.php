@@ -30,7 +30,7 @@ $check($lock->invoke($runtime,'slot-0')===null,'Occupied physical slot cannot be
 $slot=$lock->invoke($runtime,'slot-0'); $check(is_resource($slot),'Physical slot releases only after actual unlock'); flock($slot,LOCK_UN); fclose($slot);
 $workerReflection=new ReflectionClass(\app\services\query\UnifiedQueryExportWorkerServices::class); $worker=$workerReflection->newInstanceWithoutConstructor();
 $write=$workerReflection->getMethod('writeXlsx'); $write->setAccessible(true);
-$view=['query'=>['start_date'=>'2026-09-08','end_date'=>'2026-09-08','query_shape'=>'summary'],
+$view=['query'=>['start_date'=>'2026-09-08','end_date'=>'2026-09-08','query_shape'=>'summary','compare_range'=>null],
     'results'=>[['metric_code'=>'consume_amount','storage_unit'=>'fen','period'=>'current','amount_cents'=>12345]]];
 $fields=[]; foreach (\app\services\query\metric\MetricReadViewExportRegistrar::fields() as $key=>$label) $fields[]=['key'=>$key,'label'=>$label,'type'=>$key==='metric_value'?'decimal':'text'];
 $key=$write->invoke($worker,'uqe_'.str_repeat('e',32),str_repeat('f',64),$fields,\app\services\query\metric\MetricReadViewExportProvider::project($view),[],false,null);
@@ -63,14 +63,23 @@ foreach ($fixtures as $shape=>$fixture) {
     $rows=$project::project($fixture);
     $check(array_values(array_unique(array_column($rows,'metric_name')))===['现金业绩','消耗业绩'], $shape.' preserves both registered names');
     $check(array_column($rows,'row_id')===array_map('strval',range(1,count($rows))), $shape.' has stable result IDs');
-    $fileKey=$write->invoke($worker,'uqe_'.md5('fixture-'.$shape),str_repeat('f',64),$fields,$rows,[],false,null);
+    $tables=$project::presentationTables($fixture);
+    $fileKey=$write->invoke($worker,'uqe_'.md5('fixture-'.$shape),str_repeat('f',64),$fields,$rows,[],false,null,$tables);
     $verify->invoke($runtime,$fixtureRoot.'/'.$fileKey,$fixture);
     $check(true, $shape.' passes real writer and original-evidence readback');
     $sheetBook=\PhpOffice\PhpSpreadsheet\IOFactory::load($fixtureRoot.'/'.$fileKey);
     foreach ($rows as $i=>$row) {
-        $sheet=$sheetBook->getActiveSheet();
+        $sheet=$tables?$sheetBook->getSheet(1):$sheetBook->getActiveSheet();
         $check($sheet->getCell('B'.($i+2))->getValue()===$row['metric_name'], $shape.' XLSX correct metric label');
         $check(number_format((float)$sheet->getCell('I'.($i+2))->getValue(),2,'.','')===$row['metric_value'], $shape.' XLSX cents preserved');
+    }
+    if ($tables) {
+        $visible=$sheetBook->getSheet(0);
+        $check($visible->getCell('A1')->getValue()===$tables[0]['summary']
+            &&$visible->getCell('A2')->getValue()===$tables[0]['columns'][0]['label'],
+            $shape.' visible XLSX uses screen summary and column label');
+        $check($sheetBook->getSheet(1)->getSheetState()===\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet::SHEETSTATE_HIDDEN,
+            $shape.' precise source remains hidden, not a competing user-facing table');
     }
     $sheetBook->disconnectWorksheets();
 }
@@ -146,6 +155,53 @@ $check((string)$assetBook->getActiveSheet()->getCell('I2')->getValue()==='1288.6
 $assetBook->disconnectWorksheets();
 try {$verify->invoke($runtime,$fixtureRoot.'/'.$assetKey,$view);throw new LogicException('accepted rights file as metrics');}
 catch(RuntimeException $e){$check($e->getMessage()==='AI_EXPORT_CONTENT_MISMATCH','asset file cannot pass a metric-only evidence fence');}
+// R57: a 21-person screen previews 20 rows, while the visible workbook keeps
+// the identical two business tables and all 21 rows. The hidden source tab
+// retains cents so rounded display values never overwrite exact evidence.
+$members=[];$population=[];
+for ($i=1;$i<=21;$i++) {
+    $detail=$assetDetail;$detail['member']['memberId']=100+$i;$detail['member']['name']='测试会员'.$i;
+    $members[]=['detail'=>$detail,'label'=>'测试会员'.$i,'selection_ref'=>'member:'.(100+$i)];
+    $population[]=['member_id'=>100+$i,'member_name'=>'测试会员'.$i,'metrics'=>['sales_collected_amount'=>890001]];
+}
+$condition=['subject'=>'member','relation'=>'all','conditions'=>[['metric_code'=>'sales_collected_amount','operator'=>'gte','value'=>30000]]];
+$populationView=['query'=>['start_date'=>'2026-09-01','end_date'=>'2026-09-30','query_shape'=>'condition_list',
+    'compare_range'=>null,'business_filters'=>['object_kind'=>'member'],'metric_codes'=>['sales_collected_amount'],
+    'condition_set'=>$condition], 'results'=>[['period'=>'current','metric_code'=>'sales_collected_amount',
+    'storage_unit'=>'count','object_kind'=>'member','condition_set'=>$condition,'count'=>21,
+    'list_limit'=>100,'has_more'=>false,'rows'=>$population]]];
+$screen=(new \app\services\ai\presentation\AiAnswerRenderer())->render($populationView);
+$check(count($screen['table']['rows'])===20 && $screen['table']['total_rows']===21,'screen previews exactly 20 people');
+$rightsAnswer=(new \app\services\ai\presentation\AiMemberDetailAnswerRenderer())->renderSet($members,'summary');
+$assetsV2=\app\services\ai\presentation\AiMemberRightsExportProjection::capture(
+    $members,'summary',$project::project($populationView),$rightsAnswer);
+$fullView=$project::withMemberRights($populationView+['result_hash'=>'fixture-combined'],$assetsV2);
+$tables=$project::presentationTables($fullView);
+$check(count($tables)===2 && $tables[0]['title']==='会员筛选依据'
+    && $tables[1]['title']==='会员权益汇总' && count($tables[0]['rows'])===21
+    && count($tables[1]['rows'])===21,'both full export tables retain screen hierarchy');
+$check(array_column($tables[1]['columns'],'label')===['会员','所属门店','账户余额（元）','本金余额（元）',
+    '赠送余额（元）','有效卡项（张）','剩余项目（次）','剩余项目金额（元）'],
+    'rights workbook columns exactly equal the visible screen columns');
+$fullKey=$write->invoke($worker,'uqe_'.md5('fixture-visible-rights'),str_repeat('f',64),$fields,
+    $project::project($fullView),[],false,null,$tables);
+$verify->invoke($runtime,$fixtureRoot.'/'.$fullKey,$fullView);
+$fullBook=\PhpOffice\PhpSpreadsheet\IOFactory::load($fixtureRoot.'/'.$fullKey);
+$check($fullBook->getSheet(0)->getCell('A1')->getValue()==='会员筛选依据'
+    &&$fullBook->getSheet(0)->getCell('A26')->getValue()==='会员权益汇总'
+    &&$fullBook->getSheet(0)->getCell('A49')->getValue()==='测试会员21',
+    'actual XLSX first sheet has both complete business tables');
+$check($fullBook->getSheet(0)->getCell('C29')->getValue()==='1,289'
+    &&$fullBook->getSheet(1)->getCell('I2')->getValue()==8900.01
+    &&$fullBook->getSheet(1)->getCell('I23')->getValue()==1288.6,
+    'displayed rounded amount matches screen and hidden source retains cents');
+$fullBook->disconnectWorksheets();
+$tamperedBook=\PhpOffice\PhpSpreadsheet\IOFactory::load($fixtureRoot.'/'.$fullKey);
+$tamperedBook->getSheet(0)->setCellValueExplicit('A1','错误标题',\PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+(new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($tamperedBook))->save($fixtureRoot.'/'.$fullKey);
+$tamperedBook->disconnectWorksheets();
+try {$verify->invoke($runtime,$fixtureRoot.'/'.$fullKey,$fullView);throw new LogicException('accepted modified visible workbook');}
+catch(RuntimeException $e){$check($e->getMessage()==='AI_EXPORT_CONTENT_MISMATCH','changed visible title is rejected before download');}
 // Exact newly-created isolated fixture root; contains no application or user artifacts.
 $iterator=new RecursiveIteratorIterator(new RecursiveDirectoryIterator($fixtureRoot,FilesystemIterator::SKIP_DOTS),RecursiveIteratorIterator::CHILD_FIRST);
 foreach ($iterator as $file) { if ($file->isDir()) rmdir($file->getPathname()); else unlink($file->getPathname()); } rmdir($fixtureRoot);

@@ -44,7 +44,38 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
         if (($view['ai_query_ready']??false)!==true || ($view['result_status']??null)!=='complete') throw new \RuntimeException('METRIC_EXPORT_SOURCE_NOT_READY');
         $rows=self::project($view);
         UnifiedQueryExportTaskServices::assertCellBudget(count($fieldKeys),count($rows),false);
-        return ['exportRows'=>$rows,'summaries'=>[], 'total'=>count($rows),'read_consistency_ref'=>$refs[0], 'result_hash'=>$view['result_hash']];
+        return ['exportRows'=>$rows,'presentationTables'=>self::presentationTables($view),
+            'summaries'=>[], 'total'=>count($rows),'read_consistency_ref'=>$refs[0], 'result_hash'=>$view['result_hash']];
+    }
+    /** The visible workbook mirrors the answer's table hierarchy while the
+     * immutable long-form rows remain available for exact-cent verification.
+     */
+    public static function presentationTables(array $view): array
+    {
+        $renderer=new \app\services\ai\presentation\AiAnswerRenderer();
+        $projection=\app\services\ai\presentation\AiExportTableProjection::class;
+        if (isset($view['collection_exports'])) {
+            $tables=[];
+            foreach ($view['collection_exports'] as $source) {
+                foreach ($projection::fromAnswer($renderer->render($source['view'],false)) as $table) {
+                    $table['title']=$source['label'];$tables[]=$table;
+                }
+            }
+            return $projection::validate($tables);
+        }
+        if (isset($view['member_rights_export'])) {
+            $snapshot=$view['member_rights_export'];
+            if (($snapshot['version']??null)!==2) return [];
+            $tables=$projection::fromAnswer($renderer->render($view,false));
+            foreach ($tables as &$table) $table['title']='会员筛选依据';
+            unset($table);
+            foreach ($projection::validate($snapshot['tables']) as $table) {
+                if ($table['title']==='') $table['title']='会员权益汇总';
+                $tables[]=$table;
+            }
+            return $projection::validate($tables);
+        }
+        return $projection::fromAnswer($renderer->render($view,false));
     }
     public static function project(array $view): array
     {

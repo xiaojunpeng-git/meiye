@@ -481,7 +481,18 @@ final class AiExportRuntime
     {
         $book=\PhpOffice\PhpSpreadsheet\IOFactory::load($path);
         try {
-            $sheet=$book->getActiveSheet(); $expected=M\MetricReadViewExportProvider::project($view); $fields=M\MetricReadViewExportRegistrar::fields();
+            $tables=M\MetricReadViewExportProvider::presentationTables($view);
+            if ($tables) {
+                if ($book->getSheetCount()!==2 || $book->getSheet(0)->getTitle()!=='查询结果'
+                    || $book->getSheet(1)->getTitle()!=='精确数据'
+                    || $book->getSheet(1)->getSheetState()!==\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet::SHEETSTATE_HIDDEN) throw new \RuntimeException('AI_EXPORT_CONTENT_MISMATCH');
+                $this->verifyPresentation($book->getSheet(0),$tables);
+                $sheet=$book->getSheet(1);
+            } else {
+                if ($book->getSheetCount()!==1) throw new \RuntimeException('AI_EXPORT_CONTENT_MISMATCH');
+                $sheet=$book->getActiveSheet();
+            }
+            $expected=M\MetricReadViewExportProvider::project($view); $fields=M\MetricReadViewExportRegistrar::fields();
             if ($sheet->getHighestDataRow()!==count($expected)+1 || $sheet->getHighestDataColumn()!==\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($fields))) throw new \RuntimeException('AI_EXPORT_CONTENT_MISMATCH');
             $column=1; foreach ($fields as $key=>$label) {
                 $letter=\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($column++);
@@ -498,5 +509,36 @@ final class AiExportRuntime
                 }
             }
         } finally { $book->disconnectWorksheets(); }
+    }
+
+    /** Read the actual XLSX, not only the projected PHP array, before publication or download. */
+    private function verifyPresentation($sheet,array $tables): void
+    {
+        $line=1;$widest=0;
+        foreach ($tables as $table) {
+            if ($table['title']!=='') {
+                if ($sheet->getCell('A'.$line)->getValue()!==$table['title']) throw new \RuntimeException('AI_EXPORT_CONTENT_MISMATCH');
+                ++$line;
+            }
+            if ($sheet->getCell('A'.$line)->getValue()!==$table['summary']) throw new \RuntimeException('AI_EXPORT_CONTENT_MISMATCH');
+            ++$line;
+            $widest=max($widest,count($table['columns']));
+            foreach ($table['columns'] as $columnIndex=>$column) {
+                $letter=\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($columnIndex+1);
+                if ($sheet->getCell($letter.$line)->getValue()!==$column['label']) throw new \RuntimeException('AI_EXPORT_CONTENT_MISMATCH');
+            }
+            ++$line;
+            foreach ($table['rows'] as $row) {
+                foreach ($table['columns'] as $columnIndex=>$column) {
+                    $letter=\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($columnIndex+1);
+                    $cell=$sheet->getCell($letter.$line);
+                    if ($cell->getDataType()==='f'||$cell->getValue()!==$row[$column['key']]) throw new \RuntimeException('AI_EXPORT_CONTENT_MISMATCH');
+                }
+                ++$line;
+            }
+            ++$line;
+        }
+        if ($sheet->getHighestDataRow()!==$line-2
+            ||$sheet->getHighestDataColumn()!==\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($widest)) throw new \RuntimeException('AI_EXPORT_CONTENT_MISMATCH');
     }
 }

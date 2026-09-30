@@ -316,6 +316,15 @@ class UnifiedQueryExportWorkerServices
                 count((array)$execution['exportRows']),
                 $includeSummary
             );
+            $presentationTables=$this->partition==='AI_EXPORT'
+                ? (array)($execution['presentationTables']??[]) : [];
+            if ($presentationTables) {
+                $presentationTables=\app\services\ai\presentation\AiExportTableProjection::validate($presentationTables);
+                $displayCells=0;
+                foreach ($presentationTables as $table) $displayCells+=count($table['columns'])*(count($table['rows'])+3);
+                if ($displayCells+count($fieldSnapshot)*(count((array)$execution['exportRows'])+1)
+                    >UnifiedQueryExportTaskServices::MAX_EXPORT_CELLS) throw new \RuntimeException('AI_EXPORT_CELL_BUDGET_EXCEEDED');
+            }
             $inFileStage = true;
             $storageKey = $this->writeXlsx(
                 $taskNo,
@@ -324,7 +333,8 @@ class UnifiedQueryExportWorkerServices
                 (array)$execution['exportRows'],
                 $includeSummary ? (array)$execution['summaries'] : [],
                 $includeSummary,
-                $heartbeat
+                $heartbeat,
+                $presentationTables
             );
             $inFileStage = false;
             $heartbeat(true);
@@ -826,7 +836,8 @@ class UnifiedQueryExportWorkerServices
         array $rows,
         array $summaries,
         $includeSummary = null,
-        ?callable $heartbeat = null
+        ?callable $heartbeat = null,
+        array $presentationTables = []
     ): string {
         if (!preg_match('/^[a-f0-9]{64}$/D', $workerToken)) {
             throw new \RuntimeException('导出 worker 租约标识不合法');
@@ -854,6 +865,16 @@ class UnifiedQueryExportWorkerServices
         try {
             $sheet = $spreadsheet->getActiveSheet();
             $sheet->setTitle('查询结果');
+            if ($presentationTables) {
+                // The first sheet has exactly the business tables the user saw.
+                // Preserve full-precision source rows on a hidden audit sheet;
+                // visible rounded yuan must never become the export's only data.
+                \app\services\ai\presentation\AiExportTableProjection::validate($presentationTables);
+                $this->writePresentationTables($sheet,$presentationTables,$heartbeat);
+                $sheet=$spreadsheet->createSheet();
+                $sheet->setTitle('精确数据');
+                $sheet->setSheetState(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet::SHEETSTATE_HIDDEN);
+            }
             foreach ($fieldSnapshot as $index => $field) {
                 $column = Coordinate::stringFromColumnIndex($index + 1);
                 $label = $this->text((string)($field['label'] ?? ($field['key'] ?? '')));
@@ -912,6 +933,40 @@ class UnifiedQueryExportWorkerServices
             }
             $spreadsheet->disconnectWorksheets();
         }
+    }
+
+    /** Render section titles, column order and displayed cell text without
+     * letting untrusted names/formulas execute in Excel. */
+    protected function writePresentationTables($sheet,array $tables,?callable $heartbeat): void
+    {
+        $line=1;
+        foreach ($tables as $table) {
+            if ($table['title']!=='') {
+                $sheet->setCellValueExplicit('A'.$line,$this->text($table['title']),DataType::TYPE_STRING);
+                $sheet->getStyle('A'.$line)->getFont()->setBold(true);
+                ++$line;
+            }
+            $sheet->setCellValueExplicit('A'.$line,$this->text($table['summary']),DataType::TYPE_STRING);
+            ++$line;
+            $header=$line;
+            foreach ($table['columns'] as $index=>$column) {
+                $letter=Coordinate::stringFromColumnIndex($index+1);
+                $sheet->setCellValueExplicit($letter.$line,$this->text($column['label']),DataType::TYPE_STRING);
+                $sheet->getColumnDimension($letter)->setWidth($this->columnWidth($column['label']));
+            }
+            $sheet->getStyle('A'.$header.':'.Coordinate::stringFromColumnIndex(count($table['columns'])).$header)->getFont()->setBold(true);
+            ++$line;
+            foreach ($table['rows'] as $index=>$row) {
+                if ($index>0 && $index%self::HEARTBEAT_ROW_INTERVAL===0) $this->heartbeat($heartbeat);
+                foreach ($table['columns'] as $columnIndex=>$column) {
+                    $letter=Coordinate::stringFromColumnIndex($columnIndex+1);
+                    $sheet->setCellValueExplicit($letter.$line,$this->text($row[$column['key']]),DataType::TYPE_STRING);
+                }
+                ++$line;
+            }
+            ++$line;
+        }
+        $sheet->freezePane('A2');
     }
 
     protected function writeCell($sheet, string $coordinate, $value, string $type): void

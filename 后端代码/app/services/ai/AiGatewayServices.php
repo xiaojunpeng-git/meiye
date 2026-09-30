@@ -5859,6 +5859,9 @@ final class AiGatewayServices
         $renderer=new \app\services\ai\presentation\AiMemberDetailAnswerRenderer();
         $answer=isset($spec['members'])?$renderer->renderSet($details,(string)$spec['view'])
             :$renderer->render($details[0]['detail'],$details[0]['label'],(string)$spec['view']);
+        // Export captures the full authorised rights tables before the screen
+        // preview is capped; neither the browser nor a later query supplies rows.
+        $rightsAnswer=$answer;
         if (isset($spec['population_answer'])) {
             // Keep the verified membership evidence visible alongside assets;
             // the user must be able to see which metrics selected this set.
@@ -5881,7 +5884,7 @@ final class AiGatewayServices
             // Freeze exact values before publishing. The separate XLSX task
             // projects these authorised assets, not the context filter list.
             'member_rights_export'=>\app\services\ai\presentation\AiMemberRightsExportProjection::capture(
-                $details,(string)$spec['view'],$spec['population_export_rows']??[]),
+                $details,(string)$spec['view'],$spec['population_export_rows']??[],$rightsAnswer),
             'context_meaning'=>$contextMeaning,'compiled_run_hash'=>$attemptHash,
             'execution_trace'=>[['code'=>'member_detail_read','status'=>'SUCCEEDED']],
             'workflow_code'=>'wf_member_detail_read','management_version'=>$this->managementRevision];

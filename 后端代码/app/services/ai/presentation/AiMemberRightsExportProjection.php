@@ -9,7 +9,7 @@ use RuntimeException;
  */
 final class AiMemberRightsExportProjection
 {
-    public static function capture(array $members,string $view,array $populationRows=[]): array
+    public static function capture(array $members,string $view,array $populationRows=[],?array $rightsAnswer=null): array
     {
         if (!in_array($view,['summary','rights'],true)||!$members||count($members)>100) self::fail();
         // A combined filter-and-detail answer includes its verified selection
@@ -47,7 +47,10 @@ final class AiMemberRightsExportProjection
                 self::append($rows,$base,$label.'；剩余金额',$card['remainingAmount'],'元');
             }
         }
-        $snapshot=['version'=>1,'member_refs'=>array_keys($refs),'rows'=>$rows];
+        // New answers freeze the same untrimmed rights tables shown on screen.
+        // Older retained answers keep their existing v1 long-form export path.
+        $snapshot=['version'=>$rightsAnswer===null?1:2,'member_refs'=>array_keys($refs),'rows'=>$rows];
+        if ($rightsAnswer!==null) $snapshot['tables']=AiExportTableProjection::fromAnswer($rightsAnswer);
         $snapshot['hash']=self::hash($snapshot);
         return self::validate($snapshot);
     }
@@ -55,7 +58,7 @@ final class AiMemberRightsExportProjection
     /** Validate before queue, worker and download; old unsnapshotted answers fail closed. */
     public static function validate($snapshot): array
     {
-        if (!is_array($snapshot)||($snapshot['version']??null)!==1||!is_array($snapshot['member_refs']??null)
+        if (!is_array($snapshot)||!in_array($snapshot['version']??null,[1,2],true)||!is_array($snapshot['member_refs']??null)
             ||!$snapshot['member_refs']||count($snapshot['member_refs'])>100||!is_array($snapshot['rows']??null)
             ||!$snapshot['rows']||!is_string($snapshot['hash']??null)||!hash_equals(self::hash($snapshot),$snapshot['hash'])) self::fail();
         $fields=array_keys(\app\services\query\metric\MetricReadViewExportRegistrar::fields());
@@ -66,6 +69,7 @@ final class AiMemberRightsExportProjection
             foreach ($row as $value) if (!is_string($value)) self::fail();
             if (!preg_match('/^-?[0-9]+(?:\.[0-9]{2})?$/D',$row['metric_value'])) self::fail();
         }
+        if ($snapshot['version']===2) AiExportTableProjection::validate($snapshot['tables']??null);
         \app\services\query\UnifiedQueryExportTaskServices::assertCellBudget(count($fields),count($snapshot['rows']),false);
         return $snapshot;
     }

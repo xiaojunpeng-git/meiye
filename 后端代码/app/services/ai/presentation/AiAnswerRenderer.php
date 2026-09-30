@@ -11,7 +11,8 @@ final class AiAnswerRenderer
 {
     private const TABLE_SCREEN_LIMIT = 20;
 
-    public function render(array $view): array
+    /** The export worker may render the same verified view without the screen's 20-row preview cap. */
+    public function render(array $view, bool $screenLimit=true): array
     {
         $dictionary = new \app\services\metric\MetricDictionaryServices();
         // The verified answer itself is the primary presentation.  Retain the
@@ -250,7 +251,7 @@ final class AiAnswerRenderer
         $answer['presentation'] = $this->presentation($shape, $facts, $conclusion, $periodLabel, $notes, $objectKind);
         // Screen paging is a presentation concern. The signed Reader view
         // retains every row for the independent file worker and follow-ups.
-        return self::limitTables($answer,!$conditionListHasMore&&!$breakdownHasMore);
+        return $screenLimit ? self::limitTables($answer,!$conditionListHasMore&&!$breakdownHasMore) : $answer;
     }
 
     /** Cap each final business table, never its backing evidence or export. */
