@@ -960,6 +960,52 @@ final class AiGatewayServices
                 $sourceContext=$this->restoreContext($context,$owner,$body['context_ref']);
             }
         }
+        // A complete source/member question is a closed categorical cohort,
+        // not a numerical condition that the model may paraphrase away. The
+        // directory, registry and signed Reader still own every executable
+        // ID, date, population and permission boundary.
+        $priorSourceQuery=is_array($sourceContext['query']??null)?$sourceContext['query']:null;
+        $priorSource=$priorSourceQuery!==null && \app\services\query\metric\FirstCourseSourceFilter::valid(
+            (array)($priorSourceQuery['business_filters']??[]),
+            (array)($priorSourceQuery['metric_codes']??[]),
+            (array)($priorSourceQuery['condition_set']??[])
+        );
+        $sourceRequest=(new \app\services\ai\semantic\AiFirstCourseSourceAdmission())->match(
+            (string)$body['question'],$priorSource
+        );
+        if ($sourceRequest!==null) {
+            $code='member_first_course_count';
+            $ready=$caps['metric_readiness'][$code]??null;
+            if (!is_array($ready)||empty($ready['ai_query_ready'])
+                ||!in_array('condition_count',(array)($ready['query_shapes']??[]),true)) {
+                throw new RuntimeException('AI_CAPABILITY_NOT_READY');
+            }
+            $source=$sourceRequest['source_term']===null
+                ?$priorSourceQuery['business_filters']
+                :(new \app\services\query\metric\FirstCourseSourceCatalog())->resolve($sourceRequest['source_term']);
+            $filter=['object_kind'=>'member','source_primary_id'=>(int)$source['source_primary_id']];
+            if ((int)($source['source_secondary_id']??0)>0) $filter['source_secondary_id']=(int)$source['source_secondary_id'];
+            $shape=($sourceRequest['form']??null)==='list'?'condition_list'
+                :(($sourceRequest['form']??null)==='count'?'condition_count':($priorSourceQuery['query_shape']??'condition_count'));
+            $period=$sourceRequest['period'];
+            $range=$period!==null?(new AiWorkflowPlanner())->normalizePeriod($period,$today)
+                :($priorSource?['start'=>$priorSourceQuery['start_date'],'end'=>$priorSourceQuery['end_date']]
+                    :(new AiWorkflowPlanner())->normalizePeriod(['code'=>'TODAY'],$today));
+            $binding=['subject'=>'member','relation'=>'all','result_form'=>$shape==='condition_list'?'list':'count',
+                'conditions'=>[['metric_code'=>$code,'operator'=>'gt','quantity'=>'0','unit'=>'count']]];
+            $set=(new AiConditionSetCompiler())->compile($binding,$caps,$shape);
+            $query=['query_shape'=>$shape,'metric_codes'=>[$code],
+                'start_date'=>$range['start'],'end_date'=>$range['end'],'compare_range'=>null,
+                'store_ids'=>[],'business_filters'=>$filter,'ranking'=>null,
+                'aggregate_condition'=>$binding,'condition_set'=>$set];
+            if (!$priorSource && $sourceContext!==null) $this->runs->markTopicReset($owner,$id,$generation,$worker);
+            $compiled=['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_'.$shape,
+                'query'=>$query,'output_format'=>$body['output_format']],
+                '_context_meaning'=>['presentation_origin'=>'customer_or_verified_context']];
+            if ($sourceRequest['detail']) $compiled['_member_detail_request']=['view'=>'summary','target'=>'set','ordinal'=>null];
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_first_course_source_admitted');
+            return $compiled;
+        }
         $priorQueries=isset($sourceContext['items'])?array_column($sourceContext['items'],'query'):
             (isset($sourceContext['query'])?[$sourceContext['query']]:[]);
         $independent=true;
@@ -970,7 +1016,11 @@ final class AiGatewayServices
             }
         }
         $admission=new \app\services\ai\semantic\AiDeterministicSummaryAdmission();
-        if ($independent) {
+        // A complete, grammar-closed metric/date question after a source
+        // cohort is a new topic. The admission below rejects any residual
+        // pointer such as "这家"; therefore the old categorical source must
+        // not force an unrelated self-contained question through context.
+        if ($independent || $priorSource) {
             $match=$admission->match(
                 (string)$body['question'],\app\services\query\metric\MetricSemanticCatalog::entries()
             );

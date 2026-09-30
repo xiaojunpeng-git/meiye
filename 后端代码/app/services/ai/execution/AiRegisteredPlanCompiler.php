@@ -136,6 +136,13 @@ final class AiRegisteredPlanCompiler
         $person=$objectKind==='person';
         $conditionPopulation=in_array($query['query_shape'],['condition_count','condition_list'],true);
         $memberSelection=$objectKind==='member'&&isset($query['business_filters']['selection_ref']);
+        $sourceFilter=$conditionPopulation && \app\services\query\metric\FirstCourseSourceFilter::valid(
+            (array)$query['business_filters'],$metrics,(array)($query['condition_set']??[])
+        );
+        // This metric is meaningful only for a resolved source cohort. Reject
+        // a generic member condition before it reaches a Reader without a
+        // matching fact strategy; never turn it into an all-member count.
+        if (in_array('member_first_course_count',$metrics,true) && !$sourceFilter) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         if ($query['business_filters']!==[]) {
             if (!$person && count($metrics)!==1 && !in_array($query['query_shape'],['summary','breakdown'],true) && !$conditionPopulation) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             $personBreakdown=$person && $query['query_shape']==='breakdown' && $query['business_filters']===['object_kind'=>'person'];
@@ -144,7 +151,7 @@ final class AiRegisteredPlanCompiler
                 || ($conditionPopulation && $query['business_filters']['selection_ref']!=='cohort:active_personnel'))) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             if ($memberSelection && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref'])
                 || !preg_match('/^member:[1-9][0-9]*$/D',$query['business_filters']['selection_ref']))) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
-            if (!$person&&!$memberSelection&&(!is_string($objectKind)||$query['business_filters']!==['object_kind'=>$objectKind])) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+            if (!$person&&!$memberSelection&&!$sourceFilter&&(!is_string($objectKind)||$query['business_filters']!==['object_kind'=>$objectKind])) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
         }
         // A comparison reads the same bounded registered store metrics for
         // both periods under one permission snapshot. Ranking and trends keep
@@ -228,7 +235,8 @@ final class AiRegisteredPlanCompiler
             $expectedFilters=$conditionSubject==='person'
                 ? ['object_kind'=>'person','selection_ref'=>'cohort:active_personnel']
                 : ['object_kind'=>$conditionSubject];
-            if (!in_array($conditionSubject,['person','member','store','order','sale_line','card','project','product'],true)||$query['business_filters']!==$expectedFilters
+            if (!in_array($conditionSubject,['person','member','store','order','sale_line','card','project','product'],true)
+                ||(!$sourceFilter && $query['business_filters']!==$expectedFilters)
                 ||$keys!==['conditions','relation','subject']||$conditionSubject!==$objectKind
                 ||!in_array($set['relation']??null,['all','any'],true)||!is_array($set['conditions']??null)
                 ||count($set['conditions'])<1||count($set['conditions'])>4||array_keys($set['conditions'])!==range(0,count($set['conditions'])-1)) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');

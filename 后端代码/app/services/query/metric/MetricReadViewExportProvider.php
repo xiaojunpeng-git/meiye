@@ -135,19 +135,26 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
         $shape=$view['query']['query_shape']??null;$set=$view['query']['condition_set']??null;
         $subject=$set['subject']??null;$filters=$view['query']['business_filters']??null;
         $expected=$subject==='person'?['object_kind'=>'person','selection_ref'=>'cohort:active_personnel']:['object_kind'=>$subject];
-        if (!is_string($subject)||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$subject)||$filters!==$expected||($result['object_kind']??null)!==$subject
+        $sourceFilter=is_array($filters) && FirstCourseSourceFilter::valid(
+            $filters,(array)($view['query']['metric_codes']??[]),(array)$set);
+        if (!is_string($subject)||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$subject)
+            ||(!$sourceFilter && $filters!==$expected)||($result['object_kind']??null)!==$subject
             ||($result['storage_unit']??null)!=='count'||($result['condition_set']??null)!==$set
             ||!is_int($result['count']??null)||$result['count']<0||($result['period']??null)!=='current') {
             throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
         }
+        $sourceLabel=$sourceFilter?($result['source_label']??null):null;
+        if ($sourceFilter && (!is_string($sourceLabel)||trim($sourceLabel)==='')) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
         $range=['start'=>$view['query']['start_date'],'end'=>$view['query']['end_date']];
         $objectLabel=['person'=>'人员','member'=>'客户','store'=>'门店','order'=>'销售订单',
             'sale_line'=>'销售明细','card'=>'卡项','project'=>'项目','product'=>'产品'][$subject]
             ??MetricDefinitionRegistry::overviewObjectLabel($subject);
         if (!is_string($objectLabel)||$objectLabel==='') throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
         if ($shape==='condition_count') {
-            self::append($rows,['metric_name'=>'符合条件的'.$objectLabel.'数量','period_name'=>'本期','start_date'=>$range['start'],'end_date'=>$range['end'],
-                'store_name'=>'当前授权范围','ranking_direction'=>'','business_date'=>'','unit'=>$subject==='store'?'家':($subject==='order'?'笔':($subject==='sale_line'?'条':($subject==='person'||$subject==='member'?'人':'个')))],$result['count'],'count');
+            self::append($rows,['metric_name'=>$sourceFilter?'首次疗程来源会员数':'符合条件的'.$objectLabel.'数量',
+                'period_name'=>'本期','start_date'=>$range['start'],'end_date'=>$range['end'],
+                'store_name'=>$sourceFilter?$sourceLabel.'；范围：当前授权范围':'当前授权范围',
+                'ranking_direction'=>'','business_date'=>'','unit'=>$subject==='store'?'家':($subject==='order'?'笔':($subject==='sale_line'?'条':($subject==='person'||$subject==='member'?'人':'个')))],$result['count'],'count');
             return;
         }
         if (!is_array($result['rows']??null)) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
@@ -162,7 +169,8 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
                 if (!is_array($contract)||empty($contract['ai_query_ready'])||!is_int($value)) throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
                 $unit=self::displayUnit($metric,(string)($contract['storage_unit']??''));
                 self::append($rows,['metric_name'=>$contract['name'],'period_name'=>'本期','start_date'=>$range['start'],'end_date'=>$range['end'],
-                    'store_name'=>$object[$nameKey].'；范围：当前授权范围','ranking_direction'=>'','business_date'=>'','unit'=>$unit],
+                    'store_name'=>$object[$nameKey].'；范围：'.($sourceFilter?$sourceLabel.'；':'').'当前授权范围',
+                    'ranking_direction'=>'','business_date'=>'','unit'=>$unit],
                     $value,(string)$contract['storage_unit']);
             }
         }

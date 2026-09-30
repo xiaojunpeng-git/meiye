@@ -53,6 +53,12 @@ final class GroupPerformanceMetricReadServices
         return $this->registered->conditionMembers($tenantId, $stores, $range, $conditionSet, $limit);
     }
 
+    /** Preserve the same read transaction for a source-filtered first-course cohort. */
+    public function firstCourseSourceMembers(string $tenantId,array $stores,array $range,int $primaryId,int $secondaryId,int $limit): array
+    {
+        return $this->registered->firstCourseSourceMembers($tenantId,$stores,$range,$primaryId,$secondaryId,$limit);
+    }
+
     /** Exact count plus a bounded page for registered fact-dimension objects. */
     public function conditionDimensions(string $tenantId, array $stores, array $range, array $conditionSet, int $limit = 100): array
     {

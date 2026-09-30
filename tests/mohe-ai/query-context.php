@@ -23,7 +23,9 @@ qcCheck($cohortView['has_business_filter']===true&&$cohortView['has_object_selec
     'a signed condition population remains a filter but is not exposed as a customer-selected person');
 $suggestedView=IntentContextMerger::modelView($source,['presentation_origin'=>'platform_observation']);
 qcCheck($suggestedView['presentation_origin']==='platform_observation','model can distinguish a platform first answer from a customer-selected metric');
-qcCheck(array_diff(array_keys($suggestedView),['metric_codes','operation','aggregate_condition','periods','ranking','scope','object_kind','has_store_scope_restriction','has_business_filter','has_object_selection','presentation_origin'])===[],'presentation provenance adds no answer, identity or result field to the model view');
+// The verified result-set hint is an existing non-identifying shape marker;
+// this assertion must still reject any newly exposed answer or identity.
+qcCheck(array_diff(array_keys($suggestedView),['metric_codes','operation','aggregate_condition','periods','ranking','scope','object_kind','has_store_scope_restriction','has_business_filter','has_object_selection','verified_result_set','presentation_origin'])===[],'presentation provenance adds no answer, identity or result field to the model view');
 qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::modelInstruction(true),'one executed metric perspective')!==false,
     'binding instruction preserves a verified query perspective across a contextual follow-up without a metric rule');
 qcCheck(strpos(\app\services\ai\contract\AiIntentResultContract::semanticReviewInstruction(),'For a verified prior query, metric_codes are one executed query perspective')!==false,

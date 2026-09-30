@@ -20,6 +20,10 @@ $pdo = new PDO('mysql:host=127.0.0.1;port=' . $port . ';dbname=mohe_query_fixtur
 $schemas = [
     'system_store' => 'id INT PRIMARY KEY,name VARCHAR(128)',
     'user' => 'uid INT PRIMARY KEY,real_name VARCHAR(128) DEFAULT "",nickname VARCHAR(128) DEFAULT "",phone VARCHAR(32) DEFAULT ""',
+    // R56 first-course source cohort uses immutable lifecycle facts and the
+    // two-level directory; both must be transaction-verified InnoDB sources.
+    'cashier_v3_customer_lifecycle_fact' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),store_id INT,member_id INT,event_type VARCHAR(40),status VARCHAR(32),business_date DATE,related_order_id VARCHAR(64),source_primary_id INT,source_secondary_id INT DEFAULT 0',
+    'cashier_v3_business_source' => 'id INT PRIMARY KEY,parent_id INT DEFAULT 0,name VARCHAR(128),status INT DEFAULT 1',
     'organization' => 'id INT PRIMARY KEY,pid INT,is_del TINYINT DEFAULT 0',
     'organization_store' => 'store_id INT,org_id INT',
     'cashier_v3_report_organization_dimension' => 'id INT PRIMARY KEY AUTO_INCREMENT,tenant_id VARCHAR(64),dimension_code VARCHAR(64),organization_id VARCHAR(64),organization_name_snapshot VARCHAR(128),enabled TINYINT DEFAULT 1,valid_from DATE NULL,display_order INT DEFAULT 0',

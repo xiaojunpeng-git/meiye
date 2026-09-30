@@ -25,7 +25,8 @@ final class MetricReadTransaction
         // SET TRANSACTION affects only the following transaction, not other requests.
         $tables = ['cashier_v3_payment_sale_allocation_fact', 'cashier_v3_sale_fact', 'cashier_v3_payment_fact',
             'cashier_v3_recharge_debt_repayment', 'cashier_v3_balance_fact', 'cashier_v3_performance_fact', 'cashier_v3_entitlement_service_fact',
-            'cashier_v3_order_lifecycle_operation', 'system_store'];
+            'cashier_v3_order_lifecycle_operation', 'cashier_v3_customer_lifecycle_fact',
+            'cashier_v3_business_source', 'system_store'];
         $prefix = (string)$connection->getConfig('prefix');
         $names = array_map(static function (string $table) use ($prefix): string { return $prefix . $table; }, $tables);
         $prior=$connection->query('SELECT @@SESSION.max_execution_time AS execution_limit',[],true);

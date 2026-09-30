@@ -232,6 +232,37 @@ final class RegisteredMetricReadServices
     }
 
     /**
+     * Source is a categorical ID filter on the immutable first-course event,
+     * not a synthetic numeric condition. Count and page share the same scoped
+     * predicate; a later service at another store cannot move this cohort.
+     */
+    public function firstCourseSourceMembers(string $tenantId,array $stores,array $range,int $primaryId,int $secondaryId,int $limit): array
+    {
+        $this->assertScope($tenantId,$stores,$range);
+        if ($primaryId<1 || $secondaryId<0 || $limit<0 || $limit>100) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $query=call_user_func($this->queryFactory,'cashier_v3_customer_lifecycle_fact')->alias('first_course')
+            ->where('first_course.tenant_id',$tenantId)->whereIn('first_course.store_id',$stores);
+        (new \app\services\report\FirstCourseMemberCohortServices())->apply(
+            $query,'first_course',$range,$primaryId,$secondaryId
+        );
+        $members=(clone $query)->field('first_course.member_id')->group('first_course.member_id');
+        $count=(int)Db::table([$members->buildSql()=>'first_course_members'])->count();
+        if ($limit===0 || $count===0) return ['count'=>$count,'rows'=>[],'limit'=>$limit,'has_more'=>$count>0];
+        $ids=array_map('intval',(clone $members)->order('first_course.member_id','asc')->limit($limit)->column('first_course.member_id'));
+        $names=[];
+        foreach(call_user_func($this->queryFactory,'user')->whereIn('uid',$ids)
+            ->fieldRaw("uid,COALESCE(NULLIF(real_name,''),NULLIF(nickname,''),NULLIF(phone,''),CONCAT('会员#',uid)) member_name")
+            ->select()->toArray() as $row) $names[(int)$row['uid']]=(string)$row['member_name'];
+        $rows=[];
+        foreach($ids as $id) {
+            if ($id<1) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            $rows[]=['member_id'=>$id,'member_name'=>$names[$id]??('会员#'.$id),
+                'metrics'=>['member_first_course_count'=>1]];
+        }
+        return ['count'=>$count,'rows'=>$rows,'limit'=>$limit,'has_more'=>$count>count($rows)];
+    }
+
+    /**
      * Executes condition sets whose candidates are registered dimensions of
      * the same immutable fact population (orders, sale lines and sold items).
      * Every metric is aggregated independently before ids are intersected or

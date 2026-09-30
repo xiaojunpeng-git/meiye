@@ -16,7 +16,7 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v20';
+    public const VERSION = 'unified-metric-registry-v21';
     public const COVERAGE_START = '2026-08-10';
 
     /**
@@ -361,6 +361,27 @@ final class MetricDefinitionRegistry
                     'subject_dimension' => 'member',
                     'aggregation' => 'period_total',
                     'operators' => ['gte', 'gt', 'lte', 'lt', 'eq'],
+                ],
+            ]) + ['condition_subjects' => ['member']],
+            // A member's first completed course is a single immutable
+            // lifecycle event. Its source is an ID filter, not a numeric
+            // threshold or the member's later mutable home-store projection.
+            'member_first_course_count' => self::count('member_first_course_count', 'v3-member-first-course-source-v1', ['condition_count', 'condition_list'], [
+                'table' => 'cashier_v3_customer_lifecycle_fact',
+                'filters' => ['event_type' => 'first_course_completed', 'status' => 'effective'],
+                'dimensions' => [
+                    'member' => [
+                        'id' => 'member_id', 'name' => 'member_name',
+                        'analysis_object_kind' => 'member',
+                        'analysis_object_label' => '会员',
+                        'analysis_relation_role' => 'member_first_completed_course',
+                        'analysis_action_codes' => ['sale'],
+                    ],
+                ],
+                'threshold_count' => [
+                    'subject_dimension' => 'member',
+                    'aggregation' => 'period_total',
+                    'operators' => ['gt'],
                 ],
             ]) + ['condition_subjects' => ['member']],
             // Current remaining project entitlement is read from the same

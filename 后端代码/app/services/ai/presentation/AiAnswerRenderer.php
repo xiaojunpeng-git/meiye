@@ -38,7 +38,17 @@ final class AiAnswerRenderer
                 $subject=$set['subject'];
                 if ($storageUnit!=='count'||($row['object_kind']??null)!==$subject||!self::same($row['condition_set']??null,$set)
                     ||!is_int($row['count']??null)||$row['count']<0||!is_array($range)) throw new RuntimeException('AI_EVIDENCE_INVALID');
-                $conditionSummary=$this->conditionSummary($row['count'],$set,$registered);
+                $sourceFilter=\app\services\query\metric\FirstCourseSourceFilter::valid(
+                    (array)($view['query']['business_filters']??[]),
+                    (array)($view['query']['metric_codes']??[]),$set);
+                if ($sourceFilter) {
+                    $sourceLabel=$row['source_label']??null;
+                    if (!is_string($sourceLabel)||trim($sourceLabel)==='') throw new RuntimeException('AI_EVIDENCE_INVALID');
+                    // A categorical source is not a numerical customer
+                    // condition. State the original first-course cohort in
+                    // customer language instead of "符合 1 项条件".
+                    $conditionSummary='首次疗程来源为'.$sourceLabel.'的会员共有'.$row['count'].'人。';
+                } else $conditionSummary=$this->conditionSummary($row['count'],$set,$registered);
                 $conditionObjectLabel=$this->conditionObjectLabel($subject,$row);
                 if ($shape==='condition_list') {
                     if (!is_array($row['rows']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');

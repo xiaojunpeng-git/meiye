@@ -425,36 +425,41 @@ final class CustomerAnalyticsServices
     }
 
     /**
-     * First-course source cohort using lifecycle snapshots plus signed cash
-     * allocation facts. The legacy channels reader summed raw sale/payment
-     * rows and could not reverse refunds or voids, so it is deliberately not
-     * used here.
+     * First-course source cohort uses the immutable completion event's date,
+     * store and source. The mutable member projection can move store after
+     * cross-store service and must not decide historical cohort membership.
+     * Net cash still comes from signed allocation facts, not raw sales.
      */
     private function sourceAnalysis(array $stores, array $range, array $input): array
     {
-        $query = Db::name('cashier_v3_customer_lifecycle_projection')
-            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->whereIn('store_id', $stores)
-            ->whereBetween('first_course_business_date', [$range['start'], $range['end']])
-            ->where('first_course_order_id', '<>', '');
+        $query = Db::name('cashier_v3_customer_lifecycle_fact')->alias('first_course')
+            ->where('first_course.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->whereIn('first_course.store_id', $stores);
+        $reportScope=(array)($input['_report_scope']??[]);
+        if (($reportScope['mode']??null)==='self_participant') {
+            $employeeId=(int)($reportScope['employee_id']??0);
+            if ($employeeId<1) throw new \InvalidArgumentException('当前账号没有可查看的数据范围');
+            (new StoreReportParticipantScopeServices())->applyOrder($query,'first_course.related_order_id',$employeeId);
+        }
+        (new StoreUnifiedReportOrganizationDimensionServices())->applyFilters($query,'first_course',$input,$range);
         $sourceFilter = (int)($input['source_id'] ?? 0);
-        if ($sourceFilter > 0) $query->where('first_course_source_primary_id', $sourceFilter);
-        $cohort = $query->field('member_id,store_id,first_course_source_primary_id,first_course_source_label_snapshot,first_course_source_attribution_type_snapshot,first_course_order_id')->select()->toArray();
+        (new FirstCourseMemberCohortServices())->apply($query,'first_course',$range,$sourceFilter);
+        $cohort = $query->field('first_course.member_id,first_course.store_id,first_course.source_primary_id,first_course.source_primary_name_snapshot,first_course.source_attribution_type_snapshot,first_course.related_order_id')->select()->toArray();
         $members = [];
         $groups = [];
         foreach ($cohort as $row) {
             $memberId = (int)($row['member_id'] ?? 0);
-            $sourceId = (int)($row['first_course_source_primary_id'] ?? 0);
+            $sourceId = (int)($row['source_primary_id'] ?? 0);
             if ($memberId <= 0 || $sourceId <= 0) continue;
             $members[$memberId] = $sourceId;
             if (!isset($groups[$sourceId])) $groups[$sourceId] = [
                 'source_id' => $sourceId,
-                'channel_name' => (string)($row['first_course_source_label_snapshot'] ?? '未分类来源'),
-                'source_type' => (string)($row['first_course_source_attribution_type_snapshot'] ?? '-'),
+                'channel_name' => (string)($row['source_primary_name_snapshot'] ?? '未分类来源'),
+                'source_type' => (string)($row['source_attribution_type_snapshot'] ?? '-'),
                 'members' => [], 'order_ids' => [], 'cash_cents' => 0,
             ];
             $groups[$sourceId]['members'][(string)$memberId] = true;
-            $orderId = trim((string)($row['first_course_order_id'] ?? ''));
+            $orderId = trim((string)($row['related_order_id'] ?? ''));
             if ($orderId !== '') $groups[$sourceId]['order_ids'][$orderId] = true;
         }
         if ($members !== []) {

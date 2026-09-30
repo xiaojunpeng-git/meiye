@@ -595,11 +595,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
      */
     private function firstCompletedCourseOrders(array $stores,array $range,array $input):array
     {
-        $query=$this->participantOrder($this->scope(Db::name('cashier_v3_customer_lifecycle_fact')->alias('first_course'),$stores,'first_course'),'first_course.related_order_id')
-            ->where('first_course.event_type','first_course_completed')->where('first_course.status','effective')
-            ->where('first_course.member_id','>',0)->whereBetween('first_course.business_date',[$range['start'],$range['end']]);
+        $query=$this->participantOrder($this->scope(Db::name('cashier_v3_customer_lifecycle_fact')->alias('first_course'),$stores,'first_course'),'first_course.related_order_id');
         $this->applyOrganizationFilters($query,'first_course',$input,$range);
-        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query,'first_course.tenant_id','first_course.related_order_id');
+        (new FirstCourseMemberCohortServices())->apply($query,'first_course',$range);
         $out=[];
         foreach($query->field('first_course.related_order_id,first_course.member_id,first_course.business_date,first_course.source_primary_id,first_course.source_label_snapshot')->select()->toArray() as $event){
             $order=(string)$event['related_order_id'];

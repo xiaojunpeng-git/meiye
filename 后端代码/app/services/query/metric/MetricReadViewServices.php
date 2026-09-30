@@ -68,7 +68,7 @@ final class MetricReadViewServices
                         // answers.  The reader supplies each registered metric and
                         // this layer only evaluates the already-normalized values.
                         if ($metric!==$normalized['metric_codes'][0]) continue;
-                        $results[]=$this->conditionResult($reader,$binding,$range,$conditionSet,$personnel,$normalized['query_shape']);
+                        $results[]=$this->conditionResult($reader,$binding,$range,$conditionSet,$personnel,$normalized['query_shape'],$normalized['business_filters']);
                         continue;
                     }
                     if ($breakdown!==null) {
@@ -463,16 +463,28 @@ final class MetricReadViewServices
     }
 
     /** @return array<string,mixed> */
-    private function conditionResult(GroupPerformanceMetricReadServices $reader,array $binding,array $range,array $conditionSet,?array $personnel,string $shape): array
+    private function conditionResult(GroupPerformanceMetricReadServices $reader,array $binding,array $range,array $conditionSet,?array $personnel,string $shape,array $filters): array
     {
         if (($conditionSet['subject']??null)==='member') {
             if ($personnel!==null) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-            $population=$reader->conditionMembers(
-                $binding['tenant_id'],$binding['store_ids'],$range,$conditionSet,
-                $shape==='condition_list'?100:0
-            );
+            $sourceFilter=FirstCourseSourceFilter::valid($filters,
+                array_column($conditionSet['conditions'],'metric_code'),$conditionSet);
+            if ($sourceFilter) {
+                // This cohort cannot be widened from a self-participant grant
+                // to all members of that person's stores.
+                if ($binding['scope_mode']==='self_participant') $this->fail('METRIC_PERMISSION_GRAIN_UNAVAILABLE');
+                $population=$reader->firstCourseSourceMembers($binding['tenant_id'],$binding['store_ids'],$range,
+                    $filters['source_primary_id'],$filters['source_secondary_id']??0,$shape==='condition_list'?100:0);
+            } else {
+                $population=$reader->conditionMembers(
+                    $binding['tenant_id'],$binding['store_ids'],$range,$conditionSet,
+                    $shape==='condition_list'?100:0
+                );
+            }
             $result=['period'=>'current','metric_code'=>$conditionSet['conditions'][0]['metric_code'],'storage_unit'=>'count','object_kind'=>'member',
                 'condition_set'=>$conditionSet,'count'=>$population['count']];
+            if ($sourceFilter) $result['source_label']=(new FirstCourseSourceCatalog())->label(
+                $filters['source_primary_id'],$filters['source_secondary_id']??0);
             if ($shape==='condition_list') {
                 $result['rows']=$population['rows'];
                 $result['list_limit']=$population['limit'];
@@ -674,6 +686,12 @@ final class MetricReadViewServices
         $person=$objectKind==='person';
         $conditionPopulation=in_array($query['query_shape'],['condition_count','condition_list'],true);
         $memberSelection=$objectKind==='member' && isset($query['business_filters']['selection_ref']);
+        $sourceFilter=$conditionPopulation && FirstCourseSourceFilter::valid(
+            (array)$query['business_filters'],(array)$query['metric_codes'],(array)($query['condition_set']??[])
+        );
+        // The signed Reader contract mirrors the compiler: this registered
+        // metric cannot silently fall back to a broader member population.
+        if (in_array('member_first_course_count',(array)$query['metric_codes'],true) && !$sourceFilter) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if ($query['business_filters']!==[] && (!$person && !is_string($objectKind))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $personBreakdown=$person && $query['query_shape']==='breakdown' && $query['business_filters']===['object_kind'=>'person'];
         if ($person && !$personBreakdown && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref']??null)
@@ -681,7 +699,7 @@ final class MetricReadViewServices
             || ($conditionPopulation && $query['business_filters']['selection_ref']!=='cohort:active_personnel'))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if ($memberSelection && (count($query['business_filters'])!==2 || !is_string($query['business_filters']['selection_ref'])
             || !preg_match('/^member:[1-9][0-9]*$/D',$query['business_filters']['selection_ref']))) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-        if (!$person && !$memberSelection && $query['business_filters']!==[] && $query['business_filters']!==['object_kind'=>$objectKind]) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if (!$person && !$memberSelection && !$sourceFilter && $query['business_filters']!==[] && $query['business_filters']!==['object_kind'=>$objectKind]) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if ($query['query_shape'] === 'ranking') {
             $rank = $query['ranking'];
             if (!is_array($rank) || count($rank) !== 2 || !in_array($rank['direction'] ?? null, ['top', 'bottom', 'top_and_bottom'], true)
@@ -703,7 +721,8 @@ final class MetricReadViewServices
             $expectedFilters=$conditionSubject==='person'
                 ? ['object_kind'=>'person','selection_ref'=>'cohort:active_personnel']
                 : ['object_kind'=>$conditionSubject];
-            if (!is_string($conditionSubject)||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$conditionSubject)||$query['business_filters']!==$expectedFilters
+            if (!is_string($conditionSubject)||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$conditionSubject)
+                ||(!$sourceFilter && $query['business_filters']!==$expectedFilters)
                 ||$keys!==['conditions','relation','subject']||$conditionSubject!==$objectKind
                 ||!in_array($set['relation']??null,['all','any'],true)||!is_array($set['conditions']??null)
                 ||count($set['conditions'])<1||count($set['conditions'])>4||array_keys($set['conditions'])!==range(0,count($set['conditions'])-1)) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
