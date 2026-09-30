@@ -192,6 +192,25 @@ $setUnderstanding['requirements'][]=['id'=>'r2','meaning'=>'repeated prior ranki
 $storeSetCompiled=$compile->invoke($gateway,$setUnderstanding,['query'=>$storeQuery,'view'=>$storeSet],'screen');
 $check(($storeSetCompiled['kind']??null)==='verified_ranking_detail',
     'plural store details replay the signed set even when the model repeats its old rank');
+foreach (['summary','breakdown'] as $presentationOperation) {
+    $setWithPresentationOperation=$setUnderstanding;
+    $setWithPresentationOperation['requirements'][1]['values']['operation']=$presentationOperation;
+    $compiledSet=$compile->invoke($gateway,$setWithPresentationOperation,
+        ['query'=>$storeQuery,'view'=>$storeSet],'screen');
+    $check(($compiledSet['kind']??null)==='verified_ranking_detail',
+        'a model presentation operation cannot replace the signed store set: '.$presentationOperation);
+}
+$setWithScopeEcho=$setUnderstanding;
+$setWithScopeEcho['requirements'][1]['fields'][]='scope';
+$setWithScopeEcho['requirements'][1]['values']['scope']='authorized';
+$check(($compile->invoke($gateway,$setWithScopeEcho,['query'=>$storeQuery,'view'=>$storeSet],'screen')['kind']??null)
+        ==='verified_ranking_detail',
+    'an authorised scope echo cannot force a second binding of an already signed all-store set');
+$restrictedStoreQuery=$storeQuery;$restrictedStoreQuery['store_ids']=[3];
+$restrictedStoreSet=$storeSet;$restrictedStoreSet['query']=$restrictedStoreQuery;
+$check($compile->invoke($gateway,$setWithScopeEcho,
+        ['query'=>$restrictedStoreQuery,'view'=>$restrictedStoreSet],'screen')===null,
+    'an authorised scope claim cannot silently widen a selected-store ranking');
 $recompiled=$compile->invoke($gateway,$understanding,['query'=>$storeDetailQuery,'view'=>$detailView],'screen');
 $check($recompiled['plan']['query']===$storeDetailQuery,'repeated store continuation preserves metrics dates and scope');
 $invalidSummary=$summaryView;$invalidSummary['query']['business_filters']['selection_ref']='cohort:metric_fact_participants';

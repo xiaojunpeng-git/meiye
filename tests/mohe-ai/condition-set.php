@@ -555,6 +555,25 @@ csCheck(count($arrivalPeriods)===1
     &&($arrivalMeaning['requirements'][0]['values']['aggregate_condition']['conditions'][1]['quantity']??null)==='10000'
     &&!isset($arrivalMeaning['groups']),
     'R55 a complete arrival period omitted by the provider is recovered without changing either business predicate');
+$duplicatedPeriodCarrier=$arrivalMeaning;
+$duplicatedPeriodCarrier['requirements'][0]['fields'][]='periods';
+$duplicatedPeriodCarrier=AiIntentUnderstandingContract::normalize($duplicatedPeriodCarrier,$arrivalSafe);
+csCheck(($duplicatedPeriodCarrier['requirements'][0]['values']['periods'][0]??null)===[
+        'kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-30']
+    &&($duplicatedPeriodCarrier['requirements'][1]['values']['periods'][0]??null)===[
+        'kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-30'],
+    'one stated period repairs a missing duplicate carrier without issuing a second model request');
+$ambiguousPeriodCarrier=$arrivalMeaning;
+$ambiguousPeriodCarrier['requirements'][0]['fields'][]='periods';
+$ambiguousPeriodCarrier['requirements'][0]['values']['periods']=[];
+$ambiguousSafe=$arrivalSafe;
+$ambiguousSafe['question']='2026年3月和9月到店至少2次，而且实际收款销售额达到1万元的会员有哪些';
+$ambiguousSafe['evidence_messages'][0]['text']=$ambiguousSafe['question'];
+$ambiguousPeriodCarrier['requirements'][0]['evidence'][0]['quote']=$ambiguousSafe['question'];
+$ambiguousPeriodCarrier['requirements'][1]['evidence'][0]['quote']=$ambiguousSafe['question'];
+$ambiguousPeriodCarrier=AiIntentUnderstandingContract::normalize($ambiguousPeriodCarrier,$ambiguousSafe);
+csCheck(($ambiguousPeriodCarrier['requirements'][0]['values']['periods']??null)===[],
+    'multiple stated dates cannot be collapsed into one repaired period');
 $arrivalIntent=$registeredCondition->invoke($gateway,$arrivalMeaning,[
     ['metric_code'=>'member_service_visit_count','object_contracts'=>[]],
     ['metric_code'=>'sales_collected_amount','object_contracts'=>[]],

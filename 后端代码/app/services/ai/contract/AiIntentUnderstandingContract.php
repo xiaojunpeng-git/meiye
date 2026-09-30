@@ -328,22 +328,31 @@ final class AiIntentUnderstandingContract
         // parser independently proves one explicit current range. This saves
         // a second model call for JSON-shape errors without choosing a metric,
         // changing a threshold, or guessing either side of a comparison.
-        if (!isset($value['groups']) && is_array($requirements)) {
+        if (is_array($requirements)) {
             $periodIndexes=[];
             foreach ($requirements as $index=>$requirement) {
                 if (is_array($requirement) && in_array('periods',(array)($requirement['fields']??[]),true)) $periodIndexes[]=$index;
             }
-            if (count($periodIndexes)===1) {
-                $index=$periodIndexes[0];
-                if (!self::periods($requirements[$index]['values']['periods']??null)
-                    && is_string($safeQuestion['reference_date']??null)
-                    && array_filter((array)($requirements[$index]['evidence']??[]),static function($e): bool {
+            // One customer-stated period can be shared by several condition
+            // requirements or independent result groups. Repair only missing
+            // typed carriers with current-message evidence; do not infer a
+            // second date or replace an already valid model period.
+            if ($periodIndexes!==[] && count($periodIndexes)<=12 && is_string($safeQuestion['reference_date']??null)) {
+                $missing=[];
+                foreach ($periodIndexes as $index) {
+                    if (self::periods($requirements[$index]['values']['periods']??null)) continue;
+                    if (!array_filter((array)($requirements[$index]['evidence']??[]),static function($e): bool {
                         return is_array($e)&&($e['message_id']??null)==='current';
-                    })) {
+                    })) continue;
+                    $missing[]=$index;
+                }
+                if ($missing!==[]) {
                     $projection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse((string)($safeQuestion['question']??''));
                     if (($projection['date_grouping_ambiguous']??true)===false && count((array)($projection['date_terms']??[]))===1) {
                         $range=(new \app\services\ai\execution\AiWorkflowPlanner())->normalizePeriod($projection['date_terms'][0],$safeQuestion['reference_date']);
-                        $requirements[$index]['values']['periods']=[['kind'=>'date_range','start'=>$range['start'],'end'=>$range['end']]];
+                        foreach ($missing as $index) {
+                            $requirements[$index]['values']['periods']=[['kind'=>'date_range','start'=>$range['start'],'end'=>$range['end']]];
+                        }
                     }
                 }
             }
@@ -358,7 +367,7 @@ final class AiIntentUnderstandingContract
                     $hasBusinessCarrier=true;break;
                 }
             }
-            if ($periodIndexes===[] && $hasBusinessCarrier && $value['status']==='understood'
+            if (!isset($value['groups']) && $periodIndexes===[] && $hasBusinessCarrier && $value['status']==='understood'
                 &&count($requirements)<12 && is_string($safeQuestion['reference_date']??null)) {
                 $projection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse((string)($safeQuestion['question']??''));
                 if (($projection['date_grouping_ambiguous']??true)===false

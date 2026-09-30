@@ -5262,13 +5262,29 @@ final class AiGatewayServices
             // new rank or any metric/period/filter still enters normal binding.
             if (is_array($sourceContext['query']??null)
                 &&($sourceContext['query']['query_shape']??null)==='ranking') {
+                // A model may describe expanding the signed ranked set as a
+                // summary or breakdown. Those are presentation words here,
+                // not permission to recompute a different population. A new
+                // metric, period, filter or changed rank still fails below.
                 if (in_array('operation',$fields,true)
-                    &&($requirement['values']['operation']??null)==='ranking') {
+                    && (($requirement['values']['operation']??null)==='ranking'
+                        || (($detail['target']??null)==='set'
+                            && in_array($requirement['values']['operation']??null,['summary','breakdown'],true)))) {
                     $fields=array_values(array_diff($fields,['operation']));
                 }
                 if (in_array('ranking',$fields,true)
                     &&($requirement['values']['ranking']??null)===($sourceContext['query']['ranking']??null)) {
                     $fields=array_values(array_diff($fields,['ranking']));
+                }
+                // "Authorized" is only a redundant echo when the signed
+                // predecessor already used the complete authorised store
+                // range. A selected store must never be widened by this
+                // presentation shortcut.
+                if (in_array('scope',$fields,true)
+                    &&($requirement['values']['scope']??null)==='authorized'
+                    &&($sourceContext['query']['store_ids']??null)===[]
+                    &&!isset($sourceContext['query']['business_filters']['selection_ref'])) {
+                    $fields=array_values(array_diff($fields,['scope']));
                 }
             }
             // A pure continuation may restate only its referenced object. Any
