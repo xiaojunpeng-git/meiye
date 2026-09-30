@@ -9,6 +9,10 @@ use app\services\query\UnifiedQueryJson;
  */
 final class MetricReadViewStore
 {
+    // A bounded full-detail view must fit before publication; a 1 MiB page
+    // limit could otherwise turn the downloadable file into a silent prefix.
+    private const MAX_VIEW_BYTES = 4 * 1024 * 1024;
+    private const MAX_ENVELOPE_BYTES = 8 * 1024 * 1024;
     private $root;
     private $key;
     private $clock;
@@ -31,7 +35,11 @@ final class MetricReadViewStore
         $ref = 'mrv_' . bin2hex(random_bytes(24));
         $view['read_consistency_ref'] = $ref;
         $body = UnifiedQueryJson::encode($view);
-        if (strlen($body) > 1024 * 1024) $this->fail();
+        // Refuse an oversized complete snapshot as a scope limit, rather than
+        // presenting it as an expired view or publishing only a screenful.
+        if (strlen($body) > self::MAX_VIEW_BYTES) {
+            throw new MetricQueryContractException('METRIC_GROUP_OUTPUT_TOO_LARGE', '完整查询明细超过当前安全范围，请缩小查询条件。');
+        }
         $encoded = UnifiedQueryJson::encode(['body' => $body, 'signature' => hash_hmac('sha256', $body, $this->key)]);
         $path = $this->path($ref);
         $file = fopen($path, 'xb');
@@ -51,14 +59,14 @@ final class MetricReadViewStore
     public function get(string $ref): array
     {
         $path = $this->path($ref);
-        if (is_link($path) || !is_file($path) || filesize($path) > 2 * 1024 * 1024) $this->fail();
+        if (is_link($path) || !is_file($path) || filesize($path) > self::MAX_ENVELOPE_BYTES) $this->fail();
         $file = fopen($path, 'rb');
         if ($file === false) $this->fail();
         try {
             if (!flock($file, LOCK_SH)) $this->fail();
-            $bytes = stream_get_contents($file, 2 * 1024 * 1024 + 1);
+            $bytes = stream_get_contents($file, self::MAX_ENVELOPE_BYTES + 1);
         } finally { fclose($file); }
-        if (!is_string($bytes) || strlen($bytes) > 2 * 1024 * 1024) $this->fail();
+        if (!is_string($bytes) || strlen($bytes) > self::MAX_ENVELOPE_BYTES) $this->fail();
         try { $envelope = UnifiedQueryJson::decode($bytes); } catch (\Throwable $e) { $this->fail(); }
         if (!is_string($envelope['body'] ?? null) || !is_string($envelope['signature'] ?? null)
             || !hash_equals(hash_hmac('sha256', $envelope['body'], $this->key), $envelope['signature'])) $this->fail();

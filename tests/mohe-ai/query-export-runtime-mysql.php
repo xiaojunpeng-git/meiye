@@ -77,6 +77,27 @@ function app() { return new class { public function getRuntimePath(){return $GLO
         mysqlCheck($fileStatus['status']==='succeeded','independent file completes');
         $separateDownload=$export->download($context,$owner,$published);
         mysqlCheck(!empty($separateDownload['storageKey']) && $runs->get($owner,$separate['run_id'],$separate['generation'])['answer_ref']===$separateAnswer,'download preserves original answer');
+        // R57: a multi-table answer exports all immutable source sections
+        // through one independent task, not merely the first read view.
+        $collectionRun=$runs->create($owner,'collection-request',hash('sha256','collection'),$snapshot)['run'];
+        $collectionToken=bin2hex(random_bytes(24));$runs->claim($owner,$collectionRun['run_id'],$collectionRun['generation'],$collectionToken);
+        $collectionRun=$runs->get($owner,$collectionRun['run_id'],$collectionRun['generation']);
+        $collectionExpiry=intdiv($collectionRun['expires_at'],1000);
+        $firstView=$service->create([],$query,$collectionExpiry);
+        $secondView=$service->create([],$query,$collectionExpiry);
+        $collectionBase=['owner'=>$owner,'run_id'=>$collectionRun['run_id'],'generation'=>$collectionRun['generation']];
+        $collectionEvidence=$private->put('evidence',$collectionBase+['items'=>[
+            ['id'=>'q1','label'=>'第一组','query'=>$query,'view_ref'=>$firstView['read_consistency_ref']],
+            ['id'=>'q2','label'=>'第二组','query'=>$query,'view_ref'=>$secondView['read_consistency_ref']],
+        ]],$collectionExpiry);
+        $collectionAnswer=$private->put('answer',$collectionBase+['answer'=>['summary'=>'fixture','cards'=>[],'auto_export_required'=>true]],$collectionExpiry);
+        $collectionRun=$runs->publish($owner,$collectionRun['run_id'],$collectionRun['generation'],$collectionToken,$collectionEvidence,$collectionAnswer);
+        $collectionReceipt=$export->queueCompleted($context,$owner,$collectionRun);
+        mysqlCheck($collectionReceipt['status']==='pending','collection file queues after answer');
+        $collectionTask=end($dispatched);$execute->invoke($export,$collectionTask);
+        mysqlCheck($export->statusCompleted($context,$owner,$collectionRun)['status']==='succeeded'
+            &&!empty($export->download($context,$owner,$collectionRun)['storageKey']),
+            'collection file verifies every frozen section and downloads');
         $fileFailure=$runs->create($owner,'independent-capacity',hash('sha256','independent-capacity'),$snapshot)['run'];
         $failureToken=bin2hex(random_bytes(24)); $runs->claim($owner,$fileFailure['run_id'],$fileFailure['generation'],$failureToken);
         $fileFailure=$runs->get($owner,$fileFailure['run_id'],$fileFailure['generation']);

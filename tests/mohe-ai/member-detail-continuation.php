@@ -83,6 +83,29 @@ $check(count($batch['sections'])===2&&count($batch['sections'][1]['answer']['tab
 $check($batch['sections'][0]['answer']['table']['rows'][0]['store']==='测试门店'
     &&strpos($batch['summary'],'权益读取时间')!==false,
     'set detail exposes real belonging store and separates current rights time from the filter period');
+// R57 regression: a filter-and-detail answer can contain two 68-member
+// tables. Each screen table is capped independently while the rights export
+// keeps every verified member; the older on-screen answer had all 68 rows.
+$largeMembers=[];
+for($i=1;$i<=68;++$i){
+    $item=$detail;$item['member']['memberId']=$i;$item['member']['name']='测试会员'.$i;
+    $largeMembers[]=['detail'=>$item,'label'=>'测试会员'.$i,'selection_ref'=>'member:'.$i];
+}
+$largeAnswer=(new AiMemberDetailAnswerRenderer())->renderSet($largeMembers,'summary');
+$population=['summary'=>'筛选结果共68人。','cards'=>[],
+    'table'=>['columns'=>[['key'=>'member','label'=>'会员']],
+        'rows'=>array_map(static function(array $item):array{return ['member'=>$item['label']];},$largeMembers)]];
+$combinedAnswer=app\services\ai\presentation\AiAnswerRenderer::limitTables(['summary'=>$population['summary'].' '.$largeAnswer['summary'],
+    'cards'=>[],'sections'=>[['title'=>'会员筛选依据','answer'=>$population],['title'=>'会员权益汇总','answer'=>$largeAnswer]]]);
+$largeExport=app\services\ai\presentation\AiMemberRightsExportProjection::capture($largeMembers,'summary');
+$check(count($combinedAnswer['sections'][0]['answer']['table']['rows'])===20
+    &&count($combinedAnswer['sections'][1]['answer']['table']['rows'])===20
+    &&($combinedAnswer['sections'][0]['answer']['table']['total_rows']??null)===68
+    &&($combinedAnswer['sections'][1]['answer']['table']['total_rows']??null)===68
+    &&($combinedAnswer['auto_export_required']??null)===true
+    &&count($largeExport['member_refs'])===68
+    &&count($largeExport['rows'])===68*6,
+    'R57 68-member filter/details cap both screen tables and retain all export members');
 $projection=app\services\ai\presentation\AiMemberRightsExportProjection::class;
 $members=[['detail'=>$detail,'label'=>'测试会员','selection_ref'=>'member:101']];
 $assets=$projection::capture($members,'rights');

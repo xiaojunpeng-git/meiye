@@ -29,8 +29,18 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
         if (!is_array($refs) || count($refs)!==1 || !is_string($refs[0]??null) || !preg_match('/^mrv_[a-f0-9]{48}$/D',$refs[0])) throw new \RuntimeException('METRIC_EXPORT_READ_REF_INVALID');
         $resolved=call_user_func($this->resolve,$context,$refs[0]);
         if (!is_array($resolved) || !is_array($resolved['principal']??null) || !is_array($resolved['query']??null)) throw new \RuntimeException('METRIC_EXPORT_CONTEXT_INVALID');
-        $view=$this->views->replay($resolved['principal'],$resolved['query'],$refs[0]);
-        $view=self::withMemberRights($view,$resolved['member_rights_export']??null);
+        if (isset($resolved['collection_sources'])) {
+            $sources=$resolved['collection_sources'];$views=[];
+            if (!is_array($sources)||$sources===[]||($sources[0]['view_ref']??null)!==$refs[0]) throw new \RuntimeException('METRIC_EXPORT_SOURCE_NOT_READY');
+            foreach ($sources as $source) {
+                if (!is_array($source)||!is_array($source['query']??null)||!is_string($source['view_ref']??null)) throw new \RuntimeException('METRIC_EXPORT_SOURCE_NOT_READY');
+                $views[]=$this->views->replay($resolved['principal'],$source['query'],$source['view_ref']);
+            }
+            $view=self::withCollection($views,$sources);
+        } else {
+            $view=$this->views->replay($resolved['principal'],$resolved['query'],$refs[0]);
+            $view=self::withMemberRights($view,$resolved['member_rights_export']??null);
+        }
         if (($view['ai_query_ready']??false)!==true || ($view['result_status']??null)!=='complete') throw new \RuntimeException('METRIC_EXPORT_SOURCE_NOT_READY');
         $rows=self::project($view);
         UnifiedQueryExportTaskServices::assertCellBudget(count($fieldKeys),count($rows),false);
@@ -38,6 +48,19 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
     }
     public static function project(array $view): array
     {
+        if (isset($view['collection_exports'])) {
+            $rows=[];
+            foreach ($view['collection_exports'] as $source) {
+                foreach (self::project($source['view']) as $row) {
+                    // One workbook combines all requested sections while
+                    // retaining each section's frozen source and order.
+                    $row['row_id']=(string)(count($rows)+1);
+                    $row['metric_name']=$source['label'].'：'.$row['metric_name'];
+                    $rows[]=$row;
+                }
+            }
+            return $rows;
+        }
         if (isset($view['member_rights_export'])) {
             return \app\services\ai\presentation\AiMemberRightsExportProjection::validate($view['member_rights_export'])['rows'];
         }
@@ -129,6 +152,24 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
         $view['member_rights_export']=$snapshot;
         $view['result_hash']=hash('sha256',$view['result_hash'].':'.$snapshot['hash']);
         return $view;
+    }
+    /** Combine already-signed views; a collection export never re-runs facts. */
+    public static function withCollection(array $views,array $sources): array
+    {
+        if ($views===[]||count($views)!==count($sources)||count($views)>4) throw new \RuntimeException('METRIC_EXPORT_SOURCE_NOT_READY');
+        $first=$views[0];$parts=[];$expires=$first['expires_at'];$out=[];
+        foreach ($views as $index=>$view) {
+            $source=$sources[$index];$label=$source['label']??null;
+            if (!is_string($label)||trim($label)===''||($source['view_ref']??null)!==($view['read_consistency_ref']??null)
+                ||($view['result_status']??null)!=='complete') throw new \RuntimeException('METRIC_EXPORT_SOURCE_NOT_READY');
+            $parts[]=['id'=>$source['id']??null,'label'=>$label,'read_consistency_ref'=>$view['read_consistency_ref'],'result_hash'=>$view['result_hash']];
+            $expires=min($expires,$view['expires_at']);
+            $out[]=['label'=>$label,'view'=>$view];
+        }
+        $first['collection_exports']=$out;
+        $first['expires_at']=$expires;
+        $first['result_hash']=hash('sha256',\app\services\query\UnifiedQueryJson::encode($parts));
+        return $first;
     }
     private static function appendConditionResult(array &$rows,array $view,array $result,array $capabilities): void
     {

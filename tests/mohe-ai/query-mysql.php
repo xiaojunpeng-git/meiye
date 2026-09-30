@@ -437,6 +437,17 @@ try {
     $actualView=$service->create([],$actualQuery);
     mysqlCheck($actualView['results'][0]['amount_cents']
         === $registered->summary('actual_performance','0',[1],$range), 'AI view consumes registered actual performance');
+    // R57: the signed cohort reader must retain row 101 for the automatic
+    // workbook; the former page size of 100 must not become a silent prefix.
+    $insertCourse=$pdo->prepare("INSERT INTO eb_cashier_v3_customer_lifecycle_fact (tenant_id,store_id,member_id,event_type,status,business_date,related_order_id,source_primary_id,source_secondary_id) VALUES ('0',1,?,'first_course_completed','effective','2026-09-08',?,901,0)");
+    for ($memberId=2001;$memberId<=2101;++$memberId) $insertCourse->execute([$memberId,'r57-'.$memberId]);
+    $fullCohort=$registered->firstCourseSourceMembers('0',[1],$range,901,0,app\services\query\metric\RegisteredMetricReadServices::AI_DETAIL_LIMIT);
+    mysqlCheck($fullCohort['count']===101 && count($fullCohort['rows'])===101
+        &&$fullCohort['has_more']===false &&$fullCohort['rows'][100]['member_id']===2101,
+        'R57 real MySQL member cohort keeps the 101st export detail');
+    for ($memberId=2102;$memberId<=3001;++$memberId) $insertCourse->execute([$memberId,'r57-'.$memberId]);
+    mysqlReject(function()use($registered,$range){$registered->firstCourseSourceMembers('0',[1],$range,901,0,
+        app\services\query\metric\RegisteredMetricReadServices::AI_DETAIL_LIMIT);},'METRIC_GROUP_OUTPUT_TOO_LARGE');
     $now+=86400; mysqlCheck($store->cleanup()===9,'real views TTL cleanup includes breakdown, member and project views');
 } finally {
     foreach(new DirectoryIterator($tmp) as $file) if(!$file->isDot() && $file->isFile() && !$file->isLink()) unlink($file->getPathname());

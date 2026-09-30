@@ -9,7 +9,7 @@ use RuntimeException;
 /** Converts verified Reader evidence into the stable customer answer shape. */
 final class AiAnswerRenderer
 {
-    private const BREAKDOWN_SCREEN_LIMIT = 20;
+    private const TABLE_SCREEN_LIMIT = 20;
 
     public function render(array $view): array
     {
@@ -170,7 +170,7 @@ final class AiAnswerRenderer
             // broad all-store breakdowns still omit irrelevant zero rows.
             $selectedStores=(array)($view['query']['store_ids']??[]);
             $preserveSelectedZeros=($view['query']['business_filters']['object_kind']??null)==='store'
-                && $selectedStores!==[] && count($selectedStores)<=self::BREAKDOWN_SCREEN_LIMIT;
+                && $selectedStores!==[] && count($selectedStores)<=self::TABLE_SCREEN_LIMIT;
             $presentation=$this->pivotBreakdownRows($rows,$breakdownColumns,$preserveSelectedZeros);
             $rows=$presentation['rows'];$breakdownHiddenZeroCount=$presentation['hidden_zero_count'];
             $exactActive=count($breakdownEvidence)===1?($breakdownEvidence[array_key_first($breakdownEvidence)]['active_count']??null):null;
@@ -178,8 +178,9 @@ final class AiAnswerRenderer
             if (!$preserveSelectedZeros && is_int($exactObjects)&&is_int($exactActive)&&$exactObjects>=$exactActive) {
                 $breakdownHiddenZeroCount=$exactObjects-$exactActive;
             }
-            $sourceHasUsefulMore=$breakdownHasMore && (!is_int($exactActive)||$exactActive>$presentation['loaded_active_count']);
-            $breakdownHasMore=$sourceHasUsefulMore||$presentation['has_more'];
+            // Even unseen zero rows matter to a complete export. Keep the
+            // source has_more flag for legacy views instead of treating the
+            // loaded active rows as proof that the full set was retained.
         }
         $objectKind = $view['query']['business_filters']['object_kind'] ?? 'store';
         $person = $objectKind === 'person';
@@ -219,7 +220,7 @@ final class AiAnswerRenderer
         }
         if ($conditionListHasMore) $notes[]='符合条件的结果较多，当前展示前'.$conditionListLimit.'条；总数以结论中的精确数量为准。';
         if ($breakdownHiddenZeroCount>0) $notes[]='已隐藏'.$breakdownHiddenZeroCount.$this->objectCounter($breakdownObjectLabel??'对象').'0值'.($breakdownObjectLabel??'对象').'。';
-        if ($breakdownHasMore) $notes[]='有数据结果较多，当前显示前'.self::BREAKDOWN_SCREEN_LIMIT.'条；可继续缩小范围。';
+        if ($breakdownHasMore) $notes[]='原查询结果只保留了部分明细，请重新提问以获取完整明细。';
         if ($dimensionLabel !== null && $shape==='ranking') {
             if ($rows) $notes[] = $dimensionLabel . '按所选指标排名；相同数值并列。';
         }
@@ -247,6 +248,38 @@ final class AiAnswerRenderer
         // New clients receive this small evidence-only view and choose the
         // hierarchy in their own layout; no client derives business values.
         $answer['presentation'] = $this->presentation($shape, $facts, $conclusion, $periodLabel, $notes, $objectKind);
+        // Screen paging is a presentation concern. The signed Reader view
+        // retains every row for the independent file worker and follow-ups.
+        return self::limitTables($answer,!$conditionListHasMore&&!$breakdownHasMore);
+    }
+
+    /** Cap each final business table, never its backing evidence or export. */
+    public static function limitTables(array $answer,bool $sourceComplete=true): array
+    {
+        $needsFile=false;
+        if (isset($answer['table']['rows']) && is_array($answer['table']['rows'])) {
+            $total=count($answer['table']['rows']);
+            if ($total>self::TABLE_SCREEN_LIMIT) {
+                $answer['table']['rows']=array_slice($answer['table']['rows'],0,self::TABLE_SCREEN_LIMIT);
+                $answer['table']['total_rows']=$total;
+                $needsFile=$sourceComplete;
+            }
+        }
+        foreach ($answer['sections']??[] as $index=>$section) {
+            if (!is_array($section)||!is_array($section['answer']??null)) continue;
+            $answer['sections'][$index]['answer']=self::limitTables($section['answer'],$sourceComplete);
+            $needsFile=$needsFile||!empty($answer['sections'][$index]['answer']['auto_export_required']);
+        }
+        if ($needsFile) {
+            $answer['auto_export_required']=true;
+            $note='页面仅展示前20条；完整明细另行生成 Excel。';
+            // Collection summaries already contain their child summaries;
+            // repeating the file notice adds noise without new information.
+            if (strpos((string)$answer['summary'],$note)===false) $answer['summary'].=' '.$note;
+            if (isset($answer['presentation']['notes'])&&is_array($answer['presentation']['notes'])) {
+                $answer['presentation']['notes'][]=$note;
+            }
+        }
         return $answer;
     }
 
@@ -286,15 +319,12 @@ final class AiAnswerRenderer
             if ($row['raw_value']!==0) $grouped[$key]['_has_non_zero']=true;
         }
         $projected=array_map(static function(string $key)use($grouped):array {return $grouped[$key];},$order);
-        $active=[];$hidden=0;$loadedActive=0;
+        $active=[];$hidden=0;
         foreach ($projected as $row) {
-            if ($row['_has_non_zero']) ++$loadedActive;
-            elseif (!$preserveSelectedZeros) {++$hidden;continue;}
+            if (!$row['_has_non_zero']&&!$preserveSelectedZeros) {++$hidden;continue;}
             unset($row['_has_non_zero']);$active[]=$row;
         }
-        $hasMore=count($active)>self::BREAKDOWN_SCREEN_LIMIT;
-        if ($hasMore) $active=array_slice($active,0,self::BREAKDOWN_SCREEN_LIMIT);
-        return ['rows'=>$active,'hidden_zero_count'=>$hidden,'loaded_active_count'=>$loadedActive,'has_more'=>$hasMore];
+        return ['rows'=>$active,'hidden_zero_count'=>$hidden];
     }
 
     /** Build one concise, object-neutral conclusion from Reader-owned totals. */

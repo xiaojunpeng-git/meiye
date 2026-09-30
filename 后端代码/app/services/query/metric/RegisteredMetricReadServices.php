@@ -11,6 +11,9 @@ use think\facade\Db;
 /** Executes only server-registered metric contracts. No metric-code branch is allowed here. */
 final class RegisteredMetricReadServices
 {
+    // AI full-detail snapshots are bounded before publication. The separate
+    // screen limit is 20; exceeding this ceiling must fail, not export a page.
+    public const AI_DETAIL_LIMIT = 1000;
     private $queryFactory;
     private $normalFacts;
     private $normalServices;
@@ -111,7 +114,7 @@ final class RegisteredMetricReadServices
         // A count answer must not pay for a hidden 100-row member page and a
         // second value lookup. limit=0 is the server-owned count-only mode;
         // callers still cannot request an unbounded page.
-        if ($limit < 0 || $limit > 100 || ($conditionSet['subject'] ?? null) !== 'member'
+        if ($limit < 0 || $limit > self::AI_DETAIL_LIMIT || ($conditionSet['subject'] ?? null) !== 'member'
             || !in_array($conditionSet['relation'] ?? null, ['all', 'any'], true)
             || !is_array($conditionSet['conditions'] ?? null) || count($conditionSet['conditions']) < 1
             || count($conditionSet['conditions']) > 4) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
@@ -176,6 +179,7 @@ final class RegisteredMetricReadServices
                 ->order('member_id','asc')->limit($limit)->select()->toArray();
             $found=Db::query('SELECT FOUND_ROWS() qualified_count');
             $count=$this->integer($found[0]['qualified_count']??null);
+            if ($limit===self::AI_DETAIL_LIMIT && $count>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
             foreach ($idRows as $row) {
                 $memberId=$this->integer($row['member_id']??null);
                 $serialized=(string)($row['metric_values']??'');
@@ -193,6 +197,7 @@ final class RegisteredMetricReadServices
         } else {
             $countSql = (clone $matches)->buildSql();
             $count = (int)Db::table([$countSql => 'qualified_members'])->count();
+            if ($limit===self::AI_DETAIL_LIMIT && $count>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
             $idRows = (clone $matches)->order('member_id', 'asc')->limit($limit)->select()->toArray();
         }
         $memberIds = [];
@@ -239,7 +244,7 @@ final class RegisteredMetricReadServices
     public function firstCourseSourceMembers(string $tenantId,array $stores,array $range,int $primaryId,int $secondaryId,int $limit): array
     {
         $this->assertScope($tenantId,$stores,$range);
-        if ($primaryId<1 || $secondaryId<0 || $limit<0 || $limit>100) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if ($primaryId<1 || $secondaryId<0 || $limit<0 || $limit>self::AI_DETAIL_LIMIT) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $query=call_user_func($this->queryFactory,'cashier_v3_customer_lifecycle_fact')->alias('first_course')
             ->where('first_course.tenant_id',$tenantId)->whereIn('first_course.store_id',$stores);
         (new \app\services\report\FirstCourseMemberCohortServices())->apply(
@@ -248,6 +253,7 @@ final class RegisteredMetricReadServices
         $members=(clone $query)->field('first_course.member_id')->group('first_course.member_id');
         $count=(int)Db::table([$members->buildSql()=>'first_course_members'])->count();
         if ($limit===0 || $count===0) return ['count'=>$count,'rows'=>[],'limit'=>$limit,'has_more'=>$count>0];
+        if ($limit===self::AI_DETAIL_LIMIT && $count>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
         $ids=array_map('intval',(clone $members)->order('first_course.member_id','asc')->limit($limit)->column('first_course.member_id'));
         $names=[];
         foreach(call_user_func($this->queryFactory,'user')->whereIn('uid',$ids)
@@ -274,7 +280,7 @@ final class RegisteredMetricReadServices
     {
         $this->assertScope($tenantId,$stores,$range);
         $subject=$conditionSet['subject']??null;
-        if ($limit<1||$limit>100||!is_string($subject)||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$subject)
+        if ($limit<1||$limit>self::AI_DETAIL_LIMIT||!is_string($subject)||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$subject)
             ||!in_array($conditionSet['relation']??null,['all','any'],true)
             ||!is_array($conditionSet['conditions']??null)||count($conditionSet['conditions'])<1
             ||count($conditionSet['conditions'])>4) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
@@ -308,6 +314,7 @@ final class RegisteredMetricReadServices
         $matches=Db::table([$union->buildSql()=>'condition_matches'])->fieldRaw('entity_id')
             ->group('entity_id')->having('COUNT(*) >= '.$required);
         $count=(int)Db::table([(clone $matches)->buildSql()=>'qualified_entities'])->count();
+        if ($limit===self::AI_DETAIL_LIMIT && $count>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
         $idRows=(clone $matches)->order('entity_id','asc')->limit($limit)->select()->toArray();
         $entityIds=[];
         foreach ($idRows as $row) {
@@ -656,7 +663,7 @@ final class RegisteredMetricReadServices
         $this->assertScope($tenantId, $stores, $range);
         $contract = MetricDefinitionRegistry::get($metricCode);
         $dimensionContract = $contract['dimensions'][$dimension] ?? ($contract['source']['dimensions'][$dimension] ?? null);
-        if (!is_array($dimensionContract) || $limit < 1 || $limit > 100 || !in_array($order, ['asc', 'desc'], true)) {
+        if (!is_array($dimensionContract) || $limit < 1 || $limit > self::AI_DETAIL_LIMIT + 1 || !in_array($order, ['asc', 'desc'], true)) {
             $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         }
         $handlers = [
@@ -696,9 +703,10 @@ final class RegisteredMetricReadServices
      */
     public function dimensionBreakdown(string $metricCode,string $dimension,string $tenantId,array $stores,array $range,int $limit=99): array
     {
-        if ($limit<1||$limit>99) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if ($limit<1||$limit>self::AI_DETAIL_LIMIT) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $points=$this->dimensionRanking($metricCode,$dimension,$tenantId,$stores,$range,$limit+1,'desc');
         $hasMore=count($points)>$limit;
+        if ($limit===self::AI_DETAIL_LIMIT && $hasMore) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
         if ($hasMore) $points=array_slice($points,0,$limit);
         $rows=array_map(static function(array $point): array {
             return ['entity_id'=>$point['entity_id'],'entity_name'=>$point['entity_name'],'amount_cents'=>$point['metric_value']];

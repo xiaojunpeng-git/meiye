@@ -67,6 +67,9 @@ final class AiExportRuntime
         $providers->register(new M\MetricReadViewExportProvider($this->readViews,function(array $context,string $ref):array {
             if (!$this->binding || $ref!==$this->binding['read_consistency_ref']) throw new \RuntimeException('AI_EXPORT_SOURCE_MISMATCH');
             $evidence=$this->evidence($this->binding);
+            if (isset($evidence['items'])) {
+                return ['principal'=>[],'query'=>$evidence['items'][0]['query'],'collection_sources'=>$evidence['items']];
+            }
             return ['principal'=>[],'query'=>$evidence['query'],'member_rights_export'=>$evidence['member_rights_export']??null];
         })); $providers->freeze();
         $resolvers=new Q\UnifiedQueryWorkerContextResolverRegistry($pages); $resolvers->register($this->resolver); $resolvers->freeze();
@@ -169,8 +172,9 @@ final class AiExportRuntime
     {
         if ($run['status']!=='COMPLETED' || !$this->ready($context)) throw new \RuntimeException('AI_EXPORT_NOT_READY');
         $evidence=$this->runtime['private']->read($run['evidence_ref']);
-        if (($evidence['owner']??null)!==$owner || ($evidence['run_id']??null)!==$run['run_id']
-            || !isset($evidence['query'],$evidence['view_ref'])) throw new \RuntimeException('AI_EXPORT_SOURCE_MISMATCH');
+        if (($evidence['owner']??null)!==$owner || ($evidence['run_id']??null)!==$run['run_id']) throw new \RuntimeException('AI_EXPORT_SOURCE_MISMATCH');
+        $source=isset($evidence['items']) ? ($evidence['items'][0]??[]) : $evidence;
+        if (!isset($source['query'],$source['view_ref'])) throw new \RuntimeException('AI_EXPORT_SOURCE_MISMATCH');
         // Both private objects must belong to this completed Run. The file
         // task may only reuse its immutable, already verified answer source.
         $this->assertObjectOwner($this->runtime['private']->read($run['answer_ref']),[
@@ -181,7 +185,7 @@ final class AiExportRuntime
             'terminal'=>$owner['terminal'],'account_id'=>$owner['account_id'],'conversation_id'=>$owner['conversation_id'],
             'window_id'=>$owner['window_id'],'run_id'=>$run['run_id'],'generation'=>$run['generation'],
             'worker_token'=>'','evidence_ref'=>$run['evidence_ref'],'canonical_result_ref'=>$run['answer_ref'],
-            'read_consistency_ref'=>$evidence['view_ref'],'created_at'=>$now,'expires_at'=>$expiry,
+            'read_consistency_ref'=>$source['view_ref'],'created_at'=>$now,'expires_at'=>$expiry,
             'source_expires_at'=>[$expiry],'execution_deadline_at'=>min($expiry,$now+180),
             'queue_deadline_ms'=>(int)floor(microtime(true)*1000)+$this->settings['queue_wait_budget_ms'],
             'result_hash'=>'','permission_hash'=>AiAuthority::permissionHash($context),
@@ -192,7 +196,7 @@ final class AiExportRuntime
         // Identity revalidation needs the trusted principal restored from this
         // run binding; never resolve it before the binding has been installed.
         $this->assertMetricExportSource($evidence);
-        $view=$this->exportView($evidence,$evidence['view_ref']);
+        $view=$this->exportView($evidence,$source['view_ref']);
         $binding['result_hash']=$view['result_hash'];
         $binding['expires_at']=min($expiry,(int)$view['expires_at']);
         $binding['source_expires_at']=[$expiry,(int)$view['expires_at']];
@@ -413,7 +417,8 @@ final class AiExportRuntime
     {
         $evidence=$this->runtime['private']->read($binding['evidence_ref']); $this->assertObjectOwner($evidence,$binding);
         $this->assertMetricExportSource($evidence);
-        if (($evidence['view_ref']??null)!==$binding['read_consistency_ref']) throw new \RuntimeException('AI_EXPORT_SOURCE_MISMATCH');
+        $source=isset($evidence['items']) ? ($evidence['items'][0]??[]) : $evidence;
+        if (($source['view_ref']??null)!==$binding['read_consistency_ref']) throw new \RuntimeException('AI_EXPORT_SOURCE_MISMATCH');
         return $evidence;
     }
 
@@ -441,6 +446,15 @@ final class AiExportRuntime
     /** Bind file content to BOTH the context view and immutable exact assets. */
     private function exportView(array $evidence,string $ref): array
     {
+        if (isset($evidence['items'])) {
+            $sources=$evidence['items'];$views=[];
+            if (!is_array($sources)||$sources===[]||($sources[0]['view_ref']??null)!==$ref) throw new \RuntimeException('AI_EXPORT_SOURCE_MISMATCH');
+            foreach ($sources as $source) {
+                if (!is_array($source)||!is_array($source['query']??null)||!is_string($source['view_ref']??null)) throw new \RuntimeException('AI_EXPORT_SOURCE_MISMATCH');
+                $views[]=$this->readViews->replay([],$source['query'],$source['view_ref']);
+            }
+            return M\MetricReadViewExportProvider::withCollection($views,$sources);
+        }
         $view=$this->readViews->replay([],$evidence['query'],$ref);
         return M\MetricReadViewExportProvider::withMemberRights($view,$evidence['member_rights_export']??null);
     }

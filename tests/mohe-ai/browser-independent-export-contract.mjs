@@ -12,13 +12,14 @@ dom.window.HTMLElement.prototype.attachShadow = function () {
 };
 globalThis.window=dom.window; globalThis.document=dom.window.document; globalThis.crypto=webcrypto;
 const calls=[];
+let automatic=false;
 const request=async (method,path,payload) => {
   calls.push({method,path,payload});
   if (path==='/bootstrap') return {enabled:true,can_configure:true,identity_key:'fixture',window_token:'window',
     capabilities:{metric_codes:['cash_performance'],output_formats:['screen','screen_and_xlsx']}};
   if (path==='/runs') return {run_id:'r36',generation:1,run_delivery_token:'proof',status:'READY',execution_mode:'compatibility'};
   if (path==='/runs/r36/execute') return {run_id:'r36',generation:1,run_delivery_token:'proof',status:'COMPLETED',
-    answer:{summary:'已校验现金业绩',cards:[]}};
+    answer:{summary:'已校验现金业绩',cards:[],auto_export_required:automatic}};
   if (path==='/runs/r36/delivery') return {accepted:true};
   if (path==='/runs/r36/export' && method==='POST') return {status:'succeeded',filename:'经营数据.xlsx'};
   throw new Error(`unexpected ${method} ${path}`);
@@ -38,4 +39,16 @@ assert.match(root.textContent,/已校验现金业绩/);
 assert.match(root.textContent,/Excel 已生成/);
 assert.ok(Array.from(root.querySelectorAll('button')).some(button=>button.textContent==='下载 Excel'));
 dispose();
+automatic=true; calls.length=0;
+const disposeAutomatic=mountMoheAi({request}); await flush();
+const autoRoot=Array.from(document.querySelectorAll('[data-mohe-ai]')).at(-1).shadowRoot;
+autoRoot.querySelector('.entry').click(); await flush();
+autoRoot.querySelector('select').value='screen';
+autoRoot.querySelector('textarea').value='本月各门店明细';
+Array.from(autoRoot.querySelectorAll('button')).find(button=>button.textContent==='发送').click();
+await flush(); await flush();
+assert.equal(calls.find(call=>call.path==='/runs').payload.output_format,'screen');
+assert.ok(calls.some(call=>call.method==='POST' && call.path==='/runs/r36/export'));
+assert.match(autoRoot.textContent,/Excel 已生成/);
+disposeAutomatic();
 console.log('Browser independent Excel after answer: PASS');

@@ -70,6 +70,17 @@ for (const max of [3,4,5]) {
   eq(f.calls.filter(call => call.path === '/runs').length, 1); eq(f.calls.filter(call => call.path.endsWith('/execute')).length, 0);
   eq(f.api.load()[0].rounds.length, 1); f.unmount();
 }
+// R57: a backend-verified long table starts the existing independent file
+// task on mobile even when the merchant did not select manual Excel.
+{
+  const f = setup(); f.start(); f.api.chooseValue(metric, metric.options[0]); f.api.confirmChoices();
+  const completed = f.finish(); completed.answer.auto_export_required = true;
+  f.answer('/runs/mobile-run/clarify', completed);
+  eq(f.calls.filter(call => call.method === 'POST' && call.path === '/runs/mobile-run/export').length, 1);
+  eq(f.api.refs.displayed.value[0].export_status, 'pending');
+  f.answer('/runs/mobile-run/export', { status: 'succeeded', filename: '经营数据.xlsx' });
+  eq(f.api.refs.displayed.value[0].export_status, 'succeeded'); f.unmount();
+}
 {
   const f = setup(); f.api.refs.question.value = '等待态阅读锚点'; f.api.submit();
   // The customer sees a complete local turn immediately, before network

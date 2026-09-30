@@ -485,9 +485,56 @@ try {
     ];
     $limited=(new AiAnswerRenderer())->render($truncated);
     bdCheck(count($limited['table']['rows'])===20
-        && strpos($limited['summary'],'当前显示前20条')!==false
-        && strpos($limited['summary'],'缩小范围')!==false,
-        'bounded answer keeps the first screen concise without overstating unseen export coverage');
+        && strpos($limited['summary'],'原查询结果只保留了部分明细')!==false
+        && empty($limited['auto_export_required']),
+        'legacy partial evidence cannot claim that a complete Excel is being generated');
+
+    // R57: the customer sees one table page, while the file keeps the
+    // original signed ordering and all requested business-detail rows.
+    foreach ([0,20,21,100,101] as $total) {
+        $complete=$view;
+        $complete['results'][0]['rows']=[];
+        for ($i=1;$i<=$total;++$i) $complete['results'][0]['rows'][]=[
+            'entity_id'=>$i,'entity_name'=>'门店'.$i,'amount_cents'=>($total-$i+1)*100,
+        ];
+        $complete['results'][0]['object_count']=$total;
+        $complete['results'][0]['active_object_count']=$total;
+        $complete['results'][0]['aggregate_value']=intdiv($total*($total+1),2)*100;
+        $complete['results'][0]['has_more']=false;
+        $answer=(new AiAnswerRenderer())->render($complete);
+        $visible=count($answer['table']['rows']??[]);
+        $file=MetricReadViewExportProvider::project($complete);
+        bdCheck($visible===min(20,$total) && count($file)===$total
+            && !empty($answer['auto_export_required'])===($total>20),
+            'R57 full export and per-table screen threshold '.$total);
+        if ($total>20) bdCheck(($answer['table']['total_rows']??null)===$total
+            && ($file[$total-1]['store_name']??null)==='门店'.$total.'；范围：当前授权范围',
+            'R57 the last frozen detail remains downloadable at '.$total);
+    }
+    $collectionView=$view;
+    $collectionView['read_consistency_ref']='mrv_'.str_repeat('a',48);
+    $collectionView['result_hash']=str_repeat('b',64);
+    $collectionView['expires_at']=time()+3600;
+    $collectionView['result_status']='complete';
+    $source=['id'=>'q1','label'=>'第一组','query'=>$view['query'],'view_ref'=>$collectionView['read_consistency_ref']];
+    $second=['id'=>'q2','label'=>'第二组','query'=>$view['query'],'view_ref'=>$collectionView['read_consistency_ref']];
+    $combined=MetricReadViewExportProvider::withCollection([$collectionView,$collectionView],[$source,$second]);
+    $combinedRows=MetricReadViewExportProvider::project($combined);
+    bdCheck(count($combinedRows)===2*count(MetricReadViewExportProvider::project($view))
+        &&strpos($combinedRows[0]['metric_name'],'第一组：')===0
+        &&strpos($combinedRows[count($combinedRows)-1]['metric_name'],'第二组：')===0,
+        'R57 multi-table export retains each section and stable row ids');
+    $twoShort=AiAnswerRenderer::limitTables(['summary'=>'两项查询','cards'=>[],'sections'=>[
+        ['title'=>'甲','answer'=>['summary'=>'甲','table'=>['columns'=>[],'rows'=>array_fill(0,15,[])]]],
+        ['title'=>'乙','answer'=>['summary'=>'乙','table'=>['columns'=>[],'rows'=>array_fill(0,15,[])]]],
+    ]]);
+    bdCheck(empty($twoShort['auto_export_required']),'R57 multi-table threshold is per table, not the sum of sections');
+    $oneLong=$twoShort;$oneLong['sections'][1]['answer']['table']['rows']=array_fill(0,21,[]);
+    $oneLong=AiAnswerRenderer::limitTables($oneLong);
+    bdCheck(!empty($oneLong['auto_export_required'])
+        &&count($oneLong['sections'][0]['answer']['table']['rows'])===15
+        &&count($oneLong['sections'][1]['answer']['table']['rows'])===20,
+        'R57 one long section queues the complete combined workbook');
 
     echo 'breakdown-query: PASS ('.$checks." checks; offline fixtures)\n";
 } catch (Throwable $error) {

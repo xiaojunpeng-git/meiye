@@ -465,7 +465,10 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         finishActiveRunStatus(); appendCompletedElapsed(activeConversationTurn(), elapsedSeconds);
         const answerTurn = activeConversationTurn() || body;
         renderAnswer(run.answer, true, answerTurn);
-        if (exportRequested && run.status === 'COMPLETED') startIndependentExport({ ...run }, answerTurn);
+        // The server decides from the verified business table whether a full
+        // file is required. The existing manual Excel choice shares one
+        // idempotent task and never delays answer delivery.
+        if ((exportRequested || run.answer.auto_export_required === true) && run.status === 'COMPLETED') startIndependentExport({ ...run }, answerTurn);
         exportRequested = false;
         reportVisibleDeliveryAfterPaint(run);
         const text = run.answer.summary || (run.answer.cards || []).map(c => `${c.metric_name}：${c.display_value}${c.unit || ''}`).join('\n');

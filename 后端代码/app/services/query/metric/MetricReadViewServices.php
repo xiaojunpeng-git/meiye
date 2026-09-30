@@ -95,13 +95,15 @@ final class MetricReadViewServices
                                 $valueOrder=$right['amount_cents']<=>$left['amount_cents'];
                                 return $valueOrder!==0?$valueOrder:$left['entity_id']<=>$right['entity_id'];
                             });
-                            // The screen read has the same bounded-result rule as every
-                            // other analytical object. Keep the exact population count,
-                            // but never let an unusually large store scope flood one turn.
-                            $page=['rows'=>array_slice($rows,0,99),'has_more'=>count($rows)>99,'count'=>count($rows),'limit'=>99,
+                            // A downloadable detail set cannot silently stop
+                            // at the old screen page. Reject oversized scope
+                            // before publishing any apparently complete file.
+                            $limit=RegisteredMetricReadServices::AI_DETAIL_LIMIT;
+                            if (count($rows)>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
+                            $page=['rows'=>$rows,'has_more'=>false,'count'=>count($rows),'limit'=>$limit,
                                 'active_count'=>$activeObjectCount,'aggregate_value'=>$aggregateValue];
                         } else {
-                            $page=$reader->dimensionBreakdown($metric,$breakdown['dimension'],$binding['tenant_id'],$binding['store_ids'],$range,99);
+                            $page=$reader->dimensionBreakdown($metric,$breakdown['dimension'],$binding['tenant_id'],$binding['store_ids'],$range,RegisteredMetricReadServices::AI_DETAIL_LIMIT);
                         }
                         $results[]=['period'=>$period,'metric_code'=>$metric,'storage_unit'=>$metricContract['storage_unit'],
                             'object_kind'=>$breakdown['object_kind'],'object_label'=>$breakdown['object_label'],
@@ -474,11 +476,11 @@ final class MetricReadViewServices
                 // to all members of that person's stores.
                 if ($binding['scope_mode']==='self_participant') $this->fail('METRIC_PERMISSION_GRAIN_UNAVAILABLE');
                 $population=$reader->firstCourseSourceMembers($binding['tenant_id'],$binding['store_ids'],$range,
-                    $filters['source_primary_id'],$filters['source_secondary_id']??0,$shape==='condition_list'?100:0);
+                    $filters['source_primary_id'],$filters['source_secondary_id']??0,$shape==='condition_list'?RegisteredMetricReadServices::AI_DETAIL_LIMIT:0);
             } else {
                 $population=$reader->conditionMembers(
                     $binding['tenant_id'],$binding['store_ids'],$range,$conditionSet,
-                    $shape==='condition_list'?100:0
+                    $shape==='condition_list'?RegisteredMetricReadServices::AI_DETAIL_LIMIT:0
                 );
             }
             $result=['period'=>'current','metric_code'=>$conditionSet['conditions'][0]['metric_code'],'storage_unit'=>'count','object_kind'=>'member',
@@ -525,16 +527,18 @@ final class MetricReadViewServices
             $result=['period'=>'current','metric_code'=>$conditionSet['conditions'][0]['metric_code'],'storage_unit'=>'count','object_kind'=>'store',
                 'condition_set'=>$conditionSet,'count'=>count($rows)];
             if ($shape==='condition_list') {
-                $limit=100;
-                $result['rows']=array_slice($rows,0,$limit);
+                $limit=RegisteredMetricReadServices::AI_DETAIL_LIMIT;
+                if (count($rows)>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
+                $result['rows']=$rows;
                 $result['list_limit']=$limit;
-                $result['has_more']=count($rows)>$limit;
+                $result['has_more']=false;
             }
             return $result;
         }
         if (($conditionSet['subject']??null)!=='person') {
             if ($personnel!==null) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-            $population=$reader->conditionDimensions($binding['tenant_id'],$binding['store_ids'],$range,$conditionSet);
+            $population=$reader->conditionDimensions($binding['tenant_id'],$binding['store_ids'],$range,$conditionSet,
+                $shape==='condition_list'?RegisteredMetricReadServices::AI_DETAIL_LIMIT:100);
             $result=['period'=>'current','metric_code'=>$conditionSet['conditions'][0]['metric_code'],'storage_unit'=>'count',
                 'object_kind'=>$conditionSet['subject'],'object_label'=>$population['object_label'],
                 'condition_set'=>$conditionSet,'count'=>$population['count']];
@@ -574,10 +578,11 @@ final class MetricReadViewServices
         $result=['period'=>'current','metric_code'=>$conditionSet['conditions'][0]['metric_code'],'storage_unit'=>'count','object_kind'=>'person',
             'condition_set'=>$conditionSet,'count'=>count($rows)];
         if ($shape==='condition_list') {
-            $limit=100;
-            $result['rows']=array_slice($rows,0,$limit);
+            $limit=RegisteredMetricReadServices::AI_DETAIL_LIMIT;
+            if (count($rows)>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
+            $result['rows']=$rows;
             $result['list_limit']=$limit;
-            $result['has_more']=count($rows)>$limit;
+            $result['has_more']=false;
         }
         return $result;
     }

@@ -149,13 +149,13 @@ csCheck(count($memberExport)===1&&$memberExport[0]['store_name']==='测试会员
     'member condition list export reuses verified rows and registered units instead of exporting only the count');
 $view=$views->create([],$query);
 csCheck($view['results'][0]['count']===1&&$view['results'][0]['rows'][0]['employee_name']==='甲员工','AND set evaluates against one authorised current-personnel population');
-csCheck(($view['results'][0]['list_limit']??null)===100&&($view['results'][0]['has_more']??null)===false,
-    'personnel condition lists publish their bounded display limit and truncation state');
+csCheck(($view['results'][0]['list_limit']??null)===1000&&($view['results'][0]['has_more']??null)===false,
+    'personnel condition lists retain the bounded full-result ceiling for export');
 $truncatedEvidence=$view;
 $truncatedEvidence['results'][0]['count']=101;
 $truncatedEvidence['results'][0]['has_more']=true;
 $truncatedAnswer=(new AiAnswerRenderer())->render($truncatedEvidence);
-csCheck(strpos($truncatedAnswer['summary'],'当前展示前100条')!==false
+csCheck(strpos($truncatedAnswer['summary'],'当前展示前1000条')!==false
     &&strpos($truncatedAnswer['summary'],'精确数量为准')!==false,
     'bounded personnel lists disclose truncation instead of presenting the visible slice as a complete list');
 csCheck(($view['results'][0]['rows'][0]['metrics']['staff_sales_yeji']??null)===6000000

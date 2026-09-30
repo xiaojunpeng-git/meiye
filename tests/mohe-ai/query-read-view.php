@@ -157,6 +157,11 @@ try {
     $wrongKeyStore = new MetricReadViewStore($temp, str_repeat('wrong-test-key', 4), $clock);
     queryReject(function () use ($wrongKeyStore, $view) { $wrongKeyStore->get($view['read_consistency_ref']); }, 'METRIC_READ_VIEW_UNAVAILABLE');
     queryReject(function () use ($store) { $store->get('../outside'); }, 'METRIC_READ_VIEW_UNAVAILABLE');
+    // An oversized complete view is a bounded-scope answer, not a stale
+    // reference or permission to publish a truncated Excel workbook.
+    $oversizeView=$view;
+    $oversizeView['fixture_padding']=str_repeat('A',4*1024*1024);
+    queryReject(function () use ($store,$oversizeView) { $store->put($oversizeView); }, 'METRIC_GROUP_OUTPUT_TOO_LARGE');
     $now += 86400;
     queryReject(function () use ($service, $principal, $query, $view) { $service->replay($principal, $query, $view['read_consistency_ref']); }, 'METRIC_READ_VIEW_UNAVAILABLE');
     queryCheck($store->cleanup() === 10, 'all expired views including two early-date cases physically removed');

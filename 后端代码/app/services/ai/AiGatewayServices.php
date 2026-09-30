@@ -5867,6 +5867,9 @@ final class AiGatewayServices
             foreach ($parts as $part) $sections[]=['id'=>'q'.(count($sections)+1),'title'=>$part['title'],'answer'=>$part['answer']];
             $answer=['summary'=>$spec['population_answer']['summary'].' '.$answer['summary'],'cards'=>[],'sections'=>$sections];
         }
+        // Member assets have their own immutable rights snapshot for Excel;
+        // the response may show only a screen page, never trim that snapshot.
+        $answer=AiAnswerRenderer::limitTables($answer);
         $guard();$this->runs->progress($owner,$id,$generation,$worker,'PUBLISHING');
         $run=$this->runs->get($owner,$id,$generation);
         $expires=min($spec['source_expires_at'],intdiv($run['expires_at'],1000));
@@ -5964,6 +5967,13 @@ final class AiGatewayServices
                     });
                 } catch (\Throwable $error) {
                     if ($error instanceof \app\services\query\metric\MetricQueryContractException) {
+                        // Full-detail safety ceilings are not a transient
+                        // system failure. Never publish a partial workbook or
+                        // ask the customer to retry the same oversized scope.
+                        if ($error->getErrorCode()==='METRIC_GROUP_OUTPUT_TOO_LARGE') {
+                            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'query_metric_group_output_too_large',[],'query_runtime_probe');
+                            throw new RuntimeException('AI_DETAIL_SCOPE_TOO_LARGE');
+                        }
                         $code=strtolower($error->getErrorCode());
                         $predicate=preg_match('/^[a-z0-9_]{1,64}$/D',$code)?'query_'.$code:'query_contract';
                     } elseif (preg_match('/^[A-Z][A-Z0-9_]{0,63}$/D',$error->getMessage())) {
@@ -6064,7 +6074,7 @@ final class AiGatewayServices
             // The export handler records a more specific, payload-free
             // diagnostic before returning one of these boundary codes.  Do
             // not overwrite it with a generic graph-level label.
-            if (in_array($error->getMessage(),['AI_QUERY_FAILED','AI_EXPORT_HANDOFF_FAILED','AI_EXPORT_QUEUE_FAILED'],true)) throw $error;
+            if (in_array($error->getMessage(),['AI_QUERY_FAILED','AI_DETAIL_SCOPE_TOO_LARGE','AI_EXPORT_HANDOFF_FAILED','AI_EXPORT_QUEUE_FAILED'],true)) throw $error;
             // The graph is server-owned.  Record a bounded execution-code
             // diagnostic, never an exception message that may contain data.
             $known=['AI_EVIDENCE_INCOMPLETE','AI_NODE_OUTPUT_INVALID','AI_WORKFLOW_BUDGET_EXHAUSTED','AI_NODE_TIMEOUT','AI_EXECUTION_CLOCK_REGRESSED','AI_EXECUTION_CLOCK_INVALID','AI_WORKFLOW_DEPENDENCY_UNSATISFIED','AI_ANSWER_RENDER_FAILED','AI_EVIDENCE_GUARD_FAILED'];
@@ -6153,7 +6163,10 @@ final class AiGatewayServices
         }
         if ($expires===null) throw new RuntimeException('AI_EVIDENCE_INVALID');
         $summary=implode("\n\n",array_map(static function(array $section):string{return (string)($section['answer']['summary']??'');},$sections));
-        $answer=['summary'=>$summary,'cards'=>[],'sections'=>$sections];
+        // A collection keeps every source view separately signed. This only
+        // marks the combined screen answer for an independent, source-bound
+        // Excel task; no section is queried again during file generation.
+        $answer=AiAnswerRenderer::limitTables(['summary'=>$summary,'cards'=>[],'sections'=>$sections]);
         return [$this->private->put('evidence',$binding+['items'=>$sources,'context_meaning'=>$contextMeaning,'collection_version'=>1],$expires),
             $this->private->put('answer',$binding+['answer'=>$answer],$expires)];
     }
@@ -6474,6 +6487,7 @@ final class AiGatewayServices
             'AI_PERSONNEL_PERMISSION_REQUIRED'=>'当前账号尚无对应人员指标的可用查询权限，未读取或披露人员信息。',
             'AI_OBJECT_BINDING_UNAVAILABLE'=>'在当前可用范围内还不能确定您指的对象，未删减条件或改查全部。',
             'AI_OBJECT_SCOPE_TOO_LARGE'=>'涉及的人员范围较大，请先缩小到具体门店或岗位后再查询。',
+            'AI_DETAIL_SCOPE_TOO_LARGE'=>'这次明细超过单次查询可完整导出的范围，请缩小门店或时间后重试；本次没有生成不完整的 Excel。',
             'AI_LOCAL_CONDITION_REQUIRED'=>'问题中有一项条件还不能在当前可用范围内安全核对；我没有删掉该条件或改查其他数据。请换一种日常说法补充这项条件后重试。',
             'AI_ANALYSIS_COMBINATION_UNAVAILABLE'=>'已识别分析方向，但当前底层尚不能完整执行这些对象、指标与条件的组合；没有替换指标或删减条件。',
             'AI_BINDING_SEMANTIC_REJECTED'=>'已理解您的问题，但系统未能可靠确认所选指标同时符合全部条件；本次未查询或替换为近似数据。请换一种说法后重试。',
