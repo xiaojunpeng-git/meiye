@@ -141,6 +141,57 @@ foreach ([$personView,$summaryView,$storeView,$detailView] as $singleton) {
 }
 $plural=$resolver->resolve($personQuery,$many,['view'=>'summary','target'=>'set','ordinal'=>null]);
 $check(array_column($plural['objects'],'id')===[7,8],'plural target retains the complete verified display order');
+$expandedMany=$many;
+$expandedMany['query']['condition_set']=null;
+$expandedMany['results'][0]['ranking_detail_metrics']=[['metric_code'=>'staff_labor_yeji']];
+$localOrdinal=$gatewayClass->getMethod('localVerifiedOrdinalDetailUnderstanding');
+$ordinalSafe=['schema_version'=>'sanitized-question-v2','question'=>'第二位具体看看',
+    'has_unresolved_conditions'=>false,'server_resolved_fields'=>[],'reference_date'=>'2026-09-25',
+    'recent_questions'=>[],'evidence_messages'=>[['id'=>'current','text'=>'第二位具体看看']],
+    'prior_query'=>['operation'=>'ranking']];
+$localOrdinalMeaning=$localOrdinal->invoke($gateway,$ordinalSafe,['local_conditions'=>[]],
+    ['query'=>$expandedMany['query'],'view'=>$expandedMany]);
+$check(($localOrdinalMeaning['requirements'][0]['values']['object_detail']['ordinal']??null)===2,
+    'closed second-position detail uses the signed ranking without model understanding');
+$localOrdinalPlan=$compile->invoke($gateway,$localOrdinalMeaning,
+    ['query'=>$expandedMany['query'],'view'=>$expandedMany],'screen');
+$check(($localOrdinalPlan['plan']['query']['business_filters']['selection_ref']??null)==='person:8',
+    'locally admitted ordinal selects only the second verified person');
+$mixedOrdinal=$ordinalSafe;$mixedOrdinal['question']='第二位销售额详情';
+$mixedOrdinal['evidence_messages'][0]['text']=$mixedOrdinal['question'];
+$check($localOrdinal->invoke($gateway,$mixedOrdinal,['local_conditions'=>[]],
+    ['query'=>$expandedMany['query'],'view'=>$expandedMany])===null,
+    'new metric wording cannot enter the ordinal-only fast path');
+$outsideOrdinal=$ordinalSafe;$outsideOrdinal['question']='第三位具体看看';
+$outsideOrdinal['evidence_messages'][0]['text']=$outsideOrdinal['question'];
+$check($localOrdinal->invoke($gateway,$outsideOrdinal,['local_conditions'=>[]],
+    ['query'=>$expandedMany['query'],'view'=>$expandedMany])===null,
+    'an ordinal outside the displayed set cannot become a guessed identity');
+$secondAfterSet=$understanding;
+$secondAfterSet['requirements'][0]['values']['object_detail']=['view'=>'summary','target'=>'single','ordinal'=>2];
+$secondAfterSet['requirements'][]=['id'=>'r2','meaning'=>'repeated prior ranking','fields'=>['operation','ranking'],
+    'values'=>['operation'=>'ranking','ranking'=>$personQuery['ranking']],
+    'evidence'=>[['message_id'=>'current','quote'=>'第二位具体看看']]];
+$selectedAfterSet=$compile->invoke($gateway,$secondAfterSet,['query'=>$expandedMany['query'],'view'=>$expandedMany],'screen');
+$check(($selectedAfterSet['plan']['query']['business_filters']['selection_ref']??null)==='person:8'
+    &&array_key_exists('ranking',$selectedAfterSet['plan']['query'])
+    &&$selectedAfterSet['plan']['query']['ranking']===null,
+    'ordinal after expanded detail set resolves its signed second person, ignoring only an unchanged ranking echo');
+$changedAfterSet=$secondAfterSet;
+$changedAfterSet['requirements'][1]['values']['ranking']=['direction'=>'bottom','limit'=>2];
+$check($compile->invoke($gateway,$changedAfterSet,['query'=>$expandedMany['query'],'view'=>$expandedMany],'screen')===null,
+    'a changed ranking is never reclassified as a pure detail continuation');
+$storeSet=$storeView;
+$storeSet['results'][0]['rows']['top'][]=['store_id'=>4,'store_name'=>'另一门店','amount_cents'=>890000];
+$storeSet['results'][0]['ranking_detail_metrics']=[['metric_code'=>'consume_amount']];
+$setUnderstanding=$understanding;
+$setUnderstanding['requirements'][0]['values']['object_detail']=['view'=>'summary','target'=>'set','ordinal'=>null];
+$setUnderstanding['requirements'][]=['id'=>'r2','meaning'=>'repeated prior ranking','fields'=>['operation','ranking'],
+    'values'=>['operation'=>'ranking','ranking'=>$storeQuery['ranking']],
+    'evidence'=>[['message_id'=>'current','quote'=>'把这几家展开看看']]];
+$storeSetCompiled=$compile->invoke($gateway,$setUnderstanding,['query'=>$storeQuery,'view'=>$storeSet],'screen');
+$check(($storeSetCompiled['kind']??null)==='verified_ranking_detail',
+    'plural store details replay the signed set even when the model repeats its old rank');
 $recompiled=$compile->invoke($gateway,$understanding,['query'=>$storeDetailQuery,'view'=>$detailView],'screen');
 $check($recompiled['plan']['query']===$storeDetailQuery,'repeated store continuation preserves metrics dates and scope');
 $invalidSummary=$summaryView;$invalidSummary['query']['business_filters']['selection_ref']='cohort:metric_fact_participants';

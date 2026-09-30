@@ -138,6 +138,8 @@ final class AiExactRankingCollectionAdmission
         if ($shared!==null) return $shared;
         $singleDefault=$this->singleDefaultRanking($question,$objects,$allowedMetricCodes,$defaultRankObjectKinds);
         if ($singleDefault!==null) return $singleDefault;
+        $personWinner=$this->explicitPersonWinnerRanking($question,$objects,$allowedMetricCodes);
+        if ($personWinner!==null) return $personWinner;
         $bounded=$this->boundedSingleRanking($question,$objects,$allowedMetricCodes);
         if ($bounded!==null) return $bounded;
         $clauses=preg_split('/[，,；;。]+/u',$question,-1,PREG_SPLIT_NO_EMPTY);
@@ -191,6 +193,28 @@ final class AiExactRankingCollectionAdmission
             'metric_code'=>$candidateCodes[0],'object_kind'=>$object['object_kind'],
             'direction'=>$direction,'limit'=>1,
         ]];
+    }
+
+    /** A closed “first place, who” asks for one person only when the exact
+     * registered measurement itself has person fact grain. No metric label,
+     * person ID or ranking value is inferred from the pronoun; unknown extra
+     * conditions return to the ordinary semantic path. */
+    private function explicitPersonWinnerRanking(string $question,array $objects,array $allowedMetricCodes): ?array
+    {
+        if (!preg_match('/第(?:一|1)名/u',$question) || !preg_match('/谁|哪位/u',$question)) return null;
+        $metric=MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes);
+        if ($metric===null || !in_array('person',array_column($objects,'object_kind'),true)
+            ||(\app\services\query\metric\MetricDefinitionRegistry::get($metric['metric_code'])['filter_grain']??null)!=='person') return null;
+        $residue=str_replace($metric['term'],' ',$question);
+        // An independently named store, member or other object is not the
+        // person measured by this fact; its relationship needs model binding.
+        if ($this->objectsInText($residue,$objects)!==[]) return null;
+        $residue=preg_replace('/第(?:一|1)名|谁|哪位/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return null;
+        $residue=preg_replace('/的|是|，|,|。|？|\?|！|!|\s+/u','',(string)$calendar['remainder']);
+        if (!is_string($residue)||$residue!=='') return null;
+        return [['metric_code'=>$metric['metric_code'],'object_kind'=>'person','direction'=>'top','limit'=>1]];
     }
 
     /**

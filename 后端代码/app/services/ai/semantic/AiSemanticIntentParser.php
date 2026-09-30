@@ -118,8 +118,11 @@ final class AiSemanticIntentParser
         // Unsupported calendar qualifiers must retain model ownership. The
         // recognised endpoint alone cannot prove a complete customer interval.
         $remaining=str_replace('【日期】',' ',$remainder);
+        // “到店” is one registered business measurement, not a dangling
+        // “到 <date>” connector. Keep unsupported temporal endpoints such as
+        // “到春节” incomplete; never truncate an actual requested interval.
         $complete=!preg_match('/年|月|日|号|季度|星期|周|半年|以来|至今|截至|截止|上旬|中旬|下旬|月初|月底/u',$remaining)
-            && !preg_match('/(?:到|至)\s*【日期】|【日期】\s*(?:初|底|末|到|至)|(?:从|自)\s*$/u',$remainder);
+            && !preg_match('/(?:到|至)\s*【日期】|【日期】\s*(?:初|底|末|到(?!店)|至)|(?:从|自)\s*$/u',$remainder);
         return ['periods'=>$terms,'complete'=>$complete,'remainder'=>$remaining,'without_scope_modifiers'=>$withoutScopeModifiers];
     }
 }

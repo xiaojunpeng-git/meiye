@@ -109,6 +109,14 @@ final class AiRegisteredPlanCompiler
     private function query(array $query,array $snapshot,array $capabilities): array
     {
         if (!array_key_exists('aggregate_condition',$query)) $query['aggregate_condition']=null;
+        // Reader signs a canonical null condition_set on every non-condition
+        // view. A later verified detail/ordinal follow-up may reuse that
+        // query as input; remove only the empty carrier before registry
+        // compilation. A nonempty condition still cannot enter this shape.
+        if (!in_array($query['query_shape']??null,['condition_count','condition_list'],true)
+            &&array_key_exists('condition_set',$query)&&$query['condition_set']===null) {
+            unset($query['condition_set']);
+        }
         // This field carries display-only facts for a ranking. It is derived
         // again below from the frozen registry, so a planner cannot smuggle a
         // second sorting metric or a caller-selected formula into a query.

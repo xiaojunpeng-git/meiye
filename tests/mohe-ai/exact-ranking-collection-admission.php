@@ -175,6 +175,20 @@ $compiledPersonDetail=(new app\services\ai\execution\AiRegisteredPlanCompiler())
 $verify(($compiledPersonDetail['query']['ranking_presentation_metrics']??null)
     ===$singlePersonDetail['plan']['query']['ranking_presentation_metrics'],
     'the frozen business registry preserves detail ordering during compilation');
+foreach (['今天劳动业绩第一名是谁？'=>'staff_labor_yeji','今天销售人业绩第1名是哪位？'=>'staff_sales_yeji'] as $question=>$code) {
+    $winner=$admission->match($question,$vocabulary,array_keys($contracts),$sharedDefaults);
+    $verify(($winner[0]??null)===['metric_code'=>$code,'object_kind'=>'person','direction'=>'top','limit'=>1],
+        'R55 an exact person-grain winner question avoids repeated model binding: '.$question);
+}
+$verify($admission->match('今天现金业绩第一名是谁？',$vocabulary,array_keys($contracts),$sharedDefaults)===null
+    &&$admission->match('今天劳动业绩第一名是谁，排除某店',$vocabulary,array_keys($contracts),$sharedDefaults)===null,
+    'R55 non-person facts or independent filters cannot enter person-winner admission');
+$reason=null;
+$laborWinnerArgs=['今天劳动业绩第一名是谁？',$vocabulary,$capabilities,'screen','2026-09-30',&$reason];
+$laborWinnerPlan=$rankingMethod->invokeArgs($gateway,$laborWinnerArgs);
+$verify($reason===null && ($laborWinnerPlan['plan']['query']['metric_codes']??null)===['staff_labor_yeji']
+    &&($laborWinnerPlan['plan']['query']['ranking']??null)===['direction'=>'top','limit'=>1],
+    'R55 the same closed winner passes gateway admission with a registered Reader plan');
 $verify($admission->matchPopulationDetail('这个月门店业绩前三名的后两名详情',$vocabulary,array_keys($contracts),$sharedDefaults,3)===null,
     'conflicting population directions cannot enter the closed path');
 // R49: a named new ranking replaces the old dimension/ranking, while only

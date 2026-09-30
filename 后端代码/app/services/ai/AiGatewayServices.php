@@ -1179,6 +1179,13 @@ final class AiGatewayServices
             foreach (\app\services\query\metric\MetricSemanticCatalog::registeredTermsInText($wording,$registeredCodes) as $match) {
                 if (is_string($match['term']??null)) $protectedSemanticTerms[]=$match['term'];
             }
+            // A private label may coincide with the public comparative adverb
+            // “严格”. Shield only the complete numeric comparator, never the
+            // standalone label, so de-identification cannot turn “strictly
+            // greater than” into an unresolved person reference.
+            foreach (\app\services\ai\semantic\AiConditionResponseFormResolver::protectedStrictComparisonTerms($wording) as $operator) {
+                $protectedSemanticTerms[]=$operator;
+            }
         }
         $safe=(new \app\services\ai\model\AiSafeQuestionProjector())->projectConversation(
             $body['question'],$body['history'],$configuration,array_values(array_unique($privateLabels)),
@@ -1261,6 +1268,8 @@ final class AiGatewayServices
         // "top three" continuation or change any executable business field.
         $localRankingUnderstanding=$sourceQuery===null && $sourceCollection===[]?null
             :$this->localVerifiedRankingOnlyUnderstanding($safe['outbound'],$safe);
+        $localOrdinalDetailUnderstanding=$sourceContext===null?null
+            :$this->localVerifiedOrdinalDetailUnderstanding($safe['outbound'],$safe,$sourceContext);
         $localConditionUnderstanding=$sourceQuery===null?null:$this->localVerifiedConditionDeltaUnderstanding($safe['outbound'],$safe,$today);
         // A complete current money predicate is independent of whether this
         // conversation already contains a signed query. The closed residue
@@ -1272,14 +1281,17 @@ final class AiGatewayServices
         // Understanding has no metric catalogue. Binding receives accepted
         // meaning afterwards and may only propose registered execution fields.
         if ($localPeriodUnderstanding!==null || $localRankingUnderstanding!==null
+            || $localOrdinalDetailUnderstanding!==null
             || $localConditionUnderstanding!==null || $localCountUnderstanding!==null) {
             // Keep this observable without inventing a model attempt: the
             // date-only grammar gate is a server-owned context optimization.
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
                 $localPeriodUnderstanding!==null?'context_period_only_local_reuse':($localRankingUnderstanding!==null
-                    ?'context_ranking_only_local_reuse':($localConditionUnderstanding!==null
-                        ?'context_condition_delta_local_reuse':'registered_member_count_local_understanding')));
-            $understanding=$localPeriodUnderstanding??$localRankingUnderstanding??$localConditionUnderstanding??$localCountUnderstanding;
+                    ?'context_ranking_only_local_reuse':($localOrdinalDetailUnderstanding!==null
+                        ?'context_ordinal_detail_local_reuse':($localConditionUnderstanding!==null
+                        ?'context_condition_delta_local_reuse':'registered_member_count_local_understanding'))));
+            $understanding=$localPeriodUnderstanding??$localRankingUnderstanding??$localOrdinalDetailUnderstanding
+                ??$localConditionUnderstanding??$localCountUnderstanding;
         } else {
             $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
             $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$runtimeSkills,$objectVocabulary,$measurementVocabulary],1024));
@@ -3583,6 +3595,36 @@ final class AiGatewayServices
         return \app\services\ai\contract\AiIntentUnderstandingContract::normalize($candidate,$outbound);
     }
 
+    /** A closed ordinal-detail follow-up needs no fresh language model call:
+     * its only new input is a display position. Identity is resolved solely
+     * from the permission-replayed signed ranking view; mixed business words,
+     * private references and ambiguous/out-of-range positions stay on the
+     * ordinary understanding path. */
+    private function localVerifiedOrdinalDetailUnderstanding(array $outbound,array $safe,array $sourceContext): ?array
+    {
+        if (!empty($safe['local_conditions']??[]) || !is_string($outbound['question']??null)
+            ||($sourceContext['query']['query_shape']??null)!=='ranking'
+            ||!is_array($sourceContext['view']??null) || !empty($sourceContext['items']??[])) return null;
+        $closed=preg_replace('/[\s，,。？！?!]/u','',$outbound['question']);
+        if (!is_string($closed) || !preg_match('/^第([一二三四五六七八九十]|[1-9][0-9]?)(?:名|位|个)(?:的)?(?:具体)?(?:看(?:看)?|详情|详细(?:情况)?|展开(?:看看)?)$/u',$closed,$match)) return null;
+        $chinese=['一'=>1,'二'=>2,'三'=>3,'四'=>4,'五'=>5,'六'=>6,'七'=>7,'八'=>8,'九'=>9,'十'=>10];
+        $ordinal=$chinese[$match[1]]??(ctype_digit($match[1])?(int)$match[1]:0);
+        if ($ordinal<1 || $ordinal>50) return null;
+        $detail=['view'=>'summary','target'=>'single','ordinal'=>$ordinal];
+        try {
+            (new \app\services\ai\context\ObjectDetailContinuationResolver())->resolve(
+                $sourceContext['query'],$sourceContext['view'],$detail
+            );
+        } catch (\RuntimeException $error) { return null; }
+        return \app\services\ai\contract\AiIntentUnderstandingContract::normalize([
+            'goal'=>'inspect a verified ranking position','status'=>'understood','requirements'=>[[
+                'id'=>'r1','meaning'=>'inspect the stated displayed position','fields'=>['object_detail'],
+                'values'=>['object_detail'=>$detail],
+                'evidence'=>[['message_id'=>'current','quote'=>$outbound['question']]],
+            ]],
+        ],$outbound);
+    }
+
     /**
      * Admit only a complete current-turn member count with one explicit money
      * predicate and one exact registry-owned measurement. The shared calendar
@@ -5210,6 +5252,25 @@ final class AiGatewayServices
                 // generic object_detail carrier.
                 $detail=$requirement['values']['object_detail']??$requirement['values']['member_detail']??null;
             }
+        }
+        if (!is_array($detail)) return null;
+        foreach ((array)($understanding['requirements']??[]) as $requirement) {
+            $fields=(array)($requirement['fields']??[]);
+            // A model can echo the predecessor's unchanged ranking beside a
+            // pure detail request. The signed query, not that echo, remains
+            // authoritative; discard only an exactly matching carrier. A
+            // new rank or any metric/period/filter still enters normal binding.
+            if (is_array($sourceContext['query']??null)
+                &&($sourceContext['query']['query_shape']??null)==='ranking') {
+                if (in_array('operation',$fields,true)
+                    &&($requirement['values']['operation']??null)==='ranking') {
+                    $fields=array_values(array_diff($fields,['operation']));
+                }
+                if (in_array('ranking',$fields,true)
+                    &&($requirement['values']['ranking']??null)===($sourceContext['query']['ranking']??null)) {
+                    $fields=array_values(array_diff($fields,['ranking']));
+                }
+            }
             // A pure continuation may restate only its referenced object. Any
             // metric, period, condition, ranking or operation must go through
             // the normal registered query planner first.
@@ -5220,7 +5281,6 @@ final class AiGatewayServices
                 $statedObjectKind=$kind;
             }
         }
-        if (!is_array($detail)) return null;
         if (!is_array($sourceContext)||!is_array($sourceContext['query']??null)
             ||!is_array($sourceContext['view']??null)) throw new RuntimeException('AI_CONTEXT_REQUIRED');
         $resolved=(new \app\services\ai\context\ObjectDetailContinuationResolver())->resolve(

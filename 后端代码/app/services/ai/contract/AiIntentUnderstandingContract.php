@@ -347,6 +347,36 @@ final class AiIntentUnderstandingContract
                     }
                 }
             }
+            // A provider may omit the typed period altogether while still
+            // preserving every business condition. Recover only one complete
+            // current calendar span, without changing any object, metric or
+            // predicate. The period-only guard below still rejects a reply
+            // that omitted the rest of a business question.
+            $hasBusinessCarrier=false;
+            foreach ($requirements as $requirement) {
+                if (is_array($requirement) && array_diff((array)($requirement['fields']??[]),['metric_codes'])!==[]) {
+                    $hasBusinessCarrier=true;break;
+                }
+            }
+            if ($periodIndexes===[] && $hasBusinessCarrier && $value['status']==='understood'
+                &&count($requirements)<12 && is_string($safeQuestion['reference_date']??null)) {
+                $projection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse((string)($safeQuestion['question']??''));
+                if (($projection['date_grouping_ambiguous']??true)===false
+                    &&count((array)($projection['date_terms']??[]))===1) {
+                    $range=(new \app\services\ai\execution\AiWorkflowPlanner())->normalizePeriod(
+                        $projection['date_terms'][0],$safeQuestion['reference_date']
+                    );
+                    $usedIds=array_column(array_filter($requirements,'is_array'),'id');
+                    for ($number=1;$number<=13;$number++) {
+                        $id='r'.$number;
+                        if (in_array($id,$usedIds,true)) continue;
+                        $requirements[]=['id'=>$id,'meaning'=>'current stated reporting period','fields'=>['periods'],
+                            'values'=>['periods'=>[['kind'=>'date_range','start'=>$range['start'],'end'=>$range['end']]]],
+                            'evidence'=>[['message_id'=>'current','quote'=>(string)$safeQuestion['question']]]];
+                        break;
+                    }
+                }
+            }
         }
         // A provider can duplicate a valid calendar carrier into the metric
         // slot even after one repair.  Remove only that structurally proven

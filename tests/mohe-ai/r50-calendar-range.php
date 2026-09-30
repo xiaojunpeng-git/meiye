@@ -27,6 +27,16 @@ foreach ([
 foreach (['春节到今天营业额','开业至今天营业额','三月初到今天营业额','今年以来今天营业额','2026年第一季度到今天营业额'] as $question) {
     $check(!AiSemanticIntentParser::calendarEvidence($question)['complete'],'partial date must not override model: '.$question);
 }
+foreach (['最近30天到店至少2次','最近30天到店次数至少2次','最近30天，到店至少2次'] as $question) {
+    $calendar=AiSemanticIntentParser::calendarEvidence($question);
+    $check($calendar['complete'] && count($calendar['periods'])===1
+        &&$planner->normalizePeriod($calendar['periods'][0],'2026-09-27')===['start'=>'2026-08-29','end'=>'2026-09-27'],
+        'registered arrival measurement must not become an unfinished date range: '.$question);
+}
+foreach (['最近30天到','最近30天到春节'] as $question) {
+    $check(!AiSemanticIntentParser::calendarEvidence($question)['complete'],
+        'an actual dangling or unsupported date endpoint stays model-owned: '.$question);
+}
 $admission=new AiExactRankingCollectionAdmission();
 foreach (['store'=>'门店','member'=>'会员','staff'=>'员工','project'=>'项目','product'=>'产品'] as $kind=>$label) {
     $metric=in_array($kind,['project','product'],true)?'sales_amount':'cash_performance';

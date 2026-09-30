@@ -112,6 +112,15 @@ try {
         registryCheck($compiled['budget']['counters']['tool_call_count']===1&&$compiled['budget']['counters']['skill_execution_count']===1,'actual calls counted once');
         registryCheck($compiled['scene_code']==='store_operations','business Skill stays separate from reusable shape');
     }
+    $replayedDetail=registryPlan('summary');
+    $replayedDetail['query']['condition_set']=null;
+    $compiledReplayed=$compiler->compile($replayedDetail,$cap);
+    registryCheck(!array_key_exists('condition_set',$compiledReplayed['query'])
+        &&$compiledReplayed['query']['metric_codes']===$replayedDetail['query']['metric_codes'],
+        'a Reader-signed empty condition carrier cannot break a later verified detail query');
+    $replayedDetail['query']['condition_set']=['subject'=>'member'];
+    registryReject(function()use($compiler,$replayedDetail,$cap){$compiler->compile($replayedDetail,$cap);},
+        'AI_REGISTRY_SCHEMA_INVALID');
     $overviewReadiness=MetricReadViewServices::metricCapabilities();
     $overviewCodes=[];
     foreach ($overviewReadiness as $code=>$contract) if (($contract['ai_query_ready']??false)===true) $overviewCodes[]=$code;

@@ -504,6 +504,65 @@ csCheck(($independentMeaning['requirements'][0]['values']['aggregate_condition']
     &&($independentMeaning['requirements'][0]['values']['periods'][0]??null)===[
         'kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-29'],
     'R55 a complete new member-count sentence does not inherit an older amount or date');
+$strictSafe=$independentSafe;
+$strictSafe['question']='2026年9月消费严格大于1980元的客户有多少人？';
+$strictSafe['evidence_messages'][0]['text']=$strictSafe['question'];
+$strictMeaning=$localCount->invoke($gateway,$strictSafe,['local_conditions'=>[]],'2026-09-29',$localCountCaps);
+csCheck(($strictMeaning['requirements'][0]['values']['aggregate_condition']['conditions'][0]['operator']??null)==='gt'
+    &&($strictMeaning['requirements'][0]['values']['aggregate_condition']['conditions'][0]['quantity']??null)==='1980',
+    'R55 strict open comparison is the same registered gt predicate, without a second model round trip');
+$privateCollisionConfig=['enabled'=>true,'external_processing_authorized'=>true,
+    'external_scope_supported'=>true,'external_scope_version'=>'sanitized-question-v1'];
+$publicComparators=AiConditionResponseFormResolver::protectedStrictComparisonTerms($strictSafe['question']);
+$strictProjection=(new \app\services\ai\model\AiSafeQuestionProjector())->projectConversation(
+    $strictSafe['question'],[],$privateCollisionConfig,['严格'],array_merge(['消费'],$publicComparators)
+);
+csCheck($publicComparators===['严格大于']
+    &&($strictProjection['outbound']['question']??null)===$strictSafe['question']
+    &&($strictProjection['local_conditions']??null)===[],
+    'R55 a same-named private object cannot mask a complete public numeric comparator');
+$privateNameProjection=(new \app\services\ai\model\AiSafeQuestionProjector())->projectConversation(
+    '查看严格的会员详情',[],$privateCollisionConfig,['严格'],
+    AiConditionResponseFormResolver::protectedStrictComparisonTerms('查看严格的会员详情')
+);
+csCheck(($privateNameProjection['local_conditions']['local_condition_1']??null)==='严格'
+    &&strpos($privateNameProjection['outbound']['question'],'严格')===false,
+    'R55 a standalone matching private name remains masked');
+csCheck(AiConditionResponseFormResolver::parseClosedMemberMoneyCount(
+    '2026年9月消费严格大于等于1980元的客户有多少人？','消费')===null,
+    'contradictory strict-inclusive comparison must not be silently admitted');
+$arrivalQuestion='最近30天到店至少2次，而且实际收款销售额达到1万元的会员有哪些';
+$arrivalSafe=$countSafe;
+$arrivalSafe['question']=$arrivalQuestion;
+$arrivalSafe['evidence_messages'][0]['text']=$arrivalQuestion;
+$arrivalSafe['reference_date']='2026-09-30';
+$arrivalMeaning=AiIntentUnderstandingContract::normalize([
+    'goal'=>'查看同时符合到店与收款条件的会员','status'=>'understood','requirements'=>[[
+        'id'=>'r1','meaning'=>'两个会员条件','fields'=>['metric_codes','object_kind','operation','aggregate_condition'],
+        'values'=>['metric_terms'=>['到店','实际收款销售额'],'object_kind'=>'member','operation'=>'condition_list',
+            'aggregate_condition'=>['subject'=>'member','relation'=>'all','result_form'=>'list','conditions'=>[
+                ['metric_term'=>'到店','operator'=>'gte','quantity'=>'2','unit'=>'count'],
+                ['metric_term'=>'实际收款销售额','operator'=>'gte','quantity'=>'10000','unit'=>'yuan'],
+            ]]],'evidence'=>[['message_id'=>'current','quote'=>$arrivalQuestion]],
+    ]],
+],$arrivalSafe);
+$arrivalPeriods=array_values(array_filter($arrivalMeaning['requirements'],static function(array $requirement):bool {
+    return in_array('periods',$requirement['fields'],true);
+}));
+csCheck(count($arrivalPeriods)===1
+    &&($arrivalPeriods[0]['values']['periods'][0]??null)===[
+        'kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-30']
+    &&($arrivalMeaning['requirements'][0]['values']['aggregate_condition']['conditions'][1]['quantity']??null)==='10000'
+    &&!isset($arrivalMeaning['groups']),
+    'R55 a complete arrival period omitted by the provider is recovered without changing either business predicate');
+$arrivalIntent=$registeredCondition->invoke($gateway,$arrivalMeaning,[
+    ['metric_code'=>'member_service_visit_count','object_contracts'=>[]],
+    ['metric_code'=>'sales_collected_amount','object_contracts'=>[]],
+],$arrivalSafe);
+csCheck(($arrivalIntent['periods'][0]['start']??null)==='2026-09-01'
+    &&array_column($arrivalIntent['aggregate_condition']['conditions'],'metric_code')===
+        ['member_service_visit_count','sales_collected_amount'],
+    'R55 recovered period and both registered conditions reach one intact binding');
 $localWrongQuestion=$countSafe;
 $localWrongQuestion['question']='2026年消费4980并且积分200的有多少个人';
 $localWrongQuestion['evidence_messages'][0]['text']=$localWrongQuestion['question'];

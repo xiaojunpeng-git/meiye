@@ -8,6 +8,14 @@ namespace app\services\ai\semantic;
  */
 final class AiConditionResponseFormResolver
 {
+    /** Public numeric comparators are semantic syntax, not person labels.
+     * Shield only a complete operator followed by a number; a standalone
+     * identical private name must remain subject to normal de-identification. */
+    public static function protectedStrictComparisonTerms(string $text): array
+    {
+        preg_match_all('/严格(?:大于|小于|高于|低于)(?=\s*[0-9])/u',$text,$matches);
+        return array_values(array_unique($matches[0]??[]));
+    }
     public static function resolve(string $text): ?string
     {
         if ($text==='' || preg_match('//u',$text)!==1) return null;
@@ -71,7 +79,9 @@ final class AiConditionResponseFormResolver
         if ($termPosition===false || mb_strpos($remaining,$registeredTerm,$termPosition+mb_strlen($registeredTerm,'UTF-8'),'UTF-8')!==false) return null;
         $remaining=mb_substr($remaining,0,$termPosition,'UTF-8')
             .mb_substr($remaining,$termPosition+mb_strlen($registeredTerm,'UTF-8'),null,'UTF-8');
-        $comparison='大于等于|不低于|不少于|至少|小于等于|不高于|不超过|至多|大于|超过|高于|多于|小于|低于|少于|等于|恰好|刚好|正好|为|是';
+        // “严格” only modifies an open comparison. A contradictory phrase
+        // such as “严格大于等于” remains unparsed instead of becoming gte.
+        $comparison='大于等于|不低于|不少于|至少|小于等于|不高于|不超过|至多|严格(?:大于|小于|高于|低于)|大于|超过|高于|多于|小于|低于|少于|等于|恰好|刚好|正好|为|是';
         preg_match_all('/(?<operator>'.$comparison.')?(?<quantity>[0-9]+(?:\.[0-9]{1,2})?)(?:元|块)?/u',$remaining,$amountMatches,PREG_SET_ORDER);
         if (count($amountMatches)!==1) return null;
         $operator=$amountMatches[0]['operator']??'';
@@ -79,7 +89,7 @@ final class AiConditionResponseFormResolver
             '小于等于'=>'lte','不高于'=>'lte','不超过'=>'lte','至多'=>'lte',
             '大于'=>'gt','超过'=>'gt','高于'=>'gt','多于'=>'gt',
             '小于'=>'lt','低于'=>'lt','少于'=>'lt'];
-        $normalizedOperator=$operators[$operator]??'eq';
+        $normalizedOperator=$operators[preg_replace('/^严格/u','',$operator)]??'eq';
         $remaining=str_replace($amountMatches[0][0],'',$remaining);
         // Only population nouns and connective words may remain. Unknown
         // conditions such as points, refunds, or a second amount stay visible.
