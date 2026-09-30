@@ -582,6 +582,34 @@ csCheck(($arrivalIntent['periods'][0]['start']??null)==='2026-09-01'
     &&array_column($arrivalIntent['aggregate_condition']['conditions'],'metric_code')===
         ['member_service_visit_count','sales_collected_amount'],
     'R55 recovered period and both registered conditions reach one intact binding');
+// A provider may distribute one AND population across two condition owners
+// and repeat each registered measurement in separate audit rows. The local
+// compiler must accept only the same two predicates, in the original order.
+$splitArrival=$arrivalMeaning;
+$firstCondition=$arrivalMeaning['requirements'][0]['values']['aggregate_condition']['conditions'][0];
+$secondCondition=$arrivalMeaning['requirements'][0]['values']['aggregate_condition']['conditions'][1];
+$splitPeriod=$arrivalPeriods[0];$splitPeriod['id']='r5';
+$splitArrival['requirements']=[
+    ['id'=>'r1','fields'=>['metric_codes','object_kind','operation','aggregate_condition'],
+        'values'=>['metric_terms'=>['到店'],'object_kind'=>'member','operation'=>'condition_list',
+            'aggregate_condition'=>['subject'=>'member','relation'=>'all','result_form'=>'list','conditions'=>[$firstCondition]]]],
+    ['id'=>'r2','fields'=>['metric_codes','aggregate_condition'],
+        'values'=>['metric_terms'=>['实际收款销售额'],
+            'aggregate_condition'=>['subject'=>'member','relation'=>'all','result_form'=>'list','conditions'=>[$secondCondition]]]],
+    ['id'=>'r3','fields'=>['metric_codes'],'values'=>['metric_terms'=>['到店']]],
+    ['id'=>'r4','fields'=>['metric_codes'],'values'=>['metric_terms'=>['实际收款销售额']]],
+    $splitPeriod,
+];
+$splitFailure=null;$splitContractFailure=null;
+$splitArgs=[$splitArrival,[
+    ['metric_code'=>'member_service_visit_count','object_contracts'=>[]],
+    ['metric_code'=>'sales_collected_amount','object_contracts'=>[]],
+],$arrivalSafe,&$splitFailure,&$splitContractFailure];
+$splitIntent=$registeredCondition->invokeArgs($gateway,$splitArgs);
+csCheck(($splitIntent['operation']??null)==='condition_list'
+    &&array_column($splitIntent['aggregate_condition']['conditions']??[],'metric_code')===
+        ['member_service_visit_count','sales_collected_amount'],
+    'R55 split condition owners retain both AND predicates: '.json_encode($splitContractFailure));
 $localWrongQuestion=$countSafe;
 $localWrongQuestion['question']='2026年消费4980并且积分200的有多少个人';
 $localWrongQuestion['evidence_messages'][0]['text']=$localWrongQuestion['question'];

@@ -1403,11 +1403,18 @@ final class AiGatewayServices
                 break;
             }
         }
+        $objectDetailRejection=null;
         $objectDetail=$conditionDetailIntent===null
-            ?$this->compileObjectDetailContinuation($understanding,$sourceContext,$body['output_format']):null;
+            ?$this->compileObjectDetailContinuation($understanding,$sourceContext,$body['output_format'],$objectDetailRejection):null;
         if ($objectDetail!==null) {
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_object_detail_continuation_admitted');
             return $objectDetail;
+        }
+        if ($objectDetailRejection!==null) {
+            // The rejected carrier is a fixed contract field name. Keep the
+            // reason per Run without retaining model text or prior result data.
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
+                'object_detail_reject_extra_field',$objectDetailRejection,'object_detail_reject_probe');
         }
         // A self-contained member population request may ask for both the
         // ranked/filtered set and its details. Keep the presentation request
@@ -1610,8 +1617,9 @@ final class AiGatewayServices
             ||$reusedPeriodIntent!==null
             ||$reusedRankingIntent!==null;
         $registeredConditionFailure=null;
+        $registeredConditionContractFailure=null;
         $registeredConditionIntent=$this->registeredConditionIntent(
-            $understanding,$summaries,$safe['outbound'],$registeredConditionFailure
+            $understanding,$summaries,$safe['outbound'],$registeredConditionFailure,$registeredConditionContractFailure
         );
         $registeredCoordinatedFailure=null;
         $registeredCoordinatedIntent=AiIntentResultContract::exactCoordinatedIntent(
@@ -1642,6 +1650,12 @@ final class AiGatewayServices
             // customer question into a technical failure.
             try {
                 $this->runs->recordDiagnostic($owner,$id,$generation,$worker,$registeredConditionFailure,'registered_condition_compile');
+            } catch (\Throwable $ignored) {}
+        }
+        if (is_array($registeredConditionContractFailure)) {
+            try {
+                $this->runs->recordDiagnostic($owner,$id,$generation,$worker,
+                    $registeredConditionContractFailure,'registered_condition_contract');
             } catch (\Throwable $ignored) {}
         }
         // These collection-only carriers are read after every binding path,
@@ -4769,7 +4783,7 @@ final class AiGatewayServices
      * subject, response form, periods, relation, operators, quantities and
      * requirement ownership, so this is not a phrase shortcut or fallback.
      */
-    private function registeredConditionIntent(array $understanding,array $capabilities,array $safeQuestion,?array &$failure=null): ?array
+    private function registeredConditionIntent(array $understanding,array $capabilities,array $safeQuestion,?array &$failure=null,?array &$contractFailure=null): ?array
     {
         $hasCondition=false;
         foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
@@ -4806,6 +4820,9 @@ final class AiGatewayServices
             // customer wording, thresholds, metric codes and model output are
             // intentionally excluded from Run diagnostics.
             $failure=$error->diagnostic();
+            // Keep the original bounded refusal in a separate Run slot: the
+            // structural counter below cannot identify which guard rejected it.
+            $contractFailure=$failure;
             $conditionCount=0;
             $conditionItems=[];
             foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
@@ -5239,7 +5256,7 @@ final class AiGatewayServices
      * Admits only a pure detail continuation. Mixed requests establish their
      * authorised population through the condition-list path before assets.
      */
-    private function compileObjectDetailContinuation(array $understanding,$sourceContext,string $outputFormat): ?array
+    private function compileObjectDetailContinuation(array $understanding,$sourceContext,string $outputFormat,?array &$rejection=null): ?array
     {
         if (($understanding['status']??null)!=='understood') return null;
         $detail=null;$statedObjectKind=null;
@@ -5290,7 +5307,12 @@ final class AiGatewayServices
             // A pure continuation may restate only its referenced object. Any
             // metric, period, condition, ranking or operation must go through
             // the normal registered query planner first.
-            if (array_diff($fields,['object_detail','member_detail','object_kind','object_relation'])!==[]) return null;
+            $extra=array_values(array_diff($fields,['object_detail','member_detail','object_kind','object_relation']));
+            if ($extra!==[]) {
+                $field=$extra[0];
+                $rejection=['field'=>is_string($field)&&preg_match('/^[a-z_]{1,32}$/D',$field)?$field:'other'];
+                return null;
+            }
             if (in_array('object_kind',$fields,true)) {
                 $kind=$requirement['values']['object_kind']??null;
                 if (!is_string($kind)||($statedObjectKind!==null&&$statedObjectKind!==$kind)) return null;

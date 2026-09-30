@@ -96,6 +96,19 @@ final class SiliconFlowClient
             // phrase, metric, report or customer-specific fallback.
             array_splice($messages,-1,0,[['role'=>'system','content'=>'For a continuation, record only meaning actually expressed in the current message. Do not restate a verified prior measurement as a current metric_codes requirement without current evidence. A result_reference is structurally eligible only when prior_query.operation is ranking and the current message identifies a displayed top or bottom ordinal, or explicitly refers to the singular result identified by prior_query.sole_result_reference; for every other prior operation omit result_reference completely. When a verified condition_count or legacy member threshold_count is followed only by a request to identify or list the matching objects, preserve that response-form change as operation=condition_list; when a verified condition_list is followed only by a request for the number of matching objects, preserve it as operation=condition_count. Identity-oriented wording such as “哪些”, “有哪些”, “谁”, “名单” or “list/which ones” requests condition_list even when the preceding answer was a number; quantity-oriented wording such as “多少”, “几个”, “几人”, “几家”, “几笔” or “how many” requests condition_count. These are language examples for the response form only: never use them to add, remove or reinterpret an object, metric, predicate, period or scope. In both directions the previous metrics, predicates, relation, thresholds, period and scope remain context rather than new current requirements. Do not change such a response-form continuation into summary or ranking. If the current turn changes only time, return only a periods requirement and quote the entire current message as its current evidence; context later retains the prior measurement.']]);
         }
+        // The provider has occasionally emitted an invented `other` field for
+        // a conjunction, forcing a full second model request. This final
+        // protocol reminder changes no business meaning: every predicate
+        // still needs its own typed evidence, and unsupported meaning must
+        // remain unresolved rather than being silently dropped.
+        array_splice($messages,-1,0,[['role'=>'system','content'=>'Final JSON check: requirement.fields contains only the protocol field names; never use "other". When one candidate population has multiple stated numeric predicates joined by AND or OR, preserve every predicate in the ordered aggregate_condition.conditions array with the stated relation and requested count/list form. Do not replace a predicate with a vague metric summary, omit an unsupported predicate, or infer a condition from an unrelated metric.']]);
+        if (($safeQuestion['prior_query']??null)!==null) {
+            // A pure presentation follow-up inherits only the verified query.
+            // This reminder does not suppress a genuinely new metric, date,
+            // filter or rank stated by the customer; those remain explicit
+            // requirements and still pass the ordinary strict compiler.
+            array_splice($messages,-1,0,[['role'=>'system','content'=>'For a continuation that only asks to inspect or expand a previously verified object or set, emit object_detail for that target. Do not copy the old metric, period, scope, operation or ranking into current requirements merely to describe the prior answer. If the current customer message actually changes any of them, preserve each new requirement with exact current-message evidence.']]);
+        }
         if ($repairPredicate!==null) {
             if (!AiIntentUnderstandingContract::repairable($repairPredicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
             // A structural correction must be the last trusted instruction

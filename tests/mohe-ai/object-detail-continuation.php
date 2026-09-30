@@ -211,6 +211,19 @@ $restrictedStoreSet=$storeSet;$restrictedStoreSet['query']=$restrictedStoreQuery
 $check($compile->invoke($gateway,$setWithScopeEcho,
         ['query'=>$restrictedStoreQuery,'view'=>$restrictedStoreSet],'screen')===null,
     'an authorised scope claim cannot silently widen a selected-store ranking');
+$newMetricSet=$setUnderstanding;
+$newMetricSet['requirements'][]=['id'=>'r3','meaning'=>'new measurement','fields'=>['metric_codes'],
+    'values'=>['metric_terms'=>['消耗业绩']]];
+$newMetricRejection=null;
+$newMetricArgs=[$newMetricSet,['query'=>$storeQuery,'view'=>$storeSet],'screen',&$newMetricRejection];
+$check($compile->invokeArgs($gateway,$newMetricArgs)===null
+    &&($newMetricRejection['field']??null)==='metric_codes',
+    'a newly stated measurement is rejected from signed-set replay with a bounded diagnostic');
+$newPeriodSet=$setUnderstanding;
+$newPeriodSet['requirements'][]=['id'=>'r3','meaning'=>'new time','fields'=>['periods'],
+    'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>-1]]]];
+$check($compile->invoke($gateway,$newPeriodSet,['query'=>$storeQuery,'view'=>$storeSet],'screen')===null,
+    'a newly stated period cannot replay the old ranked set');
 $recompiled=$compile->invoke($gateway,$understanding,['query'=>$storeDetailQuery,'view'=>$detailView],'screen');
 $check($recompiled['plan']['query']===$storeDetailQuery,'repeated store continuation preserves metrics dates and scope');
 $invalidSummary=$summaryView;$invalidSummary['query']['business_filters']['selection_ref']='cohort:metric_fact_participants';
