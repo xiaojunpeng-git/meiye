@@ -107,22 +107,20 @@ final class SiliconFlowClient
             // This reminder does not suppress a genuinely new metric, date,
             // filter or rank stated by the customer; those remain explicit
             // requirements and still pass the ordinary strict compiler.
-            array_splice($messages,-1,0,[['role'=>'system','content'=>'For a continuation that only asks to inspect or expand a previously verified object or set, emit object_detail for that target. Do not copy the old metric, period, scope, operation or ranking into current requirements merely to describe the prior answer. If the current customer message actually changes any of them, preserve each new requirement with exact current-message evidence.']]);
-        }
-        if ($repairPredicate!==null) {
-            if (!AiIntentUnderstandingContract::repairable($repairPredicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
-            // A structural correction must be the last trusted instruction
-            // before the JSON task.  Putting it at the start lets the much
-            // longer contract, Skills and vocabularies dilute the one bounded
-            // correction, which made an otherwise valid question fail twice.
-            // This changes no business meaning and supplies no missing value.
-            array_splice($messages,-1,0,[['role'=>'system','content'=>AiIntentUnderstandingContract::repairInstruction($repairPredicate)]]);
+            array_splice($messages,-1,0,[['role'=>'system','content'=>'For a continuation that refers to a previously verified object or complete displayed set, emit object_detail for that target. If it asks for each object’s value under a new measurement or time, also express operation=breakdown and each new metric_codes or periods requirement with exact current-message evidence. Do not copy the old metric, period, scope, operation or ranking into current requirements merely to describe the prior answer. Preserve any genuinely new filter or rank as an explicit requirement.']]);
         }
         // A verified prior result can resolve a genuine reference, but an
         // explicitly named current store must win. Keep this final reminder
         // short so it does not override the complete noun phrase above.
         if (($safeQuestion['prior_query']['sole_result_reference']??null)!==null) {
             array_splice($messages,-1,0,[['role'=>'system','content'=>'最终检查：先看完整的当前对象表达。当前明确指定的门店优先；只有当前问题确实回指上一条唯一门店结果时，才使用 prior_query.sole_result_reference，并用当前原文作证据。店内员工、项目或产品仍是本次分析对象。最多和最少属于同一指标的两个排名方向。']]);
+        }
+        if ($repairPredicate!==null) {
+            if (!AiIntentUnderstandingContract::repairable($repairPredicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+            // A bounded structural correction must be the last trusted
+            // instruction before the JSON task. It repairs protocol shape,
+            // never supplies a missing business value or relaxes evidence.
+            array_splice($messages,-1,0,[['role'=>'system','content'=>AiIntentUnderstandingContract::repairInstruction($repairPredicate)]]);
         }
         $payload=['model'=>$model,'stream'=>false,'max_tokens'=>self::INTENT_CARRIER_MAX_TOKENS,'temperature'=>0,'response_format'=>['type'=>'json_object'],'messages'=>$messages];
         $decoded=$this->request($payload,$apiKey,$timeoutMs,$checkpoint);

@@ -406,7 +406,7 @@ try {
     $view=[
         'query'=>['query_shape'=>'breakdown','metric_codes'=>['cash_performance'],
             'start_date'=>'2026-09-24','end_date'=>'2026-09-24','compare_range'=>null,
-            'store_ids'=>[1,2],'business_filters'=>['object_kind'=>'store'],'ranking'=>null,'aggregate_condition'=>null],
+            'store_ids'=>[],'business_filters'=>['object_kind'=>'store'],'ranking'=>null,'aggregate_condition'=>null],
         'results'=>[['period'=>'current','metric_code'=>'cash_performance','storage_unit'=>'fen',
             'object_kind'=>'store','object_label'=>'门店','has_more'=>false,'object_count'=>3,'list_limit'=>99,
             'active_object_count'=>2,'aggregate_value'=>1229500,
@@ -427,6 +427,21 @@ try {
     bdCheck(array_column($answer['table']['columns'],'label')===['门店','现金业绩（元）']
         &&($answer['table']['rows'][0]['metric_cash_performance']??null)==='12,345',
         'single-metric breakdown uses one concise business column');
+
+    $selectedZero=$view;
+    $selectedZero['query']['store_ids']=[1,2];
+    $selectedZero['results'][0]['rows']=[
+        ['entity_id'=>1,'entity_name'=>'甲店','amount_cents'=>0],
+        ['entity_id'=>2,'entity_name'=>'乙店','amount_cents'=>0],
+    ];
+    $selectedZero['results'][0]['object_count']=2;
+    $selectedZero['results'][0]['active_object_count']=0;
+    $selectedZero['results'][0]['aggregate_value']=0;
+    $selectedAnswer=(new AiAnswerRenderer())->render($selectedZero);
+    bdCheck(array_column($selectedAnswer['table']['rows']??[],'label')===['甲店','乙店']
+        && array_column($selectedAnswer['table']['rows']??[],'metric_cash_performance')===['0','0']
+        && strpos($selectedAnswer['summary'],'已隐藏')===false,
+        'a complete selected store set shows every Reader-backed zero instead of hiding named stores');
 
     $multi=$view;
     $multi['query']['metric_codes']=['cash_performance','sales_amount'];

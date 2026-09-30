@@ -224,6 +224,98 @@ $newPeriodSet['requirements'][]=['id'=>'r3','meaning'=>'new time','fields'=>['pe
     'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>-1]]]];
 $check($compile->invoke($gateway,$newPeriodSet,['query'=>$storeQuery,'view'=>$storeSet],'screen')===null,
     'a newly stated period cannot replay the old ranked set');
+// A mixed continuation may change the measurement and time while still
+// referring to exactly the stores displayed by the signed ranking. The
+// returned query must read those IDs again through the normal Reader.
+$setValues=$gatewayClass->getMethod('compileVerifiedStoreSetValuesContinuation');
+$setQuestion='这两家上个月的消耗业绩分别是多少';
+$setSafe=['schema_version'=>'sanitized-question-v2','question'=>$setQuestion,
+    'has_unresolved_conditions'=>false,'server_resolved_fields'=>[],'reference_date'=>'2026-09-25',
+    'recent_questions'=>[],'evidence_messages'=>[['id'=>'current','text'=>$setQuestion]],
+    'prior_query'=>['operation'=>'ranking']];
+$mixedSet=AiIntentUnderstandingContract::normalize(['goal'=>'逐店查看原集合的新指标','status'=>'understood',
+    'requirements'=>[
+        ['id'=>'r1','meaning'=>'引用上一次显示的全部门店','fields'=>['object_detail'],
+            'values'=>['object_detail'=>['view'=>'summary','target'=>'set','ordinal'=>null]],
+            'evidence'=>[['message_id'=>'current','quote'=>'这两家']]],
+        ['id'=>'r2','meaning'=>'逐店查看消耗业绩','fields'=>['metric_codes','operation'],
+            'values'=>['metric_terms'=>['消耗业绩'],'operation'=>'breakdown'],
+            'evidence'=>[['message_id'=>'current','quote'=>'消耗业绩分别是多少']]],
+        ['id'=>'r3','meaning'=>'改为上个月','fields'=>['periods'],
+            'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>-1]]],
+            'evidence'=>[['message_id'=>'current','quote'=>'上个月']]],
+    ]],$setSafe);
+$setCaps=['metric_codes'=>['cash_performance','consume_amount'],'store_ids'=>[3,4]];
+$mixedPlan=$setValues->invoke($gateway,$mixedSet,['query'=>$storeQuery,'view'=>$storeSet],
+    $setSafe,$setCaps,'screen','2026-09-25');
+$mixedQuery=$mixedPlan['plan']['query']??[];
+$check(($mixedPlan['kind']??null)==='plan' && ($mixedQuery['query_shape']??null)==='breakdown'
+    &&($mixedQuery['store_ids']??null)===[3,4] &&($mixedQuery['metric_codes']??null)===['consume_amount']
+    &&($mixedQuery['start_date']??null)==='2026-08-01' &&($mixedQuery['end_date']??null)==='2026-08-31'
+    &&array_key_exists('ranking',$mixedQuery) &&$mixedQuery['ranking']===null,
+    'mixed set continuation retains exact displayed stores and replaces only requested metric and period: '.json_encode($mixedQuery));
+$check(($readerQuery->invoke($readView,$mixedQuery)['store_ids']??null)===[3,4],
+    'the ordinary Reader admits the signed-store breakdown with the new metric and period');
+$implicitSet=$mixedSet;array_shift($implicitSet['requirements']);
+$implicitPlan=$setValues->invoke($gateway,$implicitSet,['query'=>$storeQuery,'view'=>$storeSet],
+    $setSafe,$setCaps,'screen','2026-09-25');
+$check(($implicitPlan['plan']['query']['store_ids']??null)===[3,4]
+    &&($implicitPlan['plan']['query']['metric_codes']??null)===['consume_amount']
+    &&($implicitPlan['plan']['query']['start_date']??null)==='2026-08-01',
+    'a complete plural reference recovers the model-omitted object-detail marker without guessing identities');
+$implicitStoreTerm=$implicitSet;
+$implicitStoreTerm['requirements'][]=['id'=>'r4','meaning'=>'当前提到的这两家','fields'=>['store_term'],
+    'values'=>['store_term'=>'这两家'],'evidence'=>[['message_id'=>'current','quote'=>'这两家']]];
+$check(($setValues->invoke($gateway,$implicitStoreTerm,['query'=>$storeQuery,'view'=>$storeSet],
+    $setSafe,$setCaps,'screen','2026-09-25')['plan']['query']['store_ids']??null)===[3,4],
+    'a model-mislabeled deictic store term resolves only to the complete signed set');
+$namedStoreTerm=$implicitStoreTerm;$namedStoreTerm['requirements'][2]['values']['store_term']='另一门店';
+$check($setValues->invoke($gateway,$namedStoreTerm,['query'=>$storeQuery,'view'=>$storeSet],
+    $setSafe,$setCaps,'screen','2026-09-25')===null,
+    'a named store term is never silently replaced by the previous set');
+$mismatchSafe=$setSafe;$mismatchSafe['question']='这三家上个月的消耗业绩分别是多少';
+$check($setValues->invoke($gateway,$implicitSet,['query'=>$storeQuery,'view'=>$storeSet],
+    $mismatchSafe,$setCaps,'screen','2026-09-25')===null,
+    'a stated set size that differs from the signed rows cannot borrow identities');
+$extraSafe=$setSafe;$extraSafe['question']='这两家上个月的消耗业绩分别是多少，不含退款';
+$check($setValues->invoke($gateway,$implicitSet,['query'=>$storeQuery,'view'=>$storeSet],
+    $extraSafe,$setCaps,'screen','2026-09-25')===null,
+    'an unmodeled extra business condition blocks implicit set reuse');
+$otherStoreSafe=$setSafe;$otherStoreSafe['question']='这两家和另一家上个月的消耗业绩分别是多少';
+$check($setValues->invoke($gateway,$implicitSet,['query'=>$storeQuery,'view'=>$storeSet],
+    $otherStoreSafe,$setCaps,'screen','2026-09-25')===null,
+    'a newly named store cannot be swallowed by the prior-set reference');
+$periodOnlySet=$mixedSet;$periodOnlySet['requirements'][1]['fields']=['operation'];
+$periodOnlySet['requirements'][1]['values']=['operation'=>'breakdown'];
+$periodOnlyQuestion='这两家上个月分别是多少';
+$periodOnlySafe=$setSafe;$periodOnlySafe['question']=$periodOnlyQuestion;
+$periodPlan=$setValues->invoke($gateway,$periodOnlySet,['query'=>$storeQuery,'view'=>$storeSet],
+    $periodOnlySafe,$setCaps,'screen','2026-09-25');
+$check(($periodPlan['plan']['query']['metric_codes']??null)===['cash_performance']
+    &&($periodPlan['plan']['query']['store_ids']??null)===[3,4],
+    'period-only set values retain the verified metric and store identities');
+$metricOnlySet=$mixedSet;array_pop($metricOnlySet['requirements']);
+$metricOnlyQuestion='这两家的消耗业绩分别是多少';
+$metricOnlySafe=$setSafe;$metricOnlySafe['question']=$metricOnlyQuestion;
+$metricPlan=$setValues->invoke($gateway,$metricOnlySet,['query'=>$storeQuery,'view'=>$storeSet],
+    $metricOnlySafe,$setCaps,'screen','2026-09-25');
+$check(($metricPlan['plan']['query']['start_date']??null)==='2026-09-01'
+    &&($metricPlan['plan']['query']['metric_codes']??null)===['consume_amount'],
+    'metric-only set values retain the verified period');
+$check($setValues->invoke($gateway,$periodOnlySet,['query'=>$storeQuery,'view'=>$storeSet],
+    $setSafe,$setCaps,'screen','2026-09-25')===null,
+    'a model omission cannot silently inherit a metric explicitly stated in the current turn');
+$check($setValues->invoke($gateway,$metricOnlySet,['query'=>$storeQuery,'view'=>$storeSet],
+    $setSafe,$setCaps,'screen','2026-09-25')===null,
+    'a model omission cannot silently inherit a period explicitly stated in the current turn');
+$newRankSet=$mixedSet;$newRankSet['requirements'][]=['id'=>'r4','fields'=>['ranking'],
+    'values'=>['ranking'=>['direction'=>'bottom','limit'=>3]]];
+$check($setValues->invoke($gateway,$newRankSet,['query'=>$storeQuery,'view'=>$storeSet],
+    $setSafe,$setCaps,'screen','2026-09-25')===null,
+    'a newly stated ranking never enters set-values reuse');
+$check($setValues->invoke($gateway,$mixedSet,['query'=>$storeQuery,'view'=>$storeSet],
+    $setSafe,['metric_codes'=>['cash_performance','consume_amount'],'store_ids'=>[3]],'screen','2026-09-25')===null,
+    'a displayed store outside current authority cannot be queried');
 $recompiled=$compile->invoke($gateway,$understanding,['query'=>$storeDetailQuery,'view'=>$detailView],'screen');
 $check($recompiled['plan']['query']===$storeDetailQuery,'repeated store continuation preserves metrics dates and scope');
 $invalidSummary=$summaryView;$invalidSummary['query']['business_filters']['selection_ref']='cohort:metric_fact_participants';

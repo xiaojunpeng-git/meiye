@@ -1416,6 +1416,13 @@ final class AiGatewayServices
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
                 'object_detail_reject_extra_field',$objectDetailRejection,'object_detail_reject_probe');
         }
+        $storeSetValues=$this->compileVerifiedStoreSetValuesContinuation(
+            $understanding,$sourceContext,$safe['outbound'],$caps,$body['output_format'],$today
+        );
+        if ($storeSetValues!==null) {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_store_set_values_continuation_admitted');
+            return $storeSetValues;
+        }
         // A self-contained member population request may ask for both the
         // ranked/filtered set and its details. Keep the presentation request
         // beside the plan while binding only the population query; otherwise
@@ -5369,6 +5376,156 @@ final class AiGatewayServices
         }
         return ['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_'.$query['query_shape'],'query'=>$query,
             'output_format'=>$outputFormat], '_context_meaning'=>(array)($sourceContext['meaning']??[])];
+    }
+
+    /**
+     * Requery values for the exact stores displayed by a signed ranking when
+     * the current meaning requests a per-store view with a new metric or time.
+     * Only the language model identifies the set reference; the immutable
+     * read view supplies identities, and the normal compiler and Reader still
+     * enforce metric capability, dates and current store authority.
+     */
+    private function compileVerifiedStoreSetValuesContinuation(
+        array $understanding,$sourceContext,array $safeQuestion,array $capabilities,string $outputFormat,string $today
+    ): ?array {
+        if (($understanding['status']??null)!=='understood' || !is_array($sourceContext)
+            || !is_array($sourceContext['query']??null) || !is_array($sourceContext['view']??null)) return null;
+        $source=$sourceContext['query'];
+        if (($source['query_shape']??null)!=='ranking'
+            || ($source['business_filters']['object_kind']??'store')!=='store'
+            || !empty($source['aggregate_condition']) || !empty($source['condition_set'])
+            || !empty($sourceContext['items']??[])) return null;
+        $detail=null;$metricTerms=null;$periods=null;$operation=null;$storeTerm=null;
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            $fields=(array)($requirement['fields']??[]);$values=(array)($requirement['values']??[]);
+            if (array_diff($fields,['object_detail','object_kind','object_relation','metric_codes','periods','operation','store_term'])!==[]
+                || !empty($values['metric_exclusions'])) return null;
+            if (in_array('object_detail',$fields,true)) {
+                if ($detail!==null || !is_array($values['object_detail']??null)) return null;
+                $detail=$values['object_detail'];
+            }
+            if (in_array('object_kind',$fields,true) && ($values['object_kind']??null)!=='store') return null;
+            if (in_array('object_relation',$fields,true)
+                && !in_array($values['object_relation']??null,['analysis','selection'],true)) return null;
+            if (in_array('metric_codes',$fields,true)) {
+                if ($metricTerms!==null || !is_array($values['metric_terms']??null)) return null;
+                $metricTerms=$values['metric_terms'];
+            }
+            if (in_array('periods',$fields,true)) {
+                if ($periods!==null || !is_array($values['periods']??null)
+                    || count($values['periods'])!==1) return null;
+                $periods=$values['periods'];
+            }
+            if (in_array('operation',$fields,true)) {
+                if ($operation!==null || ($values['operation']??null)!=='breakdown') return null;
+                $operation='breakdown';
+            }
+            if (in_array('store_term',$fields,true)) {
+                if ($storeTerm!==null || !is_string($values['store_term']??null)) return null;
+                $storeTerm=$values['store_term'];
+            }
+        }
+        // Some language-model answers correctly carry the new breakdown,
+        // measurement and date but omit object_detail for a demonstrative
+        // plural reference. Admit that omission only when a closed, generic
+        // reference grammar proves the whole current utterance addresses the
+        // previous set; it never chooses a store or supplies a metric/date.
+        $statedSetCount=null;
+        if ($detail===null) {
+            $statedSetCount=$this->closedStoreSetReference(
+                (string)($safeQuestion['question']??''),$metricTerms,$periods,$storeTerm
+            );
+            if ($statedSetCount===false) return null;
+            $detail=['view'=>'summary','target'=>'set','ordinal'=>null];
+        } elseif ($storeTerm!==null) return null;
+        $detailKeys=is_array($detail)?array_keys($detail):[];sort($detailKeys,SORT_STRING);
+        if ($detailKeys!==['ordinal','target','view']
+            || ($detail['view']??null)!=='summary' || ($detail['target']??null)!=='set'
+            || ($detail['ordinal']??null)!==null
+            || $operation!=='breakdown' || ($metricTerms===null && $periods===null)) return null;
+        // Independent, existing registry/calendar projections are omission
+        // guards only. They cannot supply a missing model requirement or pick
+        // an identity; an incomplete current turn stays on normal binding.
+        $statedMetrics=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText(
+            (string)($safeQuestion['question']??''),(array)($capabilities['metric_codes']??[])
+        );
+        $calendar=\app\services\ai\semantic\AiSemanticIntentParser::calendarEvidence(
+            (string)($safeQuestion['question']??'')
+        );
+        if (($calendar['complete']??false)!==true
+            || count((array)($calendar['periods']??[]))!==($periods===null?0:1)
+            || count($statedMetrics)!==($metricTerms===null?0:1)) return null;
+        $metric=$source['metric_codes'][0]??null;
+        if ($metricTerms!==null) {
+            foreach ($metricTerms as $term) if (!is_string($term)
+                || mb_strpos((string)($safeQuestion['question']??''),$term,0,'UTF-8')===false) return null;
+            $metric=\app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms(
+                $metricTerms,(array)($capabilities['metric_codes']??[])
+            );
+            if ($metric!==($statedMetrics[0]['metric_code']??null)) return null;
+        }
+        if (!is_string($metric) || !in_array($metric,(array)($capabilities['metric_codes']??[]),true)) return null;
+        $resolved=(new \app\services\ai\context\ObjectDetailContinuationResolver())->resolve(
+            $source,$sourceContext['view'],$detail
+        );
+        if (($resolved['object_kind']??null)!=='store' || !is_array($resolved['objects']??null)) return null;
+        $ids=array_column($resolved['objects'],'id');
+        if ($ids===[] || count($ids)>20 || count(array_unique($ids))!==count($ids)
+            || ($statedSetCount!==null && count($ids)!==$statedSetCount)
+            || array_diff($ids,(array)($capabilities['store_ids']??[]))!==[]
+            || (!empty($source['store_ids']) && array_diff($ids,$source['store_ids'])!==[])) return null;
+        $query=$source;
+        $query['query_shape']='breakdown';$query['metric_codes']=[$metric];$query['store_ids']=$ids;
+        $query['business_filters']=['object_kind'=>'store'];$query['ranking']=null;
+        $query['ranking_presentation_metrics']=[];$query['aggregate_condition']=null;
+        $query['compare_range']=null;unset($query['condition_set']);
+        if ($periods!==null) {
+            $range=(new AiWorkflowPlanner())->normalizeNaturalPeriod($periods[0],$today);
+            $query['start_date']=$range['start'];$query['end_date']=$range['end'];
+        }
+        return ['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_breakdown',
+            'query'=>$query,'output_format'=>$outputFormat],
+            '_context_meaning'=>(array)($sourceContext['meaning']??[])];
+    }
+
+    /**
+     * Recognises only a complete plural back-reference, not a report intent.
+     * Return false when any additional wording remains outside the already
+     * typed metric, period and harmless question grammar; an integer denotes
+     * a stated set size, while null means an unnumbered but explicit plural.
+     */
+    private function closedStoreSetReference(string $question,?array $metricTerms,?array $periods,?string $storeTerm)
+    {
+        $reference='/((?:这|那)(?<count>[0-9]+|[一二两三四五六七八九十]+|几|些)家(?:门店)?|(?:这些|那些|上述|前述)(?:门店|店))/u';
+        if (preg_match_all($reference,$question,$matches,PREG_SET_ORDER|PREG_OFFSET_CAPTURE)!==1) return false;
+        $match=$matches[0];$stated=$match['count'][0]??'';
+        // The model may mislabel the demonstrative itself as a store name.
+        // It is safe to discard only an exact copy of that current reference;
+        // a different or named store still requires ordinary resolution.
+        if ($storeTerm!==null && $storeTerm!==$match[0][0]) return false;
+        $count=null;
+        if ($stated!=='' && $stated!=='几' && $stated!=='些') {
+            $digits=['一'=>1,'二'=>2,'两'=>2,'三'=>3,'四'=>4,'五'=>5,'六'=>6,'七'=>7,'八'=>8,'九'=>9,'十'=>10];
+            if (ctype_digit($stated)) $count=(int)$stated;
+            elseif (isset($digits[$stated])) $count=$digits[$stated];
+            elseif (preg_match('/^([一二三四五六七八九])?十([一二三四五六七八九])?$/uD',$stated,$parts)) {
+                $count=($digits[$parts[1]??'']??1)*10+($digits[$parts[2]??'']??0);
+            }
+            if ($count===null || $count<1 || $count>20) return false;
+        }
+        $remaining=substr_replace($question,'',$match[0][1],strlen($match[0][0]));
+        $calendar=\app\services\ai\semantic\AiSemanticIntentParser::calendarEvidence($remaining);
+        if (($calendar['complete']??false)!==true
+            || count((array)($calendar['periods']??[]))!==($periods===null?0:1)) return false;
+        $remaining=str_replace('【日期】','',(string)$calendar['remainder']);
+        foreach ((array)$metricTerms as $term) {
+            if (!is_string($term) || mb_strpos($remaining,$term,0,'UTF-8')===false) return false;
+            $remaining=str_replace($term,'',$remaining);
+        }
+        // Keep this deliberately small. A new named object, exclusion,
+        // ranking or unparsed business condition must take the normal path.
+        $remaining=preg_replace('/(?:请|帮我|把|给我|查|看|一下|的|分别|各自|每家|每个|各|是多少|多少|数值|金额|[\\s，,。？?])/u','',$remaining);
+        return $remaining===''?$count:false;
     }
 
     /**

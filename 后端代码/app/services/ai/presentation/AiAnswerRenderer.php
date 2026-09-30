@@ -155,11 +155,17 @@ final class AiAnswerRenderer
             // All visible columns are projected from the same verified Reader
             // evidence. One entity stays on one row; missing evidence remains
             // absent so clients render a neutral dash instead of inventing 0.
-            $presentation=$this->pivotBreakdownRows($rows,$breakdownColumns);
+            // A bounded, explicitly selected store set asks for every named
+            // store's value. Keep Reader-provided zero rows in that case;
+            // broad all-store breakdowns still omit irrelevant zero rows.
+            $selectedStores=(array)($view['query']['store_ids']??[]);
+            $preserveSelectedZeros=($view['query']['business_filters']['object_kind']??null)==='store'
+                && $selectedStores!==[] && count($selectedStores)<=self::BREAKDOWN_SCREEN_LIMIT;
+            $presentation=$this->pivotBreakdownRows($rows,$breakdownColumns,$preserveSelectedZeros);
             $rows=$presentation['rows'];$breakdownHiddenZeroCount=$presentation['hidden_zero_count'];
             $exactActive=count($breakdownEvidence)===1?($breakdownEvidence[array_key_first($breakdownEvidence)]['active_count']??null):null;
             $exactObjects=count($breakdownEvidence)===1?($breakdownEvidence[array_key_first($breakdownEvidence)]['object_count']??null):null;
-            if (is_int($exactObjects)&&is_int($exactActive)&&$exactObjects>=$exactActive) {
+            if (!$preserveSelectedZeros && is_int($exactObjects)&&is_int($exactActive)&&$exactObjects>=$exactActive) {
                 $breakdownHiddenZeroCount=$exactObjects-$exactActive;
             }
             $sourceHasUsefulMore=$breakdownHasMore && (!is_int($exactActive)||$exactActive>$presentation['loaded_active_count']);
@@ -244,7 +250,7 @@ final class AiAnswerRenderer
      * @param array<string,array{label:string,unit:string}> $columns
      * @return array<int,array<string,mixed>>
      */
-    private function pivotBreakdownRows(array $rows,array $columns): array
+    private function pivotBreakdownRows(array $rows,array $columns,bool $preserveSelectedZeros=false): array
     {
         $grouped=[];$order=[];
         foreach ($rows as $row) {
@@ -270,12 +276,13 @@ final class AiAnswerRenderer
             if ($row['raw_value']!==0) $grouped[$key]['_has_non_zero']=true;
         }
         $projected=array_map(static function(string $key)use($grouped):array {return $grouped[$key];},$order);
-        $active=[];$hidden=0;
+        $active=[];$hidden=0;$loadedActive=0;
         foreach ($projected as $row) {
-            if (!$row['_has_non_zero']) {++$hidden;continue;}
+            if ($row['_has_non_zero']) ++$loadedActive;
+            elseif (!$preserveSelectedZeros) {++$hidden;continue;}
             unset($row['_has_non_zero']);$active[]=$row;
         }
-        $loadedActive=count($active);$hasMore=$loadedActive>self::BREAKDOWN_SCREEN_LIMIT;
+        $hasMore=count($active)>self::BREAKDOWN_SCREEN_LIMIT;
         if ($hasMore) $active=array_slice($active,0,self::BREAKDOWN_SCREEN_LIMIT);
         return ['rows'=>$active,'hidden_zero_count'=>$hidden,'loaded_active_count'=>$loadedActive,'has_more'=>$hasMore];
     }
