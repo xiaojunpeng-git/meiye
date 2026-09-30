@@ -65,6 +65,11 @@ foreach(['2026年9月来源A的会员有几个','会员详情','第一个会员�
     }
     if ($index===3 && (strpos((string)$run['answer']['summary'],'来源为B')===false
         ||strpos((string)$run['answer']['summary'],'2026-09-01 至 2026-09-30')===false)) {
+        echo json_encode(['source_swap_probe'=>[
+            'source_b'=>strpos((string)$run['answer']['summary'],'来源为B')!==false,
+            'september'=>strpos((string)$run['answer']['summary'],'2026-09-01 至 2026-09-30')!==false,
+            'today'=>strpos((string)$run['answer']['summary'],'2026-10-01 至 2026-10-01')!==false,
+            'summary_length'=>mb_strlen((string)$run['answer']['summary'])]],JSON_UNESCAPED_UNICODE),PHP_EOL;
         throw new RuntimeException('AI_SOURCE_SWAP_FAILED');
     }
     if ($index===4 && strpos((string)$run['answer']['summary'],'2026-10-01 至 2026-10-01')===false) {

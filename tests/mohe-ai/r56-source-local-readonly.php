@@ -15,8 +15,12 @@ $admission=new app\services\ai\semantic\AiFirstCourseSourceAdmission();
 $fresh=$admission->match('这个月来源A的会员有几个');
 $check(($fresh['source_term']??null)==='A' && ($fresh['period']['code']??null)==='THIS_MONTH'
     && ($fresh['form']??null)==='count','SOURCE_QUESTION_NOT_ADMITTED');
+$check(($admission->match('来源B的会员有几个')['source_term']??null)==='B',
+    'COMPLETE_SOURCE_REPLACEMENT_NOT_ADMITTED');
 $check($admission->match('这个月来源A并且消费980的会员有几个')===null,'EXTRA_CONDITION_DROPPED');
-$check(($admission->match('会员详情',true)['detail']??false)===true,'DETAIL_FOLLOWUP_NOT_ADMITTED');
+// A previous result must enter the shared semantic/context path; this closed
+// first-question grammar cannot silently rebuild a narrower follow-up query.
+$check($admission->match('会员详情')===null,'DETAIL_FOLLOWUP_BYPASSED_SEMANTIC_PATH');
 $catalog=new app\services\query\metric\FirstCourseSourceCatalog();
 $source=$catalog->resolve('A');
 $check(($source['source_primary_id']??0)>0 && ($source['source_secondary_id']??-1)===0,'SOURCE_DIRECTORY_MISSING');

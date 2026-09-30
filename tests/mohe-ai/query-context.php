@@ -61,6 +61,19 @@ qcCheck($merged['intent']['metric_codes']===['staff_labor_yeji']&&$merged['inten
 qcCheck($merged['intent']['ranking']===['direction'=>'top','limit'=>1],'time-only continuation preserves singular ranking without defaulting to five');
 qcCheck($merged['intent']['periods']===$intent['periods'],'explicit replacement changes only period');
 qcCheck($merged['constraints']['business_filters']===$source['business_filters']&&$merged['constraints']['store_ids']===[1],'delta preserves verified constraints only when explicit inherit');
+$sourceFilters=['object_kind'=>'member','source_primary_id'=>17];
+$conditionPlaceholder=['kind'=>'plan','plan'=>['query'=>['store_ids'=>[],'business_filters'=>['object_kind'=>'member']]]];
+$boundSource=IntentContextMerger::bind($conditionPlaceholder,['store_ids'=>[1],'business_filters'=>$sourceFilters]);
+qcCheck($boundSource['plan']['query']['store_ids']===[1]&&$boundSource['plan']['query']['business_filters']===$sourceFilters,
+    'one-field analytical kind placeholder receives the full signed store and source filters');
+$changedSource=$conditionPlaceholder;$changedSource['plan']['query']['business_filters']['source_primary_id']=19;
+qcReject(function()use($changedSource,$sourceFilters){
+    IntentContextMerger::bind($changedSource,['store_ids'=>[1],'business_filters'=>$sourceFilters]);
+},'AI_CONTEXT_DELTA_CONFLICT');
+$changedKind=$conditionPlaceholder;$changedKind['plan']['query']['business_filters']=['object_kind'=>'person'];
+qcReject(function()use($changedKind,$sourceFilters){
+    IntentContextMerger::bind($changedKind,['store_ids'=>[1],'business_filters'=>$sourceFilters]);
+},'AI_CONTEXT_DELTA_CONFLICT');
 $limit=$intent;$limit['ranking']=['direction'=>'unspecified','limit'=>5];$limit['context_delta']['ranking_limit']='replace';
 $limitMerged=IntentContextMerger::merge($source,qcNormalize($limit,$safe));
 qcCheck($limitMerged['intent']['ranking']===['direction'=>'top','limit'=>5],'changing first to first five retains direction through protocol');

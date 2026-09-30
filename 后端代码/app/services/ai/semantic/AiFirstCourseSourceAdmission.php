@@ -9,7 +9,12 @@ namespace app\services\ai\semantic;
  */
 final class AiFirstCourseSourceAdmission
 {
-    public function match(string $question,bool $hasPriorSource=false): ?array
+    /**
+     * Admit only a self-contained categorical question with no unrecognized
+     * predicate. A caller may merge signed scope into that complete request;
+     * incomplete follow-ups must use typed semantic understanding instead.
+     */
+    public function match(string $question): ?array
     {
         if ($question==='' || preg_match('//u',$question)!==1) return null;
         $calendar=AiSemanticIntentParser::calendarEvidence($question);
@@ -22,16 +27,6 @@ final class AiFirstCourseSourceAdmission
             $form=$this->form($match[2]);
             return ['source_term'=>$term,'period'=>$calendar['periods'][0]??null,
                 'form'=>$form,'detail'=>$match[2]==='详情'];
-        }
-        if (!$hasPriorSource) return null;
-        if ($calendar['periods']===[] && preg_match('/^(?:换成|改成|再看|看)?(?:来源|渠道)(.+?)(?:呢)?$/uD',$clean,$match)) {
-            $term=(string)preg_replace('/的$/u','',$match[1]);
-            return $this->validTerm($term)
-                ?['source_term'=>$term,'period'=>null,'form'=>null,'detail'=>false]:null;
-        }
-        if ($calendar['periods']===[] && preg_match('/^(?:这(?:些|批))?(?:会员|客户)(?:的)?(详情|名单|有哪些|哪些|有几个|多少人)$/uD',$clean,$match)) {
-            return ['source_term'=>null,'period'=>null,'form'=>$this->form($match[1]),
-                'detail'=>$match[1]==='详情'];
         }
         return null;
     }

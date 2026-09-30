@@ -197,12 +197,32 @@ final class IntentContextMerger
         $resolved['status']='resolved';$resolved['objects']=$matches;return $resolved;
     }
 
+    /**
+     * Complete a compiled query with replay-verified scope and filters.
+     * The compiler may provide only an object-kind placeholder; explicit
+     * customer conditions or identities must agree exactly with the signed
+     * predecessor and can never be silently replaced.
+     */
     public static function bind(array $compiled,?array $constraints): array
     {
         if ($constraints===null) return $compiled;
         if (($compiled['kind']??null)==='clarification') {$compiled['inherited_query_constraints']=$constraints;return $compiled;}
         if (($compiled['kind']??null)!=='plan'||!is_array($compiled['plan']['query']??null)) return $compiled;
-        foreach(['store_ids','business_filters'] as $key){if(!array_key_exists($key,$constraints)||($constraints[$key]!==null&&!is_array($constraints[$key])))self::conflict();if($constraints[$key]===null)continue;$value=$compiled['plan']['query'][$key];if($value!==[]&&$value!==$constraints[$key])self::conflict();$compiled['plan']['query'][$key]=$constraints[$key];}
+        foreach (['store_ids','business_filters'] as $key) {
+            if (!array_key_exists($key,$constraints) || ($constraints[$key]!==null && !is_array($constraints[$key]))) self::conflict();
+            if ($constraints[$key]===null) continue;
+            $value=$compiled['plan']['query'][$key]??null;
+            if (!is_array($value)) self::conflict();
+            // A condition compiler identifies the analytical row kind before
+            // signed context supplies its complete business filter. Only that
+            // one-field placeholder may be completed; a new source, identity
+            // or other customer condition must never overwrite the predecessor.
+            $kindPlaceholder=$key==='business_filters' && count($value)===1
+                && isset($value['object_kind'],$constraints[$key]['object_kind'])
+                && $value['object_kind']===$constraints[$key]['object_kind'];
+            if ($value!==[] && $value!==$constraints[$key] && !$kindPlaceholder) self::conflict();
+            $compiled['plan']['query'][$key]=$constraints[$key];
+        }
         return $compiled;
     }
 

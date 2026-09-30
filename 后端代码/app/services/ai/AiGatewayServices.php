@@ -960,19 +960,20 @@ final class AiGatewayServices
                 $sourceContext=$this->restoreContext($context,$owner,$body['context_ref']);
             }
         }
-        // A complete source/member question is a closed categorical cohort,
-        // not a numerical condition that the model may paraphrase away. The
-        // directory, registry and signed Reader still own every executable
-        // ID, date, population and permission boundary.
+        // A prior source cohort still matters when a *complete* unrelated
+        // store summary is admitted below. This flag does not interpret a
+        // source follow-up or rebuild any of its signed filters.
         $priorSourceQuery=is_array($sourceContext['query']??null)?$sourceContext['query']:null;
         $priorSource=$priorSourceQuery!==null && \app\services\query\metric\FirstCourseSourceFilter::valid(
             (array)($priorSourceQuery['business_filters']??[]),
             (array)($priorSourceQuery['metric_codes']??[]),
             (array)($priorSourceQuery['condition_set']??[])
         );
-        $sourceRequest=(new \app\services\ai\semantic\AiFirstCourseSourceAdmission())->match(
-            (string)$body['question'],$priorSource
-        );
+        // Only a *complete* categorical source question uses this closed
+        // grammar. A verified predecessor may supply its signed period and
+        // store scope when both questions concern the same source cohort;
+        // open follow-ups such as "明细呢" use typed semantic understanding.
+        $sourceRequest=(new \app\services\ai\semantic\AiFirstCourseSourceAdmission())->match((string)$body['question']);
         if ($sourceRequest!==null) {
             $code='member_first_course_count';
             $ready=$caps['metric_readiness'][$code]??null;
@@ -980,13 +981,10 @@ final class AiGatewayServices
                 ||!in_array('condition_count',(array)($ready['query_shapes']??[]),true)) {
                 throw new RuntimeException('AI_CAPABILITY_NOT_READY');
             }
-            $source=$sourceRequest['source_term']===null
-                ?$priorSourceQuery['business_filters']
-                :(new \app\services\query\metric\FirstCourseSourceCatalog())->resolve($sourceRequest['source_term']);
+            $source=(new \app\services\query\metric\FirstCourseSourceCatalog())->resolve($sourceRequest['source_term']);
             $filter=['object_kind'=>'member','source_primary_id'=>(int)$source['source_primary_id']];
             if ((int)($source['source_secondary_id']??0)>0) $filter['source_secondary_id']=(int)$source['source_secondary_id'];
-            $shape=($sourceRequest['form']??null)==='list'?'condition_list'
-                :(($sourceRequest['form']??null)==='count'?'condition_count':($priorSourceQuery['query_shape']??'condition_count'));
+            $shape=$sourceRequest['form']==='list'?'condition_list':'condition_count';
             $period=$sourceRequest['period'];
             $range=$period!==null?(new AiWorkflowPlanner())->normalizePeriod($period,$today)
                 :($priorSource?['start'=>$priorSourceQuery['start_date'],'end'=>$priorSourceQuery['end_date']]
@@ -996,13 +994,14 @@ final class AiGatewayServices
             $set=(new AiConditionSetCompiler())->compile($binding,$caps,$shape);
             $query=['query_shape'=>$shape,'metric_codes'=>[$code],
                 'start_date'=>$range['start'],'end_date'=>$range['end'],'compare_range'=>null,
-                'store_ids'=>[],'business_filters'=>$filter,'ranking'=>null,
+                'store_ids'=>$priorSource?(array)$priorSourceQuery['store_ids']:[],
+                'business_filters'=>$filter,'ranking'=>null,
                 'aggregate_condition'=>$binding,'condition_set'=>$set];
-            if (!$priorSource && $sourceContext!==null) $this->runs->markTopicReset($owner,$id,$generation,$worker);
             $compiled=['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_'.$shape,
                 'query'=>$query,'output_format'=>$body['output_format']],
                 '_context_meaning'=>['presentation_origin'=>'customer_or_verified_context']];
             if ($sourceRequest['detail']) $compiled['_member_detail_request']=['view'=>'summary','target'=>'set','ordinal'=>null];
+            if ($sourceContext!==null && !$priorSource) $this->runs->markTopicReset($owner,$id,$generation,$worker);
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_first_course_source_admitted');
             return $compiled;
         }
@@ -1995,19 +1994,10 @@ final class AiGatewayServices
             $merged=IntentContextMerger::merge($sourceQuery,$intent);
         } catch (RuntimeException $error) {
             if ($error->getMessage()==='AI_CONTEXT_DELTA_CONFLICT') {
-                // Store only structural enums and booleans. This makes a real
-                // context failure diagnosable without persisting the question,
-                // object label, identity, result or model response.
-                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'context_merge_conflict',[
-                    'object_kind'=>(string)($intent['object_kind']??'unknown'),
-                    'object_relation'=>(string)($intent['object_relation']??'unknown'),
-                    'masked_object_term'=>is_string($intent['object_term']??null)
-                        && preg_match('/^\[local_condition_[0-9]+\]$/D',$intent['object_term'])===1,
-                    'prior_system_cohort'=>is_string($sourceQuery['business_filters']['selection_ref']??null)
-                        && strpos($sourceQuery['business_filters']['selection_ref'],'cohort:')===0,
-                    'object_delta'=>(string)($intent['context_delta']['object']??'missing'),
-                    'filter_delta'=>(string)($intent['context_delta']['business_filters']??'missing'),
-                ]);
+                // The Run store accepts only its bounded diagnostic schema;
+                // recording customer-derived fields here would silently fail.
+                $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
+                    'context_merge_conflict',[],'context_merge_probe');
             }
             throw $error;
         }
@@ -2568,7 +2558,15 @@ final class AiGatewayServices
                 }
                 $compiled=(new \app\services\ai\execution\AiPendingContextGuidancePlanner())->start($compiled,$merged['pending'],$inheritedConstraints,$pendingMetricOptions,$merged['prospective_intent'],$pendingOperationOptions,['understanding'=>$understanding]);
             } else {
-                $compiled=IntentContextMerger::bind($compiled,$inheritedConstraints);
+                try {
+                    $compiled=IntentContextMerger::bind($compiled,$inheritedConstraints);
+                } catch (RuntimeException $error) {
+                    if ($error->getMessage()==='AI_CONTEXT_DELTA_CONFLICT') {
+                        $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
+                            'context_bind_conflict',[],'context_bind_probe');
+                    }
+                    throw $error;
+                }
             }
             // The frontend never receives this key: issueGuidance persists it
             // only in the signed private envelope.  Keeping the exact
@@ -6490,6 +6488,7 @@ final class AiGatewayServices
             'AI_INTENT_UNRESOLVED'=>'我还没准确理解这句话最想了解的经营情况。请换一种日常说法补充您想看的内容；已经确认的条件会保留，本次没有查询近似数据。',
             'AI_CAPABILITY_NOT_READY'=>'已识别您的需求，但对应的数据能力或筛选组合尚未接入，暂不能准确提供结果。',
             'AI_CONTEXT_REQUIRED'=>'这句追问缺少可核对的前文条件。请补充您想延续的对象、时间或查看结果，我会按当前权限重新查询。',
+            'AI_CONTEXT_DELTA_CONFLICT'=>'这次处理查询条件时遇到问题，结果尚未生成。请重试本问；若再次出现，请重新说明查询条件。',
             'AI_RESULT_REFERENCE_UNAVAILABLE'=>'暂时无法确认要查看的详情，请补充名称或重新查询列表。',
             'AI_STORE_SET_REFERENCE_UNAVAILABLE'=>'上一条回答不是门店列表。请说出要比较的门店名称，或先查询门店排行。',
             'AI_OBJECT_DETAIL_SELECTION_REQUIRED'=>'上一份结果包含多个对象，请说明要看第几位或直接说出对象；本次没有替您选择。',
