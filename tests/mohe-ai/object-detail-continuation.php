@@ -141,6 +141,13 @@ foreach ([$personView,$summaryView,$storeView,$detailView] as $singleton) {
 }
 $plural=$resolver->resolve($personQuery,$many,['view'=>'summary','target'=>'set','ordinal'=>null]);
 $check(array_column($plural['objects'],'id')===[7,8],'plural target retains the complete verified display order');
+$brokenMany=$many;$brokenMany['results'][0]['rows']['top'][1]['employee_id']=null;
+try {$resolver->resolve($personQuery,$brokenMany,['view'=>'summary','target'=>'set','ordinal'=>null]);
+    throw new LogicException('partial ranked set accepted');
+} catch (RuntimeException $error) {
+    $check($error->getMessage()==='AI_RESULT_REFERENCE_UNAVAILABLE',
+        'one malformed ranked row cannot silently shrink a referenced set');
+}
 $expandedMany=$many;
 $expandedMany['query']['condition_set']=null;
 $expandedMany['results'][0]['ranking_detail_metrics']=[['metric_code'=>'staff_labor_yeji']];
@@ -256,6 +263,56 @@ $check(($mixedPlan['kind']??null)==='plan' && ($mixedQuery['query_shape']??null)
     'mixed set continuation retains exact displayed stores and replaces only requested metric and period: '.json_encode($mixedQuery));
 $check(($readerQuery->invoke($readView,$mixedQuery)['store_ids']??null)===[3,4],
     'the ordinary Reader admits the signed-store breakdown with the new metric and period');
+$check(($mixedPlan['_context_meaning']['result_set']??null)===['object_kind'=>'store','ids'=>[3,4]],
+    'the successful requery preserves its exact server-only store set for another follow-up');
+$nextQuestion='这两家这个月现金业绩分别是多少';
+$nextSafe=$setSafe;$nextSafe['question']=$nextQuestion;$nextSafe['evidence_messages'][0]['text']=$nextQuestion;
+$nextSafe['prior_query']=['operation'=>'breakdown'];
+$nextMeaning=AiIntentUnderstandingContract::normalize(['goal'=>'继续查看同一批门店','status'=>'understood',
+    'requirements'=>[
+        ['id'=>'r1','meaning'=>'沿用已显示门店','fields'=>['object_detail'],
+            'values'=>['object_detail'=>['view'=>'summary','target'=>'set','ordinal'=>null]],
+            'evidence'=>[['message_id'=>'current','quote'=>'这两家']]],
+        ['id'=>'r2','meaning'=>'查看现金业绩','fields'=>['metric_codes','operation'],
+            'values'=>['metric_terms'=>['现金业绩'],'operation'=>'breakdown'],
+            'evidence'=>[['message_id'=>'current','quote'=>'现金业绩分别是多少']]],
+        ['id'=>'r3','meaning'=>'改为这个月','fields'=>['periods'],
+            'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
+            'evidence'=>[['message_id'=>'current','quote'=>'这个月']]],
+    ]],$nextSafe);
+$nextPlan=$setValues->invoke($gateway,$nextMeaning,['query'=>$mixedQuery,
+    'view'=>['query'=>$mixedQuery,'results'=>[]],'meaning'=>$mixedPlan['_context_meaning']],
+    $nextSafe,$setCaps,'screen','2026-09-25');
+$check(($nextPlan['plan']['query']['store_ids']??null)===[3,4]
+    &&($nextPlan['plan']['query']['metric_codes']??null)===['cash_performance']
+    &&($nextPlan['plan']['query']['start_date']??null)==='2026-09-01',
+    'a third turn retains the original store identities after ranking became breakdown');
+// The actual provider can omit the set marker on a later short question.
+// Closed grammar plus a registered metric must still use the signed set,
+// without another model call or a store-selection prompt.
+$localSetValues=$gatewayClass->getMethod('localVerifiedStoreSetValuesContinuation');
+$anchoredSource=['query'=>$mixedQuery,'view'=>['query'=>$mixedQuery,'results'=>[]],
+    'meaning'=>$mixedPlan['_context_meaning']];
+$localThird=$localSetValues->invoke($gateway,$anchoredSource,$nextSafe,$setCaps,'screen','2026-09-25');
+$check(($localThird['plan']['query']['store_ids']??null)===[3,4]
+    &&($localThird['plan']['query']['metric_codes']??null)===['cash_performance']
+    &&($localThird['plan']['query']['start_date']??null)==='2026-09-01',
+    'a closed third-turn measurement reuses the whole signed set without provider interpretation');
+$unanchoredSource=$anchoredSource;unset($unanchoredSource['meaning']);
+$check($localSetValues->invoke($gateway,$unanchoredSource,$nextSafe,$setCaps,'screen','2026-09-25')===null,
+    'an ordinary breakdown never masquerades as a verified previous result set');
+$otherTopic=$unanchoredSource;
+$otherTopic['query']['business_filters']=['object_kind'=>'project'];
+try {
+    $localSetValues->invoke($gateway,$otherTopic,$nextSafe,$setCaps,'screen','2026-09-25');
+    throw new LogicException('old store set revived after a project topic');
+} catch (RuntimeException $error) {
+    $check($error->getMessage()==='AI_STORE_SET_REFERENCE_UNAVAILABLE',
+        'a closed plural store reference fails fast after the verified topic changed to projects');
+}
+$localExtra=$nextSafe;$localExtra['question']='这两家这个月现金业绩分别是多少，不含退款';
+$check($localSetValues->invoke($gateway,$anchoredSource,$localExtra,$setCaps,'screen','2026-09-25')===null,
+    'closed local reuse cannot discard an additional business condition');
 $implicitSet=$mixedSet;array_shift($implicitSet['requirements']);
 $implicitPlan=$setValues->invoke($gateway,$implicitSet,['query'=>$storeQuery,'view'=>$storeSet],
     $setSafe,$setCaps,'screen','2026-09-25');

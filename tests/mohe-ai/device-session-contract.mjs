@@ -47,7 +47,16 @@ assert.deepEqual(sessions.history('context-b'),[
   {question:'q-b',answer:'a-b'},
   {question:'failed-product-question',answer:'本次未能完成'}
 ]);
+sessions.append('context-b','failed-new-topic','本次未能完成',
+  {summary:'本次未能完成',terminal_status:'FAILED'},null,
+  {contextEligible:false,topicBoundary:'reset'});
+assert.equal(sessions.contextRef('context-b'),null);
+assert.deepEqual(sessions.history('context-b'),[
+  {question:'failed-new-topic',answer:'本次未能完成'}
+]);
 sessions.append('context-b','elapsed-question','elapsed-answer',{summary:'elapsed-answer'},null,{elapsedSeconds:65});
+assert.deepEqual(sessions.history('context-b').map(row => row.question),
+  ['failed-new-topic','elapsed-question']);
 assert.equal(sessions.load().find(session => session.id === 'context-b').rounds.at(-1).elapsed_seconds,65);
 assert.equal(new DeviceSessions(storage,'instance-B:person-1',()=>now).contextRef('context-b'),null);
 now += RETENTION_MS;

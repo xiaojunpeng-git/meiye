@@ -6,6 +6,33 @@ $checks=0;
 function cdgCheck($ok,string $label): void {global $checks;if(!$ok)throw new RuntimeException('context delta gateway: '.$label);$checks++;}
 function cdgDelta(): array {return array_fill_keys(\app\services\ai\contract\AiIntentResultContract::DELTA_FIELDS,'inherit');}
 
+// The model receives the existence of a signed multi-store result, never its
+// store names or IDs. Otherwise a second follow-up can mistake "these two"
+// for an unselected store after the first follow-up changed ranking to breakdown.
+$modelViewQuery=['metric_codes'=>['consume_amount'],'query_shape'=>'breakdown',
+    'start_date'=>'2026-08-01','end_date'=>'2026-08-31','compare_range'=>null,
+    'ranking'=>null,'store_ids'=>[3,4],'business_filters'=>['object_kind'=>'store']];
+$modelView=\app\services\ai\context\IntentContextMerger::modelView($modelViewQuery,
+    ['result_set'=>['object_kind'=>'store','ids'=>[3,4]]]);
+cdgCheck(($modelView['verified_result_set']??null)===['object_kind'=>'store','count'=>2]
+    &&strpos(json_encode($modelView),'"ids"')===false,
+    'the follow-up model sees a verified store-set shape but no private identities');
+cdgCheck(\app\services\ai\context\IntentContextMerger::modelView($modelViewQuery)['verified_result_set']===null,
+    'a normal selected breakdown does not claim to be an earlier result set');
+$priorValidator=Closure::bind(static function($client,array $query): void {
+    $client->validPriorQuery($query);
+},null,\app\services\ai\model\SiliconFlowClient::class);
+$priorValidator(new \app\services\ai\model\SiliconFlowClient(),$modelView);
+cdgCheck(true,'the model input boundary accepts only the non-identifying signed-set hint');
+try {
+    $unsafeModelView=$modelView;$unsafeModelView['verified_result_set']['ids']=[3,4];
+    $priorValidator(new \app\services\ai\model\SiliconFlowClient(),$unsafeModelView);
+    throw new LogicException('private IDs admitted to model input');
+} catch (\app\services\ai\contract\AiContractException $error) {
+    cdgCheck($error->getMessage()==='AI_MODEL_INPUT_INVALID',
+        'the model input boundary rejects store identities inside the set hint');
+}
+
 $h=null;
 try {
     $collectionHarness=new R6GatewayHarness(3,[1,2],'platform');
@@ -321,9 +348,9 @@ try {
         'an exact calendar-only continuation reuses a signed query and skips the binding model');
     $overviewHarness->close();
 
-    // A new analytical object changes the subject but does not implicitly
-    // change the customer's still-applicable period. This runs through the
-    // complete gateway so an eager source-query reset cannot regress silently.
+    // A self-contained new topic cannot reuse the old period merely because
+    // the previous answer happened to have one. The server relation decision
+    // must gate the ordinary binder and every faster ranking path alike.
     $topicHarness=new R6GatewayHarness(3,[1,2],'platform');
     $topicHarness->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary',
         'metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,
@@ -331,23 +358,46 @@ try {
         'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-08']],
         'scope'=>'authorized','unresolved_fragments'=>[]];
     $topicSource=$topicHarness->start('9月1日到9月8日现金业绩多少？');
-    $topicHarness->understandingOverride=['goal'=>'查看项目销售排行','status'=>'understood','requirements'=>[[
+    $modelCallsBeforeClosedTopic=$topicHarness->models;
+    $closedTopic=$topicHarness->start('这个月项目销售额第一名是谁',$topicSource['answer']['context_ref']);
+    $closedEvidence=($topicHarness->row($closedTopic)['evidence_ref']??'')!==''
+        ?$topicHarness->private->read($topicHarness->row($closedTopic)['evidence_ref']):[];
+    cdgCheck(($closedTopic['status']??null)==='COMPLETED'
+        &&($closedTopic['topic_boundary']??null)==='reset'
+        &&$topicHarness->models===$modelCallsBeforeClosedTopic
+        &&($closedEvidence['query']['business_filters']['object_kind']??null)==='project'
+        &&($closedEvidence['query']['store_ids']??[])===[]
+        &&[$closedEvidence['query']['start_date']??null,$closedEvidence['query']['end_date']??null]!==['2026-09-01','2026-09-08'],
+        'a complete registered project ranking starts a fresh topic without the old store or period');
+    $topicHarness->understandingOverride=['goal'=>'查看项目销售排行','status'=>'understood','topic_relation'=>'new_topic','requirements'=>[[
         'id'=>'r1','meaning'=>'查看项目销售第一名','fields'=>['metric_codes','object_kind','operation','ranking'],
         'values'=>['metric_terms'=>['销售额'],'object_kind'=>'project','operation'=>'ranking','ranking'=>['direction'=>'top','limit'=>1]],
         'evidence'=>[['message_id'=>'current','quote'=>'项目销售第一名是谁？']],
     ]]];
-    $topicDelta=cdgDelta();
-    foreach (['metric_codes','operation','object','ranking_direction','ranking_limit','business_filters'] as $field) $topicDelta[$field]='replace';
     $topicHarness->semanticIntent=['object_kind'=>'project','object_term'=>'','operation'=>'ranking',
         'metric_codes'=>['sales_amount'],'action_codes'=>['sales'],'needs_metric_choice'=>false,
         'ranking'=>['direction'=>'top','limit'=>1],'periods'=>[],'scope'=>'authorized',
-        'context_delta'=>$topicDelta,'unresolved_fragments'=>[]];
+        'unresolved_fragments'=>[]];
     $topicFollow=$topicHarness->start('项目销售第一名是谁？',$topicSource['answer']['context_ref']);
-    $topicEvidence=$topicHarness->private->read($topicHarness->row($topicFollow)['evidence_ref']);
-    cdgCheck($topicFollow['status']==='COMPLETED'
-        &&($topicEvidence['query']['business_filters']['object_kind']??null)==='project'
-        &&[$topicEvidence['query']['start_date']??null,$topicEvidence['query']['end_date']??null]===['2026-09-01','2026-09-08'],
-        'a natural topic switch replaces the analytical object while inheriting the verified period field');
+    $topicEvidence=($topicHarness->row($topicFollow)['evidence_ref']??'')!==''
+        ?$topicHarness->private->read($topicHarness->row($topicFollow)['evidence_ref']):[];
+    cdgCheck(($topicFollow['topic_boundary']??null)==='reset'
+        &&($topicFollow['status']!=='COMPLETED'
+            || (($topicEvidence['query']['business_filters']['object_kind']??null)==='project'
+                &&[$topicEvidence['query']['start_date']??null,$topicEvidence['query']['end_date']??null]!==['2026-09-01','2026-09-08'])),
+        'a confirmed new topic resets the old result and reporting period');
+    // An expired but authentic reference cannot resurrect its old scope. A
+    // fresh complete question may still execute; a forged reference must not
+    // be mistaken for this narrow expiry case.
+    [$oldBody]=explode('.',$topicSource['answer']['context_ref'],2);
+    $oldClaims=json_decode(base64_decode(strtr($oldBody,'-_','+/')),true);
+    $oldClaims['expires']=time()-1;
+    $expiredBody=rtrim(strtr(base64_encode(json_encode($oldClaims,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)),'+/','-_'),'=');
+    $expiredRef=$expiredBody.'.'.hash_hmac('sha256',$expiredBody,$topicHarness->private->signingKey());
+    $expiredFollow=$topicHarness->start('这个月销售额最高的门店是哪个',$expiredRef);
+    cdgCheck(($expiredFollow['status']??null)==='COMPLETED'
+        &&($expiredFollow['topic_boundary']??null)==='reset',
+        'an authentic expired reference is ignored for a complete fresh question');
     $topicHarness->close();
 
     $h=new R6GatewayHarness(3,[1,2],'platform');

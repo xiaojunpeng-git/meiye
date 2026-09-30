@@ -140,6 +140,8 @@ final class AiExactRankingCollectionAdmission
         if ($singleDefault!==null) return $singleDefault;
         $personWinner=$this->explicitPersonWinnerRanking($question,$objects,$allowedMetricCodes);
         if ($personWinner!==null) return $personWinner;
+        $ordinalWinner=$this->explicitOrdinalWinnerRanking($question,$objects,$allowedMetricCodes);
+        if ($ordinalWinner!==null) return $ordinalWinner;
         $bounded=$this->boundedSingleRanking($question,$objects,$allowedMetricCodes);
         if ($bounded!==null) return $bounded;
         $clauses=preg_split('/[，,；;。]+/u',$question,-1,PREG_SPLIT_NO_EMPTY);
@@ -215,6 +217,31 @@ final class AiExactRankingCollectionAdmission
         $residue=preg_replace('/的|是|，|,|。|？|\?|！|!|\s+/u','',(string)$calendar['remainder']);
         if (!is_string($residue)||$residue!=='') return null;
         return [['metric_code'=>$metric['metric_code'],'object_kind'=>'person','direction'=>'top','limit'=>1]];
+    }
+
+    /** A stated first/last place plus registered metric and object is a
+     * complete ranking, not a reference to the old answer. Any demonstrative,
+     * named scope or other business condition remains as residue and falls
+     * through to contextual understanding instead of losing its meaning. */
+    private function explicitOrdinalWinnerRanking(string $question,array $objects,array $allowedMetricCodes): ?array
+    {
+        $top=(bool)preg_match('/(?<!倒数)第(?:一|1)名/u',$question);
+        $bottom=(bool)preg_match('/倒数第(?:一|1)名/u',$question);
+        if ($top===$bottom) return null;
+        $metric=MetricSemanticCatalog::uniqueTermInText($question,$allowedMetricCodes);
+        if ($metric===null) return null;
+        $objectText=str_replace($metric['term'],' ',$question);
+        $matched=$this->objectsInText($objectText,$objects);
+        if ($matched===null || count($matched)!==1) return null;
+        $residue=str_replace([$metric['term'],$matched[0]['object_label']],' ',$question);
+        $residue=preg_replace('/倒数第(?:一|1)名|第(?:一|1)名/u',' ',$residue);
+        $calendar=AiSemanticIntentParser::calendarEvidence($residue);
+        if (!$calendar['complete']) return null;
+        $residue=preg_replace('/(?:的)?(?:是)?(?:谁|哪个|哪一个|哪位|什么)|的|是|，|,|。|？|\?|！|!|\s+/u',
+            '',(string)$calendar['remainder']);
+        if (!is_string($residue) || $residue!=='') return null;
+        return [['metric_code'=>$metric['metric_code'],'object_kind'=>$matched[0]['object_kind'],
+            'direction'=>$bottom?'bottom':'top','limit'=>1]];
     }
 
     /**

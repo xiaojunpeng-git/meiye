@@ -469,7 +469,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         exportRequested = false;
         reportVisibleDeliveryAfterPaint(run);
         const text = run.answer.summary || (run.answer.cards || []).map(c => `${c.metric_name}：${c.display_value}${c.unit || ''}`).join('\n');
-        try { sessions.append(conversation, deliveredQuestion, text, run.answer, run, { elapsedSeconds }); } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error', activeConversationTurn() || body); }
+        try { sessions.append(conversation, deliveredQuestion, text, run.answer, run,
+          { elapsedSeconds, topicBoundary: run.topic_boundary }); } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error', activeConversationTurn() || body); }
         completeActiveQuestion();
       } else {
         // The terminal message is already appended to the conversation.  Do
@@ -486,7 +487,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         // non-contextual so a previous failure never becomes an instruction
         // or a claimed business fact for the next model request.
         try { sessions.append(conversation, deliveredQuestion, terminalMessage,
-          { summary: terminalMessage, terminal_status: run.status }, run, { contextEligible: false, elapsedSeconds });
+          { summary: terminalMessage, terminal_status: run.status }, run,
+          { contextEligible: false, elapsedSeconds, topicBoundary: run.topic_boundary });
         } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error', activeConversationTurn() || body); }
         completeActiveQuestion();
         clientDeliveryStartedAt=0;

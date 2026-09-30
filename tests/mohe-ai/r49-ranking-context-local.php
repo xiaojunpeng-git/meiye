@@ -1,6 +1,6 @@
 <?php
 /** R49 local integration uses existing facts and expiring read views only.
- * It verifies dimension switches, shared rendering/export and frozen details;
+ * It verifies independent object rankings, shared rendering/export and frozen details;
  * it never calls a model or writes business data. */
 if (getenv('MOHE_R49_LOCAL_TEST')!=='LOCAL_READ_ONLY') exit("LOCAL_READ_ONLY opt-in required\n");
 require getcwd().'/vendor/autoload.php';
@@ -22,15 +22,17 @@ $caps=['metric_codes'=>array_keys($cap),'metric_readiness'=>$cap,'query_shapes'=
 $vocabulary=$methods['analysisObjectVocabulary']->invoke($gateway,$caps,null);
 $compiler=new app\services\ai\execution\AiRegisteredPlanCompiler();
 $renderer=new app\services\ai\presentation\AiAnswerRenderer();
-$checks=0;$source=null;
+$checks=0;
 $check=static function(bool $ok,string $message)use(&$checks):void{if(!$ok)throw new RuntimeException($message);++$checks;};
 foreach (['门店'=>'store','员工'=>'person','项目'=>'project','产品'=>'product','会员'=>'member'] as $label=>$kind) {
-    $question=($source===null?'这个月':'').$label.'业绩最高的前五名详情';
-    $reason=null;$args=[$question,$vocabulary,$caps,'screen',date('Y-m-d'),&$reason,$source];
+    // Each explicit-period question is independent; contextual carryover
+    // requires the gateway's topic decision, not this fresh-only fast path.
+    $question='这个月'.$label.'业绩最高的前五名详情';
+    $reason=null;$args=[$question,$vocabulary,$caps,'screen',date('Y-m-d'),&$reason];
     $plan=$methods['compileExactRegisteredRankingCollection']->invokeArgs($gateway,$args);
     $compiled=$compiler->compile($plan['plan'],$caps);
     $view=$service->create($context,$compiled['query']);
-    $check($view['query']['start_date']===date('Y-m-01'),'MONTH_INHERITED_'.$kind);
+    $check($view['query']['start_date']===date('Y-m-01'),'MONTH_EXPLICIT_'.$kind);
     $check(($view['query']['business_filters']['object_kind']??'store')===$kind,'OBJECT_REPLACED_'.$kind);
     $answer=$renderer->render($view);$rows=$view['results'][0]['rows']['top'];
     $check(count($rows)>0 && count($rows)<=5,'BOUNDED_REAL_ROWS_'.$kind);
@@ -45,6 +47,5 @@ foreach (['门店'=>'store','员工'=>'person','项目'=>'project','产品'=>'pr
         $check($expanded['results'][0]['rows']===$view['results'][0]['rows'],'FROZEN_IDENTITIES_'.$kind);
         $check($expanded['expires_at']===$view['expires_at'],'NO_EXPIRY_EXTENSION_'.$kind);
     }
-    $source=['query'=>$view['query'],'view'=>$view];
 }
 echo json_encode(['round'=>'R49','checks'=>$checks,'result'=>'PASS','business_data_mutated'=>false],JSON_UNESCAPED_UNICODE),PHP_EOL;

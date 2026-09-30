@@ -108,13 +108,18 @@ final class ObjectDetailContinuationResolver
     {
         $rows=[];$seen=[];
         foreach ((array)($view['results']??[]) as $result) {
-            if (isset($result['object_kind'])&&$result['object_kind']!==$kind) continue;
+            if (!is_array($result) || (isset($result['object_kind'])&&$result['object_kind']!==$kind)
+                || !empty($result['has_more'])) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
             foreach (['top','bottom'] as $group) foreach ((array)($result['rows'][$group]??[]) as $row) {
-                if (!is_array($row)) continue;
+                if (!is_array($row)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
                 $id=$kind==='person'?($row['employee_id']??$row['entity_id']??null):($row['store_id']??$row['entity_id']??null);
                 $label=$kind==='person'?($row['employee_name']??$row['person_name']??$row['entity_name']??null):($row['store_name']??$row['entity_name']??null);
-                if (!is_int($id)||$id<1||!is_string($label)||trim($label)===''||isset($seen[$id])) continue;
-                $seen[$id]=true;$rows[]=['id'=>$id,'label'=>trim($label)];
+                if (!is_int($id)||$id<1||!is_string($label)||trim($label)==='') throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+                if (isset($seen[$id])) {
+                    if ($seen[$id]!==trim($label)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+                    continue;
+                }
+                $seen[$id]=trim($label);$rows[]=['id'=>$id,'label'=>trim($label)];
             }
         }
         if ($rows===[]) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');

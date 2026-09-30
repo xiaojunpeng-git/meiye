@@ -22,6 +22,16 @@ $understanding=['goal'=>'查看本月收款，排除退款并列出前五家门�
 ]];
 $understanding=AiIntentUnderstandingContract::normalize($understanding,$question);
 $check(AiIntentUnderstandingContract::ids($understanding)===['r1','r2','r3'],'understanding has request-local requirement identities');
+$contextQuestion=$question;$contextQuestion['prior_query']=['metric_codes'=>['cash_performance']];
+$continued=AiIntentUnderstandingContract::normalize($understanding+['topic_relation'=>'continuation'],$contextQuestion);
+$check(($continued['topic_relation']??null)==='continuation',
+    'model topic continuity remains a non-executable turn relation');
+$newTopic=AiIntentUnderstandingContract::normalize($understanding+['topic_relation'=>'new_topic'],$contextQuestion);
+$check(($newTopic['topic_relation']??null)==='new_topic',
+    'model can close the prior topic without copying its query fields');
+$reject(static function()use($understanding,$question):void {
+    AiIntentUnderstandingContract::normalize($understanding+['topic_relation'=>'new_topic'],$question);
+},'a fresh question cannot claim a prior-topic relation');
 // A model values key in fields must remain a failed first attempt. The
 // diagnostic classifies its shape without retaining customer or model text,
 // and the bounded repair still has to preserve every original requirement.

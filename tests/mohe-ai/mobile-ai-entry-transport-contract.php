@@ -34,32 +34,32 @@ $check(is_string($entry) && strpos($entry,"currentMobilePlatform() === 'MP_WEIXI
     && strpos($entry,"'ai-panel--native-mini': platformUsesNativeCanvas")!==false,
     'the WeChat panel applies its capsule-safe layout only on the native mini-program target');
 $check(is_string($entry) && strpos($entry,'uni.getMenuButtonBoundingClientRect()')!==false
-    && strpos($entry,'capsuleBottom + 8')!==false
-    && strpos($entry,'function openPanel() : void { measureNativePanelTop(); opened.value = true')!==false
+    && strpos($entry,'Number(capsule.top)')!==false
+    && preg_match('/function openPanel\(\) : void \{\s*measureNativePanelTop\(\); opened\.value = true/',$entry)===1
     && strpos($entry,'paddingTop: nativePanelTop')!==false
-    && strpos($entry,"{ top: nativePanelTop + 'px' }")!==false
+    && strpos($entry,"height: nativeTitleHeight + 'px'")!==false
     && strpos($entry,'padding-top:calc(72px + env(safe-area-inset-top))')===false
     && strpos($entry,'padding:8px 18px calc(14px + env(safe-area-inset-bottom))')!==false,
     'the native mini-program workspace measures its capsule instead of stacking fixed top and safe-area gaps, while keeping the composer against the bottom safe area');
-$check(is_string($entry) && strpos($entry,'class="ai-history-drawer"')!==false
-    && strpos($entry,'function refreshHistory()')!==false
-    && strpos($entry,'function deleteHistory(id : string)')!==false
+$check(is_string($entry) && strpos($entry,'class="ai-composer-options"')!==false
+    && strpos($entry,'function openHistory()')!==false
+    && strpos($entry,'function selectConversation(targetId : string)')!==false
     && strpos($entry,'uni.showActionSheet')===false,
-    'the native menu opens an in-panel recent-conversation drawer and deletes only its matching local session');
+    'the composer menu opens in-panel history without a native action sheet');
 $check(is_string($entry) && strpos($entry,'class="ai-workspace-head"')!==false
     && strpos($entry,'class="ai-workspace-context"')===false
     && strpos($entry,'会话仅存本设备')===false
     && strpos($entry,'示例数据')===false
-    && strpos($entry,'class="ai-footer-actions"')!==false
+    && strpos($entry,'class="ai-composer-options"')!==false
     && strpos($entry,'class="ai-composer"')!==false
     && strpos($entry,'.ai-messages{min-height:0;flex:1;height:0;padding:0 36px}')!==false,
-    'mobile header actions and footer actions have separate responsive layout roles while the transcript remains scrollable, without a redundant workspace title block');
-$check(is_string($entry) && strpos($entry,'aria-label="新建对话" @tap="newConversation"')!==false
+    'mobile header and composer menu have separate layout roles while the transcript remains scrollable');
+$check(is_string($entry) && strpos($entry,'aria-label="更多操作"')!==false
     && strpos($entry,'aria-label="退出魔核 AI" @tap="closePanel"')!==false
-    && strpos($entry,'class="ai-workspace-actions"')!==false
+    && strpos($entry,'@tap="createConversationFromMenu"')!==false
     && strpos($entry,'.ai-icon-action__stroke')!==false
     && strpos($entry,'.ai-icon-compose')===false,
-    'merchant AI exposes adjacent add and exit icon actions built from one visual primitive, without retaining the retired compose icon');
+    'merchant AI keeps exit in the header and new conversation in the composer menu');
 $check(is_string($entry) && strpos($entry,'.ai-panel--native-mini .ai-question{font-size:17px;line-height:1.6}')!==false
     && strpos($entry,'.ai-panel--native-mini .ai-answer{font-size:17px;line-height:1.65}')!==false
     && strpos($entry,'.ai-panel--native-mini .ai-answer-headline{font-size:19px;line-height:1.55}')!==false
@@ -80,16 +80,19 @@ $check(is_string($entry) && strpos($entry,'function toggleCardDetail(key : strin
     && strpos($entry,'<text class="ai-note">{{ tooltipText(card.tooltip) }}</text>')===false
     && strpos($entry,'card.period_label')!==false,
     'mobile cards show the verified value and period first, while the full registered metric definition remains an on-demand disclosure');
-$check(is_string($entry) && strpos($entry,"function questionHint() : string { return '继续问，例如：按销量看呢？' }")!==false,
-    'the mobile question example is business-neutral and does not branch on a fixed metric code');
+$check(is_string($entry) && strpos($entry,'<textarea v-model="question" aria-label="输入问题"')!==false
+    && strpos($entry,'function questionHint()')===false,
+    'the mobile composer remains accessible without pre-filling or suggesting a fixed business question');
 $check(is_string($entry) && strpos($entry,'function contextEligible(row : any)')!==false
     && strpos($entry,'function appendTranscript(row : any)')!==false
     && strpos($entry,'context_eligible:false')!==false,
     'a failed mobile Run is retained as a visible question-and-status turn without becoming an executable context reference');
 $check(is_string($entry) && strpos($entry,"s.rounds.slice().reverse().some((r : any) => { if (contextEligible(r))")!==false,
-    'mobile context reference skips failed turns and retains the latest verified query only');
-$check(is_string($entry) && strpos($entry,'s.rounds.slice(-20).forEach((r : any) => history.push({question:r.question,answer:r.answer}))')!==false,
-    'mobile sends the latest attempted questions to the server while the server remains responsible for projecting no answer text');
+    'mobile context reference skips failed turns while respecting a topic reset');
+$check(is_string($entry) && strpos($entry,"r.topic_boundary == 'reset'")!==false
+    && strpos($entry,'recent.slice(boundary < 0 ? 0 : boundary).forEach')!==false
+    && strpos($entry,'history.push({question:r.question,answer:r.answer})')!==false,
+    'mobile sends only current-topic attempted questions, without older-topic carryover');
 $check(is_string($entry) && strpos($entry,'v-if="activeQuestion.length > 0"')!==false
     && strpos($entry,'showActiveQuestion(pending.question)')!==false
     && strpos($entry,':scroll-into-view="messageAnchor"')!==false,

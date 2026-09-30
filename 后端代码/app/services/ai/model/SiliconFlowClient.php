@@ -723,6 +723,18 @@ final class SiliconFlowClient
     private function validPriorQuery($query): void
     {
         if (!is_array($query)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+        // The previous answer may be a signed multi-store set rather than a
+        // new store selection. Only its type and visible count leave the
+        // server; keep the model input closed to names and IDs.
+        if (array_key_exists('verified_result_set',$query)) {
+            $set=$query['verified_result_set'];
+            if ($set!==null && (!is_array($set) || array_keys($set)!==['object_kind','count']
+                || $set['object_kind']!=='store' || !is_int($set['count'])
+                || $set['count']<1 || $set['count']>20 || ($query['operation']??null)!=='breakdown')) {
+                throw new AiContractException('AI_MODEL_INPUT_INVALID');
+            }
+            unset($query['verified_result_set']);
+        }
         // Optional server-owned position metadata contains no identity/value;
         // validate it independently and retain the established query contract.
         if (array_key_exists('sole_result_reference',$query)) {

@@ -48,12 +48,22 @@ final class VerifiedQueryContext
         // only for a later result reference and is replayed under current
         // authority; no row, name, ID or amount is returned to the model.
         $meaning=$stored['context_meaning']??[];
-        if (!is_array($meaning) || array_diff(array_keys($meaning),['presentation_origin'])) {
+        if (!is_array($meaning) || array_diff(array_keys($meaning),['presentation_origin','result_set'])) {
             throw new RuntimeException('AI_CONTEXT_REQUIRED');
         }
         if ($meaning!==[] && !in_array($meaning['presentation_origin']??null,[
             'customer_or_verified_context','platform_observation','platform_recommendation'
         ],true)) throw new RuntimeException('AI_CONTEXT_REQUIRED');
+        if (isset($meaning['result_set'])) {
+            $set=$meaning['result_set'];$ids=$set['ids']??null;
+            if (!is_array($set) || array_keys($set)!==['object_kind','ids']
+                || $set['object_kind']!=='store' || !is_array($ids) || count($ids)<1 || count($ids)>20
+                || array_keys($ids)!==range(0,count($ids)-1) || count(array_unique($ids))!==count($ids)
+                || array_filter($ids,static function($id):bool { return !is_int($id) || $id<1; })!==[]
+                || !is_array($stored['query']??null) || ($stored['query']['query_shape']??null)!=='breakdown'
+                || ($stored['query']['business_filters']['object_kind']??null)!=='store'
+                || ($stored['query']['store_ids']??null)!==$ids) throw new RuntimeException('AI_CONTEXT_REQUIRED');
+        }
         if (isset($stored['items'])) {
             if (!is_array($stored['items']) || count($stored['items'])<2 || count($stored['items'])>4
                 || array_keys($stored['items'])!==range(0,count($stored['items'])-1)) throw new RuntimeException('AI_CONTEXT_REQUIRED');
@@ -73,6 +83,25 @@ final class VerifiedQueryContext
         $query=$stored['query'];
         $view=call_user_func($this->replayView,$context,$query,$stored['view_ref']);
         return ['query'=>$query,'view'=>$view,'meaning'=>$meaning];
+    }
+
+    /**
+     * Identify only an authentic, same-owner expired reference. Its contents
+     * are never restored or exposed: an independent current question may run
+     * without old evidence, while a malformed or foreign token still fails.
+     */
+    public function isExpiredOwnReference(array $context,array $owner,string $reference): bool
+    {
+        if (strlen($reference)>2048 || substr_count($reference,'.')!==1) return false;
+        [$body,$mac]=explode('.',$reference,2);
+        if (!hash_equals(hash_hmac('sha256',$body,$this->private->signingKey()),$mac)) return false;
+        $json=base64_decode(strtr($body,'-_','+/'),true);
+        $claims=is_string($json)?json_decode($json,true):null;
+        return is_array($claims) && ($claims['type']??null)==='context'
+            && ($claims['identity']??null)===call_user_func($this->identity,$context)
+            && ($claims['conversation']??null)===$owner['conversation_id']
+            && is_string($claims['window']??null) && $claims['window']!==''
+            && is_int($claims['expires']??null) && $claims['expires']<=time();
     }
 
     /**

@@ -28,18 +28,28 @@ export class DeviceSessions {
   }
   save(sessions) { this.storage.setItem(this.key, JSON.stringify(sessions)); }
   create(id = newId()) { const sessions = this.load(); const session = { id, created_at: this.clock(), rounds: [] }; sessions.push(session); this.save(sessions); return session; }
-  // Every customer question remains available to the model as de-identified
-  // conversational context, including a failed turn. This lets “try that
-  // again” refer to the latest attempted topic rather than silently jumping
-  // to an older successful answer. The server projects questions only; a
-  // failure message or an unverified candidate never becomes a business fact.
+  // Retain the current topic's questions, including a failed first turn so
+  // “try that again” can refer to it. A server-confirmed reset stops older
+  // questions from leaking back as implicit conditions or business facts.
   history(id) {
     const s = this.load().find(s => s.id === id);
-    return s ? s.rounds.slice(-HISTORY_ROUNDS).map(r => ({ question: r.question, answer: r.answer })) : [];
+    if (!s) return [];
+    const rounds = s.rounds.slice(-HISTORY_ROUNDS);
+    let boundary = -1;
+    for (let index = rounds.length - 1; index >= 0; index--) {
+      if (rounds[index].topic_boundary === 'reset') { boundary = index; break; }
+    }
+    return rounds.slice(boundary < 0 ? 0 : boundary).map(r => ({ question: r.question, answer: r.answer }));
   }
   contextRef(id) {
     const session = this.load().find(value => value.id === id);
-    const last = session && session.rounds.length ? session.rounds.slice().reverse().find(row => row.context_eligible !== false) : null;
+    // A failed new topic is still a boundary: the next question must not
+    // revive an older successful result just because this turn has no answer.
+    let last = null;
+    for (const row of session && session.rounds.length ? session.rounds.slice().reverse() : []) {
+      if (row.context_eligible !== false) { last = row; break; }
+      if (row.topic_boundary === 'reset') break;
+    }
     const ref = last && last.presentation && last.presentation.context_ref;
     // Forward an opaque reference only. The server must validate ownership,
     // expiry and whether this new question actually refers to the old answer.
@@ -95,6 +105,7 @@ export class DeviceSessions {
       ? options.elapsedSeconds : null;
     s.rounds.push({ question, answer, presentation,
       ...(options.contextEligible === false ? { context_eligible: false } : {}),
+      ...(options.topicBoundary === 'reset' ? { topic_boundary: 'reset' } : {}),
       ...(elapsedSeconds !== null ? { elapsed_seconds: elapsedSeconds } : {}),
       ...(runId && generation !== null ? { run_id: runId, generation } : {}), created_at: this.clock() }); delete s.pending_question; this.save(sessions);
     return true;

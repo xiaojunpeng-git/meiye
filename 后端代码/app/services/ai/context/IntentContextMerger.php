@@ -8,44 +8,6 @@ namespace app\services\ai\context;
 final class IntentContextMerger
 {
     /**
-     * Closed rankings replace their metric, dimension and ranking explicitly.
-     * Only a common verified period and store scope can survive that change.
-     * The admission grammar has already proved a complete new object and
-     * metric, so an old selected person/item is not a filter on this ranking.
-     * Other business filters or incompatible sources still fail closed.
-     */
-    public static function rankingConstraints(array $queries,bool $inheritPeriod,bool $allAuthorized=false): ?array
-    {
-        $constraints=null;
-        foreach ($queries as $query) {
-            if (!is_array($query) || !is_array($query['store_ids']??null)
-                || !is_array($query['business_filters']??null)) return null;
-            // A self-contained registered ranking replaces the preceding
-            // predicate. Only its compatible store scope and (when omitted)
-            // period may survive; never copy member conditions into it.
-            $filters=$query['business_filters'];
-            // The exact current ranking is a new analytical population.
-            // Its object/metric replace both a prior selected identity and a
-            // prior registry-default cohort; neither may leak across turns.
-            unset($filters['selection_ref']);
-            if (array_diff(array_keys($filters),['object_kind'])!==[]) return null;
-            // An explicit whole-population request removes only the private
-            // prior store selection; Reader still intersects tenant/role
-            // authority before reading facts.
-            $candidate=['store_ids'=>$allAuthorized?[]:$query['store_ids']];
-            sort($candidate['store_ids']);
-            if ($inheritPeriod) {
-                if (!empty($query['compare_range']) || !is_string($query['start_date']??null)
-                    || !is_string($query['end_date']??null)) return null;
-                $candidate['start_date']=$query['start_date'];$candidate['end_date']=$query['end_date'];
-            }
-            if ($constraints!==null && $constraints!==$candidate) return null;
-            $constraints=$candidate;
-        }
-        return $constraints??[];
-    }
-
-    /**
      * Project only the verified query meaning that the model may reuse.  The
      * optional origin says whether the preceding metric perspective came from
      * the customer or from the platform's first-answer suggestion; it contains
@@ -53,6 +15,13 @@ final class IntentContextMerger
      */
     public static function modelView(array $query,array $contextMeaning=[]): array
     {
+        $set=$contextMeaning['result_set']??null;
+        // A successful breakdown may carry the exact earlier result set for
+        // another follow-up. Expose only its kind and displayed count to the
+        // model; identities remain in the signed server-side context.
+        $setHint=is_array($set) && ($set['object_kind']??null)==='store'
+            && is_array($set['ids']??null) && ($query['store_ids']??null)===$set['ids']
+            ?['object_kind'=>'store','count'=>count($set['ids'])]:null;
         return ['metric_codes'=>array_values($query['metric_codes']),'operation'=>$query['query_shape'],
             'periods'=>array_values(array_filter([
                 ['kind'=>'date_range','start'=>$query['start_date'],'end'=>$query['end_date']],
@@ -67,6 +36,7 @@ final class IntentContextMerger
             'has_business_filter'=>($query['business_filters']??[])!==[],
             // IDs, names, refs and results never leave the server.
             'has_object_selection'=>self::hasObjectSelection((array)($query['business_filters']??[])),
+            'verified_result_set'=>$setHint,
             'aggregate_condition'=>is_array($query['aggregate_condition']??null)?$query['aggregate_condition']:null,
             'presentation_origin'=>self::presentationOrigin($contextMeaning)];
     }

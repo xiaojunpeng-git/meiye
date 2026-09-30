@@ -947,10 +947,19 @@ final class AiGatewayServices
         };
         $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
         $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
-        // Restore any signed predecessor before deciding whether this complete
-        // question can stand alone. A selected store or business filter is not
-        // discarded merely because the new wording names a metric and date.
-        $sourceContext=isset($body['context_ref'])?$this->restoreContext($context,$owner,$body['context_ref']):null;
+        // An authentic expired predecessor supplies no executable facts. The
+        // current question is understood on its own; an incomplete follow-up
+        // must ask for context rather than reconstructing old conditions from
+        // unsigned browser history. Invalid or foreign references still fail.
+        $sourceContext=null;
+        if (isset($body['context_ref'])) {
+            if ($this->contextService()->isExpiredOwnReference($context,$owner,$body['context_ref'])) {
+                $body['history']=[];
+                $this->runs->markTopicReset($owner,$id,$generation,$worker);
+            } else {
+                $sourceContext=$this->restoreContext($context,$owner,$body['context_ref']);
+            }
+        }
         $priorQueries=isset($sourceContext['items'])?array_column($sourceContext['items'],'query'):
             (isset($sourceContext['query'])?[$sourceContext['query']]:[]);
         $independent=true;
@@ -982,6 +991,7 @@ final class AiGatewayServices
                     ],$caps,$body['output_format'],$today);
                     if (($compiled['kind']??null)==='plan') {
                         $compiled['_context_meaning']=['presentation_origin'=>'customer_or_verified_context'];
+                        if ($sourceContext!==null) $this->runs->markTopicReset($owner,$id,$generation,$worker);
                         $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'deterministic_registered_summary_admitted');
                     }
                     return $compiled;
@@ -995,6 +1005,7 @@ final class AiGatewayServices
             );
             if ($registeredComparison!==null) {
                 $checkpoint();
+                if ($sourceContext!==null) $this->runs->markTopicReset($owner,$id,$generation,$worker);
                 $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'deterministic_registered_comparison_admitted');
                 return $registeredComparison;
             }
@@ -1032,19 +1043,20 @@ final class AiGatewayServices
         // carrier must already be structurally valid, and no business residue
         // may remain. Open or ambiguous language continues through the model.
         $exactRankingCollectionReason=null;
+        // A fully closed ranking with its own period names metric, object and
+        // rank too. The exact residue gate rejects previous-population
+        // references, so it starts a new topic without old scope or period.
         $exactRankingCollection=$this->compileExactRegisteredRankingCollection(
             (string)$body['question'],$exactObjectVocabulary,$caps,$body['output_format'],$today,
             $exactRankingCollectionReason,$sourceContext
         );
         if ($exactRankingCollection!==null) {
-            // Exact metric, object and ranking carriers replace those fields;
-            // the shared context policy retains only a compatible store scope
-            // and, when omitted here, the verified preceding period.
             $checkpoint();
+            if ($sourceContext!==null) $this->runs->markTopicReset($owner,$id,$generation,$worker);
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'deterministic_registered_ranking_collection_admitted');
             return $exactRankingCollection;
         }
-        if ($exactRankingCollectionReason!=='semantic_no_match') {
+        if ($exactRankingCollectionReason!==null && $exactRankingCollectionReason!=='semantic_no_match') {
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
                 'deterministic_registered_ranking_collection_rejected',['field'=>$exactRankingCollectionReason]);
         }
@@ -1239,6 +1251,17 @@ final class AiGatewayServices
                 $sourceQuery,(array)($sourceContext['view']??[])
             );
         }
+        // A closed plural back-reference plus one registered measurement is
+        // fully determined by the signed result set. Resolve it locally so a
+        // model omission cannot reopen store selection on the next turn. Any
+        // extra condition or unfamiliar wording still takes the model path.
+        $localStoreSet=$this->localVerifiedStoreSetValuesContinuation(
+            $sourceContext,$safe['outbound'],$caps,$body['output_format'],$today
+        );
+        if ($localStoreSet!==null) {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_store_set_values_local_reuse');
+            return $localStoreSet;
+        }
         // A locally closed registered metric view is a bounded continuation
         // candidate, not a self-contained topic replacement. Keep this
         // structural fact beside the signed predecessor so later model
@@ -1271,13 +1294,11 @@ final class AiGatewayServices
         $localOrdinalDetailUnderstanding=$sourceContext===null?null
             :$this->localVerifiedOrdinalDetailUnderstanding($safe['outbound'],$safe,$sourceContext);
         $localConditionUnderstanding=$sourceQuery===null?null:$this->localVerifiedConditionDeltaUnderstanding($safe['outbound'],$safe,$today);
-        // A complete current money predicate is independent of whether this
-        // conversation already contains a signed query. The closed residue
-        // proof below replaces old conditions; only a deliberately omitted
-        // store scope can be inherited by the normal context contract.
-        $localCountUnderstanding=$this->localClosedMemberMoneyCountUnderstanding(
-            $safe['outbound'],$safe,$today,$caps
-        );
+        // A fresh money predicate is safe to admit locally. With a prior
+        // result, even a complete-looking count may refer to its store or
+        // population, so the relation must be decided by understanding.
+        $localCountUnderstanding=$sourceContext===null
+            ?$this->localClosedMemberMoneyCountUnderstanding($safe['outbound'],$safe,$today,$caps):null;
         // Understanding has no metric catalogue. Binding receives accepted
         // meaning afterwards and may only propose registered execution fields.
         if ($localPeriodUnderstanding!==null || $localRankingUnderstanding!==null
@@ -1363,6 +1384,16 @@ final class AiGatewayServices
                 }
             }
         }
+        }
+        // One relation decision gates every later merger and result-reference
+        // path. Contextual business questions never infer this boundary from
+        // a closed grammar alone.
+        $newTopic=$sourceContext!==null && ($understanding['topic_relation']??null)==='new_topic';
+        if ($newTopic) {
+            $this->runs->markTopicReset($owner,$id,$generation,$worker);
+            $sourceContext=null;$sourceCollection=[];$sourceQuery=null;
+            $safe['outbound']['prior_query']=null;
+            $closedMetricOnlyProjection=false;
         }
         $understanding=$this->resolveExactStatedSinglePeriod($understanding,$safe['outbound'],$today);
         // One current opaque store followed by its immediate deictic is one
@@ -3205,6 +3236,12 @@ final class AiGatewayServices
         $normalizedQuestion=$population['question'];
         $dateProjection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse($normalizedQuestion);
         $dateTermCount=count((array)($dateProjection['date_terms']??[]));
+        // Without a stated period, an otherwise closed ranking can still
+        // naturally inherit the previous reporting window. Only an explicit
+        // current period proves this independent-topic shortcut is safe.
+        if ($sourceContext!==null && $dateTermCount===0) {
+            $reason='context_requires_understanding';return null;
+        }
         if ($format!=='screen' || $dateTermCount>1
             || !empty($dateProjection['date_grouping_ambiguous'])) {$reason='date_or_format';return null;}
         $defaultRankObjects=[];
@@ -3221,18 +3258,8 @@ final class AiGatewayServices
             $normalizedQuestion,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[])),
             $defaultRankObjects,$dateProjection['semantic_intent']['rank_limit']??null
         );
-        // A missing period may use one compatible verified predecessor. Only
-        // a genuinely new conversation uses the planner's same-day default.
-        // Unresolved source constraints stay on the existing understanding path.
-        // An omitted period is a legitimate contextual continuation. The
-        // same signed-period compatibility check below guards inheritance;
-        // only a new conversation uses the planner's documented day default.
-        $priorQueries=isset($sourceContext['items'])?array_column($sourceContext['items'],'query'):
-            (isset($sourceContext['query'])?[$sourceContext['query']]:[]);
-        $inherited=IntentContextMerger::rankingConstraints(
-            $priorQueries,$dateTermCount===0,$population['all_authorized']
-        );
-        if ($inherited===null) {$reason='context_constraints';return null;}
+        // An admitted sentence is self-contained: its plan uses only current
+        // wording and registry, never any predecessor's scope or period.
         $memberDetailRequest=$memberPopulationDetail['detail']??null;
         $items=$memberPopulationDetail!==null?[$memberPopulationDetail['ranking']]:$admission->match(
             $normalizedQuestion,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[])),$defaultRankObjects
@@ -3253,7 +3280,6 @@ final class AiGatewayServices
                 );
             } catch (\Throwable $ignored) {$reason='plan_compile';return null;}
             if (($compiled['kind']??null)!=='plan' || !is_array($compiled['plan']??null)) {$reason='plan_shape';return null;}
-            foreach ($inherited as $field=>$value) $compiled['plan']['query'][$field]=$value;
             $metricContract=$capabilities['metric_readiness'][$item['metric_code']]??null;
             if (is_array($metricContract)
                 &&($metricContract['filter_grain']??null)===$objectKind
@@ -5391,7 +5417,11 @@ final class AiGatewayServices
         if (($understanding['status']??null)!=='understood' || !is_array($sourceContext)
             || !is_array($sourceContext['query']??null) || !is_array($sourceContext['view']??null)) return null;
         $source=$sourceContext['query'];
-        if (($source['query_shape']??null)!=='ranking'
+        $anchor=$sourceContext['meaning']['result_set']??null;
+        $ranked=($source['query_shape']??null)==='ranking';
+        $anchored=($source['query_shape']??null)==='breakdown' && is_array($anchor)
+            && ($anchor['object_kind']??null)==='store' && ($anchor['ids']??null)===($source['store_ids']??null);
+        if ((!$ranked && !$anchored)
             || ($source['business_filters']['object_kind']??'store')!=='store'
             || !empty($source['aggregate_condition']) || !empty($source['condition_set'])
             || !empty($sourceContext['items']??[])) return null;
@@ -5465,11 +5495,18 @@ final class AiGatewayServices
             if ($metric!==($statedMetrics[0]['metric_code']??null)) return null;
         }
         if (!is_string($metric) || !in_array($metric,(array)($capabilities['metric_codes']??[]),true)) return null;
-        $resolved=(new \app\services\ai\context\ObjectDetailContinuationResolver())->resolve(
-            $source,$sourceContext['view'],$detail
-        );
-        if (($resolved['object_kind']??null)!=='store' || !is_array($resolved['objects']??null)) return null;
-        $ids=array_column($resolved['objects'],'id');
+        if ($anchored) {
+            // A repeated follow-up uses the signed identity set from the
+            // preceding successful requery, never a fresh TOP N or visible
+            // page rows that may omit a zero-valued store.
+            $ids=$anchor['ids'];
+        } else {
+            $resolved=(new \app\services\ai\context\ObjectDetailContinuationResolver())->resolve(
+                $source,$sourceContext['view'],$detail
+            );
+            if (($resolved['object_kind']??null)!=='store' || !is_array($resolved['objects']??null)) return null;
+            $ids=array_column($resolved['objects'],'id');
+        }
         if ($ids===[] || count($ids)>20 || count(array_unique($ids))!==count($ids)
             || ($statedSetCount!==null && count($ids)!==$statedSetCount)
             || array_diff($ids,(array)($capabilities['store_ids']??[]))!==[]
@@ -5483,9 +5520,59 @@ final class AiGatewayServices
             $range=(new AiWorkflowPlanner())->normalizeNaturalPeriod($periods[0],$today);
             $query['start_date']=$range['start'];$query['end_date']=$range['end'];
         }
+        $meaning=(array)($sourceContext['meaning']??[]);
+        $meaning['result_set']=['object_kind'=>'store','ids'=>$ids];
         return ['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_breakdown',
             'query'=>$query,'output_format'=>$outputFormat],
-            '_context_meaning'=>(array)($sourceContext['meaning']??[])];
+            '_context_meaning'=>$meaning];
+    }
+
+    /**
+     * Admit only an exact result-set reference with a single registered metric
+     * and at most one complete calendar expression. This is a bounded local
+     * projection of the same compiler used after model understanding; it never
+     * chooses an object, drops a condition or changes the Reader's authority.
+     */
+    private function localVerifiedStoreSetValuesContinuation(
+        $sourceContext,array $safeQuestion,array $capabilities,string $outputFormat,string $today
+    ): ?array {
+        if (!is_array($sourceContext) || !empty($safeQuestion['has_unresolved_conditions'])
+            || !is_string($safeQuestion['question']??null)) return null;
+        $question=$safeQuestion['question'];
+        $metrics=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText(
+            $question,(array)($capabilities['metric_codes']??[])
+        );
+        $calendar=\app\services\ai\semantic\AiSemanticIntentParser::calendarEvidence($question);
+        if (count($metrics)!==1 || ($metrics[0]['ai_query_ready']??false)!==true
+            || ($calendar['complete']??false)!==true || count((array)($calendar['periods']??[]))>1) return null;
+        $periods=(array)$calendar['periods'];
+        if ($this->closedStoreSetReference($question,[$metrics[0]['term']],$periods?:null,null)===false) return null;
+        // A later, verified non-store answer replaces the old topic. A closed
+        // "these stores" question has no referent in that answer; fail fast
+        // instead of asking the model to resurrect an older private set.
+        $priorKind=$sourceContext['query']['business_filters']['object_kind']??null;
+        if (($sourceContext['meaning']['result_set']['object_kind']??null)!=='store'
+            && is_string($priorKind) && $priorKind!=='store') {
+            throw new RuntimeException('AI_STORE_SET_REFERENCE_UNAVAILABLE');
+        }
+        // Calendar evidence uses local code terms; the shared planner converts
+        // them to an explicit interval before they enter the typed contract.
+        if ($periods!==[]) {
+            try {$range=(new AiWorkflowPlanner())->normalizePeriod($periods[0],$today);}
+            catch (\Throwable $error) {return null;}
+            $periods=[['kind'=>'date_range','start'=>$range['start'],'end'=>$range['end']]];
+        }
+        $requirements=[
+            ['id'=>'r1','fields'=>['object_detail'],'values'=>[
+                'object_detail'=>['view'=>'summary','target'=>'set','ordinal'=>null]]],
+            ['id'=>'r2','fields'=>['metric_codes','operation'],'values'=>[
+                'metric_terms'=>[$metrics[0]['term']],'operation'=>'breakdown']],
+        ];
+        if ($periods!==[]) $requirements[]=['id'=>'r3','fields'=>['periods'],'values'=>['periods'=>$periods]];
+        return $this->compileVerifiedStoreSetValuesContinuation(
+            ['status'=>'understood','requirements'=>$requirements],$sourceContext,$safeQuestion,
+            $capabilities,$outputFormat,$today
+        );
     }
 
     /**
@@ -6283,7 +6370,8 @@ final class AiGatewayServices
         $result=['run_id'=>$run['run_id'],'generation'=>$run['generation'],'version'=>$run['version'],'status'=>$run['status'],'reason'=>$run['reason'],
             'progress'=>$this->progressText($run),'message'=>$this->progressText($run),'run_delivery_token'=>$this->token(['type'=>'run','identity'=>$this->identity($context),'window'=>$owner['window_id'],
                 'conversation'=>$owner['conversation_id'],'run'=>$run['run_id'],'generation'=>$run['generation'],'expires'=>intdiv($run['expires_at'],1000)]),
-            'execution_mode'=>$run['execution_mode']??'compatibility'];
+            'execution_mode'=>$run['execution_mode']??'compatibility',
+            'topic_boundary'=>$run['topic_boundary']??null];
         if ($run['status']==='WAITING_CLARIFICATION') {
             $stored=$this->private->read($run['clarification_ref']); $this->assertBinding($stored,$owner,$run['run_id'],$run['generation']);
             $result['clarification']=['id'=>$run['clarification_ref'],'question'=>$stored['envelope']['question']??'请确认这一项查询条件','fields'=>$stored['envelope']['fields']];
@@ -6353,6 +6441,7 @@ final class AiGatewayServices
             'AI_CAPABILITY_NOT_READY'=>'已识别您的需求，但对应的数据能力或筛选组合尚未接入，暂不能准确提供结果。',
             'AI_CONTEXT_REQUIRED'=>'这句追问缺少可核对的前文条件。请补充您想延续的对象、时间或查看结果，我会按当前权限重新查询。',
             'AI_RESULT_REFERENCE_UNAVAILABLE'=>'暂时无法确认要查看的详情，请补充名称或重新查询列表。',
+            'AI_STORE_SET_REFERENCE_UNAVAILABLE'=>'上一条回答不是门店列表。请说出要比较的门店名称，或先查询门店排行。',
             'AI_OBJECT_DETAIL_SELECTION_REQUIRED'=>'上一份结果包含多个对象，请说明要看第几位或直接说出对象；本次没有替您选择。',
             'AI_OBJECT_DETAIL_NOT_READY'=>'已理解您想继续查看这个对象，但该对象的这类信息尚未接入统一查询；本次没有改查近似数据。',
             'AI_MEMBER_DETAIL_SELECTION_REQUIRED'=>'上一份名单有多位会员，请说明要看第几位会员的权益，例如“第一个会员的权益明细”。本次没有替您选择会员。',

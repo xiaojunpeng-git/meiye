@@ -50,6 +50,14 @@ $verify($admission->match('那家店业绩最高是哪家店',$saleObjects,$metr
 $verify($admission->match('这个月项目卖得最好的是什么？',$saleObjects,$metrics,$sharedDefaults)
     ===[['metric_code'=>'sales_amount','object_kind'=>'project','direction'=>'top','limit'=>1]],
     'R55 punctuation cannot force a complete registry-default project ranking through the slow model path');
+$verify($admission->match('这个月项目销售额第一名是谁',$saleObjects,$metrics,$sharedDefaults)
+    ===[['metric_code'=>'sales_amount','object_kind'=>'project','direction'=>'top','limit'=>1]],
+    'an exact first-place question is a complete registered project ranking');
+$verify($admission->match('这个月项目销售额倒数第一名是谁',$saleObjects,$metrics,$sharedDefaults)
+    ===[['metric_code'=>'sales_amount','object_kind'=>'project','direction'=>'bottom','limit'=>1]],
+    'the same ordinal grammar admits an exact last-place question');
+$verify($admission->match('这两家这个月项目销售额第一名是谁',$saleObjects,$metrics,$sharedDefaults)===null,
+    'a prior-store reference cannot be dropped to enter the independent ranking path');
 $verify($admission->match('这个月销售额最高的前两家门店',$saleObjects,$metrics,$sharedDefaults)
     ===[['metric_code'=>'sales_amount','object_kind'=>'store','direction'=>'top','limit'=>2]],
     'R55 bounded single ranking keeps its registered metric, object and limit');
@@ -134,9 +142,8 @@ $dateOmittedArgs=['项目、卡项、产品卖得最好的分别是什么？',$v
     ['query'=>['store_ids'=>[],'business_filters'=>[],'metric_codes'=>['cash_performance'],
         'start_date'=>'2026-09-01','end_date'=>'2026-09-30','compare_range'=>null]]];
 $dateOmitted=$rankingMethod->invokeArgs($gateway,$dateOmittedArgs);
-$verify($reason===null && count($dateOmitted['plan']['items']??[])===3
-    &&($dateOmitted['plan']['items'][0]['plan']['query']['start_date']??null)==='2026-09-01',
-    'R55 a fully closed three-object ranking inherits one verified period instead of entering slow model understanding');
+$verify($dateOmitted===null && $reason==='context_requires_understanding',
+    'a ranking with a predecessor must pass topic understanding before any previous period can be reused');
 $reason=null;
 $memberArgs=['会员业绩最高的前五名详情',$vocabulary,$capabilities,'screen','2026-09-25',&$reason];
 $memberPlan=$rankingMethod->invokeArgs($gateway,$memberArgs);
@@ -191,96 +198,39 @@ $verify($reason===null && ($laborWinnerPlan['plan']['query']['metric_codes']??nu
     'R55 the same closed winner passes gateway admission with a registered Reader plan');
 $verify($admission->matchPopulationDetail('这个月门店业绩前三名的后两名详情',$vocabulary,array_keys($contracts),$sharedDefaults,3)===null,
     'conflicting population directions cannot enter the closed path');
-// R49: a named new ranking replaces the old dimension/ranking, while only
-// compatible verified dates and store scope survive across turns.
+// With a predecessor, an omitted period leaves topic continuity open. The
+// exact shortcut may reset only a complete question with its own period;
+// otherwise it cannot borrow the prior date, store or object shape.
 $prior=$prefixedPlan['plan']['items'][1]['plan']['query'];
 $prior['store_ids']=[12];
-$source=['query'=>$prior];
-$args=['会员业绩最高的前五名详情',$vocabulary,$capabilities,'screen','2026-09-27',&$reason,$source];
-$continued=$rankingMethod->invokeArgs($gateway,$args);
-$q=$continued['plan']['query'];
-$verify($q['start_date']==='2026-09-01' && $q['end_date']==='2026-09-25'
-    && $q['store_ids']===[12] && $q['business_filters']===['object_kind'=>'member']
-    && $q['ranking']===['direction'=>'top','limit'=>5], 'R49 carries the verified period/scope without project or bottom-ranking residue');
-$args[0]='今天会员业绩最高的前五名详情';
-$explicit=$rankingMethod->invokeArgs($gateway,$args);
-$verify($explicit['plan']['query']['start_date']==='2026-09-27'
-    &&$explicit['plan']['query']['store_ids']===[12], 'explicit date wins without dropping store scope');
-$priorCondition=$prior;
-$priorCondition['condition_set']=['subject'=>'member','relation'=>'all','conditions'=>[]];
-$priorCondition['aggregate_condition']=['subject'=>'member','relation'=>'all','conditions'=>[]];
-$args=[ '这个月销售额最高的前两家门店',$vocabulary,$capabilities,'screen','2026-09-27',&$reason,
-    ['query'=>$priorCondition] ];
-$freshRanking=$rankingMethod->invokeArgs($gateway,$args);
+$reason=null;
+$contextArgs=['会员业绩最高的前五名详情',$vocabulary,$capabilities,'screen','2026-09-27',&$reason,['query'=>$prior]];
+$verify($rankingMethod->invokeArgs($gateway,$contextArgs)===null && $reason==='context_requires_understanding',
+    'a contextual ranking cannot silently reuse a verified date or selected store');
+$reason=null;
+$freshArgs=['这个月销售额最高的前两家门店',$vocabulary,$capabilities,'screen','2026-09-27',&$reason];
+$freshRanking=$rankingMethod->invokeArgs($gateway,$freshArgs);
 $verify($reason===null && ($freshRanking['plan']['query']['metric_codes']??null)===['sales_amount']
     &&($freshRanking['plan']['query']['ranking']['limit']??null)===2
-    &&($freshRanking['plan']['query']['store_ids']??null)===[12]
-    &&empty($freshRanking['plan']['query']['condition_set'])
-    &&empty($freshRanking['plan']['query']['aggregate_condition']),
-    'R55 complete ranking replaces old customer predicates but retains compatible verified store scope');
+    &&($freshRanking['plan']['query']['store_ids']??null)===[],
+    'an independent explicit-period ranking uses only its own scope and metric');
 $authorizedCapabilities=$capabilities;$authorizedCapabilities['store_ids']=[12];
 $compiledFresh=(new app\services\ai\execution\AiRegisteredPlanCompiler())->compile(
     $freshRanking['plan'],$authorizedCapabilities
 );
 $verify(($compiledFresh['query']['ranking']??null)===['direction'=>'top','limit'=>2]
     &&($compiledFresh['query']['metric_codes']??null)===['sales_amount'],
-    'R55 admitted store sales ranking survives the shared registered compiler');
+    'fresh ranking survives the shared registered compiler and permission boundary');
+$reason=null;
 $allStoreArgs=['2026年3月到今天所有门店现金业绩前两名分别是谁',
-    $vocabulary,$capabilities,'screen','2026-09-30',&$reason,['query'=>$prior]];
+    $vocabulary,$capabilities,'screen','2026-09-30',&$reason];
 $allStores=$rankingMethod->invokeArgs($gateway,$allStoreArgs);
 $verify($reason===null && ($allStores['plan']['query']['store_ids']??null)===[]
     &&($allStores['plan']['query']['ranking']??null)===['direction'=>'top','limit'=>2],
-    'R55 explicit all-authorized population clears a prior selected store before permissioned Reader execution');
-$allStoreArgs[0]='不要只看肥西水晶城，统计2026年3月到今天我有权限的全部门店，现金业绩前两名分别是谁';
-$allStoresNatural=$rankingMethod->invokeArgs($gateway,$allStoreArgs);
-$verify($reason===null && ($allStoresNatural['plan']['query']['store_ids']??null)===[]
-    &&($allStoresNatural['plan']['query']['ranking']??null)===['direction'=>'top','limit'=>2],
-    'R55 a negated prior store plus explicit all-authorized scope still uses the Reader permission boundary');
+    'explicit all-authorized population remains within the Reader permission boundary');
 $allStoreArgs[0]='2026年3月到今天所有门店现金业绩前两名，排除一家';
 $verify($rankingMethod->invokeArgs($gateway,$allStoreArgs)===null,
-    'R55 unparsed exclusions cannot be discarded while clearing the store scope');
-$verify($memberPlan['plan']['query']['start_date']==='2026-09-25','new conversation retains the documented same-day default');
-$args[0]='会员业绩最高的前五名详情';
-foreach (['comparison','mixed_dates'] as $case) {
-    $bad=$source;
-    if ($case==='comparison') $bad['query']['compare_range']=['start'=>'2026-08-01','end'=>'2026-08-25'];
-    if ($case==='mixed_dates') {
-        $other=$prior;$other['start_date']='2026-09-20';
-        $bad=['items'=>[['query'=>$prior],['query'=>$other]]];
-    }
-    $args[6]=$bad;
-    $verify($rankingMethod->invokeArgs($gateway,$args)===null && $reason==='context_constraints',
-        'R49 '.$case.' retains ordinary contextual understanding instead of silently replacing restrictions');
-}
-$selectedSource=$source;
-$selectedSource['query']['business_filters']['selection_ref']='project:1';
-$args[6]=$selectedSource;
-$newSubject=$rankingMethod->invokeArgs($gateway,$args);
-$verify($reason===null && ($newSubject['plan']['query']['business_filters']??null)===['object_kind'=>'member']
-    &&($newSubject['plan']['query']['store_ids']??null)===[12],
-    'R55 a complete new ranking drops an old selected object while retaining compatible store authority');
-$personSource=$source;
-$personSource['query']['business_filters']=['object_kind'=>'person','selection_ref'=>'person:7'];
-$personSource['query']['metric_codes']=['staff_sales_yeji'];
-$args=['哪个员工业绩最高？',$vocabulary,$capabilities,'screen','2026-09-30',&$reason,$personSource];
-$allPersons=$rankingMethod->invokeArgs($gateway,$args);
-$verify($reason===null && ($allPersons['plan']['query']['metric_codes']??null)===['staff_sales_yeji']
-    &&($allPersons['plan']['query']['business_filters']['selection_ref']??null)!=='person:7',
-    'R55 a self-contained employee ranking must not rank only the previously selected employee');
-$args[6]=['items'=>[['query'=>$prior],['query'=>$prior]]];
-$verify($rankingMethod->invokeArgs($gateway,$args)['plan']['query']['start_date']==='2026-09-01',
-    'consistent collection dates can be reused without an extra model call');
-// Cross-dimension continuations include registered personnel cohorts. Those
-// defaults follow their own metric, unlike a specifically selected employee.
-$source=['query'=>$prior];
-foreach (['门店'=>'store','员工'=>'person','项目'=>'project','产品'=>'product','会员'=>'member'] as $label=>$kind) {
-    $args=[$label.'业绩最高的前五名详情',$vocabulary,$capabilities,'screen','2026-09-27',&$reason,$source];
-    $next=$rankingMethod->invokeArgs($gateway,$args);
-    $nextQuery=$next['plan']['query']??[];
-    $actualKind=$nextQuery['business_filters']['object_kind']??'store';
-    $verify($reason===null && $actualKind===$kind && ($nextQuery['start_date']??null)==='2026-09-01'
-        &&($nextQuery['store_ids']??null)===[12] && ($nextQuery['ranking']['limit']??null)===5,
-        'R49 sequential switch to '.$kind.' keeps only compatible context');
-    $source=['query'=>$nextQuery];
-}
+    'an unparsed exclusion cannot be discarded by the fast path');
+$verify($memberPlan['plan']['query']['start_date']==='2026-09-25',
+    'an independent ranking retains the documented same-day default');
 echo "exact ranking collection admission: {$checks} checks PASS\n";

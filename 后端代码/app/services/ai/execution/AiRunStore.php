@@ -913,6 +913,25 @@ final class AiRunStore
         });
     }
 
+    /**
+     * Persist a server-understood topic reset before binding or reading data.
+     * A later failure or cancellation must still stop both clients from
+     * searching backward for an answer from the previous topic.
+     */
+    public function markTopicReset(array $owner,string $runId,int $generation,string $workerToken): void
+    {
+        $this->transaction(function () use ($owner,$runId,$generation,$workerToken) {
+            $r=$this->read($owner,$runId,$generation,true);$this->worker($r,$workerToken);
+            if ($this->terminal($r)) return;
+            $counts=json_decode($r['counters_json'],true)?:[];
+            if (($counts['topic_boundary']??null)==='reset') return;
+            $counts['topic_boundary']='reset';
+            $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[
+                json_encode($counts),$this->instance,$runId
+            ]);
+        });
+    }
+
     /** A cancelled, unclaimed job has no future use for encrypted input. */
     public function discardUnclaimedExecutionInput(array $owner,string $runId,int $generation): ?string
     {
@@ -1396,6 +1415,7 @@ final class AiRunStore
         $out['clarification_wait_ms']=(int)($counts['clarification_wait_ms']??0);
         $out['clarification_rejected']=($r['clarification_ref']??'')!=='' && ($counts['clarification_rejected_ref']??'')===$r['clarification_ref'];
         $out['execution_mode']=($counts['execution_mode']??'')==='async'?'async':'compatibility';
+        $out['topic_boundary']=($counts['topic_boundary']??null)==='reset'?'reset':null;
         return $out;
     }
 }
