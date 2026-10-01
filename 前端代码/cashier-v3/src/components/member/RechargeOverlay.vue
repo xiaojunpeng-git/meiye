@@ -27,6 +27,7 @@ const isSalespersonLoading = ref(false)
 const salespersonLoadError = ref('')
 const validationMessage = ref('')
 const businessDate = ref('')
+const rechargeRemark = ref('')
 let paymentLineSequence = 1
 
 const cashierToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date())
@@ -68,6 +69,7 @@ watch(() => props.session, () => {
   newPaymentMethod.value = 'unionpay'
   salespersonAllocations.value = []
   businessDate.value = String(props.businessDate || cashierToday)
+  rechargeRemark.value = ''
   validationMessage.value = ''
 }, { immediate: true, deep: true })
 
@@ -116,9 +118,13 @@ function submit() {
   const debt = debtAmount.value.trim()
   const selectedBusinessDate = businessDate.value.trim()
   if (!memberId.value) validationMessage.value = '会员信息已失效，请重新选择会员。'
-  else if (!isMoney(principal)) validationMessage.value = '请输入大于 0 的充值金额。'
+  // 零本金只允许配合正数赠金，并须说明原因；不能创建一笔 0+0 的空充值。
+  else if (!isMoney(principal, true)) validationMessage.value = '充值金额只能填写不小于 0 的整数。'
   else if (!isMoney(bonus, true)) validationMessage.value = '赠送金额只能填写不小于 0 的金额。'
+  else if (moneyToCents(principal) === 0 && moneyToCents(bonus) === 0) validationMessage.value = '充值金额为 0 时，赠送金额必须大于 0。'
   else if (!isMoney(debt, true) || moneyToCents(debt) > moneyToCents(principal)) validationMessage.value = '欠款金额必须在 0 到充值本金之间。'
+  else if (moneyToCents(principal) === 0 && !rechargeRemark.value.trim()) validationMessage.value = '充值金额为 0 时，请填写备注。'
+  else if (rechargeRemark.value.trim().length > 255) validationMessage.value = '备注不能超过 255 个字。'
   else if (!isValidBusinessDate(selectedBusinessDate)) validationMessage.value = '请选择不晚于今天的业务日期。'
   else validationMessage.value = ''
   if (validationMessage.value) return
@@ -130,6 +136,7 @@ function submit() {
     bonusAmount: bonus,
     debtAmount: debt,
     businessDate: selectedBusinessDate,
+    rechargeRemark: rechargeRemark.value.trim(),
     salespersonAllocations: salespersonAllocations.value.map((item) => ({
       staffId: item.staffId || item.id,
       allocationWeight: Number(item.allocationWeight),
@@ -259,7 +266,10 @@ function createPaymentLine(paymentMethod) {
           <label>本次欠款<input v-model="debtAmount" inputmode="numeric" autocomplete="off" @input="normalizeDebtAmount"></label>
         </div>
         <section class="recharge-overlay__context" aria-label="充值日期与销售人分配">
-          <label class="recharge-overlay__business-date">业务日期<input v-model="businessDate" type="date" :max="cashierToday"></label>
+          <div class="recharge-overlay__date-and-remark">
+            <label class="recharge-overlay__business-date">业务日期<input v-model="businessDate" type="date" :max="cashierToday"></label>
+            <label class="recharge-overlay__remark">备注<span v-if="rechargeMode === 'custom' && displayedPrincipal === '0'">（必填）</span><textarea v-model="rechargeRemark" maxlength="255" rows="2" placeholder="充值金额为 0 时请填写原因"></textarea></label>
+          </div>
           <section class="recharge-overlay__salespeople" aria-label="销售人分配">
             <header><strong>销售人分配</strong><span>{{ salespersonAllocations.length ? salespersonAllocations.map((item) => `${item.name} ${item.allocationWeight}%`).join('、') : '暂未选择' }}</span><button type="button" class="button button--secondary" @click="openSalespersonSelector">选择销售人</button></header>
             <div v-if="salespersonAllocations.length" class="recharge-overlay__salesperson-list">
@@ -323,9 +333,14 @@ function createPaymentLine(paymentMethod) {
 .recharge-overlay__fields input, .recharge-overlay__fields select { width: 100%; height: 38px; padding: 0 10px; border: 1px solid #cfd7e3; border-radius: 5px; background: #fff; color: #202b3a; }
 .recharge-overlay__fields input:focus, .recharge-overlay__fields select:focus { outline: 2px solid rgba(41, 129, 229, .24); border-color: #2981e5; }
 .recharge-overlay__context { display: grid; grid-template-columns: minmax(180px, .7fr) minmax(0, 1.3fr); gap: 20px; margin: 0 24px 22px; border-top: 1px solid #edf0f4; padding-top: 16px; }
+.recharge-overlay__date-and-remark { display: grid; align-content: start; gap: 12px; }
 .recharge-overlay__business-date { display: grid; align-content: start; gap: 7px; color: #3f4c5c; font-size: 14px; }
 .recharge-overlay__business-date input { width: 100%; height: 38px; padding: 0 10px; border: 1px solid #cfd7e3; border-radius: 5px; background: #fff; color: #202b3a; }
 .recharge-overlay__business-date input:focus { outline: 2px solid rgba(41, 129, 229, .24); border-color: #2981e5; }
+.recharge-overlay__remark { display: grid; gap: 7px; color: #3f4c5c; font-size: 14px; }
+.recharge-overlay__remark span { color: #c63434; }
+.recharge-overlay__remark textarea { width: 100%; min-height: 58px; padding: 9px 10px; resize: vertical; border: 1px solid #cfd7e3; border-radius: 5px; background: #fff; color: #202b3a; font: inherit; }
+.recharge-overlay__remark textarea:focus { outline: 2px solid rgba(41, 129, 229, .24); border-color: #2981e5; }
 .recharge-overlay__salespeople { min-width: 0; }
 .recharge-overlay__salespeople header { display: flex; align-items: center; gap: 10px; }
 .recharge-overlay__salespeople header strong { color: #263445; }

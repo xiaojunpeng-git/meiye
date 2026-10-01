@@ -263,9 +263,10 @@ recordOk('V3 充值现金业绩只读取有效收款事实并按门店和充值�
     && strpos($source, "->whereIn('pf.order_no_snapshot'") !== false
     && strpos($source, 'SUM(pf.amount_cents) AS actual_received_cents') !== false
     && strpos($source, "->group('pf.store_id,pf.order_no_snapshot')") !== false);
-recordOk('V3 充值事实存在即使冲销后净额为零也为 ready，旧充值仍为 not_ready', strpos($source, 'array_key_exists($economicsKey, $rechargeEconomics)') !== false
+// 纯赠金充值本来没有收款事实；它的合法 0 元收款不能误判为旧充值缺事实。
+recordOk('V3 充值事实存在即使冲销后净额为零也为 ready，纯赠金 0 元同样 ready', strpos($source, 'array_key_exists($economicsKey, $rechargeEconomics)') !== false
     && strpos($source, "'actualReceivedAmount' => \$hasV3PaymentFacts") !== false
-    && strpos($source, "'economicsDataStatus' => \$hasV3PaymentFacts ? 'ready' : 'not_ready'") !== false
+    && strpos($source, "'economicsDataStatus' => \$hasV3PaymentFacts || (string)\$row['recharge_type'] === 'bonus_only' ? 'ready' : 'not_ready'") !== false
     && strpos($source, 'must not filter to forward facts only') !== false);
 recordOk('充值订单状态和筛选读取成功的追加式退款作废操作，不回写旧充值主表',
     strpos($source, 'rechargeLifecycleOperationQuery') !== false

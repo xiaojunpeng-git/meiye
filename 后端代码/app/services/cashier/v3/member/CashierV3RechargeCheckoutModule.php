@@ -98,6 +98,7 @@ final class CashierV3RechargeCheckoutModule
             'debtAmount' => $this->wholeMoney($input['debtCents']),
             'balanceVersion' => $balanceVersion,
             'businessDate' => $input['businessDate'],
+            'rechargeRemark' => $input['rechargeRemark'],
             'businessDateReason' => (string)($snapshot['businessDateReason'] ?? ''),
             'salespersonAllocations' => $input['salespersonAllocations'],
             'paymentLines' => array_map(static function (array $payment): array {
@@ -124,9 +125,52 @@ final class CashierV3RechargeCheckoutModule
     }
 
     private function scope(array $scope): array { $p=is_array($scope['payload']??null)?$scope['payload']:[];$o=$scope['operator_scope']??null;$d=$scope['data_scope']??null;if(!$o instanceof CashierV3OperatorScope||!$d instanceof CashierV3DataScopeContext) throw self::invalid('recharge_checkout_scope_missing','充值结账服务尚未就绪，请刷新后重试。');return [$p,$o,$d]; }
-    private function normalizeTerms(array $p): array { $id=(int)($p['memberId']??0);$mode=(string)($p['rechargeMode']??'custom');$pkg=(int)($p['rechargePackageId']??0);$principal=$mode==='package'?0:$this->moneyToCents($p['principalAmount']??null);$bonus=$mode==='package'?0:$this->moneyToCents($p['bonusAmount']??null);$debt=$this->moneyToCents($p['debtAmount']??'0');$businessDate=$this->businessDate($p['businessDate']??'');$businessSource=$this->businessSource($p['businessSource']??[]);if($id<=0||!in_array($mode,['package','custom'],true)||($mode==='package'&&$pkg<=0)||($mode==='custom'&&($principal<=0||$bonus<0))||$debt<0) throw self::invalid('recharge_checkout_terms_invalid','充值信息不完整或金额无效，请重新填写。');return ['memberId'=>$id,'mode'=>$mode,'packageId'=>$pkg,'principalCents'=>$principal,'bonusCents'=>$bonus,'debtCents'=>$debt,'businessDate'=>$businessDate,'businessSource'=>$businessSource,'salespersonAllocations'=>array_values((array)($p['salespersonAllocations']??[]))]; }
+    private function normalizeTerms(array $p): array
+    {
+        $id = (int)($p['memberId'] ?? 0);
+        $mode = (string)($p['rechargeMode'] ?? 'custom');
+        $pkg = (int)($p['rechargePackageId'] ?? 0);
+        $principal = $mode === 'package' ? 0 : $this->moneyToCents($p['principalAmount'] ?? null);
+        $bonus = $mode === 'package' ? 0 : $this->moneyToCents($p['bonusAmount'] ?? null);
+        $debt = $this->moneyToCents($p['debtAmount'] ?? '0');
+        $remark = trim((string)($p['rechargeRemark'] ?? ''));
+        $businessDate = $this->businessDate($p['businessDate'] ?? '');
+        $businessSource = $this->businessSource($p['businessSource'] ?? []);
+        // 纯赠金是一笔真实余额变更，但不得出现 0+0 空单；零本金必须保留操作原因。
+        if ($id <= 0 || !in_array($mode, ['package', 'custom'], true)
+            || ($mode === 'package' && $pkg <= 0)
+            || ($mode === 'custom' && ($principal < 0 || $bonus < 0 || $principal + $bonus <= 0))
+            || $debt < 0 || mb_strlen($remark) > 255
+            || ($mode === 'custom' && $principal === 0 && $remark === '')) {
+            throw self::invalid('recharge_checkout_terms_invalid', '充值金额为 0 时须有赠送金额并填写备注。');
+        }
+        return ['memberId' => $id, 'mode' => $mode, 'packageId' => $pkg,
+            'principalCents' => $principal, 'bonusCents' => $bonus, 'debtCents' => $debt,
+            'rechargeRemark' => $remark, 'businessDate' => $businessDate,
+            'businessSource' => $businessSource,
+            'salespersonAllocations' => array_values((array)($p['salespersonAllocations'] ?? []))];
+    }
     private function businessSource($value): array { if(!is_array($value)) throw self::invalid('recharge_business_source_invalid','请先在收银页面顶部选择客户来源。');$primary=(int)($value['primarySourceId']??0);$secondary=(int)($value['secondarySourceId']??0);if($primary<=0||$secondary<0) throw self::invalid('recharge_business_source_invalid','请先在收银页面顶部选择客户来源。');return ['primarySourceId'=>$primary,'secondarySourceId'=>$secondary]; }
-    private function resolveTerms(array $input,array $member): array { if($input['mode']==='package'){foreach((array)(sys_data('user_recharge_quota')??[]) as $pkg){if(is_array($pkg)&&(int)($pkg['id']??0)===$input['packageId']){$input['principalCents']=$this->moneyToCents($pkg['price']??null);$input['bonusCents']=$this->moneyToCents($pkg['give_money']??0);break;}}}if($input['principalCents']<=0||$input['bonusCents']<0||$input['debtCents']>$input['principalCents']) throw self::invalid('recharge_checkout_terms_unavailable','所选充值套餐已下架或欠款金额无效，请重新填写。');$input['creditedPrincipalCents']=$input['principalCents']-$input['debtCents'];return $input; }
+    private function resolveTerms(array $input,array $member): array
+    {
+        if ($input['mode'] === 'package') {
+            foreach ((array)(sys_data('user_recharge_quota') ?? []) as $pkg) {
+                if (is_array($pkg) && (int)($pkg['id'] ?? 0) === $input['packageId']) {
+                    $input['principalCents'] = $this->moneyToCents($pkg['price'] ?? null);
+                    $input['bonusCents'] = $this->moneyToCents($pkg['give_money'] ?? 0);
+                    break;
+                }
+            }
+        }
+        if (($input['mode'] === 'package' && $input['principalCents'] <= 0)
+            || $input['principalCents'] < 0 || $input['bonusCents'] < 0
+            || $input['principalCents'] + $input['bonusCents'] <= 0
+            || $input['debtCents'] > $input['principalCents']) {
+            throw self::invalid('recharge_checkout_terms_unavailable', '所选充值套餐已下架或充值金额无效，请重新填写。');
+        }
+        $input['creditedPrincipalCents'] = $input['principalCents'] - $input['debtCents'];
+        return $input;
+    }
     private function snapshotMoneyToCents($value): int
     {
         $raw = trim((string)$value);

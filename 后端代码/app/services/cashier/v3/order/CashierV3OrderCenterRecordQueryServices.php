@@ -256,7 +256,9 @@ final class CashierV3OrderCenterRecordQueryServices
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.order_id', 'u.real_name', 'u.nickname', 'u.phone', 's.name', 'st.staff_name',
         ]);
-        if ($criteria['status'] === 'paid') {
+        // “正常”是默认查询范围，不是业务状态选项；它与显式“已支付”一样
+        // 必须排除追加式作废/退款操作，否则已作废的原充值主表仍会混入正常列表。
+        if ($criteria['status'] === 'paid' || ($criteria['dataScope'] === 'normal' && $criteria['status'] === '')) {
             $query->where('r.paid', 1)->where('r.terminal_action', 0)->where('r.refund_price', '<=', 0)
                 ->whereNotExists($this->rechargeLifecycleOperationQuery($tenantId, ['refund', 'void']));
         } elseif ($criteria['status'] === 'voided') {
@@ -275,7 +277,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $total = (int)(clone $query)->count('r.id');
         $rows = $this->pageRows($query, $criteria, 'r.pay_time', 'r.id', implode(',', [
             'r.id', 'r.order_id', 'r.uid', 'r.store_id', 'r.staff_id', 'r.price', 'r.give_price',
-            'r.refund_price', 'r.recharge_type', 'r.combination_info', 'r.channel_type', 'r.paid', 'r.terminal_action',
+            'r.refund_price', 'r.recharge_type', 'r.combination_info', 'r.remarks', 'r.channel_type', 'r.paid', 'r.terminal_action',
             'r.pay_time', 'r.add_time', 'u.real_name', 'u.nickname', 'u.phone',
             's.name AS store_name', 'st.staff_name',
         ]));
@@ -303,9 +305,12 @@ final class CashierV3OrderCenterRecordQueryServices
                 // Only V3 payment facts are the authoritative cash-performance
                 // source. A zero net amount remains ready when reversals offset
                 // a real V3 collection; legacy recharge columns never fill it.
+                // 纯赠金无收款事实是合法的 0 元结果，不应误报为经济数据未就绪。
                 'actualReceivedAmount' => $hasV3PaymentFacts
-                    ? $this->centsToMoney((int)$rechargeEconomics[$economicsKey]) : null,
-                'economicsDataStatus' => $hasV3PaymentFacts ? 'ready' : 'not_ready',
+                    ? $this->centsToMoney((int)$rechargeEconomics[$economicsKey])
+                    : ((string)$row['recharge_type'] === 'bonus_only' ? '0.00' : null),
+                'economicsDataStatus' => $hasV3PaymentFacts || (string)$row['recharge_type'] === 'bonus_only' ? 'ready' : 'not_ready',
+                'remark' => (string)$row['remarks'],
                 'paymentMethod' => $this->rechargePaymentLabel($row),
                 // user_recharge.staff_id is the operator, not the salesperson.
                 // V3 salespeople are read from immutable performance facts;
@@ -2239,6 +2244,7 @@ final class CashierV3OrderCenterRecordQueryServices
      */
     private function rechargePaymentLabel(array $row): string
     {
+        if ((string)($row['recharge_type'] ?? '') === 'bonus_only') return '无收款（仅赠送）';
         $decoded = json_decode((string)($row['combination_info'] ?? ''), true);
         $labels = [];
         if (is_array($decoded)) {

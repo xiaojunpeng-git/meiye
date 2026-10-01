@@ -136,7 +136,11 @@ final class CashierV3RechargeModule
             'staff_id' => $operator->operatorId(),
             'price' => $this->centsToMoney($input['principalCents']),
             'give_price' => $this->centsToMoney($input['bonusCents']),
-            'recharge_type' => count($input['paymentLines']) === 1 ? $input['paymentLines'][0]['paymentMethod'] : 'debt',
+            // 零本金充值没有收款事实，原因必须随充值主单持久保存供审计追溯。
+            'remarks' => $input['rechargeRemark'],
+            // 无收款的纯赠金不能冒充“欠款充值”，否则订单中心会把资金来源解释错。
+            'recharge_type' => $input['principalCents'] === 0 ? 'bonus_only'
+                : (count($input['paymentLines']) === 1 ? $input['paymentLines'][0]['paymentMethod'] : 'debt'),
             'cash_choose' => 0,
             'channel_type' => (string)($member['user_type'] ?? ''),
             'paid' => 1,
@@ -458,6 +462,7 @@ final class CashierV3RechargeModule
         $principal = $mode === 'package' ? 0 : $this->moneyToCents($payload['principalAmount'] ?? null);
         $bonus = $mode === 'package' ? 0 : $this->moneyToCents($payload['bonusAmount'] ?? null);
         $debt = $this->moneyToCents($payload['debtAmount'] ?? '0');
+        $remark = trim((string)($payload['rechargeRemark'] ?? ''));
         $paymentMethod = trim((string)($payload['paymentMethod'] ?? ''));
         $reference = trim((string)($payload['collectionReference'] ?? ''));
         $paymentLines = is_array($payload['paymentLines'] ?? null)
@@ -469,8 +474,10 @@ final class CashierV3RechargeModule
             : [];
         if ($memberId <= 0 || !in_array($mode, ['package', 'custom'], true)
             || ($mode === 'package' && $packageId <= 0)
-            || ($mode === 'custom' && ($principal <= 0 || $bonus < 0))
+            || ($mode === 'custom' && ($principal < 0 || $bonus < 0 || $principal + $bonus <= 0))
             || $debt < 0
+            || mb_strlen($remark) > 255
+            || ($mode === 'custom' && $principal === 0 && $remark === '')
             || $balanceVersion <= 0
             || (!$paymentLines && (strlen($reference) > 128
                 || ($reference !== '' && preg_match('/^[A-Za-z0-9_.:\/-]+$/D', $reference) !== 1)))) {
@@ -489,6 +496,7 @@ final class CashierV3RechargeModule
             'debtCents' => $debt,
             'collectionReference' => $reference,
             'businessDate' => trim((string)($payload['businessDate'] ?? '')),
+            'rechargeRemark' => $remark,
             'businessDateReason' => trim((string)($payload['businessDateReason'] ?? '')),
         ];
     }
@@ -536,11 +544,12 @@ final class CashierV3RechargeModule
         }
 
         $minimum = $this->moneyToCents(sys_config('store_user_min_recharge', 0));
-        if ($minimum > 0 && $input['principalCents'] < $minimum) {
+        // 纯赠金没有实际收款，本金最低门槛与赠金/本金比例不适用；仍须有备注审计。
+        if ($minimum > 0 && $input['principalCents'] > 0 && $input['principalCents'] < $minimum) {
             throw self::failure('recharge_below_minimum', '充值金额不能低于门店设置的最低充值金额。');
         }
         $maximumPercent = (float)($member['recharge_per'] ?? 0);
-        if ($input['mode'] === 'custom' && $maximumPercent > 0
+        if ($input['mode'] === 'custom' && $input['principalCents'] > 0 && $maximumPercent > 0
             && $input['bonusCents'] * 100 > $input['principalCents'] * $maximumPercent) {
             throw self::failure('recharge_bonus_exceeds_limit', '赠送金额占比超过当前会员允许的上限。');
         }

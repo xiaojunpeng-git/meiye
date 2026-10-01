@@ -40,9 +40,11 @@ export function useRechargeCheckout() {
     const debt = Number(input.debtAmount || 0)
     const due = principal - debt
     if (!Number.isSafeInteger(memberId) || memberId <= 0
-      || !Number.isSafeInteger(principal) || principal <= 0
+      || !Number.isSafeInteger(principal) || principal < 0
       || !Number.isSafeInteger(bonus) || bonus < 0
+      || principal + bonus <= 0
       || !Number.isSafeInteger(debt) || debt < 0 || debt > principal
+      || (principal === 0 && !String(input.rechargeRemark || '').trim())
       || (input.rechargeMode === 'package' && !packageItem)) return null
     const localId = `local-recharge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const selectedLines = due > 0 ? [{
@@ -60,6 +62,8 @@ export function useRechargeCheckout() {
         rechargePackageId: Number(input.rechargePackageId || 0),
         principalAmount: String(principal), bonusAmount: String(bonus),
         debtAmount: String(debt), businessDate: String(input.businessDate || ''),
+        // 备注随本次确认快照冻结；零本金赠金不能在后续收款步骤丢失审计原因。
+        rechargeRemark: String(input.rechargeRemark || '').trim(),
         salespersonAllocations: clonePlain(input.salespersonAllocations || []),
         businessSource: clonePlain(input.businessSource || {})
       },

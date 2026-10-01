@@ -6,6 +6,8 @@ $read = static function (string $path) use ($root): string {
     return (string)file_get_contents($root . '/' . $path);
 };
 $module = $read('后端代码/app/services/cashier/v3/member/CashierV3RechargeCheckoutModule.php');
+$recharge = $read('后端代码/app/services/cashier/v3/member/CashierV3RechargeModule.php');
+$recordQuery = $read('后端代码/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php');
 $bootstrap = $read('后端代码/app/services/cashier/v3/bootstrap/CashierV3Bootstrap.php');
 $manifestModule = $read('后端代码/app/services/cashier/v3/manifest/CashierV3C5MemberOrderModule.php');
 $manifest = $read('后端代码/app/services/cashier/v3/manifest/CashierV3ActionManifest.php');
@@ -37,6 +39,16 @@ $checks = [
         && str_contains($module, 'resolveSourceSnapshot')
         && str_contains($module, 'paymentTotal($payments)')
         && str_contains($module, '(new CashierV3RechargeModule())->submitInTx('),
+    '纯赠金充值无收款且保留必填备注' => str_contains($module, "\$principal + \$bonus <= 0")
+        && str_contains($module, "\$principal === 0 && \$remark === ''")
+        && str_contains($module, "'rechargeRemark' => \$input['rechargeRemark']")
+        && str_contains($recharge, "'remarks' => \$input['rechargeRemark']")
+        && str_contains($recharge, "'recharge_type' => \$input['principalCents'] === 0 ? 'bonus_only'")
+        && str_contains($recordQuery, "'actualReceivedAmount'")
+        && str_contains($recordQuery, "'bonus_only' ? '0.00'"),
+    // 余额写入适配器采用封闭字段合同；审计备注只归属充值主单，不得塞进余额命令。
+    '充值备注不污染余额写入合同' => preg_match('/creditRechargeInTx\(\[([\s\S]*?)\], \$operator, \$dataScope\)/', $recharge, $creditRequest) === 1
+        && !str_contains((string)($creditRequest[1] ?? ''), "'rechargeRemark'"),
     '充值来源不再读取服务端编辑草稿' => !str_contains($source, 'cashier_v3_recharge_checkout_request')
         && !str_contains($source, 'captureRechargePreparationInTx'),
     '空上下文仅由充值最终快照放行' => str_contains($contextPolicy, "is_array(\$payload['checkoutSnapshot'] ?? null)")
