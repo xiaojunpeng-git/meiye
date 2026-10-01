@@ -28,5 +28,28 @@ $passed = $exception instanceof CashierV3CommandException
     && ($detail['usedTimes'] ?? -1) === 3
     && ($detail['remainingTimes'] ?? -1) === 63;
 
+// 已作废的核销仍会留下历史事实；按核销、补交等实际拒绝原因给短提示。
+$failure = new ReflectionMethod(CashierV3SalesOrderReversalServices::class, 'failure');
+$downstream = $failure->invoke(null, 'sales_reversal_card_downstream_use_exists');
+$repaid = $failure->invoke(null, 'sales_reversal_debt_already_repaid');
+$activeRepayment = $failure->invoke(null, 'sales_reversal_debt_repayment_active');
+$occupation = $failure->invoke(null, 'sales_reversal_card_active_occupation_exists');
+$other = $failure->invoke(null, 'sales_reversal_debt_state_invalid');
+$fallback = $failure->invoke(null, 'unexpected_reason');
+$passed = $passed
+    && $downstream instanceof CashierV3CommandException
+    && $downstream->getMessage() === '卡项有未作废的核销记录，销售订单未作废。'
+    && ($downstream->getDetail()['reason'] ?? '') === 'sales_reversal_card_downstream_use_exists'
+    && $repaid instanceof CashierV3CommandException
+    && $repaid->getMessage() === '订单欠款仍有补交金额，销售订单未作废。'
+    && ($repaid->getDetail()['reason'] ?? '') === 'sales_reversal_debt_already_repaid'
+    && $activeRepayment->getMessage() === '订单欠款有未作废的补交单，销售订单未作废。'
+    && $occupation->getMessage() === '卡项有未结束的预约或服务单，销售订单未作废。'
+    && $other instanceof CashierV3CommandException
+    && $other->getMessage() === '订单欠款状态已变化，销售订单未作废。'
+    && ($other->getDetail()['reason'] ?? '') === 'sales_reversal_debt_state_invalid'
+    && $fallback instanceof CashierV3CommandException
+    && $fallback->getMessage() === '订单相关记录异常，操作未完成。';
+
 echo $passed ? "USED_CARD_VOID_MESSAGE_CONTRACT=PASS\n" : "USED_CARD_VOID_MESSAGE_CONTRACT=FAIL\n";
 exit($passed ? 0 : 1);

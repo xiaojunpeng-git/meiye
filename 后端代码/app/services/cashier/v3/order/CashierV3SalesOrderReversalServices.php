@@ -52,6 +52,12 @@ final class CashierV3SalesOrderReversalServices
             $repaid = $this->moneyToCents($debt['repaid_debt'] ?? null);
             if ($repaid > 0) throw self::failure('sales_reversal_debt_already_repaid');
             if ((int)$debt['status'] !== 0 || $total <= 0) throw self::failure('sales_reversal_debt_state_invalid');
+            // 补交作废后状态应变为 voided、欠款投影应回到 0；两者都须成立，
+            // 避免投影异常时把仍有效的补交单留在已作废销售单下面。
+            if (Db::name('cashier_v3_debt_repayment')->where('tenant_id', $scope->tenantId())
+                ->where('debt_id', (int)$debt['debt_id'])->where('status', 'succeeded')->count() > 0) {
+                throw self::failure('sales_reversal_debt_repayment_active');
+            }
             $cancelledDebtCents += $total;
         }
 
@@ -307,14 +313,22 @@ final class CashierV3SalesOrderReversalServices
         }
         $detailIds = array_values(array_map('intval', array_column($details, 'id')));
         if ($detailIds) {
-            if (Db::name('cashier_v3_entitlement_writeoff_fact')->where('tenant_id', $scope->tenantId())->whereIn('source_detail_id', $detailIds)->count() > 0
-                || Db::name('cashier_v3_service_order_line')->where('tenant_id', $scope->tenantId())->whereIn('entitlement_source_detail_id', $detailIds)->count() > 0
-                || Db::name('store_reservation_order')->whereIn('cart_info_id', $detailIds)->where('is_del', 0)->where('is_system_del', 0)->count() > 0) {
+            // 只看未了结的后续权益，而非“曾有记录”：服务作废会追加权益返还事实，
+            // 原核销事实永远保留。次数已恢复仍须核对每一笔核销确实完成作废。
+            $writeoffs = Db::name('cashier_v3_entitlement_writeoff_fact')->where('tenant_id', $scope->tenantId())
+                ->whereIn('source_detail_id', $detailIds)->where('status', 'effective')
+                ->field('writeoff_id,source_kind,source_detail_id,holder_id,quantity')->order('id', 'asc')->lock(true)->select()->toArray();
+            if ($writeoffs && !$this->allCardWriteoffsVoided($writeoffs, $scope)) {
                 throw self::failure('sales_reversal_card_downstream_use_exists');
             }
+            if (Db::name('cashier_v3_service_order_line')->where('tenant_id', $scope->tenantId())
+                ->whereIn('entitlement_source_detail_id', $detailIds)->where('status', 'ACTIVE')->count() > 0
+                || Db::name('store_reservation_order')->whereIn('cart_info_id', $detailIds)
+                    ->whereIn('status', [0, 1, 3])->where('is_del', 0)->where('is_system_del', 0)->count() > 0) {
+                throw self::failure('sales_reversal_card_active_occupation_exists');
+            }
         }
-        if (Db::name('cashier_v3_card_operation')->where('tenant_id', $scope->tenantId())
-            ->where('source_card_holder_id', (int)$receipt['card_holder_id'])->count() > 0) {
+        if ($this->hasUnreversedCardOperation((int)$receipt['card_holder_id'], $scope)) {
             throw self::failure('sales_reversal_card_operation_exists');
         }
         $rule = (array)Db::name('cashier_v3_card_rule_state')->where('tenant_id', $scope->tenantId())
@@ -331,6 +345,75 @@ final class CashierV3SalesOrderReversalServices
             }
         }
         return ['receipt' => $receipt, 'holder' => $holder, 'order' => $order, 'details' => $details, 'rule' => $rule, 'components' => $components];
+    }
+
+    /** @param array<int,array<string,mixed>> $writeoffs 逐笔核销必须有等量返还及成功服务作废，不能只凭次数投影相等放行。 */
+    private function allCardWriteoffsVoided(array $writeoffs, CashierV3DataScopeContext $scope): bool
+    {
+        $writeoffIds = array_values(array_unique(array_column($writeoffs, 'writeoff_id')));
+        if (count($writeoffIds) !== count($writeoffs)) return false;
+        $reversals = Db::name('cashier_v3_entitlement_reversal_fact')->where('tenant_id', $scope->tenantId())
+            ->whereIn('original_writeoff_id', $writeoffIds)
+            ->field('original_writeoff_id,service_fact_id,source_detail_id,holder_id,quantity,operation_id')
+            ->order('id', 'asc')->lock(true)->select()->toArray();
+        $operationIds = array_values(array_unique(array_column($reversals, 'operation_id')));
+        $operations = $operationIds
+            ? Db::name('cashier_v3_service_record_void_operation')->where('tenant_id', $scope->tenantId())
+                ->whereIn('operation_id', $operationIds)
+                ->field('operation_id,service_fact_id,status')->lock(true)->select()->toArray()
+            : [];
+        return self::writeoffsFullyReversed($writeoffs, $reversals, $operations);
+    }
+
+    /** @param array<int,array<string,mixed>> $writeoffs @param array<int,array<string,mixed>> $reversals @param array<int,array<string,mixed>> $operations */
+    private static function writeoffsFullyReversed(array $writeoffs, array $reversals, array $operations): bool
+    {
+        $byWriteoff = [];
+        foreach ($reversals as $reversal) {
+            $id = (string)$reversal['original_writeoff_id'];
+            if (isset($byWriteoff[$id])) return false;
+            $byWriteoff[$id] = $reversal;
+        }
+        if (count($byWriteoff) !== count($writeoffs)) return false;
+        $voided = [];
+        foreach ($operations as $operation) {
+            if ((string)$operation['status'] === 'succeeded') {
+                $voided[(string)$operation['operation_id']] = (int)$operation['service_fact_id'];
+            }
+        }
+        foreach ($writeoffs as $writeoff) {
+            $reversal = $byWriteoff[(string)$writeoff['writeoff_id']] ?? null;
+            // 时间卡核销不扣次数，其成功作废的返还数量为 0；其他卡须逐笔等量返还。
+            $expectedQuantity = (string)$writeoff['source_kind'] === 'time_card' ? 0 : (int)$writeoff['quantity'];
+            if (!$reversal || (int)$reversal['quantity'] !== $expectedQuantity
+                || (int)$reversal['source_detail_id'] !== (int)$writeoff['source_detail_id']
+                || (int)$reversal['holder_id'] !== (int)$writeoff['holder_id']
+                || (int)$reversal['service_fact_id'] <= 0
+                || ($voided[(string)$reversal['operation_id']] ?? 0) !== (int)$reversal['service_fact_id']) return false;
+        }
+        return true;
+    }
+
+    /** 已取消或已反向的卡项操作只保留审计历史，不继续占用原卡的作废资格。 */
+    private function hasUnreversedCardOperation(int $holderId, CashierV3DataScopeContext $scope): bool
+    {
+        $operations = Db::name('cashier_v3_card_operation')->where('tenant_id', $scope->tenantId())
+            ->where('source_card_holder_id', $holderId)->where('operation_status', '<>', 'cancelled')
+            ->field('operation_id')->lock(true)->select()->toArray();
+        if (!$operations) return false;
+        $settlements = Db::name('cashier_v3_card_operation_settlement')->where('tenant_id', $scope->tenantId())
+            ->whereIn('operation_id', array_column($operations, 'operation_id'))
+            ->field('operation_id,settlement_status')->lock(true)->select()->toArray();
+        $reversed = [];
+        foreach ($settlements as $settlement) {
+            if ((string)$settlement['settlement_status'] === 'reversed') {
+                $reversed[(string)$settlement['operation_id']] = true;
+            }
+        }
+        foreach ($operations as $operation) {
+            if (!isset($reversed[(string)$operation['operation_id']])) return true;
+        }
+        return false;
     }
 
     private function revokeCard(array $card, array $source, string $action, string $operationId, string $commandKey, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
@@ -439,5 +522,55 @@ final class CashierV3SalesOrderReversalServices
             ]
         );
     }
-    private static function failure(string $reason): CashierV3CommandException { return new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '该订单的资金、欠款或权益状态不满足本次退款/作废条件，未提交任何变更。', CashierV3ResultCode::STATUS_FAILED, ['reason' => $reason]); }
+    /** 按真实拒绝原因给门店短提示；历史核销仍有记录，不能误称为尚未作废。 */
+    private static function failure(string $reason): CashierV3CommandException
+    {
+        $messages = [
+            'sales_reversal_balance_direction_invalid' => '订单余额支付记录异常，操作未完成。',
+            'sales_refund_balance_direction_invalid' => '订单余额支付记录异常，操作未完成。',
+            'sales_reversal_balance_restore_exceeds_source' => '退回余额超过原支付余额，操作未完成。',
+            'sales_refund_balance_restore_exceeds_source' => '退回余额超过原支付余额，操作未完成。',
+            'sales_reversal_debt_already_repaid' => '订单欠款仍有补交金额，销售订单未作废。',
+            'sales_reversal_debt_repayment_active' => '订单欠款有未作废的补交单，销售订单未作废。',
+            'sales_reversal_debt_state_invalid' => '订单欠款状态已变化，销售订单未作废。',
+            'sales_reversal_card_issuance_incomplete' => '订单卡项发放记录不完整，销售订单未作废。',
+            'sales_reversal_cash_refund_exceeds_source' => '退款金额超过原收款金额，操作未完成。',
+            'sales_refund_cash_refund_exceeds_collected' => '退款金额超过原收款金额，操作未完成。',
+            'sales_reversal_entitlement_credit_invalid' => '订单权益返还金额异常，操作未完成。',
+            'sales_refund_entitlement_credit_invalid' => '订单权益返还金额异常，操作未完成。',
+            'sales_reversal_economic_amount_invalid' => '订单退款金额与原订单金额不符，操作未完成。',
+            'sales_refund_economic_amount_invalid' => '订单退款金额与原订单金额不符，操作未完成。',
+            'sales_void_source_equation_invalid' => '订单作废金额与原订单金额不符，销售订单未作废。',
+            'sales_reversal_card_scope_mismatch' => '卡项归属与订单不一致，销售订单未作废。',
+            'sales_reversal_card_already_changed' => '卡项状态已变化，销售订单未作废。',
+            'sales_reversal_card_benefit_used' => '卡项权益未恢复到开单状态，销售订单未作废。',
+            'sales_reversal_card_downstream_use_exists' => '卡项有未作废的核销记录，销售订单未作废。',
+            'sales_reversal_card_active_occupation_exists' => '卡项有未结束的预约或服务单，销售订单未作废。',
+            'sales_reversal_card_operation_exists' => '卡项有未作废的后续操作单，销售订单未作废。',
+            'sales_reversal_card_rule_used' => '卡项次数或项目选择未恢复，销售订单未作废。',
+            'sales_reversal_card_rule_component_used' => '卡项次数或项目选择未恢复，销售订单未作废。',
+            'sales_reversal_coupon_trace_invalid' => '订单优惠券记录异常，操作未完成。',
+            'sales_reversal_coupon_state_changed' => '订单优惠券状态已变化，操作未完成。',
+            'sales_reversal_balance_credit_failed' => '会员余额退回失败，操作未完成。',
+            'sales_reversal_balance_version_invalid' => '会员余额已变化，操作未完成。',
+            'sales_reversal_balance_fact_missing' => '订单余额记录缺失，操作未完成。',
+            'sales_reversal_balance_fact_insert_failed' => '订单余额退回记录写入失败，操作未完成。',
+            'sales_reversal_balance_component_allocation_invalid' => '订单余额拆分金额异常，操作未完成。',
+            'sales_reversal_debt_cancel_race' => '订单欠款状态已变化，操作未完成。',
+            'sales_reversal_debt_audit_insert_failed' => '欠款作废记录写入失败，操作未完成。',
+            'sales_reversal_card_holder_revoke_race' => '卡项状态已变化，操作未完成。',
+            'sales_reversal_card_order_revoke_race' => '卡项订单状态已变化，操作未完成。',
+            'sales_reversal_card_audit_insert_failed' => '卡项作废记录写入失败，操作未完成。',
+            'sales_reversal_coupon_restore_race' => '优惠券状态已变化，操作未完成。',
+            'sales_reversal_money_invalid' => '订单金额资料异常，操作未完成。',
+            'sales_reversal_secret_missing' => '系统暂无法校验此操作，请联系管理员。',
+        ];
+        $message = $messages[$reason] ?? '订单相关记录异常，操作未完成。';
+        return new CashierV3CommandException(
+            CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+            $message,
+            CashierV3ResultCode::STATUS_FAILED,
+            ['reason' => $reason]
+        );
+    }
 }
