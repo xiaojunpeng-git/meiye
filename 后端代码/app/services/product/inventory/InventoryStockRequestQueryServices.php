@@ -31,10 +31,15 @@ final class InventoryStockRequestQueryServices
         if (strtoupper(trim($supplyPartyType)) === 'HQ' && $acceptancePartyId > 0) $query->where('d.acceptance_party_id', $acceptancePartyId);
         if ($status !== '') $query->where('d.document_status', $status);
         $count = (int)(clone $query)->group('d.id')->count();
-        $list = $query->field('d.id,d.request_no order_sn,d.document_status status_name,d.request_party_name_snapshot request_party_name,d.requester_name_snapshot,d.operator_name_snapshot,d.supply_party_type,d.supply_party_id,d.supply_party_name_snapshot supply_party_name,d.acceptance_party_id,d.acceptance_party_name_snapshot acceptance_party_name,d.business_date request_date,d.recorded_at add_time,d.recorded_at operation_at,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
+        $list = $query->field('d.id,d.request_no order_sn,d.document_status status_name,d.request_party_name_snapshot request_party_name,d.requester_name_snapshot,d.operator_name_snapshot operator_name,d.supply_party_type,d.supply_party_id,d.supply_party_name_snapshot supply_party_name,d.acceptance_party_id,d.acceptance_party_name_snapshot acceptance_party_name,d.business_date request_date,d.recorded_at add_time,d.recorded_at operation_at,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
             ->group('d.id')->order('d.id desc')->page(max(1, $page), max(1, min(100, $limit)))->select()->toArray();
         $canViewCost = in_array('inventory.cost.view', (array)($access['features'] ?? []), true);
-        foreach ($list as &$row) { $status=(string)$row['status_name']; $row['can_cancel']=$status==='APPLIED'; $row['can_terminate']=$status==='PARTIAL'; if (!$canViewCost) $row['estimated_amount_cents'] = null; $row['status_name'] = $this->statusName($status); }
+        foreach ($list as &$row) {
+            $status=(string)$row['status_name'];
+            $row['can_cancel']=$status==='APPLIED'; $row['can_terminate']=$status==='PARTIAL';
+            if (!$canViewCost) $row['estimated_amount_cents'] = null;
+            $row['status_name'] = $this->statusName($status);
+        }
         unset($row);
         return ['count' => $count, 'list' => $list];
     }
@@ -68,7 +73,7 @@ final class InventoryStockRequestQueryServices
         if ($keyword !== '') { $like = '%' . $keyword . '%'; $query->where(function ($inner) use ($like): void { $inner->whereLike('d.request_no', $like)->whereOr('d.remark', 'like', $like); }); }
         if ($dateFrom !== '' && $dateTo !== '') $query->whereBetween('d.business_date', [$dateFrom, $dateTo]);
         $count = (clone $query)->group('d.id')->count();
-        $list = $query->field('d.id,d.request_no order_sn,d.document_status status_name,d.store_id,s.name request_store_name,d.requester_name_snapshot,d.operator_name_snapshot,d.supply_party_type,d.supply_party_id,d.supply_party_name_snapshot supply_party_name,d.acceptance_party_id,d.acceptance_party_name_snapshot acceptance_party_name,d.business_date request_date,d.recorded_at add_time,d.recorded_at operation_at,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
+        $list = $query->field('d.id,d.request_no order_sn,d.document_status status_name,d.store_id,s.name request_store_name,d.requester_name_snapshot,d.operator_name_snapshot operator_name,d.supply_party_type,d.supply_party_id,d.supply_party_name_snapshot supply_party_name,d.acceptance_party_id,d.acceptance_party_name_snapshot acceptance_party_name,d.business_date request_date,d.recorded_at add_time,d.recorded_at operation_at,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
             ->group('d.id')->order('d.id desc')->page(max(1, $page), max(1, min(100, $limit)))->select()->toArray();
         foreach ($list as &$row) {
             $documentStatus = (string)$row['status_name'];

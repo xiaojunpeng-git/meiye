@@ -189,7 +189,7 @@ const operationalQueryPages = {
   inbound: { pageCode: 'inventory_inbound', fields: [['order_sn', '入库单号'], ['order_type_name', '入库类型'], ['location_name', '入库仓/门店'], ['product_summary', '商品摘要'], ['detail_count', '入库项数', 'integer'], ['status_name', '状态'], ['business_date', '业务日期', 'date']] },
   outbound: { pageCode: 'inventory_outbound', fields: [['order_sn', '出库单号'], ['order_type_name', '出库类型'], ['location_name', '出库仓/门店'], ['product_summary', '商品摘要'], ['detail_count', '出库项数', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '业务日期', 'date']] },
   count: { pageCode: 'inventory_count', fields: [['order_sn', '盘点单号'], ['location_name', '盘点主体'], ['detail_count', '差异项', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['count_date', '盘点日期', 'date']] },
-  request: { pageCode: 'inventory_request', fields: [['order_sn', '请货单号'], ['request_party_name', '请货方'], ['supply_party_name', '供货方'], ['acceptance_party_name', '受理部门'], ['detail_count', '商品项数', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '申请日期', 'date']] },
+  request: { pageCode: 'inventory_request', fields: [['order_sn', '请货单号'], ['business_date', '请货日期', 'date'], ['request_party_name', '请货方'], ['supply_party_name', '供货方'], ['acceptance_party_name', '受理部门'], ['detail_count', '商品项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
   transfer: { pageCode: 'inventory_transfer', fields: [['order_sn', '调拨单号'], ['from_party_name', '调出方'], ['to_party_name', '调入方'], ['detail_count', '商品项数', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '发起日期', 'date']] },
   usage: { pageCode: 'inventory_salon_usage', fields: [['order_sn', '业务单号'], ['operation_name', '领退类型'], ['project_name_snapshot', '关联项目'], ['detail_count', '耗材项数', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '业务日期', 'date'], ['remark', '备注']] },
   import: { pageCode: 'inventory_import', fields: [['source_file_name', '文件名称'], ['direction_name', '业务类型'], ['business_type', '出入库类型'], ['total_count', '数据量', 'integer'], ['success_count', '成功行数', 'integer'], ['failure_count', '失败行数', 'integer'], ['document_no', '正式单号'], ['status_name', '状态'], ['updated_at_display', '导入时间', 'datetime']] },
@@ -341,7 +341,7 @@ const pages = {
     crumb: '库存管理 / 请货管理',
     filters: ['请货状态'],
     action: '新建请货',
-    columns: ['请货单号', '请货方', '供货方', '受理部门', '商品项数', '操作时间', '状态']
+    columns: ['请货单号', '请货日期', '请货方', '供货方', '受理部门', '商品项数', '状态', '操作日期', '操作人']
   },
   transfer: {
     title: '调拨管理',
@@ -911,7 +911,7 @@ function mapApiRow(page, row) {
       ? [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.available_quantity), row.inventory_amount_cents !== undefined ? centsMoney(row.inventory_amount_cents) : money(row.inventory_amount)]
       : [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.batch_balance_quantity), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
     case 'count': return [text(row.order_sn), text(row.store_name_label || row.store_name || row.store_name_snapshot || row.location_name || scopeName.value), text(row.count_type || '全盘'), text(row.detail_count), centsMoney(row.change_amount_cents), text(row.count_date), operationTime(row.operation_at), countStatusName(row.status_name)]
-    case 'request': return [text(row.order_sn), text(row.request_party_name || row.request_store_name), text(row.supply_party_name || row.supply_store_name), text(row.acceptance_party_name), text(row.detail_count), operationTime(row.operation_at), inventoryStatusLabel(row.status_name)]
+    case 'request': return [text(row.order_sn), text(row.request_date || row.business_date), text(row.request_party_name || row.request_store_name), text(row.supply_party_name || row.supply_store_name), text(row.acceptance_party_name), text(row.detail_count), inventoryStatusLabel(row.status_name), operationTime(row.operation_at), text(row.operator_name || row.operator_name_snapshot)]
     case 'transfer': return [text(row.order_sn), text(row.from_party_name || row.from_store_name), text(row.to_party_name || row.to_store_name), text(row.detail_count), operationTime(row.operation_at), inventoryStatusLabel(row.status_name)]
     case 'usage': return [text(row.usage_no), '耗材明细见单据', text(row.project_name_snapshot), `${text(row.detail_count, '0')} 项`, '-', text(row.operation_type === 'RETURN' ? '退回' : '领用'), operationTime(row.operation_at), inventoryStatusLabel(row.document_status, '已完成')]
     case 'import': return [text(row.source_file_name), row.direction === 'inbound' ? '入库导入' : '出库导入', scopeName.value, `${text(row.success_count, '0')} / ${text(row.total_count, '0')} 行`, text(row.document_no || row.failure_message), text(row.status === 'SUCCEEDED' ? '成功' : row.status === 'FAILED' ? '失败' : '处理中'), text(row.updated_at ? new Date(Number(row.updated_at) * 1000).toLocaleString() : '-')]
@@ -1365,11 +1365,10 @@ async function confirmRecipeAction() {
 
 function onModalSaved(result = {}) {
   editor.value = ''
-  // 保存后的列表必须覆盖刚刚写入的业务日期；其他筛选仍保持用户当前选择。
-  // 草稿仍由服务端独立于完成日期周期展示。
-  const savedBusinessDate = String(result?.businessDate || '')
-  if (usesBusinessDatePeriod() && /^\d{4}-\d{2}-\d{2}$/.test(savedBusinessDate)) {
-    businessDateRange.value = { min: savedBusinessDate, max: savedBusinessDate }
+  // 保存后按单据业务日期回显；请货页对应用户选择的“请货日期”。
+  const savedPeriodDate = String(result?.businessDate || '')
+  if (usesBusinessDatePeriod() && /^\d{4}-\d{2}-\d{2}$/.test(savedPeriodDate)) {
+    businessDateRange.value = { min: savedPeriodDate, max: savedPeriodDate }
   }
   if (mode.value === 'platform') loadPlatformLocations().then(() => loadCurrentList())
   else loadCurrentList()
@@ -1620,7 +1619,7 @@ onBeforeUnmount(() => {
             <div class="filter-search"><Search :size="17" /><input v-model="keyword" :placeholder="`搜索${currentPage.title}记录`" @keyup.enter="queryStoreOperationalPage" /></div>
             <label>数据范围<select v-model="storeOperationalDataScope" @change="queryStoreOperationalPage"><option value="normal">正常数据</option><option value="all">全部数据</option></select></label>
             <label>状态<select v-model="storeOperationalStatus" @change="onStoreOperationalStatusChanged"><option value="">全部</option><option v-for="status in storeOperationalStatusOptions" :key="status" :value="status">{{ status }}</option></select></label>
-            <div v-if="usesBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="active === 'import' ? '导入日期周期' : '业务日期周期'" @change="applyBusinessDateRange" /></div>
+            <div v-if="usesBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="active === 'request' ? '请货日期周期' : (active === 'import' ? '导入日期周期' : '业务日期周期')" @change="applyBusinessDateRange" /></div>
             <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
             <button class="primary-button" :disabled="listLoading" @click="queryStoreOperationalPage">{{ listLoading ? '查询中' : '查询' }}</button>
           </section>
@@ -1636,7 +1635,7 @@ onBeforeUnmount(() => {
             <template v-else-if="mode === 'platform' && active === 'transfer'"><label>调出方<InventoryStoreSelector v-model="platformTransferFromParty" :options="platformWarehouseSelectorOptions" placeholder="全部调出方" /></label><label>调入方<InventoryStoreSelector v-model="platformTransferToParty" :options="platformWarehouseSelectorOptions" placeholder="全部调入方" /></label><label>调拨状态<select v-model="platformTransferStatus"><option value="">全部</option><option value="DRAFT">草稿</option><option value="DISPATCHED">在途</option><option value="RECEIVED">已收货</option><option value="CANCELLED">已取消</option><option value="REVERSED">已作废</option></select></label></template>
             <label v-else-if="mode === 'platform'">{{ active === 'usage' ? '门店' : '库存仓' }}<InventoryStoreSelector v-model="platformListWarehouseSelection" :options="active === 'usage' ? platformUsageStoreSelectorOptions : platformListWarehouseOptions" :placeholder="active === 'usage' ? '选择门店' : '选择门店库存仓'" :presentation="['inbound', 'outbound', 'count', 'usage'].includes(active) ? 'dropdown' : 'modal'" /></label>
             <label v-if="!(['inbound', 'outbound'].includes(active) || (mode === 'platform' && ['request', 'transfer'].includes(active)))" v-for="filter in currentPage.filters.slice(0, 2)" :key="filter">{{ filter }}<select><option>全部</option></select></label>
-            <div v-if="usesBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="active === 'import' ? '导入日期周期' : '业务日期周期'" @change="applyBusinessDateRange" /></div>
+            <div v-if="usesBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="active === 'request' ? '请货日期周期' : (active === 'import' ? '导入日期周期' : '业务日期周期')" @change="applyBusinessDateRange" /></div>
             <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
             <button class="primary-button" :disabled="listLoading || (platformFilterRequiresHqLocation && !platformHqLocationId) || (platformUsageRequiresStore && !platformUsageStoreId)" @click="loadCurrentList">{{ listLoading ? '查询中' : '查询' }}</button>
           </section>

@@ -1021,6 +1021,7 @@ async function submitRequest() {
     } else if (isRequestEdit.value) await inventoryApi.updateRequest(props.detail?.document?.id, payload)
     else await inventoryApi.applyRequest(payload)
     // 把实际保存的业务日期回传给列表，保证保存后用户立即看到该单据。
+    // 返回请货日期给列表恢复筛选；操作日期由服务端记录且只读展示。
     emit('saved', { businessDate: requestDate.value })
     close()
   } catch (error) {

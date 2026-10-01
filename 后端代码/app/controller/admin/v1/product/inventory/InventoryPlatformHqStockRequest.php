@@ -45,6 +45,7 @@ final class InventoryPlatformHqStockRequest extends AuthController
     public function index(InventoryStockRequestQueryServices $queries)
     {
         try {
+            // 顶部周期筛选用户选择的请货日期；操作日期由 recorded_at 单独只读展示。
             [$locationId, $keyword, $page, $limit, $requestPartyType, $requestPartyId, $supplyPartyType, $supplyPartyId, $acceptancePartyId, $status, $dateFrom, $dateTo] = $this->request->getMore([['hq_location_id', 0], ['keyword', ''], ['page', 1], ['limit', 20], ['request_party_type', ''], ['request_party_id', 0], ['supply_party_type', ''], ['supply_party_id', 0], ['acceptance_party_id', 0], ['status', ''], ['business_date_from', ''], ['business_date_to', '']], true);
             return $this->success($queries->listForHeadquarters((array)$this->adminInfo, (int)$locationId, (string)$keyword, (int)$page, (int)$limit, (string)$requestPartyType, (int)$requestPartyId, (string)$supplyPartyType, (int)$supplyPartyId, (int)$acceptancePartyId, (string)$status, (string)$dateFrom, (string)$dateTo));
         } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }

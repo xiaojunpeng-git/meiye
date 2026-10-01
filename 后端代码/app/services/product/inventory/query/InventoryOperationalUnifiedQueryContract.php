@@ -23,7 +23,7 @@ final class InventoryOperationalUnifiedQueryContract
         $common = [
             UnifiedQueryPageRegistry::field('record_id', '记录标识', 'text', false, false, ['sort']),
             // 盘点新周期按完成时刻；保留旧业务日期字段以兼容已保存的查询设置，但不再默认展示。
-            UnifiedQueryPageRegistry::field('business_date', '业务日期', 'date', $pageCode !== 'inventory_count', $pageCode !== 'inventory_count'),
+            UnifiedQueryPageRegistry::field('business_date', $pageCode === 'inventory_request' ? '请货日期' : '业务日期', 'date', $pageCode !== 'inventory_count', $pageCode !== 'inventory_count'),
             UnifiedQueryPageRegistry::field('order_sn', '业务单号', 'text', true, true),
             UnifiedQueryPageRegistry::field('status_name', '状态', 'text', true, true),
         ];
@@ -59,7 +59,8 @@ final class InventoryOperationalUnifiedQueryContract
                 ['request_party_name', '请货方', 'text', ''], ['supply_party_name', '供货方', 'text', ''],
                 ['acceptance_party_name', '受理部门', 'text', ''],
                 ['detail_count', '商品项数', 'integer', ''], ['estimated_amount_cents', '预计金额（分）', 'integer', InventoryBatchStockQueryContract::PERMISSION_COST],
-                ['operation_at', '操作时间', 'datetime', ''],
+                ['operation_at', '操作日期', 'datetime', ''],
+                ['operator_name', '操作人', 'text', ''],
             ],
             'inventory_transfer' => [
                 ['from_party_name', '调出方', 'text', ''], ['to_party_name', '调入方', 'text', ''],

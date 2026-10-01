@@ -8,6 +8,8 @@ $storeController = (string)file_get_contents($root . '/后端代码/app/controll
 $platformController = (string)file_get_contents($root . '/后端代码/app/controller/admin/v1/product/inventory/InventoryPlatformHqStockRequest.php');
 $storeRoutes = (string)file_get_contents($root . '/后端代码/route/store.php');
 $platformRoutes = (string)file_get_contents($root . '/后端代码/route/admin.php');
+$unifiedContract = (string)file_get_contents($root . '/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryContract.php');
+$unifiedProvider = (string)file_get_contents($root . '/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php');
 $migration = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-10-02-库存V3请货受理方/02-正式升级.sql');
 
 $checks = [
@@ -18,6 +20,7 @@ $checks = [
     'acceptance party participates in request idempotency fingerprint' => str_contains($service, '$supplierId, $acceptancePartyId, $lines'),
     'read model filters acceptance party only inside HQ supplier scope' => str_contains($query, "strtoupper(trim(\$supplyPartyType)) === 'HQ' && \$acceptancePartyId > 0"),
     'store and platform expose authenticated acceptance directories' => str_contains($storeController, 'acceptancePartiesForStore') && str_contains($platformController, 'acceptancePartiesForHeadquarters') && str_contains($storeRoutes, 'v3/request/acceptance-parties') && str_contains($platformRoutes, 'v3/hq/request/acceptance-parties'),
+    'request date, operation date and operator remain separate authoritative fields' => str_contains($platformController, "['business_date_from', '']") && str_contains($query, "whereBetween('d.business_date'") && str_contains($unifiedContract, "? '请货日期' : '业务日期'") && str_contains($unifiedContract, "['operation_at', '操作日期', 'datetime'") && str_contains($unifiedContract, "['operator_name', '操作人', 'text'") && str_contains($unifiedProvider, 'd.operator_name_snapshot operator_name'),
 ];
 
 $failed = 0;
