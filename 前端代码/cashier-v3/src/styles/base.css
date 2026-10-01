@@ -5415,20 +5415,23 @@ button:disabled {
 }
 
 .cashier-entitlement-selector-panel .cashier-entitlement-table {
-  overflow-x: hidden;
+  /* 八列保留可读宽度，仅在权益表内横向滚动，不扩张收银左右面板。 */
+  overflow-x: auto;
   overflow-y: auto;
 }
 
 .cashier-entitlement-selector-panel .cashier-entitlement-table__head,
 .cashier-entitlement-selector-panel .cashier-entitlement-table__row {
   grid-template-columns:
+    60px
     minmax(150px, 1.55fr)
     minmax(50px, .47fr)
     minmax(65px, .58fr)
     minmax(65px, .58fr)
+    minmax(65px, .58fr)
     minmax(90px, .85fr)
-    52px;
-  min-width: 0;
+    minmax(65px, .58fr);
+  min-width: 610px;
 }
 
 .cashier-entitlement-selector-panel .cashier-entitlement-table__head {

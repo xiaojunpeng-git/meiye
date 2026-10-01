@@ -1339,6 +1339,16 @@ class WriteOffOrderServices extends BaseServices
         array $orderCartRows = []
     ): float
     {
+        // R50：取消是不再收取、也不再可用的金额，不得随欠款状态3解除核销限制。
+        // 沿用固定来源明细权重分摊；清除旧行欠款字段，避免取消额与旧欠款重复扣除。
+        $cancelled = $this->cancelledEntitlementAmount($orderInfo);
+        if (bccomp($cancelled, '0', 2) > 0) {
+            if ((int)($cartRow['is_gift'] ?? 0) === 1) return 0.0;
+            $rows = $this->debtAllocationRows($cartRow, $orderInfo, $orderCartRows);
+            foreach ($rows as &$row) { $row['debt_amount'] = '0.00'; $row['repaid_debt_amount'] = '0.00'; }
+            unset($row);
+            return $this->calcAllocatedCartPendingDebt($cartRow, $orderInfo, (float)$cancelled, $rows);
+        }
         $linePending = (float)$this->calcCartPendingDebt($cartRow);
         if ($linePending > 0 || $orderPendingDebt <= 0 || (int)($cartRow['is_gift'] ?? 0) === 1) {
             return $linePending;
@@ -1349,6 +1359,13 @@ class WriteOffOrderServices extends BaseServices
             $orderPendingDebt,
             $orderCartRows
         );
+    }
+
+    /** 将审计读取与纯金额公式分开，真实核销使用数据库权威，单元测试可提供明确事实。 */
+    protected function cancelledEntitlementAmount(array $order): string
+    {
+        return (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())
+            ->cancelledCardDebt($order, (int)($order['uid'] ?? 0), (string)($order['tenant_id'] ?? '0'));
     }
 
     /**
@@ -1485,6 +1502,15 @@ class WriteOffOrderServices extends BaseServices
             $orderCartRows
         );
         return $this->calcDebtLimitedTimesByRemainingAmount($cartRow, $pending, $remainingAmount);
+    }
+
+    /** 选择器展示真正可用金额，与最终核销次数限制复用同一不可用额；不改原成交快照。 */
+    public function usableEntitlementAmount(array $cart, array $order, ?string $remaining, float $pendingDebt = 0, array $rows = []): ?string
+    {
+        if ($remaining === null) return null;
+        $blocked = $this->resolveCartPendingDebtForWriteoff($cart, $pendingDebt, $order, $rows);
+        $available = bcsub($remaining, (string)$blocked, 2);
+        return bccomp($available, '0', 2) > 0 ? $available : '0.00';
     }
 
     /**

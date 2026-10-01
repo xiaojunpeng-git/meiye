@@ -91,7 +91,7 @@ final class CashierV3CashierMemberSummaryServices
             ->where('refund_status', 0)
             ->where('terminal_action', 0)
             ->where('card_upgrade_use_oid', 0)
-            ->field('id')
+            ->field('id,uid,store_id')
             ->select());
         $validOrderIds = array_values(array_unique(array_map('intval', array_column($validOrders, 'id'))));
         if (!$validOrderIds) {
@@ -130,6 +130,9 @@ final class CashierV3CashierMemberSummaryServices
             array_keys($holderOrderIds),
             $carts
         );
+        // 顶部可用权益金额同步排除取消额，不能与权益选择器形成两个余额。
+        $orderMap = array_column($validOrders, null, 'id');
+        $writeoff = app()->make(\app\services\order\store\WriteOffOrderServices::class);
         foreach ($carts as $cart) {
             $start = max(0, (int)($cart['write_start'] ?? 0));
             $end = max(0, (int)($cart['write_end'] ?? 0));
@@ -157,6 +160,7 @@ final class CashierV3CashierMemberSummaryServices
                         $consumed,
                         $snapshot
                     );
+                $amount = $writeoff->usableEntitlementAmount($cart, $orderMap[(int)$cart['oid']] ?? [], $amount);
                 $remainingAmount = bcadd($remainingAmount, $amount, 2);
             } catch (\InvalidArgumentException $exception) {
                 throw new CashierV3CommandException(

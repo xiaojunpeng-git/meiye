@@ -386,13 +386,13 @@ ok('权益有效卡筛选保留欠款限制卡，但排除已过期或停用卡'
   && /function sourceMatchesValidCardFilter\(source = \{\}\)[\s\S]*?sourceHasRemainingTimes\(source\)[\s\S]*?status !== 'disabled'[\s\S]*?!sourceIsExpired\(source\)/.test(selector)
   && /sourceFilter\.value === 'all' \|\| sourceMatchesValidCardFilter\(source\)/.test(selector)
   && /operationMode !== 'card-enable' && !isSourceAvailable\(source\)/.test(selector))
-ok('使用权益固定六列，欠款紧随余额且卡号并入卡名下方', ['卡项名称', '余次', '余额', '欠款', '有效期']
+// R50 明确批准八列及按钮前置；取消欠款是金额事实，不是新增写操作。
+ok('使用权益固定八列，卡号仍在卡名下方', ['操作按钮', '卡名称', '余次', '剩余余额', '欠款', '购买金额', '有效期', '取消欠款']
   .every((label) => entitlementTableHead.includes(`>${label}</span>`))
-  && (entitlementTableHead.match(/<span(?:\s[^>]*)?(?:>|\s*\/\>)/g) || []).length === 6
+  && (entitlementTableHead.match(/<span(?:\s[^>]*)?(?:>|\s*\/\>)/g) || []).length === 8
   && !entitlementTableHead.includes('>购买次数</span>')
-  && !entitlementTableHead.includes('>购买金额</span>')
   && !entitlementTableHead.includes('>卡号</span>')
-  && /cashier-entitlement-table__source-name[\s\S]*?<strong>\{\{ source\.name \|\| '卡项' \}\}<\/strong>\s*<span class="cashier-entitlement-table__type-tag"[\s\S]*?<small[^>]*>\{\{ sourceCardNo\(source\) \}\}<\/small>/.test(selector)
+  && selector.includes('source.disabledReason || sourceCardNo(source)')
   && /v-for="project in source\.projects \|\| \[\]"/.test(selector)
   && /cashier-entitlement-table__row--project/.test(selector)
   && /cashier-entitlement-table__type-tag/.test(selector)
@@ -402,16 +402,16 @@ ok('任选次数卡父行显示共享余次、项目行显示短横线',
   selector.includes("cardRuleType || '').trim() === 'choice_count'")
     && selector.includes('displayProjectRemainingTimes(source, project)')
     && /return isTimeCardSource\(source\) \|\| isSharedChoiceCountSource\(source\)\s*\? '—'/.test(selector))
-ok('权益表六列不出现横向滚动', (entitlementTableGrid.match(/minmax\(/g) || []).length === 5
-  && /52px/.test(entitlementTableGrid)
+ok('权益表八列仅在表内横向滚动', (entitlementTableGrid.match(/minmax\(/g) || []).length === 7
+  && /60px/.test(entitlementTableGrid)
   && /minmax\(90px,\s*\.85fr\)/.test(entitlementTableGrid)
-  && /\.cashier-entitlement-selector-panel \.cashier-entitlement-table\s*\{[\s\S]*?overflow-x: hidden/.test(styles)
-  && /\.cashier-entitlement-selector-panel \.cashier-entitlement-table__head,[\s\S]*?min-width: 0/.test(styles))
+  && /\.cashier-entitlement-selector-panel \.cashier-entitlement-table\s*\{[\s\S]*?overflow-x: auto/.test(styles)
+  && /\.cashier-entitlement-selector-panel \.cashier-entitlement-table__head,[\s\S]*?min-width: 610px/.test(styles))
 ok('项目名称缩进一个汉字并以折线标明卡项层级', /padding-left:\s*calc\(1em\s*\+\s*4px\)/.test(entitlementProjectNameCss)
   && /display:\s*block/.test(entitlementProjectGuideCss)
   && /border-left:/.test(entitlementProjectGuideCss)
   && /border-bottom:/.test(entitlementProjectGuideCss))
-ok('项目行欠款和有效期固定留空、对辅助技术隐藏且保留列对齐', /displayProjectRemainingAmount\(source, project\) \}\}<\/span>\s*<span\s+aria-hidden="true"\s*\/>\s*<span\s+aria-hidden="true"\s*\/>\s*<button/.test(entitlementProjectRow)
+ok('项目行欠款、有效期、取消欠款固定留空且保留列对齐', /displayProjectRemainingAmount\(source, project\) \}\}<\/span>\s*<span\s+aria-hidden="true"\s*\/>\s*<span>\{\{ displayAmount\(project.purchaseAmount\) \}\}<\/span>\s*<span\s+aria-hidden="true"\s*\/>\s*<span\s+aria-hidden="true"\s*\/>/.test(entitlementProjectRow)
   && !/projectExpiryDate\(project\)/.test(entitlementProjectRow))
 ok('使用权益只接受次卡、时间卡、定制卡、赠送，数值不附加货币或次数单位', ['次卡', '时间卡', '定制卡', '赠送']
   .every((label) => selector.includes(`'${label}'`))

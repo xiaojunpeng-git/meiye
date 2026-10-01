@@ -528,7 +528,7 @@ final class CashierV3EntitlementProjectionServices
         $debts = [];
         if ($includeOperationalState && $validOrderIds) {
             $debtQuery = Db::name('store_debt')
-                ->field('id,order_id,status,total_debt,repaid_debt')
+                ->field('id,order_id,uid,store_id,status,total_debt,repaid_debt')
                 ->whereIn('order_id', $validOrderIds);
             // 欠款同样只读取当前快照；旧还款路径按 debt -> order -> cart 加锁。
             $debts = $this->rows($debtQuery->order('order_id asc,id asc')->select());
@@ -786,7 +786,8 @@ final class CashierV3EntitlementProjectionServices
                 'remainingTimes' => $rawSurplus,
                 'purchaseTimes' => max(0, (int)$cart['write_times']),
                 'purchaseAmount' => $amounts['purchaseAmount'],
-                'remainingAmount' => $amounts['remainingAmount'],
+                // 可用金额扣除未付/已取消部分；购买金额及每次原分摊快照仍保留历史。
+                'remainingAmount' => $writeoff->usableEntitlementAmount($cart, $order, $amounts['remainingAmount'], (float)$pendingDebt, $cartsByOrder[(int)$order['id']] ?? []),
                 'totalPurchaseTimes' => $amounts['totalPurchaseTimes'],
                 'consumedTimesAtSelection' => $amounts['consumedTimesAtSelection'],
                 'amountCalculationVersion' => $amounts['calculationVersion'],
@@ -889,6 +890,12 @@ final class CashierV3EntitlementProjectionServices
                 : ($kind['code'] === 'time_card'
                 ? $this->timeCardSourceAmounts($order)
                 : $this->sourceAmounts($projects));
+            // 时间卡父行没有项目金额汇总，仍须排除不可再使用的欠款/取消额。
+            if ($kind['code'] === 'time_card' && $sourceAmounts['remainingAmount'] !== null) {
+                $blocked = bcadd($outstandingDebtAmount, $this->cancelledDebt($order, null, $tenantId), 2);
+                $usable = bcsub($sourceAmounts['remainingAmount'], $blocked, 2);
+                $sourceAmounts['remainingAmount'] = bccomp($usable, '0', 2) > 0 ? $usable : '0.00';
+            }
             $sourceValidity = $this->effectiveValidity($holder, []);
             $sourceDisabledReason = $sourceOrderUnavailableReason !== ''
                 ? $sourceOrderUnavailableReason
@@ -910,6 +917,7 @@ final class CashierV3EntitlementProjectionServices
                 'purchaseAmount' => $sourceAmounts['purchaseAmount'],
                 'remainingAmount' => $sourceAmounts['remainingAmount'],
                 'outstandingDebtAmount' => $outstandingDebtAmount,
+                'cancelledDebtAmount' => $this->cancelledDebt($order, $debts[(int)($order['id'] ?? 0)] ?? null, $tenantId),
                 'amountCalculationVersion' => $sourceAmounts['calculationVersion'],
                 'cardRuleType' => is_array($holderRuleAuthority)
                     ? (string)$holderRuleAuthority['ruleType']
@@ -1258,6 +1266,14 @@ final class CashierV3EntitlementProjectionServices
         return bcadd($raw, '0', 2);
     }
 
+    /** 展示 R49 取消的剩余欠款，绝不以原欠款、当前余额或已补交额代替取消事实。 */
+    private function cancelledDebt(array $order, $debt, string $tenantId): string
+    {
+        // 显示与最终核销共用审计解析，禁止保留另一套取消金额计算。
+        return (new CashierV3CardOriginDebtResolver())->cancelledCardDebt($order, (int)($order['uid'] ?? 0), $tenantId);
+    }
+
+    /** 当前可补交额仍使用原权威路径；新增取消展示不得改变核销与欠款业务口径。 */
     private function pendingDebt(array $order, $debt): string
     {
         $v3CardDebt = (new CashierV3CardOriginDebtResolver())->pendingV3CardDebt(

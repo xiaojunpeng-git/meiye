@@ -1038,6 +1038,11 @@ final class CashierV3MemberDetailQueryServices
             array_keys($holderByOrder),
             $rows
         );
+        // R50：详情与收银共用可用金额守卫，历史购买金额/次数不改写。
+        $originOrders = Db::name('store_order')->whereIn('id', array_keys($holderByOrder))->column('id,uid,store_id', 'id');
+        foreach ($originOrders as &$originOrder) { $originOrder['tenant_id'] = $tenantId; }
+        unset($originOrder);
+        $writeoff = app()->make(\app\services\order\store\WriteOffOrderServices::class);
         foreach ($rows as $row) {
             $start = max(0, (int)($row['write_start'] ?? 0));
             $end = max(0, (int)($row['write_end'] ?? 0));
@@ -1064,6 +1069,7 @@ final class CashierV3MemberDetailQueryServices
                     $total - $remaining,
                     $amountAuthority['allocationSnapshot']
                 );
+                $amount = $writeoff->usableEntitlementAmount($row, (array)($originOrders[(int)$row['oid']] ?? []), $amount);
             } catch (\InvalidArgumentException $exception) {
                 throw new CashierV3CommandException(
                     CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
@@ -1104,6 +1110,10 @@ final class CashierV3MemberDetailQueryServices
             $isTimeCard = $cardRuleType === 'time';
             if ($isTimeCard) {
                 $remainingAmount = $this->money($holder['order_pay_price'] ?? 0);
+                $cancelled = (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())->cancelledCardDebt(
+                    (array)($originOrders[(int)$orderId] ?? []), (int)$holder['uid']
+                );
+                $remainingAmount = max('0.00', bcsub($remainingAmount, $cancelled, 2));
             }
             $statusCode = (string)($cardStatusByHolder[$holderId] ?? 'enabled');
             $cards[(int)$holder['uid']][] = [

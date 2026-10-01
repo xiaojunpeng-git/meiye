@@ -22,6 +22,37 @@ final class CashierV3CardOriginDebtResolver
      */
     public function pendingV3CardDebt(array $originOrder, int $currentMemberId, bool $lock = false): ?string
     {
+        return $this->cardDebtAmount($originOrder, $currentMemberId, $lock, false);
+    }
+
+    /** 取消整笔欠款后，每张卡只展示所属销售明细的未偿金额，不能重复展示整单取消额。 */
+    public function cancelledV3CardDebt(array $originOrder, int $currentMemberId, string $tenantId, bool $lock = false): ?string
+    {
+        return $this->cardDebtAmount($originOrder, $currentMemberId, $lock, true, $tenantId);
+    }
+
+    /** 取消金额仍是不可使用的权益，不是待还款。兼容历史卡，必须匹配原会员及门店审计。 */
+    public function cancelledCardDebt(array $order, int $memberId, string $tenantId = '0'): string
+    {
+        if ((int)($order['uid'] ?? 0) !== $memberId || $memberId <= 0) return '0.00';
+        // 核销事务读取最新债务终态并与取消命令共用行锁，避免旧快照在取消后放行。
+        $lock = \app\services\cashier\v3\CashierV3TransactionGuard::isInTransaction();
+        $v3 = $this->cancelledV3CardDebt($order, $memberId, $tenantId, $lock);
+        if ($v3 !== null) return $v3;
+        $rows = Db::name('store_debt')->where('order_id', (int)($order['id'] ?? 0))->lock($lock)->select()->toArray();
+        if (count($rows) > 1) throw new \LogicException('cashier_v3_card_origin_debt_duplicate');
+        $debt = $rows[0] ?? [];
+        if ((int)($debt['status'] ?? 0) !== 3) return '0.00';
+        $audit = Db::name('cashier_v3_debt_cancellation')->where('debt_id', (int)$debt['id'])
+            ->where('tenant_id', $tenantId)->where('member_id', $memberId)
+            ->where('store_id', (int)$debt['store_id'])->find();
+        if (!$audit || (int)$debt['uid'] !== $memberId) throw new \LogicException('cashier_v3_card_origin_debt_cancellation_missing');
+        return bcdiv((string)$audit['cancelled_debt_cents'], '100', 2);
+    }
+
+    /** 两种展示共享来源解析；取消金额必须同时具备取消状态和 R49 不可变审计事实。 */
+    private function cardDebtAmount(array $originOrder, int $currentMemberId, bool $lock, bool $cancelled, string $tenantId = ''): ?string
+    {
         $originOrderId = (int)($originOrder['id'] ?? 0);
         if ($originOrderId <= 0 || $currentMemberId <= 0
             || (int)($originOrder['uid'] ?? 0) !== $currentMemberId) {
@@ -59,7 +90,7 @@ final class CashierV3CardOriginDebtResolver
             ->join('store_debt d', 'd.id=a.debt_id')
             ->where('a.member_id', $currentMemberId)
             ->where('a.sales_order_id', $salesOrderId)
-            ->field('a.debt_id,d.status')
+            ->field('a.debt_id,d.status,d.store_id')
             ->order('a.id asc');
         if ($lock) {
             $authorityQuery->lock(true);
@@ -71,11 +102,21 @@ final class CashierV3CardOriginDebtResolver
         if (count($authorities) !== 1) {
             throw new \LogicException('cashier_v3_card_origin_debt_authority_duplicate');
         }
-        if ((int)($authorities[0]['status'] ?? 0) !== 0) {
+        if ((int)($authorities[0]['status'] ?? 0) !== ($cancelled ? 3 : 0)) {
             return '0.00';
         }
 
         $debtId = (int)$authorities[0]['debt_id'];
+        if ($cancelled) {
+            // 已取消时欠款明细保留原金额和已还金额；审计存在后才允许读取其差额。
+            $audit = Db::name('cashier_v3_debt_cancellation')
+                ->where('debt_id', $debtId)->where('tenant_id', $tenantId)
+                ->where('member_id', $currentMemberId)
+                ->where('store_id', (int)$authorities[0]['store_id'])->find();
+            if (!$audit) {
+                throw new \LogicException('cashier_v3_card_origin_debt_cancellation_missing');
+            }
+        }
         $lineQuery = Db::name('cashier_v3_sales_order_line')
             ->where('order_id', $salesOrderId)
             ->where('order_line_id', $salesOrderLineId)

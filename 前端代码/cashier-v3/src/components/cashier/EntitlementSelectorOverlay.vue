@@ -441,12 +441,14 @@ function operationProjectSelected(source = {}, project = {}) {
       <section class="cashier-entitlement-selector__content" aria-label="可使用权益">
         <div v-if="visibleSources.length" class="cashier-entitlement-table" role="table" aria-label="会员权益项目">
           <div class="cashier-entitlement-table__head" role="row">
-            <span>卡项名称</span>
+            <span>操作按钮</span>
+            <span>卡名称</span>
             <span>余次</span>
-            <span>余额</span>
+            <span>剩余余额</span>
             <span>欠款</span>
+            <span>购买金额</span>
             <span>有效期</span>
-            <span aria-label="操作" />
+            <span>取消欠款</span>
           </div>
 
           <template v-for="source in visibleSources" :key="source.id || source.entitlementInstanceId">
@@ -455,17 +457,7 @@ function operationProjectSelected(source = {}, project = {}) {
               :class="{ 'is-unavailable': !isSourceAvailable(source) }"
               role="row"
             >
-              <div class="cashier-entitlement-table__source-name" :title="sourceOrderRemark(source) || undefined">
-                <div>
-                  <strong>{{ source.name || '卡项' }}</strong>
-                  <span class="cashier-entitlement-table__type-tag">{{ sourceTypeLabel(source) }}</span>
-                </div>
-                <small :title="source.disabledReason || sourceCardNo(source)">{{ source.disabledReason || sourceCardNo(source) }}</small>
-              </div>
-              <span>{{ displaySourceRemainingTimes(source) }}</span>
-              <span>{{ displayAmount(source.remainingAmount) }}</span>
-              <span>{{ displayAmount(source.outstandingDebtAmount) }}</span>
-              <span>{{ sourceExpiryDate(source) }}</span>
+              <!-- 操作只移动展示位置，仍沿用原可用性与选择逻辑；卡级欠款不复制到项目行。 -->
               <button
                 v-if="sourceOperationLabel()"
                 type="button"
@@ -478,6 +470,19 @@ function operationProjectSelected(source = {}, project = {}) {
                   ? '添加'
                   : sourceOperationLabel() }}</button>
               <span v-else />
+              <div class="cashier-entitlement-table__source-name" :title="sourceOrderRemark(source) || undefined">
+                <div>
+                  <strong>{{ source.name || '卡项' }}</strong>
+                  <span class="cashier-entitlement-table__type-tag">{{ sourceTypeLabel(source) }}</span>
+                </div>
+                <small :title="source.disabledReason || sourceCardNo(source)">{{ source.disabledReason || sourceCardNo(source) }}</small>
+              </div>
+              <span>{{ displaySourceRemainingTimes(source) }}</span>
+              <span>{{ displayAmount(source.remainingAmount) }}</span>
+              <span>{{ displayAmount(source.outstandingDebtAmount) }}</span>
+              <span>{{ displayAmount(source.purchaseAmount) }}</span>
+              <span>{{ sourceExpiryDate(source) }}</span>
+              <span>{{ displayAmount(source.cancelledDebtAmount) }}</span>
             </article>
 
             <article
@@ -490,14 +495,6 @@ function operationProjectSelected(source = {}, project = {}) {
               }"
               role="row"
             >
-              <div class="cashier-entitlement-table__project-name">
-                <strong :title="project.name || '项目'">{{ project.name || '项目' }}</strong>
-                <small v-if="project.disabledReason || project.unavailableReason">{{ project.disabledReason || project.unavailableReason }}</small>
-              </div>
-              <span>{{ displayProjectRemainingTimes(source, project) }}</span>
-              <span>{{ displayProjectRemainingAmount(source, project) }}</span>
-              <span aria-hidden="true" />
-              <span aria-hidden="true" />
               <button
                 v-if="!sourceOperationLabel()"
                 type="button"
@@ -507,6 +504,17 @@ function operationProjectSelected(source = {}, project = {}) {
                 :title="projectDisabled(source, project) ? (project.disabledReason || project.unavailableReason || '当前权益不可使用') : '添加到购物车'"
                 @click="addProject(source, project)"
               >{{ ['project-replacement', 'project-upgrade'].includes(operationMode) ? (operationProjectSelected(source, project) ? '已添加' : '添加') : addButtonLabel(source, project) }}</button>
+              <span v-else aria-hidden="true" />
+              <div class="cashier-entitlement-table__project-name">
+                <strong :title="project.name || '项目'">{{ project.name || '项目' }}</strong>
+                <small v-if="project.disabledReason || project.unavailableReason">{{ project.disabledReason || project.unavailableReason }}</small>
+              </div>
+              <span>{{ displayProjectRemainingTimes(source, project) }}</span>
+              <span>{{ displayProjectRemainingAmount(source, project) }}</span>
+              <span aria-hidden="true" />
+              <span>{{ displayAmount(project.purchaseAmount) }}</span>
+              <span aria-hidden="true" />
+              <span aria-hidden="true" />
             </article>
           </template>
         </div>
