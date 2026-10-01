@@ -527,23 +527,14 @@ class CashierV3ActionDispatcher
             return $envelope;
         }
 
-        // 目录草稿和充值结账草稿已经在命令结果中返回各自的完整局部投影，前端只
-        // 回填对应局部状态。这里若再重建收银根状态，会重复加载目录、会员、房间、
-        // 订单和报表分区；尤其充值结账草稿不能用服务端工作台默认游客投影覆盖
-        // 浏览器中已选会员。需要显式当前根状态时仍允许通过 returnCurrentState
-        // 请求重建。
+        // 目录命令已返回局部投影；充值最终快照只返回正式回执。两者均无需
+        // 额外重建收银根状态，避免以旧工作台状态覆盖当前选客。
         $skipDefaultRootProjection = (in_array($canonical, ['choose-catalog-item', 'remove-cart-line'], true)
                 && !$wantCurrentState)
             // 整单服务作废已提交正式回执，订单页会独立重查列表。不要再加载无关
             // 收银根投影，否则其异常或超时会让已成功退权益被误报为结果未知。
             || ($canonical === 'void-service-record' && !$wantCurrentState)
-            || (in_array($canonical, [
-                'prepare-recharge-checkout',
-                'add-recharge-checkout-payment-method',
-                'update-recharge-checkout-payment-line',
-                'remove-recharge-checkout-payment-line',
-                'reload-recharge-checkout',
-            ], true) && !$wantCurrentState)
+            || ($canonical === 'submit-recharge-checkout' && is_array($payload['checkoutSnapshot'] ?? null))
             // A final browser-owned checkout has already returned its formal
             // settlement receipt. Never rebuild the old workspace projection
             // while returning that receipt to the browser.

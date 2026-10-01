@@ -1,4 +1,4 @@
-import { ref, unref } from 'vue'
+import { ref } from 'vue'
 import { createCashierV3CommandId, requestCashierV3Action } from '@/services/cashierV3Bridge'
 import { cashierV3ResponseEnvelope } from '@/services/cashierV3CheckoutResultContract'
 
@@ -19,13 +19,74 @@ function clonePlain(value = {}) {
 }
 
 /**
- * Owns the recharge editing Checkout protocol. The workbench supplies only
- * the current member/context and the shared business-source selector callback;
- * all recharge mutations remain serialized and versioned in this boundary.
+ * 充值确认只在浏览器中编辑本次快照；服务端仅在最终确认时创建业务事实。
  */
-export function useRechargeCheckout({ member, currentMemberId, openSourceSelector }) {
+export function useRechargeCheckout() {
   const rechargeCheckout = ref(null)
   let rechargeCheckoutMutationTail = Promise.resolve()
+  let originalLocalSubmit = null
+  const localMethods = [
+    ['unionpay', '银联'], ['wechat', '微信'], ['alipay', '支付宝'],
+    ['dianping_voucher', '大众验券'], ['douyin_voucher', '抖音验券'],
+    ['partner_collection', '合作方收款'], ['other_collection', '其他收款']
+  ]
+
+  function acceptLocalRechargeCheckout(input = {}, session = {}) {
+    const memberId = Number(input.memberId || 0)
+    const packageItem = (session.rechargeOptions?.packages || [])
+      .find((item) => Number(item.id) === Number(input.rechargePackageId))
+    const principal = Number(input.rechargeMode === 'package' ? packageItem?.price : input.principalAmount)
+    const bonus = Number(input.rechargeMode === 'package' ? packageItem?.bonus : input.bonusAmount)
+    const debt = Number(input.debtAmount || 0)
+    const due = principal - debt
+    if (!Number.isSafeInteger(memberId) || memberId <= 0
+      || !Number.isSafeInteger(principal) || principal <= 0
+      || !Number.isSafeInteger(bonus) || bonus < 0
+      || !Number.isSafeInteger(debt) || debt < 0 || debt > principal
+      || (input.rechargeMode === 'package' && !packageItem)) return null
+    const localId = `local-recharge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const selectedLines = due > 0 ? [{
+      id: `${localId}-unionpay`, kind: 'bookkeeping_collection', method: 'unionpay',
+      name: '银联', amount: due, externalTransactionNo: '', status: 'editing',
+      canEdit: true, canRemove: true
+    }] : []
+    // 后端套餐配置和真实余额在最终提交时重算；这里仅显示操作员刚确认的值。
+    rechargeCheckout.value = {
+      contractVersion: 'cashier-v3-recharge-checkout-v1', businessType: 'recharge',
+      localSnapshotPreview: true, status: 'editing', activeStep: 1,
+      member: clonePlain(session.member || { id: memberId }),
+      rechargeTerms: {
+        memberId, rechargeMode: input.rechargeMode,
+        rechargePackageId: Number(input.rechargePackageId || 0),
+        principalAmount: String(principal), bonusAmount: String(bonus),
+        debtAmount: String(debt), businessDate: String(input.businessDate || ''),
+        salespersonAllocations: clonePlain(input.salespersonAllocations || []),
+        businessSource: clonePlain(input.businessSource || {})
+      },
+      businessDate: String(input.businessDate || ''),
+      orderLines: [{ id: localId, lineRole: 'recharge',
+        name: input.rechargeMode === 'package' ? '充值套餐' : '自定义充值',
+        quantity: 1, amount: principal }],
+      summary: { selectedCount: 1, originalAmount: principal,
+        discountAmount: 0, receivableAmount: due, entitlementActualAmount: 0 },
+      composition: { code: 'recharge', lineRoles: ['recharge'], hasSale: false,
+        hasEntitlement: false, primaryAction: 'collect_payment', primaryActionLabel: '确认充值',
+        steps: [{ key: 'order', number: 1, label: '确认充值' },
+          { key: 'payment', number: 2, label: '收款信息' },
+          { key: 'final', number: 3, label: '确认充值' },
+          { key: 'result', number: 4, label: '处理结果' }] },
+      bonusAmount: bonus, debtAmount: debt, cashPerformanceAmount: due,
+      balancePaymentAmount: 0, finalChanges: [], sourceEnabled: false,
+      sourceSelectable: false, payment: {
+        methods: localMethods.map(([id, name]) => ({ id, name, canAdd: id !== 'unionpay' })),
+        selectedLines,
+        summary: { receivableAmount: due, selectedAmount: due,
+          remainingAmount: 0, overpaidAmount: 0 }
+      }
+    }
+    originalLocalSubmit = null
+    return rechargeCheckout.value
+  }
 
   function rechargeCheckoutProjection(response) {
     const direct = response?.data?.rechargeCheckout
@@ -38,7 +99,11 @@ export function useRechargeCheckout({ member, currentMemberId, openSourceSelecto
   function setRechargeCheckout(response, { allowTerminalOutcome = true } = {}) {
     const projection = rechargeCheckoutProjection(response)
     if (projection) {
-      rechargeCheckout.value = projection
+      // 最终响应只返回真实充值结果；确认页的行、金额和收款方式仍是
+      // 本次浏览器快照，不能用精简结果覆盖后让成功页丢失明细。
+      rechargeCheckout.value = rechargeCheckout.value?.localSnapshotPreview === true
+        ? { ...rechargeCheckout.value, ...projection }
+        : projection
     } else {
       // A command can reach the server but lose its HTTP response (timeout,
       // worker restart, or a proxy disconnect). Keep the same request visible
@@ -62,127 +127,98 @@ export function useRechargeCheckout({ member, currentMemberId, openSourceSelecto
     return projection
   }
 
-  function acceptPreparedCheckout(response) {
-    if (!['success', 'succeeded'].includes(resultStatus(response))) return null
-    const projection = setRechargeCheckout(response)
-    if (!projection) return null
-    return projection
-  }
-
   function closeRechargeCheckout() {
     rechargeCheckout.value = null
+    originalLocalSubmit = null
+  }
+
+  function changeLocalRechargeDate({ businessDate = '', reason = '' } = {}) {
+    const current = rechargeCheckout.value
+    if (current?.localSnapshotPreview !== true
+      || !/^\d{4}-\d{2}-\d{2}$/.test(String(businessDate))) return
+    // 日期编辑只改本次浏览器快照；最终服务端再校验日期及历史补单原因。
+    rechargeCheckout.value = {
+      ...current, businessDate,
+      businessDateReason: String(reason || ''),
+      rechargeTerms: { ...current.rechargeTerms,
+        businessDate, businessDateReason: String(reason || '') }
+    }
+  }
+
+  function editLocalPayment(action, payload = {}) {
+    const current = rechargeCheckout.value
+    const lines = clonePlain(current.payment?.selectedLines || [])
+    const method = localMethods.find(([id]) => id === String(payload.paymentMethodId || ''))
+    if (action === 'add-payment-method') {
+      if (!method || lines.some((line) => line.method === method[0])) return null
+      lines.push({ id: `local-recharge-payment-${method[0]}`, kind: 'bookkeeping_collection',
+        method: method[0], name: method[1], amount: Math.max(0, Number(current.payment.summary.remainingAmount || 0)),
+        externalTransactionNo: '', status: 'editing', canEdit: true, canRemove: true })
+    } else {
+      const index = lines.findIndex((line) => line.id === payload.paymentLineId)
+      if (index < 0) return null
+      if (action === 'remove-payment-line') lines.splice(index, 1)
+      else {
+        const amount = Number(payload.amount)
+        if (!Number.isSafeInteger(amount) || amount <= 0) return null
+        lines[index].amount = amount
+        lines[index].externalTransactionNo = String(payload.externalTransactionNo || '')
+      }
+    }
+    const due = Number(current.summary.receivableAmount || 0)
+    const selected = lines.reduce((total, line) => total + Number(line.amount || 0), 0)
+    rechargeCheckout.value = { ...current, payment: {
+      ...current.payment, selectedLines: lines,
+      methods: localMethods.map(([id, name]) => ({ id, name, canAdd: !lines.some((line) => line.method === id) })),
+      summary: { receivableAmount: due, selectedAmount: selected,
+        remainingAmount: Math.max(0, due - selected), overpaidAmount: Math.max(0, selected - due) }
+    } }
+    return rechargeCheckout.value
   }
 
   async function requestRechargeCheckoutAction({ action, payload = {} }) {
     const checkout = rechargeCheckout.value
-    // The root cashier projection can be refreshed while the recharge overlay
-    // is still open.  The recharge projection already carries the authoritative
-    // member/request identity, so do not lose the active session merely because
-    // the live toolbar member has temporarily become empty.
-    const memberId = unref(member)?.id
-      || unref(currentMemberId)
-      || checkout?.member?.id
-      || checkout?.memberId
-    if (!checkout?.rechargeCheckoutRequestId || !memberId) {
-      return { result: { status: 'failed', code: 'RECHARGE_CHECKOUT_SESSION_EXPIRED', message: '充值结账现场已失效，请重新进入。' } }
-    }
-    if (action === 'open-checkout-source-selector') return openSourceSelector?.('recharge')
-    const actionMap = {
-      'add-payment-method': 'add-recharge-checkout-payment-method',
-      'update-payment-line': 'update-recharge-checkout-payment-line',
-      'remove-payment-line': 'remove-recharge-checkout-payment-line',
-      'submit-checkout': 'submit-recharge-checkout',
-      'query-checkout-result': 'reload-recharge-checkout'
-    }
-    const targetAction = actionMap[action]
-    if (!targetAction) return { result: { status: 'failed', code: 'RECHARGE_CHECKOUT_ACTION_NOT_ALLOWED', message: '该充值结账操作尚未开放。' } }
-    const draftAction = ['add-payment-method', 'update-payment-line', 'remove-payment-line'].includes(action)
-    const requestPayload = {
-      ...payload,
-      memberId,
-      rechargeCheckoutRequestId: checkout.rechargeCheckoutRequestId,
-      rechargeCheckoutRequestVersion: checkout.checkoutRequestVersion,
-      // 后续请求只携带服务端返回的唯一充值草稿快照，不再读取收银主界面。
-      commandContexts: Array.isArray(checkout.commandContexts)
-        ? clonePlain(checkout.commandContexts)
-        : [],
-      silent: draftAction
-    }
-    if (action === 'submit-checkout' || action === 'retry-checkout') {
-      const orderLines = Array.isArray(checkout.orderLines) ? checkout.orderLines : []
-      const paymentLines = Array.isArray(checkout.payment?.selectedLines)
-        ? checkout.payment.selectedLines
-        : []
-      requestPayload.checkoutSnapshot = {
-        contractVersion: checkout.contractVersion || 'cashier-v3-recharge-checkout-v1',
-        businessType: 'recharge',
-        memberId: Number(memberId),
-        member: clonePlain(checkout.member || { id: Number(memberId) }),
-        rechargeCheckoutRequestId: checkout.rechargeCheckoutRequestId,
-        checkoutRequestId: checkout.checkoutRequestId || checkout.rechargeCheckoutRequestId,
-        checkoutRequestVersion: Number(checkout.checkoutRequestVersion || 0),
-        businessDate: checkout.businessDate || '',
-        businessDateReason: checkout.businessDateReason || '',
-        source: {
-          primarySourceId: Number(checkout.primarySourceId || 0),
-          secondarySourceId: Number(checkout.secondarySourceId || 0),
-          sourceSelectionVersion: Number(checkout.sourceSelectionVersion || 0),
-          sourceLabel: checkout.sourceLabel || ''
-        },
-        orderLines: clonePlain(orderLines),
-        paymentLines: clonePlain(paymentLines),
-        lines: [
-          ...clonePlain(orderLines),
-          ...paymentLines.map((line) => ({
-            ...clonePlain(line),
-            lineRole: 'payment'
-          }))
-        ],
-        summary: clonePlain(checkout.summary || {})
+    if (checkout?.localSnapshotPreview === true) {
+      if (['add-payment-method', 'update-payment-line', 'remove-payment-line'].includes(action)) {
+        const edited = editLocalPayment(action, payload)
+        const response = { result: { status: edited ? 'success' : 'failed',
+          message: edited ? '收款明细已更新。' : '收款明细无效，请核对后重试。' } }
+        window.dispatchEvent(new CustomEvent('cashier-v3:checkout-draft-mutation-result', {
+          detail: { action, payload: clonePlain(payload), status: response.result.status,
+            message: response.result.message }
+        }))
+        return response
       }
-    }
-    const response = await requestCashierV3Action(targetAction, requestPayload)
-    setRechargeCheckout(response, { allowTerminalOutcome: !draftAction })
-    if (typeof window !== 'undefined'
-      && draftAction) {
-      const envelope = cashierV3ResponseEnvelope(response)
-      window.dispatchEvent(new CustomEvent('cashier-v3:checkout-draft-mutation-result', {
-        detail: {
-          action,
-          payload: clonePlain(payload),
-          status: resultStatus(response),
-          message: envelope?.result?.message || response?.result?.message || ''
+      if (action === 'query-checkout-result' && originalLocalSubmit) {
+        // 查询只能复用原提交内容及幂等键，不能生成第二笔充值。
+        const response = await requestCashierV3Action('submit-recharge-checkout', originalLocalSubmit)
+        setRechargeCheckout(response)
+        return response
+      }
+      if (action === 'submit-checkout') {
+        const snapshot = clonePlain(checkout)
+        const submitted = {
+          memberId: Number(snapshot.rechargeTerms.memberId),
+          checkoutSnapshot: {
+            ...clonePlain(snapshot.rechargeTerms),
+            businessType: 'recharge',
+            paymentLines: snapshot.payment.selectedLines.map((line) => ({
+              paymentMethod: line.method, amount: String(line.amount),
+              collectionReference: line.externalTransactionNo || ''
+            }))
+          },
+          idempotencyKey: payload.idempotencyKey || createCashierV3CommandId('CHECKOUT')
         }
-      }))
+        originalLocalSubmit = clonePlain(submitted)
+        const response = await requestCashierV3Action('submit-recharge-checkout', submitted)
+        setRechargeCheckout(response)
+        return response
+      }
+      return { result: { status: 'failed', code: 'RECHARGE_CHECKOUT_ACTION_NOT_ALLOWED',
+        message: '该充值结账操作尚未开放。' } }
     }
-    return response
-  }
-
-  function rechargeCheckoutDraftConflict(result) {
-    if (resultStatus(result) !== 'conflict') return false
-    const envelope = cashierV3ResponseEnvelope(result)
-    return String(envelope?.result?.code || envelope?.code || '') === 'RESOURCE_VERSION_CONFLICT'
-  }
-
-  async function requestRechargeCheckoutMutationWithSingleConflictReplay(event = {}) {
-    const action = String(event?.action || '')
-    const first = await requestRechargeCheckoutAction(event)
-    if (!['add-payment-method', 'update-payment-line', 'remove-payment-line'].includes(action)
-      || !rechargeCheckoutDraftConflict(first)) return first
-    const current = rechargeCheckout.value
-    const requestId = String(current?.rechargeCheckoutRequestId || '')
-    const memberId = Number(unref(member)?.id || unref(currentMemberId) || 0)
-    if (!requestId || memberId <= 0) return first
-    const refreshed = await requestCashierV3Action('reload-recharge-checkout', {
-      requestId,
-      memberId,
-      commandContexts: Array.isArray(current.commandContexts) ? clonePlain(current.commandContexts) : [],
-      idempotencyKey: createCashierV3CommandId()
-    })
-    const projection = rechargeCheckoutProjection(refreshed)
-    if (!['success', 'succeeded'].includes(resultStatus(refreshed)) || !projection) return first
-    rechargeCheckout.value = projection
-    return requestRechargeCheckoutAction(event)
+    return { result: { status: 'failed', code: 'RECHARGE_CHECKOUT_ACTION_NOT_ALLOWED',
+      message: '充值确认快照已失效，请重新进入充值。' } }
   }
 
   async function enqueueRechargeCheckoutAction(event = {}) {
@@ -194,7 +230,7 @@ export function useRechargeCheckout({ member, currentMemberId, openSourceSelecto
     }
     rechargeCheckoutMutationTail = rechargeCheckoutMutationTail
       .catch(() => undefined)
-      .then(() => requestRechargeCheckoutMutationWithSingleConflictReplay(event))
+      .then(() => requestRechargeCheckoutAction(event))
     result = await rechargeCheckoutMutationTail
     event?.resolve?.(result)
     return result
@@ -203,11 +239,10 @@ export function useRechargeCheckout({ member, currentMemberId, openSourceSelecto
   return {
     rechargeCheckout,
     rechargeCheckoutProjection,
-    acceptPreparedCheckout,
+    acceptLocalRechargeCheckout,
     closeRechargeCheckout,
+    changeLocalRechargeDate,
     requestRechargeCheckoutAction,
-    rechargeCheckoutDraftConflict,
-    requestRechargeCheckoutMutationWithSingleConflictReplay,
     enqueueRechargeCheckoutAction
   }
 }

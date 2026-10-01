@@ -235,12 +235,7 @@ class CashierV3ActionManifest
                 'consumers' => [],
             ],
 
-            'prepare-recharge-checkout' => $eventless($checkoutPreparation),
             'prepare-recharge-debt-repayment' => $eventless($checkoutPreparation),
-            'add-recharge-checkout-payment-method' => $eventless($checkoutPreparation),
-            'update-recharge-checkout-payment-line' => $eventless($checkoutPreparation),
-            'remove-recharge-checkout-payment-line' => $eventless($checkoutPreparation),
-            'reload-recharge-checkout' => $eventless($checkoutPreparation),
             // The checkout protocol is separate, while the successful domain
             // event remains recharge.completed from the same recharge authority.
             'submit-recharge-checkout' => [

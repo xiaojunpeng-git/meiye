@@ -2,78 +2,47 @@
 declare(strict_types=1);
 
 $root = dirname(__DIR__, 3);
-$module = (string)file_get_contents(
-    $root . '/后端代码/app/services/cashier/v3/member/CashierV3RechargeCheckoutModule.php'
-);
-$bootstrap = (string)file_get_contents(
-    $root . '/后端代码/app/services/cashier/v3/bootstrap/CashierV3Bootstrap.php'
-);
-$manifestModule = (string)file_get_contents(
-    $root . '/后端代码/app/services/cashier/v3/manifest/CashierV3C5MemberOrderModule.php'
-);
-$manifest = (string)file_get_contents(
-    $root . '/后端代码/app/services/cashier/v3/manifest/CashierV3ActionManifest.php'
-);
-$dispatcher = (string)file_get_contents(
-    $root . '/后端代码/app/services/cashier/v3/CashierV3ActionDispatcher.php'
-);
-$contextPolicy = (string)file_get_contents(
-    $root . '/后端代码/app/services/cashier/v3/registry/CashierV3ContextPolicy.php'
-);
-$migration = (string)file_get_contents(
-    $root . '/后端代码/database/upgrades/2026-08-05-收银V3充值统一结账/02-正式升级.sql'
-);
+$read = static function (string $path) use ($root): string {
+    return (string)file_get_contents($root . '/' . $path);
+};
+$module = $read('后端代码/app/services/cashier/v3/member/CashierV3RechargeCheckoutModule.php');
+$bootstrap = $read('后端代码/app/services/cashier/v3/bootstrap/CashierV3Bootstrap.php');
+$manifestModule = $read('后端代码/app/services/cashier/v3/manifest/CashierV3C5MemberOrderModule.php');
+$manifest = $read('后端代码/app/services/cashier/v3/manifest/CashierV3ActionManifest.php');
+$dispatcher = $read('后端代码/app/services/cashier/v3/CashierV3ActionDispatcher.php');
+$source = $read('后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutBusinessSourceSelectionServices.php');
+$contextPolicy = $read('后端代码/app/services/cashier/v3/registry/CashierV3ContextPolicy.php');
+$migration = $read('后端代码/database/upgrades/2026-08-05-收银V3充值统一结账/02-正式升级.sql');
+$removedActions = [
+    'prepare-recharge-checkout', 'add-recharge-checkout-payment-method',
+    'update-recharge-checkout-payment-line', 'remove-recharge-checkout-payment-line',
+    'reload-recharge-checkout',
+];
 
+// 历史迁移文件是已经执行过的账务记录，不因删除运行时代码而改写或删库。
 $checks = [
-    'recharge checkout has prepare edit and submit commands' => strpos($module, "'prepare-recharge-checkout'") !== false
-        && strpos($module, "'update-recharge-checkout-payment-line'") !== false
-        && strpos($module, "'reload-recharge-checkout'") !== false
-        && strpos($module, "'submit-recharge-checkout'") !== false,
-    'selected active members may recharge across historical store relations' => strpos($module, "where('store_id',\$operator->storeId())") === false
-        && strpos($module, '充值就按当前登录门店归属创建') !== false,
-    'draft writes are eventless while final submit reuses recharge authority' => strpos($module, 'eventless; only submit-recharge-checkout') !== false
-        && strpos($module, '(new CashierV3RechargeModule())->submitInTx(') !== false,
-    'prepare freezes business date and authoritative salesperson snapshot' => strpos($module, "'business_date'=>\$input['businessDate']") !== false
-        && strpos($module, 'resolveSalespeopleForPreparation') !== false
-        && strpos($module, "'recharge_checkout_salespeople_snapshot'=>\$salespeopleSnapshot") !== false,
-    'recharge date is not mutable after preparation' => strpos($manifestModule, "'update-recharge-checkout-business-date'") === false
-        && strpos($manifest, "'update-recharge-checkout-business-date'") === false,
-    'payment edits lock the request version and reject totals above receivable' => strpos($module, 'private function lockEditing') !== false
-        && strpos($module, 'recharge_checkout_payment_exceeds_due') !== false
-        && strpos($module, 'recharge_checkout_payment_total_mismatch') !== false,
-    'payment projection captures request status explicitly' => strpos($module, 'function(array $p) use ($accounting, $request):array') !== false,
-    'recharge payment methods cannot be duplicated' => strpos($module, 'recharge_checkout_payment_method_duplicate') !== false
-        && strpos($module, "'canAdd'=>!isset(\$selectedMethods[\$code])") !== false
-        && strpos($module, 'private function hasDuplicatePaymentMethods') !== false,
-    'recharge payment line identity stays stable across draft versions' => strpos($module, 'private function publicPaymentLineId') !== false
-        && strpos($module, "'id'=>\$this->publicPaymentLineId") !== false
-        && strpos($module, "hash_equals(\$this->publicPaymentLineId") !== false,
-    'recharge source is frozen from the cashier toolbar at preparation' => strpos($module, 'captureRechargePreparationInTx') !== false
-        && strpos($module, "'sourceEnabled'=>false,'sourceSelectable'=>false") !== false
-        && strpos($module, 'update-recharge-checkout-business-source') === false
-        && strpos($manifestModule, 'update-recharge-checkout-business-source') === false
-        && strpos($manifest, 'update-recharge-checkout-business-source') === false,
-    'new context version provider and action module are installed' => strpos($bootstrap, 'CashierV3RechargeCheckoutRequestVersionProvider') !== false
-        && strpos($bootstrap, 'CashierV3RechargeCheckoutModule::install') !== false,
-    'reload command is registered with an explicit eventless contract' => strpos($manifestModule, "'reload-recharge-checkout'") !== false
-        && strpos($manifest, "'reload-recharge-checkout' => \$eventless(\$checkoutPreparation)") !== false,
-    'recharge checkout drafts never replace the selected-member workbench root' => strpos($dispatcher, "'prepare-recharge-checkout'") !== false
-        && strpos($dispatcher, "'add-recharge-checkout-payment-method'") !== false
-        && strpos($dispatcher, "'update-recharge-checkout-payment-line'") !== false
-        && strpos($dispatcher, "'remove-recharge-checkout-payment-line'") !== false
-        && strpos($dispatcher, "'reload-recharge-checkout'") !== false
-        && strpos($dispatcher, '浏览器中已选会员') !== false,
-    'recharge preparation locks one server snapshot instead of browser root versions' => strpos($module, '$install(self::PREPARE, [], []') !== false
-        && strpos($module, 'CashierV3MemberBalanceProvider') !== false
-        && strpos($module, 'lockSnapshotInTx((int)$input[\'memberId\']') !== false
-        && strpos($module, "'allows_empty_contexts'=>empty(\$required)") !== false,
-    'final recharge keeps the server-locked request context while domain writes stay atomic' => strpos($contextPolicy, "\$this->action === 'submit-recharge-checkout'") !== false
-        && strpos($contextPolicy, "is_array(\$payload['checkoutSnapshot'] ?? null)") !== false
-        && strpos($contextPolicy, "\$out['allows_empty_touched_result'] = true;") !== false,
-    'migration creates only dedicated recharge checkout draft tables' => strpos($migration, 'eb_cashier_v3_recharge_checkout_request') !== false
-        && strpos($migration, 'eb_cashier_v3_recharge_checkout_payment_draft') !== false
-        && stripos($migration, 'UPDATE ') === false
-        && stripos($migration, 'DELETE ') === false,
+    '充值只注册最终快照命令' => str_contains($module, "'submit-recharge-checkout'")
+        && str_contains($module, 'submitLocalSnapshotInTx')
+        && str_contains($bootstrap, 'CashierV3RechargeCheckoutModule::install'),
+    '充值旧草稿命令已从运行时移除' => array_reduce($removedActions, static function (bool $ok, string $action) use ($module, $manifestModule, $manifest, $dispatcher): bool {
+        return $ok && !str_contains($module, $action) && !str_contains($manifestModule, $action)
+            && !str_contains($manifest, $action) && !str_contains($dispatcher, $action);
+    }, true),
+    '充值提交不读写旧草稿表或请求版本' => !str_contains($module, 'Db::name(self::REQUEST_TABLE)')
+        && !str_contains($module, 'Db::name(self::PAYMENT_TABLE)')
+        && !str_contains($module, 'lockEditing')
+        && !str_contains($module, 'checkoutRequestVersion')
+        && !str_contains($bootstrap, 'CashierV3RechargeCheckoutRequestVersionProvider'),
+    '最终事务锁定权威余额来源并校验收款合计' => str_contains($module, 'lockSnapshotInTx')
+        && str_contains($module, 'resolveSourceSnapshot')
+        && str_contains($module, 'paymentTotal($payments)')
+        && str_contains($module, '(new CashierV3RechargeModule())->submitInTx('),
+    '充值来源不再读取服务端编辑草稿' => !str_contains($source, 'cashier_v3_recharge_checkout_request')
+        && !str_contains($source, 'captureRechargePreparationInTx'),
+    '空上下文仅由充值最终快照放行' => str_contains($contextPolicy, "is_array(\$payload['checkoutSnapshot'] ?? null)")
+        && str_contains($module, "'allows_empty_contexts' => true"),
+    '历史数据库升级文件原样保留' => str_contains($migration, 'eb_cashier_v3_recharge_checkout_request')
+        && str_contains($migration, 'eb_cashier_v3_recharge_checkout_payment_draft'),
 ];
 
 $failed = 0;

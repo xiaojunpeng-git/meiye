@@ -2522,14 +2522,6 @@ function operatorFeedback(detail, conflictText) {
   const fallbackMessage = detail.feedback?.message || detail.message || conflictText
 
   if (status === 'result_unknown' || code === 'COMMAND_RESULT_UNKNOWN') {
-    if (action === 'prepare-recharge-checkout') {
-      return {
-        kind: 'error',
-        title: '收款准备未完成',
-        message: '本次尚未进入收款，也未扣款。请核对充值金额后，再点“下一步：收款信息”重试。',
-        persistent: true
-      }
-    }
     return {
       kind: 'error',
       title: '正在确认操作结果',
@@ -2600,9 +2592,8 @@ async function handleUiResult(event) {
     'member-detail': 'cashier-v3:open-member-detail',
     'room-detail': 'cashier-v3:open-room-detail'
   }
-  // V3 收银台已经使用 prepare-recharge-checkout + CashierCheckoutOverlay。
-  // Shell 只负责把准备好的充值快照交给 Workbench；非收银台页面仍保留
-  // 旧充值兼容入口，避免第一步表单误走 submit-recharge。
+  // 收银台仅将充值表单交给 Workbench 形成浏览器确认快照；
+  // 非收银台页面仍保留原充值入口，不创建充值结账草稿。
   if (canApplyUiDirective && overlayName === 'recharge') {
     if (isCashierPage.value) {
       window.dispatchEvent(new CustomEvent('cashier-v3:open-recharge', {

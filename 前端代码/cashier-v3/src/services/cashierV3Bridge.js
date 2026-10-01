@@ -2733,12 +2733,7 @@ function isCashierWorkspaceAction(action) {
   ]
   return cashierWorkspaceActions.includes(action)
     || action === 'submit-recharge'
-    || action === 'prepare-recharge-checkout'
     || action === 'prepare-recharge-debt-repayment'
-    || action === 'add-recharge-checkout-payment-method'
-    || action === 'update-recharge-checkout-payment-line'
-    || action === 'remove-recharge-checkout-payment-line'
-    || action === 'reload-recharge-checkout'
     || action === 'submit-recharge-checkout'
     || action === 'submit-recharge-debt-repayment'
     || action === 'submit-direct-gift'
@@ -2752,16 +2747,10 @@ function isCashierWorkspaceAction(action) {
  * 也不再接受单个 command.context——少传一个对象就是少校验一个版本。
  */
 function resolveCommandContexts(action, payload) {
-  // 充值结账以服务端创建的唯一草稿为准：准备时服务端直接锁定会员余额，
-  // 不读取收银工作台的页面版本，避免局部充值流程把已选会员重置为游客。
-  if (action === 'prepare-recharge-checkout') {
+  // 普通充值的确认页是浏览器快照；最终事务自行锁定会员余额与配置，
+  // 不需要服务端编辑草稿，更不能附带收银工作台展示版本。
+  if (action === 'submit-recharge-checkout' && payload.checkoutSnapshot) {
     return { invalid: false, contexts: [] }
-  }
-  if (['add-recharge-checkout-payment-method', 'update-recharge-checkout-payment-line', 'remove-recharge-checkout-payment-line', 'reload-recharge-checkout', 'submit-recharge-checkout'].includes(action)) {
-    const snapshotContexts = Array.isArray(payload.commandContexts) ? payload.commandContexts : []
-    return snapshotContexts.length
-      ? { invalid: false, contexts: distinctCommandContexts(snapshotContexts) }
-      : { invalid: true, contexts: [] }
   }
   // 服务记录作废以服务事实中已经保存的权益明细、持卡记录和次数为准，
   // 由领域事务锁定当前数据并原路退回，不携带任何页面或影子版本。
@@ -2870,10 +2859,6 @@ function resolveCommandContexts(action, payload) {
     contexts.push(buildCommandContext('checkout_request', payload.checkoutRequestId))
   }
 
-  if (payload.rechargeCheckoutRequestId) {
-    contexts.push(buildCommandContext('recharge_checkout_request', payload.rechargeCheckoutRequestId))
-  }
-
   if (['adjust-sales-order-personnel', 'refund-sales-order', 'void-sales-order', 'reopen-sales-order', 'update-sales-order-note'].includes(action)
     && payload.orderId) {
     contexts.push(buildCommandContext('sales_order', payload.orderId))
@@ -2905,11 +2890,8 @@ function resolveCommandContexts(action, payload) {
     return { invalid: false, contexts: [] }
   }
 
-  if ((action === 'submit-recharge' || action === 'prepare-recharge-checkout' || action === 'prepare-recharge-debt-repayment'
-    || action === 'add-recharge-checkout-payment-method' || action === 'update-recharge-checkout-payment-line'
-    || action === 'remove-recharge-checkout-payment-line'
+  if ((action === 'submit-recharge' || action === 'prepare-recharge-debt-repayment'
     || action === 'submit-recharge-checkout'
-    || action === 'reload-recharge-checkout'
     || action === 'submit-recharge-debt-repayment' || action === 'submit-direct-gift') && payload.memberId) {
     contexts.push(buildCommandContext('member', payload.memberId))
     if (action !== 'submit-direct-gift') contexts.push(buildCommandContext('member_balance', payload.memberId))
@@ -3652,27 +3634,18 @@ export async function requestCashierV3Action(action, payload = {}) {
   const readOnly = isReadOnlyAction(canonicalAction)
   const liveProjectReplacement = canonicalAction === 'submit-card-operation'
     && String(requestBody.operationType || '') === 'project_replacement'
-  const directCheckoutSnapshot = canonicalAction === 'submit-checkout'
-    && isRecord(requestBody.checkoutSnapshot)
-  // 充值结账是独立的服务端草稿：它只返回／更新自己的快照，绝不能把
-  // 准备失败或草稿编辑响应附带的工作台投影套回主收银页。否则已选会员会
-  // 在点击“下一步”后被游客根状态覆盖。
-  const independentRechargeCheckoutAction = [
-    'prepare-recharge-checkout',
-    'add-recharge-checkout-payment-method',
-    'update-recharge-checkout-payment-line',
-    'remove-recharge-checkout-payment-line',
-    'reload-recharge-checkout',
-    'submit-recharge-checkout'
-  ].includes(canonicalAction)
+  // 普通结账与充值的最终确认都只提交本次浏览器快照；后端事务锁定权威资源。
+  const directCheckoutSnapshot = (
+    canonicalAction === 'submit-checkout'
+    || canonicalAction === 'submit-recharge-checkout'
+  ) && isRecord(requestBody.checkoutSnapshot)
+  // 充值最终回执独立于工作台根投影，不能覆盖当前会员现场。
+  const independentRechargeCheckoutAction = canonicalAction === 'submit-recharge-checkout'
   // 欠款补交的可还金额、来源归属和并发锁全部由服务端在同一事务内读取。
   // 它不接受浏览器工作台版本，因此空 contexts 是这个命令的正常合同，
   // 不能误判为“缺少版本”后刷新整个工作台并把当前会员覆盖为游客。
   const serverLockedDebtRepaymentPreparation = [
     'prepare-debt-repayment',
-    // 充值准备也由服务端直接锁定会员余额并生成唯一草稿。空 contexts 是
-    // 正常契约，不能触发工作台恢复而把当前会员切回游客。
-    'prepare-recharge-checkout',
     'prepare-recharge-debt-repayment',
     'submit-debt-repayment'
   ].includes(canonicalAction)
@@ -3957,9 +3930,7 @@ function emitCommandResultUnknown(idempotencyKey, canonicalAction, silent, detai
   const queryResultAction = QUERY_RESULT_ACTION_BY_COMMAND[canonicalAction] || null
   const recoveryMode = CASHIER_V3_ACTION_MANIFEST[canonicalAction]?.recovery?.mode || ''
   const canRetryWithSameKey = !queryResultAction && recoveryMode === 'same_idempotency_retry'
-  const message = canonicalAction === 'prepare-recharge-checkout'
-    ? '收款准备未完成，本次尚未进入收款或扣款，请核对充值金额后重试。'
-    : canRetryWithSameKey
+  const message = canRetryWithSameKey
       ? '操作结果未知，请回到原操作重试；系统必须沿用原内容和原请求标识，不能新建请求。'
       : '操作结果未知，请查询原结果后再决定是否重试，请勿更换请求标识重复提交。'
   const unknown = {

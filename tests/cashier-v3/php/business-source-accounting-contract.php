@@ -32,7 +32,9 @@ $checks = [
         && str_contains($saleOnly, "CashierV3CheckoutBusinessSourceSelectionServices::KIND_SALE")
         && str_contains($saleOnly, '$businessSource[\'primarySourceId\'] > 0 ? $businessSource : []'),
     'payment plan snapshots configured accounting name' => str_contains($paymentPlan, 'resolveAccountingMethodSnapshot'),
-    'recharge checkout reads configured accounting names and rechecks submit' => str_contains($rechargeCheckout, 'accountingMethodMap') && str_contains($rechargeCheckout, 'resolveAccountingMethodSnapshot'),
+    'recharge snapshot defers accounting method validation to final authority' => str_contains($rechargeCheckout, 'snapshotPayments')
+        && str_contains($rechargeCheckout, '(new CashierV3RechargeModule())->submitInTx(')
+        && str_contains($recharge, 'resolveAccountingMethodSnapshot'),
     'recharge authority snapshots configured accounting name' => str_contains($recharge, 'paymentMethodNameSnapshot'),
     'editing checkout delegates business configuration projection' => str_contains($projection, 'businessConfigProjection->apply'),
     'business configuration projection exposes configured accounting names' => str_contains($businessConfigProjection, 'applyAccountingMethodNames'),

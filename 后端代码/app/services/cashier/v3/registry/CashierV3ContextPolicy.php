@@ -237,9 +237,7 @@ class CashierV3ContextPolicy
             // writes and must not be reported as Gateway projection bumps.
             $out['allows_empty_touched_result'] = true;
         }
-        // 充值结账也使用服务端锁定的唯一草稿快照：草稿上下文仍由
-        // Gateway 校验，但会员余额、台账与业绩属于领域事务内的原子写入，
-        // 不应被当成浏览器工作台的投影版本变更而触发整笔回滚。
+        // 充值最终事务独立锁定余额、来源与套餐；充值流程不再读取服务端草稿版本。
         if ($this->action === 'submit-recharge-checkout'
             && is_array($payload['checkoutSnapshot'] ?? null)) {
             $out['allows_empty_touched_result'] = true;

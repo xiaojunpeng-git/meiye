@@ -58,7 +58,6 @@ class CashierV3ResourceKindCatalog
         'staff_time_slot' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 130, 'ownership' => self::OWNERSHIP_DOMAIN],
         'checkout_request' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 140, 'ownership' => self::OWNERSHIP_DOMAIN],
         // 充值结账有自己的草稿和金额语义，不能复用销售 checkout_request。
-        'recharge_checkout_request' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 141, 'ownership' => self::OWNERSHIP_DOMAIN],
         // C1 底座：工作台与账号级查询方案可由 C1 内置 provider 负责
         'cashier_workspace' => ['scope' => CashierV3ResourceScope::TYPE_STORE, 'lock' => 150, 'ownership' => self::OWNERSHIP_C1],
         'query_preference' => ['scope' => CashierV3ResourceScope::TYPE_ACCOUNT, 'lock' => 160, 'ownership' => self::OWNERSHIP_C1],

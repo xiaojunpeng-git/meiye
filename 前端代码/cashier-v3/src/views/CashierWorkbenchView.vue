@@ -104,7 +104,6 @@ const localCheckoutBusinessSource = ref({
   rewardAmountCents: 0
 })
 const rechargeSession = ref(null)
-const rechargePreparationIdempotencyKey = ref('')
 const isRechargeSubmitting = ref(false)
 const rechargePreparationError = ref('')
 const isHangOrderOpen = ref(false)
@@ -194,15 +193,12 @@ watch(
 )
 const {
   rechargeCheckout,
-  acceptPreparedCheckout,
+  acceptLocalRechargeCheckout,
   closeRechargeCheckout,
+  changeLocalRechargeDate,
   requestRechargeCheckoutAction,
   enqueueRechargeCheckoutAction
-} = useRechargeCheckout({
-  member,
-  currentMemberId,
-  openSourceSelector: (kind) => openCheckoutBusinessSourceSelector(kind)
-})
+} = useRechargeCheckout()
 const cashierScopeIdentity = computed(() => ({
   stateContextId: state.stateContextId || '',
   storeId: currentCashierStoreId.value || '',
@@ -4476,7 +4472,6 @@ function openRecharge(event = {}) {
     }))
     return
   }
-  rechargePreparationIdempotencyKey.value = ''
   rechargePreparationError.value = ''
   // 客户来源在选会员后已由收银顶部确认。充值第一步只保存这一份浏览器
   // 快照；后续“下一步”不得再读取可能被异步根投影清掉的工具栏状态，
@@ -4493,7 +4488,6 @@ function openRecharge(event = {}) {
 
 function closeRecharge() {
   rechargeSession.value = null
-  rechargePreparationIdempotencyKey.value = ''
   rechargePreparationError.value = ''
 }
 
@@ -4525,35 +4519,21 @@ async function submitRecharge(payload = {}) {
   }
   isRechargeSubmitting.value = true
   try {
-    // 客户来源只在收银顶部选择一次。准备充值结账时将该选择和业务日期、
-    // 销售人同时冻结；结账页不再出现第二套来源选择控件。
+    // “下一步”只冻结浏览器内这一份充值资料；不得创建服务端草稿或
+    // 用工作台展示版本阻止进入收款确认。最终入账另由服务端锁定实余额。
     const businessSource = {
       primarySourceId,
       secondarySourceId,
       rewardAmountCents
     }
-    const response = await requestCashierV3Action('prepare-recharge-checkout', {
+    const prepared = acceptLocalRechargeCheckout({
       ...payload,
       memberId: payload.memberId || currentMemberId.value,
-      businessSource,
-      ...(rechargePreparationIdempotencyKey.value
-        ? { idempotencyKey: rechargePreparationIdempotencyKey.value }
-        : {})
-    })
-    const responseStatus = resultStatus(response)
-    rechargePreparationError.value = ['success', 'succeeded'].includes(responseStatus)
-      ? ''
-      : resultMessage(response, '充值收款准备失败，请核对资料后重试。')
-    if (responseStatus === 'result_unknown') {
-      rechargePreparationIdempotencyKey.value = String(response.idempotencyKey || '')
-    } else if (responseStatus === 'success' || responseStatus === 'succeeded' || responseStatus === 'failed' || responseStatus === 'conflict') {
-      rechargePreparationIdempotencyKey.value = ''
-    }
-    const prepared = acceptPreparedCheckout(response)
-    if ((responseStatus === 'success' || responseStatus === 'succeeded') && prepared) {
-      closeRecharge()
-    }
-    return response
+      businessSource
+    }, rechargeSession.value)
+    rechargePreparationError.value = prepared ? '' : '充值资料不完整，请核对后重试。'
+    if (prepared) closeRecharge()
+    return { result: { status: prepared ? 'success' : 'failed', message: rechargePreparationError.value } }
   } finally {
     isRechargeSubmitting.value = false
   }
@@ -6678,7 +6658,7 @@ async function completeCheckoutReservations() {
 }
 
 async function closeSucceededRechargeCheckoutAndRefreshWorkbench() {
-  // 充值结账是独立草稿，完成后不会携带收银主工作台投影。先冻结本次
+  // 充值确认是浏览器快照，完成后不会携带收银主工作台投影。先冻结本次
   // 会员身份；随后根工作台刷新和会员摘要查询都不能将其降级成游客。
   const completedMember = clonePlain(rechargeCheckout.value?.member || member.value || {})
   const completedMemberId = Number(
@@ -7581,6 +7561,7 @@ onBeforeUnmount(() => {
         :sales-date-max="cashierToday"
         @close="closeRechargeCheckout"
         @completed="closeSucceededRechargeCheckoutAndRefreshWorkbench"
+        @sales-date-change="changeLocalRechargeDate"
         @request="enqueueRechargeCheckoutAction"
       />
     </Teleport>

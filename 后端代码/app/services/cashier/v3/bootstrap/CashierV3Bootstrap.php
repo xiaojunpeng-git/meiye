@@ -26,7 +26,6 @@ use app\services\cashier\v3\member\CashierV3MemberModule;
 use app\services\cashier\v3\member\CashierV3DirectGiftReconciliationConsumer;
 use app\services\cashier\v3\member\CashierV3RechargeModule;
 use app\services\cashier\v3\member\CashierV3RechargeCheckoutModule;
-use app\services\cashier\v3\member\CashierV3RechargeCheckoutRequestVersionProvider;
 use app\services\cashier\v3\settlement\CashierV3RechargeDebtRepaymentServices;
 use app\services\cashier\v3\cashier\CashierV3CashierModule;
 use app\services\cashier\v3\card\CashierV3CardOperationModule;
@@ -194,10 +193,6 @@ class CashierV3Bootstrap
         $versionServices->registerProvider(
             CashierV3CheckoutRequestVersionProvider::KIND,
             new CashierV3CheckoutRequestVersionProvider()
-        );
-        $versionServices->registerProvider(
-            CashierV3RechargeCheckoutRequestVersionProvider::KIND,
-            new CashierV3RechargeCheckoutRequestVersionProvider()
         );
         $consumerRegistry = new CashierV3EventConsumerRegistry();
         $consumerRegistry->register(

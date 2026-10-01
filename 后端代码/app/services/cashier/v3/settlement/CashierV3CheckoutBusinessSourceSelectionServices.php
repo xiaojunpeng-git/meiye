@@ -17,7 +17,6 @@ use think\facade\Db;
 final class CashierV3CheckoutBusinessSourceSelectionServices
 {
     public const KIND_SALE = 'sale';
-    public const KIND_RECHARGE = 'recharge';
     private const TABLE = 'cashier_v3_checkout_business_source_selection';
 
     /** @var CashierV3BusinessConfigServices */
@@ -49,69 +48,6 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
         );
     }
 
-    public function mutateRechargeInTx(array $payload, CashierV3OperatorScope $operator, CashierV3DataScopeContext $dataScope, string $stateContextId): array
-    {
-        CashierV3TransactionGuard::assertInTransaction('checkoutBusinessSourceRecharge');
-        $requestId = trim((string)($payload['rechargeCheckoutRequestId'] ?? ''));
-        $requestVersion = (int)($payload['rechargeCheckoutRequestVersion'] ?? 0);
-        if (preg_match('/^RCR-[0-9a-f]{40}$/D', $requestId) !== 1 || $requestVersion <= 0) {
-            throw self::invalid('business_source_recharge_request_invalid', '充值结账来源选择已失效，请重新进入。');
-        }
-        $request = (array)Db::name('cashier_v3_recharge_checkout_request')
-            ->where('request_id', $requestId)
-            ->where('tenant_id', $dataScope->tenantId())
-            ->where('store_id', $operator->storeId())
-            ->where('state_context_id', $stateContextId)
-            ->where('request_version', $requestVersion)
-            ->where('request_status', 'editing')
-            ->lock(true)->find();
-        if (!$request) {
-            throw CashierV3CommandException::versionConflict('充值结账资料已变化，请刷新后重新选择来源。');
-        }
-        return $this->saveSelectionInTx(
-            self::KIND_RECHARGE,
-            $requestId,
-            $dataScope->tenantId(),
-            $operator->storeId(),
-            $operator->operatorId(),
-            $payload,
-            true
-        );
-    }
-
-    /**
-     * Freezes the source that the cashier has already selected in the toolbar
-     * when a recharge checkout is prepared.  Recharge no longer exposes a
-     * second source picker after this point, so this is the only write
-     * boundary for its attribution snapshot.
-     */
-    public function captureRechargePreparationInTx(
-        string $requestId,
-        string $tenantId,
-        int $storeId,
-        int $operatorId,
-        array $source
-    ): array {
-        CashierV3TransactionGuard::assertInTransaction('rechargeBusinessSourcePreparation');
-        $requestId = trim($requestId);
-        if (preg_match('/^RCR-[0-9a-f]{40}$/D', $requestId) !== 1
-            || $tenantId === '' || $storeId <= 0 || $operatorId <= 0) {
-            throw self::invalid('business_source_recharge_preparation_identity_invalid', '充值客户来源快照无效，请重新进入充值。');
-        }
-        return $this->saveSelectionInTx(
-            self::KIND_RECHARGE,
-            $requestId,
-            $tenantId,
-            $storeId,
-            $operatorId,
-            [
-                'primarySourceId' => (int)($source['primarySourceId'] ?? 0),
-                'secondarySourceId' => (int)($source['secondarySourceId'] ?? 0),
-                'sourceSelectionVersion' => 0,
-            ],
-            true
-        );
-    }
 
     /**
      * Locks the source selection captured by this checkout.

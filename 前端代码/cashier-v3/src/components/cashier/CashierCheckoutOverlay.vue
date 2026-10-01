@@ -251,7 +251,7 @@ const hasNonBalancePayment = computed(() => selectedPaymentLines.value.some((lin
 // zero receivable, still needs the cashier to select one settlement route.
 const requiresPaymentMethodSelection = computed(() => (
   hasSaleLines.value
-  || isRechargeCheckout.value
+  || (isRechargeCheckout.value && Number(checkoutSummary.value.receivableAmount || 0) > 0)
   || isDebtRepayment.value
   || isCardOperationUpgrade.value
 ))
@@ -316,6 +316,7 @@ const displayedPaymentSummary = computed(() => {
 // 不读取或写入服务端草稿；未结清不能进入最终确认。
 const hasPendingPaymentLineAmountDraft = computed(() => (
   props.checkout.localDraftPreview !== true
+  && props.checkout.localSnapshotPreview !== true
   && Object.keys(paymentLineAmountDrafts.value).length > 0
 ))
 const paymentAmountValidation = computed(() => {
@@ -327,6 +328,11 @@ const paymentAmountValidation = computed(() => {
   }
   if (requiresPaymentMethodSelection.value && selectedPaymentLines.value.length === 0) {
     return { state: 'invalid', message: '请至少选择一种收款方式。' }
+  }
+  // 充值的每一笔记账收款都必须为正数；合计碰巧相等也不能把 0 元
+  // 组合行带到最终确认，否则服务端会按无效收款拒绝整笔充值。
+  if (isRechargeCheckout.value && selectedPaymentLines.value.some((line) => Number(line.amount) <= 0)) {
+    return { state: 'invalid', message: '请为每种已选择的收款方式填写大于 0 的金额。' }
   }
   const delta = receivable - selected
   if (delta > 0) return { state: 'underpaid', message: `还差 ${formatMoney(delta)}` }
@@ -457,7 +463,7 @@ const checkoutRequestIdentity = computed(() => (
 // 结果未知时不再把收银员留在“查询原支付结果”按钮上。这个动作只清理
 // 当前未完成结账现场并回到空收银台；正式订单/收款事实仍由后端保留。
 const canRestartCheckout = computed(() => (
-  isUncertain.value && Boolean(checkoutRequestIdentity.value)
+  isUncertain.value && !isRechargeCheckout.value && Boolean(checkoutRequestIdentity.value)
 ))
 // 失败但未发生任何成功收款时，允许操作人直接放弃本次未完成现场。
 // 部分收款、结果未知和成功结账仍必须保留原请求，不能从这里清空。
@@ -478,7 +484,7 @@ const originalCheckoutIdempotencyKey = computed(() => (
 const showSubmissionLongRunning = computed(() => isSubmitRequested.value && submissionLongRunning.value && !isResultStep.value)
 const canQueryCheckoutResult = computed(() => (
   (isUncertain.value || isPaymentSucceededServicePending.value || showSubmissionLongRunning.value)
-  && Boolean(checkoutRequestIdentity.value)
+  && (isRechargeCheckout.value || Boolean(checkoutRequestIdentity.value))
   && Boolean(originalCheckoutIdempotencyKey.value)
 ))
 const resultTitle = computed(() => {
@@ -752,8 +758,9 @@ function scheduleSubmissionLongRunning() {
     submissionLongRunning.value = true
     submissionLongTimer = null
     // A lost submit response must not leave the operator staring at a locked
-    // button. Read the same original request once automatically; the query is
-    // read-only and can safely run while the original command is unresolved.
+    // button. Recharge replays the exact original command with the same
+    // idempotency key, so it can settle at most once even if the first HTTP
+    // response was lost; it must never create a fresh checkout identity.
     if (isRechargeCheckout.value) {
       submissionQueryTimer = window.setTimeout(() => {
         submissionQueryTimer = null
