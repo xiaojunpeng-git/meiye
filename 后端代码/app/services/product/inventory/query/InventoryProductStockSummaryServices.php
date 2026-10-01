@@ -49,6 +49,9 @@ final class InventoryProductStockSummaryServices
             $group['inventory_amount'] = $group['inventory_amount_cents'] === null
                 ? null
                 : $this->amount((int)$group['inventory_amount_cents']);
+            // Quantity-range filtering switches to product rows; keep the hidden
+            // summary value aligned with the same aggregated product amount.
+            $group['inventory_amount_total'] = $group['inventory_amount'];
             unset($group['quantity_units'], $group['inventory_amount_cents']);
         }
         unset($group);

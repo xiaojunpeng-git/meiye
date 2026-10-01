@@ -39,6 +39,8 @@ final class InventoryBatchStockQueryContract
             self::field('expire_date', '到期日', 'date', true),
             self::field('available_quantity', '数量范围', 'decimal', false, true, ['quick', 'filter', 'sort']),
             self::field('batch_balance_quantity', '批次结存数量', 'decimal', true, false, ['display', 'filter', 'sort', 'summary', 'export']),
+            // 合计金额必须由服务端在完整筛选结果上计算；该字段仅允许汇总，不能作为明细列绕过既有自定义金额字段。
+            self::field('inventory_amount_total', '库存金额合计', 'amount', false, false, ['summary'], self::PERMISSION_COST),
             self::field('batch_unit_cost', '批次单位成本', 'amount', true, false, [], self::PERMISSION_COST),
             self::field('source_order_no', '来源入库单', 'text'),
             self::field('data_quality', '数据质量', 'text', true),
@@ -149,6 +151,15 @@ final class InventoryBatchStockQueryContract
             throw new \InvalidArgumentException('inventory_cost_invalid');
         }
         return intdiv($cents, 100) . '.' . str_pad((string)($cents % 100), 2, '0', STR_PAD_LEFT);
+    }
+
+    /** Converts the server summary amount back to cents without floating-point drift. */
+    public static function amountToCents(string $amount): int
+    {
+        if (!preg_match('/^(\d+)\.(\d{2})$/D', $amount, $match)) {
+            throw new \InvalidArgumentException('inventory_cost_invalid');
+        }
+        return (int)$match[1] * 100 + (int)$match[2];
     }
 
     private static function field(

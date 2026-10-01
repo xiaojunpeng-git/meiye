@@ -71,14 +71,20 @@ final class InventoryStoreReadModelServices
         }));
         usort($items, static fn(array $a, array $b): int => [$a['product_name'], $a['product_id']] <=> [$b['product_name'], $b['product_id']]);
         $count = count($items);
-        $page = max(1, $page); $limit = max(1, min(100, $limit));
-        $items = array_slice($items, ($page - 1) * $limit, $limit);
         foreach ($items as &$item) {
             $item['available_quantity'] = $this->unitsDecimal((int)$item['quantity_units'], (int)$item['quantity_scale']);
             unset($item['quantity_units'], $item['quantity_scale']);
         }
         unset($item);
-        return ['list' => $items, 'count' => $count, 'page' => $page, 'limit' => $limit];
+        // Totals use the filtered full result before pagination, matching list permissions and keyword scope.
+        $stockSummary = (new InventoryStockSummaryTotalsServices())->totals($items, $canViewCost);
+        $page = max(1, $page); $limit = max(1, min(100, $limit));
+        $items = array_slice($items, ($page - 1) * $limit, $limit);
+        return [
+            'list' => $items, 'count' => $count, 'page' => $page, 'limit' => $limit,
+            'stockSummary' => $stockSummary,
+            'tableLayout' => InventoryStockSummaryTotalsServices::tableLayout(),
+        ];
     }
 
     public function productDetail(int $storeId, int $operatorId, int $productId, bool $canViewCost): array

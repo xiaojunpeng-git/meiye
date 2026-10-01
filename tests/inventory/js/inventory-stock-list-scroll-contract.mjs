@@ -7,7 +7,7 @@ const app = fs.readFileSync(path.join(root, '前端代码/inventory-vue3/src/App
 const styles = fs.readFileSync(path.join(root, '前端代码/inventory-vue3/src/styles.css'), 'utf8')
 
 const checks = [
-  ['滚动约束只挂载到库存查询结果卡片', app.includes(":class=\"{ 'table-card--stock-scroll': active === 'stock' }\"")],
+  ['滚动约束只在后端声明固定布局的库存查询结果卡片生效', app.includes(":class=\"{ 'table-card--stock-scroll': stockTableFixed }\"") && app.includes("active.value === 'stock' && stockTableLayout.value.fixed === true")],
   ['库存结果区具有视口高度上限', styles.includes('.table-card--stock-scroll .table-scroll { max-height: clamp(320px, calc(100vh - 360px), 680px);')],
   ['库存结果区始终显示纵向滚动轨道', styles.includes('overflow-y: scroll;') && styles.includes('scrollbar-gutter: stable;')],
   ['库存表头在滚动时固定', styles.includes('.table-card--stock-scroll .table-scroll thead th { position: sticky;')],

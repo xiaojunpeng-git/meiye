@@ -192,6 +192,15 @@ final class InventoryBatchStockQueryProvider
                     )
                 )
                 : null,
+            // Internal summary-only value: the UQ executor aggregates it after permission and filters.
+            'inventory_amount_total' => $scope->canViewCost()
+                ? InventoryBatchStockQueryContract::centsToAmount(
+                    intdiv(
+                        (int)$row['balance_quantity_units'] * (int)$row['unit_cost_cents'],
+                        10 ** $scale
+                    )
+                )
+                : null,
             'source_order_no' => (string)$row['source_order_no'],
             'data_quality' => (string)$row['data_quality'],
         ];

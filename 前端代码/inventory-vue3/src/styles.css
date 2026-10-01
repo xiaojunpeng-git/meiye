@@ -49,6 +49,7 @@ button { cursor: pointer; }
 /* 库存快照最多返回整批规格；限制结果区高度并固定表头，避免用户只能依赖整页滚动寻找后续记录。 */
 .table-card--stock-scroll .table-scroll { max-height: clamp(320px, calc(100vh - 360px), 680px); overflow-y: scroll; scrollbar-gutter: stable; scrollbar-color: #91aac4 #eef3f8; scrollbar-width: thin; overscroll-behavior: contain; }
 .table-card--stock-scroll .table-scroll thead th { position: sticky; z-index: 1; top: 0; }
+.table-card--stock-scroll .table-summary-row td { position: sticky; z-index: 1; top: 43px; background: #f3f7fb; color: #1f5f8b; font-weight: 600; }
 .table-card--stock-scroll .table-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
 .table-card--stock-scroll .table-scroll::-webkit-scrollbar-track { background: #eef3f8; }
 .table-card--stock-scroll .table-scroll::-webkit-scrollbar-thumb { border: 2px solid #eef3f8; border-radius: 999px; background: #91aac4; }

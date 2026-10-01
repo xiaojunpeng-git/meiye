@@ -35,11 +35,17 @@ final class InventoryPlatformHqReadModelServices
             return $keyword === '' || str_contains(mb_strtolower(implode(' ', [(string)$row['product_name'], (string)$row['product_code'], (string)$row['barcode']])), $keyword);
         }));
         usort($items, static fn(array $a, array $b): int => [$a['product_name'], $a['product_id']] <=> [$b['product_name'], $b['product_id']]);
-        $page = max(1, $page); $limit = max(1, min(100, $limit)); $count = count($items);
-        $items = array_slice($items, ($page - 1) * $limit, $limit);
         foreach ($items as &$item) { $item['available_quantity'] = $this->unitsDecimal((int)$item['quantity_units'], (int)$item['quantity_scale']); unset($item['quantity_units'], $item['quantity_scale']); }
         unset($item);
-        return ['list' => $items, 'count' => $count, 'page' => $page, 'limit' => $limit];
+        // Headquarters totals follow the same filtered full-result contract as store inventory.
+        $stockSummary = (new InventoryStockSummaryTotalsServices())->totals($items, $canViewCost);
+        $page = max(1, $page); $limit = max(1, min(100, $limit)); $count = count($items);
+        $items = array_slice($items, ($page - 1) * $limit, $limit);
+        return [
+            'list' => $items, 'count' => $count, 'page' => $page, 'limit' => $limit,
+            'stockSummary' => $stockSummary,
+            'tableLayout' => InventoryStockSummaryTotalsServices::tableLayout(),
+        ];
     }
 
     public function productDetail(array $adminInfo, int $locationId, int $productId): array

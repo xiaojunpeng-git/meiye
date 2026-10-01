@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\services\product\inventory\query;
 
+use app\services\product\inventory\InventoryStockSummaryTotalsServices;
 use app\services\query\UnifiedQueryCustomFieldKeyCollector;
 use app\services\query\UnifiedQueryCustomFieldServices;
 use app\services\query\UnifiedQueryException;
@@ -44,6 +45,9 @@ final class InventoryBatchStockUnifiedQueryProvider implements UnifiedQueryProvi
 
     public function query(array $context, array $payload): array
     {
+        // The first result row is a mandatory report total. Inject these fixed
+        // summaries server-side so browser preferences cannot omit or recalculate them.
+        $payload = $this->withStockSummaries($payload, $context);
         $payload['pageCode'] = $this->pageCode();
         $definitions = $this->customDefinitions($context, $payload);
         $plan = $this->execution->validatedPlan(
@@ -57,6 +61,8 @@ final class InventoryBatchStockUnifiedQueryProvider implements UnifiedQueryProvi
             $this->payloadFromPlan($plan),
             (array)$plan['custom_definitions']
         );
+        $canViewCost = in_array(InventoryBatchStockQueryContract::PERMISSION_COST, (array)($context['permissions'] ?? []), true);
+        $amount = $canViewCost ? ($result['summaries']['inventory_amount_total:sum'] ?? '0.00') : null;
         return [
             'records' => $result['rows'],
             'total' => (int)$result['pagination']['total'],
@@ -65,6 +71,11 @@ final class InventoryBatchStockUnifiedQueryProvider implements UnifiedQueryProvi
             'isLoading' => false,
             'querySettings' => $this->preferences->load($context, $this->pageCode()),
             'summaries' => $result['summaries'],
+            'stockSummary' => [
+                'available_quantity' => (string)($result['summaries']['batch_balance_quantity:sum'] ?? '0'),
+                'inventory_amount_cents' => $amount === null ? null : InventoryBatchStockQueryContract::amountToCents((string)$amount),
+            ],
+            'tableLayout' => InventoryStockSummaryTotalsServices::tableLayout(),
             'groups' => $result['groups'],
             'queryCutoffDate' => $result['queryCutoffDate'],
             'dataAsOf' => $result['dataAsOf'],
@@ -73,6 +84,29 @@ final class InventoryBatchStockUnifiedQueryProvider implements UnifiedQueryProvi
             'consistencyFingerprint' => $result['consistencyFingerprint'],
             'security' => $result['security'],
         ];
+    }
+
+    /** Adds mandatory full-result totals while retaining optional user summaries. */
+    private function withStockSummaries(array $payload, array $context): array
+    {
+        $summaries = is_array($payload['summaries'] ?? null) ? $payload['summaries'] : [];
+        $required = [['fieldKey' => 'batch_balance_quantity', 'operator' => 'sum']];
+        if (in_array(InventoryBatchStockQueryContract::PERMISSION_COST, (array)($context['permissions'] ?? []), true)) {
+            $required[] = ['fieldKey' => 'inventory_amount_total', 'operator' => 'sum'];
+        }
+        $seen = [];
+        foreach ($summaries as $summary) {
+            if (!is_array($summary)) continue;
+            $field = (string)($summary['fieldKey'] ?? $summary['field_key'] ?? $summary['field'] ?? '');
+            $operator = (string)($summary['operator'] ?? $summary['aggregation'] ?? '');
+            $seen[$field . ':' . $operator] = true;
+        }
+        foreach ($required as $summary) {
+            $key = $summary['fieldKey'] . ':' . $summary['operator'];
+            if (!isset($seen[$key])) $summaries[] = $summary;
+        }
+        $payload['summaries'] = $summaries;
+        return $payload;
     }
 
     public function executeFrozenPlan(

@@ -81,6 +81,8 @@ const statusFocus = ref('')
 const remoteRows = ref([])
 const sourceRows = ref([])
 const remoteTotal = ref(0)
+const stockSummary = ref({ available_quantity: '0', inventory_amount_cents: null })
+const stockTableLayout = ref({ fixed: false, summaryRow: false })
 const listLoading = ref(false)
 const listError = ref('')
 const listDateRange = ref(null)
@@ -478,6 +480,13 @@ const currentRows = computed(() => {
   // preserves the source-row identity used by detail and edit actions.
   return remoteRows.value
 })
+const stockTableFixed = computed(() => active.value === 'stock' && stockTableLayout.value.fixed === true)
+const stockSummaryRow = computed(() => [
+  '合计',
+  '-',
+  text(stockSummary.value.available_quantity, '0'),
+  integerCentsMoney(stockSummary.value.inventory_amount_cents),
+])
 const analysisBuckets = computed(() => activeStatisticsTab.value === 'expiry'
   ? batchAnalysis.value.expiry_buckets
   : batchAnalysis.value.age_buckets)
@@ -877,6 +886,13 @@ function centsMoney(value) {
   return Number.isFinite(cents) ? money(cents / 100) : '-'
 }
 
+// 合计金额沿用后端分精度，只在页面按统一报表规则四舍五入为整数元。
+function integerCentsMoney(value) {
+  if (value === null || value === undefined || value === '') return '-'
+  const cents = Number(value)
+  return Number.isFinite(cents) ? `¥${Math.round(cents / 100)}` : '-'
+}
+
 function operationTime(value) {
   const seconds = Number(value)
   return Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000).toLocaleString() : '-'
@@ -1083,6 +1099,16 @@ async function loadCurrentList(unifiedQuery = null) {
     sourceRows.value = displayRows
     remoteRows.value = displayRows.map((row) => mapApiRow(active.value, row))
     remoteTotal.value = active.value === 'stock' ? displayRows.length : Number(response?.total ?? response?.count ?? list.length)
+    if (active.value === 'stock') {
+      // The server total covers the complete filtered result and already applies
+      // the same permission scope as the list; never recompute it from browser rows.
+      stockSummary.value = response?.stockSummary && typeof response.stockSummary === 'object'
+        ? response.stockSummary
+        : { available_quantity: '0', inventory_amount_cents: null }
+      stockTableLayout.value = response?.tableLayout && typeof response.tableLayout === 'object'
+        ? response.tableLayout
+        : { fixed: false, summaryRow: false }
+    }
     listDateRange.value = active.value === 'usage' && response?.from && response?.to
       ? { from: response.from, to: response.to }
       : null
@@ -1093,6 +1119,8 @@ async function loadCurrentList(unifiedQuery = null) {
     sourceRows.value = []
     remoteRows.value = []
     remoteTotal.value = 0
+    stockSummary.value = { available_quantity: '0', inventory_amount_cents: null }
+    stockTableLayout.value = { fixed: false, summaryRow: false }
     listError.value = error instanceof Error ? error.message : '库存数据加载失败。'
   } finally {
     listLoading.value = false
@@ -1576,7 +1604,7 @@ onBeforeUnmount(() => {
             <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
             <button class="primary-button" :disabled="listLoading || (platformFilterRequiresHqLocation && !platformHqLocationId) || (platformUsageRequiresStore && !platformUsageStoreId)" @click="loadCurrentList">{{ listLoading ? '查询中' : '查询' }}</button>
           </section>
-          <section class="content-card table-card" :class="{ 'table-card--stock-scroll': active === 'stock' }"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div><button v-if="['store', 'platform'].includes(mode) && ['inbound', 'outbound'].includes(active)" class="text-button" @click="openEditor('import')">导入</button><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else class="table-scroll"><table><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="cellIndex === row.length - 2 && active === 'inbound'" class="state-tag">{{ cell }}</span><span v-else-if="cellIndex === row.length - 1 && ['outbound', 'count', 'request', 'transfer', 'usage', 'import'].includes(active)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'transfer'"><button class="text-button" @click="openTransferDetail(sourceRows[index])">查看</button><button v-if="sourceRows[index].can_dispatch" class="text-button" @click="runTransferAction('dispatch', sourceRows[index])">发货</button><button v-if="sourceRows[index].can_receive" class="text-button" @click="runTransferAction('receive', sourceRows[index])">收货</button><button v-if="sourceRows[index].can_cancel" class="text-button" @click="runTransferAction('cancel', sourceRows[index])">取消</button><button v-if="sourceRows[index].can_reverse" class="text-button" @click="runTransferAction('reverse', sourceRows[index])">作废</button></template><template v-else-if="active === 'request'"><button class="text-button" @click="openRequestDetail(sourceRows[index])">查看</button><button v-if="sourceRows[index].can_edit" class="text-button" @click="openRequestEditor(sourceRows[index])">编辑</button><button v-if="sourceRows[index].can_cancel" class="text-button" @click="runDocumentAction('cancelRequest', sourceRows[index], 'request')">取消</button><button v-if="sourceRows[index].can_terminate" class="text-button" @click="runDocumentAction('terminateRequest', sourceRows[index], 'request')">终止剩余</button></template><template v-else-if="['inbound', 'outbound'].includes(active)"><button class="text-button" @click="active === 'inbound' ? openInboundDetail(sourceRows[index]) : openOutboundDetail(sourceRows[index])">查看</button><button v-if="active === 'inbound'" class="text-button" @click="openInboundOutboundDetails(sourceRows[index])">出库明细</button><button v-if="sourceRows[index].can_void" class="text-button" @click="runDocumentAction('void', sourceRows[index], active)">作废</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><template v-else><button class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">查看</button><button v-if="active === 'count' && Number(sourceRows[index]?.draft_id || 0) > 0" class="text-button text-button--danger" :disabled="countDraftDeleteBusy" @click="requestDeleteCountDraft(sourceRows[index])">删除</button></template></td></tr></tbody></table></div></section>
+          <section class="content-card table-card" :class="{ 'table-card--stock-scroll': stockTableFixed }"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div><button v-if="['store', 'platform'].includes(mode) && ['inbound', 'outbound'].includes(active)" class="text-button" @click="openEditor('import')">导入</button><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else class="table-scroll"><table><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="active === 'stock' && stockTableLayout.summaryRow === true && !listLoading && currentRows.length" class="table-summary-row"><td v-for="(cell, cellIndex) in stockSummaryRow" :key="`stock-summary-${cellIndex}`">{{ cell }}</td><td>-</td></tr><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="cellIndex === row.length - 2 && active === 'inbound'" class="state-tag">{{ cell }}</span><span v-else-if="cellIndex === row.length - 1 && ['outbound', 'count', 'request', 'transfer', 'usage', 'import'].includes(active)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'transfer'"><button class="text-button" @click="openTransferDetail(sourceRows[index])">查看</button><button v-if="sourceRows[index].can_dispatch" class="text-button" @click="runTransferAction('dispatch', sourceRows[index])">发货</button><button v-if="sourceRows[index].can_receive" class="text-button" @click="runTransferAction('receive', sourceRows[index])">收货</button><button v-if="sourceRows[index].can_cancel" class="text-button" @click="runTransferAction('cancel', sourceRows[index])">取消</button><button v-if="sourceRows[index].can_reverse" class="text-button" @click="runTransferAction('reverse', sourceRows[index])">作废</button></template><template v-else-if="active === 'request'"><button class="text-button" @click="openRequestDetail(sourceRows[index])">查看</button><button v-if="sourceRows[index].can_edit" class="text-button" @click="openRequestEditor(sourceRows[index])">编辑</button><button v-if="sourceRows[index].can_cancel" class="text-button" @click="runDocumentAction('cancelRequest', sourceRows[index], 'request')">取消</button><button v-if="sourceRows[index].can_terminate" class="text-button" @click="runDocumentAction('terminateRequest', sourceRows[index], 'request')">终止剩余</button></template><template v-else-if="['inbound', 'outbound'].includes(active)"><button class="text-button" @click="active === 'inbound' ? openInboundDetail(sourceRows[index]) : openOutboundDetail(sourceRows[index])">查看</button><button v-if="active === 'inbound'" class="text-button" @click="openInboundOutboundDetails(sourceRows[index])">出库明细</button><button v-if="sourceRows[index].can_void" class="text-button" @click="runDocumentAction('void', sourceRows[index], active)">作废</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><template v-else><button class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">查看</button><button v-if="active === 'count' && Number(sourceRows[index]?.draft_id || 0) > 0" class="text-button text-button--danger" :disabled="countDraftDeleteBusy" @click="requestDeleteCountDraft(sourceRows[index])">删除</button></template></td></tr></tbody></table></div></section>
         </template>
       </section>
     </main>
