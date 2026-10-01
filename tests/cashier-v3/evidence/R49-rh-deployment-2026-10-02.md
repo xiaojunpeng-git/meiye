@@ -40,3 +40,20 @@
 
 前端 HTML 启用及完整线上资源验证尚未完成，因此 push 暂未执行，不能称为本轮完全上线。
 已上线后端和新增表可继续运行，旧前端尚无取消入口。若需回滚，可恢复 backend-before.tar.gz 并重启 Swoole；仅在新审计表仍为空、没有实际取消事实时允许恢复旧查询/冲销逻辑。若已产生真实取消，不删除审计或把状态3改回0，应保留终态查询、补交拦截及历史记录，采用前向修复。
+
+## 2026-10-02 范围确认后的完成记录
+
+产品经理明确回复“确认”，授权采用“只发布本轮取消欠款，保留现网库存”的隔离发布方式。上方暂停记录保留为历史进度；以下为后续实际完成结果。
+
+隔离源码提交 cf6a90a65eb0f6ee1eeabd7b8e4ba638b44b8284，父版为已经推送的现网充值基线 14a13181a80f19ac8b88acdf176efd1dc895b625。只叠加本轮 16 文件，与验收提交 68cfc09c 的 cashier-v3 全工程及 6 个后端文件逐个比较零差异；inventory-vue3 及 shared 与现网基线比较零差异。没有切换主工作区、创建可编辑源码副本或纳入 R52/R53/R54 及其他任务改动。构建使用该固定 Git 归档与既有依赖，1986 模块，构建成功。该包明确为产品经理允许的范围隔离包，不冒充整个未裁剪的最新门店包。
+
+正式部署构建指纹：
+- HTML d34883bd5515a2825b6c3806b615ec5dc070f65ee81d7888e88d9811b028176b。
+- index-49c8b147.js：91e5358be0e6800c2e337d6c4018d736a3f9bb953f29aa6f1d1d69319cdf1aff。
+- index-a3b18cf1.css：a3b18cf186a4e230c27cbb5ce133f7aacf2f1019719ba2f1a196a1e748698c60。
+
+正式与预览旧入口指纹再次核对未被其他发布改变后，追加新资源并分别原子替换入口 HTML。旧资源未删除。两处服务器 HTML 均为上述新指纹。正式 HTTPS HTML、JS、CSS 指纹与构建一致；预览 HTTPS JS 同样一致，预览 HTML 由既有代理把 /view_cashier_v3/ 改写为 /preview-8080/view_cashier_v3/，因此传输 HTML 指纹为 9c6d91f686f1a54b8bdaaba42892e23d0bf306dfb6868dfcc02ecc757e75ce02，已核对内容引用同一新 JS/CSS，不视为构建不一致。
+
+启用后再次验证 MANIFEST_PROBLEMS=0、ACTIVATION_PROBLEMS=0；manager_count=1、pid=14326；invalid_amount=0、inconsistent_state=0、审计表0行、欠款65490行；未发现相关 Fatal/Parse/Uncaught 日志。没有在线取消真实欠款或执行真实资金操作。验证覆盖结构、登记、只读业务查询、运行状态及公开静态入口；不声称线上执行了完整写业务验收，业务验收依据为产品经理明确本地确认及回滚自测。
+
+本轮前后端上线核验完成。按已有授权，推送目标仅 Gitee origin 的 release/r49-debt-cancellation-20261002；主开发分支与 GitHub 不推送。推送后以 git ls-remote 对照本地隔离分支 ref 核验，不通过则不能声称 push 完成。
