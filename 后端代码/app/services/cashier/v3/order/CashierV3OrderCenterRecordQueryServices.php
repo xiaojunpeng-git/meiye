@@ -419,6 +419,9 @@ final class CashierV3OrderCenterRecordQueryServices
             return (int)($row['id'] ?? 0);
         }, $recharges))));
         if ($ids === []) return [];
+        // 调整销售人是追加式业务操作；最近一次成功操作的人员快照是当前归属。
+        // 纯赠金没有现金业绩事实，仍须显示已保存的人员，但不能伪造业绩事实。
+        $latest = (new CashierV3RechargePersonnelSnapshotReader())->latest($recharges, $tenantId);
         $rows = Db::name('cashier_v3_performance_fact')
             ->where('tenant_id', $tenantId)
             ->where('source_document_type', 'recharge')->where('performance_type', 'sales_performance_allocated')
@@ -438,6 +441,11 @@ final class CashierV3OrderCenterRecordQueryServices
         }
         $out = [];
         foreach ($names as $id => $people) $out[$id] = implode('、', $people);
+        // 未调整的充值沿用原销售业绩快照；调整后的人员选择覆盖旧快照。
+        foreach ($latest as $id => $people) {
+            $peopleNames = array_values(array_unique(array_column($people, 'name')));
+            $out[$id] = implode('、', $peopleNames);
+        }
         return $out;
     }
 

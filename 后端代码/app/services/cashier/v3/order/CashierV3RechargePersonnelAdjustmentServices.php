@@ -85,6 +85,25 @@ final class CashierV3RechargePersonnelAdjustmentServices
                 'allocationGroupKey' => $independent ? 'independent:' . ($positionId > 0 ? $positionId : $id) : 'normal',
             ];
         }
+        // 编辑器与列表使用同一份最近成功调整快照。纯赠金没有现金业绩事实，
+        // 但人员选择必须回显；金额只能取有效事实，不能拿手填请求冒充业绩。
+        $latest = (new CashierV3RechargePersonnelSnapshotReader())->latest([
+            ['id' => $source['rechargeId'], 'store_id' => $operator->storeId()],
+        ], $scope->tenantId());
+        if (isset($latest[$source['rechargeId']])) {
+            $adjusted = [];
+            foreach ($latest[$source['rechargeId']] as $person) {
+                $employeeId = (int)$person['employeeId'];
+                $fact = (array)($current[$employeeId] ?? []);
+                $amount = (int)($fact['amountCents'] ?? 0);
+                $adjusted[] = $person + [
+                    'amountCents' => $amount,
+                    'performanceAmountCents' => $amount,
+                    'performanceAmountLocked' => true,
+                ];
+            }
+            $current = $adjusted;
+        }
         return [
             'contractVersion' => self::CONTRACT_VERSION,
             'recordId' => (string)$source['rechargeId'], 'rechargeId' => (int)$source['rechargeId'], 'rechargeOrderNo' => (string)$source['orderNo'],

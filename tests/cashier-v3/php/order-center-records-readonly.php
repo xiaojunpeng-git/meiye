@@ -276,6 +276,18 @@ recordOk('充值订单状态和筛选读取成功的追加式退款作废操作�
     && strpos($source, "\$lifecycleOperation === 'refund'") !== false
     && strpos($source, "Db::name('user_recharge')->alias('r')") !== false
     && strpos($source, "Db::name('user_recharge')->where") === false);
+// 纯赠金没有现金业绩事实，销售人调整仍是有效的人员归属；列表取最近成功调整的冻结姓名。
+$rechargePersonnelReader = (string)file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3RechargePersonnelSnapshotReader.php');
+$rechargePersonnelEditor = (string)file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3RechargePersonnelAdjustmentServices.php');
+recordOk('充值销售人优先读取最近成功调整快照且不凭空生成现金业绩',
+    strpos($source, 'CashierV3RechargePersonnelSnapshotReader())->latest($recharges, $tenantId)') !== false
+    && strpos($rechargePersonnelReader, "->where('operation_type', 'personnel_adjustment')->where('status', 'succeeded')") !== false
+    && strpos($rechargePersonnelReader, "->field('source_order_id,store_id,request_json')->order('id', 'desc')") !== false
+    && strpos($rechargePersonnelReader, "\$person['_staff']") !== false);
+recordOk('充值销售人编辑器回显同一快照且零收款不冒充销售业绩',
+    strpos($rechargePersonnelEditor, 'CashierV3RechargePersonnelSnapshotReader())->latest([') !== false
+    && strpos($rechargePersonnelEditor, "\$amount = (int)(\$fact['amountCents'] ?? 0)") !== false
+    && strpos($rechargePersonnelEditor, "'currentSalespeople' => array_values(\$current)") !== false);
 
 $paymentLabel = new ReflectionMethod(CashierV3OrderCenterRecordQueryServices::class, 'rechargePaymentLabel');
 recordOk('充值订单组合收款展示真实方式并去重', $paymentLabel->invoke($service, [
