@@ -23,9 +23,16 @@ assert.match(
 )
 assert.match(
   workbench,
-  /if \(!salesOrderId && !checkoutRequestId\) return/,
-  '纯权益结账没有销售订单时仍必须继续预约检查'
+  /hasPersistedCheckoutRequestId = \/\^CKR-\[0-9a-f\]\{40\}\$\/\.test\(checkoutRequestId\)[\s\S]*?if \(!hasSalesOrderId && !hasPersistedCheckoutRequestId\) return/,
+  '只有成功回执中的有效销售订单或持久化结账请求才能查询预约，临时快照不得误报'
 )
+assert.match(
+  workbench,
+  /if \(!prompt\?\.required \|\| Number\(prompt\.reservationCount \|\| 0\) <= 0\) return[\s\S]*?checkoutReservationPrompt\.value =/,
+  '仅在服务端明确查到未结束预约时展示预约提示'
+)
+const inspection = workbench.match(/async function inspectCheckoutReservationsAfterSuccess\([\s\S]*?\n\}/)?.[0] || ''
+assert.doesNotMatch(inspection, /结账已成功，但未能检查当日预约|cashier-v3:ui-result/, '预约查询失败不得弹出误报')
 assert.match(workbench, /该客户有未结束的预约记录，是否结束？/, '需要展示产品确认的提示语')
 assert.match(
   workbench,

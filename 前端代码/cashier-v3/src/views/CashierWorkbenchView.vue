@@ -6587,8 +6587,9 @@ async function closeSucceededCheckoutAndRefreshWorkbench(submissionResponse = {}
 }
 
 /**
- * 只使用成功回执中的销售订单或结账请求标识查询预约。
- * 查询失败只告知“结账已完成”，不恢复旧购物车、不重试收款。
+ * 只使用成功回执中的有效销售订单或持久化结账请求标识查询预约。
+ * 直接结账的临时快照 ID 不是预约查询凭据；查询失败也不能冒充
+ * “发现未结束预约”，更不能恢复旧购物车或重试收款。
  */
 async function inspectCheckoutReservationsAfterSuccess(submissionResponse = {}, settledCheckoutAuthority = {}) {
   const submission = responseDataBlock(submissionResponse).checkoutSubmission
@@ -6600,11 +6601,13 @@ async function inspectCheckoutReservationsAfterSuccess(submissionResponse = {}, 
   ).trim()
   // 纯权益完成不会生成销售订单，但仍会生成已成功的结账请求和服务事实。
   // 两种标识都来自结账成功回执；会员、门店和日期继续由后端权威反查。
-  if (!salesOrderId && !checkoutRequestId) return
+  const hasSalesOrderId = /^[A-Za-z0-9_.:-]{1,64}$/.test(salesOrderId)
+  const hasPersistedCheckoutRequestId = /^CKR-[0-9a-f]{40}$/.test(checkoutRequestId)
+  if (!hasSalesOrderId && !hasPersistedCheckoutRequestId) return
   try {
     const result = await requestAction('query-checkout-unfinished-reservations', {
-      salesOrderId,
-      checkoutRequestId,
+      salesOrderId: hasSalesOrderId ? salesOrderId : '',
+      checkoutRequestId: hasPersistedCheckoutRequestId ? checkoutRequestId : '',
       silent: true
     })
     if (!['success', 'succeeded'].includes(resultStatus(result))) {
@@ -6627,12 +6630,6 @@ async function inspectCheckoutReservationsAfterSuccess(submissionResponse = {}, 
     }
   } catch (error) {
     console.warn('Checkout succeeded but reservation inspection was unavailable.', error)
-    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
-      detail: {
-        status: 'failed',
-        message: '结账已成功，但未能检查当日预约，请在预约页确认。'
-      }
-    }))
   }
 }
 
