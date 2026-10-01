@@ -39,13 +39,23 @@ const cashierRoleMiddleware = fs.readFileSync(
   path.join(root, '后端代码/app/http/middleware/cashier/CashierCheckRoleMiddleware.php'),
   'utf8',
 )
+const workspace = fs.readFileSync(
+  path.join(root, '前端代码/admin/src/pages/store/region/workspace/index.vue'),
+  'utf8',
+)
+
+// 门店端不再有员工个人入口覆盖；测试同时约束登录、功能授权、写入接口和预览。
+const channelEntryCheck = loginService.split('public function staffHasChannelEntry(')[1]?.split('public function employeeHasPlatformEntry(')[0] || ''
+const directFeatureCheck = featureResolver.split('private function storeV3GrantedFeatures(')[1]?.split('public function employeeStoreV3GrantedFeatures(')[0] || ''
 
 const assertions = [
   ['store-v3 eligibility is resolved through the employee store-login filter', loginService.includes('listEligibleStoreV3Staff')],
   ['a missing employee channel override inherits the assigned position rules', !loginService.includes("->where('status', 1)\n            ->where('is_del', 0)\n            ->find();\n        if (!$entry) {")],
-  ['an explicit disabled employee channel override still denies entry', loginService.includes("if ($entry && (int)($entry['status'] ?? 0) !== 1) {")],
-  ['feature resolution also inherits a missing employee channel override', featureResolver.includes("->where('is_del', 0)->find();\n            if ($entry && (int)($entry['status'] ?? 0) !== 1) {")],
-  ['role projection documents the same no-override inheritance rule', positionService.includes('无入口表时：以岗位规则为准')],
+  ['store-v3 ignores historical employee entry overrides while other channels retain their gate', channelEntryCheck.includes('if ($channel !== JobPositionPolicyServices::CHANNEL_STORE_V3) {') && channelEntryCheck.includes("if ($entry && (int)($entry['status'] ?? 0) !== 1) {")],
+  ['store-v3 feature authorization ignores historical employee entry overrides', !directFeatureCheck.includes("Db::name('staff_channel_entry')") && directFeatureCheck.includes("->where('position.status', 1)->where('position.use_store', 1)")],
+  ['employee entry writes allow only mobile, including the complete-save path', positionService.includes('if ($ch !== JobPositionPolicyServices::CHANNEL_MOBILE) {') && positionService.includes('foreach (array_keys($normalized) as $channel) {')],
+  ['employee permission preview no longer shows a separate store-v3 entry status', !workspace.includes("entryStatusText(row.staff_id, 'store_v3')") && !workspace.includes("{ channel: 'store_v3', status:")],
+  ['store-v3 eligibility and feature resolution both require an enabled position', channelEntryCheck.includes('->where($col, 1)') && directFeatureCheck.includes("->where('position.status', 1)->where('position.use_store', 1)")],
   ['store-v3 login keeps unique active tenure as a direct entry but restores a one-time organization selection ticket', cashierLogin.includes('resolveUniqueStoreV3Staff($employeeId)') && cashierLogin.includes('SELECT_TICKET_PREFIX') && cashierLogin.includes("'login_ticket'") && cashierLogin.includes("'need_select_store' => true")],
   ['login controller passes only the selection ticket and selected store back to the server', loginController.includes("['login_ticket', '']") && loginController.includes('(string)$ticket')],
   ['organization entry presents multiple data-scope stores then binds one selected store', cashierLogin.includes('organizationLoginCandidates') && cashierLogin.includes('count($organization) > 1') && cashierLogin.includes('issueSelectedStore')],

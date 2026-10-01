@@ -630,14 +630,14 @@
 
               <div class="form-section">
                 <div class="form-section-title">3. 岗位与功能入口</div>
-                <div class="permission-note"><strong>说明</strong><span>岗位决定能使用哪些功能；入口只表示能否登录对应端。这里只读预览，调整请点「编辑人员」或到岗位策略。</span></div>
+                <div class="permission-note"><strong>说明</strong><span>门店端由在岗任职与岗位权限决定；商家端仍有员工个人开关。这里只读预览，调整请点「编辑人员」或到岗位策略。</span></div>
                 <div class="permission-note"><strong>当前岗位</strong><span>{{ currentPersonTenure ? jobNamesOf(currentPersonTenure) : '无当前任职岗位' }}</span></div>
                 <div class="auth-write-box">
                   <div class="permission-note"><strong>平台后台</strong><span>{{ previewCoverText(personAuth.function_preview && personAuth.function_preview.platform) }} · {{ platformEntryText }}</span></div>
                 </div>
                 <div v-for="row in ((personAuth.function_preview && personAuth.function_preview.by_staff) || [])" :key="`fp-${row.staff_id}`" class="auth-write-box">
                   <div class="permission-note"><strong>{{ storeNameByStaffId(row.staff_id) }}</strong><span>按有效岗位计算</span></div>
-                  <div class="permission-note"><strong>Vue 3 门店端</strong><span>{{ previewCoverText(row.preview && row.preview.channels && row.preview.channels.store_v3) }} · {{ entryStatusText(row.staff_id, 'store_v3') }}</span></div>
+                  <div class="permission-note"><strong>Vue 3 门店端</strong><span>{{ previewCoverText(row.preview && row.preview.channels && row.preview.channels.store_v3) }}</span></div>
                   <div class="permission-note"><strong>商家端</strong><span>{{ previewCoverText(row.preview && row.preview.channels && row.preview.channels.mobile) }} · {{ entryStatusText(row.staff_id, 'mobile') }}</span></div>
                 </div>
                 <div v-if="!((personAuth.function_preview && personAuth.function_preview.by_staff) || []).length" class="empty-inline">暂无 Vue 3 门店端入口预览</div>
@@ -1348,7 +1348,6 @@ import {
   disableJobPositionPublish,
   saveEmployeeAuthJobs,
   saveEmployeeAuthDataScope,
-  saveEmployeeAuthEntries,
   saveEmployeeAuthTenure,
   saveOrganizationOpsStatus,
   saveStoreOpsStatus
@@ -1461,7 +1460,6 @@ export default {
       authForms: {
         platform: { admin_id: 0 },
         jobs: {},
-        entries: {},
         dataScope: { scope_mode: 'personal', org_ids: [], store_ids: [] }
       },
       rolePublishModal: {
@@ -3475,7 +3473,6 @@ export default {
       const help = (this.personAuth && this.personAuth.help) || {};
       const fallback = {
         jobs: '岗位决定能做什么功能。一人可在同一门店兼任多个岗位，功能权限按有效岗位取并集；岗位不会自动扩大数据查看范围。',
-        entries: '入口只决定能不能登录对应端。开通前须已有有效岗位覆盖该端功能，否则无法保存空入口。',
         data_scope: '数据权限由人员决定。总部可设个人/组织/门店；门店只能设个人或本店。未配置时默认只能看本人参与的数据。',
         function_preview: '功能权限预览只读展示当前岗位计算结果，请到岗位策略里调整，不要在人员上直接勾功能菜单。'
       };
@@ -3550,22 +3547,12 @@ export default {
         admin_id: plat ? Number(plat.id) : Number((this.authForms.platform && this.authForms.platform.admin_id) || 0)
       };
       const jobsMap = {};
-      const entriesMap = {};
       (this.personAuth.store_assignments || []).forEach((a) => {
         const sid = Number(a.id);
         const jobIds = ((a.job_positions || []).map((j) => Number(j.position_id || j.id || 0)).filter((x) => x > 0));
         this.$set(jobsMap, sid, jobIds);
-        const entryState = { store_v3: 0, mobile: 0 };
-        ((a.channel_entries || [])).forEach((e) => {
-          const ch = String(e.channel || '');
-          if (Object.prototype.hasOwnProperty.call(entryState, ch)) {
-            entryState[ch] = Number(e.status) === 1 ? 1 : 0;
-          }
-        });
-        this.$set(entriesMap, sid, entryState);
       });
       this.authForms.jobs = jobsMap;
-      this.authForms.entries = entriesMap;
       const hqScope = (this.personAuth.data_scopes || []).find((s) => String(s.source_type) === 'hq') || null;
       this.authForms.dataScope = {
         scope_mode: (hqScope && hqScope.scope_mode) || 'personal',
@@ -3657,19 +3644,6 @@ export default {
         store_id: Number(a.store_id),
         position_ids: positionIds,
         reason: '保存本店岗位'
-      });
-    },
-    saveStaffEntries(a) {
-      const state = this.authForms.entries[a.id] || {};
-      const entries = [
-        { channel: 'store_v3', status: Number(state.store_v3) === 1 ? 1 : 0 },
-        { channel: 'mobile', status: Number(state.mobile) === 1 ? 1 : 0 }
-      ];
-      this.resetWriteToken();
-      return this.runEmployeeAuthWrite('employee_auth_entries', saveEmployeeAuthEntries, {
-        staff_id: Number(a.id),
-        entries,
-        reason: '保存本店入口'
       });
     },
     saveDataScope() {

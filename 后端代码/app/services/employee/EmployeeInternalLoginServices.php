@@ -130,22 +130,24 @@ class EmployeeInternalLoginServices extends BaseServices
     }
 
     /**
-     * 员工在指定门店任职上是否具备某端入口（岗位入口开 + 有规则）
+     * 判断任职的岗位端口资格：门店端没有个人开关，其他渠道保留各自现行覆盖规则。
      */
     public function staffHasChannelEntry(int $staffId, string $channel): bool
     {
         if ($staffId <= 0) {
             return false;
         }
-        // 渠道入口是员工级显式覆盖，不建记录时应继承有效岗位的入口和功能规则。
-        // 只有管理员明确关闭该员工的入口，才阻止其进入门店端。
-        $entry = Db::name('staff_channel_entry')
-            ->where('staff_id', $staffId)
-            ->where('channel', $channel)
-            ->where('is_del', 0)
-            ->find();
-        if ($entry && (int)($entry['status'] ?? 0) !== 1) {
-            return false;
+        // 门店端只认在岗任职及岗位规则；历史个人入口关闭记录不再否决岗位授权。
+        // 手机端仍有独立人员开关，不能随门店端一并放开。
+        if ($channel !== JobPositionPolicyServices::CHANNEL_STORE_V3) {
+            $entry = Db::name('staff_channel_entry')
+                ->where('staff_id', $staffId)
+                ->where('channel', $channel)
+                ->where('is_del', 0)
+                ->find();
+            if ($entry && (int)($entry['status'] ?? 0) !== 1) {
+                return false;
+            }
         }
         /** @var StaffJobPositionServices $jobSvc */
         $jobSvc = app()->make(StaffJobPositionServices::class);

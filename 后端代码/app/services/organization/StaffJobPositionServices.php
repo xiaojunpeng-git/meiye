@@ -946,7 +946,8 @@ class StaffJobPositionServices extends BaseServices
     }
 
     /**
-     * 保存本店渠道入口（store_v3|mobile）；历史渠道不再参与新授权。
+     * 保存本店手机端个人入口；门店端由在岗任职及岗位规则控制，
+     * 不再允许写入第二套员工个人入口开关。
      * @return array{msg:string,data:array,replay:bool}
      */
     public function saveChannelEntries(
@@ -999,6 +1000,7 @@ class StaffJobPositionServices extends BaseServices
     }
 
     /**
+     * 只归一化商家端个人入口；旧客户端提交门店端个人开关时明确拒绝，避免假保存。
      * @return array<string,int>
      */
     public function normalizeChannelEntries(array $entries, string $source = 'hq'): array
@@ -1010,14 +1012,8 @@ class StaffJobPositionServices extends BaseServices
             }
             $ch = trim((string)($e['channel'] ?? ''));
             $st = (int)($e['status'] ?? 0) === 1 ? 1 : 0;
-            if (!in_array($ch, [
-                JobPositionPolicyServices::CHANNEL_STORE_V3,
-                JobPositionPolicyServices::CHANNEL_MOBILE,
-            ], true)) {
+            if ($ch !== JobPositionPolicyServices::CHANNEL_MOBILE) {
                 throw new AdminException('不支持的渠道入口');
-            }
-            if ($source === 'store' && $ch === JobPositionPolicyServices::CHANNEL_PLATFORM) {
-                throw new AdminException('门店不能操作平台后台入口');
             }
             $normalized[$ch] = $st;
         }
@@ -1039,6 +1035,12 @@ class StaffJobPositionServices extends BaseServices
         string $source = 'hq',
         bool $runAuthProjection = true
     ): array {
+        // 该方法也供员工完整保存直接调用，不能只在 API 归一化入口阻止旧端写回 store_v3。
+        foreach (array_keys($normalized) as $channel) {
+            if ($channel !== JobPositionPolicyServices::CHANNEL_MOBILE) {
+                throw new AdminException('不支持的渠道入口');
+            }
+        }
         $this->assertEmployee($employeeId);
         if ($staffId <= 0) {
             throw new AdminException('请指定门店任职');

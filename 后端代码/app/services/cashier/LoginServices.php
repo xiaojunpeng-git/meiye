@@ -177,7 +177,7 @@ class LoginServices extends BaseServices
             }
             $v3Features = $resolver->resolveGrantedFeatures($profile);
             if (!$v3Features) {
-                throw new AdminException('当前账号无门店端权限，请联系管理员配置岗位和门店端入口');
+                throw new AdminException('当前账号无门店端权限，请联系管理员检查任职状态和岗位权限');
             }
         }
         $token_login = 'is_staff_user_cashier_login_' . $storeStaffInfo->id . '_' . $type . '_' . $storeStaffInfo->pwd;

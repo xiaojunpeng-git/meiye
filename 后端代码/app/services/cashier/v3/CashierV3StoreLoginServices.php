@@ -74,13 +74,12 @@ class CashierV3StoreLoginServices extends BaseServices
             );
         }
 
-        // A direct tenure exists but has no V3 entry: do not silently turn it
-        // into an organization read-only session.
+        // 有任职但岗位未授权门店端时仍拒绝登录，不能借组织选店绕过任职岗位。
         $activeTenureCount = (int)Db::name('system_store_staff')
             ->where('employee_id', $employeeId)->where('status', 1)->where('is_del', 0)
             ->where('store_id', '>', 0)->count();
         if ($activeTenureCount > 0) {
-            throw new AdminException('当前任职未开通门店端入口，请联系管理员');
+            throw new AdminException('当前任职岗位未开通门店端权限，请联系管理员');
         }
 
         // 组织人员没有任职时，只能从当前数据权限推导出的门店中选一店进入；

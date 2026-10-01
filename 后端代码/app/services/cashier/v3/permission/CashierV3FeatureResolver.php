@@ -190,13 +190,8 @@ class CashierV3FeatureResolver
             if (!$staff) {
                 return [];
             }
-            $entry = Db::name('staff_channel_entry')
-                ->where('staff_id', $staffId)->where('employee_id', $employeeId)->where('store_id', $storeId)
-                ->where('channel', JobPositionPolicyServices::CHANNEL_STORE_V3)
-                ->where('is_del', 0)->find();
-            if ($entry && (int)($entry['status'] ?? 0) !== 1) {
-                return [];
-            }
+            // 门店端功能与登录资格同源：有效任职 + 岗位规则。
+            // 历史员工个人入口记录不再作为第二道否决，避免登录后权限被清空。
             $ruleRows = Db::name('staff_job_position')->alias('job')
                 ->join('position position', 'position.id = job.position_id')
                 ->join('job_position_channel_rule rule', 'rule.position_id = job.position_id')
