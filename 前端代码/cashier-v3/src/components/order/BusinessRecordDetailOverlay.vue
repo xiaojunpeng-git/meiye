@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { formatMoney } from '@/services/cashierV3Bridge'
 
 const props = defineProps({
@@ -33,6 +33,7 @@ const bonusAmount = ref('0')
 const reason = ref('')
 const pending = ref(false)
 const actionError = ref('')
+const detailBody = ref(null)
 
 const rows = computed(() => props.fields.map((field) => {
   const value = props.resolveValue(props.record, field.key)
@@ -44,6 +45,19 @@ const rows = computed(() => props.fields.map((field) => {
       : value === undefined || value === null || value === '' ? '—' : String(value)
   }
 }))
+
+// 仅补交作废操作置于详情最上方，打开弹窗即可看到表单；
+// 其余业务记录沿用原先先展示详情、再展示操作的顺序。
+const detailSectionOrder = computed(() => activeForm.value === 'supplement-void'
+  ? ['lifecycle', 'fields']
+  : ['fields', 'lifecycle'])
+
+// 补交作废从固定底栏进入；切换内容顺序后同步回到顶部，避免滚动位置仍停在原详情底部。
+async function openSupplementVoidForm() {
+  activeForm.value = 'supplement-void'
+  await nextTick()
+  if (detailBody.value) detailBody.value.scrollTop = 0
+}
 
 function validMoney(value, allowZero = false) {
   const raw = String(value ?? '').trim()
@@ -103,36 +117,39 @@ async function submitLifecycleAction() {
         <button type="button" class="business-record-detail__close" aria-label="关闭详情" @click="$emit('close')">×</button>
       </header>
 
-      <main class="business-record-detail__body">
-        <dl class="business-record-detail__grid">
-          <div v-for="row in rows" :key="row.key" :class="{ 'business-record-detail__money': row.type === 'money' }">
-            <dt>{{ row.label }}</dt>
-            <dd>
-              <button v-if="fieldActionKeys.includes(row.key)" type="button" class="business-record-detail__field-action" @click="emit('field-action', { key: row.key, record })">{{ row.displayValue }}</button>
-              <template v-else>{{ row.displayValue }}</template>
-            </dd>
-          </div>
-        </dl>
-        <section v-if="activeForm" class="business-record-detail__lifecycle">
-          <h3>{{ activeForm === 'refund' ? '充值退款并作废' : activeForm === 'supplement-void' ? '作废补交记录' : activeForm === 'gift-void' ? '作废赠送记录' : '作废充值订单' }}</h3>
-          <template v-if="activeForm === 'refund'">
-            <label>实际退款金额<input v-model.trim="cashRefundAmount" inputmode="decimal" placeholder="实际退给客户的金额" /></label>
-            <div class="business-record-detail__amount-row">
-              <label>扣回本金<input v-model.trim="principalAmount" inputmode="decimal" /></label>
-              <label>扣回赠金<input v-model.trim="bonusAmount" inputmode="decimal" /></label>
+      <main ref="detailBody" class="business-record-detail__body">
+        <template v-for="section in detailSectionOrder" :key="section">
+          <dl v-if="section === 'fields'" class="business-record-detail__grid">
+            <div v-for="row in rows" :key="row.key" :class="{ 'business-record-detail__money': row.type === 'money' }">
+              <dt>{{ row.label }}</dt>
+              <dd>
+                <button v-if="fieldActionKeys.includes(row.key)" type="button" class="business-record-detail__field-action" @click="emit('field-action', { key: row.key, record })">{{ row.displayValue }}</button>
+                <template v-else>{{ row.displayValue }}</template>
+              </dd>
             </div>
-          </template>
-          <small v-if="activeForm === 'refund'">退款成功后订单只保留查看；已发生的欠款、赠品和权益不会回退。</small>
-          <label>{{ activeForm === 'refund' ? '退款原因' : '作废原因' }}<textarea v-model.trim="reason" maxlength="255" rows="3" /></label>
-          <p v-if="actionError" role="alert">{{ actionError }}</p>
-          <div><button type="button" class="button button--text" :disabled="pending" @click="activeForm = ''">取消</button><button type="button" class="button button--primary" :disabled="pending" @click="submitLifecycleAction">确认</button></div>
-        </section>
+          </dl>
+          <section v-else-if="activeForm" class="business-record-detail__lifecycle"
+            :class="{ 'business-record-detail__lifecycle--top': activeForm === 'supplement-void' }">
+            <h3>{{ activeForm === 'refund' ? '充值退款并作废' : activeForm === 'supplement-void' ? '作废补交记录' : activeForm === 'gift-void' ? '作废赠送记录' : '作废充值订单' }}</h3>
+            <template v-if="activeForm === 'refund'">
+              <label>实际退款金额<input v-model.trim="cashRefundAmount" inputmode="decimal" placeholder="实际退给客户的金额" /></label>
+              <div class="business-record-detail__amount-row">
+                <label>扣回本金<input v-model.trim="principalAmount" inputmode="decimal" /></label>
+                <label>扣回赠金<input v-model.trim="bonusAmount" inputmode="decimal" /></label>
+              </div>
+            </template>
+            <small v-if="activeForm === 'refund'">退款成功后订单只保留查看；已发生的欠款、赠品和权益不会回退。</small>
+            <label>{{ activeForm === 'refund' ? '退款原因' : '作废原因' }}<textarea v-model.trim="reason" maxlength="255" rows="3" /></label>
+            <p v-if="actionError" role="alert">{{ actionError }}</p>
+            <div><button type="button" class="button button--text" :disabled="pending" @click="activeForm = ''">取消</button><button type="button" class="button button--primary" :disabled="pending" @click="submitLifecycleAction">确认</button></div>
+          </section>
+        </template>
       </main>
 
       <footer class="business-record-detail__footer">
         <button v-if="lifecycleActions.includes('refund')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'refund'">退款并作废</button>
         <button v-if="lifecycleActions.includes('void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'void'">作废</button>
-        <button v-if="lifecycleActions.includes('supplement-void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'supplement-void'">作废</button>
+        <button v-if="lifecycleActions.includes('supplement-void')" type="button" class="button button--secondary" :disabled="pending" @click="openSupplementVoidForm">作废</button>
         <button v-if="lifecycleActions.includes('gift-void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'gift-void'">作废</button>
         <button type="button" class="button button--primary" @click="$emit('close')">关闭</button>
       </footer>
@@ -173,6 +190,7 @@ async function submitLifecycleAction() {
 }
 
 .business-record-detail__lifecycle { display:grid; gap:12px; margin-top:18px; padding:16px; border:1px solid #dfe5ec; border-radius:6px; background:#fff; }
+.business-record-detail__lifecycle--top { margin-top:0; margin-bottom:18px; }
 .business-record-detail__lifecycle h3, .business-record-detail__lifecycle p { margin:0; }
 .business-record-detail__lifecycle label { display:grid; gap:6px; color:#475467; font-size:13px; }
 .business-record-detail__lifecycle input, .business-record-detail__lifecycle textarea { width:100%; box-sizing:border-box; padding:9px 10px; border:1px solid #cfd7e3; border-radius:5px; font:inherit; }
