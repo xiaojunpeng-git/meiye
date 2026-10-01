@@ -644,6 +644,7 @@ Route::group('storeapi', function () {
 		Route::post('v3/request/apply', 'product.inventory.InventoryStockRequest/apply')->option(['real_name' => '批次库存请货申请']);
 		Route::get('v3/request/suppliers', 'product.inventory.InventoryStockRequest/suppliers')->option(['real_name' => '批次库存请货供货方目录']);
 		Route::get('v3/request/counterparties', 'product.inventory.InventoryStockRequest/suppliers')->option(['real_name' => '批次库存请货供货方选择']);
+		Route::get('v3/request/acceptance-parties', 'product.inventory.InventoryStockRequest/acceptanceParties')->option(['real_name' => '总部请货受理方目录']);
 		Route::post('v3/request/:id/update', 'product.inventory.InventoryStockRequest/updateApplied')->option(['real_name' => '批次库存请货编辑']);
 		Route::post('v3/request/cancel/:id', 'product.inventory.InventoryStockRequest/cancel')->option(['real_name' => '批次库存请货取消']);
 		Route::post('v3/request/terminate/:id', 'product.inventory.InventoryStockRequest/terminate')->option(['real_name' => '批次库存请货终止剩余']);

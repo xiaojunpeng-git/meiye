@@ -2213,6 +2213,7 @@ Route::group('adminapi', function () {
 			Route::get('v3/hq/request/requester', 'v1.product.inventory.InventoryPlatformHqStockRequest/requester')->option(['real_name' => '平台总部请货人默认信息']);
 			Route::get('v3/hq/request/parties', 'v1.product.inventory.InventoryPlatformHqStockRequest/parties')->option(['real_name' => '平台请货方选择']);
 			Route::get('v3/hq/request/counterparties', 'v1.product.inventory.InventoryPlatformHqStockRequest/suppliers')->option(['real_name' => '平台总部请货供货方选择']);
+			Route::get('v3/hq/request/acceptance-parties', 'v1.product.inventory.InventoryPlatformHqStockRequest/acceptanceParties')->option(['real_name' => '平台总部请货受理方目录']);
 			Route::get('v3/hq/request', 'v1.product.inventory.InventoryPlatformHqStockRequest/index')->option(['real_name' => '平台总部请货单查询']);
 			Route::get('v3/hq/request/:id/detail', 'v1.product.inventory.InventoryPlatformHqStockRequest/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '平台总部请货单详情']);
 			Route::post('v3/hq/request/apply', 'v1.product.inventory.InventoryPlatformHqStockRequest/apply')->option(['real_name' => '平台总部请货申请']);

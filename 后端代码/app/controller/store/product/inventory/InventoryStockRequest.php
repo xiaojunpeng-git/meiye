@@ -13,7 +13,7 @@ final class InventoryStockRequest extends AuthController
     public function apply()
     {
         try {
-            $data = $this->request->postMore([['idempotency_key',''], ['business_date',''], ['remark',''], ['requester_name',''], ['supply_party_type',''], ['supply_party_id',0], ['lines',[]]]);
+            $data = $this->request->postMore([['idempotency_key',''], ['business_date',''], ['remark',''], ['requester_name',''], ['supply_party_type',''], ['supply_party_id',0], ['acceptance_party_id',0], ['lines',[]]]);
             return $this->success($this->services->apply((int)$this->storeId, (int)$this->storeStaffId, $data));
         } catch (\InvalidArgumentException $exception) {
             return $this->fail('请货参数不合法，请检查供货方和商品。', ['code' => $exception->getMessage()]);
@@ -26,10 +26,15 @@ final class InventoryStockRequest extends AuthController
         try { return $this->success($this->services->suppliersForStore((int)$this->storeId, (int)$this->storeStaffId)); }
         catch (\RuntimeException $exception) { return $this->fail('供货门店目录读取失败，请刷新后重试。', ['code' => $exception->getMessage()]); }
     }
+    public function acceptanceParties()
+    {
+        try { return $this->success($this->services->acceptancePartiesForStore((int)$this->storeId, (int)$this->storeStaffId)); }
+        catch (\RuntimeException $exception) { return $this->fail('受理部门目录读取失败，请刷新后重试。', ['code' => $exception->getMessage()]); }
+    }
     public function updateApplied(int $id)
     {
         try {
-            $data = $this->request->postMore([['idempotency_key',''], ['business_date',''], ['remark',''], ['requester_name',''], ['supply_party_type',''], ['supply_party_id',0], ['lines',[]]]);
+            $data = $this->request->postMore([['idempotency_key',''], ['business_date',''], ['remark',''], ['requester_name',''], ['supply_party_type',''], ['supply_party_id',0], ['acceptance_party_id',0], ['lines',[]]]);
             return $this->success($this->services->updateApplied((int)$this->storeId, (int)$this->storeStaffId, $id, $data));
         } catch (\InvalidArgumentException $exception) {
             return $this->fail('请货修改参数不合法，请检查供货方和商品。', ['code' => $exception->getMessage()]);

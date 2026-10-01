@@ -36,11 +36,17 @@ final class InventoryPlatformHqStockRequest extends AuthController
         catch (\RuntimeException $exception) { return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]); }
     }
 
+    public function acceptanceParties()
+    {
+        try { return $this->success($this->services->acceptancePartiesForHeadquarters((array)$this->adminInfo, (int)$this->request->get('hq_location_id', 0))); }
+        catch (\RuntimeException $exception) { return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]); }
+    }
+
     public function index(InventoryStockRequestQueryServices $queries)
     {
         try {
-            [$locationId, $keyword, $page, $limit, $requestPartyType, $requestPartyId, $status, $dateFrom, $dateTo] = $this->request->getMore([['hq_location_id', 0], ['keyword', ''], ['page', 1], ['limit', 20], ['request_party_type', ''], ['request_party_id', 0], ['status', ''], ['business_date_from', ''], ['business_date_to', '']], true);
-            return $this->success($queries->listForHeadquarters((array)$this->adminInfo, (int)$locationId, (string)$keyword, (int)$page, (int)$limit, (string)$requestPartyType, (int)$requestPartyId, (string)$status, (string)$dateFrom, (string)$dateTo));
+            [$locationId, $keyword, $page, $limit, $requestPartyType, $requestPartyId, $supplyPartyType, $supplyPartyId, $acceptancePartyId, $status, $dateFrom, $dateTo] = $this->request->getMore([['hq_location_id', 0], ['keyword', ''], ['page', 1], ['limit', 20], ['request_party_type', ''], ['request_party_id', 0], ['supply_party_type', ''], ['supply_party_id', 0], ['acceptance_party_id', 0], ['status', ''], ['business_date_from', ''], ['business_date_to', '']], true);
+            return $this->success($queries->listForHeadquarters((array)$this->adminInfo, (int)$locationId, (string)$keyword, (int)$page, (int)$limit, (string)$requestPartyType, (int)$requestPartyId, (string)$supplyPartyType, (int)$supplyPartyId, (int)$acceptancePartyId, (string)$status, (string)$dateFrom, (string)$dateTo));
         } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
         catch (\RuntimeException $exception) { return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]); }
     }
@@ -96,6 +102,7 @@ final class InventoryPlatformHqStockRequest extends AuthController
             'inventory_hq_location_selection_required' => '请选择要操作的总部仓。',
             'inventory_hq_location_invalid' => '总部仓状态无效，无法请货。',
             'inventory_stock_request_supplier_invalid' => '供货门店不存在或已停用。',
+            'inventory_stock_request_acceptance_party_invalid' => '请选择有效的受理部门。',
             'inventory_stock_request_sku_not_found' => '所选总部商品或规格已失效，请重新选择。',
             'inventory_stock_request_not_found' => '总部请货单不存在或不属于当前总部仓。',
             'inventory_stock_request_cancel_state_invalid' => '只有未履约请货单可以取消。',

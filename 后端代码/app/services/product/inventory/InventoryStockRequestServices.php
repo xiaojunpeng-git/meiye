@@ -28,6 +28,22 @@ final class InventoryStockRequestServices
         return $this->suppliers($scope);
     }
 
+    /**
+     * 受理部门只负责把总部请货路由给不同责任组，不代表仓库，也不能参与库存归属或扣减。
+     * 目录按租户从独立表读取，后续增减责任组不需要修改请货代码。
+     */
+    public function acceptancePartiesForStore(int $storeId, int $operatorId): array
+    {
+        return $this->acceptanceParties($this->lockScope($storeId, $operatorId));
+    }
+
+    public function acceptancePartiesForHeadquarters(array $adminInfo, int $hqLocationId): array
+    {
+        $resolved = (new InventoryHqLocationServices())->writableLocation($adminInfo, $hqLocationId);
+        $scope = (new InventoryHqLocationServices())->scope((array)$resolved['location'], (int)($resolved['access']['admin_id'] ?? 0));
+        return $this->acceptanceParties($scope);
+    }
+
     public function requestPartiesForHeadquarters(array $adminInfo, int $hqLocationId): array
     {
         $hq = new InventoryHqLocationServices();
@@ -100,6 +116,7 @@ final class InventoryStockRequestServices
     {
             $this->assertRequesterSelection($scope, $command['requesterName']);
             $supplier = $this->supplier($scope, $command);
+            $acceptanceParty = $this->acceptanceParty($scope, $command, $supplier);
             $existing = Db::name('inventory_stock_request_document')->where('tenant_id', $scope['tenantId'])->where('idempotency_key', $command['idempotencyKey'])->lock(true)->find();
             if ($existing) return $this->replay($existing, $scope, $location, $command);
             $now = $command['recordedAt'];
@@ -108,7 +125,7 @@ final class InventoryStockRequestServices
                 'request_no' => $requestNo,
                 'idempotency_key' => $command['idempotencyKey'], 'request_fingerprint' => $command['fingerprint'],
                 'tenant_id' => $scope['tenantId'], 'organization_id' => $scope['organizationId'], 'organization_path' => $scope['organizationPath'],
-                'location_id' => (int)$location['id'], 'store_id' => $scope['storeId'], 'request_party_type' => $scope['requestPartyType'], 'request_party_id' => $scope['requestPartyId'], 'request_party_name_snapshot' => $scope['requestPartyName'], 'supply_party_type' => $supplier['type'], 'supply_party_id' => $supplier['id'], 'supply_party_name_snapshot' => $supplier['name'], 'requester_name_snapshot' => $command['requesterName'], 'operator_id' => $scope['operatorId'], 'operator_name_snapshot' => $scope['operatorName'],
+                'location_id' => (int)$location['id'], 'store_id' => $scope['storeId'], 'request_party_type' => $scope['requestPartyType'], 'request_party_id' => $scope['requestPartyId'], 'request_party_name_snapshot' => $scope['requestPartyName'], 'supply_party_type' => $supplier['type'], 'supply_party_id' => $supplier['id'], 'supply_party_name_snapshot' => $supplier['name'], 'acceptance_party_id' => $acceptanceParty['id'], 'acceptance_party_name_snapshot' => $acceptanceParty['name'], 'requester_name_snapshot' => $command['requesterName'], 'operator_id' => $scope['operatorId'], 'operator_name_snapshot' => $scope['operatorName'],
                 'document_status' => 'APPLIED', 'remark' => $command['remark'], 'business_date' => $command['businessDate'],
                 'applied_at' => $now, 'recorded_at' => $now,
             ]);
@@ -116,7 +133,7 @@ final class InventoryStockRequestServices
             // a numeric domain identifier before it reaches the typed writer.
             $documentId = (int)$documentId;
             $this->insertLines($documentId, $scope, $location, $command['lines'], $now);
-            return ['request_id' => $documentId, 'request_no' => $requestNo, 'document_status' => 'APPLIED', 'request_party_type' => $scope['requestPartyType'], 'request_party_id' => $scope['requestPartyId'], 'supply_party_type' => $supplier['type'], 'supply_party_id' => $supplier['id'], 'idempotent' => false];
+            return ['request_id' => $documentId, 'request_no' => $requestNo, 'document_status' => 'APPLIED', 'request_party_type' => $scope['requestPartyType'], 'request_party_id' => $scope['requestPartyId'], 'supply_party_type' => $supplier['type'], 'supply_party_id' => $supplier['id'], 'acceptance_party_id' => $acceptanceParty['id'], 'idempotent' => false];
     }
 
     private function assertRequesterSelection(array $scope, string $name): void
@@ -275,6 +292,7 @@ final class InventoryStockRequestServices
             if ($transferId || array_filter($previousLines, static fn(array $line): bool => (int)$line['fulfilled_transfer_id'] > 0)) throw new \RuntimeException('inventory_stock_request_edit_fulfillment_started');
 
             $supplier = $this->supplier($scope, $command);
+            $acceptanceParty = $this->acceptanceParty($scope, $command, $supplier);
             $revisionNo = (int)Db::name('inventory_stock_request_revision')->where('document_id', $requestId)->max('revision_no') + 1;
             Db::name('inventory_stock_request_revision')->insert([
                 'document_id' => $requestId, 'revision_no' => $revisionNo, 'idempotency_key' => $command['idempotencyKey'],
@@ -284,7 +302,7 @@ final class InventoryStockRequestServices
             ]);
             Db::name('inventory_stock_request_document')->where('id', $requestId)->update([
                 'request_fingerprint' => $command['fingerprint'], 'supply_party_type' => $supplier['type'], 'supply_party_id' => $supplier['id'],
-                'supply_party_name_snapshot' => $supplier['name'], 'requester_name_snapshot' => $command['requesterName'], 'remark' => $command['remark'], 'business_date' => $command['businessDate'],
+                'supply_party_name_snapshot' => $supplier['name'], 'acceptance_party_id' => $acceptanceParty['id'], 'acceptance_party_name_snapshot' => $acceptanceParty['name'], 'requester_name_snapshot' => $command['requesterName'], 'remark' => $command['remark'], 'business_date' => $command['businessDate'],
             ]);
             Db::name('inventory_stock_request_line')->where('document_id', $requestId)->delete();
             $this->insertLines($requestId, $scope, $location, $command['lines'], $command['recordedAt']);
@@ -294,7 +312,7 @@ final class InventoryStockRequestServices
 
     private function normalize(array $input): array
     {
-        $required = ['idempotency_key', 'business_date', 'remark', 'requester_name', 'supply_party_type', 'supply_party_id', 'lines'];
+        $required = ['idempotency_key', 'business_date', 'remark', 'requester_name', 'supply_party_type', 'supply_party_id', 'acceptance_party_id', 'lines'];
         if (array_diff($required, array_keys($input)) || !is_array($input['lines']) || !$input['lines'] || count($input['lines']) > 100) throw new \InvalidArgumentException('inventory_stock_request_input_invalid');
         $key = trim((string)$input['idempotency_key']);
         if (preg_match('/^[A-Za-z0-9:._-]{8,96}$/D', $key) !== 1) throw new \InvalidArgumentException('inventory_stock_request_idempotency_invalid');
@@ -310,12 +328,15 @@ final class InventoryStockRequestServices
         $supplierType = strtoupper(trim((string)$input['supply_party_type']));
         $supplierId = $input['supply_party_id'];
         if (!in_array($supplierType, ['HQ', 'STORE'], true) || !is_int($supplierId) || ($supplierType === 'HQ' && $supplierId !== 0) || ($supplierType === 'STORE' && $supplierId <= 0)) throw new \InvalidArgumentException('inventory_stock_request_supplier_invalid');
+        $acceptancePartyId = $input['acceptance_party_id'];
+        // 总部供货的新单必须明确责任组；门店供货必须为 0，避免受理部门被误用成第二套仓库维度。
+        if (!is_int($acceptancePartyId) || ($supplierType === 'HQ' ? $acceptancePartyId <= 0 : $acceptancePartyId !== 0)) throw new \InvalidArgumentException('inventory_stock_request_acceptance_party_invalid');
         $requesterName = mb_substr(trim((string)$input['requester_name']), 0, 64);
         if ($requesterName === '') throw new \InvalidArgumentException('inventory_stock_request_requester_invalid');
         $requestPartyType = strtoupper(trim((string)($input['request_party_type'] ?? 'STORE'))); $requestPartyId = (int)($input['request_party_id'] ?? 0);
         if (!in_array($requestPartyType, ['HQ', 'STORE'], true) || ($requestPartyType === 'STORE' && $requestPartyId <= 0) || ($requestPartyType === 'HQ' && $requestPartyId !== 0)) throw new \InvalidArgumentException('inventory_stock_request_party_invalid');
-        $fingerprint = hash('sha256', json_encode([$date->format('Y-m-d'), trim((string)$input['remark']), $requesterName, $requestPartyType, $requestPartyId, $supplierType, $supplierId, $lines], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-        return ['idempotencyKey' => $key, 'businessDate' => $date->format('Y-m-d'), 'remark' => mb_substr(trim((string)$input['remark']), 0, 500), 'requesterName' => $requesterName, 'requestPartyType' => $requestPartyType, 'requestPartyId' => $requestPartyId, 'supplierType' => $supplierType, 'supplierId' => $supplierId, 'lines' => $lines, 'fingerprint' => $fingerprint, 'recordedAt' => time()];
+        $fingerprint = hash('sha256', json_encode([$date->format('Y-m-d'), trim((string)$input['remark']), $requesterName, $requestPartyType, $requestPartyId, $supplierType, $supplierId, $acceptancePartyId, $lines], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        return ['idempotencyKey' => $key, 'businessDate' => $date->format('Y-m-d'), 'remark' => mb_substr(trim((string)$input['remark']), 0, 500), 'requesterName' => $requesterName, 'requestPartyType' => $requestPartyType, 'requestPartyId' => $requestPartyId, 'supplierType' => $supplierType, 'supplierId' => $supplierId, 'acceptancePartyId' => $acceptancePartyId, 'lines' => $lines, 'fingerprint' => $fingerprint, 'recordedAt' => time()];
     }
 
     private function lockScope(int $storeId, int $operatorId): array
@@ -412,6 +433,26 @@ final class InventoryStockRequestServices
             $list[] = ['party_type' => 'STORE', 'party_id' => (int)$store['id'], 'name' => mb_substr((string)$store['name'], 0, 120)];
         }
         return ['list' => $list];
+    }
+
+    private function acceptanceParties(array $scope): array
+    {
+        $rows = Db::name('inventory_stock_request_acceptance_party')
+            ->where('tenant_id', (string)$scope['tenantId'])->where('status', 1)
+            ->field('id,party_code,party_name')->order('sort asc,id asc')->select()->toArray();
+        return ['list' => array_map(static fn(array $row): array => [
+            'id' => (int)$row['id'], 'code' => (string)$row['party_code'], 'name' => (string)$row['party_name'],
+        ], $rows)];
+    }
+
+    private function acceptanceParty(array $scope, array $command, array $supplier): array
+    {
+        if ((string)$supplier['type'] !== 'HQ') return ['id' => 0, 'name' => ''];
+        $row = Db::name('inventory_stock_request_acceptance_party')
+            ->where('tenant_id', (string)$scope['tenantId'])->where('id', (int)$command['acceptancePartyId'])
+            ->where('status', 1)->field('id,party_name')->lock(true)->find();
+        if (!$row || trim((string)$row['party_name']) === '') throw new \RuntimeException('inventory_stock_request_acceptance_party_invalid');
+        return ['id' => (int)$row['id'], 'name' => mb_substr((string)$row['party_name'], 0, 64)];
     }
 
     private function organizationPath(int $organizationId): string

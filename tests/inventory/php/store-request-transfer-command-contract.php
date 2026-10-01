@@ -24,10 +24,11 @@ $checks = [
 try {
     $stockCommand = normalizeCommand(new \app\services\product\inventory\InventoryStockRequestServices(), [
         'idempotency_key' => 'request-contract-20260811', 'business_date' => '2026-08-11', 'remark' => '', 'requester_name' => '测试请货人', 'request_party_type' => 'STORE', 'request_party_id' => 1,
-        'supply_party_type' => 'HQ', 'supply_party_id' => 0,
+        'supply_party_type' => 'HQ', 'supply_party_id' => 0, 'acceptance_party_id' => 1,
         'lines' => [['product_id' => 1, 'sku_id' => 2, 'sku_unique' => 'TEST-SKU', 'quantity' => '1']],
     ]);
     $checks['request normalizer accepts the controller-preserved requester'] = ($stockCommand['requesterName'] ?? '') === '测试请货人';
+    $checks['HQ supplier requires an explicit acceptance party without changing supplier authority'] = ($stockCommand['supplierType'] ?? '') === 'HQ' && ($stockCommand['acceptancePartyId'] ?? 0) === 1;
 } catch (Throwable $exception) {
     $checks['request normalizer accepts the controller-preserved requester'] = false;
 }

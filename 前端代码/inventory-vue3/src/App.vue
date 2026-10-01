@@ -32,6 +32,10 @@ const platformStoreId = ref(0)
 const platformListStoreId = ref(0)
 const platformRequestStatus = ref('')
 const platformRequestPartySelection = ref('ALL:0')
+// 受理部门是总部供货单的责任路由；筛选必须先锁定总部供货，不能替代仓库筛选。
+const platformRequestSupplyPartySelection = ref('ALL:0')
+const platformRequestAcceptancePartyId = ref(0)
+const platformRequestAcceptanceParties = ref([])
 const platformTransferFromStoreId = ref(0)
 const platformTransferToStoreId = ref(0)
 const platformTransferStatus = ref('')
@@ -185,7 +189,7 @@ const operationalQueryPages = {
   inbound: { pageCode: 'inventory_inbound', fields: [['order_sn', '入库单号'], ['order_type_name', '入库类型'], ['location_name', '入库仓/门店'], ['product_summary', '商品摘要'], ['detail_count', '入库项数', 'integer'], ['status_name', '状态'], ['business_date', '业务日期', 'date']] },
   outbound: { pageCode: 'inventory_outbound', fields: [['order_sn', '出库单号'], ['order_type_name', '出库类型'], ['location_name', '出库仓/门店'], ['product_summary', '商品摘要'], ['detail_count', '出库项数', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '业务日期', 'date']] },
   count: { pageCode: 'inventory_count', fields: [['order_sn', '盘点单号'], ['location_name', '盘点主体'], ['detail_count', '差异项', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['count_date', '盘点日期', 'date']] },
-  request: { pageCode: 'inventory_request', fields: [['order_sn', '请货单号'], ['request_party_name', '请货方'], ['supply_party_name', '供货方'], ['detail_count', '商品项数', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '申请日期', 'date']] },
+  request: { pageCode: 'inventory_request', fields: [['order_sn', '请货单号'], ['request_party_name', '请货方'], ['supply_party_name', '供货方'], ['acceptance_party_name', '受理部门'], ['detail_count', '商品项数', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '申请日期', 'date']] },
   transfer: { pageCode: 'inventory_transfer', fields: [['order_sn', '调拨单号'], ['from_party_name', '调出方'], ['to_party_name', '调入方'], ['detail_count', '商品项数', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '发起日期', 'date']] },
   usage: { pageCode: 'inventory_salon_usage', fields: [['order_sn', '业务单号'], ['operation_name', '领退类型'], ['project_name_snapshot', '关联项目'], ['detail_count', '耗材项数', 'integer'], ['operation_at', '操作时间', 'datetime'], ['status_name', '状态'], ['business_date', '业务日期', 'date'], ['remark', '备注']] },
   import: { pageCode: 'inventory_import', fields: [['source_file_name', '文件名称'], ['direction_name', '业务类型'], ['business_type', '出入库类型'], ['total_count', '数据量', 'integer'], ['success_count', '成功行数', 'integer'], ['failure_count', '失败行数', 'integer'], ['document_no', '正式单号'], ['status_name', '状态'], ['updated_at_display', '导入时间', 'datetime']] },
@@ -337,7 +341,7 @@ const pages = {
     crumb: '库存管理 / 请货管理',
     filters: ['请货状态'],
     action: '新建请货',
-    columns: ['请货单号', '请货方', '供货方', '商品项数', '操作时间', '状态']
+    columns: ['请货单号', '请货方', '供货方', '受理部门', '商品项数', '操作时间', '状态']
   },
   transfer: {
     title: '调拨管理',
@@ -451,6 +455,11 @@ const platformRequestPartySelectorOptions = computed(() => [
     type: 'STORE'
   }))
 ])
+const platformRequestSupplyPartySelectorOptions = computed(() => [
+  { key: 'ALL:0', name: '全部供货方', type: 'ALL' },
+  ...platformRequestPartySelectorOptions.value
+])
+const platformRequestUsesHeadquartersSupplier = computed(() => platformRequestSupplyPartySelection.value === 'HQ:0')
 const platformWarehouseSelectorOptions = computed(() => [
   { key: 'HQ:0', name: '总部仓', type: 'HQ' },
   ...platformStoreOptions.value.map((location) => ({ key: `STORE:${Number(location.store_id)}`, name: location.store_name_snapshot || location.store_name || `门店${location.store_id}`, type: 'STORE' }))
@@ -902,7 +911,7 @@ function mapApiRow(page, row) {
       ? [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.available_quantity), row.inventory_amount_cents !== undefined ? centsMoney(row.inventory_amount_cents) : money(row.inventory_amount)]
       : [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.batch_balance_quantity), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
     case 'count': return [text(row.order_sn), text(row.store_name_label || row.store_name || row.store_name_snapshot || row.location_name || scopeName.value), text(row.count_type || '全盘'), text(row.detail_count), centsMoney(row.change_amount_cents), text(row.count_date), operationTime(row.operation_at), countStatusName(row.status_name)]
-    case 'request': return [text(row.order_sn), text(row.request_party_name || row.request_store_name), text(row.supply_party_name || row.supply_store_name), text(row.detail_count), operationTime(row.operation_at), inventoryStatusLabel(row.status_name)]
+    case 'request': return [text(row.order_sn), text(row.request_party_name || row.request_store_name), text(row.supply_party_name || row.supply_store_name), text(row.acceptance_party_name), text(row.detail_count), operationTime(row.operation_at), inventoryStatusLabel(row.status_name)]
     case 'transfer': return [text(row.order_sn), text(row.from_party_name || row.from_store_name), text(row.to_party_name || row.to_store_name), text(row.detail_count), operationTime(row.operation_at), inventoryStatusLabel(row.status_name)]
     case 'usage': return [text(row.usage_no), '耗材明细见单据', text(row.project_name_snapshot), `${text(row.detail_count, '0')} 项`, '-', text(row.operation_type === 'RETURN' ? '退回' : '领用'), operationTime(row.operation_at), inventoryStatusLabel(row.document_status, '已完成')]
     case 'import': return [text(row.source_file_name), row.direction === 'inbound' ? '入库导入' : '出库导入', scopeName.value, `${text(row.success_count, '0')} / ${text(row.total_count, '0')} 行`, text(row.document_no || row.failure_message), text(row.status === 'SUCCEEDED' ? '成功' : row.status === 'FAILED' ? '失败' : '处理中'), text(row.updated_at ? new Date(Number(row.updated_at) * 1000).toLocaleString() : '-')]
@@ -1008,6 +1017,12 @@ async function loadCurrentList(unifiedQuery = null) {
         query.request_party_type = partyType
         query.request_party_id = Number(partyId) || 0
       }
+      const [supplyType, supplyId] = String(platformRequestSupplyPartySelection.value || 'ALL:0').split(':')
+      if (supplyType === 'HQ' || supplyType === 'STORE') {
+        query.supply_party_type = supplyType
+        query.supply_party_id = Number(supplyId) || 0
+      }
+      if (supplyType === 'HQ' && Number(platformRequestAcceptancePartyId.value) > 0) query.acceptance_party_id = Number(platformRequestAcceptancePartyId.value)
       if (platformRequestStatus.value) query.status = platformRequestStatus.value
     }
     if (mode.value === 'platform' && active.value === 'transfer') {
@@ -1242,9 +1257,22 @@ async function loadPlatformLocations() {
     }
     const [selectionType, selectionId] = String(platformListWarehouseSelection.value || 'HQ:0').split(':')
     if (selectionType === 'HQ' && Number(selectionId) > 0) platformHqLocationId.value = Number(selectionId)
+    await loadPlatformRequestAcceptanceParties()
   } catch (error) {
     platformLocations.value = []
     listError.value = error instanceof Error ? error.message : '平台仓库范围读取失败。'
+  }
+}
+
+async function loadPlatformRequestAcceptanceParties() {
+  if (mode.value !== 'platform' || Number(platformHqLocationId.value) <= 0) { platformRequestAcceptanceParties.value = []; return }
+  try {
+    const response = await platformInventoryApi.hqRequestAcceptanceParties({ hq_location_id: Number(platformHqLocationId.value) })
+    platformRequestAcceptanceParties.value = Array.isArray(response?.list) ? response.list : []
+    if (platformRequestAcceptancePartyId.value > 0 && !platformRequestAcceptanceParties.value.some((item) => Number(item.id) === Number(platformRequestAcceptancePartyId.value))) platformRequestAcceptancePartyId.value = 0
+  } catch (error) {
+    platformRequestAcceptanceParties.value = []
+    listError.value = error instanceof Error ? error.message : '受理部门目录读取失败。'
   }
 }
 
@@ -1335,9 +1363,14 @@ async function confirmRecipeAction() {
   }
 }
 
-function onModalSaved() {
+function onModalSaved(result = {}) {
   editor.value = ''
-  // 列表按原条件刷新；服务端让草稿独立于完成日期周期展示，不替用户切换筛选。
+  // 保存后的列表必须覆盖刚刚写入的业务日期；其他筛选仍保持用户当前选择。
+  // 草稿仍由服务端独立于完成日期周期展示。
+  const savedBusinessDate = String(result?.businessDate || '')
+  if (usesBusinessDatePeriod() && /^\d{4}-\d{2}-\d{2}$/.test(savedBusinessDate)) {
+    businessDateRange.value = { min: savedBusinessDate, max: savedBusinessDate }
+  }
   if (mode.value === 'platform') loadPlatformLocations().then(() => loadCurrentList())
   else loadCurrentList()
 }
@@ -1449,7 +1482,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
         <InventoryRecipeModal v-if="editor && active === 'recipe'" :recipe-id="Number(selectedDetail?.id || 0)" @close="editor = ''; selectedDetail = null" @saved="onModalSaved" />
-        <InventoryBusinessModal v-else-if="editor" :page-key="active" :modal-kind="editor" :detail="selectedDetail" :scope-name="scopeName" :default-location-name="defaultLocationName" :warehouse-options="platformLocations" :hq-location-id="platformHqLocationId" :usage-store-id="platformUsageStoreId" :mode="mode" @close="editor = ''; selectedDetail = null" @saved="onModalSaved" @start-usage-return="editor = 'usage-return'" @edit-count-draft="editor = 'count-edit'" />
+        <InventoryBusinessModal v-else-if="editor" :page-key="active" :modal-kind="editor" :detail="selectedDetail" :scope-name="scopeName" :default-location-name="defaultLocationName" :warehouse-options="platformLocations" :hq-location-id="platformHqLocationId" :usage-store-id="platformUsageStoreId" :default-business-date="todayDate()" :mode="mode" @close="editor = ''; selectedDetail = null" @saved="onModalSaved" @start-usage-return="editor = 'usage-return'" @edit-count-draft="editor = 'count-edit'" />
         <template v-else-if="active === 'overview'">
           <div class="page-heading page-heading--dashboard">
             <div><p>库存管理 / 首页</p><h1>库存首页</h1><span>{{ mode === 'platform' ? '总部仓' : scopeName }}的库存、临期、盘点与待办集中处理</span></div>
@@ -1599,7 +1632,7 @@ onBeforeUnmount(() => {
           </section>
           <section v-else-if="!(active === 'stock')" class="filter-card">
             <div class="filter-search"><Search :size="17" /><input v-model="keyword" :placeholder="`搜索${currentPage.title}记录`" @keyup.enter="loadCurrentList" /></div>
-            <template v-if="mode === 'platform' && active === 'request'"><label>请货方<InventoryStoreSelector v-model="platformRequestPartySelection" :options="platformRequestPartySelectorOptions" placeholder="全部请货方" /></label><label>请货状态<select v-model="platformRequestStatus"><option value="">全部</option><option value="APPLIED">申请中</option><option value="PARTIAL">部分调拨</option><option value="DONE">已完成</option><option value="CANCELLED">已取消</option><option value="TERMINATED">已终止</option></select></label></template>
+            <template v-if="mode === 'platform' && active === 'request'"><label>请货方<InventoryStoreSelector v-model="platformRequestPartySelection" :options="platformRequestPartySelectorOptions" placeholder="全部请货方" /></label><label>供货方<InventoryStoreSelector v-model="platformRequestSupplyPartySelection" :options="platformRequestSupplyPartySelectorOptions" placeholder="全部供货方" @update:modelValue="value => { if (value !== 'HQ:0') platformRequestAcceptancePartyId = 0 }" /></label><label v-if="platformRequestUsesHeadquartersSupplier">受理部门<select v-model.number="platformRequestAcceptancePartyId"><option :value="0">全部受理部门</option><option v-for="party in platformRequestAcceptanceParties" :key="party.id" :value="Number(party.id)">{{ party.name }}</option></select></label><label>请货状态<select v-model="platformRequestStatus"><option value="">全部</option><option value="APPLIED">申请中</option><option value="PARTIAL">部分调拨</option><option value="DONE">已完成</option><option value="CANCELLED">已取消</option><option value="TERMINATED">已终止</option></select></label></template>
             <template v-else-if="mode === 'platform' && active === 'transfer'"><label>调出方<InventoryStoreSelector v-model="platformTransferFromParty" :options="platformWarehouseSelectorOptions" placeholder="全部调出方" /></label><label>调入方<InventoryStoreSelector v-model="platformTransferToParty" :options="platformWarehouseSelectorOptions" placeholder="全部调入方" /></label><label>调拨状态<select v-model="platformTransferStatus"><option value="">全部</option><option value="DRAFT">草稿</option><option value="DISPATCHED">在途</option><option value="RECEIVED">已收货</option><option value="CANCELLED">已取消</option><option value="REVERSED">已作废</option></select></label></template>
             <label v-else-if="mode === 'platform'">{{ active === 'usage' ? '门店' : '库存仓' }}<InventoryStoreSelector v-model="platformListWarehouseSelection" :options="active === 'usage' ? platformUsageStoreSelectorOptions : platformListWarehouseOptions" :placeholder="active === 'usage' ? '选择门店' : '选择门店库存仓'" :presentation="['inbound', 'outbound', 'count', 'usage'].includes(active) ? 'dropdown' : 'modal'" /></label>
             <label v-if="!(['inbound', 'outbound'].includes(active) || (mode === 'platform' && ['request', 'transfer'].includes(active)))" v-for="filter in currentPage.filters.slice(0, 2)" :key="filter">{{ filter }}<select><option>全部</option></select></label>

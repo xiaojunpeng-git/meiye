@@ -35,6 +35,8 @@ const storeApi = createInventoryApi({
 })
 await storeApi.requestCounterparties()
 check('store request supplier directory is separate from transfer counterparties', storeCalls[0].url === '/storeapi/product/inventory/v3/request/counterparties' && storeCalls[0].options.method === 'GET')
+await storeApi.requestAcceptanceParties()
+check('store request acceptance parties use an independent maintained directory', storeCalls[1].url === '/storeapi/product/inventory/v3/request/acceptance-parties' && storeCalls[1].options.method === 'GET')
 
 const platformCalls = []
 const platformApi = createPlatformInventoryApi({
@@ -44,11 +46,23 @@ const platformApi = createPlatformInventoryApi({
   }
 })
 await platformApi.hqRequestCounterparties({ hq_location_id: 128 })
+await platformApi.hqRequestAcceptanceParties({ hq_location_id: 128 })
 await platformApi.applyHqRequest({ hq_location_id: 128, idempotency_key: 'hq-request-001' })
 check('platform request supplier directory is bound to the selected headquarters warehouse', platformCalls[0].url === '/adminapi/product/inventory/v3/hq/request/counterparties?hq_location_id=128')
-check('platform request submission uses the dedicated headquarters command and preserves its warehouse boundary', platformCalls[1].url === '/adminapi/product/inventory/v3/hq/request/apply'
-  && platformCalls[1].options.method === 'POST'
-  && JSON.parse(platformCalls[1].options.body).hq_location_id === 128)
+check('platform request acceptance parties use the selected headquarters scope', platformCalls[1].url === '/adminapi/product/inventory/v3/hq/request/acceptance-parties?hq_location_id=128')
+check('platform request submission uses the dedicated headquarters command and preserves its warehouse boundary', platformCalls[2].url === '/adminapi/product/inventory/v3/hq/request/apply'
+  && platformCalls[2].options.method === 'POST'
+  && JSON.parse(platformCalls[2].options.body).hq_location_id === 128)
+check('HQ supplier shows a required acceptance party while store suppliers clear it', modal.includes("selectedSupplyParty().type === 'HQ'")
+  && modal.includes('v-model.number="acceptancePartyId"')
+  && modal.includes("acceptance_party_id: supplier.type === 'HQ' ? Number(acceptancePartyId.value) : 0")
+  && modal.includes("if (selectedSupplyParty().type !== 'HQ') acceptancePartyId.value = 0"))
+check('request dates use the local calendar day and saved requests remain visible after returning to the list', modal.includes('function localBusinessDate()')
+  && modal.includes("emit('saved', { businessDate: requestDate.value })")
+  && app.includes("businessDateRange.value = { min: savedBusinessDate, max: savedBusinessDate }"))
+check('request management shows acceptance filter only after headquarters supplier is selected', app.includes("platformRequestUsesHeadquartersSupplier")
+  && app.includes('v-if="platformRequestUsesHeadquartersSupplier"')
+  && app.includes("if (supplyType === 'HQ' && Number(platformRequestAcceptancePartyId.value) > 0)"))
 check('platform request page is fixed to the headquarters warehouse subject',
   app.includes("['inbound', 'outbound', 'count', 'request', 'transfer'].includes(active.value)"))
 
@@ -83,7 +97,7 @@ check('store transfer binds responsibility to the current logged-in operator ins
   && modal.includes('<input v-else value="当前登录人员" disabled />')
   && modal.includes('transfer_staff_id: Number(transferStaffId.value)')
   && modal.includes('await inventoryApi.createCrossTransfer(commonPayload)')
-  && modal.includes("isPlatformHeadquarters && !transferStaffOptions.length"))
+  && modal.includes("isPlatformHeadquarters.value && !transferStaffOptions.value.length"))
 check('searchable supplier control filters options, opens without triggering a parent reload and does not allow arbitrary typed values', selector.includes('visibleOptions')
   && selector.includes("emit('update:modelValue', String(option.key || ''))")
   && selector.includes('没有可选供货方')

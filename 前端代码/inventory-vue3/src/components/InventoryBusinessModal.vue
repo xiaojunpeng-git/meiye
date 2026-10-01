@@ -17,11 +17,26 @@ const props = defineProps({
   warehouseOptions: { type: Array, default: () => [] },
   hqLocationId: { type: Number, default: 0 },
   usageStoreId: { type: Number, default: 0 },
+  defaultBusinessDate: { type: String, default: '' },
   detail: { type: Object, default: null },
   mode: { type: String, default: 'store' }
 })
 
 const emit = defineEmits(['close', 'saved', 'start-usage-return', 'edit-count-draft'])
+
+// 业务日期必须按系统的中国业务时区生成；不能依赖浏览器进程时区或 UTC ISO 日期，
+// 否则容器浏览器会默认到前一天，导致新单立即被列表的“今日”条件过滤。
+function localBusinessDate() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date())
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
+}
+
+function initialBusinessDate() {
+  return /^\d{4}-\d{2}-\d{2}$/.test(props.defaultBusinessDate) ? props.defaultBusinessDate : localBusinessDate()
+}
 
 const inboundType = ref('采购入库')
 const outboundType = ref('过期退货')
@@ -41,15 +56,15 @@ const lineTableBody = ref(null)
 const scannerVisible = ref(false)
 const scannerCode = ref('')
 const scannerLoading = ref(false)
-const inboundDate = ref(new Date().toISOString().slice(0, 10))
+const inboundDate = ref(initialBusinessDate())
 const inboundRemark = ref('')
-const outboundDate = ref(new Date().toISOString().slice(0, 10))
+const outboundDate = ref(initialBusinessDate())
 const outboundRemark = ref('')
 const countRemark = ref('')
 const countDraftId = ref(0)
 const countDraftVersion = ref(0)
 const countDraftSavedSnapshot = ref('')
-const requestDate = ref(new Date().toISOString().slice(0, 10))
+const requestDate = ref(initialBusinessDate())
 const requestRemark = ref('')
 const requesterName = ref('')
 const requestPartyOptions = ref([])
@@ -59,7 +74,10 @@ const requesterSelection = ref('')
 const supplyParties = ref([])
 const supplyPartySelection = ref('')
 const supplyPartiesLoading = ref(false)
-const transferDate = ref(new Date().toISOString().slice(0, 10))
+const acceptanceParties = ref([])
+const acceptancePartyId = ref(0)
+const acceptancePartiesLoading = ref(false)
+const transferDate = ref(initialBusinessDate())
 const transferRemark = ref('')
 const transferSourceSelection = ref('HQ:0')
 const transferCounterparties = ref([])
@@ -68,7 +86,7 @@ const incomingRequests = ref([])
 const requestDocumentId = ref(0)
 const transferStaffOptions = ref([])
 const transferStaffId = ref(0)
-const usageDate = ref(new Date().toISOString().slice(0, 10))
+const usageDate = ref(initialBusinessDate())
 const usageProjectId = ref('')
 const usageProjectName = ref('')
 const usageProjectKeyword = ref('')
@@ -153,7 +171,7 @@ const primarySubmitDisabled = computed(() => {
   if (submitting.value) return true
   if (lineEditorKeys.includes(props.pageKey) && !selectedRows.value.length) return true
   if (props.pageKey === 'usage' && (!Number(usageProjectId.value) || !usageProjectName.value.trim())) return true
-  if (props.pageKey === 'request' && (!supplyPartySelection.value || !requesterName.value.trim())) return true
+  if (props.pageKey === 'request' && (!supplyPartySelection.value || !requesterName.value.trim() || (selectedSupplyParty().type === 'HQ' && Number(acceptancePartyId.value) <= 0))) return true
   if (props.pageKey === 'transfer' && (!transferTargetSelection.value || (isPlatformHeadquarters.value && !transferStaffOptions.value.length))) return true
   return props.pageKey === 'warehouse' && (Number(warehouseStoreId.value) <= 0 || !warehouseName.value.trim())
 })
@@ -363,6 +381,7 @@ async function hydrateRequestEditor(detail) {
   requesterName.value = String(document.requester_name_snapshot || '')
   requestPartySelection.value = `${String(document.request_party_type || 'STORE')}:${Number(document.request_party_id || document.store_id || 0)}`
   supplyPartySelection.value = `${String(document.supply_party_type || 'HQ')}:${Number(document.supply_party_id || 0)}`
+  acceptancePartyId.value = Number(document.acceptance_party_id || 0)
   selectedRows.value = (Array.isArray(detail.lines) ? detail.lines : []).map((line) => ({
     product_id: Number(line.product_id), sku_id: Number(line.sku_id), sku_unique: String(line.sku_unique || ''),
     product_name: String(line.product_name_snapshot || ''), sku_name: String(line.sku_name_snapshot || ''),
@@ -370,6 +389,7 @@ async function hydrateRequestEditor(detail) {
   }))
   requestEditIdempotencyKey.value = newRequestIdempotencyKey()
   await loadSupplyParties()
+  await loadAcceptanceParties()
 }
 
 watch(() => props.detail, (detail) => { hydrateRequestEditor(detail) }, { immediate: true })
@@ -388,7 +408,7 @@ watch([() => props.detail, isCountEdit], ([detail]) => {
 
 function hydrateUsageReturn(detail) {
   if (!isUsageReturn.value || !detail?.document) return
-  usageDate.value = new Date().toISOString().slice(0, 10)
+  usageDate.value = localBusinessDate()
   usageProjectId.value = String(detail.document.project_id || '')
   usageProjectName.value = String(detail.document.project_name_snapshot || '')
   usageRemark.value = ''
@@ -529,7 +549,7 @@ async function exportCountRows() {
   countLoading.value = true; catalogError.value = ''
   try {
     const bytes = await exportCountXlsx(productRows.value)
-    saveBlob(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `盘点资料-${new Date().toISOString().slice(0, 10)}.xlsx`)
+    saveBlob(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `盘点资料-${localBusinessDate()}.xlsx`)
   } catch (error) { catalogError.value = error instanceof Error ? error.message : '盘点资料导出失败。' }
   finally { countLoading.value = false }
 }
@@ -650,6 +670,20 @@ async function loadSupplyParties() {
   } catch (error) { catalogError.value = error instanceof Error ? error.message : '供货方目录读取失败。' } finally { supplyPartiesLoading.value = false }
 }
 
+async function loadAcceptanceParties() {
+  if (props.pageKey !== 'request') return
+  if (isPlatformHeadquarters.value && Number(props.hqLocationId) <= 0) { acceptanceParties.value = []; return }
+  acceptancePartiesLoading.value = true
+  try {
+    const response = isPlatformHeadquarters.value
+      ? await platformInventoryApi.hqRequestAcceptanceParties({ hq_location_id: Number(props.hqLocationId) })
+      : await inventoryApi.requestAcceptanceParties()
+    acceptanceParties.value = Array.isArray(response?.list) ? response.list : []
+    if (acceptancePartyId.value > 0 && !acceptanceParties.value.some((item) => Number(item.id) === Number(acceptancePartyId.value))) acceptancePartyId.value = 0
+  } catch (error) { catalogError.value = error instanceof Error ? error.message : '受理部门目录读取失败。' }
+  finally { acceptancePartiesLoading.value = false }
+}
+
 async function loadRequester() {
   if (props.pageKey !== 'request' || isRequestEdit.value) return
   try {
@@ -664,7 +698,7 @@ async function loadRequester() {
   }
 }
 
-watch(() => [props.pageKey, props.mode, props.hqLocationId], () => { if (isPlatformHeadquarters.value) loadRequestParties(); else { loadSupplyParties(); loadRequester() } }, { immediate: true })
+watch(() => [props.pageKey, props.mode, props.hqLocationId], () => { if (isPlatformHeadquarters.value) loadRequestParties(); else { loadSupplyParties(); loadRequester() }; loadAcceptanceParties() }, { immediate: true })
 
 async function loadRequestParties() {
   if (props.pageKey !== 'request' || !isPlatformHeadquarters.value || Number(props.hqLocationId) <= 0) return
@@ -688,6 +722,8 @@ async function onRequestPartyChanged(value) {
 
 function onSupplyPartyChanged(value) {
   supplyPartySelection.value = String(value || '')
+  // 受理部门是总部供货的责任路由，不得残留到门店供货单，更不能改变库存主体。
+  if (selectedSupplyParty().type !== 'HQ') acceptancePartyId.value = 0
   // 已选商品的库存属于原供货方；切换后要求从新供货方库存重新选择。
   selectedRows.value = []
 }
@@ -976,7 +1012,7 @@ async function submitRequest() {
     const requestParty = (() => { const [type, rawId] = String(requestPartySelection.value || 'HQ:0').split(':', 2); return { type, id: Number(rawId || 0) } })()
     const selectedRequester = requesterOptions.value.find((item) => String(item.key) === String(requesterSelection.value))
     const payload = {
-      idempotency_key: isRequestEdit.value ? requestEditIdempotencyKey.value : requestIdempotencyKey(), business_date: requestDate.value, remark: requestRemark.value, requester_name: String(selectedRequester?.name || requesterName.value).trim(), ...(isPlatformHeadquarters.value ? { request_party_type: requestParty.type, request_party_id: requestParty.id } : {}), supply_party_type: supplier.type, supply_party_id: supplier.id,
+      idempotency_key: isRequestEdit.value ? requestEditIdempotencyKey.value : requestIdempotencyKey(), business_date: requestDate.value, remark: requestRemark.value, requester_name: String(selectedRequester?.name || requesterName.value).trim(), ...(isPlatformHeadquarters.value ? { request_party_type: requestParty.type, request_party_id: requestParty.id } : {}), supply_party_type: supplier.type, supply_party_id: supplier.id, acceptance_party_id: supplier.type === 'HQ' ? Number(acceptancePartyId.value) : 0,
       lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity }))
     }
     if (isPlatformHeadquarters.value) {
@@ -984,7 +1020,8 @@ async function submitRequest() {
       await platformInventoryApi.applyHqRequest({ ...payload, hq_location_id: Number(props.hqLocationId) })
     } else if (isRequestEdit.value) await inventoryApi.updateRequest(props.detail?.document?.id, payload)
     else await inventoryApi.applyRequest(payload)
-    emit('saved')
+    // 把实际保存的业务日期回传给列表，保证保存后用户立即看到该单据。
+    emit('saved', { businessDate: requestDate.value })
     close()
   } catch (error) {
     submitError.value = error instanceof Error ? error.message : '请货申请失败。'
@@ -1121,7 +1158,7 @@ function submitPrimaryEditor() {
               <section class="line-section"><header><div><h3>出入库流水</h3><p>仅展示当前商品最近 200 条已结算批次事实；冲销流水保留原流水编号。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>业务日期</th><th>单据号</th><th>业务类型</th><th>方向</th><th>数量</th><th>单位</th><th>来源明细</th><th>冲销关系</th><th>单位成本</th><th>发生仓库</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.movements?.length"><td colspan="11" class="modal-empty">暂无出入库流水</td></tr><tr v-for="movement in detail.movements" :key="movement.id"><td>{{ movement.business_date }}</td><td>{{ movement.order_sn }}</td><td>{{ movementTypeName(movement.source_type) }}</td><td>{{ Number(movement.direction) > 0 ? '入库' : '出库' }}</td><td>{{ formatQuantity(movement.quantity_units, movement.quantity_scale) }}</td><td>{{ movement.stock_unit || detail.product.stock_unit }}</td><td>{{ movement.source_detail_id || '-' }}</td><td>{{ Number(movement.reversal_of || 0) > 0 ? `冲销流水 #${movement.reversal_of}` : '-' }}</td><td>{{ movement.unit_cost_cents === null ? '-' : `¥${(Number(movement.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ movement.location_name }}</td><td>{{ movement.cost_amount_cents === null ? '-' : `¥${(Number(movement.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'request' && detail?.document">
-              <div class="detail-meta"><span>请货单号：<b>{{ detail.document.request_no }}</b></span><span>请货方：{{ detail.document.request_store_name || scopeName }}</span><span>供货方：{{ detail.document.supply_party_name_snapshot || '-' }}</span><span>状态：{{ detailStatus(detail.document) }}</span><span>申请日期：{{ detail.document.business_date }}</span></div>
+              <div class="detail-meta"><span>请货单号：<b>{{ detail.document.request_no }}</b></span><span>请货方：{{ detail.document.request_store_name || scopeName }}</span><span>供货方：{{ detail.document.supply_party_name_snapshot || '-' }}</span><span v-if="String(detail.document.supply_party_type) === 'HQ'">受理部门：{{ detail.document.acceptance_party_name_snapshot || '历史单据未设置' }}</span><span>状态：{{ detailStatus(detail.document) }}</span><span>申请日期：{{ detail.document.business_date }}</span></div>
               <section class="line-section"><header><div><h3>请货商品</h3><p>{{ detail.document.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>申请数量</th><th>库存单位</th></tr></thead><tbody><tr v-if="!requestDetailLines.length"><td colspan="5" class="modal-empty">该请货单没有商品明细</td></tr><tr v-for="line in requestDetailLines" :key="line.id"><td>{{ line.product_name_snapshot }}</td><td>{{ line.sku_name_snapshot || '默认规格' }}</td><td>{{ line.barcode_snapshot || '-' }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit_snapshot }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'transfer' && detail?.transfer_no">
@@ -1144,6 +1181,7 @@ function submitPrimaryEditor() {
             <section v-else-if="pageKey === 'request'" class="form-grid">
               <label class="form-grid__inline"><span class="field-label">请货方<i>*</i></span><InventoryStoreSelector v-if="isPlatformHeadquarters" v-model="requestPartySelection" :options="requestPartyOptions" placeholder="总部仓（可切换门店）" @update:modelValue="onRequestPartyChanged" /><input v-else :value="scopeName" disabled /></label>
               <label class="form-grid__inline"><span class="field-label">供货方<i>*</i></span><InventoryStoreSelector v-model="supplyPartySelection" :options="supplyParties" :loading="supplyPartiesLoading" :placeholder="isPlatformHeadquarters ? '搜索供货门店' : '搜索总部仓或供货门店'" @update:modelValue="onSupplyPartyChanged" /></label>
+              <label v-if="selectedSupplyParty().type === 'HQ'" class="form-grid__inline"><span class="field-label">受理部门<i>*</i></span><select v-model.number="acceptancePartyId" :disabled="acceptancePartiesLoading"><option :value="0" disabled>{{ acceptancePartiesLoading ? '正在读取受理部门…' : '请选择受理部门' }}</option><option v-for="party in acceptanceParties" :key="party.id" :value="Number(party.id)">{{ party.name }}</option></select></label>
               <label class="form-grid__inline"><span class="field-label">请货日期<i>*</i></span><input v-model="requestDate" type="date" /></label><label class="form-grid__inline"><span class="field-label">请货人<i>*</i></span><select v-model="requesterSelection" @change="requesterName = requesterOptions.find((item) => String(item.key) === String(requesterSelection))?.name || ''"><option value="" disabled>请选择请货人</option><option v-for="person in requesterOptions" :key="person.key" :value="person.key">{{ person.name }}{{ person.type === 'ORG_EMPLOYEE' ? '（组织直属）' : '（门店任职）' }}</option></select></label>
               <label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-model="requestRemark" placeholder="请输入备注" /></label>
             </section>
