@@ -58,6 +58,13 @@ final class InventoryStockRequestQueryServices
         $canViewCost = in_array('inventory.cost.view', (array)($access['features'] ?? []), true);
         foreach ($list as &$row) {
             $status=(string)$row['status_name'];
+            // The shortcut is only an entry to an existing transfer command: it never confirms
+            // or consumes stock. Source authority and current remaining lines are rechecked there.
+            $row['can_transfer'] = in_array($status, ['APPLIED', 'PARTIAL'], true)
+                && in_array('inventory.location.manage', (array)($access['features'] ?? []), true)
+                && ((string)$row['supply_party_type'] === 'HQ'
+                    || !empty($access['is_super_admin'])
+                    || in_array((int)$row['supply_party_id'], array_map('intval', (array)($access['store_ids'] ?? [])), true));
             $row['can_cancel']=$status==='APPLIED'; $row['can_terminate']=$status==='PARTIAL';
             if (!$canViewCost) $row['estimated_amount_cents'] = null;
             $row['status_name'] = $this->statusName($status);

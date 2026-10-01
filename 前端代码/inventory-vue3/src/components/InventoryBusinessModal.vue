@@ -79,11 +79,13 @@ const acceptancePartyId = ref(0)
 const acceptancePartiesLoading = ref(false)
 const transferDate = ref(initialBusinessDate())
 const transferRemark = ref('')
-const transferSourceSelection = ref('HQ:0')
+// The request shortcut selects the supplier as transfer source; no stock data is copied from the list.
+const transferSourceSelection = ref(props.detail?.transfer_request_id ? `${props.detail.transfer_source_type}:${Number(props.detail.transfer_source_id || 0)}` : 'HQ:0')
 const transferCounterparties = ref([])
 const transferTargetSelection = ref('')
 const incomingRequests = ref([])
 const requestDocumentId = ref(0)
+let transferRequestSeedPending = Number(props.detail?.transfer_request_id || 0) > 0
 const transferStaffOptions = ref([])
 const transferStaffId = ref(0)
 const usageDate = ref(initialBusinessDate())
@@ -729,6 +731,10 @@ function onSupplyPartyChanged(value) {
 }
 
 async function loadTransferContext() {
+  // Consume the shortcut once: a later manual source change must not restore the old request.
+  const initialRequestId = transferRequestSeedPending ? Number(props.detail?.transfer_request_id || 0) : 0
+  transferRequestSeedPending = false
+  if (initialRequestId > 0) requestDocumentId.value = initialRequestId
   try {
     const [sourceType, rawSourceId] = String(transferSourceSelection.value || 'HQ:0').split(':', 2)
     const sourceQuery = { hq_location_id: Number(props.hqLocationId), source_party_type: sourceType, source_store_id: Number(rawSourceId || 0) }
@@ -742,6 +748,13 @@ async function loadTransferContext() {
         ? await platformInventoryApi.hqCrossTransferIncomingRequests(sourceQuery)
         : await inventoryApi.crossTransferIncomingRequests()
       incomingRequests.value = Array.isArray(requests?.list) ? requests.list : []
+      // Seed once from the authoritative incoming-request endpoint. An obsolete or inaccessible
+      // request must not silently become an unrelated manual transfer.
+      if (initialRequestId > 0) {
+        if (!incomingRequests.value.some((item) => Number(item.id) === initialRequestId)) {
+          catalogError.value = '该请货单已无可调拨商品或不在当前供货权限内，请返回请货列表刷新。'
+        } else applyIncomingRequest()
+      }
     } catch (error) {
       incomingRequests.value = []
       catalogError.value = error instanceof Error ? `关联请货单读取失败：${error.message}` : '关联请货单读取失败。'
@@ -1037,6 +1050,10 @@ async function submitTransfer() {
   if (props.pageKey !== 'transfer' || !selectedRows.value.length || !['STORE', 'HQ'].includes(target.type) || (target.type === 'STORE' && target.id <= 0)) return
   submitting.value = true; submitError.value = ''
   try {
+    // A failed shortcut lookup must never submit an unrelated manual transfer.
+    if (Number(requestDocumentId.value) > 0 && !incomingRequests.value.some((item) => Number(item.id) === Number(requestDocumentId.value))) {
+      throw new Error('关联请货单已无可调拨商品或不在当前供货权限内，请返回列表刷新。')
+    }
     const commonPayload = { idempotency_key: transferIdempotencyKey(), business_date: transferDate.value, remark: transferRemark.value, target_party_type: target.type, target_store_id: target.id, request_document_id: Number(requestDocumentId.value), lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, request_line_id: Number(row.request_line_id || 0) })) }
     if (isPlatformHeadquarters.value) {
       if (Number(props.hqLocationId) <= 0) throw new Error('请选择可操作的总部仓。')

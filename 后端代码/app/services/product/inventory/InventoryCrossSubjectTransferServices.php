@@ -583,7 +583,15 @@ final class InventoryCrossSubjectTransferServices
         $storeKeys = ['idempotency_key', 'business_date', 'remark', 'target_party_type', 'target_store_id', 'request_document_id', 'lines'];
         $keys = ['idempotency_key', 'business_date', 'remark', 'source_party_type', 'source_store_id', 'target_party_type', 'target_store_id', 'request_document_id', 'lines'];
         $keysWithTransferStaff = ['idempotency_key', 'business_date', 'remark', 'source_party_type', 'source_store_id', 'target_party_type', 'target_store_id', 'request_document_id', 'transfer_staff_id', 'lines'];
-        if (!in_array(array_keys($input), [$legacyKeys, $storeKeys, $keys, $keysWithTransferStaff], true) || !is_int($input['target_store_id']) || !is_int($input['request_document_id']) || (array_key_exists('transfer_staff_id', $input) && (!is_int($input['transfer_staff_id']) || $input['transfer_staff_id'] < 0)) || !is_array($input['lines']) || !$input['lines'] || count($input['lines']) > 100) throw new \InvalidArgumentException('inventory_cross_transfer_input_invalid');
+        // JSON objects have no business-significant key order. Keep an exact
+        // field whitelist (including legacy/store contracts), but accept object
+        // spread/serializer reordering without weakening required/type checks.
+        $inputKeys = array_keys($input);
+        sort($inputKeys);
+        $allowedKeySets = [$legacyKeys, $storeKeys, $keys, $keysWithTransferStaff];
+        foreach ($allowedKeySets as &$allowedKeys) sort($allowedKeys);
+        unset($allowedKeys);
+        if (!in_array($inputKeys, $allowedKeySets, true) || !is_int($input['target_store_id']) || !is_int($input['request_document_id']) || (array_key_exists('transfer_staff_id', $input) && (!is_int($input['transfer_staff_id']) || $input['transfer_staff_id'] < 0)) || !is_array($input['lines']) || !$input['lines'] || count($input['lines']) > 100) throw new \InvalidArgumentException('inventory_cross_transfer_input_invalid');
         $sourcePartyType = strtoupper(trim((string)($input['source_party_type'] ?? 'HQ')));
         $sourceStoreId = (int)($input['source_store_id'] ?? 0);
         if (!in_array($sourcePartyType, ['STORE', 'HQ'], true) || ($sourcePartyType === 'STORE' && $sourceStoreId <= 0) || ($sourcePartyType === 'HQ' && $sourceStoreId !== 0)) throw new \InvalidArgumentException('inventory_cross_transfer_source_invalid');
@@ -595,7 +603,11 @@ final class InventoryCrossSubjectTransferServices
         if (preg_match('/^[A-Za-z0-9:._-]{8,96}$/D', $key) !== 1) throw new \InvalidArgumentException('inventory_cross_transfer_idempotency_invalid');
         $lines = [];
         foreach (array_values($input['lines']) as $index => $line) {
-            if (!is_array($line) || array_keys($line) !== ['product_id', 'sku_id', 'sku_unique', 'quantity', 'request_line_id'] || !is_int($line['product_id']) || !is_int($line['sku_id']) || !is_int($line['request_line_id']) || $line['product_id'] <= 0 || $line['sku_id'] <= 0 || $line['request_line_id'] < 0) throw new \InvalidArgumentException('inventory_cross_transfer_line_invalid');
+            // Apply the same order-independent exact schema to each detail;
+            // canonical output below still gives retries a stable fingerprint.
+            $lineKeys = is_array($line) ? array_keys($line) : [];
+            sort($lineKeys);
+            if ($lineKeys !== ['product_id', 'quantity', 'request_line_id', 'sku_id', 'sku_unique'] || !is_int($line['product_id']) || !is_int($line['sku_id']) || !is_int($line['request_line_id']) || $line['product_id'] <= 0 || $line['sku_id'] <= 0 || $line['request_line_id'] < 0) throw new \InvalidArgumentException('inventory_cross_transfer_line_invalid');
             $unique = trim((string)$line['sku_unique']); $quantity = trim((string)$line['quantity']);
             if ($unique === '' || strlen($unique) > 64 || preg_match('/^\d+(?:\.\d{1,4})?$/D', $quantity) !== 1 || (float)$quantity <= 0) throw new \InvalidArgumentException('inventory_cross_transfer_line_invalid');
             $lines[] = ['index' => $index, 'productId' => $line['product_id'], 'skuId' => $line['sku_id'], 'skuUnique' => $unique, 'quantity' => $quantity, 'requestLineId' => $line['request_line_id']];
