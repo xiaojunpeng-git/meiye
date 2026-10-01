@@ -36,8 +36,8 @@ final class InventoryPlatformHqInboundServices
         }
         $grouped = (clone $query)->field('f.source_id')->group('f.source_id')->select()->toArray();
         $list = $query
-            ->fieldRaw("f.source_id AS id, f.source_id AS source_id, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, MAX(f.recorded_at) AS add_time, COUNT(f.id) AS detail_count, SUM(f.cost_amount_cents) AS cost_amount_cents, GROUP_CONCAT(DISTINCT CONCAT(IFNULL(b.product_name_snapshot, '商品'), ' / ', IFNULL(b.sku_name_snapshot, '默认规格')) SEPARATOR '、') AS product_summary")
-            ->group('f.source_id,n.document_no,f.business_date')
+            ->fieldRaw("f.source_id AS id, f.source_id AS source_id, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, l.location_name, MAX(f.recorded_at) AS add_time, MAX(f.recorded_at) AS operation_at, MAX(f.operator_name_snapshot) AS operator_name, COUNT(f.id) AS detail_count, SUM(f.cost_amount_cents) AS cost_amount_cents, GROUP_CONCAT(DISTINCT CONCAT(IFNULL(b.product_name_snapshot, '商品'), ' / ', IFNULL(b.sku_name_snapshot, '默认规格')) SEPARATOR '、') AS product_summary")
+            ->group('f.source_id,n.document_no,f.business_date,l.location_name')
             ->order('add_time desc')
             ->page($page, $limit)
             ->select()
@@ -121,6 +121,8 @@ final class InventoryPlatformHqInboundServices
         $hq = new InventoryHqLocationServices();
         $resolved = $hq->writableLocation($adminInfo, $locationId);
         $scope = $hq->scope($resolved['location'], (int)($resolved['access']['admin_id'] ?? 0));
+        $scope['operatorType'] = 'PLATFORM_ADMIN';
+        $scope['operatorName'] = mb_substr(trim((string)($adminInfo['real_name'] ?? $adminInfo['name'] ?? $adminInfo['account'] ?? '')), 0, 128);
         return (new InventoryManualInboundServices())->createForHeadquarters($scope, $resolved['location'], $input);
     }
 

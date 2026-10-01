@@ -7,8 +7,8 @@ const provider = readFileSync(new URL('../../../后端代码/app/services/produc
 
 // 列表的展示值、周期条件和详情必须共用完成日期；草稿不借用保存日期。
 assert.match(app, /UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期"/)
-assert.match(app, /columns: \['盘点单号'[^\n]*'盘点日期', '操作时间', '状态'\]/)
-assert.match(app, /text\(row\.count_date\), operationTime\(row\.operation_at\)/)
+assert.match(app, /columns: \['盘点单号'[^\n]*'盘点日期', '状态', '操作日期', '操作人'\]/)
+assert.match(app, /text\(row\.count_date\), countStatusName\(row\.status_name\), operationTime\(row\.operation_at\), text\(row\.operator_name\)/)
 assert.match(app, /field: 'count_date', operator: 'between'/)
 // 首次进入按当天完成日期筛选；清空周期仍可检索无完成日期的草稿。
 assert.match(app, /const countDateRange = ref\(todayRange\(\)\)/)

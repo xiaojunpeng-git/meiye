@@ -26,8 +26,8 @@ final class InventoryPlatformHqOutboundServices
             });
         }
         $count = count((clone $query)->field('f.source_id')->group('f.source_id')->select()->toArray());
-        $list = $query->fieldRaw("f.source_id AS id, f.source_id AS source_id, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, MAX(f.recorded_at) AS operation_at, COUNT(f.id) AS detail_count, SUM(f.cost_amount_cents) AS cost_amount_cents, GROUP_CONCAT(DISTINCT CONCAT(IFNULL(b.product_name_snapshot, '商品'), ' / ', IFNULL(b.sku_name_snapshot, '默认规格')) SEPARATOR '、') AS product_summary")
-            ->group('f.source_id,n.document_no,f.business_date')->order('operation_at desc')->page($page, $limit)->select()->toArray();
+        $list = $query->fieldRaw("f.source_id AS id, f.source_id AS source_id, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, l.location_name, MAX(f.recorded_at) AS operation_at, MAX(f.operator_name_snapshot) AS operator_name, COUNT(f.id) AS detail_count, SUM(f.cost_amount_cents) AS cost_amount_cents, GROUP_CONCAT(DISTINCT CONCAT(IFNULL(b.product_name_snapshot, '商品'), ' / ', IFNULL(b.sku_name_snapshot, '默认规格')) SEPARATOR '、') AS product_summary")
+            ->group('f.source_id,n.document_no,f.business_date,l.location_name')->order('operation_at desc')->page($page, $limit)->select()->toArray();
         $canViewCost = in_array('inventory.cost.view', (array)($access['features'] ?? []), true);
         foreach ($list as &$row) {
             $row['order_type_name'] = '总部手工出库';
@@ -76,6 +76,8 @@ final class InventoryPlatformHqOutboundServices
         $hq = new InventoryHqLocationServices();
         $resolved = $hq->writableLocation($adminInfo, $locationId);
         $scope = $hq->scope((array)$resolved['location'], (int)($resolved['access']['admin_id'] ?? 0));
+        $scope['operatorType'] = 'PLATFORM_ADMIN';
+        $scope['operatorName'] = mb_substr(trim((string)($adminInfo['real_name'] ?? $adminInfo['name'] ?? $adminInfo['account'] ?? '')), 0, 128);
         return (new InventoryManualOutboundServices())->createForHeadquarters($scope, (array)$resolved['location'], $input);
     }
 
@@ -93,6 +95,7 @@ final class InventoryPlatformHqOutboundServices
     {
         return Db::name('inventory_batch_movement_fact')->alias('f')
             ->join('inventory_batch b', 'b.id=f.batch_id')
+            ->leftJoin('inventory_location l', 'l.id=f.location_id')
             ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
             ->where('f.tenant_id', (string)$location['tenant_id'])->where('f.store_id', 0)
             ->where('f.location_id', (int)$location['id'])->where('f.fact_status', 'SETTLED')->where('f.source_type', $sourceType);

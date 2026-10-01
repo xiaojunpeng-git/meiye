@@ -148,7 +148,7 @@ final class InventoryManualOutboundServices
     private function lockScope(int $storeId, int $operatorId): array
     {
         $store = Db::name('system_store')->where('id', $storeId)->where('is_del', 0)->where('is_show', 1)->field('id,name')->lock(true)->find();
-        $operator = Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)->field('id')->lock(true)->find();
+        $operator = Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)->field('id,staff_name')->lock(true)->find();
         $binding = Db::name('organization_store')->where('store_id', $storeId)->field('org_id')->lock(true)->find();
         $organizationId = (int)($binding['org_id'] ?? 0);
         if (!$store || trim((string)($store['name'] ?? '')) === '' || !$operator || $organizationId <= 0) {
@@ -177,6 +177,8 @@ final class InventoryManualOutboundServices
             'organizationPath' => '/' . implode('/', array_reverse($path)) . '/',
             'storeId' => (int)$store['id'],
             'operatorId' => $operatorId,
+            'operatorType' => 'STORE_STAFF',
+            'operatorName' => mb_substr(trim((string)$operator['staff_name']), 0, 128),
             'organizationName' => mb_substr($name, 0, 100),
         ];
     }
@@ -254,6 +256,8 @@ final class InventoryManualOutboundServices
             'sourceType' => 'manual_outbound', 'sourceId' => $command['idempotencyKey'], 'sourceDetailId' => (string)$line['index'],
             'reversalOf' => 0, 'businessDate' => $command['businessDate'], 'occurredAt' => $command['recordedAt'],
             'settledAt' => $command['recordedAt'], 'recordedAt' => $command['recordedAt'],
+            'operatorType' => (string)($scope['operatorType'] ?? 'PLATFORM_ADMIN'), 'operatorId' => (int)($scope['operatorId'] ?? 0),
+            'operatorName' => (string)($scope['operatorName'] ?? ''),
         ]);
     }
 

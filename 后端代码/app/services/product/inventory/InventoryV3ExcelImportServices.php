@@ -278,17 +278,20 @@ final class InventoryV3ExcelImportServices
     private function persistPreparedImport(string $direction, string $partyType, int $locationId, array $adminInfo, string $fileHash, string $originName, array $command, string $businessType): array
     {
         $operatorId = (int)($adminInfo['uid'] ?? $adminInfo['id'] ?? 0);
+        $operatorName = mb_substr(trim((string)($adminInfo['real_name'] ?? $adminInfo['name'] ?? $adminInfo['account'] ?? '')), 0, 128);
         $storeId = $partyType === 'HQ' ? 0 : $locationId;
         // A single workbook can target more than one warehouse. Scope the
         // idempotency/record hash by target so one HQ/store group cannot mask
         // another group in the same upload.
         $targetFileHash = hash('sha256', $fileHash . '|' . $partyType . '|' . $locationId);
-        $record = $this->claimRecord($direction, $storeId, $operatorId, $targetFileHash, $originName);
+        $record = $this->claimRecord($direction, $storeId, $operatorId, $operatorName, $targetFileHash, $originName);
         $input = ['idempotency_key' => 'inventory-platform-import-' . $direction . '-' . $partyType . '-' . $locationId . '-' . $targetFileHash, 'business_date' => (string)$command['business_date'], 'remark' => $this->buildRemark($businessType, (array)$command['remark_parts']), 'lines' => (array)$command['lines']];
         $authority = Db::transaction(function () use ($direction, $partyType, $locationId, $adminInfo, $storeId, $operatorId, $record, $input, $businessType): array {
             if ($partyType === 'HQ') {
                 $resolved = (new InventoryHqLocationServices())->writableLocation($adminInfo, $locationId);
                 $scope = (new InventoryHqLocationServices())->scope((array)$resolved['location'], $operatorId);
+                $scope['operatorType'] = 'PLATFORM_ADMIN';
+                $scope['operatorName'] = mb_substr(trim((string)($adminInfo['real_name'] ?? $adminInfo['name'] ?? $adminInfo['account'] ?? '')), 0, 128);
                 $authority = $direction === self::DIRECTION_INBOUND ? (new InventoryManualInboundServices())->createForHeadquarters($scope, (array)$resolved['location'], $input, 5000) : (new InventoryManualOutboundServices())->createForHeadquarters($scope, (array)$resolved['location'], $input, 5000);
             } else {
                 $authority = $direction === self::DIRECTION_INBOUND ? (new InventoryManualInboundServices())->createForImport($storeId, $operatorId, $input) : (new InventoryManualOutboundServices())->createForImport($storeId, $operatorId, $input);
@@ -299,11 +302,11 @@ final class InventoryV3ExcelImportServices
         return ['record_id' => (int)$record['id'], 'document_no' => (string)($authority['document_no'] ?? ''), 'success_count' => count($input['lines'])];
     }
 
-    private function claimRecord(string $direction, int $storeId, int $operatorId, string $fileHash, string $originName): array
+    private function claimRecord(string $direction, int $storeId, int $operatorId, string $operatorName, string $fileHash, string $originName): array
     {
         $now = time();
         try {
-            return Db::transaction(function () use ($direction, $storeId, $operatorId, $fileHash, $originName, $now): array {
+            return Db::transaction(function () use ($direction, $storeId, $operatorId, $operatorName, $fileHash, $originName, $now): array {
                 $row = Db::name('inventory_v3_import_record')
                     ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
                     ->where('store_id', $storeId)->where('direction', $direction)->where('file_hash', $fileHash)->lock(true)->find();
@@ -315,7 +318,7 @@ final class InventoryV3ExcelImportServices
                 }
                 if ($row) {
                     Db::name('inventory_v3_import_record')->where('id', (int)$row['id'])->update([
-                        'operator_id' => $operatorId, 'source_file_name' => $this->fileName($originName),
+                        'operator_id' => $operatorId, 'operator_name_snapshot' => $operatorName, 'source_file_name' => $this->fileName($originName),
                         'status' => 'PROCESSING', 'business_type' => '', 'total_count' => 0, 'success_count' => 0,
                         'failure_count' => 0, 'document_no' => '', 'failure_message' => '', 'updated_at' => $now,
                     ]);
@@ -326,7 +329,7 @@ final class InventoryV3ExcelImportServices
                     'tenant_id' => CashierV3ScopeResolver::TENANT_SCOPE_ID, 'store_id' => $storeId, 'direction' => $direction,
                     'file_hash' => $fileHash, 'source_file_name' => $this->fileName($originName), 'business_type' => '',
                     'total_count' => 0, 'success_count' => 0, 'failure_count' => 0, 'document_no' => '', 'status' => 'PROCESSING',
-                    'failure_message' => '', 'operator_id' => $operatorId, 'created_at' => $now, 'updated_at' => $now,
+                    'failure_message' => '', 'operator_id' => $operatorId, 'operator_name_snapshot' => $operatorName, 'created_at' => $now, 'updated_at' => $now,
                 ]);
                 return ['id' => (int)$id];
             });

@@ -91,7 +91,7 @@ final class InventoryManualInboundServices
             $stock = $this->lockOrCreateStock($location, $catalog, $line, $command['recordedAt']);
             $batch = $this->lockOrCreateBatch($stock, $catalog, $line, $command, $index);
             $this->increaseBalances($stock, $batch, $line, $command['recordedAt']);
-            $movementId = $this->appendMovement($factKey, $location, $stock, $batch, $line, $command, $index);
+            $movementId = $this->appendMovement($factKey, $scope, $location, $stock, $batch, $line, $command, $index);
             $results[] = ['movement_fact_id' => $movementId, 'idempotent' => false];
         }
         return ['document_no' => $command['documentNo'], 'idempotency_key' => $command['idempotencyKey'], 'lines' => $results];
@@ -171,7 +171,7 @@ final class InventoryManualInboundServices
             ->where('store_id', $storeId)
             ->where('status', 1)
             ->where('is_del', 0)
-            ->field('id,store_id')
+            ->field('id,store_id,staff_name')
             ->lock(true)
             ->find();
         if (!$operator) {
@@ -233,8 +233,10 @@ final class InventoryManualInboundServices
             'organizationPath' => $organizationPath,
             'organizationName' => mb_substr($organizationName, 0, 100),
             'storeId' => (int)$store['id'],
+            'operatorType' => 'STORE_STAFF',
+            'operatorId' => $operatorId,
+            'operatorName' => mb_substr(trim((string)$operator['staff_name']), 0, 128),
             'storeName' => mb_substr(trim((string)$store['name']), 0, 100),
-            'operatorId' => (int)$operator['id'],
         ];
     }
 
@@ -471,7 +473,7 @@ final class InventoryManualInboundServices
         ]) !== 1) throw new \RuntimeException('inventory_manual_inbound_batch_changed');
     }
 
-    private function appendMovement(string $factKey, array $location, array $stock, array $batch, array $line, array $command, int $index): int
+    private function appendMovement(string $factKey, array $scope, array $location, array $stock, array $batch, array $line, array $command, int $index): int
     {
         $units = InventoryEntitlementCompletionContract::decimalToUnits($line['quantity'], (int)$stock['quantity_scale']);
         $cost = intdiv($units * $line['unitCostCents'], 10 ** (int)$stock['quantity_scale']);
@@ -482,6 +484,8 @@ final class InventoryManualInboundServices
             'costAmountCents' => $cost, 'sourceType' => 'manual_inbound', 'sourceId' => $command['idempotencyKey'],
             'sourceDetailId' => (string)$index, 'reversalOf' => 0, 'businessDate' => $command['businessDate'],
             'occurredAt' => $command['recordedAt'], 'settledAt' => $command['recordedAt'], 'recordedAt' => $command['recordedAt'],
+            'operatorType' => (string)($scope['operatorType'] ?? 'PLATFORM_ADMIN'), 'operatorId' => (int)($scope['operatorId'] ?? 0),
+            'operatorName' => (string)($scope['operatorName'] ?? ''),
         ]);
     }
 

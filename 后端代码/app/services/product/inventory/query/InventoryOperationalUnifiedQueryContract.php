@@ -22,8 +22,8 @@ final class InventoryOperationalUnifiedQueryContract
     {
         $common = [
             UnifiedQueryPageRegistry::field('record_id', '记录标识', 'text', false, false, ['sort']),
-            // 盘点新周期按完成时刻；保留旧业务日期字段以兼容已保存的查询设置，但不再默认展示。
-            UnifiedQueryPageRegistry::field('business_date', $pageCode === 'inventory_request' ? '请货日期' : '业务日期', 'date', $pageCode !== 'inventory_count', $pageCode !== 'inventory_count'),
+            // 业务日期是统计和周期筛选口径；操作日期只是审计展示，不可替代业务归属日。
+            UnifiedQueryPageRegistry::field('business_date', self::businessDateLabel($pageCode), 'date', $pageCode !== 'inventory_count', $pageCode !== 'inventory_count'),
             UnifiedQueryPageRegistry::field('order_sn', '业务单号', 'text', true, true),
             UnifiedQueryPageRegistry::field('status_name', '状态', 'text', true, true),
         ];
@@ -35,24 +35,25 @@ final class InventoryOperationalUnifiedQueryContract
                 ['order_type_name', '入库类型', 'text', ''], ['location_name', '入库仓/门店', 'text', ''],
                 ['product_summary', '商品摘要', 'text', ''], ['detail_count', '入库项数', 'integer', ''],
                 ['cost_amount_cents', '入库金额（分）', 'integer', InventoryBatchStockQueryContract::PERMISSION_COST],
+                ['operation_at', '操作日期', 'datetime', ''], ['operator_name', '操作人', 'text', ''],
             ],
             'inventory_outbound' => [
                 ['order_type_name', '出库类型', 'text', ''], ['location_name', '出库仓/门店', 'text', ''],
                 ['product_summary', '商品摘要', 'text', ''], ['detail_count', '出库项数', 'integer', ''],
                 ['cost_amount_cents', '成本金额（分）', 'integer', InventoryBatchStockQueryContract::PERMISSION_COST],
-                ['operation_at', '操作时间', 'datetime', ''],
+                ['operation_at', '操作日期', 'datetime', ''], ['operator_name', '操作人', 'text', ''],
             ],
             'inventory_count' => [
                 ['location_name', '盘点主体', 'text', ''], ['detail_count', '差异项', 'integer', ''],
                 ['change_amount_cents', '盈亏金额（分）', 'integer', InventoryBatchStockQueryContract::PERMISSION_COST],
-                ['operation_at', '操作时间', 'datetime', ''],
+                ['operation_at', '操作日期', 'datetime', ''], ['operator_name', '操作人', 'text', ''],
             ],
             'inventory_movement' => [
                 ['movement_type_name', '业务类型', 'text', ''], ['product_name', '商品名称', 'text', ''],
                 ['sku_name', '商品规格', 'text', ''], ['batch_no', '批次号', 'text', ''],
                 ['quantity_display', '数量变化', 'text', ''], ['location_name', '发生仓库', 'text', ''],
                 ['cost_amount_cents', '成本金额（分）', 'integer', InventoryBatchStockQueryContract::PERMISSION_COST],
-                ['operation_at', '操作时间', 'datetime', ''],
+                ['operation_at', '操作日期', 'datetime', ''], ['operator_name', '操作人', 'text', ''],
             ],
             'inventory_request' => [
                 ['request_no', '请货单号', 'text', ''],
@@ -65,19 +66,19 @@ final class InventoryOperationalUnifiedQueryContract
             'inventory_transfer' => [
                 ['from_party_name', '调出方', 'text', ''], ['to_party_name', '调入方', 'text', ''],
                 ['detail_count', '商品项数', 'integer', ''], ['transfer_amount_cents', '调拨金额（分）', 'integer', InventoryBatchStockQueryContract::PERMISSION_COST],
-                ['operation_at', '操作时间', 'datetime', ''],
+                ['operation_at', '操作日期', 'datetime', ''], ['operator_name', '操作人', 'text', ''],
             ],
             'inventory_salon_usage' => [
                 ['operation_name', '领退类型', 'text', ''], ['project_name_snapshot', '关联项目', 'text', ''],
                 ['detail_count', '耗材项数', 'integer', ''], ['remark', '备注', 'text', ''],
-                ['operation_at', '操作时间', 'datetime', ''],
+                ['operation_at', '操作日期', 'datetime', ''], ['operator_name', '操作人', 'text', ''],
             ],
             'inventory_import' => [
                 ['source_file_name', '文件名称', 'text', ''], ['direction_name', '业务类型', 'text', ''],
                 ['business_type', '出入库类型', 'text', ''], ['total_count', '数据量', 'integer', ''],
                 ['success_count', '成功行数', 'integer', ''], ['failure_count', '失败行数', 'integer', ''],
                 ['document_no', '正式单号', 'text', ''], ['failure_message', '失败原因', 'text', ''],
-                ['updated_at_display', '导入时间', 'datetime', ''],
+                ['operation_at', '操作日期', 'datetime', ''], ['operator_name', '操作人', 'text', ''],
             ],
         ];
         if (!isset($specific[$pageCode])) {
@@ -98,6 +99,18 @@ final class InventoryOperationalUnifiedQueryContract
             'exportFeature' => 'inventory.operation.export',
             'fields' => $common,
         ];
+    }
+
+    /** User-facing label for the authoritative business-date filter of each document type. */
+    private static function businessDateLabel(string $pageCode): string
+    {
+        return [
+            'inventory_inbound' => '入库日期', 'inventory_outbound' => '出库日期',
+            // 盘点的权威筛选字段是 count_date；隐藏的旧 business_date 仅保留兼容名称。
+            'inventory_count' => '业务日期', 'inventory_movement' => '业务日期',
+            'inventory_request' => '请货日期', 'inventory_transfer' => '调拨日期',
+            'inventory_salon_usage' => '领退日期', 'inventory_import' => '导入业务日期',
+        ][$pageCode] ?? '业务日期';
     }
 
     public static function label(string $pageCode): string

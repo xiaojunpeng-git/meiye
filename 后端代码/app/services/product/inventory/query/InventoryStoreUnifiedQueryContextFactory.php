@@ -101,6 +101,7 @@ final class InventoryStoreUnifiedQueryContextFactory
         if ($pageCode === 'inventory_count') {
             $context['inventory_count_operator_type'] = $countActor['type'] ?? '';
             $context['inventory_count_creator_id'] = $countActor['id'] ?? 0;
+            $context['inventory_count_operator_name'] = $countActor['name'] ?? '';
         }
         return $context;
     }

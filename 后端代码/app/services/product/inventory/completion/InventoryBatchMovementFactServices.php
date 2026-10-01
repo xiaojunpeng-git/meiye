@@ -81,11 +81,16 @@ final class InventoryBatchMovementFactServices
 
     private function normalize(array $movement): array
     {
+        // Actor fields were added after the original fact contract. Defaulting
+        // them keeps older non-interactive writers compatible, while every new
+        // inventory document path can persist an immutable operator snapshot.
+        $movement += ['operatorType' => '', 'operatorId' => 0, 'operatorName' => ''];
         $keys = [
             'factKey', 'tenantId', 'organizationId', 'organizationPath', 'storeId',
             'stockId', 'batchId', 'direction', 'quantityUnits', 'unitCostCents',
             'costAmountCents', 'sourceType', 'sourceId', 'sourceDetailId', 'reversalOf',
             'businessDate', 'occurredAt', 'settledAt', 'recordedAt',
+            'operatorType', 'operatorId', 'operatorName',
         ];
         $actual = array_keys($movement);
         sort($keys, SORT_STRING);
@@ -94,10 +99,15 @@ final class InventoryBatchMovementFactServices
             throw new InventoryCompletionContractException('inventory_batch_movement_shape_invalid');
         }
         foreach (['storeId', 'stockId', 'batchId', 'quantityUnits', 'unitCostCents',
-                     'costAmountCents', 'reversalOf', 'occurredAt', 'settledAt', 'recordedAt'] as $key) {
+                     'costAmountCents', 'reversalOf', 'occurredAt', 'settledAt', 'recordedAt', 'operatorId'] as $key) {
             if (!is_int($movement[$key])) {
                 throw new InventoryCompletionContractException('inventory_batch_movement_type_invalid');
             }
+        }
+        $movement['operatorType'] = mb_substr(trim((string)$movement['operatorType']), 0, 32);
+        $movement['operatorName'] = mb_substr(trim((string)$movement['operatorName']), 0, 128);
+        if ($movement['operatorId'] < 0 || ($movement['operatorId'] > 0 && $movement['operatorName'] === '')) {
+            throw new InventoryCompletionContractException('inventory_batch_movement_operator_invalid');
         }
         if (!is_int($movement['direction']) || !in_array($movement['direction'], [-1, 1], true)
             || $movement['storeId'] < 0 || $movement['stockId'] <= 0 || $movement['batchId'] <= 0
@@ -133,6 +143,9 @@ final class InventoryBatchMovementFactServices
             'organization_path' => $movement['organizationPath'],
             'location_id' => $movement['locationId'],
             'store_id' => $movement['storeId'],
+            'operator_type' => $movement['operatorType'],
+            'operator_id' => $movement['operatorId'],
+            'operator_name_snapshot' => $movement['operatorName'],
             'stock_id' => $movement['stockId'],
             'batch_id' => $movement['batchId'],
             'direction' => $movement['direction'],

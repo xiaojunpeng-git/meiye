@@ -82,6 +82,8 @@ final class InventoryStockCountServices
         $hq = new InventoryHqLocationServices();
         $resolved = $hq->writableLocation($adminInfo, $locationId);
         $scope = $hq->scope((array)$resolved['location'], (int)($resolved['access']['admin_id'] ?? 0));
+        $scope['operatorType'] = 'PLATFORM_ADMIN';
+        $scope['operatorName'] = mb_substr(trim((string)($adminInfo['real_name'] ?? $adminInfo['name'] ?? $adminInfo['account'] ?? '')), 0, 128);
         return Db::transaction(function () use ($scope, $resolved, $command): array {
             $location = Db::name('inventory_location')->where('id', (int)$resolved['location']['id'])->lock(true)->find();
             if (!$location || (string)$location['location_type'] !== 'HQ' || (int)$location['store_id'] !== 0 || (string)$location['location_status'] !== 'ACTIVE') {
@@ -106,6 +108,7 @@ final class InventoryStockCountServices
                 'tenant_id' => $scope['tenantId'], 'organization_id' => $scope['organizationId'], 'organization_path' => $scope['organizationPath'], 'location_id' => (int)$location['id'],
                 'store_id' => $scope['storeId'], 'operator_id' => $operatorId,
                 'operator_type' => $scope['operatorType'] ?? 'PLATFORM_ADMIN',
+                'operator_name_snapshot' => (string)($scope['operatorName'] ?? ''),
                 'document_status' => 'CONFIRMED', 'remark' => $command['remark'], 'business_date' => $command['businessDate'], 'confirmed_at' => $command['now'], 'recorded_at' => $command['now'],
             ]);
             $document = Db::name('inventory_stock_count_document')->where('id', $documentId)->lock(true)->find();
@@ -258,7 +261,7 @@ final class InventoryStockCountServices
         return ['batchNo' => $line['batchNo'], 'cost' => $line['cost'], 'manufacturedDate' => $line['manufacturedDate'], 'expireDate' => $line['expireDate']];
     }
 
-    private function fact(array $scope, array $stock, array $batch, int $direction, int $units, string $type, string $source, string $detail, array $command): void { $scale = (int)$stock['quantity_scale']; (new InventoryBatchMovementFactServices())->append(['factKey' => 'stock-count:' . hash('sha256', $source . ':' . $detail), 'tenantId' => $scope['tenantId'], 'organizationId' => $scope['organizationId'], 'organizationPath' => $scope['organizationPath'], 'storeId' => $scope['storeId'], 'stockId' => (int)$stock['id'], 'batchId' => (int)$batch['id'], 'direction' => $direction, 'quantityUnits' => $units, 'unitCostCents' => (int)$batch['unit_cost_cents'], 'costAmountCents' => intdiv($units * (int)$batch['unit_cost_cents'], 10 ** $scale), 'sourceType' => $type, 'sourceId' => $source, 'sourceDetailId' => $detail, 'reversalOf' => 0, 'businessDate' => $command['businessDate'], 'occurredAt' => $command['now'], 'settledAt' => $command['now'], 'recordedAt' => $command['now']]); }
+    private function fact(array $scope, array $stock, array $batch, int $direction, int $units, string $type, string $source, string $detail, array $command): void { $scale = (int)$stock['quantity_scale']; (new InventoryBatchMovementFactServices())->append(['factKey' => 'stock-count:' . hash('sha256', $source . ':' . $detail), 'tenantId' => $scope['tenantId'], 'organizationId' => $scope['organizationId'], 'organizationPath' => $scope['organizationPath'], 'storeId' => $scope['storeId'], 'stockId' => (int)$stock['id'], 'batchId' => (int)$batch['id'], 'direction' => $direction, 'quantityUnits' => $units, 'unitCostCents' => (int)$batch['unit_cost_cents'], 'costAmountCents' => intdiv($units * (int)$batch['unit_cost_cents'], 10 ** $scale), 'sourceType' => $type, 'sourceId' => $source, 'sourceDetailId' => $detail, 'reversalOf' => 0, 'businessDate' => $command['businessDate'], 'occurredAt' => $command['now'], 'settledAt' => $command['now'], 'recordedAt' => $command['now'], 'operatorType' => (string)($scope['operatorType'] ?? 'PLATFORM_ADMIN'), 'operatorId' => (int)$scope['operatorId'], 'operatorName' => (string)($scope['operatorName'] ?? '')]); }
 
     /** Lock the store and organization path, while the creator identity stays stable across organization logins. */
     private function scope(int $storeId, int $operatorId, array $sessionInfo): array
@@ -283,7 +286,7 @@ final class InventoryStockCountServices
         if (!$path || (int)end($path) !== $current) throw new \RuntimeException('inventory_stock_count_scope_denied');
         return ['tenantId' => CashierV3ScopeResolver::TENANT_SCOPE_ID,
             'organizationId' => (string)$org, 'organizationPath' => '/' . implode('/', array_reverse($path)) . '/',
-            'storeId' => $storeId, 'operatorId' => $actor['id'], 'operatorType' => $actor['type']];
+            'storeId' => $storeId, 'operatorId' => $actor['id'], 'operatorType' => $actor['type'], 'operatorName' => $actor['name']];
     }
     /** Reconcile a stale organization snapshot under the count transaction; never infer ownership from the client. */
     private function location(array $scope): array
