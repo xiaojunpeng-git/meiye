@@ -21,8 +21,8 @@ if (!overlay.includes('member-debt-overlay__payment-method-card')
 if (overlay.includes('<select v-model="line.paymentMethod">')) {
   throw new Error('充值欠款补交不得继续使用旧的行内收款方式下拉框')
 }
-if (!shell.includes("prepare-recharge-debt-repayment") || !workbench.includes("submit-recharge-debt-repayment")) {
-  throw new Error('充值欠款补交必须通过统一结账准备和专用提交命令完成')
+if (!shell.includes('localRepayment: payload') || !workbench.includes("submit-recharge-debt-repayment")) {
+  throw new Error('充值欠款补交必须以本地快照进入确认页并使用专用提交命令')
 }
 for (const source of [overlay, recharge]) {
   if (!source.includes('PersonnelPerformanceOverlay') || !source.includes(':show-craftsmen="false"') || !source.includes(':show-salespeople="true"')) {
@@ -39,47 +39,38 @@ for (const source of [overlay, recharge]) {
     || !source.includes("const status = String(envelope?.result?.status || '')")) {
     throw new Error('充值与补交必须按购物车相同方式解包标准 action 信封')
   }
-  if (source.includes('Math.trunc(')) {
-    throw new Error('充值与补交不得把小数金额静默截断为整数')
+  if (source.includes('Math.trunc(Number(item.amount')) {
+    throw new Error('充值与补交不得把收款小数金额静默截断为整数')
   }
 }
-if (!shell.includes("prepare-recharge-debt-repayment") || shell.includes("requestCashierV3Action('submit-recharge-debt-repayment'")) {
-  throw new Error('shell must hand recharge debt repayment to the unified checkout preparation')
+if (shell.includes("'prepare-recharge-debt-repayment'") || shell.includes("requestCashierV3Action('submit-recharge-debt-repayment'")) {
+  throw new Error('下一步不得创建充值欠款编辑草稿或直接收款')
 }
-if (!shell.includes('checkoutMatchesRequestedAmount')
-  || !shell.includes('checkout?.summary?.receivableAmount')
-  || !shell.includes('&& checkoutMatchesRequestedAmount(currentCheckout)')
-  || !shell.includes('&& checkoutMatchesRequestedAmount(preparedCheckout)')) {
-  throw new Error('恢复补交草稿时必须匹配本次补交金额，不能复用旧的整笔欠款金额')
+if (!workbench.includes('rechargeDebt: intent.rechargeDebt === true')
+  || !workbench.includes('repaymentAmount: amount')) {
+  throw new Error('本次充值欠款金额与类型必须由页面唯一快照携带')
 }
 if (!workbench.includes('isRechargeDebtRepaymentCheckout')
   || !workbench.includes("'submit-checkout': isRechargeDebtRepaymentCheckout.value ? 'submit-recharge-debt-repayment'")) {
   throw new Error('充值欠款补交必须使用专用业务事件提交命令')
 }
-if (!workbench.includes('补交失败，请重新操作。')
-  || !workbench.includes('closeCheckoutOverlay()')
-  || !workbench.includes('isDebtRepaymentCheckout.value && [\'submit-checkout\', \'retry-checkout\'].includes(action)')) {
-  throw new Error('补交失败必须清理现场并自动返回收银台，不得进入通用结果追查')
+if (!workbench.includes("requestAction('query-debt-repayment-result'")
+  || !workbench.includes('originalIdempotencyKey: commandKey')) {
+  throw new Error('结果未知只能查询原确认命令，不能生成新补交请求')
 }
 if (!memberSummary.includes("const emit = defineEmits(['select', 'open-detail', 'open-debt', 'go-writeoff'])")
   || !memberSummary.includes("@click.stop=\"openMemberDebt(member)\"")
   || !memberSummary.includes("emit('open-debt', member?.id || member?.memberId || member?.uid || null)")) {
   throw new Error('member debt entry does not emit an explicit, isolated debt event')
 }
-if (!bridge.includes("action === 'submit-recharge-debt-repayment'")) {
-  throw new Error('bridge does not derive member and balance contexts for recharge repayment')
+if (!bridge.includes("action === 'submit-recharge-debt-repayment' && isRecord(payload?.checkoutSnapshot)")) {
+  throw new Error('充值欠款最终快照不得继承会员余额展示版本')
 }
-if (bridge.includes("'submit-recharge-debt-repayment': 'query-debt-repayment-result'")) {
-  throw new Error('充值欠款补交不得进入通用支付结果追查链路')
-}
-if (!bridge.includes("|| action === 'submit-recharge-debt-repayment'")) {
-  throw new Error('bridge does not derive the cashier workspace context for recharge repayment')
-}
-if (!manifest.includes("'submit-recharge': FEATURE_RECHARGE") || !manifest.includes("'submit-recharge-debt-repayment': FEATURE_RECHARGE") || !manifest.includes("'prepare-recharge-debt-repayment': FEATURE_RECHARGE")) {
+if (!manifest.includes("'submit-recharge': FEATURE_RECHARGE") || !manifest.includes("'submit-recharge-debt-repayment': FEATURE_RECHARGE") || manifest.includes("'prepare-recharge-debt-repayment': FEATURE_RECHARGE")) {
   throw new Error('recharge commands are not registered in the frontend action manifest')
 }
-if (!overlay.includes('<section v-if="selectedDebt" class="member-debt-overlay__recharge-salespeople"')
-  || overlay.includes('<section v-if="selectedDebt && selectedDebtIsRecharge" class="member-debt-overlay__recharge-salespeople"')) {
+if (!overlay.includes('<div class="member-debt-overlay__recharge-salespeople" aria-label="销售人分配">')
+  || overlay.includes('v-if="selectedDebt && selectedDebtIsRecharge" class="member-debt-overlay__recharge-salespeople"')) {
   throw new Error('销售订单欠款与充值欠款都必须显示同一个销售人选择入口')
 }
 if (!overlay.includes('salespersonAllocations: salespersonAllocations.value.map((item) => ({')) {

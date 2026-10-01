@@ -86,24 +86,6 @@ class CashierV3ContextPolicyRegistry
 
     protected function registerFrozenPolicies(): void
     {
-        $this->register(new CashierV3ContextPolicy(
-            'prepare-debt-repayment',
-            [],
-            [],
-            static function (array $payload, array $base): array {
-                return [
-                    'required' => [],
-                    'allowed' => [],
-                    'identities' => [],
-                    'required_read_roles' => [],
-                    'required_touched_roles' => [],
-                ];
-            },
-            [],
-            [],
-            []
-        ));
-
         foreach (CashierV3C3ServiceModule::CHECKOUT_ALIASES as $pageAction => $canonical) {
             $this->register(new CashierV3ContextPolicy(
                 $canonical,
@@ -116,22 +98,20 @@ class CashierV3ContextPolicyRegistry
             ));
         }
 
-        foreach (['submit-debt-repayment'] as $action) {
-            // 后续步骤：客户端只提交 checkout_request；真实来源在事务内从持久化记录反推
-            $touched = ['cashier_workspace', 'checkout_request'];
-            if ($action === 'submit-debt-repayment') {
-                $touched[] = 'debt_record';
-            }
-            $this->register(new CashierV3ContextPolicy(
-                $action,
-                ['cashier_workspace', 'checkout_request'],
-                ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
-                [$this, 'resolveCheckoutFollowUpBranch'],
-                $touched,
-                ['service_order', 'hang_order', 'reservation', 'room', 'debt_record'],
-                ['service_order', 'hang_order', 'reservation', 'room', 'debt_record']
-            ));
-        }
+        // 补交最终确认不继承旧 checkout_request 版本；欠款现值由领域事务锁定。
+        $this->register(new CashierV3ContextPolicy(
+            'submit-debt-repayment',
+            [],
+            [],
+            static function (array $payload, array $base): array {
+                return ['required' => [], 'allowed' => [], 'identities' => [],
+                    'required_read_roles' => [], 'required_touched_roles' => [],
+                    'allows_empty_contexts' => true, 'allows_empty_touched_result' => true];
+            },
+            [],
+            [],
+            []
+        ));
 
         $this->register(new CashierV3ContextPolicy(
             'submit-checkout',

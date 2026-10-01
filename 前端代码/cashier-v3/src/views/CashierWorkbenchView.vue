@@ -1354,8 +1354,13 @@ function isCompleteCheckoutPreparation(snapshot, preparationRequestId, { recover
 
   const contexts = Array.isArray(snapshot.commandContexts) ? snapshot.commandContexts : []
   const workspace = state.workspace || {}
-  if (!hasMatchingCommandContext(contexts, 'cashier_workspace', workspace.id, workspace.revision)) return false
-  if (!hasMatchingCommandContext(
+  // 欠款补交只接受本次服务端准备的单据快照。工作台展示版本不是该
+  // 快照的权威来源，不能拿它拦截“下一步”或让旧页面决定收款资格。
+  if (snapshot.businessType !== 'debt_repayment'
+    && !hasMatchingCommandContext(contexts, 'cashier_workspace', workspace.id, workspace.revision)) return false
+  if (snapshot.businessType === 'debt_repayment'
+    && String(snapshot.stateContextId || '') !== String(state.stateContextId || '')) return false
+  if (snapshot.businessType !== 'debt_repayment' && !hasMatchingCommandContext(
     contexts,
     'checkout_request',
     checkoutRequestIdentity(snapshot),
@@ -1405,6 +1410,11 @@ function currentCheckoutCommandContexts(session) {
     : checkout.value
   if (String(checkoutRequestIdentity(snapshot) || '') !== session.checkoutRequestId) return null
   if (session.serviceOrderId && String(serviceOrder.value?.id || '') !== session.serviceOrderId) return null
+  if (snapshot.businessType === 'debt_repayment') {
+    // 补交后续命令以准备回执中的唯一 request_id 和单据自身版本定位；
+    // 服务端事务重新锁定欠款。浏览器不提交工作台展示版本或旧资源上下文。
+    return { commandContexts: [], checkoutRequestVersion: Number(checkoutRequestVersion(snapshot)) }
+  }
   const contexts = Array.isArray(snapshot.commandContexts) ? clonePlain(snapshot.commandContexts) : []
   const workspace = state.workspace || {}
   const requestVersion = checkoutRequestVersion(snapshot)
@@ -5250,6 +5260,15 @@ function buildCheckoutSnapshot(preview = {}) {
     sourceDocument: isRecord(snapshot.sourceDocument)
       ? clonePlain(snapshot.sourceDocument)
       : undefined,
+    // 欠款补交的金额及销售人属于本次页面快照的业务输入；最终事务只
+    // 接受这份值并锁定当前欠款复核，不再读取编辑草稿里的旧金额。
+    ...(snapshot.businessType === 'debt_repayment'
+      ? {
+          repaymentAmount: Number(snapshot.repaymentAmount || 0),
+          rechargeDebt: snapshot.rechargeDebt === true,
+          salespersonAllocations: clonePlain(snapshot.salespersonAllocations || [])
+        }
+      : {}),
     source: sourceSnapshot,
     orderNote: String(snapshot.orderNote || ''),
     supplement: clonePlain(snapshot.supplement || {})
@@ -5689,7 +5708,7 @@ function localCheckoutPaymentAmount(value) {
   return /^(?:0|[1-9]\d*)$/.test(raw) ? raw : null
 }
 
-function enqueueCheckoutAction(event = {}) {
+async function enqueueCheckoutAction(event = {}) {
   const action = String(event?.action || '')
   if (localCheckoutPreview.value?.localDraftPreview === true) {
     const payload = isRecord(event?.payload) ? clonePlain(event.payload) : {}
@@ -5768,6 +5787,26 @@ function enqueueCheckoutAction(event = {}) {
       publishToolbarCheckoutContext()
     } else if (action === 'submit-checkout') {
       return finalizeLocalCheckoutPreview(event)
+    } else if (action === 'query-checkout-result'
+      && preview.businessType === 'debt_repayment') {
+      // 结果未知时只凭原确认命令查询成功事实；页面没有也不需要草稿 ID。
+      const queried = await requestAction('query-debt-repayment-result', {
+        originalIdempotencyKey: String(payload.originalIdempotencyKey || '')
+      })
+      const repaid = responseDataBlock(queried).debtRepayment
+      if (isRecord(repaid) && repaid.status === 'succeeded') {
+        checkoutRequiresRootReload.value = true
+        checkoutLocalOutcome.value = {
+          status: 'succeeded', message: '欠款补交成功。',
+          completionDescription: `补交单 ${repaid.repaymentNo || ''} 已完成。`,
+          requestNo: String(repaid.repaymentNo || ''),
+          checkoutRequestId: String(repaid.checkoutRequestId || ''),
+          originalIdempotencyKey: String(payload.originalIdempotencyKey || ''),
+          canClose: true, canRetry: false
+        }
+      }
+      event?.resolve?.(queried)
+      return queried
     } else if ([
       'checkout-step-back',
       'checkout-step-next',
@@ -5899,6 +5938,39 @@ async function requestCheckoutAction({ action, payload }) {
     return direct
   }
 
+  if (action === 'submit-checkout'
+    && isRecord(payload?.checkoutSnapshot)
+    && String(payload.checkoutSnapshot.businessType || '') === 'debt_repayment'
+    && localCheckoutPreview.value?.localDraftPreview === true) {
+    // 首次服务端写入就是最终确认；同一幂等键重试只能返回同一补交事实。
+    const commandKey = String(payload?.idempotencyKey || createCashierV3CommandId('CHECKOUT'))
+    let direct = await requestAction(payload.checkoutSnapshot.rechargeDebt === true
+      ? 'submit-recharge-debt-repayment' : 'submit-debt-repayment', {
+      checkoutSnapshot: payload.checkoutSnapshot,
+      idempotencyKey: commandKey
+    })
+    if (resultStatus(direct) === 'result_unknown') {
+      // 响应丢失时只查询原命令，不能再生成新键扣第二次款。
+      const queried = await requestAction('query-debt-repayment-result', {
+        originalIdempotencyKey: commandKey
+      })
+      if (isRecord(responseDataBlock(queried).debtRepayment)) direct = queried
+    }
+    const repaid = responseDataBlock(direct).debtRepayment || {}
+    if (['success', 'succeeded'].includes(resultStatus(direct)) && repaid.repaymentNo) {
+      checkoutRequiresRootReload.value = true
+      checkoutLocalOutcome.value = {
+        status: 'succeeded', message: resultMessage(direct, '欠款补交成功。'),
+        completionDescription: '本次欠款补交已完成。',
+        requestNo: String(repaid.repaymentNo),
+        checkoutRequestId: String(repaid.checkoutRequestId || ''),
+        originalIdempotencyKey: commandKey,
+        canClose: true, canRetry: false
+      }
+    }
+    return direct
+  }
+
   // 普通收银不再有服务端结账草稿、准备请求或恢复请求。所有普通销售、
   // 权益、混合和卡操作必须已经走本地快照分支；没有快照时直接阻断，
   // 不允许旧版本/旧投影路径重新进入主流程。
@@ -6014,9 +6086,8 @@ async function requestCheckoutAction({ action, payload }) {
     }
     actionCurrent = {
       checkoutRequestVersion: Number(checkoutRequestVersion(debtSnapshotFallback) || 0),
-      commandContexts: Array.isArray(debtSnapshotFallback.commandContexts)
-        ? clonePlain(debtSnapshotFallback.commandContexts)
-        : []
+      // 热更新恢复也不把旧工作台版本重新带进欠款补交命令。
+      commandContexts: []
     }
   }
   if (!actionSession || !actionCurrent) {
@@ -6064,7 +6135,7 @@ async function requestCheckoutAction({ action, payload }) {
     // Follow-up commands must not replay that plan as client contexts: their
     // authorities are rebuilt from the persisted checkout request instead.
     const checkoutContexts = isDebtRepaymentCheckout.value
-      ? actionCurrent.commandContexts
+      ? []
       : checkoutSubmissionCommandContexts(actionCurrent.commandContexts)
     if (!isDebtRepaymentCheckout.value && !checkoutContexts) {
       return {
@@ -6342,6 +6413,54 @@ async function openCheckoutFromService(event = {}) {
 
 async function openPreparedCheckout(event = {}) {
   const detail = event.detail || {}
+  if (detail.businessType === 'debt_repayment' && isRecord(detail.localRepayment)) {
+    const intent = detail.localRepayment
+    const debtId = Number(intent.debtRecordId || 0)
+    const memberId = Number(intent.memberId || 0)
+    const amount = Number(intent.amount || 0)
+    const date = String(intent.businessDate || '')
+    if (!Number.isSafeInteger(debtId) || debtId <= 0
+      || !Number.isSafeInteger(memberId) || memberId <= 0
+      || !Number.isSafeInteger(amount) || amount <= 0
+      || memberId !== Number(member.value?.id || member.value?.memberId || 0)
+      || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+        detail: { status: 'failed', message: '本次欠款资料已变化，请重新打开欠款明细。' }
+      }))
+      return
+    }
+    // 只有一条本次欠款业务行。收款方式追加到同一个 lines 数组；
+    // 下一步到最终确认之间不发任何写命令，也不绑定旧工作台版本。
+    const line = {
+      id: `local-debt-${debtId}`, lineRole: 'sale', sourceType: 'card',
+      sourceId: debtId, name: '欠款补交', quantity: 1,
+      originalAmount: amount, finalAmount: amount, amount,
+      lineAmountCents: amount * 100, originalLineAmountCents: amount * 100,
+      debtAmountCents: 0
+    }
+    localCheckoutPreview.value = {
+      localDraftPreview: true, businessType: 'debt_repayment', status: 'editing',
+      rechargeDebt: intent.rechargeDebt === true,
+      member: clonePlain(member.value || {}), memberId, customerMode: 'member',
+      occurredAt: Math.floor(Date.now() / 1000), businessDate: date,
+      repaymentAmount: amount,
+      salespersonAllocations: clonePlain(intent.salespersonAllocations || []),
+      sourceDocument: { type: 'debt_repayment', id: String(debtId), no: String(intent.record?.debtNo || '') },
+      lines: [line], orderLines: [line],
+      summary: { originalAmount: amount, discountAmount: 0, receivableAmount: amount },
+      debtAmount: 0, balancePaymentAmount: 0,
+      finalChanges: [],
+      composition: { code: 'sale_only', lineRoles: ['sale'], hasSale: true,
+        hasEntitlement: false, primaryAction: 'collect_payment', primaryActionLabel: '确认还款' },
+      payment: { methods: localCheckoutPaymentMethods(), selectedLines: [] },
+      sourceEnabled: true, sourceSelectable: true
+    }
+    checkoutLocalOutcome.value = {}
+    localCheckoutPaymentOperations.value = []
+    checkoutReceiptSnapshot.value = null
+    isCheckoutOpen.value = true
+    return
+  }
   let snapshot = clonePlain(detail.checkoutSnapshot)
   if (detail.businessType !== 'debt_repayment' && !isCompleteCheckoutPreparation(snapshot, detail.preparationRequestId)) {
     await requestAction('open-cashier-workbench', { silent: true })

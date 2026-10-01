@@ -2708,7 +2708,6 @@ function isCashierWorkspaceAction(action) {
     'resume-hang-order',
     'void-hang-order',
     'prepare-service-completion',
-    'prepare-debt-repayment',
     'checkout-step-back',
     'checkout-step-next',
     'open-balance-payment',
@@ -2733,7 +2732,6 @@ function isCashierWorkspaceAction(action) {
   ]
   return cashierWorkspaceActions.includes(action)
     || action === 'submit-recharge'
-    || action === 'prepare-recharge-debt-repayment'
     || action === 'submit-recharge-checkout'
     || action === 'submit-recharge-debt-repayment'
     || action === 'submit-direct-gift'
@@ -2763,10 +2761,10 @@ function resolveCommandContexts(action, payload) {
     return { invalid: false, contexts: [] }
   }
   // 欠款补交从当前欠款明细进入。选客和明细都是浏览器局部投影，不能把
-  // 工作台或欠款的展示版本当成准入条件；服务端会在同一事务中锁定欠款、
-  // 按最新未还金额生成唯一收款草稿。否则跨店或刷新后的正常欠款会被前端
-  // 自动重载工作台并错误清成游客。
-  if (action === 'prepare-debt-repayment' || action === 'submit-debt-repayment') {
+  // 工作台或欠款的展示版本当成准入条件；最终事务才锁定欠款及余额。
+  // 新补交请求没有服务端草稿，不能在网关推导旧版本上下文。
+  if (action === 'submit-debt-repayment'
+    || (action === 'submit-recharge-debt-repayment' && isRecord(payload?.checkoutSnapshot))) {
     return { invalid: false, contexts: [] }
   }
   // Project replacement is a live entitlement mutation. Its handler locks
@@ -2847,7 +2845,7 @@ function resolveCommandContexts(action, payload) {
   // member and member balance only, so sending a synthetic debt_record context
   // would be rejected before the command can reach that server-side guard.
   if ((payload.debtRecordId || payload.debtItemId)
-    && !['submit-recharge-debt-repayment', 'prepare-recharge-debt-repayment'].includes(action)) {
+    && action !== 'submit-recharge-debt-repayment') {
     contexts.push(buildCommandContext('debt_record', payload.debtRecordId || payload.debtItemId))
   }
 
@@ -2890,7 +2888,7 @@ function resolveCommandContexts(action, payload) {
     return { invalid: false, contexts: [] }
   }
 
-  if ((action === 'submit-recharge' || action === 'prepare-recharge-debt-repayment'
+  if ((action === 'submit-recharge'
     || action === 'submit-recharge-checkout'
     || action === 'submit-recharge-debt-repayment' || action === 'submit-direct-gift') && payload.memberId) {
     contexts.push(buildCommandContext('member', payload.memberId))
@@ -3645,9 +3643,8 @@ export async function requestCashierV3Action(action, payload = {}) {
   // 它不接受浏览器工作台版本，因此空 contexts 是这个命令的正常合同，
   // 不能误判为“缺少版本”后刷新整个工作台并把当前会员覆盖为游客。
   const serverLockedDebtRepaymentPreparation = [
-    'prepare-debt-repayment',
-    'prepare-recharge-debt-repayment',
-    'submit-debt-repayment'
+    'submit-debt-repayment',
+    'submit-recharge-debt-repayment'
   ].includes(canonicalAction)
   // 预约只是单据资料保存。它不依赖收银工作台或预约资源版本，直接按
   // 服务端单据写入结果处理，也不应因工作台投影未同步而拒绝提交。

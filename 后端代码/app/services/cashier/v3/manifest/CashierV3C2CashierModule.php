@@ -67,7 +67,6 @@ class CashierV3C2CashierModule implements CashierV3ActionModule
 
         // ---- 结账流程 ----
         foreach ([
-            'prepare-debt-repayment',
             'checkout-step-back',
             'checkout-step-next',
             'toggle-combination-payment',

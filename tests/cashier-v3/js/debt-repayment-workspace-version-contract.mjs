@@ -15,10 +15,11 @@ assert.ok(
   '欠款补交准备不得重读工作台并让后续命令携带过期 workspace 版本'
 )
 assert.ok(
-  preparation.includes("'prepare-recharge-debt-repayment'")
-    && preparation.includes("'prepare-debt-repayment'")
-    && preparation.includes('prepared?.preparationRequestId'),
-  '欠款补交必须直接使用统一准备命令返回的交接标识'
+  preparation.includes('localRepayment: payload')
+    && !preparation.includes("'prepare-recharge-debt-repayment'")
+    && !preparation.includes("'prepare-debt-repayment'")
+    && !preparation.includes('prepared?.preparationRequestId'),
+  '下一步必须只交接本地快照，不得创建服务端草稿或比较旧工作台版本'
 )
 
 console.log('DEBT_REPAYMENT_WORKSPACE_VERSION_CONTRACT_OK')

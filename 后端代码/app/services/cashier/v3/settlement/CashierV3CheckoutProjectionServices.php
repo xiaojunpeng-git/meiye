@@ -417,11 +417,14 @@ final class CashierV3CheckoutProjectionServices
             64,
             'request.state_context_id'
         );
-        $workspaceVersion = self::positiveInt(
+        $authoritySnapshotVersion = self::positiveInt(
             $request['authority_snapshot_version'] ?? null,
             'request.authority_snapshot_version'
         );
-        $workspaceCurrentVersion = self::positiveInt(
+        $isServerLockedDebtSnapshot = (string)($request['source_document_type'] ?? '') === 'debt_repayment';
+        // 欠款补交投影来自本次 request_id 的持久化快照；工作台显示版本
+        // 既不是其权威事实，也不参与准入。其他结账仍保留原有版本校验。
+        $workspaceCurrentVersion = $isServerLockedDebtSnapshot ? 0 : self::positiveInt(
             $aggregate['workspaceCurrentVersion'] ?? null,
             'workspaceCurrentVersion'
         );
@@ -429,16 +432,13 @@ final class CashierV3CheckoutProjectionServices
         // 欠款补交的 authority_snapshot_version 是事务内锁住的当前欠款
         // 快照标识，不是浏览器 cashier_workspace 的版本号。按 request_id
         // 读取时只允许这一个已持久化快照，禁止再拿工作台版本比较或兜底。
-        $isServerLockedDebtSnapshot = (string)($request['source_document_type'] ?? '') === 'debt_repayment';
-        $workspaceVersionInvalid = $isServerLockedDebtSnapshot
-            ? false
-            : ($exactRequestProjection
-            ? $workspaceCurrentVersion < $workspaceVersion
-            : $workspaceCurrentVersion <= $workspaceVersion);
-        if ($workspaceVersion >= PHP_INT_MAX
+        $workspaceVersionInvalid = !$isServerLockedDebtSnapshot && ($exactRequestProjection
+            ? $workspaceCurrentVersion < $authoritySnapshotVersion
+            : $workspaceCurrentVersion <= $authoritySnapshotVersion);
+        if ($authoritySnapshotVersion >= PHP_INT_MAX
             || $workspaceVersionInvalid
             || (!$isServerLockedDebtSnapshot && !$exactRequestProjection
-                && $workspaceCurrentVersion !== $workspaceVersion + 1)) {
+                && $workspaceCurrentVersion !== $authoritySnapshotVersion + 1)) {
             throw self::failure('checkout_projection_workspace_version_drift');
         }
         $authorityFingerprint = self::fingerprint(
@@ -1172,12 +1172,11 @@ final class CashierV3CheckoutProjectionServices
                 ],
             ],
             'finalChanges' => [],
-            'commandContexts' => array_merge([
-                [
-                    'kind' => 'cashier_workspace',
-                    'id' => $workspaceId,
-                    'expectedVersion' => $workspaceCurrentVersion,
-                ],
+            'commandContexts' => array_merge($isServerLockedDebtSnapshot ? [] : [[
+                'kind' => 'cashier_workspace',
+                'id' => $workspaceId,
+                'expectedVersion' => $workspaceCurrentVersion,
+            ]], [
                 [
                     'kind' => 'checkout_request',
                     'id' => $requestId,

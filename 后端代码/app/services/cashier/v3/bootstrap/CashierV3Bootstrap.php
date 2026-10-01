@@ -26,7 +26,6 @@ use app\services\cashier\v3\member\CashierV3MemberModule;
 use app\services\cashier\v3\member\CashierV3DirectGiftReconciliationConsumer;
 use app\services\cashier\v3\member\CashierV3RechargeModule;
 use app\services\cashier\v3\member\CashierV3RechargeCheckoutModule;
-use app\services\cashier\v3\settlement\CashierV3RechargeDebtRepaymentServices;
 use app\services\cashier\v3\cashier\CashierV3CashierModule;
 use app\services\cashier\v3\card\CashierV3CardOperationModule;
 use app\services\cashier\v3\hang\CashierV3HangModule;
@@ -321,7 +320,6 @@ class CashierV3Bootstrap
         CashierV3MemberModule::install($dispatcher, $assembler, $cashierWorkspace);
         CashierV3RechargeModule::install($dispatcher);
         CashierV3RechargeCheckoutModule::install($dispatcher);
-        CashierV3RechargeDebtRepaymentServices::install($dispatcher);
         CashierV3HangModule::install($dispatcher, $cashierWorkspace, $assembler);
         CashierV3ReservationModule::install($dispatcher, $assembler);
 

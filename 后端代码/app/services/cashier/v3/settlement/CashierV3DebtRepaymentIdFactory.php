@@ -16,11 +16,6 @@ final class CashierV3DebtRepaymentIdFactory
         $this->secret = $secret;
     }
 
-    public function draftId(string $tenantId, int $debtId, string $workspaceId): string
-    {
-        return $this->id('DRD', [$tenantId, (string)$debtId, $workspaceId]);
-    }
-
     public function repaymentId(string $tenantId, int $debtId, string $commandKey): string
     {
         return $this->id('DRP', [$tenantId, (string)$debtId, $commandKey]);

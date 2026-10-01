@@ -463,7 +463,8 @@ const checkoutRequestIdentity = computed(() => (
 // 结果未知时不再把收银员留在“查询原支付结果”按钮上。这个动作只清理
 // 当前未完成结账现场并回到空收银台；正式订单/收款事实仍由后端保留。
 const canRestartCheckout = computed(() => (
-  isUncertain.value && !isRechargeCheckout.value && Boolean(checkoutRequestIdentity.value)
+  isUncertain.value && !isDebtRepayment.value && !isRechargeCheckout.value
+  && Boolean(checkoutRequestIdentity.value)
 ))
 // 失败但未发生任何成功收款时，允许操作人直接放弃本次未完成现场。
 // 部分收款、结果未知和成功结账仍必须保留原请求，不能从这里清空。
@@ -484,7 +485,7 @@ const originalCheckoutIdempotencyKey = computed(() => (
 const showSubmissionLongRunning = computed(() => isSubmitRequested.value && submissionLongRunning.value && !isResultStep.value)
 const canQueryCheckoutResult = computed(() => (
   (isUncertain.value || isPaymentSucceededServicePending.value || showSubmissionLongRunning.value)
-  && (isRechargeCheckout.value || Boolean(checkoutRequestIdentity.value))
+  && (isDebtRepayment.value || isRechargeCheckout.value || Boolean(checkoutRequestIdentity.value))
   && Boolean(originalCheckoutIdempotencyKey.value)
 ))
 const resultTitle = computed(() => {
@@ -1248,7 +1249,7 @@ onBeforeUnmount(() => {
     <main class="checkout-overlay__content">
       <section v-if="!hasCurrentStepSnapshot && !isResultStep" class="checkout-change-warning">
         <strong>{{ isDebtRepayment ? '还款快照尚未完整加载' : '结账快照尚未完整加载' }}</strong>
-        <span>{{ checkoutSnapshotWarning }}必须来自后端本次{{ isDebtRepayment ? '还款' : '结账' }}快照；完整加载前不能继续或提交。</span>
+        <span>{{ checkoutSnapshotWarning }}必须来自本次{{ isDebtRepayment ? '页面还款' : '结账' }}快照；完整加载前不能继续或提交。</span>
       </section>
 
       <section v-if="currentStep === 1" class="checkout-card checkout-order-confirmation">

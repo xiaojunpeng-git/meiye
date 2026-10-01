@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace app\services\cashier\v3\settlement;
 
 use app\services\cashier\v3\CashierV3CommandException;
-use app\services\cashier\v3\CashierV3ActionDispatcher;
 use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
@@ -17,9 +16,6 @@ use app\services\cashier\v3\fact\CashierV3CheckoutFactIdFactory;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactPlanV1;
 use app\services\cashier\v3\fact\ThinkPhpCashierV3CheckoutFactRepository;
 use app\services\cashier\v3\registry\CashierV3ContextPolicy;
-use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementKernel;
-use app\services\cashier\v3\settlement\CashierV3CheckoutVerifiedSourceSet;
-use app\services\cashier\v3\settlement\ThinkPhpCashierV3CheckoutRequestRepository;
 use app\services\user\UserBalanceAtomicServices;
 use think\facade\Db;
 
@@ -32,130 +28,7 @@ use think\facade\Db;
 final class CashierV3RechargeDebtRepaymentServices
 {
     public const ACTION = 'submit-recharge-debt-repayment';
-    public const PREPARE_ACTION = 'prepare-recharge-debt-repayment';
     private const PAYMENT_METHODS = ['unionpay','wechat','alipay','dianping_voucher','douyin_voucher','partner_collection','other_collection'];
-
-    public static function install(CashierV3ActionDispatcher $dispatcher): void
-    {
-        // The unified checkout command is registered by CashierV3CashierModule,
-        // where the persisted checkout request can be converted into the
-        // dedicated recharge-repayment input before this service executes.
-    }
-
-    /**
-     * Create the same eventless checkout draft used by sales debt repayment.
-     * The final settlement still delegates to this service so recharge debts
-     * keep their dedicated balance-credit and projection semantics.
-     */
-    public function prepareCheckoutInTx(array $scope): array
-    {
-        CashierV3TransactionGuard::assertInTransaction('rechargeDebtRepayment.prepareCheckoutInTx');
-        $operator = $scope['operator_scope'] ?? null;
-        $dataScope = $scope['data_scope'] ?? null;
-        if (!$operator instanceof CashierV3OperatorScope || !$dataScope instanceof CashierV3DataScopeContext
-            || !$dataScope->allowsStore($operator->storeId())) {
-            throw self::failure('recharge_repayment_scope_incomplete');
-        }
-        $payload = (array)($scope['payload'] ?? []);
-        $now = time();
-        $businessDate = self::businessDate($payload['businessDate'] ?? null, $now);
-        $memberId = (int)($payload['memberId'] ?? 0);
-        $debtId = (int)($payload['debtRecordId'] ?? $payload['debtId'] ?? 0);
-        $amountCents = self::inputCents($payload['amount'] ?? null);
-        $stateContextId = trim((string)($scope['state_context_id'] ?? ''));
-        $idempotencyKey = trim((string)($scope['idempotency_key'] ?? $payload['preparationRequestId'] ?? ''));
-        if ($memberId <= 0 || $debtId <= 0 || $amountCents <= 0 || $stateContextId === '' || $idempotencyKey === '') {
-            throw self::failure('recharge_repayment_prepare_payload_invalid');
-        }
-        $debt = (array)Db::name('store_debt')->where('id', $debtId)->lock(true)->find();
-        $map = (array)Db::name('cashier_v3_recharge_debt_authority')->where('debt_id', $debtId)->lock(true)->find();
-        if (!$debt || !$map || (int)($debt['order_id'] ?? -1) !== 0
-            || (int)($debt['uid'] ?? 0) !== $memberId || (int)($debt['store_id'] ?? 0) !== $operator->storeId()
-            || (int)($map['member_id'] ?? 0) !== $memberId || (int)($map['store_id'] ?? 0) !== $operator->storeId()
-            || (string)($map['tenant_id'] ?? '') !== $dataScope->tenantId()) {
-            throw self::failure('recharge_repayment_source_mismatch');
-        }
-        $total = self::cents((string)($debt['total_debt'] ?? ''));
-        $repaid = self::cents((string)($debt['repaid_debt'] ?? ''));
-        if ((int)($debt['status'] ?? -1) !== 0 || $amountCents > $total - $repaid || $amountCents <= 0) {
-            throw self::failure('recharge_repayment_amount_outdated');
-        }
-        $rechargeId = (int)($map['recharge_id'] ?? 0);
-        $recharge = (array)Db::name('user_recharge')->where('id', $rechargeId)->lock(true)->find();
-        if (!$recharge || (int)($recharge['uid'] ?? 0) !== $memberId || (int)($recharge['store_id'] ?? 0) !== $operator->storeId()) {
-            throw self::failure('recharge_repayment_recharge_missing');
-        }
-        $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($operator->storeId(), $stateContextId);
-        $workspaceVersion = 0;
-        foreach ((array)($scope['contexts'] ?? []) as $context) {
-            if ((string)($context['kind'] ?? '') === 'cashier_workspace' && (int)($context['expected_version'] ?? 0) > 0) {
-                $workspaceVersion = (int)$context['expected_version'];
-                break;
-            }
-        }
-        if ($workspaceVersion <= 0) throw self::failure('recharge_repayment_workspace_version_missing');
-        $storeName = (string)Db::name('system_store')->where('id', $operator->storeId())->value('name');
-        $organization = (array)Db::name('organization')->where('id', $operator->organizationId())->where('is_del', 0)->field('id,pid,name')->find();
-        if (!$organization) throw self::failure('recharge_repayment_organization_missing');
-        $organizationIds = [];
-        $seenOrganizations = [];
-        $cursor = $organization;
-        while ($cursor) {
-            $organizationId = (int)($cursor['id'] ?? 0);
-            if ($organizationId <= 0 || isset($seenOrganizations[$organizationId])) throw self::failure('recharge_repayment_organization_path_invalid');
-            $seenOrganizations[$organizationId] = true;
-            $organizationIds[] = $organizationId;
-            $parentId = (int)($cursor['pid'] ?? 0);
-            if ($parentId <= 0) break;
-            $cursor = (array)Db::name('organization')->where('id', $parentId)->where('is_del', 0)->field('id,pid,name')->find();
-            if (!$cursor) throw self::failure('recharge_repayment_organization_path_invalid');
-        }
-        $member = (array)Db::name('user')->where('uid', $memberId)->field('real_name,nickname,phone')->find();
-        $memberName = trim((string)($member['real_name'] ?? '')) ?: trim((string)($member['nickname'] ?? '')) ?: trim((string)($member['phone'] ?? ''));
-        $operatorProfile = $dataScope->operatorProfile();
-        $operatorName = trim((string)($operatorProfile['staff_name'] ?? $operatorProfile['real_name'] ?? $operatorProfile['name'] ?? ''));
-        if ($storeName === '' || $memberName === '' || $operatorName === '') throw self::failure('recharge_repayment_dimension_missing');
-        $snapshot = [
-            'contractVersion' => CashierV3CheckoutSettlementKernel::AUTHORITY_CONTRACT_VERSION,
-            'authorityOrigin' => 'server_final_lock_snapshot', 'authoritySnapshotVersion' => $workspaceVersion,
-            'authoritySnapshotFingerprint' => '', 'tenantId' => $dataScope->tenantId(), 'organizationId' => $operator->organizationId(),
-            'organizationPath' => '/' . implode('/', array_reverse($organizationIds)) . '/', 'organizationName' => (string)$organization['name'], 'storeId' => $operator->storeId(),
-            'storeName' => $storeName, 'workspaceId' => $workspaceId, 'stateContextId' => $stateContextId,
-            'permissionSnapshotFingerprint' => $dataScope->permissionVersion(), 'memberId' => $memberId, 'memberName' => $memberName,
-            'operatorId' => $operator->operatorId(), 'operatorName' => $operatorName, 'businessDate' => $businessDate,
-            'businessTimezone' => 'Asia/Shanghai', 'occurredAt' => $now, 'recordedAt' => $now, 'orderNote' => '',
-            'supplement' => ['enabled' => false, 'reason' => '', 'operatorId' => 0, 'operatorNameSnapshot' => '', 'operatedAt' => 0],
-            'sourceDocument' => ['type' => 'debt_repayment', 'id' => (string)$debtId, 'no' => (string)($debt['debt_no'] ?? $map['debt_no'] ?? ('QK' . $debtId))],
-            'saleLines' => [[
-                'authorityKey' => 'recharge-debt-repayment:' . $debtId, 'saleClassification' => 'formal_sale', 'sourceType' => 'card',
-                'sourceId' => $debtId, 'sourceVersion' => max(1, (int)($debt['update_time'] ?? 0)), 'quantity' => 1,
-                'originalAmountCents' => $amountCents, 'discountAmountCents' => 0,
-                'couponUserId' => 0, 'couponNameSnapshot' => '', 'couponDiscountCents' => 0,
-                'saleAmountCents' => $amountCents,
-                'debtAmountCents' => 0, 'configuredCostCents' => 0, 'priceChangeReason' => '', 'priceChangedBy' => 0,
-                'priceChangedByNameSnapshot' => '', 'priceChangedAt' => 0, 'sourceNameSnapshot' => '充值欠款补交',
-                'sourceCodeSnapshot' => (string)($map['debt_no'] ?? ''), 'categoryIdSnapshot' => 0, 'categoryNameSnapshot' => '',
-                'serviceObject' => '', 'craftsmen' => [], 'isExperience' => 0,
-            ]],
-            'entitlementLines' => [], 'paymentDetails' => [],
-            'balanceDeduction' => ['authorityKey' => '', 'accountId' => '', 'accountVersion' => 0, 'amountCents' => 0],
-            'debt' => ['authorityKey' => '', 'policyVersion' => 0, 'amountCents' => 0],
-        ];
-        $snapshot['authoritySnapshotFingerprint'] = CashierV3CheckoutSettlementKernel::authorityFingerprint($snapshot);
-        $current = (new ThinkPhpCashierV3CheckoutRequestRepository())->lockCurrentForKernelInTx('', $idempotencyKey, $operator, $dataScope);
-        $kernel = CashierV3CheckoutSettlementKernel::saveDraft([
-            'contractVersion' => CashierV3CheckoutSettlementKernel::CONTRACT_VERSION,
-            'operation' => CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 'idempotencyKey' => $idempotencyKey,
-            'workspaceId' => $workspaceId, 'stateContextId' => $stateContextId, 'permissionSnapshotFingerprint' => $dataScope->permissionVersion(),
-        ], $snapshot, $current, $this->secret());
-        $repository = new ThinkPhpCashierV3CheckoutRequestRepository();
-        $sources = CashierV3CheckoutVerifiedSourceSet::fromServerVerifiedAuthorityRows($dataScope->tenantId(), $operator->storeId(), []);
-        $persisted = $repository->persistKernelPlanInTx($kernel, $sources, $operator, $dataScope);
-        return ['contractVersion' => 'cashier-v3-recharge-debt-repayment-prepare-v1', 'preparationRequestId' => $idempotencyKey,
-            'checkoutRequestId' => (string)$kernel['requestId'], 'checkoutRequestVersion' => (int)$kernel['requestVersion'],
-            'requestStatus' => (string)$kernel['requestStatus'], 'composition' => (string)$kernel['composition'],
-            'replayed' => !empty($kernel['replayed']) || !empty($persisted['replayed']), 'eventless' => true];
-    }
 
     public function submitInTx(array $scope): array
     {

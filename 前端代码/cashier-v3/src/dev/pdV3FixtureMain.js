@@ -1054,52 +1054,6 @@ function createCheckoutSnapshot(state, name, options = {}) {
   }
 }
 
-function makeDebtRepaymentCheckoutState(payload = {}) {
-  return nextRootState((state) => {
-    const snapshot = state.memberCenter?.debtSnapshot || {}
-    const record = (snapshot.records || []).find((item) => String(item.id || item.debtItemId) === String(payload.debtRecordId || payload.debtItemId))
-    const amount = Number(payload.amount)
-    const remaining = Number(record?.remainingDebtAmount || 0)
-    if (!record || !Number.isInteger(amount) || amount <= 0 || amount > remaining) return
-    const orderLine = {
-      id: record.id,
-      lineRole: 'sale',
-      name: record.summary,
-      kind: '欠款补交',
-      quantity: 1,
-      originalAmount: amount,
-      finalAmount: amount,
-      serviceSource: record.sourceLabel,
-      salespersonSummary: '按原销售分配',
-      couponSummary: '不适用',
-      debtSummary: record.debtNo
-    }
-    state.cashier.checkout = {
-      ...createCheckoutSnapshot(state, 'checkout-order', {
-        requestId: `PD-DEBT-REPAY-${record.id}`,
-        preparationRequestId: payload.preparationRequestId,
-        orderLines: [orderLine],
-        cartSummary: {
-          selectedCount: 1,
-          originalAmount: amount,
-          discountAmount: 0,
-          receivableAmount: amount
-        },
-        paymentLines: [createPaymentLine('pd-debt-payment-1', '微信', amount, '待收款')],
-        includeServiceContext: false
-      }),
-      businessType: 'debt_repayment',
-      debtRecordId: record.id,
-      debtItemId: record.debtItemId,
-      repaymentAmount: String(amount),
-      requestNo: `HK${String(Date.now()).slice(-12)}`,
-      orderNote: '欠款补交使用统一收款明细。',
-      completionLabel: '还款成功',
-      completionDescription: '本次还款已完成，欠款余额和补交记录已重新读取。'
-    }
-  })
-}
-
 function completeDebtRepayment(state, checkout) {
   if (checkout.businessType !== 'debt_repayment') return
   const snapshot = state.memberCenter?.debtSnapshot
@@ -2970,16 +2924,6 @@ const rawFixtureAdapter = {
 
     if (action === 'continue-service-checkout') {
       return successEnvelope(nextRootState(() => {}))
-    }
-
-    if (action === 'prepare-debt-repayment') {
-      const snapshot = cashierV3State.memberCenter?.debtSnapshot || {}
-      const record = (snapshot.records || []).find((item) => String(item.id || item.debtItemId) === String(payload.debtRecordId || payload.debtItemId))
-      const amount = Number(payload.amount)
-      if (!record || !Number.isInteger(amount) || amount <= 0 || amount > Number(record.remainingDebtAmount || 0)) {
-        return failedEnvelope('PD_FIXTURE_DEBT_REPAYMENT_INVALID', '还款金额或欠款记录已经变化，请重新打开欠款明细。')
-      }
-      return successEnvelope(makeDebtRepaymentCheckoutState(payload))
     }
 
     if (action === 'checkout-step-next' || action === 'checkout-step-back') {

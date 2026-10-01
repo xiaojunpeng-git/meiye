@@ -60,10 +60,10 @@ try {
     ok('Bootstrap::dispatcher 同一实例', $d1 === $d2, '', 'PG-13-01');
     ok('Dispatcher 类型正确', $d1 instanceof CashierV3ActionDispatcher, '', 'CR-4-01');
     ok(
-        '销售欠款补交准备与提交在生产 Composition Root 完整激活',
-        $d1->handlers()->hasCommand('prepare-debt-repayment')
+        '销售欠款补交仅最终提交在生产 Composition Root 激活',
+        !$d1->handlers()->hasCommand('prepare-debt-repayment')
             && $d1->handlers()->hasCommand('submit-debt-repayment')
-            && $d1->policies()->has('prepare-debt-repayment')
+            && !$d1->policies()->has('prepare-debt-repayment')
             && $d1->policies()->has('submit-debt-repayment'),
         json_encode([
             'handlers' => $d1->handlers()->registeredActions(),

@@ -693,12 +693,6 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             throw self::failure('checkout_projection_request_invalid');
         }
 
-        $workspaceVersion = (int)Db::name(CashierV3ResourceVersionServices::TABLE)
-            ->where('scope_type', CashierV3ResourceScope::TYPE_STORE)
-            ->where('scope_id', (string)$operatorScope->storeId())
-            ->where('resource_kind', 'cashier_workspace')
-            ->where('resource_id', $workspaceId)
-            ->value('current_version');
         $request = Db::name(self::REQUEST_TABLE)
             ->where('request_id', $requestId)
             ->where('tenant_id', $dataScope->tenantId())
@@ -718,6 +712,15 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             ['cashier_snapshot', 'debt_repayment'],
             true
         );
+        $isDebtRepayment = (string)($request['source_document_type'] ?? '') === 'debt_repayment';
+        // 按 request_id 读取欠款收款时，只核对该持久化请求与明细的前后
+        // 一致性；不读取无关的 cashier_workspace 显示版本。
+        $workspaceVersion = $isDebtRepayment ? 0 : (int)Db::name(CashierV3ResourceVersionServices::TABLE)
+            ->where('scope_type', CashierV3ResourceScope::TYPE_STORE)
+            ->where('scope_id', (string)$operatorScope->storeId())
+            ->where('resource_kind', 'cashier_workspace')
+            ->where('resource_id', $workspaceId)
+            ->value('current_version');
         if (!$isSnapshot && $workspaceVersion <= 1) {
             return null;
         }
@@ -747,7 +750,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             ->order('source_kind asc,source_id asc,source_role asc')
             ->select());
 
-        $workspaceVersionAfter = (int)Db::name(CashierV3ResourceVersionServices::TABLE)
+        $workspaceVersionAfter = $isDebtRepayment ? 0 : (int)Db::name(CashierV3ResourceVersionServices::TABLE)
             ->where('scope_type', CashierV3ResourceScope::TYPE_STORE)
             ->where('scope_id', (string)$operatorScope->storeId())
             ->where('resource_kind', 'cashier_workspace')
@@ -781,19 +784,22 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
             return null;
         }
 
-        return [
+        $projection = [
             'request' => is_array($request) ? $request : (array)$request,
             'lines' => $lines,
             'payments' => $payments,
             'sources' => $sources,
-            'workspaceCurrentVersion' => $isSnapshot
-                ? max($workspaceVersion, 1)
-                : $workspaceVersion,
             // Only a committed command receipt may select this exact request.
             // Workspace-only draft settings can legitimately advance beyond
             // the original checkout authority snapshot without rebuilding it.
             'exactRequestProjection' => true,
         ];
+        if (!$isDebtRepayment) {
+            $projection['workspaceCurrentVersion'] = $isSnapshot
+                ? max($workspaceVersion, 1)
+                : $workspaceVersion;
+        }
+        return $projection;
     }
 
     public function lockCurrentForKernelInTx(

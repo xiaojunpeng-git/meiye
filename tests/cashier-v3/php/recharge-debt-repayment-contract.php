@@ -32,7 +32,7 @@ $required = [
     "'sales_performance_allocated'",
     "'actual_performance_recorded'",
     'cashier_salesperson_enabled',
-    '$result[\'data\'][\'debtRepayment\'] = array_merge',
+    'rechargeSnapshotResult',
     "'status' => 'succeeded'",
 ];
 foreach ($required as $needle) {
@@ -66,11 +66,10 @@ if (strpos($source, 'recharge_repayment_salespeople_weight_invalid') !== false) 
     fwrite(STDERR, "recharge repayment must not restore one global salesperson 100% gate\\n");
     exit(1);
 }
-foreach (["'couponUserId' => 0", "'couponNameSnapshot' => ''", "'couponDiscountCents' => 0"] as $needle) {
-    if (strpos($source, $needle) === false) {
-        fwrite(STDERR, "recharge repayment kernel sale-line coupon snapshot missing: {$needle}\n");
-        exit(1);
-    }
+// 充值欠款最终确认不再生成旧结账 sale-line 草稿；收款事实由提交事务生成。
+if (strpos($source, 'prepareCheckoutInTx') !== false || strpos($debtSource, 'submitRechargeDebtThroughCheckout') !== false) {
+    fwrite(STDERR, "recharge repayment legacy checkout draft branch remains\n");
+    exit(1);
 }
 if (!is_file($snapshotMigration) || strpos((string)file_get_contents($snapshotMigration), 'eb_cashier_v3_recharge_debt_repayment') === false) {
     fwrite(STDERR, "missing recharge repayment salesperson snapshot migration\n");
@@ -92,7 +91,7 @@ if (strpos($balance, "'recharge_debt_repayment'") === false) {
     exit(1);
 }
 if (strpos($bridgeSource, "submit-recharge-debt-repayment", strpos($bridgeSource, 'debtRecordId')) === false
-    || strpos($bridgeSource, "prepare-recharge-debt-repayment") === false) {
+    || strpos($bridgeSource, "prepare-recharge-debt-repayment") !== false) {
     fwrite(STDERR, "recharge repayment must not require an undeclared debt_record context\n");
     exit(1);
 }

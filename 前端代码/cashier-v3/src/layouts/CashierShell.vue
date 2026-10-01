@@ -1499,71 +1499,32 @@ function closeMemberDebt() {
   initialDebtRecordId.value = ''
 }
 
-async function openDebtRepaymentCheckout(preparationRequestId, debtRecordId, checkoutSnapshot) {
-  const handoff = {
-    businessType: 'debt_repayment',
-    preparationRequestId,
-    debtRecordId,
-    // 唯一来源：本次 prepare 命令返回的服务端持久化结账快照。
-    checkoutSnapshot
+async function prepareDebtRepayment(payload = {}) {
+  if (isDebtRepaymentPreparing.value) return { success: false, message: '正在准备收款，请勿重复操作。' }
+  // “下一步”只冻结浏览器内金额、业务日和销售人。后端在最终确认的
+  // 单一事务内锁定当前欠款再复核，不再创建编辑中草稿或比较工作台版本。
+  const debtId = Number(payload.debtRecordId || 0)
+  const memberId = Number(payload.memberId || 0)
+  const amount = Number(payload.amount || 0)
+  if (!Number.isSafeInteger(debtId) || debtId <= 0
+    || !Number.isSafeInteger(memberId) || memberId <= 0
+    || !Number.isSafeInteger(amount) || amount <= 0
+    || !/^\d{4}-\d{2}-\d{2}$/.test(String(payload.businessDate || ''))) {
+    return { result: { status: 'failed', message: '请选择有效欠款、金额和业务日期。' } }
   }
+  const handoff = { businessType: 'debt_repayment', localRepayment: payload }
   isMemberDebtOpen.value = false
   activeDebtMember.value = null
   initialDebtRecordId.value = ''
   if (route.name !== 'cashier-v3-cashier') {
-    // 跨页面事件会在工作台挂载前丢失。仅保存本次已准备草稿的交接标识，
-    // 收银工作台挂载后自行消费并重新读取权威结账快照。
+    // 跨路由时工作台尚未挂载，只在当前浏览器会话保存交接数据；
+    // 它不是服务端草稿，进入收款页后会被立即消费。
     window.sessionStorage.setItem('cashier-v3:prepared-checkout-handoff', JSON.stringify(handoff))
     window.location.hash = '#/cashier'
-    return
+    return { result: { status: 'succeeded' } }
   }
-  window.dispatchEvent(new CustomEvent('cashier-v3:open-prepared-checkout', {
-    detail: handoff
-  }))
-}
-
-async function prepareDebtRepayment(payload = {}) {
-  if (isDebtRepaymentPreparing.value) return { success: false, message: '正在准备收款，请勿重复操作。' }
-  const preparationRequestId = createCashierV3CommandId('CHECKOUT_PREPARE')
-  isDebtRepaymentPreparing.value = true
-  try {
-    const prepareAction = payload.rechargeDebt === true
-      ? 'prepare-recharge-debt-repayment'
-      : 'prepare-debt-repayment'
-    const result = await requestCashierV3Action(prepareAction, {
-      ...payload,
-      // 欠款补交的日期由补交弹层单独选择，并在准备草稿时冻结；不能用
-      // 收银工具栏的当前日期覆盖，否则历史补交会被错误落在当天。
-      businessDate: String(payload.businessDate || toolbarBusinessDate.value || ''),
-      preparationRequestId,
-      idempotencyKey: preparationRequestId,
-      silent: true
-    })
-    // 准备命令已经在服务端原子落下统一结账草稿；响应中的准备标识就是
-    // 本次交接凭证。不要再用一次根状态刷新决定是否能跳转，否则会员欠款
-    // 读模型的刷新可能清空弹层，却把已存在的收款草稿留在后台。
-    const responseEnvelope = resultEnvelope(result)
-    const prepared = responseEnvelope?.data?.debtRepaymentPreparation
-      || result?.data?.debtRepaymentPreparation
-      || result?.result?.data?.debtRepaymentPreparation
-    const checkoutSnapshot = responseEnvelope?.data?.checkoutSnapshot
-      || result?.data?.checkoutSnapshot
-      || result?.result?.data?.checkoutSnapshot
-    const preparedBusinessSucceeded = ['succeeded', 'success'].includes(resultStatus(result))
-    if (preparedBusinessSucceeded && prepared?.preparationRequestId && checkoutSnapshot) {
-      await openDebtRepaymentCheckout(
-        String(prepared.preparationRequestId),
-        payload.debtRecordId,
-        checkoutSnapshot
-      )
-      return result
-    }
-    // 服务端无法给出同一笔锁定快照时禁止进入收款页；不回读根状态、不猜测
-    // 历史草稿，也不以任何浏览器版本作为兜底。
-    return result
-  } finally {
-    isDebtRepaymentPreparing.value = false
-  }
+  window.dispatchEvent(new CustomEvent('cashier-v3:open-prepared-checkout', { detail: handoff }))
+  return { result: { status: 'succeeded' } }
 }
 
 async function loadMemberDetailTab(payload = {}) {

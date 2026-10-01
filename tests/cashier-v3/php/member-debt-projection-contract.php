@@ -43,7 +43,7 @@ if (strpos($summarySource, 'CashierV3MemberDebtProjectionServices') === false
     exit(1);
 }
 $projectionStart = strpos($moduleSource, "registerProjection('open-member-debt-repayment'");
-$projectionEnd = strpos($moduleSource, "if (\$handlers->hasCommand('prepare-debt-repayment')", $projectionStart);
+$projectionEnd = strpos($moduleSource, "if (\$handlers->hasCommand('submit-debt-repayment')", $projectionStart);
 $debtProjection = $projectionStart === false || $projectionEnd === false
     ? ''
     : substr($moduleSource, $projectionStart, $projectionEnd - $projectionStart);

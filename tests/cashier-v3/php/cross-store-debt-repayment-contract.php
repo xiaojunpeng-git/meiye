@@ -59,12 +59,12 @@ requireContains($void, '->where(\'store_id\', $operator->storeId())->lock(true)-
 requireContains($void, 'CashierV3CrossStoreEntitlementPolicy::enabled()', '作废必须按跨店策略校验原欠款来源。');
 requireNotContains($void, "Db::name('store_debt')->where('id', (int)\$row['debt_id'])->where('store_id', \$operator->storeId())", '作废不得要求原欠款属于当前收款门店。');
 
-requireContains($bridge, "action === 'prepare-debt-repayment' || action === 'submit-debt-repayment'", '欠款补交准备和提交不得依赖浏览器版本上下文。');
-requireContains($module, "'prepare-debt-repayment',\n            []", '欠款补交准备策略不得要求浏览器版本。');
+requireContains($bridge, "action === 'submit-debt-repayment'", '欠款补交最终提交不得依赖浏览器版本上下文。');
+requireNotContains($module, "'prepare-debt-repayment'", '欠款补交不能再创建服务端草稿。');
 requireContains($module, "'submit-debt-repayment',\n            []", '欠款补交提交策略不得要求浏览器版本。');
-requireContains($module, "'checkoutSnapshot' => \$checkoutSnapshot", '欠款补交必须返回本次持久化的唯一结账快照。');
+requireContains($repayment, "debt_repayment_checkout_snapshot_required", '欠款补交最终确认必须携带页面唯一快照。');
 requireNotContains($shell, 'const currentCheckout = state.cashier?.checkout', '欠款补交不得从浏览器根状态恢复旧结账快照。');
-requireContains($repayment, 'latestSnapshotVersion($debt)', '欠款补交准备必须使用刚锁定的最新欠款快照。');
+requireContains($repayment, '$this->lockDebtAuthority($debtId, $operator, $dataScope)', '欠款补交最终事务必须锁定当前欠款。');
 
 $debtOpenStart = strpos($shell, 'async function openMemberDebt(memberId = null)');
 $debtOpenEnd = strpos($shell, 'async function handleOpenMemberDebt', $debtOpenStart);

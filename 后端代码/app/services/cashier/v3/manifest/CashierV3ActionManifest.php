@@ -235,7 +235,6 @@ class CashierV3ActionManifest
                 'consumers' => [],
             ],
 
-            'prepare-recharge-debt-repayment' => $eventless($checkoutPreparation),
             // The checkout protocol is separate, while the successful domain
             // event remains recharge.completed from the same recharge authority.
             'submit-recharge-checkout' => [
@@ -285,7 +284,6 @@ class CashierV3ActionManifest
 
             // C2 | checkout editing remains browser-local; only final submit
             // reaches the settlement gateway.
-            'prepare-debt-repayment' => $eventless($checkoutPreparation),
             'checkout-step-back' => $eventless($checkoutPreparation),
             'checkout-step-next' => $eventless($checkoutPreparation),
             'toggle-combination-payment' => $eventless($checkoutPreparation),
