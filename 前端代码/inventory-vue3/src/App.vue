@@ -11,6 +11,7 @@ import InventoryBusinessModal from './components/InventoryBusinessModal.vue'
 import InventoryOperationalUnifiedQueryToolbar from './components/InventoryOperationalUnifiedQueryToolbar.vue'
 import InventoryRecipeModal from './components/InventoryRecipeModal.vue'
 import InventoryStoreSelector from './components/InventoryStoreSelector.vue'
+import { formatIntegerQuantity } from './quantityFormat'
 import { inventoryStatusLabel } from './statusLabels'
 import { inventoryApi, inventoryCommandIdempotencyKey, platformInventoryApi, setInventoryEmbeddedSessionToken, clearInventoryEmbeddedSessionToken } from './services/inventoryApi'
 import { UnifiedQueryDateRange, UnifiedQueryToolbar, useUnifiedQueryPage } from '@mohe/unified-query-vue3'
@@ -484,8 +485,8 @@ const stockTableFixed = computed(() => active.value === 'stock' && stockTableLay
 const stockSummaryRow = computed(() => [
   '合计',
   '-',
-  text(stockSummary.value.available_quantity, '0'),
-  integerCentsMoney(stockSummary.value.inventory_amount_cents),
+  formatIntegerQuantity(stockSummary.value.available_quantity),
+  centsMoney(stockSummary.value.inventory_amount_cents),
 ])
 const analysisBuckets = computed(() => activeStatisticsTab.value === 'expiry'
   ? batchAnalysis.value.expiry_buckets
@@ -884,13 +885,6 @@ function centsMoney(value) {
   if (value === null || value === undefined || value === '') return '-'
   const cents = Number(value)
   return Number.isFinite(cents) ? money(cents / 100) : '-'
-}
-
-// 合计金额沿用后端分精度，只在页面按统一报表规则四舍五入为整数元。
-function integerCentsMoney(value) {
-  if (value === null || value === undefined || value === '') return '-'
-  const cents = Number(value)
-  return Number.isFinite(cents) ? `¥${Math.round(cents / 100)}` : '-'
 }
 
 function operationTime(value) {
