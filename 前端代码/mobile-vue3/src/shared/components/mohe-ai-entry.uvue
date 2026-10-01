@@ -126,7 +126,7 @@ function toggleComposerOptions() : void { if (composerOptionsOpen.value) closeCo
 // Delivery proofs are transient device state, never serialized into chat history.
 let exportSources : Array<any> = []
 let exportLifecycle = 0
-function exportStatusLabel(status : string) : string { return status == 'succeeded' ? 'Excel 已生成' : status == 'running' ? 'Excel 正在生成…' : status == 'pending' ? 'Excel 正在排队…' : 'Excel 生成失败，问答结果不受影响。' }
+function exportStatusLabel(status : string) : string { return status == 'succeeded' ? 'Excel 已生成' : status == 'running' ? 'Excel 正在生成…' : status == 'pending' ? 'Excel 正在排队…' : status == 'unavailable' ? 'Excel 状态暂不可用，正在重试…' : status == 'unavailable_final' ? 'Excel 状态暂不可用，请稍后查看。' : 'Excel 生成失败，问答结果不受影响。' }
 function exportSource(item : any) : any { let found : any = null; exportSources.some((source : any) => { if (source.run_id == item.run_id && source.generation == item.generation) { found = source; return true }; return false }); return found }
 function setExportStatus(source : any,status : string) : void {
   // Keep the receipt on its original turn even if the merchant opens another
@@ -144,13 +144,25 @@ function startIndependentExport(source : any) : void {
   exportSources.push(source)
   let proof : any = {client_session_id:sessionId,run_delivery_token:source.run_delivery_token,generation:source.generation}
   let path = '/runs/' + source.run_id
+  let statusFailures = 0
+  // A failed status poll is not evidence that the separate Excel task failed.
+  // Retry its original receipt without resubmitting the answer or file task.
+  let pollStatus = () : void => {
+    if (expectedLifecycle != exportLifecycle) return
+    mobileAiRequest('GET',path + '/export-status',proof,(result : any) => {
+      if (result.ok) { statusFailures = 0; observe(result.data) }
+      else {
+        statusFailures += 1
+        setExportStatus(source,statusFailures <= 10 ? 'unavailable' : 'unavailable_final')
+        if (statusFailures <= 10) setTimeout(pollStatus,3000)
+      }
+    })
+  }
   let observe = (receipt : any) : void => {
     if (expectedLifecycle != exportLifecycle) return
     let status = String(receipt.status || 'failed'); setExportStatus(source,status)
     if (status != 'pending' && status != 'running') return
-    setTimeout(() => { if (expectedLifecycle != exportLifecycle) return
-      mobileAiRequest('GET',path + '/export-status',proof,(result : any) => { if (result.ok) observe(result.data); else setExportStatus(source,'failed') })
-    },1500)
+    setTimeout(pollStatus,1500)
   }
   setExportStatus(source,'pending')
   mobileAiRequest('POST',path + '/export',proof,(result : any) => { if (result.ok) observe(result.data); else setExportStatus(source,'failed') })

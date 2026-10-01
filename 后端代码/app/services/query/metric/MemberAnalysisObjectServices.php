@@ -84,7 +84,11 @@ final class MemberAnalysisObjectServices
      */
     public function selections(array $references): array
     {
-        if (!$references || count($references)>100 || count(array_unique($references))!==count($references)) {
+        // A signed condition-list may contain the full authorised export set;
+        // use the same bounded ceiling as the Reader instead of the old
+        // screen-page limit, or a valid >100-member detail fails before data read.
+        if (!$references || count($references)>RegisteredMetricReadServices::AI_DETAIL_LIMIT
+            || count(array_unique($references))!==count($references)) {
             throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
         }
         $ids=[];

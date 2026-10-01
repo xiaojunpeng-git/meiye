@@ -82,8 +82,12 @@ if [ "$SITE_KEY" = "rh" ]; then
       *) echo "发现非法 AI worker unit：$AI_UNIT" >&2; exit 4 ;;
     esac
   done
+  AI_RIGHTS_WORKER=$(ssh "$SSH_HOST" "systemctl list-units --all --plain --no-legend 'mohe-ai-rights-index.service' | awk '{print \$1}'")
+  if [ -n "$AI_RIGHTS_WORKER" ] && [ "$AI_RIGHTS_WORKER" != 'mohe-ai-rights-index.service' ]; then
+    echo "发现非法会员权益索引 worker unit：$AI_RIGHTS_WORKER" >&2; exit 4
+  fi
   # shellcheck disable=SC2086
-  ssh "$SSH_HOST" "set -e; /etc/init.d/ruihao_swoole restart; systemctl restart $AI_WORKERS $AI_EXPORT_WORKERS mohe-ai-supervisor.service; systemctl is-active --quiet $AI_WORKERS $AI_EXPORT_WORKERS mohe-ai-supervisor.service; /etc/init.d/ruihao_swoole status; echo RH_AI_RUNTIME_READY"
+  ssh "$SSH_HOST" "set -e; /etc/init.d/ruihao_swoole restart; systemctl restart $AI_WORKERS $AI_EXPORT_WORKERS mohe-ai-supervisor.service $AI_RIGHTS_WORKER; systemctl is-active --quiet $AI_WORKERS $AI_EXPORT_WORKERS mohe-ai-supervisor.service $AI_RIGHTS_WORKER; /etc/init.d/ruihao_swoole status; echo RH_AI_RUNTIME_READY"
 fi
 
 echo "DEPLOY_BACKEND_OK $SITE_KEY"

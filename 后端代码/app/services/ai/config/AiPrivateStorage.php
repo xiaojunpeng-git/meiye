@@ -6,6 +6,11 @@ use RuntimeException;
 /** Server-owned directory outside public; no conversation transcript is accepted. */
 final class AiPrivateStorage
 {
+    private const MAX_PRIVATE_BYTES = 1048576;
+    // A complete signed 1,000-member Excel source can exceed one MiB even
+    // while the screen shows 20 rows. Only encrypted evidence gets the larger
+    // bound; user requests and published answers retain their original cap.
+    private const MAX_EVIDENCE_BYTES = 4194304;
     private $root;
     public function __construct(string $root)
     {
@@ -46,7 +51,8 @@ final class AiPrivateStorage
         if (!in_array($kind, ['answer', 'clarification', 'evidence', 'request'], true) || $expiresAt <= time() || $expiresAt > time() + 86400) throw new RuntimeException('AI_PRIVATE_OBJECT_INVALID');
         $this->directory(); $ref = $kind . '-' . bin2hex(random_bytes(24));
         $payload = json_encode(['kind' => $kind, 'expires_at' => $expiresAt, 'data' => $data], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        if ($payload === false || strlen($payload) > 1048576) throw new RuntimeException('AI_PRIVATE_OBJECT_INVALID');
+        $limit=$kind==='evidence'?self::MAX_EVIDENCE_BYTES:self::MAX_PRIVATE_BYTES;
+        if ($payload === false || strlen($payload) > $limit) throw new RuntimeException('AI_PRIVATE_OBJECT_INVALID');
         $nonce = random_bytes(12); $tag = '';
         $encrypted = openssl_encrypt($payload, 'aes-256-gcm', $this->signingKey(), OPENSSL_RAW_DATA, $nonce, $tag, $ref);
         if ($encrypted === false) throw new RuntimeException('AI_PRIVATE_OBJECT_INVALID');
@@ -61,7 +67,8 @@ final class AiPrivateStorage
     {
         if (!preg_match('/^(answer|clarification|evidence|request)-[a-f0-9]{48}$/D', $ref)) throw new RuntimeException('AI_PRIVATE_OBJECT_INVALID');
         $path = $this->root . '/' . $ref;
-        if (!is_file($path) || is_link($path) || filesize($path) < 29 || filesize($path) > 1048604) throw new RuntimeException('AI_PRIVATE_OBJECT_UNAVAILABLE');
+        $limit=strpos($ref,'evidence-')===0?self::MAX_EVIDENCE_BYTES:self::MAX_PRIVATE_BYTES;
+        if (!is_file($path) || is_link($path) || filesize($path) < 29 || filesize($path) > $limit+28) throw new RuntimeException('AI_PRIVATE_OBJECT_UNAVAILABLE');
         $bytes = file_get_contents($path);
         $plain = openssl_decrypt(substr($bytes, 28), 'aes-256-gcm', $this->signingKey(), OPENSSL_RAW_DATA, substr($bytes, 0, 12), substr($bytes, 12, 16), $ref);
         $object = $plain === false ? null : json_decode($plain, true);

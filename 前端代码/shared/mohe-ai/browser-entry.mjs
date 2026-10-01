@@ -421,6 +421,18 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     const proof = { client_session_id: clientSession, run_delivery_token: source.run_delivery_token, generation: source.generation };
     const card = el('div', 'Excel 正在排队…', 'card muted'); target.appendChild(card);
     const path = '/runs/' + encodeURIComponent(source.run_id);
+    let statusFailures = 0;
+    // A transient status-request failure does not make a completed workbook
+    // fail. Keep this receipt independent from the next question and retry a
+    // bounded number of times without submitting another export task.
+    const pollStatus = async () => { if (disposed || !card.isConnected) return;
+      try { const receipt = await request('GET', path + '/export-status', proof); statusFailures = 0; updateFile(receipt); }
+      catch (_) {
+        card.textContent = 'Excel 状态暂不可用，正在重试…';
+        if (++statusFailures <= 10) setTimeout(pollStatus, 3000);
+        else card.textContent = 'Excel 状态暂不可用，请稍后刷新查看。';
+      }
+    };
     const updateFile = receipt => {
       if (disposed || !card.isConnected) return;
       if (receipt.status === 'succeeded') {
@@ -437,10 +449,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       }
       if (['failed','cancelled','expired'].includes(receipt.status)) { card.textContent = 'Excel 生成失败，问答结果不受影响。'; return; }
       card.textContent = receipt.status === 'running' ? 'Excel 正在生成…' : 'Excel 正在排队…';
-      setTimeout(async () => { if (disposed || !card.isConnected) return;
-        try { updateFile(await request('GET', path + '/export-status', proof)); }
-        catch (_) { card.textContent = 'Excel 状态暂不可用，请稍后重试。'; }
-      }, 1500);
+      setTimeout(pollStatus, 1500);
     };
     request('POST', path + '/export', proof).then(updateFile).catch(() => { if (card.isConnected) card.textContent = 'Excel 暂无法生成，问答结果不受影响。'; });
   }

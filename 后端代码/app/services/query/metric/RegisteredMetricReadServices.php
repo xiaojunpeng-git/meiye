@@ -17,9 +17,11 @@ final class RegisteredMetricReadServices
     private $queryFactory;
     private $normalFacts;
     private $normalServices;
+    private $useRightsIndex;
 
-    public function __construct(?callable $queryFactory = null, ?callable $normalFacts = null, ?callable $normalServices = null)
+    public function __construct(?callable $queryFactory = null, ?callable $normalFacts = null, ?callable $normalServices = null, ?bool $useRightsIndex = null)
     {
+        $this->useRightsIndex=$useRightsIndex??$queryFactory===null;
         $this->queryFactory = $queryFactory ?: static function (string $table) { return Db::name($table); };
         $this->normalFacts = $normalFacts ?: static function ($query, string $tenantField, string $orderField): void {
             (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, $tenantField, $orderField);
@@ -265,6 +267,13 @@ final class RegisteredMetricReadServices
         if ($keys!==['metric_code','operator','value'] || ($contract['reader_strategy']??null)!=='member_current_rights_amount'
             || !in_array($operator,(array)($contract['source']['threshold_count']['operators']??[]),true)
             || !is_int($value) || $value<0 || $value>100000000000) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        // Activate the derived index only after a verified full backfill. Its
+        // query reconciles atomic dirty marks and time transitions before any
+        // candidate may be excluded; injected test readers keep their source.
+        if ($this->useRightsIndex) {
+            $indexed=(new AiMemberRightsAmountIndex())->query($tenantId,$stores,$operator,$value,$limit);
+            if ($indexed!==null) return $indexed;
+        }
         $comparison=$operator==='gt'?'>':'>=';
         $yuan=bcdiv((string)$value,'100',2);
         $scope=function($query)use($stores):void {

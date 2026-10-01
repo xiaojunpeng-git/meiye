@@ -5837,8 +5837,14 @@ final class AiGatewayServices
             $selections=$this->memberObjects($context)->selections($references);
             $memberIds=[];
             foreach ($references as $reference) $memberIds[]=(int)$selections[$reference]['member_id'];
-            $rights=(new \app\services\cashier\v3\member\CashierV3MemberDetailQueryServices())
-                ->readAiRightsSet($memberIds,$operator,$dataScope,$guard);
+            $detailReader=new \app\services\cashier\v3\member\CashierV3MemberDetailQueryServices();
+            // The signed amount-filtered population needs summary columns,
+            // not tens of thousands of card project rows. A requested rights
+            // view still loads every card through the cashier authority.
+            $rights=(string)$spec['view']==='summary'
+                && !empty($spec['expected_remaining_project_amount_cents'])
+                ?$detailReader->readAiRightsSummarySet($memberIds,$operator,$dataScope,$guard)
+                :$detailReader->readAiRightsSet($memberIds,$operator,$dataScope,$guard);
             $details=[];
             foreach ($members as $member) {
                 // This only assembles already checked rows; the rights reader

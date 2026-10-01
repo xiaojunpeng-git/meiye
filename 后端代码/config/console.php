@@ -30,6 +30,7 @@ return [
         'unified-query:export-worker' => \app\command\UnifiedQueryExportWorker::class,
         'mohe-ai:supervise' => \app\command\MoheAiSupervisor::class,
         'mohe-ai:execution-worker' => \app\command\MoheAiExecutionWorker::class,
+        'mohe-ai:rights-index' => \app\command\MoheAiRightsIndex::class,
         'group-dashboard:aggregate' => \app\command\GroupManagementDashboardAggregate::class,
     ],
 ];

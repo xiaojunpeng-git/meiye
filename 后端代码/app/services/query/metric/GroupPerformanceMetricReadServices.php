@@ -10,9 +10,9 @@ final class GroupPerformanceMetricReadServices
 {
     private $registered;
 
-    public function __construct(?callable $queryFactory = null, ?callable $normalScope = null, ?callable $normalServiceScope = null)
+    public function __construct(?callable $queryFactory = null, ?callable $normalScope = null, ?callable $normalServiceScope = null, ?bool $useRightsIndex = null)
     {
-        $this->registered = new RegisteredMetricReadServices($queryFactory, $normalScope, $normalServiceScope);
+        $this->registered = new RegisteredMetricReadServices($queryFactory, $normalScope, $normalServiceScope, $useRightsIndex);
     }
 
     public function metricTotal(string $tenantId, array $stores, array $range, string $metricCode): int

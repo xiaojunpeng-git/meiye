@@ -50,10 +50,12 @@ final class MetricReadTransaction
             $check();
             $connection->execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
             $connection->startTrans(); $started=true;
+            // Production receives the same connection-bound query factory for
+            // facts and the ready rights index; fixtures opt out by default.
             $reader = new GroupPerformanceMetricReadServices(static function (string $table) use ($connection,$check) {
                 $check();
                 return $connection->name($table);
-            });
+            },null,null,true);
             $result = $callback($reader);
             $check();
             $connection->commit();

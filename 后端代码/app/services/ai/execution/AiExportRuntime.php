@@ -440,7 +440,10 @@ final class AiExportRuntime
                     'store_ids'=>$current['store_ids']??[],'scope_mode'=>$current['scope_mode']??null,
                     'permission_version'=>AiAuthority::permissionHash($current)];
             });
-            foreach ($snapshot['member_refs'] as $ref) $members->selection($ref);
+            // Recheck the exact signed set against one live permission scope.
+            // Per-member selection repeated the same grant and SQL up to 1,000
+            // times before Task claim, exhausting the short queue deadline.
+            $members->selections($snapshot['member_refs']);
         }
     }
     /** Bind file content to BOTH the context view and immutable exact assets. */

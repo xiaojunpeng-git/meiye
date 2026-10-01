@@ -78,21 +78,62 @@ final class CashierV3MemberDetailQueryServices
         return $details;
     }
 
+    /**
+     * Current-rights amount populations only present member summaries. Read
+     * the three card-derived summary fields from the reconciled AI index and
+     * keep balances on their existing authority; explicit card-rights views
+     * continue through readAiRightsSet() with the full project list.
+     */
+    public function readAiRightsSummarySet(array $memberIds,CashierV3OperatorScope $operatorScope,CashierV3DataScopeContext $dataScope,?callable $checkpoint=null): array
+    {
+        $cardSummaries=(new \app\services\query\metric\AiMemberRightsAmountIndex())
+            ->summaryForMembers($operatorScope->tenantId(),array_values((array)$dataScope->visibleStoreIds()),$memberIds);
+        if ($cardSummaries===null) return $this->readAiRightsSet($memberIds,$operatorScope,$dataScope,$checkpoint);
+        $details=[];$asOf=date('c');
+        foreach (array_chunk($memberIds,100) as $batch) {
+            if ($checkpoint!==null) $checkpoint();
+            $snapshots=(new CashierV3MemberBalanceProvider())->readSnapshots($batch,$operatorScope,$dataScope);
+            $members=Db::name('user')->whereIn('uid',$batch)
+                ->field('uid,nickname,real_name,belong_store_id,status,is_del,delete_time')->select()->toArray();
+            $byId=[];$storeIds=[];
+            foreach ($members as $member) {
+                $byId[(int)$member['uid']]=$member;
+                if ((int)$member['belong_store_id']>0) $storeIds[]=(int)$member['belong_store_id'];
+            }
+            $storeNames=$storeIds?Db::name('system_store')->whereIn('id',array_unique($storeIds))->column('name','id'):[];
+            foreach ($batch as $id) {
+                // A batch is bounded to 100 members. Check once per batch and
+                // again before publication; per-row run/permission reads used
+                // to consume the entire answer budget for large export sets.
+                if (!isset($cardSummaries[$id],$snapshots[$id])) throw $this->notFound();
+                $details[$id]=$this->readAiRightsWithBalance($id,$dataScope,$snapshots[$id],[],
+                    $byId[$id]??null,$storeNames,$asOf,$cardSummaries[$id]);
+            }
+        }
+        return $details;
+    }
+
     /** Assemble only authority-validated, batch-read balance and card rows. */
-    private function readAiRightsWithBalance(int $memberId,CashierV3DataScopeContext $dataScope,array $balanceSnapshot,array $cards,?array $member,array $storeNames,string $asOf): array
+    private function readAiRightsWithBalance(int $memberId,CashierV3DataScopeContext $dataScope,array $balanceSnapshot,array $cards,?array $member,array $storeNames,string $asOf,?array $cardSummary=null): array
     {
         if ($memberId <= 0) throw $this->notFound();
         $this->assertVisible($memberId, $dataScope);
         if (!$this->isActiveMember($member)) throw $this->notFound();
 
-        $remainingTimes = 0;
-        $remainingAmount = '0.00';
-        $activeCardCount = 0;
-        foreach ($cards as $card) {
-            if (($card['statusCode'] ?? '') !== 'enabled') continue;
-            $activeCardCount++;
-            if (($card['cardRuleType'] ?? '') !== 'time') $remainingTimes += (int)($card['remainingTimes'] ?? 0);
-            $remainingAmount = bcadd($remainingAmount, (string)($card['remainingAmount'] ?? '0.00'), 2);
+        if ($cardSummary!==null) {
+            $remainingTimes=$cardSummary['remaining_project_times'];
+            $remainingAmount=$this->moneyFromCents($cardSummary['amount_cents']);
+            $activeCardCount=$cardSummary['active_card_count'];
+        } else {
+            $remainingTimes = 0;
+            $remainingAmount = '0.00';
+            $activeCardCount = 0;
+            foreach ($cards as $card) {
+                if (($card['statusCode'] ?? '') !== 'enabled') continue;
+                $activeCardCount++;
+                if (($card['cardRuleType'] ?? '') !== 'time') $remainingTimes += (int)($card['remainingTimes'] ?? 0);
+                $remainingAmount = bcadd($remainingAmount, (string)($card['remainingAmount'] ?? '0.00'), 2);
+            }
         }
         $storeId = (int)($member['belong_store_id'] ?? 0);
         $storeName = $storeId > 0 ? (string)($storeNames[$storeId]??'') : '';
@@ -744,18 +785,43 @@ final class CashierV3MemberDetailQueryServices
                 $query->name('store_user')->where('status',1)->whereIn('store_id',$visibleStoreIds)->field('uid');
             })->column('u.uid');
         if (count(array_unique(array_map('intval',$visible)))!==count($memberIds)) throw $this->notFound();
+        // Only the already-scoped public reader may expose these amounts.
+        // The shared summary projection is unscoped solely for server-owned
+        // index refresh and must never become a client-facing endpoint.
+        $summary=$this->readAiRightsSummariesForIndex($memberIds,$tenantId);
         $amounts=[];
+        foreach ($summary as $id=>$row) $amounts[$id]=$row['amount_cents'];
+        return $amounts;
+    }
+
+    /**
+     * Freeze the three card-derived summary values together. The AI index
+     * preserves their common version and time boundary; no separate metric
+     * formula is introduced for the fast member-summary presentation.
+     *
+     * @return array<int,array{amount_cents:int,active_card_count:int,remaining_project_times:int}>
+     */
+    public function readAiRightsSummariesForIndex(array $memberIds,string $tenantId): array
+    {
+        $memberIds=array_values(array_unique($memberIds));
+        if ($tenantId==='' || !$memberIds || count($memberIds)>100) throw $this->notFound();
+        foreach ($memberIds as $id) if (!is_int($id) || $id<1) throw $this->notFound();
+        $summaries=[];
         $cardsByMember=$this->cardsForMembers($memberIds,$tenantId,'','active','','');
         foreach ($memberIds as $memberId) {
-            $total='0.00';
+            $total='0.00';$activeCards=0;$remainingTimes=0;
             foreach ($cardsByMember[$memberId]??[] as $card) {
-                if (($card['statusCode']??'')==='enabled') $total=bcadd($total,(string)$card['remainingAmount'],2);
+                if (($card['statusCode']??'')!=='enabled') continue;
+                ++$activeCards;
+                if (($card['cardRuleType']??'')!=='time') $remainingTimes+=(int)$card['remainingTimes'];
+                $total=bcadd($total,(string)$card['remainingAmount'],2);
             }
             $cents=bcmul($total,'100',0);
             if (bccomp($cents,(string)PHP_INT_MAX,0)>0) throw new \RuntimeException('AI_METRIC_OVERFLOW');
-            $amounts[$memberId]=(int)$cents;
+            $summaries[$memberId]=['amount_cents'=>(int)$cents,
+                'active_card_count'=>$activeCards,'remaining_project_times'=>$remainingTimes];
         }
-        return $amounts;
+        return $summaries;
     }
 
     /** Active card rights are cross-store only after the caller verifies member visibility. */
