@@ -373,8 +373,8 @@ class LoginServices extends BaseServices
     }
 
     /**
-     * 解析无直接门店任职的收银 V3 数据权限会话。
-     * 会话主键不是 system_store_staff，避免为了登录而伪造或恢复门店任职。
+     * 解析收银 V3 组织数据权限会话。员工即使兼有原店任职，切往其他店后也必须
+     * 使用独立会话和组织岗位权限；会话主键不是 system_store_staff，不能跨店借用原任职。
      */
     protected function parseCashierV3DelegatedToken(CacheService $cacheService, int $sessionId, string $auth, string $md5Token, bool $readOnly = true): array
     {

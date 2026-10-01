@@ -17,8 +17,9 @@ use think\facade\Db;
  * 1. 有唯一有效任职门店的门店人员：直接进入该门店，不走选店票据；
  * 2. 没有任职门店、但具备组织数据权限和门店端入口的组织人员：从权限范围选店，
  *    进入后按该组织岗位的门店端规则使用当前门店，不写入或恢复 system_store_staff 任职；
- * 3. 门店任职仍固定在唯一任职店；组织人员可在其当前入口和数据权限
- *    同时允许的候选门店间重新签发会话，旧工作台不得跨店沿用。
+ * 3. 有任职的人员登录时仍直入唯一任职店；切店时若另有组织入口和数据权限，
+ *    可进入其授权的其他门店，但目标店只能使用组织岗位权限，不能借用原店任职。
+ *    组织人员也可在授权候选门店间切换，旧工作台不得跨店沿用。
  *
  * 组织人员的多门店选店不能被误判为“门店人员多店任职”。两者是不同的登录模式。
  */
@@ -133,12 +134,35 @@ class CashierV3StoreLoginServices extends BaseServices
     }
 
     /**
-     * 只向当前组织会话返回与登录时同口径的候选门店；每次读取都重算岗位、
-     * 数据权限和门店状态，不能信任登录时缓存的组织树。
+     * 切店候选与首次登录分流不同：任职人员先以原店任职身份登录，但额外的
+     * 组织岗位入口和数据权限可授予其他门店。无有效任职者继续使用原组织选店口径；
+     * 存在异常或无入口任职时不得借组织候选绕过登录限制。
+     *
+     * @return array<int, array>
+     */
+    private function storeSwitchCandidates(int $employeeId): array
+    {
+        /** @var EmployeeInternalLoginServices $employees */
+        $employees = app()->make(EmployeeInternalLoginServices::class);
+        if ($employees->resolveUniqueStoreV3Staff($employeeId)) {
+            return $this->eligibleStores($employeeId);
+        }
+        $activeTenureCount = (int)Db::name('system_store_staff')
+            ->where('employee_id', $employeeId)->where('status', 1)->where('is_del', 0)
+            ->where('store_id', '>', 0)->count();
+        if ($activeTenureCount > 0) {
+            return [];
+        }
+        return $this->organizationLoginCandidates($employeeId);
+    }
+
+    /**
+     * 只向当前会话返回至少包含另一授权门店的候选；每次读取都重算任职、
+     * 组织岗位、数据权限和门店状态，不能信任登录时缓存的组织树。
      */
     public function switchableStores(int $employeeId, int $currentStoreId): array
     {
-        $stores = $this->organizationLoginCandidates($employeeId);
+        $stores = $this->storeSwitchCandidates($employeeId);
         $currentAllowed = false;
         foreach ($stores as $store) {
             if ((int)($store['store_id'] ?? 0) === $currentStoreId) {
@@ -165,7 +189,7 @@ class CashierV3StoreLoginServices extends BaseServices
         if ($targetStoreId <= 0 || $targetStoreId === $currentStoreId) {
             throw new AdminException('请选择其他可进入的门店');
         }
-        $stores = $this->organizationLoginCandidates($employeeId);
+        $stores = $this->storeSwitchCandidates($employeeId);
         $currentAllowed = false;
         $targetAllowed = false;
         foreach ($stores as $store) {
