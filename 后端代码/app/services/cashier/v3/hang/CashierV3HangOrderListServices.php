@@ -69,7 +69,7 @@ final class CashierV3HangOrderListServices
                 'room_id', 'room_name_snapshot',
                 'sale_amount_cents', 'entitlement_actual_amount_cents', 'occurred_at', 'recorded_at',
                 'resume_contract_version', 'resume_workspace_id', 'checkout_request_id',
-                'sales_order_id', 'resumed_at', 'settled_at',
+                'sales_order_id', 'resumed_at', 'settled_at', 'member_id', 'local_draft_snapshot_json',
             ])
             ->order('occurred_at desc,id desc')
             ->page($page, $pageSize)
@@ -92,6 +92,11 @@ final class CashierV3HangOrderListServices
                 'hangAt' => $this->timeLabel((int)($row['occurred_at'] ?? $row['recorded_at'] ?? 0)),
                 'memberName' => (string)($row['member_name_snapshot'] ?? ''),
                 'phone' => '',
+                // 来源只取挂单时冻结的名称；旧挂单不回查会员现值，避免历史显示漂移。
+                'source' => CashierV3HangCheckoutSourceSnapshot::displayLabelFromJson(
+                    $row['local_draft_snapshot_json'] ?? '',
+                    (int)($row['member_id'] ?? 0)
+                ),
                 'itemCount' => (int)($row['line_count'] ?? 0),
                 'receivableAmount' => $this->amount(
                     (int)($row['sale_amount_cents'] ?? 0)

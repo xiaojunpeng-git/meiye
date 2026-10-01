@@ -24,6 +24,7 @@ const queryFields = [
   { key: 'room_name', label: '房间', defaultVisible: true, defaultQuick: true },
   { key: 'member_name', label: '会员', defaultVisible: true, defaultQuick: true },
   { key: 'phone', label: '手机号', defaultVisible: true },
+  { key: 'source', label: '来源', defaultVisible: true },
   { key: 'item_count', label: '商品数量', defaultVisible: true, type: 'number' },
   { key: 'receivable_amount', label: '应收金额', defaultVisible: true, type: 'number' },
   { key: 'operator', label: '操作人', defaultVisible: true, type: 'person' },
@@ -39,12 +40,18 @@ const visibleHangFields = computed(() => {
     : queryFields.filter((field) => field.defaultVisible !== false).map((field) => field.key)
   const seen = new Set()
 
-  return source.reduce((fields, key) => {
+  const fields = source.reduce((fields, key) => {
     if (seen.has(key) || !availableFields.has(key)) return fields
     seen.add(key)
     fields.push(availableFields.get(key))
     return fields
   }, [])
+  // 来源是挂单时的历史快照列；旧查询设置没有它，也要固定出现在手机号后。
+  const previousIndex = fields.findIndex((field) => field.key === 'source')
+  if (previousIndex >= 0) fields.splice(previousIndex, 1)
+  const phoneIndex = fields.findIndex((field) => field.key === 'phone')
+  fields.splice(phoneIndex >= 0 ? phoneIndex + 1 : 0, 0, availableFields.get('source'))
+  return fields
 })
 
 const showsBusinessStatusColumn = computed(() => visibleHangFields.value.some((field) => field.key === 'business_status'))
@@ -73,6 +80,7 @@ function hangFieldValue(record, key) {
     room_name: record.roomName,
     member_name: record.memberName,
     phone: record.phone,
+    source: record.source,
     item_count: record.itemCount,
     receivable_amount: record.receivableAmount,
     operator: record.operator,

@@ -9,6 +9,23 @@ namespace app\services\cashier\v3\hang;
  */
 final class CashierV3HangCheckoutSourceSnapshot
 {
+    /**
+     * List display reads the hang's own historical label, never the member's
+     * current source. Old hangs without a sidecar intentionally have no label.
+     */
+    public static function displayLabelFromJson($json, int $memberId): string
+    {
+        $sidecar = json_decode((string)$json, true);
+        $source = self::normalize(
+            is_array($sidecar) ? ($sidecar['checkoutBusinessSource'] ?? []) : [],
+            $memberId
+        );
+        return implode(' / ', array_filter([
+            $source['primarySourceNameSnapshot'],
+            $source['secondarySourceNameSnapshot'],
+        ], static function (string $name): bool { return $name !== ''; }));
+    }
+
     public static function normalize($candidate, int $memberId): array
     {
         $source = is_array($candidate) ? $candidate : [];
