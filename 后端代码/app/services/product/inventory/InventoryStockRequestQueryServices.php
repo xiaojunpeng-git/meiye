@@ -9,6 +9,28 @@ use think\facade\Db;
 /** Read model for the V3 request authority; legacy request drafts are excluded. */
 final class InventoryStockRequestQueryServices
 {
+    /**
+     * Search the document's historical identity inside the caller's permission scope.
+     * ASCII document numbers cannot be compared directly with Chinese keywords;
+     * normalize only the comparison expression, keeping stored IDs and snapshots intact.
+     * Fixed columns and bound values prevent keywords from becoming SQL fragments.
+     */
+    private function applyKeyword($query, string $keyword): void
+    {
+        $keyword = trim($keyword);
+        if ($keyword === '') return;
+        $columns = ['request_no', 'remark', 'request_party_name_snapshot', 'supply_party_name_snapshot', 'acceptance_party_name_snapshot'];
+        $conditions = [];
+        $bindings = [];
+        foreach ($columns as $index => $column) {
+            $parameter = 'request_search_' . $index;
+            $conditions[] = "CONVERT(d.{$column} USING utf8mb4) COLLATE utf8mb4_general_ci LIKE :{$parameter}";
+            $bindings[$parameter] = '%' . $keyword . '%';
+        }
+        // Enclose the OR search so it can only narrow tenant, organization and date filters.
+        $query->whereRaw('(' . implode(' OR ', $conditions) . ')', $bindings);
+    }
+
     public function listForHeadquarters(array $adminInfo, int $locationId, string $keyword, int $page = 1, int $limit = 20, string $requestPartyType = '', int $requestPartyId = 0, string $supplyPartyType = '', int $supplyPartyId = 0, int $acceptancePartyId = 0, string $status = '', string $dateFrom = '', string $dateTo = ''): array
     {
         $resolved = (new InventoryHqLocationServices())->readableLocation($adminInfo, $locationId);
@@ -19,7 +41,7 @@ final class InventoryStockRequestQueryServices
         // requests disappear immediately after submission.
         $query = $this->headquartersDocumentQuery($location, $access)
             ->leftJoin('inventory_stock_request_line l', 'l.document_id=d.id');
-        $keyword = trim($keyword); if ($keyword !== '') { $like = '%' . $keyword . '%'; $query->where(function ($inner) use ($like): void { $inner->whereLike('d.request_no', $like)->whereOr('d.remark', 'like', $like); }); }
+        $this->applyKeyword($query, $keyword);
         if ($dateFrom !== '' && $dateTo !== '') $query->whereBetween('d.business_date', [$dateFrom, $dateTo]);
         if (in_array(strtoupper(trim($requestPartyType)), ['HQ', 'STORE'], true)) {
             $query->where('d.request_party_type', strtoupper(trim($requestPartyType)))->where('d.request_party_id', $requestPartyId);
@@ -69,8 +91,7 @@ final class InventoryStockRequestQueryServices
         if (!$staff || !$location) throw new \RuntimeException('inventory_stock_request_query_scope_denied');
         $query = Db::name('inventory_stock_request_document')->alias('d')->leftJoin('inventory_stock_request_line l', 'l.document_id=d.id')->leftJoin('system_store s', 's.id=d.store_id')
             ->where('d.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->where('d.store_id', $storeId)->where('d.location_id', (int)$location['id']);
-        $keyword = trim($keyword);
-        if ($keyword !== '') { $like = '%' . $keyword . '%'; $query->where(function ($inner) use ($like): void { $inner->whereLike('d.request_no', $like)->whereOr('d.remark', 'like', $like); }); }
+        $this->applyKeyword($query, $keyword);
         if ($dateFrom !== '' && $dateTo !== '') $query->whereBetween('d.business_date', [$dateFrom, $dateTo]);
         $count = (clone $query)->group('d.id')->count();
         $list = $query->field('d.id,d.request_no order_sn,d.document_status status_name,d.store_id,s.name request_store_name,d.requester_name_snapshot,d.operator_name_snapshot operator_name,d.supply_party_type,d.supply_party_id,d.supply_party_name_snapshot supply_party_name,d.acceptance_party_id,d.acceptance_party_name_snapshot acceptance_party_name,d.business_date request_date,d.recorded_at add_time,d.recorded_at operation_at,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
