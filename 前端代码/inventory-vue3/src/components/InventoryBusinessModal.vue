@@ -1001,7 +1001,8 @@ async function submitWarehouse() {
           </div>
         </header>
 
-        <main class="inventory-modal__body">
+        <!-- 盘点已有独立的大数据表滚动方案；该标记用于让其他库存业务共享滚动规则而不改变盘点。 -->
+        <main class="inventory-modal__body" :class="{ 'inventory-modal__body--count': pageKey === 'count' }">
           <template v-if="isImport">
             <section class="import-workflow">
               <div class="import-modal"><FileSpreadsheet /><div><strong>{{ importDirection === 'inbound' ? '入库 Excel 导入' : '出库 Excel 导入' }}</strong><p>{{ mode === 'platform' ? '先选择库存仓生成模板；上传时按模板中的库存仓标识分别落单。' : '门店端仅能导入当前门店。' }}</p></div><button class="modal-secondary" :disabled="importBusy" @click="downloadImportTemplate">下载模板</button></div>
@@ -1133,6 +1134,12 @@ async function submitWarehouse() {
 .line-section--count > .modal-table-scroll::-webkit-scrollbar-track { background: #eef3f8; }
 .line-section--count > .modal-table-scroll::-webkit-scrollbar-thumb { border: 2px solid #eef3f8; border-radius: 8px; background: #91aac4; }
 .line-section--count > .modal-table-scroll thead th { position: sticky; top: 0; z-index: 1; }
+/* 非盘点业务和详情可能一次包含大量商品；限制明细区高度，避免表格撑出视口且保留表头与操作入口。 */
+.inventory-modal__body:not(.inventory-modal__body--count) .line-section > .modal-table-scroll { max-height: min(48vh, 520px); overflow-y: scroll; scrollbar-gutter: stable; scrollbar-color: #91aac4 #eef3f8; scrollbar-width: thin; overscroll-behavior: contain; }
+.inventory-modal__body:not(.inventory-modal__body--count) .line-section > .modal-table-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.inventory-modal__body:not(.inventory-modal__body--count) .line-section > .modal-table-scroll::-webkit-scrollbar-track { background: #eef3f8; }
+.inventory-modal__body:not(.inventory-modal__body--count) .line-section > .modal-table-scroll::-webkit-scrollbar-thumb { border: 2px solid #eef3f8; border-radius: 8px; background: #91aac4; }
+.inventory-modal__body:not(.inventory-modal__body--count) .line-section > .modal-table-scroll thead th { position: sticky; top: 0; z-index: 1; }
 .inventory-editor__header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .inventory-editor__submit-error { max-width: 620px; margin: 6px 0 0 !important; color: #c34141 !important; font-size: 12px !important; }
 .inventory-editor { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: calc(100vh - 112px); overflow: hidden; border: 1px solid #d8e3ed; border-radius: 8px; background: #f5f7fa; }.inventory-editor__header, .inventory-modal__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 20px; border-bottom: 1px solid #e0e7ef; background: #fff; }.inventory-editor__header p { margin: 0 0 4px; color: #8a97a5; font-size: 11px; }.inventory-editor__header h2 { margin: 0; color: #253a50; font-size: 18px; }.inventory-modal__footer { justify-content: flex-end; border-top: 1px solid #e0e7ef; border-bottom: 0; }.modal-icon-button { display: inline-grid; width: 34px; height: 34px; place-items: center; padding: 0; border: 1px solid #dce5ee; border-radius: 8px; background: #fff; color: #47627d; }.modal-icon-button:hover { border-color: #91caff; color: #176fd1; }
