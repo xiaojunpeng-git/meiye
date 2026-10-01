@@ -32,7 +32,7 @@ $started=microtime(true);
 $checkpoints=0;
 $batch=$reader->readAiRightsSet($ids,$operator,$scope,static function()use(&$checkpoints): void {$checkpoints++;});
 $batchMs=(int)round((microtime(true)-$started)*1000);
-if ($checkpoints!==count($ids)) throw new RuntimeException('BATCH_CHECKPOINT_MISMATCH');
+if ($checkpoints!==count($ids)+count(array_chunk($ids,100))) throw new RuntimeException('BATCH_CHECKPOINT_MISMATCH');
 $started=microtime(true);
 foreach ($ids as $id) {
     $single=$reader->readAiRights($id,$operator,$scope);

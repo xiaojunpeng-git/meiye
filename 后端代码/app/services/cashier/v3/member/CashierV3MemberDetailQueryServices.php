@@ -33,12 +33,12 @@ final class CashierV3MemberDetailQueryServices
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope
     ): array {
-        return $this->readAiRightsWithBalance($memberId,$operatorScope,$dataScope);
+        return $this->readAiRightsSet([$memberId],$operatorScope,$dataScope)[$memberId];
     }
 
     /**
-     * AI set reads share the authoritative balance query but retain the same
-     * per-member card calculation and visibility checks as a single detail.
+     * AI set reads share the authoritative balance and card projections used
+     * by a single detail; every identity is checked before assembling rows.
      * The caller must supply only identities revalidated against the live
      * member/store relation; no partial set is returned on a missing member.
      *
@@ -52,28 +52,39 @@ final class CashierV3MemberDetailQueryServices
             if (!is_int($memberId) || $memberId<=0) throw $this->notFound();
             $this->assertVisible($memberId,$dataScope);
         }
-        $snapshots=(new CashierV3MemberBalanceProvider())->readSnapshots($memberIds,$operatorScope,$dataScope);
         $details=[];
-        foreach ($memberIds as $memberId) {
-            // AI runs can be cancelled or lose authorization mid-batch; keep
-            // the former per-member checkpoint instead of hiding all work in
-            // one uninterruptible projection call.
+        // The balance authority accepts at most 100 identities per read. Fetch
+        // member labels, stores and cards at the same batch grain so a large
+        // verified result does not turn into three queries per member.
+        $asOf=date('c');
+        foreach (array_chunk($memberIds,100) as $batch) {
             if ($checkpoint!==null) $checkpoint();
-            $details[$memberId]=$this->readAiRightsWithBalance($memberId,$operatorScope,$dataScope,$snapshots[$memberId]);
+            $snapshots=(new CashierV3MemberBalanceProvider())->readSnapshots($batch,$operatorScope,$dataScope);
+            $members=Db::name('user')->whereIn('uid',$batch)
+                ->field('uid,nickname,real_name,belong_store_id,status,is_del,delete_time')->select()->toArray();
+            $membersById=[];$storeIds=[];
+            foreach ($members as $member) {
+                $membersById[(int)$member['uid']]=$member;
+                if ((int)$member['belong_store_id']>0) $storeIds[]=(int)$member['belong_store_id'];
+            }
+            $storeNames=$storeIds?Db::name('system_store')->whereIn('id',array_unique($storeIds))->column('name','id'):[];
+            $cardsByMember=$this->cardsForMembers($batch,$operatorScope->tenantId(),'','active','','');
+            foreach ($batch as $memberId) {
+                if ($checkpoint!==null) $checkpoint();
+                $details[$memberId]=$this->readAiRightsWithBalance($memberId,$dataScope,
+                    $snapshots[$memberId],$cardsByMember[$memberId]??[], $membersById[$memberId]??null,$storeNames,$asOf);
+            }
         }
         return $details;
     }
 
-    /** The supplied snapshot was validated against the cashier balance authority. */
-    private function readAiRightsWithBalance(int $memberId,CashierV3OperatorScope $operatorScope,CashierV3DataScopeContext $dataScope,?array $balanceSnapshot=null): array
+    /** Assemble only authority-validated, batch-read balance and card rows. */
+    private function readAiRightsWithBalance(int $memberId,CashierV3DataScopeContext $dataScope,array $balanceSnapshot,array $cards,?array $member,array $storeNames,string $asOf): array
     {
         if ($memberId <= 0) throw $this->notFound();
         $this->assertVisible($memberId, $dataScope);
-        $member = Db::name('user')->where('uid', $memberId)
-            ->field('uid,nickname,real_name,belong_store_id,status,is_del,delete_time')->find();
         if (!$this->isActiveMember($member)) throw $this->notFound();
 
-        $cards = $this->cards($memberId, $operatorScope->tenantId(), $dataScope);
         $remainingTimes = 0;
         $remainingAmount = '0.00';
         $activeCardCount = 0;
@@ -83,9 +94,8 @@ final class CashierV3MemberDetailQueryServices
             if (($card['cardRuleType'] ?? '') !== 'time') $remainingTimes += (int)($card['remainingTimes'] ?? 0);
             $remainingAmount = bcadd($remainingAmount, (string)($card['remainingAmount'] ?? '0.00'), 2);
         }
-        $balanceSnapshot=$balanceSnapshot??(new CashierV3MemberBalanceProvider())->readSnapshot($memberId,$operatorScope,$dataScope);
         $storeId = (int)($member['belong_store_id'] ?? 0);
-        $storeName = $storeId > 0 ? (string)Db::name('system_store')->where('id', $storeId)->value('name') : '';
+        $storeName = $storeId > 0 ? (string)($storeNames[$storeId]??'') : '';
         $name = trim((string)($member['real_name'] ?? ''));
         if ($name === '') $name = trim((string)($member['nickname'] ?? ''));
         return [
@@ -102,7 +112,7 @@ final class CashierV3MemberDetailQueryServices
                 'remainingProjectAmount' => $remainingAmount,
             ],
             'cards' => $cards,
-            'dataAsOf' => date('c'),
+            'dataAsOf' => $asOf,
             'projectionContractVersion' => 'cashier-v3-member-detail-v3',
         ];
     }
@@ -131,7 +141,7 @@ final class CashierV3MemberDetailQueryServices
             $storeId = $operatorScope->storeId();
         }
         $detailQuery = $this->detailQuery($detailQuery);
-        $cards = $this->cards($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'assets' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'assets' ? $detailQuery['status'] : 'active', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
+        $cards = $this->cards($memberId, $operatorScope->tenantId(), $detailQuery['tab'] === 'assets' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'assets' ? $detailQuery['status'] : 'active', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
         $services = $this->services($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'writeoff' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateTo'] : '');
         $gifts = $this->gifts($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'gift' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'gift' ? $detailQuery['status'] : 'active', $detailQuery['tab'] === 'gift' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'gift' ? $detailQuery['dateTo'] : '');
         $care = $this->care($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'care' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'care' ? $detailQuery['status'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
@@ -708,17 +718,70 @@ final class CashierV3MemberDetailQueryServices
         throw $this->notFound();
     }
 
-    /** @return array<int,array<string,mixed>> */
-    private function cards(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword = '', string $status = 'active', string $dateFrom = '', string $dateTo = ''): array
+    /**
+     * Read the exact cents displayed as “剩余项目金额” for a bounded, already
+     * permission-scoped candidate set. Recheck the current member/store
+     * relation before reading rights from all stores; a caller cannot turn
+     * this into an unscoped member-directory lookup.
+     *
+     * @param array<int,int> $memberIds
+     * @param array<int,int> $visibleStoreIds
+     * @return array<int,int> member ID => remaining project amount in cents
+     */
+    public function readAiRemainingProjectAmounts(array $memberIds, string $tenantId, array $visibleStoreIds): array
+    {
+        $memberIds=array_values(array_unique($memberIds));
+        $visibleStoreIds=array_values(array_unique($visibleStoreIds));
+        if ($tenantId==='' || !$memberIds || count($memberIds)>100 || !$visibleStoreIds) throw $this->notFound();
+        foreach ($memberIds as $id) if (!is_int($id) || $id<1) throw $this->notFound();
+        foreach ($visibleStoreIds as $id) if (!is_int($id) || $id<1) throw $this->notFound();
+        // The relation is the same access boundary as AI member detail. The
+        // card read below deliberately includes this verified member's other
+        // stores, matching the amount column the customer already sees.
+        $visible=Db::name('user')->alias('u')->whereIn('u.uid',$memberIds)
+            ->where('u.status',1)->where('u.is_del',0)
+            ->whereIn('u.uid',function($query)use($visibleStoreIds):void {
+                $query->name('store_user')->where('status',1)->whereIn('store_id',$visibleStoreIds)->field('uid');
+            })->column('u.uid');
+        if (count(array_unique(array_map('intval',$visible)))!==count($memberIds)) throw $this->notFound();
+        $amounts=[];
+        $cardsByMember=$this->cardsForMembers($memberIds,$tenantId,'','active','','');
+        foreach ($memberIds as $memberId) {
+            $total='0.00';
+            foreach ($cardsByMember[$memberId]??[] as $card) {
+                if (($card['statusCode']??'')==='enabled') $total=bcadd($total,(string)$card['remainingAmount'],2);
+            }
+            $cents=bcmul($total,'100',0);
+            if (bccomp($cents,(string)PHP_INT_MAX,0)>0) throw new \RuntimeException('AI_METRIC_OVERFLOW');
+            $amounts[$memberId]=(int)$cents;
+        }
+        return $amounts;
+    }
+
+    /** Active card rights are cross-store only after the caller verifies member visibility. */
+    private function cards(int $memberId, string $tenantId, string $keyword = '', string $status = 'active', string $dateFrom = '', string $dateTo = ''): array
+    {
+        return $this->cardsForMembers([$memberId],$tenantId,$keyword,$status,$dateFrom,$dateTo)[$memberId]??[];
+    }
+
+    /**
+     * Shared single-member and AI batch projection. Holder, component, rule
+     * and actual-sale reads are batched; the same amount authority and status
+     * rules serve cashier details and the AI amount predicate.
+     *
+     * @param array<int,int> $memberIds
+     * @return array<int,array<int,array>>
+     */
+    private function cardsForMembers(array $memberIds, string $tenantId, string $keyword, string $status, string $dateFrom, string $dateTo): array
     {
         $now = time();
         $activeOnly = $status === 'active';
         $holderQuery = Db::name('user_card_holder')->alias('h')
             ->join('store_order o', 'o.id = h.oid')
-            ->where('h.uid', $memberId)
+            ->whereIn('h.uid', $memberIds)
             ->where('h.is_del', 0)
             ->where('h.store_id', '>', 0)
-            ->where('o.uid', $memberId)
+            ->whereRaw('o.uid = h.uid')
             ->where('o.paid', 1)
             ->where('o.is_del', 0)
             ->where('o.is_system_del', 0)
@@ -735,7 +798,7 @@ final class CashierV3MemberDetailQueryServices
         // 等独立事实继续按各自事实层的门店权限查询。
         $this->applyDetailKeyword($holderQuery, $keyword, ['h.card_name', 'h.card_no']);
         $holders = $holderQuery
-            ->field('h.id,h.oid,h.card_name,h.card_no,h.store_id,h.write_start,h.write_end,h.add_time,o.pay_price as order_pay_price')
+            ->field('h.id,h.uid,h.oid,h.card_name,h.card_no,h.store_id,h.write_start,h.write_end,h.add_time,o.pay_price as order_pay_price')
             ->order('h.id', 'asc')
             ->select()
             ->toArray();
@@ -757,23 +820,16 @@ final class CashierV3MemberDetailQueryServices
         }, $holderByOrder)));
         $cardStatusByHolder = Db::name('cashier_v3_card_state')
             ->where('tenant_id', $tenantId)
-            ->where('current_member_id', $memberId)
+            ->whereIn('current_member_id', $memberIds)
             ->whereIn('card_holder_id', $holderIds)
             ->column('card_status', 'card_holder_id');
         $cardRuleTypeByHolder = Db::name('cashier_v3_card_rule_state')
             ->where('tenant_id', $tenantId)
-            ->where('member_id', $memberId)
+            ->whereIn('member_id', $memberIds)
             ->whereIn('card_holder_id', $holderIds)
             ->column('rule_type', 'card_holder_id');
-        $ruleAuthoritiesByHolder = [];
-        $cardRules = new CashierV3CardRuleEntitlementAuthorityServices();
-        foreach ($holderIds as $holderId) {
-            $ruleAuthoritiesByHolder[$holderId] = $cardRules->authoritiesForHolder(
-                $tenantId,
-                $holderId,
-                false
-            );
-        }
+        $ruleAuthoritiesByHolder = (new CashierV3CardRuleEntitlementAuthorityServices())
+            ->authoritiesForHolders($tenantId,$holderIds);
 
         $projectsByOrder = [];
         $rows = Db::name('store_order_cart_info')
@@ -864,7 +920,7 @@ final class CashierV3MemberDetailQueryServices
                 $remainingAmount = $this->money($holder['order_pay_price'] ?? 0);
             }
             $statusCode = (string)($cardStatusByHolder[$holderId] ?? 'enabled');
-            $cards[] = [
+            $cards[(int)$holder['uid']][] = [
                 'id' => (string)($holder['id'] ?? ''),
                 'cardNo' => (string)($holder['card_no'] ?? ''),
                 'cardName' => trim((string)($holder['card_name'] ?? '')) ?: '会员卡项',

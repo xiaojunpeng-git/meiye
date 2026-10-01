@@ -30,7 +30,7 @@ final class MemberDetailContinuationResolver
         return $rows;
     }
 
-    /** Resolve one ordinal or the complete bounded, verified displayed set. */
+    /** Resolve one ordinal or the complete verified list within the Reader limit. */
     public function resolve(array $query,array $view,array $request): array
     {
         // VerifiedQueryContext has already replayed the stored query and
@@ -44,10 +44,13 @@ final class MemberDetailContinuationResolver
         // requests may read the verified set; an ambiguous singular must not
         // silently choose its first row.
         if ($target==='set') {
-            // The query service already limits condition lists to 100. Do not
-            // silently expand a truncated list into all matching identities.
+            // Detail and export may use the Reader's full verified list, even
+            // when the screen previews 20 rows. A truncated source still fails.
             $total=$view['results'][0]['count']??count($rows);
-            if (!empty($view['results'][0]['has_more'])||(int)$total>count($rows)||count($rows)>100) throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+            if (!empty($view['results'][0]['has_more'])||(int)$total>count($rows)
+                ||count($rows)>\app\services\query\metric\RegisteredMetricReadServices::AI_DETAIL_LIMIT) {
+                throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+            }
             $members=[];$seen=[];
             foreach ($rows as $row) {
                 $member=$this->member($row,$request);

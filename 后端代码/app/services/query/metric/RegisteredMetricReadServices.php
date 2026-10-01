@@ -119,6 +119,19 @@ final class RegisteredMetricReadServices
             || !is_array($conditionSet['conditions'] ?? null) || count($conditionSet['conditions']) < 1
             || count($conditionSet['conditions']) > 4) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
 
+        // Current rights are not period facts. Their displayed amount is an
+        // exact card projection, so run its registered reader before the
+        // fact-only SQL union. A mixed condition needs a separate verified
+        // intersection contract; never silently drop its other predicates.
+        $rightsConditions=array_values(array_filter($conditionSet['conditions'],static function($condition):bool {
+            if (!is_array($condition) || !is_string($condition['metric_code']??null)) return false;
+            return (MetricDefinitionRegistry::get($condition['metric_code'])['reader_strategy']??null)==='member_current_rights_amount';
+        }));
+        if ($rightsConditions!==[]) {
+            if (count($conditionSet['conditions'])!==1) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            return $this->currentRightsAmountMembers($tenantId,$stores,$rightsConditions[0],$limit);
+        }
+
         $queries = []; $metricCodes = []; $observedAgeProbe = null;
         foreach ($conditionSet['conditions'] as $condition) {
             $keys = is_array($condition) ? array_keys($condition) : []; sort($keys, SORT_STRING);
@@ -234,6 +247,103 @@ final class RegisteredMetricReadServices
             }
         }
         return ['count'=>$count,'rows'=>array_values($values),'limit'=>$limit,'has_more'=>$count>count($values)];
+    }
+
+    /**
+     * Filter by the exact current amount shown in member rights detail. The
+     * indexed member/store relation narrows candidates; paid order and cart
+     * prices are only a conservative upper bound, never a reported value.
+     * Repriced/new-card/legacy-source rows bypass that bound, because their
+     * authoritative purchase amount can differ. The final predicate always
+     * uses the shared card projection in cents, including cross-store rights.
+     */
+    private function currentRightsAmountMembers(string $tenantId,array $stores,array $condition,int $limit): array
+    {
+        $keys=array_keys($condition);sort($keys,SORT_STRING);
+        $code=$condition['metric_code']??null;$operator=$condition['operator']??null;$value=$condition['value']??null;
+        $contract=is_string($code)?MetricDefinitionRegistry::get($code):[];
+        if ($keys!==['metric_code','operator','value'] || ($contract['reader_strategy']??null)!=='member_current_rights_amount'
+            || !in_array($operator,(array)($contract['source']['threshold_count']['operators']??[]),true)
+            || !is_int($value) || $value<0 || $value>100000000000) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $comparison=$operator==='gt'?'>':'>=';
+        $yuan=bcdiv((string)$value,'100',2);
+        $scope=function($query)use($stores):void {
+            $query->whereIn('su.store_id',$stores)->where('su.status',1)
+                ->where('u.status',1)->where('u.is_del',0)
+                ->where('h.is_del',0)->where('h.write_surplus_times','>',0)
+                ->where('o.paid',1)->where('o.is_del',0)->where('o.is_system_del',0)
+                ->where('o.is_user_del',0)->where('o.refund_status',0)
+                ->where('o.terminal_action',0)->where('o.card_upgrade_use_oid',0);
+        };
+        $base=function()use($scope) {
+            $query=call_user_func($this->queryFactory,'store_user')->alias('su')
+                ->join('user u','u.uid=su.uid')
+                ->join('user_card_holder h','h.uid=u.uid')
+                ->join('store_order o','o.id=h.oid');
+            $scope($query);
+            return $query;
+        };
+        // remainingForSnapshot() never exceeds its selected nonnegative
+        // purchase amount. For ordinary legacy carts that amount is cart
+        // price; for time cards it is order price. Summing both is a safe
+        // superset, not a second monetary formula or a page-visible number.
+        $candidateQuery=$base()->leftJoin('store_order_cart_info c',
+            'c.oid=o.id AND c.cart_type=2 AND c.product_type=6 AND c.is_writeoff=0')
+            ->group('h.uid')->field('h.uid');
+        $candidateQuery->having('SUM(GREATEST(COALESCE(o.pay_price,0),0)+GREATEST(COALESCE(c.pay_price,0),0)) '
+            .$comparison.' '.$yuan." OR MAX(COALESCE(c.cart_info LIKE '%source_line_paid_amount%',0))=1");
+        $ids=array_map('intval',$candidateQuery->column('h.uid'));
+        // Completed V3 sale allocations and issued-card rule components may
+        // override legacy cart price. Include their owners regardless of the
+        // coarse bound, then let the same detail reader decide exact value.
+        foreach ([
+            ['table'=>'cashier_v3_card_purchase_receipt','on'=>'r.legacy_order_id=o.id','status'=>'completed'],
+            ['table'=>'cashier_v3_card_rule_state','on'=>'r.card_holder_id=h.id','status'=>null],
+        ] as $source) {
+            $table=$source['table'];
+            try {
+                // The V3 authorities are indexed by tenant first. Keep that
+                // predicate explicit: without it the rule-state join scans
+                // every holder and exceeds the AI read deadline.
+                $query=$base()->join($table.' r',$source['on'])->where('r.tenant_id',$tenantId);
+                if ($source['status']!==null) $query->where('r.status',$source['status']);
+                foreach ($query->distinct(true)->column('h.uid') as $memberId) $ids[]=(int)$memberId;
+            } catch (\Throwable $error) {
+                // These two V3 authorities are optional on older instances;
+                // the shared detail reader has the same table-absence
+                // fallback. Any other DB error must fail the whole answer.
+                $message=strtolower($error->getMessage());
+                if (strpos($message,$table)===false
+                    || (strpos($message,"doesn't exist")===false && strpos($message,'not found')===false)) throw $error;
+            }
+        }
+        $ids=array_values(array_unique(array_filter($ids,static function(int $id):bool {return $id>0;})));
+        sort($ids,SORT_NUMERIC);
+        if ($ids===[]) return ['count'=>0,'rows'=>[],'limit'=>$limit,'has_more'=>false];
+        $detail=new \app\services\cashier\v3\member\CashierV3MemberDetailQueryServices();
+        $matched=[];
+        foreach (array_chunk($ids,100) as $batch) {
+            foreach ($detail->readAiRemainingProjectAmounts($batch,$tenantId,$stores) as $memberId=>$cents) {
+                if (($operator==='gt'&&$cents>$value)||($operator==='gte'&&$cents>=$value)) $matched[$memberId]=$cents;
+            }
+        }
+        $count=count($matched);
+        if ($limit===self::AI_DETAIL_LIMIT && $count>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
+        if ($limit===0 || $count===0) return ['count'=>$count,'rows'=>[],'limit'=>$limit,'has_more'=>$count>0];
+        $page=array_slice($matched,0,$limit,true);
+        $names=[];
+        foreach (call_user_func($this->queryFactory,'user')->whereIn('uid',array_keys($page))
+            ->fieldRaw("uid,COALESCE(NULLIF(real_name,''),NULLIF(nickname,''),NULLIF(phone,''),CONCAT('会员#',uid)) member_name")
+            ->select()->toArray() as $nameRow) {
+            $names[(int)$nameRow['uid']]=(string)$nameRow['member_name'];
+        }
+        $rows=[];
+        foreach ($page as $memberId=>$cents) {
+            if (!isset($names[$memberId]) || trim((string)$names[$memberId])==='') $this->fail('METRIC_SOURCE_RESULT_INVALID');
+            $rows[]=['member_id'=>(int)$memberId,'member_name'=>(string)$names[$memberId],
+                'metrics'=>[$code=>$cents]];
+        }
+        return ['count'=>$count,'rows'=>$rows,'limit'=>$limit,'has_more'=>$count>count($rows)];
     }
 
     /**

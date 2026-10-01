@@ -1220,7 +1220,7 @@ final class AiRunStore
             'AI_PROJECT_OBJECT_NOT_READY','AI_PRODUCT_OBJECT_NOT_READY','AI_CATEGORY_OBJECT_NOT_READY','AI_PARTNER_OBJECT_NOT_READY',
             // A member selection or an unsupported batch is a business
             // boundary, not a model outage or a failed database read.
-            'AI_MEMBER_DETAIL_SELECTION_REQUIRED','AI_MEMBER_DETAIL_SET_NOT_READY',
+            'AI_MEMBER_DETAIL_SELECTION_REQUIRED','AI_MEMBER_DETAIL_SET_NOT_READY','AI_RIGHTS_CHANGED',
             'AI_OBJECT_DETAIL_SELECTION_REQUIRED','AI_OBJECT_DETAIL_NOT_READY',
             'AI_MEMBER_OBJECT_NOT_READY','AI_INVENTORY_OBJECT_NOT_READY','AI_OBJECT_CONTRACT_NOT_READY','AI_BINDING_SEMANTIC_REJECTED'],true)) return 'neutral';
         if (in_array($r['reason'],['CAPACITY_STOPPED','CAPACITY_REJECTED','AI_EXPORT_CAPACITY_REJECTED'],true)) return 'capacity';

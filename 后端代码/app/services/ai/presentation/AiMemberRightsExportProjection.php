@@ -11,7 +11,8 @@ final class AiMemberRightsExportProjection
 {
     public static function capture(array $members,string $view,array $populationRows=[],?array $rightsAnswer=null): array
     {
-        if (!in_array($view,['summary','rights'],true)||!$members||count($members)>100) self::fail();
+        if (!in_array($view,['summary','rights'],true)||!$members
+            ||count($members)>\app\services\query\metric\RegisteredMetricReadServices::AI_DETAIL_LIMIT) self::fail();
         // A combined filter-and-detail answer includes its verified selection
         // evidence. Pure follow-ups export only the requested assets.
         $rows=[];$refs=[];
@@ -59,7 +60,9 @@ final class AiMemberRightsExportProjection
     public static function validate($snapshot): array
     {
         if (!is_array($snapshot)||!in_array($snapshot['version']??null,[1,2],true)||!is_array($snapshot['member_refs']??null)
-            ||!$snapshot['member_refs']||count($snapshot['member_refs'])>100||!is_array($snapshot['rows']??null)
+            ||!$snapshot['member_refs']
+            ||count($snapshot['member_refs'])>\app\services\query\metric\RegisteredMetricReadServices::AI_DETAIL_LIMIT
+            ||!is_array($snapshot['rows']??null)
             ||!$snapshot['rows']||!is_string($snapshot['hash']??null)||!hash_equals(self::hash($snapshot),$snapshot['hash'])) self::fail();
         $fields=array_keys(\app\services\query\metric\MetricReadViewExportRegistrar::fields());
         foreach ($snapshot['member_refs'] as $ref) if (!is_string($ref)||!preg_match('/^member:[1-9][0-9]*$/D',$ref)) self::fail();

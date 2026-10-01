@@ -16,7 +16,7 @@ final class MetricDefinitionRegistry
     // v3 introduces source-owned analysis-dimension contracts.  Bumping the
     // mapping identity prevents a plan frozen against the older registry from
     // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v21';
+    public const VERSION = 'unified-metric-registry-v22';
     public const COVERAGE_START = '2026-08-10';
 
     /**
@@ -406,6 +406,31 @@ final class MetricDefinitionRegistry
                     // entitlement row. Keep this first slice to the positive
                     // state that the source can prove without synthesizing 0.
                     'operators' => ['gt'],
+                ],
+            ]) + ['condition_subjects' => ['member']],
+            // “权益金额” is the current remaining project amount already
+            // shown in member detail. It excludes account balance and must be
+            // read from that same card authority, not from historic sales or
+            // a rough cart-price sum. The date range only carries the current
+            // authorization scope; this is never a period cash flow.
+            'member_remaining_project_amount' => self::amount('member_current_rights_amount', 'member-current-remaining-project-amount-v1', ['condition_count', 'condition_list'], [
+                'table' => 'user_card_holder + store_order_cart_info',
+                'dimensions' => [
+                    'member' => [
+                        'id' => 'member_id', 'name' => 'member_name',
+                        'analysis_object_kind' => 'member',
+                        'analysis_object_label' => '会员',
+                        'analysis_relation_role' => 'member_current_remaining_project_amount',
+                        'analysis_action_codes' => ['service'],
+                    ],
+                ],
+                'threshold_count' => [
+                    'subject_dimension' => 'member',
+                    'aggregation' => 'current_state',
+                    // Only a positive current-rights cohort has a bounded
+                    // source population; zero/negative comparisons would
+                    // require scanning the entire member directory.
+                    'operators' => ['gte', 'gt'],
                 ],
             ]) + ['condition_subjects' => ['member']],
             // Age is computed as-of the signed query end date from the latest

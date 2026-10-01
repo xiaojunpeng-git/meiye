@@ -55,6 +55,45 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         return $result;
     }
 
+    /**
+     * Read many issued-card authorities with one state and one component read.
+     * Every immutable snapshot receives the same validation as a single-card
+     * read; missing optional tables retain the legacy-card fallback.
+     * This read-only path is for member lists and never acquires write locks.
+     *
+     * @param array<int,int> $holderIds
+     * @return array<int,array<int,array>> holder ID => legacy detail ID => authority
+     */
+    public function authoritiesForHolders(string $tenantId, array $holderIds): array
+    {
+        $holderIds = array_values(array_unique(array_map('intval', $holderIds)));
+        if ($tenantId === '' || !$holderIds) return [];
+        foreach ($holderIds as $holderId) if ($holderId <= 0) throw self::failure('card_rule_holder_invalid');
+        try {
+            $states = $this->rows(Db::name(CashierV3IssuedCardRuleStateServices::STATE_TABLE)
+                ->where('tenant_id', $tenantId)->whereIn('card_holder_id', $holderIds)->select());
+            if (!$states) return [];
+            $components = $this->rows(Db::name(CashierV3IssuedCardRuleStateServices::COMPONENT_TABLE)
+                ->where('tenant_id', $tenantId)->whereIn('rule_state_id', array_column($states, 'id'))
+                ->order('id asc')->select());
+        } catch (\Throwable $exception) {
+            if ($this->missingOptionalTable($exception)) return [];
+            throw $exception;
+        }
+        $byState = [];
+        foreach ($components as $component) $byState[(int)$component['rule_state_id']][] = $component;
+        $result = [];
+        foreach ($states as $state) {
+            $stateComponents = $byState[(int)$state['id']] ?? [];
+            $this->assertStateSnapshot($state, $stateComponents);
+            $holderId = (int)$state['card_holder_id'];
+            foreach ($stateComponents as $component) {
+                $result[$holderId][(int)$component['legacy_detail_id']] = $this->normalizeAuthority($state, $component);
+            }
+        }
+        return $result;
+    }
+
     public function snapshotForHolder(string $tenantId, int $holderId, bool $lock = false): ?array
     {
         if ($holderId <= 0 || $tenantId === '') {

@@ -5847,6 +5847,15 @@ final class AiGatewayServices
                 $detail=$rights[(int)$selection['member_id']]??null;
                 if (!is_array($detail)) throw new RuntimeException('AI_EVIDENCE_INVALID');
                 if ((int)($detail['member']['memberId']??0)!==(int)$selection['member_id']) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                // A filter and its rights detail are two reads. If a checkout
+                // changed the current entitlement between them, never publish
+                // a member whose shown amount contradicts the signed filter.
+                $expected=$spec['expected_remaining_project_amount_cents'][(int)$selection['member_id']]??null;
+                if ($expected!==null) {
+                    $shown=$detail['summary']['remainingProjectAmount']??null;
+                    if (!is_string($shown)||!preg_match('/^[0-9]+(?:\.[0-9]{1,2})?$/D',$shown)
+                        ||(int)bcmul($shown,'100',0)!==$expected) throw new RuntimeException('AI_RIGHTS_CHANGED');
+                }
                 $details[]=['detail'=>$detail,'label'=>(string)$selection['label'],'selection_ref'=>$member['selection_ref']];
             }
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'member_detail_read','SUCCEEDED');
@@ -5916,9 +5925,18 @@ final class AiGatewayServices
         }
         $request=$compiled['_member_detail_request'];$request['target']='set';$request['ordinal']=null;
         $resolved=$memberResolver->resolve($view['query'],$view,$request);
+        $expectedAmounts=[];
+        if (($view['results'][0]['condition_set']['conditions'][0]['metric_code']??null)==='member_remaining_project_amount') {
+            foreach ($view['results'][0]['rows']??[] as $row) {
+                if (!is_int($row['member_id']??null)
+                    ||!is_int($row['metrics']['member_remaining_project_amount']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                $expectedAmounts[$row['member_id']]=$row['metrics']['member_remaining_project_amount'];
+            }
+        }
         return $this->executeMemberDetail($context,$owner,$id,$generation,$worker,$snapshot,
             ['member_detail'=>$resolved+['source_query'=>$view['query'],'source_view_ref'=>$view['read_consistency_ref'],
                 'source_expires_at'=>$view['expires_at'],'population_answer'=>$result['answer'],
+                'expected_remaining_project_amount_cents'=>$expectedAmounts,
                 // Reuse the exact signed selection metrics, without re-query
                 // or rounding, so the combined answer's file stays complete.
                 'population_export_rows'=>\app\services\query\metric\MetricReadViewExportProvider::project($view)]],$contextMeaning);
@@ -6512,6 +6530,7 @@ final class AiGatewayServices
             'AI_OBJECT_DETAIL_NOT_READY'=>'已理解您想继续查看这个对象，但该对象的这类信息尚未接入统一查询；本次没有改查近似数据。',
             'AI_MEMBER_DETAIL_SELECTION_REQUIRED'=>'上一份名单有多位会员，请说明要看第几位会员的权益，例如“第一个会员的权益明细”。本次没有替您选择会员。',
             'AI_MEMBER_DETAIL_SET_NOT_READY'=>'这份会员名单尚未完整展示，请缩小筛选范围后查看全部权益，或说明要看已展示名单中的第几位。',
+            'AI_RIGHTS_CHANGED'=>'查询期间会员权益发生了变化，请重新查询以获取最新的完整结果。',
             'AI_FOLLOWUP_CONDITION_REQUIRED'=>'我已找到上次查询，但还不能准确确认这次要改变的内容。请补充您要改看的对象、时间或查看方式；已确认条件会保留。',
             'AI_RANK_LIMIT_NOT_READY'=>'当前门店排行最多展示前20或后20项，暂不支持您要求的数量；本次未更改您的条件。',
             'AI_DIMENSION_RANK_LIMIT_NOT_READY'=>'当前分析对象最多支持前20、后20排行，暂不支持您要求的数量；本次未更改您的条件。',
