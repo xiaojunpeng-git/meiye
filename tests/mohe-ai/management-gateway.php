@@ -45,6 +45,12 @@ try {
     // publish. The current answer policy defaults an omitted period to today,
     // so this contract verifies the still-executable metric clarification
     // instead of reviving the retired date-after-metric interaction.
+    // This fixture models partial business meaning explicitly. Empty meaning
+    // now stops before binding and cannot test management-version freezing.
+    $h->understandingOverride=['goal'=>'询问业绩','status'=>'needs_clarification','requirements'=>[
+        ['id'=>'r1','meaning'=>'尚未明确哪项业绩','fields'=>['metric_codes'],'values'=>['metric_terms'=>['业绩']],
+            'evidence'=>[['message_id'=>'current','quote'=>'业绩多少']]],
+    ]];
     $old=$h->start('业绩多少');$h->step($old,'metric_code',1);
     $document=$baseline;$document['guidance']['max_rounds']=5;
     $document['guidance']['slot_order']=['start_date','metric_code','compare_start','rank_direction','rank_limit'];
@@ -67,6 +73,7 @@ try {
     mgcheck($new['clarification']['question']===$document['guidance']['prompts']['metric_code'],'new Run uses new metric prompt');
     mgcheck($new['clarification']['max_clarification_rounds']===5,'new Run freezes new rounds');
     $new=$h->choose($new,['metric_code'=>'consume_amount']);mgcheck($new['status']==='COMPLETED','new order completes');
+    $h->understandingOverride=null;
 
     // Even a not-yet-executed accepted Run keeps the prior published contract.
     $readyInput=['client_request_id'=>'ready-before-publish','conversation_id'=>'conversation1','client_session_id'=>'device1','window_token'=>$h->boot['window_token'],'question'=>'今天消耗业绩多少','history'=>[],'output_format'=>'screen','guidance_schema_version'=>'mohe-clarification-v2'];
@@ -87,7 +94,10 @@ try {
     // slot order.  A published management document must preserve it rather
     // than rejecting its structural field as an unknown admin slot.
     $delta=array_fill_keys(\app\services\ai\contract\AiIntentResultContract::DELTA_FIELDS,'inherit');$delta['store_scope']='pending';
-    $h->understandingOverride=['goal'=>'数据范围尚未确定','status'=>'needs_clarification','requirements'=>[]];
+    $h->understandingOverride=['goal'=>'原门店查询的范围尚未确定','status'=>'needs_clarification','requirements'=>[
+        ['id'=>'r1','meaning'=>'原门店查询','fields'=>['object_kind'],'values'=>['object_kind'=>'store'],
+            'evidence'=>[['message_id'=>'current','quote'=>'范围还没有确定']]],
+    ]];
     $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$delta,'unresolved_fragments'=>[]];
     $pendingScope=$h->start('范围还没有确定',$source['answer']['context_ref']);
     mgcheck($pendingScope['status']==='WAITING_CLARIFICATION'&&$pendingScope['clarification']['fields'][0]['key']==='pending_store_scope','published management preserves context-pending guidance');

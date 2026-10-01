@@ -61,6 +61,38 @@ $rankingSet=(new MemberDetailContinuationResolver())->resolve(
 $check(array_column($rankingSet['members'],'selection_ref')===['member:101','member:102'],
     'a ranked member set can read details for those exact verified members in display order');
 
+// R59: semantic detail intent must work for a complete grouped member list,
+// without any phrase whitelist or a fresh name search. Reuse display projection
+// so hidden all-zero members do not silently join the requested cohort.
+$groupQuery=['query_shape'=>'breakdown','metric_codes'=>['cash_performance'],
+    'business_filters'=>['object_kind'=>'member'],'store_ids'=>[],
+    'start_date'=>'2026-10-01','end_date'=>'2026-10-02','compare_range'=>null];
+$groupView=['query'=>$groupQuery,'results'=>[['period'=>'current','metric_code'=>'cash_performance',
+    'storage_unit'=>'fen','object_kind'=>'member','object_label'=>'会员','has_more'=>false,
+    'object_count'=>3,'list_limit'=>2500,'active_object_count'=>2,'aggregate_value'=>11900,
+    'rows'=>[['entity_id'=>101,'entity_name'=>'测试会员','amount_cents'=>12000],
+        ['entity_id'=>102,'entity_name'=>'另一会员','amount_cents'=>-100],
+        ['entity_id'=>103,'entity_name'=>'零值会员','amount_cents'=>0]]]]];
+$groupSet=(new MemberDetailContinuationResolver())->resolve($groupQuery,$groupView,['target'=>'set','view'=>'summary']);
+$check(array_column($groupSet['members'],'selection_ref')===['member:101','member:102'],
+    'complete member breakdown continues the visible cohort including negative values and excluding hidden zero rows');
+$manyGroup=$groupView;
+for($i=104;$i<=128;$i++) $manyGroup['results'][0]['rows'][]=['entity_id'=>$i,'entity_name'=>'测试会员'.$i,'amount_cents'=>100];
+$manyGroup['results'][0]['object_count']=count($manyGroup['results'][0]['rows']);
+$check(count((new MemberDetailContinuationResolver())->resolve($groupQuery,$manyGroup,['target'=>'set'])['members'])===27,
+    'detail continuation uses all grouped identities rather than the 20-row screen preview');
+foreach (['truncated','missing_count','ordinal','wrong_kind','bad_identity'] as $case) {
+    $bad=$groupView;$request=['target'=>'set'];
+    if($case==='truncated') $bad['results'][0]['has_more']=true;
+    if($case==='missing_count') $bad['results'][0]['object_count']=null;
+    if($case==='ordinal') $request=['target'=>'single','ordinal'=>2];
+    if($case==='wrong_kind') $bad['results'][0]['object_kind']='store';
+    if($case==='bad_identity') $bad['results'][0]['rows'][0]['entity_id']=null;
+    try{(new MemberDetailContinuationResolver())->resolve($groupQuery,$bad,$request);throw new LogicException('accepted damaged grouped set');}
+    catch(RuntimeException $error){$check(in_array($error->getMessage(),['AI_MEMBER_DETAIL_SET_NOT_READY','AI_MEMBER_DETAIL_SELECTION_REQUIRED',
+        'AI_RESULT_REFERENCE_UNAVAILABLE','AI_EVIDENCE_INVALID'],true),'grouped detail rejects '.$case);}
+}
+
 $detail=['projectionContractVersion'=>'cashier-v3-member-detail-v3','dataAsOf'=>'2026-09-24T20:00:00+08:00',
     'member'=>['memberId'=>101,'name'=>'测试会员','storeId'=>8,'storeName'=>'测试门店'],'summary'=>[
         'accountBalance'=>'1288.60','principalBalance'=>'1000.00','giftBalance'=>'288.60',

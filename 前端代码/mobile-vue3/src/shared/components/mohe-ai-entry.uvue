@@ -15,6 +15,7 @@
         <view class="ai-user-turn"><text class="ai-turn-label">你问</text><text class="ai-question">{{ item.question }}</text></view>
         <text v-if="elapsedLabel(item.elapsed_seconds).length > 0" class="ai-run-complete">{{ elapsedLabel(item.elapsed_seconds) }}</text>
         <view class="ai-answer-turn"><text class="ai-turn-label">魔核 AI</text><view v-if="collectionSections(item.presentation).length > 0" class="ai-answer-presentation"><view v-for="section in collectionSections(item.presentation)" :key="section.id" class="ai-answer-section-group"><text class="ai-answer-section">{{ section.title }}</text><text class="ai-answer">{{ section.answer.summary }}</text><view v-for="(card,ci) in section.answer.cards || []" :key="ci" class="ai-card"><text class="ai-card-label">{{ card.metric_name }}</text><text class="ai-number">{{ card.display_value }}{{ card.unit }}</text><text v-if="card.period_label" class="ai-note">{{ card.period_label }}</text></view><scroll-view v-if="section.answer.table != null" scroll-x="true" class="ai-result-table-scroll"><view class="ai-result-table" :style="{ width: tableWidth(section.answer.table.columns) + 'px' }"><view class="ai-result-table__row ai-result-table__head"><text v-for="column in section.answer.table.columns" :key="column.key" class="ai-result-table__cell">{{ column.label }}</text></view><view v-for="(row,ri) in section.answer.table.rows" :key="ri" class="ai-result-table__row"><text v-for="column in section.answer.table.columns" :key="column.key" class="ai-result-table__cell">{{ row[column.key] }}</text></view></view></scroll-view></view></view><view v-else-if="answerPresentation(item.presentation) != null" class="ai-answer-presentation"><view v-for="presentation in [answerPresentation(item.presentation)]" :key="presentation.version"><text class="ai-answer-headline">{{ presentation.headline }}</text><view v-for="(group,gi) in presentationGroups(presentation.facts)" :key="gi" class="ai-answer-section-group"><text v-if="group.section.length > 0" class="ai-answer-section">{{ group.section }}</text><view class="ai-answer-facts"><view v-for="(fact,fi) in group.facts" :key="fi" class="ai-answer-fact-wrap"><view class="ai-answer-fact"><text class="ai-answer-fact__label">{{ fact.label }}</text><text class="ai-answer-fact__value" :class="{ 'ai-number--count': fact.unit != '元' }">{{ fact.value }}<text class="ai-unit">{{ fact.unit }}</text></text></view></view></view></view><text v-if="presentation.period_label.length > 0" class="ai-note ai-answer-period">{{ presentation.period_label }}</text><text v-for="(note,ni) in presentation.notes" :key="ni" class="ai-note ai-answer-note">{{ note }}</text></view></view><text v-else class="ai-answer">{{ item.answer }}</text></view>
+        <!-- 未形成可信候选时只提供原问补充，不拿指标目录凑三个解释。 -->
         <view v-for="(card,ci) in item.cards" :key="ci" class="ai-card">
           <text class="ai-card-label">{{ card.metric_name }}</text>
           <text class="ai-number">{{ card.display_value }}{{ card.unit }}</text>
@@ -38,6 +39,7 @@
         <view v-for="field in currentGuidanceFields()" :key="field.key">
           <text class="ai-guidance-label">{{ field.label }}</text>
           <picker v-if="field.type == 'date'" mode="date" :start="field.min || ''" :end="field.max || ''" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @change="selectDate(field.key,$event)"><text class="ai-choice">{{ choices[field.key] || '选择日期' }}</text></picker>
+          <view v-else-if="clarification.schema_version == guidanceSchema && currentGuidanceFields().length == 1" role="radiogroup" :aria-label="field.label"><button v-for="(option,oi) in recommendedOptions(field)" :key="option.value" class="ai-guidance-option" :class="{ 'ai-guidance-option--selected': choices[field.key] == option.value }" role="radio" :aria-checked="choices[field.key] == option.value" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="chooseValue(field,option)"><text class="ai-guidance-number">{{ oi + 1 }}</text><text class="ai-guidance-option-label">{{ option.label }}</text></button><button class="ai-guidance-option" :class="{ 'ai-guidance-option--selected': choices[field.key] == '__supplement__' }" role="radio" :aria-checked="choices[field.key] == '__supplement__'" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="chooseSupplement(field)"><text class="ai-guidance-number">{{ recommendedOptions(field).length + 1 }}</text><text class="ai-guidance-option-label">我来补充描述</text></button><textarea v-if="choices[field.key] == '__supplement__'" v-model="supplementText" class="ai-guidance-supplement" aria-label="补充描述" :maxlength="1000" placeholder="请补充或改写您的问题" /></view>
           <view v-else-if="field.options.length <= 3" role="radiogroup" :aria-label="field.label"><button v-for="(option,oi) in field.options" :key="option.value" class="ai-guidance-option" :class="{ 'ai-guidance-option--selected': choices[field.key] == option.value }" role="radio" :aria-checked="choices[field.key] == option.value" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @tap="chooseValue(field,option)"><text class="ai-guidance-number">{{ oi + 1 }}</text><text class="ai-guidance-option-label">{{ option.label }}</text></button></view>
           <picker v-else :range="field.options" range-key="label" :disabled="guidanceBusy || guidanceUnknown || closeRequestedState" @change="selectOption(field,$event)"><text class="ai-choice">{{ choiceLabels[field.key] || '请选择' }}</text></picker>
         </view>
@@ -90,9 +92,18 @@ function measureNativePanelTop() : void {
   nativeCapsuleSpace.value = Number.isFinite(left) && left > 0 ? Math.max(0, Number(windowInfo.windowWidth) - left) : 100
 }
 const question = ref(''), progress = ref(''), displayed = ref<Array<any>>([]), activeQuestion = ref(''), activeQuestionAnchor = ref(''), messageAnchor = ref(''), activeElapsedSeconds = ref(0), activeRunState = ref('正在思考'), expandedCardKeys = ref<Array<string>>([])
+// 服务端错误码只用于诊断；手机端无论在入队还是确认阶段，都要向用户说明可处理的边界。
+function customerErrorMessage(value : any, fallback : string = '魔核 AI 暂时无法处理这次请求，请联系管理员检查服务状态。') : string {
+  const reason = typeof value == 'string' ? value.trim() : ''
+  if (reason == 'AI_NOT_CONFIGURED' || reason == 'AI_EXTERNAL_AUTHORIZATION_REQUIRED') return '魔核 AI 暂不可用，请管理员检查基础配置中的启用状态和外部处理授权。'
+  if (reason == 'AI_AUTH_REQUIRED') return '登录状态已失效，请重新登录后再试。'
+  if (reason == 'AI_PERMISSION_DENIED') return '当前账号没有使用魔核 AI 的权限，请联系管理员。'
+  if (reason == 'AI_CLIENT_UPGRADE_REQUIRED') return '魔核 AI 页面版本较旧，请刷新页面后再试。'
+  return reason.indexOf('AI_') == 0 ? fallback : (reason.length > 0 ? reason : fallback)
+}
 // 表格列宽只决定阅读布局，不截断后端行列或改变 Excel 数据；宽表由自身横向滚动。
 function tableWidth(columns : Array<any>) : number { return Math.max(1, columns.length) * 124 }
-const clarification = ref<any>(null), choices = ref<any>({}), choiceLabels = ref<any>({})
+const clarification = ref<any>(null), choices = ref<any>({}), choiceLabels = ref<any>({}), supplementText = ref('')
 const guidanceSchema = 'mohe-clarification-v2'
 const guidanceBusy = ref(false), guidanceUnknown = ref(false), closeRequestedState = ref(false), revisingId = ref('')
 let guidanceSubmission : any = null, queuedClarificationId = '', activeGuidanceSchema = ''
@@ -406,7 +417,7 @@ function accept(value : any) : void {
     // The verified answer owns the long-table decision. Queue its file only
     // after the mobile answer is visible; a manual request shares the task.
     if (run.answer != null && ['COMPLETED','PARTIAL_SUCCEEDED'].indexOf(String(run.status)) >= 0 && pending != null && typeof pending.question == 'string') { let answer = run.answer; let elapsedSeconds = completedElapsedSeconds(); let row : any = {question:pending.question,answer:String(answer.summary || ''),cards:answer.cards || [],table:answer.table || null,presentation:answer,topic_boundary:run.topic_boundary,elapsed_seconds:elapsedSeconds,run_id:run.run_id,generation:run.generation,created_at:Date.now()}; finishActiveRunStatus(); appendTranscript(row); reportVisibleDeliveryAfterRender(run); if ((pending.want_excel === true || answer.auto_export_required === true) && run.status == 'COMPLETED') startIndependentExport({...run}) }
-    else { let terminalMessage = run.status == 'CANCELLED' ? '已取消' : (typeof run.message == 'string' && run.message.length > 0 ? run.message : '本次未能完成，请重新提问。'); if (pending != null && typeof pending.question == 'string') { let elapsedSeconds = completedElapsedSeconds(); finishActiveRunStatus(); appendTranscript({question:pending.question,answer:terminalMessage,cards:[],table:null,presentation:{summary:terminalMessage,terminal_status:run.status},context_eligible:false,topic_boundary:run.topic_boundary,elapsed_seconds:elapsedSeconds,run_id:run.run_id,generation:run.generation,created_at:Date.now()}) }; progress.value = terminalMessage; clientDeliveryStartedAt = 0 }; activeQuestion.value = ''; activeQuestionAnchor.value = ''; pending = null; markResolvedRun(); return }
+    else { let terminalMessage = run.status == 'CANCELLED' ? '已取消' : customerErrorMessage(run.message,'本次未能完成，请重新提问。'); if (pending != null && typeof pending.question == 'string') { let elapsedSeconds = completedElapsedSeconds(); finishActiveRunStatus(); appendTranscript({question:pending.question,answer:terminalMessage,cards:[],table:null,presentation:{summary:terminalMessage,terminal_status:run.status},terminal_reason:run.reason,context_eligible:false,topic_boundary:run.topic_boundary,elapsed_seconds:elapsedSeconds,run_id:run.run_id,generation:run.generation,created_at:Date.now()}) }; progress.value = terminalMessage; clientDeliveryStartedAt = 0 }; activeQuestion.value = ''; activeQuestionAnchor.value = ''; pending = null; markResolvedRun(); return }
   if (run.status == 'WAITING_CLARIFICATION' && !closeRequestedState.value) {
     let c = run.clarification
     if (!validGuidance(c)) { clarification.value = null; clearGuidance(); progress.value = '引导信息不完整，请重新确认任务状态。'; return }
@@ -452,8 +463,8 @@ function submit() : void {
   let createBody : any = {...submitted}; delete createBody.want_excel
   mobileAiRequest('POST','/runs',createBody,(r : any) => {
     if (expectedLifecycle != lifecycle) { if (r.ok && r.data != null && r.data.accepted !== false) { let retained = retainLateAdmission(r.data,submitted); cancelLateAdmission(submitted,retained) }; return }
-    if (!r.ok) { question.value = submitted.question; stopQuestionWait(); if (r.responseKnown) { pending = null; clearActive(); progress.value = r.message } else { progress.value = '请求结果暂未确认，再次发送将重试同一任务。'; persistActive() }; pauseForExpiredLogin(r); return }
-    if (r.data.accepted === false) { question.value = submitted.question; stopQuestionWait(); pending = null; clearActive(); progress.value = r.data.message || '当前使用人数较多，请稍后再问。'; return }
+    if (!r.ok) { question.value = submitted.question; stopQuestionWait(); if (r.responseKnown) { pending = null; clearActive(); progress.value = customerErrorMessage(r.message) } else { progress.value = '请求结果暂未确认，再次发送将重试同一任务。'; persistActive() }; pauseForExpiredLogin(r); return }
+    if (r.data.accepted === false) { question.value = submitted.question; stopQuestionWait(); pending = null; clearActive(); progress.value = customerErrorMessage(r.data.message,'当前使用人数较多，请稍后再问。'); return }
     // New servers accept only after durable queueing.  During a staged rollout
     // keep the old synchronous trigger for a server that has not enabled its
     // compatible consumer yet.
@@ -478,7 +489,7 @@ function executeCompatibility(source : any,expectedLifecycle : number) : void {
     else schedulePoll()
   })
 }
-function cancelRun() : void {
+function cancelRun(afterCancel : any = null) : void {
   if (terminal() || (run == null && pending == null)) return
   closeRequested = true; closeRequestedState.value = true; persistActive(); if (run == null || terminal()) return
   let source = run, expectedLifecycle = lifecycle
@@ -489,7 +500,8 @@ function cancelRun() : void {
     // that replacement's durable recovery record.
     if (expectedLifecycle != lifecycle || run == null || run.run_id != source.run_id || run.generation != source.generation) return
     if (pauseForExpiredLogin(r)) return
-    if (r.ok) accept(r.data); else { progress.value = '暂未确认取消结果。'; schedulePoll() }
+    if (r.ok) { accept(r.data); if (run != null && run.status == 'CANCELLED' && typeof afterCancel == 'function') afterCancel() }
+    else { progress.value = '暂未确认取消结果。'; schedulePoll() }
   })
 }
 // 头部“退出”只关闭魔核 AI 工作区；复用既有取消链路，避免留下不可见的运行中任务。
@@ -525,13 +537,17 @@ function validGuidanceFields(fields : any,modern : boolean) : boolean {
   }
   return true
 }
-function clearGuidance() : void { choices.value = {}; choiceLabels.value = {}; guidanceBusy.value = false; guidanceUnknown.value = false; revisingId.value = ''; guidanceSubmission = null }
+function clearGuidance() : void { choices.value = {}; choiceLabels.value = {}; supplementText.value = ''; guidanceBusy.value = false; guidanceUnknown.value = false; revisingId.value = ''; guidanceSubmission = null }
 function currentGuidanceFields() : Array<any> { if (clarification.value == null) return []; let c = clarification.value; if (revisingId.value.length > 0 && Array.isArray(c.revisable_steps)) { let old = c.revisable_steps.find((item : any) => item.id == revisingId.value); if (old != null) return old.fields }; return c.fields }
 function currentGuidanceQuestion() : string { if (clarification.value == null) return ''; if (revisingId.value.length > 0) { let old = clarification.value.revisable_steps.find((item : any) => item.id == revisingId.value); if (old != null) return '修改：' + String(old.question) }; return String(clarification.value.question || '请选择本次要查询的内容') }
 function editGuidance(old : any) : void { if (guidanceBusy.value || guidanceUnknown.value || closeRequestedState.value) return; revisingId.value = old.id; choices.value = {}; choiceLabels.value = {}; old.fields.forEach((field : any) => { if (typeof old.choices[field.key] == 'string') choices.value[field.key] = old.choices[field.key]; if (Array.isArray(field.options)) field.options.forEach((option : any) => { if (option.value == choices.value[field.key]) choiceLabels.value[field.key] = option.label }) }) }
 function resetGuidanceChoices() : void { if (guidanceBusy.value || guidanceUnknown.value || closeRequestedState.value) return; clearGuidance() }
 function selectDate(key : string,event : any) : void { if (!guidanceBusy.value && !guidanceUnknown.value && !closeRequestedState.value) choices.value[key] = event.detail.value }
 function chooseValue(field : any,option : any) : void { if (guidanceBusy.value || guidanceUnknown.value || closeRequestedState.value) return; choices.value[field.key] = option.value; choiceLabels.value[field.key] = option.label }
+function chooseSupplement(field : any) : void { chooseValue(field,{value:'__supplement__',label:'我来补充描述'}) }
+// Only executable server choices may be recommendations. A stop sentinel is
+// replaced by the customer's free-text correction, never submitted as data.
+function recommendedOptions(field : any) : Array<any> { let executable = field.options.filter((option : any) => option.action != 'stop'); return (executable.length <= 3 ? executable : executable.filter((option : any) => option.recommended == true)).slice(0,3) }
 function selectOption(field : any,event : any) : void { let option = field.options[Number(event.detail.value)]; if (option != null) chooseValue(field,option) }
 function confirmChoices() : void {
   if (guidanceBusy.value || closeRequestedState.value || run == null || terminal() || run.status != 'WAITING_CLARIFICATION' || clarification.value == null || !mayWriteActiveRecord()) return
@@ -540,6 +556,13 @@ function confirmChoices() : void {
     let submittedChoices : any = {}; let invalid = false
     currentGuidanceFields().forEach((field : any) => { let value = choices.value[field.key]; if (typeof value != 'string' || value.length == 0) invalid = true; else submittedChoices[field.key] = value })
     if (invalid) { progress.value = '请完成当前选择或填写有效日期。'; return }
+    // Continue the same server-owned clarification; only the correction is
+    // sent as text. Never concatenate conditions or recreate the paused Run.
+    if (currentGuidanceFields().length == 1 && submittedChoices[currentGuidanceFields()[0].key] == '__supplement__') {
+      let detail = supplementText.value.trim()
+      if (detail.length == 0) { progress.value = '请补充您想查询的内容。'; return }
+      submittedChoices.supplement_text = detail
+    }
     let body : any = binding(); body.clarification_id = c.id; body.choices = submittedChoices
     if (c.schema_version == guidanceSchema) { body.schema_version = guidanceSchema; body.step_revision = c.step_revision; body.intent_revision = c.intent_revision; body.client_submission_id = id(); if (revisingId.value.length > 0) body.revise_clarification_id = revisingId.value }
     guidanceSubmission = body
@@ -571,7 +594,7 @@ function confirmChoices() : void {
     }
     if (clarification.value == null || clarification.value.id != c.id || clarification.value.intent_revision != c.intent_revision || closeRequestedState.value) return
     guidanceBusy.value = false
-    if (r.responseKnown) { guidanceSubmission = null; guidanceUnknown.value = false; progress.value = r.message; persistActive() }
+    if (r.responseKnown) { guidanceSubmission = null; guidanceUnknown.value = false; progress.value = customerErrorMessage(r.message); persistActive() }
     else { guidanceUnknown.value = true; progress.value = '提交结果暂未确认，请重试确认同一次选择。'; persistActive() }
     pauseForGuidance()
   })
@@ -689,6 +712,7 @@ onUnmounted(() => { lifecycle++; exportLifecycle++; persistActive(true); if (tim
 .ai-guidance-option--selected{background-color:#f3f3f4;border-color:#d9d9dc}
 .ai-guidance-number{flex-shrink:0;display:flex;align-items:center;justify-content:center;width:30px;height:30px;margin-right:12px;border:1px solid #dedee1;border-radius:50%;background-color:#f3f3f4;color:#737377;font-size:14px}
 .ai-guidance-option-label{flex:1;min-width:0;font-size:16px;white-space:normal}
+.ai-guidance-supplement{box-sizing:border-box;width:100%;min-height:84px;padding:12px;border:1px solid #d9d9dc;border-radius:12px;background-color:#fff;color:#202124;font-size:15px;line-height:1.5}
 .ai-guidance-actions{display:flex;flex-direction:row;justify-content:flex-end;margin-top:18px}
 .ai-guidance-confirm{margin:0;padding:0 18px;border-radius:24px;background-color:#17191e;color:#fff;font-size:15px;line-height:44px}
 .ai-guidance-confirm[disabled]{background-color:#aaa;color:#fff}

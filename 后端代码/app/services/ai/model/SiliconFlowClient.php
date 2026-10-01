@@ -122,6 +122,10 @@ final class SiliconFlowClient
             // never supplies a missing business value or relaxes evidence.
             array_splice($messages,-1,0,[['role'=>'system','content'=>AiIntentUnderstandingContract::repairInstruction($repairPredicate)]]);
         }
+        // Vocabulary is guidance, not evidence that unrelated customer text
+        // contains a business query. This final rule also prevents the model
+        // from interpreting nonsense by selecting an item from the catalogue.
+        array_splice($messages,-1,0,[['role'=>'system','content'=>'Final semantic check: interpret the actual customer message, not the vocabulary list. No intelligible business goal means requirements=[] and needs_clarification, without suggestions. For a partly intelligible request, optional clarification_suggestions is an allowed additional top-level key: provide exactly three distinct short recommended replies resolving the missing meaning while keeping clear conditions; use compatible published measurements rather than invented metrics. Each suggestion must be one concrete customer reply that resolves a missing choice when selected as-is. Do not ask the customer another question inside an option, list examples, or put multiple alternatives in one option. Three vague questions about what the customer wants are not recommendations. If clarification_context is present, merge unchanged original conditions and explicit current corrections into one complete understanding. Cite original/current evidence, not generated suggestions.']]);
         $payload=['model'=>$model,'stream'=>false,'max_tokens'=>self::INTENT_CARRIER_MAX_TOKENS,'temperature'=>0,'response_format'=>['type'=>'json_object'],'messages'=>$messages];
         $decoded=$this->request($payload,$apiKey,$timeoutMs,$checkpoint);
         $understanding=AiIntentUnderstandingContract::normalize(AiIntentResultContract::native(AiStrictJson::decodeObject($decoded['choices'][0]['message']['content'])),$safeQuestion);
@@ -562,7 +566,7 @@ final class SiliconFlowClient
             // needed to distinguish a continued platform overview from a new
             // multi-metric answer; this view contains no answer, row, name,
             // identifier or business value.
-            ['role'=>'user','content'=>json_encode(['question'=>['question'=>$safeQuestion['question'],'reference_date'=>$safeQuestion['reference_date'],'prior_query'=>$safeQuestion['prior_query']], 'understanding'=>$understanding,'candidate_binding'=>$intent,'capabilities'=>$reviewCapabilities],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)],
+            ['role'=>'user','content'=>json_encode(['question'=>self::bindingQuestion($safeQuestion), 'understanding'=>$understanding,'candidate_binding'=>$intent,'capabilities'=>$reviewCapabilities],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)],
         ];
         $payload=['model'=>$model,'stream'=>false,'max_tokens'=>300,'temperature'=>0,'response_format'=>['type'=>'json_object'],'messages'=>$messages];
         $decoded=$this->request($payload,$apiKey,$timeoutMs,$checkpoint);
@@ -682,7 +686,7 @@ final class SiliconFlowClient
      */
     private static function bindingQuestion(array $safeQuestion): array
     {
-        return [
+        $projection=[
             'schema_version'=>$safeQuestion['schema_version'],
             'question'=>$safeQuestion['question'],
             'prior_query'=>$safeQuestion['prior_query'],
@@ -690,6 +694,11 @@ final class SiliconFlowClient
             'server_resolved_fields'=>$safeQuestion['server_resolved_fields'],
             'reference_date'=>$safeQuestion['reference_date'],
         ];
+        if (isset($safeQuestion['clarification_context'])) {
+            $projection['clarification_context']=$safeQuestion['clarification_context'];
+            $projection['evidence_messages']=$safeQuestion['evidence_messages'];
+        }
+        return $projection;
     }
 
     private function validateSafeQuestion(array $safeQuestion): void
@@ -698,7 +707,7 @@ final class SiliconFlowClient
             || !is_bool($safeQuestion['has_unresolved_conditions']??null) || !is_array($safeQuestion['server_resolved_fields']??null)
             || !is_string($safeQuestion['reference_date']??null) || !preg_match('/^\d{4}-\d{2}-\d{2}$/D',$safeQuestion['reference_date'])
             || !is_array($safeQuestion['recent_questions']??null) || !is_array($safeQuestion['evidence_messages']??null)
-            || !array_key_exists('prior_query',$safeQuestion) || count($safeQuestion)!==8 || strlen($safeQuestion['question'])>16384) {
+            || !array_key_exists('prior_query',$safeQuestion) || count($safeQuestion)!==(isset($safeQuestion['clarification_context'])?9:8) || strlen($safeQuestion['question'])>16384) {
             throw new AiContractException('AI_MODEL_INPUT_INVALID');
         }
         if (count($safeQuestion['recent_questions'])>20) throw new AiContractException('AI_MODEL_INPUT_INVALID');
@@ -707,6 +716,13 @@ final class SiliconFlowClient
         if (count(array_unique($safeQuestion['server_resolved_fields']))!==count($safeQuestion['server_resolved_fields'])) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         foreach ($safeQuestion['server_resolved_fields'] as $field) if(!in_array($field,['period','current_store_scope'],true)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         $expected=['current'=>$safeQuestion['question']];
+        if (isset($safeQuestion['clarification_context'])) {
+            $clarification=$safeQuestion['clarification_context'];
+            if (!is_array($clarification) || array_keys($clarification)!==['question','understanding']
+                || !is_string($clarification['question']) || strlen($clarification['question'])>16384
+                || !is_array($clarification['understanding'])) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+            $expected['original']=$clarification['question'];
+        }
         foreach ($safeQuestion['recent_questions'] as $index=>$text) $expected['recent_'.($index+1)]=$text;
         if (count($safeQuestion['evidence_messages'])!==count($expected)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         foreach ($safeQuestion['evidence_messages'] as $message) {

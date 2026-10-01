@@ -17,6 +17,29 @@ final class AiRunStore
     private $clockRegressionMs = null;
     private $previousClockSample = null;
     private $minimumClockDelta = 0;
+    private array $semanticAttemptScopes=[];
+
+    /** A customer reply starts a new bounded execution segment in the same
+     * Run. Its attempts must not collide with the paused question's attempts;
+     * counters, deadlines and authority remain shared, not reset. */
+    public function scopeSemanticContinuation(array $owner,string $runId,int $generation,string $worker): void
+    {
+        $run=$this->read($owner,$runId,$generation);$this->worker($run,$worker);$this->live($run);
+        $round=(int)$run['clarification_count'];
+        if ($round<1 || $round>5) throw new RuntimeException('AI_CLARIFICATION_INVALID');
+        $this->semanticAttemptScopes[$runId.':'.$worker]='_reply'.$round;
+    }
+
+    /** Worker-local scoping must never leak into another Run or request. */
+    public function clearSemanticContinuation(string $runId,string $worker): void
+    {
+        unset($this->semanticAttemptScopes[$runId.':'.$worker]);
+    }
+
+    private function semanticAttemptCode(string $runId,string $worker,string $code): string
+    {
+        return $code===''?'':$code.($this->semanticAttemptScopes[$runId.':'.$worker]??'');
+    }
 
     public function __construct(PDO $db, string $prefix, string $instanceId, ?callable $clock = null)
     {
@@ -581,6 +604,7 @@ final class AiRunStore
 
     public function prepareAttempt(array $owner,string $runId,int $generation,string $workerToken,string $attemptCode,string $kind,string $payloadHash,string $targetCode): array
     {
+        $attemptCode=$this->semanticAttemptCode($runId,$workerToken,$attemptCode);
         $this->identifier($attemptCode); $this->identifier($targetCode);
         if (!in_array($kind,['model','tool'],true) || !preg_match('/^[a-f0-9]{64}$/D',$payloadHash)) { throw new RuntimeException('AI_ATTEMPT_INVALID'); }
         return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$attemptCode,$kind,$payloadHash,$targetCode) {
@@ -619,6 +643,7 @@ final class AiRunStore
     /** Returns false for every duplicate: never re-send an IN_FLIGHT/finished attempt. */
     public function sendAttempt(array $owner,string $runId,int $generation,string $workerToken,string $attemptCode): bool
     {
+        $attemptCode=$this->semanticAttemptCode($runId,$workerToken,$attemptCode);
         $this->identifier($attemptCode);
         return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$attemptCode) {
             $r=$this->read($owner,$runId,$generation); $this->worker($r,$workerToken); $this->live($r);
@@ -637,6 +662,7 @@ final class AiRunStore
     /** Usage is confirmed numeric metadata only. UNKNOWN never means zero tokens. */
     public function finishAttempt(array $owner,string $runId,int $generation,string $workerToken,string $attemptCode,string $state,?int $inputTokens=null,?int $outputTokens=null): void
     {
+        $attemptCode=$this->semanticAttemptCode($runId,$workerToken,$attemptCode);
         $this->identifier($attemptCode);
         if (!in_array($state,['SUCCEEDED','FAILED','UNKNOWN'],true) || ($inputTokens!==null && $inputTokens<0) || ($outputTokens!==null && $outputTokens<0) || ($state==='UNKNOWN' && ($inputTokens!==null || $outputTokens!==null))) { throw new RuntimeException('AI_ATTEMPT_INVALID'); }
         $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$attemptCode,$state,$inputTokens,$outputTokens) {
@@ -667,6 +693,7 @@ final class AiRunStore
     /** Payload-free model response diagnostics expire with the Run. */
     public function recordDiagnostic(array $owner,string $runId,int $generation,string $workerToken,array $diagnostic,string $attemptCode=''): void
     {
+        $attemptCode=$this->semanticAttemptCode($runId,$workerToken,$attemptCode);
         // Diagnostics deliberately hold only bounded transport facts. They
         // must never become a back door for customer wording, model output,
         // identities or returned business values.
@@ -1224,7 +1251,9 @@ final class AiRunStore
             'AI_OBJECT_DETAIL_SELECTION_REQUIRED','AI_OBJECT_DETAIL_NOT_READY',
             'AI_MEMBER_OBJECT_NOT_READY','AI_INVENTORY_OBJECT_NOT_READY','AI_OBJECT_CONTRACT_NOT_READY','AI_BINDING_SEMANTIC_REJECTED'],true)) return 'neutral';
         if (in_array($r['reason'],['CAPACITY_STOPPED','CAPACITY_REJECTED','AI_EXPORT_CAPACITY_REJECTED'],true)) return 'capacity';
-        if (in_array($r['reason'],['AI_INTENT_UNRESOLVED','AI_CAPABILITY_NOT_READY','AI_CONTEXT_REQUIRED','AI_RANK_LIMIT_NOT_READY','AI_DIMENSION_RANK_LIMIT_NOT_READY','AI_FUTURE_ACTUALS_UNAVAILABLE','AI_DATA_COVERAGE_INCOMPLETE',
+        // A partial semantic clarification is customer-resolvable, not an AI
+        // transport outage; classify it with the other neutral query bounds.
+        if (in_array($r['reason'],['AI_INTENT_UNRESOLVED','AI_INTENT_PARTIAL','AI_CAPABILITY_NOT_READY','AI_CONTEXT_REQUIRED','AI_RANK_LIMIT_NOT_READY','AI_DIMENSION_RANK_LIMIT_NOT_READY','AI_FUTURE_ACTUALS_UNAVAILABLE','AI_DATA_COVERAGE_INCOMPLETE',
             'AI_DATE_INVALID','AI_DATE_REVERSED','AI_DATE_RANGE_TOO_LONG','METRIC_QUERY_RANGE_REVERSED','METRIC_QUERY_RANGE_TOO_LONG','METRIC_QUERY_FUTURE_UNAVAILABLE','AI_RESULT_REFERENCE_UNAVAILABLE','AI_CLARIFICATION_EXHAUSTED','AI_CLARIFICATION_INVALID_LIMIT','AI_CLARIFICATION_EXPIRED','AI_CLARIFICATION_STALE','AI_CLIENT_UPGRADE_REQUIRED','AI_METADATA_NOT_READY'],true)) return 'neutral';
         if (in_array($r['reason'],['AI_EXPORT_NOT_READY','AI_EXPORT_PRINCIPAL_UNAVAILABLE','AI_EXPORT_NOT_PUBLISHED','AI_EXPORT_EXPIRED','METRIC_NOT_REGISTERED','METRIC_PERMISSION_CHANGED','METRIC_PERMISSION_DENIED','METRIC_PERMISSION_GRAIN_UNAVAILABLE','METRIC_QUERY_COVERAGE_UNAVAILABLE','METRIC_QUERY_RANGE_INVALID','METRIC_QUERY_SCHEMA_INVALID','METRIC_QUERY_SHAPE_UNAVAILABLE','METRIC_SEMANTICS_CONFLICT','CLARIFICATION_EXPIRED','AI_PERMISSION_DENIED','AI_AUTHORIZATION_CHANGED','AI_CAPABILITY_CHANGED','AI_INPUT_SCHEMA_INVALID','AI_UNSUPPORTED_CONDITION','AI_METRIC_NOT_READY','AI_QUERY_SHAPE_NOT_READY','AI_OUTPUT_FORMAT_INVALID','AI_CLARIFICATION_INVALID','AI_EVIDENCE_INCOMPLETE','AI_CANCELLED','AI_NOT_CONFIGURED','AI_METRIC_EXPLANATION_NOT_READY','AI_EXTERNAL_AUTHORIZATION_REQUIRED'],true)) return 'neutral';
         if (in_array($r['reason'],['AI_EXPORT_DISPATCH_UNKNOWN','AI_EXPORT_CANCELLATION_UNKNOWN'],true)) return 'export_unknown';

@@ -23,14 +23,23 @@ final class AiSafeQuestionProjector
      * from that local context are supplied to it.  Previous answers can contain
      * figures and names, so they never cross this boundary.
      */
-    public function projectConversation(string $question,array $history,array $configuration,array $privateLabels=[],array $protectedTerms=[]): array
+    public function projectConversation(string $question,array $history,array $configuration,array $privateLabels=[],array $protectedTerms=[],array $referenceSeed=[]): array
     {
         // One conversation has one reference map.  A name mentioned in an
         // earlier question must keep the same opaque reference when the next
         // question uses a pronoun, while a newly mentioned name gets a new one.
         if (count($history)>20) throw new \RuntimeException('AI_CONVERSATION_INVALID');
         $history=array_slice($history,-self::MODEL_RECENT_QUESTION_LIMIT);
-        $references=[];
+        // A paused semantic clarification retains its encrypted reference map.
+        // New wording must not give an old opaque token a different identity.
+        if (count($referenceSeed)>128) throw new \RuntimeException('AI_CONVERSATION_INVALID');
+        foreach (array_values($referenceSeed) as $index=>$value) {
+            if (!array_key_exists('local_condition_'.($index+1),$referenceSeed)
+                || !is_string($value) || $value==='' || strlen($value)>8192 || preg_match('//u',$value)!==1) {
+                throw new \RuntimeException('AI_CONVERSATION_INVALID');
+            }
+        }
+        $references=$referenceSeed;
         $recent=[];
         foreach ($history as $round) {
             if (!is_array($round) || !is_string($round['question']??null)) throw new \RuntimeException('AI_CONVERSATION_INVALID');

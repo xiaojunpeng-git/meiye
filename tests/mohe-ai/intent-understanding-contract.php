@@ -509,6 +509,13 @@ $broadRankingBinding=$naturalBinding;$broadRankingBinding['object_kind']='person
 $normalizedBroadRanking=AiIntentResultContract::normalize($broadRankingBinding,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);
 $check($normalizedBroadRanking['recommended_initial_answer']===true&&!$normalizedBroadRanking['needs_metric_choice']&&$normalizedBroadRanking['metric_codes']===['cash_performance'],
     'a broad singular ranking can retain the model-selected professional first measure without forcing the customer to name one');
+$choiceOnly=$broadRankingBinding;$choiceOnly['metric_codes']=[];$choiceOnly['metric_choice_candidates']=['cash_performance'];
+$normalizedChoice=AiIntentResultContract::normalize($choiceOnly,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding);
+$check($normalizedChoice['needs_metric_choice']===true&&$normalizedChoice['metric_codes']===[]&&$normalizedChoice['metric_choice_candidates']===['cash_performance'],
+    'a semantic recommendation stays separate from the selected metric and Reader query');
+$unknownChoice=$choiceOnly;$unknownChoice['metric_choice_candidates']=['not_registered'];
+$check(AiIntentResultContract::normalize($unknownChoice,['cash_performance'],[],$broadRankingQuestion,$broadRankingUnderstanding)['metric_choice_candidates']===[],
+    'an unregistered display suggestion is dropped without a query or extra model repair');
 $rankingChoiceCandidate=['operation'=>'ranking','metric_codes'=>['cash_performance'],'needs_metric_choice'=>false];
 $check(AiIntentResultContract::canUseCandidateBlindMetricReview($naturalUnderstanding,$rankingChoiceCandidate),
     'a candidate-bound ranking remains eligible for the independent semantic admission pass');
@@ -979,6 +986,21 @@ $badDate=$base;$badDate['periods']=[['kind'=>'date_range','start'=>'2026-02-30',
 $reversed=$base;$reversed['periods']=[['kind'=>'date_range','start'=>'2026-09-12','end'=>'2026-09-01']];$reject(static function()use($reversed,$question,$understanding){AiIntentResultContract::normalize($reversed,['cash_performance'],[],$question,$understanding);},'reversed model date is a model contract error');
 $prompt=AiIntentUnderstandingContract::modelInstruction().' '.AiIntentResultContract::modelInstruction(false);
 $check(strpos($prompt,'requirements')!==false&&strpos($prompt,'provenance')!==false,'two stage model contracts are published');
+$check(!AiIntentResultContract::hasConcreteQueryMeaning(['requirements'=>[
+    ['fields'=>['object_kind','operation'],'values'=>['object_kind'=>'unknown','operation'=>'unknown']],
+]],['metric_codes'=>[]]),'unknown prose requirements alone do not become partial business understanding');
+$check(AiIntentResultContract::hasConcreteQueryMeaning(['requirements'=>[
+    ['fields'=>['metric_codes'],'values'=>['metric_terms'=>['收了多少钱']]],
+]],['metric_codes'=>[]]),'accepted natural measurement meaning does not require an exact registered keyword before clarification');
+$check(AiIntentResultContract::hasConcreteQueryMeaning(['requirements'=>[
+    ['fields'=>['periods'],'values'=>['periods'=>[['kind'=>'calendar_month','offset'=>0]]]],
+]],['metric_codes'=>[]]),'a typed time condition remains partial meaning without a selected metric');
+$check(AiIntentResultContract::hasConcreteQueryMeaning(['requirements'=>[
+    ['fields'=>['object_kind'],'values'=>['object_kind'=>'member']],
+]],['metric_codes'=>[]]),'a typed business subject remains partial meaning');
+$check(strpos($prompt,'Requirements must preserve intelligible business-query meaning.')!==false
+    &&strpos($prompt,'do not manufacture an object, measurement, operation or unbound requirement')!==false,
+    'general help versus partial clarification is model-owned business meaning, not an arbitrary nonempty requirement or word list');
 $understandingPrompt=AiIntentUnderstandingContract::modelInstruction();
 foreach (['metric_terms','metric_exclusions','object_kind','object_relation','operation','ranking','direction','limit','scope','date_range','relative_days','month_offset','end_offset_days','offset_months'] as $requiredShape) {
     $check(strpos($understandingPrompt,$requiredShape)!==false,'first-stage model is told the bounded shape of '.$requiredShape);
@@ -1315,4 +1337,36 @@ $completeMeaning=['goal'=>'指定门店项目数最高的技师','status'=>'unde
 ]];
 $check(count(AiIntentUnderstandingContract::normalize($completeMeaning,$completeQuestion)['requirements'][0]['fields'])===7,
     'all seven declared and validated meanings fit one requirement without a formatting repair');
+// R59 suggestions belong to the control plane, not the query requirements.
+$partialMeaning=$completeMeaning;$partialMeaning['status']='needs_clarification';
+$partialMeaning['clarification_suggestions']=['查看现金业绩','查看消耗业绩','查看退款业绩'];
+$partialNormalized=AiIntentUnderstandingContract::normalize($partialMeaning,$completeQuestion);
+$check(count($partialNormalized['clarification_suggestions'])===3,'three distinct semantic recommendations survive separately from requirements');
+$resolvedPartial=AiIntentUnderstandingContract::withResolvedSinglePeriod($partialNormalized,
+    [['kind'=>'date_range','start'=>'2026-10-01','end'=>'2026-10-02']]);
+$check($resolvedPartial['status']==='needs_clarification'
+    && $resolvedPartial['clarification_suggestions']===$partialNormalized['clarification_suggestions'],
+    'server normalization of a clear partial date does not complete the query or remove recommendations');
+$reject(static function()use($partialMeaning,$completeQuestion):void {
+    $partialMeaning['clarification_suggestions']=['现金业绩','现金业绩','现金业绩'];
+    AiIntentUnderstandingContract::normalize($partialMeaning,$completeQuestion);
+},'duplicate recommendations cannot fill three slots');
+$emptyMeaning=$partialMeaning;$emptyMeaning['requirements']=[];
+$emptyNormalized=AiIntentUnderstandingContract::normalize($emptyMeaning,$completeQuestion);
+$check($emptyNormalized['requirements']===[] && !isset($emptyNormalized['clarification_suggestions']),
+    'generic provider recommendations cannot invent meaning or turn plain help into a contract error');
+$reject(static function()use($partialMeaning,$completeQuestion):void {
+    $partialMeaning['clarification_suggestions']=[[], '现金业绩', '退款业绩'];
+    AiIntentUnderstandingContract::normalize($partialMeaning,$completeQuestion);
+},'nested suggestion payload is rejected without array-to-string conversion');
+$replyQuestion=$completeQuestion;$replyQuestion['question']='改查别的业务';
+$replyQuestion['evidence_messages']=[['id'=>'current','text'=>'改查别的业务'],['id'=>'original','text'=>$completeQuestion['question']]];
+$replyQuestion['recent_questions']=[];
+$replyQuestion['clarification_context']=['question'=>$completeQuestion['question'],'understanding'=>$partialNormalized];
+$replyMeaning=['goal'=>'保留原条件的补充','status'=>'understood','topic_relation'=>'continuation','requirements'=>[
+    ['id'=>'r1','meaning'=>'保留原日期','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'month_offset','offset_months'=>0]]],
+        'evidence'=>[['message_id'=>'original','quote'=>$completeQuestion['question']]]],
+]];
+$check(count(AiIntentUnderstandingContract::normalize($replyMeaning,$replyQuestion)['requirements'])===1,
+    'server-owned original evidence is valid for unchanged clarification conditions');
 echo 'PASS intent understanding/binding separation: '.$checks." checks\n";

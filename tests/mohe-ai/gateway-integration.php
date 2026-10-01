@@ -34,7 +34,27 @@ try {
  $config=new AiConfigStore($db,'','fixture.instance',$private);
  $config->save(['enabled'=>true,'external_processing_authorized'=>true,'external_scope_version'=>AiConfigStore::QUESTION_SCOPE,'model'=>'fixture/model','api_key'=>'fixture-only-key','version'=>0]);
  $runs=new AiRunStore($db,'','fixture.instance');$models=0;$queries=0;$unknownBindingFailure=false;$unknownUnderstandingFailures=0;
+ verifyGateway((new ReflectionMethod(AiRunStore::class,'outcomeClass'))->invoke(null,
+     ['status'=>'FAILED','reason'=>'AI_INTENT_PARTIAL'])==='neutral',
+     'a customer-resolvable partial question does not count as a provider outage');
  $model=function($view,$candidates,$configuration,$checkpoint,$repairPredicate=null,$phase='binding',$understanding=null)use(&$models,&$unknownBindingFailure,&$unknownUnderstandingFailures){$models++;$checkpoint();
+   if ($phase==='understanding' && $view['question']==='2026年9月门店那个金额') return ['understanding'=>array_merge([
+       'goal'=>'查询九月门店金额但指标不明确','status'=>'needs_clarification',
+       'clarification_suggestions'=>['按消耗业绩查询','按现金业绩查询','按退款业绩查询'],
+       'requirements'=>[['id'=>'r1','meaning'=>'九月门店','fields'=>['object_kind','periods'],
+           'values'=>['object_kind'=>'store','periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-30']]],
+           'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]],
+   ],($view['prior_query']??null)!==null?['topic_relation'=>'new_topic']:[]),'usage'=>['input_tokens'=>20,'output_tokens'=>30]];
+   if ($phase==='understanding' && $view['question']==='按消耗业绩查询') {
+       verifyGateway(($view['clarification_context']['question']??null)==='2026年9月门店那个金额',
+           'supplement receives original accepted meaning separately, not concatenated browser text');
+       return ['understanding'=>['goal'=>'查看九月门店消耗业绩','status'=>'understood','requirements'=>[
+           // Deliberately omit unchanged original slots. The server, not this
+           // cooperative model fixture, must preserve the accepted date/store.
+           ['id'=>'r2','meaning'=>'采用补充指标','fields'=>['metric_codes'],'values'=>['metric_terms'=>['消耗业绩']],
+               'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]],
+       ]],'usage'=>['input_tokens'=>20,'output_tokens'=>30]];
+   }
    if($phase==='binding_verification') return ['review'=>['decision'=>'accept','rejected_requirement_ids'=>[]],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    if($phase==='rank_metric_selection') {$clarifyRank=in_array($view['question'],['哪些门店业绩好（注册默认）','按现金业绩或消耗业绩，哪些门店排名更好（需要澄清）'],true);return ['selection'=>['decision'=>$clarifyRank?'clarify':'select','metric_code'=>$clarifyRank?null:'cash_performance'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];}
    if($phase==='understanding' && $unknownUnderstandingFailures>0) {$unknownUnderstandingFailures--;throw new \app\services\ai\contract\AiContractException('AI_MODEL_RESULT_UNKNOWN',['stage'=>'transport','predicate'=>'timeout','transport_errno'=>28,'http_status'=>0,'elapsed_ms'=>30000]);}
@@ -69,6 +89,7 @@ try {
    if($phase==='understanding' && $view['question']==='哪个门店消耗业绩最高（明确指标）') return ['understanding'=>['goal'=>$view['question'],'requirements'=>[['id'=>'r1','meaning'=>$view['question'],'fields'=>['metric_codes','object_kind','operation','periods','ranking'],'values'=>['metric_terms'=>['消耗业绩'],'object_kind'=>'store','operation'=>'ranking','periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'ranking'=>['direction'=>'top','limit'=>1]],'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]],'status'=>'understood'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    if($phase==='understanding' && $view['question']==='这个月的销售额最高是哪天（日期极值）') return ['understanding'=>['goal'=>'查看本月销售额最高的日期','requirements'=>[['id'=>'r1','meaning'=>$view['question'],'fields'=>['metric_codes','object_kind','object_relation','operation','periods','ranking'],'values'=>['metric_terms'=>['销售额'],'object_kind'=>'business_date','object_relation'=>'analysis','operation'=>'ranking','periods'=>[['kind'=>'month_offset','offset_months'=>0]],'ranking'=>['direction'=>'top','limit'=>1]],'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]],'status'=>'understood'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    if($phase==='understanding' && in_array($view['question'],['哪些门店业绩好（候选恢复）','哪些门店业绩好（注册默认）','按现金业绩或消耗业绩，哪些门店排名更好（需要澄清）'],true)) {$values=['metric_terms'=>['业绩'],'object_kind'=>'store','operation'=>'ranking','periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'ranking'=>['direction'=>'top','limit'=>null]];if($view['question']==='按现金业绩或消耗业绩，哪些门店排名更好（需要澄清）')$values['metric_terms']=['现金业绩','消耗业绩'];return ['understanding'=>['goal'=>$view['question'],'requirements'=>[['id'=>'r1','meaning'=>$view['question'],'fields'=>['metric_codes','object_kind','operation','periods','ranking'],'values'=>$values,'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]],'status'=>'understood'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];}
+   if($phase==='understanding' && $view['question']==='业绩多少？') return ['understanding'=>['goal'=>'确认业绩口径','requirements'=>[['id'=>'r1','meaning'=>'业绩口径尚不明确','fields'=>['metric_codes'],'values'=>['metric_terms'=>['业绩']],'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]],'status'=>'needs_clarification'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    if($phase==='understanding' && $view['question']==='今天消耗业绩理解修复') return ['understanding'=>['goal'=>$view['question'],'requirements'=>[['id'=>'r1','meaning'=>$view['question'],'fields'=>['metric_codes','periods'],'values'=>$repairPredicate===null?[]:['metric_terms'=>['消耗业绩'],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]]],'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]],'status'=>'understood'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    if($phase==='understanding') { $legacy=(new \app\services\ai\model\AiModelInputProjector())->modelView(['question'=>$view['question'],'history'=>[]]);$signals=$legacy['current']['signals'];$shape='summary';foreach(['trend','ranking','comparison'] as $candidate)if(in_array($candidate,$signals,true))$shape=$candidate;if(in_array('top_5',$signals,true)||in_array('bottom_5',$signals,true))$shape='ranking';$metrics=array_values(array_intersect(['cash_performance','consume_amount'],$signals));$dates=[];if(in_array('TODAY',$signals,true))$dates=[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]];$values=[];$fields=[];$terms=[];foreach((new \app\services\query\metric\MetricSemanticCatalog())->entries() as $code=>$entry)if(in_array($code,$metrics,true))foreach($entry['terms'] as $term)if(mb_strpos($view['question'],$term,0,'UTF-8')!==false){$terms[]=$term;break;}if($terms){$fields[]='metric_codes';$values['metric_terms']=$terms;}if($dates){$fields[]='periods';$values['periods']=$dates;}if($shape!=='summary'){$fields[]='operation';$values['operation']=$shape;}if($shape==='ranking'){$fields[]='ranking';$values['ranking']=['direction'=>'top','limit'=>5];}if(preg_match('/门店|店/u',$view['question'])){$fields[]='object_kind';$values['object_kind']='store';}if(!$fields&&$view['question']==='查看尚未登记的经营目标')$fields=['unbound'];$requirements=$fields?[['id'=>'r1','meaning'=>$view['question'],'fields'=>$fields,'values'=>$values,'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]]:[];return ['understanding'=>['goal'=>$view['question'],'requirements'=>$requirements,'status'=>$fields?'understood':'needs_clarification'],'usage'=>['input_tokens'=>20,'output_tokens'=>10]]; }
    $complete=function(array $intent)use($understanding,$view): array {$metrics=(array)($intent['metric_codes']??[]);$periods=(array)($intent['periods']??[]);$ranking=(array)($intent['ranking']??[]);if(!isset($intent['requirement_bindings'])){$bound=$metrics;if(($intent['context_delta']['metric_codes']??null)==='inherit')$bound=(array)($view['prior_query']['metric_codes']??[]);$ids=[];foreach((array)($understanding['requirements']??[])as$requirement)if(in_array('metric_codes',(array)($requirement['fields']??[]),true))$ids[]=$requirement['id'];$state=$bound===[]?($intent['needs_metric_choice']?'pending':'unavailable'):'satisfied';$intent['requirement_bindings']=array_map(static function($id)use($state,$bound){return['requirement_id'=>$id,'status'=>$state,'metric_codes'=>$state==='satisfied'?$bound:[]];},$ids);}$intent['provenance']=['object_kind'=>['source'=>(($intent['object_kind']??'store')==='store'&&($intent['object_term']??'')==='')?'system':'customer','requirements'=>(($intent['object_kind']??'store')==='store'&&($intent['object_term']??'')==='')?[]:['r1']],'metric_codes'=>['source'=>$metrics===[]?'system':'customer','requirements'=>$metrics===[]?[]:['r1']],'operation'=>['source'=>in_array(($intent['operation']??'summary'),['summary','unknown'],true)?'system':'customer','requirements'=>in_array(($intent['operation']??'summary'),['summary','unknown'],true)?[]:['r1']],'periods'=>['source'=>$periods===[]?'system':'customer','requirements'=>$periods===[]?[]:['r1']],'ranking'=>['source'=>(($ranking['direction']??'unspecified')==='unspecified'&&($ranking['limit']??null)===null)?'system':'customer','requirements'=>(($ranking['direction']??'unspecified')==='unspecified'&&($ranking['limit']??null)===null)?[]:['r1']],'scope'=>['source'=>'system','requirements'=>[]]];return $intent;};
@@ -78,6 +99,13 @@ try {
        if ($repairPredicate===null) unset($intent['unresolved_fragments']);
        return ['intent'=>$complete($intent),'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    }
+   if ($view['question']==='按消耗业绩查询') return ['intent'=>$complete([
+       'object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['consume_amount'],
+       'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],
+       'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-30']],
+       'scope'=>'authorized','unresolved_fragments'=>[],
+       'requirement_bindings'=>[['requirement_id'=>'r2','status'=>'satisfied','metric_codes'=>['consume_amount']]],
+   ]),'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    if ($view['question']==='今天消耗业绩对象载体修复') {
        $intent=['object_kind'=>$repairPredicate===null?'overall':'store','object_term'=>'','operation'=>'summary','metric_codes'=>['consume_amount'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'authorized','unresolved_fragments'=>[]];
        return ['intent'=>$complete($intent),'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
@@ -91,9 +119,22 @@ try {
        if ($repairPredicate==='open_overview_candidate') return ['intent'=>$complete(['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['cash_performance','actual_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'initial_observation'=>true,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'authorized','requirement_bindings'=>[],'unresolved_fragments'=>[]]),'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
        return ['intent'=>$complete(['object_kind'=>'unknown','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]],'scope'=>'authorized','unresolved_fragments'=>[]]),'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    }
+   if ($view['question']==='业绩多少？') return ['intent'=>$complete([
+       'object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],
+       'metric_choice_candidates'=>['consume_amount','cash_performance'],
+       'action_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'unspecified','limit'=>null],
+       'periods'=>[],'scope'=>'authorized','unresolved_fragments'=>[],
+   ]),'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
    $legacy=(new \app\services\ai\model\AiModelInputProjector())->modelView(['question'=>$view['question'],'history'=>[]]);$signals=$legacy['current']['signals'];$shape='summary';foreach(['trend','ranking','comparison'] as $candidate)if(in_array($candidate,$signals,true))$shape=$candidate;if(in_array('top_5',$signals,true)||in_array('bottom_5',$signals,true))$shape='ranking';$metrics=array_values(array_intersect(['cash_performance','consume_amount'],$signals));$dates=[];if(in_array('TODAY',$signals,true))$dates=[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]];return ['intent'=>$complete(['object_kind'=>'store','object_term'=>'','operation'=>$shape,'metric_codes'=>$metrics,'action_codes'=>[],'needs_metric_choice'=>$metrics===[],'ranking'=>$shape==='ranking'?['direction'=>'top','limit'=>5]:['direction'=>'unspecified','limit'=>null],'periods'=>$dates,'scope'=>'authorized','unresolved_fragments'=>[]]),'usage'=>['input_tokens'=>20,'output_tokens'=>10]];};
  $transaction=function($callback)use(&$queries){$queries++;return $callback(new GroupPerformanceMetricReadServices(function($table){return new GatewayFactFixture($table);},function(){}));};
  $gateway=new AiGatewayServices($runs,$config,$private,'fixture.instance',$views,$model,$transaction);
+ $replyText=(new ReflectionMethod(AiGatewayServices::class,'progressText'));
+ $fullUnknown=$replyText->invoke($gateway,['status'=>'FAILED','reason'=>'AI_INTENT_UNRESOLVED']);
+ $partialUnknown=$replyText->invoke($gateway,['status'=>'FAILED','reason'=>'AI_INTENT_PARTIAL']);
+ $technicalFailure=$replyText->invoke($gateway,['status'=>'FAILED','reason'=>'AI_MODEL_INTENT_CONTRACT_INVALID']);
+ verifyGateway(strpos($fullUnknown,'今天的现金业绩')!==false && strpos($partialUnknown,'补充')!==false
+     && strpos($technicalFailure,'重试')!==false && strpos($technicalFailure,'补充')===false,
+     'customer-facing failures distinguish unknown meaning, missing meaning, and a technical retry');
  $auth=['terminal'=>'store','account_id'=>7,'tenant_id'=>'0','can_use'=>true,'can_configure'=>true,'permission_version'=>'v1','scope_mode'=>'stores','store_ids'=>[1],'personnel_data_authorized'=>false,'report_capability_code'=>'group_management_dashboard'];
  $context=$auth;$context['_refresh']=function()use(&$auth){return $auth;};
  $boot=$gateway->handle('bootstrap',$context,['client_session_id'=>'device1']);
@@ -160,7 +201,7 @@ try {
  verifyGateway($dateRankResult['status']==='COMPLETED' && $queries===$queriesBeforeDateRank+1 && $models===$modelsBeforeDateRank+2,
      'a model-understood business-date extremum uses one understanding, one exact binding and one Reader call');
  verifyGateway(($dateRankResult['answer']['table']['columns'][0]['label']??null)==='日期'
-     && preg_match('/^2026-09-[0-9]{2}$/D',(string)($dateRankResult['answer']['table']['rows'][0]['label']??''))===1,
+     && preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/D',(string)($dateRankResult['answer']['table']['rows'][0]['label']??''))===1,
      'the complete question returns a date rather than a store ranking');
  [$overviewRecovery,$overviewRecoveryInput]=$make('overview-recovery','今天整体经营怎么样（概览恢复）');$modelsBeforeOverviewRecovery=$models;$queriesBeforeOverviewRecovery=$queries;
  $overviewRecoveryResult=$gateway->handle('execute',$context,$binding($overviewRecovery)+$overviewRecoveryInput,$overviewRecovery['run_id']);
@@ -310,6 +351,17 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
     $meaningRepairResult=$gateway->handle('execute',$context,$binding($meaningRepairRun)+$meaningRepairInput,$meaningRepairRun['run_id']);
     verifyGateway($meaningRepairResult['status']==='COMPLETED' && $models===$modelsBeforeMeaningRepair+3 && $queries===$queriesBeforeMeaningRepair+1,'a missing typed meaning receives one model-owned repair before binding');
     verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($meaningRepairRun['run_id'])." AND attempt_code='understand_repair' AND state='SUCCEEDED'")->fetchColumn()===1,'typed semantic carrier repair is auditable and bounded');
+ // Reuse the isolated guidance principal, preserving the primary account's
+ // exact admission-budget regression rather than increasing its limit.
+ $unknownInput=['client_request_id'=>'unknown-meaning','conversation_id'=>'unknown-conversation','client_session_id'=>'device-rank-clarify',
+     'window_token'=>$clarifyBoot['window_token'],'question'=>'咕噜咕噜叽里呱啦','history'=>[],
+     'output_format'=>'screen','guidance_schema_version'=>'mohe-clarification-v2'];
+ $unknown=$gateway->handle('create',$clarifyContext,$unknownInput);$beforeUnknown=$models;$beforeUnknownQueries=$queries;
+ $unknownBinding=['client_session_id'=>'device-rank-clarify','generation'=>$unknown['generation'],'run_delivery_token'=>$unknown['run_delivery_token']];
+ $unknownResult=$gateway->handle('execute',$clarifyContext,$unknownBinding+$unknownInput,$unknown['run_id']);
+ verifyGateway($unknownResult['status']==='FAILED' && $unknownResult['reason']==='AI_INTENT_UNRESOLVED'
+     && $models===$beforeUnknown+1 && $queries===$beforeUnknownQueries,
+     'empty accepted meaning provides query help without binding another model or reading data');
  [$unbound,$unboundInput]=$make('unbound-goal','查看尚未登记的经营目标');$queriesBefore=$queries;
  $unboundResult=$gateway->handle('execute',$context,$binding($unbound)+$unboundInput,$unbound['run_id']);
  verifyGateway($unboundResult['status']==='FAILED' && $unboundResult['reason']==='AI_ANALYSIS_COMBINATION_UNAVAILABLE','understood but unregistered goal is a capability gap');
@@ -317,6 +369,9 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
  [$ask,$askInput]=$make('request2','业绩多少？');
  $waiting=$gateway->handle('execute',$context,$binding($ask)+$askInput,$ask['run_id']);
  verifyGateway($waiting['status']==='WAITING_CLARIFICATION' && count($waiting['clarification']['fields'])===1,'v2 asks metric only');
+ $recommended=array_values(array_filter($waiting['clarification']['fields'][0]['options'],static function(array $option):bool{return ($option['recommended']??false)===true;}));
+ verifyGateway(array_column($recommended,'value')===['consume_amount','cash_performance'],
+     'the server sends only registered, model-ranked suggestions to both clients');
  // The trusted current period is already available, so the only material
  // ambiguity is the metric. Resolving it must complete without a redundant
  // second date question.
@@ -380,5 +435,82 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
  $probeRow=$db->query('SELECT * FROM mohe_ai_attempt WHERE run_id='.$db->quote($probe))->fetch(PDO::FETCH_ASSOC);
  verifyGateway($probeRow['target_code']==='siliconflow_probe' && $probeRow['state']==='UNKNOWN' && $probeRow['input_tokens']===null,'probe usage audited without zero-cost assumption');
  verifyGateway((int)$probeRow['expires_at']-(int)$probeRow['created_at']===86400000,'probe metadata has original 24h expiry');
+ // R59 uses a separate principal so semantic checks do not change admission
+ // budgets for unrelated boundary scenarios above. No external model runs.
+ $semanticAuth=$clarifyAuth;$semanticAuth['account_id']=59;$semanticContext=$semanticAuth;
+ $semanticContext['_refresh']=function()use(&$semanticAuth){return $semanticAuth;};
+ $semanticBoot=$gateway->handle('bootstrap',$semanticContext,['client_session_id'=>'r59-device']);
+ $semanticInput=['client_request_id'=>'r59-partial','conversation_id'=>'r59-conversation','client_session_id'=>'r59-device',
+     'window_token'=>$semanticBoot['window_token'],'question'=>'2026年9月门店那个金额','history'=>[],
+     'output_format'=>'screen','guidance_schema_version'=>'mohe-clarification-v2'];
+ $semanticRun=$gateway->handle('create',$semanticContext,$semanticInput);
+ $semanticBinding=['client_session_id'=>'r59-device','generation'=>$semanticRun['generation'],
+     'run_delivery_token'=>$semanticRun['run_delivery_token']];
+ $beforeSemanticModels=$models;$beforeSemanticQueries=$queries;
+ $semanticWaiting=$gateway->handle('execute',$semanticContext,$semanticBinding+$semanticInput,$semanticRun['run_id']);
+ verifyGateway($semanticWaiting['status']==='WAITING_CLARIFICATION' && $models===$beforeSemanticModels+1
+     && $queries===$beforeSemanticQueries,'partial meaning waits after one understanding call without querying facts');
+ $semanticStep=$semanticWaiting['clarification'];
+ verifyGateway($semanticStep['fields'][0]['key']==='semantic_reply'
+     && count($semanticStep['fields'][0]['options'])===3,'three source-validated natural-language recommendations');
+ verifyGateway(!isset($semanticStep['_request_body'],$semanticStep['_semantic_reply_state']),
+     'accepted meaning and private reference maps never enter the public card');
+ $semanticSubmission=$semanticBinding+['schema_version'=>'mohe-clarification-v2','clarification_id'=>$semanticStep['id'],
+     'step_revision'=>$semanticStep['step_revision'],'intent_revision'=>$semanticStep['intent_revision'],
+     'client_submission_id'=>'r59-reply','choices'=>['semantic_reply'=>'__supplement__','supplement_text'=>'按消耗业绩查询']];
+ $semanticAnswer=$gateway->handle('clarify',$semanticContext,$semanticSubmission,$semanticRun['run_id']);
+ verifyGateway($semanticAnswer['status']==='COMPLETED','same-run supplemental description completes a registered query: '.($semanticAnswer['reason']??$semanticAnswer['status']));
+ verifyGateway(strpos($semanticAnswer['answer']['summary'],'2026-09-01')!==false
+     && strpos($semanticAnswer['answer']['summary'],'2026-09-30')!==false,'supplement preserves the original explicit date range');
+ $beforeReplayQueries=$queries;
+ $semanticReplay=$gateway->handle('clarify',$semanticContext,$semanticSubmission,$semanticRun['run_id']);
+ verifyGateway($semanticReplay['status']==='COMPLETED' && $queries===$beforeReplayQueries,
+     'retry of the identical correction does not execute data twice');
+ // Recommendation validation must not invent a store when the understood
+ // subject is still missing, nor split a compound registered measurement.
+ $recommendationMethod=new ReflectionMethod($gateway,'semanticClarification');
+ $recommendationMeaning=['status'=>'needs_clarification','requirements'=>[
+     ['values'=>['metric_terms'=>['金额'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]]]],
+ ],'clarification_suggestions'=>['查看充值本金','查看余额扣款','查看会员剩余项目金额']];
+ $recommendationCard=$recommendationMethod->invoke($gateway,$recommendationMeaning,
+     ['outbound'=>['question'=>'这个月会员那个金额'],'reference_values'=>[]],['question'=>'这个月会员那个金额']);
+ verifyGateway(count($recommendationCard['fields'][0]['options'])===3,
+     'missing subject and compound metric preserve three language suggestions without execution');
+ $recommendationMeaning['clarification_suggestions']=['查看本月的数据','改看上个月的数据','按天列出来'];
+ $recommendationCard=$recommendationMethod->invoke($gateway,$recommendationMeaning,
+     ['outbound'=>['question'=>'那个金额'],'reference_values'=>[]],['question'=>'那个金额']);
+ verifyGateway(count($recommendationCard['fields'][0]['options'])===3 && $queries===$beforeReplayQueries,
+     'language choices may resolve period or presentation without a metric-keyword requirement or a query');
+ $newTopicInput=$semanticInput;$newTopicInput['client_request_id']='r59-partial-new-topic';
+ $newTopicInput['context_ref']=$semanticAnswer['answer']['context_ref'];
+ $newTopicRun=$gateway->handle('create',$semanticContext,$newTopicInput);
+ $newTopicBinding=['client_session_id'=>'r59-device','generation'=>$newTopicRun['generation'],
+     'run_delivery_token'=>$newTopicRun['run_delivery_token']];
+ $newTopicWaiting=$gateway->handle('execute',$semanticContext,$newTopicBinding+$newTopicInput,$newTopicRun['run_id']);
+ $newTopicRow=$db->query('SELECT * FROM mohe_ai_run WHERE run_id='.$db->quote($newTopicRun['run_id']))->fetch(PDO::FETCH_ASSOC);
+ $newTopicStored=$private->read($newTopicRow['clarification_ref']);
+ verifyGateway($newTopicWaiting['status']==='WAITING_CLARIFICATION'
+     && !isset($newTopicStored['envelope']['_request_body']['context_ref']) && $queries===$beforeReplayQueries,
+     'a partial new topic discards the prior signed query before its same-task supplement');
+ $mergeMethod=new ReflectionMethod($gateway,'mergeClarificationMeaning');
+ $correctionText='改查今天现金业绩';$originalText='2026年9月门店那个金额';
+ $correctionSafe=['schema_version'=>'sanitized-question-v2','question'=>$correctionText,'reference_date'=>'2026-10-02',
+     'has_unresolved_conditions'=>false,'server_resolved_fields'=>[],'recent_questions'=>[],'prior_query'=>null,
+     'evidence_messages'=>[['id'=>'current','text'=>$correctionText],['id'=>'original','text'=>$originalText]],
+     'clarification_context'=>['question'=>$originalText,'understanding'=>[]]];
+ $correctionMeaning=['goal'=>'改查今天','status'=>'understood','requirements'=>[
+     ['id'=>'r1','meaning'=>'今天现金业绩','fields'=>['metric_codes','periods'],
+         'values'=>['metric_terms'=>['现金业绩'],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]]],
+         'evidence'=>[['message_id'=>'current','quote'=>$correctionText]]],
+ ]];
+ $originalMeaning=['requirements'=>[['fields'=>['object_kind','periods'],
+     'values'=>['object_kind'=>'store','periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-30']]]]]];
+ $mergeBody=['_clarification_context'=>['safe_question'=>$originalText,'understanding'=>$originalMeaning]];
+ $corrected=$mergeMethod->invoke($gateway,$correctionMeaning,$mergeBody,$correctionSafe);
+ verifyGateway($corrected['requirements'][0]['values']['periods'][0]['kind']==='relative_days'
+     && count($corrected['requirements'])===2,'explicit current date replaces the original date while retaining unchanged subject');
+ $correctionMeaning['topic_relation']='new_topic';
+ $fresh=$mergeMethod->invoke($gateway,$correctionMeaning,$mergeBody,$correctionSafe);
+ verifyGateway(count($fresh['requirements'])===1,'an explicit new topic inherits no old date or subject');
  echo 'Gateway integration: '.$checks." checks PASS (SQLite + model/fact fixtures)\n";
 } finally { foreach(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($temp,FilesystemIterator::SKIP_DOTS),RecursiveIteratorIterator::CHILD_FIRST) as $file){if($file->isDir())rmdir($file->getPathname());else unlink($file->getPathname());}rmdir($temp); }

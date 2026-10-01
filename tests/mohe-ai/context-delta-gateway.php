@@ -642,10 +642,17 @@ try {
     // first asks whether the verified previous metric should be retained.
     $pendingDelta=cdgDelta();$pendingDelta['metric_codes']='pending';
     $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$pendingDelta,'unresolved_fragments'=>[]];
+    // Supply the model's accepted continuation meaning explicitly: an empty
+    // understanding must no longer be revived by an unrelated binding mock.
+    $h->understandingOverride=['goal'=>'继续查询原门店，指标待明确','status'=>'needs_clarification','requirements'=>[
+        ['id'=>'r1','meaning'=>'原门店查询','fields'=>['object_kind'],'values'=>['object_kind'=>'store'],
+            'evidence'=>[['message_id'=>'current','quote'=>'那这一段呢？']]],
+    ]];
     $pending=$h->start('那这一段呢？',$source['answer']['context_ref']);
     cdgCheck($pending['status']==='WAITING_CLARIFICATION'&&$pending['clarification']['fields'][0]['key']==='pending_metric_codes','pending metric is held for an explicit context decision instead of executing or failing');
     $retained=$h->choose($pending,['pending_metric_codes'=>'retain']);
     cdgCheck($retained['status']==='COMPLETED','only an explicit retain decision may execute the prior verified metric');
+    $h->understandingOverride=null;
 
     // Replacing the scope uses the verbatim current store name only to bind
     // an already-authorized catalog entry; it must not fall back to a choice.
@@ -710,6 +717,10 @@ try {
     // Pending fields form one serial decision chain. Choosing the metric must
     // not release an unresolved period or execute the first preview plan.
     $multiDelta=cdgDelta();$multiDelta['metric_codes']='pending';$multiDelta['periods']='pending';
+    $h->understandingOverride=['goal'=>'原门店查询更换指标和时间','status'=>'needs_clarification','requirements'=>[
+        ['id'=>'r1','meaning'=>'继续原门店查询','fields'=>['object_kind'],'values'=>['object_kind'=>'store'],
+            'evidence'=>[['message_id'=>'current','quote'=>'换一个指标和时间']]],
+    ]];
     $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$multiDelta,'unresolved_fragments'=>[]];
     $multi=$h->start('换一个指标和时间',$source['answer']['context_ref']);
     cdgCheck($multi['status']==='WAITING_CLARIFICATION'&&$multi['clarification']['fields'][0]['key']==='pending_metric_codes','first unresolved context field is presented');
@@ -718,6 +729,7 @@ try {
     $multi=$h->choose($multi,['start_date'=>'2026-09-03','end_date'=>'2026-09-04']);
     $multiEvidence=$h->private->read($h->row($multi)['evidence_ref']);
     cdgCheck($multi['status']==='COMPLETED'&&($multiEvidence['query']['metric_codes']??null)===['consume_amount']&&($multiEvidence['query']['start_date']??null)==='2026-09-03','only the fully confirmed context reaches execution');
+    $h->understandingOverride=null;
 
     // Removing a restriction from a member ranking must keep its member
     // dimension. It may never silently change the answer into a store ranking.

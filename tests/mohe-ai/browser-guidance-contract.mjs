@@ -15,7 +15,7 @@ function step(round, max, fields = [metric], extra = {}) {
     max_clarification_rounds: max, question: '请选择第 ' + round + ' 项条件', fields,
     confirmed_summary: [{ label: '范围', value: '本店' }, { label: '期间', value: '今天' }], revisable_steps: [], ...extra };
 }
-function setup({ rounds = 3, fields = null, bad = false, unknownFirst = false, delayedClarify = false, delayedExecute = false, revisable = false } = {}) {
+function setup({ rounds = 3, fields = null, bad = false, unknownFirst = false, delayedClarify = false, delayedExecute = false, revisable = false, partial = false, disabled = false, createError = null } = {}) {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://guidance-fixture.test' });
   dom.window.HTMLElement.prototype.attachShadow = function () { const root = dom.window.document.createElement('section'); this.appendChild(root); Object.defineProperty(this, 'shadowRoot', { value: root }); return root; };
   globalThis.window = dom.window; globalThis.document = dom.window.document; globalThis.crypto = webcrypto;
@@ -28,9 +28,10 @@ function setup({ rounds = 3, fields = null, bad = false, unknownFirst = false, d
   }
   const request = async (method, path, payload) => {
     calls.push({ method, path, payload: payload ? JSON.parse(JSON.stringify(payload)) : null });
-    if (path === '/bootstrap') return { enabled: true, identity_key: 'fixture:store:manager', window_token: 'window', guidance_schema_version: GUIDANCE_SCHEMA, max_clarification_rounds: rounds, capabilities: { metric_codes: ['cash_performance', 'consume_amount'], output_formats: ['screen'] } };
-    if (path === '/runs') return state = { run_id: 'run', generation: 1, version: 1, run_delivery_token: 'delivery', status: 'RECEIVED' };
+    if (path === '/bootstrap') return { enabled: !disabled, can_configure: true, disabled_reason: disabled ? 'AI_NOT_CONFIGURED' : '', identity_key: 'fixture:store:manager', window_token: 'window', guidance_schema_version: GUIDANCE_SCHEMA, max_clarification_rounds: rounds, capabilities: { metric_codes: ['cash_performance', 'consume_amount'], output_formats: ['screen'] } };
+    if (path === '/runs') { if (createError) throw Object.assign(new Error(createError), { responseKnown: true }); return state = { run_id: 'run', generation: 1, version: 1, run_delivery_token: 'delivery', status: 'RECEIVED' }; }
     if (path.endsWith('/execute')) {
+      if (partial) return state = { ...state, version: state.version + 1, status: 'FAILED', reason: 'AI_INTENT_PARTIAL', message: '请补充查询意思。' };
       state = guided(1);
       if (delayedExecute) { const stale = state; state = guided(2); return new Promise(resolve => { release = () => resolve(stale); }); }
       return state;
@@ -54,14 +55,29 @@ function setup({ rounds = 3, fields = null, bad = false, unknownFirst = false, d
   const start = async () => { await flush(); click('魔核 AI'); await flush(); root().querySelector('textarea').value = '需要确认条件的测试问题'; click('发送'); await flush(); };
   return { root, click, area, choose, start, calls, dispose, release: () => release() };
 }
+// A disabled local service and a configuration change after bootstrap are
+// technical boundaries, not failed natural-language understanding.
+{
+  const f = setup({ disabled: true }); await flush(); f.click('魔核 AI'); await flush();
+  f.root().querySelector('textarea').value = '今天现金业绩是多少'; f.click('发送'); await flush();
+  eq(f.root().textContent.includes('启用状态和外部处理授权'), true);
+  eq(f.root().textContent.includes('AI_NOT_CONFIGURED'), false);
+  eq(f.calls.filter(call => call.path === '/runs').length, 0); f.dispose();
+}
+{
+  const f = setup({ createError: 'AI_NOT_CONFIGURED' }); await f.start();
+  eq(f.root().textContent.includes('启用状态和外部处理授权'), true);
+  eq(f.root().textContent.includes('AI_NOT_CONFIGURED'), false);
+  eq(f.root().querySelector('textarea').value, '需要确认条件的测试问题'); f.dispose();
+}
 for (const rounds of [3, 4, 5]) {
   const f = setup({ rounds }); await f.start();
   eq(f.calls.find(call => call.path === '/runs').payload.guidance_schema_version, GUIDANCE_SCHEMA);
   for (let i = 1; i <= rounds; i++) {
     eq(f.area().textContent.includes(`第 ${i} 步`), true);
     eq(f.area().classList.contains('guidance-card'), true);
-    eq([...f.area().querySelectorAll('.guidance-number')].map(n => n.textContent), ['1','2']);
-    eq(f.area().querySelectorAll('input[type=radio]').length, 2);
+    eq([...f.area().querySelectorAll('.guidance-number')].map(n => n.textContent), ['1','2','3']);
+    eq(f.area().querySelectorAll('input[type=radio]').length, 3);
     eq(f.area().querySelectorAll('input:checked').length, 0);
     eq(f.root().querySelectorAll('.value').length, 0);
     f.choose(); f.click('确认并继续'); await flush();
@@ -76,6 +92,32 @@ for (const rounds of [3, 4, 5]) {
   eq(f.root().textContent.includes('已接纳选择，正在继续查询。'), false);
   const local = JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixture%3Astore%3Amanager'));
   eq(local[0].rounds.length, 1); eq(JSON.stringify(local).includes('client_submission_id'), false); f.dispose();
+}
+{
+  const f = setup({ fields: [{ ...metric, options: [...metric.options.map(option => ({ ...option, recommended: true })),
+    { label: '退款业绩', value: 'refund_performance', recommended: true }, { label: '销售人业绩', value: 'staff_sales' }] }] });
+  await f.start();
+  eq([...f.area().querySelectorAll('.guidance-number')].map(n => n.textContent), ['1','2','3','4']);
+  eq(f.area().querySelectorAll('select').length, 0);
+  const supplement = f.area().querySelector('input[value=__supplement__]');
+  supplement.click(); const detail = f.area().querySelector('textarea[aria-label="补充描述"]');
+  eq(detail.hidden, false); detail.value = '我指的是本月门店退款金额';
+  f.click('确认并继续'); await flush();
+  eq(f.calls.filter(call => call.path.endsWith('/clarify')).length, 1);
+  eq(f.calls.filter(call => call.path.endsWith('/cancel')).length, 0);
+  const submitted = f.calls.filter(call => call.path === '/runs');
+  eq(submitted.length, 1);
+  eq(f.calls.find(call => call.path.endsWith('/clarify')).payload.choices,
+    {metric_code:'__supplement__',supplement_text:'我指的是本月门店退款金额'});
+  f.dispose();
+}
+{
+  const f = setup({ fields: [{ ...metric, options: [...metric.options,
+    { label: '退款业绩', value: 'refund_performance' }, { label: '销售人业绩', value: 'staff_sales' }] }] });
+  await f.start();
+  eq([...f.area().querySelectorAll('.guidance-number')].map(n => n.textContent), ['1']);
+  eq(f.area().querySelector('input[value=__supplement__]') !== null, true);
+  f.dispose();
 }
 {
   const f = setup({ fields: dates }); await f.start();
@@ -110,6 +152,13 @@ for (const action of ['停止', '关闭']) {
 }
 {
   const f = setup({ bad: true }); await f.start(); eq(f.area(), null); eq(f.root().textContent.includes('引导信息不完整'), true); f.dispose();
+}
+{
+  const f = setup({ partial: true }); await f.start();
+  const detail = f.root().querySelector('textarea[aria-label="补充描述"]');
+  eq(detail, null);
+  eq(f.calls.filter(call => call.path === '/runs').length, 1);
+  f.dispose();
 }
 assert.throws(() => validateClarification({ id: 'old', fields: [metric] }, GUIDANCE_SCHEMA)); checks++;
 assert.throws(() => validateClarification(step(4, 3), GUIDANCE_SCHEMA)); checks++;

@@ -22,6 +22,7 @@ final class MemberDetailContinuationResolver
         $query=$view['query']??null;
         if (!is_array($query)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
         if (($query['query_shape']??null)==='ranking') return $this->rankingRows($view);
+        if (($query['query_shape']??null)==='breakdown') return $this->breakdownRows($view);
         if (($query['query_shape']??null)!=='condition_list'
             || ($query['condition_set']['subject']??null)!=='member'
             || !is_array($view['results'][0]['rows']??null)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
@@ -40,6 +41,11 @@ final class MemberDetailContinuationResolver
         $rows=$this->populationRows($view);
         if ($rows===[]) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
         $target=$request['target']??null;$ordinal=$request['ordinal']??null;
+        // A grouped table is not a ranking. Its full displayed cohort is safe
+        // to continue, but an ordinal must not masquerade as a ranked position.
+        if (($view['query']['query_shape']??null)==='breakdown' && $ordinal!==null) {
+            throw new RuntimeException('AI_MEMBER_DETAIL_SELECTION_REQUIRED');
+        }
         // "This member" is safe only for a singleton result. Explicit plural
         // requests may read the verified set; an ambiguous singular must not
         // silently choose its first row.
@@ -78,6 +84,38 @@ final class MemberDetailContinuationResolver
             throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
         }
         return ['selection_ref'=>'member:'.$memberId,'label'=>trim($label),'view'=>$request['view']??'summary'];
+    }
+
+    /**
+     * Reuse the answer's full projection to identify the exact displayed cohort,
+     * including its zero-row policy and metric unions. Never use its 20-row
+     * preview or re-query a new population. Identities remain server-owned.
+     */
+    private function breakdownRows(array $view): array
+    {
+        if (($view['results']??[])===[]) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        foreach ($view['results'] as $result) {
+            if (($result['object_kind']??null)!=='member'||!is_array($result['rows']??null)) {
+                throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+            }
+            if (($result['has_more']??null)!==false||!is_int($result['object_count']??null)
+                ||$result['object_count']!==count($result['rows'])) {
+                throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+            }
+        }
+        $answer=(new \app\services\ai\presentation\AiAnswerRenderer())->render($view,false);
+        $rows=[];$seen=[];
+        foreach (($answer['table']['rows']??[]) as $row) {
+            $member=['member_id'=>$row['entity_id']??null,'member_name'=>$row['label']??null];
+            $this->member($member,[]);
+            $id=$member['member_id'];
+            if (isset($seen[$id])) {
+                if ($seen[$id]!==$member['member_name']) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+                continue;
+            }
+            $seen[$id]=$member['member_name'];$rows[]=$member;
+        }
+        return $rows;
     }
 
     /** Ranking groups may repeat one tied member; keep first display order and one identity. */

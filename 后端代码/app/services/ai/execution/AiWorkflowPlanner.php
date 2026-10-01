@@ -123,6 +123,17 @@ final class AiWorkflowPlanner
             if (!$metrics || in_array('ambiguous_metric', $signals, true)) {
                 $options = []; foreach ($shapeAvailable as $metric) if (isset($names[$metric])) $options[] = ['value' => $metric, 'label' => \app\services\query\metric\MetricSemanticCatalog::optionLabel($metric)];
                 if (!$options) throw new AiContractException('AI_METRIC_NOT_READY');
+                // Only model-proposed, registry-compatible alternatives are
+                // recommendations. The full catalogue remains server-side;
+                // choosing an unrelated first alphabetic entry would invent
+                // meaning rather than clarify the customer's wording.
+                $recommended=array_values(array_intersect((array)($selection['metric_choice_candidates']??[]),$shapeAvailable));
+                foreach ($options as &$option) $option['recommended']=in_array($option['value'],$recommended,true);
+                unset($option);
+                usort($options,static function(array $a,array $b)use($recommended):int {
+                    $ai=array_search($a['value'],$recommended,true);$bi=array_search($b['value'],$recommended,true);
+                    return ($ai===false?PHP_INT_MAX:$ai)<=>($bi===false?PHP_INT_MAX:$bi);
+                });
                 $options[]=['value'=>'other_registered_metric','label'=>'以上都不是','action'=>'stop'];
                 $fields[] = ['key' => 'metric_code', 'label' => '想了解哪一个已登记指标？', 'type' => 'select', 'options' => $options];
             }

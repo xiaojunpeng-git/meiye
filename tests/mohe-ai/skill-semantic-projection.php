@@ -97,4 +97,17 @@ $check(($defaultDayPlan['kind']??null)==='plan'
 $missing=$planner->start('project',['object_kind'=>'project','operation'=>'ranking','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'top','limit'=>1]],['date_terms'=>[['code'=>'EXPLICIT','start'=>'2026-09-01','end'=>'2026-09-09']]],$project,'screen','2026-09-10');
 $check($missing['kind']==='clarification'&&$missing['fields'][0]['key']==='dimension_metric','an ambiguous evaluation is guided from registered candidates, not a fixed report scene');
 
+// A server-owned paused clarification preserves opaque identities while new
+// text is masked. It does not expose or accept the private values as evidence.
+$continued=(new AiSafeQuestionProjector())->projectConversation('张三和李四',[],$config,['张三','李四'],[],
+    ['local_condition_1'=>'张三']);
+$check($continued['outbound']['question']==='[local_condition_1]和[local_condition_2]'
+    && $continued['reference_values']===['local_condition_1'=>'张三','local_condition_2'=>'李四'],
+    'same-task clarification preserves private reference identity');
+try {
+    (new AiSafeQuestionProjector())->projectConversation('补充',[],$config,[],[],['other_key'=>'张三']);
+    $check(false,'malformed private reference seed rejected');
+} catch (RuntimeException $error) {
+    $check($error->getMessage()==='AI_CONVERSATION_INVALID','malformed private reference seed rejected');
+}
 echo 'PASS skill prose and dynamic registry: '.$checks." checks\n";

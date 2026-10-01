@@ -404,6 +404,9 @@ final class AiGatewayServices
                 $compiled=$this->understandAnalysis($context,$owner,$id,$generation,$worker,$body,$projection,$configuration);
                 $compiled=$this->decorateGuidance($compiled);
                 if ($compiled['kind']==='clarification') {
+                    // Preserve the compiler's topic-cleared private carrier;
+                    // the original HTTP body must not revive discarded context.
+                    $compiled['_request_body']=$compiled['_request_body']??$body;
                     $r=$this->issueGuidance($owner,$id,$generation,$worker,$compiled,$compiled,[]); $paused=true;
                     return $this->present($context,$owner,$r);
                 }
@@ -415,7 +418,29 @@ final class AiGatewayServices
                 // way around), so checking planner-specific state here would
                 // let the accepted meaning disappear before the final query.
                 $guidanceRequiresSemanticContext=array_key_exists('_semantic_context',$stored['envelope']);
-                try { [$compiled,$steps]=$this->advanceGuidance($stored,$r['clarification_ref'],$input); }
+                try {
+                    $reply=$this->semanticClarificationReply($stored['envelope'],$input);
+                    if ($reply!==null) {
+                        $this->runs->scopeSemanticContinuation($owner,$id,$generation,$worker);
+                        // Resume the same durable Run. The original meaning is
+                        // private context, not a new browser-authored scope.
+                        $body=$stored['envelope']['_request_body'];
+                        $body['_clarification_context']=$stored['envelope']['_semantic_reply_state'];
+                        $body['question']=$reply;
+                        $projection=['dates'=>[],'date_terms'=>[],'signals'=>[],'semantic_intent'=>['constraints'=>[]],'blocking_reason'=>null,'unresolved_condition'=>false];
+                        $compiled=$this->decorateGuidance($this->understandAnalysis($context,$owner,$id,$generation,$worker,$body,$projection,$configuration));
+                        $guidanceRequiresSemanticContext=false;
+                        $steps=[];
+                    } else {
+                        [$compiled,$steps]=$this->advanceGuidance($stored,$r['clarification_ref'],$input);
+                    }
+                    if (($compiled['kind']??null)==='clarification') {
+                        $compiled['_request_body']=$compiled['_request_body']??$body??($stored['envelope']['_request_body']??null);
+                        if (!isset($compiled['_semantic_reply_state']) && isset($stored['envelope']['_semantic_reply_state'])) {
+                            $compiled['_semantic_reply_state']=$stored['envelope']['_semantic_reply_state'];
+                        }
+                    }
+                }
                 catch (\Throwable $error) {
                     if (!in_array($error->getMessage(),['AI_CLARIFICATION_INVALID','AI_DATE_INVALID'],true)) throw $error;
                     // The durable acknowledgement was accepted before the
@@ -454,8 +479,8 @@ final class AiGatewayServices
             unset($compiled['_context_meaning']);
             if (!is_array($contextMeaning)) throw new RuntimeException('AI_CONTEXT_DELTA_CONFLICT');
             try {
-                if (($compiled['kind']??null)==='verified_ranking_detail') {
-                    return $this->present($context,$owner,$this->executeVerifiedRankingDetail($context,$owner,$id,$generation,$worker,$snapshot,$compiled,$contextMeaning));
+                if (($compiled['kind']??null)==='verified_result_presentation') {
+                    return $this->present($context,$owner,$this->executeVerifiedResultPresentation($context,$owner,$id,$generation,$worker,$snapshot,$compiled,$contextMeaning));
                 }
                 $result=($compiled['kind']??null)==='member_detail'
                     ?$this->executeMemberDetail($context,$owner,$id,$generation,$worker,$snapshot,$compiled,$contextMeaning)
@@ -530,6 +555,7 @@ final class AiGatewayServices
             $reason=preg_match('/^[A-Z][A-Z0-9_]{0,63}$/D',$e->getMessage())?$e->getMessage():'AI_EXECUTION_FAILED';
             return $this->present($context,$owner,$this->runs->fail($owner,$id,$generation,$worker,$reason));
         } finally {
+            $this->runs->clearSemanticContinuation($id,$worker);
             if ($claimed && !$paused) $this->runs->release($owner,$id,$generation,$worker);
         }
     }
@@ -652,6 +678,7 @@ final class AiGatewayServices
     }
     private function decorateGuidance(array $plan): array
     {
+        if (($plan['fields'][0]['key']??null)==='semantic_reply') return $plan;
         // Dependency order in capability guidance is server-owned; old scene prompt
         // configuration must not reorder object binding after metric execution.
         if (in_array(($plan['schema_version']??null),[
@@ -847,6 +874,113 @@ final class AiGatewayServices
         return $objects;
     }
 
+    /** Language suggestions stay non-executable and preserve private meaning
+     * until a customer reply goes through the ordinary understanding gate. */
+    private function semanticClarification(array $understanding,array $safe,array $body): array
+    {
+        if (!AiIntentResultContract::hasConcreteQueryMeaning($understanding,[])) throw new RuntimeException('AI_INTENT_UNRESOLVED');
+        $options=[];
+        foreach ((array)($understanding['clarification_suggestions']??[]) as $index=>$label) {
+            // Recommendations are validated language, not registered codes
+            // or executable promises. A keyword hit cannot prove compatibility
+            // and must not erase paraphrases. Clicking still re-understands
+            // and binds every condition against the source-owned registry.
+            $options[]=['value'=>'suggestion_'.($index+1),'label'=>$label,'recommended'=>true];
+        }
+        // Keep older internal planner carriers valid when they have no
+        // model-authored suggestions; never fill from registry order.
+        // The clients hide stop sentinels and show their single free-text slot;
+        // this is not claimed as a successful three-recommendation card.
+        if ($options===[]) $options=[['value'=>'supplement_only','label'=>'请补充描述','action'=>'stop']];
+        return ['kind'=>'clarification','question'=>'我已理解部分条件，请选择您想查询的内容，或补充描述。',
+            'fields'=>[['key'=>'semantic_reply','type'=>'select','label'=>'查询内容','options'=>$options]],
+            '_request_body'=>$body,'_semantic_reply_state'=>$this->semanticReplyState($understanding,$safe,$body)];
+    }
+
+    /** Encrypted carrier only: it neither expands authority nor stores results. */
+    private function semanticReplyState(array $understanding,array $safe,array $body): array
+    {
+        $previous=$body['_clarification_context']??null;
+        $text=$safe['outbound']['question'];$original=$body['question'];
+        if (is_array($previous)) {
+            $text=$previous['safe_question']."\n补充：".$text;
+            $original=$previous['original_question']."\n".$original;
+        }
+        return ['safe_question'=>$text,'understanding'=>$understanding,'original_question'=>$original,
+            'reference_values'=>$safe['reference_values']??[]];
+    }
+
+    /** Preserve server-accepted slots, not concatenated keywords. Current
+     * typed replacements win; a new topic and empty meaning inherit nothing.
+     * This carrier grants no execution: normal binding/review still follows. */
+    private function mergeClarificationMeaning(array $meaning,array $body,array $safeQuestion): array
+    {
+        $previous=$body['_clarification_context']??null;
+        if (!is_array($previous) || $meaning['requirements']===[]
+            || ($meaning['topic_relation']??null)==='new_topic') return $meaning;
+        $present=[];$next=1;$originalPeriods=[];
+        foreach ($meaning['requirements'] as $requirement) {
+            $next=max($next,(int)substr($requirement['id'],1)+1);
+            foreach ($requirement['fields'] as $field) $present[$field]=true;
+        }
+        foreach ($previous['understanding']['requirements'] as $requirement) {
+            foreach ((array)($requirement['values']['periods']??[]) as $period) $originalPeriods[]=$period;
+        }
+        $originalPeriods=array_values(array_unique($originalPeriods,SORT_REGULAR));
+        foreach ($meaning['requirements'] as &$requirement) {
+            $sources=array_column($requirement['evidence'],'message_id');
+            if (isset($requirement['values']['periods']) && $originalPeriods!==[]
+                && in_array('original',$sources,true) && !in_array('current',$sources,true)) {
+                $requirement['values']['periods']=$originalPeriods;
+            }
+        }
+        unset($requirement);
+        foreach ($previous['understanding']['requirements'] as $requirement) {
+            $fields=[];$values=[];
+            foreach ($requirement['fields'] as $field) {
+                if (isset($present[$field]) || $field==='unbound') continue;
+                // An explicit current scope/reference replaces the original
+                // scope carrier as a unit; never restore its removed filter.
+                if (in_array($field,['scope','store_term','result_reference'],true)
+                    && (isset($present['scope']) || isset($present['store_term']) || isset($present['result_reference']))) continue;
+                if (($requirement['values'][$field]??null)==='unknown') continue;
+                $keys=$field==='metric_codes'?['metric_terms','metric_exclusions']:[$field];
+                foreach ($keys as $key) if (array_key_exists($key,$requirement['values'])) $values[$key]=$requirement['values'][$key];
+                $fields[]=$field;$present[$field]=true;
+            }
+            if ($fields===[]) continue;
+            $meaning['requirements'][]=['id'=>'r'.$next++,'meaning'=>'保留原问题已明确的条件',
+                'fields'=>$fields,'values'=>$values,
+                'evidence'=>[['message_id'=>'original','quote'=>$previous['safe_question']]]];
+        }
+        return \app\services\ai\contract\AiIntentUnderstandingContract::normalize($meaning,$safeQuestion);
+    }
+
+    /** Accept one server-proposed reply or bounded free text with the same
+     * revision/idempotency checks as all other clarification submissions. */
+    private function semanticClarificationReply(array $envelope,array $input): ?string
+    {
+        $choices=$input['choices']??null;
+        if (!is_array($choices)) throw new RuntimeException('AI_CLARIFICATION_INVALID');
+        $fields=$envelope['fields']??[];
+        if (count($fields)!==1) return null;
+        $key=$fields[0]['key'];$value=$choices[$key]??null;
+        $semantic=$key==='semantic_reply';
+        if (!$semantic && $value!=='__supplement__') return null;
+        if (!isset($envelope['_semantic_reply_state'],$envelope['_request_body'])
+            || isset($input['revise_clarification_id'])) throw new RuntimeException('AI_CLARIFICATION_INVALID');
+        if ($value==='__supplement__') {
+            $keys=array_keys($choices);sort($keys);$expected=[$key,'supplement_text'];sort($expected);
+            $reply=$choices['supplement_text']??null;
+            if ($keys!==$expected || !is_string($reply) || trim($reply)==='' || mb_strlen($reply,'UTF-8')>1000
+                || preg_match('//u',$reply)!==1 || preg_match('/[\x00-\x08\x0b\x0c\x0e-\x1f]/',$reply)) throw new RuntimeException('AI_CLARIFICATION_INVALID');
+            return trim($reply);
+        }
+        if (array_keys($choices)!==[$key]) throw new RuntimeException('AI_CLARIFICATION_INVALID');
+        foreach ($fields[0]['options'] as $option) if ($option['value']===$value) return $option['label'];
+        throw new RuntimeException('AI_CLARIFICATION_INVALID');
+    }
+
     private function issueGuidance(array $owner,string $id,int $generation,string $worker,array $envelope,array $origin,array $steps): array
     {
         $run=$this->runs->get($owner,$id,$generation);
@@ -973,7 +1107,8 @@ final class AiGatewayServices
         // grammar. A verified predecessor may supply its signed period and
         // store scope when both questions concern the same source cohort;
         // open follow-ups such as "明细呢" use typed semantic understanding.
-        $sourceRequest=(new \app\services\ai\semantic\AiFirstCourseSourceAdmission())->match((string)$body['question']);
+        $sourceRequest=isset($body['_clarification_context'])?null:
+            (new \app\services\ai\semantic\AiFirstCourseSourceAdmission())->match((string)$body['question']);
         if ($sourceRequest!==null) {
             $code='member_first_course_count';
             $ready=$caps['metric_readiness'][$code]??null;
@@ -1019,7 +1154,7 @@ final class AiGatewayServices
         // cohort is a new topic. The admission below rejects any residual
         // pointer such as "这家"; therefore the old categorical source must
         // not force an unrelated self-contained question through context.
-        if ($independent || $priorSource) {
+        if (!isset($body['_clarification_context']) && ($independent || $priorSource)) {
             $match=$admission->match(
                 (string)$body['question'],\app\services\query\metric\MetricSemanticCatalog::entries()
             );
@@ -1185,6 +1320,7 @@ final class AiGatewayServices
                 foreach (array_slice((array)($body['history']??[]),-6) as $round) if (is_array($round) && is_string($round['question']??null)) $questions[]=$round['question'];
             }
             $questions[]=$body['question'];
+            if (isset($body['_clarification_context']['original_question'])) $questions[]=$body['_clarification_context']['original_question'];
             // Resolve the bounded conversation in one permission-scoped read.
             // This preserves exact private-label masking while preventing the
             // same large member table from being scanned once per history turn.
@@ -1250,7 +1386,8 @@ final class AiGatewayServices
         }
         $safe=(new \app\services\ai\model\AiSafeQuestionProjector())->projectConversation(
             $body['question'],$body['history'],$configuration,array_values(array_unique($privateLabels)),
-            array_values(array_unique($protectedSemanticTerms))
+            array_values(array_unique($protectedSemanticTerms)),
+            (array)($body['_clarification_context']['reference_values']??[])
         );
         foreach (($safe['reference_values']??$safe['local_conditions']) as $reference=>$value) {
             if(in_array($value,$privateLabels,true)) {
@@ -1293,6 +1430,14 @@ final class AiGatewayServices
         $safe['outbound']['prior_query']=$sourceQuery===null?null:IntentContextMerger::modelView(
             $sourceQuery,(array)($sourceContext['meaning']??[])
         );
+        if (isset($body['_clarification_context'])) {
+            // Only server-stored, already de-identified meaning crosses this
+            // boundary. Raw names remain in the encrypted reference map.
+            $previous=$body['_clarification_context'];
+            $safe['outbound']['clarification_context']=['question'=>$previous['safe_question'],
+                'understanding'=>$previous['understanding']];
+            $safe['outbound']['evidence_messages'][]=['id'=>'original','text'=>$previous['safe_question']];
+        }
         // A singular follow-up may refer to the sole displayed result. Only
         // its position leaves the server; ties must never become a guessed ID.
         if ($sourceQuery!==null) {
@@ -1307,7 +1452,7 @@ final class AiGatewayServices
         $localStoreSet=$this->localVerifiedStoreSetValuesContinuation(
             $sourceContext,$safe['outbound'],$caps,$body['output_format'],$today
         );
-        if ($localStoreSet!==null) {
+        if ($localStoreSet!==null && !isset($body['_clarification_context'])) {
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_store_set_values_local_reuse');
             return $localStoreSet;
         }
@@ -1348,6 +1493,12 @@ final class AiGatewayServices
         // population, so the relation must be decided by understanding.
         $localCountUnderstanding=$sourceContext===null
             ?$this->localClosedMemberMoneyCountUnderstanding($safe['outbound'],$safe,$today,$caps):null;
+        // A reply belongs to a paused semantic request, not merely the last
+        // verified result. Narrow fast paths cannot ignore its preserved fields.
+        if (isset($body['_clarification_context'])) {
+            $localPeriodUnderstanding=$localRankingUnderstanding=$localOrdinalDetailUnderstanding=null;
+            $localConditionUnderstanding=$localCountUnderstanding=null;
+        }
         // Understanding has no metric catalogue. Binding receives accepted
         // meaning afterwards and may only propose registered execution fields.
         if ($localPeriodUnderstanding!==null || $localRankingUnderstanding!==null
@@ -1434,17 +1585,36 @@ final class AiGatewayServices
             }
         }
         }
+        // An empty accepted understanding explicitly means no query meaning
+        // was found. Do not let registry reconciliation or a second binding
+        // model invent business conditions from those words. Stop before
+        // binding, retaining the original question for plain-language help.
+        if (($understanding['status']??null)==='needs_clarification'
+            && ($understanding['requirements']??[])===[]) {
+            throw new RuntimeException('AI_INTENT_UNRESOLVED');
+        }
+        $understanding=$this->mergeClarificationMeaning($understanding,$body,$safe['outbound']);
+        $understanding=$this->resolveExactStatedSinglePeriod($understanding,$safe['outbound'],$today);
         // One relation decision gates every later merger and result-reference
         // path. Contextual business questions never infer this boundary from
         // a closed grammar alone.
-        $newTopic=$sourceContext!==null && ($understanding['topic_relation']??null)==='new_topic';
+        $newTopic=($sourceContext!==null || isset($body['_clarification_context']))
+            && ($understanding['topic_relation']??null)==='new_topic';
         if ($newTopic) {
             $this->runs->markTopicReset($owner,$id,$generation,$worker);
             $sourceContext=null;$sourceCollection=[];$sourceQuery=null;
             $safe['outbound']['prior_query']=null;
             $closedMetricOnlyProjection=false;
+            // A paused new topic must not carry the discarded signed query
+            // into its later supplement merely because the browser sent it.
+            unset($body['context_ref']);$body['history']=[];
         }
-        $understanding=$this->resolveExactStatedSinglePeriod($understanding,$safe['outbound'],$today);
+        if (($understanding['status']??null)==='needs_clarification' && !empty($understanding['clarification_suggestions'])) {
+            // Incomplete meaning is a waiting task, not a failed execution.
+            // Topic reset and clear calendar conditions are settled first;
+            // no extra binding call is spent on genuinely missing meaning.
+            return $this->semanticClarification($understanding,$safe,$body);
+        }
         // One current opaque store followed by its immediate deictic is one
         // location, not two filters. Keep distinct or historical locations
         // untouched so no customer condition can disappear silently.
@@ -1495,6 +1665,11 @@ final class AiGatewayServices
             // reason per Run without retaining model text or prior result data.
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
                 'object_detail_reject_extra_field',$objectDetailRejection,'object_detail_reject_probe');
+        }
+        $populationPresentation=$this->compileVerifiedPopulationPresentation($understanding,$sourceContext);
+        if ($populationPresentation!==null) {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_population_presentation_admitted');
+            return $populationPresentation;
         }
         $storeSetValues=$this->compileVerifiedStoreSetValuesContinuation(
             $understanding,$sourceContext,$safe['outbound'],$caps,$body['output_format'],$today
@@ -2459,8 +2634,12 @@ final class AiGatewayServices
                 throw new RuntimeException('AI_CAPABILITY_NOT_READY');
             }
         }
-        if ($intent['unresolved_fragments']) throw new RuntimeException('AI_INTENT_UNRESOLVED');
-        if ($intent['operation']==='unknown') throw new RuntimeException('AI_INTENT_UNRESOLVED');
+        // A partially understood request must not be described as total
+        // incomprehension. Accepted typed meaning owns that distinction;
+        // neither branch may discard the unresolved customer condition.
+        if ($intent['unresolved_fragments'] || $intent['operation']==='unknown') {
+            return $this->semanticClarification($understanding,$safe,$body);
+        }
         $localTerm=null;$localReference=null;
         if (preg_match('/^\[(local_condition_[0-9]+)\]$/D',$term,$match)) {
             $localReference=$match[1];
@@ -2543,7 +2722,7 @@ final class AiGatewayServices
         );
         $operationOptions=$this->registeredOperationOptions($caps,$intent['object_kind']??'unknown');
         $replacementOperationOptions=$this->registeredOperationOptions($caps,$merged['prospective_intent']['object_kind']??'unknown');
-        $finish=function(array $compiled)use($context,$term,$storeTerm,$contextDecisions,$owner,$id,$generation,$worker,$inheritedConstraints,$merged,$metricOptions,$replacementMetricOptions,$operationOptions,$replacementOperationOptions,$currentStoreRequested,$understanding,$safe,$summaries,$bindingCandidate,$objectReplacementWithoutFilterConfirmation,$requestedMemberDetail):array {
+        $finish=function(array $compiled)use($context,$term,$storeTerm,$contextDecisions,$owner,$id,$generation,$worker,$inheritedConstraints,$merged,$metricOptions,$replacementMetricOptions,$operationOptions,$replacementOperationOptions,$currentStoreRequested,$understanding,$safe,$summaries,$bindingCandidate,$objectReplacementWithoutFilterConfirmation,$requestedMemberDetail,$body):array {
             $compiled=$this->bindNamedStoreScope($compiled,$context,$storeTerm??$term,$contextDecisions,$owner,$id,$generation,$worker);
             $compiled=$this->bindCurrentStoreScope($compiled,$context,$currentStoreRequested);
             if ($merged['replacement_confirmation']) {
@@ -2573,6 +2752,8 @@ final class AiGatewayServices
             // de-identified review input here lets a later controlled choice
             // be checked against the original accepted meaning.
             if (($compiled['kind']??null)==='clarification') {
+                $compiled['_semantic_reply_state']=$this->semanticReplyState($understanding,$safe,$body);
+                $compiled['_request_body']=$body;
                 // A candidate-blind review has already established that one
                 // fresh, exclusion-free measurement admits several meanings.
                 // The controlled customer selection resolves that ambiguity;
@@ -2639,7 +2820,7 @@ final class AiGatewayServices
         }
         if (is_array($understanding) && ($understanding['status']??null)==='needs_clarification'
             && !$intent['needs_metric_choice'] && $intent['unresolved_fragments']===[] && !$merged['pending']) {
-            throw new RuntimeException('AI_INTENT_UNRESOLVED');
+            return $this->semanticClarification($understanding,$safe,$body);
         }
         // `initial_observation` is semantic admission only.  Its provisional
         // model candidates are deliberately replaced here by the complete
@@ -2903,7 +3084,10 @@ final class AiGatewayServices
         $projection['blocking_reason']=null;$projection['unresolved_condition']=false;$projection['semantic_intent']['constraints']=[];
         $caps['current_store_bound']=\app\services\ai\execution\AiAuthority::currentStoreId($context)!==null;
         $compiled=(new AiWorkflowPlanner())->compile($projection,['decision'=>'query','query_shape'=>$intent['operation'],'metric_codes'=>$intent['metric_codes'],'ranking'=>$intent['ranking'],
-            'aggregate_condition'=>$intent['aggregate_condition']??null,'object_kind'=>$intent['object_kind']],$caps,$body['output_format'],$today);
+            'aggregate_condition'=>$intent['aggregate_condition']??null,'object_kind'=>$intent['object_kind'],
+            // Model suggestions are only display candidates for a genuine
+            // ambiguity; the planner intersects them with executable metrics.
+            'metric_choice_candidates'=>$intent['needs_metric_choice']?($intent['metric_choice_candidates']??[]):[]],$caps,$body['output_format'],$today);
         return $finish($compiled);
     }
 
@@ -4006,7 +4190,9 @@ final class AiGatewayServices
      */
     private function resolveExactStatedSinglePeriod(array $understanding,array $safeQuestion,string $today): array
     {
-        if (($understanding['status']??null)!=='understood') return $understanding;
+        // A clear calendar condition is normalizable even while the metric
+        // remains ambiguous. This does not complete or execute that request.
+        if (!in_array($understanding['status']??null,['understood','needs_clarification'],true)) return $understanding;
         $projection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse((string)($safeQuestion['question']??''));
         if (($projection['date_grouping_ambiguous']??true) || count((array)($projection['date_terms']??[]))!==1) return $understanding;
         $range=(new \app\services\ai\execution\AiWorkflowPlanner())->normalizePeriod($projection['date_terms'][0],$today);
@@ -5423,7 +5609,7 @@ final class AiGatewayServices
             // replay it, not re-run TOP N and silently replace its identities.
             $details=$sourceContext['view']['results'][0]['ranking_detail_metrics']??$sourceContext['view']['results'][0]['ranking_presentation_metrics']??[];
             if (!$details) throw new RuntimeException('AI_OBJECT_DETAIL_NOT_READY');
-            return ['kind'=>'verified_ranking_detail','query'=>$sourceContext['query'],
+            return ['kind'=>'verified_result_presentation','query'=>$sourceContext['query'],
                 'view_ref'=>$sourceContext['view']['read_consistency_ref']??null,
                 '_context_meaning'=>(array)($sourceContext['meaning']??[])];
         }
@@ -5751,9 +5937,36 @@ final class AiGatewayServices
         return $compiled;
     }
 
-    /** Re-present a signed detail set without querying or re-ranking facts.
+    /** A typed request for the existing list changes presentation only. No
+     * lexical matching, new filter, metric, period or object may enter here. */
+    private function compileVerifiedPopulationPresentation(array $meaning,$sourceContext): ?array
+    {
+        if (($meaning['status']??null)!=='understood'||($meaning['topic_relation']??null)!=='continuation'
+            ||!is_array($sourceContext['query']??null)||!is_array($sourceContext['view']??null)) return null;
+        $query=$sourceContext['query'];$view=$sourceContext['view'];
+        if (!in_array($query['query_shape']??null,['breakdown','ranking','condition_list'],true)) return null;
+        $kind=$query['condition_set']['subject']??$query['business_filters']['object_kind']??$view['results'][0]['object_kind']??null;
+        $operation=false;
+        foreach (($meaning['requirements']??[]) as $requirement) {
+            $fields=$requirement['fields']??[];$values=$requirement['values']??[];
+            if (array_diff($fields,['operation','object_kind','object_relation'])!==[]) return null;
+            if (in_array('operation',$fields,true)) {
+                if (($values['operation']??null)!=='condition_list') return null;
+                $operation=true;
+            }
+            if (in_array('object_kind',$fields,true)&&($values['object_kind']??null)!==$kind) return null;
+            if (in_array('object_relation',$fields,true)&&($values['object_relation']??null)!=='analysis') return null;
+        }
+        if (!$operation) return null;
+        // Re-publish only the immutable authorised view. The customer asks
+        // to see its list, not to recompute a fresh condition population.
+        return ['kind'=>'verified_result_presentation','query'=>$query,
+            'view_ref'=>$view['read_consistency_ref']??null,'_context_meaning'=>(array)($sourceContext['meaning']??[])];
+    }
+
+    /** Re-present a signed result set without querying or re-ranking facts.
      * The normal Reader rechecks current authority and snapshot expiration. */
-    private function executeVerifiedRankingDetail(array $context,array $owner,string $id,int $generation,string $worker,array $snapshot,array $compiled,array $meaning): array
+    private function executeVerifiedResultPresentation(array $context,array $owner,string $id,int $generation,string $worker,array $snapshot,array $compiled,array $meaning): array
     {
         // A signed result is not permanent permission: recheck both before
         // replay and before publication, just as for a fresh detail query.
@@ -5764,7 +5977,10 @@ final class AiGatewayServices
         };
         $guard();
         $this->runs->progress($owner,$id,$generation,$worker,'QUERYING');
-        $view=$this->queryService($context)->rankingDetails($context,$compiled['query'],$compiled['view_ref']);
+        $shape=$compiled['query']['query_shape']??null;
+        $view=$shape==='ranking'
+            ?$this->queryService($context)->rankingDetails($context,$compiled['query'],$compiled['view_ref'])
+            :$this->queryService($context)->replay($context,$compiled['query'],$compiled['view_ref']);
         $compiled['query']=$view['query'];$compiled['view_ref']=$view['read_consistency_ref'];
         $this->runs->progress($owner,$id,$generation,$worker,'VERIFYING');
         $this->runs->progress($owner,$id,$generation,$worker,'RENDERING');
@@ -5777,8 +5993,8 @@ final class AiGatewayServices
         $binding=['owner'=>$owner,'run_id'=>$id,'generation'=>$generation];
         $evidence=$binding+['query'=>$compiled['query'],'view_ref'=>$compiled['view_ref'],'context_meaning'=>$meaning,
             'compiled_run_hash'=>hash('sha256',$compiled['view_ref']),
-            'execution_trace'=>[['code'=>'verified_ranking_detail','status'=>'SUCCEEDED']],
-            'workflow_code'=>'wf_performance_ranking','management_version'=>$this->managementRevision];
+            'execution_trace'=>[['code'=>'verified_result_presentation','status'=>'SUCCEEDED']],
+            'workflow_code'=>'wf_performance_'.$shape,'management_version'=>$this->managementRevision];
         return $this->runs->publish($owner,$id,$generation,$worker,
             $this->private->put('evidence',$evidence,$expires),$this->private->put('answer',$binding+['answer'=>$answer],$expires));
     }
@@ -6526,7 +6742,8 @@ final class AiGatewayServices
             'AI_INVENTORY_OBJECT_NOT_READY'=>'库存与耗用对象尚未接入门店权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他指标。',
             'AI_OBJECT_CONTRACT_NOT_READY'=>'当前分析对象尚未接入对象解析、权限、筛选、统一查询与证据合同；未查询或替换条件。',
             'AI_DIMENSION_ACTION_CONTRACT_NOT_READY'=>'当前分析对象的这项评价方式尚未接入统一查询合同；未改用其他指标或删减条件。',
-            'AI_INTENT_UNRESOLVED'=>'我还没准确理解这句话最想了解的经营情况。请换一种日常说法补充您想看的内容；已经确认的条件会保留，本次没有查询近似数据。',
+            'AI_INTENT_UNRESOLVED'=>'我还没理解您想查什么。我可以帮您查询今天的现金业绩、消耗业绩，您可以像平时说话一样提问。',
+            'AI_INTENT_PARTIAL'=>'我听懂了部分条件，但还不能确定完整的查询意思。请补充想看的对象或指标，我会按您的完整问题重新理解。',
             'AI_CAPABILITY_NOT_READY'=>'已识别您的需求，但对应的数据能力或筛选组合尚未接入，暂不能准确提供结果。',
             'AI_CONTEXT_REQUIRED'=>'这句追问缺少可核对的前文条件。请补充您想延续的对象、时间或查看结果，我会按当前权限重新查询。',
             'AI_CONTEXT_DELTA_CONFLICT'=>'这次处理查询条件时遇到问题，结果尚未生成。请重试本问；若再次出现，请重新说明查询条件。',
@@ -6558,7 +6775,7 @@ final class AiGatewayServices
             'ATTEMPT_UNKNOWN'=>'本次 AI 请求结果暂未确认，已停止继续调用，请稍后再问。',
             'AI_MODEL_RESPONSE_TRUNCATED'=>'本次 AI 理解结果未完整返回，系统已停止查询，请稍后重试。',
             'AI_MODEL_RESPONSE_ENVELOPE_INVALID'=>'本次 AI 返回格式异常，系统未执行查询，请稍后重试。',
-            'AI_MODEL_INTENT_CONTRACT_INVALID'=>'本次查询未完成，系统没有读取或计算数据，请稍后重试。',
+            'AI_MODEL_INTENT_CONTRACT_INVALID'=>'刚才理解问题时出了错，尚未查询数据。请直接重试；若再次出现，请联系管理员。',
             'AI_JSON_SIZE_INVALID'=>'本次 AI 返回内容异常，系统未执行查询，请稍后重试。',
             'AI_JSON_OBJECT_REQUIRED'=>'本次 AI 返回内容异常，系统未执行查询，请稍后重试。',
             'AI_AUTHORIZATION_CHANGED'=>'您的权限或 AI 配置已变化，本次查询已停止，请重新提问。',
@@ -6570,7 +6787,7 @@ final class AiGatewayServices
             'CAPACITY_STOPPED'=>'当前系统繁忙，本次任务已停止，请稍后再问。',
             'AI_RUN_DEADLINE'=>'本次查询已到时间上限，请缩小问题范围后重试。',
             'AI_EXECUTION_CLOCK_REGRESSED'=>'服务时间校验异常，本次查询已停止，请稍后重试。',
-        ][$run['reason']]??'本次查询未完成，请稍后重试。';
+        ][$run['reason']]??'本次处理出了问题，尚未生成可核对的结果。请重试；若再次出现，请联系管理员。';
         if ($run['status']==='WAITING_CLARIFICATION') return '请确认当前这一步，已确认条件会保留。';
         return ['RECEIVED'=>'已接收问题','UNDERSTANDING'=>'正在理解查询条件','QUERYING'=>'正在查询经营数据','VERIFYING'=>'正在核对数据','RENDERING'=>'正在整理结果','PUBLISHING'=>'正在保存并交付结果','EXPORTING'=>'正在生成文件'][$run['progress_code']]??'正在处理';
     }

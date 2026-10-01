@@ -197,21 +197,21 @@ $setUnderstanding['requirements'][]=['id'=>'r2','meaning'=>'repeated prior ranki
     'values'=>['operation'=>'ranking','ranking'=>$storeQuery['ranking']],
     'evidence'=>[['message_id'=>'current','quote'=>'把这几家展开看看']]];
 $storeSetCompiled=$compile->invoke($gateway,$setUnderstanding,['query'=>$storeQuery,'view'=>$storeSet],'screen');
-$check(($storeSetCompiled['kind']??null)==='verified_ranking_detail',
+$check(($storeSetCompiled['kind']??null)==='verified_result_presentation',
     'plural store details replay the signed set even when the model repeats its old rank');
 foreach (['summary','breakdown'] as $presentationOperation) {
     $setWithPresentationOperation=$setUnderstanding;
     $setWithPresentationOperation['requirements'][1]['values']['operation']=$presentationOperation;
     $compiledSet=$compile->invoke($gateway,$setWithPresentationOperation,
         ['query'=>$storeQuery,'view'=>$storeSet],'screen');
-    $check(($compiledSet['kind']??null)==='verified_ranking_detail',
+    $check(($compiledSet['kind']??null)==='verified_result_presentation',
         'a model presentation operation cannot replace the signed store set: '.$presentationOperation);
 }
 $setWithScopeEcho=$setUnderstanding;
 $setWithScopeEcho['requirements'][1]['fields'][]='scope';
 $setWithScopeEcho['requirements'][1]['values']['scope']='authorized';
 $check(($compile->invoke($gateway,$setWithScopeEcho,['query'=>$storeQuery,'view'=>$storeSet],'screen')['kind']??null)
-        ==='verified_ranking_detail',
+        ==='verified_result_presentation',
     'an authorised scope echo cannot force a second binding of an already signed all-store set');
 $restrictedStoreQuery=$storeQuery;$restrictedStoreQuery['store_ids']=[3];
 $restrictedStoreSet=$storeSet;$restrictedStoreSet['query']=$restrictedStoreQuery;
@@ -418,5 +418,26 @@ foreach (['project','product'] as $kind) {
     $set=$resolver->resolve($q,$v,['view'=>'summary','target'=>'set','ordinal'=>null]);
     $check($set['object_kind']===$kind && $set['objects']===[['id'=>71,'label'=>'测试对象']],
         $kind.' singleton plural detail keeps the original zero-valued identity');
+}
+// R59: the semantic operation "show that list" has no new predicate. It
+// replays the exact existing population, rather than fabricating condition
+// criteria or issuing a fresh Reader query. No customer phrases are matched.
+$listCompile=$gatewayClass->getMethod('compileVerifiedPopulationPresentation');
+$listMeaning=['status'=>'understood','topic_relation'=>'continuation','requirements'=>[[
+    'fields'=>['operation','object_kind','object_relation'],
+    'values'=>['operation'=>'condition_list','object_kind'=>'member','object_relation'=>'analysis']]]];
+$listQuery=['query_shape'=>'breakdown','business_filters'=>['object_kind'=>'member']];
+$listContext=['query'=>$listQuery,'view'=>['read_consistency_ref'=>'verified-test-ref','results'=>[['object_kind'=>'member']]]];
+$list=$listCompile->invoke($gateway,$listMeaning,$listContext);
+$check(($list['kind']??null)==='verified_result_presentation'&&$list['query']===$listQuery
+    &&$list['view_ref']==='verified-test-ref','same-population list changes presentation without rebinding identity or criteria');
+foreach (['new_topic','new_metric','new_period','new_filter','wrong_object','summary_source'] as $case) {
+    $meaning=$listMeaning;$source=$listContext;
+    if($case==='new_topic') $meaning['topic_relation']='new_topic';
+    if($case==='wrong_object') $meaning['requirements'][0]['values']['object_kind']='store';
+    if($case==='summary_source') $source['query']['query_shape']='summary';
+    $extra=['new_metric'=>'metric_codes','new_period'=>'periods','new_filter'=>'aggregate_condition'][$case]??null;
+    if($extra!==null) $meaning['requirements'][0]['fields'][]=$extra;
+    $check($listCompile->invoke($gateway,$meaning,$source)===null,'same-population presentation rejects '.$case);
 }
 echo "object-detail-continuation: {$checks} checks passed\n";

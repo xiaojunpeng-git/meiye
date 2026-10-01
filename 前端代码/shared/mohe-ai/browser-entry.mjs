@@ -49,9 +49,19 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     @media (max-width:760px){.panel.workspace{display:block;overflow:auto}.workspace-aside{display:none}.workspace-main{min-height:100vh}.workspace-top{min-height:62px;padding:0 18px}.workspace-title{font-size:19px}.workspace .body,.workspace .footer{width:calc(100% - 32px)}.workspace .body{padding-top:28px}.workspace .message{font-size:17px}.workspace .message.question{font-size:16px;max-width:88%;margin-bottom:30px}.workspace .footer{position:sticky;bottom:0;padding:12px 0 16px}.workspace-composer-card{grid-template-columns:minmax(0,1fr) 64px;grid-template-rows:minmax(64px,auto) auto;border-radius:18px}.workspace .workspace-composer-card textarea{min-height:64px;padding:14px 18px 8px;font-size:16px}.workspace-composer-actions{padding:0 18px}.workspace-excel span{min-height:28px;padding:0 12px;font-size:14px}.workspace .workspace-send{width:48px;height:48px}.workspace-keyboard-hint{display:none}.workspace-new{margin-top:16px}:host([data-mohe-ai-presentation="workspace"]) .entry{right:16px;bottom:18px}}
   `;
   // 两端确认卡共用黑白层级；视觉序号不参与业务选项与权限判断。
-  style.textContent += `.card.guidance-card{padding:22px;border:1px solid #e5e5e7;border-radius:22px;background:#fff;color:#202124}.guidance-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;color:#777;font-size:14px}.guidance-cancel{border:0;background:transparent;color:#777;font-size:13px}.guidance-question{margin:10px 0 18px;font-size:18px;font-weight:600;line-height:1.65}.guidance-label{margin:12px 0 8px;color:#777;font-size:13px}.guidance-option{position:relative;display:flex;align-items:center;gap:12px;margin:6px 0;padding:12px;border:1px solid transparent;border-radius:16px;cursor:pointer}.guidance-option:has(input:checked){background:#f3f3f4;border-color:#d9d9dc}.guidance-option:focus-within{outline:2px solid #737377;outline-offset:2px}.guidance-option input{position:absolute;width:1px;height:1px;opacity:0}.guidance-number{display:flex;align-items:center;justify-content:center;flex:0 0 30px;height:30px;border:1px solid #dedee1;border-radius:50%;background:#f3f3f4;color:#737377;font-size:14px}.guidance-option-label{min-width:0;font-size:16px;line-height:1.5;overflow-wrap:anywhere}.guidance-confirm.primary{display:block;margin:18px 0 0 auto;padding:10px 18px;min-height:44px;border:0;border-radius:24px;background:#17191e;color:#fff}.guidance-confirm:disabled{background:#aaa}.guidance-card input[type=date],.guidance-card select{box-sizing:border-box;max-width:100%;min-height:44px}[hidden]{display:none!important}`;
+  style.textContent += `.card.guidance-card{padding:22px;border:1px solid #e5e5e7;border-radius:22px;background:#fff;color:#202124}.guidance-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;color:#777;font-size:14px}.guidance-cancel{border:0;background:transparent;color:#777;font-size:13px}.guidance-question{margin:10px 0 18px;font-size:18px;font-weight:600;line-height:1.65}.guidance-label{margin:12px 0 8px;color:#777;font-size:13px}.guidance-option{position:relative;display:flex;align-items:center;gap:12px;margin:6px 0;padding:12px;border:1px solid transparent;border-radius:16px;cursor:pointer}.guidance-option:has(input:checked){background:#f3f3f4;border-color:#d9d9dc}.guidance-option:focus-within{outline:2px solid #737377;outline-offset:2px}.guidance-option input{position:absolute;width:1px;height:1px;opacity:0}.guidance-number{display:flex;align-items:center;justify-content:center;flex:0 0 30px;height:30px;border:1px solid #dedee1;border-radius:50%;background:#f3f3f4;color:#737377;font-size:14px}.guidance-option-label{min-width:0;font-size:16px;line-height:1.5;overflow-wrap:anywhere}.guidance-supplement{box-sizing:border-box;width:100%;min-height:88px;padding:12px;border:1px solid #d9d9dc;border-radius:12px;font:inherit;resize:vertical}.guidance-confirm.primary{display:block;margin:18px 0 0 auto;padding:10px 18px;min-height:44px;border:0;border-radius:24px;background:#17191e;color:#fff}.guidance-confirm:disabled{background:#aaa}.guidance-card input[type=date],.guidance-card select{box-sizing:border-box;max-width:100%;min-height:44px}[hidden]{display:none!important}`;
   root.appendChild(style);
   const el = (tag, text, cls) => { const n = documentRef.createElement(tag); if (text != null) n.textContent = String(text); if (cls) n.className = cls; return n; };
+  // Gateway codes remain machine-readable for diagnostics, but customer-facing
+  // status must explain the actionable boundary without exposing raw codes.
+  function customerErrorMessage(value, fallback = '魔核 AI 暂时无法处理这次请求，请联系管理员检查服务状态。') {
+    const reason = typeof value === 'string' ? value.trim() : '';
+    if (reason === 'AI_NOT_CONFIGURED' || reason === 'AI_EXTERNAL_AUTHORIZATION_REQUIRED') return '魔核 AI 暂不可用，请管理员检查基础配置中的启用状态和外部处理授权。';
+    if (reason === 'AI_AUTH_REQUIRED') return '登录状态已失效，请重新登录后再试。';
+    if (reason === 'AI_PERMISSION_DENIED') return '当前账号没有使用魔核 AI 的权限，请联系管理员。';
+    if (reason === 'AI_CLIENT_UPGRADE_REQUIRED') return '魔核 AI 页面版本较旧，请刷新页面后再试。';
+    return /^AI_[A-Z0-9_]+$/.test(reason) ? fallback : (reason || fallback);
+  }
   let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, elapsedTimer, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, workspaceTitle = null, workspaceHistory = null, workspaceCancel = null, readingRunway = null, activeRunStatus = null, exportRequested = false;
   let clientSession = newId(); const entry = el('button', entryIconUrl ? null : '魔核 AI', entryIconUrl ? 'entry entry--icon' : 'entry');
   entry.type = 'button'; entry.setAttribute('aria-label', '打开魔核 AI 工作台');
@@ -491,10 +501,11 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         // refusal is still a complete customer turn, so restore the original
         // wording before showing it as well.
         const deliveredQuestion = ensureQuestionVisible();
-        const terminalMessage = run.status === 'CANCELLED' ? '已取消' : run.message || '本次未能完成，请重新提问。';
+        const terminalMessage = run.status === 'CANCELLED' ? '已取消' : customerErrorMessage(run.message, '本次未能完成，请重新提问。');
         const elapsedSeconds = completedElapsedSeconds();
         finishActiveRunStatus(); appendCompletedElapsed(activeConversationTurn(), elapsedSeconds); progress.textContent = '';
-        message(terminalMessage, '', activeConversationTurn() || body);
+        const answerTurn = activeConversationTurn() || body;
+        message(terminalMessage, '', answerTurn);
         // Keep a complete customer-visible turn after refresh.  It is marked
         // non-contextual so a previous failure never becomes an instruction
         // or a claimed business fact for the next model request.
@@ -548,7 +559,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     } catch (error) {
       if (disposed || !run || run.run_id !== source.run_id || run.generation !== source.generation || isTerminal(run.status)) return;
       if (runIsUnavailable(error)) { abandonUnavailableRun(); return; }
-      progress.textContent = error.responseKnown ? error.message : '请求结果暂未确认。';
+      progress.textContent = error.responseKnown ? customerErrorMessage(error.message) : '请求结果暂未确认。';
       clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000);
     } finally {
       compatibilityExecuting = false;
@@ -595,10 +606,27 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
           if (typeof field.max === 'string') control.max = field.max;
           control.value = typeof initial[field.key] === 'string' ? initial[field.key] : '';
           form.appendChild(control); controls.push({ field, elements: [control], read: () => control.value });
+        } else if (c.schema_version === GUIDANCE_SCHEMA && fields.length === 1) {
+          const group = el('div'); group.setAttribute('role', 'radiogroup'); group.setAttribute('aria-label', field.label);
+          const name = 'guidance-' + newId(); const inputs = [];
+          // A recommendation must be one of the server's executable options.
+          // The fourth entry collects a corrected full question; it is never
+          // sent as a metric code or silently substituted into the old Run.
+          const executable = field.options.filter(option => option.action !== 'stop');
+          const recommended = (executable.length <= 3 ? executable : executable.filter(option => option.recommended === true)).slice(0, 3);
+          recommended.forEach((option, index) => { const optionLabel = el('label', null, 'guidance-option'); const control = el('input'); control.type = 'radio'; control.name = name; control.value = option.value; control.checked = initial[field.key] === option.value; optionLabel.append(control, el('span', String(index + 1), 'guidance-number'), el('span', option.label, 'guidance-option-label')); group.appendChild(optionLabel); inputs.push(control); });
+          const supplementLabel = el('label', null, 'guidance-option');
+          const supplementChoice = el('input'); supplementChoice.type = 'radio'; supplementChoice.name = name; supplementChoice.value = '__supplement__';
+          supplementLabel.append(supplementChoice, el('span', String(inputs.length + 1), 'guidance-number'), el('span', '我来补充描述', 'guidance-option-label'));
+          group.appendChild(supplementLabel); inputs.push(supplementChoice);
+          const supplementText = el('textarea', null, 'guidance-supplement'); supplementText.maxLength = 1000; supplementText.setAttribute('aria-label', '补充描述'); supplementText.placeholder = '请补充或改写您的问题'; supplementText.hidden = true;
+          supplementChoice.addEventListener('change', () => { supplementText.hidden = false; });
+          inputs.slice(0, -1).forEach(control => control.addEventListener('change', () => { supplementText.hidden = true; }));
+          form.append(group, supplementText);
+          controls.push({ field, elements: [...inputs, supplementText], supplementText, read: () => { const selected = inputs.find(control => control.checked); return selected ? selected.value : ''; } });
         } else if (field.options.length <= 3) {
           const group = el('div'); group.setAttribute('role', 'radiogroup'); group.setAttribute('aria-label', field.label);
           const name = 'guidance-' + newId(); const inputs = [];
-          // 原生radio保持键盘与读屏语义，编号与高亮只负责呈现，不替代后端选项值。
           field.options.forEach((option, index) => { const optionLabel = el('label', null, 'guidance-option'); const control = el('input'); control.type = 'radio'; control.name = name; control.value = option.value; control.checked = initial[field.key] === option.value; optionLabel.append(control, el('span', String(index + 1), 'guidance-number'), el('span', option.label, 'guidance-option-label')); group.appendChild(optionLabel); inputs.push(control); });
           form.appendChild(group); controls.push({ field, elements: inputs, read: () => { const selected = inputs.find(control => control.checked); return selected ? selected.value : ''; } });
         } else {
@@ -614,6 +642,15 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         if (!pendingSubmission) {
           const choices = {}; controls.forEach(item => { choices[item.field.key] = item.read(); });
           if (controls.some(item => !choices[item.field.key] || item.elements.some(control => control.type === 'date' && typeof control.checkValidity === 'function' && !control.checkValidity()))) { hint.textContent = '请完成当前选择或填写有效日期。'; return; }
+          const supplement = controls.find(item => choices[item.field.key] === '__supplement__');
+          if (supplement) {
+            const detail = supplement.supplementText && supplement.supplementText.value.trim();
+            if (!detail) { hint.textContent = '请补充您想查询的内容。'; return; }
+            // The same revision-protected confirmation carries only the new
+            // wording. The server owns original conditions and merges changes;
+            // the browser must not cancel, concatenate or recreate the query.
+            choices.supplement_text = detail;
+          }
           pendingSubmission = { ...binding(), ...clarificationSubmission(c, choices, newId(), reviseId) };
           guidanceSubmission = pendingSubmission; persistActive();
         }
@@ -654,7 +691,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
             // changing choices before confirmation could create two answers.
             if (error.responseKnown) { pendingSubmission = null; guidanceSubmission = null; setDisabled(false); }
             confirm.disabled = false; confirm.textContent = error.responseKnown ? '确认并继续' : '重试确认';
-            hint.textContent = error.responseKnown ? error.message : '提交结果暂未确认，请重试确认同一次选择。';
+            hint.textContent = error.responseKnown ? customerErrorMessage(error.message) : '提交结果暂未确认，请重试确认同一次选择。';
             persistActive();
           }
         } finally { submitting = false; }
@@ -679,7 +716,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     if (pendingSubmission && clarificationSubmittedId !== c.id && run.clarification_rejected !== true) void confirm.onclick();
   }
   async function submitQuestion() {
-    if (!boot.enabled) { progress.textContent = boot.disabled_reason || '请先完成配置并启用可用能力。'; return; }
+    if (!boot.enabled) { progress.textContent = customerErrorMessage(boot.disabled_reason, '当前账号暂不能使用魔核 AI，请联系管理员检查配置或权限。'); return; }
     if (!pendingCreate && !input.value.trim()) return;
     if (run && !isTerminal(run.status)) return;
     const restoringClosedRequest = pendingCreate !== null && closeRequested;
@@ -715,7 +752,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       if (accepted && accepted.accepted === false) {
         // Admission refused before a Run exists: retire the transient timer
         // and controls, but preserve the visible question for a deliberate retry.
-        clearActive(); pendingCreate = null; finishActiveRunStatus(); clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); send.disabled = false; send.textContent = '发送'; progress.textContent = accepted.message || '当前使用人数较多，请稍后再问。'; syncWorkspaceActions(); return;
+        clearActive(); pendingCreate = null; finishActiveRunStatus(); clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); send.disabled = false; send.textContent = '发送'; progress.textContent = customerErrorMessage(accepted.message, '当前使用人数较多，请稍后再问。'); syncWorkspaceActions(); return;
       }
       await update(accepted); persistActive();
       // A page replacement leaves the customer task alive.  An explicit close
@@ -729,7 +766,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     } catch (error) {
       if (disposed) return;
       if (runIsUnavailable(error)) { abandonUnavailableRun(); return; }
-      progress.textContent = error.responseKnown ? error.message : '请求结果暂未确认。';
+      progress.textContent = error.responseKnown ? customerErrorMessage(error.message) : '请求结果暂未确认。';
       if (run) { persistActive(); clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000); }
       else {
         if (error.responseKnown) { clearActive(); pendingCreate = null; finishActiveRunStatus(); clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); }

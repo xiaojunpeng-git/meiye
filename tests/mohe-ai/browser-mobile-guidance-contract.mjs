@@ -8,7 +8,7 @@ const source = fs.readFileSync(new URL('../../前端代码/mobile-vue3/src/share
 // Neither terminal displays a default hint; retain an accessible input name.
 const browserEntry = fs.readFileSync(new URL('../../前端代码/shared/mohe-ai/browser-entry.mjs', import.meta.url), 'utf8');
 assert.ok(!source.includes('questionHint'));
-assert.ok(!source.match(/<textarea[^>]*placeholder/));
+assert.ok(!source.match(/<textarea[^>]*aria-label="输入问题"[^>]*placeholder/));
 assert.ok(source.includes('aria-label="输入问题"'));
 assert.ok(!browserEntry.includes('input.placeholder'));
 assert.ok(browserEntry.includes("input.setAttribute('aria-label', '输入问题')"));
@@ -25,7 +25,7 @@ assert.ok(browserEntry.includes("el('small', '够智能、够准确、够便捷'
 // its actual state functions, not a copied implementation, but is NOT a native
 // UTS compiler, picker, H5 layout or device lifecycle acceptance test.
 const script = source.match(/<script setup lang="uts">([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '');
-const expose = '\nglobalThis.controller = {tableWidth,onComposerLineChange,onComposerInput,resetComposerSize,answerPresentation,presentationGroups,openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,editGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,load,resumeActive,elapsedLabel,toggleComposerOptions,toggleExcel,createConversationFromMenu,confirmClearConversation,openHistory,selectConversation,refs:{composerInputHeight,composerExpanded,question,progress,clarification,choices,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy,activeQuestion,activeElapsedSeconds,activeRunState,messageAnchor,composerOptionsOpen,historyOpen,recentConversations,wantExcel,excelAvailable},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
+const expose = '\nglobalThis.controller = {tableWidth,onComposerLineChange,onComposerInput,resetComposerSize,answerPresentation,presentationGroups,openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,chooseSupplement,recommendedOptions,editGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,load,resumeActive,elapsedLabel,toggleComposerOptions,toggleExcel,createConversationFromMenu,confirmClearConversation,openHistory,selectConversation,refs:{composerInputHeight,composerExpanded,question,progress,clarification,choices,supplementText,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy,activeQuestion,activeElapsedSeconds,activeRunState,messageAnchor,composerOptionsOpen,historyOpen,recentConversations,wantExcel,excelAvailable},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
 const code = esbuild.transformSync(script + expose, { loader: 'ts', target: 'es2020' }).code;
 const schema = 'mohe-clarification-v2'; let checks = 0;
 const clean = value => JSON.parse(JSON.stringify(value));
@@ -55,6 +55,15 @@ function setup(max = 3, asyncExecution = true, deferBootstrap = false, sharedSto
   const start = (fields = [metric]) => { api.refs.question.value = '移动引导测试'; api.submit(); answer('/runs', state); api.accept(step(1, fields)); };
   return { api, answer, bootstrap, calls, modals, storage, advance: ms => { now += ms; intervals.forEach(fn => fn()); }, scheduled: () => scheduled, step, start, finish: (contextRef = null) => ({ ...state, version: state.version + 1, status: 'COMPLETED', answer: { summary: '已校验', ...(contextRef ? {context_ref:contextRef} : {}), cards: [{ metric_name: '现金业绩', display_value: '123', unit: '元' }, { metric_name: '消耗业绩', display_value: '456', unit: '元' }] } }), expire: () => { now += 86400000; }, unmount: () => unmounted.forEach(fn => fn()) };
 }
+// If local configuration is revoked between bootstrap and admission, preserve
+// the unsent question while showing an actionable sentence instead of a code.
+{
+  const f = setup(); f.api.refs.question.value = '今天现金业绩是多少'; f.api.submit();
+  f.answer('/runs', null, { ok: false, responseKnown: true, message: 'AI_NOT_CONFIGURED' });
+  eq(f.api.refs.progress.value.includes('启用状态和外部处理授权'), true);
+  eq(f.api.refs.progress.value.includes('AI_NOT_CONFIGURED'), false);
+  eq(f.api.refs.question.value, '今天现金业绩是多少'); f.unmount();
+}
 // R50：等待不计处理耗时；每次人工确认开启新处理段，原会话恢复仍展示确认卡。
 {
   const f = setup(); f.start(); const frozen = f.api.refs.activeElapsedSeconds.value;
@@ -80,6 +89,34 @@ for (const max of [3,4,5]) {
   eq(f.storage.get(f.api.state().runtimeKey).resolved_run.run_id, 'mobile-run');
   eq(f.calls.filter(call => call.path === '/runs').length, 1); eq(f.calls.filter(call => call.path.endsWith('/execute')).length, 0);
   eq(f.api.load()[0].rounds.length, 1); f.unmount();
+}
+// Free-text correction must retire the paused Run before re-understanding the
+// full customer question; the sentinel is never sent to /clarify as a metric.
+{
+  const f = setup(); f.start();
+  const options = [...metric.options.map(option => ({...option, recommended:true})),
+    { value: 'staff_sales', label: '销售人业绩' }, { value: 'refund_performance', label: '退款业绩' },
+    { value: 'other_registered_metric', label: '以上都不是', action: 'stop' }];
+  eq(f.api.recommendedOptions({options}).map(option => option.value), ['cash_performance', 'consume_amount']);
+  eq(f.api.recommendedOptions({options:options.map(option => ({...option, recommended:false}))}).length, 0);
+  f.api.chooseSupplement(metric); f.api.refs.supplementText.value = '按现金收款金额查询'; f.api.confirmChoices();
+  eq(f.calls.filter(call => call.path.endsWith('/clarify')).length, 1);
+  eq(f.calls.filter(call => call.path.endsWith('/cancel')).length, 0);
+  const created = f.calls.filter(call => call.path === '/runs');
+  eq(created.length, 1);
+  eq(f.calls.find(call => call.path.endsWith('/clarify')).body.choices,
+    {metric_code:'__supplement__',supplement_text:'按现金收款金额查询'});
+  f.unmount();
+}
+{
+  const f = setup(); f.start();
+  f.api.accept({ ...f.api.state().run, version: 3, status: 'FAILED', reason: 'AI_INTENT_PARTIAL', message: '请补充查询意思。' });
+  const row = f.api.refs.displayed.value.at(-1);
+  eq(row.terminal_reason, 'AI_INTENT_PARTIAL');
+  // Historical failed runs remain readable; they must not recreate a parallel
+  // partial-query retry flow after the server now owns waiting clarification.
+  eq(f.calls.filter(call => call.path === '/runs').length, 1);
+  f.unmount();
 }
 // R57: a backend-verified long table starts the existing independent file
 // task on mobile even when the merchant did not select manual Excel.
