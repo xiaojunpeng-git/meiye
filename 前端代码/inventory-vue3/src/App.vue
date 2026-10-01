@@ -12,6 +12,7 @@ import InventoryOperationalUnifiedQueryToolbar from './components/InventoryOpera
 import InventoryRecipeModal from './components/InventoryRecipeModal.vue'
 import InventoryStoreSelector from './components/InventoryStoreSelector.vue'
 import { formatIntegerQuantity } from './quantityFormat'
+import { preventInventoryDateKeyboardInput, preventInventoryDateTextTransfer } from './inventoryDatePickerOnly'
 import { inventoryStatusLabel } from './statusLabels'
 import { inventoryApi, inventoryCommandIdempotencyKey, platformInventoryApi, setInventoryEmbeddedSessionToken, clearInventoryEmbeddedSessionToken } from './services/inventoryApi'
 import { UnifiedQueryDateRange, UnifiedQueryToolbar, useUnifiedQueryPage } from '@mohe/unified-query-vue3'
@@ -1372,7 +1373,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="inventory-shell" :class="{ 'inventory-shell--collapsed': sidebarCollapsed, 'inventory-shell--store-entry': isEmbeddedEntry }">
+  <div
+    class="inventory-shell"
+    :class="{ 'inventory-shell--collapsed': sidebarCollapsed, 'inventory-shell--store-entry': isEmbeddedEntry }"
+    @keydown.capture="preventInventoryDateKeyboardInput"
+    @beforeinput.capture="preventInventoryDateTextTransfer"
+    @paste.capture="preventInventoryDateTextTransfer"
+    @drop.capture="preventInventoryDateTextTransfer"
+  >
     <aside v-if="!isEmbeddedEntry" class="inventory-sidebar" :class="{ 'inventory-sidebar--open': sidebarOpen }">
       <div class="inventory-brand">
         <span class="inventory-brand__mark"><Package2 :size="20" /></span>
