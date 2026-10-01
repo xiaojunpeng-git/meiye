@@ -737,16 +737,21 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('system_store s', 's.id = d.store_id')
             ->leftJoin('cashier_v3_debt_authority a', 'a.debt_id = d.id')
             ->leftJoin('cashier_v3_recharge_debt_authority ra', 'ra.debt_id = d.id');
+        $query->leftJoin('cashier_v3_debt_cancellation dc', 'dc.debt_id = d.id');
         $this->applyStoreScope($query, 'd.store_id', $criteria['allowedStoreIds']);
         $this->applyTimestampBusinessDateRange($query, 'd.add_time', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'd.debt_no', 'd.order_sn', 'a.sales_order_no_snapshot',
             'ra.recharge_order_no_snapshot', 'u.real_name', 'u.nickname', 'u.phone',
         ]);
+        // 正常包含未结清和已结清，排除原单冲销与独立取消；全部保留历史。
+        if ($criteria['dataScope'] === 'normal') $query->whereIn('d.status', [0, 1]);
         if ($criteria['status'] === 'outstanding') {
             $query->where('d.status', 0);
         } elseif ($criteria['status'] === 'settled') {
             $query->where('d.status', 1);
+        } elseif ($criteria['status'] === 'cancelled') {
+            $query->where('d.status', 3);
         }
         // New V3 debts have either sales or recharge authority. Keep legacy
         // store_debt readable as well, but label it rather than pretending it
@@ -757,11 +762,13 @@ final class CashierV3OrderCenterRecordQueryServices
             'u.real_name,u.nickname,u.phone,s.name AS store_name',
             'a.sales_order_id,a.sales_order_no_snapshot,a.checkout_request_id',
             'ra.recharge_id,ra.recharge_order_no_snapshot',
+            'dc.cancelled_debt_cents,dc.reason_snapshot AS cancel_reason,dc.operator_name_snapshot AS cancel_operator,dc.occurred_at AS cancelled_at',
         ]));
         return [array_map(function (array $row): array {
             $totalDebt = (string)($row['total_debt'] ?? '0.00');
             $repaidDebt = (string)($row['repaid_debt'] ?? '0.00');
-            $remaining = bcsub($totalDebt, $repaidDebt, 2);
+            // 取消不增加已还金额。应收余额为零，免除金额另列历史事实。
+            $remaining = (int)$row['status'] >= 2 ? '0.00' : bcsub($totalDebt, $repaidDebt, 2);
             $salesOrderNo = trim((string)($row['sales_order_no_snapshot'] ?? ''));
             $rechargeOrderNo = trim((string)($row['recharge_order_no_snapshot'] ?? ''));
             $sourceOrderNo = $salesOrderNo !== '' ? $salesOrderNo
@@ -780,7 +787,12 @@ final class CashierV3OrderCenterRecordQueryServices
                 'originalDebtAmount' => $totalDebt,
                 'repaidAmount' => $repaidDebt,
                 'remainingAmount' => $remaining,
-                'debtStatus' => (int)$row['status'] === 1 ? '已结清' : '待补交',
+                'debtStatus' => [0 => '待补交', 1 => '已结清', 2 => '已失效', 3 => '已取消'][(int)$row['status']] ?? '已失效',
+                'cancelledAmount' => bcdiv((string)($row['cancelled_debt_cents'] ?? 0), '100', 2),
+                'cancelReason' => (string)($row['cancel_reason'] ?? ''),
+                'cancelOperator' => (string)($row['cancel_operator'] ?? ''),
+                'cancelledAt' => empty($row['cancelled_at']) ? '' : $this->dateTime((int)$row['cancelled_at']),
+                'canCancel' => (int)$row['status'] === 0 && bccomp($remaining, '0.00', 2) > 0,
                 'storeName' => (string)($row['store_name'] ?? ''),
                 // 欠款主表没有独立的业务日字段；其入账时间就是该条欠款
                 // 事实的发生时间，筛选与列表展示必须使用同一来源。
@@ -2156,6 +2168,7 @@ final class CashierV3OrderCenterRecordQueryServices
             return array_merge($options, [
                 ['value' => 'outstanding', 'label' => '待补交'],
                 ['value' => 'settled', 'label' => '已结清'],
+                ['value' => 'cancelled', 'label' => '已取消'],
             ]);
         }
         if ($type === 'gift') {

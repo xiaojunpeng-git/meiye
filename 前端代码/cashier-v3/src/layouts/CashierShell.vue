@@ -2639,6 +2639,19 @@ watch(
   { immediate: true }
 )
 
+// 独立取消后只读取该会员的欠款快照，不重建购物车或打开还款弹窗。
+async function refreshCancelledDebt(event) {
+  const memberId = event?.detail?.memberId
+  if (!memberId) return
+  const response = await requestCashierV3Action('open-member-debt-repayment', { memberId, preserveRootState: true, silent: true })
+  const envelope = response?.result ? response : response?.data
+  const snapshot = envelope?.data?.debtSnapshot
+  if (isSucceededResult(response) && snapshot) {
+    state.memberCenter = { ...(state.memberCenter || {}), debtSnapshot: snapshot }
+    applyAuthoritativeDebtSnapshot(snapshot)
+  }
+}
+
 onMounted(() => {
   void refreshSwitchableStores()
   window.addEventListener('cashier-v3:ui-result', handleUiResult)
@@ -2649,6 +2662,7 @@ onMounted(() => {
   window.addEventListener('cashier-v3:open-cashier-member', openCashierForMember)
   window.addEventListener('cashier-v3:open-member-detail', showMemberDetail)
   window.addEventListener('cashier-v3:open-member-debt-repayment', handleOpenMemberDebt)
+  window.addEventListener('cashier-v3:debt-cancelled', refreshCancelledDebt)
   window.addEventListener('cashier-v3:open-query-entity-selector', openQueryEntitySelector)
   window.addEventListener('cashier-v3:open-service-completion', openServiceCompletion)
   window.addEventListener('cashier-v3:register-service-completion-request', registerServiceCompletionPreparation)
@@ -2667,6 +2681,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:open-cashier-member', openCashierForMember)
   window.removeEventListener('cashier-v3:open-member-detail', showMemberDetail)
   window.removeEventListener('cashier-v3:open-member-debt-repayment', handleOpenMemberDebt)
+  window.removeEventListener('cashier-v3:debt-cancelled', refreshCancelledDebt)
   window.removeEventListener('cashier-v3:open-query-entity-selector', openQueryEntitySelector)
   window.removeEventListener('cashier-v3:open-service-completion', openServiceCompletion)
   window.removeEventListener('cashier-v3:register-service-completion-request', registerServiceCompletionPreparation)

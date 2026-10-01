@@ -94,6 +94,10 @@ final class CashierV3OrderCenterVoidServices
             throw self::failure('原欠款资料已变化，无法作废。', 'supplement_debt_missing');
         }
         $repaid = $this->moneyCents($debt['repaid_debt'] ?? '0');
+        // 独立免除是欠款终态，不能通过补交作废重新恢复应收或撤回已收款。
+        if ((int)$debt['status'] === CashierV3DebtCancellationServices::CANCELLED_STATUS) {
+            throw self::failure('欠款已取消，不能作废补交记录。', 'supplement_debt_cancelled');
+        }
         if ($repaid < $amountCents) throw self::failure('当前欠款金额不足以冲销该补交记录。', 'supplement_debt_projection_mismatch');
 
         $now = time();

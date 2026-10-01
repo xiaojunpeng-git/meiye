@@ -463,6 +463,11 @@ const visibleFields = computed(() => {
   return fields
 })
 const detailFields = computed(() => {
+  // 取消信息只补充在该笔欠款详情，不改变其他业务记录的字段。
+  if (activeTabKey.value === 'debt' && genericDetailRecord.value?.cancelledAt) {
+    return [...visibleFields.value, field('cancelledAmount', '取消金额', 'money'),
+      field('cancelReason', '取消原因'), field('cancelOperator', '取消操作人'), field('cancelledAt', '取消时间')]
+  }
   if (activeTabKey.value !== 'service') return visibleFields.value
   const present = new Set(visibleFields.value.map((item) => item.key))
   const detailOnlyKeys = genericDetailRecord.value?.voidedAt
@@ -2082,6 +2087,43 @@ async function openDebtRepayment(record) {
   }))
 }
 
+// 取消以列表当前金额作为确认快照，提交期间若有补交由后端拒绝，不扩大免除金额。
+const debtCancelRecord = ref(null)
+const debtCancelReason = ref('')
+const debtCancelError = ref('')
+const debtCancelPending = ref(false)
+const debtCancelKeys = ref({})
+function openDebtCancellation(record) {
+  debtCancelRecord.value = record
+  debtCancelReason.value = ''
+  debtCancelError.value = ''
+}
+async function submitDebtCancellation() {
+  if (debtCancelPending.value || !debtCancelRecord.value) return
+  const record = debtCancelRecord.value
+  const reason = debtCancelReason.value.trim()
+  if (!reason || reason.length > 255) { debtCancelError.value = '请填写取消原因（不超过255字）。'; return }
+  const key = String(record.debtId)
+  const idempotencyKey = debtCancelKeys.value[key] || createCashierV3CommandId()
+  debtCancelKeys.value[key] = idempotencyKey
+  debtCancelPending.value = true
+  debtCancelError.value = ''
+  try {
+    const result = await requestAction('cancel-order-center-debt', {
+      debtId: record.debtId, remainingAmount: record.remainingAmount, reason, idempotencyKey
+    })
+    const status = actionStatus(result)
+    if (isTerminalActionStatus(status)) delete debtCancelKeys.value[key]
+    if (['success', 'succeeded'].includes(status)) {
+      debtCancelRecord.value = null
+      await queryRecords({}, false)
+      // 返回收银时需重新读取总欠款；不在浏览器手工减金额。
+      window.dispatchEvent(new CustomEvent('cashier-v3:debt-cancelled', { detail: { memberId: record.memberId } }))
+    } else debtCancelError.value = result?.result?.message || result?.data?.result?.message || '取消未完成。'
+  } catch (error) { debtCancelError.value = error?.message || '取消未完成，请稍后重试。' }
+  finally { debtCancelPending.value = false }
+}
+
 const rechargeLifecycleActions = computed(() => {
   if (['supplement', 'gift'].includes(activeTabKey.value) && genericDetailRecord.value) {
     const id = giftVoidRecordId(genericDetailRecord.value) || String(genericDetailRecord.value.id || '')
@@ -2646,6 +2688,8 @@ onBeforeUnmount(() => {
                 class="button button--text"
                 @click="openDebtRepayment(record)"
               >去还款</button>
+              <button v-if="activeTabKey === 'debt' && record.canCancel && canUseCashierV3Operation('cashier.v3.order.void')"
+                type="button" class="button button--text button--danger" @click="openDebtCancellation(record)">取消欠款</button>
               <button
                 v-if="canUseCashierV3Operation('cashier.v3.order.void') && ((activeTabKey === 'recharge' && record.economicsDataStatus === 'ready' && record.orderStatus === '正常') || (activeTabKey === 'supplement' && String(record.id || '').startsWith('v3-') && record.paymentStatus !== '已作废') || (activeTabKey === 'gift' && giftVoidRecordId(record).startsWith('v3-direct-gift:') && record.giftStatus !== '已作废'))"
                 type="button"
@@ -2744,6 +2788,19 @@ onBeforeUnmount(() => {
       @field-action="handleDetailFieldAction"
       @close="genericDetailRecord = null"
     />
+
+    <div v-if="debtCancelRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-label="取消欠款">
+      <div class="service-void-modal__backdrop"></div>
+      <form class="service-void-modal__panel" @submit.prevent="submitDebtCancellation">
+        <header class="service-void-modal__head"><h2>取消欠款</h2></header>
+        <p class="service-void-modal__record">确认取消剩余欠款 {{ itemMoney(debtCancelRecord.remainingAmount) }}？取消后不再需要补交。</p>
+        <label class="service-void-modal__label" for="debt-cancel-reason">取消原因</label>
+        <textarea id="debt-cancel-reason" v-model="debtCancelReason" class="service-void-modal__textarea" maxlength="255" rows="3" :disabled="debtCancelPending" />
+        <p v-if="debtCancelError" class="service-void-modal__error" role="alert">{{ debtCancelError }}</p>
+        <footer class="service-void-modal__actions"><button type="button" class="button button--secondary" :disabled="debtCancelPending" @click="debtCancelRecord = null">取消</button>
+          <button type="submit" class="button button--primary" :disabled="debtCancelPending">确认取消欠款</button></footer>
+      </form>
+    </div>
 
     <p v-if="!isPlatformReadOnly && serviceCraftsmanError && !serviceCraftsmanEditorOpen && !serviceCraftsmanPendingAssignment" class="order-center-page__inline-error" role="alert">
       {{ serviceCraftsmanError }}

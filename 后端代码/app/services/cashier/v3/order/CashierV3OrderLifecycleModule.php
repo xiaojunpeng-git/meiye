@@ -16,6 +16,16 @@ final class CashierV3OrderLifecycleModule
         $service = new CashierV3OrderLifecycleServices($workspace, new CashierV3SaleCatalogServices());
         $serviceVoid = new CashierV3ServiceRecordVoidServices();
         $orderCenterVoid = new CashierV3OrderCenterVoidServices();
+        $debtCancellation = new CashierV3DebtCancellationServices();
+        // 独立取消只依赖确认时的欠款金额快照；不继承工作台或草稿版本。
+        // 领域服务在事务内锁定欠款并强制门店权限，网关记录命令及事件。
+        $dispatcher->handlers()->registerCommand('cancel-order-center-debt', static function (array $scope) use ($debtCancellation): array {
+            return $debtCancellation->executeInTx($scope);
+        });
+        $dispatcher->policies()->register(new CashierV3ContextPolicy('cancel-order-center-debt', [], [], static function (): array {
+            return ['required' => [], 'allowed' => [], 'identities' => [],
+                'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
+        }, [], [], [], true));
         $serviceCraftsmanAdjustment = new CashierV3ServiceRecordCraftsmanAdjustmentServices();
         $supplementPersonnelAdjustment = new CashierV3SupplementSalespersonAdjustmentServices();
         $dispatcher->versionServices()->registerProvider(

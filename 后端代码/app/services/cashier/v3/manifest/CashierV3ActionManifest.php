@@ -765,6 +765,13 @@ class CashierV3ActionManifest
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['debt.repayment.voided' => []],
             ],
+            // 取消欠款是免除事实，不产生收款、余额变更或现金业绩。
+            'cancel-order-center-debt' => [
+                'required_event_types' => ['debt.cancelled'], 'allowed_event_types' => ['debt.cancelled'],
+                'event_rules' => ['debt.cancelled' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'debt', 'source_type' => 'cancel-order-center-debt']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['debt.cancelled' => []],
+            ],
             'void-order-center-gift' => [
                 'required_event_types' => ['gift.voided'],
                 'allowed_event_types' => ['gift.voided'],
