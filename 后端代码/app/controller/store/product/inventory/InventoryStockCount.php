@@ -4,6 +4,7 @@ namespace app\controller\store\product\inventory;
 use app\controller\store\AuthController;
 use app\services\product\inventory\InventoryStockCountServices;
 use app\services\product\inventory\InventoryStockCountDraftServices;
+use app\services\product\inventory\InventoryStockCountCatalogException;
 use think\facade\App;
 final class InventoryStockCount extends AuthController
 {
@@ -17,7 +18,15 @@ final class InventoryStockCount extends AuthController
     public function confirm()
     {
         $data = $this->request->postMore([['idempotency_key',''],['business_date',''],['remark',''],['lines',[]],['draft_id',0],['draft_version',0]]);
-        return $this->success($this->services->confirm((int)$this->storeId, (int)$this->storeStaffId, $data, (array)$this->storeStaffInfo));
+        try {
+            return $this->success($this->services->confirm((int)$this->storeId, (int)$this->storeStaffId, $data, (array)$this->storeStaffInfo));
+        } catch (InventoryStockCountCatalogException $exception) {
+            // 行号与稳定商品身份用于门店端定位；不返回数据库状态或允许客户端绕过目录校验。
+            return $this->fail('部分盘点商品已从当前门店商品目录删除，请处理高亮行后再提交。', [
+                'code' => $exception->getMessage(),
+                'invalid_lines' => $exception->invalidLines(),
+            ]);
+        }
     }
 
     /** Saving does not call the confirming service or create inventory movement facts. */

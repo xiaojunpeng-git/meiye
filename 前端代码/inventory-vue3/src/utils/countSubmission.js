@@ -53,3 +53,27 @@ export function validateCountSubmissionRows(rows) {
 
   return { valid: true, rowIndex: -1, message: '' }
 }
+
+/**
+ * 用服务端返回的稳定商品身份定位草稿行，不依赖已删除目录的名称或当前排序。
+ * 返回的索引按草稿显示顺序排列，用于同时高亮全部问题行并滚动到首行。
+ */
+export function invalidCountCatalogRowIndexes(rows, invalidLines) {
+  const invalidIdentities = new Set((Array.isArray(invalidLines) ? invalidLines : []).map((line) => (
+    `${Number(line?.product_id)}:${Number(line?.sku_id)}:${String(line?.sku_unique || '')}`
+  )))
+  return rows.reduce((indexes, row, index) => {
+    const identity = `${Number(row?.product_id)}:${Number(row?.sku_id)}:${String(row?.sku_unique || '')}`
+    if (invalidIdentities.has(identity)) indexes.push(index)
+    return indexes
+  }, [])
+}
+
+/** 使用草稿快照中的商品名称生成门店员工可直接处理的行级提示。 */
+export function invalidCountCatalogMessage(rows, indexes) {
+  const labels = indexes.map((index) => {
+    const row = rows[index] || {}
+    return `第 ${index + 1} 行「${String(row.product_name || `商品ID ${row.product_id || '-'}`)}」`
+  })
+  return `${labels.join('、')}已从当前门店商品目录删除，暂时无法完成盘点。请先恢复商品，或删除这些盘点行后再提交。`
+}

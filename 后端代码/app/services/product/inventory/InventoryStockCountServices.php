@@ -99,6 +99,8 @@ final class InventoryStockCountServices
                 if ((string)$existing['request_fingerprint'] !== $command['fingerprint'] || (int)$existing['location_id'] !== (int)$location['id']) throw new \RuntimeException('inventory_stock_count_idempotency_conflict');
                 return ['count_document_id' => (int)$existing['id'], 'count_no' => (string)$existing['count_no'], 'idempotent' => true];
             }
+            // 先一次性核对整单目录身份，再创建单头和移动事实；失效行必须整批返回，不能让用户逐次试错。
+            $this->assertCatalogLines($scope, $location, $command['lines']);
             $documentId = (int)Db::name('inventory_stock_count_document')->insertGetId([
                 'count_no' => (new InventoryBusinessDocumentNumberServices())->next($scope['tenantId'], InventoryBusinessDocumentNumberServices::COUNT, $command['businessDate'], $command['now']), 'idempotency_key' => $command['key'], 'request_fingerprint' => $command['fingerprint'],
                 'tenant_id' => $scope['tenantId'], 'organization_id' => $scope['organizationId'], 'organization_path' => $scope['organizationPath'], 'location_id' => (int)$location['id'],
@@ -115,6 +117,41 @@ final class InventoryStockCountServices
             // 全部等于账面数时回滚单头及任何中间写入，不留下空盘点单。
             if ($changed === 0) throw new \RuntimeException('inventory_stock_count_no_difference');
             return ['count_document_id' => $documentId, 'count_no' => (string)$document['count_no'], 'idempotent' => false];
+    }
+
+    /** Locks valid catalog rows and reports every stale product/SKU identity before any count write starts. */
+    private function assertCatalogLines(array $scope, array $location, array $lines): void
+    {
+        $productIds = array_values(array_unique(array_map(static fn(array $line): int => $line['productId'], $lines)));
+        $skuIds = array_values(array_unique(array_map(static fn(array $line): int => $line['skuId'], $lines)));
+        $catalogRows = Db::name('store_product_attr_value')->alias('a')->join('store_product p', 'p.id=a.product_id')
+            ->whereIn('p.id', $productIds)->whereIn('a.id', $skuIds)
+            ->where('p.type', (string)$location['location_type'] === 'HQ' ? 0 : 1)
+            ->where('p.relation_id', (string)$location['location_type'] === 'HQ' ? 0 : (int)$scope['storeId'])
+            ->where('p.is_del', 0)->where('p.is_inventory', 1)->where('a.type', 0)
+            ->field('p.id AS product_id,a.id AS sku_id,a.unique AS sku_unique')->lock(true)->select()->toArray();
+        $valid = [];
+        foreach ($catalogRows as $row) {
+            $valid[(int)$row['product_id'] . ':' . (int)$row['sku_id'] . ':' . (string)$row['sku_unique']] = true;
+        }
+        $invalid = [];
+        foreach ($lines as $line) {
+            $identity = $line['productId'] . ':' . $line['skuId'] . ':' . $line['unique'];
+            if (isset($valid[$identity])) continue;
+            $invalid[] = $this->invalidCatalogLine($line);
+        }
+        if ($invalid) throw new InventoryStockCountCatalogException($invalid);
+    }
+
+    /** Returns only stable client identities; names are resolved from the user's unchanged draft snapshot. */
+    private function invalidCatalogLine(array $line): array
+    {
+        return [
+            'line_index' => (int)$line['index'] + 1,
+            'product_id' => (int)$line['productId'],
+            'sku_id' => (int)$line['skuId'],
+            'sku_unique' => (string)$line['unique'],
+        ];
     }
 
     /** 未变动规格只校验权威账面值，不创建库存主体、盘点明细或移动事实。 */
@@ -160,7 +197,7 @@ final class InventoryStockCountServices
             ->where('p.is_del', 0)->where('p.is_inventory', 1)->where('a.id', $line['skuId'])
             ->where('a.unique', $line['unique'])->where('a.type', 0)
             ->field('a.stock_unit,p.salon_stock_enabled')->lock(true)->find();
-        if (!$catalog) throw new \RuntimeException('inventory_stock_count_catalog_not_found');
+        if (!$catalog) throw new InventoryStockCountCatalogException([$this->invalidCatalogLine($line)]);
         $query = Db::name('inventory_stock')->where('tenant_id', $scope['tenantId'])
             ->where('location_id', (int)$location['id'])->where('consumable_product_id', $line['productId'])
             // 库存唯一键按商品和 SKU 建立；历史规格编码变化不能分裂同一库存余额。
@@ -213,7 +250,7 @@ final class InventoryStockCountServices
         if ($line['batchNo'] === '' || $line['cost'] < 0 || !$line['manufacturedDate'] || !$line['expireDate'] || $line['manufacturedDate'] > $line['expireDate']) throw new \RuntimeException('inventory_stock_count_surplus_batch_required');
         $batch = Db::name('inventory_batch')->where('stock_id', (int)$stock['id'])->where('batch_no', $line['batchNo'])->lock(true)->find();
         if ($batch && ((string)$batch['batch_status'] !== 'ACTIVE' || (int)$batch['unit_cost_cents'] !== $line['cost'] || (string)$batch['manufactured_date'] !== $line['manufacturedDate'] || (string)$batch['expire_date'] !== $line['expireDate'])) throw new \RuntimeException('inventory_stock_count_surplus_batch_conflict');
-        if (!$batch) { $catalog=Db::name('store_product_attr_value')->alias('a')->join('store_product p','p.id=a.product_id')->where('p.id',$line['productId'])->where('p.relation_id',$scope['storeId'])->where('p.is_del',0)->where('p.is_inventory',1)->where('a.id',$line['skuId'])->where('a.unique',$line['unique'])->where('a.type',0)->field('p.store_name,p.code,a.suk,a.bar_code')->lock(true)->find(); if(!$catalog)throw new \RuntimeException('inventory_stock_count_catalog_not_found'); $id = Db::name('inventory_batch')->insertGetId(['stock_id' => (int)$stock['id'], 'origin_batch_id' => 0, 'source_batch_id' => 0, 'batch_no' => $line['batchNo'], 'manufactured_date' => $line['manufacturedDate'], 'expire_date' => $line['expireDate'], 'received_at' => $command['now'], 'received_business_date' => $command['businessDate'], 'available_quantity_units' => 0, 'unit_cost_cents' => $line['cost'], 'cost_allocated_quantity_units' => 0, 'batch_status' => 'ACTIVE', 'version' => 1, 'product_name_snapshot' => (string)$catalog['store_name'], 'sku_name_snapshot' => (string)$catalog['suk'], 'product_code_snapshot' => (string)$catalog['code'], 'barcode_snapshot' => (string)$catalog['bar_code'], 'brand_name_snapshot' => '', 'category_name_snapshot' => '', 'source_order_no_snapshot' => (string)$document['count_no'], 'data_quality' => 'COMPLETE', 'created_at' => $command['now'], 'updated_at' => $command['now']]); Db::name('inventory_batch')->where('id', $id)->update(['origin_batch_id' => $id]); $batch = Db::name('inventory_batch')->where('id', $id)->lock(true)->find(); }
+        if (!$batch) { $catalog=Db::name('store_product_attr_value')->alias('a')->join('store_product p','p.id=a.product_id')->where('p.id',$line['productId'])->where('p.relation_id',$scope['storeId'])->where('p.is_del',0)->where('p.is_inventory',1)->where('a.id',$line['skuId'])->where('a.unique',$line['unique'])->where('a.type',0)->field('p.store_name,p.code,a.suk,a.bar_code')->lock(true)->find(); if(!$catalog)throw new InventoryStockCountCatalogException([$this->invalidCatalogLine($line)]); $id = Db::name('inventory_batch')->insertGetId(['stock_id' => (int)$stock['id'], 'origin_batch_id' => 0, 'source_batch_id' => 0, 'batch_no' => $line['batchNo'], 'manufactured_date' => $line['manufacturedDate'], 'expire_date' => $line['expireDate'], 'received_at' => $command['now'], 'received_business_date' => $command['businessDate'], 'available_quantity_units' => 0, 'unit_cost_cents' => $line['cost'], 'cost_allocated_quantity_units' => 0, 'batch_status' => 'ACTIVE', 'version' => 1, 'product_name_snapshot' => (string)$catalog['store_name'], 'sku_name_snapshot' => (string)$catalog['suk'], 'product_code_snapshot' => (string)$catalog['code'], 'barcode_snapshot' => (string)$catalog['bar_code'], 'brand_name_snapshot' => '', 'category_name_snapshot' => '', 'source_order_no_snapshot' => (string)$document['count_no'], 'data_quality' => 'COMPLETE', 'created_at' => $command['now'], 'updated_at' => $command['now']]); Db::name('inventory_batch')->where('id', $id)->update(['origin_batch_id' => $id]); $batch = Db::name('inventory_batch')->where('id', $id)->lock(true)->find(); }
         $old = (int)$stock['available_quantity_units']; $available = $old + $units; $cost = intdiv($old * (int)$stock['estimated_unit_cost_cents'] + $units * $line['cost'], $available);
         if (Db::name('inventory_stock')->where('id', (int)$stock['id'])->where('version', (int)$stock['version'])->update(['available_quantity_units' => $available, 'estimated_unit_cost_cents' => $cost, 'version' => (int)$stock['version'] + 1, 'updated_at' => $command['now']]) !== 1) throw new \RuntimeException('inventory_stock_count_stock_changed');
         if (Db::name('inventory_batch')->where('id', (int)$batch['id'])->where('version', (int)$batch['version'])->update(['available_quantity_units' => (int)$batch['available_quantity_units'] + $units, 'version' => (int)$batch['version'] + 1, 'updated_at' => $command['now']]) !== 1) throw new \RuntimeException('inventory_stock_count_batch_changed');

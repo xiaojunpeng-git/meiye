@@ -164,6 +164,31 @@ try {
 }
 check('inventory API surfaces server-side scope rejection instead of returning rows', rejected)
 
+const catalogFailureApi = createInventoryApi({
+  prefix: '/storeapi/product/inventory',
+  fetchImpl: async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({
+      status: 400,
+      msg: '部分盘点商品已从当前门店商品目录删除，请处理高亮行后再提交。',
+      data: {
+        code: 'inventory_stock_count_catalog_not_found',
+        invalid_lines: [{ line_index: 2, product_id: 601746, sku_id: 583692, sku_unique: '480f9808' }],
+      },
+    }),
+  }),
+})
+let catalogFailurePreserved = false
+try {
+  await catalogFailureApi.confirmCount({ idempotency_key: 'catalog-error-contract', business_date: '2026-10-01', lines: [] })
+} catch (error) {
+  catalogFailurePreserved = error instanceof Error
+    && error.code === 'inventory_stock_count_catalog_not_found'
+    && error.data?.invalid_lines?.[0]?.sku_id === 583692
+}
+check('stock count catalog rejection preserves stable row identities for precise client highlighting', catalogFailurePreserved)
+
 const inboundCodeFailures = [
   ['inventory_manual_inbound_sku_not_found', '所选商品规格已失效，请重新选择商品。'],
   ['inventory_manual_inbound_location_scope_invalid', '当前门店默认库存仓归属异常，请联系管理员处理。'],

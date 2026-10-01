@@ -74,10 +74,18 @@ function messageOf(body, fallback) {
   return businessMessages[code] || businessMessages[message] || message || fallback
 }
 
+/** Keeps structured business context on rejected responses without exposing transport details to pages. */
+function businessError(body, fallback) {
+  const error = new Error(messageOf(body, fallback))
+  error.code = String(body?.data?.code || body?.code || '').trim()
+  error.data = body?.data && typeof body.data === 'object' ? body.data : null
+  return error
+}
+
 function normalizeEnvelope(body) {
   if (!body || typeof body !== 'object') throw new Error('库存服务返回了无效数据。')
   const status = Number(body.status ?? 200)
-  if (status !== 200) throw new Error(messageOf(body, '库存服务拒绝了本次请求。'))
+  if (status !== 200) throw businessError(body, '库存服务拒绝了本次请求。')
   return body.data
 }
 
@@ -122,7 +130,7 @@ export function createInventoryApi(options = {}) {
       const text = await response.text()
       let body
       try { body = text ? JSON.parse(text) : null } catch (_) { throw new Error('库存服务返回了非 JSON 数据。') }
-      if (!response.ok) throw new Error(messageOf(body, `库存服务请求失败（HTTP ${response.status}）。`))
+      if (!response.ok) throw businessError(body, `库存服务请求失败（HTTP ${response.status}）。`)
       return normalizeEnvelope(body)
     } catch (error) {
       if (error?.name === 'AbortError') throw new Error('库存服务响应超时，请先查询单据状态后再重试。')

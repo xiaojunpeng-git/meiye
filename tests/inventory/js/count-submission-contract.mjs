@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict'
-import { changedCountRows, validateCountSubmissionRows } from '../../../前端代码/inventory-vue3/src/utils/countSubmission.js'
+import {
+  changedCountRows,
+  invalidCountCatalogMessage,
+  invalidCountCatalogRowIndexes,
+  validateCountSubmissionRows,
+} from '../../../前端代码/inventory-vue3/src/utils/countSubmission.js'
 
 const rows = [
   { sku_id: 1, book_quantity: '0', counted_quantity: '100' },
@@ -27,4 +32,20 @@ assert.deepEqual(validateCountSubmissionRows(validationRows), {
   message: '第 3 行「爱尔菲娜防晒霜」未填写到期日，暂时无法完成盘点。请补充后再试。',
 })
 assert.equal(validateCountSubmissionRows([{ ...validationRows[2], surplus_expire_date: '2028-04-28' }]).valid, true)
+
+// 服务端一次返回所有失效目录身份；前端必须按草稿行序定位、显示名称并高亮全部问题行。
+const catalogRows = [
+  { product_id: 601746, sku_id: 583692, sku_unique: '480f9808', product_name: '芦荟保湿洗面奶' },
+  { product_id: 601838, sku_id: 583781, sku_unique: 'valid', product_name: '甘菊滋养水' },
+  { product_id: 200737, sku_id: 199035, sku_unique: '64190303', product_name: '菁纯霜单支' },
+]
+const invalidCatalogIndexes = invalidCountCatalogRowIndexes(catalogRows, [
+  { product_id: 200737, sku_id: 199035, sku_unique: '64190303' },
+  { product_id: 601746, sku_id: 583692, sku_unique: '480f9808' },
+])
+assert.deepEqual(invalidCatalogIndexes, [0, 2])
+assert.equal(
+  invalidCountCatalogMessage(catalogRows, invalidCatalogIndexes),
+  '第 1 行「芦荟保湿洗面奶」、第 3 行「菁纯霜单支」已从当前门店商品目录删除，暂时无法完成盘点。请先恢复商品，或删除这些盘点行后再提交。',
+)
 console.log('COUNT_SUBMISSION_CONTRACT_OK')
