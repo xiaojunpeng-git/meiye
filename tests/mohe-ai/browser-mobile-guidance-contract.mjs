@@ -12,6 +12,12 @@ assert.ok(!source.match(/<textarea[^>]*placeholder/));
 assert.ok(source.includes('aria-label="输入问题"'));
 assert.ok(!browserEntry.includes('input.placeholder'));
 assert.ok(browserEntry.includes("input.setAttribute('aria-label', '输入问题')"));
+// Both the multi-section presentation and ordinary answer table must retain
+// backend columns while each table owns its horizontal gesture on mini phones.
+assert.equal((source.match(/scroll-x="true" class="ai-result-table-scroll"/g) || []).length, 2);
+assert.ok(source.includes("tableWidth(section.answer.table.columns) + 'px'"));
+assert.ok(source.includes("tableWidth(item.table.columns) + 'px'"));
+assert.ok(source.includes('.ai-result-table{min-width:100%'));
 // Approved tagline is shared visible brand copy, independent from the empty composer.
 assert.ok(source.includes('<text class="ai-brand-tagline">够智能、够准确、够便捷</text>'));
 assert.ok(browserEntry.includes("el('small', '够智能、够准确、够便捷', 'workspace-brand-tagline')"));
@@ -19,12 +25,17 @@ assert.ok(browserEntry.includes("el('small', '够智能、够准确、够便捷'
 // its actual state functions, not a copied implementation, but is NOT a native
 // UTS compiler, picker, H5 layout or device lifecycle acceptance test.
 const script = source.match(/<script setup lang="uts">([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '');
-const expose = '\nglobalThis.controller = {onComposerLineChange,onComposerInput,resetComposerSize,answerPresentation,presentationGroups,openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,editGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,load,resumeActive,elapsedLabel,toggleComposerOptions,toggleExcel,createConversationFromMenu,confirmClearConversation,openHistory,selectConversation,refs:{composerInputHeight,composerExpanded,question,progress,clarification,choices,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy,activeQuestion,activeElapsedSeconds,activeRunState,messageAnchor,composerOptionsOpen,historyOpen,recentConversations,wantExcel,excelAvailable},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
+const expose = '\nglobalThis.controller = {tableWidth,onComposerLineChange,onComposerInput,resetComposerSize,answerPresentation,presentationGroups,openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,editGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,load,resumeActive,elapsedLabel,toggleComposerOptions,toggleExcel,createConversationFromMenu,confirmClearConversation,openHistory,selectConversation,refs:{composerInputHeight,composerExpanded,question,progress,clarification,choices,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy,activeQuestion,activeElapsedSeconds,activeRunState,messageAnchor,composerOptionsOpen,historyOpen,recentConversations,wantExcel,excelAvailable},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
 const code = esbuild.transformSync(script + expose, { loader: 'ts', target: 'es2020' }).code;
 const schema = 'mohe-clarification-v2'; let checks = 0;
 const clean = value => JSON.parse(JSON.stringify(value));
 const eq = (actual, expected) => { assert.deepEqual(clean(actual), expected); checks++; };
 const metric = { key: 'metric_code', label: '业绩指标', type: 'select', options: [{ label: '现金业绩', value: 'cash_performance' }, { label: '消耗业绩', value: 'consume_amount' }] };
+{
+  const f = setup();
+  eq([f.api.tableWidth([{}, {}, {}, {}, {}, {}, {}]), f.api.tableWidth([{}, {}])], [868, 248]);
+  f.unmount();
+}
 const fieldsDate = [{ key: 'start_date', label: '开始日期', type: 'date' }, { key: 'end_date', label: '结束日期', type: 'date' }];
 function setup(max = 3, asyncExecution = true, deferBootstrap = false, sharedStorage = null, initialOpen = true) {
   const calls = [], modals = [], mounted = [], unmounted = [], storage = sharedStorage || new Map(); let now = 1788912000000;
