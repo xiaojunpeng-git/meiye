@@ -571,11 +571,7 @@ function checkoutRequestIsPersisted(snapshot = checkout.value) {
 
 function publishToolbarCheckoutContext() {
   if (typeof window === 'undefined') return
-  const source = checkoutSourceSnapshot(
-    localCheckoutBusinessSource.value.primarySourceId,
-    localCheckoutBusinessSource.value.secondarySourceId,
-    localCheckoutBusinessSource.value.rewardAmountCents
-  )
+  const source = currentHangCheckoutBusinessSource()
   window.dispatchEvent(new CustomEvent('cashier-v3:toolbar-context-updated', {
     detail: {
       businessDate: localCheckoutBusinessDate.value,
@@ -583,6 +579,14 @@ function publishToolbarCheckoutContext() {
       source
     }
   }))
+}
+
+function currentHangCheckoutBusinessSource() {
+  return checkoutSourceSnapshot(
+    localCheckoutBusinessSource.value.primarySourceId,
+    localCheckoutBusinessSource.value.secondarySourceId,
+    localCheckoutBusinessSource.value.rewardAmountCents
+  )
 }
 const hangOrderPreparation = computed(() => cashier.value.hangOrderPreparation || cashier.value.hangOrder || {})
 const hangOrderOverlayState = computed(() => hangOrderSession.value?.snapshot || {})
@@ -5078,8 +5082,14 @@ function checkoutSourceSnapshot(primarySourceId, secondarySourceId, rewardAmount
   const primary = roots.find((item) => Number(item?.id || 0) === Number(primarySourceId || 0)) || null
   const children = Array.isArray(primary?.children) ? primary.children : []
   const secondary = children.find((item) => Number(item?.id || 0) === Number(secondarySourceId || 0)) || null
-  const primaryNameSnapshot = String(primary?.name || '')
-  const secondaryNameSnapshot = String(secondary?.name || '')
+  // A resumed hang may reach this page before the read-only source catalog is
+  // loaded. Keep its saved label only for the exact saved IDs; final checkout
+  // will capture the chosen source under its own transaction and identity.
+  const fallback = localCheckoutBusinessSource.value || {}
+  const primaryMatches = Number(fallback.primarySourceId || 0) === Number(primarySourceId || 0)
+  const secondaryMatches = primaryMatches && Number(fallback.secondarySourceId || 0) === Number(secondarySourceId || 0)
+  const primaryNameSnapshot = String(primary?.name || (primaryMatches ? fallback.primarySourceNameSnapshot : '') || '')
+  const secondaryNameSnapshot = String(secondary?.name || (secondaryMatches ? fallback.secondarySourceNameSnapshot : '') || '')
   return {
     primarySourceId: Number(primarySourceId || 0),
     primarySourceNameSnapshot: primaryNameSnapshot,
@@ -5401,6 +5411,7 @@ async function openHangOrder() {
       roomVersion: intent?.roomVersion || 0,
       roomTimeSlotId: intent?.roomTimeSlotId || '',
       roomTimeSlotVersion: intent?.roomTimeSlotVersion || 0,
+      checkoutBusinessSource: currentHangCheckoutBusinessSource(),
       ...(localDraft ? { localDraft } : {})
     })
     const draft = saved?.cashierDraft
@@ -5460,7 +5471,8 @@ async function submitHangOrder(payload) {
         roomNameSnapshot: session.snapshot.roomCandidates?.[0]?.name || '',
         roomVersion: session.snapshot.preferredRoomVersion,
         roomTimeSlotId: session.snapshot.preferredRoomTimeSlotId,
-        roomTimeSlotVersion: session.snapshot.preferredRoomTimeSlotVersion
+        roomTimeSlotVersion: session.snapshot.preferredRoomTimeSlotVersion,
+        checkoutBusinessSource: currentHangCheckoutBusinessSource()
       })
       const draft = saved?.cashierDraft
       if (!await applyCommittedCashierDraft(draft, currentCashierDraftScopeKey.value)) {
@@ -6852,6 +6864,7 @@ function applyRestoredHangDraft(detail = {}) {
     localCashierDraftOperations.value = clonePlain(local.operations)
     localCashierPersistedLineIds.value = {}
     cashierDraftHasUnresolvedCommand.value = false
+    restoreHangCheckoutBusinessSource(detail)
     return true
   }
   if (!isResponseBoundCommittedCashierDraft(draft)) return false
@@ -6861,7 +6874,26 @@ function applyRestoredHangDraft(detail = {}) {
     snapshot: Object.freeze(clonePlain(draft))
   })
   cashierDraftHasUnresolvedCommand.value = false
+  restoreHangCheckoutBusinessSource(detail)
   return true
+}
+
+function restoreHangCheckoutBusinessSource(detail = {}) {
+  const saved = isRecord(detail.checkoutBusinessSource)
+    ? detail.checkoutBusinessSource
+    : (isRecord(detail.localDraft?.checkoutBusinessSource) ? detail.localDraft.checkoutBusinessSource : {})
+  // A legacy hang has no saved source. Replace the previous browser selection
+  // with empty values so another member's source never leaks into this order.
+  localCheckoutBusinessSource.value = Number(currentMemberId.value || 0) > 0
+    ? {
+        primarySourceId: Math.max(0, Number(saved.primarySourceId || 0)),
+        primarySourceNameSnapshot: String(saved.primarySourceNameSnapshot || ''),
+        secondarySourceId: Math.max(0, Number(saved.secondarySourceId || 0)),
+        secondarySourceNameSnapshot: String(saved.secondarySourceNameSnapshot || ''),
+        rewardAmountCents: Math.max(0, Number(saved.rewardAmountCents || 0))
+      }
+    : { primarySourceId: 0, secondarySourceId: 0, rewardAmountCents: 0 }
+  publishToolbarCheckoutContext()
 }
 
 function handleRestoredHangDraft(event) {

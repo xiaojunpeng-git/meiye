@@ -137,6 +137,7 @@ final class CashierV3HangResumeServices
             'sourceRetained' => true,
             'customerMode' => (int)$header['member_id'] > 0 ? 'member' : 'guest',
             'member' => $this->restoredMember((int)$header['member_id'], $operator->storeId()),
+            'checkoutBusinessSource' => $this->savedCheckoutBusinessSource($header),
             'cashierDraft' => $cashierDraft,
         ];
     }
@@ -182,6 +183,10 @@ final class CashierV3HangResumeServices
                 'member' => $this->restoredMember(
                     (int)($header['member_id'] ?? 0),
                     $operator->storeId()
+                ),
+                'checkoutBusinessSource' => CashierV3HangCheckoutSourceSnapshot::normalize(
+                    $localDraft['checkoutBusinessSource'] ?? [],
+                    (int)($header['member_id'] ?? 0)
                 ),
                 'cashierDraft' => $cashierDraft,
                 'localDraft' => $localDraft,
@@ -229,8 +234,19 @@ final class CashierV3HangResumeServices
                 (int)($header['member_id'] ?? 0),
                 $operator->storeId()
             ),
+            'checkoutBusinessSource' => $this->savedCheckoutBusinessSource($header),
             'cashierDraft' => $cashierDraft,
         ];
+    }
+
+    /** Older hangs have no source sidecar and must resume with an empty selection. */
+    private function savedCheckoutBusinessSource(array $header): array
+    {
+        $sidecar = json_decode((string)($header['local_draft_snapshot_json'] ?? ''), true);
+        return CashierV3HangCheckoutSourceSnapshot::normalize(
+            is_array($sidecar) ? ($sidecar['checkoutBusinessSource'] ?? []) : [],
+            (int)($header['member_id'] ?? 0)
+        );
     }
 
     /**

@@ -309,6 +309,10 @@ final class CashierV3HangSubmissionServices
             ->format('Y-m-d');
         $dimensions = $this->dimensions($operatorScope, $dataScope);
         $memberId = (int)($lockedDraft['memberId'] ?? 0);
+        $checkoutBusinessSource = CashierV3HangCheckoutSourceSnapshot::normalize(
+            $payload['checkoutBusinessSource'] ?? [],
+            $memberId
+        );
         $memberName = '';
         if ($memberId > 0) {
             $memberName = trim((string)($this->members->read($memberId, $operatorScope->storeId())['name'] ?? ''));
@@ -349,6 +353,27 @@ final class CashierV3HangSubmissionServices
                 (array)($transferred['frozenWorkspaceRows'] ?? [])
             );
             $persisted = $this->hangOrders->persistInTx($plan, $operatorScope, $dataScope);
+            if (empty($persisted['replayed'])) {
+                // Normal hangs have no browser-local draft JSON. Use the existing
+                // optional resume sidecar for the source only; line authority and
+                // final checkout source capture remain in their original paths.
+                $sourceJson = json_encode(
+                    ['checkoutBusinessSource' => $checkoutBusinessSource],
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+                );
+                $updated = Db::name(ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
+                    ->where('tenant_id', $dataScope->tenantId())
+                    ->where('hang_order_id', (string)$persisted['hangOrderId'])
+                    ->update(['local_draft_snapshot_json' => $sourceJson]);
+                if (!is_string($sourceJson) || $updated !== 1) {
+                    throw new CashierV3CommandException(
+                        CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '挂单来源保存失败，本次挂单已回滚，请重试。',
+                        CashierV3ResultCode::STATUS_FAILED,
+                        ['reason' => 'hang_checkout_source_sidecar_incomplete']
+                    );
+                }
+            }
         } catch (CashierV3HangOrderAuthorityException $exception) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
@@ -389,6 +414,12 @@ final class CashierV3HangSubmissionServices
             || ($customerMode === 'guest' && $memberId !== 0)) {
             throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '本地挂单草稿不完整，请重新操作。', CashierV3ResultCode::STATUS_FAILED);
         }
+        // Source belongs to the resumable editor snapshot, not to a sale or
+        // payment fact. The checkout command captures it in its own transaction.
+        $local['checkoutBusinessSource'] = CashierV3HangCheckoutSourceSnapshot::normalize(
+            $payload['checkoutBusinessSource'] ?? [],
+            $memberId
+        );
         $snapshotJson = json_encode($local, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if (!is_string($snapshotJson) || strlen($snapshotJson) > 2 * 1024 * 1024) {
             throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '本地挂单草稿过大，请减少商品后重试。', CashierV3ResultCode::STATUS_FAILED);
