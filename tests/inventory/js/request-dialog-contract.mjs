@@ -66,10 +66,10 @@ check('request dialog omits scan entry and cost estimates that do not belong to 
   && !modal.includes("pageKey === 'request' ? '预计金额由服务端按仓库成本快照计算'"))
 check('request date uses one native calendar control', modal.includes('<input v-model="requestDate" type="date" />')
   && !modal.includes('<CalendarDays :size="16" /><input v-model="requestDate" type="date" />'))
-check('request submission explains when every selected product has zero supplier stock',
-  modal.includes('function areAllRequestedProductsOutOfStock()')
-  && modal.includes('所选商品在供货方库存均为 0，请更换供货方或选择有库存的商品。')
-  && modal.includes('if (areAllRequestedProductsOutOfStock())'))
+check('request submission treats supplier stock as reference data and leaves availability validation to dispatch',
+  !modal.includes('function areAllRequestedProductsOutOfStock()')
+  && !modal.includes('所选商品在供货方库存均为 0，请更换供货方或选择有库存的商品。')
+  && modal.includes('供货方零库存不阻止保存，真正发货时再由服务端校验可用批次'))
 check('other inventory documents reuse the request-style inline document header layout',
   modal.includes("<section v-if=\"pageKey === 'inbound' || pageKey === 'outbound'\" class=\"form-grid\">")
   && modal.includes('<label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-if="pageKey === \'inbound\'"')

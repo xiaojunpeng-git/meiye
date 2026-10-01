@@ -890,22 +890,10 @@ function requestIdempotencyKey() {
   return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? `request-${crypto.randomUUID()}` : `request-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-function requestSupplyQuantity(row) {
-  const amount = Number(row?.available_quantity ?? row?.availableQuantity ?? 0)
-  return Number.isFinite(amount) ? amount : 0
-}
-
-function areAllRequestedProductsOutOfStock() {
-  return selectedRows.value.length > 0 && selectedRows.value.every((row) => requestSupplyQuantity(row) <= 0)
-}
-
 async function submitRequest() {
   const supplier = selectedSupplyParty()
   if (props.pageKey !== 'request' || !selectedRows.value.length || !['HQ', 'STORE'].includes(supplier.type) || (supplier.type === 'STORE' && supplier.id <= 0)) return
-  if (areAllRequestedProductsOutOfStock()) {
-    submitError.value = '所选商品在供货方库存均为 0，请更换供货方或选择有库存的商品。'
-    return
-  }
+  // 请货单只记录需求，不预占也不变动库存；供货方零库存不阻止保存，真正发货时再由服务端校验可用批次。
   submitting.value = true
   submitError.value = ''
   try {

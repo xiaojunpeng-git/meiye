@@ -175,8 +175,13 @@ final class InventoryStockRequestQueryServices
 
     private function decimal(int $units, int $scale): string
     {
-        $value = $units / (10 ** $scale);
-        return rtrim(rtrim(number_format($value, $scale, '.', ''), '0'), '.') ?: '0';
+        $scale = max(0, min(4, $scale));
+        $sign = $units < 0 ? '-' : '';
+        $digits = str_pad((string)abs($units), $scale + 1, '0', STR_PAD_LEFT);
+        // 只有小数部分允许裁掉尾零；整数数量的十位、百位等属于真实申请量，不能把 10000 回填成 1。
+        if ($scale === 0) return $sign . $digits;
+        $fraction = rtrim(substr($digits, -$scale), '0');
+        return $sign . substr($digits, 0, -$scale) . ($fraction === '' ? '' : '.' . $fraction);
     }
 
     private function statusName(string $status): string
