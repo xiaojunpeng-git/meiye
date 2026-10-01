@@ -166,7 +166,8 @@ check('inventory API surfaces server-side scope rejection instead of returning r
 
 const inboundCodeFailures = [
   ['inventory_manual_inbound_sku_not_found', '所选商品规格已失效，请重新选择商品。'],
-  ['inventory_manual_inbound_location_scope_invalid', '当前门店默认库存仓归属异常，请联系管理员处理。']
+  ['inventory_manual_inbound_location_scope_invalid', '当前门店默认库存仓归属异常，请联系管理员处理。'],
+  ['inventory_stock_count_surplus_batch_required', '有盘盈商品未填写完整的批次号、单价、生产日期或到期日，暂时无法完成盘点。请补充后再试。']
 ]
 for (const [code, expectedMessage] of inboundCodeFailures) {
   const codeApi = createInventoryApi({

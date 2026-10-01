@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { changedCountRows } from '../../../前端代码/inventory-vue3/src/utils/countSubmission.js'
+import { changedCountRows, validateCountSubmissionRows } from '../../../前端代码/inventory-vue3/src/utils/countSubmission.js'
 
 const rows = [
   { sku_id: 1, book_quantity: '0', counted_quantity: '100' },
@@ -14,4 +14,17 @@ const rows = [
 // 大批量加载只是草稿；确认请求只保留库存有差异的行，不误丢非法非空输入。
 assert.deepEqual(changedCountRows(rows).map((row) => row.sku_id), [1, 2, 6, 7])
 assert.deepEqual(changedCountRows(rows.slice(2, 5)), [])
+
+// 盘亏无需补建批次；盘盈必须在前端明确指出首条缺失资料，避免服务端回滚后用户无从定位。
+const validationRows = [
+  { product_id: 1, product_name: '无差异', book_quantity: '2', counted_quantity: '2' },
+  { product_id: 2, product_name: '盘亏商品', book_quantity: '2', counted_quantity: '1' },
+  { product_id: 3, product_name: '爱尔菲娜防晒霜', book_quantity: '0', counted_quantity: '3', surplus_batch_no: '31', surplus_unit_cost: '228', surplus_manufactured_date: '2025-04-27', surplus_expire_date: '' },
+]
+assert.deepEqual(validateCountSubmissionRows(validationRows), {
+  valid: false,
+  rowIndex: 2,
+  message: '第 3 行「爱尔菲娜防晒霜」未填写到期日，暂时无法完成盘点。请补充后再试。',
+})
+assert.equal(validateCountSubmissionRows([{ ...validationRows[2], surplus_expire_date: '2028-04-28' }]).valid, true)
 console.log('COUNT_SUBMISSION_CONTRACT_OK')

@@ -57,6 +57,9 @@ function messageOf(body, fallback) {
     inventory_stock_count_catalog_not_found: '盘点商品已失效，请重新选择商品。',
     inventory_stock_count_stock_changed: '账面库存已变化，请重新核对盘点数量后提交。',
     inventory_stock_count_duplicate_sku: '盘点单中有重复商品规格，请删除重复行。',
+    // 兼容旧页面直接提交后返回的服务端错误码，不能把技术标识暴露给门店员工。
+    inventory_stock_count_surplus_batch_required: '有盘盈商品未填写完整的批次号、单价、生产日期或到期日，暂时无法完成盘点。请补充后再试。',
+    inventory_stock_count_surplus_batch_conflict: '盘盈商品的批次资料与现有库存记录不一致，暂时无法完成盘点。请核对批次号、单价和日期后再试。',
     inventory_stock_count_no_difference: '实盘库存与账面库存没有差异，未生成盘点单。',
     inventory_stock_count_draft_changed: '盘点草稿已被修改或完成，请返回列表重新打开。',
     inventory_stock_count_draft_missing: '盘点草稿不存在，或当前账号无权查看。',
