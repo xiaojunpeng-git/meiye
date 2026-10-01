@@ -95,9 +95,10 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
         foreach ($craftsmen as $craftsman) {
             $staffId = (int)$craftsman['staffId'];
             $type = (string)($craftsman['craftsmanPerformanceType'] ?? 'commission_labor');
+            // 每人手工费是本次分配输入的最终金额；购买数量只参与项目业绩，不能再次放大人工输入。
             $fees[$staffId] = $type === 'commission'
                 ? 0
-                : max(0, (int)($craftsman['laborFeeCents'] ?? 0)) * $quantity;
+                : max(0, (int)($craftsman['laborFeeCents'] ?? 0));
             if ($type !== 'labor') {
                 $performanceCraftsmen[] = $staffId;
                 $weights[$staffId] = (int)$craftsman['laborWeight'];

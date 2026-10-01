@@ -693,12 +693,13 @@ final class CashierV3EntitlementCompletionPlanV1
             'friend_counts_as_customer' => $line['friend_counts_as_customer'],
             'is_experience' => $line['is_experience'],
             'labor_amount_cents' => $line['labor_amount_cents'],
+            // 手工费与人员分配快照按本次输入金额汇总；核销数量不改变每人已确认的金额。
             'labor_fee_amount_cents' => array_sum(array_map(
                 static function (array $allocation): int {
                     return (int)$allocation['labor_fee_cents'];
                 },
                 $line['labor_allocations']
-            )) * $line['quantity'],
+            )),
             'primary_craftsman_staff_id' => $line['primary_craftsman_staff_id'],
             'craftsmen_snapshot_json' => self::encode($line['craftsmen_snapshot']),
             'detail_remark_snapshot' => $line['detail_remark_snapshot'],
@@ -762,7 +763,8 @@ final class CashierV3EntitlementCompletionPlanV1
             'allocation_weight_denominator' => $allocationWeightDenominator,
             'allocation_base_amount_cents' => $line['labor_amount_cents'],
             'amount_cents' => $allocation['amount_cents'],
-            'labor_fee_amount_cents' => $allocation['labor_fee_cents'] * $line['quantity'],
+            // 人员事实保存输入的每人手工费，不能因同一行核销多次而重复乘数量。
+            'labor_fee_amount_cents' => $allocation['labor_fee_cents'],
             'rule_code_snapshot' => 'entitlement_labor_' . $line['labor_mode'],
             'rule_name_snapshot' => '项目劳动业绩',
             'rule_version_snapshot' => 'entitlement-rule:' . $line['performance_rule_version'],

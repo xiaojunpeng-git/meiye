@@ -337,6 +337,20 @@ namespace {
         count($laborRows) === 3
         && array_sum(array_column($laborRows, 'amount_cents')) === 3000
         && array_column($laborRows, 'employee_id') === [1011, 1012, 1012]);
+    // 每人输入 5 元属于本次核销的金额快照；数量 2 不得令服务与人员事实变成 10 元。
+    $feeKernel = $kernel;
+    $feeKernel['linePlans'][1]['laborPerformance']['allocations'][0]['laborFeeCents'] = 500;
+    $feeKernel['linePlans'][1]['serviceSnapshot']['craftsmen'][0]['laborFeeCents'] = 500;
+    $feePlan = CashierV3EntitlementCompletionPlanV1::fromKernelPlan($feeKernel, $context);
+    $feeFacts = array_values(array_filter($feePlan->performanceRows(), static function (array $row): bool {
+        return $row['performance_type'] === 'labor_performance_allocated'
+            && $row['source_line_id'] === 'entitlement-line-002';
+    }));
+    ecpAssert('R44 per-person 5 yuan labor fee remains 5 when writeoff quantity is 2',
+        $feePlan->serviceRows()[1]['quantity'] === 2
+        && $feePlan->serviceRows()[1]['labor_fee_amount_cents'] === 500
+        && count($feeFacts) === 1
+        && $feeFacts[0]['labor_fee_amount_cents'] === 500);
     $independentPrimary = ecpAllocation(11, 1, 1000, 100);
     $independentPrimary['allocationGroupKey'] = 'independent:67';
     $independentPrimary['performanceIndependent'] = true;
