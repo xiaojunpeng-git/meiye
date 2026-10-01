@@ -1098,7 +1098,8 @@ async function submitWarehouse() {
 
           </template>
 
-          <section v-if="!isImport && !isDetail && pageKey !== 'warehouse'" class="line-section">
+          <!-- 盘点可能一次加载数百个规格；只让明细表滚动，保留表单与操作入口的位置。 -->
+          <section v-if="!isImport && !isDetail && pageKey !== 'warehouse'" class="line-section" :class="{ 'line-section--count': pageKey === 'count' }">
             <header>
               <div><h3>{{ pageKey === 'count' ? '盘点商品' : pageKey === 'request' ? '请货商品' : pageKey === 'transfer' ? '调拨商品' : pageKey === 'inbound' ? '入库商品' : pageKey === 'outbound' ? '出库商品' : '业务明细' }}<i v-if="!isDetail">*</i></h3><p v-if="pageKey === 'inbound'">扫描商品条码可自动添加；批次、生产日期、到期日和入库单价在商品明细中填写。</p><p v-else-if="pageKey === 'outbound'">系统会优先扣减最早到期的可用批次，并自动计算成本。</p></div>
               <div v-if="!isDetail" class="line-actions"><template v-if="pageKey === 'count' && !isPlatformHeadquarters"><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="exportCountRows">导出盘点资料</button><button class="modal-secondary" :disabled="countLoading" @click="countFileInput?.click()">导入盘点</button><input ref="countFileInput" class="count-file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="importCountRows" /><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="zeroVisibleCountRows">库存清零</button><button class="modal-secondary" :disabled="countLoading" @click="loadAllCountProducts">{{ countLoading ? '加载中…' : '加载全部商品' }}</button></template><button v-if="!isUsageReturn" class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="!isUsageReturn && ['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button></div>
@@ -1126,6 +1127,12 @@ async function submitWarehouse() {
 
 <style scoped>
 .count-file-input { display: none; }.count-progress { margin: 0; padding: 8px 14px; color: #42637e; font-size: 12px; background: #f4f9ff; }
+/* 大盘点只约束商品明细高度；固定表头与可见滚动轨道让 805 行也能逐行编辑。 */
+.line-section--count > .modal-table-scroll { max-height: min(60vh, 600px); overflow-y: scroll; scrollbar-gutter: stable; scrollbar-color: #91aac4 #eef3f8; scrollbar-width: thin; overscroll-behavior: contain; }
+.line-section--count > .modal-table-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.line-section--count > .modal-table-scroll::-webkit-scrollbar-track { background: #eef3f8; }
+.line-section--count > .modal-table-scroll::-webkit-scrollbar-thumb { border: 2px solid #eef3f8; border-radius: 8px; background: #91aac4; }
+.line-section--count > .modal-table-scroll thead th { position: sticky; top: 0; z-index: 1; }
 .inventory-editor__header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .inventory-editor__submit-error { max-width: 620px; margin: 6px 0 0 !important; color: #c34141 !important; font-size: 12px !important; }
 .inventory-editor { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: calc(100vh - 112px); overflow: hidden; border: 1px solid #d8e3ed; border-radius: 8px; background: #f5f7fa; }.inventory-editor__header, .inventory-modal__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 20px; border-bottom: 1px solid #e0e7ef; background: #fff; }.inventory-editor__header p { margin: 0 0 4px; color: #8a97a5; font-size: 11px; }.inventory-editor__header h2 { margin: 0; color: #253a50; font-size: 18px; }.inventory-modal__footer { justify-content: flex-end; border-top: 1px solid #e0e7ef; border-bottom: 0; }.modal-icon-button { display: inline-grid; width: 34px; height: 34px; place-items: center; padding: 0; border: 1px solid #dce5ee; border-radius: 8px; background: #fff; color: #47627d; }.modal-icon-button:hover { border-color: #91caff; color: #176fd1; }
