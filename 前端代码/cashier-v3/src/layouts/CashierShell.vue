@@ -1375,7 +1375,11 @@ function showMemberDetail(payload = {}) {
   isMemberDetailOpen.value = true
   const openedMemberId = requestedMemberId || memberDetailId(memberDetailFallback.value)
   if (openedMemberId) {
-    void loadMemberDetailTab({ memberId: openedMemberId, tab: memberDetailInitialTab.value, keyword: '' })
+    // 直接从其他入口打开权益或赠送页，也必须与页签默认“有效”一致；
+    // 不让首个请求悄悄按“全部”读取，再与页面筛选状态互相矛盾。
+    const initialStatus = ['assets', 'gift'].includes(memberDetailInitialTab.value)
+      ? 'active' : (memberDetailInitialTab.value === 'care' ? 'unfinished' : '')
+    void loadMemberDetailTab({ memberId: openedMemberId, tab: memberDetailInitialTab.value, keyword: '', status: initialStatus })
   }
   return openedMemberId
 }

@@ -90,7 +90,7 @@ memberDetailV2Ok('all store-bound member facts reuse the data-scope store gate',
     substr_count($detail, '$this->applyStoreScope(') >= 7
     && strpos($detail, "'gf.store_id', \$dataScope") !== false
     && strpos($detail, "'business_store_id', \$dataScope") !== false
-    && strpos($detail, "'h.store_id', \$dataScope") !== false
+    && strpos($detail, "'o.store_id', \$dataScope") !== false
     && strpos($detail, 'CashierV3DataScopeContext::MODE_ALL') !== false);
 
 echo "ASSERT_PASSED={$passed}\n";

@@ -42,6 +42,7 @@ import { formatMoney } from '@/services/cashierV3Bridge'
  *     storeName, operatorName, reason, createdAt,
  *     contents: [{ typeLabel, name, quantity, effectiveAt, expiresAt, statusLabel,
  *       couponTypeLabel, couponAmount, couponAction }], actions }],
+ *     // giftRecords 也包括后端按原始承载投影的迁入赠送及商品预售，不在前端合并事实。
  *   appointmentHighlights: [{ reservationNo, statusLabel, startAt, endAt, roomName,
  *     projectSummary, plannedCraftsmenSummary, actions }],
  *   careTasks: [{ taskTypeLabel, scheduledAt, ownerName, sourceLabel, relatedBusiness,
@@ -94,7 +95,7 @@ const DEFAULT_TABS = [
   { key: 'writeoff', label: '服务记录' },
   { key: 'care', label: '客情管理' },
   { key: 'debt', label: '欠款记录' },
-  { key: 'gift', label: '赠送记录' },
+  { key: 'gift', label: '赠送/预售' },
   { key: 'points', label: '积分变动记录' },
   { key: 'archive', label: '会员档案' },
 ]
@@ -126,7 +127,7 @@ const todayDate = () => {
 }
 const tabDateFrom = ref(todayDate())
 const tabDateTo = ref(todayDate())
-const tabStatus = ref('')
+const tabStatus = ref(['assets', 'gift'].includes(props.initialTab) ? 'active' : (props.initialTab === 'care' ? 'unfinished' : ''))
 const metricTooltip = ref({ visible: false, text: '', left: 0, top: 0 })
 
 const detail = computed(() => (props.detail && typeof props.detail === 'object' ? props.detail : {}))
@@ -194,12 +195,16 @@ const tabKeywordPlaceholder = computed(() => {
   return '输入关键词后查询'
 })
 const hasStatusFilter = computed(() => ['assets', 'gift', 'care'].includes(activeTab.value))
-const showDateRange = computed(() => !['assets', 'care'].includes(activeTab.value) || tabStatus.value === '')
+// 有效赠送/预售是跨日期的当前权益；只有查看全部历史时才让日期收窄结果。
+const showDateRange = computed(() => !['assets', 'care', 'gift'].includes(activeTab.value) || tabStatus.value === '')
 
 watch(
   () => props.initialTab,
   (tabKey) => {
-    if (DEFAULT_TABS.some((tab) => tab.key === tabKey)) activeTab.value = tabKey
+    if (DEFAULT_TABS.some((tab) => tab.key === tabKey)) {
+      activeTab.value = tabKey
+      tabStatus.value = ['assets', 'gift'].includes(tabKey) ? 'active' : (tabKey === 'care' ? 'unfinished' : '')
+    }
   }
 )
 
@@ -405,8 +410,8 @@ function switchTab(tab) {
     member: member.value,
     keyword: '',
     status: tabStatus.value,
-    dateFrom: tabDateFrom.value,
-    dateTo: tabDateTo.value
+    dateFrom: tab.key === 'gift' && tabStatus.value === 'active' ? '' : tabDateFrom.value,
+    dateTo: tab.key === 'gift' && tabStatus.value === 'active' ? '' : tabDateTo.value
   })
 }
 
@@ -418,8 +423,8 @@ function queryActiveTab() {
     member: member.value,
     keyword: tabKeyword.value.trim(),
     status: hasStatusFilter.value ? tabStatus.value : '',
-    dateFrom: tabDateFrom.value,
-    dateTo: tabDateTo.value
+    dateFrom: activeTab.value === 'gift' && tabStatus.value === 'active' ? '' : tabDateFrom.value,
+    dateTo: activeTab.value === 'gift' && tabStatus.value === 'active' ? '' : tabDateTo.value
   })
 }
 
@@ -601,6 +606,8 @@ function normalizedGiftSource(record) {
 
   if (type.includes('independent') || type.includes('独立')) return '独立赠送'
   if (type.includes('batch') || type.includes('批量')) return sourceNo ? `批量赠送（${sourceNo}）` : '批量赠送'
+  // 迁入权益的来源单号不是当前收银单；明确标注来源类别，避免误认成新赠送。
+  if (type.startsWith('migrated_') || type.startsWith('claimable_')) return sourceNo ? `${explicitLabel}（${sourceNo}）` : text(explicitLabel)
   if (sourceNo) return String(sourceNo)
   return text(explicitLabel)
 }
@@ -1238,7 +1245,7 @@ async function triggerAction(action, context = {}) {
             </section>
           </section>
 
-          <section v-else-if="activeTab === 'gift'" class="member-detail-overlay__tab-content" aria-label="赠送记录">
+          <section v-else-if="activeTab === 'gift'" class="member-detail-overlay__tab-content" aria-label="赠送/预售">
             <section v-for="(record, recordIndex) in giftRecords" :key="recordKey(record, 'gift', recordIndex)" class="member-detail-overlay__gift-panel">
               <header class="member-detail-overlay__gift-header">
                 <dl>
@@ -1274,7 +1281,7 @@ async function triggerAction(action, context = {}) {
                 </table>
               </div>
             </section>
-            <div v-if="!giftRecords.length" class="member-detail-overlay__empty-inline member-detail-overlay__empty-inline--page">暂无赠送记录</div>
+            <div v-if="!giftRecords.length" class="member-detail-overlay__empty-inline member-detail-overlay__empty-inline--page">暂无赠送/预售记录</div>
           </section>
 
           <section v-else-if="activeTab === 'archive'" class="member-detail-overlay__tab-content member-detail-overlay__tab-content--archive" aria-label="会员档案">

@@ -184,7 +184,13 @@ final class CashierV3MemberDetailQueryServices
         $detailQuery = $this->detailQuery($detailQuery);
         $cards = $this->cards($memberId, $operatorScope->tenantId(), $detailQuery['tab'] === 'assets' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'assets' ? $detailQuery['status'] : 'active', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
         $services = $this->services($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'writeoff' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateTo'] : '');
-        $gifts = $this->gifts($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'gift' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'gift' ? $detailQuery['status'] : 'active', $detailQuery['tab'] === 'gift' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'gift' ? $detailQuery['dateTo'] : '');
+        // “有效”代表会员当前仍持有的赠送/预售，不受查询区缓存的日期限制；
+        // “全部”才允许按业务日期追查历史。后端也强制此口径，避免旧前端误传日期。
+        $giftStatus = $detailQuery['tab'] === 'gift' ? $detailQuery['status'] : 'active';
+        $gifts = $this->gifts($memberId, $operatorScope->tenantId(), $dataScope,
+            $detailQuery['tab'] === 'gift' ? $detailQuery['keyword'] : '', $giftStatus,
+            $detailQuery['tab'] === 'gift' && $giftStatus === '' ? $detailQuery['dateFrom'] : '',
+            $detailQuery['tab'] === 'gift' && $giftStatus === '' ? $detailQuery['dateTo'] : '');
         $care = $this->care($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'care' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'care' ? $detailQuery['status'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
         $balanceChanges = $this->balanceChanges($memberId, $operatorScope->tenantId(), $dataScope);
         $cardOperations = $this->cardOperations(
@@ -502,6 +508,7 @@ final class CashierV3MemberDetailQueryServices
     private function gifts(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword = '', string $status = 'active', string $dateFrom = '', string $dateTo = ''): array
     {
         $result = [];
+        $issuedGiftItems = [];
         foreach ([
             ['authority' => 'cashier_v3_direct_gift_authority', 'source' => 'direct_gift', 'reason' => 'reason_snapshot'],
             ['authority' => 'cashier_v3_recharge_gift_authority', 'source' => 'recharge_gift', 'reason' => 'recharge_order_no_snapshot'],
@@ -535,8 +542,12 @@ final class CashierV3MemberDetailQueryServices
             }
             $rows = $query
                 ->field(implode(',', $fields))
-                ->order('gf.settled_at desc,gf.id desc')->limit(100)->select()->toArray();
+                ->order('gf.settled_at desc,gf.id desc')->select()->toArray();
             foreach ($rows as $row) {
+                if ($isDirectGift) {
+                    // 商品赠送同时有赠送事实和领用投影；详情只展示一次赠送。
+                    $issuedGiftItems[(string)$row['source_id'] . ':' . (string)$row['source_detail_id']] = true;
+                }
                 $snapshotJson = $isDirectGift
                     ? ($row['item_content_snapshot_json'] ?: $row['content_snapshot_json'])
                     : $row['content_snapshot_json'];
@@ -567,11 +578,120 @@ final class CashierV3MemberDetailQueryServices
                 ];
             }
         }
+        // 旧系统导入只创建了现有权益的承载记录，没有伪造 V3 赠送事实。
+        // 因此补读历史项目赠送与商品赠送/预售的原始承载；只做展示合并，
+        // 不反写、重发权益，也不把迁入订单算成新销售事实。
+        $result = array_merge($result,
+            $this->migratedProjectGifts($memberId, $dataScope, $keyword, $status, $dateFrom, $dateTo),
+            $this->claimableGiftAndPresale($memberId, $tenantId, $dataScope, $keyword, $status, $dateFrom, $dateTo, $issuedGiftItems));
         usort($result, static function (array $left, array $right): int {
             return (int)$right['_issuedAt'] <=> (int)$left['_issuedAt'];
         });
         foreach ($result as &$row) unset($row['_issuedAt']);
         unset($row);
+        return $result;
+    }
+
+    /**
+     * 历史项目赠送以已支付的会员订单明细为权威承载，导入时没有对应 V3 gift_fact。
+     * 仅识别明确标记为迁入的赠送项目，避免把正常收银随单赠送重复展示。
+     * 查询仍受当前账号的门店数据权限约束，不能因会员可打开而扩大事实范围。
+     */
+    private function migratedProjectGifts(int $memberId, CashierV3DataScopeContext $dataScope, string $keyword, string $status, string $dateFrom, string $dateTo): array
+    {
+        $query = Db::name('store_order_cart_info')->alias('ci')
+            ->join('store_order o', 'o.id=ci.oid AND o.uid=ci.uid')
+            ->leftJoin('system_store ss', 'ss.id=o.store_id')
+            ->where('ci.uid', $memberId)->where('ci.cart_type', 2)
+            ->where('ci.product_type', 6)->where('ci.is_gift', 1)
+            ->where('ci.source_type', 'migration')->where('o.paid', 1)
+            ->where('o.is_del', 0)->where('o.is_system_del', 0)->where('o.is_user_del', 0);
+        $this->applyStoreScope($query, 'o.store_id', $dataScope);
+        if ($status === 'active') $query->where('ci.write_surplus_times', '>', 0)->where('o.refund_status', 0)->where('o.terminal_action', 0);
+        if ($dateFrom !== '') $query->where('ci.add_time', '>=', strtotime($dateFrom . ' 00:00:00'));
+        if ($dateTo !== '') $query->where('ci.add_time', '<=', strtotime($dateTo . ' 23:59:59'));
+        $this->applyDetailKeyword($query, $keyword, ['o.order_id', 'ci.cart_info']);
+        $rows = $query->field('ci.id,ci.cart_info,ci.write_surplus_times,ci.add_time,o.order_id,o.store_id,o.refund_status,o.terminal_action,ss.name AS store_name')
+            ->order('ci.add_time desc,ci.id desc')->select()->toArray();
+        $result = [];
+        foreach ($rows as $row) {
+            $remaining = max(0, (int)$row['write_surplus_times']);
+            $effective = $remaining > 0 && (int)$row['refund_status'] === 0 && (int)$row['terminal_action'] === 0;
+            $issuedAt = (int)$row['add_time'];
+            $label = $effective ? '有效' : '已结束';
+            $result[] = [
+                'id' => 'migrated-project-gift:' . (string)$row['id'],
+                'giftNo' => (string)$row['order_id'],
+                'businessDate' => $this->dateOnly($issuedAt),
+                'sourceType' => 'migrated_project_gift',
+                'sourceLabel' => '历史项目赠送',
+                'sourceOrderNo' => (string)$row['order_id'],
+                'storeName' => (string)($row['store_name'] ?? ''),
+                'reason' => '历史导入',
+                'statusLabel' => $label,
+                'createdAt' => $this->dateTime($issuedAt),
+                'contents' => [[
+                    'typeLabel' => '项目', 'name' => $this->projectName($row['cart_info'] ?? ''),
+                    'quantity' => $remaining, 'effectiveAt' => $this->dateTime($issuedAt),
+                    'expiresAt' => null, 'statusLabel' => $label,
+                ]],
+                '_issuedAt' => $issuedAt,
+            ];
+        }
+        return $result;
+    }
+
+    /**
+     * 商品赠送和预售以可领用行为权威；导入数据和正常结账数据共用该表。
+     * 仅返回会员本人且位于可见门店的行，数量展示剩余可领用量，不将领用
+     * 记录反算成新的赠送或销售，也不修改库存。
+     */
+    private function claimableGiftAndPresale(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword, string $status, string $dateFrom, string $dateTo, array $issuedGiftItems): array
+    {
+        $query = Db::name('cashier_v3_presale_claimable_line')
+            ->where('tenant_id', $tenantId)->where('member_id', $memberId)
+            ->whereIn('source_kind', ['GIFT', 'PRESALE']);
+        $this->applyStoreScope($query, 'store_id', $dataScope);
+        if ($status === 'active') {
+            $query->whereIn('claim_status', ['OPEN', 'AVAILABLE'])
+                ->whereRaw('quantity > claimed_quantity');
+        }
+        if ($dateFrom !== '') $query->where('business_date', '>=', $dateFrom);
+        if ($dateTo !== '') $query->where('business_date', '<=', $dateTo);
+        $this->applyDetailKeyword($query, $keyword, ['product_name_snapshot', 'source_order_no_snapshot']);
+        $rows = $query->field('id,claimable_line_id,source_kind,gift_id,gift_item_id,source_order_no_snapshot,store_name_snapshot,product_name_snapshot,quantity,claimed_quantity,claim_status,business_date,settled_at,recorded_at')
+            ->order('settled_at desc,id desc')->select()->toArray();
+        $result = [];
+        foreach ($rows as $row) {
+            if ((string)$row['source_kind'] === 'GIFT'
+                && isset($issuedGiftItems[(string)$row['gift_id'] . ':' . (string)$row['gift_item_id']])) continue;
+            $remaining = max(0, (int)$row['quantity'] - (int)$row['claimed_quantity']);
+            $state = strtoupper((string)$row['claim_status']);
+            $label = in_array($state, ['OPEN', 'AVAILABLE'], true) && $remaining > 0
+                ? '有效' : ($state === 'CLOSED_AFTER_SALE_REVERSAL' ? '已作废' : '已领完');
+            $isGift = (string)$row['source_kind'] === 'GIFT';
+            // 旧寄存与预售共用可领用表，历史来源单号明确标注 STORED 时
+            // 保留“寄存”名称；不把它错误宣称为预售或再制造一笔赠送事实。
+            $isStored = !$isGift && str_contains(strtoupper((string)$row['source_order_no_snapshot']), '-STORED-');
+            $issuedAt = (int)$row['settled_at'];
+            $result[] = [
+                'id' => 'claimable:' . (string)$row['claimable_line_id'],
+                'giftNo' => (string)$row['source_order_no_snapshot'],
+                'businessDate' => (string)$row['business_date'],
+                'sourceType' => $isGift ? 'claimable_gift' : ($isStored ? 'claimable_stored' : 'claimable_presale'),
+                'sourceLabel' => $isGift ? '商品赠送' : ($isStored ? '商品寄存' : '商品预售'),
+                'sourceOrderNo' => (string)$row['source_order_no_snapshot'],
+                'storeName' => (string)$row['store_name_snapshot'],
+                'reason' => '', 'statusLabel' => $label,
+                'createdAt' => $this->dateTime((int)$row['recorded_at']),
+                'contents' => [[
+                    'typeLabel' => '产品', 'name' => (string)$row['product_name_snapshot'],
+                    'quantity' => $remaining, 'effectiveAt' => $this->dateTime($issuedAt),
+                    'expiresAt' => null, 'statusLabel' => $label,
+                ]],
+                '_issuedAt' => $issuedAt,
+            ];
+        }
         return $result;
     }
 
