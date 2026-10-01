@@ -9,6 +9,7 @@ const emit = defineEmits(['close', 'submit'])
 
 const activeKind = ref('project')
 const catalogOpen = ref(false)
+const catalogKeyword = ref('')
 const selected = ref([])
 const reason = ref('')
 const validationMessage = ref('')
@@ -42,7 +43,14 @@ const items = computed(() => {
   }))
   return [...productItems, ...couponItems]
 })
-const visibleItems = computed(() => items.value.filter((item) => item.kind === activeKind.value))
+// Search is local to the currently open gift type. It only narrows the picker;
+// selected contents and the eventual gift command are never changed by typing.
+const kindItems = computed(() => items.value.filter((item) => item.kind === activeKind.value))
+const visibleItems = computed(() => {
+  const keyword = catalogKeyword.value.trim().toLocaleLowerCase()
+  return kindItems.value.filter((item) => !keyword || [item.name, item.specification]
+    .some((value) => String(value || '').toLocaleLowerCase().includes(keyword)))
+})
 // "已选 N 项" describes selected gift contents, not the editable quantity
 // total. Keeping it structural also prevents malformed input from rendering
 // a meaningless NaN before the submission validator explains the issue.
@@ -56,6 +64,7 @@ function kindLabel(kind) {
 watch(() => props.session, () => {
   activeKind.value = 'project'
   catalogOpen.value = false
+  catalogKeyword.value = ''
   selected.value = []
   reason.value = ''
   validationMessage.value = ''
@@ -80,6 +89,8 @@ function removeSelected(item) {
 
 function openCatalog(kind) {
   activeKind.value = kind
+  // A previous type's query must not make the next type appear empty.
+  catalogKeyword.value = ''
   catalogOpen.value = true
 }
 
@@ -150,8 +161,12 @@ function submit() {
         <section v-if="catalogOpen" class="direct-gift-overlay__catalog-modal" role="dialog" aria-modal="true" :aria-label="`选择${kindLabel(activeKind)}`" @click.self="catalogOpen = false">
           <div class="direct-gift-overlay__catalog-dialog">
             <header><strong>选择{{ kindLabel(activeKind) }}</strong><button type="button" class="button button--secondary" @click="catalogOpen = false">关闭</button></header>
+            <label class="direct-gift-overlay__search">
+              <span>搜索{{ kindLabel(activeKind) }}</span>
+              <input v-model="catalogKeyword" type="search" :placeholder="`搜索${kindLabel(activeKind)}名称或规格`" :aria-label="`搜索${kindLabel(activeKind)}`" autocomplete="off">
+            </label>
             <section class="direct-gift-overlay__catalog" aria-label="可赠送内容">
-              <p v-if="!visibleItems.length" class="direct-gift-overlay__empty">当前门店没有可赠送的{{ kindLabel(activeKind) }}。</p>
+              <p v-if="!visibleItems.length" class="direct-gift-overlay__empty">{{ kindItems.length ? '没有匹配的赠送内容。' : `当前门店没有可赠送的${kindLabel(activeKind)}。` }}</p>
               <button v-for="item in visibleItems" :key="item.key" type="button" class="direct-gift-overlay__item" :class="{ 'is-selected': selectedItem(item) }" @click="toggle(item)">
                 <span><strong>{{ item.name }}</strong><small v-if="item.specification">{{ item.specification }}</small></span>
                 <span>{{ selectedItem(item) ? `已选 ${selectedItem(item).quantity} 次` : '添加' }}</span>
@@ -178,6 +193,7 @@ function submit() {
 .direct-gift-overlay__catalog-modal { position: fixed; inset: 88px 0 0 130px; z-index: 1220; display: grid; place-items: center; padding: 24px; background: rgba(21,31,47,.46); }
 .direct-gift-overlay__catalog-dialog { width: min(760px,100%); max-height: calc(100% - 48px); overflow: auto; border: 1px solid #dfe5ec; border-radius: 8px; background: #fff; box-shadow: 0 20px 56px rgba(18,34,54,.24); }
 .direct-gift-overlay__catalog-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid #edf0f4; }
+.direct-gift-overlay__search { display: grid; gap: 6px; margin: 14px 20px 0; color: #5c6a7e; font-size: 13px; }.direct-gift-overlay__search input { width: 100%; box-sizing: border-box; padding: 9px 11px; border: 1px solid #cfd7e3; border-radius: 6px; color: #202b3a; font: inherit; }.direct-gift-overlay__search input:focus { outline: 2px solid #2981e5; outline-offset: 1px; }
 .direct-gift-overlay__catalog { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; padding: 16px 20px 20px; }.direct-gift-overlay__item { display: flex; min-width: 0; justify-content: space-between; gap: 12px; padding: 11px; border: 1px solid #cfd7e3; border-radius: 6px; background: #fff; color: #3f4c5c; text-align: left; cursor: pointer; }.direct-gift-overlay__item.is-selected { border-color: #2981e5; background: #f3f8ff; }.direct-gift-overlay__item strong, .direct-gift-overlay__item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.direct-gift-overlay__item small { margin-top: 3px; color: #7b8798; font-size: 12px; }.direct-gift-overlay__empty { grid-column: 1 / -1; margin: 0; color: #7b8798; }
 .direct-gift-overlay__selected { margin: 16px 24px 0; padding: 12px; border: 1px solid #dfe5ec; border-radius: 6px; background: #fbfcfe; }.direct-gift-overlay__section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: #3f4c5c; }.direct-gift-overlay__section-title span { color: #7b8798; font-size: 12px; }.direct-gift-overlay__table-wrap { overflow-x: auto; }.direct-gift-overlay__table { width: 100%; border-collapse: collapse; table-layout: auto; background: #fff; }.direct-gift-overlay__table th, .direct-gift-overlay__table td { padding: 8px 7px; border-bottom: 1px solid #edf0f4; text-align: left; white-space: nowrap; font-size: 13px; }.direct-gift-overlay__table th { color: #7b8798; font-weight: 500; }.direct-gift-overlay__table td:first-child { min-width: 150px; white-space: normal; }.direct-gift-overlay__table input, .direct-gift-overlay__fields input, .direct-gift-overlay__fields textarea { width: 100%; box-sizing: border-box; border: 1px solid #cfd7e3; border-radius: 5px; padding: 7px 8px; color: #202b3a; }.direct-gift-overlay__table input[type="number"] { width: 72px; }.direct-gift-overlay__empty-selected { margin: 0; color: #7b8798; font-size: 13px; }.direct-gift-overlay__fields { display: grid; grid-template-columns: minmax(0,1fr); gap: 14px; margin: 20px 24px; }.direct-gift-overlay__fields label { display: grid; gap: 7px; color: #3f4c5c; font-size: 14px; }.direct-gift-overlay__error { margin: 0 24px 16px; color: #c13737; font-size: 13px; }.direct-gift-overlay__dialog > footer { border-top: 1px solid #edf0f4; }.direct-gift-overlay__dialog > footer > span { color: #5c6a7e; font-size: 13px; }.direct-gift-overlay__dialog > footer > div { display: flex; gap: 10px; }
 @media (max-width: 720px) { .direct-gift-overlay { inset: 80px 0 0 64px; padding: 12px; }.direct-gift-overlay__catalog-modal { inset: 80px 0 0 64px; padding: 12px; }.direct-gift-overlay__dialog { max-height: calc(100% - 24px); }.direct-gift-overlay__catalog, .direct-gift-overlay__fields { grid-template-columns: 1fr; }.direct-gift-overlay__dialog > header, .direct-gift-overlay__dialog > footer { padding: 16px; }.direct-gift-overlay__member-context { display: grid; gap: 2px; }.direct-gift-overlay__member-context small { padding-bottom: 0; white-space: normal; }.direct-gift-overlay__catalog, .direct-gift-overlay__tabs { margin-left: 16px; margin-right: 16px; }.direct-gift-overlay__selected, .direct-gift-overlay__fields { margin-left: 16px; margin-right: 16px; } }
