@@ -120,11 +120,13 @@ final class CashierV3ServiceRecordVoidServices
     /**
      * 纯权益组只作为服务集合，不创建销售或退款事实。来源由服务端按门店/租户
      * 反查并稳定加锁，复用逐条冲销；任一失败由外层命令事务全部回滚。
+     * reservation:数字仅为原预约的来源关联，作废服务不得改预约状态、
+     * 明细、占用、人员排班或预约操作记录。
      */
     private function voidCheckoutGroupInTx(string $action, array $scope, CashierV3OperatorScope $operator, CashierV3DataScopeContext $dataScope): array
     {
         $requestId = trim((string)$scope['payload']['checkoutRequestId']);
-        if (preg_match('/^[A-Za-z0-9_-]{1,64}$/D', $requestId) !== 1) {
+        if (!CashierV3EntitlementCheckoutIdentity::isValidRequestId($requestId)) {
             throw self::failure('service_void_group_identity_invalid');
         }
         $detail = (new CashierV3SalesOrderQueryServices())->salesOrderDetail(

@@ -225,13 +225,13 @@ final class CashierV3OrderLifecycleModule
                 if ($orderId !== '') {
                     // 订单中心可同时提交展示单 ID；缺失组 ID 时仅从规范纯权益订单 ID 恢复。
                     // 两者冲突必须拒绝，不能让一个服务 ID 指向另一笔结账。
-                    if (preg_match('/^service:([A-Za-z0-9_-]{1,64})$/D', $orderId, $match) !== 1
-                        || ($requestId !== '' && $requestId !== $match[1])) {
+                    $fromOrder = CashierV3EntitlementCheckoutIdentity::requestIdFromServiceOrderId($orderId);
+                    if ($fromOrder === '' || ($requestId !== '' && $requestId !== $fromOrder)) {
                         throw CashierV3CommandException::invalidContext('消费订单标识不一致，请刷新列表后重试。', ['reason' => 'service_void_order_identity_conflict']);
                     }
-                    $requestId = $match[1];
+                    $requestId = $fromOrder;
                 }
-                if (preg_match('/^[A-Za-z0-9_-]{1,64}$/D', $requestId) !== 1) {
+                if (!CashierV3EntitlementCheckoutIdentity::isValidRequestId($requestId)) {
                     throw CashierV3CommandException::invalidContext('不允许单独作废服务记录，请到消费订单整单作废。', ['reason' => 'service_void_requires_checkout_group']);
                 }
                 $payload['checkoutRequestId'] = $requestId;

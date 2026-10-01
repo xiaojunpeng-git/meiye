@@ -297,14 +297,18 @@ final class CashierV3SalesOrderQueryServices
         $authorityOrderId = $this->scalarString($idValue);
         $id = $this->positiveInteger($idValue);
         $orderNo = $this->scalarString($payload['salesOrderNo'] ?? $payload['orderNo'] ?? '');
+        // 预约直通服务的组 ID 含冒号；只给规范 service: 前缀放行，
+        // 明细仍受后续租户及门店查询约束，不能据此扩大可操作订单范围。
+        $validAuthorityOrderId = preg_match('/^(?:service:)?[A-Za-z0-9_-]{1,64}$/D', $authorityOrderId) === 1
+            || CashierV3EntitlementCheckoutIdentity::requestIdFromServiceOrderId($authorityOrderId) !== '';
         if ($id === null
-            && preg_match('/^(?:service:)?[A-Za-z0-9_-]{1,64}$/D', $authorityOrderId) !== 1
+            && !$validAuthorityOrderId
             && preg_match('/^[A-Za-z0-9_-]{1,64}$/D', $orderNo) !== 1) {
             return null;
         }
         $base['orderId'] = $id;
         // 纯权益组使用服务请求标识，仍由同一个租户/门店权限查询读取详情。
-        $base['authorityOrderId'] = $id === null && preg_match('/^(?:service:)?[A-Za-z0-9_-]{1,64}$/D', $authorityOrderId) === 1
+        $base['authorityOrderId'] = $id === null && $validAuthorityOrderId
             ? $authorityOrderId : '';
         $base['orderNo'] = $id === null ? $orderNo : '';
         return $base;

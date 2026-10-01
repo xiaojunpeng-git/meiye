@@ -29,7 +29,8 @@ export function entitlementCheckoutRequestId(record) {
   // 两种服务端身份冲突时拒绝写入，不能误作废另一笔结账的权益。
   if (explicit && fromOrder && explicit !== fromOrder) return ''
   const requestId = explicit || fromOrder
-  return /^[A-Za-z0-9_-]{1,64}$/.test(requestId) ? requestId : ''
+  // 预约直通服务的历史组标识是 reservation:数字；禁止扩展成任意冒号串。
+  return requestId.length <= 64 && /^(?:[A-Za-z0-9_-]+|reservation:[1-9][0-9]*)$/.test(requestId) ? requestId : ''
 }
 
 export function mergeSalesOrderCenterProjection(current, incoming) {

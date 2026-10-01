@@ -6,7 +6,13 @@ import { entitlementCheckoutRequestId } from '../../../前端代码/cashier-v3/s
 // 一条权益服务也按所属结账组提交；异常或冲突身份不得退化为单条作废。
 assert.equal(entitlementCheckoutRequestId({ entitlementOnly: true, checkoutRequestId: 'CKR-one', id: 'service:CKR-one', items: [{ serviceFactId: 1 }] }), 'CKR-one')
 assert.equal(entitlementCheckoutRequestId({ entitlementOnly: true, id: 'service:CKR-old', items: [{ serviceFactId: 1 }] }), 'CKR-old')
+// 预约直通服务已经把 reservation:数字 作为组标识落库；它不是版本号或服务事实 ID。
+assert.equal(entitlementCheckoutRequestId({ entitlementOnly: true, checkoutRequestId: 'reservation:447', id: 'service:reservation:447' }), 'reservation:447')
+assert.equal(entitlementCheckoutRequestId({ entitlementOnly: true, id: 'service:reservation:595' }), 'reservation:595')
 assert.equal(entitlementCheckoutRequestId({ entitlementOnly: true, checkoutRequestId: 'CKR-one', id: 'service:CKR-other' }), '')
+assert.equal(entitlementCheckoutRequestId({ entitlementOnly: true, checkoutRequestId: 'reservation:447', id: 'service:reservation:448' }), '')
+assert.equal(entitlementCheckoutRequestId({ entitlementOnly: true, id: 'service:reservation:0' }), '')
+assert.equal(entitlementCheckoutRequestId({ entitlementOnly: true, id: 'service:reservation:447:other' }), '')
 assert.equal(entitlementCheckoutRequestId({ entitlementOnly: true, id: 'service:bad:identity' }), '')
 assert.equal(entitlementCheckoutRequestId({ entitlementOnly: false, id: 'service:CKR-one' }), '')
 

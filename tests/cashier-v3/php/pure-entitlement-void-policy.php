@@ -11,6 +11,9 @@ foreach ([
     [['checkoutRequestId' => 'CKR-one'], 'CKR-one'],
     [['orderId' => 'service:CKR-one'], 'CKR-one'],
     [['checkoutRequestId' => 'CKR-one', 'orderId' => 'service:CKR-one'], 'CKR-one'],
+    // 历史预约直通服务必须仍按同一组作废，而不是按单条服务 ID 冲销。
+    [['checkoutRequestId' => 'reservation:447', 'orderId' => 'service:reservation:447'], 'reservation:447'],
+    [['orderId' => 'service:reservation:595'], 'reservation:595'],
 ] as $case) {
     $resolved = $policy->resolve($case[0] + ['reason' => '本地测试'], []);
     $normalized = $resolved['normalized_payload'] ?? [];
@@ -23,6 +26,9 @@ foreach ([
     ['serviceFactId' => '3971'],
     ['orderId' => 'service:3971:other'],
     ['checkoutRequestId' => 'CKR-one', 'orderId' => 'service:CKR-other'],
+    ['checkoutRequestId' => 'reservation:447', 'orderId' => 'service:reservation:448'],
+    ['orderId' => 'service:reservation:0'],
+    ['orderId' => 'service:reservation:447:other'],
 ] as $invalid) {
     try {
         $policy->resolve($invalid + ['reason' => '本地测试'], []);
