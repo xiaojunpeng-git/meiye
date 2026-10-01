@@ -387,7 +387,7 @@ ok('权益有效卡筛选保留欠款限制卡，但排除已过期或停用卡'
   && /sourceFilter\.value === 'all' \|\| sourceMatchesValidCardFilter\(source\)/.test(selector)
   && /operationMode !== 'card-enable' && !isSourceAvailable\(source\)/.test(selector))
 // R50 明确批准八列及按钮前置；取消欠款是金额事实，不是新增写操作。
-ok('使用权益固定八列，卡号仍在卡名下方', ['操作按钮', '卡名称', '余次', '剩余余额', '欠款', '购买金额', '有效期', '取消欠款']
+ok('使用权益固定八列，卡号仍在卡名下方', ['操作按钮', '卡名称', '余次', '剩余余额', '欠款', '取消欠款', '购买金额', '有效期']
   .every((label) => entitlementTableHead.includes(`>${label}</span>`))
   && (entitlementTableHead.match(/<span(?:\s[^>]*)?(?:>|\s*\/\>)/g) || []).length === 8
   && !entitlementTableHead.includes('>购买次数</span>')
@@ -411,7 +411,10 @@ ok('项目名称缩进一个汉字并以折线标明卡项层级', /padding-left
   && /display:\s*block/.test(entitlementProjectGuideCss)
   && /border-left:/.test(entitlementProjectGuideCss)
   && /border-bottom:/.test(entitlementProjectGuideCss))
-ok('项目行欠款、有效期、取消欠款固定留空且保留列对齐', /displayProjectRemainingAmount\(source, project\) \}\}<\/span>\s*<span\s+aria-hidden="true"\s*\/>\s*<span>\{\{ displayAmount\(project.purchaseAmount\) \}\}<\/span>\s*<span\s+aria-hidden="true"\s*\/>\s*<span\s+aria-hidden="true"\s*\/>/.test(entitlementProjectRow)
+// 用户明确要求取消欠款紧随欠款，父子行必须同步移动，不能只改表头。
+ok('取消欠款紧随欠款且购买金额和有效期后移', /<span>欠款<\/span>\s*<span>取消欠款<\/span>\s*<span>购买金额<\/span>\s*<span>有效期<\/span>/.test(entitlementTableHead)
+  && /displayAmount\(source.outstandingDebtAmount\)[\s\S]*?displayAmount\(source.cancelledDebtAmount\)[\s\S]*?displayAmount\(source.purchaseAmount\)[\s\S]*?sourceExpiryDate\(source\)/.test(selector))
+ok('项目行欠款、取消欠款、有效期固定留空且保留列对齐', /displayProjectRemainingAmount\(source, project\) \}\}<\/span>\s*<span\s+aria-hidden="true"\s*\/>\s*<span\s+aria-hidden="true"\s*\/>\s*<span>\{\{ displayAmount\(project.purchaseAmount\) \}\}<\/span>\s*<span\s+aria-hidden="true"\s*\/>/.test(entitlementProjectRow)
   && !/projectExpiryDate\(project\)/.test(entitlementProjectRow))
 ok('使用权益只接受次卡、时间卡、定制卡、赠送，数值不附加货币或次数单位', ['次卡', '时间卡', '定制卡', '赠送']
   .every((label) => selector.includes(`'${label}'`))

@@ -5429,8 +5429,8 @@ button:disabled {
     minmax(65px, .58fr)
     minmax(65px, .58fr)
     minmax(65px, .58fr)
-    minmax(90px, .85fr)
-    minmax(65px, .58fr);
+    minmax(65px, .58fr)
+    minmax(90px, .85fr);
   min-width: 610px;
 }
 

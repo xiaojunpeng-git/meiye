@@ -446,9 +446,9 @@ function operationProjectSelected(source = {}, project = {}) {
             <span>余次</span>
             <span>剩余余额</span>
             <span>欠款</span>
+            <span>取消欠款</span>
             <span>购买金额</span>
             <span>有效期</span>
-            <span>取消欠款</span>
           </div>
 
           <template v-for="source in visibleSources" :key="source.id || source.entitlementInstanceId">
@@ -457,7 +457,7 @@ function operationProjectSelected(source = {}, project = {}) {
               :class="{ 'is-unavailable': !isSourceAvailable(source) }"
               role="row"
             >
-              <!-- 操作只移动展示位置，仍沿用原可用性与选择逻辑；卡级欠款不复制到项目行。 -->
+              <!-- 列顺序与表头一致，取消金额紧随欠款；只移动展示，卡级欠款不复制到项目行。 -->
               <button
                 v-if="sourceOperationLabel()"
                 type="button"
@@ -480,9 +480,9 @@ function operationProjectSelected(source = {}, project = {}) {
               <span>{{ displaySourceRemainingTimes(source) }}</span>
               <span>{{ displayAmount(source.remainingAmount) }}</span>
               <span>{{ displayAmount(source.outstandingDebtAmount) }}</span>
+              <span>{{ displayAmount(source.cancelledDebtAmount) }}</span>
               <span>{{ displayAmount(source.purchaseAmount) }}</span>
               <span>{{ sourceExpiryDate(source) }}</span>
-              <span>{{ displayAmount(source.cancelledDebtAmount) }}</span>
             </article>
 
             <article
@@ -512,8 +512,8 @@ function operationProjectSelected(source = {}, project = {}) {
               <span>{{ displayProjectRemainingTimes(source, project) }}</span>
               <span>{{ displayProjectRemainingAmount(source, project) }}</span>
               <span aria-hidden="true" />
-              <span>{{ displayAmount(project.purchaseAmount) }}</span>
               <span aria-hidden="true" />
+              <span>{{ displayAmount(project.purchaseAmount) }}</span>
               <span aria-hidden="true" />
             </article>
           </template>
