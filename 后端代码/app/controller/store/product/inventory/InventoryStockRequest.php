@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace app\controller\store\product\inventory;
 
 use app\controller\store\AuthController;
+use app\services\product\inventory\InventoryErrorMessage;
 use app\services\product\inventory\InventoryStockRequestServices;
 use think\facade\App;
 
@@ -15,10 +16,10 @@ final class InventoryStockRequest extends AuthController
         try {
             $data = $this->request->postMore([['idempotency_key',''], ['business_date',''], ['remark',''], ['requester_name',''], ['supply_party_type',''], ['supply_party_id',0], ['acceptance_party_id',0], ['lines',[]]]);
             return $this->success($this->services->apply((int)$this->storeId, (int)$this->storeStaffId, $data));
-        } catch (\InvalidArgumentException $exception) {
-            return $this->fail('请货参数不合法，请检查供货方和商品。', ['code' => $exception->getMessage()]);
-        } catch (\RuntimeException $exception) {
-            return $this->fail($exception->getMessage() === 'inventory_stock_request_supplier_invalid' ? '供货方不存在，或不在当前组织范围内。' : '请货申请未完成，请刷新后重试。', ['code' => $exception->getMessage()]);
+        } catch (\InvalidArgumentException|\RuntimeException $exception) {
+            // 保存失败必须返回可执行的业务原因；技术错误码仅作为结构化上下文供前端与日志定位。
+            $error = InventoryErrorMessage::from($exception);
+            return $this->fail($error['message'] ?? '请货申请未完成，请刷新后重试。', ['code' => $error['code'] ?? $exception->getMessage()]);
         }
     }
     public function suppliers()
@@ -36,15 +37,14 @@ final class InventoryStockRequest extends AuthController
         try {
             $data = $this->request->postMore([['idempotency_key',''], ['business_date',''], ['remark',''], ['requester_name',''], ['supply_party_type',''], ['supply_party_id',0], ['acceptance_party_id',0], ['lines',[]]]);
             return $this->success($this->services->updateApplied((int)$this->storeId, (int)$this->storeStaffId, $id, $data));
-        } catch (\InvalidArgumentException $exception) {
-            return $this->fail('请货修改参数不合法，请检查供货方和商品。', ['code' => $exception->getMessage()]);
-        } catch (\RuntimeException $exception) {
+        } catch (\InvalidArgumentException|\RuntimeException $exception) {
             $messages = [
                 'inventory_stock_request_edit_state_invalid' => '当前请货单不能编辑。',
                 'inventory_stock_request_edit_fulfillment_started' => '请货单已关联调拨，不能再编辑。',
                 'inventory_stock_request_not_found' => '请货单不存在或不属于当前门店。',
             ];
-            return $this->fail($messages[$exception->getMessage()] ?? '请货修改未完成，请刷新后重试。', ['code' => $exception->getMessage()]);
+            $error = InventoryErrorMessage::from($exception);
+            return $this->fail($messages[$exception->getMessage()] ?? $error['message'] ?? '请货修改未完成，请刷新后重试。', ['code' => $error['code'] ?? $exception->getMessage()]);
         }
     }
     public function cancel($id)

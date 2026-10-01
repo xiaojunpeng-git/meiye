@@ -91,7 +91,7 @@ final class InventoryStockRequestServices
         if ($storeId <= 0 || $operatorId <= 0) throw new \InvalidArgumentException('inventory_stock_request_scope_invalid');
         return Db::transaction(function () use ($storeId, $operatorId, $command): array {
             $scope = $this->lockScope($storeId, $operatorId);
-            $location = $this->lockDefaultLocation($scope);
+            $location = $this->lockDefaultLocation($scope, $command['recordedAt']);
             return $this->applyAtScope($scope, $location, $command);
         });
     }
@@ -105,7 +105,7 @@ final class InventoryStockRequestServices
         $scope = $this->requestPartyScope($adminInfo, $resolved, (string)($command['requestPartyType'] ?? 'HQ'), (int)($command['requestPartyId'] ?? 0));
         return Db::transaction(function () use ($scope, $resolved, $command): array {
             $location = ($scope['requestPartyType'] ?? 'HQ') === 'STORE'
-                ? $this->lockDefaultLocation($scope)
+                ? $this->lockDefaultLocation($scope, $command['recordedAt'])
                 : Db::name('inventory_location')->where('id', (int)$resolved['location']['id'])->lock(true)->find();
             if (!$location || (string)$location['location_status'] !== 'ACTIVE') throw new \RuntimeException('inventory_hq_location_invalid');
             return $this->applyAtScope($scope, (array)$location, $command);
@@ -276,7 +276,7 @@ final class InventoryStockRequestServices
         $command = $this->normalize($input);
         return Db::transaction(function () use ($storeId, $operatorId, $requestId, $command): array {
             $scope = $this->lockScope($storeId, $operatorId);
-            $location = $this->lockDefaultLocation($scope);
+            $location = $this->lockDefaultLocation($scope, $command['recordedAt']);
             $document = Db::name('inventory_stock_request_document')->where('id', $requestId)->lock(true)->find();
             if (!$document || (string)$document['tenant_id'] !== $scope['tenantId'] || (string)$document['organization_id'] !== $scope['organizationId'] || (string)$document['organization_path'] !== $scope['organizationPath'] || (int)$document['store_id'] !== $scope['storeId'] || (int)$document['location_id'] !== (int)$location['id']) throw new \RuntimeException('inventory_stock_request_not_found');
             if ((string)$document['document_status'] !== 'APPLIED') throw new \RuntimeException('inventory_stock_request_edit_state_invalid');
@@ -403,11 +403,20 @@ final class InventoryStockRequestServices
         return $result;
     }
 
-    private function lockDefaultLocation(array $scope): array
+    private function lockDefaultLocation(array $scope, int $now): array
     {
         $rows = Db::name('inventory_location')->where('tenant_id', $scope['tenantId'])->where('store_id', $scope['storeId'])->where('location_type', 'STORE')->where('is_default', 1)->where('location_status', 'ACTIVE')->limit(2)->lock(true)->select()->toArray();
-        if (count($rows) !== 1 || (string)$rows[0]['organization_id'] !== $scope['organizationId'] || (string)$rows[0]['organization_path'] !== $scope['organizationPath'] || (int)$rows[0]['owner_id'] !== $scope['storeId']) throw new \RuntimeException('inventory_stock_request_location_invalid');
-        return (array)$rows[0];
+        if (count($rows) !== 1) throw new \RuntimeException('inventory_stock_request_location_invalid');
+        // 门店调整组织层级后，默认仓与当前余额的组织路径可能仍是旧快照。
+        // 请货本身不改库存，但必须在同一事务内复用统一修复器刷新当前归属，避免合法门店被旧路径阻断。
+        try {
+            return (new InventoryStoreScopeReconciliationServices())->reconcileLocation((array)$rows[0], $scope, $now);
+        } catch (\RuntimeException $exception) {
+            if (in_array($exception->getMessage(), ['inventory_store_location_scope_invalid', 'inventory_store_stock_scope_invalid'], true)) {
+                throw new \RuntimeException('inventory_stock_request_location_invalid');
+            }
+            throw $exception;
+        }
     }
 
     private function supplier(array $scope, array $command): array
