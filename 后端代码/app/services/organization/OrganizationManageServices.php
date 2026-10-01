@@ -7,6 +7,7 @@ use app\dao\organization\OrganizationChangeLogDao;
 use app\dao\organization\OrganizationDao;
 use app\dao\organization\OrganizationStoreDao;
 use app\services\BaseServices;
+use app\services\product\inventory\InventoryStoreScopeReconciliationServices;
 use think\facade\Db;
 
 /**
@@ -146,6 +147,11 @@ class OrganizationManageServices extends BaseServices
             $all = Db::name('organization')->where('is_del', 0)->field('id,pid')->select()->toArray();
             if ($this->scopeService->detectCycleInOrgRows($all)) {
                 throw new \Exception('组织树存在循环引用，请联系技术处理后再操作');
+            }
+            // A parent change moves every descendant store's current warehouse and stock scope
+            // in this same transaction; historical inventory facts keep their event-time scope.
+            if ((int)$before['pid'] !== $pid) {
+                (new InventoryStoreScopeReconciliationServices())->reconcileMovedOrganization($id, $time);
             }
             $this->writeLog($id, 'update', 'organization', $id, $before, $save, '编辑组织', $operatorId, $operatorName, $auditMeta);
             return $id;
@@ -585,6 +591,8 @@ class OrganizationManageServices extends BaseServices
             $this->onStoreLeaveOrg($storeId, $oldOrgId);
         }
         $this->onStoreJoinOrg($storeId, $orgId);
+        // Rebinding changes the live store scope; settled inventory facts keep their original organization snapshot.
+        (new InventoryStoreScopeReconciliationServices())->reconcileBoundStore($storeId, $orgId, time());
         $this->writeLog($orgId, 'bind_store', 'store', $storeId, ['org_id' => $oldOrgId], ['org_id' => $orgId], '门店迁移组织', $operatorId, $operatorName, $auditMeta);
         return ['changed' => true, 'old_org_id' => $oldOrgId, 'org_id' => $orgId];
     }

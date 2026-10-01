@@ -60,6 +60,10 @@ final class InventoryErrorMessage
         'inventory_stock_count_draft_changed' => '盘点草稿已被修改或完成，请重新打开。',
         'inventory_stock_count_draft_missing' => '盘点草稿不存在，或当前账号无权查看。',
         'inventory_stock_count_draft_lines_invalid' => '盘点草稿明细不完整，请核对商品和数量。',
+        'inventory_stock_count_location_invalid' => '当前门店没有唯一的默认仓库，请联系管理员处理。',
+        'inventory_store_location_scope_invalid' => '门店默认仓归属异常，请联系管理员处理。',
+        'inventory_store_stock_scope_invalid' => '门店库存归属异常，请联系管理员处理。',
+        'inventory_store_organization_scope_invalid' => '门店组织归属异常，请联系管理员处理。',
     ];
 
     /** @return array{code: string, message: string}|null */

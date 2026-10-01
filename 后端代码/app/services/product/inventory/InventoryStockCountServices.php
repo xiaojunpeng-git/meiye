@@ -248,7 +248,16 @@ final class InventoryStockCountServices
             'organizationId' => (string)$org, 'organizationPath' => '/' . implode('/', array_reverse($path)) . '/',
             'storeId' => $storeId, 'operatorId' => $actor['id'], 'operatorType' => $actor['type']];
     }
-    private function location(array $scope): array { $rows=Db::name('inventory_location')->where('tenant_id',$scope['tenantId'])->where('store_id',$scope['storeId'])->where('location_type','STORE')->where('is_default',1)->where('location_status','ACTIVE')->limit(2)->lock(true)->select()->toArray(); if(count($rows)!==1||(string)$rows[0]['organization_id']!==$scope['organizationId']||(string)$rows[0]['organization_path']!==$scope['organizationPath']) throw new \RuntimeException('inventory_stock_count_location_invalid'); return $rows[0]; }
+    /** Reconcile a stale organization snapshot under the count transaction; never infer ownership from the client. */
+    private function location(array $scope): array
+    {
+        $rows = Db::name('inventory_location')->where('tenant_id', $scope['tenantId'])
+            ->where('store_id', $scope['storeId'])->where('location_type', 'STORE')
+            ->where('is_default', 1)->where('location_status', 'ACTIVE')
+            ->limit(2)->lock(true)->select()->toArray();
+        if (count($rows) !== 1) throw new \RuntimeException('inventory_stock_count_location_invalid');
+        return (new InventoryStoreScopeReconciliationServices())->reconcileLocation($rows[0], $scope, time());
+    }
     /** One document remains atomic regardless of its SKU count; duplicate SKUs are rejected before stock changes. */
     private function normalize(array $input): array
     {
