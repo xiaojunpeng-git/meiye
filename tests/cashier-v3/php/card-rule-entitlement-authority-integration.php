@@ -406,6 +406,19 @@ try {
         'selectionStatus' => 'not_applicable',
     ]], $now - 10, $now + 3600);
     $fixtureStateIds[] = $shared['stateId'];
+    // R50整卡取消额校验必须有真实来源链；不用悬空holder伪装正式共享卡。
+    // 此卡无取消欠款，仍应按原共享8次扣减；夹具由本测试外层事务回滚。
+    $sharedOriginId = 970000000;
+    Db::name('store_order')->insert([
+        'id'=>$sharedOriginId, 'uid'=>$memberId, 'store_id'=>11, 'paid'=>1,
+        'is_del'=>0, 'order_id'=>'SO-SHARED-' . $suffix, 'unique'=>md5('shared-' . $suffix), 'pay_price'=>'248.00',
+        'debt_amount'=>'0.00', 'repaid_debt_amount'=>'0.00',
+    ]);
+    Db::name('user_card_holder')->insert([
+        'id'=>$holderBase+3, 'uid'=>$memberId, 'oid'=>$sharedOriginId,
+        'store_id'=>11, 'card_name'=>'共享次数回归夹具', 'card_no'=>'SHARED-' . $suffix,
+        'product_type'=>4, 'write_times'=>8, 'write_surplus_times'=>8, 'is_del'=>0,
+    ]);
     $service->applyDeductionsInTx([
         deduction($holderBase + 3, $detailBase + 5, 505, 1, 8),
         deduction($holderBase + 3, $detailBase + 6, 506, 2, 8),

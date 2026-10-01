@@ -15,6 +15,66 @@ final class CashierV3CardRuleEntitlementAuthorityServices
 
     private const REPLACEMENT_RELATION_OFFSET = 1000000000000;
 
+    /**
+     * R50：共享次数必须以整卡成交额扣除取消额后折算，不能用零金额子项目逃逸。
+     * 返回 null 表示不是正式签发的共享次数卡；物理余次及历史成交快照不被改写。
+     * 最终结账事务中读取并锁定权威池，选择器只读同一口径。
+     */
+    public function cancellationLimitForDetail(array $detail, array $order): ?int
+    {
+        $lock = CashierV3TransactionGuard::isInTransaction();
+        $component = $this->row(Db::name(CashierV3IssuedCardRuleStateServices::COMPONENT_TABLE)
+            ->where('legacy_detail_id', (int)($detail['id'] ?? 0))
+            ->where('tenant_id', (string)($order['tenant_id'] ?? '0'))->find());
+        if (!$component) return null;
+        $state = $this->row(Db::name(CashierV3IssuedCardRuleStateServices::STATE_TABLE)
+            ->where('id', (int)$component['rule_state_id'])->find());
+        if (!$state || (string)$state['rule_type'] !== 'choice_count') return null;
+        $holder = $this->row(Db::name('user_card_holder')
+            ->where('id', (int)$state['card_holder_id'])->lock($lock)->find());
+        if (!$holder || (int)$holder['oid'] !== (int)($order['id'] ?? 0)
+            || (int)($detail['oid'] ?? 0) !== (int)$holder['oid']) {
+            throw self::failure('card_rule_cancellation_origin_mismatch');
+        }
+        $snapshot = $this->snapshotForHolder((string)$state['tenant_id'], (int)$holder['id'], $lock);
+        if ($snapshot === null) throw self::failure('card_rule_cancellation_snapshot_missing');
+        return $this->cancelledDebtLimitedSharedTimes($snapshot, $order);
+    }
+
+    /** 仅正式共享池使用整卡销售明细的成交分；取消审计不是收款，不增加可用次数。 */
+    private function cancelledDebtLimitedSharedTimes(array $snapshot, array $order): int
+    {
+        $state = $snapshot['state'];
+        $remaining = (int)$state['shared_remaining_times'];
+        $cancelled = (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())
+            ->cancelledCardDebt($order, (int)($order['uid'] ?? 0), (string)$state['tenant_id']);
+        if (bccomp($cancelled, '0', 2) <= 0) return $remaining;
+        $line = $this->row(Db::name('cashier_v3_sales_order_line')
+            ->where('order_id', (string)$state['sales_order_id'])
+            ->where('order_line_id', (string)$state['sales_order_line_id'])
+            ->field('sale_amount_cents')->lock(CashierV3TransactionGuard::isInTransaction())->find());
+        if (!$line) throw self::failure('card_rule_cancellation_sale_missing');
+        return self::sharedTimesAfterCancellation(
+            (int)$state['shared_total_times'], $remaining,
+            (int)$line['sale_amount_cents'], (int)bcmul($cancelled, '100', 0)
+        );
+    }
+
+    /**
+     * 整数分公式：floor((成交-取消)/成交×总次)-已用共享次数。
+     * 每次都减累计已用次数，不能在剩余池上反复按比例计算；作废恢复物理池后自然恢复额度。
+     */
+    public static function sharedTimesAfterCancellation(int $total, int $remaining, int $purchaseCents, int $cancelledCents): int
+    {
+        if ($total <= 0 || $remaining < 0 || $remaining > $total || $purchaseCents < 0 || $cancelledCents < 0) {
+            throw new \LogicException('card_rule_cancellation_amount_invalid');
+        }
+        if ($cancelledCents === 0) return $remaining;
+        if ($purchaseCents === 0 || $cancelledCents >= $purchaseCents) return 0;
+        $paidTimes = (int)bcdiv(bcmul((string)($purchaseCents - $cancelledCents), (string)$total, 0), (string)$purchaseCents, 0);
+        return min($remaining, max(0, $paidTimes - ($total - $remaining)));
+    }
+
     public function authorityForDetail(
         string $tenantId,
         int $holderId,
@@ -261,6 +321,17 @@ final class CashierV3CardRuleEntitlementAuthorityServices
                 $remaining = (int)$state['shared_remaining_times'];
                 if ($totalQuantity > $remaining) {
                     throw self::failure('card_rule_shared_times_insufficient', ['holderId' => $holderId]);
+                }
+                // 同一卡多个项目要合计复核；逐行<=23不能允许两个项目各用15次。
+                // 本分支位于原核销事务内，超额抛错会回滚所有明细/事实，不产生部分扣减。
+                $originOrder = $this->row(Db::name('store_order')
+                    ->where('id', (int)($currentHolder['oid'] ?? 0))->lock(true)->find());
+                if (!$originOrder) throw self::failure('card_rule_cancellation_origin_missing');
+                $limit = $this->cancelledDebtLimitedSharedTimes($snapshot, $originOrder);
+                if ($totalQuantity > $limit) {
+                    throw self::failure('card_rule_shared_times_insufficient', [
+                        'holderId' => $holderId, 'requested' => $totalQuantity, 'available' => $limit,
+                    ]);
                 }
                 $after = $remaining - $totalQuantity;
                 $this->updateState($state, [

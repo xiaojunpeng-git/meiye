@@ -1383,6 +1383,18 @@ class WriteOffOrderServices extends BaseServices
     ): float
     {
         $rows = $this->debtAllocationRows($cartRow, $orderInfo, $orderCartRows);
+        // V3 新购卡的兼容项目 pay_price 可为0，真正成交金额在不可变分摊事实中。
+        // 欠款与取消额必须按同一成交权重分摊，不能把配置价0误认成免除欠款；
+        // 无正式分摊事实的历史/替换权益继续沿用原快照，不改写任何购买事实。
+        $issuedRows = array_values(array_filter($rows, static function (array $row): bool {
+            $info = is_string($row['cart_info'] ?? null)
+                ? json_decode($row['cart_info'], true) : ($row['cart_info'] ?? []);
+            return is_array($info) && ($info['sourceType'] ?? '') === 'cashier_v3_card_purchase';
+        }));
+        // 只对正式V3购卡读取事实；历史/替换/纯公式夹具不引入额外数据库依赖。
+        $actualAmounts = $issuedRows === [] ? []
+            : (new \app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices())
+                ->forOrders([(int)($orderInfo['id'] ?? 0)], $issuedRows);
         $explicitDebt = '0.00';
         $candidates = [];
         foreach ($rows as $row) {
@@ -1394,7 +1406,10 @@ class WriteOffOrderServices extends BaseServices
                 $explicitDebt = bcadd($explicitDebt, $lineDebt, 2);
                 continue;
             }
-            $amount = $this->debtAllocationAmount($row);
+            $detailId = (int)($row['id'] ?? 0);
+            $amount = array_key_exists($detailId, $actualAmounts)
+                ? bcdiv((string)$actualAmounts[$detailId], '100', 2)
+                : $this->debtAllocationAmount($row);
             if (bccomp($amount, '0', 2) > 0) {
                 $candidates[] = ['row' => $row, 'amount' => $amount];
             }
@@ -1439,7 +1454,7 @@ class WriteOffOrderServices extends BaseServices
             return [$cartRow];
         }
         $rows = Db::name('store_order_cart_info')
-            ->field('id,oid,cart_info,cart_type,product_type,write_times,write_surplus_times,pay_price,debt_amount,repaid_debt_amount,is_gift')
+            ->field('id,oid,product_id,cart_info,cart_type,product_type,write_times,write_surplus_times,pay_price,debt_amount,repaid_debt_amount,is_gift')
             ->where('oid', $orderId)
             ->where('cart_type', 2)
             ->where('product_type', 6)
@@ -1501,7 +1516,15 @@ class WriteOffOrderServices extends BaseServices
             $orderInfo,
             $orderCartRows
         );
-        return $this->calcDebtLimitedTimesByRemainingAmount($cartRow, $pending, $remainingAmount);
+        $effective = $this->calcDebtLimitedTimesByRemainingAmount($cartRow, $pending, $remainingAmount);
+        // R50：项目金额限制之外再核对共享池；零金额子项目不能耗尽未实付的共享次数。
+        // 普通独立项目保留原分摊口径；查询、预约与最终核销共用这个服务端出口。
+        if (bccomp($this->cancelledEntitlementAmount($orderInfo), '0', 2) > 0) {
+            $sharedLimit = (new \app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices())
+                ->cancellationLimitForDetail($cartRow, $orderInfo);
+            if ($sharedLimit !== null) $effective = min($effective, $sharedLimit);
+        }
+        return $effective;
     }
 
     /** 选择器展示真正可用金额，与最终核销次数限制复用同一不可用额；不改原成交快照。 */
