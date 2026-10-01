@@ -27,7 +27,7 @@ $book = (int)$stock['available_quantity_units'];
 $factsBefore = (int)Db::name('inventory_batch_movement_fact')->where('store_id', 99008)->count();
 $drafts = new InventoryStockCountDraftServices();
 $line = ['product_id' => 990081, 'sku_id' => 9900811, 'sku_unique' => 'testsku9900811',
-    'product_name' => 'TEST-盘点精华', 'sku_name' => '30ml', 'barcode' => '6909900100081',
+    'product_name' => 'TEST-盘点精华', 'sku_name' => '30ml', 'stock_unit' => '瓶', 'barcode' => '6909900100081',
     'book_quantity' => (string)$book, 'counted_quantity' => (string)($book + 1),
     'surplus_batch_no' => 'TEST-DRAFT-GAIN-' . time(), 'surplus_unit_cost' => '2.30',
     'surplus_manufactured_date' => '2026-06-07', 'surplus_expire_date' => '2027-07-07'];
@@ -40,7 +40,8 @@ draftCheck('saving a draft does not change stock or settled movement facts',
 $detail = $drafts->detail(99008, 990008, $draftId);
 draftCheck('draft detail restores entered quantity, batch and revision',
     $detail['version'] === 1 && $detail['lines'][0]['counted_quantity'] === (string)($book + 1)
-    && $detail['lines'][0]['surplus_batch_no'] === $line['surplus_batch_no']);
+    && $detail['lines'][0]['surplus_batch_no'] === $line['surplus_batch_no']
+    && $detail['lines'][0]['stock_unit'] === '瓶');
 $provider = (new ReflectionClass(InventoryCountUnifiedQueryProvider::class))->newInstanceWithoutConstructor();
 $source = new ReflectionMethod($provider, 'sourceRows'); $source->setAccessible(true);
 $sourceRows = $source->invoke($provider, [

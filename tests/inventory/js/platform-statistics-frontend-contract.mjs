@@ -37,7 +37,7 @@ check('expiry results render the authoritative batch balance without browser agg
     && !statisticsSource.includes('Number(row.batch_balance_quantity)'))
 check('expiry table presents current remaining stock as its own column',
   source.includes('<th v-if="activeStatisticsTab === \'expiry\'">当前剩余库存</th>')
-    && source.includes(":colspan=\"activeStatisticsTab === 'expiry' ? 8 : 7\""))
+    && source.includes(":colspan=\"activeStatisticsTab === 'expiry' ? 9 : 8\""))
 
 console.log(`INVENTORY_PLATFORM_STATISTICS_FRONTEND_RESULT passed=${passed} failed=${failed}`)
 process.exit(failed === 0 ? 0 : 1)

@@ -157,6 +157,8 @@ final class InventoryStockCountDraftServices
                 'product_id' => $productId, 'sku_id' => $skuId, 'sku_unique' => $unique,
                 'product_name' => mb_substr((string)($line['product_name'] ?? ''), 0, 191),
                 'sku_name' => mb_substr((string)($line['sku_name'] ?? ''), 0, 191),
+                // 单位随盘点草稿保存为当时的 SKU 快照，恢复页面时不得根据名称猜测或串用其他规格单位。
+                'stock_unit' => mb_substr(trim((string)($line['stock_unit'] ?? '')), 0, 32),
                 'barcode' => mb_substr((string)($line['barcode'] ?? ''), 0, 96),
                 'book_quantity' => $book, 'counted_quantity' => $counted,
                 'surplus_batch_no' => mb_substr(trim((string)($line['surplus_batch_no'] ?? '')), 0, 64),

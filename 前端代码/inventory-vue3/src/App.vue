@@ -161,9 +161,9 @@ function requestEmbeddedSession() {
 }
 
 const storeStockQueryBaseFields = [
-  ['product_name', '商品名称', 'text'], ['sku_name', '商品规格', 'text'], ['product_code', '商品编码', 'text'],
+  ['product_name', '商品名称', 'text'], ['sku_name', '规格', 'text'], ['product_code', '商品编码', 'text'],
   ['barcode', '商品条码', 'text'], ['brand_name', '品牌', 'text'], ['category_name', '商品类别', 'text'],
-  ['stock_unit', '库存单位', 'text'], ['batch_no', '批次号', 'text'], ['quality_status', '库存状态', 'text'],
+  ['stock_unit', '单位', 'text'], ['batch_no', '批次号', 'text'], ['quality_status', '库存状态', 'text'],
   ['received_date', '正式入库日期', 'date'], ['manufactured_date', '生产日期', 'date'], ['expire_date', '到期日', 'date'],
   ['available_quantity', '数量范围', 'decimal'], ['batch_balance_quantity', '批次结存数量', 'decimal'], ['batch_unit_cost', '批次单位成本', 'amount', true],
   ['source_order_no', '来源入库单', 'text'], ['data_quality', '数据质量', 'text']
@@ -202,10 +202,10 @@ const storeOperationalStatusOptions = computed(() => ({
   import: ['成功', '失败', '处理中']
 }[active.value] || []))
 const statisticsQueryPages = {
-  inbound: { pageCode: 'inventory_statistics_inbound', fields: [['business_date', '业务日期', 'date'], ['source_type_name', '业务类型'], ['product_name', '商品名称'], ['sku_name', '商品规格'], ['stock_unit', '库存单位'], ['document_count', '单据数', 'integer'], ['movement_count', '流水数', 'integer'], ['quantity', '数量', 'decimal']] },
-  outbound: { pageCode: 'inventory_statistics_outbound', fields: [['business_date', '业务日期', 'date'], ['source_type_name', '业务类型'], ['product_name', '商品名称'], ['sku_name', '商品规格'], ['stock_unit', '库存单位'], ['document_count', '单据数', 'integer'], ['movement_count', '流水数', 'integer'], ['quantity', '数量', 'decimal']] },
-  expiry: { pageCode: 'inventory_statistics_expiry', fields: [['product_name', '商品名称'], ['sku_name', '商品规格'], ['batch_no', '批次号'], ['batch_balance_quantity', '当前剩余库存', 'decimal'], ['expire_date', '到期日', 'date'], ['remaining_shelf_life_days', '距到期日天数', 'integer'], ['remaining_shelf_life_band', '保质期分档'], ['received_date', '正式入库日期', 'date']] },
-  age: { pageCode: 'inventory_statistics_age', fields: [['product_name', '商品名称'], ['sku_name', '商品规格'], ['batch_no', '批次号'], ['received_date', '正式入库日期', 'date'], ['inventory_age_days', '库龄天数', 'integer'], ['inventory_age_band', '库龄分档'], ['expire_date', '到期日', 'date']] },
+  inbound: { pageCode: 'inventory_statistics_inbound', fields: [['business_date', '业务日期', 'date'], ['source_type_name', '业务类型'], ['product_name', '商品名称'], ['sku_name', '规格'], ['stock_unit', '单位'], ['document_count', '单据数', 'integer'], ['movement_count', '流水数', 'integer'], ['quantity', '数量', 'decimal']] },
+  outbound: { pageCode: 'inventory_statistics_outbound', fields: [['business_date', '业务日期', 'date'], ['source_type_name', '业务类型'], ['product_name', '商品名称'], ['sku_name', '规格'], ['stock_unit', '单位'], ['document_count', '单据数', 'integer'], ['movement_count', '流水数', 'integer'], ['quantity', '数量', 'decimal']] },
+  expiry: { pageCode: 'inventory_statistics_expiry', fields: [['product_name', '商品名称'], ['sku_name', '规格'], ['stock_unit', '单位'], ['batch_no', '批次号'], ['batch_balance_quantity', '当前剩余库存', 'decimal'], ['expire_date', '到期日', 'date'], ['remaining_shelf_life_days', '距到期日天数', 'integer'], ['remaining_shelf_life_band', '保质期分档'], ['received_date', '正式入库日期', 'date']] },
+  age: { pageCode: 'inventory_statistics_age', fields: [['product_name', '商品名称'], ['sku_name', '规格'], ['stock_unit', '单位'], ['batch_no', '批次号'], ['received_date', '正式入库日期', 'date'], ['inventory_age_days', '库龄天数', 'integer'], ['inventory_age_band', '库龄分档'], ['expire_date', '到期日', 'date']] },
 }
 const statisticsQueryPage = computed(() => active.value === 'statistics' ? statisticsQueryPages[activeStatisticsTab.value] || null : null)
 const statisticsQueryFields = computed(() => (statisticsQueryPage.value?.fields || []).map(([key, label, type = 'text']) => ({
@@ -323,7 +323,7 @@ const pages = {
     title: '库存查询',
     crumb: '库存管理 / 库存查询',
     filters: ['商品/条码', '库存区间', '院装产品', '隐藏零库存'],
-    columns: ['商品', '商品规格', '可用库存', '库存金额']
+    columns: ['商品', '规格', '单位', '可用库存', '库存金额']
   },
   count: {
     title: '库存盘点',
@@ -486,6 +486,7 @@ const stockTableFixed = computed(() => active.value === 'stock' && stockTableLay
 const stockSummaryRow = computed(() => [
   '合计',
   '-',
+  '-',
   formatIntegerQuantity(stockSummary.value.available_quantity),
   centsMoney(stockSummary.value.inventory_amount_cents),
 ])
@@ -493,11 +494,11 @@ const analysisBuckets = computed(() => activeStatisticsTab.value === 'expiry'
   ? batchAnalysis.value.expiry_buckets
   : batchAnalysis.value.age_buckets)
 const analysisRows = computed(() => batchAnalysis.value.list.map((row) => activeStatisticsTab.value === 'expiry'
-  ? [text(row.product_name), text(row.sku_name), text(row.batch_no), text(row.batch_balance_quantity), text(row.expire_date), text(row.remaining_shelf_life_days), text(row.remaining_shelf_life_band), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
-  : [text(row.product_name), text(row.sku_name), text(row.batch_no), text(row.received_date), text(row.inventory_age_days), text(row.inventory_age_band), row.inventory_amount === null ? '-' : money(row.inventory_amount)]))
+  ? [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.batch_no), text(row.batch_balance_quantity), text(row.expire_date), text(row.remaining_shelf_life_days), text(row.remaining_shelf_life_band), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
+  : [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.batch_no), text(row.received_date), text(row.inventory_age_days), text(row.inventory_age_band), row.inventory_amount === null ? '-' : money(row.inventory_amount)]))
 const movementStatisticRows = computed(() => movementStatistics.value.list.map((row) => [
-  text(row.source_type_name), text(row.product_name), text(row.sku_name), text(row.document_count, '0'),
-  text(row.movement_count, '0'), `${text(row.quantity, '0')} ${text(row.stock_unit, '')}`.trim(), centsMoney(row.cost_amount_cents)
+  text(row.source_type_name), text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.document_count, '0'),
+  text(row.movement_count, '0'), text(row.quantity, '0'), centsMoney(row.cost_amount_cents)
 ]))
 const dashboardCards = computed(() => [
   {
@@ -898,8 +899,8 @@ function mapApiRow(page, row) {
     case 'inbound': return [text(row.order_sn), text(row.order_type_name), text(row.product_summary), `${text(row.detail_count, '0')} 项`, centsMoney(row.cost_amount_cents), inventoryStatusLabel(row.status_name, '已完成'), text(row.add_time ? new Date(Number(row.add_time) * 1000).toLocaleString() : '-')]
     case 'outbound': return [text(row.order_sn), text(row.order_type_name), text(row.location_name), text(row.product_summary), `${text(row.detail_count, '0')} 项`, centsMoney(row.cost_amount_cents), operationTime(row.operation_at), inventoryStatusLabel(row.status_name, '已完成')]
     case 'stock': return row.available_quantity !== undefined
-      ? [text(row.product_name), text(row.sku_name), text(row.available_quantity), row.inventory_amount_cents !== undefined ? centsMoney(row.inventory_amount_cents) : money(row.inventory_amount)]
-      : [text(row.product_name), text(row.sku_name), text(row.batch_balance_quantity), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
+      ? [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.available_quantity), row.inventory_amount_cents !== undefined ? centsMoney(row.inventory_amount_cents) : money(row.inventory_amount)]
+      : [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.batch_balance_quantity), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
     case 'count': return [text(row.order_sn), text(row.store_name_label || row.store_name || row.store_name_snapshot || row.location_name || scopeName.value), text(row.count_type || '全盘'), text(row.detail_count), centsMoney(row.change_amount_cents), text(row.count_date), operationTime(row.operation_at), countStatusName(row.status_name)]
     case 'request': return [text(row.order_sn), text(row.request_party_name || row.request_store_name), text(row.supply_party_name || row.supply_store_name), text(row.detail_count), operationTime(row.operation_at), inventoryStatusLabel(row.status_name)]
     case 'transfer': return [text(row.order_sn), text(row.from_party_name || row.from_store_name), text(row.to_party_name || row.to_store_name), text(row.detail_count), operationTime(row.operation_at), inventoryStatusLabel(row.status_name)]
@@ -1524,14 +1525,14 @@ onBeforeUnmount(() => {
               <div v-else-if="analysisError" class="statistics-empty"><AlertTriangle :size="28" /><strong>{{ analysisError }}</strong></div>
               <template v-else>
                 <div class="statistics-summary"><article v-for="bucket in analysisBuckets" :key="bucket.name"><span>{{ bucket.name }}</span><strong>{{ bucket.batch_count }} 批次</strong><small>{{ bucket.inventory_amount === null ? '成本权限不足' : `库存金额 ${money(bucket.inventory_amount)}` }}</small></article></div>
-                <div class="table-scroll statistics-table"><table><thead><tr><th>商品</th><th>规格</th><th>批次</th><th v-if="activeStatisticsTab === 'expiry'">当前剩余库存</th><th>{{ activeStatisticsTab === 'expiry' ? '到期日' : '正式入库日' }}</th><th>{{ activeStatisticsTab === 'expiry' ? '距到期日天数' : '库龄天数' }}</th><th>分档</th><th>库存金额</th></tr></thead><tbody><tr v-if="!analysisRows.length"><td :colspan="activeStatisticsTab === 'expiry' ? 8 : 7" class="table-empty">暂无符合条件的批次</td></tr><tr v-for="(row, index) in analysisRows" :key="index"><td v-for="cell in row" :key="cell">{{ cell }}</td></tr></tbody></table></div>
+                <div class="table-scroll statistics-table"><table><thead><tr><th>商品</th><th>规格</th><th>单位</th><th>批次</th><th v-if="activeStatisticsTab === 'expiry'">当前剩余库存</th><th>{{ activeStatisticsTab === 'expiry' ? '到期日' : '正式入库日' }}</th><th>{{ activeStatisticsTab === 'expiry' ? '距到期日天数' : '库龄天数' }}</th><th>分档</th><th>库存金额</th></tr></thead><tbody><tr v-if="!analysisRows.length"><td :colspan="activeStatisticsTab === 'expiry' ? 9 : 8" class="table-empty">暂无符合条件的批次</td></tr><tr v-for="(row, index) in analysisRows" :key="index"><td v-for="cell in row" :key="cell">{{ cell }}</td></tr></tbody></table></div>
               </template>
             </template>
             <template v-else-if="['inbound', 'outbound'].includes(activeStatisticsTab)">
               <div v-if="movementStatisticsLoading" class="statistics-empty"><ChartNoAxesCombined :size="28" /><strong>正在读取批次事实统计</strong></div>
               <div v-else-if="movementStatisticsError" class="statistics-empty"><AlertTriangle :size="28" /><strong>{{ movementStatisticsError }}</strong></div>
               <template v-else>
-                <div class="table-scroll statistics-table"><table><thead><tr><th>业务类型</th><th>商品</th><th>规格</th><th>单据数</th><th>批次流水数</th><th>数量</th><th>成本金额</th></tr></thead><tbody><tr v-if="!movementStatisticRows.length"><td colspan="7" class="table-empty">统计期间暂无{{ activeStatisticsTab === 'inbound' ? '入库' : '出库' }}流水</td></tr><tr v-for="(row, index) in movementStatisticRows" :key="index"><td v-for="cell in row" :key="cell">{{ cell }}</td></tr></tbody></table></div>
+                <div class="table-scroll statistics-table"><table><thead><tr><th>业务类型</th><th>商品</th><th>规格</th><th>单位</th><th>单据数</th><th>批次流水数</th><th>数量</th><th>成本金额</th></tr></thead><tbody><tr v-if="!movementStatisticRows.length"><td colspan="8" class="table-empty">统计期间暂无{{ activeStatisticsTab === 'inbound' ? '入库' : '出库' }}流水</td></tr><tr v-for="(row, index) in movementStatisticRows" :key="index"><td v-for="cell in row" :key="cell">{{ cell }}</td></tr></tbody></table></div>
               </template>
             </template>
           </section>

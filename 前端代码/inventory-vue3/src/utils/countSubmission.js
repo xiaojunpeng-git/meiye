@@ -69,6 +69,16 @@ export function invalidCountCatalogRowIndexes(rows, invalidLines) {
   }, [])
 }
 
+/**
+ * 删除明细后同步问题行索引：被删除的问题行必须移除，后续行索引必须前移。
+ * 这样不会把原问题行的红色状态错误地转移到下一件正常商品。
+ */
+export function reindexCountValidationRowsAfterRemoval(indexes, removedIndex) {
+  return (Array.isArray(indexes) ? indexes : [])
+    .filter((index) => index !== removedIndex)
+    .map((index) => index > removedIndex ? index - 1 : index)
+}
+
 /** 使用草稿快照中的商品名称生成门店员工可直接处理的行级提示。 */
 export function invalidCountCatalogMessage(rows, indexes) {
   const labels = indexes.map((index) => {

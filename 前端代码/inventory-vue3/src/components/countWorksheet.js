@@ -1,7 +1,7 @@
 // 盘点工作簿只包含当前表格可见列。导入仅恢复前端草稿，正式库存仍由服务端盘点命令确认。
-export const COUNT_COLUMNS = ['商品ID', '商品名称', '商品规格', '商品条码', '账面库存', '实盘库存', '库存盈亏', '盘盈批次号', '盘盈单价', '生产日期', '到期日']
+export const COUNT_COLUMNS = ['商品ID', '商品名称', '规格', '单位', '商品条码', '账面库存', '实盘库存', '库存盈亏', '盘盈批次号', '盘盈单价', '生产日期', '到期日']
 const SHEET_NAME = '盘点资料'
-const NUMERIC_COLUMNS = new Set([4, 5, 6, 8])
+const NUMERIC_COLUMNS = new Set([5, 6, 7, 9])
 
 function quantityDifference(book, counted) {
   // 盘点数量最多四位小数；避免二进制浮点尾数使重新导入时误报盈亏不一致。
@@ -23,19 +23,19 @@ export async function exportCountXlsx(rows) {
       return Number.isFinite(number) ? number : text
     }))
     // 用户只需修改“实盘库存”，Excel 即重算盈亏；导入时服务端口径仍以两列库存数重新核对。
-    const book = Number(row[4]); const counted = Number(row[5])
+    const book = Number(row[5]); const counted = Number(row[6])
     if (Number.isFinite(book) && Number.isFinite(counted)) {
-      excelRow.getCell(7).value = { formula: `F${excelRow.number}-E${excelRow.number}`, result: quantityDifference(book, counted) }
+      excelRow.getCell(8).value = { formula: `G${excelRow.number}-F${excelRow.number}`, result: quantityDifference(book, counted) }
     }
   }
-  sheet.autoFilter = { from: 'A1', to: 'K1' }
-  sheet.columns.forEach((column, index) => { column.width = [14, 28, 18, 24, 15, 15, 15, 20, 16, 17, 17][index] })
+  sheet.autoFilter = { from: 'A1', to: 'L1' }
+  sheet.columns.forEach((column, index) => { column.width = [14, 28, 18, 12, 24, 15, 15, 15, 20, 16, 17, 17][index] })
   sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
   sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF254679' } }
-  for (const index of NUMERIC_COLUMNS) sheet.getColumn(index + 1).numFmt = index === 8 ? '0.00' : '0.####'
+  for (const index of NUMERIC_COLUMNS) sheet.getColumn(index + 1).numFmt = index === 9 ? '0.00' : '0.####'
   // Excel 会把用户填入空白批次的前导零抹掉、把 ISO 日期改作日期序列；
   // 导出时预先把这些可编辑列设为文本，避免往返导入后静默改变批次身份或日期。
-  for (const index of [0, 1, 2, 3, 7, 9, 10]) sheet.getColumn(index + 1).numFmt = '@'
+  for (const index of [0, 1, 2, 3, 4, 8, 10, 11]) sheet.getColumn(index + 1).numFmt = '@'
   // 库存数量和单价写真实数值；商品/规格/条码/批次及 ISO 日期保持文本原貌。
   return new Uint8Array(await workbook.xlsx.writeBuffer())
 }
@@ -43,7 +43,7 @@ export async function exportCountXlsx(rows) {
 function cellText(cell, rowNumber, columnNumber, date1904 = false) {
   const value = cell.value
   if (value == null) return ''
-  if (columnNumber >= 10 && columnNumber <= 11 && typeof value === 'number' && Number.isInteger(value)) {
+  if (columnNumber >= 11 && columnNumber <= 12 && typeof value === 'number' && Number.isInteger(value)) {
     // ExcelJS serializes a Date written into a text-formatted date column as an Excel
     // day number. Decode only valid date-column serials; other numeric input is not a date.
     const epoch = date1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 30)
@@ -53,7 +53,7 @@ function cellText(cell, rowNumber, columnNumber, date1904 = false) {
     }
   }
   if (value instanceof Date) {
-    if (columnNumber < 10 || columnNumber > 11 || Number.isNaN(value.getTime())) {
+    if (columnNumber < 11 || columnNumber > 12 || Number.isNaN(value.getTime())) {
       throw new Error(`第 ${rowNumber} 行第 ${columnNumber} 列不是有效文本或数值。`)
     }
     return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`
@@ -98,17 +98,17 @@ export async function parseCountXlsx(buffer) {
     const row = sheet.getRow(rowNumber)
     const values = COUNT_COLUMNS.map((_, index) => {
       const cell = row.getCell(index + 1)
-      if (index === 6 && cell.value && typeof cell.value === 'object' && cell.formula) {
+      if (index === 7 && cell.value && typeof cell.value === 'object' && cell.formula) {
         // Excel may rewrite identical row formulas as a shared formula; ExcelJS resolves each
         // cell's effective formula here, so only the exported F-E calculation is accepted.
-        if (cell.formula !== `F${rowNumber}-E${rowNumber}`) {
+        if (cell.formula !== `G${rowNumber}-F${rowNumber}`) {
           throw new Error(`第 ${rowNumber} 行库存盈亏公式已被修改。`)
         }
-        const book = Number(row.getCell(5).value); const counted = Number(row.getCell(6).value)
+        const book = Number(row.getCell(6).value); const counted = Number(row.getCell(7).value)
         return Number.isFinite(book) && Number.isFinite(counted) ? String(quantityDifference(book, counted)) : ''
       }
       const text = cellText(cell, rowNumber, index + 1, date1904)
-      return index >= 9 ? countDateText(text, rowNumber) : text
+      return index >= 10 ? countDateText(text, rowNumber) : text
     })
     if (!values.some((value) => value !== '')) {
       if (rowNumber < sheet.rowCount) throw new Error(`第 ${rowNumber} 行为空，请删除空行后重试。`)

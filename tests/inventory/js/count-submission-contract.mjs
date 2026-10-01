@@ -3,6 +3,7 @@ import {
   changedCountRows,
   invalidCountCatalogMessage,
   invalidCountCatalogRowIndexes,
+  reindexCountValidationRowsAfterRemoval,
   validateCountSubmissionRows,
 } from '../../../前端代码/inventory-vue3/src/utils/countSubmission.js'
 
@@ -48,4 +49,9 @@ assert.equal(
   invalidCountCatalogMessage(catalogRows, invalidCatalogIndexes),
   '第 1 行「芦荟保湿洗面奶」、第 3 行「菁纯霜单支」已从当前门店商品目录删除，暂时无法完成盘点。请先恢复商品，或删除这些盘点行后再提交。',
 )
+
+// 删除问题行后必须移除对应高亮；删除前置普通行时，后续问题行索引只前移不能串到相邻商品。
+assert.deepEqual(reindexCountValidationRowsAfterRemoval([0, 2], 0), [1])
+assert.deepEqual(reindexCountValidationRowsAfterRemoval([2], 2), [])
+assert.deepEqual(reindexCountValidationRowsAfterRemoval([1, 3], 0), [0, 2])
 console.log('COUNT_SUBMISSION_CONTRACT_OK')
