@@ -1789,6 +1789,9 @@ final class CashierV3SalesOrderQueryServices
         if (!empty($header['entitlement_only'])) {
             // 服务单据可复用详情/打印，作废走服务冲销；不授予销售资金操作。
             $mapped['entitlementOnly'] = true;
+            // 纯权益单即使只有一条服务也按结账请求整单作废。显式返回权威组标识，
+            // 避免浏览器从展示用订单 ID 或服务记录号反推写命令的作用范围。
+            $mapped['checkoutRequestId'] = (string)$header['checkout_request_id'];
             $mapped['lifecycleOrderId'] = '';
             $mapped['availableActions'] = [];
             $mapped['businessDateBasis'] = 'v3_service_fact';

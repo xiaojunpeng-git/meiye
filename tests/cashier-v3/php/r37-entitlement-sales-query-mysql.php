@@ -21,6 +21,11 @@ foreach ($full['records'] as $record) {
     $ids[$record['id']]=true;
     if (empty($record['entitlementOnly'])) continue;
     $pure++;
+    // 列表和详情必须原样携带权威结账组标识；单条权益不能因展示 ID 被误判为逐条作废。
+    $requestId = substr($record['id'], strlen('service:'));
+    if (($record['checkoutRequestId'] ?? '') !== $requestId) throw new RuntimeException('pure entitlement group identity missing in list');
+    $identityDetail = $reader->salesOrderDetail(['orderId'=>$record['id']], $operator, $scope);
+    if (($identityDetail['checkoutRequestId'] ?? '') !== $requestId) throw new RuntimeException('pure entitlement group identity missing in detail');
     // 来源必须来自这次结账的冻结选择，验证列表和详情都不再丢失；只读不回填。
     $selectedSource = Db::name('cashier_v3_checkout_business_source_selection')
         ->where('tenant_id', $tenant)->where('store_id', $store)->where('checkout_kind', 'sale')

@@ -20,6 +20,7 @@ import {
   useCashierV3State
 } from '@/services/cashierV3Bridge'
 import {
+  entitlementCheckoutRequestId,
   isUnavailableSalesOrderEconomics,
   mergeSalesOrderCenterProjection,
   nextSalesOrderQueryWithCursor,
@@ -2033,7 +2034,8 @@ async function submitServiceVoid() {
     serviceVoidError.value = '作废原因不能超过255字。'
     return
   }
-  const checkoutRequestId = record.entitlementOnly ? String(record.id || '').replace(/^service:/, '') : ''
+  // 一条权益服务同样是完整的纯权益消费单；使用后端组标识提交一次整单冲销。
+  const checkoutRequestId = entitlementCheckoutRequestId(record)
   if (!checkoutRequestId) {
     serviceVoidError.value = '消费订单标识无效，请刷新后重试。'
     return
@@ -2044,7 +2046,12 @@ async function submitServiceVoid() {
   serviceVoidSubmitting.value = true
   serviceVoidError.value = ''
   try {
-    const result = await requestAction('void-service-record', { checkoutRequestId, reason, idempotencyKey })
+    const result = await requestAction('void-service-record', {
+      checkoutRequestId,
+      orderId: `service:${checkoutRequestId}`,
+      reason,
+      idempotencyKey
+    })
     const status = actionStatus(result)
     if (isTerminalActionStatus(status)) {
       serviceVoidCommandIds.value = { ...serviceVoidCommandIds.value, [key]: null }

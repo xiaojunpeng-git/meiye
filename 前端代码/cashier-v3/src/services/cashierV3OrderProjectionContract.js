@@ -20,6 +20,18 @@ export function salesOrderProjectionFromResult(result) {
   return partition
 }
 
+/** 纯权益作废以服务端结账组标识为准；旧投影只允许从规范服务订单 ID 兼容读取。 */
+export function entitlementCheckoutRequestId(record) {
+  if (record?.entitlementOnly !== true) return ''
+  const explicit = String(record.checkoutRequestId || '').trim()
+  const orderId = String(record.id || record.orderId || '').trim()
+  const fromOrder = orderId.startsWith('service:') ? orderId.slice('service:'.length) : ''
+  // 两种服务端身份冲突时拒绝写入，不能误作废另一笔结账的权益。
+  if (explicit && fromOrder && explicit !== fromOrder) return ''
+  const requestId = explicit || fromOrder
+  return /^[A-Za-z0-9_-]{1,64}$/.test(requestId) ? requestId : ''
+}
+
 export function mergeSalesOrderCenterProjection(current, incoming) {
   const base = isRecord(current) ? current : {}
   if (!isRecord(incoming) || incoming.contractVersion !== ORDER_CONTRACT_VERSION) return base

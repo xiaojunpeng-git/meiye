@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { requestOrderVoidReceipt } from '../../../前端代码/cashier-v3/src/services/orderVoidReceiptRecovery.js'
+import { entitlementCheckoutRequestId } from '../../../前端代码/cashier-v3/src/services/cashierV3OrderProjectionContract.js'
+
+// 一条权益服务也按所属结账组提交；异常或冲突身份不得退化为单条作废。
+assert.equal(entitlementCheckoutRequestId({ entitlementOnly: true, checkoutRequestId: 'CKR-one', id: 'service:CKR-one', items: [{ serviceFactId: 1 }] }), 'CKR-one')
+assert.equal(entitlementCheckoutRequestId({ entitlementOnly: true, id: 'service:CKR-old', items: [{ serviceFactId: 1 }] }), 'CKR-old')
+assert.equal(entitlementCheckoutRequestId({ entitlementOnly: true, checkoutRequestId: 'CKR-one', id: 'service:CKR-other' }), '')
+assert.equal(entitlementCheckoutRequestId({ entitlementOnly: true, id: 'service:bad:identity' }), '')
+assert.equal(entitlementCheckoutRequestId({ entitlementOnly: false, id: 'service:CKR-one' }), '')
 
 // 模拟提交已成功但传输断开，验证恢复始终沿用同一个命令对象和幂等键。
-const payload = { command: { idempotencyKey: 'same-key' }, checkoutRequestId: 'CKR-test' }
+const payload = { command: { idempotencyKey: 'same-key' }, checkoutRequestId: 'CKR-test', orderId: 'service:CKR-test' }
 const success = { result: { status: 'success' }, replay: true }
 for (const first of ['throw', 'invalid', 'success']) {
   const calls = []
@@ -27,5 +35,5 @@ assert.doesNotMatch(view, />修改手艺人<|打印服务小票|printServiceReco
 assert.match(view, /openRecordDetail\(record\)">详情/)
 assert.match(view, /'生成中…' : '打印'/)
 assert.match(view, /activeTabKey === 'service' \? '详情' : '查看详情'/)
-assert.match(view, /requestAction\('void-service-record', \{ checkoutRequestId, reason, idempotencyKey \}\)/)
+assert.match(view, /requestAction\('void-service-record', \{[\s\S]*?checkoutRequestId,[\s\S]*?orderId: `service:\$\{checkoutRequestId\}`,[\s\S]*?reason,[\s\S]*?idempotencyKey/)
 console.log('PASS: service action removal, short labels, checkout-group-only payload')

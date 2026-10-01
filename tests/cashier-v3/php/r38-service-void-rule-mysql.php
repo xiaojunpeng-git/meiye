@@ -23,16 +23,19 @@ $scope = new CashierV3DataScopeContext(71,701,$store,$tenant,$org,[$store],Cashi
 $operator = new CashierV3OperatorScope($store,71,$org,$tenant);
 $recorder = new CashierV3BusinessEventRecorder(); $writer = new CashierV3ServiceRecordVoidServices();
 $original = Db::name('cashier_v3_card_rule_component')->where('legacy_detail_id',$detail)->find();
-foreach (['mixed','pure'] as $mode) {
+// pure_single 覆盖“整笔消费只有一条权益服务”的实际业务边界；同样走整组事务。
+foreach (['mixed','pure','pure_single'] as $mode) {
     $request = 'r38-void-' . $mode . '-' . bin2hex(random_bytes(6));
     Db::startTrans();
     try {
-        // 在事务内模拟两次核销后的状态，回滚后用户的原始余额及作废账本不变。
-        Db::name('cashier_v3_card_rule_component')->where('id',$original['id'])->update(['remaining_times'=>8,'status'=>'active']);
-        Db::name('store_order_cart_info')->where('id',$detail)->update(['write_surplus_times'=>8]);
-        Db::name('user_card_holder')->where('id',$holder)->update(['write_surplus_times'=>8]);
+        // 在事务内模拟本组核销后的余额，最终回滚，不改用户原始权益。
+        $lineCount = $mode === 'pure_single' ? 1 : 2;
+        $remaining = 10 - $lineCount;
+        Db::name('cashier_v3_card_rule_component')->where('id',$original['id'])->update(['remaining_times'=>$remaining,'status'=>'active']);
+        Db::name('store_order_cart_info')->where('id',$detail)->update(['write_surplus_times'=>$remaining]);
+        Db::name('user_card_holder')->where('id',$holder)->update(['write_surplus_times'=>$remaining]);
         $ids = [];
-        for ($i=0; $i<2; $i++) {
+        for ($i=0; $i<$lineCount; $i++) {
             $service = $template; unset($service['id']);
             $service['checkout_request_id']=$request; $service['source_line_id']=$request.'-'.$i;
             $service['service_fact_id']=$request.'-sf-'.$i; $service['service_record_no']=$request.'-'.$i;
@@ -62,22 +65,26 @@ foreach (['mixed','pure'] as $mode) {
             $cascade = new ReflectionMethod(CashierV3OrderLifecycleServices::class,'voidCompletedServiceFactsInTx');
             $cascade->setAccessible(true);
             $cascade->invoke(new CashierV3OrderLifecycleServices(),['storeId'=>$store,'checkoutRequestId'=>$request,'sourceNo'=>'R38'],$request,$operator,$scope,$recorder,'r38-test');
-        } else {
+        } elseif ($mode === 'pure') {
             // 先单条作废，再通过订单中心纯权益整组入口处理剩余一条。
             $single=$input; $single['payload']=['serviceFactId'=>$ids[0],'reason'=>'R38先作废一条'];
             $writer->executeInTx('void-service-record',$single);
             $result=$writer->executeInTx('void-service-record',$input);
             verifyR38(count($result['records'])===1,'pure skips already voided service');
+        } else {
+            // 一条权益也是一笔完整消费单，不能要求另有第二条服务才能作废。
+            $result=$writer->executeInTx('void-service-record',$input);
+            verifyR38(count($result['records'])===1,'pure_single voids sole entitlement service');
         }
         foreach (['cashier_v3_card_rule_component'=>['id',$original['id'],'remaining_times'],
             'store_order_cart_info'=>['id',$detail,'write_surplus_times'],
             'user_card_holder'=>['id',$holder,'write_surplus_times']] as $table=>$fields) {
-            verifyR38((int)Db::name($table)->where($fields[0],$fields[1])->value($fields[2])===10,"$mode restores $table 8 -> 10");
+            verifyR38((int)Db::name($table)->where($fields[0],$fields[1])->value($fields[2])===10,"$mode restores $table $remaining -> 10");
         }
         $single=$input; $single['payload']=['serviceFactId'=>$ids[0],'reason'=>'重复'];
         $writer->executeInTx('void-service-record',$single);
         verifyR38((int)Db::name('cashier_v3_card_rule_component')->where('id',$original['id'])->value('remaining_times')===10,"$mode retry does not inflate rights");
-        verifyR38((int)Db::name('cashier_v3_entitlement_reversal_fact')->whereIn('service_fact_id',$ids)->sum('quantity')===2,"$mode reversal ledger quantity=2");
+        verifyR38((int)Db::name('cashier_v3_entitlement_reversal_fact')->whereIn('service_fact_id',$ids)->sum('quantity')===$lineCount,"$mode reversal ledger quantity=$lineCount");
         verifyR38((int)Db::name('cashier_v3_performance_fact')->where('checkout_request_id',$request)->sum('amount_cents')===0,"$mode performance reversal balances");
     } finally { Db::rollback(); }
     verifyR38(Db::name('cashier_v3_entitlement_service_fact')->where('checkout_request_id',$request)->count()===0,"$mode rollback removes fixtures");
