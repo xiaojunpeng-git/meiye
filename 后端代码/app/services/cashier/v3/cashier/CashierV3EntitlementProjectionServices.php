@@ -829,6 +829,12 @@ final class CashierV3EntitlementProjectionServices
                 // exception because they own a separate paid count and amount.
                 $project['purchaseTimes'] = (int)$ruleAuthority['totalTimes'];
             }
+            // 单价仅展示原购买平均价，不使用余次、可用余额或核销计价；不进入扣款快照。
+            $project['unitPrice'] = $this->purchaseUnitPrice(
+                $project['purchaseAmount'],
+                (int)$project['totalPurchaseTimes'],
+                !empty($project['unlimited'])
+            );
             $projectsByHolder[(int)$holder['id']][] = $project;
         }
 
@@ -915,6 +921,11 @@ final class CashierV3EntitlementProjectionServices
                 'remainingTimes' => $remaining,
                 'purchaseTimes' => $purchaseTimes,
                 'purchaseAmount' => $sourceAmounts['purchaseAmount'],
+                'unitPrice' => $this->purchaseUnitPrice(
+                    $sourceAmounts['purchaseAmount'],
+                    $purchaseTimes,
+                    is_array($holderRuleAuthority) && !empty($holderRuleAuthority['unlimited'])
+                ),
                 'remainingAmount' => $sourceAmounts['remainingAmount'],
                 'outstandingDebtAmount' => $outstandingDebtAmount,
                 'cancelledDebtAmount' => $this->cancelledDebt($order, $debts[(int)($order['id'] ?? 0)] ?? null, $tenantId),
@@ -944,6 +955,20 @@ final class CashierV3EntitlementProjectionServices
             }
         }
         return $sources;
+    }
+
+    /**
+     * 原购买金额÷原购买次数的只读整数展示价，直接截取整数部分，
+     * 与尾差归末次规则保持一致；绝不回写或替代实际扣款及尾差分摊。
+     * 无可信购买金额、无正数原次数或不限次权益返回 null，不猜测目录价。
+     */
+    private function purchaseUnitPrice(?string $purchaseAmount, int $purchaseTimes, bool $unlimited): ?string
+    {
+        if ($unlimited || $purchaseTimes <= 0 || $purchaseAmount === null
+            || preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', $purchaseAmount) !== 1) {
+            return null;
+        }
+        return bcdiv($purchaseAmount, (string)$purchaseTimes, 0);
     }
 
     private function ruleProjectAmounts(array $authority): array

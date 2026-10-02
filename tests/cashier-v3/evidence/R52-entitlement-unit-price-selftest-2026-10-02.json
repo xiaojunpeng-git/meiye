@@ -1,0 +1,71 @@
+{
+  "round": "R52",
+  "status": "产品经理已确认本固定版本验收，授权commit、部署瑞昊及线上验证后push；执行结果另存发布记录",
+  "acceptance": {
+    "date": "2026-10-02",
+    "userStatement": "我测试没有问题,commit,部署瑞昊,push",
+    "fingerprints": "六个源码/测试SHA-256逐一一致，提交前12个算法边界及尾差不变检查、6项列序/欠款合同再次通过",
+    "scope": "仅第52轮单价整数截断与九列展示；不授权其他任务未发布改动"
+  },
+  "baselineHead": "f8db071e0fef91f7f5ae9ecc617d9a1a5b231012",
+  "approvedScope": "使用权益表在购买金额后、有效期前新增单价；原购买金额除以原购买次数，仅取整数部分，不四舍五入",
+  "columnOrder": ["操作按钮", "卡名称", "余次", "剩余余额", "欠款", "取消欠款", "购买金额", "单价", "有效期"],
+  "architectureReview": {
+    "authority": "复用权益投影已解析的原购买金额和原购买次数；卡行使用卡级原次数，项目行使用金额分摊快照totalPurchaseTimes",
+    "grain": "卡/卡内项目各自一个只读unitPrice展示值，不产生经营统计指标或新业务事实",
+    "eventsAndTime": "未新增业务事件；不变更销售、服务、核销四类时间或成功生效时点",
+    "transactionsConcurrencyIdempotency": "仅在原权限查询结果内派生，不增加数据库写入、锁、幂等请求、事务或Outbox",
+    "reversals": "原购买金额与历史分摊快照不修改；退款作废和权益是否可用继续由既有规则控制",
+    "snapshotsAndPermission": "不读取实时目录价，不使用剩余次数、欠款或取消金额重算单价；沿用原会员门店权限",
+    "reuse": "后端BCMath截断，前端只展示后端unitPrice；不限次或缺少可信分母/金额返回null显示短横线",
+    "performanceAndMigration": "每行常数次BCMath，无新增SQL、索引、迁移或历史回填",
+    "reconciliation": "6980/30显示232，原分摊前29次合计6728、末次252、合计6980；单价绝不替代末次实际扣款",
+    "environment": "仅本机源码及18091本地运行服务，目标客户/线上迁移/远程备份/回滚不适用；未连接远程实例"
+  },
+  "sourceFiles": {
+    "frontend": {
+      "前端代码/cashier-v3/src/components/cashier/EntitlementSelectorOverlay.vue": "9ddb939266b4b06bf7f7b0c8a7a9bc24beec09990e8745e5e82a05b1e5bbd8f3",
+      "前端代码/cashier-v3/src/styles/base.css": "af059b1cdf2ebbc0aed9d2d37b025c37c8576ccdbc8a4f85ee658589102bdde0"
+    },
+    "backend": {
+      "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php": "c8dcdf9fded718c30a3053fa9c8fdf2a7d5e9866d39d7509b440b7859dc19019"
+    },
+    "tests": {
+      "tests/cashier-v3/js/c2-entitlement-frontend-contract.mjs": "2c48b9aff3704394821f06c6eb1d5d9d52fa6080fedd0e180ae5b3ad7d6c1d3f",
+      "tests/cashier-v3/php/entitlement-selector-debt-display-contract.php": "e861ff01165ea0bd7dbafe2662030b5b90bc8315e56269a6a7cc9de39ae3d35e",
+      "tests/cashier-v3/php/entitlement-unit-price-contract.php": "7f799665b25bb5fa6861030180290c4d3a7fe92d2ef7b941271a98717609b7b8"
+    },
+    "databaseMigrations": [],
+    "engineeringScripts": [],
+    "generatedBuild": []
+  },
+  "trackedFilePatchSha256": "bace36062e47cc27104bced7572d22be7529a0dfc615d9d5b5f54d1958e138d1",
+  "commentReview": "前端说明单价与欠款/实际扣款分离，CSS说明九列表内横滚；后端说明截断、历史原价及无可信次数边界；两份既有合同及新增算法测试同步说明业务约束",
+  "tests": [
+    "PHP7.4本地容器：12个真实算法边界及尾差归末次不变断言通过，未连接数据库",
+    "PHP7.4权益投影语法检查通过",
+    "欠款/取消额展示及九列顺序合同6/6通过",
+    "Vue SFC script与template编译通过，18091返回编译内容含单价及source/project.unitPrice",
+    "综合JS合同102通过、6既有失败；使用HEAD旧测试和HEAD旧selector/CSS对照，失败项完全一致，没有新增失败",
+    "另跑既有member-entitlement-whole-yuan合同7通过、1失败：会员详情与选择器读同一实际销售分摊的静态断言，与本次未修改的会员详情文件相关；不宣称全量回归通过",
+    "git diff --check通过"
+  ],
+  "knownLegacyJsFailures": [
+    "类型/单位静态断言含已有¥格式化正则",
+    "购物车顶部权益工具条与选购区对齐",
+    "充值赠送会员上下文",
+    "项目替换直接提交权益事务",
+    "项目替换升级目标筛选与取消",
+    "空购物车挂单和结账双层禁止"
+  ],
+  "browserEvidence": {
+    "url": "http://127.0.0.1:18091/view_cashier_v3/?fresh=r36-replacement-writeoff-final#/cashier",
+    "actions": "核对空购物车后刷新；重新选择原会员丛建平，恢复原来源A老客首护，打开使用权益并横向滚动验证",
+    "result": "幸福霜卡行及项目行单价298；剩余次数1、可用金额198、取消欠款100、购买金额2980不变；老项目卡和项目金额0对应单价0；原禁用添加状态不变",
+    "businessWrites": "没有充值、支付、服务核销、作废、取消欠款或权益资产写入；仅本地工作台会员/来源恢复",
+    "localRuntime": "因Vite仍缓存旧编译，仅重启mohe-cashier-v3-src；USR1刷新mohe-cashier-app工作进程，未改变配置或其他服务",
+    "screenshot": "tests/cashier-v3/evidence/R52-entitlement-unit-price-2026-10-02.jpg",
+    "screenshotSha256": "26452feea54c298a074d1d09fab9fdf723695287d829a0e1ee589de35c48fded"
+  },
+  "limits": "未执行真实资金或核销业务写入、全量回归、8080打包或线上验证；既有无关脏改动保留；本次用户确认取整口径不等于产品经理对固定成果验收"
+}

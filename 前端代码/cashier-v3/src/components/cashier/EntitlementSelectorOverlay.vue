@@ -448,6 +448,7 @@ function operationProjectSelected(source = {}, project = {}) {
             <span>欠款</span>
             <span>取消欠款</span>
             <span>购买金额</span>
+            <span>单价</span>
             <span>有效期</span>
           </div>
 
@@ -457,7 +458,7 @@ function operationProjectSelected(source = {}, project = {}) {
               :class="{ 'is-unavailable': !isSourceAvailable(source) }"
               role="row"
             >
-              <!-- 列顺序与表头一致，取消金额紧随欠款；只移动展示，卡级欠款不复制到项目行。 -->
+              <!-- 单价只消费后端原购买平均价；与欠款和实际扣款分离，父子行保持九列对齐。 -->
               <button
                 v-if="sourceOperationLabel()"
                 type="button"
@@ -482,6 +483,7 @@ function operationProjectSelected(source = {}, project = {}) {
               <span>{{ displayAmount(source.outstandingDebtAmount) }}</span>
               <span>{{ displayAmount(source.cancelledDebtAmount) }}</span>
               <span>{{ displayAmount(source.purchaseAmount) }}</span>
+              <span>{{ displayAmount(source.unitPrice) }}</span>
               <span>{{ sourceExpiryDate(source) }}</span>
             </article>
 
@@ -514,6 +516,7 @@ function operationProjectSelected(source = {}, project = {}) {
               <span aria-hidden="true" />
               <span aria-hidden="true" />
               <span>{{ displayAmount(project.purchaseAmount) }}</span>
+              <span>{{ displayAmount(project.unitPrice) }}</span>
               <span aria-hidden="true" />
             </article>
           </template>

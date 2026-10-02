@@ -16,13 +16,15 @@ $checks = [
     'debt column follows balance and renders the backend source value' => str_contains($selector, '<span>剩余余额</span>')
         && str_contains($selector, '<span>欠款</span>')
         && str_contains($selector, '{{ displayAmount(source.outstandingDebtAmount) }}'),
+    // 欠款和取消额始终只属于父卡；新增单价不得打破项目行空列与表头对齐。
     'project rows do not repeat a card-level debt amount' => str_contains(
         $selector,
         'displayProjectRemainingAmount(source, project) }}</span>' . PHP_EOL
         . '              <span aria-hidden="true" />' . PHP_EOL
+        . '              <span aria-hidden="true" />' . PHP_EOL
         . '              <span>{{ displayAmount(project.purchaseAmount) }}</span>'
     ),
-    'R50 eight headers are ordered and cancel value comes from backend' => preg_match('/<span>操作按钮<\/span>\s*<span>卡名称<\/span>\s*<span>余次<\/span>\s*<span>剩余余额<\/span>\s*<span>欠款<\/span>\s*<span>购买金额<\/span>\s*<span>有效期<\/span>\s*<span>取消欠款<\/span>/', $selector) === 1
+    'R52 nine headers are ordered and cancel value comes from backend' => preg_match('/<span>操作按钮<\/span>\s*<span>卡名称<\/span>\s*<span>余次<\/span>\s*<span>剩余余额<\/span>\s*<span>欠款<\/span>\s*<span>取消欠款<\/span>\s*<span>购买金额<\/span>\s*<span>单价<\/span>\s*<span>有效期<\/span>/', $selector) === 1
         && str_contains($selector, '{{ displayAmount(source.cancelledDebtAmount) }}')
         && str_contains($projection, "'cancelledDebtAmount' => \$this->cancelledDebt("),
     'source and project operation precede name cell' => strpos($selector, '@click="chooseSourceOperation(source)"') < strpos($selector, '<div class="cashier-entitlement-table__source-name"')
