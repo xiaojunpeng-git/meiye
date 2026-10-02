@@ -21,7 +21,7 @@ function fixture(spec = 0) {
 }
 function context(attrValue = []) {
   return { attrValue, levelList: [{ id: 1, discount: 100 }], formData: { id: 0, store_name: '', unit_name: '', is_del: 0, product_type: 0,
-      type: 0, spec_type: 0, attr: {}, coupons: [], brand_id: [], delivery_type: [], store_delivery_type: [], limit_type: 0, is_limit: false },
+      type: 0, spec_type: 0, slider_image: [], attr: {}, coupons: [], brand_id: [], delivery_type: [], store_delivery_type: [], limit_type: 0, is_limit: false },
     $route: { params: { id: '290295' }, query: {} }, $refs: {}, oneFormBatch: [{}],
     $set: (object, key, value) => { object[key] = value; }, generateHeader() {},
     $computes: { Mul: (a, b) => a * b, Div: (a, b) => a / b },
@@ -50,6 +50,23 @@ async function main() {
   assert.equal(normal.formData.attr.price, 3980);
   assert.equal(normal.formData.attr.cost, 2000);
   assert.equal(normal.formData.attr.vip_price, 3980);
+  // 使用反馈商品的真实形态：有正常SKU但轮播图为null，验证子组件所需数组及既有封面均保留。
+  const legacyImage = context([{ suk: '默认', vip_price: 0, level_price: [] }]);
+  const legacyData = fixture();
+  Object.assign(legacyData, { id: 498505, store_name: '焕能净透洁面泡', slider_image: null, image: 'https://example.test/original.png' });
+  legacyData.attr = { price: 168, cost: 0, ot_price: 168 };
+  infoData.call(legacyImage, legacyData);
+  assert.equal(legacyImage.formData.store_name, '焕能净透洁面泡');
+  assert.deepEqual(legacyImage.formData.slider_image, [legacyData.image]);
+  assert.equal(legacyImage.formData.slider_image.length, 1, '子组件读取图片数量不再抛错');
+  assert.equal(legacyImage.formData.attr.price, 168);
+  const noImage = context(); const noImageData = fixture(); noImageData.slider_image = null;
+  infoData.call(noImage, noImageData);
+  assert.deepEqual(noImage.formData.slider_image, [], '无原封面时不伪造图片');
+  const existingImages = context(); const existingImagesData = fixture();
+  existingImagesData.slider_image = ['https://example.test/a.png', 'https://example.test/b.png'];
+  infoData.call(existingImages, existingImagesData);
+  assert.deepEqual(existingImages.formData.slider_image, existingImagesData.slider_image, '合法轮播图顺序不变');
   const multi = context([{ suk: '小瓶', vip_price: 20, level_price: [] }]);
   const multiData = fixture(1); multiData.attrs = [{ attr_arr: ['小瓶'], price: 30, cost: 10, ot_price: 40 }];
   infoData.call(multi, multiData);

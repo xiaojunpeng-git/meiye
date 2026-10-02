@@ -3190,6 +3190,11 @@ export default {
       });
     },
     infoData(data) {
+      // 历史商品可能没有轮播图数组；只读投影沿用原封面，不让子组件读取null.length中断整页回显。
+      // 此处不补写数据库或创造图片，正式保存仍由既有接口校验原封面/用户选择的图片。
+      if (!Array.isArray(data.slider_image)) {
+        data.slider_image = data.image ? [data.image] : [];
+      }
       // 规格接口允许旧商品返回空数组；基本资料仍须回显，缺失金额保持空值待人工补全。
       this.specificationMissing = this.attrValue.length === 0;
       if (this.specificationMissing) {
