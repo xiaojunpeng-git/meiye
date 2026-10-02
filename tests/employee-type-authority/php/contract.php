@@ -58,10 +58,13 @@ etaAssert(
         && strpos($personSource, "'employment_type_version'") !== false
 );
 etaAssert(
-    'store person complete only reads and writes type through current-store assignment checks',
+    'store type uses forced target-store boundary without extra operator assignment requirement',
     strpos($personSource, "readSnapshot(\$employeeId, 'store', \$staffId, \$storeId)") !== false
-        && strpos($personSource, "\$source,\n                \$staffId,\n                \$storeId") !== false
+        // 参数语义不依赖缩进；旧断言硬编码空格会把正确的完整保存调用误判为失败。
+        && preg_match('/\$source\s*,\s*\$staffId\s*,\s*\$storeId\s*\)/', $personSource) === 1
         && strpos($typeAuthoritySource, 'assertStoreManagePermission') !== false
+        && strpos($typeAuthoritySource, '$this->assertStoreTargetAssignment($employeeId, $staffId, $storeId)') !== false
+        && strpos($typeAuthoritySource, '$operatorStaffId') === false
 );
 etaAssert(
     'employment type transaction guard supports dynamic database proxies',

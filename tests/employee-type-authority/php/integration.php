@@ -228,9 +228,10 @@ etaiAssert(
 
 $snapshot = $service->readSnapshot(10, 'hq');
 $storeSnapshot = $service->readSnapshot(10, 'store', 110, 8);
+// storeId 是入口强制的当前门店，不是目标员工原店；不能让测试伪造已认证门店。
 $crossStoreWrite = Db::transaction(function () use ($service, $storeOperator): string {
     return etaiMessage(function () use ($service, $storeOperator): void {
-        $service->saveTypeInTx(13, 'internal', 2, $storeOperator, etaiAudit(110), 'store', 113, 9);
+        $service->saveTypeInTx(13, 'internal', 2, $storeOperator, etaiAudit(110), 'store', 113, 8);
     });
 });
 etaiAssert(
@@ -239,8 +240,15 @@ etaiAssert(
         && $snapshot['employment_type_version'] === 2
         && $storeSnapshot['employment_type_code'] === 'outsourced'
         && $storeSnapshot['employment_type_version'] === 2
-        && strpos($crossStoreWrite, '当前账号无本门店人员类型管理权限') !== false
+        && strpos($crossStoreWrite, '员工不属于当前门店') !== false
 );
+
+// 组织会话没有本店任职也可使用已授权的编辑功能；相同类型不产生新版本或审计。
+$organizationNoop = Db::transaction(function () use ($service): array {
+    return $service->saveTypeInTx(10, 'outsourced', 2, etaiAdmin(999999, 1, 3), etaiAudit(999999), 'store', 110, 8);
+});
+etaiAssert('authorized organization session does not require operator store assignment',
+    !$organizationNoop['changed'] && $organizationNoop['employment_type_version'] === 2);
 
 $token = '11111111-1111-4111-8111-111111111111';
 $firstIdem = $service->saveType(12, 'outsourced', 1, $super, [

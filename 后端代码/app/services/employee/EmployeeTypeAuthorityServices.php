@@ -316,20 +316,16 @@ class EmployeeTypeAuthorityServices extends BaseServices
     }
 
     /**
-     * 门店端只能通过已登录且在当前门店任职的员工，修改同一门店任职员工的类型。
-     * 路由角色中间件仍负责“员工列表维护”功能权限；这里补齐服务层的门店边界。
+     * 门店端复用入口已验证的登录、员工新增/编辑功能权限与强制门店会话。
+     * 组织权限会话的 id 是会话主键，不是任职主键；不能再要求操作者在本店任职，
+     * 也不能用该 id 查询 system_store_staff。这里仅保留身份有效性及目标本店边界，
+     * 不新增独立的“人员类型管理”权限；总部独立类型入口不受此调整影响。
      */
     public function assertStoreManagePermission(array $adminInfo, int $employeeId, int $staffId, int $storeId): void
     {
-        $operatorStaffId = (int)($adminInfo['id'] ?? 0);
-        if ($operatorStaffId <= 0 || $employeeId <= 0 || $staffId <= 0 || $storeId <= 0) {
+        $operatorId = (int)($adminInfo['id'] ?? 0);
+        if ($operatorId <= 0 || $employeeId <= 0 || $staffId <= 0 || $storeId <= 0) {
             throw new AdminException('无法确认门店任职，禁止修改人员类型');
-        }
-        $operator = Db::name('system_store_staff')
-            ->where('id', $operatorStaffId)->where('store_id', $storeId)
-            ->where('status', 1)->where('is_del', 0)->lock(true)->find();
-        if (!$operator) {
-            throw new AdminException('当前账号无本门店人员类型管理权限');
         }
         $this->assertStoreTargetAssignment($employeeId, $staffId, $storeId);
     }
