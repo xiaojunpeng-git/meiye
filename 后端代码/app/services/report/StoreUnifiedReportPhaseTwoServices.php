@@ -1034,6 +1034,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             )
             ->whereBetween('sv.business_date', [$range['start'], $range['end']])
             ->where('sv.service_status', 'completed')
+            // 服务事实冻结的顾客计数规则是权威口径：朋友明确不计人次时排除，
+            // 本人仍正常计数；不改变收款、有效人员或服务审计记录。
+            ->whereRaw("(sv.service_object <> 'friend' OR sv.friend_counts_as_customer = 1)")
             ->whereNull('vo.id');
         $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'sv');
         $rows = $query
@@ -1266,7 +1269,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $source=$source!==''?$source:'该来源';
                 $descriptions=[
                     'walk_in'=>'汇总有权限人员在市场明细表保存的进店数：会员按“门店＋业务日期＋会员＋来源”汇总，游客按原始订单独立记录；新行尚未保存时读取原单据已保存值，新旧值不会重复相加。仅 B 来源显示该列。',
-                    'visits'=>'统计所选日期内归属“'.$source.'”、已完成且未作废的服务人次。会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
+                    'visits'=>'统计所选日期内归属“'.$source.'”、已完成且未作废的服务人次，排除选择“朋友、不计人次”的服务。会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
                     'effective'=>'统计所选日期内归属“'.$source.'”且净记账收款达到标准的会员人数：A 来源每位会员至少 1,000 元，其他来源至少 500 元；按门店、来源和会员去重，游客不计。退款会抵减，已作废销售不计。',
                     'amount'=>'合计所选日期内归属“'.$source.'”的有效记账收款净额。现金退款在退款发生日计入 K退款顾客并冲减金额；作废销售冲减原来源；余额支付和旧卡录入不计。',
                 ];
@@ -1295,7 +1298,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'member_phone'=>'显示会员资料中当前保存的手机号码；未填写则留空。',
             'dimension'=>'显示业务发生时保存的客户来源；纯权益服务优先读取本次结账保存的来源，历史服务没有该快照时读取关联购卡或销售记录，不按会员当前资料改写历史来源。',
             'walk_in'=>'显示有权限人员为本行保存的进店数：会员按“门店＋业务日期＋会员＋来源”合并，游客按原始订单独立显示和编辑；新行尚未保存时显示原单据已保存值。仅 B 来源汇总到市场业绩表的进店列。',
-            'visits'=>'有已完成且未作废的服务即计人次：会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
+            'visits'=>'有已完成且未作废的服务即计人次，排除选择“朋友、不计人次”的服务：会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
             'effective_people'=>'所选日期内，同一门店、同一来源的会员净记账收款达到标准时显示 1：A 来源至少 1,000 元，其他来源至少 500 元；游客不计。同一会员跨日期可能显示多行 1，但合计按会员去重。',
             'amount'=>'合计本行会员当天在该门店和来源下的有效记账收款净额；退款按退款发生日抵减，已作废销售不计。只有正常服务、没有当次收款时显示 0。',
             'registered_date'=>'显示本行收款或服务归属的业务日期；补录业务的系统录入时间可能晚于该日期。',
