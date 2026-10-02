@@ -141,6 +141,16 @@ final class CashierV3SaleProjectServiceCompletionServices
                 'service_status' => 'completed',
             ];
             $row['immutable_fingerprint'] = self::fingerprint($row);
+            // The settled sales header is this service's same-checkout source.
+            // Keep new attribution outside the legacy fingerprint so historical
+            // successful checkouts still pass their immutable replay check.
+            if ((int)($header['business_source_primary_id'] ?? 0) > 0) {
+                $row['business_source_primary_id'] = (int)$header['business_source_primary_id'];
+                $row['business_source_primary_name_snapshot'] = (string)$header['business_source_primary_name_snapshot'];
+                $row['business_source_secondary_id'] = (int)$header['business_source_secondary_id'];
+                $row['business_source_secondary_name_snapshot'] = (string)$header['business_source_secondary_name_snapshot'];
+                $row['business_source_label_snapshot'] = (string)$header['business_source_label_snapshot'];
+            }
             $existing = Db::name(self::SERVICE_TABLE)
                 ->where('tenant_id', $row['tenant_id'])
                 ->where('checkout_request_id', $row['checkout_request_id'])

@@ -66,6 +66,7 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
         $serviceRows = $this->decorateServiceCategorySnapshotsInTx(
             $this->allocateServiceDocumentNumbersInTx($plan->serviceRows(), $context)
         );
+        $serviceRows = $this->attachSameCheckoutSaleSourceInTx($serviceRows, $context);
         $inserted = [
             'writeoff' => $this->persistRows(self::WRITEOFF_TABLE, 'writeoff', $plan->writeoffRows()),
             'service' => $this->persistRows(self::SERVICE_TABLE, 'service', $serviceRows),
@@ -599,6 +600,39 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             $row['immutable_fingerprint'] = hash('sha256', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
             $serviceRows[$index] = $row;
         }
+        return $serviceRows;
+    }
+
+    /**
+     * A mixed checkout may have a settled sale in the same transaction. Copy
+     * only that sale's frozen attribution; a prior card purchase is not this
+     * service's source. The legacy service fingerprint excludes these newly
+     * added attribution columns so completed receipts remain replayable.
+     *
+     * @param array<int,array<string,mixed>> $serviceRows
+     * @param array<string,mixed> $context
+     * @return array<int,array<string,mixed>>
+     */
+    private function attachSameCheckoutSaleSourceInTx(array $serviceRows, array $context): array
+    {
+        if (!$serviceRows) return $serviceRows;
+        $sale = Db::name('cashier_v3_sales_order')
+            ->where('tenant_id', (string)$context['tenant_id'])
+            ->where('checkout_request_id', (string)$context['checkout_request_id'])
+            ->where('store_id', (int)$context['store_id'])
+            ->where('member_id', (int)$context['member_id'])
+            ->where('order_status', 'settled')
+            ->where('order_direction', 'forward')
+            ->find();
+        if (!$sale || (int)($sale['business_source_primary_id'] ?? 0) <= 0) return $serviceRows;
+        foreach ($serviceRows as &$row) {
+            $row['business_source_primary_id'] = (int)$sale['business_source_primary_id'];
+            $row['business_source_primary_name_snapshot'] = (string)$sale['business_source_primary_name_snapshot'];
+            $row['business_source_secondary_id'] = (int)$sale['business_source_secondary_id'];
+            $row['business_source_secondary_name_snapshot'] = (string)$sale['business_source_secondary_name_snapshot'];
+            $row['business_source_label_snapshot'] = (string)$sale['business_source_label_snapshot'];
+        }
+        unset($row);
         return $serviceRows;
     }
 

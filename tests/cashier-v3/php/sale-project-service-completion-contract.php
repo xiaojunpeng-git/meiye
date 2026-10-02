@@ -33,6 +33,11 @@ $check('guest and member service facts retain the settled sales snapshot',
     strpos($service, "'member_id' => (int)\$header['member_id']") !== false
     && strpos($service, "'member_name_snapshot' => (string)\$header['member_name_snapshot']") !== false
     && strpos($service, "'source_document_type' => 'sales_order'") !== false);
+$check('cash project service stores same-checkout sales attribution without changing legacy replay fingerprint',
+    strpos($service, "\$row['business_source_primary_id'] = (int)\$header['business_source_primary_id']") !== false
+    && strpos($service, "\$row['business_source_label_snapshot'] = (string)\$header['business_source_label_snapshot']") !== false
+    && strpos($service, "\$row['immutable_fingerprint'] = self::fingerprint(\$row);")
+        < strpos($service, "\$row['business_source_primary_id'] = (int)\$header['business_source_primary_id']"));
 $check('service record numbers are allocated from the source fact and replay is immutable',
     strpos($service, "'sale_project_service_fact'") !== false
     && strpos($service, 'sale_project_service_replay_conflict') !== false
