@@ -278,6 +278,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $rows = $this->pageRows($query, $criteria, 'r.pay_time', 'r.id', implode(',', [
             'r.id', 'r.order_id', 'r.uid', 'r.store_id', 'r.staff_id', 'r.price', 'r.give_price',
             'r.refund_price', 'r.recharge_type', 'r.combination_info', 'r.remarks', 'r.channel_type', 'r.paid', 'r.terminal_action',
+            'r.business_source_primary_name_snapshot', 'r.business_source_secondary_name_snapshot', 'r.business_source_label_snapshot',
             'r.pay_time', 'r.add_time', 'u.real_name', 'u.nickname', 'u.phone',
             's.name AS store_name', 'st.staff_name',
         ]));
@@ -295,6 +296,8 @@ final class CashierV3OrderCenterRecordQueryServices
                 'rechargeId' => (int)$row['id'],
                 'memberId' => (int)$row['uid'],
                 'rechargeOrderNo' => (string)$row['order_id'],
+                // 客户来源只读充值成功时的单据快照，不回查会员当前来源。
+                'source' => $this->businessSourceLabel($row),
                 'businessDate' => $rechargeBusinessDates[$economicsKey] ?? $this->date($time),
                 'memberName' => $this->memberName($row),
                 'phone' => (string)$row['phone'],
@@ -545,6 +548,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $rows = $query->field(implode(',', [
             'r.id', 'r.repayment_id', 'r.repayment_no', 'r.debt_no',
             'r.sales_order_no_snapshot', 'r.repayment_amount_cents', 'r.status',
+            'r.business_source_primary_name_snapshot', 'r.business_source_secondary_name_snapshot', 'r.business_source_label_snapshot',
             'r.store_id', 'r.member_id', 'r.operator_id', 'r.business_date', 'r.settled_at',
             'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name',
             'st.staff_name',
@@ -571,6 +575,7 @@ final class CashierV3OrderCenterRecordQueryServices
             return [
                 'id' => 'v3-sales-supplement:' . $repaymentId,
                 'supplementOrderNo' => (string)$row['repayment_no'],
+                'source' => $this->businessSourceLabel($row),
                 'businessDate' => (string)$row['business_date'],
                 'debtNo' => (string)$row['debt_no'],
                 'sourceOrderNo' => (string)$row['sales_order_no_snapshot'],
@@ -615,6 +620,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
             'r.id', 'r.repayment_id', 'r.repayment_no', 'r.debt_id', 'r.amount_cents',
+            'r.business_source_primary_name_snapshot', 'r.business_source_secondary_name_snapshot', 'r.business_source_label_snapshot',
             'r.store_id', 'r.member_id', 'r.operator_id', 'r.business_date', 'r.settled_at', 'd.debt_no',
             'd.order_sn', 'r.status', 'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name',
             'st.staff_name',
@@ -640,6 +646,7 @@ final class CashierV3OrderCenterRecordQueryServices
             return [
                 'id' => 'v3-supplement:' . $repaymentId,
                 'supplementOrderNo' => (string)$row['repayment_no'],
+                'source' => $this->businessSourceLabel($row),
                 'businessDate' => (string)$row['business_date'],
                 'debtNo' => (string)$row['debt_no'],
                 'sourceOrderNo' => (string)$row['order_sn'],
@@ -1484,6 +1491,16 @@ final class CashierV3OrderCenterRecordQueryServices
         return $labels[$kind] ?? '卡项权益';
     }
 
+    /** 本次充值/补交单的来源快照；历史空值不借原购单来源。 */
+    private function businessSourceLabel(array $row): string
+    {
+        foreach (['business_source_secondary_name_snapshot', 'business_source_primary_name_snapshot', 'business_source_label_snapshot'] as $key) {
+            $label = trim((string)($row[$key] ?? ''));
+            if ($label !== '') return $label;
+        }
+        return '';
+    }
+
     /**
      * 结账销售单、纯权益结账选择、预约服务事实依次作为来源权威快照。
      * 三者均缺失的历史记录才显示“—”，不回读会员当前来源。
@@ -2270,12 +2287,18 @@ final class CashierV3OrderCenterRecordQueryServices
 
     private function paymentLabel(string $code): string
     {
+        // 订单中心以业务发生时的收款代码读取快照；V3 新方式在此转为经营人员可读名称，旧代码仍兼容。
         $labels = [
             'cash' => '现金',
             'weixin' => '微信',
             'wechat' => '微信',
             'alipay' => '支付宝',
             'unionpay' => '银联刷卡',
+            'dianping_voucher' => '大众验券',
+            'douyin_voucher' => '抖音验券',
+            'partner_collection' => '合作方收款',
+            'other_collection' => '其他收款',
+            'old_card_entry' => '旧卡录入',
             'bank' => '银联刷卡',
             'yue' => '余额',
             'offline' => '线下记账',

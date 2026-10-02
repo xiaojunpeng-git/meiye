@@ -69,6 +69,8 @@ final class CashierV3DebtRepaymentServices
         $debtId = self::positiveInt($sourceDocument['id'] ?? null, 'debt_id');
         $requestId = (new CashierV3DebtRepaymentIdFactory($this->secret()))
             ->repaymentId($dataScope->tenantId(), $debtId, $commandKey);
+        $businessSource = is_array($checkoutSnapshot['source'] ?? null) ? $checkoutSnapshot['source'] : [];
+        $sourceColumns = self::sourceSnapshotColumns($businessSource);
 
         $existing = (array)Db::name('cashier_v3_debt_repayment')
             ->where('tenant_id', $dataScope->tenantId())
@@ -81,6 +83,14 @@ final class CashierV3DebtRepaymentServices
                 || (int)($existing['repayment_amount_cents'] ?? 0) !== $replayedAmount
                 || (string)($existing['business_date'] ?? '') !== (string)($checkoutSnapshot['businessDate'] ?? '')) {
                 throw self::failure('debt_repayment_idempotency_conflict');
+            }
+            // 迁移前成功单没有来源列值，重试只返回原结果；新单必须核对同一快照。
+            if ((int)($existing['business_source_primary_id'] ?? 0) > 0) {
+                foreach ($sourceColumns as $column => $value) {
+                    if ((string)($existing[$column] ?? '') !== (string)$value) {
+                        throw self::failure('debt_repayment_idempotency_conflict');
+                    }
+                }
             }
             $submittedPayments = $this->paymentLinesFromCheckoutSnapshot(
                 $checkoutSnapshot, $replayedAmount, $debtId, (int)$existing['member_id']);
@@ -139,7 +149,6 @@ final class CashierV3DebtRepaymentServices
         if (!is_array($checkoutSnapshot['source'] ?? null)) {
             throw self::failure('debt_repayment_checkout_snapshot_source_required');
         }
-        $businessSource = $checkoutSnapshot['source'];
         $repaymentId = (new CashierV3DebtRepaymentIdFactory($this->secret()))->repaymentId($dataScope->tenantId(), $debtId, $commandKey);
         $repaymentNo = (new \app\services\cashier\v3\CashierV3BusinessDocumentNumberServices())->allocateForSourceInTx(
             $dataScope->tenantId(),
@@ -153,7 +162,7 @@ final class CashierV3DebtRepaymentServices
         $repaidAfter = $repaidBefore + $amount;
         $itemTargets = self::proportionalCumulativeAllocation($repaidAfter, $items);
         $dimensions = $this->dimensions($operator, $dataScope, (int)$authority['member_id']);
-        $fingerprint = hash('sha256', json_encode([$requestId, $debtId, $amount, $repaidBefore, $payments, $selectedSalespeople], JSON_UNESCAPED_SLASHES));
+        $fingerprint = hash('sha256', json_encode([$requestId, $debtId, $amount, $repaidBefore, $payments, $selectedSalespeople, $sourceColumns], JSON_UNESCAPED_SLASHES));
         $recordId = (int)Db::name('cashier_v3_debt_repayment')->insertGetId([
             'repayment_id' => $repaymentId, 'repayment_no' => $repaymentNo,
             'natural_key' => 'debt_repayment:' . $requestId, 'command_idempotency_key' => $commandKey,
@@ -165,6 +174,12 @@ final class CashierV3DebtRepaymentServices
             'operator_id' => $operator->operatorId(), 'operator_name_snapshot' => $dimensions['operatorName'],
             'debt_id' => $debtId, 'debt_no' => (string)$authority['debt_no'],
             'sales_order_id' => (string)$authority['sales_order_id'], 'sales_order_no_snapshot' => (string)$authority['sales_order_no_snapshot'],
+            // The repayment has its own cashier attribution; the original sale's source is not inherited.
+            'business_source_primary_id' => $sourceColumns['business_source_primary_id'],
+            'business_source_primary_name_snapshot' => $sourceColumns['business_source_primary_name_snapshot'],
+            'business_source_secondary_id' => $sourceColumns['business_source_secondary_id'],
+            'business_source_secondary_name_snapshot' => $sourceColumns['business_source_secondary_name_snapshot'],
+            'business_source_label_snapshot' => $sourceColumns['business_source_label_snapshot'],
             'salespeople_snapshot_json' => json_encode($selectedSalespeople, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'repayment_amount_cents' => $amount, 'debt_repaid_before_cents' => $repaidBefore,
             'debt_repaid_after_cents' => $repaidAfter, 'debt_status_after' => $repaidAfter === $total ? 'settled' : 'partial',
@@ -280,6 +295,7 @@ final class CashierV3DebtRepaymentServices
             throw self::failure('recharge_repayment_checkout_snapshot_amount_invalid');
         }
         $payments = $this->paymentLinesFromCheckoutSnapshot($snapshot, $amount, $debtId, $memberId);
+        $sourceColumns = self::sourceSnapshotColumns(is_array($snapshot['source'] ?? null) ? $snapshot['source'] : []);
         // A confirmed command can be queried or retried with the same key. Do
         // not re-evaluate its now-changed debt/balance as if it were a new sale.
         $existing = (array)Db::name('cashier_v3_recharge_debt_repayment')
@@ -292,6 +308,14 @@ final class CashierV3DebtRepaymentServices
                 || (int)($existing['amount_cents'] ?? 0) !== $amount
                 || (string)($existing['business_date'] ?? '') !== (string)($snapshot['businessDate'] ?? '')) {
                 throw self::failure('recharge_repayment_idempotency_conflict');
+            }
+            // 历史空来源单可幂等查询；新单的来源属于不可变确认快照。
+            if ((int)($existing['business_source_primary_id'] ?? 0) > 0) {
+                foreach ($sourceColumns as $column => $value) {
+                    if ((string)($existing[$column] ?? '') !== (string)$value) {
+                        throw self::failure('recharge_repayment_idempotency_conflict');
+                    }
+                }
             }
             $savedPayments = Db::name('cashier_v3_recharge_debt_repayment_payment')
                 ->where('repayment_id', (string)$existing['repayment_id'])
@@ -314,6 +338,7 @@ final class CashierV3DebtRepaymentServices
             'memberId' => $memberId, 'debtId' => $debtId,
             'amount' => (string)intdiv($amount, 100),
             'businessDate' => (string)($snapshot['businessDate'] ?? ''),
+            'businessSource' => is_array($snapshot['source'] ?? null) ? $snapshot['source'] : [],
             'balanceVersion' => (int)$balance['accountVersion'],
             'salespersonAllocations' => is_array($snapshot['salespersonAllocations'] ?? null)
                 ? array_values($snapshot['salespersonAllocations']) : [],
@@ -597,6 +622,18 @@ final class CashierV3DebtRepaymentServices
             ];
         }
         return $personnel;
+    }
+
+    /** Keep the five queryable order columns aligned with the checkout source used by payment facts. */
+    private static function sourceSnapshotColumns(array $source): array
+    {
+        return [
+            'business_source_primary_id' => (int)($source['primarySourceId'] ?? 0),
+            'business_source_primary_name_snapshot' => (string)($source['primarySourceNameSnapshot'] ?? ''),
+            'business_source_secondary_id' => (int)($source['secondarySourceId'] ?? 0),
+            'business_source_secondary_name_snapshot' => (string)($source['secondarySourceNameSnapshot'] ?? ''),
+            'business_source_label_snapshot' => (string)($source['displayNameSnapshot'] ?? ''),
+        ];
     }
 
     /** Read collection rows from the one browser checkout snapshot. */

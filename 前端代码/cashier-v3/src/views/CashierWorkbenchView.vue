@@ -5775,6 +5775,9 @@ async function enqueueCheckoutAction(event = {}) {
         secondarySourceId: payment.secondarySourceId,
         rewardAmountCents: payment.rewardAmountCents
       }
+      if (preview.businessType === 'debt_repayment') {
+        preview.source = currentHangCheckoutBusinessSource()
+      }
       publishToolbarCheckoutContext()
     } else if (action === 'open-balance-payment') {
       const available = Math.max(0, Number(payment.availableBalance || 0))
@@ -6457,6 +6460,10 @@ async function openPreparedCheckout(event = {}) {
       occurredAt: Math.floor(Date.now() / 1000), businessDate: date,
       repaymentAmount: amount,
       salespersonAllocations: clonePlain(intent.salespersonAllocations || []),
+      // 补交只读取本次交接冻结的工具栏来源，避免跨路由时工作台临时值丢失。
+      source: Number(intent.businessSource?.primarySourceId || 0) > 0
+        ? clonePlain(intent.businessSource)
+        : currentHangCheckoutBusinessSource(),
       sourceDocument: { type: 'debt_repayment', id: String(debtId), no: String(intent.record?.debtNo || '') },
       lines: [line], orderLines: [line],
       summary: { originalAmount: amount, discountAmount: 0, receivableAmount: amount },
@@ -6508,10 +6515,14 @@ async function openPreparedCheckout(event = {}) {
           status: String(line?.status || 'editing')
         }))
       : []
+    // 补交归因属于本次收银，不沿用原欠款或原订单的来源。
+    const cashierSource = currentHangCheckoutBusinessSource()
     localCheckoutPreview.value = {
       ...snapshot,
       lines: [...clonePlain(orderLines), ...paymentLines],
-      source: isRecord(snapshot.source)
+      source: Number(cashierSource.primarySourceId || 0) > 0
+        ? cashierSource
+        : isRecord(snapshot.source)
         ? clonePlain(snapshot.source)
         : {
             primarySourceId: Number(snapshot.primarySourceId || 0),

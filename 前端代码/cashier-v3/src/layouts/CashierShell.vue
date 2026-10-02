@@ -83,6 +83,7 @@ const isDebtReminderOpen = ref(false)
 const debtReminderMember = ref(null)
 const deferredMemberSelection = ref(null)
 const pendingDebtReminderAfterSource = ref(null)
+const debtReminderBusinessSource = ref(null)
 const isMemberDebtOpen = ref(false)
 const activeDebtMember = ref(null)
 const initialDebtRecordId = ref('')
@@ -256,6 +257,14 @@ function handleToolbarCheckoutContextUpdated(event) {
   toolbarBusinessSource.value = detail.source && typeof detail.source === 'object'
     ? { ...toolbarBusinessSource.value, ...detail.source }
     : toolbarBusinessSource.value
+  // 只为当前待提醒的欠款会员留一份来源；会员摘要的迟到刷新不能让
+  // 随后的补交交接丢失刚由收银工具栏确认的归因。
+  if (pendingDebtReminderAfterSource.value?.member && Number(detail.source?.primarySourceId || 0) > 0) {
+    debtReminderBusinessSource.value = {
+      memberId: memberDetailId(pendingDebtReminderAfterSource.value.member),
+      source: { ...detail.source }
+    }
+  }
 }
 
 function handleCheckoutBusinessSourceCancelled(event = {}) {
@@ -1095,6 +1104,9 @@ function emptyLocalCashierCart() {
 
 function applyLocalCashierCustomerSelection({ customerMode, member = null } = {}) {
   const isMember = customerMode === 'member' && memberDetailId(member)
+  if (!isMember || Number(debtReminderBusinessSource.value?.memberId || 0) !== Number(memberDetailId(member))) {
+    debtReminderBusinessSource.value = null
+  }
   state.cashier = {
     ...(state.cashier || {}),
     customerMode: isMember ? 'member' : 'guest',
@@ -1516,7 +1528,18 @@ async function prepareDebtRepayment(payload = {}) {
     || !/^\d{4}-\d{2}-\d{2}$/.test(String(payload.businessDate || ''))) {
     return { result: { status: 'failed', message: '请选择有效欠款、金额和业务日期。' } }
   }
-  const handoff = { businessType: 'debt_repayment', localRepayment: payload }
+  // 补交从会员欠款入口跳转时，优先冻结当前工具栏来源；若欠款提醒期间
+  // 的迟到刷新清空工具栏，仅回退同一会员刚确认的来源。普通结账不走此路径。
+  const source = Number(toolbarBusinessSource.value.primarySourceId || 0) > 0
+    ? toolbarBusinessSource.value
+    : Number(debtReminderBusinessSource.value?.memberId || 0) === memberId
+      ? debtReminderBusinessSource.value.source
+      : toolbarBusinessSource.value
+  const handoff = {
+    businessType: 'debt_repayment',
+    localRepayment: { ...payload, businessSource: { ...source } }
+  }
+  debtReminderBusinessSource.value = null
   isMemberDebtOpen.value = false
   activeDebtMember.value = null
   initialDebtRecordId.value = ''

@@ -120,7 +120,7 @@ const ORDER_TABS = [
     searchPlaceholder: '搜索充值订单号、会员姓名或手机号',
     emptyText: '暂无充值订单。',
     fields: [
-      field('recharge_order_no', '充值订单号', 'text', { quickFilterHidden: true }),
+      field('recharge_order_no', '充值订单号', 'text', { quickFilterHidden: true }), field('source', '客户来源'),
       field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('member_name', '会员姓名'), field('phone', '手机号'), field('store', '办理门店', 'store'),
       field('recharge_plan', '充值方案'), field('salesperson', '销售人', 'person'),
@@ -199,7 +199,7 @@ const ORDER_TABS = [
     searchPlaceholder: '搜索补交单号、欠款编号、来源订单或会员',
     emptyText: '暂无已完成的补交记录。会员未补交的欠款请从总欠款入口查看。',
     fields: [
-      field('supplement_order_no', '补交单号', 'text', { quickFilterHidden: true }),
+      field('supplement_order_no', '补交单号', 'text', { quickFilterHidden: true }), field('source', '客户来源'),
       field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('member_name', '会员姓名'), field('phone', '手机号'), field('debt_summary', '欠款摘要'),
       field('salesperson', '销售人', 'person'), field('supplement_amount', '补交金额', 'money'), field('payment_method', '收款方式'),
@@ -449,6 +449,12 @@ const visibleFields = computed(() => {
   // 销售人是充值/补交金额的归属字段，固定显示在金额左侧；旧版保存的
   // 查询设置可能仍把它排在金额后面，这里只纠正这两个字段的相对位置。
   if (['recharge', 'supplement'].includes(activeTabKey.value)) {
+    // 来源是单号后的固定审计列：旧账号无论保存了缺失或旧位置，都按同一顺序展示。
+    const sourceIndex = fields.findIndex((item) => item.key === 'source')
+    if (sourceIndex >= 0) fields.splice(sourceIndex, 1)
+    const orderNoKey = activeTabKey.value === 'recharge' ? 'recharge_order_no' : 'supplement_order_no'
+    const orderNoIndex = fields.findIndex((item) => item.key === orderNoKey)
+    fields.splice(orderNoIndex >= 0 ? orderNoIndex + 1 : 0, 0, available.get('source'))
     const salespersonIndex = fields.findIndex((item) => item.key === 'salesperson')
     const amountIndex = fields.findIndex((item) => item.key === (activeTabKey.value === 'recharge' ? 'recharge_amount' : 'supplement_amount'))
     if (salespersonIndex >= 0 && amountIndex >= 0 && salespersonIndex > amountIndex) {

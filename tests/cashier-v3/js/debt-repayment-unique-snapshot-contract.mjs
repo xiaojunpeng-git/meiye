@@ -38,7 +38,7 @@ assert.match(exactRead, /\$workspaceVersionAfter = \$isDebtRepayment \? 0 : \(in
 assert.doesNotMatch(prepareRequest, /open-cashier-workbench|state\.workspace\s*=/)
 
 // “下一步”只交接浏览器内这笔金额，不能调用创建编辑草稿的准备命令。
-assert.match(prepareRequest, /localRepayment: payload/)
+assert.match(prepareRequest, /localRepayment: \{ \.\.\.payload, businessSource: \{ \.\.\.source \} \}/)
 assert.doesNotMatch(prepareRequest, /requestCashierV3Action|requestAction|prepare-debt-repayment|prepare-recharge-debt-repayment/)
 const localCheckout = between(workbench, "if (detail.businessType === 'debt_repayment' && isRecord(detail.localRepayment)) {", 'let snapshot = clonePlain(detail.checkoutSnapshot)')
 assert.match(localCheckout, /localCheckoutPreview\.value = \{/)
