@@ -92,6 +92,8 @@ export default defineConfig({
     fs: {
       allow: [cashierSourceRoot, inventoryPackageRoot, unifiedQueryPackageRoot]
     },
+    // Colima bind mounts may miss host file events; polling keeps 18091 tied to live source edits.
+    watch: { usePolling: true, interval: 500 },
     proxy: cashierApiProxy
   },
   // 独立验收候选包也必须走收银专用 Gateway；该代理仅用于本地 vite preview。

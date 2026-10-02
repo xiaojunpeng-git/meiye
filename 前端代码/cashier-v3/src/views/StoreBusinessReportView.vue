@@ -8,6 +8,8 @@ import ChevronDown from '@lucide/vue/dist/esm/icons/chevron-down.mjs'
 import ChevronUp from '@lucide/vue/dist/esm/icons/chevron-up.mjs'
 import ChevronRight from '@lucide/vue/dist/esm/icons/chevron-right.mjs'
 import Network from '@lucide/vue/dist/esm/icons/network.mjs'
+import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
+import '@mohe/unified-query-vue3/styles.css'
 import { requestCashierV3Action } from '@/services/cashierV3Bridge'
 import {
   PHASE_FOUR_ANNUAL_REPORT_CODES,
@@ -408,6 +410,28 @@ const filterSchema = computed(() => {
 })
 const usesAnnualYearFilter = computed(() => PHASE_FOUR_ANNUAL_REPORT_CODES.includes(activeReport.value)
   || filterSchema.value.some((field) => String(field?.type || '') === 'year'))
+// 页面统一选择周期；月报和年报的显示范围必须与实际提交的自然周期一致。
+const reportPeriodMode = computed(() => usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
+const reportDateRange = computed(() => {
+  if (usesAnnualYearFilter.value) {
+    const { start, end } = yearBounds(selectedYear.value)
+    return { min: start, max: end }
+  }
+  if (usesNaturalMonthFilter.value) {
+    const { start, end } = monthBounds(selectedMonth.value)
+    return { min: start, max: end }
+  }
+  return { min: startDate.value, max: endDate.value }
+})
+
+// 控件确认只更新待查询周期；点击查询后才让列表、导出和下钻共用同一组路由参数。
+function applyReportDateRange({ min, max }) {
+  if (!min || !max) return
+  startDate.value = min
+  endDate.value = max
+  if (usesAnnualYearFilter.value) selectedYear.value = min.slice(0, 4)
+  if (usesNaturalMonthFilter.value) selectedMonth.value = min.slice(0, 7)
+}
 const editableFields = computed(() => {
   const declared = result.value.editable_fields || result.value.editableFields
   const entries = Array.isArray(declared) ? declared : []
@@ -1457,7 +1481,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
           <footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
         </section>
       </div>
-      <label v-if="usesAnnualYearFilter" class="store-business-report__date-field"><span>年份</span><input v-model="selectedYear" type="number" inputmode="numeric" min="2000" :max="today().slice(0, 4)" aria-label="统计年份" /></label>
+      <div v-if="!isPlatformReport" class="store-business-report__period-picker">
+        <UnifiedQueryDateRange :model-value="reportDateRange" :mode="reportPeriodMode" :min-date="isFirstPhaseReport ? LEGACY_COVERAGE_START : ''" :allow-clear="false" label="报表查询周期" @change="applyReportDateRange" />
+      </div>
+      <label v-else-if="usesAnnualYearFilter" class="store-business-report__date-field"><span>年份</span><input v-model="selectedYear" type="number" inputmode="numeric" min="2000" :max="today().slice(0, 4)" aria-label="统计年份" /></label>
       <label v-else-if="usesNaturalMonthFilter" class="store-business-report__date-field"><span>月份</span><input v-model="selectedMonth" type="month" aria-label="统计月份" :max="today().slice(0, 7)" /></label>
       <template v-else>
         <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? LEGACY_COVERAGE_START : undefined" :max="endDate" /></label>
@@ -1667,6 +1694,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__query-actions .button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; }
 .store-business-report__filters--advanced { border-top: 0; border-radius: 0 0 8px 8px; padding-top: 2px; }
 .store-business-report__filters label { display: grid; gap: 5px; min-width: 140px; color: #687586; font-size: 12px; }
+.store-business-report__period-picker { flex: 0 1 260px; width: 260px; min-width: 230px; }
 .store-business-report__filters .store-business-report__date-field { display: inline-flex; min-width: 0; align-items: center; gap: 6px; color: #526174; font-size: 13px; }
 .store-business-report__date-field input { width: 116px; }
 .store-business-report__filters input, .store-business-report__filters select { min-height: 34px; box-sizing: border-box; border: 1px solid #d8e0ea; border-radius: 6px; padding: 6px 8px; background: #fff; color: #252a34; font: inherit; }
