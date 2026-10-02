@@ -15,10 +15,13 @@ $read = static function (string $relative) use ($root): string {
 $reader = $read('/后端代码/app/services/cashier/v3/dashboard/CashierV3StoreTargetDashboardReadModel.php');
 $module = $read('/后端代码/app/services/cashier/v3/dashboard/CashierV3BusinessDashboardModule.php');
 $manifest = $read('/后端代码/app/services/cashier/v3/manifest/CashierV3C4DashboardModule.php');
+$consumptionMethod = preg_match('/private function consumptionRanking\(.+?\n    private function goal\(/s', $reader, $consumptionMatch) === 1
+    ? $consumptionMatch[0] : '';
 
 $checks = [
     'store target reader and contract version' => str_contains($reader, 'final class CashierV3StoreTargetDashboardReadModel')
-        && str_contains($reader, "CONTRACT_VERSION = 'cashier-v3-store-target-dashboard-v1'"),
+        && str_contains($reader, "CONTRACT_VERSION = 'cashier-v3-store-target-dashboard-v1'")
+        && str_contains($reader, "METRIC_VERSION = 'cashier-v3-facts-v2'"),
     'current store is enforced server side' => str_contains($reader, 'allowsStore($operator->storeId())')
         && (str_contains($reader, '->where(\'pf.store_id\', $storeId)') || str_contains($reader, '->where(\'p.store_id\', $storeId)'))
         && str_contains($reader, "'forced' => true"),
@@ -40,8 +43,12 @@ $checks = [
         && str_contains($reader, 'SUM(p.amount_cents) AS consumption_performance_cents')
         && str_contains($reader, 'labor_fee_amount_cents')
         && str_contains($reader, 'project_count_half_units'),
-    'consumption ranking has stable descending order and customer de-duplication' => str_contains($reader, "orderRaw('consumption_performance_cents DESC, p.employee_id ASC')")
-        && str_contains($reader, 'COUNT(DISTINCT NULLIF(p.member_id,0)) AS customer_count'),
+    'consumption ranking reuses the unified customer metric without filtering labor money' => str_contains($consumptionMethod, "orderRaw('consumption_performance_cents DESC, p.employee_id ASC')")
+        && str_contains($consumptionMethod, 'ServiceCustomerMetricReadServices())->employeeMetrics($tenantId, [$storeId], $range)')
+        && str_contains($consumptionMethod, "->where('p.performance_type', 'labor_performance_allocated')")
+        && str_contains($consumptionMethod, "'service_count' => (int)(\$customer['visit_tenths'] ?? 0) / 10")
+        && str_contains($consumptionMethod, "'customer_count' => (int)(\$customer['people_tenths'] ?? 0) / 10")
+        && !str_contains($consumptionMethod, 'COUNT(DISTINCT NULLIF(p.member_id,0)) AS customer_count'),
     'goal actual cash nets signed reversal facts' => preg_match('/private function cashTotal\([^}]+?\n    }/s', $reader, $cashTotalMatch) === 1
         && str_contains($cashTotalMatch[0], 'cashier_v3_payment_fact')
         && str_contains($cashTotalMatch[0], 'SUM(pf.amount_cents)')
