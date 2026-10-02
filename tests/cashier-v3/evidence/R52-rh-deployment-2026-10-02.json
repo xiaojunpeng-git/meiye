@@ -1,0 +1,124 @@
+{
+  "round": "R52",
+  "completedAtUtc": "2026-10-02 05:16:27 UTC",
+  "target": "rh.cc3798.com / ruihao",
+  "status": "产品经理验收通过；本地代码已提交，瑞昊部署与线上只读验证通过，授权push按隔离发布分支执行",
+  "acceptance": "我测试没有问题,commit,部署瑞昊,push",
+  "businessCommit": "7e1e4b4979690b151cc167f944b9be1a54dbfb96",
+  "releaseCodeCommit": "4321ad3915eeca92cf63482a4a36dc460e4c8715",
+  "releaseBase": "c08dbc0aa42ed1a4b4e3f295eca702414c487a4a",
+  "releaseBranch": "release/r52-entitlement-unit-price-20261002",
+  "releaseIsolation": "临时Git索引叠加8个已验收文件，不切换工作区、不创建平行源码；保留瑞昊已发布R51、R58，排除其他AI及库存R59成果。线上目录不做git reset或服务器commit。",
+  "scope": "购买金额之后新增单价；原购买金额/原购买次数取整数部分，不四舍五入，不改变末次尾差与任何权益扣款。",
+  "files": {
+    "frontend": [
+      "前端代码/cashier-v3/src/components/cashier/EntitlementSelectorOverlay.vue",
+      "前端代码/cashier-v3/src/styles/base.css"
+    ],
+    "backend": [
+      "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php"
+    ],
+    "databaseMigrations": [],
+    "engineeringScripts": [],
+    "tests": [
+      "tests/cashier-v3/js/c2-entitlement-frontend-contract.mjs",
+      "tests/cashier-v3/php/entitlement-selector-debt-display-contract.php",
+      "tests/cashier-v3/php/entitlement-unit-price-contract.php"
+    ],
+    "evidence": [
+      "tests/cashier-v3/evidence/R52-entitlement-unit-price-selftest-2026-10-02.json",
+      "tests/cashier-v3/evidence/R52-entitlement-unit-price-2026-10-02.jpg"
+    ],
+    "generated": "固定releaseCodeCommit归档构建；仅下述5个dist文件部署，两处静态资源保留旧hash资产。"
+  },
+  "build": {
+    "node": "v16.20.2 native arm64",
+    "vite": "4.5.14",
+    "result": "PASS 1988 modules",
+    "sourceVerification": "门店端源码与验收版本/18091源码一致；shared保留已发布基线，排除未发布AI浏览器能力",
+    "warning": "常规chunk大体积提示"
+  },
+  "deployedBackendSha256": "c8dcdf9fded718c30a3053fa9c8fdf2a7d5e9866d39d7509b440b7859dc19019",
+  "generatedFiles": {
+    "index.html": "876217f06d05da60493cae2a15892e3ac06156217e61d830f98cdee550f626b2",
+    "assets/index-8ad22e9b.js": "d2de74858030d2660d9b0329532e5a973fe46ac9f5dce7903f79c807e78dc650",
+    "assets/index-aa2c4513.css": "aa2c451330329f4781b6cb419ec5a9b97fd22d8ddd048df9968abc7e808d828b",
+    "assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+    "assets/login-beauty-quiet-826510a5.png": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47"
+  },
+  "deployment": {
+    "backendRoot": "/www/wwwroot/rh.cc3798.com",
+    "staticRoots": [
+      "/www/wwwroot/rh.cc3798.com/public/view_cashier_v3",
+      "/www/wwwroot/rh.cc3798.com-8080/public/view_cashier_v3"
+    ],
+    "backendFiles": 1,
+    "staticFilesPerEntry": 5,
+    "activation": "阶段上传逐项校验SHA及PHP7.4 lint；旧线上PHP、两个HTML、配置SHA守卫通过后原子替换；只重启/etc/init.d/ruihao_swoole。",
+    "configurationChanged": false,
+    "otherCustomersChanged": false,
+    "redisCleared": false,
+    "businessDatabaseWrites": false,
+    "backupDirectory": "/www/backups/rh.cc3798.com/20261002-r52-unit-price-4321ad39",
+    "backups": {
+      "backend-projection-before.tar.gz": "3d792fe33a2024e499061f60be4d622b34ad5db84b278f7e9d26f76933e9c5d0",
+      "main-cashier-before.tar.gz": "4350ecf0c6826ca79b369144d090b3316bae526871563d3e32d9c11c08917e84",
+      "preview-cashier-before.tar.gz": "7e46ede122f74d2428d80d54b100c66c9d0800e0881fbffd2e55bb9d860d9626"
+    },
+    "backupVerification": "gzip -t、tar目录读取通过；不做数据库迁移或数据回填，沿用瑞昊既有ECS每日快照备份。",
+    "rollback": "仅在当前文件仍为本R52指纹且无后续发布时，恢复备份中的一个PHP及两处HTML入口，保留hash资产，重启瑞昊Swoole；禁止覆盖.env、上传目录、数据库或其他任务。",
+    "previousBackendSha256": "b561560c3223da99c597adf0a66173ea7b7e3edc32d2866bfbb387471b126390",
+    "previousHtmlSha256": "aecaf3c161525983534f6b9387fc4171f8ab78112fb3b0a94cd8dbed51b516db"
+  },
+  "onlineVerification": {
+    "http": "正式HTTPS HTML、JS、CSS指纹匹配固定dist；preview-8080 HTML路径重写正确、JS指纹相同；匿名V3网关返回status410000请登录（不是已登录业务流程测试）。",
+    "php": "生产PHP7.4.33+bcmath；12边界算法及6980/30常规232、末次252、总额6980保持通过；线上投影PHP语法通过。",
+    "businessSample": {
+      "holderId": 1997478,
+      "projectId": 4394758,
+      "purchase": "3980.00",
+      "originalTimes": 36,
+      "unitPriceBefore": null,
+      "unitPriceAfter": "110",
+      "moneyAndTimesDigestBefore": "ecade21d9c68bfa4f482c1fb520d30cdb77af78c456bd2c3d766b1ca227d7d8c",
+      "moneyAndTimesDigestAfter": "ecade21d9c68bfa4f482c1fb520d30cdb77af78c456bd2c3d766b1ca227d7d8c",
+      "method": "真实线上会员权益loadRows/buildSources只读查询，SET SESSION TRANSACTION READ ONLY保护；不签发版本，不写工作台或业务数据。"
+    },
+    "liveDatabaseNote": "生产在正常营业，并非冻结快照；购卡事实行数从149到150、分摊事实95到116，未将这些全库行数宣称不变。受控样本投影金额/余次摘要一致，所有检查脚本数据库会话只读，不执行写命令。",
+    "schema": {
+      "database": "ruihao",
+      "mysql": "5.7.44-log",
+      "upgradeLogRowsBefore": 202,
+      "upgradeLogRowsAfter": 202,
+      "latestKeys": [
+        "20261001-001-mohe-ai-rights-amount-index",
+        "20260929-001-inventory-count-operator-type",
+        "20260928-001-inventory-stock-count-draft"
+      ]
+    },
+    "configHashesUnchanged": {
+      ".env": "24b6eef35143aed11786d9bdac4f53eb160fc610974c3fd4cb0b98463191ee82",
+      "config/swoole.php": "6578c0bde1be74fc99741289e83ff61976029bf8e1e416908253b931a91027de"
+    },
+    "process": {
+      "managerBefore": 8295,
+      "managerAfter": 14508,
+      "managerCountAfter": 1,
+      "port": 20800,
+      "recentSwooleLog": "启动正常，抽查近期输出无Fatal/Parse/Uncaught；不代表全历史日志无错误。",
+      "aiServices": "四个AI服务仍active，启动时间均2026-10-01 17:49:46 CST；本次未重启。"
+    }
+  },
+  "recoveredChecks": [
+    "初次全投影只读事务触发MySQL1792：既有事务保护启用SELECT FOR UPDATE，与READ ONLY事务不兼容；改用SET SESSION TRANSACTION READ ONLY且不显式开启事务，再执行纯查询，前后均通过。未移除数据库只读保护。",
+    "PHP暂存上传首次SSH连接中断；仅重传暂存文件，SHA通过后才激活。",
+    "迁移复查首次使用不存在cashier_v3_upgrade_log，未算通过；查明权威表database_upgrade_log后只读核对202条通过。",
+    "服务器无rg，使用grep替代端口只读检查。"
+  ],
+  "limits": "未进行生产资金、核销或其他业务写入，未通过已登录生产UI执行业务流程；本地真人页面测试与产品经理验收见原自测记录。既有综合JS6项及whole-yuan1项历史失败已记录，不宣称全量回归通过。",
+  "pushPlan": {
+    "remote": "origin git@gitee.com:mhfz/rh.git",
+    "ref": "refs/heads/release/r52-entitlement-unit-price-20261002",
+    "policy": "线上验证通过后仅push该隔离分支；不push开发分支或github；发布证据commit作为releaseCodeCommit子提交归档，实际远端SHA由ls-remote核对。"
+  }
+}
