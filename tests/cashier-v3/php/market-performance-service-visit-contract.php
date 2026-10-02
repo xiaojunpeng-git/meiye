@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__, 3);
 $service = file_get_contents($root . '/后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php');
+$normalDataScope = file_get_contents($root . '/后端代码/app/services/report/StoreReportNormalDataScopeServices.php');
 $marketPerformance = substr($service, strpos($service, 'private function marketPerformance'), strpos($service, 'private function marketDetail') - strpos($service, 'private function marketPerformance'));
 
 $checks = [
@@ -21,6 +22,12 @@ $checks = [
     'market performance deduplicates both member and guest visits' => strpos($marketPerformance, 'if (isset($visitedSubjects[$visitKey])) continue;') !== false,
     'guest visit explanation exposes its order-level rule' => strpos($service, '游客每张有效服务单记 1') !== false && strpos($service, '同单多项目不重复') !== false,
     'successful order void payment reversals are included in report net cash' => strpos($service, "reversal_operation.operation_type IN ('refund','void')") !== false,
+    'successful supplement void hides the original repayment and its reversal on every date' => strpos($service, 'excludeVoidedSupplementPaymentFacts($query') !== false
+        && strpos($normalDataScope, "->whereIn('normal_supplement_void.source_kind', ['sales_supplement', 'recharge_supplement'])") !== false
+        && strpos($normalDataScope, "->where('normal_supplement_void.status', 'succeeded')") !== false,
+    'supplement void scope matches the same tenant store and repayment order' => strpos($normalDataScope, "normal_supplement_void.tenant_id = ' . \$tenantColumn") !== false
+        && strpos($normalDataScope, "normal_supplement_void.store_id = ' . \$storeColumn") !== false
+        && strpos($normalDataScope, "normal_supplement_void.source_id = ' . \$orderColumn") !== false,
     'market performance keeps order void reversals in their original source channel' => strpos($service, 'is_refund_reversal') !== false
         && strpos($service, "refund_operation.operation_type='refund'") !== false
         && strpos($service, "(int)(\$fact['is_refund_reversal'] ?? 0) === 1") !== false,

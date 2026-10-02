@@ -25,6 +25,23 @@ final class StoreReportNormalDataScopeServices
     }
 
     /**
+     * A succeeded supplement void removes both the original repayment and its
+     * reversal from normal reports, including when the two facts have different
+     * business dates. The immutable payment facts remain available for audit.
+     */
+    public function excludeVoidedSupplementPaymentFacts($query, string $tenantColumn, string $storeColumn, string $orderColumn): void
+    {
+        $query->whereNotExists(function ($operation) use ($tenantColumn, $storeColumn, $orderColumn): void {
+            $operation->name('cashier_v3_order_center_void_operation')->alias('normal_supplement_void')
+                ->whereRaw('normal_supplement_void.tenant_id = ' . $tenantColumn)
+                ->whereRaw('normal_supplement_void.store_id = ' . $storeColumn)
+                ->whereRaw('normal_supplement_void.source_id = ' . $orderColumn)
+                ->whereIn('normal_supplement_void.source_kind', ['sales_supplement', 'recharge_supplement'])
+                ->where('normal_supplement_void.status', 'succeeded');
+        });
+    }
+
+    /**
      * Service facts do not carry a sales-order ID. A service belongs to a
      * voided sale only when its source line belongs to the successfully
      * voided sales order; services from previously purchased entitlements stay

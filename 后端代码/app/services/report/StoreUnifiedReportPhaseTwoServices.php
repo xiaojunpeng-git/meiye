@@ -1642,6 +1642,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         // reversal facts; audit records remain append-only elsewhere.
         $query->whereRaw("({$column}fact_direction='forward' OR ({$column}fact_direction='reversal' AND EXISTS (SELECT 1 FROM eb_cashier_v3_order_lifecycle_operation reversal_operation WHERE reversal_operation.tenant_id={$column}tenant_id AND reversal_operation.command_idempotency_key={$column}command_idempotency_key AND reversal_operation.operation_type IN ('refund','void') AND reversal_operation.status='succeeded')))" );
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, $column . 'tenant_id', $column . 'order_id');
+        $this->normalDataScope()->excludeVoidedSupplementPaymentFacts($query, $column . 'tenant_id', $column . 'store_id', $column . 'order_id');
         return $this->participantOrder($query,$column.'order_id');
     }
     private function guideFilterOptions(array $stores,array $range):array
