@@ -656,10 +656,15 @@ async function importCountRows(event) {
     for (const item of catalog) if (!catalogByProduct.has(Number(item.product_id))) catalogByProduct.set(Number(item.product_id), item)
     const rowIdentity = (skuId, mode, batchNo) => `${skuId}:${mode}:${mode === 'BATCH' ? batchNo : ''}`
     const existing = new Map(selectedRows.value.map((row) => [rowIdentity(row.sku_id, row.count_mode || 'SKU', row.surplus_batch_no), row]))
-    const matched = [], seen = new Set()
+    const matched = [], skipped = [], seen = new Set()
     for (let index = 0; index < imported.length; index++) {
       const cells = imported[index]
       const rowNumber = cells.sourceRow || index + 2
+      // 未匹配的 ID 只跳过并按文件名称提示；不能按名称猜测替代商品或扩大门店目录权限。
+      if (!catalogByProduct.has(Number(cells[0]))) {
+        skipped.push(`${cells[1] || `商品 ID ${cells[0]}`}无法导入，请手动录入`)
+        continue
+      }
       const sku = matchCountProduct(cells, catalogByProduct, rowNumber)
       const mode = cells[12] === 'BATCH' ? 'BATCH' : 'SKU'
       const identity = rowIdentity(sku?.sku_id, mode, cells[8])
@@ -676,10 +681,12 @@ async function importCountRows(event) {
         surplus_unit_cost: cells[9], surplus_manufactured_date: cells[10], surplus_expire_date: cells[11] }
       matched.push(row)
     }
-    // 全文件校验成功后才一次性更新表格；不删除当前表格里未出现在文件中的行。
+    // 匹配成功的行全部校验后才一次性更新；数量、日期和重复错误仍阻断，缺失商品不阻断其他行。
+    // 不删除当前表格里未出现在有效导入记录中的行，也不写入系统库存。
     const importedIds = new Set(matched.map((row) => rowIdentity(row.sku_id, row.count_mode, row.surplus_batch_no)))
     selectedRows.value = [...selectedRows.value.filter((row) => !importedIds.has(rowIdentity(row.sku_id, row.count_mode || 'SKU', row.surplus_batch_no))), ...matched]
-    countProgress.value = `已导入 ${matched.length} 行到盘点单；完成盘点前系统库存不变。`
+    countProgress.value = `已导入 ${matched.length} 行到盘点单${skipped.length ? `，已跳过 ${skipped.length} 行` : ''}；完成盘点前系统库存不变。`
+    catalogError.value = skipped.join('；')
   } catch (error) { catalogError.value = error instanceof Error ? error.message : '盘点资料导入失败。' }
   finally { countLoading.value = false }
 }
