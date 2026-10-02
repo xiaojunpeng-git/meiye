@@ -4,9 +4,11 @@ import { readFileSync } from 'node:fs'
 const source = readFileSync(new URL('../../../前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue', import.meta.url), 'utf8')
 const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end))
 const picker = section('async function acceptCatalogRows(', '/** 只下载当前表格行的 Excel')
-const rows = section('function countDraftRow(', '/** 按已授权仓当前批次填草稿')
-const loadAll = section('async function loadAllCountProducts(', 'async function importCountRows(')
+const rows = section('function countDraftRow(', '/** 替换本地盘点明细')
+const batchActions = section('function replaceCountRows(', 'async function importCountRows(')
 const selectedRows = { value: [] }, catalogError = { value: '' }, countProgress = { value: '' }, countLoading = { value: false }
+const selectedLineIndexes = { value: [] }, countValidationRowIndexes = { value: [] }, bulkEditorVisible = { value: false }
+const bulkValues = { value: {} }, submitError = { value: '' }, submitting = { value: false }
 const productSelectorVisible = { value: true }
 const props = { pageKey: 'count' }
 const catalog = [
@@ -16,12 +18,15 @@ const catalog = [
   ] },
   { product_id: 2, sku_id: 102, product_name: '无库存商品', available_quantity: '0', count_batches: [] }
 ]
+let catalogFailure = false
 const run = new Function('props', 'selectedRows', 'catalogError', 'countProgress', 'countLoading', 'productSelectorVisible', 'allCountCatalog',
-  `${rows}\n${picker}\n${loadAll}\nreturn { acceptCatalogRows, loadAllCountProducts }`)(
+  'selectedLineIndexes', 'countValidationRowIndexes', 'bulkEditorVisible', 'bulkValues', 'submitError', 'submitting',
+  `${rows}\n${picker}\n${batchActions}\nreturn { acceptCatalogRows, loadAllCountProducts, importCurrentInventory, clearCountRows }`)(
   props, selectedRows, catalogError, countProgress, countLoading, productSelectorVisible, async (includeBatches) => {
     assert.equal(includeBatches, true)
+    if (catalogFailure) throw new Error('目录读取失败')
     return catalog
-  }
+  }, selectedLineIndexes, countValidationRowIndexes, bulkEditorVisible, bulkValues, submitError, submitting
 )
 
 await run.loadAllCountProducts()
@@ -32,9 +37,43 @@ assert.deepEqual(selectedRows.value.slice(0, 2).map((row) => [row.count_mode, ro
 ])
 assert.equal(selectedRows.value[2].surplus_batch_no, '')
 selectedRows.value[0].counted_quantity = '1'
+selectedLineIndexes.value = [0]
+countValidationRowIndexes.value = [0]
+bulkEditorVisible.value = true
+bulkValues.value = { counted_quantity: '8' }
+submitError.value = '旧校验错误'
 await run.loadAllCountProducts()
 assert.equal(selectedRows.value.length, 3)
-assert.equal(selectedRows.value[0].counted_quantity, '1')
+assert.equal(selectedRows.value[0].counted_quantity, '2')
+assert.deepEqual(selectedLineIndexes.value, [])
+assert.deepEqual(countValidationRowIndexes.value, [])
+assert.equal(bulkEditorVisible.value, false)
+assert.deepEqual(bulkValues.value, {})
+assert.equal(submitError.value, '')
+
+selectedRows.value[0].counted_quantity = '9'
+catalogFailure = true
+await run.loadAllCountProducts()
+assert.equal(selectedRows.value[0].counted_quantity, '9')
+assert.match(catalogError.value, /目录读取失败/)
+catalogFailure = false
+
+await run.importCurrentInventory()
+assert.equal(selectedRows.value.length, 2)
+assert.equal(selectedRows.value[0].counted_quantity, '2')
+selectedRows.value[0].counted_quantity = '7'
+await run.importCurrentInventory()
+assert.equal(selectedRows.value.length, 2)
+assert.equal(selectedRows.value[0].counted_quantity, '2')
+catalogFailure = true
+selectedRows.value[0].counted_quantity = '6'
+await run.importCurrentInventory()
+assert.equal(selectedRows.value[0].counted_quantity, '6')
+catalogFailure = false
+
+run.clearCountRows()
+assert.deepEqual(selectedRows.value, [])
+assert.match(countProgress.value, /系统库存尚未修改/)
 
 selectedRows.value = []
 await run.acceptCatalogRows([catalog[0]])
