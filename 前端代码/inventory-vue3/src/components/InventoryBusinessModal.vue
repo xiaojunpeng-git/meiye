@@ -125,7 +125,7 @@ const platformImportStores = computed(() => {
 const catalogApi = computed(() => isPlatformHeadquarters.value ? platformInventoryApi : inventoryApi)
 const catalogQuery = computed(() => {
   // 盘点的账面数要与确认命令锁定的当前库存一致；普通选品仍沿用原目录口径。
-  if (!isPlatformHeadquarters.value) return props.pageKey === 'count' ? { for_count: 1 } : {}
+  if (!isPlatformHeadquarters.value) return props.pageKey === 'count' ? { for_count: 1, include_count_batches: 1 } : {}
   // 请货明细仍按“请货方”目录保存，保证后端可校验请求商品；
   // “当前库存”则必须来自供货方库存主体，不能误展示请货方库存。
   const selection = props.pageKey === 'request'
@@ -141,7 +141,8 @@ const catalogQuery = computed(() => {
     source_party_type: sourcePartyType,
     source_store_id: Number(rawSourceId || 0),
     availability_party_type: availabilityPartyType,
-    availability_store_id: Number(rawAvailabilityId || 0)
+    availability_store_id: Number(rawAvailabilityId || 0),
+    ...(props.pageKey === 'count' ? { include_count_batches: 1 } : {})
   }
 })
 const warehouseStoreOptions = computed(() => {
@@ -532,6 +533,20 @@ async function acceptCatalogRows(rows) {
   catalogError.value = ''
   const selectedSkuIds = new Set(selectedRows.value.map((item) => Number(item.sku_id)))
   for (const row of rows) {
+    if (props.pageKey === 'count' && Array.isArray(row.count_batches) && row.count_batches.length) {
+      // 选品以仓库当前批次为粒度；相同 SKU 的每个批次只补一次，保留已经录入的实盘数。
+      if (selectedRows.value.some((item) => Number(item.sku_id) === Number(row.sku_id) && item.count_mode !== 'BATCH')) {
+        catalogError.value = `「${row.product_name}」已有按总量盘点的行，请删除该行后再加载库存批次。`
+        continue
+      }
+      const existingBatches = new Set(selectedRows.value.filter((item) => Number(item.sku_id) === Number(row.sku_id) && item.count_mode === 'BATCH').map((item) => String(item.surplus_batch_no)))
+      for (const batch of row.count_batches) {
+        if (existingBatches.has(String(batch.batch_no))) continue
+        selectedRows.value.push(countBatchRow(row, batch))
+        existingBatches.add(String(batch.batch_no))
+      }
+      continue
+    }
     if (selectedSkuIds.has(Number(row.sku_id)) && props.pageKey !== 'count') continue
     if (props.pageKey === 'count' && selectedRows.value.some((item) => Number(item.sku_id) === Number(row.sku_id) && item.count_mode !== 'BATCH')) {
       catalogError.value = '该商品已有按总量盘点的明细，请删除该行后再按不同批次添加。'
@@ -576,7 +591,7 @@ async function allCountCatalog(includeBatches = false) {
   const rows = [], seen = new Set()
   let page = 1, total = 0
   do {
-    const response = await catalogApi.value.searchCatalog({ ...catalogQuery.value, keyword: '', category_id: 0, page, limit: 50, ...(includeBatches ? { include_count_batches: 1 } : {}) })
+    const response = await catalogApi.value.searchCatalog({ ...catalogQuery.value, keyword: '', category_id: 0, page, limit: 50, include_count_batches: includeBatches ? 1 : 0 })
     const current = Array.isArray(response?.list) ? response.list : []
     total = Number(response?.total || 0)
     if (!current.length && rows.length < total) throw new Error('商品目录未返回完整数据，请稍后重试。')
@@ -599,6 +614,13 @@ function countDraftRow(row) {
     surplus_manufactured_date: '', surplus_expire_date: '', available_quantity: book, reference_unit_cost: '-' }
 }
 
+/** 使用当前仓可见批次及其成本权限生成独立盘点行；不从 SKU 汇总数猜测单个批次数据。 */
+function countBatchRow(sku, batch) {
+  return { ...countDraftRow(sku), count_mode: 'BATCH', book_quantity: String(batch.quantity), counted_quantity: String(batch.quantity),
+    surplus_batch_no: String(batch.batch_no), surplus_unit_cost: batch.unit_cost == null ? '' : String(batch.unit_cost),
+    surplus_manufactured_date: String(batch.manufactured_date || ''), surplus_expire_date: String(batch.expire_date || '') }
+}
+
 /** 按已授权仓当前批次填草稿；重复导入仅补缺失批次，不覆盖员工已经填写的实盘。 */
 async function importCurrentInventory() {
   if (props.pageKey !== 'count' || countLoading.value || submitting.value) return
@@ -615,9 +637,7 @@ async function importCurrentInventory() {
       for (const batch of batches) {
         const identity = `${sku.sku_id}:${batch.batch_no}`
         if (existing.has(identity)) continue
-        additions.push({ ...countDraftRow(sku), count_mode: 'BATCH', book_quantity: String(batch.quantity), counted_quantity: String(batch.quantity),
-          surplus_batch_no: String(batch.batch_no), surplus_unit_cost: batch.unit_cost == null ? '' : String(batch.unit_cost),
-          surplus_manufactured_date: String(batch.manufactured_date || ''), surplus_expire_date: String(batch.expire_date || '') })
+        additions.push(countBatchRow(sku, batch))
         existing.add(identity)
         if (additions.length > 10000) throw new Error('本次库存批次超过 10000 行，请分批盘点；未导入任何行。')
       }
@@ -633,9 +653,12 @@ async function loadAllCountProducts() {
   // 两端共用仓库范围，加载商品不覆盖用户已录入的实盘数。
   countLoading.value = true; catalogError.value = ''; countProgress.value = '正在读取当前库存仓全部库存商品…'
   try {
-    const catalog = await allCountCatalog()
+    const catalog = await allCountCatalog(true)
     const existing = new Set(selectedRows.value.map((row) => Number(row.sku_id)))
-    const additions = catalog.filter((row) => !existing.has(Number(row.sku_id))).map(countDraftRow)
+    // 员工已录入的 SKU 保持原样；新增商品按真实库存批次展开，无库存的商品保留待填写行。
+    const additions = catalog.filter((row) => !existing.has(Number(row.sku_id)))
+      .flatMap((row) => Array.isArray(row.count_batches) && row.count_batches.length
+        ? row.count_batches.map((batch) => countBatchRow(row, batch)) : [countDraftRow(row)])
     for (const row of additions) selectedRows.value.push(row)
     countProgress.value = `已加载 ${catalog.length} 个有效规格，新增 ${additions.length} 行；原有实盘数保持不变。`
   } catch (error) { catalogError.value = error instanceof Error ? error.message : '加载全部商品失败。' }
