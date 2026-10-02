@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {
-  changedCountRows,
+  countedRows,
   invalidCountCatalogMessage,
   invalidCountCatalogRowIndexes,
   reindexCountValidationRowsAfterRemoval,
@@ -17,9 +17,11 @@ const rows = [
   { sku_id: 7, book_quantity: '0', counted_quantity: 'invalid' },
 ]
 
-// 大批量加载只是草稿；确认请求只保留库存有差异的行，不误丢非法非空输入。
-assert.deepEqual(changedCountRows(rows).map((row) => row.sku_id), [1, 2, 6, 7])
-assert.deepEqual(changedCountRows(rows.slice(2, 5)), [])
+// 等于旧账面的实盘也必须提交，空白未盘不提交；非法非空输入必须留给校验。
+assert.deepEqual(countedRows(rows).map((row) => row.sku_id), [1, 2, 3, 4, 6, 7])
+assert.deepEqual(countedRows(rows.slice(2, 5)).map((row) => row.sku_id), [3, 4])
+assert.equal(validateCountSubmissionRows(rows, { validateSurplus: false }).rowIndex, 6)
+assert.equal(validateCountSubmissionRows(rows.slice(0, 6), { validateSurplus: false }).valid, true)
 
 // 盘亏无需补建批次；盘盈必须在前端明确指出首条缺失资料，避免服务端回滚后用户无从定位。
 const validationRows = [

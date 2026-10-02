@@ -43,5 +43,8 @@ $changed=line('9','TEST-COUNT-MIXED-GAIN','2.30','2026-06-07','2027-07-07');$cha
 $mixed=$count->confirm(99008,990008,['idempotency_key'=>'TEST-count-mixed-20260928','business_date'=>'2026-09-28','remark'=>'TEST-仅保存变动','lines'=>[$unchanged,$changed]]);
 cassert('mixed count saves only changed SKU', (int)Db::name('inventory_stock_count_line')->where('document_id',(int)$mixed['count_document_id'])->count()===1 && (int)Db::name('inventory_stock_count_line')->where('document_id',(int)$mixed['count_document_id'])->where('product_id',990081)->count()===1);
 $stale=line('8');$stale['expected_book_quantity']='7';
-cassert('stale book snapshot rolls back the whole count', reason(static function()use($count,$stale){$count->confirm(99008,990008,cmd('TEST-count-stale-20260928',$stale));})==='inventory_stock_count_stock_changed'&&(int)Db::name('inventory_stock_count_document')->where('idempotency_key','TEST-count-stale-20260928')->count()===0);
+// 导出时账面 7、提交时库存 9：以实盘 8 调整为盘亏 1，不因快照过期拒绝。
+$staleResult=$count->confirm(99008,990008,cmd('TEST-count-stale-20260928',$stale));
+$staleLine=Db::name('inventory_stock_count_line')->where('document_id',(int)$staleResult['count_document_id'])->find();
+cassert('stale book snapshot settles physical count against current stock', (int)$staleLine['book_quantity_units']===9 && (int)$staleLine['counted_quantity_units']===8 && (int)$staleLine['difference_quantity_units']===-1);
 echo "INVENTORY_STOCK_COUNT_RESULT failed={$failed}\n";exit($failed?1:0);

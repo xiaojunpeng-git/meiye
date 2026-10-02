@@ -723,7 +723,7 @@ async function openCountDetail(row) {
 async function openCountDraft(row) {
   try {
     // A draft ID is not a settled count document ID; read the creator-scoped draft endpoint.
-    selectedDetail.value = await inventoryApi.countDraftDetail(row.draft_id)
+    selectedDetail.value = await readCountDraft(row.draft_id)
     editor.value = 'count-edit'
   } catch (error) {
     listError.value = error instanceof Error ? error.message : '盘点草稿读取失败。'
@@ -733,20 +733,27 @@ async function openCountDraft(row) {
 async function openCountDraftDetail(row) {
   try {
     // 只读草稿仍使用创建人范围的服务端详情，不自动加载商品目录或变动库存。
-    selectedDetail.value = await inventoryApi.countDraftDetail(row.draft_id)
+    selectedDetail.value = await readCountDraft(row.draft_id)
     editor.value = 'count-draft-detail'
   } catch (error) {
     listError.value = error instanceof Error ? error.message : '盘点草稿读取失败。'
   }
 }
 
+/** 草稿按当前登录终端及总部仓读取，不拿草稿ID冒充已确认单据。 */
+function readCountDraft(id) {
+  return mode.value === 'platform'
+    ? platformInventoryApi.hqCountDraftDetail(id, { hq_location_id: Number(platformHqLocationId.value) })
+    : inventoryApi.countDraftDetail(id)
+}
+
 /** 删除前先读创建人可见的最新草稿版本，防止旧列表操作误删并发修改后的内容。 */
 async function requestDeleteCountDraft(row) {
-  if (mode.value !== 'store' || active.value !== 'count' || Number(row?.draft_id || 0) <= 0 || countDraftDeleteBusy.value) return
+  if (active.value !== 'count' || Number(row?.draft_id || 0) <= 0 || countDraftDeleteBusy.value) return
   countDraftDeleteBusy.value = true
   countDraftDeleteError.value = ''
   try {
-    const detail = await inventoryApi.countDraftDetail(row.draft_id)
+    const detail = await readCountDraft(row.draft_id)
     countDraftDeleteConfirmation.value = { id: Number(detail.draft_id), version: Number(detail.version) }
   } catch (error) {
     listError.value = error instanceof Error ? error.message : '读取盘点草稿失败。'
@@ -762,7 +769,8 @@ async function confirmDeleteCountDraft() {
   countDraftDeleteBusy.value = true
   countDraftDeleteError.value = ''
   try {
-    await inventoryApi.deleteCountDraft(target.id, target.version)
+    if (mode.value === 'platform') await platformInventoryApi.deleteHqCountDraft(target.id, target.version, platformHqLocationId.value)
+    else await inventoryApi.deleteCountDraft(target.id, target.version)
     countDraftDeleteConfirmation.value = null
     await loadCurrentList()
   } catch (error) {

@@ -6,7 +6,7 @@ import InventoryProductSelector from './InventoryProductSelector.vue'
 import InventoryStoreSelector from './InventoryStoreSelector.vue'
 import { inventoryStatusLabel } from '../statusLabels'
 import { exportCountXlsx, parseCountXlsx } from './countWorksheet'
-import { changedCountRows, invalidCountCatalogMessage, invalidCountCatalogRowIndexes, reindexCountValidationRowsAfterRemoval, validateCountSubmissionRows } from '../utils/countSubmission'
+import { countedRows, invalidCountCatalogMessage, invalidCountCatalogRowIndexes, reindexCountValidationRowsAfterRemoval, validateCountSubmissionRows } from '../utils/countSubmission'
 import { validateInboundDates } from '../inboundDateValidation'
 
 const props = defineProps({
@@ -405,7 +405,7 @@ watch([() => props.detail, isCountEdit], ([detail]) => {
   countRemark.value = String(detail.remark || '')
   selectedRows.value = (Array.isArray(detail.lines) ? detail.lines : []).map((line) => ({ ...line }))
   countDraftSavedSnapshot.value = JSON.stringify(countDraftContent())
-  countProgress.value = `已恢复草稿中的 ${selectedRows.value.length} 行；完成盘点时会重新校验账面库存。`
+  countProgress.value = `已恢复草稿中的 ${selectedRows.value.length} 行；完成盘点以实盘数为最终库存。`
 }, { immediate: true })
 
 function hydrateUsageReturn(detail) {
@@ -592,7 +592,8 @@ function countDraftRow(row) {
 
 async function loadAllCountProducts() {
   if (props.pageKey !== 'count' || countLoading.value) return
-  countLoading.value = true; catalogError.value = ''; countProgress.value = '正在读取当前门店全部库存商品…'
+  // 两端共用仓库范围，加载商品不覆盖用户已录入的实盘数。
+  countLoading.value = true; catalogError.value = ''; countProgress.value = '正在读取当前库存仓全部库存商品…'
   try {
     const catalog = await allCountCatalog()
     const existing = new Set(selectedRows.value.map((row) => Number(row.sku_id)))
@@ -631,15 +632,12 @@ async function importCountRows(event) {
       if (!sku || seen.has(Number(sku.sku_id))) throw new Error(`第 ${index + 2} 行的商品规格不存在、标识重复或不唯一，请重新导出核对。`)
       if (String(cells[3] || '') !== String(sku.stock_unit || '')) throw new Error(`第 ${index + 2} 行库存单位已变化，请重新导出盘点资料。`)
       seen.add(Number(sku.sku_id))
-      if (!/^\d+(?:\.\d{1,4})?$/.test(cells[5]) || !/^\d+(?:\.\d{1,4})?$/.test(cells[6])) throw new Error(`第 ${index + 2} 行库存数量无效。`)
-      // 文件的账面值必须与导入时目录一致；过期文件不能覆盖更新后的入出库结果。
-      if (Number(cells[5]) !== Number(sku.available_quantity ?? 0)) throw new Error(`第 ${index + 2} 行账面库存已变化，请重新导出盘点资料。`)
-      const difference = Number(cells[6]) - Number(cells[5])
-      if (!/^-?\d+(?:\.\d{1,4})?$/.test(cells[7]) || Math.abs(Number(cells[7]) - difference) > 0.0001) throw new Error(`第 ${index + 2} 行库存盈亏与实盘数不一致。`)
+      // 文件账面、盈亏仅为导出时参考，不作为导入门禁；只接收有效实盘数。
+      if (!/^\d+(?:\.\d{1,4})?$/.test(cells[6])) throw new Error(`第 ${index + 2} 行实盘库存数量无效。`)
       if (cells[9] && !/^\d+(?:\.\d{1,2})?$/.test(cells[9])) throw new Error(`第 ${index + 2} 行盘盈单价无效。`)
       if ([cells[10], cells[11]].some((value) => value && !/^\d{4}-\d{2}-\d{2}$/.test(value))) throw new Error(`第 ${index + 2} 行日期格式无效。`)
       const row = { ...(existing.get(Number(sku.sku_id)) || countDraftRow(sku)),
-        book_quantity: cells[5], counted_quantity: cells[6], surplus_batch_no: cells[8],
+        book_quantity: String(sku.available_quantity ?? 0), counted_quantity: cells[6], surplus_batch_no: cells[8],
         surplus_unit_cost: cells[9], surplus_manufactured_date: cells[10], surplus_expire_date: cells[11] }
       matched.push(row)
     }
@@ -842,9 +840,11 @@ function countDraftContent() {
 
 async function persistCountDraft() {
   const content = countDraftContent()
-  const result = await inventoryApi.saveCountDraft({
-    draft_id: countDraftId.value, expected_version: countDraftVersion.value, ...content
-  })
+  // 平台总部不能调用门店写接口；保存仍只产生可续编快照，不产生库存变更。
+  const payload = { draft_id: countDraftId.value, expected_version: countDraftVersion.value, ...content }
+  const result = isPlatformHeadquarters.value
+    ? await platformInventoryApi.saveHqCountDraft({ ...payload, hq_location_id: Number(props.hqLocationId) })
+    : await inventoryApi.saveCountDraft(payload)
   countDraftId.value = Number(result.draft_id)
   countDraftVersion.value = Number(result.version)
   countDraftSavedSnapshot.value = JSON.stringify(content)
@@ -852,7 +852,7 @@ async function persistCountDraft() {
 }
 
 async function saveCountDraft() {
-  if (props.pageKey !== 'count' || isPlatformHeadquarters.value || !selectedRows.value.length || countLoading.value || submitting.value) return
+  if (props.pageKey !== 'count' || !selectedRows.value.length || countLoading.value || submitting.value) return
   submitting.value = true
   submitError.value = ''
   try {
@@ -866,14 +866,14 @@ async function saveCountDraft() {
 
 async function submitCount() {
   if (props.pageKey !== 'count' || countLoading.value || submitting.value) return
-  // 保留加载全部商品的草稿体验，但不得把未盘或无库存变化的规格写入正式盘点单。
-  const changedRows = changedCountRows(selectedRows.value)
-  if (!changedRows.length) {
-    submitError.value = '请至少填写一项与账面库存不同的实盘库存。'
+  // 等于旧账面也必须提交：期间库存可能变化，是否调整由服务端锁定后决定。
+  const physicalRows = countedRows(selectedRows.value)
+  if (!physicalRows.length) {
+    submitError.value = '请至少填写一项实盘库存。'
     catalogError.value = submitError.value
     return
   }
-  const validation = validateCountSubmissionRows(selectedRows.value)
+  const validation = validateCountSubmissionRows(selectedRows.value, { validateSurplus: false })
   if (!validation.valid) {
     // 明细可能有数百行；错误必须留在操作区并把首条问题行带回视野，避免用户误以为按钮无效。
     countValidationRowIndexes.value = [validation.rowIndex]
@@ -894,7 +894,7 @@ async function submitCount() {
       idempotency_key: countDraftId.value > 0 ? `count-draft-${countDraftId.value}` : countIdempotencyKey(),
       draft_id: countDraftId.value, draft_version: countDraftVersion.value,
       business_date: inboundDate.value, remark: countRemark.value,
-      lines: changedRows.map((row) => ({
+      lines: physicalRows.map((row) => ({
         product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique,
         counted_quantity: row.counted_quantity, surplus_batch_no: row.surplus_batch_no,
         surplus_unit_cost: row.surplus_unit_cost, surplus_manufactured_date: row.surplus_manufactured_date,
@@ -1230,7 +1230,7 @@ function submitPrimaryEditor() {
           <section v-if="!isImport && !isDetail && pageKey !== 'warehouse'" class="line-section" :class="{ 'line-section--count': pageKey === 'count' }">
             <header>
               <div><h3>{{ pageKey === 'count' ? '盘点商品' : pageKey === 'request' ? '请货商品' : pageKey === 'transfer' ? '调拨商品' : pageKey === 'inbound' ? '入库商品' : pageKey === 'outbound' ? '出库商品' : '业务明细' }}<i v-if="!isDetail">*</i></h3><p v-if="pageKey === 'inbound'">扫描商品条码可自动添加；批次、生产日期、到期日和入库单价在商品明细中填写。</p><p v-else-if="pageKey === 'outbound'">系统会优先扣减最早到期的可用批次，并自动计算成本。</p></div>
-              <div v-if="!isDetail" class="line-actions"><template v-if="pageKey === 'count' && !isPlatformHeadquarters"><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="exportCountRows">导出盘点资料</button><button class="modal-secondary" :disabled="countLoading" @click="countFileInput?.click()">导入盘点</button><input ref="countFileInput" class="count-file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="importCountRows" /><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="zeroVisibleCountRows">库存清零</button><button class="modal-secondary" :disabled="countLoading" @click="loadAllCountProducts">{{ countLoading ? '加载中…' : '加载全部商品' }}</button></template><button v-if="!isUsageReturn" class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="!isUsageReturn && ['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button><span class="line-submit-actions"><button class="modal-secondary" :disabled="submitting" @click="close">取消</button><template v-if="pageKey === 'count'"><button v-if="!isPlatformHeadquarters" class="modal-secondary" :disabled="submitting || countLoading || !selectedRows.length" @click="saveCountDraft">{{ submitting ? '保存中' : '保存草稿' }}</button><button class="modal-primary" :disabled="submitting || countLoading || !selectedRows.length" @click="submitCount">{{ submitting ? '提交中' : '完成盘点' }}</button></template><button v-else class="modal-primary" :disabled="primarySubmitDisabled" @click="submitPrimaryEditor">{{ primarySubmitLabel }}</button></span></div>
+              <div v-if="!isDetail" class="line-actions"><template v-if="pageKey === 'count'"><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="exportCountRows">导出盘点资料</button><button class="modal-secondary" :disabled="countLoading" @click="countFileInput?.click()">导入盘点</button><input ref="countFileInput" class="count-file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="importCountRows" /><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="zeroVisibleCountRows">库存清零</button><button class="modal-secondary" :disabled="countLoading" @click="loadAllCountProducts">{{ countLoading ? '加载中…' : '加载全部商品' }}</button></template><button v-if="!isUsageReturn" class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="!isUsageReturn && ['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button><span class="line-submit-actions"><button class="modal-secondary" :disabled="submitting" @click="close">取消</button><template v-if="pageKey === 'count'"><button class="modal-secondary" :disabled="submitting || countLoading || !selectedRows.length" @click="saveCountDraft">{{ submitting ? '保存中' : '保存草稿' }}</button><button class="modal-primary" :disabled="submitting || countLoading || !selectedRows.length" @click="submitCount">{{ submitting ? '提交中' : '完成盘点' }}</button></template><button v-else class="modal-primary" :disabled="primarySubmitDisabled" @click="submitPrimaryEditor">{{ primarySubmitLabel }}</button></span></div>
             </header>
             <p v-if="catalogError" class="catalog-error">{{ catalogError }}</p><p v-if="pageKey === 'count' && countProgress" class="count-progress">{{ countProgress }}</p>
             <section v-if="scannerVisible" class="scanner-entry"><Barcode :size="17" /><label>扫描条码<input v-model="scannerCode" autofocus placeholder="请扫描或输入商品条码" @keyup.enter="addScannedProduct" /></label><button class="modal-secondary" @click="scannerVisible = false">取消</button><button class="modal-primary" :disabled="!scannerCode.trim() || scannerLoading" @click="addScannedProduct">{{ scannerLoading ? '添加中' : '添加' }}</button></section>

@@ -6,6 +6,9 @@ namespace app\controller\admin\v1\product\inventory;
 use app\controller\admin\AuthController;
 use app\services\product\inventory\InventoryPlatformHqStockCountQueryServices;
 use app\services\product\inventory\InventoryStockCountServices;
+use app\services\product\inventory\InventoryStockCountDraftServices;
+use app\services\product\inventory\InventoryErrorMessage;
+use app\services\product\inventory\InventoryStockCountCatalogException;
 use think\facade\App;
 
 /** Platform write boundary for physical counts owned by a headquarters warehouse. */
@@ -25,10 +28,13 @@ final class InventoryPlatformHqStockCount extends AuthController
             $locationId = (int)($input['hq_location_id'] ?? 0);
             unset($input['hq_location_id']);
             return $this->success($this->services->confirmForHeadquarters((array)$this->adminInfo, $locationId, $input));
+        } catch (InventoryStockCountCatalogException $exception) {
+            // 共用编辑器按稳定商品身份提示并高亮，不能在总部入口丢失问题行信息。
+            return $this->fail('盘点商品已失效，请核对标红的明细。', ['code' => $exception->getMessage(), 'invalid_lines' => $exception->invalidLines()]);
         } catch (\InvalidArgumentException $exception) {
             return $this->fail('总部盘点参数不合法。', ['code' => $exception->getMessage()]);
         } catch (\RuntimeException $exception) {
-            return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]);
+            return $this->fail(InventoryErrorMessage::from($exception)['message'] ?? $this->message($exception->getMessage()), ['code' => $exception->getMessage()]);
         }
     }
 
@@ -44,6 +50,37 @@ final class InventoryPlatformHqStockCount extends AuthController
             return $this->fail('总部盘点单不存在或无权查看。', ['code' => $exception->getMessage()]);
         } catch (\RuntimeException $exception) {
             return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]);
+        }
+    }
+
+    /** 草稿命令与完成盘点分开，所有主体/创建人范围交服务端授权解析。 */
+    public function saveDraft()
+    {
+        return $this->draftCommand('save');
+    }
+
+    public function draftDetail(int $id)
+    {
+        return $this->draftCommand('detail', $id);
+    }
+
+    public function deleteDraft(int $id)
+    {
+        return $this->draftCommand('delete', $id);
+    }
+
+    private function draftCommand(string $action, int $id = 0)
+    {
+        try {
+            $input = $action === 'detail' ? $this->request->get() : $this->request->post();
+            $locationId = (int)($input['hq_location_id'] ?? 0);
+            $service = new InventoryStockCountDraftServices();
+            if ($action === 'save') $result = $service->saveForHeadquarters((array)$this->adminInfo, $locationId, (array)$input);
+            elseif ($action === 'detail') $result = $service->detailForHeadquarters((array)$this->adminInfo, $locationId, $id);
+            else $result = $service->deleteForHeadquarters((array)$this->adminInfo, $locationId, $id, (int)($input['expected_version'] ?? 0));
+            return $this->success($result);
+        } catch (\InvalidArgumentException | \RuntimeException $exception) {
+            return $this->fail((InventoryErrorMessage::from($exception)['message'] ?? '总部盘点草稿操作失败，请重试。'), ['code' => $exception->getMessage()]);
         }
     }
 

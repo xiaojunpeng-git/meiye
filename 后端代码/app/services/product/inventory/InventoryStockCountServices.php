@@ -27,34 +27,40 @@ final class InventoryStockCountServices
         return Db::transaction(function () use ($storeId, $operatorId, $sessionInfo, $command, $draftId, $draftVersion): array {
             $scope = $this->scope($storeId, $operatorId, $sessionInfo);
             $location = $this->location($scope);
-            if ($draftId > 0) {
-                $scope['locationId'] = (int)$location['id'];
-                $draft = (new InventoryStockCountDraftServices())->lockForConfirmation($scope, $draftId, $draftVersion);
-                $this->assertDraftCommandMatches($draft, $command);
-                if ((string)$draft['document_status'] === 'CONFIRMED') {
-                    $existing = Db::name('inventory_stock_count_document')->where('id', (int)$draft['confirmed_document_id'])
-                        ->where('tenant_id', $scope['tenantId'])->where('location_id', (int)$location['id'])->find();
-                    if (!$existing || (string)$existing['idempotency_key'] !== $command['key']
-                        || (string)$existing['request_fingerprint'] !== $command['fingerprint']) {
-                        throw new \RuntimeException('inventory_stock_count_idempotency_conflict');
-                    }
-                    return ['count_document_id' => (int)$existing['id'], 'count_no' => (string)$existing['count_no'], 'idempotent' => true];
-                }
-            }
-            $result = $this->confirmAtScope($scope, $location, $command);
-            if ($draftId > 0) (new InventoryStockCountDraftServices())->markConfirmed($draftId, (int)$result['count_document_id'], $draftVersion);
-            return $result;
+            return $this->confirmWithDraftAtScope($scope, $location, $command, $draftId, $draftVersion);
         });
     }
 
-    /** A resumed draft must settle exactly its saved differences, never an unrelated client-substituted line set. */
+    /** 门店与总部共用草稿结算：事务内锁版本、核对快照、幂等入账，不形成两套库存口径。 */
+    private function confirmWithDraftAtScope(array $scope, array $location, array $command, int $draftId, int $draftVersion): array
+    {
+        if ($draftId > 0) {
+            $scope['locationId'] = (int)$location['id'];
+            $draft = (new InventoryStockCountDraftServices())->lockForConfirmation($scope, $draftId, $draftVersion);
+            $this->assertDraftCommandMatches($draft, $command);
+            if ((string)$draft['document_status'] === 'CONFIRMED') {
+                $existing = Db::name('inventory_stock_count_document')->where('id', (int)$draft['confirmed_document_id'])
+                    ->where('tenant_id', $scope['tenantId'])->where('location_id', (int)$location['id'])->find();
+                if (!$existing || (string)$existing['idempotency_key'] !== $command['key']
+                    || (string)$existing['request_fingerprint'] !== $command['fingerprint']) {
+                    throw new \RuntimeException('inventory_stock_count_idempotency_conflict');
+                }
+                return ['count_document_id' => (int)$existing['id'], 'count_no' => (string)$existing['count_no'], 'idempotent' => true];
+            }
+        }
+        $result = $this->confirmAtScope($scope, $location, $command);
+        if ($draftId > 0) (new InventoryStockCountDraftServices())->markConfirmed($draftId, (int)$result['count_document_id'], $draftVersion);
+        return $result;
+    }
+
+    /** 草稿结算核对全部已填写的实盘数，不用历史账面排除等值行，仍禁止客户端替换明细。 */
     private function assertDraftCommandMatches(array $draft, array $command): void
     {
         $savedLines = json_decode((string)$draft['lines_json'], true, 512, JSON_THROW_ON_ERROR);
         $changed = [];
         foreach ($savedLines as $line) {
             $counted = trim((string)$line['counted_quantity']);
-            if ($counted === '' || (float)$counted === (float)$line['book_quantity']) continue;
+            if ($counted === '') continue;
             $changed[] = [
                 'product_id' => (int)$line['product_id'], 'sku_id' => (int)$line['sku_id'],
                 'sku_unique' => (string)$line['sku_unique'], 'counted_quantity' => $counted,
@@ -71,6 +77,17 @@ final class InventoryStockCountServices
             'remark' => (string)$draft['remark'], 'lines' => $changed,
         ]);
         if ($savedCommand['fingerprint'] !== $command['fingerprint']) {
+            // 已结算的旧版本曾只提交与快照不同的行；只允许其原命令重放，不放宽未结算草稿。
+            if ((string)$draft['document_status'] === 'CONFIRMED') {
+                $legacyLines = array_values(array_filter($changed, static function (array $line): bool {
+                    return (float)$line['counted_quantity'] !== (float)$line['expected_book_quantity'];
+                }));
+                if ($legacyLines) {
+                    $legacy = $this->normalize(['idempotency_key' => $command['key'],
+                        'business_date' => (string)$draft['business_date'], 'remark' => (string)$draft['remark'], 'lines' => $legacyLines]);
+                    if ($legacy['fingerprint'] === $command['fingerprint']) return;
+                }
+            }
             throw new \RuntimeException('inventory_stock_count_draft_changed');
         }
     }
@@ -78,18 +95,26 @@ final class InventoryStockCountServices
     /** Confirms a count against a platform-authenticated headquarters location. */
     public function confirmForHeadquarters(array $adminInfo, int $locationId, array $input): array
     {
+        // 草稿身份不是库存写入字段；剥离后按同一正式命令契约校验，并保护创建人版本。
+        $draftId = (int)($input['draft_id'] ?? 0);
+        $draftVersion = (int)($input['draft_version'] ?? 0);
+        unset($input['draft_id'], $input['draft_version']);
         $command = $this->normalize($input);
+        if ($draftId < 0 || ($draftId === 0 && $draftVersion !== 0)
+            || ($draftId > 0 && ($draftVersion <= 0 || $command['key'] !== 'count-draft-' . $draftId))) {
+            throw new \InvalidArgumentException('inventory_stock_count_draft_invalid');
+        }
         $hq = new InventoryHqLocationServices();
         $resolved = $hq->writableLocation($adminInfo, $locationId);
         $scope = $hq->scope((array)$resolved['location'], (int)($resolved['access']['admin_id'] ?? 0));
         $scope['operatorType'] = 'PLATFORM_ADMIN';
         $scope['operatorName'] = mb_substr(trim((string)($adminInfo['real_name'] ?? $adminInfo['name'] ?? $adminInfo['account'] ?? '')), 0, 128);
-        return Db::transaction(function () use ($scope, $resolved, $command): array {
+        return Db::transaction(function () use ($scope, $resolved, $command, $draftId, $draftVersion): array {
             $location = Db::name('inventory_location')->where('id', (int)$resolved['location']['id'])->lock(true)->find();
             if (!$location || (string)$location['location_type'] !== 'HQ' || (int)$location['store_id'] !== 0 || (string)$location['location_status'] !== 'ACTIVE') {
                 throw new \RuntimeException('inventory_hq_location_invalid');
             }
-            return $this->confirmAtScope($scope, (array)$location, $command);
+            return $this->confirmWithDraftAtScope($scope, (array)$location, $command, $draftId, $draftVersion);
         });
     }
 
@@ -157,17 +182,14 @@ final class InventoryStockCountServices
         ];
     }
 
-    /** 未变动规格只校验权威账面值，不创建库存主体、盘点明细或移动事实。 */
+    /** 实盘为最终数量；锁定当前账面计算调整，零差异不创建明细或移动事实。 */
     private function confirmLine(array $scope, array $location, array $document, array $line, array $command): bool
     {
         $stock = $this->countableStock($scope, $location, $line, $command['now'], false);
         if ((int)$stock['quantity_scale'] < 0 || (int)$stock['quantity_scale'] > 4) throw new \RuntimeException('inventory_stock_count_stock_not_found');
         $scale = (int)$stock['quantity_scale']; $book = (int)$stock['available_quantity_units']; $counted = $this->countUnits($line['counted'], $scale); $difference = $counted - $book;
-        // 导出后的账面数若变化，必须重新核对，避免“清零”误清后来入库的数量。
-        if (($line['expectedBook'] ?? null) !== null
-            && $this->countUnits($line['expectedBook'], $scale) !== $book) {
-            throw new \RuntimeException('inventory_stock_count_stock_changed');
-        }
+        // 产品口径：即使导出/草稿后的库存变化，也以本次实盘为最终数。
+        // expectedBook 仅保留命令指纹兼容，不作为并发库存门禁；事务锁与幂等仍有效。
         if ($difference === 0) return false;
         if ((int)$stock['id'] === 0) $stock = $this->countableStock($scope, $location, $line, $command['now']);
         $surplus = ['batchNo' => '', 'cost' => 0, 'manufacturedDate' => null, 'expireDate' => null];

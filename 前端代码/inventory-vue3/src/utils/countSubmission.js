@@ -1,13 +1,13 @@
 /**
- * 加载商品只形成待盘草稿；确认时只提交实际库存与账面库存不同的规格。
- * 空白代表未盘，等值代表未产生库存调整，二者都不应生成盘点明细。
+ * 空白代表未盘；所有非空实盘数都提交，不能用加载时账面快照过滤。
+ * 是否产生调整由服务端在事务内比较提交时库存，保护期间发生的入出库事实。
  * 非法非空输入仍保留给服务端校验，不能悄悄丢弃用户试图提交的记录。
  */
-export function changedCountRows(rows) {
+export function countedRows(rows) {
   return rows.filter((row) => {
     const counted = String(row.counted_quantity ?? '').trim()
     if (!counted) return false
-    return Number(counted) !== Number(row.book_quantity)
+    return true
   })
 }
 
@@ -15,7 +15,7 @@ export function changedCountRows(rows) {
  * 在请求服务端前定位首条不可结算的盘点明细。
  * 只校验实际产生库存差异的行；盘盈会新建或合并批次，因此必须具备可追溯的批次、成本和有效期信息。
  */
-export function validateCountSubmissionRows(rows) {
+export function validateCountSubmissionRows(rows, { validateSurplus = true } = {}) {
   const quantityPattern = /^\d+(?:\.\d{1,4})?$/
   const costPattern = /^\d+(?:\.\d{1,2})?$/
   const datePattern = /^\d{4}-\d{2}-\d{2}$/
@@ -23,13 +23,14 @@ export function validateCountSubmissionRows(rows) {
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
     const row = rows[rowIndex]
     const counted = String(row.counted_quantity ?? '').trim()
-    if (!counted || Number(counted) === Number(row.book_quantity)) continue
+    if (!counted) continue
 
     const productName = String(row.product_name || `商品ID ${row.product_id || '-'}`).trim()
     if (!quantityPattern.test(counted)) {
       return { valid: false, rowIndex, message: `第 ${rowIndex + 1} 行「${productName}」的实盘库存填写不正确，暂时无法完成盘点。请填写有效数量后再试。` }
     }
-    if (Number(counted) <= Number(row.book_quantity)) continue
+    // 完成盘点不以旧账面判断盘盈；服务端按锁定后的库存校验实际需要的批次信息。
+    if (!validateSurplus || Number(counted) <= Number(row.book_quantity)) continue
 
     const missing = []
     const batchNo = String(row.surplus_batch_no || '').trim()

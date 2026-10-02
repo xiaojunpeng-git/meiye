@@ -2208,6 +2208,10 @@ Route::group('adminapi', function () {
 			Route::post('v3/hq/outbound', 'v1.product.inventory.InventoryPlatformHqOutbound/create')->option(['real_name' => '平台总部仓批次出库']);
 			Route::post('v3/hq/outbound/:id/void', 'v1.product.inventory.InventoryPlatformHqOutbound/void')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '平台总部仓出库作废']);
 			Route::post('v3/hq/count/confirm', 'v1.product.inventory.InventoryPlatformHqStockCount/confirm')->option(['real_name' => '平台总部仓批次库存盘点确认']);
+			// 总部草稿使用独立平台授权入口，避免落到门店会话或跨仓创建人。
+			Route::post('v3/hq/count/draft', 'v1.product.inventory.InventoryPlatformHqStockCount/saveDraft')->option(['real_name' => '平台总部仓盘点草稿保存']);
+			Route::get('v3/hq/count/draft/:id', 'v1.product.inventory.InventoryPlatformHqStockCount/draftDetail')->pattern(['id' => '\\d+'])->option(['real_name' => '平台总部仓盘点草稿详情']);
+			Route::post('v3/hq/count/draft/:id/delete', 'v1.product.inventory.InventoryPlatformHqStockCount/deleteDraft')->pattern(['id' => '\\d+'])->option(['real_name' => '平台总部仓盘点草稿删除']);
 			Route::get('v3/hq/count/:id/detail', 'v1.product.inventory.InventoryPlatformHqStockCount/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '平台总部仓盘点单详情']);
 			Route::get('v3/hq/request/suppliers', 'v1.product.inventory.InventoryPlatformHqStockRequest/suppliers')->option(['real_name' => '平台总部请货供货方目录']);
 			Route::get('v3/hq/request/requester', 'v1.product.inventory.InventoryPlatformHqStockRequest/requester')->option(['real_name' => '平台总部请货人默认信息']);

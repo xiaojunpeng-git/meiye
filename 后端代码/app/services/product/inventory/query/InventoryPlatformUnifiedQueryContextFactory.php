@@ -78,7 +78,7 @@ final class InventoryPlatformUnifiedQueryContextFactory
         }
         $features = (array)($access['features'] ?? []);
         $canManageQuery = in_array('inventory.batch.query.manage', $features, true);
-        return $this->core->make([
+        $context = $this->core->make([
             'tenant_id' => (string)CashierV3ScopeResolver::TENANT_SCOPE_ID, 'account_id' => $adminId, 'operator_id' => $adminId,
             'store_id' => $subject === 'STORE' ? $selectedStoreId : 0, 'organization_id' => 'platform', 'visible_store_ids' => array_keys($storeIds),
             'ancestor_organization_ids' => array_values($organizationIds), 'shareable_store_ids' => array_keys($storeIds),
@@ -90,5 +90,13 @@ final class InventoryPlatformUnifiedQueryContextFactory
             'scope_dimensions' => ['location_id' => array_keys($locationIds)],
             'query_cutoff_date' => InventoryBatchStockQueryContract::assertCutoffDate($cutoffDate), 'data_as_of' => time(),
         ], ['pageCode' => $pageCode]);
+        // 总部草稿仅归当前平台创建人；门店查询不得借平台身份读到门店人员草稿。
+        if ($pageCode === 'inventory_count' && $subject === 'HQ'
+            && in_array('inventory.location.manage', $features, true)) {
+            $context['inventory_count_operator_type'] = 'PLATFORM_ADMIN';
+            $context['inventory_count_creator_id'] = $adminId;
+            $context['inventory_count_operator_name'] = (string)($adminInfo['real_name'] ?? $adminInfo['account'] ?? '');
+        }
+        return $context;
     }
 }

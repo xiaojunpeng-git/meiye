@@ -13,6 +13,17 @@ final class InventoryStockCountDraftServices
     public function save(int $storeId, int $operatorId, array $input, array $sessionInfo = []): array
     {
         $scope = $this->scope($storeId, $operatorId, $sessionInfo);
+        return $this->saveAtScope($scope, $input);
+    }
+
+    /** 总部草稿绑定真实总部仓和平台创建人；绝不伪造门店身份或产生库存事实。 */
+    public function saveForHeadquarters(array $adminInfo, int $locationId, array $input): array
+    {
+        return $this->saveAtScope($this->headquartersScope($adminInfo, $locationId), $input);
+    }
+
+    private function saveAtScope(array $scope, array $input): array
+    {
         $date = trim((string)($input['business_date'] ?? ''));
         $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
         if (!$parsed || $parsed->format('Y-m-d') !== $date) throw new \InvalidArgumentException('inventory_stock_count_date_invalid');
@@ -55,6 +66,17 @@ final class InventoryStockCountDraftServices
     public function detail(int $storeId, int $operatorId, int $id, array $sessionInfo = []): array
     {
         $scope = $this->scope($storeId, $operatorId, $sessionInfo);
+        return $this->detailAtScope($scope, $id);
+    }
+
+    /** 总部续编只读取当前平台创建人的同仓草稿。 */
+    public function detailForHeadquarters(array $adminInfo, int $locationId, int $id): array
+    {
+        return $this->detailAtScope($this->headquartersScope($adminInfo, $locationId), $id);
+    }
+
+    private function detailAtScope(array $scope, int $id): array
+    {
         $draft = $this->scopedDraft($scope, $id);
         if ((string)$draft['document_status'] !== 'DRAFT') throw new \RuntimeException('inventory_stock_count_draft_changed');
         return ['draft_id' => (int)$draft['id'], 'version' => (int)$draft['version'],
@@ -65,8 +87,19 @@ final class InventoryStockCountDraftServices
     /** Permanently removes only an unconfirmed creator-owned draft; settled documents and facts are never deleted. */
     public function delete(int $storeId, int $operatorId, int $id, int $expectedVersion, array $sessionInfo = []): array
     {
-        if ($expectedVersion <= 0) throw new \InvalidArgumentException('inventory_stock_count_draft_changed');
         $scope = $this->scope($storeId, $operatorId, $sessionInfo);
+        return $this->deleteAtScope($scope, $id, $expectedVersion);
+    }
+
+    /** 删除仍限创建人、仓库和当前版本，不触及已确认单据。 */
+    public function deleteForHeadquarters(array $adminInfo, int $locationId, int $id, int $expectedVersion): array
+    {
+        return $this->deleteAtScope($this->headquartersScope($adminInfo, $locationId), $id, $expectedVersion);
+    }
+
+    private function deleteAtScope(array $scope, int $id, int $expectedVersion): array
+    {
+        if ($expectedVersion <= 0) throw new \InvalidArgumentException('inventory_stock_count_draft_changed');
         return Db::transaction(function () use ($scope, $id, $expectedVersion): array {
             $draft = $this->scopedDraft($scope, $id, true);
             if ((string)$draft['document_status'] !== 'DRAFT' || (int)$draft['version'] !== $expectedVersion) {
@@ -118,6 +151,15 @@ final class InventoryStockCountDraftServices
         return ['tenant_id' => CashierV3ScopeResolver::TENANT_SCOPE_ID, 'store_id' => $storeId,
             'location_id' => (int)$locations[0]['id'], 'operator_id' => $actor['id'],
             'operator_type' => $actor['type']];
+    }
+
+    /** 使用现有平台仓库管理授权；ID 相同的门店人员与平台账号也不能串读。 */
+    private function headquartersScope(array $adminInfo, int $locationId): array
+    {
+        $resolved = (new InventoryHqLocationServices())->writableLocation($adminInfo, $locationId);
+        return ['tenant_id' => (string)$resolved['location']['tenant_id'], 'store_id' => 0,
+            'location_id' => (int)$resolved['location']['id'], 'operator_id' => (int)$resolved['access']['admin_id'],
+            'operator_type' => 'PLATFORM_ADMIN'];
     }
 
     private function scopedDraft(array $scope, int $id, bool $lock = false): array

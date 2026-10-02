@@ -206,9 +206,9 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
         } else foreach ($rows as &$row) $row['change_amount_cents'] = null;
         unset($row);
         // Drafts are editing snapshots, not confirmed facts. A typed, stable creator sees only
-        // their own draft even after re-login; platform reporting reads confirmed documents alone.
-        if ($storeId > 0 && (string)($context['organization_id'] ?? '') !== 'platform'
-            && (string)($context['inventory_count_operator_type'] ?? '') !== '') {
+        // their own draft even after re-login. HQ uses store_id=0 plus PLATFORM_ADMIN;
+        // the trusted context factory grants this discriminator only for managed HQ scope.
+        if ((string)($context['inventory_count_operator_type'] ?? '') !== '') {
             $drafts = Db::name('inventory_stock_count_draft')->alias('d')
                 ->leftJoin('inventory_location p', 'p.id=d.location_id')
                 ->where('d.tenant_id', $tenantId)->where('d.store_id', $storeId)

@@ -223,6 +223,10 @@ export function createInventoryApi(options = {}) {
     createHqOutbound(body) { return request('/v3/hq/outbound', { method: 'POST', body }) },
     voidHqOutbound(id, body) { return request(`/v3/hq/outbound/${encodeURIComponent(String(id || ''))}/void`, { method: 'POST', body }) },
     confirmHqCount(body) { return request('/v3/hq/count/confirm', { method: 'POST', body }) },
+    // 总部草稿与门店草稿使用各自登录上下文；仓库 ID 只能缩小服务端授权范围。
+    saveHqCountDraft(body) { return request('/v3/hq/count/draft', { method: 'POST', body, timeoutMs: 300000 }) },
+    hqCountDraftDetail(id, query = {}) { return request(`/v3/hq/count/draft/${Number(id)}`, { query }) },
+    deleteHqCountDraft(id, expectedVersion, hqLocationId) { return request(`/v3/hq/count/draft/${Number(id)}/delete`, { method: 'POST', body: { expected_version: Number(expectedVersion), hq_location_id: Number(hqLocationId) } }) },
     hqCountDetail(id, query = {}) { return request(`/v3/hq/count/${Number(id)}/detail`, { query }) },
     hqRequestCounterparties(query = {}) { return request('/v3/hq/request/counterparties', { query }) },
     hqRequestParties(query = {}) { return request('/v3/hq/request/counterparties', { query: { ...query, directory: 'request_party' } }) },
