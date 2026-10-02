@@ -1,0 +1,9 @@
+# R48-续 瑞昊预约来源漏选弹窗发布验证
+
+- 授权：产品经理对本地固定版本明确表示测试无问题，并要求 commit、部署瑞昊、push。业务提交 `9f352ff477ca17c8deab19bc8f0f8b91f9bb3705`，仅含预约编辑器、合同测试、自测记录 3 个文件；其他脏工作区改动未暂存。瑞昊隔离发布提交 `d97817ca38fe12631bbe5431638c1fd6a5d4513d`，父提交为已部署的 `862867700fa7eee79f10ce78ce944c9a7eee8f23`，相对父提交仅这 3 个文件不同。
+- 目标仅 `rh.cc3798.com` 正式门店端与 `/preview-8080/view_cashier_v3/` 预览门店端，未操作其他客户、小程序、后端业务代码或数据库。部署前两处入口 HTML SHA-256 均为 `a4bec8578c7e7395cf39d8de12f0a2cd04cca5e1aa0116f53b7c196e96c41bf7`；瑞昊 R48 数据升级日志存在、Swoole 单 manager、磁盘空余约 212G。
+- 独立备份及回滚点：`/www/backups/rh.cc3798.com/20261003-r48-source-dialog-d97817ca/`，正式端 `cashier-prod-before.tar.gz` SHA-256 `cbff1f10e75ba1380e3d9a06d42c5668fbd76dd2635711fb6d724c15154bff5f`，预览端 `cashier-preview-before.tar.gz` SHA-256 `6f613d3a68dd0697786e424bdb1b18fc5db560f70d5d00abbd8355ab0fde0751`；两包 `tar -tzf` 校验通过。仅需回滚静态资源时，恢复对应目录备份，不回写数据库。
+- 固定构建：从隔离提交归档源码独立运行 `npm run build`，与 18091 热更新门店端同一 Vue 3 源。发布包 SHA-256 `aca915fed609c426c1e3eda831bc8db2d9c5faa203c71c41f301542621cbbc42`；`index.html` 为 `661e908c414735b25405138cbe92ca0b7d3fd8b2d4fb81a000b5718301be79c8`，JS `index-d098660f.js` 为 `1319d5140315c44a0715d4f2cd2d8c91b9869a5cff2cc6e5076f6e55e62cb820`，CSS `index-500313fb.css` 为 `500313fb21708fa26f780d00dd38695406e2d3e3781d40049e7d81d589dfc140`。
+- 部署：发布包上送后远程校验 SHA；先安装新指纹资源到两处并 `cmp`，再确认旧 HTML 指纹未变化，最后原子替换两处 `index.html`。正式与预览入口文件均匹配新 HTML 指纹；公网两处新 JS/CSS 均 HTTP 200 且下载指纹匹配。预览入口公网 HTML 因 Nginx 路径重写与磁盘文件指纹不同，但引用的仍为本次新 JS/CSS。
+- 线上验证：瑞昊预览门店会话刷新后，预约页与新增编辑器正常加载。空白表单点击“确认预约”，出现居中的“预约来源未选择”弹窗和一级来源提示；点“知道了”后焦点返回一级来源。测试单据随即关闭，预约列表仍为 6 条，未提交业务写入。正式与预览静态资源均正常；Swoole 单 manager PID `13617` 未重启，日志修改时间仍为 01:25:11，服务事实数仍为 2231。`.env` 与 `config/swoole.php` 指纹未变。
+- 推送：线上验证后将 `release/r48-source-dialog-rh-20261003` 推送到 Gitee `origin`，远端核对提交为 `d97817ca38fe12631bbe5431638c1fd6a5d4513d`。未推送主开发分支，避免夹带其余未发布提交。未做真实预约保存、支付或其他生产写入测试。
