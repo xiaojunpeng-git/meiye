@@ -211,11 +211,11 @@ ok('服务记录详情保留原始金额和项目数，列表只展示手艺人�
   assert.match(view, /labor_performance_ratio: \['laborPerformanceRatio'\]/)
 })
 
-ok('服务记录号右侧展示结账时冻结的来源', () => {
+ok('服务记录号右侧固定展示来源和同次销售单号', () => {
   const view = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/OrderCenterView.vue', import.meta.url), 'utf8')
-  assert.match(view, /field\('service_record_no', '服务记录号'[\s\S]*?field\('source', '来源'\)[\s\S]*?field\('business_date', '业务日期'/)
+  assert.match(view, /field\('service_record_no', '服务记录号'[\s\S]*?field\('source', '来源'\), field\('sales_order_no', '销售单号'\)[\s\S]*?field\('business_date', '业务日期'/)
   assert.match(view, /source: \['source', 'sourceLabel', 'sourceSecondary', 'sourcePrimary'\]/)
-  assert.match(view, /activeTabKey\.value === 'service'[\s\S]*?recordNoIndex \+ 1[\s\S]*?available\.get\('source'\)/)
+  assert.match(view, /activeTabKey\.value === 'service'[\s\S]*?recordNoIndex \+ 1[\s\S]*?available\.get\('source'\), available\.get\('sales_order_no'\)/)
 })
 
 process.stdout.write(`ASSERT_PASSED=${passed}\n`)

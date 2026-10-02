@@ -215,11 +215,31 @@ recordOk('服务记录只读取完成态服务事实，不从销售订单回推'
 recordOk('服务记录使用会员详情同源的可见服务单号并携带会员编号', strpos($source, "'sf.service_record_no'") !== false
     && strpos($source, "'serviceRecordNo' => (string)(\$row['service_record_no'] ?: \$row['service_fact_id'])") !== false
     && strpos($source, "'memberId' => (int)\$row['member_id']") !== false);
-recordOk('服务记录来源读取结账销售订单快照且不回读会员当前来源', strpos($source, "'cashier_v3_sales_order so'") !== false
+recordOk('服务记录优先读取同次销售单来源，纯权益回退结账来源选择', strpos($source, "'cashier_v3_sales_order so'") !== false
     && strpos($source, 'so.tenant_id = sf.tenant_id AND so.checkout_request_id = sf.checkout_request_id') !== false
+    && strpos($source, "'cashier_v3_checkout_business_source_selection bs'") !== false
+    && strpos($source, "bs.checkout_kind = \\'sale\\'") !== false
     && strpos($source, "'source' => \$this->serviceBusinessSourceLabel(\$row)") !== false
     && strpos($source, 'business_source_secondary_name_snapshot') !== false
+    && strpos($source, 'checkout_source_secondary_name_snapshot') !== false
     && strpos($source, 'serviceBusinessSourceLabel') !== false);
+recordOk('服务记录只关联同次销售单号，纯权益核销不借用原卡购买单',
+    strpos($source, "'so.order_no AS sales_order_no'") !== false
+    && strpos($source, "'salesOrderNo' => (string)(\$row['sales_order_no'] ?? '')") !== false
+    && strpos($source, 'cp.legacy_order_id') === false);
+$sourceLabelMethod = new ReflectionMethod(new CashierV3OrderCenterRecordQueryServices(), 'serviceBusinessSourceLabel');
+if (PHP_VERSION_ID < 80100) $sourceLabelMethod->setAccessible(true);
+recordOk('纯权益服务读取同次结账来源，不把当前会员来源混入历史',
+    $sourceLabelMethod->invoke(new CashierV3OrderCenterRecordQueryServices(), [
+        'checkout_source_secondary_name_snapshot' => '',
+        'checkout_source_primary_name_snapshot' => 'A老客首护',
+        'checkout_source_label_snapshot' => 'A老客首护',
+    ]) === 'A老客首护'
+    && $sourceLabelMethod->invoke(new CashierV3OrderCenterRecordQueryServices(), [
+        'business_source_secondary_name_snapshot' => '本次销售来源',
+        'checkout_source_primary_name_snapshot' => 'A老客首护',
+    ]) === '本次销售来源'
+    && $sourceLabelMethod->invoke(new CashierV3OrderCenterRecordQueryServices(), []) === '');
 recordOk('劳动业绩汇总有效事实的正负净额，服务记录调整后不保留旧分配', strpos($source, "->where('performance_type', 'labor_performance_allocated')") !== false
     && strpos($source, "->where('status', 'effective')") !== false
     && strpos($source, "'fact_direction'") !== false

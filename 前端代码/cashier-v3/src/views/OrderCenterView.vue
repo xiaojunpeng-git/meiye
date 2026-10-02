@@ -176,7 +176,7 @@ const ORDER_TABS = [
     emptyText: '暂无服务记录。',
     fields: [
       field('service_record_no', '服务记录号', 'text', { quickFilterHidden: true }),
-      field('source', '来源'),
+      field('source', '来源'), field('sales_order_no', '销售单号'),
       field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('member_name', '会员姓名'), field('service_project', '服务项目'),
       field('entitlement_source', '权益来源'), field('source_card', '来源卡名称'),
@@ -437,12 +437,14 @@ const visibleFields = computed(() => {
     return items
   }, [])
   if (activeTabKey.value === 'service') {
-    // “来源”是服务记录的固定审计列。旧账号保存的可见列清单早于该字段，
-    // 因此这里补入并固定到服务记录号右侧，同时保留其余个性化列顺序。
-    const sourceIndex = fields.findIndex((item) => item.key === 'source')
-    if (sourceIndex >= 0) fields.splice(sourceIndex, 1)
+    // 来源与同次销售单号是服务记录的固定审计列。旧账号保存的列清单可能缺少
+    // 新字段，故统一补齐并保持“服务记录号→来源→销售单号”，其余列不重排。
+    for (const key of ['source', 'sales_order_no']) {
+      const index = fields.findIndex((item) => item.key === key)
+      if (index >= 0) fields.splice(index, 1)
+    }
     const recordNoIndex = fields.findIndex((item) => item.key === 'service_record_no')
-    fields.splice(recordNoIndex >= 0 ? recordNoIndex + 1 : 0, 0, available.get('source'))
+    fields.splice(recordNoIndex >= 0 ? recordNoIndex + 1 : 0, 0, available.get('source'), available.get('sales_order_no'))
   }
   // 销售人是充值/补交金额的归属字段，固定显示在金额左侧；旧版保存的
   // 查询设置可能仍把它排在金额后面，这里只纠正这两个字段的相对位置。
