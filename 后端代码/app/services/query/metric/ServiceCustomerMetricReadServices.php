@@ -263,7 +263,8 @@ final class ServiceCustomerMetricReadServices
     {
         $object = strtolower(trim((string)($row['service_object'] ?? '')));
         if ($object === 'friend') {
-            return $this->integer($row['friend_counts_as_customer'] ?? null) === 1 ? 'record:' . $serviceFactId : null;
+            // 员工分配和报表客数共享同一资格规则；员工仍按既有服务记录粒度分配。
+            return ServiceCustomerEligibility::allows(array_replace($row, ['service_object' => $object])) ? 'record:' . $serviceFactId : null;
         }
         if ($object !== 'self') $this->fail('METRIC_SERVICE_OBJECT_INVALID');
         $memberId = $this->integer($row['member_id'] ?? null);

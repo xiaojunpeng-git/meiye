@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 namespace app\services\report;
+use app\services\query\metric\ServiceCustomerEligibility;
 
 use app\services\BaseServices;
 use app\services\cashier\v3\CashierV3ScopeResolver;
@@ -119,7 +120,8 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $categoryIds = $this->categoryIds('六维', $input);
         $periodCash = $this->cashRows($stores, $range, $categoryIds);
         $historyCash = $this->cashRows($stores, ['end' => $range['end']], $categoryIds);
-        $services = $this->serviceRows($stores, $range, $categoryIds);
+        // 见诊人数过滤不能传播到金额、核销数量或手工费计算。
+        $services = ServiceCustomerEligibility::filter($this->serviceRows($stores, $range, $categoryIds));
         // The workbook defines new/old by the member's six-dimension purchase
         // history, not by the member-import/source flag used by other reports.
         $firstPositive = [];
@@ -229,6 +231,13 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->pathColumn('partner_received_performance', '合作六维实收业绩', '所选期间六维中合作分类的实际收款，扣除退款；卡项按卡内合作六维项目计入，不受1,000元成交条件限制。', ['合作六维实收业绩'], true, false, 140, $this->drill('六维 / 合作')),
             $this->pathColumn('all_received_performance', '六维全部实收业绩', '所选期间六维自营与合作实际收款之和，已扣除退款；包括未达到1,000元成交条件的收款。', ['六维全部实收业绩'], true, false, 140, $this->drill('六维')),
         ];
+        // 展示解释与计算规则同源，避免用户看到的见诊口径与底层筛选不一致。
+        foreach ($columns as &$column) {
+            if (in_array($column['key'], ['new_visit_people', 'old_visit_people', 'total_visit_people'], true)) {
+                $column['source_explanation'] .= ServiceCustomerEligibility::EXPLANATION;
+            }
+        }
+        unset($column);
         return $this->result((string)$definition['name'], $columns, array_values($rows), $range, $input, ['category' => true]);
     }
 
@@ -1024,7 +1033,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         else $query->where('sv.business_date', '<=', (string)$range['end']);
         if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
         if ($this->participantEmployeeId > 0) (new StoreReportParticipantScopeServices())->applyCheckout($query, 'sv.checkout_request_id', $this->participantEmployeeId);
-        return $query->fieldRaw("sv.service_fact_id,sv.store_id,sv.member_id,sv.business_date,sv.organization_id,sv.organization_path_snapshot,sv.store_name_snapshot store_name,sv.project_id,sv.project_name_snapshot,sv.project_category_path_snapshot category_path,sv.is_experience,sv.source_line_id,sv.quantity,(SELECT MAX(sf.business_source_label_snapshot) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=sv.tenant_id AND sf.source_line_id=sv.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') business_source_label,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=sv.tenant_id AND pf.source_line_id=sv.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') consumption_cents")->select()->toArray();
+        return $query->fieldRaw("sv.service_fact_id,sv.store_id,sv.member_id,sv.business_date,sv.organization_id,sv.organization_path_snapshot,sv.store_name_snapshot store_name,sv.project_id,sv.project_name_snapshot,sv.project_category_path_snapshot category_path,sv.is_experience,sv.service_object,sv.friend_counts_as_customer,sv.source_line_id,sv.quantity,(SELECT MAX(sf.business_source_label_snapshot) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=sv.tenant_id AND sf.source_line_id=sv.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') business_source_label,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=sv.tenant_id AND pf.source_line_id=sv.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') consumption_cents")->select()->toArray();
     }
 
     /**
@@ -1302,6 +1311,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             'source_explanations' => array_values(array_map(static fn(array $column): array => ['key' => (string)$column['key'], 'label' => (string)$column['label'], 'source_explanation' => (string)$column['source_explanation']], $columns)),
             'drilldown_keys' => ['start_date', 'end_date', 'store_id', 'category_path', 'company_dimension_id', 'metric_code'],
             'table_layout' => ['fixed' => true, 'sticky_query' => true, 'sticky_header' => true, 'sticky_summary' => true, 'result_scroll' => true], 'metric_version' => self::METRIC_VERSION,
+            'service_customer_rule_version' => ServiceCustomerEligibility::VERSION,
             'data_as_of' => date('Y-m-d H:i:s'), 'aggregation_status' => 'reconciled', 'scope' => ['date_range' => $range]];
     }
     private function column(string $key,string $label,string $explanation,bool $summable=false,bool $fixed=false,int $width=110,array $drilldown=[],string $group=''):array{$column=['key'=>$key,'label'=>$label,'source_explanation'=>$explanation,'summable'=>$summable,'width'=>$width];if($fixed){$column['fixed']='left';$column['fixed_width']=$width;}if($drilldown)$column['drilldown']=$drilldown;if($group!=='')$column['group_label']=$group;return $column;}

@@ -563,6 +563,8 @@ final class RegisteredMetricReadServices
                 ->whereBetween('s.business_date', [$range['start'], $range['end']])
                 ->where('s.service_status', 'completed')->where('s.member_id', '>', 0)->group('s.member_id');
             call_user_func($this->normalServices, $query, 's');
+            // 条件查询和报表共用服务客数资格，不再保留独立的朋友计数口径。
+            ServiceCustomerEligibility::apply($query, 's');
             return [$query, "COUNT(DISTINCT CONCAT(s.store_id,'|',s.business_date))"];
         }
         if (($contract['reader_strategy'] ?? null) === 'member_remaining_project_times'

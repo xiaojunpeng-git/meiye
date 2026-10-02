@@ -46,7 +46,7 @@ assertPhaseSix(
     'salary service metrics preserve tenth-unit summary precision'
 );
 assertPhaseSix(
-    str_contains($serviceCustomerReader, 'friend_counts_as_customer') && str_contains($serviceCustomerReader, "return \$this->integer(\$row['friend_counts_as_customer'] ?? null) === 1")
+    str_contains($serviceCustomerReader, 'friend_counts_as_customer') && str_contains($serviceCustomerReader, 'ServiceCustomerEligibility::allows(')
     && str_contains($serviceCustomerReader, "'record:' . \$serviceFactId"),
     'shared reader excludes friend-not-counted and keeps friend or guest records distinct'
 );

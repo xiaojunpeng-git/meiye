@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 namespace app\services\report;
+use app\services\query\metric\ServiceCustomerEligibility;
 
 use app\services\BaseServices;
 use app\services\cashier\v3\CashierV3ScopeResolver;
@@ -102,7 +103,8 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
     {
         $categoryIds = $this->categoryScope($input);
         $records = [];
-        foreach ($this->completedServices($stores, $range, $categoryIds) as $service) {
+        foreach (ServiceCustomerEligibility::filter($this->completedServices($stores, $range, $categoryIds)) as $service) {
+            // 体验人数只取可计客服务，购买/消耗仍使用各自完整事实。
             if ((int)$service['is_experience'] !== 1 || (int)$service['member_id'] <= 0) continue;
             $key = $this->itemKey($service);
             $this->ensureItemRow($records, $key, $service, (string)$service['business_date']);
@@ -133,7 +135,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             $this->column('company_name', '分公司', '读取业务所属组织路径中配置为分公司的组织名称；没有配置时显示“未配置分公司”。', false, true, 130),
             $this->column('store_name', '门店', '取成交或服务实际发生时保存的门店名称。', false, true, 140),
             $this->column('item_name', '商品名称', '取成交项目名称快照；卡项按购买时冻结的内含项目逐项展开。', false, true, 180),
-            $this->column('experience_people', '体验人数', '期间内完成该体验项目服务的会员数，同门店同商品会员去重。', true, false, 110),
+            $this->column('experience_people', '体验人数', '期间内完成该体验项目服务的会员数，同门店同商品会员去重。' . ServiceCustomerEligibility::EXPLANATION, true, false, 110),
             $this->column('purchase_people', '购买人数', '期间内成功取得该商品或项目的会员数，同门店同商品会员去重。', true, false, 110),
             $this->column('conversion_rate', '成交率', '购买人数除以体验人数；体验人数为零时显示“-”。', false),
             $this->column('purchase_count', '购买次数', '单独购买项目取成交数量；卡项取购买时冻结的卡内项目数量。', true, false, 110),
@@ -697,6 +699,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                 'sticky_summary' => true, 'result_scroll' => true,
             ],
             'metric_version' => self::METRIC_VERSION,
+            'service_customer_rule_version' => ServiceCustomerEligibility::VERSION,
             'coverage_start' => $this->coverageStart(),
             'fact_completeness' => '卡内项目分摊事实从当前实例第三阶段升级后的首个完整自然日开始完整覆盖；导入和来源无法证明的会员按老客处理。',
             'data_as_of' => date('Y-m-d H:i:s'), 'aggregation_status' => 'reconciled',
@@ -910,7 +913,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         if ($this->participantEmployeeId > 0) {
             (new StoreReportParticipantScopeServices())->applyCheckout($query, 'sv.checkout_request_id', $this->participantEmployeeId);
         }
-        return $query->fieldRaw("sv.id,sv.service_fact_id fact_id,sv.organization_id,sv.organization_path_snapshot,sv.store_id,sv.store_name_snapshot store_name,sv.member_id,sv.business_date,sv.occurred_at,sv.quantity,sv.project_id item_id,sv.project_name_snapshot item_name,sv.project_category_id_snapshot category_id,sv.project_category_path_snapshot category_path,sv.is_experience")
+        return $query->fieldRaw("sv.id,sv.service_fact_id fact_id,sv.organization_id,sv.organization_path_snapshot,sv.store_id,sv.store_name_snapshot store_name,sv.member_id,sv.business_date,sv.occurred_at,sv.quantity,sv.project_id item_id,sv.project_name_snapshot item_name,sv.project_category_id_snapshot category_id,sv.project_category_path_snapshot category_path,sv.is_experience,sv.service_object,sv.friend_counts_as_customer")
             ->order('sv.business_date', 'asc')->order('sv.id', 'asc')->select()->toArray();
     }
 
@@ -945,7 +948,8 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
     private function activeMemberIds(array $stores, array $range): array
     {
         $result = [];
-        foreach ($this->completedServices($stores, $range, []) as $service) {
+        // 活跃会员是顾客指标，不把朋友明确不计客的服务算成会员本人到店。
+        foreach (ServiceCustomerEligibility::filter($this->completedServices($stores, $range, [])) as $service) {
             $memberId = (int)$service['member_id'];
             if ($memberId > 0) $result[(string)$memberId] = $memberId;
         }
