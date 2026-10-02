@@ -211,6 +211,10 @@ final class CashierV3ReservationDetailQueryServices
             'roomChanges' => [],
             'remark' => (string)($reservation['remark_snapshot'] ?? ''),
             'sourceType' => (string)($reservation['source_type'] ?? ''),
+            // The channel (member/store) and market attribution answer different questions.
+            'businessSourceLabel' => (string)($reservation['business_source_label_snapshot'] ?? ''),
+            'businessSourcePrimaryId' => (int)($reservation['business_source_primary_id'] ?? 0),
+            'businessSourceSecondaryId' => (int)($reservation['business_source_secondary_id'] ?? 0),
             'rejectReason' => (string)($reservation['reject_reason'] ?? ''),
             'relatedRecords' => [
                 'hangOrders' => [],

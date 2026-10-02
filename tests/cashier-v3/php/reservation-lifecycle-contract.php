@@ -94,8 +94,10 @@ reservationLifecycleOk('开始服务写服务单，结束服务按实时权益�
     && strpos($lifecycle, 'actual_service_started_at') === false
     && strpos($lifecycle, 'liveEntitlementCandidatesInTx') !== false
     && strpos($lifecycle, "'insufficientEntitlements'") !== false);
-reservationLifecycleOk('结束服务同一事务写核销、服务、消耗与劳动业绩事实',
+reservationLifecycleOk('结束服务仅为已购权益项目在同一事务写核销、服务与业绩事实',
     strpos($lifecycle, 'CashierV3ReservationCompletionFactServices') !== false
+    && strpos($completionFacts, "strtoupper((string)(\$line['project_source'] ?? '')) === 'UNPAID'") !== false
+    && strpos($completionFacts, 'if ($serviceRows)') !== false
     && strpos($completionFacts, "cashier_v3_entitlement_writeoff_fact") !== false
     && strpos($completionFacts, "cashier_v3_entitlement_service_fact") !== false
     && strpos($completionFacts, "consumption_performance_recorded") !== false

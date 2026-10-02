@@ -1075,12 +1075,16 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         // 市场服务资格集中到指标层，不在报表维护另一份朋友判断。
         ServiceCustomerEligibility::apply($query, 'sv');
         $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'sv');
+        // A reservation ended directly has no checkout request row; its service
+        // fact carries the booking attribution. Actual checkout attribution wins
+        // when a service was completed through checkout instead.
         $rows = $query
             ->fieldRaw(
                 'sv.tenant_id,sv.store_id,sv.service_fact_id,sv.checkout_request_id,'
                 . 'MAX(sv.service_record_no) service_record_no,MAX(sv.organization_id) organization_id,'
                 . 'MAX(sv.organization_path_snapshot) organization_path_snapshot,'
-                . 'MAX(bs.primary_source_name_snapshot) service_source_name,MAX(bs.source_label_snapshot) service_source_label,'
+                . "COALESCE(NULLIF(MAX(bs.primary_source_name_snapshot),''),NULLIF(MAX(sv.business_source_primary_name_snapshot),''),'') service_source_name,"
+                . "COALESCE(NULLIF(MAX(bs.source_label_snapshot),''),NULLIF(MAX(sv.business_source_label_snapshot),''),'') service_source_label,"
                 . 'MAX(sv.store_name_snapshot) store_name_snapshot,'
                 . 'MAX(sv.business_date) service_business_date,'
                 . 'MAX(sv.member_id) member_id,MAX(sv.member_name_snapshot) member_name_snapshot,'
@@ -1088,9 +1092,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 . 'MAX(sv.recorded_at) recorded_at,'
                 . 'COALESCE(NULLIF(wf.origin_order_id,0),0) origin_order_id,'
                 // 无当前销售单但有本次冻结来源时，按结账请求表示服务单；禁止借历史购卡单合并不同游客。
-                . "COALESCE(NULLIF(MAX(o1.order_id),''),CASE WHEN MAX(bs.primary_source_id)>0 AND sv.checkout_request_id<>'' THEN CONCAT('service:',sv.checkout_request_id) END,NULLIF(MAX(o3.order_id),''),NULLIF(MAX(o2.order_id),''),NULLIF(MAX(p1.order_id),''),NULLIF(MAX(p3.order_id),''),NULLIF(MAX(p2.order_id),''),'') matched_order_id,"
+                . "COALESCE(NULLIF(MAX(o1.order_id),''),CASE WHEN COALESCE(NULLIF(MAX(bs.primary_source_id),0),NULLIF(MAX(sv.business_source_primary_id),0),0)>0 AND sv.checkout_request_id<>'' THEN CONCAT('service:',sv.checkout_request_id) END,NULLIF(MAX(o3.order_id),''),NULLIF(MAX(o2.order_id),''),NULLIF(MAX(p1.order_id),''),NULLIF(MAX(p3.order_id),''),NULLIF(MAX(p2.order_id),''),'') matched_order_id,"
                 . 'COALESCE(NULLIF(MAX(o1.business_source_primary_id),0),'
                 . 'NULLIF(MAX(bs.primary_source_id),0),'
+                . 'NULLIF(MAX(sv.business_source_primary_id),0),'
                 . 'NULLIF(MAX(o3.business_source_primary_id),0),'
                 . 'NULLIF(MAX(o2.business_source_primary_id),0),'
                 . 'NULLIF(MAX(p1.business_source_primary_id),0),'

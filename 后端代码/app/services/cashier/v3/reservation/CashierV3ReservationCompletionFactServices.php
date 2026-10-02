@@ -25,6 +25,7 @@ final class CashierV3ReservationCompletionFactServices
         if ($eventNo === '' || $commandKey === '' || $operatorId <= 0) {
             throw new \LogicException('reservation_completion_execution_invalid');
         }
+        if (!$lines) throw new \LogicException('reservation_completion_lines_empty');
         $occupationByLine = [];
         foreach ($occupations as $occupation) {
             $occupationByLine[(int)$occupation['reservation_line_id']] = $occupation;
@@ -33,15 +34,21 @@ final class CashierV3ReservationCompletionFactServices
         $writeoffCount = 0;
         $performanceCount = 0;
         foreach ($lines as $line) {
+            // Unpurchased appointment projects only complete the reservation and
+            // service-order trail. Checkout, if any, owns their later business facts.
+            if (strtoupper((string)($line['project_source'] ?? '')) === 'UNPAID') continue;
             $occupation = $occupationByLine[(int)$line['id']] ?? null;
             $facts = $this->persistLineInTx($header, $line, is_array($occupation) ? $occupation : null, $eventNo, $commandKey, $operatorId, $operatorName, $now);
             $serviceRows[] = $facts['service'];
             $writeoffCount += $facts['writeoff'];
             $performanceCount += $facts['performance'];
         }
-        if (!$serviceRows) throw new \LogicException('reservation_completion_lines_empty');
-        $context = $this->lifecycleContext($header, $operatorId, $operatorName, $now);
-        (new CustomerLifecycleFactServices())->recordServiceCompletionInTx($context, $serviceRows);
+        // A completed reservation with only unpurchased projects has no
+        // service visit or customer-lifecycle fact at this point.
+        if ($serviceRows) {
+            $context = $this->lifecycleContext($header, $operatorId, $operatorName, $now);
+            (new CustomerLifecycleFactServices())->recordServiceCompletionInTx($context, $serviceRows);
+        }
         return ['service' => count($serviceRows), 'writeoff' => $writeoffCount, 'performance' => $performanceCount];
     }
 
@@ -111,7 +118,9 @@ final class CashierV3ReservationCompletionFactServices
             $businessDate,
             $now
         );
-        $service = array_merge($common, [
+        // A completed service is the immutable reporting grain. Preserve the
+        // booking attribution even when the configured source later changes.
+        $service = array_merge($common, $this->sourceSnapshot($header), [
             'service_fact_id' => 'ESF-' . substr(hash('sha256', $tenantId . "\0" . $serviceNatural), 0, 40),
             'service_record_no' => $serviceNo,
             'natural_key' => $serviceNatural,
@@ -226,9 +235,12 @@ final class CashierV3ReservationCompletionFactServices
             'settled_at' => (int)$common['settled_at'], 'recorded_at' => (int)$common['recorded_at'],
             'checkout_request_id' => (string)$common['checkout_request_id'], 'order_id' => (string)$common['document_id'],
             'order_no_snapshot' => (string)$common['document_no_snapshot'], 'source_document_type' => 'entitlement_completion',
-            'business_source_primary_id' => 0, 'business_source_primary_name_snapshot' => '',
-            'business_source_secondary_id' => 0, 'business_source_secondary_name_snapshot' => '',
-            'business_source_label_snapshot' => '', 'source_attribution_type_snapshot' => 'other',
+            'business_source_primary_id' => (int)($header['business_source_primary_id'] ?? 0),
+            'business_source_primary_name_snapshot' => (string)($header['business_source_primary_name_snapshot'] ?? ''),
+            'business_source_secondary_id' => (int)($header['business_source_secondary_id'] ?? 0),
+            'business_source_secondary_name_snapshot' => (string)($header['business_source_secondary_name_snapshot'] ?? ''),
+            'business_source_label_snapshot' => (string)($header['business_source_label_snapshot'] ?? ''),
+            'source_attribution_type_snapshot' => (string)($header['source_attribution_type_snapshot'] ?? 'other'),
             'source_line_id' => $sourceLineId, 'performance_type' => $type,
             'employee_id' => $employeeId, 'employee_name_snapshot' => $employeeName,
             'employee_type_snapshot' => $employeeType, 'employee_type_authority_version' => $employeeTypeVersion,
@@ -333,9 +345,25 @@ final class CashierV3ReservationCompletionFactServices
             'order_id' => (string)$header['service_order_id'], 'order_no_snapshot' => (string)$header['service_order_no_snapshot'],
             'checkout_request_id' => 'reservation:' . (int)$header['id'], 'business_date' => date('Y-m-d', $now),
             'occurred_at' => $now, 'recorded_at' => $now, 'operator_id' => $operatorId, 'operator_name_snapshot' => $operatorName,
-            'business_source_primary_id' => 0, 'business_source_primary_name_snapshot' => '',
-            'business_source_secondary_id' => 0, 'business_source_secondary_name_snapshot' => '',
-            'business_source_label_snapshot' => '', 'source_attribution_type_snapshot' => 'other',
+            'business_source_primary_id' => (int)($header['business_source_primary_id'] ?? 0),
+            'business_source_primary_name_snapshot' => (string)($header['business_source_primary_name_snapshot'] ?? ''),
+            'business_source_secondary_id' => (int)($header['business_source_secondary_id'] ?? 0),
+            'business_source_secondary_name_snapshot' => (string)($header['business_source_secondary_name_snapshot'] ?? ''),
+            'business_source_label_snapshot' => (string)($header['business_source_label_snapshot'] ?? ''),
+            'source_attribution_type_snapshot' => (string)($header['source_attribution_type_snapshot'] ?? 'other'),
+        ];
+    }
+
+    /** Historical reservations without a choice retain an empty attribution. */
+    private function sourceSnapshot(array $header): array
+    {
+        return [
+            'business_source_primary_id' => (int)($header['business_source_primary_id'] ?? 0),
+            'business_source_primary_name_snapshot' => (string)($header['business_source_primary_name_snapshot'] ?? ''),
+            'business_source_secondary_id' => (int)($header['business_source_secondary_id'] ?? 0),
+            'business_source_secondary_name_snapshot' => (string)($header['business_source_secondary_name_snapshot'] ?? ''),
+            'business_source_label_snapshot' => (string)($header['business_source_label_snapshot'] ?? ''),
+            'source_attribution_type_snapshot' => (string)($header['source_attribution_type_snapshot'] ?? 'other'),
         ];
     }
 

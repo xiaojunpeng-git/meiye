@@ -1698,7 +1698,9 @@ final class RegisteredMetricReadServices
         $this->applyParticipantScope($query, $filters, 'checkout:s');
         if ($categoryIds !== []) $query->whereIn('s.project_category_id_snapshot', $categoryIds);
         $this->applyServiceFilters($query, $filters, 's', 's');
-        return $query->fieldRaw("s.service_fact_id,s.store_id,s.member_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.project_id,s.project_name_snapshot,s.project_category_id_snapshot,s.project_category_path_snapshot,s.source_line_id,s.quantity,(SELECT MAX(sf.business_source_primary_id) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=s.tenant_id AND sf.checkout_request_id=s.checkout_request_id AND sf.source_line_id=s.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') business_source_primary_id")
+        // Directly completed reservations carry attribution on the service fact;
+        // checkout services retain their sale-fact fallback for old rows.
+        return $query->fieldRaw("s.service_fact_id,s.store_id,s.member_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.project_id,s.project_name_snapshot,s.project_category_id_snapshot,s.project_category_path_snapshot,s.source_line_id,s.quantity,COALESCE(NULLIF(s.business_source_primary_id,0),(SELECT MAX(sf.business_source_primary_id) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=s.tenant_id AND sf.checkout_request_id=s.checkout_request_id AND sf.source_line_id=s.source_line_id AND sf.fact_direction='forward' AND sf.status='effective')) business_source_primary_id")
             ->select()->toArray();
     }
 

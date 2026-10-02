@@ -23,6 +23,7 @@ use app\services\cashier\v3\projection\CashierV3RootDomainAssembler;
 use app\services\cashier\v3\registry\CashierV3ContextPolicy;
 use app\services\product\product\StoreProductReservationServices;
 use think\facade\Db;
+use app\services\cashier\v3\config\CashierV3BusinessConfigServices;
 
 /** V3 reservation authority. All state changes are gateway-owned transactions. */
 final class CashierV3ReservationModule
@@ -63,7 +64,7 @@ final class CashierV3ReservationModule
                 }
 
                 $contexts = [];
-                $draft = ['member' => null, 'memberId' => null, 'projects' => [], 'craftsmen' => [], 'appointmentTime' => '', 'room' => null, 'roomId' => null, 'remark' => ''];
+                $draft = ['member' => null, 'memberId' => null, 'projects' => [], 'craftsmen' => [], 'appointmentTime' => '', 'room' => null, 'roomId' => null, 'remark' => '', 'businessSourcePrimaryId' => 0, 'businessSourceSecondaryId' => 0, 'businessSourceLabel' => ''];
                 $selectedMemberId = (int)($payload['memberId'] ?? ((array)($payload['reservation'] ?? []))['memberId'] ?? 0);
                 if ($mode === 'edit') {
                     $header = self::findHeaderForRead($reservationId, $operator, $dataScope);
@@ -95,6 +96,7 @@ final class CashierV3ReservationModule
                     'commandContexts' => $contexts,
                     'draft' => $draft,
                     'catalogOptions' => $options,
+                    'businessSources' => (new CashierV3BusinessConfigServices())->sourceTree(true),
                     'craftsmenOptions' => self::craftsmen($operator),
                     'rooms' => $rooms->roomCandidates($operator, $dataScope),
                 ]], 'message' => '预约编辑器已准备完成。'];
@@ -337,6 +339,8 @@ final class CashierV3ReservationModule
         if ($sourceType !== CashierV3ReservationLifecycleServices::SOURCE_STORE) {
             throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '门店工作台只能创建门店预约。');
         }
+        // 预约来源由门店确认一次，后续完成服务只复制这份历史快照。
+        $source = self::reservationBusinessSource($reservation);
         $lifecycle = new CashierV3ReservationLifecycleServices();
         $lifecycle->assertStaffAvailabilityInTx($operator->storeId(), 0, $artisanStaffIds, $when, $endAt);
         $lifecycle->assertRoomAvailabilityInTx($tenant, $operator->storeId(), 0, $room['id'], $when, $endAt);
@@ -346,6 +350,12 @@ final class CashierV3ReservationModule
             'organization_id' => $operator->organizationId(), 'organization_path' => '', 'organization_name_snapshot' => '',
             'store_id' => $operator->storeId(), 'store_name_snapshot' => (string)($store['name'] ?? ''),
             'member_id' => $memberId, 'member_name_snapshot' => $memberName, 'member_phone_snapshot' => $memberPhone,
+            'business_source_primary_id' => $source['business_source_primary_id'],
+            'business_source_primary_name_snapshot' => $source['business_source_primary_name_snapshot'],
+            'business_source_secondary_id' => $source['business_source_secondary_id'],
+            'business_source_secondary_name_snapshot' => $source['business_source_secondary_name_snapshot'],
+            'business_source_label_snapshot' => $source['business_source_label_snapshot'],
+            'source_attribution_type_snapshot' => $source['source_attribution_type_snapshot'],
             'service_order_id' => 0, 'service_order_no_snapshot' => '', 'room_id' => $room['id'], 'room_name_snapshot' => $room['name'],
             'appointment_start_at' => $when, 'appointment_end_at' => $endAt, 'status' => self::STATUS_UNSTARTED,
             'confirmed_at' => $now, 'rejected_at' => 0, 'reject_reason' => '', 'actual_service_started_at' => 0, 'actual_service_ended_at' => 0, 'version' => 1,
@@ -357,7 +367,7 @@ final class CashierV3ReservationModule
         if ($headerId <= 0) throw new \RuntimeException('reservation_insert_failed');
         self::replaceLines($headerId, $tenant, $plans, $artisanStaffIds, $now);
         self::replaceScheduledStaff($headerId, $tenant, $artisanStaffIds, $pointCustomerStaffIds, $now);
-        self::record($scope, 'reservation.created', 'reservation', (string)$headerId, 1, $header, $now, date('Y-m-d', $when), ['reservationNo' => $reservationNo, 'appointmentStartAt' => $when, 'appointmentEndAt' => $endAt, 'scheduledStaffIds' => $artisanStaffIds]);
+        self::record($scope, 'reservation.created', 'reservation', (string)$headerId, 1, $header, $now, date('Y-m-d', $when), ['reservationNo' => $reservationNo, 'appointmentStartAt' => $when, 'appointmentEndAt' => $endAt, 'scheduledStaffIds' => $artisanStaffIds, 'source' => $source]);
         $result = ['status' => 'succeeded', 'reservationId' => $headerId, 'reservationNo' => $reservationNo, 'originalIdempotencyKey' => (string)($scope['idempotency_key'] ?? ''), 'message' => '预约已创建。'];
         self::operation($tenant, $headerId, (string)($scope['idempotency_key'] ?? ''), 'CREATE', 0, 1, $result, $now);
         return $result;
@@ -376,19 +386,25 @@ final class CashierV3ReservationModule
         $room = self::room($reservation['roomId'] ?? 0, $reservation['roomName'] ?? ($reservation['room']['name'] ?? $reservation['room']['roomName'] ?? ''));
         [$artisanStaffIds, , $pointCustomerStaffIds] = self::artisans($reservation['craftsmen'] ?? []);
         $now = time(); $nextVersion = (int)$header['version'] + 1;
+        $source = self::sourceForEdit($reservation, $header);
+        if ($source['business_source_primary_id'] <= 0) {
+            throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '请选择预约来源。');
+        }
         $lifecycle = new CashierV3ReservationLifecycleServices();
         $lifecycle->assertStaffAvailabilityInTx($operator->storeId(), (int)$header['id'], $artisanStaffIds, $when, $endAt);
         $lifecycle->assertRoomAvailabilityInTx($dataScope->tenantId(), $operator->storeId(), (int)$header['id'], $room['id'], $when, $endAt);
-        self::advanceHeader($header, $dataScope, $nextVersion, [
+        self::advanceHeader($header, $dataScope, $nextVersion, array_merge($source, [
             'room_id' => $room['id'], 'room_name_snapshot' => $room['name'], 'appointment_start_at' => $when, 'appointment_end_at' => $endAt,
             'remark_snapshot' => mb_substr(trim((string)($reservation['remark'] ?? '')), 0, 500), 'business_date' => date('Y-m-d', $when), 'updated_at' => $now,
-        ]);
+        ]));
         $beforeLines = self::lineSnapshot((int)$header['id'], $dataScope->tenantId());
         $lifecycle->releaseInTx($dataScope->tenantId(), (int)$header['id'], $now);
         self::replaceLines((int)$header['id'], $dataScope->tenantId(), $plans, $artisanStaffIds, $now);
         self::replaceScheduledStaff((int)$header['id'], $dataScope->tenantId(), $artisanStaffIds, $pointCustomerStaffIds, $now);
-        $eventHeader = array_merge($header, ['appointment_start_at' => $when, 'appointment_end_at' => $endAt]);
-        self::record($scope, 'reservation.updated', 'reservation', (string)$header['id'], $nextVersion, $eventHeader, $now, date('Y-m-d', $when), ['reservationNo' => (string)$header['reservation_no'], 'appointmentStartAt' => $when, 'appointmentEndAt' => $endAt, 'lineCount' => count($plans), 'beforeLines' => $beforeLines, 'afterLines' => self::planSnapshot($plans, $artisanStaffIds), 'scheduledStaffIds' => $artisanStaffIds]);
+        // Edits may change attribution before service starts; the event keeps
+        // both versions while the completed service later uses the final one.
+        $eventHeader = array_merge($header, $source, ['appointment_start_at' => $when, 'appointment_end_at' => $endAt]);
+        self::record($scope, 'reservation.updated', 'reservation', (string)$header['id'], $nextVersion, $eventHeader, $now, date('Y-m-d', $when), ['reservationNo' => (string)$header['reservation_no'], 'appointmentStartAt' => $when, 'appointmentEndAt' => $endAt, 'lineCount' => count($plans), 'beforeLines' => $beforeLines, 'afterLines' => self::planSnapshot($plans, $artisanStaffIds), 'scheduledStaffIds' => $artisanStaffIds, 'sourceBefore' => self::sourceFromHeader($header), 'sourceAfter' => $source]);
         $result = ['status' => 'succeeded', 'reservationId' => (int)$header['id'], 'reservationNo' => (string)$header['reservation_no'], 'version' => $nextVersion, 'originalIdempotencyKey' => (string)($scope['idempotency_key'] ?? '')];
         self::operation($dataScope->tenantId(), (int)$header['id'], (string)($scope['idempotency_key'] ?? ''), 'UPDATE', (int)$header['version'], $nextVersion, $result, $now);
         return $result;
@@ -415,7 +431,12 @@ final class CashierV3ReservationModule
         $reservation = is_array($payload['reservation'] ?? null) ? $payload['reservation'] : [];
         $nextVersion = (int)$header['version'] + 1;
         $changes = ['status' => self::STATUS_UNSTARTED, 'confirmed_at' => $now, 'updated_at' => $now];
-        $eventPayload = ['reservationNo' => (string)$header['reservation_no'], 'confirmedAt' => $now, 'editedDuringConfirmation' => false];
+        $source = self::sourceForEdit($reservation, $header);
+        if ($source['business_source_primary_id'] <= 0) {
+            throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '请先选择预约来源，再确认预约。');
+        }
+        $changes = array_merge($changes, $source);
+        $eventPayload = ['reservationNo' => (string)$header['reservation_no'], 'confirmedAt' => $now, 'editedDuringConfirmation' => false, 'sourceBefore' => self::sourceFromHeader($header), 'sourceAfter' => $source];
 
         if ($reservation !== []) {
             self::assertSameMember($header, $reservation);
@@ -515,7 +536,7 @@ final class CashierV3ReservationModule
         $header = self::reservationHeader($scope); $dataScope = $scope['data_scope']; $now = time();
         if ((string)$header['status'] !== self::STATUS_IN_SERVICE) throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '当前预约不能结束服务。');
         $nextVersion = (int)$header['version'] + 1;
-        $event = self::record($scope, 'reservation.completed', 'reservation', (string)$header['id'], $nextVersion, $header, $now, date('Y-m-d', $now), ['reservationNo' => (string)$header['reservation_no'], 'actualEndAt' => $now, 'endedEarly' => $now < (int)$header['appointment_end_at']]);
+        $event = self::record($scope, 'reservation.completed', 'reservation', (string)$header['id'], $nextVersion, $header, $now, date('Y-m-d', $now), ['reservationNo' => (string)$header['reservation_no'], 'actualEndAt' => $now, 'endedEarly' => $now < (int)$header['appointment_end_at'], 'source' => self::sourceFromHeader($header)]);
         $operatorProfile = $dataScope->operatorProfile();
         $facts = (new CashierV3ReservationLifecycleServices())->consumeInTx($header, $now, [
             'eventNo' => (string)$event['event_no'],
@@ -563,6 +584,47 @@ final class CashierV3ReservationModule
         return $row;
     }
 
+    /** Resolve IDs against the current catalog in the reservation write transaction. */
+    private static function reservationBusinessSource(array $reservation): array
+    {
+        $primaryId = (int)($reservation['businessSourcePrimaryId'] ?? 0);
+        $secondaryId = (int)($reservation['businessSourceSecondaryId'] ?? 0);
+        $snapshot = (new CashierV3BusinessConfigServices())->resolveSourceSnapshot($primaryId, $secondaryId, true);
+        return [
+            'business_source_primary_id' => $snapshot['primarySourceId'],
+            'business_source_primary_name_snapshot' => $snapshot['primarySourceNameSnapshot'],
+            'business_source_secondary_id' => $snapshot['secondarySourceId'],
+            'business_source_secondary_name_snapshot' => $snapshot['secondarySourceNameSnapshot'],
+            'business_source_label_snapshot' => $snapshot['displayNameSnapshot'],
+            'source_attribution_type_snapshot' => $snapshot['attributionTypeSnapshot'],
+        ];
+    }
+
+    /** Legacy and member-created pending reservations can legitimately have no source yet. */
+    private static function sourceFromHeader(array $header): array
+    {
+        return [
+            'business_source_primary_id' => (int)($header['business_source_primary_id'] ?? 0),
+            'business_source_primary_name_snapshot' => (string)($header['business_source_primary_name_snapshot'] ?? ''),
+            'business_source_secondary_id' => (int)($header['business_source_secondary_id'] ?? 0),
+            'business_source_secondary_name_snapshot' => (string)($header['business_source_secondary_name_snapshot'] ?? ''),
+            'business_source_label_snapshot' => (string)($header['business_source_label_snapshot'] ?? ''),
+            'source_attribution_type_snapshot' => (string)($header['source_attribution_type_snapshot'] ?? 'other'),
+        ];
+    }
+
+    /** Retain a prior valid snapshot when only the source catalog changed. */
+    private static function sourceForEdit(array $reservation, array $header): array
+    {
+        $existing = self::sourceFromHeader($header);
+        if (!array_key_exists('businessSourcePrimaryId', $reservation)) return $existing;
+        if ((int)$reservation['businessSourcePrimaryId'] === $existing['business_source_primary_id']
+            && (int)($reservation['businessSourceSecondaryId'] ?? 0) === $existing['business_source_secondary_id']) {
+            return $existing;
+        }
+        return self::reservationBusinessSource($reservation);
+    }
+
     private static function editorDraft(array $header, array $options): array
     {
         $lines = self::rows(Db::name('cashier_v3_reservation_line')->where('tenant_id', (string)$header['tenant_id'])->where('reservation_id', (int)$header['id'])->order('id asc')->select());
@@ -578,7 +640,7 @@ final class CashierV3ReservationModule
         }
         $craftsmen = [];
         foreach ($staffIds as $id) $craftsmen[] = ['id' => $id, 'staffId' => $id, 'name' => (string)($staffNames[$id] ?? ''), 'isPointCustomer' => isset($pointCustomerStaffIds[$id])];
-        return ['id' => (int)$header['id'], 'reservationId' => (int)$header['id'], 'revision' => (int)$header['version'], 'recordVersion' => (int)$header['version'], 'reservationVersion' => (int)$header['version'], 'memberId' => (int)$header['member_id'], 'member' => ['id' => (int)$header['member_id'], 'name' => (string)$header['member_name_snapshot'], 'phone' => (string)$header['member_phone_snapshot']], 'projects' => $projects, 'craftsmen' => $craftsmen, 'appointmentTime' => self::formatTime((int)$header['appointment_start_at']), 'appointmentStartAt' => (int)$header['appointment_start_at'], 'appointmentEndAt' => (int)$header['appointment_end_at'], 'roomId' => (int)$header['room_id'], 'room' => (int)$header['room_id'] > 0 ? ['id' => (int)$header['room_id'], 'name' => (string)$header['room_name_snapshot']] : null, 'remark' => (string)$header['remark_snapshot']];
+        return ['id' => (int)$header['id'], 'reservationId' => (int)$header['id'], 'revision' => (int)$header['version'], 'recordVersion' => (int)$header['version'], 'reservationVersion' => (int)$header['version'], 'memberId' => (int)$header['member_id'], 'member' => ['id' => (int)$header['member_id'], 'name' => (string)$header['member_name_snapshot'], 'phone' => (string)$header['member_phone_snapshot']], 'projects' => $projects, 'craftsmen' => $craftsmen, 'appointmentTime' => self::formatTime((int)$header['appointment_start_at']), 'appointmentStartAt' => (int)$header['appointment_start_at'], 'appointmentEndAt' => (int)$header['appointment_end_at'], 'roomId' => (int)$header['room_id'], 'room' => (int)$header['room_id'] > 0 ? ['id' => (int)$header['room_id'], 'name' => (string)$header['room_name_snapshot']] : null, 'remark' => (string)$header['remark_snapshot'], 'businessSourcePrimaryId' => (int)($header['business_source_primary_id'] ?? 0), 'businessSourceSecondaryId' => (int)($header['business_source_secondary_id'] ?? 0), 'businessSourceLabel' => (string)($header['business_source_label_snapshot'] ?? '')];
     }
 
     private static function catalogOptions(

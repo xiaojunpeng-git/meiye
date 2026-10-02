@@ -698,6 +698,7 @@ useModalFocusTrap({
                 <div><dt>会员编号</dt><dd>{{ member.memberNo || '—' }}</dd></div>
                 <div><dt>会员状态</dt><dd>{{ member.status || '—' }}</dd></div>
                 <div><dt>预约来源</dt><dd>{{ reservationSourceLabel }}</dd></div>
+                <div><dt>客户来源</dt><dd>{{ reservation.businessSourceLabel || '未选择' }}</dd></div>
                 <div><dt>卡项次数</dt><dd>{{ entitlementOccupationLabel }}</dd></div>
               </dl>
             </div>

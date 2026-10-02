@@ -860,9 +860,9 @@ final class CashierV3OrderCenterRecordQueryServices
         CashierV3OperatorScope $scope
     ): array {
         $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
-            // 现金项目可从同次销售单读取来源；纯权益核销没有销售单，必须回到
-            // 同次结账保存的来源选择，不能用会员当前来源或原卡购买单替代。
-            // 两张关联表都由结账请求唯一约束，服务事实仍保持一行一项目。
+            // 现金项目优先使用同次销售单，纯权益结账使用同次来源选择；
+            // 预约直接结束服务没有结账单，来源留在服务事实自身。
+            // 不回读会员当前来源或原卡购买单，避免历史归因漂移。
             ->leftJoin(
                 'cashier_v3_sales_order so',
                 'so.tenant_id = sf.tenant_id AND so.checkout_request_id = sf.checkout_request_id'
@@ -909,6 +909,8 @@ final class CashierV3OrderCenterRecordQueryServices
             'so.order_no', 'so.business_source_label_snapshot', 'so.business_source_primary_name_snapshot',
             'so.business_source_secondary_name_snapshot', 'bs.source_label_snapshot',
             'bs.primary_source_name_snapshot', 'bs.secondary_source_name_snapshot',
+            'sf.business_source_label_snapshot', 'sf.business_source_primary_name_snapshot',
+            'sf.business_source_secondary_name_snapshot',
         ]);
         $this->applyServiceTopFilters($query, $criteria['topFilters']);
         // “正常数据” is the default view and must contain completed service
@@ -929,6 +931,9 @@ final class CashierV3OrderCenterRecordQueryServices
             'sf.operator_id', 'sf.operator_name_snapshot', 'sf.settled_at', 'sf.occurred_at',
             'sf.craftsmen_snapshot_json', 'sf.service_status', 'sf.source_document_type', 'wf.is_gift', 'wf.source_kind',
             'sf.detail_remark_snapshot',
+            'sf.business_source_label_snapshot AS service_source_label_snapshot',
+            'sf.business_source_primary_name_snapshot AS service_source_primary_name_snapshot',
+            'sf.business_source_secondary_name_snapshot AS service_source_secondary_name_snapshot',
             'so.business_source_label_snapshot',
             'so.business_source_primary_name_snapshot',
             'so.business_source_secondary_name_snapshot',
@@ -1480,8 +1485,8 @@ final class CashierV3OrderCenterRecordQueryServices
     }
 
     /**
-     * 来源优先使用结账销售订单的不可变快照；纯权益核销则使用同一结账请求
-     * 保存的来源选择。两者均缺失的历史记录才显示“—”，不回读会员当前来源。
+     * 结账销售单、纯权益结账选择、预约服务事实依次作为来源权威快照。
+     * 三者均缺失的历史记录才显示“—”，不回读会员当前来源。
      */
     private function serviceBusinessSourceLabel(array $row): string
     {
@@ -1492,6 +1497,9 @@ final class CashierV3OrderCenterRecordQueryServices
             $row['checkout_source_secondary_name_snapshot'] ?? '',
             $row['checkout_source_primary_name_snapshot'] ?? '',
             $row['checkout_source_label_snapshot'] ?? '',
+            $row['service_source_secondary_name_snapshot'] ?? '',
+            $row['service_source_primary_name_snapshot'] ?? '',
+            $row['service_source_label_snapshot'] ?? '',
         ] as $value) {
             $label = trim((string)$value);
             if ($label !== '') return $label;
@@ -1544,7 +1552,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $likeFields = [
             'service_record_no' => 'sf.service_record_no',
             // 与显示值同序选择历史快照，保证筛选、列表和导出不出现不同来源。
-            'source' => "COALESCE(NULLIF(so.business_source_secondary_name_snapshot, ''), NULLIF(so.business_source_primary_name_snapshot, ''), NULLIF(so.business_source_label_snapshot, ''), NULLIF(bs.secondary_source_name_snapshot, ''), NULLIF(bs.primary_source_name_snapshot, ''), bs.source_label_snapshot, '')",
+            'source' => "COALESCE(NULLIF(so.business_source_secondary_name_snapshot, ''), NULLIF(so.business_source_primary_name_snapshot, ''), NULLIF(so.business_source_label_snapshot, ''), NULLIF(bs.secondary_source_name_snapshot, ''), NULLIF(bs.primary_source_name_snapshot, ''), NULLIF(bs.source_label_snapshot, ''), NULLIF(sf.business_source_secondary_name_snapshot, ''), NULLIF(sf.business_source_primary_name_snapshot, ''), sf.business_source_label_snapshot, '')",
             'sales_order_no' => 'so.order_no',
             'member_name' => 'sf.member_name_snapshot',
             'service_project' => 'sf.project_name_snapshot',

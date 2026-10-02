@@ -67,6 +67,7 @@ const editorConfig = computed(() => preparedEditorConfig.value || reservation.va
 const editorCatalogOptions = computed(() => Array.isArray(editorConfig.value.catalogOptions) ? editorConfig.value.catalogOptions : [])
 const editorCraftsmenOptions = computed(() => Array.isArray(editorConfig.value.craftsmenOptions) ? editorConfig.value.craftsmenOptions : [])
 const editorRooms = computed(() => Array.isArray(editorConfig.value.rooms) ? editorConfig.value.rooms : [])
+const editorBusinessSources = computed(() => Array.isArray(editorConfig.value.businessSources) ? editorConfig.value.businessSources : [])
 const reservationStatusOptions = computed(() => {
   if (!Array.isArray(reservation.value.statusOptions)) return []
   const seen = new Set()
@@ -1031,6 +1032,7 @@ function isCompleteReservationEditorDraft(config, draft, reservationId, preparat
   if (aliasesConflict(draft, ['id', 'reservationId', 'appointmentId'])) return false
   if (aliasesConflict(draft, ['revision', 'recordVersion', 'reservationVersion'])) return false
   if (!Array.isArray(config.catalogOptions) || !Array.isArray(config.craftsmenOptions) || !Array.isArray(config.rooms)) return false
+  if (!Array.isArray(config.businessSources)) return false
   if (!Array.isArray(draft.projects) && !Array.isArray(draft.projectLines)) return false
   if (!Array.isArray(draft.craftsmen)) return false
   if (!hasOwn(draft, 'member') && !hasOwn(draft, 'memberId')) return false
@@ -1607,6 +1609,7 @@ onBeforeUnmount(() => {
       :catalog-options="editorCatalogOptions"
       :craftsmen-options="editorCraftsmenOptions"
       :rooms="editorRooms"
+      :business-sources="editorBusinessSources"
       :is-submitting="isEditorSubmitting"
       :submission="editorSubmission"
       :on-select-member="selectEditorMember"

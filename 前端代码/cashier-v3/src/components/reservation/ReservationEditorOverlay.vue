@@ -49,6 +49,10 @@ const props = defineProps({
     type: Array,
     default: () => []
   },
+  businessSources: {
+    type: Array,
+    default: () => []
+  },
   isSubmitting: {
     type: Boolean,
     default: false
@@ -127,6 +131,9 @@ const selectedCraftsmen = computed(() => {
 })
 const availableCraftsmen = computed(() => Array.isArray(props.craftsmenOptions) ? props.craftsmenOptions : [])
 const selectedRoom = computed(() => draft.value.room || findRoom(draft.value.roomId) || null)
+const selectedBusinessSource = computed(() => props.businessSources.find((source) => Number(source.id) === Number(draft.value.businessSourcePrimaryId)) || null)
+const businessSourceChildren = computed(() => Array.isArray(selectedBusinessSource.value?.children) ? selectedBusinessSource.value.children : [])
+const businessSourceLabel = computed(() => draft.value.businessSourceLabel || [selectedBusinessSource.value?.name, businessSourceChildren.value.find((item) => Number(item.id) === Number(draft.value.businessSourceSecondaryId))?.name].filter(Boolean).join(' / ') || '待选择')
 const projectCatalogOptions = computed(() => (Array.isArray(refreshedCatalogOptions.value)
   ? refreshedCatalogOptions.value
   : (Array.isArray(props.catalogOptions) ? props.catalogOptions : []))
@@ -162,6 +169,7 @@ const craftsmanLabel = computed(() => selectedCraftsmen.value.length
   : '待分配手艺人')
 const summaryRows = computed(() => [
   { label: '会员', value: memberLabel.value },
+  { label: '客户来源', value: businessSourceLabel.value },
   { label: '预约时间', value: reservationRangeLabel.value },
   { label: '项目', value: projectLines.value.length ? projectLines.value.map((item) => `${roleText(item)}：${projectName(item)}`).join('；') : '未填写项目（仅占用预约时段）' },
   { label: '手艺人', value: craftsmanLabel.value },
@@ -733,9 +741,28 @@ function submitDraft() {
   return payload
 }
 
+function chooseBusinessPrimary(value) {
+  const primary = props.businessSources.find((source) => Number(source.id) === Number(value))
+  updateDraft({
+    businessSourcePrimaryId: Number(primary?.id || 0),
+    businessSourceSecondaryId: 0,
+    businessSourceLabel: primary?.name || ''
+  })
+}
+
+function chooseBusinessSecondary(value) {
+  const secondary = businessSourceChildren.value.find((source) => Number(source.id) === Number(value))
+  updateDraft({
+    businessSourceSecondaryId: Number(secondary?.id || 0),
+    businessSourceLabel: [selectedBusinessSource.value?.name, secondary?.name].filter(Boolean).join(' / ')
+  })
+}
+
 function collectMissingFields() {
   const missing = []
   if (!hasSelectedMember.value) missing.push('会员')
+  if (!Number(draft.value.businessSourcePrimaryId)) missing.push('客户来源')
+  if (selectedBusinessSource.value?.requireSecondary && !Number(draft.value.businessSourceSecondaryId)) missing.push('二级来源')
   if (projectLines.value.some((line) => normalizedProjectSource(line) === 'card' && !Number(line?.entitlementSourceDetailId || line?.sourceDetailId))) {
     missing.push('已购项目来源')
   }
@@ -825,6 +852,30 @@ useModalFocusTrap({
       <section class="reservation-editor-step reservation-editor-step--compact">
         <header class="reservation-editor-step__header">
           <span class="reservation-editor-step__number">2</span>
+          <div><h3>客户来源</h3></div>
+        </header>
+        <div class="reservation-editor-schedule-fields">
+          <label class="reservation-editor-field">
+            <span>一级来源</span>
+            <select :value="draft.businessSourcePrimaryId || 0" :disabled="editorFieldsLocked" @change="chooseBusinessPrimary($event.target.value)">
+              <option value="0">请选择</option>
+              <option v-for="source in businessSources" :key="source.id" :value="source.id">{{ source.name }}</option>
+            </select>
+          </label>
+          <label v-if="businessSourceChildren.length" class="reservation-editor-field">
+            <span>二级来源{{ selectedBusinessSource?.requireSecondary ? '（必选）' : '' }}</span>
+            <select :value="draft.businessSourceSecondaryId || 0" :disabled="editorFieldsLocked" @change="chooseBusinessSecondary($event.target.value)">
+              <option value="0">不选择</option>
+              <option v-for="source in businessSourceChildren" :key="source.id" :value="source.id">{{ source.name }}</option>
+            </select>
+          </label>
+        </div>
+        <p v-if="!businessSources.length" class="reservation-editor-validation">当前没有可用来源，请联系平台管理员。</p>
+      </section>
+
+      <section class="reservation-editor-step reservation-editor-step--compact">
+        <header class="reservation-editor-step__header">
+          <span class="reservation-editor-step__number">3</span>
           <div><h3>预约时间</h3><p>先确定预约日期、开始和结束时间；预约必须在当天完成，未填写项目时默认预约一小时。</p></div>
         </header>
         <div class="reservation-editor-schedule-fields">
@@ -846,7 +897,7 @@ useModalFocusTrap({
 
       <section class="reservation-editor-step">
         <header class="reservation-editor-step__header">
-          <span class="reservation-editor-step__number">3</span>
+          <span class="reservation-editor-step__number">4</span>
           <div><h3>选择手艺人 <em>（可不选）</em></h3><p>未选择时显示“待分配手艺人”，不会阻止预约提交。</p></div>
         </header>
         <div class="reservation-editor-selection-card">
@@ -886,7 +937,7 @@ useModalFocusTrap({
 
       <section class="reservation-editor-step">
         <header class="reservation-editor-step__header">
-          <span class="reservation-editor-step__number">4</span>
+          <span class="reservation-editor-step__number">5</span>
           <div><h3>选择项目 <em>（可不选）</em></h3><p>不选项目也能预约时段；开始服务前必须补齐项目和手艺人。</p></div>
         </header>
         <p v-if="startServiceHint" class="reservation-editor-start-service-hint">{{ startServiceHint }}</p>
@@ -921,7 +972,7 @@ useModalFocusTrap({
 
       <section class="reservation-editor-step">
         <header class="reservation-editor-step__header">
-          <span class="reservation-editor-step__number">5</span>
+          <span class="reservation-editor-step__number">6</span>
           <div><h3>选择房间 <em>（可不选）</em></h3><p>不选时显示“待分配房间”，不会占用房间。</p></div>
         </header>
         <div class="reservation-editor-selection-card">
@@ -940,7 +991,7 @@ useModalFocusTrap({
 
       <section class="reservation-editor-step reservation-editor-step--compact">
         <header class="reservation-editor-step__header">
-          <span class="reservation-editor-step__number">6</span>
+          <span class="reservation-editor-step__number">7</span>
           <div><h3>填写备注 <em>（可不填）</em></h3><p>写下本次预约需要注意的事项。</p></div>
         </header>
         <label class="reservation-editor-field">
@@ -951,7 +1002,7 @@ useModalFocusTrap({
 
       <section class="reservation-editor-step reservation-editor-step--summary">
         <header class="reservation-editor-step__header">
-          <span class="reservation-editor-step__number">7</span>
+          <span class="reservation-editor-step__number">8</span>
           <div><h3>确认预约内容</h3><p>{{ confirmationMode ? '提交后保存修改，并将预约同步为待服务。' : '确认后保存预约单据。' }}</p></div>
         </header>
         <dl class="reservation-editor-summary">
@@ -1684,6 +1735,7 @@ useModalFocusTrap({
 }
 
 .reservation-editor-field input,
+.reservation-editor-field select,
 .reservation-editor-field textarea {
   box-sizing: border-box;
   width: 100%;
@@ -1696,6 +1748,7 @@ useModalFocusTrap({
 }
 
 .reservation-editor-field input:focus,
+.reservation-editor-field select:focus,
 .reservation-editor-field textarea:focus {
   border-color: #1677cc;
   box-shadow: 0 0 0 3px rgba(124, 58, 237, .12);
