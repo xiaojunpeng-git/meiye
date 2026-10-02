@@ -24,7 +24,7 @@ export async function exportCountXlsx(rows) {
       const number = Number(text)
       return Number.isFinite(number) ? number : text
     }))
-    // 用户只需修改“实盘库存”，Excel 即重算盈亏；导入时服务端口径仍以两列库存数重新核对。
+    // 盈亏公式只供表格参考；导入及完成盘点均以实盘数为准，不校验导出账面快照。
     const book = Number(row[5]); const counted = Number(row[6])
     if (Number.isFinite(book) && Number.isFinite(counted)) {
       excelRow.getCell(8).value = { formula: `G${excelRow.number}-F${excelRow.number}`, result: quantityDifference(book, counted) }
@@ -80,54 +80,76 @@ function countDateText(value, rowNumber) {
   return `${match[1]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
-/** 核对模板及可选隐藏粒度列；旧十二列文件仍按商品总量恢复，不因批号非空而猜测粒度。 */
+// 按业务列名定位，不依赖导出来源、工作表名或列顺序；未知列只供用户参考。
+const COLUMN_ALIASES = [
+  ['商品ID', '产品ID'], ['商品名称', '产品名称'], ['规格', '商品规格'], ['单位'], ['商品条码', '条码'],
+  ['账面库存', '帐面库存'], ['实盘库存', '实盘数量', '实盘数', '盘点数量'], ['库存盈亏'],
+  ['盘盈批次号', '批次号', '批号'], ['盘盈单价', '单价'], ['生产日期'], ['到期日', '到期日期', '有效期'], ['盘点粒度']
+]
+const headerName = (value) => String(value ?? '').replace(/\s/g, '').toUpperCase()
+
+/** 当前系统一商品一规格，仅按商品 ID 取权限范围内的系统记录，不核对文件描述列。 */
+export function matchCountProduct(cells, catalog, rowNumber) {
+  const product = catalog instanceof Map ? catalog.get(Number(cells[0])) : catalog.find((item) => Number(item.product_id) === Number(cells[0]))
+  if (!product) throw new Error(`第 ${rowNumber} 行商品 ID ${cells[0]} 在当前可盘点商品中不存在，请核对商品 ID。`)
+  return product
+}
+
+/** 接收用户自制工作簿，统一成现有盘点输入；粒度仍显式声明，不能用批号猜测总量/批次。 */
 export async function parseCountXlsx(buffer) {
   const { default: ExcelJS } = await import('exceljs')
   const workbook = new ExcelJS.Workbook()
   try { await workbook.xlsx.load(buffer) }
   catch { throw new Error('盘点文件不是有效的 xlsx 工作簿。') }
-  if (workbook.worksheets.length !== 1 || workbook.worksheets[0]?.name !== SHEET_NAME) {
-    throw new Error('请选择本页导出的盘点文件，且不要修改工作表。')
-  }
-  const sheet = workbook.worksheets[0]
-  const hasBatchMode = sheet.getCell('M1').value === '盘点粒度'
   const date1904 = Boolean(workbook.properties.date1904)
-  const header = COUNT_COLUMNS.map((_, index) => cellText(sheet.getRow(1).getCell(index + 1), 1, index + 1, date1904))
-  if (JSON.stringify(header) !== JSON.stringify(COUNT_COLUMNS)) {
-    throw new Error('请选择本页导出的盘点文件，且不要修改表头。')
-  }
-  const rows = []
-  for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber++) {
-    const row = sheet.getRow(rowNumber)
-    const values = COUNT_COLUMNS.map((_, index) => {
-      const cell = row.getCell(index + 1)
-      if (index === 7 && cell.value && typeof cell.value === 'object' && cell.formula) {
-        // Excel may rewrite identical row formulas as a shared formula; ExcelJS resolves each
-        // cell's effective formula here, so only the exported F-E calculation is accepted.
-        if (cell.formula !== `G${rowNumber}-F${rowNumber}`) {
-          throw new Error(`第 ${rowNumber} 行库存盈亏公式已被修改。`)
+  let sheet, headerRow, columns
+  // 允许标题、说明页和空行；选择第一个含商品 ID 与实盘数量表头的数据表，不混合多个表。
+  for (const candidate of workbook.worksheets) {
+    for (let number = 1; number <= candidate.rowCount; number++) {
+      const row = candidate.getRow(number)
+      const names = Array.from({ length: row.cellCount }, (_, index) => headerName(row.getCell(index + 1).text))
+      const mapped = COLUMN_ALIASES.map((aliases) => names.findIndex((name) => aliases.some((alias) => headerName(alias) === name)) + 1)
+      if (!mapped[0] || !mapped[6]) continue
+      for (const aliases of COLUMN_ALIASES) {
+        if (names.filter((name) => aliases.some((alias) => headerName(alias) === name)).length > 1) {
+          throw new Error(`第 ${number} 行表头“${aliases[0]}”重复，请保留一列。`)
         }
-        const book = Number(row.getCell(6).value); const counted = Number(row.getCell(7).value)
+      }
+      sheet = candidate; headerRow = number; columns = mapped
+      break
+    }
+    if (sheet) break
+  }
+  if (!sheet) throw new Error('请在表头中提供“商品ID”和“实盘库存”（或“实盘数量”）两列，其他列可选。')
+  const hasBatchMode = Boolean(columns[12])
+  const rows = []
+  for (let rowNumber = headerRow + 1; rowNumber <= sheet.rowCount; rowNumber++) {
+    const row = sheet.getRow(rowNumber)
+    if (!columns.some((column) => column && row.getCell(column).value != null && row.getCell(column).text.trim())) continue
+    const values = COUNT_COLUMNS.map((_, index) => {
+      if (!columns[index]) return ''
+      const cell = row.getCell(columns[index])
+      if (index === 7 && cell.formula) {
+        // 盈亏完全不作为输入；兼容旧导出往返展示，但不检查用户改过的公式。
+        const book = Number(columns[5] ? row.getCell(columns[5]).value : 0); const counted = Number(row.getCell(columns[6]).value)
         return Number.isFinite(book) && Number.isFinite(counted) ? String(quantityDifference(book, counted)) : ''
       }
-      const text = cellText(cell, rowNumber, index + 1, date1904)
+      // 名称/单位/条码/账面/盈亏不参与身份或库存写入，不因这些参考列的格式阻断导入。
+      if ([1, 2, 3, 4, 5, 7].includes(index)) return typeof cell.value === 'object' ? '' : String(cell.value ?? '').trim()
+      const text = cellText(cell, rowNumber, index + 1, date1904).trim()
       return index >= 10 ? countDateText(text, rowNumber) : text
     })
     if (!values.some((value) => value !== '')) {
-      if (rowNumber < sheet.rowCount) throw new Error(`第 ${rowNumber} 行为空，请删除空行后重试。`)
       continue
     }
     if (hasBatchMode) {
-      const mode = cellText(row.getCell(13), rowNumber, 13, date1904)
+      const mode = cellText(row.getCell(columns[12]), rowNumber, 13, date1904).trim().toUpperCase()
       if (!['SKU', 'BATCH', ''].includes(mode)) throw new Error(`第 ${rowNumber} 行盘点粒度无效。`)
       values.push(mode || 'SKU')
     }
-    for (let columnNumber = COUNT_COLUMNS.length + (hasBatchMode ? 2 : 1); columnNumber <= row.cellCount; columnNumber++) {
-      if (cellText(row.getCell(columnNumber), rowNumber, columnNumber, date1904) !== '') {
-        throw new Error(`第 ${rowNumber} 行存在模板之外的列。`)
-      }
-    }
     if (!/^\d+$/.test(values[0])) throw new Error(`第 ${rowNumber} 行商品 ID 无效。`)
+    // 保留原始 Excel 行号供 UI 指出错误，不改变旧数组契约及导出字段。
+    Object.defineProperty(values, 'sourceRow', { value: rowNumber })
     rows.push(values)
   }
   if (!rows.length) throw new Error('盘点文件没有商品记录。')

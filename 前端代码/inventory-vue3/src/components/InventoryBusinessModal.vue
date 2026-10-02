@@ -5,7 +5,7 @@ import { inventoryApi, platformInventoryApi } from '../services/inventoryApi'
 import InventoryProductSelector from './InventoryProductSelector.vue'
 import InventoryStoreSelector from './InventoryStoreSelector.vue'
 import { inventoryStatusLabel } from '../statusLabels'
-import { exportCountXlsx, parseCountXlsx } from './countWorksheet'
+import { exportCountXlsx, parseCountXlsx, matchCountProduct } from './countWorksheet'
 import { countedRows, invalidCountCatalogMessage, invalidCountCatalogRowIndexes, reindexCountValidationRowsAfterRemoval, validateCountSubmissionRows } from '../utils/countSubmission'
 import { validateInboundDates } from '../inboundDateValidation'
 
@@ -642,41 +642,34 @@ async function loadAllCountProducts() {
   finally { countLoading.value = false }
 }
 
-function countRowKey(row) {
-  return [String(row.product_id), String(row.product_name), String(row.sku_name || ''), String(row.barcode || '')].join('\u001F')
-}
-
 async function importCountRows(event) {
   const file = event?.target?.files?.[0]
   if (event?.target) event.target.value = ''
   if (!file || props.pageKey !== 'count' || countLoading.value) return
   countLoading.value = true; catalogError.value = ''; countProgress.value = '正在核对盘点文件…'
   try {
-    if (!/\.xlsx$/i.test(String(file.name))) throw new Error('请导入本页导出的 Excel（.xlsx）盘点资料。')
+    if (!/\.xlsx$/i.test(String(file.name))) throw new Error('请导入 Excel（.xlsx）文件，不要求使用本页导出的模板。')
     const imported = await parseCountXlsx(await file.arrayBuffer())
     const catalog = await allCountCatalog(imported.some((cells) => cells[12] === 'BATCH'))
-    const catalogByKey = new Map()
-    for (const item of catalog) {
-      const key = countRowKey(item)
-      if (catalogByKey.has(key)) catalogByKey.set(key, null)
-      else catalogByKey.set(key, item)
-    }
+    // 一商品一规格按 ID 建索引，避免大文件逐行扫描整个目录；身份始终取系统记录。
+    const catalogByProduct = new Map()
+    for (const item of catalog) if (!catalogByProduct.has(Number(item.product_id))) catalogByProduct.set(Number(item.product_id), item)
     const rowIdentity = (skuId, mode, batchNo) => `${skuId}:${mode}:${mode === 'BATCH' ? batchNo : ''}`
     const existing = new Map(selectedRows.value.map((row) => [rowIdentity(row.sku_id, row.count_mode || 'SKU', row.surplus_batch_no), row]))
     const matched = [], seen = new Set()
     for (let index = 0; index < imported.length; index++) {
       const cells = imported[index]
-      const key = [cells[0], cells[1], cells[2], cells[4]].join('\u001F')
-      const sku = catalogByKey.get(key)
+      const rowNumber = cells.sourceRow || index + 2
+      const sku = matchCountProduct(cells, catalogByProduct, rowNumber)
       const mode = cells[12] === 'BATCH' ? 'BATCH' : 'SKU'
       const identity = rowIdentity(sku?.sku_id, mode, cells[8])
-      if (!sku || seen.has(identity) || (mode === 'BATCH' && !cells[8])) throw new Error(`第 ${index + 2} 行的商品规格不存在、批号为空或标识重复，请重新导出核对。`)
-      if (String(cells[3] || '') !== String(sku.stock_unit || '')) throw new Error(`第 ${index + 2} 行库存单位已变化，请重新导出盘点资料。`)
+      if (seen.has(identity)) throw new Error(`第 ${rowNumber} 行商品 ID ${cells[0]} 的盘点记录重复，请保留一行；不同批次请使用批次盘点粒度。`)
+      if (mode === 'BATCH' && !cells[8]) throw new Error(`第 ${rowNumber} 行为批次盘点，请填写批号。`)
       seen.add(identity)
       // 文件账面、盈亏仅为导出时参考，不作为导入门禁；只接收有效实盘数。
-      if (!/^\d+(?:\.\d{1,4})?$/.test(cells[6])) throw new Error(`第 ${index + 2} 行实盘库存数量无效。`)
-      if (cells[9] && !/^\d+(?:\.\d{1,2})?$/.test(cells[9])) throw new Error(`第 ${index + 2} 行盘盈单价无效。`)
-      if ([cells[10], cells[11]].some((value) => value && !/^\d{4}-\d{2}-\d{2}$/.test(value))) throw new Error(`第 ${index + 2} 行日期格式无效。`)
+      if (!/^\d+(?:\.\d{1,4})?$/.test(cells[6])) throw new Error(`第 ${rowNumber} 行实盘库存数量无效。`)
+      if (cells[9] && !/^\d+(?:\.\d{1,2})?$/.test(cells[9])) throw new Error(`第 ${rowNumber} 行盘盈单价无效。`)
+      if ([cells[10], cells[11]].some((value) => value && !/^\d{4}-\d{2}-\d{2}$/.test(value))) throw new Error(`第 ${rowNumber} 行日期格式无效。`)
       const batch = (sku.count_batches || []).find((item) => String(item.batch_no) === String(cells[8]))
       const row = { ...(existing.get(identity) || countDraftRow(sku)), count_mode: mode,
         book_quantity: String(mode === 'BATCH' ? (batch?.quantity ?? 0) : (sku.available_quantity ?? 0)), counted_quantity: cells[6], surplus_batch_no: cells[8],
