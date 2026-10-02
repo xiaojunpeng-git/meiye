@@ -17,6 +17,9 @@
       </PageHeader>
     </div>
     <Card :bordered="false" dis-hover class="ivu-mt">
+      <Alert v-if="specificationMissing" type="warning" show-icon>
+        商品规格资料缺失，请补全后保存。
+      </Alert>
       <div class="new_tab">
         <Tabs v-model="currentTab">
           <TabPane
@@ -1748,6 +1751,8 @@ export default {
       spinShow: false,
       openSubimit: false,
       saveSubmitting: false,
+      // 读取缺失规格只提示并保留编辑机会，不在打开页面时补建SKU或恢复回收站商品。
+      specificationMissing: false,
       ruleList: [],
       attrs: [],
       formData: structuredClone(defaultObj),
@@ -3128,7 +3133,8 @@ export default {
         })
         .catch((res) => {
           this.spinShow = false;
-          this.$Message.error(res.msg);
+          // 本地装配异常是Error而非接口响应，不能把undefined传给消息组件再次抛错。
+          this.$Message.error((res && (res.msg || res.message)) || '商品资料加载失败，请重试。');
         });
     },
     loadPerformanceRule(id) {
@@ -3184,6 +3190,17 @@ export default {
       });
     },
     infoData(data) {
+      // 规格接口允许旧商品返回空数组；基本资料仍须回显，缺失金额保持空值待人工补全。
+      this.specificationMissing = this.attrValue.length === 0;
+      if (this.specificationMissing) {
+        const rows = data.spec_type ? data.attrs : [data.attr];
+        rows.forEach((row) => {
+          row.price = null;
+          row.cost = null;
+          row.ot_price = null;
+          row.level_price = [];
+        });
+      }
       // 初始化会员价/佣金数据
       // 多规格
       if (data.spec_type) {
@@ -3197,7 +3214,7 @@ export default {
             item.brokerage = suk.brokerage;
             item.brokerage_two = suk.brokerage_two;
             item.level_price = this.levelList.map((level) => {
-              const levelValue = suk.level_price.find((value) => {
+              const levelValue = (Array.isArray(suk.level_price) ? suk.level_price : []).find((value) => {
                 return value.id == level.id;
               });
               if (levelValue) {
@@ -3220,14 +3237,14 @@ export default {
             });
           }
         }
-      } else {
+      } else if (!this.specificationMissing) {
         const suk = this.attrValue[0];
         data.attr.suk = suk.suk;
         data.attr.vip_price = suk.vip_price;
         data.attr.brokerage = suk.brokerage;
         data.attr.brokerage_two = suk.brokerage_two;
         data.attr.level_price = this.levelList.map((level) => {
-          const levelValue = suk.level_price.find((value) => {
+          const levelValue = (Array.isArray(suk.level_price) ? suk.level_price : []).find((value) => {
             return value.id == level.id;
           });
           if (levelValue) {
@@ -3297,13 +3314,14 @@ export default {
       this.generateHeader(this.attrs);
       if (data.spec_type) {
         data.attrs.map((item) => {
-          this.$set(item, 'price', Number(item.price));
+          // 缺失规格的空金额不能经Number(null)变成0，否则多规格会绕过人工补全门禁。
+          this.$set(item, 'price', item.price === null ? null : Number(item.price));
           if(this.merchantType == 2){
-            this.$set(item, "cost", Number(item.settle_price));
+            this.$set(item, "cost", this.specificationMissing ? null : Number(item.settle_price));
           }else{
-            this.$set(item, "cost", Number(item.cost));
+            this.$set(item, "cost", item.cost === null ? null : Number(item.cost));
           }
-          this.$set(item, 'ot_price', Number(item.ot_price));
+          this.$set(item, 'ot_price', item.ot_price === null ? null : Number(item.ot_price));
           this.$set(item, 'weight', Number(item.weight));
           this.$set(item, 'volume', Number(item.volume));
           this.$set(item, 'stock', Number(item.stock));
@@ -3672,6 +3690,15 @@ export default {
     },
     async handleSubmit() {
       if (this.saveSubmitting || this.openSubimit) return;
+      // 旧详情降级模型里的0不是用户确认的SKU金额；补全前不能用默认值创建规格。
+      if (this.specificationMissing) {
+        const rows = Number(this.formData.spec_type) === 1 ? this.manyFormValidate.slice(1) : [this.formData.attr];
+        if (!rows.length || rows.some((row) => ['price', 'cost', 'ot_price'].some((key) => row[key] === null || row[key] === undefined || row[key] === ''))) {
+          this.currentTab = '2';
+          this.$Message.warning('商品规格资料缺失，请补全规格的售价、成本价和划线价后保存（允许明确填写0）。');
+          return;
+        }
+      }
       this.normalizeRetailDeliveryBeforeSave(this.formData);
       let formData = this.summarizeData();
       this.normalizeRetailDeliveryBeforeSave(formData);
@@ -4186,7 +4213,8 @@ export default {
           this.getInfo();
         }
       }).catch((err) => {
-        this.$Message.error(err.msg);
+        // 辅助会员价失败不应再让错误提示崩溃；基础详情仍独立尝试加载。
+        this.$Message.error((err && (err.msg || err.message)) || '商品规格与会员价资料加载失败，请重试。');
         if (this.$route.params.id || this.$route.query.copy) {
           this.changeSpec();
           this.getInfo();
