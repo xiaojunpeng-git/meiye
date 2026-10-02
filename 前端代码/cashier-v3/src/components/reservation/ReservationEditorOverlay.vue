@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useModalFocusTrap } from '@/composables/useModalFocusTrap'
 
 /**
@@ -99,6 +99,10 @@ const emit = defineEmits(['close', 'update:modelValue', 'submitted', 'resume-edi
 const draft = ref(cloneDraft(props.modelValue))
 const missingFields = ref([])
 const submitMessage = ref('')
+const sourceValidationDialogOpen = ref(false)
+const sourceValidationButtonRef = ref(null)
+const primarySourceSelectRef = ref(null)
+const secondarySourceSelectRef = ref(null)
 const isSelecting = ref(false)
 const isCatalogOpen = ref(false)
 const catalogKeyword = ref('')
@@ -134,6 +138,9 @@ const selectedRoom = computed(() => draft.value.room || findRoom(draft.value.roo
 const selectedBusinessSource = computed(() => props.businessSources.find((source) => Number(source.id) === Number(draft.value.businessSourcePrimaryId)) || null)
 const businessSourceChildren = computed(() => Array.isArray(selectedBusinessSource.value?.children) ? selectedBusinessSource.value.children : [])
 const businessSourceLabel = computed(() => draft.value.businessSourceLabel || [selectedBusinessSource.value?.name, businessSourceChildren.value.find((item) => Number(item.id) === Number(draft.value.businessSourceSecondaryId))?.name].filter(Boolean).join(' / ') || '待选择')
+const sourceValidationMessage = computed(() => missingFields.value.includes('客户来源')
+  ? '请选择一级来源后再确认预约。'
+  : '请选择二级来源后再确认预约。')
 const projectCatalogOptions = computed(() => (Array.isArray(refreshedCatalogOptions.value)
   ? refreshedCatalogOptions.value
   : (Array.isArray(props.catalogOptions) ? props.catalogOptions : []))
@@ -223,6 +230,7 @@ watch(
     draft.value = cloneDraft(value)
     missingFields.value = []
     submitMessage.value = ''
+    sourceValidationDialogOpen.value = false
     resetProjectCatalog()
   },
   { deep: true }
@@ -779,11 +787,28 @@ function collectMissingFields() {
   return missing
 }
 
+// 来源漏选必须在当前视口明确拦截；确认提示后将焦点归还给待填写的来源控件。
+async function closeSourceValidationDialog() {
+  sourceValidationDialogOpen.value = false
+  await nextTick()
+  const target = missingFields.value.includes('客户来源')
+    ? primarySourceSelectRef.value
+    : secondarySourceSelectRef.value
+  target?.focus()
+}
+
 async function submit() {
   if (!canSubmitReservation.value || !props.onSubmit) return
   missingFields.value = collectMissingFields()
   submitMessage.value = ''
-  if (missingFields.value.length) return
+  if (missingFields.value.length) {
+    if (missingFields.value.includes('客户来源') || missingFields.value.includes('二级来源')) {
+      sourceValidationDialogOpen.value = true
+      await nextTick()
+      sourceValidationButtonRef.value?.focus()
+    }
+    return
+  }
 
   try {
     const result = await props.onSubmit(submitDraft())
@@ -857,14 +882,14 @@ useModalFocusTrap({
         <div class="reservation-editor-schedule-fields">
           <label class="reservation-editor-field">
             <span>一级来源</span>
-            <select :value="draft.businessSourcePrimaryId || 0" :disabled="editorFieldsLocked" @change="chooseBusinessPrimary($event.target.value)">
+            <select ref="primarySourceSelectRef" :value="draft.businessSourcePrimaryId || 0" :disabled="editorFieldsLocked" @change="chooseBusinessPrimary($event.target.value)">
               <option value="0">请选择</option>
               <option v-for="source in businessSources" :key="source.id" :value="source.id">{{ source.name }}</option>
             </select>
           </label>
           <label v-if="businessSourceChildren.length" class="reservation-editor-field">
             <span>二级来源{{ selectedBusinessSource?.requireSecondary ? '（必选）' : '' }}</span>
-            <select :value="draft.businessSourceSecondaryId || 0" :disabled="editorFieldsLocked" @change="chooseBusinessSecondary($event.target.value)">
+            <select ref="secondarySourceSelectRef" :value="draft.businessSourceSecondaryId || 0" :disabled="editorFieldsLocked" @change="chooseBusinessSecondary($event.target.value)">
               <option value="0">不选择</option>
               <option v-for="source in businessSourceChildren" :key="source.id" :value="source.id">{{ source.name }}</option>
             </select>
@@ -1026,6 +1051,22 @@ useModalFocusTrap({
         </template>
       </footer>
     </form>
+
+    <div v-if="sourceValidationDialogOpen" class="reservation-editor-source-alert" role="presentation">
+      <section
+        class="reservation-editor-source-alert__dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="reservation-editor-source-alert-title"
+        aria-describedby="reservation-editor-source-alert-message"
+        @keydown.esc.stop.prevent="closeSourceValidationDialog"
+        @keydown.tab.stop.prevent
+      >
+        <h3 id="reservation-editor-source-alert-title">预约来源未选择</h3>
+        <p id="reservation-editor-source-alert-message">{{ sourceValidationMessage }}</p>
+        <button ref="sourceValidationButtonRef" type="button" class="reservation-editor-button reservation-editor-button--primary" @click="closeSourceValidationDialog">知道了</button>
+      </section>
+    </div>
 
     <section
       v-if="isCatalogOpen"
@@ -1824,6 +1865,46 @@ useModalFocusTrap({
 .reservation-editor-message {
   background: #eff6ff;
   color: #1d4ed8;
+}
+
+.reservation-editor-source-alert {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(22, 29, 40, .38);
+}
+
+.reservation-editor-source-alert__dialog {
+  display: grid;
+  gap: 12px;
+  width: min(420px, 100%);
+  padding: 24px;
+  border: 1px solid #dce3ed;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(28, 38, 52, .24);
+}
+
+.reservation-editor-source-alert__dialog h3,
+.reservation-editor-source-alert__dialog p {
+  margin: 0;
+}
+
+.reservation-editor-source-alert__dialog h3 {
+  font-size: 18px;
+}
+
+.reservation-editor-source-alert__dialog p {
+  color: #5b6472;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.reservation-editor-source-alert__dialog button {
+  justify-self: end;
 }
 
 .reservation-editor-locked-tip {
