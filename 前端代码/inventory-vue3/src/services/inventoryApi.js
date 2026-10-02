@@ -56,7 +56,10 @@ function messageOf(body, fallback) {
     inventory_manual_outbound_stock_insufficient: '当前库存不足，请核对出库数量后重试。',
     inventory_stock_count_catalog_not_found: '盘点商品已失效，请重新选择商品。',
     inventory_stock_count_stock_changed: '账面库存已变化，请重新核对盘点数量后提交。',
-    inventory_stock_count_duplicate_sku: '盘点单中有重复商品规格，请删除重复行。',
+    // 两端共用粒度校验提示，不能把新增错误码直接展示给操作人员。
+    inventory_stock_count_batch_required: '按批次盘点必须填写批号，请补充后再提交。',
+    inventory_stock_count_mixed_granularity: '同一商品不能同时按总量和按批次盘点，请保留一种方式后再提交。',
+    inventory_stock_count_duplicate_sku: '盘点单中有重复商品总量或重复批号，请核对并删除重复行。',
     // 兼容旧页面直接提交后返回的服务端错误码，不能把技术标识暴露给门店员工。
     inventory_stock_count_surplus_batch_required: '有盘盈商品未填写完整的批次号、单价、生产日期或到期日，暂时无法完成盘点。请补充后再试。',
     inventory_stock_count_surplus_batch_conflict: '盘盈商品的批次资料与现有库存记录不一致，暂时无法完成盘点。请核对批次号、单价和日期后再试。',

@@ -70,6 +70,7 @@ final class InventoryStockCountServices
                 'surplus_expire_date' => (string)$line['surplus_expire_date'],
                 'expected_book_quantity' => (string)$line['book_quantity'],
             ];
+            if (($line['count_mode'] ?? '') === 'BATCH') $changed[count($changed) - 1]['count_mode'] = 'BATCH';
         }
         if (!$changed) throw new \RuntimeException('inventory_stock_count_no_difference');
         $savedCommand = $this->normalize([
@@ -188,6 +189,22 @@ final class InventoryStockCountServices
         $stock = $this->countableStock($scope, $location, $line, $command['now'], false);
         if ((int)$stock['quantity_scale'] < 0 || (int)$stock['quantity_scale'] > 4) throw new \RuntimeException('inventory_stock_count_stock_not_found');
         $scale = (int)$stock['quantity_scale']; $book = (int)$stock['available_quantity_units']; $counted = $this->countUnits($line['counted'], $scale); $difference = $counted - $book;
+        if (($line['countMode'] ?? '') === 'BATCH') {
+            // 同规格多行按批号独立盘点；未列出的批次保持原状，不得把每行实盘覆盖商品总余额。
+            $batch = (int)$stock['id'] > 0 ? Db::name('inventory_batch')->where('stock_id', (int)$stock['id'])
+                ->where('batch_no', $line['batchNo'])->lock(true)->find() : null;
+            if ($batch && (string)$batch['batch_status'] !== 'ACTIVE') throw new \RuntimeException('inventory_stock_count_surplus_batch_conflict');
+            $book = (int)($batch['available_quantity_units'] ?? 0);
+            $difference = $counted - $book;
+            // 无成本查看权限时导入不泄露单价；已有批次调整使用服务端权威成本和日期。
+            if ($batch) {
+                if (!$line['costProvided'] || $difference < 0) $line['cost'] = (int)$batch['unit_cost_cents'];
+                if (!$line['manufacturedDate']) $line['manufacturedDate'] = $batch['manufactured_date'];
+                if (!$line['expireDate']) $line['expireDate'] = $batch['expire_date'];
+                if ($difference < 0) { $line['manufacturedDate'] = $batch['manufactured_date']; $line['expireDate'] = $batch['expire_date']; }
+            }
+            if (!$batch && $difference > 0 && !$line['costProvided']) throw new \RuntimeException('inventory_stock_count_surplus_batch_required');
+        }
         // 产品口径：即使导出/草稿后的库存变化，也以本次实盘为最终数。
         // expectedBook 仅保留命令指纹兼容，不作为并发库存门禁；事务锁与幂等仍有效。
         if ($difference === 0) return false;
@@ -195,6 +212,8 @@ final class InventoryStockCountServices
         $surplus = ['batchNo' => '', 'cost' => 0, 'manufacturedDate' => null, 'expireDate' => null];
         if ($difference < 0) $this->countLoss($scope, $location, $stock, -$difference, $document, $line, $command);
         if ($difference > 0) $surplus = $this->countGain($scope, $location, $stock, $difference, $document, $line, $command);
+        // 复用既有批次快照列保存按批次盘亏的身份，历史查询仍从移动事实取得真实成本。
+        if (($line['countMode'] ?? '') === 'BATCH' && $difference < 0) $surplus = ['batchNo' => $line['batchNo'], 'cost' => $line['cost'], 'manufacturedDate' => $line['manufacturedDate'], 'expireDate' => $line['expireDate']];
         Db::name('inventory_stock_count_line')->insert([
             'document_id' => (int)$document['id'], 'line_no' => $line['index'], 'stock_id' => (int)$stock['id'], 'product_id' => $line['productId'], 'sku_id' => $line['skuId'], 'sku_unique' => $line['unique'], 'quantity_scale' => $scale,
             'book_quantity_units' => $book, 'counted_quantity_units' => $counted, 'difference_quantity_units' => $difference, 'surplus_batch_no' => $surplus['batchNo'], 'surplus_unit_cost_cents' => $surplus['cost'], 'surplus_manufactured_date' => $surplus['manufacturedDate'], 'surplus_expire_date' => $surplus['expireDate'], 'created_at' => $command['now'],
@@ -259,7 +278,10 @@ final class InventoryStockCountServices
 
     private function countLoss(array $scope, array $location, array $stock, int $units, array $document, array $line, array $command): void
     {
-        $batches = Db::name('inventory_batch')->where('stock_id', (int)$stock['id'])->where('batch_status', 'ACTIVE')->where('available_quantity_units', '>', 0)->orderRaw('expire_date IS NULL ASC, expire_date ASC, received_business_date IS NULL ASC, received_business_date ASC, id ASC')->lock(true)->select()->toArray();
+        // 批次盘亏只能扣所盘批次；旧商品总量盘点继续使用 FEFO，不能混用两种粒度。
+        $batchQuery = Db::name('inventory_batch')->where('stock_id', (int)$stock['id'])->where('batch_status', 'ACTIVE')->where('available_quantity_units', '>', 0);
+        if (($line['countMode'] ?? '') === 'BATCH') $batchQuery->where('batch_no', $line['batchNo']);
+        $batches = $batchQuery->orderRaw('expire_date IS NULL ASC, expire_date ASC, received_business_date IS NULL ASC, received_business_date ASC, id ASC')->lock(true)->select()->toArray();
         $remaining = $units; $allocations = [];
         foreach ($batches as $batch) { $take = min((int)$batch['available_quantity_units'], $remaining); if ($take) $allocations[] = [$batch, $take]; $remaining -= $take; if (!$remaining) break; }
         if ($remaining) throw new \RuntimeException('inventory_stock_count_loss_exceeds_book');
@@ -330,11 +352,12 @@ final class InventoryStockCountServices
         $dateText = trim((string)$input['business_date']);
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $dateText);
         if (!$date || $date->format('Y-m-d') !== $dateText) throw new \InvalidArgumentException('inventory_stock_count_date_invalid');
-        $lines = []; $seen = [];
+        $lines = []; $seen = []; $modes = [];
         foreach (array_values($input['lines']) as $i => $line) {
             $keys = ['product_id','sku_id','sku_unique','counted_quantity','surplus_batch_no','surplus_unit_cost','surplus_manufactured_date','surplus_expire_date'];
             $withBook = [...$keys, 'expected_book_quantity'];
-            if (!is_array($line) || (array_keys($line) !== $keys && array_keys($line) !== $withBook)
+            $batchKeys = [...$withBook, 'count_mode'];
+            if (!is_array($line) || (array_keys($line) !== $keys && array_keys($line) !== $withBook && array_keys($line) !== $batchKeys)
                 || !is_int($line['product_id']) || !is_int($line['sku_id'])
                 || $line['product_id'] <= 0 || $line['sku_id'] <= 0
                 || trim((string)$line['sku_unique']) === ''
@@ -342,8 +365,15 @@ final class InventoryStockCountServices
                 throw new \InvalidArgumentException('inventory_stock_count_line_invalid');
             }
             $identity = $line['product_id'] . ':' . $line['sku_id'] . ':' . $line['sku_unique'];
-            if (isset($seen[$identity])) throw new \InvalidArgumentException('inventory_stock_count_duplicate_sku');
-            $seen[$identity] = true;
+            $mode = $line['count_mode'] ?? 'SKU';
+            if (!in_array($mode, ['SKU', 'BATCH'], true)) throw new \InvalidArgumentException('inventory_stock_count_line_invalid');
+            if ($mode === 'BATCH' && trim((string)$line['surplus_batch_no']) === '') throw new \InvalidArgumentException('inventory_stock_count_batch_required');
+            // 同规格不能同时按总量和按批次结算；同批号重复仍整单拒绝。
+            if (isset($modes[$identity]) && $modes[$identity] !== $mode) throw new \InvalidArgumentException('inventory_stock_count_mixed_granularity');
+            $modes[$identity] = $mode;
+            $rowIdentity = $identity . ':' . $mode . ':' . ($mode === 'BATCH' ? trim((string)$line['surplus_batch_no']) : '');
+            if (isset($seen[$rowIdentity])) throw new \InvalidArgumentException('inventory_stock_count_duplicate_sku');
+            $seen[$rowIdentity] = true;
             $cost = trim((string)$line['surplus_unit_cost']);
             if ($cost !== '' && !preg_match('/^\d+(?:\.\d{1,2})?$/D', $cost)) throw new \InvalidArgumentException('inventory_stock_count_cost_invalid');
             [$w, $f] = array_pad(explode('.', $cost === '' ? '0' : $cost, 2), 2, '');
@@ -361,6 +391,7 @@ final class InventoryStockCountServices
             ];
             // 旧请求的指纹必须保持原结构，使部署前已成功的幂等重放仍能命中。
             if ($expected !== null) $normalized['expectedBook'] = trim((string)$expected);
+            if ($mode === 'BATCH') { $normalized['countMode'] = 'BATCH'; $normalized['costProvided'] = $cost !== ''; }
             $lines[] = $normalized;
         }
         $remark = mb_substr(trim((string)$input['remark']), 0, 500);

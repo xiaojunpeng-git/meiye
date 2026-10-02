@@ -532,12 +532,18 @@ async function acceptCatalogRows(rows) {
   catalogError.value = ''
   const selectedSkuIds = new Set(selectedRows.value.map((item) => Number(item.sku_id)))
   for (const row of rows) {
-    if (selectedSkuIds.has(Number(row.sku_id))) continue
+    if (selectedSkuIds.has(Number(row.sku_id)) && props.pageKey !== 'count') continue
+    if (props.pageKey === 'count' && selectedRows.value.some((item) => Number(item.sku_id) === Number(row.sku_id) && item.count_mode !== 'BATCH')) {
+      catalogError.value = '该商品已有按总量盘点的明细，请删除该行后再按不同批次添加。'
+      continue
+    }
     const selected = { ...row, batch_no: '', manufactured_date: '', manufactured_date_bad_input: false, expire_date: '', expire_date_bad_input: false, quantity: '1', unit_cost: '0.00', book_quantity: '0', counted_quantity: '0', surplus_batch_no: '', surplus_unit_cost: '', surplus_manufactured_date: '', surplus_expire_date: '', available_quantity: String(row.available_quantity ?? '0'), reference_unit_cost: '-' }
     if (props.pageKey === 'count') {
       // 商品目录已经按当前库存主体返回权威可用数；避免对每个 SKU 再发一次库存查询。
-      selected.book_quantity = String(row.available_quantity ?? '0')
-      selected.counted_quantity = selected.book_quantity
+      // 手工重复选择形成独立待填批次，不能复制商品总库存到每个批次。
+      selected.count_mode = 'BATCH'
+      selected.book_quantity = '0'
+      selected.counted_quantity = ''
     }
     selectedRows.value.push(selected)
     selectedSkuIds.add(Number(row.sku_id))
@@ -550,7 +556,10 @@ async function exportCountRows() {
   if (props.pageKey !== 'count' || !selectedRows.value.length || countLoading.value) return
   countLoading.value = true; catalogError.value = ''
   try {
-    const bytes = await exportCountXlsx(productRows.value)
+    // 隐藏粒度列只用于多批次文件往返，屏幕上仍保留产品经理已确认的列布局。
+    const exportRows = selectedRows.value.some((row) => row.count_mode === 'BATCH')
+      ? productRows.value.map((row, index) => [...row, selectedRows.value[index].count_mode || 'SKU']) : productRows.value
+    const bytes = await exportCountXlsx(exportRows)
     saveBlob(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `盘点资料-${localBusinessDate()}.xlsx`)
   } catch (error) { catalogError.value = error instanceof Error ? error.message : '盘点资料导出失败。' }
   finally { countLoading.value = false }
@@ -563,11 +572,11 @@ function zeroVisibleCountRows() {
 }
 
 /** 后端目录本身按门店/库存主体过滤；逐页取完，不按库存数量或前 100 行截断。 */
-async function allCountCatalog() {
+async function allCountCatalog(includeBatches = false) {
   const rows = [], seen = new Set()
   let page = 1, total = 0
   do {
-    const response = await catalogApi.value.searchCatalog({ ...catalogQuery.value, keyword: '', category_id: 0, page, limit: 50 })
+    const response = await catalogApi.value.searchCatalog({ ...catalogQuery.value, keyword: '', category_id: 0, page, limit: 50, ...(includeBatches ? { include_count_batches: 1 } : {}) })
     const current = Array.isArray(response?.list) ? response.list : []
     total = Number(response?.total || 0)
     if (!current.length && rows.length < total) throw new Error('商品目录未返回完整数据，请稍后重试。')
@@ -588,6 +597,35 @@ function countDraftRow(row) {
   return { ...row, batch_no: '', manufactured_date: '', expire_date: '', quantity: '1', unit_cost: '0.00',
     book_quantity: book, counted_quantity: book, surplus_batch_no: '', surplus_unit_cost: '',
     surplus_manufactured_date: '', surplus_expire_date: '', available_quantity: book, reference_unit_cost: '-' }
+}
+
+/** 按已授权仓当前批次填草稿；重复导入仅补缺失批次，不覆盖员工已经填写的实盘。 */
+async function importCurrentInventory() {
+  if (props.pageKey !== 'count' || countLoading.value || submitting.value) return
+  countLoading.value = true; catalogError.value = ''; countProgress.value = '正在读取现有库存批次…'
+  try {
+    const catalog = await allCountCatalog(true)
+    const additions = []
+    const existing = new Set(selectedRows.value.filter((row) => row.count_mode === 'BATCH').map((row) => `${row.sku_id}:${row.surplus_batch_no}`))
+    for (const sku of catalog) {
+      const batches = Array.isArray(sku.count_batches) ? sku.count_batches : []
+      if (batches.length && selectedRows.value.some((row) => Number(row.sku_id) === Number(sku.sku_id) && row.count_mode !== 'BATCH')) {
+        throw new Error(`「${sku.product_name}」已有按总量盘点的行，请删除该行后再导入批次库存，避免重复计算。`)
+      }
+      for (const batch of batches) {
+        const identity = `${sku.sku_id}:${batch.batch_no}`
+        if (existing.has(identity)) continue
+        additions.push({ ...countDraftRow(sku), count_mode: 'BATCH', book_quantity: String(batch.quantity), counted_quantity: String(batch.quantity),
+          surplus_batch_no: String(batch.batch_no), surplus_unit_cost: batch.unit_cost == null ? '' : String(batch.unit_cost),
+          surplus_manufactured_date: String(batch.manufactured_date || ''), surplus_expire_date: String(batch.expire_date || '') })
+        existing.add(identity)
+        if (additions.length > 10000) throw new Error('本次库存批次超过 10000 行，请分批盘点；未导入任何行。')
+      }
+    }
+    selectedRows.value.push(...additions)
+    countProgress.value = `已导入 ${additions.length} 个库存批次；现有实盘填写保持不变，系统库存尚未修改。`
+  } catch (error) { catalogError.value = error instanceof Error ? error.message : '导入库存失败。' }
+  finally { countLoading.value = false }
 }
 
 async function loadAllCountProducts() {
@@ -616,34 +654,38 @@ async function importCountRows(event) {
   try {
     if (!/\.xlsx$/i.test(String(file.name))) throw new Error('请导入本页导出的 Excel（.xlsx）盘点资料。')
     const imported = await parseCountXlsx(await file.arrayBuffer())
-    const catalog = await allCountCatalog()
+    const catalog = await allCountCatalog(imported.some((cells) => cells[12] === 'BATCH'))
     const catalogByKey = new Map()
     for (const item of catalog) {
       const key = countRowKey(item)
       if (catalogByKey.has(key)) catalogByKey.set(key, null)
       else catalogByKey.set(key, item)
     }
-    const existing = new Map(selectedRows.value.map((row) => [Number(row.sku_id), row]))
+    const rowIdentity = (skuId, mode, batchNo) => `${skuId}:${mode}:${mode === 'BATCH' ? batchNo : ''}`
+    const existing = new Map(selectedRows.value.map((row) => [rowIdentity(row.sku_id, row.count_mode || 'SKU', row.surplus_batch_no), row]))
     const matched = [], seen = new Set()
     for (let index = 0; index < imported.length; index++) {
       const cells = imported[index]
       const key = [cells[0], cells[1], cells[2], cells[4]].join('\u001F')
       const sku = catalogByKey.get(key)
-      if (!sku || seen.has(Number(sku.sku_id))) throw new Error(`第 ${index + 2} 行的商品规格不存在、标识重复或不唯一，请重新导出核对。`)
+      const mode = cells[12] === 'BATCH' ? 'BATCH' : 'SKU'
+      const identity = rowIdentity(sku?.sku_id, mode, cells[8])
+      if (!sku || seen.has(identity) || (mode === 'BATCH' && !cells[8])) throw new Error(`第 ${index + 2} 行的商品规格不存在、批号为空或标识重复，请重新导出核对。`)
       if (String(cells[3] || '') !== String(sku.stock_unit || '')) throw new Error(`第 ${index + 2} 行库存单位已变化，请重新导出盘点资料。`)
-      seen.add(Number(sku.sku_id))
+      seen.add(identity)
       // 文件账面、盈亏仅为导出时参考，不作为导入门禁；只接收有效实盘数。
       if (!/^\d+(?:\.\d{1,4})?$/.test(cells[6])) throw new Error(`第 ${index + 2} 行实盘库存数量无效。`)
       if (cells[9] && !/^\d+(?:\.\d{1,2})?$/.test(cells[9])) throw new Error(`第 ${index + 2} 行盘盈单价无效。`)
       if ([cells[10], cells[11]].some((value) => value && !/^\d{4}-\d{2}-\d{2}$/.test(value))) throw new Error(`第 ${index + 2} 行日期格式无效。`)
-      const row = { ...(existing.get(Number(sku.sku_id)) || countDraftRow(sku)),
-        book_quantity: String(sku.available_quantity ?? 0), counted_quantity: cells[6], surplus_batch_no: cells[8],
+      const batch = (sku.count_batches || []).find((item) => String(item.batch_no) === String(cells[8]))
+      const row = { ...(existing.get(identity) || countDraftRow(sku)), count_mode: mode,
+        book_quantity: String(mode === 'BATCH' ? (batch?.quantity ?? 0) : (sku.available_quantity ?? 0)), counted_quantity: cells[6], surplus_batch_no: cells[8],
         surplus_unit_cost: cells[9], surplus_manufactured_date: cells[10], surplus_expire_date: cells[11] }
       matched.push(row)
     }
     // 全文件校验成功后才一次性更新表格；不删除当前表格里未出现在文件中的行。
-    const importedIds = new Set(matched.map((row) => Number(row.sku_id)))
-    selectedRows.value = [...selectedRows.value.filter((row) => !importedIds.has(Number(row.sku_id))), ...matched]
+    const importedIds = new Set(matched.map((row) => rowIdentity(row.sku_id, row.count_mode, row.surplus_batch_no)))
+    selectedRows.value = [...selectedRows.value.filter((row) => !importedIds.has(rowIdentity(row.sku_id, row.count_mode || 'SKU', row.surplus_batch_no))), ...matched]
     countProgress.value = `已导入 ${matched.length} 行到盘点单；完成盘点前系统库存不变。`
   } catch (error) { catalogError.value = error instanceof Error ? error.message : '盘点资料导入失败。' }
   finally { countLoading.value = false }
@@ -833,7 +875,8 @@ function countDraftContent() {
       product_name: String(row.product_name || ''), sku_name: String(row.sku_name || ''), stock_unit: String(row.stock_unit || ''), barcode: String(row.barcode || ''),
       book_quantity: String(row.book_quantity ?? '0'), counted_quantity: String(row.counted_quantity ?? ''),
       surplus_batch_no: String(row.surplus_batch_no || ''), surplus_unit_cost: String(row.surplus_unit_cost || ''),
-      surplus_manufactured_date: String(row.surplus_manufactured_date || ''), surplus_expire_date: String(row.surplus_expire_date || '')
+      surplus_manufactured_date: String(row.surplus_manufactured_date || ''), surplus_expire_date: String(row.surplus_expire_date || ''),
+      ...(row.count_mode === 'BATCH' ? { count_mode: 'BATCH' } : {})
     }))
   }
 }
@@ -898,7 +941,8 @@ async function submitCount() {
         product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique,
         counted_quantity: row.counted_quantity, surplus_batch_no: row.surplus_batch_no,
         surplus_unit_cost: row.surplus_unit_cost, surplus_manufactured_date: row.surplus_manufactured_date,
-        surplus_expire_date: row.surplus_expire_date, expected_book_quantity: String(row.book_quantity)
+        surplus_expire_date: row.surplus_expire_date, expected_book_quantity: String(row.book_quantity),
+        ...(row.count_mode === 'BATCH' ? { count_mode: 'BATCH' } : {})
       }))
     }
     if (isPlatformHeadquarters.value) await platformInventoryApi.confirmHqCount({ ...payload, hq_location_id: Number(props.hqLocationId) })
@@ -1230,12 +1274,12 @@ function submitPrimaryEditor() {
           <section v-if="!isImport && !isDetail && pageKey !== 'warehouse'" class="line-section" :class="{ 'line-section--count': pageKey === 'count' }">
             <header>
               <div><h3>{{ pageKey === 'count' ? '盘点商品' : pageKey === 'request' ? '请货商品' : pageKey === 'transfer' ? '调拨商品' : pageKey === 'inbound' ? '入库商品' : pageKey === 'outbound' ? '出库商品' : '业务明细' }}<i v-if="!isDetail">*</i></h3><p v-if="pageKey === 'inbound'">扫描商品条码可自动添加；批次、生产日期、到期日和入库单价在商品明细中填写。</p><p v-else-if="pageKey === 'outbound'">系统会优先扣减最早到期的可用批次，并自动计算成本。</p></div>
-              <div v-if="!isDetail" class="line-actions"><template v-if="pageKey === 'count'"><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="exportCountRows">导出盘点资料</button><button class="modal-secondary" :disabled="countLoading" @click="countFileInput?.click()">导入盘点</button><input ref="countFileInput" class="count-file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="importCountRows" /><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="zeroVisibleCountRows">库存清零</button><button class="modal-secondary" :disabled="countLoading" @click="loadAllCountProducts">{{ countLoading ? '加载中…' : '加载全部商品' }}</button></template><button v-if="!isUsageReturn" class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="!isUsageReturn && ['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button><span class="line-submit-actions"><button class="modal-secondary" :disabled="submitting" @click="close">取消</button><template v-if="pageKey === 'count'"><button class="modal-secondary" :disabled="submitting || countLoading || !selectedRows.length" @click="saveCountDraft">{{ submitting ? '保存中' : '保存草稿' }}</button><button class="modal-primary" :disabled="submitting || countLoading || !selectedRows.length" @click="submitCount">{{ submitting ? '提交中' : '完成盘点' }}</button></template><button v-else class="modal-primary" :disabled="primarySubmitDisabled" @click="submitPrimaryEditor">{{ primarySubmitLabel }}</button></span></div>
+              <div v-if="!isDetail" class="line-actions"><template v-if="pageKey === 'count'"><button class="modal-secondary" :disabled="countLoading || submitting" @click="importCurrentInventory">导入库存</button><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="exportCountRows">导出盘点资料</button><button class="modal-secondary" :disabled="countLoading" @click="countFileInput?.click()">导入盘点</button><input ref="countFileInput" class="count-file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="importCountRows" /><button class="modal-secondary" :disabled="!selectedRows.length || countLoading" @click="zeroVisibleCountRows">库存清零</button><button class="modal-secondary" :disabled="countLoading" @click="loadAllCountProducts">{{ countLoading ? '加载中…' : '加载全部商品' }}</button></template><button v-if="!isUsageReturn" class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="!isUsageReturn && ['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button><span class="line-submit-actions"><button class="modal-secondary" :disabled="submitting" @click="close">取消</button><template v-if="pageKey === 'count'"><button class="modal-secondary" :disabled="submitting || countLoading || !selectedRows.length" @click="saveCountDraft">{{ submitting ? '保存中' : '保存草稿' }}</button><button class="modal-primary" :disabled="submitting || countLoading || !selectedRows.length" @click="submitCount">{{ submitting ? '提交中' : '完成盘点' }}</button></template><button v-else class="modal-primary" :disabled="primarySubmitDisabled" @click="submitPrimaryEditor">{{ primarySubmitLabel }}</button></span></div>
             </header>
             <p v-if="catalogError" class="catalog-error">{{ catalogError }}</p><p v-if="pageKey === 'count' && countProgress" class="count-progress">{{ countProgress }}</p>
             <section v-if="scannerVisible" class="scanner-entry"><Barcode :size="17" /><label>扫描条码<input v-model="scannerCode" autofocus placeholder="请扫描或输入商品条码" @keyup.enter="addScannedProduct" /></label><button class="modal-secondary" @click="scannerVisible = false">取消</button><button class="modal-primary" :disabled="!scannerCode.trim() || scannerLoading" @click="addScannedProduct">{{ scannerLoading ? '添加中' : '添加' }}</button></section>
             <section v-if="bulkEditorVisible" class="bulk-editor"><strong>批量填写已选 {{ selectedLineIndexes.length }} 项</strong><label v-for="field in bulkFields" :key="field.key">{{ field.label }}<input v-model="bulkValues[field.key]" :type="field.type" :placeholder="`不填写则不覆盖`" /></label><div><button class="modal-secondary" @click="bulkEditorVisible = false">取消</button><button class="modal-primary" @click="applyBulkValues">应用到已选行</button></div></section>
-            <div class="modal-table-scroll"><table><thead><tr><th><input type="checkbox" :checked="allLinesSelected" @change="toggleAllLines" /></th><th v-for="column in columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody ref="lineTableBody"><tr v-if="!productRows.length && ['inbound', 'outbound', 'count', 'request', 'transfer', 'usage'].includes(pageKey)"><td :colspan="columns.length + 2" class="modal-empty">请扫描商品条码或搜索并选择商品</td></tr><tr v-for="(row, rowIndex) in productRows" :key="`${selectedRows[rowIndex]?.sku_id || rowIndex}:${selectedRows[rowIndex]?.sku_unique || ''}`" :class="{ 'count-row-invalid': pageKey === 'count' && countValidationRowIndexes.includes(rowIndex) }"><td><input v-model="selectedLineIndexes" type="checkbox" :value="rowIndex" /></td><td v-for="(cell, cellIndex) in row" :key="cellIndex"><template v-if="pageKey === 'inbound' && cellIndex === 5"><input v-model="selectedRows[rowIndex].batch_no" class="table-input" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 6"><input :value="selectedRows[rowIndex].manufactured_date" class="table-input" type="date" :aria-invalid="selectedRows[rowIndex].manufactured_date_bad_input" @input="updateInboundDate(rowIndex, 'manufactured_date', $event)" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 7"><input :value="selectedRows[rowIndex].expire_date" class="table-input" type="date" :aria-invalid="selectedRows[rowIndex].expire_date_bad_input" @input="updateInboundDate(rowIndex, 'expire_date', $event)" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 8"><input v-model="selectedRows[rowIndex].quantity" class="table-input" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 9"><input v-model="selectedRows[rowIndex].unit_cost" class="table-input" /></template><template v-else-if="(pageKey === 'outbound' && cellIndex === 7) || (pageKey === 'request' && cellIndex === 6) || (pageKey === 'transfer' && cellIndex === 7) || (pageKey === 'usage' && cellIndex === 5)"><input v-model="selectedRows[rowIndex].quantity" class="table-input" /></template><template v-else-if="pageKey === 'count' && cellIndex === 6"><input v-model="selectedRows[rowIndex].counted_quantity" class="table-input" /></template><template v-else-if="pageKey === 'count' && cellIndex === 8"><input v-model="selectedRows[rowIndex].surplus_batch_no" class="table-input" placeholder="盘盈必填" /></template><template v-else-if="pageKey === 'count' && cellIndex === 9"><input v-model="selectedRows[rowIndex].surplus_unit_cost" class="table-input" placeholder="盘盈必填" /></template><template v-else-if="pageKey === 'count' && cellIndex === 10"><input v-model="selectedRows[rowIndex].surplus_manufactured_date" class="table-input" type="date" /></template><template v-else-if="pageKey === 'count' && cellIndex === 11"><input v-model="selectedRows[rowIndex].surplus_expire_date" class="table-input" type="date" /></template><template v-else>{{ cell }}</template></td><td><button class="modal-link" @click="removeCatalogRow(rowIndex)">删除</button></td></tr></tbody></table></div>
+            <div class="modal-table-scroll"><table><thead><tr><th><input type="checkbox" :checked="allLinesSelected" @change="toggleAllLines" /></th><th v-for="column in columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody ref="lineTableBody"><tr v-if="!productRows.length && ['inbound', 'outbound', 'count', 'request', 'transfer', 'usage'].includes(pageKey)"><td :colspan="columns.length + 2" class="modal-empty">请扫描商品条码或搜索并选择商品</td></tr><tr v-for="(row, rowIndex) in productRows" :key="`${selectedRows[rowIndex]?.sku_id || rowIndex}:${selectedRows[rowIndex]?.sku_unique || ''}:${rowIndex}`" :class="{ 'count-row-invalid': pageKey === 'count' && countValidationRowIndexes.includes(rowIndex) }"><td><input v-model="selectedLineIndexes" type="checkbox" :value="rowIndex" /></td><td v-for="(cell, cellIndex) in row" :key="cellIndex"><template v-if="pageKey === 'inbound' && cellIndex === 5"><input v-model="selectedRows[rowIndex].batch_no" class="table-input" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 6"><input :value="selectedRows[rowIndex].manufactured_date" class="table-input" type="date" :aria-invalid="selectedRows[rowIndex].manufactured_date_bad_input" @input="updateInboundDate(rowIndex, 'manufactured_date', $event)" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 7"><input :value="selectedRows[rowIndex].expire_date" class="table-input" type="date" :aria-invalid="selectedRows[rowIndex].expire_date_bad_input" @input="updateInboundDate(rowIndex, 'expire_date', $event)" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 8"><input v-model="selectedRows[rowIndex].quantity" class="table-input" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 9"><input v-model="selectedRows[rowIndex].unit_cost" class="table-input" /></template><template v-else-if="(pageKey === 'outbound' && cellIndex === 7) || (pageKey === 'request' && cellIndex === 6) || (pageKey === 'transfer' && cellIndex === 7) || (pageKey === 'usage' && cellIndex === 5)"><input v-model="selectedRows[rowIndex].quantity" class="table-input" /></template><template v-else-if="pageKey === 'count' && cellIndex === 6"><input v-model="selectedRows[rowIndex].counted_quantity" class="table-input" /></template><template v-else-if="pageKey === 'count' && cellIndex === 8"><input v-model="selectedRows[rowIndex].surplus_batch_no" class="table-input" placeholder="盘盈必填" /></template><template v-else-if="pageKey === 'count' && cellIndex === 9"><input v-model="selectedRows[rowIndex].surplus_unit_cost" class="table-input" placeholder="盘盈必填" /></template><template v-else-if="pageKey === 'count' && cellIndex === 10"><input v-model="selectedRows[rowIndex].surplus_manufactured_date" class="table-input" type="date" /></template><template v-else-if="pageKey === 'count' && cellIndex === 11"><input v-model="selectedRows[rowIndex].surplus_expire_date" class="table-input" type="date" /></template><template v-else>{{ cell }}</template></td><td><button class="modal-link" @click="removeCatalogRow(rowIndex)">删除</button></td></tr></tbody></table></div>
             <footer v-if="['inbound', 'outbound', 'request', 'transfer'].includes(pageKey)" class="line-total"><span>明细数量：{{ selectedRows.length }} 项</span><strong v-if="pageKey === 'inbound'">入库金额按填写单价计算</strong><strong v-else-if="pageKey === 'outbound'">出库成本由服务端按实际批次计算</strong></footer>
           </section>
 
@@ -1249,7 +1293,8 @@ function submitPrimaryEditor() {
           <template v-else><button class="modal-secondary" :disabled="submitting" @click="close">取消</button><button class="modal-primary" :disabled="primarySubmitDisabled" @click="submitPrimaryEditor">{{ primarySubmitLabel }}</button></template>
         </footer>
   </section>
-  <InventoryProductSelector :visible="productSelectorVisible" :selected-rows="selectedRows" :catalog-api="catalogApi" :catalog-query="catalogQuery" @close="productSelectorVisible = false" @confirm="acceptCatalogRows" />
+  <!-- 盘点每次仅选择本次新增批次的商品，不把已有批次回填为全选后再次添加；其他业务维持原选择逻辑。 -->
+  <InventoryProductSelector :visible="productSelectorVisible" :selected-rows="pageKey === 'count' ? [] : selectedRows" :catalog-api="catalogApi" :catalog-query="catalogQuery" @close="productSelectorVisible = false" @confirm="acceptCatalogRows" />
 </template>
 
 <style scoped>

@@ -1,4 +1,4 @@
-// 盘点工作簿只包含当前表格可见列。导入仅恢复前端草稿，正式库存仍由服务端盘点命令确认。
+// 盘点工作簿保留可见列；按批次行用隐藏的粒度列防止往返后被误当成商品总量。
 export const COUNT_COLUMNS = ['商品ID', '商品名称', '规格', '单位', '商品条码', '账面库存', '实盘库存', '库存盈亏', '盘盈批次号', '盘盈单价', '生产日期', '到期日']
 const SHEET_NAME = '盘点资料'
 const NUMERIC_COLUMNS = new Set([5, 6, 7, 9])
@@ -15,6 +15,8 @@ export async function exportCountXlsx(rows) {
   workbook.calcProperties.fullCalcOnLoad = true
   const sheet = workbook.addWorksheet(SHEET_NAME, { views: [{ state: 'frozen', ySplit: 1 }] })
   sheet.addRow(COUNT_COLUMNS)
+  const hasBatchMode = rows.some((row) => row[12] === 'BATCH')
+  if (hasBatchMode) { sheet.getCell('M1').value = '盘点粒度'; sheet.getColumn(13).hidden = true }
   for (const row of rows) {
     const excelRow = sheet.addRow(row.map((value, index) => {
       const text = String(value ?? '')
@@ -29,7 +31,7 @@ export async function exportCountXlsx(rows) {
     }
   }
   sheet.autoFilter = { from: 'A1', to: 'L1' }
-  sheet.columns.forEach((column, index) => { column.width = [14, 28, 18, 12, 24, 15, 15, 15, 20, 16, 17, 17][index] })
+  sheet.columns.forEach((column, index) => { column.width = [14, 28, 18, 12, 24, 15, 15, 15, 20, 16, 17, 17, 12][index] })
   sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
   sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF254679' } }
   for (const index of NUMERIC_COLUMNS) sheet.getColumn(index + 1).numFmt = index === 9 ? '0.00' : '0.####'
@@ -78,7 +80,7 @@ function countDateText(value, rowNumber) {
   return `${match[1]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
-/** 严格核对同一导出模板的表头和行宽；下游仍逐行比对服务端 SKU 与实时账面数。 */
+/** 核对模板及可选隐藏粒度列；旧十二列文件仍按商品总量恢复，不因批号非空而猜测粒度。 */
 export async function parseCountXlsx(buffer) {
   const { default: ExcelJS } = await import('exceljs')
   const workbook = new ExcelJS.Workbook()
@@ -88,6 +90,7 @@ export async function parseCountXlsx(buffer) {
     throw new Error('请选择本页导出的盘点文件，且不要修改工作表。')
   }
   const sheet = workbook.worksheets[0]
+  const hasBatchMode = sheet.getCell('M1').value === '盘点粒度'
   const date1904 = Boolean(workbook.properties.date1904)
   const header = COUNT_COLUMNS.map((_, index) => cellText(sheet.getRow(1).getCell(index + 1), 1, index + 1, date1904))
   if (JSON.stringify(header) !== JSON.stringify(COUNT_COLUMNS)) {
@@ -114,7 +117,12 @@ export async function parseCountXlsx(buffer) {
       if (rowNumber < sheet.rowCount) throw new Error(`第 ${rowNumber} 行为空，请删除空行后重试。`)
       continue
     }
-    for (let columnNumber = COUNT_COLUMNS.length + 1; columnNumber <= row.cellCount; columnNumber++) {
+    if (hasBatchMode) {
+      const mode = cellText(row.getCell(13), rowNumber, 13, date1904)
+      if (!['SKU', 'BATCH', ''].includes(mode)) throw new Error(`第 ${rowNumber} 行盘点粒度无效。`)
+      values.push(mode || 'SKU')
+    }
+    for (let columnNumber = COUNT_COLUMNS.length + (hasBatchMode ? 2 : 1); columnNumber <= row.cellCount; columnNumber++) {
       if (cellText(row.getCell(columnNumber), rowNumber, columnNumber, date1904) !== '') {
         throw new Error(`第 ${rowNumber} 行存在模板之外的列。`)
       }

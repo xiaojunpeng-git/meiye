@@ -32,7 +32,11 @@ class InventoryStoreCatalog extends AuthController
             (int)$categoryId,
             (int)$page,
             (int)$limit,
-            (int)$forCount === 1
+            (int)$forCount === 1,
+            (int)$this->request->get('include_count_batches', 0) === 1,
+            // 成本权限由当前员工实际权限解析，不能使用请求中的布尔值。
+            (int)$this->request->get('include_count_batches', 0) === 1
+                && (new \app\services\product\inventory\InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.stock')
         ));
     }
 

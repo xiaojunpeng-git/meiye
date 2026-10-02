@@ -58,10 +58,12 @@ final class InventoryErrorMessage
         'inventory_manual_outbound_stock_insufficient' => '当前库存不足，请核对出库数量后重试。',
         'inventory_manual_outbound_idempotency_conflict' => '本次出库内容与已提交记录不一致，请刷新后重新操作。',
         'inventory_stock_count_loss_exceeds_book' => '盘亏数量不能超过当前账面库存。',
-        // 整张盘点单在事务中核对；任何规格失效或账面变化都应提示重新核对，不允许部分入账。
+        // 整张盘点单在事务中核对身份与粒度；不因导出后账面变化拦截，不允许部分入账。
         'inventory_stock_count_catalog_not_found' => '盘点商品已失效，请重新选择商品。',
         'inventory_stock_count_stock_changed' => '账面库存已变化，请重新核对盘点数量后提交。',
-        'inventory_stock_count_duplicate_sku' => '盘点单中有重复商品规格，请删除重复行。',
+        'inventory_stock_count_duplicate_sku' => '盘点单中有重复商品总量或重复批号，请核对并删除重复行。',
+        'inventory_stock_count_batch_required' => '按批次盘点必须填写批号，请补充后再提交。',
+        'inventory_stock_count_mixed_granularity' => '同一商品不能同时按总量和按批次盘点，请保留一种方式后再提交。',
         'inventory_stock_count_no_difference' => '实盘库存与账面库存没有差异，未生成盘点单。',
         'inventory_stock_count_draft_changed' => '盘点草稿已被修改或完成，请重新打开。',
         'inventory_stock_count_draft_missing' => '盘点草稿不存在，或当前账号无权查看。',

@@ -37,7 +37,8 @@ final class InventoryPlatformHqCatalog extends AuthController
                 $sourcePartyType,
                 $sourceStoreId,
                 $availabilityPartyType,
-                $availabilityStoreId
+                $availabilityStoreId,
+                (int)$this->request->get('include_count_batches', 0) === 1
             ));
         } catch (\InvalidArgumentException $exception) {
             return $this->fail('总部商品查询条件不合法。', ['code' => $exception->getMessage()]);

@@ -114,6 +114,51 @@ try {
         && (int)$physicalFact['counted_quantity_units'] === 1 && (int)$physicalFact['difference_quantity_units'] === -1
         && !empty($physicalReplay['idempotent'])
         && (int)Db::name('inventory_stock')->where('id', (int)$stock['id'])->value('available_quantity_units') === 1);
+    // 同规格三批次：分别结算所盘批次，未列出的第三批次必须保持原数量。
+    $batchB = $commandLine; $batchB['count_mode'] = 'BATCH'; $batchB['surplus_batch_no'] = 'TEST-HQ-B';
+    $batchB['counted_quantity'] = '2';
+    $batchC = $batchB; $batchC['surplus_batch_no'] = 'TEST-HQ-C'; $batchC['counted_quantity'] = '3';
+    $batchCommand = ['idempotency_key' => 'TEST-HQ-batch-seed', 'business_date' => '2026-10-02', 'remark' => 'TEST-批次', 'lines' => [$batchB, $batchC]];
+    $counts->confirmForHeadquarters($admin, $locationId, $batchCommand);
+    $batchA = $commandLine; $batchA['count_mode'] = 'BATCH'; $batchA['counted_quantity'] = '0';
+    $batchB['counted_quantity'] = '1';
+    $batchCommand['idempotency_key'] = 'TEST-HQ-batch-loss'; $batchCommand['lines'] = [$batchA, $batchB];
+    $batchLoss = $counts->confirmForHeadquarters($admin, $locationId, $batchCommand);
+    $batchReplay = $counts->confirmForHeadquarters($admin, $locationId, $batchCommand);
+    $balances = Db::name('inventory_batch')->where('stock_id', (int)$stock['id'])->column('available_quantity_units', 'batch_no');
+    hqCheck('multi-batch physical count targets each batch and preserves uncounted stock', (int)$balances[$commandLine['surplus_batch_no']] === 0
+        && (int)$balances['TEST-HQ-B'] === 1 && (int)$balances['TEST-HQ-C'] === 3
+        && (int)Db::name('inventory_stock')->where('id', (int)$stock['id'])->value('available_quantity_units') === 4
+        && !empty($batchReplay['idempotent']) && (int)Db::name('inventory_stock_count_line')->where('document_id', (int)$batchLoss['count_document_id'])->count() === 2);
+    $batchCommand['idempotency_key'] = 'TEST-HQ-batch-duplicate'; $batchCommand['lines'] = [$batchB, $batchB];
+    hqCheck('duplicate batch is rejected before settlement', hqReason(fn() => $counts->confirmForHeadquarters($admin, $locationId, $batchCommand)) === 'inventory_stock_count_duplicate_sku');
+    $batchCommand['idempotency_key'] = 'TEST-HQ-batch-mixed'; $batchCommand['lines'] = [$commandLine, $batchB];
+    hqCheck('mixing SKU total and batch counts is rejected', hqReason(fn() => $counts->confirmForHeadquarters($admin, $locationId, $batchCommand)) === 'inventory_stock_count_mixed_granularity');
+    $batchCatalog = new \app\services\product\inventory\InventoryCountBatchCatalog();
+    $catalogRows = [['product_id' => $productId, 'sku_id' => $skuId]];
+    $visible = $batchCatalog->attach($catalogRows, (string)$location['tenant_id'], $locationId, true);
+    $hidden = $batchCatalog->attach($catalogRows, (string)$location['tenant_id'], $locationId, false);
+    $outside = $batchCatalog->attach($catalogRows, (string)$location['tenant_id'], $locationId + 999999, true);
+    hqCheck('current batch import carries quantity dates and protects costs and warehouse scope', count($visible[0]['count_batches']) === 2
+        && $visible[0]['count_batches'][0]['quantity'] === '1' && $visible[0]['count_batches'][0]['unit_cost'] !== null
+        && $hidden[0]['count_batches'][0]['unit_cost'] === null && $outside[0]['count_batches'] === []);
+    $batchB['counted_quantity'] = '2';
+    $batchDraftLines = [];
+    foreach ([$batchB, $batchC] as $entered) {
+        $batchDraftLines[] = array_merge($line, ['count_mode' => 'BATCH', 'surplus_batch_no' => $entered['surplus_batch_no'],
+            'book_quantity' => '0', 'counted_quantity' => $entered['counted_quantity']]);
+    }
+    $batchDraft = $drafts->saveForHeadquarters($admin, $locationId, ['draft_id' => 0, 'expected_version' => 0,
+        'business_date' => '2026-10-02', 'remark' => 'TEST-多批次草稿', 'lines' => $batchDraftLines]);
+    $restoredBatches = $drafts->detailForHeadquarters($admin, $locationId, (int)$batchDraft['draft_id']);
+    hqCheck('multi-batch draft retains both batch identities and physical quantities', count($restoredBatches['lines']) === 2
+        && $restoredBatches['lines'][0]['count_mode'] === 'BATCH' && $restoredBatches['lines'][1]['surplus_batch_no'] === 'TEST-HQ-C');
+    $batchB['counted_quantity'] = '2';
+    $batchB['expected_book_quantity'] = '0'; $batchC['expected_book_quantity'] = '0';
+    $batchDraftCommand = ['idempotency_key' => 'count-draft-' . $batchDraft['draft_id'], 'draft_id' => (int)$batchDraft['draft_id'],
+        'draft_version' => 1, 'business_date' => '2026-10-02', 'remark' => 'TEST-多批次草稿', 'lines' => [$batchB, $batchC]];
+    $counts->confirmForHeadquarters($admin, $locationId, $batchDraftCommand);
+    hqCheck('multi-batch draft confirms and replays with saved identities', !empty($counts->confirmForHeadquarters($admin, $locationId, $batchDraftCommand)['idempotent']));
     $input['draft_id'] = 0; $input['expected_version'] = 0;
     $disposable = $drafts->saveForHeadquarters($admin, $locationId, $input);
     $drafts->deleteForHeadquarters($admin, $locationId, (int)$disposable['draft_id'], 1);

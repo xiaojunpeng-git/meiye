@@ -19,6 +19,8 @@ export function validateCountSubmissionRows(rows, { validateSurplus = true } = {
   const quantityPattern = /^\d+(?:\.\d{1,4})?$/
   const costPattern = /^\d+(?:\.\d{1,2})?$/
   const datePattern = /^\d{4}-\d{2}-\d{2}$/
+  const batchIdentities = new Set()
+  const skuModes = new Map()
 
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
     const row = rows[rowIndex]
@@ -26,6 +28,19 @@ export function validateCountSubmissionRows(rows, { validateSurplus = true } = {
     if (!counted) continue
 
     const productName = String(row.product_name || `商品ID ${row.product_id || '-'}`).trim()
+    const skuIdentity = `${row.product_id}:${row.sku_id}`
+    const mode = row.count_mode === 'BATCH' ? 'BATCH' : 'SKU'
+    if (skuModes.has(skuIdentity) && skuModes.get(skuIdentity) !== mode) return { valid: false, rowIndex,
+      message: `第 ${rowIndex + 1} 行「${productName}」与前面同一商品的盘点方式不同，请保留按总量或按批次的一种方式。` }
+    skuModes.set(skuIdentity, mode)
+    if (row.count_mode === 'BATCH') {
+      // 同规格允许不同批号，但空批号或重复批号必须定位到行，不可重复覆盖批次实盘。
+      const batchNo = String(row.surplus_batch_no || '').trim()
+      const identity = `${row.sku_id}:${batchNo}`
+      if (!batchNo || batchIdentities.has(identity)) return { valid: false, rowIndex,
+        message: `第 ${rowIndex + 1} 行「${productName}」${!batchNo ? '未填写批号' : '与前面的批号重复'}，请填写不同的批号后再完成盘点。` }
+      batchIdentities.add(identity)
+    }
     if (!quantityPattern.test(counted)) {
       return { valid: false, rowIndex, message: `第 ${rowIndex + 1} 行「${productName}」的实盘库存填写不正确，暂时无法完成盘点。请填写有效数量后再试。` }
     }

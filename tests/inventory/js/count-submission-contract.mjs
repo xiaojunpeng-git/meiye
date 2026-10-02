@@ -22,6 +22,12 @@ assert.deepEqual(countedRows(rows).map((row) => row.sku_id), [1, 2, 3, 4, 6, 7])
 assert.deepEqual(countedRows(rows.slice(2, 5)).map((row) => row.sku_id), [3, 4])
 assert.equal(validateCountSubmissionRows(rows, { validateSurplus: false }).rowIndex, 6)
 assert.equal(validateCountSubmissionRows(rows.slice(0, 6), { validateSurplus: false }).valid, true)
+// 新批次行可重复选择商品，但正式提交必须填写不同批号。
+const batchRows = [{ sku_id: 1, product_name: '精华', count_mode: 'BATCH', surplus_batch_no: 'A', counted_quantity: '0' },
+  { sku_id: 1, product_name: '精华', count_mode: 'BATCH', surplus_batch_no: 'B', counted_quantity: '2' }]
+assert.equal(validateCountSubmissionRows(batchRows, { validateSurplus: false }).valid, true)
+assert.equal(validateCountSubmissionRows([...batchRows, { ...batchRows[0] }], { validateSurplus: false }).rowIndex, 2)
+assert.equal(validateCountSubmissionRows([{ ...batchRows[0], surplus_batch_no: '' }], { validateSurplus: false }).rowIndex, 0)
 
 // 盘亏无需补建批次；盘盈必须在前端明确指出首条缺失资料，避免服务端回滚后用户无从定位。
 const validationRows = [

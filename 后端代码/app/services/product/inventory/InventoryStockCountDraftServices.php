@@ -186,7 +186,11 @@ final class InventoryStockCountDraftServices
             $unique = trim((string)($line['sku_unique'] ?? ''));
             $book = trim((string)($line['book_quantity'] ?? ''));
             $counted = trim((string)($line['counted_quantity'] ?? ''));
-            $identity = $productId . ':' . $skuId . ':' . $unique;
+            $mode = $line['count_mode'] ?? 'SKU';
+            if (!in_array($mode, ['SKU', 'BATCH'], true)) throw new \InvalidArgumentException('inventory_stock_count_draft_lines_invalid');
+            // 草稿允许尚未填写批号的多行；已填写批号必须唯一，正式提交还会校验粒度混用。
+            $identity = $productId . ':' . $skuId . ':' . $unique . ':' . $mode;
+            if ($mode === 'BATCH') $identity .= ':' . (trim((string)($line['surplus_batch_no'] ?? '')) ?: 'pending-' . count($result));
             if ($productId <= 0 || $skuId <= 0 || $unique === '' || isset($seen[$identity])
                 || !preg_match('/^\d+(?:\.\d{1,4})?$/D', $book)
                 || ($counted !== '' && !preg_match('/^\d+(?:\.\d{1,4})?$/D', $counted))) {
@@ -208,6 +212,7 @@ final class InventoryStockCountDraftServices
                 'surplus_manufactured_date' => (string)($line['surplus_manufactured_date'] ?? ''),
                 'surplus_expire_date' => (string)($line['surplus_expire_date'] ?? ''),
             ];
+            if ($mode === 'BATCH') $result[count($result) - 1]['count_mode'] = 'BATCH';
         }
         return $result;
     }

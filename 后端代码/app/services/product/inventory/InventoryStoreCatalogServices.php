@@ -44,7 +44,7 @@ final class InventoryStoreCatalogServices
      * The store ID is always derived from the authenticated store session. Client
      * category and page inputs can only narrow a catalog already scoped to it.
      */
-    public function search(int $storeId, string $keyword, int $categoryId = 0, int $page = 1, int $limit = 20, bool $forCount = false): array
+    public function search(int $storeId, string $keyword, int $categoryId = 0, int $page = 1, int $limit = 20, bool $forCount = false, bool $includeCountBatches = false, bool $canViewCost = false): array
     {
         $keyword = trim($keyword);
         if ($storeId <= 0 || $categoryId < 0 || mb_strlen($keyword) > 64) {
@@ -114,6 +114,13 @@ final class InventoryStoreCatalogServices
 
         // Count confirmation compares the current stock projection under lock; only count callers use that same book basis.
         $list = $forCount ? $this->withCountBookQuantity($storeId, $list) : $this->withAvailableQuantity($storeId, $list);
+        if ($includeCountBatches) {
+            // 仓库由会话门店默认仓确定，不接受客户端传入任意仓 ID。
+            $locationId = (int)Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                ->where('store_id', $storeId)->where('location_type', 'STORE')->where('is_default', 1)->where('location_status', 'ACTIVE')->value('id');
+            if (!$locationId) throw new \RuntimeException('inventory_catalog_source_scope_denied');
+            $list = (new InventoryCountBatchCatalog())->attach($list, CashierV3ScopeResolver::TENANT_SCOPE_ID, $locationId, $canViewCost);
+        }
         return compact('list', 'total', 'page', 'limit', 'categories');
     }
 

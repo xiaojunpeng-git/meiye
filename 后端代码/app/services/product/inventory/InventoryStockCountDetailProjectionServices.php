@@ -34,8 +34,8 @@ final class InventoryStockCountDetailProjectionServices
             $line['stock_unit'] = (string)($line['stock_unit'] ?: '');
             $line['change_amount_cents'] = $canViewCost && array_key_exists((int)$line['line_no'], $amountByLine)
                 ? $amountByLine[(int)$line['line_no']] : null;
-            // 只有盘盈明细存在新批次；无成本权限时保留批次追溯但隐藏单价。
-            if ((int)$line['difference_quantity_units'] <= 0) {
+            // 按批次盘亏同样保存批次快照；旧按总量盘亏无单一批次，保持原展示。
+            if ((int)$line['difference_quantity_units'] <= 0 && (string)$line['surplus_batch_no'] === '') {
                 $line['surplus_batch_no'] = '';
                 $line['surplus_unit_cost_cents'] = null;
                 $line['surplus_manufactured_date'] = null;

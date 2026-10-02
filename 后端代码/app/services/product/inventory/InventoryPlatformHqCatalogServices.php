@@ -37,7 +37,7 @@ final class InventoryPlatformHqCatalogServices
         return $this->withSupplierAvailableQuantity($source, $availabilitySource, $rows)[0];
     }
 
-    public function search(array $adminInfo, int $locationId, string $keyword, int $page = 1, int $limit = 20, string $sourcePartyType = 'HQ', int $sourceStoreId = 0, string $availabilityPartyType = '', int $availabilityStoreId = 0): array
+    public function search(array $adminInfo, int $locationId, string $keyword, int $page = 1, int $limit = 20, string $sourcePartyType = 'HQ', int $sourceStoreId = 0, string $availabilityPartyType = '', int $availabilityStoreId = 0, bool $includeCountBatches = false): array
     {
         // Resolve the selected source subject first. The catalog is never a
         // tenant-wide anonymous product search, even though it contains no stock figures.
@@ -89,6 +89,11 @@ final class InventoryPlatformHqCatalogServices
             ->select()
             ->toArray();
 
+        if ($includeCountBatches) {
+            // 导入盘点只读所选总部仓；供货目录切换门店不能扩展该入口的仓库范围。
+            if ($source['type'] !== 'HQ') throw new \RuntimeException('inventory_catalog_source_scope_denied');
+            $list = (new InventoryCountBatchCatalog())->attach($list, (string)$source['tenantId'], (int)$source['locationId'], in_array('inventory.cost.view', $source['features'], true));
+        }
         return [
             'list' => $this->withSupplierAvailableQuantity($source, $availabilitySource, $list),
             'total' => $total,

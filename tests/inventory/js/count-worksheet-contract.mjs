@@ -17,6 +17,10 @@ assert.equal((await parseCountXlsx(exported.buffer.slice(exported.byteOffset, ex
 assert.deepEqual(restored, rows)
 assert.deepEqual(COUNT_COLUMNS, ['商品ID', '商品名称', '规格', '单位', '商品条码', '账面库存', '实盘库存', '库存盈亏', '盘盈批次号', '盘盈单价', '生产日期', '到期日'])
 assert.equal(restored.length, 1001)
+// 相同商品的不同批次不能在 Excel 往返中丢失粒度，也不改变旧十二列文件语义。
+const batchRows = [[...rows[0].slice(0, 8), '0001', '2.30', '2026-01-01', '2028-01-01', 'BATCH'],
+  [...rows[0].slice(0, 8), '0002', '3.40', '2026-02-01', '2028-02-01', 'BATCH']]
+assert.deepEqual(await parseCountXlsx(await exportCountXlsx(batchRows)), batchRows.map((row) => row.map((cell, index) => index === 9 ? String(Number(cell)) : cell)))
 const workbook = new ExcelJS.Workbook()
 await workbook.xlsx.load(exported)
 const sheet = workbook.worksheets[0]
