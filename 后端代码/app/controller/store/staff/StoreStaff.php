@@ -747,6 +747,42 @@ class StoreStaff extends AuthController
         return app('json')->success($services->getStaffShiftHandoverData($this->storeId,$staffInfo['staff_id'],$staffInfo['shift_start_time'],$staffInfo['shift_end_time'],true));
     }
 
+    /** 手机号查询仅返回核对信息；当前门店取强制会话，禁止客户端选择目标。 */
+    public function phoneTransferPreview()
+    {
+        try {
+            $result = app()->make(\app\services\store\StoreStaffPhoneTransferServices::class)->preview(
+                (string)$this->request->get('phone', ''), (int)$this->storeId, (int)$this->storeStaffId
+            );
+            return app('json')->success($result);
+        } catch (\Throwable $e) {
+            return app('json')->fail($e->getMessage());
+        }
+    }
+
+    /** 门店直接调入不走总部审批；原请求令牌和候选快照由服务层事务复核。 */
+    public function phoneTransferConfirm()
+    {
+        try {
+            $data = (array)$this->request->post();
+            // 会话中间件为所有 POST 注入 store_id；仅移除确由中间件新增且匹配会话的技术字段。
+            // 客户端自带门店仍交给严格白名单拒绝，调店目标只取已鉴权的当前门店。
+            if (($this->request->forceStoreSessionInjectedPostStoreId ?? false) === true
+                && (int)($data['store_id'] ?? 0) === (int)$this->storeId) {
+                unset($data['store_id']);
+            }
+            $result = app()->make(\app\services\store\StoreStaffPhoneTransferServices::class)->confirm(
+                $data, (int)$this->storeId,
+                ['id' => (int)$this->storeStaffId, 'real_name' => (string)($this->storeStaffInfo['staff_name'] ?? '')],
+                ['header_token' => (string)$this->request->header('X-Request-Token', ''),
+                    'body_token' => (string)($data['request_token'] ?? ''), 'operator_ip' => (string)$this->request->ip()]
+            );
+            return app('json')->success($result['msg'], $result['data']);
+        } catch (\Throwable $e) {
+            return app('json')->fail($e->getMessage());
+        }
+    }
+
     /** I1：门店发起调店申请（不改任职） */
     public function transferApplyCreate()
     {

@@ -21,7 +21,10 @@ async function request(path, options = {}) {
   })
   const payload = await response.json().catch(() => null)
   if (!response.ok || !payload || Number(payload.status || 200) !== 200) {
-    throw new Error(String(payload?.msg || payload?.message || '员工管理请求失败。'))
+    const error = new Error(String(payload?.msg || payload?.message || '员工管理请求失败。'))
+    // 只有明确业务拒绝才可重新查找；网络/网关错误可能已经提交，必须保留原令牌查询结果。
+    error.definitive = response.ok && payload && Number(payload.status || 200) !== 200
+    throw error
   }
   return payload
 }
@@ -53,7 +56,7 @@ export async function uploadStoreStaffAvatar(file) {
   return String(source)
 }
 
-function createRequestToken() {
+export function createRequestToken() {
   if (window.crypto && typeof window.crypto.randomUUID === 'function') {
     return window.crypto.randomUUID()
   }
@@ -65,6 +68,22 @@ function createRequestToken() {
   bytes[8] = (bytes[8] & 0x3f) | 0x80
   const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+/** 精确手机号查找；不接受姓名、原门店或目标门店等范围参数。 */
+export function findStoreTransferStaff(phone) {
+  return request(`/cashierapi/v3/management/staff/phone-transfer?phone=${encodeURIComponent(String(phone).trim())}`)
+}
+
+/** 保留调用方首次生成的令牌和查询快照，网络失败重试不得换请求或改目标。 */
+export function confirmStoreTransferStaff(candidate, requestToken) {
+  return request('/cashierapi/v3/management/staff/phone-transfer', {
+    method: 'POST', requestToken,
+    body: {
+      phone: candidate.phone, employee_id: candidate.employee_id, source_staff_id: candidate.source_staff_id,
+      expected_version: candidate.expected_version, snapshot_hash: candidate.snapshot_hash, request_token: requestToken
+    }
+  })
 }
 
 function normalizedBoolean(value) {

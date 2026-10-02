@@ -69,7 +69,7 @@ class StoreStaffTransferServices extends BaseServices
      * @param array{
      *   source_staff_id:int,to_store_id:int,roles:array,position?:int,position_level?:int,
      *   is_manager?:int,is_cashier?:int,reason:string,apply_id?:int,operator:array,
-     *   expected_from_store_id?:int,expected_employee_id?:int
+     *   expected_from_store_id?:int,expected_employee_id?:int,strict_projection?:bool,inherit_staff_settings?:bool
      * } $ctx
      * @return array{execute_staff_id:int,source_staff_id:int,employee_id:int,from_store_id:int,to_store_id:int}
      */
@@ -80,6 +80,8 @@ class StoreStaffTransferServices extends BaseServices
         $applyId = (int)($ctx['apply_id'] ?? 0);
         $reason = trim((string)($ctx['reason'] ?? ''));
         $operator = is_array($ctx['operator'] ?? null) ? $ctx['operator'] : [];
+        // 新门店手机号入口须完整投影成功，否则整个调店回滚；旧入口兼容行为不扩散修改。
+        $strictProjection = !empty($ctx['strict_projection']);
         $roles = $ctx['roles'] ?? [];
         if (!is_array($roles)) {
             $roles = $roles !== '' ? explode(',', (string)$roles) : [];
@@ -192,6 +194,12 @@ class StoreStaffTransferServices extends BaseServices
             'employee_id' => $employeeId,
             'customer_phone' => (string)($employee['phone'] ?? $sourceStaff['phone'] ?? ''),
         ];
+        // 手机号调入不开放设置员工配置，携带原任职资格；角色权限仍由目标店岗位重新投影。
+        if (!empty($ctx['inherit_staff_settings'])) {
+            foreach (['cashier_salesperson_enabled', 'cashier_craftsman_enabled', 'craftsman_performance_type', 'mobile_enabled', 'is_reservable'] as $key) {
+                if (array_key_exists($key, $sourceStaff)) $staffUpdate[$key] = $sourceStaff[$key];
+            }
+        }
         // 总部调店允许按审批配置设置收银/店长；仍禁止写 uid
         if ($roles) {
             $this->staffServices->applyRolesFlags($staffUpdate);
@@ -357,6 +365,7 @@ class StoreStaffTransferServices extends BaseServices
                 $jobSvc->projectStaffRoles($executeStaffId);
                 $jobSvc->syncManagerFlagFromJobs($executeStaffId);
             } catch (\Throwable $e) {
+                if ($strictProjection) throw $e;
             }
         }
         // 统一账号投影到新任职
@@ -374,6 +383,7 @@ class StoreStaffTransferServices extends BaseServices
             }
         } catch (\Throwable $e) {
             // 表未就绪时不阻断调店
+            if ($strictProjection) throw $e;
         }
         // 数据权限：切到 B 店 store_self（有本店来源则更新；无则保持）
         try {
@@ -387,8 +397,13 @@ class StoreStaffTransferServices extends BaseServices
                     'update_time' => $now,
                 ]);
         } catch (\Throwable $e) {
+            if ($strictProjection) throw $e;
         }
 
+        if ($strictProjection) {
+            // 新入口记录实际目标店投影角色，而不是传入的空兼容角色列表。
+            $roles = array_values(array_filter(array_map('intval', explode(',', (string)Db::name('system_store_staff')->where('id', $executeStaffId)->value('roles')))));
+        }
         $logRow = [
             'staff_id' => $sourceStaffId,
             'execute_staff_id' => $executeStaffId,
@@ -417,7 +432,8 @@ class StoreStaffTransferServices extends BaseServices
             'action' => 'staff_transfer_execute',
             'target_type' => $applyId > 0 ? 'transfer_apply' : 'staff',
             'target_id' => $applyId > 0 ? $applyId : $sourceStaffId,
-            'source' => 'admin',
+            // 审计必须记录实际发起端，门店确认不能冒充总部操作。
+            'source' => (int)($operator['type'] ?? 1) === 2 ? 'store' : 'admin',
             'before_data' => json_encode([
                 'source_staff_id' => $sourceStaffId,
                 'from_store_id' => $fromStoreId,
@@ -429,7 +445,7 @@ class StoreStaffTransferServices extends BaseServices
                 'roles' => $roles,
             ], JSON_UNESCAPED_UNICODE) ?: '',
             'reason' => $reason,
-            'operator_type' => 'admin',
+            'operator_type' => (int)($operator['type'] ?? 1) === 2 ? 'store' : 'admin',
             'operator_id' => (int)($operator['id'] ?? 0),
             'operator_name' => (string)($operator['name'] ?? ''),
             'operator_ip' => (string)($operator['ip'] ?? ''),

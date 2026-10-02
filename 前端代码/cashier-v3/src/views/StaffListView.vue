@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import TablePagination from '@/components/common/TablePagination.vue'
+import StaffPhoneTransferDialog from '@/components/StaffPhoneTransferDialog.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
 import { useUnifiedQueryPage } from '@/composables/useUnifiedQueryPage'
 import { canUseCashierV3Operation, requestCashierV3Action, useCashierV3State } from '@/services/cashierV3Bridge'
@@ -24,6 +25,7 @@ const lastSuccessfulQuery = ref(null)
 const isQueryLoading = ref(false)
 const queryError = ref('')
 const editorOpen = ref(false)
+const transferOpen = ref(false)
 const editorLoading = ref(false)
 const editorSaving = ref(false)
 const editorError = ref('')
@@ -336,6 +338,11 @@ function createStaffExport(payload) {
   return unifiedQuery.createExport(payload)
 }
 
+/** 调店入口与员工列表同权，不使用员工新增/编辑的独立权限开关。 */
+async function refreshAfterTransfer() {
+  await queryStaff(lastSuccessfulQuery.value || {}, true)
+}
+
 function avatarSource(value) {
   const raw = String(value || '')
   return raw.startsWith('http://') || raw.startsWith('https://') ? raw : `${window.location.origin}${raw.startsWith('/') ? raw : `/${raw}`}`
@@ -381,7 +388,9 @@ async function onAvatarFileChange(event) {
       :on-change-custom-field-status="unifiedQuery.changeCustomFieldStatus" :on-archive-custom-field="unifiedQuery.archiveCustomField"
       :on-upgrade-saved-query-field-reference="unifiedQuery.upgradeSavedQueryFieldReference" :on-create-export="createStaffExport"
       :on-query-export-task="unifiedQuery.queryExportTask"
-    />
+    >
+      <template #primary-actions><button type="button" class="button button--secondary" @click="transferOpen = true">调店</button></template>
+    </UnifiedQueryToolbar>
     <p v-if="isQueryLoading" class="staff-list-message">正在查询员工数据…</p>
     <p v-else-if="queryError" class="staff-list-message staff-list-message--error">{{ queryError }}</p>
     <main class="staff-list-wrap">
@@ -391,6 +400,7 @@ async function onAvatarFileChange(event) {
       <div v-if="!records.length && !isQueryLoading" class="staff-list-empty">暂无符合条件的员工。</div>
     </main>
     <TablePagination :total="total" :page="page" :page-size="pageSize" @change="changePage" />
+    <StaffPhoneTransferDialog :open="transferOpen" :context-key="state.stateContextId || ''" :store-name="state.currentStore?.name || state.currentStore?.storeName || '本门店'" @close="transferOpen = false" @transferred="refreshAfterTransfer" />
 
     <div v-if="editorOpen" class="staff-editor-backdrop" @click.self="!editorSaving && (editorOpen = false)">
       <form class="staff-editor" aria-label="员工资料" novalidate @submit.prevent="saveEditor">

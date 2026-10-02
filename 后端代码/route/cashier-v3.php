@@ -121,6 +121,11 @@ Route::group('cashierapi/v3/management', function () {
         ->option(['real_name' => 'V3读取可选岗位']);
     Route::get('staff/work-members', 'store.staff.StoreStaff/getWorkMemberList')
         ->option(['real_name' => 'V3读取企业微信成员']);
+    // 精确手机号调入与员工列表共用管理入口权限；须在通用 staff/:id 之前登记。
+    Route::get('staff/phone-transfer', 'store.staff.StoreStaff/phoneTransferPreview')
+        ->option(['real_name' => 'V3手机号查询调店员工']);
+    Route::post('staff/phone-transfer', 'store.staff.StoreStaff/phoneTransferConfirm')
+        ->option(['real_name' => 'V3确认调入本门店']);
     Route::post('staff/:id', 'store.staff.StoreStaff/save')
         ->option(['real_name' => 'V3保存门店员工']);
     Route::post('file/upload', 'store.file.SystemAttachment/upload')

@@ -75,6 +75,8 @@ class ForceStoreSessionMiddleware implements MiddlewareInterface
         try {
             $post = $request->post();
             if (is_array($post)) {
+                // 严格写命令要区分会话注入与客户端自带门店；只记录注入来源，不能放宽目标门店契约。
+                $request->forceStoreSessionInjectedPostStoreId = !array_key_exists('store_id', $post);
                 foreach (['store_id', 'storeId', 'selected_store_id', 'current_store_id'] as $k) {
                     if (array_key_exists($k, $post) || $k === 'store_id') {
                         $post[$k] = $sessionStoreId;
