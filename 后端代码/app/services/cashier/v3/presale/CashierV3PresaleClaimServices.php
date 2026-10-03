@@ -26,6 +26,7 @@ final class CashierV3PresaleClaimServices
     public const CLAIM_BATCH_TABLE = 'cashier_v3_presale_claim_batch';
 
     private const STATUS_AVAILABLE = 'AVAILABLE';
+    private const STATUS_LEGACY_OPEN = 'OPEN';
     private const STATUS_FULLY_CLAIMED = 'FULLY_CLAIMED';
     private const STATUS_CLOSED = 'CLOSED_AFTER_SALE_REVERSAL';
     private const CLAIM_SETTLED = 'SETTLED';
@@ -195,8 +196,10 @@ final class CashierV3PresaleClaimServices
         $tenantId = $this->token($tenantId, 32, 'presale_claim_tenant_invalid');
         $orderId = $this->token($orderId, 64, 'presale_claim_order_invalid');
         $operationId = $this->token($operationId, 64, 'presale_claim_operation_invalid');
+        // Imported OPEN is an unclaimed legacy spelling of AVAILABLE; reversal
+        // must close it too, without touching already closed historical rows.
         $rows = Db::name(self::CLAIMABLE_TABLE)->where('tenant_id', $tenantId)->where('source_order_id', $orderId)
-            ->whereIn('claim_status', [self::STATUS_AVAILABLE, self::STATUS_FULLY_CLAIMED])->lock(true)->select()->toArray();
+            ->whereIn('claim_status', [self::STATUS_AVAILABLE, self::STATUS_LEGACY_OPEN, self::STATUS_FULLY_CLAIMED])->lock(true)->select()->toArray();
         $closed = 0;
         foreach ($rows as $row) {
             $affected = Db::name(self::CLAIMABLE_TABLE)->where('id', (int)$row['id'])->where('version', (int)$row['version'])->update([
@@ -316,7 +319,15 @@ final class CashierV3PresaleClaimServices
         if (!$storeIds) return ['list' => [], 'count' => 0, 'page' => $page, 'limit' => $limit, 'data_as_of' => time()];
         $query->whereIn('store_id', $storeIds);
         $query->where('source_kind', $sourceKind);
-        if ($status !== '') $query->where('claim_status', $status);
+        // Historical imports persisted OPEN while current checkout writes
+        // AVAILABLE. Keep the database unchanged and admit only positive
+        // remaining legacy rights into the default "可领用" result.
+        if ($status === self::STATUS_AVAILABLE) {
+            $query->whereIn('claim_status', [self::STATUS_AVAILABLE, self::STATUS_LEGACY_OPEN])
+                ->whereRaw('quantity > claimed_quantity');
+        } elseif ($status !== '') {
+            $query->where('claim_status', $status);
+        }
         if ($startDate !== '') $query->where('business_date', '>=', $startDate);
         if ($endDate !== '') $query->where('business_date', '<=', $endDate);
         if ($keyword !== '') {
@@ -338,8 +349,8 @@ final class CashierV3PresaleClaimServices
                 'organization_id' => (string)$row['organization_id'], 'organization_name' => (string)$row['organization_name_snapshot'],
                 'member_id' => (int)$row['member_id'], 'member_name' => (string)$row['member_name_snapshot'], 'member_phone' => (string)$row['member_phone_snapshot'],
                 'product_name' => (string)$row['product_name_snapshot'], 'quantity' => $quantity, 'claimed_quantity' => $claimed,
-                'unclaimed_quantity' => max(0, $quantity - $claimed), 'claim_status' => (string)$row['claim_status'],
-                'can_claim' => (string)$row['claim_status'] === self::STATUS_AVAILABLE && $claimed < $quantity,
+                'unclaimed_quantity' => max(0, $quantity - $claimed), 'claim_status' => $this->claimableDisplayStatus($row),
+                'can_claim' => $this->isClaimable($row),
               ];
         }, $rows), 'count' => $count, 'page' => $page, 'limit' => $limit, 'data_as_of' => time()];
     }
@@ -364,7 +375,7 @@ final class CashierV3PresaleClaimServices
         if ($existing) return $this->replayClaim((array)$existing, $scope, $command);
 
         $claimable = $this->authorizedClaimable($scope, $command['claimableLineId'], true);
-        if ((string)$claimable['claim_status'] !== self::STATUS_AVAILABLE) {
+        if (!$this->isClaimable($claimable)) {
             throw new \RuntimeException((string)$claimable['claim_status'] === self::STATUS_CLOSED ? 'presale_claim_closed_after_sale_reversal' : 'presale_claim_fully_claimed');
         }
         $remaining = (int)$claimable['quantity'] - (int)$claimable['claimed_quantity'];
@@ -585,7 +596,21 @@ final class CashierV3PresaleClaimServices
         $quantity = (int)$row['quantity']; $claimed = (int)$row['claimed_quantity'];
         return ['claimable_line_id' => (string)$row['claimable_line_id'], 'source_kind' => (string)$row['source_kind'], 'presale_order_no' => (string)$row['source_order_no_snapshot'], 'sales_date' => (string)$row['business_date'],
             'member_name' => (string)$row['member_name_snapshot'], 'member_phone' => (string)$row['member_phone_snapshot'], 'product_name' => (string)$row['product_name_snapshot'],
-            'quantity' => $quantity, 'claimed_quantity' => $claimed, 'unclaimed_quantity' => max(0, $quantity - $claimed), 'claim_status' => (string)$row['claim_status']];
+            'quantity' => $quantity, 'claimed_quantity' => $claimed, 'unclaimed_quantity' => max(0, $quantity - $claimed), 'claim_status' => $this->claimableDisplayStatus($row)];
+    }
+
+    /** OPEN is accepted only as a legacy spelling of an unspent right; no closed or exhausted right may be claimed. */
+    private function isClaimable(array $row): bool
+    {
+        return in_array((string)($row['claim_status'] ?? ''), [self::STATUS_AVAILABLE, self::STATUS_LEGACY_OPEN], true)
+            && (int)($row['quantity'] ?? 0) > (int)($row['claimed_quantity'] ?? 0);
+    }
+
+    /** Return the public contract's canonical state without rewriting imported history during a read. */
+    private function claimableDisplayStatus(array $row): string
+    {
+        return (string)($row['claim_status'] ?? '') === self::STATUS_LEGACY_OPEN && $this->isClaimable($row)
+            ? self::STATUS_AVAILABLE : (string)($row['claim_status'] ?? '');
     }
 
     private function positiveInt($value, string $error): int { if (filter_var($value, FILTER_VALIDATE_INT) === false || (int)$value <= 0) throw new \InvalidArgumentException($error); return (int)$value; }
