@@ -314,7 +314,7 @@ const inventoryFeatureItems = [
   { key: 'transfer', label: '调拨', featureCode: 'cashier.v3.inventory.transfer' },
   { key: 'usage', label: '院装', featureCode: 'cashier.v3.inventory.usage' },
   { key: 'import', label: '导入', featureCode: 'cashier.v3.inventory.import' },
-  { key: 'presale-claim', label: '客户领用', featureCode: 'cashier.v3.inventory.outbound', to: { name: 'cashier-v3-presale-claim' } }
+  { key: 'presale-claim', label: '会员领用', featureCode: 'cashier.v3.inventory.outbound', to: { name: 'cashier-v3-presale-claim' } }
 ]
 const visibleInventoryFeatureItems = computed(() => inventoryFeatureItems.filter((entry) => canUseFeature(entry.featureCode)))
 const managementFeatureItems = [
