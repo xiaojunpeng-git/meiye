@@ -126,9 +126,17 @@ final class MobileMerchantDashboardServices
                     $id = (int)$id;
                     if ($id > 0) $orgIds[$id] = $id;
                 }
-            } elseif (in_array($mode, ['store', 'store_self'], true)) {
+            } elseif (in_array($mode, ['store', 'store_self', 'store_selected'], true)) {
+                // 精确门店与自动门店都按门店维度排名，不因选择多个门店提升为组织排行。
                 $hasStoreScope = true;
             }
+        }
+        /** @var \app\services\organization\EmployeeDataScopeServices $dataScope */
+        $dataScope = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
+        if ($dataScope->resolvePrimaryHqScopeMode((int)($merchant['employeeId'] ?? 0)) === $dataScope::MODE_STORE_SELECTED) {
+            // 与权限解析一致：精确门店优先于同人残留的旧组织行。
+            $hasOrganizationScope = false;
+            $orgIds = [];
         }
         $dimensionByOrg = [];
         if ($orgIds !== []) {

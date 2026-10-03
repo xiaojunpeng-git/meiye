@@ -16,6 +16,7 @@ class EmployeeDataScopeServices extends BaseServices
     public const MODE_PERSONAL = 'personal';
     public const MODE_ORG = 'org';
     public const MODE_STORE = 'store';
+    public const MODE_STORE_SELECTED = 'store_selected';
     public const MODE_STORE_SELF = 'store_self';
 
     /**
@@ -103,8 +104,8 @@ class EmployeeDataScopeServices extends BaseServices
             if ($sourceStoreId <= 0) {
                 throw new AdminException('门店来源须指定本店');
             }
-            if ($scopeMode === self::MODE_ORG) {
-                throw new AdminException('门店不能设置组织数据范围');
+            if (in_array($scopeMode, [self::MODE_ORG, self::MODE_STORE_SELECTED], true)) {
+                throw new AdminException('门店不能设置跨店数据范围');
             }
             if (!in_array($scopeMode, [self::MODE_PERSONAL, self::MODE_STORE_SELF], true)) {
                 throw new AdminException('门店只能设置个人或本店数据范围');
@@ -117,7 +118,7 @@ class EmployeeDataScopeServices extends BaseServices
             }
         } else {
             $sourceStoreId = 0;
-            if (!in_array($scopeMode, [self::MODE_PERSONAL, self::MODE_ORG, self::MODE_STORE], true)) {
+            if (!in_array($scopeMode, [self::MODE_PERSONAL, self::MODE_ORG, self::MODE_STORE, self::MODE_STORE_SELECTED], true)) {
                 throw new AdminException('总部数据范围类型无效');
             }
             if ($scopeMode === self::MODE_PERSONAL) {
@@ -145,6 +146,28 @@ class EmployeeDataScopeServices extends BaseServices
                 }
                 $orgIds = $found;
                 $storeIds = [];
+            } elseif ($scopeMode === self::MODE_STORE_SELECTED) {
+                // 指定门店是精确授权：不继承组织下级，也不能相信前端送来的任意门店 ID。
+                if (!$storeIds) {
+                    throw new AdminException('请选择可看门店');
+                }
+                if (strlen((string)json_encode($storeIds)) > 2000) {
+                    throw new AdminException('所选门店过多，请缩小范围');
+                }
+                $found = Db::name('system_store')->whereIn('id', $storeIds)->where('is_del', 0)->column('id');
+                $found = array_values(array_unique(array_map('intval', $found)));
+                sort($found);
+                $want = $storeIds;
+                sort($want);
+                if ($found !== $want) {
+                    throw new AdminException('门店范围包含无效或已删除门店');
+                }
+                $allowedStoreIds = $this->resolveOperatorAllowedSelectedStoreIds($adminInfo);
+                if ($allowedStoreIds !== null && array_diff($found, $allowedStoreIds)) {
+                    throw new AdminException('门店范围超出可授权范围');
+                }
+                $storeIds = $found;
+                $orgIds = [];
             } else {
                 // 门店模式：服务端按当前有效任职自动计算，忽略前端 store_ids（防扩权）
                 $clientStoreIds = $storeIds;
@@ -310,6 +333,18 @@ class EmployeeDataScopeServices extends BaseServices
             ->where('status', 1)
             ->select()->toArray();
 
+        // 总部明确指定门店时，该列表是完整授权，不与历史门店来源/自动任职范围取并集。
+        $hqScopes = array_values(array_filter($scopes, static function (array $scope): bool {
+            return (string)($scope['source_type'] ?? '') === self::SOURCE_HQ
+                && (int)($scope['source_store_id'] ?? 0) === 0;
+        }));
+        if ($hqScopes) {
+            usort($hqScopes, static fn(array $left, array $right): int => (int)$right['id'] <=> (int)$left['id']);
+        }
+        if ((string)($hqScopes[0]['scope_mode'] ?? '') === self::MODE_STORE_SELECTED) {
+            $scopes = [$hqScopes[0]];
+        }
+
         $storeSet = [];
         $hasExtension = false;
         if (!$scopes) {
@@ -345,6 +380,18 @@ class EmployeeDataScopeServices extends BaseServices
                         foreach ($this->expandOrgToStoreIds((int)$oid) as $sid) {
                             $storeSet[$sid] = true;
                         }
+                    }
+                    continue;
+                }
+                if ($mode === self::MODE_STORE_SELECTED) {
+                    // 精确门店模式只使用仍有效的已选门店；隔离门店在下方进一步扣除。
+                    $selectedIds = json_decode((string)($scope['store_ids'] ?? '[]'), true) ?: [];
+                    $selectedIds = $this->normalizeIntIds($selectedIds);
+                    $activeIds = $selectedIds
+                        ? Db::name('system_store')->whereIn('id', $selectedIds)->where('is_del', 0)->column('id')
+                        : [];
+                    foreach ($activeIds as $sid) {
+                        $storeSet[$sid] = true;
                     }
                 }
             }
@@ -512,7 +559,7 @@ class EmployeeDataScopeServices extends BaseServices
             ->order('id', 'desc')
             ->find();
         $mode = (string)($row['scope_mode'] ?? self::MODE_PERSONAL);
-        if (!in_array($mode, [self::MODE_PERSONAL, self::MODE_ORG, self::MODE_STORE], true)) {
+        if (!in_array($mode, [self::MODE_PERSONAL, self::MODE_ORG, self::MODE_STORE, self::MODE_STORE_SELECTED], true)) {
             return self::MODE_PERSONAL;
         }
         return $mode;
@@ -579,6 +626,57 @@ class EmployeeDataScopeServices extends BaseServices
     }
 
     /**
+     * 返回操作者可精确授权的门店集合。已有总部范围优先，以其实际有效门店为上限；
+     * 仅没有总部范围时才兼容独立的组织管理员授权，避免借祖先组织 ID 授出兄弟门店。
+     * null 仅表示超管不限，空数组必须拒绝授权。
+     * @return int[]|null
+     */
+    protected function resolveOperatorAllowedSelectedStoreIds(array $adminInfo): ?array
+    {
+        if ($this->isSuperAdmin($adminInfo)) {
+            return null;
+        }
+        $adminId = (int)($adminInfo['id'] ?? 0);
+        if ($adminId <= 0) {
+            return [];
+        }
+        $employeeId = (int)($adminInfo['employee_id'] ?? 0);
+        if ($employeeId <= 0) {
+            $employeeId = (int)Db::name('system_admin')->where('id', $adminId)->where('is_del', 0)->value('employee_id');
+        }
+        if ($employeeId > 0) {
+            $hqScope = Db::name('employee_data_scope')
+                ->where('employee_id', $employeeId)
+                ->where('source_type', self::SOURCE_HQ)
+                ->where('source_store_id', 0)
+                ->where('status', 1)
+                ->where('is_del', 0)
+                ->order('id', 'desc')
+                ->find();
+            $mode = (string)($hqScope['scope_mode'] ?? '');
+            if ($mode === self::MODE_ORG || $mode === self::MODE_STORE_SELECTED || $mode === self::MODE_STORE) {
+                $ids = $this->resolveEffectiveStoreIds($employeeId, 0, $adminInfo);
+                return array_values(array_unique(array_filter(array_map('intval', (array)$ids))));
+            }
+            if ($hqScope) {
+                // 明确的个人范围是空授权，不能回退历史组织管理员关系而重新扩大。
+                return [];
+            }
+        }
+        $orgAdminIds = Db::name('organization_admin')->where('admin_id', $adminId)->where('is_del', 0)->column('id');
+        if (!$orgAdminIds) {
+            return [];
+        }
+        /** @var OrganizationScopeService $scope */
+        $scope = app()->make(OrganizationScopeService::class);
+        $ids = [];
+        foreach ($orgAdminIds as $orgAdminId) {
+            $ids = array_merge($ids, $scope->getAdminResolvedStoreIds((int)$orgAdminId));
+        }
+        return array_values(array_unique(array_filter(array_map('intval', $ids))));
+    }
+
+    /**
      * 返回平台操作者可管理的组织范围；null 表示总部超管不限。
      * 组织直属人员写入、组织名册维护等入口必须复用这条边界，
      * 不能只依赖页面上的“集团”文案或前端传入的 org_id。
@@ -625,6 +723,10 @@ class EmployeeDataScopeServices extends BaseServices
         }
 
         $mode = strtolower(trim((string)($scope['scope_mode'] ?? self::MODE_PERSONAL)));
+        if ($mode === self::MODE_STORE_SELECTED) {
+            // 精确门店不是组织授权；禁止回退旧组织管理员路径扩大范围。
+            return [];
+        }
         if ($mode !== self::MODE_ORG) {
             // 个人/门店模式本身不是集团组织授权；继续走旧
             // organization_admin 兼容路径，避免覆盖已有的组织管理员授权。

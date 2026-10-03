@@ -49,7 +49,7 @@ final class MobileMerchantAnalyticsEntryScopeServices
         }
 
         $scopeRows = Db::name('employee_data_scope')->where('employee_id', $employeeId)
-            ->where('status', 1)->where('is_del', 0)->field('scope_mode,org_ids')->select()->toArray();
+            ->where('status', 1)->where('is_del', 0)->field('id,source_type,source_store_id,scope_mode,org_ids')->select()->toArray();
         $organizations = Db::name('organization')->where('is_del', 0)->field('id,pid')->select()->toArray();
         $bindings = Db::name('organization_store')->whereIn('store_id', $storeIds)->field('org_id,store_id')->select()->toArray();
         try {

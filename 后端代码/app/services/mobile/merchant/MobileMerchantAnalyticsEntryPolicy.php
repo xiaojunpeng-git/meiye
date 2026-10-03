@@ -40,9 +40,19 @@ final class MobileMerchantAnalyticsEntryPolicy
             if ($mode === 'org') {
                 $entryType = self::TYPE_ORGANIZATION;
                 $grantedOrgIds = array_merge($grantedOrgIds, $this->jsonIds($row['org_ids'] ?? []));
-            } elseif ($entryType !== self::TYPE_ORGANIZATION && in_array($mode, ['store', 'store_self'], true)) {
+            } elseif ($entryType !== self::TYPE_ORGANIZATION && in_array($mode, ['store', 'store_self', 'store_selected'], true)) {
                 $entryType = self::TYPE_STORE;
             }
+        }
+
+        $hqRows = array_values(array_filter($scopeRows, static function (array $row): bool {
+            return (string)($row['source_type'] ?? '') === 'hq' && (int)($row['source_store_id'] ?? 0) === 0;
+        }));
+        usort($hqRows, static fn(array $left, array $right): int => (int)$right['id'] <=> (int)$left['id']);
+        if ((string)($hqRows[0]['scope_mode'] ?? '') === 'store_selected') {
+            // 仅最新总部授权为精确门店时覆盖旧组织行，分析入口保持门店维度。
+            $entryType = self::TYPE_STORE;
+            $grantedOrgIds = [];
         }
 
         if ($entryType === self::TYPE_PERSONAL) {

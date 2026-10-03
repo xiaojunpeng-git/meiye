@@ -7,8 +7,9 @@ namespace app\services\mobile\merchant;
 use app\services\employee\EmployeeInternalAccountServices;
 use app\services\mobile\protocol\MobileApiException;
 use app\services\mobile\protocol\MobileApiResponse;
-use app\services\organization\OrganizationOpsStatusServices;
+use app\services\organization\EmployeeDataScopeServices;
 use app\services\organization\JobPositionPolicyServices;
+use app\services\organization\OrganizationOpsStatusServices;
 use app\services\organization\StaffJobPositionServices;
 use mohe\exceptions\AdminException;
 use think\facade\Db;
@@ -451,31 +452,17 @@ final class MobileMerchantSessionServices
     /** @return int[] */
     private function employeeDataScopeStoreIds(int $employeeId): array
     {
-        $rows = Db::name('employee_data_scope')->where('employee_id', $employeeId)->where('status', 1)->where('is_del', 0)
-            ->field('scope_mode,org_ids,source_store_id')->select()->toArray();
-        $storeIds = [];
-        foreach ($rows as $row) {
-            $mode = (string)($row['scope_mode'] ?? 'personal');
-            if ($mode === 'store_self') $storeIds[] = (int)($row['source_store_id'] ?? 0);
-            if ($mode === 'store') {
-                $storeIds = array_merge($storeIds, Db::name('system_store_staff')->where('employee_id', $employeeId)
-                    ->where('status', 1)->where('is_del', 0)->column('store_id'));
-            }
-            if ($mode === 'org') {
-                $orgIds = $this->positiveIds(json_decode((string)($row['org_ids'] ?? '[]'), true) ?: []);
-                if ($orgIds) $storeIds = array_merge($storeIds, $this->organizationStoreIds($orgIds));
-            }
-        }
-        $isolated = $this->positiveIds(Db::name('employee_store_isolation')->where('employee_id', $employeeId)
-            ->where('status', 1)->where('is_del', 0)->column('store_id'));
-        return array_values(array_diff($this->positiveIds($storeIds), $isolated));
+        // 会话候选门店复用总部权威解析，避免与保存口径产生并集/隔离差异。
+        /** @var EmployeeDataScopeServices $scope */
+        $scope = app()->make(EmployeeDataScopeServices::class);
+        return $this->positiveIds((array)$scope->resolveEffectiveStoreIds($employeeId, 0));
     }
 
     private function isPersonalScope(int $employeeId): bool
     {
         $rows = Db::name('employee_data_scope')->where('employee_id', $employeeId)->where('status', 1)->where('is_del', 0)->field('scope_mode')->select()->toArray();
         if (!$rows) return true;
-        foreach ($rows as $row) if (in_array((string)($row['scope_mode'] ?? ''), ['store_self', 'store', 'org'], true)) return false;
+        foreach ($rows as $row) if (in_array((string)($row['scope_mode'] ?? ''), ['store_self', 'store', 'store_selected', 'org'], true)) return false;
         return true;
     }
 
@@ -488,20 +475,9 @@ final class MobileMerchantSessionServices
 
     private function isStoreWithinEmployeeDataScope(int $employeeId, int $storeId): bool
     {
-        $rows = Db::name('employee_data_scope')->where('employee_id', $employeeId)->where('status', 1)->where('is_del', 0)
-            ->field('scope_mode,org_ids,source_store_id')->select()->toArray();
-        $stores = [];
-        foreach ($rows as $row) {
-            $mode = (string)($row['scope_mode'] ?? 'personal');
-            if ($mode === 'store_self') $stores[] = (int)($row['source_store_id'] ?? 0);
-            if ($mode === 'store') $stores = array_merge($stores, Db::name('system_store_staff')->where('employee_id', $employeeId)->where('status', 1)->where('is_del', 0)->column('store_id'));
-            if ($mode === 'org') {
-                $orgIds = $this->positiveIds(json_decode((string)($row['org_ids'] ?? '[]'), true) ?: []);
-                if ($orgIds) $stores = array_merge($stores, $this->organizationStoreIds($orgIds));
-            }
-        }
-        $stores = $this->positiveIds($stores);
-        return $stores === [] || in_array($storeId, $stores, true);
+        $stores = $this->employeeDataScopeStoreIds($employeeId);
+        // 显式范围即使因门店失效而为空，也不能回退成“个人”放行任意门店。
+        return $stores === [] ? $this->isPersonalScope($employeeId) : in_array($storeId, $stores, true);
     }
 
     private function positiveIds(array $values): array
@@ -510,14 +486,6 @@ final class MobileMerchantSessionServices
         foreach ($values as $value) { $id = (int)$value; if ($id > 0) $ids[$id] = $id; }
         ksort($ids, SORT_NUMERIC);
         return array_values($ids);
-    }
-
-    /** @return int[] */
-    private function organizationStoreIds(array $organizationIds): array
-    {
-        /** @var MobileMerchantOrganizationStoreScopeServices $scope */
-        $scope = app()->make(MobileMerchantOrganizationStoreScopeServices::class);
-        return $scope->resolve($organizationIds);
     }
 
     private function encryptReceipt(array $root): string

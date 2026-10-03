@@ -3089,6 +3089,10 @@ export default {
         const ids = Array.isArray(scope.org_ids) ? scope.org_ids : [];
         return ids.length ? `（已选 ${ids.length} 个组织）` : '';
       }
+      if (scope.scope_mode === 'store_selected') {
+        const ids = Array.isArray(scope.store_ids) ? scope.store_ids : [];
+        return `（已选 ${ids.length} 家门店）`;
+      }
       if (scope.scope_mode === 'store' || scope.scope_mode === 'store_self') {
         return '（按当前任职门店自动计算）';
       }
@@ -3524,6 +3528,7 @@ export default {
     },
     dataScopeModeLabel(mode) {
       if (mode === 'org') return '已选组织范围';
+      if (mode === 'store_selected') return '指定门店范围';
       if (mode === 'store' || mode === 'store_self') return '门店自动范围';
       return '个人';
     },

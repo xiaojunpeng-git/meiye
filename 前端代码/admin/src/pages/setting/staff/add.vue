@@ -190,12 +190,13 @@
 
           <TabPane label="数据权限" name="scope">
             <Alert show-icon>
-              设置该人员可查看的数据范围。个人：本人任职相关数据；门店：系统按当前任职自动计算；组织：可多选组织及其下级。手机端是否可进入由本页的“手机端”开关控制；数据权限只决定进入后可查看、可切换的门店范围。
+              设置该人员可查看的数据范围。个人：本人任职相关数据；门店：系统按当前任职自动计算；指定门店：仅所选门店；组织：可多选组织及其下级。手机端是否可进入由本页的“手机端”开关控制；数据权限只决定进入后可查看、可切换的门店范围。
             </Alert>
             <FormItem label="数据范围：">
               <RadioGroup v-model="formInline.scope_mode" @on-change="onScopeModeChange">
                 <Radio label="personal">个人</Radio>
                 <Radio label="store" :disabled="!hasAppointmentStore">门店</Radio>
+                <Radio v-if="scene === 'organization'" label="store_selected">指定门店</Radio>
                 <Radio label="org">组织</Radio>
               </RadioGroup>
             </FormItem>
@@ -222,6 +223,17 @@
                 @change="onScopeOrganizationsPick"
               />
               <div class="form-tip">可多选组织；将查看所选组织及其下级组织、门店的数据（取并集）。不能直接选门店。手机端看板按此范围汇总，工作台需在此范围内选择一个门店操作。</div>
+            </FormItem>
+            <FormItem v-if="formInline.scope_mode === 'store_selected'" label="可看门店：">
+              <OrganizationStoreScopePicker
+                v-model="formInline.store_ids"
+                :load-scope="loadOrganizationPickerScope"
+                empty-label="请选择可看门店"
+                clear-label="清空已选门店"
+                selection-mode="store_multiple"
+                @change="onScopeStoresPick"
+              />
+              <div class="form-tip">可跨组织多选门店；组织树只用于查找，不会自动授权整个组织。仅可查看所选门店的数据。</div>
             </FormItem>
             <FormItem label="手机端：">
               <i-switch
@@ -698,6 +710,8 @@ export default {
       employmentTypeLoaded: true,
       /** 编辑时必须读到学历版本，防止详情降级后用空值覆盖主档。 */
       educationLoaded: true,
+      /** 仅学历真实变更才提交该字段；权限编辑不能触发无关的学历版本校验。 */
+      originalEducation: '',
       educationOptions: ['本科以上', '本科', '大专', '高中', '高中以下', '其他'],
       /** 离职记录由服务端不可变审计投影返回，不能在前端编辑或拼算。 */
       departureRecords: [],
@@ -929,6 +943,7 @@ export default {
       this.activeTab = 'basic';
       this.submitting = false;
       this.originalInternalAccount = '';
+      this.originalEducation = '';
       this.originalStoreId = 0;
       this.originalStoreName = '';
       this.organizationMemberships = [];
@@ -1019,6 +1034,13 @@ export default {
           .filter((id) => id > 0);
       }
     },
+    onScopeStoresPick(scope = {}) {
+      if (scope.nodeType === 'store_multiple' || scope.nodeType === 'all') {
+        this.formInline.store_ids = (scope.storeIds || [])
+          .map(Number)
+          .filter((id) => id > 0);
+      }
+    },
     onStorePick(storeId, meta) {
       const sid = Number(storeId || (meta && meta.store_id) || 0);
       this.formInline.store_id = sid > 0 ? sid : '';
@@ -1061,9 +1083,9 @@ export default {
         })).filter((item) => item.org_id > 0 && item.org_name)
         : [];
       let scopeMode = String(scope.scope_mode || 'personal');
-      // 后端存 store_self，表单仅认 personal/store/org
+      // 后端存 store_self，表单统一显示为自动门店；指定门店则保持独立模式。
       if (scopeMode === 'store_self') scopeMode = 'store';
-      if (!['personal', 'store', 'org'].includes(scopeMode)) {
+      if (!['personal', 'store', 'store_selected', 'org'].includes(scopeMode)) {
         scopeMode = 'personal';
       }
       const employmentTypeLoaded = !!(data
@@ -1132,6 +1154,7 @@ export default {
       this.appointmentStorePickerLabel = String((data && data.store_name) || '').trim();
       this.employmentTypeLoaded = employmentTypeLoaded;
       this.educationLoaded = educationLoaded;
+      this.originalEducation = this.formInline.education;
       this.mobileAuthLoaded = mobileAuthLoaded;
       this.mobileEnabledTouched = false;
       this.positionIdsTouched = false;
@@ -1383,14 +1406,16 @@ export default {
           ? this.formInline.position_ids.map((x) => Number(x)).filter((n) => n > 0)
           : [];
       }
-      payload.scope_mode = ['personal', 'store', 'org'].includes(this.formInline.scope_mode)
+      payload.scope_mode = ['personal', 'store', 'store_selected', 'org'].includes(this.formInline.scope_mode)
         ? this.formInline.scope_mode
         : 'personal';
       payload.org_ids = payload.scope_mode === 'org'
         ? (this.formInline.org_ids || []).map(Number).filter((n) => n > 0)
         : [];
-      // 门店范围由服务端按任职自动计算，前端不再提交人工 store_ids（防扩权）
-      payload.store_ids = [];
+      // 自动门店不接受人工 ID；仅精确授权模式提交所选门店，由服务端逐个核验。
+      payload.store_ids = payload.scope_mode === 'store_selected'
+        ? (this.formInline.store_ids || []).map(Number).filter((id) => id > 0)
+        : [];
       payload.cashier_salesperson_enabled = Number(this.formInline.cashier_salesperson_enabled) === 1 ? 1 : 0;
       payload.cashier_craftsman_enabled = Number(this.formInline.cashier_craftsman_enabled) === 1 ? 1 : 0;
       payload.craftsman_performance_type = ['commission', 'labor', 'commission_labor'].includes(String(this.formInline.craftsman_performance_type || ''))
@@ -1413,9 +1438,10 @@ export default {
         delete payload.employment_type_code;
         delete payload.employment_type_version;
       }
-      // 新建空值无需写入；编辑仅在读到权威版本后提交，允许显式清空已填学历。
-      if (Number(this.editId) > 0 ? this.educationLoaded : !!String(this.formInline.education || '').trim()) {
-        payload.education = String(this.formInline.education || '').trim();
+      // 权限等无关编辑不得触发学历乐观锁；仅在权威版本已加载且值确实变化时提交。
+      const educationValue = String(this.formInline.education || '').trim();
+      if (this.educationLoaded && educationValue !== this.originalEducation) {
+        payload.education = educationValue;
         payload.education_version = Number(this.formInline.education_version || 0);
       } else {
         delete payload.education;
@@ -1456,6 +1482,12 @@ export default {
         && (!(Array.isArray(this.formInline.org_ids) && this.formInline.org_ids.length))) {
         this.activeTab = 'scope';
         this.$Message.required('请选择可看组织');
+        return;
+      }
+      if (this.formInline.scope_mode === 'store_selected'
+        && (!(Array.isArray(this.formInline.store_ids) && this.formInline.store_ids.length))) {
+        this.activeTab = 'scope';
+        this.$Message.required('请选择可看门店');
         return;
       }
       if (!String(this.formInline.account || '').trim() && String(this.formInline.pwd || '').trim()) {

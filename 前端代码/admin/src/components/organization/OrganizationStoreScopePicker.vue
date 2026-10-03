@@ -1,22 +1,22 @@
 <template>
   <div
     class="organization-store-scope-picker"
-    :class="{ 'organization-store-scope-picker--org-multiple': isOrganizationMultiple }"
+    :class="{ 'organization-store-scope-picker--org-multiple': isOrganizationMultiple || isStoreMultiple }"
   >
     <Button class="organization-store-scope-picker__trigger" :loading="loading" @click="togglePanel">
       <Icon type="ios-git-network-outline" />
       <span v-if="loading">读取权限范围</span>
-      <span v-else-if="isOrganizationMultiple && selectedOrganizationLabels.length" class="organization-store-scope-picker__selected-organizations">
-        <span v-for="organization in selectedOrganizationLabels" :key="organization.id" class="organization-store-scope-picker__selected-organization">{{ organization.name }}</span>
+      <span v-else-if="selectedScopeLabels.length" class="organization-store-scope-picker__selected-organizations">
+        <span v-for="item in selectedScopeLabels" :key="item.id" class="organization-store-scope-picker__selected-organization">{{ item.name }}</span>
       </span>
       <span v-else>{{ displayLabel }}</span>
       <Icon type="ios-arrow-down" />
     </Button>
     <Button
-      v-if="isOrganizationMultiple"
+      v-if="isOrganizationMultiple || isStoreMultiple"
       class="organization-store-scope-picker__clear"
       type="text"
-      :disabled="!selectedOrganizationIds.length"
+      :disabled="!(isStoreMultiple ? selectedStoreIds.length : selectedOrganizationIds.length)"
       @click.stop="clearSelection"
     >清空</Button>
 
@@ -63,7 +63,7 @@
               v-for="store in selectedStores"
               :key="store.id"
               type="button"
-              :class="{ 'is-active': selectedStoreIds.length === 1 && selectedStoreIds[0] === store.id }"
+              :class="{ 'is-active': selectedStoreIds.includes(store.id) }"
               @click="selectStore(store)"
             >{{ store.name }}</button>
           </div>
@@ -72,7 +72,8 @@
       </div>
       <footer>
         <button type="button" @click="chooseAll">{{ clearLabel }}</button>
-        <span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span>
+        <span v-if="isStoreMultiple">组织仅用于查找；只授权勾选的门店，不自动包含其他下级门店。</span>
+        <span v-else>选择组织查询其全部下级门店；选择门店仅查询该门店。</span>
       </footer>
     </section>
   </div>
@@ -98,7 +99,8 @@ export default {
     clearLabel: { type: String, default: '当前权限范围' },
     /**
      * org_store：组织或门店均可选；org_only：仅可选组织；
-     * store_only：组织仅用于展开门店；org_multiple：仅可多选组织。
+     * store_only：组织仅用于展开门店；org_multiple：仅可多选组织；
+     * store_multiple：组织仅用于查找，保存精确多门店集合。
      */
     selectionMode: { type: String, default: 'org_store' },
   },
@@ -121,11 +123,14 @@ export default {
     isStoreOnly() { return this.selectionMode === 'store_only'; },
     isOrganizationOnly() { return this.selectionMode === 'org_only'; },
     isOrganizationMultiple() { return this.selectionMode === 'org_multiple'; },
-    selectedOrganizationLabels() {
-      if (!this.isOrganizationMultiple) return [];
-      return this.selectedOrganizationIds.map((id) => ({
+    isStoreMultiple() { return this.selectionMode === 'store_multiple'; },
+    selectedScopeLabels() {
+      const ids = this.isStoreMultiple ? this.selectedStoreIds : (this.isOrganizationMultiple ? this.selectedOrganizationIds : []);
+      return ids.map((id) => ({
         id,
-        name: this.findOrganizationName(id) || `组织 #${id}`,
+        name: this.isStoreMultiple
+          ? (this.findStoreName(id) || `门店 #${id}`)
+          : (this.findOrganizationName(id) || `组织 #${id}`),
       }));
     },
     visibleNodes() {
@@ -145,7 +150,7 @@ export default {
             expanded,
           };
           // 仅组织选择场景中，门店仍在右侧作为该组织的范围说明展示。
-          if (!((this.isOrganizationMultiple || this.isOrganizationOnly) && option.storeId > 0)) result.push(option);
+          if (!((this.isOrganizationMultiple || this.isOrganizationOnly || this.isStoreMultiple) && option.storeId > 0)) result.push(option);
           if (children.length && expanded) walk(children, depth + 1);
         });
       };
@@ -163,6 +168,8 @@ export default {
           this.syncOrganizationMultipleLabel();
         } else if (this.isStoreOnly) {
           this.syncStoreOnlyLabel();
+        } else if (this.isStoreMultiple) {
+          this.syncStoreMultipleLabel();
         }
       },
     },
@@ -172,6 +179,7 @@ export default {
         const label = String(value || '').trim();
         if (label) this.displayLabel = label;
         else if (this.isStoreOnly) this.syncStoreOnlyLabel();
+        else if (this.isStoreMultiple) this.syncStoreMultipleLabel();
         else if (!this.selectedStoreIds.length && !this.selectedOrganizationKey) this.displayLabel = this.emptyLabel;
       },
     },
@@ -249,6 +257,7 @@ export default {
         this.syncOrganizationMultipleLabel();
         this.syncOrganizationOnlyLabel();
         this.syncStoreOnlyLabel();
+        this.syncStoreMultipleLabel();
       } catch (error) {
         this.tree = [];
         this.$Message.error((error && error.msg) || (error && error.message) || '权限范围读取失败');
@@ -291,6 +300,7 @@ export default {
         return this.selectedOrganizationKey === option.key ||
           Number(option.node && option.node.id) === Number(this.selectedOrganizationId || 0);
       }
+      if (this.isStoreMultiple && option.storeId > 0) return this.selectedStoreIds.includes(option.storeId);
       return this.selectedOrganizationKey === option.key;
     },
     syncOrganizationMultipleLabel() {
@@ -355,6 +365,13 @@ export default {
       }
       this.displayLabel = this.findStoreName(storeId) || `门店 #${storeId}`;
     },
+    /** 精确门店模式的回显只依据已选门店，不把当前展开的组织误认为授权。 */
+    syncStoreMultipleLabel() {
+      if (!this.isStoreMultiple) return;
+      this.displayLabel = this.selectedStoreIds.length
+        ? `已选 ${this.selectedStoreIds.length} 家门店`
+        : this.emptyLabel;
+    },
     selectNode(option) {
       if (option.storeId > 0) {
         if (this.isOrganizationMultiple || this.isOrganizationOnly) return;
@@ -371,7 +388,7 @@ export default {
       this.selectedOrganizationKey = option.key;
       this.selectedOrganizationName = option.name;
       this.selectedStores = this.nodeStores(option.node);
-      if (this.isStoreOnly) return;
+      if (this.isStoreOnly || this.isStoreMultiple) return;
       this.displayLabel = option.name;
       if (this.isOrganizationOnly) {
         this.emitChange([], option.name, {
@@ -407,6 +424,15 @@ export default {
     selectStore(store) {
       const storeId = Number(store && store.id);
       if (!storeId) return;
+      if (this.isStoreMultiple) {
+        // 点击当前组织下的门店只切换该门店；不隐式添加整个组织或关闭面板。
+        const ids = this.selectedStoreIds.includes(storeId)
+          ? this.selectedStoreIds.filter((id) => id !== storeId)
+          : [...this.selectedStoreIds, storeId];
+        this.emitChange(ids, '', { nodeType: 'store_multiple', storeIds: ids });
+        this.syncStoreMultipleLabel();
+        return;
+      }
       this.displayLabel = store.name || `门店${storeId}`;
       this.setPanelOpen(false);
       this.emitChange([storeId], this.displayLabel, {

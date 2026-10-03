@@ -495,8 +495,8 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             if ($storeId <= 0) {
                 throw new AdminException('请选择门店');
             }
-            if ($scopeMode === EmployeeDataScopeServices::MODE_ORG) {
-                throw new AdminException('门店不能设置组织数据范围');
+            if (in_array($scopeMode, [EmployeeDataScopeServices::MODE_ORG, EmployeeDataScopeServices::MODE_STORE_SELECTED], true)) {
+                throw new AdminException('门店不能设置跨店数据范围');
             }
             if (!in_array($scopeMode, [
                 EmployeeDataScopeServices::MODE_PERSONAL,
@@ -542,6 +542,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 EmployeeDataScopeServices::MODE_PERSONAL,
                 EmployeeDataScopeServices::MODE_ORG,
                 EmployeeDataScopeServices::MODE_STORE,
+                EmployeeDataScopeServices::MODE_STORE_SELECTED,
             ], true)) {
                 throw new AdminException('总部数据范围类型无效');
             }

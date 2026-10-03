@@ -2,6 +2,7 @@
 
 namespace app\services\mobile\merchant;
 
+use app\services\organization\EmployeeDataScopeServices;
 use app\services\organization\JobPositionPolicyServices;
 use app\services\organization\OrganizationOpsStatusServices;
 use app\services\organization\StaffJobPositionServices;
@@ -266,26 +267,9 @@ final class MobileMerchantRequestContextResolver
     /** @return array{mode:string,stores:int[]} */
     private function employeeDataScope(int $employeeId, int $storeId): array
     {
-        $rows = Db::name('employee_data_scope')->where('employee_id', $employeeId)
-            ->where('status', 1)->where('is_del', 0)->field('scope_mode,org_ids,source_store_id')->select()->toArray();
-        $stores = [];
-        foreach ($rows as $row) {
-            $mode = (string)($row['scope_mode'] ?? 'personal');
-            if ($mode === 'store_self') {
-                $stores[] = (int)($row['source_store_id'] ?? 0);
-            } elseif ($mode === 'store') {
-                $stores = array_merge($stores, Db::name('system_store_staff')->where('employee_id', $employeeId)
-                    ->where('status', 1)->where('is_del', 0)->column('store_id'));
-            } elseif ($mode === 'org') {
-                $orgIds = $this->positiveIds(json_decode((string)($row['org_ids'] ?? '[]'), true) ?: []);
-                if ($orgIds) $stores = array_merge($stores, $this->organizationStoreIds($orgIds));
-            }
-        }
-        $stores = $this->positiveIds($stores);
-        $isolated = $this->positiveIds(Db::name('employee_store_isolation')->where('employee_id', $employeeId)
-            ->where('status', 1)->where('is_del', 0)->column('store_id'));
-        $stores = array_values(array_diff($stores, $isolated));
-        if ($stores === []) {
+        // 工作台上下文复用数据权限权威解析，精确门店不会混入其他来源的授权。
+        $stores = $this->explicitDataScopeStoreIds($employeeId);
+        if ($stores === [] && !$this->hasSelectedStoreScope($employeeId)) {
             return ['mode' => 'PERSONAL_SELF', 'stores' => [$storeId]];
         }
         if (!in_array($storeId, $stores, true)) {
@@ -322,24 +306,17 @@ final class MobileMerchantRequestContextResolver
     /** @return int[] */
     private function explicitDataScopeStoreIds(int $employeeId): array
     {
-        $rows = Db::name('employee_data_scope')->where('employee_id', $employeeId)->where('status', 1)->where('is_del', 0)
-            ->field('scope_mode,org_ids,source_store_id')->select()->toArray();
-        $storeIds = [];
-        foreach ($rows as $row) {
-            $mode = (string)($row['scope_mode'] ?? 'personal');
-            if ($mode === 'store_self') $storeIds[] = (int)($row['source_store_id'] ?? 0);
-            if ($mode === 'store') {
-                $storeIds = array_merge($storeIds, Db::name('system_store_staff')->where('employee_id', $employeeId)
-                    ->where('status', 1)->where('is_del', 0)->column('store_id'));
-            }
-            if ($mode === 'org') {
-                $orgIds = $this->positiveIds(json_decode((string)($row['org_ids'] ?? '[]'), true) ?: []);
-                if ($orgIds) $storeIds = array_merge($storeIds, $this->organizationStoreIds($orgIds));
-            }
-        }
-        $isolated = $this->positiveIds(Db::name('employee_store_isolation')->where('employee_id', $employeeId)
-            ->where('status', 1)->where('is_del', 0)->column('store_id'));
-        return array_values(array_diff($this->positiveIds($storeIds), $isolated));
+        /** @var EmployeeDataScopeServices $scope */
+        $scope = app()->make(EmployeeDataScopeServices::class);
+        return $this->positiveIds((array)$scope->resolveEffectiveStoreIds($employeeId, 0));
+    }
+
+    private function hasSelectedStoreScope(int $employeeId): bool
+    {
+        // 只以最新总部授权判定；指定门店变空须拒绝，旧授权行不能阻碍后续改回个人。
+        /** @var EmployeeDataScopeServices $scope */
+        $scope = app()->make(EmployeeDataScopeServices::class);
+        return $scope->resolvePrimaryHqScopeMode($employeeId) === EmployeeDataScopeServices::MODE_STORE_SELECTED;
     }
 
     private function employeeName(int $employeeId): string
@@ -373,13 +350,5 @@ final class MobileMerchantRequestContextResolver
         foreach ($values as $value) { $id = (int)$value; if ($id > 0) $ids[$id] = $id; }
         ksort($ids, SORT_NUMERIC);
         return array_values($ids);
-    }
-
-    /** @return int[] */
-    private function organizationStoreIds(array $organizationIds): array
-    {
-        /** @var MobileMerchantOrganizationStoreScopeServices $scope */
-        $scope = app()->make(MobileMerchantOrganizationStoreScopeServices::class);
-        return $scope->resolve($organizationIds);
     }
 }

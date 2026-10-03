@@ -114,8 +114,9 @@ $assert('MA-MANAGER-CONTEXT-02',
 $assert('MA-MANAGER-CONTEXT-03',
     str_contains($organizationStoreScope, 'OrganizationScopeService::class')
     && str_contains($organizationStoreScope, 'getOrgStoreIds($organizationId, true)')
-    && str_contains($sessions, 'MobileMerchantOrganizationStoreScopeServices::class')
-    && str_contains($merchantResolver, 'MobileMerchantOrganizationStoreScopeServices::class')
+    // 会话和上下文如今统一复用数据权限权威服务，不能再各自扩组织门店。
+    && str_contains($sessions, 'EmployeeDataScopeServices::class')
+    && str_contains($merchantResolver, 'EmployeeDataScopeServices::class')
     && !str_contains($sessions, "whereIn('org_id', \$orgIds)->column('store_id')")
     && !str_contains($merchantResolver, "whereIn('org_id', \$orgIds)->column('store_id')")
 );
