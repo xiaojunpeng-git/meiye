@@ -118,6 +118,15 @@ final class CashierV3DebtRepaymentServices
         $authority = $locked['authority'];
         $items = $locked['items'];
         $personnel = $locked['personnel'];
+        // 补交必须继承原销售单发生时的来源；浏览器快照仅用于发现过期页面或篡改，
+        // 不能决定补交主记录、收款事实或业绩事实的来源。历史原单无来源时
+        // 留空且允许还款，不回填本地数据，也不能回退为当前工具栏来源。
+        $businessSource = self::sourceFromOriginalSalesOrder((array)$locked['order']);
+        $originalSourceColumns = self::sourceSnapshotColumns($businessSource);
+        if ($sourceColumns !== $originalSourceColumns) {
+            throw self::failure('debt_repayment_original_source_mismatch');
+        }
+        $sourceColumns = $originalSourceColumns;
         $amount = self::inputMoneyCents($checkoutSnapshot['repaymentAmount'] ?? null, 'repayment_amount');
         // 业务行、页面应收与收款行必须指向同一笔金额。浏览器快照
         // 只表达意图；成员、来源欠款和可还余额仍在下方事务锁内核对。
@@ -174,7 +183,7 @@ final class CashierV3DebtRepaymentServices
             'operator_id' => $operator->operatorId(), 'operator_name_snapshot' => $dimensions['operatorName'],
             'debt_id' => $debtId, 'debt_no' => (string)$authority['debt_no'],
             'sales_order_id' => (string)$authority['sales_order_id'], 'sales_order_no_snapshot' => (string)$authority['sales_order_no_snapshot'],
-            // The repayment has its own cashier attribution; the original sale's source is not inherited.
+            // 补交主记录与同事务的收款事实共用原销售单冻结来源，不读取当前工具栏来源。
             'business_source_primary_id' => $sourceColumns['business_source_primary_id'],
             'business_source_primary_name_snapshot' => $sourceColumns['business_source_primary_name_snapshot'],
             'business_source_secondary_id' => $sourceColumns['business_source_secondary_id'],
@@ -633,6 +642,28 @@ final class CashierV3DebtRepaymentServices
             'business_source_secondary_id' => (int)($source['secondarySourceId'] ?? 0),
             'business_source_secondary_name_snapshot' => (string)($source['secondarySourceNameSnapshot'] ?? ''),
             'business_source_label_snapshot' => (string)($source['displayNameSnapshot'] ?? ''),
+        ];
+    }
+
+    /** 原单历史来源是补交的唯一来源权威；缺失则留空，已停用来源仍按快照保留。 */
+    private static function sourceFromOriginalSalesOrder(array $order): array
+    {
+        $primaryId = (int)($order['business_source_primary_id'] ?? 0);
+        $primaryName = trim((string)($order['business_source_primary_name_snapshot'] ?? ''));
+        $secondaryId = (int)($order['business_source_secondary_id'] ?? 0);
+        $secondaryName = trim((string)($order['business_source_secondary_name_snapshot'] ?? ''));
+        $label = trim((string)($order['business_source_label_snapshot'] ?? ''));
+        if ($primaryId <= 0 || $primaryName === '' || $label === ''
+            || ($secondaryId > 0 && $secondaryName === '')) {
+            // 历史导入欠款可以没有可核实的原单来源，不能因此阻断真实还款。
+            return [];
+        }
+        return [
+            'primarySourceId' => $primaryId,
+            'primarySourceNameSnapshot' => $primaryName,
+            'secondarySourceId' => $secondaryId,
+            'secondarySourceNameSnapshot' => $secondaryName,
+            'displayNameSnapshot' => $label,
         ];
     }
 

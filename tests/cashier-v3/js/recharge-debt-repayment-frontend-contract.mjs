@@ -21,7 +21,8 @@ if (!overlay.includes('member-debt-overlay__payment-method-card')
 if (overlay.includes('<select v-model="line.paymentMethod">')) {
   throw new Error('充值欠款补交不得继续使用旧的行内收款方式下拉框')
 }
-if (!shell.includes('localRepayment: payload') || !workbench.includes("submit-recharge-debt-repayment")) {
+// 交接会冻结来源并展开 payload；旧的精确字符串已不能代表实际快照契约。
+if (!shell.includes('localRepayment: { ...payload, businessSource: { ...source } }') || !workbench.includes("submit-recharge-debt-repayment")) {
   throw new Error('充值欠款补交必须以本地快照进入确认页并使用专用提交命令')
 }
 for (const source of [overlay, recharge]) {

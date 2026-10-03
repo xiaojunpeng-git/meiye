@@ -81,6 +81,23 @@ final class CashierV3MemberDebtProjectionServices
                     : ($isV3Sale
                         ? (string)($row['sales_order_no_snapshot'] ?? $row['order_sn'] ?? '')
                         : (string)($row['order_sn'] ?? ''));
+                // 欠款只展示原销售或充值单冻结来源；该值随欠款交接到结账页，
+                // 最终提交仍须由服务端重新锁定原单核对，不能相信此只读投影。
+                $sourcePrefix = $isRecharge ? 'recharge_source_' : ($isV3Sale ? 'original_source_' : '');
+                $originalSource = $sourcePrefix !== '' ? [
+                    'primarySourceId' => (int)($row[$sourcePrefix . 'primary_id'] ?? 0),
+                    'primarySourceNameSnapshot' => (string)($row[$sourcePrefix . 'primary_name'] ?? ''),
+                    'secondarySourceId' => (int)($row[$sourcePrefix . 'secondary_id'] ?? 0),
+                    'secondarySourceNameSnapshot' => (string)($row[$sourcePrefix . 'secondary_name'] ?? ''),
+                    'displayNameSnapshot' => (string)($row[$sourcePrefix . 'label'] ?? ''),
+                ] : null;
+                // 历史原单若只有残缺来源，不将半截信息交给收银端显示或提交。
+                if ($originalSource !== null && ($originalSource['primarySourceId'] <= 0
+                    || trim($originalSource['primarySourceNameSnapshot']) === ''
+                    || trim($originalSource['displayNameSnapshot']) === ''
+                    || ($originalSource['secondarySourceId'] > 0 && trim($originalSource['secondarySourceNameSnapshot']) === ''))) {
+                    $originalSource = null;
+                }
                 $records[] = [
                     'id' => (string)$debtId,
                     'debtId' => $debtId,
@@ -88,6 +105,7 @@ final class CashierV3MemberDebtProjectionServices
                     'sourceType' => $isRecharge ? '充值欠款' : '销售订单欠款',
                     'sourceLabel' => $isRecharge ? '充值欠款' : '销售订单欠款',
                     'sourceOrderNo' => $orderNo,
+                    'originalBusinessSource' => $originalSource,
                     'summary' => $isRecharge ? '储值充值' : $this->summary($itemsByDebt[$debtId] ?? []),
                     'originalDebtAmount' => $original,
                     'repaidAmount' => $repaid,
@@ -138,6 +156,7 @@ final class CashierV3MemberDebtProjectionServices
     {
         return $this->rows(Db::name('store_debt')->alias('d')
             ->leftJoin('cashier_v3_recharge_debt_authority r', 'r.debt_id=d.id')
+            ->leftJoin('user_recharge rr', 'rr.id=r.recharge_id')
             ->leftJoin('cashier_v3_debt_authority a', 'a.debt_id=d.id')
             ->leftJoin('cashier_v3_sales_order s', 's.id=a.sales_order_record_id AND s.order_id=a.sales_order_id')
             ->leftJoin('store_order o', 'o.id=d.order_id')
@@ -145,8 +164,13 @@ final class CashierV3MemberDebtProjectionServices
             ->where('d.status', 0)
             ->field('d.id,d.store_id AS debt_store_id,d.debt_no,d.order_id,d.order_sn,d.total_debt,d.repaid_debt,d.status,d.add_time,d.update_time,d.remark,'
                 . 'r.member_id AS recharge_member_id,r.recharge_id,r.recharge_order_no_snapshot,'
+                . 'rr.business_source_primary_id AS recharge_source_primary_id,rr.business_source_primary_name_snapshot AS recharge_source_primary_name,'
+                . 'rr.business_source_secondary_id AS recharge_source_secondary_id,rr.business_source_secondary_name_snapshot AS recharge_source_secondary_name,rr.business_source_label_snapshot AS recharge_source_label,'
                 . 'a.store_id AS authority_store_id,a.member_id AS authority_member_id,a.sales_order_record_id,a.sales_order_id,a.sales_order_no_snapshot,'
-                . 's.member_id AS v3_order_member_id,o.uid AS order_member_id')
+                . 's.member_id AS v3_order_member_id,s.business_source_primary_id AS original_source_primary_id,'
+                . 's.business_source_primary_name_snapshot AS original_source_primary_name,s.business_source_secondary_id AS original_source_secondary_id,'
+                . 's.business_source_secondary_name_snapshot AS original_source_secondary_name,s.business_source_label_snapshot AS original_source_label,'
+                . 'o.uid AS order_member_id')
             ->order('d.add_time desc,d.id desc')
             ->select());
     }

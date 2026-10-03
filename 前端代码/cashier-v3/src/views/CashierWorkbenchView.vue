@@ -1659,7 +1659,7 @@ async function openCheckoutBusinessSourceSelector(kind) {
   if (kind === 'recharge' && !current) {
     return { result: { status: 'failed', code: 'BUSINESS_SOURCE_NOT_SELECTABLE', message: '本次补交继承原订单来源，不能修改。' } }
   }
-  if (!isLocalSaleEdit && current.sourceSelectable === false) {
+  if (current.sourceSelectable === false) {
     return { result: { status: 'failed', code: 'BUSINESS_SOURCE_NOT_SELECTABLE', message: '本次补交继承原订单来源，不能修改。' } }
   }
   const localSource = localCheckoutBusinessSource.value
@@ -5762,6 +5762,13 @@ async function enqueueCheckoutAction(event = {}) {
       const line = lines.find((item) => String(item.id) === String(payload.paymentLineId || ''))
       if (line) Object.assign(line, { amount: Number(payload.amount || 0), externalTransactionNo: String(payload.externalTransactionNo || ''), remark: String(payload.remark || '') })
     } else if (action === 'update-checkout-business-source') {
+      // 欠款补交来源已锁定为原单快照，不能通过本地草稿更新动作改写；
+      // 服务端最终还会在事务内比对原单，防止绕过页面直接提交。
+      if (preview.businessType === 'debt_repayment') {
+        const result = { result: { status: 'failed', code: 'BUSINESS_SOURCE_NOT_SELECTABLE', message: '本次补交继承原订单来源，不能修改。' } }
+        event?.resolve?.(result)
+        return result
+      }
       // 来源是结账预览的一部分。这里只更新浏览器内快照，最终确认时由
       // finalizeLocalCheckoutPreview 随完整 checkoutSnapshot 一次性发送。
       payment.primarySourceId = Number(payload.primarySourceId || 0)
@@ -5774,9 +5781,6 @@ async function enqueueCheckoutAction(event = {}) {
         primarySourceId: payment.primarySourceId,
         secondarySourceId: payment.secondarySourceId,
         rewardAmountCents: payment.rewardAmountCents
-      }
-      if (preview.businessType === 'debt_repayment') {
-        preview.source = currentHangCheckoutBusinessSource()
       }
       publishToolbarCheckoutContext()
     } else if (action === 'open-balance-payment') {
@@ -6460,10 +6464,9 @@ async function openPreparedCheckout(event = {}) {
       occurredAt: Math.floor(Date.now() / 1000), businessDate: date,
       repaymentAmount: amount,
       salespersonAllocations: clonePlain(intent.salespersonAllocations || []),
-      // 补交只读取本次交接冻结的工具栏来源，避免跨路由时工作台临时值丢失。
-      source: Number(intent.businessSource?.primarySourceId || 0) > 0
-        ? clonePlain(intent.businessSource)
-        : currentHangCheckoutBusinessSource(),
+      // 欠款补交只显示原单冻结来源；原单来源缺失时保留空值，
+      // 不可回退工具栏来源，否则页面会伪装成可修改的另一种归因。
+      source: clonePlain(intent.businessSource || {}),
       sourceDocument: { type: 'debt_repayment', id: String(debtId), no: String(intent.record?.debtNo || '') },
       lines: [line], orderLines: [line],
       summary: { originalAmount: amount, discountAmount: 0, receivableAmount: amount },
@@ -6472,7 +6475,7 @@ async function openPreparedCheckout(event = {}) {
       composition: { code: 'sale_only', lineRoles: ['sale'], hasSale: true,
         hasEntitlement: false, primaryAction: 'collect_payment', primaryActionLabel: '确认还款' },
       payment: { methods: localCheckoutPaymentMethods(), selectedLines: [] },
-      sourceEnabled: true, sourceSelectable: true
+      sourceEnabled: true, sourceSelectable: false
     }
     checkoutLocalOutcome.value = {}
     localCheckoutPaymentOperations.value = []
@@ -6515,14 +6518,11 @@ async function openPreparedCheckout(event = {}) {
           status: String(line?.status || 'editing')
         }))
       : []
-    // 补交归因属于本次收银，不沿用原欠款或原订单的来源。
-    const cashierSource = currentHangCheckoutBusinessSource()
+    // 恢复欠款补交时保留原单来源，不能让随后调整的工具栏来源覆盖它。
     localCheckoutPreview.value = {
       ...snapshot,
       lines: [...clonePlain(orderLines), ...paymentLines],
-      source: Number(cashierSource.primarySourceId || 0) > 0
-        ? cashierSource
-        : isRecord(snapshot.source)
+      source: isRecord(snapshot.source)
         ? clonePlain(snapshot.source)
         : {
             primarySourceId: Number(snapshot.primarySourceId || 0),

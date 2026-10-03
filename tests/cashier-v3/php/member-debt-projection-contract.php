@@ -38,7 +38,8 @@ if (strpos($summarySource, 'CashierV3MemberDebtProjectionServices') === false
     || strpos($frontendSource, 'rechargeSession.value = null') === false
     || strpos($frontendSource, 'function applyAuthoritativeDebtSnapshot(snapshot)') === false
     || strpos($frontendSource, 'applyAuthoritativeDebtSnapshot(snapshot)') === false
-    || strpos($frontendSource, "selectorEntry: 'cashier',\n      silent: true") === false) {
+    || strpos($frontendSource, "selectorEntry: 'cashier',") === false
+    || strpos($frontendSource, 'preserveRootState: true,') === false) {
     fwrite(STDERR, "member debt projection wiring missing\n");
     exit(1);
 }

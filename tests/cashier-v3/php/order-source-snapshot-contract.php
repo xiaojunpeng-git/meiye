@@ -25,12 +25,11 @@ $required = [
     [$contract, "['source', '客户来源']", 'unified query field'],
     [$view, "field('source', '客户来源')", 'visible field'],
     [$view, "fields.splice(orderNoIndex >= 0 ? orderNoIndex + 1 : 0, 0, available.get('source'))", 'saved column settings'],
-    [$workbench, 'preview.source = currentHangCheckoutBusinessSource()', 'source edit snapshot'],
-    [$workbench, 'const cashierSource = currentHangCheckoutBusinessSource()', 'repayment toolbar source'],
-    [$shell, 'localRepayment: { ...payload, businessSource: { ...source } }', 'repayment handoff source freeze'],
-    [$shell, 'debtReminderBusinessSource.value.source', 'debt reminder source fallback'],
-    [$workbench, 'source: Number(intent.businessSource?.primarySourceId || 0) > 0', 'local repayment source freeze'],
-    [$workbench, "if (preview.businessType === 'debt_repayment')", 'ordinary checkout source isolation'],
+    [$workbench, 'localCheckoutBusinessSource.value = {', 'ordinary source edit snapshot'],
+    [$workbench, 'source: isRecord(snapshot.source)', 'repayment original source preservation'],
+    [$shell, 'const source = payload.record?.originalBusinessSource || {}', 'repayment handoff from original order'],
+    [$workbench, 'source: clonePlain(intent.businessSource || {})', 'local repayment source freeze'],
+    [$workbench, "if (preview.businessType === 'debt_repayment')", 'repayment source isolation'],
     [$recharge, "'businessSourcePrimaryId' => (int)\$input['businessSource']['primarySourceId']", 'recharge fact source'],
 ];
 foreach ($required as [$source, $needle, $label]) {
