@@ -38,6 +38,15 @@ try {
      ['status'=>'FAILED','reason'=>'AI_INTENT_PARTIAL'])==='neutral',
      'a customer-resolvable partial question does not count as a provider outage');
  $model=function($view,$candidates,$configuration,$checkpoint,$repairPredicate=null,$phase='binding',$understanding=null)use(&$models,&$unknownBindingFailure,&$unknownUnderstandingFailures){$models++;$checkpoint();
+   if ($phase==='recommendations') {
+       // Fixture chooses three actually compiled alternatives in a deliberately
+       // different order; selection execution must not invoke this model again.
+       $ids=[];
+       foreach (['消耗业绩','现金业绩','退款业绩'] as $label) foreach ($candidates as $candidate) {
+           if (strpos($candidate['label'],$label)!==false && $candidate['query_shape']==='summary') {$ids[]=$candidate['id'];break;}
+       }
+       return ['selections'=>count($ids)===3?$ids:array_slice(array_column($candidates,'id'),0,3),'usage'=>['input_tokens'=>20,'output_tokens'=>10]];
+   }
    if ($phase==='understanding' && $view['question']==='2026年9月门店那个金额') return ['understanding'=>array_merge([
        'goal'=>'查询九月门店金额但指标不明确','status'=>'needs_clarification',
        'clarification_suggestions'=>['按消耗业绩查询','按现金业绩查询','按退款业绩查询'],
@@ -370,12 +379,14 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
  $waiting=$gateway->handle('execute',$context,$binding($ask)+$askInput,$ask['run_id']);
  verifyGateway($waiting['status']==='WAITING_CLARIFICATION' && count($waiting['clarification']['fields'])===1,'v2 asks metric only');
  $recommended=array_values(array_filter($waiting['clarification']['fields'][0]['options'],static function(array $option):bool{return ($option['recommended']??false)===true;}));
- verifyGateway(array_column($recommended,'value')===['consume_amount','cash_performance'],
+ verifyGateway(array_column($recommended,'value')===['suggestion_1','suggestion_2','suggestion_3'],
      'the server sends only registered, model-ranked suggestions to both clients');
  // The trusted current period is already available, so the only material
  // ambiguity is the metric. Resolving it must complete without a redundant
  // second date question.
- $answered=$clarify($ask,$waiting,['metric_code'=>'consume_amount'],'metric-answer');
+ $modelsBeforeSelection=$models;
+ $answered=$clarify($ask,$waiting,['semantic_reply'=>'suggestion_1'],'metric-answer');
+ verifyGateway($models===$modelsBeforeSelection,'a verified recommendation executes without another model call');
  verifyGateway($answered['status']==='COMPLETED','metric clarification resumes complete status='.($answered['status']??'').' reason='.($answered['reason']??''));
  verifyGateway((int)$db->query("SELECT clarification_count FROM mohe_ai_run WHERE run_id=".$db->quote($ask['run_id']))->fetchColumn()===1,'one material semantic question budget');
  [$cancel,$cancelInput]=$make('request3','今天消耗业绩多少？');$before=$models;
@@ -448,12 +459,12 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
      'run_delivery_token'=>$semanticRun['run_delivery_token']];
  $beforeSemanticModels=$models;$beforeSemanticQueries=$queries;
  $semanticWaiting=$gateway->handle('execute',$semanticContext,$semanticBinding+$semanticInput,$semanticRun['run_id']);
- verifyGateway($semanticWaiting['status']==='WAITING_CLARIFICATION' && $models===$beforeSemanticModels+1
-     && $queries===$beforeSemanticQueries,'partial meaning waits after one understanding call without querying facts');
+ verifyGateway($semanticWaiting['status']==='WAITING_CLARIFICATION' && $models===$beforeSemanticModels+2
+     && $queries===$beforeSemanticQueries,'partial meaning batches recommendation selection without querying facts');
  $semanticStep=$semanticWaiting['clarification'];
  verifyGateway($semanticStep['fields'][0]['key']==='semantic_reply'
      && count($semanticStep['fields'][0]['options'])===3,'three source-validated natural-language recommendations');
- verifyGateway(!isset($semanticStep['_request_body'],$semanticStep['_semantic_reply_state']),
+ verifyGateway(!isset($semanticStep['_request_body'],$semanticStep['_semantic_reply_state'],$semanticStep['_semantic_recommendations']),
      'accepted meaning and private reference maps never enter the public card');
  $semanticSubmission=$semanticBinding+['schema_version'=>'mohe-clarification-v2','clarification_id'=>$semanticStep['id'],
      'step_revision'=>$semanticStep['step_revision'],'intent_revision'=>$semanticStep['intent_revision'],
@@ -474,13 +485,13 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
  ],'clarification_suggestions'=>['查看充值本金','查看余额扣款','查看会员剩余项目金额']];
  $recommendationCard=$recommendationMethod->invoke($gateway,$recommendationMeaning,
      ['outbound'=>['question'=>'这个月会员那个金额'],'reference_values'=>[]],['question'=>'这个月会员那个金额']);
- verifyGateway(count($recommendationCard['fields'][0]['options'])===3,
-     'missing subject and compound metric preserve three language suggestions without execution');
+ verifyGateway(count($recommendationCard['fields'][0]['options'])===1 && isset($recommendationCard['fields'][0]['options'][0]['action']),
+     'unverified historical language suggestions cannot promise executable recommendations');
  $recommendationMeaning['clarification_suggestions']=['查看本月的数据','改看上个月的数据','按天列出来'];
  $recommendationCard=$recommendationMethod->invoke($gateway,$recommendationMeaning,
      ['outbound'=>['question'=>'那个金额'],'reference_values'=>[]],['question'=>'那个金额']);
- verifyGateway(count($recommendationCard['fields'][0]['options'])===3 && $queries===$beforeReplayQueries,
-     'language choices may resolve period or presentation without a metric-keyword requirement or a query');
+ verifyGateway(count($recommendationCard['fields'][0]['options'])===1 && $queries===$beforeReplayQueries,
+     'historical text suggestions perform no query and leave free supplementation available');
  $newTopicInput=$semanticInput;$newTopicInput['client_request_id']='r59-partial-new-topic';
  $newTopicInput['context_ref']=$semanticAnswer['answer']['context_ref'];
  $newTopicRun=$gateway->handle('create',$semanticContext,$newTopicInput);
@@ -512,5 +523,43 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
  $correctionMeaning['topic_relation']='new_topic';
  $fresh=$mergeMethod->invoke($gateway,$correctionMeaning,$mergeBody,$correctionSafe);
  verifyGateway(count($fresh['requirements'])===1,'an explicit new topic inherits no old date or subject');
+ // Exercise each stored option independently through the real Gateway/Run
+ // state machine. A label is never re-submitted to model understanding.
+ foreach ([1,2,3] as $choiceNumber) {
+     $input=$semanticInput;$input['client_request_id']='r59-ready-choice-'.$choiceNumber;
+     $run=$gateway->handle('create',$semanticContext,$input);
+     $binding=['client_session_id'=>'r59-device','generation'=>$run['generation'],'run_delivery_token'=>$run['run_delivery_token']];
+     $waiting=$gateway->handle('execute',$semanticContext,$binding+$input,$run['run_id']);
+     $step=$waiting['clarification'];$beforeChoiceModels=$models;
+     $answer=$gateway->handle('clarify',$semanticContext,$binding+[
+         'schema_version'=>'mohe-clarification-v2','clarification_id'=>$step['id'],
+         'step_revision'=>$step['step_revision'],'intent_revision'=>$step['intent_revision'],
+         'client_submission_id'=>'r59-ready-submit-'.$choiceNumber,
+         'choices'=>['semantic_reply'=>'suggestion_'.$choiceNumber]],$run['run_id']);
+     verifyGateway($answer['status']==='COMPLETED' && $models===$beforeChoiceModels,
+         'stored recommendation '.$choiceNumber.' completes without another model call');
+     verifyGateway(strpos($answer['answer']['summary'],'2026-09-01')!==false
+         && strpos($answer['answer']['summary'],'2026-09-30')!==false,
+         'stored recommendation '.$choiceNumber.' retains the original complete period');
+ }
+ // The meaning model has already accepted every field. Exact registered
+ // supplementation can use the same preflight without another binding call.
+ $simpleMethod=new ReflectionMethod($gateway,'compileAcceptedSimpleSupplement');
+ $capabilityMethod=new ReflectionMethod($gateway,'capabilities');
+ $simpleCaps=$capabilityMethod->invoke($gateway,$semanticContext);
+ $simpleMeaning=['status'=>'understood','requirements'=>[['fields'=>['object_kind','operation','periods','metric_codes'],
+     'values'=>['object_kind'=>'member','operation'=>'breakdown','metric_terms'=>['现金业绩'],
+         'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-30']]]]]];
+ $simpleBody=$semanticInput;$simpleBody['_clarification_context']=['understanding'=>[]];
+ $beforeSimpleQueries=$queries;$beforeSimpleModels=$models;
+ $simplePlan=$simpleMethod->invoke($gateway,$simpleMeaning,$simpleBody,$simpleCaps,'2026-10-02',null);
+ verifyGateway(($simplePlan['plan']['query']['business_filters']??null)===['object_kind'=>'member']
+     && $simplePlan['plan']['query']['metric_codes']===['cash_performance']
+     && $simplePlan['plan']['query']['start_date']==='2026-09-01'
+     && $simplePlan['plan']['query']['end_date']==='2026-09-30'
+     && $queries===$beforeSimpleQueries && $models===$beforeSimpleModels,'accepted exact supplement preflights without model or data calls');
+ $simpleMeaning['requirements'][0]['values']['object_term']='private-ref';
+ verifyGateway($simpleMethod->invoke($gateway,$simpleMeaning,$simpleBody,$simpleCaps,'2026-10-02',null)===null,
+     'named/private selection never bypasses ordinary semantic binding');
  echo 'Gateway integration: '.$checks." checks PASS (SQLite + model/fact fixtures)\n";
 } finally { foreach(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($temp,FilesystemIterator::SKIP_DOTS),RecursiveIteratorIterator::CHILD_FIRST) as $file){if($file->isDir())rmdir($file->getPathname());else unlink($file->getPathname());}rmdir($temp); }

@@ -8,7 +8,7 @@ namespace app\services\ai\contract;
  */
 final class AiIntentUnderstandingContract
 {
-    public const VERSION = 'intent-understanding-v21';
+    public const VERSION = 'intent-understanding-v22';
     // The model sees only current protocol fields. Older stored member-detail
     // carriers remain valid input for context replay, but must not reappear
     // in newly generated understanding responses.
@@ -287,7 +287,7 @@ final class AiIntentUnderstandingContract
         // Grounding remains strict. Explain contiguous quoting on the first
         // pass so coordinated wording does not need an avoidable repair call.
         return 'Return one JSON object following '.self::VERSION.': '
-            . 'Optional additional top-level clarification_suggestions contains exactly three distinct short natural-language replies ONLY for a partly intelligible needs_clarification request. Recommend plausible ways to resolve its actual missing meaning using published business vocabulary; preserve already stated object, period and filters. These are suggestions, never requirements or executable codes. Omit suggestions for empty requirements and understood requests. '
+            . 'For a partly intelligible needs_clarification request preserve the clear conditions only. Omit clarification_suggestions; executable recommendations are proposed separately from server-verified capabilities. Do not infer operation=summary merely from a vague request about an amount situation. Preserve operation only when its answer form was actually fixed by the customer. '
             . 'When clarification_context is present, current is the customer reply to the paused question. Merge it with clarification_context.understanding and original evidence: retain unchanged conditions, explicitly corrected conditions take precedence, and an independent new topic discards the paused meaning. Emit the complete merged requirements, citing current for corrections and original for preserved fields. Do not copy a condition contradicted by the current reply. '
             . 'When prior_query or clarification_context exists, add top-level topic_relation="continuation|new_topic". Decide from the complete current meaning: a reference to a prior result or an omitted condition the customer intends to keep is continuation, including a move from a store to people in that store. An independent new question that does not refer to the preceding answer is new_topic, even if it omits a period or store. Changing an analytical object alone does not prove a new topic. Do not copy prior conditions into a new_topic. This relation grants no object identity or permission. Omit topic_relation only when both prior_query and clarification_context are absent. When prior_query.verified_result_set has a kind and count, a plural reference such as "这两家" may refer to that complete verified set even though prior_query.operation is breakdown; express that as object_detail target=set, and express a requested per-object measurement as operation=breakdown. The server alone resolves the identities. '
             . 'A named store restricting another analytical subject uses a separate requirement fields=["store_term"], values.store_term="exact named-store text or opaque reference", with current-message evidence. Keep the compared people/items in object_kind with object_relation=analysis. Never put the store identity into the analytical object_term or infer a store from a person name. Do not use store_term for a pronoun referring to a previous result; use the supported result reference instead. '
@@ -319,8 +319,8 @@ final class AiIntentUnderstandingContract
     public static function normalize($value, array $safeQuestion): array
     {
         if ($value instanceof \stdClass) $value = get_object_vars($value);
-        // Suggestions are language choices, never executable conditions. Keep
-        // them separate from requirements so clicking one still needs binding.
+        // Read historical language suggestions without treating them as plans.
+        // Current recommendation execution uses separately verified carriers.
         $suggestions=is_array($value)?($value['clarification_suggestions']??[]):[];
         if (is_array($value)) unset($value['clarification_suggestions']);
         $keys = is_array($value) ? array_keys($value) : [];

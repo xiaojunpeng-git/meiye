@@ -419,8 +419,16 @@ final class AiGatewayServices
                 // let the accepted meaning disappear before the final query.
                 $guidanceRequiresSemanticContext=array_key_exists('_semantic_context',$stored['envelope']);
                 try {
-                    $reply=$this->semanticClarificationReply($stored['envelope'],$input);
-                    if ($reply!==null) {
+                    $selected=$this->semanticRecommendationChoice($stored['envelope'],$input);
+                    $reply=$selected===null?$this->semanticClarificationReply($stored['envelope'],$input):null;
+                    if ($selected!==null) {
+                        // The option was compiled before the card was issued.
+                        // Current capability/config/authority snapshots were
+                        // checked above; execution still recompiles and guards
+                        // every Reader call. No model reinterprets the label.
+                        $compiled=$selected;$steps=[];$guidanceRequiresSemanticContext=false;
+                        $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_recommendation_selected');
+                    } elseif ($reply!==null) {
                         $this->runs->scopeSemanticContinuation($owner,$id,$generation,$worker);
                         // Resume the same durable Run. The original meaning is
                         // private context, not a new browser-authored scope.
@@ -874,18 +882,17 @@ final class AiGatewayServices
         return $objects;
     }
 
-    /** Language suggestions stay non-executable and preserve private meaning
-     * until a customer reply goes through the ordinary understanding gate. */
-    private function semanticClarification(array $understanding,array $safe,array $body): array
+    /** Display only dry-run-verified options. Free text retains private meaning
+     * and continues through ordinary natural-language understanding. */
+    private function semanticClarification(array $understanding,array $safe,array $body,array $recommendations=[]): array
     {
         if (!AiIntentResultContract::hasConcreteQueryMeaning($understanding,[])) throw new RuntimeException('AI_INTENT_UNRESOLVED');
         $options=[];
-        foreach ((array)($understanding['clarification_suggestions']??[]) as $index=>$label) {
-            // Recommendations are validated language, not registered codes
-            // or executable promises. A keyword hit cannot prove compatibility
-            // and must not erase paraphrases. Clicking still re-understands
-            // and binds every condition against the source-owned registry.
-            $options[]=['value'=>'suggestion_'.($index+1),'label'=>$label,'recommended'=>true];
+        $plans=[];
+        foreach (array_values($recommendations) as $index=>$candidate) {
+            $value='suggestion_'.($index+1);
+            $options[]=['value'=>$value,'label'=>$candidate['label'],'recommended'=>true];
+            $plans[$value]=$candidate['compiled'];
         }
         // Keep older internal planner carriers valid when they have no
         // model-authored suggestions; never fill from registry order.
@@ -894,7 +901,104 @@ final class AiGatewayServices
         if ($options===[]) $options=[['value'=>'supplement_only','label'=>'请补充描述','action'=>'stop']];
         return ['kind'=>'clarification','question'=>'我已理解部分条件，请选择您想查询的内容，或补充描述。',
             'fields'=>[['key'=>'semantic_reply','type'=>'select','label'=>'查询内容','options'=>$options]],
-            '_request_body'=>$body,'_semantic_reply_state'=>$this->semanticReplyState($understanding,$safe,$body)];
+            '_request_body'=>$body,'_semantic_reply_state'=>$this->semanticReplyState($understanding,$safe,$body),
+            '_semantic_recommendations'=>$plans];
+    }
+
+    /** Preflight shares the production compiler and performs no fact query.
+     * A single short model call ranks relevant choices; never three bindings. */
+    private function verifiedSemanticClarification(array $owner,string $id,int $generation,string $worker,array $understanding,array $safe,array $body,array $caps,string $today,array $configuration,callable $checkpoint,?array $sourceQuery=null): array
+    {
+        // A collection predecessor has no single query to reuse. Until the
+        // complete collection can be preserved, do not publish alternatives
+        // that silently lose its object sets or shared conditions.
+        if (isset($body['context_ref']) && (($understanding['topic_relation']??null)===null
+            || (($understanding['topic_relation']??null)==='continuation' && $sourceQuery===null))) {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'recommendation_context_not_single_query');
+            return $this->semanticClarification($understanding,$safe,$body);
+        }
+        $planner=new \app\services\ai\execution\AiSemanticRecommendationPlanner();$labels=[];
+        foreach ($this->analysisObjectVocabulary($caps,null) as $object) {
+            if (!isset($labels[$object['object_kind']])) $labels[$object['object_kind']]=$object['object_label'];
+        }
+        $compiler=new AiRegisteredPlanCompiler($this->registry(),static function()use($today):string{return $today;});
+        $pool=$planner->candidates($understanding,$caps,$today,$body['output_format'],
+            static function(array $plan)use($compiler,$caps):void{$compiler->compile($plan,$caps);},$labels,$sourceQuery);
+        if (count($pool)<3) {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'recommendation_pool_insufficient');
+            return $this->semanticClarification($understanding,$safe,$body);
+        }
+        $metadata=[];
+        foreach ($pool as $key=>$candidate) $metadata[]=['id'=>$key,'label'=>$candidate['label'],
+            'meaning'=>$candidate['meaning'],'object_kind'=>$candidate['object_kind'],'query_shape'=>$candidate['query_shape']];
+        $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
+        $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$understanding,$metadata],256));
+        $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',160);
+        $code='select_recommendations';
+        $this->runs->prepareAttempt($owner,$id,$generation,$worker,$code,'model',hash('sha256',json_encode([$safe['outbound'],$understanding,$metadata])),'siliconflow');
+        $this->runs->sendAttempt($owner,$id,$generation,$worker,$code);
+        try {
+            $checkpoint();
+            $timeout=$this->model===null?$this->modelCallTimeout($owner,$id,$generation,$worker,10000):null;
+            $reply=$this->model
+                ?call_user_func($this->model,$safe['outbound'],$metadata,$configuration,$checkpoint,null,'recommendations',$understanding)
+                :(new SiliconFlowClient())->selectRecommendations($safe['outbound'],$understanding,$metadata,$configuration['model'],$configuration['api_key'],$timeout,$checkpoint);
+            $recommendations=($reply['selections']??null)===[]?[]:$planner->select($pool,$reply['selections']??null);
+            $this->runs->finishAttempt($owner,$id,$generation,$worker,$code,'SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
+        } catch (\Throwable $error) {
+            $this->runs->finishAttempt($owner,$id,$generation,$worker,$code,$error->getMessage()==='AI_MODEL_RESULT_UNKNOWN'?'UNKNOWN':'FAILED');
+            // A failed recommendation call must leave the usable supplement
+            // flow available. Cancellation and authority changes still stop.
+            if (in_array($error->getMessage(),['AI_CANCELLED','AI_AUTHORIZATION_CHANGED','AI_CAPABILITY_CHANGED'],true)
+                || (!($error instanceof AiContractException) && $error->getMessage()!=='AI_RECOMMENDATION_INVALID')) throw $error;
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'recommendation_selection_failed');
+            $recommendations=[];
+        }
+        return $this->semanticClarification($understanding,$safe,$body,$recommendations);
+    }
+
+    /** The encrypted envelope binds choices to this Run/revision. HTTP clients
+     * supply one option ID only; injected plans and extra keys are rejected. */
+    private function semanticRecommendationChoice(array $envelope,array $input): ?array
+    {
+        if (($envelope['fields'][0]['key']??null)!=='semantic_reply') return null;
+        $choices=$input['choices']??null;
+        if (!is_array($choices)) throw new RuntimeException('AI_CLARIFICATION_INVALID');
+        $value=$choices['semantic_reply']??null;
+        if ($value==='__supplement__') return null;
+        if (array_keys($choices)!==['semantic_reply'] || !is_string($value)
+            || isset($input['revise_clarification_id']) || !isset($envelope['_semantic_recommendations'][$value])) throw new RuntimeException('AI_CLARIFICATION_INVALID');
+        return $envelope['_semantic_recommendations'][$value];
+    }
+
+    /** After natural-language supplementation, an exact registered metric
+     * plus an explicitly understood subject/form needs no second model to
+     * restate the same slots. This reuses candidate preflight, not a keyword
+     * parser; private selections, compound conditions and ambiguity fail
+     * admission and retain the ordinary binding/review path. */
+    private function compileAcceptedSimpleSupplement(array $understanding,array $body,array $caps,string $today,?array $sourceQuery): ?array
+    {
+        if (!isset($body['_clarification_context']) || ($understanding['status']??null)!=='understood'
+            || ($sourceQuery===null && isset($body['context_ref']))) return null;
+        $values=[];
+        foreach ($understanding['requirements'] as $requirement) {
+            foreach ($requirement['values'] as $key=>$value) {
+                if (isset($values[$key]) && $values[$key]!==$value) return null;
+                $values[$key]=$value;
+            }
+        }
+        if (!isset($values['object_kind'],$values['operation']) || ($values['object_relation']??'analysis')!=='analysis'
+            || count($values['metric_terms']??[])!==1
+            || \app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms($values['metric_terms'],$caps['metric_codes']??[])===null) return null;
+        $labels=[];
+        foreach ($this->analysisObjectVocabulary($caps,null) as $object) {
+            if (!isset($labels[$object['object_kind']])) $labels[$object['object_kind']]=$object['object_label'];
+        }
+        $compiler=new AiRegisteredPlanCompiler($this->registry(),static function()use($today):string{return $today;});
+        $pool=(new \app\services\ai\execution\AiSemanticRecommendationPlanner())->candidates(
+            $understanding,$caps,$today,$body['output_format'],
+            static function(array $plan)use($compiler,$caps):void{$compiler->compile($plan,$caps);},$labels,$sourceQuery);
+        return count($pool)===1?array_values($pool)[0]['compiled']:null;
     }
 
     /** Encrypted carrier only: it neither expands authority nor stores results. */
@@ -977,7 +1081,8 @@ final class AiGatewayServices
             return trim($reply);
         }
         if (array_keys($choices)!==[$key]) throw new RuntimeException('AI_CLARIFICATION_INVALID');
-        foreach ($fields[0]['options'] as $option) if ($option['value']===$value) return $option['label'];
+        // Recommended choices use the validated carrier above. Only free text
+        // reaches this method; old string labels cannot restart model binding.
         throw new RuntimeException('AI_CLARIFICATION_INVALID');
     }
 
@@ -1609,11 +1714,16 @@ final class AiGatewayServices
             // into its later supplement merely because the browser sent it.
             unset($body['context_ref']);$body['history']=[];
         }
-        if (($understanding['status']??null)==='needs_clarification' && !empty($understanding['clarification_suggestions'])) {
+        if (($understanding['status']??null)==='needs_clarification') {
             // Incomplete meaning is a waiting task, not a failed execution.
             // Topic reset and clear calendar conditions are settled first;
             // no extra binding call is spent on genuinely missing meaning.
-            return $this->semanticClarification($understanding,$safe,$body);
+            return $this->verifiedSemanticClarification($owner,$id,$generation,$worker,$understanding,$safe,$body,$caps,$today,$configuration,$checkpoint,$sourceQuery);
+        }
+        $simpleSupplement=$this->compileAcceptedSimpleSupplement($understanding,$body,$caps,$today,$sourceQuery);
+        if ($simpleSupplement!==null) {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_supplement_local_binding');
+            return $simpleSupplement;
         }
         // One current opaque store followed by its immediate deictic is one
         // location, not two filters. Keep distinct or historical locations

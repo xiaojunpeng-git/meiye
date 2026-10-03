@@ -644,14 +644,26 @@ try {
     $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$pendingDelta,'unresolved_fragments'=>[]];
     // Supply the model's accepted continuation meaning explicitly: an empty
     // understanding must no longer be revived by an unrelated binding mock.
-    $h->understandingOverride=['goal'=>'继续查询原门店，指标待明确','status'=>'needs_clarification','requirements'=>[
+    $h->understandingOverride=['goal'=>'继续查询原门店，指标待明确','status'=>'needs_clarification','topic_relation'=>'continuation','requirements'=>[
         ['id'=>'r1','meaning'=>'原门店查询','fields'=>['object_kind'],'values'=>['object_kind'=>'store'],
             'evidence'=>[['message_id'=>'current','quote'=>'那这一段呢？']]],
     ]];
     $pending=$h->start('那这一段呢？',$source['answer']['context_ref']);
-    cdgCheck($pending['status']==='WAITING_CLARIFICATION'&&$pending['clarification']['fields'][0]['key']==='pending_metric_codes','pending metric is held for an explicit context decision instead of executing or failing');
-    $retained=$h->choose($pending,['pending_metric_codes'=>'retain']);
-    cdgCheck($retained['status']==='COMPLETED','only an explicit retain decision may execute the prior verified metric');
+    cdgCheck($pending['status']==='WAITING_CLARIFICATION'&&$pending['clarification']['fields'][0]['key']==='semantic_reply',
+        'incomplete continuation uses the unified executable recommendation card');
+    $stored=$h->private->read($h->row($pending)['clarification_ref']);$retainChoice=null;
+    $prior=$h->private->read($h->row($source)['evidence_ref'])['query'];
+    foreach($stored['envelope']['_semantic_recommendations'] as $key=>$candidate) {
+        $query=$candidate['plan']['query'];
+        cdgCheck($query['store_ids']===$prior['store_ids'] && $query['business_filters']===$prior['business_filters']
+            && $query['start_date']===$prior['start_date'] && $query['end_date']===$prior['end_date'],
+            'every continuation recommendation preserves the signed scope and period');
+        if($query['metric_codes']===$prior['metric_codes'])$retainChoice=$key;
+    }
+    cdgCheck($retainChoice!==null,'the original supported metric is an executable candidate');
+    $beforeRetainModels=$h->models;$retained=$h->choose($pending,['semantic_reply'=>$retainChoice]);
+    cdgCheck($retained['status']==='COMPLETED' && $h->models===$beforeRetainModels,
+        'explicit prior-metric selection executes its stored query without model rebinding');
     $h->understandingOverride=null;
 
     // Replacing the scope uses the verbatim current store name only to bind
@@ -714,8 +726,8 @@ try {
     cdgCheck($heldOperation['status']==='WAITING_CLARIFICATION'&&$heldOperation['clarification']['fields'][0]['key']==='pending_operation','pending operation is a controlled decision, not a failed Run');
     cdgCheck($h->choose($heldOperation,['pending_operation'=>'retain'])['status']==='COMPLETED','retained response form completes only after confirmation');
 
-    // Pending fields form one serial decision chain. Choosing the metric must
-    // not release an unresolved period or execute the first preview plan.
+    // Partial natural language now uses one semantic card. Free supplement
+    // must replace both pending fields before the complete query can execute.
     $multiDelta=cdgDelta();$multiDelta['metric_codes']='pending';$multiDelta['periods']='pending';
     $h->understandingOverride=['goal'=>'原门店查询更换指标和时间','status'=>'needs_clarification','requirements'=>[
         ['id'=>'r1','meaning'=>'继续原门店查询','fields'=>['object_kind'],'values'=>['object_kind'=>'store'],
@@ -723,10 +735,17 @@ try {
     ]];
     $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>true,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$multiDelta,'unresolved_fragments'=>[]];
     $multi=$h->start('换一个指标和时间',$source['answer']['context_ref']);
-    cdgCheck($multi['status']==='WAITING_CLARIFICATION'&&$multi['clarification']['fields'][0]['key']==='pending_metric_codes','first unresolved context field is presented');
-    $multi=$h->choose($multi,['pending_metric_codes'=>'metric:consume_amount']);
-    cdgCheck($multi['status']==='WAITING_CLARIFICATION'&&$multi['clarification']['fields'][0]['key']==='start_date','second unresolved context field remains required after metric selection');
-    $multi=$h->choose($multi,['start_date'=>'2026-09-03','end_date'=>'2026-09-04']);
+    cdgCheck($multi['status']==='WAITING_CLARIFICATION'&&$multi['clarification']['fields'][0]['key']==='semantic_reply','partial multi-field request uses the semantic card');
+    $h->understandingOverride=['goal'=>'明确指标和期间','status'=>'understood','topic_relation'=>'continuation','requirements'=>[
+        ['id'=>'r1','meaning'=>'消耗业绩','fields'=>['metric_codes'],'values'=>['metric_terms'=>['消耗业绩']],
+            'evidence'=>[['message_id'=>'current','quote'=>'消耗业绩']]],
+        ['id'=>'r2','meaning'=>'指定期间','fields'=>['periods'],'values'=>['periods'=>[['kind'=>'date_range','start'=>'2026-09-03','end'=>'2026-09-04']]],
+            'evidence'=>[['message_id'=>'current','quote'=>'2026年9月3日至9月4日']]],
+    ]];
+    $resolvedDelta=cdgDelta();$resolvedDelta['metric_codes']='replace';$resolvedDelta['periods']='replace';
+    $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['consume_amount'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],
+        'periods'=>[['kind'=>'date_range','start'=>'2026-09-03','end'=>'2026-09-04']],'scope'=>'unspecified','context_delta'=>$resolvedDelta,'unresolved_fragments'=>[]];
+    $multi=$h->choose($multi,['semantic_reply'=>'__supplement__','supplement_text'=>'2026年9月3日至9月4日消耗业绩']);
     $multiEvidence=$h->private->read($h->row($multi)['evidence_ref']);
     cdgCheck($multi['status']==='COMPLETED'&&($multiEvidence['query']['metric_codes']??null)===['consume_amount']&&($multiEvidence['query']['start_date']??null)==='2026-09-03','only the fully confirmed context reaches execution');
     $h->understandingOverride=null;

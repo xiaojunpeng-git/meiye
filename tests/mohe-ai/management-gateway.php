@@ -47,7 +47,9 @@ try {
     // instead of reviving the retired date-after-metric interaction.
     // This fixture models partial business meaning explicitly. Empty meaning
     // now stops before binding and cannot test management-version freezing.
-    $h->understandingOverride=['goal'=>'询问业绩','status'=>'needs_clarification','requirements'=>[
+    // This fixture deliberately reaches registered binding ambiguity to test
+    // management-version freezing, not the separate partial-language card.
+    $h->understandingOverride=['goal'=>'询问业绩','status'=>'understood','requirements'=>[
         ['id'=>'r1','meaning'=>'尚未明确哪项业绩','fields'=>['metric_codes'],'values'=>['metric_terms'=>['业绩']],
             'evidence'=>[['message_id'=>'current','quote'=>'业绩多少']]],
     ]];
@@ -90,9 +92,8 @@ try {
     $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>['cash_performance'],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-08']],'scope'=>'authorized','unresolved_fragments'=>[]];
     $source=$h->start('9月1日到9月8日现金业绩合计多少');
     mgcheck($source['status']==='COMPLETED'&&isset($source['answer']['context_ref']),'source query available after restore');
-    // Custom server-owned context guidance is deliberately outside the admin
-    // slot order.  A published management document must preserve it rather
-    // than rejecting its structural field as an unknown admin slot.
+    // Partial-language guidance is server-owned, outside the admin slot
+    // order. Published management must not rewrite it as an old metric slot.
     $delta=array_fill_keys(\app\services\ai\contract\AiIntentResultContract::DELTA_FIELDS,'inherit');$delta['store_scope']='pending';
     $h->understandingOverride=['goal'=>'原门店查询的范围尚未确定','status'=>'needs_clarification','requirements'=>[
         ['id'=>'r1','meaning'=>'原门店查询','fields'=>['object_kind'],'values'=>['object_kind'=>'store'],
@@ -100,7 +101,7 @@ try {
     ]];
     $h->semanticIntent=['object_kind'=>'store','object_term'=>'','operation'=>'summary','metric_codes'=>[],'action_codes'=>[],'needs_metric_choice'=>false,'ranking'=>['direction'=>'unspecified','limit'=>null],'periods'=>[],'scope'=>'unspecified','context_delta'=>$delta,'unresolved_fragments'=>[]];
     $pendingScope=$h->start('范围还没有确定',$source['answer']['context_ref']);
-    mgcheck($pendingScope['status']==='WAITING_CLARIFICATION'&&$pendingScope['clarification']['fields'][0]['key']==='pending_store_scope','published management preserves context-pending guidance');
+    mgcheck($pendingScope['status']==='WAITING_CLARIFICATION'&&$pendingScope['clarification']['fields'][0]['key']==='semantic_reply','published management preserves server-owned semantic guidance');
     $h->auth['permission_version']='permission-revoked';$beforeQueries=$h->queries;
     $revoked=$h->start('那就换成消耗业绩，其他条件别动。',$source['answer']['context_ref']);
     mgcheck($revoked['status']==='FAILED'&&$h->queries===$beforeQueries,'published management cannot revive expired source authority');
