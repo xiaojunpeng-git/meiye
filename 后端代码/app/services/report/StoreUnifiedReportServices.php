@@ -1591,10 +1591,12 @@ class StoreUnifiedReportServices extends BaseServices
         $sourceLineIds = array_values(array_unique(array_filter(array_map(static function ($row) { return trim((string)($row['source_line_id'] ?? '')); }, $rows))));
         $paymentBySaleFact = [];
         if ($saleFactIds) {
-            $payments = $this->withStoreScope(Db::name('cashier_v3_payment_sale_allocation_fact'), $storeId)
+            // Correlated void predicates require an explicit SQL alias; the
+            // logical ThinkPHP table name omits the configured database prefix.
+            $payments = $this->withStoreScope(Db::name('cashier_v3_payment_sale_allocation_fact')->alias('allocation'), $storeId)
                 ->whereIn('sale_fact_id', $saleFactIds)->where('status', 'effective')
                 ->field('sale_fact_id,payment_method,SUM(amount_cents) amount_cents')->group('sale_fact_id,payment_method');
-            $this->normalDataScope()->excludeVoidedSupplementAllocations($payments, 'cashier_v3_payment_sale_allocation_fact');
+            $this->normalDataScope()->excludeVoidedSupplementAllocations($payments, 'allocation');
             $payments = $payments->select()->toArray();
             foreach ($payments as $payment) $paymentBySaleFact[(string)$payment['sale_fact_id']][(string)$payment['payment_method']] = (int)$payment['amount_cents'];
         }

@@ -1074,6 +1074,7 @@ function finishCheckoutAndReturn() {
 function requestClose() {
   if (!canCloseOverlay.value) return
   emit('close', {
+    returnToDebt: isDebtRepayment.value,
     // 没有成功收款的失败结账返回后，下一次确认收款必须创建新请求。
     discardFailedCheckout: isFailed.value && !isPartialPaymentRecovery.value
   })

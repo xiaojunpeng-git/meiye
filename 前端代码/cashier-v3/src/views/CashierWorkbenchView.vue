@@ -6636,16 +6636,42 @@ async function closeCheckoutOverlay(options = {}) {
     // 该选项只由子组件在未产生成功收款的失败态发出。
     return confirmClearCart()
   }
-  if (checkoutRequiresRootReload.value) {
+  const debtSnapshot = options?.returnToDebt === true && isDebtRepaymentCheckout.value
+    ? currentCheckoutSnapshot.value
+    : null
+  const debtMemberId = Number(
+    debtSnapshot?.memberId || debtSnapshot?.member?.id || debtSnapshot?.member?.memberId || 0
+  )
+  const returnToDebt = Number.isSafeInteger(debtMemberId) && debtMemberId > 0
+  const refreshCommittedDebt = returnToDebt && checkoutRequiresRootReload.value
+  if (checkoutRequiresRootReload.value && !returnToDebt) {
     checkoutRequiresRootReload.value = false
     window.location.reload()
     return
   }
+  checkoutRequiresRootReload.value = false
   isCheckoutOpen.value = false
   checkoutPreparationId.value = null
   checkoutSession.value = null
   checkoutRecoveryActiveStep.value = null
   checkoutLocalOutcome.value = {}
+  if (returnToDebt) {
+    // 成功补交先刷新收银根状态，再按被冻结的会员 ID 重新读取欠款；
+    // 不能用成功前的欠款金额，也不能让通用结账的整页刷新吞掉返回意图。
+    localCheckoutPreview.value = null
+    checkoutReceiptSnapshot.value = null
+    if (refreshCommittedDebt) {
+      try {
+        await requestAction('open-cashier-workbench', { silent: true })
+      } catch (error) {
+        // 欠款明细有独立的权威读取；工作台刷新失败不能吞掉返回入口。
+        console.warn('Repayment succeeded but the cashier workbench refresh was unavailable.', error)
+      }
+    }
+    window.dispatchEvent(new CustomEvent('cashier-v3:open-member-debt-repayment', {
+      detail: { memberId: debtMemberId }
+    }))
+  }
 }
 
 async function closeSucceededCheckoutAndRefreshWorkbench(submissionResponse = {}) {

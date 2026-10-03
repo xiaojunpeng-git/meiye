@@ -84,7 +84,13 @@ foreach ($queries as $name => $query) {
     echo 'PASS local MySQL normal scope: ' . $name . PHP_EOL;
 }
 
-$storeId = (int)\think\facade\Db::name('system_store')->where('is_del', 0)->order('id', 'asc')->value('id');
+$storeId = (int)getenv('ROUND3_TEST_STORE_ID');
+// Exercise populated report branches: an arbitrary first store can have no
+// sales and silently skip allocation queries used by consumption details.
+if ($storeId <= 0) {
+    $storeId = (int)\think\facade\Db::name('cashier_v3_sale_fact')->where('status', 'effective')
+        ->whereBetween('business_date', ['2026-10-01', '2026-10-03'])->order('id', 'desc')->value('store_id');
+}
 if ($storeId <= 0) throw new RuntimeException('Local fixture needs one active store.');
 $reader = new \app\services\query\metric\RegisteredMetricReadServices();
 $range = ['start' => '2026-10-01', 'end' => '2026-10-03'];
@@ -94,6 +100,14 @@ foreach (['actual_performance', 'consume_amount', 'staff_sales_yeji'] as $metric
 }
 
 $reports = new \app\services\report\StoreUnifiedReportServices();
+$consumption = $reports->query([$storeId], [
+    'report' => 'member_consumption_detail', 'start_date' => $range['start'], 'end_date' => $range['end'],
+    '_report_scope' => ['mode' => 'stores'],
+]);
+if (empty($consumption['records'])) {
+    throw new RuntimeException('Consumption detail regression needs retained valid sales, not an empty fixture.');
+}
+echo 'PASS local MySQL populated consumption detail: store=' . $storeId . ' rows=' . count($consumption['records']) . PHP_EOL;
 foreach (['sales', 'service', 'customers', 'channels'] as $report) {
     $result = $reports->query([$storeId], [
         'report' => $report, 'start_date' => $range['start'], 'end_date' => $range['end'],
