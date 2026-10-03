@@ -297,7 +297,7 @@ const currentFieldExplanations = computed(() => columns.value.map((column) => ({
 // 弹窗导语只解释列的阅读方式；每列实际取值仍以服务端返回的说明为准。
 const fieldGuideIntro = computed(() => {
   if (['new_customer_analysis', 'new_customer_analysis_summary'].includes(activeReport.value)) {
-    return '顾客首次办理并付清疗程卡时才算新客；未付清、后续购买和已作废订单不算。下方说明各列的数据从哪里来。'
+    return '顾客首次办理疗程卡即计入新客，未付清也计入；后续补清不重复记人次。首次办卡或补交来源为 A 的数据不计入，已作废订单也不计入；其他补交按自身来源统计。下方说明各列的数据从哪里来。'
   }
   if (activeReport.value === 'store_item_analysis') {
     return '分类列按当前可见的商品分类显示；每笔金额仍按发生业务时记录的分类归入。旧记录没有可用分类时显示在“未分类”，以后修改项目分类不会改变旧记录。'

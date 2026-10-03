@@ -626,17 +626,49 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     }
 
     /**
-     * 查询已经首次付清疗程卡的顾客及对应订单。会员生命周期事件只生成一次；
-     * 用事件日期决定入表月份，并隐藏已作废原单，避免后续订单或退款重记新客。
+     * 查询顾客首次有效疗程卡销售的对应订单，含全款和欠款销售。
+     * 用首次销售业务日决定新客月份，并隐藏已作废原单；后续补清只计收款。
+     * 本组新客汇总/明细按已确认口径排除一级来源 A；按来源 ID 判定，
+     * 包含已停用但仍有历史事实的来源，不能只凭当前展示名称过滤。
      * 门店、组织和个人参与范围与其他门店报表使用同一后端权限限制。
      */
-    private function firstCompletedCourseOrders(array $stores,array $range,array $input):array
+    private function firstCourseOrders(array $stores,array $range,array $input):array
     {
+        // 两张新客报表以首次有效疗程卡销售为资格：欠款订单用待付清事件，
+        // 全款订单用完成事件。按真实发生顺序选全局首笔，不能在补清时再记一人。
+        // 只返回当前账号有权查看的门店，跨店更早订单仅用于资格去重，不泄露其明细。
         $query=$this->participantOrder($this->scope(Db::name('cashier_v3_customer_lifecycle_fact')->alias('first_course'),$stores,'first_course'),'first_course.related_order_id');
         $this->applyOrganizationFilters($query,'first_course',$input,$range);
-        (new FirstCourseMemberCohortServices())->apply($query,'first_course',$range);
+        $query->whereIn('first_course.event_type',['course_pending_settlement','first_course_completed'])
+            ->where('first_course.status','effective')->where('first_course.member_id','>',0)
+            ->whereBetween('first_course.business_date',[StoreUnifiedReportServices::COVERAGE_START,$range['end']]);
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query,'first_course.tenant_id','first_course.related_order_id');
+        $candidates=$query->field('first_course.id,first_course.tenant_id,first_course.related_order_id,first_course.member_id,first_course.business_date,first_course.source_primary_id,first_course.source_label_snapshot')->select()->toArray();
+        if(!$candidates)return[];
+        $memberIdsByTenant=[];
+        foreach($candidates as $candidate)$memberIdsByTenant[(string)$candidate['tenant_id']][(int)$candidate['member_id']]=true;
+        $firstByMember=[];
+        foreach($memberIdsByTenant as $tenantId=>$memberIds){
+            // tenant + event + business_date 命中现有索引；跨店查首笔仅作资格判断，
+            // 返回结果仍限于上方已授权的候选门店，不引入第二套历史回填或写库。
+            $history=Db::name('cashier_v3_customer_lifecycle_fact')->alias('history_course')
+                ->where('history_course.tenant_id',(string)$tenantId)
+                ->whereIn('history_course.member_id',array_keys($memberIds))
+                ->whereIn('history_course.event_type',['course_pending_settlement','first_course_completed'])
+                ->where('history_course.status','effective')
+                ->where('history_course.business_date','<=',$range['end']);
+            $this->normalDataScope()->excludeVoidedSalesOrderFacts($history,'history_course.tenant_id','history_course.related_order_id');
+            foreach($history->field('history_course.id,history_course.tenant_id,history_course.member_id')->order('history_course.occurred_at','asc')->order('history_course.id','asc')->select()->toArray() as $event){
+                $memberKey=(string)$event['tenant_id'].'|'.(int)$event['member_id'];
+                if(!isset($firstByMember[$memberKey]))$firstByMember[$memberKey]=(int)$event['id'];
+            }
+        }
+        $excludedSourceIds=$this->newCustomerExcludedSourceIds();
         $out=[];
-        foreach($query->field('first_course.related_order_id,first_course.member_id,first_course.business_date,first_course.source_primary_id,first_course.source_label_snapshot')->select()->toArray() as $event){
+        foreach($candidates as $event){
+            $memberKey=(string)$event['tenant_id'].'|'.(int)$event['member_id'];
+            if((int)$event['id']!==($firstByMember[$memberKey]??0)
+                ||$this->isExcludedNewCustomerSource((int)$event['source_primary_id'],(string)$event['source_label_snapshot'],$excludedSourceIds))continue;
             $order=(string)$event['related_order_id'];
             if($order!=='')$out[$order]=$event;
         }
@@ -645,22 +677,24 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
 
     private function newCustomerAnalysis(array $stores,array $range,array $input):array
     {
-        // 新客只由首次疗程卡付清事件确定；普通销售、定金和后续购买都不能让顾客再次成为新客。
-        $firstOrders=$this->firstCompletedCourseOrders($stores,$range,$input);
+        // 两张新客报表以首次有效疗程卡销售为资格；定金订单也计人次，补清和后续购买不能再计一次。
+        $firstOrders=$this->firstCourseOrders($stores,$range,$input);
+        $excludedSourceIds=$this->newCustomerExcludedSourceIds();
         $memberId=(int)($input['member_id']??0);
+        $summaryGroupKey=trim((string)($input['summary_group_key']??''));
         $sourceId=(int)($input['source_id']??0);
         $sourceLabel=trim((string)($input['source_label']??''));
         $sales=$this->participantOrder($this->scope(Db::name('cashier_v3_sale_fact')->alias('s'),$stores,'s'),'s.order_id')
             ->leftJoin('cashier_v3_sales_order o','o.order_id=s.order_id')->leftJoin('user u','u.uid=s.member_id')
             ->whereIn('s.order_id',array_keys($firstOrders)?:['__no_first_course_order__'])->where('s.fact_direction','forward')->where('s.status','effective');
         if($memberId>0)$sales->where('s.member_id',$memberId);
-        if($sourceId>0)$sales->where('s.business_source_primary_id',$sourceId);
-        elseif($sourceLabel!==''&&$sourceLabel!=='补交')$sales->where('s.business_source_label_snapshot',$sourceLabel);
+        // 明细来源筛选要分别作用于原销售和补交收款；不能先按原单来源过滤销售，
+        // 否则补交来源与原单不同的明细会在关联收款前被提前删掉。
         $this->applyOrganizationFilters($sales,'s',$input,$range);
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($sales,'s.tenant_id','s.order_id');
         $rows=$sales->fieldRaw('s.fact_id,s.store_id,s.organization_id,s.organization_path_snapshot,s.organization_name_snapshot,s.store_name_snapshot,s.business_date,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.business_source_label_snapshot,s.item_name_snapshot,s.sale_amount_cents,s.debt_amount_cents,u.phone,MAX(o.order_note) remark')
             ->group('s.source_line_id')->order('s.business_date','desc')->select()->toArray();
-        // 订单可能先付定金、后来才付清；报表日期以首次付清日为准。
+        // 欠款和全款都以首次疗程卡销售业务日记新客，补清不改写首次日期。
         foreach($rows as &$row){
             $event=$firstOrders[(string)$row['order_id']]??null;
             if(!$event||(int)$row['member_id']!==(int)$event['member_id']){$row['_exclude_first_course']=true;continue;}
@@ -672,6 +706,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $lineIds=array_values(array_unique(array_filter(array_column($rows,'source_line_id'))));
         $personnel=$this->newCustomerPersonnel($stores,$orderIds,$lineIds);
         $guides=$personnel['guides'];$salespeople=$personnel['salespeople'];$managers=$personnel['managers'];
+        // 汇总按订单整体人员归属分组，明细按商品行展示；下钻须复用订单级归属而非单行人员，否则会丢失同订单的其他商品。
+        $orderPeople=[];foreach($rows as $saleRow){$order=(string)$saleRow['order_id'];$line=(string)$saleRow['source_line_id'];$orderPeople[$order]['salespeople']=array_merge($orderPeople[$order]['salespeople']??[],$salespeople[$line]??[]);$orderPeople[$order]['managers']=array_merge($orderPeople[$order]['managers']??[],$managers[$line]??[]);}
         $payments=[];$repaymentRows=[];
         if($saleFactIds){
             foreach($this->cashFacts($stores,'payment')->join('cashier_v3_payment_sale_allocation_fact allocation',"allocation.tenant_id=payment.tenant_id AND allocation.payment_fact_id=payment.fact_id AND allocation.status='effective'")
@@ -681,8 +717,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             }
             foreach($this->cashFacts($stores,'repayment_payment')->join('cashier_v3_payment_sale_allocation_fact repayment_allocation',"repayment_allocation.tenant_id=repayment_payment.tenant_id AND repayment_allocation.payment_fact_id=repayment_payment.fact_id AND repayment_allocation.status='effective'")
                 ->whereIn('repayment_allocation.sale_fact_id',$saleFactIds)->where('repayment_payment.source_document_type','debt_repayment')->whereBetween('repayment_payment.business_date',[$range['start'],$range['end']])->where('repayment_payment.status','effective')
-                ->fieldRaw('repayment_allocation.sale_fact_id,repayment_payment.fact_id payment_fact_id,repayment_payment.order_id repayment_order_id,repayment_payment.business_date,repayment_payment.organization_id,repayment_payment.organization_path_snapshot,repayment_payment.organization_name_snapshot,repayment_payment.store_name_snapshot,repayment_payment.member_id,repayment_payment.member_name_snapshot,repayment_payment.source_line_id,repayment_payment.source_document_type,SUM(repayment_allocation.amount_cents) amount_cents')
-                ->group('repayment_allocation.sale_fact_id,repayment_payment.fact_id,repayment_payment.order_id,repayment_payment.business_date,repayment_payment.organization_id,repayment_payment.organization_path_snapshot,repayment_payment.organization_name_snapshot,repayment_payment.store_name_snapshot,repayment_payment.member_id,repayment_payment.member_name_snapshot,repayment_payment.source_line_id,repayment_payment.source_document_type')->select()->toArray() as $r) {
+                ->fieldRaw('repayment_allocation.sale_fact_id,repayment_payment.fact_id payment_fact_id,repayment_payment.order_id repayment_order_id,repayment_payment.store_id,repayment_payment.business_date,repayment_payment.organization_id,repayment_payment.organization_path_snapshot,repayment_payment.organization_name_snapshot,repayment_payment.store_name_snapshot,repayment_payment.member_id,repayment_payment.member_name_snapshot,repayment_payment.business_source_primary_id,repayment_payment.business_source_label_snapshot,repayment_payment.source_line_id,repayment_payment.source_document_type,SUM(repayment_allocation.amount_cents) amount_cents')
+                ->group('repayment_allocation.sale_fact_id,repayment_payment.fact_id,repayment_payment.order_id,repayment_payment.store_id,repayment_payment.business_date,repayment_payment.organization_id,repayment_payment.organization_path_snapshot,repayment_payment.organization_name_snapshot,repayment_payment.store_name_snapshot,repayment_payment.member_id,repayment_payment.member_name_snapshot,repayment_payment.business_source_primary_id,repayment_payment.business_source_label_snapshot,repayment_payment.source_line_id,repayment_payment.source_document_type')->select()->toArray() as $r) {
                 $repaymentRows[(string)$r['sale_fact_id']][]=$r;
             }
         }
@@ -692,36 +728,55 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         foreach($rows as &$row){
             $line=(string)$row['source_line_id'];$order=(string)$row['order_id'];$salesFact=(string)$row['fact_id'];
             $guideRows=$guides[$order]??[];$salespersonRows=$salespeople[$line]??[];$managerRows=$managers[$line]??[];
-            // 未分配导购或销售人员仍是真实新客；人员只在用户主动筛选时限制结果。
-            if(!$this->newCustomerPersonnelMatches($guideRows,$salespersonRows,$managerRows,$input)||$sourceLabel==='补交')$row['_exclude_personnel']=true;
+            // 未分配人员仍是真实新客；当前行来源只按首次办卡事件判断，补交行另按自身收款来源判断。
+            $event=$firstOrders[$order];
+            if(!$this->newCustomerPersonnelMatches($guideRows,$salespersonRows,$managerRows,$input)
+                ||($sourceId>0&&(int)$event['source_primary_id']!==$sourceId)
+                ||($sourceLabel!==''&&(string)$event['source_label_snapshot']!==$sourceLabel))$row['_exclude_personnel']=true;
             $craftNames=[];$fee=0;foreach($personnel['performance'][$line]??[] as $f){if((string)$f['performance_type']==='labor_performance_allocated'){$craftNames[]=(string)$f['employee_name_snapshot'];$fee+=(int)$f['labor_fee_amount_cents'];}}
-            $row['division_name']=(string)$row['organization_name_snapshot'];$row['customer']=(string)$row['member_name_snapshot'];
+            // 新客明细分组键与显示列都必须先解析当前组织统计维度，
+            // 不能让交易时的岗位/组织名称快照冒充分公司。
+            $row['division_name']=(string)$row['organization_name_snapshot'];$this->projectOrganization($row,(string)$row['organization_id'],(string)$row['organization_path_snapshot'],(string)$row['business_date']);$row['customer']=(string)$row['member_name_snapshot'];
             $row['guide']=$this->newCustomerNames($guideRows,'guide_employee_id','guide_employee_name_snapshot');
             $row['salesperson']=$this->newCustomerNames($salespersonRows,'employee_id','employee_name_snapshot');
             $row['sales_manager']=$this->newCustomerNames($managerRows,'sales_manager_employee_id','sales_manager_name_snapshot');
-            $row['source']=(string)$row['business_source_label_snapshot'];$row['age']='';$row['care_project']=(string)$row['item_name_snapshot'];$row['craftsman']=implode('、',array_unique(array_filter($craftNames)));
+            $row['source']=(string)$event['source_label_snapshot'];$row['age']='';$row['care_project']=(string)$row['item_name_snapshot'];$row['craftsman']=implode('、',array_unique(array_filter($craftNames)));
+            $row['_summary_group_key']=$this->newCustomerSummaryGroupKey($row,$this->newCustomerNames($guideRows,'guide_employee_id','guide_employee_name_snapshot'),$this->newCustomerNames($orderPeople[$order]['salespeople']??[],'employee_id','employee_name_snapshot'),$this->newCustomerNames($orderPeople[$order]['managers']??[],'sales_manager_employee_id','sales_manager_name_snapshot'),(int)$event['source_primary_id'],(string)$event['source_label_snapshot']);
             $experienceCardAmount=$manual[$line]['experience_card_amount']??[];$row['experience_card_amount']=array_key_exists('value',$experienceCardAmount)?((string)$experienceCardAmount['value']===''?'':$this->money((int)$experienceCardAmount['value'])):$this->money((int)$row['sale_amount_cents']);$row['experience_card_amount_version']=(int)($experienceCardAmount['version']??0);$row['care_duration']=$manual[$line]['care_duration']['value']??'';$row['care_duration_version']=(int)($manual[$line]['care_duration']['version']??0);$row['labor_fee']=$this->money($fee);$row['guide_effective_count']=count($guideRows);$row['guide_performance_round']=implode('、',array_unique(array_map(static fn($g)=>(string)$g['guide_round_no'],$guideRows)));
             // 按商品明细自己的欠款区分全款和定金，避免其他商品的欠款改变本明细归类。
             $collected=0;$hasDebt=(int)$row['debt_amount_cents']>0;foreach($payments[$salesFact]??[] as $p)if(!in_array((string)$p['source_document_type'],['debt_repayment','recharge_debt_repayment'],true))$collected+=(int)$p['amount_cents'];$row['full_payment']=$this->money($hasDebt?0:$collected);$row['deposit_payment']=$this->money($hasDebt?$collected:0);$row['cleared_payment']=$this->money(0);$row['annotation_subject_key']=$line;$row['annotation_subject_type']='sale_line';$baseRowsByFact[$salesFact]=$row;
         }unset($row);
-        $rows=array_values(array_filter($rows,static fn(array $row):bool=>empty($row['_exclude_personnel'])));foreach($rows as &$row){unset($row['_exclude_personnel']);}unset($row);
+        // 历史首笔订单留在内存中供本期补清追溯，但只把本期首次销售明细显示在当前日期范围。
+        $rows=array_values(array_filter($rows,static fn(array $row):bool=>empty($row['_exclude_personnel'])&&(string)$row['business_date']>=$range['start']&&(string)$row['business_date']<=$range['end']));foreach($rows as &$row){unset($row['_exclude_personnel']);}unset($row);
+        // 明细的业务识别粒度仍是原销售商品行。同一业务日、门店及人员/来源分组的
+        // 补清可并入原行的“清款业绩”；不同日期或归因必须留独立行，避免改写收款时点。
+        $saleRowIndex=[];foreach($rows as $index=>$saleRow){$saleRowIndex[implode('|',[(string)$saleRow['order_id'],(string)$saleRow['source_line_id'],(string)$saleRow['business_date'],(string)$saleRow['_summary_group_key']])]=$index;}
         foreach($repaymentRows as $saleFact=>$items){$base=$baseRowsByFact[$saleFact]??null;if(!$base)continue;foreach($items as $item){
             $repayPeople=$repaymentSalespeople[(string)$item['repayment_order_id']]??[];
-            if($sourceId>0||($sourceLabel!==''&&$sourceLabel!=='补交')||!$this->newCustomerPersonnelMatches([],$repayPeople,[],$input))continue;
-            $repay=$base;unset($repay['_exclude_personnel']);$repay['business_date']=(string)$item['business_date'];$repay['source']='补交';$repay['guide']='';$repay['sales_manager']='';$repay['salesperson']=$this->newCustomerNames($repayPeople,'employee_id','employee_name_snapshot');$repay['craftsman']='';$repay['experience_card_amount']='';$repay['labor_fee']=$this->money(0);$repay['guide_effective_count']=0;$repay['guide_performance_round']='';$repay['full_payment']=$this->money(0);$repay['deposit_payment']=$this->money(0);$repay['cleared_payment']=$this->money((int)$item['amount_cents']);$repay['annotation_subject_key']=(string)$item['payment_fact_id'];$repay['annotation_subject_type']='debt_repayment';$rows[]=$repay;
+            $repaySourceId=(int)$item['business_source_primary_id'];$repaySource=(string)$item['business_source_label_snapshot'];
+            // 新客明细与汇总统一排除 A 来源补交；不能因为原首单是 B 就让 A 收款混入。
+            if($this->isExcludedNewCustomerSource($repaySourceId,$repaySource,$excludedSourceIds))continue;
+            if(($sourceId>0&&$repaySourceId!==$sourceId)||($sourceLabel!==''&&$repaySource!==$sourceLabel)||!$this->newCustomerPersonnelMatches([],$repayPeople,[],$input))continue;
+            $repay=$base;unset($repay['_exclude_personnel']);$repay['business_date']=(string)$item['business_date'];$repay['store_id']=(int)$item['store_id'];$repay['organization_id']=(string)$item['organization_id'];$repay['organization_path_snapshot']=(string)$item['organization_path_snapshot'];$repay['store_name_snapshot']=(string)$item['store_name_snapshot'];$repay['division_name']=(string)$item['organization_name_snapshot'];$this->projectOrganization($repay,(string)$repay['organization_id'],(string)$repay['organization_path_snapshot'],(string)$repay['business_date']);$repay['source']=$repaySource;$repay['guide']='';$repay['sales_manager']='';$repay['salesperson']=$this->newCustomerNames($repayPeople,'employee_id','employee_name_snapshot');$repay['_summary_group_key']=$this->newCustomerSummaryGroupKey($repay,'',$repay['salesperson'],'',$repaySourceId,$repaySource);$repay['craftsman']='';$repay['experience_card_amount']='';$repay['labor_fee']=$this->money(0);$repay['guide_effective_count']=0;$repay['guide_performance_round']='';$repay['full_payment']=$this->money(0);$repay['deposit_payment']=$this->money(0);$repay['cleared_payment']=$this->money((int)$item['amount_cents']);$repay['annotation_subject_key']=(string)$item['payment_fact_id'];$repay['annotation_subject_type']='debt_repayment';
+            $saleKey=implode('|',[(string)$repay['order_id'],(string)$repay['source_line_id'],(string)$repay['business_date'],(string)$repay['_summary_group_key']]);
+            if(isset($saleRowIndex[$saleKey])){$target=&$rows[$saleRowIndex[$saleKey]];$target['_merged_cleared_cents']=(int)($target['_merged_cleared_cents']??0)+(int)$item['amount_cents'];$target['cleared_payment']=$this->money($target['_merged_cleared_cents']);unset($target);continue;}
+            $rows[]=$repay;
         }}
+        foreach($rows as &$row){unset($row['_merged_cleared_cents']);}unset($row);
+        if($summaryGroupKey!=='')$rows=array_values(array_filter($rows,static fn(array $row):bool=>($row['_summary_group_key']??'')===$summaryGroupKey));
         return $this->result('新客明细表',$this->columns(['division_name'=>'分公司','store_name_snapshot'=>'门店','business_date'=>'日期','customer'=>'顾客','guide'=>'导购','salesperson'=>'销售人','sales_manager'=>'销售经理','source'=>'来源','age'=>'年龄','phone'=>'手机号码','care_project'=>'护理项目','craftsman'=>'护理手艺人','experience_card_amount'=>'体验卡金额','care_duration'=>'手艺人护理时长','labor_fee'=>'手艺人手工费','guide_effective_count'=>'导购有效人次','guide_performance_round'=>'导购业绩次数','full_payment'=>'全款业绩','deposit_payment'=>'定金业绩','cleared_payment'=>'清款业绩','remark'=>'备注']),$rows,array_merge($input,['_guide_filter_options'=>$this->newCustomerGuideFilterOptions($stores,array_keys($firstOrders))]));
     }
 
     private function newCustomerSummary(array $stores,array $range,array $input):array
     {
         $records=[];$year=(int)substr($range['end'],0,4);$currentYear=(int)date('Y');$lastMonth=$year===$currentYear?min((int)date('n'),(int)substr($range['end'],5,2)):12;
-        $firstOrders=$this->firstCompletedCourseOrders($stores,$range,$input);
+        $firstOrders=$this->firstCourseOrders($stores,$range,$input);
+        $excludedSourceIds=$this->newCustomerExcludedSourceIds();
         $firstOrderIds=array_keys($firstOrders);
         // 现金列以 payment_fact.business_date 为唯一统计时间，因此退款反向事实
         // 只落在退款实际发生月份，不回写原订单月份。
         $query=$this->cashFacts($stores)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective')->where('member_id','>',0);
-        $payments=$query->fieldRaw('fact_id,store_id,organization_name_snapshot division_name,store_name_snapshot store_name,member_id,member_name_snapshot member_name,order_id,business_source_primary_id,business_source_label_snapshot source,source_document_type,business_date,amount_cents')->select()->toArray();
+        $payments=$query->fieldRaw('fact_id,store_id,organization_id,organization_path_snapshot,organization_name_snapshot division_name,store_name_snapshot store_name,member_id,member_name_snapshot member_name,order_id,business_source_primary_id,business_source_label_snapshot source,source_document_type,business_date,amount_cents')->select()->toArray();
         $regularPayments=[];$repaymentFactIds=[];foreach($payments as $row){
             if((string)$row['source_document_type']==='debt_repayment')$repaymentFactIds[]=(string)$row['fact_id'];
             elseif(isset($firstOrders[(string)$row['order_id']])&&!in_array((string)$row['source_document_type'],['recharge_debt_repayment'],true))$regularPayments[(string)$row['fact_id']]=$row;
@@ -738,16 +793,23 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             foreach($allocated as $allocation){$payment=$regularPayments[(string)$allocation['payment_fact_id']];$payment['amount_cents']=(int)$allocation['amount_cents'];$payment['source_line_id']=(string)$allocation['source_line_id'];$payment['sale_debt_amount_cents']=(int)$allocation['debt_amount_cents'];$regular[]=$payment;}
         }
         $repayments=[];$orderIds=$firstOrderIds;
-        if($repaymentFactIds&&$firstOrderIds){foreach($this->cashFacts($stores,'summary_repayment')->join('cashier_v3_payment_sale_allocation_fact a',"a.tenant_id=summary_repayment.tenant_id AND a.payment_fact_id=summary_repayment.fact_id AND a.status='effective'")->join('cashier_v3_sale_fact origin',"origin.tenant_id=a.tenant_id AND origin.fact_id=a.sale_fact_id AND origin.status='effective' AND origin.fact_direction='forward'")->whereIn('summary_repayment.fact_id',$repaymentFactIds)->whereIn('origin.order_id',$firstOrderIds)->where('summary_repayment.source_document_type','debt_repayment')->where('summary_repayment.status','effective')->fieldRaw('summary_repayment.fact_id payment_fact_id,summary_repayment.order_id repayment_order_id,summary_repayment.store_id,summary_repayment.organization_name_snapshot division_name,summary_repayment.store_name_snapshot store_name,summary_repayment.member_id,summary_repayment.member_name_snapshot member_name,summary_repayment.business_date,a.sale_fact_id,origin.order_id origin_order_id,origin.source_line_id,SUM(a.amount_cents) amount_cents')->group('summary_repayment.fact_id,summary_repayment.order_id,summary_repayment.store_id,summary_repayment.organization_name_snapshot,summary_repayment.store_name_snapshot,summary_repayment.member_id,summary_repayment.member_name_snapshot,summary_repayment.business_date,a.sale_fact_id,origin.order_id,origin.source_line_id')->select()->toArray() as $row){$repayments[]=$row;}}
+        if($repaymentFactIds&&$firstOrderIds){foreach($this->cashFacts($stores,'summary_repayment')->join('cashier_v3_payment_sale_allocation_fact a',"a.tenant_id=summary_repayment.tenant_id AND a.payment_fact_id=summary_repayment.fact_id AND a.status='effective'")->join('cashier_v3_sale_fact origin',"origin.tenant_id=a.tenant_id AND origin.fact_id=a.sale_fact_id AND origin.status='effective' AND origin.fact_direction='forward'")->whereIn('summary_repayment.fact_id',$repaymentFactIds)->whereIn('origin.order_id',$firstOrderIds)->where('summary_repayment.source_document_type','debt_repayment')->where('summary_repayment.status','effective')->fieldRaw('summary_repayment.fact_id payment_fact_id,summary_repayment.order_id repayment_order_id,summary_repayment.store_id,summary_repayment.organization_name_snapshot division_name,summary_repayment.store_name_snapshot store_name,summary_repayment.member_id,summary_repayment.member_name_snapshot member_name,summary_repayment.business_date,summary_repayment.business_source_primary_id,summary_repayment.business_source_label_snapshot,a.sale_fact_id,origin.order_id origin_order_id,origin.source_line_id,SUM(a.amount_cents) amount_cents')->group('summary_repayment.fact_id,summary_repayment.order_id,summary_repayment.store_id,summary_repayment.organization_name_snapshot,summary_repayment.store_name_snapshot,summary_repayment.member_id,summary_repayment.member_name_snapshot,summary_repayment.business_date,summary_repayment.business_source_primary_id,summary_repayment.business_source_label_snapshot,a.sale_fact_id,origin.order_id,origin.source_line_id')->select()->toArray() as $row){$repayments[]=$row;}}
         $saleRowsByOrder=[];$lineIds=[];
         if($orderIds){foreach($this->scope(Db::name('cashier_v3_sale_fact'),$stores)->whereIn('order_id',$orderIds)->where('fact_direction','forward')->where('status','effective')->select()->toArray() as $sale){$saleRowsByOrder[(string)$sale['order_id']][]=$sale;$lineIds[]=(string)$sale['source_line_id'];}}
         $personnel=$this->newCustomerPersonnel($stores,$orderIds,array_values(array_unique($lineIds)));$guides=$personnel['guides'];$salespeople=$personnel['salespeople'];$managers=$personnel['managers'];
-        foreach($regular as $row){$sourceId=(int)$row['business_source_primary_id'];$order=(string)$row['order_id'];$guideRows=$guides[$order]??[];$salespersonRows=[];$managerRows=[];foreach($saleRowsByOrder[$order]??[] as $sale){$line=(string)$sale['source_line_id'];$salespersonRows=array_merge($salespersonRows,$salespeople[$line]??[]);$managerRows=array_merge($managerRows,$managers[$line]??[]);} $suffix=(int)$row['sale_debt_amount_cents']>0?'deposit':'full';$this->newCustomerSummaryAddRow($records,$row,$guideRows,$salespersonRows,$managerRows,(int)$row['amount_cents'],$suffix,0,(string)$row['source'],$sourceId,$input);}
-        // 一笔首次付清事件只记一次新客，即使该订单拆成多条商品和多次收款。
-        foreach($firstOrders as $order=>$event){$saleRows=$saleRowsByOrder[$order]??[];if(!$saleRows)continue;$guideRows=$guides[$order]??[];$salespersonRows=[];$managerRows=[];foreach($saleRows as $sale){$line=(string)$sale['source_line_id'];$salespersonRows=array_merge($salespersonRows,$salespeople[$line]??[]);$managerRows=array_merge($managerRows,$managers[$line]??[]);} $sale=$saleRows[0];$this->newCustomerSummaryAddRow($records,['member_id'=>$event['member_id'],'member_name'=>$sale['member_name_snapshot'],'division_name'=>$sale['organization_name_snapshot'],'store_name'=>$sale['store_name_snapshot'],'business_date'=>$event['business_date']],$guideRows,$salespersonRows,$managerRows,0,'full',1,(string)$event['source_label_snapshot'],(int)$event['source_primary_id'],$input);}
-        $repaymentSalespeople=$this->newCustomerRepaymentSalespeople($stores,array_values(array_unique(array_column($repayments,'repayment_order_id'))));foreach($repayments as $row)$this->newCustomerSummaryAddRow($records,['member_id'=>$row['member_id'],'member_name'=>$row['member_name'],'division_name'=>$row['division_name'],'store_name'=>$row['store_name'],'business_date'=>$row['business_date']],[], $repaymentSalespeople[(string)$row['repayment_order_id']]??[],[],(int)$row['amount_cents'],'cleared',0,'补交',0,$input);
-        $columns=$this->columns(['system_name'=>'系统名称','division_name'=>'分公司','store_name'=>'门店','member'=>'会员','guide'=>'导购','salesperson'=>'销售人','sales_manager'=>'销售经理','source'=>'来源']);$groups=[];foreach(range(1,$lastMonth)as$m){$keys=[];foreach([['count','人次'],['full','全款'],['deposit','定金'],['cleared','清款']]as$d){$key='month_'.$m.'_'.$d[0];$columns[]=['key'=>$key,'label'=>$d[1],'group_label'=>$m.'月'];$keys[]=$key;}$groups[]=['label'=>$m.'月','column_keys'=>$keys];}$columns[]=['key'=>'annual_cash','label'=>'全年现金业绩'];
-        foreach($records as &$row){$row['_drilldown']=[];foreach(range(1,$lastMonth)as$m){$countKey='month_'.$m.'_count';$row[$countKey]=(int)($row[$countKey]??0);foreach(['full','deposit','cleared']as$s){$key='month_'.$m.'_'.$s;$row[$key]=$this->money((int)($row[$key.'_cents']??0));}$monthStart=max($range['start'],sprintf('%04d-%02d-01',$year,$m));$monthEnd=min($range['end'],date('Y-m-t',strtotime($monthStart)));$config=['report'=>'new_customer_analysis','params'=>['start_date'=>$monthStart,'end_date'=>$monthEnd],'param_map'=>['member_id'=>'member_id','source_id'=>'source_id','source_label'=>'source_label','guide_id'=>'guide_id','salesperson_id'=>'salesperson_id','sales_manager_id'=>'sales_manager_id']];if($row[$countKey]!==0)$row['_drilldown'][$countKey]=$config;foreach(['full','deposit','cleared']as$s){$key='month_'.$m.'_'.$s;if((int)($row[$key.'_cents']??0)!==0)$row['_drilldown'][$key]=$config;}}$row['annual_cash']=$this->money((int)$row['annual_cash_cents']);if((int)$row['annual_cash_cents']!==0)$row['_drilldown']['annual_cash']=['report'=>'new_customer_analysis','param_map'=>['member_id'=>'member_id','source_id'=>'source_id','source_label'=>'source_label','guide_id'=>'guide_id','salesperson_id'=>'salesperson_id','sales_manager_id'=>'sales_manager_id']];}unset($row);
+        // 首次销售事件的冻结来源是新客归属权威值，不能让收款单上的来源把同一新客拆成两组。
+        foreach($regular as $row){$order=(string)$row['order_id'];$event=$firstOrders[$order];$sourceId=(int)$event['source_primary_id'];$source=(string)$event['source_label_snapshot'];$guideRows=$guides[$order]??[];$salespersonRows=[];$managerRows=[];foreach($saleRowsByOrder[$order]??[] as $sale){$line=(string)$sale['source_line_id'];$salespersonRows=array_merge($salespersonRows,$salespeople[$line]??[]);$managerRows=array_merge($managerRows,$managers[$line]??[]);} $suffix=(int)$row['sale_debt_amount_cents']>0?'deposit':'full';$this->newCustomerSummaryAddRow($records,$row,$guideRows,$salespersonRows,$managerRows,(int)$row['amount_cents'],$suffix,0,$source,$sourceId,$input);}
+        // 一笔首次销售事件只记一次新客，即使该订单拆成多条商品和多次收款。
+        foreach($firstOrders as $order=>$event){if((string)$event['business_date']<$range['start'])continue;$saleRows=$saleRowsByOrder[$order]??[];if(!$saleRows)continue;$guideRows=$guides[$order]??[];$salespersonRows=[];$managerRows=[];foreach($saleRows as $sale){$line=(string)$sale['source_line_id'];$salespersonRows=array_merge($salespersonRows,$salespeople[$line]??[]);$managerRows=array_merge($managerRows,$managers[$line]??[]);} $sale=$saleRows[0];$this->newCustomerSummaryAddRow($records,['store_id'=>$sale['store_id'],'member_id'=>$event['member_id'],'member_name'=>$sale['member_name_snapshot'],'organization_id'=>$sale['organization_id'],'organization_path_snapshot'=>$sale['organization_path_snapshot'],'division_name'=>$sale['organization_name_snapshot'],'store_name'=>$sale['store_name_snapshot'],'business_date'=>$event['business_date']],$guideRows,$salespersonRows,$managerRows,0,'full',1,(string)$event['source_label_snapshot'],(int)$event['source_primary_id'],$input);}
+        // 补交来源是收款事件自己的历史快照；原办卡来源只决定新客资格，不覆盖补交归因。
+        $repaymentSalespeople=$this->newCustomerRepaymentSalespeople($stores,array_values(array_unique(array_column($repayments,'repayment_order_id'))));foreach($repayments as $row){
+            // 与明细共用 A 来源判定；合计、下钻及导出都从相同的后端行集得出。
+            if($this->isExcludedNewCustomerSource((int)$row['business_source_primary_id'],(string)$row['business_source_label_snapshot'],$excludedSourceIds))continue;
+            $this->newCustomerSummaryAddRow($records,$row,[], $repaymentSalespeople[(string)$row['repayment_order_id']]??[],[],(int)$row['amount_cents'],'cleared',0,(string)$row['business_source_label_snapshot'],(int)$row['business_source_primary_id'],$input);
+        }
+        // 会员不是汇总维度；前端、合计和导出使用同一组不含会员的后端列契约。
+        $columns=$this->columns(['system_name'=>'系统名称','division_name'=>'分公司','store_name'=>'门店','guide'=>'导购','salesperson'=>'销售人','sales_manager'=>'销售经理','source'=>'来源']);$groups=[];foreach(range(1,$lastMonth)as$m){$keys=[];foreach([['count','人次'],['full','全款'],['deposit','定金'],['cleared','清款']]as$d){$key='month_'.$m.'_'.$d[0];$columns[]=['key'=>$key,'label'=>$d[1],'group_label'=>$m.'月'];$keys[]=$key;}$groups[]=['label'=>$m.'月','column_keys'=>$keys];}$columns[]=['key'=>'annual_cash','label'=>'全年现金业绩'];
+        foreach($records as &$row){$row['_drilldown']=[];foreach(range(1,$lastMonth)as$m){$countKey='month_'.$m.'_count';$row[$countKey]=(int)($row[$countKey]??0);foreach(['full','deposit','cleared']as$s){$key='month_'.$m.'_'.$s;$row[$key]=$this->money((int)($row[$key.'_cents']??0));}$monthStart=max($range['start'],sprintf('%04d-%02d-01',$year,$m));$monthEnd=min($range['end'],date('Y-m-t',strtotime($monthStart)));$config=['report'=>'new_customer_analysis','params'=>['start_date'=>$monthStart,'end_date'=>$monthEnd],'param_map'=>['summary_group_key'=>'summary_group_key']];if($row[$countKey]!==0)$row['_drilldown'][$countKey]=$config;foreach(['full','deposit','cleared']as$s){$key='month_'.$m.'_'.$s;if((int)($row[$key.'_cents']??0)!==0)$row['_drilldown'][$key]=$config;}}$row['annual_cash']=$this->money((int)$row['annual_cash_cents']);if((int)$row['annual_cash_cents']!==0)$row['_drilldown']['annual_cash']=['report'=>'new_customer_analysis','param_map'=>['summary_group_key'=>'summary_group_key']];}unset($row);
         return $this->result('新客汇总表',$columns,array_values($records),array_merge($input,['_guide_filter_options'=>$this->newCustomerGuideFilterOptions($stores,$firstOrderIds)]),$groups,['natural_year'=>$year,'visible_months'=>$lastMonth]);
     }
 
@@ -1228,6 +1290,20 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         ];
     }
     private function sourceIds(string $prefix):array{return $this->sourceIdsMany([$prefix]);}
+    /** 新客两表排除全部一级 A 来源，包括已停用但仍存在历史快照的来源。 */
+    private function newCustomerExcludedSourceIds():array
+    {
+        $ids=[];
+        foreach(Db::name('cashier_v3_business_source')->where('parent_id',0)->field('id,name')->select()->toArray() as $source){
+            if($this->sourcePrefix($source)==='A')$ids[]=(int)$source['id'];
+        }
+        return $ids;
+    }
+    /** 历史来源可能改名或删除：ID 与发生时名称任一指向 A，均不进入新客收款行。 */
+    private function isExcludedNewCustomerSource(int $sourceId,string $label,array $excludedIds):bool
+    {
+        return in_array($sourceId,$excludedIds,true)||$this->sourcePrefix(['name'=>$label])==='A';
+    }
     private function sourceIdsMany(array $prefixes):array{$ids=[];foreach($this->primarySources()as$s)if(in_array($this->sourcePrefix($s),$prefixes,true))$ids[]=(int)$s['id'];return $ids;}
     private function sourcePrefix(array $source):string{$name=trim((string)($source['name']??''));return preg_match('/^([A-Z])/u',$name,$m)?$m[1]:'';}
     private function paymentMethods():array{$rows=Db::name('cashier_v3_payment_method_config')->where('status',1)->where('code','<>','old_card_entry')->order('sort','asc')->order('id','asc')->select()->toArray();$out=[];foreach($rows as$r){$code=trim((string)$r['code']);if($code==='')continue;$out[]=['code'=>$code,'label'=>trim((string)$r['display_name'])?:trim((string)$r['default_name'])?:$code];}return$out;}
@@ -1271,7 +1347,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $this->appendDimensionFiltersToColumns($columns);
         $this->appendDimensionFiltersToRows($records);
         $visible=!empty($input['_internal_all'])?$records:array_slice($records,($page-1)*$limit,$limit);
-        $result=['title'=>$title,'columns'=>$columns,'records'=>$visible,'total'=>count($records),'page'=>$page,'page_size'=>$limit,'totals'=>$totals,'drilldown_keys'=>['organization_id','store_id','dimension_code','payment_method_code','metric_code','start_date','end_date'],'table_layout'=>['fixed'=>true,'sticky_header'=>true,'sticky_summary'=>true,'result_scroll'=>true],'metric_version'=>'store-operations-phase-two-v1','service_customer_rule_version'=>ServiceCustomerEligibility::VERSION,'data_as_of'=>date('Y-m-d H:i:s'),'aggregation_status'=>'reconciled'];
+        // 未付清订单入表改变两张新客表的资格和统计时间，不能复用旧口径版本。
+        $metricVersion=$title==='新客汇总表'?'new-customer-first-sale-grouped-v6':($title==='新客明细表'?'new-customer-first-sale-v5':'store-operations-phase-two-v1');
+        $result=['title'=>$title,'columns'=>$columns,'records'=>$visible,'total'=>count($records),'page'=>$page,'page_size'=>$limit,'totals'=>$totals,'drilldown_keys'=>['organization_id','store_id','dimension_code','payment_method_code','metric_code','start_date','end_date'],'table_layout'=>['fixed'=>true,'sticky_header'=>true,'sticky_summary'=>true,'result_scroll'=>true],'metric_version'=>$metricVersion,'service_customer_rule_version'=>ServiceCustomerEligibility::VERSION,'data_as_of'=>date('Y-m-d H:i:s'),'aggregation_status'=>'reconciled'];
         $summary=$this->summaryRow($title,$columns,$records);if($summary)$result['summary_row']=$summary;
         if($groups)$result['column_groups']=$groups;
         $metadata=$this->metadataForTitle($title,$totals);
@@ -1279,7 +1357,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $metadata['filter_schema'][] = [
                 'key' => 'guide_id', 'label' => '导购', 'type' => 'select', 'required' => false,
                 'placeholder' => '全部导购（可选）', 'options' => (array)($input['_guide_filter_options'] ?? []),
-                'source_explanation' => '默认显示所有首次付清疗程卡的顾客，包括未填写导购的订单；选择导购后，只显示该导购参与的订单。',
+                'source_explanation' => '默认显示来源不是 A 且首次办理疗程卡的顾客，未付清和未填写导购的订单也计入；选择导购后，只显示该导购参与的订单。',
             ];
         }
         $metadata['filter_schema']=array_merge(
@@ -1362,20 +1440,19 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     {
         $descriptions=[
             'company'=>'显示该订单门店现在所属的分公司；门店未配置分公司时显示“未配置分公司”。',
-            'division_name'=>'显示首次付清疗程卡订单所属的分公司。',
-            'store_name_snapshot'=>'显示首次付清疗程卡订单的下单门店。',
-            'store_name'=>'显示首次付清疗程卡订单的下单门店。',
-            'business_date'=>'显示顾客首次付清疗程卡的销售日期；先付定金、后来补清的，以付清日期为准。',
-            'customer'=>'显示首次付清疗程卡订单上的顾客姓名。',
-            'member'=>'显示首次付清疗程卡订单上的会员姓名。',
+            'division_name'=>'显示首次办理疗程卡订单所属的分公司。',
+            'store_name_snapshot'=>'显示首次办理疗程卡订单的下单门店。',
+            'store_name'=>'显示首次办理疗程卡订单的下单门店。',
+            'business_date'=>'显示顾客首次办理疗程卡的销售日期；未付清也计入新客，后来补清不改变这一天。',
+            'customer'=>'显示首次办理疗程卡订单上的顾客姓名。',
             'system_name'=>'显示该顾客所属的业务系统。',
-            'guide'=>'显示首次付清疗程卡订单中记录的导购；未填写则显示空白。',
-            'salesperson'=>'显示首次付清疗程卡订单中记录的销售人；未填写则显示空白。',
-            'sales_manager'=>'显示首次付清疗程卡订单中记录的销售经理；未填写则显示空白。',
-            'source'=>'显示顾客首次付清疗程卡订单记录的来源；补交收款明细显示“补交”。',
+            'guide'=>'显示首次办理疗程卡订单中记录的导购；未填写则显示空白。',
+            'salesperson'=>'显示首次办理疗程卡订单中记录的销售人；未填写则显示空白。',
+            'sales_manager'=>'显示首次办理疗程卡订单中记录的销售经理；未填写则显示空白。',
+            'source'=>'首次办理疗程卡的明细显示办卡订单来源；补交按收款时记录的来源统计。首次办卡或补交来源为 A 的数据均不进入本表。',
             'age'=>'当前订单没有可核实的年龄资料，因此暂不显示年龄。',
             'phone'=>'显示会员资料中当前保存的手机号码。',
-            'care_project'=>'显示首次付清疗程卡订单中的商品或项目名称。',
+            'care_project'=>'显示首次办理疗程卡订单中的商品或项目名称。',
             'craftsman'=>'显示该订单项目分配的护理手艺人；未分配则显示空白。',
             'experience_card_amount'=>'默认显示该订单明细的销售金额；有权限人员手动修改后显示保存的金额。',
             'care_duration'=>'显示有权限人员为该订单明细手动填写并保存的护理时长。',
@@ -1385,8 +1462,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'full_payment'=>'显示查询日期内，这笔首次疗程卡订单未形成欠款的收款金额。',
             'deposit_payment'=>'显示查询日期内，这笔首次疗程卡订单形成欠款时先收的金额。',
             'cleared_payment'=>'显示查询日期内，为这笔首次疗程卡订单补交并结清的金额。',
-            'remark'=>'显示首次付清疗程卡订单上填写的备注。',
-            'annual_cash'=>'合计所选日期内，这笔首次疗程卡订单的全款、定金和补交收款；退款按实际发生日期扣减。',
+            'remark'=>'显示首次办理疗程卡订单上填写的备注。',
+            'annual_cash'=>'合计所选日期内，这笔首次疗程卡订单的全款、定金和补交收款；未付清不影响已收款计入，退款按实际发生日期扣减。',
         ];
         foreach($columns as &$column){
             $key=(string)($column['key']??'');
@@ -1394,8 +1471,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             if(preg_match('/^month_(\d+)_(count|full|deposit|cleared)$/',$key,$parts)){
                 $month=(int)$parts[1];$kind=$parts[2];
                 $column['source_explanation']=$kind==='count'
-                    ?$month.'月首次付清疗程卡的顾客人数；每位顾客只算一次，多次付款不会重复增加人数。'
-                    :$month.'月所选日期内，这些首次付清疗程卡订单的'.['full'=>'全款','deposit'=>'定金','cleared'=>'补交结清'][$kind].'收款金额。';
+                    ?$month.'月来源不是 A 且首次办理疗程卡的顾客人数；未付清也计入，每位顾客只算一次，后续补清不会重复增加人数。'
+                    :$month.'月所选日期内，这些首次疗程卡订单的'.['full'=>'全款','deposit'=>'定金','cleared'=>'补交结清'][$kind].'收款金额。';
             }
         }unset($column);
         return $columns;
@@ -1542,16 +1619,27 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if($managerId>0&&!array_filter($managers,static fn(array $row):bool=>(int)($row['sales_manager_employee_id']??0)===$managerId))return false;
         return true;
     }
+    /**
+     * 汇总及下钻共用非会员维度键。门店 ID 阻止同名门店跨店混算，历史名称快照
+     * 保留报表当期展示维度；会员、订单与收款单均不能再拆分汇总行。
+     */
+    private function newCustomerSummaryGroupKey(array $row,string $guide,string $salesperson,string $manager,int $sourceId,string $source):string
+    {
+        return hash('sha256',json_encode([(int)($row['store_id']??0),(string)($row['company_dimension_id']??''),(string)($row['division_name']??$row['organization_name_snapshot']??''),(string)($row['store_name']??$row['store_name_snapshot']??''),$guide,$salesperson,$manager,$sourceId,$source],JSON_UNESCAPED_UNICODE));
+    }
     private function newCustomerSummaryAddRow(array &$records,array $row,array $guides,array $salespeople,array $managers,int $amount,string $suffix,int $count,string $source,int $sourceId,array $input):void
     {
-        // 缺少人员归属不影响首次付清的顾客身份；人员仅用于主动筛选。
+        // 缺少人员归属不影响首次疗程卡顾客身份；人员仅用于主动筛选。
         if(!$this->newCustomerPersonnelMatches($guides,$salespeople,$managers,$input))return;
         if((int)($input['member_id']??0)>0&&(int)$row['member_id']!==(int)$input['member_id'])return;
         if((int)($input['source_id']??0)>0&&$sourceId!==(int)$input['source_id'])return;
         if((int)($input['source_id']??0)===0&&trim((string)($input['source_label']??''))!==''&&$source!==trim((string)$input['source_label']))return;
-        $guideId=(int)($input['guide_id']??0);$guide=$this->newCustomerNames($guides,'guide_employee_id','guide_employee_name_snapshot');$salesperson=$this->newCustomerNames($salespeople,'employee_id','employee_name_snapshot');$manager=$this->newCustomerNames($managers,'sales_manager_employee_id','sales_manager_name_snapshot');
-        $key=(int)$row['member_id'].'|'.$guide.'|'.$salesperson.'|'.$manager.'|'.$sourceId.'|'.$source;
-        if(!isset($records[$key]))$records[$key]=['system_name'=>'瑞昊','division_name'=>(string)$row['division_name'],'store_name'=>(string)$row['store_name'],'member'=>(string)$row['member_name'],'member_id'=>(int)$row['member_id'],'guide_id'=>$guideId,'guide'=>$guide,'salesperson'=>$salesperson,'sales_manager'=>$manager,'source'=>$source,'source_id'=>$sourceId,'source_label'=>$source,'annual_cash_cents'=>0];
+        // 与明细共用组织维度解析，再按分公司 ID 分组并应用已选择的维度筛选。
+        $this->projectOrganization($row,(string)($row['organization_id']??''),(string)($row['organization_path_snapshot']??''),(string)($row['business_date']??''));
+        if(!$this->selectedDimensionMatches($row,$input))return;
+        $guide=$this->newCustomerNames($guides,'guide_employee_id','guide_employee_name_snapshot');$salesperson=$this->newCustomerNames($salespeople,'employee_id','employee_name_snapshot');$manager=$this->newCustomerNames($managers,'sales_manager_employee_id','sales_manager_name_snapshot');
+        $key=$this->newCustomerSummaryGroupKey($row,$guide,$salesperson,$manager,$sourceId,$source);
+        if(!isset($records[$key]))$records[$key]=['system_name'=>'瑞昊','division_name'=>(string)$row['division_name'],'company_dimension_id'=>(string)$row['company_dimension_id'],'city_manager_dimension_id'=>(string)$row['city_manager_dimension_id'],'store_name'=>(string)$row['store_name'],'store_id'=>(int)$row['store_id'],'summary_group_key'=>$key,'guide'=>$guide,'salesperson'=>$salesperson,'sales_manager'=>$manager,'source'=>$source,'source_id'=>$sourceId,'source_label'=>$source,'annual_cash_cents'=>0];
         $month=(int)substr((string)$row['business_date'],5,2);$records[$key]['month_'.$month.'_count']=(int)($records[$key]['month_'.$month.'_count']??0)+$count;$records[$key]['month_'.$month.'_'.$suffix.'_cents']=(int)($records[$key]['month_'.$month.'_'.$suffix.'_cents']??0)+$amount;$records[$key]['annual_cash_cents']+=(int)$amount;
     }
     private function cashByMemberAndMonth(array $stores,array $members,string $start,string $end):array{if(!$members)return[];$rows=$this->cashFacts($stores)->whereIn('member_id',$members)->whereBetween('business_date',[$start,$end])->where('status','effective')->fieldRaw('member_id,business_date,SUM(amount_cents) amount_cents')->group('member_id,business_date')->order('business_date','asc')->select()->toArray();$out=[];foreach($rows as$r)$out[(int)$r['member_id']][]=$r;return$out;}
@@ -1670,7 +1758,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             return ['value'=>(int)($row['value']??0),'label'=>(string)($row['label']??'')];
         },$rows),static fn(array $row):bool=>(int)$row['value']>0&&trim($row['label'])!==''));
     }
-    /** 导购选项只来自本期首次付清的订单，避免跨月补清时选不到原单导购。 */
+    /** 导购选项来自首笔疗程卡订单，避免跨月补清时选不到原单导购。 */
     private function newCustomerGuideFilterOptions(array $stores,array $orderIds):array
     {
         if(!$orderIds)return[];

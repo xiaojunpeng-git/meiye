@@ -12,7 +12,9 @@ foreach ([
     'private function fixedColumns',
     'private function summaryRow',
     'private function summaryMetricKind',
-    "'metric_version'=>'store-operations-phase-two-v1'",
+    "'metric_version'=>\$metricVersion",
+    "'new-customer-first-sale-grouped-v6'",
+    "'new-customer-first-sale-v5':'store-operations-phase-two-v1'",
     "'data_as_of'=>date('Y-m-d H:i:s')",
     'if(!$columns)return[]',
 ] as $needle) {
@@ -35,9 +37,9 @@ foreach ([
     "'new_customer_analysis' => '新客明细表'",
     "'new_customer_analysis_summary' => '新客汇总表'",
     "'report'=>'new_customer_analysis'",
-    "'member_id'=>'member_id','source_id'=>'source_id','source_label'=>'source_label','guide_id'=>'guide_id'",
+    "'summary_group_key'=>'summary_group_key'",
     "'guide'=>'导购'",
-    "'guide_id'=>\$guideId",
+    'newCustomerSummaryGroupKey',
     "'key' => 'guide_id', 'label' => '导购', 'type' => 'select', 'required' => false",
     "guideFilterOptions",
     "'cross_industry_customer_detail' => '异业收客明细表'",
@@ -48,15 +50,16 @@ foreach ([
     if (strpos($service, $needle) === false) throw new RuntimeException('new-customer drilldown contract missing: ' . $needle);
 }
 foreach ([
-    'firstCompletedCourseOrders',
-    "'first_course_completed'",
+    'firstCourseOrders',
+    "'course_pending_settlement','first_course_completed'",
     "whereIn('s.order_id',array_keys(\$firstOrders)",
-    '一笔首次付清事件只记一次新客',
-    '缺少人员归属不影响首次付清的顾客身份',
+    '一笔首次销售事件只记一次新客',
+    '缺少人员归属不影响首次疗程卡顾客身份',
     'newCustomerColumnExplanations',
-    '未付清、后续购买和已作废订单不算',
+    '未付清也计入',
 ] as $needle) {
-    $haystack = $needle === '未付清、后续购买和已作废订单不算' ? $view : $service;
+    // 只调整两张新客报表；共享的首次付清生命周期资格仍供其他指标复用。
+    $haystack = $needle === '未付清也计入' ? $view : $service;
     if (strpos($haystack, $needle) === false) throw new RuntimeException('first-course new-customer contract missing: ' . $needle);
 }
 foreach ([
