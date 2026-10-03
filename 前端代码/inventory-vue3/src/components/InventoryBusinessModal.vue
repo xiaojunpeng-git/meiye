@@ -580,12 +580,12 @@ async function exportCountRows() {
   finally { countLoading.value = false }
 }
 
-/** 后端目录本身按门店/库存主体过滤；逐页取完，不按库存数量或前 100 行截断。 */
-async function allCountCatalog(includeBatches = false) {
+/** 普通盘点读有效目录，清零读现存批次；两者都逐页取完且不信任客户端传来的仓库范围。 */
+async function allCountCatalog(includeBatches = false, forZeroCount = false) {
   const rows = [], seen = new Set()
   let page = 1, total = 0
   do {
-    const response = await catalogApi.value.searchCatalog({ ...catalogQuery.value, keyword: '', category_id: 0, page, limit: 50, include_count_batches: includeBatches ? 1 : 0 })
+    const response = await catalogApi.value.searchCatalog({ ...catalogQuery.value, keyword: '', category_id: 0, page, limit: 50, include_count_batches: includeBatches ? 1 : 0, ...(forZeroCount ? { for_zero_count: 1 } : {}) })
     const current = Array.isArray(response?.list) ? response.list : []
     total = Number(response?.total || 0)
     if (!current.length && rows.length < total) throw new Error('商品目录未返回完整数据，请稍后重试。')
@@ -641,7 +641,8 @@ async function loadCurrentInventoryCountRows(zeroCounted = false) {
   // 一键清零先清空屏幕上的旧行；读取失败再还原，不能让网络错误丢失未保存的填写。
   if (zeroCounted) replaceCountRows([])
   try {
-    const catalog = await allCountCatalog(true)
+    // 清零不依赖有效商品目录；只此操作读取当前仓正数批次，普通导入仍沿用原目录口径。
+    const catalog = await allCountCatalog(true, zeroCounted)
     const additions = []
     for (const sku of catalog) {
       const batches = Array.isArray(sku.count_batches) ? sku.count_batches : []

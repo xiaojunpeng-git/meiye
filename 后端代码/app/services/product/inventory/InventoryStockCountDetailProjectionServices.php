@@ -18,8 +18,10 @@ final class InventoryStockCountDetailProjectionServices
             ->leftJoin('inventory_stock s', 's.id=l.stock_id')
             ->leftJoin('store_product p', 'p.id=l.product_id')
             ->leftJoin('store_product_attr_value a', 'a.id=l.sku_id')
+            // 历史目录缺失时从所盘批次快照还原名称，不能把真实盘亏单显示成匿名“已停用商品”。
+            ->leftJoin('inventory_batch b', 'b.stock_id=l.stock_id AND b.batch_no=l.surplus_batch_no')
             ->where('l.document_id', (int)$document['id'])
-            ->field('l.id,l.line_no,l.product_id,l.sku_id,l.sku_unique,l.quantity_scale,l.book_quantity_units,l.counted_quantity_units,l.difference_quantity_units,l.surplus_batch_no,l.surplus_unit_cost_cents,l.surplus_manufactured_date,l.surplus_expire_date,p.store_name product_name,p.code product_code,a.suk sku_name,a.bar_code barcode,s.stock_unit')
+            ->field("l.id,l.line_no,l.product_id,l.sku_id,l.sku_unique,l.quantity_scale,l.book_quantity_units,l.counted_quantity_units,l.difference_quantity_units,l.surplus_batch_no,l.surplus_unit_cost_cents,l.surplus_manufactured_date,l.surplus_expire_date,COALESCE(NULLIF(p.store_name,''),b.product_name_snapshot) product_name,COALESCE(NULLIF(p.code,''),b.product_code_snapshot) product_code,COALESCE(NULLIF(a.suk,''),b.sku_name_snapshot) sku_name,COALESCE(NULLIF(a.bar_code,''),b.barcode_snapshot) barcode,s.stock_unit")
             ->order('l.line_no asc')->select()->toArray();
         // 金额必须取已结算批次流水；盘亏可能跨多个成本批次，不能用实盘差额乘盘盈单价推算。
         $amountByLine = $canViewCost ? $this->settledAmountByLine($document, $location) : [];

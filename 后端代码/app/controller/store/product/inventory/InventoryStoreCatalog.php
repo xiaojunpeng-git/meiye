@@ -26,18 +26,27 @@ class InventoryStoreCatalog extends AuthController
             ['limit', 20],
             ['for_count', 0],
         ], true);
-        return $this->success($this->services->search(
-            (int)$this->storeId,
-            (string)$keyword,
-            (int)$categoryId,
-            (int)$page,
-            (int)$limit,
-            (int)$forCount === 1,
-            (int)$this->request->get('include_count_batches', 0) === 1,
-            // 成本权限由当前员工实际权限解析，不能使用请求中的布尔值。
-            (int)$this->request->get('include_count_batches', 0) === 1
-                && (new \app\services\product\inventory\InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.stock')
-        ));
+        try {
+            $result = $this->services->search(
+                (int)$this->storeId,
+                (string)$keyword,
+                (int)$categoryId,
+                (int)$page,
+                (int)$limit,
+                (int)$forCount === 1,
+                (int)$this->request->get('include_count_batches', 0) === 1,
+                // 成本权限由当前员工实际权限解析，不能使用请求中的布尔值。
+                (int)$this->request->get('include_count_batches', 0) === 1
+                    && (new \app\services\product\inventory\InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.stock'),
+                // 清零专用查询以现存库存批次为入口，不能因商品目录失效漏掉仍有余额的批次。
+                (int)$this->request->get('for_zero_count', 0) === 1
+            );
+        } catch (\RuntimeException $exception) {
+            if ($exception->getMessage() !== 'inventory_stock_count_batch_balance_mismatch') throw $exception;
+            // 总余额与批次明细不一致时必须明示阻断，不能以空列表误导操作人认为已清零。
+            return $this->fail('当前库存批次与总余额不一致，请先联系管理员核对库存；尚未修改系统库存。', ['code' => $exception->getMessage()]);
+        }
+        return $this->success($result);
     }
 
     public function barcode()

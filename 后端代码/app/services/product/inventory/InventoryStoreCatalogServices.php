@@ -7,6 +7,7 @@ use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\product\inventory\query\InventoryBatchStockDataScope;
 use app\services\product\inventory\query\InventoryBatchStockQueryContract;
 use app\services\product\inventory\query\InventoryBatchStockQueryProvider;
+use app\services\product\inventory\completion\InventoryEntitlementCompletionContract;
 use think\facade\Db;
 
 /** Read-only bridge to the established store product/SKU/barcode authority. */
@@ -44,7 +45,7 @@ final class InventoryStoreCatalogServices
      * The store ID is always derived from the authenticated store session. Client
      * category and page inputs can only narrow a catalog already scoped to it.
      */
-    public function search(int $storeId, string $keyword, int $categoryId = 0, int $page = 1, int $limit = 20, bool $forCount = false, bool $includeCountBatches = false, bool $canViewCost = false): array
+    public function search(int $storeId, string $keyword, int $categoryId = 0, int $page = 1, int $limit = 20, bool $forCount = false, bool $includeCountBatches = false, bool $canViewCost = false, bool $forZeroCount = false): array
     {
         $keyword = trim($keyword);
         if ($storeId <= 0 || $categoryId < 0 || mb_strlen($keyword) > 64) {
@@ -52,6 +53,12 @@ final class InventoryStoreCatalogServices
         }
         $page = max(1, $page);
         $limit = max(1, min($limit, 50));
+        if ($forZeroCount) {
+            if (!$forCount || !$includeCountBatches || $keyword !== '' || $categoryId !== 0) {
+                throw new \InvalidArgumentException('inventory_catalog_zero_count_invalid');
+            }
+            return $this->positiveBatchCountCatalog($storeId, $page, $limit, $canViewCost);
+        }
         $query = Db::name('store_product_attr_value')
             ->alias('a')
             ->join('store_product p', 'p.id=a.product_id')
@@ -122,6 +129,41 @@ final class InventoryStoreCatalogServices
             $list = (new InventoryCountBatchCatalog())->attach($list, CashierV3ScopeResolver::TENANT_SCOPE_ID, $locationId, $canViewCost);
         }
         return compact('list', 'total', 'page', 'limit', 'categories');
+    }
+
+    /** 清零候选取当前门店默认仓的正数库存主体，而非可售商品目录；历史下架/缺失目录也必须可盘亏。 */
+    private function positiveBatchCountCatalog(int $storeId, int $page, int $limit, bool $canViewCost): array
+    {
+        $locationId = (int)Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('store_id', $storeId)->where('location_type', 'STORE')->where('is_default', 1)
+            ->where('location_status', 'ACTIVE')->value('id');
+        if (!$locationId) throw new \RuntimeException('inventory_catalog_source_scope_denied');
+        // 存在正数库存主体却没有可盘批次时必须阻止“一键全部清零”，不能悄悄漏掉残额。
+        $positiveStocks = (int)Db::name('inventory_stock')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('store_id', $storeId)->where('location_id', $locationId)
+            ->where('stock_status', 'GOOD')->where('available_quantity_units', '>', 0)->count();
+        $query = Db::name('inventory_stock')->alias('s')->join('inventory_batch b', 'b.stock_id=s.id')
+            ->where('s.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('s.store_id', $storeId)->where('s.location_id', $locationId)
+            ->where('s.stock_status', 'GOOD')->where('s.available_quantity_units', '>', 0)
+            ->where('b.batch_status', 'ACTIVE')->where('b.available_quantity_units', '>', 0);
+        $total = (int)(clone $query)->count('DISTINCT s.id');
+        if ($total !== $positiveStocks) throw new \RuntimeException('inventory_stock_count_batch_balance_mismatch');
+        $list = $query->fieldRaw('s.id AS stock_id,s.consumable_product_id AS product_id,s.sku_id,s.product_unique AS sku_unique,s.stock_unit,s.available_quantity_units,s.quantity_scale,b.product_name_snapshot AS product_name,b.sku_name_snapshot AS sku_name,b.barcode_snapshot AS barcode')
+            ->group('s.id')->order('s.id asc')->page($page, $limit)->select()->toArray();
+        foreach ($list as &$row) {
+            $row['available_quantity'] = InventoryBatchStockQueryContract::unitsToDecimal((int)$row['available_quantity_units'], (int)$row['quantity_scale']);
+        }
+        unset($row);
+        $list = (new InventoryCountBatchCatalog())->attach($list, CashierV3ScopeResolver::TENANT_SCOPE_ID, $locationId, $canViewCost);
+        foreach ($list as $row) {
+            $batchUnits = 0;
+            foreach ($row['count_batches'] as $batch) {
+                $batchUnits += InventoryEntitlementCompletionContract::decimalToUnits((string)$batch['quantity'], (int)$row['quantity_scale']);
+            }
+            if ($batchUnits !== (int)$row['available_quantity_units']) throw new \RuntimeException('inventory_stock_count_batch_balance_mismatch');
+        }
+        return compact('list', 'total', 'page', 'limit') + ['categories' => []];
     }
 
     /** Read only the requested page's SKU balances, so loading all SKUs does not hit the batch-report 10k-row window. */

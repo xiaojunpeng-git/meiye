@@ -166,10 +166,25 @@ final class InventoryStockCountServices
         $invalid = [];
         foreach ($lines as $line) {
             $identity = $line['productId'] . ':' . $line['skuId'] . ':' . $line['unique'];
-            if (isset($valid[$identity])) continue;
+            if (isset($valid[$identity]) || $this->retiredBatchCanOnlyBeZeroed($scope, $location, $line)) continue;
             $invalid[] = $this->invalidCatalogLine($line);
         }
         if ($invalid) throw new InventoryStockCountCatalogException($invalid);
+    }
+
+    /** 失效目录仅可处理本仓已有的正数批次，并且必须把该批实盘置零；绝不放行新增、盘盈或其他仓库存。 */
+    private function retiredBatchCanOnlyBeZeroed(array $scope, array $location, array $line): bool
+    {
+        if (($line['countMode'] ?? '') !== 'BATCH' || $line['batchNo'] === '' || (float)$line['counted'] !== 0.0) return false;
+        $stock = Db::name('inventory_stock')->where('tenant_id', $scope['tenantId'])
+            ->where('store_id', $scope['storeId'])->where('location_id', (int)$location['id'])
+            ->where('consumable_product_id', $line['productId'])->where('sku_id', $line['skuId'])
+            ->where('product_unique', $line['unique'])->where('stock_status', InventoryEntitlementCompletionContract::STOCK_STATUS_GOOD)
+            ->where('available_quantity_units', '>', 0)->lock(true)->find();
+        if (!$stock) return false;
+        return (bool)Db::name('inventory_batch')->where('stock_id', (int)$stock['id'])
+            ->where('batch_no', $line['batchNo'])->where('batch_status', 'ACTIVE')
+            ->where('available_quantity_units', '>', 0)->lock(true)->find();
     }
 
     /** Returns only stable client identities; names are resolved from the user's unchanged draft snapshot. */
@@ -241,14 +256,18 @@ final class InventoryStockCountServices
             ->where('p.is_del', 0)->where('p.is_inventory', 1)->where('a.id', $line['skuId'])
             ->where('a.unique', $line['unique'])->where('a.type', 0)
             ->field('a.stock_unit,p.salon_stock_enabled')->lock(true)->find();
-        if (!$catalog) throw new InventoryStockCountCatalogException([$this->invalidCatalogLine($line)]);
+        // 上游已做整单目录核验；这里再锁定失效商品的现有批次，防止确认途中转为盘盈。
+        if (!$catalog && !$this->retiredBatchCanOnlyBeZeroed($scope, $location, $line)) {
+            throw new InventoryStockCountCatalogException([$this->invalidCatalogLine($line)]);
+        }
         $query = Db::name('inventory_stock')->where('tenant_id', $scope['tenantId'])
-            ->where('location_id', (int)$location['id'])->where('consumable_product_id', $line['productId'])
+            ->where('store_id', $scope['storeId'])->where('location_id', (int)$location['id'])->where('consumable_product_id', $line['productId'])
             // 库存唯一键按商品和 SKU 建立；历史规格编码变化不能分裂同一库存余额。
             ->where('sku_id', $line['skuId'])
             ->where('stock_status', InventoryEntitlementCompletionContract::STOCK_STATUS_GOOD);
         $stock = $query->lock(true)->find();
         if ($stock) return (array)$stock;
+        if (!$catalog) throw new InventoryStockCountCatalogException([$this->invalidCatalogLine($line)]);
         // 未盘或零差异的全量目录行不能因确认请求而创建零库存主体。
         if (!$createMissing) return [
             'id' => 0, 'quantity_scale' => (int)$catalog['salon_stock_enabled'] === 1 ? 2 : 0,
