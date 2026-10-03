@@ -105,14 +105,15 @@ final class InventoryStoreReadModelServices
                 'inventory_amount_cents' => $canViewCost ? $this->amountCents($row['inventory_amount'] ?? null) : null,
             ];
         }, $rows);
-        $batchIds = array_map(static fn(array $row): int => (int)$row['batch_id'], $batches);
-        // 流水仍以已结算批次事实为准；批号和日期只从该事实绑定的批次补充展示。
-        $facts = Db::name('inventory_batch_movement_fact')->alias('f')->leftJoin('inventory_location l', 'l.id=f.location_id')
+        // 当前批次只用于余额展示；已耗尽批次的历史流水仍属于该商品，不能用当前正库存批次 ID 过滤。
+        // 同时约束事实仓库和库存所属仓库，保持详情与门店授权范围一致。
+        $facts = Db::name('inventory_batch_movement_fact')->alias('f')->join('inventory_stock s', 's.id=f.stock_id')
+            ->leftJoin('inventory_location l', 'l.id=f.location_id')
             ->leftJoin('inventory_batch b', 'b.id=f.batch_id')
             ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
             ->where('f.tenant_id', $scope->tenantId())->whereIn('f.location_id', $scope->locationIds())
-            ->whereIn('f.batch_id', $batchIds)->where('f.fact_status', 'SETTLED')
-            ->leftJoin('inventory_stock s', 's.id=f.stock_id')
+            ->where('s.tenant_id', $scope->tenantId())->whereIn('s.location_id', $scope->locationIds())
+            ->where('s.consumable_product_id', $productId)->where('f.fact_status', 'SETTLED')
             ->field('f.id,COALESCE(n.document_no,f.source_id) order_sn,b.batch_no,b.manufactured_date,b.expire_date,f.source_type,f.source_id,f.source_detail_id,f.reversal_of,f.business_date,f.direction,f.quantity_units,s.quantity_scale,s.stock_unit,f.unit_cost_cents,f.cost_amount_cents,f.recorded_at,l.location_name')
             ->order('f.id desc')->limit(200)->select()->toArray();
         foreach ($facts as &$fact) {

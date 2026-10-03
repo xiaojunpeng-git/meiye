@@ -27,7 +27,8 @@ foreach (['store' => $store, 'platform' => $platform] as $side => $source) {
         && strpos($source, "throw new \\RuntimeException('inventory_stock_batch_balance_mismatch')") !== false);
     reconciliationAssert($side . ' movement detail includes display scale, unit and unit cost from the authoritative stock row',
         $source !== false
-        && strpos($source, "leftJoin('inventory_stock s', 's.id=f.stock_id')") !== false
+        && (strpos($source, "leftJoin('inventory_stock s', 's.id=f.stock_id')") !== false
+            || strpos($source, "join('inventory_stock s', 's.id=f.stock_id')") !== false)
         && strpos($source, 's.quantity_scale,s.stock_unit,f.unit_cost_cents') !== false
         && strpos($source, "\$fact['unit_cost_cents'] = null") !== false);
 }
