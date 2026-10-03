@@ -536,8 +536,57 @@ final class CashierV3PresaleClaimServices
         $stock = Db::name('inventory_stock')->where('tenant_id', $scope['tenantId'])->where('location_id', (int)$location['id'])
             ->where('store_id', $scope['storeId'])->where('consumable_product_id', (int)$claimable['product_id'])->where('sku_id', (int)$claimable['sku_id'])
             ->where('product_unique', (string)$claimable['sku_unique_snapshot'])->where('stock_status', InventoryEntitlementCompletionContract::STOCK_STATUS_GOOD)->lock(true)->find();
+        // An existing exact stock identity remains authoritative even at zero; a sibling must
+        // never bypass its shortage. Legacy imported rights may lack that identity entirely.
+        if (!$stock) $stock = $this->lockUniqueSiblingStock($scope, $location, $claimable);
         if (!$stock || (int)$stock['available_quantity_units'] <= 0 || (int)$stock['quantity_scale'] < 0 || (int)$stock['quantity_scale'] > 4) throw new \RuntimeException('presale_claim_stock_insufficient');
         return (array)$stock;
+    }
+
+    /**
+     * Resolve a missing imported product identity only within the same store and product master.
+     * Both SKU ratios must be 1:1; names, specification and the physical stock candidate must
+     * be unique. This is a stock lookup, not a stock creation or cross-store transfer.
+     */
+    private function lockUniqueSiblingStock(array $scope, array $location, array $claimable): array
+    {
+        $source = Db::name('store_product')->where('id', (int)$claimable['product_id'])->find();
+        $sourceSku = Db::name('store_product_attr_value')->where('id', (int)$claimable['sku_id'])->find();
+        if (!$source || !$sourceSku || (int)$source['pid'] <= 0 || (int)$source['type'] !== 1
+            || (int)$source['relation_id'] !== $scope['storeId']
+            || (int)$sourceSku['product_id'] !== (int)$source['id']
+            || (int)$sourceSku['product_type'] !== (int)$source['product_type']
+            || (string)$sourceSku['unique'] !== (string)$claimable['sku_unique_snapshot']
+            || (string)$source['store_name'] !== (string)$claimable['product_name_snapshot']
+            || (float)$sourceSku['unit_convert'] !== 1.0 || (int)$sourceSku['decimal_scale'] !== 0) {
+            throw new \RuntimeException('presale_claim_stock_insufficient');
+        }
+        $siblings = Db::name('store_product')->where('pid', (int)$source['pid'])->where('relation_id', $scope['storeId'])
+            ->where('product_type', (int)$source['product_type'])->where('store_name', (string)$source['store_name'])
+            ->where('is_del', (int)$source['is_del'])->where('type', 1)
+            ->where('id', '<>', (int)$source['id'])->order('id', 'asc')->select()->toArray();
+        $matched = [];
+        foreach ($siblings as $sibling) {
+            $skus = Db::name('store_product_attr_value')->where('product_id', (int)$sibling['id'])
+                ->where('product_type', (int)$sibling['product_type'])->where('suk', (string)$sourceSku['suk'])
+                ->order('id', 'asc')->select()->toArray();
+            foreach ($skus as $sku) {
+                if ((float)$sku['unit_convert'] !== 1.0 || (int)$sku['decimal_scale'] !== 0) continue;
+                $candidate = Db::name('inventory_stock')->where('tenant_id', $scope['tenantId'])->where('location_id', (int)$location['id'])
+                    ->where('store_id', $scope['storeId'])->where('consumable_product_id', (int)$sibling['id'])
+                    ->where('sku_id', (int)$sku['id'])->where('product_unique', (string)$sku['unique'])
+                    ->where('stock_status', InventoryEntitlementCompletionContract::STOCK_STATUS_GOOD)->lock(true)->find();
+                if ($candidate && (int)$candidate['available_quantity_units'] > 0 && (int)$candidate['quantity_scale'] === 0) {
+                    $matched[(int)$candidate['id']] = (array)$candidate;
+                }
+            }
+        }
+        if (count($matched) !== 1) throw new \RuntimeException('presale_claim_stock_insufficient');
+        $stock = reset($matched);
+        $batchUnits = (int)Db::name('inventory_batch')->where('stock_id', (int)$stock['id'])
+            ->where('batch_status', 'ACTIVE')->sum('available_quantity_units');
+        if ($batchUnits !== (int)$stock['available_quantity_units']) throw new \RuntimeException('presale_claim_stock_insufficient');
+        return $stock;
     }
 
     private function allocateBatches(int $stockId, int $units): array
