@@ -2741,6 +2741,7 @@ onBeforeUnmount(() => {
       initial-mode="full"
       :show-craftsmen="salesPersonnelTarget.role === 'craftsman'"
       :show-salespeople="salesPersonnelTarget.role === 'salesperson'"
+      :grouped-allocation-summary="salesPersonnelTarget.role === 'salesperson'"
       :show-guides="salesPersonnelTarget.role === 'guide'"
       :show-sales-managers="salesPersonnelTarget.role === 'sales_manager'"
       :require-craftsmen="salesPersonnelTarget.role === 'craftsman'"
@@ -2826,6 +2827,7 @@ onBeforeUnmount(() => {
       :selected-craftsmen="serviceCraftsmanEntry.allocations || []"
       :store-id="state.currentStore?.id || state.currentStore?.storeId || 0"
       :allocation-total-amount-cents="serviceCraftsmanEntry.allocationTotalAmountCents || 0"
+      :project-count-total="serviceCraftsmanEntry.writeoffQuantity || 0"
       history-adjustment
       :loading="serviceCraftsmanLoading"
       :saving="serviceCraftsmanSubmitting"

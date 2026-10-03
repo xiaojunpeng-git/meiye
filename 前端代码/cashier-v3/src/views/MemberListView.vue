@@ -239,13 +239,13 @@ async function submitMemberMutation(payload = {}) {
   })
 }
 
-async function selectMemberCreatorServicePerson({ selectedRecord = null } = {}) {
+async function selectMemberCreatorServicePerson({ selectedRecords = [] } = {}) {
   const selection = await openCashierV3QueryEntitySelector({
     entityType: 'person',
     title: '选择专属服务人',
     description: '只显示当前门店有效任职的人员。',
-    multiple: false,
-    selectedRecords: selectedRecord ? [selectedRecord] : [],
+    multiple: true,
+    selectedRecords: Array.isArray(selectedRecords) ? selectedRecords : [],
     scope: 'member_exclusive_service_staff',
     selectionContext: {
       storeScope: 'current_store',

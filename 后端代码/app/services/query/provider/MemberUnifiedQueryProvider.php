@@ -778,10 +778,29 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
 
     protected function exclusiveServicePeople(array $uids, array $visible, bool $allStores): array
     {
+        // 多人选择是当前权威关系；旧单人关系仅为尚未建立多人选择的会员回退。
+        // 先按门店权限过滤姓名，再聚合，列表和导出共用此投影避免跨店泄漏。
+        $selected = [];
+        $selectedColumns = $this->tableColumns('member_exclusive_service_selection');
+        if (isset($selectedColumns['member_id'], $selectedColumns['status'], $selectedColumns['staff_name'], $selectedColumns['store_id'], $selectedColumns['sort_order'])) {
+            $rows = Db::name('member_exclusive_service_selection')
+                ->whereIn('member_id', $uids)
+                ->where('status', 1)
+                ->field('member_id,store_id,staff_name')
+                ->order('member_id asc,sort_order asc,id asc')
+                ->select()->toArray();
+            foreach ($rows as $row) {
+                $memberId = (int)$row['member_id'];
+                $selected[$memberId] ??= [];
+                if (!$allStores && !in_array((int)$row['store_id'], $visible, true)) continue;
+                $name = trim((string)$row['staff_name']);
+                if ($name !== '') $selected[$memberId][] = $name;
+            }
+        }
         $columns = $this->tableColumns('member_exclusive_service');
         if (!isset($columns['member_id'], $columns['status'], $columns['staff_name'])
             || (!$allStores && !isset($columns['store_id']))) {
-            return [];
+            return array_map(static function (array $names): string { return implode('、', $names); }, $selected);
         }
         $query = Db::name('member_exclusive_service')
             ->whereIn('member_id', $uids)
@@ -789,7 +808,11 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         if (!$allStores) {
             $query->whereIn('store_id', $visible);
         }
-        return $query->column('staff_name', 'member_id');
+        $legacy = $query->column('staff_name', 'member_id');
+        foreach ($legacy as $memberId => $name) {
+            if (!array_key_exists((int)$memberId, $selected)) $selected[(int)$memberId] = [(string)$name];
+        }
+        return array_map(static function (array $names): string { return implode('、', $names); }, $selected);
     }
 
     protected function cardSummaries(array $uids, array $visible, bool $allStores): array

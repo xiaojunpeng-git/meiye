@@ -244,9 +244,20 @@ final class MobileCustomerProfileServices
         $currentActive = $current !== null && (int)($current['status'] ?? 0) === 1;
         if ($currentActive === ($next !== null) && $currentStaffId === $nextStaffId) return;
         $now = time(); $storeName = (string)Db::name('system_store')->where('id', (int)$merchant['storeId'])->value('name');
-        if ($current) Db::name('member_exclusive_service')->where('id', (int)$current['id'])->update(['status' => 0, 'updated_at' => $now, 'version' => (int)$current['version'] + 1]);
+        // 旧单人投影每会员有唯一键，变更必须更新原行；手机端未换首位
+        // 人员时上方已返回，不能顺手清掉门店端多选的其余人员。
         $changeKey = 'mobile-profile:' . $memberId . ':' . substr(hash('sha256', $idempotencyKey), 0, 40);
-        if ($next !== null) Db::name('member_exclusive_service')->insert(['member_id' => $memberId, 'staff_id' => $next['staffId'], 'employee_id' => $next['employeeId'], 'store_id' => $next['storeId'], 'staff_name' => $next['name'], 'store_name' => $storeName, 'source_type' => $source, 'source_business_type' => 'member', 'source_business_id' => (string)$memberId, 'reason' => '手机端客户档案保存', 'status' => 1, 'version' => 1, 'bound_at' => $now, 'operator_id' => (int)$merchant['staffId'], 'operator_name' => (string)$merchant['staffName'], 'idempotency_key' => $changeKey, 'created_at' => $now, 'updated_at' => $now]);
+        $projection = ['staff_id' => (int)($next['staffId'] ?? 0), 'employee_id' => (int)($next['employeeId'] ?? 0), 'store_id' => (int)($next['storeId'] ?? 0), 'staff_name' => (string)($next['name'] ?? ''), 'store_name' => $next === null ? '' : $storeName, 'source_type' => $source, 'source_business_type' => 'member', 'source_business_id' => (string)$memberId, 'reason' => '手机端客户档案保存', 'status' => $next === null ? 0 : 1, 'bound_at' => $now, 'operator_id' => (int)$merchant['staffId'], 'operator_name' => (string)$merchant['staffName'], 'idempotency_key' => $changeKey, 'updated_at' => $now];
+        if ($current) Db::name('member_exclusive_service')->where('id', (int)$current['id'])->update($projection + ['version' => (int)$current['version'] + 1]);
+        elseif ($next !== null) Db::name('member_exclusive_service')->insert($projection + ['member_id' => $memberId, 'version' => 1, 'created_at' => $now]);
+        (new \app\services\cashier\v3\member\CashierV3MemberExclusiveSelectionServices())->replace(
+            $memberId,
+            $next === null ? [] : [[
+                'staff_id' => (int)$next['staffId'], 'employee_id' => (int)$next['employeeId'],
+                'store_id' => (int)$next['storeId'], 'staff_name' => (string)$next['name'],
+            ]],
+            (int)$merchant['staffId'], $changeKey, $now
+        );
         Db::name('member_exclusive_service_change')->insert([
             'change_key' => $changeKey, 'member_id' => $memberId,
             'previous_staff_id' => $currentStaffId, 'previous_employee_id' => (int)($current['employee_id'] ?? 0), 'previous_store_id' => (int)($current['store_id'] ?? 0),

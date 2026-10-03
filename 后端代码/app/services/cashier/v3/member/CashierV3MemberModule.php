@@ -1324,6 +1324,11 @@ final class CashierV3MemberModule
                 $now
             );
         }
+        if ($profile['exclusive_service_people_supplied']) {
+            (new CashierV3MemberExclusiveSelectionServices())->replace(
+                $uid, $profile['exclusive_service_people'], $operatorScope->operatorId(), $idempotencyKey, $now
+            );
+        }
         self::recordMemberCreatedEvent(
             $uid,
             $operatorScope,
@@ -1439,6 +1444,12 @@ final class CashierV3MemberModule
                 time()
             );
         }
+        if ($profile['exclusive_service_people_supplied']) {
+            (new CashierV3MemberExclusiveSelectionServices())->replace(
+                (int)$member['uid'], $profile['exclusive_service_people'],
+                $operatorScope->operatorId(), $idempotencyKey, time()
+            );
+        }
         $current = Db::name('user')->where('uid', (int)$member['uid'])->lock(true)->find();
         $changedFields = ['name', 'sex', 'birthday', 'address', 'note', 'idCard', 'profileFields', 'memberLevelId', 'memberTagIds'];
         if ($referrerSupplied) $changedFields[] = 'referrerMemberId';
@@ -1447,9 +1458,14 @@ final class CashierV3MemberModule
             'source' => 'cashier_v3',
         ];
         if ($profile['exclusive_service_person_supplied']) {
-            $changedFields[] = 'exclusiveServicePersonId';
+            $changedFields[] = $profile['exclusive_service_people_supplied']
+                ? 'exclusiveServicePersonIds' : 'exclusiveServicePersonId';
             $mutationPayload['changed_fields'] = $changedFields;
             $mutationPayload['exclusive_service_person_id'] = (int)($profile['exclusive_service_person']['staff_id'] ?? 0);
+            if ($profile['exclusive_service_people_supplied']) {
+                $mutationPayload['exclusive_service_person_ids'] = array_values(array_map('intval',
+                    array_column($profile['exclusive_service_people'], 'staff_id')));
+            }
             $mutationPayload['exclusive_service_person_changed'] = $exclusiveServicePersonChanged;
         }
         self::recordMemberMutationEvent(
@@ -1571,9 +1587,9 @@ final class CashierV3MemberModule
         $tagIds = $uid > 0
             ? array_map('intval', (array)Db::name('user_label_relation')->where('uid', $uid)->where('type', 0)->where('relation_id', 0)->column('label_id'))
             : [];
-        $exclusive = $uid > 0
-            ? Db::name(self::EXCLUSIVE_SERVICE_TABLE)->where('member_id', $uid)->where('status', 1)->find()
-            : null;
+        $exclusivePeople = $uid > 0
+            ? (new CashierV3MemberExclusiveSelectionServices())->records($uid) : [];
+        $exclusive = $exclusivePeople[0] ?? null;
         $referrer = self::referrerProjection($member);
         return [
             'id' => (string)($member['uid'] ?? ''),
@@ -1590,6 +1606,8 @@ final class CashierV3MemberModule
             'profileFields' => $profileFields,
             'exclusiveServicePersonId' => (int)($exclusive['staff_id'] ?? 0),
             'exclusiveServiceStaffRecord' => $exclusive ?: null,
+            'exclusiveServicePersonIds' => array_values(array_map('intval', array_column($exclusivePeople, 'staff_id'))),
+            'exclusiveServiceStaffRecords' => $exclusivePeople,
             'referrerMemberId' => (int)$referrer['member_id'],
             'referrerMemberName' => (string)$referrer['name'],
             'referrerLocked' => (bool)$referrer['locked'],
@@ -1760,7 +1778,7 @@ final class CashierV3MemberModule
 
     /**
      * 校验并规范化完整建档中的可落库选择项。
-     * @return array{level_id:int,tag_ids:int[],exclusive_service_person:?array,exclusive_service_person_supplied:bool}
+     * @return array{level_id:int,tag_ids:int[],exclusive_service_person:?array,exclusive_service_person_supplied:bool,exclusive_service_people:array,exclusive_service_people_supplied:bool}
      */
     private static function validateProfileSelections(array $payload, CashierV3OperatorScope $operatorScope): array
     {
@@ -1815,19 +1833,28 @@ final class CashierV3MemberModule
             }
         }
 
-        $exclusiveServicePersonSupplied = array_key_exists('exclusiveServicePersonId', $payload)
+        // 新数组完整替换当前集合；旧单值调用继续映射成一人，避免移动端
+        // 或旧接口编辑时把“未提交字段”误当成清空。
+        $peopleSupplied = array_key_exists('exclusiveServicePersonIds', $payload);
+        $exclusiveServicePersonSupplied = $peopleSupplied
+            || array_key_exists('exclusiveServicePersonId', $payload)
             || array_key_exists('exclusive_service_person_id', $payload);
-        $servicePersonRaw = $payload['exclusiveServicePersonId']
-            ?? $payload['exclusive_service_person_id']
-            ?? null;
-        $exclusiveServicePerson = null;
-        if ($servicePersonRaw !== null && $servicePersonRaw !== '' && $servicePersonRaw !== 0 && $servicePersonRaw !== '0') {
-            if (is_array($servicePersonRaw)
-                || !ctype_digit((string)$servicePersonRaw)
-                || (int)$servicePersonRaw <= 0) {
-                throw self::validation('exclusiveServicePersonId', '专属服务人参数无效。');
+        $raw = $peopleSupplied ? $payload['exclusiveServicePersonIds'] : [
+            $payload['exclusiveServicePersonId'] ?? $payload['exclusive_service_person_id'] ?? null
+        ];
+        if (!is_array($raw) || count($raw) > 30) {
+            throw self::validation('exclusiveServicePersonIds', '专属服务人选择无效。');
+        }
+        $ids = [];
+        foreach ($raw as $value) {
+            if ($value === null || $value === '' || $value === 0 || $value === '0') continue;
+            if (is_array($value) || !ctype_digit((string)$value) || (int)$value <= 0) {
+                throw self::validation('exclusiveServicePersonIds', '专属服务人参数无效。');
             }
-            $staffId = (int)$servicePersonRaw;
+            $ids[(int)$value] = (int)$value;
+        }
+        $exclusiveServicePeople = [];
+        foreach ($ids as $staffId) {
             $staff = Db::name('system_store_staff')->alias('ss')
                 ->join('employee e', 'e.id = ss.employee_id')
                 ->where('ss.id', $staffId)
@@ -1835,16 +1862,19 @@ final class CashierV3MemberModule
                 ->where('ss.status', 1)
                 ->where('ss.is_del', 0)
                 ->where('ss.employee_id', '>', 0)
-                ->where('ss.cashier_craftsman_enabled', 1)
+                ->where(function ($query) {
+                    $query->where('ss.cashier_craftsman_enabled', 1)
+                        ->whereOr('ss.cashier_salesperson_enabled', 1);
+                })
                 ->where('e.status', 1)
                 ->where('e.is_del', 0)
                 ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,e.name as employee_name')
                 ->lock(true)
                 ->find();
             if (!$staff) {
-                throw self::validation('exclusiveServicePersonId', '所选人员已停用、离职、不属于当前门店或已关闭手艺人资格。');
+                throw self::validation('exclusiveServicePersonIds', '所选人员已停用、离职、不属于当前门店或不具备销售人/手艺人资格。');
             }
-            $exclusiveServicePerson = [
+            $exclusiveServicePeople[] = [
                 'staff_id' => (int)$staff['id'],
                 'employee_id' => (int)$staff['employee_id'],
                 'store_id' => (int)$staff['store_id'],
@@ -1852,12 +1882,15 @@ final class CashierV3MemberModule
                     ?: (string)$staff['staff_name'],
             ];
         }
+        $exclusiveServicePerson = $exclusiveServicePeople[0] ?? null;
 
         return [
             'level_id' => $levelId,
             'tag_ids' => $tagIds,
             'exclusive_service_person' => $exclusiveServicePerson,
             'exclusive_service_person_supplied' => $exclusiveServicePersonSupplied,
+            'exclusive_service_people' => $exclusiveServicePeople,
+            'exclusive_service_people_supplied' => $peopleSupplied,
         ];
     }
 
@@ -2186,14 +2219,17 @@ final class CashierV3MemberModule
             ->where('ss.store_id', $storeId)
             ->where('ss.status', 1)
             ->where('ss.is_del', 0)
-            ->where('ss.cashier_craftsman_enabled', 1)
+            ->where(function ($query) {
+                $query->where('ss.cashier_craftsman_enabled', 1)
+                    ->whereOr('ss.cashier_salesperson_enabled', 1);
+            })
             ->where('e.status', 1)
             ->where('e.is_del', 0)
             ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,e.name as employee_name')
             ->lock(true)
             ->find();
         if (!$staff) {
-            throw self::validation('exclusiveServicePersonId', '所选人员已停用、离职、不属于当前门店或已关闭手艺人资格。');
+            throw self::validation('exclusiveServicePersonId', '所选人员已停用、离职、不属于当前门店或不具备销售人/手艺人资格。');
         }
         $staffName = trim((string)($staff['employee_name'] ?? ''))
             ?: trim((string)($staff['staff_name'] ?? ''));

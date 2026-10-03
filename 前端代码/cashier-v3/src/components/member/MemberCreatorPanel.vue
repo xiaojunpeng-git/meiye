@@ -125,7 +125,7 @@ const existingMember = ref(null)
 const avatarFile = ref(null)
 const avatarPreview = ref('')
 const customValues = ref({})
-const servicePerson = ref(null)
+const servicePeople = ref([])
 const referrerMember = ref(null)
 
 const form = reactive({
@@ -146,14 +146,9 @@ const visibleProfileFields = computed(() => props.profileFields
   .filter((field) => field && typeof field === 'object' && fieldIsEnabled(field))
   .filter((field) => !BUILTIN_PROFILE_PARAMS.has(profileParam(field).toLowerCase()))
   .map((field, index) => normalizeProfileField(field, index)))
-const servicePersonName = computed(() => firstText(servicePerson.value, [
-  'staffName',
-  'staff_name',
-  'name',
-  'employeeName',
-  'realName',
-  'nickname'
-]) || '')
+const servicePersonName = computed(() => servicePeople.value.map((person) => firstText(person, [
+  'staffName', 'staff_name', 'name', 'employeeName', 'realName', 'nickname'
+])).filter(Boolean).join('、'))
 const referrerMemberName = computed(() => firstText(referrerMember.value, [
   'referrerMemberName',
   'name',
@@ -213,8 +208,10 @@ function initializeMember(member) {
   const tags = firstValue(member, ['memberTagIds', 'tagIds', 'labelIds', 'member_tag_ids'])
   form.memberTagIds = Array.isArray(tags) ? [...tags] : []
   form.note = firstText(member, ['note', 'remark', 'memo'])
+  const services = firstValue(member, ['exclusiveServiceStaffRecords'])
   const service = firstValue(member, ['exclusiveServiceStaffRecord', 'exclusiveServiceStaff', 'exclusiveStaff'])
-  servicePerson.value = service && typeof service === 'object' ? service : null
+  servicePeople.value = Array.isArray(services) ? services.map((item) => ({ ...item }))
+    : service && typeof service === 'object' ? [service] : []
   const referrerId = firstValue(member, ['referrerMemberId', 'referrer_member_id', 'spread_uid'])
   const referrerName = firstText(member, ['referrerMemberName', 'referrer_member_name', 'spread_uid_nickname'])
   referrerMember.value = Number(referrerId) > 0 ? {
@@ -424,11 +421,11 @@ async function selectServicePerson() {
   submitMessage.value = ''
   try {
     const selection = await props.onSelectServicePerson({
-      selectedRecord: servicePerson.value,
+      selectedRecords: servicePeople.value,
       currentStoreName: props.currentStoreName
     })
-    const record = normalizeSelectedPerson(selection)
-    if (record) servicePerson.value = record
+    if (Array.isArray(selection)) servicePeople.value = selection.map((item) => ({ ...item }))
+    else if (Array.isArray(selection?.selected)) servicePeople.value = selection.selected.map((item) => ({ ...item }))
   } catch (error) {
     submitMessageKind.value = 'error'
     submitMessage.value = readableError(error, '选择专属服务人失败，请稍后重试。')
@@ -480,7 +477,7 @@ function normalizeSelectedMember(selection) {
 
 function clearServicePerson() {
   if (isSubmitting.value || isOutcomeUncertain.value) return
-  servicePerson.value = null
+  servicePeople.value = []
 }
 
 function clearReferrer() {
@@ -488,10 +485,11 @@ function clearReferrer() {
   referrerMember.value = null
 }
 
-function servicePersonId() {
-  // 编辑回填的是会员-服务人关系记录，其 id 是关系主键，不是门店人员 id。
-  // 优先使用 staff_id，避免无关资料保存时把关系 id 当作新的服务人提交。
-  return firstValue(servicePerson.value, ['staffId', 'staff_id', 'id', 'employeeId', 'userId']) ?? null
+function servicePersonIds() {
+  // 回填的关系记录 id 是关系主键，必须优先取门店人员 staff_id。
+  return servicePeople.value.map((person) => Number(firstValue(person, [
+    'staffId', 'staff_id', 'id', 'employeeId', 'userId'
+  ]) || 0)).filter((id) => id > 0)
 }
 
 function referrerMemberId() {
@@ -560,7 +558,7 @@ function buildPayload() {
     address: form.address.trim(),
     memberLevelId: form.memberLevelId || null,
     memberTagIds: [...form.memberTagIds],
-    exclusiveServicePersonId: servicePersonId(),
+    exclusiveServicePersonIds: servicePersonIds(),
     referrerMemberId: referrerMemberId(),
     note: form.note.trim(),
     profileFields: profileValues

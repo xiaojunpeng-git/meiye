@@ -5,6 +5,7 @@ namespace app\services\cashier\v3\cashier;
 use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3ResultCode;
+use app\services\cashier\v3\member\CashierV3MemberExclusiveSelectionServices;
 use think\facade\Db;
 
 /** 收银顶部当前会员的权威摘要；不写会员、权益或欠款事实。 */
@@ -37,6 +38,8 @@ final class CashierV3CashierMemberSummaryServices
         $cards = $this->cardSummary($memberId);
         $debtAmount = $this->debtAmount($memberId);
         $exclusive = $this->exclusiveServiceName($memberId);
+        // 多人仅是收银默认候选；本次购物车行的人员分配仍单独保存和校验。
+        $exclusivePeople = (new CashierV3MemberExclusiveSelectionServices())->records($memberId);
         return [
             'id' => (string)$memberId,
             'memberId' => $memberId,
@@ -48,6 +51,7 @@ final class CashierV3CashierMemberSummaryServices
             'storeName' => $storeName,
             'serviceAdvisorName' => $exclusive,
             'exclusiveStaffName' => $exclusive,
+            'exclusiveServiceStaffRecords' => $exclusivePeople,
             'accountBalance' => $accountBalance,
             'cardBenefitAmount' => $cards['remainingAmount'],
             'remainingProjectAmount' => $cards['remainingAmount'],

@@ -322,11 +322,21 @@ final class CashierV3OrderLifecycleServices
             $facts = $this->effectivePersonnelFactsForLine(
                 $scope->tenantId(), $source['sourceId'], $lineId, 'sales_performance_allocated'
             );
-            $totalAmount = array_sum(array_map(static function (array $fact): int {
-                return abs((int)($fact['amount_cents'] ?? 0));
-            }, $facts));
-            $allocatedWeight = 0;
-            $lastFactIndex = count($facts) - 1;
+            // 独立结算岗位与普通岗位各有一份 100% 基数。打开调整弹窗时
+            // 只能在各自岗位组内反推比例，不能把两组业绩金额相加成 200% 的分母。
+            $groupTotals = [];
+            $groupLastIndices = [];
+            $groupCounts = [];
+            foreach ($facts as $factIndex => $fact) {
+                $staffRow = $eligibleByStaffId[(int)($fact['employee_id'] ?? 0)] ?? [];
+                $positionId = (int)($staffRow['position_id'] ?? 0);
+                $independent = (int)($staffRow['performance_independent'] ?? 0) === 1;
+                $groupKey = $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
+                $groupTotals[$groupKey] = ($groupTotals[$groupKey] ?? 0) + abs((int)($fact['amount_cents'] ?? 0));
+                $groupLastIndices[$groupKey] = $factIndex;
+                $groupCounts[$groupKey] = ($groupCounts[$groupKey] ?? 0) + 1;
+            }
+            $allocatedByGroup = [];
             foreach ($facts as $factIndex => $fact) {
                 $roleSnapshot = (string)($fact['role_snapshot'] ?? '');
                 // Lifecycle-adjusted facts store exact cents as their
@@ -334,14 +344,22 @@ final class CashierV3OrderLifecycleServices
                 // percentage-based, so derive a stable 0–100 percentage
                 // from the effective amounts instead of exposing 13400%.
                 $amount = abs((int)($fact['amount_cents'] ?? 0));
-                $allocationWeight = $lastFactIndex === $factIndex
-                    ? max(0, 100 - $allocatedWeight)
-                    : ($totalAmount > 0 ? intdiv($amount * 100, $totalAmount) : 0);
-                $allocatedWeight += $allocationWeight;
                 $staffId = (int)($fact['employee_id'] ?? 0);
                 $staffRow = $eligibleByStaffId[$staffId] ?? [];
                 $positionId = (int)($staffRow['position_id'] ?? 0);
                 $independent = (int)($staffRow['performance_independent'] ?? 0) === 1;
+                $groupKey = $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
+                $groupTotal = (int)($groupTotals[$groupKey] ?? 0);
+                // 0 元项目没有可反推比例的金额，优先保留结账事实原权重；
+                // 事后调整事实未保存比例时才在同组人员间等分。
+                $storedNumerator = (int)($fact['allocation_weight_numerator'] ?? 0);
+                $storedDenominator = (int)($fact['allocation_weight_denominator'] ?? 0);
+                $zeroAmountWeight = $storedDenominator === 100 && $storedNumerator > 0
+                    ? $storedNumerator : intdiv(100, max(1, (int)$groupCounts[$groupKey]));
+                $allocationWeight = $groupLastIndices[$groupKey] === $factIndex
+                    ? max(0, 100 - (int)($allocatedByGroup[$groupKey] ?? 0))
+                    : ($groupTotal > 0 ? intdiv($amount * 100, $groupTotal) : $zeroAmountWeight);
+                $allocatedByGroup[$groupKey] = ($allocatedByGroup[$groupKey] ?? 0) + $allocationWeight;
                 $salespeople[$lineId][] = [
                     'factId' => (string)($fact['fact_id'] ?? ''),
                     'employeeId' => (int)$fact['employee_id'],
@@ -356,7 +374,7 @@ final class CashierV3OrderLifecycleServices
                     'positionId' => $positionId,
                     'positionName' => trim((string)($staffRow['position_name'] ?? '')),
                     'performanceIndependent' => $independent,
-                    'allocationGroupKey' => $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal',
+                    'allocationGroupKey' => $groupKey,
                 ];
             }
             // 直接购买项目可能没有服务记录，但结账时的劳动业绩事实仍是
@@ -1099,12 +1117,13 @@ final class CashierV3OrderLifecycleServices
             if ($role === 'salesperson' && is_array($salespersonState)) {
                 continue;
             }
-            $total = 0; foreach ($facts as $fact) $total += abs((int)$fact['amount_cents']);
+            // 旧事实金额可能包含独立岗位的多份 100% 业绩，不是订单行的
+            // 现金业绩基数；调整时必须从结账收款权威值重新取一次。
+            $total = $role === 'salesperson'
+                ? $this->cashPerformanceForLine($scope->tenantId(), $source['sourceId'], $lineId)
+                : array_sum(array_map(static function (array $fact): int { return abs((int)$fact['amount_cents']); }, $facts));
             foreach ($facts as $fact) $this->insertReversal('cashier_v3_performance_fact', $fact, $operationId, $commandKey, $event, $operator, $now);
             $template = $facts[0] ?? $this->personnelAdjustmentTemplate($scope->tenantId(), $source['sourceId']);
-            if (!$facts && $role === 'salesperson') {
-                $total = $this->cashPerformanceForLine($scope->tenantId(), $source['sourceId'], $lineId);
-            }
             $marked = $role === 'salesperson' ? !empty($item['isPreSale']) : !empty($item['isPointCustomer']);
             if ($role === 'salesperson') {
                 // Reverse the old allocation once, then write the complete new
@@ -1355,6 +1374,13 @@ final class CashierV3OrderLifecycleServices
         if (!$lines || !$batch) throw self::failure('personnel_adjustment_cash_authority_missing');
         $amount = (int)$batch['cash_performance_amount_cents'];
         $total = array_sum(array_map(static function (array $line): int { return (int)$line['sale_amount_cents']; }, $lines));
+        // 全部为 0 元的订单仍可调整人员；其权威现金业绩为 0，不能进入除法分摊。
+        if ($total === 0 && $amount === 0) {
+            foreach ($lines as $line) {
+                if ((string)$line['order_line_id'] === $lineId) return 0;
+            }
+            throw self::failure('personnel_adjustment_line_cash_missing');
+        }
         if ($amount < 0 || $total <= 0 || $amount > $total) throw self::failure('personnel_adjustment_cash_equation_invalid');
         $shares = [];
         $remainders = [];

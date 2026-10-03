@@ -241,13 +241,23 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         // 事实；但已锁定的服务手艺人快照仍是历史服务归属的权威来源。不能因
         // 为没有金额事实就把用户在结账时选定的（含跨店/组织支援）人员清空。
         if ($byEmployee === []) return $this->presentSnapshotAllocations($source);
-        $staffRows = Db::name('system_store_staff')->where('store_id', $operator->storeId())
-            ->whereIn('employee_id', array_keys($byEmployee))->where('status', 1)->where('is_del', 0)
-            ->field('id,employee_id,craftsman_performance_type')->select()->toArray();
+        $staffRows = Db::name('system_store_staff')->alias('ss')
+            ->leftJoin('staff_job_position sjp', 'sjp.staff_id=ss.id AND sjp.status=1 AND sjp.is_del=0 AND sjp.end_time=0')
+            ->leftJoin('position p', 'p.id=sjp.position_id AND p.status=1')
+            ->where('ss.store_id', $operator->storeId())->whereIn('ss.employee_id', array_keys($byEmployee))
+            ->where('ss.status', 1)->where('ss.is_del', 0)
+            ->field('ss.id,ss.employee_id,ss.craftsman_performance_type,sjp.position_id,p.name position_name,p.performance_independent')->select()->toArray();
         foreach ($staffRows as $staff) {
             $employeeId = (int)$staff['employee_id'];
             if (!isset($byEmployee[$employeeId])) continue;
             $byEmployee[$employeeId]['staffId'] = (int)$staff['id'];
+            $positionId = (int)($staff['position_id'] ?? 0);
+            $independent = (int)($staff['performance_independent'] ?? 0) === 1;
+            $byEmployee[$employeeId]['positionId'] = $positionId;
+            $byEmployee[$employeeId]['positionName'] = trim((string)($staff['position_name'] ?? ''));
+            $byEmployee[$employeeId]['performanceIndependent'] = $independent;
+            $byEmployee[$employeeId]['allocationGroupKey'] = $independent && $positionId > 0
+                ? 'independent:' . $positionId : 'normal';
             $type = trim((string)($staff['craftsman_performance_type'] ?? ''));
             if (in_array($type, ['commission', 'labor', 'commission_labor'], true)) {
                 $byEmployee[$employeeId]['craftsmanPerformanceType'] = $type;
@@ -272,13 +282,21 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
             foreach ($rows as $index => &$row) $row['projectCountHalfUnits'] = $base + ($index >= count($rows) - $remainder ? 1 : 0);
             unset($row);
         }
-        $allocationTotal = array_sum(array_column($rows, 'allocationAmountCents'));
+        // 独立结算岗位与普通岗位分别拥有自己的 100% 分母；消耗业绩金额
+        // 仍以原事实为准，回显比例不得把不同岗位组的金额相加后重分配。
+        $groupTotals = [];
+        foreach ($rows as $row) {
+            $groupKey = (string)($row['allocationGroupKey'] ?? 'normal');
+            $groupTotals[$groupKey] = ($groupTotals[$groupKey] ?? 0) + (int)$row['allocationAmountCents'];
+        }
         foreach ($rows as &$row) {
             $row['id'] = $row['staffId']; $row['name'] = $row['employeeName'];
             $row['personnelSource'] = (string)($row['personnelSource'] ?? 'store');
             $row['marked'] = $row['isPointCustomer'];
-            $row['laborWeight'] = $allocationTotal > 0
-                ? round((int)$row['allocationAmountCents'] * 100 / $allocationTotal, 2)
+            $groupKey = (string)($row['allocationGroupKey'] ?? 'normal');
+            $groupTotal = (int)($groupTotals[$groupKey] ?? 0);
+            $row['laborWeight'] = $groupTotal > 0
+                ? round((int)$row['allocationAmountCents'] * 100 / $groupTotal, 2)
                 : 0;
             $row['allocationAmount'] = $this->money((int)$row['allocationAmountCents']);
             $row['laborFeeAmount'] = $this->money((int)$row['laborFeeCents']);
@@ -414,15 +432,22 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
     private function candidates(int $storeId): array
     {
         $rows = Db::name('system_store_staff')->alias('ss')->join('employee e', 'e.id=ss.employee_id')
+            ->leftJoin('staff_job_position sjp', 'sjp.staff_id=ss.id AND sjp.status=1 AND sjp.is_del=0 AND sjp.end_time=0')
+            ->leftJoin('position p', 'p.id=sjp.position_id AND p.status=1')
             ->where('ss.store_id', $storeId)->where('ss.status', 1)->where('ss.is_del', 0)
             ->where('ss.cashier_craftsman_enabled', 1)->where('e.status', 1)->where('e.is_del', 0)
-            ->field('ss.id,ss.employee_id,ss.store_id,ss.account,ss.staff_name,ss.craftsman_performance_type,e.name employee_name,e.employment_type_code,e.employment_type_version')
+            ->field('ss.id,ss.employee_id,ss.store_id,ss.account,ss.staff_name,ss.craftsman_performance_type,e.name employee_name,e.employment_type_code,e.employment_type_version,sjp.position_id,p.name position_name,p.performance_independent')
             ->order('ss.id', 'asc')->select()->toArray();
         return array_map(static function (array $row): array {
+            $positionId = (int)($row['position_id'] ?? 0);
+            $independent = (int)($row['performance_independent'] ?? 0) === 1;
             return [
                 'id' => (int)$row['id'], 'staffId' => (int)$row['id'], 'employeeId' => (int)$row['employee_id'],
                 'storeId' => (int)$row['store_id'], 'name' => trim((string)$row['employee_name']) ?: (string)$row['staff_name'],
-                'staffNo' => (string)$row['account'], 'positionName' => '手艺人',
+                'staffNo' => (string)$row['account'], 'positionId' => $positionId,
+                'positionName' => trim((string)($row['position_name'] ?? '')),
+                'performanceIndependent' => $independent,
+                'allocationGroupKey' => $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal',
                 'employeeTypeCode' => (string)$row['employment_type_code'],
                 'employeeTypeAuthorityVersion' => (int)$row['employment_type_version'],
                 'craftsmanPerformanceType' => (string)($row['craftsman_performance_type'] ?: 'commission_labor'),

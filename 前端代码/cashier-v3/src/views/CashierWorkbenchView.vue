@@ -40,6 +40,7 @@ import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerforman
 import CashierCouponSelectorOverlay from '@/components/cashier/CashierCouponSelectorOverlay.vue'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import { useRechargeCheckout } from '@/composables/useRechargeCheckout'
+import { defaultCraftsmanWeights, defaultProjectCounts, defaultSalespersonWeights } from '@/services/personnelDefaultAllocation'
 
 const state = useCashierV3State()
 const route = useRoute()
@@ -2052,10 +2053,61 @@ function openCustomCardUpgradeTarget() {
 }
 
 let catalogItemAppendQueue = Promise.resolve()
+async function defaultExclusivePersonnelForLine(line) {
+  // 只在新行创建时预选，人员资格以当前门店的收银候选查询为准。
+  // 查询不可用不阻断加入购物车；结账仍按最终行快照校验。
+  const selectedMemberId = Number(currentMemberId.value || 0)
+  const selectedIds = new Set((member.value?.exclusiveServiceStaffRecords || [])
+    .map((record) => Number(record.staffId || record.staff_id || 0)).filter((id) => id > 0))
+  if (!selectedIds.size || !selectedMemberId) return {}
+  const project = isProjectLine(line)
+  const [craftResult, salesResult] = await Promise.allSettled([
+    project ? queryPersonnelCandidates('service_actual_craftsmen', line) : Promise.resolve([]),
+    isEntitlementLine(line) ? Promise.resolve([]) : queryPersonnelCandidates('sales_performance_assignees', line)
+  ])
+  if (Number(currentMemberId.value || 0) !== selectedMemberId) return {}
+  const chosen = (result, role) => result.status === 'fulfilled'
+    ? result.value.filter((candidate) => selectedIds.has(Number(candidate.staffId || candidate.id || 0))
+        && candidate.selectable === true
+        && (role === 'craftsmen' ? candidate.craftsmanEligible === true : candidate.salespersonEligible === true))
+      .map((candidate) => ({ ...candidate, selected: true, role })) : []
+  const craftsmen = chosen(craftResult, 'craftsmen')
+  const salespeople = chosen(salesResult, 'salespeople')
+  const amountCents = personnelPerformanceBaseAmountCents(line)
+  if (craftsmen.length) {
+    defaultCraftsmanWeights(craftsmen)
+    defaultProjectCounts(craftsmen, Math.max(1, Number(line.quantity || 1)))
+  }
+  if (salespeople.length) defaultSalespersonWeights(salespeople)
+  const amountFor = (weight) => Math.max(0, Math.round(amountCents * Number(weight || 0) / 10000) * 100)
+  return {
+    ...(craftsmen.length ? { craftsmen: craftsmen.map((record, index) => ({
+      ...record, id: Number(record.staffId || record.id),
+      name: record.name || record.staffName || '',
+      laborWeight: Number(record.performance || 0),
+      performanceAmountCents: record.craftsmanPerformanceType === 'labor' ? 0 : amountFor(record.performance),
+      performanceAmountManual: false,
+      laborFeeCents: record.craftsmanPerformanceType === 'commission' ? 0 : Number(record.laborDefaultFeeCents || 0),
+      projectCount: record.projectCountText || '0',
+      isPrimary: index === 0,
+      sequence: index + 1,
+      isPointCustomer: false
+    })) } : {}),
+    ...(salespeople.length ? { salespeople: salespeople.map((record) => ({
+      ...record, id: Number(record.staffId || record.id),
+      name: record.name || record.staffName || '',
+      allocationWeight: Number(record.performance || 0),
+      performanceAmountCents: amountFor(record.performance),
+      performanceAmountManual: false,
+      isPreSale: false
+    })) } : {})
+  }
+}
+
 async function appendCatalogItemToDraft(item) {
   const itemId = Number(item?.id || 0)
   const catalogKind = String(item?.kind || '').trim()
-  const queued = catalogItemAppendQueue.then(() => {
+  const queued = catalogItemAppendQueue.then(async () => {
     if (!itemId || !catalogKind) {
       return { result: { status: 'failed', code: 'CASHIER_CATALOG_ITEM_INVALID', message: '商品信息不完整，请重新选择。' } }
     }
@@ -2078,6 +2130,7 @@ async function appendCatalogItemToDraft(item) {
       cardPurchaseSnapshot: clonePlain(item.cardPurchaseSnapshot || {}),
       localCatalogItem: { itemId, catalogKind }
     }
+    Object.assign(line, await defaultExclusivePersonnelForLine(line))
     appendLocalCashierDraftOperation({ action: 'choose-catalog-item', localLineId, itemId, catalogKind }, (draft) => {
       draft.lines.push(line)
     })
@@ -3138,6 +3191,14 @@ async function addEntitlementLines(payload = {}) {
       localLine.originalAmount = localLine.actualAmount
       draft.lines.push(localLine)
     })
+    // 权益金额由草稿占用情况计算，金额确定后再按同一行预选人员。
+    const defaults = await defaultExclusivePersonnelForLine(localLine)
+    if (Object.keys(defaults).length) {
+      appendLocalCashierDraftOperation({ action: 'default-exclusive-personnel', localLineId }, (draft) => {
+        const target = draft.lines.find((line) => line.id === localLineId)
+        if (target && String(draft.memberId || '') === String(currentMemberId.value || '')) Object.assign(target, defaults)
+      })
+    }
     // Keep the newly appended benefit line together with all pending purchases
     // until the selector closes. A late selector/root response is read-only and
     // must never temporarily render a pure-entitlement cart.
@@ -4202,18 +4263,18 @@ async function applyPersonnelAssignmentToAll(result = {}) {
 
 function craftsmenDisplaySummary(line = {}) {
   const records = localPersonnelAssignments.value[line.id]?.craftsmen
-  if (!Array.isArray(records)) return hasCartLineCraftsmen(line) ? line.craftsmenSummary : '待选择手艺人'
-  if (!records.length) return '待选择手艺人'
-  const first = `手艺人：${records[0].name}(${records[0].marked ? '点' : '轮'})`
-  return records.length > 1 ? `${first}等${records.length}人` : first
+  const chosen = Array.isArray(records) ? records : Array.isArray(line.craftsmen) ? line.craftsmen : []
+  if (!chosen.length) return hasCartLineCraftsmen(line) ? line.craftsmenSummary : '待选择手艺人'
+  const first = `手艺人：${chosen[0].name || chosen[0].staffName || ''}(${chosen[0].marked || chosen[0].isPointCustomer ? '点' : '轮'})`
+  return chosen.length > 1 ? `${first}等${chosen.length}人` : first
 }
 
 function salespersonDisplaySummary(line = {}) {
   const records = localPersonnelAssignments.value[line.id]?.salespeople
-  if (!Array.isArray(records)) return ''
-  if (!records.length) return ''
-  const first = `${records[0].name}${records[0].marked ? '(售前)' : ''}`
-  return records.length > 1 ? `${first}${records.length}人` : first
+  const chosen = Array.isArray(records) ? records : Array.isArray(line.salespeople) ? line.salespeople : []
+  if (!chosen.length) return ''
+  const first = `${chosen[0].name || chosen[0].staffName || ''}${chosen[0].marked || chosen[0].isPreSale ? '(售前)' : ''}`
+  return chosen.length > 1 ? `${first}${chosen.length}人` : first
 }
 
 function attributionDisplaySummary(line = {}, key = '', fallback = '') {

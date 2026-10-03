@@ -1,0 +1,25 @@
+# 第7轮：会员双人专属服务人默认分配本地自测
+
+- 基线 HEAD：`8b985656fe0ff2424d5972be353152476c8194cd`，本轮未提交。
+- 环境：门店端源码热更新 `127.0.0.1:18091`；本地 Docker `ruihao` 开发库。未访问或修改瑞昊生产库。
+- 迁移：仅本地执行 `2026-10-03-会员多专属服务人预选/02-正式升级.sql`，创建当前选择和审计两表。
+- 实操：在合肥世纪中心店新增会员“第七轮双人预选验收”，测试手机 `13000007001`，会员 ID `1136792`，专属服务人依次选择刘文秀（staff 672）、宋丽（staff 728）。保存后数据库两条有效关系的顺序为 1、2。
+- 列表补验：会员“张体”（uid `1110589`）本地库有两条有效选择，依次为刘雅婷、张高锦。修复统一查询的旧单人投影后，在 `18091` 门店会员列表重新查询，页面显示“刘雅婷、张高锦”；单元格 `clientWidth=scrollWidth=150`，姓名完整可见。列表与导出共用按门店权限过滤、按保存顺序聚合的字段；历史未建立多人选择的会员仍回退旧单人关系。
+- 独立岗位补验：张体的订单 `XS26100300076` 中，张高锦任店长且岗位独立结算，刘雅婷为普通美容师；卡项与 198 元项目的销售事实均为两人各 100%。订单中心原调整弹窗错误以两组事实合计反推各 50%，现重新打开显示两组各 100%，金额分别为各 9999 元、各 198 元。0 元订单 `XS26100300075` 的两名普通岗位仍为 50%/50%。本次未确认调整命令、未改写这两笔历史订单。
+- 服务手艺人补验：订单 `XS26100400002` 的“仪器”服务记录，原弹窗将张高锦、刘雅婷、龚栓萍的岗位统一显示为“手艺人”，并以三人金额合计反推为 50%/25%/25%。按当前有效岗位和独立结算组修复后，本地 `18091` 实际重新打开显示：张高锦“店长 100% / 1000 元”，刘雅婷、龚栓萍“美容师各 50% / 各 500 元”。临时将刘雅婷比例输入 60%，同组联动为 600/400 元，张高锦仍为 1000 元；随后点击取消，没有提交历史调整命令。职位读取当前有效任职供编辑资格和分组使用，既有劳动业绩事实金额不被打开弹窗改写。
+- 项目数追查：本地已结账订单 `XS26100400002` 的“面部养护”服务记录 `FW100400003`，锁定手艺人快照与三条劳动业绩事实均记录张高锦 1、刘雅婷 1、鲍兰芳 0；弹窗如实回显，不能仅改前端文字成 1/0.5/0.5。原因是原有两人默认项目数已进入购物车草稿，新增第三人时旧 `projectCount` 字段被误当人工修改，自动重分配提前退出。现将默认分配改为逐岗位组识别仍等于旧默认的数值并重算，回归测试得到店长 1、普通岗位两人各 0.5；非默认人工数值保持不变。该历史记录未修改，须经授权后通过服务记录调整命令留下原因与冲销事实。
+- 历史调整增人补验：产品经理在“修改服务记录手艺人”弹窗新增第三位普通岗位后，原界面保留两人各 0.5、第三人 0。修复为首次打开仍回显历史事实，仅在本次增减人员时按组重算自动项目数；服务记录项目数量 1 从后端传入控件。产品经理明确项目数默认按一位小数均分，除不尽的尾差归最后一人；针对独立岗位 1 + 普通组三人的回归输出为 1 / 0.3 / 0.3 / 0.4，普通组合计 1。没有点击历史调整确认或更改底层事实；独立浏览器标签无登录态，未声称完成刷新后页面实操。
+- 收银弹窗增人实测：在 `18091` 的张体收银草稿中加入 100 元“面部养护”，选择独立结算的店长张高锦及普通岗位刘雅婷、龚栓萍、邓红梅，打开“完整分配”实际看到业绩比例 100% / 34% / 33% / 33%，项目数 1 / 0.3 / 0.3 / 0.4；普通组三人项目数合计 1。旧草稿即使每条都带项目数字段，增减人员仍须重算；只保护当前弹窗内真正输入过项目数的组，单纯聚焦或重新打开不算手改。热更新曾重置未保存的购物车草稿，随后重新建草稿完成实测；未点击分配确认、收款或保存单据。
+- 收银：选择该会员、来源 A老客首护、0 元测试项目“觉知 身体”。购物车默认显示“销售人:刘文秀2人”和“手艺人：刘文秀(轮)等2人”，未手工打开分配弹窗或调整人员。结账选择 0 元其他收款，页面显示支付成功，销售订单 `XS26100300075`。
+- 预约：在“新增预约”表单选择同一会员后，手艺人栏和确认区均自动显示刘文秀、宋丽。随后取消表单，没有新增预约记录。
+- 事实核对：订单 `member_id=1136792`、状态 `settled`、销售金额 0 分；`eb_cashier_v3_performance_fact` 中两位人员各有销售分配和劳动分配事实，权重均为 50/100，项目数各 0.5。订单中心消费订单明细也显示两位手艺人、两位销售人。会员与订单保留供产品经理查看。
+- 验证：Vue3 `npm run build` 通过；4 个修改的 PHP 文件 `php -l` 通过；`member-exclusive-service-contract`、`exclusive-service-default-allocation`、`personnel-performance-overlay-contract`、`reservation-lifecycle-frontend-contract` 通过；目标跟踪文件 `git diff --check` 通过。列表补验后 `MemberUnifiedQueryProvider.php` 的 `php -l`、更新后的 `member-exclusive-service-contract` 通过；独立岗位补验后 Vue3 构建、订单生命周期 PHP 语法检查和独立分组金额回归通过。预约完成新建表单预选实操验证，未保存预约单据。
+- 服务手艺人补验验证：`CashierV3ServiceRecordCraftsmanAdjustmentServices.php` 的 `php -l`、Vue3 `npm run build`、`personnel-performance-overlay-contract`、`git diff --check` 均通过。订单生命周期的两个较旧契约脚本仍有与本次改动无关的源码字符串断言失败（作废上下文、终态冲销快照、重开入口），不将其报告为全量回归通过。
+- 项目数补验验证：`exclusive-service-default-allocation` 新增增人后按组重算、人工非默认值保留用例并通过；Vue3 `npm run build`、`personnel-performance-overlay-contract` 通过。未新建测试订单，未更正已有业务事实。
+- 历史调整增人验证：扩展 `exclusive-service-default-allocation` 覆盖普通组三人一位小数尾差、旧六位小数自动草稿再增人的兼容，测试通过；Vue3 `npm run build` 通过。当前用户未保存的弹窗未被测试脚本或浏览器自动操作更改，仍待产品经理在 `18091` 页面刷新后实测。
+- 收银弹窗增人验证：`exclusive-service-default-allocation` 补旧草稿每条均有 `projectCount` 的回归用例；`personnel-performance-overlay-contract`、Vue3 构建和 `git diff --check` 通过。`18091` 页面完成上述四人真人路径核对，未形成销售或服务事实。
+- 注释：更新/新增 `CashierV3MemberModule.php`、`CashierV3MemberExclusiveSelectionServices.php`、`CashierV3CashierMemberSummaryServices.php`、`MemberUnifiedQueryProvider.php`、`MobileCustomerProfileServices.php`、`MemberCreatorPanel.vue`、`ReservationListView.vue`、`CashierWorkbenchView.vue`、`personnelDefaultAllocation.js` 中的业务边界说明；相关测试文件说明预选与事实边界。
+- 手艺人修复注释：`CashierV3ServiceRecordCraftsmanAdjustmentServices.php` 说明组内比例只能用组内消耗业绩反推；`PersonnelPerformanceOverlay.vue` 说明历史调整的金额联动必须使用原组金额作基数。
+- 项目数修复注释：`personnelDefaultAllocation.js` 说明自动草稿字段和人工编辑标记的判别边界；`exclusive-service-default-allocation.mjs` 覆盖增加人员与人工数值保护。
+- 固定关键文件 SHA-256：`personnelDefaultAllocation.js` `38ecd814af92a98311e74e83eab85ecc95ac260391e736f2ebf215e3aa803b4b`；`PersonnelPerformanceOverlay.vue` `e02f4ef408203aca8af01aa78c4e8ba9008108abd5b53d9dc0657557952332b8`；`exclusive-service-default-allocation.mjs` `ee89fe2a7bd78094dfd1be3edfa14c70abfdfd298931a21fe4f55b25a0f844ec`；`CashierWorkbenchView.vue` `9363dd7adebb2dc9d38a8f704101675829a7c9663f8bc5423f122fc97dc4bc52`；`ReservationListView.vue` `a868d220887ed5ef336b97e8f0f884085a58651e5378440220ee2d0b64beaaf9`；`CashierV3MemberExclusiveSelectionServices.php` `a309d0ca3b780c296342deff89f599997ed23dc59d9097f92e779e3f2c098dd3`；迁移 SQL `5764e1868cb7db5ef5619f4e5fccc3563a1a61e96280a081b8c553f78e1f9e11`。
+- 待办：产品经理对本地固定范围验收；验收前不 commit，不部署，不 push。正式部署须逐实例备份、先迁移后应用、线上核验。

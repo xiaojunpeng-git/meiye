@@ -1201,12 +1201,46 @@ function normalizeSubmissionStatus(value) {
 
 async function selectEditorMember() {
   if (resolvePendingMemberSelection) return null
-  return new Promise((resolve) => {
+  const selected = await new Promise((resolve) => {
     resolvePendingMemberSelection = resolve
     window.dispatchEvent(new CustomEvent('cashier-v3:open-member-selector', {
       detail: { context: 'reservation' }
     }))
   })
+  const member = selected?.member || selected
+  const memberId = Number(member?.memberId || member?.id || 0)
+  if (!memberId) return selected
+  try {
+    // 默认值只属于新预约草稿，人员资格仍由当前门店后端候选决定。
+    const summaryResult = await requestAction('query-cashier-member-summary', { memberId, preserveRootState: true, silent: true })
+    const people = resultData(summaryResult)?.memberSummary?.exclusiveServiceStaffRecords || []
+    const selectedIds = new Set(people.map((person) => Number(person.staffId || person.staff_id || 0)))
+    const candidates = []
+    if (selectedIds.size) {
+      let page = 1
+      let total = 0
+      do {
+        const staffResult = await requestAction('query-query-entities', {
+          entityType: 'person', selectorEntry: 'reservation',
+          selectorContext: { scope: 'reservation_craftsmen' },
+          page, pageSize: 20, silent: true
+        })
+        const data = resultData(staffResult)
+        if (!Array.isArray(data.records)) throw new Error('reservation_candidates_unavailable')
+        candidates.push(...data.records)
+        total = Number(data.total || candidates.length)
+        page += 1
+      } while (candidates.length < total && page <= 50
+        && candidates.filter((person) => selectedIds.has(Number(person.staffId || person.id || 0))).length < selectedIds.size)
+    }
+    const defaults = candidates.filter((person) => selectedIds.has(Number(person.staffId || person.id || 0))
+      && person.craftsmanEligible === true && person.selectable === true)
+      .map((person) => ({ ...person, isPointCustomer: false }))
+    return { ...member, exclusiveDefaultCraftsmen: defaults }
+  } catch {
+    // 读取默认失败不妨碍原来的会员选择和手动选人。
+    return selected
+  }
 }
 
 async function selectEditorCraftsmen(payload = {}) {

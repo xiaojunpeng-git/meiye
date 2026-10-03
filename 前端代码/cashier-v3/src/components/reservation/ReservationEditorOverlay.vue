@@ -593,7 +593,11 @@ async function chooseMember() {
       ...draft.value,
       member,
       memberId,
-      memberName: member.memberName || member.name || draft.value.memberName
+      memberName: member.memberName || member.name || draft.value.memberName,
+      // 仅在首次选会员时套用一次；已有预约编辑与后续手工改选不回填。
+      ...(Array.isArray(member.exclusiveDefaultCraftsmen)
+        ? { craftsmen: member.exclusiveDefaultCraftsmen.map((person) => ({ ...person })) }
+        : {})
     })
     clearValidation('会员')
     isSelecting.value = false
