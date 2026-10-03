@@ -15,7 +15,7 @@ let fail = null, tokens = [], lookups = 0
 const mocks = {
   findStoreTransferStaff: async () => { lookups++; return typeof searchReply === 'function' ? searchReply() : searchReply },
   createRequestToken: () => 'r51-stable-token',
-  confirmStoreTransferStaff: async (candidate, token) => { tokens.push(token); if (fail) throw fail; return { data: {} } }
+  confirmStoreTransferStaff: async (candidate, token) => { tokens.push(token); if (fail) throw fail; return { data: { execute_staff_id: 789, needs_profile_completion: true } } }
 }
 let compiled = compileScript(descriptor, { id: 'r51' }).content
 compiled = compiled.replace(/import\s+\{([^}]+)\}\s+from\s+['"]vue['"]/g, (_, names) => `const {${names.replace(/\bas\b/g, ':')}} = vue`)
@@ -25,7 +25,7 @@ const holder = { exports: {} }
 new Function('vue', 'mocks', 'module', compiled)(vue, mocks, holder)
 const props = vue.reactive({ open: true, contextKey: 'store-a', storeName: '本门店' })
 const events = []
-const dialog = holder.exports.setup(props, { expose() {}, emit: (name) => events.push(name) })
+const dialog = holder.exports.setup(props, { expose() {}, emit: (name, payload) => events.push([name, payload]) })
 async function run() {
   dialog.phone.value = '199'; await vue.nextTick(); await dialog.search()
   assert.equal(lookups, 0); assert.ok(dialog.error.value.includes('11位'))
@@ -37,7 +37,8 @@ async function run() {
   assert.equal(events.length, before); assert.equal(lookups, 1)
   fail = null; await dialog.confirm()
   assert.deepEqual(tokens, ['r51-stable-token', 'r51-stable-token'])
-  assert.deepEqual(events.slice(-2), ['transferred', 'close'])
+  assert.deepEqual(events.slice(-2), [['transferred', { execute_staff_id: 789, needs_profile_completion: true }], ['close', undefined]])
+  assert.ok(descriptor.template.content.includes('确认后在本店建立任职，并打开员工编辑页'))
   await dialog.search(); fail = Object.assign(new Error('资料已变化'), { definitive: true }); await dialog.confirm()
   assert.equal(dialog.candidate.value, null); assert.equal(dialog.uncertain.value, false)
   let resolveLookup

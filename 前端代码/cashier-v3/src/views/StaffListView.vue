@@ -4,7 +4,7 @@ import TablePagination from '@/components/common/TablePagination.vue'
 import StaffPhoneTransferDialog from '@/components/StaffPhoneTransferDialog.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
 import { useUnifiedQueryPage } from '@/composables/useUnifiedQueryPage'
-import { canUseCashierV3Operation, requestCashierV3Action, useCashierV3State } from '@/services/cashierV3Bridge'
+import { canUseCashierV3Feature, canUseCashierV3Operation, requestCashierV3Action, useCashierV3State } from '@/services/cashierV3Bridge'
 import {
   readStoreStaffComplete,
   readStoreStaffPositions,
@@ -136,7 +136,8 @@ const defaultVisibleKeys = computed(() => queryFields.value.filter((field) => fi
 const visibleKeys = ref([])
 const visibleFields = computed(() => visibleKeys.value.map((key) => fieldMap.value.get(key)).filter(Boolean))
 const canCreateStaff = computed(() => canUseCashierV3Operation('cashier.v3.staff.create'))
-const canEditStaff = computed(() => canUseCashierV3Operation('cashier.v3.staff.edit'))
+// 管理中心是页面权限，不在细粒度 operation 快照中；本店员工编辑与列表同权，但委托查看仍只读。
+const canEditStaff = computed(() => !state.readOnly && canUseCashierV3Feature('cashier.v3.management_center'))
 
 function applyQuerySettings(settings) {
   const configured = Array.isArray(settings?.visibleFields) ? settings.visibleFields : null
@@ -338,8 +339,13 @@ function createStaffExport(payload) {
   return unifiedQuery.createExport(payload)
 }
 
-/** 调店入口与员工列表同权，不使用员工新增/编辑的独立权限开关。 */
-async function refreshAfterTransfer() {
+/** 无原门店任职的员工调入后须补全本店岗位；详情接口固定读取本店 staff ID。 */
+async function refreshAfterTransfer(result = {}) {
+  transferOpen.value = false
+  const staffId = Number(result?.execute_staff_id || 0)
+  if (result?.needs_profile_completion && staffId > 0) {
+    await openEditor({ staffId })
+  }
   await queryStaff(lastSuccessfulQuery.value || {}, true)
 }
 

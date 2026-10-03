@@ -561,6 +561,12 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'allow_profile_update' => true,
         ];
 
+        // 门店“新增员工”不能按手机号复用既有主档绕过调店核对；编辑已调入的本店任职不受影响。
+        if ($source === 'store' && $staffIdHint <= 0 && $employeeIdHint <= 0
+            && Db::name('employee')->where('phone', $phone)->where('is_del', 0)->lock(true)->find()) {
+            throw new AdminException('已经有了员工档案，请使用调店功能');
+        }
+
         // 1) employee
         $this->maybeFail('employee', $input);
         $employeeUpsert = $this->upsertEmployee($employeeIdHint, $phone, $staffName, $avatar, $opCtx, $source);

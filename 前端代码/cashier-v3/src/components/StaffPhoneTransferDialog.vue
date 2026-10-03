@@ -51,10 +51,10 @@ async function confirm() {
   try {
     // 首次确认后一直复用同一令牌；不把未知结果当失败后另建一笔调店。
     if (!token) token = createRequestToken()
-    await confirmStoreTransferStaff(candidate.value, token)
+    const result = await confirmStoreTransferStaff(candidate.value, token)
     if (current !== sequence || context !== props.contextKey) return
     uncertain.value = false; candidate.value = null; token = ''
-    emit('transferred')
+    emit('transferred', result.data)
     emit('close')
   } catch (failure) {
     if (current !== sequence || context !== props.contextKey) return
@@ -85,7 +85,8 @@ function close() {
         <div class="staff-transfer-search"><input id="staff-transfer-phone" v-model="phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="off" placeholder="请输入完整手机号码" :disabled="busy || uncertain"><button type="submit" class="button button--primary" :disabled="busy || uncertain">查询</button></div>
         <section v-if="candidate" class="staff-transfer-candidate" aria-label="查找到的员工">
           <p>员工姓名：{{ candidate.staff_name }}</p><p>原门店：{{ candidate.from_store_name }}</p><p>调入门店：{{ storeName }}</p>
-          <small>确认后结束原店任职，历史订单和业绩仍保留原店归属。</small>
+          <small v-if="candidate.source_staff_id">确认后结束原店任职，历史订单和业绩仍保留原店归属。</small>
+          <small v-else>确认后在本店建立任职，并打开员工编辑页填写岗位及其他资料。</small>
         </section>
         <p v-if="error" class="staff-transfer-error" role="alert">{{ error }}</p>
       </main>

@@ -130,26 +130,8 @@ class StaffJobPositionServices extends BaseServices
             $existingIds[(int)$ex['position_id']] = (int)$ex['id'];
         }
 
-        // 岗位是员工的唯一有效身份，不允许借由多门店任职或总部任职
-        // 同时挂出多个有效岗位。历史岗位保留结束时间，不能被覆盖删除。
-        if ($positionIds) {
-            $otherActiveJobQuery = Db::name('staff_job_position')
-                ->where('employee_id', $employeeId)
-                ->where('is_del', 0)
-                ->where('status', 1)
-                ->where('end_time', 0)
-                ->where('position_id', '<>', (int)$positionIds[0]);
-            // 当前任职记录允许被本次保存替换；除此之外的门店/总部任职
-            // 若仍挂着另一岗位，必须拒绝，避免员工通过多任职绕过单岗位规则。
-            if ($existingIds !== []) {
-                $otherActiveJobQuery->whereNotIn('id', array_values($existingIds));
-            }
-            $otherActiveJob = $otherActiveJobQuery->order('id', 'desc')->lock(true)->find();
-            if (is_array($otherActiveJob)
-                && (int)($otherActiveJob['position_id'] ?? 0) !== (int)$positionIds[0]) {
-                throw new AdminException('该员工已有其他有效岗位，请先结束原岗位后再设置');
-            }
-        }
+        // 单岗位约束只作用于本次任职：门店按 staff_id，总部直属按 staff_id=0。
+        // 其他门店/总部的岗位属于独立任职，不应阻止本店编辑或被本次保存结束。
 
         /** @var JobPositionPolicyServices $policy */
         $policy = app()->make(JobPositionPolicyServices::class);

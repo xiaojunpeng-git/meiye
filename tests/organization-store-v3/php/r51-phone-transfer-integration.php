@@ -6,11 +6,16 @@ require $backend . '/vendor/autoload.php';
 $app = new think\App($backend . '/'); $app->initialize();
 use think\facade\Db;
 use app\services\store\StoreStaffPhoneTransferServices;
+use app\services\employee\EmployeePersonCompleteWriteServices;
 use app\services\organization\OrganizationOpsStatusServices;
 use app\services\organization\StaffJobPositionServices;
+use app\services\organization\JobPositionPolicyServices;
 function checkTransfer($ok, $name) { if (!$ok) throw new RuntimeException('FAIL '.$name); echo 'PASS '.$name.PHP_EOL; }
 function rejectTransfer(callable $fn, string $text) {
-    try { $fn(); } catch (Throwable $e) { checkTransfer(strpos($e->getMessage(), $text) !== false, 'reject '.$text); return; }
+    try { $fn(); } catch (Throwable $e) {
+        if (strpos($e->getMessage(), $text) === false) throw new RuntimeException('expected '.$text.', got '.$e->getMessage(),0,$e);
+        checkTransfer(true, 'reject '.$text); return;
+    }
     throw new RuntimeException('expected rejection '.$text);
 }
 function uuidTransfer(): string { $h=bin2hex(random_bytes(16)); return substr($h,0,8).'-'.substr($h,8,4).'-4'.substr($h,13,3).'-a'.substr($h,17,3).'-'.substr($h,20); }
@@ -119,6 +124,8 @@ try {
     });
     $beforeAudit=(int)Db::name('employee_change_log')->where('employee_id',$employee)->count();
     $lateToken=uuidTransfer();
+    // 调回同一历史 staff ID 后，既有内核以秒拼接任职令牌；跨秒才能单独验证后置失败回滚。
+    sleep(1);
     rejectTransfer(fn()=>$confirm($fresh,$lateToken),'late failure');
     $app->instance(StaffJobPositionServices::class,$jobs);
     checkTransfer((int)Db::name('system_store_staff')->where('id',$sourceId)->value('status')===1
@@ -128,6 +135,71 @@ try {
     $retry=$confirm($fresh,$lateToken);
     checkTransfer($retry['replay']===false,'rolled back request can safely retry original token');
     checkTransfer((int)Db::name('store_staff_transfer_log')->where('employee_id',$employee)->count()===3,'only three successful transfers recorded');
+
+    // 只有主档/停用历史任职时，调入本店不得复活旧登录权限；结果必须可按同令牌安全重放。
+    [$inactiveEmployee,$inactiveStaff,$inactivePhone]=$create($to,'无有效任职');
+    Db::name('employee')->where('id',$inactiveEmployee)->update(['auth_version'=>0]);
+    Db::name('system_store_staff')->where('id',$inactiveStaff)->update([
+        'status'=>0,'account'=>'r51-old-account','pwd'=>'r51-old-password','is_cashier'=>1,'is_store'=>1,'is_manager'=>1,
+    ]);
+    $inactiveCandidate=$svc->preview($inactivePhone,$to,$operatorId);
+    checkTransfer($inactiveCandidate['source_staff_id']===0 && $inactiveCandidate['expected_version']===1,'inactive assignment can be found by exact phone');
+    $inactiveToken=uuidTransfer(); $inactiveResult=$confirm($inactiveCandidate,$inactiveToken);
+    checkTransfer((int)$inactiveResult['data']['execute_staff_id']===$inactiveStaff
+        && $inactiveResult['data']['needs_profile_completion']===true,'inactive local assignment reused for profile completion');
+    $reactivated=Db::name('system_store_staff')->where('id',$inactiveStaff)->find();
+    checkTransfer((int)$reactivated['status']===1 && $reactivated['account']==='' && $reactivated['pwd']===''
+        && (int)$reactivated['is_cashier']===0 && (int)$reactivated['is_manager']===0,'historical login and permission do not reactivate');
+    checkTransfer((int)Db::name('staff_tenure_period')->where('employee_id',$inactiveEmployee)->where('status',1)->count()===1,
+        'one active tenure after inactive assignment attaches');
+    $inactiveReplay=$confirm($inactiveCandidate,$inactiveToken);
+    checkTransfer($inactiveReplay['replay']===true && $inactiveReplay['data']===$inactiveResult['data'],'inactive assignment replay does not duplicate tenure');
+    rejectTransfer(fn()=>$svc->preview($inactivePhone,$to,$operatorId),'已在本门店');
+
+    // 模拟已调入员工仍有总部直属岗位：本店岗位保存只替换本店任职，不结束另一处岗位。
+    $selectable=app()->make(JobPositionPolicyServices::class)->listStoreSelectablePositions($to);
+    $storePosition=(int)($selectable[0]['value'] ?? 0);
+    $directPosition=(int)Db::name('position')->where('status',1)->where('id','<>',$storePosition)->value('id');
+    checkTransfer($storePosition>0 && $directPosition>0,'distinct direct and selectable store positions');
+    Db::name('staff_job_position')->insert(['employee_id'=>$inactiveEmployee,'store_id'=>0,'staff_id'=>0,
+        'position_id'=>$directPosition,'status'=>1,'start_time'=>time()-10,'end_time'=>0,'reason'=>'R51直属岗位夹具',
+        'is_del'=>0,'request_token'=>uuidTransfer(),'operator_id'=>$operatorId,'operator_name'=>'R51',
+        'add_time'=>time(),'update_time'=>time()]);
+    $jobs->bindJobsInTx($inactiveEmployee,$inactiveStaff,$to,[$storePosition],$operator,[],'store',false);
+    checkTransfer((int)Db::name('staff_job_position')->where('employee_id',$inactiveEmployee)->where('staff_id',0)
+        ->where('position_id',$directPosition)->where('status',1)->count()===1
+        && (int)Db::name('staff_job_position')->where('employee_id',$inactiveEmployee)->where('staff_id',$inactiveStaff)
+            ->where('position_id',$storePosition)->where('status',1)->count()===1,
+        'different appointments retain their own active position');
+    $nextStorePosition=(int)($selectable[1]['value'] ?? 0);
+    checkTransfer($nextStorePosition>0 && $nextStorePosition!==$storePosition,'second selectable store position');
+    $jobs->bindJobsInTx($inactiveEmployee,$inactiveStaff,$to,[$nextStorePosition],$operator,[],'store',false);
+    checkTransfer((int)Db::name('staff_job_position')->where('staff_id',$inactiveStaff)->where('status',1)
+        ->where('end_time',0)->count()===1
+        && (int)Db::name('staff_job_position')->where('staff_id',$inactiveStaff)->where('position_id',$storePosition)
+            ->where('status',0)->count()===1
+        && (int)Db::name('staff_job_position')->where('employee_id',$inactiveEmployee)->where('staff_id',0)
+            ->where('position_id',$directPosition)->where('status',1)->count()===1,
+        'same appointment replaces its position and preserves other appointment');
+
+    $bare= $employeeTemplate; unset($bare['id']); $bare['name']='R51仅主档夹具';
+    $bare['phone']='199'.str_pad((string)random_int(1,99999999),8,'0',STR_PAD_LEFT); $bare['uid']=null; $bare['auth_version']=1;
+    $bareEmployee=(int)Db::name('employee')->insertGetId($bare); $employeeIds[]=$bareEmployee;
+    $bareCandidate=$svc->preview($bare['phone'],$to,$operatorId);
+    $bareResult=$confirm($bareCandidate);
+    checkTransfer((int)$bareResult['data']['execute_staff_id']>0 && $bareResult['data']['needs_profile_completion']===true,
+        'employee without any assignment attaches to current store');
+    checkTransfer((int)Db::name('system_store_staff')->where('employee_id',$bareEmployee)->where('store_id',$to)->where('status',1)->count()===1,
+        'bare employee has exactly one active local assignment');
+    $editable=app()->make(EmployeePersonCompleteWriteServices::class)->getComplete(
+        $bareEmployee,(int)$bareResult['data']['execute_staff_id'],'store');
+    checkTransfer((int)$editable['staff_id']===(int)$bareResult['data']['execute_staff_id']
+        && (string)$editable['phone']===$bare['phone'],'attached staff opens current-store complete editor');
+    $createToken=uuidTransfer();
+    rejectTransfer(fn()=>app()->make(EmployeePersonCompleteWriteServices::class)->saveComplete([
+        'store_id'=>$to,'staff_name'=>'重复新增员工','phone'=>$bare['phone'],'position_ids'=>[$position],
+        'request_token'=>$createToken,
+    ],$operator,['body_token'=>$createToken],'store'),'已经有了员工档案，请使用调店功能');
 } finally {
     Db::rollback();
     foreach($employeeIds as $id) checkTransfer(!Db::name('employee')->where('id',$id)->find(),'fixture rolled back '.$id);

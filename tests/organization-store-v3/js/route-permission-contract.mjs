@@ -12,6 +12,7 @@ const backendManifest = fs.readFileSync(path.join(root, '后端代码/app/servic
 const backendBootstrap = fs.readFileSync(path.join(root, '后端代码/app/services/cashier/v3/bootstrap/CashierV3Bootstrap.php'), 'utf8')
 const policies = fs.readFileSync(path.join(root, '后端代码/app/services/cashier/v3/permission/CashierV3PermissionPolicyRegistry.php'), 'utf8')
 const cashierRoleMiddleware = fs.readFileSync(path.join(root, '后端代码/app/http/middleware/cashier/CashierCheckRoleMiddleware.php'), 'utf8')
+const staffListView = fs.readFileSync(path.join(root, '前端代码/cashier-v3/src/views/StaffListView.vue'), 'utf8')
 
 const assertions = [
   ['route feature mapping exists', router.includes('const routeFeatureCodes = Object.freeze({')],
@@ -31,7 +32,8 @@ const assertions = [
   ['backend bootstrap uses matching session policy', backendManifest.includes("'open-cashier-workbench' => self::POLICY_STORE_V3_SESSION")],
   ['session policy requires at least one server-resolved feature', policies.includes("register('policy:store_v3_session'") && policies.includes('$scope->grantedFeatures()')],
   ['delegated read-only middleware leaves action gateway for manifest-level projection/command checks', cashierRoleMiddleware.includes('$isV3ActionGateway') && cashierRoleMiddleware.includes('workbenches/actions') && cashierRoleMiddleware.includes('!$isV3ActionGateway')],
-  ['direct employee save routes have separate create/edit gates', cashierRoleMiddleware.includes("'cashier.v3.staff.edit' : 'cashier.v3.staff.create'") && cashierRoleMiddleware.includes('cashierapi/v3/management/staff/')],
+  ['employee edit shares staff-list operation; creation keeps its separate gate', cashierRoleMiddleware.includes("'cashier.v3.management_center' : 'cashier.v3.staff.create'") && cashierRoleMiddleware.includes('cashierapi/v3/management/staff/')],
+  ['staff edit button uses visible list feature and excludes read-only sessions', staffListView.includes("!state.readOnly && canUseCashierV3Feature('cashier.v3.management_center')") && !staffListView.includes("canUseCashierV3Operation('cashier.v3.management_center')")],
 ]
 
 let failed = 0

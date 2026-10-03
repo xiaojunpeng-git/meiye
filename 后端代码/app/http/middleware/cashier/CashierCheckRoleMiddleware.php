@@ -79,7 +79,8 @@ class CashierCheckRoleMiddleware implements MiddlewareInterface
 
     /**
      * V3 仍有少量不经过统一 action gateway 的直连写接口。
-     * 员工保存仍有创建/编辑门禁；手机号调店按产品确认复用员工列表权限，不能另加编辑权限。
+     * 新增员工仍走创建权限；进入员工列表即可编辑本店员工，含原有个人/门店数据权限。
+     * 手机号调店也复用列表权限；委托只读会话仍在上层禁止写入。
      */
     private function directOperationFeature(string $path, string $method): string
     {
@@ -93,6 +94,6 @@ class CashierCheckRoleMiddleware implements MiddlewareInterface
         if (preg_match('#^cashierapi/v3/management/staff/([0-9]+)$#D', $path, $match) !== 1) {
             return '';
         }
-        return (int)$match[1] > 0 ? 'cashier.v3.staff.edit' : 'cashier.v3.staff.create';
+        return (int)$match[1] > 0 ? 'cashier.v3.management_center' : 'cashier.v3.staff.create';
     }
 }
