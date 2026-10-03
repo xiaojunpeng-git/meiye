@@ -59,11 +59,11 @@ memberDetailV2Ok('balance changes only read immutable effective V3 balance facts
 memberDetailV2Ok('balance changes expose stable server-owned YE display numbers',
     strpos($detail, "'changeNo' => \$this->balanceChangeDisplayNo(") !== false
     && strpos($detail, "return 'YE' . \$date->format('ymd')") !== false);
-memberDetailV2Ok('card operation records read the immutable authority with member and store scope',
+memberDetailV2Ok('card operation records read the immutable authority across stores for the exact member',
     strpos($detail, "Db::name('cashier_v3_card_operation')") !== false
     && strpos($detail, "->where('member_id_before', \$memberId)") !== false
     && strpos($detail, "->whereOr('member_id_after', \$memberId)") !== false
-    && strpos($detail, "\$this->applyStoreScope(\$query, 'store_id', \$dataScope)") !== false
+    && strpos($detail, "\$this->applyStoreScope(\$query, 'store_id', \$dataScope)") === false
     && strpos($detail, "'card_transfer' => '卡转让'") !== false
     && strpos($detail, "'cardOperations' => \$cardOperations") !== false);
 memberDetailV2Ok('labor performance joins only the matching completed service line authority',
@@ -86,12 +86,14 @@ memberDetailV2Ok('member-detail action still delegates debt and sales tabs to de
     strpos($module, "(string)(\$payload['tab'] ?? '') === 'debt'") !== false
     && strpos($module, "(string)(\$payload['tab'] ?? '') === 'sales'") !== false
     && strpos($module, "'memberCenter' => ['detail' => \$detail]") !== false);
-memberDetailV2Ok('all store-bound member facts reuse the data-scope store gate',
-    substr_count($detail, '$this->applyStoreScope(') >= 7
-    && strpos($detail, "'gf.store_id', \$dataScope") !== false
-    && strpos($detail, "'business_store_id', \$dataScope") !== false
-    && strpos($detail, "'o.store_id', \$dataScope") !== false
-    && strpos($detail, 'CashierV3DataScopeContext::MODE_ALL') !== false);
+memberDetailV2Ok('cross-store detail requires an authorized current-store session, not self-participant mode',
+    strpos($detail, '$this->applyStoreScope(') === false
+    && strpos($detail, '$dataScope->allowsStore($operatorScope->storeId())') !== false
+    && strpos($detail, 'CashierV3DataScopeContext::MODE_STORES') !== false
+    && strpos($detail, 'private function assertAiVisible(') !== false
+    && strpos($detail, '$this->assertVisible($memberId, $operatorScope, $dataScope)') !== false);
+memberDetailV2Ok('sales cross-store read is scoped to exact-member detail only',
+    strpos($module, "], \$scope['operator_scope'], \$scope['data_scope'], true);") !== false);
 
 echo "ASSERT_PASSED={$passed}\n";
 echo "ASSERT_FAILED={$failed}\n";

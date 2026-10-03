@@ -18,7 +18,8 @@ assert.match(shell, /const initialStatus = \['assets', 'gift'\]\.includes\(membe
 assert.match(service, /\$detailQuery\['tab'\] === 'gift' && \$giftStatus === '' \? \$detailQuery\['dateFrom'\] : ''/)
 assert.match(service, /private function migratedProjectGifts\(/)
 assert.match(service, /private function claimableGiftAndPresale\(/)
-assert.match(service, /\$this->applyStoreScope\(\$query, 'o\.store_id', \$dataScope\)/)
-assert.match(service, /\$this->applyStoreScope\(\$query, 'store_id', \$dataScope\)/)
+// 会员详情按会员展示全门店历史，不能再用来源门店筛掉迁入赠送。
+assert.doesNotMatch(service, /\$this->applyStoreScope\(/)
+assert.match(service, /\$this->assertVisible\(\$memberId, \$operatorScope, \$dataScope\)/)
 assert.match(service, /isset\(\$issuedGiftItems\[/)
 console.log('MEMBER_GIFT_PRESALE_QUERY_CONTRACT_OK')

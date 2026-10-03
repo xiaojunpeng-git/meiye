@@ -238,14 +238,16 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     'benefit_pool:' . $detailId,
                     self::CONTRACT_VERSION
                 );
-                $this->addResource(
-                    $resources,
-                    'card_holder',
-                    (string)$holderId,
-                    (int)$line['source_version'],
-                    'card_holder:' . $holderId,
-                    self::CONTRACT_VERSION
-                );
+                if ($holderId > 0) {
+                    $this->addResource(
+                        $resources,
+                        'card_holder',
+                        (string)$holderId,
+                        (int)$line['source_version'],
+                        'card_holder:' . $holderId,
+                        self::CONTRACT_VERSION
+                    );
+                }
             }
             $this->addResource(
                 $resources,
@@ -466,7 +468,9 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
 
             $sourceVersion = $directSnapshot
                 ? 1
-                : $this->lockedVersion($gateway, 'card_holder', (string)$holderId);
+                : ($holderId > 0
+                    ? $this->lockedVersion($gateway, 'card_holder', (string)$holderId)
+                    : $this->lockedVersion($gateway, 'member_benefit_pool', (string)$detailId));
             $detailVersion = $directSnapshot
                 ? 1
                 : $this->lockedVersion($gateway, 'member_benefit_pool', (string)$detailId);
@@ -599,15 +603,16 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 'lineId' => $lineId,
                 'sortNo' => $index + 1,
                 'lineRole' => self::ENTITLEMENT_ROLE,
-                'entitlementInstanceType' => CashierV3EntitlementCompletionKernel::ENTITLEMENT_CARD_HOLDER,
-                'entitlementInstanceId' => $holderId,
+                'entitlementInstanceType' => $holderId > 0
+                    ? CashierV3EntitlementCompletionKernel::ENTITLEMENT_CARD_HOLDER
+                    : CashierV3EntitlementCompletionKernel::ENTITLEMENT_INDEPENDENT_GIFT,
+                'entitlementInstanceId' => $holderId > 0 ? $holderId : $detailId,
                 'sourceKind' => $authority['sourceKind'],
                 'isGift' => $authority['isGift'],
-                'giftSourceType' => $authority['isGift']
-                    ? CashierV3EntitlementCompletionKernel::GIFT_SOURCE_HOLDER_BACKED
-                    : 'none',
-                'giftId' => 0,
-                'giftVersion' => 0,
+                'giftSourceType' => $holderId === 0 ? 'independent' : ($authority['isGift']
+                    ? CashierV3EntitlementCompletionKernel::GIFT_SOURCE_HOLDER_BACKED : 'none'),
+                'giftId' => $holderId === 0 ? $detailId : 0,
+                'giftVersion' => $holderId === 0 ? 1 : 0,
                 'holderId' => $holderId,
                 'originOrderId' => $originOrderId,
                 'sourceNameSnapshot' => (string)$line['source_name_snapshot'],
@@ -866,9 +871,19 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 continue;
             }
             $craftsmen = is_array($line['craftsmen'] ?? null) ? $line['craftsmen'] : [];
+            // The browser keeps the user-facing labels “本人／朋友” in its
+            // immutable checkout snapshot. The completion kernel deliberately
+            // accepts only its stable enum, so translate at this one boundary
+            // instead of making the UI leak internal values into its display
+            // model.
+            $serviceObject = trim((string)($line['serviceObject'] ?? ''));
+            $serviceObject = $serviceObject === '本人'
+                ? 'self'
+                : ($serviceObject === '朋友' ? 'friend' : $serviceObject);
             $result[] = [
                 'line_id' => (string)($line['lineId'] ?? 'snapshot-' . $index),
                 'line_role' => self::ENTITLEMENT_ROLE,
+                'entitlement_instance_type' => (string)($line['entitlementInstanceType'] ?? 'card_holder'),
                 'source_id' => (int)($line['entitlementInstanceId'] ?? $line['cardHolderId'] ?? 0),
                 'entitlement_source_detail_id' => (int)($line['entitlementSourceDetailId'] ?? $line['memberBenefitPoolId'] ?? 0),
                 'source_version' => 1,
@@ -882,7 +897,7 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     $line['actualAmount'] ?? $line['actualEntitlementAmount'] ?? null
                 ),
                 'craftsmen_snapshot_json' => json_encode($craftsmen, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-                'service_object' => (string)($line['serviceObject'] ?? ''),
+                'service_object' => $serviceObject,
                 'friend_counts_as_customer' => empty($line['friendCountsAsCustomer']) ? 0 : 1,
                 'is_experience' => !empty($line['isExperience']) ? 1 : 0,
                 // Keep the display identity captured by the browser. These
@@ -1092,6 +1107,16 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             $holderId = (int)$line['source_id'];
             $detailId = (int)$line['entitlement_source_detail_id'];
             $projectId = (int)$line['project_id'];
+            // Persisted checkout rows carry the discriminator in source_type;
+            // browser-only discovery rows still use entitlement_instance_type.
+            $independentGift = (string)($line['source_type'] ?? '') === 'independent_gift'
+                || (string)($line['entitlement_instance_type'] ?? '') === 'independent_gift';
+            if ($independentGift) {
+                $result[$lineId] = $this->loadLegacyGiftAuthority(
+                    $line, $memberId, $operatorScope, $dataScope
+                );
+                continue;
+            }
             $holder = $this->row(Db::name('user_card_holder')
                 ->where('id', $holderId)
                 ->where('uid', $memberId)
@@ -1220,6 +1245,63 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             ];
         }
         return $result;
+    }
+
+    /**
+     * 导入项目赠送的 cart 明细本身是剩余次数权威。身份、原单有效性和
+     * 来源门店在每次最终结账事务中重读；不把旧赠送映射成虚构卡实例。
+     */
+    private function loadLegacyGiftAuthority(
+        array $line,
+        int $memberId,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $detailId = (int)$line['entitlement_source_detail_id'];
+        $lineId = (string)$line['line_id'];
+        if ((int)$line['source_id'] !== $detailId) {
+            throw self::failure('authority_gift_identity_invalid', ['lineId' => $lineId]);
+        }
+        $detail = $this->row(Db::name('store_order_cart_info')
+            ->where('id', $detailId)->where('uid', $memberId)
+            ->where('product_id', (int)$line['project_id'])
+            ->where('cart_type', 2)->where('product_type', 6)
+            ->where('is_gift', 1)->where('source_type', 'migration')
+            ->where('cart_id', 'like', 'RH-PG-%')->where('is_writeoff', 0)
+            ->lock(true)->find());
+        if (!$detail || (int)$detail['write_surplus_times'] <= 0) {
+            throw self::failure('authority_gift_not_active', ['lineId' => $lineId]);
+        }
+        $order = $this->row(Db::name('store_order')->where('id', (int)$detail['oid'])
+            ->where('uid', $memberId)->lock(true)->find());
+        if (!$this->activeOrder($order)) {
+            throw self::failure('authority_gift_order_not_active', ['lineId' => $lineId]);
+        }
+        $this->assertOriginStoreAllowed((int)$order['store_id'], $operatorScope, $dataScope);
+        $decoded = json_decode((string)$detail['cart_info'], true);
+        $projectName = trim((string)($decoded['productInfo']['store_name'] ?? $decoded['project_name'] ?? ''));
+        if ($projectName === ''
+            || (string)$line['source_name_snapshot'] !== $projectName
+            || (string)$line['project_name_snapshot'] !== $projectName
+            || (string)$line['source_code_snapshot'] !== (string)$order['order_id']) {
+            throw self::failure('authority_gift_snapshot_changed', ['lineId' => $lineId]);
+        }
+        $total = (int)$detail['write_times'];
+        $remaining = (int)$detail['write_surplus_times'];
+        if ($total <= 0 || $remaining > $total) {
+            throw self::failure('authority_gift_quantity_invalid', ['lineId' => $lineId]);
+        }
+        return [
+            'holder' => ['id' => 0], 'detail' => $detail, 'order' => $order,
+            'sourceKind' => 'gift', 'isGift' => true,
+            'physicalRemainingTimes' => $remaining,
+            'debtLimitedUsableTimes' => $remaining,
+            'purchaseAmount' => '0.00', 'totalPurchaseTimes' => $total,
+            'amountCalculationVersion' => 'independent-gift-'
+                . CashierV3EntitlementCompletionKernel::AMOUNT_CALCULATION_VERSION,
+            'projectUnique' => self::token($detail['cart_id'], 64, 'authority_gift_project_unique_invalid'),
+            'projectCategoryName' => trim((string)($decoded['productInfo']['categoryName'] ?? '')) ?: '未分类',
+        ];
     }
 
     private function assertCardOperationStateActive(array $holder, int $memberId): void
@@ -1591,9 +1673,11 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 $requirements['benefit_pool:' . $line['sourceDetailId']] = [
                     'member_benefit_pool', (string)$line['sourceDetailId'], $line['detailVersion'],
                 ];
-                $requirements['card_holder:' . $line['holderId']] = [
-                    'card_holder', (string)$line['holderId'], $line['sourceVersion'],
-                ];
+                if ($line['holderId'] > 0) {
+                    $requirements['card_holder:' . $line['holderId']] = [
+                        'card_holder', (string)$line['holderId'], $line['sourceVersion'],
+                    ];
+                }
             }
             $requirements['entitlement_debt_guard:' . $line['originOrderId']] = [
                 'entitlement_debt_guard', $line['debtGuardId'], $line['debtGuardVersion'],

@@ -350,10 +350,17 @@ final class CashierV3EntitlementCompletionPlanV1
                     throw self::failure('entitlement_deduction_shape_invalid', ['missing' => $key]);
                 }
             }
-            if ($row['entitlementInstanceType'] !== CashierV3EntitlementCompletionKernel::ENTITLEMENT_CARD_HOLDER) {
+            $independentGift = $row['entitlementInstanceType']
+                === CashierV3EntitlementCompletionKernel::ENTITLEMENT_INDEPENDENT_GIFT;
+            if (!$independentGift && $row['entitlementInstanceType'] !== CashierV3EntitlementCompletionKernel::ENTITLEMENT_CARD_HOLDER) {
                 throw self::failure('entitlement_instance_writer_not_ready');
             }
-            $holderId = self::positiveInt($row['holderId'], 'deduction_holder_id_invalid');
+            $holderId = $independentGift
+                ? self::nonNegativeInt($row['holderId'], 'deduction_holder_id_invalid')
+                : self::positiveInt($row['holderId'], 'deduction_holder_id_invalid');
+            if ($independentGift && $holderId !== 0) {
+                throw self::failure('deduction_gift_holder_invalid');
+            }
             $detailId = self::positiveInt($row['sourceDetailId'], 'deduction_detail_id_invalid');
             $key = $holderId . ':' . $detailId;
             if (isset($seen[$key])) {
@@ -371,7 +378,7 @@ final class CashierV3EntitlementCompletionPlanV1
             }
             $result[] = [
                 'source_key' => self::token($row['sourceKey'], 128, 'deduction_source_key_invalid'),
-                'entitlement_instance_type' => 'card_holder',
+                'entitlement_instance_type' => $independentGift ? 'independent_gift' : 'card_holder',
                 'entitlement_instance_id' => self::positiveInt($row['entitlementInstanceId'], 'deduction_instance_id_invalid'),
                 'source_kind' => self::token($row['sourceKind'], 32, 'deduction_source_kind_invalid'),
                 'is_gift' => self::booleanInt($row['isGift'], 'deduction_gift_flag_invalid'),
@@ -494,7 +501,9 @@ final class CashierV3EntitlementCompletionPlanV1
             'gift_source_type' => self::token($source['giftSourceType'], 32, 'line_gift_source_invalid'),
             'gift_id' => self::nonNegativeInt($source['giftId'], 'line_gift_id_invalid'),
             'gift_version' => self::nonNegativeInt($source['giftVersion'], 'line_gift_version_invalid'),
-            'holder_id' => self::positiveInt($source['holderId'], 'line_holder_id_invalid'),
+            'holder_id' => (string)$source['entitlementInstanceType'] === CashierV3EntitlementCompletionKernel::ENTITLEMENT_INDEPENDENT_GIFT
+                ? self::nonNegativeInt($source['holderId'], 'line_holder_id_invalid')
+                : self::positiveInt($source['holderId'], 'line_holder_id_invalid'),
             'origin_order_id' => self::positiveInt($source['originOrderId'], 'line_order_id_invalid'),
             'source_name_snapshot' => self::text($source['sourceNameSnapshot'], 128, 'line_source_name_invalid'),
             'source_code_snapshot' => self::text($source['sourceCodeSnapshot'], 128, 'line_source_code_invalid'),

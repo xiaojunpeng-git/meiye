@@ -305,14 +305,16 @@ function b1LockedPlan(array $snapshot): array
             $line['detailVersion'],
             'benefit_pool:' . $line['sourceDetailId']
         );
-        b1AddLockedResource(
-            $resources,
-            'card_holder',
-            (string)$line['holderId'],
-            40,
-            $line['sourceVersion'],
-            'card_holder:' . $line['holderId']
-        );
+        if ($line['holderId'] > 0) {
+            b1AddLockedResource(
+                $resources,
+                'card_holder',
+                (string)$line['holderId'],
+                40,
+                $line['sourceVersion'],
+                'card_holder:' . $line['holderId']
+            );
+        }
         b1AddLockedResource(
             $resources,
             'performance_rule',
@@ -955,24 +957,30 @@ b1Assert(
         && in_array('gift.consumed', $giftPlan['requiredEventTypes'], true)
 );
 
-$standaloneGiftsRejected = true;
-foreach ([
-    CashierV3EntitlementCompletionKernel::ENTITLEMENT_INDEPENDENT_GIFT => 'independent',
-    CashierV3EntitlementCompletionKernel::ENTITLEMENT_ORDER_ATTACHED_GIFT => 'order_attached',
-] as $giftInstanceType => $giftSourceType) {
-    $standaloneGift = b1Snapshot();
-    $standaloneGift['lines'] = [$standaloneGift['lines'][0]];
-    $standaloneGift['lines'][0]['entitlementInstanceType'] = $giftInstanceType;
-    $standaloneGift['lines'][0]['giftSourceType'] = $giftSourceType;
-    $standaloneGiftsRejected = $standaloneGiftsRejected
-        && b1Reason(static function () use ($giftCommand, $standaloneGift): void {
-            b1Plan($giftCommand, $standaloneGift, []);
-        }) === 'standalone_gift_authority_not_ready';
-}
+$independentGift = $giftSnapshot;
+$independentGift['lines'][0]['entitlementInstanceType'] = CashierV3EntitlementCompletionKernel::ENTITLEMENT_INDEPENDENT_GIFT;
+$independentGift['lines'][0]['entitlementInstanceId'] = $independentGift['lines'][0]['sourceDetailId'];
+$independentGift['lines'][0]['giftSourceType'] = 'independent';
+$independentGift['lines'][0]['giftId'] = $independentGift['lines'][0]['sourceDetailId'];
+$independentGift['lines'][0]['giftVersion'] = 1;
+$independentGift['lines'][0]['holderId'] = 0;
+$independentGift['lines'][0]['purchaseAmount'] = '0.00';
+$independentGiftPlan = b1Plan($giftCommand, $independentGift);
+$independentGiftKinds = array_column($independentGiftPlan['lockedResourcePlan'], 'kind');
 b1Assert(
-    'standalone gift paths fail closed until a real gift authority and provider exist',
-    $standaloneGiftsRejected
+    'historical independent gift requires a benefit lock but no card holder',
+    $independentGiftPlan['entitlementDeductions'][0]['holderId'] === 0
+        && $independentGiftPlan['entitlementDeductions'][0]['giftId'] === $independentGift['lines'][0]['sourceDetailId']
+        && in_array('member_benefit_pool', $independentGiftKinds, true)
+        && !in_array('card_holder', $independentGiftKinds, true)
+        && $independentGiftPlan['linePlans'][0]['actualEntitlementAmountCents'] === 0
 );
+$unsupportedGift = $giftSnapshot;
+$unsupportedGift['lines'][0]['entitlementInstanceType'] = CashierV3EntitlementCompletionKernel::ENTITLEMENT_ORDER_ATTACHED_GIFT;
+$unsupportedGift['lines'][0]['giftSourceType'] = 'order_attached';
+b1Assert('order-attached gift stays closed', b1Reason(static function () use ($giftCommand, $unsupportedGift): void {
+    b1Plan($giftCommand, $unsupportedGift);
+}) === 'standalone_gift_authority_not_ready');
 b1Assert(
     'inventory events distinguish every real batch and shortage',
     $events['inventory.batch.consumed']['grain'] === 'line_stock_batch'

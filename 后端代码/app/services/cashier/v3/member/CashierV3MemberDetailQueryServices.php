@@ -50,7 +50,7 @@ final class CashierV3MemberDetailQueryServices
         // Deny an unusable detail scope before the shared balance query.
         foreach ($memberIds as $memberId) {
             if (!is_int($memberId) || $memberId<=0) throw $this->notFound();
-            $this->assertVisible($memberId,$dataScope);
+            $this->assertAiVisible($memberId, $dataScope);
         }
         $details=[];
         // The balance authority accepts at most 100 identities per read. Fetch
@@ -117,7 +117,7 @@ final class CashierV3MemberDetailQueryServices
     private function readAiRightsWithBalance(int $memberId,CashierV3DataScopeContext $dataScope,array $balanceSnapshot,array $cards,?array $member,array $storeNames,string $asOf,?array $cardSummary=null): array
     {
         if ($memberId <= 0) throw $this->notFound();
-        $this->assertVisible($memberId, $dataScope);
+        $this->assertAiVisible($memberId, $dataScope);
         if (!$this->isActiveMember($member)) throw $this->notFound();
 
         if ($cardSummary!==null) {
@@ -167,7 +167,7 @@ final class CashierV3MemberDetailQueryServices
         if ($memberId <= 0) {
             throw $this->notFound();
         }
-        $this->assertVisible($memberId, $dataScope);
+        $this->assertVisible($memberId, $operatorScope, $dataScope);
 
         $member = Db::name('user')
             ->where('uid', $memberId)
@@ -183,23 +183,22 @@ final class CashierV3MemberDetailQueryServices
         }
         $detailQuery = $this->detailQuery($detailQuery);
         $cards = $this->cards($memberId, $operatorScope->tenantId(), $detailQuery['tab'] === 'assets' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'assets' ? $detailQuery['status'] : 'active', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
-        $services = $this->services($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'writeoff' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateTo'] : '');
+        $services = $this->services($memberId, $operatorScope->tenantId(), $detailQuery['tab'] === 'writeoff' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateTo'] : '');
         // “有效”代表会员当前仍持有的赠送/预售，不受查询区缓存的日期限制；
         // “全部”才允许按业务日期追查历史。后端也强制此口径，避免旧前端误传日期。
         $giftStatus = $detailQuery['tab'] === 'gift' ? $detailQuery['status'] : 'active';
-        $gifts = $this->gifts($memberId, $operatorScope->tenantId(), $dataScope,
+        $gifts = $this->gifts($memberId, $operatorScope->tenantId(),
             $detailQuery['tab'] === 'gift' ? $detailQuery['keyword'] : '', $giftStatus,
             $detailQuery['tab'] === 'gift' && $giftStatus === '' ? $detailQuery['dateFrom'] : '',
             $detailQuery['tab'] === 'gift' && $giftStatus === '' ? $detailQuery['dateTo'] : '');
-        $care = $this->care($memberId, $operatorScope->tenantId(), $dataScope, $detailQuery['tab'] === 'care' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'care' ? $detailQuery['status'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
-        $balanceChanges = $this->balanceChanges($memberId, $operatorScope->tenantId(), $dataScope);
+        $care = $this->care($memberId, $operatorScope->tenantId(), $detailQuery['tab'] === 'care' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'care' ? $detailQuery['status'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
+        $balanceChanges = $this->balanceChanges($memberId, $operatorScope->tenantId());
         $cardOperations = $this->cardOperations(
             $memberId,
             $operatorScope->tenantId(),
-            $dataScope,
             $detailQuery['tab'] === 'card-operations' ? $detailQuery['keyword'] : ''
         );
-        $overview = $this->overview($memberId, $operatorScope->tenantId(), $services, $dataScope);
+        $overview = $this->overview($memberId, $operatorScope->tenantId(), $services);
         $remainingTimes = 0;
         $remainingAmount = '0.00';
         $activeCardCount = 0;
@@ -305,7 +304,7 @@ final class CashierV3MemberDetailQueryServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    private function services(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword = '', string $dateFrom = '', string $dateTo = ''): array
+    private function services(int $memberId, string $tenantId, string $keyword = '', string $dateFrom = '', string $dateTo = ''): array
     {
         $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
             ->leftJoin(
@@ -314,7 +313,7 @@ final class CashierV3MemberDetailQueryServices
             )
             ->where('sf.tenant_id', $tenantId)->where('sf.member_id', $memberId)
             ->where('sf.service_status', 'completed');
-        $this->applyStoreScope($query, 'sf.store_id', $dataScope);
+        // 会员详情按会员汇集各店已完成服务；结账与核销的门店授权仍由写命令校验。
         $this->applyDetailKeyword($query, $keyword, [
             'sf.service_record_no', 'sf.project_name_snapshot', 'sf.store_name_snapshot',
             'sf.operator_name_snapshot', 'sf.craftsmen_snapshot_json', 'sf.document_no_snapshot',
@@ -412,13 +411,13 @@ final class CashierV3MemberDetailQueryServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    private function balanceChanges(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope): array
+    private function balanceChanges(int $memberId, string $tenantId): array
     {
         $query = Db::name('cashier_v3_balance_fact')
             ->where('tenant_id', $tenantId)
             ->where('member_id', $memberId)
             ->where('status', 'effective');
-        $this->applyStoreScope($query, 'store_id', $dataScope);
+        // 余额属于会员统一账户，详情流水须与顶部全量余额保持同一跨店口径。
         $rows = $query
             ->field('id,fact_id,business_date,balance_change_type,fact_direction,principal_delta_cents,bonus_delta_cents,principal_after_cents,bonus_after_cents,order_no_snapshot,source_document_type,operator_name_snapshot,occurred_at,settled_at,recorded_at')
             ->order('settled_at desc,id desc')->limit(100)->select()->toArray();
@@ -454,7 +453,6 @@ final class CashierV3MemberDetailQueryServices
     private function cardOperations(
         int $memberId,
         string $tenantId,
-        CashierV3DataScopeContext $dataScope,
         string $keyword = ''
     ): array {
         $query = Db::name('cashier_v3_card_operation')
@@ -463,7 +461,7 @@ final class CashierV3MemberDetailQueryServices
                 $memberQuery->where('member_id_before', $memberId)
                     ->whereOr('member_id_after', $memberId);
             });
-        $this->applyStoreScope($query, 'store_id', $dataScope);
+        // 卡操作只按本会员的转出/转入身份读取，不按办理门店隐藏历史。
         $this->applyDetailKeyword($query, $keyword, [
             'operation_no', 'card_name_snapshot', 'card_no_snapshot',
             'target_catalog_name_snapshot', 'member_name_before_snapshot',
@@ -505,7 +503,7 @@ final class CashierV3MemberDetailQueryServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    private function gifts(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword = '', string $status = 'active', string $dateFrom = '', string $dateTo = ''): array
+    private function gifts(int $memberId, string $tenantId, string $keyword = '', string $status = 'active', string $dateFrom = '', string $dateTo = ''): array
     {
         $result = [];
         $issuedGiftItems = [];
@@ -530,7 +528,7 @@ final class CashierV3MemberDetailQueryServices
                     'gi.gift_id=gf.source_id AND gi.item_id=gf.source_detail_id'
                 );
             }
-            $this->applyStoreScope($query, 'gf.store_id', $dataScope);
+            // 已授权打开会员详情后，展示该会员所有门店的赠送事实。
             $this->applyDetailKeyword($query, $keyword, ['gf.content_name_snapshot', 'ga.gift_no', 'ga.' . $source['reason']]);
             $fields = [
                 'gf.id,gf.gift_fact_id,gf.source_id,gf.source_detail_id,gf.gift_kind,gf.content_name_snapshot,gf.quantity',
@@ -582,8 +580,8 @@ final class CashierV3MemberDetailQueryServices
         // 因此补读历史项目赠送与商品赠送/预售的原始承载；只做展示合并，
         // 不反写、重发权益，也不把迁入订单算成新销售事实。
         $result = array_merge($result,
-            $this->migratedProjectGifts($memberId, $dataScope, $keyword, $status, $dateFrom, $dateTo),
-            $this->claimableGiftAndPresale($memberId, $tenantId, $dataScope, $keyword, $status, $dateFrom, $dateTo, $issuedGiftItems));
+            $this->migratedProjectGifts($memberId, $keyword, $status, $dateFrom, $dateTo),
+            $this->claimableGiftAndPresale($memberId, $tenantId, $keyword, $status, $dateFrom, $dateTo, $issuedGiftItems));
         usort($result, static function (array $left, array $right): int {
             return (int)$right['_issuedAt'] <=> (int)$left['_issuedAt'];
         });
@@ -595,9 +593,9 @@ final class CashierV3MemberDetailQueryServices
     /**
      * 历史项目赠送以已支付的会员订单明细为权威承载，导入时没有对应 V3 gift_fact。
      * 仅识别明确标记为迁入的赠送项目，避免把正常收银随单赠送重复展示。
-     * 查询仍受当前账号的门店数据权限约束，不能因会员可打开而扩大事实范围。
+     * 会员详情按会员展示跨店历史；此只读路径不改变权益使用门店的校验。
      */
-    private function migratedProjectGifts(int $memberId, CashierV3DataScopeContext $dataScope, string $keyword, string $status, string $dateFrom, string $dateTo): array
+    private function migratedProjectGifts(int $memberId, string $keyword, string $status, string $dateFrom, string $dateTo): array
     {
         $query = Db::name('store_order_cart_info')->alias('ci')
             ->join('store_order o', 'o.id=ci.oid AND o.uid=ci.uid')
@@ -606,7 +604,6 @@ final class CashierV3MemberDetailQueryServices
             ->where('ci.product_type', 6)->where('ci.is_gift', 1)
             ->where('ci.source_type', 'migration')->where('o.paid', 1)
             ->where('o.is_del', 0)->where('o.is_system_del', 0)->where('o.is_user_del', 0);
-        $this->applyStoreScope($query, 'o.store_id', $dataScope);
         if ($status === 'active') $query->where('ci.write_surplus_times', '>', 0)->where('o.refund_status', 0)->where('o.terminal_action', 0);
         if ($dateFrom !== '') $query->where('ci.add_time', '>=', strtotime($dateFrom . ' 00:00:00'));
         if ($dateTo !== '') $query->where('ci.add_time', '<=', strtotime($dateTo . ' 23:59:59'));
@@ -643,15 +640,14 @@ final class CashierV3MemberDetailQueryServices
 
     /**
      * 商品赠送和预售以可领用行为权威；导入数据和正常结账数据共用该表。
-     * 仅返回会员本人且位于可见门店的行，数量展示剩余可领用量，不将领用
+     * 仅返回会员本人的全门店行，数量展示剩余可领用量，不将领用
      * 记录反算成新的赠送或销售，也不修改库存。
      */
-    private function claimableGiftAndPresale(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword, string $status, string $dateFrom, string $dateTo, array $issuedGiftItems): array
+    private function claimableGiftAndPresale(int $memberId, string $tenantId, string $keyword, string $status, string $dateFrom, string $dateTo, array $issuedGiftItems): array
     {
         $query = Db::name('cashier_v3_presale_claimable_line')
             ->where('tenant_id', $tenantId)->where('member_id', $memberId)
             ->whereIn('source_kind', ['GIFT', 'PRESALE']);
-        $this->applyStoreScope($query, 'store_id', $dataScope);
         if ($status === 'active') {
             $query->whereIn('claim_status', ['OPEN', 'AVAILABLE'])
                 ->whereRaw('quantity > claimed_quantity');
@@ -696,7 +692,7 @@ final class CashierV3MemberDetailQueryServices
     }
 
     /** @return array{records:array<int,array<string,mixed>>,tasks:array<int,array<string,mixed>>,reminder:array<string,mixed>} */
-    private function care(int $memberId, string $tenantId, CashierV3DataScopeContext $dataScope, string $keyword = '', string $status = '', string $dateFrom = '', string $dateTo = ''): array
+    private function care(int $memberId, string $tenantId, string $keyword = '', string $status = '', string $dateFrom = '', string $dateTo = ''): array
     {
         $records = [];
         // 客情记录本身代表已经发生的跟进；“未完成”只显示尚未完成的任务，
@@ -704,7 +700,7 @@ final class CashierV3MemberDetailQueryServices
         if ($status !== 'unfinished') {
             $recordQuery = Db::name('customer_care_record')->where('tenant_id', $tenantId)
                 ->where('member_id', $memberId)->where('status', 'NORMAL');
-            $this->applyStoreScope($recordQuery, 'business_store_id', $dataScope);
+            // 客情详情回顾会员在各店的跟进，任务编辑权限不由此只读投影授予。
             $this->applyDetailKeyword($recordQuery, $keyword, ['record_no', 'record_type', 'summary', 'detail', 'follower_name_snapshot']);
             if ($dateFrom !== '') $recordQuery->where('followed_at', '>=', strtotime($dateFrom . ' 00:00:00'));
             if ($dateTo !== '') $recordQuery->where('followed_at', '<=', strtotime($dateTo . ' 23:59:59'));
@@ -714,7 +710,6 @@ final class CashierV3MemberDetailQueryServices
         }
         $taskQuery = Db::name('customer_care_task')->where('tenant_id', $tenantId)
             ->where('member_id', $memberId)->where('is_visible', 1);
-        $this->applyStoreScope($taskQuery, 'business_store_id', $dataScope);
         $this->applyDetailKeyword($taskQuery, $keyword, ['task_no', 'title', 'task_type', 'owner_name_snapshot']);
         if ($status === 'unfinished') $taskQuery->whereIn('status', ['UNSTARTED', 'PENDING', 'IN_PROGRESS']);
         if ($dateFrom !== '') $taskQuery->where('planned_at', '>=', strtotime($dateFrom . ' 00:00:00'));
@@ -744,16 +739,15 @@ final class CashierV3MemberDetailQueryServices
     }
 
     /** @param array<int,array<string,mixed>> $services @return array<string,mixed> */
-    private function overview(int $memberId, string $tenantId, array $services, CashierV3DataScopeContext $dataScope): array
+    private function overview(int $memberId, string $tenantId, array $services): array
     {
         $salesQuery = Db::name('cashier_v3_sale_fact')->where('tenant_id', $tenantId)
             ->where('member_id', $memberId)->where('status', 'effective');
-        $this->applyStoreScope($salesQuery, 'store_id', $dataScope);
+        // 顶部消费与到店汇总必须覆盖和各页签相同的会员全门店事实。
         $sales = (array)$salesQuery
             ->field('COALESCE(SUM(sale_amount_cents),0) AS total_cents,MAX(business_date) AS latest_date')->find();
         $visitQuery = Db::name('cashier_v3_entitlement_service_fact')->where('tenant_id', $tenantId)
             ->where('member_id', $memberId)->where('service_status', 'completed');
-        $this->applyStoreScope($visitQuery, 'store_id', $dataScope);
         $visits = (array)$visitQuery->field('COUNT(DISTINCT business_date) AS visit_count')->find();
         $latest = $services[0] ?? [];
         return [
@@ -861,20 +855,29 @@ final class CashierV3MemberDetailQueryServices
         return $timestamp > 0 ? date('Y-m-d', $timestamp) : '';
     }
 
-    private function assertVisible(int $memberId, CashierV3DataScopeContext $dataScope): void
+    /** AI candidates were scoped by their caller; do not widen that separate read path. */
+    private function assertAiVisible(int $memberId, CashierV3DataScopeContext $dataScope): void
     {
-        if ($dataScope->authorizationMode() === CashierV3DataScopeContext::MODE_ALL
-            || $dataScope->authorizationMode() === CashierV3DataScopeContext::MODE_STORES
-            || $dataScope->authorizationMode() === CashierV3DataScopeContext::MODE_SELF_PARTICIPANT) {
-            // 会员详情按会员主档和会员权益读取，不能因为当前操作门店与会员归属门店
-            // 不同就把会员判定为不存在；否则会员摘要可以显示，权益明细却会被清空。
-            // 卡项权益在 cards() 中按会员关联事实返回，服务记录、赠送记录等独立事实
-            // 仍分别执行自己的门店数据权限过滤。NONE 模式继续拒绝，保留无权限会话的
-            // fail-closed 行为。
+        if ($memberId > 0 && in_array($dataScope->authorizationMode(), [
+            CashierV3DataScopeContext::MODE_ALL,
+            CashierV3DataScopeContext::MODE_STORES,
+            CashierV3DataScopeContext::MODE_SELF_PARTICIPANT,
+        ], true)) return;
+        throw $this->notFound();
+    }
+
+    /** Member-detail cross-store history requires an authenticated current-store session. */
+    private function assertVisible(int $memberId, CashierV3OperatorScope $operatorScope, CashierV3DataScopeContext $dataScope): void
+    {
+        if ($memberId > 0 && $operatorScope->tenantId() !== ''
+            && $operatorScope->tenantId() === $dataScope->tenantId()
+            && $operatorScope->storeId() === $dataScope->forcedStoreId()
+            && $dataScope->allowsStore($operatorScope->storeId())
+            && in_array($dataScope->authorizationMode(), [CashierV3DataScopeContext::MODE_ALL, CashierV3DataScopeContext::MODE_STORES], true)) {
+            // Only an authenticated store session may expand an exact member's
+            // history across stores. SELF_PARTICIPANT/NONE cannot use the member
+            // id as a shortcut to another store's private records.
             return;
-        }
-        if ($dataScope->authorizationMode() === CashierV3DataScopeContext::MODE_NONE) {
-            throw $this->notFound();
         }
         throw $this->notFound();
     }
@@ -980,8 +983,8 @@ final class CashierV3MemberDetailQueryServices
         if ($dateTo !== '') $holderQuery->where('h.add_time', '<=', strtotime($dateTo . ' 23:59:59'));
         // 会员详情的卡项权益跟随已通过可见性校验的会员读取；卡项历史可能
         // 来自多个门店，不能再用当前操作门店过滤，否则摘要有权益而明细为空。
-        // 门店数据权限仍由 assertVisible() 控制会员是否可打开，服务记录和赠送
-        // 等独立事实继续按各自事实层的门店权限查询。
+        // 详情入口先验证当前门店会话，再按同一会员聚合全门店历史；
+        // AI 候选读取和所有写命令继续走各自权限门禁。
         $this->applyDetailKeyword($holderQuery, $keyword, ['h.card_name', 'h.card_no']);
         $holders = $holderQuery
             ->field('h.id,h.uid,h.oid,h.card_name,h.card_no,h.store_id,h.write_start,h.write_end,h.add_time,o.pay_price as order_pay_price')
@@ -1195,21 +1198,6 @@ final class CashierV3MemberDetailQueryServices
             'purchaseAmount' => $this->money($row['pay_price'] ?? 0),
             'allocationSnapshot' => $snapshot,
         ];
-    }
-
-    private function applyStoreScope($query, string $column, CashierV3DataScopeContext $dataScope): void
-    {
-        if ($dataScope->authorizationMode() === CashierV3DataScopeContext::MODE_ALL) {
-            return;
-        }
-        $storeIds = array_values(array_unique(array_filter(array_map(
-            'intval',
-            (array)$dataScope->visibleStoreIds()
-        ))));
-        if (!$storeIds) {
-            throw $this->notFound();
-        }
-        $query->whereIn($column, $storeIds);
     }
 
     /** @return array{tab:string,keyword:string,status:string,dateFrom:string,dateTo:string} */

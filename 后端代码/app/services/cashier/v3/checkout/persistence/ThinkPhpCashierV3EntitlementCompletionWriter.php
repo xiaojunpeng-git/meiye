@@ -220,10 +220,14 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
         $orderIds = [];
         $holderExpectation = [];
         foreach ($deductions as $deduction) {
-            $holderIds[$deduction['holder_id']] = $deduction['holder_id'];
             $detailIds[$deduction['source_detail_id']] = $deduction['source_detail_id'];
             $orderIds[$deduction['origin_order_id']] = $deduction['origin_order_id'];
             $holderId = $deduction['holder_id'];
+            if ($deduction['entitlement_instance_type'] === 'independent_gift') {
+                // 独立赠送只扣导入明细，不参与卡规则和卡实例余额。
+                continue;
+            }
+            $holderIds[$holderId] = $holderId;
             if (isset($holderExpectation[$holderId])
                 && ($holderExpectation[$holderId]['origin_order_id'] !== $deduction['origin_order_id']
                     || $holderExpectation[$holderId]['source_version'] !== $deduction['source_version'])) {
@@ -251,6 +255,10 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             : $this->versionRows(array_values($holderIds), array_values($detailIds));
         $ruleAuthorities = [];
         foreach ($deductions as $deduction) {
+            if ($deduction['entitlement_instance_type'] === 'independent_gift') {
+                $ruleAuthorities[$deduction['source_detail_id']] = null;
+                continue;
+            }
             $ruleAuthorities[$deduction['source_detail_id']] = $this->cardRules()->authorityForDetail(
                 $context['tenant_id'],
                 $deduction['holder_id'],
@@ -295,11 +303,19 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             $ruleAuthority = $ruleAuthorities[$detailId] ?? null;
             $legacyRemainingMustMatch = !is_array($ruleAuthority)
                 || in_array((string)($ruleAuthority['ruleType'] ?? ''), ['normal', 'choice_kind'], true);
+            $independentGift = $deduction['entitlement_instance_type'] === 'independent_gift';
             if (!$detail || !$order || (!$directSnapshot && !$version)
                 || (int)($detail['oid'] ?? 0) !== $deduction['origin_order_id']
                 || (int)($detail['product_id'] ?? 0) !== $deduction['project_id']
                 || (int)($detail['cart_type'] ?? 0) !== 2
                 || (int)($detail['product_type'] ?? 0) !== 6
+                || ($independentGift && ((int)($detail['uid'] ?? 0) !== $context['member_id']
+                    || (int)($order['uid'] ?? 0) !== $context['member_id']
+                    || (int)($detail['is_gift'] ?? 0) !== 1
+                    || (string)($detail['source_type'] ?? '') !== 'migration'
+                    || strpos((string)($detail['cart_id'] ?? ''), 'RH-PG-') !== 0
+                    || (int)($detail['is_writeoff'] ?? 1) !== 0
+                    || !$this->activeOrder($order)))
                 || (!$directSnapshot && $legacyRemainingMustMatch
                     && (int)($detail['write_surplus_times'] ?? -1)
                         !== $deduction['expected_physical_remaining_times'])

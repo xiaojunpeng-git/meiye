@@ -48,9 +48,12 @@ final class CashierV3SalesOrderQueryServices
     public function querySalesOrders(
         array $payload,
         CashierV3OperatorScope $operatorScope,
-        CashierV3DataScopeContext $dataScope
+        CashierV3DataScopeContext $dataScope,
+        bool $memberDetailAllStores = false
     ): array {
-        $criteria = $this->listCriteria($payload, $operatorScope, $dataScope);
+        // Only the member-detail caller may request a member-locked cross-store
+        // history. Normal order-center lists and order mutations retain their scope.
+        $criteria = $this->listCriteria($payload, $operatorScope, $dataScope, $memberDetailAllStores);
         if ($criteria['allowedStoreIds'] === [] || !$dataScope->hasFeature('cashier.v3.order_center')) {
             return $this->emptyPage($criteria, 'permission_filtered');
         }
@@ -196,7 +199,8 @@ final class CashierV3SalesOrderQueryServices
     private function listCriteria(
         array $payload,
         CashierV3OperatorScope $operatorScope,
-        CashierV3DataScopeContext $dataScope
+        CashierV3DataScopeContext $dataScope,
+        bool $memberDetailAllStores = false
     ): array {
         $nowTimestamp = $this->nowTimestamp();
         $page = max(1, (int)($payload['page'] ?? 1));
@@ -231,6 +235,16 @@ final class CashierV3SalesOrderQueryServices
             : [];
         if ($memberFilterPresent && $memberId === null) {
             $allowedStores = [];
+        }
+        if ($memberDetailAllStores && $memberId !== null && $recordType === 'sales'
+            && $operatorScope->tenantId() !== ''
+            && $operatorScope->tenantId() === $dataScope->tenantId()
+            && $operatorScope->storeId() === $dataScope->forcedStoreId()
+            && $dataScope->allowsStore($operatorScope->storeId())
+            && in_array($dataScope->authorizationMode(), [CashierV3DataScopeContext::MODE_ALL, CashierV3DataScopeContext::MODE_STORES], true)) {
+            // This is a read-only, exact-member projection after member-detail
+            // visibility was checked; no other sales-order query gets this scope.
+            $allowedStores = null;
         }
         $salesPerformanceDrilldown = $recordType === 'sales'
             ? $this->salesPerformanceDrilldown($payload) : null;

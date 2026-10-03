@@ -162,6 +162,9 @@ final class CashierV3EntitlementProjectionServices
             return $versions;
         });
         $sources = $this->buildSources($snapshot, [], [], $operatorScope->tenantId(), false, true);
+        // 历史项目赠送没有卡实例；以导入明细自身作为独立权益展示，不补造卡。
+        // 最终结账仍须在事务内锁定这条明细并复核剩余次数。
+        $sources = array_merge($sources, $this->legacyGiftSources($memberId, $operatorScope));
         // 展示行不能充当并发版本来源。选择器把本次读取时签发的 holder
         // 版本作为命令上下文返回，前端仅从中挑选用户最终选中的来源卡；
         // Gateway 仍会在写事务内核对该版本并拒绝任何过期操作。
@@ -953,6 +956,83 @@ final class CashierV3EntitlementProjectionServices
             if ($includeVersionFields) {
                 $sources[array_key_last($sources)]['version'] = (int)$holderVersions[$holderId];
             }
+        }
+        return $sources;
+    }
+
+    /**
+     * 历史导入项目赠送的剩余次数以原明细为权威；来源单仅证明发放仍有效。
+     * 这里只投影仍可用的明细，不把赠送伪装为销售卡项或购买金额。
+     */
+    private function legacyGiftSources(int $memberId, CashierV3OperatorScope $operatorScope): array
+    {
+        $query = Db::name('store_order_cart_info')->alias('ci')
+            ->join('store_order o', 'o.id = ci.oid AND o.uid = ci.uid')
+            ->where('ci.uid', $memberId)
+            ->where('ci.cart_type', 2)
+            ->where('ci.product_type', 6)
+            ->where('ci.is_gift', 1)
+            ->where('ci.source_type', 'migration')
+            ->where('ci.cart_id', 'like', 'RH-PG-%')
+            ->where('ci.write_surplus_times', '>', 0)
+            ->where('ci.is_writeoff', 0)
+            ->where('o.paid', 1)
+            ->where('o.is_del', 0)
+            ->where('o.is_system_del', 0)
+            ->where('o.is_user_del', 0)
+            ->where('o.refund_status', 0)
+            ->where('o.terminal_action', 0)
+            ->where('o.card_upgrade_use_oid', 0);
+        if (!$this->crossStoreEnabled()) {
+            $query->where('o.store_id', $operatorScope->storeId());
+        }
+        $rows = $this->rows($query->field('ci.id,ci.oid,ci.product_id,ci.cart_info,ci.write_times,ci.write_surplus_times,o.order_id,o.store_id')
+            ->order('ci.id desc')->select());
+        $sources = [];
+        foreach ($rows as $row) {
+            $detailId = (int)$row['id'];
+            $remaining = (int)$row['write_surplus_times'];
+            $total = (int)$row['write_times'];
+            if ($detailId <= 0 || (int)$row['product_id'] <= 0 || $total <= 0 || $remaining > $total) {
+                continue;
+            }
+            $snapshot = json_decode((string)$row['cart_info'], true);
+            $name = trim((string)($snapshot['productInfo']['store_name'] ?? $snapshot['project_name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $sourceNo = (string)$row['order_id'];
+            $project = [
+                'id' => $detailId, 'projectId' => (int)$row['product_id'],
+                'entitlementSourceDetailId' => $detailId,
+                'sourceType' => 'migrated_project_gift', 'name' => $name,
+                'remainingTimes' => $remaining, 'purchaseTimes' => $total,
+                'purchaseAmount' => '0.00', 'remainingAmount' => '0.00',
+                'totalPurchaseTimes' => $total, 'consumedTimesAtSelection' => $total - $remaining,
+                'amountCalculationVersion' => 'independent-gift-'
+                    . \app\services\cashier\v3\checkout\CashierV3EntitlementCompletionKernel::AMOUNT_CALCULATION_VERSION,
+                'occupiedTimes' => 0, 'availableTimes' => $remaining, 'debtBlockedTimes' => 0,
+                'debtRestrictionLabel' => '', 'validThroughLabel' => '长期有效', 'expiryDate' => '',
+                'orderRemark' => '', 'isGift' => true, 'selectable' => true,
+                'disabled' => false, 'disabledReason' => '', 'unitPrice' => '0',
+                'serviceObject' => '本人', 'craftsmen' => [], 'craftsmenSummary' => '待分配',
+            ];
+            $sources[] = [
+                'id' => 'independent-gift:' . $detailId, 'entitlementInstanceId' => $detailId,
+                'entitlementInstanceType' => 'independent_gift', 'sourceType' => 'independent_gift',
+                'sourceKind' => 'gift', 'sourceKindLabel' => '赠送',
+                'name' => $name, 'fullCardNo' => $sourceNo, 'reference' => $sourceNo,
+                'remainingTimes' => $remaining, 'purchaseTimes' => $total,
+                'purchaseAmount' => '0.00', 'unitPrice' => '0', 'remainingAmount' => '0.00',
+                'outstandingDebtAmount' => '0.00', 'cancelledDebtAmount' => '0.00',
+                'amountCalculationVersion' => 'independent-gift-'
+                    . \app\services\cashier\v3\checkout\CashierV3EntitlementCompletionKernel::AMOUNT_CALCULATION_VERSION,
+                'occupiedTimes' => 0, 'availableTimes' => $remaining,
+                'selectable' => true, 'disabled' => false, 'disabledReason' => '',
+                'statusCode' => 'enabled', 'status' => '可用',
+                'expiryText' => '长期有效', 'expiryDate' => '', 'orderRemark' => '',
+                'projects' => [$project],
+            ];
         }
         return $sources;
     }

@@ -1030,6 +1030,7 @@ final class CashierV3CheckoutSettlementKernel
                 'projectCategoryIdSnapshot',
                 'projectCategoryNameSnapshot',
             ], [
+                'entitlementInstanceType',
                 'craftsmen',
                 'serviceObject',
                 'friendCountsAsCustomer',
@@ -1038,6 +1039,13 @@ final class CashierV3CheckoutSettlementKernel
             ], 'entitlementLines[' . $index . ']');
             if (!in_array($line['sourceKind'], self::ENTITLEMENT_SOURCE_KINDS, true)) {
                 throw self::failure('entitlement_source_kind_invalid', ['index' => $index]);
+            }
+            $instanceType = (string)($line['entitlementInstanceType'] ?? 'card_holder');
+            if (!in_array($instanceType, ['card_holder', 'independent_gift'], true)
+                || ($instanceType === 'independent_gift'
+                    && ((string)$line['sourceKind'] !== 'gift'
+                        || (int)$line['holderId'] !== (int)$line['entitlementSourceDetailId']))) {
+                throw self::failure('entitlement_instance_type_invalid', ['index' => $index]);
             }
             $authorityKey = self::token($line['authorityKey'], 96, 'entitlementLine.authorityKey');
             if (isset($keys[$authorityKey])) {
@@ -1114,6 +1122,9 @@ final class CashierV3CheckoutSettlementKernel
                     || !empty($line['friendCountsAsCustomer']) ? 1 : 0,
                 'isExperience' => !empty($line['isExperience']) ? 1 : 0,
             ];
+            if ($instanceType === 'independent_gift') {
+                $normalized['entitlementInstanceType'] = $instanceType;
+            }
             if (array_key_exists('manualLaborFeeCents', $line)) {
                 $normalized['manualLaborFeeCents'] = self::nonNegativeInt(
                     $line['manualLaborFeeCents'],
@@ -1135,6 +1146,7 @@ final class CashierV3CheckoutSettlementKernel
             // identity and amount fields only.
             $fingerprintInput = $normalized;
             unset(
+                $fingerprintInput['entitlementInstanceType'],
                 $fingerprintInput['craftsmen'],
                 $fingerprintInput['serviceObject'],
                 $fingerprintInput['friendCountsAsCustomer'],
@@ -1603,7 +1615,10 @@ final class CashierV3CheckoutSettlementKernel
                 'lineRole' => 'entitlement_service',
                 'authorityKey' => $line['authorityKey'],
                 'sourceKind' => $line['sourceKind'],
-                'sourceType' => 'entitlement_project',
+                // source_type is the persisted discriminator; source_id is a
+                // detail ID for independent gifts, never a card-holder ID.
+                'sourceType' => ($line['entitlementInstanceType'] ?? 'card_holder') === 'independent_gift'
+                    ? 'independent_gift' : 'entitlement_project',
                 'sourceId' => $line['holderId'],
                 // 持久化行契约要求所有行明确携带 SKU 槽位；权益项目没有
                 // 销售 SKU，固定写 0，避免用缺字段表示“无 SKU”。

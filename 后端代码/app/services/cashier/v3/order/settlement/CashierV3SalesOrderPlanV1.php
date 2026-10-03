@@ -1145,8 +1145,11 @@ final class CashierV3SalesOrderPlanV1
     private static function assertEntitlementLine(array $row): int
     {
         $kind = (string)$row['source_kind'];
+        $independentGift = (string)$row['source_type'] === 'independent_gift';
         if (!in_array($kind, self::ENTITLEMENT_KINDS, true)
-            || (string)$row['source_type'] !== 'entitlement_project') {
+            || !in_array((string)$row['source_type'], ['entitlement_project', 'independent_gift'], true)
+            || ($independentGift && ($kind !== 'gift'
+                || (int)$row['source_id'] !== (int)$row['entitlement_source_detail_id']))) {
             throw self::failure('entitlement_checkout_line_type_invalid');
         }
         $authority = [

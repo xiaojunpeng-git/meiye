@@ -157,6 +157,10 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
             $entitlementLine = [
                 'authorityKey' => (string)($row['authority_key'] ?? ''),
                 'sourceKind' => (string)($row['source_kind'] ?? ''),
+                // source_type is the persisted right identity; rebuilding
+                // must not silently turn a gift detail into a card holder.
+                'entitlementInstanceType' => (string)($row['source_type'] ?? '') === 'independent_gift'
+                    ? 'independent_gift' : 'card_holder',
                 'holderId' => self::positiveInt(
                     $row['source_id'] ?? null,
                     'entitlement.holder_id'

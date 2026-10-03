@@ -1547,8 +1547,12 @@ const cartGroups = computed(() => {
   const entitlementLines = cartLines.value.filter((line) => cartLineRole(line) === 'entitlement_service')
   const cardOperationLines = cartLines.value.filter((line) => cartLineRole(line) === 'card_operation')
   const groups = []
-  // 分组只信任后端 lineRole：卡内权益在上，本次付款购买在下，不能从商品名称推断。
-  if (entitlementLines.length) groups.push({ key: 'current-entitlement-service', label: '卡内项目', lines: entitlementLines })
+  // 赠送与卡内项目共用核销角色，但独立赠送不能在购物车被标成卡项目。
+  if (entitlementLines.length) groups.push({
+    key: 'current-entitlement-service',
+    label: entitlementLines.some((line) => line.entitlementInstanceType === 'independent_gift') ? '权益项目' : '卡内项目',
+    lines: entitlementLines
+  })
   if (cardOperationLines.length) groups.push({ key: 'current-card-operation', label: '卡操作', lines: cardOperationLines })
   if (saleLines.length) groups.push({ key: 'current-sale', label: '本次购买', lines: saleLines })
   return groups
@@ -3157,10 +3161,10 @@ async function addEntitlementLines(payload = {}) {
 }
 
 function localEntitlementAmount(lines = [], line = {}) {
-  const sourceKey = `${line.entitlementInstanceId || line.cardHolderId || ''}:${line.entitlementSourceDetailId || line.memberBenefitPoolId || ''}`
+  const sourceKey = `${line.entitlementInstanceType || 'card_holder'}:${line.entitlementInstanceId || line.cardHolderId || ''}:${line.entitlementSourceDetailId || line.memberBenefitPoolId || ''}`
   const selectedBefore = (Array.isArray(lines) ? lines : []).reduce((total, current) => {
     if (!isEntitlementLine(current)) return total
-    const currentKey = `${current.entitlementInstanceId || current.cardHolderId || ''}:${current.entitlementSourceDetailId || current.memberBenefitPoolId || ''}`
+    const currentKey = `${current.entitlementInstanceType || 'card_holder'}:${current.entitlementInstanceId || current.cardHolderId || ''}:${current.entitlementSourceDetailId || current.memberBenefitPoolId || ''}`
     return currentKey === sourceKey ? total + Math.max(1, Number(current.quantity || 1)) : total
   }, 0)
   const totalCents = moneyToCents(line.purchaseAmount)
@@ -3233,7 +3237,7 @@ function localEntitlementDraftLine(line = {}, id = '') {
     craftsmen: [],
     craftsmenSummary: '待选择手艺人',
     isExperience: false,
-    serviceSource: '卡内项目',
+    serviceSource: String(snapshot.serviceSource || '卡内项目'),
     displaySnapshot: snapshot,
     actualAmount: 0,
     amount: 0,
@@ -3268,7 +3272,8 @@ function normalizeEntitlementAppendLines(lines = []) {
         entitlementInstanceType: String(source.entitlementInstanceType || source.sourceType || ''),
         entitlementSourceKind: project.isGift ? 'gift' : String(source.sourceKind || ''),
         isGift: Boolean(project.isGift),
-        giftSourceType: project.isGift ? 'holder_backed' : 'none',
+        giftSourceType: source.entitlementInstanceType === 'independent_gift'
+          ? 'independent' : (project.isGift ? 'holder_backed' : 'none'),
         sourceType: String(project.sourceType || ''),
         sourceDetailId: Number(detailId || 0),
         entitlementSourceName: String(source.name || ''),
@@ -3284,7 +3289,7 @@ function normalizeEntitlementAppendLines(lines = []) {
         validThroughLabel: String(project.validThroughLabel || source.validThroughLabel || ''),
         expiryDate: String(project.expiryDate || source.expiryDate || ''),
         debtRestrictionLabel: String(project.debtRestrictionLabel || ''),
-        serviceSource: '卡内项目'
+        serviceSource: source.entitlementInstanceType === 'independent_gift' ? '赠送项目' : '卡内项目'
       }
     }
   })
@@ -4843,6 +4848,7 @@ function entitlementLineMaximum(line = {}) {
   const selectedByOtherLines = cartLines.value.reduce((total, candidate) => {
     const sameSource = isEntitlementLine(candidate)
       && String(candidate.id || '') !== String(line.id || '')
+      && String(candidate.entitlementInstanceType || 'card_holder') === String(line.entitlementInstanceType || 'card_holder')
       && String(candidate.entitlementInstanceId || candidate.cardHolderId || '') === holderId
       && String(candidate.entitlementSourceDetailId || candidate.memberBenefitPoolId || '') === detailId
       && String(candidate.projectId || '') === projectId
@@ -4871,7 +4877,7 @@ function localCheckoutEntitlementAvailabilityFailure(snapshot = {}) {
         message: '当前页面的权益快照不完整，请返回购物车重新选择权益。'
       }
     }
-    const key = `${holderId}:${detailId}:${projectId}`
+    const key = `${line.entitlementInstanceType || 'card_holder'}:${holderId}:${detailId}:${projectId}`
     const current = usageBySource.get(key) || { availableTimes, quantity: 0 }
     // 同一权益在本次快照中的可用次数必须一致；不接受混合不同投影的数据。
     if (current.availableTimes !== availableTimes) {
@@ -5306,6 +5312,19 @@ function buildCheckoutSnapshot(preview = {}) {
 }
 
 async function openCheckout() {
+  // The toolbar is the source of truth until checkout opens. Block an empty
+  // selection here so a stale checkout projection cannot silently supply it.
+  if (Number(localCheckoutBusinessSource.value.primarySourceId || 0) <= 0) {
+    const blocked = {
+      result: {
+        status: 'failed',
+        code: 'CASHIER_BUSINESS_SOURCE_REQUIRED',
+        message: '请先选择客户来源'
+      }
+    }
+    reportCheckoutEntryFailure(blocked, '请先选择客户来源')
+    return blocked
+  }
   const craftsmenRequiredLine = firstCartLineMissingCraftsmen()
   if (craftsmenRequiredLine) {
     const blocked = {
@@ -7406,7 +7425,7 @@ onBeforeUnmount(() => {
                     :title="line.entitlementSourceName || line.sourceName || line.serviceSource"
                   >
                     来源：{{ line.entitlementSourceName || line.sourceName || line.serviceSource || '会员权益' }}
-                    <template v-if="line.fullCardNo || line.cardNo"> · 卡号：{{ line.fullCardNo || line.cardNo }}</template>
+                    <template v-if="line.fullCardNo || line.cardNo"> · {{ line.entitlementInstanceType === 'independent_gift' ? '赠送记录' : '卡号' }}：{{ line.fullCardNo || line.cardNo }}</template>
                     · 剩余 {{ line.remainingTimes ?? '—' }} · 占用 {{ line.occupiedTimes ?? line.reservedTimes ?? 0 }} · 可用 {{ line.availableTimes ?? '—' }}
                   </span>
                 </div>

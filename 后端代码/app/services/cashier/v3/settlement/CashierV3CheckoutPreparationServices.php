@@ -669,6 +669,8 @@ final class CashierV3CheckoutPreparationServices
                 $entitlementLine = [
                     'id' => (string)($line['lineId'] ?? 'snapshot-' . $index),
                     'lineRole' => 'entitlement_service',
+                    // 独立历史赠送沿用明细 ID 作权益身份，结账草稿必须保留其类型。
+                    'entitlementInstanceType' => (string)($line['entitlementInstanceType'] ?? 'card_holder'),
                     'entitlementInstanceId' => (int)($line['entitlementInstanceId'] ?? 0),
                     'entitlementSourceDetailId' => (int)($line['entitlementSourceDetailId'] ?? 0),
             'entitlementSourceVersion' => 1,
@@ -676,7 +678,8 @@ final class CashierV3CheckoutPreparationServices
             'projectVersion' => 1,
                     'quantity' => (int)($line['quantity'] ?? 0),
                     'actualAmount' => (string)($line['actualAmount'] ?? $line['actualEntitlementAmount'] ?? '0'),
-                    'entitlementSourceKind' => (string)($line['entitlementSourceKind'] ?? 'unknown'),
+                    'entitlementSourceKind' => (string)($line['entitlementInstanceType'] ?? '') === 'independent_gift'
+                        ? 'gift' : (string)($line['entitlementSourceKind'] ?? 'unknown'),
                     'entitlementSourceName' => (string)($line['entitlementSourceName'] ?? ''),
                     'fullCardNo' => (string)($line['fullCardNo'] ?? ''),
                     'name' => (string)($line['name'] ?? ($line['displaySnapshot']['name'] ?? '')),
@@ -1145,10 +1148,11 @@ final class CashierV3CheckoutPreparationServices
         $holderId = (int)($line['entitlementInstanceId'] ?? 0);
         $detailId = (int)($line['entitlementSourceDetailId'] ?? 0);
         $versions = [];
-        if ($holderId > 0 || $detailId > 0) {
+        $independentGift = (string)($line['entitlementInstanceType'] ?? '') === 'independent_gift';
+        if ((!$independentGift && $holderId > 0) || $detailId > 0) {
             $rows = Db::name(CashierV3EntitlementResourceVersionProvider::VERSION_TABLE)
-                ->where(function ($query) use ($holderId, $detailId) {
-                    if ($holderId > 0) {
+                ->where(function ($query) use ($holderId, $detailId, $independentGift) {
+                    if (!$independentGift && $holderId > 0) {
                         $query->where(function ($nested) use ($holderId) {
                             $nested->where('resource_kind', 'card_holder')->where('resource_id', (string)$holderId);
                         });
@@ -1171,10 +1175,12 @@ final class CashierV3CheckoutPreparationServices
         $result = [
             'authorityKey' => (string)($line['id'] ?? ''),
             'sourceKind' => (string)($line['entitlementSourceKind'] ?? ''),
+            'entitlementInstanceType' => $independentGift ? 'independent_gift' : 'card_holder',
             'holderId' => $holderId,
             'entitlementSourceDetailId' => $detailId,
-            'sourceVersion' => $versions['card_holder:' . $holderId]
-                ?? (int)($line['entitlementSourceVersion'] ?? 0),
+            'sourceVersion' => $independentGift
+                ? ($versions['member_benefit_pool:' . $detailId] ?? (int)($line['entitlementSourceVersion'] ?? 0))
+                : ($versions['card_holder:' . $holderId] ?? (int)($line['entitlementSourceVersion'] ?? 0)),
             'projectId' => (int)($line['projectId'] ?? 0),
             'projectVersion' => $versions['member_benefit_pool:' . $detailId]
                 ?? (int)($line['projectVersion'] ?? 0),

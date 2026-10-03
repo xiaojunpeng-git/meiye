@@ -109,7 +109,7 @@ final class CashierV3MemberModule
                             'dateTo' => (string)($payload['dateTo'] ?? ''),
                             'page' => 1,
                             'pageSize' => 50,
-                        ], $scope['operator_scope'], $scope['data_scope']);
+                        ], $scope['operator_scope'], $scope['data_scope'], true);
                         $detail['salesOrders'] = array_map(static function (array $record): array {
                             $record['orderNo'] = (string)($record['salesOrderNo'] ?? $record['sales_order_no'] ?? '');
                             $record['orderTypeLabel'] = '销售订单';

@@ -859,9 +859,18 @@ final class CashierV3EntitlementCompletionKernel
             } elseif ($line['sourceKind'] === 'gift' || $line['giftSourceType'] !== 'none') {
                 throw self::failure('card_holder_source_identity_invalid', ['lineId' => $line['lineId']]);
             }
+        } elseif ($line['entitlementInstanceType'] === self::ENTITLEMENT_INDEPENDENT_GIFT) {
+            // 历史导入赠送由独立 cart 明细承载余次；没有卡实例，也没有销售金额。
+            if (!$line['isGift'] || $line['sourceKind'] !== 'gift'
+                || $line['giftSourceType'] !== 'independent'
+                || $line['holderId'] !== 0
+                || $line['giftId'] !== $line['sourceDetailId']
+                || $line['entitlementInstanceId'] !== $line['sourceDetailId']
+                || $line['giftVersion'] <= 0
+                || $line['originOrderId'] <= 0) {
+                throw self::failure('independent_gift_source_identity_invalid', ['lineId' => $line['lineId']]);
+            }
         } else {
-            // 当前生产权威只有 user_card_holder + cart detail。在独立赠送
-            // 权威表、provider 与并发测试完成前，禁止虚构可达路径。
             throw self::failure('standalone_gift_authority_not_ready', [
                 'lineId' => $line['lineId'],
                 'entitlementInstanceType' => $line['entitlementInstanceType'],
@@ -2169,13 +2178,15 @@ final class CashierV3EntitlementCompletionKernel
                 (string)$line['sourceDetailId'],
                 $line['detailVersion']
             );
-            self::addRequiredLock(
-                $required,
-                'card_holder:' . $line['holderId'],
-                'card_holder',
-                (string)$line['holderId'],
-                $line['sourceVersion']
-            );
+            if ($line['holderId'] > 0) {
+                self::addRequiredLock(
+                    $required,
+                    'card_holder:' . $line['holderId'],
+                    'card_holder',
+                    (string)$line['holderId'],
+                    $line['sourceVersion']
+                );
+            }
             self::addRequiredLock(
                 $required,
                 'entitlement_debt_guard:' . $line['originOrderId'],

@@ -165,7 +165,8 @@ function sourceMatchesKeyword(source = {}, normalizedKeyword = '') {
 }
 
 function projectKey(source = {}, project = {}) {
-  return `${entitlementCardHolderId(source)}:${entitlementBenefitPoolId(project)}`
+  // Gift-detail IDs and card-holder IDs are independent namespaces.
+  return `${source.entitlementInstanceType || 'card_holder'}:${entitlementCardHolderId(source)}:${entitlementBenefitPoolId(project)}`
 }
 
 function cartQuantity(source = {}, project = {}) {
@@ -173,6 +174,7 @@ function cartQuantity(source = {}, project = {}) {
   const detailId = String(entitlementBenefitPoolId(project) || '')
   return props.cartLines.reduce((total, item) => {
     const matched = item?.lineRole === 'entitlement_service'
+      && String(item.entitlementInstanceType || 'card_holder') === String(source.entitlementInstanceType || 'card_holder')
       && String(item.entitlementInstanceId || item.cardHolderId || '') === holderId
       && String(item.entitlementSourceDetailId || item.memberBenefitPoolId || '') === detailId
     if (!matched) return total
@@ -276,8 +278,9 @@ function addProject(source = {}, project = {}) {
     emit('operation-project', { source: clonePlain(source), project: clonePlain(project) })
     return
   }
+  const independentGift = source.entitlementInstanceType === 'independent_gift'
   const line = {
-    cardHolderId: entitlementCardHolderId(source),
+    cardHolderId: independentGift ? '' : entitlementCardHolderId(source),
     memberBenefitPoolId: entitlementBenefitPoolId(project),
     entitlementInstanceId: source.entitlementInstanceId || source.id,
     entitlementInstanceType: source.entitlementInstanceType || source.sourceType,
@@ -290,7 +293,8 @@ function addProject(source = {}, project = {}) {
       entitlementInstanceType: String(source.entitlementInstanceType || source.sourceType || ''),
       entitlementSourceKind: project.isGift ? 'gift' : String(source.sourceKind || ''),
       isGift: Boolean(project.isGift),
-      giftSourceType: project.isGift ? 'holder_backed' : 'none',
+      // 历史赠送没有卡实例；类型随快照传到结账权威，不得伪称卡内赠送。
+      giftSourceType: independentGift ? 'independent' : (project.isGift ? 'holder_backed' : 'none'),
       sourceType: String(project.sourceType || ''),
       sourceDetailId: Number(project.entitlementSourceDetailId || project.sourceDetailId || project.id || 0),
       entitlementSourceName: String(source.name || ''),
@@ -306,7 +310,7 @@ function addProject(source = {}, project = {}) {
       validThroughLabel: String(project.validThroughLabel || source.validThroughLabel || ''),
       expiryDate: String(project.expiryDate || source.expiryDate || ''),
       debtRestrictionLabel: String(project.debtRestrictionLabel || ''),
-      serviceSource: '卡内项目'
+      serviceSource: independentGift ? '赠送项目' : '卡内项目'
     }
   }
   emit('add', {

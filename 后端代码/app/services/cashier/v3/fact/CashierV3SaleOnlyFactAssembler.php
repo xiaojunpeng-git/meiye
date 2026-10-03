@@ -566,7 +566,7 @@ final class CashierV3SaleOnlyFactAssembler
                 continue;
             }
             if ($role !== 'entitlement_service'
-                || (string)$line['source_type'] !== 'entitlement_project'
+                || !in_array((string)$line['source_type'], ['entitlement_project', 'independent_gift'], true)
                 || (int)$line['entitlement_source_detail_id'] <= 0
                 || (int)$line['project_id'] <= 0
                 || (int)$line['quantity'] <= 0

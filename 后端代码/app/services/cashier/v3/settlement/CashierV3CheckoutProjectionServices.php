@@ -879,7 +879,11 @@ final class CashierV3CheckoutProjectionServices
                 'quantity' => $quantity,
                 'memberId' => $memberId,
                 'entitlementInstanceId' => $sourceId,
-                'cardHolderId' => $sourceId,
+                // A migrated gift detail is not a card holder even though
+                // both use the persisted source_id identity slot.
+                'entitlementInstanceType' => (string)($row['source_type'] ?? '') === 'independent_gift'
+                    ? 'independent_gift' : 'card_holder',
+                'cardHolderId' => (string)($row['source_type'] ?? '') === 'independent_gift' ? 0 : $sourceId,
                 'entitlementSourceDetailId' => $detailId,
                 'entitlementSourceVersion' => $sourceVersion,
                 'cardHolderVersion' => $sourceVersion,

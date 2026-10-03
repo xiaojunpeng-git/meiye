@@ -47,10 +47,10 @@ $scope = new CashierV3DataScopeContext(
 $detail = (new CashierV3MemberDetailQueryServices())->read($memberId, $operator, $scope);
 $summary = (array)$detail['summary'];
 $sales = (array)Db::name('cashier_v3_sale_fact')->where('tenant_id', '0')->where('member_id', $memberId)
-    ->where('store_id', $storeId)->where('status', 'effective')
+    ->where('status', 'effective')
     ->field('COALESCE(SUM(sale_amount_cents),0) AS total_cents,MAX(business_date) AS latest_date')->find();
 $visits = (array)Db::name('cashier_v3_entitlement_service_fact')->where('tenant_id', '0')
-    ->where('store_id', $storeId)->where('member_id', $memberId)->where('service_status', 'completed')
+    ->where('member_id', $memberId)->where('service_status', 'completed')
     ->field('COUNT(DISTINCT business_date) AS visit_count,MAX(business_date) AS latest_date')->find();
 
 $moneyFromCents = static function (int $cents): string {
@@ -78,7 +78,7 @@ $checks = [
         true
     ),
     'card operation projection reads member-scoped immutable audit rows' => (int)Db::name('cashier_v3_card_operation')
-        ->where('tenant_id', '0')->where('store_id', $storeId)
+        ->where('tenant_id', '0')
         ->where(function ($query) use ($memberId): void {
             $query->where('member_id_before', $memberId)->whereOr('member_id_after', $memberId);
         })->count() === count((array)($detail['cardOperations'] ?? [])),
