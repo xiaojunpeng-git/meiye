@@ -18,6 +18,34 @@ $meaning=['status'=>'needs_clarification','requirements'=>[['fields'=>['object_k
     'values'=>['object_kind'=>'member','periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-30']]]]]];
 $pool=$planner->candidates($meaning,$caps,'2026-10-02','screen',$preflight,['member'=>'会员','store'=>'门店']);
 $check(count($pool)>=3 && $preflights===count($pool),'at least three actual member plans compile before selection');
+// Even for an otherwise useful partial meaning, an explicitly unresolved
+// object kind is not the registered unqualified-store default.
+$missingSubject=$meaning;
+$missingSubject['requirements'][0]['values']['object_kind']='unknown';
+$check($planner->candidates($missingSubject,$caps,'2026-10-02','screen',$preflight,['member'=>'会员','store'=>'门店'])===[],
+    'unknown analytical subject never defaults to store');
+// The real model can carry an explicit or neutral data-scope requirement in
+// the same partial question. It must not erase otherwise valid candidates.
+foreach (['authorized','unspecified'] as $scope) {
+    $scoped=$meaning;
+    $scoped['requirements'][0]['fields'][]='scope';
+    $scoped['requirements'][0]['values']['scope']=$scope;
+    $choices=$planner->candidates($scoped,$caps,'2026-10-02','screen',$preflight,['member'=>'会员','store'=>'门店']);
+    $check(count($choices)>=3,'safe '.$scope.' scope retains three executable member recommendations');
+    foreach ($choices as $choice) $check($choice['compiled']['plan']['query']['store_ids']===[],
+        'safe '.$scope.' scope does not silently select a store');
+}
+$currentStore=$meaning;
+$currentStore['requirements'][0]['fields'][]='scope';
+$currentStore['requirements'][0]['values']['scope']='current_store';
+$check($planner->candidates($currentStore,$caps,'2026-10-02','screen',$preflight,['member'=>'会员'])===[],
+    'current-store scope without a verified origin offers no recommendation');
+$check($planner->candidates($currentStore,$caps,'2026-10-02','screen',$preflight,['member'=>'会员'],null,81)===[],
+    'a store outside the authorized set cannot become a recommendation scope');
+$currentChoices=$planner->candidates($currentStore,$caps,'2026-10-02','screen',$preflight,['member'=>'会员'],null,80);
+$check(count($currentChoices)>=3,'a verified current store retains executable recommendations');
+foreach ($currentChoices as $choice) $check($choice['compiled']['plan']['query']['store_ids']===[80],
+    'every current-store recommendation binds only the verified origin');
 foreach ($pool as $candidate) {
     $query=$candidate['compiled']['plan']['query'];
     $check($query['business_filters']['object_kind']==='member','member subject never becomes store');
@@ -51,10 +79,14 @@ foreach ([$ids[0],[$ids[0],$ids[0],$ids[2]],[$ids[0],$ids[1],'made_up'],[$ids[0]
 $locked=$meaning;$locked['requirements'][0]['fields'][]='metric_codes';$locked['requirements'][0]['values']['metric_terms']=['现金业绩'];
 $exact=$planner->candidates($locked,$caps,'2026-10-02','screen',$preflight,['member'=>'会员']);
 foreach($exact as $candidate)$check($candidate['compiled']['plan']['query']['metric_codes']===['cash_performance'],'clear registered metric stays locked');
-foreach (['store_term','unbound','aggregate_condition','scope','result_reference'] as $field) {
+foreach (['store_term','unbound','aggregate_condition','result_reference'] as $field) {
     $restricted=$meaning;$restricted['requirements'][0]['fields'][]=$field;$restricted['requirements'][0]['values'][$field]='locked';
     $check($planner->candidates($restricted,$caps,'2026-10-02','screen',$preflight,['member'=>'会员'])===[],'unsupported '.$field.' never disappears');
 }
+$scopeContinuation=['status'=>'needs_clarification','topic_relation'=>'continuation','requirements'=>[[
+    'fields'=>['scope'],'values'=>['scope'=>'authorized']]]];
+$check($planner->candidates($scopeContinuation,$caps,'2026-10-02','screen',$preflight,['member'=>'会员','store'=>'门店'],$source)===[],
+    'an explicitly broadened authorized scope cannot retain a narrower signed predecessor');
 foreach (['object_term'=>'ref_private','object_relation'=>'selection'] as $key=>$value) {
     $restricted=$meaning;$restricted['requirements'][0]['values'][$key]=$value;
     $check($planner->candidates($restricted,$caps,'2026-10-02','screen',$preflight,['member'=>'会员'])===[],

@@ -54,6 +54,21 @@ try {
            'values'=>['object_kind'=>'store','periods'=>[['kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-30']]],
            'evidence'=>[['message_id'=>'current','quote'=>$view['question']]]]],
    ],($view['prior_query']??null)!==null?['topic_relation'=>'new_topic']:[]),'usage'=>['input_tokens'=>20,'output_tokens'=>30]];
+   if ($phase==='understanding' && $view['question']==='这个月会员那个金额的情况') return ['understanding'=>[
+       'goal'=>'查询本月会员金额但指标不明确','status'=>'needs_clarification','requirements'=>[[
+           'id'=>'r1','meaning'=>'本月会员金额','fields'=>['metric_codes','object_kind','periods','scope'],
+           'values'=>['metric_terms'=>['金额'],'object_kind'=>'member',
+               'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'authorized'],
+           'evidence'=>[['message_id'=>'current','quote'=>$view['question']]],
+       ]],
+   ],'usage'=>['input_tokens'=>20,'output_tokens'=>30]];
+   if ($phase==='understanding' && $view['question']==='这个月会员那个金额的情况（遗漏对象载体）') return ['understanding'=>[
+       'goal'=>'查询本月会员金额但指标不明确','status'=>'needs_clarification','requirements'=>[[
+           'id'=>'r1','meaning'=>'本月金额','fields'=>['metric_codes','periods','scope'],
+           'values'=>['metric_terms'=>['金额'],'periods'=>[['kind'=>'month_offset','offset_months'=>0]],'scope'=>'unspecified'],
+           'evidence'=>[['message_id'=>'current','quote'=>$view['question']]],
+       ]],
+   ],'usage'=>['input_tokens'=>20,'output_tokens'=>30]];
    if ($phase==='understanding' && $view['question']==='按消耗业绩查询') {
        verifyGateway(($view['clarification_context']['question']??null)==='2026年9月门店那个金额',
            'supplement receives original accepted meaning separately, not concatenated browser text');
@@ -477,6 +492,36 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
  $semanticReplay=$gateway->handle('clarify',$semanticContext,$semanticSubmission,$semanticRun['run_id']);
  verifyGateway($semanticReplay['status']==='COMPLETED' && $queries===$beforeReplayQueries,
      'retry of the identical correction does not execute data twice');
+ // Production understanding may include the ordinary authorized-scope field
+ // on the same incomplete member question. Run this case after the prior
+ // clarification completes because one principal has only one active run.
+ $scopedInput=$semanticInput;$scopedInput['client_request_id']='r59-scoped-partial';
+ $scopedInput['conversation_id']='r59-scoped-conversation';
+ $scopedInput['question']='这个月会员那个金额的情况';
+ $scopedRun=$gateway->handle('create',$semanticContext,$scopedInput);
+ $scopedBinding=['client_session_id'=>'r59-device','generation'=>$scopedRun['generation'],
+     'run_delivery_token'=>$scopedRun['run_delivery_token']];
+ $beforeScopedQueries=$queries;
+ $scopedWaiting=$gateway->handle('execute',$semanticContext,$scopedBinding+$scopedInput,$scopedRun['run_id']);
+ verifyGateway($scopedWaiting['status']==='WAITING_CLARIFICATION'
+     && count($scopedWaiting['clarification']['fields'][0]['options'])===3
+     && $queries===$beforeScopedQueries,
+     'partial member meaning with authorized scope still offers three verified choices before fact reads');
+ // An actual provider can omit the clearly named object in its partial
+ // carrier. The gateway must not advertise store answers for that member turn.
+ $omittedInput=$scopedInput;$omittedInput['client_request_id']='r59-omitted-subject';
+ $omittedInput['conversation_id']='r59-omitted-conversation';
+ $omittedInput['question']='这个月会员那个金额的情况（遗漏对象载体）';
+ $omittedRun=$gateway->handle('create',$semanticContext,$omittedInput);
+ $omittedBinding=['client_session_id'=>'r59-device','generation'=>$omittedRun['generation'],
+     'run_delivery_token'=>$omittedRun['run_delivery_token']];
+ $beforeOmittedQueries=$queries;
+ $omittedWaiting=$gateway->handle('execute',$semanticContext,$omittedBinding+$omittedInput,$omittedRun['run_id']);
+ $omittedOptions=$omittedWaiting['clarification']['fields'][0]['options']??[];
+ verifyGateway($omittedWaiting['status']==='WAITING_CLARIFICATION'
+     && count($omittedOptions)===1 && ($omittedOptions[0]['action']??null)==='stop'
+     && $queries===$beforeOmittedQueries,
+     'an omitted explicit member subject cannot become three store recommendations');
  // Recommendation validation must not invent a store when the understood
  // subject is still missing, nor split a compound registered measurement.
  $recommendationMethod=new ReflectionMethod($gateway,'semanticClarification');

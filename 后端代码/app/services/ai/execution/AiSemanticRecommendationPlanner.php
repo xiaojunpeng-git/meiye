@@ -8,7 +8,7 @@ use app\services\query\metric\MetricSemanticCatalog;
  * alter a locked condition or turn an unavailable metric into a recommendation. */
 final class AiSemanticRecommendationPlanner
 {
-    public function candidates(array $meaning,array $capabilities,string $today,string $format,callable $preflight,array $labels,?array $source=null): array
+    public function candidates(array $meaning,array $capabilities,string $today,string $format,callable $preflight,array $labels,?array $source=null,?int $currentStoreId=null): array
     {
         if (!empty($meaning['groups'])) return [];
         $values=[];
@@ -16,28 +16,39 @@ final class AiSemanticRecommendationPlanner
             foreach ($requirement['fields'] as $field) {
                 // Selection, cohort predicates and private references need the
                 // ordinary semantic compiler. Never drop them to fill a card.
-                if (!in_array($field,['object_kind','object_relation','operation','periods','metric_codes','ranking'],true)) return [];
+                if (!in_array($field,['object_kind','object_relation','operation','periods','metric_codes','ranking','scope'],true)) return [];
             }
             foreach ($requirement['values'] as $key=>$value) {
                 // Selecting a named/private object is not equivalent to an
                 // unfiltered analytical dimension. Never discard an opaque
                 // object term simply because its field is object_kind.
-                if (!in_array($key,['object_kind','object_relation','operation','periods','metric_terms','metric_exclusions','ranking'],true)) return [];
+                if (!in_array($key,['object_kind','object_relation','operation','periods','metric_terms','metric_exclusions','ranking','scope'],true)) return [];
                 if (isset($values[$key]) && $values[$key]!==$value) return [];
                 $values[$key]=$value;
             }
         }
         if (!empty($values['metric_exclusions'])) return [];
         if (isset($values['object_relation']) && $values['object_relation']!=='analysis') return [];
+        // A model may legitimately preserve the customer's scope while asking
+        // for a metric choice. Authorized/unspecified use the Reader's scope;
+        // current_store is offered only with a freshly authenticated origin.
+        $scope=$values['scope']??'unspecified';
+        if (!in_array($scope,['authorized','unspecified','current_store'],true)) return [];
+        if ($scope==='current_store' && ($currentStoreId===null || $currentStoreId<=0
+            || !in_array($currentStoreId,$capabilities['store_ids']??[],true))) return [];
         // Only a model-declared continuation may reuse a signed query. Keep
         // its complete private scope/conditions on the server; never rebuild
         // them from the public model summary or a displayed object name.
         if ($source!==null && !isset($meaning['topic_relation'])) return [];
         if (($meaning['topic_relation']??null)!=='continuation') $source=null;
+        // Explicitly asking for the whole authorized range cannot quietly
+        // retain a narrower predecessor. The ordinary binder handles that
+        // scope change instead of publishing misleading recommendations.
+        if ($source!==null && $scope==='authorized' && ($source['store_ids']??[])!==[]) return [];
         $sourceKind=$source['business_filters']['object_kind']??'store';
         $kind=$values['object_kind']??($source===null?'store':$sourceKind);
         if ($source!==null && $kind!==$sourceKind) return [];
-        if ($kind==='unknown') $kind='store';
+        if ($kind==='unknown') return [];
         if (!isset($labels[$kind])) return [];
         // A stated rank is part of the customer's requested result, not an
         // optional display hint. It overrides an inherited response form;
@@ -105,6 +116,11 @@ final class AiSemanticRecommendationPlanner
                             }
                             $compiled['plan']['query']['business_filters']=$sourceFilters;
                             $compiled['plan']['query']['aggregate_condition']=$source['aggregate_condition']??null;
+                        }
+                        if ($scope==='current_store') {
+                            $existing=$compiled['plan']['query']['store_ids']??[];
+                            if ($existing!==[] && $existing!==[$currentStoreId]) continue;
+                            $compiled['plan']['query']['store_ids']=[$currentStoreId];
                         }
                         $preflight($compiled['plan']);
                     } catch (\app\services\ai\contract\AiContractException $error) { continue;

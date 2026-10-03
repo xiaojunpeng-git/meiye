@@ -906,8 +906,10 @@ final class AiGatewayServices
     }
 
     /** Preflight shares the production compiler and performs no fact query.
-     * A single short model call ranks relevant choices; never three bindings. */
-    private function verifiedSemanticClarification(array $owner,string $id,int $generation,string $worker,array $understanding,array $safe,array $body,array $caps,string $today,array $configuration,callable $checkpoint,?array $sourceQuery=null): array
+     * Current-store scope is supplied by authenticated server context, never
+     * inferred from the model or a customer-visible store name. A single short
+     * model call ranks relevant choices; never three bindings. */
+    private function verifiedSemanticClarification(array $owner,string $id,int $generation,string $worker,array $understanding,array $safe,array $body,array $caps,string $today,array $configuration,callable $checkpoint,?array $sourceQuery=null,?int $currentStoreId=null): array
     {
         // A collection predecessor has no single query to reuse. Until the
         // complete collection can be preserved, do not publish alternatives
@@ -918,12 +920,31 @@ final class AiGatewayServices
             return $this->semanticClarification($understanding,$safe,$body);
         }
         $planner=new \app\services\ai\execution\AiSemanticRecommendationPlanner();$labels=[];
-        foreach ($this->analysisObjectVocabulary($caps,null) as $object) {
+        $objectVocabulary=$this->analysisObjectVocabulary($caps,null);
+        foreach ($objectVocabulary as $object) {
             if (!isset($labels[$object['object_kind']])) $labels[$object['object_kind']]=$object['object_label'];
+        }
+        // The registry's unqualified store default is safe only when the
+        // customer did not name another analytical subject. This is a
+        // fail-closed check against source-owned object labels, not a parser:
+        // it never assigns a kind or manufactures a query from keywords.
+        if ($sourceQuery===null) {
+            $typedObject=false;
+            foreach ($understanding['requirements'] as $requirement) {
+                if (isset($requirement['values']['object_kind'])) {$typedObject=true;break;}
+            }
+            if (!$typedObject) {
+                $question=(string)($safe['outbound']['question']??'');
+                foreach ($objectVocabulary as $object) {
+                    if (mb_strpos($question,$object['object_label'],0,'UTF-8')===false) continue;
+                    $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'recommendation_subject_unresolved');
+                    return $this->semanticClarification($understanding,$safe,$body);
+                }
+            }
         }
         $compiler=new AiRegisteredPlanCompiler($this->registry(),static function()use($today):string{return $today;});
         $pool=$planner->candidates($understanding,$caps,$today,$body['output_format'],
-            static function(array $plan)use($compiler,$caps):void{$compiler->compile($plan,$caps);},$labels,$sourceQuery);
+            static function(array $plan)use($compiler,$caps):void{$compiler->compile($plan,$caps);},$labels,$sourceQuery,$currentStoreId);
         if (count($pool)<3) {
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'recommendation_pool_insufficient');
             return $this->semanticClarification($understanding,$safe,$body);
@@ -976,7 +997,7 @@ final class AiGatewayServices
      * restate the same slots. This reuses candidate preflight, not a keyword
      * parser; private selections, compound conditions and ambiguity fail
      * admission and retain the ordinary binding/review path. */
-    private function compileAcceptedSimpleSupplement(array $understanding,array $body,array $caps,string $today,?array $sourceQuery): ?array
+    private function compileAcceptedSimpleSupplement(array $understanding,array $body,array $caps,string $today,?array $sourceQuery,?int $currentStoreId=null): ?array
     {
         if (!isset($body['_clarification_context']) || ($understanding['status']??null)!=='understood'
             || ($sourceQuery===null && isset($body['context_ref']))) return null;
@@ -997,7 +1018,7 @@ final class AiGatewayServices
         $compiler=new AiRegisteredPlanCompiler($this->registry(),static function()use($today):string{return $today;});
         $pool=(new \app\services\ai\execution\AiSemanticRecommendationPlanner())->candidates(
             $understanding,$caps,$today,$body['output_format'],
-            static function(array $plan)use($compiler,$caps):void{$compiler->compile($plan,$caps);},$labels,$sourceQuery);
+            static function(array $plan)use($compiler,$caps):void{$compiler->compile($plan,$caps);},$labels,$sourceQuery,$currentStoreId);
         return count($pool)===1?array_values($pool)[0]['compiled']:null;
     }
 
@@ -1718,9 +1739,11 @@ final class AiGatewayServices
             // Incomplete meaning is a waiting task, not a failed execution.
             // Topic reset and clear calendar conditions are settled first;
             // no extra binding call is spent on genuinely missing meaning.
-            return $this->verifiedSemanticClarification($owner,$id,$generation,$worker,$understanding,$safe,$body,$caps,$today,$configuration,$checkpoint,$sourceQuery);
+            return $this->verifiedSemanticClarification($owner,$id,$generation,$worker,$understanding,$safe,$body,$caps,$today,$configuration,$checkpoint,$sourceQuery,
+                \app\services\ai\execution\AiAuthority::currentStoreId($freshContext));
         }
-        $simpleSupplement=$this->compileAcceptedSimpleSupplement($understanding,$body,$caps,$today,$sourceQuery);
+        $simpleSupplement=$this->compileAcceptedSimpleSupplement($understanding,$body,$caps,$today,$sourceQuery,
+            \app\services\ai\execution\AiAuthority::currentStoreId($freshContext));
         if ($simpleSupplement!==null) {
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_supplement_local_binding');
             return $simpleSupplement;

@@ -1369,4 +1369,7 @@ $replyMeaning=['goal'=>'保留原条件的补充','status'=>'understood','topic_
 ]];
 $check(count(AiIntentUnderstandingContract::normalize($replyMeaning,$replyQuestion)['requirements'])===1,
     'server-owned original evidence is valid for unchanged clarification conditions');
+$check(strpos(AiIntentUnderstandingContract::modelInstruction(),
+    'A vague measurement does not erase a clearly named analytical subject')!==false,
+    'understanding prompt preserves a named object even while the measurement remains ambiguous');
 echo 'PASS intent understanding/binding separation: '.$checks." checks\n";
