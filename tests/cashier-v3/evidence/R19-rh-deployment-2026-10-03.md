@@ -16,6 +16,7 @@
 - 精确暂存四个后端文件及门店端构建包，服务器 PHP 7.4 语法检查通过；逐一核对旧文件 SHA 后替换四个 PHP，先追加带哈希静态资源、后切换正式和预览入口，重启 Swoole。没有运行全量同步脚本、没有覆盖 `.env`、没有删除旧静态资源。
 - 新 PHP SHA-256：报表 `7ca5c7eb7e690443a1d99f8bdc42f940e5a3eb04f1390b82bbcb7593778bd484`；会员欠款投影 `dbf5816f4c62d22eacc55025ba496ea1d1976bc349fa544d19ffa69e97db0ac1`；销售补交 `07fe7a0aab5a8d563d191b5715ae60604cbca3b08d86b55abe65cad537658598`；充值补交 `f9ec26c9cb087a6ece8ec8ba86e23d1b98bfa49e1d525fc1fec1e473685559cc`。正式与预览站磁盘入口 SHA 均为上述构建 HTML；预览公网响应由代理改写资源路径，故响应体 SHA 不等于磁盘 HTML。
 - Swoole `manager_count=1`、20800 监听；正式 `/view_cashier_v3/`、预览 `/preview-8080/view_cashier_v3/` 和正式主 JS 均返回 HTTPS 200。正式公网 HTML、主 JS 与构建 SHA 一致；最近日志未发现 `Fatal error`、`Parse error` 或 `Uncaught`。上线后数据库 36/0/49 数量不变。
+- 线上只读报表集成核验：使用已提交的 `new-customer-first-course-report-integration.php`，只跳过硬编码本地样本 `XS26100300005` 的定额断言，其余查询、A 来源排除、分组／下钻、明细汇总金额对账及导出一致性断言在瑞昊数据上通过：`PASS first-course new-customer reports: 16 orders, 16 people`。未创建或修改业务记录。
 - 未持生产登录态执行报表下钻或真实收款写入；该业务路径以产品经理对本地固定版本的验收及本轮自动化测试为依据，不把 HTTP 冒烟称为线上业务验收。
 
 文件分组：前端源码、后端源码和自动化测试均见两个本地闭环提交；本次无数据库迁移、工程脚本源码或线上历史数据变更；本文件是发布验收证据。
