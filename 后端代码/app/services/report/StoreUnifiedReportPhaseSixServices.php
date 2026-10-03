@@ -451,21 +451,25 @@ final class StoreUnifiedReportPhaseSixServices
 
     private function cashFacts(array $stores,array $range):array
     {
-        return Db::name('cashier_v3_payment_sale_allocation_fact')->alias('a')
+        $query = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('a')
             ->leftJoin('cashier_v3_report_sale_dimension_fact d','d.tenant_id=a.tenant_id AND d.sale_fact_id=a.sale_fact_id')
             ->leftJoin('cashier_v3_sale_fact s','s.tenant_id=a.tenant_id AND s.fact_id=a.sale_fact_id')
             ->where('a.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('a.store_id',$stores)->whereBetween('a.business_date',[$range['start'],$range['end']])->where('a.status','effective')
-            ->field("a.allocation_fact_id allocation_id,a.store_id,a.member_id,a.order_id,a.source_line_id,a.business_date,a.amount_cents,a.payment_method,d.item_name_snapshot item_name,d.category_path_snapshot category_path,d.partner_name_snapshot partner_name,d.is_experience,s.quantity,s.member_name_snapshot member_name,s.organization_name_snapshot company_name,s.organization_path_snapshot organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_label_snapshot source_name,(SELECT GROUP_CONCAT(DISTINCT pf.employee_name_snapshot ORDER BY pf.id SEPARATOR ', ') FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=a.tenant_id AND pf.source_line_id=a.source_line_id AND pf.performance_type='sales_performance_allocated' AND pf.status='effective') salesperson_name")
-            ->select()->toArray();
+            ->field("a.allocation_fact_id allocation_id,a.store_id,a.member_id,a.order_id,a.source_line_id,a.business_date,a.amount_cents,a.payment_method,d.item_name_snapshot item_name,d.category_path_snapshot category_path,d.partner_name_snapshot partner_name,d.is_experience,s.quantity,s.member_name_snapshot member_name,s.organization_name_snapshot company_name,s.organization_path_snapshot organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_label_snapshot source_name,(SELECT GROUP_CONCAT(DISTINCT pf.employee_name_snapshot ORDER BY pf.id SEPARATOR ', ') FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=a.tenant_id AND pf.source_line_id=a.source_line_id AND pf.performance_type='sales_performance_allocated' AND pf.status='effective') salesperson_name");
+        $normal = new StoreReportNormalDataScopeServices();
+        $normal->excludeVoidedSalesOrderFacts($query, 'a.tenant_id', 'a.order_id');
+        $normal->excludeVoidedSupplementAllocations($query, 'a');
+        return $query->select()->toArray();
     }
 
     private function serviceFacts(array $stores,array $range):array
     {
-        return Db::name('cashier_v3_entitlement_service_fact')->alias('sv')
+        $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sv')
             ->where('sv.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('sv.store_id',$stores)
             ->whereBetween('sv.business_date',[$range['start'],$range['end']])->where('sv.service_status','completed')
-            ->field("sv.service_fact_id fact_id,sv.store_id,sv.member_id,sv.business_date,sv.source_line_id,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.store_name_snapshot store_name,sv.organization_path_snapshot organization_path_snapshot,sv.is_experience,COALESCE(sv.labor_fee_amount_cents,0) labor_fee_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=sv.tenant_id AND pf.checkout_request_id=sv.checkout_request_id AND pf.source_line_id=sv.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') consumption_cents,(SELECT MAX(sf.business_source_label_snapshot) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=sv.tenant_id AND sf.source_line_id=sv.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') source_name")
-            ->select()->toArray();
+            ->field("sv.service_fact_id fact_id,sv.store_id,sv.member_id,sv.business_date,sv.source_line_id,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.store_name_snapshot store_name,sv.organization_path_snapshot organization_path_snapshot,sv.is_experience,COALESCE(sv.labor_fee_amount_cents,0) labor_fee_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=sv.tenant_id AND pf.checkout_request_id=sv.checkout_request_id AND pf.source_line_id=sv.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') consumption_cents,(SELECT MAX(sf.business_source_label_snapshot) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=sv.tenant_id AND sf.source_line_id=sv.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') source_name");
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 'sv');
+        return $query->select()->toArray();
     }
 
     /**
@@ -617,13 +621,16 @@ final class StoreUnifiedReportPhaseSixServices
 
     private function salaryFacts(array $stores,array $range):array
     {
-        $rows=Db::name('cashier_v3_performance_fact')->alias('pf')
+        $query=Db::name('cashier_v3_performance_fact')->alias('pf')
             ->leftJoin('cashier_v3_entitlement_service_fact sv','sv.tenant_id=pf.tenant_id AND sv.checkout_request_id=pf.checkout_request_id AND sv.source_line_id=pf.source_line_id AND sv.service_status=\'completed\'')
             ->where('pf.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
             ->where('pf.performance_type','labor_performance_allocated')->where('pf.status','effective')
             ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_id row_key,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.labor_fee_amount_cents,pf.project_count_half_units,pf.project_count_decimal,pf.rule_code_snapshot,pf.fact_direction,sv.service_fact_id,sv.member_id,sv.member_name_snapshot member_name,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_name_snapshot category_path,sv.source_document_type source_type')
-            ->order('pf.id','asc')
-            ->select()->toArray();
+            ->order('pf.id','asc');
+        $normal = new StoreReportNormalDataScopeServices();
+        $normal->excludeVoidedSalesOrderFacts($query, 'pf.tenant_id', 'pf.order_id');
+        $normal->excludeVoidedSalesOrderServices($query, 'pf');
+        $rows=$query->select()->toArray();
         $reversed=$this->reversedPerformanceFactIds($rows);
         $grouped=[];
         foreach($rows as $row){
@@ -671,7 +678,7 @@ final class StoreUnifiedReportPhaseSixServices
         }
         // 现金业绩与服务/手工事实分开记账：纯销售订单没有 labor 行，不能因此从薪资明细中消失。
         // 先按同一业务行、同一员工合并销售事实；若该员工同时参与服务，则与已有 labor 行合并，避免重复展示。
-        $salesRows=Db::name('cashier_v3_performance_fact')->alias('pf')
+        $salesQuery=Db::name('cashier_v3_performance_fact')->alias('pf')
             ->leftJoin('cashier_v3_sale_fact s','s.tenant_id=pf.tenant_id AND s.checkout_request_id=pf.checkout_request_id AND s.source_line_id=pf.source_line_id AND s.fact_direction=\'forward\' AND s.status=\'effective\'')
             ->leftJoin('cashier_v3_report_sale_dimension_fact d','d.tenant_id=pf.tenant_id AND d.sale_fact_id=s.fact_id')
             ->where('pf.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
@@ -679,7 +686,12 @@ final class StoreUnifiedReportPhaseSixServices
             ->where('pf.performance_type','sales_performance_allocated')->where('pf.status','effective')
             ->where('pf.employee_id','>',0)
             ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path')
-            ->order('pf.id','asc')->select()->toArray();
+            ->order('pf.id','asc');
+        $normal = new StoreReportNormalDataScopeServices();
+        $normal->excludeVoidedSalesOrderFacts($salesQuery, 'pf.tenant_id', 'pf.order_id');
+        $normal->excludeVoidedRechargeOrderFacts($salesQuery, 'pf.tenant_id', 'pf.order_id');
+        $normal->excludeVoidedSupplementPaymentFacts($salesQuery, 'pf.tenant_id', 'pf.store_id', 'pf.order_id');
+        $salesRows=$salesQuery->select()->toArray();
         $cardAllocations=$this->salaryCardCategoryAllocations($salesRows);
         $salesReversed=$this->reversedPerformanceFactIds($salesRows);
         $salesGrouped=[];

@@ -861,11 +861,15 @@ final class MobileWarehouseServices
      */
     private function designatedCustomerRanking(array $storeIds, array $period, string $rankingOrder, int $limit = 10): array
     {
-        $facts = Db::name('cashier_v3_entitlement_service_fact')
-            ->where('tenant_id', '0')->whereIn('store_id', $storeIds)
-            ->whereBetween('business_date', [$period['startDate'], $period['endDate']])
-            ->where('service_status', 'completed')
-            ->field('service_fact_id,business_date,member_id,service_object,craftsmen_snapshot_json')
+        $query = Db::name('cashier_v3_entitlement_service_fact')->alias('service')
+            ->where('service.tenant_id', '0')->whereIn('service.store_id', $storeIds)
+            ->whereBetween('service.business_date', [$period['startDate'], $period['endDate']])
+            ->where('service.service_status', 'completed');
+        // Point-customer rankings share normal service visibility with report
+        // lists, so a successful service or sales void removes its original day.
+        (new \app\services\report\StoreReportNormalDataScopeServices())
+            ->excludeVoidedSalesOrderServices($query, 'service');
+        $facts = $query->field('service.service_fact_id,service.business_date,service.member_id,service.service_object,service.craftsmen_snapshot_json')
             ->select()->toArray();
 
         // groupKey => [staff id => immutable employee identity]

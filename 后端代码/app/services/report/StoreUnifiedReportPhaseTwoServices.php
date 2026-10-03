@@ -1469,7 +1469,21 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function activeCardEntitlements(array $stores,array $members):array
     {
         if(!$members)return[];
-        $holders=Db::name('user_card_holder')->alias('h')->join('store_order o','o.id=h.oid')->whereIn('h.uid',$members)->whereIn('h.store_id',$stores)->where('h.is_del',0)->where('h.write_surplus_times','>',0)->where('o.paid',1)->where('o.is_del',0)->where('o.is_system_del',0)->where('o.refund_status',0)->field('h.uid,h.oid,h.write_surplus_times')->select()->toArray();
+        $holderQuery=Db::name('user_card_holder')->alias('h')->join('store_order o','o.id=h.oid')->whereIn('h.uid',$members)->whereIn('h.store_id',$stores)->where('h.is_del',0)->where('h.write_surplus_times','>',0)->where('o.paid',1)->where('o.is_del',0)->where('o.is_system_del',0)->where('o.refund_status',0);
+        if($this->hasColumn('store_order','terminal_action'))$holderQuery->where('o.terminal_action',0);
+        if($this->hasColumn('store_order','order_id')){
+            // The current entitlement projection is still the balance authority;
+            // a succeeded V3 sale void must never contribute its old remainder.
+            $holderQuery->whereNotExists(function($void):void{
+                $void->name('cashier_v3_order_lifecycle_operation')->alias('remaining_card_sale_void')
+                    ->where('remaining_card_sale_void.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                    ->whereRaw('remaining_card_sale_void.source_order_id=o.order_id')
+                    ->where('remaining_card_sale_void.source_type','sales')
+                    ->where('remaining_card_sale_void.operation_type','void')
+                    ->where('remaining_card_sale_void.status','succeeded');
+            });
+        }
+        $holders=$holderQuery->field('h.uid,h.oid,h.write_surplus_times')->select()->toArray();
         if(!$holders)return[];
         $oids=array_values(array_unique(array_column($holders,'oid')));$owner=[];foreach($holders as $row)$owner[(int)$row['oid']]=(int)$row['uid'];
         $out=[];foreach($holders as $row){$id=(int)$row['uid'];$out[$id]['remaining_count']=(int)($out[$id]['remaining_count']??0)+(int)$row['write_surplus_times'];$out[$id]['remaining_amount_cents']=(int)($out[$id]['remaining_amount_cents']??0);}
@@ -1642,6 +1656,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         // reversal facts; audit records remain append-only elsewhere.
         $query->whereRaw("({$column}fact_direction='forward' OR ({$column}fact_direction='reversal' AND EXISTS (SELECT 1 FROM eb_cashier_v3_order_lifecycle_operation reversal_operation WHERE reversal_operation.tenant_id={$column}tenant_id AND reversal_operation.command_idempotency_key={$column}command_idempotency_key AND reversal_operation.operation_type IN ('refund','void') AND reversal_operation.status='succeeded')))" );
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, $column . 'tenant_id', $column . 'order_id');
+        $this->normalDataScope()->excludeVoidedRechargeOrderFacts($query, $column . 'tenant_id', $column . 'order_id');
         $this->normalDataScope()->excludeVoidedSupplementPaymentFacts($query, $column . 'tenant_id', $column . 'store_id', $column . 'order_id');
         return $this->participantOrder($query,$column.'order_id');
     }

@@ -202,8 +202,8 @@ final class CustomerAnalyticsServices
             case 'customer_consumption_tier':
                 // Phase 3 的分级读取统一现金事实及反向事实，避免会员看板旧
                 // cashRows 直接按 sale_fact_id 连接而漏掉退款/作废回接。
-                $metric = in_array((string)($contextInput['consumption_metric'] ?? 'cash'), ['cash', 'consumption'], true)
-                    ? (string)$contextInput['consumption_metric'] : 'cash';
+                $requestedMetric = (string)($contextInput['consumption_metric'] ?? 'cash');
+                $metric = in_array($requestedMetric, ['cash', 'consumption'], true) ? $requestedMetric : 'cash';
                 $contextInput['consumption_metric'] = $metric;
                 return (new StoreUnifiedReportPhaseThreeServices())->query(
                     'six_dimension_cash_consumption_analysis', $stores, $range, $contextInput
@@ -840,6 +840,19 @@ final class CustomerAnalyticsServices
                 ->where('o.refund_status', 0);
             if ($this->hasColumn('store_order', 'terminal_action')) $holderQuery->where('o.terminal_action', 0);
             if ($this->hasColumn('store_order', 'card_upgrade_use_oid')) $holderQuery->where('o.card_upgrade_use_oid', 0);
+            if ($this->hasColumn('store_order', 'order_id')) {
+                // Legacy entitlement balance has no immutable current-state
+                // fact yet. The successful V3 void authority must still
+                // remove its holder from normal unconsumed statistics.
+                $holderQuery->whereNotExists(function ($void): void {
+                    $void->name('cashier_v3_order_lifecycle_operation')->alias('unconsumed_sale_void')
+                        ->where('unconsumed_sale_void.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                        ->whereRaw('unconsumed_sale_void.source_order_id=o.order_id')
+                        ->where('unconsumed_sale_void.source_type', 'sales')
+                        ->where('unconsumed_sale_void.operation_type', 'void')
+                        ->where('unconsumed_sale_void.status', 'succeeded');
+                });
+            }
             if ($participantMode === 'self_participant') {
                 (new StoreReportParticipantScopeServices())->applyOrder($holderQuery, 'o.order_id', $participantEmployeeId);
             }
@@ -1113,17 +1126,11 @@ final class CustomerAnalyticsServices
     private function lifecycleStages(array $memberIds): array
     {
         if ($memberIds === []) return [];
-        try {
-            $rows = Db::name('cashier_v3_customer_lifecycle_projection')
-                ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('member_id', $memberIds)
-                ->field('member_id,lifecycle_stage,first_course_business_date')->select()->toArray();
-        } catch (\Throwable $e) { return []; }
-        $out = [];
-        foreach ($rows as $row) $out[(int)$row['member_id']] = [
-            'lifecycle_stage' => (string)($row['lifecycle_stage'] ?? ''),
-            'first_course_business_date' => (string)($row['first_course_business_date'] ?? ''),
-        ];
-        return $out;
+        // The mutable projection can retain voided activity; classify the
+        // selected cash facts against effective lifecycle and service facts.
+        return (new CustomerLifecycleNormalReadServices())->forMembers(
+            CashierV3ScopeResolver::TENANT_SCOPE_ID, $memberIds
+        );
     }
 
     /**

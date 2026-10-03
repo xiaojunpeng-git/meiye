@@ -321,6 +321,7 @@ final class ProductManagementDashboardServices
             ->where('p.status', 'effective')->where('s.source_type', '<>', 'card')
             ->whereIn('d.product_type_snapshot', ['product', 'goods']);
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 's.tenant_id', 's.order_id');
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSupplementAllocations($query, 'p');
         if ($categoryIds !== []) $query->whereIn('d.category_id_snapshot', $categoryIds);
         return $query->fieldRaw('p.id,p.source_line_id item_line_id,p.amount_cents,d.item_id,d.item_name_snapshot item_name,d.category_id_snapshot category_id')
             ->group('p.id')->select()->toArray();

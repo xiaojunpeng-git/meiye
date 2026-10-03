@@ -874,6 +874,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->whereIn('p.store_id', $stores)->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->where('p.status', 'effective');
         $this->excludeVoidedSalesOrders($query, 'p.tenant_id', 'p.order_id');
+        $this->normalDataScope()->excludeVoidedSupplementAllocations($query, 'p');
         // Refunds remain normal operating data. A successfully voided sales
         // order is excluded as a whole, with its audit facts kept separately.
         if ($memberIds !== []) $query->whereIn('p.member_id', $memberIds);

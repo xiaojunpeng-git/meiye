@@ -1140,6 +1140,11 @@ class StoreUnifiedReportServices extends BaseServices
         $table = $dataset === 'payment' ? 'cashier_v3_payment_fact' : 'cashier_v3_sale_fact';
         $query = $this->withStoreScope(Db::name($table), $storeId)->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective');
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'tenant_id', 'order_id');
+        if ($dataset === 'payment') {
+            // Payment facts also contain recharge and standalone repayment receipts.
+            $this->normalDataScope()->excludeVoidedRechargeOrderFacts($query, 'tenant_id', 'order_id');
+            $this->normalDataScope()->excludeVoidedSupplementPaymentFacts($query, 'tenant_id', 'store_id', 'order_id');
+        }
         $this->commonFilters($query, $input, $dataset);
         $total = (int)(clone $query)->count();
         $records = (clone $query)->order('business_date', 'desc')->order('id', 'desc')->page($this->page($input), $this->limit($input))->select()->toArray();
@@ -1150,8 +1155,11 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function service($storeId, array $range, array $input)
     {
-        $serviceQuery = $this->withStoreScope(Db::name('cashier_v3_entitlement_service_fact'), $storeId)->whereBetween('business_date', [$range['start'], $range['end']])->where('service_status', 'completed');
-        $this->normalDataScope()->excludeVoidedSalesOrderServices($serviceQuery, 'cashier_v3_entitlement_service_fact');
+        $serviceQuery = $this->withStoreScope(Db::name('cashier_v3_entitlement_service_fact')->alias('sv'), $storeId)
+            ->whereBetween('sv.business_date', [$range['start'], $range['end']])->where('sv.service_status', 'completed');
+        // The normal-scope subqueries refer to the SQL alias, not the logical
+        // table name (which ThinkPHP prefixes before execution).
+        $this->normalDataScope()->excludeVoidedSalesOrderServices($serviceQuery, 'sv');
         $total = (int)(clone $serviceQuery)->count();
         $records = (clone $serviceQuery)->order('business_date', 'desc')->order('id', 'desc')->page($this->page($input), $this->limit($input))->select()->toArray();
         $stores = is_array($storeId) ? array_values(array_unique(array_map('intval', $storeId))) : [(int)$storeId];
@@ -1175,10 +1183,13 @@ class StoreUnifiedReportServices extends BaseServices
         if (!$members) return $this->customerResult([], $input, $metric, $year, $sleepMonths);
 
         $memberIds = array_keys($members);
+        // Projection rows may retain stages from voided orders/services. Only
+        // effective lifecycle and service facts may classify operating rows.
+        $normalLife = (new CustomerLifecycleNormalReadServices())->forMembers('0', $memberIds);
         $sales = $this->withStoreScope(Db::name('cashier_v3_sale_fact'), $storeId)->whereIn('member_id', $memberIds)
             ->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective');
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($sales, 'tenant_id', 'order_id');
-        $sales
+        $sales = $sales
             ->fieldRaw('member_id, MAX(member_name_snapshot) member_name, COUNT(DISTINCT order_id) order_count, SUM(quantity) item_quantity, SUM(sale_amount_cents) sale_amount_cents')->group('member_id')->select()->toArray();
         $salesByMember = []; foreach ($sales as $row) $salesByMember[(int)$row['member_id']] = $row;
         $cashByMember = $this->memberAmounts('cashier_v3_payment_fact', 'amount_cents', $storeId, $memberIds, self::COVERAGE_START, $range['end'], []);
@@ -1191,22 +1202,25 @@ class StoreUnifiedReportServices extends BaseServices
         $active = $this->activeMembers($storeId, $range, $memberIds);
         $cutoff = strtotime('-' . $sleepMonths . ' months', strtotime($range['end'] . ' 23:59:59'));
         $records = [];
-        foreach ($members as $memberId => $life) {
-            $stage = (string)$life['lifecycle_stage'];
+        foreach ($memberIds as $memberId) {
+            $life = $normalLife[$memberId] ?? [];
+            if ($life === [] && !isset($salesByMember[$memberId])
+                && !isset($cashByMember[$memberId]) && !isset($consumeByMember[$memberId])) continue;
+            $stage = (string)($life['lifecycle_stage'] ?? '');
             $isActive = isset($active[$memberId]);
-            $lastVisit = (int)$life['last_service_at'];
-            $base = $lastVisit ?: (int)$life['first_course_completed_at'];
+            $lastVisit = (int)($life['last_service_at'] ?? 0);
+            $base = $lastVisit ?: (int)($life['first_course_completed_at'] ?? 0);
             $sleeping = $base > 0 && $base < $cutoff;
             $cash = (int)($cashByMember[$memberId] ?? 0);
             $consume = (int)($consumeByMember[$memberId] ?? 0);
             $isEffective = ($stage === 'pre_sale' && $cash >= 50000) || ($stage === 'post_sale' && $cash >= 100000);
-            if (!$this->matchesSegment($segment, $stage, (int)$life['is_guest'], $isActive, $isEffective, $sleeping)) continue;
+            if (!$this->matchesSegment($segment, $stage, (int)($life['is_guest'] ?? 0), $isActive, $isEffective, $sleeping)) continue;
             $sale = $salesByMember[$memberId] ?? [];
             $amount = $metric === 'consume' ? $consume : $cash;
             $records[] = [
                 'member_id'=>$memberId, 'member_name'=>(string)($sale['member_name'] ?? ''), 'lifecycle_label'=>$this->lifecycleLabel($stage),
-                'is_guest'=>(int)$life['is_guest'] === 1 ? '是' : '否', 'first_course_source'=>(string)$life['first_course_source_label_snapshot'],
-                'conversion_history'=>(int)$life['has_pending_conversion'] === 1 ? '曾待转换' : '',
+                'is_guest'=>(int)($life['is_guest'] ?? 0) === 1 ? '是' : '否', 'first_course_source'=>(string)($life['first_course_source_label_snapshot'] ?? ''),
+                'conversion_history'=>!empty($life['has_pending_conversion']) ? '曾待转换' : '',
                 'order_count'=>(int)($sale['order_count'] ?? 0), 'sale_amount'=>$this->money((int)($sale['sale_amount_cents'] ?? 0)),
                 'cash_performance'=>$this->money($cash), 'consume_performance'=>$this->money($consume),
                 'consumption_amount'=>$this->money($amount), 'annual_30000'=>(($metric === 'consume' ? (int)($annualConsume[$memberId] ?? 0) : (int)($annualCash[$memberId] ?? 0)) >= 3000000) ? '是' : '否',
@@ -1239,21 +1253,30 @@ class StoreUnifiedReportServices extends BaseServices
         foreach ($customers as $customer) {
             $id = (int)$customer['first_course_source_primary_id']; if ($id <= 0) continue;
             if (!empty($input['channel_id']) && $id !== (int)$input['channel_id']) continue;
-            if (!isset($groups[$id])) $groups[$id] = ['business_source_primary_id'=>$id,'channel_name'=>(string)$customer['first_course_source_label_snapshot'],'source_type'=>(string)$customer['first_course_source_attribution_type_snapshot'],'member_count'=>0,'order_ids'=>[]];
-            $groups[$id]['member_count']++; $groups[$id]['order_ids'][(string)$customer['first_course_order_id']] = true;
+            if (!isset($groups[$id])) $groups[$id] = ['business_source_primary_id'=>$id,'channel_name'=>(string)$customer['first_course_source_label_snapshot'],'source_type'=>(string)$customer['first_course_source_attribution_type_snapshot'],'member_count'=>0,'order_ids'=>[],'members_by_order'=>[]];
+            $orderId = (string)$customer['first_course_order_id'];
+            $groups[$id]['order_ids'][$orderId] = true;
+            $groups[$id]['members_by_order'][$orderId][(int)$customer['member_id']] = true;
         }
         foreach ($groups as &$group) {
             $orders = array_keys($group['order_ids']);
+            // The lifecycle projection is historical; a voided first-course
+            // sale remains there for audit but cannot contribute a customer or
+            // order to the operating channel report.
             $salesQuery = $orders ? $this->withStoreScope(Db::name('cashier_v3_sale_fact'), $storeId)->whereIn('order_id', $orders)->where('status','effective')->where('source_type','card') : null;
             if ($salesQuery) $this->normalDataScope()->excludeVoidedSalesOrderFacts($salesQuery, 'tenant_id', 'order_id');
+            $validOrders = $salesQuery ? array_values(array_unique(array_map('strval', (clone $salesQuery)->column('order_id')))) : [];
             $sales = $salesQuery ? $salesQuery->sum('sale_amount_cents') : 0;
-            $receiptsQuery = $orders ? $this->withStoreScope(Db::name('cashier_v3_payment_fact'), $storeId)->whereIn('order_id', $orders)->where('status','effective') : null;
+            $receiptsQuery = $validOrders ? $this->withStoreScope(Db::name('cashier_v3_payment_fact'), $storeId)->whereIn('order_id', $validOrders)->where('status','effective') : null;
             if ($receiptsQuery) $this->normalDataScope()->excludeVoidedSalesOrderFacts($receiptsQuery, 'tenant_id', 'order_id');
             $receipts = $receiptsQuery ? $receiptsQuery->sum('amount_cents') : 0;
-            $group['order_count'] = count($orders); $group['sale_amount'] = $this->money((int)$sales); $group['receipt_amount'] = $this->money((int)$receipts);
-            $group['average_order_amount'] = $group['order_count'] ? $this->money((int)$sales / $group['order_count']) : '0'; unset($group['order_ids']);
+            $members = [];
+            foreach ($validOrders as $orderId) foreach (array_keys($group['members_by_order'][$orderId] ?? []) as $memberId) $members[(int)$memberId] = true;
+            $group['member_count'] = count($members);
+            $group['order_count'] = count($validOrders); $group['sale_amount'] = $this->money((int)$sales); $group['receipt_amount'] = $this->money((int)$receipts);
+            $group['average_order_amount'] = $group['order_count'] ? $this->money((int)$sales / $group['order_count']) : '0'; unset($group['order_ids'], $group['members_by_order']);
         }
-        unset($group); $records = array_values($groups); usort($records, function ($a, $b) { return (float)$b['sale_amount'] <=> (float)$a['sale_amount']; });
+        unset($group); $records = array_values(array_filter($groups, static function (array $group): bool { return (int)$group['order_count'] > 0; })); usort($records, function ($a, $b) { return (float)$b['sale_amount'] <=> (float)$a['sale_amount']; });
         return ['title' => '拓客渠道（首次疗程卡来源）', 'columns' => [['key'=>'channel_name','label'=>'首次疗程卡来源'],['key'=>'source_type','label'=>'来源类型'],['key'=>'member_count','label'=>'成交顾客'],['key'=>'order_count','label'=>'首次疗程卡单数'],['key'=>'sale_amount','label'=>'成交金额'],['key'=>'receipt_amount','label'=>'收款金额'],['key'=>'average_order_amount','label'=>'成交单产']], 'records' => $records, 'total' => count($records), 'page' => 1, 'page_size' => count($records)];
     }
 
@@ -1279,10 +1302,18 @@ class StoreUnifiedReportServices extends BaseServices
     private function memberAmounts($table, $amount, $storeId, array $memberIds, string $start, string $end, array $conditions): array
     {
         if (!$memberIds) return [];
-        $query = $this->withStoreScope(Db::name($table), $storeId)->whereIn('member_id', $memberIds)->whereBetween('business_date', [$start, $end])->where('status', 'effective');
-        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'tenant_id', 'order_id');
-        foreach ($conditions as $key => $value) $query->where($key, $value);
-        $rows = $query->fieldRaw('member_id, SUM(' . $amount . ') amount')->group('member_id')->select()->toArray();
+        $query = $this->withStoreScope(Db::name($table)->alias('fact'), $storeId)
+            ->whereIn('fact.member_id', $memberIds)->whereBetween('fact.business_date', [$start, $end])->where('fact.status', 'effective');
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'fact.tenant_id', 'fact.order_id');
+        if ($table === 'cashier_v3_payment_fact' || $table === 'cashier_v3_performance_fact') {
+            $this->normalDataScope()->excludeVoidedRechargeOrderFacts($query, 'fact.tenant_id', 'fact.order_id');
+            $this->normalDataScope()->excludeVoidedSupplementPaymentFacts($query, 'fact.tenant_id', 'fact.store_id', 'fact.order_id');
+        }
+        if ($table === 'cashier_v3_performance_fact' && ($conditions['performance_type'] ?? '') === 'consumption_performance_recorded') {
+            $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'fact');
+        }
+        foreach ($conditions as $key => $value) $query->where('fact.' . $key, $value);
+        $rows = $query->fieldRaw('fact.member_id, SUM(fact.' . $amount . ') amount')->group('fact.member_id')->select()->toArray();
         $result = []; foreach ($rows as $row) $result[(int)$row['member_id']] = (int)$row['amount'];
         return $result;
     }
@@ -1562,7 +1593,9 @@ class StoreUnifiedReportServices extends BaseServices
         if ($saleFactIds) {
             $payments = $this->withStoreScope(Db::name('cashier_v3_payment_sale_allocation_fact'), $storeId)
                 ->whereIn('sale_fact_id', $saleFactIds)->where('status', 'effective')
-                ->field('sale_fact_id,payment_method,SUM(amount_cents) amount_cents')->group('sale_fact_id,payment_method')->select()->toArray();
+                ->field('sale_fact_id,payment_method,SUM(amount_cents) amount_cents')->group('sale_fact_id,payment_method');
+            $this->normalDataScope()->excludeVoidedSupplementAllocations($payments, 'cashier_v3_payment_sale_allocation_fact');
+            $payments = $payments->select()->toArray();
             foreach ($payments as $payment) $paymentBySaleFact[(string)$payment['sale_fact_id']][(string)$payment['payment_method']] = (int)$payment['amount_cents'];
         }
         $salespersonByLine = [];

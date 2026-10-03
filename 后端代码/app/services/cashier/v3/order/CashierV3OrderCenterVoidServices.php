@@ -13,6 +13,8 @@ use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\user\UserBalanceAtomicServices;
 use app\services\cashier\v3\presale\CashierV3PresaleClaimServices;
+use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
+use app\services\report\StoreReportPaymentSaleAllocationFactServices;
 use think\facade\Db;
 
 /**
@@ -101,6 +103,7 @@ final class CashierV3OrderCenterVoidServices
         if ($repaid < $amountCents) throw self::failure('当前欠款金额不足以冲销该补交记录。', 'supplement_debt_projection_mismatch');
 
         $now = time();
+        $balanceResult = null;
         if ($type === 'recharge') {
             $balanceLedgerId = 0;
             try {
@@ -149,7 +152,7 @@ final class CashierV3OrderCenterVoidServices
             'store_name_snapshot' => (string)Db::name('system_store')->where('id', $operator->storeId())->value('name'),
             'payload' => ['recordId' => $recordId, 'amountCents' => $amountCents, 'reason' => $reason, 'operationId' => $operation['operation_id']],
         ]);
-        $this->appendRepaymentFactReversals($scope->tenantId(), (string)$row['repayment_id'], (string)$operation['operation_id'], $key, $event, $operator, $now);
+        $this->appendRepaymentFactReversals($scope->tenantId(), (string)$row['repayment_id'], $type, $amountCents, (string)$operation['operation_id'], $key, $event, $operator, $scope, $now, $balanceResult);
         Db::name(self::OPERATION_TABLE)->where('id', (int)$operation['id'])->update(['business_event_no' => (string)$event['event_no'], 'status' => 'succeeded', 'updated_at' => $now]);
         return ['data' => ['void' => ['operationNo' => $operation['operation_no'], 'replayed' => false]], 'business_no' => $operation['operation_no'], 'touched' => ['supplement_record'], 'message' => '补交记录已取消，欠款已恢复。'];
     }
@@ -329,13 +332,24 @@ final class CashierV3OrderCenterVoidServices
         if (!preg_match('/^EV-[A-Fa-f0-9]{32}$/', $eventNo)) throw self::failure('原始业务事件缺失，无法安全作废。', 'order_center_void_original_event_missing');
         return $eventNo;
     }
-    private function appendRepaymentFactReversals(string $tenantId, string $repaymentId, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now): void
+    /** Reverse exactly the facts owned by this repayment in the void transaction. */
+    private function appendRepaymentFactReversals(string $tenantId, string $repaymentId, string $type, int $amountCents, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now, ?array $balanceResult): void
     {
+        $documentType = $type === 'sales' ? 'debt_repayment' : 'recharge_debt_repayment';
+        $paymentReversals = [];
         foreach (['cashier_v3_payment_fact', 'cashier_v3_performance_fact'] as $table) {
             $rows = Db::name($table)->where('tenant_id', $tenantId)->where('order_id', $repaymentId)
-                ->where('source_document_type', 'debt_repayment')->where('fact_direction', 'forward')->where('status', 'effective')->lock(true)->select()->toArray();
+                ->where('source_document_type', $documentType)->where('fact_direction', 'forward')->where('status', 'effective')->lock(true)->select()->toArray();
+            if ($table === 'cashier_v3_payment_fact' && $rows === []) throw self::failure('补交收款事实缺失，无法安全作废。', 'supplement_payment_fact_missing');
+            if ($table === 'cashier_v3_payment_fact' && array_sum(array_map(static function (array $row): int { return (int)$row['amount_cents']; }, $rows)) !== $amountCents) {
+                throw self::failure('补交金额与收款事实不一致，无法安全作废。', 'supplement_payment_fact_amount_mismatch');
+            }
             foreach ($rows as $source) {
-                if (Db::name($table)->where('tenant_id', $tenantId)->where('reversal_of', (string)$source['fact_id'])->where('fact_direction', 'reversal')->where('status', 'effective')->count() > 0) continue;
+                // A prior reversal without this successful operation is a
+                // conflicting fact, never a reason to accept a partial void.
+                if (Db::name($table)->where('tenant_id', $tenantId)->where('reversal_of', (string)$source['fact_id'])->where('fact_direction', 'reversal')->where('status', 'effective')->count() > 0) {
+                    throw self::failure('补交事实已存在其他冲销，无法安全作废。', 'supplement_fact_already_reversed');
+                }
                 $copy = $source; unset($copy['id']);
                 $copy['fact_id'] = 'OCV-' . strtoupper(substr(hash_hmac('sha256', $table . '|' . $source['fact_id'] . '|' . $operationId, (string)config('cashier_v3.checkout_namespace_secret')), 0, 40));
                 $copy['business_event_no'] = (string)$event['event_no']; $copy['fact_direction'] = 'reversal';
@@ -348,8 +362,81 @@ final class CashierV3OrderCenterVoidServices
                 }
                 $copy['immutable_fingerprint'] = hash('sha256', json_encode($copy, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
                 if ((int)Db::name($table)->insert($copy) !== 1) throw self::failure('order_center_void_fact_reversal_insert_failed', 'order_center_void_fact_reversal_insert_failed');
+                if ($table === 'cashier_v3_payment_fact') $paymentReversals[] = $copy;
             }
         }
+        if ($type === 'sales') {
+            $this->appendSalesRepaymentAllocationReversals($tenantId, $repaymentId, $paymentReversals, $event, $operator, $now);
+        } elseif ($balanceResult !== null) {
+            $this->appendRechargeRepaymentBalanceReversal($tenantId, $repaymentId, $operationId, $commandKey, $event, $operator, $scope, $now, $balanceResult);
+        }
+    }
+
+    /** Sales repayment allocations belong to the original sale, but their payment identity belongs to this repayment. */
+    private function appendSalesRepaymentAllocationReversals(string $tenantId, string $repaymentId, array $payments, array $event, CashierV3OperatorScope $operator, int $now): void
+    {
+        $allocations = new StoreReportPaymentSaleAllocationFactServices();
+        foreach ($payments as $payment) {
+            $originals = Db::name(StoreReportPaymentSaleAllocationFactServices::TABLE)
+                ->where('tenant_id', $tenantId)->where('payment_fact_id', (string)$payment['reversal_of'])
+                ->where('fact_direction', 'forward')->where('status', 'effective')->lock(true)->select()->toArray();
+            if ($originals === []) continue; // Historical repayments may not have a V3 sale-line allocation.
+            $first = $originals[0];
+            $allocatedCents = array_sum(array_map(static function (array $row): int {
+                return (int)$row['amount_cents'];
+            }, $originals));
+            if ($allocatedCents !== abs((int)$payment['amount_cents'])) {
+                throw self::failure('补交销售分摊与收款金额不一致，无法安全作废。', 'supplement_allocation_amount_mismatch');
+            }
+            foreach ($originals as $original) {
+                if ((string)$original['order_id'] !== (string)$first['order_id'] || (int)$original['store_id'] !== $operator->storeId()) {
+                    throw self::failure('补交销售明细归属异常，无法安全作废。', 'supplement_allocation_scope_mismatch');
+                }
+            }
+            $allocations->persistLifecycleReversalsInTx([
+                'tenant_id' => $tenantId, 'organization_id' => (string)$first['organization_id'],
+                'store_id' => $operator->storeId(), 'member_id' => (int)$first['member_id'],
+                'order_id' => (string)$first['order_id'], 'order_no_snapshot' => (string)$first['order_no_snapshot'],
+                'business_date' => date('Y-m-d', $now), 'occurred_at' => $now, 'settled_at' => $now,
+                'recorded_at' => $now, 'business_event_no' => (string)$event['event_no'],
+                'checkout_request_id' => $repaymentId,
+            ], [$payment]);
+        }
+    }
+
+    /** The balance ledger was debited above; publish its exact principal/bonus change as an immutable fact. */
+    private function appendRechargeRepaymentBalanceReversal(string $tenantId, string $repaymentId, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now, array $balanceResult): void
+    {
+        $rows = Db::name('cashier_v3_balance_fact')->where('tenant_id', $tenantId)->where('order_id', $repaymentId)
+            ->where('source_document_type', 'recharge_debt_repayment')->where('fact_direction', 'forward')
+            ->where('status', 'effective')->lock(true)->select()->toArray();
+        if (count($rows) !== 1) throw self::failure('补交余额事实异常，无法安全作废。', 'supplement_balance_fact_ambiguous');
+        $originalBalance = $rows[0];
+        $deductedCents = $this->moneyCents($balanceResult['paid_ben'] ?? '0')
+            + $this->moneyCents($balanceResult['paid_give'] ?? '0');
+        if ((int)$originalBalance['principal_delta_cents'] + (int)$originalBalance['bonus_delta_cents'] !== $deductedCents
+            || Db::name('cashier_v3_balance_fact')->where('tenant_id', $tenantId)
+                ->where('reversal_of', (string)$originalBalance['fact_id'])
+                ->where('fact_direction', 'reversal')->where('status', 'effective')->count() > 0) {
+            throw self::failure('补交余额事实与本次扣回不一致，无法安全作废。', 'supplement_balance_fact_conflict');
+        }
+        $after = (new CashierV3MemberBalanceProvider())->lockSnapshotInTx((int)$rows[0]['member_id'], $operator, $scope);
+        $copy = $rows[0]; unset($copy['id']);
+        $copy['fact_id'] = 'OCV-' . strtoupper(substr(hash_hmac('sha256', 'balance|' . $rows[0]['fact_id'] . '|' . $operationId, (string)config('cashier_v3.checkout_namespace_secret')), 0, 40));
+        $copy['natural_key'] = 'order_center_void:' . hash('sha256', 'balance|' . $rows[0]['fact_id'] . '|' . $operationId);
+        $copy['fact_direction'] = 'reversal'; $copy['reversal_of'] = (string)$rows[0]['fact_id'];
+        $copy['business_event_no'] = (string)$event['event_no']; $copy['command_idempotency_key'] = $commandKey;
+        $copy['operator_id'] = $operator->operatorId(); $copy['fact_version'] = 1;
+        $copy['business_date'] = date('Y-m-d', $now); $copy['occurred_at'] = $now;
+        $copy['settled_at'] = $now; $copy['recorded_at'] = $now;
+        $copy['principal_delta_cents'] = -$this->moneyCents($balanceResult['paid_ben'] ?? '0');
+        $copy['bonus_delta_cents'] = -$this->moneyCents($balanceResult['paid_give'] ?? '0');
+        $copy['balance_account_id'] = (string)$after['accountId'];
+        $copy['account_version'] = (int)$after['accountVersion'];
+        $copy['principal_after_cents'] = (int)$after['principalCents'];
+        $copy['bonus_after_cents'] = (int)$after['giftCents'];
+        $copy['immutable_fingerprint'] = hash('sha256', json_encode($copy, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        if ((int)Db::name('cashier_v3_balance_fact')->insert($copy) !== 1) throw self::failure('补交余额冲销失败，已取消作废。', 'supplement_balance_reversal_insert_failed');
     }
     private static function failure(string $message, string $reason): CashierV3CommandException { return new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, $message, CashierV3ResultCode::STATUS_FAILED, ['reason' => $reason]); }
 }

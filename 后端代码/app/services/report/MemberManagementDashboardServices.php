@@ -159,6 +159,9 @@ final class MemberManagementDashboardServices
             ->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->fieldRaw('p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,s.source_type,s.business_source_primary_id,s.business_source_label_snapshot,d.item_id,d.item_name_snapshot item_name,d.product_type_snapshot,d.category_id_snapshot category_id,d.category_path_snapshot category_path,d.is_experience');
         if ($categoryId > 0) $query->where('d.category_id_snapshot', $categoryId);
+        $normal = new StoreReportNormalDataScopeServices();
+        $normal->excludeVoidedSalesOrderFacts($query, 's.tenant_id', 's.order_id');
+        $normal->excludeVoidedSupplementAllocations($query, 'p');
         return $query->select()->toArray();
     }
 
@@ -170,6 +173,7 @@ final class MemberManagementDashboardServices
             ->whereBetween('s.business_date', [$range['start'], $range['end']])
             ->fieldRaw('s.service_fact_id,s.store_id,s.member_id,s.business_date,s.checkout_request_id,s.source_line_id,s.project_id,s.project_name_snapshot,s.project_category_id_snapshot category_id,s.project_category_name_snapshot category_name,s.quantity,s.is_experience');
         if ($categoryId > 0) $query->where('s.project_category_id_snapshot', $categoryId);
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 's');
         return $query->select()->toArray();
     }
 
@@ -179,6 +183,9 @@ final class MemberManagementDashboardServices
             ->where('performance_type', 'consumption_performance_recorded')->where('status', 'effective')
             ->whereBetween('p.business_date', [$range['start'], $range['end']]);
         if ($categoryId > 0) $query->join('cashier_v3_entitlement_service_fact s', 's.tenant_id=p.tenant_id AND s.checkout_request_id=p.checkout_request_id AND s.source_line_id=p.source_line_id')->where('s.project_category_id_snapshot', $categoryId)->where('s.service_status', 'completed');
+        $normal = new StoreReportNormalDataScopeServices();
+        $normal->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
+        $normal->excludeVoidedSalesOrderServices($query, 'p');
         $row = $query->fieldRaw('COALESCE(SUM(p.amount_cents),0) amount')->find();
         return (int)($row['amount'] ?? 0);
     }
@@ -190,6 +197,7 @@ final class MemberManagementDashboardServices
             ->join('cashier_v3_entitlement_service_fact s', 's.tenant_id=p.tenant_id AND s.checkout_request_id=p.checkout_request_id AND s.source_line_id=p.source_line_id')
             ->where('p.tenant_id', $tenant)->whereIn('p.store_id', $stores)->where('p.performance_type', 'consumption_performance_recorded')->where('p.status', 'effective')
             ->where('s.service_status', 'completed')->where('s.project_category_id_snapshot', $categoryId)->whereBetween('p.business_date', [$range['start'], $range['end']]);
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 's');
         $rows = $query->fieldRaw('s.project_id item_id,s.project_name_snapshot item_name,SUM(p.amount_cents) consumption_cents,COUNT(DISTINCT s.member_id) people')->group('s.project_id,s.project_name_snapshot')->order('consumption_cents','desc')->limit(5)->select()->toArray();
         return array_map(function (array $row): array { $amount = (int)$row['consumption_cents']; $people = (int)$row['people']; return ['name' => (string)$row['item_name'], 'consumption_cents' => $amount, 'people' => $people, 'average_cents' => $this->ratio($amount, $people)]; }, $rows);
     }

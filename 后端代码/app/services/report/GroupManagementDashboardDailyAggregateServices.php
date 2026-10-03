@@ -199,14 +199,27 @@ final class GroupManagementDashboardDailyAggregateServices
     /** @return array<int,array<string,mixed>> */
     private function sourceGroups(string $tenantId, array $stores, array $range): array
     {
-        $query = Db::name(self::FACT_TABLE)
-            ->where('tenant_id', $tenantId)
-            ->where('status', 'effective')
-            ->whereIn('performance_type', self::PERFORMANCE_TYPES)
-            ->whereBetween('business_date', [$range['start'], $range['end']]);
+        $query = Db::name(self::FACT_TABLE)->alias('p')
+            ->where('p.tenant_id', $tenantId)
+            ->where('p.status', 'effective')
+            ->whereIn('p.performance_type', self::PERFORMANCE_TYPES)
+            ->whereBetween('p.business_date', [$range['start'], $range['end']]);
         if ($stores !== []) {
-            $query->whereIn('store_id', $stores);
+            $query->whereIn('p.store_id', $stores);
         }
+        $normal = new StoreReportNormalDataScopeServices();
+        $normal->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
+        $normal->excludeVoidedRechargeOrderFacts($query, 'p.tenant_id', 'p.order_id');
+        $normal->excludeVoidedSupplementPaymentFacts($query, 'p.tenant_id', 'p.store_id', 'p.order_id');
+        // Service voids affect consumption only; they must not hide an otherwise
+        // valid sales performance fact from the same checkout.
+        $query->where(function ($population) use ($normal): void {
+            $population->where('p.performance_type', 'actual_performance_recorded')
+                ->whereOr(function ($services) use ($normal): void {
+                    $services->where('p.performance_type', 'consumption_performance_recorded');
+                    $normal->excludeVoidedSalesOrderServices($services, 'p');
+                });
+        });
         return $query->fieldRaw(
             "store_id,business_date,"
             . "COALESCE(SUM(CASE WHEN performance_type='actual_performance_recorded' THEN amount_cents ELSE 0 END),0) actual_performance_cents,"

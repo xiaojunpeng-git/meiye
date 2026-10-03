@@ -979,6 +979,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             ->where('p.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('p.store_id', $stores)
             ->where('p.status', 'effective');
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($base, 's.tenant_id', 's.order_id');
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSupplementAllocations($base, 'p');
         if (isset($range['start']) && (string)$range['start'] !== '') $base->whereBetween('p.business_date', [$range['start'], $range['end']]);
         else $base->where('p.business_date', '<=', (string)$range['end']);
         if ($this->participantEmployeeId > 0) (new StoreReportParticipantScopeServices())->applyOrder($base, 'p.order_id', $this->participantEmployeeId);

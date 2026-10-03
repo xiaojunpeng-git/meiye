@@ -5,10 +5,9 @@ declare(strict_types=1);
 namespace app\services\report;
 
 /**
- * Normal business-report visibility is determined by the authoritative order
- * lifecycle. A succeeded sales-order void hides both its original and signed
- * reversal facts from every operating statistic, while preserving both facts
- * for audit and reconciliation views.
+ * Normal business-report visibility is determined by authoritative successful
+ * void operations for sales, recharge, repayment and service. Both the original
+ * and signed reversal remain immutable for audit but leave operating reports.
  */
 final class StoreReportNormalDataScopeServices
 {
@@ -21,6 +20,19 @@ final class StoreReportNormalDataScopeServices
                 ->where('normal_void_operation.source_type', 'sales')
                 ->where('normal_void_operation.operation_type', 'void')
                 ->where('normal_void_operation.status', 'succeeded');
+        });
+    }
+
+    /** Recharge facts use RCH:<id>; lifecycle operations retain the numeric recharge id. */
+    public function excludeVoidedRechargeOrderFacts($query, string $tenantColumn, string $orderColumn): void
+    {
+        $query->whereNotExists(function ($operation) use ($tenantColumn, $orderColumn): void {
+            $operation->name('cashier_v3_order_lifecycle_operation')->alias('normal_recharge_void')
+                ->whereRaw('normal_recharge_void.tenant_id = ' . $tenantColumn)
+                ->whereRaw("CONCAT('RCH:', normal_recharge_void.source_order_id) = " . $orderColumn)
+                ->where('normal_recharge_void.source_type', 'recharge')
+                ->where('normal_recharge_void.operation_type', 'void')
+                ->where('normal_recharge_void.status', 'succeeded');
         });
     }
 
@@ -41,11 +53,27 @@ final class StoreReportNormalDataScopeServices
         });
     }
 
+    /** A sales repayment allocation carries its original sale order id, so identify its own payment fact. */
+    public function excludeVoidedSupplementAllocations($query, string $allocationAlias): void
+    {
+        $query->whereNotExists(function ($operation) use ($allocationAlias): void {
+            $operation->name('cashier_v3_order_center_void_operation')->alias('normal_allocation_void')
+                ->join('cashier_v3_payment_fact normal_allocation_payment',
+                    'normal_allocation_payment.tenant_id=normal_allocation_void.tenant_id'
+                    . ' AND normal_allocation_payment.order_id=normal_allocation_void.source_id'
+                    . " AND normal_allocation_payment.source_document_type='debt_repayment'")
+                ->whereRaw('normal_allocation_payment.fact_id=' . $allocationAlias . '.payment_fact_id')
+                ->whereRaw('normal_allocation_void.store_id=' . $allocationAlias . '.store_id')
+                ->whereRaw('normal_allocation_void.tenant_id=' . $allocationAlias . '.tenant_id')
+                ->where('normal_allocation_void.source_kind', 'sales_supplement')
+                ->where('normal_allocation_void.status', 'succeeded');
+        });
+    }
+
     /**
-     * Service facts do not carry a sales-order ID. A service belongs to a
-     * voided sale only when its source line belongs to the successfully
-     * voided sales order; services from previously purchased entitlements stay
-     * visible because they have no such sales fact.
+     * Service and service-performance facts do not reliably carry the sales
+     * order ID. Their source line identifies a voided sale only when a sale
+     * fact owns that line; unrelated previously purchased services remain.
      */
     public function excludeVoidedSalesOrderServices($query, string $serviceAlias): void
     {
@@ -61,6 +89,25 @@ final class StoreReportNormalDataScopeServices
                 ->where('normal_service_void_operation.source_type', 'sales')
                 ->where('normal_service_void_operation.operation_type', 'void')
                 ->where('normal_service_void_operation.status', 'succeeded');
+        });
+        // A standalone service void keeps the original completed service fact
+        // for audit; its stable checkout/line identity controls visibility.
+        $this->excludeVoidedServiceRecord($query, $serviceAlias);
+    }
+
+    /** Match the stable checkout/line identity on service or service-performance facts. */
+    public function excludeVoidedServiceRecord($query, string $serviceAlias): void
+    {
+        $query->whereNotExists(function ($void) use ($serviceAlias): void {
+            $void->name('cashier_v3_service_record_void_operation')->alias('normal_service_record_void')
+                ->join('cashier_v3_entitlement_service_fact normal_service_record',
+                    'normal_service_record.tenant_id=normal_service_record_void.tenant_id'
+                    . ' AND normal_service_record.id=normal_service_record_void.service_fact_id')
+                ->whereRaw('normal_service_record.tenant_id=' . $serviceAlias . '.tenant_id')
+                ->whereRaw('normal_service_record.store_id=' . $serviceAlias . '.store_id')
+                ->whereRaw('normal_service_record.checkout_request_id=' . $serviceAlias . '.checkout_request_id')
+                ->whereRaw('normal_service_record.source_line_id=' . $serviceAlias . '.source_line_id')
+                ->where('normal_service_record_void.status', 'succeeded');
         });
     }
 

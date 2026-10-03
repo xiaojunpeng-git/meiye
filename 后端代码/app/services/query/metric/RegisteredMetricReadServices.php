@@ -2375,6 +2375,19 @@ final class RegisteredMetricReadServices
         $guard = $normal[$source['normal_scope']] ?? null;
         if (!$guard) $this->fail('METRIC_SOURCE_TYPE_INVALID');
         $guard();
+        if ($source['normal_scope'] === 'facts') {
+            $normalScope = new StoreReportNormalDataScopeServices();
+            // Sale facts use the existing sales guard; money and personnel
+            // facts can also belong to independently voided recharges or repayments.
+            if (in_array($table, ['cashier_v3_performance_fact', 'cashier_v3_balance_fact'], true)) {
+                $normalScope->excludeVoidedRechargeOrderFacts($query, 'p.tenant_id', 'p.order_id');
+                $normalScope->excludeVoidedSupplementPaymentFacts($query, 'p.tenant_id', 'p.store_id', 'p.order_id');
+            }
+            if ($table === 'cashier_v3_performance_fact'
+                && in_array($source['filters']['performance_type'] ?? '', ['consumption_performance_recorded', 'labor_performance_allocated'], true)) {
+                $normalScope->excludeVoidedSalesOrderServices($query, 'p');
+            }
+        }
         if (($source['requires_completed_service'] ?? false) === true) {
             $query->whereExists(function ($service) {
                 $service->name('cashier_v3_entitlement_service_fact')->whereRaw(
@@ -2393,6 +2406,7 @@ final class RegisteredMetricReadServices
             ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
             ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective');
         call_user_func($this->normalFacts, $query, 'p.tenant_id', 'p.order_id');
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSupplementAllocations($query, 'p');
         return $query;
     }
 
@@ -2412,6 +2426,9 @@ final class RegisteredMetricReadServices
                 });
             });
         });
+        $normalScope = new StoreReportNormalDataScopeServices();
+        $normalScope->excludeVoidedRechargeOrderFacts($query, 'p.tenant_id', 'p.order_id');
+        $normalScope->excludeVoidedSupplementPaymentFacts($query, 'p.tenant_id', 'p.store_id', 'p.order_id');
         // Forward and signed reversal facts are both retained. Positive, refund and
         // net readers choose their own expression from this same fact population;
         // balance-only restoration never creates a negative payment fact.
@@ -2427,7 +2444,7 @@ final class RegisteredMetricReadServices
      */
     private function unallocatedSalesDebtRepaymentCashQuery(string $tenantId, array $stores, array $range)
     {
-        return call_user_func($this->queryFactory, 'cashier_v3_payment_fact')->alias('p')
+        $query = call_user_func($this->queryFactory, 'cashier_v3_payment_fact')->alias('p')
             ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)->where('p.status', 'effective')
             ->where('p.fact_type', 'payment_collected')->where('p.source_document_type', 'debt_repayment')
             ->whereIn('p.payment_method', CashierV3CheckoutFactPlanV1::paymentMethods())
@@ -2437,6 +2454,8 @@ final class RegisteredMetricReadServices
                     ->whereRaw('debt_payment_allocation.tenant_id=p.tenant_id AND debt_payment_allocation.payment_fact_id=p.fact_id')
                     ->where('debt_payment_allocation.status', 'effective');
             });
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSupplementPaymentFacts($query, 'p.tenant_id', 'p.store_id', 'p.order_id');
+        return $query;
     }
 
     private function assertScope(string $tenantId, array $stores, array $range): void
