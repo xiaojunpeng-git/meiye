@@ -11,11 +11,27 @@ export function countedRows(rows) {
   })
 }
 
+/** Server line numbers count only submitted physical rows; map back to the full draft before highlighting. */
+export function submittedCountRowIndex(rows, lineIndex) {
+  const position = Number(lineIndex)
+  if (!Number.isInteger(position) || position < 1) return -1
+  const submitted = countedRows(rows)
+  return position <= submitted.length ? rows.indexOf(submitted[position - 1]) : -1
+}
+
+/** The server decides gain from locked stock; the draft snapshot supplies the operator-facing row name. */
+export function missingCountSurplusMessage(rows, rowIndex) {
+  const row = rows[rowIndex] || {}
+  const name = String(row.product_name || `商品ID ${row.product_id || '-'}`).trim()
+  return `第 ${rowIndex + 1} 行「${name}」的盘盈批次资料不完整，请核对批号、单价、生产日期和到期日后再完成盘点。`
+}
+
 /**
  * 在请求服务端前定位首条不可结算的盘点明细。
- * 只校验实际产生库存差异的行；盘盈会新建或合并批次，因此必须具备可追溯的批次、成本和有效期信息。
+ * 商品总量盘点的正数实盘行均需具备批次、成本和有效期资料；不依赖可能过期的账面快照。
+ * 既有批次盘点可由服务端按已锁定批次补成本和日期，仍单独校验批号身份。
  */
-export function validateCountSubmissionRows(rows, { validateSurplus = true } = {}) {
+export function validateCountSubmissionRows(rows) {
   const quantityPattern = /^\d+(?:\.\d{1,4})?$/
   const costPattern = /^\d+(?:\.\d{1,2})?$/
   const datePattern = /^\d{4}-\d{2}-\d{2}$/
@@ -44,16 +60,16 @@ export function validateCountSubmissionRows(rows, { validateSurplus = true } = {
     if (!quantityPattern.test(counted)) {
       return { valid: false, rowIndex, message: `第 ${rowIndex + 1} 行「${productName}」的实盘库存填写不正确，暂时无法完成盘点。请填写有效数量后再试。` }
     }
-    // 完成盘点不以旧账面判断盘盈；服务端按锁定后的库存校验实际需要的批次信息。
-    if (!validateSurplus || Number(counted) <= Number(row.book_quantity)) continue
+    // 正数总量可能因期间出入库变成盘盈；零实盘无需创建新批次，批次模式保留服务端已有批次资料口径。
+    if (mode !== 'SKU' || Number(counted) === 0) continue
 
     const missing = []
     const batchNo = String(row.surplus_batch_no || '').trim()
     const unitCost = String(row.surplus_unit_cost ?? '').trim()
     const manufacturedDate = String(row.surplus_manufactured_date || '').trim()
     const expireDate = String(row.surplus_expire_date || '').trim()
-    if (!batchNo) missing.push('盘盈批次号')
-    if (!unitCost) missing.push('盘盈单价')
+    if (!batchNo) missing.push('批次号')
+    if (!unitCost) missing.push('单价')
     if (!manufacturedDate) missing.push('生产日期')
     if (!expireDate) missing.push('到期日')
     if (missing.length) {

@@ -7,7 +7,8 @@ const importer = modal.slice(modal.indexOf('async function importCountRows('), m
 assert.doesNotMatch(importer, /Number\(cells\[5\]\)|Number\(cells\[7\]\)|账面库存已变化/)
 assert.match(importer, /book_quantity: String\(mode === 'BATCH' \? \(batch\?\.quantity \?\? 0\) : \(sku.available_quantity \?\? 0\)\), counted_quantity: cells\[6\]/)
 assert.match(modal, /lines: physicalRows\.map/)
-assert.match(modal, /validateCountSubmissionRows\(selectedRows.value, \{ validateSurplus: false \}\)/)
+// Completion checks positive SKU metadata without using the stale book snapshot as a gain gate.
+assert.match(modal, /validateCountSubmissionRows\(selectedRows.value\)/)
 const backend = readFileSync(new URL('../../../后端代码/app/services/product/inventory/InventoryStockCountServices.php', import.meta.url), 'utf8')
 const confirmLine = backend.slice(backend.indexOf('private function confirmLine('), backend.indexOf('private function countUnits('))
 assert.doesNotMatch(confirmLine, /countUnits\(\$line\['expectedBook'\]/)

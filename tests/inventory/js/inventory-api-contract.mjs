@@ -189,6 +189,22 @@ try {
 }
 check('stock count catalog rejection preserves stable row identities for precise client highlighting', catalogFailurePreserved)
 
+const surplusFailureApi = createInventoryApi({
+  prefix: '/storeapi/product/inventory',
+  fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({
+    status: 400,
+    msg: '库存操作未完成，请核对数据后重试。',
+    data: { code: 'inventory_stock_count_surplus_batch_required', line_index: 2 },
+  }) }),
+})
+let surplusLinePreserved = false
+try {
+  await surplusFailureApi.confirmCount({ idempotency_key: 'surplus-line-contract', business_date: '2026-10-04', lines: [] })
+} catch (error) {
+  surplusLinePreserved = error?.code === 'inventory_stock_count_surplus_batch_required' && error?.data?.line_index === 2
+}
+check('stock count surplus rejection preserves the submitted line position', surplusLinePreserved)
+
 const inboundCodeFailures = [
   ['inventory_manual_inbound_sku_not_found', '所选商品规格已失效，请重新选择商品。'],
   ['inventory_manual_inbound_location_scope_invalid', '当前门店默认库存仓归属异常，请联系管理员处理。'],

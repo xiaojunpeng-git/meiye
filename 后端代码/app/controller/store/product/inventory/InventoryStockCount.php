@@ -5,6 +5,8 @@ use app\controller\store\AuthController;
 use app\services\product\inventory\InventoryStockCountServices;
 use app\services\product\inventory\InventoryStockCountDraftServices;
 use app\services\product\inventory\InventoryStockCountCatalogException;
+use app\services\product\inventory\InventoryStockCountLineException;
+use app\services\product\inventory\InventoryErrorMessage;
 use think\facade\App;
 final class InventoryStockCount extends AuthController
 {
@@ -25,6 +27,11 @@ final class InventoryStockCount extends AuthController
             return $this->fail('部分盘点商品已从当前门店商品目录删除，请处理高亮行后再提交。', [
                 'code' => $exception->getMessage(),
                 'invalid_lines' => $exception->invalidLines(),
+            ]);
+        } catch (InventoryStockCountLineException $exception) {
+            // Return only the submitted position; product names and draft contents remain client-side.
+            return $this->fail(InventoryErrorMessage::from($exception)['message'], [
+                'code' => $exception->getMessage(), 'line_index' => $exception->lineIndex(),
             ]);
         }
     }

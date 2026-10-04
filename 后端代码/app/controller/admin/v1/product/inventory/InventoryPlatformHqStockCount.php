@@ -9,6 +9,7 @@ use app\services\product\inventory\InventoryStockCountServices;
 use app\services\product\inventory\InventoryStockCountDraftServices;
 use app\services\product\inventory\InventoryErrorMessage;
 use app\services\product\inventory\InventoryStockCountCatalogException;
+use app\services\product\inventory\InventoryStockCountLineException;
 use think\facade\App;
 
 /** Platform write boundary for physical counts owned by a headquarters warehouse. */
@@ -31,6 +32,11 @@ final class InventoryPlatformHqStockCount extends AuthController
         } catch (InventoryStockCountCatalogException $exception) {
             // 共用编辑器按稳定商品身份提示并高亮，不能在总部入口丢失问题行信息。
             return $this->fail('盘点商品已失效，请核对标红的明细。', ['code' => $exception->getMessage(), 'invalid_lines' => $exception->invalidLines()]);
+        } catch (InventoryStockCountLineException $exception) {
+            // Headquarters uses the same submitted-line contract as the store count editor.
+            return $this->fail(InventoryErrorMessage::from($exception)['message'], [
+                'code' => $exception->getMessage(), 'line_index' => $exception->lineIndex(),
+            ]);
         } catch (\InvalidArgumentException $exception) {
             return $this->fail('总部盘点参数不合法。', ['code' => $exception->getMessage()]);
         } catch (\RuntimeException $exception) {

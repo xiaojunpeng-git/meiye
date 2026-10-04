@@ -218,7 +218,7 @@ final class InventoryStockCountServices
                 if (!$line['expireDate']) $line['expireDate'] = $batch['expire_date'];
                 if ($difference < 0) { $line['manufacturedDate'] = $batch['manufactured_date']; $line['expireDate'] = $batch['expire_date']; }
             }
-            if (!$batch && $difference > 0 && !$line['costProvided']) throw new \RuntimeException('inventory_stock_count_surplus_batch_required');
+            if (!$batch && $difference > 0 && !$line['costProvided']) throw new InventoryStockCountLineException('inventory_stock_count_surplus_batch_required', $line['index'] + 1);
         }
         // 产品口径：即使导出/草稿后的库存变化，也以本次实盘为最终数。
         // expectedBook 仅保留命令指纹兼容，不作为并发库存门禁；事务锁与幂等仍有效。
@@ -313,7 +313,8 @@ final class InventoryStockCountServices
 
     private function countGain(array $scope, array $location, array $stock, int $units, array $document, array $line, array $command): array
     {
-        if ($line['batchNo'] === '' || $line['cost'] < 0 || !$line['manufacturedDate'] || !$line['expireDate'] || $line['manufacturedDate'] > $line['expireDate']) throw new \RuntimeException('inventory_stock_count_surplus_batch_required');
+        // The locked stock decides whether this is a gain; return its original input position so stale drafts can identify the failed row.
+        if ($line['batchNo'] === '' || $line['cost'] < 0 || !$line['manufacturedDate'] || !$line['expireDate'] || $line['manufacturedDate'] > $line['expireDate']) throw new InventoryStockCountLineException('inventory_stock_count_surplus_batch_required', $line['index'] + 1);
         $batch = Db::name('inventory_batch')->where('stock_id', (int)$stock['id'])->where('batch_no', $line['batchNo'])->lock(true)->find();
         if ($batch && ((string)$batch['batch_status'] !== 'ACTIVE' || (int)$batch['unit_cost_cents'] !== $line['cost'] || (string)$batch['manufactured_date'] !== $line['manufacturedDate'] || (string)$batch['expire_date'] !== $line['expireDate'])) throw new \RuntimeException('inventory_stock_count_surplus_batch_conflict');
         if (!$batch) { $catalog=Db::name('store_product_attr_value')->alias('a')->join('store_product p','p.id=a.product_id')->where('p.id',$line['productId'])->where('p.relation_id',$scope['storeId'])->where('p.is_del',0)->where('p.is_inventory',1)->where('a.id',$line['skuId'])->where('a.unique',$line['unique'])->where('a.type',0)->field('p.store_name,p.code,a.suk,a.bar_code')->lock(true)->find(); if(!$catalog)throw new InventoryStockCountCatalogException([$this->invalidCatalogLine($line)]); $id = Db::name('inventory_batch')->insertGetId(['stock_id' => (int)$stock['id'], 'origin_batch_id' => 0, 'source_batch_id' => 0, 'batch_no' => $line['batchNo'], 'manufactured_date' => $line['manufacturedDate'], 'expire_date' => $line['expireDate'], 'received_at' => $command['now'], 'received_business_date' => $command['businessDate'], 'available_quantity_units' => 0, 'unit_cost_cents' => $line['cost'], 'cost_allocated_quantity_units' => 0, 'batch_status' => 'ACTIVE', 'version' => 1, 'product_name_snapshot' => (string)$catalog['store_name'], 'sku_name_snapshot' => (string)$catalog['suk'], 'product_code_snapshot' => (string)$catalog['code'], 'barcode_snapshot' => (string)$catalog['bar_code'], 'brand_name_snapshot' => '', 'category_name_snapshot' => '', 'source_order_no_snapshot' => (string)$document['count_no'], 'data_quality' => 'COMPLETE', 'created_at' => $command['now'], 'updated_at' => $command['now']]); Db::name('inventory_batch')->where('id', $id)->update(['origin_batch_id' => $id]); $batch = Db::name('inventory_batch')->where('id', $id)->lock(true)->find(); }
