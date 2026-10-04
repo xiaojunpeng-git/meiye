@@ -196,7 +196,8 @@
               <RadioGroup v-model="formInline.scope_mode" @on-change="onScopeModeChange">
                 <Radio label="personal">个人</Radio>
                 <Radio label="store" :disabled="!hasAppointmentStore">门店</Radio>
-                <Radio v-if="scene === 'organization'" label="store_selected">指定门店</Radio>
+                <!-- 平台端凡能看到“组织”的编辑人员入口，同组展示“指定门店”；保存时仍由后端逐项校验可授权门店。 -->
+                <Radio label="store_selected">指定门店</Radio>
                 <Radio label="org">组织</Radio>
               </RadioGroup>
             </FormItem>
