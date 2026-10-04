@@ -11,6 +11,19 @@ export function countedRows(rows) {
   })
 }
 
+/** 只合计当前盘点单已加载明细的账面快照；不把实盘数或未加载的系统库存混入展示。 */
+export function sumCountBookQuantities(rows) {
+  let units = 0n
+  for (const row of rows) {
+    const match = /^(\d+)(?:\.(\d{1,4}))?$/.exec(String(row.book_quantity ?? '').trim())
+    if (!match) return '—'
+    units += BigInt(match[1]) * 10000n + BigInt((match[2] || '').padEnd(4, '0'))
+  }
+  const whole = (units / 10000n).toLocaleString('zh-CN')
+  const fraction = String(units % 10000n).padStart(4, '0').replace(/0+$/, '')
+  return fraction ? `${whole}.${fraction}` : whole
+}
+
 /** Server line numbers count only submitted physical rows; map back to the full draft before highlighting. */
 export function submittedCountRowIndex(rows, lineIndex) {
   const position = Number(lineIndex)

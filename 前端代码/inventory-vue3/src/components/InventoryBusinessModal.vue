@@ -6,7 +6,7 @@ import InventoryProductSelector from './InventoryProductSelector.vue'
 import InventoryStoreSelector from './InventoryStoreSelector.vue'
 import { inventoryStatusLabel } from '../statusLabels'
 import { exportCountXlsx, parseCountXlsx, matchCountProduct } from './countWorksheet'
-import { countedRows, invalidCountCatalogMessage, invalidCountCatalogRowIndexes, missingCountSurplusMessage, reindexCountValidationRowsAfterRemoval, submittedCountRowIndex, validateCountSubmissionRows } from '../utils/countSubmission'
+import { countedRows, invalidCountCatalogMessage, invalidCountCatalogRowIndexes, missingCountSurplusMessage, reindexCountValidationRowsAfterRemoval, submittedCountRowIndex, sumCountBookQuantities, validateCountSubmissionRows } from '../utils/countSubmission'
 import { validateInboundDates } from '../inboundDateValidation'
 
 const props = defineProps({
@@ -43,6 +43,8 @@ const outboundType = ref('过期退货')
 const inboundTypes = ['初始入库', '采购入库', '退货入库', '其他入库']
 const outboundTypes = ['过期退货', '试用出库', '报废出库', '其他出库']
 const selectedRows = ref([])
+// 盘点单标题只反映当前已加载明细的账面快照，增删、清空和恢复草稿后由响应式明细同步更新。
+const countBookQuantityTotal = computed(() => sumCountBookQuantities(selectedRows.value))
 const selectedLineIndexes = ref([])
 const bulkEditorVisible = ref(false)
 const bulkValues = ref({})
@@ -1336,7 +1338,7 @@ function submitPrimaryEditor() {
           <!-- 盘点可能一次加载数百个规格；只让明细表滚动，保留表单与操作入口的位置。 -->
           <section v-if="!isImport && !isDetail && pageKey !== 'warehouse'" class="line-section" :class="{ 'line-section--count': pageKey === 'count' }">
             <header>
-              <div><h3>{{ pageKey === 'count' ? '盘点商品' : pageKey === 'request' ? '请货商品' : pageKey === 'transfer' ? '调拨商品' : pageKey === 'inbound' ? '入库商品' : pageKey === 'outbound' ? '出库商品' : '业务明细' }}<i v-if="!isDetail">*</i></h3><p v-if="pageKey === 'inbound'">扫描商品条码可自动添加；批次、生产日期、到期日和入库单价在商品明细中填写。</p><p v-else-if="pageKey === 'outbound'">系统会优先扣减最早到期的可用批次，并自动计算成本。</p></div>
+              <div><h3 v-if="pageKey === 'count'">账面数量合计：{{ countBookQuantityTotal }}</h3><h3 v-else>{{ pageKey === 'request' ? '请货商品' : pageKey === 'transfer' ? '调拨商品' : pageKey === 'inbound' ? '入库商品' : pageKey === 'outbound' ? '出库商品' : '业务明细' }}<i v-if="!isDetail">*</i></h3><p v-if="pageKey === 'inbound'">扫描商品条码可自动添加；批次、生产日期、到期日和入库单价在商品明细中填写。</p><p v-else-if="pageKey === 'outbound'">系统会优先扣减最早到期的可用批次，并自动计算成本。</p></div>
               <div v-if="!isDetail" class="line-actions">
                 <template v-if="pageKey === 'count'">
                   <button class="modal-secondary" :disabled="countLoading || submitting" @click="prepareZeroCountInventory">把所有库存改成0</button>

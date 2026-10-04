@@ -6,6 +6,7 @@ import {
   missingCountSurplusMessage,
   reindexCountValidationRowsAfterRemoval,
   submittedCountRowIndex,
+  sumCountBookQuantities,
   validateCountSubmissionRows,
 } from '../../../前端代码/inventory-vue3/src/utils/countSubmission.js'
 
@@ -19,6 +20,13 @@ const rows = [
   { sku_id: 6, book_quantity: '7', counted_quantity: '0' },
   { sku_id: 7, book_quantity: '0', counted_quantity: 'invalid' },
 ]
+
+// 标题合计只按已加载行的账面快照求值，批次行逐行计入，不能受实盘填写影响。
+assert.equal(sumCountBookQuantities([]), '0')
+assert.equal(sumCountBookQuantities([{ book_quantity: '0.1', counted_quantity: '9' }, { book_quantity: '0.2', counted_quantity: '0' }]), '0.3')
+assert.equal(sumCountBookQuantities([{ count_mode: 'BATCH', book_quantity: '1.2345' }, { count_mode: 'BATCH', book_quantity: '2.0005' }]), '3.235')
+assert.equal(sumCountBookQuantities([{ book_quantity: '1000000000000' }, { book_quantity: '2' }]), '1,000,000,000,002')
+assert.equal(sumCountBookQuantities([{ book_quantity: '' }]), '—')
 
 // 等于旧账面的实盘也必须提交，空白未盘不提交；非法非空输入必须留给校验。
 assert.deepEqual(countedRows(rows).map((row) => row.sku_id), [1, 2, 3, 4, 6, 7])
