@@ -150,7 +150,7 @@ try {
 }
 if (!$balanceRejected) throw new RuntimeException('stock_count_zero_balance_mismatch_not_rejected');
 
-/** A retired SKU cannot be gained, counted in SKU mode, or addressed through a fabricated batch. */
+/** A retired SKU can only retain or reduce a real batch; gains, SKU mode and fabricated batches remain invalid. */
 function retiredLine(string $counted, string $batchNo, bool $batchMode = true): array
 {
     return ['product_id' => 991901, 'sku_id' => 9919011, 'sku_unique' => 'deleted-sku-9919011',
@@ -159,7 +159,7 @@ function retiredLine(string $counted, string $batchNo, bool $batchMode = true): 
         'surplus_manufactured_date' => '', 'surplus_expire_date' => '',
         'expected_book_quantity' => '0', 'count_mode' => $batchMode ? 'BATCH' : 'SKU'];
 }
-foreach ([retiredLine('1', 'TEST-RETIRED-A'), retiredLine('0', 'TEST-RETIRED-A', false), retiredLine('0', 'TEST-FORGED')] as $line) {
+foreach ([retiredLine('3', 'TEST-RETIRED-A'), retiredLine('0', 'TEST-RETIRED-A', false), retiredLine('0', 'TEST-FORGED')] as $line) {
     $rejected = false;
     try {
         (new InventoryStockCountServices())->confirm(99190, 991900, [
@@ -170,6 +170,15 @@ foreach ([retiredLine('1', 'TEST-RETIRED-A'), retiredLine('0', 'TEST-RETIRED-A',
         $rejected = count($exception->invalidLines()) === 1;
     }
     if (!$rejected) throw new RuntimeException('stock_count_retired_gain_or_forged_batch_accepted');
+}
+$retiredResult = (new InventoryStockCountServices())->confirm(99190, 991900, [
+    'idempotency_key' => 'TEST-count-retired-loss-' . bin2hex(random_bytes(6)),
+    'business_date' => '2026-10-03', 'remark' => 'TEST-失效目录持平及盘亏',
+    'lines' => [retiredLine('2', 'TEST-RETIRED-A'), retiredLine('2', 'TEST-RETIRED-B')],
+], $countSession);
+if ((int)Db::name('inventory_stock')->where('id', 9919010)->value('available_quantity_units') !== 4
+    || (int)Db::name('inventory_stock_count_line')->where('document_id', $retiredResult['count_document_id'])->count() !== 1) {
+    throw new RuntimeException('stock_count_retired_unchanged_or_loss_failed');
 }
 $orphanLine = ['product_id' => 991903, 'sku_id' => 9919031, 'sku_unique' => 'orphan-sku-9919031',
     'counted_quantity' => '0', 'surplus_batch_no' => 'TEST-ORPHAN',

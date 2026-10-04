@@ -38,8 +38,9 @@ class InventoryStoreCatalog extends AuthController
                 // 成本权限由当前员工实际权限解析，不能使用请求中的布尔值。
                 (int)$this->request->get('include_count_batches', 0) === 1
                     && (new \app\services\product\inventory\InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.stock'),
-                // 清零专用查询以现存库存批次为入口，不能因商品目录失效漏掉仍有余额的批次。
-                (int)$this->request->get('for_zero_count', 0) === 1
+                // 普通导入与清零共用本仓现存批次入口；旧清零参数保留给既有调用。
+                (int)$this->request->get('for_existing_stock', 0) === 1
+                    || (int)$this->request->get('for_zero_count', 0) === 1
             );
         } catch (\RuntimeException $exception) {
             if ($exception->getMessage() !== 'inventory_stock_count_batch_balance_mismatch') throw $exception;

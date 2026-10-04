@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { sumCountBookQuantities } from '../../../前端代码/inventory-vue3/src/utils/countSubmission.js'
 
 const source = readFileSync(new URL('../../../前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue', import.meta.url), 'utf8')
 const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end))
@@ -7,7 +8,7 @@ const picker = section('async function acceptCatalogRows(', '/** 只下载当前
 const rows = section('function countDraftRow(', '/** 替换本地盘点明细')
 const batchActions = section('function replaceCountRows(', 'async function importCountRows(')
 const selectedRows = { value: [] }, catalogError = { value: '' }, countProgress = { value: '' }, countLoading = { value: false }
-const selectedLineIndexes = { value: [] }, countValidationRowIndexes = { value: [] }, bulkEditorVisible = { value: false }
+const selectedLineIndexes = { value: [] }, countValidationRowIndexes = { value: [] }, countValidationKind = { value: '' }, bulkEditorVisible = { value: false }
 const bulkValues = { value: {} }, submitError = { value: '' }, submitting = { value: false }
 const productSelectorVisible = { value: true }
 const props = { pageKey: 'count' }
@@ -18,19 +19,22 @@ const catalog = [
   ] },
   { product_id: 2, sku_id: 102, product_name: '无库存商品', available_quantity: '0', count_batches: [] }
 ]
+const existingStockCatalog = [catalog[0], { product_id: 3, sku_id: 103, product_name: '已删除但有库存', available_quantity: '50', count_batches: [
+  { batch_no: 'H', quantity: '50', unit_cost: null, manufactured_date: '2026-01-01', expire_date: '2027-01-01' }
+] }]
 let catalogFailure = false, releaseCatalog = null
-let zeroQueryCalls = 0, ordinaryQueryCalls = 0
+let existingStockQueryCalls = 0, activeCatalogCalls = 0
 const run = new Function('props', 'selectedRows', 'catalogError', 'countProgress', 'countLoading', 'productSelectorVisible', 'allCountCatalog',
-  'selectedLineIndexes', 'countValidationRowIndexes', 'bulkEditorVisible', 'bulkValues', 'submitError', 'submitting',
+  'selectedLineIndexes', 'countValidationRowIndexes', 'countValidationKind', 'bulkEditorVisible', 'bulkValues', 'submitError', 'submitting',
   `${rows}\n${picker}\n${batchActions}\nreturn { acceptCatalogRows, loadAllCountProducts, importCurrentInventory, prepareZeroCountInventory, clearCountRows }`)(
-  props, selectedRows, catalogError, countProgress, countLoading, productSelectorVisible, async (includeBatches, forZeroCount) => {
+  props, selectedRows, catalogError, countProgress, countLoading, productSelectorVisible, async (includeBatches, forExistingStock) => {
     assert.equal(includeBatches, true)
-    if (forZeroCount) zeroQueryCalls++
-    else ordinaryQueryCalls++
+    if (forExistingStock) existingStockQueryCalls++
+    else activeCatalogCalls++
     if (releaseCatalog) await new Promise((resolve) => { releaseCatalog = resolve })
     if (catalogFailure) throw new Error('目录读取失败')
-    return catalog
-  }, selectedLineIndexes, countValidationRowIndexes, bulkEditorVisible, bulkValues, submitError, submitting
+    return forExistingStock ? existingStockCatalog : catalog
+  }, selectedLineIndexes, countValidationRowIndexes, countValidationKind, bulkEditorVisible, bulkValues, submitError, submitting
 )
 
 await run.loadAllCountProducts()
@@ -70,10 +74,10 @@ assert.equal(countLoading.value, true)
 releaseCatalog()
 releaseCatalog = null
 await zeroLoad
-assert.equal(zeroQueryCalls, 1)
-assert.equal(selectedRows.value.length, 2)
+assert.equal(existingStockQueryCalls, 1)
+assert.equal(selectedRows.value.length, 3)
 assert.deepEqual(selectedRows.value.map((row) => [row.count_mode, row.book_quantity, row.counted_quantity, row.surplus_batch_no]), [
-  ['BATCH', '2', '0', 'A'], ['BATCH', '3', '0', 'B']
+  ['BATCH', '2', '0', 'A'], ['BATCH', '3', '0', 'B'], ['BATCH', '50', '0', 'H']
 ])
 assert.match(countProgress.value, /完成盘点前系统库存不变/)
 selectedRows.value[0].counted_quantity = '6'
@@ -84,12 +88,15 @@ assert.match(catalogError.value, /目录读取失败/)
 catalogFailure = false
 
 await run.importCurrentInventory()
-assert.ok(ordinaryQueryCalls >= 1)
-assert.equal(selectedRows.value.length, 2)
+assert.ok(activeCatalogCalls >= 1)
+assert.ok(existingStockQueryCalls >= 2)
+assert.equal(selectedRows.value.length, 3)
 assert.equal(selectedRows.value[0].counted_quantity, '2')
+assert.equal(selectedRows.value[2].book_quantity, '50')
+assert.equal(sumCountBookQuantities(selectedRows.value), '55')
 selectedRows.value[0].counted_quantity = '7'
 await run.importCurrentInventory()
-assert.equal(selectedRows.value.length, 2)
+assert.equal(selectedRows.value.length, 3)
 assert.equal(selectedRows.value[0].counted_quantity, '2')
 catalogFailure = true
 selectedRows.value[0].counted_quantity = '6'
@@ -127,7 +134,7 @@ assert.equal(selectedRows.value[0].surplus_batch_no, '')
 assert.match(source, /props.pageKey === 'count' \? \{ for_count: 1, include_count_batches: 1 \} : \{\}/)
 assert.match(source, /\.\.\.\(props.pageKey === 'count' \? \{ include_count_batches: 1 \} : \{\}\)/)
 assert.match(source, /@click="prepareZeroCountInventory">把所有库存改成0<\/button>[\s\S]*@click="clearCountRows">清空下列记录<\/button>/)
-assert.match(source, /allCountCatalog\(true, zeroCounted\)/)
-assert.match(source, /forZeroCount \? \{ for_zero_count: 1 \} : \{\}/)
+assert.match(source, /allCountCatalog\(true, true\)/)
+assert.match(source, /forExistingStock && !isPlatformHeadquarters\.value \? \{ for_existing_stock: 1 \} : \{\}/)
 assert.doesNotMatch(source, /@click="zeroVisibleCountRows"|function zeroVisibleCountRows\(/)
 console.log('COUNT_CATALOG_BATCH_ENTRY_OK')

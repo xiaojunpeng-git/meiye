@@ -42,10 +42,9 @@ final class InventoryStoreCatalogServices
     }
 
     /**
-     * The store ID is always derived from the authenticated store session. Client
-     * category and page inputs can only narrow a catalog already scoped to it.
+     * 门店身份只来自认证会话；普通查询按有效目录筛选，现存库存盘点仅限该门店默认仓。
      */
-    public function search(int $storeId, string $keyword, int $categoryId = 0, int $page = 1, int $limit = 20, bool $forCount = false, bool $includeCountBatches = false, bool $canViewCost = false, bool $forZeroCount = false): array
+    public function search(int $storeId, string $keyword, int $categoryId = 0, int $page = 1, int $limit = 20, bool $forCount = false, bool $includeCountBatches = false, bool $canViewCost = false, bool $forExistingStock = false): array
     {
         $keyword = trim($keyword);
         if ($storeId <= 0 || $categoryId < 0 || mb_strlen($keyword) > 64) {
@@ -53,9 +52,9 @@ final class InventoryStoreCatalogServices
         }
         $page = max(1, $page);
         $limit = max(1, min($limit, 50));
-        if ($forZeroCount) {
+        if ($forExistingStock) {
             if (!$forCount || !$includeCountBatches || $keyword !== '' || $categoryId !== 0) {
-                throw new \InvalidArgumentException('inventory_catalog_zero_count_invalid');
+                throw new \InvalidArgumentException('inventory_catalog_existing_stock_invalid');
             }
             return $this->positiveBatchCountCatalog($storeId, $page, $limit, $canViewCost);
         }
@@ -131,7 +130,7 @@ final class InventoryStoreCatalogServices
         return compact('list', 'total', 'page', 'limit', 'categories');
     }
 
-    /** 清零候选取当前门店默认仓的正数库存主体，而非可售商品目录；历史下架/缺失目录也必须可盘亏。 */
+    /** 导入和清零候选取默认仓正数库存主体；历史下架/缺失目录仍须参与盘点。 */
     private function positiveBatchCountCatalog(int $storeId, int $page, int $limit, bool $canViewCost): array
     {
         $locationId = (int)Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
