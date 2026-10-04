@@ -79,7 +79,13 @@ final class CashierV3SalesOrderReversalServices
         $cashRefund = $action === 'void-sales-order' ? 0 : $cashReversal;
         if ($cashReversal < 0 || $cashReversal > $cashCollected) throw self::failure('sales_reversal_cash_refund_exceeds_source');
         if ($entitlementCreditCents < 0) throw self::failure('sales_reversal_entitlement_credit_invalid');
-        $economicReversal = $cashReversal + $restorePrincipal + $restoreBonus + $cancelledDebtCents + $entitlementCreditCents;
+        $legacyCardValue = $action === 'void-sales-order'
+            ? $this->lockedLegacyCardValue($source, $scope, $cashCollected, $principalPaid + $bonusPaid)
+            : 0;
+        // Old-card value settled the original sale without a payment fact.
+        // Count it when reversing the sale, never as refunded or reversed cash.
+        $economicReversal = $cashReversal + $restorePrincipal + $restoreBonus + $cancelledDebtCents
+            + $entitlementCreditCents + $legacyCardValue;
         // 免费的人次／项目也是已经结算的销售事实。全量作废仍需留下作废
         // 事件和反向业务事实，只是没有资金、欠款、余额或权益可冲销；退款
         // 则必须始终有正向经济金额，不能借此生成零额退款。
@@ -105,9 +111,30 @@ final class CashierV3SalesOrderReversalServices
             'debts' => $debts, 'cancelledDebtCents' => $cancelledDebtCents,
             'cards' => $cards, 'paymentFacts' => $paymentFacts, 'cashCollectedCents' => $cashCollected,
             'cashRefundCents' => $cashRefund, 'cashReversalCents' => $cashReversal,
-            'entitlementCreditCents' => $entitlementCreditCents, 'economicReversalCents' => $economicReversal,
+            'entitlementCreditCents' => $entitlementCreditCents, 'legacyCardValueCents' => $legacyCardValue,
+            'economicReversalCents' => $economicReversal,
             'coupons' => $coupons,
         ];
+    }
+
+    /** Only the one committed old-card draft may supply noncash value to a full void. */
+    private function lockedLegacyCardValue(array $source, CashierV3DataScopeContext $scope, int $cashCollected, int $balancePaid): int
+    {
+        $drafts = Db::name('cashier_v3_checkout_payment_draft')
+            ->where('tenant_id', $scope->tenantId())
+            ->where('request_id', (string)$source['checkoutRequestId'])
+            ->where('draft_status', 'committed')->lock(true)->select()->toArray();
+        $legacy = array_values(array_filter($drafts, static function (array $draft): bool {
+            return (string)$draft['payment_method'] === 'old_card_entry';
+        }));
+        if ($legacy === []) return 0;
+        if (count($drafts) !== 1 || count($legacy) !== 1 || $cashCollected !== 0 || $balancePaid !== 0
+            || (int)$legacy[0]['store_id'] !== (int)$source['storeId']
+            || (int)$legacy[0]['member_id'] !== (int)$source['memberId']
+            || (int)$legacy[0]['amount_cents'] <= 0) {
+            throw self::failure('sales_void_source_equation_invalid');
+        }
+        return (int)$legacy[0]['amount_cents'];
     }
 
     /**
