@@ -1,10 +1,10 @@
 export const SALES_ORDER_RECEIPT_PRINT_SETTINGS_KEY = 'cashier-v3:sales-order-receipt-print-settings:v1'
 
 export const SALES_ORDER_RECEIPT_PAPER_PROFILES = Object.freeze([
-  Object.freeze({ key: '58', label: '58mm', paperWidthMm: 58, contentWidthMm: 44, fontSizePx: 12, titleSizePx: 17 }),
-  // Common 76mm impact-printer drivers expose a 63mm printable form.
-  Object.freeze({ key: '76', label: '76mm', paperWidthMm: 63, contentWidthMm: 56, fixedPageHeightMm: 296, fontSizePx: 15, titleSizePx: 20 }),
-  Object.freeze({ key: '80', label: '80mm', paperWidthMm: 80, contentWidthMm: 60, fontSizePx: 13, titleSizePx: 18 })
+  Object.freeze({ key: '58', label: '58mm', paperWidthMm: 58, contentWidthMm: 55, fontSizePx: 16, titleSizePx: 22 }),
+  // XP-76 exposes a 63.5 x 210mm default form; a taller CSS page makes the driver shrink the entire receipt.
+  Object.freeze({ key: '76', label: '76mm', paperWidthMm: 63, contentWidthMm: 60, fixedPageHeightMm: 210, fontSizePx: 20, titleSizePx: 26 }),
+  Object.freeze({ key: '80', label: '80mm', paperWidthMm: 80, contentWidthMm: 76, fontSizePx: 20, titleSizePx: 26 })
 ])
 
 const DEFAULT_RECEIPT_PAPER_KEY = '76'
@@ -212,7 +212,6 @@ export function buildSalesOrderReceiptTestOrder(options = {}) {
 export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   const source = order && typeof order === 'object' ? order : {}
   const paperProfile = resolveSalesOrderReceiptPaperProfile(options.paperSize)
-  const paperSideMarginMm = Math.max(0, (paperProfile.paperWidthMm - paperProfile.contentWidthMm) / 2)
   const member = source.member && typeof source.member === 'object' ? source.member : {}
   const items = firstList(source, ['items', 'orderItems', 'lines', 'details'])
   const services = firstList(source, ['serviceRecords', 'services', 'serviceItems', 'serviceLines'])
@@ -251,11 +250,11 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   .receipt-toolbar { display: flex; justify-content: flex-end; gap: 8px; width: min(${paperProfile.contentWidthMm}mm, 100%); margin: 0 auto 12px; }
   .receipt-toolbar button { border: 1px solid #98a2b3; border-radius: 6px; padding: 7px 12px; color: #344054; background: #fff; font: inherit; font-weight: 600; cursor: pointer; }
   .receipt-toolbar button:first-child { border-color: #175cd3; color: #fff; background: #175cd3; }
-  .receipt { width: ${paperProfile.contentWidthMm}mm; max-width: 100%; margin: 0 auto; padding: 3mm; background: #fff; }
+  .receipt { width: ${paperProfile.contentWidthMm}mm; max-width: 100%; margin: 0 auto; padding: 1mm; background: #fff; }
   h1 { margin: 0; font-size: ${paperProfile.titleSizePx}px; font-weight: 700; text-align: center; }
   .test-label { margin-top: 3px; text-align: center; font-weight: 700; }
   .meta { margin: 10px 0; padding: 8px 0; border-top: 1px dashed #6b7280; border-bottom: 1px dashed #6b7280; }
-  .meta div { display: flex; justify-content: space-between; gap: 8px; }
+  .meta div { display: flex; justify-content: space-between; gap: 2px; }
   .meta span:first-child { flex: none; white-space: nowrap; }
   .meta span:last-child { text-align: right; overflow-wrap: anywhere; }
   h2 { margin: 12px 0 5px; font-size: ${paperProfile.fontSizePx}px; font-weight: 700; text-align: center; }
@@ -264,9 +263,9 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   th { color: #111; font-weight: 700; }
   td:first-child { padding-right: 4px; overflow-wrap: anywhere; }
   .right { padding-left: 2px; text-align: right; white-space: nowrap; }
-  .items-table th:nth-child(1), .items-table td:nth-child(1) { width: 57%; }
-  .items-table th:nth-child(2), .items-table td:nth-child(2) { width: 15%; }
-  .items-table th:nth-child(3), .items-table td:nth-child(3) { width: 28%; }
+  .items-table th:nth-child(1), .items-table td:nth-child(1) { width: 53%; }
+  .items-table th:nth-child(2), .items-table td:nth-child(2) { width: 16%; }
+  .items-table th:nth-child(3), .items-table td:nth-child(3) { width: 31%; }
   .services-table th:nth-child(1), .services-table td:nth-child(1) { width: 45%; }
   .services-table th:nth-child(2), .services-table td:nth-child(2) { width: 20%; }
   .services-table th:nth-child(3), .services-table td:nth-child(3) { width: 35%; }
@@ -276,14 +275,18 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   .summary { margin-top: 8px; border-top: 1px dashed #6b7280; }
   .summary-row { display: flex; justify-content: space-between; gap: 8px; padding-top: 4px; }
   .note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6b7280; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .footer { margin-top: 12px; color: #374151; text-align: center; font-size: ${paperProfile.fontSizePx - 1}px; }
-  .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 10px; }
-  @page { size: ${paperProfile.paperWidthMm}mm 297mm; margin: 0; }
+  .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
+  @page { size: ${paperProfile.paperWidthMm}mm ${paperProfile.fixedPageHeightMm || 297}mm; margin: 0; }
   @media print {
     body { padding: 0; background: #fff; }
     .receipt-toolbar { display: none; }
-    .receipt { width: ${paperProfile.contentWidthMm}mm; max-width: none; margin: 0 0 0 ${paperSideMarginMm}mm; }
-    .meta, tr, .summary, .note, .footer, .tear-guide { break-inside: avoid; page-break-inside: avoid; }
+    /* The XP-76 driver exposes a 63mm page; use it fully while keeping text inside a 0.5mm inset. */
+    .receipt { width: ${paperProfile.key === '76' ? '63mm' : 'calc(100% - 2mm)'}; max-width: none; margin: ${paperProfile.key === '76' ? '0' : '0 1mm'}; padding: ${paperProfile.key === '76' ? '.5mm' : '1mm'}; font-size: ${paperProfile.key === '76' ? '23px' : `clamp(${paperProfile.fontSizePx}px, 8vw, 70px)`}; }
+    ${paperProfile.key === '76' ? '.receipt .meta div:first-child span:last-child { font-size: .78em; }' : ''}
+    .receipt h1 { font-size: 1.3em; }
+    .receipt h2 { font-size: 1em; }
+    .receipt .tear-guide { font-size: .6em; }
+    .meta, tr, .summary, .note, .tear-guide { break-inside: avoid; page-break-inside: avoid; }
     h2 { break-after: avoid; page-break-after: avoid; }
   }
 </style>
@@ -297,9 +300,9 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   <h1>${escapeHtml(displayText(pickValue(source, ['storeName', 'shopName']), '销售小票'))}</h1>
   ${source.isPrintTest ? '<div class="test-label">打印测试小票 · 非业务凭证</div>' : ''}
   <div class="meta">
-    <div><span>订单号</span><span>${escapeHtml(displayText(orderNo))}</span></div>
+    <div><span>单号</span><span>${escapeHtml(displayText(orderNo))}</span></div>
     <div><span>顾客</span><span>${escapeHtml(memberName)}</span></div>
-    <div><span>业务日期</span><span>${escapeHtml(displayText(pickValue(source, ['businessDate', 'settledAt', 'paymentCompletedAt', 'occurredAt'])))}</span></div>
+    <div><span>日期</span><span>${escapeHtml(displayText(pickValue(source, ['businessDate', 'settledAt', 'paymentCompletedAt', 'occurredAt'])))}</span></div>
     <div><span>收银员</span><span>${escapeHtml(displayText(pickValue(source, ['cashierName', 'operatorName', 'operatedBy'])))}</span></div>
   </div>
   ${hasSalesSection ? `<h2>销售明细</h2>
@@ -310,7 +313,6 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   <table class="payments-table"><thead><tr><th>收款方式</th><th class="right">金额</th></tr></thead><tbody>${paymentRows}</tbody></table>` : ''}
   ${summaryRows || hasSalesSection ? `<div class="summary">${summaryRows || '<div class="empty">暂无金额汇总</div>'}</div>` : ''}
   ${hasValue(note) ? `<div class="note"><strong>订单备注</strong><br>${escapeHtml(note)}</div>` : ''}
-  <div class="footer">本小票仅展示已结账订单快照</div>
   <div class="tear-guide">撕纸处</div>
   </main>
   <script>
@@ -431,15 +433,50 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
   let printStyle = null
   let printCapabilityTimer = null
   let printLifecycleCompleted = false
+  let printLifecycleStarted = false
+  let hiddenPrintSiblings = null
+
+  // Hide the live page before opening the native dialog: some embedded browsers snapshot screen layout before applying @media print.
+  const isolatePrintDocument = () => {
+    if (!printHost || hiddenPrintSiblings) return
+    const isXp76 = resolveSalesOrderReceiptPaperProfile(options.paperSize).key === '76'
+    hiddenPrintSiblings = Array.from(documentRef.body.children || [])
+      .filter((child) => child !== printHost && child.style)
+      .map((child) => [child, child.style.display])
+    hiddenPrintSiblings.forEach(([child]) => { child.style.display = 'none' })
+    printHost.style.position = 'static'
+    printHost.style.left = 'auto'
+    printHost.style.width = isXp76 ? '63mm' : 'calc(100% - 2mm)'
+    printHost.style.fontSize = isXp76 ? '23px' : ''
+    printHost.style.margin = isXp76 ? '0' : '0 1mm'
+    printHost.style.padding = isXp76 ? '.5mm' : '1mm'
+    printHost.style.display = 'block'
+    printHost.getBoundingClientRect?.()
+  }
+
+  const restorePreviewAfterPrint = () => {
+    hiddenPrintSiblings?.forEach(([child, display]) => { child.style.display = display })
+    hiddenPrintSiblings = null
+    if (!printHost) return
+    for (const property of ['position', 'left', 'width', 'fontSize', 'margin', 'padding', 'display']) printHost.style[property] = ''
+  }
 
   const handleBeforePrint = () => {
+    printLifecycleStarted = true
+    isolatePrintDocument()
     status.textContent = ''
   }
 
   const handleAfterPrint = () => {
     printLifecycleCompleted = true
+    hostWindow.removeEventListener?.('focus', handlePrintFocus)
+    restorePreviewAfterPrint()
     status.textContent = ''
     printButton.disabled = false
+  }
+
+  const handlePrintFocus = () => {
+    if (!printLifecycleCompleted) handleAfterPrint()
   }
 
   const ensureTopLevelPrintDocument = () => {
@@ -450,44 +487,46 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
     if (!receipt) return false
 
     const profile = resolveSalesOrderReceiptPaperProfile(options.paperSize)
-    const profileSideMarginMm = Math.max(0, (profile.paperWidthMm - profile.contentWidthMm) / 2)
     printHost = documentRef.createElement('main')
     printHost.id = 'sales-order-receipt-print-document-v1'
     printHost.innerHTML = receipt.innerHTML
     printStyle = documentRef.createElement('style')
     const root = '#sales-order-receipt-print-document-v1'
     const buildPrintCss = (pageHeightMm) => `
-      ${root} { position: fixed; left: -10000px; top: 0; box-sizing: border-box; width: ${profile.contentWidthMm}mm; padding: 3mm; color: #000; background: #fff; font: ${profile.fontSizePx}px/1.5 "PingFang SC", "Microsoft YaHei", Arial, sans-serif; font-weight: 500; }
+      ${root} { position: fixed; left: -10000px; top: 0; box-sizing: border-box; width: ${profile.contentWidthMm}mm; padding: 1mm; color: #000; background: #fff; font: ${profile.fontSizePx}px/1.5 "PingFang SC", "Microsoft YaHei", Arial, sans-serif; font-weight: 500; }
       ${root} *, ${root} *::before, ${root} *::after { box-sizing: border-box; }
       ${root} h1 { margin: 0; font-size: ${profile.titleSizePx}px; font-weight: 700; text-align: center; }
       ${root} .test-label { margin-top: 3px; text-align: center; font-weight: 700; }
       ${root} .meta { margin: 10px 0; padding: 8px 0; border-top: 1px dashed #6b7280; border-bottom: 1px dashed #6b7280; }
-      ${root} .meta div { display: flex; justify-content: space-between; gap: 8px; }
+      ${root} .meta div { display: flex; justify-content: space-between; gap: 2px; }
       ${root} .meta span:first-child { flex: none; white-space: nowrap; }
       ${root} .meta span:last-child { text-align: right; overflow-wrap: anywhere; }
+      ${profile.key === '76' ? `${root} .meta div:first-child span:last-child { font-size: .78em; }` : ''}
       ${root} h2 { margin: 12px 0 5px; font-size: ${profile.fontSizePx}px; font-weight: 700; text-align: center; }
       ${root} table { width: 100%; table-layout: fixed; border-collapse: collapse; }
       ${root} th, ${root} td { padding: 4px 0; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
       ${root} th { color: #111; font-weight: 700; }
       ${root} td:first-child { padding-right: 4px; overflow-wrap: anywhere; }
       ${root} .right { padding-left: 2px; text-align: right; white-space: nowrap; }
-      ${root} .items-table th:nth-child(1), ${root} .items-table td:nth-child(1) { width: 57%; }
-      ${root} .items-table th:nth-child(2), ${root} .items-table td:nth-child(2) { width: 15%; }
-      ${root} .items-table th:nth-child(3), ${root} .items-table td:nth-child(3) { width: 28%; }
+      ${root} .items-table th:nth-child(1), ${root} .items-table td:nth-child(1) { width: 53%; }
+      ${root} .items-table th:nth-child(2), ${root} .items-table td:nth-child(2) { width: 16%; }
+      ${root} .items-table th:nth-child(3), ${root} .items-table td:nth-child(3) { width: 31%; }
       ${root} .payments-table th:nth-child(1), ${root} .payments-table td:nth-child(1) { width: 68%; }
       ${root} .payments-table th:nth-child(2), ${root} .payments-table td:nth-child(2) { width: 32%; }
       ${root} .empty { color: #6b7280; text-align: center; }
       ${root} .summary { margin-top: 8px; border-top: 1px dashed #6b7280; }
       ${root} .summary-row { display: flex; justify-content: space-between; gap: 8px; padding-top: 4px; }
       ${root} .note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6b7280; white-space: pre-wrap; overflow-wrap: anywhere; }
-      ${root} .footer { margin-top: 12px; color: #374151; text-align: center; font-size: ${profile.fontSizePx - 1}px; }
-      ${root} .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 10px; }
+      ${root} .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
       @page { size: ${profile.paperWidthMm}mm ${pageHeightMm}mm; margin: 0; }
       @media print {
         html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
         body > * { display: none !important; }
-        body > ${root} { position: static !important; display: block !important; width: ${profile.contentWidthMm}mm !important; margin: 0 0 0 ${profileSideMarginMm}mm !important; }
-        ${root} .meta, ${root} tr, ${root} .summary, ${root} .note, ${root} .footer, ${root} .tear-guide { break-inside: avoid; page-break-inside: avoid; }
+        body > ${root} { position: static !important; display: block !important; width: ${profile.key === '76' ? '63mm' : 'calc(100% - 2mm)'} !important; margin: ${profile.key === '76' ? '0' : '0 1mm'} !important; padding: ${profile.key === '76' ? '.5mm' : '1mm'} !important; font-size: ${profile.key === '76' ? '23px' : `clamp(${profile.fontSizePx}px, 8vw, 70px)`} !important; }
+        ${root} h1 { font-size: 1.3em !important; }
+        ${root} h2 { font-size: 1em !important; }
+        ${root} .tear-guide { font-size: .6em !important; }
+        ${root} .meta, ${root} tr, ${root} .summary, ${root} .note, ${root} .tear-guide { break-inside: avoid; page-break-inside: avoid; }
         ${root} h2 { break-after: avoid; page-break-after: avoid; }
       }
     `
@@ -506,9 +545,11 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
   }
 
   const disposePreview = () => {
+    restorePreviewAfterPrint()
     hostWindow.removeEventListener?.('message', closePreview)
     hostWindow.removeEventListener?.('beforeprint', handleBeforePrint)
     hostWindow.removeEventListener?.('afterprint', handleAfterPrint)
+    hostWindow.removeEventListener?.('focus', handlePrintFocus)
     if (printCapabilityTimer !== null) hostWindow.clearTimeout?.(printCapabilityTimer)
     printHost?.remove?.()
     printStyle?.remove?.()
@@ -526,12 +567,17 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
       return
     }
     printLifecycleCompleted = false
+    printLifecycleStarted = false
     printButton.disabled = true
     hostWindow.addEventListener?.('beforeprint', handleBeforePrint, { once: true })
     hostWindow.addEventListener?.('afterprint', handleAfterPrint, { once: true })
+    hostWindow.addEventListener?.('focus', handlePrintFocus, { once: true })
     try {
+      isolatePrintDocument()
       hostWindow.print()
     } catch {
+      hostWindow.removeEventListener?.('focus', handlePrintFocus)
+      restorePreviewAfterPrint()
       printButton.disabled = false
       status.textContent = '当前浏览器无法打开系统打印窗口，请使用 Chrome 或 Edge。'
       return
@@ -539,7 +585,10 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
     printCapabilityTimer = hostWindow.setTimeout?.(() => {
       printCapabilityTimer = null
       printButton.disabled = false
-      if (!printLifecycleCompleted) status.textContent = '当前内置浏览器未打开系统打印，请使用 Chrome 或 Edge。'
+      if (!printLifecycleCompleted && !printLifecycleStarted && documentRef.hasFocus?.() !== false) {
+        restorePreviewAfterPrint()
+        status.textContent = '当前内置浏览器未打开系统打印，请使用 Chrome 或 Edge。'
+      }
     }, 800) ?? null
   })
   closeButton.addEventListener?.('click', disposePreview)

@@ -41,24 +41,31 @@ ok('小票只展示订单冻结快照且转义动态文本', () => {
     amountSummary: { payableAmount: 99, actualReceivedAmount: 99 }
   })
   assert.match(html, /SO-1001/)
+  assert.match(html, /<span>单号<\/span>/)
+  assert.match(html, /<span>日期<\/span>/)
+  assert.doesNotMatch(html, /<span>订单号<\/span>|<span>业务日期<\/span>/)
   assert.match(html, /&lt;门店&gt;/)
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/)
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/)
   assert.match(html, /游客/)
-  assert.match(html, /@page \{ size: 63mm 297mm; margin: 0; \}/)
-  assert.match(html, /\.receipt \{ width: 56mm;/)
+  assert.match(html, /@page \{ size: 63mm 210mm; margin: 0; \}/)
+  assert.match(html, /\.receipt \{ width: 60mm; max-width: 100%; margin: 0 auto; padding: 1mm;/)
   assert.match(html, /table-layout: fixed/)
-  assert.match(html, /\.items-table th:nth-child\(3\).*width: 28%/)
-  assert.match(html, /font: 15px\/1\.5/)
-  assert.match(html, /h1 .*font-size: 20px/)
+  assert.match(html, /\.items-table th:nth-child\(3\).*width: 31%/)
+  assert.match(html, /font: 20px\/1\.5/)
+  assert.match(html, /h1 .*font-size: 26px/)
   assert.match(html, /h2 .*text-align: center/)
+  assert.match(html, /\.meta div \{ display: flex; justify-content: space-between; gap: 2px; \}/)
+  assert.doesNotMatch(html, /本小票仅展示已结账订单快照/)
+  assert.match(html, /\.receipt \{ width: 63mm; max-width: none; margin: 0; padding: \.5mm; font-size: 23px; \}/)
+  assert.match(html, /\.receipt \.meta div:first-child span:last-child \{ font-size: \.78em; \}/)
   assert.match(html, /\.tear-guide .*height: 64mm/)
   assert.match(html, />撕纸处<\/div>/)
   assert.match(html, /beforeprint/)
   assert.match(html, /prepareSalesOrderReceiptPrint/)
 })
 
-ok('76mm 打印使用驱动支持的 296mm 页长，为作业结束走纸留出空间', () => {
+ok('76mm 打印匹配 XP-76 默认 210mm 页长，避免驱动整页缩放', () => {
   let appendedStyle
   const documentRef = {
     querySelector(selector) {
@@ -78,9 +85,9 @@ ok('76mm 打印使用驱动支持的 296mm 页长，为作业结束走纸留出�
     }
   }
   const height = setSalesOrderReceiptPageSize(documentRef)
-  assert.equal(height, 296)
+  assert.equal(height, 210)
   assert.equal(appendedStyle.id, 'sales-order-receipt-page-size')
-  assert.equal(appendedStyle.textContent, '@page { size: 63mm 296mm; margin: 0; }')
+  assert.equal(appendedStyle.textContent, '@page { size: 63mm 210mm; margin: 0; }')
 
   const adaptiveHeight = setSalesOrderReceiptPageSize(documentRef, '58')
   assert.equal(adaptiveHeight, 184)
@@ -116,8 +123,13 @@ ok('测试小票包含中文金额和底部完整性内容且不冒充业务订�
   assert.match(html, /中文项目名称换行测试/)
   assert.match(html, /测试小票底部内容完整/)
   assert.match(html, /@page \{ size: 58mm 297mm; margin: 0; \}/)
-  assert.match(html, /\.receipt \{ width: 44mm;/)
-  assert.match(html, /@media print[\s\S]*\.receipt \{ width: 44mm; max-width: none; margin: 0 0 0 7mm; \}/)
+  assert.match(html, /\.receipt \{ width: 55mm; max-width: 100%; margin: 0 auto; padding: 1mm;/)
+  assert.match(html, /font: 16px\/1\.5/)
+  assert.match(html, /@media print[\s\S]*\.receipt \{ width: calc\(100% - 2mm\); max-width: none; margin: 0 1mm; padding: 1mm; font-size: clamp\(16px, 8vw, 70px\); \}/)
+  const wideHtml = buildSalesOrderReceiptHtml(order, { paperSize: '80' })
+  assert.match(wideHtml, /\.receipt \{ width: 76mm; max-width: 100%; margin: 0 auto; padding: 1mm;/)
+  assert.match(wideHtml, /font: 20px\/1\.5/)
+  assert.match(wideHtml, /@media print[\s\S]*\.receipt \{ width: calc\(100% - 2mm\); max-width: none; margin: 0 1mm; padding: 1mm; font-size: clamp\(20px, 8vw, 70px\); \}/)
 })
 
 ok('旧结账快照适配器兼容完整快照', () => {
@@ -215,13 +227,19 @@ ok('用户点击后在当前页面显示小票预览且不自动打印', () => {
     },
     print() {
       printCount += 1
+      assert.equal(bodyChildren[0].style.display, 'none')
+      assert.equal(bodyChildren[1].style.display, 'block')
+      assert.equal(bodyChildren[1].style.width, '63mm')
+      assert.equal(bodyChildren[1].style.margin, '0')
+      assert.equal(bodyChildren[1].style.padding, '.5mm')
+      assert.equal(bodyChildren[1].style.fontSize, '23px')
       listeners.get('beforeprint')?.()
       listeners.get('afterprint')?.()
     },
     setTimeout(callback) { callback(); return 1 },
     clearTimeout() {},
     document: {
-      body: { appendChild(child) { bodyChildren.push(child) } },
+      body: { children: bodyChildren, appendChild(child) { bodyChildren.push(child) } },
       head: { appendChild(child) { headChildren.push(child) } },
       createElement,
       querySelector() { return null }
@@ -239,11 +257,18 @@ ok('用户点击后在当前页面显示小票预览且不自动打印', () => {
   result.preview.printButton.handlers.click()
   assert.equal(printCount, 1)
   assert.equal(result.preview.printButton.disabled, false)
+  assert.equal(bodyChildren[0].style.display, undefined)
+  assert.equal(bodyChildren[1].style.position, '')
   assert.equal(bodyChildren[1].id, 'sales-order-receipt-print-document-v1')
   assert.match(headChildren[0].textContent, /body > #sales-order-receipt-print-document-v1/)
   assert.match(headChildren[0].textContent, /body > \* \{ display: none !important; \}/)
-  assert.match(headChildren[0].textContent, /@page \{ size: 63mm 296mm; margin: 0; \}/)
-  assert.match(headChildren[0].textContent, /margin: 0 0 0 3\.5mm !important/)
+  assert.match(headChildren[0].textContent, /@page \{ size: 63mm 210mm; margin: 0; \}/)
+  assert.match(headChildren[0].textContent, /width: 60mm; padding: 1mm;/)
+  assert.match(headChildren[0].textContent, /font: 20px\/1\.5/)
+  assert.match(headChildren[0].textContent, /\.items-table th:nth-child\(3\).*width: 31%/)
+  assert.match(headChildren[0].textContent, /width: 63mm !important; margin: 0 !important; padding: \.5mm !important; font-size: 23px !important/)
+  assert.match(headChildren[0].textContent, /\.meta div:first-child span:last-child \{ font-size: \.78em; \}/)
+  assert.doesNotMatch(bodyChildren[1].innerHTML, /本小票仅展示已结账订单快照/)
   assert.equal(listeners.has('message'), true)
 })
 
@@ -273,7 +298,7 @@ ok('系统打印未被浏览器接管时给出可见提示并恢复按钮', () =
     setTimeout(callback) { callback(); return 1 },
     clearTimeout() {},
     document: {
-      body: { appendChild(child) { bodyChildren.push(child) } },
+      body: { children: bodyChildren, appendChild(child) { bodyChildren.push(child) } },
       head: { appendChild() {} },
       createElement,
       querySelector() { return null }
@@ -284,7 +309,50 @@ ok('系统打印未被浏览器接管时给出可见提示并恢复按钮', () =
   const result = openSalesOrderReceiptPrint({ salesOrderNo: 'SO-1006' }, hostWindow)
   result.preview.printButton.handlers.click()
   assert.equal(result.preview.printButton.disabled, false)
+  assert.equal(bodyChildren[0].style.display, undefined)
   assert.match(result.preview.status.textContent, /未打开系统打印|Chrome 或 Edge/)
+})
+
+ok('系统打印窗口仍打开时不提前恢复页面弹窗', () => {
+  const bodyChildren = []
+  const listeners = new Map()
+  const createElement = (tagName) => ({
+    tagName,
+    style: {},
+    children: [],
+    handlers: {},
+    contentWindow: {},
+    contentDocument: tagName === 'iframe'
+      ? { querySelector() { return { scrollHeight: 320, getBoundingClientRect() { return { height: 318 } } } } }
+      : undefined,
+    scrollHeight: 680,
+    getBoundingClientRect() { return { height: 680 } },
+    setAttribute() {},
+    appendChild(child) { this.children.push(child) },
+    addEventListener(type, listener) { this.handlers[type] = listener },
+    remove() {}
+  })
+  const hostWindow = {
+    localStorage: { getItem() { return null } },
+    DOMParser: class { parseFromString() { return { querySelector() { return { innerHTML: '<h1>SO-1007</h1>' } } } } },
+    print() { assert.equal(bodyChildren[0].style.display, 'none') },
+    setTimeout(callback) { callback(); return 1 },
+    clearTimeout() {},
+    document: {
+      hasFocus() { return false },
+      body: { children: bodyChildren, appendChild(child) { bodyChildren.push(child) } },
+      head: { appendChild() {} },
+      createElement,
+      querySelector() { return null }
+    },
+    addEventListener(type, listener) { listeners.set(type, listener) },
+    removeEventListener(type) { listeners.delete(type) }
+  }
+  const result = openSalesOrderReceiptPrint({ salesOrderNo: 'SO-1007' }, hostWindow)
+  result.preview.printButton.handlers.click()
+  assert.equal(bodyChildren[0].style.display, 'none')
+  listeners.get('focus')?.()
+  assert.equal(bodyChildren[0].style.display, undefined)
 })
 
 ok('浏览器不能承载当前页预览时返回中文提示', () => {
