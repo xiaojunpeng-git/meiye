@@ -83,6 +83,10 @@ class StoreCkeckRoleMiddleware implements MiddlewareInterface
             return 'cashier.v3.inventory.presale_claim.create';
         }
         if ($method === 'POST'
+            && preg_match('#^storeapi/product/inventory/v3/presale-claims/[A-Za-z0-9-]+/remark$#D', $path) === 1) {
+            return 'cashier.v3.inventory.presale_claim.create';
+        }
+        if ($method === 'POST'
             && preg_match('#^storeapi/product/inventory/v3/presale-claims/[A-Za-z0-9-]+/void$#D', $path) === 1) {
             return 'cashier.v3.inventory.presale_claim.void';
         }

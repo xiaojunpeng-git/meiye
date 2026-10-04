@@ -9,6 +9,7 @@ import {
   createStorePresaleClaim,
   listStorePresaleClaims,
   readStorePresaleClaim,
+  updateStorePresaleClaimRemark,
   voidStorePresaleClaim
 } from '@/services/presaleClaimApi'
 import { canUseCashierV3Operation } from '@/services/cashierV3Bridge'
@@ -30,7 +31,13 @@ const detailLoading = ref(false)
 const claimOpen = ref(false)
 const claimQuantity = ref(1)
 const claimDate = ref(today())
+const claimRemark = ref('')
 const claimSubmitting = ref(false)
+const remarkOpen = ref(false)
+const remarkTarget = ref(null)
+const editedRemark = ref('')
+const remarkSubmitting = ref(false)
+const remarkError = ref('')
 const claimFailure = ref('')
 const voidOpen = ref(false)
 const voidTarget = ref(null)
@@ -124,6 +131,7 @@ function openClaim(line) {
   selectedLine.value = line
   claimQuantity.value = 1
   claimDate.value = today()
+  claimRemark.value = ''
   claimOpen.value = true
 }
 
@@ -151,7 +159,8 @@ async function submitClaim() {
     await createStorePresaleClaim({
       claimable_line_id: line.claimable_line_id,
       quantity,
-      business_date: claimDate.value
+      business_date: claimDate.value,
+      remark: claimRemark.value.trim()
     })
     claimOpen.value = false
     showFeedback(`领用成功，已生成${outboundDocumentLabel.value}。`)
@@ -183,6 +192,38 @@ async function openDetail(line) {
 }
 
 function closeDetail() { detailOpen.value = false }
+
+/** Keep note edits attached to the selected outbound record, not to the source order. */
+function openRemark(row) {
+  if (!canClaim.value) return
+  remarkTarget.value = row
+  editedRemark.value = String(row.remark || '')
+  remarkError.value = ''
+  remarkOpen.value = true
+}
+function closeRemark() {
+  if (!remarkSubmitting.value) remarkOpen.value = false
+}
+async function submitRemark() {
+  if (!remarkTarget.value || editedRemark.value.trim().length > 500) {
+    remarkError.value = '备注不能超过500字。'
+    return
+  }
+  remarkError.value = ''
+  remarkSubmitting.value = true
+  try {
+    await updateStorePresaleClaimRemark(remarkTarget.value.claim_id, {
+      remark: editedRemark.value.trim(), expected_version: remarkTarget.value.remark_version
+    })
+    remarkOpen.value = false
+    showFeedback('领用备注已保存。')
+    if (selectedLine.value) await openDetail(selectedLine.value)
+  } catch (error) {
+    remarkError.value = error?.message || '备注保存失败，请刷新后重试。'
+  } finally {
+    remarkSubmitting.value = false
+  }
+}
 function openVoid(row) {
   if (!canVoidClaim.value) return
   voidTarget.value = row
@@ -283,6 +324,7 @@ onMounted(() => load(1))
         <dl v-if="selectedLine" class="presale-modal__summary"><dt>{{ sourceDocumentLabel }}</dt><dd>{{ selectedLine.presale_order_no }}</dd><dt>商品</dt><dd>{{ selectedLine.product_name }}</dd><dt>未领用</dt><dd>{{ selectedLine.unclaimed_quantity }}</dd></dl>
         <label class="presale-modal__field">本次领用<input v-model.number="claimQuantity" type="number" min="1" :max="Number(selectedLine?.unclaimed_quantity || 1)" step="1" /></label>
         <label class="presale-modal__field">领用日期<input v-model="claimDate" type="date" /></label>
+        <label class="presale-modal__field">备注<textarea v-model="claimRemark" rows="3" maxlength="500" placeholder="选填" /></label>
         <footer><button class="button button--secondary" type="button" @click="closeClaim">取消</button><button class="button button--primary" type="button" :disabled="claimSubmitting" @click="submitClaim">确认领用</button></footer>
       </div>
     </section>
@@ -301,12 +343,22 @@ onMounted(() => load(1))
         <div v-if="detailLoading" class="presale-loading"><FileClock :size="22" />加载中...</div>
         <template v-else>
           <p v-if="detail.claimable" class="presale-detail-summary">{{ detail.claimable.product_name }}：{{ sourceQuantityLabel }} {{ detail.claimable.quantity }}，已领用 {{ detail.claimable.claimed_quantity }}，未领用 {{ detail.claimable.unclaimed_quantity }}</p>
-          <table class="presale-detail-table"><thead><tr><th>{{ outboundDocumentLabel }}</th><th class="align-right">数量</th><th>状态</th><th>操作人</th><th>领用时间</th><th>作废时间</th><th>作废原因</th><th>操作</th></tr></thead><tbody>
-            <tr v-for="row in detail.claims || []" :key="row.claim_id"><td>{{ row.claim_no }}</td><td class="align-right">{{ row.quantity }}</td><td>{{ statusLabel(row.status) }}</td><td>{{ row.operator_name }}</td><td>{{ timestamp(row.occurred_at) }}</td><td>{{ timestamp(row.voided_at) }}</td><td>{{ row.void_reason || '-' }}</td><td><button v-if="row.status === 'SETTLED' && canVoidClaim" class="button button--text button--danger" type="button" @click="openVoid(row)">作废领用</button><span v-else class="muted">已作废</span></td></tr>
-            <tr v-if="!(detail.claims || []).length"><td colspan="8" class="presale-empty">暂无领用记录</td></tr>
+          <table class="presale-detail-table"><thead><tr><th>{{ outboundDocumentLabel }}</th><th class="align-right">数量</th><th>状态</th><th>操作人</th><th>领用时间</th><th>备注</th><th>作废时间</th><th>作废原因</th><th>操作</th></tr></thead><tbody>
+            <tr v-for="row in detail.claims || []" :key="row.claim_id"><td>{{ row.claim_no }}</td><td class="align-right">{{ row.quantity }}</td><td>{{ statusLabel(row.status) }}</td><td>{{ row.operator_name }}</td><td>{{ timestamp(row.occurred_at) }}</td><td class="presale-detail-table__remark">{{ row.remark || '-' }}</td><td>{{ timestamp(row.voided_at) }}</td><td>{{ row.void_reason || '-' }}</td><td class="presale-detail-table__actions"><button v-if="canClaim" class="button button--text" type="button" @click="openRemark(row)">修改备注</button><button v-if="row.status === 'SETTLED' && canVoidClaim" class="button button--text button--danger" type="button" @click="openVoid(row)">作废领用</button><span v-if="row.status !== 'SETTLED'" class="muted">已作废</span></td></tr>
+            <tr v-if="!(detail.claims || []).length"><td colspan="9" class="presale-empty">暂无领用记录</td></tr>
           </tbody></table>
         </template>
         <footer><button class="button button--secondary" type="button" @click="closeDetail">关闭</button></footer>
+      </div>
+    </section>
+
+    <section v-if="remarkOpen" class="presale-modal-backdrop" role="presentation" @click.self="closeRemark">
+      <div class="presale-modal" role="dialog" aria-modal="true" aria-labelledby="presale-remark-title">
+        <header><div><p>{{ outboundDocumentLabel }}</p><h2 id="presale-remark-title">修改备注</h2></div><button class="icon-button" title="关闭" type="button" @click="closeRemark"><X :size="18" /></button></header>
+        <p class="presale-void-note">{{ remarkTarget?.claim_no }}</p>
+        <label class="presale-modal__field">备注<textarea v-model="editedRemark" rows="4" maxlength="500" placeholder="选填" /></label>
+        <p v-if="remarkError" class="presale-alert-message" role="alert">{{ remarkError }}</p>
+        <footer><button class="button button--secondary" type="button" @click="closeRemark">取消</button><button class="button button--primary" type="button" :disabled="remarkSubmitting" @click="submitRemark">保存</button></footer>
       </div>
     </section>
 
@@ -323,7 +375,10 @@ onMounted(() => load(1))
 
 <style scoped>
 .presale-claim-view { min-height: 100%; padding: 24px; background: #f6f8fa; color: #17212b; }
+.presale-detail-table__remark { min-width: 150px; max-width: 260px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.presale-detail-table__actions { white-space: nowrap; }
 /* 已领用/已关闭记录按销售周期查询；可领用记录不按销售日缩小范围。 */
 .presale-claim-filter__period { width: min(290px, 100%); }
 .presale-modal header p { margin: 0 0 4px; color: #6b7785; font-size: 12px; }.presale-modal h2 { margin: 0; font-size: 22px; font-weight: 650; }.presale-claim-filter { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }.presale-claim-source-switch { position: relative; display: grid; grid-template-columns: repeat(2, 72px); isolation: isolate; min-height: 36px; padding: 2px; border: 1px solid #d7dee5; border-radius: 4px; background: #fff; }.presale-claim-source-switch__thumb { position: absolute; z-index: -1; inset: 2px auto 2px 2px; width: 72px; border-radius: 3px; background: #e8f3ee; transition: transform .18s ease; }.presale-claim-source-switch__thumb.is-gift { transform: translateX(72px); }.presale-claim-source-switch button { min-height: 30px; border: 0; border-radius: 3px; background: transparent; color: #687481; cursor: pointer; }.presale-claim-source-switch button.is-active { color: #155d50; font-weight: 600; }.presale-claim-filter input, .presale-claim-filter select, .presale-modal__field input, .presale-modal__field textarea { box-sizing: border-box; width: 100%; min-height: 36px; border: 1px solid #d7dee5; border-radius: 4px; padding: 7px 10px; background: #fff; color: inherit; }.presale-claim-filter input { width: 260px; }.presale-claim-filter select { width: 130px; }.presale-claim-filter__date { display: flex; align-items: center; gap: 6px; color: #53606d; font-size: 12px; white-space: nowrap; }.presale-claim-filter__date input { width: 142px; }.presale-feedback { margin: 0 0 12px; padding: 10px 12px; border-left: 3px solid #167d68; background: #edf8f4; color: #155d50; }.presale-claim-table-wrap { overflow: auto; background: #fff; border: 1px solid #e1e7ec; }.presale-claim-table, .presale-detail-table { width: 100%; min-width: 1000px; border-collapse: collapse; font-size: 13px; }.presale-claim-table th, .presale-claim-table td, .presale-detail-table th, .presale-detail-table td { padding: 12px; border-bottom: 1px solid #edf0f2; text-align: left; vertical-align: middle; }.presale-claim-table th, .presale-detail-table th { background: #f7f9fa; color: #53606d; font-weight: 600; white-space: nowrap; }.presale-claim-table small { display: block; margin-top: 3px; color: #768391; }.align-right { text-align: right !important; }.presale-claim-table__actions { white-space: nowrap; }.button--text { padding: 0; min-height: auto; border: 0; background: transparent; color: #167d68; cursor: pointer; }.button--text + .button--text { margin-left: 12px; }.button--danger { border-color: #c83c3c; background: #c83c3c; color: #fff; }.button--text.button--danger { color: #c83c3c; background: transparent; }.muted { color: #9aa5af; }.presale-status { display: inline-block; padding: 3px 7px; border-radius: 3px; background: #eff3f5; color: #687481; white-space: nowrap; }.presale-status--available { background: #e9f7f0; color: #167d68; }.presale-status--fully_claimed { background: #eaf2fb; color: #276ba7; }.presale-status--closed_after_sale_reversal { background: #f8eded; color: #9d3a3a; }.presale-pagination { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 12px; color: #65727e; }.presale-empty { padding: 32px !important; text-align: center !important; color: #7d8994; }.presale-modal-backdrop { position: fixed; z-index: 2000; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(23, 33, 43, .46); }.presale-modal-backdrop--alert { z-index: 2100; }.presale-modal { width: min(440px, 100%); max-height: calc(100vh - 48px); overflow: auto; padding: 20px; border-radius: 6px; background: #fff; box-shadow: 0 18px 56px rgba(10, 20, 30, .28); }.presale-modal--wide { width: min(1040px, 100%); }.presale-modal--alert { width: min(380px, 100%); }.presale-modal header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 20px; }.icon-button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #5a6875; cursor: pointer; }.icon-button:hover { background: #eef2f4; }.presale-modal__summary { display: grid; grid-template-columns: 84px 1fr; gap: 8px 12px; margin: 0 0 18px; }.presale-modal__summary dt { color: #71808d; }.presale-modal__summary dd { margin: 0; }.presale-modal__field { display: grid; gap: 7px; margin-bottom: 16px; color: #46535f; font-size: 13px; }.presale-modal footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }.presale-detail-summary, .presale-void-note, .presale-alert-message { margin: 0 0 14px; padding: 10px; background: #f4f7f8; color: #475561; font-size: 13px; }.presale-alert-message { border-left: 3px solid #c83c3c; background: #fff4f4; color: #8a3030; }.presale-loading { display: grid; min-height: 160px; place-content: center; gap: 10px; color: #71808d; text-align: center; }@media (max-width: 760px) { .presale-claim-view { padding: 16px; }.presale-claim-filter { align-items: stretch; flex-wrap: wrap; }.presale-claim-source-switch { width: 148px; }.presale-claim-filter input { width: 100%; }.presale-claim-filter label:first-child { width: 100%; }.presale-claim-filter__date { flex: 1 1 100%; }.presale-claim-filter__date input { width: auto; flex: 1; }.presale-modal-backdrop { padding: 12px; }.presale-modal { padding: 16px; } }
+.presale-modal.presale-modal--wide { width: min(1160px, 100%); }
 </style>

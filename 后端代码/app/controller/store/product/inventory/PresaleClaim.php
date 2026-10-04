@@ -37,8 +37,17 @@ final class PresaleClaim extends AuthController
     public function claim()
     {
         try {
-            $input = $this->request->postMore([['idempotency_key', ''], ['claimable_line_id', ''], ['quantity', 0], ['business_date', '']]);
+            $input = $this->request->postMore([['idempotency_key', ''], ['claimable_line_id', ''], ['quantity', 0], ['business_date', ''], ['remark', '']]);
             return $this->success('预售商品已领用并生成出库单。', $this->services->claimForStore((int)$this->storeId, (int)$this->storeStaffId, $input));
+        } catch (\Throwable $exception) { return $this->fail($this->message($exception), ['code' => $exception->getMessage()]); }
+    }
+
+    /** Edits the note on a store-scoped claim without replaying its inventory movement. */
+    public function remark(string $id)
+    {
+        try {
+            $input = $this->request->postMore([['remark', ''], ['expected_version', 0]]);
+            return $this->success('领用备注已保存。', $this->services->updateRemarkForStore((int)$this->storeId, (int)$this->storeStaffId, $id, $input));
         } catch (\Throwable $exception) { return $this->fail($this->message($exception), ['code' => $exception->getMessage()]); }
     }
 
@@ -62,6 +71,9 @@ final class PresaleClaim extends AuthController
             'presale_claim_sales_date_range_invalid' => '销售开始日期不能晚于结束日期。',
             'presale_claim_already_voided' => '该领用记录已经作废。',
             'presale_claimable_line_not_found' => '预售明细不存在或不属于当前门店。',
+            'presale_claim_remark_invalid' => '备注不能超过500字。',
+            'presale_claim_remark_version_changed' => '备注已被其他人修改，请刷新明细后重试。',
+            'presale_claim_not_found' => '领用记录不存在或不属于当前门店。',
         ][$exception->getMessage()] ?? '预售领用操作未完成，请刷新后重试。';
     }
 }

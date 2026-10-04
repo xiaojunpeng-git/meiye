@@ -45,6 +45,13 @@ export function createStorePresaleClaim(input = {}) {
   })
 }
 
+/** Update only the note on an existing claim; the server checks its note version. */
+export function updateStorePresaleClaimRemark(claimId, input = {}) {
+  return request(`/storeapi/product/inventory/v3/presale-claims/${encodeURIComponent(String(claimId || ''))}/remark`, {
+    method: 'POST', body: input
+  })
+}
+
 export function voidStorePresaleClaim(claimId, input = {}) {
   return request(`/storeapi/product/inventory/v3/presale-claims/${encodeURIComponent(String(claimId || ''))}/void`, {
     method: 'POST',

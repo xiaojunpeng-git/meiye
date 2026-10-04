@@ -24,6 +24,7 @@ final class CashierV3PresaleClaimServices
     public const CLAIMABLE_TABLE = 'cashier_v3_presale_claimable_line';
     public const CLAIM_TABLE = 'cashier_v3_presale_claim';
     public const CLAIM_BATCH_TABLE = 'cashier_v3_presale_claim_batch';
+    public const CLAIM_REMARK_HISTORY_TABLE = 'cashier_v3_presale_claim_remark_history';
 
     private const STATUS_AVAILABLE = 'AVAILABLE';
     private const STATUS_LEGACY_OPEN = 'OPEN';
@@ -270,6 +271,32 @@ final class CashierV3PresaleClaimServices
         return $this->detail($scope, $claimableId);
     }
 
+    /** Change a claim note in its original store only, with optimistic versioning and immutable edit history. */
+    public function updateRemarkForStore(int $storeId, int $operatorId, string $claimId, array $input): array
+    {
+        return Db::transaction(function () use ($storeId, $operatorId, $claimId, $input): array {
+            $scope = $this->storeScope($storeId, $operatorId, true);
+            $claimId = $this->token($claimId, 64, 'presale_claim_id_invalid');
+            $remark = $this->remark($input['remark'] ?? '');
+            $version = $this->positiveInt($input['expected_version'] ?? 0, 'presale_claim_remark_version_changed');
+            $claim = Db::name(self::CLAIM_TABLE)->where('tenant_id', $scope['tenantId'])->where('claim_id', $claimId)->lock(true)->find();
+            if (!$claim || (int)$claim['store_id'] !== $scope['storeId']) throw new \RuntimeException('presale_claim_not_found');
+            if ((int)$claim['remark_version'] !== $version) throw new \RuntimeException('presale_claim_remark_version_changed');
+            $previous = (string)$claim['remark'];
+            if ($previous === $remark) return ['claim_id' => $claimId, 'remark' => $remark, 'remark_version' => $version];
+            $now = time();
+            Db::name(self::CLAIM_REMARK_HISTORY_TABLE)->insert([
+                'tenant_id' => $scope['tenantId'], 'claim_id' => $claimId, 'store_id' => $scope['storeId'],
+                'previous_remark' => $previous, 'new_remark' => $remark, 'previous_version' => $version,
+                'operator_type' => $scope['operatorType'], 'operator_id' => $scope['operatorId'], 'changed_at' => $now,
+            ]);
+            if (Db::name(self::CLAIM_TABLE)->where('id', (int)$claim['id'])->where('remark_version', $version)->update([
+                'remark' => $remark, 'remark_version' => $version + 1, 'updated_at' => $now,
+            ]) !== 1) throw new \RuntimeException('presale_claim_remark_version_changed');
+            return ['claim_id' => $claimId, 'remark' => $remark, 'remark_version' => $version + 1];
+        });
+    }
+
     public function detailForPlatform(array $adminInfo, string $claimableId): array
     {
         $access = (new InventoryPlatformAccessPolicy())->resolve($adminInfo);
@@ -363,7 +390,8 @@ final class CashierV3PresaleClaimServices
         return ['claimable' => $this->claimableProjection($claimable), 'claims' => array_map(static function (array $claim): array {
             return ['claim_id' => (string)$claim['claim_id'], 'claim_no' => (string)$claim['claim_no'], 'quantity' => (int)$claim['quantity'],
                 'source_kind' => (string)$claim['source_kind'], 'status' => (string)$claim['claim_status'], 'operator_name' => (string)$claim['operator_name_snapshot'],
-                'occurred_at' => (int)$claim['occurred_at'], 'voided_at' => (int)$claim['voided_at'], 'void_reason' => (string)$claim['void_reason_snapshot']];
+                'occurred_at' => (int)$claim['occurred_at'], 'voided_at' => (int)$claim['voided_at'], 'void_reason' => (string)$claim['void_reason_snapshot'],
+                'remark' => (string)$claim['remark'], 'remark_version' => (int)$claim['remark_version']];
         }, $claims)];
     }
 
@@ -399,7 +427,8 @@ final class CashierV3PresaleClaimServices
             'store_id' => $scope['storeId'], 'location_id' => (int)$location['id'], 'claim_no' => $claimNo,
             'idempotency_key' => $command['idempotencyKey'], 'request_fingerprint' => $command['fingerprint'], 'quantity' => $command['quantity'],
             'source_kind' => $sourceKind, 'claim_status' => self::CLAIM_SETTLED, 'operator_type' => $scope['operatorType'], 'operator_id' => $scope['operatorId'],
-            'operator_name_snapshot' => $scope['operatorName'], 'void_idempotency_key' => '', 'void_reason_snapshot' => '', 'void_operator_id' => 0, 'voided_at' => 0,
+            'operator_name_snapshot' => $scope['operatorName'], 'remark' => $command['remark'], 'remark_version' => 1,
+            'void_idempotency_key' => '', 'void_reason_snapshot' => '', 'void_operator_id' => 0, 'voided_at' => 0,
             'business_date' => $command['businessDate'], 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now, 'created_at' => $now, 'updated_at' => $now,
         ]);
         if ($claimPk <= 0) throw new \RuntimeException('presale_claim_insert_failed');
@@ -622,8 +651,21 @@ final class CashierV3PresaleClaimServices
         $quantity = $this->positiveInt($input['quantity'] ?? 0, 'presale_claim_quantity_invalid');
         if (preg_match('/^[A-Za-z0-9:._-]{8,96}$/D', $key) !== 1) throw new \InvalidArgumentException('presale_claim_idempotency_invalid');
         $now = time(); $date = $this->date((string)($input['business_date'] ?? date('Y-m-d', $now)), 'presale_claim_business_date_invalid');
+        $remark = $this->remark($input['remark'] ?? '');
+        // Empty notes retain the pre-migration fingerprint so an in-flight retry cannot duplicate or conflict.
+        $fingerprintInput = $remark === '' ? [$claimable, $quantity, $date] : [$claimable, $quantity, $date, $remark];
         return ['idempotencyKey' => $key, 'claimableLineId' => $this->token($claimable, 64, 'presale_claimable_line_id_invalid'), 'quantity' => $quantity,
-            'businessDate' => $date, 'now' => $now, 'fingerprint' => hash('sha256', json_encode([$claimable, $quantity, $date], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES))];
+            'businessDate' => $date, 'remark' => $remark, 'now' => $now,
+            'fingerprint' => hash('sha256', json_encode($fingerprintInput, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES))];
+    }
+
+    /** Notes are optional free text, never a source for claim quantity or inventory facts. */
+    private function remark($value): string
+    {
+        if (!is_string($value)) throw new \InvalidArgumentException('presale_claim_remark_invalid');
+        $remark = trim($value);
+        if (mb_strlen($remark) > 500) throw new \InvalidArgumentException('presale_claim_remark_invalid');
+        return $remark;
     }
 
     private function voidCommand(array $input): array
