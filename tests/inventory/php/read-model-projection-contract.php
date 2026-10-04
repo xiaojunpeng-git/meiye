@@ -64,7 +64,9 @@ readModelAssert('salon usage projects, list and details stay within the server-a
 
 readModelAssert('inventory page displays the authority fields with correct units and labels',
     $app !== false
-    && strpos($app, "'商品摘要'") !== false
+    && strpos($app, "'商品摘要'") === false
+    && strpos($app, 'text(row.product_summary)') === false
+    && strpos($app, 'inbound: 6, outbound: 6') !== false
     && strpos($app, "'操作日期'") !== false
     && strpos($app, "'耗材项数'") !== false
     && strpos($app, 'centsMoney(row.change_amount_cents)') !== false

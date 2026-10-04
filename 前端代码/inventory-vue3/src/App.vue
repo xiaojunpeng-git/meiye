@@ -186,8 +186,9 @@ const platformStockQueryBaseFields = [
 ]
 
 const operationalQueryPages = {
-  inbound: { pageCode: 'inventory_inbound', fields: [['order_sn', '入库单号'], ['business_date', '入库日期', 'date'], ['order_type_name', '入库类型'], ['location_name', '入库仓/门店'], ['product_summary', '商品摘要'], ['detail_count', '入库项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
-  outbound: { pageCode: 'inventory_outbound', fields: [['order_sn', '出库单号'], ['business_date', '出库日期', 'date'], ['order_type_name', '出库类型'], ['location_name', '出库仓/门店'], ['product_summary', '商品摘要'], ['detail_count', '出库项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
+  // 入出库列表不展示商品摘要；商品仍保留在权威单据明细中供“查看”追溯。
+  inbound: { pageCode: 'inventory_inbound', fields: [['order_sn', '入库单号'], ['business_date', '入库日期', 'date'], ['order_type_name', '入库类型'], ['location_name', '入库仓/门店'], ['detail_count', '入库项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
+  outbound: { pageCode: 'inventory_outbound', fields: [['order_sn', '出库单号'], ['business_date', '出库日期', 'date'], ['order_type_name', '出库类型'], ['location_name', '出库仓/门店'], ['detail_count', '出库项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
   count: { pageCode: 'inventory_count', fields: [['order_sn', '盘点单号'], ['location_name', '盘点主体'], ['detail_count', '差异项', 'integer'], ['count_date', '盘点日期', 'date'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
   request: { pageCode: 'inventory_request', fields: [['order_sn', '请货单号'], ['business_date', '请货日期', 'date'], ['request_party_name', '请货方'], ['supply_party_name', '供货方'], ['acceptance_party_name', '受理部门'], ['detail_count', '商品项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
   transfer: { pageCode: 'inventory_transfer', fields: [['order_sn', '调拨单号'], ['business_date', '调拨日期', 'date'], ['from_party_name', '调出方'], ['to_party_name', '调入方'], ['detail_count', '商品项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
@@ -314,14 +315,14 @@ const pages = {
     crumb: '库存管理 / 入库管理',
     filters: ['入库类型', '入库单号', '入库日期', '创建时间'],
     action: '新建入库',
-    columns: ['入库单号', '入库日期', '入库类型', '入库仓/门店', '商品摘要', '商品项数', '入库金额', '状态', '操作日期', '操作人']
+    columns: ['入库单号', '入库日期', '入库类型', '入库仓/门店', '商品项数', '入库金额', '状态', '操作日期', '操作人']
   },
   outbound: {
     title: '出库管理',
     crumb: '库存管理 / 出库管理',
     filters: ['出库类型', '出库单号', '出库日期', '创建时间'],
     action: '新建出库',
-    columns: ['出库单号', '出库日期', '出库类型', '出库仓/门店', '商品摘要', '商品项数', '成本金额', '状态', '操作日期', '操作人']
+    columns: ['出库单号', '出库日期', '出库类型', '出库仓/门店', '商品项数', '成本金额', '状态', '操作日期', '操作人']
   },
   stock: {
     title: '库存查询',
@@ -906,8 +907,8 @@ function operationTime(value) {
 
 function mapApiRow(page, row) {
   switch (page) {
-    case 'inbound': return [text(row.order_sn), text(row.business_date), text(row.order_type_name), text(row.location_name), text(row.product_summary), `${text(row.detail_count, '0')} 项`, centsMoney(row.cost_amount_cents), inventoryStatusLabel(row.status_name, '已完成'), operationTime(row.operation_at), text(row.operator_name)]
-    case 'outbound': return [text(row.order_sn), text(row.business_date), text(row.order_type_name), text(row.location_name), text(row.product_summary), `${text(row.detail_count, '0')} 项`, centsMoney(row.cost_amount_cents), inventoryStatusLabel(row.status_name, '已完成'), operationTime(row.operation_at), text(row.operator_name)]
+    case 'inbound': return [text(row.order_sn), text(row.business_date), text(row.order_type_name), text(row.location_name), `${text(row.detail_count, '0')} 项`, centsMoney(row.cost_amount_cents), inventoryStatusLabel(row.status_name, '已完成'), operationTime(row.operation_at), text(row.operator_name)]
+    case 'outbound': return [text(row.order_sn), text(row.business_date), text(row.order_type_name), text(row.location_name), `${text(row.detail_count, '0')} 项`, centsMoney(row.cost_amount_cents), inventoryStatusLabel(row.status_name, '已完成'), operationTime(row.operation_at), text(row.operator_name)]
     case 'stock': return row.available_quantity !== undefined
       ? [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.available_quantity), row.inventory_amount_cents !== undefined ? centsMoney(row.inventory_amount_cents) : money(row.inventory_amount)]
       : [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.batch_balance_quantity), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
@@ -925,7 +926,7 @@ function mapApiRow(page, row) {
 
 /** Status can no longer be inferred from the last cell because audit columns follow it. */
 function isOperationalStatusCell(page, cellIndex) {
-  return { inbound: 7, outbound: 7, count: 6, request: 6, transfer: 5, usage: 6, import: 7 }[page] === cellIndex
+  return { inbound: 6, outbound: 6, count: 6, request: 6, transfer: 5, usage: 6, import: 7 }[page] === cellIndex
 }
 
 /** The period label names the business event filtered by the backend. */
