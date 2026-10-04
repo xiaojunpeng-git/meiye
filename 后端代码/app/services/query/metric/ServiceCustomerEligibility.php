@@ -9,14 +9,13 @@ namespace app\services\query\metric;
  */
 final class ServiceCustomerEligibility
 {
-    public const VERSION = 'service-customer-eligibility-v1';
-    public const EXPLANATION = '选择“朋友、不计人次”的服务不计入人数或到店次数；实际服务消耗与手工费仍保留。';
+    public const VERSION = 'service-customer-eligibility-v2';
+    public const EXPLANATION = '服务记录选择“不算人数人次”时，本人或朋友均不计入人数和到店次数；实际服务消耗与手工费仍保留。';
 
-    /** PHP 投影与 SQL 查询必须等价：本人不受朋友计数开关影响。 */
+    /** 计数开关属于整条完成服务事实，本人和朋友均须与 SQL 查询等价。 */
     public static function allows(array $fact): bool
     {
-        return (string)($fact['service_object'] ?? '') !== 'friend'
-            || (int)($fact['friend_counts_as_customer'] ?? 0) === 1;
+        return (int)($fact['friend_counts_as_customer'] ?? 1) === 1;
     }
 
     /** 只接受后端代码中的事实别名，不允许客户端提供 SQL 标识符。 */
@@ -25,7 +24,7 @@ final class ServiceCustomerEligibility
         if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/D', $alias)) {
             throw new \InvalidArgumentException('Invalid service fact alias');
         }
-        return $query->whereRaw("({$alias}.service_object <> 'friend' OR {$alias}.friend_counts_as_customer = 1)");
+        return $query->where("{$alias}.friend_counts_as_customer", 1);
     }
 
     /** 混合指标报表先保留完整服务事实，只在人/到店计算入口缩小集合。 */

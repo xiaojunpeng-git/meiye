@@ -53,12 +53,17 @@ try {
     unified51($annual('project')===$before[2]+4, 'actual project quantity retained');
     unified51($experience()===$before[3] && $consult()===$before[4], 'experience and consultation exclude friend');
     Db::name('cashier_v3_entitlement_service_fact')->where('id',$ids[0])->update(['friend_counts_as_customer'=>1]);
-    unified51($get($detail('market_detail'),'visits')===1 && $get($detail('member_visit_analysis'),'total_visits')===1, 'same frozen switch enables both member metrics');
+    $countedMarketVisits = $get($detail('market_detail'),'visits');
+    $countedMemberVisits = $get($detail('member_visit_analysis'),'total_visits');
+    // Market visits exclude experience services independently of the count flag.
+    unified51($countedMarketVisits===0 && $countedMemberVisits===1, 'same frozen switch respects market experience exclusion: market='.$countedMarketVisits.' member='.$countedMemberVisits);
     unified51($annual('count')===$before[0]+1 && $annual('people')===$before[1]+1, 'annual reports enable same eligible service');
     unified51($experience()===$before[3]+1 && $consult()===$before[4]+1, 'experience and consultation enable same eligible service');
     Db::name('cashier_v3_entitlement_service_fact')->whereIn('id',$ids)->update(['service_object'=>'self','friend_counts_as_customer'=>0]);
-    unified51($get($detail('member_visit_analysis'),'total_visits')===1 && $annual('count')===$before[0]+1, 'self multi-project member-day dedup preserved');
-    unified51($experience()===$before[3]+1 && $consult()===$before[4]+1, 'self experience/consultation member dedup preserved');
+    unified51($get($detail('member_visit_analysis'),'total_visits')===0 && $annual('count')===$before[0], 'self marked not counted excluded from member visits');
+    unified51($experience()===$before[3] && $consult()===$before[4], 'self marked not counted excluded from experience/consultation');
+    Db::name('cashier_v3_entitlement_service_fact')->whereIn('id',$ids)->update(['friend_counts_as_customer'=>1]);
+    unified51($get($detail('member_visit_analysis'),'total_visits')===1 && $annual('count')===$before[0]+1, 'counted self multi-project member-day dedup preserved');
     $after=$detail('market_detail');
     unified51($after['summary_row']['amount']===$money['summary_row']['amount'], 'cash unchanged by customer eligibility');
     $export=$phase2->export([$store],array_merge($input,['report'=>'member_visit_analysis']));

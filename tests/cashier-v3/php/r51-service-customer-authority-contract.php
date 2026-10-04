@@ -1,5 +1,5 @@
 <?php
-/** 统一资格接入合同：防止报表回退到各自写朋友开关判断或全局过滤劳动事实。 */
+/** 统一资格接入合同：防止报表自行判断计数开关或全局过滤劳动事实。 */
 $root = dirname(__DIR__, 3);
 $read = static function ($path) use ($root) { return file_get_contents($root.'/后端代码/app/services/'.$path); };
 $two = $read('report/StoreUnifiedReportPhaseTwoServices.php');
@@ -9,7 +9,7 @@ $employee = $read('query/metric/ServiceCustomerMetricReadServices.php');
 $registered = $read('query/metric/RegisteredMetricReadServices.php');
 $policy = $read('query/metric/ServiceCustomerEligibility.php');
 $checks = [
-    'SQL eligibility exists only in central authority' => strpos($policy, "service_object <> 'friend'") !== false
+    'SQL eligibility exists only in central authority' => strpos($policy, '->where("{$alias}.friend_counts_as_customer", 1)') !== false
         && strpos($two, "service_object <> 'friend'") === false,
     'market/member visit scopes use central qualification' => strpos($two, "ServiceCustomerEligibility::apply(\$query, 'sv')") !== false
         && strpos($two, "if (\$customerMetric) ServiceCustomerEligibility::apply") !== false,

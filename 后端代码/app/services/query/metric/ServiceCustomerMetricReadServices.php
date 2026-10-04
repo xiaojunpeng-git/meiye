@@ -78,6 +78,7 @@ final class ServiceCustomerMetricReadServices
                     'category_path' => trim((string)($row['category_path'] ?? '')),
                     'source_type' => trim((string)($row['source_type'] ?? '')),
                     'craftsmen_snapshot_json' => (string)($row['craftsmen_snapshot_json'] ?? ''),
+                    'allocation_groups' => $this->snapshotAllocationGroups((string)($row['craftsmen_snapshot_json'] ?? ''), $storeId),
                     'labor_amount_cents' => $this->integer($row['labor_amount_cents'] ?? 0),
                     'labor_fee_amount_cents' => $this->integer($row['labor_fee_amount_cents'] ?? 0),
                     'had_labor_fact' => false,
@@ -105,7 +106,7 @@ final class ServiceCustomerMetricReadServices
                 $this->fail('METRIC_SERVICE_SOURCE_INVALID');
             }
             $subject = $this->subjectKey($row, $serviceFactId);
-            if ($subject === null) continue; // 朋友不算不进入任何服务客数指标。
+            if ($subject === null) continue; // 本人或朋友标记不计数时，只排除客数，不排除真实服务及业绩。
 
             $lineKey = $storeId . '|' . $employeeId . '|' . $requestId . '|' . $sourceLineId;
             $serviceLineKey = $storeId . '|' . $requestId . '|' . $sourceLineId;
@@ -119,6 +120,7 @@ final class ServiceCustomerMetricReadServices
                     // The point/round choice is frozen on the employee role,
                     // not on the calculation rule (which may be shared).
                     'point' => substr((string)($row['role_snapshot'] ?? ''), -6) === ':point',
+                    'allocation_group' => $services[$serviceLineKey]['allocation_groups'][$employeeId] ?? 'normal',
                     'service_line_key' => $serviceLineKey,
                     'service' => $services[$serviceLineKey],
                 ];
@@ -140,6 +142,7 @@ final class ServiceCustomerMetricReadServices
                     'store_id' => $service['store_id'], 'business_date' => $service['business_date'],
                     'subject' => $service['subject'], 'employee_id' => $employeeId,
                     'employee_name' => $employeeName, 'point' => isset($pointEmployees[$employeeId]),
+                    'allocation_group' => $service['allocation_groups'][$employeeId] ?? 'normal',
                     'service_line_key' => $serviceLineKey,
                     'service' => $service,
                 ];
@@ -156,12 +159,17 @@ final class ServiceCustomerMetricReadServices
             $employeeName = (string)$line['employee_name'];
             $dailyKey = $storeId . '|' . (string)$line['business_date'] . '|' . (string)$line['subject'];
             $periodKey = $storeId . '|' . (string)$line['subject'];
-            if (!isset($daily[$dailyKey])) $daily[$dailyKey] = ['employees' => [], 'lines' => [], 'point_employees' => []];
-            if (!isset($period[$periodKey])) $period[$periodKey] = ['employees' => []];
+            if (!isset($daily[$dailyKey])) $daily[$dailyKey] = ['employees' => [], 'lines' => [], 'point_employees' => [], 'allocation_groups' => []];
+            if (!isset($period[$periodKey])) $period[$periodKey] = ['employees' => [], 'allocation_groups' => []];
             $daily[$dailyKey]['employees'][$employeeId] = $this->name($daily[$dailyKey]['employees'][$employeeId] ?? '', $employeeName);
             $daily[$dailyKey]['lines'][$employeeId][] = $lineKey;
             if (!empty($line['point'])) $daily[$dailyKey]['point_employees'][$employeeId] = true;
             $period[$periodKey]['employees'][$employeeId] = $this->name($period[$periodKey]['employees'][$employeeId] ?? '', $employeeName);
+            // A member may have several service lines in one day or period.
+            // Keep one employee visit, with an independently settled role taking precedence over a normal role.
+            $allocationGroup = (string)$line['allocation_group'];
+            $daily[$dailyKey]['allocation_groups'][$employeeId] = $this->preferredAllocationGroup($daily[$dailyKey]['allocation_groups'][$employeeId] ?? null, $allocationGroup);
+            $period[$periodKey]['allocation_groups'][$employeeId] = $this->preferredAllocationGroup($period[$periodKey]['allocation_groups'][$employeeId] ?? null, $allocationGroup);
         }
 
         $detail = [];
@@ -169,7 +177,7 @@ final class ServiceCustomerMetricReadServices
         $summary = [];
         $dailyTotals = [];
         foreach ($daily as $dailyKey => $group) {
-            $parts = $this->split(array_keys($group['employees']));
+            $parts = $this->splitAllocationGroups($group['allocation_groups']);
             [$storeId, $businessDate] = explode('|', $dailyKey, 3);
             foreach ($parts as $employeeId => $tenths) {
                 $employeeName = (string)($group['employees'][$employeeId] ?? '');
@@ -196,7 +204,7 @@ final class ServiceCustomerMetricReadServices
         // names; the latter may legitimately be duplicated across stores.
         foreach ($period as $periodKey => $group) {
             [$storeId] = explode('|', $periodKey, 2);
-            foreach ($this->split(array_keys($group['employees'])) as $employeeId => $tenths) {
+            foreach ($this->splitAllocationGroups($group['allocation_groups']) as $employeeId => $tenths) {
                 $employeeName = (string)($group['employees'][$employeeId] ?? '');
                 $summaryKey = (int)$storeId . '|' . $employeeId;
                 $this->initSummary($summary, $summaryKey, $employeeName);
@@ -258,13 +266,52 @@ final class ServiceCustomerMetricReadServices
         return $out;
     }
 
-    /** @return string|null null means 朋友不算 */
+    /** Freeze service-customer allocation to the checkout's role grouping, never today's position. */
+    private function snapshotAllocationGroups(string $json, int $storeId): array
+    {
+        $rows = json_decode($json, true);
+        if (!is_array($rows)) return [];
+        $groups = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) continue;
+            $employeeId = $this->integer($row['employee_id'] ?? $row['employeeId'] ?? 0);
+            if ($employeeId <= 0 || $this->integer($row['store_id'] ?? $row['storeId'] ?? $storeId) !== $storeId) continue;
+            $groupKey = trim((string)($row['allocationGroupKey'] ?? $row['allocation_group_key'] ?? ''));
+            $positionId = $this->integer($row['positionId'] ?? $row['position_id'] ?? 0);
+            $independent = !empty($row['performanceIndependent']) || !empty($row['performance_independent']);
+            $group = $independent && $positionId > 0 && $groupKey === 'independent:' . $positionId
+                ? $groupKey : 'normal';
+            $groups[$employeeId] = $this->preferredAllocationGroup($groups[$employeeId] ?? null, $group);
+        }
+        return $groups;
+    }
+
+    /** Each independent position owns one full customer unit; ordinary staff share one other unit. */
+    private function splitAllocationGroups(array $employeeGroups): array
+    {
+        $groups = [];
+        foreach ($employeeGroups as $employeeId => $group) $groups[$group][] = $employeeId;
+        ksort($groups, SORT_STRING);
+        $shares = [];
+        foreach ($groups as $employeeIds) $shares += $this->split($employeeIds);
+        return $shares;
+    }
+
+    /** Resolve mixed historical lines deterministically without counting one employee twice. */
+    private function preferredAllocationGroup(?string $existing, string $current): string
+    {
+        if ($existing === null || $existing === 'normal') return $current;
+        if ($current === 'normal') return $existing;
+        return strcmp($existing, $current) <= 0 ? $existing : $current;
+    }
+
+    /** @return string|null null means this completed service is excluded from customer counts. */
     private function subjectKey(array $row, string $serviceFactId): ?string
     {
         $object = strtolower(trim((string)($row['service_object'] ?? '')));
+        if (!ServiceCustomerEligibility::allows($row)) return null;
         if ($object === 'friend') {
-            // 员工分配和报表客数共享同一资格规则；员工仍按既有服务记录粒度分配。
-            return ServiceCustomerEligibility::allows(array_replace($row, ['service_object' => $object])) ? 'record:' . $serviceFactId : null;
+            return 'record:' . $serviceFactId;
         }
         if ($object !== 'self') $this->fail('METRIC_SERVICE_OBJECT_INVALID');
         $memberId = $this->integer($row['member_id'] ?? null);

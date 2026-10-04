@@ -58,7 +58,7 @@ final class CashierV3StoreTargetDashboardReadModel
             'source_explanation' => [
                 'goals' => '门店目标读取 cashier_v3_group_dashboard_target 的门店月度目标事实；实际现金按有效 payment_fact 的正负签名净额汇总；本页只读。',
                 'cash_ranking' => '现金业绩读取有效 sales_performance_allocated 事实；销售数量关联有效销售明细数量，成交人数按顾客去重。',
-                'consumption_ranking' => '消耗业绩、手工和项目数保留实际完成服务的有效业绩；服务人次对会员本人按同日去重，服务人数对会员本人按周期去重，朋友算和游客逐条计数，多人服务按实际人员分配；“朋友不算”不计入这两列。',
+                'consumption_ranking' => '消耗业绩、手工和项目数保留实际完成服务的有效业绩；服务人次对会员本人按同日去重，服务人数对会员本人按周期去重，朋友算和游客逐条计数；普通岗位共同服务时均分，独立核算岗位按发生时职位另组计算；本人或朋友选择“不算人数人次”不计入这两列。',
             ],
             'metricVersion' => self::METRIC_VERSION,
             'dataAsOf' => date('Y-m-d H:i:s'),
@@ -109,7 +109,7 @@ final class CashierV3StoreTargetDashboardReadModel
     private function consumptionRanking(string $tenantId, int $storeId, array $range): array
     {
         // 客数只复用统一服务客数读层；劳动金额与项目数保留完整有效事实。
-        // 不能在此处给整条事实加“朋友不算”过滤，否则会误删真实消耗和手工。
+        // 不能在此处给整条事实加“不算人数人次”过滤，否则会误删真实消耗和手工。
         $customerMetrics = (new ServiceCustomerMetricReadServices())->employeeMetrics($tenantId, [$storeId], $range)['summary_by_store_employee'];
         $query = Db::name('cashier_v3_performance_fact')->alias('p')
             ->leftJoin('cashier_v3_entitlement_service_fact sv', 'sv.tenant_id=p.tenant_id AND sv.checkout_request_id=p.checkout_request_id AND sv.source_line_id=p.source_line_id AND sv.service_status=\'completed\'')

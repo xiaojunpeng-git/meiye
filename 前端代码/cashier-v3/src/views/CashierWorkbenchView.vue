@@ -730,9 +730,8 @@ function recalculateLocalCashierDraft(draft) {
     const next = { ...line }
     if (localSettings.serviceObject) {
       next.serviceObject = localSettings.serviceObject
-      next.friendCountsAsCustomer = localSettings.serviceObject === 'friend'
-        ? localSettings.friendCountsAsCustomer !== false
-        : true
+      // The count flag belongs to the service line, not only to a friend.
+      next.friendCountsAsCustomer = localSettings.friendCountsAsCustomer !== false
     }
     for (const field of ['isExperience', 'isPresale', 'inventoryOutboundRequired']) {
       if (typeof localSettings[field] === 'boolean') next[field] = localSettings[field]
@@ -4352,16 +4351,21 @@ function cardOperationConfirmLabel(mode = '') {
 function setCartLineServiceObject(line, serviceObject, friendCountsAsCustomer = true) {
   if (!isProjectLine(line) || !['self', 'friend'].includes(serviceObject)) return
   if (cartLineServiceObject(line) === serviceObject
-    && (serviceObject !== 'friend' || cartLineFriendCountsAsCustomer(line) === friendCountsAsCustomer)) return
+    && cartLineFriendCountsAsCustomer(line) === friendCountsAsCustomer) return
   activeCartLineId.value = line.id
   localLineServiceSettings.value = {
     ...localLineServiceSettings.value,
     [line.id]: {
       ...(localLineServiceSettings.value[line.id] || {}),
       serviceObject,
-      friendCountsAsCustomer: serviceObject === 'friend' ? friendCountsAsCustomer : true
+      friendCountsAsCustomer
     }
   }
+}
+
+function setCartLineExcludedFromCustomerCounts(line) {
+  // Keep 本人/朋友 unchanged so exclusion never rewrites who received service.
+  setCartLineServiceObject(line, cartLineServiceObject(line), false)
 }
 
 function toggleCartLineExperience(line) {
@@ -7533,9 +7537,9 @@ onBeforeUnmount(() => {
                     >朋友算</button>
                     <button
                       type="button"
-                      :class="{ 'is-active': cartLineServiceObject(line) === 'friend' && !cartLineFriendCountsAsCustomer(line) }"
-                      @click="setCartLineServiceObject(line, 'friend', false)"
-                    >朋友不算</button>
+                      :class="{ 'is-active': !cartLineFriendCountsAsCustomer(line) }"
+                      @click="setCartLineExcludedFromCustomerCounts(line)"
+                    >不算人数人次</button>
                   </div>
                   <div class="cart-line__amount">
                     <span v-if="linePriceChanged(line)" class="cart-line__original-price">

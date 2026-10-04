@@ -271,7 +271,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('performance_category','业绩分类','普通明细显示结账时的分类；从汇总表点击分类金额进入时，显示所点分类，卡项可按卡内项目拆分。'),
             $this->column('detail','明细','该笔业务对应的具体服务项目、卡项或产品名称。'),
             $this->column('project_count','项目数','该员工实际承担的项目数量；多人服务按分配比例拆分，可显示小数，人工调整后按已保存数值计算。',true),
-            $this->column('service_visit_count','服务人次','本人服务按“同一会员+同一日期”计一次；朋友算和游客每条有效服务记录计一次，朋友不算不计入；多人服务按实际分配计算。',true),
+            $this->column('service_visit_count','服务人次','本人服务按“同一会员+同一日期”计一次；朋友算和游客每条有效服务记录计一次；本人或朋友选择“不算人数人次”均不计入。普通员工共同服务时均分，独立核算岗位按结账时岗位分组另计一次。',true),
             $this->column('consumption_amount','消耗业绩','服务完成或卡项核销后计入该员工的消耗金额；作废后不再统计。',true),
             $this->column('cash_amount','现金业绩','成功收款后分配给该员工的金额；从汇总表点击分类金额进入时，只显示该分类分得的金额；作废后不再统计。',true),
             $this->column('labor_fee','手工费','结账时分配给该手艺人的手工费；作废后不再统计。',true),
@@ -327,7 +327,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('employee_name','员工','该行汇总的员工，按业务结账时记录的姓名显示；页面可输入姓名中的任意文字进行筛选。',false,true),
             $this->column('project_count','项目数','该员工在明细表中的项目数合计；多人服务和人工调整可产生小数。',true),
             $this->column('service_visit_count','服务人次','该员工在所选日期内的有效服务人次合计；计算规则与明细表一致。',true),
-            $this->column('service_people_count','服务人数','该员工在所选日期内服务的顾客数；本人服务的会员跨日期只计一人，朋友算和游客每条有效服务记录分别计算，多人服务按实际分配计算。',true),
+            $this->column('service_people_count','服务人数','该员工在所选日期内服务的顾客数；本人服务的会员跨日期只计一人，朋友算和游客每条有效服务记录分别计算；本人或朋友选择“不算人数人次”均不计入。普通员工共同服务时均分，独立核算岗位另组计算。',true),
             $this->column('consumption_amount','消耗','该员工在所选日期内，服务完成或卡项核销后计入的消耗金额；作废后不再统计。',true),
             $this->column('labor_fee','手工','该员工在所选日期内被分配的手工费合计；作废后不再统计。',true),
         ];

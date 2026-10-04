@@ -60,8 +60,10 @@ try {
     Db::name('cashier_v3_entitlement_service_fact')->where('id', $ids[0])->update(['friend_counts_as_customer'=>1]);
     check51($visits() === 1 && $summary() === $baseline + 1, 'counted friend missing');
     Db::name('cashier_v3_entitlement_service_fact')->whereIn('id', $ids)->update(['service_object'=>'self','friend_counts_as_customer'=>0]);
-    check51($visits() === 1 && $summary() === $baseline + 1, 'self visits lost or duplicated');
-    Db::name('cashier_v3_entitlement_service_fact')->whereIn('id', $ids)->update(['service_object'=>'friend','member_id'=>0]);
+    check51($visits() === 0 && $summary() === $baseline, 'self marked not counted excluded from detail and summary');
+    Db::name('cashier_v3_entitlement_service_fact')->whereIn('id', $ids)->update(['friend_counts_as_customer'=>1]);
+    check51($visits() === 1 && $summary() === $baseline + 1, 'counted self visits deduplicated');
+    Db::name('cashier_v3_entitlement_service_fact')->whereIn('id', $ids)->update(['service_object'=>'friend','friend_counts_as_customer'=>0,'member_id'=>0]);
     check51($summary() === $baseline, 'excluded guest friend counted');
     Db::name('cashier_v3_entitlement_service_fact')->whereIn('id', $ids)->update(['friend_counts_as_customer'=>1]);
     check51($summary() === $baseline + 1, 'counted guest projects not deduplicated');

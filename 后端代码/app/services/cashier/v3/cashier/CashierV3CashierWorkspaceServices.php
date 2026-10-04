@@ -472,11 +472,8 @@ final class CashierV3CashierWorkspaceServices
             }
             $friendCountsAsCustomer = $settings['friendCountsAsCustomer'] ? 1 : 0;
         }
-        // “本人”始终是当前会员本人，不允许标记为不计客；朋友默认计客，除非
-        // 当前行明确选择“朋友不算”。
-        if ($serviceObject === 'self') {
-            $friendCountsAsCustomer = 1;
-        } elseif ($hasServiceObject && !$hasFriendCounts) {
+        // 计数开关适用于整条服务记录，包括会员本人；未传开关时仍默认计数。
+        if ($hasServiceObject && !$hasFriendCounts) {
             $friendCountsAsCustomer = 1;
         }
 
