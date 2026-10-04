@@ -142,7 +142,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $visits = [];
         $visitedSubjects = [];
         $serviceVisitFacts = $this->marketServiceVisitFacts($stores, $range, $input);
-        foreach ($serviceVisitFacts as $fact) {
+        // 体验服务仍可形成明细和其他经营结果，但不取得市场人次资格。
+        foreach ($this->marketCountableServiceVisits($serviceVisitFacts) as $fact) {
             $sourceId = (int)($fact['business_source_primary_id'] ?? 0);
             if ($sourceId <= 0) continue;
             $storeId = (int)$fact['store_id'];
@@ -268,7 +269,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $key = 'channel_' . $sourceId . '_' . $definition[0];
                 $columns[] = ['key'=>$key,'label'=>$definition[1],'group_label'=>(string)$source['name']]; $keys[] = $key;
                 if ($prefix === 'B' && $definition[0] === 'visits') {
-                    $columns[count($columns)-1]['source_explanation'] = 'B 来源有正常服务即计算人次：会员同一天记 1，游客每张有效服务单记 1；同单多项目不重复，不要求当次有收款。';
+                    $columns[count($columns)-1]['source_explanation'] = 'B 来源有非体验的正常服务才计算人次：会员同一天记 1，游客每张有效服务单记 1；同单多项目不重复，不要求当次有收款。';
                 }
                 $params = ['dimension_code'=>(string)$sourceId];
                 if ($definition[0] === 'effective') $params['metric_code'] = 'effective_people';
@@ -333,7 +334,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $rows = array_merge($rows, $this->marketServiceOnlyRows($stores, $serviceVisits, $rows, $dimension));
         }
         $visitedSubjects = [];
-        foreach ($serviceVisits as $serviceVisit) {
+        // 与市场业绩汇总使用同一资格集合；体验行可展示，不能因展示而计入人次。
+        foreach ($this->marketCountableServiceVisits($serviceVisits) as $serviceVisit) {
             $sourceId = (int)($serviceVisit['business_source_primary_id'] ?? 0);
             $visitIdentity = $this->marketVisitIdentity($serviceVisit);
             if ($sourceId <= 0 || $visitIdentity === '') continue;
@@ -388,7 +390,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $columns = $this->columns(['business_date'=>'日期','store_name_snapshot'=>'门店名称','member_name_snapshot'=>'会员','member_phone'=>'手机','dimension'=>'来源','walk_in'=>'进店','visits'=>'人次','effective_people'=>'有效人员','amount'=>'金额','registered_date'=>'登记日期','reviewer'=>'审核人','reviewed_at'=>'审核时间','creator_name'=>'制单人','created_at'=>'制单日期']);
         foreach ($columns as &$column) {
             if ($column['key'] === 'visits') {
-                $column['source_explanation'] = '有正常服务即计算人次：会员同一天同一来源记 1，游客每张有效服务单记 1；同单多项目不重复。';
+                $column['source_explanation'] = '有非体验的正常服务才计算人次：会员同一天同一来源记 1，游客每张有效服务单记 1；同单多项目不重复。';
             }
         }
         unset($column);
@@ -1152,6 +1154,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 . 'MAX(sv.member_id) member_id,MAX(sv.member_name_snapshot) member_name_snapshot,'
                 . 'MAX(sv.operator_name_snapshot) operator_name_snapshot,'
                 . 'MAX(sv.recorded_at) recorded_at,'
+                // 体验标记在完成服务时冻结；按服务事实而非当前项目配置判定人次资格。
+                . 'MAX(sv.is_experience) is_experience,'
                 . 'COALESCE(NULLIF(wf.origin_order_id,0),0) origin_order_id,'
                 // 无当前销售单但有本次冻结来源时，按结账请求表示服务单；禁止借历史购卡单合并不同游客。
                 . "COALESCE(NULLIF(MAX(o1.order_id),''),CASE WHEN COALESCE(NULLIF(MAX(bs.primary_source_id),0),NULLIF(MAX(sv.business_source_primary_id),0),0)>0 AND sv.checkout_request_id<>'' THEN CONCAT('service:',sv.checkout_request_id) END,NULLIF(MAX(o3.order_id),''),NULLIF(MAX(o2.order_id),''),NULLIF(MAX(p1.order_id),''),NULLIF(MAX(p3.order_id),''),NULLIF(MAX(p2.order_id),''),'') matched_order_id,"
@@ -1169,6 +1173,13 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->toArray();
         return array_values(array_filter($rows, static function (array $row): bool {
             return (int)($row['business_source_primary_id'] ?? 0) > 0;
+        }));
+    }
+    /** 市场两表只在人次入口排除体验服务；不改变明细存在性、金额、进店或有效人员。 */
+    private function marketCountableServiceVisits(array $serviceVisits): array
+    {
+        return array_values(array_filter($serviceVisits, static function (array $visit): bool {
+            return (int)($visit['is_experience'] ?? 0) === 0;
         }));
     }
     /**
@@ -1349,6 +1360,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $visible=!empty($input['_internal_all'])?$records:array_slice($records,($page-1)*$limit,$limit);
         // 未付清订单入表改变两张新客表的资格和统计时间，不能复用旧口径版本。
         $metricVersion=$title==='新客汇总表'?'new-customer-first-sale-grouped-v6':($title==='新客明细表'?'new-customer-first-sale-v5':'store-operations-phase-two-v1');
+        // 体验标签改变市场人次资格，两张表与导出共用新口径版本；其他报表维持原版本。
+        if (in_array($title, ['市场业绩表', '市场明细表'], true)) $metricVersion = 'market-visits-non-experience-v2';
         $result=['title'=>$title,'columns'=>$columns,'records'=>$visible,'total'=>count($records),'page'=>$page,'page_size'=>$limit,'totals'=>$totals,'drilldown_keys'=>['organization_id','store_id','dimension_code','payment_method_code','metric_code','start_date','end_date'],'table_layout'=>['fixed'=>true,'sticky_header'=>true,'sticky_summary'=>true,'result_scroll'=>true],'metric_version'=>$metricVersion,'service_customer_rule_version'=>ServiceCustomerEligibility::VERSION,'data_as_of'=>date('Y-m-d H:i:s'),'aggregation_status'=>'reconciled'];
         $summary=$this->summaryRow($title,$columns,$records);if($summary)$result['summary_row']=$summary;
         if($groups)$result['column_groups']=$groups;
@@ -1390,7 +1403,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $source=$source!==''?$source:'该来源';
                 $descriptions=[
                     'walk_in'=>'汇总有权限人员在市场明细表保存的进店数：会员按“门店＋业务日期＋会员＋来源”汇总，游客按原始订单独立记录；新行尚未保存时读取原单据已保存值，新旧值不会重复相加。仅 B 来源显示该列。',
-                    'visits'=>'统计所选日期内归属“'.$source.'”、已完成且未作废的服务人次，排除选择“朋友、不计人次”的服务。会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
+                    'visits'=>'统计所选日期内归属“'.$source.'”、已完成且未作废的非体验服务人次，排除选择“朋友、不计人次”的服务。会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
                     'effective'=>'统计所选日期内归属“'.$source.'”且净记账收款达到标准的会员人数：A 来源每位会员至少 1,000 元，其他来源至少 500 元；按门店、来源和会员去重，游客不计。退款会抵减，已作废销售不计。',
                     'amount'=>'合计所选日期内归属“'.$source.'”的有效记账收款净额。现金退款在退款发生日计入 K退款顾客并冲减金额；作废销售冲减原来源；余额支付和旧卡录入不计。',
                 ];
@@ -1419,7 +1432,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'member_phone'=>'显示会员资料中当前保存的手机号码；未填写则留空。',
             'dimension'=>'显示业务发生时保存的客户来源；纯权益服务优先读取本次结账保存的来源，历史服务没有该快照时读取关联购卡或销售记录，不按会员当前资料改写历史来源。',
             'walk_in'=>'显示有权限人员为本行保存的进店数：会员按“门店＋业务日期＋会员＋来源”合并，游客按原始订单独立显示和编辑；新行尚未保存时显示原单据已保存值。仅 B 来源汇总到市场业绩表的进店列。',
-            'visits'=>'有已完成且未作废的服务即计人次，排除选择“朋友、不计人次”的服务：会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
+            'visits'=>'有已完成且未作废的非体验服务才计人次，排除选择“朋友、不计人次”的服务：会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
             'effective_people'=>'所选日期内，同一门店、同一来源的会员净记账收款达到标准时显示 1：A 来源至少 1,000 元，其他来源至少 500 元；游客不计。同一会员跨日期可能显示多行 1，但合计按会员去重。',
             'amount'=>'合计本行会员当天在该门店和来源下的有效记账收款净额；退款按退款发生日抵减，已作废销售不计。只有正常服务、没有当次收款时显示 0。',
             'registered_date'=>'显示本行收款或服务归属的业务日期；补录业务的系统录入时间可能晚于该日期。',
