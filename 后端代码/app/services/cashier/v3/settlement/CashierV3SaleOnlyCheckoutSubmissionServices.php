@@ -220,6 +220,14 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 !empty($scope['direct_snapshot_submission'])
             );
             $this->assertSupportedSaleLines($aggregate['lines'], $dataScope);
+            // The ordinary checkout grant is insufficient for historical
+            // card entry. Recheck the server-locked payment draft at submit.
+            foreach ((array)$aggregate['payments'] as $payment) {
+                if ((string)($payment['payment_method'] ?? '') === 'old_card_entry'
+                    && !$dataScope->hasFeature('cashier.v3.cashier.old_card_entry')) {
+                    throw self::failure('old_card_entry_permission_denied');
+                }
+            }
             $salespeopleByCheckoutLine = $this->workspace->salespeopleFromCheckoutRequestLinesInTx(
                 (array)$aggregate['lines'],
                 $operatorScope

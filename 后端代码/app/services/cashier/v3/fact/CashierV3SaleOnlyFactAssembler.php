@@ -156,7 +156,7 @@ final class CashierV3SaleOnlyFactAssembler
             $collections,
             $finalCommandIdempotencyKey
         );
-        self::assertTotals($request, $order, $orderLines, $collectionBatch, $collections);
+        self::assertTotals($request, $order, $orderLines, $collectionBatch, $collections, $lockedAggregate['payments']);
 
         $ids = new CashierV3CheckoutFactIdFactory($serverNamespaceSecret);
         $saleFacts = [];
@@ -732,10 +732,17 @@ final class CashierV3SaleOnlyFactAssembler
             || (int)($request['debt_amount_cents'] ?? 0) > 0;
         $positivePaymentCount = 0;
         $hasZeroAmountMethodSelection = false;
+        $hasLegacyEntry = false;
         foreach ($aggregate['payments'] as $payment) {
             $amount = (int)($payment['amount_cents'] ?? -1);
             if ($amount < 0) {
                 throw self::failure('sale_only_fact_payment_amount_invalid');
+            }
+            // Historical card value settles the sale but is not a collected
+            // payment fact. The later totals gate verifies its exclusive shape.
+            if ((string)($payment['payment_method'] ?? '') === 'old_card_entry') {
+                $hasLegacyEntry = true;
+                continue;
             }
             if ($amount === 0) {
                 $hasZeroAmountMethodSelection = true;
@@ -746,7 +753,7 @@ final class CashierV3SaleOnlyFactAssembler
         $zeroReceivableMethodSelection = $hasZeroAmountMethodSelection
             && (int)($request['selected_payment_amount_cents'] ?? -1) === 0
             && (int)($request['receivable_amount_cents'] ?? -1) === 0;
-        if ((count($collections) === 0 && !$hasNonCollectionSettlement && !$zeroReceivableMethodSelection)
+        if ((count($collections) === 0 && !$hasNonCollectionSettlement && !$zeroReceivableMethodSelection && !$hasLegacyEntry)
             || count($collections) !== $positivePaymentCount
             || count($collections) !== (int)$batch['collection_count']) {
             throw self::failure('sale_only_fact_payment_collection_count_mismatch');
@@ -850,7 +857,8 @@ final class CashierV3SaleOnlyFactAssembler
         array $order,
         array $orderLines,
         array $batch,
-        array $collections
+        array $collections,
+        array $paymentDrafts
     ): void {
         $original = self::sum($orderLines, 'original_amount_cents');
         $discount = self::sum($orderLines, 'discount_amount_cents');
@@ -859,6 +867,21 @@ final class CashierV3SaleOnlyFactAssembler
         $collected = self::sum($collections, 'amount_cents');
         $balance = (int)$request['balance_deduction_amount_cents'];
         $debt = (int)$request['debt_amount_cents'];
+        $legacyEntry = count($paymentDrafts) === 1
+            && (string)($paymentDrafts[0]['payment_method'] ?? '') === 'old_card_entry';
+        $legacyAmount = $legacyEntry ? (int)$paymentDrafts[0]['amount_cents'] : 0;
+        // The historical card value pays the card sale without becoming cash.
+        // Recheck its exclusive shape where formal facts are assembled.
+        if ($legacyEntry && ($legacyAmount <= 0 || $collections !== [] || $balance !== 0
+            || (string)$request['composition'] !== 'sale_only'
+            || count($orderLines) === 0)) {
+            throw self::failure('sale_only_fact_old_card_entry_invalid');
+        }
+        foreach ($legacyEntry ? $orderLines : [] as $line) {
+            if ((string)$line['item_type'] !== 'card') {
+                throw self::failure('sale_only_fact_old_card_entry_invalid');
+            }
+        }
         // A card/project upgrade records the target card's formal sale amount
         // while retaining the old right value as a separate entitlement-credit
         // settlement component. The locked sales plan has already bound that
@@ -870,9 +893,9 @@ final class CashierV3SaleOnlyFactAssembler
             || $original !== (int)$order['original_amount_cents']
             || $discount !== (int)$order['discount_amount_cents']
             || $sale !== (int)$order['sale_amount_cents']
-            || $collected !== (int)$request['selected_payment_amount_cents']
+            || $collected + $legacyAmount !== (int)$request['selected_payment_amount_cents']
             || $collected !== (int)$request['cash_performance_amount_cents']
-            || $collected + $balance + $debt + $entitlementCredit !== $sale
+            || $collected + $legacyAmount + $balance + $debt + $entitlementCredit !== $sale
             || $lineDebt !== $debt
             || $collected !== (int)$batch['collected_amount_cents']
             || $collected !== (int)$batch['cash_performance_amount_cents']

@@ -304,6 +304,7 @@ const EMPTY_BOOTSTRAP = {
     'cashier.v3.cashier.recharge': false,
     'cashier.v3.cashier.gift': false,
     'cashier.v3.cashier.checkout': false,
+    'cashier.v3.cashier.old_card_entry': false,
     'cashier.v3.cashier.card.upgrade': false,
     'cashier.v3.cashier.card.extend': false,
     'cashier.v3.cashier.card.transfer': false,
@@ -486,6 +487,8 @@ const DEV_PREVIEW_BOOTSTRAP = {
     'cashier.v3.cashier.recharge': true,
     'cashier.v3.cashier.gift': true,
     'cashier.v3.cashier.checkout': true,
+    // The standalone historical-card route requires an explicit position grant, even in local previews.
+    'cashier.v3.cashier.old_card_entry': false,
     'cashier.v3.cashier.card.upgrade': true,
     'cashier.v3.cashier.card.extend': true,
     'cashier.v3.cashier.card.transfer': true,

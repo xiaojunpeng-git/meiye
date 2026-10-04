@@ -25,6 +25,7 @@ class CashierV3StaffFeatureOverrideServices
     {
         return [
             'cashier.v3.cashier.recharge', 'cashier.v3.cashier.gift', 'cashier.v3.cashier.checkout',
+            'cashier.v3.cashier.old_card_entry',
             'cashier.v3.cashier.card.upgrade', 'cashier.v3.cashier.card.extend',
             'cashier.v3.cashier.card.transfer', 'cashier.v3.cashier.card.disable',
             'cashier.v3.cashier.card.enable', 'cashier.v3.cashier.card.project_replace',

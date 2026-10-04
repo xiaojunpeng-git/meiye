@@ -24,6 +24,7 @@ class CashierV3FeatureResolver
         'cashier.v3.cashier.recharge',
         'cashier.v3.cashier.gift',
         'cashier.v3.cashier.checkout',
+        'cashier.v3.cashier.old_card_entry',
         'cashier.v3.cashier.card.upgrade',
         'cashier.v3.cashier.card.extend',
         'cashier.v3.cashier.card.transfer',

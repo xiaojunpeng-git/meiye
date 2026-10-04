@@ -157,8 +157,10 @@ final class CashierV3PaymentCollectionPlanV1
         $finalOperatorName = self::text($order['operator_name_snapshot'], 128, 'payment_collection_final_operator_name_invalid', false);
         $payments = self::normalizePayments($lockedAggregate['payments'], $request, $finalOperatorId, $finalOperatorName);
         $paymentTotal = self::sum($payments, 'amount_cents');
+        $legacyEntry = count($payments) === 1 && $payments[0]['payment_method'] === 'old_card_entry';
+        $collectedTotal = $legacyEntry ? 0 : $paymentTotal;
         if ($paymentTotal !== $request['selected_payment_amount_cents']
-            || $paymentTotal !== $request['cash_performance_amount_cents']) {
+            || $collectedTotal !== $request['cash_performance_amount_cents']) {
             throw self::failure('payment_collection_checkout_total_mismatch');
         }
         $balanceTotal = $request['balance_deduction_amount_cents'];
@@ -174,6 +176,12 @@ final class CashierV3PaymentCollectionPlanV1
         $collectionRows = [];
         $businessConfig = new CashierV3BusinessConfigServices();
         foreach ($payments as $index => $payment) {
+            if ($payment['payment_method'] === 'old_card_entry') {
+                // Confirm the configured method is enabled, but the historical
+                // value is not a collected-payment row or cash-performance fact.
+                $businessConfig->resolveAccountingMethodSnapshot('old_card_entry', true);
+                continue;
+            }
             // The immutable collection keeps the name as of settlement. The
             // transaction lock also rejects a method disabled mid-checkout.
             $methodSnapshot = $businessConfig->resolveAccountingMethodSnapshot(
@@ -267,7 +275,7 @@ final class CashierV3PaymentCollectionPlanV1
             'checkout_authority_fingerprint' => $request['authority_fingerprint'],
             'checkout_aggregate_fingerprint' => $request['aggregate_fingerprint'],
             'collection_count' => count($collectionRows),
-            'collected_amount_cents' => $paymentTotal,
+            'collected_amount_cents' => $collectedTotal,
             'cash_performance_amount_cents' => $request['cash_performance_amount_cents'],
             'receivable_amount_cents' => $request['receivable_amount_cents'],
             'business_date' => $request['business_date'],
@@ -708,10 +716,7 @@ final class CashierV3PaymentCollectionPlanV1
                 'payment_collection_payment_draft_id_invalid'
             );
             $method = (string)$row['payment_method'];
-            if ($method === 'old_card_entry') {
-                throw self::failure('old_card_entry_payment_collection_forbidden');
-            }
-            if (!array_key_exists($method, self::PAYMENT_METHOD_LABELS)) {
+            if ($method !== 'old_card_entry' && !array_key_exists($method, self::PAYMENT_METHOD_LABELS)) {
                 throw self::failure('payment_collection_method_invalid', ['method' => $method]);
             }
             $authorityKey = self::token(

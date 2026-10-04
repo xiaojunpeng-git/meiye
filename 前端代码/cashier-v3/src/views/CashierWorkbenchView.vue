@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  canUseCashierV3Operation,
   createCashierV3CommandId,
   formatMoney,
   getCashierV3PublicVersion,
@@ -1602,7 +1603,7 @@ function checkoutSourceSelectorError(error) {
 async function loadInlineCheckoutBusinessSources() {
   const current = checkoutOverlayState.value
   const loadToken = ++checkoutBusinessSourcesLoadToken
-  if (!isCheckoutOpen.value || current.sourceEnabled !== true || current.sourceSelectable === false) {
+  if (!isCheckoutOpen.value) {
     checkoutInlineBusinessSources.value = []
     checkoutBusinessSourcesLoadError.value = ''
     isLoadingCheckoutBusinessSources.value = false
@@ -1624,11 +1625,26 @@ async function loadInlineCheckoutBusinessSources() {
       || stateContextId !== String(state.stateContextId || '')
       || (localCheckoutPreview.value?.localDraftPreview !== true
         && requestId !== String(checkoutRequestIdentity(checkout.value) || ''))) return
-    checkoutInlineBusinessSources.value = Array.isArray(catalog.sources) ? catalog.sources : []
+    checkoutInlineBusinessSources.value = current.sourceEnabled === true && current.sourceSelectable !== false
+      && Array.isArray(catalog.sources) ? catalog.sources : []
+    if (localCheckoutPreview.value?.localDraftPreview === true) {
+      // The position grant exposes this noncash route only while the global
+      // accounting-method kill switch is enabled; a failed catalog read denies it.
+      const oldCardEnabled = catalog.accountingMethods.some((method) => String(method?.code || '') === 'old_card_entry')
+      const preview = localCheckoutPreview.value
+      preview.payment.methods = localCheckoutPaymentMethods(
+        preview.lines.filter((line) => ['sale', 'entitlement_service'].includes(cartLineRole(line))),
+        oldCardEnabled
+      )
+    }
   } catch (error) {
     if (loadToken === checkoutBusinessSourcesLoadToken) {
       checkoutInlineBusinessSources.value = []
       checkoutBusinessSourcesLoadError.value = checkoutSourceSelectorError(error)
+      if (localCheckoutPreview.value?.localDraftPreview === true) {
+        const preview = localCheckoutPreview.value
+        preview.payment.methods = preview.payment.methods.filter((method) => String(method?.id || '') !== 'old_card_entry')
+      }
     }
   } finally {
     if (loadToken === checkoutBusinessSourcesLoadToken) isLoadingCheckoutBusinessSources.value = false
@@ -4986,12 +5002,20 @@ async function setLineQuantity(line, event) {
   return result
 }
 
-function localCheckoutPaymentMethods() {
-  return [
+function localCheckoutPaymentMethods(lines = [], oldCardEnabled = false) {
+  const methods = [
     ['unionpay', '银联'], ['wechat', '微信'], ['alipay', '支付宝'],
     ['dianping_voucher', '大众验券'], ['douyin_voucher', '抖音验券'],
     ['partner_collection', '合作方收款'], ['other_collection', '其他收款']
   ].map(([id, name]) => ({ id, name, canAdd: true }))
+  // This is a card-only historical-value route, not an extra cash method.
+  if (oldCardEnabled && lines.length > 0
+    && lines.every((line) => cartLineRole(line) === 'sale'
+      && (line.kind === '卡项' || isCustomCardPurchase(line)))
+    && canUseCashierV3Operation('cashier.v3.cashier.old_card_entry')) {
+    methods.push({ id: 'old_card_entry', name: '旧卡录入', canAdd: true, cashPerformanceEligible: false })
+  }
+  return methods
 }
 
 function localCheckoutPreviewSnapshot() {
@@ -5136,7 +5160,7 @@ function localCheckoutPreviewSnapshot() {
       ]
     },
     payment: {
-      methods: localCheckoutPaymentMethods(),
+      methods: localCheckoutPaymentMethods(lines),
       availableBalance: Number(checkoutProjection.payment?.availableBalance || checkoutProjection.availableBalance || 0)
     }
   }
@@ -5811,8 +5835,10 @@ async function enqueueCheckoutAction(event = {}) {
     const receivable = checkoutSnapshotReceivableAmount(checkoutLines)
     if (action === 'add-payment-method') {
       const method = (payment.methods || []).find((item) => String(item?.id || '') === String(payload.paymentMethodId || ''))
-      if (!method || lines.some((line) => String(line.method || '') === String(method.id))) {
-        const result = { result: { status: 'failed', message: '请选择未重复的收款方式。' } }
+      const oldCardEntryConflict = lines.some((line) => checkoutLineRole(line) === 'payment'
+        && (String(line.method || '') === 'old_card_entry' || String(method?.id || '') === 'old_card_entry'))
+      if (!method || oldCardEntryConflict || lines.some((line) => String(line.method || '') === String(method.id))) {
+        const result = { result: { status: 'failed', message: oldCardEntryConflict ? '旧卡录入只能单独结算，不能组合收款。' : '请选择未重复的收款方式。' } }
         // This local-draft rejection has no server receipt. Emit the same
         // failed mutation result as an HTTP rejection so the overlay releases
         // the button's temporary “添加中…” state instead of leaving it locked.

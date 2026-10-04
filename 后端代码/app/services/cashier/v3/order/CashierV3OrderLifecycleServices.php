@@ -105,6 +105,16 @@ final class CashierV3OrderLifecycleServices
             throw self::failure('order_lifecycle_scope_incomplete');
         }
         $source = $this->source((array)($scope['payload'] ?? []), $operator, $dataScope, true);
+        // Historical card entry has no collected cash to refund. A full
+        // void may reverse the card/debt facts, but a cash refund must stop.
+        if ($action === 'refund-sales-order'
+            && Db::name('cashier_v3_checkout_payment_draft')
+                ->where('tenant_id', $dataScope->tenantId())
+                ->where('request_id', (string)$source['checkoutRequestId'])
+                ->where('payment_method', 'old_card_entry')
+                ->where('draft_status', 'committed')->count() > 0) {
+            throw self::failure('old_card_entry_cash_refund_forbidden');
+        }
         // The checkout request is the event-set boundary.  Build the set once
         // inside the same transaction and let the void cascade invoke only
         // domains that actually emitted a checkout event.  Financial

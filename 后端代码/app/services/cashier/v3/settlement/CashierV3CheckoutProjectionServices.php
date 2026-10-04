@@ -24,6 +24,7 @@ final class CashierV3CheckoutProjectionServices
         'douyin_voucher' => '抖音验券',
         'partner_collection' => '合作方收款',
         'other_collection' => '其他收款',
+        'old_card_entry' => '旧卡录入',
     ];
 
     /** @var CashierV3CheckoutRequestRepository */
@@ -1024,8 +1025,10 @@ final class CashierV3CheckoutProjectionServices
             'request.balance_deduction_amount_cents'
         );
         $debt = self::nonNegativeInt($request['debt_amount_cents'] ?? null, 'request.debt_amount_cents');
+        $legacyEntry = count($paymentRows) === 1
+            && (string)$paymentRows[0]['payment_method'] === 'old_card_entry';
         if ($selectedPayment !== $selectedPaymentExpected
-            || $cashPerformance !== $selectedPayment
+            || $cashPerformance !== ($legacyEntry ? 0 : $selectedPayment)
             || $saleDebt !== $debt) {
             throw self::failure('checkout_projection_payment_total_drift');
         }
@@ -1068,15 +1071,6 @@ final class CashierV3CheckoutProjectionServices
                 'cashPerformanceEligible' => true,
             ];
         }
-        $legacy = CashierV3CheckoutSettlementKernel::legacyEntryContract();
-        $paymentMethods[] = [
-            'id' => (string)$legacy['methodCode'],
-            'name' => '旧卡录入',
-            'canAdd' => false,
-            'disabledReason' => '旧卡录入需单独办理，不能与其他收款方式组合。',
-            'cashPerformanceEligible' => false,
-        ];
-
         $preparationToken = 'CKPT-' . hash('sha256', implode('|', [
             self::CONTRACT_VERSION,
             $requestId,

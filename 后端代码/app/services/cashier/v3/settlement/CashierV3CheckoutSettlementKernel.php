@@ -124,7 +124,7 @@ final class CashierV3CheckoutSettlementKernel
             'combinableWithCheckoutSettlement' => false,
             'cashPerformanceAmountCents' => 0,
             'paymentCollectedFactCount' => 0,
-            'implementationStatus' => 'not_integrated',
+            'implementationStatus' => 'card_only_with_debt',
         ];
     }
 
@@ -270,6 +270,24 @@ final class CashierV3CheckoutSettlementKernel
             'actualEntitlementAmountCents'
         );
         $selectedPaymentAmountCents = self::sumField($snapshot['paymentDetails'], 'amountCents');
+        $legacyEntryPayments = array_values(array_filter($snapshot['paymentDetails'], static function (array $payment): bool {
+            return $payment['method'] === self::PAYMENT_OLD_CARD_ENTRY;
+        }));
+        // Historical card value settles a card-only sale without creating a
+        // collected-payment or cash-performance amount. Debt remains separate.
+        if ($legacyEntryPayments && (count($snapshot['paymentDetails']) !== 1
+            || count($snapshot['saleLines']) === 0
+            || count($snapshot['entitlementLines']) !== 0
+            || $snapshot['balanceDeduction']['amountCents'] !== 0
+            || $legacyEntryPayments[0]['amountCents'] === 0)) {
+            throw self::failure('old_card_entry_card_only_independent_required');
+        }
+        foreach ($legacyEntryPayments ? $snapshot['saleLines'] : [] as $line) {
+            if ($line['sourceType'] !== 'card') {
+                throw self::failure('old_card_entry_card_only_independent_required');
+            }
+        }
+        $cashPerformanceAmountCents = $legacyEntryPayments ? 0 : $selectedPaymentAmountCents;
         $balanceAmountCents = $snapshot['balanceDeduction']['amountCents'];
         $debtAmountCents = $snapshot['debt']['amountCents'];
         if ($debtAmountCents > $salesAmountCents) {
@@ -386,6 +404,7 @@ final class CashierV3CheckoutSettlementKernel
             $salesAmountCents,
             $receivableAmountCents,
             $selectedPaymentAmountCents,
+            $cashPerformanceAmountCents,
             $balanceAmountCents,
             $debtAmountCents,
             $entitlementActualAmountCents,
@@ -414,7 +433,7 @@ final class CashierV3CheckoutSettlementKernel
                 'balanceDeductionAmountCents' => $balanceAmountCents,
                 'debtAmountCents' => $debtAmountCents,
                 'settlementAmountCents' => $settlementAmountCents,
-                'cashPerformanceAmountCents' => $selectedPaymentAmountCents,
+                'cashPerformanceAmountCents' => $cashPerformanceAmountCents,
                 'entitlementActualAmountCents' => $entitlementActualAmountCents,
                 'balanced' => $balanced,
             ],
@@ -1315,10 +1334,8 @@ final class CashierV3CheckoutSettlementKernel
                 'externalTransactionNo',
                 'remark',
             ], 'paymentDetails[' . $index . ']');
-            if ($payment['method'] === self::PAYMENT_OLD_CARD_ENTRY) {
-                throw self::failure('old_card_entry_separate_flow_required', self::legacyEntryContract());
-            }
-            if (!in_array($payment['method'], self::PAYMENT_METHODS, true)) {
+            if ($payment['method'] !== self::PAYMENT_OLD_CARD_ENTRY
+                && !in_array($payment['method'], self::PAYMENT_METHODS, true)) {
                 throw self::failure('payment_method_invalid', [
                     'index' => $index,
                     'method' => $payment['method'],
@@ -1722,6 +1739,7 @@ final class CashierV3CheckoutSettlementKernel
         int $salesAmountCents,
         int $receivableAmountCents,
         int $selectedPaymentAmountCents,
+        int $cashPerformanceAmountCents,
         int $balanceAmountCents,
         int $debtAmountCents,
         int $entitlementActualAmountCents,
@@ -1769,7 +1787,7 @@ final class CashierV3CheckoutSettlementKernel
             'debtAmountCents' => $debtAmountCents,
             'debtAuthorityKey' => $snapshot['debt']['authorityKey'],
             'debtPolicyVersion' => $snapshot['debt']['policyVersion'],
-            'cashPerformanceAmountCents' => $selectedPaymentAmountCents,
+            'cashPerformanceAmountCents' => $cashPerformanceAmountCents,
             'entitlementActualAmountCents' => $entitlementActualAmountCents,
             'authoritySnapshotVersion' => $snapshot['authoritySnapshotVersion'],
             'authorityFingerprint' => $snapshot['authoritySnapshotFingerprint'],

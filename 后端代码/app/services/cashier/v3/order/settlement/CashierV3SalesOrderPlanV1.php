@@ -169,8 +169,10 @@ final class CashierV3SalesOrderPlanV1
         }
         self::assertSourceRows($lockedAggregate['sources'], $request, $verifiedSources);
         $paymentTotal = self::assertPaymentRows($lockedAggregate['payments'], $request);
+        $legacyEntry = count($lockedAggregate['payments']) === 1
+            && (string)$lockedAggregate['payments'][0]['payment_method'] === 'old_card_entry';
         if ($paymentTotal !== $request['selected_payment_amount_cents']
-            || $paymentTotal !== $request['cash_performance_amount_cents']) {
+            || ($legacyEntry ? 0 : $paymentTotal) !== $request['cash_performance_amount_cents']) {
             throw self::failure('sales_order_payment_total_mismatch');
         }
 
@@ -1236,7 +1238,7 @@ final class CashierV3SalesOrderPlanV1
             self::assertChildBinding($row, $request, 'payment', $index);
             self::positiveInt($row['operator_id'], 'locked_checkout_payment_operator_invalid');
             $method = (string)$row['payment_method'];
-            if (!in_array($method, self::PAYMENT_METHODS, true)) {
+            if ($method !== 'old_card_entry' && !in_array($method, self::PAYMENT_METHODS, true)) {
                 throw self::failure('locked_checkout_payment_method_invalid', ['method' => $method]);
             }
             $authorityKey = self::token(

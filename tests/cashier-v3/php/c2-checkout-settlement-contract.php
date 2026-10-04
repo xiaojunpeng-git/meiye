@@ -542,15 +542,12 @@ checkoutAssert('checkout projection lines summary and composition use frozen req
         && $checkoutProjection['compositionCode'] === 'mixed'
         && $checkoutProjection['composition']['primaryAction'] === 'collect_and_complete'
         && $checkoutProjection['composition']['primaryActionLabel'] === '收款并完成服务');
-checkoutAssert('projection exposes seven bookkeeping methods and independently disables old card entry',
+checkoutAssert('projection exposes seven cash methods without a permissionless old-card button',
     array_column($checkoutProjection['payment']['methods'], 'id') === [
         'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
-        'partner_collection', 'other_collection', 'old_card_entry',
+        'partner_collection', 'other_collection',
     ]
-        && $checkoutProjection['payment']['methods'][0]['canAdd'] === true
-        && $checkoutProjection['payment']['methods'][7]['canAdd'] === false
-        && $checkoutProjection['payment']['methods'][7]['cashPerformanceEligible'] === false
-        && $checkoutProjection['payment']['methods'][7]['disabledReason'] !== '');
+        && $checkoutProjection['payment']['methods'][0]['canAdd'] === true);
 checkoutAssert('projection payment lines and summary remain exact cents-derived values',
     count($checkoutProjection['payment']['selectedLines']) === 3
         && $checkoutProjection['payment']['selectedLines'][0]['amount'] === '30.00'
@@ -855,7 +852,73 @@ checkoutAssert('old card entry is rejected from combined checkout',
             null,
             $secret
         );
-    }) === 'old_card_entry_separate_flow_required');
+    }) === 'old_card_entry_card_only_independent_required');
+
+// Historical card value settles the card sale's payable part. The remaining
+// amount may stay as debt, but no cash or collection fact may be inferred.
+$cardEntry = $snapshot;
+$cardEntry['saleLines'][0]['sourceType'] = 'card';
+$cardEntry['saleLines'][0]['cardPurchaseSnapshot'] = ['sourceKind' => 'count_card'];
+$cardEntry['saleLines'][0]['serviceObject'] = '';
+$cardEntry['entitlementLines'] = [];
+$cardEntry['balanceDeduction'] = ['authorityKey' => '', 'accountId' => '', 'accountVersion' => 0, 'amountCents' => 0];
+$cardEntry['paymentDetails'] = [[
+    'paymentAuthorityKey' => 'payment:old-card',
+    'method' => 'old_card_entry',
+    'amountCents' => 6000,
+    'businessTime' => 1785258000,
+]];
+checkoutResign($cardEntry);
+$cardEntryDraft = CashierV3CheckoutSettlementKernel::saveDraft(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 90),
+    $cardEntry,
+    null,
+    $secret
+);
+checkoutAssert('old card entry settles card payable with debt and zero cash performance',
+    $cardEntryDraft['totals']['selectedPaymentAmountCents'] === 6000
+    && $cardEntryDraft['totals']['debtAmountCents'] === 3000
+    && $cardEntryDraft['totals']['cashPerformanceAmountCents'] === 0
+    && $cardEntryDraft['totals']['balanced'] === true);
+
+// The noncash card route cannot be turned into a generic payment by changing
+// the selected line, adding a second method, or consuming stored balance.
+$oldCardProduct = $cardEntry;
+$oldCardProduct['saleLines'][0]['sourceType'] = 'product';
+checkoutResign($oldCardProduct);
+checkoutAssert('old card entry rejects product purchases',
+    checkoutReason(static function () use ($oldCardProduct, $secret): void {
+        CashierV3CheckoutSettlementKernel::saveDraft(
+            checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 91),
+            $oldCardProduct, null, $secret
+        );
+    }) === 'old_card_entry_card_only_independent_required');
+$oldCardCombined = $cardEntry;
+$oldCardCombined['paymentDetails'][] = [
+    'paymentAuthorityKey' => 'payment:wechat-extra', 'method' => 'wechat',
+    'amountCents' => 100, 'businessTime' => 1785258000,
+];
+checkoutResign($oldCardCombined);
+checkoutAssert('old card entry rejects combined bookkeeping methods',
+    checkoutReason(static function () use ($oldCardCombined, $secret): void {
+        CashierV3CheckoutSettlementKernel::saveDraft(
+            checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 92),
+            $oldCardCombined, null, $secret
+        );
+    }) === 'old_card_entry_card_only_independent_required');
+$oldCardBalance = $cardEntry;
+$oldCardBalance['balanceDeduction'] = [
+    'authorityKey' => 'balance:member:9', 'accountId' => 'balance-account-9',
+    'accountVersion' => 1, 'amountCents' => 100,
+];
+checkoutResign($oldCardBalance);
+checkoutAssert('old card entry rejects stored-balance combinations',
+    checkoutReason(static function () use ($oldCardBalance, $secret): void {
+        CashierV3CheckoutSettlementKernel::saveDraft(
+            checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 93),
+            $oldCardBalance, null, $secret
+        );
+    }) === 'old_card_entry_card_only_independent_required');
 
 $paperCash = $snapshot;
 $paperCash['paymentDetails'][0]['method'] = 'cash';

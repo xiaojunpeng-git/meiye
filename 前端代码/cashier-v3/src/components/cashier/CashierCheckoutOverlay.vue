@@ -246,6 +246,12 @@ const hasBalancePayment = computed(() => (
   selectedPaymentLines.value.some((line) => String(line?.lineRole || '') === 'balance_payment')
 ))
 const hasNonBalancePayment = computed(() => selectedPaymentLines.value.some((line) => String(line?.lineRole || '') === 'payment'))
+// Historical card entry is a standalone settlement route, never a cash or balance combination.
+const hasOldCardEntry = computed(() => selectedPaymentLines.value.some((line) => String(line?.method || line?.paymentMethod || '') === 'old_card_entry'))
+const paymentMethodDisabled = (method) => method.canAdd === false
+  || pendingPaymentMethodIds.value.has(String(method.id))
+  || (hasOldCardEntry.value && String(method.id) !== 'old_card_entry')
+  || (String(method.id) === 'old_card_entry' && selectedPaymentLines.value.length > 0)
 // A pure entitlement completion has no collection and must not fabricate a
 // payment row. Every sale-bearing or repayment checkout, including an exactly
 // zero receivable, still needs the cashier to select one settlement route.
@@ -274,6 +280,7 @@ const paymentSummary = computed(() => {
 // can be stale after payment rows have changed.
 const checkoutCollectionAmount = computed(() => selectedPaymentLines.value.reduce(
   (total, line) => String(line?.lineRole || '') === 'balance_payment'
+    || String(line?.method || line?.paymentMethod || '') === 'old_card_entry'
     ? total
     : total + Math.max(0, Number(line?.amount || 0)),
   0
@@ -341,6 +348,7 @@ const paymentAmountValidation = computed(() => {
 })
 const isPaymentAmountBalanced = computed(() => paymentAmountValidation.value.state === 'balanced')
 const toggleBalancePayment = () => {
+  if (hasOldCardEntry.value) return
   if (hasBalancePayment.value) {
     request('remove-balance-payment')
     return
@@ -745,7 +753,7 @@ function closePaymentLineEditor() {
 }
 
 function addPaymentMethod(method = {}) {
-  if (method.canAdd === false || !method.id || pendingPaymentMethodIds.value.has(String(method.id))) return
+  if (!method.id || paymentMethodDisabled(method)) return
   // The selected method receives the current snapshot's remaining amount;
   // split payments remain editable from the resulting line.
   pendingPaymentMethodIds.value = new Set(pendingPaymentMethodIds.value).add(String(method.id))
@@ -1358,7 +1366,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="button button--secondary"
-                :disabled="payment.balanceAvailable === false"
+                :disabled="payment.balanceAvailable === false || hasOldCardEntry"
                 @click="toggleBalancePayment"
               >{{ hasBalancePayment ? '取消余额支付' : '使用余额支付' }}</button>
               <button
@@ -1383,8 +1391,8 @@ onBeforeUnmount(() => {
               :key="method.id"
               type="button"
               class="payment-method-card"
-              :disabled="method.canAdd === false || pendingPaymentMethodIds.has(String(method.id))"
-              :title="method.disabledReason || ''"
+              :disabled="paymentMethodDisabled(method)"
+              :title="paymentMethodDisabled(method) && (hasOldCardEntry || String(method.id) === 'old_card_entry') ? '旧卡录入只能单独结算' : (method.disabledReason || '')"
               @click="addPaymentMethod(method)"
             >
               {{ pendingPaymentMethodIds.has(String(method.id)) ? '添加中…' : method.name }}
