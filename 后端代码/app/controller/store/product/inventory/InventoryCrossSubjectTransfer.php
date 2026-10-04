@@ -53,13 +53,13 @@ final class InventoryCrossSubjectTransfer extends AuthController
 
     public function cancel(int $id)
     {
-        return $this->run(fn (): array => $this->services->cancelForStore((int)$this->storeId, (int)$this->storeStaffId, $id), '调拨草稿已取消。');
+        // 保留旧 URL 的明确拒绝响应，避免旧客户端绕过新页面继续取消调拨。
+        return $this->fail('调拨单不支持作废。', ['code' => 'inventory_cross_transfer_void_disabled']);
     }
 
     public function reverse(int $id)
     {
-        $input = $this->request->postMore([['idempotency_key', ''], ['reason', '']]);
-        return $this->run(fn (): array => $this->services->reverseForStore((int)$this->storeId, (int)$this->storeStaffId, $id, $input), '调拨单已作废，库存已按原批次冲销。');
+        return $this->fail('调拨单不支持作废。', ['code' => 'inventory_cross_transfer_void_disabled']);
     }
 
     private function canViewCost(): bool
@@ -90,11 +90,6 @@ final class InventoryCrossSubjectTransfer extends AuthController
             'inventory_cross_transfer_request_quantity_exceeded' => '调拨数量超过请货单剩余数量。',
             'inventory_cross_transfer_dispatch_state_invalid' => '当前调拨单不可发货。',
             'inventory_cross_transfer_receive_state_invalid' => '当前调拨单不可收货。',
-            'inventory_cross_transfer_cancel_state_invalid' => '当前调拨单不可取消。',
-            'inventory_cross_transfer_reverse_state_invalid' => '只有在途或已收货调拨单可以作废。',
-            'inventory_cross_transfer_reverse_scope_denied' => '只有调出方可以作废该调拨单。',
-            'inventory_cross_transfer_target_reversal_stock_insufficient' => '调入方对应批次剩余库存不足，无法作废。',
-            'inventory_cross_transfer_reverse_idempotency_conflict' => '本次操作号已用于其他调拨操作，请刷新后重试。',
             'inventory_cross_transfer_target_scope_denied' => '只能向同一组织范围内的门店调拨。',
             'inventory_cross_transfer_target_invalid' => '调入方不合法，不能调拨给当前库存主体。',
             'inventory_cross_transfer_hq_location_missing' => '当前组织尚未配置可用总部仓。',

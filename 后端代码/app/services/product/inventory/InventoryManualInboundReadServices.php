@@ -74,13 +74,12 @@ final class InventoryManualInboundReadServices
 
     private function defaultLocation(int $storeId, int $operatorId): array
     {
-        $staff = Db::name('system_store_staff')
-            ->where('id', $operatorId)
-            ->where('store_id', $storeId)
-            ->where('status', 1)
-            ->where('is_del', 0)
-            ->field('id')
-            ->find();
+        // 详情与新建共享门店授权边界，避免组织选店人员保存后看不到原单。
+        try {
+            (new InventoryStoreAccessPolicy())->writableActor($storeId, $operatorId, 'cashier.v3.inventory.inbound');
+        } catch (\RuntimeException $exception) {
+            throw new \RuntimeException('inventory_manual_inbound_detail_scope_denied', 0, $exception);
+        }
         $locations = Db::name('inventory_location')
             ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->where('store_id', $storeId)
@@ -91,7 +90,7 @@ final class InventoryManualInboundReadServices
             ->limit(2)
             ->select()
             ->toArray();
-        if (!$staff || count($locations) !== 1) {
+        if (count($locations) !== 1) {
             throw new \RuntimeException('inventory_manual_inbound_detail_scope_denied');
         }
         return (array)$locations[0];

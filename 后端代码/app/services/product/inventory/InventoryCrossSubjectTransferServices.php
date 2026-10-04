@@ -43,8 +43,9 @@ final class InventoryCrossSubjectTransferServices
             $row['status_name'] = $this->statusName((string)$row['status_name']);
             $row['can_dispatch'] = (string)$row['document_status'] === 'DRAFT' && (int)$row['from_party_id'] === $scope['storeId'];
             $row['can_receive'] = (string)$row['document_status'] === 'DISPATCHED' && (int)$row['to_party_id'] === $scope['storeId'];
-            $row['can_cancel'] = (string)$row['document_status'] === 'DRAFT' && (int)$row['initiator_store_id'] === $scope['storeId'];
-            $row['can_reverse'] = in_array((string)$row['document_status'], ['DISPATCHED', 'RECEIVED'], true) && (string)$row['from_party_type'] === 'STORE' && (int)$row['from_party_id'] === $scope['storeId'];
+            // 历史调拨及冲销事实仍可读；当前业务不开放草稿取消或库存冲销入口。
+            $row['can_cancel'] = false;
+            $row['can_reverse'] = false;
         }
         unset($row);
         return ['count' => $count, 'list' => $list];
@@ -280,8 +281,8 @@ final class InventoryCrossSubjectTransferServices
                 : ((string)$row['from_party_type'] === 'STORE' && ($scope['isSuperAdmin'] || in_array((int)$row['from_party_id'], $scope['allowedStoreIds'], true)));
             $row['can_dispatch'] = (string)$row['document_status'] === 'DRAFT' && $sourceAllowed;
             $row['can_receive'] = (string)$row['document_status'] === 'DISPATCHED' && (int)$row['to_location_id'] === (int)$scope['location']['id'];
-            $row['can_cancel'] = (string)$row['document_status'] === 'DRAFT' && $sourceAllowed;
-            $row['can_reverse'] = in_array((string)$row['document_status'], ['DISPATCHED', 'RECEIVED'], true) && $sourceAllowed;
+            $row['can_cancel'] = false;
+            $row['can_reverse'] = false;
         }
         unset($row);
         return ['count' => $count, 'list' => $list];
@@ -335,31 +336,23 @@ final class InventoryCrossSubjectTransferServices
 
     public function cancelForStore(int $storeId, int $operatorId, int $documentId): array
     {
-        return Db::transaction(function () use ($storeId, $operatorId, $documentId): array {
-            $scope = $this->scope($storeId, $operatorId, true);
-            return $this->cancel($scope, $documentId);
-        });
+        // 保留旧调用契约但在领域服务处拒绝写入，防止控制器外调用绕过新禁令。
+        throw new \RuntimeException('inventory_cross_transfer_void_disabled');
     }
 
     public function cancelForHeadquarters(array $adminInfo, int $hqLocationId, int $documentId): array
     {
-        $scope = $this->headquartersScope($adminInfo, $hqLocationId);
-        return Db::transaction(fn (): array => $this->cancel($this->platformSourceScope($scope, $documentId, true), $documentId));
+        throw new \RuntimeException('inventory_cross_transfer_void_disabled');
     }
 
     public function reverseForStore(int $storeId, int $operatorId, int $documentId, array $input): array
     {
-        $command = $this->normalizeReversal($input);
-        return Db::transaction(function () use ($storeId, $operatorId, $documentId, $command): array {
-            return $this->reverse($this->scope($storeId, $operatorId, true), $documentId, $command);
-        });
+        throw new \RuntimeException('inventory_cross_transfer_void_disabled');
     }
 
     public function reverseForHeadquarters(array $adminInfo, int $hqLocationId, int $documentId, array $input): array
     {
-        $command = $this->normalizeReversal($input);
-        $scope = $this->headquartersScope($adminInfo, $hqLocationId);
-        return Db::transaction(fn (): array => $this->reverse($this->platformSourceScope($scope, $documentId, true), $documentId, $command));
+        throw new \RuntimeException('inventory_cross_transfer_void_disabled');
     }
 
     private function createDraft(array $source, array $target, array $command): array
@@ -456,123 +449,6 @@ final class InventoryCrossSubjectTransferServices
         $this->refreshRequestStatus((int)$document['request_document_id']);
         Db::name('inventory_cross_transfer_document')->where('id', $documentId)->where('document_status', 'DISPATCHED')->update(['document_status' => 'RECEIVED', 'received_by_operator_id' => $scope['operatorId'], 'received_at' => $now]);
         return ['transfer_id' => $documentId, 'document_status' => 'RECEIVED', 'idempotent' => false];
-    }
-
-    private function cancel(array $scope, int $documentId): array
-    {
-        $document = $this->lockedSubjectDocument($scope, $documentId, true);
-        if ((string)$document['document_status'] === 'CANCELLED') return ['transfer_id' => $documentId, 'document_status' => 'CANCELLED', 'idempotent' => true];
-        if ((string)$document['document_status'] !== 'DRAFT' || (string)$document['from_party_type'] !== $scope['partyType'] || (int)$document['from_party_id'] !== (int)$scope['partyId']) throw new \RuntimeException('inventory_cross_transfer_cancel_state_invalid');
-        Db::name('inventory_cross_transfer_document')->where('id', $documentId)->where('document_status', 'DRAFT')->update(['document_status' => 'CANCELLED', 'cancelled_at' => time()]);
-        return ['transfer_id' => $documentId, 'document_status' => 'CANCELLED', 'idempotent' => false];
-    }
-
-    /**
-     * Reversal is owned by the dispatching subject. It appends exact opposite
-     * batch facts and never deletes or rewrites the original movement facts.
-     */
-    private function reverse(array $scope, int $documentId, array $command): array
-    {
-        $document = $this->lockedSubjectDocument($scope, $documentId, true);
-        if ((string)$document['from_party_type'] !== (string)$scope['partyType'] || (int)$document['from_party_id'] !== (int)$scope['partyId']) throw new \RuntimeException('inventory_cross_transfer_reverse_scope_denied');
-        $existing = Db::name('inventory_cross_transfer_reversal_operation')->where('tenant_id', $scope['tenantId'])->where('idempotency_key', $command['idempotencyKey'])->lock(true)->find();
-        if ($existing) {
-            if ((int)$existing['transfer_document_id'] !== $documentId || (string)$existing['request_fingerprint'] !== $command['fingerprint']) throw new \RuntimeException('inventory_cross_transfer_reverse_idempotency_conflict');
-            return ['transfer_id' => $documentId, 'document_status' => 'REVERSED', 'reversal_id' => (int)$existing['id'], 'idempotent' => true];
-        }
-        $previousStatus = (string)$document['document_status'];
-        if (!in_array($previousStatus, ['DISPATCHED', 'RECEIVED'], true)) throw new \RuntimeException('inventory_cross_transfer_reverse_state_invalid');
-        $now = time();
-        $reversalId = (int)Db::name('inventory_cross_transfer_reversal_operation')->insertGetId([
-            'tenant_id' => $scope['tenantId'], 'transfer_document_id' => $documentId,
-            'idempotency_key' => $command['idempotencyKey'], 'request_fingerprint' => $command['fingerprint'],
-            'previous_status' => $previousStatus, 'reason' => $command['reason'], 'operator_id' => (int)$scope['operatorId'],
-            'occurred_at' => $now, 'recorded_at' => $now,
-        ]);
-        $allocations = Db::name('inventory_cross_transfer_batch_allocation')->where('document_id', $documentId)->order('id asc')->lock(true)->select()->toArray();
-        if (!$allocations) throw new \RuntimeException('inventory_cross_transfer_allocation_missing');
-        foreach ($allocations as $allocation) {
-            if ($previousStatus === 'RECEIVED') $this->reverseReceiptAllocation($document, (array)$allocation, $reversalId, $now);
-            $this->reverseDispatchAllocation($document, (array)$allocation, $reversalId, $now);
-        }
-        if ($previousStatus === 'RECEIVED') $this->reverseFulfillment($documentId, (int)$document['request_document_id'], $reversalId, $now);
-        $this->refreshRequestStatus((int)$document['request_document_id']);
-        if (Db::name('inventory_cross_transfer_document')->where('id', $documentId)->where('document_status', $previousStatus)->update(['document_status' => 'REVERSED']) !== 1) throw new \RuntimeException('inventory_cross_transfer_changed');
-        return ['transfer_id' => $documentId, 'document_status' => 'REVERSED', 'reversal_id' => $reversalId, 'idempotent' => false];
-    }
-
-    private function reverseReceiptAllocation(array $document, array $allocation, int $reversalId, int $now): void
-    {
-        if ((int)$allocation['to_stock_id'] <= 0 || (int)$allocation['to_batch_id'] <= 0 || (int)$allocation['received_at'] <= 0) throw new \RuntimeException('inventory_cross_transfer_receipt_reversal_missing');
-        $stock = Db::name('inventory_stock')->where('id', (int)$allocation['to_stock_id'])->lock(true)->find();
-        $batch = Db::name('inventory_batch')->where('id', (int)$allocation['to_batch_id'])->lock(true)->find();
-        $units = (int)$allocation['quantity_units'];
-        if (!$stock || !$batch || (int)$batch['stock_id'] !== (int)$stock['id'] || (int)$stock['available_quantity_units'] < $units || (int)$batch['available_quantity_units'] < $units) throw new \RuntimeException('inventory_cross_transfer_target_reversal_stock_insufficient');
-        $this->changeExactBatchBalance((array)$stock, (array)$batch, -$units, $now, 'inventory_cross_transfer_target_reversal_stock_changed');
-        $original = $this->movementFact((string)$document['tenant_id'], 'cross_transfer_in', (string)$document['transfer_no'], (int)$allocation['id']);
-        $this->appendReversalFact((array)$stock, (array)$batch, $original, -1, 'cross_transfer_in_reversal', (string)$document['transfer_no'], (int)$allocation['id'], $reversalId, (string)$document['business_date'], $now);
-    }
-
-    private function reverseDispatchAllocation(array $document, array $allocation, int $reversalId, int $now): void
-    {
-        $stock = Db::name('inventory_stock')->where('id', (int)$allocation['from_stock_id'])->lock(true)->find();
-        $batch = Db::name('inventory_batch')->where('id', (int)$allocation['from_batch_id'])->lock(true)->find();
-        if (!$stock || !$batch || (int)$batch['stock_id'] !== (int)$stock['id'] || (string)$stock['stock_status'] !== InventoryEntitlementCompletionContract::STOCK_STATUS_GOOD || (string)$batch['batch_status'] !== 'ACTIVE') throw new \RuntimeException('inventory_cross_transfer_source_reversal_invalid');
-        $this->changeExactBatchBalance((array)$stock, (array)$batch, (int)$allocation['quantity_units'], $now, 'inventory_cross_transfer_source_reversal_stock_changed');
-        $original = $this->movementFact((string)$document['tenant_id'], 'cross_transfer_out', (string)$document['transfer_no'], (int)$allocation['id']);
-        $this->appendReversalFact((array)$stock, (array)$batch, $original, 1, 'cross_transfer_out_reversal', (string)$document['transfer_no'], (int)$allocation['id'], $reversalId, (string)$document['business_date'], $now);
-    }
-
-    private function changeExactBatchBalance(array $stock, array $batch, int $delta, int $now, string $error): void
-    {
-        $nextBatch = (int)$batch['available_quantity_units'] + $delta;
-        $nextStock = (int)$stock['available_quantity_units'] + $delta;
-        if ($nextBatch < 0 || $nextStock < 0) throw new \RuntimeException('inventory_cross_transfer_reversal_stock_insufficient');
-        if (Db::name('inventory_batch')->where('id', (int)$batch['id'])->where('version', (int)$batch['version'])->update(['available_quantity_units' => $nextBatch, 'version' => (int)$batch['version'] + 1, 'updated_at' => $now]) !== 1) throw new \RuntimeException($error);
-        $batches = Db::name('inventory_batch')->where('stock_id', (int)$stock['id'])->where('batch_status', 'ACTIVE')->lock(true)->select()->toArray();
-        $total = 0; $weightedCost = 0;
-        foreach ($batches as $candidate) { $quantity = (int)$candidate['available_quantity_units']; $total += $quantity; $weightedCost += $quantity * (int)$candidate['unit_cost_cents']; }
-        if ($total !== $nextStock) throw new \RuntimeException('inventory_cross_transfer_reversal_batch_reconciliation_failed');
-        $estimatedCost = $total > 0 ? intdiv($weightedCost, $total) : 0;
-        if (Db::name('inventory_stock')->where('id', (int)$stock['id'])->where('version', (int)$stock['version'])->update(['available_quantity_units' => $total, 'estimated_unit_cost_cents' => $estimatedCost, 'version' => (int)$stock['version'] + 1, 'updated_at' => $now]) !== 1) throw new \RuntimeException($error);
-    }
-
-    private function movementFact(string $tenantId, string $sourceType, string $sourceId, int $detailId): array
-    {
-        $fact = Db::name('inventory_batch_movement_fact')->where('tenant_id', $tenantId)->where('source_type', $sourceType)->where('source_id', $sourceId)->where('source_detail_id', (string)$detailId)->where('direction', $sourceType === 'cross_transfer_in' ? 1 : -1)->lock(true)->find();
-        if (!$fact) throw new \RuntimeException('inventory_cross_transfer_original_fact_missing');
-        if (Db::name('inventory_batch_movement_fact')->where('reversal_of', (int)$fact['id'])->lock(true)->find()) throw new \RuntimeException('inventory_cross_transfer_already_reversed');
-        return (array)$fact;
-    }
-
-    private function appendReversalFact(array $stock, array $batch, array $original, int $direction, string $type, string $sourceId, int $detailId, int $reversalId, string $date, int $now): void
-    {
-        (new InventoryBatchMovementFactServices())->append([
-            'factKey' => $type . ':' . hash('sha256', $sourceId . ':' . $detailId . ':' . $reversalId),
-            'tenantId' => (string)$stock['tenant_id'], 'organizationId' => (string)$stock['organization_id'], 'organizationPath' => (string)$stock['organization_path'], 'storeId' => (int)$stock['store_id'],
-            'stockId' => (int)$stock['id'], 'batchId' => (int)$batch['id'], 'direction' => $direction,
-            'quantityUnits' => (int)$original['quantity_units'], 'unitCostCents' => (int)$original['unit_cost_cents'], 'costAmountCents' => (int)$original['cost_amount_cents'],
-            'sourceType' => $type, 'sourceId' => $sourceId, 'sourceDetailId' => (string)$detailId, 'reversalOf' => (int)$original['id'],
-            'businessDate' => $date, 'occurredAt' => $now, 'settledAt' => $now, 'recordedAt' => $now,
-        ]);
-    }
-
-    private function reverseFulfillment(int $transferId, int $requestId, int $reversalId, int $now): void
-    {
-        if ($requestId <= 0) return;
-        $rows = Db::name('inventory_stock_request_fulfillment')->where('transfer_document_id', $transferId)->order('id asc')->lock(true)->select()->toArray();
-        foreach ($rows as $row) Db::name('inventory_stock_request_fulfillment_reversal')->insert([
-            'request_document_id' => $requestId, 'request_line_id' => (int)$row['request_line_id'], 'reversal_of' => (int)$row['id'],
-            'transfer_reversal_operation_id' => $reversalId, 'reversed_quantity_units' => (int)$row['fulfilled_quantity_units'], 'recorded_at' => $now,
-        ]);
-    }
-
-    private function normalizeReversal(array $input): array
-    {
-        if (array_keys($input) !== ['idempotency_key', 'reason']) throw new \InvalidArgumentException('inventory_cross_transfer_reverse_input_invalid');
-        $key = trim((string)$input['idempotency_key']); $reason = trim((string)$input['reason']);
-        if (preg_match('/^[A-Za-z0-9:._-]{8,96}$/D', $key) !== 1 || $reason === '' || mb_strlen($reason) > 500) throw new \InvalidArgumentException('inventory_cross_transfer_reverse_input_invalid');
-        return ['idempotencyKey' => $key, 'reason' => $reason, 'fingerprint' => hash('sha256', "REVERSE\n" . $reason)];
     }
 
     private function normalize(array $input): array

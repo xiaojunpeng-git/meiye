@@ -148,10 +148,15 @@ final class InventoryManualOutboundServices
     private function lockScope(int $storeId, int $operatorId): array
     {
         $store = Db::name('system_store')->where('id', $storeId)->where('is_del', 0)->where('is_show', 1)->field('id,name')->lock(true)->find();
-        $operator = Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)->field('id,staff_name')->lock(true)->find();
+        // 门店组织会话需按当前岗位授权，库存事实记录员工而非可替换的选店会话。
+        try {
+            $actor = (new InventoryStoreAccessPolicy())->writableActor($storeId, $operatorId, 'cashier.v3.inventory.outbound');
+        } catch (\RuntimeException $exception) {
+            throw new \RuntimeException('inventory_manual_outbound_scope_denied', 0, $exception);
+        }
         $binding = Db::name('organization_store')->where('store_id', $storeId)->field('org_id')->lock(true)->find();
         $organizationId = (int)($binding['org_id'] ?? 0);
-        if (!$store || trim((string)($store['name'] ?? '')) === '' || !$operator || $organizationId <= 0) {
+        if (!$store || trim((string)($store['name'] ?? '')) === '' || $organizationId <= 0) {
             throw new \RuntimeException('inventory_manual_outbound_scope_denied');
         }
         $path = [];
@@ -176,9 +181,9 @@ final class InventoryManualOutboundServices
             'organizationId' => (string)$organizationId,
             'organizationPath' => '/' . implode('/', array_reverse($path)) . '/',
             'storeId' => (int)$store['id'],
-            'operatorId' => $operatorId,
-            'operatorType' => 'STORE_STAFF',
-            'operatorName' => mb_substr(trim((string)$operator['staff_name']), 0, 128),
+            'operatorId' => $actor['id'],
+            'operatorType' => $actor['type'],
+            'operatorName' => $actor['name'],
             'organizationName' => mb_substr($name, 0, 100),
         ];
     }

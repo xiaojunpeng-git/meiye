@@ -128,25 +128,13 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
 
     public function cancel(int $id)
     {
-        try {
-            $locationId = (int)$this->request->post('hq_location_id', 0);
-            return $this->success('总部调拨草稿已取消。', $this->services->cancelForHeadquarters((array)$this->adminInfo, $locationId, $id));
-        } catch (UnifiedQueryException $exception) {
-            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
-        } catch (\RuntimeException $exception) {
-            return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]);
-        }
+        // 平台旧接口同样拒绝写入，不能靠直调 URL 绕过调拨只读作废规则。
+        return $this->fail('调拨单不支持作废。', ['code' => 'inventory_cross_transfer_void_disabled']);
     }
 
     public function reverse(int $id)
     {
-        try {
-            $input = $this->request->post(); $input = is_array($input) ? $input : [];
-            $locationId = (int)($input['hq_location_id'] ?? 0); unset($input['hq_location_id']);
-            return $this->success('调拨单已作废，库存已按原批次冲销。', $this->services->reverseForHeadquarters((array)$this->adminInfo, $locationId, $id, $input));
-        } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
-        catch (\InvalidArgumentException $exception) { return $this->fail('请填写作废原因。', ['code' => $exception->getMessage()]); }
-        catch (\RuntimeException $exception) { return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]); }
+        return $this->fail('调拨单不支持作废。', ['code' => 'inventory_cross_transfer_void_disabled']);
     }
 
     private function message(string $code): string
@@ -167,10 +155,6 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
             'inventory_cross_transfer_receive_state_invalid' => '当前调拨单不可收货。',
             'inventory_cross_transfer_target_scope_denied' => '只能操作当前组织范围内的调拨。',
             'inventory_cross_transfer_transfer_staff_invalid' => '请选择当前授权组织范围内的在职员工。',
-            'inventory_cross_transfer_reverse_state_invalid' => '只有在途或已收货调拨单可以作废。',
-            'inventory_cross_transfer_reverse_scope_denied' => '只有调出方可以作废该调拨单。',
-            'inventory_cross_transfer_target_reversal_stock_insufficient' => '调入方对应批次剩余库存不足，无法作废。',
-            'inventory_cross_transfer_reverse_idempotency_conflict' => '本次操作号已用于其他调拨操作，请刷新后重试。',
         ][$code] ?? '总部调拨未完成，请刷新后重试。';
     }
 }

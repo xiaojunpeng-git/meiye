@@ -22,7 +22,7 @@ const props = defineProps({
   mode: { type: String, default: 'store' }
 })
 
-const emit = defineEmits(['close', 'saved', 'start-usage-return', 'edit-count-draft'])
+const emit = defineEmits(['close', 'saved', 'edit-count-draft'])
 
 // 业务日期必须按系统的中国业务时区生成；不能依赖浏览器进程时区或 UTC ISO 日期，
 // 否则容器浏览器会默认到前一天，导致新单立即被列表的“今日”条件过滤。
@@ -117,7 +117,6 @@ const isInboundOutboundDetail = computed(() => props.modalKind === 'inbound-outb
 const isRequestEdit = computed(() => props.modalKind === 'request-edit')
 const isCountEdit = computed(() => props.modalKind === 'count-edit')
 const isCountDraftDetail = computed(() => props.modalKind === 'count-draft-detail')
-const isUsageReturn = computed(() => props.modalKind === 'usage-return')
 const isImport = computed(() => props.modalKind === 'import')
 const isPlatformHeadquarters = computed(() => props.mode === 'platform')
 const platformImportStores = computed(() => {
@@ -162,7 +161,6 @@ const title = computed(() => {
   if (isInboundOutboundDetail.value) return '入库批次出库明细'
   if (isDetail.value) return `${pageLabel.value}详情`
   if (isCountEdit.value) return '编辑盘点草稿'
-  if (isUsageReturn.value) return '院装耗材退回'
   if (isRequestEdit.value) return '编辑请货单'
   return {
     inbound: '添加入库单', outbound: '添加出库单', count: '添加盘点单',
@@ -176,7 +174,7 @@ const primarySubmitDisabled = computed(() => {
   // 统一移动提交入口时保留各业务原有门禁，按钮位置不得放宽数据完整性校验。
   if (submitting.value) return true
   if (lineEditorKeys.includes(props.pageKey) && !selectedRows.value.length) return true
-  if (props.pageKey === 'usage' && (!Number(usageProjectId.value) || !usageProjectName.value.trim())) return true
+  // 院装领用可以不关联核销项目；作废走独立命令，不复用领用表单。
   if (props.pageKey === 'request' && (!supplyPartySelection.value || !requesterName.value.trim() || (selectedSupplyParty().type === 'HQ' && Number(acceptancePartyId.value) <= 0))) return true
   if (props.pageKey === 'transfer' && (!transferTargetSelection.value || (isPlatformHeadquarters.value && !transferStaffOptions.value.length))) return true
   return props.pageKey === 'warehouse' && (Number(warehouseStoreId.value) <= 0 || !warehouseName.value.trim())
@@ -185,7 +183,7 @@ const primarySubmitLabel = computed(() => {
   if (submitting.value) return '提交中'
   if (props.pageKey === 'request') return isRequestEdit.value ? '保存修改' : '确认申请'
   if (props.pageKey === 'transfer') return '保存调拨草稿'
-  if (props.pageKey === 'usage') return isUsageReturn.value ? '确认退回' : '确认领用'
+  if (props.pageKey === 'usage') return '确认领用'
   if (props.pageKey === 'warehouse') return '创建仓库'
   return '保存'
 })
@@ -411,23 +409,6 @@ watch([() => props.detail, isCountEdit], ([detail]) => {
   countDraftSavedSnapshot.value = JSON.stringify(countDraftContent())
   countProgress.value = `已恢复草稿中的 ${selectedRows.value.length} 行；完成盘点以实盘数为最终库存。`
 }, { immediate: true })
-
-function hydrateUsageReturn(detail) {
-  if (!isUsageReturn.value || !detail?.document) return
-  usageDate.value = localBusinessDate()
-  usageProjectId.value = String(detail.document.project_id || '')
-  usageProjectName.value = String(detail.document.project_name_snapshot || '')
-  usageRemark.value = ''
-  selectedRows.value = (Array.isArray(detail.lines) ? detail.lines : [])
-    .filter((line) => Number(line.returnable_quantity || 0) > 0)
-    .map((line) => ({
-      source_usage_line_id: Number(line.line_id), product_id: Number(line.product_id), sku_id: Number(line.sku_id), sku_unique: String(line.sku_unique || ''),
-      product_name: String(line.product_name || ''), sku_name: String(line.sku_name || ''), barcode: String(line.barcode || ''),
-      stock_unit: String(line.stock_unit || ''), quantity: String(line.returnable_quantity), returnable_quantity: String(line.returnable_quantity)
-    }))
-}
-
-watch([() => props.detail, isUsageReturn], ([detail]) => { hydrateUsageReturn(detail) }, { immediate: true })
 
 async function loadUsageProjects() {
   if (props.pageKey !== 'usage') return
@@ -1183,18 +1164,12 @@ async function submitTransfer() {
 
 function usageIdempotencyKey() { return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? `usage-${crypto.randomUUID()}` : `usage-${Date.now()}-${Math.random().toString(36).slice(2)}` }
 async function submitUsage() {
-  if (props.pageKey !== 'usage' || !selectedRows.value.length || Number(usageProjectId.value) <= 0 || !usageProjectName.value.trim()) return
+  if (props.pageKey !== 'usage' || !selectedRows.value.length) return
   submitting.value = true; submitError.value = ''
   try {
     const api = isPlatformHeadquarters.value ? platformInventoryApi : inventoryApi
     const scope = isPlatformHeadquarters.value ? { store_id: Number(props.usageStoreId) } : {}
-    if (isUsageReturn.value) {
-      const exceedsReturnableQuantity = selectedRows.value.some((row) => Number(row.quantity) <= 0 || Number(row.quantity) > Number(row.returnable_quantity))
-      if (exceedsReturnableQuantity) throw new Error('退回数量不能超过原领用数量。')
-      await api.returnSalonUsage({ idempotency_key: usageIdempotencyKey(), business_date: usageDate.value, project_id: Number(usageProjectId.value), project_name: usageProjectName.value.trim(), remark: usageRemark.value, return_location_id: Number(props.detail?.document?.location_id || 0), ...scope, lines: selectedRows.value.map((row) => ({ source_usage_line_id: Number(row.source_usage_line_id), quantity: row.quantity })) })
-    } else {
-      await api.issueSalonUsage({ idempotency_key: usageIdempotencyKey(), business_date: usageDate.value, project_id: Number(usageProjectId.value), project_name: usageProjectName.value.trim(), remark: usageRemark.value, ...scope, lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity })) })
-    }
+    await api.issueSalonUsage({ idempotency_key: usageIdempotencyKey(), business_date: usageDate.value, project_id: Number(usageProjectId.value), project_name: usageProjectName.value.trim(), remark: usageRemark.value, ...scope, lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity })) })
     emit('saved'); close()
   } catch (error) { submitError.value = error instanceof Error ? error.message : '院装领用提交失败。' } finally { submitting.value = false }
 }
@@ -1280,8 +1255,8 @@ function submitPrimaryEditor() {
               <section class="line-section"><header><div><h3>草稿明细</h3><p>保存的数据仅供查看；点击编辑后才能继续填写或完成盘点。</p></div><button class="modal-primary" @click="emit('edit-count-draft')">编辑草稿</button></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>单位</th><th>条码</th><th>账面库存</th><th>实盘库存</th><th>库存盈亏</th><th>盘盈批次号</th><th>盘盈单价</th><th>生产日期</th><th>到期日</th></tr></thead><tbody><tr v-for="(line, index) in detail.lines || []" :key="`${line.sku_id}-${index}`"><td>{{ line.product_name || '-' }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.stock_unit || '-' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.book_quantity }}</td><td>{{ line.counted_quantity === '' ? '未填写' : line.counted_quantity }}</td><td>{{ line.counted_quantity === '' ? '-' : Number(line.counted_quantity) - Number(line.book_quantity) }}</td><td>{{ line.surplus_batch_no || '-' }}</td><td>{{ line.surplus_unit_cost || '-' }}</td><td>{{ line.surplus_manufactured_date || '-' }}</td><td>{{ line.surplus_expire_date || '-' }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'usage' && detail?.document">
-              <div class="detail-meta"><span>院装单号：<b>{{ detail.document.usage_no }}</b></span><span>关联项目：{{ detail.document.project_name_snapshot }}</span><span>业务日期：{{ detail.document.business_date }}</span><span>类型：{{ detail.document.operation_type === 'RETURN' ? '退回' : '领用' }}</span></div>
-              <section class="line-section"><header><div><h3>耗材明细</h3><p>{{ detail.document.remark || '无备注' }}</p></div><button v-if="detail.document.can_return" class="modal-secondary" @click="emit('start-usage-return')">退回耗材</button></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>批次条码</th><th>领用/退回数量</th><th>已退回</th><th>可退回</th><th>库存单位</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="7" class="modal-empty">该院装单没有耗材明细</td></tr><tr v-for="line in detail.lines" :key="line.line_id"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.quantity }}</td><td>{{ line.returned_quantity }}</td><td>{{ line.returnable_quantity }}</td><td>{{ line.stock_unit || '-' }}</td></tr></tbody></table></div></section>
+              <div class="detail-meta"><span>院装单号：<b>{{ detail.document.usage_no }}</b></span><span>关联项目：{{ detail.document.project_name_snapshot || '未关联项目' }}</span><span>业务日期：{{ detail.document.business_date }}</span><span>类型：{{ detail.document.operation_type === 'RETURN' ? '退回' : '领用' }}</span></div>
+              <section class="line-section"><header><div><h3>耗材明细</h3><p>{{ detail.document.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>批次条码</th><th>领用/退回数量</th><th>已退回</th><th>可退回</th><th>库存单位</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="7" class="modal-empty">该院装单没有耗材明细</td></tr><tr v-for="line in detail.lines" :key="line.line_id"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.quantity }}</td><td>{{ line.returned_quantity }}</td><td>{{ line.returnable_quantity }}</td><td>{{ line.stock_unit || '-' }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'import' && detail?.record">
               <div class="detail-meta"><span>文件：<b>{{ detail.record.source_file_name }}</b></span><span>方向：{{ detail.record.direction === 'inbound' ? '入库导入' : '出库导入' }}</span><span>业务单号：{{ detail.record.document_no || '-' }}</span><span>状态：{{ detail.record.status === 'SUCCEEDED' ? '成功' : detail.record.status === 'FAILED' ? '失败' : '处理中' }}</span></div>
@@ -1335,9 +1310,8 @@ function submitPrimaryEditor() {
             </section>
 
             <section v-else-if="pageKey === 'usage'" class="form-grid">
-              <label v-if="!isUsageReturn" class="form-grid__inline form-grid__full"><span class="field-label">核销项目<i>*</i></span><span class="usage-project-picker"><input v-model="usageProjectKeyword" placeholder="搜索项目名称或编码" @input="loadUsageProjects" /><select v-model="usageProjectId" :disabled="usageProjectsLoading" @change="selectUsageProject"><option value="">{{ usageProjectsLoading ? '正在读取项目…' : '请选择本次核销项目' }}</option><option v-for="project in usageProjects" :key="project.id" :value="String(project.id)">{{ project.name }}{{ project.code ? `（${project.code}）` : '' }}</option></select><small v-if="usageProjectName">已选择：{{ usageProjectName }}</small><small v-else-if="usageProjectsError" class="catalog-error">{{ usageProjectsError }}</small><small v-else-if="!usageProjectsLoading && !usageProjects.length">当前门店没有可用核销项目</small></span></label>
-              <label v-else class="form-grid__inline form-grid__full"><span class="field-label">原领用项目</span><input :value="usageProjectName" disabled /></label>
-              <label class="form-grid__inline"><span class="field-label">{{ isUsageReturn ? '退回日期' : '领用日期' }}<i>*</i></span><input v-model="usageDate" type="date" /></label><label class="form-grid__inline"><span class="field-label">操作人</span><input value="当前登录人员" disabled /></label>
+              <label class="form-grid__inline form-grid__full"><span class="field-label">核销项目</span><span class="usage-project-picker"><input v-model="usageProjectKeyword" placeholder="搜索项目名称或编码" @input="loadUsageProjects" /><select v-model="usageProjectId" :disabled="usageProjectsLoading" @change="selectUsageProject"><option value="">{{ usageProjectsLoading ? '正在读取项目…' : '不关联核销项目' }}</option><option v-for="project in usageProjects" :key="project.id" :value="String(project.id)">{{ project.name }}{{ project.code ? `（${project.code}）` : '' }}</option></select><small v-if="usageProjectName">已选择：{{ usageProjectName }}</small><small v-else-if="usageProjectsError" class="catalog-error">{{ usageProjectsError }}</small><small v-else-if="!usageProjectsLoading && !usageProjects.length">当前门店没有可用核销项目，可不关联项目直接领用</small></span></label>
+              <label class="form-grid__inline"><span class="field-label">领用日期<i>*</i></span><input v-model="usageDate" type="date" /></label><label class="form-grid__inline"><span class="field-label">操作人</span><input value="当前登录人员" disabled /></label>
               <label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-model="usageRemark" placeholder="请输入备注" /></label>
             </section>
 
@@ -1357,7 +1331,7 @@ function submitPrimaryEditor() {
                   <input ref="countFileInput" class="count-file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="importCountRows" />
                   <button class="modal-secondary" :disabled="countLoading || submitting" @click="loadAllCountProducts">{{ countLoading ? '加载中…' : '加载全部商品' }}</button>
                 </template>
-                <button v-if="!isUsageReturn" class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="!isUsageReturn && ['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button><span class="line-submit-actions"><button class="modal-secondary" :disabled="submitting" @click="close">取消</button><template v-if="pageKey === 'count'"><button class="modal-secondary" :disabled="submitting || countLoading || !selectedRows.length" @click="saveCountDraft">{{ submitting ? '保存中' : '保存草稿' }}</button><button class="modal-primary" :disabled="submitting || countLoading || !selectedRows.length" @click="submitCount">{{ submitting ? '提交中' : '完成盘点' }}</button></template><button v-else class="modal-primary" :disabled="primarySubmitDisabled" @click="submitPrimaryEditor">{{ primarySubmitLabel }}</button></span>
+                <button class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button><span class="line-submit-actions"><button class="modal-secondary" :disabled="submitting" @click="close">取消</button><template v-if="pageKey === 'count'"><button class="modal-secondary" :disabled="submitting || countLoading || !selectedRows.length" @click="saveCountDraft">{{ submitting ? '保存中' : '保存草稿' }}</button><button class="modal-primary" :disabled="submitting || countLoading || !selectedRows.length" @click="submitCount">{{ submitting ? '提交中' : '完成盘点' }}</button></template><button v-else class="modal-primary" :disabled="primarySubmitDisabled" @click="submitPrimaryEditor">{{ primarySubmitLabel }}</button></span>
               </div>
             </header>
             <p v-if="catalogError" class="catalog-error">{{ catalogError }}</p><p v-if="pageKey === 'count' && countProgress" class="count-progress">{{ countProgress }}</p>

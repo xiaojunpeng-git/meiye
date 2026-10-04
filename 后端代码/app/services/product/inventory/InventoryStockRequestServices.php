@@ -69,7 +69,13 @@ final class InventoryStockRequestServices
             ->where('ss.store_id', $storeId)->where('ss.status', 1)->where('ss.is_del', 0)->where('e.status', 1)->where('e.is_del', 0)
             ->field('ss.id,ss.employee_id,ss.staff_name,e.name')->order('ss.id asc')->select()->toArray();
         $candidates = array_map(static fn (array $row): array => ['key' => 'STORE_STAFF:' . (int)$row['id'], 'type' => 'STORE_STAFF', 'id' => (int)$row['id'], 'employee_id' => (int)$row['employee_id'], 'name' => trim((string)($row['name'] ?: $row['staff_name']))], $list);
-        return ['requester_name' => $scope['operatorName'], 'operator_name' => $scope['operatorName'], 'list' => $candidates, 'default_key' => 'STORE_STAFF:' . $operatorId];
+        // 组织选店会话可能没有传统门店员工任职行；请货人仍必须来自当前已认证员工。
+        if (($scope['operatorType'] ?? '') === 'EMPLOYEE') {
+            $candidates[] = ['key' => 'ORG_EMPLOYEE:' . $scope['operatorId'], 'type' => 'ORG_EMPLOYEE',
+                'id' => $scope['operatorId'], 'employee_id' => $scope['operatorId'], 'name' => $scope['operatorName']];
+        }
+        return ['requester_name' => $scope['operatorName'], 'operator_name' => $scope['operatorName'],
+            'list' => $candidates, 'default_key' => (($scope['operatorType'] ?? '') === 'EMPLOYEE' ? 'ORG_EMPLOYEE' : 'STORE_STAFF') . ':' . $scope['operatorId']];
     }
 
     public function requesterForHeadquarters(array $adminInfo, int $hqLocationId, string $requestPartyType = 'HQ', int $requestPartyId = 0): array
@@ -141,6 +147,7 @@ final class InventoryStockRequestServices
         $name = trim($name);
         if ($name === '') throw new \InvalidArgumentException('inventory_stock_request_requester_invalid');
         if (($scope['requestPartyType'] ?? 'STORE') === 'STORE') {
+            if (($scope['operatorType'] ?? '') === 'EMPLOYEE' && $name === (string)$scope['operatorName']) return;
             $exists = Db::name('system_store_staff')->alias('ss')->leftJoin('employee e', 'e.id=ss.employee_id')->where('ss.store_id', (int)$scope['storeId'])->where('ss.status', 1)->where('ss.is_del', 0)->where('e.status', 1)->where('e.is_del', 0)->where(function ($query) use ($name): void { $query->where('e.name', $name)->whereOr('ss.staff_name', $name); })->value('ss.id');
             if (!$exists) throw new \InvalidArgumentException('inventory_stock_request_requester_invalid');
             return;
@@ -185,6 +192,84 @@ final class InventoryStockRequestServices
         return $this->transitionForHeadquarters($adminInfo, $hqLocationId, $requestId, $input, 'TERMINATE');
     }
 
+    /** 门店供货方只可作废从未生成调拨的请货单；关联库存保持原样。 */
+    public function voidForStore(int $storeId, int $operatorId, int $requestId, array $input): array
+    {
+        $command = $this->normalizeLifecycle($input, 'VOID');
+        if ($requestId <= 0) throw new \InvalidArgumentException('inventory_stock_request_void_input_invalid');
+        return Db::transaction(function () use ($storeId, $operatorId, $requestId, $command): array {
+            return $this->voidDocument($this->lockScope($storeId, $operatorId), $requestId, $command);
+        });
+    }
+
+    /** 平台管理员的可操作供货方由服务端岗位权限决定，不能通过请求参数冒领库存权限。 */
+    public function voidForHeadquarters(array $adminInfo, int $hqLocationId, int $requestId, array $input): array
+    {
+        $command = $this->normalizeLifecycle($input, 'VOID');
+        if ($requestId <= 0) throw new \InvalidArgumentException('inventory_stock_request_void_input_invalid');
+        $resolved = (new InventoryHqLocationServices())->writableLocation($adminInfo, $hqLocationId);
+        return Db::transaction(function () use ($adminInfo, $resolved, $requestId, $command): array {
+            // 作废由供货方授权，不要求管理员同时持有请货门店权限。
+            $scope = $this->requestPartyScope($adminInfo, $resolved, 'HQ', 0);
+            return $this->voidDocument($scope, $requestId, $command);
+        });
+    }
+
+    /** 请货一旦生成任何调拨（含旧取消／冲销记录）即锁定作废入口，绝不反向改动库存。 */
+    private function voidDocument(array $scope, int $requestId, array $command): array
+    {
+        $document = Db::name('inventory_stock_request_document')->where('id', $requestId)->lock(true)->find();
+        if (!$document || (string)$document['tenant_id'] !== (string)$scope['tenantId']) throw new \RuntimeException('inventory_stock_request_not_found');
+        // 供货主体是请货作废的权限锚点；同一组织根之外的单据不可凭门店 ID 越权。
+        $documentRoot = explode('/', trim((string)$document['organization_path'], '/'))[0] ?? '';
+        $scopeRoot = explode('/', trim((string)$scope['organizationPath'], '/'))[0] ?? '';
+        if ($documentRoot === '' || $documentRoot !== $scopeRoot) throw new \RuntimeException('inventory_stock_request_not_found');
+        $supplierType = strtoupper((string)$document['supply_party_type']);
+        $supplierId = (int)$document['supply_party_id'];
+        if ((string)$scope['requestPartyType'] === 'STORE') {
+            if ($supplierType !== 'STORE' || $supplierId !== (int)$scope['storeId']) throw new \RuntimeException('inventory_stock_request_void_supplier_denied');
+        } elseif ($supplierType === 'HQ') {
+            if ($supplierId !== 0) throw new \RuntimeException('inventory_stock_request_void_supplier_denied');
+        } elseif ($supplierType !== 'STORE' || ($supplierId <= 0 || (empty($scope['isSuperAdmin']) && !in_array($supplierId, (array)$scope['allowedStoreIds'], true)))) {
+            throw new \RuntimeException('inventory_stock_request_void_supplier_denied');
+        }
+        $existing = Db::name('inventory_stock_request_lifecycle_operation')->where('tenant_id', $scope['tenantId'])
+            ->where('idempotency_key', $command['idempotencyKey'])->lock(true)->find();
+        if ($existing) {
+            if ((int)$existing['request_document_id'] !== $requestId || (string)$existing['operation_type'] !== 'VOID'
+                || (string)$existing['request_fingerprint'] !== $command['fingerprint']) {
+                throw new \RuntimeException('inventory_stock_request_lifecycle_idempotency_conflict');
+            }
+            return ['request_id' => $requestId, 'document_status' => 'VOIDED', 'operation_id' => (int)$existing['id'], 'idempotent' => true];
+        }
+        $previousStatus = (string)$document['document_status'];
+        if (!in_array($previousStatus, ['APPLIED', 'PARTIAL', 'DONE'], true)) {
+            throw new \RuntimeException('inventory_stock_request_void_state_invalid');
+        }
+        // “生成过”按是否存在关联单据判断，不能因调拨后来取消/冲销而重新开放作废。
+        if (Db::name('inventory_cross_transfer_document')->where('tenant_id', $scope['tenantId'])
+            ->where('request_document_id', $requestId)->value('id')) {
+            throw new \RuntimeException('inventory_stock_request_void_transfer_exists');
+        }
+        $fulfilledBefore = $this->fulfilledUnitsForDocument($requestId);
+        if ($fulfilledBefore !== 0) {
+            throw new \RuntimeException('inventory_stock_request_void_fulfillment_remains');
+        }
+        $now = time();
+        $operationId = (int)Db::name('inventory_stock_request_lifecycle_operation')->insertGetId([
+            'tenant_id' => $scope['tenantId'], 'request_document_id' => $requestId,
+            'idempotency_key' => $command['idempotencyKey'], 'request_fingerprint' => $command['fingerprint'],
+            'operation_type' => 'VOID', 'previous_status' => $previousStatus, 'next_status' => 'VOIDED',
+            'fulfilled_quantity_units_snapshot' => $fulfilledBefore, 'reason' => $command['reason'],
+            'operator_id' => (int)$scope['operatorId'], 'occurred_at' => $now, 'recorded_at' => $now,
+        ]);
+        if (Db::name('inventory_stock_request_document')->where('id', $requestId)
+            ->whereIn('document_status', ['APPLIED', 'PARTIAL', 'DONE'])->update(['document_status' => 'VOIDED']) !== 1) {
+            throw new \RuntimeException('inventory_stock_request_void_state_changed');
+        }
+        return ['request_id' => $requestId, 'document_status' => 'VOIDED', 'operation_id' => $operationId, 'idempotent' => false];
+    }
+
     private function transitionForHeadquarters(array $adminInfo, int $hqLocationId, int $requestId, array $input, string $operationType): array
     {
         $command = $this->normalizeLifecycle($input, $operationType);
@@ -219,6 +304,10 @@ final class InventoryStockRequestServices
         $expectedStatus = $command['operationType'] === 'CANCEL' ? 'APPLIED' : 'PARTIAL';
         $nextStatus = $command['operationType'] === 'CANCEL' ? 'CANCELLED' : 'TERMINATED';
         if ($previousStatus !== $expectedStatus) throw new \RuntimeException($command['operationType'] === 'CANCEL' ? 'inventory_stock_request_cancel_state_invalid' : 'inventory_stock_request_terminate_state_invalid');
+        // 旧取消／终止接口也不能绕开“生成调拨后不可关闭请货”的新业务边界。
+        if (Db::name('inventory_cross_transfer_document')->where('request_document_id', $requestId)->value('id')) {
+            throw new \RuntimeException('inventory_stock_request_void_transfer_exists');
+        }
         $fulfilledUnits = $this->fulfilledUnitsForDocument($requestId);
         if ($command['operationType'] === 'CANCEL' && $fulfilledUnits !== 0) throw new \RuntimeException('inventory_stock_request_cancel_fulfilled');
         if ($command['operationType'] === 'TERMINATE' && $fulfilledUnits <= 0) throw new \RuntimeException('inventory_stock_request_terminate_state_invalid');
@@ -342,15 +431,19 @@ final class InventoryStockRequestServices
     private function lockScope(int $storeId, int $operatorId): array
     {
         $store = Db::name('system_store')->where('id', $storeId)->where('is_del', 0)->where('is_show', 1)->field('id,name')->lock(true)->find();
-        $operator = Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)->field('id,staff_name')->lock(true)->find();
+        try {
+            $actor = (new InventoryStoreAccessPolicy())->writableActor($storeId, $operatorId, 'cashier.v3.inventory.request');
+        } catch (\RuntimeException $exception) {
+            throw new \RuntimeException('inventory_stock_request_scope_denied', 0, $exception);
+        }
         $binding = Db::name('organization_store')->where('store_id', $storeId)->field('org_id')->lock(true)->find();
-        if (!$store || !$operator || !$binding || (int)$binding['org_id'] <= 0) throw new \RuntimeException('inventory_stock_request_scope_denied');
+        if (!$store || !$binding || (int)$binding['org_id'] <= 0) throw new \RuntimeException('inventory_stock_request_scope_denied');
         $path = []; $seen = []; $current = (int)$binding['org_id']; $name = '';
         for ($depth = 0; $depth < 64; $depth++) { if (isset($seen[$current])) throw new \RuntimeException('inventory_stock_request_organization_invalid'); $seen[$current] = true; $node = Db::name('organization')->where('id', $current)->where('is_del', 0)->field('id,pid,name')->lock(true)->find(); if (!$node || trim((string)$node['name']) === '') throw new \RuntimeException('inventory_stock_request_organization_invalid'); if ($name === '') $name = (string)$node['name']; $path[] = (int)$node['id']; if ((int)$node['pid'] === 0) break; $current = (int)$node['pid']; }
         if (!$path || end($path) !== $current) throw new \RuntimeException('inventory_stock_request_organization_invalid');
-        $operatorName = mb_substr(trim((string)$operator['staff_name']), 0, 64);
+        $operatorName = mb_substr((string)$actor['name'], 0, 64);
         if ($operatorName === '') throw new \RuntimeException('inventory_stock_request_operator_name_invalid');
-        return ['tenantId' => CashierV3ScopeResolver::TENANT_SCOPE_ID, 'organizationId' => (string)$binding['org_id'], 'organizationPath' => '/' . implode('/', array_reverse($path)) . '/', 'storeId' => $storeId, 'storeName' => mb_substr((string)$store['name'], 0, 120), 'operatorId' => $operatorId, 'operatorName' => $operatorName, 'requestPartyType' => 'STORE', 'requestPartyId' => $storeId, 'requestPartyName' => mb_substr((string)$store['name'], 0, 120)];
+        return ['tenantId' => CashierV3ScopeResolver::TENANT_SCOPE_ID, 'organizationId' => (string)$binding['org_id'], 'organizationPath' => '/' . implode('/', array_reverse($path)) . '/', 'storeId' => $storeId, 'storeName' => mb_substr((string)$store['name'], 0, 120), 'operatorId' => $actor['id'], 'operatorType' => $actor['type'], 'operatorName' => $operatorName, 'requestPartyType' => 'STORE', 'requestPartyId' => $storeId, 'requestPartyName' => mb_substr((string)$store['name'], 0, 120)];
     }
 
     private function headquartersScope(array $scope, array $adminInfo): array

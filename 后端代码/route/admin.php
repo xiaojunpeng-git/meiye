@@ -2197,7 +2197,7 @@ Route::group('adminapi', function () {
 			Route::get('v3/salon-usage/projects', 'v1.product.inventory.InventoryPlatformSalonUsage/projects')->option(['real_name' => '平台院装项目选择']);
 			Route::get('v3/salon-usage/:id/detail', 'v1.product.inventory.InventoryPlatformSalonUsage/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '平台院装单据详情']);
 			Route::post('v3/salon-usage/issue', 'v1.product.inventory.InventoryPlatformSalonUsage/issue')->option(['real_name' => '平台院装领用']);
-			Route::post('v3/salon-usage/return', 'v1.product.inventory.InventoryPlatformSalonUsage/returnToDefault')->option(['real_name' => '平台院装退回']);
+			Route::post('v3/salon-usage/:id/void', 'v1.product.inventory.InventoryPlatformSalonUsage/void')->pattern(['id' => '\\d+'])->option(['real_name' => '平台院装领用作废']);
 			Route::get('v3/hq/inbound', 'v1.product.inventory.InventoryPlatformHqInbound/index')->option(['real_name' => '平台总部仓入库查询']);
 			Route::get('v3/hq/inbound/:id/detail', 'v1.product.inventory.InventoryPlatformHqInbound/detail')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '平台总部仓入库详情']);
 			Route::get('v3/hq/inbound/:id/outbound-details', 'v1.product.inventory.InventoryPlatformHqInbound/outboundDetails')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '平台总部仓入库批次后续出库明细']);
@@ -2223,6 +2223,7 @@ Route::group('adminapi', function () {
 			Route::post('v3/hq/request/apply', 'v1.product.inventory.InventoryPlatformHqStockRequest/apply')->option(['real_name' => '平台总部请货申请']);
 			Route::post('v3/hq/request/:id/cancel', 'v1.product.inventory.InventoryPlatformHqStockRequest/cancel')->option(['real_name' => '平台总部请货取消']);
 			Route::post('v3/hq/request/:id/terminate', 'v1.product.inventory.InventoryPlatformHqStockRequest/terminate')->option(['real_name' => '平台总部请货终止剩余']);
+			Route::post('v3/hq/request/:id/void', 'v1.product.inventory.InventoryPlatformHqStockRequest/void')->pattern(['id' => '\\d+'])->option(['real_name' => '平台总部请货整单作废']);
 			Route::get('v3/hq/product-summary', 'v1.product.inventory.InventoryPlatformHqReadModel/productSummary')->option(['real_name' => '平台总部库存商品汇总']);
 			Route::get('v3/hq/product-summary/:productId/detail', 'v1.product.inventory.InventoryPlatformHqReadModel/productDetail')->pattern(['productId' => '\\d+'])->option(['real_name' => '平台总部库存商品详情']);
 			Route::get('v3/hq/catalog', 'v1.product.inventory.InventoryPlatformHqCatalog/search')->option(['real_name' => '平台总部库存商品目录']);

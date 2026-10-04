@@ -8,6 +8,8 @@ $requestController = (string)file_get_contents($root . '/后端代码/app/contro
 $platformRequestController = (string)file_get_contents($root . '/后端代码/app/controller/admin/v1/product/inventory/InventoryPlatformHqStockRequest.php');
 $transferController = (string)file_get_contents($root . '/后端代码/app/controller/store/product/inventory/InventoryCrossSubjectTransfer.php');
 $platformTransferController = (string)file_get_contents($root . '/后端代码/app/controller/admin/v1/product/inventory/InventoryPlatformHqCrossTransfer.php');
+$requestQuery = (string)file_get_contents($root . '/后端代码/app/services/product/inventory/InventoryStockRequestQueryServices.php');
+$inventoryPage = (string)file_get_contents($root . '/前端代码/inventory-vue3/src/App.vue');
 $upgrade = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-08-05-库存V3请货终止与调拨冲销/02-正式升级.sql');
 $postcheck = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-08-05-库存V3请货终止与调拨冲销/03-升级后验证.sql');
 
@@ -28,34 +30,39 @@ lifecycleAssert('request lifecycle is shared by authenticated store and platform
     && strpos($requestController, 'function terminate') !== false
     && strpos($platformRequestController, 'function terminate') !== false);
 
-lifecycleAssert('received transfer reversal removes the exact target allocation before restoring its source allocation',
-    strpos($transfer, 'reverseReceiptAllocation') !== false
-    && strpos($transfer, 'reverseDispatchAllocation') !== false
-    && strpos($transfer, 'target_reversal_stock_insufficient') !== false
-    && strpos($transfer, "'cross_transfer_in_reversal'") !== false
-    && strpos($transfer, "'cross_transfer_out_reversal'") !== false);
+lifecycleAssert('transfer cancellation and reversal are rejected by the domain service',
+    substr_count($transfer, "throw new \\RuntimeException('inventory_cross_transfer_void_disabled')") === 4
+    && strpos($transfer, 'private function reverse(') === false
+    && strpos($transfer, 'private function cancel(') === false);
 
-lifecycleAssert('movement reversal facts are immutable and tied one-to-one to originals',
-    strpos($transfer, "'reversalOf' => (int)\$original['id']") !== false
-    && strpos($transfer, "->where('reversal_of', (int)\$fact['id'])") !== false
-    && strpos($upgrade, 'uk_transfer_reversal') !== false
+lifecycleAssert('historical reversal schema is preserved for old records without enabling new writes',
+    strpos($upgrade, 'uk_transfer_reversal') !== false
     && strpos($postcheck, 'r.direction<>-o.direction') !== false
     && strpos($postcheck, 'r.quantity_units<>o.quantity_units') !== false);
 
-lifecycleAssert('request fulfillment reversal is appended and net fulfillment drives status recalculation',
+lifecycleAssert('historical request fulfillment reversal remains readable for status recalculation',
     strpos($upgrade, 'eb_inventory_stock_request_fulfillment_reversal') !== false
     && strpos($upgrade, 'uk_reversal_of_fulfillment') !== false
-    && strpos($transfer, 'reversed_quantity_units') !== false
     && strpos($transfer, 'return max(0,$fulfilled-$reversed)') !== false
     && strpos($transfer, "['APPLIED','PARTIAL'],true") !== false
     && strpos($transfer, "['APPLIED','PARTIAL','DONE']") !== false
     && strpos($transfer, "['CANCELLED','TERMINATED']") !== false);
 
-lifecycleAssert('both store and HQ controllers expose transfer reversal with mandatory reason input',
+lifecycleAssert('both store and HQ legacy transfer endpoints reject void',
     strpos($transferController, 'function reverse') !== false
     && strpos($platformTransferController, 'function reverse') !== false
-    && strpos($transferController . $platformTransferController, "['reason', '']") !== false
-    && strpos($transfer, 'inventory_cross_transfer_reverse_input_invalid') !== false);
+    && strpos($transferController, 'inventory_cross_transfer_void_disabled') !== false
+    && strpos($platformTransferController, 'inventory_cross_transfer_void_disabled') !== false);
+
+lifecycleAssert('requests with any historical transfer are never voidable',
+    strpos($request, "->where('request_document_id', \$requestId)->value('id')") !== false
+    && preg_match('/private function hasLinkedTransfer\([^)]*\): bool\s*\{[^}]*where\(\'request_document_id\', \$requestId\)->value\(\'id\'\)/s', $requestQuery) === 1);
+
+lifecycleAssert('V3 transfer list has only view, dispatch and receive actions',
+    strpos($inventoryPage, "runTransferAction('cancel'") === false
+    && strpos($inventoryPage, "runTransferAction('reverse'") === false
+    && strpos($inventoryPage, 'can_cancel" class="text-button"') === false
+    && strpos($inventoryPage, 'can_reverse" class="text-button"') === false);
 
 echo "REQUEST_TRANSFER_LIFECYCLE_CONTRACT_RESULT failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

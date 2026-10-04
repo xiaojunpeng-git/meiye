@@ -23,12 +23,14 @@ foreach ([
     ['organization', ['id' => $rootOrg, 'pid' => 0, 'name' => 'TEST-手工单作废根组织', 'is_del' => 0]],
     ['organization', ['id' => $storeId, 'pid' => $rootOrg, 'name' => 'TEST-手工单作废门店组织', 'is_del' => 0]],
     ['system_store', ['id' => $storeId, 'name' => 'TEST-手工单作废门店', 'is_del' => 0, 'is_show' => 1]],
-    ['system_store_staff', ['id' => $staffId, 'store_id' => $storeId, 'status' => 1, 'is_del' => 0]],
+    ['system_store_staff', ['id' => $staffId, 'store_id' => $storeId, 'staff_name' => 'TEST-作废员工', 'status' => 1, 'is_del' => 0]],
     ['organization_store', ['store_id' => $storeId, 'org_id' => $storeId]],
 ] as [$table, $row]) {
     $key = $table === 'organization_store' ? 'store_id' : 'id';
     if (!Db::name($table)->where($key, $row[$key])->find()) Db::name($table)->insert($row);
 }
+// 员工姓名是批次事实的审计必填快照；隔离库的旧夹具可能已有空姓名行。
+Db::name('system_store_staff')->where('id', $staffId)->where('store_id', $storeId)->update(['staff_name' => 'TEST-作废员工']);
 
 if (!Db::name('inventory_location')->where('id', $hqLocationId)->find()) {
     Db::name('inventory_location')->insert([
@@ -117,7 +119,7 @@ reversalAssert('store outbound reversal restores the exact batch and actual cost
 $hqScope = [
     'tenantId' => '0', 'organizationId' => (string)$rootOrg, 'organizationPath' => '/' . $rootOrg . '/',
     'organizationName' => 'TEST-手工单作废根组织', 'storeId' => 0, 'storeName' => '',
-    'operatorId' => 1, 'partyType' => 'HQ',
+    'operatorId' => 1, 'operatorType' => 'PLATFORM_ADMIN', 'operatorName' => 'TEST-平台管理员', 'partyType' => 'HQ',
 ];
 $hqLocation = Db::name('inventory_location')->where('id', $hqLocationId)->find();
 $hqInboundKey = 'TEST-reverse-hq-in-' . $suffix;

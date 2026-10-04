@@ -10,6 +10,44 @@ use think\facade\Db;
 /** 从可信门店会话和当前 V3 岗位规则构建逐功能的库存成本查看能力。 */
 final class InventoryStoreAccessPolicy
 {
+    /**
+     * 门店库存写入以已认证会话解析操作者；组织选店的会话行不是传统门店员工行。
+     * 返回稳定的员工身份供单据与库存事实审计，且每次按当前岗位重新校验功能授权。
+     * @return array{type:string,id:int,name:string}
+     */
+    public function writableActor(int $storeId, int $sessionId, string $featureCode): array
+    {
+        if ($storeId <= 0 || $sessionId <= 0 || !in_array($featureCode, CashierV3FeatureResolver::FEATURE_CODES, true)) {
+            throw new \RuntimeException('inventory_store_actor_denied');
+        }
+        $profile = (array)(request()->storeStaffInfo ?? []);
+        if (!empty($profile['_cashier_v3_organization']) || !empty($profile['_cashier_v3_delegated'])) {
+            if (!empty($profile['_cashier_v3_delegated']) || !empty($profile['read_only'])
+                || (int)($profile['id'] ?? 0) !== $sessionId
+                || (int)($profile['store_id'] ?? 0) !== $storeId
+                || (int)($profile['employee_id'] ?? 0) <= 0
+                || ($profile['session_mode'] ?? '') !== 'store_organization'
+                || !in_array($featureCode, app()->make(CashierV3FeatureResolver::class)->resolveGrantedFeatures($profile), true)) {
+                throw new \RuntimeException('inventory_store_actor_denied');
+            }
+            $employee = Db::name('employee')->where('id', (int)$profile['employee_id'])
+                ->where('status', 1)->where('is_del', 0)->field('id,name')->find();
+            if (!$employee || trim((string)$employee['name']) === '') {
+                throw new \RuntimeException('inventory_store_actor_denied');
+            }
+            return ['type' => 'EMPLOYEE', 'id' => (int)$employee['id'],
+                'name' => mb_substr(trim((string)$employee['name']), 0, 128)];
+        }
+        $staff = Db::name('system_store_staff')->where('id', $sessionId)
+            ->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)
+            ->field('id,staff_name')->find();
+        if (!$staff) {
+            throw new \RuntimeException('inventory_store_actor_denied');
+        }
+        return ['type' => 'STORE_STAFF', 'id' => $sessionId,
+            'name' => mb_substr(trim((string)$staff['staff_name']), 0, 128)];
+    }
+
     /** @return string[] */
     public function features(int $storeId, int $operatorId, string $featureCode = ''): array
     {

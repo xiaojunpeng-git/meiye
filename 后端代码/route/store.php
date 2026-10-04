@@ -649,6 +649,7 @@ Route::group('storeapi', function () {
 		Route::post('v3/request/:id/update', 'product.inventory.InventoryStockRequest/updateApplied')->option(['real_name' => '批次库存请货编辑']);
 		Route::post('v3/request/cancel/:id', 'product.inventory.InventoryStockRequest/cancel')->option(['real_name' => '批次库存请货取消']);
 		Route::post('v3/request/terminate/:id', 'product.inventory.InventoryStockRequest/terminate')->option(['real_name' => '批次库存请货终止剩余']);
+		Route::post('v3/request/:id/void', 'product.inventory.InventoryStockRequest/void')->pattern(['id' => '\\d+'])->option(['real_name' => '批次库存请货整单作废']);
 		Route::get('v3/cross-transfer', 'product.inventory.InventoryCrossSubjectTransfer/index')->option(['real_name' => '跨门店库存调拨单查询']);
 		Route::get('v3/cross-transfer/:id/detail', 'product.inventory.InventoryCrossSubjectTransfer/detail')->option(['real_name' => '跨门店库存调拨单详情']);
 		Route::get('v3/cross-transfer/counterparties', 'product.inventory.InventoryCrossSubjectTransfer/counterparties')->option(['real_name' => '跨门店库存调拨对象']);
@@ -664,7 +665,7 @@ Route::group('storeapi', function () {
 		Route::get('v3/salon-usage/:id/detail', 'product.inventory.InventorySalonUsage/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '院装耗材单据详情']);
 		Route::get('v3/salon-usage/projects', 'product.inventory.InventorySalonUsage/projects')->option(['real_name' => '院装核销项目选择']);
 		Route::post('v3/salon-usage/issue', 'product.inventory.InventorySalonUsage/issue')->option(['real_name' => '院装耗材领用']);
-		Route::post('v3/salon-usage/return', 'product.inventory.InventorySalonUsage/returnToDefault')->option(['real_name' => '院装耗材退回']);
+		Route::post('v3/salon-usage/:id/void', 'product.inventory.InventorySalonUsage/void')->pattern(['id' => '\\d+'])->option(['real_name' => '院装耗材领用作废']);
 			//出入库统计
 			Route::get('order/overall_statistics', 'product.inventory.StoreProductStockDetail/stockOrderOverallStatistics')->option(['real_name' => '出入库顶部统计']);
 			Route::get('order/statistics', 'product.inventory.StoreProductStockDetail/stockOrderStatistics')->option(['real_name' => '出入库统计']);

@@ -7,26 +7,53 @@ use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\product\inventory\completion\InventoryBatchMovementFactServices;
 use think\facade\Db;
 
-/** Reverses a settled manual inbound/outbound without overwriting its facts. */
+/** Reverses a settled inventory issue/inbound/outbound without overwriting its facts. */
 final class InventoryManualDocumentReversalServices
 {
     public const INBOUND = 'manual_inbound';
     public const OUTBOUND = 'manual_outbound';
+    public const SALON_ISSUE = 'salon_usage_issue';
+
+    /** The salon command has already resolved the writable store scope; recheck the exact warehouse before sharing the batch reversal engine. */
+    public function reverseSalonAtLocation(array $scope, array $location, array $input): array
+    {
+        $command = $this->normalize(self::SALON_ISSUE, $input);
+        if ((int)($scope['storeId'] ?? 0) <= 0 || (int)($scope['operatorId'] ?? 0) <= 0
+            || (int)($location['store_id'] ?? 0) !== (int)$scope['storeId']
+            || (int)($location['owner_id'] ?? 0) !== (int)$scope['storeId']
+            || (string)($location['tenant_id'] ?? '') !== (string)($scope['tenantId'] ?? '')
+            || (string)($location['organization_id'] ?? '') !== (string)($scope['organizationId'] ?? '')
+            || (string)($location['organization_path'] ?? '') !== (string)($scope['organizationPath'] ?? '')
+            || (string)($location['location_type'] ?? '') !== 'STORE'
+            || (int)($location['is_default'] ?? 0) !== 1
+            || (string)($location['location_status'] ?? '') !== 'ACTIVE') {
+            throw new \RuntimeException('inventory_salon_usage_void_scope_denied');
+        }
+        return $this->reverseAtLocation($scope, $location, $command);
+    }
 
     public function reverseForStore(int $storeId, int $operatorId, string $sourceType, array $input): array
     {
+        // 院装只走已校验关联退回约束的专用入口，不能借手工单作废绕过该约束。
+        if (!in_array($sourceType, [self::INBOUND, self::OUTBOUND], true)) {
+            throw new \InvalidArgumentException('inventory_manual_reversal_source_invalid');
+        }
         $command = $this->normalize($sourceType, $input);
         if ($storeId <= 0 || $operatorId <= 0) {
             throw new \InvalidArgumentException('inventory_manual_reversal_scope_invalid');
         }
 
         return Db::transaction(function () use ($storeId, $operatorId, $command): array {
-            $staff = Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)
-                ->where('status', 1)->where('is_del', 0)->lock(true)->find();
+            try {
+                $actor = (new InventoryStoreAccessPolicy())->writableActor($storeId, $operatorId,
+                    $command['sourceType'] === self::INBOUND ? 'cashier.v3.inventory.inbound' : 'cashier.v3.inventory.outbound');
+            } catch (\RuntimeException $exception) {
+                throw new \RuntimeException('inventory_manual_reversal_scope_denied', 0, $exception);
+            }
             $locations = Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
                 ->where('store_id', $storeId)->where('location_type', 'STORE')->where('is_default', 1)
                 ->where('location_status', 'ACTIVE')->order('id asc')->limit(2)->lock(true)->select()->toArray();
-            if (!$staff || count($locations) !== 1) {
+            if (count($locations) !== 1) {
                 throw new \RuntimeException('inventory_manual_reversal_scope_denied');
             }
             $location = (array)$locations[0];
@@ -38,8 +65,8 @@ final class InventoryManualDocumentReversalServices
                 'organizationId' => (string)$location['organization_id'],
                 'organizationPath' => (string)$location['organization_path'],
                 'storeId' => $storeId,
-                'operatorId' => $operatorId,
-                'operatorType' => 'STORE_STAFF',
+                'operatorId' => $actor['id'],
+                'operatorType' => $actor['type'],
             ];
             return $this->reverseAtLocation($scope, $location, $command);
         });
@@ -228,7 +255,7 @@ final class InventoryManualDocumentReversalServices
 
     private function normalize(string $sourceType, array $input): array
     {
-        if (!in_array($sourceType, [self::INBOUND, self::OUTBOUND], true)
+        if (!in_array($sourceType, [self::INBOUND, self::OUTBOUND, self::SALON_ISSUE], true)
             || array_keys($input) !== ['source_id', 'idempotency_key', 'reason']) {
             throw new \InvalidArgumentException('inventory_manual_reversal_input_invalid');
         }

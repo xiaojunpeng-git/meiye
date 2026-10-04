@@ -81,6 +81,18 @@ final class InventoryPlatformHqStockRequest extends AuthController
         return $this->lifecycle($id, 'TERMINATE');
     }
 
+    /** 平台请货作废严格沿用总部仓与供货方岗位授权。 */
+    public function void(int $id)
+    {
+        try {
+            $input = $this->request->post(); $input = is_array($input) ? $input : [];
+            $locationId = (int)($input['hq_location_id'] ?? 0); unset($input['hq_location_id']);
+            return $this->success('请货单已作废。', $this->services->voidForHeadquarters((array)$this->adminInfo, $locationId, $id, $input));
+        } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
+        catch (\InvalidArgumentException $exception) { return $this->fail('请填写作废原因。', ['code' => $exception->getMessage()]); }
+        catch (\RuntimeException $exception) { return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]); }
+    }
+
     private function lifecycle(int $id, string $operation)
     {
         try {
@@ -109,6 +121,10 @@ final class InventoryPlatformHqStockRequest extends AuthController
             'inventory_stock_request_cancel_state_invalid' => '只有未履约请货单可以取消。',
             'inventory_stock_request_terminate_state_invalid' => '只有部分履约请货单可以终止剩余数量。',
             'inventory_stock_request_lifecycle_idempotency_conflict' => '本次操作号已用于其他请货操作，请刷新后重试。',
+            'inventory_stock_request_void_state_invalid' => '当前请货单不可作废。',
+            'inventory_stock_request_void_supplier_denied' => '请由有权限的供货方人员作废。',
+            'inventory_stock_request_void_transfer_exists' => '这笔请货已生成调拨单，不能作废。',
+            'inventory_stock_request_void_fulfillment_remains' => '请货单已有履约记录，不能作废。',
         ][$code] ?? '总部请货申请未完成，请刷新后重试。';
     }
 }

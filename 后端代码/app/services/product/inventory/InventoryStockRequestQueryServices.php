@@ -65,7 +65,10 @@ final class InventoryStockRequestQueryServices
                 && ((string)$row['supply_party_type'] === 'HQ'
                     || !empty($access['is_super_admin'])
                     || in_array((int)$row['supply_party_id'], array_map('intval', (array)($access['store_ids'] ?? [])), true));
-            $row['can_cancel']=$status==='APPLIED'; $row['can_terminate']=$status==='PARTIAL';
+            // 旧取消/终止入口也不能绕过“曾生成调拨即不可作废”的单据边界。
+            $hasTransfer = $this->hasLinkedTransfer((int)$row['id']);
+            $row['can_cancel']=$status==='APPLIED' && !$hasTransfer; $row['can_terminate']=$status==='PARTIAL' && !$hasTransfer;
+            $row['can_void'] = $this->canVoidForPlatform((int)$row['id'], $status, (string)$row['supply_party_type'], (int)$row['supply_party_id'], $access, $hasTransfer);
             if (!$canViewCost) $row['estimated_amount_cents'] = null;
             $row['status_name'] = $this->statusName($status);
         }
@@ -88,16 +91,30 @@ final class InventoryStockRequestQueryServices
         foreach ($lines as &$line) { $line['quantity'] = $this->decimal((int)$line['requested_quantity_units'], max(0, min(4, (int)$line['quantity_scale']))); if (!$canViewCost) $line['reference_unit_cost_cents'] = null; }
         unset($line);
         $document['status_name'] = $this->statusName((string)$document['document_status']);
-        return ['document' => $document, 'lines' => $lines, 'can_edit' => false, 'can_cancel' => (string)$document['document_status'] === 'APPLIED', 'can_terminate' => (string)$document['document_status'] === 'PARTIAL'];
+        $hasTransfer = $this->hasLinkedTransfer($requestId);
+        return ['document' => $document, 'lines' => $lines, 'can_edit' => false, 'can_cancel' => (string)$document['document_status'] === 'APPLIED' && !$hasTransfer, 'can_terminate' => (string)$document['document_status'] === 'PARTIAL' && !$hasTransfer, 'can_void' => $this->canVoidForPlatform($requestId, (string)$document['document_status'], (string)$document['supply_party_type'], (int)$document['supply_party_id'], $access, $hasTransfer)];
     }
 
     public function list(int $storeId, int $operatorId, string $keyword, int $page = 1, int $limit = 20, bool $canViewCost = false, string $dateFrom = '', string $dateTo = ''): array
     {
-        $staff = Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)->find();
+        // 请货读模型沿用写入方的可信门店身份，不再把组织会话 ID 当员工行。
+        try {
+            (new InventoryStoreAccessPolicy())->writableActor($storeId, $operatorId, 'cashier.v3.inventory.request');
+        } catch (\RuntimeException $exception) {
+            throw new \RuntimeException('inventory_stock_request_query_scope_denied', 0, $exception);
+        }
         $location = Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->where('store_id', $storeId)->where('location_type', 'STORE')->where('is_default', 1)->where('location_status', 'ACTIVE')->find();
-        if (!$staff || !$location) throw new \RuntimeException('inventory_stock_request_query_scope_denied');
+        if (!$location) throw new \RuntimeException('inventory_stock_request_query_scope_denied');
+        // 本店发起与供货给本店是两个独立的可见主体；仅用请求方仓库筛选会漏掉跨店请货。
         $query = Db::name('inventory_stock_request_document')->alias('d')->leftJoin('inventory_stock_request_line l', 'l.document_id=d.id')->leftJoin('system_store s', 's.id=d.store_id')
-            ->where('d.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->where('d.store_id', $storeId)->where('d.location_id', (int)$location['id']);
+            ->where('d.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where(function ($subjects) use ($storeId, $location): void {
+                $subjects->where(function ($requester) use ($storeId, $location): void {
+                    $requester->where('d.store_id', $storeId)->where('d.location_id', (int)$location['id']);
+                })->whereOr(function ($supplier) use ($storeId): void {
+                    $supplier->where('d.supply_party_type', 'STORE')->where('d.supply_party_id', $storeId);
+                });
+            });
         $this->applyKeyword($query, $keyword);
         if ($dateFrom !== '' && $dateTo !== '') $query->whereBetween('d.business_date', [$dateFrom, $dateTo]);
         $count = (clone $query)->group('d.id')->count();
@@ -105,13 +122,15 @@ final class InventoryStockRequestQueryServices
             ->group('d.id')->order('d.id desc')->page(max(1, $page), max(1, min(100, $limit)))->select()->toArray();
         foreach ($list as &$row) {
             $documentStatus = (string)$row['status_name'];
-            $row['can_edit'] = $documentStatus === 'APPLIED'
+            $row['can_edit'] = (int)$row['store_id'] === $storeId && $documentStatus === 'APPLIED'
                 && !(bool)Db::name('inventory_cross_transfer_document')
                     ->where('request_document_id', (int)$row['id'])
                     ->whereNotIn('document_status', ['CANCELLED', 'REVERSED'])
                     ->value('id');
-            $row['can_cancel'] = $documentStatus === 'APPLIED';
-            $row['can_terminate'] = $documentStatus === 'PARTIAL';
+            $hasTransfer = $this->hasLinkedTransfer((int)$row['id']);
+            $row['can_cancel'] = $documentStatus === 'APPLIED' && !$hasTransfer;
+            $row['can_terminate'] = $documentStatus === 'PARTIAL' && !$hasTransfer;
+            $row['can_void'] = $this->canVoidForStore((int)$row['id'], $documentStatus, $storeId, $hasTransfer);
             if (!$canViewCost) $row['estimated_amount_cents'] = null;
             $row['status_name'] = $this->statusName($documentStatus);
         }
@@ -130,8 +149,13 @@ final class InventoryStockRequestQueryServices
         $document = Db::name('inventory_stock_request_document')->alias('d')
             ->leftJoin('system_store s', 's.id=d.store_id')
             ->where('d.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->where('d.store_id', $storeId)
-            ->where('d.location_id', (int)$scope['location_id'])
+            ->where(function ($subjects) use ($storeId, $scope): void {
+                $subjects->where(function ($requester) use ($storeId, $scope): void {
+                    $requester->where('d.store_id', $storeId)->where('d.location_id', (int)$scope['location_id']);
+                })->whereOr(function ($supplier) use ($storeId): void {
+                    $supplier->where('d.supply_party_type', 'STORE')->where('d.supply_party_id', $storeId);
+                });
+            })
             ->where('d.id', $requestId)
             ->field('d.id,d.request_no,d.document_status,d.store_id,s.name request_store_name,d.requester_name_snapshot,d.operator_name_snapshot,d.supply_party_type,d.supply_party_id,d.supply_party_name_snapshot,d.acceptance_party_id,d.acceptance_party_name_snapshot,d.business_date,d.applied_at,d.recorded_at,d.remark')
             ->find();
@@ -154,22 +178,53 @@ final class InventoryStockRequestQueryServices
             ->where('request_document_id', $requestId)
             ->whereNotIn('document_status', ['CANCELLED', 'REVERSED'])
             ->value('id');
+        $everTransfer = $this->hasLinkedTransfer($requestId);
         return [
             'document' => $document,
             'lines' => $lines,
-            'can_edit' => (string)$document['document_status'] === 'APPLIED'
+            'can_edit' => (int)$document['store_id'] === $storeId && (string)$document['document_status'] === 'APPLIED'
                 && !$hasTransfer
                 && !array_filter($lines, static fn(array $line): bool => (int)$line['fulfilled_transfer_id'] > 0),
-            'can_cancel' => (string)$document['document_status'] === 'APPLIED',
-            'can_terminate' => (string)$document['document_status'] === 'PARTIAL',
+            'can_cancel' => (string)$document['document_status'] === 'APPLIED' && !$everTransfer,
+            'can_terminate' => (string)$document['document_status'] === 'PARTIAL' && !$everTransfer,
+            'can_void' => $this->canVoidForStore($requestId, (string)$document['document_status'], $storeId, $everTransfer),
         ];
+    }
+
+    /** 作废仅开放给供货门店且从未生成调拨的请货；历史取消调拨仍算已生成。 */
+    private function canVoidForStore(int $requestId, string $status, int $storeId, ?bool $hasTransfer = null): bool
+    {
+        if (!in_array($status, ['APPLIED', 'PARTIAL', 'DONE'], true)) return false;
+        $supplier = Db::name('inventory_stock_request_document')->where('id', $requestId)->field('supply_party_type,supply_party_id')->find();
+        if (!$supplier || (string)$supplier['supply_party_type'] !== 'STORE' || (int)$supplier['supply_party_id'] !== $storeId) return false;
+        return !($hasTransfer ?? $this->hasLinkedTransfer($requestId));
+    }
+
+    /** 平台需同时满足供货方授权与零关联调拨；已取消或冲销的历史调拨也关闭作废。 */
+    private function canVoidForPlatform(int $requestId, string $status, string $supplierType, int $supplierId, array $access, ?bool $hasTransfer = null): bool
+    {
+        if (!in_array($status, ['APPLIED', 'PARTIAL', 'DONE'], true)) return false;
+        $allowedStores = array_map('intval', (array)($access['store_ids'] ?? []));
+        if ($supplierType === 'HQ' && $supplierId !== 0) return false;
+        if ($supplierType !== 'HQ' && ($supplierType !== 'STORE' || $supplierId <= 0 || (empty($access['is_super_admin']) && !in_array($supplierId, $allowedStores, true)))) return false;
+        return !($hasTransfer ?? $this->hasLinkedTransfer($requestId));
+    }
+
+    /** 只看是否曾经生成关联调拨，不能因后来取消或历史冲销而重新开放作废。 */
+    private function hasLinkedTransfer(int $requestId): bool
+    {
+        return (bool)Db::name('inventory_cross_transfer_document')->where('request_document_id', $requestId)->value('id');
     }
 
     private function scope(int $storeId, int $operatorId): array
     {
-        $staff = Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)->find();
+        try {
+            (new InventoryStoreAccessPolicy())->writableActor($storeId, $operatorId, 'cashier.v3.inventory.request');
+        } catch (\RuntimeException $exception) {
+            throw new \RuntimeException('inventory_stock_request_query_scope_denied', 0, $exception);
+        }
         $location = Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->where('store_id', $storeId)->where('location_type', 'STORE')->where('is_default', 1)->where('location_status', 'ACTIVE')->find();
-        if (!$staff || !$location) throw new \RuntimeException('inventory_stock_request_query_scope_denied');
+        if (!$location) throw new \RuntimeException('inventory_stock_request_query_scope_denied');
         return ['location_id' => (int)$location['id']];
     }
 
@@ -207,6 +262,11 @@ final class InventoryStockRequestQueryServices
                         $store->whereIn('d.store_id', $allowedStoreIds)
                             ->whereIn('d.request_party_id', $allowedStoreIds);
                     }
+                })->whereOr(function ($headquartersSupplier): void {
+                    $headquartersSupplier->where('d.supply_party_type', 'HQ')->where('d.supply_party_id', 0);
+                })->whereOr(function ($supplier) use ($isSuperAdmin, $allowedStoreIds): void {
+                    $supplier->where('d.supply_party_type', 'STORE')->where('d.supply_party_id', '>', 0);
+                    if (!$isSuperAdmin) $supplier->whereIn('d.supply_party_id', $allowedStoreIds ?: [-1]);
                 });
             });
     }
@@ -224,6 +284,6 @@ final class InventoryStockRequestQueryServices
 
     private function statusName(string $status): string
     {
-        return ['APPLIED' => '申请中', 'PARTIAL' => '部分履约', 'DONE' => '已完成', 'CANCELLED' => '已取消', 'TERMINATED' => '已终止剩余请货'][$status] ?? $status;
+        return ['APPLIED' => '申请中', 'PARTIAL' => '部分履约', 'DONE' => '已完成', 'CANCELLED' => '已取消', 'TERMINATED' => '已终止剩余请货', 'VOIDED' => '已作废'][$status] ?? $status;
     }
 }

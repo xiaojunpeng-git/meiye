@@ -63,8 +63,17 @@ final class InventoryStockRequest extends AuthController
         } catch (\InvalidArgumentException $exception) { return $this->fail('请填写终止原因。', ['code' => $exception->getMessage()]); }
         catch (\RuntimeException $exception) { return $this->fail($this->lifecycleMessage($exception->getMessage()), ['code' => $exception->getMessage()]); }
     }
+    /** 只允许尚未生成调拨的请货单作废，已生成调拨的单据及库存保持原样。 */
+    public function void($id)
+    {
+        try {
+            $data = $this->request->postMore([['idempotency_key',''], ['reason','']]);
+            return $this->success('请货单已作废。', $this->services->voidForStore((int)$this->storeId, (int)$this->storeStaffId, (int)$id, $data));
+        } catch (\InvalidArgumentException $exception) { return $this->fail('请填写作废原因。', ['code' => $exception->getMessage()]); }
+        catch (\RuntimeException $exception) { return $this->fail($this->lifecycleMessage($exception->getMessage()), ['code' => $exception->getMessage()]); }
+    }
     private function lifecycleMessage(string $code): string
     {
-        return ['inventory_stock_request_not_found'=>'请货单不存在或不属于当前门店。','inventory_stock_request_cancel_state_invalid'=>'只有未履约请货单可以取消。','inventory_stock_request_terminate_state_invalid'=>'只有部分履约请货单可以终止剩余数量。','inventory_stock_request_lifecycle_idempotency_conflict'=>'本次操作号已用于其他请货操作，请刷新后重试。'][$code] ?? '请货单操作未完成，请刷新后重试。';
+        return ['inventory_stock_request_not_found'=>'请货单不存在或不属于当前门店。','inventory_stock_request_cancel_state_invalid'=>'只有未履约请货单可以取消。','inventory_stock_request_terminate_state_invalid'=>'只有部分履约请货单可以终止剩余数量。','inventory_stock_request_void_state_invalid'=>'当前请货单不可作废。','inventory_stock_request_void_supplier_denied'=>'请由有权限的供货方人员作废。','inventory_stock_request_void_transfer_exists'=>'这笔请货已生成调拨单，不能作废。','inventory_stock_request_void_fulfillment_remains'=>'请货单已有履约记录，不能作废。','inventory_stock_request_lifecycle_idempotency_conflict'=>'本次操作号已用于其他请货操作，请刷新后重试。'][$code] ?? '请货单操作未完成，请刷新后重试。';
     }
 }

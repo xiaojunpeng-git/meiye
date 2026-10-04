@@ -90,6 +90,11 @@ final class InventoryMovementQueryServices
 
     private function defaultLocation(int $storeId, int $operatorId): array
     {
+        // 详情与统一查询使用同一门店会话授权，不把组织选店会话误当传统员工 ID。
+        $sessionInfo = (array)(request()->storeStaffInfo ?? []);
+        $organizationSession = (!empty($sessionInfo['_cashier_v3_organization']) || !empty($sessionInfo['_cashier_v3_delegated']))
+            && (int)($sessionInfo['id'] ?? 0) === $operatorId
+            && (int)($sessionInfo['store_id'] ?? 0) === $storeId;
         $staff = Db::name('system_store_staff')
             ->where('id', $operatorId)->where('store_id', $storeId)
             ->where('status', 1)->where('is_del', 0)->find();
@@ -98,7 +103,7 @@ final class InventoryMovementQueryServices
             ->where('store_id', $storeId)->where('location_type', 'STORE')
             ->where('is_default', 1)->where('location_status', 'ACTIVE')
             ->limit(2)->select()->toArray();
-        if (!$staff || count($locations) !== 1) {
+        if ((!$staff && !$organizationSession) || count($locations) !== 1) {
             throw new \RuntimeException('inventory_movement_query_scope_denied');
         }
         return (array)$locations[0];

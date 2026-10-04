@@ -236,20 +236,33 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
 
     private function requestRows(string $tenantId, int $storeId, array $locationIds, bool $canViewCost): array
     {
+        // 供货给本店的跨店请货也进入同一权威列表；当前门店仓是查询维度，原单仓仍单独保留。
         $rows = Db::name('inventory_stock_request_document')->alias('d')->leftJoin('inventory_stock_request_line l', 'l.document_id=d.id')->leftJoin('system_store s', 's.id=d.store_id')
-            ->where('d.tenant_id', $tenantId)->where('d.store_id', $storeId)->whereIn('d.location_id', $locationIds)
-            ->field('d.id,d.request_no,d.request_no order_sn,d.document_status status_name,d.business_date,d.recorded_at add_time,d.recorded_at operation_at,d.location_id,s.name request_store_name,d.supply_party_type,d.supply_party_id,d.supply_party_name_snapshot supply_party_name,d.acceptance_party_id,d.acceptance_party_name_snapshot acceptance_party_name,d.operator_name_snapshot operator_name,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
+            ->where('d.tenant_id', $tenantId)->where(function ($subjects) use ($storeId, $locationIds): void {
+                $subjects->where(function ($requester) use ($storeId, $locationIds): void {
+                    $requester->where('d.store_id', $storeId)->whereIn('d.location_id', $locationIds);
+                })->whereOr(function ($supplier) use ($storeId): void {
+                    $supplier->where('d.supply_party_type', 'STORE')->where('d.supply_party_id', $storeId);
+                });
+            })
+            ->field('d.id,d.request_no,d.request_no order_sn,d.document_status status_name,d.store_id requester_store_id,d.business_date,d.recorded_at add_time,d.recorded_at operation_at,d.location_id request_location_id,s.name request_store_name,d.supply_party_type,d.supply_party_id,d.supply_party_name_snapshot supply_party_name,d.acceptance_party_id,d.acceptance_party_name_snapshot acceptance_party_name,d.operator_name_snapshot operator_name,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
             ->group('d.id')->order('d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
         foreach ($rows as &$row) {
             $status = (string)$row['status_name'];
             $row['status_name'] = $this->requestStatusName($status);
-            $row['can_edit'] = $status === 'APPLIED'
+            $isRequester = (int)$row['requester_store_id'] === $storeId && in_array((int)$row['request_location_id'], $locationIds, true);
+            $isSupplier = (string)$row['supply_party_type'] === 'STORE' && (int)$row['supply_party_id'] === $storeId;
+            $row['location_id'] = $isRequester ? (int)$row['request_location_id'] : (int)$locationIds[0];
+            $row['can_edit'] = $isRequester && $status === 'APPLIED'
                 && !(bool)Db::name('inventory_cross_transfer_document')
                     ->where('request_document_id', (int)$row['id'])
                     ->whereNotIn('document_status', ['CANCELLED', 'REVERSED'])
                     ->value('id');
-            $row['can_cancel'] = $status === 'APPLIED';
-            $row['can_terminate'] = $status === 'PARTIAL';
+            // 只要曾生成调拨（包括后来取消/冲销），请货单即锁定所有关闭入口。
+            $linkedTransfer = Db::name('inventory_cross_transfer_document')->where('request_document_id', (int)$row['id'])->value('id');
+            $row['can_cancel'] = $isRequester && $status === 'APPLIED' && !$linkedTransfer;
+            $row['can_terminate'] = $isRequester && $status === 'PARTIAL' && !$linkedTransfer;
+            $row['can_void'] = $isSupplier && in_array($status, ['APPLIED', 'PARTIAL', 'DONE'], true) && !$linkedTransfer;
             if (!$canViewCost) $row['estimated_amount_cents'] = null;
         }
         unset($row);
@@ -273,10 +286,9 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
             $row['status_name'] = $this->transferStatusName((string)$row['document_status']);
             $row['can_dispatch'] = (string)$row['document_status'] === 'DRAFT' && $fromCurrentStore;
             $row['can_receive'] = (string)$row['document_status'] === 'DISPATCHED' && $toCurrentStore;
-            $row['can_cancel'] = (string)$row['document_status'] === 'DRAFT'
-                && (int)$row['initiator_store_id'] === $storeId;
-            $row['can_reverse'] = in_array((string)$row['document_status'], ['DISPATCHED', 'RECEIVED'], true)
-                && $fromCurrentStore;
+            // 调拨状态与历史冲销记录仍可查询；当前业务入口不再允许作废调拨。
+            $row['can_cancel'] = false;
+            $row['can_reverse'] = false;
             if (!$canViewCost) $row['transfer_amount_cents'] = null;
             unset($row['from_party_type'], $row['from_party_id'], $row['from_location_id'], $row['to_party_type'], $row['to_party_id'], $row['to_location_id'], $row['initiator_store_id']);
         }
@@ -285,10 +297,24 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
 
     private function usageRows(string $tenantId, int $storeId, array $locationIds): array
     {
-        return $this->bounded(Db::name('inventory_salon_usage_document')->alias('d')->leftJoin('inventory_salon_usage_line l', 'l.document_id=d.id')
+        $rows = Db::name('inventory_salon_usage_document')->alias('d')->leftJoin('inventory_salon_usage_line l', 'l.document_id=d.id')
             ->where('d.tenant_id', $tenantId)->where('d.store_id', $storeId)->whereIn('d.location_id', $locationIds)
             ->field('d.id,d.usage_no,d.operation_type,d.project_name_snapshot,d.location_id,d.document_status,d.business_date,d.recorded_at operation_at,d.operator_name_snapshot operator_name,d.remark,COUNT(l.id) detail_count')
-            ->group('d.id')->order('d.business_date desc,d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray());
+            ->group('d.id')->order('d.business_date desc,d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
+        $issueIds = array_values(array_map('intval', array_column(array_filter($rows,
+            static fn (array $row): bool => (string)$row['operation_type'] === 'ISSUE'
+                && (string)$row['document_status'] === 'SETTLED'), 'id')));
+        $returned = $issueIds ? array_fill_keys(array_map('intval', Db::name('inventory_salon_usage_line')->alias('source')
+            ->join('inventory_salon_usage_line returned', 'returned.source_usage_line_id=source.id')
+            ->join('inventory_salon_usage_document rd', 'rd.id=returned.document_id')
+            ->whereIn('source.document_id', $issueIds)->where('rd.operation_type', 'RETURN')
+            ->group('source.document_id')->column('source.document_id')), true) : [];
+        foreach ($rows as &$row) {
+            $row['can_void'] = (string)$row['operation_type'] === 'ISSUE'
+                && (string)$row['document_status'] === 'SETTLED' && !isset($returned[(int)$row['id']]);
+        }
+        unset($row);
+        return $this->bounded($rows);
     }
 
     private function importRows(string $tenantId, int $storeId): array
@@ -300,9 +326,9 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
     }
 
     private function bounded(array $rows): array { if (count($rows) > UnifiedQueryExecutionServices::MAX_SOURCE_ROWS) throw new UnifiedQueryException('UNIFIED_QUERY_SOURCE_WINDOW_TOO_LARGE', '当前数据量较大，请缩小业务日期范围后再查询。', []); return $rows; }
-    private function movementName(string $type): string { return ['manual_inbound' => '手工入库', 'manual_outbound' => '手工出库', 'presale_claim_outbound' => '预售领用出库', 'presale_claim_void' => '预售领用作废退库', 'batch_transfer_in' => '调拨入库', 'batch_transfer_out' => '调拨出库', 'cross_transfer_in_reversal' => '调拨入库冲销', 'cross_transfer_out_reversal' => '调拨出库冲销', 'stock_count_gain' => '盘盈', 'stock_count_loss' => '盘亏', 'salon_usage_issue' => '院装领用', 'salon_usage_return' => '院装退回', 'completion_batch' => '项目耗材核销'][$type] ?? $type; }
+    private function movementName(string $type): string { return ['manual_inbound' => '手工入库', 'manual_outbound' => '手工出库', 'presale_claim_outbound' => '预售领用出库', 'presale_claim_void' => '预售领用作废退库', 'batch_transfer_in' => '调拨入库', 'batch_transfer_out' => '调拨出库', 'cross_transfer_in_reversal' => '调拨入库冲销', 'cross_transfer_out_reversal' => '调拨出库冲销', 'stock_count_gain' => '盘盈', 'stock_count_loss' => '盘亏', 'salon_usage_issue' => '院装领用', 'salon_usage_issue_reversal' => '院装领用作废退库', 'salon_usage_return' => '院装退回', 'completion_batch' => '项目耗材核销'][$type] ?? $type; }
     private function transferStatusName(string $status): string { return ['DRAFT' => '草稿', 'DISPATCHED' => '在途', 'RECEIVED' => '已收货', 'CANCELLED' => '已取消', 'REVERSED' => '已作废'][$status] ?? $status; }
-    private function requestStatusName(string $status): string { return ['APPLIED' => '申请中', 'PARTIAL' => '部分履约', 'DONE' => '已完成', 'CANCELLED' => '已取消', 'TERMINATED' => '已终止剩余请货'][$status] ?? $status; }
+    private function requestStatusName(string $status): string { return ['APPLIED' => '申请中', 'PARTIAL' => '部分履约', 'DONE' => '已完成', 'CANCELLED' => '已取消', 'TERMINATED' => '已终止剩余请货', 'VOIDED' => '已作废'][$status] ?? $status; }
 
     private function payloadFromPlan(array $plan): array
     {

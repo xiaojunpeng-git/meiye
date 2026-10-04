@@ -56,9 +56,16 @@ final class InventoryPlatformSalonUsage extends AuthController
         return $this->command('issueForPlatform', '院装领用未完成，请刷新后重试。');
     }
 
-    public function returnToDefault()
+    /** 平台作废仍由已选门店的数据权限限定，不能修改其他门店的院装库存。 */
+    public function void(int $id)
     {
-        return $this->command('returnForPlatform', '院装退回未完成，请刷新后重试。');
+        try {
+            $input = $this->request->post(); $input = is_array($input) ? $input : [];
+            $storeId = (int)($input['store_id'] ?? 0); unset($input['store_id']);
+            return $this->success($this->services->voidForPlatform((array)$this->adminInfo, $storeId, $id, $input));
+        } catch (\InvalidArgumentException|\RuntimeException $exception) {
+            return $this->fail($this->message($exception->getMessage(), '院装领用作废未完成，请刷新后重试。'), ['code' => $exception->getMessage()]);
+        }
     }
 
     private function command(string $method, string $fallback)
@@ -84,6 +91,9 @@ final class InventoryPlatformSalonUsage extends AuthController
             'inventory_salon_usage_return_source_not_found' => '退回来源不存在或不属于当前门店项目。',
             'inventory_salon_usage_return_location_denied' => '退回必须回到当前门店的默认库存仓。',
             'inventory_salon_usage_stock_insufficient' => '当前库存不足，无法完成院装领用。',
+            'inventory_salon_usage_void_has_return' => '该领用单已有退回记录，不能再次作废退库。',
+            'inventory_salon_usage_void_document_missing' => '领用单不存在或不属于当前门店。',
+            'inventory_manual_reversal_already_voided' => '该领用单已作废，请刷新列表。',
         ][$code] ?? $fallback;
     }
 }

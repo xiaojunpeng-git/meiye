@@ -166,15 +166,10 @@ final class InventoryManualInboundServices
             throw new \RuntimeException('inventory_manual_inbound_store_scope_invalid');
         }
 
-        $operator = Db::name('system_store_staff')
-            ->where('id', $operatorId)
-            ->where('store_id', $storeId)
-            ->where('status', 1)
-            ->where('is_del', 0)
-            ->field('id,store_id,staff_name')
-            ->lock(true)
-            ->find();
-        if (!$operator) {
+        // 组织选店会话没有门店员工行；由当前岗位权限解析稳定审计身份，不借用会话 ID。
+        try {
+            $actor = (new InventoryStoreAccessPolicy())->writableActor($storeId, $operatorId, 'cashier.v3.inventory.inbound');
+        } catch (\RuntimeException $exception) {
             throw new \RuntimeException('inventory_manual_inbound_operator_scope_denied');
         }
 
@@ -233,9 +228,9 @@ final class InventoryManualInboundServices
             'organizationPath' => $organizationPath,
             'organizationName' => mb_substr($organizationName, 0, 100),
             'storeId' => (int)$store['id'],
-            'operatorType' => 'STORE_STAFF',
-            'operatorId' => $operatorId,
-            'operatorName' => mb_substr(trim((string)$operator['staff_name']), 0, 128),
+            'operatorType' => $actor['type'],
+            'operatorId' => $actor['id'],
+            'operatorName' => $actor['name'],
             'storeName' => mb_substr(trim((string)$store['name']), 0, 100),
         ];
     }
