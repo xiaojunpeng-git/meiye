@@ -1505,7 +1505,7 @@ function closeMemberDebt() {
 
 async function prepareDebtRepayment(payload = {}) {
   if (isDebtRepaymentPreparing.value) return { success: false, message: '正在准备收款，请勿重复操作。' }
-  // “下一步”只冻结浏览器内金额、业务日和销售人。后端在最终确认的
+  // “下一步”只冻结浏览器内金额、业务日、来源和销售人。后端在最终确认的
   // 单一事务内锁定当前欠款再复核，不再创建编辑中草稿或比较工作台版本。
   const debtId = Number(payload.debtRecordId || 0)
   const memberId = Number(payload.memberId || 0)
@@ -1513,12 +1513,13 @@ async function prepareDebtRepayment(payload = {}) {
   if (!Number.isSafeInteger(debtId) || debtId <= 0
     || !Number.isSafeInteger(memberId) || memberId <= 0
     || !Number.isSafeInteger(amount) || amount <= 0
-    || !/^\d{4}-\d{2}-\d{2}$/.test(String(payload.businessDate || ''))) {
-    return { result: { status: 'failed', message: '请选择有效欠款、金额和业务日期。' } }
+    || !/^\d{4}-\d{2}-\d{2}$/.test(String(payload.businessDate || ''))
+    || Number(payload.businessSource?.primarySourceId || 0) <= 0) {
+    return { result: { status: 'failed', message: '请选择有效欠款、金额、业务日期和客户来源。' } }
   }
-  // 销售与充值欠款都展示原单历史来源，不继承当前工具栏可编辑来源；
-  // 原单缺少快照时保留空值，最终事务会拒绝猜测来源。
-  const source = payload.record?.originalBusinessSource || {}
+  // 欠款弹窗选择的来源是本次补交归因；原单快照仅是默认值。
+  // 不继承收银工具栏来源，最终事务仍按目录/原单权威重新解析。
+  const source = payload.businessSource || {}
   const handoff = {
     businessType: 'debt_repayment',
     localRepayment: { ...payload, businessSource: { ...source } }

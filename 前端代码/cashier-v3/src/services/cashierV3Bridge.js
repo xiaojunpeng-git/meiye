@@ -2755,6 +2755,11 @@ function resolveCommandContexts(action, payload) {
   if (action === 'void-service-record') {
     return { invalid: false, contexts: [] }
   }
+  // 归属更正只以原单权威行和提交时旧值做并发约束；即使调用方误传展示版本，
+  // 也不得让浏览器版本仓决定这笔历史更正能否进入后端事务。
+  if (['correct-sales-order-attribution', 'correct-service-order-date', 'correct-recharge-order-attribution', 'correct-debt-repayment-date', 'correct-debt-repayment-source'].includes(action)) {
+    return { invalid: false, contexts: [] }
+  }
   // 结账后批量结束预约时，作用集合必须由服务端从已结算订单反推，
   // 不接受浏览器指定或遗漏某一条预约 context。
   if (action === 'complete-checkout-reservations') {
@@ -3724,17 +3729,21 @@ export async function requestCashierV3Action(action, payload = {}) {
   // 作废和结账后预约收口都以服务端权威单据反查实际作用集合：
   // 浏览器不得伪造或遗漏某条预约 context，因此这些命令允许空 contexts，
   // 再由领域事务锁定销售订单及候选预约。
-  const serverDiscoverableContextAction = [
+  // 日期／来源更正不引入单据版本：领域事务锁定原单并比较提交时旧值，
+  // 因而和独立欠款操作一样允许空 command contexts，不能误拿收银工作台版本阻断。
+  const serverDiscoverableContextActions = [
     'cancel-order-center-debt',
     'void-order-center-supplement',
     'void-service-record',
-    'complete-checkout-reservations'
-  ].includes(canonicalAction) || [
-    'cancel-order-center-debt',
-    'void-order-center-supplement',
-    'void-service-record',
-    'complete-checkout-reservations'
-  ].includes(action)
+    'complete-checkout-reservations',
+    'correct-sales-order-attribution',
+    'correct-service-order-date',
+    'correct-recharge-order-attribution',
+    'correct-debt-repayment-date',
+    'correct-debt-repayment-source'
+  ]
+  const serverDiscoverableContextAction = serverDiscoverableContextActions.includes(canonicalAction)
+    || serverDiscoverableContextActions.includes(action)
   if (!readOnly && !reservationDataWrite && !directCheckoutSnapshot && !liveProjectReplacement && !serverDiscoverableContextAction && !serverLockedDebtRepaymentPreparation
     && (resolvedContexts.invalid || hasInvalidWriteContexts(contexts))) {
     // No command has been sent yet, so a single automatic root recovery is

@@ -78,6 +78,8 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         foreach ([
             'query-sales-orders' => self::FEATURE_ORDER_CENTER,
             'query-order-center-records' => self::FEATURE_ORDER_CENTER,
+            'query-order-attribution-sources' => self::FEATURE_ORDER_CENTER,
+            'query-order-attribution-changes' => self::FEATURE_ORDER_CENTER,
             'open-sales-order-detail' => self::FEATURE_ORDER_CENTER,
             'view-sales-order' => self::FEATURE_ORDER_CENTER,
             'open-order-operation-logs' => self::FEATURE_ORDER_CENTER,
@@ -106,6 +108,12 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['adjust-recharge-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
         $command['adjust-supplement-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
         $command['update-sales-order-note'] = self::FEATURE_ORDER_CENTER;
+        $command['correct-sales-order-attribution'] = self::FEATURE_ORDER_CENTER;
+        // 纯权益消费只有服务事实，允许更正日期但没有来源编辑权限。
+        $command['correct-service-order-date'] = self::FEATURE_ORDER_CENTER;
+        $command['correct-recharge-order-attribution'] = self::FEATURE_ORDER_CENTER;
+        $command['correct-debt-repayment-date'] = self::FEATURE_ORDER_CENTER;
+        $command['correct-debt-repayment-source'] = self::FEATURE_ORDER_CENTER;
         $command['refund-sales-order'] = self::FEATURE_ORDER_REFUND;
         $command['void-sales-order'] = self::FEATURE_ORDER_VOID;
         $command['void-service-record'] = self::FEATURE_ORDER_SERVICE_VOID;

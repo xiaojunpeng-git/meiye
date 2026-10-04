@@ -8847,7 +8847,20 @@ button:disabled {
 }
 
 .order-center-page {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  /* 更正成功提示、报表下钻提示等是条件子项；固定四行网格会把查询栏错放进
+     剩余高度行。仅订单中心改为纵向弹性布局，让表格承接可变子项后的余高。 */
+  display: flex;
+  flex-direction: column;
+}
+
+.order-center-page > .unified-query-toolbar,
+.order-center-page > .table-pagination {
+  flex: none;
+}
+
+.order-center-page > .order-center-list-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .member-query-insights {

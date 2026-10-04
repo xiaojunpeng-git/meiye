@@ -6544,8 +6544,7 @@ async function openPreparedCheckout(event = {}) {
       occurredAt: Math.floor(Date.now() / 1000), businessDate: date,
       repaymentAmount: amount,
       salespersonAllocations: clonePlain(intent.salespersonAllocations || []),
-      // 欠款补交只显示原单冻结来源；原单来源缺失时保留空值，
-      // 不可回退工具栏来源，否则页面会伪装成可修改的另一种归因。
+      // 欠款弹窗已确认本次补交来源，原单只是默认值；不回退工具栏来源。
       source: clonePlain(intent.businessSource || {}),
       sourceDocument: { type: 'debt_repayment', id: String(debtId), no: String(intent.record?.debtNo || '') },
       lines: [line], orderLines: [line],
@@ -6598,7 +6597,7 @@ async function openPreparedCheckout(event = {}) {
           status: String(line?.status || 'editing')
         }))
       : []
-    // 恢复欠款补交时保留原单来源，不能让随后调整的工具栏来源覆盖它。
+    // 恢复欠款补交时保留本次已选来源，不能让随后调整的工具栏来源覆盖它。
     localCheckoutPreview.value = {
       ...snapshot,
       lines: [...clonePlain(orderLines), ...paymentLines],

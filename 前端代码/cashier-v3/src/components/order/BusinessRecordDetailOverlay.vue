@@ -21,7 +21,8 @@ const props = defineProps({
   },
   lifecycleActions: { type: Array, default: () => [] },
   onLifecycleAction: { type: Function, default: null },
-  fieldActionKeys: { type: Array, default: () => [] }
+  fieldActionKeys: { type: Array, default: () => [] },
+  attributionChanges: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['close', 'field-action'])
@@ -144,6 +145,13 @@ async function submitLifecycleAction() {
             <div><button type="button" class="button button--text" :disabled="pending" @click="activeForm = ''">取消</button><button type="button" class="button button--primary" :disabled="pending" @click="submitLifecycleAction">确认</button></div>
           </section>
         </template>
+        <section v-if="attributionChanges.length" class="business-record-detail__changes">
+          <h3>变更记录</h3>
+          <p v-for="(change, index) in attributionChanges" :key="`${change.recordId}-${change.field}-${index}`">
+            {{ change.recordNo }} · {{ change.field === 'source' ? '来源' : '业务日期' }}：{{ change.oldValue || '—' }} → {{ change.newValue || '—' }}
+            <small>{{ change.operatorName || change.operatorId }} · {{ new Date(change.occurredAt * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }}</small>
+          </p>
+        </section>
       </main>
 
       <footer class="business-record-detail__footer">
@@ -158,6 +166,9 @@ async function submitLifecycleAction() {
 </template>
 
 <style scoped>
+.business-record-detail__changes { margin-top: 18px; border-top: 1px solid #e1e8f0; padding-top: 12px; }
+.business-record-detail__changes p { margin: 8px 0; }
+.business-record-detail__changes small { display: block; color: #65758a; margin-top: 3px; }
 .business-record-detail {
   position: fixed;
   z-index: 1450;

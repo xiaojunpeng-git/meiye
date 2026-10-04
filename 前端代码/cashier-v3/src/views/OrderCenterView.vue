@@ -13,6 +13,7 @@ import { useUnifiedQueryPage } from '@mohe/unified-query-vue3/composable'
 import { queryPreferenceKey, readQueryPreferences, mergeQueryRefresh, normalizeUnifiedQuerySettings } from '@mohe/unified-query-vue3'
 import {
   createCashierV3CommandId,
+  canUseCashierV3Feature,
   canUseCashierV3Operation,
   formatMoney,
   mergeCashierV3PublicVersions,
@@ -81,6 +82,13 @@ const salesOrderNoteSubmitting = ref(false)
 const salesOrderNoteCommandIds = ref({})
 const salesDetailFocus = ref({ lifecycleAction: '', personnelRole: '', personnelLineId: '' })
 const salesDetailActionOnly = ref(false)
+// 归属更正仅更新业务日／来源，实际发生与收款时间保持只读；后端再次校验门店、权限和旧值。
+const attributionEditor = ref(null)
+const attributionSources = ref([])
+const attributionChanges = ref([])
+const attributionPending = ref(false)
+const attributionError = ref('')
+let attributionChangesSerial = 0
 
 const ORDER_TABS = [
   {
@@ -834,6 +842,121 @@ function salesOrderActionAvailable(record, action, permission) {
   const actions = record?.availableActions
   const available = Array.isArray(actions) ? actions.includes(action) : actions?.[action] === true
   return available && (!permission || canUseCashierV3Operation(permission))
+}
+
+function attributionIdentity(record, tab = activeTabKey.value) {
+  const raw = String(record?.id || record?.orderId || record?.salesOrderId || '')
+  // 纯服务列表的 service: 前缀只是展示分组键；写命令必须使用后端给出的结账请求 ID。
+  if (tab === 'sales' && record?.entitlementOnly) return { recordType: 'service', recordId: String(record?.checkoutRequestId || '') }
+  if (tab === 'sales') return { recordType: 'sales', recordId: raw }
+  if (tab === 'recharge') return { recordType: 'recharge', recordId: raw.replace(/^recharge:/, '') }
+  if (tab === 'supplement') return { recordType: 'supplement', recordId: raw.replace(/^v3-(?:sales-)?supplement:/, '') }
+  return null
+}
+
+// 列表能力仅决定是否展示蓝色入口；后端仍以当前会话门店、权限及旧值独立判定。
+function canCorrectAttribution(record, field) {
+  // 消费订单是页面 feature，不在叶子 operation 快照中；误查 operation 会让有权门店隐藏更正入口。
+  // 销售行还须由后端明确授予更正动作，实际写入仍由后端按当前会话与门店重新校验。
+  if (isPlatformReadOnly.value || !canUseCashierV3Feature('cashier.v3.order_center')) return false
+  if (activeTabKey.value === 'sales') {
+    if (record?.entitlementOnly) return field === 'business_date'
+      && salesOrderActionAvailable(record, 'correct-service-order-date')
+    return salesOrderActionAvailable(record, 'correct-sales-order-attribution')
+  }
+  if (activeTabKey.value === 'recharge') return record?.attributionEditable === true
+  return activeTabKey.value === 'supplement' && ['business_date', 'source'].includes(field)
+    && record?.attributionEditable === true
+}
+
+function attributionAction(type, field) {
+  return type === 'sales' ? 'correct-sales-order-attribution'
+    : type === 'service' ? 'correct-service-order-date'
+    : type === 'recharge' ? 'correct-recharge-order-attribution'
+      : field === 'source' ? 'correct-debt-repayment-source' : 'correct-debt-repayment-date'
+}
+
+async function readAttributionChanges(record, tab = activeTabKey.value) {
+  // 详情切换时只接收最后一次请求，避免旧订单的审计记录落到新订单详情。
+  const serial = ++attributionChangesSerial
+  attributionChanges.value = []
+  const identity = attributionIdentity(record, tab)
+  if (!identity || !['sales', 'service', 'recharge', 'supplement'].includes(identity.recordType)) return
+  try {
+    const response = await requestAction('query-order-attribution-changes', identity)
+    if (serial === attributionChangesSerial && ['success', 'succeeded'].includes(actionStatus(response))) {
+      attributionChanges.value = actionData(response).attributionChanges?.changes || []
+    }
+  } catch { /* 详情仍可查看；审计读取失败不应遮蔽订单。 */ }
+}
+
+async function openAttributionEditor(record, field) {
+  if (!canCorrectAttribution(record, field)) return
+  const identity = attributionIdentity(record)
+  if (!identity) return
+  attributionError.value = ''
+  attributionEditor.value = {
+    ...identity, field, recordNo: displayRecordField(record, activeTab.value.primaryField),
+    expectedValue: String(recordFieldValue(record, field) || ''),
+    newValue: field === 'business_date' ? String(recordFieldValue(record, field) || '') : '',
+    expectedPrimarySourceId: Number(record.businessSourcePrimaryId || 0),
+    expectedSecondarySourceId: Number(record.businessSourceSecondaryId || 0),
+    primarySourceId: Number(record.businessSourcePrimaryId || 0),
+    secondarySourceId: Number(record.businessSourceSecondaryId || 0)
+  }
+  if (field === 'source' && !attributionSources.value.length) {
+    try {
+      const response = await requestAction('query-order-attribution-sources', {})
+      if (!['success', 'succeeded'].includes(actionStatus(response))) {
+        attributionError.value = response?.result?.message || '来源选项读取失败。'
+        return
+      }
+      attributionSources.value = actionData(response).attributionSources?.sources || []
+    } catch (error) {
+      attributionError.value = error?.message || '来源选项读取失败。'
+    }
+  }
+}
+
+const selectedAttributionPrimary = computed(() => attributionSources.value.find(
+  (source) => Number(source.id) === Number(attributionEditor.value?.primarySourceId)
+))
+
+async function submitAttributionCorrection() {
+  const editor = attributionEditor.value
+  if (!editor || attributionPending.value) return
+  attributionError.value = ''
+  if (editor.field === 'business_date' && (!/^\d{4}-\d{2}-\d{2}$/.test(editor.newValue) || editor.newValue === editor.expectedValue)) {
+    attributionError.value = '请选择不同于原日期的有效业务日期。'
+    return
+  }
+  if (editor.field === 'source' && !editor.primarySourceId) {
+    attributionError.value = '请选择来源。'
+    return
+  }
+  attributionPending.value = true
+  try {
+    const response = await requestAction(attributionAction(editor.recordType, editor.field), {
+      recordType: editor.recordType, recordId: editor.recordId, field: editor.field,
+      expectedValue: editor.expectedValue, newValue: editor.newValue,
+      expectedPrimarySourceId: editor.expectedPrimarySourceId, expectedSecondarySourceId: editor.expectedSecondarySourceId,
+      primarySourceId: editor.primarySourceId, secondarySourceId: editor.secondarySourceId,
+      idempotencyKey: createCashierV3CommandId()
+    })
+    if (!['success', 'succeeded'].includes(actionStatus(response))) {
+      attributionError.value = response?.result?.message || response?.data?.result?.message || '更正未完成，请刷新后重试。'
+      return
+    }
+    attributionEditor.value = null
+    serviceVoidNotice.value = '归属更正已保存，可在订单详情的变更记录查看。'
+    try { await queryRecords({}, false) } catch { serviceVoidNotice.value += ' 列表刷新失败，请手动点击查询。' }
+    if (isSalesDetailOpen.value && ['sales', 'service'].includes(editor.recordType)) await readAttributionChanges(salesDetailOrder.value, 'sales')
+    if (genericDetailRecord.value && !['sales', 'service'].includes(editor.recordType)) await readAttributionChanges(genericDetailRecord.value, editor.recordType)
+  } catch (error) {
+    attributionError.value = error?.message || '更正未完成，请稍后重试。'
+  } finally {
+    attributionPending.value = false
+  }
 }
 
 /**
@@ -1730,6 +1853,7 @@ function showSalesOrderDetail(payload = {}) {
 async function openSalesOrderDetail(payload = {}) {
   const current = showSalesOrderDetail(payload)
   if (!current) return { success: false, message: '未找到销售订单。' }
+  void readAttributionChanges(current.record || { id: current.orderId }, 'sales')
   const requestSequence = ++salesDetailSequence
   const requestedOrderId = current.orderId
   const requestedOrderNo = current.orderNo || salesOrderDetailNo(salesDetailOrder.value)
@@ -1810,6 +1934,14 @@ function closeSalesDetail() {
   salesDetailLoadError.value = ''
   salesDetailFocus.value = { lifecycleAction: '', personnelRole: '', personnelLineId: '' }
   salesDetailActionOnly.value = false
+  attributionChangesSerial++
+  attributionChanges.value = []
+}
+
+function closeGenericDetail() {
+  attributionChangesSerial++
+  attributionChanges.value = []
+  genericDetailRecord.value = null
 }
 
 function openRecordDetail(record) {
@@ -1819,6 +1951,7 @@ function openRecordDetail(record) {
   }
   if (activeTabKey.value === 'service' && !canUseCashierV3Operation('cashier.v3.order.service_detail')) return
   genericDetailRecord.value = record
+  void readAttributionChanges(record)
   return null
 }
 
@@ -2528,7 +2661,7 @@ onBeforeUnmount(() => {
           <tr class="sales-order-query-group__header">
             <td :colspan="salesOrderListColumns.length">
               <!-- 主项固定列槽，业务标签放在来源之后，避免标签或名称长度推移后续字段。 -->
-              <span class="sales-order-query-meta sales-order-query-meta--date">销售日期：{{ displayRecordField(record, 'business_date') }}</span>
+              <span class="sales-order-query-meta sales-order-query-meta--date">销售日期：<button v-if="canCorrectAttribution(record, 'business_date')" type="button" class="order-link" @click="openAttributionEditor(record, 'business_date')">{{ displayRecordField(record, 'business_date') }}</button><template v-else>{{ displayRecordField(record, 'business_date') }}</template></span>
               <span class="sales-order-query-meta sales-order-query-meta--time">实际下单时间：{{ displayRecordField(record, 'occurred_at') }}</span>
               <span class="sales-order-query-meta sales-order-query-meta--number" :title="displayRecordField(record, 'sales_order_no')">订单编号：{{ displayRecordField(record, 'sales_order_no') }}</span>
               <span class="sales-order-query-meta sales-order-query-meta--store" :title="displayRecordField(record, 'store')">门店：{{ displayRecordField(record, 'store') }}</span>
@@ -2540,7 +2673,7 @@ onBeforeUnmount(() => {
                 :title="`查看${displayRecordField(record, 'member_name')}的会员详情`"
                 @click="openMemberDetail(record)"
               >{{ displayRecordField(record, 'member_name') }}</button><template v-else>{{ displayRecordField(record, 'member_name') }}</template></span>
-              <span class="sales-order-query-meta sales-order-query-meta--source" :title="displayRecordField(record, 'source')">来源：{{ displayRecordField(record, 'source') }}</span>
+              <span class="sales-order-query-meta sales-order-query-meta--source" :title="displayRecordField(record, 'source')">来源：<button v-if="canCorrectAttribution(record, 'source')" type="button" class="order-link" @click="openAttributionEditor(record, 'source')">{{ displayRecordField(record, 'source') }}</button><template v-else>{{ displayRecordField(record, 'source') }}</template></span>
               <span v-if="record.upgradeTypeLabel" class="sales-order-query-group__upgrade-tag">{{ record.upgradeTypeLabel }}</span>
               <!-- 纯权益可以查看/打印及作废服务，但不进入销售退款。 -->
               <span v-if="!isPlatformReadOnly" class="sales-order-query-group__actions">
@@ -2667,6 +2800,10 @@ onBeforeUnmount(() => {
                 {{ displayRecordField(record, fieldItem.key) }}
               </button>
               <button
+                v-else-if="['business_date', 'source'].includes(fieldItem.key) && canCorrectAttribution(record, fieldItem.key)"
+                type="button" class="order-link" @click="openAttributionEditor(record, fieldItem.key)"
+              >{{ displayRecordField(record, fieldItem.key) }}</button>
+              <button
                 v-else-if="!isPlatformReadOnly && fieldItem.key === 'craftsman' && serviceRecordIsNormal(record) && canUseCashierV3Operation('cashier.v3.order.service_detail')"
                 type="button"
                 class="order-link"
@@ -2726,6 +2863,7 @@ onBeforeUnmount(() => {
       :order="salesDetailOrder"
       :is-loading="isSalesDetailLoading"
       :load-error="salesDetailLoadError"
+      :attribution-changes="attributionChanges"
       :action-only="salesDetailActionOnly"
       :initial-lifecycle-action="salesDetailFocus.lifecycleAction"
       :focus-personnel-role="salesDetailFocus.personnelRole"
@@ -2794,9 +2932,39 @@ onBeforeUnmount(() => {
       :lifecycle-actions="rechargeLifecycleActions"
       :on-lifecycle-action="handleRechargeLifecycleAction"
       :field-action-keys="serviceRecordIsNormal(genericDetailRecord) ? ['craftsman'] : []"
+      :attribution-changes="attributionChanges"
       @field-action="handleDetailFieldAction"
-      @close="genericDetailRecord = null"
+      @close="closeGenericDetail"
     />
+
+    <div v-if="attributionEditor" class="service-void-modal" role="dialog" aria-modal="true" aria-label="更正订单归属">
+      <div class="service-void-modal__backdrop"></div>
+      <form class="service-void-modal__panel" @submit.prevent="submitAttributionCorrection">
+        <header class="service-void-modal__head"><h2>更正{{ attributionEditor.field === 'source' ? '来源' : '业务日期' }}</h2></header>
+        <p class="service-void-modal__record">{{ attributionEditor.recordNo }} · 当前{{ attributionEditor.field === 'source' ? '来源' : '日期' }}：{{ attributionEditor.expectedValue || '—' }}</p>
+        <template v-if="attributionEditor.field === 'source'">
+          <label class="service-void-modal__label">一级来源</label>
+          <select v-model.number="attributionEditor.primarySourceId" class="service-void-modal__textarea" @change="attributionEditor.secondarySourceId = 0">
+            <option :value="0">请选择</option>
+            <option v-for="source in attributionSources" :key="source.id" :value="source.id">{{ source.name }}</option>
+          </select>
+          <template v-if="selectedAttributionPrimary?.children?.length">
+            <label class="service-void-modal__label">二级来源</label>
+            <select v-model.number="attributionEditor.secondarySourceId" class="service-void-modal__textarea">
+              <option :value="0">请选择</option>
+              <option v-for="source in selectedAttributionPrimary.children" :key="source.id" :value="source.id">{{ source.name }}</option>
+            </select>
+          </template>
+        </template>
+        <template v-else>
+          <label class="service-void-modal__label">更正后日期</label>
+          <input v-model="attributionEditor.newValue" type="date" class="service-void-modal__textarea" required />
+        </template>
+        <p v-if="attributionError" class="service-void-modal__error" role="alert">{{ attributionError }}</p>
+        <footer class="service-void-modal__actions"><button type="button" class="button button--secondary" :disabled="attributionPending" @click="attributionEditor = null">取消</button>
+          <button type="submit" class="button button--primary" :disabled="attributionPending">{{ attributionPending ? '保存中…' : '确认更正' }}</button></footer>
+      </form>
+    </div>
 
     <div v-if="debtCancelRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-label="取消欠款">
       <div class="service-void-modal__backdrop"></div>

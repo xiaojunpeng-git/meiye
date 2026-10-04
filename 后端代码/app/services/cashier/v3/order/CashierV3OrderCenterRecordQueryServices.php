@@ -252,7 +252,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('system_store s', 's.id = r.store_id')
             ->leftJoin('system_store_staff st', 'st.id = r.staff_id');
         $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
-        $this->applyTimestampBusinessDateRange($query, 'COALESCE(NULLIF(r.pay_time, 0), r.add_time)', $criteria);
+        $this->applyBusinessDateRange($query, 'r.business_date', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.order_id', 'u.real_name', 'u.nickname', 'u.phone', 's.name', 'st.staff_name',
         ]);
@@ -275,18 +275,18 @@ final class CashierV3OrderCenterRecordQueryServices
                 ->whereNotExists($this->rechargeLifecycleOperationQuery($tenantId, ['void']));
         }
         $total = (int)(clone $query)->count('r.id');
-        $rows = $this->pageRows($query, $criteria, 'r.pay_time', 'r.id', implode(',', [
+        $rows = $this->pageRows($query, $criteria, 'r.business_date', 'r.id', implode(',', [
             'r.id', 'r.order_id', 'r.uid', 'r.store_id', 'r.staff_id', 'r.price', 'r.give_price',
             'r.refund_price', 'r.recharge_type', 'r.combination_info', 'r.remarks', 'r.channel_type', 'r.paid', 'r.terminal_action',
-            'r.business_source_primary_name_snapshot', 'r.business_source_secondary_name_snapshot', 'r.business_source_label_snapshot',
-            'r.pay_time', 'r.add_time', 'u.real_name', 'u.nickname', 'u.phone',
+            'r.business_source_primary_id', 'r.business_source_primary_name_snapshot',
+            'r.business_source_secondary_id', 'r.business_source_secondary_name_snapshot', 'r.business_source_label_snapshot',
+            'r.business_date', 'r.pay_time', 'r.add_time', 'u.real_name', 'u.nickname', 'u.phone',
             's.name AS store_name', 'st.staff_name',
         ]));
         $rechargeEconomics = $this->readRechargeEconomics($rows);
         $rechargeSalespeople = $this->readRechargeSalespeople($rows, $tenantId);
-        $rechargeBusinessDates = $this->readRechargeBusinessDates($rows);
         $rechargeLifecycleOperations = $this->readRechargeLifecycleOperations($rows, $tenantId);
-        return [array_map(function (array $row) use ($rechargeEconomics, $rechargeSalespeople, $rechargeBusinessDates, $rechargeLifecycleOperations): array {
+        return [array_map(function (array $row) use ($rechargeEconomics, $rechargeSalespeople, $rechargeLifecycleOperations): array {
             $time = (int)($row['pay_time'] ?: $row['add_time']);
             $economicsKey = $this->rechargeFactKey((int)$row['store_id'], (string)$row['order_id']);
             $hasV3PaymentFacts = array_key_exists($economicsKey, $rechargeEconomics);
@@ -298,7 +298,10 @@ final class CashierV3OrderCenterRecordQueryServices
                 'rechargeOrderNo' => (string)$row['order_id'],
                 // 客户来源只读充值成功时的单据快照，不回查会员当前来源。
                 'source' => $this->businessSourceLabel($row),
-                'businessDate' => $rechargeBusinessDates[$economicsKey] ?? $this->date($time),
+                'businessSourcePrimaryId' => (int)$row['business_source_primary_id'],
+                'businessSourceSecondaryId' => (int)$row['business_source_secondary_id'],
+                'businessDate' => (string)$row['business_date'],
+                'attributionEditable' => true,
                 'memberName' => $this->memberName($row),
                 'phone' => (string)$row['phone'],
                 'storeName' => (string)$row['store_name'],
@@ -452,48 +455,6 @@ final class CashierV3OrderCenterRecordQueryServices
         return $out;
     }
 
-    /**
-     * The selected recharge date is recorded in the immutable V3 fact context.
-     * The legacy recharge row keeps payment time for compatibility, so order
-     * center must prefer the fact date when one exists.
-     *
-     * @return array<string,string> keyed by store ID and recharge order number
-     */
-    private function readRechargeBusinessDates(array $recharges): array
-    {
-        $storeIds = [];
-        $orderNos = [];
-        foreach ($recharges as $recharge) {
-            $storeId = (int)($recharge['store_id'] ?? 0);
-            $orderNo = trim((string)($recharge['order_id'] ?? ''));
-            if ($storeId <= 0 || $orderNo === '') continue;
-            $storeIds[$storeId] = $storeId;
-            $orderNos[$orderNo] = $orderNo;
-        }
-        if ($storeIds === [] || $orderNos === []) return [];
-        $facts = Db::name('cashier_v3_payment_fact')->alias('pf')
-            ->where('pf.source_document_type', 'recharge')
-            // 原充值业务日期取正向事实；作废反向事实按作废日入账，不能覆盖原单日期快照。
-            ->where('pf.fact_direction', 'forward')
-            ->where('pf.status', 'effective')
-            ->whereIn('pf.store_id', array_values($storeIds))
-            ->whereIn('pf.order_no_snapshot', array_values($orderNos))
-            ->field('pf.store_id,pf.order_no_snapshot,MAX(pf.business_date) AS business_date')
-            ->group('pf.store_id,pf.order_no_snapshot')
-            ->select()
-            ->toArray();
-        $dates = [];
-        foreach ($facts as $fact) {
-            $storeId = (int)($fact['store_id'] ?? 0);
-            $orderNo = trim((string)($fact['order_no_snapshot'] ?? ''));
-            $businessDate = trim((string)($fact['business_date'] ?? ''));
-            if ($storeId > 0 && $orderNo !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $businessDate) === 1) {
-                $dates[$this->rechargeFactKey($storeId, $orderNo)] = $businessDate;
-            }
-        }
-        return $dates;
-    }
-
     private function rechargeFactKey(int $storeId, string $orderNo): string
     {
         return $storeId . "\0" . trim($orderNo);
@@ -548,6 +509,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $rows = $query->field(implode(',', [
             'r.id', 'r.repayment_id', 'r.repayment_no', 'r.debt_no',
             'r.sales_order_no_snapshot', 'r.repayment_amount_cents', 'r.status',
+            'r.business_source_primary_id', 'r.business_source_secondary_id',
             'r.business_source_primary_name_snapshot', 'r.business_source_secondary_name_snapshot', 'r.business_source_label_snapshot',
             'r.store_id', 'r.member_id', 'r.operator_id', 'r.business_date', 'r.settled_at',
             'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name',
@@ -576,7 +538,10 @@ final class CashierV3OrderCenterRecordQueryServices
                 'id' => 'v3-sales-supplement:' . $repaymentId,
                 'supplementOrderNo' => (string)$row['repayment_no'],
                 'source' => $this->businessSourceLabel($row),
+                'businessSourcePrimaryId' => (int)$row['business_source_primary_id'],
+                'businessSourceSecondaryId' => (int)$row['business_source_secondary_id'],
                 'businessDate' => (string)$row['business_date'],
+                'attributionEditable' => true,
                 'debtNo' => (string)$row['debt_no'],
                 'sourceOrderNo' => (string)$row['sales_order_no_snapshot'],
                 'memberId' => (int)$row['member_id'],
@@ -620,6 +585,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
             'r.id', 'r.repayment_id', 'r.repayment_no', 'r.debt_id', 'r.amount_cents',
+            'r.business_source_primary_id', 'r.business_source_secondary_id',
             'r.business_source_primary_name_snapshot', 'r.business_source_secondary_name_snapshot', 'r.business_source_label_snapshot',
             'r.store_id', 'r.member_id', 'r.operator_id', 'r.business_date', 'r.settled_at', 'd.debt_no',
             'd.order_sn', 'r.status', 'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name',
@@ -647,7 +613,10 @@ final class CashierV3OrderCenterRecordQueryServices
                 'id' => 'v3-supplement:' . $repaymentId,
                 'supplementOrderNo' => (string)$row['repayment_no'],
                 'source' => $this->businessSourceLabel($row),
+                'businessSourcePrimaryId' => (int)$row['business_source_primary_id'],
+                'businessSourceSecondaryId' => (int)$row['business_source_secondary_id'],
                 'businessDate' => (string)$row['business_date'],
+                'attributionEditable' => true,
                 'debtNo' => (string)$row['debt_no'],
                 'sourceOrderNo' => (string)$row['order_sn'],
                 'memberId' => (int)$row['member_id'],

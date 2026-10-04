@@ -740,6 +740,11 @@ class CashierV3ActionManifest
                 'event_rules' => ['sales_order.note_updated' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'update-sales-order-note']],
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['sales_order.note_updated' => []],
             ],
+            'correct-sales-order-attribution' => self::attributionCorrectionEventContract('correct-sales-order-attribution'),
+            'correct-service-order-date' => self::attributionCorrectionEventContract('correct-service-order-date'),
+            'correct-recharge-order-attribution' => self::attributionCorrectionEventContract('correct-recharge-order-attribution'),
+            'correct-debt-repayment-date' => self::attributionCorrectionEventContract('correct-debt-repayment-date'),
+            'correct-debt-repayment-source' => self::attributionCorrectionEventContract('correct-debt-repayment-source'),
             'refund-sales-order' => [
                 'required_event_types' => ['sales_order.refunded'], 'allowed_event_types' => ['sales_order.refunded'],
                 'event_rules' => ['sales_order.refunded' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'refund-sales-order']],
@@ -822,6 +827,21 @@ class CashierV3ActionManifest
             'archive-unified-query-custom-field' => $eventless($queryMetadata),
             'upgrade-unified-query-field-reference' => $eventless($queryPreference),
             'create-unified-query-export' => $eventless($queryMetadata),
+        ];
+    }
+
+    /** 更正事件只描述审计动作；经营事实直接更新归属字段，原单不生成新版本。 */
+    private static function attributionCorrectionEventContract(string $action): array
+    {
+        return [
+            'required_event_types' => ['order_attribution.corrected'],
+            'allowed_event_types' => ['order_attribution.corrected'],
+            'event_rules' => ['order_attribution.corrected' => [
+                'min_count' => 1, 'max_count' => 1,
+                'aggregate_type' => 'attribution_correction', 'source_type' => $action,
+            ]],
+            'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+            'consumers' => ['order_attribution.corrected' => []],
         ];
     }
 

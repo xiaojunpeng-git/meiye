@@ -84,8 +84,10 @@ final class CashierV3DebtRepaymentServices
                 || (string)($existing['business_date'] ?? '') !== (string)($checkoutSnapshot['businessDate'] ?? '')) {
                 throw self::failure('debt_repayment_idempotency_conflict');
             }
-            // 迁移前成功单没有来源列值，重试只返回原结果；新单必须核对同一快照。
-            if ((int)($existing['business_source_primary_id'] ?? 0) > 0) {
+            // 来源事后可由订单中心审计更正；重放仍只返回原收款结果，不能把
+            // 更正后的当前值误当作当初命令输入冲突。未更正的新单仍核对快照。
+            if ((int)($existing['business_source_primary_id'] ?? 0) > 0
+                && !$this->repaymentSourceWasCorrected((string)$existing['repayment_id'], $dataScope->tenantId())) {
                 foreach ($sourceColumns as $column => $value) {
                     if ((string)($existing[$column] ?? '') !== (string)$value) {
                         throw self::failure('debt_repayment_idempotency_conflict');
@@ -118,15 +120,22 @@ final class CashierV3DebtRepaymentServices
         $authority = $locked['authority'];
         $items = $locked['items'];
         $personnel = $locked['personnel'];
-        // 补交必须继承原销售单发生时的来源；浏览器快照仅用于发现过期页面或篡改，
-        // 不能决定补交主记录、收款事实或业绩事实的来源。历史原单无来源时
-        // 留空且允许还款，不回填本地数据，也不能回退为当前工具栏来源。
-        $businessSource = self::sourceFromOriginalSalesOrder((array)$locked['order']);
-        $originalSourceColumns = self::sourceSnapshotColumns($businessSource);
-        if ($sourceColumns !== $originalSourceColumns) {
-            throw self::failure('debt_repayment_original_source_mismatch');
+        // 原单来源只作为本次补交的默认值。操作员可在欠款弹窗明确重选；
+        // 最终事务按选中 ID 解析有效来源，绝不信任浏览器提交的名称快照。
+        // 仅当选择与原单完全一致时沿用历史名称，允许已停用来源保持原貌。
+        $originalSource = self::sourceFromOriginalSalesOrder((array)$locked['order']);
+        $originalSourceColumns = self::sourceSnapshotColumns($originalSource);
+        if ($sourceColumns['business_source_primary_id'] <= 0) {
+            throw self::failure('debt_repayment_business_source_required');
         }
-        $sourceColumns = $originalSourceColumns;
+        if ($originalSource && $sourceColumns === $originalSourceColumns) {
+            $businessSource = $originalSource;
+        } else {
+            $businessSource = (new CashierV3BusinessConfigServices())->resolveSourceSnapshot(
+                $sourceColumns['business_source_primary_id'], $sourceColumns['business_source_secondary_id'], true
+            );
+        }
+        $sourceColumns = self::sourceSnapshotColumns($businessSource);
         $amount = self::inputMoneyCents($checkoutSnapshot['repaymentAmount'] ?? null, 'repayment_amount');
         // 业务行、页面应收与收款行必须指向同一笔金额。浏览器快照
         // 只表达意图；成员、来源欠款和可还余额仍在下方事务锁内核对。
@@ -183,7 +192,7 @@ final class CashierV3DebtRepaymentServices
             'operator_id' => $operator->operatorId(), 'operator_name_snapshot' => $dimensions['operatorName'],
             'debt_id' => $debtId, 'debt_no' => (string)$authority['debt_no'],
             'sales_order_id' => (string)$authority['sales_order_id'], 'sales_order_no_snapshot' => (string)$authority['sales_order_no_snapshot'],
-            // 补交主记录与同事务的收款事实共用原销售单冻结来源，不读取当前工具栏来源。
+            // 补交主记录与同事务的收款/业绩事实共用本次已确认来源，不读取收银工具栏。
             'business_source_primary_id' => $sourceColumns['business_source_primary_id'],
             'business_source_primary_name_snapshot' => $sourceColumns['business_source_primary_name_snapshot'],
             'business_source_secondary_id' => $sourceColumns['business_source_secondary_id'],
@@ -318,8 +327,10 @@ final class CashierV3DebtRepaymentServices
                 || (string)($existing['business_date'] ?? '') !== (string)($snapshot['businessDate'] ?? '')) {
                 throw self::failure('recharge_repayment_idempotency_conflict');
             }
-            // 历史空来源单可幂等查询；新单的来源属于不可变确认快照。
-            if ((int)($existing['business_source_primary_id'] ?? 0) > 0) {
+            // 订单中心允许事后更正来源；已更正单的幂等重放不能用当前来源
+            // 否决原收款命令。未更正的新单仍按最初确认快照校验。
+            if ((int)($existing['business_source_primary_id'] ?? 0) > 0
+                && !$this->repaymentSourceWasCorrected((string)$existing['repayment_id'], $dataScope->tenantId())) {
                 foreach ($sourceColumns as $column => $value) {
                     if ((string)($existing[$column] ?? '') !== (string)$value) {
                         throw self::failure('recharge_repayment_idempotency_conflict');
@@ -645,7 +656,15 @@ final class CashierV3DebtRepaymentServices
         ];
     }
 
-    /** 原单历史来源是补交的唯一来源权威；缺失则留空，已停用来源仍按快照保留。 */
+    /** 来源更正不改变历史收款命令；审计行是识别合法事后更正的唯一依据。 */
+    private function repaymentSourceWasCorrected(string $repaymentId, string $tenantId): bool
+    {
+        return Db::name('cashier_v3_order_attribution_change')->where('tenant_id', $tenantId)
+            ->where('record_type', 'supplement')->where('record_id', $repaymentId)
+            ->where('field_key', 'source')->count() > 0;
+    }
+
+    /** 原单历史来源只供欠款弹窗默认选择；沿用时保留其名称快照，不能从会员或工具栏猜测。 */
     private static function sourceFromOriginalSalesOrder(array $order): array
     {
         $primaryId = (int)($order['business_source_primary_id'] ?? 0);

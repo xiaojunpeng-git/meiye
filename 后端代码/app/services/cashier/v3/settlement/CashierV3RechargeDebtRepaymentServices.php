@@ -9,6 +9,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\config\CashierV3BusinessConfigServices;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
@@ -62,8 +63,8 @@ final class CashierV3RechargeDebtRepaymentServices
             || (int)($recharge['store_id'] ?? 0) !== $operator->storeId()) {
             throw self::failure('recharge_repayment_recharge_missing');
         }
-        // 充值欠款同样继承原充值单发生时的来源。客户端来源只用于检测过期/篡改，
-        // 不得让本次工具栏选择改写补交记录、余额入账及收款事实的历史归因。
+        // 原充值单来源是欠款弹窗的默认选项；本次明确选择的来源归属于补交，
+        // 不反写原充值单，也不读取收银工具栏来源。
         $originalSource = [
             'business_source_primary_id' => (int)($recharge['business_source_primary_id'] ?? 0),
             'business_source_primary_name_snapshot' => trim((string)($recharge['business_source_primary_name_snapshot'] ?? '')),
@@ -108,23 +109,31 @@ final class CashierV3RechargeDebtRepaymentServices
             }
             return $this->replayedResult((array)$existing);
         }
-        // 历史已完成补交保持原幂等回放结果。原充值单无可靠来源时，
-        // 新补交仍可还款，但来源只能留空，不能改取收银工具栏的当前值。
+        // 历史已完成补交保持原幂等回放结果。新补交必须有明确来源；
+        // 与原单一致时保留历史快照，重选则在事务内从当前有效目录解析名称。
         if ($originalSource['business_source_primary_id'] <= 0
             || $originalSource['business_source_primary_name_snapshot'] === ''
             || $originalSource['business_source_label_snapshot'] === ''
             || ($originalSource['business_source_secondary_id'] > 0 && $originalSource['business_source_secondary_name_snapshot'] === '')) {
             $originalSource = self::sourceSnapshotColumns([]);
         }
-        if ($input['businessSource'] !== $originalSource) {
-            throw self::failure('recharge_repayment_original_source_mismatch');
+        if ($input['businessSource']['business_source_primary_id'] <= 0) {
+            throw self::failure('recharge_repayment_business_source_required');
         }
-        $input['businessSource'] = $originalSource;
+        if ($input['businessSource'] === $originalSource) {
+            $input['businessSource'] = $originalSource;
+        } else {
+            $selected = (new CashierV3BusinessConfigServices())->resolveSourceSnapshot(
+                $input['businessSource']['business_source_primary_id'],
+                $input['businessSource']['business_source_secondary_id'], true
+            );
+            $input['businessSource'] = self::sourceSnapshotColumns($selected);
+        }
         $recordId = (int)Db::name('cashier_v3_recharge_debt_repayment')->insertGetId([
             'repayment_id' => $repaymentId, 'repayment_no' => $repaymentNo,
             'tenant_id' => $dataScope->tenantId(), 'store_id' => $operator->storeId(), 'member_id' => $input['memberId'], 'operator_id' => $operator->operatorId(),
             'debt_id' => $input['debtId'], 'recharge_id' => $rechargeId, 'command_idempotency_key' => $commandKey, 'immutable_fingerprint' => $fingerprint,
-            // 补交主记录及同事务收款事实共用原充值单冻结来源。
+            // 补交主记录及同事务收款事实共用本次已确认来源。
             'business_source_primary_id' => $input['businessSource']['business_source_primary_id'],
             'business_source_primary_name_snapshot' => $input['businessSource']['business_source_primary_name_snapshot'],
             'business_source_secondary_id' => $input['businessSource']['business_source_secondary_id'],
@@ -209,7 +218,7 @@ final class CashierV3RechargeDebtRepaymentServices
         $lines=is_array($payload['paymentLines']??null)?array_values($payload['paymentLines']):[]; $salespeople=is_array($payload['salespersonAllocations']??null)?array_values($payload['salespersonAllocations']):[];
         if($memberId<=0||$debtId<=0||$amount<=0||$version<=0||!$lines) throw self::failure('recharge_repayment_payload_invalid');
         $out=[]; foreach($lines as $line){$method=trim((string)($line['paymentMethod']??''));$cents=self::inputCents(is_array($line)?($line['amount']??null):null);$reference=trim((string)($line['collectionReference']??''));$remark=trim((string)($line['remark']??''));if(!in_array($method,self::PAYMENT_METHODS,true)||$cents<=0||strlen($reference)>128||strlen($remark)>255)throw self::failure('recharge_repayment_payment_invalid');$out[]=['paymentMethod'=>$method,'amountCents'=>$cents,'collectionReference'=>$reference,'remark'=>$remark];}
-        // 浏览器仅传待核对的快照；原充值单来源由事务内锁定的业务主表确定。
+        // 浏览器提交本次选中的 ID；名称仍由事务内原单快照或有效目录确定。
         $source = is_array($payload['businessSource'] ?? null) ? $payload['businessSource'] : [];
         return ['memberId'=>$memberId,'debtId'=>$debtId,'amountCents'=>$amount,'balanceVersion'=>$version,'paymentLines'=>$out,'salespersonAllocations'=>$salespeople,'businessDate'=>trim((string)($payload['businessDate'] ?? '')),'businessSource'=>self::sourceSnapshotColumns($source)];
     }

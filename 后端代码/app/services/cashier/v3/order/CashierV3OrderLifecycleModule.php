@@ -13,6 +13,29 @@ final class CashierV3OrderLifecycleModule
 {
     public static function install(CashierV3ActionDispatcher $dispatcher, CashierV3CashierWorkspaceServices $workspace): void
     {
+        $attribution = new CashierV3OrderAttributionCorrectionServices();
+        foreach (['correct-sales-order-attribution', 'correct-service-order-date',
+            'correct-recharge-order-attribution', 'correct-debt-repayment-date',
+            'correct-debt-repayment-source'] as $action) {
+            // 更正以服务端主单锁和提交时旧值比较控制并发，避免给原单增加业务版本。
+            $dispatcher->handlers()->registerCommand($action, static function (array $scope) use ($attribution): array {
+                $result = $attribution->executeInTx($scope);
+                return ['data' => ['attributionCorrection' => $result], 'business_no' => (string)$result['operationId'],
+                    'touched' => ['order_center'], 'message' => '更正已保存。'];
+            });
+            $dispatcher->policies()->register(new CashierV3ContextPolicy($action, [], [], static function (): array {
+                return ['required' => [], 'allowed' => [], 'identities' => [],
+                    'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
+            }, [], [], [], true));
+        }
+        $dispatcher->handlers()->registerProjection('query-order-attribution-sources', static function (array $scope) use ($attribution): array {
+            return ['data' => ['attributionSources' => $attribution->options($scope['operator_scope'], $scope['data_scope'])],
+                'message' => '可用来源已读取。'];
+        });
+        $dispatcher->handlers()->registerProjection('query-order-attribution-changes', static function (array $scope) use ($attribution): array {
+            return ['data' => ['attributionChanges' => $attribution->history((array)($scope['payload'] ?? []),
+                $scope['operator_scope'], $scope['data_scope'])], 'message' => '变更记录已读取。'];
+        });
         $service = new CashierV3OrderLifecycleServices($workspace, new CashierV3SaleCatalogServices());
         $serviceVoid = new CashierV3ServiceRecordVoidServices();
         $orderCenterVoid = new CashierV3OrderCenterVoidServices();

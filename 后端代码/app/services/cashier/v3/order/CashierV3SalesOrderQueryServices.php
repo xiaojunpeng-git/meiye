@@ -1437,10 +1437,19 @@ final class CashierV3SalesOrderQueryServices
             $collectionsByOrder[(string)$collection['sales_order_id']][] = $collection;
         }
         $requestsById = [];
+        $legacyEntriesByRequest = [];
         if ($requestIds !== []) {
             foreach (Db::name('cashier_v3_checkout_request')->whereIn('request_id', $requestIds)
-                ->field('request_id,debt_amount_cents,balance_deduction_amount_cents')->select()->toArray() as $request) {
+                ->field('request_id,debt_amount_cents,balance_deduction_amount_cents,selected_payment_amount_cents')->select()->toArray() as $request) {
                 $requestsById[(string)$request['request_id']] = $request;
+            }
+            // A committed old-card draft is the non-cash settlement authority;
+            // no payment-collection row is created for historical value.
+            foreach (Db::name('cashier_v3_checkout_payment_draft')->whereIn('request_id', $requestIds)
+                ->where('payment_method', 'old_card_entry')->where('draft_status', 'committed')
+                ->field('request_id,payment_draft_id,amount_cents,remark,operation_occurred_at')
+                ->select()->toArray() as $entry) {
+                $legacyEntriesByRequest[(string)$entry['request_id']][] = $entry;
             }
         }
         // A card/project upgrade is a formal sale of the target item.  Its
@@ -1603,6 +1612,7 @@ final class CashierV3SalesOrderQueryServices
                 'header' => $header,
                 'batch' => $batchesByOrder[$orderId],
                 'request' => !empty($header['entitlement_only']) || $requestId === '' ? [] : $requestsById[$requestId],
+                'legacyEntries' => $legacyEntriesByRequest[$requestId] ?? [],
                 'lines' => $linesByOrder[$orderId],
                 'serviceFacts' => $serviceFactsByOrder[$orderId] ?? [],
                 'collections' => $collectionsByOrder[$orderId] ?? [],
@@ -1633,6 +1643,16 @@ final class CashierV3SalesOrderQueryServices
         $cashPerformanceCents = (int)$batch['cash_performance_amount_cents'];
         $debtCents = (int)($request['debt_amount_cents'] ?? 0);
         $balanceCents = (int)($request['balance_deduction_amount_cents'] ?? 0);
+        $legacyEntries = (array)($snapshot['legacyEntries'] ?? []);
+        $legacyEntryCents = count($legacyEntries) === 1 ? (int)$legacyEntries[0]['amount_cents'] : 0;
+        $legacyEntryValid = $legacyEntries === [] || (
+            count($legacyEntries) === 1
+            && $legacyEntryCents > 0
+            && (int)($request['selected_payment_amount_cents'] ?? -1) === $legacyEntryCents
+            && $cashPerformanceCents === 0
+            && $balanceCents === 0
+            && $snapshot['collections'] === []
+        );
         $couponDiscountCents = 0;
         $priceChangeDiscountCents = 0;
         foreach ((array)($snapshot['lines'] ?? []) as $line) {
@@ -1661,13 +1681,13 @@ final class CashierV3SalesOrderQueryServices
             && $entitlementCreditCents >= 0
             && (int)($upgradeSettlement['cash_delta_cents'] ?? -1) === $receivableCents + $discountCents - $entitlementCreditCents
         );
-        $settlementEquationValid = $upgradeSettlementValid
+        $settlementEquationValid = $upgradeSettlementValid && $legacyEntryValid
             && $entitlementCreditCents >= 0
             && (int)$batch['collected_amount_cents'] === $cashPerformanceCents
             && $debtCents >= 0
             && $balanceCents >= 0
             && $cashReceivableCents >= 0
-            && $cashPerformanceCents + $debtCents + $balanceCents + $entitlementCreditCents === $receivableCents
+            && $cashPerformanceCents + $legacyEntryCents + $debtCents + $balanceCents + $entitlementCreditCents === $receivableCents
             && $cashReceivableCents + $debtCents + $balanceCents + $entitlementCreditCents === $receivableCents;
         if (!$settlementEquationValid) {
             // A bad historical snapshot must stay visible for reconciliation,
@@ -1728,6 +1748,7 @@ final class CashierV3SalesOrderQueryServices
         if (count($itemNames) > 3) $itemSummary .= ' 等' . count($itemNames) . '项';
         $paymentNames = [];
         foreach ($snapshot['collections'] as $collection) $paymentNames[$this->paymentMethodName($collection)] = true;
+        if ($legacyEntryCents > 0) $paymentNames['旧卡录入'] = true;
         $memberName = trim((string)$header['member_name_snapshot']);
         $operations = (array)($snapshot['lifecycleOperations'] ?? []);
         $terminal = null;
@@ -1786,10 +1807,13 @@ final class CashierV3SalesOrderQueryServices
             'salespersonSummary' => implode('、', array_keys($salespersonNames)), 'cashierName' => (string)$header['operator_name_snapshot'],
             'orderNote' => (string)($header['order_note'] ?? ''),
             'source' => $this->businessSourceLabel($header),
+            'businessSourcePrimaryId' => (int)$header['business_source_primary_id'],
+            'businessSourceSecondaryId' => (int)$header['business_source_secondary_id'],
             'economicsDataStatus' => $economicsStatus, 'cashPerformanceDataStatus' => $economicsStatus,
             'dataIntegrityStatus' => $settlementEquationValid ? 'valid' : 'settlement_equation_invalid',
             'contractVersion' => self::CONTRACT_VERSION,
-            'availableActions' => !$settlementEquationValid ? [] : ($terminal ? ['reopen-sales-order'] : array_values(array_filter([
+            'availableActions' => !$settlementEquationValid ? [] : ($terminal ? ['reopen-sales-order', 'correct-sales-order-attribution'] : array_values(array_filter([
+                'correct-sales-order-attribution',
                 'open-sales-order-personnel-adjustment', 'adjust-sales-order-personnel',
                 'update-sales-order-note',
                 'reopen-sales-order',
@@ -1797,7 +1821,7 @@ final class CashierV3SalesOrderQueryServices
                 (int)$header['member_id'] > 0 ? 'open-order-debt-settlements' : null,
                 // 退款只写人工确认的财务冲销，不撤回库存、卡项或后续服务，
                 // 因此所有完整结算订单都可进入一次退款。
-                'refund-sales-order',
+                $legacyEntryCents > 0 ? null : 'refund-sales-order',
                 // 作废仍是严格的全量回滚路径，具体资格由服务端二次校验。
                 'void-sales-order',
             ]))),
@@ -1811,12 +1835,13 @@ final class CashierV3SalesOrderQueryServices
             // 避免浏览器从展示用订单 ID 或服务记录号反推写命令的作用范围。
             $mapped['checkoutRequestId'] = (string)$header['checkout_request_id'];
             $mapped['lifecycleOrderId'] = '';
-            $mapped['availableActions'] = [];
             $mapped['businessDateBasis'] = 'v3_service_fact';
             $mapped['paymentStatus'] = $mapped['payment_status'] = '无需收款';
             $allVoided = $items !== [] && count(array_filter($items, static function (array $item): bool {
                 return !empty($item['voidedAt']);
             })) === count($items);
+            // 纯服务单按结账请求整组更正日期；来源属原选择快照，不开放编辑。
+            $mapped['availableActions'] = $allVoided ? [] : ['correct-service-order-date'];
             $mapped['orderStatus'] = $mapped['order_status'] = $allVoided ? '已作废' : '正常';
         }
         // 列表与详情复用同一批已结算记账收款事实，避免前端按金额反推收款方式。
@@ -1854,6 +1879,15 @@ final class CashierV3SalesOrderQueryServices
                 'externalTransactionNo' => (string)$collection['external_transaction_no_snapshot'], 'remark' => (string)$collection['remark_snapshot'],
                 'occurredAt' => $this->formatTimestamp((int)$collection['occurred_at'], 'Y-m-d H:i:s')];
         }, $snapshot['collections']);
+        if ($settlementEquationValid && $legacyEntryCents > 0) {
+            $entry = $legacyEntries[0];
+            $mapped['paymentDetails'][] = [
+                'id' => (string)$entry['payment_draft_id'], 'paymentMethodCode' => 'old_card_entry',
+                'methodName' => '旧卡录入', 'amount' => $this->moneyFromCents($legacyEntryCents),
+                'externalTransactionNo' => '', 'remark' => (string)$entry['remark'],
+                'occurredAt' => $this->formatTimestamp((int)$entry['operation_occurred_at'], 'Y-m-d H:i:s'),
+            ];
+        }
         $mapped['paymentDetailsDataStatus'] = $economicsStatus;
         $mapped['cardBatches'] = [];
         $operationRecords = array_map(function (array $operation): array {

@@ -1304,10 +1304,10 @@ onBeforeUnmount(() => {
         </div>
 
         <dl class="checkout-order-details">
-          <!-- 销售及充值欠款补交均展示只读原单来源，提交时由服务端再次核对。 -->
+          <!-- 来源已在欠款弹窗确认；收款页只读展示，最终提交仍由服务端重新校验。 -->
           <div v-if="isDebtRepayment">
-            <dt>原单来源（不可修改）</dt>
-            <dd>{{ checkout.source?.displayNameSnapshot || '原单未记录来源，本次补交留空' }}</dd>
+            <dt>本次补交来源（已确认）</dt>
+            <dd>{{ checkout.source?.displayNameSnapshot || '请返回欠款明细选择来源' }}</dd>
           </div>
           <div v-if="checkout.orderNote"><dt>订单备注</dt><dd>{{ checkout.orderNote }}</dd></div>
         </dl>

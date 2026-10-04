@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { formatMoney, requestCashierV3Action } from '@/services/cashierV3Bridge'
+import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
 
 const props = defineProps({
@@ -44,6 +45,12 @@ const salespersonCandidates = ref([])
 const isSalespersonSelectorOpen = ref(false)
 const isSalespersonLoading = ref(false)
 const salespersonLoadError = ref('')
+const repaymentSources = ref([])
+const repaymentSourcesLoading = ref(false)
+const repaymentSourcesError = ref('')
+const repaymentSourcePrimaryId = ref(0)
+const repaymentSourceSecondaryId = ref(0)
+let repaymentSourceLoadToken = 0
 const paymentMethods = [
   { code: 'unionpay', label: '银联' },
   { code: 'wechat', label: '微信' },
@@ -84,6 +91,20 @@ const paymentMethodLabel = (code) => paymentMethods.find((method) => method.code
 const salespersonSummary = computed(() => salespersonAllocations.value.length
   ? salespersonAllocations.value.map(salespersonLabel).join('、')
   : '暂未选择')
+const originalRepaymentSource = computed(() => selectedDebt.value?.originalBusinessSource || null)
+const selectedRepaymentPrimary = computed(() => repaymentSources.value.find(
+  (source) => Number(source.id) === Number(repaymentSourcePrimaryId.value)
+) || null)
+const repaymentSourceChildren = computed(() => selectedRepaymentPrimary.value?.children || [])
+const historicalPrimaryOption = computed(() => originalRepaymentSource.value
+  && Number(originalRepaymentSource.value.primarySourceId) > 0
+  && !repaymentSources.value.some((source) => Number(source.id) === Number(originalRepaymentSource.value.primarySourceId))
+  ? originalRepaymentSource.value : null)
+const historicalSecondaryOption = computed(() => originalRepaymentSource.value
+  && Number(originalRepaymentSource.value.secondarySourceId) > 0
+  && Number(originalRepaymentSource.value.primarySourceId) === Number(repaymentSourcePrimaryId.value)
+  && !repaymentSourceChildren.value.some((source) => Number(source.id) === Number(originalRepaymentSource.value.secondarySourceId))
+  ? originalRepaymentSource.value : null)
 
 watch(records, (nextRecords) => {
   if (selectedDebtId.value && nextRecords.some((record) => String(recordId(record)) === String(selectedDebtId.value))) return
@@ -91,6 +112,8 @@ watch(records, (nextRecords) => {
   repayAmount.value = ''
   paymentLines.value = []
   salespersonAllocations.value = []
+  repaymentSourcePrimaryId.value = 0
+  repaymentSourceSecondaryId.value = 0
   validationMessage.value = ''
 }, { immediate: true })
 
@@ -131,7 +154,48 @@ function selectRepayment(record) {
   repaymentBusinessDate.value = String(props.businessDate || '')
   paymentLines.value = [{ id: nextPaymentLineId(), paymentMethod: 'unionpay', amount: wholeYuanString(remainingAmount(record)), collectionReference: '', remark: '' }]
   salespersonAllocations.value = []
+  // 原单快照仅作默认选择。历史导入欠款可能没有来源，此时必须由操作员明确选择。
+  repaymentSourcePrimaryId.value = Number(record.originalBusinessSource?.primarySourceId || 0)
+  repaymentSourceSecondaryId.value = Number(record.originalBusinessSource?.secondarySourceId || 0)
+  loadRepaymentSources()
   validationMessage.value = ''
+}
+
+async function loadRepaymentSources() {
+  const token = ++repaymentSourceLoadToken
+  repaymentSourcesLoading.value = true
+  repaymentSourcesError.value = ''
+  try {
+    const catalog = await loadCheckoutBusinessCatalog()
+    if (token === repaymentSourceLoadToken) repaymentSources.value = catalog.sources
+  } catch (error) {
+    if (token === repaymentSourceLoadToken) {
+      repaymentSources.value = []
+      repaymentSourcesError.value = error instanceof Error ? error.message : '来源加载失败，请重试。'
+    }
+  } finally {
+    if (token === repaymentSourceLoadToken) repaymentSourcesLoading.value = false
+  }
+}
+
+function selectedRepaymentSource() {
+  const original = originalRepaymentSource.value
+  const primaryId = Number(repaymentSourcePrimaryId.value)
+  const secondaryId = Number(repaymentSourceSecondaryId.value)
+  // 原单发生时的名称不能被目录后续改名覆盖；停用来源也可沿用历史快照。
+  if (original && primaryId === Number(original.primarySourceId)
+    && secondaryId === Number(original.secondarySourceId)) return { ...original }
+  const primary = selectedRepaymentPrimary.value
+  const secondary = repaymentSourceChildren.value.find((source) => Number(source.id) === secondaryId)
+  if (!primary || (Number(primary.requireSecondary) === 1 && !secondary)
+    || (secondaryId > 0 && !secondary)) return null
+  return {
+    primarySourceId: primaryId,
+    primarySourceNameSnapshot: String(primary.name),
+    secondarySourceId: secondary ? secondaryId : 0,
+    secondarySourceNameSnapshot: secondary ? String(secondary.name) : '',
+    displayNameSnapshot: secondary ? `${primary.name} / ${secondary.name}` : String(primary.name)
+  }
 }
 
 function submitRepayment() {
@@ -154,6 +218,11 @@ function submitRepayment() {
     validationMessage.value = '请选择补交业务日期。'
     return
   }
+  const businessSource = selectedRepaymentSource()
+  if (!businessSource || Number(businessSource.primarySourceId) <= 0) {
+    validationMessage.value = '请选择本次补交的客户来源。'
+    return
+  }
   validationMessage.value = ''
   emit('repay', {
     memberId: props.member.id || props.member.memberId,
@@ -162,6 +231,7 @@ function submitRepayment() {
     recordVersion: value(record, ['revision', 'recordVersion', 'version'], null),
     amount: String(amount),
     businessDate: repaymentBusinessDate.value,
+    businessSource,
     record,
     rechargeDebt: selectedDebtIsRecharge.value,
     balanceVersion: Number(props.snapshot.balanceVersion || props.snapshot.accountVersion || props.member.balanceVersion || props.member.accountVersion || 0),
@@ -353,6 +423,20 @@ function confirmSalespeople(result = {}) {
           <div class="member-debt-overlay__business-date">
             <label for="member-debt-repayment-business-date">业务日期</label>
             <input id="member-debt-repayment-business-date" v-model="repaymentBusinessDate" type="date" :disabled="isPreparing" aria-label="补交业务日期">
+          </div>
+          <div class="member-debt-overlay__business-source" aria-label="本次补交客户来源">
+            <label for="member-debt-repayment-source-primary">来源</label>
+            <select id="member-debt-repayment-source-primary" v-model.number="repaymentSourcePrimaryId" :disabled="isPreparing || repaymentSourcesLoading" @change="repaymentSourceSecondaryId = 0">
+              <option :value="0">请选择来源</option>
+              <option v-if="historicalPrimaryOption" :value="Number(historicalPrimaryOption.primarySourceId)">{{ historicalPrimaryOption.primarySourceNameSnapshot }}（原单）</option>
+              <option v-for="source in repaymentSources" :key="source.id" :value="source.id">{{ source.name }}</option>
+            </select>
+            <select v-if="repaymentSourceChildren.length || historicalSecondaryOption" v-model.number="repaymentSourceSecondaryId" :disabled="isPreparing || repaymentSourcesLoading" aria-label="二级来源">
+              <option :value="0">{{ Number(selectedRepaymentPrimary?.requireSecondary) === 1 ? '请选择二级来源' : '无二级来源' }}</option>
+              <option v-if="historicalSecondaryOption" :value="Number(historicalSecondaryOption.secondarySourceId)">{{ historicalSecondaryOption.secondarySourceNameSnapshot }}（原单）</option>
+              <option v-for="source in repaymentSourceChildren" :key="source.id" :value="source.id">{{ source.name }}</option>
+            </select>
+            <small v-if="repaymentSourcesError">{{ repaymentSourcesError }} <button type="button" @click="loadRepaymentSources">重试</button></small>
           </div>
           <div class="member-debt-overlay__recharge-salespeople" aria-label="销售人分配">
             <header><strong>销售人分配</strong><span>{{ salespersonSummary }}</span><button type="button" class="button button--secondary" @click="openSalespersonSelector">选择销售人</button></header>
@@ -589,8 +673,13 @@ function confirmSalespeople(result = {}) {
 
 .member-debt-overlay__recharge-payment,
 .member-debt-overlay__recharge-salespeople { display: grid; gap: 10px; padding: 16px 18px; border: 1px solid #dde4ec; border-radius: 6px; background: #fff; }
-.member-debt-overlay__repayment-context { display: grid; grid-template-columns: minmax(180px, .42fr) minmax(0, 1fr); gap: 14px; }
+.member-debt-overlay__repayment-context { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(190px, 1fr) minmax(260px, 1.5fr); gap: 14px; }
 .member-debt-overlay__business-date { display: grid; align-content: center; gap: 7px; padding: 16px 18px; border: 1px solid #dde4ec; border-radius: 6px; background: #fff; }
+.member-debt-overlay__business-source { display: grid; align-content: center; gap: 7px; padding: 12px 14px; border: 1px solid #dde4ec; border-radius: 6px; background: #fff; }
+.member-debt-overlay__business-source label { color: #6b7787; font-size: 12px; }
+.member-debt-overlay__business-source select { width: 100%; min-width: 0; min-height: 34px; border: 1px solid #cfd7e3; border-radius: 5px; background: #fff; color: #303640; }
+.member-debt-overlay__business-source small { color: #b42318; }
+.member-debt-overlay__business-source small button { border: 0; background: none; color: #1769aa; cursor: pointer; }
 .member-debt-overlay__business-date label { color: #6b7787; font-size: 12px; }
 .member-debt-overlay__business-date input { width: 100%; box-sizing: border-box; min-height: 34px; padding: 6px 8px; border: 1px solid #cfd7e3; border-radius: 5px; color: #303640; font: inherit; font-size: 16px; font-variant-numeric: tabular-nums; }
 .member-debt-overlay__business-date input:disabled { background: #f4f6f8; color: #98a2b3; }

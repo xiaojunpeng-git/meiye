@@ -145,6 +145,8 @@ final class CashierV3RechargeModule
             'channel_type' => (string)($member['user_type'] ?? ''),
             'paid' => 1,
             'pay_time' => $now,
+            // 业务日独立于真实收款时间，供订单更正和报表统一读取。
+            'business_date' => $input['businessDate'],
             'add_time' => $now,
             'trade_no' => (string)($input['paymentLines'][0]['collectionReference'] ?? ''),
             'combination_info' => json_encode($input['paymentLines'], JSON_UNESCAPED_UNICODE),
