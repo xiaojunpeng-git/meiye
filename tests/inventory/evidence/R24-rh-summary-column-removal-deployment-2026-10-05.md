@@ -1,0 +1,11 @@
+# 第 24 轮：瑞昊入出库列表隐藏商品摘要
+
+- 产品经理对基于 `baa30139ea6bb1f683f7ebd56eb3b757304733e6`、补丁 SHA-256 `519bdab6ff3a3ee551e7f38cdbe6137a56642ddf8a7cda134e39da589d9c054d` 的本地版本明确确认“我测试没有问题,commit,部署瑞昊,push”。功能提交为 `28ef582b1400c3b60fa2e48029fcc036174b4cdb`，提交中仅有库存 Vue 3 页面和对应契约测试两文件。
+- 范围：入库、出库列表各去掉一列“商品摘要”；列表行投影、查询字段配置、状态标签列位置同步调整。单据详情及后端 `product_summary` 数据保留。门店端收银工作台直接打包库存 Vue 3 模块，因此本次从同一提交构建门店包与独立库存包；没有使用本机其他未提交的 `CashierShell.vue` 变更。
+- 本地验证：库存包 Vite 构建通过（1821 模块），门店包 Vite 构建通过（1989 模块）；本地已登录门店页面上入库、出库两张列表表头和行数据对齐，状态标签仍正常。`read-model-projection-contract.php` 的本次相关断言通过；整套契约测试有 1 项既有院装门店范围静态断言失败，其检查的后端源码本次未修改。`git diff --cached --check` 通过。
+- 构建指纹：从功能提交的 Git 归档构建；库存源码 `App.vue` SHA-256 `a29ad84a4d9b151b8c446027b39c84cdd9ef09a8ace53a39b28706e502fbeba1`，门店源码 `CashierShell.vue` SHA-256 `7acadd2d3c9e0d1c96ac1adcea6f9c8a58a45c58f9fc0e049ad08eaeb25fd12b`，均与提交一致。门店 HTML `4daaa055b936b884cec7aabc6d709bcc3df3b6b43af35e00de14c6b59e0f90c7`、主 JS `35b5770e084c9088f981cd48a1b04e72fb6e4989180cb5e1e4a8d844a042753b`；库存 HTML `3820ff14ee594722999ccc5821cf209b61b2a7008fc7f8c2042987634e5c1b4c`、主 JS `a3767742da7fc6712295347647c587e303b328fb765b45325526281461343a51`。
+- 目标仅 `rh.cc3798.com`。部署前核对正式门店、预览门店 HTML 均为上一版 `ad8341af…`，正式库存 HTML 为上一版 `c2aaeac2…`；服务器磁盘余量 209G。回滚包位于 `/www/backups/rh.cc3798.com/20261005-r24-28ef582b/`，正式门店、预览门店、正式库存备份 tar SHA-256 依次为 `d44074e595aefe4ddcf9cac13e2e7c052756485b0e05e5e0c908b18e0d43d463`、`b610d9aa9ec13fa1b9b925419bff3f492d9cc41f0fa7a78a6d95bf85cfc978c1`、`4d81b69391d499532ee86178af41f1c91f8afa77fd8bcde724e2a477d90fe678`；均可列出压缩包内容。回滚只需恢复这三个静态目录，原有资源未删除。
+- 仅更新 `/www/wwwroot/rh.cc3798.com/public/view_cashier_v3/`、`/www/wwwroot/rh.cc3798.com-8080/public/view_cashier_v3/`、`/www/wwwroot/rh.cc3798.com/public/view_inventory_v3/`；先追加带哈希资源，校验主 JS，再原子切换 HTML。线上三个 HTML、三个新 JS 均 HTTPS 200，JS 网络内容 SHA-256 与构建一致。没有改 PHP、数据库、环境配置或重启 Swoole，也未碰其他客户实例。
+- 已登录瑞昊平台 `/admin/inbound/manage` 与 `/admin/outbound/manage` 的库存 iframe 均真实加载，表头不含“商品摘要”，其余列可见；当日筛选结果为 0 条，未在生产创建或修改业务单据。瑞昊门店预览入口可加载新版本并进入登录页，但缺少已登录门店会话，未将其视为门店业务验证。
+- 数据架构自检：权威源仍为原入出库单据与库存事实；事实粒度、业务时点、事务、幂等、冲销、历史快照、数据权限、索引、报表与导出均未改变。仅前端列表投影隐藏一列，商品详情继续由权威明细接口读取；无需迁移、回填或业务对账。部署验证通过页面列、资源指纹、原有业务数据未改三项核对。
+- 文件分组：前端源码 1、自动化测试 1；后端源码 0、数据库迁移 0、工程脚本 0。生成物为一次性 Git 归档构建的两个 Vite 包及瑞昊三个静态目录；本文件为发布证据，不作为业务源码。
