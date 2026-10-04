@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
 import { nextSalesOrderQueryWithCursor } from '../../../前端代码/cashier-v3/src/services/cashierV3OrderProjectionContract.js'
 
 const view = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/OrderCenterView.vue', import.meta.url), 'utf8')
@@ -13,6 +14,19 @@ assert.match(query, /'economicsDataStatus' => 'not_applicable'/)
 assert.match(query, /'payableAmount' => null/)
 assert.match(query, /'itemCount' => array_sum\(array_map\(static function \(array \$line\)/)
 assert.match(view, /sales-order-query-item-cell__business-tag/)
+assert.match(view, /v-if="item\.itemType === '项目' && item\.isExperience"[^>]*>体验<\/small>/)
+assert.match(view, /v-if="salesOrderItemCustomerTag\(item\)"/)
+assert.match(query, /service_object,friend_counts_as_customer,is_experience/)
+assert.match(query, /'friendCountsAsCustomer' => \(int\)\(\$line\['friend_counts_as_customer'\] \?\? 1\) === 1/)
+assert.match(query, /'friendCountsAsCustomer' => \(int\)\(\$serviceFact\['friend_counts_as_customer'\] \?\? 1\) === 1/)
+const customerTagSource = view.match(/function salesOrderItemCustomerTag\(item\) \{[\s\S]*?\n\}/)?.[0]
+assert.ok(customerTagSource, 'customer tag must be derived from the frozen order item')
+const customerTag = runInNewContext(`${customerTagSource}; salesOrderItemCustomerTag`)
+assert.equal(customerTag({ itemType: '项目', serviceRecipientType: 'self', friendCountsAsCustomer: true }), '')
+assert.equal(customerTag({ itemType: '项目', serviceRecipientType: 'self', friendCountsAsCustomer: false }), '不算人数人次')
+assert.equal(customerTag({ itemType: '项目', serviceRecipientType: 'friend', friendCountsAsCustomer: true }), '朋友算')
+assert.equal(customerTag({ itemType: '项目', serviceRecipientType: 'friend', friendCountsAsCustomer: false }), '不算人数人次')
+assert.equal(customerTag({ itemType: '卡项', serviceRecipientType: 'friend', friendCountsAsCustomer: true }), '')
 assert.match(view, /salesItemCraftsmanAdjustable\(item\)/)
 assert.match(view, /salesPurchaseCraftsmanAdjustable\(record, item\)/)
 assert.match(view, /@click="openSalesItemCraftsmanEditor\(record, item\)"/)

@@ -802,6 +802,13 @@ function salesOrderItems(record) {
   }]
 }
 
+function salesOrderItemCustomerTag(item) {
+  // Only settled project snapshots may label a counted friend or excluded service.
+  if (item?.itemType !== '项目' || !['self', 'friend'].includes(item?.serviceRecipientType)) return ''
+  if (item.friendCountsAsCustomer === false || item.friendCountsAsCustomer === 0 || item.friendCountsAsCustomer === '0') return '不算人数人次'
+  return item.serviceRecipientType === 'friend' ? '朋友算' : ''
+}
+
 function personnelNames(item, key) {
   const records = Array.isArray(item?.[key]) ? item[key] : []
   return records.map((person) => person?.name || person?.employeeName || person?.employee_name_snapshot || '').filter(Boolean).join('、') || '—'
@@ -2714,6 +2721,8 @@ onBeforeUnmount(() => {
                 <small v-if="item.businessTag" class="sales-order-query-item-cell__business-tag" :class="`is-${item.businessTag === '权益' ? 'entitlement' : 'purchase'}`">{{ item.businessTag }}</small>
                 <small v-if="item.itemType" class="sales-order-query-item-cell__type">{{ item.itemType }}</small>
                 <strong class="sales-order-query-item-cell__name">{{ item.name || '未命名商品' }}</strong>
+                <small v-if="item.itemType === '项目' && item.isExperience" class="sales-order-query-item-cell__service-tag">体验</small>
+                <small v-if="salesOrderItemCustomerTag(item)" class="sales-order-query-item-cell__service-tag is-customer">{{ salesOrderItemCustomerTag(item) }}</small>
               </span>
             </td>
             <td>{{ itemMoney(item.unitPrice) }}</td>
@@ -3177,6 +3186,8 @@ onBeforeUnmount(() => {
 }
 .sales-order-query-item-cell__line { display: inline-flex; align-items: center; gap: 8px; }
 .sales-order-query-item-cell__name { display: inline-block; line-height: 1.2; }
+.sales-order-query-table td:first-child small.sales-order-query-item-cell__service-tag { display: inline-block; flex-shrink: 0; margin-top: 0; border: 1px solid #b7d4fe; border-radius: 4px; padding: 1px 5px; color: #175cd3; background: #eff6ff; font-size: 11px; line-height: 1.2; }
+.sales-order-query-table td:first-child small.sales-order-query-item-cell__service-tag.is-customer { border-color: #abefc6; color: #067647; background: #ecfdf3; }
 .sales-order-query-item-cell__business-tag {
   display: inline-block;
   padding: 2px 6px;

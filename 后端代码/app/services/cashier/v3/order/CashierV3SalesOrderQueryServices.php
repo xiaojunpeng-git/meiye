@@ -1192,7 +1192,7 @@ final class CashierV3SalesOrderQueryServices
             ->where('line_direction', 'forward')
             ->field(
                 'order_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,'
-                . 'checkout_line_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,is_experience,craftsmen_snapshot_json,quantity,'
+                . 'checkout_line_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,friend_counts_as_customer,is_experience,craftsmen_snapshot_json,quantity,'
                 . 'original_amount_cents,discount_amount_cents,sale_amount_cents,card_purchase_snapshot_json,line_version'
             )
             ->select()
@@ -1385,7 +1385,7 @@ final class CashierV3SalesOrderQueryServices
             ->whereIn('order_id', $orderIds)
             ->where('line_status', 'settled')
             ->where('line_direction', 'forward')
-            ->field('order_line_id,checkout_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,is_experience,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,card_purchase_snapshot_json,detail_remark_snapshot,line_version')
+            ->field('order_line_id,checkout_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,friend_counts_as_customer,is_experience,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,card_purchase_snapshot_json,detail_remark_snapshot,line_version')
             ->order('order_id', 'asc')->order('line_no', 'asc')->select()->toArray() as $line) {
             $linesByOrder[(string)$line['order_id']][] = $line;
         }
@@ -1405,7 +1405,7 @@ final class CashierV3SalesOrderQueryServices
                 ->where('sf.tenant_id', $tenantIds[0])
                 ->whereIn('sf.checkout_request_id', $requestIds)
                 ->where('sf.service_status', 'completed')
-                ->field('sf.id,sf.service_fact_id,sf.service_record_no,sf.checkout_request_id,sf.source_line_id,sf.project_id,sf.project_name_snapshot,sf.quantity,sf.project_count,sf.craftsmen_snapshot_json,sf.service_status,sf.detail_remark_snapshot,wf.actual_entitlement_amount_cents,vo.id AS void_operation_id,vo.occurred_at AS voided_at')
+                ->field('sf.id,sf.service_fact_id,sf.service_record_no,sf.checkout_request_id,sf.source_line_id,sf.project_id,sf.project_name_snapshot,sf.quantity,sf.project_count,sf.service_object,sf.friend_counts_as_customer,sf.is_experience,sf.craftsmen_snapshot_json,sf.service_status,sf.detail_remark_snapshot,wf.actual_entitlement_amount_cents,vo.id AS void_operation_id,vo.occurred_at AS voided_at')
                 ->order('sf.id', 'asc')->select()->toArray();
             foreach ($serviceRows as $serviceRow) {
                 $orderId = $requestToOrder[(string)($serviceRow['checkout_request_id'] ?? '')] ?? '';
@@ -2016,7 +2016,9 @@ final class CashierV3SalesOrderQueryServices
             'cardPurchaseTimes' => $type === '卡项'
                 ? $this->cardPurchaseTimesSnapshot($line['card_purchase_snapshot_json'] ?? null)
                 : [],
+            // These labels must come from the order-line snapshot, not current service settings.
             'serviceRecipientType' => (string)($line['service_object'] ?? ''),
+            'friendCountsAsCustomer' => (int)($line['friend_counts_as_customer'] ?? 1) === 1,
             'isExperience' => (int)($line['is_experience'] ?? 0) === 1,
             'detailRemark' => (string)($line['detail_remark_snapshot'] ?? ''),
             'salespeople' => array_map(function (array $person): array {
@@ -2074,6 +2076,10 @@ final class CashierV3SalesOrderQueryServices
             'actualReceivedAmount' => null,
             'economicsDataStatus' => 'not_applicable',
             'snapshotStatus' => 'ready',
+            // Entitlement service has its own completed-service snapshot rather than a sales line.
+            'serviceRecipientType' => (string)($serviceFact['service_object'] ?? ''),
+            'friendCountsAsCustomer' => (int)($serviceFact['friend_counts_as_customer'] ?? 1) === 1,
+            'isExperience' => (int)($serviceFact['is_experience'] ?? 0) === 1,
             'detailRemark' => (string)($serviceFact['detail_remark_snapshot'] ?? ''),
             'salespeople' => [],
             'salesManagers' => [],
@@ -2492,6 +2498,7 @@ final class CashierV3SalesOrderQueryServices
                 ? $this->cardPurchaseTimesSnapshot($authority['card_purchase_snapshot_json'] ?? null)
                 : [],
             'serviceRecipientType' => $v3Ready ? (string)($authority['service_object'] ?? '') : '',
+            'friendCountsAsCustomer' => $v3Ready ? (int)($authority['friend_counts_as_customer'] ?? 1) === 1 : null,
             'isExperience' => $v3Ready && (int)($authority['is_experience'] ?? 0) === 1,
             'economicsDataStatus' => $v3Ready ? 'ready' : self::ECONOMICS_STATUS,
             'snapshotStatus' => $name === '' ? 'invalid' : 'ready',
