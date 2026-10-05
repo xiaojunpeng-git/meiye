@@ -1299,13 +1299,17 @@ function drilldownConfig(row, column) {
 }
 
 function canDrilldown(row, column) {
-  return Boolean(drilldownConfig(row, column)?.report || drilldownConfig(row, column)?.report_code)
+  const config = drilldownConfig(row, column)
+  const target = String(config?.report || config?.report_code || '')
+  // Only an order-center identity returned for this scoped salary row can open details.
+  if (target === 'order_center_order_detail') return !isPlatformReport.value && Boolean(String(row?.document_order_id || '').trim())
+  return Boolean(target)
 }
 
 function drilldownRequest(row, column) {
   const config = drilldownConfig(row, column)
   const report = String(config?.report || config?.report_code || '')
-  if (!report || (!['order_center_service', 'order_center_sales'].includes(report)
+  if (!report || (!['order_center_service', 'order_center_sales', 'order_center_order_detail'].includes(report)
     && !allowedReportTabs.value.some((tab) => tab.code === report))) return null
   const params = { ...(config.params || config.query || {}) }
   const mapping = config.param_map || config.paramMap || {}
@@ -1316,6 +1320,20 @@ function drilldownRequest(row, column) {
 function openDrilldown(row, column) {
   const request = drilldownRequest(row, column)
   if (!request) return
+  if (request.report === 'order_center_order_detail') {
+    if (isPlatformReport.value || !String(request.params.order_id || '').trim()) return
+    // Preserve this report's route filters so closing the linked detail returns to the same view.
+    const returnTo = router.resolve({
+      name: reportRouteName.value,
+      params: { report: activeReport.value },
+      query: currentRouteQuery()
+    }).fullPath
+    router.push({
+      name: 'cashier-v3-order-center',
+      query: { tab: 'sales', salary_detail_order_id: request.params.order_id, salary_detail_return_to: returnTo }
+    })
+    return
+  }
   if (request.report === 'order_center_service') {
     // 汇总行的门店、员工编号和日期来自服务端声明；订单中心仍用后端
     // 数据权限收紧范围，并只展示能解释当前有效报表金额的服务记录。

@@ -2097,6 +2097,18 @@ function closeSalesDetail() {
   attributionChanges.value = []
 }
 
+function closeSalaryLinkedSalesDetail() {
+  const returnTo = route.query.salary_detail_return_to
+  closeSalesDetail()
+  if (typeof returnTo !== 'string' || !returnTo.startsWith('/') || returnTo.startsWith('//') || returnTo.length > 4096) return
+  const resolved = router.resolve(returnTo)
+  // Only the salary-detail link may return to a store report; other order-detail closes stay here.
+  if (route.name === 'cashier-v3-order-center'
+    && route.query.salary_detail_order_id
+    && resolved.name === 'cashier-v3-store-business-reports'
+    && resolved.params.report === 'phase_six_salary_detail') void router.replace(resolved.fullPath)
+}
+
 function closeGenericDetail() {
   attributionChangesSerial++
   attributionChanges.value = []
@@ -2733,6 +2745,20 @@ watch(
   }
 )
 
+let openedSalaryDetailOrderId = ''
+watch(
+  [() => route.query.salary_detail_order_id, () => state.stateContextId, () => route.name],
+  ([rawOrderId, contextId, routeName]) => {
+    if (routeName !== 'cashier-v3-order-center' || !contextId || activeTabKey.value !== 'sales') return
+    const orderId = String(rawOrderId || '').trim()
+    if (!/^(?:service:)?[A-Za-z0-9_:-]{1,96}$/.test(orderId) || orderId === openedSalaryDetailOrderId) return
+    // The route is only a read request; the detail API enforces the current operator's store scope.
+    openedSalaryDetailOrderId = orderId
+    void openSalesOrderDetail({ orderId })
+  },
+  { immediate: true }
+)
+
 // 根分区是登录时的通用快照，不能直接当作销售订单的“正常数据”结果。
 // 首次拿到当前工作台上下文后主动执行一次后端 normal 查询，避免首屏把
 // 已退款／已作废订单带进正常列表；切换账号或门店时同样重新收敛到正常范围。
@@ -3077,7 +3103,7 @@ onBeforeUnmount(() => {
       :focus-personnel-line-id="salesDetailFocus.personnelLineId"
       :cart-line-count="Array.isArray(state.cashier?.cart?.lines) ? state.cashier.cart.lines.length : 0"
       :on-action="handleSalesOrderDetailAction"
-      @close="closeSalesDetail"
+      @close="closeSalaryLinkedSalesDetail"
     />
 
     <PersonnelPerformanceOverlay

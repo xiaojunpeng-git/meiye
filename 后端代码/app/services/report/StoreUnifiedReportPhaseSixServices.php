@@ -225,9 +225,10 @@ final class StoreUnifiedReportPhaseSixServices
             throw new \InvalidArgumentException('请从员工薪资汇总表选择员工和门店后查看分类明细');
         // 下钻使用服务端许可门店内的稳定 ID，不能用同名员工或页面文字扩大查询范围。
         if($storeId>0 && !in_array($storeId,$stores,true))throw new \InvalidArgumentException('无权限查看该门店的工资明细');
-        $facts=$this->filterSalaryFactsByEmployeeName($this->salaryFactsWithServiceCustomerMetrics($stores,$range),$employeeName);
+        $facts=$this->filterSalaryFactsByEmployeeName($this->salaryFactsWithReportingDimensions($stores,$range),$employeeName);
         if($employeeId>0)$facts=array_values(array_filter($facts,static fn(array $fact):bool=>(int)$fact['employee_id']===$employeeId));
         if($storeId>0)$facts=array_values(array_filter($facts,static fn(array $fact):bool=>(int)$fact['store_id']===$storeId));
+        $orderReferences=$this->salaryOrderReferences($facts);
         $categories=$categoryKey!==''?$this->salaryCategoryDefinitions($this->observedSalaryCategories($facts)):null;
         $categoryLabel='';
         if($categoryKey!=='')foreach($categories['columns'] as $column){
@@ -235,6 +236,7 @@ final class StoreUnifiedReportPhaseSixServices
         }
         $rows = [];
         foreach ($facts as $f) {
+            $orderReference=$orderReferences[(int)$f['store_id'].'|'.(string)$f['checkout_request_id']]??[];
             $cashCents=(int)($f['cash_cents']??0);
             if($categoryKey!==''){
                 // 卡项可跨多个二级分类；明细只展示所点分类的分摊金额，合计才与汇总单元格相等。
@@ -245,13 +247,11 @@ final class StoreUnifiedReportPhaseSixServices
             $rows[] = [
                 'business_date' => $f['business_date'], 'company_name' => $f['company_name'],
                 'store_name' => $f['store_name'], 'employee_name' => $f['employee_name'],
-                'member_name' => $f['member_name'], 'card_type' => (string)($f['card_type'] ?: '-'),
+                'member_name' => $f['member_name'],
+                'document_no' => (string)($orderReference['number']??'-'),
+                'document_order_id' => (string)($orderReference['id']??''),
                 'performance_category' => $categoryKey!==''?$categoryLabel:$f['category_path'], 'detail' => $f['item_name'],
                 'project_count' => (string)$f['project_count'],
-                // The common reader has already chosen the one stable labor
-                // line that carries a daily visit share.  All other project
-                // lines for the same employee/customer/day remain zero.
-                'service_visit_count' => $this->tenth((int)($f['service_visit_tenths'] ?? 0)),
                 'consumption_amount' => $this->money((int)$f['consumption_cents']),
                 'cash_amount' => $this->money($cashCents), 'cash_amount_cents' => $cashCents,
                 'labor_fee' => $this->money((int)$f['labor_fee_cents']), 'row_key' => $f['row_key'],
@@ -263,15 +263,16 @@ final class StoreUnifiedReportPhaseSixServices
         }
         return $this->salaryResult('员工薪资明细月报表',[
             $this->column('business_date','日期','该笔服务、核销或销售计入工资的日期；后来已作废的记录不再统计。'),
-            $this->column('company_name','分公司','该笔业务发生门店所属的分公司。',false,true),
+            $this->column('company_name','分公司','按业务门店当前所属组织查找已配置的分公司统计维度；未配置时显示“未配置分公司”。',false,true),
             $this->column('store_name','门店','该笔业务实际发生的门店。',false,true),
             $this->column('employee_name','员工','该笔项目的手艺人，或现金业绩分配到的员工；按结账时记录的姓名显示。',false,true),
             $this->column('member_name','会员','该笔业务对应的会员或顾客姓名。'),
-            $this->column('card_type','卡类型','使用会员卡内项目时显示对应卡类型；现金购买或无卡项目显示“-”。'),
-            $this->column('performance_category','业绩分类','普通明细显示结账时的分类；从汇总表点击分类金额进入时，显示所点分类，卡项可按卡内项目拆分。'),
+            $this->column('document_no','单据号','显示订单中心对应的订单编号；点击可查看该订单详情。没有对应订单时显示“-”。',false,false,180,[
+                'report'=>'order_center_order_detail','param_map'=>['order_id'=>'document_order_id','order_no'=>'document_no'],
+            ]),
+            $this->column('performance_category','商品分类','普通明细显示业务发生时保存的商品或项目分类；从汇总表点击分类金额进入时，显示所点商品分类，卡项可按卡内项目拆分。'),
             $this->column('detail','明细','该笔业务对应的具体服务项目、卡项或产品名称。'),
             $this->column('project_count','项目数','该员工实际承担的项目数量；多人服务按分配比例拆分，可显示小数，人工调整后按已保存数值计算。',true),
-            $this->column('service_visit_count','服务人次','本人服务按“同一会员+同一日期”计一次；朋友算和游客每条有效服务记录计一次；本人或朋友选择“不算人数人次”均不计入。普通员工共同服务时均分，独立核算岗位按结账时岗位分组另计一次。',true),
             $this->column('consumption_amount','消耗业绩','服务完成或卡项核销后计入该员工的消耗金额；作废后不再统计。',true),
             $this->column('cash_amount','现金业绩','成功收款后分配给该员工的金额；从汇总表点击分类金额进入时，只显示该分类分得的金额；作废后不再统计。',true),
             $this->column('labor_fee','手工费','结账时分配给该手艺人的手工费；作废后不再统计。',true),
@@ -279,12 +280,61 @@ final class StoreUnifiedReportPhaseSixServices
         ],$rows,$range,$employeeName,$categoryKey!=='');
     }
 
+    /**
+     * Match the order center's user-visible header: a settled sale takes precedence;
+     * pure entitlement checkouts use the first completed service record number.
+     * Read only immutable same-tenant, same-store identities from the salary facts in scope.
+     */
+    private function salaryOrderReferences(array $facts): array
+    {
+        $requestsByStore=[];
+        foreach($facts as $fact){
+            $requestId=trim((string)($fact['checkout_request_id']??''));
+            $storeId=(int)($fact['store_id']??0);
+            if($requestId!=='' && $storeId>0)$requestsByStore[$storeId][$requestId]=true;
+        }
+        $references=[];
+        foreach($requestsByStore as $storeId=>$requests){
+            foreach(array_chunk(array_keys($requests),300) as $requestIds){
+                $sales=Db::name('cashier_v3_sales_order')
+                    ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                    ->where('store_id',(int)$storeId)->whereIn('checkout_request_id',$requestIds)
+                    ->where('order_status','settled')->where('order_direction','forward')
+                    ->field('checkout_request_id,order_id,order_no')->select()->toArray();
+                $withSale=[];
+                foreach($sales as $sale){
+                    $requestId=(string)$sale['checkout_request_id'];
+                    $number=trim((string)$sale['order_no']);
+                    $orderId=trim((string)$sale['order_id']);
+                    if($number==='' || $orderId==='')continue;
+                    $references[$storeId.'|'.$requestId]=['number'=>$number,'id'=>$orderId];
+                    $withSale[$requestId]=true;
+                }
+                $serviceRequests=array_values(array_filter($requestIds,static fn(string $id):bool=>!isset($withSale[$id])));
+                if($serviceRequests===[])continue;
+                $services=Db::name('cashier_v3_entitlement_service_fact')
+                    ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                    ->where('store_id',(int)$storeId)->whereIn('checkout_request_id',$serviceRequests)
+                    ->where('service_status','completed')
+                    ->fieldRaw("checkout_request_id,MIN(COALESCE(NULLIF(service_record_no,''),service_fact_id)) order_no")
+                    ->group('checkout_request_id')->select()->toArray();
+                foreach($services as $service){
+                    $requestId=(string)$service['checkout_request_id'];
+                    $number=trim((string)$service['order_no']);
+                    if($requestId==='' || $number==='')continue;
+                    $references[$storeId.'|'.$requestId]=['number'=>$number,'id'=>'service:'.$requestId];
+                }
+            }
+        }
+        return $references;
+    }
+
     private function salarySummary(array $stores,array $range,array $input):array
     {
         $employeeName=$this->salaryEmployeeName($input);
         $rows=[];$observedCategories=[];
         foreach($this->filterSalaryFactsByEmployeeName(
-            $this->salaryFactsWithServiceCustomerMetrics($stores,$range),$employeeName
+            $this->salaryFactsWithReportingDimensions($stores,$range),$employeeName
         ) as $f){
             $key=(int)$f['store_id'].'|'.(int)$f['employee_id'];
             if(!isset($rows[$key]))$rows[$key]=['store_id'=>(int)$f['store_id'],'employee_id'=>(int)$f['employee_id'],'company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'project_count_micros'=>0,'service_visit_tenths'=>0,'service_people_tenths'=>0,'consumption_cents'=>0,'cash_cents'=>0,'labor_fee_cents'=>0];
@@ -322,7 +372,7 @@ final class StoreUnifiedReportPhaseSixServices
             unset($r['project_count_micros'],$r['service_visit_tenths'],$r['service_people_tenths'],$r['consumption_cents'],$r['cash_cents'],$r['labor_fee_cents'],$r['sales_category_cents']);
         }unset($r);
         $columns=[
-            $this->column('company_name','分公司','该员工业务发生门店所属的分公司。',false,true),
+            $this->column('company_name','分公司','按业务门店当前所属组织查找已配置的分公司统计维度；未配置时显示“未配置分公司”。',false,true),
             $this->column('store_name','门店','该员工业务实际发生的门店。',false,true),
             $this->column('employee_name','员工','该行汇总的员工，按业务结账时记录的姓名显示；页面可输入姓名中的任意文字进行筛选。',false,true),
             $this->column('project_count','项目数','该员工在明细表中的项目数合计；多人服务和人工调整可产生小数。',true),
@@ -678,6 +728,7 @@ final class StoreUnifiedReportPhaseSixServices
         }
         // 现金业绩与服务/手工事实分开记账：纯销售订单没有 labor 行，不能因此从薪资明细中消失。
         // 先按同一业务行、同一员工合并销售事实；若该员工同时参与服务，则与已有 labor 行合并，避免重复展示。
+        // Salary detail displays the sale's historical category path, never its numeric category ID.
         $salesQuery=Db::name('cashier_v3_performance_fact')->alias('pf')
             ->leftJoin('cashier_v3_sale_fact s','s.tenant_id=pf.tenant_id AND s.checkout_request_id=pf.checkout_request_id AND s.source_line_id=pf.source_line_id AND s.fact_direction=\'forward\' AND s.status=\'effective\'')
             ->leftJoin('cashier_v3_report_sale_dimension_fact d','d.tenant_id=pf.tenant_id AND d.sale_fact_id=s.fact_id')
@@ -685,7 +736,7 @@ final class StoreUnifiedReportPhaseSixServices
             ->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
             ->where('pf.performance_type','sales_performance_allocated')->where('pf.status','effective')
             ->where('pf.employee_id','>',0)
-            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path')
+            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,d.item_name_snapshot item_name,d.category_path_snapshot category_path')
             ->order('pf.id','asc');
         $normal = new StoreReportNormalDataScopeServices();
         $normal->excludeVoidedSalesOrderFacts($salesQuery, 'pf.tenant_id', 'pf.order_id');
@@ -734,7 +785,7 @@ final class StoreUnifiedReportPhaseSixServices
                 : (int)$row['amount_cents'];
             $row['labor_fee_cents']=(int)$row['labor_fee_amount_cents'];
             $row['cash_cents']=(int)($row['cash_cents']??0);
-            $row['card_type']='';$row['item_name']=(string)($row['item_name']??'');$row['category_path']=(string)($row['category_path']??'');
+            $row['item_name']=(string)($row['item_name']??'');$row['category_path']=(string)($row['category_path']??'');
             // A completed service with a zero amount still contributes to
             // service visits/people.  Pure empty sales rows remain hidden.
             if((int)$row['consumption_cents']===0&&(int)$row['labor_fee_cents']===0&&(float)$row['project_count']===0.0&&(int)$row['cash_cents']===0&&trim((string)($row['service_fact_id'] ?? ''))==='')continue;
@@ -769,6 +820,23 @@ final class StoreUnifiedReportPhaseSixServices
             if($original!=='')$reversed[$original]=true;
         }
         return $reversed;
+    }
+
+    /**
+     * Salary detail and summary share the current company reporting dimension.
+     * This only changes the displayed grouping label; business facts, store scope,
+     * employee attribution and historical monetary values remain untouched.
+     */
+    private function salaryFactsWithReportingDimensions(array $stores, array $range): array
+    {
+        $facts=$this->salaryFactsWithServiceCustomerMetrics($stores,$range);
+        $dimensions=new StoreUnifiedReportOrganizationDimensionServices();
+        foreach($facts as &$fact){
+            $company=$dimensions->resolve('company','','',(string)$range['end'],(int)($fact['store_id']??0));
+            $fact['company_name']=$company['name'];
+        }
+        unset($fact);
+        return $facts;
     }
 
     /**
@@ -813,7 +881,7 @@ final class StoreUnifiedReportPhaseSixServices
                 'member_id' => (int)($service['member_id'] ?? 0), 'member_name' => (string)($service['member_name'] ?? ''),
                 'store_name' => (string)($service['store_name'] ?? ''), 'company_name' => (string)($service['company_name'] ?? ''),
                 'item_name' => (string)($service['item_name'] ?? ''), 'category_path' => (string)($service['category_path'] ?? ''),
-                'source_type' => (string)($service['source_type'] ?? ''), 'card_type' => '',
+                'source_type' => (string)($service['source_type'] ?? ''),
                 'project_count' => 0.0, 'consumption_cents' => 0, 'cash_cents' => 0, 'labor_fee_cents' => 0,
                 'service_visit_tenths' => (int)($byLaborKey[$laborKey] ?? 0),
             ];
