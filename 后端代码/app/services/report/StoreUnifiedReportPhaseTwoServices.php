@@ -268,9 +268,6 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             foreach ([['visits','人次'],['effective','有效人员'],['amount','金额']] as $definition) {
                 $key = 'channel_' . $sourceId . '_' . $definition[0];
                 $columns[] = ['key'=>$key,'label'=>$definition[1],'group_label'=>(string)$source['name']]; $keys[] = $key;
-                if ($prefix === 'B' && $definition[0] === 'visits') {
-                    $columns[count($columns)-1]['source_explanation'] = 'B 来源有非体验的正常服务才计算人次：会员同一天记 1，游客每张有效服务单记 1；同单多项目不重复，不要求当次有收款。';
-                }
                 $params = ['dimension_code'=>(string)$sourceId];
                 if ($definition[0] === 'effective') $params['metric_code'] = 'effective_people';
                 if ($prefix === 'B' && $definition[0] === 'visits') $params['metric_code'] = 'visits';
@@ -388,12 +385,6 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 ?: strcmp((string)$right['order_id'], (string)$left['order_id']);
         });
         $columns = $this->columns(['business_date'=>'日期','store_name_snapshot'=>'门店名称','member_name_snapshot'=>'会员','member_phone'=>'手机','dimension'=>'来源','walk_in'=>'进店','visits'=>'人次','effective_people'=>'有效人员','amount'=>'金额','registered_date'=>'登记日期','reviewer'=>'审核人','reviewed_at'=>'审核时间','creator_name'=>'制单人','created_at'=>'制单日期']);
-        foreach ($columns as &$column) {
-            if ($column['key'] === 'visits') {
-                $column['source_explanation'] = '有非体验的正常服务才计算人次：会员同一天同一来源记 1，游客每张有效服务单记 1；同单多项目不重复。';
-            }
-        }
-        unset($column);
         foreach (['business_date'=>112, 'store_name_snapshot'=>112, 'member_name_snapshot'=>82, 'member_phone'=>116, 'dimension'=>108] as $key => $width) {
             foreach ($columns as &$column) if ($column['key'] === $key) { $column['fixed'] = 'left'; $column['fixed_width'] = $width; break; }
             unset($column);
@@ -1384,6 +1375,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     /**
      * 市场业绩的动态来源列必须说明真实计入口径。分组名称来自当前来源配置，
      * 但人次、有效人员和金额的解释固定由后端给出，页面不能按列名猜算法。
+     * 两种服务标记只排除人次，不能把它们解释为收款或有效人员也被排除。
+     * 最终说明集中在此及明细说明方法，避免前置列模板重复维护后又被覆盖。
      */
     private function marketPerformanceColumnExplanations(array $columns):array
     {
@@ -1403,9 +1396,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $source=$source!==''?$source:'该来源';
                 $descriptions=[
                     'walk_in'=>'汇总有权限人员在市场明细表保存的进店数：会员按“门店＋业务日期＋会员＋来源”汇总，游客按原始订单独立记录；新行尚未保存时读取原单据已保存值，新旧值不会重复相加。仅 B 来源显示该列。',
-                    'visits'=>'统计所选日期内归属“'.$source.'”、已完成且未作废的非体验服务人次，排除本人或朋友选择“不算人数人次”的服务。会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
-                    'effective'=>'统计所选日期内归属“'.$source.'”且净记账收款达到标准的会员人数：A 来源每位会员至少 1,000 元，其他来源至少 500 元；按门店、来源和会员去重，游客不计。退款会抵减，已作废销售不计。',
-                    'amount'=>'合计所选日期内归属“'.$source.'”的有效记账收款净额。现金退款在退款发生日计入 K退款顾客并冲减金额；作废销售冲减原来源；余额支付和旧卡录入不计。',
+                    'visits'=>'统计所选日期内归属“'.$source.'”、已完成且未作废的非体验服务人次。打了“体验”标签，或本人、朋友选择“不算人数人次”的服务，均不计入人次；同一门店、同一天、同一来源还有其他符合条件的服务时，会员仍记 1 人次。游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。这两种标记只排除人次，不排除金额和按收款门槛计算的有效人员，也不表示整行明细隐藏。',
+                    'effective'=>'统计所选日期内归属“'.$source.'”且净记账收款达到标准的会员人数：A 来源每位会员至少 1,000 元，其他来源至少 500 元；按门店、来源和会员去重，游客不计。退款会抵减，已作废销售不计。“体验”和“不算人数人次”不影响本列，达到收款门槛仍计入。',
+                    'amount'=>'合计所选日期内归属“'.$source.'”的有效记账收款净额。现金退款在退款发生日计入 K退款顾客并冲减金额；作废销售冲减原来源；余额支付和旧卡录入不计。“体验”和“不算人数人次”不排除已经产生的有效记账收款。',
                 ];
                 $column['source_explanation']=$descriptions[$parts[1]];
                 continue;
@@ -1421,7 +1414,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         unset($column);
         return$columns;
     }
-    /** 市场明细的说明必须解释按日合并与跨日期去重的差别，不能沿用逐单模板。 */
+    /** 市场明细按日合并；服务人次资格与收款资格独立，不能把零人次解释为整行隐藏。 */
     private function marketDetailColumnExplanations(array $columns):array
     {
         $descriptions=[
@@ -1432,9 +1425,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'member_phone'=>'显示会员资料中当前保存的手机号码；未填写则留空。',
             'dimension'=>'显示业务发生时保存的客户来源；纯权益服务优先读取本次结账保存的来源，历史服务没有该快照时读取关联购卡或销售记录，不按会员当前资料改写历史来源。',
             'walk_in'=>'显示有权限人员为本行保存的进店数：会员按“门店＋业务日期＋会员＋来源”合并，游客按原始订单独立显示和编辑；新行尚未保存时显示原单据已保存值。仅 B 来源汇总到市场业绩表的进店列。',
-            'visits'=>'有已完成且未作废的非体验服务才计人次，排除本人或朋友选择“不算人数人次”的服务：会员同一门店、同一天、同一来源记 1；游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。',
-            'effective_people'=>'所选日期内，同一门店、同一来源的会员净记账收款达到标准时显示 1：A 来源至少 1,000 元，其他来源至少 500 元；游客不计。同一会员跨日期可能显示多行 1，但合计按会员去重。',
-            'amount'=>'合计本行会员当天在该门店和来源下的有效记账收款净额；退款按退款发生日抵减，已作废销售不计。只有正常服务、没有当次收款时显示 0。',
+            'visits'=>'有已完成且未作废的非体验服务才计人次。打了“体验”标签，或本人、朋友选择“不算人数人次”的服务，均不计入人次；同一门店、同一天、同一来源还有其他符合条件的服务时，会员仍记 1 人次。游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。这两种标记只排除人次，不排除金额和按收款门槛计算的有效人员；明细行仍可能显示，人次为 0 不代表整行隐藏。',
+            'effective_people'=>'所选日期内，同一门店、同一来源的会员净记账收款达到标准时显示 1：A 来源至少 1,000 元，其他来源至少 500 元；游客不计。同一会员跨日期可能显示多行 1，但合计按会员去重。“体验”和“不算人数人次”不影响本列，达到收款门槛仍计入。',
+            'amount'=>'合计本行会员当天在该门店和来源下的有效记账收款净额；退款按退款发生日抵减，已作废销售不计。只有正常服务、没有当次收款时显示 0。“体验”和“不算人数人次”不排除已经产生的有效记账收款。',
             'registered_date'=>'显示本行收款或服务归属的业务日期；补录业务的系统录入时间可能晚于该日期。',
             'reviewer'=>'本表目前没有读取审核人，显示“—”；不能据此判断单据是否审核。',
             'reviewed_at'=>'本表目前没有读取审核时间，显示“—”；不能据此判断单据是否审核。',

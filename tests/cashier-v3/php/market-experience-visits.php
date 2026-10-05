@@ -59,6 +59,27 @@ $visitExplanation = static function (array $report, string $key): string {
 checkMarketExperience(strpos($visitExplanation($query('market_performance'), 'channel_' . $sourceId . '_visits'), '非体验') !== false
     && strpos($visitExplanation($query('market_detail'), 'visits'), '非体验') !== false,
     'Market visit column explanations do not describe the experience exclusion');
+// R26 说明必须随实际报表契约返回：两种标记不计人次，但不能误导用户认为
+// 整行、有效人员或收款也被删除；所有动态来源列与明细都检查，防止仅修 B 来源。
+foreach (['market_performance', 'market_detail'] as $reportCode) {
+    foreach ($query($reportCode)['columns'] as $column) {
+        $key = (string)$column['key'];
+        $visitColumn = $key === 'visits' || preg_match('/^channel_\d+_visits$/', $key);
+        $cashColumn = in_array($key, ['effective_people', 'amount'], true)
+            || preg_match('/^channel_\d+_(effective|amount)$/', $key);
+        if (!$visitColumn && !$cashColumn) continue;
+        $explanation = (string)($column['source_explanation'] ?? '');
+        checkMarketExperience(strpos($explanation, '“体验”') !== false
+            && strpos($explanation, '“不算人数人次”') !== false,
+            'Missing explicit service labels: ' . $reportCode . ':' . $key);
+        if ($visitColumn) {
+            checkMarketExperience(strpos($explanation, '只排除人次') !== false
+                && strpos($explanation, '其他符合条件的服务') !== false
+                && strpos($explanation, '整行') !== false,
+                'Missing mixed-service or row-visibility boundary: ' . $reportCode . ':' . $key);
+        }
+    }
+}
 Db::startTrans();
 try {
     $frozenSource = $selection;
