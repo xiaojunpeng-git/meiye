@@ -280,6 +280,9 @@ class CashierV3PermissionSnapshotServices
         }
         if (!empty($sessionHint['_cashier_v3_organization'])) {
             $profile['_cashier_v3_organization'] = 1;
+            if (!empty($sessionHint['_cashier_v3_staff_scope'])) {
+                $profile['_cashier_v3_staff_scope'] = 1;
+            }
             $profile['type'] = 'cashier_v3_organization';
             $profile['session_mode'] = 'store_organization';
         }

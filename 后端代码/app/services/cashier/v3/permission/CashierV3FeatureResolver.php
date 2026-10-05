@@ -2,6 +2,7 @@
 namespace app\services\cashier\v3\permission;
 
 use app\services\organization\JobPositionPolicyServices;
+use app\services\employee\EmployeeInternalLoginServices;
 use app\services\mobile\merchant\MobileMerchantCapabilityCatalog;
 use think\facade\Db;
 
@@ -179,6 +180,9 @@ class CashierV3FeatureResolver
             return [];
         }
         if (!empty($operatorProfile['_cashier_v3_organization'])) {
+            if (!empty($operatorProfile['_cashier_v3_staff_scope'])) {
+                return $this->tenureStoreV3GrantedFeatures($employeeId);
+            }
             return $this->employeeStoreV3GrantedFeatures((int)($operatorProfile['employee_id'] ?? 0));
         }
         if ($staffId <= 0 || $employeeId <= 0 || $storeId <= 0) {
@@ -216,7 +220,31 @@ class CashierV3FeatureResolver
     }
 
     /**
-     * 数据权限选店会话使用组织直属岗位（staff_id=0）的收银 V3 规则。
+     * 任职人员跨店会话只继承唯一有效原店任职的当前岗位规则，不借目标店任职。
+     * 任职或岗位被撤销时返回零权限，使已签发的目标店会话随即失效。
+     * @return string[]
+     */
+    private function tenureStoreV3GrantedFeatures(int $employeeId): array
+    {
+        if ($employeeId <= 0) return [];
+        try {
+            /** @var EmployeeInternalLoginServices $employees */
+            $employees = app()->make(EmployeeInternalLoginServices::class);
+            $staff = $employees->resolveUniqueStoreV3Staff($employeeId);
+            if (!$staff) return [];
+            return $this->storeV3GrantedFeatures([
+                'id' => (int)$staff['id'],
+                'employee_id' => $employeeId,
+                'store_id' => (int)$staff['store_id'],
+            ]);
+        } catch (\Throwable $exception) {
+            return [];
+        }
+    }
+
+    /**
+     * 组织直属选店会话使用 staff_id=0 的收银 V3 规则；任职人员的
+     * staff_scope 会话走 tenureStoreV3GrantedFeatures，不共享此权限来源。
      * 规则仍由服务端岗位事实计算，客户端不能注入 feature 列表。
      *
      * @return string[]

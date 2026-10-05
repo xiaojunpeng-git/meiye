@@ -17,8 +17,9 @@ use think\facade\Db;
  * 1. 有唯一有效任职门店的门店人员：直接进入该门店，不走选店票据；
  * 2. 没有任职门店、但具备组织数据权限和门店端入口的组织人员：从权限范围选店，
  *    进入后按该组织岗位的门店端规则使用当前门店，不写入或恢复 system_store_staff 任职；
- * 3. 有任职的人员登录时仍直入唯一任职店；切店时若另有组织入口和数据权限，
- *    可进入其授权的其他门店，但目标店只能使用组织岗位权限，不能借用原店任职。
+ * 3. 有任职的人员登录时仍直入唯一任职店；切店时若另有数据权限，
+ *    可进入其授权的其他门店。目标店使用组织直属岗位权限；无此岗位时只继承
+ *    原任职岗位的实时功能规则，不能伪造目标店任职。
  *    组织人员也可在授权候选门店间切换，旧工作台不得跨店沿用。
  *
  * 组织人员的多门店选店不能被误判为“门店人员多店任职”。两者是不同的登录模式。
@@ -28,6 +29,8 @@ class CashierV3StoreLoginServices extends BaseServices
     private const SELECT_TICKET_PREFIX = 'cashier_v3_store_select:';
     private const SELECT_TICKET_TTL = 300;
     private const DELEGATED_SESSION_TTL = 28800;
+    /** 区分任职岗位跨店会话与原组织直属岗位会话，供后续令牌解析实时判权。 */
+    public const STAFF_SCOPE_SESSION_SOURCE = 'staff_scope';
 
     /** @return array */
     public function login(string $account, string $password, int $storeId = 0, string $ticket = ''): array
@@ -134,7 +137,7 @@ class CashierV3StoreLoginServices extends BaseServices
 
     /**
      * 切店候选与首次登录分流不同：任职人员先以原店任职身份登录，但额外的
-     * 组织岗位入口和数据权限可授予其他门店。无有效任职者继续使用原组织选店口径；
+     * 门店数据权限可授予其他门店。无有效任职者继续使用原组织选店口径；
      * 存在异常或无入口任职时不得借组织候选绕过登录限制。
      *
      * @return array<int, array>
@@ -221,8 +224,9 @@ class CashierV3StoreLoginServices extends BaseServices
             }
         }
 
-        // 组织直属岗位才有资格把数据权限门店作为收银入口；个人数据权限不扩店。
-        if ($employees->employeeHasStoreV3Entry($employeeId)) {
+        // 首次登录仍由唯一任职店直入；切店时，具备门店端岗位的任职人员
+        // 可在额外数据权限内选店，目标店的操作权限继续取原任职岗位。
+        if ($employees->employeeHasStoreV3Entry($employeeId) || $direct) {
             /** @var EmployeeDataScopeServices $scope */
             $scope = app()->make(EmployeeDataScopeServices::class);
             $scopeIds = $scope->resolveEffectiveStoreIds($employeeId, 0, ['admin_type' => 3]);
@@ -317,6 +321,12 @@ class CashierV3StoreLoginServices extends BaseServices
     private function issueOrganizationStore(int $employeeId, array $selected, int $accountId, array $eligible): array
     {
         $storeId = (int)($selected['store_id'] ?? 0);
+        /** @var EmployeeInternalLoginServices $employees */
+        $employees = app()->make(EmployeeInternalLoginServices::class);
+        $usesStaffScope = !$employees->employeeHasStoreV3Entry($employeeId);
+        if ($usesStaffScope && !$employees->resolveUniqueStoreV3Staff($employeeId)) {
+            throw new AdminException('当前岗位已失去门店端权限，请重新登录');
+        }
         $now = time();
         $accountSnapshot = $accountId > 0
             ? trim((string)Db::name('employee_internal_account')->where('id', $accountId)->value('account'))
@@ -332,7 +342,7 @@ class CashierV3StoreLoginServices extends BaseServices
             'expire_time' => $now + self::DELEGATED_SESSION_TTL,
             'status' => 1,
             'is_del' => 0,
-            'source' => 'data_scope',
+            'source' => $usesStaffScope ? self::STAFF_SCOPE_SESSION_SOURCE : 'data_scope',
             'account_snapshot' => $accountSnapshot,
             'staff_name_snapshot' => $employeeName,
             'add_time' => $now,
@@ -351,6 +361,9 @@ class CashierV3StoreLoginServices extends BaseServices
             'level' => 1,
             '_cashier_v3_organization' => 1,
         ];
+        if ($usesStaffScope) {
+            $profile['_cashier_v3_staff_scope'] = 1;
+        }
         /** @var CashierV3FeatureResolver $resolver */
         $resolver = app()->make(CashierV3FeatureResolver::class);
         $features = $resolver->resolveGrantedFeatures($profile);

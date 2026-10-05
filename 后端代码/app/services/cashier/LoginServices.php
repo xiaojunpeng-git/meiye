@@ -373,8 +373,8 @@ class LoginServices extends BaseServices
     }
 
     /**
-     * 解析收银 V3 组织数据权限会话。员工即使兼有原店任职，切往其他店后也必须
-     * 使用独立会话和组织岗位权限；会话主键不是 system_store_staff，不能跨店借用原任职。
+     * 解析收银 V3 数据权限选店会话。目标店仍使用独立会话，不伪造目标店任职；
+     * staff_scope 会话按原任职岗位的实时规则授权，其他组织会话按组织直属岗位授权。
      */
     protected function parseCashierV3DelegatedToken(CacheService $cacheService, int $sessionId, string $auth, string $md5Token, bool $readOnly = true): array
     {
@@ -430,6 +430,9 @@ class LoginServices extends BaseServices
             $profile['_cashier_v3_read_only'] = 1;
         } else {
             $profile['_cashier_v3_organization'] = 1;
+            if ((string)($session['source'] ?? '') === \app\services\cashier\v3\CashierV3StoreLoginServices::STAFF_SCOPE_SESSION_SOURCE) {
+                $profile['_cashier_v3_staff_scope'] = 1;
+            }
         }
         $resolver = app()->make(\app\services\cashier\v3\permission\CashierV3FeatureResolver::class);
         $features = $readOnly

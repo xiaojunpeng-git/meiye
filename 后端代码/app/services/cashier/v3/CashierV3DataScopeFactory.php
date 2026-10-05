@@ -50,8 +50,8 @@ class CashierV3DataScopeFactory
         $granted = $readOnlySession
             ? $this->featureResolver->resolveVisibleFeatures($operatorProfile)
             : $this->featureResolver->resolveGrantedFeatures($operatorProfile);
-        // 数据权限选店会话没有 system_store_staff 任职，只能进入门店查看。
-        // 该身份由服务端 delegated token 产生，不能由客户端 profile 注入。
+        // 数据权限选店会话没有目标店的 system_store_staff 任职，操作始终绑定
+        // 服务端签发的目标店令牌；只读与可写能力分别按实时岗位规则判定。
         $adminInfoForScope = $operatorProfile;
         if (!array_key_exists('admin_type', $adminInfoForScope)) {
             $adminInfoForScope['admin_type'] = 3;
