@@ -777,6 +777,13 @@ class CashierV3ActionManifest
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['debt.cancelled' => []],
             ],
+            // 恢复是取消的反向事实，重新开放原剩余欠款，不产生现金收款或业绩。
+            'restore-order-center-debt' => [
+                'required_event_types' => ['debt.restored'], 'allowed_event_types' => ['debt.restored'],
+                'event_rules' => ['debt.restored' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'debt', 'source_type' => 'restore-order-center-debt']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['debt.restored' => []],
+            ],
             'void-order-center-gift' => [
                 'required_event_types' => ['gift.voided'],
                 'allowed_event_types' => ['gift.voided'],

@@ -81,6 +81,44 @@ $replacement = CashierV3CardOperationKernel::plan([
 ], $source, ['catalogId' => 501, 'catalogName' => '目标项目'], $context);
 check_card_operation($replacement['operationStatus'] === 'succeeded', 'replacement is direct');
 check_card_operation($replacement['lines'][0]['quantityAfter'] === 2, 'replacement quantity is frozen');
+$debtLimitedSource = $source;
+$debtLimitedSource['projects'][0]['remainingTimes'] = 10;
+$debtLimitedSource['projects'][0]['debtLimitedRemainingTimes'] = 5;
+$debtLimitedSource['projects'][0]['totalTimes'] = 10;
+$debtLimitedSource['projects'][0]['totalValueCents'] = 100000;
+$debtLimitedSource['projects'][0]['remainingValueCents'] = 100000;
+foreach (['project_replacement', 'project_upgrade'] as $limitedType) {
+    $limitedRejected = false;
+    try {
+        CashierV3CardOperationKernel::plan([
+            'operationType' => $limitedType, 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+            'idempotencyKey' => 'DEBT-LIMIT-' . $limitedType, 'reason' => '债务限制回归',
+            'projectLines' => [['sourceDetailId' => 301, 'quantity' => 6]],
+        ], $debtLimitedSource, ['catalogId' => 501, 'catalogName' => '目标项目', 'priceCents' => 100000], $context);
+    } catch (CashierV3CommandException $error) {
+        $limitedRejected = strpos($error->getMessage(), '当前可用 5 次') !== false;
+    }
+    check_card_operation($limitedRejected, $limitedType . ' rejects quantity beyond paid entitlement');
+}
+$sharedDebtSource = $debtLimitedSource;
+$sharedDebtSource['projects'][0]['sharedDebtLimitedRemainingTimes'] = 5;
+$sharedDebtSource['projects'][] = [
+    'detailId' => 302, 'detailVersion' => 4, 'projectId' => 402,
+    'remainingTimes' => 10, 'debtLimitedRemainingTimes' => 5,
+    'sharedDebtLimitedRemainingTimes' => 5, 'remainingValueCents' => 0,
+    'totalTimes' => 10, 'totalValueCents' => 0,
+];
+$sharedRejected = false;
+try {
+    CashierV3CardOperationKernel::plan([
+        'operationType' => 'project_replacement', 'sourceCardHolderId' => 10, 'sourceCardHolderVersion' => 7,
+        'idempotencyKey' => 'SHARED-DEBT-LIMIT', 'reason' => '共享池债务限制回归',
+        'projectLines' => [['sourceDetailId' => 301, 'quantity' => 3], ['sourceDetailId' => 302, 'quantity' => 3]],
+    ], $sharedDebtSource, ['catalogId' => 501, 'catalogName' => '目标项目'], $context);
+} catch (CashierV3CommandException $error) {
+    $sharedRejected = strpos($error->getMessage(), '当前可用 5 次') !== false;
+}
+check_card_operation($sharedRejected, 'shared project aggregate cannot exceed card-level paid times');
 check_card_operation(
     count($replacement['lines']) === 2
     && ($replacement['lines'][1]['lineRole'] ?? '') === 'target_project'

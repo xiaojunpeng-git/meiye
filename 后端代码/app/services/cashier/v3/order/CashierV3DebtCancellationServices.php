@@ -13,7 +13,7 @@ use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use think\facade\Db;
 
 /**
- * 独立免除剩余欠款：store_debt 为余额权威，取消事实为免除金额权威。
+ * 独立免除剩余欠款：store_debt 为余额权威，当前未恢复的取消事实为免除金额权威。
  * 不伪造补交、不改写原订单/已用权益/收款/业绩；状态3与整单冲销状态2分开。
  * R50：取消审计金额同时是不可使用的权益额度，由统一核销守卫扣除，不能当作赠送放行。
  * 确认金额快照仅用于检测期间发生的补交，最终状态由事务内行锁裁决。
@@ -50,14 +50,25 @@ final class CashierV3DebtCancellationServices
         // 与补交及补交作废共用同一债务行锁，失败时事实和状态一起回滚。
         $debt = (array)Db::name('store_debt')->where('id', (int)$id)->lock(true)->find();
         if (!$debt || (int)$debt['store_id'] !== $operator->storeId()) throw self::failure('无权取消该欠款。', 'debt_cancel_store');
-        $existing = (array)Db::name(self::TABLE)->where('debt_id', (int)$id)->lock(true)->find();
+        // 同一债务允许“取消→恢复→再取消”；旧事实只能追加反向记录，不覆盖。
+        $existing = (array)Db::name(self::TABLE)->where('debt_id', (int)$id)->order('id desc')->lock(true)->find();
         if ($existing) {
-            if ((string)$existing['tenant_id'] !== $dataScope->tenantId() || (int)$debt['status'] !== self::CANCELLED_STATUS) {
+            if ((string)$existing['tenant_id'] !== $dataScope->tenantId()) {
                 throw self::failure('欠款取消记录异常。', 'debt_cancel_audit_mismatch');
             }
-            // 新请求不能冒充原取消成功事件；同一请求由命令回执重放。
-            if ((string)$existing['command_idempotency_key'] !== $key) throw self::failure('该欠款已取消。', 'debt_cancel_already_cancelled');
-            return $this->result($existing, true);
+            $restored = Db::name(CashierV3DebtRestorationServices::TABLE)
+                ->where('cancellation_id', (string)$existing['cancellation_id'])->lock(true)->find();
+            if ((int)$debt['status'] === self::CANCELLED_STATUS) {
+                if ($restored) throw self::failure('欠款取消记录异常。', 'debt_cancel_audit_mismatch');
+                // 新请求不能冒充原取消成功事件；同一请求由命令回执重放。
+                if ((string)$existing['command_idempotency_key'] !== $key) throw self::failure('该欠款已取消。', 'debt_cancel_already_cancelled');
+                return $this->result($existing, true);
+            }
+            if (!$restored || (int)$debt['status'] !== 0) {
+                throw self::failure('欠款取消记录异常。', 'debt_cancel_audit_mismatch');
+            }
+        } elseif ((int)$debt['status'] === self::CANCELLED_STATUS) {
+            throw self::failure('欠款取消记录异常。', 'debt_cancel_audit_missing');
         }
         $total = self::cents($debt['total_debt']);
         $repaid = self::cents($debt['repaid_debt']);
@@ -84,9 +95,13 @@ final class CashierV3DebtCancellationServices
             'command_idempotency_key' => $key, 'business_date' => date('Y-m-d', $now),
             'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
         ];
+        // 同一秒可经历取消/恢复/再取消；事件版本按锁定债务的已入账最大值递增。
+        $aggregateVersion = max(1, (int)Db::name('cashier_v3_business_event')
+            ->where('tenant_id', $dataScope->tenantId())->where('aggregate_type', 'debt')
+            ->where('aggregate_id', $id)->max('aggregate_version') + 1);
         $event = $recorder->recordInTx($execution, (array)($scope['event_contract'] ?? []), [
             'event_type' => 'debt.cancelled', 'aggregate_type' => 'debt', 'aggregate_id' => $id,
-            'aggregate_version' => max(1, $now), 'event_version' => 1,
+            'aggregate_version' => $aggregateVersion, 'event_version' => 1,
             'source_type' => 'cancel-order-center-debt', 'source_id' => $factId,
             'member_id' => (int)$debt['uid'], 'business_date' => $row['business_date'],
             'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,

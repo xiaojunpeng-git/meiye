@@ -86,6 +86,10 @@ const salesDetailActionOnly = ref(false)
 const attributionEditor = ref(null)
 const attributionSources = ref([])
 const attributionChanges = ref([])
+const debtChanges = ref([])
+const debtChangesLoading = ref(false)
+const debtChangesError = ref('')
+let debtChangesSerial = 0
 const attributionPending = ref(false)
 const attributionError = ref('')
 let attributionChangesSerial = 0
@@ -168,7 +172,7 @@ const ORDER_TABS = [
       field('debt_no', '欠款编号', 'text', { quickFilterHidden: true }),
       field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('member_name', '客户'), field('phone', '手机号'),
-      field('source_type', '欠款来源'), field('source_order_no', '来源订单'),
+      field('source_type', '欠款来源'), field('source_order_no', '来源订单'), field('product_name', '商品名称'),
       field('original_debt_amount', '原欠款', 'money'), field('repaid_amount', '已还', 'money'),
       field('remaining_amount', '剩余', 'money'), field('debt_status', '状态', 'status'),
       field('store', '欠款门店', 'store'), field('created_at', '创建时间', 'date')
@@ -266,7 +270,7 @@ const FIELD_ALIASES = {
   occurred_at: ['occurredAt'], payment_completed_at: ['paymentCompletedAt', 'completedAt'], recharge_order_no: ['rechargeOrderNo', 'orderNo'],
   recharge_plan: ['rechargePlan', 'planName'], recharge_amount: ['rechargeAmount'], gift_amount: ['giftAmount'],
   operator: ['operatorName', 'operator'], supplement_order_no: ['supplementOrderNo', 'repayNo', 'orderNo'],
-  debt_no: ['debtNo'], source_order_no: ['sourceOrderNo'], debt_summary: ['debtSummary', 'summary'],
+  debt_no: ['debtNo'], source_order_no: ['sourceOrderNo'], product_name: ['productName'], debt_summary: ['debtSummary', 'summary'],
   supplement_amount: ['supplementAmount', 'repayAmount'], refund_order_no: ['refundOrderNo', 'refundNo'],
   refund_summary: ['refundSummary', 'summary'], refund_amount: ['refundAmount'], refund_method: ['refundMethod'],
   refund_status: ['refundStatus', 'statusLabel'], refund_completed_at: ['refundCompletedAt', 'completedAt'],
@@ -444,6 +448,14 @@ const visibleFields = computed(() => {
     items.push(available.get(key))
     return items
   }, [])
+  if (activeTabKey.value === 'debt') {
+    // Saved column settings predate this requested debt name; keep it next to
+    // the source order without changing any other configured column.
+    const nameIndex = fields.findIndex((item) => item.key === 'product_name')
+    if (nameIndex >= 0) fields.splice(nameIndex, 1)
+    const orderIndex = fields.findIndex((item) => item.key === 'source_order_no')
+    fields.splice(orderIndex >= 0 ? orderIndex + 1 : 0, 0, available.get('product_name'))
+  }
   if (activeTabKey.value === 'service') {
     // 来源与同次销售单号是服务记录的固定审计列。旧账号保存的列清单可能缺少
     // 新字段，故统一补齐并保持“服务记录号→来源→销售单号”，其余列不重排。
@@ -895,6 +907,27 @@ async function readAttributionChanges(record, tab = activeTabKey.value) {
       attributionChanges.value = actionData(response).attributionChanges?.changes || []
     }
   } catch { /* 详情仍可查看；审计读取失败不应遮蔽订单。 */ }
+}
+
+async function readDebtChanges(record) {
+  // 详情可快速切换欠款，旧请求不得覆盖当前债务的操作历史。
+  const serial = ++debtChangesSerial
+  debtChanges.value = []
+  debtChangesError.value = ''
+  debtChangesLoading.value = true
+  try {
+    const response = await requestAction('query-order-center-debt-changes', { debtId: record.debtId })
+    if (serial !== debtChangesSerial) return
+    if (!['success', 'succeeded'].includes(actionStatus(response))) {
+      debtChangesError.value = response?.result?.message || '变更记录读取失败。'
+      return
+    }
+    debtChanges.value = actionData(response).debtChanges?.changes || []
+  } catch (error) {
+    if (serial === debtChangesSerial) debtChangesError.value = error?.message || '变更记录读取失败。'
+  } finally {
+    if (serial === debtChangesSerial) debtChangesLoading.value = false
+  }
 }
 
 async function openAttributionEditor(record, field) {
@@ -1948,6 +1981,10 @@ function closeSalesDetail() {
 function closeGenericDetail() {
   attributionChangesSerial++
   attributionChanges.value = []
+  debtChangesSerial++
+  debtChanges.value = []
+  debtChangesLoading.value = false
+  debtChangesError.value = ''
   genericDetailRecord.value = null
 }
 
@@ -1959,6 +1996,7 @@ function openRecordDetail(record) {
   if (activeTabKey.value === 'service' && !canUseCashierV3Operation('cashier.v3.order.service_detail')) return
   genericDetailRecord.value = record
   void readAttributionChanges(record)
+  if (activeTabKey.value === 'debt') void readDebtChanges(record)
   return null
 }
 
@@ -2264,12 +2302,38 @@ async function submitDebtCancellation() {
     if (isTerminalActionStatus(status)) delete debtCancelKeys.value[key]
     if (['success', 'succeeded'].includes(status)) {
       debtCancelRecord.value = null
-      await queryRecords({}, false)
+      // 正常范围隐藏已取消欠款；定位本欠款并清除旧状态筛选，让恢复入口立即可见。
+      await queryRecords({ dataScope: 'all', status: '', businessStatus: '', keyword: record.debtNo }, true)
       // 返回收银时需重新读取总欠款；不在浏览器手工减金额。
       window.dispatchEvent(new CustomEvent('cashier-v3:debt-cancelled', { detail: { memberId: record.memberId } }))
     } else debtCancelError.value = result?.result?.message || result?.data?.result?.message || '取消未完成。'
   } catch (error) { debtCancelError.value = error?.message || '取消未完成，请稍后重试。' }
   finally { debtCancelPending.value = false }
+}
+
+const debtRestorePending = ref({})
+const debtRestoreKeys = ref({})
+const debtRestoreError = ref('')
+async function restoreDebt(record) {
+  if (!record?.canRestore || !record.cancellationId || debtRestorePending.value[record.debtId]) return
+  const key = String(record.debtId)
+  const idempotencyKey = debtRestoreKeys.value[key] || createCashierV3CommandId()
+  debtRestoreKeys.value[key] = idempotencyKey
+  debtRestorePending.value = { ...debtRestorePending.value, [key]: true }
+  debtRestoreError.value = ''
+  try {
+    const result = await requestAction('restore-order-center-debt', {
+      debtId: record.debtId, cancellationId: record.cancellationId, idempotencyKey
+    })
+    const status = actionStatus(result)
+    if (isTerminalActionStatus(status)) delete debtRestoreKeys.value[key]
+    if (['success', 'succeeded'].includes(status)) {
+      await queryRecords({ dataScope: 'all', status: '', businessStatus: '', keyword: record.debtNo }, true)
+      // 沿用会员欠款快照刷新通知；读回服务端余额及权益，不在页面推算。
+      window.dispatchEvent(new CustomEvent('cashier-v3:debt-cancelled', { detail: { memberId: record.memberId } }))
+    } else debtRestoreError.value = result?.result?.message || result?.data?.result?.message || '恢复欠款未完成。'
+  } catch (error) { debtRestoreError.value = error?.message || '恢复欠款未完成，请稍后重试。' }
+  finally { debtRestorePending.value = { ...debtRestorePending.value, [key]: false } }
 }
 
 const rechargeLifecycleActions = computed(() => {
@@ -2657,6 +2721,8 @@ onBeforeUnmount(() => {
       </template>
     </UnifiedQueryToolbar>
 
+    <p v-if="activeTabKey === 'debt' && debtRestoreError" class="order-center-page__inline-error" role="alert">{{ debtRestoreError }}</p>
+
     <main class="order-center-list-wrap">
       <table v-if="activeTabKey === 'sales'" class="order-center-list-table sales-order-query-table" :style="{ '--order-column-count': salesOrderListColumns.length }">
         <thead>
@@ -2844,6 +2910,8 @@ onBeforeUnmount(() => {
               >去还款</button>
               <button v-if="activeTabKey === 'debt' && record.canCancel && canUseCashierV3Operation('cashier.v3.order.void')"
                 type="button" class="button button--text button--danger" @click="openDebtCancellation(record)">取消欠款</button>
+              <button v-if="activeTabKey === 'debt' && record.canRestore && canUseCashierV3Operation('cashier.v3.order.void')"
+                type="button" class="button button--text" :disabled="!!debtRestorePending[record.debtId]" @click="restoreDebt(record)">恢复欠款</button>
               <button
                 v-if="canUseCashierV3Operation('cashier.v3.order.void') && ((activeTabKey === 'recharge' && record.economicsDataStatus === 'ready' && record.orderStatus === '正常') || (activeTabKey === 'supplement' && String(record.id || '').startsWith('v3-') && record.paymentStatus !== '已作废') || (activeTabKey === 'gift' && giftVoidRecordId(record).startsWith('v3-direct-gift:') && record.giftStatus !== '已作废'))"
                 type="button"
@@ -2942,6 +3010,10 @@ onBeforeUnmount(() => {
       :on-lifecycle-action="handleRechargeLifecycleAction"
       :field-action-keys="serviceRecordIsNormal(genericDetailRecord) ? ['craftsman'] : []"
       :attribution-changes="attributionChanges"
+      :show-debt-changes="activeTabKey === 'debt'"
+      :debt-changes="debtChanges"
+      :debt-changes-loading="debtChangesLoading"
+      :debt-changes-error="debtChangesError"
       @field-action="handleDetailFieldAction"
       @close="closeGenericDetail"
     />

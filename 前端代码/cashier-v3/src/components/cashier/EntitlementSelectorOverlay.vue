@@ -240,13 +240,13 @@ function isTimeCardSource(source = {}) {
 }
 
 function displaySourceRemainingTimes(source = {}) {
-  return isTimeCardSource(source) ? '—' : displayNumber(source.remainingTimes)
+  return isTimeCardSource(source) ? '—' : displayNumber(source.debtLimitedRemainingTimes ?? source.remainingTimes)
 }
 
 function displayProjectRemainingTimes(source = {}, project = {}) {
   return isTimeCardSource(source) || isSharedChoiceCountSource(source)
     ? '—'
-    : displayNumber(project.remainingTimes)
+    : displayNumber(project.debtLimitedRemainingTimes ?? project.remainingTimes)
 }
 
 function displayProjectRemainingAmount(source = {}, project = {}) {

@@ -714,6 +714,7 @@ final class CashierV3ReservationModule
                     'entitlementSourceDetailId' => $detailId,
                     'cardName' => (string)($source['name'] ?? ''),
                     'remainingTimes' => $remainingTimes,
+                    'debtLimitedRemainingTimes' => max(0, (int)($project['debtLimitedRemainingTimes'] ?? $remainingTimes)),
                     'availableTimes' => max(0, (int)($project['availableTimes'] ?? 0)),
                     'debtBlockedTimes' => max(0, (int)($project['debtBlockedTimes'] ?? 0)),
                     'debtRestrictionLabel' => (string)($project['debtRestrictionLabel'] ?? ''),

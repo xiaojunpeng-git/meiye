@@ -445,7 +445,7 @@ function entitlementOptionText(option) {
   if (normalizedProjectSource(option) !== 'card') return ''
   const parts = []
   const cardName = String(option?.cardName || '').trim()
-  const remainingTimes = Number(option?.remainingTimes)
+  const remainingTimes = Number(option?.debtLimitedRemainingTimes ?? option?.remainingTimes)
   if (cardName) parts.push(cardName)
   if (Number.isFinite(remainingTimes) && remainingTimes > 0) parts.push(`剩余 ${remainingTimes} 次`)
   return parts.join(' · ')

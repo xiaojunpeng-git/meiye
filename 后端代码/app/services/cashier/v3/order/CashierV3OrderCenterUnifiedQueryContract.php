@@ -55,7 +55,7 @@ final class CashierV3OrderCenterUnifiedQueryContract
             ], ['refund_order_no', 'source_order_no', 'member_name', 'phone', 'refund_summary']],
             'debt' => ['欠款管理', [
                 ['debt_no', '欠款编号', 'text', true, true], ['business_date', '业务日期', 'date', true, true], ['member_name', '客户'], ['phone', '手机号'], ['source_type', '欠款来源'],
-                ['source_order_no', '来源订单'], ['original_debt_amount', '原欠款', 'amount'], ['repaid_amount', '已还', 'amount'],
+                ['source_order_no', '来源订单'], ['product_name', '商品名称'], ['original_debt_amount', '原欠款', 'amount'], ['repaid_amount', '已还', 'amount'],
                 ['remaining_amount', '剩余', 'amount'], ['debt_status', '状态'], ['store', '欠款门店'], ['created_at', '创建时间', 'datetime'],
             ], ['debt_no', 'source_order_no', 'member_name', 'phone']],
             'service' => ['服务记录', [

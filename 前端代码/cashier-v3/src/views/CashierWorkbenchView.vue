@@ -2903,6 +2903,11 @@ async function appendMultiCardUpgradeTarget(operation = {}) {
     reportEntitlementContractError({ message: '请至少选择一张完整的原卡。' })
     return { result: { status: 'failed', code: 'MULTI_CARD_UPGRADE_SOURCE_MISSING' } }
   }
+  // 购物车阶段先提示操作员；正式结账仍以锁定后的原卡债务终态为准。
+  if (sourceSnapshots.some((source) => source.outstandingDebtCents > 0)) {
+    reportEntitlementContractError({ message: '请先补交原卡的欠款或者取消原卡的欠款，才能升级。' })
+    return { result: { status: 'failed', code: 'CARD_UPGRADE_ORIGIN_DEBT_PENDING' } }
+  }
   const targetId = Number(target.catalogItemId ?? target.productId ?? target.id ?? 0)
   if (target.kind !== '卡项' || targetId <= 0) {
     reportEntitlementContractError({ message: '请选择一张目标卡。' })
@@ -7516,7 +7521,7 @@ onBeforeUnmount(() => {
                   >
                     来源：{{ line.entitlementSourceName || line.sourceName || line.serviceSource || '会员权益' }}
                     <template v-if="line.fullCardNo || line.cardNo"> · {{ line.entitlementInstanceType === 'independent_gift' ? '赠送记录' : '卡号' }}：{{ line.fullCardNo || line.cardNo }}</template>
-                    · 剩余 {{ line.remainingTimes ?? '—' }} · 占用 {{ line.occupiedTimes ?? line.reservedTimes ?? 0 }} · 可用 {{ line.availableTimes ?? '—' }}
+                    · 剩余 {{ line.debtLimitedRemainingTimes ?? line.remainingTimes ?? '—' }} · 占用 {{ line.occupiedTimes ?? line.reservedTimes ?? 0 }} · 可用 {{ line.availableTimes ?? '—' }}
                   </span>
                 </div>
                 <div class="cart-line__header-actions">

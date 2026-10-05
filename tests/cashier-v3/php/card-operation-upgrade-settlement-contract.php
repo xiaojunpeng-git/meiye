@@ -89,8 +89,8 @@ upgradeContract(strpos($source['facts'], '$plannedById = [];') !== false
     && strpos($source['facts'], "\$planned['sale_amount_cents']") !== false,
     'facts verify the formal upgrade sale line instead of the pre-credit draft line');
 upgradeContract(strpos($source['facts'], '$entitlementCredit = $sale - (int)$request[\'sales_amount_cents\'];') !== false
-    && strpos($source['facts'], '$collected + $balance + $debt + $entitlementCredit !== $sale') !== false,
-    'facts balance formal upgrade sales with the separate old-entitlement credit');
+    && strpos($source['facts'], '$collected + $legacyAmount + $balance + $debt + $entitlementCredit !== $sale') !== false,
+    'facts balance formal upgrade sales with legacy entry and separate old-entitlement credit');
 upgradeContract(strpos($source['facts'], 'if ($sale < 0') !== false
     && strpos($source['facts'], "if ((int)\$line['sale_amount_cents'] < 0") !== false,
     'zero-delta upgrades keep a zero-value formal sale line while retaining the exact total equation');

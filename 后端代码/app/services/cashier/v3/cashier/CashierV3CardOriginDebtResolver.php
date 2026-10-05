@@ -31,7 +31,7 @@ final class CashierV3CardOriginDebtResolver
         return $this->cardDebtAmount($originOrder, $currentMemberId, $lock, true, $tenantId);
     }
 
-    /** 取消金额仍是不可使用的权益，不是待还款。兼容历史卡，必须匹配原会员及门店审计。 */
+    /** 当前最后一次取消金额仍是不可使用的权益；恢复后状态归零，旧审计不再限制次数。 */
     public function cancelledCardDebt(array $order, int $memberId, string $tenantId = '0'): string
     {
         if ((int)($order['uid'] ?? 0) !== $memberId || $memberId <= 0) return '0.00';
@@ -45,9 +45,32 @@ final class CashierV3CardOriginDebtResolver
         if ((int)($debt['status'] ?? 0) !== 3) return '0.00';
         $audit = Db::name('cashier_v3_debt_cancellation')->where('debt_id', (int)$debt['id'])
             ->where('tenant_id', $tenantId)->where('member_id', $memberId)
-            ->where('store_id', (int)$debt['store_id'])->find();
+            ->where('store_id', (int)$debt['store_id'])->order('id desc')->find();
         if (!$audit || (int)$debt['uid'] !== $memberId) throw new \LogicException('cashier_v3_card_origin_debt_cancellation_missing');
         return bcdiv((string)$audit['cancelled_debt_cents'], '100', 2);
+    }
+
+    /**
+     * 共享次数卡的不可用金额以当前债务终态为准：待还与取消均限制核销，
+     * 恢复只切换来源事实，不释放尚未补交的次数；结清后才解除限制。
+     */
+    public function unavailableCardDebt(array $order, int $memberId, string $tenantId = '0'): string
+    {
+        $cancelled = $this->cancelledCardDebt($order, $memberId, $tenantId);
+        if (bccomp($cancelled, '0', 2) > 0) return $cancelled;
+        if ($memberId <= 0 || (int)($order['uid'] ?? 0) !== $memberId) return '0.00';
+        $lock = \app\services\cashier\v3\CashierV3TransactionGuard::isInTransaction();
+        $v3 = $this->pendingV3CardDebt($order, $memberId, $lock);
+        if ($v3 !== null) return $v3;
+        $rows = Db::name('store_debt')->where('order_id', (int)($order['id'] ?? 0))
+            ->lock($lock)->select()->toArray();
+        if (count($rows) > 1) throw new \LogicException('cashier_v3_card_origin_debt_duplicate');
+        $debt = $rows[0] ?? [];
+        if ((int)($debt['status'] ?? -1) !== 0) return '0.00';
+        if ((int)($debt['uid'] ?? 0) !== $memberId) {
+            throw new \LogicException('cashier_v3_card_origin_debt_member_mismatch');
+        }
+        return $this->positiveDifference($debt['total_debt'] ?? '0', $debt['repaid_debt'] ?? '0');
     }
 
     /** 两种展示共享来源解析；取消金额必须同时具备取消状态和 R49 不可变审计事实。 */
@@ -112,7 +135,7 @@ final class CashierV3CardOriginDebtResolver
             $audit = Db::name('cashier_v3_debt_cancellation')
                 ->where('debt_id', $debtId)->where('tenant_id', $tenantId)
                 ->where('member_id', $currentMemberId)
-                ->where('store_id', (int)$authorities[0]['store_id'])->find();
+                ->where('store_id', (int)$authorities[0]['store_id'])->order('id desc')->find();
             if (!$audit) {
                 throw new \LogicException('cashier_v3_card_origin_debt_cancellation_missing');
             }

@@ -174,7 +174,13 @@ final class CashierV3MultiCardUpgradeSettlementServices
             || (int)($state['current_member_id'] ?? 0) !== (int)$request['member_id'])) || (int)($order['paid'] ?? 0) !== 1
             || (int)($order['card_upgrade_use_oid'] ?? -1) !== 0 || (int)($order['refund_status'] ?? -1) !== 0
             || (int)($order['terminal_action'] ?? -1) !== 0 || (int)($order['is_del'] ?? 1) !== 0) throw self::conflict('multi_card_upgrade_source_changed');
-        $value = $this->remainingValue((int)$holder['oid']);
+        // 多卡升级也必须逐张锁定原卡欠款，不能用另一张卡的余额掩盖待还债务。
+        // 已取消部分不是已收款，不能作为升级抵扣额进入新卡销售。
+        $cancelledCents = (new CashierV3CardUpgradeDebtPolicy())
+            ->cancelledCentsAfterPendingGuard((array)$order, $dataScope->tenantId());
+        $value = CashierV3CardUpgradeDebtPolicy::creditAfterCancellation(
+            $this->remainingValue((int)$holder['oid']), $cancelledCents
+        );
         return ['holderId' => $holderId, 'legacyOrderId' => (int)$holder['oid'],
             'cardName' => trim((string)($holder['card_name'] ?? '')) ?: '会员卡项', 'cardNo' => (string)($holder['card_no'] ?? ''), 'remainingValueCents' => $value];
     }
@@ -199,6 +205,10 @@ final class CashierV3MultiCardUpgradeSettlementServices
             if ($purchaseCents < 0) $purchaseCents = self::decimalCents($row['pay_price'] ?? null);
             $snapshot = json_decode((string)($row['cart_info'] ?? ''), true);
             $snapshot = is_array($snapshot) ? $snapshot : [];
+            if ($purchaseCents % 100 !== 0) {
+                // 实际成交分摊可能含分；多卡升级与单卡升级共用分精度口径。
+                $snapshot['amountCalculationVersion'] = 'operation-cent-card-upgrade';
+            }
             $remainingMoney = CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
                 number_format($purchaseCents / 100, 2, '.', ''),
                 $times,

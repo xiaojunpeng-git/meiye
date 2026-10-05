@@ -22,7 +22,11 @@ const props = defineProps({
   lifecycleActions: { type: Array, default: () => [] },
   onLifecycleAction: { type: Function, default: null },
   fieldActionKeys: { type: Array, default: () => [] },
-  attributionChanges: { type: Array, default: () => [] }
+  attributionChanges: { type: Array, default: () => [] },
+  showDebtChanges: { type: Boolean, default: false },
+  debtChanges: { type: Array, default: () => [] },
+  debtChangesLoading: { type: Boolean, default: false },
+  debtChangesError: { type: String, default: '' }
 })
 
 const emit = defineEmits(['close', 'field-action'])
@@ -150,6 +154,17 @@ async function submitLifecycleAction() {
           <p v-for="(change, index) in attributionChanges" :key="`${change.recordId}-${change.field}-${index}`">
             {{ change.recordNo }} · {{ change.field === 'source' ? '来源' : '业务日期' }}：{{ change.oldValue || '—' }} → {{ change.newValue || '—' }}
             <small>{{ change.operatorName || change.operatorId }} · {{ new Date(change.occurredAt * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }}</small>
+          </p>
+        </section>
+        <section v-if="showDebtChanges" class="business-record-detail__changes">
+          <h3>变更记录</h3>
+          <p v-if="debtChangesLoading">读取中…</p>
+          <p v-else-if="debtChangesError" role="alert">{{ debtChangesError }}</p>
+          <p v-else-if="!debtChanges.length">暂无变更记录</p>
+          <p v-for="change in debtChanges" :key="change.factId">
+            {{ change.type === 'restore' ? '恢复欠款' : '取消欠款' }} {{ formatMoney((Number(change.amountCents) / 100).toFixed(2)) }}
+            <template v-if="change.reason"> · {{ change.reason }}</template>
+            <small>{{ change.operatorName || change.operatorId || '—' }} · {{ new Date(change.occurredAt * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }}</small>
           </p>
         </section>
       </main>

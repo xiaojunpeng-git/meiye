@@ -273,6 +273,13 @@ final class CashierV3CardOperationKernel
                 'projectId' => self::positiveInt($project['projectId'] ?? null, 'source_project_invalid'),
                 'projectName' => trim((string)($project['projectName'] ?? '')) ?: '原项目',
                 'remainingTimes' => self::nonnegativeInt($project['remainingTimes'] ?? null, 'source_project_times_invalid'),
+                'debtLimitedRemainingTimes' => self::nonnegativeInt(
+                    $project['debtLimitedRemainingTimes'] ?? $project['remainingTimes'] ?? null,
+                    'source_project_debt_limited_times_invalid'
+                ),
+                'sharedDebtLimitedRemainingTimes' => isset($project['sharedDebtLimitedRemainingTimes'])
+                    ? self::nonnegativeInt($project['sharedDebtLimitedRemainingTimes'], 'source_shared_debt_limited_times_invalid')
+                    : null,
                 'remainingValueCents' => self::nonnegativeInt($project['remainingValueCents'] ?? null, 'source_project_value_invalid'),
                 'totalTimes' => self::positiveInt($project['totalTimes'] ?? $project['remainingTimes'] ?? null, 'source_project_total_times_invalid'),
                 'totalValueCents' => self::nonnegativeInt($project['totalValueCents'] ?? $project['remainingValueCents'] ?? null, 'source_project_total_value_invalid'),
@@ -293,6 +300,7 @@ final class CashierV3CardOperationKernel
         $sourceValue = 0;
         $totalQuantity = 0;
         $lineNo = 0;
+        $sharedLimit = null;
         foreach ($selectedByDetail as $detailId => $quantity) {
             $project = $sourceByDetail[$detailId] ?? null;
             if ($project === null) {
@@ -305,6 +313,15 @@ final class CashierV3CardOperationKernel
                     $quantity,
                     $detailId
                 );
+            }
+            // 物理余次保留用于冲销；项目操作只能处分当前已付款可用的次数。
+            if ($quantity > $project['debtLimitedRemainingTimes']) {
+                throw self::debtLimitedInsufficient($project['projectName'], $project['debtLimitedRemainingTimes'], $quantity);
+            }
+            if ($project['sharedDebtLimitedRemainingTimes'] !== null) {
+                $sharedLimit = $sharedLimit === null
+                    ? $project['sharedDebtLimitedRemainingTimes']
+                    : min($sharedLimit, $project['sharedDebtLimitedRemainingTimes']);
             }
             // 替换沿用来源快照的剩余金额口径，目标只接收整元；历史分角
             // 单独记为取整扣减，不增加目标权益，也不改写原销售金额。
@@ -339,6 +356,9 @@ final class CashierV3CardOperationKernel
                 'amountCents' => $allocation['sourceDeductionCents'] ?? $lineValue,
                 'replacementAmountAllocation' => $allocation,
             ];
+        }
+        if ($sharedLimit !== null && $totalQuantity > $sharedLimit) {
+            throw self::debtLimitedInsufficient('原卡共享权益', $sharedLimit, $totalQuantity);
         }
         // A replacement creates the explicitly selected target-right count.
         // The target row remains a new current-right record on the same
@@ -634,6 +654,17 @@ final class CashierV3CardOperationKernel
                 'required_times' => $required,
                 'source_detail_id' => $detailId,
             ]
+        );
+    }
+
+    /** 共享池和独立项目都以服务端欠款限制后的可用次数拒绝超额操作。 */
+    private static function debtLimitedInsufficient(string $name, int $available, int $required): CashierV3CommandException
+    {
+        return new CashierV3CommandException(
+            CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+            $name . '受欠款限制，当前可用 ' . $available . ' 次，本次需要 ' . $required . ' 次。',
+            CashierV3ResultCode::STATUS_FAILED,
+            ['reason' => 'project_debt_limited_quantity', 'available_times' => $available, 'required_times' => $required]
         );
     }
 }

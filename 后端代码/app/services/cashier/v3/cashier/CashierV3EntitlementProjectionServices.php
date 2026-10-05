@@ -787,6 +787,8 @@ final class CashierV3EntitlementProjectionServices
                 'sourceType' => (string)($decoded['sourceType'] ?? ''),
                 'name' => $name,
                 'remainingTimes' => $rawSurplus,
+                // 债务只限制可兑现次数，不改写核销/作废依赖的物理余次。
+                'debtLimitedRemainingTimes' => $effective,
                 'purchaseTimes' => max(0, (int)$cart['write_times']),
                 'purchaseAmount' => $amounts['purchaseAmount'],
                 // 可用金额扣除未付/已取消部分；购买金额及每次原分摊快照仍保留历史。
@@ -888,6 +890,17 @@ final class CashierV3EntitlementProjectionServices
                 $remaining = (int)$holderRuleAuthority['remainingTimes'];
                 $purchaseTimes = (int)$holderRuleAuthority['totalTimes'];
             }
+            $debtLimitedRemaining = min($remaining, $availableTimes);
+            if (is_array($holderRuleAuthority) && (string)$holderRuleAuthority['ruleType'] === 'choice_count') {
+                // 任选次数卡各项目共享一池；不能把每行可用次数相加成多份余次。
+                $firstDetailId = (int)($projects[0]['id'] ?? 0);
+                foreach ($cartsByOrder[(int)$order['id']] ?? [] as $sourceCart) {
+                    if ((int)$sourceCart['id'] !== $firstDetailId) continue;
+                    $sharedLimit = $this->cardRules->debtLimitForDetail($sourceCart, $order);
+                    if ($sharedLimit !== null) $debtLimitedRemaining = min($remaining, $sharedLimit);
+                    break;
+                }
+            }
             // 欠款权威归属为该卡来源销售订单。它是卡级余额，不能复制到
             // 每个项目明细，否则一个卡含多个项目时会造成重复展示。
             $outstandingDebtAmount = $this->pendingDebt(
@@ -922,6 +935,7 @@ final class CashierV3EntitlementProjectionServices
                 'fullCardNo' => (string)$holder['card_no'],
                 'reference' => (string)$holder['card_no'],
                 'remainingTimes' => $remaining,
+                'debtLimitedRemainingTimes' => $debtLimitedRemaining,
                 'purchaseTimes' => $purchaseTimes,
                 'purchaseAmount' => $sourceAmounts['purchaseAmount'],
                 'unitPrice' => $this->purchaseUnitPrice(

@@ -92,8 +92,13 @@ function sourceAddedTimes(project) {
     .reduce((total, line) => total + Number(line.times || 0), 0)
 }
 
+// 来源项目可选择次数优先采用服务端已扣除欠款限制的投影。
+function sourceAvailableTimes(project) {
+  return Math.max(0, Number(project.debtLimitedRemainingTimes ?? project.remainingTimes ?? 0))
+}
+
 function addSource(project) {
-  if (!selectedCardId.value || sourceAddedTimes(project) >= Number(project.remainingTimes || 0)) return
+  if (!selectedCardId.value || sourceAddedTimes(project) >= sourceAvailableTimes(project)) return
   sourceLines.value = [
     ...sourceLines.value,
     {
@@ -102,7 +107,7 @@ function addSource(project) {
       name: project.name,
       benefitReference: project.benefitReference,
       times: 1,
-      maxTimes: project.remainingTimes,
+      maxTimes: sourceAvailableTimes(project),
       amount: null
     }
   ]
@@ -191,9 +196,9 @@ onBeforeUnmount(() => {
           </header>
           <p v-if="validationAttempted && selectedCardId && !sourceLines.length" class="replacement-step__error">请至少添加一条来源项目。</p>
           <div class="replacement-source-grid">
-            <button v-for="project in visibleSourceProjects" :key="project.id" type="button" :disabled="!selectedCardId || sourceAddedTimes(project) >= Number(project.remainingTimes || 0)" @click="addSource(project)">
+            <button v-for="project in visibleSourceProjects" :key="project.id" type="button" :disabled="!selectedCardId || sourceAddedTimes(project) >= sourceAvailableTimes(project)" @click="addSource(project)">
               <strong :title="project.name">{{ project.name }}</strong>
-              <span class="replacement-source-grid__meta"><i>剩余次数</i><b>{{ project.remainingTimes || 0 }} 次</b><em>·</em><span>单次核销 {{ formatMoney(project.unitAmount) }}</span></span>
+              <span class="replacement-source-grid__meta"><i>剩余次数</i><b>{{ sourceAvailableTimes(project) }} 次</b><em>·</em><span>单次核销 {{ formatMoney(project.unitAmount) }}</span></span>
               <em>{{ sourceAddedTimes(project) ? `已添加 ${sourceAddedTimes(project)} 次` : '＋ 添加一次' }}</em>
             </button>
           </div>

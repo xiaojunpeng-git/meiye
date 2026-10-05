@@ -1517,13 +1517,11 @@ class WriteOffOrderServices extends BaseServices
             $orderCartRows
         );
         $effective = $this->calcDebtLimitedTimesByRemainingAmount($cartRow, $pending, $remainingAmount);
-        // R50：项目金额限制之外再核对共享池；零金额子项目不能耗尽未实付的共享次数。
-        // 普通独立项目保留原分摊口径；查询、预约与最终核销共用这个服务端出口。
-        if (bccomp($this->cancelledEntitlementAmount($orderInfo), '0', 2) > 0) {
-            $sharedLimit = (new \app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices())
-                ->cancellationLimitForDetail($cartRow, $orderInfo);
-            if ($sharedLimit !== null) $effective = min($effective, $sharedLimit);
-        }
+        // 共享池按整卡核对待还/取消额，避免零金额子项目绕开逐行分摊；
+        // 恢复欠款但未补交时仍占用次数，独立项目继续保留原分摊口径。
+        $sharedLimit = (new \app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices())
+            ->debtLimitForDetail($cartRow, $orderInfo);
+        if ($sharedLimit !== null) $effective = min($effective, $sharedLimit);
         return $effective;
     }
 

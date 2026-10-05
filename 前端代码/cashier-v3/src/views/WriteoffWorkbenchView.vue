@@ -89,7 +89,9 @@ function sourceLabel(source) {
 }
 
 function sourceSummary(source) {
-  const times = source.remainingTimes === '不限' ? '不限' : `${source.remainingTimes || 0}`
+  // 用户所见余次与服务端欠款限制一致，原始次数仍留给核销/冲销校验。
+  const displayTimes = source.debtLimitedRemainingTimes ?? source.remainingTimes
+  const times = displayTimes === '不限' ? '不限' : `${displayTimes || 0}`
   const amount = source.remainingAmount === null || source.remainingAmount === undefined
     ? '—'
     : formatMoney(source.remainingAmount)
@@ -514,7 +516,7 @@ onBeforeUnmount(() => {
                   <span v-if="project.disabledReason" class="writeoff-project-row__reason">{{ project.disabledReason }}</span>
                   <span v-else>{{ project.sourceType || sourceLabel(source) }}<template v-if="project.reservedTimes"> · 预约占用 {{ project.reservedTimes }}</template></span>
                 </div>
-                <span class="writeoff-project-row__remaining"><strong>{{ project.remainingTimes || 0 }}</strong>/{{ project.totalTimes || 0 }}</span>
+                <span class="writeoff-project-row__remaining"><strong>{{ project.debtLimitedRemainingTimes ?? project.remainingTimes ?? 0 }}</strong>/{{ project.totalTimes || 0 }}</span>
                 <div class="quantity-stepper" aria-label="本次核销次数">
                   <button type="button" aria-label="减少本次核销次数" :disabled="!project.selected" @click="changeProjectTimes(source, project, -1)">−</button>
                   <span>{{ project.selectedTimes || 0 }}次</span>

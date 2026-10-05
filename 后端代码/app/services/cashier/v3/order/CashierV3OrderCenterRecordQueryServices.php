@@ -4,6 +4,7 @@ namespace app\services\cashier\v3\order;
 
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\cashier\CashierV3MemberDebtProjectionServices;
 use app\services\report\StoreReportNormalDataScopeServices;
 use think\facade\Db;
 
@@ -713,7 +714,6 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('system_store s', 's.id = d.store_id')
             ->leftJoin('cashier_v3_debt_authority a', 'a.debt_id = d.id')
             ->leftJoin('cashier_v3_recharge_debt_authority ra', 'ra.debt_id = d.id');
-        $query->leftJoin('cashier_v3_debt_cancellation dc', 'dc.debt_id = d.id');
         $this->applyStoreScope($query, 'd.store_id', $criteria['allowedStoreIds']);
         $this->applyTimestampBusinessDateRange($query, 'd.add_time', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
@@ -738,9 +738,26 @@ final class CashierV3OrderCenterRecordQueryServices
             'u.real_name,u.nickname,u.phone,s.name AS store_name',
             'a.sales_order_id,a.sales_order_no_snapshot,a.checkout_request_id',
             'ra.recharge_id,ra.recharge_order_no_snapshot',
-            'dc.cancelled_debt_cents,dc.reason_snapshot AS cancel_reason,dc.operator_name_snapshot AS cancel_operator,dc.occurred_at AS cancelled_at',
         ]));
-        return [array_map(function (array $row): array {
+        // 历史取消可有多轮，分页先按欠款主表完成，再批量取每笔最后一次审计。
+        // 仅 status=3 的最后一次取消参与当前金额/按钮，恢复的旧事实留在详情历史。
+        $latestByDebt = [];
+        $debtIds = array_values(array_unique(array_map(static function (array $row): int {
+            return (int)$row['id'];
+        }, $rows)));
+        if ($debtIds) {
+            $audits = Db::name('cashier_v3_debt_cancellation')->whereIn('debt_id', $debtIds)
+                ->order('debt_id asc,id desc')->select()->toArray();
+            foreach ($audits as $audit) {
+                $debtId = (int)$audit['debt_id'];
+                if (!isset($latestByDebt[$debtId])) $latestByDebt[$debtId] = $audit;
+            }
+        }
+        // Reuse the member debt summary after this page's store scope and
+        // pagination, so list/export never infer a historical name from today's catalog.
+        $summariesByDebt = (new CashierV3MemberDebtProjectionServices())->summariesForDebts($debtIds);
+        return [array_map(function (array $row) use ($latestByDebt, $summariesByDebt): array {
+            $cancel = (int)$row['status'] === 3 ? ($latestByDebt[(int)$row['id']] ?? []) : [];
             $totalDebt = (string)($row['total_debt'] ?? '0.00');
             $repaidDebt = (string)($row['repaid_debt'] ?? '0.00');
             // 取消不增加已还金额。应收余额为零，免除金额另列历史事实。
@@ -760,15 +777,19 @@ final class CashierV3OrderCenterRecordQueryServices
                 'phone' => (string)($row['phone'] ?? ''),
                 'sourceOrderNo' => $sourceOrderNo,
                 'sourceType' => $sourceType,
+                'productName' => $rechargeOrderNo !== '' ? '储值充值'
+                    : ($summariesByDebt[(int)$row['id']] ?? '销售订单欠款'),
                 'originalDebtAmount' => $totalDebt,
                 'repaidAmount' => $repaidDebt,
                 'remainingAmount' => $remaining,
                 'debtStatus' => [0 => '待补交', 1 => '已结清', 2 => '已失效', 3 => '已取消'][(int)$row['status']] ?? '已失效',
-                'cancelledAmount' => bcdiv((string)($row['cancelled_debt_cents'] ?? 0), '100', 2),
-                'cancelReason' => (string)($row['cancel_reason'] ?? ''),
-                'cancelOperator' => (string)($row['cancel_operator'] ?? ''),
-                'cancelledAt' => empty($row['cancelled_at']) ? '' : $this->dateTime((int)$row['cancelled_at']),
+                'cancelledAmount' => bcdiv((string)($cancel['cancelled_debt_cents'] ?? 0), '100', 2),
+                'cancellationId' => (string)($cancel['cancellation_id'] ?? ''),
+                'cancelReason' => (string)($cancel['reason_snapshot'] ?? ''),
+                'cancelOperator' => (string)($cancel['operator_name_snapshot'] ?? ''),
+                'cancelledAt' => empty($cancel['occurred_at']) ? '' : $this->dateTime((int)$cancel['occurred_at']),
                 'canCancel' => (int)$row['status'] === 0 && bccomp($remaining, '0.00', 2) > 0,
+                'canRestore' => (int)$row['status'] === 3 && $cancel !== [],
                 'storeName' => (string)($row['store_name'] ?? ''),
                 // 欠款主表没有独立的业务日字段；其入账时间就是该条欠款
                 // 事实的发生时间，筛选与列表展示必须使用同一来源。
@@ -817,7 +838,9 @@ final class CashierV3OrderCenterRecordQueryServices
                 'phone' => (string)$row['phone'],
                 'refundSummary' => (string)$row['reason_snapshot'],
                 'refundAmount' => $this->centsToMoney((int)$row['cash_refund_cents']),
-                'refundMethod' => '原记账方式退回',
+                // 导入旧卡没有可信的历史 V3 收款渠道；其退款是操作人线下核实后手工登记。
+                'refundMethod' => (string)$row['source_type'] === 'imported_card'
+                    ? '手工确认退款' : '原记账方式退回',
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
                 'refundStatus' => '已退款',

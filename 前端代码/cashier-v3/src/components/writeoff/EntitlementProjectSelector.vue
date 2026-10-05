@@ -63,6 +63,7 @@ function sourceAvailableProjectCount(source = {}) {
 }
 
 function sourceRemainingTimes(source = {}) {
+  if (source.debtLimitedRemainingTimes !== undefined) return source.debtLimitedRemainingTimes
   if (source.remainingTimes !== undefined) return source.remainingTimes
   return (Array.isArray(source.projects) ? source.projects : []).reduce((total, project) => (
     total + Number(project.remainingTimes || 0)
@@ -262,7 +263,7 @@ function changeTimes(source, project, delta) {
                   <span v-else>{{ project.sourceTypeLabel || sourceTypeLabel(source) }}<template v-if="project.validThroughLabel"> · {{ project.validThroughLabel }}</template></span>
                 </div>
                 <span class="writeoff-project-row__availability">
-                  <strong>{{ project.remainingTimes || 0 }}</strong>
+                  <strong>{{ project.debtLimitedRemainingTimes ?? project.remainingTimes ?? 0 }}</strong>
                   <span>／{{ projectOccupiedTimes(project) }}／{{ projectAvailableTimes(project) }}</span>
                 </span>
                 <div class="quantity-stepper" aria-label="本次使用次数">

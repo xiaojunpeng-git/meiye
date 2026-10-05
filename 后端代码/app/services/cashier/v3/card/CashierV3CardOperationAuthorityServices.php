@@ -16,6 +16,7 @@ use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
+use app\services\order\store\WriteOffOrderServices;
 use think\facade\Db;
 
 /**
@@ -440,6 +441,16 @@ final class CashierV3CardOperationAuthorityServices
         ], true) && (int)$holder['store_id'] !== $operatorScope->storeId()) {
             throw self::notFound('card_source_store_not_allowed');
         }
+        // 升级会把原卡权益折成新销售抵扣；待还债务必须先补交或取消。
+        // 取消不产生收款，因此整卡抵扣还要扣掉已取消的原卡欠款。
+        $cancelledCents = 0;
+        if (in_array($operationType, [
+            CashierV3CardOperationKernel::TYPE_CARD_UPGRADE,
+            CashierV3CardOperationKernel::TYPE_PROJECT_UPGRADE,
+        ], true)) {
+            $cancelledCents = (new CashierV3CardUpgradeDebtPolicy())
+                ->cancelledCentsAfterPendingGuard($order, $operatorScope->tenantId());
+        }
         return [
             'holderId' => (int)$holder['id'],
             'holderVersion' => 0,
@@ -451,12 +462,15 @@ final class CashierV3CardOperationAuthorityServices
             'cardNo' => trim((string)($holder['card_no'] ?? '')),
             'effectiveWriteStart' => max(0, (int)($holder['write_start'] ?? 0)),
             'effectiveWriteEnd' => max(0, (int)($holder['write_end'] ?? 0)),
-            'remainingValueCents' => in_array($operationType, [
-                CashierV3CardOperationKernel::TYPE_CARD_UPGRADE,
-                CashierV3CardOperationKernel::TYPE_PROJECT_UPGRADE,
-            ], true) ? $this->remainingValueCents((int)$holder['oid']) : 0,
+            'remainingValueCents' => $operationType === CashierV3CardOperationKernel::TYPE_CARD_UPGRADE
+                ? CashierV3CardUpgradeDebtPolicy::creditAfterCancellation(
+                    $this->remainingValueCents((int)$holder['oid']), $cancelledCents
+                )
+                : ($operationType === CashierV3CardOperationKernel::TYPE_PROJECT_UPGRADE
+                    ? $this->remainingValueCents((int)$holder['oid']) : 0),
             'projects' => $this->loadSelectedProjectRightsForUpdate(
                 (int)$order['id'],
+                $order,
                 $operationType,
                 $payload,
                 $operatorScope,
@@ -893,6 +907,7 @@ final class CashierV3CardOperationAuthorityServices
     /** @return array<int,array> */
     private function loadSelectedProjectRightsForUpdate(
         int $orderId,
+        array $order,
         string $operationType,
         array $payload,
         CashierV3OperatorScope $operatorScope,
@@ -916,18 +931,26 @@ final class CashierV3CardOperationAuthorityServices
         }
         $ids = array_keys($ids);
         sort($ids, SORT_NUMERIC);
+        $selectedIds = array_fill_keys($ids, true);
+        // 欠款按原订单全部权益行分摊；只查询勾选行会放大每行可用次数。
         $rows = Db::name('store_order_cart_info')
             ->where('oid', $orderId)
-            ->whereIn('id', $ids)
             ->where('cart_type', 2)
             ->where('product_type', 6)
-            ->field('id,product_id,write_times,write_surplus_times,pay_price,is_writeoff,cart_info')
+            ->field('id,oid,product_id,write_times,write_surplus_times,pay_price,is_writeoff,is_gift,debt_amount,repaid_debt_amount,cart_info')
             ->lock(true)
             ->select();
+        $allRows = $this->rows($rows);
+        $actualAmounts = (new CashierV3CardSaleActualAmountServices())->forOrders([$orderId], $allRows);
+        $unavailableDebt = (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())
+            ->unavailableCardDebt($order, (int)($order['uid'] ?? 0), $operatorScope->tenantId());
+        /** @var WriteOffOrderServices $writeoff */
+        $writeoff = app()->make(WriteOffOrderServices::class);
         $projects = [];
         $includeUnavailableForReplacement = $operationType === CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT;
-        foreach ($this->rows($rows) as $row) {
+        foreach ($allRows as $row) {
             $detailId = (int)($row['id'] ?? 0);
+            if (!isset($selectedIds[$detailId])) continue;
             $times = (int)($row['write_times'] ?? 0);
             $remaining = (int)($row['write_surplus_times'] ?? -1);
             if ($detailId <= 0 || $times <= 0 || $remaining < 0 || $remaining > $times
@@ -936,6 +959,23 @@ final class CashierV3CardOperationAuthorityServices
                 continue;
             }
             $cartInfo = json_decode((string)($row['cart_info'] ?? ''), true);
+            $cartInfo = is_array($cartInfo) ? $cartInfo : [];
+            $actualCents = (int)($actualAmounts[$detailId] ?? -1);
+            $purchaseCents = $actualCents >= 0 ? $actualCents : self::moneyToCents($row['pay_price'] ?? null);
+            if ($purchaseCents % 100 !== 0) {
+                // 改价后分摊可精确到分，不能交给只接受整元的旧卡分配器。
+                $cartInfo['amountCalculationVersion'] = 'operation-cent-card-upgrade';
+            }
+            $remainingAmount = CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
+                self::centsToMoney($purchaseCents), $times, $times - $remaining, $cartInfo
+            );
+            $sharedLimit = $this->cardRules->debtLimitForDetail($row, $order);
+            // 共享任选卡的子项目金额可能为零，整卡上限才是其次数权威。
+            $effective = $sharedLimit !== null
+                ? min($remaining, $sharedLimit)
+                : $writeoff->calcEffectiveWriteSurplusTimes(
+                    $row, (float)$unavailableDebt, $order, $remainingAmount, $allRows
+                );
             $projectName = is_array($cartInfo)
                 ? trim((string)(
                     $cartInfo['productInfo']['store_name']
@@ -978,13 +1018,17 @@ final class CashierV3CardOperationAuthorityServices
                 'projectId' => (int)($row['product_id'] ?? 0),
                 'projectName' => $projectName,
                 'remainingTimes' => $remaining,
+                'debtLimitedRemainingTimes' => max(0, min($remaining, $effective)),
+                'sharedDebtLimitedRemainingTimes' => $sharedLimit,
                 'remainingValueCents' => self::allocateCents(
-                    self::moneyToCents($row['pay_price'] ?? null),
+                    $operationType === CashierV3CardOperationKernel::TYPE_PROJECT_UPGRADE
+                        ? $purchaseCents : self::moneyToCents($row['pay_price'] ?? null),
                     $times,
                     $remaining
                 ),
                 'totalTimes' => $times,
-                'totalValueCents' => self::moneyToCents($row['pay_price'] ?? null),
+                'totalValueCents' => $operationType === CashierV3CardOperationKernel::TYPE_PROJECT_UPGRADE
+                    ? $purchaseCents : self::moneyToCents($row['pay_price'] ?? null),
                 'centCapable' => CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot(
                     json_decode((string)($row['cart_info'] ?? ''), true) ?: []
                 ),
@@ -1307,12 +1351,13 @@ final class CashierV3CardOperationAuthorityServices
             ->where('product_type', 6)
             ->where('is_writeoff', 0)
             ->where('write_surplus_times', '>', 0)
-            ->field('pay_price,write_times,write_surplus_times')
+            ->field('id,oid,product_id,pay_price,write_times,write_surplus_times,cart_info')
             ->lock(true)
             ->select();
         if (is_object($rows) && method_exists($rows, 'toArray')) {
             $rows = $rows->toArray();
         }
+        $actualAmounts = (new CashierV3CardSaleActualAmountServices())->forOrders([$orderId], (array)$rows);
         $total = 0;
         foreach ((array)$rows as $row) {
             $times = (int)($row['write_times'] ?? 0);
@@ -1320,7 +1365,18 @@ final class CashierV3CardOperationAuthorityServices
             if ($times <= 0 || $remaining < 0 || $remaining > $times) {
                 throw self::failure('card_remaining_value_source_invalid');
             }
-            $total += self::allocateCents(self::moneyToCents($row['pay_price'] ?? null), $times, $remaining);
+            // 改价签发卡使用实际成交分摊，历史卡没有该事实时沿用原项目价。
+            $purchaseCents = (int)($actualAmounts[(int)($row['id'] ?? 0)] ?? -1);
+            if ($purchaseCents < 0) $purchaseCents = self::moneyToCents($row['pay_price'] ?? null);
+            $snapshot = json_decode((string)($row['cart_info'] ?? ''), true);
+            $snapshot = is_array($snapshot) ? $snapshot : [];
+            if ($purchaseCents % 100 !== 0) {
+                $snapshot['amountCalculationVersion'] = 'operation-cent-card-upgrade';
+            }
+            $total += self::moneyToCents(CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
+                self::centsToMoney($purchaseCents), $times, $times - $remaining,
+                $snapshot
+            ));
         }
         return $total;
     }

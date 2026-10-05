@@ -131,7 +131,7 @@ final class CashierV3MemberDetailQueryServices
             foreach ($cards as $card) {
                 if (($card['statusCode'] ?? '') !== 'enabled') continue;
                 $activeCardCount++;
-                if (($card['cardRuleType'] ?? '') !== 'time') $remainingTimes += (int)($card['remainingTimes'] ?? 0);
+                if (($card['cardRuleType'] ?? '') !== 'time') $remainingTimes += (int)($card['debtLimitedRemainingTimes'] ?? $card['remainingTimes'] ?? 0);
                 $remainingAmount = bcadd($remainingAmount, (string)($card['remainingAmount'] ?? '0.00'), 2);
             }
         }
@@ -206,7 +206,7 @@ final class CashierV3MemberDetailQueryServices
             if (($card['statusCode'] ?? '') !== 'enabled') continue;
             $activeCardCount++;
             if (($card['cardRuleType'] ?? '') !== 'time') {
-                $remainingTimes += (int)($card['remainingTimes'] ?? 0);
+                $remainingTimes += (int)($card['debtLimitedRemainingTimes'] ?? $card['remainingTimes'] ?? 0);
             }
             $remainingAmount = bcadd($remainingAmount, (string)($card['remainingAmount'] ?? '0.00'), 2);
         }
@@ -936,7 +936,7 @@ final class CashierV3MemberDetailQueryServices
             foreach ($cardsByMember[$memberId]??[] as $card) {
                 if (($card['statusCode']??'')!=='enabled') continue;
                 ++$activeCards;
-                if (($card['cardRuleType']??'')!=='time') $remainingTimes+=(int)$card['remainingTimes'];
+                if (($card['cardRuleType']??'')!=='time') $remainingTimes+=(int)($card['debtLimitedRemainingTimes']??$card['remainingTimes']);
                 $total=bcadd($total,(string)$card['remainingAmount'],2);
             }
             $cents=bcmul($total,'100',0);
@@ -970,7 +970,7 @@ final class CashierV3MemberDetailQueryServices
             ->whereIn('h.uid', $memberIds)
             ->where('h.is_del', 0)
             ->where('h.store_id', '>', 0)
-            ->whereRaw('o.uid = h.uid')
+            // 整卡转让只改变当前持卡人；原购卡人仍留在订单上供债务归属和审计。
             ->where('o.paid', 1)
             ->where('o.is_del', 0)
             ->where('o.is_system_del', 0)
@@ -1014,7 +1014,7 @@ final class CashierV3MemberDetailQueryServices
             ->column('card_status', 'card_holder_id');
         $cardRuleTypeByHolder = Db::name('cashier_v3_card_rule_state')
             ->where('tenant_id', $tenantId)
-            ->whereIn('member_id', $memberIds)
+            // 规则签发快照保留原会员，转让后必须按持卡实例识别卡规则。
             ->whereIn('card_holder_id', $holderIds)
             ->column('rule_type', 'card_holder_id');
         $ruleAuthoritiesByHolder = (new CashierV3CardRuleEntitlementAuthorityServices())
@@ -1041,10 +1041,35 @@ final class CashierV3MemberDetailQueryServices
             array_keys($holderByOrder),
             $rows
         );
+        $rowsByOrder = [];
+        $rowsById = [];
+        foreach ($rows as $row) {
+            $rowsByOrder[(int)$row['oid']][] = $row;
+            $rowsById[(int)$row['id']] = $row;
+        }
         // R50：详情与收银共用可用金额守卫，历史购买金额/次数不改写。
-        $originOrders = Db::name('store_order')->whereIn('id', array_keys($holderByOrder))->column('id,uid,store_id', 'id');
+        $originOrders = Db::name('store_order')->whereIn('id', array_keys($holderByOrder))
+            ->column('id,uid,store_id,debt_amount,repaid_debt_amount', 'id');
         foreach ($originOrders as &$originOrder) { $originOrder['tenant_id'] = $tenantId; }
         unset($originOrder);
+        $debtRows = Db::name('store_debt')->whereIn('order_id', array_keys($holderByOrder))
+            ->field('order_id,status,total_debt,repaid_debt')->select()->toArray();
+        $debtByOrder = [];
+        foreach ($debtRows as $debtRow) $debtByOrder[(int)$debtRow['order_id']] = $debtRow;
+        $debtResolver = new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver();
+        $pendingByOrder = [];
+        foreach ($originOrders as $orderId => $originOrder) {
+            $v3Pending = $debtResolver->pendingV3CardDebt($originOrder, (int)$originOrder['uid']);
+            if ($v3Pending !== null) {
+                $pendingByOrder[(int)$orderId] = $v3Pending;
+                continue;
+            }
+            $debt = $debtByOrder[(int)$orderId] ?? null;
+            $total = $debt ? (string)$debt['total_debt'] : (string)($originOrder['debt_amount'] ?? '0');
+            $repaid = $debt ? (string)$debt['repaid_debt'] : (string)($originOrder['repaid_debt_amount'] ?? '0');
+            $pending = $debt && (int)$debt['status'] !== 0 ? '0.00' : bcsub($total, $repaid, 2);
+            $pendingByOrder[(int)$orderId] = bccomp($pending, '0', 2) > 0 ? $pending : '0.00';
+        }
         $writeoff = app()->make(\app\services\order\store\WriteOffOrderServices::class);
         foreach ($rows as $row) {
             $start = max(0, (int)($row['write_start'] ?? 0));
@@ -1072,7 +1097,15 @@ final class CashierV3MemberDetailQueryServices
                     $total - $remaining,
                     $amountAuthority['allocationSnapshot']
                 );
-                $amount = $writeoff->usableEntitlementAmount($row, (array)($originOrders[(int)$row['oid']] ?? []), $amount);
+                $orderId = (int)$row['oid'];
+                $originOrder = (array)($originOrders[$orderId] ?? []);
+                $pending = (float)($pendingByOrder[$orderId] ?? 0);
+                $effective = $writeoff->calcEffectiveWriteSurplusTimes(
+                    $row, $pending, $originOrder, $amount, $rowsByOrder[$orderId] ?? []
+                );
+                $amount = $writeoff->usableEntitlementAmount(
+                    $row, $originOrder, $amount, $pending, $rowsByOrder[$orderId] ?? []
+                );
             } catch (\InvalidArgumentException $exception) {
                 throw new CashierV3CommandException(
                     CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
@@ -1087,6 +1120,7 @@ final class CashierV3MemberDetailQueryServices
                 'purchaseTimes' => $total,
                 'usedTimes' => $total - $remaining,
                 'remainingTimes' => $remaining,
+                'debtLimitedRemainingTimes' => min($remaining, max(0, $effective)),
                 'remainingAmount' => $amount,
             ];
         }
@@ -1103,18 +1137,31 @@ final class CashierV3MemberDetailQueryServices
                 continue;
             }
             $remainingTimes = 0;
+            $debtLimitedRemainingTimes = 0;
             $remainingAmount = '0.00';
             foreach ($projects as $project) {
                 $remainingTimes += (int)$project['remainingTimes'];
+                $debtLimitedRemainingTimes += (int)$project['debtLimitedRemainingTimes'];
                 $remainingAmount = bcadd($remainingAmount, (string)$project['remainingAmount'], 2);
             }
             $holderId = (int)($holder['id'] ?? 0);
             $cardRuleType = (string)($cardRuleTypeByHolder[$holderId] ?? '');
+            if ($cardRuleType === 'choice_count' && $projects) {
+                // 多项目共享同一次数池；详情父卡不可按子项目求和。
+                $firstRow = $rowsById[(int)$projects[0]['id']] ?? null;
+                $originOrder = (array)($originOrders[(int)$orderId] ?? []);
+                if ($firstRow && $originOrder) {
+                    $sharedLimit = (new CashierV3CardRuleEntitlementAuthorityServices())
+                        ->debtLimitForDetail($firstRow, $originOrder);
+                    if ($sharedLimit !== null) $debtLimitedRemainingTimes = $sharedLimit;
+                }
+            }
             $isTimeCard = $cardRuleType === 'time';
             if ($isTimeCard) {
                 $remainingAmount = $this->money($holder['order_pay_price'] ?? 0);
                 $cancelled = (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())->cancelledCardDebt(
-                    (array)($originOrders[(int)$orderId] ?? []), (int)$holder['uid']
+                    (array)($originOrders[(int)$orderId] ?? []),
+                    (int)($originOrders[(int)$orderId]['uid'] ?? 0), $tenantId
                 );
                 $remainingAmount = max('0.00', bcsub($remainingAmount, $cancelled, 2));
             }
@@ -1131,6 +1178,7 @@ final class CashierV3MemberDetailQueryServices
                 'openedAt' => $this->dateTime($holder['add_time'] ?? 0),
                 'expiresAt' => $this->dateTime($holder['write_end'] ?? 0, '长期有效'),
                 'remainingTimes' => $remainingTimes,
+                'debtLimitedRemainingTimes' => $debtLimitedRemainingTimes,
                 'remainingAmount' => $remainingAmount,
                 'purchaseBatchNo' => (string)$orderId,
                 'projects' => $projects,

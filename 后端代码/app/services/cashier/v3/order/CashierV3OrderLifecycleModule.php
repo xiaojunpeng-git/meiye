@@ -40,6 +40,7 @@ final class CashierV3OrderLifecycleModule
         $serviceVoid = new CashierV3ServiceRecordVoidServices();
         $orderCenterVoid = new CashierV3OrderCenterVoidServices();
         $debtCancellation = new CashierV3DebtCancellationServices();
+        $debtRestoration = new CashierV3DebtRestorationServices();
         // 独立取消只依赖确认时的欠款金额快照；不继承工作台或草稿版本。
         // 领域服务在事务内锁定欠款并强制门店权限，网关记录命令及事件。
         $dispatcher->handlers()->registerCommand('cancel-order-center-debt', static function (array $scope) use ($debtCancellation): array {
@@ -49,6 +50,18 @@ final class CashierV3OrderLifecycleModule
             return ['required' => [], 'allowed' => [], 'identities' => [],
                 'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
         }, [], [], [], true));
+        // 恢复沿用取消的空上下文约束，由服务端锁定债务及最后一轮取消事实。
+        $dispatcher->handlers()->registerCommand('restore-order-center-debt', static function (array $scope) use ($debtRestoration): array {
+            return $debtRestoration->executeInTx($scope);
+        });
+        $dispatcher->policies()->register(new CashierV3ContextPolicy('restore-order-center-debt', [], [], static function (): array {
+            return ['required' => [], 'allowed' => [], 'identities' => [],
+                'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
+        }, [], [], [], true));
+        $dispatcher->handlers()->registerProjection('query-order-center-debt-changes', static function (array $scope) use ($debtRestoration): array {
+            return ['data' => ['debtChanges' => $debtRestoration->history((array)($scope['payload'] ?? []),
+                $scope['operator_scope'], $scope['data_scope'])], 'message' => '欠款变更记录已读取。'];
+        });
         $serviceCraftsmanAdjustment = new CashierV3ServiceRecordCraftsmanAdjustmentServices();
         $supplementPersonnelAdjustment = new CashierV3SupplementSalespersonAdjustmentServices();
         $dispatcher->versionServices()->registerProvider(

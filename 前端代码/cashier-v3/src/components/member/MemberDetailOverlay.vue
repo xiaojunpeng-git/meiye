@@ -161,11 +161,13 @@ function isTimeCard(record = {}) {
 }
 
 function cardRemainingTimesDisplay(card = {}) {
-  return isTimeCard(card) ? '—' : numberText(firstValue(card, ['remainingTimes', 'leftTimes']), ' 次')
+  return isTimeCard(card) ? '—' : numberText(firstValue(card, ['debtLimitedRemainingTimes', 'remainingTimes', 'leftTimes']), ' 次')
 }
 
 function cardProjectTimesDisplay(card = {}, project = {}, keys = []) {
-  return isTimeCard(card) ? '—' : numberText(firstValue(project, keys), ' 次')
+  // 只有剩余次数受欠款限制；购买和已用次数仍是不可改写的历史事实。
+  const displayKeys = keys.includes('remainingTimes') ? ['debtLimitedRemainingTimes', ...keys] : keys
+  return isTimeCard(card) ? '—' : numberText(firstValue(project, displayKeys), ' 次')
 }
 
 function cardProjectAmountDisplay(card = {}, project = {}) {

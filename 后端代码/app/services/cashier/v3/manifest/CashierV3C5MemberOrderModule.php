@@ -80,6 +80,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'query-order-center-records' => self::FEATURE_ORDER_CENTER,
             'query-order-attribution-sources' => self::FEATURE_ORDER_CENTER,
             'query-order-attribution-changes' => self::FEATURE_ORDER_CENTER,
+            'query-order-center-debt-changes' => self::FEATURE_ORDER_CENTER,
             'open-sales-order-detail' => self::FEATURE_ORDER_CENTER,
             'view-sales-order' => self::FEATURE_ORDER_CENTER,
             'open-order-operation-logs' => self::FEATURE_ORDER_CENTER,
@@ -123,6 +124,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['void-recharge-order'] = self::FEATURE_ORDER_VOID;
         $command['void-order-center-supplement'] = self::FEATURE_ORDER_VOID;
         $command['cancel-order-center-debt'] = self::FEATURE_ORDER_VOID;
+        $command['restore-order-center-debt'] = self::FEATURE_ORDER_VOID;
         $command['void-order-center-gift'] = self::FEATURE_ORDER_VOID;
         $command['reopen-sales-order'] = self::FEATURE_ORDER_REOPEN;
         $command['upgrade-sales-order'] = self::FEATURE_ORDER_CENTER;

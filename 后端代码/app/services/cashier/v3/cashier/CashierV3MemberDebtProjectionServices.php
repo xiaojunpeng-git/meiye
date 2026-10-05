@@ -54,7 +54,7 @@ final class CashierV3MemberDebtProjectionServices
             $rows = $this->debtRowsForMember($memberId);
 
             $debtIds = array_values(array_filter(array_map('intval', array_column($rows, 'id'))));
-            $itemsByDebt = $this->itemsByDebt($debtIds);
+            $summariesByDebt = $this->summariesForDebts($debtIds);
             $records = [];
             $total = '0.00';
             foreach ($rows as $row) {
@@ -106,7 +106,7 @@ final class CashierV3MemberDebtProjectionServices
                     'sourceLabel' => $isRecharge ? '充值欠款' : '销售订单欠款',
                     'sourceOrderNo' => $orderNo,
                     'originalBusinessSource' => $originalSource,
-                    'summary' => $isRecharge ? '储值充值' : $this->summary($itemsByDebt[$debtId] ?? []),
+                    'summary' => $isRecharge ? '储值充值' : ($summariesByDebt[$debtId] ?? '销售订单欠款'),
                     'originalDebtAmount' => $original,
                     'repaidAmount' => $repaid,
                     'remainingDebtAmount' => $remaining,
@@ -210,18 +210,46 @@ final class CashierV3MemberDebtProjectionServices
         return '';
     }
 
+    /**
+     * Return display names only for debt IDs already filtered by the caller's
+     * member or store scope. Both debt views must use this issuance-time name.
+     *
+     * @param array<int,int> $debtIds
+     * @return array<int,string>
+     */
+    public function summariesForDebts(array $debtIds): array
+    {
+        $summaries = [];
+        foreach ($this->itemsByDebt($debtIds) as $debtId => $items) {
+            $summaries[$debtId] = $this->summary($items);
+        }
+        return $summaries;
+    }
+
     /** @return array<int,array<int,string>> */
     private function itemsByDebt(array $debtIds): array
     {
         if (!$debtIds) {
             return [];
         }
-        $rows = $this->rows(Db::name('store_debt_item')->whereIn('debt_id', $debtIds)
-            ->field('debt_id,product_name')->order('id asc')->select());
+        // Historical imports stored a generic debt label, while the card holder
+        // retains the name frozen at issuance. Match both order and product so
+        // another card on the same order cannot rename this debt in the read model.
+        $rows = $this->rows(Db::name('store_debt_item')->alias('i')
+            ->leftJoin('user_card_holder h', 'h.oid=i.order_id AND h.product_id=i.product_id')
+            ->whereIn('i.debt_id', $debtIds)
+            ->field('i.debt_id,i.product_name,h.card_name AS card_name_snapshot')
+            ->order('i.id asc')->select());
         $out = [];
         foreach ($rows as $row) {
             $id = (int)($row['debt_id'] ?? 0);
             $name = trim((string)($row['product_name'] ?? ''));
+            if ($name === '历史卡项欠款' || $name === 'SWXT历史卡项欠款') {
+                $snapshot = trim((string)($row['card_name_snapshot'] ?? ''));
+                if ($snapshot !== '') {
+                    $name = $snapshot;
+                }
+            }
             if ($id > 0 && $name !== '') {
                 $out[$id][] = $name;
             }
