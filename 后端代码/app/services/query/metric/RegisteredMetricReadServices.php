@@ -1484,7 +1484,8 @@ final class RegisteredMetricReadServices
         $sale = $this->aggregate($this->saleCashQuery($tenantId, $stores, $range), $expression);
         $recharge = $this->aggregate($this->rechargeCashQuery($tenantId, $stores, $range), $expression);
         $unallocatedDebtRepayment = $this->aggregate($this->unallocatedSalesDebtRepaymentCashQuery($tenantId, $stores, $range), $expression);
-        return $this->add($this->add($sale, $recharge), $unallocatedDebtRepayment);
+        $importedCardRefund = $this->aggregate($this->importedCardRefundCashQuery($tenantId, $stores, $range), $expression);
+        return $this->add($this->add($this->add($sale, $recharge), $unallocatedDebtRepayment), $importedCardRefund);
     }
 
     private function derivedSummary(array $contract, string $tenantId, array $stores, array $range): int
@@ -1513,13 +1514,16 @@ final class RegisteredMetricReadServices
         $sale = $this->saleCashQuery($tenantId, $stores, $range);
         $recharge = $this->rechargeCashQuery($tenantId, $stores, $range);
         $unallocatedDebtRepayment = $this->unallocatedSalesDebtRepaymentCashQuery($tenantId, $stores, $range);
+        $importedCardRefund = $this->importedCardRefundCashQuery($tenantId, $stores, $range);
         $this->applyCashDirection($sale, $mode, 'p.amount_cents');
         $this->applyCashDirection($recharge, $mode, 'p.amount_cents');
         $this->applyCashDirection($unallocatedDebtRepayment, $mode, 'p.amount_cents');
+        $this->applyCashDirection($importedCardRefund, $mode, 'p.amount_cents');
 
         $saleTotal = (int)(clone $sale)->count('p.id');
         $rechargeTotal = (int)(clone $recharge)->count('p.id');
         $unallocatedDebtRepaymentTotal = (int)(clone $unallocatedDebtRepayment)->count('p.id');
+        $importedCardRefundTotal = (int)(clone $importedCardRefund)->count('p.id');
         $fetch = $page * $pageSize;
         $amount = $mode === 'refund' ? '-p.amount_cents' : 'p.amount_cents';
 
@@ -1532,8 +1536,11 @@ final class RegisteredMetricReadServices
         $unallocatedDebtRepaymentRows = (clone $unallocatedDebtRepayment)->fieldRaw(
             "p.id,CONCAT('sales-debt-repayment:',p.id) detail_sort_key,p.fact_id,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,p.business_date,p.occurred_at,p.settled_at,p.recorded_at,p.status,{$amount} metric_value,p.member_name_snapshot,p.operator_id,p.operator_name_snapshot"
         )->order('p.settled_at', 'desc')->order('p.id', 'desc')->limit($fetch)->select()->toArray();
+        $importedCardRefundRows = (clone $importedCardRefund)->fieldRaw(
+            "p.id,CONCAT('imported-card-refund:',p.id) detail_sort_key,p.fact_id,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,p.business_date,p.occurred_at,p.settled_at,p.recorded_at,p.status,{$amount} metric_value,p.member_name_snapshot,p.operator_id,p.operator_name_snapshot"
+        )->order('p.settled_at', 'desc')->order('p.id', 'desc')->limit($fetch)->select()->toArray();
 
-        $rows = array_merge($saleRows, $rechargeRows, $unallocatedDebtRepaymentRows);
+        $rows = array_merge($saleRows, $rechargeRows, $unallocatedDebtRepaymentRows, $importedCardRefundRows);
         usort($rows, static function (array $left, array $right): int {
             $time = ((int)($right['settled_at'] ?? 0)) <=> ((int)($left['settled_at'] ?? 0));
             if ($time !== 0) return $time;
@@ -1547,7 +1554,7 @@ final class RegisteredMetricReadServices
         unset($row);
         return [
             'rows' => $pageRows,
-            'total' => $this->add($this->add($saleTotal, $rechargeTotal), $unallocatedDebtRepaymentTotal),
+            'total' => $this->add($this->add($this->add($saleTotal, $rechargeTotal), $unallocatedDebtRepaymentTotal), $importedCardRefundTotal),
         ];
     }
 
@@ -1593,10 +1600,18 @@ final class RegisteredMetricReadServices
         if ($categoryIds === [] && $populationFilters === []) {
             $recharge = $this->rechargeCashQuery($tenantId, $stores, $range);
             $unallocatedDebtRepayment = $this->unallocatedSalesDebtRepaymentCashQuery($tenantId, $stores, $range);
+            $importedCardRefund = $this->importedCardRefundCashQuery($tenantId, $stores, $range);
             $this->applyParticipantScope($recharge, $filters, 'order');
             $this->applyParticipantScope($unallocatedDebtRepayment, $filters, 'order');
+            // 旧卡退款没有可信的原销售参与人事实，只能按实际办理人收窄
+            // “本人参与”范围；不能用虚拟退款单号去关联原销售人。
+            $participantEmployeeId = (int)($filters['participant_employee_id'] ?? 0);
+            if ($participantEmployeeId > 0) {
+                $importedCardRefund->where('p.operator_id', $participantEmployeeId);
+            }
             $this->applyCashDirection($recharge, $mode, 'p.amount_cents');
             $this->applyCashDirection($unallocatedDebtRepayment, $mode, 'p.amount_cents');
+            $this->applyCashDirection($importedCardRefund, $mode, 'p.amount_cents');
             $rows = array_merge($rows, $recharge->fieldRaw(
                 "CONCAT('recharge-payment:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,CASE WHEN p.source_document_type='recharge' THEN '充值' ELSE '充值欠款补交' END item_name,'recharge' product_type_snapshot,0 category_id,'' category_path"
             )->select()->toArray());
@@ -1606,6 +1621,11 @@ final class RegisteredMetricReadServices
             // category filters must not invent a relation that was never saved.
             $rows = array_merge($rows, $unallocatedDebtRepayment->fieldRaw(
                 "CONCAT('sales-debt-repayment:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,'销售欠款补交（未关联原销售明细）' item_name,'sales_debt_repayment_unallocated' product_type_snapshot,0 category_id,'' category_path"
+            )->select()->toArray());
+            // A migrated-card refund likewise has no defensible sale category; keep it in
+            // unfiltered cash/refund totals without fabricating an item allocation.
+            $rows = array_merge($rows, $importedCardRefund->fieldRaw(
+                "CONCAT('imported-card-refund:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,'旧卡退款' item_name,'imported_card_refund' product_type_snapshot,0 category_id,'' category_path"
             )->select()->toArray());
         }
         if ($cards === []) return $rows;
@@ -1869,7 +1889,8 @@ final class RegisteredMetricReadServices
         $sale = $this->grouped($this->saleCashQuery($tenantId, $stores, $range), $expression, $stores, $range);
         $recharge = $this->grouped($this->rechargeCashQuery($tenantId, $stores, $range), $expression, $stores, $range);
         $unallocatedDebtRepayment = $this->grouped($this->unallocatedSalesDebtRepaymentCashQuery($tenantId, $stores, $range), $expression, $stores, $range);
-        return $this->mergePoints($sale, $recharge, $unallocatedDebtRepayment);
+        $importedCardRefund = $this->grouped($this->importedCardRefundCashQuery($tenantId, $stores, $range), $expression, $stores, $range);
+        return $this->mergePoints($sale, $recharge, $unallocatedDebtRepayment, $importedCardRefund);
     }
 
     private function cashDimensionRanking(string $tenantId, array $stores, array $range, string $mode, array $dimension, int $limit, string $order): array
@@ -1883,6 +1904,7 @@ final class RegisteredMetricReadServices
                 'sale' => ['join' => 'payment', 'id' => 'payment.operator_id', 'name' => 'payment.operator_name_snapshot'],
                 'recharge' => ['id' => 'p.operator_id', 'name' => 'p.operator_name_snapshot'],
                 'unallocated_debt_repayment' => ['id' => 'p.operator_id', 'name' => 'p.operator_name_snapshot'],
+                'imported_card_refund' => ['id' => 'p.operator_id', 'name' => 'p.operator_name_snapshot'],
             ],
             'member_id|member_name_snapshot' => [
                 // The allocation is a payment allocation, while membership is
@@ -1891,6 +1913,7 @@ final class RegisteredMetricReadServices
                 'sale' => ['id' => 's.member_id', 'name' => 's.member_name_snapshot'],
                 'recharge' => ['id' => 'p.member_id', 'name' => 'p.member_name_snapshot'],
                 'unallocated_debt_repayment' => ['id' => 'p.member_id', 'name' => 'p.member_name_snapshot'],
+                'imported_card_refund' => ['id' => 'p.member_id', 'name' => 'p.member_name_snapshot'],
             ],
         ];
         if (!isset($sources[$dimensionKey])) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
@@ -1902,8 +1925,13 @@ final class RegisteredMetricReadServices
             $expression,
             $sources[$dimensionKey]['unallocated_debt_repayment']
         );
+        $importedCardRefund = $this->cashDimensionRows(
+            $this->importedCardRefundCashQuery($tenantId, $stores, $range),
+            $expression,
+            $sources[$dimensionKey]['imported_card_refund']
+        );
         $merged = [];
-        foreach (array_merge($sale, $recharge, $unallocatedDebtRepayment) as $row) {
+        foreach (array_merge($sale, $recharge, $unallocatedDebtRepayment, $importedCardRefund) as $row) {
             $id = $this->integer($row['entity_id'] ?? null);
             $name = trim((string)($row['entity_name'] ?? ''));
             if ($id <= 0 || $name === '') $this->fail('METRIC_SOURCE_RESULT_INVALID');
@@ -2456,6 +2484,20 @@ final class RegisteredMetricReadServices
             });
         (new StoreReportNormalDataScopeServices())->excludeVoidedSupplementPaymentFacts($query, 'p.tenant_id', 'p.store_id', 'p.order_id');
         return $query;
+    }
+
+    /**
+     * Migrated cards carry rights but no trustworthy historic positive payment. Their manually
+     * confirmed refund is therefore a standalone negative cash fact, not a fabricated reversal.
+     */
+    private function importedCardRefundCashQuery(string $tenantId, array $stores, array $range)
+    {
+        return call_user_func($this->queryFactory, 'cashier_v3_payment_fact')->alias('p')
+            ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
+            ->where('p.status', 'effective')->where('p.fact_type', 'payment_refunded')
+            ->where('p.source_document_type', 'imported_card_refund')
+            ->where('p.amount_cents', '<', 0)
+            ->whereBetween('p.business_date', [$range['start'], $range['end']]);
     }
 
     private function assertScope(string $tenantId, array $stores, array $range): void

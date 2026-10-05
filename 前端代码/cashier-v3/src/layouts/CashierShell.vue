@@ -396,7 +396,7 @@ const allowedTopActions = new Set([
   'open-member-creator',
   'open-member-batch-actions'
 ])
-const allowedMemberSelectorContexts = new Set(['cashier', 'writeoff', 'reservation', 'card-transfer', 'customer-care', 'customer-care-record', 'member-referrer'])
+const allowedMemberSelectorContexts = new Set(['cashier', 'writeoff', 'reservation', 'card-transfer', 'customer-care', 'customer-care-record', 'member-referrer', 'imported-card-refund'])
 const memberSelectorActions = {
   writeoff: 'select-writeoff-member',
   reservation: 'select-reservation-member'
@@ -961,6 +961,8 @@ async function queryMemberSelector(query) {
   }
   const selectorContext = memberSelectorContext.value === 'card-transfer'
     ? 'cashier'
+    : memberSelectorContext.value === 'imported-card-refund'
+      ? 'order_center'
     : memberSelectorContext.value
   // member-referrer constrains the result set, but is not an authorization
   // entry. This selector is opened from cashier and must use its grant.
@@ -990,7 +992,7 @@ async function queryMemberSelector(query) {
 }
 
 async function selectMemberFromSelector(record) {
-  if (['card-transfer', 'customer-care', 'customer-care-record', 'reservation', 'member-referrer'].includes(memberSelectorContext.value)) {
+  if (['card-transfer', 'customer-care', 'customer-care-record', 'reservation', 'member-referrer', 'imported-card-refund'].includes(memberSelectorContext.value)) {
     // 转让和预约都只回填选择结果。预约没有收银工作台上下文，也不需要
     // 为选择会员发送一笔服务端写命令；正式保存时仅写预约单据本身。
     isMemberSelectorOpen.value = false
@@ -3159,7 +3161,8 @@ onBeforeUnmount(() => {
     :page-size="memberSelector.pageSize || 20"
     :is-loading="Boolean(memberSelector.isLoading)"
     :allow-guest="isCashierWorkflowPage && memberSelectorContext !== 'reservation' && !memberSelectorRequiresMember"
-    :allow-create="canUseFeature('cashier.v3.member') && (isCashierWorkflowPage || memberSelectorInitialView === 'creator')"
+    :title="memberSelectorContext === 'imported-card-refund' ? '选择旧卡退款会员' : '选择会员'"
+    :allow-create="memberSelectorContext !== 'imported-card-refund' && canUseFeature('cashier.v3.member') && (isCashierWorkflowPage || memberSelectorInitialView === 'creator')"
     :show-scope-toggle="['cashier', 'reservation'].includes(memberSelectorContext)"
     :current-store-name="state.storeName || ''"
     :creator-schema="memberCreatorSchema"

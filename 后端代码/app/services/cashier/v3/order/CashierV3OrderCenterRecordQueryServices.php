@@ -756,7 +756,13 @@ final class CashierV3OrderCenterRecordQueryServices
         // Reuse the member debt summary after this page's store scope and
         // pagination, so list/export never infer a historical name from today's catalog.
         $summariesByDebt = (new CashierV3MemberDebtProjectionServices())->summariesForDebts($debtIds);
-        return [array_map(function (array $row) use ($latestByDebt, $summariesByDebt): array {
+        // 旧卡退款已终止原权益，不能再恢复它的欠款；这里只判断按钮能力，
+        // 金额和历史仍由欠款事实读取，服务端恢复命令也会再次拒绝该状态。
+        $originIds = array_values(array_unique(array_column($rows, 'order_id')));
+        $refundedImportedOrders = $originIds ? Db::name('store_order')->whereIn('id', $originIds)
+            ->where('pay_type', 'migration')->where('channel_type', 'migration')->where('refund_status', 2)
+            ->column('id') : [];
+        return [array_map(function (array $row) use ($latestByDebt, $summariesByDebt, $refundedImportedOrders): array {
             $cancel = (int)$row['status'] === 3 ? ($latestByDebt[(int)$row['id']] ?? []) : [];
             $totalDebt = (string)($row['total_debt'] ?? '0.00');
             $repaidDebt = (string)($row['repaid_debt'] ?? '0.00');
@@ -789,7 +795,8 @@ final class CashierV3OrderCenterRecordQueryServices
                 'cancelOperator' => (string)($cancel['operator_name_snapshot'] ?? ''),
                 'cancelledAt' => empty($cancel['occurred_at']) ? '' : $this->dateTime((int)$cancel['occurred_at']),
                 'canCancel' => (int)$row['status'] === 0 && bccomp($remaining, '0.00', 2) > 0,
-                'canRestore' => (int)$row['status'] === 3 && $cancel !== [],
+                'canRestore' => (int)$row['status'] === 3 && $cancel !== []
+                    && !in_array((int)$row['order_id'], array_map('intval', $refundedImportedOrders), true),
                 'storeName' => (string)($row['store_name'] ?? ''),
                 // 欠款主表没有独立的业务日字段；其入账时间就是该条欠款
                 // 事实的发生时间，筛选与列表展示必须使用同一来源。

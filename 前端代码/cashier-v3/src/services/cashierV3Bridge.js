@@ -2892,7 +2892,7 @@ function resolveCommandContexts(action, payload) {
   // Cancelling a settled debt is an order-center mutation, not a cart edit.
   // Let the backend discover and lock the authoritative repayment instead of
   // attaching the currently displayed cashier workspace revision.
-  if (['void-order-center-supplement', 'cancel-order-center-debt', 'restore-order-center-debt'].includes(action)) {
+  if (['void-order-center-supplement', 'cancel-order-center-debt', 'restore-order-center-debt', 'refund-imported-card'].includes(action)) {
     return { invalid: false, contexts: [] }
   }
 
@@ -3734,8 +3734,10 @@ export async function requestCashierV3Action(action, payload = {}) {
   // 再由领域事务锁定销售订单及候选预约。
   // 日期／来源更正不引入单据版本：领域事务锁定原单并比较提交时旧值，
   // 因而和独立欠款操作一样允许空 command contexts，不能误拿收银工作台版本阻断。
+  // 旧卡退款同样由领域事务锁定原卡及欠款，并校验候选卡确认快照。
   const serverDiscoverableContextActions = [
     'cancel-order-center-debt',
+    'refund-imported-card',
     'restore-order-center-debt',
     'void-order-center-supplement',
     'void-service-record',

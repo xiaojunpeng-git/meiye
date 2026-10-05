@@ -750,6 +750,18 @@ class CashierV3ActionManifest
                 'event_rules' => ['sales_order.refunded' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'refund-sales-order']],
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['sales_order.refunded' => []],
             ],
+            'refund-imported-card' => [
+                'required_event_types' => ['imported_card.refunded'],
+                'allowed_event_types' => ['imported_card.refunded', 'debt.cancelled'],
+                'event_rules' => [
+                    'imported_card.refunded' => ['min_count' => 1, 'max_count' => 1,
+                        'aggregate_type' => 'imported_card', 'source_type' => 'refund-imported-card'],
+                    'debt.cancelled' => ['min_count' => 0, 'max_count' => 1,
+                        'aggregate_type' => 'debt', 'source_type' => 'refund-imported-card'],
+                ],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['imported_card.refunded' => [], 'debt.cancelled' => []],
+            ],
             'void-sales-order' => [
                 'required_event_types' => ['sales_order.voided'], 'allowed_event_types' => ['sales_order.voided'],
                 'event_rules' => ['sales_order.voided' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'void-sales-order']],

@@ -91,6 +91,13 @@ final class CashierV3DebtRestorationServices
         if (!$debt || (int)$debt['store_id'] !== $operator->storeId()) {
             throw self::failure('无权恢复该欠款。', 'debt_restore_store');
         }
+        // 旧卡退款已不可逆地终止剩余权益；恢复其关联欠款会让会员重新背债，
+        // 却无法恢复原卡，必须在服务端阻止（页面显隐不能承担此约束）。
+        $originOrder = (array)Db::name('store_order')->where('id', (int)($debt['order_id'] ?? 0))->find();
+        if ($originOrder && (string)($originOrder['pay_type'] ?? '') === 'migration'
+            && (int)($originOrder['refund_status'] ?? 0) === 2) {
+            throw self::failure('该欠款关联的旧卡已退款，不能恢复欠款。', 'debt_restore_imported_card_refunded');
+        }
         $cancel = (array)Db::name(CashierV3DebtCancellationServices::TABLE)
             ->where('debt_id', (int)$id)->order('id desc')->lock(true)->find();
         if (!$cancel || (string)$cancel['tenant_id'] !== $dataScope->tenantId()

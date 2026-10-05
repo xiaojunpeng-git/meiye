@@ -92,6 +92,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'open-supplement-personnel-adjustment' => self::FEATURE_ORDER_STAFF_ADJUST,
             'open-order-refunds' => self::FEATURE_ORDER_REFUND,
             'open-refunds' => self::FEATURE_ORDER_REFUND,
+            'query-imported-card-refund-candidates' => self::FEATURE_ORDER_REFUND,
             'open-order-void' => self::FEATURE_ORDER_VOID,
             'open-void-record' => self::FEATURE_ORDER_VOID,
             'open-order-reopenings' => self::FEATURE_ORDER_REOPEN,
@@ -116,6 +117,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['correct-debt-repayment-date'] = self::FEATURE_ORDER_CENTER;
         $command['correct-debt-repayment-source'] = self::FEATURE_ORDER_CENTER;
         $command['refund-sales-order'] = self::FEATURE_ORDER_REFUND;
+        $command['refund-imported-card'] = self::FEATURE_ORDER_REFUND;
         $command['void-sales-order'] = self::FEATURE_ORDER_VOID;
         $command['void-service-record'] = self::FEATURE_ORDER_SERVICE_VOID;
         // 编辑入口与保存使用同一服务记录权限快照，不增加第二个功能权限点。

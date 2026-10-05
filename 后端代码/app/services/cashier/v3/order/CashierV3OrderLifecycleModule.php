@@ -37,6 +37,26 @@ final class CashierV3OrderLifecycleModule
                 $scope['operator_scope'], $scope['data_scope'])], 'message' => '变更记录已读取。'];
         });
         $service = new CashierV3OrderLifecycleServices($workspace, new CashierV3SaleCatalogServices());
+        $importedCardRefund = new CashierV3ImportedCardRefundServices();
+        // 独立旧卡退款入口不把迁入权益伪装成正式销售单；候选查询与提交共用退款权限。
+        $dispatcher->handlers()->registerProjection('query-imported-card-refund-candidates', static function (array $scope) use ($importedCardRefund): array {
+            $result = $importedCardRefund->candidates((array)($scope['payload'] ?? []),
+                $scope['operator_scope'], $scope['data_scope']);
+            return ['data' => ['importedCardRefundCandidates' => [
+                'cards' => $result['cards'], 'total' => $result['total'],
+                'page' => $result['page'], 'pageSize' => $result['pageSize'],
+            ]], 'versions' => $result['versions'], 'message' => '可退款旧卡已读取。'];
+        });
+        $dispatcher->handlers()->registerCommand('refund-imported-card', static function (array $scope) use ($importedCardRefund): array {
+            return $importedCardRefund->refundInTx($scope);
+        });
+        // 旧卡退款按确认快照及事务行锁执行跨店终止，独立于核销的跨店开关。
+        // 不继承工作台上下文；服务内必须复核候选指纹及卡、欠款权威行。
+        $dispatcher->policies()->register(new CashierV3ContextPolicy('refund-imported-card', [], [],
+            static function (): array {
+                return ['required' => [], 'allowed' => [], 'identities' => [],
+                    'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
+            }, [], [], [], true));
         $serviceVoid = new CashierV3ServiceRecordVoidServices();
         $orderCenterVoid = new CashierV3OrderCenterVoidServices();
         $debtCancellation = new CashierV3DebtCancellationServices();

@@ -90,6 +90,22 @@ const debtChanges = ref([])
 const debtChangesLoading = ref(false)
 const debtChangesError = ref('')
 let debtChangesSerial = 0
+// 旧卡退款是退款记录页的独立流程；候选卡不会并入正式消费订单投影。
+const importedCardRefundOpen = ref(false)
+const importedCardRefundMember = ref(null)
+const importedCardRefundCards = ref([])
+const importedCardRefundLoading = ref(false)
+const importedCardRefundSubmitting = ref(false)
+const importedCardRefundError = ref('')
+const importedCardRefundHolderId = ref('')
+const importedCardRefundAmount = ref('')
+const importedCardRefundReason = ref('')
+const importedCardRefundPage = ref(1)
+const importedCardRefundTotal = ref(0)
+// 收到不确定结果时保留同一请求及输入，重试查询原结果，不能换金额重复退款。
+const importedCardRefundUncertain = ref(false)
+let importedCardRefundQuerySerial = 0
+let importedCardRefundCommandId = ''
 const attributionPending = ref(false)
 const attributionError = ref('')
 let attributionChangesSerial = 0
@@ -564,6 +580,109 @@ watch(
 
 function requestAction(action, payload = {}) {
   return requestCashierV3Action(action, payload)
+}
+
+function openImportedCardRefundMemberSelector() {
+  importedCardRefundError.value = ''
+  window.dispatchEvent(new CustomEvent('cashier-v3:open-member-selector', {
+    detail: { context: 'imported-card-refund', requireMember: true }
+  }))
+}
+
+async function loadImportedCardRefundCards(member, page = 1) {
+  if (importedCardRefundSubmitting.value || importedCardRefundUncertain.value) return
+  const memberId = Number(member?.memberId || member?.id || 0)
+  if (!memberId) return
+  const serial = ++importedCardRefundQuerySerial
+  importedCardRefundOpen.value = true
+  importedCardRefundMember.value = member
+  importedCardRefundCards.value = []
+  importedCardRefundHolderId.value = ''
+  importedCardRefundAmount.value = ''
+  importedCardRefundReason.value = ''
+  importedCardRefundPage.value = page
+  importedCardRefundTotal.value = 0
+  importedCardRefundError.value = ''
+  importedCardRefundLoading.value = true
+  try {
+    const response = await requestAction('query-imported-card-refund-candidates', { memberId, page, pageSize: 50 })
+    if (serial !== importedCardRefundQuerySerial) return
+    if (!['success', 'succeeded'].includes(actionStatus(response))) {
+      importedCardRefundError.value = response?.result?.message || response?.data?.result?.message || '未能读取可退款旧卡。'
+      return
+    }
+    const candidates = actionData(response).importedCardRefundCandidates || {}
+    importedCardRefundCards.value = candidates.cards || []
+    importedCardRefundTotal.value = Number(candidates.total) || 0
+  } catch (error) {
+    if (serial === importedCardRefundQuerySerial) importedCardRefundError.value = error?.message || '未能读取可退款旧卡。'
+  } finally {
+    if (serial === importedCardRefundQuerySerial) importedCardRefundLoading.value = false
+  }
+}
+
+function handleImportedCardRefundMemberSelected(event) {
+  if (event?.detail?.context !== 'imported-card-refund') return
+  void loadImportedCardRefundCards(event.detail.record)
+}
+
+function closeImportedCardRefund() {
+  if (importedCardRefundSubmitting.value || importedCardRefundUncertain.value) return
+  importedCardRefundQuerySerial++
+  importedCardRefundOpen.value = false
+  importedCardRefundMember.value = null
+  importedCardRefundCards.value = []
+  importedCardRefundLoading.value = false
+  importedCardRefundSubmitting.value = false
+  importedCardRefundError.value = ''
+  importedCardRefundHolderId.value = ''
+  importedCardRefundAmount.value = ''
+  importedCardRefundReason.value = ''
+  importedCardRefundCommandId = ''
+}
+
+function importedCardRefundMoney(cents) {
+  return formatMoney((Math.max(0, Number(cents) || 0) / 100).toFixed(2))
+}
+
+async function submitImportedCardRefund() {
+  if (importedCardRefundSubmitting.value) return
+  const card = importedCardRefundCards.value.find((item) => String(item.holderId) === String(importedCardRefundHolderId.value))
+  const amount = String(importedCardRefundAmount.value || '').trim()
+  const reason = String(importedCardRefundReason.value || '').trim()
+  if (!card?.canRefund) { importedCardRefundError.value = '请选择一张可退款旧卡。'; return }
+  if (!/^[1-9][0-9]{0,9}$/.test(amount)) {
+    importedCardRefundError.value = '实际退款金额必须是大于 0 的整数元。'; return
+  }
+  if (!reason || reason.length > 255) { importedCardRefundError.value = '请填写退款原因（不超过 255 字）。'; return }
+  if (!importedCardRefundCommandId) importedCardRefundCommandId = createCashierV3CommandId()
+  importedCardRefundSubmitting.value = true
+  importedCardRefundUncertain.value = true
+  importedCardRefundError.value = ''
+  try {
+    const response = await requestAction('refund-imported-card', {
+      holderId: card.holderId,
+      snapshotFingerprint: card.snapshotFingerprint,
+      memberId: Number(importedCardRefundMember.value?.memberId || importedCardRefundMember.value?.id || 0),
+      refundAmount: amount,
+      reason,
+      idempotencyKey: importedCardRefundCommandId
+    })
+    const status = actionStatus(response)
+    if (isTerminalActionStatus(status)) {
+      importedCardRefundCommandId = ''
+      importedCardRefundUncertain.value = false
+    }
+    if (['success', 'succeeded'].includes(status)) {
+      importedCardRefundSubmitting.value = false
+      closeImportedCardRefund()
+      await queryRecords({ recordType: 'refund', page: 1 }, true)
+    } else importedCardRefundError.value = response?.result?.message || response?.data?.result?.message || '旧卡退款未完成。'
+  } catch (error) {
+    importedCardRefundError.value = '退款结果尚未确认，请保持原输入并重试确认，避免重复退款。'
+  } finally {
+    importedCardRefundSubmitting.value = false
+  }
 }
 
 // The normal list projection remains the order-center authority. This companion
@@ -2571,12 +2690,14 @@ function resetLocalContext() {
   salesOrderNoteCommandIds.value = {}
   salesOrderActionIds.value = {}
   rechargeOrderActionIds.value = {}
+  closeImportedCardRefund()
 }
 
 onMounted(() => {
   window.addEventListener('cashier-v3:open-sales-order-detail', showSalesOrderDetail)
   window.addEventListener('cashier-v3:state-context-changing', resetLocalContext)
   window.addEventListener('cashier-v3:state-context-changed', resetLocalContext)
+  window.addEventListener('cashier-v3:member-selector-selected', handleImportedCardRefundMemberSelected)
 })
 
 // Vue Router 在首帧可能尚未把嵌套路由 meta 写入 route；若只在 mounted
@@ -2632,6 +2753,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('cashier-v3:open-sales-order-detail', showSalesOrderDetail)
   window.removeEventListener('cashier-v3:state-context-changing', resetLocalContext)
   window.removeEventListener('cashier-v3:state-context-changed', resetLocalContext)
+  window.removeEventListener('cashier-v3:member-selector-selected', handleImportedCardRefundMemberSelected)
 })
 </script>
 
@@ -2718,6 +2840,14 @@ onBeforeUnmount(() => {
           :loading="platformScopePicker.loading"
           @change="changePlatformOrderScope"
         />
+      </template>
+      <template #primary-actions>
+        <button
+          v-if="!isPlatformReadOnly && activeTabKey === 'refund' && canUseCashierV3Operation('cashier.v3.order.refund')"
+          type="button"
+          class="button button--secondary"
+          @click="openImportedCardRefundMemberSelector"
+        >旧卡退款</button>
       </template>
     </UnifiedQueryToolbar>
 
@@ -3017,6 +3147,43 @@ onBeforeUnmount(() => {
       @field-action="handleDetailFieldAction"
       @close="closeGenericDetail"
     />
+
+    <div v-if="importedCardRefundOpen" class="service-void-modal" role="dialog" aria-modal="true" aria-label="旧卡退款">
+      <div class="service-void-modal__backdrop" @click="closeImportedCardRefund"></div>
+      <form class="service-void-modal__panel imported-card-refund-dialog" @submit.prevent="submitImportedCardRefund">
+        <header class="service-void-modal__head">
+          <div><h2>旧卡退款</h2><p>{{ importedCardRefundMember?.name || importedCardRefundMember?.realName || '已选会员' }} · 仅显示未退款的导入旧卡</p></div>
+        </header>
+        <p v-if="importedCardRefundError" class="service-void-modal__error" role="alert">{{ importedCardRefundError }}</p>
+        <div v-if="importedCardRefundLoading" class="imported-card-refund-dialog__empty">正在读取旧卡…</div>
+        <div v-else-if="!importedCardRefundCards.length" class="imported-card-refund-dialog__empty">该会员没有可退款的导入旧卡。</div>
+        <div v-else class="imported-card-refund-dialog__cards">
+          <label v-for="card in importedCardRefundCards" :key="card.holderId" class="imported-card-refund-dialog__card" :class="{ 'imported-card-refund-dialog__card--disabled': !card.canRefund }">
+            <input v-model="importedCardRefundHolderId" type="radio" name="imported-card-refund" :value="String(card.holderId)" :disabled="!card.canRefund || importedCardRefundUncertain" />
+            <span class="imported-card-refund-dialog__card-main">
+              <strong>{{ card.cardName || '未命名旧卡' }}</strong>
+              <small>卡号：{{ card.cardNo || '—' }}　原办理门店：{{ card.originStoreName || '—' }}</small>
+              <small>总次数 {{ card.totalTimes }}，已核销 {{ Math.max(0, Number(card.totalTimes) - Number(card.remainingTimes)) }}，剩余 {{ card.remainingTimes }}</small>
+              <small v-if="Number(card.remainingDebtCents) > 0">剩余欠款 {{ importedCardRefundMoney(card.remainingDebtCents) }}，退款时一并取消</small>
+              <small v-if="card.unavailableReason" class="service-void-modal__error">{{ card.unavailableReason }}</small>
+            </span>
+          </label>
+        </div>
+        <div v-if="importedCardRefundTotal > 50" class="service-void-modal__actions" aria-label="旧卡分页">
+          <button type="button" class="button button--secondary" :disabled="importedCardRefundLoading || importedCardRefundUncertain || importedCardRefundPage <= 1" @click="loadImportedCardRefundCards(importedCardRefundMember, importedCardRefundPage - 1)">上一页</button>
+          <span>第 {{ importedCardRefundPage }} / {{ Math.ceil(importedCardRefundTotal / 50) }} 页</span>
+          <button type="button" class="button button--secondary" :disabled="importedCardRefundLoading || importedCardRefundUncertain || importedCardRefundPage * 50 >= importedCardRefundTotal" @click="loadImportedCardRefundCards(importedCardRefundMember, importedCardRefundPage + 1)">下一页</button>
+        </div>
+        <label class="service-void-modal__label" for="imported-card-refund-amount">实际退款金额</label>
+        <input id="imported-card-refund-amount" v-model.trim="importedCardRefundAmount" class="service-void-modal__textarea" inputmode="numeric" placeholder="由操作人核实后填写整数元" :readonly="importedCardRefundUncertain" required />
+        <label class="service-void-modal__label" for="imported-card-refund-reason">退款原因</label>
+        <textarea id="imported-card-refund-reason" v-model.trim="importedCardRefundReason" class="service-void-modal__textarea" maxlength="255" rows="3" placeholder="填写退款原因" :readonly="importedCardRefundUncertain" required></textarea>
+        <footer class="service-void-modal__actions">
+          <button type="button" class="button button--secondary" :disabled="importedCardRefundUncertain" @click="closeImportedCardRefund">取消</button>
+          <button type="submit" class="button button--primary" :disabled="importedCardRefundSubmitting || importedCardRefundLoading || !importedCardRefundCards.length">{{ importedCardRefundSubmitting ? '提交中…' : importedCardRefundUncertain ? '重试确认' : '确认退款' }}</button>
+        </footer>
+      </form>
+    </div>
 
     <div v-if="attributionEditor" class="service-void-modal" role="dialog" aria-modal="true" aria-label="更正订单归属">
       <div class="service-void-modal__backdrop"></div>
@@ -3383,4 +3550,12 @@ onBeforeUnmount(() => {
 .sales-order-query-table td:first-child small.sales-order-query-item-cell__business-tag.is-entitlement { background: #d7f2e8; color: #19735b; border-color: transparent; }
 .sales-order-query-group__header .sales-order-query-group__upgrade-tag { background: #eaf1ff; color: #2858b8; border-color: #cbdcf7; }
 .sales-order-query-item-cell__type { color: #66758b; }
+.imported-card-refund-dialog { width: min(760px, calc(100vw - 32px)); }
+.imported-card-refund-dialog__cards { display: grid; gap: 8px; max-height: 300px; overflow: auto; margin: 10px 0 14px; }
+.imported-card-refund-dialog__card { display: flex; gap: 10px; padding: 12px; border: 1px solid #dce4ef; border-radius: 8px; cursor: pointer; }
+.imported-card-refund-dialog__card:has(input:checked) { border-color: #4568f5; background: #f3f6ff; }
+.imported-card-refund-dialog__card--disabled { cursor: not-allowed; opacity: .7; }
+.imported-card-refund-dialog__card-main { display: grid; gap: 4px; min-width: 0; }
+.imported-card-refund-dialog__card-main small { color: #667085; }
+.imported-card-refund-dialog__empty { padding: 28px 12px; text-align: center; color: #667085; }
 </style>
