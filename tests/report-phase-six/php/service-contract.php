@@ -193,12 +193,18 @@ $unclassifiedColumns = $projectCategoryMoney->invoke($phaseSix,
 assertPhaseSix(($unclassifiedColumns['salary_category_cash_unclassified'] ?? null) === 50000,
     'category drilldown reconciles unclassified remainder with the summary');
 assertPhaseSix(
-    str_contains($service, "'employee_name','员工','该行汇总的员工")
-    && str_contains($service, "'employee_name','员工','该笔项目的手艺人")
+    str_contains($service, "'employee_name','员工','按门店和员工汇总")
+    && str_contains($service, "'employee_name','员工','该笔项目的服务员工")
+    && str_contains($service, "'position_name','岗位','显示该员工目前在这家门店的有效岗位")
+    && str_contains($service, "'salary_metric_key'=>\$metricKey")
     && str_contains($service, "'param_map'=>['salary_employee_id'=>'employee_id','salary_store_id'=>'store_id']")
     && str_contains($service, "'report'=>'phase_six_salary_detail'")
     && str_contains($controller, "['salary_employee_id', 0]")
+    && str_contains($controller, "['document_no', '']")
+    && str_contains($controller, "['salary_metric_key', '']")
     && str_contains($store, "['salary_employee_id',0]")
+    && str_contains($store, "['document_no','']")
+    && str_contains($store, "['salary_metric_key','']")
     && str_contains($cashier, "['salary_employee_id', 0]"),
     'salary employee columns and exact category drilldown are declared for all three endpoints');
 $allocateCategories = new ReflectionMethod($phaseSix, 'salarySaleCategoryAmounts');

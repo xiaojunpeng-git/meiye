@@ -219,6 +219,14 @@ final class StoreUnifiedReportPhaseSixServices
         $employeeId=$this->salaryDrilldownId($input,'salary_employee_id');
         $storeId=$this->salaryDrilldownId($input,'salary_store_id');
         $categoryKey=trim((string)($input['salary_category_key']??''));
+        $metricKey=trim((string)($input['salary_metric_key']??''));
+        $documentNo=trim((string)($input['document_no']??''));
+        if(mb_strlen($documentNo)>64)throw new \InvalidArgumentException('单据号最多输入64个字');
+        if($metricKey!==''&&!in_array($metricKey,['project_count','service_visit_count','service_people_count','consumption_amount'],true))
+            throw new \InvalidArgumentException('工资指标下钻条件不正确');
+        if($metricKey!==''&&$categoryKey!=='')throw new \InvalidArgumentException('工资指标与商品分类不能同时下钻');
+        if($metricKey!==''&&($employeeId===0||$storeId===0))
+            throw new \InvalidArgumentException('请从员工薪资汇总表选择员工和门店后查看指标明细');
         if($categoryKey!=='' && !preg_match('/^salary_category_cash_(?:\d+|historical_\d+|unclassified)$/D',$categoryKey))
             throw new \InvalidArgumentException('商品分类筛选条件不正确');
         if($categoryKey!=='' && ($employeeId===0 || $storeId===0))
@@ -234,9 +242,21 @@ final class StoreUnifiedReportPhaseSixServices
         if($categoryKey!=='')foreach($categories['columns'] as $column){
             if($column['key']===$categoryKey){$categoryLabel=(string)$column['label'];break;}
         }
+        $visitRequests=[];
+        $visitMemberDays=[];
+        if($metricKey==='service_visit_count')foreach($facts as $fact){
+            $requestId=trim((string)($fact['checkout_request_id']??''));
+            if($requestId!==''&&trim((string)($fact['service_fact_id']??''))!==''
+                &&(int)($fact['service_visit_tenths']??0)!==0){
+                $visitRequests[$requestId]=true;
+                $memberDay=$this->salaryVisitMemberDayKey($fact);
+                if($memberDay!=='')$visitMemberDays[$memberDay]=true;
+            }
+        }
         $rows = [];
         foreach ($facts as $f) {
             $orderReference=$orderReferences[(int)$f['store_id'].'|'.(string)$f['checkout_request_id']]??[];
+            if($documentNo!==''&&mb_stripos((string)($orderReference['number']??''),$documentNo)===false)continue;
             $cashCents=(int)($f['cash_cents']??0);
             if($categoryKey!==''){
                 // 卡项可跨多个二级分类；明细只展示所点分类的分摊金额，合计才与汇总单元格相等。
@@ -244,9 +264,20 @@ final class StoreUnifiedReportPhaseSixServices
                 $cashCents=(int)($projected[$categoryKey]??0);
                 if($cashCents===0)continue;
             }
-            $rows[] = [
+            // 同单服务及同员工、同门店、同日的会员本人跨单服务都应可核对；朋友/游客不跨单归组。
+            // 补充的服务行只展示原有零人次，客数分摊仍由共享读取器决定。
+            if($metricKey==='project_count'&&$this->projectCountMicros((string)$f['project_count'])===0)continue;
+            if($metricKey==='service_visit_count'&&(int)($f['service_visit_tenths']??0)===0){
+                $memberDay=$this->salaryVisitMemberDayKey($f);
+                if(trim((string)($f['service_fact_id']??''))===''
+                    ||(!isset($visitRequests[(string)($f['checkout_request_id']??'')])
+                        &&($memberDay===''||!isset($visitMemberDays[$memberDay]))))continue;
+            }
+            if($metricKey==='service_people_count'&&(int)($f['service_people_tenths']??0)===0)continue;
+            if($metricKey==='consumption_amount'&&(int)$f['consumption_cents']===0)continue;
+            $detailRow = [
                 'business_date' => $f['business_date'], 'company_name' => $f['company_name'],
-                'store_name' => $f['store_name'], 'employee_name' => $f['employee_name'],
+                'store_name' => $f['store_name'], 'employee_name' => $f['employee_name'], 'position_name' => $f['position_name'],
                 'member_name' => $f['member_name'],
                 'document_no' => (string)($orderReference['number']??'-'),
                 'document_order_id' => (string)($orderReference['id']??''),
@@ -260,24 +291,35 @@ final class StoreUnifiedReportPhaseSixServices
                 'annotation_subject_type' => 'phase_six_row',
                 'annotation_subject_key' => 'phase_six:salary:' . (string)$f['row_key'],
             ];
+            if($metricKey==='service_visit_count')$detailRow['service_visit_count']=$this->tenth((int)$f['service_visit_tenths']);
+            if($metricKey==='service_people_count')$detailRow['service_people_count']=$this->tenth((int)$f['service_people_tenths']);
+            $rows[]=$detailRow;
         }
-        return $this->salaryResult('员工薪资明细月报表',[
-            $this->column('business_date','日期','该笔服务、核销或销售计入工资的日期；后来已作废的记录不再统计。'),
+        $columns=[
+            $this->column('business_date','日期','该笔服务完成、项目核销或销售结账归属的业务日期；后来已作废的记录不再统计。'),
             $this->column('company_name','分公司','按业务门店当前所属组织查找已配置的分公司统计维度；未配置时显示“未配置分公司”。',false,true),
             $this->column('store_name','门店','该笔业务实际发生的门店。',false,true),
-            $this->column('employee_name','员工','该笔项目的手艺人，或现金业绩分配到的员工；按结账时记录的姓名显示。',false,true),
-            $this->column('member_name','会员','该笔业务对应的会员或顾客姓名。'),
+            $this->column('employee_name','员工','该笔项目的服务员工，或现金业绩分配到的员工；显示业务记账时记录的姓名。',false,true),
+            $this->column('position_name','岗位','显示该员工目前在这家门店的有效岗位；已无有效岗位时显示“-”。岗位只供查看，不重新分配历史业绩。',false,true),
+            $this->column('member_name','会员','显示该笔服务或销售记录中的会员、顾客姓名；未记录姓名时显示“-”。'),
             $this->column('document_no','单据号','显示订单中心对应的订单编号；点击可查看该订单详情。没有对应订单时显示“-”。',false,false,180,[
                 'report'=>'order_center_order_detail','param_map'=>['order_id'=>'document_order_id','order_no'=>'document_no'],
             ]),
-            $this->column('performance_category','商品分类','普通明细显示业务发生时保存的商品或项目分类；从汇总表点击分类金额进入时，显示所点商品分类，卡项可按卡内项目拆分。'),
-            $this->column('detail','明细','该笔业务对应的具体服务项目、卡项或产品名称。'),
-            $this->column('project_count','项目数','该员工实际承担的项目数量；多人服务按分配比例拆分，可显示小数，人工调整后按已保存数值计算。',true),
-            $this->column('consumption_amount','消耗业绩','服务完成或卡项核销后计入该员工的消耗金额；作废后不再统计。',true),
-            $this->column('cash_amount','现金业绩','成功收款后分配给该员工的金额；从汇总表点击分类金额进入时，只显示该分类分得的金额；作废后不再统计。',true),
-            $this->column('labor_fee','手工费','结账时分配给该手艺人的手工费；作废后不再统计。',true),
+            $this->column('performance_category','商品分类','普通明细显示该笔业务记录的商品或项目分类；点击汇总表分类金额进入时，显示所点分类，卡项金额可按卡内项目分类拆分。'),
+            $this->column('detail','明细','显示该笔业务记录的服务项目、卡项或产品名称。'),
+            $this->column('project_count','项目数','该员工分得的服务项目数；多人服务按实际分配份额计算，后续人工调整按调整后的有效结果显示。',true),
+        ];
+        // Service visits and people were removed from the ordinary detail view;
+        // reveal only the clicked metric so its period total can be audited.
+        if($metricKey==='service_visit_count')$columns[]=$this->column('service_visit_count','服务人次','会员本人在同一门店同一天服务多项目只计一次；朋友和无会员顾客按每笔有效服务计算。同员工服务该会员的其他项目即使跨单也显示，未分得人次的项目为 0。',true);
+        if($metricKey==='service_people_count')$columns[]=$this->column('service_people_count','服务人数','所选日期内，同一会员在同一门店服务多天只计一次；分得的人数只在其中一条明细显示。',true);
+        $columns=array_merge($columns,[
+            $this->column('consumption_amount','消耗业绩','服务完成或卡项核销后分配给该员工的消耗金额；后来作废的记录不再统计。',true),
+            $this->column('cash_amount','现金业绩','成功收款后分配给该员工的金额；从汇总表点击分类金额进入时仅显示该分类金额，作废后不再统计。',true),
+            $this->column('labor_fee','手工费','该笔服务最终分配给员工的手工费；后续人员调整按有效结果显示，作废后不再统计。',true),
             $this->manualColumn('备注','备注','有权限的用户手动填写，保存后刷新页面仍会显示。')
-        ],$rows,$range,$employeeName,$categoryKey!=='');
+        ]);
+        return $this->salaryResult('员工薪资明细月报表',$columns,$rows,$range,$employeeName,$categoryKey!=='',$documentNo,true);
     }
 
     /**
@@ -337,7 +379,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->salaryFactsWithReportingDimensions($stores,$range),$employeeName
         ) as $f){
             $key=(int)$f['store_id'].'|'.(int)$f['employee_id'];
-            if(!isset($rows[$key]))$rows[$key]=['store_id'=>(int)$f['store_id'],'employee_id'=>(int)$f['employee_id'],'company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'project_count_micros'=>0,'service_visit_tenths'=>0,'service_people_tenths'=>0,'consumption_cents'=>0,'cash_cents'=>0,'labor_fee_cents'=>0];
+            if(!isset($rows[$key]))$rows[$key]=['store_id'=>(int)$f['store_id'],'employee_id'=>(int)$f['employee_id'],'company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'position_name'=>$f['position_name'],'project_count_micros'=>0,'service_visit_tenths'=>0,'service_people_tenths'=>0,'consumption_cents'=>0,'cash_cents'=>0,'labor_fee_cents'=>0];
             // 工资项目数是人员服务份额，不是销售数量；用百万分位整数累加，保留入库 DECIMAL(20,6) 的精度。
             $rows[$key]['project_count_micros']+=$this->projectCountMicros((string)$f['project_count']);
             $rows[$key]['service_visit_tenths']+=(int)($f['service_visit_tenths'] ?? 0);
@@ -374,12 +416,13 @@ final class StoreUnifiedReportPhaseSixServices
         $columns=[
             $this->column('company_name','分公司','按业务门店当前所属组织查找已配置的分公司统计维度；未配置时显示“未配置分公司”。',false,true),
             $this->column('store_name','门店','该员工业务实际发生的门店。',false,true),
-            $this->column('employee_name','员工','该行汇总的员工，按业务结账时记录的姓名显示；页面可输入姓名中的任意文字进行筛选。',false,true),
-            $this->column('project_count','项目数','该员工在明细表中的项目数合计；多人服务和人工调整可产生小数。',true),
-            $this->column('service_visit_count','服务人次','该员工在所选日期内的有效服务人次合计；计算规则与明细表一致。',true),
-            $this->column('service_people_count','服务人数','该员工在所选日期内服务的顾客数；本人服务的会员跨日期只计一人，朋友算和游客每条有效服务记录分别计算；本人或朋友选择“不算人数人次”均不计入。普通员工共同服务时均分，独立核算岗位另组计算。',true),
-            $this->column('consumption_amount','消耗','该员工在所选日期内，服务完成或卡项核销后计入的消耗金额；作废后不再统计。',true),
-            $this->column('labor_fee','手工','该员工在所选日期内被分配的手工费合计；作废后不再统计。',true),
+            $this->column('employee_name','员工','按门店和员工汇总所选日期内的有效业务，显示业务记账时记录的姓名；页面可输入姓名中的任意文字进行筛选。',false,true),
+            $this->column('position_name','岗位','显示该员工目前在这家门店的有效岗位；已无有效岗位时显示“-”。岗位只供查看，不重新分配历史业绩。',false,true),
+            $this->column('project_count','项目数','所选日期内该员工分得的服务项目数之和；多人服务及人工调整可产生小数，点击可查看对应明细。',true,false,120,$this->salaryMetricDrilldown('project_count')),
+            $this->column('service_visit_count','服务人次','会员本人在同一门店同一天服务多项目只计一次，朋友和无会员顾客按每笔有效服务计算；普通员工分摊，独立核算岗位分别计算。点击可查看明细。',true,false,120,$this->salaryMetricDrilldown('service_visit_count')),
+            $this->column('service_people_count','服务人数','所选日期内，同一会员在同一门店服务多天只计一次；朋友及无会员的顾客按每次有效服务计算。不计人数人次的服务排除，普通员工分摊，独立核算岗位分别计算。点击可查看明细。',true,false,120,$this->salaryMetricDrilldown('service_people_count')),
+            $this->column('consumption_amount','消耗','所选日期内服务完成或卡项核销后分配给该员工的消耗金额之和；作废后不再统计，点击可查看明细。',true,false,120,$this->salaryMetricDrilldown('consumption_amount')),
+            $this->column('labor_fee','手工','所选日期内最终分配给该员工的手工费之和；后续人员调整按有效结果显示，作废后不再统计。',true),
         ];
         foreach($categories['columns'] as $categoryColumn){
             // 分类列自己声明精确下钻条件；页面仅传递 ID 与列键，不推断名称或重算金额。
@@ -408,6 +451,16 @@ final class StoreUnifiedReportPhaseSixServices
         if($raw==='' || $raw==='0')return 0;
         if(!ctype_digit($raw) || (int)$raw<=0)throw new \InvalidArgumentException('员工或门店筛选条件不正确');
         return (int)$raw;
+    }
+
+    /** Exact metric drilldown uses the same authorized store and employee IDs as category amounts. */
+    private function salaryMetricDrilldown(string $metricKey): array
+    {
+        return [
+            'report'=>'phase_six_salary_detail',
+            'params'=>['employee_name'=>'','salary_metric_key'=>$metricKey],
+            'param_map'=>['salary_employee_id'=>'employee_id','salary_store_id'=>'store_id'],
+        ];
     }
 
     /** Keep the same observed category mapping for summary columns and category-specific detail. */
@@ -450,7 +503,7 @@ final class StoreUnifiedReportPhaseSixServices
     }
 
     /** Add the shared text filter contract without making the frontend infer it from report names. */
-    private function salaryResult(string $title,array $columns,array $records,array $range,string $employeeName,bool $categoryDrilldown=false): array
+    private function salaryResult(string $title,array $columns,array $records,array $range,string $employeeName,bool $categoryDrilldown=false,string $documentNo='',bool $documentFilter=false): array
     {
         $result=$this->result($title,$columns,$records,$range);
         if($categoryDrilldown){
@@ -464,7 +517,12 @@ final class StoreUnifiedReportPhaseSixServices
             'key'=>'employee_name','label'=>'员工','show_label'=>false,'aria_label'=>'员工姓名',
             'type'=>'text','placeholder'=>'输入员工姓名',
         ]];
+        if($documentFilter)$result['filter_schema'][]=[
+            'key'=>'document_no','label'=>'单据号','show_label'=>false,'aria_label'=>'单据号',
+            'type'=>'text','placeholder'=>'输入单据号',
+        ];
         $result['filters']['employee_name']=$employeeName;
+        if($documentFilter)$result['filters']['document_no']=$documentNo;
         return $result;
     }
 
@@ -675,7 +733,7 @@ final class StoreUnifiedReportPhaseSixServices
             ->leftJoin('cashier_v3_entitlement_service_fact sv','sv.tenant_id=pf.tenant_id AND sv.checkout_request_id=pf.checkout_request_id AND sv.source_line_id=pf.source_line_id AND sv.service_status=\'completed\'')
             ->where('pf.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
             ->where('pf.performance_type','labor_performance_allocated')->where('pf.status','effective')
-            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_id row_key,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.labor_fee_amount_cents,pf.project_count_half_units,pf.project_count_decimal,pf.rule_code_snapshot,pf.fact_direction,sv.service_fact_id,sv.member_id,sv.member_name_snapshot member_name,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_name_snapshot category_path,sv.source_document_type source_type')
+            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_id row_key,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.labor_fee_amount_cents,pf.project_count_half_units,pf.project_count_decimal,pf.rule_code_snapshot,pf.fact_direction,sv.service_fact_id,sv.member_id,sv.service_object,sv.member_name_snapshot member_name,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_name_snapshot category_path,sv.source_document_type source_type')
             ->order('pf.id','asc');
         $normal = new StoreReportNormalDataScopeServices();
         $normal->excludeVoidedSalesOrderFacts($query, 'pf.tenant_id', 'pf.order_id');
@@ -711,7 +769,7 @@ final class StoreUnifiedReportPhaseSixServices
                 ||(string)$row['rule_code_snapshot']==='SERVICE-RECORD-CRAFTSMAN-ADJUST-V1'
                 ||(int)$row['project_count_half_units']!==0
                 ||($row['project_count_decimal']!==null&&(string)$row['project_count_decimal']!=='');
-            foreach(['row_key','service_fact_id','employee_name','member_id','member_name','store_name','company_name','item_name','category_path','source_type'] as $field)$grouped[$key][$field]=$row[$field]??$grouped[$key][$field]??'';
+            foreach(['row_key','service_fact_id','employee_name','member_id','service_object','member_name','store_name','company_name','item_name','category_path','source_type'] as $field)$grouped[$key][$field]=$row[$field]??$grouped[$key][$field]??'';
         }
         $lineGroups=[];
         foreach($grouped as $key=>$row){$lineKey=(int)$row['store_id'].'|'.(string)$row['checkout_request_id'].'|'.(string)$row['source_line_id'];$lineGroups[$lineKey][]=$key;}
@@ -830,10 +888,29 @@ final class StoreUnifiedReportPhaseSixServices
     private function salaryFactsWithReportingDimensions(array $stores, array $range): array
     {
         $facts=$this->salaryFactsWithServiceCustomerMetrics($stores,$range);
+        $employeeIds=array_values(array_unique(array_filter(array_map(static fn(array $fact):int=>(int)($fact['employee_id']??0),$facts))));
+        $positions=[];
+        if($employeeIds!==[]){
+            // Position is a present-day staff dimension, not an immutable salary fact.
+            // Keep this lookup scoped to authorized stores and never regroup historical amounts by it.
+            foreach(array_chunk($employeeIds,300) as $employeeChunk){
+                $positionRows=Db::name('system_store_staff')->alias('ss')
+                    ->join('staff_job_position sjp','sjp.staff_id=ss.id AND sjp.status=1 AND sjp.is_del=0 AND sjp.end_time=0')
+                    ->join('position p','p.id=sjp.position_id AND p.status=1')
+                    ->whereIn('ss.store_id',$stores)->whereIn('ss.employee_id',$employeeChunk)
+                    ->where('ss.status',1)->where('ss.is_del',0)->field('ss.store_id,ss.employee_id,p.name position_name')
+                    ->order('sjp.id','desc')->select()->toArray();
+                foreach($positionRows as $position){
+                    $key=(int)$position['store_id'].'|'.(int)$position['employee_id'];
+                    if(!isset($positions[$key]))$positions[$key]=trim((string)$position['position_name'])?:'-';
+                }
+            }
+        }
         $dimensions=new StoreUnifiedReportOrganizationDimensionServices();
         foreach($facts as &$fact){
             $company=$dimensions->resolve('company','','',(string)$range['end'],(int)($fact['store_id']??0));
             $fact['company_name']=$company['name'];
+            $fact['position_name']=$positions[(int)$fact['store_id'].'|'.(int)$fact['employee_id']]??'-';
         }
         unset($fact);
         return $facts;
@@ -849,6 +926,7 @@ final class StoreUnifiedReportPhaseSixServices
     {
         $metrics = $this->serviceCustomerMetrics($stores, $range);
         $byLaborKey = $metrics['detail_by_labor_key'];
+        $peopleByLaborKey = $metrics['people_by_labor_key'];
         $facts = $this->salaryFacts($stores, $range);
         $present = [];
         foreach ($facts as &$fact) {
@@ -860,6 +938,7 @@ final class StoreUnifiedReportPhaseSixServices
             $fact['service_visit_tenths'] = is_array($metric)
                 ? (int)($metric['visit_tenths'] ?? 0)
                 : (int)$metric;
+            $fact['service_people_tenths'] = (int)($peopleByLaborKey[$laborKey] ?? 0);
         }
         unset($fact);
         // Zero-price completed services intentionally have no performance
@@ -879,11 +958,13 @@ final class StoreUnifiedReportPhaseSixServices
                 'source_line_id' => (string)($service['source_line_id'] ?? ''),
                 'service_fact_id' => (string)($service['service_fact_id'] ?? ''),
                 'member_id' => (int)($service['member_id'] ?? 0), 'member_name' => (string)($service['member_name'] ?? ''),
+                'service_object' => strpos((string)($service['subject'] ?? ''), 'member:') === 0 ? 'self' : '',
                 'store_name' => (string)($service['store_name'] ?? ''), 'company_name' => (string)($service['company_name'] ?? ''),
                 'item_name' => (string)($service['item_name'] ?? ''), 'category_path' => (string)($service['category_path'] ?? ''),
                 'source_type' => (string)($service['source_type'] ?? ''),
                 'project_count' => 0.0, 'consumption_cents' => 0, 'cash_cents' => 0, 'labor_fee_cents' => 0,
                 'service_visit_tenths' => (int)($byLaborKey[$laborKey] ?? 0),
+                'service_people_tenths' => (int)($peopleByLaborKey[$laborKey] ?? 0),
             ];
         }
         return $facts;
@@ -892,6 +973,7 @@ final class StoreUnifiedReportPhaseSixServices
     /**
      * @return array{
      *   detail_by_labor_key:array<string,int>,
+     *   people_by_labor_key:array<string,int>,
      *   detail_context_by_labor_key:array<string,array<string,mixed>>,
      *   summary_by_store_employee:array<string,array{visit_tenths:int,people_tenths:int}>
      * }
@@ -904,6 +986,7 @@ final class StoreUnifiedReportPhaseSixServices
         if (!is_array($metrics)) throw new \LogicException('服务客数读取器返回结果无效');
         return [
             'detail_by_labor_key' => is_array($metrics['detail_by_labor_key'] ?? null) ? $metrics['detail_by_labor_key'] : [],
+            'people_by_labor_key' => is_array($metrics['people_by_labor_key'] ?? null) ? $metrics['people_by_labor_key'] : [],
             'detail_context_by_labor_key' => is_array($metrics['detail_context_by_labor_key'] ?? null) ? $metrics['detail_context_by_labor_key'] : [],
             'summary_by_store_employee' => is_array($metrics['summary_by_store_employee'] ?? null) ? $metrics['summary_by_store_employee'] : [],
         ];
@@ -916,6 +999,16 @@ final class StoreUnifiedReportPhaseSixServices
             . (int)($fact['employee_id'] ?? 0) . '|'
             . (string)($fact['checkout_request_id'] ?? '') . '|'
             . (string)($fact['source_line_id'] ?? '');
+    }
+
+    /** Only completed self-member service facts may join a visit across checkouts; IDs keep the scope exact. */
+    private function salaryVisitMemberDayKey(array $fact): string
+    {
+        if(trim((string)($fact['service_fact_id']??''))===''
+            ||strtolower(trim((string)($fact['service_object']??'')))!=='self'
+            ||(int)($fact['member_id']??0)<=0)return '';
+        return (int)$fact['store_id'].'|'.(int)$fact['employee_id'].'|'
+            .(string)$fact['business_date'].'|'.(int)$fact['member_id'];
     }
 
     private function topCategory(string $path): string

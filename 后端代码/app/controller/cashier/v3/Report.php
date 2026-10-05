@@ -161,8 +161,8 @@ class Report extends AuthController
             ['store_ids', ''],
             ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''],
             ['unit_price_min', ''], ['unit_price_max', ''],
-            // 分类金额下钻保留员工和门店稳定 ID；门店端仍须经过当前账号的数据权限裁剪。
-            ['employee_name', ''], ['salary_employee_id', 0], ['salary_store_id', 0], ['salary_category_key', ''],
+            // 薪资筛选和指标下钻保留原单号与稳定人员/门店 ID；权限范围仍由服务端裁剪。
+            ['employee_name', ''], ['document_no', ''], ['salary_employee_id', 0], ['salary_store_id', 0], ['salary_category_key', ''], ['salary_metric_key', ''],
             ['mode', 'count'],
             ['page', 1], ['limit', 20],
         ];

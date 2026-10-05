@@ -70,6 +70,11 @@ expectShares(array_map(static function (int $id) use ($metrics): int {
         return strpos($key, '23|' . $id . '|') === 0;
     }, ARRAY_FILTER_USE_KEY));
 }, array_keys($people)), [5, 5, 10], 'daily visits attach to one stable detail line per employee');
+expectShares(array_map(static function (int $id) use ($metrics): int {
+    return array_sum(array_filter($metrics['people_by_labor_key'], static function (string $key) use ($id): bool {
+        return strpos($key, '23|' . $id . '|') === 0;
+    }, ARRAY_FILTER_USE_KEY));
+}, array_keys($people)), [5, 5, 10], 'period-deduplicated people reconcile with one stable detail line');
 
 // The actual settled service snapshot uses snake_case and omits position_id.
 // Historical and future rows must still use its frozen independent group.

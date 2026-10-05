@@ -33,6 +33,7 @@ final class ServiceCustomerMetricReadServices
     /**
      * @return array{
      *   detail_by_labor_key:array<string,int>,
+     *   people_by_labor_key:array<string,int>,
      *   detail_context_by_labor_key:array<string,array<string,mixed>>,
      *   summary_by_store_employee:array<string,array{visit_tenths:int,people_tenths:int,employee_name:string}>,
      *   daily_by_store_employee:array<string,array{visit_tenths:int,employee_name:string}>
@@ -160,9 +161,10 @@ final class ServiceCustomerMetricReadServices
             $dailyKey = $storeId . '|' . (string)$line['business_date'] . '|' . (string)$line['subject'];
             $periodKey = $storeId . '|' . (string)$line['subject'];
             if (!isset($daily[$dailyKey])) $daily[$dailyKey] = ['employees' => [], 'lines' => [], 'point_employees' => [], 'allocation_groups' => []];
-            if (!isset($period[$periodKey])) $period[$periodKey] = ['employees' => [], 'allocation_groups' => []];
+            if (!isset($period[$periodKey])) $period[$periodKey] = ['employees' => [], 'allocation_groups' => [], 'lines' => []];
             $daily[$dailyKey]['employees'][$employeeId] = $this->name($daily[$dailyKey]['employees'][$employeeId] ?? '', $employeeName);
             $daily[$dailyKey]['lines'][$employeeId][] = $lineKey;
+            $period[$periodKey]['lines'][$employeeId][$lineKey] = (string)$line['business_date'];
             if (!empty($line['point'])) $daily[$dailyKey]['point_employees'][$employeeId] = true;
             $period[$periodKey]['employees'][$employeeId] = $this->name($period[$periodKey]['employees'][$employeeId] ?? '', $employeeName);
             // A member may have several service lines in one day or period.
@@ -173,6 +175,7 @@ final class ServiceCustomerMetricReadServices
         }
 
         $detail = [];
+        $peopleDetail = [];
         $detailContext = [];
         $summary = [];
         $dailyTotals = [];
@@ -209,14 +212,27 @@ final class ServiceCustomerMetricReadServices
                 $summaryKey = (int)$storeId . '|' . $employeeId;
                 $this->initSummary($summary, $summaryKey, $employeeName);
                 $summary[$summaryKey]['people_tenths'] += $tenths;
+                // Period-deduplicated people belong to one stable service line;
+                // summing these projected rows must reproduce the period total.
+                $candidates = $group['lines'][$employeeId] ?? [];
+                if ($candidates === []) $this->fail('METRIC_SERVICE_SOURCE_INVALID');
+                asort($candidates, SORT_STRING);
+                $firstDate = reset($candidates);
+                $firstKeys = array_keys(array_filter($candidates, static fn(string $date): bool => $date === $firstDate));
+                sort($firstKeys, SORT_STRING);
+                $firstKey = $firstKeys[0];
+                $peopleDetail[$firstKey] = ($peopleDetail[$firstKey] ?? 0) + $tenths;
+                $detailContext[$firstKey] = $lines[$firstKey];
             }
         }
         ksort($detail, SORT_STRING);
+        ksort($peopleDetail, SORT_STRING);
         ksort($detailContext, SORT_STRING);
         ksort($summary, SORT_STRING);
         ksort($dailyTotals, SORT_STRING);
         return [
             'detail_by_labor_key' => $detail,
+            'people_by_labor_key' => $peopleDetail,
             'detail_context_by_labor_key' => $detailContext,
             'summary_by_store_employee' => $summary,
             'daily_by_store_employee' => $dailyTotals,

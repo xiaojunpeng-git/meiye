@@ -31,5 +31,12 @@ check('store only exposes three cross-end reports', view.includes('phase_six_oth
 check('platform-only phase six reports are blocked in direct store runtime', view.includes('phaseSixBlocked') && view.includes('isPlatformRuntimeRoute()'))
 check('embedded report re-syncs route after async catalog load', view.includes('catalog.value = Array.isArray(response) ? response : []') && view.includes('syncActiveReportFromRoute()\n    syncFiltersFromRoute()\n    await loadReport()'))
 check('report filters can hide a repeated title without losing accessibility', view.includes('field.show_label !== false') && view.includes('field.aria_label || field.label || field.name || field.key'))
+check('salary detail returns to the original summary filters without sending return metadata to the report API',
+  view.includes("activeReport.value === 'phase_six_salary_summary' && request.report === 'phase_six_salary_detail'")
+  && view.includes('salary_report_return_to: salaryReturnTo')
+  && view.includes("if (code === 'phase_six_salary_summary' && salarySummaryReturnLocation.value) return returnToSalarySummary()")
+  && view.includes('query.salary_report_return_to = salarySummaryReturnLocation.value')
+  && view.includes("'scope_label', 'salary_report_return_to'")
+  && view.includes('<ArrowLeft :size="15" aria-hidden="true" /> 返回'))
 if (failed) process.exit(1)
 console.log('PASS phase-six frontend contract')

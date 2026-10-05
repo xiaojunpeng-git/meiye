@@ -7,6 +7,7 @@ import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import ChevronDown from '@lucide/vue/dist/esm/icons/chevron-down.mjs'
 import ChevronUp from '@lucide/vue/dist/esm/icons/chevron-up.mjs'
 import ChevronRight from '@lucide/vue/dist/esm/icons/chevron-right.mjs'
+import ArrowLeft from '@lucide/vue/dist/esm/icons/arrow-left.mjs'
 import Network from '@lucide/vue/dist/esm/icons/network.mjs'
 import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import '@mohe/unified-query-vue3/styles.css'
@@ -792,6 +793,16 @@ const currentReportDescription = computed(() => currentReportDefinition.value?.d
 const isPlatformReport = computed(isPlatformRuntimeRoute)
 const reportRuntime = computed(() => isPlatformReport.value ? STORE_BUSINESS_REPORT_RUNTIME.PLATFORM : STORE_BUSINESS_REPORT_RUNTIME.STORE)
 const reportRouteName = computed(() => isPlatformReport.value ? 'cashier-v3-platform-store-business-reports' : 'cashier-v3-store-business-reports')
+const salarySummaryReturnLocation = computed(() => {
+  if (route.name !== reportRouteName.value || requestedReportCode() !== 'phase_six_salary_detail') return null
+  const returnTo = route.query.salary_report_return_to
+  if (typeof returnTo !== 'string' || !returnTo.startsWith('/') || returnTo.startsWith('//') || returnTo.length > 4096) return null
+  const resolved = router.resolve(returnTo)
+  // Only the summary report on this runtime may be restored from a drilldown URL.
+  return resolved.name === reportRouteName.value && resolved.params.report === 'phase_six_salary_summary'
+    ? resolved.fullPath
+    : null
+})
 
 function today() {
   const date = new Date()
@@ -857,8 +868,15 @@ async function loadReport() {
 
 function selectReport(code) {
   if (code === activeReport.value) return
+  if (code === 'phase_six_salary_summary' && salarySummaryReturnLocation.value) return returnToSalarySummary()
   page.value = 1
   router.push({ name: reportRouteName.value, params: { report: code } })
+}
+
+function returnToSalarySummary() {
+  if (!salarySummaryReturnLocation.value) return
+  // Route navigation runs the existing report watcher once with the original summary filters.
+  return router.push(salarySummaryReturnLocation.value)
 }
 
 function updateTabsLayout() {
@@ -891,6 +909,8 @@ function currentRouteQuery() {
     query[key] = String(value)
   })
   if (scopePicker.value.selectedStoreIds.length) query.scope_label = scopePicker.value.label
+  // Detail re-filtering must not erase the summary context that opened this drilldown.
+  if (salarySummaryReturnLocation.value) query.salary_report_return_to = salarySummaryReturnLocation.value
   return query
 }
 
@@ -996,7 +1016,7 @@ function syncFiltersFromRoute() {
   if (storeIds.length) {
     scopePicker.value = { ...scopePicker.value, selectedStoreIds: storeIds, label: String(query.scope_label || '下钻范围') }
   }
-  const reserved = new Set(['start_date', 'end_date', 'month', 'year', 'store_ids', 'scope_label'])
+  const reserved = new Set(['start_date', 'end_date', 'month', 'year', 'store_ids', 'scope_label', 'salary_report_return_to'])
   dynamicFilters.value = Object.fromEntries(Object.entries(query)
     .filter(([key, value]) => !reserved.has(key) && value !== undefined && value !== '')
     .map(([key, value]) => [key, String(value)]))
@@ -1379,6 +1399,13 @@ function openDrilldown(row, column) {
     })
     return
   }
+  const salaryReturnTo = activeReport.value === 'phase_six_salary_summary' && request.report === 'phase_six_salary_detail'
+    ? router.resolve({
+      name: reportRouteName.value,
+      params: { report: activeReport.value },
+      query: currentRouteQuery()
+    }).fullPath
+    : null
   router.push({
     name: reportRouteName.value,
     params: { report: request.report },
@@ -1387,7 +1414,8 @@ function openDrilldown(row, column) {
       end_date: endDate.value,
       ...(scopePicker.value.selectedStoreIds.length ? { store_ids: scopePicker.value.selectedStoreIds.join(','), scope_label: scopePicker.value.label } : {}),
       ...dynamicFilters.value,
-      ...request.params
+      ...request.params,
+      ...(salaryReturnTo ? { salary_report_return_to: salaryReturnTo } : {})
     }
   })
 }
@@ -1451,6 +1479,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
     </div>
 
     <section class="store-business-report__filters" aria-label="报表查询条件">
+      <button v-if="salarySummaryReturnLocation" type="button" class="button button--secondary store-business-report__salary-return" @click="returnToSalarySummary">
+        <ArrowLeft :size="15" aria-hidden="true" /> 返回
+      </button>
       <div v-if="isPlatformReport" class="store-business-report__scope-picker">
         <button type="button" class="store-business-report__scope-trigger" :disabled="scopePicker.loading" @click="scopePicker.open = !scopePicker.open">
           <Network :size="16" aria-hidden="true" /> {{ scopePicker.loading ? '读取权限范围' : scopePicker.label }}
@@ -1710,6 +1741,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__scope-panel footer button { flex: none; border: 0; padding: 0; background: transparent; color: #2d8cf0; font: inherit; font-size: 12px; cursor: pointer; }
 .store-business-report__query-actions { display: flex; flex: none; align-items: center; gap: 8px; margin-left: auto; }
 .store-business-report__query-actions .button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; }
+.store-business-report__salary-return { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 6px; max-width: 100%; text-align: left; }
+.store-business-report__salary-return svg { flex: none; }
 .store-business-report__filters--advanced { border-top: 0; border-radius: 0 0 8px 8px; padding-top: 2px; }
 .store-business-report__filters label { display: grid; gap: 5px; min-width: 140px; color: #687586; font-size: 12px; }
 .store-business-report__period-picker { flex: 0 1 260px; width: 260px; min-width: 230px; }
