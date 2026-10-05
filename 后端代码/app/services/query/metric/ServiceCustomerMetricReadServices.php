@@ -277,9 +277,15 @@ final class ServiceCustomerMetricReadServices
             $employeeId = $this->integer($row['employee_id'] ?? $row['employeeId'] ?? 0);
             if ($employeeId <= 0 || $this->integer($row['store_id'] ?? $row['storeId'] ?? $storeId) !== $storeId) continue;
             $groupKey = trim((string)($row['allocationGroupKey'] ?? $row['allocation_group_key'] ?? ''));
+            $hasPositionId = array_key_exists('positionId', $row) || array_key_exists('position_id', $row);
             $positionId = $this->integer($row['positionId'] ?? $row['position_id'] ?? 0);
             $independent = !empty($row['performanceIndependent']) || !empty($row['performance_independent']);
-            $group = $independent && $positionId > 0 && $groupKey === 'independent:' . $positionId
+            // Settled service snapshots persist the independent flag and group key,
+            // but not always position_id. Accept that frozen key when well formed;
+            // if an explicit position is present, it must still agree with the key.
+            $validGroup = preg_match('/^independent:[1-9][0-9]*$/D', $groupKey) === 1
+                && (!$hasPositionId || ($positionId > 0 && $groupKey === 'independent:' . $positionId));
+            $group = $independent && $validGroup
                 ? $groupKey : 'normal';
             $groups[$employeeId] = $this->preferredAllocationGroup($groups[$employeeId] ?? null, $group);
         }

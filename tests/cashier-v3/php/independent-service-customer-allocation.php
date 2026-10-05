@@ -71,6 +71,48 @@ expectShares(array_map(static function (int $id) use ($metrics): int {
     }, ARRAY_FILTER_USE_KEY));
 }, array_keys($people)), [5, 5, 10], 'daily visits attach to one stable detail line per employee');
 
+// The actual settled service snapshot uses snake_case and omits position_id.
+// Historical and future rows must still use its frozen independent group.
+$persistedSnapshot = json_encode([
+    ['employee_id' => 101, 'store_id' => 23, 'performance_independent' => 0,
+        'allocation_group_key' => 'normal'],
+    ['employee_id' => 201, 'store_id' => 23, 'performance_independent' => 1,
+        'allocation_group_key' => 'independent:67'],
+], JSON_THROW_ON_ERROR);
+$persisted = serviceMetrics(serviceRows('persisted', [101 => '普通甲', 201 => '店长'], $persistedSnapshot));
+expectShares([
+    $persisted['summary_by_store_employee']['23|101']['visit_tenths'],
+    $persisted['summary_by_store_employee']['23|201']['visit_tenths'],
+], [10, 10], 'persisted independent role without position_id owns a separate visit');
+expectShares([
+    $persisted['summary_by_store_employee']['23|101']['people_tenths'],
+    $persisted['summary_by_store_employee']['23|201']['people_tenths'],
+], [10, 10], 'persisted independent role also owns a separate person');
+
+// Incomplete or contradictory metadata must not create an independent group.
+$invalidSnapshot = json_encode([
+    ['employee_id' => 101, 'store_id' => 23, 'performance_independent' => 0,
+        'allocation_group_key' => 'normal'],
+    ['employee_id' => 201, 'store_id' => 23, 'performance_independent' => 1,
+        'allocation_group_key' => 'independent:67', 'position_id' => 68],
+], JSON_THROW_ON_ERROR);
+$invalid = serviceMetrics(serviceRows('invalid', [101 => '普通甲', 201 => '店长'], $invalidSnapshot));
+expectShares([
+    $invalid['summary_by_store_employee']['23|101']['visit_tenths'],
+    $invalid['summary_by_store_employee']['23|201']['visit_tenths'],
+], [5, 5], 'contradictory frozen position cannot form an independent group');
+
+$invalidPositionSnapshot = json_encode([
+    ['employee_id' => 101, 'store_id' => 23, 'allocation_group_key' => 'normal'],
+    ['employee_id' => 201, 'store_id' => 23, 'performance_independent' => 1,
+        'allocation_group_key' => 'independent:67', 'position_id' => 0],
+], JSON_THROW_ON_ERROR);
+$invalidPosition = serviceMetrics(serviceRows('invalid-position', [101 => '普通甲', 201 => '店长'], $invalidPositionSnapshot));
+expectShares([
+    $invalidPosition['summary_by_store_employee']['23|101']['visit_tenths'],
+    $invalidPosition['summary_by_store_employee']['23|201']['visit_tenths'],
+], [5, 5], 'explicitly invalid position cannot form an independent group');
+
 $excluded = serviceMetrics(serviceRows('C', $people, $snapshot, 'friend', 0));
 expectShares($excluded['summary_by_store_employee'], [], 'friend not counted remains excluded');
 $selfExcluded = serviceMetrics(serviceRows('C-self', $people, $snapshot, 'self', 0));
