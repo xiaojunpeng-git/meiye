@@ -3656,6 +3656,11 @@ function cartLineFriendCountsAsCustomer(line = {}) {
   return !(line.friendCountsAsCustomer === false || Number(line.friendCountsAsCustomer) === 0)
 }
 
+function cartLineServiceChoice(line = {}) {
+  // 不计客只是唯一的页面选中项；结账仍保留真实服务对象本人或朋友。
+  return cartLineFriendCountsAsCustomer(line) ? cartLineServiceObject(line) : 'excluded'
+}
+
 function isProductLine(line = {}) {
   return cartLineRole(line) === 'sale' && (Number(line.productType) === 0 || line.kind === '产品')
 }
@@ -7532,17 +7537,17 @@ onBeforeUnmount(() => {
                   >
                     <button
                       type="button"
-                      :class="{ 'is-active': cartLineServiceObject(line) === 'self' }"
+                      :class="{ 'is-active': cartLineServiceChoice(line) === 'self' }"
                       @click="setCartLineServiceObject(line, 'self', true)"
                     >本人</button>
                     <button
                       type="button"
-                      :class="{ 'is-active': cartLineServiceObject(line) === 'friend' && cartLineFriendCountsAsCustomer(line) }"
+                      :class="{ 'is-active': cartLineServiceChoice(line) === 'friend' }"
                       @click="setCartLineServiceObject(line, 'friend', true)"
                     >朋友算</button>
                     <button
                       type="button"
-                      :class="{ 'is-active': !cartLineFriendCountsAsCustomer(line) }"
+                      :class="{ 'is-active': cartLineServiceChoice(line) === 'excluded' }"
                       @click="setCartLineExcludedFromCustomerCounts(line)"
                     >不算人数人次</button>
                   </div>
