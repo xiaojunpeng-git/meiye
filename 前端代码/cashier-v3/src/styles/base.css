@@ -486,7 +486,8 @@ button:disabled {
   min-height: 0;
 }
 
-.cashier-main--workflow {
+.cashier-main--workflow,
+.cashier-main--headerless {
   grid-template-rows: minmax(0, 1fr);
 }
 

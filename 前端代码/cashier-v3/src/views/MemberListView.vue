@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import TablePagination from '@/components/common/TablePagination.vue'
 import MemberCreatorPanel from '@/components/member/MemberCreatorPanel.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
@@ -199,10 +199,8 @@ async function requestAction(action, payload = {}) {
   return requestCashierV3Action(action, payload)
 }
 
-function openMemberCreator(event = null) {
+function openMemberCreator() {
   if (!canCreateMember.value) return
-  const schema = event?.detail?.creatorSchema
-  if (schema && typeof schema === 'object') creatorSchema.value = schema
   isMemberCreatorOpen.value = true
 }
 
@@ -440,14 +438,6 @@ watch(
   { immediate: true }
 )
 
-onMounted(() => {
-  window.addEventListener('cashier-v3:open-member-list-creator', openMemberCreator)
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('cashier-v3:open-member-list-creator', openMemberCreator)
-})
-
 async function openMemberDetail(record) {
   const memberId = memberRecordId(record)
   window.dispatchEvent(new CustomEvent('cashier-v3:open-member-detail', {
@@ -592,9 +582,6 @@ async function openBatchAction() {
 
 <template>
   <section class="member-list-page" :class="{ 'member-list-page--batch': canBatchOperate, 'member-list-page--insights': hasQueryInsights }" aria-label="会员列表">
-    <header v-if="canCreateMember" class="member-list-page__head">
-      <button type="button" class="button button--primary" @click="openMemberCreator()">新增会员</button>
-    </header>
     <UnifiedQueryToolbar
       search-placeholder="搜索会员姓名、完整手机号或会员编号"
       settings-button-label="查询设置"
@@ -625,7 +612,11 @@ async function openBatchAction() {
       :on-upgrade-saved-query-field-reference="unifiedQuery.upgradeSavedQueryFieldReference"
       :on-create-export="unifiedQuery.createExport"
       :on-query-export-task="unifiedQuery.queryExportTask"
-    />
+    >
+      <template #primary-actions>
+        <button v-if="canCreateMember" type="button" class="button button--primary" @click="openMemberCreator()">新增会员</button>
+      </template>
+    </UnifiedQueryToolbar>
 
     <p v-if="isQueryLoading" class="member-list-query-message" role="status">正在查询会员数据…</p>
     <p v-else-if="queryError" class="member-list-query-message member-list-query-message--error" role="alert">{{ queryError }}</p>
@@ -714,7 +705,6 @@ async function openBatchAction() {
 </template>
 
 <style scoped>
-.member-list-page__head { display: flex; justify-content: flex-end; margin: 0 0 12px; }
 .member-list-query-message {
   margin: 0;
   padding: 9px 12px;

@@ -112,7 +112,6 @@ const latestRoomAssignmentPreparationIntent = ref(null)
 const pendingCashierWorkflowTarget = ref(null)
 const pendingMemberTopAction = ref(null)
 const memberSelectorInitialView = ref('selector')
-const memberCreatorSchema = ref({})
 const isCardOperationMenuOpen = ref(false)
 const rechargeSession = ref(null)
 const isRechargeSubmitting = ref(false)
@@ -391,10 +390,7 @@ const cardOperationItems = Object.freeze([
 ])
 const allowedTopActions = new Set([
   'open-recharge',
-  'open-gift',
-  'open-reservation-editor',
-  'open-member-creator',
-  'open-member-batch-actions'
+  'open-gift'
 ])
 const allowedMemberSelectorContexts = new Set(['cashier', 'writeoff', 'reservation', 'card-transfer', 'customer-care', 'customer-care-record', 'member-referrer', 'imported-card-refund'])
 const memberSelectorActions = {
@@ -493,8 +489,19 @@ function isMenuItemActive(item) {
 
 const isCashierPage = computed(() => route.name === 'cashier-v3-cashier')
 const isCashierWorkflowPage = computed(() => ['cashier-v3-cashier', 'cashier-v3-writeoff', 'cashier-v3-replacement'].includes(route.name))
-const isReservationPage = computed(() => route.name === 'cashier-v3-reservation')
-const isMemberPage = computed(() => route.name === 'cashier-v3-member')
+// 这些业务页已有自己的查询/操作区，隐藏外壳标题时同时释放其固定行高。
+const headerlessPageNames = new Set([
+  'cashier-v3-fund',
+  'cashier-v3-hang',
+  'cashier-v3-room',
+  'cashier-v3-reservation',
+  'cashier-v3-member',
+  'cashier-v3-care',
+  'cashier-v3-order-center',
+  'cashier-v3-store-business-reports',
+  'cashier-v3-store-target-dashboard'
+])
+const isHeaderlessPage = computed(() => headerlessPageNames.has(route.name))
 const isStaffPage = computed(() => route.name === 'cashier-v3-staff-list')
 const isManagementCenterPage = computed(() => route.name === 'cashier-v3-management-center')
 const isBusinessDashboardPage = computed(() => route.name === 'cashier-v3-business-dashboard')
@@ -809,33 +816,7 @@ async function requestTopAction(action, payload = {}) {
   if (!allowedTopActions.has(action)) {
     return { result: { status: 'failed', code: 'TOP_ACTION_NOT_ALLOWED', message: '该顶部操作未进入前端允许清单。' } }
   }
-  if (action === 'open-reservation-editor') {
-    window.dispatchEvent(new CustomEvent('cashier-v3:open-reservation-editor', {
-      detail: { mode: 'create' }
-    }))
-    // 预约页负责携带本次准备请求号并校验完整后端草稿；Shell 不再并行发第二次准备请求。
-    return { success: true }
-  }
   return requestCashierV3Action(action, payload)
-}
-
-async function openMemberCreator() {
-  const result = await requestTopAction('open-member-creator')
-  if (!isSucceededResult(result)) return result
-  const schema = result?.result?.data?.creatorSchema
-    || result?.data?.result?.data?.creatorSchema
-    || result?.data?.data?.creatorSchema
-    || result?.data?.creatorSchema
-    || {}
-  memberCreatorSchema.value = schema && typeof schema === 'object' ? schema : {}
-  if (isMemberPage.value) {
-    // 会员列表直接进入完整建档，不经过收银用的“查询/选择会员”流程。
-    window.dispatchEvent(new CustomEvent('cashier-v3:open-member-list-creator', {
-      detail: { creatorSchema: memberCreatorSchema.value }
-    }))
-    return result
-  }
-  return openMemberSelector({ context: 'cashier', initialView: 'creator' })
 }
 
 function openStaffCreator() {
@@ -2901,8 +2882,8 @@ onBeforeUnmount(() => {
       </div>
     </aside>
 
-    <section class="cashier-main" :class="{ 'cashier-main--workflow': isCashierWorkflowPage || isInventoryWorkspaceOpen }">
-      <header v-if="!isCashierWorkflowPage && !isInventoryWorkspaceOpen" class="cashier-main__header">
+    <section class="cashier-main" :class="{ 'cashier-main--workflow': isCashierWorkflowPage || isInventoryWorkspaceOpen, 'cashier-main--headerless': isHeaderlessPage }">
+      <header v-if="!isCashierWorkflowPage && !isInventoryWorkspaceOpen && !isHeaderlessPage" class="cashier-main__header">
         <div class="cashier-page-identity">
           <div>
             <h1>{{ pageTitle }}</h1>
@@ -2911,26 +2892,7 @@ onBeforeUnmount(() => {
 
         <div class="cashier-main__header-center" />
 
-        <div v-if="isReservationPage" class="cashier-header-actions">
-          <button type="button" class="button button--primary" @click="requestTopAction('open-reservation-editor')">
-            新增预约
-          </button>
-          <button type="button" class="button button--help" @click="isOperationHelpOpen = true">
-            页面说明
-          </button>
-        </div>
-        <div v-else-if="isMemberPage" class="cashier-header-actions">
-          <button v-if="canUseFeature('cashier.v3.member')" type="button" class="button button--primary" @click="openMemberCreator">
-            新增会员
-          </button>
-          <button v-if="canUseFeature('cashier.v3.member.batch')" type="button" class="button button--secondary" @click="requestTopAction('open-member-batch-actions')">
-            批量操作
-          </button>
-          <button type="button" class="button button--help" @click="isOperationHelpOpen = true">
-            页面说明
-          </button>
-        </div>
-        <div v-else-if="isStaffPage" class="cashier-header-actions">
+        <div v-if="isStaffPage" class="cashier-header-actions">
           <button type="button" class="button button--primary" @click="openStaffCreator">
             新增员工
           </button>
@@ -3165,7 +3127,6 @@ onBeforeUnmount(() => {
     :allow-create="memberSelectorContext !== 'imported-card-refund' && canUseFeature('cashier.v3.member') && (isCashierWorkflowPage || memberSelectorInitialView === 'creator')"
     :show-scope-toggle="['cashier', 'reservation'].includes(memberSelectorContext)"
     :current-store-name="state.storeName || ''"
-    :creator-schema="memberCreatorSchema"
     :initial-view="memberSelectorInitialView"
     :on-query="queryMemberSelector"
     :on-select="selectMemberFromSelector"

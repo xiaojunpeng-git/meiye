@@ -26,9 +26,8 @@ assert.match(memberList, /openCashierV3QueryEntitySelector\(/, '完整建档的�
 assert.match(memberList, /requestAction\('create-member', serializablePayload\)/, '会员建档必须继续走 V3 权威写命令')
 assert.match(memberList, /initialQueryPayload\(queryCapability\.value\)/, '保存成功后必须重置列表查询基线')
 assert.match(memberList, /member\?\.phone \|\| payload\?\.phone/, '保存成功后必须以新会员手机号查询并回显')
-assert.match(memberList, /cashier-v3:open-member-list-creator/, '会员列表必须接收顶部新增会员事件')
-
-assert.match(shell, /if \(isMemberPage\.value\) \{[\s\S]*cashier-v3:open-member-list-creator/, '会员页顶部新增入口必须直接打开列表完整建档')
-assert.match(shell, /return openMemberSelector\(\{ context: 'cashier', initialView: 'creator' \}\)/, '收银选择会员必须继续走原有选择器流程')
+assert.match(memberList, /<template #primary-actions>[\s\S]*v-if="canCreateMember"[\s\S]*@click="openMemberCreator\(\)"/, '会员新增入口必须位于查询栏重置按钮后且保留权限判断')
+assert.doesNotMatch(memberList, /cashier-v3:open-member-list-creator/, '会员列表不再订阅已移除的顶部新增事件')
+assert.doesNotMatch(shell, /open-member-list-creator/, '外壳不能保留已移除的顶部新增入口')
 
 console.log('PASS member-list-creator-contract')

@@ -1513,6 +1513,9 @@ onBeforeUnmount(() => {
             <button type="button" :aria-pressed="viewMode === 'list'" :class="{ 'reservation-page__view-switch--active': viewMode === 'list' }" @click="switchReservationView('list')">列表</button>
           </div>
         </template>
+        <template #primary-actions>
+          <button type="button" class="button button--primary" @click="openReservationEditor({ mode: 'create' })">新增预约</button>
+        </template>
       </UnifiedQueryToolbar>
       <p v-if="isEditorLoading || editorLoadMessage" class="reservation-editor-load-message" :class="{ 'reservation-editor-load-message--error': editorLoadMessage }">
         {{ editorLoadMessage || '正在加载完整预约编辑内容…' }}
