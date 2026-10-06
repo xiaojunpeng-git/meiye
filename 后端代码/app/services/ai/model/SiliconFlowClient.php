@@ -8,10 +8,22 @@ use app\services\ai\contract\AiIntentGroupContract;
 use app\services\ai\contract\AiStrictJson;
 use app\services\ai\execution\AiOverviewMetricResolver;
 
-/** Fixed HTTPS endpoint, bounded response, no redirect/retry or raw prompt logging. */
+/** Historical class name; one guarded OpenAI-compatible transport for the two allowlisted providers. */
 final class SiliconFlowClient
 {
     const ENDPOINT = 'https://api.siliconflow.cn/v1/chat/completions';
+    const OPENLUX_ENDPOINT = 'https://api.openlux.ai/v1/chat/completions';
+    private $provider;
+    private $endpoint;
+
+    /** A server-owned provider code selects a fixed HTTPS host, never a user URL. */
+    public function __construct(string $provider = 'siliconflow')
+    {
+        $endpoints=['siliconflow'=>self::ENDPOINT,'openlux'=>self::OPENLUX_ENDPOINT];
+        if (!isset($endpoints[$provider])) throw new AiContractException('AI_MODEL_CONFIG_INVALID');
+        $this->provider=$provider;
+        $this->endpoint=$endpoints[$provider];
+    }
     // Provider-side safety ceiling. The gateway supplies the smaller,
     // Run-budget-derived timeout for every business-model request.
     const MAX_REQUEST_TIMEOUT_MS = 45000;
@@ -37,7 +49,7 @@ final class SiliconFlowClient
     /** Minimal configuration probe. It is deliberately unrelated to business language or metrics. */
     public function probe(string $model,string $apiKey,int $timeoutMs,callable $checkpoint): array
     {
-        $payload=['model'=>$model,'stream'=>false,'max_tokens'=>16,'temperature'=>0,'response_format'=>['type'=>'json_object'],
+        $payload=['model'=>$model,'stream'=>false,'max_tokens'=>64,'temperature'=>0,'response_format'=>['type'=>'json_object'],
             'messages'=>[
                 ['role'=>'system','content'=>'Return exactly {"ok":true}. Do not answer any business question.'],
                 ['role'=>'user','content'=>'connection check'],
@@ -841,12 +853,18 @@ final class SiliconFlowClient
             || !preg_match('/^[A-Za-z0-9][A-Za-z0-9_.\/-]{0,127}$/D',$payload['model']??'')
             || $apiKey==='' || preg_match('/[\r\n\x00]/',$apiKey)) throw new AiContractException('AI_MODEL_CONFIG_INVALID');
         $checkpoint();
+        if ($this->provider==='openlux' && ($payload['response_format']['type']??null)==='json_object') {
+            // OpenLux requires the literal word JSON in the messages before
+            // accepting structured mode. This output-only instruction does
+            // not change the accepted business meaning or query boundary.
+            array_unshift($payload['messages'],['role'=>'system','content'=>'Return a JSON object only.']);
+        }
         $body = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if ($body === false || strlen($body) > 65536) throw new AiContractException('AI_MODEL_INPUT_INVALID');
         $response = ''; $aborted = false; $oversized = false; $startedAt = microtime(true);
         // PHP 7.4 builds may expose only the legacy progress option, even with new libcurl.
         $progressOption = defined('CURLOPT_XFERINFOFUNCTION') ? constant('CURLOPT_XFERINFOFUNCTION') : CURLOPT_PROGRESSFUNCTION;
-        $handle = curl_init(self::ENDPOINT);
+        $handle = curl_init($this->endpoint);
         curl_setopt_array($handle, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body,
             CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $apiKey],
             CURLOPT_FOLLOWLOCATION => false, CURLOPT_MAXREDIRS => 0, CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,

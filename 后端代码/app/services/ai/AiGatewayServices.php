@@ -963,7 +963,7 @@ final class AiGatewayServices
             $timeout=$this->model===null?$this->modelCallTimeout($owner,$id,$generation,$worker,10000):null;
             $reply=$this->model
                 ?call_user_func($this->model,$safe['outbound'],$metadata,$configuration,$checkpoint,null,'recommendations',$understanding)
-                :(new SiliconFlowClient())->selectRecommendations($safe['outbound'],$understanding,$metadata,$configuration['model'],$configuration['api_key'],$timeout,$checkpoint);
+                :(new SiliconFlowClient($configuration['provider']))->selectRecommendations($safe['outbound'],$understanding,$metadata,$configuration['model'],$configuration['api_key'],$timeout,$checkpoint);
             $recommendations=($reply['selections']??null)===[]?[]:$planner->select($pool,$reply['selections']??null);
             $this->runs->finishAttempt($owner,$id,$generation,$worker,$code,'SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
         } catch (\Throwable $error) {
@@ -1650,7 +1650,7 @@ final class AiGatewayServices
             $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::UNDERSTANDING_PRIMARY_LIMIT_MS) : null;
             $meaningReply=$this->model
                 ? call_user_func($this->model,$safe['outbound'],[],$configuration,$checkpoint,null,'understanding')
-                : (new SiliconFlowClient())->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,null,$objectVocabulary,$measurementVocabulary);
+                : (new SiliconFlowClient($configuration['provider']))->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,null,$objectVocabulary,$measurementVocabulary);
             $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::normalize($meaningReply['understanding']??null,$safe['outbound']);
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_meaning','SUCCEEDED',$meaningReply['usage']['input_tokens']??null,$meaningReply['usage']['output_tokens']??null);
             } catch (\Throwable $error) {
@@ -1682,7 +1682,7 @@ final class AiGatewayServices
                 $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
                 $meaningReply=$this->model
                     ? call_user_func($this->model,$safe['outbound'],[],$configuration,$checkpoint,$repairPredicate,'understanding')
-                    : (new SiliconFlowClient())->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,$repairPredicate,$objectVocabulary,$measurementVocabulary);
+                    : (new SiliconFlowClient($configuration['provider']))->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,$repairPredicate,$objectVocabulary,$measurementVocabulary);
                 $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::normalize($meaningReply['understanding']??null,$safe['outbound']);
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_repair','SUCCEEDED',$meaningReply['usage']['input_tokens']??null,$meaningReply['usage']['output_tokens']??null);
             } catch (\Throwable $repairError) {
@@ -2140,7 +2140,7 @@ final class AiGatewayServices
             $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
             $reply=$this->model
                 ? call_user_func($this->model,$safe['outbound'],$bindingSummaries,$configuration,$checkpoint,null,'binding',$understanding)
-                : (new SiliconFlowClient())->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills);
+                : (new SiliconFlowClient($configuration['provider']))->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills);
             // External and injected model adapters must have identical
             // recovery semantics. A candidate response from the provider is
             // already marked below; an injected adapter can still return the
@@ -2223,7 +2223,7 @@ final class AiGatewayServices
                 $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
                 $reply=$this->model
                     ? call_user_func($this->model,$safe['outbound'],$bindingSummaries,$configuration,$checkpoint,$repairPredicate,'binding',$understanding)
-                    : (new SiliconFlowClient())->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,$repairPredicate);
+                    : (new SiliconFlowClient($configuration['provider']))->understand($safe['outbound'],$bindingSummaries,$understanding,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,$repairPredicate);
                 if ($groupedBindingExpected) {
                     if (!array_key_exists('items',$reply)) throw new RuntimeException('AI_MODEL_INPUT_INVALID');
                     // Same rule as the primary binding path: a repaired
@@ -5380,7 +5380,7 @@ final class AiGatewayServices
             $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
             $reply=$this->model
                 ? call_user_func($this->model,$safeQuestion,$summaries,$configuration,$checkpoint,$predicate,'binding',$understanding)
-                : (new SiliconFlowClient())->understand($safeQuestion,$summaries,$understanding,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,$predicate);
+                : (new SiliconFlowClient($configuration['provider']))->understand($safeQuestion,$summaries,$understanding,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,$predicate);
             $reply['intent']=$this->semanticIntent($reply['intent']??null,$summaries,$safeQuestion,$understanding);
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'bind_candidate_repair','SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
             return $reply;
@@ -5420,7 +5420,7 @@ final class AiGatewayServices
                 $usage=$selectionReply['usage']??[];
             } else {
                 $modelTimeout=$this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS);
-                $selection=(new SiliconFlowClient())->selectRankMetric($safeQuestion,$understanding,$summaries,$candidates,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint);
+                $selection=(new SiliconFlowClient($configuration['provider']))->selectRankMetric($safeQuestion,$understanding,$summaries,$candidates,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint);
                 $usage=$selection['usage']??[];
             }
             if (!is_array($selection) || !in_array($selection['decision']??null,['select','clarify'],true)
@@ -5615,7 +5615,7 @@ final class AiGatewayServices
             $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
             $reply=$this->model
                 ? call_user_func($this->model,$reviewInput,['candidate_binding'=>$intent,'capabilities'=>$summaries],$configuration,$checkpoint,null,'binding_verification',$understanding)
-                : (new SiliconFlowClient())->verifyBinding($safeQuestion,$summaries,$understanding,$intent,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$customerConfirmedChoice);
+                : (new SiliconFlowClient($configuration['provider']))->verifyBinding($safeQuestion,$summaries,$understanding,$intent,$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$customerConfirmedChoice);
             $review=AiIntentResultContract::normalizeSemanticReview($reply['review']??null,$understanding);
             // Only the explicitly candidate-blind uniqueness pass may defer a
             // metric to the registered choice UI. A coverage reviewer has a
@@ -6932,7 +6932,7 @@ final class AiGatewayServices
         $deadline=microtime(true)+10;
         $probe=$this->config->beginProbe((int)$configuration['version']);
         try {
-            $reply=(new SiliconFlowClient())->probe($configuration['model'],$configuration['api_key'],10000,
+            $reply=(new SiliconFlowClient($configuration['provider']))->probe($configuration['model'],$configuration['api_key'],10000,
                 static function () use($deadline):void { if (microtime(true)>$deadline) throw new RuntimeException('AI_CHECK_TIMEOUT'); });
             $this->config->finishProbe($probe,'SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
         } catch (\Throwable $error) {

@@ -13,14 +13,14 @@
       <nav aria-label="魔核 AI 管理模块"><button v-for="item in tabs" :key="item.key" :class="{ selected: tab === item.key }" @click="tab = item.key">{{ item.label }}</button></nav>
 
       <section v-if="tab === 'config'" class="box">
-        <h2>基础配置</h2><p class="muted">使用客户自己的 SiliconFlow 账号，费用由客户承担。密钥保存后不回显，留空表示保持不变。</p>
+        <h2>基础配置</h2><p class="muted">使用客户自己的 {{ providerLabel }} 账号，费用由客户承担。密钥保存后不回显，留空表示保持不变。</p>
         <form v-if="config" @submit.prevent="saveConfig">
           <label class="check"><input v-model="config.enabled" type="checkbox">启用魔核 AI</label>
           <label>模型名称<input v-model.trim="config.model" aria-label="模型名称" required maxlength="180"></label>
           <label>API Key<input v-model="apiKey" type="password" autocomplete="new-password" aria-label="API Key" :placeholder="config.has_api_key ? '已保存密钥，留空保持不变' : '请输入客户 API Key'"></label>
-          <label class="check"><input v-model="config.external_processing_authorized" type="checkbox">已获得客户对 SiliconFlow 外部处理的授权</label>
+          <label class="check"><input v-model="config.external_processing_authorized" type="checkbox">已获得客户对 {{ providerLabel }} 外部处理的授权</label>
           <label class="check"><input :checked="config.external_scope_version === 'sanitized-question-v1'" :disabled="!config.external_scope_supported || !config.external_processing_authorized" type="checkbox" @change="config.external_scope_version = $event.target.checked ? 'sanitized-question-v1' : ''">另行授权发送最小脱敏当前问题及必要能力摘要</label>
-          <p class="muted">此项不沿用旧授权。仅发送到本客户配置的 SiliconFlow；不发送人员或门店名称、联系方式、内部编号、经营数字或历史回答。无法可靠脱敏时转本地选择引导。取消上方外部处理授权会同时撤销此项。</p>
+          <p class="muted">此项不沿用旧授权。仅发送到本客户配置的 {{ providerLabel }}；不发送人员或门店名称、联系方式、内部编号、经营数字或历史回答。无法可靠脱敏时转本地选择引导。取消上方外部处理授权会同时撤销此项。</p>
           <p v-if="!config.external_scope_supported" class="muted">当前实例尚未升级授权存储，不能启用新外发范围；原有配置仍可保存。</p>
           <div class="actions"><button class="primary" :disabled="busy" type="submit">保存基础配置</button><button type="button" :disabled="busy" @click="checkConnection">测试连接（可能消耗客户额度）</button></div>
         </form>
@@ -75,6 +75,9 @@ export default {
   name: 'MoheAiManagement', components: { AiTrial, AiConfirm, AiSkillDetail, AiAnalysisInventory },
   data() { return { tab: 'config', tabs: [{ key: 'config', label: '基础配置' }, { key: 'catalog', label: '能力目录' }, { key: 'scenes', label: '场景与引导' }, { key: 'workflows', label: '工作流编排' }, { key: 'trial', label: '试问验证' }, { key: 'versions', label: '版本管理' }], state: null, document: null, config: null, apiKey: '', loading: true, busy: false, dirty: false, validated: false, error: '', notice: '', question: '', preview: null }; },
   computed: {
+    // The server owns provider selection; consent wording must describe the
+    // actual destination before an administrator authorizes external transfer.
+    providerLabel() { return this.config && this.config.provider === 'openlux' ? 'OpenLux' : 'SiliconFlow'; },
     catalog() { return this.state.catalog || {}; }, defaults() { return this.catalog.defaults || { workflows: {} }; },
     activeVersion() { return typeof this.state.active_version === 'object' ? this.state.active_version.version : this.state.active_version; },
     runtimeCounts() { const values = this.config.runtime_status; return [['success', '完整成功'], ['partial', '数据成功、文件失败'], ['technical', '技术失败'], ['active', '处理中']].filter(([key]) => Number.isInteger(values[key])).map(([key, label]) => ({ label, value: values[key] })); },
@@ -114,7 +117,7 @@ export default {
     previewDraft() { return this.perform(async () => { this.preview = await request('POST', '/management/preview', { expected_revision: this.state.revision, question: this.question.trim() }); }); },
     async rebaseSource() { if (!await this.confirmAction('将现有可编辑配置合并到最新底层能力。同步后仍需校验并发布，确认继续？', '同步底层能力')) return; return this.perform(async () => { this.hydrate(await request('POST', '/management/rebase', { expected_revision: this.state.revision })); this.notice = '已同步最新能力，请到版本管理校验并发布。'; }); },
     saveConfig() { return this.perform(async () => { try { const payload = { version: this.config.version, enabled: this.config.enabled, model: this.config.model, external_processing_authorized: this.config.external_processing_authorized, api_key: this.apiKey }; if (this.config.external_scope_supported) payload.external_scope_version = this.config.external_processing_authorized ? this.config.external_scope_version : ''; await request('PUT', '/config', payload); this.config = await request('GET', '/config'); this.notice = '基础配置已保存。'; } finally { this.apiKey = ''; } }); },
-    async checkConnection() { if (!await this.confirmAction('此测试可能消耗客户 SiliconFlow 额度，只测试连接，不携带经营数据。是否继续？', '测试模型连接')) return; return this.perform(async () => { const result = await request('POST', '/config/check', { confirm_cost: true }); this.notice = result.message || '测试完成，请查看配置状态。'; }); }
+    async checkConnection() { if (!await this.confirmAction(`此测试可能消耗客户 ${this.providerLabel} 额度，只测试连接，不携带经营数据。是否继续？`, '测试模型连接')) return; return this.perform(async () => { const result = await request('POST', '/config/check', { confirm_cost: true }); this.notice = result.message || '测试完成，请查看配置状态。'; }); }
   }
 };
 </script>

@@ -123,6 +123,16 @@ namespace {
     check(SiliconFlowClient::MAX_REQUEST_TIMEOUT_MS===45000,'intent understanding can use the bounded 45-second provider window');
     check($GLOBALS['sfOptions'][CURLOPT_FOLLOWLOCATION]===false,'redirect prohibited');
     check(json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true)['temperature']===0,'configuration probe uses deterministic transport settings');
+    // The new provider keeps the same bounded transport and JSON contract,
+    // while selecting only its server-owned host and adding its required
+    // structured-output instruction (never a customer-supplied URL).
+    $openlux = new SiliconFlowClient('openlux');
+    $openlux->probe('fixture/model','fixture-key',1000,function(){});
+    $outbound=json_decode($GLOBALS['sfOptions'][CURLOPT_POSTFIELDS],true);
+    check($GLOBALS['sfEndpoint']===SiliconFlowClient::OPENLUX_ENDPOINT,'OpenLux fixed endpoint');
+    check(strpos($outbound['messages'][0]['content'],'JSON')!==false && $GLOBALS['sfOptions'][CURLOPT_FOLLOWLOCATION]===false,
+        'OpenLux structured mode keeps fixed JSON and redirect boundary');
+    rejects(function(){ new SiliconFlowClient('untrusted-provider'); },'AI_MODEL_CONFIG_INVALID');
     $GLOBALS['sfResponse']=$response('{"ok":false}');
     rejects(function()use($client){$client->probe('fixture/model','fixture-key',1000,function(){});},'AI_MODEL_RESPONSE_INVALID');
     $GLOBALS['sfResponse']=$response('{"ok":true}','length');

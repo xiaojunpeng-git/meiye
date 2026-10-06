@@ -15,7 +15,12 @@ $integer = static function (string $key, ?int $default = null, int $min = 1, int
 $rate = env('mohe_ai.monitor_export_failure_rate', null);
 if (is_string($rate) && preg_match('/^(?:0(?:\.[0-9]+)?|1(?:\.0+)?)$/D', $rate)) $rate = (float)$rate;
 $rate = (is_float($rate) || is_int($rate)) && is_finite((float)$rate) && $rate > 0 && $rate <= 1 ? $rate : null;
+$modelProvider = (string)env('mohe_ai.model_provider', 'siliconflow');
+// The provider is server-owned and allowlisted: a customer key must never turn
+// an administrator-supplied URL into a model egress destination.
+if (!in_array($modelProvider, ['siliconflow', 'openlux'], true)) throw new \RuntimeException('AI_MODEL_PROVIDER_INVALID');
 return [
+    'model_provider'=>$modelProvider,
     'run_budget_ms'=>180000,
     'execution_slots'=>4,
     'active_run_limit'=>8,

@@ -8,26 +8,35 @@ use RuntimeException;
 final class AiConfigStore
 {
     public const QUESTION_SCOPE = 'sanitized-question-v1';
-    private $db; private $table; private $instance; private $private;
-    public function __construct(PDO $db, string $prefix, string $instance, AiPrivateStorage $private)
+    private $db; private $table; private $instance; private $private; private $provider;
+    public function __construct(PDO $db, string $prefix, string $instance, AiPrivateStorage $private, string $provider = 'siliconflow')
     {
-        if (!preg_match('/^[A-Za-z0-9_]*$/D', $prefix) || $instance === '') throw new RuntimeException('AI_CONFIG_INVALID');
-        $this->db = $db; $this->table = $prefix . 'mohe_ai_config'; $this->instance = $instance; $this->private = $private;
+        if (!preg_match('/^[A-Za-z0-9_]*$/D', $prefix) || $instance === '' || !in_array($provider, ['siliconflow','openlux'], true)) throw new RuntimeException('AI_CONFIG_INVALID');
+        $this->db = $db; $this->table = $prefix . 'mohe_ai_config'; $this->instance = $instance; $this->private = $private; $this->provider = $provider;
     }
     public function read(bool $secret = false): array
     {
         $statement = $this->db->prepare('SELECT * FROM ' . $this->table . ' WHERE instance_id=?'); $statement->execute([$this->instance]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
         $scopeSupported = $row ? array_key_exists('external_scope_version', $row) : $this->scopeSupported();
-        if (!$row) return ['enabled' => false, 'model' => '', 'has_api_key' => false, 'external_processing_authorized' => false,
+        if (!$row) return ['enabled' => false, 'model' => '', 'has_api_key' => false, 'external_processing_authorized' => false, 'provider'=>$this->provider,
             'external_scope_version' => '', 'external_scope_supported' => $scopeSupported, 'version' => 0];
-        $result = ['enabled' => (bool)$row['enabled'], 'model' => $row['model'], 'has_api_key' => $row['encrypted_key'] !== '',
-            'external_processing_authorized' => (bool)$row['external_authorized'], 'version' => (int)$row['version'],
-            'external_scope_version' => (bool)$row['external_authorized'] && ($row['external_scope_version'] ?? '') === self::QUESTION_SCOPE ? self::QUESTION_SCOPE : '',
+        // Legacy ciphertext belongs only to SiliconFlow. The prefixed format
+        // binds a replacement key and its existing consent flags to OpenLux;
+        // switching this instance's provider never reuses another provider's
+        // authority or sends a question with an obsolete credential.
+        $storedProvider = strpos((string)$row['encrypted_key'], 'openlux:') === 0 ? 'openlux' : 'siliconflow';
+        $matched = $storedProvider === $this->provider;
+        $result = ['enabled' => $matched && (bool)$row['enabled'], 'model' => $matched ? $row['model'] : '', 'has_api_key' => $matched && $row['encrypted_key'] !== '',
+            'external_processing_authorized' => $matched && (bool)$row['external_authorized'], 'provider'=>$this->provider, 'version' => (int)$row['version'],
+            'external_scope_version' => $matched && (bool)$row['external_authorized'] && ($row['external_scope_version'] ?? '') === self::QUESTION_SCOPE ? self::QUESTION_SCOPE : '',
             'external_scope_supported' => $scopeSupported];
         if ($secret) {
-            $bytes = base64_decode($row['encrypted_key'], true);
-            $key = is_string($bytes) ? openssl_decrypt(substr($bytes, 28), 'aes-256-gcm', $this->private->signingKey(), OPENSSL_RAW_DATA, substr($bytes, 0, 12), substr($bytes, 12, 16), $this->instance) : false;
+            if (!$matched) throw new RuntimeException('AI_MODEL_CONFIG_INVALID');
+            $ciphertext=$this->provider==='openlux' ? substr($row['encrypted_key'], strlen('openlux:')) : $row['encrypted_key'];
+            $bytes = base64_decode($ciphertext, true);
+            $aad=$this->provider==='openlux' ? $this->instance.'|openlux' : $this->instance;
+            $key = is_string($bytes) ? openssl_decrypt(substr($bytes, 28), 'aes-256-gcm', $this->private->signingKey(), OPENSSL_RAW_DATA, substr($bytes, 0, 12), substr($bytes, 12, 16), $aad) : false;
             if ($key === false) throw new RuntimeException('AI_MODEL_CONFIG_INVALID');
             $result['api_key'] = $key;
         }
@@ -58,9 +67,12 @@ final class AiConfigStore
         if ($key === '') $key = $current['api_key'] ?? '';
         if ($key === '') throw new RuntimeException('AI_MODEL_KEY_REQUIRED');
         $nonce = random_bytes(12); $tag = '';
-        $cipher = openssl_encrypt($key, 'aes-256-gcm', $this->private->signingKey(), OPENSSL_RAW_DATA, $nonce, $tag, $this->instance);
+        $aad=$this->provider==='openlux' ? $this->instance.'|openlux' : $this->instance;
+        $cipher = openssl_encrypt($key, 'aes-256-gcm', $this->private->signingKey(), OPENSSL_RAW_DATA, $nonce, $tag, $aad);
         if ($cipher === false) throw new RuntimeException('AI_CONFIG_INVALID');
-        $values = [(int)$input['enabled'], $input['model'], base64_encode($nonce . $tag . $cipher), (int)$input['external_processing_authorized'], $current['version'] + 1];
+        $encrypted=base64_encode($nonce . $tag . $cipher);
+        if ($this->provider==='openlux') $encrypted='openlux:'.$encrypted;
+        $values = [(int)$input['enabled'], $input['model'], $encrypted, (int)$input['external_processing_authorized'], $current['version'] + 1];
         $scopeColumn = $current['external_scope_supported'] ? ',external_scope_version' : '';
         if ($current['external_scope_supported']) $values[] = $scope;
         $values[] = $this->instance;
@@ -107,17 +119,20 @@ final class AiConfigStore
     {
         if ($this->db->inTransaction()) throw new RuntimeException('AI_CONFIG_PROBE_BUSY');
         $attempt=substr($this->table,0,-6).'attempt'; $mutex=substr($this->table,0,-6).'mutex';
+        // Rate limits and Attempt audit records identify the actual provider;
+        // a switched instance must not be reported as a SiliconFlow probe.
+        $target=$this->provider.'_probe';
         $sqlite=$this->db->getAttribute(PDO::ATTR_DRIVER_NAME)==='sqlite'; $now=(int)floor(microtime(true)*1000);
         if ($sqlite) $this->db->exec('BEGIN IMMEDIATE'); else $this->db->beginTransaction();
         try {
             $s=$this->db->prepare(($sqlite?'INSERT OR IGNORE':'INSERT IGNORE').' INTO '.$mutex.' (instance_id) VALUES (?)'); $s->execute([$this->instance]);
             $s=$this->db->prepare('SELECT instance_id FROM '.$mutex.' WHERE instance_id=?'.($sqlite?'':' FOR UPDATE')); $s->execute([$this->instance]); $s->fetch();
             $s=$this->db->prepare('SELECT COUNT(*) FROM '.$attempt.' WHERE instance_id=? AND target_code=? AND created_at>?');
-            $s->execute([$this->instance,'siliconflow_probe',$now-60000]);
+            $s->execute([$this->instance,$target,$now-60000]);
             if ((int)$s->fetchColumn()>0) throw new RuntimeException('AI_CHECK_RATE_LIMITED');
             $id=bin2hex(random_bytes(24));
             $s=$this->db->prepare('INSERT INTO '.$attempt.' (instance_id,run_id,attempt_code,kind,target_code,payload_hash,state,input_tokens,output_tokens,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
-            $s->execute([$this->instance,$id,'config_probe','model','siliconflow_probe',hash_hmac('sha256','config-probe-v1:'.$version,$this->private->signingKey()),'IN_FLIGHT',null,null,$now,$now+86400000]);
+            $s->execute([$this->instance,$id,'config_probe','model',$target,hash_hmac('sha256','config-probe-v1:'.$version,$this->private->signingKey()),'IN_FLIGHT',null,null,$now,$now+86400000]);
             if ($sqlite) $this->db->exec('COMMIT'); else $this->db->commit();
             return $id;
         } catch (\Throwable $e) {
