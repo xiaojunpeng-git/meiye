@@ -1351,8 +1351,11 @@ final class CashierV3MemberDetailQueryServices
     private function balanceChangeTypeLabel(string $value, string $direction): string
     {
         $normalized = strtolower(trim($value));
+        // Checkout balance deductions use order_payment in immutable facts;
+        // keep that code for reconciliation and translate only the UI label.
         $labels = [
             'recharge' => '充值', 'recharge_credit' => '充值', 'balance_payment' => '余额支付',
+            'order_payment' => '余额支付',
             'order_void' => '订单作废返还', 'order_refund' => '订单退款返还',
             'balance_restored' => '余额返还', 'recharge_debt_repayment_credit' => '欠款补交转余额',
         ];

@@ -1634,10 +1634,9 @@ final class CashierV3SalesOrderQueryServices
         $header = $snapshot['header'];
         $batch = $snapshot['batch'];
         $request = $snapshot['request'];
-        // The payment batch is the amount still due after a card/project
-        // upgrade's entitlement credit and after any debt allocation.  The
-        // sales order itself remains a formal purchase of the target item, so
-        // its receivable amount is the settled sales amount.
+        // The batch receivable includes both accounting collections and the
+        // member-balance deduction. Debt and upgrade credit are excluded.
+        // The formal sales order still records the full settled sale amount.
         $cashReceivableCents = (int)$batch['receivable_amount_cents'];
         $receivableCents = (int)$header['sale_amount_cents'];
         $cashPerformanceCents = (int)$batch['cash_performance_amount_cents'];
@@ -1688,7 +1687,8 @@ final class CashierV3SalesOrderQueryServices
             && $balanceCents >= 0
             && $cashReceivableCents >= 0
             && $cashPerformanceCents + $legacyEntryCents + $debtCents + $balanceCents + $entitlementCreditCents === $receivableCents
-            && $cashReceivableCents + $debtCents + $balanceCents + $entitlementCreditCents === $receivableCents;
+            && $cashReceivableCents + $debtCents + $entitlementCreditCents === $receivableCents
+            && $cashPerformanceCents + $legacyEntryCents + $balanceCents === $cashReceivableCents;
         if (!$settlementEquationValid) {
             // A bad historical snapshot must stay visible for reconciliation,
             // but cannot make unrelated business records disappear or expose
@@ -1749,6 +1749,7 @@ final class CashierV3SalesOrderQueryServices
         $paymentNames = [];
         foreach ($snapshot['collections'] as $collection) $paymentNames[$this->paymentMethodName($collection)] = true;
         if ($legacyEntryCents > 0) $paymentNames['旧卡录入'] = true;
+        if ($balanceCents > 0) $paymentNames['余额支付'] = true;
         $memberName = trim((string)$header['member_name_snapshot']);
         $operations = (array)($snapshot['lifecycleOperations'] ?? []);
         $terminal = null;
@@ -1856,6 +1857,26 @@ final class CashierV3SalesOrderQueryServices
                 'occurredAt' => $this->formatTimestamp((int)$collection['occurred_at'], 'Y-m-d H:i:s'),
             ];
         }, $snapshot['collections']);
+        if ($settlementEquationValid && $legacyEntryCents > 0) {
+            $entry = $legacyEntries[0];
+            $mapped['paymentDetails'][] = [
+                'id' => (string)$entry['payment_draft_id'], 'paymentMethodCode' => 'old_card_entry',
+                'methodName' => '旧卡录入', 'amount' => $this->moneyFromCents($legacyEntryCents),
+                'externalTransactionNo' => '', 'remark' => (string)$entry['remark'],
+                'occurredAt' => $this->formatTimestamp((int)$entry['operation_occurred_at'], 'Y-m-d H:i:s'),
+            ];
+        }
+        if ($settlementEquationValid && $balanceCents > 0) {
+            // A balance debit is committed in the checkout transaction, but is
+            // not a payment-collection row or cash-performance amount.
+            $mapped['paymentDetails'][] = [
+                'id' => 'balance:' . (string)$header['checkout_request_id'],
+                'paymentMethodCode' => 'member_balance', 'methodName' => '余额支付',
+                'amount' => $this->moneyFromCents($balanceCents),
+                'externalTransactionNo' => '', 'remark' => '',
+                'occurredAt' => $this->formatTimestamp((int)$batch['settled_at'], 'Y-m-d H:i:s'),
+            ];
+        }
         if (!$detail) return $mapped;
         // The order note is a sales-order header fact. Do not replace it with
         // payment collection remarks when opening the detail projection.
@@ -1873,21 +1894,6 @@ final class CashierV3SalesOrderQueryServices
             'balancePaymentAmount' => $settlementEquationValid ? $this->moneyFromCents($balanceCents) : null,
             'dataStatus' => $economicsStatus,
         ];
-        $mapped['paymentDetails'] = !$settlementEquationValid ? [] : array_map(function (array $collection): array {
-            return ['id' => (string)$collection['collection_id'], 'paymentMethodCode' => (string)$collection['payment_method'],
-                'methodName' => $this->paymentMethodName($collection), 'amount' => $this->moneyFromCents((int)$collection['amount_cents']),
-                'externalTransactionNo' => (string)$collection['external_transaction_no_snapshot'], 'remark' => (string)$collection['remark_snapshot'],
-                'occurredAt' => $this->formatTimestamp((int)$collection['occurred_at'], 'Y-m-d H:i:s')];
-        }, $snapshot['collections']);
-        if ($settlementEquationValid && $legacyEntryCents > 0) {
-            $entry = $legacyEntries[0];
-            $mapped['paymentDetails'][] = [
-                'id' => (string)$entry['payment_draft_id'], 'paymentMethodCode' => 'old_card_entry',
-                'methodName' => '旧卡录入', 'amount' => $this->moneyFromCents($legacyEntryCents),
-                'externalTransactionNo' => '', 'remark' => (string)$entry['remark'],
-                'occurredAt' => $this->formatTimestamp((int)$entry['operation_occurred_at'], 'Y-m-d H:i:s'),
-            ];
-        }
         $mapped['paymentDetailsDataStatus'] = $economicsStatus;
         $mapped['cardBatches'] = [];
         $operationRecords = array_map(function (array $operation): array {

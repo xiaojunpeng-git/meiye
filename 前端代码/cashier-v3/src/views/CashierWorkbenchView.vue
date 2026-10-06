@@ -31,6 +31,7 @@ import {
   salesOrderProjectionFromResult
 } from '@/services/cashierV3OrderProjectionContract'
 import { salesOrderReceiptFromCheckout } from '@/services/salesOrderReceiptPrint'
+import { checkoutBalancePreview } from '@/services/cashierV3CheckoutBalancePreview'
 import CashierCheckoutOverlay from '@/components/cashier/CashierCheckoutOverlay.vue'
 import CheckoutBusinessSourceOverlay from '@/components/cashier/CheckoutBusinessSourceOverlay.vue'
 import CashierGuidedBusinessPanel from '@/components/cashier/CashierGuidedBusinessPanel.vue'
@@ -5110,6 +5111,7 @@ function localCheckoutPreviewSnapshot() {
   })
   const composition = clonePlain(draft.checkoutComposition || {})
   const customerMode = currentCustomerMode.value
+  const checkoutMemberId = Number(draft.memberId || currentMemberId.value || 0)
   const checkoutSourceProjection = customerMode === 'guest' ? {} : checkoutProjection
   const hasSale = lines.some((line) => String(line?.lineRole || '') === 'sale')
   const hasEntitlement = lines.some((line) => String(line?.lineRole || '') === 'entitlement_service')
@@ -5133,7 +5135,7 @@ function localCheckoutPreviewSnapshot() {
     requestStatus: 'editing',
     businessType: 'sale',
     member: clonePlain(member.value || {}),
-    memberId: Number(draft.memberId || currentMemberId.value || 0),
+    memberId: checkoutMemberId,
     customerMode,
     // This is fixed when the user opens checkout. Final confirmation must not
     // replace the snapshot's business time with submission-time clock data.
@@ -5175,7 +5177,9 @@ function localCheckoutPreviewSnapshot() {
     },
     payment: {
       methods: localCheckoutPaymentMethods(lines),
-      availableBalance: Number(checkoutProjection.payment?.availableBalance || checkoutProjection.availableBalance || 0)
+      // Ordinary sales have no persisted checkout request yet. Use the
+      // selected member's read-only summary only for this visible choice.
+      ...checkoutBalancePreview(member.value, checkoutMemberId)
     }
   }
 }

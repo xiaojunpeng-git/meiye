@@ -139,5 +139,53 @@ $couponUpgradeOk = ($couponUpgradeRecord['orderStatus'] ?? '') === '正常'
     && count($couponUpgradeDetail['related']['upgrades'] ?? []) === 1
     && count($couponUpgradeDetail['related']['debtSettlements'] ?? []) === 1;
 
-echo ($ok && $upgradeOk && $zeroCreditDebtOk && $couponUpgradeOk) ? "ORDER_CENTER_SETTLEMENT_INTEGRITY=PASS\n" : "ORDER_CENTER_SETTLEMENT_INTEGRITY=FAIL\n";
-exit($ok && $upgradeOk && $zeroCreditDebtOk && $couponUpgradeOk ? 0 : 1);
+// The batch receivable is before balance deduction; the collection is only
+// the accounting-payment portion. Both must appear without double-counting.
+$balanceSnapshot = $snapshot;
+$balanceSnapshot['header']['checkout_request_id'] = 'CKR-integrity-balance';
+$balanceSnapshot['batch']['receivable_amount_cents'] = 10000;
+$balanceSnapshot['request']['balance_deduction_amount_cents'] = 6000;
+$balanceSnapshot['batch']['collected_amount_cents'] = 4000;
+$balanceSnapshot['batch']['cash_performance_amount_cents'] = 4000;
+$balanceSnapshot['collections'] = [[
+    'collection_id' => 'CPC-integrity-balance', 'payment_method' => 'wechat',
+    'payment_method_name_snapshot' => '微信', 'amount_cents' => 4000,
+    'external_transaction_no_snapshot' => '', 'remark_snapshot' => '',
+    'occurred_at' => 1786169992,
+]];
+$balanceRecord = $method->invoke($service, $balanceSnapshot, false);
+$balanceDetail = $method->invoke($service, $balanceSnapshot, true);
+$balanceOk = ($balanceRecord['orderStatus'] ?? '') === '正常'
+    && ($balanceRecord['paymentStatus'] ?? '') === '已支付'
+    && ($balanceRecord['receivableAmount'] ?? null) === 100.0
+    && ($balanceRecord['actualReceivedAmount'] ?? null) === 40.0
+    && ($balanceRecord['paymentMethod'] ?? '') === '微信、余额支付'
+    && count($balanceRecord['paymentDetails'] ?? []) === 2
+    && ($balanceRecord['paymentDetails'][0]['amount'] ?? null) === 40.0
+    && ($balanceRecord['paymentDetails'][1]['paymentMethodCode'] ?? '') === 'member_balance'
+    && ($balanceRecord['paymentDetails'][1]['amount'] ?? null) === 60.0
+    && ($balanceDetail['amountSummary']['balancePaymentAmount'] ?? null) === 60.0
+    && $balanceDetail['paymentDetails'] === $balanceRecord['paymentDetails'];
+
+$brokenBalanceSnapshot = $balanceSnapshot;
+$brokenBalanceSnapshot['batch']['receivable_amount_cents'] = 4000;
+$brokenBalance = $method->invoke($service, $brokenBalanceSnapshot, false);
+$brokenBalanceOk = ($brokenBalance['economicsDataStatus'] ?? '') === 'integrity_failed'
+    && ($brokenBalance['paymentDetails'] ?? ['unexpected']) === [];
+
+$balanceOnlySnapshot = $balanceSnapshot;
+$balanceOnlySnapshot['request']['balance_deduction_amount_cents'] = 10000;
+$balanceOnlySnapshot['batch']['collected_amount_cents'] = 0;
+$balanceOnlySnapshot['batch']['cash_performance_amount_cents'] = 0;
+$balanceOnlySnapshot['collections'] = [];
+$balanceOnly = $method->invoke($service, $balanceOnlySnapshot, false);
+$balanceOnlyOk = ($balanceOnly['orderStatus'] ?? '') === '正常'
+    && ($balanceOnly['paymentStatus'] ?? '') === '已支付'
+    && count($balanceOnly['paymentDetails'] ?? []) === 1
+    && ($balanceOnly['paymentDetails'][0]['paymentMethodCode'] ?? '') === 'member_balance'
+    && ($balanceOnly['paymentDetails'][0]['amount'] ?? null) === 100.0;
+
+$passed = $ok && $upgradeOk && $zeroCreditDebtOk && $couponUpgradeOk
+    && $balanceOk && $brokenBalanceOk && $balanceOnlyOk;
+echo $passed ? "ORDER_CENTER_SETTLEMENT_INTEGRITY=PASS\n" : "ORDER_CENTER_SETTLEMENT_INTEGRITY=FAIL\n";
+exit($passed ? 0 : 1);
