@@ -1225,7 +1225,10 @@ final class CashierV3EntitlementProjectionServices
         $consumedTimes = $purchaseTimes - $remainingTimes;
         $allocationSnapshot = $snapshot;
         if ($amountCents % 100 !== 0) {
-            $allocationSnapshot['amountCalculationVersion'] = 'operation-cent-' . $version;
+            // The final completion kernel reads this version to preserve cents;
+            // selector and settlement must expose the same allocation contract.
+            $version = 'operation-cent-' . $version;
+            $allocationSnapshot['amountCalculationVersion'] = $version;
         }
         return [
             'purchaseAmount' => $purchaseAmount,

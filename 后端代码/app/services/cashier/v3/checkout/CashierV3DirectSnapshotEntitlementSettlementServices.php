@@ -3,6 +3,7 @@
 namespace app\services\cashier\v3\checkout;
 
 use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
+use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3CrossStoreEntitlementPolicy;
 use app\services\cashier\v3\CashierV3OperatorScope;
@@ -1102,6 +1103,7 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
     ): array {
         $result = [];
         $orderCartRowsByOrder = [];
+        $actualSaleAmountsByOrder = [];
         foreach ($lines as $line) {
             $lineId = (string)$line['line_id'];
             $holderId = (int)$line['source_id'];
@@ -1189,15 +1191,30 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             $originOrderId = (int)$order['id'];
             if (!isset($orderCartRowsByOrder[$originOrderId])) {
                 $orderCartRowsByOrder[$originOrderId] = $this->rows(Db::name('store_order_cart_info')
-                    ->field('id,oid,cart_info,cart_type,product_type,write_times,write_surplus_times,pay_price,debt_amount,repaid_debt_amount,is_gift')
+                    ->field('id,oid,product_id,cart_info,cart_type,product_type,write_times,write_surplus_times,pay_price,debt_amount,repaid_debt_amount,is_gift')
                     ->where('oid', $originOrderId)
                     ->where('cart_type', 2)
                     ->where('product_type', 6)
                     ->order('id asc')
                     ->lock(true)
                     ->select());
+                $actualSaleAmountsByOrder[$originOrderId] = (new CashierV3CardSaleActualAmountServices())
+                    ->forOrders([$originOrderId], $orderCartRowsByOrder[$originOrderId]);
             }
             $orderCartRows = $orderCartRowsByOrder[$originOrderId];
+            // Match the selector's immutable sale allocation. Configured project
+            // value is not the amount paid for a repriced card and cannot bound
+            // cancelled-debt usage or the final service amount.
+            $actualSaleAmountCents = $actualSaleAmountsByOrder[$originOrderId][$detailId] ?? null;
+            if ($actualSaleAmountCents !== null) {
+                $amount = $this->centsToMoney((int)$actualSaleAmountCents);
+                $amountCalculationVersion = 'card-sale-actual-amount-'
+                    . CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION;
+                if ((int)$actualSaleAmountCents % 100 !== 0) {
+                    $amountCalculationVersion = 'operation-cent-' . $amountCalculationVersion;
+                    $decoded['amountCalculationVersion'] = $amountCalculationVersion;
+                }
+            }
             $remainingAmount = CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
                 $amount,
                 $totalTimes,
