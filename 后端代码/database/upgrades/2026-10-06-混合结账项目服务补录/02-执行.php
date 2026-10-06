@@ -8,7 +8,9 @@ declare(strict_types=1);
  */
 
 $execute = in_array('--execute', $argv ?? [], true);
+$validate = in_array('--validate', $argv ?? [], true);
 $allowRuihao = in_array('--allow-ruihao', $argv ?? [], true);
+if ($execute && $validate) throw new RuntimeException('choose execute or validate');
 $envPath = getenv('MOHE_REPAIR_ENV_PATH') ?: '/var/www/html/.env';
 $env = parse_ini_file($envPath, true);
 if (!is_array($env) || !is_array($env['DATABASE'] ?? null)) {
@@ -39,7 +41,7 @@ $candidateSql = "FROM eb_cashier_v3_sales_order o
 $candidates = $pdo->query('SELECT o.tenant_id,o.order_id,o.order_no,l.order_line_id ' . $candidateSql
     . ' ORDER BY o.business_date,o.id,l.line_no,l.id')->fetchAll();
 $orderIds = array_unique(array_column($candidates, 'order_id'));
-if (!$execute) {
+if (!$execute && !$validate) {
     echo json_encode(['mode' => 'read_only', 'database' => $database,
         'orders' => count($orderIds), 'lines' => count($candidates),
         'orderNos' => array_values(array_unique(array_column($candidates, 'order_no')))],
@@ -53,7 +55,7 @@ $lock->execute([$lockName]);
 if ((int)$lock->fetchColumn() !== 1) throw new RuntimeException('migration lock unavailable');
 try {
     // DDL is outside row transactions; an interrupted run can resume safely.
-    $pdo->exec("CREATE TABLE IF NOT EXISTS eb_cashier_v3_mixed_sale_service_repair_audit (
+    if ($execute) $pdo->exec("CREATE TABLE IF NOT EXISTS eb_cashier_v3_mixed_sale_service_repair_audit (
       id bigint unsigned NOT NULL AUTO_INCREMENT,
       tenant_id varchar(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
       checkout_request_id varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -70,6 +72,7 @@ try {
       UNIQUE KEY uk_service(service_fact_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Audited mixed checkout missing project services'");
     $applied = 0;
+    $validated = 0;
     foreach ($candidates as $candidate) {
         $pdo->beginTransaction();
         try {
@@ -128,7 +131,13 @@ try {
                  ORDER BY id FOR UPDATE",
                 [$order['tenant_id'], $order['checkout_request_id'], $line['order_line_id']]);
             $craftsmen = json_decode((string)$line['craftsmen_snapshot_json'], true);
-            if (!is_array($craftsmen) || ($craftsmen !== [] && !$facts)) {
+            if (!is_array($craftsmen)) {
+                throw new RuntimeException('original craftsmen/labor facts incomplete: ' . $line['order_line_id']);
+            }
+            // Zero-price, zero-project-count promotional lines can have a
+            // frozen craftsman but no monetary labor fact. Accept only when
+            // every frozen amount is zero; this does not mint performance.
+            if ($craftsmen !== [] && !$facts && !provablyZeroLabor($line, $craftsmen)) {
                 throw new RuntimeException('original craftsmen/labor facts incomplete: ' . $line['order_line_id']);
             }
             $baseAmounts = array_unique(array_map(static function (array $fact): int {
@@ -191,7 +200,12 @@ try {
             if ((int)$order['business_source_primary_id'] > 0) {
                 foreach (['business_source_primary_id','business_source_primary_name_snapshot',
                     'business_source_secondary_id','business_source_secondary_name_snapshot',
-                    'business_source_label_snapshot'] as $key) $row[$key] = $order[$key];
+                'business_source_label_snapshot'] as $key) $row[$key] = $order[$key];
+            }
+            if ($validate) {
+                $pdo->rollBack();
+                $validated++;
+                continue;
             }
             $row['service_record_no'] = allocateServiceNo($pdo, (string)$order['tenant_id'], $factId,
                 (string)$order['business_date'], $now);
@@ -213,6 +227,11 @@ try {
             if ($pdo->inTransaction()) $pdo->rollBack();
             throw $exception;
         }
+    }
+    if ($validate) {
+        echo json_encode(['mode' => 'validated_read_only', 'database' => $database,
+            'orders' => count($orderIds), 'validatedLines' => $validated], JSON_UNESCAPED_UNICODE), PHP_EOL;
+        exit(0);
     }
     $remaining = (int)$pdo->query('SELECT COUNT(*) ' . $candidateSql)->fetchColumn();
     if ($remaining !== 0) throw new RuntimeException('eligible lines remain: ' . $remaining);
@@ -269,6 +288,19 @@ function historicalLaborMode(PDO $pdo, array $order, array $line, array $version
         throw new RuntimeException('historical labor rule changed: ' . $line['order_line_id']);
     }
     return (string)$rule['labor_mode'];
+}
+
+/** Missing original labor facts are safe only when the settled source froze no labor or project count. */
+function provablyZeroLabor(array $line, array $craftsmen): bool
+{
+    if ((int)$line['sale_amount_cents'] !== 0 || (int)($line['manual_labor_fee_cents'] ?? 0) !== 0) return false;
+    foreach ($craftsmen as $person) {
+        if (!is_array($person) || (int)($person['performanceAmountCents'] ?? 0) !== 0
+            || (int)($person['laborFeeCents'] ?? 0) !== 0
+            || (float)($person['projectCount'] ?? $person['project_count'] ?? 0) !== 0.0
+            || (int)($person['projectCountHalfUnits'] ?? 0) !== 0) return false;
+    }
+    return true;
 }
 
 /** Keep the frozen leaf name if the present catalog hierarchy no longer matches it. */
