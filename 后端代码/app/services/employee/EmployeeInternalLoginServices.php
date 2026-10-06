@@ -53,7 +53,8 @@ class EmployeeInternalLoginServices extends BaseServices
                     $or->where('org.is_del', 0);
                 });
             })
-            ->field('staff.id,staff.employee_id,staff.store_id,staff.staff_name,store.name AS store_name')
+            // 任职店先于数据范围去重；必须带上其真实组织，否则切店树会把已归属门店误列为未归属。
+            ->field('staff.id,staff.employee_id,staff.store_id,staff.staff_name,store.name AS store_name,org.id AS org_id,org.name AS org_name')
             ->order('staff.id', 'desc')->select()->toArray();
         $out = [];
         foreach ($rows as $row) {

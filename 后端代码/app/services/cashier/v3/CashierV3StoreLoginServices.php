@@ -482,25 +482,13 @@ class CashierV3StoreLoginServices extends BaseServices
         }
         unset($node);
 
-        // 无组织归属的门店保持可选，但以单独导航节点展示，避免丢失权限内候选项。
-        if (!empty($storeNodesByOrg[0])) {
-            $roots[] = [
-                'id' => 'unassigned',
-                'node_type' => 'org',
-                'name' => '未归属组织',
-                'sort' => PHP_INT_MAX,
-                'children' => [],
-            ];
-        }
-
         foreach ($storeNodesByOrg as $orgId => $storeNodes) {
             if ($orgId > 0 && isset($nodes[$orgId])) {
                 $nodes[$orgId]['children'] = array_merge($nodes[$orgId]['children'], $storeNodes);
-            } elseif ($orgId === 0) {
-                $last = array_key_last($roots);
-                if ($last !== null && ($roots[$last]['id'] ?? '') === 'unassigned') {
-                    $roots[$last]['children'] = $storeNodes;
-                }
+            } else {
+                // 没有有效组织的授权门店直接作为根节点，既不显示虚构的“未归属组织”，
+                // 也不能因为组织缺失而丢掉可切换门店；最终权限仍按候选门店 ID 校验。
+                $roots = array_merge($roots, $storeNodes);
             }
         }
 
