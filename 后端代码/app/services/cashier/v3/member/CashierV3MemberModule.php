@@ -168,7 +168,9 @@ final class CashierV3MemberModule
                         // 推荐人固定只能查本店，不能通过查询范围扩大权限。
                         $selectorContext !== 'member-referrer'
                             && (!$supportsExplicitStoreScope || $isAllScope),
-                        $supportsExplicitStoreScope && !$isAllScope
+                        $supportsExplicitStoreScope && !$isAllScope,
+                        // 首字母检索只开放本轮批准的收银/预约选择器，其他复用入口不扩散。
+                        $supportsExplicitStoreScope
                     ),
                 ];
             });
@@ -794,7 +796,8 @@ final class CashierV3MemberModule
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope,
         bool $globalSelector,
-        bool $currentStoreOnly = false
+        bool $currentStoreOnly = false,
+        bool $allowNameInitials = false
     ): array {
         $page = max(1, (int)($payload['page'] ?? 1));
         $pageSize = min(100, max(1, (int)($payload['pageSize'] ?? 20)));
@@ -811,7 +814,7 @@ final class CashierV3MemberModule
         }
 
         $priority = self::priorityContext($operatorScope, $storeIds);
-        $query = self::memberVisibilityQuery($storeIds, $keyword);
+        $query = self::memberVisibilityQuery($storeIds, $keyword, $allowNameInitials);
         $total = (int)(clone $query)->count('distinct u.uid');
         $rows = $query
             ->field('u.uid,u.nickname,u.real_name,u.phone,u.bar_code,u.belong_store_id,u.status,u.is_del,u.delete_time,u.add_time')
@@ -896,7 +899,7 @@ final class CashierV3MemberModule
      * 可见关系。ALL 模式保留没有门店关系的历史平台会员；有限门店范围必须有
      * 一条有效的 store_user 关系，避免仅凭主归属门店越权展示。
      */
-    private static function memberVisibilityQuery(?array $storeIds, string $keyword)
+    private static function memberVisibilityQuery(?array $storeIds, string $keyword, bool $allowNameInitials = false)
     {
         $query = Db::name('user')->alias('u');
         if ($storeIds === null) {
@@ -905,13 +908,23 @@ final class CashierV3MemberModule
             $query->join('store_user su', 'su.uid = u.uid AND su.status = 1')
                 ->whereIn('su.store_id', $storeIds);
         }
+        $initials = $allowNameInitials && preg_match('/^[A-Za-z]{1,60}$/D', $keyword) === 1
+            ? strtoupper($keyword) : '';
+        if ($initials !== '') {
+            // 索引表由会员主表的插入/改名触发器同步，不能绕过原有 store_user 可见范围。
+            $query->leftJoin('member_name_initial_search name_search', 'name_search.uid = u.uid');
+        }
         if ($keyword !== '') {
             $like = '%' . addcslashes($keyword, '%_') . '%';
-            $query->where(function ($q) use ($like, $keyword) {
+            $query->where(function ($q) use ($like, $keyword, $initials) {
                 $q->whereLike('u.nickname', $like)
                     ->whereLike('u.real_name', $like, 'OR')
                     ->whereOr('u.phone', $keyword)
                     ->whereOr('u.bar_code', $keyword);
+                // 先按数据库权限确定候选，再在同一 SQL 内计数/分页；不能只筛当前页。
+                if ($initials !== '') {
+                    $q->whereOr('name_search.initials', 'like', $initials . '%');
+                }
             });
         }
         return $query;

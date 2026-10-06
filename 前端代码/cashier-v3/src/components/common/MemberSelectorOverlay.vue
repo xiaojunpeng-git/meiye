@@ -272,7 +272,7 @@ async function handleCreated(payload = {}) {
       <form class="member-selector__search" @submit.prevent="submitQuery">
         <label class="member-selector__search-field">
           <span>查询会员</span>
-          <input v-model="keyword" type="search" autocomplete="off" placeholder="姓名、完整手机号或会员编号" :disabled="isBusy || selectingRecordId !== null" @keydown.enter.prevent="submitQuery">
+          <input v-model="keyword" type="search" autocomplete="off" :placeholder="showScopeToggle ? '姓名或拼音首字母、完整手机号或会员编号' : '姓名、完整手机号或会员编号'" :disabled="isBusy || selectingRecordId !== null" @keydown.enter.prevent="submitQuery">
         </label>
         <fieldset v-if="showScopeToggle" class="member-selector__scope-toggle" :disabled="isBusy || selectingRecordId !== null">
           <legend>查询范围</legend>
