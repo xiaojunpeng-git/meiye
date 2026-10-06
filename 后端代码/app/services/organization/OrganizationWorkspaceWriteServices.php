@@ -171,6 +171,36 @@ class OrganizationWorkspaceWriteServices
     }
 
     /**
+     * 门店表单调整归属：资料与组织绑定必须同事务；旧区域ID不能参与新组织写入。
+     * 仅调整归属时调用，沿用组织写权限、结构锁、审计及请求重放保护。
+     */
+    public function saveStoreWithOrganization(int $storeId, int $orgId, int $expectedOrgId, array $data, array $staffData, array $adminInfo, array $requestCtx): array
+    {
+        if ($orgId <= 0 || $expectedOrgId < 0) {
+            throw new \Exception('请选择所属组织，不能清空已有组织归属');
+        }
+        unset($data['region_id'], $data['manage_region_id']);
+        return $this->runWrite('store_profile_org', 'store:' . $storeId,
+            compact('storeId', 'orgId', 'expectedOrgId', 'data', 'staffData'), $adminInfo, $requestCtx,
+            function (array $auditMeta) use ($storeId, $orgId, $expectedOrgId, $data, $staffData) {
+                // 保持组织→门店→绑定锁序；并发调整后不能用旧表单覆盖新归属。
+                $org = Db::name('organization')->where('id', $orgId)->where('is_del', 0)->lock(true)->find();
+                if (!$org) throw new \Exception('所选组织不存在或已删除');
+                if ($storeId > 0) {
+                    Db::name('system_store')->where('id', $storeId)->lock(true)->find();
+                }
+                $binding = Db::name('organization_store')->where('store_id', $storeId)->lock(true)->find();
+                if ((int)($binding['org_id'] ?? 0) !== $expectedOrgId) {
+                    throw new \Exception('门店所属组织已被修改，请刷新后重试');
+                }
+                $saved = app()->make(\app\services\store\SystemStoreServices::class)->saveStore($storeId, $data, $staffData);
+                $this->manage->applyBindStoreToOrg((int)$saved[0], $orgId,
+                    (int)$auditMeta['operator_id'], (string)$auditMeta['operator_name'], $auditMeta);
+                return ['msg' => '保存成功', 'data' => ['saved' => $saved]];
+            });
+    }
+
+    /**
      * 旧排除语义（store_ids=排除门店）
      * @return array{msg:string,data:array,replay:bool}
      */

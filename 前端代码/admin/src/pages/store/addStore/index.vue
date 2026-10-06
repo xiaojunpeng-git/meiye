@@ -69,15 +69,17 @@
 							</FormItem>
 						</Col>
 						<Col span="24">
-							<FormItem label="门店区域：" prop="manage_region_path" label-for="manage_region_path">
-							  <Cascader
-							      :data="manageRegionTree"
-							      placeholder="请选择门店区域"
-							      change-on-select
-							      v-model="formItem.manage_region_path"
-							      filterable
-								  class="inputW"
-							  ></Cascader>
+							<FormItem label="所属组织：" prop="organization_id">
+							  <OrganizationStoreScopePicker
+							    :key="organizationPickerKey"
+							    v-model="organizationPickerStoreIds"
+							    :load-scope="loadOrganizationPickerScope"
+							    :selected-organization-id="formItem.organization_id"
+							    :selected-label="formItem.organization_name"
+							    empty-label="请选择所属组织"
+							    selection-mode="org_only"
+							    @change="onOrganizationScopePick"
+							  />
 							</FormItem>
 						</Col>
 						<Col span="24">
@@ -396,7 +398,8 @@
 
 <script>
     import goodsList from '@/components/goodsList'
-	import { keyApi, storeGetInfoApi, cityApi, storeUpdateApi, getRegionManageCascader, getResolveCity, getFinanceConfig } from '@/api/store';
+	import { keyApi, storeGetInfoApi, cityApi, storeUpdateApi, getOrganizationResourceSelector, getResolveCity, getFinanceConfig } from '@/api/store';
+	import OrganizationStoreScopePicker from '@/components/organization/OrganizationStoreScopePicker.vue';
 	import { deliveryConfigApi } from '@/api/setting';
 	import { erpConfig } from "@/api/erp";
 	import { mapState } from 'vuex';
@@ -417,9 +420,9 @@
 			product_category_status: 0,
 			delivery_type: [],
 			product_id: [],
-			region_id: 0,
-			manage_region_id: 0,
-			manage_region_path: [],
+			organization_id: 0,
+			organization_name: '',
+			expected_organization_id: 0,
 			id: 0,
 			erp_shop_id: 0,
 			store_account: '',
@@ -453,7 +456,7 @@
 
 	export default {
 		name: 'systemStore',
-		components: { uploadPictures,Maps,erpList,goodsList },
+		components: { uploadPictures,Maps,erpList,goodsList,OrganizationStoreScopePicker },
 		props: { },
 		data () {
 			let validatePhone = (rule, value, callback) => {
@@ -591,7 +594,10 @@
 				isApi:0,
 				storeAddress:'',
         cityDeliveryStatus: 0,
-				manageRegionTree: [],
+				organizationPickerStoreIds: [],
+				organizationPickerKey: 0,
+				saving: false,
+				organizationRequest: null,
 			}
 		},
 		created () {
@@ -648,24 +654,21 @@
 					: (this.$route.params.id ? String(this.$route.params.id) : '');
 				if (storeId && storeId === this.loadedRouteStoreId) return;
 				this.currentTab = '1';
-				this.loadManageRegionTree().then(() => {
-					if (storeId) {
-						this.loadedRouteStoreId = storeId;
-						this.getInfo(storeId);
-					} else {
-						this.resetFormForCreate();
-					}
-				});
+				if (storeId) {
+					this.loadedRouteStoreId = storeId;
+					this.getInfo(storeId);
+				} else {
+					this.resetFormForCreate();
+				}
 			},
 			resetFormForCreate() {
 				this.loadedRouteStoreId = '';
 				this.isApi = 1;
 				Object.assign(this.formItem, createDefaultFormItem());
-				const manageRegionId = Number(this.$route.query.manage_region_id || 0);
-				if (manageRegionId > 0) {
-					this.formItem.manage_region_path = this.buildManageRegionPath(manageRegionId, this.manageRegionTree);
-					this.syncManageRegionFromPath();
-				}
+				// 组织ID与旧区域ID不是同一命名空间，不转换旧路由参数。
+				this.formItem.organization_id = Number(this.$route.query.organization_id || 0);
+				this.organizationPickerKey++;
+				this.organizationRequest = null;
 				this.storeAddress = '';
 			},
 			applyStoreInfo(info, id) {
@@ -676,21 +679,16 @@
 					delivery_type: Array.isArray(info.delivery_type)
 						? info.delivery_type.map(String)
 						: (info.delivery_type ? String(info.delivery_type).split(',') : []),
-					manage_region_id: info.manage_region_id || 0,
-					manage_region_path: info.manage_region_path || [],
+					organization_id: Number(info.organization_id || 0),
+					expected_organization_id: Number(info.organization_id || 0),
 					store_cashier_order_rate: Number(info.store_cashier_order_rate) || 0,
 					store_self_order_rate: Number(info.store_self_order_rate) || 0,
 					store_writeoff_order_rate: Number(info.store_writeoff_order_rate) || 0,
 					store_recharge_order_rate: Number(info.store_recharge_order_rate) || 0,
 					store_svip_order_rate: Number(info.store_svip_order_rate) || 0,
 				});
-				if (!this.formItem.manage_region_path.length && this.formItem.manage_region_id) {
-					this.formItem.manage_region_path = this.buildManageRegionPath(
-						this.formItem.manage_region_id,
-						this.manageRegionTree
-					);
-				}
-				this.syncManageRegionFromPath();
+				this.organizationPickerKey++;
+				this.organizationRequest = null;
 				this.storeAddress = info.address || '';
 			},
 			financeConfig(){
@@ -865,6 +863,7 @@
 			},
 			// 提交
 			handleSubmit (name) {
+				if (this.saving) return;
 				this.$refs[name].validate((valid) => {
 					if (valid) {
 						if(this.formItem.day_time[0] == ''){
@@ -884,15 +883,28 @@
             if (!this.cityDeliveryStatus) {
               this.formItem.delivery_type = this.formItem.delivery_type.filter(item => item != '3');
             }
-						this.syncManageRegionFromPath();
 						this.formItem.cate_id = [];
-
-						storeUpdateApi(this.formItem.id,this.formItem).then(async res => {
+						const payload = { ...this.formItem };
+						// 新控件只写组织归属，禁止旧区域字段随回显数据重新提交。
+						delete payload.region_id;
+						delete payload.manage_region_id;
+						delete payload.manage_region_path;
+						const fingerprint = JSON.stringify(payload);
+						if (!this.organizationRequest || this.organizationRequest.fingerprint !== fingerprint) {
+							const token = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+								const r = Math.random() * 16 | 0;
+								return (c === 'x' ? r : (r & 3 | 8)).toString(16);
+							});
+							this.organizationRequest = { fingerprint, token };
+						}
+						payload.request_token = this.organizationRequest.token;
+						this.saving = true;
+						storeUpdateApi(this.formItem.id,payload).then(async res => {
 							this.$Message.success(res.msg);
 							this.$router.push({ path: this.listRoutePath, query: this.listRouteQuery });
 						}).catch(res => {
 							this.$Message.error(res.msg);
-						})
+						}).finally(() => { this.saving = false; });
 					} else {
 						return false;
 					}
@@ -919,43 +931,13 @@
           this.cityDeliveryStatus = Number(res.data.city_delivery_status);
         });
       },
-			loadManageRegionTree() {
-				return getRegionManageCascader().then(res => {
-					this.manageRegionTree = this.attachRegionPid(res.data || []);
-				}).catch(err => {
-					this.$Message.error(err.msg);
-				});
+			// 与组织工作台共用权限裁剪后的组织树；仅接受组织节点，不接受门店节点。
+			loadOrganizationPickerScope() {
+				return getOrganizationResourceSelector({ resource: 'org_store_tree', page: 1, limit: 50 });
 			},
-			attachRegionPid(tree, pid = 0) {
-				return (tree || [])
-					.filter(item => item.value !== 0)
-					.map(item => ({
-						...item,
-						pid,
-						children: item.children && item.children.length
-							? this.attachRegionPid(item.children, item.value)
-							: [],
-					}));
-			},
-			buildManageRegionPath(id, tree, prefix = []) {
-				for (let i = 0; i < (tree || []).length; i++) {
-					const node = tree[i];
-					const path = prefix.concat([node.value]);
-					if (Number(node.value) === Number(id)) {
-						return path;
-					}
-					if (node.children && node.children.length) {
-						const childPath = this.buildManageRegionPath(id, node.children, path);
-						if (childPath.length) {
-							return childPath;
-						}
-					}
-				}
-				return [];
-			},
-			syncManageRegionFromPath() {
-				const path = this.formItem.manage_region_path || [];
-				this.formItem.manage_region_id = path.length ? Number(path[path.length - 1]) : 0;
+			onOrganizationScopePick(scope = {}) {
+				this.formItem.organization_id = Number(scope.orgId || 0);
+				this.formItem.organization_name = '';
 			},
 		}
 	}

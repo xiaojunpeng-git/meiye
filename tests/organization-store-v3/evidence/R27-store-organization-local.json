@@ -1,0 +1,42 @@
+{
+  "round": 27,
+  "date": "2026-10-06",
+  "baseline": "238e1101c2080683f66c7b3f9cb9d839f50d54ac",
+  "status": "product accepted 2026-10-06; commit, RH deployment and push authorized",
+  "acceptance": "产品经理：我测试没有问题，一起commit、部署瑞昊、push；包含组织详情抽屉既有保存归属入口。",
+  "scope": "门店编辑页使用现有Vue2 OrganizationStoreScopePicker的org_only模式；读写当前组织归属，不再使用旧区域树",
+  "frontend": {
+    "前端代码/admin/src/pages/store/addStore/index.vue": "3d5ff367f0a3aa98e42785e57cb48a2035dc3f17e89ececfae25d0ea040771e3"
+  },
+  "backend": {
+    "后端代码/app/controller/admin/v1/store/SystemStore.php": "2df081c146f19a6c22de7c4622a6aefceee5fc5040f8905526edeca95aaecf77",
+    "后端代码/app/services/organization/OrganizationWorkspaceWriteServices.php": "fbc8f02325871805728a98fe17a878de1e7ad2a95ec4477f31946cf0a2a12e4e"
+  },
+  "tests": {
+    "tests/organization-store-v3/php/store-profile-organization-transaction.php": "120b454111dd822eb601f4b2879fd9ba0a6b62e1adae948f3b76aac718460588"
+  },
+  "migrations": [],
+  "engineering_scripts": [],
+  "generated_artifacts": "仅18081开发编译产物，没有生成8080发布包",
+  "verification": [
+    "两份PHP业务文件语法通过",
+    "Vue2模板和脚本解析通过；18081开发服务编译通过",
+    "真实本地数据库事务回归：持久化、幂等重放、并发冲突、无效组织、清空拒绝、权限拒绝、审计失败资料和绑定同步回滚，共11项通过",
+    "浏览器：179门店回显周晓玲经理；展开集团及当前组织树；选择运营整合中心可回显；重新加载后恢复原有周晓玲经理",
+    "未向179门店提交实际组织调整，测试变动全部回滚",
+    "git diff --check通过"
+  ],
+  "limitations": [
+    "179门店现有手机号和地址等必填资料为空，未补写无关业务资料；未完成该记录的浏览器保存成功路径，不能把服务事务回归冒充完整页面保存验收",
+    "归属调整沿用组织工作台既有写门禁和超管权限；仅保存资料而不改归属不提高权限要求",
+    "禁止清空已有组织归属；历史区域兼容入口仍有调用，因此保留其逻辑",
+    "没有提交、部署、push或远程数据库操作"
+  ],
+  "comments_updated": [
+    "门店编辑页：组织ID命名空间、显式新契约和组织节点限制",
+    "门店控制器：权威回显、旧入口兼容及权限边界",
+    "组织写服务：事务、锁序、过期表单和幂等边界"
+  ],
+  "skill": "manual-input-solution：应用持久化、权限、并发、幂等和审计要求；本字段属于组织权威关系，不创建报表手动覆盖表。完整页面保存验收仍待完成。",
+  "remote_instance": "不适用；本任务仅本地开发与回滚测试"
+}

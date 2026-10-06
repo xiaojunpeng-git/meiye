@@ -150,6 +150,11 @@ class SystemStore extends AuthController
 				$info['manage_region_path'] = $manageServices->getManageRegionPath((int)$info['manage_region_id']);
 			}
 		}
+        // 新组织归属以 organization_store 为权威，不能从历史区域管理员反推。
+        $binding = \think\facade\Db::name('organization_store')->where('store_id', $id)->find();
+        $info['organization_id'] = (int)($binding['org_id'] ?? 0);
+        $info['organization_name'] = $info['organization_id']
+            ? (string)\think\facade\Db::name('organization')->where('id', $info['organization_id'])->value('name') : '';
         return $this->success(compact('info'));
     }
 
@@ -358,7 +363,35 @@ class SystemStore extends AuthController
 		}
 		$applicable_type = $data['applicable_type'];
         unset($data['store_account'], $data['store_password'], $data['product_id'], $data['applicable_type']);
-        [$id, $is_new, $is_synchronous] = $this->services->saveStore((int)$id, $data, $staff_data);
+        $post = $this->request->post();
+        $replay = false;
+        if (array_key_exists('organization_id', $post)) {
+            // 显式组织契约与旧区域契约隔离；资料编辑未调整组织时不提升权限要求。
+            if (!isset($post['expected_organization_id'])
+                || filter_var($post['organization_id'], FILTER_VALIDATE_INT) === false
+                || filter_var($post['expected_organization_id'], FILTER_VALIDATE_INT) === false) {
+                return $this->fail('组织参数无效，请刷新后重试');
+            }
+            unset($data['region_id'], $data['manage_region_id']);
+            $orgId = (int)$post['organization_id'];
+            $expectedOrgId = (int)$post['expected_organization_id'];
+            if ($orgId !== $expectedOrgId) {
+                $result = app()->make(\app\services\organization\OrganizationWorkspaceWriteServices::class)
+                    ->saveStoreWithOrganization((int)$id, $orgId, $expectedOrgId, $data, $staff_data,
+                        is_array($this->adminInfo) ? $this->adminInfo : [], [
+                            'body_token' => (string)($post['request_token'] ?? ''),
+                            'operator_ip' => (string)$this->request->ip(),
+                        ]);
+                [$id, $is_new, $is_synchronous] = $result['data']['saved'];
+                $replay = (bool)$result['replay'];
+            } else {
+                [$id, $is_new, $is_synchronous] = $this->services->saveStore((int)$id, $data, $staff_data);
+            }
+        } else {
+            // 尚未迁移的旧入口仍遵守原区域契约，不把旧ID当作新组织ID。
+            [$id, $is_new, $is_synchronous] = $this->services->saveStore((int)$id, $data, $staff_data);
+        }
+        if ($replay) return $this->success('操作成功!');
         event('store.create', [$data, $id, $is_new, $is_synchronous, $applicable_type, $product_ids]);
 		$storeInfo = $this->services->get((int)$id);
 		$this->services->cacheUpdate($storeInfo->toArray());
