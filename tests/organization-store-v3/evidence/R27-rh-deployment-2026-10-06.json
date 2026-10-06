@@ -1,0 +1,32 @@
+{
+  "round": 27,
+  "feature_commit": "c44b50fb",
+  "acceptance": "产品经理确认测试无问题，并授权一起commit、部署瑞昊、push",
+  "target": "rh.cc3798.com /www/wwwroot/rh.cc3798.com",
+  "scope": "门店编辑Vue2组织选择控件、原组织详情保存归属入口随平台包发布；仅两份后端PHP与平台静态资源",
+  "source": "固定commit归档构建，admin/shared与18081当前业务源码一致；仅排除其他任务的vue.config.js开发代理修改，不影响production配置",
+  "build": "原生arm64 Node16串行production构建退出码0，历史lint/包体积/Browserslist警告非致命",
+  "database": "ruihao；无迁移、无生产业务写入；最新升级键20261006-ruihao-mixed-sale-project-service-repair，2026-10-06 12:59:40",
+  "backup": {
+    "path": "/www/backups/rh.cc3798.com/20261006-r27-c44b50fb/before.tgz",
+    "sha256": "ffc215f4de907736c72508266aefb24a0eae27bb2fc4dd9c887c1cdfb1de1826",
+    "contents": "旧system.html、view_admin、两份PHP及精确模板缓存；gzip校验通过",
+    "rollback": "确认无后续发布后仅恢复包内目标文件与旧模板，重启瑞昊Swoole；不回滚数据库、不触碰其他客户"
+  },
+  "deployed_sha256": {
+    "public/system.html": "31ce042898bceaf9f4cc107e2884f05b56148b6365fb588cb94e237b34aadc0c",
+    "public/view_admin/js/app.73908b2c.js": "66e18776bf52cf1ac262b151208e4ead451817e73af585ba9c4a908e13b327ce",
+    "app/controller/admin/v1/store/SystemStore.php": "2df081c146f19a6c22de7c4622a6aefceee5fc5040f8905526edeca95aaecf77",
+    "app/services/organization/OrganizationWorkspaceWriteServices.php": "fbc8f02325871805728a98fe17a878de1e7ad2a95ec4477f31946cf0a2a12e4e"
+  },
+  "deployment": "旧文件指纹匹配基线后备份；先追加哈希静态资源，原子替换PHP并重启瑞昊Swoole，再原子替换HTML；仅旧system编译缓存移到备份目录old-template.php，正常请求自动重建。未删除旧资源。",
+  "online_verification": [
+    "HTTPS组织页面引用app.73908b2c.js，公网主包SHA与构建和服务器一致",
+    "admin已有会话打开组织详情：邵武五四店可见门店所属组织、调整门店归属组织、保存归属（未更改选择时禁用）",
+    "admin已有会话打开add_store/179：显示所属组织，周晓玲经理回显，点击打开Vue2组织树",
+    "生产组织写门禁can_write=true；既有组织权限、组织绑定、库存归属依赖文件指纹与本地一致",
+    "本地事务回归11项通过；线上未实际保存组织调整，不将只读页面核验表述为生产写入测试"
+  ],
+  "other_worktree_changes": "保留所有其他任务脏文件，不纳入本次commit及部署",
+  "push_target": "origin/release/store-cashier-c14-main；不推送github镜像"
+}
