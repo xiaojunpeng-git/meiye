@@ -277,6 +277,7 @@ docker run -d --name mohe-fund-v3-src --platform linux/amd64 \
   -p 18089:18089 \
   --add-host host.docker.internal:host-gateway \
   -v "$FUND_V3_SRC:/app" \
+  -v "$ROOT/前端代码/shared:/shared:ro" \
   -v "$FUND_V3_NM_VOLUME:/app/node_modules" \
   -w /app \
   "$INVENTORY_NODE_IMAGE" \
