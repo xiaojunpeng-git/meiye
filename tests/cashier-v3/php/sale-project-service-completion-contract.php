@@ -8,6 +8,9 @@ $service = (string)file_get_contents(
 $submission = (string)file_get_contents(
     $root . '/后端代码/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php'
 );
+$mixedSubmission = (string)file_get_contents(
+    $root . '/后端代码/app/services/cashier/v3/settlement/ThinkPhpCashierV3CheckoutSubmissionExecutionPort.php'
+);
 $records = (string)file_get_contents(
     $root . '/后端代码/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php'
 );
@@ -52,6 +55,11 @@ $check('sale checkout persists the service fact in the same transaction and reco
     strpos($submission, '$this->saleProjectServices->completeInTx(') !== false
     && strpos($submission, "'event_type' => 'service.completed'") !== false
     && strpos($submission, "'eb_cashier_v3_entitlement_service_fact'") !== false);
+$check('mixed checkout completes sold projects before request success and records their service events',
+    strpos($mixedSubmission, "if (\$authority['composition'] === 'mixed') {") !== false
+    && strpos($mixedSubmission, '->completeInTx($salesPlan, $salesOrder, (int)$authority[\'settledAt\']') !== false
+    && strpos($mixedSubmission, "'event_type' => 'service.completed'") !== false
+    && strpos($mixedSubmission, "'source' => 'cash_project_sale'") !== false);
 $check('cash-purchased project completion also updates customer lifecycle in the same transaction',
     strpos($service, 'CustomerLifecycleFactServices') !== false
     && strpos($service, 'recordServiceCompletionInTx') !== false

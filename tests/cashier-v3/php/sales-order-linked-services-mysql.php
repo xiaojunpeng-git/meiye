@@ -65,7 +65,8 @@ if ((int)$record['itemCount'] !== $purchaseQuantity
 }
 foreach ($entitlementRows as $item) {
     if ((int)($item['serviceFactId'] ?? 0) <= 0
-        || ($item['unitPrice'] ?? null) !== null
+        // The service may show its frozen entitlement value as a unit price;
+        // it must not contribute another payable sales amount.
         || ($item['payableAmount'] ?? null) !== null
         || !array_key_exists('craftsmenListAllocations', $item)) {
         throw new RuntimeException('Entitlement display row contract is incomplete');

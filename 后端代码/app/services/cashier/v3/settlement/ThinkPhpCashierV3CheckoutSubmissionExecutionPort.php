@@ -539,6 +539,54 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             if ($checkoutCompleted === null) {
                 throw self::failure('checkout_completed_event_missing');
             }
+            if ($authority['composition'] === 'mixed') {
+                // A mixed checkout settles purchased projects as completed services too.
+                // Write them before request success in this transaction; entitlement lines
+                // already have their own completion facts and must not be duplicated.
+                $saleProjectServices = (new CashierV3SaleProjectServiceCompletionServices($this->salesOrders))
+                    ->completeInTx($salesPlan, $salesOrder, (int)$authority['settledAt'],
+                        (string)$checkoutCompleted['event_no']);
+                foreach ($saleProjectServices['services'] as $service) {
+                    $input = [
+                        'event_type' => 'service.completed',
+                        'aggregate_type' => 'service_line',
+                        'aggregate_id' => (string)$service['sourceLineId'],
+                        'aggregate_version' => 1,
+                        'event_version' => 1,
+                        'source_type' => self::ACTION,
+                        'source_id' => $authority['checkoutRequestId'],
+                        'member_id' => (int)$saleOrderHeader['member_id'],
+                        'business_date' => (string)$saleOrderHeader['business_date'],
+                        'occurred_at' => (int)$authority['settledAt'],
+                        'settled_at' => (int)$authority['settledAt'],
+                        'recorded_at' => (int)$authority['settledAt'],
+                        'aggregate_name_snapshot' => (string)$service['projectNameSnapshot'],
+                        'store_name_snapshot' => (string)$saleOrderHeader['store_name_snapshot'],
+                        'payload' => [
+                            'contractVersion' => 'cashier-v3-sale-project-service-v1',
+                            'checkoutRequestId' => $authority['checkoutRequestId'],
+                            'salesOrderId' => (string)$salesOrder['orderId'],
+                            'salesOrderNo' => (string)$salesOrder['orderNo'],
+                            'serviceFactId' => (string)$service['serviceFactId'],
+                            'serviceRecordNo' => (string)$service['serviceRecordNo'],
+                            'sourceLineId' => (string)$service['sourceLineId'],
+                            'projectId' => (int)$service['projectId'],
+                            'quantity' => (int)$service['quantity'],
+                            'serviceObject' => (string)$service['serviceObject'],
+                            'isExperience' => (bool)$service['isExperience'],
+                            'source' => 'cash_project_sale',
+                        ],
+                    ];
+                    $result = $context->eventRecorder()->recordInTx(
+                        $context->eventExecution(), $context->eventContract(), $input
+                    );
+                    $recorded[] = [
+                        'eventNo' => (string)$result['event_no'],
+                        'eventKey' => (string)$result['event_key'],
+                        'eventType' => (string)$result['event_type'],
+                    ];
+                }
+            }
             return [
                 'businessEventNos' => array_column($recorded, 'eventNo'),
                 'eventSetFingerprint' => CashierV3CheckoutSettlementCanonicalizer::fingerprint(
