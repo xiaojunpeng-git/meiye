@@ -1,0 +1,45 @@
+--- rh.cc3798.com.conf
++++ rh.cc3798.com.conf
+@@ -98,6 +98,24 @@
+         return 302 /store/login;
+     }
+ 
++    # Only the preview cashier HTML must revalidate. Its hashed assets keep normal caching.
++    location = /preview-8080/view_cashier_v3/ {
++        rewrite ^ /preview-8080/view_cashier_v3/index.html last;
++    }
++
++    location = /preview-8080/view_cashier_v3/index.html {
++        alias /www/wwwroot/rh.cc3798.com-8080/public/view_cashier_v3/index.html;
++        gzip off;
++        add_header Set-Cookie "rh_preview_8080=1; Path=/; SameSite=Lax" always;
++        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
++        sub_filter_once off;
++        sub_filter_types text/html;
++        sub_filter 'href="/' 'href="/preview-8080/';
++        sub_filter 'src="/' 'src="/preview-8080/';
++        sub_filter 'href=/' 'href=/preview-8080/';
++        sub_filter 'src=/' 'src=/preview-8080/';
++    }
++
+     location ^~ /preview-8080/ {
+         alias /www/wwwroot/rh.cc3798.com-8080/public/;
+         gzip off;
+@@ -162,6 +180,17 @@
+         try_files $uri =404;
+     }
+ 
++    # The embedded fund app has its own HTML shell; old open tabs must not cache it.
++    location = /view_fund_v3/ {
++        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
++        try_files $uri $uri/ @swoole;
++    }
++
++    location = /view_fund_v3/index.html {
++        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
++        try_files $uri =404;
++    }
++
+     location ^~ / {
+         try_files $uri $uri/ @swoole;
+     }
