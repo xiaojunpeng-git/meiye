@@ -4970,13 +4970,27 @@ function localCheckoutEntitlementAvailabilityFailure(snapshot = {}) {
       }
     }
     const key = `${line.entitlementInstanceType || 'card_holder'}:${holderId}:${detailId}:${projectId}`
-    const current = usageBySource.get(key) || { availableTimes, quantity: 0 }
+    const current = usageBySource.get(key) || {
+      availableTimes,
+      quantity: 0,
+      sourceLabel: String(line.entitlementInstanceType || 'card_holder') === 'independent_gift' ? '赠送记录' : '卡号',
+      sourceCode: '',
+      projectName: ''
+    }
     // 同一权益在本次快照中的可用次数必须一致；不接受混合不同投影的数据。
     if (current.availableTimes !== availableTimes) {
       return {
         code: 'CHECKOUT_ENTITLEMENT_SNAPSHOT_INCONSISTENT',
         message: '当前页面的权益快照不一致，请返回购物车重新选择权益。'
       }
+    }
+    // The rejected source must be identifiable without another lookup; labels
+    // come from the same immutable checkout row snapshot as its available count.
+    if (!current.sourceCode) {
+      current.sourceCode = String(line.fullCardNo || line.cardNo || line.sourceCodeSnapshot || line.displaySnapshot?.fullCardNo || '').trim()
+    }
+    if (!current.projectName) {
+      current.projectName = String(line.projectNameSnapshot || line.name || line.displaySnapshot?.name || '').trim()
     }
     current.quantity += quantity
     usageBySource.set(key, current)
@@ -4985,7 +4999,7 @@ function localCheckoutEntitlementAvailabilityFailure(snapshot = {}) {
     if (source.quantity > source.availableTimes) {
       return {
         code: 'CHECKOUT_ENTITLEMENT_TIMES_EXCEEDED',
-        message: `当前页面权益快照可用 ${source.availableTimes} 次，本次已选择 ${source.quantity} 次，请调整后再结账。`
+        message: `${source.sourceLabel} ${source.sourceCode || '未载入'} 的项目「${source.projectName || '未命名项目'}」当前剩余可用 ${source.availableTimes} 次，本次已选择 ${source.quantity} 次，超出 ${source.quantity - source.availableTimes} 次，请调整后再结账。`
       }
     }
   }
