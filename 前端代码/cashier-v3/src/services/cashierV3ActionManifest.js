@@ -271,6 +271,8 @@ const C5_ACTIONS = {
     'correct-debt-repayment-source': FEATURE_ORDER_CENTER,
     'refund-sales-order': FEATURE_ORDER_REFUND,
     'refund-imported-card': FEATURE_ORDER_REFUND,
+    // 统一退款写入仍由后端复核卡项或单据明细，前端只声明可发送的动作类型。
+    'refund-card-or-line': FEATURE_ORDER_REFUND,
     'void-sales-order': FEATURE_ORDER_VOID,
     'void-service-record': FEATURE_ORDER_SERVICE_VOID,
     'adjust-service-record-craftsmen': FEATURE_ORDER_SERVICE_DETAIL,
@@ -305,6 +307,8 @@ const C5_ACTIONS = {
     'open-member-selector': FEATURE_CASHIER,
     'open-member-detail': FEATURE_MEMBER,
     'load-member-detail-tab': FEATURE_MEMBER,
+    // 本卡流水只读且仍由后端按会员与持卡实例做可见性校验。
+    'query-member-card-history': FEATURE_MEMBER,
     'open-member-more-actions': FEATURE_MEMBER,
     'open-member-editor': FEATURE_MEMBER_EDIT,
     'open-member-creator': FEATURE_MEMBER_CREATE,
@@ -326,6 +330,7 @@ const C5_ACTIONS = {
     'open-debt-settlements': FEATURE_ORDER_DEBT_VIEW,
     'open-order-refunds': FEATURE_ORDER_REFUND,
     'query-imported-card-refund-candidates': FEATURE_ORDER_REFUND,
+    'query-unified-refund-candidates': FEATURE_ORDER_REFUND,
     'open-refunds': FEATURE_ORDER_REFUND,
     'open-order-void': FEATURE_ORDER_VOID,
     'open-void-record': FEATURE_ORDER_VOID,

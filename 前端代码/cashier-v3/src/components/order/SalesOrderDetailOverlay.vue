@@ -390,15 +390,14 @@ const operationRecords = computed(() => relatedRecords(['operationLogs', 'operat
 watch(
   () => props.initialLifecycleAction,
   (lifecycleAction) => {
-    if (lifecycleAction === 'refund-sales-order' || lifecycleAction === 'void-sales-order') {
-      activeLifecycleForm.value = lifecycleAction === 'refund-sales-order' ? 'refund' : 'void'
+    if (lifecycleAction === 'void-sales-order') {
+      activeLifecycleForm.value = 'void'
     }
   },
   { immediate: true }
 )
 const canOpenOperationLogs = computed(() => hasAction('open-order-operation-logs') || hasAction('open-operation-logs'))
 const quickActions = computed(() => [
-  { action: 'refund-sales-order', label: '退款', permission: 'cashier.v3.order.refund' },
   { action: 'void-sales-order', label: '作废订单', permission: 'cashier.v3.order.void' },
   { action: 'reopen-sales-order', label: '重开', permission: 'cashier.v3.order.reopen' },
   { action: 'upgrade-sales-order', label: '卡项／项目升级' }
@@ -428,13 +427,12 @@ async function revealActionPanel() {
 
 function openLifecycleForm(action) {
   actionError.value = ''
-  if (action === 'refund-sales-order') activeLifecycleForm.value = 'refund'
   if (action === 'void-sales-order') activeLifecycleForm.value = 'void'
   void revealActionPanel()
 }
 
 function runQuickAction(action) {
-  if (['refund-sales-order', 'void-sales-order'].includes(action)) {
+  if (action === 'void-sales-order') {
     openLifecycleForm(action)
     return
   }

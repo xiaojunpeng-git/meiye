@@ -815,6 +815,11 @@ final class CashierV3OrderCenterRecordQueryServices
         // store_order_refund table is intentionally not a source or a
         // compatibility projection for this workbench.
         $query = Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('rlo')
+            ->leftJoin('cashier_v3_refund_adjustment ra', 'ra.operation_id = rlo.operation_id AND ra.tenant_id = rlo.tenant_id')
+            // The holder's issuance receipt is unique per tenant. It restores the
+            // customer-facing sale number for older refunds without rewriting facts.
+            ->leftJoin('cashier_v3_card_purchase_receipt cpr', "rlo.source_type = 'card' AND cpr.tenant_id = rlo.tenant_id AND cpr.card_holder_id = ra.card_holder_id AND cpr.legacy_order_id = rlo.source_order_id AND cpr.status = 'completed'")
+            ->leftJoin('cashier_v3_sales_order cso', 'cso.tenant_id = cpr.tenant_id AND cso.order_id = cpr.sales_order_id')
             ->leftJoin('user u', 'u.uid = rlo.member_id')
             ->leftJoin('system_store s', 's.id = rlo.store_id')
             ->leftJoin('system_store_staff st', 'st.id = rlo.operator_id')
@@ -824,7 +829,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $this->applyStoreScope($query, 'rlo.store_id', $criteria['allowedStoreIds']);
         $this->applyBusinessDateRange($query, 'rlo.business_date', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
-            'rlo.operation_no', 'rlo.source_order_no_snapshot', 'u.real_name', 'u.nickname', 'u.phone',
+            'rlo.operation_no', 'rlo.source_order_no_snapshot', 'cso.order_no', 'u.real_name', 'u.nickname', 'u.phone',
             'rlo.reason_snapshot',
         ]);
         $total = (int)(clone $query)->count('rlo.id');
@@ -832,22 +837,35 @@ final class CashierV3OrderCenterRecordQueryServices
             'rlo.id', 'rlo.operation_id', 'rlo.operation_no', 'rlo.source_type', 'rlo.source_order_no_snapshot',
             'rlo.member_id', 'rlo.store_id', 'rlo.reason_snapshot', 'rlo.cash_refund_cents',
             'rlo.status', 'rlo.business_date', 'rlo.settled_at', 'u.real_name', 'u.nickname', 'u.phone',
-            's.name AS store_name', 'st.staff_name',
+            's.name AS store_name', 'st.staff_name', 'cso.order_no AS card_sales_order_no',
+            'ra.target_type AS adjustment_target_type,ra.target_name_snapshot AS adjustment_target_name,ra.balance_credit_cents,ra.balance_kind,ra.void_target,ra.remaining_after_cents,ra.times_after,ra.closed_remaining_cents',
         ]));
         return [array_map(function (array $row): array {
+            $isManual = in_array((string)$row['source_type'], ['card', 'document'], true);
+            $targetLabel = (string)$row['source_type'] === 'card' ? '卡项退款' : '单据退款';
+            $voidLabel = (int)($row['void_target'] ?? 0) === 1
+                ? ((string)$row['source_type'] === 'card' ? '作废本卡，剩余权益已关闭' : '作废明细，剩余价值已关闭')
+                : '不作废，可再次退款';
+            $summary = $isManual
+                ? $targetLabel . '：' . (string)($row['adjustment_target_name'] ?? '')
+                    . '；转入' . ((string)($row['balance_kind'] ?? '') === 'principal' ? '本金' : '赠金')
+                    . ' ¥' . number_format((int)round((int)($row['balance_credit_cents'] ?? 0) / 100), 0, '.', ',')
+                    . '；' . $voidLabel . '；' . (string)$row['reason_snapshot']
+                : (string)$row['reason_snapshot'];
             return [
                 'id' => 'refund:' . (string)$row['operation_id'],
                 'refundOrderNo' => (string)$row['operation_no'],
                 'businessDate' => (string)$row['business_date'],
-                'sourceOrderNo' => (string)$row['source_order_no_snapshot'],
+                'sourceOrderNo' => (string)$row['source_type'] === 'card' && trim((string)($row['card_sales_order_no'] ?? '')) !== ''
+                    ? (string)$row['card_sales_order_no'] : (string)$row['source_order_no_snapshot'],
                 'memberId' => (int)$row['member_id'],
                 'memberName' => $this->memberName($row),
                 'phone' => (string)$row['phone'],
-                'refundSummary' => (string)$row['reason_snapshot'],
+                'refundSummary' => $summary,
                 'refundAmount' => $this->centsToMoney((int)$row['cash_refund_cents']),
-                // 导入旧卡没有可信的历史 V3 收款渠道；其退款是操作人线下核实后手工登记。
-                'refundMethod' => (string)$row['source_type'] === 'imported_card'
-                    ? '手工确认退款' : '原记账方式退回',
+                // R26 只登记退款统计与会员余额，不能暗示已调用支付渠道对外退款。
+                'refundMethod' => $isManual ? '手工登记' : ((string)$row['source_type'] === 'imported_card'
+                    ? '手工确认退款' : '原记账方式退回'),
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
                 'refundStatus' => '已退款',

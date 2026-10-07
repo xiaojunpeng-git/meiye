@@ -65,6 +65,13 @@ final class CashierV3MemberModule
 
         $handlers = $dispatcher->handlers();
         $memberDetails = new CashierV3MemberDetailQueryServices();
+        $handlers->registerProjection('query-member-card-history', static function (array $scope) use ($memberDetails): array {
+            $payload = (array)($scope['payload'] ?? []);
+            return ['data' => ['cardHistory' => $memberDetails->cardHistory(
+                (int)($payload['memberId'] ?? 0), (int)($payload['holderId'] ?? 0),
+                (int)($payload['page'] ?? 1), $scope['operator_scope'], $scope['data_scope'])],
+                'message' => '本卡操作记录已读取。'];
+        });
         $memberDebtDetails = new CashierV3MemberDebtProjectionServices();
         $memberSalesOrders = new CashierV3SalesOrderQueryServices();
         $cashierMemberSummaries = new CashierV3CashierMemberSummaryServices();

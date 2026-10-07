@@ -1820,9 +1820,7 @@ final class CashierV3SalesOrderQueryServices
                 'reopen-sales-order',
                 // 游客没有会员欠款账户，不能进入补交链路。
                 (int)$header['member_id'] > 0 ? 'open-order-debt-settlements' : null,
-                // 退款只写人工确认的财务冲销，不撤回库存、卡项或后续服务，
-                // 因此所有完整结算订单都可进入一次退款。
-                $legacyEntryCents > 0 ? null : 'refund-sales-order',
+                // 旧消费订单退款暂不开放；历史退款仍可查，统一退款入口接通后另行启用。
                 // 作废仍是严格的全量回滚路径，具体资格由服务端二次校验。
                 'void-sales-order',
             ]))),

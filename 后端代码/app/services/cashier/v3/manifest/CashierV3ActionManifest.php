@@ -762,6 +762,16 @@ class CashierV3ActionManifest
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['imported_card.refunded' => [], 'debt.cancelled' => []],
             ],
+            'refund-card-or-line' => [
+                'required_event_types' => ['manual_refund.completed'],
+                'allowed_event_types' => ['manual_refund.completed'],
+                'event_rules' => ['manual_refund.completed' => [
+                    'min_count' => 1, 'max_count' => 1,
+                    'aggregate_type' => 'manual_refund', 'source_type' => 'refund-card-or-line',
+                ]],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['manual_refund.completed' => []],
+            ],
             'void-sales-order' => [
                 'required_event_types' => ['sales_order.voided'], 'allowed_event_types' => ['sales_order.voided'],
                 'event_rules' => ['sales_order.voided' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'void-sales-order']],

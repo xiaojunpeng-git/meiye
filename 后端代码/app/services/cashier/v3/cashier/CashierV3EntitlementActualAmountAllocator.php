@@ -45,6 +45,9 @@ final class CashierV3EntitlementActualAmountAllocator
         int $quantity,
         array $snapshot
     ): string {
+        // A refund removes future uses without recording a service. Recover the
+        // real consumed index so a later writeoff still uses the original price.
+        $consumedTimes = self::actualConsumedTimes($consumedTimes, $snapshot);
         return self::isCentCapableSnapshot($snapshot)
             ? self::allocateCents($purchaseAmount, $totalPurchaseTimes, $consumedTimes, $quantity)
             : self::allocate($purchaseAmount, $totalPurchaseTimes, $consumedTimes, $quantity);
@@ -56,9 +59,29 @@ final class CashierV3EntitlementActualAmountAllocator
         int $consumedTimes,
         array $snapshot
     ): string {
-        return self::isCentCapableSnapshot($snapshot)
+        $consumedTimes = self::actualConsumedTimes($consumedTimes, $snapshot);
+        $originalRemaining = self::isCentCapableSnapshot($snapshot)
             ? self::remainingCents($purchaseAmount, $totalPurchaseTimes, $consumedTimes)
             : self::remaining($purchaseAmount, $totalPurchaseTimes, $consumedTimes);
+        $refundedCents = $snapshot['r26RefundedCents'] ?? 0;
+        if (!is_int($refundedCents) || $refundedCents < 0) {
+            throw new \InvalidArgumentException('refund amount snapshot is invalid');
+        }
+        $remainingCents = (int)self::moneyToCents($originalRemaining) - $refundedCents;
+        if ($remainingCents < 0) {
+            throw new \InvalidArgumentException('refund exceeds remaining card value');
+        }
+        return self::centsToMoney((string)$remainingCents);
+    }
+
+    /** Refund-removed quota is not historical service consumption. */
+    private static function actualConsumedTimes(int $reportedConsumedTimes, array $snapshot): int
+    {
+        $removed = $snapshot['r26RefundRemovedTimes'] ?? 0;
+        if (!is_int($removed) || $removed < 0 || $removed > $reportedConsumedTimes) {
+            throw new \InvalidArgumentException('refund quota snapshot is invalid');
+        }
+        return $reportedConsumedTimes - $removed;
     }
 
     public static function allocate(

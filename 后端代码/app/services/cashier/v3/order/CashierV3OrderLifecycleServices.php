@@ -104,6 +104,12 @@ final class CashierV3OrderLifecycleServices
             || !$recorder instanceof CashierV3BusinessEventRecorder || !$execution instanceof CashierV3BusinessEventExecution) {
             throw self::failure('order_lifecycle_scope_incomplete');
         }
+        // 旧消费订单退款暂时停用；统一退款须分别校验单据明细或卡实例，避免只退资金却保留权益。
+        if ($action === 'refund-sales-order') {
+            throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT,
+                '消费订单原退款入口暂未开放，请联系管理员。', CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'sales_order_refund_temporarily_disabled']);
+        }
         $source = $this->source((array)($scope['payload'] ?? []), $operator, $dataScope, true);
         // Historical card entry has no collected cash to refund. A full
         // void may reverse the card/debt facts, but a cash refund must stop.
@@ -619,14 +625,18 @@ final class CashierV3OrderLifecycleServices
         return ['targetOrderLineId' => $lineId, 'targetRole' => $role, 'personnel' => array_values($rows)];
     }
 
-    /** @return array<int,array{lineId:string,itemName:string,itemType:string,quantity:int}> */
+    /**
+     * 单据退款只能定位一条已结算的项目或产品销售明细；卡项和权益明细不能借此路径退资。
+     * 即使调用方跳过页面筛选，仍必须在锁定原单明细后执行同一条业务限制。
+     * @return array<int,array{lineId:string,itemName:string,itemType:string,quantity:int}>
+     */
     private function refundLineSnapshots(array $rawLineIds, array $source): array
     {
         $lineIds = array_values(array_unique(array_filter(array_map(static function ($value): string {
             $lineId = trim((string)$value);
             return preg_match('/^[A-Za-z0-9_.:-]{1,64}$/D', $lineId) === 1 ? $lineId : '';
         }, $rawLineIds))));
-        if (!$lineIds || count($lineIds) > 200) {
+        if (count($lineIds) !== 1 || count($rawLineIds) !== 1) {
             throw self::failure('order_lifecycle_refund_lines_invalid');
         }
         $rows = Db::name('cashier_v3_sales_order_line')
@@ -640,6 +650,9 @@ final class CashierV3OrderLifecycleServices
             ->lock(true)->order('line_no', 'asc')->select()->toArray();
         if (count($rows) !== count($lineIds)) {
             throw self::failure('order_lifecycle_refund_line_scope_invalid');
+        }
+        if (!in_array((string)$rows[0]['item_type'], ['project', 'product'], true)) {
+            throw self::failure('order_lifecycle_refund_line_ineligible');
         }
         return array_map(static function (array $row): array {
             return [

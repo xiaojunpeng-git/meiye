@@ -400,7 +400,7 @@ const memberSelectorActions = {
 const memberDetailActionsByScope = {
   member: new Set(['open-member-more-actions', 'open-member-editor', 'open-recharge', 'open-gift']),
   'appointment-highlight': new Set(['open-reservation-detail']),
-  card: new Set(['open-card-batch', 'open-card-benefits']),
+  card: new Set(['open-card-batch', 'open-card-benefits', 'query-member-card-history']),
   'balance-change': new Set(['open-operation-logs']),
   coupon: new Set(['open-operation-logs']),
   'point-change': new Set(['open-operation-logs']),
@@ -1584,6 +1584,13 @@ async function handleMemberDetailAction(payload = {}) {
   if (scope === 'debt-record' && action === 'open-debt-settlements') {
     isMemberDetailOpen.value = false
     return openMemberDebt(currentMemberId)
+  }
+  if (scope === 'card' && action === 'query-member-card-history') {
+    return requestCashierV3Action(action, {
+      memberId: currentMemberId,
+      holderId: Number(payload.record?.id || 0),
+      page: Number(payload.page || 1)
+    })
   }
   if (scope === 'sales-order' && action === 'open-sales-order-detail') {
     const orderId = payload.record?.orderId || payload.record?.salesOrderId || payload.record?.id
@@ -3123,7 +3130,7 @@ onBeforeUnmount(() => {
     :page-size="memberSelector.pageSize || 20"
     :is-loading="Boolean(memberSelector.isLoading)"
     :allow-guest="isCashierWorkflowPage && memberSelectorContext !== 'reservation' && !memberSelectorRequiresMember"
-    :title="memberSelectorContext === 'imported-card-refund' ? '选择旧卡退款会员' : '选择会员'"
+    :title="memberSelectorContext === 'imported-card-refund' ? '选择退款会员' : '选择会员'"
     :allow-create="memberSelectorContext !== 'imported-card-refund' && canUseFeature('cashier.v3.member') && (isCashierWorkflowPage || memberSelectorInitialView === 'creator')"
     :show-scope-toggle="['cashier', 'reservation'].includes(memberSelectorContext)"
     :current-store-name="state.storeName || ''"

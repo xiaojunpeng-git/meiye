@@ -4,6 +4,7 @@ namespace app\services\cashier\v3\cashier;
 
 use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
 use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
+use app\services\cashier\v3\order\CashierV3CardRefundQuotaPolicy;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3CrossStoreEntitlementPolicy;
 use app\services\cashier\v3\CashierV3DataScopeContext;
@@ -694,6 +695,19 @@ final class CashierV3EntitlementProjectionServices
                 );
             }
         }
+        // Shared-count refunds belong to the whole card, not any of its project
+        // carts. Batch their effective facts so source totals cannot re-sum stale carts.
+        $sharedRefunds = [];
+        $holderIds = array_keys($ruleAuthoritiesByHolder);
+        if ($holderIds) {
+            foreach (Db::name('cashier_v3_refund_adjustment')->where('tenant_id', $tenantId)
+                ->whereIn('card_holder_id', $holderIds)->where('status', 'effective')
+                ->field('card_holder_id,refund_amount_cents,times_removed')->select()->toArray() as $refund) {
+                $id = (int)$refund['card_holder_id'];
+                $sharedRefunds[$id]['returned'] = ($sharedRefunds[$id]['returned'] ?? 0) + (int)$refund['refund_amount_cents'];
+                $sharedRefunds[$id]['removed'] = ($sharedRefunds[$id]['removed'] ?? 0) + (int)$refund['times_removed'];
+            }
+        }
         $projectsByHolder = [];
         $now = time();
         foreach ($snapshot['carts'] as $cart) {
@@ -912,6 +926,25 @@ final class CashierV3EntitlementProjectionServices
                 : ($kind['code'] === 'time_card'
                 ? $this->timeCardSourceAmounts($order)
                 : $this->sourceAmounts($projects));
+            if (is_array($holderRuleAuthority) && (string)$holderRuleAuthority['ruleType'] === 'choice_count'
+                && (int)($sharedRefunds[$holderId]['returned'] ?? 0) > 0) {
+                if ($cardDisabled) {
+                    $sourceAmounts['remainingAmount'] = '0.00';
+                } else {
+                    try {
+                        $quota = CashierV3CardRefundQuotaPolicy::sharedPool((string)($order['pay_price'] ?? ''),
+                            $purchaseTimes, $remaining, (int)$sharedRefunds[$holderId]['returned'],
+                            (int)($sharedRefunds[$holderId]['removed'] ?? 0));
+                    } catch (\InvalidArgumentException $error) {
+                        throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                            '本卡共享次数与退款金额不一致，请联系管理员核对。', CashierV3ResultCode::STATUS_FAILED,
+                            ['reason' => 'entitlement_shared_refund_value_mismatch']);
+                    }
+                    $sourceAmounts['remainingAmount'] = $this->centsToMoney($quota['remainingValueCents']);
+                }
+                $sourceAmounts['purchaseAmount'] = $this->nonnegativeCentMoney($order['pay_price'] ?? null);
+                $sourceAmounts['calculationVersion'] = 'shared-card-refund-v1';
+            }
             // 时间卡父行没有项目金额汇总，仍须排除不可再使用的欠款/取消额。
             if ($kind['code'] === 'time_card' && $sourceAmounts['remainingAmount'] !== null) {
                 $blocked = bcadd($outstandingDebtAmount, $this->cancelledDebt($order, null, $tenantId), 2);

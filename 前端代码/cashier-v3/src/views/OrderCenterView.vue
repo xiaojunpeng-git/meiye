@@ -35,6 +35,7 @@ import {
 import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
 import { queryPlatformOrderCenterScope } from '@/services/platformOrderCenterApi'
 import { salespeoplePerformanceText, serviceCraftsmenPerformanceText } from '@/services/orderCenterPersonnelDisplay'
+import { nextWholeYuanInputValue } from '@/services/refundWholeYuanInput'
 
 const field = (key, label, type = 'text', extra = {}) => ({ key, label, type, defaultVisible: true, ...extra })
 const isPrinterSetupOpen = ref(false)
@@ -90,10 +91,18 @@ const debtChanges = ref([])
 const debtChangesLoading = ref(false)
 const debtChangesError = ref('')
 let debtChangesSerial = 0
-// 旧卡退款是退款记录页的独立流程；候选卡不会并入正式消费订单投影。
+// 统一退款独立于原消费订单退款入口；所有候选和金额在提交时由服务端复核。
 const importedCardRefundOpen = ref(false)
 const importedCardRefundMember = ref(null)
 const importedCardRefundCards = ref([])
+const unifiedRefundMode = ref('card')
+const unifiedRefundLines = ref([])
+const unifiedRefundLineId = ref('')
+const unifiedRefundComponentId = ref('')
+const unifiedRefundKeyword = ref('')
+const unifiedRefundBalanceAmount = ref('0')
+const unifiedRefundVoid = ref(false)
+const unifiedRefundValidThrough = ref('')
 const importedCardRefundLoading = ref(false)
 const importedCardRefundSubmitting = ref(false)
 const importedCardRefundError = ref('')
@@ -102,6 +111,17 @@ const importedCardRefundAmount = ref('')
 const importedCardRefundReason = ref('')
 const importedCardRefundPage = ref(1)
 const importedCardRefundTotal = ref(0)
+const selectedUnifiedRefundCard = computed(() => importedCardRefundCards.value.find(
+  (card) => String(card.holderId) === String(importedCardRefundHolderId.value)
+))
+watch(importedCardRefundHolderId, () => {
+  // A shared-count card has one whole-card refund target, not one per project.
+  unifiedRefundComponentId.value = selectedUnifiedRefundCard.value?.ruleType === 'choice_count' ? '0' : ''
+  const end = Number(selectedUnifiedRefundCard.value?.validThrough || 0)
+  unifiedRefundValidThrough.value = end > 0
+    ? new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(end * 1000))
+    : ''
+})
 // 收到不确定结果时保留同一请求及输入，重试查询原结果，不能换金额重复退款。
 const importedCardRefundUncertain = ref(false)
 let importedCardRefundQuerySerial = 0
@@ -529,18 +549,18 @@ const detailFields = computed(() => {
 const allowedSalesOrderDetailActions = new Set([
   'print-sales-order-receipt', 'open-card-batch', 'open-card-benefits', 'open-order-debt-settlements',
   'open-order-refunds', 'open-order-void', 'open-order-reopenings', 'open-order-upgrades', 'open-order-gifts',
-  'open-order-services', 'open-order-writeoffs', 'open-order-operation-logs', 'refund-sales-order',
+  'open-order-services', 'open-order-writeoffs', 'open-order-operation-logs',
   'void-sales-order', 'reopen-sales-order', 'upgrade-sales-order', 'open-sales-order-personnel-adjustment',
   'adjust-sales-order-personnel', 'update-sales-order-note'
 ])
 const salesOrderDetailCommandActions = new Set([
-  'print-sales-order-receipt', 'refund-sales-order', 'void-sales-order', 'reopen-sales-order', 'upgrade-sales-order',
+  'print-sales-order-receipt', 'void-sales-order', 'reopen-sales-order', 'upgrade-sales-order',
   'adjust-sales-order-personnel', 'update-sales-order-note'
 ])
 // Only these actions are backed by the V3 sales-order lifecycle resource.
 // Other historical detail affordances keep their existing display-ID contract.
 const salesOrderLifecycleResourceActions = new Set([
-  'adjust-sales-order-personnel', 'update-sales-order-note', 'refund-sales-order',
+  'adjust-sales-order-personnel', 'update-sales-order-note',
   'void-sales-order', 'reopen-sales-order', 'open-order-debt-settlements', 'open-debt-settlements'
 ])
 
@@ -590,6 +610,21 @@ function openImportedCardRefundMemberSelector() {
   }))
 }
 
+function changeUnifiedRefundMode(mode) {
+  if (importedCardRefundSubmitting.value || importedCardRefundUncertain.value || unifiedRefundMode.value === mode) return
+  unifiedRefundMode.value = mode
+  // 卡项与单据使用不同的搜索字段，切换时不能沿用上一模式的筛选词。
+  unifiedRefundKeyword.value = ''
+  importedCardRefundHolderId.value = ''
+  unifiedRefundComponentId.value = ''
+  unifiedRefundLineId.value = ''
+  importedCardRefundAmount.value = ''
+  unifiedRefundBalanceAmount.value = '0'
+  unifiedRefundVoid.value = false
+  unifiedRefundValidThrough.value = ''
+  if (importedCardRefundMember.value) void loadImportedCardRefundCards(importedCardRefundMember.value)
+}
+
 async function loadImportedCardRefundCards(member, page = 1) {
   if (importedCardRefundSubmitting.value || importedCardRefundUncertain.value) return
   const memberId = Number(member?.memberId || member?.id || 0)
@@ -598,25 +633,33 @@ async function loadImportedCardRefundCards(member, page = 1) {
   importedCardRefundOpen.value = true
   importedCardRefundMember.value = member
   importedCardRefundCards.value = []
+  unifiedRefundLines.value = []
   importedCardRefundHolderId.value = ''
+  unifiedRefundComponentId.value = ''
+  unifiedRefundLineId.value = ''
   importedCardRefundAmount.value = ''
+  unifiedRefundBalanceAmount.value = '0'
   importedCardRefundReason.value = ''
   importedCardRefundPage.value = page
   importedCardRefundTotal.value = 0
   importedCardRefundError.value = ''
   importedCardRefundLoading.value = true
   try {
-    const response = await requestAction('query-imported-card-refund-candidates', { memberId, page, pageSize: 50 })
+    const response = await requestAction('query-unified-refund-candidates', {
+      memberId, mode: unifiedRefundMode.value, page, pageSize: 50,
+      keyword: unifiedRefundKeyword.value
+    })
     if (serial !== importedCardRefundQuerySerial) return
     if (!['success', 'succeeded'].includes(actionStatus(response))) {
-      importedCardRefundError.value = response?.result?.message || response?.data?.result?.message || '未能读取可退款旧卡。'
+      importedCardRefundError.value = response?.result?.message || response?.data?.result?.message || '未能读取可退款对象。'
       return
     }
-    const candidates = actionData(response).importedCardRefundCandidates || {}
+    const candidates = actionData(response).unifiedRefundCandidates || {}
     importedCardRefundCards.value = candidates.cards || []
+    unifiedRefundLines.value = candidates.lines || []
     importedCardRefundTotal.value = Number(candidates.total) || 0
   } catch (error) {
-    if (serial === importedCardRefundQuerySerial) importedCardRefundError.value = error?.message || '未能读取可退款旧卡。'
+    if (serial === importedCardRefundQuerySerial) importedCardRefundError.value = error?.message || '未能读取可退款对象。'
   } finally {
     if (serial === importedCardRefundQuerySerial) importedCardRefundLoading.value = false
   }
@@ -633,11 +676,20 @@ function closeImportedCardRefund() {
   importedCardRefundOpen.value = false
   importedCardRefundMember.value = null
   importedCardRefundCards.value = []
+  unifiedRefundLines.value = []
   importedCardRefundLoading.value = false
   importedCardRefundSubmitting.value = false
   importedCardRefundError.value = ''
   importedCardRefundHolderId.value = ''
+  unifiedRefundComponentId.value = ''
+  unifiedRefundLineId.value = ''
   importedCardRefundAmount.value = ''
+  unifiedRefundBalanceAmount.value = '0'
+  // 每次新开退款都从卡项模式开始；转入余额始终记入赠金。
+  unifiedRefundMode.value = 'card'
+  unifiedRefundKeyword.value = ''
+  unifiedRefundVoid.value = false
+  unifiedRefundValidThrough.value = ''
   importedCardRefundReason.value = ''
   importedCardRefundCommandId = ''
 }
@@ -646,14 +698,45 @@ function importedCardRefundMoney(cents) {
   return formatMoney((Math.max(0, Number(cents) || 0) / 100).toFixed(2))
 }
 
+// Refund amounts are whole yuan only. Reject invalid insertions (including paste)
+// instead of stripping punctuation, which could turn "12.5" into "125".
+function blockNonDigitRefundInput(event) {
+  const inserted = event.data ?? event.dataTransfer?.getData('text/plain')
+  if (typeof inserted === 'string' && /[^0-9]/.test(inserted)) event.preventDefault()
+}
+
+function updateWholeYuanRefundInput(event, field) {
+  const amountRef = field === 'refund' ? importedCardRefundAmount : unifiedRefundBalanceAmount
+  const next = nextWholeYuanInputValue(amountRef.value, event.target.value)
+  if (event.target.value !== next) event.target.value = next
+  amountRef.value = next
+}
+
 async function submitImportedCardRefund() {
   if (importedCardRefundSubmitting.value) return
   const card = importedCardRefundCards.value.find((item) => String(item.holderId) === String(importedCardRefundHolderId.value))
+  const line = unifiedRefundLines.value.find((item) => item.lineId === unifiedRefundLineId.value)
   const amount = String(importedCardRefundAmount.value || '').trim()
+  const balanceAmount = String(unifiedRefundBalanceAmount.value || '0').trim()
   const reason = String(importedCardRefundReason.value || '').trim()
-  if (!card?.canRefund) { importedCardRefundError.value = '请选择一张可退款旧卡。'; return }
-  if (!/^[1-9][0-9]{0,9}$/.test(amount)) {
-    importedCardRefundError.value = '实际退款金额必须是大于 0 的整数元。'; return
+  if (unifiedRefundMode.value === 'card' && (!card?.canRefund || unifiedRefundComponentId.value === '')) {
+    importedCardRefundError.value = '请选择一张卡的可退款项目。'; return
+  }
+  if (unifiedRefundMode.value === 'document' && !line) {
+    importedCardRefundError.value = '请选择单据中的一条购买项目或产品明细。'; return
+  }
+  // Both entered amounts are whole yuan; the server applies the same rule before changing any rights or facts.
+  if (!/^(?:0|[1-9][0-9]{0,7})$/.test(amount) || Number(amount) <= 0
+    || !/^(?:0|[1-9][0-9]{0,7})$/.test(balanceAmount)) {
+    importedCardRefundError.value = '本次退款金额和转入余额只能填写整数元。'; return
+  }
+  const remaining = unifiedRefundMode.value === 'card'
+    ? Number(card?.remainingAmountCents || 0) / 100 : Number(line?.remainingAmountCents || 0) / 100
+  const targetRemaining = unifiedRefundMode.value === 'card'
+    ? Number(card?.components?.find((item) => String(item.id) === unifiedRefundComponentId.value)?.remainingAmountCents || 0) / 100
+    : remaining
+  if (Number(amount) > targetRemaining || Number(balanceAmount) > remaining) {
+    importedCardRefundError.value = '本次退款金额或转入余额超过实际剩余金额。'; return
   }
   if (!reason || reason.length > 255) { importedCardRefundError.value = '请填写退款原因（不超过 255 字）。'; return }
   if (!importedCardRefundCommandId) importedCardRefundCommandId = createCashierV3CommandId()
@@ -661,24 +744,49 @@ async function submitImportedCardRefund() {
   importedCardRefundUncertain.value = true
   importedCardRefundError.value = ''
   try {
-    const response = await requestAction('refund-imported-card', {
-      holderId: card.holderId,
-      snapshotFingerprint: card.snapshotFingerprint,
+    const response = await requestAction('refund-card-or-line', {
+      mode: unifiedRefundMode.value,
+      holderId: card?.holderId || 0,
+      componentId: Number(unifiedRefundComponentId.value || 0),
+      lineId: line?.lineId || '',
       memberId: Number(importedCardRefundMember.value?.memberId || importedCardRefundMember.value?.id || 0),
       refundAmount: amount,
+      balanceAmount,
+      balanceKind: 'bonus',
+      voidTarget: unifiedRefundVoid.value,
+      validThrough: unifiedRefundMode.value === 'card' && card?.isTimeCard
+        ? Math.floor(new Date(`${unifiedRefundValidThrough.value}T23:59:59+08:00`).getTime() / 1000) : 0,
       reason,
       idempotencyKey: importedCardRefundCommandId
     })
     const status = actionStatus(response)
-    if (isTerminalActionStatus(status)) {
-      importedCardRefundCommandId = ''
-      importedCardRefundUncertain.value = false
-    }
     if (['success', 'succeeded'].includes(status)) {
+      const result = actionData(response).unifiedRefund
+      if (!result?.operationNo) {
+        // 已提交但回执不完整时保留同一幂等键，不能把重试变成第二笔退款。
+        importedCardRefundError.value = '退款已登记，但结果未完整返回；请保持当前内容，重试查询原结果。'
+        importedCardRefundUncertain.value = true
+        return
+      }
+      importedCardRefundUncertain.value = false
       importedCardRefundSubmitting.value = false
       closeImportedCardRefund()
-      await queryRecords({ recordType: 'refund', page: 1 }, true)
-    } else importedCardRefundError.value = response?.result?.message || response?.data?.result?.message || '旧卡退款未完成。'
+      // 查询函数以当前页签决定记录类型；成功后先切到退款页并清除旧筛选，
+      // 否则仍会查询消费订单，或被上次搜索条件隐藏刚登记的退款。
+      activeTabKey.value = 'refund'
+      queryModelByType.value = { ...queryModelByType.value, refund: {} }
+      executedQueryByType.value = { ...executedQueryByType.value, refund: null }
+      // 成功回执已确认，列表刷新失败也不能把已登记的退款当作失败重提。
+      try {
+        await queryRecords({ ...defaultOrderCenterDateQuery(), recordType: 'refund', page: 1, keyword: '' }, true)
+      } catch { /* 保持退款页，下一次查询仍从权威记录读取。 */ }
+    } else {
+      if (isTerminalActionStatus(status)) {
+        importedCardRefundCommandId = ''
+        importedCardRefundUncertain.value = false
+      }
+      importedCardRefundError.value = response?.result?.message || response?.data?.result?.message || '退款未完成。'
+    }
   } catch (error) {
     importedCardRefundError.value = '退款结果尚未确认，请保持原输入并重试确认，避免重复退款。'
   } finally {
@@ -2895,7 +3003,7 @@ onBeforeUnmount(() => {
           type="button"
           class="button button--secondary"
           @click="openImportedCardRefundMemberSelector"
-        >旧卡退款</button>
+        >退款</button>
       </template>
     </UnifiedQueryToolbar>
 
@@ -2936,12 +3044,6 @@ onBeforeUnmount(() => {
                   :disabled="Boolean(salesPrintLoading[String(record.id || record.orderId || record.salesOrderId || '')])"
                   @click="printSalesOrderRecord(record)"
                 >{{ salesPrintLoading[String(record.id || record.orderId || record.salesOrderId || '')] ? '生成中…' : '打印' }}</button>
-                <button
-                  v-if="salesOrderActionAvailable(record, 'refund-sales-order', 'cashier.v3.order.refund')"
-                  type="button"
-                  class="button button--text"
-                  @click="openSalesOrderLifecycle(record, 'refund-sales-order', 'cashier.v3.order.refund')"
-                >退款</button>
                 <button
                   v-if="salesOrderActionAvailable(record, 'void-sales-order', 'cashier.v3.order.void')"
                   type="button"
@@ -3199,39 +3301,98 @@ onBeforeUnmount(() => {
       @close="closeGenericDetail"
     />
 
-    <div v-if="importedCardRefundOpen" class="service-void-modal" role="dialog" aria-modal="true" aria-label="旧卡退款">
+    <div v-if="importedCardRefundOpen" class="service-void-modal" role="dialog" aria-modal="true" aria-label="退款">
       <div class="service-void-modal__backdrop" @click="closeImportedCardRefund"></div>
       <form class="service-void-modal__panel imported-card-refund-dialog" @submit.prevent="submitImportedCardRefund">
         <header class="service-void-modal__head">
-          <div><h2>旧卡退款</h2><p>{{ importedCardRefundMember?.name || importedCardRefundMember?.realName || '已选会员' }} · 仅显示未退款的导入旧卡</p></div>
+          <div><h2>退款</h2><p>{{ importedCardRefundMember?.name || importedCardRefundMember?.realName || '已选会员' }}</p></div>
         </header>
-        <p v-if="importedCardRefundError" class="service-void-modal__error" role="alert">{{ importedCardRefundError }}</p>
-        <div v-if="importedCardRefundLoading" class="imported-card-refund-dialog__empty">正在读取旧卡…</div>
-        <div v-else-if="!importedCardRefundCards.length" class="imported-card-refund-dialog__empty">该会员没有可退款的导入旧卡。</div>
-        <div v-else class="imported-card-refund-dialog__cards">
-          <label v-for="card in importedCardRefundCards" :key="card.holderId" class="imported-card-refund-dialog__card" :class="{ 'imported-card-refund-dialog__card--disabled': !card.canRefund }">
-            <input v-model="importedCardRefundHolderId" type="radio" name="imported-card-refund" :value="String(card.holderId)" :disabled="!card.canRefund || importedCardRefundUncertain" />
-            <span class="imported-card-refund-dialog__card-main">
-              <strong>{{ card.cardName || '未命名旧卡' }}</strong>
-              <small>卡号：{{ card.cardNo || '—' }}　原办理门店：{{ card.originStoreName || '—' }}</small>
-              <small>总次数 {{ card.totalTimes }}，已核销 {{ Math.max(0, Number(card.totalTimes) - Number(card.remainingTimes)) }}，剩余 {{ card.remainingTimes }}</small>
-              <small v-if="Number(card.remainingDebtCents) > 0">剩余欠款 {{ importedCardRefundMoney(card.remainingDebtCents) }}，退款时一并取消</small>
-              <small v-if="card.unavailableReason" class="service-void-modal__error">{{ card.unavailableReason }}</small>
-            </span>
-          </label>
+        <div class="unified-refund-dialog__body">
+        <div class="unified-refund-dialog__mode" role="group" aria-label="退款类型">
+          <button type="button" class="button" :class="unifiedRefundMode === 'card' ? 'button--primary' : 'button--secondary'" @click="changeUnifiedRefundMode('card')">卡项退款</button>
+          <button type="button" class="button" :class="unifiedRefundMode === 'document' ? 'button--primary' : 'button--secondary'" @click="changeUnifiedRefundMode('document')">单据退款</button>
         </div>
-        <div v-if="importedCardRefundTotal > 50" class="service-void-modal__actions" aria-label="旧卡分页">
+        <p v-if="importedCardRefundError" class="service-void-modal__error" role="alert">{{ importedCardRefundError }}</p>
+        <div class="unified-refund-dialog__search">
+          <input v-model.trim="unifiedRefundKeyword" type="search" class="service-void-modal__textarea" :aria-label="unifiedRefundMode === 'card' ? '搜索卡项' : '搜索单据号'" :placeholder="unifiedRefundMode === 'card' ? '搜索卡号、卡名或来源单号' : '搜索单据号'" :readonly="importedCardRefundUncertain" @keydown.enter.prevent="loadImportedCardRefundCards(importedCardRefundMember)" />
+          <button type="button" class="button button--secondary" :disabled="importedCardRefundLoading || importedCardRefundUncertain" @click="loadImportedCardRefundCards(importedCardRefundMember)">查询</button>
+        </div>
+        <div v-if="importedCardRefundLoading" class="imported-card-refund-dialog__empty">正在读取可退款对象…</div>
+        <template v-else-if="unifiedRefundMode === 'card'">
+          <div class="unified-refund-dialog__card-workspace">
+            <section class="unified-refund-dialog__card-column" aria-label="卡项">
+              <div class="unified-refund-dialog__column-head"><h3>卡项</h3><span>共 {{ importedCardRefundTotal }} 张</span></div>
+              <div v-if="!importedCardRefundCards.length" class="imported-card-refund-dialog__empty">该会员没有可退款卡项。</div>
+              <div v-else class="imported-card-refund-dialog__cards">
+                <label v-for="card in importedCardRefundCards" :key="card.holderId" class="imported-card-refund-dialog__card" :class="{ 'imported-card-refund-dialog__card--disabled': !card.canRefund }">
+                  <input v-model="importedCardRefundHolderId" type="radio" name="unified-card-refund" :value="String(card.holderId)" :disabled="!card.canRefund || importedCardRefundUncertain" />
+                  <span class="imported-card-refund-dialog__card-main">
+                    <strong>{{ card.cardName }}</strong>
+                    <small>卡号：{{ card.cardNo || '—' }}</small>
+                    <span class="imported-card-refund-dialog__card-metrics">
+                      <span>成交金额 <strong>{{ importedCardRefundMoney(card.purchaseAmountCents) }}</strong></span>
+                      <span>实际可用次数 <strong>{{ card.remainingTimes }}</strong></span>
+                      <span>实际剩余金额 <strong>{{ importedCardRefundMoney(card.remainingAmountCents) }}</strong></span>
+                      <span>历史退款 <strong>{{ importedCardRefundMoney(card.historicalRefundCents) }}</strong></span>
+                    </span>
+                    <small v-if="card.unavailableReason" class="service-void-modal__error">{{ card.unavailableReason }}</small>
+                  </span>
+                </label>
+              </div>
+            </section>
+            <section class="unified-refund-dialog__component-panel" aria-label="选择卡内项目">
+              <div class="unified-refund-dialog__column-head"><h3>{{ selectedUnifiedRefundCard?.ruleType === 'choice_count' ? '整卡共享次数' : '卡内项目' }}</h3><span v-if="selectedUnifiedRefundCard">共 {{ selectedUnifiedRefundCard.components.length }} 项</span></div>
+              <template v-if="selectedUnifiedRefundCard">
+                <div class="unified-refund-dialog__component-list" role="radiogroup" aria-label="卡内项目">
+                  <label v-for="component in selectedUnifiedRefundCard.components" :key="component.id" class="unified-refund-dialog__component" :class="{ 'unified-refund-dialog__component--disabled': component.remainingAmountCents <= 0 }">
+                    <input v-model="unifiedRefundComponentId" type="radio" name="unified-refund-component" :value="String(component.id)" :disabled="component.remainingAmountCents <= 0 || importedCardRefundUncertain" />
+                    <span class="unified-refund-dialog__component-name">{{ component.name }}</span>
+                    <span class="unified-refund-dialog__component-remaining"><strong>{{ importedCardRefundMoney(component.remainingAmountCents) }}</strong><small>剩余 {{ component.remainingTimes }} 次</small></span>
+                  </label>
+                </div>
+                <div v-if="selectedUnifiedRefundCard.isTimeCard" class="unified-refund-dialog__field">
+                  <label class="service-void-modal__label" for="unified-refund-valid-through">退款后有效期</label>
+                  <input id="unified-refund-valid-through" v-model="unifiedRefundValidThrough" type="date" class="service-void-modal__textarea" required :readonly="importedCardRefundUncertain" />
+                </div>
+              </template>
+              <div v-else class="unified-refund-dialog__component-empty">未选择卡项</div>
+            </section>
+          </div>
+        </template>
+        <template v-else>
+          <div v-if="!unifiedRefundLines.length" class="imported-card-refund-dialog__empty">没有可退款的购买项目或产品明细。</div>
+          <div v-else class="imported-card-refund-dialog__cards">
+            <label v-for="line in unifiedRefundLines" :key="line.lineId" class="imported-card-refund-dialog__card">
+              <input v-model="unifiedRefundLineId" type="radio" name="unified-document-line" :value="line.lineId" :disabled="importedCardRefundUncertain" />
+              <span class="imported-card-refund-dialog__card-main"><strong>{{ line.name }}</strong><small>单据号：{{ line.sourceOrderNo }}　{{ line.itemType === 'project' ? '购买项目' : '产品' }}　实际剩余金额：{{ importedCardRefundMoney(line.remainingAmountCents) }}</small></span>
+            </label>
+          </div>
+        </template>
+        <div v-if="unifiedRefundMode === 'card' && importedCardRefundTotal > 50" class="service-void-modal__actions" aria-label="卡项分页">
           <button type="button" class="button button--secondary" :disabled="importedCardRefundLoading || importedCardRefundUncertain || importedCardRefundPage <= 1" @click="loadImportedCardRefundCards(importedCardRefundMember, importedCardRefundPage - 1)">上一页</button>
           <span>第 {{ importedCardRefundPage }} / {{ Math.ceil(importedCardRefundTotal / 50) }} 页</span>
           <button type="button" class="button button--secondary" :disabled="importedCardRefundLoading || importedCardRefundUncertain || importedCardRefundPage * 50 >= importedCardRefundTotal" @click="loadImportedCardRefundCards(importedCardRefundMember, importedCardRefundPage + 1)">下一页</button>
         </div>
-        <label class="service-void-modal__label" for="imported-card-refund-amount">实际退款金额</label>
-        <input id="imported-card-refund-amount" v-model.trim="importedCardRefundAmount" class="service-void-modal__textarea" inputmode="numeric" placeholder="由操作人核实后填写整数元" :readonly="importedCardRefundUncertain" required />
-        <label class="service-void-modal__label" for="imported-card-refund-reason">退款原因</label>
-        <textarea id="imported-card-refund-reason" v-model.trim="importedCardRefundReason" class="service-void-modal__textarea" maxlength="255" rows="3" placeholder="填写退款原因" :readonly="importedCardRefundUncertain" required></textarea>
+        <div class="unified-refund-dialog__field">
+          <label class="service-void-modal__label" for="imported-card-refund-amount">本次退款金额</label>
+          <input id="imported-card-refund-amount" :value="importedCardRefundAmount" class="service-void-modal__textarea" inputmode="numeric" pattern="[1-9][0-9]*" placeholder="整数元" :readonly="importedCardRefundUncertain" required @beforeinput="blockNonDigitRefundInput" @input="updateWholeYuanRefundInput($event, 'refund')" />
+        </div>
+        <div class="unified-refund-dialog__field">
+          <label class="service-void-modal__label" for="unified-refund-balance">转入余额</label>
+          <input id="unified-refund-balance" :value="unifiedRefundBalanceAmount" class="service-void-modal__textarea" inputmode="numeric" pattern="(?:0|[1-9][0-9]*)" placeholder="整数元，可填 0" :readonly="importedCardRefundUncertain" @beforeinput="blockNonDigitRefundInput" @input="updateWholeYuanRefundInput($event, 'balance')" />
+        </div>
+        <div class="unified-refund-dialog__choices" role="group" aria-label="作废选择">
+          <label><input v-model="unifiedRefundVoid" type="radio" :value="false" /> 不作废</label>
+          <label><input v-model="unifiedRefundVoid" type="radio" :value="true" /> {{ unifiedRefundMode === 'card' ? '作废本卡' : '作废明细' }}</label>
+        </div>
+        <div class="unified-refund-dialog__field">
+          <label class="service-void-modal__label" for="imported-card-refund-reason">退款原因</label>
+          <textarea id="imported-card-refund-reason" v-model.trim="importedCardRefundReason" class="service-void-modal__textarea" maxlength="255" rows="3" placeholder="填写退款原因" :readonly="importedCardRefundUncertain" required></textarea>
+        </div>
+        </div>
         <footer class="service-void-modal__actions">
           <button type="button" class="button button--secondary" :disabled="importedCardRefundUncertain" @click="closeImportedCardRefund">取消</button>
-          <button type="submit" class="button button--primary" :disabled="importedCardRefundSubmitting || importedCardRefundLoading || !importedCardRefundCards.length">{{ importedCardRefundSubmitting ? '提交中…' : importedCardRefundUncertain ? '重试确认' : '确认退款' }}</button>
+          <button type="submit" class="button button--primary" :disabled="importedCardRefundSubmitting || importedCardRefundLoading || (unifiedRefundMode === 'card' ? !importedCardRefundCards.length : !unifiedRefundLines.length)">{{ importedCardRefundSubmitting ? '提交中…' : importedCardRefundUncertain ? '重试确认' : '确认退款' }}</button>
         </footer>
       </form>
     </div>
@@ -3601,12 +3762,59 @@ onBeforeUnmount(() => {
 .sales-order-query-table td:first-child small.sales-order-query-item-cell__business-tag.is-entitlement { background: #d7f2e8; color: #19735b; border-color: transparent; }
 .sales-order-query-group__header .sales-order-query-group__upgrade-tag { background: #eaf1ff; color: #2858b8; border-color: #cbdcf7; }
 .sales-order-query-item-cell__type { color: #66758b; }
-.imported-card-refund-dialog { width: min(760px, calc(100vw - 32px)); }
-.imported-card-refund-dialog__cards { display: grid; gap: 8px; max-height: 300px; overflow: auto; margin: 10px 0 14px; }
-.imported-card-refund-dialog__card { display: flex; gap: 10px; padding: 12px; border: 1px solid #dce4ef; border-radius: 8px; cursor: pointer; }
+.imported-card-refund-dialog { display: flex; flex-direction: column; box-sizing: border-box; width: min(1120px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; overflow: hidden; }
+.imported-card-refund-dialog > .service-void-modal__head { flex: none; padding: 20px 24px 16px; border-bottom: 1px solid #e7ecf2; }
+.imported-card-refund-dialog > .service-void-modal__head p { margin: 6px 0 0; color: #53657c; }
+.unified-refund-dialog__body { display: flex; flex-direction: column; gap: 16px; min-height: 0; padding: 18px 24px 20px; overflow-y: auto; }
+.unified-refund-dialog__body > .service-void-modal__error { margin: 0; }
+.unified-refund-dialog__mode { display: flex; gap: 8px; }
+.unified-refund-dialog__search { display: flex; align-items: center; gap: 8px; }
+.unified-refund-dialog__search .service-void-modal__textarea { flex: 1; min-width: 0; width: auto; }
+.unified-refund-dialog__search .button { flex: none; min-width: 72px; margin-left: auto; }
+.unified-refund-dialog__card-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; flex: none; height: clamp(240px, 38dvh, 380px); min-height: 0; }
+.unified-refund-dialog__card-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.unified-refund-dialog__column-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex: none; margin-bottom: 10px; }
+.unified-refund-dialog__column-head h3 { margin: 0; color: #2c3c51; font-size: 14px; }
+.unified-refund-dialog__column-head > span { color: #66758b; font-size: 12px; white-space: nowrap; }
+.imported-card-refund-dialog__cards { display: grid; gap: 8px; max-height: 240px; padding-right: 4px; overflow: auto; }
+.unified-refund-dialog__card-column > .imported-card-refund-dialog__cards { flex: 1; min-height: 0; max-height: none; align-content: start; }
+.imported-card-refund-dialog__card { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid #dce4ef; border-radius: 6px; cursor: pointer; }
 .imported-card-refund-dialog__card:has(input:checked) { border-color: #4568f5; background: #f3f6ff; }
 .imported-card-refund-dialog__card--disabled { cursor: not-allowed; opacity: .7; }
 .imported-card-refund-dialog__card-main { display: grid; gap: 4px; min-width: 0; }
 .imported-card-refund-dialog__card-main small { color: #667085; }
+.imported-card-refund-dialog__card-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px; color: #667085; font-size: 12px; }
+.imported-card-refund-dialog__card-metrics > span { min-width: 0; }
+.imported-card-refund-dialog__card-metrics strong { color: #344054; font-weight: 600; white-space: nowrap; }
 .imported-card-refund-dialog__empty { padding: 28px 12px; text-align: center; color: #667085; }
+.unified-refund-dialog__component-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 14px 16px; border: 1px solid #dbe3ed; border-radius: 6px; background: #f8fafc; }
+.unified-refund-dialog__component-list { flex: 1; min-height: 0; overflow-y: auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; }
+.unified-refund-dialog__component-empty { display: grid; flex: 1; place-items: center; color: #8a98a9; }
+.unified-refund-dialog__component { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 48px; padding: 9px 12px; cursor: pointer; }
+.unified-refund-dialog__component + .unified-refund-dialog__component { border-top: 1px solid #edf1f5; }
+.unified-refund-dialog__component:has(input:checked) { background: #eaf2ff; }
+.unified-refund-dialog__component--disabled { opacity: .55; cursor: not-allowed; }
+.unified-refund-dialog__component input { margin: 0; }
+.unified-refund-dialog__component-name { min-width: 0; color: #26364b; font-weight: 600; overflow-wrap: anywhere; }
+.unified-refund-dialog__component-remaining { display: flex; align-items: baseline; gap: 12px; white-space: nowrap; text-align: right; }
+.unified-refund-dialog__component-remaining strong { color: #1f5e99; }
+.unified-refund-dialog__component-remaining small { color: #66758b; }
+.unified-refund-dialog__field .service-void-modal__label { margin-bottom: 6px; }
+.unified-refund-dialog__component-panel .unified-refund-dialog__field { margin-top: 14px; }
+.unified-refund-dialog__choices { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.unified-refund-dialog__choices label { display: inline-flex; align-items: center; gap: 6px; }
+.unified-refund-dialog__choices input { margin: 0; }
+.imported-card-refund-dialog > .service-void-modal__actions { flex: none; margin: 0; padding: 14px 24px; border-top: 1px solid #e7ecf2; background: #fff; }
+@media (max-width: 900px) {
+  .unified-refund-dialog__card-workspace { display: flex; flex-direction: column; height: auto; }
+  .unified-refund-dialog__card-column > .imported-card-refund-dialog__cards { flex: none; max-height: 220px; }
+  .unified-refund-dialog__component-panel { min-height: 130px; }
+  .unified-refund-dialog__component-list { flex: none; max-height: 200px; }
+}
+@media (max-width: 560px) {
+  .imported-card-refund-dialog > .service-void-modal__head { padding: 16px 18px 12px; }
+  .unified-refund-dialog__body { gap: 14px; padding: 16px 18px; }
+  .unified-refund-dialog__component-remaining { flex-direction: column; align-items: flex-end; gap: 0; }
+  .imported-card-refund-dialog > .service-void-modal__actions { padding: 12px 18px; }
+}
 </style>

@@ -24,7 +24,7 @@ final class CashierV3BusinessDocumentNumberServices
     private const PREFIXES = [
         self::SALES_ORDER => 'XS',
         self::RECHARGE => 'CZ',
-        self::REFUND => 'TH',
+        self::REFUND => 'TK',
         self::SERVICE => 'FW',
         self::DEBT_REPAYMENT => 'BJ',
         self::GIFT => 'ZS',
@@ -73,17 +73,20 @@ final class CashierV3BusinessDocumentNumberServices
             return (string)$existing['document_no'];
         }
 
+        // TK has no tenant segment, while lifecycle operation_no is globally unique in this database.
+        // Serialize its daily sequence across tenants without changing the tenant-scoped source mapping.
+        $sequenceTenantId = $documentType === self::REFUND ? '__refund_global__' : $tenantId;
         Db::execute(
             'INSERT INTO `eb_cashier_v3_business_document_sequence` (`tenant_id`,`document_type`,`business_date`,`current_value`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `current_value`=LAST_INSERT_ID(`current_value`+1),`updated_at`=VALUES(`updated_at`)',
-            [$tenantId, $documentType, $businessDate, 1, $now, $now]
+            [$sequenceTenantId, $documentType, $businessDate, 1, $now, $now]
         );
         $sequence = (int)Db::name('cashier_v3_business_document_sequence')
-            ->where('tenant_id', $tenantId)
+            ->where('tenant_id', $sequenceTenantId)
             ->where('document_type', $documentType)
             ->where('business_date', $businessDate)
             ->lock(true)
             ->value('current_value');
-        $sequenceWidth = in_array($documentType, [self::RESERVATION, self::DEBT], true) ? 4 : 5;
+        $sequenceWidth = in_array($documentType, [self::RESERVATION, self::DEBT, self::REFUND], true) ? 4 : 5;
         $sequenceLimit = (10 ** $sequenceWidth) - 1;
         if ($sequence < 1 || $sequence > $sequenceLimit) {
             throw new \RuntimeException('cashier_business_document_number_daily_limit_reached');

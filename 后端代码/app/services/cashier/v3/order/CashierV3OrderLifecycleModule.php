@@ -38,6 +38,20 @@ final class CashierV3OrderLifecycleModule
         });
         $service = new CashierV3OrderLifecycleServices($workspace, new CashierV3SaleCatalogServices());
         $importedCardRefund = new CashierV3ImportedCardRefundServices();
+        $unifiedRefund = new CashierV3UnifiedRefundServices();
+        $dispatcher->handlers()->registerProjection('query-unified-refund-candidates', static function (array $scope) use ($unifiedRefund): array {
+            return ['data' => ['unifiedRefundCandidates' => $unifiedRefund->candidates(
+                (array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope'])],
+                'message' => '可退款项目已读取。'];
+        });
+        $dispatcher->handlers()->registerCommand('refund-card-or-line', static function (array $scope) use ($unifiedRefund): array {
+            return $unifiedRefund->executeInTx($scope);
+        });
+        // The service locks the chosen card/line and member balance in one transaction.
+        $dispatcher->policies()->register(new CashierV3ContextPolicy('refund-card-or-line', [], [], static function (): array {
+            return ['required' => [], 'allowed' => [], 'identities' => [],
+                'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
+        }, [], [], [], true));
         // 独立旧卡退款入口不把迁入权益伪装成正式销售单；候选查询与提交共用退款权限。
         $dispatcher->handlers()->registerProjection('query-imported-card-refund-candidates', static function (array $scope) use ($importedCardRefund): array {
             $result = $importedCardRefund->candidates((array)($scope['payload'] ?? []),
@@ -47,8 +61,12 @@ final class CashierV3OrderLifecycleModule
                 'page' => $result['page'], 'pageSize' => $result['pageSize'],
             ]], 'versions' => $result['versions'], 'message' => '可退款旧卡已读取。'];
         });
-        $dispatcher->handlers()->registerCommand('refund-imported-card', static function (array $scope) use ($importedCardRefund): array {
-            return $importedCardRefund->refundInTx($scope);
+        $dispatcher->handlers()->registerCommand('refund-imported-card', static function (array $scope): array {
+            // The old command cancelled debt and closed the whole card; it must not bypass R26's
+            // unpaid-debt gate or partial-refund ledger even if an older client still calls it.
+            throw new CashierV3CommandException(\app\services\cashier\v3\CashierV3ResultCode::INVALID_COMMAND_CONTEXT,
+                '旧卡退款入口已停用，请在退款功能中选择卡项退款。',
+                \app\services\cashier\v3\CashierV3ResultCode::STATUS_FAILED, ['reason' => 'legacy_refund_disabled']);
         });
         // 旧卡退款按确认快照及事务行锁执行跨店终止，独立于核销的跨店开关。
         // 不继承工作台上下文；服务内必须复核候选指纹及卡、欠款权威行。

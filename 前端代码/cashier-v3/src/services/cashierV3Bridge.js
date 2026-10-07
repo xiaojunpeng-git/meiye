@@ -2893,7 +2893,8 @@ function resolveCommandContexts(action, payload) {
   // Let the backend discover and lock the authoritative repayment instead of
   // attaching the currently displayed cashier workspace revision.
   // 项目替换作废以原操作号反查并锁定权益，不能继承收银工作台版本。
-  if (['void-order-center-supplement', 'void-order-center-project-replacement', 'cancel-order-center-debt', 'restore-order-center-debt', 'refund-imported-card'].includes(action)) {
+  // 统一退款以服务端事务锁定选中的卡项或单据明细及会员余额，不继承收银工作台版本。
+  if (['void-order-center-supplement', 'void-order-center-project-replacement', 'cancel-order-center-debt', 'restore-order-center-debt', 'refund-imported-card', 'refund-card-or-line'].includes(action)) {
     return { invalid: false, contexts: [] }
   }
 
@@ -3735,10 +3736,11 @@ export async function requestCashierV3Action(action, payload = {}) {
   // 再由领域事务锁定销售订单及候选预约。
   // 日期／来源更正不引入单据版本：领域事务锁定原单并比较提交时旧值，
   // 因而和独立欠款操作一样允许空 command contexts，不能误拿收银工作台版本阻断。
-  // 旧卡退款同样由领域事务锁定原卡及欠款，并校验候选卡确认快照。
+  // 卡项/明细退款同样由领域事务锁定权威对象，不要求浏览器携带工作台版本。
   const serverDiscoverableContextActions = [
     'cancel-order-center-debt',
     'refund-imported-card',
+    'refund-card-or-line',
     'restore-order-center-debt',
     'void-order-center-supplement',
     'void-order-center-project-replacement',

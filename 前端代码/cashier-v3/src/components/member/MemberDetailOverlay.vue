@@ -89,7 +89,6 @@ const emit = defineEmits(['close', 'tab-change'])
 const DEFAULT_TABS = [
   { key: 'profile', label: '会员概况' },
   { key: 'assets', label: '权益明细' },
-  { key: 'card-operations', label: '卡操作记录' },
   { key: 'balance-changes', label: '余额变动明细' },
   { key: 'sales', label: '销售订单' },
   { key: 'writeoff', label: '服务记录' },
@@ -174,7 +173,10 @@ function cardProjectAmountDisplay(card = {}, project = {}) {
   return isTimeCard(card) ? '—' : money(firstValue(project, ['remainingAmount', 'leftAmount']))
 }
 
-const cardOperations = computed(() => readList(detail.value, ['cardOperations', 'cardOperationRecords', 'cardOperationHistory']))
+const cardHistory = ref(null)
+const cardHistoryCard = ref(null)
+const cardHistoryLoading = ref(false)
+const cardHistoryError = ref('')
 const balanceChanges = computed(() => readList(detail.value, ['balanceChanges', 'balanceChangeRecords', 'balanceHistory']))
 const coupons = computed(() => readList(detail.value, ['coupons', 'couponRecords', 'memberCoupons']))
 const pointChanges = computed(() => readList(detail.value, ['pointChanges', 'pointChangeRecords', 'pointHistory']))
@@ -189,7 +191,7 @@ const debtRecords = computed(() => readList(detail.value, ['debtRecords', 'debts
 const availableActions = computed(() => normalizeActionList(readList(detail.value, ['actions', 'availableActions', 'actionList']), 'member'))
 
 const tabs = DEFAULT_TABS
-const isSearchableTab = computed(() => ['assets', 'card-operations', 'sales', 'writeoff', 'care', 'debt', 'gift', 'points'].includes(activeTab.value))
+const isSearchableTab = computed(() => ['assets', 'sales', 'writeoff', 'care', 'debt', 'gift', 'points'].includes(activeTab.value))
 const tabKeywordPlaceholder = computed(() => {
   if (activeTab.value === 'writeoff') return '输入手艺人或项目后查询'
   if (activeTab.value === 'sales') return '输入商品名称或销售人后查询'
@@ -753,6 +755,33 @@ function actionFailureMessage(result) {
   return response?.message || response?.errorMessage || response?.error || '操作未完成，请稍后重试。'
 }
 
+// Query by immutable holder ID so a transferred card or reused card number cannot
+// leak another card's history into this panel.
+async function openCardHistory(card, page = 1) {
+  if (!props.onAction || !card?.id || cardHistoryLoading.value) return
+  cardHistoryLoading.value = true
+  cardHistoryError.value = ''
+  cardHistoryCard.value = card
+  if (page === 1) cardHistory.value = { cardNo: cardNo(card), holderId: card.id, records: [], total: 0, page: 1, pageSize: 50 }
+  try {
+    const response = await props.onAction({
+      actionCode: 'query-member-card-history', memberId: memberId.value,
+      activeTab: activeTab.value, scope: 'card', record: card, page
+    })
+    if (actionFailed(response)) throw new Error(actionFailureMessage(response))
+    // V3 action adapter wraps projection data in data.data; keep the holder check below
+    // so a valid envelope can never show another card's timeline.
+    const timeline = response?.data?.data?.cardHistory || response?.result?.data?.cardHistory || response?.data?.cardHistory
+      || response?.data?.result?.data?.cardHistory
+    if (!timeline || Number(timeline.holderId) !== Number(card.id)) throw new Error('本卡操作记录未完整返回。')
+    cardHistory.value = timeline
+  } catch (error) {
+    cardHistoryError.value = error?.message || '本卡操作记录读取失败。'
+  } finally {
+    cardHistoryLoading.value = false
+  }
+}
+
 async function triggerAction(action, context = {}) {
   if (!props.onAction || !action || action.disabled || activeActionKey.value) return
 
@@ -940,6 +969,8 @@ async function triggerAction(action, context = {}) {
                   <span>卡号：{{ cardNo(card) }}</span>
                 </div>
                 <div class="member-detail-overlay__record-actions">
+                  <button type="button" class="member-detail-overlay__inline-action"
+                    :disabled="!onAction || cardHistoryLoading" @click="openCardHistory(card)">卡操作记录</button>
                   <button
                     v-for="action in recordActions(card, `card-${cardIndex}`)"
                     :key="action.key"
@@ -1186,37 +1217,6 @@ async function triggerAction(action, context = {}) {
             </section>
           </section>
 
-          <section v-else-if="activeTab === 'card-operations'" class="member-detail-overlay__tab-content" aria-label="卡操作记录">
-            <section class="member-detail-overlay__panel">
-              <header><h3>卡操作记录</h3><span>仅展示当前数据范围内已留痕的卡操作。</span></header>
-              <div class="member-detail-overlay__table-wrap">
-                <table class="member-detail-overlay__table member-detail-overlay__table--wide">
-                  <thead>
-                    <tr><th>操作单号</th><th>业务日期</th><th>操作类型</th><th>原卡名称</th><th>原卡号</th><th>目标内容</th><th>关联会员</th><th>金额</th><th>办理门店</th><th>操作人</th><th>原因</th><th>状态</th><th>完成时间</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="(record, index) in cardOperations" :key="recordKey(record, 'card-operation', index)">
-                      <td>{{ cardOperationNo(record) }}</td>
-                      <td>{{ text(firstValue(record, ['businessDate', 'date'])) }}</td>
-                      <td>{{ text(firstValue(record, ['typeLabel', 'operationTypeLabel', 'operationType'])) }}</td>
-                      <td>{{ text(firstValue(record, ['cardName', 'sourceCardName'])) }}</td>
-                      <td>{{ text(firstValue(record, ['cardNo', 'sourceCardNo'])) }}</td>
-                      <td>{{ text(firstValue(record, ['targetContent', 'targetName'])) }}</td>
-                      <td>{{ text(firstValue(record, ['relatedMemberName', 'memberName'])) }}</td>
-                      <td class="member-detail-overlay__money">{{ money(firstValue(record, ['amount', 'settlementAmount'])) }}</td>
-                      <td>{{ text(firstValue(record, ['storeName', 'handlingStoreName'])) }}</td>
-                      <td>{{ text(firstValue(record, ['operatorName', 'operator'])) }}</td>
-                      <td>{{ text(firstValue(record, ['reason', 'remark'])) }}</td>
-                      <td><span class="member-detail-overlay__record-status">{{ displayStatus(firstValue(record, ['statusLabel', 'status'])) }}</span></td>
-                      <td>{{ text(firstValue(record, ['completedAt', 'occurredAt'])) }}</td>
-                    </tr>
-                    <tr v-if="!cardOperations.length"><td colspan="13" class="member-detail-overlay__table-empty">暂无卡操作记录</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          </section>
-
           <section v-else-if="activeTab === 'balance-changes'" class="member-detail-overlay__tab-content" aria-label="余额变动明细">
             <section class="member-detail-overlay__panel">
               <header><h3>余额变动明细</h3><span>本金、赠金拆分只读取后端余额变更事实。</span></header>
@@ -1342,6 +1342,34 @@ async function triggerAction(action, context = {}) {
         <button type="button" class="member-detail-overlay__button member-detail-overlay__button--secondary" :disabled="activeActionKey !== ''" @click="requestClose">关闭</button>
       </footer>
     </section>
+    <div v-if="cardHistory" class="member-detail-overlay__history-backdrop" role="presentation" @click.self="cardHistory = null">
+      <section class="member-detail-overlay__history-dialog" role="dialog" aria-modal="true" :aria-label="`${cardHistory.cardNo} 卡操作记录`">
+        <header class="member-detail-overlay__history-head">
+          <div><h3>卡操作记录</h3><span>卡号：{{ cardHistory.cardNo }}</span></div>
+          <button type="button" class="member-detail-overlay__inline-action" aria-label="关闭卡操作记录" @click="cardHistory = null">关闭</button>
+        </header>
+        <p v-if="cardHistoryError" class="member-detail-overlay__error" role="alert">{{ cardHistoryError }}</p>
+        <div class="member-detail-overlay__table-wrap member-detail-overlay__history-table">
+          <table class="member-detail-overlay__table member-detail-overlay__table--wide">
+            <thead><tr><th>时间</th><th>操作</th><th>内容</th><th>金额</th><th>门店</th><th>操作人</th><th>结果</th></tr></thead>
+            <tbody>
+              <tr v-for="record in cardHistory.records" :key="record.key">
+                <td>{{ new Date(record.time * 1000).toLocaleString('zh-CN') }}</td>
+                <td>{{ record.type }}</td><td>{{ record.content }}</td><td>{{ record.amount || '—' }}</td>
+                <td>{{ record.store || '—' }}</td><td>{{ record.operatorName || '—' }}</td><td>{{ record.result || '—' }}</td>
+              </tr>
+              <tr v-if="!cardHistory.records.length && !cardHistoryLoading"><td colspan="7" class="member-detail-overlay__table-empty">暂无操作记录</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <footer class="member-detail-overlay__history-footer">
+          <span>共 {{ cardHistory.total }} 条</span>
+          <button type="button" class="member-detail-overlay__inline-action" :disabled="cardHistoryLoading || cardHistory.page <= 1" @click="openCardHistory(cardHistoryCard, cardHistory.page - 1)">上一页</button>
+          <span>{{ cardHistory.page }}</span>
+          <button type="button" class="member-detail-overlay__inline-action" :disabled="cardHistoryLoading || cardHistory.page * cardHistory.pageSize >= cardHistory.total" @click="openCardHistory(cardHistoryCard, cardHistory.page + 1)">下一页</button>
+        </footer>
+      </section>
+    </div>
     <div
       v-if="metricTooltip.visible"
       id="member-detail-metric-tooltip"
@@ -1353,6 +1381,41 @@ async function triggerAction(action, context = {}) {
 </template>
 
 <style scoped>
+.member-detail-overlay__history-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(15 23 42 / 55%);
+}
+
+.member-detail-overlay__history-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 1060px);
+  max-height: 82vh;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.member-detail-overlay__history-head,
+.member-detail-overlay__history-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.member-detail-overlay__history-head h3 { margin: 0; font-size: 16px; }
+.member-detail-overlay__history-head span { font-size: 12px; color: #667085; }
+.member-detail-overlay__history-table { overflow: auto; }
+.member-detail-overlay__history-footer { justify-content: flex-end; border-top: 1px solid #e5e7eb; border-bottom: 0; }
+
 .member-detail-overlay {
   position: fixed;
   z-index: 1320;

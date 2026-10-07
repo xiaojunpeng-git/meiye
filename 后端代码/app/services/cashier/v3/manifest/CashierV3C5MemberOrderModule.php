@@ -61,6 +61,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'query-members' => self::FEATURE_MEMBER,
             'open-member-detail' => self::FEATURE_MEMBER,
             'load-member-detail-tab' => self::FEATURE_MEMBER,
+            'query-member-card-history' => self::FEATURE_MEMBER,
             'open-member-more-actions' => self::FEATURE_MEMBER,
             'open-member-editor' => self::FEATURE_MEMBER_EDIT,
             'open-member-creator' => self::FEATURE_MEMBER_CREATE,
@@ -93,6 +94,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'open-order-refunds' => self::FEATURE_ORDER_REFUND,
             'open-refunds' => self::FEATURE_ORDER_REFUND,
             'query-imported-card-refund-candidates' => self::FEATURE_ORDER_REFUND,
+            'query-unified-refund-candidates' => self::FEATURE_ORDER_REFUND,
             'open-order-void' => self::FEATURE_ORDER_VOID,
             'open-void-record' => self::FEATURE_ORDER_VOID,
             'open-order-reopenings' => self::FEATURE_ORDER_REOPEN,
@@ -118,6 +120,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['correct-debt-repayment-source'] = self::FEATURE_ORDER_CENTER;
         $command['refund-sales-order'] = self::FEATURE_ORDER_REFUND;
         $command['refund-imported-card'] = self::FEATURE_ORDER_REFUND;
+        $command['refund-card-or-line'] = self::FEATURE_ORDER_REFUND;
         $command['void-sales-order'] = self::FEATURE_ORDER_VOID;
         $command['void-service-record'] = self::FEATURE_ORDER_SERVICE_VOID;
         // 编辑入口与保存使用同一服务记录权限快照，不增加第二个功能权限点。

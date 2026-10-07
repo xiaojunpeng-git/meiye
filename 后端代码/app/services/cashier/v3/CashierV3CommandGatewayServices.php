@@ -1774,7 +1774,7 @@ class CashierV3CommandGatewayServices extends BaseServices
         // 重放必须重新解析第一次落回执时保存的 contexts；不能信任本次请求
         // 夹带的版本或只依赖 store_id/operator_id，否则数据范围收窄后会泄露旧 data。
         $storedContexts = json_decode((string)($existing['contexts_json'] ?? ''), true);
-        if (!is_array($storedContexts) || $storedContexts === []) {
+        if (!is_array($storedContexts) || ($storedContexts === [] && $canonicalAction !== 'refund-card-or-line')) {
             return $this->replayDenied(
                 $stateContext,
                 $txnDataScope,
@@ -1783,11 +1783,11 @@ class CashierV3CommandGatewayServices extends BaseServices
                 'stored_contexts_missing'
             );
         }
-        $scopeFailure = $this->historicalReplayScopeFailure(
-            $storedContexts,
-            $operatorScope,
-            $txnDataScope
-        );
+        // Unified refund locks its target inside the domain transaction and intentionally stores
+        // no browser contexts. For this action, recheck the committed operation and today's scope.
+        $scopeFailure = $storedContexts === []
+            ? $this->unifiedRefundReplayScopeFailure($existing, $operatorScope, $txnDataScope)
+            : $this->historicalReplayScopeFailure($storedContexts, $operatorScope, $txnDataScope);
         if ($scopeFailure !== '') {
             return $this->replayDenied(
                 $stateContext,
@@ -1937,6 +1937,31 @@ class CashierV3CommandGatewayServices extends BaseServices
                     return 'stored_context_store_denied';
                 }
             }
+        }
+        return '';
+    }
+
+    /** Empty-context refund receipts may replay only for the same authorized operation/store. */
+    private function unifiedRefundReplayScopeFailure(
+        array $existing,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): string {
+        $identityFailure = $this->historicalReplayScopeFailure([], $operatorScope, $dataScope);
+        if ($identityFailure !== '') return $identityFailure;
+        if ($dataScope->isReadOnlySession() || !$dataScope->allowsStore($operatorScope->storeId())) {
+            return 'refund_replay_store_denied';
+        }
+        $operation = Db::name('cashier_v3_order_lifecycle_operation')
+            ->where('tenant_id', $operatorScope->tenantId())
+            ->where('command_idempotency_key', (string)($existing['idempotency_key'] ?? ''))
+            ->where('store_id', $operatorScope->storeId())
+            ->where('operator_id', $operatorScope->operatorId())
+            ->where('operation_type', 'refund')
+            ->where('status', 'succeeded')->find();
+        if (!$operation || !in_array((string)($operation['source_type'] ?? ''), ['card', 'document'], true)
+            || (string)$operation['operation_no'] !== (string)($existing['business_no'] ?? '')) {
+            return 'refund_replay_operation_missing';
         }
         return '';
     }

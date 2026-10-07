@@ -45,6 +45,11 @@ class UserBalanceAtomicServices extends BaseServices
             'ledger_type' => 'pay_product_refund', 'pm' => 1,
             'title' => '商品退款', 'mark' => '订单余额退款{%num%}元',
         ],
+        // R26 转入余额是独立的会员权益增加，不代表原支付通道已退款。
+        'manual_refund_credit' => [
+            'ledger_type' => 'manual_refund_credit', 'pm' => 1,
+            'title' => '退款转入余额', 'mark' => '退款转入余额{%num%}元',
+        ],
         'order_void' => [
             'ledger_type' => 'order_void', 'pm' => 1,
             'title' => '订单作废冲正', 'mark' => '订单作废退回余额{%num%}元',

@@ -7,8 +7,10 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
+use app\services\cashier\v3\card\CashierV3CardComponentPurchaseAmountAuthority;
 use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
+use app\services\cashier\v3\order\CashierV3CardRefundQuotaPolicy;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use app\services\query\metric\StoreCustomerVisitEligibility;
 use mohe\services\SystemConfigService;
@@ -23,6 +25,86 @@ use think\facade\Db;
  */
 final class CashierV3MemberDetailQueryServices
 {
+    /**
+     * One card's operation timeline uses its physical holder and benefit-detail IDs.
+     * The member-wide card-operation tab cannot safely stand in for this history:
+     * writeoffs and refunds are facts in other tables, and card numbers may repeat.
+     */
+    public function cardHistory(int $memberId, int $holderId, int $page,
+        CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
+    {
+        $this->assertVisible($memberId, $operator, $scope);
+        $holder = (array)Db::name('user_card_holder')->where('id', $holderId)
+            ->where('uid', $memberId)->find();
+        if (!$holder) throw $this->notFound();
+        $order = (array)Db::name('store_order')->where('id', (int)$holder['oid'])
+            ->where('uid', $memberId)->find();
+        if (!$order) throw $this->notFound();
+        $tenantId = $scope->tenantId();
+        $detailIds = array_map('intval', Db::name('store_order_cart_info')
+            ->where('oid', (int)$holder['oid'])->where('cart_type', 2)->where('product_type', 6)->column('id'));
+        $rows = [];
+        $append = static function (string $key, string $type, string $content, string $amount,
+            string $date, int $time, string $store, string $operatorName, string $result) use (&$rows): void {
+            $rows[] = compact('key', 'type', 'content', 'amount', 'date', 'time', 'store', 'operatorName', 'result');
+        };
+        $append('card:' . $holderId, '购卡', (string)$holder['card_name'],
+            (string)($order['pay_price'] ?? '0.00'), date('Y-m-d', (int)$holder['add_time']),
+            (int)$holder['add_time'], (string)Db::name('system_store')->where('id', (int)$holder['store_id'])->value('name'),
+            '', '卡号：' . (string)$holder['card_no']);
+        foreach (Db::name('cashier_v3_card_operation')->where('tenant_id', $tenantId)
+            ->where('source_card_holder_id', $holderId)->select()->toArray() as $row) {
+            $append('operation:' . $row['operation_id'], $this->cardOperationTypeLabel((string)$row['operation_type']),
+                (string)$row['target_catalog_name_snapshot'], $this->moneyFromCents((int)$row['settlement_delta_cents']),
+                (string)$row['business_date'], (int)$row['occurred_at'], (string)$row['store_name_snapshot'],
+                (string)$row['operator_name_snapshot'], (string)$row['reason_snapshot']);
+        }
+        foreach (Db::name('cashier_v3_refund_adjustment')->where('tenant_id', $tenantId)
+            ->where('card_holder_id', $holderId)->where('status', 'effective')->select()->toArray() as $row) {
+            $append('refund:' . $row['adjustment_id'], '退款', (string)$row['target_name_snapshot'],
+                $this->moneyFromCents((int)$row['refund_amount_cents']), (string)$row['business_date'],
+                (int)$row['occurred_at'], (string)Db::name('system_store')->where('id', (int)$row['store_id'])->value('name'),
+                (string)Db::name('system_store_staff')->where('id', (int)$row['operator_id'])->value('staff_name'),
+                ((int)$row['void_target'] ? '作废本卡' : '不作废') . '；' . (string)$row['reason_snapshot']);
+        }
+        if ($detailIds !== []) {
+            $used = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+                ->join('cashier_v3_checkout_line_draft dl',
+                    'dl.line_id=sf.source_line_id AND dl.tenant_id=sf.tenant_id AND dl.draft_status=\'committed\'')
+                ->where('sf.tenant_id', $tenantId)->where('sf.member_id', $memberId)
+                ->whereIn('dl.entitlement_source_detail_id', $detailIds)
+                ->field('sf.service_fact_id,sf.project_name_snapshot,sf.quantity,sf.business_date,sf.occurred_at,sf.store_name_snapshot,sf.operator_name_snapshot')
+                ->select()->toArray();
+            foreach ($used as $row) {
+                $append('writeoff:' . $row['service_fact_id'], '核销',
+                    (string)$row['project_name_snapshot'] . ' ×' . (int)$row['quantity'], '',
+                    (string)$row['business_date'], (int)$row['occurred_at'],
+                    (string)$row['store_name_snapshot'], (string)$row['operator_name_snapshot'], '已完成');
+            }
+        }
+        $debts = Db::name('store_debt')->where('order_id', (int)$holder['oid'])->column('id');
+        if ($debts !== []) {
+            foreach (Db::name('cashier_v3_debt_repayment')->where('tenant_id', $tenantId)
+                ->whereIn('debt_id', $debts)->where('status', 'succeeded')->select()->toArray() as $row) {
+                $append('repayment:' . $row['repayment_id'], '补交', (string)$row['repayment_no'],
+                    $this->moneyFromCents((int)$row['repayment_amount_cents']), (string)$row['business_date'],
+                    (int)$row['occurred_at'], (string)$row['store_name_snapshot'],
+                    (string)$row['operator_name_snapshot'], '已完成');
+            }
+            foreach (Db::name('cashier_v3_debt_cancellation')->where('tenant_id', $tenantId)
+                ->whereIn('debt_id', $debts)->select()->toArray() as $row) {
+                $append('debt-cancel:' . $row['cancellation_id'], '取消欠款', (string)$row['debt_no_snapshot'],
+                    $this->moneyFromCents((int)$row['cancelled_debt_cents']), (string)$row['business_date'],
+                    (int)$row['occurred_at'], (string)$row['store_name_snapshot'],
+                    (string)$row['operator_name_snapshot'], (string)$row['reason_snapshot']);
+            }
+        }
+        usort($rows, static fn(array $a, array $b): int => [$b['time'], $b['key']] <=> [$a['time'], $a['key']]);
+        $page = max(1, $page);
+        return ['holderId' => $holderId, 'cardNo' => (string)$holder['card_no'],
+            'records' => array_slice($rows, ($page - 1) * 50, 50),
+            'total' => count($rows), 'page' => $page, 'pageSize' => 50];
+    }
     /**
      * AI uses the same authoritative balance/card readers as cashier detail,
      * but does not load unrelated service, care or history tabs for each member.
@@ -999,7 +1081,6 @@ final class CashierV3MemberDetailQueryServices
         $holderQuery = Db::name('user_card_holder')->alias('h')
             ->join('store_order o', 'o.id = h.oid')
             ->whereIn('h.uid', $memberIds)
-            ->where('h.is_del', 0)
             ->where('h.store_id', '>', 0)
             // 整卡转让只改变当前持卡人；原购卡人仍留在订单上供债务归属和审计。
             ->where('o.paid', 1)
@@ -1008,6 +1089,9 @@ final class CashierV3MemberDetailQueryServices
             ->where('o.is_user_del', 0)
             ->where('o.card_upgrade_use_oid', 0);
         if ($activeOnly) {
+            // Voided cards remain readable under "all" for card-specific audit,
+            // but must never re-enter the active rights selector.
+            $holderQuery->where('h.is_del', 0);
             $holderQuery->where('h.write_surplus_times', '>', 0)->where('o.refund_status', 0)->where('o.terminal_action', 0);
         }
         if ($dateFrom !== '') $holderQuery->where('h.add_time', '>=', strtotime($dateFrom . ' 00:00:00'));
@@ -1043,11 +1127,21 @@ final class CashierV3MemberDetailQueryServices
             ->whereIn('current_member_id', $memberIds)
             ->whereIn('card_holder_id', $holderIds)
             ->column('card_status', 'card_holder_id');
-        $cardRuleTypeByHolder = Db::name('cashier_v3_card_rule_state')
+        $cardRules = Db::name('cashier_v3_card_rule_state')
             ->where('tenant_id', $tenantId)
             // 规则签发快照保留原会员，转让后必须按持卡实例识别卡规则。
             ->whereIn('card_holder_id', $holderIds)
-            ->column('rule_type', 'card_holder_id');
+            ->field('card_holder_id,rule_type,shared_total_times,shared_remaining_times')->select()->toArray();
+        $cardRulesByHolder = [];
+        foreach ($cardRules as $cardRule) $cardRulesByHolder[(int)$cardRule['card_holder_id']] = $cardRule;
+        $sharedRefunds = [];
+        foreach (Db::name('cashier_v3_refund_adjustment')->where('tenant_id', $tenantId)
+            ->whereIn('card_holder_id', $holderIds)->where('status', 'effective')
+            ->field('card_holder_id,refund_amount_cents,times_removed')->select()->toArray() as $refund) {
+            $id = (int)$refund['card_holder_id'];
+            $sharedRefunds[$id]['returned'] = ($sharedRefunds[$id]['returned'] ?? 0) + (int)$refund['refund_amount_cents'];
+            $sharedRefunds[$id]['removed'] = ($sharedRefunds[$id]['removed'] ?? 0) + (int)$refund['times_removed'];
+        }
         $ruleAuthoritiesByHolder = (new CashierV3CardRuleEntitlementAuthorityServices())
             ->authoritiesForHolders($tenantId,$holderIds);
 
@@ -1116,17 +1210,22 @@ final class CashierV3MemberDetailQueryServices
                     ? json_decode((string)$row['cart_info'], true)
                     : ($row['cart_info'] ?? []);
                 $snapshot = is_array($snapshot) ? $snapshot : [];
-                $amountAuthority = $this->cardComponentPurchaseAmountAuthority(
+                $amountAuthority = (new CashierV3CardComponentPurchaseAmountAuthority())->resolve(
                     $row,
                     $snapshot,
                     $actualSaleAmounts,
                     $ruleAuthoritiesByHolder[(int)($holderByOrder[(int)($row['oid'] ?? 0)]['id'] ?? 0)][(int)($row['id'] ?? 0)] ?? null
                 );
+                // Formal rule authority supplies the immutable sale amount, while
+                // refunds live on the cart's current snapshot. Both are needed.
+                $allocationSnapshot = $amountAuthority['allocationSnapshot'];
+                $allocationSnapshot['r26RefundedCents'] = (int)($snapshot['r26RefundedCents'] ?? 0);
+                $allocationSnapshot['r26RefundRemovedTimes'] = (int)($snapshot['r26RefundRemovedTimes'] ?? 0);
                 $amount = CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
-                    $amountAuthority['purchaseAmount'],
+                    $this->moneyFromCents($amountAuthority['purchaseAmountCents']),
                     $total,
                     $total - $remaining,
-                    $amountAuthority['allocationSnapshot']
+                    $allocationSnapshot
                 );
                 $orderId = (int)$row['oid'];
                 $originOrder = (array)($originOrders[$orderId] ?? []);
@@ -1149,7 +1248,7 @@ final class CashierV3MemberDetailQueryServices
                 'id' => (string)($row['id'] ?? ''),
                 'projectName' => $this->projectName($row['cart_info'] ?? ''),
                 'purchaseTimes' => $total,
-                'usedTimes' => $total - $remaining,
+                'usedTimes' => $total - $remaining - (int)($snapshot['r26RefundRemovedTimes'] ?? 0),
                 'remainingTimes' => $remaining,
                 'debtLimitedRemainingTimes' => min($remaining, max(0, $effective)),
                 'remainingAmount' => $amount,
@@ -1176,9 +1275,32 @@ final class CashierV3MemberDetailQueryServices
                 $remainingAmount = bcadd($remainingAmount, (string)$project['remainingAmount'], 2);
             }
             $holderId = (int)($holder['id'] ?? 0);
-            $cardRuleType = (string)($cardRuleTypeByHolder[$holderId] ?? '');
+            $cardRule = (array)($cardRulesByHolder[$holderId] ?? []);
+            $cardRuleType = (string)($cardRule['rule_type'] ?? '');
             if ($cardRuleType === 'choice_count' && $projects) {
-                // 多项目共享同一次数池；详情父卡不可按子项目求和。
+                // 多项目共享同一次数池和整卡金额；退款只更新共享池，不改旧项目行。
+                $remainingTimes = (int)$cardRule['shared_remaining_times'];
+                $refund = (array)($sharedRefunds[$holderId] ?? []);
+                if ((int)($refund['returned'] ?? 0) > 0
+                    && (string)($cardStatusByHolder[$holderId] ?? 'enabled') === 'enabled') {
+                    try {
+                        $quota = CashierV3CardRefundQuotaPolicy::sharedPool(
+                            (string)($holder['order_pay_price'] ?? ''), (int)$cardRule['shared_total_times'],
+                            $remainingTimes, (int)$refund['returned'], (int)($refund['removed'] ?? 0));
+                    } catch (\InvalidArgumentException $error) {
+                        throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                            '本卡共享次数与退款金额不一致，请联系管理员核对。', CashierV3ResultCode::STATUS_FAILED,
+                            ['reason' => 'member_shared_refund_value_mismatch']);
+                    }
+                    $remainingAmount = $this->moneyFromCents($quota['remainingValueCents']);
+                } elseif ((string)($cardStatusByHolder[$holderId] ?? 'enabled') !== 'enabled') {
+                    $remainingAmount = '0.00';
+                }
+                foreach ($projects as &$project) {
+                    $project['remainingTimes'] = min((int)$project['remainingTimes'], $remainingTimes);
+                    $project['debtLimitedRemainingTimes'] = min((int)$project['debtLimitedRemainingTimes'], $remainingTimes);
+                }
+                unset($project);
                 $firstRow = $rowsById[(int)$projects[0]['id']] ?? null;
                 $originOrder = (array)($originOrders[(int)$orderId] ?? []);
                 if ($firstRow && $originOrder) {
@@ -1195,6 +1317,12 @@ final class CashierV3MemberDetailQueryServices
                     (int)($originOrders[(int)$orderId]['uid'] ?? 0), $tenantId
                 );
                 $remainingAmount = max('0.00', bcsub($remainingAmount, $cancelled, 2));
+                // A time-card refund changes value but does not fabricate usage.
+                $refundedCents = (int)Db::name('cashier_v3_refund_adjustment')
+                    ->where('tenant_id', $tenantId)->where('card_holder_id', $holderId)
+                    ->where('status', 'effective')->sum('refund_amount_cents');
+                $remainingAmount = max('0.00', bcsub($remainingAmount,
+                    $this->moneyFromCents($refundedCents), 2));
             }
             $statusCode = (string)($cardStatusByHolder[$holderId] ?? 'enabled');
             $cards[(int)$holder['uid']][] = [
@@ -1216,67 +1344,6 @@ final class CashierV3MemberDetailQueryServices
             ];
         }
         return $cards;
-    }
-
-    /**
-     * Resolves one card component's immutable purchase amount. The component
-     * cart price is only a legacy fallback: a completed V3 allocation, current
-     * issued-card rule snapshot, or recorded RH source-line payment wins.
-     *
-     * @param array<int,int> $actualSaleAmounts
-     * @return array{purchaseAmount:string,allocationSnapshot:array}
-     */
-    private function cardComponentPurchaseAmountAuthority(
-        array $row,
-        array $snapshot,
-        array $actualSaleAmounts,
-        ?array $ruleAuthority
-    ): array {
-        $actualSaleAmountCents = (int)($actualSaleAmounts[(int)($row['id'] ?? 0)] ?? -1);
-        if ($actualSaleAmountCents >= 0) {
-            $allocationSnapshot = $snapshot;
-            // Cent-level allocation facts must preserve their exact cents,
-            // rather than being rounded through the legacy whole-yuan path.
-            if ($actualSaleAmountCents % 100 !== 0) {
-                $allocationSnapshot['amountCalculationVersion'] = 'operation-cent-card-sale-actual-amount';
-            }
-            return [
-                'purchaseAmount' => $this->moneyFromCents($actualSaleAmountCents),
-                'allocationSnapshot' => $allocationSnapshot,
-            ];
-        }
-
-        // Match the entitlement selector's priority: an ordinary formally
-        // issued card reads its immutable rule component amount, not the
-        // legacy cart's configured value. Cent-capable operation snapshots
-        // remain on their own explicit source path.
-        if (!CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($snapshot)
-            && is_array($ruleAuthority)) {
-            $rulePurchaseAmountCents = (int)($ruleAuthority['purchaseAmountCents'] ?? -1);
-            if ($rulePurchaseAmountCents >= 0 && $rulePurchaseAmountCents % 100 === 0) {
-                return [
-                    'purchaseAmount' => $this->moneyFromCents($rulePurchaseAmountCents),
-                    'allocationSnapshot' => $ruleAuthority,
-                ];
-            }
-        }
-
-        $legacySource = is_array($snapshot['rh_source'] ?? null) ? $snapshot['rh_source'] : [];
-        if (array_key_exists('source_line_paid_amount', $legacySource)) {
-            $paidAmount = $this->nonnegativeMoney($legacySource['source_line_paid_amount']);
-            if ($paidAmount === null) {
-                throw new \InvalidArgumentException('rh source-line payment amount is invalid');
-            }
-            return [
-                'purchaseAmount' => $paidAmount,
-                'allocationSnapshot' => $snapshot,
-            ];
-        }
-
-        return [
-            'purchaseAmount' => $this->money($row['pay_price'] ?? 0),
-            'allocationSnapshot' => $snapshot,
-        ];
     }
 
     /** @return array{tab:string,keyword:string,status:string,dateFrom:string,dateTo:string} */
@@ -1389,6 +1456,8 @@ final class CashierV3MemberDetailQueryServices
             'order_payment' => '余额支付',
             'order_void' => '订单作废返还', 'order_refund' => '订单退款返还',
             'balance_restored' => '余额返还', 'recharge_debt_repayment_credit' => '欠款补交转余额',
+            // 退款仍保留原始类型码用于对账，会员页面只展示可理解的业务名称。
+            'manual_refund_credit' => '退款转入余额',
         ];
         $label = $labels[$normalized] ?? (trim($value) !== '' ? $value : '余额变动');
         return strtolower(trim($direction)) === 'reversal' && !str_contains($label, '返还') ? $label . '冲销' : $label;
@@ -1449,7 +1518,8 @@ final class CashierV3MemberDetailQueryServices
 
     private function sourceDocumentLabel(string $value): string
     {
-        $labels = ['sales' => '销售订单', 'recharge' => '充值订单', 'debt_repayment' => '欠款补交'];
+        $labels = ['sales' => '销售订单', 'recharge' => '充值订单',
+            'debt_repayment' => '欠款补交', 'manual_refund' => '退款记录'];
         $key = strtolower(trim($value));
         return $labels[$key] ?? (trim($value) !== '' ? $value : '—');
     }
@@ -1478,18 +1548,6 @@ final class CashierV3MemberDetailQueryServices
         $raw = trim((string)$value);
         if (!preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,8})?$/', $raw)) {
             return '0.00';
-        }
-        return bcadd($raw, '0', 2);
-    }
-
-    private function nonnegativeMoney($value): ?string
-    {
-        if (is_bool($value) || is_array($value) || is_object($value) || $value === null) {
-            return null;
-        }
-        $raw = trim((string)$value);
-        if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.0{1,2})?$/D', $raw) !== 1) {
-            return null;
         }
         return bcadd($raw, '0', 2);
     }
