@@ -22,6 +22,12 @@ if (!app.includes("subject_type:'NORMAL'") || !app.includes('团建费')) throw 
 if (!app.includes('monthStart()') || !app.includes("'期初'")) throw new Error('资金 Vue3 台账缺少月初默认筛选或期初展示行')
 if (!fundPackage.includes('"@mohe/unified-query-vue3"') || !localStartup.includes('-v "$ROOT/前端代码/shared:/shared:ro"')) throw new Error('费用工程缺少共享 Vue3 周期控件依赖或本地源码挂载')
 for (const field of ['documentRange', 'ledgerRange', 'reportRange']) if (!app.includes(`:model-value="${field}"`)) throw new Error(`费用视图缺少统一查询周期：${field}`)
+const dateRangeHandler = app.match(/function applyDateRange\(target,\{min,max\}\)\{[^}]+\}/)?.[0]
+if (!dateRangeHandler) throw new Error('费用周期回调缺失')
+const updateDateRange = new Function(`${dateRangeHandler}; return applyDateRange`)()
+const draftFilters = { date_from: '2026-10-01', date_to: '2026-10-07' }
+updateDateRange(draftFilters, { min: '2026-09-21', max: '2026-09-29' })
+if (draftFilters.date_from !== '2026-09-21' || draftFilters.date_to !== '2026-09-29') throw new Error('选择历史日期后未更新当前视图筛选条件')
 if (!app.includes("const filters=ref({date_from:monthStart(),date_to:today()")) throw new Error('收支单没有默认本月日期')
 if (!app.includes('page:documentsPage.value,limit:documentsLimit.value') || !app.includes('documentsCount.value=Number(data.count)') || !app.includes('changeDocumentPage(documentsPage+1)')) throw new Error('收支单没有使用服务端分页与总数')
 if (!app.includes('documentsLimit=ref(10)') || !app.includes('<option :value="10">10</option>')) throw new Error('收支单默认每页应为 10 条')

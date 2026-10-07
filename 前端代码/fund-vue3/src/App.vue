@@ -19,8 +19,8 @@ const documentsPages=computed(()=>Math.max(1,Math.ceil(documentsCount.value/docu
 const documentRange=computed(()=>({min:filters.value.date_from,max:filters.value.date_to}))
 const ledgerRange=computed(()=>({min:ledgerFilters.value.date_from,max:ledgerFilters.value.date_to}))
 const reportRange=computed(()=>({min:reportFilters.value.date_from,max:reportFilters.value.date_to}))
-// 周期选择只改变对应视图的草稿条件，点击查询后才更新该视图的结果。
-function applyDateRange(target,{min,max}){target.value.date_from=min;target.value.date_to=max}
+// 模板传入的 ref 已自动解包；只更新当前视图草稿条件，点击查询后才刷新结果。
+function applyDateRange(target,{min,max}){target.date_from=min;target.date_to=max}
 const form=ref(blank())
 function blank(){return {id:0,store_id:'',business_date:today(),direction:'EXPENSE',summary:'',remark:'',lines:[{subject_id:'',amount:'',summary:'',remark:''}]}}
 function cookie(name){const matched=document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));return matched?decodeURIComponent(matched[1]).trim():''}
