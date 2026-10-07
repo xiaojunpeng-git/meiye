@@ -8,6 +8,7 @@ use app\services\mobile\merchant\MobileMerchantAnalyticsEntryPolicy;
 use app\services\mobile\merchant\MobileMerchantAnalyticsEntryScopeServices;
 use app\services\mobile\protocol\MobileApiException;
 use app\services\mobile\warehouse\MobileWarehouseHierarchyProjector;
+use app\services\query\metric\StoreCustomerVisitEligibility;
 use InvalidArgumentException;
 use think\facade\Db;
 
@@ -385,14 +386,14 @@ final class MobileCustomerAudienceOverviewServices
     {
         $visits = [];
         $tenantId = (string)($merchant['tenantId'] ?? '0');
-        $rows = Db::name('cashier_v3_entitlement_service_fact')
+        $query = Db::name('cashier_v3_entitlement_service_fact')->alias('service')
             ->where('tenant_id', $tenantId)
             ->whereIn('store_id', $scopeStoreIds)
-            ->where('service_status', 'completed')
-            ->field('member_id,store_id,MAX(business_date) AS latest_date')
-            ->group('member_id,store_id')
-            ->select()
-            ->toArray();
+            ->where('service_status', 'completed');
+        // 客群的“最近到店”按门店到店资格计算，体验服务不能刷新到店日。
+        StoreCustomerVisitEligibility::apply($query, 'service');
+        $rows = $query->field('service.member_id,service.store_id,MAX(service.business_date) AS latest_date')
+            ->group('service.member_id,service.store_id')->select()->toArray();
         foreach ($rows as $row) {
             $memberId = (int)($row['member_id'] ?? 0);
             $storeId = (int)($row['store_id'] ?? 0);

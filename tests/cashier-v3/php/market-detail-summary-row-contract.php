@@ -15,9 +15,11 @@ $checks = [
     'market detail explains source-specific effective thresholds and member-level summary' => strpos($service, "if(\$title==='市场明细表')\$columns=\$this->marketDetailColumnExplanations(\$columns)") !== false
         && strpos($service, 'A 来源至少 1,000 元，其他来源至少 500 元') !== false
         && strpos($service, '同一会员跨日期可能显示多行 1，但合计按会员去重') !== false,
+    // 门店市场说明要与实际同单去重边界一致，且明确人员开关不改变本列。
     'market detail explains member-day amount and member-or-guest visits' => strpos($service, '合计本行会员当天在该门店和来源下的有效记账收款净额') !== false
-        && strpos($service, '游客每张有效服务单记 1') !== false
-        && strpos($service, '同单多项目不重复，不要求当次有收款') !== false,
+        && strpos($service, '游客每张可关联销售单记 1') !== false
+        && strpos($service, '同单多项目不重复，不要求当次有收款') !== false
+        && strpos($service, '“不算人数人次”只影响人员统计，不影响本列') !== false,
     'market performance and detail expose business-language source explanations' => strpos($service, "if(\$title==='市场业绩表')\$columns=\$this->marketPerformanceColumnExplanations(\$columns)") !== false
         && strpos($service, '新旧值不会重复相加。仅 B 来源显示该列') !== false
         && strpos($service, '退款会抵减，已作废销售不计') !== false

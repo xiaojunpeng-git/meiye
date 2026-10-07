@@ -59,8 +59,8 @@ $visitExplanation = static function (array $report, string $key): string {
 checkMarketExperience(strpos($visitExplanation($query('market_performance'), 'channel_' . $sourceId . '_visits'), '非体验') !== false
     && strpos($visitExplanation($query('market_detail'), 'visits'), '非体验') !== false,
     'Market visit column explanations do not describe the experience exclusion');
-// R26 说明必须随实际报表契约返回：两种标记不计人次，但不能误导用户认为
-// 整行、有效人员或收款也被删除；所有动态来源列与明细都检查，防止仅修 B 来源。
+// R29 门店市场只排除体验服务；人员的“不算人数人次”开关不得误导为门店人次资格。
+// 所有动态来源列与明细都检查，防止只修改单一来源或漏掉金额说明。
 foreach (['market_performance', 'market_detail'] as $reportCode) {
     foreach ($query($reportCode)['columns'] as $column) {
         $key = (string)$column['key'];
@@ -73,10 +73,10 @@ foreach (['market_performance', 'market_detail'] as $reportCode) {
             && strpos($explanation, '“不算人数人次”') !== false,
             'Missing explicit service labels: ' . $reportCode . ':' . $key);
         if ($visitColumn) {
-            checkMarketExperience(strpos($explanation, '只排除人次') !== false
+            checkMarketExperience(strpos($explanation, '只影响人员统计，不影响本列') !== false
                 && strpos($explanation, '其他符合条件的服务') !== false
                 && strpos($explanation, '整行') !== false,
-                'Missing mixed-service or row-visibility boundary: ' . $reportCode . ':' . $key);
+                'Missing personnel/market split, mixed-service or row-visibility boundary: ' . $reportCode . ':' . $key);
         }
     }
 }
@@ -125,6 +125,14 @@ try {
     checkMarketExperience($visits() === $baselineVisits + 1
         && (int)($detailRow($pseudoOrderId, ['metric_code' => 'visits'])['visits'] ?? 0) === 1,
         'Normal service not counted in summary and drilldown');
+    // 人员开关关闭后，正常服务仍必须保留门店市场人次、明细与下钻。
+    Db::name('cashier_v3_entitlement_service_fact')->where('service_fact_id', $serviceFactId)
+        ->update(['friend_counts_as_customer' => 0]);
+    checkMarketExperience($visits() === $baselineVisits + 1
+        && (int)($detailRow($pseudoOrderId, ['metric_code' => 'visits'])['visits'] ?? 0) === 1,
+        'Personnel no-count flag incorrectly removed normal market visit');
+    Db::name('cashier_v3_entitlement_service_fact')->where('service_fact_id', $serviceFactId)
+        ->update(['friend_counts_as_customer' => 1]);
 
     // 同一会员同日混合体验与非体验项目，只由非体验项目取得一次人次。
     $mixed = $fact;
@@ -169,8 +177,10 @@ try {
         && (int)($detailRow($guestOrderId)['visits'] ?? -1) === 0,
         'Experience guest was counted or its zero-visit row disappeared');
     $allDetail = $query('market_detail', ['_internal_all' => true]);
-    checkMarketExperience((string)($allDetail['metric_version'] ?? '') === 'market-visits-non-experience-v2'
+    checkMarketExperience((string)($allDetail['metric_version'] ?? '') === 'market-visits-experience-only-v3'
         && (string)($query('market_performance')['metric_version'] ?? '') === (string)$allDetail['metric_version']
+        && array_key_exists('service_customer_rule_version', $allDetail)
+        && $allDetail['service_customer_rule_version'] === null
         && array_filter($allDetail['records'], static function (array $row) use ($guestOrderId): bool {
             return in_array($guestOrderId, array_column((array)($row['_market_orders'] ?? []), 'order_id'), true)
                 && (int)($row['visits'] ?? -1) === 0;

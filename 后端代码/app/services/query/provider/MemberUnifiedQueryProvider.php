@@ -8,6 +8,7 @@ use app\services\query\UnifiedQueryException;
 use app\services\query\UnifiedQueryExecutionServices;
 use app\services\query\UnifiedQueryPreferenceServices;
 use app\services\query\UnifiedQueryProvider;
+use app\services\query\metric\StoreCustomerVisitEligibility;
 use think\facade\Db;
 
 /**
@@ -420,20 +421,23 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         $tenantId = trim((string)($context['tenant_id'] ?? ''));
         if ($field === 'latest_visit_date') {
             $table = $quoteTable('cashier_v3_entitlement_service_fact');
+            // 到店筛选与会员摘要共用冻结的体验资格；人员统计标记不能影响门店日期。
+            $visitCondition = ' AND ' . StoreCustomerVisitEligibility::sqlPredicate('sf');
+            $visitCondition2 = ' AND ' . StoreCustomerVisitEligibility::sqlPredicate('sf2');
             [$scopeSql, $scopeParams] = $storeScope('sf', $visibleStoreIds, $allStores);
             if (is_array($rawValue) && $operator === 'between' && count($rawValue) === 2) {
                 $start = (string)$rawValue[0]; $end = (string)$rawValue[1];
                 $scope2 = str_replace('sf.', 'sf2.', $scopeSql);
                 return [
-                    'sql' => 'EXISTS (SELECT 1 FROM ' . $table . ' sf WHERE sf.member_id = u.uid AND sf.tenant_id = ? AND sf.service_status = \'completed\' AND sf.business_date BETWEEN ? AND ?' . $scopeSql . ')'
-                        . ' AND NOT EXISTS (SELECT 1 FROM ' . $table . ' sf2 WHERE sf2.member_id = u.uid AND sf2.tenant_id = ? AND sf2.service_status = \'completed\' AND sf2.business_date > ?' . $scope2 . ')',
+                    'sql' => 'EXISTS (SELECT 1 FROM ' . $table . ' sf WHERE sf.member_id = u.uid AND sf.tenant_id = ? AND sf.service_status = \'completed\'' . $visitCondition . ' AND sf.business_date BETWEEN ? AND ?' . $scopeSql . ')'
+                        . ' AND NOT EXISTS (SELECT 1 FROM ' . $table . ' sf2 WHERE sf2.member_id = u.uid AND sf2.tenant_id = ? AND sf2.service_status = \'completed\'' . $visitCondition2 . ' AND sf2.business_date > ?' . $scope2 . ')',
                     'params' => array_merge([$tenantId, $start, $end], $scopeParams, [$tenantId, $end], $scopeParams),
                 ];
             }
             if ($tenantId === '' || !in_array($operator, ['greater_or_equal', 'less_or_equal'], true)) return null;
             $value = trim((string)$rawValue);
             return [
-                'sql' => 'EXISTS (SELECT 1 FROM ' . $table . ' sf WHERE sf.member_id = u.uid AND sf.tenant_id = ? AND sf.service_status = \'completed\' AND sf.business_date ' . ($operator === 'greater_or_equal' ? '>= ' : '<= ') . '?' . $scopeSql . ')',
+                'sql' => 'EXISTS (SELECT 1 FROM ' . $table . ' sf WHERE sf.member_id = u.uid AND sf.tenant_id = ? AND sf.service_status = \'completed\'' . $visitCondition . ' AND sf.business_date ' . ($operator === 'greater_or_equal' ? '>= ' : '<= ') . '?' . $scopeSql . ')',
                 'params' => array_merge([$tenantId, $value], $scopeParams),
             ];
         }
@@ -992,21 +996,23 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             throw new \RuntimeException('会员到店事实缺少租户范围');
         }
         $columns = $this->tableColumns('cashier_v3_entitlement_service_fact');
-        foreach (['id', 'tenant_id', 'store_id', 'member_id', 'business_date', 'settled_at', 'service_status', 'craftsmen_snapshot_json'] as $required) {
+        foreach (['id', 'tenant_id', 'store_id', 'member_id', 'business_date', 'settled_at', 'service_status', 'is_experience', 'craftsmen_snapshot_json'] as $required) {
             if (!isset($columns[$required])) {
                 throw new \RuntimeException('会员到店事实表缺少权威字段：' . $required);
             }
         }
-        $query = Db::name('cashier_v3_entitlement_service_fact')
-            ->where('tenant_id', $tenantId)
-            ->whereIn('member_id', $uids)
-            ->where('service_status', 'completed');
+        $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+            ->where('sf.tenant_id', $tenantId)
+            ->whereIn('sf.member_id', $uids)
+            ->where('sf.service_status', 'completed');
+        // 会员列表的到店次数、最近到店及手艺人来自同一批非体验服务。
+        StoreCustomerVisitEligibility::apply($query, 'sf');
         if (!$allStores) {
-            $query->whereIn('store_id', $visible);
+            $query->whereIn('sf.store_id', $visible);
         }
         $rows = $query
-            ->field("member_id AS uid,COUNT(DISTINCT business_date) AS visit_count,MAX(business_date) AS latest_date,SUBSTRING_INDEX(GROUP_CONCAT(id ORDER BY settled_at DESC,id DESC), ',', 1) AS latest_service_fact_id")
-            ->group('member_id')
+            ->field("sf.member_id AS uid,COUNT(DISTINCT sf.business_date) AS visit_count,MAX(sf.business_date) AS latest_date,SUBSTRING_INDEX(GROUP_CONCAT(sf.id ORDER BY sf.settled_at DESC,sf.id DESC), ',', 1) AS latest_service_fact_id")
+            ->group('sf.member_id')
             ->select()
             ->toArray();
         $latestFactIds = array_values(array_unique(array_filter(array_map(

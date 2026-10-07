@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace app\services\report;
 
+use app\services\query\metric\StoreCustomerVisitEligibility;
 use think\facade\Db;
 
 /**
@@ -57,6 +58,8 @@ final class CustomerLifecycleNormalReadServices
             ->where('life.event_type', 'service_completed')->where('life.status', 'effective')
             ->where('service.service_status', 'completed');
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($visits, 'service');
+        // 生命周期的到店次数沿用统一门店资格，不能受手艺人人员统计开关影响。
+        StoreCustomerVisitEligibility::apply($visits, 'service');
         $visitRows = $visits->fieldRaw('life.member_id,COUNT(DISTINCT life.id) visit_count,MAX(life.occurred_at) last_service_at')
             ->group('life.member_id')->select()->toArray();
         foreach ($visitRows as $row) {

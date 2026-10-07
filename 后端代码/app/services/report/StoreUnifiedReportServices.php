@@ -1323,6 +1323,8 @@ class StoreUnifiedReportServices extends BaseServices
         $query = $this->withStoreScope(Db::name('cashier_v3_entitlement_service_fact')->alias('s'), $storeId)->whereIn('s.member_id', $memberIds)
             ->whereBetween('s.business_date', [$range['start'], $range['end']])->where('s.service_status', 'completed');
         $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 's');
+        // 客户活跃按门店真实到店判定；体验不占到店，人员不计数开关不影响顾客状态。
+        \app\services\query\metric\StoreCustomerVisitEligibility::apply($query, 's');
         $rows = $query->field('s.member_id')->group('s.member_id')->select()->toArray();
         $result = []; foreach ($rows as $row) $result[(int)$row['member_id']] = true;
         return $result;

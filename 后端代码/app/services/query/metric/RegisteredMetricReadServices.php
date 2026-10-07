@@ -571,10 +571,11 @@ final class RegisteredMetricReadServices
             $query = call_user_func($this->queryFactory, 'cashier_v3_entitlement_service_fact')->alias('s')
                 ->where('s.tenant_id', $tenantId)->whereIn('s.store_id', $stores)
                 ->whereBetween('s.business_date', [$range['start'], $range['end']])
-                ->where('s.service_status', 'completed')->where('s.member_id', '>', 0)->group('s.member_id');
+                ->where('s.service_status', 'completed')
+                ->where('s.member_id', '>', 0)->group('s.member_id');
             call_user_func($this->normalServices, $query, 's');
-            // 条件查询和报表共用服务客数资格，不再保留独立的朋友计数口径。
-            ServiceCustomerEligibility::apply($query, 's');
+            StoreCustomerVisitEligibility::apply($query, 's');
+            // 会员到店条件与门店报表同源：体验服务排除，人员不计数开关不参与。
             return [$query, "COUNT(DISTINCT CONCAT(s.store_id,'|',s.business_date))"];
         }
         if (($contract['reader_strategy'] ?? null) === 'member_remaining_project_times'
@@ -1730,7 +1731,8 @@ final class RegisteredMetricReadServices
         $this->applyServiceFilters($query, $filters, 's', 's');
         // Directly completed reservations carry attribution on the service fact;
         // checkout services retain their sale-fact fallback for old rows.
-        return $query->fieldRaw("s.service_fact_id,s.store_id,s.member_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.project_id,s.project_name_snapshot,s.project_category_id_snapshot,s.project_category_path_snapshot,s.source_line_id,s.quantity,COALESCE(NULLIF(s.business_source_primary_id,0),(SELECT MAX(sf.business_source_primary_id) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=s.tenant_id AND sf.checkout_request_id=s.checkout_request_id AND sf.source_line_id=s.source_line_id AND sf.fact_direction='forward' AND sf.status='effective')) business_source_primary_id")
+        // 仅追加冻结体验维度供各消费方判断门店到店资格，不改变项目数量指标本身。
+        return $query->fieldRaw("s.service_fact_id,s.store_id,s.member_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.project_id,s.project_name_snapshot,s.project_category_id_snapshot,s.project_category_path_snapshot,s.source_line_id,s.quantity,s.is_experience,COALESCE(NULLIF(s.business_source_primary_id,0),(SELECT MAX(sf.business_source_primary_id) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=s.tenant_id AND sf.checkout_request_id=s.checkout_request_id AND sf.source_line_id=s.source_line_id AND sf.fact_direction='forward' AND sf.status='effective')) business_source_primary_id")
             ->select()->toArray();
     }
 

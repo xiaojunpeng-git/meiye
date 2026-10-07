@@ -1,11 +1,11 @@
 <?php
 
 namespace app\services\report;
+use app\services\query\metric\StoreCustomerVisitEligibility;
 
 use app\services\BaseServices;
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use think\facade\Db;
-use app\services\query\metric\ServiceCustomerEligibility;
 
 /**
  * 第二阶段门店运营报表。
@@ -416,7 +416,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         }
         $memberIds = array_keys($records);
         if ($memberIds) {
-            // 到店只补充现金会员在所选期间已完成且未作废的服务。
+            // 到店只补充现金会员在所选期间已完成、未作废且非体验的服务；
+            // 人员不计数开关不参与门店到店资格。
             // 粒度为“会员 + 业务日”，同日多个服务项目或订单只算一次。
             $services = $this->completedUnvoidedServiceFacts(
                 $this->participantCheckout(
@@ -429,11 +430,11 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                     'member_visit_service.checkout_request_id'
                 ),
                 'member_visit_service',
-                'member_visit_void',
-                true
+                'member_visit_void'
             )
                 ->whereIn('member_visit_service.member_id', $memberIds)
                 ->whereBetween('member_visit_service.business_date', [$range['start'], $range['end']])
+                ->whereRaw(StoreCustomerVisitEligibility::sqlPredicate('member_visit_service'))
                 ->fieldRaw('member_visit_service.member_id,MONTH(member_visit_service.business_date) month_no,COUNT(DISTINCT member_visit_service.business_date) month_visits')
                 ->group('member_visit_service.member_id,MONTH(member_visit_service.business_date)')->select()->toArray();
             foreach ($services as $fact) {
@@ -467,7 +468,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $column['source_explanation'] = '所选日期内有成功记账收款的会员；仅完成服务但没有本期现金消费的会员不列入。';
             }
             if ($column['key'] === 'total_visits') {
-                $column['source_explanation'] = '本行会员在所选日期内完成服务的到店天数；没有完成服务为 0，同日多个项目只算一次。' . ServiceCustomerEligibility::EXPLANATION;
+                $column['source_explanation'] = '本行会员在所选日期内完成且未作废的非体验服务到店天数；没有符合条件的服务为 0，同日多个项目只算一次。“体验”不计门店到店次数，“不算人数人次”只影响人员统计。';
             }
             if ($column['key'] === 'annual_cash') {
                 $column['source_explanation'] = '所选日期内有成功记账收款的会员，在所选年份内的记账收款扣除该年现金退款；没有完成服务的会员进店次数为 0，历史权益迁入不计入。';
@@ -477,7 +478,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $groups=[];
         foreach (range(1,12) as $month) {
             $keys=['month_'.$month.'_visits','month_'.$month.'_cash'];
-            $columns[]=['key'=>$keys[0],'label'=>'进店次数','group_label'=>$month.'月','source_explanation'=>'本行现金消费会员在所选日期范围内、该月份完成服务的到店天数；未服务为 0，同日多项目只算一次。' . ServiceCustomerEligibility::EXPLANATION];
+            $columns[]=['key'=>$keys[0],'label'=>'进店次数','group_label'=>$month.'月','source_explanation'=>'本行现金消费会员在所选日期范围内、该月份完成且未作废的非体验服务到店天数；没有符合条件的服务为 0，同日多项目只算一次。“体验”不计门店到店次数，“不算人数人次”只影响人员统计。'];
             $columns[]=['key'=>$keys[1],'label'=>'现金业绩','group_label'=>$month.'月','source_explanation'=>'本行现金消费会员在所选年份该月的成功记账收款，扣除当月实际发生的现金退款；历史权益迁入不计入。'];
             $groups[]=['label'=>$month.'月','column_keys'=>$keys];
         }
@@ -486,8 +487,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             foreach(range(1,12) as $month){$row['month_'.$month.'_visits']=(int)($row['month_'.$month.'_visits']??0);$row['month_'.$month.'_cash']=$this->money((int)($row['month_'.$month.'_cash_cents']??0));}
         } unset($row);
         $result = $this->result('会员进店分析表',$columns,array_values($records),$input,$groups,['natural_year'=>$year]);
-        // 版本变更仅针对本表“现金会员先入表，再补服务”的人员范围。
-        $result['metric_version'] = 'store-member-visit-analysis-v3';
+        // 会员到店恢复全部已完成服务，现金会员入表门槛和日期范围保持不变。
+        $result['metric_version'] = 'store-member-visit-analysis-v4';
         return $result;
     }
 
@@ -495,10 +496,12 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     {
         $year=(int)substr($range['end'],0,4);$mode=(string)($input['mode']??'count');
         if(!in_array($mode,['count','people','project'],true)) throw new \InvalidArgumentException('年度进店统计方式无效');
-        $query=$this->completedUnvoidedServiceFacts($this->participantCheckout($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('annual_visit_service'),$stores,'annual_visit_service'), 'annual_visit_service', $input, $range),'annual_visit_service.checkout_request_id'),'annual_visit_service','annual_visit_void', $mode !== 'project')
+        // 年度进店人数/次数只取非体验服务；项目数量仍按实际完成量统计，不扣体验项目。
+        $query=$this->completedUnvoidedServiceFacts($this->participantCheckout($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('annual_visit_service'),$stores,'annual_visit_service'), 'annual_visit_service', $input, $range),'annual_visit_service.checkout_request_id'),'annual_visit_service','annual_visit_void')
             ->whereBetween('annual_visit_service.business_date',[$range['start'],$range['end']])
             // 本表统计会员进店；游客服务不应混入会员年度口径。
             ->where('annual_visit_service.member_id', '>', 0);
+        if ($mode !== 'project') StoreCustomerVisitEligibility::apply($query, 'annual_visit_service');
         // 年度汇总的“进店次数”与会员进店分析使用同一口径：同一门店内，
         // 同一会员同一业务日仅计一次。项目模式仍统计项目数量，人数模式
         // 仍统计月度去重会员，三者不混用。
@@ -511,15 +514,17 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $storeNames=[];$records=[];foreach(range(1,12) as $month)$records[$month]=['row_label'=>$month.'月','year'=>$year.'年','total'=>0];
         foreach($facts as $fact){$sid=(int)$fact['store_id'];$storeNames[$sid]=(string)$fact['store_name'];$records[(int)$fact['month_no']]['store_'.$sid]=(int)$fact['amount'];$records[(int)$fact['month_no']]['total']+=(int)$fact['amount'];}
         $columns=$this->columns(['row_label'=>'列明','year'=>'年份','total'=>'合计']);foreach($storeNames as $id=>$name)$columns[]=['key'=>'store_'.$id,'label'=>$name,'store_id'=>$id];
-        // 项目模式是实际核销数量，不套用客数规则；次数/人数模式解释统一资格。
+        // 项目模式统计实际项目数量；次数/人数模式按非体验服务去重，均不受人员开关影响。
         if ($mode !== 'project') foreach ($columns as &$column) {
             if ($column['key'] === 'total' || strpos($column['key'], 'store_') === 0) {
-                $column['source_explanation'] = '统计已完成且未作废的会员服务，按所选次数或人数模式去重。' . ServiceCustomerEligibility::EXPLANATION;
+                $column['source_explanation'] = '统计已完成且未作废的非体验会员服务，按所选次数或人数模式去重；“体验”不计门店到店次数和人数，“不算人数人次”只影响人员统计。';
             }
         }
         unset($column);
         foreach($records as &$row)foreach($storeNames as $id=>$name)$row['store_'.$id]=(int)($row['store_'.$id]??0);unset($row);
-        return $this->result('会员进店年度汇总表',$columns,array_values($records),$input,[],['mode'=>$mode,'natural_year'=>$year]);
+        $result = $this->result('会员进店年度汇总表',$columns,array_values($records),$input,[],['mode'=>$mode,'natural_year'=>$year]);
+        $result['metric_version'] = 'store-member-visit-annual-v2';
+        return $result;
     }
 
     private function fieldMarketingDetail(array $stores,array $range,array $input):array
@@ -557,7 +562,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $row['visit_over_one_hour'] = $manual[$subject]['visit_over_one_hour']['value'] ?? '';
             $row['visit_over_one_hour_version'] = (int)($manual[$subject]['visit_over_one_hour']['version'] ?? 0);
             $allServices = $services[$member] ?? [];
-            $visits = ServiceCustomerEligibility::filter($allServices);
+            // 地推护理槽位和“四次及以上”表示门店到店：体验不占次数，人员开关不参与；手工费仍按实际护理事实。
+            $visits = StoreCustomerVisitEligibility::filter($allServices);
             foreach (range(1, 3) as $i) {
                 $visit = $visits[$i - 1] ?? [];
                 $row['visit_'.$i.'_craftsman'] = (string)($visit['craftsman'] ?? '');
@@ -565,8 +571,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $row['visit_'.$i.'_project'] = (string)($visit['project_name_snapshot'] ?? '');
                 $row['cash_'.$i] = $this->money((int)($saleSlots[$member.'|'.(string)$row['order_id']] ?? 0) === $i ? (int)($saleCash[(string)$row['fact_id']] ?? 0) : 0);
             }
-            // 保留原先“前三条实际服务且至少三条”的手工费口径；客数资格
-            // 不能删除朋友已经实际发生的劳动，也不能调整销售收款槽位。
+            // 保留原先“前三条实际服务且至少三条”的手工费口径；
+            // 人员标记不能删除朋友已经实际发生的劳动，也不能调整销售收款槽位。
             $fee = array_sum(array_map(static function (array $service): int {
                 return (int)($service['labor_fee_amount_cents'] ?? 0);
             }, array_slice($allServices, 0, 3)));
@@ -596,7 +602,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $sourceIds=$this->sourceIds('G');$memberId=(int)($input['member_id']??0);$includeFollowupCash=(int)($input['include_followup_cash']??0)===1&&$memberId>0;$payments=$this->cashFacts($stores)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective');if(!$includeFollowupCash)$payments->whereIn('business_source_primary_id',$sourceIds?:[-1]);if($memberId>0)$payments->where('member_id',$memberId);$payments=$payments->fieldRaw('store_id,order_id,checkout_request_id,member_id,MAX(member_name_snapshot) member_name,MAX(store_name_snapshot) store_name,MAX(business_source_label_snapshot) source,SUM(amount_cents) amount_cents')->group('store_id,order_id,checkout_request_id,member_id')->select()->toArray();
         $keys=array_values(array_unique(array_column($payments,'order_id')));$orders=[];if($keys){$fields=$this->hasColumn('cashier_v3_sales_order','reward_amount_cents')?'order_id,order_note,reward_amount_cents':'order_id,order_note';foreach(Db::name('cashier_v3_sales_order')->whereIn('order_id',$keys)->field($fields)->select()->toArray()as$r)$orders[(string)$r['order_id']]=$r;}
         $memberIds=array_values(array_unique(array_filter(array_column($payments,'member_id'))));$careDates=[];
-        if($memberIds){foreach($this->completedUnvoidedServiceFacts($this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('cross_care_service'),$stores,'cross_care_service'),'cross_care_service.checkout_request_id'),'cross_care_service','cross_care_void', true)->whereIn('cross_care_service.member_id',$memberIds)->fieldRaw('cross_care_service.store_id,cross_care_service.member_id,MIN(cross_care_service.business_date) care_date')->group('cross_care_service.store_id,cross_care_service.member_id')->select()->toArray()as$r)$careDates[(int)$r['store_id'].'|'.(int)$r['member_id']]=(string)$r['care_date'];}
+        // “护理日期”作为异业顾客首次门店到店日期，体验服务不占到店；人员开关不参与。
+        if($memberIds){$careQuery=$this->completedUnvoidedServiceFacts($this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('cross_care_service'),$stores,'cross_care_service'),'cross_care_service.checkout_request_id'),'cross_care_service','cross_care_void')->whereIn('cross_care_service.member_id',$memberIds);StoreCustomerVisitEligibility::apply($careQuery,'cross_care_service');foreach($careQuery->fieldRaw('cross_care_service.store_id,cross_care_service.member_id,MIN(cross_care_service.business_date) care_date')->group('cross_care_service.store_id,cross_care_service.member_id')->select()->toArray()as$r)$careDates[(int)$r['store_id'].'|'.(int)$r['member_id']]=(string)$r['care_date'];}
         foreach($payments as &$row){$key=(string)$row['order_id'];$row['care_date']=$careDates[(int)$row['store_id'].'|'.(int)$row['member_id']]??'';$row['full_payment']=$this->money((int)$row['amount_cents']);$row['reward']=$this->money((int)($orders[$key]['reward_amount_cents']??0));$row['remark']=(string)($orders[$key]['order_note']??'');$row['annotation_subject_key']=$key;$row['annotation_subject_type']='sales_order';$row['source_order_id']=$key;}unset($row);
         return $this->result('异业收客明细表',$this->columns(['source'=>'来源','care_date'=>'护理日期','store_name'=>'门店','member_name'=>'会员','full_payment'=>'收客全款业绩','reward'=>'奖励','remark'=>'备注']),$payments,$input);
     }
@@ -607,10 +614,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($sales,'cross_sale.tenant_id','cross_sale.order_id');
         $sales=$sales->fieldRaw('cross_sale.store_id,cross_sale.member_id,MAX(cross_sale.member_name_snapshot) member_name,MIN(cross_sale.source_line_id) source_line_id,MAX(cross_sale.item_name_snapshot) card_name,MIN(cross_sale.business_date) first_sale_date')->group('cross_sale.store_id,cross_sale.member_id')->select()->toArray();
         $memberIds=array_values(array_unique(array_filter(array_column($sales,'member_id'))));$phones=$this->phones($memberIds);$cash=$this->cashMonthlyTotals($stores,$memberIds,$year.'-01-01',$year.'-12-31');$dailyCash=$this->cashByMemberAndMonth($stores,$memberIds,$year.'-01-01',$year.'-12-31');$services=$this->servicesByMember($stores,$memberIds);$entitlements=$this->activeCardEntitlements($stores,$memberIds);$keys=array_values(array_unique(array_column($sales,'source_line_id')));$manual=$this->annotations('cross_industry_customer_summary',$stores,$keys);$total500=0;$total2400=0;
-        // 首次到店读取可计客服务；后续现金及卡内剩余权益仍取独立权威事实。
-        $services = array_map([ServiceCustomerEligibility::class, 'filter'], $services);
+        // 首次到店只读非体验的门店服务；金额和剩余权益仍保留原始事实口径。
         foreach($sales as &$row){
-            $id=(int)$row['member_id'];$key=(string)$row['source_line_id'];$row['customer_acquired_at']=$manual[$key]['customer_acquired_at']['value']??'';$row['customer_acquired_at_version']=(int)($manual[$key]['customer_acquired_at']['version']??0);$row['partner_store_name']=$manual[$key]['partner_store_name']['value']??'';$row['partner_store_name_version']=(int)($manual[$key]['partner_store_name']['version']??0);$row['phone']=$phones[$id]??'';$row['remaining_service_count']=(int)($entitlements[$id]['remaining_count']??0);$row['remaining_service_amount']=$this->money((int)($entitlements[$id]['remaining_amount_cents']??0));$row['first_visit_at']=(string)($services[$id][0]['business_date']??'');
+            $id=(int)$row['member_id'];$key=(string)$row['source_line_id'];$row['customer_acquired_at']=$manual[$key]['customer_acquired_at']['value']??'';$row['customer_acquired_at_version']=(int)($manual[$key]['customer_acquired_at']['version']??0);$row['partner_store_name']=$manual[$key]['partner_store_name']['value']??'';$row['partner_store_name_version']=(int)($manual[$key]['partner_store_name']['version']??0);$row['phone']=$phones[$id]??'';$row['remaining_service_count']=(int)($entitlements[$id]['remaining_count']??0);$row['remaining_service_amount']=$this->money((int)($entitlements[$id]['remaining_amount_cents']??0));$visits=StoreCustomerVisitEligibility::filter($services[$id]??[]);$row['first_visit_at']=(string)($visits[0]['business_date']??'');
             $annual=0;foreach(range(1,12)as$m){$c=(int)($cash[$id][$m]??0);$row['month_'.$m]=$this->money($c);$annual+=$c;}$row['annual_cash']=$this->money($annual);
             $first500=0;$reached2400=0;$running=0;foreach($dailyCash[$id]??[]as$day){$amount=(int)$day['amount_cents'];if($first500===0&&$amount>=50000)$first500=$amount;$before=$running;$running+=$amount;if($reached2400===0&&$before<240000&&$running>=240000)$reached2400=$running;}
             $row['first_500']=$this->money($first500);$row['reached_2400']=$this->money($reached2400);$total500+=$first500;$total2400+=$reached2400;$row['annotation_subject_key']=$key;$row['annotation_subject_type']='sale_line';$row['source_line_id']=$key;$row['_drilldown']=[];$annualConfig=['report'=>'cross_industry_customer_detail','params'=>['start_date'=>$year.'-01-01','end_date'=>$year.'-12-31','include_followup_cash'=>1],'param_map'=>['member_id'=>'member_id']];foreach(range(1,12)as$m){$monthKey='month_'.$m;if((int)($cash[$id][$m]??0)===0)continue;$row['_drilldown'][$monthKey]=['report'=>'cross_industry_customer_detail','params'=>['start_date'=>sprintf('%04d-%02d-01',$year,$m),'end_date'=>date('Y-m-t',strtotime(sprintf('%04d-%02d-01',$year,$m))),'include_followup_cash'=>1],'param_map'=>['member_id'=>'member_id']];}if($annual!==0)$row['_drilldown']['annual_cash']=$annualConfig;if($first500!==0)$row['_drilldown']['first_500']=$annualConfig;if($reached2400!==0)$row['_drilldown']['reached_2400']=$annualConfig;
@@ -1128,8 +1134,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->whereBetween('sv.business_date', [$range['start'], $range['end']])
             ->where('sv.service_status', 'completed')
             ->whereNull('vo.id');
-        // 市场服务资格集中到指标层，不在报表维护另一份朋友判断。
-        ServiceCustomerEligibility::apply($query, 'sv');
+        // 门店市场人次只由完成、未作废且非体验的服务决定；“不算人数人次”
+        // 是人员统计开关，不得在此过滤服务事实，否则门店人次和人员口径会串用。
         $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'sv');
         // A reservation ended directly has no checkout request row; its service
         // fact carries the booking attribution. Actual checkout attribution wins
@@ -1170,9 +1176,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     /** 市场两表只在人次入口排除体验服务；不改变明细存在性、金额、进店或有效人员。 */
     private function marketCountableServiceVisits(array $serviceVisits): array
     {
-        return array_values(array_filter($serviceVisits, static function (array $visit): bool {
-            return (int)($visit['is_experience'] ?? 0) === 0;
-        }));
+        return StoreCustomerVisitEligibility::filter($serviceVisits);
     }
     /**
      * 人次身份必须同时适配实名会员和游客：会员使用稳定会员 ID，保持同日去重；
@@ -1317,7 +1321,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
      * the original completed service. Operational audit lists can retain the
      * original row, while every business-report aggregation must exclude it.
      */
-    private function completedUnvoidedServiceFacts($query, string $serviceAlias, string $voidAlias, bool $customerMetric = false)
+    private function completedUnvoidedServiceFacts($query, string $serviceAlias, string $voidAlias)
     {
         $query = $query
             ->leftJoin(
@@ -1329,8 +1333,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->where($serviceAlias . '.service_status', 'completed')
             ->whereNull($voidAlias . '.id');
         $this->normalDataScope()->excludeVoidedSalesOrderServices($query, $serviceAlias);
-        // 数量/护理审计调用保留全部完成服务，只有客数指标选择资格过滤。
-        if ($customerMetric) ServiceCustomerEligibility::apply($query, $serviceAlias);
+        // 顾客到店、项目数量和护理审计均保留全部完成服务；人员客数资格只能由人员指标层应用。
         return $query;
     }
     private function participantOrder($query,string $orderField){return $this->participantEmployeeId>0?(new StoreReportParticipantScopeServices())->applyOrder($query,$orderField,$this->participantEmployeeId):$query;}
@@ -1352,9 +1355,14 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $visible=!empty($input['_internal_all'])?$records:array_slice($records,($page-1)*$limit,$limit);
         // 未付清订单入表改变两张新客表的资格和统计时间，不能复用旧口径版本。
         $metricVersion=$title==='新客汇总表'?'new-customer-first-sale-grouped-v6':($title==='新客明细表'?'new-customer-first-sale-v5':'store-operations-phase-two-v1');
-        // 体验标签改变市场人次资格，两张表与导出共用新口径版本；其他报表维持原版本。
-        if (in_array($title, ['市场业绩表', '市场明细表'], true)) $metricVersion = 'market-visits-non-experience-v2';
-        $result=['title'=>$title,'columns'=>$columns,'records'=>$visible,'total'=>count($records),'page'=>$page,'page_size'=>$limit,'totals'=>$totals,'drilldown_keys'=>['organization_id','store_id','dimension_code','payment_method_code','metric_code','start_date','end_date'],'table_layout'=>['fixed'=>true,'sticky_header'=>true,'sticky_summary'=>true,'result_scroll'=>true],'metric_version'=>$metricVersion,'service_customer_rule_version'=>ServiceCustomerEligibility::VERSION,'data_as_of'=>date('Y-m-d H:i:s'),'aggregation_status'=>'reconciled'];
+        // 市场两表与导出共用“只排除体验”的门店人次口径，不再宣称采用人员客数开关版本。
+        $isMarketReport = in_array($title, ['市场业绩表', '市场明细表'], true);
+        if ($isMarketReport) $metricVersion = 'market-visits-experience-only-v3';
+        // 护理槽位与首次到店日期原先误用了人员标记；相关报表单独升级口径，其他报表不变。
+        if (in_array($title, ['地推拓客明细表', '地推拓客汇总表', '异业收客明细表', '异业收客汇总表'], true)) {
+            $metricVersion = 'store-customer-service-events-v2';
+        }
+        $result=['title'=>$title,'columns'=>$columns,'records'=>$visible,'total'=>count($records),'page'=>$page,'page_size'=>$limit,'totals'=>$totals,'drilldown_keys'=>['organization_id','store_id','dimension_code','payment_method_code','metric_code','start_date','end_date'],'table_layout'=>['fixed'=>true,'sticky_header'=>true,'sticky_summary'=>true,'result_scroll'=>true],'metric_version'=>$metricVersion,'service_customer_rule_version'=>null,'data_as_of'=>date('Y-m-d H:i:s'),'aggregation_status'=>'reconciled'];
         $summary=$this->summaryRow($title,$columns,$records);if($summary)$result['summary_row']=$summary;
         if($groups)$result['column_groups']=$groups;
         $metadata=$this->metadataForTitle($title,$totals);
@@ -1397,7 +1405,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $source=$source!==''?$source:'该来源';
                 $descriptions=[
                     'walk_in'=>'汇总有权限人员在市场明细表保存的进店数：会员按“门店＋业务日期＋会员＋来源”汇总，游客按原始订单独立记录；新行尚未保存时读取原单据已保存值，新旧值不会重复相加。仅 B 来源显示该列。',
-                    'visits'=>'统计所选日期内归属“'.$source.'”、已完成且未作废的非体验服务人次。打了“体验”标签，或本人、朋友选择“不算人数人次”的服务，均不计入人次；同一门店、同一天、同一来源还有其他符合条件的服务时，会员仍记 1 人次。游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。这两种标记只排除人次，不排除金额和按收款门槛计算的有效人员，也不表示整行明细隐藏。',
+                    'visits'=>'统计所选日期内归属“'.$source.'”、已完成且未作废的非体验服务人次。打了“体验”标签的服务不计门店人次；“不算人数人次”只影响人员统计，不影响本列。同一门店、同一天、同一来源还有其他符合条件的服务时，会员仍记 1 人次。游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。体验标签只排除门店人次，不排除金额和按收款门槛计算的有效人员，也不表示整行明细隐藏。',
                     'effective'=>'统计所选日期内归属“'.$source.'”且净记账收款达到标准的会员人数：A 来源每位会员至少 1,000 元，其他来源至少 500 元；按门店、来源和会员去重，游客不计。退款会抵减，已作废销售不计。“体验”和“不算人数人次”不影响本列，达到收款门槛仍计入。',
                     'amount'=>'合计所选日期内归属“'.$source.'”的有效记账收款净额。现金退款在退款发生日计入 K退款顾客并冲减金额；作废销售冲减原来源；余额支付和旧卡录入不计。“体验”和“不算人数人次”不排除已经产生的有效记账收款。',
                 ];
@@ -1426,7 +1434,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'member_phone'=>'显示会员资料中当前保存的手机号码；未填写则留空。',
             'dimension'=>'显示业务发生时保存的客户来源；纯权益服务优先读取本次结账保存的来源，历史服务没有该快照时读取关联购卡或销售记录，不按会员当前资料改写历史来源。',
             'walk_in'=>'显示有权限人员为本行保存的进店数：会员按“门店＋业务日期＋会员＋来源”合并，游客按原始订单独立显示和编辑；新行尚未保存时显示原单据已保存值。仅 B 来源汇总到市场业绩表的进店列。',
-            'visits'=>'有已完成且未作废的非体验服务才计人次。打了“体验”标签，或本人、朋友选择“不算人数人次”的服务，均不计入人次；同一门店、同一天、同一来源还有其他符合条件的服务时，会员仍记 1 人次。游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。这两种标记只排除人次，不排除金额和按收款门槛计算的有效人员；明细行仍可能显示，人次为 0 不代表整行隐藏。',
+            'visits'=>'有已完成且未作废的非体验服务才计门店人次。打了“体验”标签的服务不计门店人次；“不算人数人次”只影响人员统计，不影响本列。同一门店、同一天、同一来源还有其他符合条件的服务时，会员仍记 1 人次。游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。体验标签只排除门店人次，不排除金额和按收款门槛计算的有效人员；明细行仍可能显示，人次为 0 不代表整行隐藏。',
             'effective_people'=>'所选日期内，同一门店、同一来源的会员净记账收款达到标准时显示 1：A 来源至少 1,000 元，其他来源至少 500 元；游客不计。同一会员跨日期可能显示多行 1，但合计按会员去重。“体验”和“不算人数人次”不影响本列，达到收款门槛仍计入。',
             'amount'=>'合计本行会员当天在该门店和来源下的有效记账收款净额；退款按退款发生日抵减，已作废销售不计。只有正常服务、没有当次收款时显示 0。“体验”和“不算人数人次”不排除已经产生的有效记账收款。',
             'registered_date'=>'显示本行收款或服务归属的业务日期；补录业务的系统录入时间可能晚于该日期。',
@@ -1576,7 +1584,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         return$out;
     }
     private function phones(array $ids):array{if(!$ids)return[];$out=[];foreach(Db::name('user')->whereIn('uid',$ids)->field('uid,phone')->select()->toArray()as$r)$out[(int)$r['uid']]=(string)$r['phone'];return$out;}
-    /** 服务审计保留完整记录与劳动金额，客数调用方再通过统一资格缩小投影。 */
+    /** 保留完整完成服务供护理和手工费使用，并携带冻结体验标记供门店到店列单独筛选。 */
     private function servicesByMember(array $stores, array $members): array
     {
         if (!$members) return [];
@@ -1584,7 +1592,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('member_service'), $stores, 'member_service'), 'member_service.checkout_request_id'),
             'member_service', 'member_service_void'
         )->whereIn('member_service.member_id', $members)
-            ->field('member_service.member_id,member_service.business_date,member_service.project_name_snapshot,member_service.labor_fee_amount_cents,member_service.craftsmen_snapshot_json,member_service.occurred_at,member_service.service_object,member_service.friend_counts_as_customer')
+            ->field('member_service.member_id,member_service.business_date,member_service.project_name_snapshot,member_service.labor_fee_amount_cents,member_service.craftsmen_snapshot_json,member_service.occurred_at,member_service.is_experience')
             ->order('member_service.business_date', 'asc')->order('member_service.occurred_at', 'asc')->select()->toArray();
         $out = [];
         foreach ($rows as $row) {

@@ -20,7 +20,8 @@ $checks = [
     'guest visits use their associated service order identity' => strpos($service, "return \$orderId === '' ? '' : 'guest-order:' . \$orderId") !== false,
     'market detail and performance share the same visit identity resolver' => substr_count($service, '$this->marketVisitIdentity(') >= 3,
     'market performance deduplicates both member and guest visits' => strpos($marketPerformance, 'if (isset($visitedSubjects[$visitKey])) continue;') !== false,
-    'guest visit explanation exposes its order-level rule' => strpos($service, '游客每张有效服务单记 1') !== false && strpos($service, '同单多项目不重复') !== false,
+    // 市场门店人次以可关联销售单为游客去重边界，说明文字必须与后端身份键一致。
+    'guest visit explanation exposes its order-level rule' => strpos($service, '游客每张可关联销售单记 1') !== false && strpos($service, '同单多项目不重复') !== false,
     'successful order void payment reversals are included in report net cash' => strpos($service, "reversal_operation.operation_type IN ('refund','void')") !== false,
     'successful supplement void hides the original repayment and its reversal on every date' => strpos($service, 'excludeVoidedSupplementPaymentFacts($query') !== false
         && strpos($normalDataScope, "->whereIn('normal_supplement_void.source_kind', ['sales_supplement', 'recharge_supplement'])") !== false

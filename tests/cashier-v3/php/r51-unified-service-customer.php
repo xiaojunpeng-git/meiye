@@ -1,5 +1,5 @@
 <?php
-/** 本地事务回滚测试：同一冻结开关同步影响各报表客数，但不影响核销数量和金额。 */
+/** 本地事务回滚测试：人员客数开关不影响体验标签的门店排除口径，也不影响核销数量和金额。 */
 if (getenv('R51_LOCAL_TEST') !== '1') throw new RuntimeException('explicit local flag required');
 $backend = getenv('BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
 require $backend . '/vendor/autoload.php';
@@ -9,6 +9,7 @@ use app\services\report\StoreUnifiedReportServices;
 use app\services\report\StoreUnifiedReportPhaseThreeServices;
 use app\services\report\StoreUnifiedReportPhaseFourServices;
 use app\services\query\metric\ServiceCustomerEligibility;
+use app\services\query\metric\StoreCustomerVisitEligibility;
 use app\services\query\metric\ServiceCustomerMetricReadServices;
 function unified51($ok, $message) { if (!$ok) throw new RuntimeException($message); echo "PASS $message\n"; }
 $service = Db::name('cashier_v3_entitlement_service_fact')->where('service_status', 'completed')->find();
@@ -48,22 +49,26 @@ try {
         $ids[]=Db::name('cashier_v3_entitlement_service_fact')->insertGetId($row);
     }
     $money = $detail('market_detail');
-    unified51($get($detail('market_detail'), 'visits')===0 && $get($detail('member_visit_analysis'), 'total_visits')===0, 'excluded friend: market and member visits zero');
+    unified51($get($detail('market_detail'), 'visits')===0 && $get($detail('member_visit_analysis'), 'total_visits')===0, 'experience excluded from both store visit reports');
     unified51($annual('count')===$before[0] && $annual('people')===$before[1], 'annual count/people share eligibility');
     unified51($annual('project')===$before[2]+4, 'actual project quantity retained');
-    unified51($experience()===$before[3] && $consult()===$before[4], 'experience and consultation exclude friend');
+    unified51($experience()===$before[3]+1 && $consult()===$before[4]+1, 'experience and consultation retain actual completed experience');
     Db::name('cashier_v3_entitlement_service_fact')->where('id',$ids[0])->update(['friend_counts_as_customer'=>1]);
     $countedMarketVisits = $get($detail('market_detail'),'visits');
     $countedMemberVisits = $get($detail('member_visit_analysis'),'total_visits');
     // Market visits exclude experience services independently of the count flag.
-    unified51($countedMarketVisits===0 && $countedMemberVisits===1, 'same frozen switch respects market experience exclusion: market='.$countedMarketVisits.' member='.$countedMemberVisits);
-    unified51($annual('count')===$before[0]+1 && $annual('people')===$before[1]+1, 'annual reports enable same eligible service');
-    unified51($experience()===$before[3]+1 && $consult()===$before[4]+1, 'experience and consultation enable same eligible service');
+    unified51($countedMarketVisits===0 && $countedMemberVisits===0, 'personnel switch never changes experience exclusion: market='.$countedMarketVisits.' member='.$countedMemberVisits);
+    unified51($annual('count')===$before[0] && $annual('people')===$before[1], 'annual store visit remains zero regardless of personnel flag');
+    unified51($experience()===$before[3]+1 && $consult()===$before[4]+1, 'experience and consultation independent of personnel flag');
     Db::name('cashier_v3_entitlement_service_fact')->whereIn('id',$ids)->update(['service_object'=>'self','friend_counts_as_customer'=>0]);
-    unified51($get($detail('member_visit_analysis'),'total_visits')===0 && $annual('count')===$before[0], 'self marked not counted excluded from member visits');
-    unified51($experience()===$before[3] && $consult()===$before[4], 'self marked not counted excluded from experience/consultation');
-    Db::name('cashier_v3_entitlement_service_fact')->whereIn('id',$ids)->update(['friend_counts_as_customer'=>1]);
-    unified51($get($detail('member_visit_analysis'),'total_visits')===1 && $annual('count')===$before[0]+1, 'counted self multi-project member-day dedup preserved');
+    unified51($get($detail('member_visit_analysis'),'total_visits')===0 && $annual('count')===$before[0], 'self marked not counted still excluded only because experience');
+    unified51($experience()===$before[3]+1 && $consult()===$before[4]+1, 'self marked not counted remains in experience and consultation');
+    Db::name('cashier_v3_entitlement_service_fact')->where('id',$ids[0])->update(['is_experience'=>0]);
+    unified51($get($detail('member_visit_analysis'),'total_visits')===1 && $annual('count')===$before[0]+1, 'non-experience service counts at store despite personnel switch');
+    unified51($get($detail('market_detail'),'visits')===1 && $annual('people')===$before[1]+1, 'market and annual people share store eligibility');
+    Db::name('cashier_v3_entitlement_service_fact')->whereIn('id',$ids)->update(['is_experience'=>0,'friend_counts_as_customer'=>1]);
+    unified51($get($detail('member_visit_analysis'),'total_visits')===1 && $annual('count')===$before[0]+1, 'non-experience multi-project member-day dedup preserved');
+    unified51($experience()===$before[3] && $consult()===$before[4], 'removing experience tag changes only experience-specific counts');
     $after=$detail('market_detail');
     unified51($after['summary_row']['amount']===$money['summary_row']['amount'], 'cash unchanged by customer eligibility');
     $export=$phase2->export([$store],array_merge($input,['report'=>'member_visit_analysis']));
@@ -71,6 +76,12 @@ try {
     $restricted=$phase3->query('six_dimension_item_deal_analysis',[999999999],$range,$input);
     unified51(empty($restricted['records']), 'store scope cannot leak fixture');
     unified51(!ServiceCustomerEligibility::allows(['service_object'=>'friend','friend_counts_as_customer'=>0]), 'central PHP eligibility');
+    foreach ([0,1] as $experienceFlag) foreach ([0,1] as $personnelFlag) {
+        Db::name('cashier_v3_entitlement_service_fact')->whereIn('id',$ids)->update(['is_experience'=>$experienceFlag,'friend_counts_as_customer'=>$personnelFlag]);
+        $sql = StoreCustomerVisitEligibility::apply(Db::name('cashier_v3_entitlement_service_fact')->alias('sv')->whereIn('sv.id',$ids), 'sv')->count();
+        $php = count(StoreCustomerVisitEligibility::filter(Db::name('cashier_v3_entitlement_service_fact')->whereIn('id',$ids)->select()->toArray()));
+        unified51((int)$sql===$php && (int)$sql===($experienceFlag===0?2:0), 'store SQL/PHP parity experience='.$experienceFlag.' personnel='.$personnelFlag);
+    }
     // 每种合法冻结状态验证 SQL 与投影资格完全一致，防止修一端漏另一端。
     foreach ([['self',0],['self',1],['friend',0],['friend',1]] as $state) {
         Db::name('cashier_v3_entitlement_service_fact')->whereIn('id',$ids)->update(['service_object'=>$state[0],'friend_counts_as_customer'=>$state[1]]);

@@ -10,6 +10,7 @@ use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
 use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
+use app\services\query\metric\StoreCustomerVisitEligibility;
 use mohe\services\SystemConfigService;
 use think\facade\Db;
 
@@ -766,18 +767,28 @@ final class CashierV3MemberDetailQueryServices
         // 顶部消费与到店汇总必须覆盖和各页签相同的会员全门店事实。
         $sales = (array)$salesQuery
             ->field('COALESCE(SUM(sale_amount_cents),0) AS total_cents,MAX(business_date) AS latest_date')->find();
-        $visitQuery = Db::name('cashier_v3_entitlement_service_fact')->where('tenant_id', $tenantId)
-            ->where('member_id', $memberId)->where('service_status', 'completed');
-        $visits = (array)$visitQuery->field('COUNT(DISTINCT business_date) AS visit_count')->find();
-        $latest = $services[0] ?? [];
+        $visitQuery = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+            ->where('sf.tenant_id', $tenantId)->where('sf.member_id', $memberId)
+            ->where('sf.service_status', 'completed');
+        // 详情页的到店摘要独立于实际服务列表；体验可留在历史列表，但不占门店到店次数。
+        StoreCustomerVisitEligibility::apply($visitQuery, 'sf');
+        $visits = (array)$visitQuery->fieldRaw('COUNT(DISTINCT sf.business_date) AS visit_count,MAX(sf.business_date) AS latest_date')->find();
+        $latestQuery = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
+            ->where('sf.tenant_id', $tenantId)->where('sf.member_id', $memberId)
+            ->where('sf.service_status', 'completed');
+        StoreCustomerVisitEligibility::apply($latestQuery, 'sf');
+        $latest = (array)$latestQuery->field('sf.project_name_snapshot,sf.store_name_snapshot,sf.craftsmen_snapshot_json,sf.business_date,sf.settled_at,sf.occurred_at')
+            ->order('sf.business_date desc,sf.settled_at desc,sf.id desc')->find();
         return [
             'totalConsumptionAmount' => $this->moneyFromCents((int)($sales['total_cents'] ?? 0)),
             'latestPurchaseDate' => (string)($sales['latest_date'] ?? ''),
             'visitCount' => (int)($visits['visit_count'] ?? 0),
-            'latestVisitDate' => (string)($latest['businessDate'] ?? ''),
+            'latestVisitDate' => (string)($visits['latest_date'] ?? ''),
             'latestVisit' => $latest ? [
-                'visitedAt' => (string)$latest['completedAt'], 'storeName' => (string)$latest['storeName'],
-                'projectName' => (string)$latest['projectName'], 'craftsmenSummary' => (string)$latest['craftsmenSummary'],
+                'visitedAt' => $this->dateTime((int)($latest['settled_at'] ?: $latest['occurred_at'])),
+                'storeName' => (string)$latest['store_name_snapshot'],
+                'projectName' => (string)$latest['project_name_snapshot'],
+                'craftsmenSummary' => $this->craftsmenSummary((string)($latest['craftsmen_snapshot_json'] ?? '')),
             ] : [],
         ];
     }

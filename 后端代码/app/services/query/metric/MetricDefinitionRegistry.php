@@ -354,7 +354,7 @@ final class MetricDefinitionRegistry
                 'default_ranking_dimension' => 'member',
                 'overview' => [['object_kind' => 'store', 'section' => '销售结果', 'order' => 20]],
             ],
-            'member_service_visit_count' => self::count('member_service_visit_count', 'v3-member-completed-service-visit-v1', ['condition_count', 'condition_list'], [
+            'member_service_visit_count' => self::count('member_service_visit_count', 'v3-member-non-experience-service-visit-v2', ['condition_count', 'condition_list'], [
                 'table' => 'cashier_v3_entitlement_service_fact',
                 'filters' => ['service_status' => 'completed'],
                 'normal_scope' => 'services',

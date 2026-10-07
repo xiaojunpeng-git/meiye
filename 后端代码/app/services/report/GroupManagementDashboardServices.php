@@ -16,7 +16,7 @@ use think\facade\Db;
 final class GroupManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'group_management_dashboard';
-    public const METRIC_VERSION = 'group-management-cash-recharge-v2';
+    public const METRIC_VERSION = 'group-management-cash-recharge-v3';
     public const COVERAGE_START = '2026-08-10';
 
     private $organizationDimensions;
@@ -414,6 +414,8 @@ final class GroupManagementDashboardServices
             $services = array_values(array_filter($serviceRows, static function (array $row) use ($sourceId): bool {
                 return (int)($row['business_source_primary_id'] ?? 0) === $sourceId;
             }));
+            // 来源维度的进店数与 A 来源活客均是门店到店指标；体验服务不取得资格。
+            $services = \app\services\query\metric\StoreCustomerVisitEligibility::filter($services);
             $orders = []; foreach ($matches as $row) if (trim((string)($row['order_id'] ?? '')) !== '') $orders[(string)$row['order_id']] = true;
             $activeMembers = []; foreach ($services as $row) if ((int)($row['member_id'] ?? 0) > 0) $activeMembers[(int)$row['member_id']] = true;
             $code = strtoupper(substr(trim($name), 0, 1));
@@ -421,7 +423,7 @@ final class GroupManagementDashboardServices
             if ($code === 'A') $item['active_customer_count'] = count($activeMembers);
             $out[] = $item;
         }
-        return ['records' => $out, 'source_explanation' => '按实际启用的一级业务来源动态展示；仅来源 A 展示活客数。进店数按该来源完成服务记录统计，成交数按该来源成功成交订单去重，成交金额按该来源正向成功收款及卡内项目分摊统计；A 来源活客数按完成服务的不同会员去重。'];
+        return ['records' => $out, 'source_explanation' => '按实际启用的一级业务来源动态展示；仅来源 A 展示活客数。进店数及活客只按非体验完成服务统计，不受人员“不算人数人次”开关影响；成交数按成功成交订单去重，金额按正向成功收款及卡内项目分摊统计。'];
     }
 
     private function rankings(string $tenantId, array $stores, array $range, array $targets, bool $aggregateEligible, array $categoryIds = []): array

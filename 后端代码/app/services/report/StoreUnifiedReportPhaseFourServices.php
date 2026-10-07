@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 namespace app\services\report;
-use app\services\query\metric\ServiceCustomerEligibility;
 
 use app\services\BaseServices;
 use app\services\cashier\v3\CashierV3ScopeResolver;
@@ -18,7 +17,7 @@ use think\facade\Db;
  */
 final class StoreUnifiedReportPhaseFourServices extends BaseServices
 {
-    public const METRIC_VERSION = 'report-phase-four-v1';
+    public const METRIC_VERSION = 'report-phase-four-store-visits-v2';
 
     private const SIX_DIMENSION_ANALYSIS = 'six_dimension_analysis';
 
@@ -120,8 +119,9 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $categoryIds = $this->categoryIds('六维', $input);
         $periodCash = $this->cashRows($stores, $range, $categoryIds);
         $historyCash = $this->cashRows($stores, ['end' => $range['end']], $categoryIds);
-        // 见诊人数过滤不能传播到金额、核销数量或手工费计算。
-        $services = ServiceCustomerEligibility::filter($this->serviceRows($stores, $range, $categoryIds));
+        // 六维见诊取实际完成的体验服务；人员不计数开关不能过滤门店见诊人数。
+        // 金额、核销数量和手工费仍各自读取原有权威事实，不受人数口径反向影响。
+        $services = $this->serviceRows($stores, $range, $categoryIds);
         // The workbook defines new/old by the member's six-dimension purchase
         // history, not by the member-import/source flag used by other reports.
         $firstPositive = [];
@@ -231,10 +231,10 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->pathColumn('partner_received_performance', '合作六维实收业绩', '所选期间六维中合作分类的实际收款，扣除退款；卡项按卡内合作六维项目计入，不受1,000元成交条件限制。', ['合作六维实收业绩'], true, false, 140, $this->drill('六维 / 合作')),
             $this->pathColumn('all_received_performance', '六维全部实收业绩', '所选期间六维自营与合作实际收款之和，已扣除退款；包括未达到1,000元成交条件的收款。', ['六维全部实收业绩'], true, false, 140, $this->drill('六维')),
         ];
-        // 展示解释与计算规则同源，避免用户看到的见诊口径与底层筛选不一致。
+        // 展示解释与计算规则同源，避免把人员开关误写成门店见诊资格。
         foreach ($columns as &$column) {
             if (in_array($column['key'], ['new_visit_people', 'old_visit_people', 'total_visit_people'], true)) {
-                $column['source_explanation'] .= ServiceCustomerEligibility::EXPLANATION;
+                $column['source_explanation'] .= '“不算人数人次”只影响人员统计，不影响本列；“体验”标记在本报表用于识别见诊服务，不是排除条件。';
             }
         }
         unset($column);
@@ -312,7 +312,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $facts = $this->cashRows($stores, $monthRange, $ids);
             $total = $this->factAmount($this->cashRows($stores, $monthRange, []));
             $serviceRows = $this->serviceRows($stores, $monthRange, $ids);
-            $active = $this->memberCount($this->serviceRows($stores, $monthRange, []));
+            $active = $this->memberCount(\app\services\query\metric\StoreCustomerVisitEligibility::filter($this->serviceRows($stores, $monthRange, [])));
             foreach ($facts as $fact) {
                 $key = $month . '|' . (string)$fact['item_id'];
                 if (!isset($rows[$key])) $rows[$key] = ['month' => $month, 'item_name' => (string)$fact['item_name'], 'item_id' => (string)$fact['item_id'], 'month_total_cents' => $total, 'cash_cents' => 0, 'members' => [], 'experience_members' => [], 'annual_members' => [], 'annual_repeat_members' => [], 'active_members' => $active];
@@ -396,7 +396,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $rows[$key]['cash_cents'] += (int)$fact['amount_cents'];
             if ((int)$fact['member_id'] > 0) $rows[$key]['members'][(string)$fact['member_id']] = (int)($rows[$key]['members'][(string)$fact['member_id']] ?? 0) + (int)$fact['amount_cents'];
         }
-        $allServiceMembers = $this->memberCount($this->serviceRows($stores, $range, []));
+        $allServiceMembers = $this->memberCount(\app\services\query\metric\StoreCustomerVisitEligibility::filter($this->serviceRows($stores, $range, [])));
         $storeCash = $this->factAmount($this->cashRows($stores, $range, []));
         foreach ($rows as &$row) {
             $qualified = 0;
@@ -735,7 +735,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->monthlySpec('actual_staff', '员工实配人数', '手动输入当月实际配置员工人数，保存为独立报表补充记录。', true, ['员工实配人数']),
             $this->monthlySpec('staff_difference', '差值', '员工应配人数减员工实配人数；任一值未填写显示“-”。', false, ['差值']),
             $this->monthlySpec('beauty_service_count', '生美总消耗项目数', '当月完成服务且商品分类为生美及下级分类的项目数量。', false, ['生美总消耗项目数']),
-            $this->monthlySpec('post_sale_visits', '售后人次', '当月完成有效服务的项目次数。', false, ['售后人次']),
+            $this->monthlySpec('post_sale_visits', '售后人次', '当月完成且未作废的非体验服务项目次数；人员“不算人数人次”不影响门店人次。', false, ['售后人次']),
             $this->monthlySpec('active_members', '活客数', '当月完成有效服务的不同会员数。', false, ['活客数']),
             $this->monthlySpec('beautician_monthly_projects', '美容师月均项目', '生美总消耗项目数除以员工实配人数；分母为零或未填写显示“-”。', false, ['美容师月均项目']),
             $this->monthlySpec('beautician_monthly_visits', '美容师月均服务人次', '售后人次除以员工实配人数；分母为零或未填写显示“-”。', false, ['美容师月均服务人次']),
@@ -747,7 +747,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->monthlySpec('active_members', '活客数', '当月完成有效服务的不同会员数。', false, ['活客数']),
             $this->monthlySpec('consuming_members', '消费人数', '当月有老客首护成功现金业绩的不同会员数。', false, ['消费人数']),
             $this->monthlySpec('consumption_rate', '消费率', '消费人数除以活客数；分母为零显示“-”。', false, ['消费率']),
-            $this->monthlySpec('post_sale_visits', '售后人次', '当月完成有效服务的项目次数。', false, ['售后人次']),
+            $this->monthlySpec('post_sale_visits', '售后人次', '当月完成且未作废的非体验服务项目次数；人员“不算人数人次”不影响门店人次。', false, ['售后人次']),
             $this->monthlySpec('store_average_visits', "店均\n售后人次", '售后人次除以门店数；分母为零显示“-”。', false, ["店均\n售后人次"]),
             $this->monthlySpec('actual_staff', '美容师人数', '手动输入当月美容师人数，保存为独立报表补充记录。', true, ['美容师人数']),
             $this->monthlySpec('staff_unit_output', '人均产值', '店均业绩除以美容师人数；分母为零或未填写显示“-”。', false, ['人均产值']),
@@ -806,7 +806,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         return $this->monthlyProjection((string)$definition['name'], $report, $stores, $range, $input, [
             $this->monthlySpec('store_count', '店面数', '当前权限范围内有效门店数量。', false, ['店面数']),
             $this->monthlySpec('active_members', '活客数', '当月完成有效服务的不同会员数。', false, ['活客数']),
-            $this->monthlySpec('post_sale_visits', '售后人次', '当月完成有效服务的项目次数。', false, ['售后人次']),
+            $this->monthlySpec('post_sale_visits', '售后人次', '当月完成且未作废的非体验服务项目次数；人员“不算人数人次”不影响门店人次。', false, ['售后人次']),
             $this->monthlySpec('deal_visits', '成交人次', '当月购买生美卡项商品名称的会员项目人次，不以同一会员去重。', false, ['成交人次']),
             $this->monthlySpec('visit_deal_rate', '人次成交率', '成交人次除以售后人次；分母为零显示“-”。', false, ['人次成交率']),
             $this->monthlySpec('deal_people', '成交人头', '当月购买生美卡项商品名称的不同会员数。', false, ['成交人头']),
@@ -875,8 +875,11 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         // A 老客首护由成功业务发生时冻结的来源代码 A 识别，不能用名称中的
         // 任意字母 A 做模糊匹配，也不能由当前会员资料反推历史来源。
         $healthSourceServices = $report === 'operations_health_data' ? $this->filterSourceFacts($services, ['source_codes' => ['A']]) : $services;
+        // 门店到店/活客/售后人次只看非体验服务；实际服务项目数及消耗金额仍读完整事实。
+        $storeVisits = \app\services\query\metric\StoreCustomerVisitEligibility::filter($services);
+        $healthVisits = \app\services\query\metric\StoreCustomerVisitEligibility::filter($healthSourceServices);
         $healthSourceCash = $report === 'operations_health_data' ? $this->filterSourceFacts($allCash, ['source_codes' => ['A']]) : $allCash;
-        $amount = $this->factAmount($allCash); $sourceAmount = $this->factAmount($cash); $active = $this->memberCount($healthSourceServices);
+        $amount = $this->factAmount($allCash); $sourceAmount = $this->factAmount($cash); $active = $this->memberCount($healthVisits);
         $beautyCash = $this->categoryAmount($allCash, '生美'); $beautyServices = $this->categoryServices($services, '生美');
         $amountByCategory = function (string $category) use ($allCash): int { return $this->categoryAmount($allCash, $category); };
         if ($key === 'store_count') return count((array)$context['stores']);
@@ -891,24 +894,24 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         }
         if (preg_match('/^(six_dimension|private|haomei|beauty)_difference$/', $key, $m)) return $this->money($this->cents($row[$m[1] . '_current_amount'] ?? '-') - $this->cents($row[$m[1] . '_previous_amount'] ?? '-'));
         if ($key === 'active_members') return $active;
-        if ($key === 'post_sale_visits') return $this->serviceCount($healthSourceServices);
-        if ($key === 'one_to_two_visits') return $this->visitBandMembers($services, 1, 2);
+        if ($key === 'post_sale_visits') return $this->serviceCount($healthVisits);
+        if ($key === 'one_to_two_visits') return $this->visitBandMembers($storeVisits, 1, 2);
         if ($key === 'one_to_two_visit_share') return $this->ratio((int)($row['one_to_two_visits'] ?? 0), $active);
-        if ($key === 'three_plus_visits') return $this->visitBandMembers($services, 3, null);
+        if ($key === 'three_plus_visits') return $this->visitBandMembers($storeVisits, 3, null);
         if ($key === 'three_plus_visit_share') return $this->ratio((int)($row['three_plus_visits'] ?? 0), $active);
-        if ($key === 'regular_customers') return $this->visitBandMembers($services, 1, 1);
-        if ($key === 'inactive_customers') return $this->inactiveMemberCount((array)$context['serviceHistory'], (string)$context['monthRange']['end']);
+        if ($key === 'regular_customers') return $this->visitBandMembers($storeVisits, 1, 1);
+        if ($key === 'inactive_customers') return $this->inactiveMemberCount(\app\services\query\metric\StoreCustomerVisitEligibility::filter((array)$context['serviceHistory']), (string)$context['monthRange']['end']);
         if ($key === 'active_rate') return $this->ratio($active, $active + (int)($row['inactive_customers'] ?? 0));
         if ($key === 'consuming_members') return $this->memberCount($healthSourceCash);
         if ($key === 'consumption_rate') return $this->ratio((int)($row['consuming_members'] ?? 0), $active);
-        if ($key === 'store_average_visits') return $this->moneyRatio($this->serviceCount($healthSourceServices) * 100, count((array)$context['stores']));
-        if ($key === 'monthly_service_visits') return $this->moneyRatio($this->serviceCount($healthSourceServices) * 100, 12);
+        if ($key === 'store_average_visits') return $this->moneyRatio($this->serviceCount($healthVisits) * 100, count((array)$context['stores']));
+        if ($key === 'monthly_service_visits') return $this->moneyRatio($this->serviceCount($healthVisits) * 100, 12);
         if ($key === 'beauty_service_count') return $this->serviceCount($beautyServices);
         if ($key === 'consumption_amount') return $this->money($this->serviceConsumptionAmount($beautyServices));
         if ($key === 'consumption_share') return $this->ratio($this->cents($row['consumption_amount'] ?? '-'), $amount);
         if ($key === 'staff_difference') return ($row['required_staff'] ?? '-') === '-' || ($row['actual_staff'] ?? '-') === '-' ? '-' : (int)$row['required_staff'] - (int)$row['actual_staff'];
         if ($key === 'beautician_monthly_projects') return $this->moneyRatio($this->serviceCount($beautyServices) * 100, (int)($row['actual_staff'] ?? 0));
-        if ($key === 'beautician_monthly_visits') return $this->moneyRatio($this->serviceCount($services) * 100, (int)($row['actual_staff'] ?? 0));
+        if ($key === 'beautician_monthly_visits') return $this->moneyRatio($this->serviceCount($storeVisits) * 100, (int)($row['actual_staff'] ?? 0));
         if ($key === 'store_average_amount') return $this->moneyRatio($amount, count((array)$context['stores']));
         if ($key === 'staff_unit_output') return $this->moneyRatio($this->cents($row['store_average_amount'] ?? '-'), (int)($row['actual_staff'] ?? 0));
         if ($key === 'staff_consumption_output') return $this->moneyRatio($this->cents($row['consumption_amount'] ?? '-'), (int)($row['actual_staff'] ?? 0));
@@ -1034,7 +1037,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         else $query->where('sv.business_date', '<=', (string)$range['end']);
         if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
         if ($this->participantEmployeeId > 0) (new StoreReportParticipantScopeServices())->applyCheckout($query, 'sv.checkout_request_id', $this->participantEmployeeId);
-        return $query->fieldRaw("sv.service_fact_id,sv.store_id,sv.member_id,sv.business_date,sv.organization_id,sv.organization_path_snapshot,sv.store_name_snapshot store_name,sv.project_id,sv.project_name_snapshot,sv.project_category_path_snapshot category_path,sv.is_experience,sv.service_object,sv.friend_counts_as_customer,sv.source_line_id,sv.quantity,(SELECT MAX(sf.business_source_label_snapshot) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=sv.tenant_id AND sf.source_line_id=sv.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') business_source_label,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=sv.tenant_id AND pf.source_line_id=sv.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') consumption_cents")->select()->toArray();
+        return $query->fieldRaw("sv.service_fact_id,sv.store_id,sv.member_id,sv.business_date,sv.organization_id,sv.organization_path_snapshot,sv.store_name_snapshot store_name,sv.project_id,sv.project_name_snapshot,sv.project_category_path_snapshot category_path,sv.is_experience,sv.source_line_id,sv.quantity,(SELECT MAX(sf.business_source_label_snapshot) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=sv.tenant_id AND sf.source_line_id=sv.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') business_source_label,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=sv.tenant_id AND pf.source_line_id=sv.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') consumption_cents")->select()->toArray();
     }
 
     /**
@@ -1311,8 +1314,8 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             'filter_schema' => array_merge([['key' => 'organization_store_scope', 'label' => '组织 / 门店', 'type' => 'organization_store_scope'], ['key' => 'date_range', 'label' => '日期', 'type' => !empty($filters['year']) ? 'year' : 'date_range', 'inclusive' => true, 'single_natural_month' => !empty($filters['single_month'])]], !empty($filters['category']) ? [['key' => 'category_path', 'label' => '商品分类', 'type' => 'category_tree', 'include_descendants' => true]] : [], !empty($filters['unit_price_range']) ? [['key' => 'unit_price_range', 'label' => '项目单价成交区间（元）', 'type' => 'money_range', 'min_key' => 'unit_price_min', 'max_key' => 'unit_price_max']] : []),
             'source_explanations' => array_values(array_map(static fn(array $column): array => ['key' => (string)$column['key'], 'label' => (string)$column['label'], 'source_explanation' => (string)$column['source_explanation']], $columns)),
             'drilldown_keys' => ['start_date', 'end_date', 'store_id', 'category_path', 'company_dimension_id', 'metric_code'],
-            'table_layout' => ['fixed' => true, 'sticky_query' => true, 'sticky_header' => true, 'sticky_summary' => true, 'result_scroll' => true], 'metric_version' => self::METRIC_VERSION,
-            'service_customer_rule_version' => ServiceCustomerEligibility::VERSION,
+            'table_layout' => ['fixed' => true, 'sticky_query' => true, 'sticky_header' => true, 'sticky_summary' => true, 'result_scroll' => true], 'metric_version' => $title === '六维数据分析表' ? 'six-dimension-analysis-personnel-split-v2' : self::METRIC_VERSION,
+            'service_customer_rule_version' => null,
             'data_as_of' => date('Y-m-d H:i:s'), 'aggregation_status' => 'reconciled', 'scope' => ['date_range' => $range]];
     }
     private function column(string $key,string $label,string $explanation,bool $summable=false,bool $fixed=false,int $width=110,array $drilldown=[],string $group=''):array{$column=['key'=>$key,'label'=>$label,'source_explanation'=>$explanation,'summable'=>$summable,'width'=>$width];if($fixed){$column['fixed']='left';$column['fixed_width']=$width;}if($drilldown)$column['drilldown']=$drilldown;if($group!=='')$column['group_label']=$group;return $column;}

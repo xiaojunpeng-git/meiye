@@ -1,5 +1,5 @@
 <?php
-/** 本地事务回滚夹具：验证朋友计数规则、同日去重、市场汇总/明细及下钻同源，不留业务数据。 */
+/** 本地事务回滚夹具：人员不计数标记不影响非体验门店市场人次，汇总/明细/下钻同源且不留业务数据。 */
 $backend = getenv('BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
 require $backend . '/vendor/autoload.php';
 $app = new \think\App($backend . '/');
@@ -53,21 +53,25 @@ try {
         $row['business_date'] = $date;
         $row['service_object'] = 'friend';
         $row['friend_counts_as_customer'] = 0;
+        $row['is_experience'] = 0;
         $ids[] = Db::name('cashier_v3_entitlement_service_fact')->insertGetId($row);
     }
-    check51($visits() === 0 && $summary() === $baseline, 'excluded friend leaked into detail/drilldown/summary');
-    // 混合项目必须保留可计数服务，不能因同单存在不计人次项目而整单排除。
+    check51($visits() === 1 && $summary() === $baseline + 1, 'personnel-excluded friend missing from market visit');
+    // 同会员、同日、同来源的两个项目只记一次；切换人员标记不得改变门店资格。
     Db::name('cashier_v3_entitlement_service_fact')->where('id', $ids[0])->update(['friend_counts_as_customer'=>1]);
-    check51($visits() === 1 && $summary() === $baseline + 1, 'counted friend missing');
+    check51($visits() === 1 && $summary() === $baseline + 1, 'mixed personnel flags changed market deduplication');
     Db::name('cashier_v3_entitlement_service_fact')->whereIn('id', $ids)->update(['service_object'=>'self','friend_counts_as_customer'=>0]);
-    check51($visits() === 0 && $summary() === $baseline, 'self marked not counted excluded from detail and summary');
+    check51($visits() === 1 && $summary() === $baseline + 1, 'self personnel flag changed market visits');
     Db::name('cashier_v3_entitlement_service_fact')->whereIn('id', $ids)->update(['friend_counts_as_customer'=>1]);
-    check51($visits() === 1 && $summary() === $baseline + 1, 'counted self visits deduplicated');
+    check51($visits() === 1 && $summary() === $baseline + 1, 'counted self visits not deduplicated');
     Db::name('cashier_v3_entitlement_service_fact')->whereIn('id', $ids)->update(['service_object'=>'friend','friend_counts_as_customer'=>0,'member_id'=>0]);
-    check51($summary() === $baseline, 'excluded guest friend counted');
+    check51($summary() === $baseline + 1, 'guest personnel flag changed market visits');
     Db::name('cashier_v3_entitlement_service_fact')->whereIn('id', $ids)->update(['friend_counts_as_customer'=>1]);
     check51($summary() === $baseline + 1, 'counted guest projects not deduplicated');
-    echo "PASS R51: excluded/counting friends, mixed projects, self, guest, dedup, detail/drilldown/summary\n";
+    // 唯一的门店市场排除标记是体验；两条服务均变体验后，应整单退出市场人次。
+    Db::name('cashier_v3_entitlement_service_fact')->whereIn('id', $ids)->update(['is_experience'=>1]);
+    check51($summary() === $baseline, 'experience guest leaked into market visits');
+    echo "PASS R29: personnel flag independent of market visits, experience exclusion, member/guest dedup, detail/drilldown/summary\n";
 } finally {
     Db::rollback();
 }

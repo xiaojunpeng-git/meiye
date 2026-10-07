@@ -6,11 +6,12 @@ $provider = (string)file_get_contents($root . '/后端代码/app/services/query/
 $failures = [];
 foreach ([
     "Db::name('cashier_v3_entitlement_service_fact')",
-    "->where('service_status', 'completed')",
-    'COUNT(DISTINCT business_date) AS visit_count',
-    'MAX(business_date) AS latest_date',
-    "->where('tenant_id', \$tenantId)",
-    "->whereIn('store_id', \$visible)",
+    "->where('sf.service_status', 'completed')",
+    'COUNT(DISTINCT sf.business_date) AS visit_count',
+    'MAX(sf.business_date) AS latest_date',
+    "->where('sf.tenant_id', \$tenantId)",
+    "->whereIn('sf.store_id', \$visible)",
+    "StoreCustomerVisitEligibility::apply(\$query, 'sf')",
 ] as $needle) {
     if (strpos($provider, $needle) === false) $failures[] = 'missing V3 visit authority: ' . $needle;
 }

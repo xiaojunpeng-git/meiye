@@ -42,6 +42,7 @@ $storeId = (int)$member['belong_store_id'];
 $actual = (new MemberVisitFactProbe())->readVisits([$memberId], [$storeId], '0')[$memberId] ?? [];
 $expected = (array)Db::name('cashier_v3_entitlement_service_fact')->where('tenant_id', '0')
     ->where('store_id', $storeId)->where('member_id', $memberId)->where('service_status', 'completed')
+    ->whereRaw('COALESCE(is_experience,0)=0')
     ->field('COUNT(DISTINCT business_date) AS visit_count,MAX(business_date) AS latest_date')->find();
 
 $checks = [

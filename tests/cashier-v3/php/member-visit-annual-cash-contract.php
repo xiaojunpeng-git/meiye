@@ -24,7 +24,7 @@ $checks = [
     'cash is scoped to listed members' => strpos($method, "->whereIn('member_id', \$memberIds)") !== false,
     'cash comes from payment facts' => strpos($method, '$this->cashFacts($stores)') !== false && strpos($method, 'store_order') === false,
     'annual cash sums the month facts' => strpos($method, "\$records[\$id]['annual_cash_cents']+=(int)\$fact['amount_cents']") !== false,
-    'report metric version is revised' => strpos($method, "store-member-visit-analysis-v3") !== false,
+    'report metric version is revised' => strpos($method, "store-member-visit-analysis-v4") !== false,
 ];
 
 foreach ($checks as $name => $passes) {

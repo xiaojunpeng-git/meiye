@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace app\services\report;
 
+use app\services\query\metric\StoreCustomerVisitEligibility;
 use think\facade\Db;
 
 /**
@@ -17,7 +18,7 @@ use think\facade\Db;
 final class MemberManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'member_management_dashboard';
-    public const METRIC_VERSION = 'member-management-dashboard-facts-v1';
+    public const METRIC_VERSION = 'member-management-dashboard-facts-v2';
 
     /** @return array<string,mixed> */
     public function dashboard(array $context, array $input = []): array
@@ -31,7 +32,7 @@ final class MemberManagementDashboardServices
 
         $consuming = $this->memberSet($this->withoutExperience($cash), true);
         $serviceMembers = $this->memberSet($services);
-        $sleeping = $this->sleepingMembers($historicalServices, $range['end'], 90);
+        $sleeping = $this->sleepingMembers(StoreCustomerVisitEligibility::filter($historicalServices), $range['end'], 90);
         $cashAmount = $this->sum($this->withoutExperience($cash), 'amount_cents');
         $serviceAmount = $this->performanceAmount($scope['tenant_id'], $scope['store_ids'], $range, $categoryId);
         $projectCount = $this->projectCount($services);
@@ -272,8 +273,9 @@ final class MemberManagementDashboardServices
     private function visitBands(array $currentServices, array $historicalServices, string $start, string $end): array
     {
         $last = []; $monthly = [];
-        foreach ($historicalServices as $row) { $member = (int)($row['member_id'] ?? 0); if ($member <= 0) continue; $date = (string)$row['business_date']; if (!isset($last[$member]) || $date > $last[$member]) $last[$member] = $date; }
-        foreach ($currentServices as $row) { $member = (int)($row['member_id'] ?? 0); if ($member <= 0) continue; $month = substr((string)$row['business_date'], 0, 7); $monthly[$month][$member] = ($monthly[$month][$member] ?? 0) + 1; }
+        // 会员到店频次只计非体验服务；人员“不算人数人次”不改变门店到店事实。
+        foreach (StoreCustomerVisitEligibility::filter($historicalServices) as $row) { $member = (int)($row['member_id'] ?? 0); if ($member <= 0) continue; $date = (string)$row['business_date']; if (!isset($last[$member]) || $date > $last[$member]) $last[$member] = $date; }
+        foreach (StoreCustomerVisitEligibility::filter($currentServices) as $row) { $member = (int)($row['member_id'] ?? 0); if ($member <= 0) continue; $month = substr((string)$row['business_date'], 0, 7); $monthly[$month][$member] = ($monthly[$month][$member] ?? 0) + 1; }
         $recency = []; foreach ([30, 60, 90, 180, 360] as $days) { $cut = strtotime($end . ' -' . $days . ' days'); $count = 0; foreach ($last as $date) if (strtotime($date) <= $cut) $count++; $recency[] = ['label' => $days . '天到店', 'value' => $count]; }
         $frequency = []; $counts = [1 => 0, 2 => 0, 3 => 0, 4 => 0, 5 => 0];
         $startMonth = substr($start, 0, 7); $endMonth = substr($end, 0, 7);
@@ -305,7 +307,7 @@ final class MemberManagementDashboardServices
         return [
             'member.consuming_members' => '购买过卡项或项目并形成成功现金业绩、排除体验标签的会员，按会员 ID 去重。',
             'member.service_members' => '查询期间完成有效服务的会员，按会员 ID 去重；取消、拒绝、爽约、作废和未完成不计入。',
-            'member.sleeping_members' => '截至查询结束日最后一次有效服务距今 90 天及以上且历史有有效服务记录的会员，按会员 ID 去重。',
+            'member.sleeping_members' => '截至查询结束日最后一次非体验有效服务距今 90 天及以上且历史有符合条件到店记录的会员，按会员 ID 去重；人员开关不参与。',
             'consumption.people' => '非体验标签的消费会员数，按会员 ID 去重。',
             'consumption.amount' => '查询期间成功收款现金业绩净额；退款、作废和调整按实际发生日期形成反向影响。',
             'consumption.average' => '消费金额除以消费会员数；分母为零显示 -。',
@@ -326,8 +328,8 @@ final class MemberManagementDashboardServices
             'ranking.consumption_amount.amount' => '消耗排行消耗金额：项目有效服务形成的消耗业绩，产品使用购买金额按看板特殊规则归集。',
             'ranking.consumption_amount.people' => '消耗排行服务人头：该项目或产品关联的服务会员数，按会员 ID 去重。',
             'ranking.consumption_amount.average' => '消耗排行人均消耗：消耗金额除以服务人头。',
-            'visit.recency' => '截至查询结束日最后一次有效服务距今达到 30/60/90/180/360 天的会员数，按累计区间统计。',
-            'visit.frequency' => '按有效服务事实逐条统计每个会员每月服务次数；全年按各月份会员频次桶合计。',
+            'visit.recency' => '截至查询结束日最后一次非体验有效服务距今达到 30/60/90/180/360 天的会员数，按累计区间统计；人员开关不参与。',
+            'visit.frequency' => '按非体验有效服务事实统计每个会员每月到店次数；全年按各月份会员频次桶合计，人员开关不参与。',
             'tier.people' => '按查询期间会员现金业绩净额匹配集团消费层级后，按会员 ID 去重。',
             'tier.amount' => '该消费层级会员的现金业绩净额合计。',
             'tier.member_share' => '层级顾客人数除以消费顾客总人数。',

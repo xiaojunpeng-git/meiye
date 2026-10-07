@@ -16,7 +16,7 @@ use think\facade\Db;
  */
 final class CustomerAnalyticsServices
 {
-    public const METRIC_VERSION = 'customer-analytics-v1';
+    public const METRIC_VERSION = 'customer-analytics-store-visits-v2';
 
     /** Keep IN predicates below MySQL packet/optimizer limits on all-store queries. */
     private const UNCONSUMED_BATCH_SIZE = 500;
@@ -224,7 +224,10 @@ final class CustomerAnalyticsServices
     private function overviewVisuals(array $stores, array $range, array $input): array
     {
         $phaseFour = new StoreUnifiedReportPhaseFourServices();
-        $facts = $phaseFour->customerServiceRows($stores, $range, (array)($input['_report_scope'] ?? []));
+        // 概览趋势展示到店会员，不把体验服务误认为门店到店；现金画像仍取全部有效收款。
+        $facts = \app\services\query\metric\StoreCustomerVisitEligibility::filter(
+            $phaseFour->customerServiceRows($stores, $range, (array)($input['_report_scope'] ?? []))
+        );
         $cashFacts = $phaseFour->customerCashRows($stores, $range, (array)($input['_report_scope'] ?? []));
         $months = [];
         $members = [];
@@ -266,7 +269,10 @@ final class CustomerAnalyticsServices
     /** Build frequency and recency distributions from completed service facts. */
     private function visitVisuals(array $stores, array $range, array $input): array
     {
-        $facts = (new StoreUnifiedReportPhaseFourServices())->customerServiceRows($stores, $range, (array)($input['_report_scope'] ?? []));
+        // 到店频次/最近到店与经营报表共用体验资格，人员开关只由员工统计使用。
+        $facts = \app\services\query\metric\StoreCustomerVisitEligibility::filter(
+            (new StoreUnifiedReportPhaseFourServices())->customerServiceRows($stores, $range, (array)($input['_report_scope'] ?? []))
+        );
         $byMember = [];
         foreach ($facts as $fact) {
             $member = (int)($fact['member_id'] ?? 0);
@@ -320,14 +326,14 @@ final class CustomerAnalyticsServices
                 'is_guest' => '取客户生命周期记录中的嘉宾标记快照。',
                 'first_course_source' => '取客户首次疗程完成时保存的来源名称快照。',
                 'annual_30000' => '按选择自然年累计现金或消耗业绩是否达到3万元判断。',
-                'customer_active' => '从客户生命周期记录统计期间完成过有效服务的去重会员人数。',
+                'customer_active' => '从已完成且未作废的非体验服务统计期间到店会员，按会员去重；人员开关不参与。',
                 'customer_effective' => '从客户生命周期和有效服务记录统计期间产生有效消费或服务的会员人数。',
                 'customer_sleeping' => '从客户最近服务日期和生命周期状态统计超过设定周期未再到店的会员人数。',
                 'cash_performance' => '按会员统计成功收款分摊事实的现金业绩。',
                 'consume_performance' => '按会员统计有效消耗业绩事实。',
                 'order_count' => '按统计期间有效销售事实关联的订单编号去重计数。',
                 'sale_amount' => '按统计期间有效销售事实中的成交金额快照汇总。',
-                'active' => '按期间完成有效服务的事实判断是否活客。',
+                'active' => '按期间完成且未作废的非体验服务判断是否活客；人员“不算人数人次”不影响门店到店。',
                 'effective' => '按统一客户有效标准和生命周期快照判断是否有效顾客。',
                 'sleeping' => '按最近有效服务时间和页面选择的睡眠周期判断。',
                 'last_service_at' => '取客户最近一次完成有效服务事实的业务时间。',
@@ -348,22 +354,22 @@ final class CustomerAnalyticsServices
             ],
             'customer_visit_analysis' => [
                 'month' => '按完成服务日期归属自然月。',
-                'active_members' => '从完成服务记录统计当前权限范围内的去重活跃会员。',
-                'one_to_two_visits' => '统计期间完成1至2次有效服务的去重会员人数。',
+                'active_members' => '从非体验完成服务统计当前权限范围内的去重到店会员，人员开关不参与。',
+                'one_to_two_visits' => '统计期间有1至2次非体验有效服务到店的去重会员人数。',
                 'one_to_two_visit_share' => '1至2次到店会员人数除以当期活客人数，分母为零显示“-”。',
-                'three_plus_visits' => '统计期间完成3次及以上有效服务的去重会员人数。',
+                'three_plus_visits' => '统计期间有3次及以上非体验有效服务到店的去重会员人数。',
                 'three_plus_visit_share' => '3次及以上到店会员人数除以当期活客人数，分母为零显示“-”。',
-                'regular_customers' => '统计近90天内恰好完成1次有效服务的去重会员人数。',
-                'inactive_customers' => '统计超过90天未完成有效服务、但历史有服务记录的去重会员人数。',
+                'regular_customers' => '统计近90天内恰好有1次非体验有效服务到店的去重会员人数。',
+                'inactive_customers' => '统计超过90天没有非体验有效服务到店、但历史有到店记录的去重会员人数。',
                 'active_rate' => '活客人数除以活客人数与死客人数之和，分母为零显示“-”。',
             ],
             'customer_store_health' => [
                 'month' => '按服务或收款业务日期归属自然月。',
                 'store_count' => '按当前权限范围内有效门店统计。',
-                'active_members' => '按门店和月份统计完成有效服务的去重会员人数。',
+                'active_members' => '按门店和月份统计非体验有效服务到店的去重会员人数；人员开关不参与。',
                 'consuming_members' => '按门店和月份统计产生有效现金业绩的去重会员人数。',
                 'consumption_rate' => '消费人数除以活客人数，分母为零显示“-”。',
-                'post_sale_visits' => '按完成服务事实统计售后服务次数。',
+                'post_sale_visits' => '按非体验完成服务事实统计售后服务次数；体验只排除门店人次，不排除消耗金额。',
                 'store_average_visits' => '售后服务次数除以门店数，分母为零显示“-”。',
                 'actual_staff' => '取平台保存的当月美容师人数手动值，未填写显示“-”。',
                 'staff_unit_output' => '店均业绩除以美容师人数，分母为零显示“-”。',
