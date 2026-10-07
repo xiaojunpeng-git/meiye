@@ -8,8 +8,8 @@ export const SALES_ORDER_RECEIPT_PAPER_PROFILES = Object.freeze([
 ])
 
 const DEFAULT_RECEIPT_PAPER_KEY = '76'
-// Keep a short blank feed area below the totals so the receipt can be torn off cleanly.
-const RECEIPT_TEAR_GUIDE_MM = 30
+// Reserve 40mm for the XP-76 print-head/cutter offset plus 30mm of visible tear-off space.
+const RECEIPT_TEAR_GUIDE_MM = 70
 const RECEIPT_TRAILING_SAFETY_MM = 4
 
 function resolveReceiptPageHeightMm(paperProfile, measuredHeightPx) {
