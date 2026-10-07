@@ -7,6 +7,11 @@ $service = (string)file_get_contents($root . '/后端代码/app/services/report/
 $report = (string)file_get_contents($root . '/后端代码/app/services/report/StoreUnifiedReportServices.php');
 $view = (string)file_get_contents($root . '/前端代码/cashier-v3/src/views/StoreBusinessReportView.vue');
 
+// 剩余卡项统计必须使用 V3 租户范围常量，避免 PHP 在报表命名空间查找不存在的同名类。
+if (strpos($service, 'use app\\services\\cashier\\v3\\CashierV3ScopeResolver;') === false) {
+    throw new RuntimeException('phase-two report scope resolver import missing');
+}
+
 foreach ([
     "'table_layout'=>['fixed'=>true,'sticky_header'=>true,'sticky_summary'=>true,'result_scroll'=>true]",
     'private function fixedColumns',

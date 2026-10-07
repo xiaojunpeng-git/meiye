@@ -3,6 +3,7 @@
 namespace app\services\report;
 
 use app\services\BaseServices;
+use app\services\cashier\v3\CashierV3ScopeResolver;
 use think\facade\Db;
 use app\services\query\metric\ServiceCustomerEligibility;
 
