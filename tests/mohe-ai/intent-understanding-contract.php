@@ -29,9 +29,14 @@ $check(($continued['topic_relation']??null)==='continuation',
 $newTopic=AiIntentUnderstandingContract::normalize($understanding+['topic_relation'=>'new_topic'],$contextQuestion);
 $check(($newTopic['topic_relation']??null)==='new_topic',
     'model can close the prior topic without copying its query fields');
-$reject(static function()use($understanding,$question):void {
-    AiIntentUnderstandingContract::normalize($understanding+['topic_relation'=>'new_topic'],$question);
-},'a fresh question cannot claim a prior-topic relation');
+$freshDecorated=AiIntentUnderstandingContract::normalize($understanding+['topic_relation'=>'new_topic'],$question);
+$check(!isset($freshDecorated['topic_relation']) && AiIntentUnderstandingContract::ids($freshDecorated)===['r1','r2','r3'],
+    'a fresh question ignores a meaningless topic relation without dropping current meaning');
+$rankingMissingOperation=$understanding;
+unset($rankingMissingOperation['requirements'][2]['values']['operation']);
+$rankingRecovered=AiIntentUnderstandingContract::normalize($rankingMissingOperation,$question);
+$check(($rankingRecovered['requirements'][2]['values']['operation']??null)==='ranking',
+    'a typed top ranking restores only its missing operation carrier');
 // A model values key in fields must remain a failed first attempt. The
 // diagnostic classifies its shape without retaining customer or model text,
 // and the bounded repair still has to preserve every original requirement.
@@ -70,6 +75,47 @@ $typedOverview=AiIntentUnderstandingContract::normalize([
 $check(($typedOverview['request_kind']??null)==='open_overview'
     &&($typedOverview['requirements'][0]['values']['object_relation']??null)==='analysis',
     'an explicit open overview remains a non-executable typed semantic carrier');
+$overviewMissingOperation=['goal'=>'查看本月门店整体经营概览','request_kind'=>'open_overview',
+    'status'=>'understood','requirements'=>[array_replace($typedOverview['requirements'][0],
+        ['values'=>array_diff_key($typedOverview['requirements'][0]['values'],['operation'=>true])])]];
+$recoveredOverviewOperation=AiIntentUnderstandingContract::normalize($overviewMissingOperation,$overviewTypedQuestion);
+$check(($recoveredOverviewOperation['requirements'][0]['values']['operation']??null)==='summary',
+    'a declared overview operation omitted by the provider is recovered only from its typed marker');
+$unmarkedMissingOperation=$overviewMissingOperation;
+unset($unmarkedMissingOperation['request_kind']);
+$reject(static function()use($unmarkedMissingOperation,$overviewTypedQuestion):void {
+    AiIntentUnderstandingContract::normalize($unmarkedMissingOperation,$overviewTypedQuestion);
+},'a missing operation without an overview marker is not guessed from prose');
+$conflictingOverviewOperation=$overviewMissingOperation;
+$conflictingOverviewOperation['requirements'][0]['values']['operation']='ranking';
+$conflictingOverview=AiIntentUnderstandingContract::normalize($conflictingOverviewOperation,$overviewTypedQuestion);
+$check(($conflictingOverview['requirements'][0]['values']['operation']??null)==='ranking',
+    'an explicit conflicting operation is not overwritten by marker recovery');
+$doubleConditionQuestion=$overviewTypedQuestion;
+$doubleConditionQuestion['question']='销售额达到5000元并且销量达到10件的产品有哪些';
+$doubleConditionQuestion['evidence_messages']=[['id'=>'current','text'=>$doubleConditionQuestion['question']]];
+$doubleConditionQuestion['has_unresolved_conditions']=false;
+$lostCondition=['goal'=>'列出符合销售条件的产品','status'=>'understood','requirements'=>[[
+    'id'=>'r1','meaning'=>'按产品销售额查看','fields'=>['metric_codes','object_kind','operation'],
+    'values'=>['metric_terms'=>['销售额'],'object_kind'=>'product','operation'=>'summary'],
+    'evidence'=>[['message_id'=>'current','quote'=>$doubleConditionQuestion['question']]],
+]]];
+$lostPredicate=false;
+try { AiIntentUnderstandingContract::normalize($lostCondition,$doubleConditionQuestion); }
+catch (AiContractException $error) {
+    $lostPredicate=($error->diagnostic()['predicate']??null)==='condition_completeness';
+}
+$check($lostPredicate && AiIntentUnderstandingContract::repairable('condition_completeness'),
+    'two registered numeric predicates cannot be reduced to one measurement');
+$nullCondition=$lostCondition;
+$nullCondition['requirements'][0]['fields'][]='aggregate_condition';
+$nullCondition['requirements'][0]['values']['aggregate_condition']=null;
+$nullConditionRejected=false;
+try { AiIntentUnderstandingContract::normalize($nullCondition,$doubleConditionQuestion); }
+catch (AiContractException $error) {
+    $nullConditionRejected=($error->diagnostic()['predicate']??null)==='values:aggregate_condition';
+}
+$check($nullConditionRejected,'declared but null compound condition requests repair instead of losing predicates');
 $reject(static function()use($overviewTypedQuestion){AiIntentUnderstandingContract::normalize([
     'goal'=>'invalid marker','request_kind'=>'ranking','status'=>'understood','requirements'=>[[
         'id'=>'r1','meaning'=>'invalid marker','fields'=>['unbound'],'evidence'=>[['message_id'=>'current','quote'=>$overviewTypedQuestion['question']]],

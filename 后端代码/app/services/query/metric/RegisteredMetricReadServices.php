@@ -14,6 +14,13 @@ final class RegisteredMetricReadServices
     // AI full-detail snapshots are bounded before publication. The separate
     // screen limit is 20; exceeding this ceiling must fail, not export a page.
     public const AI_DETAIL_LIMIT = 1000;
+    /** A current-rights summary exports one selection row and six asset
+     * values per member. Derive its larger complete-set ceiling from the
+     * shared workbook row budget; other condition sets keep their own limit. */
+    public static function rightsDetailLimit(): int
+    {
+        return intdiv(\app\services\query\UnifiedQueryExecutionServices::MAX_SOURCE_ROWS, 7);
+    }
     private $queryFactory;
     private $normalFacts;
     private $normalServices;
@@ -116,7 +123,10 @@ final class RegisteredMetricReadServices
         // A count answer must not pay for a hidden 100-row member page and a
         // second value lookup. limit=0 is the server-owned count-only mode;
         // callers still cannot request an unbounded page.
-        if ($limit < 0 || $limit > self::AI_DETAIL_LIMIT || ($conditionSet['subject'] ?? null) !== 'member'
+        $rightsOnly=count((array)($conditionSet['conditions']??[]))===1
+            && ($conditionSet['conditions'][0]['metric_code']??null)==='member_remaining_project_amount';
+        $maxLimit=$rightsOnly?self::rightsDetailLimit():self::AI_DETAIL_LIMIT;
+        if ($limit < 0 || $limit > $maxLimit || ($conditionSet['subject'] ?? null) !== 'member'
             || !in_array($conditionSet['relation'] ?? null, ['all', 'any'], true)
             || !is_array($conditionSet['conditions'] ?? null) || count($conditionSet['conditions']) < 1
             || count($conditionSet['conditions']) > 4) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
@@ -337,7 +347,7 @@ final class RegisteredMetricReadServices
             }
         }
         $count=count($matched);
-        if ($limit===self::AI_DETAIL_LIMIT && $count>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
+        if ($limit>=self::AI_DETAIL_LIMIT && $count>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
         if ($limit===0 || $count===0) return ['count'=>$count,'rows'=>[],'limit'=>$limit,'has_more'=>$count>0];
         $page=array_slice($matched,0,$limit,true);
         $names=[];

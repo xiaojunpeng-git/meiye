@@ -30,14 +30,24 @@ final class MetricDefinitionRegistry
      */
     public static function analysisObjectAliases(): array
     {
+        $roles=self::personnelRoleAliases();
         return [
             // “哪家店” is an ordinary interrogative form of the registered
             // store object. Publishing it here keeps that linguistic form in
             // the same source-owned vocabulary as “门店”; it does not choose
             // a metric or turn a referential “那家店” into an all-store query.
             'store' => ['门店', '哪家店'],
-            'person' => ['员工', '手艺人', '销售人'],
+            // 人员语言别名不授予对应岗位资格；执行时仍核验岗位和权限。
+            'person' => array_values(array_unique(array_merge(['员工'],...array_values($roles)))),
         ];
+    }
+
+    /** One source-owned map for natural role words and live personnel
+     * catalogue refs. A phrase match is never itself an authorized cohort. */
+    public static function personnelRoleAliases(): array
+    {
+        return ['role:craftsman'=>['手艺人','技师'],
+            'role:salesperson'=>['销售人','销售顾问']];
     }
 
     /**

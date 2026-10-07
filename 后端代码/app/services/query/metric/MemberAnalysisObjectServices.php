@@ -87,7 +87,7 @@ final class MemberAnalysisObjectServices
         // A signed condition-list may contain the full authorised export set;
         // use the same bounded ceiling as the Reader instead of the old
         // screen-page limit, or a valid >100-member detail fails before data read.
-        if (!$references || count($references)>RegisteredMetricReadServices::AI_DETAIL_LIMIT
+        if (!$references || count($references)>RegisteredMetricReadServices::rightsDetailLimit()
             || count(array_unique($references))!==count($references)) {
             throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
         }

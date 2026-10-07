@@ -335,7 +335,7 @@ final class CashierV3CardRuleEntitlementAuthorityServices
                 $originOrder = $this->row(Db::name('store_order')
                     ->where('id', (int)($currentHolder['oid'] ?? 0))->lock(true)->find());
                 if (!$originOrder) throw self::failure('card_rule_cancellation_origin_missing');
-                $limit = $this->debtLimitedSharedTimes($snapshot, $originOrder);
+                $limit = $this->debtLimitedSharedTimes($snapshot, $originOrder, true);
                 if ($totalQuantity > $limit) {
                     throw self::failure('card_rule_shared_times_insufficient', [
                         'holderId' => $holderId, 'requested' => $totalQuantity, 'available' => $limit,

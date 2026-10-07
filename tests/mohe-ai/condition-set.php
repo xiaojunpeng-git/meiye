@@ -278,6 +278,12 @@ $productCompiled=(new AiRegisteredPlanCompiler())->compile(['query'=>$productQue
 csCheck(($productCompiled['query']['business_filters']??null)===['object_kind'=>'product']
     &&($productCompiled['query']['condition_set']??null)===$productSet,
     'product amount and quantity conditions compile through the generic registered-object path');
+$gateway=(new ReflectionClass(\app\services\ai\AiGatewayServices::class))->newInstanceWithoutConstructor();
+$singleTitleRecovery=new ReflectionMethod($gateway,'applyUniqueRegisteredMetricTermBinding');
+$completeConditionIntent=['operation'=>'condition_list','metric_codes'=>['sales_amount','sales_quantity'],
+    'aggregate_condition'=>$productBinding];
+csCheck($singleTitleRecovery->invoke($gateway,$completeConditionIntent,[],[],null,[])===$completeConditionIntent,
+    'single-title recovery cannot collapse an accepted two-metric condition set');
 csCheck(($normalizeMetricQuery($views,$productQuery)['condition_set']['subject']??null)==='product',
     'read-view admission accepts a registered product condition population without a product-name branch');
 $productEvidence=['query'=>$productQuery,'results'=>[[
@@ -410,6 +416,8 @@ $memberNatural=AiIntentUnderstandingContract::normalize(['goal'=>'列出同时�
 ]]],$memberNaturalSafe);
 csCheck($memberNatural['requirements'][0]['values']['metric_terms']===['到店次数','实际收款销售额'],
     'generic conditions admit only registry-proven alias normalization grounded by literal customer evidence');
+csCheck(($memberNatural['requirements'][0]['values']['object_relation']??null)==='analysis',
+    'a complete candidate condition set supplies its own analytical relation when the provider omits it');
 $spokenVisitSafe=$memberNaturalSafe;
 $spokenVisitSafe['question']='最近30天到店至少2次，而且实际收款销售额达到1万元的会员有哪些？';
 $spokenVisitSafe['evidence_messages'][0]['text']=$spokenVisitSafe['question'];

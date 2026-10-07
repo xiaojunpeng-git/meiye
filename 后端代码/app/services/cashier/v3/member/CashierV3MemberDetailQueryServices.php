@@ -79,19 +79,39 @@ final class CashierV3MemberDetailQueryServices
     }
 
     /**
-     * Current-rights amount populations only present member summaries. Read
-     * the three card-derived summary fields from the reconciled AI index and
-     * keep balances on their existing authority; explicit card-rights views
-     * continue through readAiRightsSet() with the full project list.
+     * Read a complete, authorized member-summary set without returning card
+     * rows. The live cashier card projection is authoritative: an index may
+     * lag a source change, so its cached amount must not be presented as the
+     * current detail or used to silently replace the exported screen value.
+     * Explicit card-rights views still use readAiRightsSet().
      */
     public function readAiRightsSummarySet(array $memberIds,CashierV3OperatorScope $operatorScope,CashierV3DataScopeContext $dataScope,?callable $checkpoint=null): array
     {
-        $cardSummaries=(new \app\services\query\metric\AiMemberRightsAmountIndex())
-            ->summaryForMembers($operatorScope->tenantId(),array_values((array)$dataScope->visibleStoreIds()),$memberIds);
-        if ($cardSummaries===null) return $this->readAiRightsSet($memberIds,$operatorScope,$dataScope,$checkpoint);
+        if ($memberIds===[] || count($memberIds)>\app\services\query\metric\RegisteredMetricReadServices::rightsDetailLimit()
+            || count(array_unique($memberIds))!==count($memberIds)) throw $this->notFound();
+        foreach ($memberIds as $memberId) {
+            if (!is_int($memberId) || $memberId<=0) throw $this->notFound();
+            $this->assertAiVisible($memberId,$dataScope);
+        }
         $details=[];$asOf=date('c');
+        // The versioned rights index contains these exact cashier-projected
+        // card totals. Recheck every signed member against the current store
+        // scope and overlay dirty/time-transitioned rows before using it;
+        // without a ready index, retain the live cashier authority below.
+        $visibleStores=$dataScope->visibleStoreIds();
+        if ($dataScope->authorizationMode()===CashierV3DataScopeContext::MODE_ALL) {
+            $visibleStores=array_map('intval',Db::name('system_store')->column('id'));
+        }
+        $indexedSummaries=is_array($visibleStores) && $visibleStores!==[]
+            ?(new \app\services\query\metric\AiMemberRightsAmountIndex())->summaryForMembers(
+                $operatorScope->tenantId(),$visibleStores,$memberIds):null;
         foreach (array_chunk($memberIds,100) as $batch) {
             if ($checkpoint!==null) $checkpoint();
+            // A live fallback still computes the same three totals in batches
+            // and never exposes card rows in the summary/Excel projection.
+            $cardSummaries=$indexedSummaries!==null
+                ?array_intersect_key($indexedSummaries,array_fill_keys($batch,true))
+                :$this->readAiRightsSummariesForIndex($batch,$operatorScope->tenantId());
             $snapshots=(new CashierV3MemberBalanceProvider())->readSnapshots($batch,$operatorScope,$dataScope);
             $members=Db::name('user')->whereIn('uid',$batch)
                 ->field('uid,nickname,real_name,belong_store_id,status,is_del,delete_time')->select()->toArray();
@@ -1101,10 +1121,10 @@ final class CashierV3MemberDetailQueryServices
                 $originOrder = (array)($originOrders[$orderId] ?? []);
                 $pending = (float)($pendingByOrder[$orderId] ?? 0);
                 $effective = $writeoff->calcEffectiveWriteSurplusTimes(
-                    $row, $pending, $originOrder, $amount, $rowsByOrder[$orderId] ?? []
+                    $row, $pending, $originOrder, $amount, $rowsByOrder[$orderId] ?? [], false
                 );
                 $amount = $writeoff->usableEntitlementAmount(
-                    $row, $originOrder, $amount, $pending, $rowsByOrder[$orderId] ?? []
+                    $row, $originOrder, $amount, $pending, $rowsByOrder[$orderId] ?? [], false
                 );
             } catch (\InvalidArgumentException $exception) {
                 throw new CashierV3CommandException(

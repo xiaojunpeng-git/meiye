@@ -50,11 +50,31 @@ final class MemberDetailContinuationResolver
         // requests may read the verified set; an ambiguous singular must not
         // silently choose its first row.
         if ($target==='set') {
+            $snapshot=$view['results'][0]['population_snapshot']??null;
+            if ($snapshot!==null) {
+                $total=$view['results'][0]['count']??null;
+                if (!is_array($snapshot)||!is_int($total)||$total<1
+                    ||($snapshot['count']??null)!==$total||count($rows)!==min(20,$total)) {
+                    throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+                }
+                $members=[];$position=0;
+                foreach ((new \app\services\query\metric\AiMemberRightsPopulationStore())->rows($snapshot) as $frozen) {
+                    if ($position>=count($rows)) break;
+                    if ($rows[$position]['member_id']!==$frozen['member_id']
+                        ||$rows[$position]['member_name']!==$frozen['member_name']) {
+                        throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+                    }
+                    $members[]=$this->member($rows[$position],$request);++$position;
+                }
+                if ($position!==count($rows)) throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
+                return ['members'=>$members,'view'=>$request['view']??'summary',
+                    'population_snapshot'=>$snapshot];
+            }
             // Detail and export may use the Reader's full verified list, even
             // when the screen previews 20 rows. A truncated source still fails.
             $total=$view['results'][0]['count']??count($rows);
             if (!empty($view['results'][0]['has_more'])||(int)$total>count($rows)
-                ||count($rows)>\app\services\query\metric\RegisteredMetricReadServices::AI_DETAIL_LIMIT) {
+                ||count($rows)>\app\services\query\metric\RegisteredMetricReadServices::rightsDetailLimit()) {
                 throw new RuntimeException('AI_MEMBER_DETAIL_SET_NOT_READY');
             }
             $members=[];$seen=[];
@@ -70,6 +90,16 @@ final class MemberDetailContinuationResolver
             if (count($rows)!==1) throw new RuntimeException('AI_MEMBER_DETAIL_SELECTION_REQUIRED');
             $index=0;
         } else {
+            $snapshot=$view['results'][0]['population_snapshot']??null;
+            if (is_array($snapshot) && is_int($ordinal) && $ordinal>count($rows)
+                && $ordinal<=($snapshot['count']??0)) {
+                $position=0;
+                foreach ((new \app\services\query\metric\AiMemberRightsPopulationStore())->rows($snapshot) as $frozen) {
+                    if (++$position===$ordinal) return $this->member([
+                        'member_id'=>$frozen['member_id'],'member_name'=>$frozen['member_name']],$request);
+                }
+                throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+            }
             if (!is_int($ordinal)||$ordinal<1||$ordinal>count($rows)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
             $index=$ordinal-1;
         }

@@ -18,6 +18,7 @@ class UnifiedQueryExportWorkerServices
     public const CLEANUP_GRACE_SECONDS = 60;
     public const LEASE_RENEW_INTERVAL_SECONDS = 30;
     public const MAX_TASK_RUNTIME_SECONDS = 240;
+    public const MAX_AI_TASK_RUNTIME_SECONDS = 21600;
     public const HEARTBEAT_ROW_INTERVAL = 50;
 
     /** @var UnifiedQueryExportTaskServices */
@@ -311,30 +312,42 @@ class UnifiedQueryExportWorkerServices
             );
             $heartbeat(true);
             $includeSummary = !empty($claim['include_summary']);
-            UnifiedQueryExportTaskServices::assertCellBudget(
-                count($fieldSnapshot),
-                count((array)$execution['exportRows']),
-                $includeSummary
-            );
-            $presentationTables=$this->partition==='AI_EXPORT'
-                ? (array)($execution['presentationTables']??[]) : [];
-            if ($presentationTables) {
-                $presentationTables=\app\services\ai\presentation\AiExportTableProjection::validate($presentationTables);
-                $displayCells=0;
-                foreach ($presentationTables as $table) $displayCells+=count($table['columns'])*(count($table['rows'])+3);
-                if ($displayCells+count($fieldSnapshot)*(count((array)$execution['exportRows'])+1)
-                    >UnifiedQueryExportTaskServices::MAX_EXPORT_CELLS) throw new \RuntimeException('AI_EXPORT_CELL_BUDGET_EXCEEDED');
+            $streamed=$this->partition==='AI_EXPORT' && isset($execution['streamingRows'],$execution['streamingTables']);
+            if ($streamed) {
+                // Only a signed AI source may exceed the in-memory workbook
+                // budget. The file writer counts every row and publication
+                // fails if it differs from the frozen source's exact total.
+                if (!is_int($execution['total']??null)||$execution['total']<1
+                    ||!is_iterable($execution['streamingRows'])
+                    ||!is_array($execution['streamingTables'])||$execution['streamingTables']===[]
+                    ||$includeSummary) throw new \RuntimeException('AI_EXPORT_STREAM_INVALID');
+                $presentationTables=$execution['streamingTables'];
+                $rowCount=$execution['total'];
+            } else {
+                UnifiedQueryExportTaskServices::assertCellBudget(
+                    count($fieldSnapshot),count((array)$execution['exportRows']),$includeSummary);
+                $presentationTables=$this->partition==='AI_EXPORT'
+                    ? (array)($execution['presentationTables']??[]) : [];
+                if ($presentationTables) {
+                    $presentationTables=\app\services\ai\presentation\AiExportTableProjection::validate($presentationTables);
+                    $displayCells=0;
+                    foreach ($presentationTables as $table) $displayCells+=count($table['columns'])*(count($table['rows'])+3);
+                    if ($displayCells+count($fieldSnapshot)*(count((array)$execution['exportRows'])+1)
+                        >UnifiedQueryExportTaskServices::MAX_EXPORT_CELLS) throw new \RuntimeException('AI_EXPORT_CELL_BUDGET_EXCEEDED');
+                }
+                $rowCount=count((array)$execution['exportRows']);
             }
             $inFileStage = true;
             $storageKey = $this->writeXlsx(
                 $taskNo,
                 (string)$claim['workerToken'],
                 $fieldSnapshot,
-                (array)$execution['exportRows'],
+                $streamed?$execution['streamingRows']:(array)$execution['exportRows'],
                 $includeSummary ? (array)$execution['summaries'] : [],
                 $includeSummary,
                 $heartbeat,
-                $presentationTables
+                $presentationTables,
+                $streamed?$rowCount:null
             );
             $inFileStage = false;
             $heartbeat(true);
@@ -344,7 +357,7 @@ class UnifiedQueryExportWorkerServices
             $this->tasks->complete(
                 (string)$claim['tenant_id'],
                 $taskNo,
-                count((array)$execution['exportRows']),
+                $rowCount,
                 $storageKey,
                 time() + self::RETENTION_SECONDS,
                 (string)$claim['workerToken']
@@ -352,13 +365,13 @@ class UnifiedQueryExportWorkerServices
             return [
                 'taskId' => $taskNo,
                 'status' => 'succeeded',
-                'rowCount' => count((array)$execution['exportRows']),
+                'rowCount' => $rowCount,
                 'storageKey' => $storageKey,
             ];
         } catch (\Throwable $exception) {
             $completion = [
                 'state' => 'not_applicable',
-                'rowCount' => count((array)($execution['exportRows'] ?? [])),
+                'rowCount' => isset($rowCount)?$rowCount:count((array)($execution['exportRows'] ?? [])),
             ];
             if ($completionAttempted && is_array($claim) && $storageKey !== '') {
                 $completion = $this->completionState(
@@ -778,7 +791,10 @@ class UnifiedQueryExportWorkerServices
     protected function applyProcessTimeout(): void
     {
         if (function_exists('set_time_limit')) {
-            @set_time_limit(self::MAX_TASK_RUNTIME_SECONDS + 15);
+            // AI's file task is detached from the question. Large, frozen
+            // result sets may need longer without extending the answer wait.
+            @set_time_limit(($this->partition === 'AI_EXPORT'
+                ? self::MAX_AI_TASK_RUNTIME_SECONDS : self::MAX_TASK_RUNTIME_SECONDS) + 15);
         }
     }
 
@@ -794,19 +810,22 @@ class UnifiedQueryExportWorkerServices
         }
         $startedAt = microtime(true);
         $lastRenewedAt = 0.0;
+        $runtimeLimit=$this->partition==='AI_EXPORT'
+            ?self::MAX_AI_TASK_RUNTIME_SECONDS:self::MAX_TASK_RUNTIME_SECONDS;
         return function (bool $force = false) use (
             $tenantId,
             $taskNo,
             $workerToken,
             $startedAt,
-            &$lastRenewedAt
+            &$lastRenewedAt,
+            $runtimeLimit
         ): void {
             $now = microtime(true);
-            if ($now - $startedAt > self::MAX_TASK_RUNTIME_SECONDS) {
+            if ($now - $startedAt > $runtimeLimit) {
                 throw new UnifiedQueryException(
                     'UNIFIED_QUERY_EXPORT_TIMEOUT',
                     '导出任务处理超时，请缩小查询范围后重试。',
-                    ['max_seconds' => self::MAX_TASK_RUNTIME_SECONDS]
+                    ['max_seconds' => $runtimeLimit]
                 );
             }
             if ($this->partition === 'AI_EXPORT' || $force || $lastRenewedAt <= 0.0
@@ -833,21 +852,23 @@ class UnifiedQueryExportWorkerServices
         string $taskNo,
         string $workerToken,
         array $fieldSnapshot,
-        array $rows,
+        iterable $rows,
         array $summaries,
         $includeSummary = null,
         ?callable $heartbeat = null,
-        array $presentationTables = []
+        array $presentationTables = [],
+        ?int $expectedRowCount = null
     ): string {
         if (!preg_match('/^[a-f0-9]{64}$/D', $workerToken)) {
             throw new \RuntimeException('导出 worker 租约标识不合法');
         }
         $includeSummary = $includeSummary === null ? !empty($summaries) : (bool)$includeSummary;
-        UnifiedQueryExportTaskServices::assertCellBudget(
-            count($fieldSnapshot),
-            count($rows),
-            $includeSummary
-        );
+        if ($expectedRowCount===null) {
+            UnifiedQueryExportTaskServices::assertCellBudget(
+                count($fieldSnapshot),count($rows),$includeSummary);
+        } elseif ($expectedRowCount<1 || $presentationTables===[]) {
+            throw new \RuntimeException('AI_EXPORT_STREAM_INVALID');
+        }
         $this->heartbeat($heartbeat, true);
         $datePath = date('Y/m');
         // 禁止不同租约写同一路径；只有 complete CAS 成功的对象键才会进入任务行。
@@ -861,20 +882,26 @@ class UnifiedQueryExportWorkerServices
         }
         $path = $directory . DIRECTORY_SEPARATOR . $objectName;
         $temporary = $path . '.tmp-' . bin2hex(random_bytes(6));
+        if ($presentationTables!==[]) {
+            // AI tables may grow far beyond the in-memory spreadsheet cell
+            // budget. Serialize the already verified answer incrementally;
+            // the same lease and atomic publication checks remain below.
+            try {
+                $written=(new \app\services\ai\presentation\AiStreamingWorkbook())->write(
+                    $temporary,$fieldSnapshot,$presentationTables,$rows,$heartbeat);
+                if ($written!==($expectedRowCount??count($rows)) || !is_file($temporary) || filesize($temporary)<=0
+                    || !rename($temporary,$path)) throw new \RuntimeException('AI_EXPORT_WRITE_FAILED');
+                @chmod($path,0600);
+                return $storageKey;
+            } finally {
+                if (is_file($temporary)) @unlink($temporary);
+            }
+        }
+        if ($expectedRowCount!==null) throw new \RuntimeException('AI_EXPORT_STREAM_INVALID');
         $spreadsheet = new Spreadsheet();
         try {
             $sheet = $spreadsheet->getActiveSheet();
             $sheet->setTitle('查询结果');
-            if ($presentationTables) {
-                // The first sheet has exactly the business tables the user saw.
-                // Preserve full-precision source rows on a hidden audit sheet;
-                // visible rounded yuan must never become the export's only data.
-                \app\services\ai\presentation\AiExportTableProjection::validate($presentationTables);
-                $this->writePresentationTables($sheet,$presentationTables,$heartbeat);
-                $sheet=$spreadsheet->createSheet();
-                $sheet->setTitle('精确数据');
-                $sheet->setSheetState(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet::SHEETSTATE_HIDDEN);
-            }
             foreach ($fieldSnapshot as $index => $field) {
                 $column = Coordinate::stringFromColumnIndex($index + 1);
                 $label = $this->text((string)($field['label'] ?? ($field['key'] ?? '')));
@@ -933,40 +960,6 @@ class UnifiedQueryExportWorkerServices
             }
             $spreadsheet->disconnectWorksheets();
         }
-    }
-
-    /** Render section titles, column order and displayed cell text without
-     * letting untrusted names/formulas execute in Excel. */
-    protected function writePresentationTables($sheet,array $tables,?callable $heartbeat): void
-    {
-        $line=1;
-        foreach ($tables as $table) {
-            if ($table['title']!=='') {
-                $sheet->setCellValueExplicit('A'.$line,$this->text($table['title']),DataType::TYPE_STRING);
-                $sheet->getStyle('A'.$line)->getFont()->setBold(true);
-                ++$line;
-            }
-            $sheet->setCellValueExplicit('A'.$line,$this->text($table['summary']),DataType::TYPE_STRING);
-            ++$line;
-            $header=$line;
-            foreach ($table['columns'] as $index=>$column) {
-                $letter=Coordinate::stringFromColumnIndex($index+1);
-                $sheet->setCellValueExplicit($letter.$line,$this->text($column['label']),DataType::TYPE_STRING);
-                $sheet->getColumnDimension($letter)->setWidth($this->columnWidth($column['label']));
-            }
-            $sheet->getStyle('A'.$header.':'.Coordinate::stringFromColumnIndex(count($table['columns'])).$header)->getFont()->setBold(true);
-            ++$line;
-            foreach ($table['rows'] as $index=>$row) {
-                if ($index>0 && $index%self::HEARTBEAT_ROW_INTERVAL===0) $this->heartbeat($heartbeat);
-                foreach ($table['columns'] as $columnIndex=>$column) {
-                    $letter=Coordinate::stringFromColumnIndex($columnIndex+1);
-                    $sheet->setCellValueExplicit($letter.$line,$this->text($row[$column['key']]),DataType::TYPE_STRING);
-                }
-                ++$line;
-            }
-            ++$line;
-        }
-        $sheet->freezePane('A2');
     }
 
     protected function writeCell($sheet, string $coordinate, $value, string $type): void

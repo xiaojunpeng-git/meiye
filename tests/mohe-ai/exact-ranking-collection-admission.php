@@ -28,6 +28,21 @@ $verify(($compound[1]['metric_code']??null)==='sales_record_count'
 $prefixedCompound=$admission->match('那这个月的销售额最高是哪天，销售记录最多的项目是哪个，最低是哪个',$objects,$metrics);
 $verify($prefixedCompound===$compound,
     'a leading conversational connector preserves the exact compound ranking plan');
+$scoped=$admission->namedStoreScope('这个月甲店这个门店技师项目数最多的是哪个，最低的是哪个',[
+    ['ref'=>'store:12','kind'=>'store','label'=>'甲店'],
+    ['ref'=>'store:13','kind'=>'store','label'=>'乙店'],
+]);
+$verify(($scoped['store_id']??null)===12
+    &&$admission->match($scoped['question'],[['object_kind'=>'person','object_label'=>'技师']],['staff_project_num'])
+        ===[['metric_code'=>'staff_project_num','object_kind'=>'person','direction'=>'top_and_bottom','limit'=>1]],
+    'an exact authorized store scope leaves the ordinary two-extrema ranking grammar intact');
+$verify($admission->namedStoreScope('甲店这个门店技师项目数最多的是哪个',[
+    ['ref'=>'store:12','kind'=>'store','label'=>'甲店'],
+    ['ref'=>'store:13','kind'=>'store','label'=>'甲店'],
+])===null,'duplicate authorized store names never select an arbitrary identity');
+$verify($admission->namedStoreScope('这个门店技师项目数最多的是哪个',[
+    ['ref'=>'store:12','kind'=>'store','label'=>'甲店'],
+])===null,'a demonstrative without a named store stays on contextual understanding');
 
 $saleObjects=$objects;
 $saleObjects[]=['object_kind'=>'product','object_label'=>'产品'];
@@ -118,6 +133,13 @@ $vocabulary=$vocabularyMethod->invoke($gateway,['metric_readiness'=>$contracts],
 $capabilities=['metric_codes'=>array_keys($contracts),'metric_readiness'=>$contracts,
     'query_shapes'=>['summary','breakdown','trend','ranking','comparison','condition_count','condition_list'],
     'output_formats'=>['screen']];
+$realStorePhrase=$admission->namedStoreScope('这个月肥西水晶城这个门店技师项目数最多的是哪个，最低的是哪个',[
+    ['ref'=>'store:133','kind'=>'store','label'=>'肥西水晶城'],
+]);
+$verify(($realStorePhrase['store_id']??null)===133
+    &&$admission->match($realStorePhrase['question'],$vocabulary,$capabilities['metric_codes'])
+        ===[['metric_code'=>'staff_project_num','object_kind'=>'person','direction'=>'top_and_bottom','limit'=>1]],
+    'a registered metric containing 项目 does not conceal the actual 技师 ranked subject');
 $reason=null;
 $args=['这个月销售额最高的门店是哪个',$vocabulary,$capabilities,'screen','2026-09-25',&$reason];
 $baseGrainRanking=$rankingMethod->invokeArgs($gateway,$args);

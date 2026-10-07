@@ -32,11 +32,13 @@ final class CashierV3CardOriginDebtResolver
     }
 
     /** 当前最后一次取消金额仍是不可使用的权益；恢复后状态归零，旧审计不再限制次数。 */
-    public function cancelledCardDebt(array $order, int $memberId, string $tenantId = '0'): string
+    public function cancelledCardDebt(array $order, int $memberId, string $tenantId = '0', bool $allowRowLock = true): string
     {
         if ((int)($order['uid'] ?? 0) !== $memberId || $memberId <= 0) return '0.00';
         // 核销事务读取最新债务终态并与取消命令共用行锁，避免旧快照在取消后放行。
-        $lock = \app\services\cashier\v3\CashierV3TransactionGuard::isInTransaction();
+        // AI's repeatable-read transaction is READ ONLY. It needs the same
+        // debt facts without FOR UPDATE; checkout callers retain row locks.
+        $lock = $allowRowLock && \app\services\cashier\v3\CashierV3TransactionGuard::isInTransaction();
         $v3 = $this->cancelledV3CardDebt($order, $memberId, $tenantId, $lock);
         if ($v3 !== null) return $v3;
         $rows = Db::name('store_debt')->where('order_id', (int)($order['id'] ?? 0))->lock($lock)->select()->toArray();
@@ -54,12 +56,12 @@ final class CashierV3CardOriginDebtResolver
      * 共享次数卡的不可用金额以当前债务终态为准：待还与取消均限制核销，
      * 恢复只切换来源事实，不释放尚未补交的次数；结清后才解除限制。
      */
-    public function unavailableCardDebt(array $order, int $memberId, string $tenantId = '0'): string
+    public function unavailableCardDebt(array $order, int $memberId, string $tenantId = '0', bool $allowRowLock = true): string
     {
-        $cancelled = $this->cancelledCardDebt($order, $memberId, $tenantId);
+        $cancelled = $this->cancelledCardDebt($order, $memberId, $tenantId, $allowRowLock);
         if (bccomp($cancelled, '0', 2) > 0) return $cancelled;
         if ($memberId <= 0 || (int)($order['uid'] ?? 0) !== $memberId) return '0.00';
-        $lock = \app\services\cashier\v3\CashierV3TransactionGuard::isInTransaction();
+        $lock = $allowRowLock && \app\services\cashier\v3\CashierV3TransactionGuard::isInTransaction();
         $v3 = $this->pendingV3CardDebt($order, $memberId, $lock);
         if ($v3 !== null) return $v3;
         $rows = Db::name('store_debt')->where('order_id', (int)($order['id'] ?? 0))

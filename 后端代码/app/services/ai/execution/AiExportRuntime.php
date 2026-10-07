@@ -181,12 +181,17 @@ final class AiExportRuntime
             'terminal'=>$owner['terminal'],'account_id'=>$owner['account_id'],'conversation_id'=>$owner['conversation_id'],
             'window_id'=>$owner['window_id'],'run_id'=>$run['run_id'],'generation'=>$run['generation']]);
         $now=time(); $expiry=intdiv($run['expires_at'],1000);
+        // A completed answer is already delivered. Its full streamed file is
+        // independent of the short question budget and must not be cut off at
+        // 180 seconds solely because the verified population is large.
+        $fileBudget=(($evidence['member_rights_export']['version']??null)===3)
+            ?Q\UnifiedQueryExportWorkerServices::MAX_AI_TASK_RUNTIME_SECONDS:180;
         $binding=['mode'=>'independent_v1','instance_fingerprint'=>$this->runtime['instance'],
             'terminal'=>$owner['terminal'],'account_id'=>$owner['account_id'],'conversation_id'=>$owner['conversation_id'],
             'window_id'=>$owner['window_id'],'run_id'=>$run['run_id'],'generation'=>$run['generation'],
             'worker_token'=>'','evidence_ref'=>$run['evidence_ref'],'canonical_result_ref'=>$run['answer_ref'],
             'read_consistency_ref'=>$source['view_ref'],'created_at'=>$now,'expires_at'=>$expiry,
-            'source_expires_at'=>[$expiry],'execution_deadline_at'=>min($expiry,$now+180),
+            'source_expires_at'=>[$expiry],'execution_deadline_at'=>min($expiry,$now+$fileBudget),
             'queue_deadline_ms'=>(int)floor(microtime(true)*1000)+$this->settings['queue_wait_budget_ms'],
             'result_hash'=>'','permission_hash'=>AiAuthority::permissionHash($context),
             'model_config_version'=>(string)$this->runtime['config']->read()['version']];
@@ -200,7 +205,7 @@ final class AiExportRuntime
         $binding['result_hash']=$view['result_hash'];
         $binding['expires_at']=min($expiry,(int)$view['expires_at']);
         $binding['source_expires_at']=[$expiry,(int)$view['expires_at']];
-        $binding['execution_deadline_at']=min($binding['expires_at'],$now+180);
+        $binding['execution_deadline_at']=min($binding['expires_at'],$now+$fileBudget);
         $binding['signature']=$this->signature($binding); $this->binding=$binding;
         $this->validateBinding($binding,'create'); $this->assertCurrentVersions($binding);
         $seed=['source_type'=>'AI','account_id'=>$owner['account_id'],'operator_id'=>$owner['account_id'],
@@ -371,6 +376,10 @@ final class AiExportRuntime
             } catch (\Throwable $ignored) { /* Invalid/expired ownership is never reconstructed; TTL erasure below owns it. */ }
         }
         $result=$this->worker->cleanupExpired(200); $result['stopped_tasks']=$stopped;
+        // These two 24-hour spools contain private member data and are not
+        // owned by the generic export-file cleaner.
+        $result['expired_member_sets']=(new M\AiMemberRightsPopulationStore())->cleanupExpired(200);
+        $result['expired_rights_details']=(new \app\services\ai\presentation\AiMemberRightsDetailStore())->cleanupExpired(200);
         if (!$this->dispatch) $result['queue']=AiExportQueue::cleanup($this->runtime['instance']);
         return $result;
     }
@@ -443,7 +452,23 @@ final class AiExportRuntime
             // Recheck the exact signed set against one live permission scope.
             // Per-member selection repeated the same grant and SQL up to 1,000
             // times before Task claim, exhausting the short queue deadline.
-            $members->selections($snapshot['member_refs']);
+            if ($snapshot['version']===3) {
+                $batch=[];
+                foreach ((new \app\services\ai\presentation\AiMemberRightsDetailStore())->rows($snapshot['details']) as $record) {
+                    $batch[$record['selection_ref']]=$record['label'];
+                    if (count($batch)<100) continue;
+                    $this->assertCurrentMemberBatch($members,$batch);$batch=[];
+                }
+                if ($batch!==[]) $this->assertCurrentMemberBatch($members,$batch);
+            } else $members->selections($snapshot['member_refs']);
+        }
+    }
+    /** Recheck current visibility without loading the complete file into one SQL IN list. */
+    private function assertCurrentMemberBatch($members,array $batch): void
+    {
+        $selected=$members->selections(array_keys($batch));
+        foreach ($batch as $ref=>$label) {
+            if (($selected[$ref]['label']??null)!==$label) throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
         }
     }
     /** Bind file content to BOTH the context view and immutable exact assets. */
@@ -482,6 +507,16 @@ final class AiExportRuntime
     { return rtrim(app()->getRuntimePath(),DIRECTORY_SEPARATOR).'/private/mohe-ai-export-locks/'.hash('sha256',$this->runtime['instance']); }
     private function verifyFile(string $path,array $view): void
     {
+        if (($view['member_rights_export']['version']??null)===3) {
+            $fields=[];
+            foreach (M\MetricReadViewExportRegistrar::fields() as $key=>$label) $fields[]=['key'=>$key,'label'=>$label];
+            // The physical workbook and frozen private source are compared
+            // cell-by-cell with bounded memory before publishing download.
+            (new \app\services\ai\presentation\AiStreamingWorkbook())->verify($path,$fields,
+                \app\services\ai\presentation\AiMemberRightsExportProjection::streamedTables($view),
+                \app\services\ai\presentation\AiMemberRightsExportProjection::streamedAuditRows($view));
+            return;
+        }
         $book=\PhpOffice\PhpSpreadsheet\IOFactory::load($path);
         try {
             $tables=M\MetricReadViewExportProvider::presentationTables($view);
@@ -506,7 +541,10 @@ final class AiExportRuntime
                     $sameValue = $numericValue
                         ? (($row['unit'] ?? null) === '元'
                             ? number_format((float)$actual, 2, '.', '') === $wanted
-                            : (string)(int)$actual === (string)$wanted)
+                            // Counts can be fractional (for example split
+                            // service visits). Integer-casting an XLSX number
+                            // would reject a correct 4.5 as if it were 4.
+                            : (string)$actual === (string)$wanted)
                         : (string)$actual === (string)$wanted;
                     if ($cell->getDataType()==='f' || !$sameValue) throw new \RuntimeException('AI_EXPORT_CONTENT_MISMATCH');
                 }

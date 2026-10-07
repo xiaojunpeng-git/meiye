@@ -1336,12 +1336,13 @@ class WriteOffOrderServices extends BaseServices
         array $cartRow,
         float $orderPendingDebt = 0,
         array $orderInfo = [],
-        array $orderCartRows = []
+        array $orderCartRows = [],
+        bool $allowRowLock = true
     ): float
     {
         // R50：取消是不再收取、也不再可用的金额，不得随欠款状态3解除核销限制。
         // 沿用固定来源明细权重分摊；清除旧行欠款字段，避免取消额与旧欠款重复扣除。
-        $cancelled = $this->cancelledEntitlementAmount($orderInfo);
+        $cancelled = $this->cancelledEntitlementAmount($orderInfo, $allowRowLock);
         if (bccomp($cancelled, '0', 2) > 0) {
             if ((int)($cartRow['is_gift'] ?? 0) === 1) return 0.0;
             $rows = $this->debtAllocationRows($cartRow, $orderInfo, $orderCartRows);
@@ -1361,11 +1362,11 @@ class WriteOffOrderServices extends BaseServices
         );
     }
 
-    /** 将审计读取与纯金额公式分开，真实核销使用数据库权威，单元测试可提供明确事实。 */
-    protected function cancelledEntitlementAmount(array $order): string
+    /** 将审计读取与纯金额公式分开；只读报表传 false，核销默认保留事务行锁。 */
+    protected function cancelledEntitlementAmount(array $order, bool $allowRowLock = true): string
     {
         return (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())
-            ->cancelledCardDebt($order, (int)($order['uid'] ?? 0), (string)($order['tenant_id'] ?? '0'));
+            ->cancelledCardDebt($order, (int)($order['uid'] ?? 0), (string)($order['tenant_id'] ?? '0'), $allowRowLock);
     }
 
     /**
@@ -1507,29 +1508,31 @@ class WriteOffOrderServices extends BaseServices
         float $orderPendingDebt = 0,
         array $orderInfo = [],
         ?string $remainingAmount = null,
-        array $orderCartRows = []
+        array $orderCartRows = [],
+        bool $allowRowLock = true
     ): int
     {
         $pending = $this->resolveCartPendingDebtForWriteoff(
             $cartRow,
             $orderPendingDebt,
             $orderInfo,
-            $orderCartRows
+            $orderCartRows,
+            $allowRowLock
         );
         $effective = $this->calcDebtLimitedTimesByRemainingAmount($cartRow, $pending, $remainingAmount);
         // 共享池按整卡核对待还/取消额，避免零金额子项目绕开逐行分摊；
         // 恢复欠款但未补交时仍占用次数，独立项目继续保留原分摊口径。
         $sharedLimit = (new \app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices())
-            ->debtLimitForDetail($cartRow, $orderInfo);
+            ->debtLimitForDetail($cartRow, $orderInfo, $allowRowLock);
         if ($sharedLimit !== null) $effective = min($effective, $sharedLimit);
         return $effective;
     }
 
-    /** 选择器展示真正可用金额，与最终核销次数限制复用同一不可用额；不改原成交快照。 */
-    public function usableEntitlementAmount(array $cart, array $order, ?string $remaining, float $pendingDebt = 0, array $rows = []): ?string
+    /** 选择器和报表只读同一不可用额；报表传 false 禁止只读事务中的 FOR UPDATE。 */
+    public function usableEntitlementAmount(array $cart, array $order, ?string $remaining, float $pendingDebt = 0, array $rows = [], bool $allowRowLock = true): ?string
     {
         if ($remaining === null) return null;
-        $blocked = $this->resolveCartPendingDebtForWriteoff($cart, $pendingDebt, $order, $rows);
+        $blocked = $this->resolveCartPendingDebtForWriteoff($cart, $pendingDebt, $order, $rows, $allowRowLock);
         $available = bcsub($remaining, (string)$blocked, 2);
         return bccomp($available, '0', 2) > 0 ? $available : '0.00';
     }

@@ -42,6 +42,13 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             $view=self::withMemberRights($view,$resolved['member_rights_export']??null);
         }
         if (($view['ai_query_ready']??false)!==true || ($view['result_status']??null)!=='complete') throw new \RuntimeException('METRIC_EXPORT_SOURCE_NOT_READY');
+        if (($view['member_rights_export']['version']??null)===3) {
+            $snapshot=\app\services\ai\presentation\AiMemberRightsExportProjection::validate($view['member_rights_export']);
+            return ['streamingTables'=>\app\services\ai\presentation\AiMemberRightsExportProjection::streamedTables($view),
+                'streamingRows'=>\app\services\ai\presentation\AiMemberRightsExportProjection::streamedAuditRows($view),
+                'total'=>$snapshot['details']['count']*7,'summaries'=>[],
+                'read_consistency_ref'=>$refs[0],'result_hash'=>$view['result_hash']];
+        }
         $rows=self::project($view);
         UnifiedQueryExportTaskServices::assertCellBudget(count($fieldKeys),count($rows),false);
         return ['exportRows'=>$rows,'presentationTables'=>self::presentationTables($view),
@@ -65,6 +72,7 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
         }
         if (isset($view['member_rights_export'])) {
             $snapshot=$view['member_rights_export'];
+            if (($snapshot['version']??null)===3) throw new \RuntimeException('AI_EXPORT_STREAM_REQUIRED');
             if (($snapshot['version']??null)!==2) return [];
             $tables=$projection::fromAnswer($renderer->render($view,false));
             foreach ($tables as &$table) $table['title']='会员筛选依据';
@@ -93,6 +101,7 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             return $rows;
         }
         if (isset($view['member_rights_export'])) {
+            if (($view['member_rights_export']['version']??null)===3) throw new \RuntimeException('AI_EXPORT_STREAM_REQUIRED');
             return \app\services\ai\presentation\AiMemberRightsExportProjection::validate($view['member_rights_export'])['rows'];
         }
         $rows=[]; $capabilities=MetricReadViewServices::metricCapabilities();

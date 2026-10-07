@@ -550,14 +550,17 @@ final class AiAnswerRenderer
         $metrics = array_values(array_unique(array_filter(array_column($rows, 'metric'), 'is_string')));
         $prefix = count($metrics) === 1 ? '按' . $metrics[0] . '看，' : '';
         // A short ranking is commonly a continuation such as “第二名呢？”.
-        // State every verified row; longer rankings remain table-first.
+        // State every verified row; longer rankings stay table-first but must
+        // announce their full size so the lead sentence is not mistaken for
+        // the whole answer (the table/export retain the complete ranking).
         if (count($rows) > 1 && count($rows) <= 3) {
             return $prefix . implode('；', array_map(static function (array $row): string {
                 return ($row['rank'] ?? '第一名') . '是' . $row['label'] . '，'
                     . $row['metric'] . '为' . $row['value'] . $row['unit'];
             }, $rows)) . '。';
         }
-        return $prefix . ($first['rank'] ?? '第一名') . '是' . $first['label'] . '，'
+        return $prefix . (count($rows)>3?'共列出'.count($rows).'条排名结果；':'')
+            . ($first['rank'] ?? '第一名') . '是' . $first['label'] . '，'
             . $first['metric'] . '为' . $first['value'] . $first['unit'] . '。';
     }
 

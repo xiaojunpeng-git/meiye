@@ -290,7 +290,7 @@ final class AiIntentUnderstandingContract
             . 'For a partly intelligible needs_clarification request preserve the clear conditions only. Omit clarification_suggestions; executable recommendations are proposed separately from server-verified capabilities. A vague measurement does not erase a clearly named analytical subject: preserve its object_kind and object_relation even when the measurement still needs clarification. Do not infer operation=summary merely from a vague request about an amount situation. Preserve operation only when its answer form was actually fixed by the customer. '
             . 'When clarification_context is present, current is the customer reply to the paused question. Merge it with clarification_context.understanding and original evidence: retain unchanged conditions, explicitly corrected conditions take precedence, and an independent new topic discards the paused meaning. Emit the complete merged requirements, citing current for corrections and original for preserved fields. Do not copy a condition contradicted by the current reply. '
             . 'When prior_query or clarification_context exists, add top-level topic_relation="continuation|new_topic". Decide from the complete current meaning: a reference to a prior result or an omitted condition the customer intends to keep is continuation, including a move from a store to people in that store. An independent new question that does not refer to the preceding answer is new_topic, even if it omits a period or store. Changing an analytical object alone does not prove a new topic. Do not copy prior conditions into a new_topic. This relation grants no object identity or permission. Omit topic_relation only when both prior_query and clarification_context are absent. When prior_query.verified_result_set has a kind and count, a plural reference such as "这两家" may refer to that complete verified set even though prior_query.operation is breakdown; express that as object_detail target=set, and express a requested per-object measurement as operation=breakdown. The server alone resolves the identities. '
-            . 'A named store restricting another analytical subject uses a separate requirement fields=["store_term"], values.store_term="exact named-store text or opaque reference", with current-message evidence. Keep the compared people/items in object_kind with object_relation=analysis. Never put the store identity into the analytical object_term or infer a store from a person name. Do not use store_term for a pronoun referring to a previous result; use the supported result reference instead. '
+            . 'A named store restricting another analytical subject uses a separate requirement fields=["store_term"], values.store_term="exact named-store text or opaque reference", with current-message evidence. Keep the compared people/items in object_kind with object_relation=analysis. Never put the store identity into the analytical object_term or infer a store from a person name. Do not use store_term for a pronoun referring to a previous result; use the supported result reference instead. An opaque local store reference is intentionally hidden from you but is not an ambiguous customer request: preserve its store_term carrier and let the authorized server catalogue resolve it. When one measured object is requested at both extremes, use one ranking operation with direction=top_and_bottom; do not split or discard the common metric, object, period or named-store scope. '
             . 'scope=current_store means the authenticated store of the application entry, NOT a named store, a location mentioned in this question, or the store from a prior answer. A named-store reference must have store_term even if followed by words meaning this store. Do not add scope=current_store for that reference; retain the authorized origin while independently narrowing with store_term. '
             . '{"goal":"brief business goal","requirements":[{"id":"r1","meaning":"one part of the customer request","fields":["metric_codes"],"values":{"metric_terms":["exact customer term"]},"evidence":[{"message_id":"current","quote":"exact text from that de-identified message"}]}],"status":"understood|needs_clarification"}. '
             . 'Evidence is copied source text, not a rewritten description: never join non-adjacent words, remove conjunctions or insert an object name into a quote. When several measurements share an object or time expression, use the entire original current message verbatim for their current-message evidence rather than constructing a shorter sentence. Keep their semantic requirements distinct; sharing evidence does not merge requirements. '
@@ -323,6 +323,11 @@ final class AiIntentUnderstandingContract
         // Current recommendation execution uses separately verified carriers.
         $suggestions=is_array($value)?($value['clarification_suggestions']??[]):[];
         if (is_array($value)) unset($value['clarification_suggestions']);
+        // A fresh conversation has no previous topic to continue or reset.
+        // Ignore this non-executable model decoration instead of discarding
+        // otherwise grounded current-turn meaning and spending a repair call.
+        if (is_array($value) && ($safeQuestion['prior_query']??null)===null
+            && !isset($safeQuestion['clarification_context'])) unset($value['topic_relation']);
         $keys = is_array($value) ? array_keys($value) : [];
         sort($keys, SORT_STRING);
         if (!in_array($keys,[
@@ -429,6 +434,29 @@ final class AiIntentUnderstandingContract
         $ids = []; $normalized = [];
         foreach ($requirements as $requirement) {
             if ($requirement instanceof \stdClass) $requirement = get_object_vars($requirement);
+            // The overview marker already commits to one response shape.
+            // Restore only a declared but omitted operation carrier; never
+            // derive a shape from customer words or overwrite a conflicting
+            // value. The later overview admission still rejects extra metrics,
+            // predicates and ungrounded periods before any Reader runs.
+            $overviewOperation=($value['request_kind']??null)==='open_overview'?'summary':
+                ((($value['request_kind']??null)==='overview_comparison')?'comparison':null);
+            if ($overviewOperation!==null && is_array($requirement)
+                && in_array('operation',(array)($requirement['fields']??[]),true)
+                && is_array($requirement['values']??null)
+                && !array_key_exists('operation',$requirement['values'])) {
+                $requirement['values']['operation']=$overviewOperation;
+            }
+            // A typed top/bottom ranking already fixes the response form.
+            // Restore only the missing operation carrier; never infer a rank
+            // from customer wording or from an unspecified ranking value.
+            if (is_array($requirement) && in_array('operation',(array)($requirement['fields']??[]),true)
+                && in_array('ranking',(array)($requirement['fields']??[]),true)
+                && is_array($requirement['values']??null)
+                && !array_key_exists('operation',$requirement['values'])
+                && in_array($requirement['values']['ranking']['direction']??null,['top','bottom','top_and_bottom'],true)) {
+                $requirement['values']['operation']='ranking';
+            }
             $requirement=self::groundUniqueUnitConditionUpdate($requirement,$safeQuestion,$messages);
             $requirement=self::collapseVerifiedConditionResponseFormContinuation($requirement,$safeQuestion,$messages);
             $requirement=self::alignExplicitConditionResponseForm($requirement,$safeQuestion);
@@ -646,6 +674,27 @@ final class AiIntentUnderstandingContract
         // non-executable until the gateway independently proves the complete
         // typed requirements, current evidence and registry overview profile.
         if (array_key_exists('request_kind',$value)) $out['request_kind']=$value['request_kind'];
+        // Two independently registered measurements with two stated numeric
+        // predicates cannot become one unqualified metric summary. This is
+        // only a completeness check on a model interpretation: the registry
+        // does not choose the subject, Boolean relation, thresholds or result
+        // form. A failed check requests one bounded language repair and never
+        // authorizes a query or silently drops either customer condition.
+        if ($out['status']==='understood' && empty($value['groups'])) {
+            $current=(string)($safeQuestion['question']??'');
+            $terms=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText($current);
+            preg_match_all('/[0-9]+(?:\.[0-9]+)?\s*(?:元|万元|件|次|个|项|人|笔)/u',$current,$numericPredicates);
+            if (count($terms)>=2 && count((array)($numericPredicates[0]??[]))>=2
+                && preg_match('/并且|而且|同时|以及|或者|(?<!或)且|(?<!或)或/u',$current)===1) {
+                $conditionItems=[];
+                foreach ($normalized as $requirement) {
+                    foreach ((array)($requirement['values']['aggregate_condition']['conditions']??[]) as $item) {
+                        $conditionItems[]=$item;
+                    }
+                }
+                if (count($conditionItems)<count($terms)) self::fail('condition_completeness');
+            }
+        }
         if (array_key_exists('groups',$value)) {
             try {
                 $groups=self::groups($value['groups'],$normalized);
@@ -683,11 +732,17 @@ final class AiIntentUnderstandingContract
             || !is_array($requirement['values']??null)) return $requirement;
         $condition=$requirement['values']['aggregate_condition']??null;
         if (!is_array($condition) || !isset($condition['conditions']) || !self::aggregateCondition($condition)) return $requirement;
-        foreach (['metric_codes','object_kind','operation','aggregate_condition'] as $field) {
+        foreach (['metric_codes','object_kind','object_relation','operation','aggregate_condition'] as $field) {
             if (!in_array($field,$requirement['fields'],true)) $requirement['fields'][]=$field;
         }
         $requirement['values']['metric_terms']=array_column($condition['conditions'],'metric_term');
         $requirement['values']['object_kind']=$condition['subject'];
+        // A condition set selects rows of its stated subject for analysis;
+        // it never selects one named target. Its relation is fixed by the
+        // accepted condition carrier, not by a guessed customer synonym.
+        if (!array_key_exists('object_relation',$requirement['values'])) {
+            $requirement['values']['object_relation']='analysis';
+        }
         $requirement['values']['operation']=$condition['result_form']==='count'?'condition_count':'condition_list';
         return $requirement;
     }
@@ -959,13 +1014,16 @@ final class AiIntentUnderstandingContract
     public static function repairable(?string $predicate): bool
     {
         return is_string($predicate) && $predicate !== ''
-            && preg_match('/^(shape|goal|status|requirements|requirements_collection|requirement_shape|requirement_keys|requirement_id|requirement_meaning|requirement_fields(?:_(?:shape|empty|too_many|duplicate|unknown))?|requirement_evidence_collection|requirement_evidence_shape|requirement_evidence_duplicate|groups|message_projection|evidence_not_unique|period_only_business_residue|period_only_coverage|period_only_multiple|period_term_as_metric|result_reference_without_ranked_prior|values(?::[a-z_]+)?)$/D',$predicate) === 1;
+            && preg_match('/^(shape|goal|status|requirements|requirements_collection|requirement_shape|requirement_keys|requirement_id|requirement_meaning|requirement_fields(?:_(?:shape|empty|too_many|duplicate|unknown))?|requirement_evidence_collection|requirement_evidence_shape|requirement_evidence_duplicate|groups|message_projection|evidence_not_unique|period_only_business_residue|period_only_coverage|period_only_multiple|period_term_as_metric|result_reference_without_ranked_prior|condition_completeness|values(?::[a-z_]+)?)$/D',$predicate) === 1;
     }
 
     /** A structural correction never interprets a customer phrase in PHP. */
     public static function repairInstruction(string $predicate): string
     {
         if (!self::repairable($predicate)) throw new AiContractException('AI_MODEL_INPUT_INVALID');
+        if ($predicate === 'condition_completeness') {
+            return 'The previous understanding dropped at least one separately stated numerical business condition. Re-read the entire current customer message, not a prior answer. Preserve every measured term, comparison, amount and unit as one complete aggregate_condition over the customer-stated subject. Preserve the explicit AND/OR relation and count/list result form. Ground each condition in the exact current evidence; do not choose a metric code, assume a missing value, merge two predicates, or turn the question into a one-metric summary. If any predicate remains genuinely unclear, keep the understood parts and use needs_clarification instead of executing a reduced query.';
+        }
         if ($predicate === 'requirement_fields_unknown') {
             // Correct only the carrier, never the customer meaning. In
             // particular a values-only key is not another semantic field.
@@ -1256,7 +1314,11 @@ final class AiIntentUnderstandingContract
         if (isset($value['object_kind']) && !in_array($value['object_kind'],['store','business_date','person','position','guide','sales_manager','member','product','project','category','partner','inventory','course','organization','order','sale_line','card','unknown'],true)) self::fail('values:object_kind');
         if (isset($value['object_relation']) && !in_array($value['object_relation'],['analysis','selection'],true)) self::fail('values:object_relation');
         if (isset($value['operation']) && !in_array($value['operation'],['summary','breakdown','trend','ranking','comparison','threshold_count','condition_count','condition_list','definition','unknown'],true)) self::fail('values:operation');
-        if (isset($value['aggregate_condition'])) {
+        // A declared condition carrier must contain its full typed set.
+        // JSON null is not an understood condition and must enter the one
+        // bounded repair, otherwise a later path sees a present-but-empty
+        // condition and can silently lose one of the customer's predicates.
+        if (array_key_exists('aggregate_condition',$value)) {
             if (!self::aggregateCondition($value['aggregate_condition'])) self::fail('values:aggregate_condition','shape');
             // A generic condition label is the semantic key later bound to
             // one registered metric. Prefer an exact excerpt. Natural speech

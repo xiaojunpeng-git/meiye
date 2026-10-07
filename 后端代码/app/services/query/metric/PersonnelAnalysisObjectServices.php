@@ -10,6 +10,7 @@ final class PersonnelAnalysisObjectServices
     public function __construct(callable $queryFactory,callable $authorize)
     { $this->query=$queryFactory; $this->authorize=$authorize; }
 
+
     public function catalog(string $metric): array
     {
         $scope=$this->scope($metric);
@@ -34,8 +35,8 @@ final class PersonnelAnalysisObjectServices
             // These are platform-owned role aliases, not an AI phrase map:
             // the local catalog resolves a model-understood analytical role
             // to the same qualification record used by performance facts.
-            if ((int)$row['cashier_craftsman_enabled']===1) $roles['role:craftsman']=['ref'=>'role:craftsman','kind'=>'position','label'=>'有手艺人资格的在职人员（按当前任职）','aliases'=>['手艺人','技师'], 'version'=>'2','relations'=>[$metric]];
-            if ((int)$row['cashier_salesperson_enabled']===1) $roles['role:salesperson']=['ref'=>'role:salesperson','kind'=>'position','label'=>'有销售人资格的在职人员（按当前任职）','aliases'=>['销售人','销售顾问'], 'version'=>'2','relations'=>[$metric]];
+            if ((int)$row['cashier_craftsman_enabled']===1) $roles['role:craftsman']=['ref'=>'role:craftsman','kind'=>'position','label'=>'有手艺人资格的在职人员（按当前任职）','aliases'=>MetricDefinitionRegistry::personnelRoleAliases()['role:craftsman'], 'version'=>'2','relations'=>[$metric]];
+            if ((int)$row['cashier_salesperson_enabled']===1) $roles['role:salesperson']=['ref'=>'role:salesperson','kind'=>'position','label'=>'有销售人资格的在职人员（按当前任职）','aliases'=>MetricDefinitionRegistry::personnelRoleAliases()['role:salesperson'], 'version'=>'2','relations'=>[$metric]];
         }
         // Two authorized employees may legitimately share one name.  Keep the
         // plain name as a local matching alias (so it is still masked before a

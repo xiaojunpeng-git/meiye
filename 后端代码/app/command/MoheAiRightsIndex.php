@@ -36,12 +36,22 @@ final class MoheAiRightsIndex extends Command
         $index=new AiMemberRightsAmountIndex();
         if (!$index->schemaInstalled()) {$output->writeln('AI_RIGHTS_MIGRATION_REQUIRED');return 1;}
         if ($input->getOption('bootstrap')) {
+            // Freeze an epoch before the first refresh. Activation checks that
+            // every retained snapshot was recalculated under the current
+            // cashier projection; changing code cannot bless old amounts.
             Db::name('ai_member_rights_amount_state')->replace()->insert([
-                'tenant_id'=>$tenant,'ready'=>0,'backfilled_at'=>0]);
+                'tenant_id'=>$tenant,'ready'=>0,'backfilled_at'=>time(),'projection_version'=>0]);
             $last=0;$count=0;
             do {
-                $ids=array_map('intval',Db::name('user_card_holder')->where('uid','>',$last)
-                    ->group('uid')->order('uid','asc')->limit(100)->column('uid'));
+                // Include old snapshot owners without a current holder too:
+                // otherwise a removed right could leave a stale positive
+                // amount eligible in the indexed population.
+                $prefix=(string)Db::connect()->getConfig('prefix');
+                $ids=array_map('intval',array_column(Db::query("SELECT member_id FROM (
+                    SELECT uid member_id FROM {$prefix}user_card_holder WHERE uid>?
+                    UNION SELECT member_id FROM {$prefix}ai_member_rights_amount_snapshot
+                      WHERE tenant_id=? AND member_id>?
+                    ) members ORDER BY member_id LIMIT 100",[$last,$tenant,$last]),'member_id'));
                 if (!$ids) break;
                 $index->refresh($tenant,$ids);
                 $count+=count($ids);$last=max($ids);
@@ -65,6 +75,12 @@ final class MoheAiRightsIndex extends Command
 
     private function activate(string $tenant,Output $output): int
     {
+        $state=Db::name('ai_member_rights_amount_state')->where('tenant_id',$tenant)
+            ->field('ready,backfilled_at,projection_version')->find();
+        $started=is_array($state)?(int)$state['backfilled_at']:0;
+        if (!is_array($state) || (int)$state['ready']!==0 || $started<=0) {
+            $output->writeln('AI_RIGHTS_FULL_REBUILD_REQUIRED');return 1;
+        }
         $prefix=(string)Db::connect()->getConfig('prefix');
         // Validate identity coverage, not only two equal row counts. Triggers
         // were installed before backfill, so later inserts have a dirty mark.
@@ -76,8 +92,12 @@ final class MoheAiRightsIndex extends Command
         $snapshots=(int)Db::name('ai_member_rights_amount_snapshot')
             ->where('tenant_id',$tenant)->count('member_id');
         if ($snapshots===0) {$output->writeln('AI_RIGHTS_BACKFILL_EMPTY');return 1;}
+        $old=Db::name('ai_member_rights_amount_snapshot')->where('tenant_id',$tenant)
+            ->where('calculated_at','<',$started)->value('member_id');
+        if ($old!==null) {$output->writeln('AI_RIGHTS_FULL_REBUILD_INCOMPLETE');return 1;}
         Db::name('ai_member_rights_amount_state')->replace()->insert([
-            'tenant_id'=>$tenant,'ready'=>1,'backfilled_at'=>time()]);
+            'tenant_id'=>$tenant,'ready'=>1,'backfilled_at'=>time(),
+            'projection_version'=>AiMemberRightsAmountIndex::PROJECTION_VERSION]);
         $output->writeln('AI_RIGHTS_READY '.$snapshots);
         return 0;
     }

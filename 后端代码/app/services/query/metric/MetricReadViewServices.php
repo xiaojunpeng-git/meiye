@@ -478,9 +478,16 @@ final class MetricReadViewServices
                 $population=$reader->firstCourseSourceMembers($binding['tenant_id'],$binding['store_ids'],$range,
                     $filters['source_primary_id'],$filters['source_secondary_id']??0,$shape==='condition_list'?RegisteredMetricReadServices::AI_DETAIL_LIMIT:0);
             } else {
+                // The rights Reader freezes the entire authorized population
+                // outside the bounded view and returns only a screen preview.
+                // Other condition sets retain their existing full-view limit.
+                $rightsOnly=count($conditionSet['conditions'])===1
+                    && ($conditionSet['conditions'][0]['metric_code']??null)==='member_remaining_project_amount';
+                $listLimit=$rightsOnly?20
+                    :RegisteredMetricReadServices::AI_DETAIL_LIMIT;
                 $population=$reader->conditionMembers(
                     $binding['tenant_id'],$binding['store_ids'],$range,$conditionSet,
-                    $shape==='condition_list'?RegisteredMetricReadServices::AI_DETAIL_LIMIT:0
+                    $shape==='condition_list'?$listLimit:0
                 );
             }
             $result=['period'=>'current','metric_code'=>$conditionSet['conditions'][0]['metric_code'],'storage_unit'=>'count','object_kind'=>'member',
@@ -491,6 +498,11 @@ final class MetricReadViewServices
                 $result['rows']=$population['rows'];
                 $result['list_limit']=$population['limit'];
                 $result['has_more']=$population['has_more'];
+                if (isset($population['population_snapshot'])) {
+                    // The ref/hash are server-issued inside this signed view;
+                    // later detail/export reads must verify the frozen file.
+                    $result['population_snapshot']=$population['population_snapshot'];
+                }
             }
             return $result;
         }

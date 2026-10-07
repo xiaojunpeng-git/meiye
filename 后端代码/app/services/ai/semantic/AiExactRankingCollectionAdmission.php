@@ -15,6 +15,32 @@ use app\services\query\metric\MetricSemanticCatalog;
 final class AiExactRankingCollectionAdmission
 {
     /**
+     * Peel off one explicitly named, currently authorized store scope before
+     * the existing closed-ranking grammar runs. A demonstrative without an
+     * exact catalogue name is not a store selection; ambiguous or repeated
+     * names return to normal language understanding without choosing an ID.
+     *
+     * @param array<int,array{ref:string,kind:string,label:string}> $stores
+     * @return array{question:string,store_id:int}|null
+     */
+    public function namedStoreScope(string $question,array $stores): ?array
+    {
+        $matches=[];
+        foreach ($stores as $store) {
+            if (($store['kind']??null)!=='store' || !preg_match('/^store:([1-9][0-9]*)$/D',(string)($store['ref']??''),$id)) continue;
+            $label=trim((string)($store['label']??''));
+            if ($label==='') continue;
+            foreach ([$label.'这个门店',$label.'这家门店'] as $carrier) {
+                if (substr_count($question,$carrier)===1) $matches[$store['ref']]=['carrier'=>$carrier,'id'=>(int)$id[1]];
+            }
+        }
+        if (count($matches)!==1) return null;
+        $match=array_values($matches)[0];
+        $stripped=str_replace($match['carrier'],' ',$question,$replacements);
+        return $replacements===1?['question'=>trim($stripped),'store_id'=>$match['id']]:null;
+    }
+
+    /**
      * A customer may explicitly replace a previously selected store/person
      * with the entire authorised population. Strip only this scope carrier;
      * the caller may clear private store IDs only after the remaining ranking
@@ -152,7 +178,12 @@ final class AiExactRankingCollectionAdmission
             $clause=trim($rawClause);
             if ($clause==='') continue;
             $metric=MetricSemanticCatalog::uniqueTermInText($clause,$allowedMetricCodes);
-            $object=$this->uniqueObjectInText($clause,$objects);
+            // A registered measurement may contain an object noun (项目数,
+            // 销售人业绩). Remove its proven span before selecting the ranked
+            // object, otherwise the measurement's noun competes with 技师等
+            // actual subject. Never discard the span from residue validation.
+            $object=$this->uniqueObjectInText($metric!==null
+                ?str_replace($metric['term'],' ',$clause):$clause,$objects);
             $direction=$this->direction($clause);
 
             // A short coordinated tail such as “最低是哪个” belongs to the

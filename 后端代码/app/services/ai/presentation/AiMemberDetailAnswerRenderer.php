@@ -11,18 +11,12 @@ use RuntimeException;
 final class AiMemberDetailAnswerRenderer
 {
     /** One bounded population, two tables at most; never one UI section per person. */
-    public function renderSet(array $members,string $view): array
+    public function renderSet(array $members,string $view,?int $totalMembers=null): array
     {
         $rows=[];$rights=[];$rightColumns=[];$firstAsOf='';$lastAsOf='';
         foreach ($members as $member) {
             $answer=$this->render($member['detail'],$member['label'],$view);
-            $row=['member'=>$member['label'],'store'=>$this->belongingStore($member['detail']['member'])];
-            // The store has its own identity column; money/count facts retain
-            // their fixed index so the set table cannot relabel a value.
-            foreach ($answer['presentation']['facts'] as $i=>$fact) {
-                if ($i>0) $row['f'.($i-1)]=$fact['value'];
-            }
-            $rows[]=$row;
+            $rows[]=$this->summaryRow($member,$answer);
             $currentAsOf=(string)($member['detail']['dataAsOf']??'');
             if ($currentAsOf!=='') {
                 if ($firstAsOf==='' || $currentAsOf<$firstAsOf) $firstAsOf=$currentAsOf;
@@ -39,7 +33,11 @@ final class AiMemberDetailAnswerRenderer
             $columns[]=['key'=>'f'.$i,'label'=>$label];
         }
         $readPeriod=$firstAsOf===$lastAsOf?$firstAsOf:$firstAsOf.' 至 '.$lastAsOf;
-        $summary=['summary'=>'共'.count($rows).'位会员的当前权益，包含其所有门店权益。权益读取时间：'.$readPeriod.'。','cards'=>[],
+        // A streamed cohort renders only its preview here; the verified full
+        // count comes from the immutable source, never the 20 visible rows.
+        $totalMembers=$totalMembers??count($rows);
+        if ($totalMembers<count($rows)) throw new RuntimeException('AI_EVIDENCE_INVALID');
+        $summary=['summary'=>'共'.$totalMembers.'位会员的当前权益，包含其所有门店权益。权益读取时间：'.$readPeriod.'。','cards'=>[],
             'table'=>['columns'=>$columns,'rows'=>$rows]];
         if ($view!=='rights'||$rights===[]) return $summary;
         return ['summary'=>$summary['summary'],'cards'=>[],'sections'=>[
@@ -47,6 +45,21 @@ final class AiMemberDetailAnswerRenderer
             ['id'=>'q2','title'=>'会员卡项明细','answer'=>['summary'=>'各会员的有效卡项明细如下。','cards'=>[],
                 'table'=>['columns'=>array_merge([['key'=>'member','label'=>'会员']],$rightColumns),'rows'=>$rights]]],
         ]];
+    }
+
+    /** One shared screen/file projection; streaming Excel must not invent another amount formatter. */
+    public function renderSummaryRow(array $member): array
+    {
+        return $this->summaryRow($member,$this->render($member['detail'],$member['label'],'summary'));
+    }
+
+    private function summaryRow(array $member,array $answer): array
+    {
+        $row=['member'=>$member['label'],'store'=>$this->belongingStore($member['detail']['member'])];
+        // Store identity is separate; monetary facts retain the six fixed
+        // registered positions in both preview and exported rows.
+        foreach ($answer['presentation']['facts'] as $i=>$fact) if ($i>0) $row['f'.($i-1)]=$fact['value'];
+        return $row;
     }
 
     public function render(array $detail,string $expectedLabel,string $view): array

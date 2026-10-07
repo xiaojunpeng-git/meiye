@@ -14,6 +14,10 @@ use think\facade\Db;
  */
 final class AiMemberRightsAmountIndex
 {
+    // Changes to the cashier card summary projection require a full rebuild;
+    // source-row dirty marks cannot invalidate a value when the formula itself
+    // changes. Old snapshots are never eligible for member selection.
+    public const PROJECTION_VERSION=2;
     private const STALE_LIMIT=1000;
     private const NEVER_TRANSITIONS=9223372036854775807;
 
@@ -22,7 +26,10 @@ final class AiMemberRightsAmountIndex
     {
         if ($tenantId==='') return false;
         if (!$this->schemaInstalled()) return false;
-        return (int)Db::name('ai_member_rights_amount_state')->where('tenant_id',$tenantId)->value('ready')===1;
+        $state=Db::name('ai_member_rights_amount_state')->where('tenant_id',$tenantId)
+            ->field('ready,projection_version')->find();
+        return is_array($state) && (int)$state['ready']===1
+            && (int)$state['projection_version']===self::PROJECTION_VERSION;
     }
 
     /** Every read source must preserve the same transaction snapshot and mark contract. */
@@ -38,6 +45,9 @@ final class AiMemberRightsAmountIndex
             .implode(',',array_fill(0,count($names),'?')).')',$names);
         if (count($rows)!==count($tables)) return false;
         foreach ($rows as $row) if (strtoupper((string)$row['ENGINE'])!=='INNODB') return false;
+        $versionColumn=Db::query('SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE()
+            AND TABLE_NAME=? AND COLUMN_NAME=? LIMIT 1',[$prefix.'ai_member_rights_amount_state','projection_version']);
+        if ($versionColumn===[]) return false;
         // A ready snapshot is safe only while every source write still marks
         // the same transaction. Count alone could hide one missing trigger.
         $expected=[];
@@ -59,7 +69,7 @@ final class AiMemberRightsAmountIndex
     {
         if (!$this->ready($tenantId)) return null;
         if (!$stores || !in_array($operator,['gt','gte'],true) || $threshold<0 || $limit<0
-            || $limit>RegisteredMetricReadServices::AI_DETAIL_LIMIT) throw new MetricQueryContractException('METRIC_QUERY_SHAPE_UNAVAILABLE','当前查询条件不可用。');
+            || $limit>RegisteredMetricReadServices::rightsDetailLimit()) throw new MetricQueryContractException('METRIC_QUERY_SHAPE_UNAVAILABLE','当前查询条件不可用。');
         $now=time();
         $stale=$this->staleIds($tenantId,$stores,$now);
         if (count($stale)>self::STALE_LIMIT) throw new MetricQueryContractException(
@@ -80,19 +90,8 @@ final class AiMemberRightsAmountIndex
         if ($stale) $base->whereNotIn('s.member_id',$stale);
         $cleanCount=(int)(clone $base)->count('s.member_id');
         $count=$cleanCount+count($staleAmounts);
-        if ($limit===RegisteredMetricReadServices::AI_DETAIL_LIMIT && $count>$limit) {
-            throw new MetricQueryContractException('METRIC_GROUP_OUTPUT_TOO_LARGE','当前结果超过完整明细上限。');
-        }
         if ($limit===0 || $count===0) return ['count'=>$count,'rows'=>[],'limit'=>$limit,'has_more'=>$count>0];
-        $clean=(clone $base)->fieldRaw('s.member_id,s.amount_cents,'
-            ."COALESCE(NULLIF(u.real_name,''),NULLIF(u.nickname,''),NULLIF(u.phone,''),CONCAT('会员#',u.uid)) member_name")
-            ->order('s.member_id','asc')->limit($limit)->select()->toArray();
         $rows=[];
-        foreach ($clean as $row) {
-            $id=(int)$row['member_id'];
-            $rows[$id]=['member_id'=>$id,'member_name'=>(string)$row['member_name'],
-                'metrics'=>['member_remaining_project_amount'=>(int)$row['amount_cents']]];
-        }
         if ($staleAmounts) {
             // ThinkORM column() cannot address a computed field alias. Keep
             // the stale overlay's identity projection on the same live user
@@ -107,12 +106,42 @@ final class AiMemberRightsAmountIndex
             foreach ($staleAmounts as $id=>$amount) {
                 if (!isset($names[$id])) throw new MetricQueryContractException('METRIC_SOURCE_RESULT_INVALID','会员身份已发生变化。');
                 $rows[$id]=['member_id'=>$id,'member_name'=>(string)$names[$id],
-                    'metrics'=>['member_remaining_project_amount'=>$amount]];
+                    'amount_cents'=>$amount];
             }
         }
         ksort($rows,SORT_NUMERIC);
-        $page=array_slice(array_values($rows),0,$limit);
-        return ['count'=>$count,'rows'=>$page,'limit'=>$limit,'has_more'=>$count>count($page)];
+        // The complete source is spooled from the same repeatable-read scope;
+        // a screen page is never mistaken for the file's business population.
+        // Keeping only 500 clean rows per SQL page avoids the old 1428-member
+        // worksheet limit in this Reader without materializing all identities.
+        $ordered=(static function()use($base,$rows):\Generator {
+            $stale=array_values($rows);$stalePosition=0;$cursor=0;
+            do {
+                $clean=(clone $base)->where('s.member_id','>',$cursor)
+                    ->fieldRaw('s.member_id,s.amount_cents,'
+                        ."COALESCE(NULLIF(u.real_name,''),NULLIF(u.nickname,''),NULLIF(u.phone,''),CONCAT('会员#',u.uid)) member_name")
+                    ->order('s.member_id','asc')->limit(500)->select()->toArray();
+                foreach ($clean as $item) {
+                    $id=(int)$item['member_id'];
+                    while (isset($stale[$stalePosition]) && $stale[$stalePosition]['member_id']<$id) {
+                        yield $stale[$stalePosition++];
+                    }
+                    yield ['member_id'=>$id,'member_name'=>(string)$item['member_name'],
+                        'amount_cents'=>(int)$item['amount_cents']];
+                    $cursor=$id;
+                }
+            } while (count($clean)===500);
+            while (isset($stale[$stalePosition])) yield $stale[$stalePosition++];
+        })();
+        $snapshot=(new AiMemberRightsPopulationStore())->put($ordered,$count);
+        $page=[];
+        foreach ((new AiMemberRightsPopulationStore())->rows($snapshot) as $item) {
+            $page[]=['member_id'=>$item['member_id'],'member_name'=>$item['member_name'],
+                'metrics'=>['member_remaining_project_amount'=>$item['amount_cents']]];
+            if (count($page)===$limit) break;
+        }
+        return ['count'=>$count,'rows'=>$page,'limit'=>$limit,'has_more'=>$count>count($page),
+            'population_snapshot'=>$snapshot];
     }
 
     /**
@@ -124,7 +153,7 @@ final class AiMemberRightsAmountIndex
     {
         if (!$this->ready($tenantId)) return null;
         $memberIds=array_values(array_unique($memberIds));
-        if (!$memberIds || count($memberIds)>RegisteredMetricReadServices::AI_DETAIL_LIMIT
+        if (!$memberIds || count($memberIds)>RegisteredMetricReadServices::rightsDetailLimit()
             || !$stores) throw new MetricQueryContractException('METRIC_QUERY_SHAPE_UNAVAILABLE','当前会员范围不可用。');
         foreach ($memberIds as $id) if (!is_int($id)||$id<1) throw new MetricQueryContractException(
             'METRIC_QUERY_SHAPE_UNAVAILABLE','当前会员范围不可用。');

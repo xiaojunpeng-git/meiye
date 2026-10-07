@@ -138,6 +138,33 @@ $check(count($combinedAnswer['sections'][0]['answer']['table']['rows'])===20
     &&count($largeExport['member_refs'])===68
     &&count($largeExport['rows'])===68*6,
     'R57 68-member filter/details cap both screen tables and retain all export members');
+// The current-rights summary is constrained by the workbook's seven rows
+// per member, not by the old 1,000-member screen/export shortcut. Full card
+// details remain on their original bound because card rows are unbounded.
+$rightsLimit=app\services\query\metric\RegisteredMetricReadServices::rightsDetailLimit();
+$check($rightsLimit===intdiv(app\services\query\UnifiedQueryExecutionServices::MAX_SOURCE_ROWS,7)
+    &&$rightsLimit>1000,'rights summary capacity follows the shared full-export row budget');
+$overThousand=[];
+for($i=1;$i<=1001;++$i) {
+    $item=$detail;$item['member']['memberId']=$i;$item['member']['name']='测试会员'.$i;
+    $overThousand[]=['detail'=>$item,'label'=>'测试会员'.$i,'selection_ref'=>'member:'.$i];
+}
+$rightsSummary=(new AiMemberDetailAnswerRenderer())->renderSet($overThousand,'summary');
+$rightsSnapshot=app\services\ai\presentation\AiMemberRightsExportProjection::capture(
+    $overThousand,'summary',[],$rightsSummary);
+$screen=app\services\ai\presentation\AiAnswerRenderer::limitTables($rightsSummary);
+$check(count($rightsSnapshot['member_refs'])===1001
+    &&count($rightsSnapshot['rows'])===1001*6
+    &&count($rightsSnapshot['tables'][0]['rows'])===1001
+    &&count($screen['table']['rows'])===20,
+    'over-1000 rights summary keeps the complete signed Excel source and only previews 20 rows');
+try {
+    app\services\ai\presentation\AiMemberRightsExportProjection::capture($overThousand,'rights');
+    throw new LogicException('accepted unbounded card-rights detail');
+} catch (RuntimeException $error) {
+    $check($error->getMessage()==='AI_EXPORT_SOURCE_MISMATCH',
+        'full card-rights detail keeps its old bounded safety contract');
+}
 $projection=app\services\ai\presentation\AiMemberRightsExportProjection::class;
 $members=[['detail'=>$detail,'label'=>'测试会员','selection_ref'=>'member:101']];
 $assets=$projection::capture($members,'rights');

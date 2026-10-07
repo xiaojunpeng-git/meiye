@@ -99,6 +99,20 @@ $countBook=\PhpOffice\PhpSpreadsheet\IOFactory::load($fixtureRoot.'/'.$countKey)
 $check((string)(int)$countBook->getActiveSheet()->getCell('I2')->getValue()==='3' && $countBook->getActiveSheet()->getCell('J2')->getValue()==='项',
     'count XLSX keeps numeric value and visible unit');
 $countBook->disconnectWorksheets();
+$fractionalFixture=['query'=>array_replace($view['query'],
+    ['business_filters'=>['object_kind'=>'person']]),
+    'personnel_selection_label'=>'已验证人员范围','results'=>[[
+    'metric_code'=>'staff_service_num','storage_unit'=>'customer_tenth',
+    'period'=>'current','amount_cents'=>45,'count'=>45,
+]]];
+$fractionalRows=$project::project($fractionalFixture);
+$check(($fractionalRows[0]['metric_value']??null)==='4.5'
+    &&($fractionalRows[0]['unit']??null)!=='元',
+    'a registered personnel visit keeps its fractional non-currency value');
+$fractionalKey=$write->invoke($worker,'uqe_'.md5('fixture-fractional-count'),
+    str_repeat('f',64),$fields,$fractionalRows,[],false,null);
+$verify->invoke($runtime,$fixtureRoot.'/'.$fractionalKey,$fractionalFixture);
+$check(true,'fractional count passes the actual XLSX numeric-cell readback');
 $large=$fixtures['summary'];
 $large['results'][0]['amount_cents']=PHP_INT_MAX;
 $large['results'][1]['amount_cents']=PHP_INT_MIN;

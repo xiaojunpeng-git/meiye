@@ -1358,17 +1358,17 @@ final class AiGatewayServices
         // references, so it starts a new topic without old scope or period.
         $exactRankingCollection=$this->compileExactRegisteredRankingCollection(
             (string)$body['question'],$exactObjectVocabulary,$caps,$body['output_format'],$today,
-            $exactRankingCollectionReason,$sourceContext
+            $exactRankingCollectionReason,$sourceContext,$context
         );
         if ($exactRankingCollection!==null) {
             $checkpoint();
             if ($sourceContext!==null) $this->runs->markTopicReset($owner,$id,$generation,$worker);
-            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'deterministic_registered_ranking_collection_admitted');
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'deterministic_registered_ranking_collection_admitted',[],'exact_ranking_admission');
             return $exactRankingCollection;
         }
         if ($exactRankingCollectionReason!==null && $exactRankingCollectionReason!=='semantic_no_match') {
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
-                'deterministic_registered_ranking_collection_rejected',['field'=>$exactRankingCollectionReason]);
+                'deterministic_registered_ranking_collection_rejected',['field'=>$exactRankingCollectionReason],'exact_ranking_admission');
         }
         foreach ($caps['metric_codes'] as $code) {
             $tooltip=$dictionary->getTooltip($code);if (($tooltip['user_ready']??false)!==true) continue;
@@ -3585,7 +3585,7 @@ final class AiGatewayServices
      */
     private function compileExactRegisteredRankingCollection(
         string $question,array $objectVocabulary,array $capabilities,string $format,string $today,
-        ?string &$reason=null,?array $sourceContext=null
+        ?string &$reason=null,?array $sourceContext=null,array $context=[]
     ): ?array {
         // The ordinary model path intentionally starts with a neutral empty
         // projection. This closed admission may read only the shared calendar
@@ -3599,6 +3599,18 @@ final class AiGatewayServices
         $normalizedQuestion=$admission->normalizeLeadingDiscourseConnector($question);
         $population=$admission->authorizedPopulation($normalizedQuestion,$objectVocabulary);
         $normalizedQuestion=$population['question'];
+        $scopedStoreId=null;
+        // This is a narrow fast path for a complete ranking inside one named
+        // store. Exact current catalogue membership is required before the
+        // store phrase is removed; the remaining entire sentence must still
+        // pass the existing metric/object/date/direction residue proof.
+        if (!$population['all_authorized'] && preg_match('/(?:这个|这家)门店/u',$normalizedQuestion)===1) {
+            $scope=$admission->namedStoreScope($normalizedQuestion,$this->authorizedStoreObjects($context));
+            if ($scope!==null) {
+                $normalizedQuestion=$scope['question'];
+                $scopedStoreId=$scope['store_id'];
+            }
+        }
         $dateProjection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse($normalizedQuestion);
         $dateTermCount=count((array)($dateProjection['date_terms']??[]));
         // Without a stated period, an otherwise closed ranking can still
@@ -3645,6 +3657,9 @@ final class AiGatewayServices
                 );
             } catch (\Throwable $ignored) {$reason='plan_compile';return null;}
             if (($compiled['kind']??null)!=='plan' || !is_array($compiled['plan']??null)) {$reason='plan_shape';return null;}
+            // The Reader rechecks the authorized store ID against current
+            // permissions; the lexical fast path never widens an old scope.
+            if ($scopedStoreId!==null) $compiled['plan']['query']['store_ids']=[$scopedStoreId];
             $metricContract=$capabilities['metric_readiness'][$item['metric_code']]??null;
             if (is_array($metricContract)
                 &&($metricContract['filter_grain']??null)===$objectKind
@@ -3662,6 +3677,35 @@ final class AiGatewayServices
                 // cohort; an analytical noun alone grants no personnel scope.
                 $compiled['plan']['query']['business_filters']=['object_kind'=>$objectKind,
                     'selection_ref'=>$metricContract['analysis_default_selection_ref']];
+            }
+            if ($objectKind==='person') {
+                // An exact personnel-role word is a cohort constraint, not a
+                // synonym for every person. Resolve it from the same live,
+                // permission-bound role catalogue used by the ordinary model
+                // path. Remove a proved measurement span first: “销售人业绩”
+                // names a metric, not necessarily a salesperson cohort.
+                $roleMatches=[];
+                $metricTerm=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
+                    $normalizedQuestion,[$item['metric_code']]
+                );
+                $roleText=$metricTerm!==null
+                    ?str_replace($metricTerm['term'],' ',$normalizedQuestion):$normalizedQuestion;
+                foreach (\app\services\query\metric\MetricDefinitionRegistry::personnelRoleAliases() as $ref=>$aliases) {
+                    foreach ($aliases as $alias) {
+                        if (mb_strpos($roleText,$alias)!==false) $roleMatches[$ref]=true;
+                    }
+                }
+                if (count($roleMatches)>1) {$reason='ambiguous_personnel_role';return null;}
+                if ($roleMatches!==[]) {
+                    $roleRef=(string)array_key_first($roleMatches);
+                    $roleAvailable=false;
+                    foreach ($this->personnelObjects($context)->catalog($item['metric_code'])['objects'] as $object) {
+                        if (($object['ref']??null)===$roleRef && ($object['kind']??null)==='position') $roleAvailable=true;
+                    }
+                    if (!$roleAvailable) {$reason='personnel_role_unavailable';return null;}
+                    $compiled['plan']['query']['business_filters']=['object_kind'=>'person',
+                        'selection_ref'=>$roleRef];
+                }
             }
             $label=$this->analysisObjectLabel($objectKind);
             if (!is_string($label) || $label==='') {$reason='object_label';return null;}
@@ -5061,6 +5105,13 @@ final class AiGatewayServices
      */
     private function applyUniqueRegisteredMetricTermBinding(array $intent,array $understanding,array $summaries,?array $sourceQuery,array $safeQuestion): array
     {
+        // A complete accepted condition set owns a positional metric for
+        // every predicate. The single-exact-title recovery below must never
+        // collapse that set to one attractive registry term and leave an
+        // inconsistent query for the plan compiler to reject.
+        if (in_array($intent['operation']??null,['condition_count','condition_list'],true)
+            && is_array($intent['aggregate_condition']['conditions']??null)
+            && count($intent['aggregate_condition']['conditions'])>1) return $intent;
         $requirements=[];
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
             if (is_array($requirement) && in_array('metric_codes',(array)($requirement['fields']??[]),true)) $requirements[]=$requirement;
@@ -6157,7 +6208,14 @@ final class AiGatewayServices
         $fresh=$guard();
         $this->runs->progress($owner,$id,$generation,$worker,'QUERYING');
         $members=$spec['members']??[$spec];
-        $attemptHash=hash('sha256',json_encode([$members,$spec['view'],$spec['source_view_ref']]));
+        // Full card-by-card rights can multiply rows without a fixed bound;
+        // only the six-value summary may use the derived larger cohort limit.
+        if (($spec['view']??null)==='rights'
+            &&count($members)>\app\services\query\metric\RegisteredMetricReadServices::AI_DETAIL_LIMIT) {
+            throw new RuntimeException('AI_DETAIL_SCOPE_TOO_LARGE');
+        }
+        $attemptHash=hash('sha256',json_encode([$members,$spec['view'],$spec['source_view_ref'],
+            $spec['population_snapshot']['sha256']??null]));
         $this->runs->prepareAttempt($owner,$id,$generation,$worker,'member_detail_read','tool',$attemptHash,'cashier_v3_member_detail');
         if (!$this->runs->sendAttempt($owner,$id,$generation,$worker,'member_detail_read')) throw new RuntimeException('AI_ATTEMPT_CONFLICT');
         try {
@@ -6182,36 +6240,42 @@ final class AiGatewayServices
             // relation, then read balances in one bounded batch. The cashier
             // projection still validates each member/card and the run guard
             // still prevents an expired authorization from publishing a set.
-            $references=array_column($members,'selection_ref');
-            $selections=$this->memberObjects($context)->selections($references);
-            $memberIds=[];
-            foreach ($references as $reference) $memberIds[]=(int)$selections[$reference]['member_id'];
-            $detailReader=new \app\services\cashier\v3\member\CashierV3MemberDetailQueryServices();
-            // The signed amount-filtered population needs summary columns,
-            // not tens of thousands of card project rows. A requested rights
-            // view still loads every card through the cashier authority.
-            $rights=(string)$spec['view']==='summary'
-                && !empty($spec['expected_remaining_project_amount_cents'])
-                ?$detailReader->readAiRightsSummarySet($memberIds,$operator,$dataScope,$guard)
-                :$detailReader->readAiRightsSet($memberIds,$operator,$dataScope,$guard);
-            $details=[];
-            foreach ($members as $member) {
-                // This only assembles already checked rows; the rights reader
-                // checkpoints per member and the final guard gates delivery.
-                $selection=$selections[$member['selection_ref']];
-                $detail=$rights[(int)$selection['member_id']]??null;
-                if (!is_array($detail)) throw new RuntimeException('AI_EVIDENCE_INVALID');
-                if ((int)($detail['member']['memberId']??0)!==(int)$selection['member_id']) throw new RuntimeException('AI_EVIDENCE_INVALID');
-                // A filter and its rights detail are two reads. If a checkout
-                // changed the current entitlement between them, never publish
-                // a member whose shown amount contradicts the signed filter.
-                $expected=$spec['expected_remaining_project_amount_cents'][(int)$selection['member_id']]??null;
-                if ($expected!==null) {
-                    $shown=$detail['summary']['remainingProjectAmount']??null;
-                    if (!is_string($shown)||!preg_match('/^[0-9]+(?:\.[0-9]{1,2})?$/D',$shown)
-                        ||(int)bcmul($shown,'100',0)!==$expected) throw new RuntimeException('AI_RIGHTS_CHANGED');
+            $streamedSnapshot=null;
+            if (isset($spec['population_snapshot'])) {
+                if (($spec['view']??null)!=='summary') throw new RuntimeException('AI_DETAIL_SCOPE_TOO_LARGE');
+                $streamedSnapshot=$this->freezeMemberRightsSummary($context,$spec['population_snapshot'],
+                    $operator,$dataScope,$guard);
+                $details=[];
+                foreach ((new \app\services\ai\presentation\AiMemberRightsDetailStore())->rows($streamedSnapshot) as $record) {
+                    $details[]=['detail'=>$record['detail'],'label'=>$record['label'],
+                        'selection_ref'=>$record['selection_ref']];
+                    if (count($details)===20) break;
                 }
-                $details[]=['detail'=>$detail,'label'=>(string)$selection['label'],'selection_ref'=>$member['selection_ref']];
+            } else {
+                $references=array_column($members,'selection_ref');
+                $selections=$this->memberObjects($context)->selections($references);
+                $memberIds=[];
+                foreach ($references as $reference) $memberIds[]=(int)$selections[$reference]['member_id'];
+                $detailReader=new \app\services\cashier\v3\member\CashierV3MemberDetailQueryServices();
+                // Non-streamed member references keep their original signed
+                // full-set guard and authoritatively read every requested row.
+                $rights=(string)$spec['view']==='summary'
+                    ?$detailReader->readAiRightsSummarySet($memberIds,$operator,$dataScope,$guard)
+                    :$detailReader->readAiRightsSet($memberIds,$operator,$dataScope,$guard);
+                $details=[];
+                foreach ($members as $member) {
+                    $selection=$selections[$member['selection_ref']];
+                    $detail=$rights[(int)$selection['member_id']]??null;
+                    if (!is_array($detail)) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                    if ((int)($detail['member']['memberId']??0)!==(int)$selection['member_id']) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                    $expected=$spec['expected_remaining_project_amount_cents'][(int)$selection['member_id']]??null;
+                    if ($expected!==null) {
+                        $shown=$detail['summary']['remainingProjectAmount']??null;
+                        if (!is_string($shown)||!preg_match('/^[0-9]+(?:\.[0-9]{1,2})?$/D',$shown)
+                            ||(int)bcmul($shown,'100',0)!==$expected) throw new RuntimeException('AI_RIGHTS_CHANGED');
+                    }
+                    $details[]=['detail'=>$detail,'label'=>(string)$selection['label'],'selection_ref'=>$member['selection_ref']];
+                }
             }
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'member_detail_read','SUCCEEDED');
         } catch (\Throwable $error) {
@@ -6221,7 +6285,7 @@ final class AiGatewayServices
         $guard();$this->runs->progress($owner,$id,$generation,$worker,'VERIFYING');
         $this->runs->progress($owner,$id,$generation,$worker,'RENDERING');
         $renderer=new \app\services\ai\presentation\AiMemberDetailAnswerRenderer();
-        $answer=isset($spec['members'])?$renderer->renderSet($details,(string)$spec['view'])
+        $answer=isset($spec['members'])?$renderer->renderSet($details,(string)$spec['view'],$streamedSnapshot['count']??null)
             :$renderer->render($details[0]['detail'],$details[0]['label'],(string)$spec['view']);
         // Export captures the full authorised rights tables before the screen
         // preview is capped; neither the browser nor a later query supplies rows.
@@ -6237,6 +6301,13 @@ final class AiGatewayServices
         // Member assets have their own immutable rights snapshot for Excel;
         // the response may show only a screen page, never trim that snapshot.
         $answer=AiAnswerRenderer::limitTables($answer);
+        if ($streamedSnapshot!==null && $streamedSnapshot['count']>20) {
+            // The preview is intentionally 20 rows, so limitTables() cannot
+            // infer that a complete file is still required from array size.
+            $answer['auto_export_required']=true;
+            $note='页面仅展示前20条；完整明细另行生成 Excel。';
+            if (strpos((string)$answer['summary'],$note)===false) $answer['summary'].=' '.$note;
+        }
         $guard();$this->runs->progress($owner,$id,$generation,$worker,'PUBLISHING');
         $run=$this->runs->get($owner,$id,$generation);
         $expires=min($spec['source_expires_at'],intdiv($run['expires_at'],1000));
@@ -6247,14 +6318,57 @@ final class AiGatewayServices
         $evidence=$binding+['query'=>$spec['source_query'],'view_ref'=>$spec['source_view_ref'],
             // Freeze exact values before publishing. The separate XLSX task
             // projects these authorised assets, not the context filter list.
-            'member_rights_export'=>\app\services\ai\presentation\AiMemberRightsExportProjection::capture(
-                $details,(string)$spec['view'],$spec['population_export_rows']??[],$rightsAnswer),
+            'member_rights_export'=>$streamedSnapshot!==null
+                ?\app\services\ai\presentation\AiMemberRightsExportProjection::captureStreamed($streamedSnapshot,$rightsAnswer)
+                :\app\services\ai\presentation\AiMemberRightsExportProjection::capture(
+                    $details,(string)$spec['view'],$spec['population_export_rows']??[],$rightsAnswer),
             'context_meaning'=>$contextMeaning,'compiled_run_hash'=>$attemptHash,
             'execution_trace'=>[['code'=>'member_detail_read','status'=>'SUCCEEDED']],
             'workflow_code'=>'wf_member_detail_read','management_version'=>$this->managementRevision];
         $evidenceRef=$this->private->put('evidence',$evidence,$expires);
         $answerRef=$this->private->put('answer',$binding+['answer'=>$answer],$expires);
         return $this->runs->publish($owner,$id,$generation,$worker,$evidenceRef,$answerRef);
+    }
+
+    /** Freeze all scoped rights in bounded batches before publishing a 20-row preview. */
+    private function freezeMemberRightsSummary(array $context,array $population,
+        \app\services\cashier\v3\CashierV3OperatorScope $operator,
+        \app\services\cashier\v3\CashierV3DataScopeContext $scope,callable $guard): array
+    {
+        $source=(new \app\services\query\metric\AiMemberRightsPopulationStore())->rows($population);
+        $reader=new \app\services\cashier\v3\member\CashierV3MemberDetailQueryServices();
+        $objects=$this->memberObjects($context);
+        $records=(static function()use($source,$reader,$objects,$operator,$scope,$guard):\Generator {
+            $batch=[];
+            foreach ($source as $row) {
+                $batch[]=$row;
+                if (count($batch)<100) continue;
+                yield from self::rightsSummaryBatch($batch,$reader,$objects,$operator,$scope,$guard);
+                $batch=[];
+            }
+            if ($batch!==[]) yield from self::rightsSummaryBatch($batch,$reader,$objects,$operator,$scope,$guard);
+        })();
+        return (new \app\services\ai\presentation\AiMemberRightsDetailStore())->put($records,(int)$population['count']);
+    }
+
+    /** A changed right or revoked identity invalidates the whole frozen result. */
+    private static function rightsSummaryBatch(array $batch,$reader,$objects,$operator,$scope,callable $guard): \Generator
+    {
+        $guard();$refs=array_map(static fn(array $row):string=>'member:'.$row['member_id'],$batch);
+        $selections=$objects->selections($refs);
+        $ids=array_column($batch,'member_id');
+        $details=$reader->readAiRightsSummarySet($ids,$operator,$scope,$guard);
+        foreach ($batch as $row) {
+            $ref='member:'.$row['member_id'];$selection=$selections[$ref]??null;
+            $detail=$details[$row['member_id']]??null;
+            if (!is_array($selection)||!is_array($detail)
+                ||$selection['label']!==$row['member_name']) throw new RuntimeException('AI_EVIDENCE_INVALID');
+            $shown=$detail['summary']['remainingProjectAmount']??null;
+            if (!is_string($shown)||!preg_match('/^[0-9]+(?:\.[0-9]{1,2})?$/D',$shown)
+                ||(int)bcmul($shown,'100',0)!==$row['amount_cents']) throw new RuntimeException('AI_RIGHTS_CHANGED');
+            yield ['detail'=>$detail,'label'=>$row['member_name'],'selection_ref'=>$ref,
+                'selected_amount_cents'=>$row['amount_cents']];
+        }
     }
 
     /** Rank or filter first, then read details from that exact signed population. */
@@ -6356,7 +6470,24 @@ final class AiGatewayServices
                         $predicate='query_'.strtolower($error->getMessage());
                     } elseif ($error instanceof \TypeError) $predicate='query_type_error';
                     elseif ($error instanceof \Error) $predicate='query_php_error';
-                    else $predicate='query_unexpected';
+                    else {
+                        // Keep the failure diagnosable without retaining SQL,
+                        // bind values, customer wording or exception messages.
+                        $kind=strtolower((new \ReflectionClass($error))->getShortName());
+                        if (!preg_match('/^[a-z][a-z0-9]{0,31}$/D',$kind)) $kind='other';
+                        $state=preg_match('/SQLSTATE\[([A-Z0-9]{5})\]/',$error->getMessage(),$match)
+                            ?strtolower($match[1]):'none';
+                        $driverCode=$error instanceof \PDOException
+                            && is_array($error->errorInfo??null)
+                            && is_int($error->errorInfo[1]??null)
+                            ?(string)$error->errorInfo[1]:'none';
+                        // ThinkPHP may rethrow a PDOException without errorInfo;
+                        // retain only the numeric database code, never SQL text.
+                        if ($driverCode==='none' && preg_match('/(?:General error|Error):\s*([0-9]{3,5})\b/',$error->getMessage(),$driverMatch)) {
+                            $driverCode=$driverMatch[1];
+                        }
+                        $predicate='query_unexpected_'.$kind.'_'.$state.'_'.$driverCode;
+                    }
                     // Persist the payload-free query boundary as a separate
                     // attempt diagnostic. The terminal run reason is purposely
                     // generic for users, so without this record a fast contract
