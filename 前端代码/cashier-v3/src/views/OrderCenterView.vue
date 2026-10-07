@@ -425,6 +425,7 @@ const isSalesDetailLoading = ref(false)
 const salesDetailLoadError = ref('')
 const SALES_DETAIL_REQUEST_TIMEOUT_MS = 15000
 const genericDetailRecord = ref(null)
+const initialDetailLifecycleAction = ref('')
 const salesPrintLoading = ref({})
 const salesOrderActionIds = ref({})
 const rechargeOrderActionIds = ref({})
@@ -2117,18 +2118,34 @@ function closeGenericDetail() {
   debtChangesLoading.value = false
   debtChangesError.value = ''
   genericDetailRecord.value = null
+  initialDetailLifecycleAction.value = ''
 }
 
-function openRecordDetail(record) {
+function openRecordDetail(record, initialAction = '') {
   if (isPlatformReadOnly.value) return null
   if (activeTabKey.value === 'sales') {
     return openSalesOrderDetail({ orderId: record?.id || record?.orderId || record?.salesOrderId })
   }
   if (activeTabKey.value === 'service' && !canUseCashierV3Operation('cashier.v3.order.service_detail')) return
+  initialDetailLifecycleAction.value = initialAction
   genericDetailRecord.value = record
   void readAttributionChanges(record)
   if (activeTabKey.value === 'debt') void readDebtChanges(record)
   return null
+}
+
+// 列表作废入口与详情操作共用同一权限、状态及 V3 身份边界。
+function canVoidProjectReplacement(record) {
+  return activeTabKey.value === 'card_operation'
+    && String(record?.id || '').startsWith('card-operation:')
+    && record?.operationType === 'project_replacement'
+    && record?.recordStatus === '已完成'
+    && canUseCashierV3Operation('cashier.v3.order.void')
+}
+
+function openProjectReplacementVoid(record) {
+  if (!canVoidProjectReplacement(record) || isPlatformReadOnly.value) return
+  openRecordDetail(record, 'replacement-void')
 }
 
 async function printSalesOrderRecord(record = {}) {
@@ -2468,6 +2485,10 @@ async function restoreDebt(record) {
 }
 
 const rechargeLifecycleActions = computed(() => {
+  // 卡操作只开放 V3 项目替换的反向操作；旧版记录缺少可核对的目标权益快照。
+  if (activeTabKey.value === 'card_operation' && genericDetailRecord.value) {
+    return canVoidProjectReplacement(genericDetailRecord.value) ? ['replacement-void'] : []
+  }
   if (['supplement', 'gift'].includes(activeTabKey.value) && genericDetailRecord.value) {
     const id = giftVoidRecordId(genericDetailRecord.value) || String(genericDetailRecord.value.id || '')
     if (activeTabKey.value === 'supplement' && id.startsWith('v3-') && genericDetailRecord.value.paymentStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.void')) return ['supplement-void']
@@ -2483,9 +2504,10 @@ const rechargeLifecycleActions = computed(() => {
 async function handleRechargeLifecycleAction(payload = {}) {
   const record = genericDetailRecord.value || {}
   const action = String(payload.action || '')
-  if (action === 'void-order-center-supplement' || action === 'void-order-center-gift') {
+  if (action === 'void-order-center-supplement' || action === 'void-order-center-gift'
+    || action === 'void-order-center-project-replacement') {
     const recordId = action === 'void-order-center-gift' ? giftVoidRecordId(record) : String(record.id || '')
-    if (!recordId) return { result: { status: 'failed', message: '赠送记录标识已变化，请刷新后重试。' } }
+    if (!recordId) return { result: { status: 'failed', message: '记录标识已变化，请刷新后重试。' } }
     const key = `${action}:${recordId}`
     const idempotencyKey = rechargeOrderActionIds.value[key] || createCashierV3CommandId()
     rechargeOrderActionIds.value = { ...rechargeOrderActionIds.value, [key]: idempotencyKey }
@@ -3057,6 +3079,8 @@ onBeforeUnmount(() => {
                 class="button button--text"
                 @click="openRecordDetail(record)"
               >{{ activeTabKey === 'service' ? '详情' : '查看详情' }}</button>
+              <button v-if="canVoidProjectReplacement(record)" type="button"
+                class="button button--text button--danger" @click="openProjectReplacementVoid(record)">作废</button>
               <!-- 服务只保留详情入口；打印与作废统一按消费订单处理，避免拆单操作。 -->
               <button
                 v-if="activeTabKey === 'debt' && record.canRepay"
@@ -3163,6 +3187,7 @@ onBeforeUnmount(() => {
       :fields="detailFields"
       :resolve-value="recordFieldValue"
       :lifecycle-actions="rechargeLifecycleActions"
+      :initial-lifecycle-action="initialDetailLifecycleAction"
       :on-lifecycle-action="handleRechargeLifecycleAction"
       :field-action-keys="serviceRecordIsNormal(genericDetailRecord) ? ['craftsman'] : []"
       :attribution-changes="attributionChanges"

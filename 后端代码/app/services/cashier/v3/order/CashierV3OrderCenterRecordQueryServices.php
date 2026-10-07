@@ -1876,6 +1876,8 @@ final class CashierV3OrderCenterRecordQueryServices
             // authoritative bridge from a card operation to its sales order.
             ->leftJoin('cashier_v3_card_operation_settlement s', 's.tenant_id = c.tenant_id AND s.operation_id = c.operation_id AND s.settlement_status = \'settled\'')
             ->leftJoin('cashier_v3_sales_order o', 'o.tenant_id = s.tenant_id AND o.order_id = s.sales_order_id')
+            // The original operation is immutable; its successful reversal owns the visible status.
+            ->leftJoin('cashier_v3_order_center_void_operation v', "v.tenant_id = c.tenant_id AND v.record_id = CONCAT('card-operation:', c.id) AND v.source_kind = 'project_replacement' AND v.status = 'succeeded'")
             ->where('c.tenant_id', $scope->tenantId())
             ->whereIn('c.operation_type', self::CARD_OPERATION_TYPES);
         if ($criteria['operationType'] !== '') {
@@ -1888,7 +1890,13 @@ final class CashierV3OrderCenterRecordQueryServices
             'c.card_no_snapshot', 'c.target_catalog_name_snapshot', 'c.operator_name_snapshot',
         ]);
         if ($criteria['status'] !== '') {
-            $query->where('c.operation_status', $criteria['status']);
+            if ($criteria['status'] === 'voided') {
+                $query->where('v.id', '>', 0);
+            } elseif ($criteria['status'] === 'completed') {
+                $query->whereIn('c.operation_status', ['completed', 'succeeded'])->whereNull('v.id');
+            } else {
+                $query->where('c.operation_status', $criteria['status'])->whereNull('v.id');
+            }
         }
         $total = (int)(clone $query)->count('c.id');
         $limit = $criteria['page'] * $criteria['pageSize'];
@@ -1899,7 +1907,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'c.card_no_snapshot', 'c.target_catalog_name_snapshot', 'c.source_remaining_value_cents',
             'c.settlement_delta_cents', 'o.order_no AS sales_order_no', 'c.reason_snapshot',
             'c.operator_name_snapshot', 'c.business_date', 'c.occurred_at', 'c.settled_at',
-            'c.result_snapshot_json',
+            'c.result_snapshot_json', 'v.id AS void_operation_id',
         ]))->order('c.occurred_at', 'desc')->order('c.id', 'desc')->limit($limit)->select()->toArray();
         return [array_map(function (array $row): array {
             $time = (int)($row['settled_at'] ?: $row['occurred_at']);
@@ -1907,7 +1915,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'id' => 'card-operation:' . $row['id'],
                 'operationNo' => $row['operation_no'],
                 'operationType' => $row['operation_type'],
-                'operationStatus' => $row['operation_status'],
+                'operationStatus' => (int)($row['void_operation_id'] ?? 0) > 0 ? 'voided' : $row['operation_status'],
                 'businessDate' => (string)$row['business_date'],
                 'memberId' => (int)($row['member_id_after'] ?: $row['member_id_before'] ?: $row['origin_member_id']),
                 'memberName' => $row['member_name_after_snapshot'],
@@ -2229,6 +2237,7 @@ final class CashierV3OrderCenterRecordQueryServices
         if ($type === 'card_operation') {
             return array_merge($options, [
                 ['value' => 'completed', 'label' => '已完成'],
+                ['value' => 'voided', 'label' => '已作废'],
                 ['value' => 'awaiting_checkout', 'label' => '待结账'],
                 ['value' => 'cancelled', 'label' => '已取消'],
             ]);
@@ -2366,6 +2375,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $labels = [
             'completed' => '已完成',
             'succeeded' => '已完成',
+            'voided' => '已作废',
             'awaiting_checkout' => '待结账',
             'cancelled' => '已取消',
             'failed' => '失败',

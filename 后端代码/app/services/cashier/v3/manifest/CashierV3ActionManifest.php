@@ -803,6 +803,14 @@ class CashierV3ActionManifest
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['gift.voided' => []],
             ],
+            // 项目替换不产生销售；作废只冲销权益迁移，不能伪造收款或退款事实。
+            'void-order-center-project-replacement' => [
+                'required_event_types' => ['card.operation.voided'],
+                'allowed_event_types' => ['card.operation.voided'],
+                'event_rules' => ['card.operation.voided' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'card_operation', 'source_type' => 'void-order-center-project-replacement']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['card.operation.voided' => []],
+            ],
             'adjust-service-record-craftsmen' => [
                 'required_event_types' => ['service_record.craftsmen_adjusted'],
                 'allowed_event_types' => ['service_record.craftsmen_adjusted'],

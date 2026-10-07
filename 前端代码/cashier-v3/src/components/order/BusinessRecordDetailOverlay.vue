@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { formatMoney } from '@/services/cashierV3Bridge'
 
 const props = defineProps({
@@ -20,6 +20,7 @@ const props = defineProps({
     required: true
   },
   lifecycleActions: { type: Array, default: () => [] },
+  initialLifecycleAction: { type: String, default: '' },
   onLifecycleAction: { type: Function, default: null },
   fieldActionKeys: { type: Array, default: () => [] },
   attributionChanges: { type: Array, default: () => [] },
@@ -31,7 +32,8 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'field-action'])
 
-const activeForm = ref('')
+// 列表直达作废时先校验本条记录仍具备该操作，避免复用弹窗暴露无权动作。
+const activeForm = ref(props.lifecycleActions.includes(props.initialLifecycleAction) ? props.initialLifecycleAction : '')
 const cashRefundAmount = ref('')
 const principalAmount = ref('0')
 const bonusAmount = ref('0')
@@ -39,6 +41,12 @@ const reason = ref('')
 const pending = ref(false)
 const actionError = ref('')
 const detailBody = ref(null)
+
+onMounted(async () => {
+  if (activeForm.value !== 'replacement-void') return
+  await nextTick()
+  if (detailBody.value) detailBody.value.scrollTop = detailBody.value.scrollHeight
+})
 
 const rows = computed(() => props.fields.map((field) => {
   const value = props.resolveValue(props.record, field.key)
@@ -81,7 +89,8 @@ async function submitLifecycleAction() {
   const payload = {
     action: activeForm.value === 'refund' ? 'refund-recharge-order'
       : activeForm.value === 'supplement-void' ? 'void-order-center-supplement'
-        : activeForm.value === 'gift-void' ? 'void-order-center-gift' : 'void-recharge-order',
+        : activeForm.value === 'gift-void' ? 'void-order-center-gift'
+          : activeForm.value === 'replacement-void' ? 'void-order-center-project-replacement' : 'void-recharge-order',
     reason: reason.value.trim()
   }
   if (activeForm.value === 'refund') {
@@ -135,7 +144,7 @@ async function submitLifecycleAction() {
           </dl>
           <section v-else-if="activeForm" class="business-record-detail__lifecycle"
             :class="{ 'business-record-detail__lifecycle--top': activeForm === 'supplement-void' }">
-            <h3>{{ activeForm === 'refund' ? '充值退款并作废' : activeForm === 'supplement-void' ? '作废补交记录' : activeForm === 'gift-void' ? '作废赠送记录' : '作废充值订单' }}</h3>
+            <h3>{{ activeForm === 'refund' ? '充值退款并作废' : activeForm === 'supplement-void' ? '作废补交记录' : activeForm === 'gift-void' ? '作废赠送记录' : activeForm === 'replacement-void' ? '作废项目替换' : '作废充值订单' }}</h3>
             <template v-if="activeForm === 'refund'">
               <label>实际退款金额<input v-model.trim="cashRefundAmount" inputmode="decimal" placeholder="实际退给客户的金额" /></label>
               <div class="business-record-detail__amount-row">
@@ -144,6 +153,7 @@ async function submitLifecycleAction() {
               </div>
             </template>
             <small v-if="activeForm === 'refund'">退款成功后订单只保留查看；已发生的欠款、赠品和权益不会回退。</small>
+            <small v-if="activeForm === 'replacement-void'">目标项目未使用且原项目权益未发生后续变化时，才可恢复原项目次数。</small>
             <label>{{ activeForm === 'refund' ? '退款原因' : '作废原因' }}<textarea v-model.trim="reason" maxlength="255" rows="3" /></label>
             <p v-if="actionError" role="alert">{{ actionError }}</p>
             <div><button type="button" class="button button--text" :disabled="pending" @click="activeForm = ''">取消</button><button type="button" class="button button--primary" :disabled="pending" @click="submitLifecycleAction">确认</button></div>
@@ -174,6 +184,7 @@ async function submitLifecycleAction() {
         <button v-if="lifecycleActions.includes('void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'void'">作废</button>
         <button v-if="lifecycleActions.includes('supplement-void')" type="button" class="button button--secondary" :disabled="pending" @click="openSupplementVoidForm">作废</button>
         <button v-if="lifecycleActions.includes('gift-void')" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'gift-void'">作废</button>
+        <button v-if="lifecycleActions.includes('replacement-void') && activeForm !== 'replacement-void'" type="button" class="button button--secondary" :disabled="pending" @click="activeForm = 'replacement-void'">作废</button>
         <button type="button" class="button button--primary" @click="$emit('close')">关闭</button>
       </footer>
     </section>

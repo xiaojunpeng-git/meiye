@@ -2892,7 +2892,8 @@ function resolveCommandContexts(action, payload) {
   // Cancelling a settled debt is an order-center mutation, not a cart edit.
   // Let the backend discover and lock the authoritative repayment instead of
   // attaching the currently displayed cashier workspace revision.
-  if (['void-order-center-supplement', 'cancel-order-center-debt', 'restore-order-center-debt', 'refund-imported-card'].includes(action)) {
+  // 项目替换作废以原操作号反查并锁定权益，不能继承收银工作台版本。
+  if (['void-order-center-supplement', 'void-order-center-project-replacement', 'cancel-order-center-debt', 'restore-order-center-debt', 'refund-imported-card'].includes(action)) {
     return { invalid: false, contexts: [] }
   }
 
@@ -3740,6 +3741,7 @@ export async function requestCashierV3Action(action, payload = {}) {
     'refund-imported-card',
     'restore-order-center-debt',
     'void-order-center-supplement',
+    'void-order-center-project-replacement',
     'void-service-record',
     'complete-checkout-reservations',
     'correct-sales-order-attribution',

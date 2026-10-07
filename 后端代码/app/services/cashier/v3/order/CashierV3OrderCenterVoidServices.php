@@ -9,6 +9,9 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
+use app\services\cashier\v3\cashier\CashierV3CashierReadinessGuard;
+use app\services\cashier\v3\cashier\CashierV3EntitlementResourceVersionProvider;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\user\UserBalanceAtomicServices;
@@ -18,7 +21,7 @@ use app\services\report\StoreReportPaymentSaleAllocationFactServices;
 use think\facade\Db;
 
 /**
- * Order-center supplement/gift void entry point.
+ * Order-center supplement/gift/project-replacement void entry point.
  *
  * Only V3 authority rows are accepted. Original facts remain immutable; this
  * service appends one operation row and one reversal business event.
@@ -57,18 +60,33 @@ final class CashierV3OrderCenterVoidServices
 
         $existing = Db::name(self::OPERATION_TABLE)->where('tenant_id', $dataScope->tenantId())
             ->where('command_idempotency_key', $key)->lock(true)->find();
-        if ($existing) return ['data' => ['void' => ['operationNo' => (string)$existing['operation_no'], 'replayed' => true]],
-            'business_no' => (string)$existing['operation_no'], 'touched' => ['supplement_record'], 'message' => '该补交记录已作废。'];
+        if ($existing) {
+            // A command key cannot be replayed for a different record or action.
+            if (($action === 'void-order-center-project-replacement' && (int)$existing['store_id'] !== $operator->storeId())
+                || (string)$existing['record_id'] !== $recordId || (string)$existing['source_kind'] !== $this->voidSourceKind($action, $recordId)
+                || (string)$existing['status'] !== 'succeeded') {
+                throw self::failure('作废请求与原记录不一致，请重新打开记录。', 'order_center_void_replay_mismatch');
+            }
+            return $this->replayedVoid($existing, $action);
+        }
         $recordOperation = Db::name(self::OPERATION_TABLE)->where('tenant_id', $dataScope->tenantId())
             ->where('record_id', $recordId)->where('status', 'succeeded')->lock(true)->find();
-        if ($recordOperation) return ['data' => ['void' => ['operationNo' => (string)$recordOperation['operation_no'], 'replayed' => true]],
-            'business_no' => (string)$recordOperation['operation_no'], 'touched' => ['supplement_record'], 'message' => '该补交记录已作废。'];
+        if ($recordOperation) {
+            if (($action === 'void-order-center-project-replacement' && (int)$recordOperation['store_id'] !== $operator->storeId())
+                || (string)$recordOperation['source_kind'] !== $this->voidSourceKind($action, $recordId)) {
+                throw self::failure('记录作废类型不一致。', 'order_center_void_kind_mismatch');
+            }
+            return $this->replayedVoid($recordOperation, $action);
+        }
 
         if ($action === 'void-order-center-supplement') {
             return $this->voidSupplement($recordId, $reason, $key, $operator, $dataScope, $recorder, $execution, (array)($scope['event_contract'] ?? []));
         }
         if ($action === 'void-order-center-gift') {
             return $this->voidGift($recordId, $reason, $key, $operator, $dataScope, $recorder, $execution, (array)($scope['event_contract'] ?? []));
+        }
+        if ($action === 'void-order-center-project-replacement') {
+            return $this->voidProjectReplacement($recordId, $reason, $key, $operator, $dataScope, $recorder, $execution, (array)($scope['event_contract'] ?? []));
         }
         throw self::failure('暂不支持该订单中心作废类型。', 'order_center_void_action_invalid');
     }
@@ -227,6 +245,168 @@ final class CashierV3OrderCenterVoidServices
         Db::name('cashier_v3_gift_fact')->insert($reverse);
         Db::name(self::OPERATION_TABLE)->where('id', (int)$operation['id'])->update(['business_event_no' => (string)$event['event_no'], 'status' => 'succeeded', 'updated_at' => $now]);
         return ['data' => ['void' => ['operationNo' => $operation['operation_no'], 'replayed' => false]], 'business_no' => $operation['operation_no'], 'touched' => ['cashier_workspace'], 'message' => '赠送记录已作废。'];
+    }
+
+    /**
+     * 项目替换无收款事实；只在来源和目标权益均未发生后续业务时反转本次权益迁移。
+     * 原操作及项目行不删除，作废操作、规则状态和权益版本在同一事务内落地。
+     */
+    private function voidProjectReplacement(string $recordId, string $reason, string $key, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, CashierV3BusinessEventRecorder $recorder, CashierV3BusinessEventExecution $execution, array $contract): array
+    {
+        if (!preg_match('/^card-operation:([1-9][0-9]*)$/D', $recordId, $matches)) {
+            throw self::failure('仅支持作废V3项目替换记录。', 'replacement_void_v3_only');
+        }
+        $original = (array)Db::name('cashier_v3_card_operation')->where('id', (int)$matches[1])
+            ->where('tenant_id', $scope->tenantId())->where('store_id', $operator->storeId())->lock(true)->find();
+        if (!$original || (string)$original['operation_type'] !== 'project_replacement'
+            || (string)$original['operation_status'] !== 'succeeded') {
+            throw self::failure('项目替换记录不存在或不可作废。', 'replacement_void_original_invalid');
+        }
+        $operationId = (string)$original['operation_id'];
+        $state = (array)Db::name('cashier_v3_card_state')->where('tenant_id', $scope->tenantId())
+            ->where('card_holder_id', (int)$original['source_card_holder_id'])->lock(true)->find();
+        $holder = (array)Db::name('user_card_holder')->where('id', (int)$original['source_card_holder_id'])->lock(true)->find();
+        $order = (array)Db::name('store_order')->where('id', (int)$original['origin_order_id'])->lock(true)->find();
+        $snapshot = json_decode((string)$original['result_snapshot_json'], true);
+        if (!$state || !$holder || !$order || !is_array($snapshot) || (int)$original['settled_at'] <= 0
+            || (string)($state['last_operation_id'] ?? '') !== $operationId
+            || (int)$state['current_version'] !== (int)($snapshot['stateVersionAfter'] ?? 0)
+            || (string)$state['card_status'] !== 'enabled'
+            || (int)$state['current_member_id'] !== (int)$original['member_id_after']
+            || (int)$holder['uid'] !== (int)$original['member_id_after'] || (int)$holder['is_del'] !== 0
+            || (int)$holder['oid'] !== (int)$original['origin_order_id']
+            || (int)$order['uid'] !== (int)$original['origin_member_id']
+            || (int)$order['terminal_action'] !== 0 || (int)$order['card_upgrade_use_oid'] !== 0) {
+            throw self::failure('原卡或订单已有后续变化，不能作废项目替换。', 'replacement_void_card_changed');
+        }
+        $lines = Db::name('cashier_v3_card_operation_line')->where('tenant_id', $scope->tenantId())
+            ->where('operation_id', $operationId)->order('line_no', 'asc')->lock(true)->select()->toArray();
+        $sourceLines = array_values(array_filter($lines, static function (array $line): bool {
+            return (string)$line['line_role'] === 'source_project';
+        }));
+        $targetLines = array_values(array_filter($lines, static function (array $line): bool {
+            return (string)$line['line_role'] === 'target_project';
+        }));
+        if ($sourceLines === [] || count($targetLines) !== 1 || count($lines) !== count($sourceLines) + 1) {
+            throw self::failure('项目替换快照不完整，不能安全作废。', 'replacement_void_lines_invalid');
+        }
+        $target = (array)Db::name('store_order_cart_info')->where('oid', (int)$original['origin_order_id'])
+            ->where('cart_id', 'cop' . substr(hash('sha256', $operationId), 0, 28))->lock(true)->find();
+        $targetSnapshot = json_decode((string)($target['cart_info'] ?? ''), true);
+        $targetQuantity = (int)$targetLines[0]['quantity_after'];
+        if (!$target || !is_array($targetSnapshot) || (string)($targetSnapshot['sourceType'] ?? '') !== 'cashier_v3_project_replacement'
+            || (string)($targetSnapshot['cardOperationId'] ?? '') !== $operationId
+            || (int)$target['uid'] !== (int)$original['origin_member_id']
+            || (int)$target['cart_type'] !== 2 || (int)$target['product_type'] !== 6
+            || (int)$target['product_id'] !== (int)$targetLines[0]['target_catalog_id']
+            || $targetQuantity <= 0 || (int)$target['write_times'] !== $targetQuantity
+            || (int)$target['write_surplus_times'] !== $targetQuantity
+            || (int)$target['cart_num'] !== $targetQuantity
+            || (int)$target['surplus_num'] !== $targetQuantity
+            || (int)$target['split_surplus_num'] !== $targetQuantity
+            || (int)$target['refund_num'] !== 0 || (int)$target['is_writeoff'] !== 0) {
+            throw self::failure('目标项目权益已使用或变化，不能作废项目替换。', 'replacement_void_target_changed');
+        }
+        $sourceIds = [];
+        foreach ($sourceLines as $line) {
+            $detailId = (int)$line['source_detail_id'];
+            $before = (int)$line['quantity_before'];
+            $after = (int)$line['quantity_after'];
+            $detail = (array)Db::name('store_order_cart_info')->where('id', $detailId)
+                ->where('oid', (int)$original['origin_order_id'])->lock(true)->find();
+            if ($detailId <= 0 || isset($sourceIds[$detailId]) || !$detail || $before <= $after
+                || $after < 0 || $before > (int)$detail['write_times']
+                || (int)$detail['uid'] !== (int)$original['origin_member_id']
+                || (int)$detail['cart_type'] !== 2 || (int)$detail['product_type'] !== 6
+                || (int)$detail['write_surplus_times'] !== $after
+                || (int)$detail['is_writeoff'] !== ($after === 0 ? 1 : 0)) {
+                throw self::failure('原项目权益已变化，不能作废项目替换。', 'replacement_void_source_changed');
+            }
+            $sourceIds[$detailId] = true;
+        }
+        $affectedIds = array_merge(array_keys($sourceIds), [(int)$target['id']]);
+        // 已发生的服务、核销或预约即使后来取消，也不自动撤销其历史依赖链。
+        if (Db::name('cashier_v3_entitlement_writeoff_fact')->where('tenant_id', $scope->tenantId())
+                ->whereIn('source_detail_id', $affectedIds)->where('occurred_at', '>=', (int)$original['settled_at'])->count() > 0
+            || Db::name('cashier_v3_service_order_operation')->where('tenant_id', $scope->tenantId())
+                ->whereIn('entitlement_source_detail_id', $affectedIds)->where('occurred_at', '>=', (int)$original['settled_at'])->count() > 0
+            || Db::name('cashier_v3_service_order_line')->where('tenant_id', $scope->tenantId())
+                ->whereIn('entitlement_source_detail_id', $affectedIds)->where('status', 'ACTIVE')->count() > 0
+            || Db::name('cashier_v3_reservation_entitlement_occupation')->where('tenant_id', $scope->tenantId())
+                ->whereIn('entitlement_source_detail_id', $affectedIds)->where('status', 'ACTIVE')->count() > 0
+            || Db::name('store_reservation_order')->whereIn('cart_info_id', $affectedIds)
+                ->where('is_del', 0)->where('is_system_del', 0)->count() > 0) {
+            throw self::failure('相关项目已有服务、核销或预约记录，不能作废项目替换。', 'replacement_void_downstream_use');
+        }
+
+        $now = time();
+        $void = $this->operation($scope, $operator, $key, $recordId, 'project_replacement', $operationId, $reason, $now);
+        (new CashierV3CardRuleEntitlementAuthorityServices())->reverseProjectComponentsInTx(
+            $scope->tenantId(), (int)$original['source_card_holder_id'], $sourceLines, (int)$target['id'], $operationId, $now
+        );
+        foreach ($sourceLines as $line) {
+            $after = (int)$line['quantity_after'];
+            if ((int)Db::name('store_order_cart_info')->where('id', (int)$line['source_detail_id'])
+                ->where('write_surplus_times', $after)->update([
+                    'write_surplus_times' => (int)$line['quantity_before'], 'is_writeoff' => 0,
+                ]) !== 1) throw self::failure('原项目权益并发变化，作废未提交。', 'replacement_void_source_race');
+        }
+        if ((int)Db::name('store_order_cart_info')->where('id', (int)$target['id'])
+            ->where('write_surplus_times', $targetQuantity)->where('refund_num', 0)->update([
+                'write_surplus_times' => 0, 'surplus_num' => 0, 'split_surplus_num' => 0,
+                'refund_num' => $targetQuantity, 'is_writeoff' => 0,
+            ]) !== 1) throw self::failure('目标项目权益并发变化，作废未提交。', 'replacement_void_target_race');
+        if ((int)Db::name('cashier_v3_card_state')->where('id', (int)$state['id'])
+            ->where('current_version', (int)$state['current_version'])->where('last_operation_id', $operationId)
+            ->update(['current_version' => (int)$state['current_version'] + 1,
+                'last_operation_id' => (string)$void['operation_id'], 'status_reason_snapshot' => $reason, 'updated_at' => $now]) !== 1) {
+            throw self::failure('原卡状态并发变化，作废未提交。', 'replacement_void_card_race');
+        }
+        $versions = new CashierV3EntitlementResourceVersionProvider(new CashierV3CashierReadinessGuard());
+        foreach (array_keys($sourceIds) as $detailId) {
+            $versions->synchronizeProjectionVersion('member_benefit_pool', (string)$detailId, $operator, $scope);
+        }
+        $versions->synchronizeProjectionVersion('card_holder', (string)$original['source_card_holder_id'], $operator, $scope);
+        if ((int)Db::name('cashier_v3_entitlement_resource_version')->where('resource_kind', 'member_benefit_pool')
+            ->where('resource_id', (string)$target['id'])->where('current_version', '>', 0)
+            ->update(['current_version' => Db::raw('current_version+1'), 'last_action' => 'void-order-center-project-replacement', 'update_time' => $now]) !== 1) {
+            throw self::failure('目标项目版本异常，作废未提交。', 'replacement_void_target_version_missing');
+        }
+        $event = $recorder->recordInTx($execution, $contract, [
+            'event_type' => 'card.operation.voided', 'aggregate_type' => 'card_operation', 'aggregate_id' => $operationId,
+            'aggregate_version' => (int)$state['current_version'] + 1, 'event_version' => 1,
+            'source_type' => 'void-order-center-project-replacement', 'source_id' => (string)$void['operation_id'],
+            'reversal_of' => $this->originalEventNo($scope->tenantId(), $operationId, ['card.operation.recorded']),
+            'member_id' => (int)$original['member_id_after'], 'business_date' => date('Y-m-d', $now),
+            'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
+            'aggregate_name_snapshot' => (string)$original['card_name_snapshot'],
+            'store_name_snapshot' => (string)$original['store_name_snapshot'],
+            'payload' => ['recordId' => $recordId, 'reason' => $reason, 'sourceDetailIds' => array_keys($sourceIds), 'targetDetailId' => (int)$target['id']],
+        ]);
+        Db::name(self::OPERATION_TABLE)->where('id', (int)$void['id'])
+            ->update(['business_event_no' => (string)$event['event_no'], 'status' => 'succeeded', 'updated_at' => $now]);
+        return ['data' => ['void' => ['operationNo' => $void['operation_no'], 'replayed' => false]],
+            'business_no' => $void['operation_no'], 'touched' => ['source_card'], 'message' => '项目替换已作废，原项目次数已恢复。'];
+    }
+
+    /** Preserve each existing void type's idempotent response without sharing its business identity. */
+    private function replayedVoid(array $row, string $action): array
+    {
+        $replacement = $action === 'void-order-center-project-replacement';
+        return ['data' => ['void' => ['operationNo' => (string)$row['operation_no'], 'replayed' => true]],
+            'business_no' => (string)$row['operation_no'],
+            'touched' => [$replacement ? 'source_card' : ($action === 'void-order-center-gift' ? 'cashier_workspace' : 'supplement_record')],
+            'message' => $replacement ? '该项目替换已作废。' : ($action === 'void-order-center-gift' ? '该赠送记录已作废。' : '该补交记录已作废。')];
+    }
+
+    private function voidSourceKind(string $action, string $recordId): string
+    {
+        if ($action === 'void-order-center-project-replacement') return 'project_replacement';
+        if ($action === 'void-order-center-gift') return 'gift';
+        if ($action === 'void-order-center-supplement') {
+            return strpos($recordId, 'v3-sales-supplement:') === 0 ? 'sales_supplement' : 'recharge_supplement';
+        }
+        throw self::failure('暂不支持该订单中心作废类型。', 'order_center_void_action_invalid');
     }
 
     private function revokeUnusedDirectProject(array $item, int $memberId, CashierV3DataScopeContext $scope, int $now): void

@@ -20,9 +20,11 @@ final class CashierV3CardRuleEntitlementAuthorityServices
      * 返回 null 表示不是正式签发的共享次数卡；物理余次及历史成交快照不被改写。
      * 最终结账事务中读取并锁定权威池，选择器只读同一口径。
      */
-    public function debtLimitForDetail(array $detail, array $order): ?int
+    public function debtLimitForDetail(array $detail, array $order, bool $allowRowLock = true): ?int
     {
-        $lock = CashierV3TransactionGuard::isInTransaction();
+        // A read-only AI snapshot cannot issue FOR UPDATE. Checkout keeps the
+        // default lock; the member detail reader explicitly opts out.
+        $lock = $allowRowLock && CashierV3TransactionGuard::isInTransaction();
         $component = $this->row(Db::name(CashierV3IssuedCardRuleStateServices::COMPONENT_TABLE)
             ->where('legacy_detail_id', (int)($detail['id'] ?? 0))
             ->where('tenant_id', (string)($order['tenant_id'] ?? '0'))->find());
@@ -38,7 +40,7 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         }
         $snapshot = $this->snapshotForHolder((string)$state['tenant_id'], (int)$holder['id'], $lock);
         if ($snapshot === null) throw self::failure('card_rule_cancellation_snapshot_missing');
-        return $this->debtLimitedSharedTimes($snapshot, $order);
+        return $this->debtLimitedSharedTimes($snapshot, $order, $lock);
     }
 
     /** 保留 R50 已有调用入口；取消与恢复后的待还状态均走同一整卡上限。 */
@@ -48,17 +50,17 @@ final class CashierV3CardRuleEntitlementAuthorityServices
     }
 
     /** 仅正式共享池使用整卡销售明细的成交分；债务状态切换不是收款。 */
-    private function debtLimitedSharedTimes(array $snapshot, array $order): int
+    private function debtLimitedSharedTimes(array $snapshot, array $order, bool $lock): int
     {
         $state = $snapshot['state'];
         $remaining = (int)$state['shared_remaining_times'];
         $unavailable = (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())
-            ->unavailableCardDebt($order, (int)($order['uid'] ?? 0), (string)$state['tenant_id']);
+            ->unavailableCardDebt($order, (int)($order['uid'] ?? 0), (string)$state['tenant_id'], $lock);
         if (bccomp($unavailable, '0', 2) <= 0) return $remaining;
         $line = $this->row(Db::name('cashier_v3_sales_order_line')
             ->where('order_id', (string)$state['sales_order_id'])
             ->where('order_line_id', (string)$state['sales_order_line_id'])
-            ->field('sale_amount_cents')->lock(CashierV3TransactionGuard::isInTransaction())->find());
+            ->field('sale_amount_cents')->lock($lock)->find());
         if (!$line) throw self::failure('card_rule_cancellation_sale_missing');
         return self::sharedTimesAfterCancellation(
             (int)$state['shared_total_times'], $remaining,
@@ -602,6 +604,61 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         ]);
         if ($inserted <= 0) {
             throw self::failure('card_rule_replacement_component_create_failed');
+        }
+    }
+
+    /**
+     * Reverse an unused project replacement without changing the issued rule definition.
+     * Source quantities come from the immutable operation lines; every mutable component
+     * must still match the state left by that operation before any rights are restored.
+     */
+    public function reverseProjectComponentsInTx(string $tenantId, int $holderId, array $sourceLines, int $targetDetailId, string $operationId, int $time): void
+    {
+        CashierV3TransactionGuard::assertInTransaction('cardRuleProjectReplacementVoid');
+        $snapshot = $this->snapshotForHolder($tenantId, $holderId, true);
+        if ($snapshot === null) return; // Legacy cards have no rule projection.
+        $state = $snapshot['state'];
+        if (!in_array((string)$state['status'], ['active', 'exhausted'], true)) {
+            throw self::failure('card_rule_replacement_void_state_invalid');
+        }
+        $components = [];
+        foreach ($snapshot['components'] as $component) $components[(int)$component['legacy_detail_id']] = $component;
+        $target = $components[$targetDetailId] ?? null;
+        $targetSnapshot = json_decode((string)($target['component_snapshot_json'] ?? ''), true);
+        if (!$target || !is_array($targetSnapshot) || (string)$target['status'] !== 'active'
+            || (int)$target['state_version'] !== 1
+            || !hash_equals($operationId, (string)($targetSnapshot['replacementOperationId'] ?? ''))) {
+            throw self::failure('card_rule_replacement_void_target_changed');
+        }
+        $expectedSources = [];
+        $independent = in_array((string)$state['rule_type'], ['normal', 'choice_kind'], true);
+        foreach ($sourceLines as $line) {
+            $id = (int)($line['source_detail_id'] ?? 0);
+            $before = (int)($line['quantity_before'] ?? 0);
+            $after = (int)($line['quantity_after'] ?? -1);
+            $component = $components[$id] ?? null;
+            if ($id <= 0 || isset($expectedSources[$id]) || $before <= $after || $after < 0 || !$component
+                || !in_array((string)$component['status'], ['active', 'exhausted'], true)
+                || ($independent && ((int)$component['remaining_times'] !== $after || $before > (int)$component['total_times']))) {
+                throw self::failure('card_rule_replacement_void_source_changed');
+            }
+            $expectedSources[$id] = $before - $after;
+        }
+        $frozenSources = (array)($targetSnapshot['replacementSourceDetails'] ?? []);
+        ksort($expectedSources);
+        ksort($frozenSources);
+        if (!$expectedSources || $expectedSources !== array_map('intval', $frozenSources)
+            || ($independent && (int)$target['remaining_times'] !== (int)$target['total_times'])) {
+            throw self::failure('card_rule_replacement_void_snapshot_mismatch');
+        }
+        foreach ($sourceLines as $line) {
+            if (!$independent) continue; // Shared-count and time rules do not decrement source components on replacement.
+            $component = $components[(int)$line['source_detail_id']];
+            $this->updateComponent($component, ['remaining_times' => (int)$line['quantity_before'], 'status' => 'active'], $time);
+        }
+        $this->updateComponent($target, ['remaining_times' => 0, 'status' => 'revoked'], $time);
+        if ($independent && (string)$state['status'] === 'exhausted') {
+            $this->updateState($state, ['status' => 'active'], $time);
         }
     }
 

@@ -316,7 +316,7 @@ final class CashierV3OrderLifecycleModule
         );
         $dispatcher->policies()->register($serviceVoidPolicy);
 
-        foreach (['void-order-center-supplement', 'void-order-center-gift'] as $action) {
+        foreach (['void-order-center-supplement', 'void-order-center-gift', 'void-order-center-project-replacement'] as $action) {
             if ($handlers->hasCommand($action) || $dispatcher->policies()->has($action)) {
                 throw new \LogicException('order center void duplicate action: ' . $action);
             }
@@ -343,6 +343,17 @@ final class CashierV3OrderLifecycleModule
                 }, ['supplement_record'], ['supplement_record'], ['debt_repayment'], true);
                 $policy->configureServerResourceDiscovery([$orderCenterVoid, 'discover'], ['supplement_record'], ['debt_repayment']);
                 $dispatcher->policies()->register($policy);
+                continue;
+            }
+            if ($action === 'void-order-center-project-replacement') {
+                // 权益锁由作废事务从原操作号反查；不借用可能已变化的收银购物车版本。
+                $dispatcher->policies()->register(new CashierV3ContextPolicy($action, [], [], static function (): array {
+                    return [
+                        'required' => [], 'allowed' => [], 'identities' => [],
+                        'required_read_roles' => [], 'required_touched_roles' => [],
+                        'allows_empty_contexts' => true, 'allows_empty_touched_result' => true,
+                    ];
+                }, [], [], [], true));
                 continue;
             }
             $policy = new CashierV3ContextPolicy($action, ['cashier_workspace'], [], static function (array $payload, array $base): array {

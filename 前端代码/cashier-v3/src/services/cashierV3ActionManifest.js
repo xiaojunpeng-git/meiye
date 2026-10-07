@@ -280,6 +280,7 @@ const C5_ACTIONS = {
     'cancel-order-center-debt': FEATURE_ORDER_VOID,
     'restore-order-center-debt': FEATURE_ORDER_VOID,
     'void-order-center-gift': FEATURE_ORDER_VOID,
+    'void-order-center-project-replacement': FEATURE_ORDER_VOID,
     'reopen-sales-order': FEATURE_ORDER_REOPEN,
     'upgrade-sales-order': FEATURE_ORDER_CENTER,
     'print-sales-order-receipt': FEATURE_ORDER_RECEIPT_PRINT,
