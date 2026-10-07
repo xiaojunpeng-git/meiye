@@ -55,6 +55,15 @@ foreach ($cases as $name=>$question) {
     $safe=['schema_version'=>'sanitized-question-v2','question'=>$question,'recent_questions'=>[],
         'evidence_messages'=>[['id'=>'current','text'=>$question]],'prior_query'=>null,
         'has_unresolved_conditions'=>false,'server_resolved_fields'=>[],'reference_date'=>'2026-10-07'];
+    if ($name==='weekday_extrema' && getenv('MOHE_R62_PRIOR_QUARTER')==='1') {
+        $safe['recent_questions']=['上个季度营业额总的是多少'];
+        $safe['evidence_messages'][]=['id'=>'recent_1','text'=>'上个季度营业额总的是多少'];
+        $safe['prior_query']=['metric_codes'=>['cash_performance'],'operation'=>'summary',
+            'periods'=>[['kind'=>'calendar_period','unit'=>'quarter','offset'=>-1,'count'=>1,'end_mode'=>'full']],
+            'ranking'=>['direction'=>'unspecified','limit'=>null],'scope'=>'authorized','object_kind'=>'store',
+            'has_business_filter'=>false,'has_object_selection'=>false,'has_store_scope_restriction'=>false,
+            'presentation_origin'=>'customer_or_verified_context'];
+    }
     $started=microtime(true);
     try {
         $attempts=1;

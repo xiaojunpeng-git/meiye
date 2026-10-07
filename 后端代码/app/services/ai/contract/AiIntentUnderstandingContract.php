@@ -345,6 +345,30 @@ final class AiIntentUnderstandingContract
                     $value['requirements'][$index]['values']['periods']=$value['periods'];
                     unset($value['periods']);
                 }
+            } elseif (count($owners)===2 && count($value['requirements'])===2
+                && !isset($value['groups'])) {
+                // A shared top-level date is another provider packaging of
+                // the same two-sided ranking. Require current evidence on
+                // both ends, then reuse the strict rank/date compatibility
+                // gate rather than assigning a date to unrelated queries.
+                $evidence=[];
+                foreach ($value['requirements'] as $requirement) {
+                    $current=array_values(array_filter((array)($requirement['evidence']??[]),static function($item): bool {
+                        return is_array($item)&&($item['message_id']??null)==='current';
+                    }));
+                    if ($current===[]) {$evidence=[];break;}
+                    $evidence[]=$current[0];
+                }
+                if (count($evidence)===2) {
+                    $candidate=$value['requirements'];
+                    $candidate[]=['fields'=>['periods'],'values'=>['periods'=>$value['periods']],
+                        'evidence'=>$evidence];
+                    $attached=self::attachSharedRankingPeriod($candidate);
+                    if (count($attached)===2) {
+                        $value['requirements']=$attached;
+                        unset($value['periods']);
+                    }
+                }
             }
         }
         $keys = is_array($value) ? array_keys($value) : [];
@@ -376,6 +400,15 @@ final class AiIntentUnderstandingContract
         // a second model call for JSON-shape errors without choosing a metric,
         // changing a threshold, or guessing either side of a comparison.
         if (is_array($requirements)) {
+            // Models sometimes emit one shared date requirement beside the
+            // two ends of a ranking, while declaring that same period on
+            // each end without repeating its typed value. Move only that
+            // single, current-evidenced period into the two compatible ends.
+            // Conflicting or independently grouped periods remain untouched
+            // and fail the ordinary contract instead of changing the query.
+            if (!isset($value['groups'])) {
+                $requirements=self::attachSharedRankingPeriod($requirements);
+            }
             $periodIndexes=[];
             foreach ($requirements as $index=>$requirement) {
                 if (is_array($requirement) && in_array('periods',(array)($requirement['fields']??[]),true)) $periodIndexes[]=$index;
@@ -795,6 +828,56 @@ final class AiIntentUnderstandingContract
         }
         $first['values']=$left;$first['evidence']=$evidence;
         return [$first];
+    }
+
+    /** Reattach one model-extracted shared date to both ends of one ranking. */
+    private static function attachSharedRankingPeriod(array $requirements): array
+    {
+        if (count($requirements)!==3) return $requirements;
+        $dateIndex=null;$rankIndexes=[];
+        foreach ($requirements as $index=>$requirement) {
+            if (!is_array($requirement) || !is_array($requirement['fields']??null)
+                || !is_array($requirement['values']??null)) return $requirements;
+            $fields=$requirement['fields'];$values=$requirement['values'];
+            if ($fields===['periods'] && self::periods($values['periods']??null)
+                && count($values['periods'])===1) {
+                if ($dateIndex!==null) return $requirements;
+                $dateIndex=$index;continue;
+            }
+            if (!in_array($values['operation']??null,[null,'ranking'],true)
+                || !in_array('periods',$fields,true)
+                || !in_array('operation',$fields,true)
+                || !in_array('ranking',$fields,true)
+                || !in_array('metric_codes',$fields,true)
+                || !in_array('object_kind',$fields,true)
+                || (($values['ranking']['limit']??null)!==1)) return $requirements;
+            $rankIndexes[]=$index;
+        }
+        if ($dateIndex===null || count($rankIndexes)!==2) return $requirements;
+        $directions=array_map(static function($index) use ($requirements) {
+            return $requirements[$index]['values']['ranking']['direction']??null;
+        },$rankIndexes);
+        sort($directions,SORT_STRING);
+        if ($directions!==['bottom','top']) return $requirements;
+        $date=$requirements[$dateIndex];
+        $currentEvidence=array_filter((array)($date['evidence']??[]),static function($item): bool {
+            return is_array($item) && ($item['message_id']??null)==='current';
+        });
+        if ($currentEvidence===[]) return $requirements;
+        foreach ($rankIndexes as $index) {
+            $existing=$requirements[$index]['values']['periods']??null;
+            if ($existing!==null && $existing!==$date['values']['periods']) return $requirements;
+        }
+        foreach ($rankIndexes as $index) {
+            $requirements[$index]['values']['periods']=$date['values']['periods'];
+            foreach ($currentEvidence as $item) {
+                if (!in_array($item,(array)($requirements[$index]['evidence']??[]),true)) {
+                    $requirements[$index]['evidence'][]=$item;
+                }
+            }
+        }
+        unset($requirements[$dateIndex]);
+        return array_values($requirements);
     }
 
     /**
