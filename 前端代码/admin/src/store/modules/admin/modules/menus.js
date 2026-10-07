@@ -17,6 +17,7 @@ import { isAgentPath } from '@/utils/pathUtils';
 import { normalizeOrganizationWorkspaceMenu } from '@/libs/organizationWorkspaceMenu';
 import { normalizeProductBusinessConfigMenu } from '@/libs/productBusinessConfigMenu';
 import { disambiguateDuplicateMenuPaths } from '@/libs/menuRouteDisambiguation';
+import { STORE_OPERATION_REPORTS } from '@/libs/storeOperationReports';
 
 // 客户分析页面由平台源码提供路由，菜单仍由后端菜单树驱动。开发联调期间，
 // 对已有“客户”顶栏补齐九个独立入口；如果后端以后返回同一 unique_auth，
@@ -34,6 +35,11 @@ const CUSTOMER_ANALYTICS_MENU = Object.freeze([
 ]);
 
 const EMPLOYEE_DASHBOARD_AUTH = 'admin-staff';
+const CROSS_INDUSTRY_MENU_TITLES = new Map(
+  STORE_OPERATION_REPORTS
+    .filter(report => ['cross_industry_customer_detail', 'cross_industry_customer_summary'].includes(report.code))
+    .map(report => [`admin-report-store-operations-${report.code}`, report.title])
+);
 
 // 只向后端已返回的顶层“员工”菜单追加入口，不创建第二套顶栏菜单。
 function withEmployeeDashboardMenu(menuData, prefix) {
@@ -308,7 +314,9 @@ function withoutStoreOperationsReportIcons(menuData) {
     if (!item) return item;
     const children = Array.isArray(item.children) ? withoutStoreOperationsReportIcons(item.children) : item.children;
     if (String(item.unique_auth || '').startsWith('admin-report-store-operations-')) {
-      return { ...item, icon: '', custom: '', children };
+      // 已登录浏览器可能持有迁移前的菜单快照；仅按稳定权限标识校正这两张报表的展示名。
+      const title = CROSS_INDUSTRY_MENU_TITLES.get(String(item.unique_auth || ''));
+      return { ...item, ...(title ? { title, menu_name: title } : {}), icon: '', custom: '', children };
     }
     return { ...item, children };
   });
