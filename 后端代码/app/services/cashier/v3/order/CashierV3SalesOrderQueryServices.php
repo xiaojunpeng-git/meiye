@@ -1405,7 +1405,7 @@ final class CashierV3SalesOrderQueryServices
                 ->where('sf.tenant_id', $tenantIds[0])
                 ->whereIn('sf.checkout_request_id', $requestIds)
                 ->where('sf.service_status', 'completed')
-                ->field('sf.id,sf.service_fact_id,sf.service_record_no,sf.checkout_request_id,sf.source_line_id,sf.project_id,sf.project_name_snapshot,sf.quantity,sf.project_count,sf.service_object,sf.friend_counts_as_customer,sf.is_experience,sf.craftsmen_snapshot_json,sf.service_status,sf.detail_remark_snapshot,wf.actual_entitlement_amount_cents,vo.id AS void_operation_id,vo.occurred_at AS voided_at')
+                ->field('sf.id,sf.service_fact_id,sf.service_record_no,sf.checkout_request_id,sf.source_line_id,sf.project_id,sf.project_name_snapshot,sf.quantity,sf.project_count,sf.service_object,sf.friend_counts_as_customer,sf.is_experience,sf.craftsmen_snapshot_json,sf.service_status,sf.detail_remark_snapshot,wf.actual_entitlement_amount_cents,wf.total_purchase_times_snapshot,wf.consumed_times_before_snapshot,wf.quantity AS writeoff_quantity,vo.id AS void_operation_id,vo.occurred_at AS voided_at')
                 ->order('sf.id', 'asc')->select()->toArray();
             foreach ($serviceRows as $serviceRow) {
                 $orderId = $requestToOrder[(string)($serviceRow['checkout_request_id'] ?? '')] ?? '';
@@ -2060,6 +2060,14 @@ final class CashierV3SalesOrderQueryServices
     {
         $quantity = max(0, (int)$serviceFact['quantity']);
         $actualCents = isset($serviceFact['actual_entitlement_amount_cents']) ? max(0, (int)$serviceFact['actual_entitlement_amount_cents']) : null;
+        $remainingTimes = isset($serviceFact['total_purchase_times_snapshot'], $serviceFact['consumed_times_before_snapshot'])
+            ? max(
+                0,
+                (int)$serviceFact['total_purchase_times_snapshot']
+                    - (int)$serviceFact['consumed_times_before_snapshot']
+                    - max(0, (int)($serviceFact['writeoff_quantity'] ?? $quantity))
+            )
+            : null;
         // 权益服务事实保存的是服务核销快照，早期直通结算使用 snake_case；
         // 它不是销售明细的结账快照，不能交给 salesLineCraftsmen 的兜底解码。
         $snapshotJson = (string)($serviceFact['craftsmen_snapshot_json'] ?? '');
@@ -2071,6 +2079,8 @@ final class CashierV3SalesOrderQueryServices
             'name' => (string)$serviceFact['project_name_snapshot'],
             'purchaseSpec' => '',
             'quantity' => max(0, (int)$serviceFact['quantity']),
+            // 票据展示本次核销后的冻结余次，不读取会随后续核销变化的当前会员权益。
+            'remainingTimes' => $remainingTimes,
             'unitPrice' => $actualCents !== null && $quantity > 0 ? $this->moneyFromCents(intdiv($actualCents + intdiv($quantity, 2), $quantity)) : null,
             'entitlementAmount' => $actualCents !== null ? $this->moneyFromCents($actualCents) : null,
             'originalAmount' => null,

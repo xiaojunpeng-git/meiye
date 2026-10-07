@@ -166,12 +166,29 @@ ok('纯权益订单小票只展示服务区块', () => {
   assert.doesNotMatch(html, /销售明细/)
 })
 
-ok('混合结账小票同时展示销售和服务区块', () => {
+ok('权益项目从销售明细拆出并只展示名称次数余次', () => {
+  const html = buildSalesOrderReceiptHtml({
+    items: [
+      { businessTag: '购买', name: '舒缓卡', quantity: 1, payableAmount: 1000 },
+      { businessTag: '权益', name: '身体(收店)', quantity: 2, remainingTimes: 8, entitlementAmount: 0 }
+    ],
+    amountSummary: { payableAmount: 1000 }
+  })
+  const salesSection = html.slice(html.indexOf('<h2>销售明细</h2>'), html.indexOf('<h2>权益明细</h2>'))
+  const entitlementSection = html.slice(html.indexOf('<h2>权益明细</h2>'), html.indexOf('<h2>收款明细</h2>'))
+  assert.match(salesSection, /舒缓卡/)
+  assert.doesNotMatch(salesSection, /身体\(收店\)/)
+  assert.match(entitlementSection, /<th>名称<\/th><th class="right">次数<\/th><th class="right">余次<\/th>/)
+  assert.match(entitlementSection, /身体\(收店\)<\/td><td class="right">2<\/td><td class="right">8<\/td>/)
+  assert.doesNotMatch(entitlementSection, /金额|¥0/)
+})
+
+ok('混合结账小票同时展示销售和权益区块', () => {
   const receipt = salesOrderReceiptFromCheckout({
     salesOrderId: 'S-1001',
     lines: [
       { lineRole: 'sale', name: '买卡', quantity: 1, payableAmount: 200 },
-      { lineRole: 'entitlement_service', name: '东方熏蒸', quantity: 1, sourceName: '次卡权益' },
+      { lineRole: 'entitlement_service', name: '东方熏蒸', quantity: 1, remainingTimes: 3, sourceName: '次卡权益' },
       { lineRole: 'payment', name: '微信', quantity: 1, amount: 200 }
     ],
     payment: { selectedLines: [] },
@@ -180,10 +197,10 @@ ok('混合结账小票同时展示销售和服务区块', () => {
   })
   const html = buildSalesOrderReceiptHtml(receipt)
   assert.match(html, /销售明细/)
-  assert.match(html, /服务明细/)
+  assert.match(html, /权益明细/)
   assert.match(html, /买卡/)
   assert.match(html, /东方熏蒸/)
-  assert.equal(receipt.items.length, 1)
+  assert.equal(receipt.items.length, 2)
   assert.equal(receipt.paymentDetails.length, 1)
   assert.equal(receipt.paymentDetails[0].name, '微信')
   assert.match(html, /应付金额/)

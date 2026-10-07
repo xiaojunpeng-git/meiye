@@ -83,6 +83,22 @@ function itemAmount(item) {
   return pickValue(item, ['payableAmount', 'receivableAmount', 'amountDue', 'actualReceivedAmount', 'amount'])
 }
 
+function isEntitlementItem(item) {
+  const role = String(item?.lineRole || item?.kind || '').toLowerCase()
+  return item?.businessTag === '权益' || role === 'entitlement_service'
+}
+
+function entitlementRemainingTimes(item) {
+  return pickValue(item, [
+    'remainingTimes',
+    'remaining_times',
+    'remainingTimesAfter',
+    'remaining_times_after',
+    'availableTimes',
+    'available_times'
+  ])
+}
+
 function paymentName(line) {
   if (line?.isBalancePayment === true || ['balance', 'member_balance', '余额'].includes(String(pickValue(line, ['paymentSource', 'paymentMethodCode', 'methodCode', 'type']) || '').toLowerCase())) {
     return '余额支付'
@@ -214,17 +230,24 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   const paperProfile = resolveSalesOrderReceiptPaperProfile(options.paperSize)
   const member = source.member && typeof source.member === 'object' ? source.member : {}
   const items = firstList(source, ['items', 'orderItems', 'lines', 'details'])
+  const salesItems = items.filter((item) => !isEntitlementItem(item))
+  const entitlementItems = items.filter(isEntitlementItem)
   const services = firstList(source, ['serviceRecords', 'services', 'serviceItems', 'serviceLines'])
   const payments = firstList(source, ['paymentDetails', 'paymentLines', 'receipts', 'payments'])
   const receiptMode = String(source.receiptMode || (services.length && !items.length ? 'service' : 'sales'))
-  const hasSalesSection = receiptMode !== 'service'
+  const hasSalesReceipt = receiptMode !== 'service'
+  const hasSalesSection = hasSalesReceipt && salesItems.length > 0
+  const hasEntitlementSection = entitlementItems.length > 0
   const hasServiceSection = receiptMode !== 'sales' && services.length > 0
   const orderNo = pickValue(source, ['salesOrderNo', 'orderNo', 'no'])
   const memberName = pickValue(source, ['memberName']) || pickValue(member, ['name', 'memberName']) || (source.isGuest ? '游客' : '游客')
   const note = pickValue(source, ['orderNote', 'remark', 'note'])
-  const itemRows = items.length
-    ? items.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">x${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayAmount(itemAmount(item)))}</td></tr>`).join('')
+  const itemRows = salesItems.length
+    ? salesItems.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">x${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayAmount(itemAmount(item)))}</td></tr>`).join('')
     : '<tr><td colspan="3" class="empty">暂无商品明细</td></tr>'
+  const entitlementRows = entitlementItems.length
+    ? entitlementItems.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayText(entitlementRemainingTimes(item)))}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="empty">暂无权益明细</td></tr>'
   const serviceRows = services.length
     ? services.map((service) => `<tr><td>${escapeHtml(serviceName(service))}</td><td class="right">x${escapeHtml(serviceQuantity(service))}</td><td>${escapeHtml(displayText(serviceSource(service)))}</td></tr>`).join('')
     : '<tr><td colspan="3" class="empty">暂无服务明细</td></tr>'
@@ -266,6 +289,9 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   .items-table th:nth-child(1), .items-table td:nth-child(1) { width: 53%; }
   .items-table th:nth-child(2), .items-table td:nth-child(2) { width: 16%; }
   .items-table th:nth-child(3), .items-table td:nth-child(3) { width: 31%; }
+  .entitlements-table th:nth-child(1), .entitlements-table td:nth-child(1) { width: 54%; }
+  .entitlements-table th:nth-child(2), .entitlements-table td:nth-child(2) { width: 22%; }
+  .entitlements-table th:nth-child(3), .entitlements-table td:nth-child(3) { width: 24%; }
   .services-table th:nth-child(1), .services-table td:nth-child(1) { width: 45%; }
   .services-table th:nth-child(2), .services-table td:nth-child(2) { width: 20%; }
   .services-table th:nth-child(3), .services-table td:nth-child(3) { width: 35%; }
@@ -307,11 +333,13 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   </div>
   ${hasSalesSection ? `<h2>销售明细</h2>
   <table class="items-table"><thead><tr><th>名称</th><th class="right">数量</th><th class="right">金额</th></tr></thead><tbody>${itemRows}</tbody></table>` : ''}
+  ${hasEntitlementSection ? `<h2>权益明细</h2>
+  <table class="entitlements-table"><thead><tr><th>名称</th><th class="right">次数</th><th class="right">余次</th></tr></thead><tbody>${entitlementRows}</tbody></table>` : ''}
   ${hasServiceSection ? `<h2>服务明细</h2>
   <table class="services-table"><thead><tr><th>项目</th><th class="right">次数</th><th>来源</th></tr></thead><tbody>${serviceRows}</tbody></table>` : ''}
-  ${payments.length || hasSalesSection ? `<h2>收款明细</h2>
+  ${payments.length || hasSalesReceipt ? `<h2>收款明细</h2>
   <table class="payments-table"><thead><tr><th>收款方式</th><th class="right">金额</th></tr></thead><tbody>${paymentRows}</tbody></table>` : ''}
-  ${summaryRows || hasSalesSection ? `<div class="summary">${summaryRows || '<div class="empty">暂无金额汇总</div>'}</div>` : ''}
+  ${summaryRows || hasSalesReceipt ? `<div class="summary">${summaryRows || '<div class="empty">暂无金额汇总</div>'}</div>` : ''}
   ${hasValue(note) ? `<div class="note"><strong>订单备注</strong><br>${escapeHtml(note)}</div>` : ''}
   <div class="tear-guide">撕纸处</div>
   </main>
@@ -352,13 +380,15 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
   const lines = firstNonEmptyList(snapshot, ['items', 'orderItems', 'lines', 'details']).length
     ? firstNonEmptyList(snapshot, ['items', 'orderItems', 'lines', 'details'])
     : firstNonEmptyList(source, ['orderLines', 'lines'])
-  const serviceRoles = new Set(['entitlement_service', 'service', 'service_line'])
+  const entitlementRoles = new Set(['entitlement_service'])
+  const serviceRoles = new Set(['service', 'service_line'])
   const paymentRoles = new Set(['payment', 'balance_payment'])
+  const entitlementLines = lines.filter((line) => entitlementRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()) || line?.businessTag === '权益')
   const serviceLines = lines.filter((line) => serviceRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()))
   const paymentLines = lines.filter((line) => paymentRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()))
   const salesLines = lines.filter((line) => {
     const role = String(line?.lineRole || line?.kind || '').toLowerCase()
-    return !serviceRoles.has(role) && !paymentRoles.has(role)
+    return !entitlementRoles.has(role) && !serviceRoles.has(role) && !paymentRoles.has(role) && line?.businessTag !== '权益'
   })
   const serviceRecords = serviceLines
     .map((line) => ({
@@ -379,9 +409,12 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
     businessDate: pickValue(source, ['businessDate', 'settledAt', 'paymentCompletedAt']) || pickValue(snapshot, ['businessDate', 'settledAt', 'paymentCompletedAt']),
     cashierName: pickValue(source, ['cashierName', 'operatorName']) || pickValue(snapshot, ['cashierName', 'operatorName']),
     orderNote: pickValue(source, ['orderNote']) || pickValue(snapshot, ['orderNote', 'remark', 'note']),
-    items: salesLines,
+    items: [
+      ...salesLines,
+      ...entitlementLines.map((line) => ({ ...line, businessTag: '权益' }))
+    ],
     serviceRecords,
-    receiptMode: serviceRecords.length && !salesLines.length ? 'service' : serviceRecords.length ? 'mixed' : 'sales',
+    receiptMode: serviceRecords.length && !salesLines.length && !entitlementLines.length ? 'service' : serviceRecords.length ? 'mixed' : 'sales',
     paymentDetails: firstNonEmptyList(payment, ['resultLines', 'selectedLines']).length
       ? firstNonEmptyList(payment, ['resultLines', 'selectedLines'])
       : firstNonEmptyList(snapshot, ['paymentDetails', 'paymentLines', 'receipts', 'payments']).length
@@ -511,6 +544,9 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
       ${root} .items-table th:nth-child(1), ${root} .items-table td:nth-child(1) { width: 53%; }
       ${root} .items-table th:nth-child(2), ${root} .items-table td:nth-child(2) { width: 16%; }
       ${root} .items-table th:nth-child(3), ${root} .items-table td:nth-child(3) { width: 31%; }
+      ${root} .entitlements-table th:nth-child(1), ${root} .entitlements-table td:nth-child(1) { width: 54%; }
+      ${root} .entitlements-table th:nth-child(2), ${root} .entitlements-table td:nth-child(2) { width: 22%; }
+      ${root} .entitlements-table th:nth-child(3), ${root} .entitlements-table td:nth-child(3) { width: 24%; }
       ${root} .payments-table th:nth-child(1), ${root} .payments-table td:nth-child(1) { width: 68%; }
       ${root} .payments-table th:nth-child(2), ${root} .payments-table td:nth-child(2) { width: 32%; }
       ${root} .empty { color: #6b7280; text-align: center; }
