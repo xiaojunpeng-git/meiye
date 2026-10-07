@@ -17,19 +17,22 @@ final class AiIntentResultContract
      * Choose help versus partial clarification from accepted typed meaning,
      * not from a nonempty prose requirements array. An accepted measurement
      * expression is partial meaning even before dictionary binding; requiring
-     * an exact registered keyword here would defeat natural language. This affects
-     * guidance only; it never grants execution or discards query conditions.
+     * an exact registered keyword here would defeat natural language. A date
+     * alone is not a business query unless it continues a verified prior one:
+     * "today" in an unrelated question must not produce a business choice card.
+     * This affects guidance only; it never grants execution or drops conditions.
      */
-    public static function hasConcreteQueryMeaning(array $understanding,array $intent): bool
+    public static function hasConcreteQueryMeaning(array $understanding,array $intent,bool $verifiedContinuation=false): bool
     {
         if (($intent['metric_codes']??[])!==[] || ($intent['metric_choice_candidates']??[])!==[]) return true;
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
             $values=(array)($requirement['values']??[]);
             if (($values['metric_terms']??[])!==[]) return true;
             if (isset($values['object_kind']) && $values['object_kind']!=='unknown') return true;
-            foreach (['periods','store_term','aggregate_condition','condition_update','object_detail','result_reference'] as $field) {
+            foreach (['store_term','aggregate_condition','condition_update','object_detail','result_reference'] as $field) {
                 if (isset($values[$field]) && $values[$field]!==[] && $values[$field]!=='') return true;
             }
+            if ($verifiedContinuation && !empty($values['periods'])) return true;
             if (in_array($values['scope']??null,['current_store','authorized'],true)) return true;
         }
         return false;

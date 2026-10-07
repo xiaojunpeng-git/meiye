@@ -187,7 +187,7 @@ final class AiGatewayServices
                 'intent_contract_version'=>AiIntentResultContract::VERSION];
             if ($this->management) $snapshot['management_revision']=$this->managementRevision;
             $created=$this->runs->create($owner,$this->identifier($input['client_request_id']??null),$this->bodyHash($body),$snapshot,$limits['run_budget_ms'],$limits['execution_slots'],$limits['active_run_limit']);
-            if (!$created['accepted']) return ['accepted'=>false,'reason'=>$created['reason'],'message'=>[
+            if (!$created['accepted']) return ['accepted'=>false,'reason'=>$created['reason'],'failure_guidance'=>$this->failureGuidance($created['reason']),'message'=>[
                 'RATE_LIMITED'=>'您近期提问较频繁，请稍后再问。',
                 'CIRCUIT_OPEN'=>'近期请求连续未能完成，已暂停新请求两分钟，请稍后重试。',
                 'OTHER_CONVERSATION_ACTIVE'=>'您还有一个对话正在执行，请先完成或停止该任务。',
@@ -886,7 +886,11 @@ final class AiGatewayServices
      * and continues through ordinary natural-language understanding. */
     private function semanticClarification(array $understanding,array $safe,array $body,array $recommendations=[]): array
     {
-        if (!AiIntentResultContract::hasConcreteQueryMeaning($understanding,[])) throw new RuntimeException('AI_INTENT_UNRESOLVED');
+        // A calendar word only becomes a business follow-up with verified
+        // context. An unrelated question about "today" stays general help.
+        $verifiedContinuation=($understanding['topic_relation']??null)==='continuation'
+            && (isset($body['context_ref']) || isset($body['_clarification_context']));
+        if (!AiIntentResultContract::hasConcreteQueryMeaning($understanding,[],$verifiedContinuation)) throw new RuntimeException('AI_INTENT_UNRESOLVED');
         $options=[];
         $plans=[];
         foreach (array_values($recommendations) as $index=>$candidate) {
@@ -1499,6 +1503,13 @@ final class AiGatewayServices
         foreach (array_merge([(string)$body['question']],array_map(static function($round):string {
             return is_array($round)&&is_string($round['question']??null)?$round['question']:'';
         },(array)$body['history'])) as $wording) {
+            // A shorter private nickname can overlap a public calendar word
+            // (for example, two characters crossing "today" and the next
+            // noun). Shield the whole recognised date span before masking.
+            // Exact private-label collisions remain masked, not disclosed.
+            foreach (\app\services\ai\semantic\AiSemanticIntentParser::calendarEvidence($wording)['matched_texts'] as $dateText) {
+                if (!in_array($dateText,$privateLabels,true)) $protectedSemanticTerms[]=$dateText;
+            }
             foreach (\app\services\query\metric\MetricSemanticCatalog::registeredTermsInText($wording,$registeredCodes) as $match) {
                 if (is_string($match['term']??null)) $protectedSemanticTerms[]=$match['term'];
             }
@@ -6973,11 +6984,36 @@ final class AiGatewayServices
                 $result['answer']['summary'].=' 数据已核对，但 Excel 文件生成失败。';
             }
         }
-        if ($run['status']==='FAILED' && $context['terminal']==='platform' && !empty($this->fresh($context)['can_configure'])) {
-            $diagnostic=$this->runs->runDiagnostic($owner,$run['run_id'],$run['generation']);
-            if ($diagnostic!==null) $result['management_trace']=['model_diagnostic'=>$diagnostic];
+        if ($run['status']==='FAILED') {
+            $result['failure_guidance']=$this->failureGuidance($run['reason']);
+            // A revoked account can still read its own failed task. The
+            // optional administrator diagnostic must not hide that response.
+            try {
+                if ($context['terminal']==='platform' && !empty($this->fresh($context)['can_configure'])) {
+                    $diagnostic=$this->runs->runDiagnostic($owner,$run['run_id'],$run['generation']);
+                    if ($diagnostic!==null) $result['management_trace']=['model_diagnostic'=>$diagnostic];
+                }
+            } catch (\Throwable $ignored) {}
         }
         return $result;
+    }
+    /** A failed Run stays failed. No query meaning and a pre-understanding
+     * capability drift need plain capability help, not a retry card. Other
+     * failures offer customer actions, never an executable substitute plan. */
+    private function failureGuidance(?string $reason): array
+    {
+        if ($reason==='AI_INTENT_UNRESOLVED') return ['kind'=>'capability_help',
+            'question'=>'我主要帮您查询门店经营数据，比如今天的现金业绩、消耗业绩。您可以直接用平常的话提问。'];
+        if ($reason==='AI_CAPABILITY_CHANGED') return ['kind'=>'capability_help',
+            'question'=>'这次暂时没能完成查询。我主要帮您查询门店经营数据，比如今天的现金业绩、消耗业绩。您可以直接再问一次。'];
+        $question=in_array($reason,['AI_AUTHORIZATION_CHANGED','AI_PERSONNEL_PERMISSION_REQUIRED','AI_WORKFLOW_DISABLED','AI_MODEL_ACCOUNT_UNAVAILABLE'],true)
+            ?'当前账号暂时无法完成这次查询。请选择一种方式继续。'
+            :'这次没能给出可靠结果。请选择一种方式继续。';
+        return ['kind'=>'recovery','question'=>$question,'options'=>[
+            ['value'=>'retry_original','label'=>'按原问题再查一次'],
+            ['value'=>'edit_original','label'=>'修改原问题后查询'],
+            ['value'=>'new_conversation','label'=>'开启新对话'],
+        ],'supplement_label'=>'我来补充描述'];
     }
     private function assertBinding(array $stored,array $owner,string $id,int $generation): void
     {
@@ -6989,69 +7025,7 @@ final class AiGatewayServices
         if ($run['status']==='COMPLETED') return '查询完成';
         if ($run['status']==='PARTIAL_SUCCEEDED') return '数据已核对，文件未生成';
         if ($run['status']==='WAITING_EXPORT') return '正在生成 Excel 文件';
-        if ($run['status']==='FAILED') return [
-            'AI_WORKFLOW_DISABLED'=>'此项分析能力已由管理员停用，请联系平台管理员。',
-            'AI_PERSONNEL_PERMISSION_REQUIRED'=>'当前账号尚无对应人员指标的可用查询权限，未读取或披露人员信息。',
-            'AI_OBJECT_BINDING_UNAVAILABLE'=>'在当前可用范围内还不能确定您指的对象，未删减条件或改查全部。',
-            'AI_OBJECT_SCOPE_TOO_LARGE'=>'涉及的人员范围较大，请先缩小到具体门店或岗位后再查询。',
-            'AI_DETAIL_SCOPE_TOO_LARGE'=>'这次明细超过单次查询可完整导出的范围，请缩小门店或时间后重试；本次没有生成不完整的 Excel。',
-            'AI_LOCAL_CONDITION_REQUIRED'=>'问题中有一项条件还不能在当前可用范围内安全核对；我没有删掉该条件或改查其他数据。请换一种日常说法补充这项条件后重试。',
-            'AI_ANALYSIS_COMBINATION_UNAVAILABLE'=>'已识别分析方向，但当前底层尚不能完整执行这些对象、指标与条件的组合；没有替换指标或删减条件。',
-            'AI_BINDING_SEMANTIC_REJECTED'=>'已理解您的问题，但系统未能可靠确认所选指标同时符合全部条件；本次未查询或替换为近似数据。请换一种说法后重试。',
-            'AI_PROJECT_OBJECT_NOT_READY'=>'项目对象尚未接入项目解析、当前权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他指标。',
-            'AI_PRODUCT_OBJECT_NOT_READY'=>'产品对象尚未接入产品解析、当前权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他指标。',
-            'AI_CATEGORY_OBJECT_NOT_READY'=>'商品分类对象尚未接入当前配置快照、权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他指标。',
-            'AI_PARTNER_OBJECT_NOT_READY'=>'合作方对象尚未接入分类维度、当前权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他对象。',
-            'AI_MEMBER_OBJECT_NOT_READY'=>'会员对象尚未接入当前统一查询与证据合同；已保留您的问题，未查询或替换为其他对象。',
-            'AI_INVENTORY_OBJECT_NOT_READY'=>'库存与耗用对象尚未接入门店权限、筛选、统一查询与证据合同；已保留您的问题，未查询或替换为其他指标。',
-            'AI_OBJECT_CONTRACT_NOT_READY'=>'当前分析对象尚未接入对象解析、权限、筛选、统一查询与证据合同；未查询或替换条件。',
-            'AI_DIMENSION_ACTION_CONTRACT_NOT_READY'=>'当前分析对象的这项评价方式尚未接入统一查询合同；未改用其他指标或删减条件。',
-            'AI_INTENT_UNRESOLVED'=>'我还没理解您想查什么。我可以帮您查询今天的现金业绩、消耗业绩，您可以像平时说话一样提问。',
-            'AI_INTENT_PARTIAL'=>'我听懂了部分条件，但还不能确定完整的查询意思。请补充想看的对象或指标，我会按您的完整问题重新理解。',
-            'AI_CAPABILITY_NOT_READY'=>'已识别您的需求，但对应的数据能力或筛选组合尚未接入，暂不能准确提供结果。',
-            'AI_CONTEXT_REQUIRED'=>'这句追问缺少可核对的前文条件。请补充您想延续的对象、时间或查看结果，我会按当前权限重新查询。',
-            'AI_CONTEXT_DELTA_CONFLICT'=>'这次处理查询条件时遇到问题，结果尚未生成。请重试本问；若再次出现，请重新说明查询条件。',
-            'AI_RESULT_REFERENCE_UNAVAILABLE'=>'暂时无法确认要查看的详情，请补充名称或重新查询列表。',
-            'AI_STORE_SET_REFERENCE_UNAVAILABLE'=>'上一条回答不是门店列表。请说出要比较的门店名称，或先查询门店排行。',
-            'AI_OBJECT_DETAIL_SELECTION_REQUIRED'=>'上一份结果包含多个对象，请说明要看第几位或直接说出对象；本次没有替您选择。',
-            'AI_OBJECT_DETAIL_NOT_READY'=>'已理解您想继续查看这个对象，但该对象的这类信息尚未接入统一查询；本次没有改查近似数据。',
-            'AI_MEMBER_DETAIL_SELECTION_REQUIRED'=>'上一份名单有多位会员，请说明要看第几位会员的权益，例如“第一个会员的权益明细”。本次没有替您选择会员。',
-            'AI_MEMBER_DETAIL_SET_NOT_READY'=>'这份会员名单尚未完整展示，请缩小筛选范围后查看全部权益，或说明要看已展示名单中的第几位。',
-            'AI_RIGHTS_CHANGED'=>'查询期间会员权益发生了变化，请重新查询以获取最新的完整结果。',
-            'AI_FOLLOWUP_CONDITION_REQUIRED'=>'我已找到上次查询，但还不能准确确认这次要改变的内容。请补充您要改看的对象、时间或查看方式；已确认条件会保留。',
-            'AI_RANK_LIMIT_NOT_READY'=>'当前门店排行最多展示前20或后20项，暂不支持您要求的数量；本次未更改您的条件。',
-            'AI_DIMENSION_RANK_LIMIT_NOT_READY'=>'当前分析对象最多支持前20、后20排行，暂不支持您要求的数量；本次未更改您的条件。',
-            'AI_FUTURE_ACTUALS_UNAVAILABLE'=>'未来日期尚未发生实际业绩，暂不能提供该日期的实际数据，也未替换成今天或预测值。',
-            'AI_DATA_COVERAGE_INCOMPLETE'=>'所选期间早于当前指标的事实数据起点，本次未缩短或替换日期范围，请选择较晚的期间。',
-            'AI_DATE_INVALID'=>'日期范围不完整或无效，请重新选择开始和结束日期。',
-            'AI_DATE_REVERSED'=>'开始日期不能晚于结束日期，请重新选择；本次未调整您的日期。',
-            'AI_DATE_RANGE_TOO_LONG'=>'本次查询的时间跨度超过单次允许范围，请缩短期间后重试；本次未自动裁剪日期。',
-            'AI_CLARIFICATION_EXHAUSTED'=>'已达到本次引导上限，仍有条件未确定。请把问题拆小后重新提问。',
-            'AI_CLARIFICATION_INVALID_LIMIT'=>'条件连续未能通过检查，本次已停止。请重新提问并选择完整条件。',
-            'AI_CLARIFICATION_EXPIRED'=>'本次选择等待已超时，请重新提问。',
-            'CLARIFICATION_EXPIRED'=>'本次选择等待已超时，请重新提问。',
-            'AI_UNSUPPORTED_CONDITION'=>'当前尚不支持这个指标或筛选组合，未删减您的条件。请分开提问或调整条件。',
-            'AI_QUERY_SHAPE_NOT_READY'=>'当前暂不支持这种分析方式，请调整问题。',
-            'AI_METRIC_NOT_READY'=>'该指标尚未通过统一报表口径核验，暂不能查询。',
-            'AI_EXPORT_NOT_READY'=>'当前 Excel 能力尚未启用，本次未生成文件或发布数字。',
-            'AI_MODEL_ACCOUNT_UNAVAILABLE'=>'客户 AI 账号暂不可用，请联系管理员检查 AI 配置。',
-            'AI_MODEL_RESULT_UNKNOWN'=>'模型响应超时，本次尚未执行数据查询。您可以直接重试，无需重新描述问题。',
-            'ATTEMPT_UNKNOWN'=>'本次 AI 请求结果暂未确认，已停止继续调用，请稍后再问。',
-            'AI_MODEL_RESPONSE_TRUNCATED'=>'本次 AI 理解结果未完整返回，系统已停止查询，请稍后重试。',
-            'AI_MODEL_RESPONSE_ENVELOPE_INVALID'=>'本次 AI 返回格式异常，系统未执行查询，请稍后重试。',
-            'AI_MODEL_INTENT_CONTRACT_INVALID'=>'刚才理解问题时出了错，尚未查询数据。请直接重试；若再次出现，请联系管理员。',
-            'AI_JSON_SIZE_INVALID'=>'本次 AI 返回内容异常，系统未执行查询，请稍后重试。',
-            'AI_JSON_OBJECT_REQUIRED'=>'本次 AI 返回内容异常，系统未执行查询，请稍后重试。',
-            'AI_AUTHORIZATION_CHANGED'=>'您的权限或 AI 配置已变化，本次查询已停止，请重新提问。',
-            'METRIC_QUERY_COVERAGE_UNAVAILABLE'=>'所选期间早于当前指标的事实数据起点，本次未缩短或替换日期范围，请选择较晚的期间。',
-            'METRIC_QUERY_RANGE_INVALID'=>'日期范围不完整或无效，请重新选择开始和结束日期。',
-            'METRIC_QUERY_RANGE_REVERSED'=>'开始日期不能晚于结束日期，请重新选择；本次未调整您的日期。',
-            'METRIC_QUERY_RANGE_TOO_LONG'=>'本次查询的时间跨度超过单次允许范围，请缩短期间后重试；本次未自动裁剪日期。',
-            'METRIC_QUERY_FUTURE_UNAVAILABLE'=>'未来日期尚未发生实际数据，本次未替换成今天或预测值。',
-            'CAPACITY_STOPPED'=>'当前系统繁忙，本次任务已停止，请稍后再问。',
-            'AI_RUN_DEADLINE'=>'本次查询已到时间上限，请缩小问题范围后重试。',
-            'AI_EXECUTION_CLOCK_REGRESSED'=>'服务时间校验异常，本次查询已停止，请稍后重试。',
-        ][$run['reason']]??'本次处理出了问题，尚未生成可核对的结果。请重试；若再次出现，请联系管理员。';
+        if ($run['status']==='FAILED') return $this->failureGuidance($run['reason'])['question'];
         if ($run['status']==='WAITING_CLARIFICATION') return '请确认当前这一步，已确认条件会保留。';
         return ['RECEIVED'=>'已接收问题','UNDERSTANDING'=>'正在理解查询条件','QUERYING'=>'正在查询经营数据','VERIFYING'=>'正在核对数据','RENDERING'=>'正在整理结果','PUBLISHING'=>'正在保存并交付结果','EXPORTING'=>'正在生成文件'][$run['progress_code']]??'正在处理';
     }

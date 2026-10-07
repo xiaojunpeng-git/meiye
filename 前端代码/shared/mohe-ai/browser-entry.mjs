@@ -60,9 +60,9 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     if (reason === 'AI_AUTH_REQUIRED') return '登录状态已失效，请重新登录后再试。';
     if (reason === 'AI_PERMISSION_DENIED') return '当前账号没有使用魔核 AI 的权限，请联系管理员。';
     if (reason === 'AI_CLIENT_UPGRADE_REQUIRED') return '魔核 AI 页面版本较旧，请刷新页面后再试。';
-    return /^AI_[A-Z0-9_]+$/.test(reason) ? fallback : (reason || fallback);
+    return /[\u3400-\u9fff]/.test(reason) ? reason : fallback;
   }
-  let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, elapsedTimer, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, workspaceTitle = null, workspaceHistory = null, workspaceCancel = null, readingRunway = null, activeRunStatus = null, exportRequested = false;
+  let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, elapsedTimer, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, workspaceTitle = null, workspaceHistory = null, workspaceCancel = null, readingRunway = null, activeRunStatus = null, exportRequested = false, recoveryDraft = null, freshButton = null;
   let clientSession = newId(); const entry = el('button', entryIconUrl ? null : '魔核 AI', entryIconUrl ? 'entry entry--icon' : 'entry');
   entry.type = 'button'; entry.setAttribute('aria-label', '打开魔核 AI 工作台');
   if (entryIconUrl) { const icon = documentRef.createElement('img'); icon.className = 'entry-icon'; icon.src = entryIconUrl; icon.alt = ''; entry.appendChild(icon); }
@@ -82,10 +82,94 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     message(questionText, 'question', turn);
     appendCompletedElapsed(turn, elapsedSeconds);
     renderAnswer(answer, false, turn);
+    if (answer && answer.failure_guidance) renderFailureCard(questionText, answer, turn);
     // Keep the reading runway at the physical transcript end. Reopened
     // history remains chronological instead of being appended after its gap.
     body.insertBefore(turn, readingRunway && readingRunway.parentNode === body ? readingRunway : null);
     return turn;
+  }
+  // A failed turn is immutable history. Choosing its card starts a new Run
+  // with that turn's captured predecessor, never the conversation's latest
+  // result; the gateway rechecks the signed reference and current permission.
+  function renderFailureCard(questionText, presentation, turn) {
+    const guidance = presentation.failure_guidance;
+    const options = guidance && guidance.options;
+    if (!Array.isArray(options) || options.length !== 3 || options.some(item => !item || typeof item.label !== 'string'
+      || !['retry_original', 'edit_original', 'new_conversation'].includes(item.value))) return;
+    const origin = presentation.recovery_origin;
+    if (!origin || !Array.isArray(origin.history) || typeof origin.created_at !== 'number') return;
+    const card = el('section', null, 'card guidance-card'); card.dataset.failureGuidance = 'true';
+    card.appendChild(el('div', '您可以这样继续', 'guidance-heading'));
+    const supplement = el('textarea', null, 'guidance-supplement'); supplement.maxLength = 4000;
+    supplement.setAttribute('aria-label', '补充或改写完整问题'); supplement.placeholder = '请补充或改写完整问题'; supplement.hidden = true;
+    const sendSupplement = el('button', '发送补充问题', 'primary guidance-confirm'); sendSupplement.hidden = true;
+    const start = text => {
+      if (disposed || pendingCreate || (run && !isTerminal(run.status)) || conversation !== origin.conversation_id) return;
+      recoveryDraft = origin; input.value = text; void submitQuestion();
+    };
+    options.forEach((option, index) => {
+      const button = el('button', null, 'guidance-option'); button.type = 'button';
+      button.append(el('span', String(index + 1), 'guidance-number'), el('span', option.label, 'guidance-option-label'));
+      button.onclick = () => {
+        if (option.value === 'new_conversation') { recoveryDraft = null; if (freshButton) freshButton.click(); return; }
+        if (option.value === 'edit_original' || !sameBusinessDay(origin.created_at, Date.now())) {
+          recoveryDraft = origin; input.value = questionText; input.focus(); return;
+        }
+        start(questionText);
+      };
+      card.appendChild(button);
+    });
+    const custom = el('button', null, 'guidance-option'); custom.type = 'button';
+    custom.append(el('span', '4', 'guidance-number'), el('span', guidance.supplement_label || '我来补充描述', 'guidance-option-label'));
+    custom.onclick = () => { supplement.hidden = false; sendSupplement.hidden = false; supplement.value = questionText; supplement.focus(); };
+    sendSupplement.onclick = () => { const text = supplement.value.trim(); if (text) start(text); };
+    card.append(custom, supplement, sendSupplement); turn.appendChild(card);
+  }
+  // Staged server/client versions may differ. Keep one safe customer card for
+  // every confirmed failure, but never turn a failed Run into a data answer.
+  function safeFailureGuidance(value, reason = '') {
+    // A server-confirmed absence of business-query meaning needs a short
+    // capability explanation, not three ways to repeat an unrelated question.
+    // Capability drift fails before understanding; do not pretend it classified
+    // the wording, but explain the product boundary without a choice card.
+    if (value && value.kind === 'capability_help' && typeof value.question === 'string' && value.question.trim()) return value;
+    if (reason === 'AI_INTENT_UNRESOLVED') return { kind: 'capability_help',
+      question: '我主要帮您查询门店经营数据，比如今天的现金业绩、消耗业绩。您可以直接用平常的话提问。' };
+    if (reason === 'AI_CAPABILITY_CHANGED') return { kind: 'capability_help',
+      question: '这次暂时没能完成查询。我主要帮您查询门店经营数据，比如今天的现金业绩、消耗业绩。您可以直接再问一次。' };
+    const options = value && value.options;
+    if (Array.isArray(options) && options.length === 3
+      && ['retry_original', 'edit_original', 'new_conversation'].every((key, index) =>
+        options[index] && options[index].value === key && typeof options[index].label === 'string' && options[index].label)) return value;
+    return { question: '这次没能给出可靠结果。请选择一种方式继续。',
+      options: [{ value: 'retry_original', label: '按原问题再查一次' },
+        { value: 'edit_original', label: '修改原问题后查询' },
+        { value: 'new_conversation', label: '开启新对话' }], supplement_label: '我来补充描述' };
+  }
+  function sameBusinessDay(first, second) {
+    const key = value => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(value);
+    return key(first) === key(second);
+  }
+  // A known admission refusal has no Run ID. Record it as a non-contextual
+  // turn so the customer gets the same recovery choices without pretending
+  // data was queried; an unknown transport outcome remains recoverable instead.
+  function recordAdmissionRefusal(submitted, explanation, guidance, reason = '') {
+    const safeGuidance = safeFailureGuidance(guidance, reason);
+    const customerText = safeGuidance.kind === 'capability_help' ? safeGuidance.question : explanation;
+    const deliveredQuestion = ensureQuestionVisible();
+    const elapsedSeconds = completedElapsedSeconds();
+    finishActiveRunStatus(); appendCompletedElapsed(activeConversationTurn(), elapsedSeconds); progress.textContent = '';
+    const turn = activeConversationTurn() || body;
+    message(customerText, '', turn);
+    const presentation = { summary: customerText, terminal_status: 'FAILED', failure_guidance: safeGuidance };
+    if (safeGuidance.kind !== 'capability_help') presentation.recovery_origin = { conversation_id: conversation,
+      history: submitted.history, context_ref: submitted.context_ref || null, created_at: Date.now() };
+    renderFailureCard(deliveredQuestion, presentation, turn);
+    try { sessions.append(conversation, deliveredQuestion, customerText, presentation, null,
+      { contextEligible: false, elapsedSeconds }); } catch (_) { message('本机历史保存失败，本次问题仍可查看。', 'error', turn); }
+    completeActiveQuestion(); clearActive(); pendingCreate = null; clientDeliveryStartedAt = 0;
+    if (sessions) sessions.clearPendingQuestion(conversation);
+    send.disabled = false; send.textContent = '发送'; syncWorkspaceActions();
   }
   function ensureReadingRunway(turn = activeConversationTurn()) {
     if (!body) return;
@@ -210,7 +294,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       if (item.id === conversation) button.setAttribute('aria-current', 'true');
       button.onclick = () => {
         if (pendingCreate || (run && !isTerminal(run.status))) return;
-        conversation = item.id; body.textContent = ''; progress.textContent = '';
+        recoveryDraft = null; conversation = item.id; body.textContent = ''; progress.textContent = '';
         item.rounds.forEach(row => appendTranscriptTurn(row.question, row.presentation || { summary: row.answer }, row.elapsed_seconds));
         body.scrollTop = 0;
         updateWorkspaceTitle(item); renderWorkspaceHistory();
@@ -501,16 +585,33 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         // refusal is still a complete customer turn, so restore the original
         // wording before showing it as well.
         const deliveredQuestion = ensureQuestionVisible();
-        const terminalMessage = run.status === 'CANCELLED' ? '已取消' : customerErrorMessage(run.message, '本次未能完成，请重新提问。');
+        const safeGuidance = run.status === 'FAILED' ? safeFailureGuidance(run.failure_guidance, run.reason) : null;
+        const terminalMessage = run.status === 'CANCELLED' ? '已取消' : safeGuidance
+          ? (safeGuidance.question || '这次没能给出可靠结果。请选择一种方式继续。')
+          : customerErrorMessage(run.message, '本次未能完成，请重新提问。');
         const elapsedSeconds = completedElapsedSeconds();
         finishActiveRunStatus(); appendCompletedElapsed(activeConversationTurn(), elapsedSeconds); progress.textContent = '';
         const answerTurn = activeConversationTurn() || body;
         message(terminalMessage, '', answerTurn);
+        const failurePresentation = { summary: terminalMessage, terminal_status: run.status };
+        if (safeGuidance) {
+          failurePresentation.failure_guidance = safeGuidance;
+        }
+        if (safeGuidance && safeGuidance.kind !== 'capability_help') {
+          // A remounted task can retain its Run and visible original question
+          // after the admission envelope was retired. No newer turn can enter
+          // this active conversation, so its stored transcript is the same
+          // predecessor; the server still validates any opaque result ref.
+          const predecessor = pendingCreate || { history: sessions.history(conversation), context_ref: sessions.contextRef(conversation) };
+          failurePresentation.recovery_origin = { conversation_id: conversation, history: predecessor.history,
+            context_ref: predecessor.context_ref || null, created_at: Date.now() };
+          renderFailureCard(deliveredQuestion, failurePresentation, answerTurn);
+        }
         // Keep a complete customer-visible turn after refresh.  It is marked
         // non-contextual so a previous failure never becomes an instruction
         // or a claimed business fact for the next model request.
         try { sessions.append(conversation, deliveredQuestion, terminalMessage,
-          { summary: terminalMessage, terminal_status: run.status }, run,
+          failurePresentation, run,
           { contextEligible: false, elapsedSeconds, topicBoundary: run.topic_boundary });
         } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error', activeConversationTurn() || body); }
         completeActiveQuestion();
@@ -729,10 +830,12 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       // Keep the question on the screen-only path; the selected Excel file is
       // requested only after the answer has been published and shown.
       exportRequested = format.value === 'screen_and_xlsx';
+      const source = recoveryDraft && recoveryDraft.conversation_id === conversation ? recoveryDraft : null;
       pendingCreate = { client_request_id: newId(), conversation_id: conversation, client_session_id: clientSession,
-        window_token: boot.window_token, question, history: sessions.history(conversation), output_format: 'screen' };
+        window_token: boot.window_token, question, history: source ? source.history : sessions.history(conversation), output_format: 'screen' };
       if (activeGuidanceSchema === GUIDANCE_SCHEMA) pendingCreate.guidance_schema_version = GUIDANCE_SCHEMA;
-      const contextRef = sessions.contextRef(conversation); if (contextRef) pendingCreate.context_ref = contextRef;
+      const contextRef = source ? source.context_ref : sessions.contextRef(conversation); if (contextRef) pendingCreate.context_ref = contextRef;
+      recoveryDraft = null;
       // The workspace header is customer-facing context, so show the actual
       // submitted wording instead of a generic title as soon as it is durable.
       updateWorkspaceTitle({ rounds: [{ question }] }); renderWorkspaceHistory();
@@ -750,9 +853,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         return;
       }
       if (accepted && accepted.accepted === false) {
-        // Admission refused before a Run exists: retire the transient timer
-        // and controls, but preserve the visible question for a deliberate retry.
-        clearActive(); pendingCreate = null; finishActiveRunStatus(); clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); send.disabled = false; send.textContent = '发送'; progress.textContent = customerErrorMessage(accepted.message, '当前使用人数较多，请稍后再问。'); syncWorkspaceActions(); return;
+        recordAdmissionRefusal(submitted, customerErrorMessage(accepted.message, '当前使用人数较多，请稍后再问。'), accepted.failure_guidance, accepted.reason); return;
       }
       await update(accepted); persistActive();
       // A page replacement leaves the customer task alive.  An explicit close
@@ -769,7 +870,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       progress.textContent = error.responseKnown ? customerErrorMessage(error.message) : '请求结果暂未确认。';
       if (run) { persistActive(); clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000); }
       else {
-        if (error.responseKnown) { clearActive(); pendingCreate = null; finishActiveRunStatus(); clientDeliveryStartedAt=0; if (sessions) sessions.clearPendingQuestion(conversation); }
+        if (error.responseKnown) { recordAdmissionRefusal(pendingCreate, customerErrorMessage(error.message), null, error.message); return; }
         else persistActive();
         send.disabled = false; send.textContent = error.responseKnown ? '发送' : '重试确认'; input.value = question;
       }
@@ -849,6 +950,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     const workspace = presentation === 'workspace';
     panel = el('section', null, 'panel' + (workspace ? ' workspace' : '')); panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', '魔核 AI');
     const history = el('button', '历史'); const fresh = el('button', '新对话'); const close = el('button', workspace ? '×' : '关闭');
+    freshButton = fresh;
     let main = panel;
     if (workspace) {
       const aside = el('aside', null, 'workspace-aside');
@@ -908,8 +1010,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     send.onclick = () => { void submitQuestion(); };
     cancel.onclick = stop; close.onclick = () => { stop(); panel.hidden = true; };
     input.onkeydown = event => { if (event.isComposing || event.key !== 'Enter' || event.shiftKey) return; event.preventDefault(); void submitQuestion(); };
-    fresh.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) { message('请先确认当前任务状态。'); return; } finishActiveRunStatus(); conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; clearActive(); updateWorkspaceTitle(null); renderWorkspaceHistory(); syncWorkspaceActions(); };
-    history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; body.textContent = ''; progress.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', conversationTitle(s)); b.onclick = () => { conversation = s.id; body.textContent = ''; progress.textContent = ''; s.rounds.forEach(r => appendTranscriptTurn(r.question, r.presentation || {summary:r.answer}, r.elapsed_seconds)); body.scrollTop = 0; }; body.appendChild(b); }); };
+    fresh.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) { message('请先确认当前任务状态。'); return; } recoveryDraft = null; finishActiveRunStatus(); conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; clearActive(); updateWorkspaceTitle(null); renderWorkspaceHistory(); syncWorkspaceActions(); };
+    history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; recoveryDraft = null; body.textContent = ''; progress.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', conversationTitle(s)); b.onclick = () => { recoveryDraft = null; conversation = s.id; body.textContent = ''; progress.textContent = ''; s.rounds.forEach(r => appendTranscriptTurn(r.question, r.presentation || {summary:r.answer}, r.elapsed_seconds)); body.scrollTop = 0; }; body.appendChild(b); }); };
     if (workspace) { renderWorkspaceHistory(); syncWorkspaceActions(); }
     if (record) void resumeActive(record);
   }

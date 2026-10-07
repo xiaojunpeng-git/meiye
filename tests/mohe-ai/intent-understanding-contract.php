@@ -1038,9 +1038,12 @@ $check(!AiIntentResultContract::hasConcreteQueryMeaning(['requirements'=>[
 $check(AiIntentResultContract::hasConcreteQueryMeaning(['requirements'=>[
     ['fields'=>['metric_codes'],'values'=>['metric_terms'=>['收了多少钱']]],
 ]],['metric_codes'=>[]]),'accepted natural measurement meaning does not require an exact registered keyword before clarification');
+$check(!AiIntentResultContract::hasConcreteQueryMeaning(['requirements'=>[
+    ['fields'=>['periods'],'values'=>['periods'=>[['kind'=>'calendar_month','offset'=>0]]]],
+]],['metric_codes'=>[]]),'a date alone in an unrelated question is not partial business meaning');
 $check(AiIntentResultContract::hasConcreteQueryMeaning(['requirements'=>[
     ['fields'=>['periods'],'values'=>['periods'=>[['kind'=>'calendar_month','offset'=>0]]]],
-]],['metric_codes'=>[]]),'a typed time condition remains partial meaning without a selected metric');
+]],['metric_codes'=>[]],true),'a date-only continuation of a verified business query remains partial meaning');
 $check(AiIntentResultContract::hasConcreteQueryMeaning(['requirements'=>[
     ['fields'=>['object_kind'],'values'=>['object_kind'=>'member']],
 ]],['metric_codes'=>[]]),'a typed business subject remains partial meaning');

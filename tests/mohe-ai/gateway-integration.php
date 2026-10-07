@@ -156,9 +156,14 @@ try {
  $fullUnknown=$replyText->invoke($gateway,['status'=>'FAILED','reason'=>'AI_INTENT_UNRESOLVED']);
  $partialUnknown=$replyText->invoke($gateway,['status'=>'FAILED','reason'=>'AI_INTENT_PARTIAL']);
  $technicalFailure=$replyText->invoke($gateway,['status'=>'FAILED','reason'=>'AI_MODEL_INTENT_CONTRACT_INVALID']);
- verifyGateway(strpos($fullUnknown,'今天的现金业绩')!==false && strpos($partialUnknown,'补充')!==false
-     && strpos($technicalFailure,'重试')!==false && strpos($technicalFailure,'补充')===false,
-     'customer-facing failures distinguish unknown meaning, missing meaning, and a technical retry');
+ $failureCard=(new ReflectionMethod(AiGatewayServices::class,'failureGuidance'))->invoke($gateway,'AI_MODEL_INTENT_CONTRACT_INVALID');
+ verifyGateway(strpos($fullUnknown,'今天的现金业绩')!==false && strpos($partialUnknown,'可靠结果')!==false
+     && strpos($technicalFailure,'可靠结果')!==false && strpos($technicalFailure,'管理员')===false,
+     'customer-facing failures provide natural guidance without exposing technical diagnostics');
+ verifyGateway(array_column($failureCard['options'],'value')===['retry_original','edit_original','new_conversation']
+     && $failureCard['supplement_label']==='我来补充描述'
+     && strpos($failureCard['question'],'可靠结果')!==false,
+     'every failed Run offers three safe actions plus an open supplement action');
  $auth=['terminal'=>'store','account_id'=>7,'tenant_id'=>'0','can_use'=>true,'can_configure'=>true,'permission_version'=>'v1','scope_mode'=>'stores','store_ids'=>[1],'personnel_data_authorized'=>false,'report_capability_code'=>'group_management_dashboard'];
  $context=$auth;$context['_refresh']=function()use(&$auth){return $auth;};
  $boot=$gateway->handle('bootstrap',$context,['client_session_id'=>'device1']);
@@ -349,7 +354,8 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
  $unknownBindingFailure=true;[$unknownBinding,$unknownBindingInput]=$make('binding-result-unknown','今天消耗业绩多少？请解释一下');$modelsBeforeUnknownBinding=$models;$queriesBeforeUnknownBinding=$queries;
  $unknownBindingResult=$gateway->handle('execute',$context,$binding($unknownBinding)+$unknownBindingInput,$unknownBinding['run_id']);
  verifyGateway($unknownBindingResult['status']==='FAILED' && $unknownBindingResult['reason']==='AI_MODEL_RESULT_UNKNOWN'
-     && $unknownBindingResult['progress']==='模型响应超时，本次尚未执行数据查询。您可以直接重试，无需重新描述问题。','an unknown binding result stops after one full model attempt with an accurate no-query explanation');
+     && $unknownBindingResult['progress']==='这次没能给出可靠结果。请选择一种方式继续。'
+     && count($unknownBindingResult['failure_guidance']['options']??[])===3,'an unknown binding result stops after one full model attempt with a four-option customer recovery');
  verifyGateway($models===$modelsBeforeUnknownBinding+2 && $queries===$queriesBeforeUnknownBinding,'an unknown binding result is never automatically replayed or sent to the Reader');
  verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownBinding['run_id'])." AND attempt_code='bind_intent' AND state='UNKNOWN'")->fetchColumn()===1,'unknown binding remains auditable');
  verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownBinding['run_id'])." AND attempt_code='bind_transport_recovery'")->fetchColumn()===0,'unknown binding creates no second transport recovery attempt');

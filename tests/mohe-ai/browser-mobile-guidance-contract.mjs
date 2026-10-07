@@ -25,7 +25,7 @@ assert.ok(browserEntry.includes("el('small', '够智能、够准确、够便捷'
 // its actual state functions, not a copied implementation, but is NOT a native
 // UTS compiler, picker, H5 layout or device lifecycle acceptance test.
 const script = source.match(/<script setup lang="uts">([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '');
-const expose = '\nglobalThis.controller = {tableWidth,onComposerLineChange,onComposerInput,resetComposerSize,answerPresentation,presentationGroups,openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,chooseSupplement,recommendedOptions,editGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,load,resumeActive,elapsedLabel,toggleComposerOptions,toggleExcel,createConversationFromMenu,confirmClearConversation,openHistory,selectConversation,refs:{composerInputHeight,composerExpanded,question,progress,clarification,choices,supplementText,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy,activeQuestion,activeElapsedSeconds,activeRunState,messageAnchor,composerOptionsOpen,historyOpen,recentConversations,wantExcel,excelAvailable},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
+const expose = '\nglobalThis.controller = {tableWidth,onComposerLineChange,onComposerInput,resetComposerSize,answerPresentation,presentationGroups,openPanel,newConversation,submit,accept,confirmChoices,cancelRun,closePanel,selectDate,chooseValue,chooseSupplement,recommendedOptions,editGuidance,load,resumeActive,elapsedLabel,toggleComposerOptions,toggleExcel,createConversationFromMenu,confirmClearConversation,openHistory,selectConversation,chooseFailureAction,openFailureSupplement,sendFailureSupplement,validFailureGuidance,resetGuidanceChoices,currentGuidanceFields,validGuidance,refs:{composerInputHeight,composerExpanded,question,progress,clarification,choices,supplementText,guidanceBusy,guidanceUnknown,revisingId,displayed,opened,busy,activeQuestion,activeElapsedSeconds,activeRunState,messageAnchor,composerOptionsOpen,historyOpen,recentConversations,wantExcel,excelAvailable,failureSupplementKey,failureSupplementText},state:()=>({run,pending,conversation,storageKey,runtimeKey}),unmount:()=>{}};';
 const code = esbuild.transformSync(script + expose, { loader: 'ts', target: 'es2020' }).code;
 const schema = 'mohe-clarification-v2'; let checks = 0;
 const clean = value => JSON.parse(JSON.stringify(value));
@@ -55,14 +55,21 @@ function setup(max = 3, asyncExecution = true, deferBootstrap = false, sharedSto
   const start = (fields = [metric]) => { api.refs.question.value = '移动引导测试'; api.submit(); answer('/runs', state); api.accept(step(1, fields)); };
   return { api, answer, bootstrap, calls, modals, storage, advance: ms => { now += ms; intervals.forEach(fn => fn()); }, scheduled: () => scheduled, step, start, finish: (contextRef = null) => ({ ...state, version: state.version + 1, status: 'COMPLETED', answer: { summary: '已校验', ...(contextRef ? {context_ref:contextRef} : {}), cards: [{ metric_name: '现金业绩', display_value: '123', unit: '元' }, { metric_name: '消耗业绩', display_value: '456', unit: '元' }] } }), expire: () => { now += 86400000; }, unmount: () => unmounted.forEach(fn => fn()) };
 }
-// If local configuration is revoked between bootstrap and admission, preserve
-// the unsent question while showing an actionable sentence instead of a code.
+// A known admission refusal becomes an immutable turn with recovery choices;
+// the old question remains available without inventing a successful Run.
 {
   const f = setup(); f.api.refs.question.value = '今天现金业绩是多少'; f.api.submit();
   f.answer('/runs', null, { ok: false, responseKnown: true, message: 'AI_NOT_CONFIGURED' });
-  eq(f.api.refs.progress.value.includes('启用状态和外部处理授权'), true);
-  eq(f.api.refs.progress.value.includes('AI_NOT_CONFIGURED'), false);
-  eq(f.api.refs.question.value, '今天现金业绩是多少'); f.unmount();
+  const row = f.api.refs.displayed.value.at(-1);
+  eq(row.answer.includes('启用状态和外部处理授权'), true);
+  eq(row.answer.includes('AI_NOT_CONFIGURED'), false);
+  eq(row.question, '今天现金业绩是多少');
+  eq(row.context_eligible, false);
+  eq(f.api.validFailureGuidance(row.failure_guidance), true);
+  f.api.chooseFailureAction(row,'retry_original');
+  const creates = f.calls.filter(call => call.path == '/runs');
+  eq(creates.length,2); eq(creates[1].body.question,creates[0].body.question);
+  eq(creates[1].body.history,creates[0].body.history); f.unmount();
 }
 // R50：等待不计处理耗时；每次人工确认开启新处理段，原会话恢复仍展示确认卡。
 {
@@ -116,6 +123,43 @@ for (const max of [3,4,5]) {
   // Historical failed runs remain readable; they must not recreate a parallel
   // partial-query retry flow after the server now owns waiting clarification.
   eq(f.calls.filter(call => call.path === '/runs').length, 1);
+  f.unmount();
+}
+{
+  const f = setup(); f.start();
+  const guidance = {options:[{value:'retry_original',label:'按原问题再查一次'},
+    {value:'edit_original',label:'修改原问题后查询'},
+    {value:'new_conversation',label:'开启新对话'}],supplement_label:'我来补充描述'};
+  f.api.accept({ ...f.api.state().run, version: 3, status: 'FAILED', reason: 'AI_MODEL_INTENT_CONTRACT_INVALID',
+    message: '这次没能给出可靠结果。请选择一种方式继续。', failure_guidance: guidance });
+  const row = f.api.refs.displayed.value.at(-1);
+  eq(f.api.validFailureGuidance(row.failure_guidance),true);
+  eq(row.context_eligible,false);
+  f.api.chooseFailureAction(row,'retry_original'); f.api.chooseFailureAction(row,'retry_original');
+  const creates = f.calls.filter(call => call.path === '/runs');
+  eq(creates.length,2); eq(creates[1].body.question,creates[0].body.question);
+  eq(creates[1].body.history,creates[0].body.history);
+  f.unmount();
+}
+{
+  const f = setup(); f.start();
+  f.api.accept({ ...f.api.state().run, version: 3, status: 'FAILED', reason: 'AI_MODEL_INTENT_CONTRACT_INVALID',
+    message: '刚才理解问题时出了错，尚未查询数据。请直接重试' });
+  const row = f.api.refs.displayed.value.at(-1);
+  eq(row.answer.includes('可靠结果'),true);
+  eq(row.answer.includes('刚才理解问题时出了错'),false);
+  eq(f.api.validFailureGuidance(row.failure_guidance),true);
+  f.unmount();
+}
+for (const reason of ['AI_INTENT_UNRESOLVED','AI_CAPABILITY_CHANGED']) {
+  const f = setup(); f.start();
+  f.api.accept({ ...f.api.state().run, version: 3, status: 'FAILED', reason,
+    message: '这次没能给出可靠结果。请选择一种方式继续。' });
+  const row = f.api.refs.displayed.value.at(-1);
+  eq(row.answer.includes('今天的现金业绩'),true);
+  eq(row.failure_guidance.kind,'capability_help');
+  eq(f.api.validFailureGuidance(row.failure_guidance),false);
+  eq(row.recovery_origin,null);
   f.unmount();
 }
 // R57: a backend-verified long table starts the existing independent file

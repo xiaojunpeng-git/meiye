@@ -322,16 +322,17 @@ assert.match(durablePendingRecoveryRoot.textContent,/持久问题不能丢失/);
 finishStatus({run_id:'r',generation:1,run_delivery_token:'delivery',version:2,status:'FAILED',message:'当前组合暂不可用'}); await flush();
 const durableText = durablePendingRecoveryRoot.textContent;
 assert.equal(durableText.split('持久问题不能丢失').length - 1,1);
-assert.equal(durableText.split('当前组合暂不可用').length - 1,1);
+assert.equal(durableText.split('这次没能给出可靠结果').length - 1,1);
 const failedTurn = durablePendingRecoveryRoot.querySelector('.conversation-turn');
 assert.ok(failedTurn);
 assert.match(failedTurn.textContent, /持久问题不能丢失/);
-assert.match(failedTurn.textContent, /当前组合暂不可用/);
+assert.match(failedTurn.textContent, /这次没能给出可靠结果/);
+assert.equal(failedTurn.querySelectorAll('[data-failure-guidance] .guidance-number').length,4);
 assert.equal(JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixture%3Adurable-pending-question'))[0].pending_question,undefined);
 const durableSaved = JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixture%3Adurable-pending-question')).flatMap(s => s.rounds);
-assert.deepEqual(durableSaved.map(r => [r.question,r.answer,r.context_eligible]), [['持久问题不能丢失','当前组合暂不可用',false]]);
+assert.deepEqual(durableSaved.map(r => [r.question,r.answer,r.context_eligible]), [['持久问题不能丢失','这次没能给出可靠结果。请选择一种方式继续。',false]]);
 assert.deepEqual((new DeviceSessions(window.localStorage,'fixture:durable-pending-question')).history(durableConversation),[
-  {question:'持久问题不能丢失',answer:'当前组合暂不可用'}
+  {question:'持久问题不能丢失',answer:'这次没能给出可靠结果。请选择一种方式继续。'}
 ]);
 durablePendingRecovery();
 // Platform uses an unobtrusive launcher that enters the separate desktop
@@ -438,7 +439,11 @@ const refusedRoot = document.querySelector('[data-mohe-ai]').shadowRoot;
 refusedRoot.querySelector('.entry').click(); await flush();
 refusedRoot.querySelector('textarea').value = '今天退款业绩多少';
 Array.from(refusedRoot.querySelectorAll('button')).find(b=>b.textContent==='发送').click(); await flush();
-assert.match(refusedRoot.querySelector('[role=status]').textContent,/提问较频繁/);
+assert.match(refusedRoot.querySelector('[data-failure-guidance]').parentNode.textContent,/提问较频繁/);
+assert.deepEqual([...refusedRoot.querySelectorAll('[data-failure-guidance] .guidance-number')].map(n=>n.textContent),['1','2','3','4']);
+const refusedCreates = calls.filter(call=>call.path==='/runs').length;
+refusedRoot.querySelector('[data-failure-guidance] button').click(); await flush();
+assert.equal(calls.filter(call=>call.path==='/runs').length,refusedCreates+1);
 assert.equal(refusedRoot.querySelector('.workspace-run-status'),null);
 assert.equal(refusedRoot.querySelector('.workspace-cancel').hidden,true);
 assert.equal(refusedRoot.querySelector('button[aria-label="发送问题"]').disabled,false);

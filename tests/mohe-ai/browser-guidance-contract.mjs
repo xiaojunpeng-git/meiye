@@ -15,7 +15,7 @@ function step(round, max, fields = [metric], extra = {}) {
     max_clarification_rounds: max, question: '请选择第 ' + round + ' 项条件', fields,
     confirmed_summary: [{ label: '范围', value: '本店' }, { label: '期间', value: '今天' }], revisable_steps: [], ...extra };
 }
-function setup({ rounds = 3, fields = null, bad = false, unknownFirst = false, delayedClarify = false, delayedExecute = false, revisable = false, partial = false, disabled = false, createError = null } = {}) {
+function setup({ rounds = 3, fields = null, bad = false, unknownFirst = false, delayedClarify = false, delayedExecute = false, revisable = false, partial = false, failureCard = false, failureReason = 'AI_INTENT_PARTIAL', disabled = false, createError = null } = {}) {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://guidance-fixture.test' });
   dom.window.HTMLElement.prototype.attachShadow = function () { const root = dom.window.document.createElement('section'); this.appendChild(root); Object.defineProperty(this, 'shadowRoot', { value: root }); return root; };
   globalThis.window = dom.window; globalThis.document = dom.window.document; globalThis.crypto = webcrypto;
@@ -31,7 +31,10 @@ function setup({ rounds = 3, fields = null, bad = false, unknownFirst = false, d
     if (path === '/bootstrap') return { enabled: !disabled, can_configure: true, disabled_reason: disabled ? 'AI_NOT_CONFIGURED' : '', identity_key: 'fixture:store:manager', window_token: 'window', guidance_schema_version: GUIDANCE_SCHEMA, max_clarification_rounds: rounds, capabilities: { metric_codes: ['cash_performance', 'consume_amount'], output_formats: ['screen'] } };
     if (path === '/runs') { if (createError) throw Object.assign(new Error(createError), { responseKnown: true }); return state = { run_id: 'run', generation: 1, version: 1, run_delivery_token: 'delivery', status: 'RECEIVED' }; }
     if (path.endsWith('/execute')) {
-      if (partial) return state = { ...state, version: state.version + 1, status: 'FAILED', reason: 'AI_INTENT_PARTIAL', message: '请补充查询意思。' };
+      if (partial) return state = { ...state, version: state.version + 1, status: 'FAILED', reason: failureReason, message: failureCard ? '这次没能给出可靠结果。请选择一种方式继续。' : '请补充查询意思。',
+        ...(failureCard ? { failure_guidance: { options: [
+          {value:'retry_original',label:'按原问题再查一次'}, {value:'edit_original',label:'修改原问题后查询'},
+          {value:'new_conversation',label:'开启新对话'}], supplement_label:'我来补充描述' } } : {}) };
       state = guided(1);
       if (delayedExecute) { const stale = state; state = guided(2); return new Promise(resolve => { release = () => resolve(stale); }); }
       return state;
@@ -68,7 +71,16 @@ function setup({ rounds = 3, fields = null, bad = false, unknownFirst = false, d
   const f = setup({ createError: 'AI_NOT_CONFIGURED' }); await f.start();
   eq(f.root().textContent.includes('启用状态和外部处理授权'), true);
   eq(f.root().textContent.includes('AI_NOT_CONFIGURED'), false);
-  eq(f.root().querySelector('textarea').value, '需要确认条件的测试问题'); f.dispose();
+  eq(f.root().querySelector('[data-failure-guidance]') !== null, true);
+  eq(f.root().textContent.includes('需要确认条件的测试问题'), true); f.dispose();
+}
+for (const reason of ['AI_INTENT_UNRESOLVED','AI_CAPABILITY_CHANGED']) {
+  const f = setup({ partial: true, failureReason: reason }); await f.start();
+  eq(f.root().textContent.includes('今天的现金业绩'), true);
+  eq(f.root().textContent.includes('需要确认条件的测试问题'), true);
+  eq(f.root().querySelector('[data-failure-guidance]'), null);
+  eq(f.calls.filter(call => call.path === '/runs').length, 1);
+  f.dispose();
 }
 for (const rounds of [3, 4, 5]) {
   const f = setup({ rounds }); await f.start();
@@ -158,6 +170,19 @@ for (const action of ['停止', '关闭']) {
   const detail = f.root().querySelector('textarea[aria-label="补充描述"]');
   eq(detail, null);
   eq(f.calls.filter(call => call.path === '/runs').length, 1);
+  f.dispose();
+}
+{
+  const f = setup({ partial: true, failureCard: true }); await f.start();
+  const card = f.root().querySelector('[data-failure-guidance]');
+  eq(card !== null, true);
+  eq([...card.querySelectorAll('.guidance-number')].map(item => item.textContent), ['1','2','3','4']);
+  eq(f.root().textContent.includes('请直接重试'), false);
+  card.querySelector('button').click(); card.querySelector('button').click(); await flush();
+  const creates = f.calls.filter(call => call.path === '/runs');
+  eq(creates.length, 2);
+  eq(creates[1].payload.question, creates[0].payload.question);
+  eq(creates[1].payload.history, creates[0].payload.history);
   f.dispose();
 }
 assert.throws(() => validateClarification({ id: 'old', fields: [metric] }, GUIDANCE_SCHEMA)); checks++;

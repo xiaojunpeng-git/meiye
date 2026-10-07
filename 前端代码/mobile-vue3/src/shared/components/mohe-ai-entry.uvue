@@ -25,6 +25,12 @@
         </view>
         <scroll-view v-if="item.table != null" scroll-x="true" class="ai-result-table-scroll"><view class="ai-result-table" :style="{ width: tableWidth(item.table.columns) + 'px' }"><view class="ai-result-table__row ai-result-table__head"><text v-for="column in item.table.columns" :key="column.key" class="ai-result-table__cell">{{ column.label }}</text></view><view v-for="(row,ri) in item.table.rows" :key="ri" class="ai-result-table__row"><text v-for="column in item.table.columns" :key="column.key" class="ai-result-table__cell">{{ row[column.key] }}</text></view></view></scroll-view>
         <view v-if="item.export_status != null" class="ai-card"><text class="ai-note">{{ exportStatusLabel(item.export_status) }}</text><button v-if="item.export_status == 'succeeded' && exportSource(item) != null" size="mini" @tap="downloadExcel(item)">下载 Excel</button></view>
+        <view v-if="validFailureGuidance(item.failure_guidance)" class="ai-guidance ai-failure-guidance">
+          <text class="ai-guidance-label">您可以这样继续</text>
+          <button v-for="(option,oi) in item.failure_guidance.options" :key="option.value" class="ai-guidance-option" :disabled="busy || pending != null" @tap="chooseFailureAction(item,option.value)"><text class="ai-guidance-number">{{ oi + 1 }}</text><text class="ai-guidance-option-label">{{ option.label }}</text></button>
+          <button class="ai-guidance-option" :disabled="busy || pending != null" @tap="openFailureSupplement(item)"><text class="ai-guidance-number">4</text><text class="ai-guidance-option-label">我来补充描述</text></button>
+          <view v-if="failureSupplementKey == turnAnchor(item,index)"><textarea v-model="failureSupplementText" class="ai-guidance-supplement" aria-label="补充或改写完整问题" :maxlength="4000" placeholder="请补充或改写完整问题"/><button class="ai-guidance-confirm" :disabled="busy || failureSupplementText.trim().length == 0" @tap="sendFailureSupplement(item)">发送补充问题</button></view>
+        </view>
       </view>
       <view v-if="activeQuestion.length > 0" :id="activeQuestionAnchor" class="ai-message ai-message--active">
         <view class="ai-user-turn"><text class="ai-turn-label">你问</text><text class="ai-question">{{ activeQuestion }}</text></view>
@@ -92,6 +98,7 @@ function measureNativePanelTop() : void {
   nativeCapsuleSpace.value = Number.isFinite(left) && left > 0 ? Math.max(0, Number(windowInfo.windowWidth) - left) : 100
 }
 const question = ref(''), progress = ref(''), displayed = ref<Array<any>>([]), activeQuestion = ref(''), activeQuestionAnchor = ref(''), messageAnchor = ref(''), activeElapsedSeconds = ref(0), activeRunState = ref('正在思考'), expandedCardKeys = ref<Array<string>>([])
+const failureSupplementKey = ref(''), failureSupplementText = ref('')
 // 服务端错误码只用于诊断；手机端无论在入队还是确认阶段，都要向用户说明可处理的边界。
 function customerErrorMessage(value : any, fallback : string = '魔核 AI 暂时无法处理这次请求，请联系管理员检查服务状态。') : string {
   const reason = typeof value == 'string' ? value.trim() : ''
@@ -99,7 +106,7 @@ function customerErrorMessage(value : any, fallback : string = '魔核 AI 暂时
   if (reason == 'AI_AUTH_REQUIRED') return '登录状态已失效，请重新登录后再试。'
   if (reason == 'AI_PERMISSION_DENIED') return '当前账号没有使用魔核 AI 的权限，请联系管理员。'
   if (reason == 'AI_CLIENT_UPGRADE_REQUIRED') return '魔核 AI 页面版本较旧，请刷新页面后再试。'
-  return reason.indexOf('AI_') == 0 ? fallback : (reason.length > 0 ? reason : fallback)
+  return /[\u3400-\u9fff]/.test(reason) ? reason : fallback
 }
 // 表格列宽只决定阅读布局，不截断后端行列或改变 Excel 数据；宽表由自身横向滚动。
 function tableWidth(columns : Array<any>) : number { return Math.max(1, columns.length) * 124 }
@@ -181,9 +188,38 @@ function startIndependentExport(source : any) : void {
   mobileAiRequest('POST',path + '/export',proof,(result : any) => { if (result.ok) observe(result.data); else setExportStatus(source,'failed') })
 }
 let bootstrap : any = null, run : any = null, pending : any = null, compatibilityExecuting = false
+let recoveryDraft : any = null
 let conversation = '', storageKey = '', runtimeKey = '', sessionId = '', entryId = id(), timer : any = null, expiryTimer : any = null, elapsedTimer : any = null, closeRequested = false, lifecycle = 0, clientDeliveryStartedAt = 0
 function id() : string { return 'device-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) }
-function turnAnchor(item : any,index : number) : string { return item != null && typeof item.run_id == 'string' && item.run_id.length > 0 ? 'ai-turn-' + item.run_id + '-' + String(item.generation || 0) : 'ai-history-' + String(index) }
+function turnAnchor(item : any,index : number) : string { return item != null && typeof item.run_id == 'string' && item.run_id.length > 0 ? 'ai-turn-' + item.run_id + '-' + String(item.generation || 0) : item != null && typeof item.turn_key == 'string' ? 'ai-local-' + item.turn_key : 'ai-history-' + String(index) }
+// Failure actions are advice, never query plans. Only a current authenticated
+// create request can execute their chosen wording under fresh permissions.
+function validFailureGuidance(value : any) : boolean { return value != null && Array.isArray(value.options) && value.options.length == 3 && value.options.every((item : any) => item != null && typeof item.label == 'string' && item.label.length > 0) && value.options[0].value == 'retry_original' && value.options[1].value == 'edit_original' && value.options[2].value == 'new_conversation' }
+// Older server projections may lack the new card. A confirmed failure still
+// receives safe actions locally, while data and permissions remain server-owned.
+// The server owns the semantic distinction. Older projections can still be
+// rendered from their typed reason; neither client guesses from user words.
+function safeFailureGuidance(value : any,reason : string = '') : any {
+  if (value != null && value.kind == 'capability_help' && typeof value.question == 'string' && value.question.trim().length > 0) return value
+  if (reason == 'AI_INTENT_UNRESOLVED') return {kind:'capability_help',question:'我主要帮您查询门店经营数据，比如今天的现金业绩、消耗业绩。您可以直接用平常的话提问。'}
+  if (reason == 'AI_CAPABILITY_CHANGED') return {kind:'capability_help',question:'这次暂时没能完成查询。我主要帮您查询门店经营数据，比如今天的现金业绩、消耗业绩。您可以直接再问一次。'}
+  return validFailureGuidance(value) ? value : {kind:'recovery',question:'这次没能给出可靠结果。请选择一种方式继续。',options:[
+  {value:'retry_original',label:'按原问题再查一次'},
+  {value:'edit_original',label:'修改原问题后查询'},
+  {value:'new_conversation',label:'开启新对话'}],supplement_label:'我来补充描述'}
+}
+function sameBusinessDay(first : number,second : number) : boolean { let a = new Date(first + 28800000), b = new Date(second + 28800000); return a.getUTCFullYear() == b.getUTCFullYear() && a.getUTCMonth() == b.getUTCMonth() && a.getUTCDate() == b.getUTCDate() }
+function chooseFailureAction(item : any,action : string) : void {
+  if (busy.value || pending != null || item == null || !validFailureGuidance(item.failure_guidance)) return
+  if (action == 'new_conversation') { recoveryDraft = null; newConversation(); return }
+  let origin = item.recovery_origin
+  if (origin == null || origin.conversation_id != conversation || !Array.isArray(origin.history)) return
+  recoveryDraft = origin
+  question.value = String(item.question || '')
+  if (action == 'retry_original' && sameBusinessDay(Number(origin.created_at),Date.now())) submit()
+}
+function openFailureSupplement(item : any) : void { if (busy.value || pending != null || !validFailureGuidance(item.failure_guidance)) return; let index = displayed.value.indexOf(item); failureSupplementKey.value = turnAnchor(item,index); failureSupplementText.value = String(item.question || '') }
+function sendFailureSupplement(item : any) : void { let text = failureSupplementText.value.trim(); if (text.length == 0 || busy.value || pending != null) return; let origin = item.recovery_origin; if (origin == null || origin.conversation_id != conversation || !Array.isArray(origin.history)) return; recoveryDraft = origin; question.value = text; failureSupplementKey.value = ''; submit() }
 function refreshActiveElapsed() : void { activeElapsedSeconds.value = Math.max(0,Math.floor((Date.now() - clientDeliveryStartedAt) / 1000)) }
 function startActiveRunStatus() : void {
   if (activeQuestion.value.length == 0) return
@@ -252,10 +288,26 @@ function load() : Array<any> { let raw = uni.getStorageSync(storageKey); let now
 function contextEligible(row : any) : boolean { return row == null || row.context_eligible !== false }
 function appendTranscript(row : any) : void {
   let all = load(), duplicate = false
-  all.forEach((s : any) => { if (s.id == conversation && s.rounds.some((item : any) => item.run_id == row.run_id && item.generation == row.generation)) duplicate = true })
-  if (!displayed.value.some((item : any) => item.run_id == row.run_id && item.generation == row.generation)) displayed.value.push(row)
+  let hasRunId = typeof row.run_id == 'string' && row.run_id.length > 0 && Number.isSafeInteger(row.generation)
+  all.forEach((s : any) => { if (hasRunId && s.id == conversation && s.rounds.some((item : any) => item.run_id == row.run_id && item.generation == row.generation)) duplicate = true })
+  if (!hasRunId || !displayed.value.some((item : any) => item.run_id == row.run_id && item.generation == row.generation)) displayed.value.push(row)
   if (!duplicate) { all.forEach((s : any) => { if (s.id == conversation) s.rounds.push(row) }); uni.setStorageSync(storageKey,all) }
   messageAnchor.value = turnAnchor(row,displayed.value.length - 1)
+}
+// A definitive refusal before admission has no Run. Keep the original input
+// and its predecessor for a deliberate retry, but never grant it result context.
+// An uncertain transport response must instead keep its idempotent pending key.
+function recordAdmissionRefusal(submitted : any,explanation : string,guidance : any,reason : string = '') : void {
+  let safeGuidance = safeFailureGuidance(guidance,reason)
+  let customerText = safeGuidance.kind == 'capability_help' ? String(safeGuidance.question) : explanation
+  let now = Date.now(), elapsedSeconds = completedElapsedSeconds()
+  stopQuestionWait(); clearActive()
+  appendTranscript({question:submitted.question,answer:customerText,cards:[],table:null,
+    presentation:{summary:customerText,terminal_status:'FAILED'},context_eligible:false,
+    elapsed_seconds:elapsedSeconds,created_at:now,turn_key:submitted.client_request_id,
+    failure_guidance:safeGuidance,recovery_origin:safeGuidance.kind == 'capability_help' ? null : {conversation_id:conversation,
+      history:submitted.history,context_ref:submitted.context_ref || null,created_at:now}})
+  pending = null; clientDeliveryStartedAt = 0; progress.value = ''
 }
 function validStoredGuidanceSubmission(value : any) : boolean { return value != null && typeof value == 'object' && typeof value.clarification_id == 'string' && value.clarification_id.length > 0 && typeof value.client_submission_id == 'string' && value.client_submission_id.length > 0 && value.choices != null && typeof value.choices == 'object' && !Array.isArray(value.choices) && (value.schema_version == null || value.schema_version == guidanceSchema) && (value.intent_revision == null || Number.isSafeInteger(value.intent_revision)) && (value.step_revision == null || Number.isSafeInteger(value.step_revision)) }
 function validResolvedRun(value : any) : boolean { return value != null && typeof value.run_id == 'string' && value.run_id.length > 0 && Number.isSafeInteger(value.generation) && value.generation >= 1 }
@@ -318,6 +370,7 @@ function unavailable(value : any) : boolean { return value != null && value.resp
 function abandonUnavailableRun() : void { if (timer != null) clearTimeout(timer); finishActiveRunStatus(); run = null; pending = null; compatibilityExecuting = false; busy.value = false; queuedClarificationId = ''; clarification.value = null; clearGuidance(); closeRequested = false; closeRequestedState.value = false; clientDeliveryStartedAt = 0; activeQuestion.value = ''; activeQuestionAnchor.value = ''; messageAnchor.value = ''; clearActive(); progress.value = '上一次任务已失效，请重新提问。' }
 function newConversation() : void {
   if (busy.value || pending != null) return
+  recoveryDraft = null; failureSupplementKey.value = ''; failureSupplementText.value = ''
   lifecycle++; finishActiveRunStatus(); queuedClarificationId = ''
   let all = load(); conversation = id(); all.push({id:conversation,created_at:Date.now(),rounds:[]})
   uni.setStorageSync(storageKey,all); uni.setStorageSync(storageKey + ':current',conversation)
@@ -342,6 +395,7 @@ function selectConversation(targetId : string) : void {
   let selected : any = null
   load().some((session : any) => { if (session.id == targetId) { selected = session; return true }; return false })
   if (selected == null) { closeComposerOptions(); return }
+  recoveryDraft = null; failureSupplementKey.value = ''; failureSupplementText.value = ''
   conversation = targetId; uni.setStorageSync(storageKey + ':current',conversation); displayed.value = selected.rounds.slice(); expandedCardKeys.value = []
   question.value = ''; progress.value = ''; messageAnchor.value = ''; resetComposerSize()
   closeComposerOptions()
@@ -417,7 +471,20 @@ function accept(value : any) : void {
     // The verified answer owns the long-table decision. Queue its file only
     // after the mobile answer is visible; a manual request shares the task.
     if (run.answer != null && ['COMPLETED','PARTIAL_SUCCEEDED'].indexOf(String(run.status)) >= 0 && pending != null && typeof pending.question == 'string') { let answer = run.answer; let elapsedSeconds = completedElapsedSeconds(); let row : any = {question:pending.question,answer:String(answer.summary || ''),cards:answer.cards || [],table:answer.table || null,presentation:answer,topic_boundary:run.topic_boundary,elapsed_seconds:elapsedSeconds,run_id:run.run_id,generation:run.generation,created_at:Date.now()}; finishActiveRunStatus(); appendTranscript(row); reportVisibleDeliveryAfterRender(run); if ((pending.want_excel === true || answer.auto_export_required === true) && run.status == 'COMPLETED') startIndependentExport({...run}) }
-    else { let terminalMessage = run.status == 'CANCELLED' ? '已取消' : customerErrorMessage(run.message,'本次未能完成，请重新提问。'); if (pending != null && typeof pending.question == 'string') { let elapsedSeconds = completedElapsedSeconds(); finishActiveRunStatus(); appendTranscript({question:pending.question,answer:terminalMessage,cards:[],table:null,presentation:{summary:terminalMessage,terminal_status:run.status},terminal_reason:run.reason,context_eligible:false,topic_boundary:run.topic_boundary,elapsed_seconds:elapsedSeconds,run_id:run.run_id,generation:run.generation,created_at:Date.now()}) }; progress.value = terminalMessage; clientDeliveryStartedAt = 0 }; activeQuestion.value = ''; activeQuestionAnchor.value = ''; pending = null; markResolvedRun(); return }
+    else {
+      let failureGuidance = run.status == 'FAILED' ? safeFailureGuidance(run.failure_guidance,String(run.reason || '')) : null
+      let terminalMessage = run.status == 'CANCELLED' ? '已取消' : failureGuidance != null ? String(failureGuidance.question || '这次没能给出可靠结果。请选择一种方式继续。') : customerErrorMessage(run.message,'本次未能完成，请重新提问。')
+      if (pending != null && typeof pending.question == 'string') {
+        let elapsedSeconds = completedElapsedSeconds(); finishActiveRunStatus()
+        appendTranscript({question:pending.question,answer:terminalMessage,cards:[],table:null,
+          presentation:{summary:terminalMessage,terminal_status:run.status},terminal_reason:run.reason,
+          context_eligible:false,topic_boundary:run.topic_boundary,elapsed_seconds:elapsedSeconds,
+          run_id:run.run_id,generation:run.generation,created_at:Date.now(),failure_guidance:failureGuidance,
+          recovery_origin:failureGuidance == null || failureGuidance.kind == 'capability_help' ? null : {conversation_id:conversation,history:pending.history,context_ref:pending.context_ref || null,created_at:Date.now()}})
+      }
+      progress.value = terminalMessage; clientDeliveryStartedAt = 0
+    }
+    activeQuestion.value = ''; activeQuestionAnchor.value = ''; pending = null; markResolvedRun(); return }
   if (run.status == 'WAITING_CLARIFICATION' && !closeRequestedState.value) {
     let c = run.clarification
     if (!validGuidance(c)) { clarification.value = null; clearGuidance(); progress.value = '引导信息不完整，请重新确认任务状态。'; return }
@@ -446,7 +513,7 @@ function submit() : void {
   // Stop at a server-confirmed new-topic boundary even when that turn failed.
   load().forEach((s : any) => { if (s.id == conversation) { let recent = s.rounds.slice(-20); let boundary = -1; recent.forEach((r : any, i : number) => { if (r.topic_boundary == 'reset') boundary = i }); recent.slice(boundary < 0 ? 0 : boundary).forEach((r : any) => history.push({question:r.question,answer:r.answer})); let last : any = null; s.rounds.slice().reverse().some((r : any) => { if (contextEligible(r)) { last = r; return true }; return r.topic_boundary == 'reset' }); if (last != null && last.presentation != null && typeof last.presentation.context_ref == 'string') contextRef = last.presentation.context_ref } })
   let isNewRequest = pending == null
-  if (isNewRequest) { activeGuidanceSchema = String(bootstrap.guidance_schema_version || ''); pending = {client_request_id:id(),conversation_id:conversation,client_session_id:sessionId,window_token:bootstrap.window_token,question:question.value.trim(),history:history,output_format:'screen',want_excel:wantExcel.value}; if (activeGuidanceSchema == guidanceSchema) pending.guidance_schema_version = guidanceSchema; if (contextRef.length > 0) pending.context_ref = contextRef; closeRequested = false; closeRequestedState.value = false; clientDeliveryStartedAt = Date.now(); showActiveQuestion(pending.question) }
+  if (isNewRequest) { let source = recoveryDraft != null && recoveryDraft.conversation_id == conversation ? recoveryDraft : null; activeGuidanceSchema = String(bootstrap.guidance_schema_version || ''); pending = {client_request_id:id(),conversation_id:conversation,client_session_id:sessionId,window_token:bootstrap.window_token,question:question.value.trim(),history:source != null ? source.history : history,output_format:'screen',want_excel:wantExcel.value}; if (activeGuidanceSchema == guidanceSchema) pending.guidance_schema_version = guidanceSchema; let originalRef = source != null ? source.context_ref : contextRef; if (typeof originalRef == 'string' && originalRef.length > 0) pending.context_ref = originalRef; recoveryDraft = null; closeRequested = false; closeRequestedState.value = false; clientDeliveryStartedAt = Date.now(); showActiveQuestion(pending.question) }
   let restoringCancelledRequest = !isNewRequest && closeRequested
   // Retrying an uncertain admission reuses its key, but restores the waiting
   // bubble that was stopped when transport failed.
@@ -463,8 +530,8 @@ function submit() : void {
   let createBody : any = {...submitted}; delete createBody.want_excel
   mobileAiRequest('POST','/runs',createBody,(r : any) => {
     if (expectedLifecycle != lifecycle) { if (r.ok && r.data != null && r.data.accepted !== false) { let retained = retainLateAdmission(r.data,submitted); cancelLateAdmission(submitted,retained) }; return }
-    if (!r.ok) { question.value = submitted.question; stopQuestionWait(); if (r.responseKnown) { pending = null; clearActive(); progress.value = customerErrorMessage(r.message) } else { progress.value = '请求结果暂未确认，再次发送将重试同一任务。'; persistActive() }; pauseForExpiredLogin(r); return }
-    if (r.data.accepted === false) { question.value = submitted.question; stopQuestionWait(); pending = null; clearActive(); progress.value = customerErrorMessage(r.data.message,'当前使用人数较多，请稍后再问。'); return }
+    if (!r.ok) { if (pauseForExpiredLogin(r)) return; if (r.responseKnown) recordAdmissionRefusal(submitted,customerErrorMessage(r.message),null,String(r.message || '')); else { question.value = submitted.question; stopQuestionWait(); progress.value = '请求结果暂未确认，再次发送将重试同一任务。'; persistActive() }; return }
+    if (r.data.accepted === false) { recordAdmissionRefusal(submitted,customerErrorMessage(r.data.message,'当前使用人数较多，请稍后再问。'),r.data.failure_guidance,String(r.data.reason || '')); return }
     // New servers accept only after durable queueing.  During a staged rollout
     // keep the old synchronous trigger for a server that has not enabled its
     // compatible consumer yet.
