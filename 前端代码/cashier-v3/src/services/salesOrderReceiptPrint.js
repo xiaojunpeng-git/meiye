@@ -8,8 +8,8 @@ export const SALES_ORDER_RECEIPT_PAPER_PROFILES = Object.freeze([
 ])
 
 const DEFAULT_RECEIPT_PAPER_KEY = '76'
-// Reserve 40mm for the XP-76 print-head/cutter offset plus 30mm of visible tear-off space.
-const RECEIPT_TEAR_GUIDE_MM = 70
+// Fifteen 1/6-inch impact-printer lines, now owned by the receipt instead of the driver.
+const RECEIPT_TEAR_GUIDE_MM = 64
 const RECEIPT_TRAILING_SAFETY_MM = 4
 
 function resolveReceiptPageHeightMm(paperProfile, measuredHeightPx) {
@@ -301,7 +301,7 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   .summary { margin-top: 8px; border-top: 1px dashed #6b7280; }
   .summary-row { display: flex; justify-content: space-between; gap: 8px; padding-top: 4px; }
   .note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6b7280; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .tear-guide { height: ${RECEIPT_TEAR_GUIDE_MM}mm; }
+  .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
   @page { size: ${paperProfile.paperWidthMm}mm ${paperProfile.fixedPageHeightMm || 297}mm; margin: 0; }
   @media print {
     body { padding: 0; background: #fff; }
@@ -311,6 +311,7 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
     ${paperProfile.key === '76' ? '.receipt .meta div:first-child span:last-child { font-size: .78em; }' : ''}
     .receipt h1 { font-size: 1.3em; }
     .receipt h2 { font-size: 1em; }
+    .receipt .tear-guide { font-size: .6em; }
     .meta, tr, .summary, .note, .tear-guide { break-inside: avoid; page-break-inside: avoid; }
     h2 { break-after: avoid; page-break-after: avoid; }
   }
@@ -552,7 +553,7 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
       ${root} .summary { margin-top: 8px; border-top: 1px dashed #6b7280; }
       ${root} .summary-row { display: flex; justify-content: space-between; gap: 8px; padding-top: 4px; }
       ${root} .note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6b7280; white-space: pre-wrap; overflow-wrap: anywhere; }
-      ${root} .tear-guide { height: ${RECEIPT_TEAR_GUIDE_MM}mm; }
+      ${root} .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
       @page { size: ${profile.paperWidthMm}mm ${pageHeightMm}mm; margin: 0; }
       @media print {
         html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
@@ -560,6 +561,7 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
         body > ${root} { position: static !important; display: block !important; width: ${profile.key === '76' ? '63mm' : 'calc(100% - 2mm)'} !important; margin: ${profile.key === '76' ? '0' : '0 1mm'} !important; padding: ${profile.key === '76' ? '.5mm' : '1mm'} !important; font-size: ${profile.key === '76' ? '23px' : `clamp(${profile.fontSizePx}px, 8vw, 70px)`} !important; }
         ${root} h1 { font-size: 1.3em !important; }
         ${root} h2 { font-size: 1em !important; }
+        ${root} .tear-guide { font-size: .6em !important; }
         ${root} .meta, ${root} tr, ${root} .summary, ${root} .note, ${root} .tear-guide { break-inside: avoid; page-break-inside: avoid; }
         ${root} h2 { break-after: avoid; page-break-after: avoid; }
       }
