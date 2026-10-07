@@ -50,8 +50,9 @@ const REPORT_TABS = Object.freeze([
   { code: 'member_visit_annual_summary', name: '会员进店年度汇总表' },
   { code: 'field_acquisition_detail', name: '地推拓客明细表' },
   { code: 'field_acquisition_summary', name: '地推拓客汇总表' },
-  { code: 'cross_industry_customer_summary', name: '异业收客汇总表' },
-  { code: 'cross_industry_customer_detail', name: '异业收客明细表' },
+  // 保留既有路由代码和下钻目标，只交换产品确认的展示名称。
+  { code: 'cross_industry_customer_summary', name: '异业收客明细表' },
+  { code: 'cross_industry_customer_detail', name: '异业收客汇总表' },
   { code: 'new_customer_analysis_summary', name: '新客汇总表' },
   { code: 'new_customer_analysis', name: '新客明细表' },
   { code: 'salesperson_large_order_statistics', name: '销售人生美大单统计表' },

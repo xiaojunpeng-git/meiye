@@ -6,6 +6,7 @@ $root = dirname(__DIR__, 3);
 $service = (string)file_get_contents($root . '/后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php');
 $report = (string)file_get_contents($root . '/后端代码/app/services/report/StoreUnifiedReportServices.php');
 $view = (string)file_get_contents($root . '/前端代码/cashier-v3/src/views/StoreBusinessReportView.vue');
+$platformCatalog = (string)file_get_contents($root . '/前端代码/admin/src/libs/storeOperationReports.js');
 
 // 剩余卡项统计必须使用 V3 租户范围常量，避免 PHP 在报表命名空间查找不存在的同名类。
 if (strpos($service, 'use app\\services\\cashier\\v3\\CashierV3ScopeResolver;') === false) {
@@ -47,12 +48,34 @@ foreach ([
     'newCustomerSummaryGroupKey',
     "'key' => 'guide_id', 'label' => '导购', 'type' => 'select', 'required' => false",
     "guideFilterOptions",
-    "'cross_industry_customer_detail' => '异业收客明细表'",
-    "'cross_industry_customer_summary' => '异业收客汇总表'",
+    "'cross_industry_customer_detail' => '异业收客汇总表'",
+    "'cross_industry_customer_summary' => '异业收客明细表'",
     "'include_followup_cash'=>1",
     "'report'=>'field_acquisition_detail'",
 ] as $needle) {
     if (strpos($service, $needle) === false) throw new RuntimeException('new-customer drilldown contract missing: ' . $needle);
+}
+// 展示名互换不能改变接口代码、下钻方向或依标题分配的表格元数据。
+foreach ([
+    "{ code: 'cross_industry_customer_summary', name: '异业收客明细表' }",
+    "{ code: 'cross_industry_customer_detail', name: '异业收客汇总表' }",
+] as $needle) {
+    if (strpos($view, $needle) === false) throw new RuntimeException('cross-industry report tab name missing: ' . $needle);
+}
+foreach ([
+    "code: 'cross_industry_customer_summary', title: '异业收客明细表'",
+    "code: 'cross_industry_customer_detail', title: '异业收客汇总表'",
+] as $needle) {
+    if (strpos($platformCatalog, $needle) === false) throw new RuntimeException('cross-industry platform report name missing: ' . $needle);
+}
+foreach ([
+    "result('异业收客汇总表',",
+    "result('异业收客明细表',",
+    "'异业收客明细表'=>['editable_fields'",
+    "if(\$title==='异业收客汇总表')return in_array(\$key,['full_payment','reward']",
+    "if(\$title==='异业收客明细表')return \$key==='remaining_service_count'",
+] as $needle) {
+    if (strpos($service, $needle) === false) throw new RuntimeException('cross-industry report title metadata missing: ' . $needle);
 }
 foreach ([
     'firstCourseOrders',
