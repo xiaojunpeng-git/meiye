@@ -68,6 +68,17 @@ foreach ([
 ] as $needle) {
     if (strpos($platformCatalog, $needle) === false) throw new RuntimeException('cross-industry platform report name missing: ' . $needle);
 }
+// 平台导航由数据库菜单提供，迁移必须只改名称且保持与报表代码的固定映射。
+$menuUpgrade = (string)file_get_contents($root . '/后端代码/database/upgrades/2026-10-07-异业收客报表菜单更名/02-正式升级.sql');
+foreach ([
+    "menu_name='异业收客汇总表'\nWHERE unique_auth='admin-report-store-operations-cross_industry_customer_detail'",
+    "menu_name='异业收客明细表'\nWHERE unique_auth='admin-report-store-operations-cross_industry_customer_summary'",
+] as $needle) {
+    if (strpos($menuUpgrade, $needle) === false) throw new RuntimeException('cross-industry platform menu migration missing: ' . $needle);
+}
+foreach (['SET unique_auth=', 'SET menu_path=', 'SET pid=', 'SET sort='] as $forbidden) {
+    if (strpos($menuUpgrade, $forbidden) !== false) throw new RuntimeException('cross-industry menu migration changes a stable identifier: ' . $forbidden);
+}
 foreach ([
     "result('异业收客汇总表',",
     "result('异业收客明细表',",
