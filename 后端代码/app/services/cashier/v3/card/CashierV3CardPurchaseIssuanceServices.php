@@ -184,8 +184,8 @@ final class CashierV3CardPurchaseIssuanceServices
         );
         // Lock the physical card SKU in the final transaction so issuance is
         // bound to the selected store resource.  The browser checkout
-        // snapshot owns price and the displayed card data: never compare it
-        // with a later catalogue version, lifecycle flag or configured cost.
+        // snapshot owns price and displayed card data; do not compare those
+        // with a later version or cost. New-sale delisting is checked separately.
         $line = $customConfiguration
             ? $this->catalog->customCardIssuanceLineInTx($customConfiguration, $operatorScope, $dataScope)
             : $this->catalog->selectCheckoutSaleLineInTx(

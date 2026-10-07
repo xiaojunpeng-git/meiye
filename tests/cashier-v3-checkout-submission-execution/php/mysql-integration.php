@@ -294,10 +294,46 @@ function mixedDeleteDomainRows(): void
     }
 }
 
+function mixedGrantCashierFeature(): void
+{
+    // Keep this isolated integration on the real store-V3 position permission chain.
+    Db::execute("CREATE TABLE IF NOT EXISTS `eb_position` (
+      `id` int unsigned NOT NULL PRIMARY KEY,
+      `status` tinyint NOT NULL DEFAULT 1,
+      `use_store` tinyint NOT NULL DEFAULT 1
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
+    Db::execute("CREATE TABLE IF NOT EXISTS `eb_staff_job_position` (
+      `id` bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      `staff_id` int unsigned NOT NULL,
+      `employee_id` int unsigned NOT NULL,
+      `position_id` int unsigned NOT NULL,
+      `status` tinyint NOT NULL DEFAULT 1,
+      `is_del` tinyint NOT NULL DEFAULT 0,
+      `end_time` int unsigned NOT NULL DEFAULT 0,
+      UNIQUE KEY `uk_staff_position` (`staff_id`,`employee_id`,`position_id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
+    Db::execute("CREATE TABLE IF NOT EXISTS `eb_job_position_channel_rule` (
+      `id` bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      `position_id` int unsigned NOT NULL,
+      `channel` varchar(32) NOT NULL,
+      `status` tinyint NOT NULL DEFAULT 1,
+      `rules` varchar(255) NOT NULL DEFAULT '',
+      UNIQUE KEY `uk_position_channel` (`position_id`,`channel`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
+    Db::execute("REPLACE INTO `eb_position` (`id`,`status`,`use_store`) VALUES (901,1,1)");
+    Db::execute("REPLACE INTO `eb_staff_job_position`
+      (`staff_id`,`employee_id`,`position_id`,`status`,`is_del`,`end_time`)
+      VALUES (1,1,901,1,0,0)");
+    Db::execute("REPLACE INTO `eb_job_position_channel_rule`
+      (`position_id`,`channel`,`status`,`rules`)
+      VALUES (901,'store_v3',1,'301001,301012')");
+}
+
 function mixedSeedAuthorities(): void
 {
     mixedDeleteDomainRows();
     MemberIntegrationFixture::resetAndSeed();
+    mixedGrantCashierFeature();
     MemberIntegrationFixture::seedMember(101, '混合结账会员', '13800000101', 8);
     Db::name('employee')->whereIn('id', [1, 2, 20])->update([
         'employment_type_code' => 'internal',
@@ -516,9 +552,19 @@ function mixedSeedAuthorities(): void
     ]);
 }
 
-function mixedPrepareScenario(): array
+function mixedPrepareScenario(string $historicalProject = 'active'): array
 {
     mixedSeedAuthorities();
+    if ($historicalProject !== 'active') {
+        // An existing entitlement can outlive catalog visibility; only the original
+        // inventory flag determines whether completion must consume real stock.
+        Db::name('store_product')->where('id', 601)->update([
+            'is_del' => 1,
+            'is_show' => 0,
+            'is_verify' => 0,
+            'is_inventory' => $historicalProject === 'non_inventory' ? 0 : 1,
+        ]);
+    }
     MemberIntegrationFixture::bindTestAdapters();
     $dispatcher = MemberIntegrationFixture::dispatcher();
 
@@ -906,6 +952,27 @@ try {
             && $rollbackBefore === mixedDatabaseSnapshot(),
         json_encode($lateFailure, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
     );
+
+    foreach (['non_inventory', 'inventory'] as $historicalProject) {
+        $archived = mixedPrepareScenario($historicalProject);
+        $archivedResult = $archived['dispatcher']->dispatch($archived['finalBody'], $archived['session']);
+        $archivedReceipt = (array)Db::name('cashier_v3_entitlement_completion_receipt')
+            ->where('checkout_request_id', $archived['requestId'])->find();
+        $inventoryReceiptCount = (int)Db::name('inventory_consumption_receipt')
+            ->where('source_detail_id', $archived['requestId'])->count();
+        mixedOk(
+            'MIXED-MYSQL-12 archived ' . $historicalProject . ' entitlement completes with original stock policy',
+            ($archivedResult['result']['status'] ?? '') === CashierV3ResultCode::STATUS_SUCCESS
+                && ($archivedReceipt['status'] ?? '') === 'completed'
+                && (int)Db::name('store_order_cart_info')->where('id', 2001)->value('write_surplus_times') === 7
+                && (int)Db::name('cashier_v3_entitlement_writeoff_fact')
+                    ->where('checkout_request_id', $archived['requestId'])->sum('quantity') === 3
+                && $inventoryReceiptCount === ($historicalProject === 'inventory' ? 1 : 0)
+                && (int)Db::name('inventory_stock')->where('id', 8101)->value('available_quantity_units')
+                    === ($historicalProject === 'inventory' ? 4 : 10),
+            json_encode($archivedResult, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+        );
+    }
 } catch (Throwable $throwable) {
     $detail = $throwable instanceof CashierV3CommandException
         ? ' code=' . $throwable->getResultCode()

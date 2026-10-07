@@ -225,7 +225,9 @@ final class InventoryEntitlementCompletionProvider
     {
         $managed = [];
         foreach ($lines as $line) {
-            $project = Db::name('store_product')->where('id', $line['projectId'])->where('is_del', 0)->field('is_inventory')->find();
+            // Final locking must use the same historical project identity as discovery.
+            // Deletion from the sale catalog never changes whether the service consumes stock.
+            $project = Db::name('store_product')->where('id', $line['projectId'])->field('is_inventory')->find();
             if (!$project) {
                 throw $this->failure('inventory_project_not_found', ['projectId' => $line['projectId']]);
             }
@@ -709,9 +711,9 @@ final class InventoryEntitlementCompletionProvider
     /** @return array{0:int,1:string} */
     private function resolvePlatformProductSku(int $productId, string $unique, int $storeId): array
     {
+        // Preserve the discovery identity under lock even when the source project is archived.
         $product = Db::name('store_product')
             ->where('id', $productId)
-            ->where('is_del', 0)
             ->field('id,pid,type,relation_id')
             ->find();
         if (!$product) {

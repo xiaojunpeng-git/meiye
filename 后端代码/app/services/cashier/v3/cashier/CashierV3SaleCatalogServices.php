@@ -138,6 +138,9 @@ final class CashierV3SaleCatalogServices
             $operatorScope->storeId(),
             $skuId
         );
+        if (is_array($availability)) {
+            self::assertNewSaleAvailability($availability, $skuId);
+        }
         if (!is_array($availability)
             || (int)($availability['product_type'] ?? 0) !== 1
             || (int)($availability['product_is_del'] ?? 1) !== 0
@@ -164,12 +167,8 @@ final class CashierV3SaleCatalogServices
         return $this->serverResources($normalized);
     }
 
-    /**
-     * Snapshot checkout discovery deliberately does not apply product
-     * lifecycle/show/verify predicates. The final preparation transaction
-     * locks the SKU and reconstructs its authority row; only entitlement,
-     * balance and inventory providers decide final availability.
-     */
+    /** Snapshot discovery rejects a newly unavailable sale before locks;
+     * purchased entitlements use their own historic authority path. */
     public function discoverSnapshotSaleResources(
         $itemId,
         CashierV3OperatorScope $operatorScope,
@@ -177,16 +176,13 @@ final class CashierV3SaleCatalogServices
     ): array {
         $this->assertStoreScope($operatorScope, $dataScope);
         $skuId = self::positiveId($itemId, 'itemId');
-        // A browser snapshot is not allowed to trust the display row, but it
-        // also must not be rejected here because a product lifecycle flag
-        // changed after the item was added. Read the authoritative joined
-        // product/SKU row only to derive stable resource identities; the
-        // final settlement transaction performs the inventory/entitlement/
-        // balance checks and any product-specific business validation.
+        // Browser snapshots do not authorize a new sale after the catalog is
+        // taken off shelf; the final transaction repeats this check under lock.
         $row = $this->authority->readStoreItemBySkuId($operatorScope->storeId(), $skuId);
         if (!is_array($row)) {
             throw self::notAvailable($skuId);
         }
+        self::assertNewSaleAvailability($row, $skuId);
         $item = $this->normalizeAuthorityRow($row, false);
         $resources = $this->serverResources($item);
         // Snapshot checkout owns the browser values, but resource locking must
@@ -382,12 +378,8 @@ final class CashierV3SaleCatalogServices
         return $this->saleLineFromItem($this->normalizeAuthorityRow($row, false), $idempotencyKey);
     }
 
-    /**
-     * Final card issuance consumes the browser's checkout snapshot, not the
-     * mutable catalogue lifecycle flags. The SKU identity remains locked in
-     * this transaction; stock, balance and entitlement checks remain at their
-     * dedicated final authorities.
-     */
+    /** Final card issuance keeps snapshot price/definition but must not sell
+     * a card that was taken off shelf before this transaction. */
     public function selectCheckoutSaleLineInTx(
         $itemId,
         string $idempotencyKey,
@@ -409,6 +401,7 @@ final class CashierV3SaleCatalogServices
         if (!is_array($row)) {
             throw self::notAvailable($skuId);
         }
+        self::assertNewSaleAvailability($row, $skuId);
         // The final card definition comes from the one browser snapshot. This
         // lock supplies SKU identity only; it must not reload card components.
         return $this->saleLineFromItem($this->normalizeAuthorityRow($row, false), $idempotencyKey);
@@ -468,8 +461,8 @@ final class CashierV3SaleCatalogServices
             : $this->lockedActiveItem($operatorScope->storeId(), $targetSkuId);
         // A browser checkout snapshot is the only authority for the selected
         // target and its transaction price. The final command locks current
-        // inventory only; it must not turn an earlier catalogue projection,
-        // price edit, or product-state change into a stale-version rejection.
+        // inventory and current saleability; price edits still do not change
+        // the selected snapshot amount or cause a stale-version rejection.
         // Legacy direct card-operation commands retain their old contract.
         if (!$directSnapshot) {
             $this->assertLockedContextsCover($current, $lockedContexts);
@@ -979,6 +972,7 @@ final class CashierV3SaleCatalogServices
         if (!is_array($row)) {
             throw self::notAvailable($skuId);
         }
+        self::assertNewSaleAvailability($row, $skuId);
         $normalized = $this->normalizeAuthorityRow($row, true);
         if (!$normalized['active']) {
             throw self::notAvailable($skuId);
@@ -986,9 +980,8 @@ final class CashierV3SaleCatalogServices
         return $normalized;
     }
 
-    /** Lock a catalogue row for final inventory use without treating current
-     * product visibility, verification, price or resource version as a
-     * validation rule for a browser-owned checkout snapshot. */
+    /** Lock the current saleability flag without replacing snapshot price or
+     * card definition; historic entitlement fulfilment never calls this. */
     private function lockedSnapshotItem(int $storeId, int $skuId): array
     {
         if ($this->readiness !== null) {
@@ -998,6 +991,7 @@ final class CashierV3SaleCatalogServices
         if (!is_array($row)) {
             throw self::notAvailable($skuId);
         }
+        self::assertNewSaleAvailability($row, $skuId);
         return $this->normalizeAuthorityRow($row, false);
     }
 
@@ -1010,6 +1004,7 @@ final class CashierV3SaleCatalogServices
         if (!is_array($row)) {
             throw self::notAvailable($skuId);
         }
+        self::assertNewSaleAvailability($row, $skuId);
         $normalized = $this->normalizeAuthorityRow($row, true);
         if (!$normalized['active']) {
             throw self::notAvailable($skuId);
@@ -1026,6 +1021,7 @@ final class CashierV3SaleCatalogServices
         if (!is_array($row)) {
             throw self::notAvailable($skuId);
         }
+        self::assertNewSaleAvailability($row, $skuId);
         return $this->normalizeAuthorityRow($row, false);
     }
 
@@ -2080,6 +2076,89 @@ final class CashierV3SaleCatalogServices
             'cashier_catalog_item_not_available',
             ['item_id' => $skuId]
         );
+    }
+
+    /** Only store-scoped authority rows may reveal a product name. A deleted
+     * or hidden catalog item blocks new sales, never existing entitlements. */
+    public static function assertNewSaleAvailability(array $row, int $skuId): void
+    {
+        $offShelf = (int)($row['product_is_del'] ?? 0) !== 0
+            || (int)($row['product_is_show'] ?? 1) !== 1
+            || (int)($row['sku_is_show'] ?? 1) !== 1;
+        if (!$offShelf && (int)($row['product_is_verify'] ?? 1) === 1) {
+            return;
+        }
+        if (!$offShelf) {
+            throw self::notAvailable($skuId);
+        }
+        $name = trim((string)($row['product_store_name'] ?? ''));
+        if ($name === '') {
+            throw self::notAvailable($skuId);
+        }
+        throw self::failure(
+            CashierV3ResultCode::RESOURCE_NOT_FOUND,
+            '商品“' . $name . '”已被下架，请重新选择。',
+            'cashier_catalog_item_off_shelf',
+            ['item_id' => $skuId]
+        );
+    }
+
+    /** Final shared checkout gate for sale-only and mixed compositions.
+     * Only sale rows are inspected; historic entitlement rows are excluded. */
+    public static function assertNewSaleLinesAvailableInTx(array $lines, CashierV3DataScopeContext $dataScope): void
+    {
+        CashierV3TransactionGuard::assertInTransaction('cashierNewSaleAvailability');
+        $skuIds = [];
+        foreach ($lines as $line) {
+            if (!is_array($line) || (string)($line['line_role'] ?? '') !== 'sale') {
+                continue;
+            }
+            $productId = (int)($line['source_id'] ?? 0);
+            $skuId = (int)($line['catalog_sku_id'] ?? 0);
+            if ($productId <= 0 || $skuId <= 0) {
+                throw self::notAvailable($skuId);
+            }
+            $skuIds[$productId][$skuId] = (string)($line['source_type'] ?? '');
+        }
+        ksort($skuIds, SORT_NUMERIC);
+        foreach ($skuIds as $productId => $skus) {
+            $product = Db::name('store_product')
+                ->where('id', $productId)
+                ->where('type', 1)
+                ->where('relation_id', $dataScope->forcedStoreId())
+                ->field('id,pid,product_type,store_name,is_del,is_show,is_verify')
+                ->lock(true)
+                ->find();
+            if (!$product) {
+                throw self::notAvailable((int)array_key_first($skus));
+            }
+            ksort($skus, SORT_NUMERIC);
+            foreach ($skus as $skuId => $sourceType) {
+                $sku = Db::name('store_product_attr_value')
+                    ->where('id', $skuId)
+                    ->where('product_id', $productId)
+                    ->where('type', 0)
+                    ->field('id,is_show')
+                    ->lock(true)
+                    ->find();
+                if (!$sku) {
+                    throw self::notAvailable($skuId);
+                }
+                // Hidden custom-card shells host a configured card, not a
+                // standalone shelf item. Deletion and SKU status still apply.
+                $customCardShell = $sourceType === 'card'
+                    && (int)$product['product_type'] === 6
+                    && ((int)$product['id'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID
+                        || (int)$product['pid'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID);
+                self::assertNewSaleAvailability([
+                    'product_store_name' => $product['store_name'],
+                    'product_is_del' => $product['is_del'],
+                    'product_is_show' => $customCardShell ? 1 : $product['is_show'],
+                    'product_is_verify' => $product['is_verify'],
+                    'sku_is_show' => $sku['is_show'],
+                ], $skuId);
+            }
+        }
     }
 
     private static function failure(

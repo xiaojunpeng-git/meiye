@@ -218,13 +218,37 @@ $check('entitlement service intent is decoded separately from sale personnel sna
     && str_contains($rebuilder, "'craftsmen' => self::entitlementCraftsmenSnapshot(")
     && str_contains($rebuilder, 'private static function entitlementCraftsmenSnapshot($json)')
     && str_contains($rebuilder, 'checkout_draft_entitlement_craftsmen_weight_invalid'));
-$check('final snapshot sale validation does not reject product lifecycle status',
+$check('new snapshot sales recheck catalog availability while entitlements keep historic authority',
     is_string($saleOnly)
     && !str_contains($saleOnly, "->where('is_del', 0)")
     && is_string($catalog)
+    && str_contains($catalog, 'self::assertNewSaleAvailability($row, $skuId);')
+    && str_contains($catalog, 'function discoverSnapshotSaleResources(')
+    && str_contains($catalog, 'function lockedSnapshotItem(')
     && str_contains($catalog, 'function selectCheckoutSaleLineInTx(')
     && is_string($cardIssuer)
     && str_contains($cardIssuer, 'selectCheckoutSaleLineInTx('));
+$saleAvailability = new ReflectionMethod(\app\services\cashier\v3\cashier\CashierV3SaleCatalogServices::class, 'assertNewSaleAvailability');
+$activeSaleRow = [
+    'product_store_name' => '测试护理项目',
+    'product_is_del' => 0,
+    'product_is_show' => 1,
+    'sku_is_show' => 1,
+];
+$saleAvailability->invoke(null, $activeSaleRow, 101);
+$check('active product remains saleable', true);
+foreach (['product_is_del' => 1, 'product_is_show' => 0, 'sku_is_show' => 0] as $field => $offShelfValue) {
+    $row = $activeSaleRow;
+    $row[$field] = $offShelfValue;
+    $rejected = false;
+    try {
+        $saleAvailability->invoke(null, $row, 101);
+    } catch (CashierV3CommandException $exception) {
+        $rejected = str_contains($exception->getMessage(), '商品“测试护理项目”已被下架')
+            && ($exception->getDetail()['reason'] ?? '') === 'cashier_catalog_item_off_shelf';
+    }
+    $check('new sale names the off-shelf product for ' . $field, $rejected);
+}
 $cardPurchaseStart = is_string($catalog) ? strpos($catalog, 'private function cardPurchaseSnapshot(') : false;
 $cardPurchaseEnd = is_string($catalog) ? strpos($catalog, 'private static function cardRuleLabel(', $cardPurchaseStart === false ? 0 : $cardPurchaseStart) : false;
 $cardPurchaseSnapshot = $cardPurchaseStart === false || $cardPurchaseEnd === false

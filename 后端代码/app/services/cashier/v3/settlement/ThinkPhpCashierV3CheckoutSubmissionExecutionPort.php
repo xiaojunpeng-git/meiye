@@ -180,6 +180,12 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             }
             $lineIds = self::lineIdsByRole((array)$aggregate['lines']);
             self::assertComposition($composition, $lineIds);
+            // Recheck only new sale lines at the shared final boundary. A
+            // purchased entitlement may still be fulfilled after delisting.
+            \app\services\cashier\v3\cashier\CashierV3SaleCatalogServices::assertNewSaleLinesAvailableInTx(
+                (array)$aggregate['lines'],
+                $dataScope
+            );
             $commandKey = self::commandIdempotencyKey($scope['idempotency_key'] ?? null);
             $settledAt = max(
                 time(),

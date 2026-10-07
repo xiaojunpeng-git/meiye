@@ -401,10 +401,9 @@ final class CashierV3SaleInventorySettlementServices
                 ->field('id,type,relation_id,product_type,is_inventory,store_name')
                 ->lock(true)
                 ->find();
-            // A checkout snapshot owns the sale line that was already shown to
-            // the cashier. At final settlement this read establishes only the
-            // physical inventory identity; catalogue visibility, review and
-            // deletion flags must not turn a valid snapshot into a rejection.
+            // This provider establishes physical inventory identity only.
+            // The shared submit gate checks delisting for new sales; historic
+            // entitlement inventory does not use this sale-side decision.
             if (!$row || (int)$row['product_type'] !== 0) {
                 throw $this->failure('sale_inventory_product_changed', ['productId' => $productId]);
             }

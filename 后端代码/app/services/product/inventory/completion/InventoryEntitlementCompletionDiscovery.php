@@ -262,7 +262,9 @@ final class InventoryEntitlementCompletionDiscovery
     {
         $managed = [];
         foreach ($lines as $line) {
-            $project = Db::name('store_product')->where('id', $line['projectId'])->where('is_del', 0)->field('is_inventory')->find();
+            // The sold entitlement remains valid after its catalog project is hidden or soft-deleted.
+            // Keep the original inventory flag so a managed service still discovers its stock.
+            $project = Db::name('store_product')->where('id', $line['projectId'])->field('is_inventory')->find();
             if (!$project) {
                 throw $this->failure('inventory_project_not_found', ['projectId' => $line['projectId']]);
             }
@@ -502,9 +504,9 @@ final class InventoryEntitlementCompletionDiscovery
     /** @return array{0:int,1:string} */
     private function resolvePlatformProductSku(int $productId, string $unique, int $storeId): array
     {
+        // Recipe identity follows the sold project SKU, not its current sale-catalog status.
         $product = Db::name('store_product')
             ->where('id', $productId)
-            ->where('is_del', 0)
             ->field('id,pid,type,relation_id')
             ->find();
         if (!$product) {

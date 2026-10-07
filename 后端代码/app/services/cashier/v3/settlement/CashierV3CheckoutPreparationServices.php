@@ -241,9 +241,9 @@ final class CashierV3CheckoutPreparationServices
      *
      * Its line authority was materialized from the final snapshot, so re-reading the
      * mutable cashier workspace here would reintroduce the stale-projection
-     * race that the snapshot flow removes. Product lifecycle flags are not an
-     * eligibility check; only current resource versions are assembled for the
-     * final inventory/entitlement/balance transaction.
+     * race that the snapshot flow removes. This discovery assembles resource
+     * versions; the shared final submission gate separately checks new sale
+     * rows for delisting while historic entitlements remain fulfilable.
      */
     private function discoverPreparedRequestResources(
         string $requestId,
