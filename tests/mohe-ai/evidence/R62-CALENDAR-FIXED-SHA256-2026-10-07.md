@@ -1,0 +1,19 @@
+# R62 固定版本文件校验
+
+固定时 HEAD：`f86aaadc6ec6a7ec04961ab38e08eb6a343cc2c1`。尚未提交；验收期间任一文件变化须重算本清单。此 HEAD 包含其他任务独立提交；仅下列文件属于 R62。
+
+```text
+5b5e1a8ddc6942a2f09af81080e17dbf266b3fc5e0fae5d7dec742326cb8f6e1  后端代码/app/services/ai/execution/AiTemporalPeriodResolver.php
+29b9efe4c6750d737f2ced8f86e313e1c2d0efa6a3e0fe0aa3052514ba0dbaa9  后端代码/app/services/ai/execution/AiWorkflowPlanner.php
+ca476073035e3cb36c8ffc9e8b3baa82e617b35c181ed25b314bf95360410965  后端代码/app/services/ai/contract/AiIntentResultContract.php
+03aafe6d0a25bdefe39481ea3e5ee49c376748fe4a69f857b2ffe87aacb06d47  后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php
+b884642f02bfa945d86608db3d47411a4b7b3ed89bc3dadb2ee2c626ca451b3f  后端代码/app/services/ai/model/SiliconFlowClient.php
+07576ce3e2e469df60e87a98c8d97060ae1f43cbf76349dfb7d4f01c3c507d9f  后端代码/app/services/ai/presentation/AiAnswerRenderer.php
+141c196050f279173d10ce05e53e435718e4c96e23c3825b2ca57ab7522843d2  tests/mohe-ai/r62-calendar-period.php
+15b4510d83822237b67cb5cb411fcb580de8bc66f37edf40aae7f1c2c96d6a33  tests/mohe-ai/r62-model-calendar-local.php
+a720b6e17be57bfe67c28fc04ee0136502112f38fe46bda524bc6bb4eed37b98  tests/mohe-ai/r62-gateway-calendar-local.php
+48616981ad1f70a4f83f962f4e82823cbfa0456c7d362546b496d8d7e6f3e94f  tests/mohe-ai/temporal-ranking.php
+617812bb4a448d33874e1628a66af9d606e3528f9f54d3d833598c82aea9699c  tests/mohe-ai/intent-understanding-contract.php
+c4a18a40f3b47ac1419f18dced256c18aad5a43fc1b5cfc525c12105820f8804  tests/mohe-ai/gateway-integration.php
+1c945688c6d199f4ea4a1b5464e6928b641d8130a48d622c7dd8f358dd2ff288  tests/mohe-ai/gateway-review-regressions.php
+```

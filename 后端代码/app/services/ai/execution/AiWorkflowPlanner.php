@@ -65,9 +65,6 @@ final class AiWorkflowPlanner
             // ranges together instead of dropping one or choosing endpoints.
         } elseif (array_key_exists('date_terms',$projection)) {
             if (count($projection['date_terms'])===1 && empty($projection['date_grouping_ambiguous'])) $range=$this->period($projection['date_terms'][0],$today);
-        } elseif (!empty($projection['date_terms'])) {
-            if (count($projection['date_terms'])!==1 || !empty($projection['date_grouping_ambiguous'])) throw new AiContractException('AI_UNSUPPORTED_CONDITION');
-            $range=$this->period($projection['date_terms'][0],$today);
         } else {
         $dateCode = null;
         foreach (['TODAY', 'YESTERDAY', 'THIS_MONTH', 'LAST_MONTH'] as $code) if (in_array($code, $signals, true)) {
@@ -306,22 +303,9 @@ final class AiWorkflowPlanner
     /** Resolves meaning only. Bounds here are calendar representation, not query capacity. */
     public function normalizeNaturalPeriod(array $period,string $today): array
     {
-        if (!\app\services\ai\contract\AiIntentResultContract::periods([$period])) throw new AiContractException('AI_DATE_INVALID');
-        if ($period['kind']==='date_range') return $this->range($period['start'],$period['end']);
-        $reference=$this->date($today);
-        if ($period['kind']==='relative_days') {
-            $minimum=$this->date('1000-01-01');$maximum=$this->date('9999-12-31');
-            $offset=$period['end_offset_days'];
-            if ($offset < -$minimum->diff($reference)->days || $offset > $reference->diff($maximum)->days) throw new AiContractException('AI_DATE_INVALID');
-            $end=$reference->modify($offset.' days');
-            if ($period['days']>$minimum->diff($end)->days+1) throw new AiContractException('AI_DATE_INVALID');
-            return $this->range($end->modify('-'.($period['days']-1).' days')->format('Y-m-d'),$end->format('Y-m-d'));
-        }
-        $offset=$period['offset_months'];$year=(int)$reference->format('Y');$month=(int)$reference->format('n');
-        if ($offset < - (($year-1000)*12+$month-1) || $offset > (9999-$year)*12+12-$month) throw new AiContractException('AI_DATE_INVALID');
-        $start=$reference->modify('first day of this month')->modify($offset.' months');
-        // Existing product meaning: current calendar month is month-to-date.
-        return $this->range($start->format('Y-m-d'),$offset===0?$today:$start->format('Y-m-t'));
+        // Every typed period uses the same conversion for planning and contract
+        // comparison; separate month/week arithmetic would silently drift.
+        return AiTemporalPeriodResolver::resolve($period,$today);
     }
     private function range($start, $end): array
     {

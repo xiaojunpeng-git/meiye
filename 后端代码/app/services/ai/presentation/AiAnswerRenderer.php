@@ -135,7 +135,10 @@ final class AiAnswerRenderer
                         $rank = ($valueCounts[(string)$amount] > 1 ? '并列' : '')
                             . ($direction === 'top' ? '第' : '倒数第') . $ordinal . '名';
                         $rendered=[
-                            'label' => $point['business_date'] ?? ($point['employee_name'] ?? ($point['member_name'] ?? ($point['entity_name'] ?? ($point['store_name'] ?? ('门店 ID ' . $point['store_id']))))),
+                            // A day ranking answers “周几” directly while retaining
+                            // the exact Reader date for reconciliation and export.
+                            'label' => isset($point['business_date']) ? $this->weekdayDateLabel($point['business_date'])
+                                : ($point['employee_name'] ?? ($point['member_name'] ?? ($point['entity_name'] ?? ($point['store_name'] ?? ('门店 ID ' . $point['store_id']))))),
                             'metric' => $metricLabel, 'rank' => $rank, 'value' => $this->metricValue($amount, $storageUnit), 'unit' => $unit,
                             'period' => $row['period'], 'period_label' => $this->periodLabel($row['period']),
                         ];
@@ -252,6 +255,14 @@ final class AiAnswerRenderer
         // Screen paging is a presentation concern. The signed Reader view
         // retains every row for the independent file worker and follow-ups.
         return $screenLimit ? self::limitTables($answer,!$conditionListHasMore&&!$breakdownHasMore) : $answer;
+    }
+
+    /** A display label only: never replace the underlying business_date fact. */
+    private function weekdayDateLabel(string $date): string
+    {
+        $day=\DateTimeImmutable::createFromFormat('!Y-m-d',$date,new \DateTimeZone('Asia/Shanghai'));
+        if (!$day || $day->format('Y-m-d')!==$date) throw new RuntimeException('AI_EVIDENCE_INVALID');
+        return '周'.['日','一','二','三','四','五','六'][(int)$day->format('w')].'（'.$date.'）';
     }
 
     /** Cap each final business table, never its backing evidence or export. */

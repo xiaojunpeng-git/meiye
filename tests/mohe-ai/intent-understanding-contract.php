@@ -1048,7 +1048,7 @@ $check(strpos($prompt,'Requirements must preserve intelligible business-query me
     &&strpos($prompt,'do not manufacture an object, measurement, operation or unbound requirement')!==false,
     'general help versus partial clarification is model-owned business meaning, not an arbitrary nonempty requirement or word list');
 $understandingPrompt=AiIntentUnderstandingContract::modelInstruction();
-foreach (['metric_terms','metric_exclusions','object_kind','object_relation','operation','ranking','direction','limit','scope','date_range','relative_days','month_offset','end_offset_days','offset_months'] as $requiredShape) {
+foreach (['metric_terms','metric_exclusions','object_kind','object_relation','operation','ranking','direction','limit','scope','date_range','relative_days','calendar_period','week|month|quarter|year','end_offset_days','end_mode'] as $requiredShape) {
     $check(strpos($understandingPrompt,$requiredShape)!==false,'first-stage model is told the bounded shape of '.$requiredShape);
 }
 $check(strpos($understandingPrompt,'inspecting, summarizing or evaluating')!==false

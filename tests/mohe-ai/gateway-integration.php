@@ -225,7 +225,7 @@ try {
  verifyGateway($dateRankResult['status']==='COMPLETED' && $queries===$queriesBeforeDateRank+1 && $models===$modelsBeforeDateRank+2,
      'a model-understood business-date extremum uses one understanding, one exact binding and one Reader call');
  verifyGateway(($dateRankResult['answer']['table']['columns'][0]['label']??null)==='日期'
-     && preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/D',(string)($dateRankResult['answer']['table']['rows'][0]['label']??''))===1,
+     && preg_match('/^周[一二三四五六日]（[0-9]{4}-[0-9]{2}-[0-9]{2}）$/uD',(string)($dateRankResult['answer']['table']['rows'][0]['label']??''))===1,
      'the complete question returns a date rather than a store ranking');
  [$overviewRecovery,$overviewRecoveryInput]=$make('overview-recovery','今天整体经营怎么样（概览恢复）');$modelsBeforeOverviewRecovery=$models;$queriesBeforeOverviewRecovery=$queries;
  $overviewRecoveryResult=$gateway->handle('execute',$context,$binding($overviewRecovery)+$overviewRecoveryInput,$overviewRecovery['run_id']);

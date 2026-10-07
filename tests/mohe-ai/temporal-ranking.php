@@ -76,7 +76,7 @@ $view=[
 $answer=(new AiAnswerRenderer())->render($view);
 $check(str_contains($answer['summary'],'2026-09-02')
     && ($answer['table']['columns'][0]['label']??null)==='日期'
-    && ($answer['table']['rows'][0]['label']??null)==='2026-09-02',
-    'answer presents the winning date instead of a store identity');
+    && ($answer['table']['rows'][0]['label']??null)==='周三（2026-09-02）',
+    'answer presents the winning weekday and exact date instead of a store identity');
 
 echo 'temporal-ranking: PASS ('.$checks." checks; offline fixtures)\n";
