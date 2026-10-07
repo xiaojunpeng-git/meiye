@@ -64,6 +64,11 @@ const REPORT_TABS = Object.freeze([
   // through the store Data menu; the remaining 26 stay platform-only.
   { code: 'six_dimension_analysis', name: '六维数据分析表' }
 ])
+// 平台嵌入同一报表组件，但本轮名称调整仅适用于门店端。
+const PLATFORM_CROSS_INDUSTRY_NAMES = Object.freeze({
+  cross_industry_customer_detail: '异业收客明细表',
+  cross_industry_customer_summary: '异业收客汇总表'
+})
 const SIX_DIMENSION_REPORT_TABS = Object.freeze([
   { code: 'six_dimension_item_deal_analysis', name: '品项成交分析表' },
   { code: 'six_dimension_cash_consumption_analysis', name: '现金消费分析表' },
@@ -383,9 +388,12 @@ const allowedReportTabs = computed(() => {
   return authorized.length ? authorized : tabs
 })
 const reportTabs = computed(() => allowedReportTabs.value.filter((tab) => !tab.hidden).map((tab) => ({
-  // 历史目录名称可能仍保留在服务器配置中，门店端以已确认的标准名称为准。
+  // 门店端使用本地确认的名称；平台嵌入页仍保留原名称，不改其下载与字段说明标题。
   ...(serverCatalogByCode.value.get(tab.code) || {}),
-  ...tab
+  ...tab,
+  ...(isPlatformRuntimeRoute() && PLATFORM_CROSS_INDUSTRY_NAMES[tab.code]
+    ? { name: PLATFORM_CROSS_INDUSTRY_NAMES[tab.code] }
+    : {})
 })))
 const isFirstPhaseReport = computed(() => [
   'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',

@@ -45,9 +45,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'member_visit_annual_summary' => '会员进店年度汇总表',
             'field_acquisition_detail' => '地推拓客明细表',
             'field_acquisition_summary' => '地推拓客汇总表',
-            // 报表代码是下钻及手工补充记录的稳定标识，名称按产品确认互换。
-            'cross_industry_customer_detail' => '异业收客汇总表',
-            'cross_industry_customer_summary' => '异业收客明细表',
+            'cross_industry_customer_detail' => '异业收客明细表',
+            'cross_industry_customer_summary' => '异业收客汇总表',
             'new_customer_analysis' => '新客明细表',
             'new_customer_analysis_summary' => '新客汇总表',
             'salesperson_large_order_statistics' => '销售人生美大单统计表',
@@ -599,7 +598,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $memberIds=array_values(array_unique(array_filter(array_column($payments,'member_id'))));$careDates=[];
         if($memberIds){foreach($this->completedUnvoidedServiceFacts($this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('cross_care_service'),$stores,'cross_care_service'),'cross_care_service.checkout_request_id'),'cross_care_service','cross_care_void', true)->whereIn('cross_care_service.member_id',$memberIds)->fieldRaw('cross_care_service.store_id,cross_care_service.member_id,MIN(cross_care_service.business_date) care_date')->group('cross_care_service.store_id,cross_care_service.member_id')->select()->toArray()as$r)$careDates[(int)$r['store_id'].'|'.(int)$r['member_id']]=(string)$r['care_date'];}
         foreach($payments as &$row){$key=(string)$row['order_id'];$row['care_date']=$careDates[(int)$row['store_id'].'|'.(int)$row['member_id']]??'';$row['full_payment']=$this->money((int)$row['amount_cents']);$row['reward']=$this->money((int)($orders[$key]['reward_amount_cents']??0));$row['remark']=(string)($orders[$key]['order_note']??'');$row['annotation_subject_key']=$key;$row['annotation_subject_type']='sales_order';$row['source_order_id']=$key;}unset($row);
-        return $this->result('异业收客汇总表',$this->columns(['source'=>'来源','care_date'=>'护理日期','store_name'=>'门店','member_name'=>'会员','full_payment'=>'收客全款业绩','reward'=>'奖励','remark'=>'备注']),$payments,$input);
+        return $this->result('异业收客明细表',$this->columns(['source'=>'来源','care_date'=>'护理日期','store_name'=>'门店','member_name'=>'会员','full_payment'=>'收客全款业绩','reward'=>'奖励','remark'=>'备注']),$payments,$input);
     }
 
     private function crossIndustrySummary(array $stores,array $range,array $input):array
@@ -617,7 +616,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $row['first_500']=$this->money($first500);$row['reached_2400']=$this->money($reached2400);$total500+=$first500;$total2400+=$reached2400;$row['annotation_subject_key']=$key;$row['annotation_subject_type']='sale_line';$row['source_line_id']=$key;$row['_drilldown']=[];$annualConfig=['report'=>'cross_industry_customer_detail','params'=>['start_date'=>$year.'-01-01','end_date'=>$year.'-12-31','include_followup_cash'=>1],'param_map'=>['member_id'=>'member_id']];foreach(range(1,12)as$m){$monthKey='month_'.$m;if((int)($cash[$id][$m]??0)===0)continue;$row['_drilldown'][$monthKey]=['report'=>'cross_industry_customer_detail','params'=>['start_date'=>sprintf('%04d-%02d-01',$year,$m),'end_date'=>date('Y-m-t',strtotime(sprintf('%04d-%02d-01',$year,$m))),'include_followup_cash'=>1],'param_map'=>['member_id'=>'member_id']];}if($annual!==0)$row['_drilldown']['annual_cash']=$annualConfig;if($first500!==0)$row['_drilldown']['first_500']=$annualConfig;if($reached2400!==0)$row['_drilldown']['reached_2400']=$annualConfig;
         }unset($row);
         $columns=$this->columns(['customer_acquired_at'=>'收客时间','partner_store_name'=>'异业店名','member_name'=>'会员','phone'=>'手机号码','card_name'=>'卡项名称','remaining_service_count'=>'剩余服务次数','remaining_service_amount'=>'剩余服务金额','first_500'=>'首次成交满500','reached_2400'=>'成交满2400','first_visit_at'=>'首次到店时间','annual_cash'=>'全年现金业绩']);foreach(range(1,12)as$m)$columns[]=['key'=>'month_'.$m,'label'=>$m.'月'];
-        return $this->result('异业收客明细表',$columns,$sales,$input,[],['first_500_total'=>$this->money($total500),'reached_2400_total'=>$this->money($total2400),'natural_year'=>$year]);
+        return $this->result('异业收客汇总表',$columns,$sales,$input,[],['first_500_total'=>$this->money($total500),'reached_2400_total'=>$this->money($total2400),'natural_year'=>$year]);
     }
 
     /**
@@ -1494,8 +1493,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             '会员进店年度汇总表'=>['row_label'=>82,'year'=>76],
             '地推拓客明细表'=>['division_name'=>120,'store_name_snapshot'=>120,'source'=>110,'member_name_snapshot'=>90,'phone'=>116],
             '地推拓客汇总表'=>['card_sale_date'=>106,'member_name_snapshot'=>90,'phone'=>116,'source'=>110],
-            '异业收客汇总表'=>['source'=>110,'care_date'=>106,'store_name'=>120,'member_name'=>90],
-            '异业收客明细表'=>['customer_acquired_at'=>106,'partner_store_name'=>120,'member_name'=>90,'phone'=>116],
+            '异业收客明细表'=>['source'=>110,'care_date'=>106,'store_name'=>120,'member_name'=>90],
+            '异业收客汇总表'=>['customer_acquired_at'=>106,'partner_store_name'=>120,'member_name'=>90,'phone'=>116],
             '新客明细表'=>['division_name'=>120,'store_name_snapshot'=>120,'business_date'=>106,'customer'=>90,'guide'=>110,'salesperson'=>110,'sales_manager'=>110,'phone'=>116],
             '新客汇总表'=>['system_name'=>90,'division_name'=>120,'store_name'=>120,'member'=>90,'guide'=>110,'salesperson'=>110,'sales_manager'=>110,'source'=>110],
             '销售人生美大单统计表'=>['division_name'=>120,'store_name'=>120,'business_date'=>106,'salesperson'=>110],
@@ -1520,8 +1519,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if($title==='会员进店年度汇总表')return $key==='total'||strpos($key,'store_')===0?'count':'';
         if($title==='地推拓客明细表')return in_array($key,['visit_over_one_hour','fourth_and_above'],true)?'count':(in_array($key,['labor_fee','cash_1','cash_2','cash_3'],true)?'money':'');
         if($title==='地推拓客汇总表')return $key==='annual_total'||preg_match('/^month_\d+$/',$key)?'money':'';
-        if($title==='异业收客汇总表')return in_array($key,['full_payment','reward'],true)?'money':'';
-        if($title==='异业收客明细表')return $key==='remaining_service_count'?'count':(in_array($key,['remaining_service_amount','first_500','reached_2400','annual_cash'],true)||preg_match('/^month_\d+$/',$key)?'money':'');
+        if($title==='异业收客明细表')return in_array($key,['full_payment','reward'],true)?'money':'';
+        if($title==='异业收客汇总表')return $key==='remaining_service_count'?'count':(in_array($key,['remaining_service_amount','first_500','reached_2400','annual_cash'],true)||preg_match('/^month_\d+$/',$key)?'money':'');
         if($title==='新客明细表')return $key==='guide_effective_count'?'count':(in_array($key,['experience_card_amount','labor_fee','full_payment','deposit_payment','cleared_payment'],true)?'money':'');
         if($title==='新客汇总表')return preg_match('/^month_\d+_count$/',$key)?'count':($key==='annual_cash'||preg_match('/^month_\d+_(full|deposit|cleared)$/',$key)?'money':'');
         if($title==='销售人生美大单统计表')return $key==='daily_cash'?'money':'';
@@ -1535,7 +1534,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             '市场明细表'=>['editable_fields'=>[['key'=>'walk_in','label'=>'进店','type'=>'number','min'=>0]],'drilldown'=>['report'=>'market_detail']],
             '会员进店年度汇总表'=>['filter_schema'=>[['key'=>'mode','label'=>'统计方式','type'=>'select','options'=>[['value'=>'count','label'=>'按次数'],['value'=>'people','label'=>'按人头'],['value'=>'project','label'=>'按项目']]]]],
             '地推拓客明细表'=>['editable_fields'=>[['key'=>'card_sale_date','label'=>'卖卡日期','type'=>'date'],['key'=>'visit_over_one_hour','label'=>'进店满1小时','type'=>'number','min'=>0]]],
-            '异业收客明细表'=>['editable_fields'=>[['key'=>'customer_acquired_at','label'=>'收客时间','type'=>'date'],['key'=>'partner_store_name','label'=>'异业店名','type'=>'text']],'top_summaries'=>[['key'=>'first_500_total','label'=>'成交满500元合计：','value'=>$totals['first_500_total']??'0'],['key'=>'reached_2400_total','label'=>'成交满2400元合计：','value'=>$totals['reached_2400_total']??'0']]],
+            '异业收客汇总表'=>['editable_fields'=>[['key'=>'customer_acquired_at','label'=>'收客时间','type'=>'date'],['key'=>'partner_store_name','label'=>'异业店名','type'=>'text']],'top_summaries'=>[['key'=>'first_500_total','label'=>'成交满500元合计：','value'=>$totals['first_500_total']??'0'],['key'=>'reached_2400_total','label'=>'成交满2400元合计：','value'=>$totals['reached_2400_total']??'0']]],
             '新客明细表'=>['editable_fields'=>[['key'=>'experience_card_amount','label'=>'体验卡金额','type'=>'money'],['key'=>'care_duration','label'=>'手艺人护理时长','type'=>'text']]],
             '销售人生美大单统计表'=>['pending_metrics'=>['分成前、分成后和兑现月份尚无权威分成计划事实，当前不猜算这些数值。']],
         ];

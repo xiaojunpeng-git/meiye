@@ -11,9 +11,8 @@ const STORE_OPERATION_REPORTS = Object.freeze([
   { code: 'member_visit_annual_summary', title: '会员进店年度汇总表', description: '按年度、月份和权限范围汇总会员进店数据' },
   { code: 'field_acquisition_detail', title: '地推拓客明细表', description: '查看地推来源会员的卖卡、服务和业绩明细' },
   { code: 'field_acquisition_summary', title: '地推拓客汇总表', description: '汇总地推会员首年及各月现金业绩' },
-  // 既有代码仍承载原查询与下钻，仅同步产品确认的两张报表名称。
-  { code: 'cross_industry_customer_detail', title: '异业收客汇总表', description: '查看异业来源的护理、收款和奖励数据' },
-  { code: 'cross_industry_customer_summary', title: '异业收客明细表', description: '查看异业客户成交、权益及月度业绩数据' },
+  { code: 'cross_industry_customer_detail', title: '异业收客明细表', description: '查看异业来源的护理、收款和奖励明细' },
+  { code: 'cross_industry_customer_summary', title: '异业收客汇总表', description: '汇总异业客户成交、权益及月度业绩' },
   { code: 'new_customer_analysis', title: '新客明细表', description: '查看新客服务、人员分配及收款归类明细' },
   { code: 'new_customer_analysis_summary', title: '新客汇总表', description: '按当前查询年度动态汇总新客月度数据' },
   { code: 'salesperson_large_order_statistics', title: '销售人生美大单统计表', description: '统计销售人生美大单及分成阶段结果' },
