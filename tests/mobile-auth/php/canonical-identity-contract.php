@@ -67,9 +67,33 @@ namespace {
         strpos($precheck, '20260728-002-cashier-v3-member-consistency') !== false
         && strpos($precheck, 'STOP_MOBILE_AUTH_CANONICAL_IDENTITY_PRECHECK_FAILED') !== false
     );
+    $identitySource = (string)file_get_contents($root . '/后端代码/app/services/user/CanonicalUserIdentityServices.php');
+    $ok('MA-CI-03',
+        strpos($identitySource, 'lockPhoneOwners($phone)') !== false
+        && strpos($identitySource, 'releaseIdentityForCancelledMember') === false
+        && strpos($identitySource, 'clearPhoneIdentity(int $uid') !== false
+        && strpos($identitySource, '会员注销不释放手机号身份') !== false,
+        'cancelled_phone_reassignment_must_stay_blocked'
+    );
+    $merchantSource = (string)file_get_contents($root . '/后端代码/app/services/merchant/MerchantCustomerServices.php');
+    $h5Source = (string)file_get_contents($root . '/后端代码/app/services/user/LoginServices.php');
+    $legacyCashierSource = (string)file_get_contents($root . '/后端代码/app/controller/cashier/User.php');
+    $importSource = (string)file_get_contents($root . '/后端代码/app/services/other/Import/ImportRecordServices.php');
+    $memberEditSource = (string)file_get_contents($root . '/后端代码/app/services/user/UserServices.php');
+    $ok('MA-CI-03',
+        strpos($merchantSource, 'ensureUserIdentity($phone') !== false
+        && strpos($h5Source, 'ensureUserIdentity((string)$phone') !== false
+        && substr_count($h5Source, 'replacePhoneIdentity($uid, $phone') === 2
+        && strpos($legacyCashierSource, 'ensureUserIdentity($phone') !== false
+        && strpos($legacyCashierSource, 'replacePhoneIdentity($uid, (string)$data[\'phone\']') !== false
+        && strpos($importSource, 'createMemberWithUniquePhone($userServices, $save)') !== false
+        && strpos($memberEditSource, 'replacePhoneIdentity($id, trim((string)$data[\'phone\']') !== false
+        && strpos($memberEditSource, 'clearPhoneIdentity($id, $audit)') !== false,
+        'legacy_member_writers_must_use_canonical_phone_identity'
+    );
 
     $expected = ['MA-CI-01', 'MA-CI-02', 'MA-CI-03'];
     $ok('MATRIX', $executed === $expected, json_encode($executed));
-    echo 'TEST_COUNT=' . (count($expected) + 3) . "\n";
+    echo 'TEST_COUNT=' . (count($expected) + 5) . "\n";
     exit($failed === 0 ? 0 : 1);
 }

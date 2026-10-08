@@ -710,6 +710,21 @@ class CashierV3ActionManifest
                 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['member.deactivated' => []],
             ],
+            'restore-member' => [
+                'required_event_types' => ['member.restored'],
+                'allowed_event_types' => ['member.restored'],
+                'event_rules' => [
+                    'member.restored' => [
+                        'min_count' => 1,
+                        'max_count' => 1,
+                        'aggregate_type' => 'member',
+                        'source_type' => 'restore-member',
+                    ],
+                ],
+                'eventless_reason' => '',
+                'activation_blocked_until_event_contract' => false,
+                'consumers' => ['member.restored' => []],
+            ],
 
             // C5 | order mutation and account query preferences
             'adjust-sales-order-personnel' => [

@@ -20,6 +20,7 @@ use app\services\wechat\WechatUserServices;
 use mohe\services\CacheService;
 use think\exception\ValidateException;
 use think\facade\Config;
+use think\facade\Db;
 
 /**
  *
@@ -193,7 +194,7 @@ class LoginServices extends BaseServices
      */
     public function register($account, $password, $spread_uid, $user_type = 'h5')
     {
-        if ($this->dao->getOne(['phone' => $account])) {
+        if (Db::name('user')->where('phone', $account)->value('uid')) {
             throw new ValidateException('用户已存在,请去修改密码');
         }
         $phone = $account;
@@ -221,15 +222,31 @@ class LoginServices extends BaseServices
         $data['province'] = '';
         $data['country'] = '';
         $data['status'] = 1;
-        if (!$re = $this->dao->save($data)) {
-            throw new ValidateException('注册失败');
-        } else {
-            //用户注册成功事件
-            event('user.register', [$this->dao->get((int)$re->uid), true, $spread_uid]);
-            //推送消息
-//            event('notice.notice', [['spreadUid' => $spread, 'user_type' => $user_type, 'nickname' => $data['nickname']], 'bind_spread_uid']);
-            return $re;
+        /** @var CanonicalUserIdentityServices $identities */
+        $identities = app()->make(CanonicalUserIdentityServices::class);
+        $data['phone'] = '';
+        $created = false;
+        // 注册和收银建档争用同一身份行；注销号不得被 H5 重新注册。
+        $uid = $identities->ensureUserIdentity((string)$phone, function () use ($data, &$created): int {
+            $member = $this->dao->save($data);
+            if (!$member) {
+                throw new ValidateException('注册失败');
+            }
+            $created = true;
+            return (int)$member->uid;
+        }, ['operator_type' => 'MEMBER', 'source' => 'H5_REGISTER']);
+        if (!$created) {
+            throw new ValidateException('用户已存在,请去修改密码');
         }
+        $re = $this->dao->get($uid);
+        if (!$re) {
+            throw new ValidateException('注册失败');
+        }
+        // 用户注册事件只为本次新建的 UID 发送。
+        event('user.register', [$re, true, $spread_uid]);
+        //推送消息
+//            event('notice.notice', [['spreadUid' => $spread, 'user_type' => $user_type, 'nickname' => $data['nickname']], 'bind_spread_uid']);
+        return $re;
     }
 
     /**
@@ -364,11 +381,13 @@ class LoginServices extends BaseServices
      */
     public function userBindindPhone(int $uid, $phone, $step)
     {
+        $phone = trim((string)$phone);
         $userInfo = $this->dao->get($uid);
         if (!$userInfo) {
             throw new ValidateException('登录失效');
         }
-        if ($this->dao->getOne(['phone' => $phone])) {
+        // DAO 默认忽略软删除；号码归属检查必须覆盖注销会员。
+        if (Db::name('user')->where('phone', $phone)->where('uid', '<>', $uid)->value('uid')) {
             throw new ValidateException('此手机已经绑定，无法多次绑定！');
         }
         if ($userInfo->phone == $phone) {
@@ -380,11 +399,17 @@ class LoginServices extends BaseServices
         } else {
             $data['account'] = $phone;
         }
-        $data['phone'] = $phone;
-        if ($this->dao->update($userInfo['uid'], $data, 'uid') || $userInfo->phone == $phone)
-            return ['msg' => '绑定成功', 'data' => []];
-        else
-            throw new ValidateException('绑定失败');
+        Db::transaction(function () use ($uid, $phone, $data): void {
+            /** @var CanonicalUserIdentityServices $identities */
+            $identities = app()->make(CanonicalUserIdentityServices::class);
+            $identities->replacePhoneIdentity($uid, $phone, [
+                'operator_type' => 'MEMBER', 'operator_id' => $uid, 'source' => 'H5_BIND_PHONE',
+            ]);
+            if ($data && $this->dao->update($uid, $data, 'uid') === false) {
+                throw new ValidateException('绑定失败');
+            }
+        });
+        return ['msg' => '绑定成功', 'data' => []];
     }
 
     /**
@@ -396,6 +421,7 @@ class LoginServices extends BaseServices
      */
     public function updateBindindPhone(int $uid, $phone)
     {
+        $phone = trim((string)$phone);
         $userInfo = $this->dao->get($uid);
         if (!$userInfo) {
             throw new ValidateException('登录失败，请重新登录');
@@ -403,14 +429,14 @@ class LoginServices extends BaseServices
         if ($userInfo->phone == $phone) {
             throw new ValidateException('新手机号和原手机号相同，无需修改');
         }
-        if ($this->dao->getOne([['phone', '=', $phone]])) {
+        if (Db::name('user')->where('phone', $phone)->where('uid', '<>', $uid)->value('uid')) {
             throw new ValidateException('此手机已经注册');
         }
-        $data = [];
-        $data['phone'] = $phone;
-        if ($this->dao->update($userInfo['uid'], $data, 'uid'))
-            return ['msg' => '修改成功', 'data' => []];
-        else
-            throw new ValidateException('修改失败');
+        /** @var CanonicalUserIdentityServices $identities */
+        $identities = app()->make(CanonicalUserIdentityServices::class);
+        $identities->replacePhoneIdentity($uid, $phone, [
+            'operator_type' => 'MEMBER', 'operator_id' => $uid, 'source' => 'H5_CHANGE_PHONE',
+        ]);
+        return ['msg' => '修改成功', 'data' => []];
     }
 }

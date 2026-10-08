@@ -146,6 +146,8 @@ final class MemberIntegrationFixture
         'eb_cashier_v3_member_number_sequence',
         'eb_member_exclusive_service',
         'eb_member_exclusive_service_change',
+        'eb_user_phone_identity',
+        'eb_user_phone_identity_audit',
     ];
 
     /** @var string[] */
@@ -231,6 +233,9 @@ final class MemberIntegrationFixture
               `employee_id` int unsigned NOT NULL DEFAULT 0,
               `account` varchar(64) NOT NULL DEFAULT '',
               `staff_name` varchar(64) NOT NULL DEFAULT '',
+              `cashier_salesperson_enabled` tinyint NOT NULL DEFAULT 1,
+              `cashier_craftsman_enabled` tinyint NOT NULL DEFAULT 1,
+              `craftsman_performance_type` varchar(32) NOT NULL DEFAULT '',
               `roles` varchar(255) NOT NULL DEFAULT '',
               `level` int NOT NULL DEFAULT 1,
               `can_choose` tinyint NOT NULL DEFAULT 0,
@@ -321,6 +326,79 @@ final class MemberIntegrationFixture
               `exp` decimal(12,2) NOT NULL DEFAULT 0,
               `level_status` tinyint NOT NULL DEFAULT 0,
               PRIMARY KEY (`uid`), KEY `idx_phone` (`phone`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_user_phone_identity` (
+              `id` bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+              `phone_digest` char(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+              `bound_uid` bigint unsigned DEFAULT NULL,
+              `state` varchar(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'RESERVED',
+              `identity_version` bigint unsigned NOT NULL DEFAULT 1,
+              `bound_at` int unsigned NOT NULL DEFAULT 0,
+              `released_at` int unsigned NOT NULL DEFAULT 0,
+              `created_at` int unsigned NOT NULL DEFAULT 0,
+              `updated_at` int unsigned NOT NULL DEFAULT 0,
+              UNIQUE KEY `uk_phone_digest` (`phone_digest`),
+              UNIQUE KEY `uk_bound_uid` (`bound_uid`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_user_phone_identity_audit` (
+              `id` bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+              `identity_id` bigint unsigned NOT NULL,
+              `phone_digest` char(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+              `before_uid` bigint unsigned DEFAULT NULL,
+              `after_uid` bigint unsigned DEFAULT NULL,
+              `before_state` varchar(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+              `after_state` varchar(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+              `before_version` bigint unsigned NOT NULL,
+              `after_version` bigint unsigned NOT NULL,
+              `action` varchar(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+              `operator_type` varchar(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+              `operator_id` bigint unsigned NOT NULL DEFAULT 0,
+              `source` varchar(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+              `request_id` char(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+              `occurred_at` int unsigned NOT NULL DEFAULT 0,
+              `recorded_at` int unsigned NOT NULL DEFAULT 0
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_cashier_v3_entitlement_service_fact` (
+              `id` bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+              `tenant_id` varchar(64) NOT NULL DEFAULT '0',
+              `store_id` int unsigned NOT NULL DEFAULT 0,
+              `member_id` int unsigned NOT NULL DEFAULT 0,
+              `business_date` date NOT NULL,
+              `settled_at` int unsigned NOT NULL DEFAULT 0,
+              `service_status` varchar(32) NOT NULL DEFAULT 'completed',
+              `is_experience` tinyint NOT NULL DEFAULT 0,
+              `craftsmen_snapshot_json` text,
+              KEY `idx_member_visit` (`tenant_id`,`member_id`,`store_id`,`business_date`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_cashier_v3_customer_lifecycle_projection` (
+              `id` bigint unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+              `tenant_id` varchar(32) NOT NULL DEFAULT '0',
+              `member_id` bigint unsigned NOT NULL,
+              `first_course_completed_at` bigint unsigned NOT NULL DEFAULT 0,
+              UNIQUE KEY `uk_tenant_member` (`tenant_id`,`member_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_position` (
+              `id` int unsigned NOT NULL PRIMARY KEY,
+              `name` varchar(64) NOT NULL DEFAULT '',
+              `status` tinyint NOT NULL DEFAULT 1,
+              `use_store` tinyint NOT NULL DEFAULT 1,
+              `performance_independent` tinyint NOT NULL DEFAULT 0
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_staff_job_position` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+              `staff_id` int unsigned NOT NULL,
+              `employee_id` int unsigned NOT NULL,
+              `position_id` int unsigned NOT NULL,
+              `status` tinyint NOT NULL DEFAULT 1,
+              `is_del` tinyint NOT NULL DEFAULT 0,
+              `end_time` int unsigned NOT NULL DEFAULT 0
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_job_position_channel_rule` (
+              `id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+              `position_id` int unsigned NOT NULL,
+              `channel` varchar(32) NOT NULL,
+              `status` tinyint NOT NULL DEFAULT 1,
+              `rules` varchar(255) NOT NULL DEFAULT ''
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
             "CREATE TABLE IF NOT EXISTS `eb_user_recharge` (
               `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -598,6 +676,11 @@ final class MemberIntegrationFixture
         self::ensureColumn('eb_user_card_holder', 'write_times', "int unsigned NOT NULL DEFAULT 0");
         self::ensureColumn('eb_store_product', 'card_rule_type', "varchar(24) NOT NULL DEFAULT ''");
         self::ensureColumn('eb_store_product', 'card_rule_version', "int unsigned NOT NULL DEFAULT 0");
+        self::ensureColumn('eb_system_store_staff', 'cashier_salesperson_enabled', "tinyint NOT NULL DEFAULT 1");
+        self::ensureColumn('eb_system_store_staff', 'cashier_craftsman_enabled', "tinyint NOT NULL DEFAULT 1");
+        self::ensureColumn('eb_system_store_staff', 'craftsman_performance_type', "varchar(32) NOT NULL DEFAULT ''");
+        self::ensureColumn('eb_position', 'name', "varchar(64) NOT NULL DEFAULT ''");
+        self::ensureColumn('eb_position', 'performance_independent', "tinyint NOT NULL DEFAULT 0");
         self::ensureColumn('eb_store_product', 'card_choice_limit', "int unsigned NOT NULL DEFAULT 0");
         self::ensureColumn('eb_store_product', 'card_shared_times', "int unsigned NOT NULL DEFAULT 0");
         self::ensureColumn('eb_store_card_related', 'writeoff_amount', "decimal(12,2) unsigned NOT NULL DEFAULT 0");
@@ -653,6 +736,8 @@ final class MemberIntegrationFixture
             'cashier_v3_workspace_line',
             'cashier_v3_workspace_draft',
             'cashier_v3_entitlement_resource_version',
+            'cashier_v3_entitlement_service_fact',
+            'cashier_v3_customer_lifecycle_projection',
             'staff_yeji',
             'store_order_writeoff',
             'store_reservation_order',
@@ -665,6 +750,8 @@ final class MemberIntegrationFixture
             'cashier_v3_outbox',
             'cashier_v3_business_event',
             'cashier_v3_member_phone_lock',
+            'user_phone_identity_audit',
+            'user_phone_identity',
             'member_exclusive_service_change',
             'member_exclusive_service',
         ] as $table) {
@@ -685,6 +772,14 @@ final class MemberIntegrationFixture
           (31,8,31,'selector-sales-31','人员查询销售未分类','1',1,1,0),
           (32,9,32,'selector-sales-32','人员查询销售跨店','1',1,1,0),
           (33,8,33,'selector-sales-33','人员查询销售停用','1',1,0,0)");
+        // 当前权限权威源是任职岗位规则，旧角色菜单已不再给选择器授权。
+        Db::execute("REPLACE INTO `eb_position` (`id`,`status`,`use_store`) VALUES (99001,1,1)");
+        Db::execute("DELETE FROM `eb_staff_job_position` WHERE `position_id`=99001");
+        Db::execute("INSERT INTO `eb_staff_job_position` (`staff_id`,`employee_id`,`position_id`,`status`,`is_del`,`end_time`) VALUES
+          (1,1,99001,1,0,0),(2,2,99001,1,0,0)");
+        Db::execute("DELETE FROM `eb_job_position_channel_rule` WHERE `position_id`=99001");
+        Db::execute("INSERT INTO `eb_job_position_channel_rule` (`position_id`,`channel`,`status`,`rules`) VALUES
+          (99001,'store_v3',1,'301001,301004,301005')");
         Db::execute("REPLACE INTO `eb_employee` (`id`,`name`,`status`,`employment_type_code`,`employment_type_version`,`is_del`) VALUES
           (1,'操作员一',1,'internal',1,0),(2,'操作员二',1,'internal',1,0),(20,'专属服务人甲',1,NULL,0,0),
           (30,'人员查询销售内部',1,'internal',1,0),(31,'人员查询销售未分类',1,NULL,0,0),

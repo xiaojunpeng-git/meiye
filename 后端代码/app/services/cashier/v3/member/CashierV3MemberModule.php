@@ -58,6 +58,7 @@ final class CashierV3MemberModule
         self::registerPolicy($dispatcher, 'set-guest-order');
         self::registerMemberMutationPolicy($dispatcher, 'update-member');
         self::registerMemberMutationPolicy($dispatcher, 'deactivate-member');
+        self::registerMemberMutationPolicy($dispatcher, 'restore-member');
         self::registerDirectGiftPolicy($dispatcher);
         self::registerPolicy($dispatcher, 'select-cashier-member');
         self::registerSelectionPolicy($dispatcher, 'select-writeoff-member', 'writeoff');
@@ -177,6 +178,7 @@ final class CashierV3MemberModule
                             && (!$supportsExplicitStoreScope || $isAllScope),
                         $supportsExplicitStoreScope && !$isAllScope,
                         // 首字母检索只开放本轮批准的收银/预约选择器，其他复用入口不扩散。
+                        $supportsExplicitStoreScope,
                         $supportsExplicitStoreScope
                     ),
                 ];
@@ -370,6 +372,29 @@ final class CashierV3MemberModule
                 });
             });
         }
+        if (!$handlers->hasProjection('open-member-restore')) {
+            $handlers->registerProjection('open-member-restore', function (array $scope) use ($memberVersions): array {
+                $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
+                return Db::transaction(function () use ($payload, $scope, $memberVersions): array {
+                    // 仅为有权操作的注销会员签发版本；不开放编辑或其他业务选择。
+                    $member = self::findManageableMember(
+                        (string)($payload['memberId'] ?? $payload['member_id'] ?? ''),
+                        $scope['operator_scope'],
+                        $scope['data_scope'],
+                        false,
+                        true
+                    );
+                    $memberId = (int)$member['uid'];
+                    $version = $memberVersions->synchronizeProjectionVersion(
+                        'member', (string)$memberId, $scope['operator_scope'], $scope['data_scope']
+                    );
+                    return [
+                        'data' => ['member' => self::formatMemberRow($member, $scope['operator_scope']->storeId())],
+                        'versions' => [['kind' => 'member', 'id' => (string)$memberId, 'version' => $version]],
+                    ];
+                });
+            });
+        }
         if (!$handlers->hasCommand('create-member')) {
             $handlers->registerCommand('create-member', function (array $scope) use ($memberVersions): array {
                 $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
@@ -441,6 +466,25 @@ final class CashierV3MemberModule
                     'business_no' => (string)($member['memberNo'] ?? ''),
                     'touched' => ['member', 'cashier_workspace'],
                     'message' => '会员已注销，历史业务记录已保留。',
+                ];
+            });
+        }
+        if (!$handlers->hasCommand('restore-member')) {
+            $handlers->registerCommand('restore-member', function (array $scope): array {
+                $member = self::restoreMember(
+                    is_array($scope['payload'] ?? null) ? $scope['payload'] : [],
+                    $scope['operator_scope'],
+                    $scope['data_scope'],
+                    (string)($scope['idempotency_key'] ?? ''),
+                    $scope['event_recorder'] ?? null,
+                    $scope['event_execution'] ?? null,
+                    is_array($scope['event_contract'] ?? null) ? $scope['event_contract'] : []
+                );
+                return [
+                    'data' => ['member' => $member],
+                    'business_no' => (string)($member['memberNo'] ?? ''),
+                    'touched' => ['member', 'cashier_workspace'],
+                    'message' => '会员已恢复，原会员资料及历史记录保持不变。',
                 ];
             });
         }
@@ -804,7 +848,8 @@ final class CashierV3MemberModule
         CashierV3DataScopeContext $dataScope,
         bool $globalSelector,
         bool $currentStoreOnly = false,
-        bool $allowNameInitials = false
+        bool $allowNameInitials = false,
+        bool $excludeCancelled = false
     ): array {
         $page = max(1, (int)($payload['page'] ?? 1));
         $pageSize = min(100, max(1, (int)($payload['pageSize'] ?? 20)));
@@ -822,6 +867,10 @@ final class CashierV3MemberModule
 
         $priority = self::priorityContext($operatorScope, $storeIds);
         $query = self::memberVisibilityQuery($storeIds, $keyword, $allowNameInitials);
+        if ($excludeCancelled) {
+            // 在计数和分页之前过滤，避免注销号码仍出现在收银搜索结果或造成空页。
+            $query->where('u.is_del', 0)->whereRaw("(u.delete_time IS NULL OR CAST(u.delete_time AS CHAR) IN ('', '0', '0000-00-00 00:00:00'))");
+        }
         $total = (int)(clone $query)->count('distinct u.uid');
         $rows = $query
             ->field('u.uid,u.nickname,u.real_name,u.phone,u.bar_code,u.belong_store_id,u.status,u.is_del,u.delete_time,u.add_time')
@@ -1270,6 +1319,8 @@ final class CashierV3MemberModule
             );
         }
         $uid = (int)$saved->uid;
+        // V3 与手机端共用同一号码身份；身份绑定失败必须连会员建档一起回滚。
+        self::bindCanonicalPhone($uid, $phone);
         $storeUser = Db::name('store_user')->where(['uid' => $uid, 'store_id' => $operatorScope->storeId()])->lock(true)->find();
         if (!$storeUser) {
             $storeUserInserted = Db::name('store_user')->insert([
@@ -1546,6 +1597,52 @@ final class CashierV3MemberModule
         return self::formatMemberRow($current ?: $member, $operatorScope->storeId());
     }
 
+    /** 恢复原 UID 和号码，不创建新档案；手机号锁防止并发建档或其他恢复占用该号码。 */
+    private static function restoreMember(
+        array $payload,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope,
+        string $idempotencyKey,
+        $eventRecorder,
+        $eventExecution,
+        array $eventContract
+    ): array {
+        $member = self::findManageableMember(
+            (string)($payload['memberId'] ?? $payload['member_id'] ?? ''),
+            $operatorScope, $dataScope, true, true
+        );
+        $phone = trim((string)($member['phone'] ?? ''));
+        if ($phone === '') {
+            throw self::validation('phone', '该会员没有手机号，无法恢复号码。');
+        }
+        self::lockPhoneResource($phone);
+        $samePhone = Db::name('user')->where('phone', $phone)->where('uid', '<>', (int)$member['uid'])->lock(true)->find();
+        if ($samePhone) {
+            // 已注销、停用也持续占用号码，历史重复数据不能通过恢复再扩大冲突。
+            throw self::validation('phone', '该手机号已属于其他会员，不能恢复，请先核对历史重复资料。');
+        }
+        if ((int)Db::name('user')->where('uid', (int)$member['uid'])->update([
+            'status' => 1,
+            'is_del' => 0,
+            'delete_time' => null,
+        ]) !== 1) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '会员恢复失败，本次操作已取消。',
+                CashierV3ResultCode::STATUS_FAILED
+            );
+        }
+        // 早期注销记录可能处于 RELEASED 状态；恢复须重绑同一 UID 才能跨端使用。
+        self::bindCanonicalPhone((int)$member['uid'], $phone);
+        $current = Db::name('user')->where('uid', (int)$member['uid'])->lock(true)->find();
+        self::recordMemberMutationEvent(
+            'member.restored', 'restore-member', $current ?: $member,
+            $operatorScope, $dataScope, $idempotencyKey,
+            ['source' => 'cashier_v3'], $eventRecorder, $eventExecution, $eventContract
+        );
+        return self::formatMemberRow($current ?: $member, $operatorScope->storeId());
+    }
+
     /** Resolves the referrer inside the V3 member-write transaction and scope. */
     private static function resolveReferrerMemberId(array $payload, int $memberId, CashierV3OperatorScope $operatorScope, CashierV3DataScopeContext $dataScope): int
     {
@@ -1566,7 +1663,8 @@ final class CashierV3MemberModule
         string $memberId,
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope,
-        bool $lock
+        bool $lock,
+        bool $requireCancelled = false
     ): array {
         if (preg_match('/^[1-9][0-9]*$/D', trim($memberId)) !== 1) {
             throw new CashierV3CommandException(CashierV3ResultCode::RESOURCE_NOT_FOUND, '该会员不存在或当前不可编辑。', CashierV3ResultCode::STATUS_FAILED);
@@ -1576,7 +1674,11 @@ final class CashierV3MemberModule
             $query->lock(true);
         }
         $member = $query->find();
-        if (!$member || !self::memberState($member)['selectable']) {
+        $state = $member ? self::memberState($member) : null;
+        // 恢复只接受已注销原档案，编辑/注销仍只接受正常会员。
+        if (!$member || ($requireCancelled
+            ? $state['code'] !== 'member_cancelled'
+            : !$state['selectable'])) {
             throw new CashierV3CommandException(CashierV3ResultCode::RESOURCE_NOT_FOUND, '该会员不存在、已停用或已注销，不能继续编辑。', CashierV3ResultCode::STATUS_FAILED);
         }
         $stores = self::visibleStoreIds($dataScope);
@@ -2408,6 +2510,19 @@ final class CashierV3MemberModule
                 CashierV3ResultCode::STATUS_FAILED,
                 ['resource' => 'member_phone']
             );
+        }
+    }
+
+    /** 共用身份表的唯一摘要锁，禁止注销后号码被另一会员重新绑定。 */
+    private static function bindCanonicalPhone(int $memberId, string $phone): void
+    {
+        CashierV3TransactionGuard::assertInTransaction('memberCanonicalPhone');
+        try {
+            app()->make(\app\services\user\CanonicalUserIdentityServices::class)->bindPhoneIdentity(
+                $memberId, $phone, ['operator_type' => 'STORE', 'source' => 'CASHIER_V3_MEMBER']
+            );
+        } catch (\mohe\exceptions\AdminException $exception) {
+            throw self::validation('phone', $exception->getMessage());
         }
     }
 

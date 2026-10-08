@@ -49,6 +49,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['create-member'] = self::FEATURE_MEMBER_CREATE;
         $command['update-member'] = self::FEATURE_MEMBER_EDIT;
         $command['deactivate-member'] = self::FEATURE_MEMBER;
+        $command['restore-member'] = self::FEATURE_MEMBER;
         foreach ([
             'submit-recharge',
             'submit-recharge-checkout',
@@ -64,6 +65,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'query-member-card-history' => self::FEATURE_MEMBER,
             'open-member-more-actions' => self::FEATURE_MEMBER,
             'open-member-editor' => self::FEATURE_MEMBER_EDIT,
+            'open-member-restore' => self::FEATURE_MEMBER,
             'open-member-creator' => self::FEATURE_MEMBER_CREATE,
             'open-member-batch-actions' => self::FEATURE_MEMBER_BATCH,
             'open-recharge' => self::FEATURE_RECHARGE,

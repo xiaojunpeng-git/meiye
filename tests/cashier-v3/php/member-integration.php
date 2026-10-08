@@ -215,6 +215,7 @@ try {
     for ($page = 1; $page <= 3; $page++) {
         $data = c5Projection($dispatcher, 'query-member-selector', [
             'selectorEntry' => 'cashier',
+            'memberScope' => 'all',
             'keyword' => '排序',
             'page' => $page,
             'pageSize' => 2,
@@ -279,7 +280,7 @@ try {
         'C5-ENTITY-03'
     );
 
-    c5Section('disabled and cancelled members remain visible but not selectable');
+    c5Section('disabled remains visible; cancelled is excluded from cashier selector');
     $statusData = c5Projection($dispatcher, 'query-member-selector', [
         'selectorEntry' => 'cashier',
         'keyword' => '状态',
@@ -298,10 +299,19 @@ try {
         'C5-MEM-02'
     );
     ok(
-        '注销会员显示为已注销且不可选',
-        ($statusById[107]['status'] ?? '') === '已注销'
-            && ($statusById[107]['selectable'] ?? true) === false,
+        '注销会员不出现在收银选择器',
+        !isset($statusById[107]) && (int)($statusData['total'] ?? -1) === 1,
         json_encode($statusById[107] ?? null, JSON_UNESCAPED_UNICODE),
+        'C5-MEM-02'
+    );
+    $cancelledPhone = c5Projection($dispatcher, 'query-member-selector', [
+        'selectorEntry' => 'cashier', 'keyword' => '13100000107', 'memberScope' => 'all',
+        'page' => 1, 'pageSize' => 1,
+    ], $projectionSession);
+    ok(
+        '注销号码全集团精确搜索也无结果',
+        (int)($cancelledPhone['total'] ?? -1) === 0 && ($cancelledPhone['records'] ?? null) === [],
+        json_encode($cancelledPhone, JSON_UNESCAPED_UNICODE),
         'C5-MEM-02'
     );
     foreach ([
@@ -513,6 +523,7 @@ try {
     $memberOutboxCount = $eventRows
         ? (int)Db::name('cashier_v3_outbox')->where('event_id', (int)$eventRows[0]['id'])->count()
         : -1;
+    $createdIdentity = Db::name('user_phone_identity')->where('phone_digest', hash('sha256', $profilePayload['phone']))->find();
     ok(
         '同幂等键只建一名会员并重放第一次结果',
         ($created['result']['status'] ?? '') === CashierV3ResultCode::STATUS_SUCCESS
@@ -521,6 +532,8 @@ try {
             && (int)($replayed['data']['member']['memberId'] ?? 0) === $memberId
             && $createdCount === 1
             && count($eventRows) === 1
+            && (string)($createdIdentity['state'] ?? '') === 'BOUND'
+            && (int)($createdIdentity['bound_uid'] ?? 0) === $memberId
             && $memberOutboxCount === 0,
         json_encode([
             'created' => $created,
@@ -709,6 +722,7 @@ try {
         'user', 'store_user', 'user_level', 'user_label_relation',
         'member_exclusive_service', 'member_exclusive_service_change',
         'cashier_v3_member_phone_lock',
+        'user_phone_identity', 'user_phone_identity_audit',
         'cashier_v3_business_event', 'cashier_v3_outbox',
         'cashier_v3_command_receipt', 'cashier_v3_resource_version',
     ];
@@ -827,6 +841,78 @@ try {
         ], JSON_UNESCAPED_UNICODE),
         'C5-MEM-04'
     );
+
+    c5Section('cancelled phone stays owned; restoring reuses the original member');
+    $identityWriter = app()->make(\app\services\user\CanonicalUserIdentityServices::class);
+    $createdForCancelledPhone = false;
+    $cancelledIdentityRejected = false;
+    try {
+        $identityWriter->ensureUserIdentity('13100000107', function () use (&$createdForCancelledPhone) {
+            $createdForCancelledPhone = true;
+            return 999;
+        });
+    } catch (\mohe\exceptions\AdminException $exception) {
+        $cancelledIdentityRejected = strpos($exception->getMessage(), '已注销会员') !== false;
+    }
+    ok('统一身份入口不为注销号码创建第二会员', !$createdForCancelledPhone
+        && $cancelledIdentityRejected, '', 'C5-MEM-05');
+    $restoreRequest = MemberIntegrationFixture::commandRequest($dispatcher, 'restore-member', ['memberId' => 107]);
+    $restoreProjection = $dispatcher->dispatch([
+        'action' => 'open-member-restore',
+        'memberId' => 107,
+        'clientSessionId' => $restoreRequest['session']['client_session_id'],
+        'stateContextId' => $restoreRequest['session']['state_context_id'],
+        'correlationId' => 'CORR-' . MemberIntegrationFixture::uuid(),
+    ], $restoreRequest['session']);
+    $restoreVersion = 0;
+    foreach ((array)($restoreProjection['versions'] ?? []) as $version) {
+        if (($version['kind'] ?? '') === 'member' && (string)($version['id'] ?? '') === '107') {
+            $restoreVersion = (int)($version['version'] ?? 0);
+        }
+    }
+    ok('恢复投影只为原注销会员签发版本', $restoreVersion > 0, json_encode($restoreProjection, JSON_UNESCAPED_UNICODE), 'C5-MEM-05');
+    $restoreRequest['body']['command']['contexts'][] = [
+        'kind' => 'member', 'id' => '107', 'expectedVersion' => $restoreVersion,
+    ];
+    MemberIntegrationFixture::seedMember(109, '历史重复号码', '13100000107', 8, 0, 1, '2026-07-28 00:00:00');
+    $duplicateDetail = [];
+    $duplicateCode = c5CommandCode(function () use ($dispatcher, $restoreRequest) {
+        $dispatcher->dispatch($restoreRequest['body'], $restoreRequest['session']);
+    }, $duplicateDetail);
+    ok('另一注销会员占号也拒绝恢复原号码', $duplicateCode !== '' && (int)Db::name('user')->where('uid', 107)->value('is_del') === 1, json_encode($duplicateDetail, JSON_UNESCAPED_UNICODE), 'C5-MEM-05');
+    Db::name('store_user')->where('uid', 109)->delete();
+    Db::name('user')->where('uid', 109)->delete();
+    $restoreRequest['body']['command']['idempotencyKey'] = 'CMD-' . MemberIntegrationFixture::uuid();
+    $restored = $dispatcher->dispatch($restoreRequest['body'], $restoreRequest['session']);
+    $restoredAgain = $dispatcher->dispatch($restoreRequest['body'], $restoreRequest['session']);
+    $restoredRow = Db::name('user')->where('uid', 107)->find();
+    $restoredIdentity = Db::name('user_phone_identity')->where('phone_digest', hash('sha256', '13100000107'))->find();
+    ok(
+        '恢复保持原 UID 与号码且幂等事件仅一条',
+        (string)($restoredRow['phone'] ?? '') === '13100000107'
+            && (int)($restoredRow['status'] ?? 0) === 1
+            && (int)($restoredRow['is_del'] ?? 1) === 0
+            && ($restoredRow['delete_time'] ?? null) === null
+            && (int)Db::name('cashier_v3_business_event')->where('event_type', 'member.restored')->where('aggregate_id', '107')->count() === 1
+            && (string)($restoredIdentity['state'] ?? '') === 'BOUND'
+            && (int)($restoredIdentity['bound_uid'] ?? 0) === 107
+            && ($restored['result']['status'] ?? '') === 'success'
+            && ($restoredAgain['result']['status'] ?? '') === 'success',
+        json_encode(['row' => $restoredRow, 'identity' => $restoredIdentity, 'first' => $restored, 'replay' => $restoredAgain], JSON_UNESCAPED_UNICODE),
+        'C5-MEM-05'
+    );
+    $restoredSelector = c5Projection($dispatcher, 'query-member-selector', [
+        'selectorEntry' => 'cashier', 'keyword' => '13100000107', 'memberScope' => 'all',
+    ], $projectionSession);
+    ok('恢复后原号码重新出现在收银选择器', (int)($restoredSelector['total'] ?? 0) === 1
+        && (int)($restoredSelector['records'][0]['memberId'] ?? 0) === 107,
+        json_encode($restoredSelector, JSON_UNESCAPED_UNICODE), 'C5-MEM-05');
+    $createdAfterRestore = false;
+    $sameUid = $identityWriter->ensureUserIdentity('13100000107', function () use (&$createdAfterRestore) {
+        $createdAfterRestore = true;
+        return 999;
+    });
+    ok('统一身份入口复用恢复后的原 UID', $sameUid === 107 && !$createdAfterRestore, '', 'C5-MEM-05');
 } catch (\Throwable $throwable) {
     ok(
         'C5 会员集成套件无未处理异常',

@@ -11,6 +11,7 @@ use app\services\store\StoreUserServices;
 use app\services\store\UserStoreUserServices;
 use app\services\user\level\SystemUserLevelServices;
 use app\services\user\level\UserLevelServices;
+use app\services\user\CanonicalUserIdentityServices;
 use app\services\user\UserListStatServices;
 use app\services\user\UserServices;
 use think\exception\ValidateException;
@@ -212,7 +213,8 @@ class MerchantCustomerServices extends BaseServices
         }
         /** @var UserServices $userServices */
         $userServices = app()->make(UserServices::class);
-        $exists = $userServices->get(['phone' => $phone]);
+        // 全状态占号：软删除会员仍保留手机号，不能从商家端另建新 UID。
+        $exists = Db::name('user')->where('phone', $phone)->value('uid');
         if ($exists) {
             throw new ValidateException('手机号已存在');
         }
@@ -220,7 +222,7 @@ class MerchantCustomerServices extends BaseServices
             $nickname = substr_replace($phone, '****', 3, 4);
         }
         $payload = [
-            'phone' => $phone,
+            'phone' => '',
             'nickname' => $nickname,
             'real_name' => (string)($data['real_name'] ?? $nickname),
             'avatar' => sys_config('h5_avatar'),
@@ -235,11 +237,21 @@ class MerchantCustomerServices extends BaseServices
         $newUid = 0;
         Db::startTrans();
         try {
-            $userInfo = $userServices->save($payload);
-            if (!$userInfo) {
-                throw new ValidateException('保存用户失败');
+            /** @var CanonicalUserIdentityServices $identities */
+            $identities = app()->make(CanonicalUserIdentityServices::class);
+            $created = false;
+            // 与其他建档入口共用号码锁；已有活跃账号也不作为“新增成功”复用。
+            $newUid = $identities->ensureUserIdentity($phone, function () use ($userServices, $payload, &$created): int {
+                $userInfo = $userServices->save($payload);
+                if (!$userInfo) {
+                    throw new ValidateException('保存用户失败');
+                }
+                $created = true;
+                return (int)$userInfo['uid'];
+            }, ['operator_type' => 'MERCHANT', 'source' => 'MERCHANT_CUSTOMER_CREATE']);
+            if (!$created) {
+                throw new ValidateException('手机号已存在');
             }
-            $newUid = (int)$userInfo['uid'];
             if ($newUid <= 0) {
                 throw new ValidateException('保存用户失败');
             }

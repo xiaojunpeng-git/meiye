@@ -26,6 +26,8 @@ const selectedMemberIds = ref([])
 const isMemberCreatorOpen = ref(false)
 const editingMember = ref(null)
 const deletingMember = ref(null)
+const restoringMember = ref(null)
+const memberRestoreError = ref('')
 const isMemberMutationSaving = ref(false)
 const memberEditConflictMessage = ref('')
 
@@ -573,6 +575,36 @@ async function confirmMemberDelete() {
   }
 }
 
+async function confirmMemberRestore() {
+  const member = restoringMember.value
+  if (!member || isMemberMutationSaving.value) return
+  const memberId = memberRecordId(member)
+  memberRestoreError.value = ''
+  isMemberMutationSaving.value = true
+  try {
+    // 注销会员不允许走编辑投影；恢复前独立读取原 UID 的权威版本。
+    const prepared = await requestAction('open-member-restore', { memberId })
+    if (!unifiedQueryActionSucceeded(prepared)) {
+      memberRestoreError.value = unifiedQueryActionMessage(prepared, '会员状态已变化，请刷新后重试。')
+      return
+    }
+    const response = await requestAction('restore-member', {
+      memberId,
+      commandContexts: memberCommandContexts(memberId)
+    })
+    if (!unifiedQueryActionSucceeded(response)) {
+      memberRestoreError.value = unifiedQueryActionMessage(response, '会员恢复失败，请稍后重试。')
+      return
+    }
+    restoringMember.value = null
+    await queryMembers({}, false)
+  } catch (_error) {
+    memberRestoreError.value = '会员恢复失败，请稍后重试。'
+  } finally {
+    isMemberMutationSaving.value = false
+  }
+}
+
 async function openBatchAction() {
   await requestAction('open-member-batch-actions', {
     selectedMemberIds: selectedMemberIds.value
@@ -658,6 +690,7 @@ async function openBatchAction() {
                 <button type="button" class="button button--text" @click="openMemberDetail(record)">查看</button>
                 <button v-if="canEditMember && record.status !== '已注销'" type="button" class="button button--text" @click="openMemberEditor(record)">编辑</button>
                 <button v-if="record.status !== '已注销'" type="button" class="button button--text button--danger" @click="deletingMember = record">注销</button>
+                <button v-else type="button" class="button button--text" @click="restoringMember = record; memberRestoreError = ''">恢复</button>
               </div>
             </td>
           </tr>
@@ -698,6 +731,15 @@ async function openBatchAction() {
           <h2>注销会员</h2>
           <p>注销 {{ deletingMember.name || '该会员' }} 后不可再办理新业务，但历史订单、卡项、收款和权益记录会完整保留。</p>
           <footer><button type="button" class="button button--secondary" :disabled="isMemberMutationSaving" @click="deletingMember = null">取消</button><button type="button" class="button button--danger" :disabled="isMemberMutationSaving" @click="confirmMemberDelete">{{ isMemberMutationSaving ? '注销中…' : '确认注销' }}</button></footer>
+        </section>
+      </div>
+      <div v-if="restoringMember" class="member-mutation-modal" role="dialog" aria-modal="true" aria-label="恢复会员">
+        <div class="member-mutation-modal__backdrop" @click="!isMemberMutationSaving && (restoringMember = null)" />
+        <section class="member-mutation-modal__card member-mutation-modal__card--confirm">
+          <h2>恢复会员</h2>
+          <p>恢复 {{ restoringMember.name || '该会员' }} 的原手机号及会员身份。原会员资料和历史记录不会变更。</p>
+          <p v-if="memberRestoreError" class="member-list-query-message member-list-query-message--error" role="alert">{{ memberRestoreError }}</p>
+          <footer><button type="button" class="button button--secondary" :disabled="isMemberMutationSaving" @click="restoringMember = null">取消</button><button type="button" class="button button--primary" :disabled="isMemberMutationSaving" @click="confirmMemberRestore">{{ isMemberMutationSaving ? '恢复中…' : '确认恢复' }}</button></footer>
         </section>
       </div>
     </Teleport>

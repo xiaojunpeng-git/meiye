@@ -1146,11 +1146,17 @@ class UserServices extends BaseServices
         } else {
             $res2 = true;
         }
+        $phoneChanged = false;
+        $phoneCleared = false;
         //修改基本信息
         if (!isset($data['is_other']) || !$data['is_other']) {
-            if ($data['phone']) {
-                $otherUser = $this->getOne(['phone' => $data['phone']], 'uid,phone');
-                if ($otherUser && $otherUser['uid'] != $id) {
+            $requestedPhone = trim((string)$data['phone']);
+            $phoneChanged = $requestedPhone !== '' && $requestedPhone !== (string)$user['phone'];
+            $phoneCleared = $requestedPhone === '' && (string)$user['phone'] !== '';
+            if ($phoneChanged) {
+                // 资料编辑不得借软删除默认过滤，绕过注销会员的号码归属。
+                $otherUid = Db::name('user')->where('phone', $requestedPhone)->where('uid', '<>', $id)->value('uid');
+                if ($otherUid) {
                     throw new AdminException('该手机号码已被注册');
                 }
             }
@@ -1182,7 +1188,9 @@ class UserServices extends BaseServices
                 $edit['salesman_time'] = $data['salesman_time'];
             }
             $edit['level'] = $data['level'];
-            $edit['phone'] = $data['phone'];
+            if (!$phoneChanged && !$phoneCleared) {
+                $edit['phone'] = $data['phone'];
+            }
             $edit['addres'] = $data['addres'];
             $edit['group_id'] = $data['group_id'];
             if ($data['spread_uid'] != -1) {
@@ -1235,8 +1243,26 @@ class UserServices extends BaseServices
             $wechatUser = app()->make(WechatUserServices::class);
             $wechatUser->update(['uid' => $id], ['sex' => $data['sex']]);
         }
-        if ($edit) $res3 = $this->dao->update($id, $edit);
-        else $res3 = true;
+        // 非空换号与资料落库同一事务；号码身份表的唯一锁负责并发查重。
+        $res3 = Db::transaction(function () use ($id, $edit, $data, $phoneChanged, $phoneCleared): bool {
+            if ($phoneChanged || $phoneCleared) {
+                /** @var CanonicalUserIdentityServices $identities */
+                $identities = app()->make(CanonicalUserIdentityServices::class);
+                $audit = [
+                    'operator_type' => 'ADMIN', 'operator_id' => (int)($data['adminId'] ?? 0),
+                    'source' => 'ADMIN_MEMBER_EDIT',
+                ];
+                if ($phoneChanged) {
+                    $identities->replacePhoneIdentity($id, trim((string)$data['phone']), $audit);
+                } else {
+                    $identities->clearPhoneIdentity($id, $audit);
+                }
+            }
+            if ($edit && $this->dao->update($id, $edit) === false) {
+                throw new AdminException('修改失败');
+            }
+            return true;
+        });
         if ($res1 && $res2 && $res3) {
             $this->dao->cacheTag()->clear();
             return true;

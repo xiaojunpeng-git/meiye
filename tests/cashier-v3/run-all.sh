@@ -602,6 +602,17 @@ if ! grep -q 'ASSERT_PASSED=' "$EV/integration.out" 2>/dev/null; then
 fi
 mark_runner "php/integration-gateway.php" "$INT_RC"
 
+echo "== R31 member restoration integration =="
+set +e
+docker_php 'php /tests/php/member-restore-integration.php' | tee "$EV/member-restore-integration.out"
+RESTORE_RC=${PIPESTATUS[0]}
+set -e
+if ! grep -q 'ASSERT_FAILED=0' "$EV/member-restore-integration.out" 2>/dev/null \
+  || ! grep -q 'RUNNER_OK=R31-member-restore-integration' "$EV/member-restore-integration.out" 2>/dev/null; then
+  RESTORE_RC=1
+fi
+mark_runner "php/member-restore-integration.php" "$RESTORE_RC"
+
 echo "== C5 member integration =="
 set +e
 docker_php 'php /tests/php/member-integration.php' | tee "$EV/member-integration.out"

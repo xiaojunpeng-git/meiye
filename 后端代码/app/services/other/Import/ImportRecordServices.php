@@ -45,6 +45,7 @@ use app\services\user\group\UserGroupServices;
 use app\services\user\label\UserLabelRelationServices;
 use app\services\user\label\UserLabelServices;
 use app\services\user\level\SystemUserLevelServices;
+use app\services\user\CanonicalUserIdentityServices;
 use app\services\wechat\WechatUserServices;
 use \think\facade\Db;
 use think\db\exception\DataNotFoundException;
@@ -475,7 +476,7 @@ class ImportRecordServices extends BaseServices
                     $save['belong_store_id'] = $storeDao->insertGetId($saveStore);
                 }
                 $userServices = app()->make(UserServices::class);
-                $uid = $userServices->save($save)->uid;
+                $uid = $this->createMemberWithUniquePhone($userServices, $save);
                 $find = StoreUser::where('uid', $uid)->find();
                 if (empty($find)) {
                     $storeUser = [
@@ -707,7 +708,9 @@ class ImportRecordServices extends BaseServices
             }
             $user=User::where("account",$handle['account'])->find();
             if(empty($user)) {
-                $uid = $userServices->save($handle)->uid;
+                $uid = trim((string)($handle['phone'] ?? '')) === ''
+                    ? (int)$userServices->save($handle)->uid
+                    : $this->createMemberWithUniquePhone($userServices, $handle);
                 //插入门店用户
                 if(!empty($handle['belong_store_id'])){
                     $find=StoreUser::where('uid',$uid)->find();
@@ -962,6 +965,28 @@ class ImportRecordServices extends BaseServices
             $handleData[] = $handle;
         }
         return [$errorData, $handleData, $labelData, $groupData];
+    }
+
+    /** 导入新增会员仍按原 UID 建档，但手机号必须经过跨状态唯一身份锁。 */
+    private function createMemberWithUniquePhone(UserServices $userServices, array $payload): int
+    {
+        $phone = trim((string)($payload['phone'] ?? ''));
+        $payload['phone'] = '';
+        $created = false;
+        /** @var CanonicalUserIdentityServices $identities */
+        $identities = app()->make(CanonicalUserIdentityServices::class);
+        $uid = $identities->ensureUserIdentity($phone, function () use ($userServices, $payload, &$created): int {
+            $member = $userServices->save($payload);
+            if (!$member) {
+                throw new ValidateException('导入会员保存失败');
+            }
+            $created = true;
+            return (int)$member->uid;
+        }, ['operator_type' => 'SYSTEM', 'source' => 'LEGACY_MEMBER_IMPORT']);
+        if (!$created) {
+            throw new ValidateException('导入手机号已属于其他会员');
+        }
+        return $uid;
     }
 
     public function excelDate($date)

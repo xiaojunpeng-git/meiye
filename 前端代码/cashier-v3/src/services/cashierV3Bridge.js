@@ -2678,6 +2678,7 @@ function isCashierWorkspaceAction(action) {
     'create-member',
     'update-member',
     'deactivate-member',
+    'restore-member',
     'set-guest-order',
     // 定制卡配置先由后端发现并锁定项目资源；客户端仍必须提交当前
     // 收银工作台版本，避免配置写入绕开工作台并发保护。

@@ -44,13 +44,27 @@ class CanonicalUserIdentityServices extends BaseServices
             $identity = $this->lockOrReserveIdentity($digest);
             $boundUid = (int)($identity['bound_uid'] ?? 0);
 
-            if (($identity['state'] ?? '') === self::IDENTITY_BOUND && $boundUid > 0) {
-                $user = $this->lockUser($boundUid);
-                if ((int)$user['is_del'] === 0) {
+            // 注销不释放号码；历史映射即使是 RELEASED 也必须核对 user 全状态。
+            $owners = $this->lockPhoneOwners($phone);
+            if (count($owners) > 1) {
+                throw new AdminException('该手机号码存在历史重复会员，请联系管理员处理');
+            }
+            if ($owners) {
+                $owner = $owners[0];
+                if ((int)$owner['is_del'] !== 0 || $this->hasCancellationTime($owner)) {
+                    throw new AdminException('该手机号码属于已注销会员，请在会员列表恢复原会员');
+                }
+                if (($identity['state'] ?? '') === self::IDENTITY_BOUND && $boundUid === (int)$owner['uid']) {
                     return $boundUid;
                 }
-                $this->releaseIdentityForCancelledMember($identity, $audit);
-                $identity = $this->lockIdentity($digest);
+                if (($identity['state'] ?? '') === self::IDENTITY_BOUND) {
+                    throw new AdminException('该手机号码的会员身份不一致，请联系管理员处理');
+                }
+                $this->bindReservedIdentity($identity, (int)$owner['uid'], $phone, $audit, 'BIND_LEGACY_OWNER');
+                return (int)$owner['uid'];
+            }
+            if (($identity['state'] ?? '') === self::IDENTITY_BOUND) {
+                throw new AdminException('该手机号码的会员身份不一致，请联系管理员处理');
             }
 
             $uid = $this->requireUid($createUser());
@@ -71,13 +85,14 @@ class CanonicalUserIdentityServices extends BaseServices
         return Db::transaction(function () use ($uid, $phone, $digest, $audit): int {
             $identity = $this->lockOrReserveIdentity($digest);
             $boundUid = (int)($identity['bound_uid'] ?? 0);
-            if (($identity['state'] ?? '') === self::IDENTITY_BOUND && $boundUid !== $uid) {
-                $boundUser = $this->lockUser($boundUid);
-                if ((int)$boundUser['is_del'] === 0) {
-                    throw new AdminException('该手机号码已被注册');
+            $owners = $this->lockPhoneOwners($phone);
+            foreach ($owners as $owner) {
+                if ((int)$owner['uid'] !== $uid) {
+                    throw new AdminException('该手机号码已属于其他会员');
                 }
-                $this->releaseIdentityForCancelledMember($identity, $audit);
-                $identity = $this->lockIdentity($digest);
+            }
+            if (($identity['state'] ?? '') === self::IDENTITY_BOUND && $boundUid !== $uid) {
+                throw new AdminException('该手机号码已属于其他会员');
             }
 
             $this->lockUser($uid);
@@ -105,14 +120,14 @@ class CanonicalUserIdentityServices extends BaseServices
             $newIdentity = $oldDigest === $newDigest && $oldIdentity !== null
                 ? $oldIdentity
                 : $this->lockOrReserveIdentity($newDigest);
+            foreach ($this->lockPhoneOwners($phone) as $owner) {
+                if ((int)$owner['uid'] !== $uid) {
+                    throw new AdminException('该手机号码已属于其他会员');
+                }
+            }
             $boundUid = (int)($newIdentity['bound_uid'] ?? 0);
             if (($newIdentity['state'] ?? '') === self::IDENTITY_BOUND && $boundUid !== $uid) {
-                $boundUser = $this->lockUser($boundUid);
-                if ((int)$boundUser['is_del'] === 0) {
-                    throw new AdminException('该手机号码已被注册');
-                }
-                $this->releaseIdentityForCancelledMember($newIdentity, $audit);
-                $newIdentity = $this->lockIdentity($newDigest);
+                throw new AdminException('该手机号码已属于其他会员');
             }
 
             $user = $this->lockUser($uid);
@@ -128,25 +143,37 @@ class CanonicalUserIdentityServices extends BaseServices
         });
     }
 
-    /**
-     * Member cancellation calls this in the same outer transaction.
-     */
+    /** 仅活跃会员主动清空当前号码时释放映射；注销流程不得调用此入口。 */
+    public function clearPhoneIdentity(int $uid, array $audit = []): void
+    {
+        Db::transaction(function () use ($uid, $audit): void {
+            $before = Db::name('user')->where('uid', $uid)->field('uid,phone,is_del')->find();
+            if (!$before || (int)$before['is_del'] !== 0) {
+                throw new AdminException('会员不存在或已注销');
+            }
+            $oldPhone = (string)$before['phone'];
+            $digest = $this->digestForStoredPhone($oldPhone);
+            $identity = $digest === '' ? null : $this->lockIdentity($digest);
+            $user = $this->lockUser($uid);
+            if ((string)$user['phone'] !== $oldPhone || (int)$user['is_del'] !== 0) {
+                throw new AdminException('会员手机号已变化，请重试');
+            }
+            if ($identity && (int)($identity['bound_uid'] ?? 0) > 0
+                && (int)$identity['bound_uid'] !== $uid) {
+                throw new AdminException('手机号身份不一致，请联系管理员处理');
+            }
+            if ($identity && (string)$identity['state'] === self::IDENTITY_BOUND) {
+                $this->releaseIdentity($identity, $audit, 'RELEASE_ON_PHONE_CLEAR');
+            }
+            Db::name('user')->where('uid', $uid)->update(['phone' => '']);
+        });
+    }
+
+    /** Cancellation never releases a phone; legacy callers fail closed. */
     public function releasePhoneIdentity(int $uid, array $audit = [], bool $useOuterTransaction = false): void
     {
-        $release = function () use ($uid, $audit): void {
-            $identity = Db::name('user_phone_identity')->where('bound_uid', $uid)->lock(true)->find();
-            if (!$identity) {
-                return;
-            }
-            $this->lockUser($uid);
-            $this->releaseIdentity($identity, $audit, 'RELEASE_ON_MEMBER_CANCEL');
-        };
-
-        if ($useOuterTransaction) {
-            $release();
-            return;
-        }
-        Db::transaction($release);
+        // 保留原接口以便旧调用者显式收到失败，而非静默释放注销号码。
+        throw new AdminException('会员注销不释放手机号身份');
     }
 
     /**
@@ -208,6 +235,19 @@ class CanonicalUserIdentityServices extends BaseServices
         return (array)$user;
     }
 
+    /** 以 user 当前号码为最终占用依据，含正常、停用和注销会员。 */
+    private function lockPhoneOwners(string $phone): array
+    {
+        return Db::name('user')->where('phone', $phone)->field('uid,is_del,delete_time')->order('uid')->limit(2)->lock(true)->select()->toArray();
+    }
+
+    private function hasCancellationTime(array $owner): bool
+    {
+        $time = $owner['delete_time'] ?? null;
+        return !($time === null || $time === '' || $time === 0 || $time === '0'
+            || $time === '0000-00-00 00:00:00');
+    }
+
     private function bindReservedIdentity(array $identity, int $uid, string $phone, array $audit, string $action): void
     {
         $state = (string)($identity['state'] ?? '');
@@ -239,11 +279,6 @@ class CanonicalUserIdentityServices extends BaseServices
             throw new AdminException('会员手机号更新失败');
         }
         $this->writeAudit($identity, $uid, self::IDENTITY_BOUND, $beforeVersion + 1, $action, $audit);
-    }
-
-    private function releaseIdentityForCancelledMember(array $identity, array $audit): void
-    {
-        $this->releaseIdentity($identity, $audit, 'REASSIGN_AFTER_MEMBER_CANCEL');
     }
 
     private function releaseIdentity(array $identity, array $audit, string $action): void

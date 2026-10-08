@@ -117,7 +117,7 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
         // benefit pools (project replacement).  The Gateway has already
         // locked and version-checked this exact set before the writer runs.
         $memberMutation = $kind === 'member'
-            && in_array($action, ['update-member', 'deactivate-member'], true);
+            && in_array($action, ['update-member', 'deactivate-member', 'restore-member'], true);
         $cardMutation = $action === 'submit-card-operation'
             && in_array($kind, ['card_holder', 'member_benefit_pool'], true);
         $debtMutation = $action === 'submit-debt-repayment' && $kind === 'debt_record';
@@ -279,7 +279,10 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
                 $query->lock(true);
             }
             $row = $query->find();
-            if (!$row || (!$allowInactiveMember && !$this->activeMember($row))) {
+            // 注销会员仍须具有可核对的版本，供恢复原档案使用；其他业务命令
+            // 继续在各领域入口校验正常状态，不能因为版本可读就允许办理。
+            if (!$row || (!$allowInactiveMember && !$this->activeMember($row)
+                && !$this->cancelledMember($row))) {
                 return null;
             }
             return [
@@ -622,6 +625,17 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
         $deleteTime = $row['delete_time'] ?? null;
         return $deleteTime === null || $deleteTime === '' || $deleteTime === 0 || $deleteTime === '0'
             || $deleteTime === '0000-00-00 00:00:00';
+    }
+
+    private function cancelledMember($row): bool
+    {
+        if (!$row || !is_array($row) || (int)($row['uid'] ?? 0) <= 0) {
+            return false;
+        }
+        $deleteTime = $row['delete_time'] ?? null;
+        return (int)($row['is_del'] ?? 0) !== 0
+            || !($deleteTime === null || $deleteTime === '' || $deleteTime === 0
+                || $deleteTime === '0' || $deleteTime === '0000-00-00 00:00:00');
     }
 
     private function allowsBusinessSelection(CashierV3DataScopeContext $scope): bool

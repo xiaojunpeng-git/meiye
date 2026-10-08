@@ -23,10 +23,12 @@ use app\services\store\SystemStoreStaffServices;
 use app\services\user\level\SystemUserLevelServices;
 use app\services\user\member\MemberCardServices;
 use app\services\user\UserCardHolderServices;
+use app\services\user\CanonicalUserIdentityServices;
 use mohe\services\AliPayService;
 use mohe\services\CacheService;
 use mohe\services\SystemConfigService;
 use mohe\services\wechat\Payment;
+use think\facade\Db;
 
 /**
  * 收银台用户
@@ -147,27 +149,51 @@ class User extends AuthController
 		if (!check_phone($data['phone'])) {
 			return $this->fail('手机号码格式不正确');
 		}
-		$user = $userServices->get(['phone' => $data['phone']]);
-		if ($user && (($uid && $user['uid'] != $uid) || !$uid)) {
+		// 旧收银入口也必须把注销会员计入占号，不能依赖软删除 DAO 的默认查询。
+		$user = Db::name('user')->where('phone', $data['phone'])->value('uid');
+		if ($user && (int)$user !== $uid) {
 			return $this->fail('手机号已经存在不能添加相同的手机号用户');
 		}
 		if (!$data['nickname']) {
 			$data['nickname'] = substr_replace($data['phone'], '****', 3, 4);
 		}
 		$data['adminId'] = $this->cashierId;
+		/** @var CanonicalUserIdentityServices $identities */
+		$identities = app()->make(CanonicalUserIdentityServices::class);
 		if ($uid) {
 			$isNew = false;
-			$userServices->update($uid, $data);
+			Db::transaction(function () use ($uid, $data, $userServices, $identities): void {
+				$identities->replacePhoneIdentity($uid, (string)$data['phone'], [
+					'operator_type' => 'STORE', 'operator_id' => (int)$this->cashierId,
+					'source' => 'LEGACY_CASHIER_MEMBER',
+				]);
+				unset($data['phone']);
+				$userServices->update($uid, $data);
+			});
 		} else {
 			$isNew = true;
 			$data['avatar'] = sys_config('h5_avatar');
 			$data['user_type'] = 'cashier';
-			$userInfo = $userServices->save($data);
-			if (!$userInfo) {
-				return $this->fail('保存用户失败');
-			}
+			$phone = (string)$data['phone'];
+			$data['phone'] = '';
+			$created = false;
+			$uid = Db::transaction(function () use ($identities, $phone, $userServices, $data, &$created): int {
+				$resolved = $identities->ensureUserIdentity($phone, function () use ($userServices, $data, &$created): int {
+					$userInfo = $userServices->save($data);
+					if (!$userInfo) {
+						throw new \RuntimeException('保存用户失败');
+					}
+					$created = true;
+					return (int)$userInfo['uid'];
+				}, ['operator_type' => 'STORE', 'operator_id' => (int)$this->cashierId,
+					'source' => 'LEGACY_CASHIER_MEMBER']);
+				if (!$created) {
+					throw new \RuntimeException('手机号已经存在不能添加相同的手机号用户');
+				}
+				return $resolved;
+			});
+			$data['phone'] = $phone;
 			event('user.create', $data);
-			$uid = (int)$userInfo['uid'];
 		}
 		/** @var StoreUserServices $storeUserServices */
 		$storeUserServices = app()->make(StoreUserServices::class);
