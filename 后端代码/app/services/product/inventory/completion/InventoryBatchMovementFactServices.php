@@ -84,13 +84,14 @@ final class InventoryBatchMovementFactServices
         // Actor fields were added after the original fact contract. Defaulting
         // them keeps older non-interactive writers compatible, while every new
         // inventory document path can persist an immutable operator snapshot.
-        $movement += ['operatorType' => '', 'operatorId' => 0, 'operatorName' => ''];
+        // 手工入/出库的原始明细以移动事实为权威行；其他写入者省略备注时仍兼容空值。
+        $movement += ['operatorType' => '', 'operatorId' => 0, 'operatorName' => '', 'detailRemark' => ''];
         $keys = [
             'factKey', 'tenantId', 'organizationId', 'organizationPath', 'storeId',
             'stockId', 'batchId', 'direction', 'quantityUnits', 'unitCostCents',
             'costAmountCents', 'sourceType', 'sourceId', 'sourceDetailId', 'reversalOf',
             'businessDate', 'occurredAt', 'settledAt', 'recordedAt',
-            'operatorType', 'operatorId', 'operatorName',
+            'operatorType', 'operatorId', 'operatorName', 'detailRemark',
         ];
         $actual = array_keys($movement);
         sort($keys, SORT_STRING);
@@ -106,6 +107,10 @@ final class InventoryBatchMovementFactServices
         }
         $movement['operatorType'] = mb_substr(trim((string)$movement['operatorType']), 0, 32);
         $movement['operatorName'] = mb_substr(trim((string)$movement['operatorName']), 0, 128);
+        if (!is_string($movement['detailRemark']) || mb_strlen(trim($movement['detailRemark'])) > 500) {
+            throw new InventoryCompletionContractException('inventory_batch_movement_detail_remark_invalid');
+        }
+        $movement['detailRemark'] = trim($movement['detailRemark']);
         if ($movement['operatorId'] < 0 || ($movement['operatorId'] > 0 && $movement['operatorName'] === '')) {
             throw new InventoryCompletionContractException('inventory_batch_movement_operator_invalid');
         }
@@ -156,6 +161,7 @@ final class InventoryBatchMovementFactServices
             'source_type' => $movement['sourceType'],
             'source_id' => $movement['sourceId'],
             'source_detail_id' => $movement['sourceDetailId'],
+            'detail_remark' => $movement['detailRemark'],
             'reversal_of' => $movement['reversalOf'],
             'business_date' => $movement['businessDate'],
             'occurred_at' => $movement['occurredAt'],

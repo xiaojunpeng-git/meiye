@@ -110,9 +110,17 @@ final class InventoryManualInboundServices
         $businessDate = $this->date((string)$input['business_date']);
         $lines = [];
         foreach (array_values($input['lines']) as $line) {
-            if (!is_array($line) || array_keys($line) !== ['product_id', 'sku_id', 'sku_unique', 'batch_no', 'quantity', 'unit_cost', 'manufactured_date', 'expire_date']) {
+            $lineKeys = is_array($line) ? array_keys($line) : [];
+            if (!in_array($lineKeys, [
+                ['product_id', 'sku_id', 'sku_unique', 'batch_no', 'quantity', 'unit_cost', 'manufactured_date', 'expire_date'],
+                ['product_id', 'sku_id', 'sku_unique', 'batch_no', 'quantity', 'unit_cost', 'manufactured_date', 'expire_date', 'detail_remark'],
+            ], true)) {
                 throw new \InvalidArgumentException('inventory_manual_inbound_line_invalid');
             }
+            // 旧客户端可省略字段；新备注属于当前明细，不能用整单 remark 代替。
+            if (array_key_exists('detail_remark', $line) && !is_string($line['detail_remark'])) throw new \InvalidArgumentException('inventory_manual_inbound_line_remark_invalid');
+            $detailRemark = trim($line['detail_remark'] ?? '');
+            if (mb_strlen($detailRemark) > 500) throw new \InvalidArgumentException('inventory_manual_inbound_line_remark_invalid');
             $productId = $this->positive($line['product_id']);
             $skuId = $this->positive($line['sku_id']);
             $skuUnique = trim((string)$line['sku_unique']);
@@ -137,6 +145,7 @@ final class InventoryManualInboundServices
                 'unitCostCents' => $this->amountCents((string)$line['unit_cost']),
                 'manufacturedDate' => $manufacturedDate,
                 'expireDate' => $expireDate,
+                'detailRemark' => $detailRemark,
             ];
         }
         return [
@@ -478,6 +487,7 @@ final class InventoryManualInboundServices
             'batchId' => (int)$batch['id'], 'direction' => 1, 'quantityUnits' => $units, 'unitCostCents' => $line['unitCostCents'],
             'costAmountCents' => $cost, 'sourceType' => 'manual_inbound', 'sourceId' => $command['idempotencyKey'],
             'sourceDetailId' => (string)$index, 'reversalOf' => 0, 'businessDate' => $command['businessDate'],
+            'detailRemark' => $line['detailRemark'],
             'occurredAt' => $command['recordedAt'], 'settledAt' => $command['recordedAt'], 'recordedAt' => $command['recordedAt'],
             'operatorType' => (string)($scope['operatorType'] ?? 'PLATFORM_ADMIN'), 'operatorId' => (int)($scope['operatorId'] ?? 0),
             'operatorName' => (string)($scope['operatorName'] ?? ''),
@@ -519,6 +529,7 @@ final class InventoryManualInboundServices
         if ((int)$fact['direction'] !== 1
             || (int)$fact['quantity_units'] !== $quantityUnits
             || (int)$fact['unit_cost_cents'] !== (int)$line['unitCostCents']
+            || (string)($fact['detail_remark'] ?? '') !== $line['detailRemark']
             || (int)$fact['cost_amount_cents'] !== $costAmount
             || (string)$fact['fact_status'] !== 'SETTLED'
             || (int)$fact['reversal_of'] !== 0

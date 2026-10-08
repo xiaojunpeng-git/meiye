@@ -251,25 +251,25 @@ const productRows = computed(() => {
   // 单位来自商品 SKU 的库存单位快照，紧跟规格展示；禁止用数量字段或商品名称在前端推断。
   if (['inbound', 'outbound'].includes(props.pageKey)) {
     return selectedRows.value.map((row) => props.pageKey === 'inbound'
-      ? [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.barcode, row.batch_no, row.manufactured_date, row.expire_date, row.quantity, row.unit_cost]
-      : [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.barcode, '系统优先扣减最早到期的可用批次', '提交后返回', row.quantity, '系统计算', '系统计算'])
+      ? [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.batch_no, row.manufactured_date, row.expire_date, row.quantity, row.unit_cost, row.detail_remark, '']
+      : [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', '系统优先扣减最早到期的可用批次', '提交后返回', row.quantity, '系统计算', row.detail_remark, '系统计算'])
   }
   if (props.pageKey === 'count') return selectedRows.value.map((row) => [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.barcode, row.book_quantity, row.counted_quantity, Number(row.counted_quantity || 0) - Number(row.book_quantity || 0), row.surplus_batch_no, row.surplus_unit_cost, row.surplus_manufactured_date, row.surplus_expire_date])
-  if (props.pageKey === 'request') return selectedRows.value.map((row) => [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.barcode, row.available_quantity || '-', row.quantity])
-  if (props.pageKey === 'transfer') return selectedRows.value.map((row) => [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.barcode, '发货时优先扣减最早到期的可用批次', '收货时入账', row.quantity])
-  if (props.pageKey === 'usage') return selectedRows.value.map((row) => [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.barcode, row.quantity, '系统优先扣减最早到期的可用批次', ''])
+  if (props.pageKey === 'request') return selectedRows.value.map((row) => [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.available_quantity || '-', row.quantity, row.detail_remark])
+  if (props.pageKey === 'transfer') return selectedRows.value.map((row) => [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', '发货时优先扣减最早到期的可用批次', '收货时入账', row.quantity, row.detail_remark])
+  if (props.pageKey === 'usage') return selectedRows.value.map((row) => [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.quantity, '系统优先扣减最早到期的可用批次', row.detail_remark])
   return []
 })
 
 const columns = computed(() => {
-  const product = ['商品ID', '商品名称', '规格', '单位', '商品条码']
+  const product = ['商品ID', '商品名称', '规格', '单位']
   const batch = ['批次号', '生产日期', '到期日']
-  if (props.pageKey === 'count') return [...product, '账面库存', '实盘库存', '库存盈亏', '盘盈批次号', '盘盈单价', '生产日期', '到期日']
-  if (props.pageKey === 'request') return [...product, '当前库存', '申请数量']
-  if (props.pageKey === 'transfer') return [...product, '发货批次', '收货状态', '调拨数量']
-  if (props.pageKey === 'usage') return [...product, '领用数量', '实际单位成本']
-  if (props.pageKey === 'outbound') return [...product, '扣减批次', '到期日', '出库数量', '实际单位成本', '成本金额']
-  return [...product, ...batch, '入库数量', '入库单价', '入库金额']
+  if (props.pageKey === 'count') return [...product, '商品条码', '账面库存', '实盘库存', '库存盈亏', '盘盈批次号', '盘盈单价', '生产日期', '到期日']
+  if (props.pageKey === 'request') return [...product, '当前库存', '申请数量', '明细备注']
+  if (props.pageKey === 'transfer') return [...product, '发货批次', '收货状态', '调拨数量', '明细备注']
+  if (props.pageKey === 'usage') return [...product, '领用数量', '实际单位成本', '明细备注']
+  if (props.pageKey === 'outbound') return [...product, '扣减批次', '到期日', '出库数量', '实际单位成本', '明细备注', '成本金额']
+  return [...product, ...batch, '入库数量', '入库单价', '明细备注', '入库金额']
 })
 
 const bulkFields = computed(() => ({
@@ -389,7 +389,7 @@ async function hydrateRequestEditor(detail) {
   selectedRows.value = (Array.isArray(detail.lines) ? detail.lines : []).map((line) => ({
     product_id: Number(line.product_id), sku_id: Number(line.sku_id), sku_unique: String(line.sku_unique || ''),
     product_name: String(line.product_name_snapshot || ''), sku_name: String(line.sku_name_snapshot || ''),
-    stock_unit: String(line.stock_unit_snapshot || ''), barcode: String(line.barcode_snapshot || ''), quantity: String(line.quantity || '1'), available_quantity: '-', reference_unit_cost: line.reference_unit_cost_cents === null ? '-' : (Number(line.reference_unit_cost_cents) / 100).toFixed(2)
+    stock_unit: String(line.stock_unit_snapshot || ''), barcode: String(line.barcode_snapshot || ''), quantity: String(line.quantity || '1'), detail_remark: String(line.detail_remark || ''), available_quantity: '-', reference_unit_cost: line.reference_unit_cost_cents === null ? '-' : (Number(line.reference_unit_cost_cents) / 100).toFixed(2)
   }))
   requestEditIdempotencyKey.value = newRequestIdempotencyKey()
   await loadSupplyParties()
@@ -536,7 +536,7 @@ async function acceptCatalogRows(rows) {
       catalogError.value = '该商品已有按总量盘点的明细，请删除该行后再按不同批次添加。'
       continue
     }
-    const selected = { ...row, batch_no: '', manufactured_date: '', manufactured_date_bad_input: false, expire_date: '', expire_date_bad_input: false, quantity: '1', unit_cost: '0.00', book_quantity: '0', counted_quantity: '0', surplus_batch_no: '', surplus_unit_cost: '', surplus_manufactured_date: '', surplus_expire_date: '', available_quantity: String(row.available_quantity ?? '0'), reference_unit_cost: '-' }
+    const selected = { ...row, batch_no: '', manufactured_date: '', manufactured_date_bad_input: false, expire_date: '', expire_date_bad_input: false, quantity: '1', unit_cost: '0.00', detail_remark: '', book_quantity: '0', counted_quantity: '0', surplus_batch_no: '', surplus_unit_cost: '', surplus_manufactured_date: '', surplus_expire_date: '', available_quantity: String(row.available_quantity ?? '0'), reference_unit_cost: '-' }
     if (props.pageKey === 'count') {
       // 商品目录已经按当前库存主体返回权威可用数；避免对每个 SKU 再发一次库存查询。
       // 手工重复选择形成独立待填批次，不能复制商品总库存到每个批次。
@@ -888,7 +888,7 @@ function applyIncomingRequest() {
     return {
       product_id: Number(line.product_id || line.pid), sku_id: Number(line.sku_id || line.sku), sku_unique: String(line.sku_unique || ''),
       product_name: String(line.product_name_snapshot || line.product_name || ''), sku_name: String(line.sku_name_snapshot || line.sku_name || ''),
-      stock_unit: String(line.stock_unit_snapshot || line.stock_unit || ''), barcode: String(line.barcode_snapshot || line.barcode || ''), quantity: quantity || '0', request_line_id: Number(line.id || line.request_line_id || 0),
+      stock_unit: String(line.stock_unit_snapshot || line.stock_unit || ''), barcode: String(line.barcode_snapshot || line.barcode || ''), quantity: quantity || '0', detail_remark: String(line.detail_remark || ''), request_line_id: Number(line.id || line.request_line_id || 0),
       remaining_quantity_units: remainingUnits
     }
   }).filter((line) => line.request_line_id > 0 && Number(line.quantity) > 0)
@@ -1069,7 +1069,7 @@ async function submitInbound() {
       lines: selectedRows.value.map((row) => ({
         product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique,
         batch_no: row.batch_no, quantity: row.quantity, unit_cost: row.unit_cost,
-        manufactured_date: row.manufactured_date, expire_date: row.expire_date
+        manufactured_date: row.manufactured_date, expire_date: row.expire_date, detail_remark: String(row.detail_remark || '')
       }))
     }
     if (isPlatformHeadquarters.value) {
@@ -1093,7 +1093,7 @@ async function submitOutbound() {
     const payload = {
       idempotency_key: outboundIdempotencyKey(), business_date: outboundDate.value, remark: outboundRemark.value,
       lines: selectedRows.value.map((row) => ({
-        product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity
+        product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, detail_remark: String(row.detail_remark || '')
       }))
     }
     if (isPlatformHeadquarters.value) {
@@ -1124,7 +1124,7 @@ async function submitRequest() {
     const selectedRequester = requesterOptions.value.find((item) => String(item.key) === String(requesterSelection.value))
     const payload = {
       idempotency_key: isRequestEdit.value ? requestEditIdempotencyKey.value : requestIdempotencyKey(), business_date: requestDate.value, remark: requestRemark.value, requester_name: String(selectedRequester?.name || requesterName.value).trim(), ...(isPlatformHeadquarters.value ? { request_party_type: requestParty.type, request_party_id: requestParty.id } : {}), supply_party_type: supplier.type, supply_party_id: supplier.id, acceptance_party_id: supplier.type === 'HQ' ? Number(acceptancePartyId.value) : 0,
-      lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity }))
+      lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, detail_remark: String(row.detail_remark || '') }))
     }
     if (isPlatformHeadquarters.value) {
       if (Number(props.hqLocationId) <= 0) throw new Error('请选择可操作的总部仓。')
@@ -1152,7 +1152,7 @@ async function submitTransfer() {
     if (Number(requestDocumentId.value) > 0 && !incomingRequests.value.some((item) => Number(item.id) === Number(requestDocumentId.value))) {
       throw new Error('关联请货单已无可调拨商品或不在当前供货权限内，请返回列表刷新。')
     }
-    const commonPayload = { idempotency_key: transferIdempotencyKey(), business_date: transferDate.value, remark: transferRemark.value, target_party_type: target.type, target_store_id: target.id, request_document_id: Number(requestDocumentId.value), lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, request_line_id: Number(row.request_line_id || 0) })) }
+    const commonPayload = { idempotency_key: transferIdempotencyKey(), business_date: transferDate.value, remark: transferRemark.value, target_party_type: target.type, target_store_id: target.id, request_document_id: Number(requestDocumentId.value), lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, request_line_id: Number(row.request_line_id || 0), detail_remark: String(row.detail_remark || '') })) }
     if (isPlatformHeadquarters.value) {
       if (Number(props.hqLocationId) <= 0) throw new Error('请选择可操作的总部仓。')
       const [type, rawId] = String(transferSourceSelection.value || 'HQ:0').split(':', 2)
@@ -1169,7 +1169,7 @@ async function submitUsage() {
   try {
     const api = isPlatformHeadquarters.value ? platformInventoryApi : inventoryApi
     const scope = isPlatformHeadquarters.value ? { store_id: Number(props.usageStoreId) } : {}
-    await api.issueSalonUsage({ idempotency_key: usageIdempotencyKey(), business_date: usageDate.value, project_id: Number(usageProjectId.value), project_name: usageProjectName.value.trim(), remark: usageRemark.value, ...scope, lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity })) })
+    await api.issueSalonUsage({ idempotency_key: usageIdempotencyKey(), business_date: usageDate.value, project_id: Number(usageProjectId.value), project_name: usageProjectName.value.trim(), remark: usageRemark.value, ...scope, lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, detail_remark: String(row.detail_remark || '') })) })
     emit('saved'); close()
   } catch (error) { submitError.value = error instanceof Error ? error.message : '院装领用提交失败。' } finally { submitting.value = false }
 }
@@ -1240,11 +1240,11 @@ function submitPrimaryEditor() {
             </template>
             <template v-else-if="pageKey === 'inbound' && detail?.document">
               <div class="detail-meta"><span>入库单号：<b>{{ detail.document.order_sn }}</b></span><span>入库日期：{{ detail.document.business_date }}</span><span>入库时间：{{ detail.document.operation_at || detail.document.recorded_at ? new Date(Number(detail.document.operation_at || detail.document.recorded_at) * 1000).toLocaleString() : '-' }}</span><span>入库主体：{{ detail.document.location_name }}</span></div>
-              <section class="line-section"><header><div><h3>入库商品</h3><p>明细由已结算入库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>批次号</th><th>生产日期</th><th>到期日</th><th>入库数量</th><th>库存单位</th><th>入库单价</th><th>入库金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该入库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.batch_no }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>入库商品</h3><p>明细由已结算入库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>批次号</th><th>生产日期</th><th>到期日</th><th>入库数量</th><th>库存单位</th><th>入库单价</th><th>明细备注</th><th>入库金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该入库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.batch_no }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.detail_remark || '-' }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'outbound' && detail?.document">
               <div class="detail-meta"><span>出库单号：<b>{{ detail.document.order_sn }}</b></span><span>出库日期：{{ detail.document.business_date }}</span><span>出库时间：{{ detail.document.recorded_at ? new Date(Number(detail.document.recorded_at) * 1000).toLocaleString() : '-' }}</span><span>出库主体：{{ detail.document.location_name }}</span></div>
-              <section class="line-section"><header><div><h3>出库商品</h3><p>明细由已结算出库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>扣减批次</th><th>生产日期</th><th>到期日</th><th>出库数量</th><th>库存单位</th><th>实际单位成本</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该出库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.batch_no }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>出库商品</h3><p>明细由已结算出库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>扣减批次</th><th>生产日期</th><th>到期日</th><th>出库数量</th><th>库存单位</th><th>实际单位成本</th><th>明细备注</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该出库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.batch_no }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.detail_remark || '-' }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'count' && detail?.document">
               <div class="detail-meta"><span>盘点单号：<b>{{ detail.document.order_sn || '-' }}</b></span><span>库存仓：{{ detail.document.location_name || scopeName }}</span><span>盘点日期：{{ detail.document.count_date || '-' }}</span><span>盘点状态：{{ detailStatus(detail.document) }}</span></div>
@@ -1256,7 +1256,7 @@ function submitPrimaryEditor() {
             </template>
             <template v-else-if="pageKey === 'usage' && detail?.document">
               <div class="detail-meta"><span>院装单号：<b>{{ detail.document.usage_no }}</b></span><span>关联项目：{{ detail.document.project_name_snapshot || '未关联项目' }}</span><span>业务日期：{{ detail.document.business_date }}</span><span>类型：{{ detail.document.operation_type === 'RETURN' ? '退回' : '领用' }}</span></div>
-              <section class="line-section"><header><div><h3>耗材明细</h3><p>{{ detail.document.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>批次条码</th><th>领用/退回数量</th><th>已退回</th><th>可退回</th><th>库存单位</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="7" class="modal-empty">该院装单没有耗材明细</td></tr><tr v-for="line in detail.lines" :key="line.line_id"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.quantity }}</td><td>{{ line.returned_quantity }}</td><td>{{ line.returnable_quantity }}</td><td>{{ line.stock_unit || '-' }}</td></tr></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>耗材明细</h3><p>{{ detail.document.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>领用/退回数量</th><th>已退回</th><th>可退回</th><th>库存单位</th><th>明细备注</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="7" class="modal-empty">该院装单没有耗材明细</td></tr><tr v-for="line in detail.lines" :key="line.line_id"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.quantity }}</td><td>{{ line.returned_quantity }}</td><td>{{ line.returnable_quantity }}</td><td>{{ line.stock_unit || '-' }}</td><td>{{ line.detail_remark || '-' }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'import' && detail?.record">
               <div class="detail-meta"><span>文件：<b>{{ detail.record.source_file_name }}</b></span><span>方向：{{ detail.record.direction === 'inbound' ? '入库导入' : '出库导入' }}</span><span>业务单号：{{ detail.record.document_no || '-' }}</span><span>状态：{{ detail.record.status === 'SUCCEEDED' ? '成功' : detail.record.status === 'FAILED' ? '失败' : '处理中' }}</span></div>
@@ -1269,11 +1269,11 @@ function submitPrimaryEditor() {
             </template>
             <template v-else-if="pageKey === 'request' && detail?.document">
               <div class="detail-meta"><span>请货单号：<b>{{ detail.document.request_no }}</b></span><span>请货方：{{ detail.document.request_store_name || scopeName }}</span><span>供货方：{{ detail.document.supply_party_name_snapshot || '-' }}</span><span v-if="String(detail.document.supply_party_type) === 'HQ'">受理部门：{{ detail.document.acceptance_party_name_snapshot || '历史单据未设置' }}</span><span>状态：{{ detailStatus(detail.document) }}</span><span>申请日期：{{ detail.document.business_date }}</span></div>
-              <section class="line-section"><header><div><h3>请货商品</h3><p>{{ detail.document.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>申请数量</th><th>库存单位</th></tr></thead><tbody><tr v-if="!requestDetailLines.length"><td colspan="5" class="modal-empty">该请货单没有商品明细</td></tr><tr v-for="line in requestDetailLines" :key="line.id"><td>{{ line.product_name_snapshot }}</td><td>{{ line.sku_name_snapshot || '默认规格' }}</td><td>{{ line.barcode_snapshot || '-' }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit_snapshot }}</td></tr></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>请货商品</h3><p>{{ detail.document.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>申请数量</th><th>库存单位</th><th>明细备注</th></tr></thead><tbody><tr v-if="!requestDetailLines.length"><td colspan="5" class="modal-empty">该请货单没有商品明细</td></tr><tr v-for="line in requestDetailLines" :key="line.id"><td>{{ line.product_name_snapshot }}</td><td>{{ line.sku_name_snapshot || '默认规格' }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit_snapshot }}</td><td>{{ line.detail_remark || '-' }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'transfer' && detail?.transfer_no">
               <div class="detail-meta"><span>调拨单号：<b>{{ detail.transfer_no }}</b></span><span>调出方：{{ detail.from_party_name_snapshot }}</span><span>调入方：{{ detail.to_party_name_snapshot }}</span><span>状态：{{ detailStatus(detail) }}</span><span>调拨日期：{{ detail.business_date }}</span></div>
-              <section class="line-section"><header><div><h3>调拨商品</h3><p>{{ detail.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>调拨数量</th><th>库存单位</th><th>批次分配</th><th>状态</th></tr></thead><tbody><tr v-if="!transferDetailLines.length"><td colspan="6" class="modal-empty">该调拨单没有商品明细</td></tr><template v-for="line in transferDetailLines" :key="line.id"><tr><td>{{ line.product_name_snapshot }}</td><td>{{ line.sku_name_snapshot || '默认规格' }}</td><td>{{ formatQuantity(line.requested_quantity_units, line.quantity_scale) }}</td><td>{{ line.stock_unit_snapshot }}</td><td>{{ line.allocations?.length || 0 }} 个批次</td><td>{{ detail.status_name || detail.document_status }}</td></tr><tr v-for="allocation in line.allocations || []" :key="allocation.id" class="allocation-row"><td colspan="2">批次 ID：{{ allocation.from_batch_id }}</td><td>{{ formatQuantity(allocation.quantity_units, allocation.quantity_scale) }}</td><td>单位成本：{{ allocation.unit_cost_cents === null ? '-' : `¥${(Number(allocation.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>目标批次 ID：{{ allocation.to_batch_id || '-' }}</td><td>{{ allocationStatus(allocation) }}</td></tr></template></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>调拨商品</h3><p>{{ detail.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>调拨数量</th><th>库存单位</th><th>批次分配</th><th>状态</th><th>明细备注</th></tr></thead><tbody><tr v-if="!transferDetailLines.length"><td colspan="7" class="modal-empty">该调拨单没有商品明细</td></tr><template v-for="line in transferDetailLines" :key="line.id"><tr><td>{{ line.product_name_snapshot }}</td><td>{{ line.sku_name_snapshot || '默认规格' }}</td><td>{{ formatQuantity(line.requested_quantity_units, line.quantity_scale) }}</td><td>{{ line.stock_unit_snapshot }}</td><td>{{ line.allocations?.length || 0 }} 个批次</td><td>{{ detail.status_name || detail.document_status }}</td><td>{{ line.detail_remark || '-' }}</td></tr><tr v-for="allocation in line.allocations || []" :key="allocation.id" class="allocation-row"><td colspan="2">批次 ID：{{ allocation.from_batch_id }}</td><td>{{ formatQuantity(allocation.quantity_units, allocation.quantity_scale) }}</td><td>单位成本：{{ allocation.unit_cost_cents === null ? '-' : `¥${(Number(allocation.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>目标批次 ID：{{ allocation.to_batch_id || '-' }}</td><td>{{ allocationStatus(allocation) }}</td><td></td></tr></template></tbody></table></div></section>
             </template>
             <div v-else class="detail-meta"><span>此单据详情读取接口尚未接入。</span></div>
           </template>
@@ -1337,7 +1337,14 @@ function submitPrimaryEditor() {
             <p v-if="catalogError" class="catalog-error">{{ catalogError }}</p><p v-if="pageKey === 'count' && countProgress" class="count-progress">{{ countProgress }}</p>
             <section v-if="scannerVisible" class="scanner-entry"><Barcode :size="17" /><label>扫描条码<input v-model="scannerCode" autofocus placeholder="请扫描或输入商品条码" @keyup.enter="addScannedProduct" /></label><button class="modal-secondary" @click="scannerVisible = false">取消</button><button class="modal-primary" :disabled="!scannerCode.trim() || scannerLoading" @click="addScannedProduct">{{ scannerLoading ? '添加中' : '添加' }}</button></section>
             <section v-if="bulkEditorVisible" class="bulk-editor"><strong>批量填写已选 {{ selectedLineIndexes.length }} 项</strong><label v-for="field in bulkFields" :key="field.key">{{ field.label }}<input v-model="bulkValues[field.key]" :type="field.type" :placeholder="`不填写则不覆盖`" /></label><div><button class="modal-secondary" @click="bulkEditorVisible = false">取消</button><button class="modal-primary" @click="applyBulkValues">应用到已选行</button></div></section>
-            <div class="modal-table-scroll"><table><thead><tr><th><input type="checkbox" :checked="allLinesSelected" @change="toggleAllLines" /></th><th v-for="column in columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody ref="lineTableBody"><tr v-if="!productRows.length && ['inbound', 'outbound', 'count', 'request', 'transfer', 'usage'].includes(pageKey)"><td :colspan="columns.length + 2" class="modal-empty">请扫描商品条码或搜索并选择商品</td></tr><tr v-for="(row, rowIndex) in productRows" :key="`${selectedRows[rowIndex]?.sku_id || rowIndex}:${selectedRows[rowIndex]?.sku_unique || ''}:${rowIndex}`" :class="{ 'count-row-invalid': pageKey === 'count' && countValidationRowIndexes.includes(rowIndex) }"><td><input v-model="selectedLineIndexes" type="checkbox" :value="rowIndex" /></td><td v-for="(cell, cellIndex) in row" :key="cellIndex"><template v-if="pageKey === 'inbound' && cellIndex === 5"><input v-model="selectedRows[rowIndex].batch_no" class="table-input" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 6"><input :value="selectedRows[rowIndex].manufactured_date" class="table-input" type="date" :aria-invalid="selectedRows[rowIndex].manufactured_date_bad_input" @input="updateInboundDate(rowIndex, 'manufactured_date', $event)" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 7"><input :value="selectedRows[rowIndex].expire_date" class="table-input" type="date" :aria-invalid="selectedRows[rowIndex].expire_date_bad_input" @input="updateInboundDate(rowIndex, 'expire_date', $event)" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 8"><input v-model="selectedRows[rowIndex].quantity" class="table-input" /></template><template v-else-if="pageKey === 'inbound' && cellIndex === 9"><input v-model="selectedRows[rowIndex].unit_cost" class="table-input" /></template><template v-else-if="(pageKey === 'outbound' && cellIndex === 7) || (pageKey === 'request' && cellIndex === 6) || (pageKey === 'transfer' && cellIndex === 7) || (pageKey === 'usage' && cellIndex === 5)"><input v-model="selectedRows[rowIndex].quantity" class="table-input" /></template><template v-else-if="pageKey === 'count' && cellIndex === 6"><input v-model="selectedRows[rowIndex].counted_quantity" class="table-input" /></template><template v-else-if="pageKey === 'count' && cellIndex === 8"><input v-model="selectedRows[rowIndex].surplus_batch_no" class="table-input" :placeholder="selectedRows[rowIndex].count_mode === 'BATCH' ? '新批次必填' : '正数实盘必填'" /></template><template v-else-if="pageKey === 'count' && cellIndex === 9"><input v-model="selectedRows[rowIndex].surplus_unit_cost" class="table-input" :placeholder="selectedRows[rowIndex].count_mode === 'BATCH' ? '新批次必填' : '正数实盘必填'" /></template><template v-else-if="pageKey === 'count' && cellIndex === 10"><input v-model="selectedRows[rowIndex].surplus_manufactured_date" class="table-input" type="date" /></template><template v-else-if="pageKey === 'count' && cellIndex === 11"><input v-model="selectedRows[rowIndex].surplus_expire_date" class="table-input" type="date" /></template><template v-else>{{ cell }}</template></td><td><button class="modal-link" @click="removeCatalogRow(rowIndex)">删除</button></td></tr></tbody></table></div>
+            <div class="modal-table-scroll"><table><thead><tr><th><input type="checkbox" :checked="allLinesSelected" @change="toggleAllLines" /></th><th v-for="column in columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody ref="lineTableBody"><tr v-if="!productRows.length && ['inbound', 'outbound', 'count', 'request', 'transfer', 'usage'].includes(pageKey)"><td :colspan="columns.length + 2" class="modal-empty">请扫描商品条码或搜索并选择商品</td></tr><tr v-for="(row, rowIndex) in productRows" :key="`${selectedRows[rowIndex]?.sku_id || rowIndex}:${selectedRows[rowIndex]?.sku_unique || ''}:${rowIndex}`" :class="{ 'count-row-invalid': pageKey === 'count' && countValidationRowIndexes.includes(rowIndex) }"><td><input v-model="selectedLineIndexes" type="checkbox" :value="rowIndex" /></td><td v-for="(cell, cellIndex) in row" :key="cellIndex">
+              <template v-if="pageKey === 'inbound' && cellIndex === 4"><input v-model="selectedRows[rowIndex].batch_no" class="table-input" /></template>
+              <template v-else-if="pageKey === 'inbound' && cellIndex === 5"><input :value="selectedRows[rowIndex].manufactured_date" class="table-input" type="date" :aria-invalid="selectedRows[rowIndex].manufactured_date_bad_input" @input="updateInboundDate(rowIndex, 'manufactured_date', $event)" /></template>
+              <template v-else-if="pageKey === 'inbound' && cellIndex === 6"><input :value="selectedRows[rowIndex].expire_date" class="table-input" type="date" :aria-invalid="selectedRows[rowIndex].expire_date_bad_input" @input="updateInboundDate(rowIndex, 'expire_date', $event)" /></template>
+              <template v-else-if="pageKey === 'inbound' && cellIndex === 8"><input v-model="selectedRows[rowIndex].unit_cost" class="table-input" /></template>
+              <template v-else-if="(pageKey === 'inbound' && cellIndex === 7) || (pageKey === 'outbound' && cellIndex === 6) || (pageKey === 'request' && cellIndex === 5) || (pageKey === 'transfer' && cellIndex === 6) || (pageKey === 'usage' && cellIndex === 4)"><input v-model="selectedRows[rowIndex].quantity" class="table-input" /></template>
+              <template v-else-if="columns[cellIndex] === '明细备注'"><input v-model="selectedRows[rowIndex].detail_remark" class="table-input table-input--remark" maxlength="500" aria-label="明细备注" placeholder="填写备注" /></template>
+              <template v-else-if="pageKey === 'count' && cellIndex === 6"><input v-model="selectedRows[rowIndex].counted_quantity" class="table-input" /></template><template v-else-if="pageKey === 'count' && cellIndex === 8"><input v-model="selectedRows[rowIndex].surplus_batch_no" class="table-input" :placeholder="selectedRows[rowIndex].count_mode === 'BATCH' ? '新批次必填' : '正数实盘必填'" /></template><template v-else-if="pageKey === 'count' && cellIndex === 9"><input v-model="selectedRows[rowIndex].surplus_unit_cost" class="table-input" :placeholder="selectedRows[rowIndex].count_mode === 'BATCH' ? '新批次必填' : '正数实盘必填'" /></template><template v-else-if="pageKey === 'count' && cellIndex === 10"><input v-model="selectedRows[rowIndex].surplus_manufactured_date" class="table-input" type="date" /></template><template v-else-if="pageKey === 'count' && cellIndex === 11"><input v-model="selectedRows[rowIndex].surplus_expire_date" class="table-input" type="date" /></template><template v-else>{{ cell }}</template></td><td><button class="modal-link" @click="removeCatalogRow(rowIndex)">删除</button></td></tr></tbody></table></div>
             <footer v-if="['inbound', 'outbound', 'request', 'transfer'].includes(pageKey)" class="line-total"><span>明细数量：{{ selectedRows.length }} 项</span><strong v-if="pageKey === 'inbound'">入库金额按填写单价计算</strong><strong v-else-if="pageKey === 'outbound'">出库成本由服务端按实际批次计算</strong></footer>
           </section>
 
@@ -1356,6 +1363,7 @@ function submitPrimaryEditor() {
 </template>
 
 <style scoped>
+.table-input--remark { min-width: 160px; width: 100%; }
 .count-file-input { display: none; }.count-progress { margin: 0; padding: 8px 14px; color: #42637e; font-size: 12px; background: #f4f9ff; }
 /* 大盘点只约束商品明细高度；固定表头与可见滚动轨道让 805 行也能逐行编辑。 */
 .line-section--count > .modal-table-scroll { max-height: min(60vh, 600px); overflow-y: scroll; scrollbar-gutter: stable; scrollbar-color: #91aac4 #eef3f8; scrollbar-width: thin; overscroll-behavior: contain; }

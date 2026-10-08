@@ -121,9 +121,15 @@ final class InventoryManualOutboundServices
         }
         $lines = [];
         foreach (array_values($input['lines']) as $index => $line) {
-            if (!is_array($line) || array_keys($line) !== ['product_id', 'sku_id', 'sku_unique', 'quantity']) {
+            if (!is_array($line) || !in_array(array_keys($line), [
+                ['product_id', 'sku_id', 'sku_unique', 'quantity'],
+                ['product_id', 'sku_id', 'sku_unique', 'quantity', 'detail_remark'],
+            ], true)) {
                 throw new \InvalidArgumentException('inventory_manual_outbound_line_invalid');
             }
+            if (array_key_exists('detail_remark', $line) && !is_string($line['detail_remark'])) throw new \InvalidArgumentException('inventory_manual_outbound_line_remark_invalid');
+            $detailRemark = trim($line['detail_remark'] ?? '');
+            if (mb_strlen($detailRemark) > 500) throw new \InvalidArgumentException('inventory_manual_outbound_line_remark_invalid');
             foreach (['product_id', 'sku_id'] as $field) {
                 if (!is_int($line[$field]) || $line[$field] <= 0) {
                     throw new \InvalidArgumentException('inventory_manual_outbound_identifier_invalid');
@@ -134,7 +140,7 @@ final class InventoryManualOutboundServices
             if ($unique === '' || strlen($unique) > 64 || !preg_match('/^\d+(?:\.\d{1,4})?$/D', $quantity) || (float)$quantity <= 0) {
                 throw new \InvalidArgumentException('inventory_manual_outbound_line_invalid');
             }
-            $lines[] = ['index' => $index, 'productId' => $line['product_id'], 'skuId' => $line['sku_id'], 'skuUnique' => $unique, 'quantity' => $quantity];
+            $lines[] = ['index' => $index, 'productId' => $line['product_id'], 'skuId' => $line['sku_id'], 'skuUnique' => $unique, 'quantity' => $quantity, 'detailRemark' => $detailRemark];
         }
         return [
             'idempotencyKey' => $key,
@@ -259,6 +265,7 @@ final class InventoryManualOutboundServices
             'quantityUnits' => $allocation['units'], 'unitCostCents' => (int)$batch['unit_cost_cents'],
             'costAmountCents' => intdiv($allocation['units'] * (int)$batch['unit_cost_cents'], $factor),
             'sourceType' => 'manual_outbound', 'sourceId' => $command['idempotencyKey'], 'sourceDetailId' => (string)$line['index'],
+            'detailRemark' => $line['detailRemark'],
             'reversalOf' => 0, 'businessDate' => $command['businessDate'], 'occurredAt' => $command['recordedAt'],
             'settledAt' => $command['recordedAt'], 'recordedAt' => $command['recordedAt'],
             'operatorType' => (string)($scope['operatorType'] ?? 'PLATFORM_ADMIN'), 'operatorId' => (int)($scope['operatorId'] ?? 0),
@@ -274,7 +281,8 @@ final class InventoryManualOutboundServices
             if ($index < 0 || !isset($command['lines'][$index]) || (string)$fact['tenant_id'] !== $scope['tenantId']
                 || (string)$fact['organization_id'] !== $scope['organizationId'] || (string)$fact['organization_path'] !== $scope['organizationPath']
                 || (int)$fact['location_id'] !== (int)$location['id'] || (int)$fact['store_id'] !== $scope['storeId']
-                || (int)$fact['direction'] !== -1 || (string)$fact['business_date'] !== $command['businessDate'] || (int)$fact['reversal_of'] !== 0) {
+                || (int)$fact['direction'] !== -1 || (string)$fact['business_date'] !== $command['businessDate'] || (int)$fact['reversal_of'] !== 0
+                || (string)($fact['detail_remark'] ?? '') !== $command['lines'][$index]['detailRemark']) {
                 throw new \RuntimeException('inventory_manual_outbound_idempotency_conflict');
             }
             $stock = Db::name('inventory_stock')->where('id', (int)$fact['stock_id'])->lock(true)->find();

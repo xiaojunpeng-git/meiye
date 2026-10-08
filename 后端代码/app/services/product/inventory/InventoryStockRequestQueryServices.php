@@ -165,7 +165,7 @@ final class InventoryStockRequestQueryServices
         $lines = Db::name('inventory_stock_request_line')
             ->where('document_id', $requestId)
             ->order('line_no asc')
-            ->field('id,line_no,product_id,sku_id,sku_unique,product_name_snapshot,sku_name_snapshot,product_code_snapshot,barcode_snapshot,stock_unit_snapshot,quantity_scale,requested_quantity_units,reference_unit_cost_cents,reference_cost_status,fulfilled_transfer_id')
+            ->field('id,line_no,product_id,sku_id,sku_unique,product_name_snapshot,sku_name_snapshot,product_code_snapshot,barcode_snapshot,stock_unit_snapshot,quantity_scale,requested_quantity_units,reference_unit_cost_cents,reference_cost_status,fulfilled_transfer_id,detail_remark')
             ->select()->toArray();
         foreach ($lines as &$line) {
             $scale = max(0, min(4, (int)$line['quantity_scale']));

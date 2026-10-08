@@ -407,10 +407,19 @@ final class InventoryStockRequestServices
         if (preg_match('/^[A-Za-z0-9:._-]{8,96}$/D', $key) !== 1) throw new \InvalidArgumentException('inventory_stock_request_idempotency_invalid');
         $lines = [];
         foreach (array_values($input['lines']) as $index => $line) {
-            if (!is_array($line) || array_keys($line) !== ['product_id', 'sku_id', 'sku_unique', 'quantity'] || !is_int($line['product_id']) || !is_int($line['sku_id']) || $line['product_id'] <= 0 || $line['sku_id'] <= 0) throw new \InvalidArgumentException('inventory_stock_request_line_invalid');
+            if (!is_array($line) || !in_array(array_keys($line), [
+                ['product_id', 'sku_id', 'sku_unique', 'quantity'],
+                ['product_id', 'sku_id', 'sku_unique', 'quantity', 'detail_remark'],
+            ], true) || !is_int($line['product_id']) || !is_int($line['sku_id']) || $line['product_id'] <= 0 || $line['sku_id'] <= 0) throw new \InvalidArgumentException('inventory_stock_request_line_invalid');
             $unique = trim((string)$line['sku_unique']); $quantity = trim((string)$line['quantity']);
             if ($unique === '' || strlen($unique) > 64 || preg_match('/^\d+(?:\.\d{1,4})?$/D', $quantity) !== 1 || (float)$quantity <= 0) throw new \InvalidArgumentException('inventory_stock_request_line_invalid');
-            $lines[] = ['index' => $index, 'productId' => $line['product_id'], 'skuId' => $line['sku_id'], 'skuUnique' => $unique, 'quantity' => $quantity];
+            if (array_key_exists('detail_remark', $line) && !is_string($line['detail_remark'])) throw new \InvalidArgumentException('inventory_stock_request_line_remark_invalid');
+            $detailRemark = trim($line['detail_remark'] ?? '');
+            if (mb_strlen($detailRemark) > 500) throw new \InvalidArgumentException('inventory_stock_request_line_remark_invalid');
+            $normalized = ['index' => $index, 'productId' => $line['product_id'], 'skuId' => $line['sku_id'], 'skuUnique' => $unique, 'quantity' => $quantity];
+            // 旧命令的指纹保持原样；新命令把每行备注纳入幂等与草稿修改审计。
+            if (array_key_exists('detail_remark', $line)) $normalized['detailRemark'] = $detailRemark;
+            $lines[] = $normalized;
         }
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', trim((string)$input['business_date'])); $errors = \DateTimeImmutable::getLastErrors();
         if (!$date || ($errors !== false && ($errors['warning_count'] || $errors['error_count'])) || $date->format('Y-m-d') !== trim((string)$input['business_date'])) throw new \InvalidArgumentException('inventory_stock_request_date_invalid');
@@ -601,6 +610,7 @@ final class InventoryStockRequestServices
                 'stock_unit_snapshot' => mb_substr((string)$catalog['stock_unit'], 0, 32), 'quantity_scale' => (int)$catalog['quantity_scale'],
                 'requested_quantity_units' => InventoryEntitlementCompletionContract::decimalToUnits($line['quantity'], (int)$catalog['quantity_scale']),
                 'reference_unit_cost_cents' => $reference['cents'], 'reference_cost_status' => $reference['status'], 'created_at' => $recordedAt,
+                'detail_remark' => (string)($line['detailRemark'] ?? ''),
             ]);
         }
     }

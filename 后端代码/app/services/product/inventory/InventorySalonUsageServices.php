@@ -203,7 +203,7 @@ final class InventorySalonUsageServices
         if (!$document) throw new \InvalidArgumentException('inventory_salon_usage_detail_missing');
         $lines = Db::name('inventory_salon_usage_line')->alias('l')->leftJoin('inventory_batch b', 'b.id=l.batch_id')
             ->leftJoin('inventory_stock s', 's.id=l.stock_id')->where('l.document_id', $documentId)
-            ->field('l.id line_id,l.source_usage_line_id,l.product_id,l.sku_id,l.sku_unique,l.quantity_scale,l.quantity_units,l.unit_cost_cents,b.product_name_snapshot product_name,b.sku_name_snapshot sku_name,b.barcode_snapshot barcode,s.stock_unit')
+            ->field('l.id line_id,l.source_usage_line_id,l.product_id,l.sku_id,l.sku_unique,l.quantity_scale,l.quantity_units,l.unit_cost_cents,l.detail_remark,b.product_name_snapshot product_name,b.sku_name_snapshot sku_name,b.barcode_snapshot barcode,s.stock_unit')
             ->order('l.line_no asc')->select()->toArray();
         foreach ($lines as &$line) {
             $returned = (string)$document['operation_type'] === 'ISSUE'
@@ -246,7 +246,7 @@ final class InventorySalonUsageServices
                 $batch=$allocation['batch']; $fact=$this->fact($scope,$stock,$batch,-1,$allocation['units'],'salon_usage_issue',(string)$doc['usage_no'],$line['index'].':'.$allocationIndex,$command);
                 // 只有退回行才引用原领用明细；领用行用 NULL，允许同单多商品或多批次，
                 // 同时保留 (document_id, source_usage_line_id) 对退回行的唯一约束。
-                $id=(int)Db::name('inventory_salon_usage_line')->insertGetId(['document_id'=>(int)$doc['id'],'line_no'=>$line['index']*1000+$allocationIndex,'source_usage_line_id'=>null,'movement_fact_id'=>$fact,'stock_id'=>(int)$stock['id'],'batch_id'=>(int)$batch['id'],'origin_batch_id'=>(int)$batch['origin_batch_id'],'product_id'=>$line['productId'],'sku_id'=>$line['skuId'],'sku_unique'=>$line['unique'],'quantity_scale'=>(int)$stock['quantity_scale'],'quantity_units'=>$allocation['units'],'unit_cost_cents'=>(int)$batch['unit_cost_cents'],'created_at'=>$command['now']]);
+                $id=(int)Db::name('inventory_salon_usage_line')->insertGetId(['document_id'=>(int)$doc['id'],'line_no'=>$line['index']*1000+$allocationIndex,'source_usage_line_id'=>null,'movement_fact_id'=>$fact,'stock_id'=>(int)$stock['id'],'batch_id'=>(int)$batch['id'],'origin_batch_id'=>(int)$batch['origin_batch_id'],'product_id'=>$line['productId'],'sku_id'=>$line['skuId'],'sku_unique'=>$line['unique'],'quantity_scale'=>(int)$stock['quantity_scale'],'quantity_units'=>$allocation['units'],'unit_cost_cents'=>(int)$batch['unit_cost_cents'],'detail_remark'=>(string)($line['detailRemark']??''),'created_at'=>$command['now']]);
                 $written[]=$id;
             }
         }
@@ -347,7 +347,7 @@ final class InventorySalonUsageServices
         $lines = [];
         foreach (array_values($input['lines']) as $i => $line) {
             $lineKeys = ['product_id', 'sku_id', 'sku_unique', 'quantity'];
-            if (!is_array($line) || array_keys($line) !== $lineKeys
+            if (!is_array($line) || !in_array(array_keys($line), [$lineKeys, [...$lineKeys, 'detail_remark']], true)
                 || !preg_match('/^\d+(?:\.\d{1,4})?$/D', trim((string)$line['quantity']))) {
                 throw new \InvalidArgumentException('inventory_salon_usage_line_invalid');
             }
@@ -356,8 +356,14 @@ final class InventorySalonUsageServices
                 || trim((string)$line['sku_unique']) === '') {
                 throw new \InvalidArgumentException('inventory_salon_usage_line_invalid');
             }
-            $lines[] = ['index' => $i, 'productId' => $line['product_id'], 'skuId' => $line['sku_id'],
+            if (array_key_exists('detail_remark', $line) && !is_string($line['detail_remark'])) throw new \InvalidArgumentException('inventory_salon_usage_line_remark_invalid');
+            $detailRemark = trim($line['detail_remark'] ?? '');
+            if (mb_strlen($detailRemark) > 500) throw new \InvalidArgumentException('inventory_salon_usage_line_remark_invalid');
+            $normalized = ['index' => $i, 'productId' => $line['product_id'], 'skuId' => $line['sku_id'],
                 'unique' => trim((string)$line['sku_unique']), 'quantity' => trim((string)$line['quantity'])];
+            // 旧领用单的幂等指纹不变；显式提交的备注属于新单据行快照。
+            if (array_key_exists('detail_remark', $line)) $normalized['detailRemark'] = $detailRemark;
+            $lines[] = $normalized;
         }
         $date = $this->date((string)$input['business_date']);
         $payload = ['operation' => $operation, 'business_date' => $date, 'project_id' => $input['project_id'],

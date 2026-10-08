@@ -8,6 +8,8 @@ $upgrade = dirname(__DIR__, 3) . '/后端代码/database/upgrades/2026-10-08-院
 executeInventorySqlFile($upgrade);
 
 use app\services\product\inventory\InventoryManualInboundServices;
+use app\services\product\inventory\InventoryManualInboundReadServices;
+use app\services\product\inventory\InventoryManualOutboundServices;
 use app\services\product\inventory\InventorySalonUsageServices;
 use think\facade\Db;
 
@@ -69,15 +71,20 @@ $inbound->create($storeId, $staffId, [
     'lines' => [[
         'product_id' => $productId, 'sku_id' => $skuId, 'sku_unique' => $skuUnique,
         'batch_no' => 'TEST-SALON-VOID-' . $suffix, 'quantity' => '3', 'unit_cost' => '66.00',
-        'manufactured_date' => '2026-07-01', 'expire_date' => '2027-07-01',
+        'manufactured_date' => '2026-07-01', 'expire_date' => '2027-07-01', 'detail_remark' => '测试入库明细备注',
     ]],
 ]);
 $locationId = (int)Db::name('inventory_location')->where('tenant_id', '0')->where('store_id', $storeId)->where('is_default', 1)->value('id');
+$inboundRemark = Db::name('inventory_batch_movement_fact')->where('source_id', 'TEST-salon-void-in-' . $suffix)->value('detail_remark');
+salonVoidAssert('inbound line remark is stored on the immutable movement fact', $inboundRemark === '测试入库明细备注');
+$inboundDetail = (new InventoryManualInboundReadServices())->detail($storeId, $staffId, 'TEST-salon-void-in-' . $suffix, true);
+salonVoidAssert('inbound detail returns its own line remark',
+    (string)($inboundDetail['lines'][0]['detail_remark'] ?? '') === '测试入库明细备注');
 $stockBefore = (int)Db::name('inventory_stock')->where('location_id', $locationId)->where('consumable_product_id', $productId)->value('available_quantity_units');
 $issueInput = static function (string $key, int $project) use ($productId, $skuId, $skuUnique): array {
     return ['idempotency_key' => $key, 'business_date' => date('Y-m-d'), 'project_id' => $project,
         'project_name' => '客户端不可信名称', 'remark' => 'TEST-院装领用作废',
-        'lines' => [['product_id' => $productId, 'sku_id' => $skuId, 'sku_unique' => $skuUnique, 'quantity' => '1']]];
+        'lines' => [['product_id' => $productId, 'sku_id' => $skuId, 'sku_unique' => $skuUnique, 'quantity' => '1', 'detail_remark' => '测试院装明细备注']]];
 };
 $issue = $salon->issue($storeId, $staffId, $issueInput('TEST-salon-void-issue-' . $suffix, $projectId));
 $issueId = (int)$issue['usage_document_id'];
@@ -87,6 +94,8 @@ salonVoidAssert('issue stores the server project snapshot and one batch deductio
     (string)$detailBefore['document']['project_name_snapshot'] === 'TEST-院装项目'
     && $detailBefore['document']['can_void'] === true
     && (int)Db::name('inventory_stock')->where('location_id', $locationId)->where('consumable_product_id', $productId)->value('available_quantity_units') === $stockBefore - 1);
+salonVoidAssert('salon issue line remark survives the document detail read',
+    (string)($detailBefore['lines'][0]['detail_remark'] ?? '') === '测试院装明细备注');
 
 // 模拟升级前成功的单行领用，确认历史 0 只转为 NULL，不改原单和库存事实。
 Db::name('inventory_salon_usage_line')->where('document_id', $issueId)->update(['source_usage_line_id' => 0]);
@@ -210,6 +219,21 @@ salonVoidAssert('later line stock failure rolls back the header, earlier deducti
     && (int)Db::name('inventory_batch_movement_fact')->where('store_id', $storeId)->where('source_type', 'salon_usage_issue')->count() === $movementCountBefore
     && (int)Db::name('inventory_stock')->where('location_id', $locationId)->where('consumable_product_id', $productId)->value('available_quantity_units') === $firstStockBefore
     && (int)Db::name('inventory_stock')->where('location_id', $locationId)->where('consumable_product_id', $secondProductId)->value('available_quantity_units') === $secondStockBefore);
+
+// 出库在其他断言之后扣减，避免改变上面的多批次领用基线。
+$outboundKey = 'TEST-salon-remark-out-' . $suffix;
+$outboundInput = ['idempotency_key' => $outboundKey, 'business_date' => date('Y-m-d'), 'remark' => '',
+    'lines' => [['product_id' => $productId, 'sku_id' => $skuId, 'sku_unique' => $skuUnique,
+        'quantity' => '1', 'detail_remark' => '测试出库明细备注']]];
+$outbound = new InventoryManualOutboundServices();
+$outbound->create($storeId, $staffId, $outboundInput);
+$outboundRemarks = Db::name('inventory_batch_movement_fact')->where('source_type', 'manual_outbound')
+    ->where('source_id', $outboundKey)->column('detail_remark');
+salonVoidAssert('outbound settled facts retain the source line remark on every allocated batch',
+    count($outboundRemarks) >= 1 && count(array_unique($outboundRemarks)) === 1
+    && $outboundRemarks[0] === '测试出库明细备注');
+salonVoidAssert('outbound remark replays without a second inventory deduction',
+    ($outbound->create($storeId, $staffId, $outboundInput)['lines'][0]['idempotent'] ?? false) === true);
 
 echo "INVENTORY_SALON_VOID_RESULT failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

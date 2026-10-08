@@ -50,7 +50,7 @@ final class InventoryPlatformHqOutboundServices
         if ($sourceId === '' || strlen($sourceId) > 96) throw new \InvalidArgumentException('inventory_hq_outbound_detail_invalid');
         $facts = $this->facts($location, 'manual_outbound')->where('f.source_id', $sourceId)
             ->join('inventory_stock s', 's.id=f.stock_id')
-            ->fieldRaw("COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.recorded_at, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
+            ->fieldRaw("COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.recorded_at, f.detail_remark, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
             ->order('f.id asc')->select()->toArray();
         if (!$facts) throw new \InvalidArgumentException('inventory_hq_outbound_detail_missing');
         $canViewCost = in_array('inventory.cost.view', (array)($access['features'] ?? []), true);

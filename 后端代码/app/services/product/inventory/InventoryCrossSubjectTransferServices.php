@@ -384,7 +384,7 @@ final class InventoryCrossSubjectTransferServices
                 'from_product_id' => $catalog['fromProductId'], 'from_sku_id' => $catalog['fromSkuId'], 'from_sku_unique' => $catalog['fromSkuUnique'],
                 'to_product_id' => $catalog['toProductId'], 'to_sku_id' => $catalog['toSkuId'], 'to_sku_unique' => $catalog['toSkuUnique'],
                 'requested_quantity_units' => $catalog['units'], 'quantity_scale' => $catalog['scale'], 'product_name_snapshot' => $catalog['productName'],
-                'sku_name_snapshot' => $catalog['skuName'], 'stock_unit_snapshot' => $catalog['stockUnit'], 'created_at' => $command['now'],
+                'sku_name_snapshot' => $catalog['skuName'], 'stock_unit_snapshot' => $catalog['stockUnit'], 'detail_remark' => (string)($line['detailRemark'] ?? ''), 'created_at' => $command['now'],
             ]);
         }
         return ['transfer_id' => $documentId, 'transfer_no' => $transferNo, 'document_status' => 'DRAFT', 'idempotent' => false];
@@ -483,10 +483,19 @@ final class InventoryCrossSubjectTransferServices
             // canonical output below still gives retries a stable fingerprint.
             $lineKeys = is_array($line) ? array_keys($line) : [];
             sort($lineKeys);
-            if ($lineKeys !== ['product_id', 'quantity', 'request_line_id', 'sku_id', 'sku_unique'] || !is_int($line['product_id']) || !is_int($line['sku_id']) || !is_int($line['request_line_id']) || $line['product_id'] <= 0 || $line['sku_id'] <= 0 || $line['request_line_id'] < 0) throw new \InvalidArgumentException('inventory_cross_transfer_line_invalid');
+            if (!in_array($lineKeys, [
+                ['product_id', 'quantity', 'request_line_id', 'sku_id', 'sku_unique'],
+                ['detail_remark', 'product_id', 'quantity', 'request_line_id', 'sku_id', 'sku_unique'],
+            ], true) || !is_int($line['product_id']) || !is_int($line['sku_id']) || !is_int($line['request_line_id']) || $line['product_id'] <= 0 || $line['sku_id'] <= 0 || $line['request_line_id'] < 0) throw new \InvalidArgumentException('inventory_cross_transfer_line_invalid');
             $unique = trim((string)$line['sku_unique']); $quantity = trim((string)$line['quantity']);
             if ($unique === '' || strlen($unique) > 64 || preg_match('/^\d+(?:\.\d{1,4})?$/D', $quantity) !== 1 || (float)$quantity <= 0) throw new \InvalidArgumentException('inventory_cross_transfer_line_invalid');
-            $lines[] = ['index' => $index, 'productId' => $line['product_id'], 'skuId' => $line['sku_id'], 'skuUnique' => $unique, 'quantity' => $quantity, 'requestLineId' => $line['request_line_id']];
+            if (array_key_exists('detail_remark', $line) && !is_string($line['detail_remark'])) throw new \InvalidArgumentException('inventory_cross_transfer_line_remark_invalid');
+            $detailRemark = trim($line['detail_remark'] ?? '');
+            if (mb_strlen($detailRemark) > 500) throw new \InvalidArgumentException('inventory_cross_transfer_line_remark_invalid');
+            $normalized = ['index' => $index, 'productId' => $line['product_id'], 'skuId' => $line['sku_id'], 'skuUnique' => $unique, 'quantity' => $quantity, 'requestLineId' => $line['request_line_id']];
+            // 空缺字段沿用历史指纹；显式备注参与新单据的重放校验。
+            if (array_key_exists('detail_remark', $line)) $normalized['detailRemark'] = $detailRemark;
+            $lines[] = $normalized;
         }
         $date = $this->date((string)$input['business_date']); $remark = mb_substr(trim((string)$input['remark']), 0, 500);
         $legacyFingerprint = hash('sha256', json_encode([$date, $remark, $input['target_store_id'], $input['request_document_id'], $lines], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
