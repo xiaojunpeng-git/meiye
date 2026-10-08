@@ -6,6 +6,7 @@ use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3PersonnelIdentity;
+use app\services\cashier\v3\CashierV3ProjectLaborDefault;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\organization\OrganizationScopeService;
 use think\facade\Db;
@@ -116,33 +117,8 @@ final class CashierV3QueryEntitySelectorServices
             : 0;
         $laborDefaultFeeCents = 0;
         if ($selectorScope === 'service_actual_craftsmen' && $projectId > 0) {
-            $ruleQuery = Db::name('cashier_v3_project_performance_rule')
-                ->where('tenant_id', $dataScope->tenantId())
-                ->where('project_id', $projectId)
-                ->order('id', 'desc');
-            $rule = $ruleQuery->find();
-            if (is_array($rule) && array_key_exists('labor_configured_unit_amount_cents', $rule)) {
-                $configured = $rule['labor_configured_unit_amount_cents'];
-                $laborDefaultFeeCents = max(0, (int)$configured);
-            } else {
-                // 门店商品是平台项目的复制行（type=1，pid=平台项目ID），
-                // 固定手工费规则归属于平台主项目，需回溯 pid 读取。
-                $masterId = (int)(Db::name('store_product')
-                    ->where('id', $projectId)
-                    ->where('type', 1)
-                    ->where('product_type', 6)
-                    ->value('pid') ?: 0);
-                if ($masterId > 0 && $masterId !== $projectId) {
-                    $masterRule = Db::name('cashier_v3_project_performance_rule')
-                        ->where('tenant_id', $dataScope->tenantId())
-                        ->where('project_id', $masterId)
-                        ->order('id', 'desc')
-                        ->find();
-                    if (is_array($masterRule) && array_key_exists('labor_configured_unit_amount_cents', $masterRule)) {
-                        $laborDefaultFeeCents = max(0, (int)$masterRule['labor_configured_unit_amount_cents']);
-                    }
-                }
-            }
+            // 与购物车使用同一配置来源，避免旧门店零值规则使人员候选默认值漂移。
+            $laborDefaultFeeCents = CashierV3ProjectLaborDefault::cents($projectId, $dataScope->tenantId());
         }
         $eligibilityColumn = $requiresEmploymentType
             ? 'ss.cashier_salesperson_enabled'

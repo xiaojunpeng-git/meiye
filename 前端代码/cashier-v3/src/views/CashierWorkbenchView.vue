@@ -2133,7 +2133,10 @@ async function appendCatalogItemToDraft(item) {
       id: localLineId,
       lineRole: 'sale',
       catalogItemId: itemId,
-      productId: itemId,
+      // 目录 id 是 SKU，手工费与人员默认规则使用商品/项目 ID，不能混用两种身份。
+      // 结账目录键仍保留 SKU；项目键只用于该项目的配置查询。
+      productId: Number(item.productId || 0),
+      projectId: catalogKind === '项目' ? Number(item.productId || 0) : 0,
       itemId,
       name: String(item.name || ''),
       kind: catalogKind,

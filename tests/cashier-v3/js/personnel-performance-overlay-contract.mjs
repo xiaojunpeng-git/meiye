@@ -224,11 +224,11 @@ assert.match(component, /personnel-allocation-input--labor/, '手工费输入格
 assert.match(component, /laborDefaultFee/, '手工费默认值必须接收项目固定手工费')
 assert.match(workbench, /projectId: line\.projectId/, '人员候选查询必须携带当前项目 ID')
 assert.match(component, /candidateDefault/, '手艺人候选返回的项目固定手工费必须作为默认值')
-assert.match(selector, /labor_configured_unit_amount_cents/, '手艺人候选必须读取项目固定手工费')
-assert.match(selector, /where\('tenant_id', \$dataScope->tenantId\(\)\)/, '候选手工费读取必须限定当前租户')
+// 两个入口共用已做行为测试的主项目解析器；租户仍由各入口的后端上下文传入。
+assert.match(selector, /CashierV3ProjectLaborDefault::cents\(\$projectId, \$dataScope->tenantId\(\)\)/, '手艺人候选必须按当前租户读取统一的项目固定手工费')
 assert.match(
   workspace,
-  /private function projectLaborDefaultCents\(int \$projectId\)[\s\S]*?where\('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID\)/,
+  /private function projectLaborDefaultCents\(int \$projectId\)[\s\S]*?CashierV3ProjectLaborDefault::cents\(\$projectId, CashierV3ScopeResolver::TENANT_SCOPE_ID\)/,
   '项目固定手工费读取必须限定当前租户，不能被其他租户同项目配置覆盖'
 )
 assert.match(

@@ -7,6 +7,7 @@ use app\services\employee\EmployeeCraftsmanPerformanceTypeServices;
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3PersonnelIdentity;
+use app\services\cashier\v3\CashierV3ProjectLaborDefault;
 use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3ScopeResolver;
@@ -3635,33 +3636,10 @@ final class CashierV3CashierWorkspaceServices
         return bcdiv((string)$cents, '100', 2);
     }
 
+    /** 默认值统一取平台主项目；人员已输入的金额仍由分配快照保存，不能在此重算。 */
     private function projectLaborDefaultCents(int $projectId): int
     {
-        if ($projectId <= 0) return 0;
-        $ruleQuery = Db::name('cashier_v3_project_performance_rule')
-            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->where('project_id', $projectId)
-            ->order('id', 'desc');
-        $rule = $ruleQuery->find();
-        if (is_array($rule) && array_key_exists('labor_configured_unit_amount_cents', $rule)) {
-            return max(0, (int)$rule['labor_configured_unit_amount_cents']);
-        }
-        // 门店商品是平台项目的复制行（type=1，pid=平台项目ID）。项目业绩规则
-        // 只归属于平台主项目，不能按门店复制行 ID 查，否则固定手工费会变成 0。
-        $masterId = (int)(Db::name('store_product')
-            ->where('id', $projectId)
-            ->where('type', 1)
-            ->where('product_type', 6)
-            ->value('pid') ?: 0);
-        if ($masterId <= 0 || $masterId === $projectId) return 0;
-        $masterRule = Db::name('cashier_v3_project_performance_rule')
-            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->where('project_id', $masterId)
-            ->order('id', 'desc')
-            ->find();
-        return is_array($masterRule) && array_key_exists('labor_configured_unit_amount_cents', $masterRule)
-            ? max(0, (int)$masterRule['labor_configured_unit_amount_cents'])
-            : 0;
+        return CashierV3ProjectLaborDefault::cents($projectId, CashierV3ScopeResolver::TENANT_SCOPE_ID);
     }
 
     private function laborProjectIdFromLine(array $line): int
