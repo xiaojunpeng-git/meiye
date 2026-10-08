@@ -121,7 +121,10 @@ final class ServiceCustomerMetricReadServices
                     // The point/round choice is frozen on the employee role,
                     // not on the calculation rule (which may be shared).
                     'point' => substr((string)($row['role_snapshot'] ?? ''), -6) === ':point',
-                    'allocation_group' => $services[$serviceLineKey]['allocation_groups'][$employeeId] ?? 'normal',
+                    // Replacement labor facts own their adjustment-time role group;
+                    // the checkout snapshot is only authoritative before an adjustment.
+                    'allocation_group' => $this->factAllocationGroup($row)
+                        ?? ($services[$serviceLineKey]['allocation_groups'][$employeeId] ?? 'normal'),
                     'service_line_key' => $serviceLineKey,
                     'service' => $services[$serviceLineKey],
                 ];
@@ -244,11 +247,24 @@ final class ServiceCustomerMetricReadServices
     {
         $query = call_user_func($this->queryFactory, 'cashier_v3_entitlement_service_fact')->alias('sv')
             ->leftJoin('cashier_v3_performance_fact p', "p.tenant_id=sv.tenant_id AND p.checkout_request_id=sv.checkout_request_id AND p.source_line_id=sv.source_line_id AND p.status='effective' AND p.performance_type='labor_performance_allocated'")
+            ->leftJoin('cashier_v3_service_customer_group_fact cg', 'cg.tenant_id=p.tenant_id AND cg.performance_fact_id=p.fact_id AND cg.store_id=sv.store_id AND cg.service_fact_id=sv.id AND cg.employee_id=p.employee_id')
             ->where('sv.tenant_id', $tenantId)->whereIn('sv.store_id', $stores)
             ->whereBetween('sv.business_date', [$range['start'], $range['end']])
             ->where('sv.service_status', 'completed')->order('p.id', 'asc');
         call_user_func($this->normalServices, $query, 'sv');
-        return $query->field('p.id,p.fact_id,p.fact_direction,p.reversal_of,p.store_id,p.employee_id,p.employee_name_snapshot employee_name,p.role_snapshot,sv.checkout_request_id,sv.source_line_id,sv.service_fact_id,sv.store_id service_store_id,sv.business_date,sv.member_id,sv.member_name_snapshot member_name,sv.service_object,sv.friend_counts_as_customer,sv.craftsmen_snapshot_json,sv.labor_amount_cents,sv.labor_fee_amount_cents,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.source_document_type source_type')->select()->toArray();
+        return $query->field('p.id,p.fact_id,p.fact_direction,p.reversal_of,p.store_id,p.employee_id,p.employee_name_snapshot employee_name,p.role_snapshot,cg.allocation_group_key fact_allocation_group,cg.position_id fact_position_id,cg.performance_independent fact_performance_independent,sv.checkout_request_id,sv.source_line_id,sv.service_fact_id,sv.store_id service_store_id,sv.business_date,sv.member_id,sv.member_name_snapshot member_name,sv.service_object,sv.friend_counts_as_customer,sv.craftsmen_snapshot_json,sv.labor_amount_cents,sv.labor_fee_amount_cents,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.source_document_type source_type')->select()->toArray();
+    }
+
+    /** An adjustment group must be internally consistent; never infer it from today's position. */
+    private function factAllocationGroup(array $row): ?string
+    {
+        $key = trim((string)($row['fact_allocation_group'] ?? ''));
+        if ($key === '') return null;
+        $positionId = $this->integer($row['fact_position_id'] ?? 0);
+        $independent = $this->integer($row['fact_performance_independent'] ?? 0) === 1;
+        if ($key === 'normal' && !$independent) return 'normal';
+        if ($independent && $positionId > 0 && $key === 'independent:' . $positionId) return $key;
+        $this->fail('METRIC_SERVICE_SOURCE_INVALID');
     }
 
     /** @return array<int,string> */

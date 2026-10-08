@@ -118,6 +118,54 @@ expectShares([
     $invalidPosition['summary_by_store_employee']['23|201']['visit_tenths'],
 ], [5, 5], 'explicitly invalid position cannot form an independent group');
 
+// A later service-person adjustment overrides the original checkout role for
+// the replacement labor facts, including an employee absent from that snapshot.
+$originalOnly = json_encode([
+    ['employee_id' => 101, 'store_id' => 23, 'performance_independent' => 0,
+        'allocation_group_key' => 'normal'],
+], JSON_THROW_ON_ERROR);
+$adjustedRows = serviceRows('adjusted', [101 => '美容师', 201 => '店长'], $originalOnly);
+$adjustedRows[0]['fact_allocation_group'] = 'normal';
+$adjustedRows[0]['fact_position_id'] = 69;
+$adjustedRows[0]['fact_performance_independent'] = 0;
+$adjustedRows[1]['fact_allocation_group'] = 'independent:67';
+$adjustedRows[1]['fact_position_id'] = 67;
+$adjustedRows[1]['fact_performance_independent'] = 1;
+$adjusted = serviceMetrics($adjustedRows);
+expectShares([
+    $adjusted['summary_by_store_employee']['23|101']['visit_tenths'],
+    $adjusted['summary_by_store_employee']['23|201']['visit_tenths'],
+], [10, 10], 'replacement labor facts use frozen adjustment groups');
+expectShares([
+    $adjusted['summary_by_store_employee']['23|101']['people_tenths'],
+    $adjusted['summary_by_store_employee']['23|201']['people_tenths'],
+], [10, 10], 'replacement groups also reconcile period people');
+
+$invalidAdjustment = $adjustedRows;
+$invalidAdjustment[1]['fact_position_id'] = 68;
+try {
+    serviceMetrics($invalidAdjustment);
+    throw new RuntimeException('conflicting adjustment group was accepted');
+} catch (Throwable $exception) {
+    if (!$exception instanceof \app\services\query\metric\MetricQueryContractException
+        || $exception->getErrorCode() !== 'METRIC_SERVICE_SOURCE_INVALID') throw $exception;
+    echo 'PASS conflicting adjustment group fails closed' . PHP_EOL;
+}
+
+$reversedManager = $adjustedRows[1];
+$reversedManager['fact_id'] = 'REV-adjusted-manager';
+$reversedManager['fact_direction'] = 'reversal';
+$reversedManager['reversal_of'] = $adjustedRows[1]['fact_id'];
+$replacementManager = $adjustedRows[1];
+$replacementManager['fact_id'] = 'NEW-adjusted-manager';
+$replacementManager['fact_allocation_group'] = 'normal';
+$replacementManager['fact_performance_independent'] = 0;
+$readjusted = serviceMetrics(array_merge($adjustedRows, [$reversedManager, $replacementManager]));
+expectShares([
+    $readjusted['summary_by_store_employee']['23|101']['visit_tenths'],
+    $readjusted['summary_by_store_employee']['23|201']['visit_tenths'],
+], [5, 5], 'later adjustment replaces the reversed role group without double counting');
+
 $excluded = serviceMetrics(serviceRows('C', $people, $snapshot, 'friend', 0));
 expectShares($excluded['summary_by_store_employee'], [], 'friend not counted remains excluded');
 $selfExcluded = serviceMetrics(serviceRows('C-self', $people, $snapshot, 'self', 0));

@@ -25,6 +25,7 @@ use think\facade\Db;
 final class CashierV3ServiceRecordCraftsmanAdjustmentServices
 {
     public const OPERATION_TABLE = 'cashier_v3_service_record_adjustment_operation';
+    public const CUSTOMER_GROUP_TABLE = 'cashier_v3_service_customer_group_fact';
     public const CONTRACT_VERSION = 'cashier-v3-service-record-craftsman-adjustment-v1';
 
     /** @return array<string,mixed> */
@@ -120,8 +121,9 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         foreach ($currentFacts as $fact) {
             $this->insertReversal($fact, $operationId, $commandKey, $event, $operator, $now);
         }
+        $allocationFacts = [];
         foreach ($after as $index => $allocation) {
-            $this->insertAllocation($template, $allocation, $index, $source, $operationId, $commandKey, $event, $operator, $now, $totalCents);
+            $allocationFacts[] = $this->insertAllocation($template, $allocation, $index, $source, $operationId, $commandKey, $event, $operator, $now, $totalCents);
         }
 
         $operatorName = $this->operatorName($operator);
@@ -143,6 +145,11 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         ];
         $row['immutable_fingerprint'] = hash('sha256', $this->json($row));
         if ((int)Db::name(self::OPERATION_TABLE)->insert($row) !== 1) throw self::failure('service_adjust_operation_insert_failed');
+        // The adjustment replaces the serving people. Freeze their position groups with
+        // the new labor facts so later role edits cannot change historical customer counts.
+        foreach ($after as $index => $allocation) {
+            $this->insertCustomerGroupFact($allocationFacts[$index], $allocation, $row, $now);
+        }
         return $this->result($row, false);
     }
 
@@ -542,11 +549,15 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         if ($storeStaffIds !== []) {
             sort($storeStaffIds, SORT_NUMERIC);
             $staffRows = Db::name('system_store_staff')->alias('ss')->join('employee e', 'e.id=ss.employee_id')
+                ->leftJoin('staff_job_position sjp', 'sjp.staff_id=ss.id AND sjp.status=1 AND sjp.is_del=0 AND sjp.end_time=0')
+                ->leftJoin('position p', 'p.id=sjp.position_id AND p.status=1')
                 ->whereIn('ss.id', $storeStaffIds)->where('ss.store_id', $operator->storeId())->where('ss.status', 1)->where('ss.is_del', 0)
                 ->where('ss.cashier_craftsman_enabled', 1)->where('e.status', 1)->where('e.is_del', 0)
-                ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,ss.craftsman_performance_type,e.name,e.employment_type_code,e.employment_type_version')
+                ->field('ss.id,ss.employee_id,ss.store_id,ss.staff_name,ss.craftsman_performance_type,e.name,e.employment_type_code,e.employment_type_version,sjp.id staff_job_position_id,sjp.position_id,p.performance_independent,p.version position_version,p.update_time position_update_time')
                 ->lock(true)->select()->toArray();
             foreach ($staffRows as $row) {
+                $positionId = (int)($row['position_id'] ?? 0);
+                $independent = $positionId > 0 && (int)($row['performance_independent'] ?? 0) === 1;
                 $byId[(int)$row['id']] = [
                     'staffId' => (int)$row['id'], 'employeeId' => (int)$row['employee_id'],
                     'employeeName' => trim((string)$row['name']) ?: (string)$row['staff_name'],
@@ -554,6 +565,12 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                     'employeeTypeVersion' => max(1, (int)$row['employment_type_version']),
                     'craftsmanPerformanceType' => (string)$row['craftsman_performance_type'],
                     'personnelSource' => 'store',
+                    'positionId' => $positionId,
+                    'staffJobPositionId' => (int)($row['staff_job_position_id'] ?? 0),
+                    'positionVersion' => (int)($row['position_version'] ?? 0),
+                    'positionUpdateTime' => (int)($row['position_update_time'] ?? 0),
+                    'performanceIndependent' => $independent,
+                    'allocationGroupKey' => $independent ? 'independent:' . $positionId : 'normal',
                 ];
             }
             if (count($staffRows) !== count($storeStaffIds)) throw CashierV3CommandException::invalidContext('所选手艺人已停用或不属于当前门店。');
@@ -597,6 +614,12 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
                 'employeeTypeVersion' => (int)$staff['employeeTypeVersion'],
                 'personnelSource' => (string)$staff['personnelSource'],
                 'craftsmanPerformanceType' => $type,
+                'positionId' => (int)($staff['positionId'] ?? 0),
+                'staffJobPositionId' => (int)($staff['staffJobPositionId'] ?? 0),
+                'positionVersion' => (int)($staff['positionVersion'] ?? 0),
+                'positionUpdateTime' => (int)($staff['positionUpdateTime'] ?? 0),
+                'performanceIndependent' => !empty($staff['performanceIndependent']),
+                'allocationGroupKey' => (string)($staff['allocationGroupKey'] ?? 'normal'),
                 'isPointCustomer' => !empty($raw['isPointCustomer']) || !empty($raw['marked']),
                 'allocationAmountCents' => $amount, 'laborFeeCents' => $fee,
                 'projectCount' => $projectCount,
@@ -671,7 +694,7 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         if ((int)Db::name('cashier_v3_performance_fact')->insert($row) !== 1) throw self::failure('service_adjust_reversal_insert_failed');
     }
 
-    private function insertAllocation(array $template, array $allocation, int $index, array $source, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, int $totalCents): void
+    private function insertAllocation(array $template, array $allocation, int $index, array $source, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, int $totalCents): string
     {
         $row = $template; unset($row['id']);
         $row['fact_id'] = 'SAA-' . strtoupper(substr(hash_hmac('sha256', $operationId . '|' . $allocation['staffId'], $this->secret()), 0, 40));
@@ -695,6 +718,36 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
         $row['rule_name_snapshot'] = '服务记录手艺人调整'; $row['rule_version_snapshot'] = 'v1';
         $row['immutable_fingerprint'] = hash('sha256', $this->json($row));
         if ((int)Db::name('cashier_v3_performance_fact')->insert($row) !== 1) throw self::failure('service_adjust_allocation_insert_failed', ['index' => $index]);
+        return (string)$row['fact_id'];
+    }
+
+    /** Bind one frozen customer-allocation group to the matching replacement labor fact. */
+    private function insertCustomerGroupFact(string $performanceFactId, array $allocation, array $operation, int $now): void
+    {
+        $row = [
+            'tenant_id' => (string)$operation['tenant_id'],
+            'store_id' => (int)$operation['store_id'],
+            'service_fact_id' => (int)$operation['service_fact_id'],
+            'operation_id' => (string)$operation['operation_id'],
+            'business_event_no' => (string)$operation['business_event_no'],
+            'performance_fact_id' => $performanceFactId,
+            'employee_id' => (int)$allocation['employeeId'],
+            'staff_id' => (int)$allocation['staffId'],
+            'staff_job_position_id' => (int)$allocation['staffJobPositionId'],
+            'position_id' => (int)$allocation['positionId'],
+            'position_version' => (int)$allocation['positionVersion'],
+            'position_update_time' => (int)$allocation['positionUpdateTime'],
+            'performance_independent' => !empty($allocation['performanceIndependent']) ? 1 : 0,
+            'allocation_group_key' => (string)$allocation['allocationGroupKey'],
+            'capture_mode' => 'adjustment',
+            'source_fingerprint' => (string)$operation['immutable_fingerprint'],
+            'occurred_at' => (int)$operation['occurred_at'],
+            'recorded_at' => $now,
+        ];
+        $row['immutable_fingerprint'] = hash('sha256', $this->json($row));
+        if ((int)Db::name(self::CUSTOMER_GROUP_TABLE)->insert($row) !== 1) {
+            throw self::failure('service_adjust_customer_group_insert_failed');
+        }
     }
 
     private function performanceTypeFromRole(string $role): string
