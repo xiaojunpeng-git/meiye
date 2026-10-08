@@ -1,0 +1,52 @@
+[
+  {
+    "url": "https://rh.cc3798.com/view_cashier_v3/",
+    "sha256": "62a31c979a8a6a35db6906b9a2f9393dc71bb690b5fdadea9932bc5bcec17a4c",
+    "status": 200
+  },
+  {
+    "url": "https://rh.cc3798.com/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+    "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+    "status": 200
+  },
+  {
+    "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-a4212234.js",
+    "sha256": "1212bb3862c9606cdd21ff698556156d56f9e539894894d75194026b9d5760c4",
+    "status": 200
+  },
+  {
+    "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-ea778e54.css",
+    "sha256": "ea778e5405ede61e8b5023c69f3b26cc5f3ff15b1c3a0ab8136e3b5f261d49a8",
+    "status": 200
+  },
+  {
+    "url": "https://rh.cc3798.com/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+    "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+    "status": 200
+  },
+  {
+    "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/",
+    "sha256": "27172b2a6d483aa34cf974c98a6b1bf44bf4f435e02e6a8f14fa04e21504cee2",
+    "status": 200
+  },
+  {
+    "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+    "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+    "status": 200
+  },
+  {
+    "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-a4212234.js",
+    "sha256": "1212bb3862c9606cdd21ff698556156d56f9e539894894d75194026b9d5760c4",
+    "status": 200
+  },
+  {
+    "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-ea778e54.css",
+    "sha256": "ea778e5405ede61e8b5023c69f3b26cc5f3ff15b1c3a0ab8136e3b5f261d49a8",
+    "status": 200
+  },
+  {
+    "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+    "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+    "status": 200
+  }
+]
