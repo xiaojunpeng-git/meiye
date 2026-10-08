@@ -244,7 +244,9 @@ final class InventorySalonUsageServices
             $allocations=$this->fefo((int)$stock['id'],$units); $this->decrease($stock,$allocations,$units,$command['now']);
             foreach ($allocations as $allocationIndex => $allocation) {
                 $batch=$allocation['batch']; $fact=$this->fact($scope,$stock,$batch,-1,$allocation['units'],'salon_usage_issue',(string)$doc['usage_no'],$line['index'].':'.$allocationIndex,$command);
-                $id=(int)Db::name('inventory_salon_usage_line')->insertGetId(['document_id'=>(int)$doc['id'],'line_no'=>$line['index']*1000+$allocationIndex,'source_usage_line_id'=>0,'movement_fact_id'=>$fact,'stock_id'=>(int)$stock['id'],'batch_id'=>(int)$batch['id'],'origin_batch_id'=>(int)$batch['origin_batch_id'],'product_id'=>$line['productId'],'sku_id'=>$line['skuId'],'sku_unique'=>$line['unique'],'quantity_scale'=>(int)$stock['quantity_scale'],'quantity_units'=>$allocation['units'],'unit_cost_cents'=>(int)$batch['unit_cost_cents'],'created_at'=>$command['now']]);
+                // 只有退回行才引用原领用明细；领用行用 NULL，允许同单多商品或多批次，
+                // 同时保留 (document_id, source_usage_line_id) 对退回行的唯一约束。
+                $id=(int)Db::name('inventory_salon_usage_line')->insertGetId(['document_id'=>(int)$doc['id'],'line_no'=>$line['index']*1000+$allocationIndex,'source_usage_line_id'=>null,'movement_fact_id'=>$fact,'stock_id'=>(int)$stock['id'],'batch_id'=>(int)$batch['id'],'origin_batch_id'=>(int)$batch['origin_batch_id'],'product_id'=>$line['productId'],'sku_id'=>$line['skuId'],'sku_unique'=>$line['unique'],'quantity_scale'=>(int)$stock['quantity_scale'],'quantity_units'=>$allocation['units'],'unit_cost_cents'=>(int)$batch['unit_cost_cents'],'created_at'=>$command['now']]);
                 $written[]=$id;
             }
         }
