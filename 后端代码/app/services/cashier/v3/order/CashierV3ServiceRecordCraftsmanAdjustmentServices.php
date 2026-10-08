@@ -180,6 +180,16 @@ final class CashierV3ServiceRecordCraftsmanAdjustmentServices
 
     private function writeoffAmountCents(array $source, string $tenantId): int
     {
+        // 历史共享卡核销金额以追加更正事实修复，原始核销快照不能覆盖。
+        // 二次调整手艺人时必须使用已更正的权威金额，避免把旧小数额重新写回。
+        $corrected = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)
+            ->where('checkout_request_id', (string)$source['checkout_request_id'])
+            ->where('source_line_id', (string)$source['source_line_id'])
+            ->where('performance_type', 'consumption_performance_recorded')->where('status', 'effective')
+            ->where('fact_direction', 'forward')
+            ->where('rule_code_snapshot', 'SHARED-CARD-PURCHASE-REPAIR-R32')
+            ->order('id', 'desc')->value('amount_cents');
+        if ($corrected !== null) return max(0, (int)$corrected);
         $amount = max(0, (int)($source['actual_entitlement_amount_cents'] ?? 0));
         if ($amount > 0) return $amount;
         $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)
