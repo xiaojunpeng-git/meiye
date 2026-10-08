@@ -752,8 +752,11 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
             // the browser must not cancel, concatenate or recreate the query.
             choices.supplement_text = detail;
           }
-          const action = controls.length === 1 && controls[0].field.options.find(option =>
-            option.value === choices[controls[0].field.key])?.action;
+          // The platform build chain does not transpile this shared module;
+          // read the selected recovery action without optional-chain syntax.
+          const selected = controls.length === 1 && controls[0].field.options.find(option =>
+            option.value === choices[controls[0].field.key]);
+          const action = selected && selected.action;
           if (['edit_original', 'retry_original', 'new_conversation'].includes(action)) {
             // Recovery actions are client commands, not metric choices. End
             // the paused Run before editing or resubmitting the same question.
