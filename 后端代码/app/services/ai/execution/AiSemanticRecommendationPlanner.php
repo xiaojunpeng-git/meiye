@@ -8,6 +8,29 @@ use app\services\query\metric\MetricSemanticCatalog;
  * alter a locked condition or turn an unavailable metric into a recommendation. */
 final class AiSemanticRecommendationPlanner
 {
+    /** Complete a four-choice question card without inventing a metric.
+     * The first three slots keep genuine executable suggestions, then use
+     * customer actions for any missing slots; the client owns the fourth
+     * free-text supplement and never submits these actions as metric codes. */
+    public static function completeCardOptions(array $suggestions): array
+    {
+        $options=[];$seen=[];
+        foreach ($suggestions as $suggestion) {
+            $value=$suggestion['value']??null;
+            if (!is_string($value) || $value==='' || isset($seen[$value]) || count($options)>=3) continue;
+            $seen[$value]=true;$suggestion['recommended']=true;$options[]=$suggestion;
+        }
+        foreach ([
+            ['value'=>'__edit_original__','label'=>'修改原问题后查询','action'=>'edit_original'],
+            ['value'=>'__retry_original__','label'=>'按原问题再查一次','action'=>'retry_original'],
+            ['value'=>'__new_conversation__','label'=>'开启新对话','action'=>'new_conversation'],
+        ] as $action) {
+            if (count($options)>=3) break;
+            $action['recommended']=true;$options[]=$action;
+        }
+        return $options;
+    }
+
     public function candidates(array $meaning,array $capabilities,string $today,string $format,callable $preflight,array $labels,?array $source=null,?int $currentStoreId=null): array
     {
         if (!empty($meaning['groups'])) return [];

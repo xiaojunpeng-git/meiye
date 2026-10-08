@@ -27,4 +27,17 @@ for ($rank=1;$rank<=5;$rank++) $rows[]=['rank'=>'第'.$rank.'名','label'=>'对�
 $summary=$narrative->invoke(new AiAnswerRenderer(),$rows);
 $check(str_contains($summary,'共列出5条排名结果') && str_contains($summary,'第1名'),
     'five-row ranking summary announces the complete list size while the table retains all rows');
+$both=[];
+for ($rank=1;$rank<=20;$rank++) {
+    $both[]=['rank'=>'第'.$rank.'名','rank_direction'=>'top','label'=>'高'.$rank,'metric'=>'现金业绩','value'=>(string)(100-$rank),'unit'=>'元'];
+    $both[]=['rank'=>'倒数第'.$rank.'名','rank_direction'=>'bottom','label'=>'低'.$rank,'metric'=>'现金业绩','value'=>(string)$rank,'unit'=>'元'];
+}
+$bothSummary=$narrative->invoke(new AiAnswerRenderer(),$both);
+$check(str_contains($bothSummary,'第1名是高1') && str_contains($bothSummary,'倒数第1名是低1'),
+    'two-sided ranking states both verified extremes even when its full table exceeds the preview');
+$preview=AiAnswerRenderer::limitTables(['summary'=>$bothSummary,'table'=>['rows'=>$both]]);
+$check(count($preview['table']['rows'])===20 && ($preview['table']['rows'][0]['rank_direction']??null)==='top'
+    && ($preview['table']['rows'][1]['rank_direction']??null)==='bottom'
+    && ($preview['table']['total_rows']??null)===40 && ($preview['auto_export_required']??null)===true,
+    'two-sided interleaved order retains both extremes in the bounded screen table and complete export');
 echo "PASS r27 ranking presentation: {$checks} checks\n";

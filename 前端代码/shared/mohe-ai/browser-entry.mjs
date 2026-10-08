@@ -62,7 +62,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     if (reason === 'AI_CLIENT_UPGRADE_REQUIRED') return '魔核 AI 页面版本较旧，请刷新页面后再试。';
     return /[\u3400-\u9fff]/.test(reason) ? reason : fallback;
   }
-  let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, elapsedTimer, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, workspaceTitle = null, workspaceHistory = null, workspaceCancel = null, readingRunway = null, activeRunStatus = null, exportRequested = false, recoveryDraft = null, freshButton = null;
+  let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, elapsedTimer, admissionRetryTimer = null, admissionInFlight = false, admissionRetryCount = 0, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, workspaceTitle = null, workspaceHistory = null, workspaceCancel = null, readingRunway = null, activeRunStatus = null, exportRequested = false, recoveryDraft = null, freshButton = null;
   let clientSession = newId(); const entry = el('button', entryIconUrl ? null : '魔核 AI', entryIconUrl ? 'entry entry--icon' : 'entry');
   entry.type = 'button'; entry.setAttribute('aria-label', '打开魔核 AI 工作台');
   if (entryIconUrl) { const icon = documentRef.createElement('img'); icon.className = 'entry-icon'; icon.src = entryIconUrl; icon.alt = ''; entry.appendChild(icon); }
@@ -752,6 +752,21 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
             // the browser must not cancel, concatenate or recreate the query.
             choices.supplement_text = detail;
           }
+          const action = controls.length === 1 && controls[0].field.options.find(option =>
+            option.value === choices[controls[0].field.key])?.action;
+          if (['edit_original', 'retry_original', 'new_conversation'].includes(action)) {
+            // Recovery actions are client commands, not metric choices. End
+            // the paused Run before editing or resubmitting the same question.
+            const original = question;
+            const origin = { conversation_id: conversation, history: sessions.history(conversation),
+              context_ref: sessions.contextRef(conversation) };
+            await stop();
+            if (!run || run.status !== 'CANCELLED') return;
+            if (action === 'new_conversation') { if (freshButton) freshButton.click(); return; }
+            recoveryDraft = origin; input.value = original; input.focus();
+            if (action === 'retry_original') void submitQuestion();
+            return;
+          }
           pendingSubmission = { ...binding(), ...clarificationSubmission(c, choices, newId(), reviseId) };
           guidanceSubmission = pendingSubmission; persistActive();
         }
@@ -819,7 +834,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   async function submitQuestion() {
     if (!boot.enabled) { progress.textContent = customerErrorMessage(boot.disabled_reason, '当前账号暂不能使用魔核 AI，请联系管理员检查配置或权限。'); return; }
     if (!pendingCreate && !input.value.trim()) return;
-    if (run && !isTerminal(run.status)) return;
+    if (admissionInFlight || (run && !isTerminal(run.status))) return;
+    clearTimeout(admissionRetryTimer); admissionRetryTimer = null;
     const restoringClosedRequest = pendingCreate !== null && closeRequested;
     question = pendingCreate ? pendingCreate.question : input.value.trim(); send.disabled = true; closeRequested = restoringClosedRequest;
     if (!pendingCreate) {
@@ -843,7 +859,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     syncWorkspaceActions();
     if (!clientDeliveryStartedAt) clientDeliveryStartedAt=Date.now();
     if (sessions) sessions.setPendingQuestion(conversation, question);
-    input.value = ''; if (!setActiveRunState('正在思考')) progress.textContent = '正在接纳请求'; run = null; persistActive();
+    input.value = ''; if (!setActiveRunState(admissionRetryCount ? '正在重新确认请求' : '正在思考')) progress.textContent = '正在接纳请求'; run = null; persistActive();
+    admissionInFlight = true;
     try {
       const submitted = pendingCreate;
       const accepted = await request('POST', '/runs', submitted);
@@ -853,8 +870,10 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         return;
       }
       if (accepted && accepted.accepted === false) {
+        admissionRetryCount = 0;
         recordAdmissionRefusal(submitted, customerErrorMessage(accepted.message, '当前使用人数较多，请稍后再问。'), accepted.failure_guidance, accepted.reason); return;
       }
+      admissionRetryCount = 0;
       await update(accepted); persistActive();
       // A page replacement leaves the customer task alive.  An explicit close
       // is different: once the delayed admission is known, cancel that Run.
@@ -870,11 +889,29 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       progress.textContent = error.responseKnown ? customerErrorMessage(error.message) : '请求结果暂未确认。';
       if (run) { persistActive(); clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000); }
       else {
-        if (error.responseKnown) { recordAdmissionRefusal(pendingCreate, customerErrorMessage(error.message), null, error.message); return; }
-        else persistActive();
-        send.disabled = false; send.textContent = error.responseKnown ? '发送' : '重试确认'; input.value = question;
+        if (error.responseKnown) { admissionRetryCount = 0; recordAdmissionRefusal(pendingCreate, customerErrorMessage(error.message), null, error.message); return; }
+        persistActive();
+        // A lost acknowledgement is not a failed query. Replay the immutable
+        // admission key at most twice; the server deduplicates it. If transport
+        // remains unknown, stop the visible thinking clock and offer manual
+        // confirmation of that same request instead of waiting indefinitely.
+        if (!closeRequested && admissionRetryCount < 2) {
+          const submitted = pendingCreate;
+          admissionRetryCount += 1;
+          if (!setActiveRunState('正在重新确认请求')) progress.textContent = '正在重新确认请求';
+          admissionRetryTimer = setTimeout(() => {
+            admissionRetryTimer = null;
+            if (!disposed && !closeRequested && pendingCreate === submitted && !run) void submitQuestion();
+          }, admissionRetryCount * 1000);
+        } else {
+          finishActiveRunStatus();
+          progress.textContent = '请求是否已接收暂未确认，请点发送重新确认同一问题。';
+          send.disabled = false; send.textContent = '重试确认'; input.value = question;
+        }
       }
       syncWorkspaceActions();
+    } finally {
+      admissionInFlight = false;
     }
   }
   async function resumeActive(record) {
@@ -1023,7 +1060,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   // its signed delivery session and continue polling. The visible buttons are
   // the only cancellation path.
   const unload = () => { persistActive(); }; window.addEventListener('pagehide', unload); window.addEventListener('beforeunload', unload);
-  const dispose = () => { persistActive(); disposed = true; clearTimeout(pollTimer); clearInterval(expiryTimer); finishActiveRunStatus(); window.removeEventListener('pagehide', unload); window.removeEventListener('beforeunload', unload); host.remove(); };
+  const dispose = () => { persistActive(); disposed = true; clearTimeout(pollTimer); clearTimeout(admissionRetryTimer); clearInterval(expiryTimer); finishActiveRunStatus(); window.removeEventListener('pagehide', unload); window.removeEventListener('beforeunload', unload); host.remove(); };
   host.__moheAiDispose = dispose;
   return dispose;
 }

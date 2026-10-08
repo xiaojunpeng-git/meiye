@@ -599,6 +599,30 @@ $scopeDrift=$followBinding;$scopeDrift['context_delta']['scope']='replace';unset
 $normalizedScopeDrift=AiIntentResultContract::normalize($scopeDrift,['cash_performance','actual_performance'],[],$followQuestion,$followUnderstanding);
 $check($normalizedScopeDrift['context_delta']['scope']==='inherit',
     'an omitted replacement scope cannot override the verified prior authorization in a follow-up');
+$storeRankQuestion=$followQuestion;
+$storeRankQuestion['question']='哪个门店业绩最高哪个门店最低';
+$storeRankQuestion['evidence_messages'][0]['text']=$storeRankQuestion['question'];
+$storeRankQuestion['prior_query']=['metric_codes'=>['actual_performance'],'operation'=>'ranking',
+    'periods'=>[['kind'=>'date_range','start'=>'2026-10-01','end'=>'2026-10-08']],
+    'ranking'=>['direction'=>'top','limit'=>1],'scope'=>'authorized','object_kind'=>'business_date',
+    'has_business_filter'=>true,'has_object_selection'=>false,'has_store_scope_restriction'=>false];
+$storeRankUnderstanding=AiIntentUnderstandingContract::normalize(['goal'=>'比较门店业绩高低','status'=>'understood','requirements'=>[
+    ['id'=>'r1','meaning'=>'比较门店业绩高低','fields'=>['metric_codes','object_kind','object_relation','operation','ranking'],
+        'values'=>['metric_terms'=>['业绩'],'object_kind'=>'store','object_relation'=>'analysis',
+            'operation'=>'ranking','ranking'=>['direction'=>'top_and_bottom','limit'=>1]],
+        'evidence'=>[['message_id'=>'current','quote'=>$storeRankQuestion['question']]]],
+]],$storeRankQuestion);
+$storeRankDelta=array_fill_keys(AiIntentResultContract::DELTA_FIELDS,'inherit');
+$storeRankDelta['object']='replace';$storeRankDelta['store_scope']='replace';
+$storeRankDelta['ranking_direction']='replace';
+$storeRankBinding=['object_kind'=>'store','object_term'=>'','object_relation'=>'analysis','operation'=>'ranking',
+    'metric_codes'=>['actual_performance'],'action_codes'=>[],'needs_metric_choice'=>false,
+    'ranking'=>['direction'=>'top_and_bottom','limit'=>1],'periods'=>[],'scope'=>'unspecified',
+    'context_delta'=>$storeRankDelta,'requirement_bindings'=>[['requirement_id'=>'r1','status'=>'satisfied','metric_codes'=>['actual_performance']]],
+    'unresolved_fragments'=>[]];
+$normalizedStoreRank=AiIntentResultContract::normalize($storeRankBinding,['actual_performance'],[],$storeRankQuestion,$storeRankUnderstanding);
+$check($normalizedStoreRank['context_delta']['store_scope']==='inherit' && $normalizedStoreRank['object_relation']==='analysis',
+    'ranking authorized stores never turns its analytical object into a single-store selector');
 $overviewAfterDimensionQuestion=$overviewQuestion;
 $overviewAfterDimensionQuestion['prior_query']=$followQuestion['prior_query'];
 $overviewAfterDimensionQuestion['prior_query']['has_business_filter']=true;
@@ -745,6 +769,47 @@ foreach (['只看今天不含退款','只看今天现金业绩','只看会员'] 
     $reject(static function()use($businessUnderstanding,$businessSafe){
         AiIntentUnderstandingContract::normalize($businessUnderstanding,$businessSafe);
     },'calendar modifier cleanup cannot discard business meaning: '.$businessQuestion);
+}
+// R64: the model owns temporal meaning for week/quarter ellipses. The
+// independent server guard checks a complete time-only utterance and the
+// typed calendar unit before inheriting any verified metric or condition.
+foreach ([
+    ['上周呢','week',-1],['上一周呢','week',-1],['上上上周呢','week',-3],
+    ['上个季度呢','quarter',-1],['前两年呢','year',-1],
+] as [$temporalQuestion,$unit,$offset]) {
+    $temporalSafe=$periodOnlyAfterSelection;
+    $temporalSafe['question']=$temporalQuestion;
+    $temporalSafe['evidence_messages'][0]['text']=$temporalQuestion;
+    $temporalUnderstanding=$periodOnlyDatedOverview;
+    $temporalUnderstanding['requirements'][0]['values']['periods']=[
+        ['kind'=>'calendar_period','unit'=>$unit,'offset'=>$offset,'count'=>1,'end_mode'=>'full']];
+    $temporalUnderstanding['requirements'][0]['evidence'][0]['quote']=$temporalQuestion;
+    $check(AiIntentUnderstandingContract::normalize($temporalUnderstanding,$temporalSafe)['status']==='understood',
+        'a full-span model calendar continuation keeps signed business context: '.$temporalQuestion);
+}
+foreach (['上周会员有多少','上周营业额是多少','上周只看肥西门店','上周天气怎么样'] as $businessQuestion) {
+    $businessSafe=$periodOnlyAfterSelection;
+    $businessSafe['question']=$businessQuestion;
+    $businessSafe['evidence_messages'][0]['text']=$businessQuestion;
+    $businessUnderstanding=$periodOnlyDatedOverview;
+    $businessUnderstanding['requirements'][0]['values']['periods']=[
+        ['kind'=>'calendar_period','unit'=>'week','offset'=>-1,'count'=>1,'end_mode'=>'full']];
+    $businessUnderstanding['requirements'][0]['evidence'][0]['quote']=$businessQuestion;
+    $reject(static function()use($businessUnderstanding,$businessSafe){
+        AiIntentUnderstandingContract::normalize($businessUnderstanding,$businessSafe);
+    },'a model period cannot hide a new current-turn topic: '.$businessQuestion);
+}
+foreach ([['上周呢','month',-1],['上周呢','week',0],['上个季度呢','week',-1]] as [$timeQuestion,$unit,$offset]) {
+    $mismatchSafe=$periodOnlyAfterSelection;
+    $mismatchSafe['question']=$timeQuestion;
+    $mismatchSafe['evidence_messages'][0]['text']=$timeQuestion;
+    $mismatchUnderstanding=$periodOnlyDatedOverview;
+    $mismatchUnderstanding['requirements'][0]['values']['periods']=[
+        ['kind'=>'calendar_period','unit'=>$unit,'offset'=>$offset,'count'=>1,'end_mode'=>($offset===0?'to_reference':'full')]];
+    $mismatchUnderstanding['requirements'][0]['evidence'][0]['quote']=$timeQuestion;
+    $reject(static function()use($mismatchUnderstanding,$mismatchSafe){
+        AiIntentUnderstandingContract::normalize($mismatchUnderstanding,$mismatchSafe);
+    },'a model calendar shortcut cannot change the stated unit or direction: '.$timeQuestion.'/'.$unit.'/'.$offset);
 }
 $periodWithHistoricalMetric=$periodOnlyUnderstanding;
 $periodWithHistoricalMetric['requirements'][]=[

@@ -898,11 +898,10 @@ final class AiGatewayServices
             $options[]=['value'=>$value,'label'=>$candidate['label'],'recommended'=>true];
             $plans[$value]=$candidate['compiled'];
         }
-        // Keep older internal planner carriers valid when they have no
-        // model-authored suggestions; never fill from registry order.
-        // The clients hide stop sentinels and show their single free-text slot;
-        // this is not claimed as a successful three-recommendation card.
-        if ($options===[]) $options=[['value'=>'supplement_only','label'=>'请补充描述','action'=>'stop']];
+        // The language model may propose fewer than three safe alternatives.
+        // Preserve those plans and fill only the remaining visible positions
+        // with customer actions; no arbitrary registry metric becomes advice.
+        $options=\app\services\ai\execution\AiSemanticRecommendationPlanner::completeCardOptions($options);
         return ['kind'=>'clarification','question'=>'我已理解部分条件，请选择您想查询的内容，或补充描述。',
             'fields'=>[['key'=>'semantic_reply','type'=>'select','label'=>'查询内容','options'=>$options]],
             '_request_body'=>$body,'_semantic_reply_state'=>$this->semanticReplyState($understanding,$safe,$body),
@@ -1366,7 +1365,12 @@ final class AiGatewayServices
         );
         if ($exactRankingCollection!==null) {
             $checkpoint();
-            if ($sourceContext!==null) $this->runs->markTopicReset($owner,$id,$generation,$worker);
+            // A closed sentence can still continue the verified store/date
+            // analysis. The admission itself proves whether a compatible
+            // signed metric was reused; only an independent plan resets it.
+            if ($sourceContext!==null && empty($exactRankingCollection['_context_reused'])) {
+                $this->runs->markTopicReset($owner,$id,$generation,$worker);
+            }
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'deterministic_registered_ranking_collection_admitted',[],'exact_ranking_admission');
             return $exactRankingCollection;
         }
@@ -1730,6 +1734,12 @@ final class AiGatewayServices
             && ($understanding['requirements']??[])===[]) {
             throw new RuntimeException('AI_INTENT_UNRESOLVED');
         }
+        if ($sourceContext===null && $this->unanchoredCalendarQuestion((string)$body['question'],$understanding)) {
+            // A bare period after a topic reset names no business measure.
+            // The model may suggest a default metric, but there is no customer
+            // authority to turn “上周呢” into an actual-performance query.
+            throw new RuntimeException('AI_INTENT_UNRESOLVED');
+        }
         $understanding=$this->mergeClarificationMeaning($understanding,$body,$safe['outbound']);
         $understanding=$this->resolveExactStatedSinglePeriod($understanding,$safe['outbound'],$today);
         // One relation decision gates every later merger and result-reference
@@ -1945,17 +1955,31 @@ final class AiGatewayServices
                 throw new RuntimeException('AI_CAPABILITY_NOT_READY');
             }
         }
-        // A verified collection is reusable only for a proved pure-period
-        // continuation. Its mere presence must never turn a self-contained
-        // new question into a date edit of the previous collection.
-        // A model-authored period requirement is not by itself proof that the
-        // complete current sentence is a date-only continuation: the model
-        // may omit a broad new business goal such as "today's operations".
-        // Use the deterministic collection shortcut only after the local
-        // closed-calendar grammar has proved that no other business signal is
-        // present. Other date-bearing requests continue through normal
-        // binding, where the model may clear or replace the old topic.
-        $collectionPeriodIntent=$sourceCollection===[]||$localPeriodUnderstanding===null?null
+        // The local closed-calendar path remains the fastest proof. A model
+        // may also understand a compositional week/quarter ellipsis that the
+        // local date interpreter intentionally does not parse. Reuse signed
+        // context only after the understanding contract accepted one period,
+        // its evidence covers the whole current turn, and the independent
+        // structural guard finds no second business request. A bare typed
+        // period without this proof must still pass ordinary binding.
+        $closedPeriodOnlyContinuation=$localPeriodUnderstanding!==null;
+        if (!$closedPeriodOnlyContinuation && !isset($body['_clarification_context'])
+            && ($sourceQuery!==null || $sourceCollection!==[])) {
+            $periodRequirements=array_values(AiIntentUnderstandingContract::requirements($understanding));
+            if (count($periodRequirements)===1 && ($periodRequirements[0]['fields']??null)===['periods']) {
+                $periodRequirement=$periodRequirements[0];
+                $wholeTurn=(string)($safe['outbound']['question']??'');
+                $fullEvidence=false;
+                foreach ((array)($periodRequirement['evidence']??[]) as $evidence) {
+                    if (($evidence['message_id']??null)==='current' && ($evidence['start']??null)===0
+                        && ($evidence['quote']??null)===$wholeTurn) {$fullEvidence=true;break;}
+                }
+                $closedPeriodOnlyContinuation=$fullEvidence
+                    &&\app\services\ai\semantic\AiSemanticIntentParser::modelOnlyCalendarContinuation(
+                        $wholeTurn,(array)($periodRequirement['values']['periods']??[]));
+            }
+        }
+        $collectionPeriodIntent=$sourceCollection===[]||!$closedPeriodOnlyContinuation?null
             :AiIntentResultContract::inheritedPeriodOnlyContextIntent(
                 $understanding,$sourceCollection[0]['query'],(array)($sourceContext['meaning']??[])
             );
@@ -2009,11 +2033,10 @@ final class AiGatewayServices
                 $understanding,$sourceQuery,(array)($sourceContext['meaning']??[])
             ));
         $conditionUpdateBindingReused=$reusedConditionIntent!==null;
-        // The same closed-calendar proof guards the single-query shortcut.
-        // This prevents a complete new question that happens to contain a
-        // date from silently inheriting a prior member condition, object or
-        // ranking when the understanding model returns only the date carrier.
-        $reusedPeriodIntent=$sourceQuery===null||$localPeriodUnderstanding===null?null:AiIntentResultContract::inheritedPeriodOnlyContextIntent(
+        // The same complete-turn proof guards the single-query shortcut.
+        // A current metric, object, condition or broader goal must not inherit
+        // the predecessor merely because its wording also contains a date.
+        $reusedPeriodIntent=$sourceQuery===null||!$closedPeriodOnlyContinuation?null:AiIntentResultContract::inheritedPeriodOnlyContextIntent(
             $understanding,$sourceQuery,(array)($sourceContext['meaning']??[])
         );
         $reusedRankingIntent=$sourceQuery===null||$localRankingUnderstanding===null?null:AiIntentResultContract::inheritedRankingOnlyContextIntent(
@@ -3653,6 +3676,42 @@ final class AiGatewayServices
             $normalizedQuestion,$objectVocabulary,array_values((array)($capabilities['metric_codes']??[])),$defaultRankObjects
         );
         if ($items===null) {$reason='semantic_no_match';return null;}
+        $reusedContext=false;
+        $priorQuery=is_array($sourceContext['query']??null)?$sourceContext['query']:null;
+        if ($priorQuery!==null && !$population['all_authorized'] && $scopedStoreId===null
+            && (array)($priorQuery['store_ids']??[])!==[]) {
+            // A broad ranking does not authorize dropping a previously
+            // selected store. The model must decide whether this is an
+            // explicit scope change before any query can expand that range.
+            $reason='context_scope_requires_understanding';return null;
+        }
+        if (count($items)===1 && $priorQuery!==null && !$population['all_authorized']
+            && $scopedStoreId===null
+            && \app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
+                $normalizedQuestion,array_values((array)($capabilities['metric_codes']??[]))
+            )===null) {
+            $priorMetrics=(array)($priorQuery['metric_codes']??[]);
+            $priorFilters=(array)($priorQuery['business_filters']??[]);
+            $priorKind=(string)($priorFilters['object_kind']??'store');
+            $nextKind=$items[0]['object_kind'];
+            // Reuse only one verified store-level measurement between store
+            // and business-date rankings. Conditions, private selections and
+            // other subject families need full language understanding.
+            if (count($priorMetrics)===1 && is_string($priorMetrics[0])
+                && in_array($priorKind,['store','business_date'],true)
+                && in_array($nextKind,['store','business_date'],true)
+                && ($priorFilters===[] || $priorFilters===['object_kind'=>$priorKind])
+                && empty($priorQuery['aggregate_condition']) && empty($priorQuery['condition_set'])
+                && empty($priorQuery['compare_range'])) {
+                $compatible=$nextKind==='business_date'
+                    ? \app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($capabilities,'store','trend')
+                    : \app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($capabilities,$nextKind,'ranking');
+                if (isset($compatible[$priorMetrics[0]])) {
+                    $items[0]['metric_code']=$priorMetrics[0];
+                    $reusedContext=true;
+                }
+            }
+        }
         $plans=[];
         foreach ($items as $index=>$item) {
             $objectKind=$item['object_kind'];
@@ -3725,7 +3784,9 @@ final class AiGatewayServices
         $reason=null;
         $plan=count($plans)===1?$plans[0]['plan']:['items'=>$plans];
         $compiled=['kind'=>'plan','plan'=>$plan,
-            '_context_meaning'=>['presentation_origin'=>'customer_or_verified_context']];
+            '_context_meaning'=>$reusedContext?(array)($sourceContext['meaning']??[]):
+                ['presentation_origin'=>'customer_or_verified_context']];
+        if ($reusedContext) $compiled['_context_reused']=true;
         if (is_array($memberDetailRequest)) {
             $kind=$memberPopulationDetail['ranking']['object_kind'];
             if ($kind!=='member') $memberDetailRequest['_ranking_object_kind']=$kind;
@@ -5659,6 +5720,19 @@ final class AiGatewayServices
         return [['code'=>'EXPLICIT','start'=>$range['start'],'end'=>$range['end']]];
     }
 
+    /** A time-only utterance needs a signed business predecessor; model defaults cannot create one. */
+    private function unanchoredCalendarQuestion(string $question,array $understanding): bool
+    {
+        $periods=[];
+        foreach ((array)($understanding['requirements']??[]) as $requirement) {
+            foreach ((array)($requirement['values']['periods']??[]) as $period) {
+                if (is_array($period)) $periods[json_encode($period)]=$period;
+            }
+        }
+        return count($periods)===1 && \app\services\ai\semantic\AiSemanticIntentParser::modelOnlyCalendarContinuation(
+            $question,array_values($periods));
+    }
+
     /**
      * Performs the semantic admission once for every candidate metric binding.
      * It deliberately runs before a pending context field is converted to a
@@ -6986,6 +7060,11 @@ final class AiGatewayServices
         }
         if ($run['status']==='FAILED') {
             $result['failure_guidance']=$this->failureGuidance($run['reason']);
+            // A wholly unrelated question receives capability help and ends
+            // the prior analysis topic. Without this boundary, device clients
+            // may revive the last signed business result for a later bare
+            // follow-up such as “上周呢”, crossing the intervening topic.
+            if ($run['reason']==='AI_INTENT_UNRESOLVED') $result['topic_boundary']='reset';
             // A revoked account can still read its own failed task. The
             // optional administrator diagnostic must not hide that response.
             try {

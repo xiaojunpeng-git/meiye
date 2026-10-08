@@ -61,8 +61,12 @@ namespace {
     check($envelope['kind']==='clarification' && count($envelope['fields'])===1,'only current semantic question displayed');
     $suggested=$planner->compile($projector->project('业绩多少？'),$selection+['metric_choice_candidates'=>['consume_amount','cash_performance']],$cap,'screen','2026-09-08');
     $suggestions=array_values(array_filter($suggested['fields'][0]['options'],static function(array $option):bool{return ($option['recommended']??false)===true;}));
-    check(array_column($suggestions,'value')===['consume_amount','cash_performance'],
-        'only executable model-proposed candidates are ranked as recommendations');
+    check(array_column($suggestions,'value')===['consume_amount','cash_performance','__edit_original__'],
+        'two model-proposed metrics stay visible and a correction action fills the third slot');
+    check(array_column(array_values(array_filter($envelope['fields'][0]['options'],
+        static fn(array $option):bool=>($option['recommended']??false)===true)),'value')===
+        ['__edit_original__','__retry_original__','__new_conversation__'],
+        'no semantic candidates yields three honest customer actions rather than an empty card');
     // The current server date is already a verified default in this legacy
     // planner fixture, so choosing the only unresolved metric completes the
     // plan directly instead of manufacturing a second date question.
@@ -70,6 +74,7 @@ namespace {
     check($chosen['kind']==='plan','metric clarification completes with the verified default period');
     $actualPlan=$planner->choose($envelope,['metric_code'=>'actual_performance']);
     check($actualPlan['kind']==='plan','registered actual metric remains available during clarification');
+    rejects(function()use($planner,$envelope){$planner->choose($envelope,['metric_code'=>'__edit_original__']);},'AI_CLARIFICATION_INVALID');
     rejects(function()use($planner,$envelope){$planner->choose($envelope,['metric_code'=>'cash_performance','start_date'=>'2026-09-01']);},'AI_CLARIFICATION_INVALID');
     $directActualPlan=$planner->compile($projector->project('今天实际业绩'),array_merge($selection,['metric_codes'=>['actual_performance']]),$cap,'screen','2026-09-08');
     check($directActualPlan['kind']==='plan' && $directActualPlan['plan']['query']['metric_codes']===['actual_performance'],'registered actual metric compiles directly');

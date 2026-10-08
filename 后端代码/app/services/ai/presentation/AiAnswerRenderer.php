@@ -120,6 +120,7 @@ final class AiAnswerRenderer
                 if (($row['participant_relation'] ?? false) === true && is_string($row['object_label'] ?? null)) $metricLabel = $row['object_label'] . '关联订单' . $tooltip['name'];
                 $supplements=$this->rankingPresentationValues($row,$registered,$dictionary);
                 foreach ($supplements as $code=>$supplement) $rankingPresentationColumns[$code]=$supplement['label'];
+                $directionRows=[];
                 foreach ($row['rows'] as $direction => $points) {
                     $valueCounts = [];
                     foreach ($points as $point) {
@@ -139,7 +140,8 @@ final class AiAnswerRenderer
                             // the exact Reader date for reconciliation and export.
                             'label' => isset($point['business_date']) ? $this->weekdayDateLabel($point['business_date'])
                                 : ($point['employee_name'] ?? ($point['member_name'] ?? ($point['entity_name'] ?? ($point['store_name'] ?? ('门店 ID ' . $point['store_id']))))),
-                            'metric' => $metricLabel, 'rank' => $rank, 'value' => $this->metricValue($amount, $storageUnit), 'unit' => $unit,
+                            'metric' => $metricLabel, 'rank' => $rank, 'rank_direction'=>$direction,
+                            'value' => $this->metricValue($amount, $storageUnit), 'unit' => $unit,
                             'period' => $row['period'], 'period_label' => $this->periodLabel($row['period']),
                         ];
                         // A supplementary column is evidence for the same
@@ -151,9 +153,19 @@ final class AiAnswerRenderer
                             $value=$supplement['values'][$entityId]??null;
                             $rendered['presentation_'.$code]=$value===null?'—':$this->metricValue($value,$supplement['storage_unit']).$supplement['unit'];
                         }
-                        $rows[]=$rendered;
+                        $directionRows[$direction][]=$rendered;
                     }
                 }
+                // A two-sided ranking must show evidence from both ends in
+                // the 20-row screen preview. Interleave the verified groups
+                // before rendering/export; neither rank nor population changes.
+                if (isset($directionRows['top'],$directionRows['bottom'])) {
+                    $count=max(count($directionRows['top']),count($directionRows['bottom']));
+                    for ($index=0;$index<$count;++$index) {
+                        if (isset($directionRows['top'][$index])) $rows[]=$directionRows['top'][$index];
+                        if (isset($directionRows['bottom'][$index])) $rows[]=$directionRows['bottom'][$index];
+                    }
+                } else foreach ($directionRows as $points) foreach ($points as $point) $rows[]=$point;
                 continue;
             }
             $value = $storageUnit === 'fen'
@@ -560,6 +572,19 @@ final class AiAnswerRenderer
         $first = $rows[0];
         $metrics = array_values(array_unique(array_filter(array_column($rows, 'metric'), 'is_string')));
         $prefix = count($metrics) === 1 ? '按' . $metrics[0] . '看，' : '';
+        $firstByDirection=[];
+        foreach ($rows as $row) {
+            $direction=$row['rank_direction']??null;
+            if (in_array($direction,['top','bottom'],true) && !isset($firstByDirection[$direction])) $firstByDirection[$direction]=$row;
+        }
+        if (isset($firstByDirection['top'],$firstByDirection['bottom'])) {
+            // Both requested extremes belong in the first sentence even when
+            // each side has more rows than the screen can preview.
+            $leaders=[$firstByDirection['top'],$firstByDirection['bottom']];
+            return $prefix.(count($rows)>3?'共列出'.count($rows).'条排名结果；':'')
+                .implode('；',array_map(static fn(array $row):string=>$row['rank'].'是'.$row['label'].'，'
+                    .$row['metric'].'为'.$row['value'].$row['unit'],$leaders)).'。';
+        }
         // A short ranking is commonly a continuation such as “第二名呢？”.
         // State every verified row; longer rankings stay table-first but must
         // announce their full size so the lead sentence is not mistaken for

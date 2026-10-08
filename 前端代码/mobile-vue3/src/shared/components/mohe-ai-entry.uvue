@@ -630,6 +630,25 @@ function confirmChoices() : void {
       if (detail.length == 0) { progress.value = '请补充您想查询的内容。'; return }
       submittedChoices.supplement_text = detail
     }
+    let currentFields = currentGuidanceFields()
+    let action = ''
+    if (currentFields.length == 1 && Array.isArray(currentFields[0].options)) {
+      let selected = currentFields[0].options.find((option : any) => option.value == submittedChoices[currentFields[0].key])
+      action = String(selected?.action || '')
+    }
+    if (['edit_original','retry_original','new_conversation'].indexOf(action) >= 0) {
+      // These are recovery actions, never metric values. Preserve the exact
+      // predecessor before cancelling the paused clarification Run.
+      let original = String(pending?.question || activeQuestion.value || '')
+      let origin : any = pending == null ? null : {conversation_id:conversation,
+        history:pending.history,context_ref:pending.context_ref || null,created_at:Date.now()}
+      cancelRun(() => {
+        if (action == 'new_conversation') { newConversation(); return }
+        recoveryDraft = origin; question.value = original
+        if (action == 'retry_original') submit()
+      })
+      return
+    }
     let body : any = binding(); body.clarification_id = c.id; body.choices = submittedChoices
     if (c.schema_version == guidanceSchema) { body.schema_version = guidanceSchema; body.step_revision = c.step_revision; body.intent_revision = c.intent_revision; body.client_submission_id = id(); if (revisingId.value.length > 0) body.revise_clarification_id = revisingId.value }
     guidanceSubmission = body

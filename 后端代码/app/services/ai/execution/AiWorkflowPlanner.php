@@ -125,12 +125,16 @@ final class AiWorkflowPlanner
                 // choosing an unrelated first alphabetic entry would invent
                 // meaning rather than clarify the customer's wording.
                 $recommended=array_values(array_intersect((array)($selection['metric_choice_candidates']??[]),$shapeAvailable));
-                foreach ($options as &$option) $option['recommended']=in_array($option['value'],$recommended,true);
+                $recommended=array_values(array_unique($recommended));
+                $byCode=array_column($options,null,'value');$selected=[];
+                foreach ($recommended as $code) if (isset($byCode[$code])) $selected[]=$byCode[$code];
+                // Preserve every explicit executable alternative. Remaining
+                // positions become correction actions, never guessed metrics.
+                $selected=AiSemanticRecommendationPlanner::completeCardOptions($selected);
+                foreach ($options as &$option) $option['recommended']=false;
                 unset($option);
-                usort($options,static function(array $a,array $b)use($recommended):int {
-                    $ai=array_search($a['value'],$recommended,true);$bi=array_search($b['value'],$recommended,true);
-                    return ($ai===false?PHP_INT_MAX:$ai)<=>($bi===false?PHP_INT_MAX:$bi);
-                });
+                $options=array_merge($selected,array_values(array_filter($options,
+                    static fn(array $option):bool=>!in_array($option['value'],$recommended,true))));
                 $options[]=['value'=>'other_registered_metric','label'=>'以上都不是','action'=>'stop'];
                 $fields[] = ['key' => 'metric_code', 'label' => '想了解哪一个已登记指标？', 'type' => 'select', 'options' => $options];
             }
@@ -150,7 +154,9 @@ final class AiWorkflowPlanner
         $metrics = $envelope['resolved_metrics']; $range = $envelope['resolved_range'];
         foreach ($envelope['fields'] as $field) if ($field['key'] === 'metric_code') {
             if (!is_string($choices['metric_code']) || !in_array($choices['metric_code'], array_column($field['options'], 'value'), true)) throw new AiContractException('AI_CLARIFICATION_INVALID');
-            foreach ($field['options'] as $option) if ($option['value']===$choices['metric_code'] && (($option['action']??null)==='stop')) throw new AiContractException('AI_CAPABILITY_NOT_READY');
+            foreach ($field['options'] as $option) if ($option['value']===$choices['metric_code'] && isset($option['action'])) {
+                throw new AiContractException('AI_CLARIFICATION_INVALID');
+            }
             $metrics = array_values(array_unique(array_merge($metrics,[$choices['metric_code']])));
         }
         if (array_key_exists('start_date',$choices)) $range = $this->range($choices['start_date'], $choices['end_date'] ?? null);

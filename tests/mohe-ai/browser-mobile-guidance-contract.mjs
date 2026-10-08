@@ -97,8 +97,25 @@ for (const max of [3,4,5]) {
   eq(f.calls.filter(call => call.path === '/runs').length, 1); eq(f.calls.filter(call => call.path.endsWith('/execute')).length, 0);
   eq(f.api.load()[0].rounds.length, 1); f.unmount();
 }
-// Free-text correction must retire the paused Run before re-understanding the
-// full customer question; the sentinel is never sent to /clarify as a metric.
+// A recovery action ends the paused Run locally; it cannot be submitted as a
+// metric value to the server, and the original wording remains editable.
+{
+  const f = setup(); const actionField = { ...metric, options: [
+    ...metric.options.map(option => ({...option,recommended:true})),
+    {value:'__edit_original__',label:'修改原问题后查询',recommended:true,action:'edit_original'},
+  ] };
+  f.start([actionField]);
+  eq(f.api.recommendedOptions(actionField).map(option => option.value),
+    ['cash_performance','consume_amount','__edit_original__']);
+  f.api.chooseValue(actionField,actionField.options[2]); f.api.confirmChoices();
+  eq(f.calls.filter(call => call.path.endsWith('/cancel')).length,1);
+  eq(f.calls.filter(call => call.path.endsWith('/clarify')).length,0);
+  f.answer('/runs/mobile-run/cancel',{...f.step(1,[actionField]),version:4,status:'CANCELLED'});
+  eq(f.api.refs.question.value,'移动引导测试');
+  f.unmount();
+}
+// The fourth free-text correction continues the same server-owned Run, while
+// its sentinel is never sent as a metric code.
 {
   const f = setup(); f.start();
   const options = [...metric.options.map(option => ({...option, recommended:true})),

@@ -294,6 +294,7 @@ final class AiIntentUnderstandingContract
             . 'scope=current_store means the authenticated store of the application entry, NOT a named store, a location mentioned in this question, or the store from a prior answer. A named-store reference must have store_term even if followed by words meaning this store. Do not add scope=current_store for that reference; retain the authorized origin while independently narrowing with store_term. '
             . '{"goal":"brief business goal","requirements":[{"id":"r1","meaning":"one part of the customer request","fields":["metric_codes"],"values":{"metric_terms":["exact customer term"]},"evidence":[{"message_id":"current","quote":"exact text from that de-identified message"}]}],"status":"understood|needs_clarification"}. '
             . 'Evidence is copied source text, not a rewritten description: never join non-adjacent words, remove conjunctions or insert an object name into a quote. When several measurements share an object or time expression, use the entire original current message verbatim for their current-message evidence rather than constructing a shorter sentence. Keep their semantic requirements distinct; sharing evidence does not merge requirements. '
+            . 'When one measurement is asked at both extrema in the same sentence, preserve one shared measurement and one top_and_bottom ranking; if you emit multiple requirements, cite the complete current message verbatim for each instead of inventing a shortened or punctuated quote. '
             // The existence of a requirement controls whether the customer
             // receives partial-query clarification or general query help.
             // Preserve business meaning, not arbitrary words made to fit a
@@ -690,7 +691,15 @@ final class AiIntentUnderstandingContract
                 && count($calendar['periods']??[])===1
                 && in_array($remainder,['条件不变','其他条件不变','条件不变有多少人','其他条件不变有多少人',
                     '条件不变人数是多少','其他条件不变人数是多少'],true);
-            if (!$sameCondition && (array_diff((array)($projection['signals']??[]),$calendarSignals)!==[]
+            // The local calendar parser deliberately does not translate every
+            // natural-language week/quarter form. If the model provided one
+            // typed calendar period, a whole-turn structural time expression
+            // may reuse the signed query without pretending its unparsed time
+            // word is a new business condition. Named metrics, objects and
+            // restrictions still fail this closed shortcut.
+            $modelOnlyCalendar=\app\services\ai\semantic\AiSemanticIntentParser::modelOnlyCalendarContinuation(
+                (string)($safeQuestion['question']??''),(array)($normalized[0]['values']['periods']??[]));
+            if (!$sameCondition && !$modelOnlyCalendar && (array_diff((array)($projection['signals']??[]),$calendarSignals)!==[]
                 ||($projection['unresolved_condition']??false)
                 ||(array)($projection['semantic_intent']['constraints']??[])!==[])) {
                 self::fail('period_only_business_residue');

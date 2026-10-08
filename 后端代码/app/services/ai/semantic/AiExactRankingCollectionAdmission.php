@@ -159,6 +159,11 @@ final class AiExactRankingCollectionAdmission
         $calendar=AiSemanticIntentParser::calendarEvidence($question);
         if (!$calendar['complete']) return null;
         $question=trim($calendar['remainder']);
+        // “呢” after a complete calendar expression is a discourse particle.
+        // Removing it changes no metric, object or condition; the remaining
+        // sentence must still pass the full closed-ranking residue proof.
+        $question=preg_replace('/^呢(?=\s*(?:[，,]|哪))/u','',$question);
+        $question=trim((string)$question);
         $objects=$this->objects($objectVocabulary);
         $shared=$this->sharedDefaultRanking($question,$objects,$allowedMetricCodes,$defaultRankObjectKinds);
         if ($shared!==null) return $shared;

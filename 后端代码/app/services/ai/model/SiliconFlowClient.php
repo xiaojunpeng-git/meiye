@@ -554,7 +554,18 @@ final class SiliconFlowClient
         // measurement.  An exclusion may be represented by another accepted
         // requirement, so inspect every metric-bearing requirement rather
         // than only the first one selected below.
-        $singleMetric=!$customerConfirmedChoice && AiIntentResultContract::canUseCandidateBlindMetricReview($understanding,$intent);
+        // A candidate-blind pass intentionally sees no proposed answer, but
+        // that also hides a signed previous measurement. If this candidate is
+        // exactly the one already executed in the verified predecessor, use
+        // the coverage reviewer with prior-query context instead. It can
+        // reject a newly stated, conflicting measurement; a broad co-reference
+        // must not be downgraded to a fresh metric choice merely because the
+        // isolated current phrase is ambiguous.
+        $priorCodes=$safeQuestion['prior_query']['metric_codes']??null;
+        $sameVerifiedMetric=is_array($priorCodes) && count($priorCodes)===1
+            && $priorCodes===($intent['metric_codes']??null);
+        $singleMetric=!$customerConfirmedChoice && !$sameVerifiedMetric
+            && AiIntentResultContract::canUseCandidateBlindMetricReview($understanding,$intent);
         $requirement=$singleMetric?reset($metricRequirements):null;
         if ($singleMetric && empty($requirement['values']['metric_exclusions'])) {
             $objectKind=$intent['object_kind']??null;$available=[];

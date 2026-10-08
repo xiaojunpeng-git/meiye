@@ -1108,6 +1108,7 @@ final class AiIntentResultContract
             : 'No verified prior query exists. Do not include context_delta.';
         $context.=' An analytical object also includes a stated subject being inspected, summarized or evaluated. A broad evaluation or overview of an accepted object must preserve that object_kind with object_relation=analysis; a period never changes it into store.';
         $context.=' An accepted store_term requirement is resolved independently by the server against its authorized store catalogue. Do not copy it into object_term, scope or unresolved_fragments and do not emit store_term as a binding key. Scope has only current_store, authorized and unspecified; omit it when understanding has no explicit scope requirement. A named store is not a scope enum. Keep the compared subject and its role in the ordinary analytical fields; the server applies the accepted store scope without asking this binding pass to reinterpret it.';
+        $context.=' When several clauses compare the top and bottom of the same analytical object, an omitted measurement in a later clause refers to the measurement established in the earlier clause; bind every accepted metric requirement to that one code rather than treating each clause as a different question. In a verified continuation, a general restatement of the prior business measurement does not by itself require a new metric choice. Changing the ranked object from dates to stores changes the analytical dimension, not the selected store scope: store_scope=replace is only for a particular named store restriction, never for comparing stores.';
         $context.=' Use operation=breakdown when the accepted meaning asks for each object value without ordering, winner or threshold. Preserve the analytical object and keep ranking direction unspecified with a null limit. A breakdown may use multiple compatible registered metrics only when the customer explicitly coordinated those measurements. A broad professional first reading of one measurement uses exactly one registered metric. It must never be downgraded to one overall summary or upgraded to a ranking.';
         $context.=' Generic condition unit vocabulary is yuan, count or day. Preserve day for an accepted elapsed-day condition; any earlier shorthand showing yuan|count must be read as yuan|count|day.';
         // Recommendations are presentation candidates only. The customer
@@ -1404,6 +1405,17 @@ final class AiIntentResultContract
         // Only accepted current evidence can author this replacement; the
         // binding model is not asked to rediscover or carry a second identity.
         if ($delta!==null && self::understoodStoreTerm($understanding)!==null) $delta['store_scope']='replace';
+        // Comparing stores is an analytical dimension, not a request to
+        // select one store. A binding model may confuse object=store with a
+        // store-scope replacement; when the signed predecessor was already
+        // unrestricted and no current named store was accepted, preserve that
+        // range instead of presenting every authorized store as a selector.
+        if ($delta!==null && $delta['store_scope']==='replace'
+            && $objectRelation==='analysis' && $value['object_kind']==='store'
+            && self::understoodStoreTerm($understanding)===null
+            && ($safeQuestion['prior_query']['has_store_scope_restriction']??true)===false) {
+            $delta['store_scope']='inherit';$value['context_delta']['store_scope']='inherit';
+        }
         // Accepted current meaning already owns the new analytical object.
         // Synchronize its delta after anchoring instead of spending a second
         // model repair on an obsolete `inherit` flag. No prose is inferred;
@@ -2021,6 +2033,7 @@ final class AiIntentResultContract
             .'Reject when a selected metric or result reference substitutes, reverses, ignores or conflicts with any such requirement, including an exclusion. '
             .'When a binding replaces or clears a signed store range, or changes an object filter, accept only if the current customer question itself expresses that exact change. A confirmed request for the authorized range may execute directly, but never expands authority beyond the current Reader permission. '
             .'An analytical object and a selected object have different meanings. Accept object_relation=analysis when the customer is asking to inspect, summarize, evaluate, compare, group or list that kind; accept object_relation=selection only when the customer identifies a particular target whose records must narrow the query. A broad evaluation of a stated object remains analysis of that object even when it also states a period. Reject a candidate that turns one into the other or substitutes store for the stated analytical object. '
+            .'For a verified continuation, read prior_query before calling a repeated broad measurement ambiguous: changing only the ranked analytical object can preserve the previously executed measurement and period. A later comparison clause may omit a repeated metric while still using the earlier clause’s one metric. Reject an inherited metric if the current question explicitly introduces a different accounting basis, and never treat comparison across stores as selection of one store. '
             .'The accepted understanding may preserve a clear business goal without materialising every response-form carrier. When candidate binding adds an object kind, response form, period, ranking or scope that has no typed first-pass carrier, decide from the current customer question itself whether that exact candidate is faithful. Do not reject only because the first pass omitted that carrier; reject any candidate that adds, replaces or narrows a condition the customer did not express. '
             .'An excerpt that expresses only a date, ranking, metric or another condition does not support a scope expansion merely because it appears in the same requirement. '
             .'A result reference is valid only when the current question itself asks for the displayed ranked result; it must never be inferred from prior conversation. '

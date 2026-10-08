@@ -105,6 +105,21 @@ for (const rounds of [3, 4, 5]) {
   const local = JSON.parse(window.localStorage.getItem('mohe-ai:v1:fixture%3Astore%3Amanager'));
   eq(local[0].rounds.length, 1); eq(JSON.stringify(local).includes('client_submission_id'), false); f.dispose();
 }
+// An underspecified card keeps true metric alternatives, while its action
+// option cancels the paused Run and returns the original wording to edit.
+{
+  const actionField = { ...metric, options: [
+    ...metric.options.map(option => ({ ...option, recommended: true })),
+    { value: '__edit_original__', label: '修改原问题后查询', recommended: true, action: 'edit_original' },
+  ] };
+  const f = setup({ fields: [actionField] }); await f.start();
+  eq([...f.area().querySelectorAll('.guidance-number')].map(node => node.textContent), ['1','2','3','4']);
+  f.area().querySelector('input[value=__edit_original__]').click(); f.click('确认并继续'); await flush();
+  eq(f.calls.filter(call => call.path.endsWith('/cancel')).length, 1);
+  eq(f.calls.filter(call => call.path.endsWith('/clarify')).length, 0);
+  eq(f.root().querySelector('textarea[aria-label="输入问题"]').value, '需要确认条件的测试问题');
+  f.dispose();
+}
 {
   const f = setup({ fields: [{ ...metric, options: [...metric.options.map(option => ({ ...option, recommended: true })),
     { label: '退款业绩', value: 'refund_performance', recommended: true }, { label: '销售人业绩', value: 'staff_sales' }] }] });

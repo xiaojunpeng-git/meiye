@@ -89,6 +89,33 @@ final class AiSemanticIntentParser
         return 1000000;
     }
 
+    /**
+     * Admit a model-understood calendar continuation only when the whole turn
+     * is one compositional time expression. This is a safety check for reusing
+     * signed context, not a date interpreter: the model supplies the period and
+     * the temporal resolver converts it to dates. Any extra business wording
+     * leaves the model's period-only shortcut closed.
+     */
+    public static function modelOnlyCalendarContinuation(string $question,array $periods): bool
+    {
+        if (count($periods)!==1 || ($periods[0]['kind']??null)!=='calendar_period') return false;
+        $text=preg_replace('/[\s，,。？?！!、]+/u','',$question);
+        $text=preg_replace('/^(?:(?:那|那么|就|只看|仅看|只查|仅查|改成|换成|改回|换回|再看|再查))+/u','',$text);
+        $text=preg_replace('/(?:呢|吗|吧)+$/u','',$text);
+        // Direction, optional magnitude and calendar unit form one expression;
+        // no complete customer sentence is enumerated or assigned a metric.
+        if (!preg_match('/^(?<direction>上+|前+|下+|后+|这|本|今|去)(?<magnitude>[0-9一二两三四五六七八九十百]+)?(?:个)?(?<unit>周|星期|礼拜|季度|季|月|年)$/u',$text,$match)) return false;
+        $unit=in_array($match['unit'],['周','星期','礼拜'],true)?'week'
+            :(in_array($match['unit'],['季度','季'],true)?'quarter':($match['unit']==='月'?'month':'year'));
+        if (($periods[0]['unit']??null)!==$unit) return false;
+        $offset=$periods[0]['offset']??null;
+        if (!is_int($offset)) return false;
+        $direction=$match['direction'];
+        if (in_array($direction,['这','本','今'],true)) return $offset===0;
+        if (preg_match('/^(?:上+|前+|去)$/u',$direction)) return $offset<0;
+        return $offset>0;
+    }
+
     /** Connected endpoints form one interval; unrecognised temporal residue
      * disables deterministic correction rather than silently dropping a bound.
      * Ranking and model correction consume the same calendar evidence. */

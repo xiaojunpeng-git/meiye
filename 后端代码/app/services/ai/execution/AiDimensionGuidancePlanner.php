@@ -69,8 +69,14 @@ final class AiDimensionGuidancePlanner
         // linguistic default such as "top five".
         if ($limit === null && $direction !== null) $limit = 20;
         if ($limit !== null && (!is_int($limit) || $limit < 1 || $limit > 20)) throw new \RuntimeException('AI_DIMENSION_RANK_LIMIT_NOT_READY');
+        // The binding model may name up to three relevant alternatives when
+        // it genuinely cannot give a first answer. Keep only executable
+        // candidates; catalogue order is never a semantic recommendation.
+        $recommended=array_values(array_slice(array_unique(array_intersect(
+            (array)($intent['metric_choice_candidates']??[]),array_keys($candidates)
+        )),0,3));
         return $this->next(['object_kind'=>$objectKind,'metric'=>$metric,'candidates'=>$candidates,'range'=>$range,
-            'direction'=>$direction,'limit'=>$limit,'format'=>$format,'today'=>$today]);
+            'direction'=>$direction,'limit'=>$limit,'format'=>$format,'today'=>$today,'recommended_metric_codes'=>$recommended]);
     }
 
     public function choose(array $envelope, array $choices): array
@@ -89,7 +95,12 @@ final class AiDimensionGuidancePlanner
             if ($key === 'end_date') continue;
             $value = $choices[$key] ?? null;
             if (!is_string($value) || !in_array($value, array_column($field['options'] ?? [], 'value'), true)) throw new \RuntimeException('AI_CLARIFICATION_INVALID');
-            if ($key === 'dimension_metric') $state['metric'] = $value;
+            if ($key === 'dimension_metric') {
+                // Client-side recovery choices never become a metric code,
+                // including when an older client submits one accidentally.
+                if (!isset($state['candidates'][$value])) throw new \RuntimeException('AI_CLARIFICATION_INVALID');
+                $state['metric'] = $value;
+            }
             elseif ($key === 'dimension_direction') $state['direction'] = $value;
             elseif ($key === 'dimension_limit') $state['limit'] = (int)$value;
             else throw new \RuntimeException('AI_CLARIFICATION_INVALID');
@@ -102,7 +113,17 @@ final class AiDimensionGuidancePlanner
         $fields=[]; $question='';
         if ($state['metric'] === null) {
             $question='您想按哪种表现排行？'; $options=[];
-            foreach ($state['candidates'] as $code=>$candidate) $options[]=['value'=>$code,'label'=>$candidate['name'].'：'.$candidate['summary']];
+            $recommended=(array)($state['recommended_metric_codes']??[]);
+            foreach ($recommended as $code) if (isset($state['candidates'][$code])) {
+                $candidate=$state['candidates'][$code];
+                $options[]=['value'=>$code,'label'=>$candidate['name'].'：'.$candidate['summary'],'recommended'=>true];
+            }
+            // A short candidate set is a reason to offer correction actions,
+            // not to guess another business measurement or publish an empty card.
+            $options=AiSemanticRecommendationPlanner::completeCardOptions($options);
+            foreach ($state['candidates'] as $code=>$candidate) if (!in_array($code,$recommended,true)) {
+                $options[]=['value'=>$code,'label'=>$candidate['name'].'：'.$candidate['summary'],'recommended'=>false];
+            }
             $fields[]=['key'=>'dimension_metric','type'=>'select','label'=>'评价指标','options'=>$options];
         } elseif ($state['range'] === null) {
             $question='您想查询哪个时间段？';

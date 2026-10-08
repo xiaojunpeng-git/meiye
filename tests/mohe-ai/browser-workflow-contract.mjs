@@ -7,7 +7,7 @@ const require=createRequire(import.meta.url);
 const {JSDOM}=require('../../前端代码/admin/node_modules/jsdom');
 const flush=()=>new Promise(r=>setTimeout(r,12));let checks=0;
 function eq(a,b){assert.deepEqual(a,b);checks++;}
-function setup({delayCreate=false,clarification=false}={}) {
+function setup({delayCreate=false,clarification=false,failCreateOnce=false,failCreateAlways=false}={}) {
   const dom=new JSDOM('<!doctype html><body></body>',{url:'https://fixture.test'});
   // Old jsdom has no native shadow root: actual DOM events + real transport,
   // shim only supplies the root. This is not a browser layout or live API test.
@@ -18,7 +18,11 @@ function setup({delayCreate=false,clarification=false}={}) {
   globalThis.fetch=async(url,options)=>{
     const body=options.body?JSON.parse(options.body):null;calls.push({url,method:options.method,body,headers:options.headers});
     if(url.endsWith('/bootstrap'))return json({enabled:configured,can_configure:true,identity_key:'account-one',window_token:'window',capabilities:{metric_codes:['consume_amount'],output_formats:configured?['screen','screen_and_xlsx']:['screen']}});
-    if(url.endsWith('/runs')){const result=json({run_id:'run'+(++sequence),generation:1,run_delivery_token:'delivery',status:'RECEIVED'});return delayCreate?new Promise(resolve=>{releaseCreate=()=>resolve(result);}):result;}
+    if(url.endsWith('/runs')){
+      if(failCreateAlways || (failCreateOnce && calls.filter(call=>call.url.endsWith('/runs')).length===1)) throw new TypeError('unknown network outcome');
+      const result=json({run_id:'run'+(++sequence),generation:1,run_delivery_token:'delivery',status:'RECEIVED'});
+      return delayCreate?new Promise(resolve=>{releaseCreate=()=>resolve(result);}):result;
+    }
     const id=url.match(/\/runs\/(run\d+)/)?.[1];
     if(clarification && (url.endsWith('/execute') || options.method==='GET')) {
       const result=json({run_id:id,generation:1,status:'WAITING_CLARIFICATION',clarification:{id:'clarify-one',fields:[{key:'metric',label:'业绩指标',options:[{label:'现金业绩',value:'cash'}]}]}});
@@ -35,6 +39,26 @@ function setup({delayCreate=false,clarification=false}={}) {
   const enable=async()=>{await flush();click('魔核 AI');await flush();};
   const send=async(text)=>{root().querySelector('textarea').value=text;click('发送');await flush();};
   return {root,click,enable,send,calls,dispose,release:()=>releaseCreate()};
+}
+{
+  const f=setup({failCreateOnce:true});await f.enable();await f.send('哪个门店业绩最高哪个门店最低');
+  await new Promise(resolve=>setTimeout(resolve,1150));
+  const admissions=f.calls.filter(call=>call.url.endsWith('/runs'));
+  eq(admissions.length,2);
+  eq(admissions[1].body.client_request_id,admissions[0].body.client_request_id);
+  eq(admissions[1].body.question,admissions[0].body.question);
+  eq(f.root().textContent.includes('已校验答案1'),true);
+  f.dispose();
+}
+{
+  const f=setup({failCreateAlways:true});await f.enable();await f.send('今天现金业绩是多少');
+  await new Promise(resolve=>setTimeout(resolve,3250));
+  const admissions=f.calls.filter(call=>call.url.endsWith('/runs'));
+  eq(admissions.length,3);
+  eq(new Set(admissions.map(call=>call.body.client_request_id)).size,1);
+  eq(f.root().textContent.includes('已处理'),false);
+  eq(f.root().textContent.includes('请求是否已接收暂未确认'),true);
+  f.dispose();
 }
 {
   const f=setup();await f.enable();
