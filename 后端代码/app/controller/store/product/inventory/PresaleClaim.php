@@ -7,6 +7,7 @@ use app\controller\store\AuthController;
 use app\services\cashier\v3\presale\CashierV3PresaleClaimServices;
 use think\facade\App;
 
+/** 将门店鉴权中间件确认的选店会话交给服务层，仅访问当前所选门店。 */
 final class PresaleClaim extends AuthController
 {
     public function __construct(App $app, CashierV3PresaleClaimServices $services)
@@ -24,13 +25,13 @@ final class PresaleClaim extends AuthController
                 'source_kind' => $this->request->get('source_kind', 'PRESALE'),
                 'start_date' => $this->request->get('start_date', ''), 'end_date' => $this->request->get('end_date', ''),
             ];
-            return $this->success($this->services->listForStore((int)$this->storeId, (int)$this->storeStaffId, $criteria));
+            return $this->success($this->services->listForStore((int)$this->storeId, (int)$this->storeStaffId, $criteria, (array)$this->storeStaffInfo));
         } catch (\Throwable $exception) { return $this->fail($this->message($exception), ['code' => $exception->getMessage()]); }
     }
 
     public function detail(string $id)
     {
-        try { return $this->success($this->services->detailForStore((int)$this->storeId, (int)$this->storeStaffId, $id)); }
+        try { return $this->success($this->services->detailForStore((int)$this->storeId, (int)$this->storeStaffId, $id, (array)$this->storeStaffInfo)); }
         catch (\Throwable $exception) { return $this->fail($this->message($exception), ['code' => $exception->getMessage()]); }
     }
 
@@ -38,7 +39,7 @@ final class PresaleClaim extends AuthController
     {
         try {
             $input = $this->request->postMore([['idempotency_key', ''], ['claimable_line_id', ''], ['quantity', 0], ['business_date', ''], ['remark', '']]);
-            return $this->success('预售商品已领用并生成出库单。', $this->services->claimForStore((int)$this->storeId, (int)$this->storeStaffId, $input));
+            return $this->success('预售商品已领用并生成出库单。', $this->services->claimForStore((int)$this->storeId, (int)$this->storeStaffId, $input, (array)$this->storeStaffInfo));
         } catch (\Throwable $exception) { return $this->fail($this->message($exception), ['code' => $exception->getMessage()]); }
     }
 
@@ -47,7 +48,7 @@ final class PresaleClaim extends AuthController
     {
         try {
             $input = $this->request->postMore([['remark', ''], ['expected_version', 0]]);
-            return $this->success('领用备注已保存。', $this->services->updateRemarkForStore((int)$this->storeId, (int)$this->storeStaffId, $id, $input));
+            return $this->success('领用备注已保存。', $this->services->updateRemarkForStore((int)$this->storeId, (int)$this->storeStaffId, $id, $input, (array)$this->storeStaffInfo));
         } catch (\Throwable $exception) { return $this->fail($this->message($exception), ['code' => $exception->getMessage()]); }
     }
 
@@ -55,7 +56,7 @@ final class PresaleClaim extends AuthController
     {
         try {
             $input = $this->request->postMore([['idempotency_key', ''], ['reason', '']]);
-            return $this->success('领用已作废，库存已按原批次退回。', $this->services->voidForStore((int)$this->storeId, (int)$this->storeStaffId, $id, $input));
+            return $this->success('领用已作废，库存已按原批次退回。', $this->services->voidForStore((int)$this->storeId, (int)$this->storeStaffId, $id, $input, (array)$this->storeStaffInfo));
         } catch (\Throwable $exception) { return $this->fail($this->message($exception), ['code' => $exception->getMessage()]); }
     }
 

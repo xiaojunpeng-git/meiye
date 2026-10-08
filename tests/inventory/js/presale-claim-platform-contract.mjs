@@ -103,7 +103,8 @@ check('store page labels post-refund presale lines as closed and keeps them unav
 check('store defaults to all available presale lines and only shows sales dates for other statuses',
   storeView.includes("const status = ref('AVAILABLE')")
   && storeView.includes("status.value !== 'AVAILABLE'")
-  && storeView.includes('start_date: salesStartDate.value, end_date: salesEndDate.value'))
+  && storeView.includes("start_date: shouldShowSalesDateFilter.value ? salesDateRange.value.min : ''")
+  && storeView.includes("end_date: shouldShowSalesDateFilter.value ? salesDateRange.value.max : ''"))
 check('presale list filters sales dates on the server under the same access scope',
   service.includes("$this->optionalDate((string)($criteria['start_date'] ?? ''), 'presale_claim_sales_date_invalid')")
   && service.includes("$query->where('business_date', '>=', $startDate)")

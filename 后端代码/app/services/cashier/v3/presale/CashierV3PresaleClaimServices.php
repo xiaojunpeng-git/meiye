@@ -6,6 +6,7 @@ namespace app\services\cashier\v3\presale;
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\permission\CashierV3FeatureResolver;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
 use app\services\organization\OrganizationScopeService;
 use app\services\product\inventory\InventoryBusinessDocumentNumberServices;
@@ -213,9 +214,9 @@ final class CashierV3PresaleClaimServices
         return $closed;
     }
 
-    public function listForStore(int $storeId, int $operatorId, array $criteria): array
+    public function listForStore(int $storeId, int $operatorId, array $criteria, array $sessionInfo = []): array
     {
-        $scope = $this->storeScope($storeId, $operatorId, false);
+        $scope = $this->storeScope($storeId, $operatorId, false, $sessionInfo);
         return $this->list($scope, $criteria);
     }
 
@@ -250,10 +251,11 @@ final class CashierV3PresaleClaimServices
         ];
     }
 
-    public function claimForStore(int $storeId, int $operatorId, array $input): array
+    public function claimForStore(int $storeId, int $operatorId, array $input, array $sessionInfo = []): array
     {
-        return Db::transaction(function () use ($storeId, $operatorId, $input): array {
-            return $this->claimInTx($this->storeScope($storeId, $operatorId, true), $input);
+        return Db::transaction(function () use ($storeId, $operatorId, $input, $sessionInfo): array {
+            return $this->claimInTx($this->storeScope($storeId, $operatorId, true, $sessionInfo,
+                'cashier.v3.inventory.presale_claim.create'), $input);
         });
     }
 
@@ -265,17 +267,18 @@ final class CashierV3PresaleClaimServices
         });
     }
 
-    public function detailForStore(int $storeId, int $operatorId, string $claimableId): array
+    public function detailForStore(int $storeId, int $operatorId, string $claimableId, array $sessionInfo = []): array
     {
-        $scope = $this->storeScope($storeId, $operatorId, false);
+        $scope = $this->storeScope($storeId, $operatorId, false, $sessionInfo);
         return $this->detail($scope, $claimableId);
     }
 
     /** Change a claim note in its original store only, with optimistic versioning and immutable edit history. */
-    public function updateRemarkForStore(int $storeId, int $operatorId, string $claimId, array $input): array
+    public function updateRemarkForStore(int $storeId, int $operatorId, string $claimId, array $input, array $sessionInfo = []): array
     {
-        return Db::transaction(function () use ($storeId, $operatorId, $claimId, $input): array {
-            $scope = $this->storeScope($storeId, $operatorId, true);
+        return Db::transaction(function () use ($storeId, $operatorId, $claimId, $input, $sessionInfo): array {
+            $scope = $this->storeScope($storeId, $operatorId, true, $sessionInfo,
+                'cashier.v3.inventory.presale_claim.create');
             $claimId = $this->token($claimId, 64, 'presale_claim_id_invalid');
             $remark = $this->remark($input['remark'] ?? '');
             $version = $this->positiveInt($input['expected_version'] ?? 0, 'presale_claim_remark_version_changed');
@@ -303,10 +306,11 @@ final class CashierV3PresaleClaimServices
         return $this->detail(['tenantId' => CashierV3ScopeResolver::TENANT_SCOPE_ID, 'storeIds' => (array)$access['store_ids'], 'platform' => true], $claimableId);
     }
 
-    public function voidForStore(int $storeId, int $operatorId, string $claimId, array $input): array
+    public function voidForStore(int $storeId, int $operatorId, string $claimId, array $input, array $sessionInfo = []): array
     {
-        return Db::transaction(function () use ($storeId, $operatorId, $claimId, $input): array {
-            return $this->voidInTx($this->storeScope($storeId, $operatorId, true), $claimId, $input);
+        return Db::transaction(function () use ($storeId, $operatorId, $claimId, $input, $sessionInfo): array {
+            return $this->voidInTx($this->storeScope($storeId, $operatorId, true, $sessionInfo,
+                'cashier.v3.inventory.presale_claim.void'), $claimId, $input);
         });
     }
 
@@ -512,20 +516,56 @@ final class CashierV3PresaleClaimServices
         return ['claim_id' => $claimId, 'claim_no' => (string)$claim['claim_no'], 'status' => self::CLAIM_VOIDED, 'idempotent' => false];
     }
 
-    private function storeScope(int $storeId, int $operatorId, bool $lock): array
+    /** 功能已授权的选店会话只读取当前店；写入仍逐项核对岗位权限并记录真实员工。 */
+    private function storeScope(int $storeId, int $operatorId, bool $lock, array $sessionInfo = [], string $writeFeature = ''): array
     {
         if ($storeId <= 0 || $operatorId <= 0) throw new \RuntimeException('presale_claim_scope_invalid');
         $query = Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->where('store_id', $storeId)
             ->where('location_type', 'STORE')->where('is_default', 1)->where('location_status', 'ACTIVE')->order('id', 'asc')->limit(2);
         if ($lock) $query->lock(true);
         $locations = $query->select()->toArray();
-        $staff = Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)->where('status', 1)->where('is_del', 0);
-        if ($lock) $staff->lock(true);
-        $staff = $staff->field('id,staff_name')->find();
-        if (count($locations) !== 1 || !$staff) throw new \RuntimeException('presale_claim_scope_denied');
+        if (count($locations) !== 1) throw new \RuntimeException('presale_claim_scope_denied');
+        $organizationSession = !empty($sessionInfo['_cashier_v3_organization']) || !empty($sessionInfo['_cashier_v3_delegated']);
+        if ($organizationSession) {
+            $sessionType = (string)($sessionInfo['type'] ?? '');
+            $employeeId = (int)($sessionInfo['employee_id'] ?? 0);
+            $sessionMode = (string)($sessionInfo['session_mode'] ?? '');
+            $isOrganization = $sessionType === 'cashier_v3_organization' && $sessionMode === 'store_organization'
+                && !empty($sessionInfo['_cashier_v3_organization']) && empty($sessionInfo['_cashier_v3_delegated']);
+            $isDelegated = $sessionType === 'cashier_v3_delegated' && $sessionMode === 'store_read_only'
+                && !empty($sessionInfo['_cashier_v3_delegated']) && empty($sessionInfo['_cashier_v3_organization']);
+            if ((int)($sessionInfo['id'] ?? 0) !== $operatorId || (int)($sessionInfo['store_id'] ?? 0) !== $storeId
+                || $employeeId <= 0 || (!$isOrganization && !$isDelegated)) {
+                throw new \RuntimeException('presale_claim_scope_denied');
+            }
+            $session = Db::name('cashier_v3_store_session')->where('id', $operatorId)->where('store_id', $storeId)
+                ->where('employee_id', $employeeId)->where('status', 1)->where('is_del', 0)
+                ->where('expire_time', '>=', time())->find();
+            $employee = Db::name('employee')->where('id', $employeeId)->where('status', 1)->where('is_del', 0)
+                ->field('id,name')->find();
+            if (!$session || !$employee) throw new \RuntimeException('presale_claim_scope_denied');
+            if ($lock && ($sessionType !== 'cashier_v3_organization' || !empty($sessionInfo['read_only'])
+                || $writeFeature === '' || !in_array($writeFeature,
+                    app()->make(CashierV3FeatureResolver::class)->resolveGrantedFeatures($sessionInfo), true))) {
+                throw new \RuntimeException('presale_claim_scope_denied');
+            }
+            $actorType = 'EMPLOYEE';
+            $actorId = $employeeId;
+            $actorName = (string)$employee['name'];
+        } else {
+            $staff = Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)
+                ->where('status', 1)->where('is_del', 0);
+            if ($lock) $staff->lock(true);
+            $staff = $staff->field('id,staff_name')->find();
+            if (!$staff) throw new \RuntimeException('presale_claim_scope_denied');
+            $actorType = 'STORE_STAFF';
+            $actorId = $operatorId;
+            $actorName = (string)$staff['staff_name'];
+        }
         $location = (array)$locations[0];
         return ['tenantId' => (string)$location['tenant_id'], 'organizationId' => (string)$location['organization_id'], 'organizationPath' => (string)$location['organization_path'],
-            'storeId' => $storeId, 'storeIds' => [$storeId], 'operatorId' => $operatorId, 'operatorType' => 'STORE_STAFF', 'operatorName' => $this->text((string)$staff['staff_name'], 128), 'location' => $location];
+            'storeId' => $storeId, 'storeIds' => [$storeId], 'operatorId' => $actorId, 'operatorType' => $actorType,
+            'operatorName' => $this->text($actorName, 128), 'location' => $location];
     }
 
     private function platformScope(array $adminInfo, int $storeId): array
