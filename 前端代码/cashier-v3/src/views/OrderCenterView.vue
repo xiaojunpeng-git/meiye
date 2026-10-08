@@ -186,8 +186,10 @@ const ORDER_TABS = [
     primaryField: 'refund_order_no',
     searchPlaceholder: '搜索退款单号、来源订单、会员姓名或手机号',
     emptyText: '暂无退款记录。',
+    // 退款来源由服务端记录投影给出；页面不按会员来源或来源单号猜测。
     fields: [
       field('refund_order_no', '退款单号', 'text', { quickFilterHidden: true }),
+      field('source', '来源'),
       field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('source_order_no', '来源订单号'), field('member_name', '会员姓名／游客'),
       field('phone', '手机号'), field('refund_summary', '退款内容'), field('refund_amount', '退款金额', 'money'),

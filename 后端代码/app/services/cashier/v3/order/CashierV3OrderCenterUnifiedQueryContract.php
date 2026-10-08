@@ -48,7 +48,8 @@ final class CashierV3OrderCenterUnifiedQueryContract
                 ['order_status', '订单状态'], ['payment_completed_at', '支付完成时间', 'datetime'],
             ], ['recharge_order_no', 'member_name', 'phone']],
             'refund' => ['退款记录', [
-                ['refund_order_no', '退款单号', 'text', true, true], ['business_date', '业务日期', 'date', true, true],
+                // 当前退款业务归属固定为 K；列表和导出使用同一只读来源列。
+                ['refund_order_no', '退款单号', 'text', true, true], ['source', '来源'], ['business_date', '业务日期', 'date', true, true],
                 ['source_order_no', '来源订单号'], ['member_name', '会员姓名／游客'], ['phone', '手机号'], ['refund_summary', '退款内容'],
                 ['refund_amount', '退款金额', 'amount'], ['refund_method', '退款方式'], ['store', '办理门店'], ['operator', '操作人'],
                 ['refund_status', '退款状态'], ['refund_completed_at', '退款完成时间', 'datetime'],

@@ -112,6 +112,11 @@ exportOk('服务记录固定显示来源及同次销售单号，列表与导出�
     && strpos($view, "field('service_record_no', '服务记录号', 'text', { quickFilterHidden: true }),\n      field('source', '来源'), field('sales_order_no', '销售单号'),") !== false
     && strpos($recordQuery, "'source' => \$this->serviceBusinessSourceLabel(\$row)") !== false
     && strpos($recordQuery, "'salesOrderNo' => (string)(\$row['sales_order_no'] ?? '')") !== false);
+exportOk('退款记录来源固定为 K 且列表与导出读取同一投影',
+    strpos($contract, "['refund_order_no', '退款单号', 'text', true, true], ['source', '来源'], ['business_date'") !== false
+    && strpos($view, "field('refund_order_no', '退款单号', 'text', { quickFilterHidden: true }),\n      field('source', '来源'),") !== false
+    && strpos($recordQuery, "'source' => 'K退款顾客'") !== false
+    && strpos($provider, "'source' => ['source', 'sourceLabel', 'sourceSecondary', 'sourcePrimary']") !== false);
 exportOk('工作台上下文就绪后会重试当前页签统一查询能力', strpos($view, "activeUnifiedQuery.value?.load({ silent: true })") !== false);
 exportOk('订单中心导出位于设置右侧且固定导出当前查询结果', strpos($view, 'export-button-after-settings') !== false
     && strpos($view, 'direct-query-export') !== false

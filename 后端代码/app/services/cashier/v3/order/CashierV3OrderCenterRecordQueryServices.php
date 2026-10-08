@@ -855,6 +855,9 @@ final class CashierV3OrderCenterRecordQueryServices
             return [
                 'id' => 'refund:' . (string)$row['operation_id'],
                 'refundOrderNo' => (string)$row['operation_no'],
+                // 这是退款自身的经营来源 K，不继承会员当前来源或原销售来源。
+                // 旧记录按同一已确认口径只读投影，不回写不可变历史事实。
+                'source' => 'K退款顾客',
                 'businessDate' => (string)$row['business_date'],
                 'sourceOrderNo' => (string)$row['source_type'] === 'card' && trim((string)($row['card_sales_order_no'] ?? '')) !== ''
                     ? (string)$row['card_sales_order_no'] : (string)$row['source_order_no_snapshot'],
