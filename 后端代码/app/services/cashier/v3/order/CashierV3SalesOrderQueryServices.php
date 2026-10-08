@@ -1396,7 +1396,7 @@ final class CashierV3SalesOrderQueryServices
         $serviceFactIds = [];
         if ($requestIds !== []) {
             $serviceRows = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
-                // 单次金额取核销时冻结的权益金额，不取当前项目售价或可调整的手艺人业绩。
+                // 原始核销快照只作历史兜底；已追加的金额更正事实由下方读模型覆盖。
                 ->leftJoin('cashier_v3_entitlement_writeoff_fact wf', 'wf.tenant_id=sf.tenant_id AND wf.checkout_request_id=sf.checkout_request_id AND wf.source_line_id=sf.source_line_id')
                 ->leftJoin(
                     'cashier_v3_service_record_void_operation vo',
@@ -1407,6 +1407,19 @@ final class CashierV3SalesOrderQueryServices
                 ->where('sf.service_status', 'completed')
                 ->field('sf.id,sf.service_fact_id,sf.service_record_no,sf.checkout_request_id,sf.source_line_id,sf.project_id,sf.project_name_snapshot,sf.quantity,sf.project_count,sf.service_object,sf.friend_counts_as_customer,sf.is_experience,sf.craftsmen_snapshot_json,sf.service_status,sf.detail_remark_snapshot,wf.actual_entitlement_amount_cents,wf.total_purchase_times_snapshot,wf.consumed_times_before_snapshot,wf.quantity AS writeoff_quantity,vo.id AS void_operation_id,vo.occurred_at AS voided_at')
                 ->order('sf.id', 'asc')->select()->toArray();
+            if ($serviceRows !== []) {
+                // R32 历史更正以不可变正反事实入账，原核销快照不能覆盖。
+                // 按本页结账请求批量取更正后的项目金额，避免逐行查询和重新计算购卡价。
+                $correctedAmounts = Db::name('cashier_v3_performance_fact')
+                    ->where('tenant_id', $tenantIds[0])
+                    ->whereIn('checkout_request_id', $requestIds)
+                    ->where('performance_type', 'consumption_performance_recorded')
+                    ->where('status', 'effective')->where('fact_direction', 'forward')
+                    ->where('rule_code_snapshot', 'SHARED-CARD-PURCHASE-REPAIR-R32')
+                    ->field('id,checkout_request_id,source_line_id,amount_cents')
+                    ->order('id', 'desc')->select()->toArray();
+                $serviceRows = $this->applyCorrectedEntitlementAmounts($serviceRows, $correctedAmounts);
+            }
             foreach ($serviceRows as $serviceRow) {
                 $orderId = $requestToOrder[(string)($serviceRow['checkout_request_id'] ?? '')] ?? '';
                 if ($orderId === '' || !isset($headersByOrder[$orderId])) continue;
@@ -2113,9 +2126,37 @@ final class CashierV3SalesOrderQueryServices
     }
 
     /**
-     * Only a personnel-adjustment reversal replaces the displayed assignment.
-     * Refund and void reversals affect accounting totals but must preserve the
-     * last salesperson and craftsman snapshots on the immutable source order.
+     * 只覆盖同一结账请求、同一服务行的展示金额；旧快照和其他权益行保持原值。
+     * 更正事实按 ID 倒序传入，重复更正时以最新有效正向事实为准。
+     *
+     * @param array<int,array<string,mixed>> $serviceRows
+     * @param array<int,array<string,mixed>> $corrections
+     * @return array<int,array<string,mixed>>
+     */
+    private function applyCorrectedEntitlementAmounts(array $serviceRows, array $corrections): array
+    {
+        $amounts = [];
+        foreach ($corrections as $correction) {
+            $requestId = (string)($correction['checkout_request_id'] ?? '');
+            $lineId = (string)($correction['source_line_id'] ?? '');
+            if ($requestId === '' || $lineId === '' || isset($amounts[$requestId][$lineId])) continue;
+            $amounts[$requestId][$lineId] = max(0, (int)$correction['amount_cents']);
+        }
+        foreach ($serviceRows as &$serviceRow) {
+            $requestId = (string)($serviceRow['checkout_request_id'] ?? '');
+            $lineId = (string)($serviceRow['source_line_id'] ?? '');
+            if (isset($amounts[$requestId][$lineId])) {
+                $serviceRow['actual_entitlement_amount_cents'] = $amounts[$requestId][$lineId];
+            }
+        }
+        unset($serviceRow);
+        return $serviceRows;
+    }
+
+    /**
+     * Personnel adjustments and the R32 shared-card correction replace the
+     * displayed assignment. Refund and void reversals affect accounting totals
+     * but preserve the last salesperson/craftsman snapshot on the source order.
      *
      * @return array<int,array<string,mixed>>
      */
@@ -2159,7 +2200,8 @@ final class CashierV3SalesOrderQueryServices
         $reversed = [];
         foreach ($rows as $row) {
             if ((string)$row['fact_direction'] === 'reversal'
-                && isset($adjustmentCommandKeys[(string)($row['command_idempotency_key'] ?? '')])
+                && (isset($adjustmentCommandKeys[(string)($row['command_idempotency_key'] ?? '')])
+                    || (string)($row['rule_code_snapshot'] ?? '') === 'SHARED-CARD-PURCHASE-REPAIR-R32')
                 && (string)($row['reversal_of'] ?? '') !== '') {
                 $reversed[(string)$row['reversal_of']] = true;
             }

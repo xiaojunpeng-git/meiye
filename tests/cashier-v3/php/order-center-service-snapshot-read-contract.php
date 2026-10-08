@@ -11,11 +11,28 @@ require $backend . '/app/services/cashier/v3/order/CashierV3SalesOrderQueryServi
 
 $reader = new \app\services\cashier\v3\order\CashierV3SalesOrderQueryServices();
 $method = new ReflectionMethod($reader, 'mapEntitlementServiceLine');
+$correctedAmountMethod = new ReflectionMethod($reader, 'applyCorrectedEntitlementAmounts');
+$correctedRows = $correctedAmountMethod->invoke($reader, [
+    ['checkout_request_id' => 'request-1', 'source_line_id' => 'line-1', 'actual_entitlement_amount_cents' => 2822],
+    ['checkout_request_id' => 'request-1', 'source_line_id' => 'line-2', 'actual_entitlement_amount_cents' => 3500],
+    ['checkout_request_id' => 'request-2', 'source_line_id' => 'line-1', 'actual_entitlement_amount_cents' => 4500],
+], [
+    ['checkout_request_id' => 'request-1', 'source_line_id' => 'line-1', 'amount_cents' => 6600],
+    ['checkout_request_id' => 'request-1', 'source_line_id' => 'line-1', 'amount_cents' => 6500],
+]);
+if (array_column($correctedRows, 'actual_entitlement_amount_cents') !== [6600, 3500, 4500]) {
+    throw new RuntimeException('shared_card_correction_not_scoped_to_service_line');
+}
 $service = [
     'id' => 1, 'quantity' => 1, 'project_name_snapshot' => '护理项目',
     'actual_entitlement_amount_cents' => 3000, 'service_fact_id' => 'ESF-1',
     'service_status' => 'completed',
 ];
+$correctedLine = $method->invoke($reader, array_merge($service, $correctedRows[0]), []);
+if ($correctedLine['unitPrice'] !== 66.0 || $correctedLine['entitlementAmount'] !== 66.0
+    || $correctedLine['payableAmount'] !== null) {
+    throw new RuntimeException('shared_card_correction_not_reflected_in_both_prices');
+}
 $legacy = [[
     'staff_id' => 11, 'employee_id' => 22, 'staff_name_snapshot' => '历史技师',
     'employee_type_snapshot' => '正式', 'store_id' => 8, 'sequence' => 1,

@@ -15,13 +15,14 @@ function personnelSnapshotAssert(bool $condition, string $message): void
 
 $service = new CashierV3SalesOrderQueryServices();
 $method = new ReflectionMethod($service, 'displayedPersonnelFacts');
-$fact = static function (string $id, string $direction, string $name, string $command, string $reversalOf = ''): array {
+$fact = static function (string $id, string $direction, string $name, string $command, string $reversalOf = '', string $rule = ''): array {
     return [
         'fact_id' => $id,
         'fact_direction' => $direction,
         'employee_name_snapshot' => $name,
         'command_idempotency_key' => $command,
         'reversal_of' => $reversalOf,
+        'rule_code_snapshot' => $rule,
     ];
 };
 
@@ -45,6 +46,16 @@ $refundResult = $method->invoke(
 personnelSnapshotAssert(
     array_column($refundResult, 'employee_name_snapshot') === ['调整后销售人'],
     '人员调整后退款仍展示最后一次有效人员快照'
+);
+
+$repairResult = $method->invoke($service, [
+    $fact('shared-original', 'forward', '原手艺人', 'checkout'),
+    $fact('shared-reversal', 'reversal', '原手艺人', 'r32_shared_purchase:14473', 'shared-original', 'SHARED-CARD-PURCHASE-REPAIR-R32'),
+    $fact('shared-corrected', 'forward', '更正后手艺人', 'r32_shared_purchase:14473'),
+], []);
+personnelSnapshotAssert(
+    array_column($repairResult, 'employee_name_snapshot') === ['更正后手艺人'],
+    '共享次数卡更正只显示有效手艺人，不叠加原事实'
 );
 
 echo "PERSONNEL_SNAPSHOT_TERMINAL_REVERSAL_CONTRACT=PASS\n";
