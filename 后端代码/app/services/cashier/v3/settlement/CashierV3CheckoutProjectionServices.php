@@ -17,6 +17,7 @@ final class CashierV3CheckoutProjectionServices
     private const MAX_PAYMENT_DRAFTS = 200;
 
     private const PAYMENT_NAMES = [
+        'cash' => '现金',
         'unionpay' => '银联',
         'wechat' => '微信',
         'alipay' => '支付宝',
@@ -243,7 +244,7 @@ final class CashierV3CheckoutProjectionServices
         if (!isset($projection['payment']) || !is_array($projection['payment'])) {
             throw self::failure('checkout_projection_payment_missing');
         }
-        // Sales-debt repayment accepts only the seven bookkeeping collection
+        // Sales-debt repayment accepts only the configured bookkeeping collection
         // methods. It must not silently turn an old receivable into a balance
         // deduction, for which the repayment authority has no ledger fields.
         if ((string)($projection['businessType'] ?? '') === 'debt_repayment') {

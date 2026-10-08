@@ -31,8 +31,9 @@ final class CashierV3SalesOrderPlanV1
     // 混合结账的销售订单计划必须接受同一受控枚举，仍由 holder/detail/version
     // 和行指纹共同校验，不能把 unknown 当作任意来源。
     private const ENTITLEMENT_KINDS = ['count_card', 'time_card', 'custom_card', 'gift', 'unknown'];
+    // 销售订单快照只接受正式记账收款代码；旧卡录入保留独立迁入语义。
     private const PAYMENT_METHODS = [
-        'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
+        'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
         'partner_collection', 'other_collection',
     ];
 

@@ -94,8 +94,8 @@ check('only final sale-bearing checkout can produce formal collections',
     && plan.includes("!in_array($normalized['composition'], self::SALE_BEARING_COMPOSITIONS, true)")
     && plan.includes("throw self::failure('payment_collection_sale_composition_required')")
     && plan.includes('public function composition(): string'))
-check('seven bookkeeping methods are an exact server allowlist',
-  ['unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
+check('eight bookkeeping methods are an exact server allowlist',
+  ['cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
     'partner_collection', 'other_collection']
     .every((method) => plan.includes(`'${method}' =>`))
     && plan.includes("$method === 'old_card_entry'")
@@ -169,7 +169,7 @@ check('server DataScope is enforced before the first collection write',
     && writer.includes('$operatorScope->operatorId() !== $dataScope->operatorId()'))
 check('legacy tables and generic payment payloads are outside this domain',
   !/store_order|pay_type|paymentPayload|clientPayment/i.test(plan + ids + contract + writer + exception))
-check('sale-only submit-checkout persists the seven-method collection authority in its final transaction',
+check('sale-only submit-checkout persists the eight-method collection authority in its final transaction',
   submission.includes('CashierV3PaymentCollectionPlanV1::fromLockedCheckoutAggregate(')
     && submission.includes('$this->collections->persistInTx(')
     && manifest.includes("'required_event_types' => ['checkout.completed']"))

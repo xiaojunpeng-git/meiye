@@ -20,7 +20,8 @@ use think\facade\Db;
 final class CashierV3RechargeCheckoutModule
 {
     private const SUBMIT = 'submit-recharge-checkout';
-    private const METHODS = ['unionpay','wechat','alipay','dianping_voucher','douyin_voucher','partner_collection','other_collection'];
+    // 本次充值快照只能携带已确认的记账方式，最终事务还会按同一白名单重验。
+    private const METHODS = ['cash','unionpay','wechat','alipay','dianping_voucher','douyin_voucher','partner_collection','other_collection'];
 
     public static function install(CashierV3ActionDispatcher $dispatcher): void
     {

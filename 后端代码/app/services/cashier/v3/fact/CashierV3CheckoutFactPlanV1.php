@@ -25,7 +25,9 @@ final class CashierV3CheckoutFactPlanV1
     public const DIRECTION_FORWARD = 'forward';
     public const DIRECTION_REVERSAL = 'reversal';
 
+    // payment_collected 事实只落成功记账收款；余额和旧卡录入在各自事实域处理。
     private const PAYMENT_METHODS = [
+        'cash',
         'unionpay',
         'wechat',
         'alipay',

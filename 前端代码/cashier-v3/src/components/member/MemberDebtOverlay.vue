@@ -51,7 +51,9 @@ const repaymentSourcesError = ref('')
 const repaymentSourcePrimaryId = ref(0)
 const repaymentSourceSecondaryId = ref(0)
 let repaymentSourceLoadToken = 0
+// 欠款补交使用同一套记账收款代码；这里只提供可选项，落账权限和事实由最终提交重验。
 const paymentMethods = [
+  { code: 'cash', label: '现金' },
   { code: 'unionpay', label: '银联' },
   { code: 'wechat', label: '微信' },
   { code: 'alipay', label: '支付宝' },

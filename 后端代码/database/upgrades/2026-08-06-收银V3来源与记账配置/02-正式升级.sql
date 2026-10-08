@@ -65,6 +65,7 @@ GROUP BY `legacy`.`source_name`;
 INSERT INTO `eb_cashier_v3_payment_method_config`
   (`code`,`default_name`,`display_name`,`status`,`sort`,`version`,`created_at`,`updated_at`)
 VALUES
+  ('cash','现金','现金',1,5,1,UNIX_TIMESTAMP(),UNIX_TIMESTAMP()),
   ('unionpay','银联','银联',1,10,1,UNIX_TIMESTAMP(),UNIX_TIMESTAMP()),
   ('wechat','微信','微信',1,20,1,UNIX_TIMESTAMP(),UNIX_TIMESTAMP()),
   ('alipay','支付宝','支付宝',1,30,1,UNIX_TIMESTAMP(),UNIX_TIMESTAMP()),

@@ -25,7 +25,9 @@ final class CashierV3PaymentCollectionPlanV1
     private const MAX_MONEY_CENTS = 100000000000;
     private const MAX_PAYMENT_ROWS = 200;
     private const SALE_BEARING_COMPOSITIONS = ['sale_only', 'mixed'];
+    // 正式收款事实只接受这些记账方式，名称在成功时冻结为历史快照。
     private const PAYMENT_METHOD_LABELS = [
+        'cash' => '现金',
         'unionpay' => '银联',
         'wechat' => '微信',
         'alipay' => '支付宝',

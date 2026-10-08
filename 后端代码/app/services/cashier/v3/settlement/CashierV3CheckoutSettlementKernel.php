@@ -23,6 +23,9 @@ final class CashierV3CheckoutSettlementKernel
     public const COMPOSITION_ENTITLEMENT_ONLY = 'entitlement_only';
     public const COMPOSITION_MIXED = 'mixed';
 
+    // 现金是产品确认的记账收款方式，进入现金业绩；旧卡录入继续走
+    // 单独历史权益迁入流程，不进入 PAYMENT_METHODS。
+    public const PAYMENT_CASH = 'cash';
     public const PAYMENT_UNIONPAY = 'unionpay';
     public const PAYMENT_WECHAT = 'wechat';
     public const PAYMENT_ALIPAY = 'alipay';
@@ -33,6 +36,7 @@ final class CashierV3CheckoutSettlementKernel
     public const PAYMENT_OLD_CARD_ENTRY = 'old_card_entry';
 
     private const PAYMENT_METHODS = [
+        self::PAYMENT_CASH,
         self::PAYMENT_UNIONPAY,
         self::PAYMENT_WECHAT,
         self::PAYMENT_ALIPAY,
@@ -155,10 +159,10 @@ final class CashierV3CheckoutSettlementKernel
     {
         return [
             '销售额' => '正式成交的商品、卡项、项目金额，包含现金业绩、余额扣款和欠款覆盖的部分。',
-            '现金业绩' => '银联、微信、支付宝、大众验券、抖音验券、合作方收款、其他收款。',
+            '现金业绩' => '现金、银联、微信、支付宝、大众验券、抖音验券、合作方收款、其他收款。',
             '收款明细' => '每一种记账收款分别保存的金额、方式、业务时间、操作人和来源单据。',
-            '欠款' => '应收金额中本次未收、允许以后补交的金额；使用七种记账方式补交产生现金业绩。',
-            '储值金额' => '充值成功写入会员账户的本金，赠送金额单独记录；使用七种记账方式充值时产生现金业绩。',
+            '欠款' => '应收金额中本次未收、允许以后补交的金额；使用八种记账方式补交产生现金业绩。',
+            '储值金额' => '充值成功写入会员账户的本金，赠送金额单独记录；使用八种记账方式充值时产生现金业绩。',
             '余额扣款' => '使用会员已有储值余额支付订单的金额，不属于现金业绩。',
             '销售人业绩' => '销售商品明细按最终分配规则归属给所选销售人的现金业绩。',
             '实际业绩' => '现金业绩减去分配给“合作方”或“外包”销售人的业绩。销售人在员工管理中设置人员类型；普通内部员工分配的销售人业绩不扣。员工类型和分配结果按业务发生时保存，后来改人员类型不反改历史数据。',

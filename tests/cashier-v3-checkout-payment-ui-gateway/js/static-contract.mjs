@@ -136,6 +136,7 @@ function methodSlice(source, signature, nextSignature) {
 }
 
 const fixedMethods = [
+  'cash',
   'unionpay',
   'wechat',
   'alipay',
@@ -370,7 +371,7 @@ const kernelMethods = phpArrayValues(
   'private const PAYMENT_METHODS = [',
 )
 check(
-  'settlement authority exposes exactly seven bookkeeping methods',
+  'settlement authority exposes exactly eight bookkeeping methods',
   JSON.stringify(kernelMethods) === JSON.stringify(fixedMethods),
   JSON.stringify(kernelMethods),
 )
@@ -379,7 +380,7 @@ const normalizerMethods = phpArrayValues(
   'if (!in_array($method, [',
 )
 check(
-  'gateway normalizer preserves seven methods plus legacy old-card recognition',
+  'gateway normalizer preserves eight methods plus legacy old-card recognition',
   JSON.stringify(normalizerMethods) === JSON.stringify([...fixedMethods, 'old_card_entry']),
   JSON.stringify(normalizerMethods),
 )
@@ -389,7 +390,7 @@ const domainAdd = methodSlice(
   'private static function updatePayment(',
 )
 check(
-  'payment draft domain rejects old-card entry before accepting the seven methods',
+  'payment draft domain rejects old-card entry before accepting the eight methods',
   paymentDraft !== ''
     && domainAdd.includes('PAYMENT_OLD_CARD_ENTRY')
     && domainAdd.includes("'old_card_entry_separate_flow_required'")
@@ -407,13 +408,13 @@ check(
     && addPayment.includes('method.canAdd === false'),
 )
 check(
-  'paper cash is absent from frontend and server method catalogs',
-  !/\{\s*id:\s*['"]cash['"]/.test(bridge)
-    && !kernelMethods.includes('cash')
-    && !normalizerMethods.includes('cash'),
+  'cash bookkeeping method is present in frontend and server method catalogs',
+  /\{\s*id:\s*['"]cash['"]/.test(bridge)
+    && kernelMethods.includes('cash')
+    && normalizerMethods.includes('cash'),
 )
 check(
-  'all seven bookkeeping method codes are present in the frontend catalog',
+  'all eight bookkeeping method codes are present in the frontend catalog',
   fixedMethods.every((method) => bridge.includes(`{ id: '${method}',`)),
 )
 

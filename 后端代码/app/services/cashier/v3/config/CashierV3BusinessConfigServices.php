@@ -23,7 +23,10 @@ final class CashierV3BusinessConfigServices extends BaseServices
         'referral' => '老客转介绍',
         'other' => '其他',
     ];
+    // 记账方式代码是结账、充值、欠款补交和事实层共享的业务口径；
+    // 旧卡录入保留在同一配置表中，但不属于可组合的现金收款事实。
     public const PAYMENT_METHODS = [
+        'cash' => '现金',
         'unionpay' => '银联',
         'wechat' => '微信',
         'alipay' => '支付宝',

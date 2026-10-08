@@ -182,15 +182,15 @@ paymentCollectionOk('new command cannot change stable collection identities',
         === array_column($collections, 'collection_id')
         && $differentCommand->fingerprint() !== $plan->fingerprint());
 
-$sevenMethods = [
-    ['unionpay', 1000], ['wechat', 1000], ['alipay', 1000],
+$eightMethods = [
+    ['cash', 1000], ['unionpay', 1000], ['wechat', 1000], ['alipay', 1000],
     ['dianping_voucher', 1000], ['douyin_voucher', 1000],
     ['partner_collection', 1000], ['other_collection', 1000],
 ];
-$seven = paymentCollectionPlan(paymentCollectionLockedAggregate($sevenMethods));
-paymentCollectionOk('all and only seven fixed bookkeeping methods are accepted',
-    array_column($seven->collections(), 'payment_method') === array_column($sevenMethods, 0)
-        && $seven->batch()['collection_count'] === 7);
+$eight = paymentCollectionPlan(paymentCollectionLockedAggregate($eightMethods));
+paymentCollectionOk('all and only eight fixed bookkeeping methods are accepted',
+    array_column($eight->collections(), 'payment_method') === array_column($eightMethods, 0)
+        && $eight->batch()['collection_count'] === 8);
 
 $oldCard = paymentCollectionLockedAggregate([['old_card_entry', 8500]]);
 $validOrder = paymentCollectionSalesOrder(
@@ -210,11 +210,11 @@ paymentCollectionOk('legacy old-card entry is never a formal collection',
             'payment-collection-local-secret-32-bytes'
         );
     }) === 'old_card_entry_payment_collection_forbidden');
-$paperCash = paymentCollectionLockedAggregate([['cash', 8500]]);
-paymentCollectionOk('paper cash is not a supported bookkeeping method',
-    paymentCollectionReason(static function () use ($paperCash, $validOrder): void {
+$invalidMethod = paymentCollectionLockedAggregate([['cash_legacy', 8500]]);
+paymentCollectionOk('unknown cash-like method is not a supported bookkeeping method',
+    paymentCollectionReason(static function () use ($invalidMethod, $validOrder): void {
         CashierV3PaymentCollectionPlanV1::fromLockedCheckoutAggregate(
-            $paperCash,
+            $invalidMethod,
             $validOrder,
             paymentCollectionIdempotency('CHECKOUT', 99),
             1785283250,

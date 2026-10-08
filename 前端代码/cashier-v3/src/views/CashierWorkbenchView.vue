@@ -5035,8 +5035,10 @@ async function setLineQuantity(line, event) {
 }
 
 function localCheckoutPaymentMethods(lines = [], oldCardEnabled = false) {
+  // 本地预览按钮必须与服务端 canonical 收款方式一致；现金在这里是
+  // 记账收款代码，不代表绕过最终结账事务或事实校验。
   const methods = [
-    ['unionpay', '银联'], ['wechat', '微信'], ['alipay', '支付宝'],
+    ['cash', '现金'], ['unionpay', '银联'], ['wechat', '微信'], ['alipay', '支付宝'],
     ['dianping_voucher', '大众验券'], ['douyin_voucher', '抖音验券'],
     ['partner_collection', '合作方收款'], ['other_collection', '其他收款']
   ].map(([id, name]) => ({ id, name, canAdd: true }))

@@ -56,7 +56,7 @@ assert.match(accountingPage, /displayName: this\.form\.displayName/, '记账方�
 assert.match(accountingPage, /version: numberValue\(item\.version/, '记账方式读取必须保留服务端资源版本');
 assert.match(accountingPage, /expectedVersion: this\.form\.version/, '记账方式更新必须提交预期版本');
 assert.match(accountingPage, /ACCOUNTING-RESTORE/, '恢复默认名称必须提交独立幂等键');
-assert.match(accountingPage, /item\.code !== 'old_card_entry'/, '七种记账收款必须排除旧卡录入');
+assert.match(accountingPage, /item\.code !== 'old_card_entry'/, '八种记账收款必须排除旧卡录入');
 assert.match(accountingPage, /item\.code === 'old_card_entry'/, '旧卡录入必须在独立区域展示');
 assert.match(accountingPage, /现金业绩 0，不可组合收款/, '旧卡录入必须明确展示非收款业务边界');
 assert.match(accountingPage, /启用状态和排序保持不变/, '恢复默认名称不得重置状态或排序');

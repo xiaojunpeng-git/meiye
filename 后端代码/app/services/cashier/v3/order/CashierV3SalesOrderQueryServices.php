@@ -2800,6 +2800,7 @@ final class CashierV3SalesOrderQueryServices
             return $snapshot;
         }
         $labels = [
+            'cash' => '现金',
             'unionpay' => '银联',
             'wechat' => '微信',
             'alipay' => '支付宝',

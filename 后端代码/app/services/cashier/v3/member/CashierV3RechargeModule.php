@@ -31,8 +31,9 @@ use think\facade\Db;
 final class CashierV3RechargeModule
 {
     private const ACTION = 'submit-recharge';
+    // 充值本金使用这些记账收款方式时才形成 payment_collected 和现金业绩。
     private const PAYMENT_METHODS = [
-        'unionpay', 'wechat', 'alipay', 'dianping_voucher',
+        'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher',
         'douyin_voucher', 'partner_collection', 'other_collection',
     ];
 

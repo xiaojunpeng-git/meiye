@@ -29,7 +29,8 @@ use think\facade\Db;
 final class CashierV3RechargeDebtRepaymentServices
 {
     public const ACTION = 'submit-recharge-debt-repayment';
-    private const PAYMENT_METHODS = ['unionpay','wechat','alipay','dianping_voucher','douyin_voucher','partner_collection','other_collection'];
+    // 充值欠款补交复用记账收款白名单，避免补交路径与充值完成路径产生口径漂移。
+    private const PAYMENT_METHODS = ['cash','unionpay','wechat','alipay','dianping_voucher','douyin_voucher','partner_collection','other_collection'];
 
     public function submitInTx(array $scope): array
     {

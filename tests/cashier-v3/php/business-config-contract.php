@@ -26,7 +26,7 @@ $cashierRoutes = file_get_contents($cashierRoutePath);
 $migration = file_get_contents($migrationPath);
 
 $canonical = [
-    'unionpay', 'wechat', 'alipay', 'dianping_voucher',
+    'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher',
     'douyin_voucher', 'partner_collection', 'other_collection',
 ];
 foreach ($canonical as $code) {

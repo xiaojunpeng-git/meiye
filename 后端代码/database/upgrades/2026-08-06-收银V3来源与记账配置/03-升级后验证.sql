@@ -18,7 +18,7 @@ FROM eb_cashier_v3_payment_method_config ORDER BY sort,id;
 
 SELECT COUNT(*) AS canonical_method_count
 FROM eb_cashier_v3_payment_method_config
-WHERE code IN ('unionpay','wechat','alipay','dianping_voucher','douyin_voucher','partner_collection','other_collection');
+WHERE code IN ('cash','unionpay','wechat','alipay','dianping_voucher','douyin_voucher','partner_collection','other_collection');
 
 SELECT api_url,methods,unique_auth,is_del
 FROM eb_system_menus

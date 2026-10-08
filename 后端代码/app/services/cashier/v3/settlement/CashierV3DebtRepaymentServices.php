@@ -28,8 +28,9 @@ final class CashierV3DebtRepaymentServices
 {
     public const SUBMIT_CONTRACT_VERSION = 'cashier-v3-debt-repayment-submit-v1';
 
+    // 欠款补交的成功收款进入现金业绩；余额抵扣和旧卡录入不在此白名单内。
     private const PAYMENT_METHODS = [
-        'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
+        'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
         'partner_collection', 'other_collection',
     ];
 

@@ -348,7 +348,8 @@ function checkoutProjectionAggregate(array $result): array
 }
 
 $methods = CashierV3CheckoutSettlementKernel::paymentMethods();
-checkoutAssert('seven bookkeeping methods are exact', $methods === [
+checkoutAssert('eight bookkeeping methods are exact', $methods === [
+    'cash',
     'unionpay',
     'wechat',
     'alipay',
@@ -357,7 +358,6 @@ checkoutAssert('seven bookkeeping methods are exact', $methods === [
     'partner_collection',
     'other_collection',
 ]);
-checkoutAssert('paper cash is absent', !in_array('cash', $methods, true));
 checkoutAssert('old card is outside bookkeeping methods', !in_array('old_card_entry', $methods, true));
 $legacy = CashierV3CheckoutSettlementKernel::legacyEntryContract();
 checkoutAssert(
@@ -399,7 +399,7 @@ checkoutAssert('sales amount excludes entitlement actual amount',
     $draft['totals']['salesAmountCents'] === 9000
         && $draft['totals']['receivableAmountCents'] === 6000
         && $draft['totals']['entitlementActualAmountCents'] === 2000);
-checkoutAssert('seven-method sum is cash performance',
+checkoutAssert('bookkeeping-method sum is cash performance',
     $draft['totals']['selectedPaymentAmountCents'] === 4000
         && $draft['totals']['cashPerformanceAmountCents'] === 4000);
 checkoutAssert('balance and debt remain independent non-cash components',
@@ -542,9 +542,9 @@ checkoutAssert('checkout projection lines summary and composition use frozen req
         && $checkoutProjection['compositionCode'] === 'mixed'
         && $checkoutProjection['composition']['primaryAction'] === 'collect_and_complete'
         && $checkoutProjection['composition']['primaryActionLabel'] === '收款并完成服务');
-checkoutAssert('projection exposes seven cash methods without a permissionless old-card button',
+checkoutAssert('projection exposes eight cash methods without a permissionless old-card button',
     array_column($checkoutProjection['payment']['methods'], 'id') === [
-        'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
+        'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
         'partner_collection', 'other_collection',
     ]
         && $checkoutProjection['payment']['methods'][0]['canAdd'] === true);
@@ -920,14 +920,14 @@ checkoutAssert('old card entry rejects stored-balance combinations',
         );
     }) === 'old_card_entry_card_only_independent_required');
 
-$paperCash = $snapshot;
-$paperCash['paymentDetails'][0]['method'] = 'cash';
-checkoutResign($paperCash);
-checkoutAssert('paper cash method is rejected',
-    checkoutReason(static function () use ($paperCash, $secret): void {
+$unknownPaymentMethod = $snapshot;
+$unknownPaymentMethod['paymentDetails'][0]['method'] = 'cash_legacy';
+checkoutResign($unknownPaymentMethod);
+checkoutAssert('unknown cash-like payment method is rejected',
+    checkoutReason(static function () use ($unknownPaymentMethod, $secret): void {
         CashierV3CheckoutSettlementKernel::saveDraft(
             checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 10),
-            $paperCash,
+            $unknownPaymentMethod,
             null,
             $secret
         );
@@ -1202,10 +1202,10 @@ checkoutAssert('actual performance contract deducts only frozen external allocat
 $definitions = CashierV3CheckoutSettlementKernel::metricDefinitions();
 checkoutAssert('approved sales and cash performance wording is frozen verbatim',
     $definitions['销售额'] === '正式成交的商品、卡项、项目金额，包含现金业绩、余额扣款和欠款覆盖的部分。'
-        && $definitions['现金业绩'] === '银联、微信、支付宝、大众验券、抖音验券、合作方收款、其他收款。');
+        && $definitions['现金业绩'] === '现金、银联、微信、支付宝、大众验券、抖音验券、合作方收款、其他收款。');
 checkoutAssert('approved payment detail and debt wording is frozen verbatim',
     $definitions['收款明细'] === '每一种记账收款分别保存的金额、方式、业务时间、操作人和来源单据。'
-        && $definitions['欠款'] === '应收金额中本次未收、允许以后补交的金额；使用七种记账方式补交产生现金业绩。');
+        && $definitions['欠款'] === '应收金额中本次未收、允许以后补交的金额；使用八种记账方式补交产生现金业绩。');
 checkoutAssert('approved remaining business glossary is complete',
     array_keys($definitions) === [
         '销售额', '现金业绩', '收款明细', '欠款', '储值金额', '余额扣款',

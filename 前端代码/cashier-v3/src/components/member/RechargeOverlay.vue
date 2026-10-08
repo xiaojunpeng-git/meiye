@@ -54,8 +54,9 @@ const cashDueCents = computed(() => Math.max(0, moneyToCents(displayedPrincipal.
 const cashDue = computed(() => cashDueCents.value / 100)
 const paymentLineTotalCents = computed(() => paymentLines.value.reduce((total, item) => total + moneyToCents(item.amount), 0))
 const paymentLineTotal = computed(() => paymentLineTotalCents.value / 100)
+// 充值弹窗的可选方式与最终提交白名单保持一致，避免页面能选但服务端拒绝。
 const paymentMethods = [
-  ['unionpay', '银联'], ['wechat', '微信'], ['alipay', '支付宝'], ['dianping_voucher', '大众验券'],
+  ['cash', '现金'], ['unionpay', '银联'], ['wechat', '微信'], ['alipay', '支付宝'], ['dianping_voucher', '大众验券'],
   ['douyin_voucher', '抖音验券'], ['partner_collection', '合作方收款'], ['other_collection', '其他收款']
 ]
 

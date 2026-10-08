@@ -1030,6 +1030,7 @@ function createCheckoutSnapshot(state, name, options = {}) {
         description: '本次只检查页面入口，不做真实身份验证。'
       },
       methods: composition.hasSale ? [
+        { id: 'cash', name: '现金' },
         { id: 'unionpay', name: '银联' },
         { id: 'wechat', name: '微信' },
         { id: 'alipay', name: '支付宝' },

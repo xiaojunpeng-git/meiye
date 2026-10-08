@@ -703,6 +703,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
           validationMessage: '收款金额以结账前后端最终试算为准。'
         },
         methods: [
+          { id: 'cash', name: '现金' },
           { id: 'unionpay', name: '银联' },
           { id: 'wechat', name: '微信' },
           { id: 'alipay', name: '支付宝' },
@@ -1188,11 +1189,11 @@ const DEV_PREVIEW_BOOTSTRAP = {
     },
     cards: [
       { metricCode: 'salesperson_performance', name: '销售人业绩', value: 16800, unit: '元', description: '销售商品明细按最终分配规则归属给所选销售人的现金业绩。' },
-      { metricCode: 'cash_performance', name: '现金业绩', value: 22860, unit: '元', description: '银联、微信、支付宝、大众验券、抖音验券、合作方收款、其他收款。' },
+      { metricCode: 'cash_performance', name: '现金业绩', value: 22860, unit: '元', description: '现金、银联、微信、支付宝、大众验券、抖音验券、合作方收款、其他收款。' },
       { metricCode: 'actual_performance', name: '实际业绩', value: 18340, unit: '元', description: '现金业绩减去分配给“合作方”或“外包”销售人的业绩。销售人在员工管理中设置人员类型；普通内部员工分配的销售人业绩不扣。员工类型和分配结果按业务发生时保存，后来改人员类型不反改历史数据。' },
       { metricCode: 'consumption_performance', name: '消耗业绩', value: 9360, unit: '元', description: '项目真正完成服务并核销后才产生的项目消耗业绩。' },
       { metricCode: 'refund_amount', name: '退款金额', value: 300, unit: '元', description: '退款成功后形成的反向调整金额。' },
-      { metricCode: 'recharge_amount', name: '储值金额', value: 7600, unit: '元', description: '充值成功写入会员账户的本金，赠送金额单独记录；使用七种记账方式充值时产生现金业绩。' },
+      { metricCode: 'recharge_amount', name: '储值金额', value: 7600, unit: '元', description: '充值成功写入会员账户的本金，赠送金额单独记录；使用八种记账方式充值时产生现金业绩。' },
       { metricCode: 'balance_deduction', name: '余额扣款', value: 4200, unit: '元', description: '使用会员已有储值余额支付订单的金额，不属于现金业绩。' },
       { metricCode: 'casual_customer_count', name: '散客数量', value: 12, unit: '人', description: '未绑定会员的到店消费人数。' },
       { metricCode: 'new_customer_count', name: '新客数量', value: 9, unit: '人', description: '统计期内首次形成有效消费的会员人数。' },

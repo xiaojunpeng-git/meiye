@@ -1,0 +1,169 @@
+{
+  "baselineHead": "e705c70ecd0802d54d60f61ef7a2596f627270f2",
+  "createdAt": "2026-10-08T09:53:32.856Z",
+  "scope": "现金记账收款现有工作区固定版本；本轮仅执行本地现金配置迁移和页面实操验证",
+  "note": "文件指纹固定完整工作区文件；补丁可能含同文件其他任务的既有改动，不作为暂存或提交授权。未跟踪迁移与证据由逐文件 SHA-256 固定。",
+  "patchSha256": "d3a0bbda3e91902291f15e3d1c957816aef6f9eb3e57cc7fd431272623a453ec",
+  "groups": {
+    "frontend": [
+      {
+        "path": "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue",
+        "sha256": "0e91e2bb92899f4de4dc33b709faf5f4612406eb529c070ac4bbdf075cb3bf0a"
+      },
+      {
+        "path": "前端代码/cashier-v3/src/services/cashierV3Bridge.js",
+        "sha256": "918368ebe00b087435f741275e674e58f2da9affe693cc80393b9903e45ae34a"
+      },
+      {
+        "path": "前端代码/cashier-v3/src/composables/useRechargeCheckout.js",
+        "sha256": "a85e54f0995db6133f2947496859dbd01fef0b3c68ad55cd06c09989c1a2d9dc"
+      },
+      {
+        "path": "前端代码/cashier-v3/src/components/member/MemberDebtOverlay.vue",
+        "sha256": "661d753fa6a37870085873ff98858220084d3856dcd1c9953c690d1413c6da9f"
+      },
+      {
+        "path": "前端代码/cashier-v3/src/components/member/RechargeOverlay.vue",
+        "sha256": "2bf2c141913330e4940cb196ebcdbd1c2dedacc5f7e60dc64fc866c1ae2c3ef5"
+      },
+      {
+        "path": "前端代码/cashier-v3/src/dev/pdV3FixtureMain.js",
+        "sha256": "f9a73688be281e4f058674a082c49b56497e30917eecff9e4de9def0e1543634"
+      }
+    ],
+    "backend": [
+      {
+        "path": "后端代码/app/services/cashier/v3/config/CashierV3BusinessConfigServices.php",
+        "sha256": "ea3b2415d3f8d26be5d15e233527c60d0b25404debe70f685db2cdab7ef5be19"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutSettlementKernel.php",
+        "sha256": "7ce6efa6d3d2b2d194555551db4d0dac7e7ac817896575fe61b8590c84179e36"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/settlement/payment/CashierV3PaymentCollectionPlanV1.php",
+        "sha256": "0356bd6d3b00771f14c000d34c56b9830c7aa02cd642ed02697697a98c190f3c"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/fact/CashierV3CheckoutFactPlanV1.php",
+        "sha256": "0dae2d2f8b7fc3b268d2209a786e471d1d393ecd53b59f5a31cfb8ad1c7abf0a"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/member/CashierV3RechargeModule.php",
+        "sha256": "010f9251a50b62821d3ac5837df2e8887241c09578713ddfb08e2d9553eb3fb2"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/member/CashierV3RechargeCheckoutModule.php",
+        "sha256": "f337b06aaa7f094cd769c6d96b564ff048ec9a7d8ac32a0668fbb20365f4c76c"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/settlement/CashierV3DebtRepaymentServices.php",
+        "sha256": "033e48c699424b6505823591dacf0bfce3b56c55fd8de34e43c6ee9d74410b7f"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/settlement/CashierV3RechargeDebtRepaymentServices.php",
+        "sha256": "9078edc9ba32ebebe2b53d67ac2af7f6550740ad395b51ef9aedd1653e157780"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/order/settlement/CashierV3SalesOrderPlanV1.php",
+        "sha256": "a57dc88175aa3bfe8ed1e962cfd44f243722127c46e56901813759da2c3353e6"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutProjectionServices.php",
+        "sha256": "9f5ba4009739edca26450a469704ee8ee5fde3c9f8c8fe44c03207e74c95403e"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/order/CashierV3SalesOrderQueryServices.php",
+        "sha256": "eb5ac6e52428fbc6f9fbc6ade82d3e9ba4d2bfe814c7a57ba7bcd969c03caca9"
+      }
+    ],
+    "migrations": [
+      {
+        "path": "后端代码/database/upgrades/2026-08-06-收银V3来源与记账配置/00-升级清单.md",
+        "sha256": "3112f5cdfc354bc4864f2a35b870a00ecf08040186d0c5d568677b5e8d0def5f"
+      },
+      {
+        "path": "后端代码/database/upgrades/2026-08-06-收银V3来源与记账配置/01-升级前检查.sql",
+        "sha256": "c8d7be780c6a366da3b7fc0e8bfa21625f57d2abb6ce8bac7bb49c706f22dde3"
+      },
+      {
+        "path": "后端代码/database/upgrades/2026-08-06-收银V3来源与记账配置/02-正式升级.sql",
+        "sha256": "7b2b193fb2d379dcec55f9583d76ff6097e2049cb648762d6b5599664e552cd3"
+      },
+      {
+        "path": "后端代码/database/upgrades/2026-08-06-收银V3来源与记账配置/03-升级后验证.sql",
+        "sha256": "12b8c8c14fb5bbd9eadf20bc1f29413f8991dd0fbfed1394f199961151120fc9"
+      },
+      {
+        "path": "后端代码/database/upgrades/2026-08-06-收银V3来源与记账配置/04-回滚或应急说明.md",
+        "sha256": "307b133fc143a963d299fa430dd0417b73159de6a06ccae210b6b7d8d0f64503"
+      },
+      {
+        "path": "后端代码/database/upgrades/2026-10-08-收银V3现金记账收款方式/00-升级清单.md",
+        "sha256": "3db61e2c7b98c3ec75290846233e12ccd410d23ecd83de8e430e900b63914cd8"
+      },
+      {
+        "path": "后端代码/database/upgrades/2026-10-08-收银V3现金记账收款方式/01-升级前检查.sql",
+        "sha256": "e1e57d2965bc0a3a170310a7055848f724f79cfb6fe486c6c33bd286ca4929bc"
+      },
+      {
+        "path": "后端代码/database/upgrades/2026-10-08-收银V3现金记账收款方式/02-正式升级.sql",
+        "sha256": "3526d4db6a25f7a307a13e5e78f0c56e0d07a89668925f31f8f7ff8144607382"
+      },
+      {
+        "path": "后端代码/database/upgrades/2026-10-08-收银V3现金记账收款方式/03-升级后验证.sql",
+        "sha256": "0335031eb9b811d06ab78e34b86dc18a980ffd1916c6c0eeeca1eb4760291039"
+      }
+    ],
+    "tests": [
+      {
+        "path": "tests/cashier-v3/php/c2-checkout-settlement-contract.php",
+        "sha256": "c83d37560542e4daeab98a4c0c89386d7249843fc89ea59c20f55c65f5f3f81e"
+      },
+      {
+        "path": "tests/cashier-v3/php/business-config-contract.php",
+        "sha256": "4c50774fd30685f37a7f0aa1c1c37a44440c4cfbaff0f5ea4ff61ed8d78dcfcd"
+      },
+      {
+        "path": "tests/platform-business-config/js/frontend-contract.mjs",
+        "sha256": "262b6f5dbbc48872c2d8019aa82f62ee195c977606691169e962bcb39a1924db"
+      },
+      {
+        "path": "tests/cashier-v3-checkout-payment-ui-gateway/js/static-contract.mjs",
+        "sha256": "88efdb09063d429d5ce6b4b77483bfb454f4e705aefa3266b9e0ffcfcb6bd5fa"
+      },
+      {
+        "path": "tests/cashier-v3-payment-collection-authority/README.md",
+        "sha256": "a61009bf39af0ac6e9924e424543073d5bcbc42ff36b3083bbb089db80d95562"
+      },
+      {
+        "path": "tests/cashier-v3-payment-collection-authority/js/static-contract.mjs",
+        "sha256": "99e9f5294bdaff0b1ccaaf7743884804223cf89f1b746261f7baa7fcd9a710cf"
+      },
+      {
+        "path": "tests/cashier-v3-payment-collection-authority/php/contract.php",
+        "sha256": "0d50f4c532a35d5bc9a2658170a4b093b2438d85065ded1b53debbcd8d7e572c"
+      }
+    ],
+    "documents": [
+      {
+        "path": "../XJPMD/14-统一数据底层架构.md",
+        "sha256": "f53f050c4a671885a8b5624335b6fc9e74a05674f62cb03fb91bf6477a31194c"
+      }
+    ],
+    "evidence": [
+      {
+        "path": "tests/cashier-v3/evidence/cash-checkout-local-2026-10-08.md",
+        "sha256": "c1cce29cd323d3faace43c1e36f6c49d89209ee9a98b137fb0146381bbf3ba71"
+      },
+      {
+        "path": "tests/cashier-v3/evidence/R45-cash-checkout-success-2026-10-08.jpg",
+        "sha256": "09a7d92361c40f5a7a55cd95e56738fea346c75a67f310ae2648e5a008fd41e6"
+      },
+      {
+        "path": "tests/cashier-v3/evidence/cash-checkout-order-detail-2026-10-08.jpg",
+        "sha256": "0d42d6c61fa5d35fc6ede47f357201312165c55bc1d6ba64d33d7d6ba278dc92"
+      }
+    ]
+  }
+}
