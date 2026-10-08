@@ -789,7 +789,8 @@ final class StoreUnifiedReportPhaseSixServices
         }
         // 现金业绩与服务/手工事实分开记账：纯销售订单没有 labor 行，不能因此从薪资明细中消失。
         // 先按同一业务行、同一员工合并销售事实；若该员工同时参与服务，则与已有 labor 行合并，避免重复展示。
-        // Salary detail displays the sale's historical category path, never its numeric category ID.
+        // Sales classification requires the frozen category ID as well as its path: the ID selects
+        // the salary bucket; the path preserves historical display. Never infer an ID from a name.
         $salesQuery=Db::name('cashier_v3_performance_fact')->alias('pf')
             ->leftJoin('cashier_v3_sale_fact s','s.tenant_id=pf.tenant_id AND s.checkout_request_id=pf.checkout_request_id AND s.source_line_id=pf.source_line_id AND s.fact_direction=\'forward\' AND s.status=\'effective\'')
             ->leftJoin('cashier_v3_report_sale_dimension_fact d','d.tenant_id=pf.tenant_id AND d.sale_fact_id=s.fact_id')
@@ -797,7 +798,7 @@ final class StoreUnifiedReportPhaseSixServices
             ->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
             ->where('pf.performance_type','sales_performance_allocated')->where('pf.status','effective')
             ->where('pf.employee_id','>',0)
-            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,d.item_name_snapshot item_name,d.category_path_snapshot category_path')
+            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path')
             ->order('pf.id','asc');
         $normal = new StoreReportNormalDataScopeServices();
         $normal->excludeVoidedSalesOrderFacts($salesQuery, 'pf.tenant_id', 'pf.order_id');
