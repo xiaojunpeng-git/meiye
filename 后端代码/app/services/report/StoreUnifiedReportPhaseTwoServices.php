@@ -121,6 +121,19 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ];
             $this->projectOrganization($rows[$id], '', '', $range['end']);
         }
+        // 登记退款不是支付通道的反向流水；单独归入 K，且退款日即使没有
+        // 正向收款也必须保留门店行，否则退款单日会从汇总和导出中消失。
+        $refunds = $this->marketRefundAdjustmentFacts($stores, 'market_refund')
+            ->whereBetween('market_refund.business_date', [$range['start'], $range['end']])
+            ->fieldRaw('market_refund.store_id,MAX(market_refund.store_name_snapshot) store_name,SUM(market_refund.amount_cents) amount_cents')
+            ->group('market_refund.store_id')->select()->toArray();
+        foreach ($refunds as $refund) {
+            $storeId = (int)$refund['store_id'];
+            if (!isset($rows[$storeId])) {
+                $rows[$storeId] = ['store_id' => $storeId, 'division_name' => '', 'store_name' => (string)$refund['store_name']];
+                $this->projectOrganization($rows[$storeId], '', '', $range['end']);
+            }
+        }
         $cash = $this->cashFacts($stores, 'market_payment')
             ->whereBetween('market_payment.business_date', [$range['start'], $range['end']])->where('market_payment.status', 'effective')
             ->fieldRaw("market_payment.store_id,market_payment.business_source_primary_id,market_payment.fact_direction,market_payment.payment_method,CASE WHEN market_payment.fact_direction='reversal' AND EXISTS (SELECT 1 FROM eb_cashier_v3_order_lifecycle_operation refund_operation WHERE refund_operation.tenant_id=market_payment.tenant_id AND refund_operation.command_idempotency_key=market_payment.command_idempotency_key AND refund_operation.operation_type='refund' AND refund_operation.status='succeeded') THEN 1 ELSE 0 END is_refund_reversal,SUM(market_payment.amount_cents) amount_cents")
@@ -139,6 +152,16 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $method = (string)$fact['payment_method'];
             $rows[$storeId]['payment_' . $method . '_cents'] = (int)($rows[$storeId]['payment_' . $method . '_cents'] ?? 0) + (int)$fact['amount_cents'];
             $rows[$storeId]['total_performance_cents'] = (int)($rows[$storeId]['total_performance_cents'] ?? 0) + (int)$fact['amount_cents'];
+        }
+        foreach ($refunds as $refund) {
+            $storeId = (int)$refund['store_id'];
+            $amount = (int)$refund['amount_cents'];
+            if ($refundSourceId > 0) {
+                $key = 'channel_' . $refundSourceId . '_amount_cents';
+                $rows[$storeId][$key] = (int)($rows[$storeId][$key] ?? 0) + $amount;
+            }
+            // 退款业绩扣实际业绩，但没有外部支付通道，不归入任一收款方式。
+            $rows[$storeId]['total_performance_cents'] = (int)($rows[$storeId]['total_performance_cents'] ?? 0) + $amount;
         }
         $visits = [];
         $visitedSubjects = [];
@@ -302,20 +325,61 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
 
     private function marketDetail(array $stores, array $range, array $input): array
     {
+        $refundSourceId = 0;
+        $refundSourceName = '';
+        foreach ($this->primarySources() as $source) {
+            if ($this->sourcePrefix($source) !== 'K') continue;
+            $refundSourceId = (int)$source['id'];
+            $refundSourceName = (string)$source['name'];
+            break;
+        }
+        // 与市场汇总使用同一“成功退款反向流水”判定，作废仍留在原来源。
+        $refundReversal = "p.fact_direction='reversal' AND EXISTS (SELECT 1 FROM eb_cashier_v3_order_lifecycle_operation refund_operation WHERE refund_operation.tenant_id=p.tenant_id AND refund_operation.command_idempotency_key=p.command_idempotency_key AND refund_operation.operation_type='refund' AND refund_operation.status='succeeded')";
         $query = $this->cashFacts($stores, 'p')
             ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective');
         $dimension = trim((string)($input['dimension_code'] ?? ''));
         $metricCode = trim((string)($input['metric_code'] ?? ''));
-        if ($dimension !== '') $query->where('p.business_source_primary_id', (int)$dimension);
+        if ($dimension !== '') {
+            $sourceId = (int)$dimension;
+            if ($sourceId === $refundSourceId && $refundSourceId > 0) {
+                $query->whereRaw('(p.business_source_primary_id=' . $sourceId . ' OR (' . $refundReversal . '))');
+            } else {
+                $query->where('p.business_source_primary_id', $sourceId)->whereRaw('NOT (' . $refundReversal . ')');
+            }
+        }
         if (($method = trim((string)($input['payment_method_code'] ?? ''))) !== '') $query->where('p.payment_method', $method);
         $rows = $query->leftJoin('user market_detail_member', 'market_detail_member.uid = p.member_id')
-            ->fieldRaw('p.store_id,p.order_id,p.checkout_request_id,p.order_no_snapshot,p.store_name_snapshot,MAX(p.organization_id) organization_id,MAX(p.organization_path_snapshot) organization_path_snapshot,MAX(p.member_id) member_id,MAX(p.member_name_snapshot) member_name_snapshot,MAX(market_detail_member.phone) member_phone,p.business_source_primary_id,p.business_source_primary_name_snapshot,p.business_source_label_snapshot,p.business_date,MAX(p.operator_name_snapshot) creator_name,SUM(p.amount_cents) amount_cents,MAX(p.recorded_at) recorded_at')
-            ->group('p.store_id,p.order_id,p.business_source_primary_id,p.business_date')
+            ->fieldRaw('p.store_id,p.order_id,p.checkout_request_id,p.order_no_snapshot,p.store_name_snapshot,MAX(p.organization_id) organization_id,MAX(p.organization_path_snapshot) organization_path_snapshot,MAX(p.member_id) member_id,MAX(p.member_name_snapshot) member_name_snapshot,MAX(market_detail_member.phone) member_phone,p.business_source_primary_id,p.business_source_primary_name_snapshot,p.business_source_label_snapshot,p.business_date,CASE WHEN ' . $refundReversal . ' THEN 1 ELSE 0 END is_refund_reversal,MAX(p.operator_name_snapshot) creator_name,SUM(p.amount_cents) amount_cents,MAX(p.recorded_at) recorded_at')
+            ->group('p.store_id,p.order_id,p.business_source_primary_id,p.business_date,is_refund_reversal')
             // An order void writes a paired negative payment fact. Keep both
             // facts for audit and aggregates, but do not render a zero-net
             // document as an active market-detail row.
             ->having('SUM(p.amount_cents) <> 0')
             ->order('p.business_date','desc')->order('p.order_id','desc')->select()->toArray();
+        foreach ($rows as &$cashRow) {
+            if ((int)($cashRow['is_refund_reversal'] ?? 0) !== 1 || $refundSourceId <= 0) continue;
+            $cashRow['business_source_primary_id'] = $refundSourceId;
+            $cashRow['business_source_primary_name_snapshot'] = $refundSourceName;
+            $cashRow['business_source_label_snapshot'] = $refundSourceName;
+        }
+        unset($cashRow);
+        // 下钻与汇总读取同一批有效调整事实；退款操作单号是明细边界，
+        // 不按原销售单合并，以免多次部分退款被折成一笔。
+        if ($refundSourceId > 0 && $method === '' && ($dimension === '' || (int)$dimension === $refundSourceId)) {
+            $refundRows = $this->marketRefundAdjustmentFacts($stores, 'p')
+                ->whereBetween('p.business_date', [$range['start'], $range['end']])
+                ->leftJoin('user market_detail_member', 'market_detail_member.uid = p.member_id')
+                ->fieldRaw('p.store_id,p.order_id,p.checkout_request_id,p.order_no_snapshot,p.store_name_snapshot,MAX(p.organization_id) organization_id,MAX(p.organization_path_snapshot) organization_path_snapshot,MAX(p.member_id) member_id,MAX(p.member_name_snapshot) member_name_snapshot,MAX(market_detail_member.phone) member_phone,p.business_date,MAX(p.operator_name_snapshot) creator_name,SUM(p.amount_cents) amount_cents,MAX(p.recorded_at) recorded_at')
+                ->group('p.store_id,p.order_id,p.business_date')
+                ->order('p.business_date','desc')->order('p.order_id','desc')->select()->toArray();
+            foreach ($refundRows as &$refundRow) {
+                $refundRow['business_source_primary_id'] = $refundSourceId;
+                $refundRow['business_source_primary_name_snapshot'] = $refundSourceName;
+                $refundRow['business_source_label_snapshot'] = $refundSourceName;
+            }
+            unset($refundRow);
+            $rows = array_merge($rows, $refundRows);
+        }
         // The detail query already contains every matching payment record before
         // pagination, so derive effective members here instead of running another
         // aggregate query solely for the summary row or drilldown filter.
@@ -975,14 +1039,94 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
 
     private function storeRefundLedger(array $stores,array $range,array $input):array
     {
+        // 旧销售退款仍以成功的生命周期操作为准，且只读销售单现金退款。
+        // 卡项和明细的登记退款在下方单独读取，不能把转入余额叠加为退款。
         $rows=$this->participantOrder($this->scope(Db::name('cashier_v3_order_lifecycle_operation')->alias('r'),$stores,'r'),'r.source_order_id')
             ->join('cashier_v3_sales_order o','o.order_id=r.source_order_id AND o.tenant_id=r.tenant_id')
             ->whereBetween('r.business_date',[$range['start'],$range['end']])
             ->where('r.source_type','sales')->where('r.operation_type','refund')->where('r.status','succeeded')
-            ->field('r.operation_id,r.store_id,r.business_date,r.business_date refund_date,r.source_order_id order_id,r.reason_snapshot refund_reason,r.request_json,r.cash_refund_cents refund_amount_cents,r.restored_principal_cents,r.restored_bonus_cents,o.organization_id,o.organization_path_snapshot,o.organization_name_snapshot market,o.store_name_snapshot store_name,o.member_id,o.member_name_snapshot customer,o.business_date original_sale_date,o.order_note original_remark')
+            ->field('r.id refund_sequence,r.settled_at refund_settled_at,r.operation_id,r.store_id,r.business_date,r.business_date refund_date,r.source_order_id order_id,r.reason_snapshot refund_reason,r.request_json,r.cash_refund_cents refund_amount_cents,r.restored_principal_cents,r.restored_bonus_cents,o.organization_id,o.organization_path_snapshot,o.organization_name_snapshot market,o.store_name_snapshot store_name,o.member_id,o.member_name_snapshot customer,o.business_date original_sale_date,o.order_note original_remark')
             ->order('r.business_date','desc')->order('r.id','desc')->select()->toArray();
         foreach($rows as &$row){$request=json_decode((string)$row['request_json'],true);$names=[];foreach((array)($request['refundLines']??[])as$line){$name=trim((string)($line['itemName']??''));if($name!=='')$names[]=$name;}$row['refund_items']=implode('、',array_values(array_unique($names)));$row['refund_amount']=$this->money((int)$row['refund_amount_cents']);$row['refund_remark']=trim((string)$row['refund_reason'])?:trim((string)$row['original_remark']);}unset($row);
-        return $this->result('院店退款台账',$this->columns(['market'=>'市场','store_name'=>'院店','customer'=>'顾客姓名','refund_date'=>'退款申请时间','refund_items'=>'退款项目','original_sale_date'=>'原销售日期','refund_amount'=>'退款金额','refund_remark'=>'退款原因']),$rows,$input,[],['refund_amount_cents'=>$this->sumField($rows,'refund_amount_cents')]);
+        // 退款调整事实提供组织/会员历史快照并执行与市场 K 相同的权限过滤；
+        // 生命周期成功操作决定台账资格、业务日和实际登记退款金额。
+        $adjustments=$this->marketRefundAdjustmentFacts($stores,'ledger_refund')
+            ->join('cashier_v3_order_lifecycle_operation refund_operation',
+                "refund_operation.tenant_id=ledger_refund.tenant_id AND refund_operation.operation_id=ledger_refund.order_id AND refund_operation.operation_type='refund' AND refund_operation.status='succeeded'")
+            ->leftJoin('cashier_v3_refund_adjustment adjustment',
+                "adjustment.tenant_id=refund_operation.tenant_id AND adjustment.operation_id=refund_operation.operation_id AND adjustment.status='effective'")
+            ->leftJoin('cashier_v3_sales_order document_sale',
+                "refund_operation.source_type='document' AND document_sale.tenant_id=refund_operation.tenant_id AND document_sale.order_id=refund_operation.source_order_id")
+            ->leftJoin('cashier_v3_card_purchase_receipt card_receipt',
+                "refund_operation.source_type='card' AND card_receipt.tenant_id=refund_operation.tenant_id AND card_receipt.card_holder_id=adjustment.card_holder_id AND card_receipt.legacy_order_id=refund_operation.source_order_id AND card_receipt.status='completed'")
+            ->leftJoin('cashier_v3_sales_order card_sale',
+                'card_sale.tenant_id=card_receipt.tenant_id AND card_sale.order_id=card_receipt.sales_order_id')
+            ->leftJoin('store_order legacy_card_sale',
+                "refund_operation.source_type='card' AND legacy_card_sale.id=refund_operation.source_order_id AND legacy_card_sale.uid=refund_operation.member_id")
+            ->whereBetween('ledger_refund.business_date',[$range['start'],$range['end']])
+            ->whereIn('refund_operation.source_type',['card','document','imported_card'])
+            ->field('refund_operation.id refund_sequence,refund_operation.settled_at refund_settled_at,refund_operation.operation_id,refund_operation.source_type,refund_operation.request_json,refund_operation.reason_snapshot refund_reason,refund_operation.cash_refund_cents refund_amount_cents,refund_operation.business_date,refund_operation.business_date refund_date,refund_operation.source_order_id order_id,ledger_refund.store_id,ledger_refund.organization_id,ledger_refund.organization_path_snapshot,ledger_refund.organization_name_snapshot refund_market,ledger_refund.store_name_snapshot refund_store_name,ledger_refund.member_id,ledger_refund.member_name_snapshot refund_customer,adjustment.target_name_snapshot,document_sale.organization_name_snapshot document_market,document_sale.store_name_snapshot document_store_name,document_sale.member_name_snapshot document_customer,document_sale.business_date document_sale_date,card_sale.organization_name_snapshot card_market,card_sale.store_name_snapshot card_store_name,card_sale.member_name_snapshot card_customer,card_sale.business_date card_sale_date,legacy_card_sale.pay_time legacy_pay_time,legacy_card_sale.add_time legacy_add_time')
+            ->order('refund_operation.business_date','desc')->order('refund_operation.id','desc')->select()->toArray();
+        // 导入旧卡使用成功操作保存的原订单 ID，不回读会员当前持卡关系。
+        $importedOrderIds=[];
+        foreach($adjustments as $adjustment){
+            if((string)$adjustment['source_type']!=='imported_card')continue;
+            $request=json_decode((string)$adjustment['request_json'],true);
+            $orderId=(int)($request['originOrderId']??0);
+            if($orderId>0)$importedOrderIds[$orderId]=$orderId;
+        }
+        $importedSales=[];
+        if($importedOrderIds){
+            foreach(Db::name('store_order')->whereIn('id',array_values($importedOrderIds))
+                ->field('id,uid,pay_time,add_time')->select()->toArray() as $sale){
+                $importedSales[(int)$sale['id']]=$sale;
+            }
+        }
+        foreach($adjustments as $adjustment){
+            $isCard=(string)$adjustment['source_type']==='card';
+            $request=json_decode((string)$adjustment['request_json'],true);
+            $importedSale=$importedSales[(int)($request['originOrderId']??0)]??[];
+            if((int)($importedSale['uid']??0)!==(int)$adjustment['member_id'])$importedSale=[];
+            $legacyTime=(int)($isCard?$adjustment['legacy_pay_time']:($importedSale['pay_time']??0));
+            if($legacyTime<=0)$legacyTime=(int)($isCard?$adjustment['legacy_add_time']:($importedSale['add_time']??0));
+            $adjustment['original_sale_date']=(string)($isCard?$adjustment['card_sale_date']:$adjustment['document_sale_date']);
+            if($adjustment['original_sale_date']===''&&$legacyTime>0)$adjustment['original_sale_date']=$this->dateTime($legacyTime);
+            $adjustment['original_sale_date']=substr($adjustment['original_sale_date'],0,10);
+            $adjustment['market']=(string)(($isCard?$adjustment['card_market']:$adjustment['document_market'])?:$adjustment['refund_market']);
+            $adjustment['store_name']=(string)(($isCard?$adjustment['card_store_name']:$adjustment['document_store_name'])?:$adjustment['refund_store_name']);
+            $adjustment['customer']=(string)(($isCard?$adjustment['card_customer']:$adjustment['document_customer'])?:$adjustment['refund_customer']);
+            $adjustment['refund_items']=trim((string)($adjustment['target_name_snapshot']??''))?:trim((string)($request['cardName']??''));
+            $adjustment['refund_amount']=$this->money((int)$adjustment['refund_amount_cents']);
+            $adjustment['refund_remark']=(string)$adjustment['refund_reason'];
+            $rows[]=$adjustment;
+        }
+        usort($rows,static function(array $left,array $right):int{
+            return strcmp((string)$right['business_date'],(string)$left['business_date'])
+                ?: ((int)$right['refund_settled_at']<=>(int)$left['refund_settled_at'])
+                ?: ((int)$right['refund_sequence']<=>(int)$left['refund_sequence']);
+        });
+        // 退款事实只保存会员身份，没有历史手机快照。权限过滤完成后批量读取
+        // 当前会员手机号；号码变更会反映在台账中，不伪装为退款时的历史号码。
+        $memberIds=array_values(array_unique(array_filter(array_map('intval',array_column($rows,'member_id')))));
+        $phones=$memberIds?Db::name('user')->whereIn('uid',$memberIds)->column('phone','uid'):[];
+        foreach($rows as &$row){
+            $row['phone']=(string)($phones[(int)($row['member_id']??0)]??'');
+            unset($row['refund_sequence'],$row['refund_settled_at']);
+        }unset($row);
+        // 市场归属仍供客户退款分析使用，本台账只移除其展示及导出列。
+        $columns=$this->columns(['store_name'=>'门店','customer'=>'会员','phone'=>'手机','refund_date'=>'退款申请时间','refund_items'=>'退款项目','original_sale_date'=>'原销售日期','refund_amount'=>'退款金额','refund_remark'=>'退款原因']);
+        $explanations=[
+            'store_name'=>'优先显示原销售单保存的门店；旧卡没有原销售快照时显示办理退款的门店。',
+            'customer'=>'优先显示原销售单保存的会员姓名；旧卡没有原销售快照时显示退款记录保存的姓名。',
+            'phone'=>'显示会员当前登记的手机号；退款时没有保存历史号码，会员改号后此列会更新。',
+            'refund_date'=>'成功办理退款的业务日期，不按原销售日期回填。',
+            'refund_items'=>'显示本次成功退款时保存的项目或卡项名称。',
+            'original_sale_date'=>'显示原销售单的业务日期；旧卡按原订单支付时间、无支付时间时按创建时间显示。',
+            'refund_amount'=>'统计成功退款时登记的金额；转入余额独立记账，不重复计入，也不表示已通过支付渠道退钱。',
+            'refund_remark'=>'显示退款时填写的原因；旧销售退款未填原因时显示原销售备注。',
+        ];
+        foreach($columns as &$column)$column['source_explanation']=$explanations[$column['key']];unset($column);
+        return $this->result('院店退款台账',$columns,$rows,$input,[],['refund_amount_cents'=>$this->sumField($rows,'refund_amount_cents')]);
     }
 
     private function primarySources():array{return Db::name('cashier_v3_business_source')->where('parent_id',0)->where('status',1)->order('sort','asc')->order('id','asc')->field('id,name,sort')->select()->toArray();}
@@ -1358,6 +1502,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         // 市场两表与导出共用“只排除体验”的门店人次口径，不再宣称采用人员客数开关版本。
         $isMarketReport = in_array($title, ['市场业绩表', '市场明细表'], true);
         if ($isMarketReport) $metricVersion = 'market-visits-experience-only-v3';
+        // 台账 v3 纳入登记退款，并明确会员手机读取当前档案而非历史快照。
+        if ($title === '院店退款台账') $metricVersion = 'store-refund-ledger-v3';
         // 护理槽位与首次到店日期原先误用了人员标记；相关报表单独升级口径，其他报表不变。
         if (in_array($title, ['地推拓客明细表', '地推拓客汇总表', '异业收客明细表', '异业收客汇总表'], true)) {
             $metricVersion = 'store-customer-service-events-v2';
@@ -1407,17 +1553,17 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                     'walk_in'=>'汇总有权限人员在市场明细表保存的进店数：会员按“门店＋业务日期＋会员＋来源”汇总，游客按原始订单独立记录；新行尚未保存时读取原单据已保存值，新旧值不会重复相加。仅 B 来源显示该列。',
                     'visits'=>'统计所选日期内归属“'.$source.'”、已完成且未作废的非体验服务人次。打了“体验”标签的服务不计门店人次；“不算人数人次”只影响人员统计，不影响本列。同一门店、同一天、同一来源还有其他符合条件的服务时，会员仍记 1 人次。游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。体验标签只排除门店人次，不排除金额和按收款门槛计算的有效人员，也不表示整行明细隐藏。',
                     'effective'=>'统计所选日期内归属“'.$source.'”且净记账收款达到标准的会员人数：A 来源每位会员至少 1,000 元，其他来源至少 500 元；按门店、来源和会员去重，游客不计。退款会抵减，已作废销售不计。“体验”和“不算人数人次”不影响本列，达到收款门槛仍计入。',
-                    'amount'=>'合计所选日期内归属“'.$source.'”的有效记账收款净额。现金退款在退款发生日计入 K退款顾客并冲减金额；作废销售冲减原来源；余额支付和旧卡录入不计。“体验”和“不算人数人次”不排除已经产生的有效记账收款。',
+                    'amount'=>'合计所选日期内归属“'.$source.'”的有效记账收款净额。成功现金退款及登记退款在退款发生日计入 K退款顾客并冲减金额；作废销售冲减原来源；余额支付和旧卡录入不计。“体验”和“不算人数人次”不排除已经产生的有效记账收款。',
                 ];
                 $column['source_explanation']=$descriptions[$parts[1]];
                 continue;
             }
             if(strpos($key,'payment_')===0){
-                $column['source_explanation']='合计所选日期内使用“'.$label.'”完成的有效记账收款净额；退款和作废产生的反向收款按实际发生日冲减，余额支付和旧卡录入不计。';
+                $column['source_explanation']='合计所选日期内使用“'.$label.'”完成的有效记账收款净额；该通道发生的退款和作废反向收款按实际发生日冲减。登记退款没有支付通道，不计入本列。';
                 continue;
             }
             if($key==='total_performance'){
-                $column['source_explanation']='合计所选日期内全部有效记账收款方式的净额；退款和作废按实际发生日冲减，余额支付、赠金和旧卡录入不计。该值等于本表各系统收款方式金额之和。';
+                $column['source_explanation']='合计所选日期内全部有效记账收款方式的净额，再扣除已登记的退款业绩；作废按实际发生日冲减，退款转入余额、余额支付和旧卡录入不计。登记退款没有支付通道，因此本列可能小于各收款方式金额之和。';
             }
         }
         unset($column);
@@ -1506,7 +1652,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             '新客明细表'=>['division_name'=>120,'store_name_snapshot'=>120,'business_date'=>106,'customer'=>90,'guide'=>110,'salesperson'=>110,'sales_manager'=>110,'phone'=>116],
             '新客汇总表'=>['system_name'=>90,'division_name'=>120,'store_name'=>120,'member'=>90,'guide'=>110,'salesperson'=>110,'sales_manager'=>110,'source'=>110],
             '销售人生美大单统计表'=>['division_name'=>120,'store_name'=>120,'business_date'=>106,'salesperson'=>110],
-            '院店退款台账'=>['market'=>120,'store_name'=>120,'customer'=>90,'refund_date'=>130],
+            '院店退款台账'=>['store_name'=>120,'customer'=>90,'refund_date'=>130],
         ];
         foreach($columns as &$column){$key=(string)($column['key']??'');if(isset($maps[$title][$key])&&empty($column['fixed'])){$column['fixed']='left';$column['fixed_width']=$maps[$title][$key];}}unset($column);
         return$columns;
@@ -1762,6 +1908,35 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $this->normalDataScope()->excludeVoidedRechargeOrderFacts($query, $column . 'tenant_id', $column . 'order_id');
         $this->normalDataScope()->excludeVoidedSupplementPaymentFacts($query, $column . 'tenant_id', $column . 'store_id', $column . 'order_id');
         return $this->participantOrder($query,$column.'order_id');
+    }
+    /**
+     * 市场报表只补入已生效的登记退款事实，不读取独立的赠金入账事实。
+     * 个人视图须经退款调整单反查原单参与关系；旧卡没有可验证的 V3
+     * 参与关系时保持不可见，不用退款操作员身份扩大个人数据权限。
+     */
+    private function marketRefundAdjustmentFacts(array $stores, string $alias)
+    {
+        $query = Db::name('cashier_v3_payment_fact')->alias($alias);
+        $this->scope($query, $stores, $alias);
+        $this->applyOrganizationFilters($query, $alias, $this->activeInput, $this->activeRange);
+        $query->where($alias . '.status', 'effective')
+            ->where($alias . '.amount_cents', '<', 0)
+            ->where(function ($kind) use ($alias): void {
+                $kind->where(function ($manual) use ($alias): void {
+                    $manual->where($alias . '.fact_type', 'manual_refund_adjustment')
+                        ->where($alias . '.source_document_type', 'manual_refund');
+                })->whereOr(function ($oldCard) use ($alias): void {
+                    $oldCard->where($alias . '.fact_type', 'payment_refunded')
+                        ->where($alias . '.source_document_type', 'imported_card_refund');
+                });
+            });
+        if ($this->participantEmployeeId > 0) {
+            $query->join('cashier_v3_refund_adjustment market_refund_subject',
+                'market_refund_subject.tenant_id=' . $alias . '.tenant_id AND market_refund_subject.operation_id=' . $alias . '.order_id')
+                ->where('market_refund_subject.status', 'effective');
+            $this->participantOrder($query, 'market_refund_subject.source_order_id');
+        }
+        return $query;
     }
     private function guideFilterOptions(array $stores,array $range):array
     {
