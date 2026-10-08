@@ -1153,6 +1153,13 @@ final class RegisteredMetricReadServices
         return $this->categoryRowsWithParticipant($metricCode, $tenantId, $stores, $range, $categoryIds, $filters, 0);
     }
 
+    /** 只接受认证报表范围注入的参与员工；逐行下钻与汇总使用相同事实权限，不能由客户端放宽。 */
+    public function categoryRowsForParticipant(string $metricCode, string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId): array
+    {
+        if ($participantEmployeeId <= 0) $this->fail('METRIC_SOURCE_SCOPE_INVALID');
+        return $this->categoryRowsWithParticipant($metricCode, $tenantId, $stores, $range, $categoryIds, $filters, $participantEmployeeId);
+    }
+
     /** @return array<int,array<string,mixed>> */
     private function categoryRowsWithParticipant(string $metricCode, string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId): array
     {
@@ -1592,7 +1599,8 @@ final class RegisteredMetricReadServices
         $this->applySaleRelationFilters($direct, $filters, 'd');
         if ($categoryIds !== []) $direct->whereIn('d.category_id_snapshot', $categoryIds);
         $amount = $mode === 'refund' ? '-p.amount_cents' : 'p.amount_cents';
-        $rows = $direct->fieldRaw("p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,d.item_id,d.item_name_snapshot item_name,d.product_type_snapshot,d.category_id_snapshot category_id,d.category_path_snapshot category_path")
+        // 原销售事实与合作方快照只用于明细定位；金额和统计日期仍属于本笔收款分摊。
+        $rows = $direct->fieldRaw("p.id,s.fact_id sale_fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,d.item_id,d.item_name_snapshot item_name,d.product_type_snapshot,d.category_id_snapshot category_id,d.category_path_snapshot category_path,d.partner_name_snapshot")
             ->select()->toArray();
 
         $cardBase = (clone $base)->where('s.source_type', 'card');
@@ -1670,6 +1678,8 @@ final class RegisteredMetricReadServices
                     'amount_cents' => $allocation['amount_cents'], 'item_id' => (string)$item['component_product_id'],
                     'item_name' => (string)$item['category_name_snapshot'], 'product_type_snapshot' => 'card_component',
                     'category_id' => $categoryId, 'category_path' => (string)$item['category_path_snapshot'],
+                    // 合作方归属跟随成交时组件快照，不能借用卡项当前分类。
+                    'partner_name_snapshot' => (string)$item['partner_name_snapshot'],
                 ]);
             }
         }

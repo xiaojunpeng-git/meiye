@@ -253,9 +253,14 @@ $partnerEnd = strpos($store, 'private function memberConsumptionDetail');
 $partnerSlice = $partnerStart === false || $partnerEnd === false ? '' : substr($store, $partnerStart, $partnerEnd - $partnerStart);
 metricRegistryCheck($partnerSlice !== '' && strpos($partnerSlice, "performance_type='consumption_performance_recorded'") === false
     && strpos($partnerSlice, "metricSourceLineCategoryTotals('consume_amount'") !== false
-    && strpos($partnerSlice, "metricSourceLineCategoryTotals('sales_amount'") !== false
+    // 合作方金额已改为统一收款口径；汇总和明细必须共用行集，不能回退为含欠款的成交额。
+    && strpos($partnerSlice, "->categoryRows('cash_performance'") !== false
+    && strpos($partnerSlice, "->categoryRowsForParticipant('cash_performance'") !== false
+    && substr_count($partnerSlice, '$this->partnerItemFacts($storeId, $range, $input)') === 2
+    && strpos($partnerSlice, "metricSourceLineCategoryTotals('sales_amount'") === false
+    && strpos($partnerSlice, "Db::name('cashier_v3_payment_sale_allocation_fact')") === false
     && strpos($partnerSlice, 'SUM(COALESCE(c.sale_amount_cents,s.sale_amount_cents))') === false,
-    'partner reports cannot own a second consumption or sales amount sum');
+    'partner reports reuse registered consumption and cash rows without a second amount formula');
 $itemStart = strpos($store, 'private function itemAnalysisMetricRows');
 $itemEnd = strpos($store, 'private function itemAnalysisStore');
 $itemSlice = $itemStart === false || $itemEnd === false ? '' : substr($store, $itemStart, $itemEnd - $itemStart);

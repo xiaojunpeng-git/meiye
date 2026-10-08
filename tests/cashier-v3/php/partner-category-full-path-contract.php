@@ -45,14 +45,16 @@ namespace {
         === $groupKey->invoke($service, '2026-09', $sameVisibleGroup, '六维 / 自营 / 自营ks')) {
         throw new RuntimeException('identical full categories did not merge, or different paths were mixed');
     }
-    $sum = $reflection->getMethod('selectedCategoryMetricTotal');
-    $amounts = ['sale-1|11' => 150000, 'sale-1|12' => 50000];
-    $firstCategory = [['source_line_id' => 'sale-1', 'category_id_snapshot' => 11]];
-    $secondCategory = [['source_line_id' => 'sale-1', 'category_id_snapshot' => 12]];
-    if ($sum->invoke($service, $firstCategory, $amounts) !== 150000
-        || $sum->invoke($service, $secondCategory, $amounts) !== 50000
-        || $sum->invoke($service, array_merge($firstCategory, $firstCategory, $secondCategory), $amounts) !== 200000) {
-        throw new RuntimeException('detail total leaked a sibling card category or counted one twice');
+    // 合作方现金行现由稳定行键合并，驱动返回的字符串 ID 不能拆成重复行。
+    $keyMethod = $reflection->getMethod('partnerItemFactKey');
+    $first = ['store_id'=>7,'business_date'=>'2026-10-08','source_line_id'=>'sale-1','category_id_snapshot'=>'11','category_path_snapshot'=>'六维 / 自营'];
+    $integerId = array_merge($first, ['category_id_snapshot'=>11]);
+    $sibling = array_merge($first, ['category_id_snapshot'=>12,'category_path_snapshot'=>'六维 / 自营 / 自营ks']);
+    $later = array_merge($first, ['business_date'=>'2026-10-09']);
+    if ($keyMethod->invoke($service, $first) !== $keyMethod->invoke($service, $integerId)
+        || $keyMethod->invoke($service, $first) === $keyMethod->invoke($service, $sibling)
+        || $keyMethod->invoke($service, $first) === $keyMethod->invoke($service, $later)) {
+        throw new RuntimeException('cash detail split an identical category or mixed another category/day');
     }
 
     echo "partner category full path and drilldown contract: PASS\n";

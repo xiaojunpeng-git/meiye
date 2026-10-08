@@ -246,16 +246,9 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function partnerItemSummary($storeId, array $range, array $input): array
     {
-        $query = $this->operationSaleQuery($storeId, $range, $input)->whereRaw("COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)<>''");
-        $facts = $query->fieldRaw("s.business_date,s.organization_id,s.organization_path_snapshot,s.store_id,s.store_name_snapshot AS store_name,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.partner_name_snapshot,d.partner_name_snapshot) AS partner_name_snapshot,0 AS sale_amount_cents,COALESCE(d.is_experience,0) AS is_experience,s.member_id,s.quantity,s.source_line_id,(SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents")
-            ->order('s.business_date', 'desc')->order('s.id', 'desc')->select()->toArray();
-        $saleByLine = $this->metricSourceLineCategoryTotals('sales_amount', $storeId, $range, $input, array_column($facts, 'source_line_id'));
-        $consumeByLine = $this->metricSourceLineCategoryTotals('consume_amount', $storeId, $range, $input, array_column($facts, 'source_line_id'));
+        $facts = $this->partnerItemFacts($storeId, $range, $input);
         $grouped = [];
         foreach ($facts as $fact) {
-            $consumeKey = (string)($fact['source_line_id'] ?? '') . '|' . (int)($fact['category_id_snapshot'] ?? 0);
-            $fact['sale_amount_cents'] = (int)($saleByLine[$consumeKey] ?? 0);
-            $fact['consumption_amount_cents'] = (int)($consumeByLine[$consumeKey] ?? 0);
             $this->applyOrganizationDimensions($fact);
             $month = substr((string)$fact['business_date'], 0, 7);
             $categoryPath = (string)$fact['category_path_snapshot'];
@@ -285,7 +278,8 @@ class StoreUnifiedReportServices extends BaseServices
             $row['quantity'] += (int)$fact['quantity'];
             $row['consumption_amount_cents'] += (int)$fact['consumption_amount_cents'];
             $row['labor_amount_cents'] += (int)$fact['labor_amount_cents'];
-            if ((int)$fact['member_id'] > 0) $row['_member_ids'][(string)$fact['member_id']] = true;
+            // 补交只增加收款金额，不再制造一笔原销售的成交人头或项目数量。
+            if (!empty($fact['_sale_activity']) && (int)$fact['member_id'] > 0) $row['_member_ids'][(string)$fact['member_id']] = true;
             unset($row);
         }
         $rows = array_values($grouped);
@@ -305,9 +299,22 @@ class StoreUnifiedReportServices extends BaseServices
         $columns = $this->fixedColumns(array_merge([
             ['key'=>'month','label'=>'月份'],
         ], $this->organizationDimensionColumns(), [
-            ['key'=>'store_summary','label'=>'门店汇总'],['key'=>'performance_type','label'=>'分类','source_explanation'=>'显示成交时卡内项目或商品的完整分类路径；同一完整路径的成交额合并，不同路径分别列示。'],['key'=>'experience_count','label'=>'体验人次'],['key'=>'member_count','label'=>'成交人头'],['key'=>'consumption_amount','label'=>'消耗业绩'],['key'=>'labor_amount','label'=>'手工汇总'],['key'=>'sale_amount','label'=>'成交业绩'],
+            ['key'=>'store_summary','label'=>'门店汇总'],['key'=>'performance_type','label'=>'分类'],['key'=>'experience_count','label'=>'体验人次'],['key'=>'member_count','label'=>'成交人头'],['key'=>'consumption_amount','label'=>'消耗业绩'],['key'=>'labor_amount','label'=>'手工汇总'],['key'=>'sale_amount','label'=>'成交业绩'],
         ]), ['month'=>88, 'division_name'=>130, 'city_manager'=>130, 'store_summary'=>132, 'performance_type'=>220]);
+        // 汇总逐列解释实际分组和计数边界，不能把体验数量说成去重人数；只更新说明，不改变指标。
+        $explanations = [
+            'month'=>'销售记录按销售业务日期归入月份；跨日补交欠款按补交收款业务日期归入月份。只统计所选日期范围内的记录。',
+            'division_name'=>'这家门店当前所属的分公司；没有配置时显示“未配置分公司”。',
+            'store_summary'=>'本行汇总的门店名称，使用业务发生时记录的名称。不同门店分别列示。',
+            'performance_type'=>'销售时商品所属的分类，例如“花园 / 花园产品”。销售卡项时，按卡内项目的分类显示；同一门店、同一月份、同一完整分类汇总为一行。',
+            'experience_count'=>'查询日期内销售时记为体验的明细，按购买数量累计。例如一条体验明细购买2份，记2；不是按会员去重的人数。补交欠款不增加体验人次。',
+            'member_count'=>'查询日期内本门店、本月份、本分类成交过的会员人数；同一会员重复成交只算1人，未关联会员的销售不计入。补交欠款不增加人数。一个会员可能出现在多行，因此合计栏显示“-”，不直接相加。',
+            'consumption_amount'=>'查询日期内销售明细对应的已完成服务，按本分类累计消耗业绩金额；只购买、未完成服务不产生消耗。补交欠款不增加消耗业绩。',
+            'labor_amount'=>'查询日期内销售明细对应的有效手艺人分配记录，累计其中的手工费金额；不是劳动业绩金额。补交欠款不增加手工费。',
+            'sale_amount'=>'查询日期内已记账并分配到本分类的现金业绩合计，不含未收欠款、余额支付和旧卡录入。例：成交2086元、已收106元、欠1980元，只计106元；以后补交1980元，计入补交日期。',
+        ];
         foreach ($columns as &$column) {
+            $column['source_explanation'] = $explanations[$column['key']];
             if (!in_array((string)$column['key'], ['experience_count','member_count','consumption_amount','labor_amount','sale_amount'], true)) continue;
             $column['drilldown'] = ['report'=>'partner_item_detail', 'param_map'=>[
                 'store_ids'=>'store_id', 'category_path_exact'=>'category_path_snapshot',
@@ -316,7 +323,7 @@ class StoreUnifiedReportServices extends BaseServices
         }
         unset($column);
         return [
-            'title'=>'合作方品项汇总','columns'=>$columns, 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows),
+            'title'=>'合作方品项汇总','metric_version'=>'partner-item-cash-v2','columns'=>$columns, 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true],
             'summary_row'=>$this->summaryRow($columns, [
@@ -326,6 +333,80 @@ class StoreUnifiedReportServices extends BaseServices
                 'sale_amount'=>$this->money(array_sum(array_column($rows, 'sale_amount_cents'))),
             ]),
         ];
+    }
+
+    /**
+     * 合作方汇总、明细及导出共用的只读行集。原销售活动保留数量、消耗和手工费，
+     * 金额仅来自统一现金指标；跨日补交追加到收款日，不能被原销售日期筛掉。
+     * 同一销售行/日期/完整分类合并多笔收款，不重复统计原成交活动。
+     */
+    private function partnerItemFacts($storeId, array $range, array $input): array
+    {
+        $stores = $this->organizationDimensions()->narrowStoreIds(is_array($storeId) ? $storeId : [(int)$storeId], $input);
+        if ($stores === []) return [];
+        $sales = $this->operationSaleQuery($stores, $range, $input)
+            // 原销售活动也要固定租户，不能只给现金行做隔离而让其他实例活动污染数量。
+            ->where('s.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->whereRaw("COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)<>''")
+            ->leftJoin('user u', 'u.uid=s.member_id')
+            ->fieldRaw("s.fact_id,s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.store_name_snapshot AS store_name,s.order_id,s.order_no_snapshot,s.member_id,s.member_name_snapshot,u.phone AS member_phone,s.item_name_snapshot,s.source_type,s.quantity,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.product_type_snapshot,d.product_type_snapshot) AS product_type_snapshot,COALESCE(c.partner_name_snapshot,d.partner_name_snapshot) AS partner_name_snapshot,COALESCE(d.is_experience,0) AS is_experience,s.source_line_id,(SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents")
+            ->select()->toArray();
+        $consume = $this->metricSourceLineCategoryTotals('consume_amount', $stores, $range, $input, array_column($sales, 'source_line_id'));
+        $rows = [];
+        foreach ($sales as $sale) {
+            $key = $this->partnerItemFactKey($sale);
+            if (isset($rows[$key])) continue;
+            $consumeKey = (string)$sale['source_line_id'] . '|' . (int)$sale['category_id_snapshot'];
+            $rows[$key] = $sale + ['_sale_activity'=>true, 'sale_amount_cents'=>0, 'consumption_amount_cents'=>(int)($consume[$consumeKey] ?? 0)];
+        }
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $categories = (int)($input['category_id'] ?? 0) > 0 ? [(int)$input['category_id']] : [];
+        $filters = $this->itemAnalysisMetricFilters($input);
+        $cash = $this->participantEmployeeId > 0
+            ? $reader->categoryRowsForParticipant('cash_performance', CashierV3ScopeResolver::TENANT_SCOPE_ID, $stores, $range, $categories, $filters, $this->participantEmployeeId)
+            : $reader->categoryRows('cash_performance', CashierV3ScopeResolver::TENANT_SCOPE_ID, $stores, $range, $categories, $filters);
+        $exact = trim((string)($input['category_path_exact'] ?? ''));
+        // 不给充值或未关联原销售分类的历史补交臆造合作方；精确下钻在后端再收窄。
+        $cash = array_values(array_filter($cash, static function (array $row) use ($exact): bool {
+            return (string)($row['partner_name_snapshot'] ?? '') !== ''
+                && ($exact === '' || (string)($row['category_path'] ?? '') === $exact);
+        }));
+        $saleIds = array_values(array_unique(array_column($cash, 'sale_fact_id')));
+        $metadata = [];
+        if ($saleIds !== []) {
+            // 此查询只补原订单识别信息，不读取销售金额；收款行已由 Reader 做租户、门店、参与人及作废过滤。
+            $sourceRows = Db::name('cashier_v3_sale_fact')->alias('s')->leftJoin('user u', 'u.uid=s.member_id')
+                ->where('s.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('s.store_id', $stores)->whereIn('s.fact_id', $saleIds)
+                ->field('s.fact_id,s.order_id,s.order_no_snapshot,s.member_name_snapshot,s.item_name_snapshot,s.source_type,u.phone AS member_phone')->select()->toArray();
+            foreach ($sourceRows as $source) $metadata[(string)$source['fact_id']] = $source;
+        }
+        foreach ($cash as $payment) {
+            $source = $metadata[(string)($payment['sale_fact_id'] ?? '')] ?? null;
+            if ($source === null) throw new \RuntimeException('合作方收款缺少原销售明细，请联系管理员核对。');
+            $entry = array_merge($payment, $source, [
+                'store_name_snapshot'=>(string)$payment['store_name'],
+                'category_id_snapshot'=>(int)$payment['category_id'], 'category_path_snapshot'=>(string)$payment['category_path'],
+            ]);
+            $key = $this->partnerItemFactKey($entry);
+            if (!isset($rows[$key])) {
+                $rows[$key] = $entry + ['_sale_activity'=>false, 'quantity'=>0, 'is_experience'=>0, 'labor_amount_cents'=>0, 'consumption_amount_cents'=>0, 'sale_amount_cents'=>0];
+            }
+            $rows[$key]['sale_amount_cents'] += (int)$payment['amount_cents'];
+        }
+        $rows = array_values($rows);
+        usort($rows, static function (array $left, array $right): int {
+            return strcmp((string)$right['business_date'], (string)$left['business_date'])
+                ?: strcmp((string)$right['order_no_snapshot'], (string)$left['order_no_snapshot'])
+                ?: strcmp((string)$left['category_path_snapshot'], (string)$right['category_path_snapshot']);
+        });
+        return $rows;
+    }
+
+    /** 收款按稳定的原销售行、业务日、门店和完整分类合并，不能靠显示名称定位单据。 */
+    private function partnerItemFactKey(array $row): string
+    {
+        // SQL 驱动会把分类 ID 返回为字符串，Reader 返回整数；归一化后才能合并同一活动。
+        return (string)json_encode([(int)$row['store_id'], (string)$row['business_date'], (string)$row['source_line_id'], (int)$row['category_id_snapshot'], (string)$row['category_path_snapshot']], JSON_UNESCAPED_UNICODE);
     }
 
     /**
@@ -346,43 +427,56 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function partnerItemDetail($storeId, array $range, array $input): array
     {
-        $query = $this->operationSaleQuery($storeId, $range, $input)->whereRaw("COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)<>''");
-        $total = (int)(clone $query)->count('s.id');
-        $summary = (clone $query)->fieldRaw("COUNT(DISTINCT NULLIF(s.member_id,0)) AS member_count,SUM(s.quantity) AS quantity,SUM((SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective')) AS labor_amount_cents")->find() ?: [];
-        $selectedCategories = (clone $query)->fieldRaw('s.source_line_id,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot')->select()->toArray();
-        $summarySales = $this->metricSourceLineCategoryTotals(
-            'sales_amount', $storeId, $range, $input, array_column($selectedCategories, 'source_line_id')
-        );
-        $summary['sale_amount_cents'] = $this->selectedCategoryMetricTotal($selectedCategories, $summarySales);
-        $summaryConsume = $this->metricSourceLineCategoryTotals(
-            'consume_amount', $storeId, $range, $input, array_column($selectedCategories, 'source_line_id')
-        );
-        $summary['consumption_amount_cents'] = $this->selectedCategoryMetricTotal($selectedCategories, $summaryConsume);
-        $rows = (clone $query)->leftJoin('user u', 'u.uid = s.member_id')
-            ->fieldRaw("s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.member_id,s.member_name_snapshot,u.phone AS member_phone,s.item_name_snapshot,s.source_type,s.quantity,0 AS sale_amount_cents,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.product_type_snapshot,d.product_type_snapshot) AS product_type_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.partner_name_snapshot,d.partner_name_snapshot) AS partner_name_snapshot,d.is_experience,s.source_line_id,s.fact_id,(SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents")
-            ->order('s.business_date','desc')->order('s.id','desc')->page($this->page($input),$this->limit($input))->select()->toArray();
-        $pageSales = $this->metricSourceLineCategoryTotals('sales_amount', $storeId, $range, $input, array_column($rows, 'source_line_id'));
-        $pageConsume = $this->metricSourceLineCategoryTotals('consume_amount', $storeId, $range, $input, array_column($rows, 'source_line_id'));
-        foreach ($rows as &$row) {
-            $consumeKey = (string)($row['source_line_id'] ?? '') . '|' . (int)($row['category_id_snapshot'] ?? 0);
-            $row['sale_amount_cents'] = (int)($pageSales[$consumeKey] ?? 0);
-            $row['consumption_amount_cents'] = (int)($pageConsume[$consumeKey] ?? 0);
-        }
-        unset($row);
+        // 合计先覆盖完整权限行集，分页仅影响展示；导出不得沿用页面的前 100 行。
+        $all = $this->partnerItemFacts($storeId, $range, $input);
+        $total = count($all);
+        // 明细不再展示成交人头；会员去重统计仍由汇总报表负责，不在这里重复计算。
+        $summary = [];
+        foreach (['quantity','labor_amount_cents','sale_amount_cents','consumption_amount_cents'] as $field) $summary[$field] = array_sum(array_column($all, $field));
+        $rows = !empty($input['_internal_all']) ? $all : array_slice($all, ($this->page($input)-1)*$this->limit($input), $this->limit($input));
         $rows = $this->attachAnnotations($rows, 'partner_item_detail', $storeId);
         foreach ($rows as &$row) { $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']); $row['consumption_amount'] = $this->money((int)$row['consumption_amount_cents']); $row['labor_amount'] = $this->money((int)$row['labor_amount_cents']); $row['experience'] = (int)$row['is_experience'] === 1 ? '是' : '否'; }
         unset($row);
-        foreach ($rows as &$row) { $this->applyOrganizationDimensions($row); $row['member_phone'] = (string)($row['member_phone'] ?? ''); $row['performance_type'] = (string)$row['category_path_snapshot']; $row['experience_project'] = $row['experience']; $row['deal_headcount'] = (int)($row['member_id'] ?? 0) > 0 ? 1 : 0; $row['deal_project'] = $row['item_name_snapshot']; $row['consumption'] = $row['consumption_amount'] ?? '0'; $row['consumption_amount'] = $row['consumption_amount'] ?? '0'; $row['labor_fee'] = $row['labor_amount'] ?? '0'; $row['deal_amount'] = $row['sale_amount']; $row['partner_label'] = $row['partner_name_snapshot']; }
+        foreach ($rows as &$row) { $this->applyOrganizationDimensions($row); $row['member_phone'] = (string)($row['member_phone'] ?? ''); $row['performance_type'] = (string)$row['category_path_snapshot']; $row['experience_project'] = $row['experience']; $row['deal_project'] = $row['item_name_snapshot']; $row['consumption'] = $row['consumption_amount'] ?? '0'; $row['consumption_amount'] = $row['consumption_amount'] ?? '0'; $row['labor_fee'] = $row['labor_amount'] ?? '0'; $row['deal_amount'] = $row['sale_amount']; $row['partner_label'] = $row['partner_name_snapshot']; }
         unset($row);
+        // 销售单号沿用原销售发生时的快照；补交行不改成补交单号，页面和导出共用列定义。
         $columns = $this->fixedColumns(array_merge($this->organizationDimensionColumns(), [
-            ['key'=>'store_name_snapshot','label'=>'门店'],['key'=>'member_name_snapshot','label'=>'会员'],['key'=>'member_phone','label'=>'手机'],['key'=>'performance_type','label'=>'业绩类型','source_explanation'=>'显示成交时商品或卡内项目的完整分类路径，与合作方品项汇总的分类一致。'],['key'=>'business_date','label'=>'日期'],['key'=>'experience_project','label'=>'体验项目'],['key'=>'medical_elevation','label'=>'复诊'],['key'=>'medical_followup','label'=>'类型'],['key'=>'deal_headcount','label'=>'成交人头'],['key'=>'deal_project','label'=>'成交项目'],['key'=>'consumption','label'=>'消耗'],['key'=>'consumption_amount','label'=>'消耗金额'],['key'=>'labor_fee','label'=>'手工费'],['key'=>'quantity','label'=>'数量'],['key'=>'deal_amount','label'=>'成交金额'],['key'=>'expert_name','label'=>'专家姓名'],['key'=>'partner_label','label'=>'合作方'],['key'=>'remark','label'=>'备注'],
-        ]), ['division_name'=>130, 'city_manager'=>130, 'store_name_snapshot'=>126, 'member_name_snapshot'=>88, 'member_phone'=>116, 'performance_type'=>220, 'business_date'=>104]);
+            ['key'=>'store_name_snapshot','label'=>'门店'],['key'=>'member_name_snapshot','label'=>'会员'],['key'=>'member_phone','label'=>'手机'],
+            ['key'=>'order_no_snapshot','label'=>'销售单号','source_explanation'=>'显示原销售单据生成时保存的单号；欠款补交仍显示对应的原销售单号，不显示补交单号。'],
+            ['key'=>'performance_type','label'=>'业绩类型','source_explanation'=>'显示成交时商品或卡内项目的完整分类路径，与合作方品项汇总的分类一致。'],['key'=>'business_date','label'=>'日期'],['key'=>'experience_project','label'=>'体验项目'],['key'=>'medical_elevation','label'=>'复诊'],['key'=>'medical_followup','label'=>'类型'],['key'=>'deal_project','label'=>'成交项目'],['key'=>'consumption','label'=>'消耗'],['key'=>'consumption_amount','label'=>'消耗金额'],['key'=>'labor_fee','label'=>'手工费'],['key'=>'quantity','label'=>'数量'],['key'=>'deal_amount','label'=>'成交金额'],['key'=>'expert_name','label'=>'专家姓名'],['key'=>'partner_label','label'=>'合作方'],['key'=>'remark','label'=>'备注'],
+        ]), ['division_name'=>130, 'city_manager'=>130, 'store_name_snapshot'=>126, 'member_name_snapshot'=>88, 'member_phone'=>116, 'order_no_snapshot'=>165, 'performance_type'=>220, 'business_date'=>104]);
+        // 本表逐列解释实际取值，不能用通用套话代替业务口径；这里只改说明，不改统计或人工字段规则。
+        $explanations = [
+            'division_name'=>'这家门店当前所属的分公司；没有配置时显示“未配置分公司”。',
+            'store_name_snapshot'=>'办理原销售单据的门店名称，使用销售时记录的名称。',
+            'member_name_snapshot'=>'原销售单据上的会员姓名，使用销售时记录的姓名。',
+            'member_phone'=>'会员档案中当前保存的手机号；没有手机号时显示“-”。',
+            'order_no_snapshot'=>'这笔交易的原销售单号。补交欠款时仍显示原销售单号，不换成补交单号。',
+            'performance_type'=>'销售时商品所属的分类，例如“花园 / 花园产品”。销售卡项时，按卡内项目的分类显示。',
+            'business_date'=>'销售记录显示销售业务日期；跨日补交欠款的记录显示补交收款业务日期。',
+            'experience_project'=>'销售时记为体验的明细显示“是”，其余显示“否”；单独补交欠款的记录不重复计为体验。',
+            'medical_elevation'=>'人工填写的复诊信息，系统不自动判断；未填写时显示“-”。',
+            'medical_followup'=>'人工填写的业务类型，系统不自动分类；未填写时显示“-”。',
+            'deal_project'=>'原销售单据中的商品、项目或卡项名称，使用销售时记录的名称。',
+            'consumption'=>'这里显示消耗金额，不是次数，与“消耗金额”列相同；单独补交欠款不重复计入消耗。',
+            'consumption_amount'=>'本条销售明细在查询日期内完成服务后，按本分类计算的消耗金额；只购买、未完成服务不产生消耗，单独补交欠款也不增加消耗。',
+            'labor_fee'=>'本条销售明细对应的有效手艺人手工费合计；单独补交欠款不增加手工费。',
+            'quantity'=>'原销售明细的购买数量；单独补交欠款显示0，避免重复计算购买数量。',
+            'deal_amount'=>'本行在查询日期内已记账的现金业绩，不含未收欠款、余额支付和旧卡录入。例：成交2086元、已收106元、欠1980元，这里显示106元；以后补交的款计入补交日期。',
+            'expert_name'=>'人工填写的专家姓名；未填写时显示“-”，不会自动取销售人或手艺人的姓名。',
+            'partner_label'=>'销售时商品或卡内项目分类对应的合作方名称；之后修改分类或合作方配置，不改变这里的历史名称。',
+            'remark'=>'人工填写的本条明细备注；未填写时显示“-”，备注不改变金额和统计结果。',
+        ];
+        foreach ($columns as &$column) {
+            $column['source_explanation'] = $explanations[$column['key']];
+        }
+        unset($column);
         return [
-            'title'=>'合作方品项明细','columns'=>$columns, 'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input),
+            'title'=>'合作方品项明细','metric_version'=>'partner-item-cash-v2','columns'=>$columns, 'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true],
             'summary_row'=>$this->summaryRow($columns, [
-                'store_name_snapshot'=>'合计', 'deal_headcount'=>(int)($summary['member_count'] ?? 0),
+                'store_name_snapshot'=>'合计',
                 'consumption'=>$this->money((int)($summary['consumption_amount_cents'] ?? 0)),
                 'consumption_amount'=>$this->money((int)($summary['consumption_amount_cents'] ?? 0)),
                 'labor_fee'=>$this->money((int)($summary['labor_amount_cents'] ?? 0)),
@@ -734,24 +828,6 @@ class StoreUnifiedReportServices extends BaseServices
             $metricCode, CashierV3ScopeResolver::TENANT_SCOPE_ID, $stores, $range, $lineIds,
             $this->itemAnalysisMetricFilters($input)
         );
-    }
-
-    /**
-     * A line can contain several card categories. Its detail total must only
-     * include the category pairs left by the report's exact path filter, while
-     * the amount for each pair still comes from the registered metric reader.
-     */
-    private function selectedCategoryMetricTotal(array $selectedCategories, array $amountsByLineCategory): int
-    {
-        $total = 0;
-        $seen = [];
-        foreach ($selectedCategories as $row) {
-            $key = (string)($row['source_line_id'] ?? '') . '|' . (int)($row['category_id_snapshot'] ?? 0);
-            if (isset($seen[$key])) continue;
-            $seen[$key] = true;
-            $total += (int)($amountsByLineCategory[$key] ?? 0);
-        }
-        return $total;
     }
 
     /**

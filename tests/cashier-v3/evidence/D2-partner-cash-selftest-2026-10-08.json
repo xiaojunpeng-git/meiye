@@ -1,0 +1,65 @@
+{
+  "task": "D2 partner item summary and detail cash performance",
+  "generated_at": "2026-10-08T15:08:43.255Z",
+  "baseline_head": "c606860b4bad45b66f58761198eeb0e10c7eb94a",
+  "owned_patch_sha256": "ac93566d98f8a781516c63807118bebe62398481a7e258859c890f732676a2dc",
+  "files": [
+    {
+      "path": "后端代码/app/services/report/StoreUnifiedReportServices.php",
+      "sha256": "d541905d4057fe7899ac0bc4a4e7d84455153f47a27993632ee3096eb4bf189c",
+      "owned_diff_sha256": "988104c2ead2966786c2e89a40887c59472f31f1d16e0421836e0233942f8ec1",
+      "ownership": "whole D2 change"
+    },
+    {
+      "path": "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+      "sha256": "10705675484be0e6956e17c2067ac3b9047b9fd7b0ed78a070ce617739d249f1",
+      "owned_diff_sha256": "61564fcdf24724d47f7860b80fa943d3343f6690ecf4514ab21ad9598bd539cb",
+      "ownership": "three D2 hunks only; pre-existing manual refund hunks excluded"
+    },
+    {
+      "path": "tests/cashier-v3/php/partner-category-full-path-contract.php",
+      "sha256": "548d7ba9753d6f64653175de6ccab6ecdedd1803658a1b0c1b43d5d13ffac1bc",
+      "owned_diff_sha256": "c5d9e6a6f6bf7d4d67db9acb1c042a39f900e4fe52b31073934fdea2bb13e432",
+      "ownership": "whole D2 change"
+    },
+    {
+      "path": "tests/mohe-ai/metric-registry-contract.php",
+      "sha256": "3d1143fcc1e7c750d932bd8a21d4980aa002e5c281f790a1eab7e50836b289f3",
+      "owned_diff_sha256": "7fab4a2a2ecc34eeb5a82129fafa01ba6468b5d5031d448844e15ca7cce5c98a",
+      "ownership": "whole D2 change"
+    },
+    {
+      "path": "tests/cashier-v3/php/partner-cash-report-mysql-integration.php",
+      "sha256": "14045e762ca64ab502b578f5bbd4f33efcbc569ce65c324931d6de8ee5d86cbd",
+      "owned_diff_sha256": "4c6ec237150a4ed3deaba8b48d93a1328a54932bc14f85ee20926282e1312773",
+      "ownership": "whole D2 change"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue",
+      "ownership": "removed unused detail headcount explanation only",
+      "sha256": "028dc1b65d7bfaf747f6a7233f41f6ec2e8536959a1a1db6c8247fd14dc97164",
+      "owned_diff_sha256": "d86a490d462fa71abf2d3113ba1bb0099a888acddfe457335c794fa21fab185c"
+    }
+  ],
+  "backend_integration_checks_passed": 38,
+  "metric_architecture_checks_passed": 98,
+  "frontend_contract_checks_passed": 44,
+  "page_verification": "19 business detail columns; no headcount header or explanation; summary headcount retained (garden 2 members); original sale numbers and cash amounts retained; summary dialog all 9 plain business explanations verified; cash debt example and quantity/member distinction verified",
+  "product_manager_acceptance": "accepted revision 5; user tested without issues and authorized commit RH deployment and push on 2026-10-08",
+  "commit": false,
+  "deployment": false,
+  "push": false,
+  "database_migrations": [],
+  "remote_operations": [],
+  "previous_owned_patch_sha256": "ef6ae035485661123b3394e97123f79f6e20442a4962311b9b73f5384d79fbd6",
+  "revision": 5,
+  "browser_download_file_verification": "download event timed out; service export column order and values passed",
+  "screenshot": "tests/cashier-v3/evidence/D2-partner-sale-number-2026-10-08.png",
+  "screenshot_sha256": "5c39251b500a5579ccd624e8515029cb0898f872fde7dad4e69d46ee96f38ce6",
+  "explanation_screenshot": "tests/cashier-v3/evidence/D2-partner-column-explanations-2026-10-08.png",
+  "explanation_screenshot_sha256": "eceaa5d8caaa14d73eb6b2f67d407d9ff3ade92531944e969cc547ba30fbe232",
+  "latest_screenshot": "tests/cashier-v3/evidence/D2-partner-detail-no-headcount-2026-10-08.png",
+  "latest_screenshot_sha256": "842ba4772af0e61d32dfe58161375399f80f5387dc85d788eb0f6ca03da9ea41",
+  "summary_explanation_screenshot": "tests/cashier-v3/evidence/D2-partner-summary-explanations-2026-10-08.png",
+  "summary_explanation_screenshot_sha256": "f2a4e400b5402dc153c8626b926f0ad27fd1965be194168f9de7b6b9a58aa015"
+}

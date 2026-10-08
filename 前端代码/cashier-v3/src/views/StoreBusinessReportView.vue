@@ -167,7 +167,6 @@ const FIELD_LOGIC = Object.freeze({
   experience_project: '该成交项目是否被标记为体验项目。',
   medical_elevation: '由运营人员手动填写并保存的复诊信息。',
   medical_followup: '由运营人员手动填写并保存的类型。',
-  deal_headcount: '当前成交明细是否关联会员：关联会员记为 1，未关联会员记为 0。',
   deal_project: '本条成交明细的项目或商品名称。',
   consumption: '本条成交明细完成服务后形成的消耗业绩；与“消耗金额”显示同一金额。',
   labor_fee: '本条服务分配给手艺人的手工费；与劳动业绩分别保存，金额可以不同。',
