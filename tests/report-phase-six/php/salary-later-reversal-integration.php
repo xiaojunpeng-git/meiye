@@ -74,7 +74,8 @@ foreach ($groups as $group) {
     }
     $detailExplanations = implode("\n", array_column((array)$detail['columns'], 'source_explanation'));
     $summaryExplanations = implode("\n", array_column((array)$summary['columns'], 'source_explanation'));
-    if (!str_contains($detailExplanations, '后来已作废的记录不再统计')
+    // Both accepted business phrasings mean later voids are excluded; do not pin an incidental extra word.
+    if (preg_match('/后来(?:已)?作废的记录不再统计/u',$detailExplanations)!==1
         || !str_contains($summaryExplanations, '页面可输入姓名中的任意文字进行筛选')) {
         throw new RuntimeException('salary column source description misses the current business rules');
     }

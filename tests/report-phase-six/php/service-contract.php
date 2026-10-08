@@ -142,9 +142,10 @@ assertPhaseSix(
     'salary summary and detail expose the same partial employee-name text filter without a repeated visible title'
 );
 assertPhaseSix(
-    str_contains($service, '后来已作废的记录不再统计')
+    preg_match('/后来(?:已)?作废的记录不再统计/u',$service)===1
     && str_contains($service, '页面可输入姓名中的任意文字进行筛选')
-    && str_contains($service, '卡项金额按卡内项目的分类和金额比例拆分')
+    && str_contains($service, '卡项按卡内项目当前分类和原有金额比例拆分')
+    && str_contains($service, '统一读取关联商品的当前分类，历史记录也随商品分类调整')
     && !str_contains($service, "'business_date','日期','事实业务日期。'")
     && !str_contains($service, "'cash_amount','现金业绩','销售明细现金业绩分摊事实。'"),
     'salary column-source descriptions use business language and explain filtering, voiding and card allocation'
@@ -176,10 +177,11 @@ $categoryLabels = array_column($categoryProjection['columns'], 'label');
 assertPhaseSix(in_array('生美/卡项', $categoryLabels, true)
     && in_array('生美/项目', $categoryLabels, true)
     && in_array('花园', $categoryLabels, true)
-    && in_array('历史/旧分类', $categoryLabels, true)
+    && in_array('未分类', $categoryLabels, true)
+    && !in_array('历史/旧分类', $categoryLabels, true)
     && !in_array('生美', $categoryLabels, true)
     && !in_array('生美/项目/三级', $categoryLabels, true),
-    'salary category columns use current two-level config and retain zero-sale and historical categories');
+    'salary categories use current two-level config, retain zero-sale columns and never resurrect old categories');
 assertPhaseSix(($categoryProjection['targets'][4] ?? null) === 'salary_category_cash_3',
     'third-level sale fact rolls into its visible second-level category');
 $projectCategoryMoney = new ReflectionMethod($phaseSix, 'salaryCategoryAmountsByColumn');
@@ -208,10 +210,11 @@ assertPhaseSix(
     && str_contains($cashier, "['salary_employee_id', 0]"),
     'salary employee columns and exact category drilldown are declared for all three endpoints');
 $allocateCategories = new ReflectionMethod($phaseSix, 'salarySaleCategoryAmounts');
+// Card weights remain immutable, while input categories now come from the shared current-product reader.
 $cardParts = $allocateCategories->invoke($phaseSix,
     ['source_type' => 'card', 'amount_cents' => 100], [
-        ['category_id_snapshot' => 2, 'category_path_snapshot' => '生美 / 卡项', 'cash_performance_amount_cents' => 2],
-        ['category_id_snapshot' => 3, 'category_path_snapshot' => '生美 / 项目', 'cash_performance_amount_cents' => 1],
+        ['category_id' => 2, 'category_path' => '生美 / 卡项', 'cash_performance_amount_cents' => 2],
+        ['category_id' => 3, 'category_path' => '生美 / 项目', 'cash_performance_amount_cents' => 1],
     ]);
 assertPhaseSix(($cardParts[2]['cents'] ?? null) === 66 && ($cardParts[3]['cents'] ?? null) === 34,
     'card employee performance is allocated in cents with stable final-category remainder');

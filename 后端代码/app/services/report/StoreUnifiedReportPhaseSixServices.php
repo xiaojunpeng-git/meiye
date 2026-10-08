@@ -305,7 +305,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('document_no','单据号','显示订单中心对应的订单编号；点击可查看该订单详情。没有对应订单时显示“-”。',false,false,180,[
                 'report'=>'order_center_order_detail','param_map'=>['order_id'=>'document_order_id','order_no'=>'document_no'],
             ]),
-            $this->column('performance_category','商品分类','普通明细显示该笔业务记录的商品或项目分类；点击汇总表分类金额进入时，显示所点分类，卡项金额可按卡内项目分类拆分。'),
+            $this->column('performance_category','商品分类','统一读取关联商品的当前分类，历史记录也随商品分类调整；没有有效分类时留空。卡项按卡内项目当前分类拆分，分类下钻只显示所点分类，金额和次数不变。'),
             $this->column('detail','明细','显示该笔业务记录的服务项目、卡项或产品名称。'),
             $this->column('project_count','项目数','该员工分得的服务项目数；多人服务按实际分配份额计算，后续人工调整按调整后的有效结果显示。',true),
         ];
@@ -529,6 +529,8 @@ final class StoreUnifiedReportPhaseSixServices
             'key'=>'document_no','label'=>'单据号','show_label'=>false,'aria_label'=>'单据号',
             'type'=>'text','placeholder'=>'输入单据号',
         ];
+        // 产品于 2026-10-09 确认薪资分类改为现行商品维度；历史金额事实及其他报表版本不变。
+        $result['metric_version']=self::METRIC_VERSION.':salary-current-product-category-v1';
         $result['filters']['employee_name']=$employeeName;
         if($documentFilter)$result['filters']['document_no']=$documentNo;
         return $result;
@@ -592,25 +594,29 @@ final class StoreUnifiedReportPhaseSixServices
     }
 
     /**
-     * Read the immutable component-category facts only for card sale lines in
-     * the already permission-scoped salary facts. The card's outer category is
-     * never a substitute for its contained-project allocation.
+     * Retain immutable card-component monetary weights, but resolve every component's
+     * category through its actual product ID. The card's outer category never replaces projects.
      */
     private function salaryCardCategoryAllocations(array $salesRows): array
     {
-        $saleFactIds=[];
+        $saleFactIds=[];$stores=[];
         foreach($salesRows as $sale){
             if((string)($sale['source_type']??'')==='card' && trim((string)($sale['sale_fact_id']??''))!=='')
-                $saleFactIds[(string)$sale['sale_fact_id']]=true;
+                {$saleFactIds[(string)$sale['sale_fact_id']]=true;$stores[(int)$sale['store_id']]=true;}
         }
         if($saleFactIds===[])return [];
         $facts=Db::name('cashier_v3_card_sale_category_allocation_fact')
             ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->whereIn('sale_fact_id',array_keys($saleFactIds))->where('status','effective')
-            ->field('sale_fact_id,category_id_snapshot,category_path_snapshot,cash_performance_amount_cents,sale_amount_cents,configured_amount_cents')
+            ->whereIn('sale_fact_id',array_keys($saleFactIds))->whereIn('store_id',array_keys($stores))->where('status','effective')
+            ->field('sale_fact_id,store_id,component_product_id product_id,cash_performance_amount_cents,sale_amount_cents,configured_amount_cents')
             ->select()->toArray();
+        $categories=$this->salaryCurrentProductCategories($facts);
         $bySale=[];
-        foreach($facts as $fact)$bySale[(string)$fact['sale_fact_id']][]=$fact;
+        foreach($facts as $index=>$fact){
+            $category=$categories[$index]??[];
+            $fact['category_id']=(int)($category['id']??0);$fact['category_path']=(string)($category['path']??'');
+            $bySale[(string)$fact['sale_fact_id']][]=$fact;
+        }
         return $bySale;
     }
 
@@ -631,9 +637,9 @@ final class StoreUnifiedReportPhaseSixServices
         foreach(['cash_performance_amount_cents','sale_amount_cents','configured_amount_cents'] as $weightField){
             $weights=[];
             foreach($cardFacts as $fact){
-                $id=(int)($fact['category_id_snapshot']??0);
+                $id=(int)($fact['category_id']??0);
                 $weights[$id]=($weights[$id]??0)+abs((int)($fact[$weightField]??0));
-                $paths[$id]=(string)($fact['category_path_snapshot']??'');
+                $paths[$id]=(string)($fact['category_path']??'');
             }
             if(array_sum($weights)>0)break;
         }
@@ -650,9 +656,8 @@ final class StoreUnifiedReportPhaseSixServices
     }
 
     /**
-     * Current visible product categories define zero-sales columns. Facts
-     * outside the current hierarchy retain a separate historical column so
-     * their amount is never silently moved into a different configured name.
+     * Current visible categories define zero-sales columns; hidden or unsplit current
+     * categories retain their stable legacy column keys. No historical snapshot supplies classification.
      *
      * @return array{columns:array<int,array>,targets:array<int|string,string>}
      */
@@ -689,15 +694,19 @@ final class StoreUnifiedReportPhaseSixServices
         }
         foreach($observed as $rawId=>$path){
             $id=(int)$rawId;$chain=$id>0?$this->salaryCategoryChain($id,$byId):[];
+            // 现行商品维度不恢复已经失效的旧分类名；未知/断链 ID 一律归入未分类。
+            if($chain===[]){
+                $key='salary_category_cash_unclassified';
+                $definitions[$key]=['key'=>$key,'label'=>'未分类','id'=>0];$targets[$rawId]=$key;
+                continue;
+            }
             $root=(int)($chain[0]['id']??0);$second=(int)($chain[1]['id']??0);
             $effective=$second>0 && isset($visible[$second])?$second:$root;
             if($id>0 && $effective>0 && isset($definitions[$effective])
                 && !($second===0 && isset($visibleChildren[$root]))){
                 $targets[$rawId]=$definitions[$effective]['key'];continue;
             }
-            $label=$id===0?'未分类':$this->salaryCategoryLabel($chain,$id);
-            if($label==='')$label=$this->salaryTwoLevelPath((string)$path);
-            if($label==='')$label='未分类';
+            $label=$this->salaryTwoLevelPath(implode('/',array_column($chain,'cate_name')));
             if($second===0 && $root>0 && isset($visibleChildren[$root]))$label.='/未细分';
             $key=$id>0?'salary_category_cash_historical_'.$id:'salary_category_cash_unclassified';
             $definitions[$key]=['key'=>$key,'label'=>$label,'id'=>$id];$targets[$rawId]=$key;
@@ -706,14 +715,14 @@ final class StoreUnifiedReportPhaseSixServices
         $columns=[];
         foreach($definitions as $definition){
             $explanation=$definition['key']==='salary_category_cash_unclassified'
-                ? '已分配给该员工，但项目或产品未设置可用分类的销售业绩及退款扣减；不会按卡项名称自动猜测分类。'
-                : '该分类下分配给该员工的销售业绩减退款扣减；卡项金额按卡内项目分类及金额比例拆分，原销售分配不回写。';
+                ? '关联商品没有有效的当前分类，或无法关联商品的销售业绩及退款扣减；不按名称或旧分类猜填。'
+                : '按关联商品当前分类统计销售业绩减退款扣减，历史记录也随商品分类调整；卡项按卡内项目当前分类和原有金额比例拆分，原始金额不变。';
             $columns[]=$this->column($definition['key'],$definition['label'],$explanation,true,false,140,[],'商品分类业绩');
         }
         return ['columns'=>$columns,'targets'=>$targets];
     }
 
-    /** Build a bounded ancestry path; invalid or cyclic configuration falls back to the fact snapshot. */
+    /** Build a bounded current ancestry path; broken or cyclic configuration is not a valid category. */
     private function salaryCategoryChain(int $id,array $byId): array
     {
         $chain=[];$seen=[];
@@ -797,8 +806,7 @@ final class StoreUnifiedReportPhaseSixServices
         }
         // 现金业绩与服务/手工事实分开记账：纯销售订单没有 labor 行，不能因此从薪资明细中消失。
         // 先按同一业务行、同一员工合并销售事实；若该员工同时参与服务，则与已有 labor 行合并，避免重复展示。
-        // Sales classification requires the frozen category ID as well as its path: the ID selects
-        // the salary bucket; the path preserves historical display. Never infer an ID from a name.
+        // 销售事实只提供实际商品 ID 和历史金额；薪资分类统一读取该商品当前配置，不再读分类快照。
         $salesQuery=Db::name('cashier_v3_performance_fact')->alias('pf')
             ->leftJoin('cashier_v3_sale_fact s','s.tenant_id=pf.tenant_id AND s.checkout_request_id=pf.checkout_request_id AND s.source_line_id=pf.source_line_id AND s.fact_direction=\'forward\' AND s.status=\'effective\'')
             ->leftJoin('cashier_v3_report_sale_dimension_fact d','d.tenant_id=pf.tenant_id AND d.sale_fact_id=s.fact_id')
@@ -806,19 +814,21 @@ final class StoreUnifiedReportPhaseSixServices
             ->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
             ->where('pf.performance_type','sales_performance_allocated')->where('pf.status','effective')
             ->where('pf.employee_id','>',0)
-            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path')
+            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,s.item_id product_id,d.item_name_snapshot item_name')
             ->order('pf.id','asc');
         $normal = new StoreReportNormalDataScopeServices();
         $normal->excludeVoidedSalesOrderFacts($salesQuery, 'pf.tenant_id', 'pf.order_id');
         $normal->excludeVoidedRechargeOrderFacts($salesQuery, 'pf.tenant_id', 'pf.order_id');
         $normal->excludeVoidedSupplementPaymentFacts($salesQuery, 'pf.tenant_id', 'pf.store_id', 'pf.order_id');
         $salesRows=$salesQuery->select()->toArray();
+        $salesRows=$this->salaryCurrentSaleCategories($salesRows);
         $cardAllocations=$this->salaryCardCategoryAllocations($salesRows);
         $salesReversed=$this->reversedPerformanceFactIds($salesRows);
         $salesGrouped=[];
         foreach($salesRows as $sale){
             if((string)$sale['fact_direction']!=='forward'||isset($salesReversed[(string)$sale['fact_id']]))continue;
             $allocation=$this->salarySaleCategoryAmounts($sale,$cardAllocations[(string)($sale['sale_fact_id']??'')]??[]);
+            if((string)$sale['source_type']==='card')$sale['category_path']=$this->salaryAllocationCategoryPath($allocation);
             $salesKey=(int)$sale['store_id'].'|'.(int)$sale['employee_id'].'|'.(string)$sale['checkout_request_id'].'|'.(string)$sale['source_line_id'];
             if(!isset($salesGrouped[$salesKey])){$salesGrouped[$salesKey]=$sale;$salesGrouped[$salesKey]['amount_cents']=0;$salesGrouped[$salesKey]['sales_category_cents']=[];$salesGrouped[$salesKey]['sales_category_paths']=[];}
             $salesGrouped[$salesKey]['amount_cents']+=(int)$sale['amount_cents'];
@@ -869,7 +879,7 @@ final class StoreUnifiedReportPhaseSixServices
         return $out;
     }
 
-    /** 读取当前有效的退款销售人事实，并沿用原销售分类快照拆分负向金额。 */
+    /** 退款来源只定位实际商品/卡内项目；现行分类复用统一读取器，原销售及退款金额不回写。 */
     private function salaryRefundSalespersonFacts(array $stores,array $range):array
     {
         $rows=Db::name('cashier_v3_performance_fact')->alias('pf')
@@ -878,25 +888,34 @@ final class StoreUnifiedReportPhaseSixServices
             ->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
             ->where('pf.performance_type','refund_sales_deduction')->where('pf.fact_direction','forward')
             ->where('pf.status','effective')->where('pf.employee_id','>',0)
-            ->field('pf.fact_id,pf.fact_direction,pf.reversal_of,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.member_id,pf.member_name_snapshot member_name,pf.store_name_snapshot store_name,ra.target_name_snapshot item_name,ra.source_sales_order_id,ra.source_sales_line_id')
+            ->field('pf.fact_id,pf.fact_direction,pf.reversal_of,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.member_id,pf.member_name_snapshot member_name,pf.store_name_snapshot store_name,ra.target_name_snapshot item_name,ra.source_sales_order_id,ra.source_sales_line_id,ra.target_type,ra.catalog_item_id,ra.catalog_kind,ra.card_holder_id,ra.card_component_id')
             ->order('pf.id','asc')->select()->toArray();
         $reversed=$this->reversedPerformanceFactIds($rows);
         $saleLineIds=array_values(array_unique(array_filter(array_column($rows,'source_sales_line_id'))));
         $saleDimensions=[];$cardFacts=[];
         foreach(array_chunk($saleLineIds,300) as $lineIds){
             $sales=Db::name('cashier_v3_sale_fact')->alias('s')
-                ->leftJoin('cashier_v3_report_sale_dimension_fact d','d.tenant_id=s.tenant_id AND d.sale_fact_id=s.fact_id')
                 ->where('s.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
-                ->whereIn('s.source_line_id',$lineIds)->where('s.fact_direction','forward')->where('s.status','effective')
-                ->field('s.fact_id sale_fact_id,s.order_id,s.source_line_id,s.source_type,d.category_id_snapshot category_id,d.category_path_snapshot category_path')
+                ->whereIn('s.store_id',$stores)->whereIn('s.source_line_id',$lineIds)->where('s.fact_direction','forward')->where('s.status','effective')
+                ->field('s.fact_id sale_fact_id,s.store_id,s.order_id,s.source_line_id,s.source_type,s.item_id product_id')
                 ->select()->toArray();
+            $sales=$this->salaryCurrentSaleCategories($sales);
             foreach($sales as $sale)$saleDimensions[(string)$sale['order_id'].'|'.(string)$sale['source_line_id']]=$sale;
             $cardFacts=array_merge($cardFacts,$this->salaryCardCategoryAllocations($sales));
         }
+        $catalogCategories=$this->salaryRefundCatalogCategories($rows,$stores);
+        $componentCategories=$this->salaryRefundComponentCategories($rows,$stores);
         $out=[];
         foreach($rows as $row){
             if(isset($reversed[(string)$row['fact_id']]))continue;
             $source=$saleDimensions[(string)$row['source_sales_order_id'].'|'.(string)$row['source_sales_line_id']]??[];
+            // 无原单退款的 catalog_item_id 是 SKU ID，不是商品 ID；不能用同号商品或退款名称猜分类。
+            // 原销售事实同样已经过当前商品分类读取；来源不同不能产生另一套分类口径。
+            if($source===[]){
+                $category=$catalogCategories[(int)$row['store_id'].'|'.(int)$row['catalog_item_id']]
+                    ??$componentCategories[(int)$row['store_id'].'|'.(int)$row['card_component_id']]??[];
+                if($category!==[])$source=['source_type'=>'product','category_id'=>$category['id'],'category_path'=>$category['path']];
+            }
             $sale=$source+['amount_cents'=>(int)$row['amount_cents'],'source_type'=>'','category_id'=>0,'category_path'=>''];
             $sale['amount_cents']=(int)$row['amount_cents'];
             $allocation=$this->salarySaleCategoryAmounts($sale,$cardFacts[(string)($source['sale_fact_id']??'')]??[]);
@@ -904,7 +923,7 @@ final class StoreUnifiedReportPhaseSixServices
             foreach($allocation as $categoryId=>$part){$categoryCents[$categoryId]=(int)$part['cents'];$categoryPaths[$categoryId]=(string)$part['path'];}
             $row['row_key']=(string)$row['fact_id'];
             $row['service_fact_id']='';$row['service_object']='';$row['source_type']='manual_refund';
-            $row['category_path']=(string)($source['category_path']??'');
+            $row['category_path']=$this->salaryAllocationCategoryPath($allocation);
             $row['sales_category_cents']=$categoryCents;$row['sales_category_paths']=$categoryPaths;
             $row['cash_cents']=(int)$row['amount_cents'];$row['consumption_cents']=0;
             $row['labor_fee_amount_cents']=0;$row['project_count_half_units']=0;
@@ -913,6 +932,82 @@ final class StoreUnifiedReportPhaseSixServices
             $out[]=$row;
         }
         return $out;
+    }
+
+    /** 无原单产品/项目退款只通过所选 SKU 关联本门店商品；卡项不能用外层分类替代卡内项目分摊。 */
+    private function salaryRefundCatalogCategories(array $rows,array $stores):array
+    {
+        $ids=[];$wanted=[];
+        foreach($rows as $row){
+            $id=(int)($row['catalog_item_id']??0);$store=(int)($row['store_id']??0);
+            if(($row['target_type']??'')!=='catalog' || !in_array($row['catalog_kind']??'',['产品','项目'],true)
+                || $id<=0 || !in_array($store,$stores,true))continue;
+            $ids[$id]=true;$wanted[$store.'|'.$id]=true;
+        }
+        $products=[];
+        foreach(array_chunk(array_keys($ids),300) as $chunk){
+            $links=Db::name('store_product_attr_value')->alias('sku')
+                ->join('store_product p','p.id=sku.product_id')
+                ->whereIn('sku.id',$chunk)->where('sku.type',0)->where('p.type',1)
+                ->whereIn('p.relation_id',$stores)->where('p.is_del',0)->whereIn('p.product_type',[0,4,6])
+                ->field('sku.id sku_id,p.id product_id,p.relation_id store_id')->select()->toArray();
+            foreach($links as $link){
+                $key=(int)$link['store_id'].'|'.(int)$link['sku_id'];
+                if(isset($wanted[$key]))$products[$key]=$link;
+            }
+        }
+        return $this->salaryCurrentProductCategories($products);
+    }
+
+    /** 单个历史卡项目退款使用明确关联的卡内商品；共享卡没有项目 ID 时不能按卡名猜分类。 */
+    private function salaryRefundComponentCategories(array $rows,array $stores):array
+    {
+        $ids=[];$wanted=[];
+        foreach($rows as $row){
+            $id=(int)($row['card_component_id']??0);$holder=(int)($row['card_holder_id']??0);
+            $store=(int)($row['store_id']??0);
+            if(($row['target_type']??'')!=='card'||$id<=0||!in_array($store,$stores,true))continue;
+            $ids[$id]=true;$wanted[$store.'|'.$id]=$holder;
+        }
+        $links=[];
+        foreach(array_chunk(array_keys($ids),300) as $chunk){
+            $components=Db::name('store_order_cart_info')->alias('c')
+                ->join('user_card_holder h','h.oid=c.oid')->join('store_order o','o.id=c.oid')
+                ->whereIn('c.id',$chunk)->whereIn('o.store_id',$stores)->where('c.cart_type',2)->where('c.product_type',6)
+                ->field('c.id,h.id holder_id,c.product_id,o.store_id')->select()->toArray();
+            foreach($components as $component){
+                $key=(int)$component['store_id'].'|'.(int)$component['id'];
+                if(isset($wanted[$key]) && $wanted[$key]===(int)$component['holder_id'])$links[$key]=$component;
+            }
+        }
+        return $this->salaryCurrentProductCategories($links);
+    }
+
+    /** 销售来源只提供实际商品 ID；充值/迁入等没有商品的事实保持空分类，不借旧快照。 */
+    private function salaryCurrentSaleCategories(array $rows):array
+    {
+        $links=[];
+        foreach($rows as $index=>$row){
+            if(in_array((string)($row['source_type']??''),['project','product'],true))$links[$index]=$row;
+        }
+        $categories=$this->salaryCurrentProductCategories($links);
+        foreach($rows as $index=>&$row){
+            $row['category_id']=(int)($categories[$index]['id']??0);
+            $row['category_path']=(string)($categories[$index]['path']??'');
+        }
+        unset($row);
+        return $rows;
+    }
+
+    /** 一行卡项可含多个实际项目分类；展示已有分摊的当前路径，不读取卡项外层分类。 */
+    private function salaryAllocationCategoryPath(array $allocation):string
+    {
+        $paths=[];
+        foreach($allocation as $part){
+            $path=trim((string)($part['path']??''));
+            if($path!=='' && $path!=='未分类')$paths[$path]=true;
+        }
+        return implode('、',array_keys($paths));
     }
 
     /**
@@ -951,6 +1046,8 @@ final class StoreUnifiedReportPhaseSixServices
     private function salaryFactsWithReportingDimensions(array $stores, array $range): array
     {
         $facts=$this->salaryFactsWithServiceCustomerMetrics($stores,$range);
+        // 所有服务（含已有旧分类）均使用实际项目当前分类；现金分类分摊由同一商品读取器产生。
+        $facts=$this->salaryServiceProductCategories($facts,$stores);
         $employeeIds=array_values(array_unique(array_filter(array_map(static fn(array $fact):int=>(int)($fact['employee_id']??0),$facts))));
         $positions=[];
         if($employeeIds!==[]){
@@ -977,6 +1074,91 @@ final class StoreUnifiedReportPhaseSixServices
         }
         unset($fact);
         return $facts;
+    }
+
+    /**
+     * 所有服务按稳定项目 ID 关联现行商品资料；旧分类快照仅保留在事实中，不参与薪资分类展示。
+     * 只更新查询投影，不能写回事实或改变金额/次数；批量门店校验防止跨店同名商品借分类。
+     */
+    private function salaryServiceProductCategories(array $facts,array $stores):array
+    {
+        $serviceIds=[];
+        foreach($facts as $fact){
+            $id=trim((string)($fact['service_fact_id']??''));
+            if($id!=='' && in_array((int)($fact['store_id']??0),$stores,true))$serviceIds[$id]=true;
+        }
+        if($serviceIds===[])return $facts;
+        $services=[];
+        foreach(array_chunk(array_keys($serviceIds),300) as $chunk){
+            $rows=Db::name('cashier_v3_entitlement_service_fact')
+                ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('store_id',$stores)
+                ->whereIn('service_fact_id',$chunk)->where('service_status','completed')
+                ->field('service_fact_id,store_id,project_id product_id')->select()->toArray();
+            foreach($rows as $row){
+                $services[(int)$row['store_id'].'|'.(string)$row['service_fact_id']]=$row;
+            }
+        }
+        $categories=$this->salaryCurrentProductCategories($services);
+        foreach($facts as &$fact){
+            if(trim((string)($fact['service_fact_id']??''))==='')continue;
+            $key=(int)($fact['store_id']??0).'|'.(string)($fact['service_fact_id']??'');
+            $fact['category_path']=$categories[$key]['path']??'';
+        }
+        unset($fact);
+        return $facts;
+    }
+
+    /** 薪资全部业务共用当前商品分类解析；输入须是已经过商户/门店范围校验的实际商品 ID。 */
+    private function salaryCurrentProductCategories(array $links):array
+    {
+        if($links===[])return [];
+        $productIds=[];
+        foreach($links as $row){if((int)($row['product_id']??0)>0)$productIds[(int)$row['product_id']]=true;}
+        $products=$this->salaryCategoryProducts(array_keys($productIds));
+        $parentIds=[];
+        foreach($products as $product){if((int)$product['pid']>0)$parentIds[(int)$product['pid']]=true;}
+        $parents=$this->salaryCategoryProducts(array_keys($parentIds));
+        $categories=[];
+        foreach(Db::name('store_product_category')->where('type',0)->where('relation_id',0)
+            ->field('id,pid,cate_name')->select()->toArray() as $category)$categories[(int)$category['id']]=$category;
+        $paths=[];
+        foreach($links as $key=>$row){
+            $product=$products[(int)($row['product_id']??0)]??[];
+            if($product===[] || !(((int)$product['type']===0 && (int)$product['relation_id']===0)
+                || ((int)$product['type']===1 && (int)$product['relation_id']===(int)$row['store_id'])))continue;
+            $candidates=[$product];
+            $parent=$parents[(int)$product['pid']]??[];
+            // 门店商品可继承其明确关联的平台商品分类；其他门店的同名或同父商品不是权威来源。
+            if($parent!==[] && (int)$parent['type']===0 && (int)$parent['relation_id']===0)$candidates[]=$parent;
+            foreach($candidates as $candidate){
+                $best=[];
+                foreach(explode(',',(string)$candidate['cate_id']) as $rawId){
+                    $rawId=trim($rawId);
+                    if(preg_match('/^[1-9][0-9]*$/D',$rawId)!==1)continue;
+                    $chain=$this->salaryCategoryChain((int)$rawId,$categories);
+                    // 配置可能同时保存祖先与叶分类；优先完整、最深路径，失效/断链/循环均不猜填。
+                    if(count($chain)>count($best) && !array_filter($chain,
+                        static fn(array $node):bool=>trim((string)$node['cate_name'])===''))$best=$chain;
+                }
+                if($best!==[]){
+                    $paths[$key]=['id'=>(int)$best[count($best)-1]['id'],
+                        'path'=>$this->salaryTwoLevelPath(implode(' / ',array_column($best,'cate_name')))];
+                    break;
+                }
+            }
+        }
+        return $paths;
+    }
+
+    /** 批量读取现行分类所需商品字段；已删除商品不提供当前分类，历史快照不兜底。 */
+    private function salaryCategoryProducts(array $ids):array
+    {
+        $products=[];
+        foreach(array_chunk($ids,300) as $chunk){
+            foreach(Db::name('store_product')->whereIn('id',$chunk)->where('is_del',0)
+                ->field('id,pid,type,relation_id,cate_id')->select()->toArray() as $row)$products[(int)$row['id']]=$row;
+        }
+        return $products;
     }
 
     /**

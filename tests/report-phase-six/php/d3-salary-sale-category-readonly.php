@@ -5,7 +5,7 @@ declare(strict_types=1);
 use app\services\report\StoreUnifiedReportPhaseSixServices;
 use think\facade\Db;
 
-// Read-only RH fixture regression: frozen sale categories must reach salary buckets,
+// Read-only local fixture regression: current product categories must reach salary buckets,
 // exact employee/store drilldowns and the complete export projection without rewriting facts.
 require '/var/www/html/vendor/autoload.php';
 $app = new \think\App('/var/www/html/');
@@ -46,7 +46,7 @@ $assert(count($summary['records']) === 1 && (int)$summary['records'][0]['employe
     'summary selects the exact employee');
 $row = $summary['records'][0];
 $assert($row[$key] === '1596' && $summary['summary_row'][$key] === '1596',
-    'summary and total put 1596 yuan in the frozen category');
+    'summary and total put 1596 yuan in the current product category');
 $assert(($row['salary_category_cash_unclassified'] ?? '0') === '0', 'known category is not unclassified');
 $assert(array_sum(array_map('intval', array_filter($row,
     static fn(string $field): bool => strpos($field, 'salary_category_cash_') === 0, ARRAY_FILTER_USE_KEY))) === 1596,
@@ -81,20 +81,20 @@ try {
     $assert(strpos($error->getMessage(), '无权限') !== false, 'drilldown cannot expand authorized stores');
 }
 
-// Unit boundary checks keep genuinely missing snapshots unclassified and preserve
+// Unit boundary checks keep genuinely missing product categories unclassified and preserve
 // card-component allocation with integer-cent remainder, rather than using the card category.
 $allocate = new ReflectionMethod($service, 'salarySaleCategoryAmounts');
 $allocate->setAccessible(true);
 $assert($allocate->invoke($service, ['source_type' => 'product', 'amount_cents' => 101,
     'category_id' => 26321, 'category_path' => '花园 / 花园产品'], [])
-    === [26321 => ['cents' => 101, 'path' => '花园 / 花园产品']], 'non-card sales use the frozen ID');
+    === [26321 => ['cents' => 101, 'path' => '花园 / 花园产品']], 'non-card sales use the resolved current category ID');
 $missing = $allocate->invoke($service, ['source_type' => 'product', 'amount_cents' => 101,
     'category_path' => '花园 / 花园产品'], []);
 $assert(array_keys($missing) === [0], 'missing ID is not guessed from a category name');
 $card = $allocate->invoke($service, ['source_type' => 'card', 'amount_cents' => 101,
     'category_id' => 999], [
-        ['category_id_snapshot' => 2, 'category_path_snapshot' => 'A', 'cash_performance_amount_cents' => 2],
-        ['category_id_snapshot' => 3, 'category_path_snapshot' => 'B', 'cash_performance_amount_cents' => 1],
+        ['category_id' => 2, 'category_path' => 'A', 'cash_performance_amount_cents' => 2],
+        ['category_id' => 3, 'category_path' => 'B', 'cash_performance_amount_cents' => 1],
     ]);
 $assert(array_keys($card) === [2, 3] && $card[2]['cents'] === 67 && $card[3]['cents'] === 34,
     'card categories and last-component remainder are unchanged');

@@ -7,7 +7,7 @@ use app\services\report\StoreUnifiedReportOrganizationDimensionServices;
 use app\services\report\StoreUnifiedReportPhaseSixServices;
 use think\facade\Db;
 
-// Read-only fixture: the page and export share order identities and historical category labels.
+// Read-only fixture: page/export share stable historical order identities and current product categories.
 require '/var/www/html/vendor/autoload.php';
 $app = new \think\App('/var/www/html/');
 $app->initialize();
@@ -19,7 +19,7 @@ $serviceSample = Db::name('cashier_v3_performance_fact')->alias('pf')
     ->where('pf.tenant_id', $tenantId)->where('pf.status', 'effective')
     ->where('pf.fact_direction', 'forward')->where('pf.performance_type', 'labor_performance_allocated')
     ->where('sv.service_status', 'completed')->where('sv.service_record_no', '<>', '')
-    ->field('pf.fact_id,pf.store_id,pf.employee_id,pf.business_date,pf.checkout_request_id,sv.project_category_name_snapshot expected_category')
+    ->field('pf.fact_id,pf.store_id,pf.employee_id,pf.business_date,pf.checkout_request_id,sv.project_id product_id')
     ->order('pf.id', 'desc')->find();
 $saleSample = Db::name('cashier_v3_performance_fact')->alias('pf')
     ->join('cashier_v3_sales_order so',
@@ -32,8 +32,8 @@ $saleSample = Db::name('cashier_v3_performance_fact')->alias('pf')
         'sv.tenant_id=pf.tenant_id AND sv.checkout_request_id=pf.checkout_request_id AND sv.source_line_id=pf.source_line_id')
     ->where('pf.tenant_id', $tenantId)->where('pf.status', 'effective')
     ->where('pf.fact_direction', 'forward')->where('pf.performance_type', 'sales_performance_allocated')
-    ->whereNull('sv.id')->where('d.category_path_snapshot', '<>', '')
-    ->field('pf.fact_id,pf.store_id,pf.employee_id,pf.business_date,pf.checkout_request_id,d.category_path_snapshot expected_category')
+    ->whereNull('sv.id')->whereIn('s.source_type',['project','product'])
+    ->field('pf.fact_id,pf.store_id,pf.employee_id,pf.business_date,pf.checkout_request_id,s.item_id product_id')
     ->order('pf.id', 'desc')->find();
 if (!$serviceSample && !$saleSample) {
     echo "SKIP no salary facts with order center references in local fixture\n";
@@ -55,6 +55,30 @@ function expectedOrderReference(string $tenantId, array $sample): array
         ->find();
     $number = trim((string)($service['order_no'] ?? ''));
     return $number !== '' ? [$number, 'service:' . $sample['checkout_request_id']] : ['-', ''];
+}
+
+/** Independent fixture lookup: current categories come from the actual product, never the fact label. */
+function expectedCurrentCategory(array $sample):string
+{
+    $product=Db::name('store_product')->where('id',(int)$sample['product_id'])->where('is_del',0)->find();
+    if(!$product || !(((int)$product['type']===0 && (int)$product['relation_id']===0)
+        || ((int)$product['type']===1 && (int)$product['relation_id']===(int)$sample['store_id'])))return '';
+    $parent=Db::name('store_product')->where('id',(int)$product['pid'])->where('type',0)->where('relation_id',0)
+        ->where('is_del',0)->find();
+    $byId=Db::name('store_product_category')->where('type',0)->where('relation_id',0)->column('*','id');
+    foreach(array_filter([$product,$parent]) as $candidate){
+        $best=[];
+        foreach(explode(',',(string)$candidate['cate_id']) as $raw){
+            if(!ctype_digit($raw) || (int)$raw<=0)continue;
+            $chain=[];$seen=[];$id=(int)$raw;
+            while($id>0 && isset($byId[$id]) && !isset($seen[$id]) && count($chain)<12){
+                $seen[$id]=true;$chain[]=trim((string)$byId[$id]['cate_name']);$id=(int)$byId[$id]['pid'];
+            }
+            if($id===0 && !in_array('',$chain,true) && count($chain)>count($best))$best=array_reverse($chain);
+        }
+        if($best!==[])return implode('/',array_slice($best,0,2));
+    }
+    return '';
 }
 
 $service = new StoreUnifiedReportPhaseSixServices();
@@ -97,9 +121,9 @@ foreach ([$serviceSample, $saleSample] as $sample) {
         || ($record['document_order_id'] ?? '') !== $expectedId
         || ($record['company_name'] ?? '') !== $expectedCompany
         || ($summaryRecord['company_name'] ?? '') !== $expectedCompany
-        || ($record['performance_category'] ?? '') !== (string)$sample['expected_category']
+        || ($record['performance_category'] ?? '') !== expectedCurrentCategory($sample)
         || isset($record['card_type']) || isset($record['service_visit_count'])) {
-        throw new RuntimeException('salary order link or historical product category differs from its facts');
+        throw new RuntimeException('salary order link or current product category differs from its authority');
     }
     $exportRecord = null;
     foreach ($export['records'] as $candidate) {
