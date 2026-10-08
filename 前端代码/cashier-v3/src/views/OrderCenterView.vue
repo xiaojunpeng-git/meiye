@@ -868,8 +868,10 @@ async function submitImportedCardRefund() {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate) || businessDate > refundBusinessToday()) {
     importedCardRefundError.value = '请选择不晚于今天的有效退款日期。'; return
   }
-  if (unifiedRefundPersonnelLoading.value || !unifiedRefundPersonnel.value || !unifiedRefundSalespeople.value.length) {
-    importedCardRefundError.value = '请先选择退款销售人并完成业绩分配。'; return
+  // 退款销售人可留空；金额仍由退款命令落账，仅选了人员时才产生员工扣减。
+  // 默认人员仍在加载时先等待，避免原单人员草稿晚到后覆盖本次提交选择。
+  if (unifiedRefundPersonnelLoading.value) {
+    importedCardRefundError.value = '退款销售人信息读取中，请稍后重试。'; return
   }
   if (!importedCardRefundCommandId) importedCardRefundCommandId = createCashierV3CommandId()
   importedCardRefundSubmitting.value = true

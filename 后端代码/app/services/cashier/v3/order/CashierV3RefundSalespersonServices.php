@@ -80,7 +80,7 @@ final class CashierV3RefundSalespersonServices
                 'currentSalespeople' => $selected]]];
     }
 
-    /** 同退款命令事务内写入人员快照和负向事实；非员工经营指标仍读取整笔退款支付调整事实。 */
+    /** 同退款命令写入人员快照；留空不生成员工扣减，经营退款仍按整笔支付调整统计。 */
     public function createInTx(array $operation, array $payload, int $adjustmentRowId, array $event,
         CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): void
     {
@@ -218,9 +218,11 @@ final class CashierV3RefundSalespersonServices
         }, $rows));
     }
 
+    /** 空分配代表本次退款不扣员工；一旦选人仍须通过身份、比例和整元金额校验。 */
     private function normalize(array $rows, CashierV3OperatorScope $operator): array
     {
-        if ($rows === [] || count($rows) > 20) throw self::fail('请至少选择一名退款销售人。');
+        if ($rows === []) return [];
+        if (count($rows) > 20) throw self::fail('退款销售人不能超过20人。');
         $candidates = $this->candidates($operator);
         $byStaff = [];
         foreach ($candidates as $candidate) $byStaff[(int)$candidate['staffId']] = $candidate;
