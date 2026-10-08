@@ -33,6 +33,27 @@ if ($correctedLine['unitPrice'] !== 66.0 || $correctedLine['entitlementAmount'] 
     || $correctedLine['payableAmount'] !== null) {
     throw new RuntimeException('shared_card_correction_not_reflected_in_both_prices');
 }
+// 历史卡来源必须来自本次核销快照，独立赠送及缺失旧快照不可伪造卡信息。
+$cardLine = $method->invoke($reader, array_merge($service, [
+    'entitlement_instance_type' => 'card_holder',
+    'source_name_snapshot' => '1980随心挑',
+    'source_code_snapshot' => '2355612',
+]), []);
+if ($cardLine['cardName'] !== '1980随心挑' || $cardLine['cardNo'] !== '2355612') {
+    throw new RuntimeException('entitlement_card_snapshot_not_visible');
+}
+$giftLine = $method->invoke($reader, array_merge($service, [
+    'entitlement_instance_type' => 'independent_gift',
+    'source_name_snapshot' => '赠送项目',
+    'source_code_snapshot' => 'GIFT-1',
+]), []);
+if ($giftLine['cardName'] !== '' || $giftLine['cardNo'] !== '') {
+    throw new RuntimeException('independent_gift_misidentified_as_card');
+}
+$legacyLine = $method->invoke($reader, $service, []);
+if ($legacyLine['cardName'] !== '' || $legacyLine['cardNo'] !== '') {
+    throw new RuntimeException('missing_card_snapshot_misidentified_as_card');
+}
 $legacy = [[
     'staff_id' => 11, 'employee_id' => 22, 'staff_name_snapshot' => '历史技师',
     'employee_type_snapshot' => '正式', 'store_id' => 8, 'sequence' => 1,

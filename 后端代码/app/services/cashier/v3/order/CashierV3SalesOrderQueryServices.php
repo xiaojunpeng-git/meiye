@@ -1405,7 +1405,7 @@ final class CashierV3SalesOrderQueryServices
                 ->where('sf.tenant_id', $tenantIds[0])
                 ->whereIn('sf.checkout_request_id', $requestIds)
                 ->where('sf.service_status', 'completed')
-                ->field('sf.id,sf.service_fact_id,sf.service_record_no,sf.checkout_request_id,sf.source_line_id,sf.project_id,sf.project_name_snapshot,sf.quantity,sf.project_count,sf.service_object,sf.friend_counts_as_customer,sf.is_experience,sf.craftsmen_snapshot_json,sf.service_status,sf.detail_remark_snapshot,wf.actual_entitlement_amount_cents,wf.total_purchase_times_snapshot,wf.consumed_times_before_snapshot,wf.quantity AS writeoff_quantity,vo.id AS void_operation_id,vo.occurred_at AS voided_at')
+                ->field('sf.id,sf.service_fact_id,sf.service_record_no,sf.checkout_request_id,sf.source_line_id,sf.project_id,sf.project_name_snapshot,sf.quantity,sf.project_count,sf.service_object,sf.friend_counts_as_customer,sf.is_experience,sf.craftsmen_snapshot_json,sf.service_status,sf.detail_remark_snapshot,wf.entitlement_instance_type,wf.source_name_snapshot,wf.source_code_snapshot,wf.actual_entitlement_amount_cents,wf.total_purchase_times_snapshot,wf.consumed_times_before_snapshot,wf.quantity AS writeoff_quantity,vo.id AS void_operation_id,vo.occurred_at AS voided_at')
                 ->order('sf.id', 'asc')->select()->toArray();
             if ($serviceRows !== []) {
                 // R32 历史更正以不可变正反事实入账，原核销快照不能覆盖。
@@ -2088,6 +2088,11 @@ final class CashierV3SalesOrderQueryServices
             'itemType' => '项目',
             'businessTag' => '权益',
             'name' => (string)$serviceFact['project_name_snapshot'],
+            // 卡名称和卡号只取本次核销冻结的卡来源；独立赠送不是卡，不能借用当前卡档冒充历史来源。
+            'cardName' => (string)($serviceFact['entitlement_instance_type'] ?? '') === 'card_holder'
+                ? (string)($serviceFact['source_name_snapshot'] ?? '') : '',
+            'cardNo' => (string)($serviceFact['entitlement_instance_type'] ?? '') === 'card_holder'
+                ? (string)($serviceFact['source_code_snapshot'] ?? '') : '',
             'purchaseSpec' => '',
             'quantity' => max(0, (int)$serviceFact['quantity']),
             // 票据展示本次核销后的冻结余次，不读取会随后续核销变化的当前会员权益。

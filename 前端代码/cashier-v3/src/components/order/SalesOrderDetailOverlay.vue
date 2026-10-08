@@ -22,6 +22,7 @@ import SalesOrderReceiptPrintButton from '@/components/order/SalesOrderReceiptPr
  *     payableAmount, debtAmount, actualReceivedAmount,
  *     salespeople: [{ id, name, salesPerformanceAmount }],
  *     // 仅项目：craftsmen、laborPerformanceAmount、serviceRecipientType
+ *     // 权益项目：cardName、cardNo 仅来自本次卡项核销快照；独立赠送不提供卡来源
  *     // 卡项：cardPurchaseTimes（成交时购买次数快照）、cardBatchId、cardBatchNo、benefitEntryId、benefitSummary
  *   }],
  *   paymentDetails: [{ id, methodName, amount, externalTransactionNo, remark, isBalancePayment }],
@@ -711,6 +712,10 @@ async function runAction(action, payload = {}) {
                   <!-- 复用权威明细业务标签，不能按金额是否为零推断权益。 -->
                   <span v-if="item.businessTag" class="sales-order-detail-tag">{{ item.businessTag }}</span>
                   <h4>{{ itemName(item) }}</h4>
+                  <p v-if="item.businessTag === '权益' && (item.cardName || item.cardNo)" class="sales-order-detail-item__card-source">
+                    <span v-if="item.cardName">卡名称：{{ item.cardName }}</span>
+                    <span v-if="item.cardNo">卡号：{{ item.cardNo }}</span>
+                  </p>
                   <p v-if="pickValue(item, ['purchaseSpec', 'specification', 'specName', 'packageName', 'cardSpecification'])">购买规格：{{ pickValue(item, ['purchaseSpec', 'specification', 'specName', 'packageName', 'cardSpecification']) }}</p>
                   <p v-if="cardPurchaseTimesText(item)">{{ cardPurchaseTimesLabel(item) }}：{{ cardPurchaseTimesText(item) }}</p>
                   <p v-if="pickValue(item, ['detailRemark', 'detail_remark_snapshot', 'lineRemark'])">明细备注：{{ pickValue(item, ['detailRemark', 'detail_remark_snapshot', 'lineRemark']) }}</p>
@@ -1208,6 +1213,12 @@ async function runAction(action, payload = {}) {
   margin-top: 8px;
   color: #6b7280;
   font-size: 13px;
+}
+
+.sales-order-detail-item__card-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
 }
 
 .sales-order-detail-item__unit {
