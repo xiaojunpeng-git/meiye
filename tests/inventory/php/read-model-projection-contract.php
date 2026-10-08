@@ -55,12 +55,14 @@ readModelAssert('salon usage projects, list and details stay within the server-a
     && strpos($usage, "whereLike('p.store_name|p.keyword|p.code|p.bar_code', \$like)") !== false
     && strpos($usage, "whereLike('d.usage_no|d.project_name_snapshot|d.remark', \$like)") !== false
     && strpos($usage, "'returnable_quantity'") !== false
-    && strpos($usage, 'inventory_salon_usage_return_exceeds_issue') !== false
+    // 历史退回单只读；现行领用单的作废必须拒绝已发生的部分退回。
+    && strpos($usage, 'inventory_salon_usage_void_has_return') !== false
     && $platformUsage !== false
     && strpos($platformUsage, 'listForPlatform') !== false
     && strpos($platformUsage, 'issueForPlatform') !== false
-    && strpos($platformUsage, 'returnForPlatform') !== false
-    && strpos($adminRoutes, 'v3/salon-usage/:id/detail') !== false);
+    && strpos($platformUsage, 'voidForPlatform') !== false
+    && strpos($adminRoutes, 'v3/salon-usage/:id/detail') !== false
+    && strpos($adminRoutes, 'v3/salon-usage/:id/void') !== false);
 
 readModelAssert('inventory page displays the authority fields with correct units and labels',
     $app !== false
