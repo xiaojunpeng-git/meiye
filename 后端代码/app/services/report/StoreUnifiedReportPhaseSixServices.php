@@ -296,10 +296,10 @@ final class StoreUnifiedReportPhaseSixServices
             $rows[]=$detailRow;
         }
         $columns=[
-            $this->column('business_date','日期','该笔服务完成、项目核销或销售结账归属的业务日期；后来已作废的记录不再统计。'),
+            $this->column('business_date','日期','服务完成、项目核销、销售结账或退款登记归属的业务日期；后来已作废的销售或服务不再统计。'),
             $this->column('company_name','分公司','按业务门店当前所属组织查找已配置的分公司统计维度；未配置时显示“未配置分公司”。',false,true),
             $this->column('store_name','门店','该笔业务实际发生的门店。',false,true),
-            $this->column('employee_name','员工','该笔项目的服务员工，或现金业绩分配到的员工；显示业务记账时记录的姓名。',false,true),
+            $this->column('employee_name','员工','该笔项目的服务员工，或销售/退款业绩分配到的员工；显示业务记账时记录的姓名。',false,true),
             $this->column('position_name','岗位','显示该员工目前在这家门店的有效岗位；已无有效岗位时显示“-”。岗位只供查看，不重新分配历史业绩。',false,true),
             $this->column('member_name','会员','显示该笔服务或销售记录中的会员、顾客姓名；未记录姓名时显示“-”。'),
             $this->column('document_no','单据号','显示订单中心对应的订单编号；点击可查看该订单详情。没有对应订单时显示“-”。',false,false,180,[
@@ -315,7 +315,7 @@ final class StoreUnifiedReportPhaseSixServices
         if($metricKey==='service_people_count')$columns[]=$this->column('service_people_count','服务人数','所选日期内，同一会员在同一门店服务多天只计一次；分得的人数只在其中一条明细显示。',true);
         $columns=array_merge($columns,[
             $this->column('consumption_amount','消耗业绩','服务完成或卡项核销后分配给该员工的消耗金额；后来作废的记录不再统计。',true),
-            $this->column('cash_amount','现金业绩','成功收款后分配给该员工的金额；从汇总表点击分类金额进入时仅显示该分类金额，作废后不再统计。',true),
+            $this->column('cash_amount','现金业绩','销售分配金额减去退款日分配给该员工的退款业绩；原销售分配不回写。分类下钻只显示该分类金额。',true),
             $this->column('labor_fee','手工费','该笔服务最终分配给员工的手工费；后续人员调整按有效结果显示，作废后不再统计。',true),
             $this->manualColumn('备注','备注','有权限的用户手动填写，保存后刷新页面仍会显示。')
         ]);
@@ -366,6 +366,14 @@ final class StoreUnifiedReportPhaseSixServices
                     if($requestId==='' || $number==='')continue;
                     $references[$storeId.'|'.$requestId]=['number'=>$number,'id'=>'service:'.$requestId];
                 }
+                // 退款工资行属于独立退款单，不冒充原销售单；明细展示退款单号。
+                $refunds=Db::name('cashier_v3_order_lifecycle_operation')
+                    ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                    ->where('store_id',(int)$storeId)->whereIn('operation_id',$serviceRequests)
+                    ->where('operation_type','refund')->where('status','succeeded')
+                    ->field('operation_id,operation_no')->select()->toArray();
+                foreach($refunds as $refund)$references[$storeId.'|'.(string)$refund['operation_id']]=[
+                    'number'=>(string)$refund['operation_no'],'id'=>'refund:'.(string)$refund['operation_id']];
             }
         }
         return $references;
@@ -698,8 +706,8 @@ final class StoreUnifiedReportPhaseSixServices
         $columns=[];
         foreach($definitions as $definition){
             $explanation=$definition['key']==='salary_category_cash_unclassified'
-                ? '已分配给该员工，但项目或产品未设置可用分类的现金业绩；不会按卡项名称自动猜测分类。'
-                : '该分类下成功收款并分配给该员工的现金业绩；卡项金额按卡内项目的分类和金额比例拆分，作废后不再统计。';
+                ? '已分配给该员工，但项目或产品未设置可用分类的销售业绩及退款扣减；不会按卡项名称自动猜测分类。'
+                : '该分类下分配给该员工的销售业绩减退款扣减；卡项金额按卡内项目分类及金额比例拆分，原销售分配不回写。';
             $columns[]=$this->column($definition['key'],$definition['label'],$explanation,true,false,140,[],'商品分类业绩');
         }
         return ['columns'=>$columns,'targets'=>$targets];
@@ -836,6 +844,11 @@ final class StoreUnifiedReportPhaseSixServices
             $sale['category_path']=(string)($sale['category_path']??'');$sale['source_type']=(string)($sale['source_type']??'');
             $grouped[$salesKey]=$sale;
         }
+        // 退款分配是独立负向业绩，按退款业务日计入员工薪资；不冲销或改写原销售人的正向分配。
+        foreach($this->salaryRefundSalespersonFacts($stores,$range) as $refund){
+            $key='refund|'.(string)$refund['row_key'];
+            $grouped[$key]=$refund;
+        }
         $out=[];
         foreach($grouped as $row){
             $halfUnits=(int)$row['project_count_half_units'];
@@ -851,6 +864,52 @@ final class StoreUnifiedReportPhaseSixServices
             // A completed service with a zero amount still contributes to
             // service visits/people.  Pure empty sales rows remain hidden.
             if((int)$row['consumption_cents']===0&&(int)$row['labor_fee_cents']===0&&(float)$row['project_count']===0.0&&(int)$row['cash_cents']===0&&trim((string)($row['service_fact_id'] ?? ''))==='')continue;
+            $out[]=$row;
+        }
+        return $out;
+    }
+
+    /** 读取当前有效的退款销售人事实，并沿用原销售分类快照拆分负向金额。 */
+    private function salaryRefundSalespersonFacts(array $stores,array $range):array
+    {
+        $rows=Db::name('cashier_v3_performance_fact')->alias('pf')
+            ->join('cashier_v3_refund_adjustment ra','ra.tenant_id=pf.tenant_id AND ra.operation_id=pf.order_id AND ra.status=\'effective\'')
+            ->where('pf.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
+            ->where('pf.performance_type','refund_sales_deduction')->where('pf.fact_direction','forward')
+            ->where('pf.status','effective')->where('pf.employee_id','>',0)
+            ->field('pf.fact_id,pf.fact_direction,pf.reversal_of,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.member_id,pf.member_name_snapshot member_name,pf.store_name_snapshot store_name,ra.target_name_snapshot item_name,ra.source_sales_order_id,ra.source_sales_line_id')
+            ->order('pf.id','asc')->select()->toArray();
+        $reversed=$this->reversedPerformanceFactIds($rows);
+        $saleLineIds=array_values(array_unique(array_filter(array_column($rows,'source_sales_line_id'))));
+        $saleDimensions=[];$cardFacts=[];
+        foreach(array_chunk($saleLineIds,300) as $lineIds){
+            $sales=Db::name('cashier_v3_sale_fact')->alias('s')
+                ->leftJoin('cashier_v3_report_sale_dimension_fact d','d.tenant_id=s.tenant_id AND d.sale_fact_id=s.fact_id')
+                ->where('s.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                ->whereIn('s.source_line_id',$lineIds)->where('s.fact_direction','forward')->where('s.status','effective')
+                ->field('s.fact_id sale_fact_id,s.order_id,s.source_line_id,s.source_type,d.category_id_snapshot category_id,d.category_path_snapshot category_path')
+                ->select()->toArray();
+            foreach($sales as $sale)$saleDimensions[(string)$sale['order_id'].'|'.(string)$sale['source_line_id']]=$sale;
+            $cardFacts=array_merge($cardFacts,$this->salaryCardCategoryAllocations($sales));
+        }
+        $out=[];
+        foreach($rows as $row){
+            if(isset($reversed[(string)$row['fact_id']]))continue;
+            $source=$saleDimensions[(string)$row['source_sales_order_id'].'|'.(string)$row['source_sales_line_id']]??[];
+            $sale=$source+['amount_cents'=>(int)$row['amount_cents'],'source_type'=>'','category_id'=>0,'category_path'=>''];
+            $sale['amount_cents']=(int)$row['amount_cents'];
+            $allocation=$this->salarySaleCategoryAmounts($sale,$cardFacts[(string)($source['sale_fact_id']??'')]??[]);
+            $categoryCents=[];$categoryPaths=[];
+            foreach($allocation as $categoryId=>$part){$categoryCents[$categoryId]=(int)$part['cents'];$categoryPaths[$categoryId]=(string)$part['path'];}
+            $row['row_key']=(string)$row['fact_id'];
+            $row['service_fact_id']='';$row['service_object']='';$row['source_type']='manual_refund';
+            $row['category_path']=(string)($source['category_path']??'');
+            $row['sales_category_cents']=$categoryCents;$row['sales_category_paths']=$categoryPaths;
+            $row['cash_cents']=(int)$row['amount_cents'];$row['consumption_cents']=0;
+            $row['labor_fee_amount_cents']=0;$row['project_count_half_units']=0;
+            $row['project_count_decimal_micros']=0;$row['legacy_project_count_half_units']=0;
+            $row['has_project_count_decimal']=false;$row['has_explicit_project_count']=true;
             $out[]=$row;
         }
         return $out;

@@ -41,6 +41,8 @@ const props = defineProps({
   // 当前收银行的业绩基数只用于“改比例时”的即时展示。最终结账仍以
   // 服务端锁定后的实际业务基数重算自动金额；手工金额则原样进入快照。
   performanceBaseAmountCents: { type: [Number, String], default: 0 },
+  // 退款按整元及末人尾差分配；只影响退款入口的预览，其他销售分配保持原口径。
+  refundWholeYuanTail: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
   saving: { type: Boolean, default: false },
   loadError: { type: String, default: '' }
@@ -164,11 +166,26 @@ function syncManualPerformanceAmount(item) {
   // 手改金额是独立的最终分配值，绝不反向改比例或平衡其他人员。
   item.performanceAmountManual = true
   item.performanceAmountLocked = false
+  if (props.refundWholeYuanTail && item.role === 'salespeople') {
+    unlockRefundAutomaticGroup(item)
+    syncRefundWholeYuanTail(salespeople.value)
+  }
   validationMessage.value = ''
+}
+
+function unlockRefundAutomaticGroup(item) {
+  // 编辑一人后，原快照的其余自动金额也必须按新基数/比例重算；手填最终值保持原样。
+  const group = allocationGroupKey(item)
+  salespeople.value.filter((record) => record.selected && allocationGroupKey(record) === group
+    && !record.performanceAmountManual).forEach((record) => { record.performanceAmountLocked = false })
 }
 
 function syncComputedPerformanceAmounts(records) {
   if (props.historyAdjustment || !Array.isArray(records)) return
+  if (props.refundWholeYuanTail) {
+    syncRefundWholeYuanTail(records)
+    return
+  }
   records.filter((record) => record.selected
     && craftsmanType(record) !== PERFORMANCE_TYPES.LABOR
     // 订单中心打开历史记录时，业绩事实中已保存的金额才是展示权威。
@@ -177,6 +194,32 @@ function syncComputedPerformanceAmounts(records) {
     && !record.performanceAmountManual
     && !record.performanceAmountLocked)
     .forEach((record) => syncPerformanceAmountFromRatio(record))
+}
+
+function syncRefundWholeYuanTail(records) {
+  const groups = new Map()
+  records.filter((record) => record.selected).forEach((record) => {
+    const key = allocationGroupKey(record)
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(record)
+  })
+  groups.forEach((group) => {
+    const automatic = group.filter((record) => !record.performanceAmountManual && !record.performanceAmountLocked)
+    if (!automatic.length) return
+    const base = performanceBaseCents()
+    const autoWeight = automatic.reduce((sum, record) => sum + Number(record.performance || 0), 0)
+    const autoBase = automatic.length === group.length
+      ? base : Math.trunc(Math.trunc(base / 100) * autoWeight / 100) * 100
+    let allocated = 0
+    automatic.forEach((record, index) => {
+      const share = index === automatic.length - 1
+        ? autoBase - allocated
+        : Math.trunc(base * Number(record.performance || 0) / 10000) * 100
+      record.performanceAmountCents = Math.max(0, share)
+      record.performanceAmountYuan = performanceAmountYuanText(record)
+      allocated += share
+    })
+  })
 }
 
 const PROJECT_COUNT_SCALE = 1000000
@@ -556,6 +599,10 @@ function markPerformanceTouched(item) {
   item.performanceTouched = true
   if (props.historyAdjustment && item.role === 'craftsmen') syncHistoryAmountFromRatio(item)
   else syncPerformanceAmountFromRatio(item)
+  if (props.refundWholeYuanTail && item.role === 'salespeople') {
+    unlockRefundAutomaticGroup(item)
+    syncRefundWholeYuanTail(salespeople.value)
+  }
   validationMessage.value = ''
 }
 
@@ -882,6 +929,7 @@ function confirm() {
   }
   const selectedCraftsmen = craftsmen.value.filter((item) => item.selected)
   const selectedSalespeople = salespeople.value.filter((item) => item.selected)
+  if (props.refundWholeYuanTail) syncRefundWholeYuanTail(salespeople.value)
   const selectedGuides = guides.value.filter((item) => item.selected)
   const selectedSalesManagers = salesManagers.value.filter((item) => item.selected)
   if (props.requireCraftsmen && !selectedCraftsmen.length) {

@@ -838,20 +838,31 @@ final class CashierV3OrderCenterRecordQueryServices
             'rlo.member_id', 'rlo.store_id', 'rlo.reason_snapshot', 'rlo.cash_refund_cents',
             'rlo.status', 'rlo.business_date', 'rlo.settled_at', 'u.real_name', 'u.nickname', 'u.phone',
             's.name AS store_name', 'st.staff_name', 'cso.order_no AS card_sales_order_no',
-            'ra.target_type AS adjustment_target_type,ra.target_name_snapshot AS adjustment_target_name,ra.balance_credit_cents,ra.balance_kind,ra.void_target,ra.remaining_after_cents,ra.times_after,ra.closed_remaining_cents',
+            'ra.target_type AS adjustment_target_type,ra.target_name_snapshot AS adjustment_target_name,ra.catalog_item_id,ra.catalog_kind,ra.balance_credit_cents,ra.balance_kind,ra.void_target,ra.remaining_after_cents,ra.times_after,ra.closed_remaining_cents,ra.salespeople_snapshot_json',
         ]));
         return [array_map(function (array $row): array {
-            $isManual = in_array((string)$row['source_type'], ['card', 'document'], true);
-            $targetLabel = (string)$row['source_type'] === 'card' ? '卡项退款' : '单据退款';
+            $salespeople = json_decode((string)($row['salespeople_snapshot_json'] ?? '[]'), true);
+            $salespeople = is_array($salespeople) ? $salespeople : [];
+            // 列表和导出只使用退款保存的当前快照，不从原销售单回读人员。
+            $salespersonSummary = implode('、', array_map(static function (array $person): string {
+                return (string)($person['name'] ?? '') . '（-' . number_format((int)($person['performanceAmountCents'] ?? 0) / 100, 0, '.', ',') . '）';
+            }, $salespeople));
+            $isManual = in_array((string)$row['source_type'], ['card', 'document', 'catalog'], true);
+            $targetLabel = (string)$row['source_type'] === 'card' ? '卡项退款'
+                : ((string)$row['source_type'] === 'catalog' ? '无原单退款' : '单据退款');
             $voidLabel = (int)($row['void_target'] ?? 0) === 1
                 ? ((string)$row['source_type'] === 'card' ? '作废本卡，剩余权益已关闭' : '作废明细，剩余价值已关闭')
                 : '不作废，可再次退款';
-            $summary = $isManual
+            // 无原单只保存商品归因；没有可作废的销售明细或权益，也没有余额返还。
+            $summary = (string)$row['source_type'] === 'catalog'
+                ? '无原单退款（' . (string)($row['catalog_kind'] ?? '') . '）：' . (string)($row['adjustment_target_name'] ?? '')
+                    . '；' . (string)$row['reason_snapshot']
+                : ($isManual
                 ? $targetLabel . '：' . (string)($row['adjustment_target_name'] ?? '')
                     . '；转入' . ((string)($row['balance_kind'] ?? '') === 'principal' ? '本金' : '赠金')
                     . ' ¥' . number_format((int)round((int)($row['balance_credit_cents'] ?? 0) / 100), 0, '.', ',')
                     . '；' . $voidLabel . '；' . (string)$row['reason_snapshot']
-                : (string)$row['reason_snapshot'];
+                : (string)$row['reason_snapshot']);
             return [
                 'id' => 'refund:' . (string)$row['operation_id'],
                 'refundOrderNo' => (string)$row['operation_no'],
@@ -866,6 +877,9 @@ final class CashierV3OrderCenterRecordQueryServices
                 'phone' => (string)$row['phone'],
                 'refundSummary' => $summary,
                 'refundAmount' => $this->centsToMoney((int)$row['cash_refund_cents']),
+                'salespersonSummary' => $salespersonSummary,
+                'salesperson_query_ids' => array_values(array_unique(array_map(
+                    static fn(array $person): string => (string)($person['employeeId'] ?? ''), $salespeople))),
                 // R26 只登记退款统计与会员余额，不能暗示已调用支付渠道对外退款。
                 'refundMethod' => $isManual ? '手工登记' : ((string)$row['source_type'] === 'imported_card'
                     ? '手工确认退款' : '原记账方式退回'),

@@ -98,9 +98,31 @@ const importedCardRefundCards = ref([])
 const unifiedRefundMode = ref('card')
 const unifiedRefundLines = ref([])
 const unifiedRefundLineId = ref('')
+// 无原单目录项仅作退款归因，不能复用原销售明细 ID 或剩余可退额度。
+const unifiedRefundCatalogItem = ref(null)
+const unifiedRefundCatalogItems = ref([])
+const unifiedRefundCatalogOpen = ref(false)
+const unifiedRefundCatalogLoading = ref(false)
+const unifiedRefundCatalogKeyword = ref('')
+const unifiedRefundCatalogKind = ref('全部')
+const effectiveRefundMode = computed(() => unifiedRefundMode.value === 'document' && unifiedRefundCatalogItem.value ? 'catalog' : unifiedRefundMode.value)
+const visibleRefundCatalogItems = computed(() => unifiedRefundCatalogItems.value.filter((item) => {
+  const kind = String(item.kind || '')
+  const keyword = unifiedRefundCatalogKeyword.value.trim().toLocaleLowerCase()
+  return (unifiedRefundCatalogKind.value === '全部' || kind === unifiedRefundCatalogKind.value)
+    && (!keyword || [item.name, item.specification, item.code].some((part) => String(part || '').toLocaleLowerCase().includes(keyword)))
+}))
 const unifiedRefundComponentId = ref('')
 const unifiedRefundKeyword = ref('')
 const unifiedRefundBalanceAmount = ref('0')
+// 退款业务日可补录过去日期；实际提交时间仍由服务端记录，不能由表单回填。
+const unifiedRefundBusinessDate = ref('')
+// 退款销售人是退款自己的人员草稿；切换退款对象时重新从原单读取默认值。
+const unifiedRefundPersonnel = ref(null)
+const unifiedRefundSalespeople = ref([])
+const unifiedRefundPersonnelLoading = ref(false)
+const unifiedRefundPersonnelEditorOpen = ref(false)
+let unifiedRefundPersonnelSerial = 0
 const unifiedRefundVoid = ref(false)
 const unifiedRefundValidThrough = ref('')
 const importedCardRefundLoading = ref(false)
@@ -190,9 +212,10 @@ const ORDER_TABS = [
     fields: [
       field('refund_order_no', '退款单号', 'text', { quickFilterHidden: true }),
       field('source', '来源'),
-      field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
+      field('business_date', '退款日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('source_order_no', '来源订单号'), field('member_name', '会员姓名／游客'),
       field('phone', '手机号'), field('refund_summary', '退款内容'), field('refund_amount', '退款金额', 'money'),
+      field('salesperson', '退款销售人', 'person'),
       field('refund_method', '退款方式'), field('store', '办理门店', 'store'),
       field('operator', '操作人', 'person'), field('refund_status', '退款状态', 'status'),
       field('refund_completed_at', '退款完成时间', 'date')
@@ -620,10 +643,13 @@ function changeUnifiedRefundMode(mode) {
   importedCardRefundHolderId.value = ''
   unifiedRefundComponentId.value = ''
   unifiedRefundLineId.value = ''
+  unifiedRefundCatalogItem.value = null
   importedCardRefundAmount.value = ''
   unifiedRefundBalanceAmount.value = '0'
   unifiedRefundVoid.value = false
   unifiedRefundValidThrough.value = ''
+  unifiedRefundPersonnel.value = null
+  unifiedRefundSalespeople.value = []
   if (importedCardRefundMember.value) void loadImportedCardRefundCards(importedCardRefundMember.value)
 }
 
@@ -639,9 +665,13 @@ async function loadImportedCardRefundCards(member, page = 1) {
   importedCardRefundHolderId.value = ''
   unifiedRefundComponentId.value = ''
   unifiedRefundLineId.value = ''
+  unifiedRefundCatalogItem.value = null
   importedCardRefundAmount.value = ''
   unifiedRefundBalanceAmount.value = '0'
   importedCardRefundReason.value = ''
+  unifiedRefundBusinessDate.value = refundBusinessToday()
+  unifiedRefundPersonnel.value = null
+  unifiedRefundSalespeople.value = []
   importedCardRefundPage.value = page
   importedCardRefundTotal.value = 0
   importedCardRefundError.value = ''
@@ -667,6 +697,39 @@ async function loadImportedCardRefundCards(member, page = 1) {
   }
 }
 
+// Picker contents come from the store-scoped server catalog; selecting here only drafts a refund label.
+async function openUnifiedRefundCatalog() {
+  if (importedCardRefundUncertain.value || unifiedRefundCatalogLoading.value) return
+  unifiedRefundCatalogOpen.value = true
+  unifiedRefundCatalogKeyword.value = ''
+  unifiedRefundCatalogKind.value = '全部'
+  unifiedRefundCatalogItems.value = []
+  unifiedRefundCatalogLoading.value = true
+  importedCardRefundError.value = ''
+  try {
+    const response = await requestAction('query-unified-refund-candidates', {
+      memberId: Number(importedCardRefundMember.value?.memberId || importedCardRefundMember.value?.id || 0), mode: 'catalog'
+    })
+    if (!['success', 'succeeded'].includes(actionStatus(response))) throw new Error(response?.result?.message || '目录读取失败。')
+    unifiedRefundCatalogItems.value = actionData(response).unifiedRefundCandidates?.items || []
+  } catch (error) {
+    importedCardRefundError.value = error?.message || '目录读取失败。'
+    unifiedRefundCatalogOpen.value = false
+  } finally {
+    unifiedRefundCatalogLoading.value = false
+  }
+}
+
+// A catalog target and an original sale line are mutually exclusive refund identities.
+function selectUnifiedRefundCatalogItem(item) {
+  unifiedRefundLineId.value = ''
+  unifiedRefundCatalogItem.value = item
+  unifiedRefundCatalogOpen.value = false
+  unifiedRefundBalanceAmount.value = '0'
+  unifiedRefundVoid.value = false
+  importedCardRefundAmount.value = ''
+}
+
 function handleImportedCardRefundMemberSelected(event) {
   if (event?.detail?.context !== 'imported-card-refund') return
   void loadImportedCardRefundCards(event.detail.record)
@@ -685,15 +748,70 @@ function closeImportedCardRefund() {
   importedCardRefundHolderId.value = ''
   unifiedRefundComponentId.value = ''
   unifiedRefundLineId.value = ''
+  unifiedRefundCatalogItem.value = null
+  unifiedRefundCatalogOpen.value = false
   importedCardRefundAmount.value = ''
   unifiedRefundBalanceAmount.value = '0'
   // 每次新开退款都从卡项模式开始；转入余额始终记入赠金。
+  unifiedRefundBusinessDate.value = ''
   unifiedRefundMode.value = 'card'
   unifiedRefundKeyword.value = ''
   unifiedRefundVoid.value = false
   unifiedRefundValidThrough.value = ''
   importedCardRefundReason.value = ''
+  unifiedRefundPersonnelSerial++
+  unifiedRefundPersonnel.value = null
+  unifiedRefundSalespeople.value = []
+  unifiedRefundPersonnelEditorOpen.value = false
+  unifiedRefundPersonnelLoading.value = false
   importedCardRefundCommandId = ''
+}
+
+watch(
+  () => [effectiveRefundMode.value, importedCardRefundHolderId.value, unifiedRefundLineId.value, unifiedRefundCatalogItem.value?.skuId, importedCardRefundMember.value?.memberId || importedCardRefundMember.value?.id],
+  async ([mode, holderId, lineId, catalogItemId, memberId]) => {
+    const serial = ++unifiedRefundPersonnelSerial
+    unifiedRefundPersonnel.value = null
+    unifiedRefundSalespeople.value = []
+    unifiedRefundPersonnelEditorOpen.value = false
+    if (!importedCardRefundOpen.value || !memberId || (mode === 'card' ? !holderId : mode === 'document' ? !lineId : !catalogItemId)) return
+    unifiedRefundPersonnelLoading.value = true
+    try {
+      const response = await requestAction('query-unified-refund-salespeople', {
+        mode, memberId: Number(memberId), holderId: Number(holderId || 0), lineId: String(lineId || ''), catalogItemId: Number(catalogItemId || 0)
+      })
+      if (serial !== unifiedRefundPersonnelSerial) return
+      if (!['success', 'succeeded'].includes(actionStatus(response))) {
+        importedCardRefundError.value = response?.result?.message || response?.data?.result?.message || '原单销售人读取失败。'
+        return
+      }
+      const entry = actionData(response).refundSalespeople
+      unifiedRefundPersonnel.value = entry
+      unifiedRefundSalespeople.value = Array.isArray(entry?.currentSalespeople) ? entry.currentSalespeople : []
+    } catch (error) {
+      if (serial === unifiedRefundPersonnelSerial) importedCardRefundError.value = error?.message || '原单销售人读取失败。'
+    } finally {
+      if (serial === unifiedRefundPersonnelSerial) unifiedRefundPersonnelLoading.value = false
+    }
+  }
+)
+
+function setUnifiedRefundSalespeople(assignment) {
+  unifiedRefundSalespeople.value = Array.isArray(assignment?.salespeople) ? assignment.salespeople : []
+  unifiedRefundPersonnelEditorOpen.value = false
+}
+
+function refundPersonnelPayload(rows) {
+  return (rows || []).map((person) => ({
+    staffId: Number(person.staffId || person.id || 0),
+    allocationWeight: Number(person.allocationWeight || person.performance || 0),
+    isPreSale: Boolean(person.isPreSale || person.marked),
+    performanceAmountCents: Math.max(0, Math.trunc(Number(person.performanceAmountCents || 0))),
+    performanceAmountManual: Boolean(person.performanceAmountManual),
+    positionId: Number(person.positionId || 0),
+    performanceIndependent: Boolean(person.performanceIndependent),
+    allocationGroupKey: person.allocationGroupKey || ''
+  }))
 }
 
 function importedCardRefundMoney(cents) {
@@ -718,43 +836,58 @@ async function submitImportedCardRefund() {
   if (importedCardRefundSubmitting.value) return
   const card = importedCardRefundCards.value.find((item) => String(item.holderId) === String(importedCardRefundHolderId.value))
   const line = unifiedRefundLines.value.find((item) => item.lineId === unifiedRefundLineId.value)
+  const catalogItem = unifiedRefundCatalogItem.value
+  const mode = effectiveRefundMode.value
   const amount = String(importedCardRefundAmount.value || '').trim()
   const balanceAmount = String(unifiedRefundBalanceAmount.value || '0').trim()
   const reason = String(importedCardRefundReason.value || '').trim()
+  const businessDate = String(unifiedRefundBusinessDate.value || '').trim()
   if (unifiedRefundMode.value === 'card' && (!card?.canRefund || unifiedRefundComponentId.value === '')) {
     importedCardRefundError.value = '请选择一张卡的可退款项目。'; return
   }
-  if (unifiedRefundMode.value === 'document' && !line) {
+  if (mode === 'document' && !line) {
     importedCardRefundError.value = '请选择单据中的一条购买项目或产品明细。'; return
   }
-  // Both entered amounts are whole yuan; the server applies the same rule before changing any rights or facts.
+  if (mode === 'catalog' && !catalogItem?.skuId) {
+    importedCardRefundError.value = '请选择退款商品。'; return
+  }
+  // All entered amounts are whole yuan; unlinked refunds prohibit balance grants and rights changes.
   if (!/^(?:0|[1-9][0-9]{0,7})$/.test(amount) || Number(amount) <= 0
     || !/^(?:0|[1-9][0-9]{0,7})$/.test(balanceAmount)) {
     importedCardRefundError.value = '本次退款金额和转入余额只能填写整数元。'; return
   }
-  const remaining = unifiedRefundMode.value === 'card'
+  const remaining = mode === 'card'
     ? Number(card?.remainingAmountCents || 0) / 100 : Number(line?.remainingAmountCents || 0) / 100
-  const targetRemaining = unifiedRefundMode.value === 'card'
+  const targetRemaining = mode === 'card'
     ? Number(card?.components?.find((item) => String(item.id) === unifiedRefundComponentId.value)?.remainingAmountCents || 0) / 100
     : remaining
-  if (Number(amount) > targetRemaining || Number(balanceAmount) > remaining) {
+  if (mode !== 'catalog' && (Number(amount) > targetRemaining || Number(balanceAmount) > remaining)) {
     importedCardRefundError.value = '本次退款金额或转入余额超过实际剩余金额。'; return
   }
   if (!reason || reason.length > 255) { importedCardRefundError.value = '请填写退款原因（不超过 255 字）。'; return }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate) || businessDate > refundBusinessToday()) {
+    importedCardRefundError.value = '请选择不晚于今天的有效退款日期。'; return
+  }
+  if (unifiedRefundPersonnelLoading.value || !unifiedRefundPersonnel.value || !unifiedRefundSalespeople.value.length) {
+    importedCardRefundError.value = '请先选择退款销售人并完成业绩分配。'; return
+  }
   if (!importedCardRefundCommandId) importedCardRefundCommandId = createCashierV3CommandId()
   importedCardRefundSubmitting.value = true
   importedCardRefundUncertain.value = true
   importedCardRefundError.value = ''
   try {
     const response = await requestAction('refund-card-or-line', {
-      mode: unifiedRefundMode.value,
+      mode,
       holderId: card?.holderId || 0,
       componentId: Number(unifiedRefundComponentId.value || 0),
       lineId: line?.lineId || '',
+      catalogItemId: mode === 'catalog' ? Number(catalogItem.skuId) : 0,
       memberId: Number(importedCardRefundMember.value?.memberId || importedCardRefundMember.value?.id || 0),
       refundAmount: amount,
       balanceAmount,
       balanceKind: 'bonus',
+      businessDate,
+      salespeople: refundPersonnelPayload(unifiedRefundSalespeople.value),
       voidTarget: unifiedRefundVoid.value,
       validThrough: unifiedRefundMode.value === 'card' && card?.isTimeCard
         ? Math.floor(new Date(`${unifiedRefundValidThrough.value}T23:59:59+08:00`).getTime() / 1000) : 0,
@@ -780,7 +913,7 @@ async function submitImportedCardRefund() {
       executedQueryByType.value = { ...executedQueryByType.value, refund: null }
       // 成功回执已确认，列表刷新失败也不能把已登记的退款当作失败重提。
       try {
-        await queryRecords({ ...defaultOrderCenterDateQuery(), recordType: 'refund', page: 1, keyword: '' }, true)
+        await queryRecords({ ...defaultOrderCenterDateQuery(businessDate), recordType: 'refund', page: 1, keyword: '' }, true)
       } catch { /* 保持退款页，下一次查询仍从权威记录读取。 */ }
     } else {
       if (isTerminalActionStatus(status)) {
@@ -1099,9 +1232,13 @@ function attributionIdentity(record, tab = activeTabKey.value) {
   if (tab === 'sales' && record?.entitlementOnly) return { recordType: 'service', recordId: String(record?.checkoutRequestId || '') }
   if (tab === 'sales') return { recordType: 'sales', recordId: raw }
   if (tab === 'recharge') return { recordType: 'recharge', recordId: raw.replace(/^recharge:/, '') }
+  if (tab === 'refund') return { recordType: 'refund', recordId: raw.replace(/^refund:/, '') }
   if (tab === 'supplement') return { recordType: 'supplement', recordId: raw.replace(/^v3-(?:sales-)?supplement:/, '') }
   return null
 }
+
+// 三类手工退款共用日期和销售人更正入口；原单关联与否由后端按退款类型处理。
+const editableRefundSourceTypes = new Set(['card', 'document', 'catalog'])
 
 // 列表能力仅决定是否展示蓝色入口；后端仍以当前会话门店、权限及旧值独立判定。
 function canCorrectAttribution(record, field) {
@@ -1114,6 +1251,8 @@ function canCorrectAttribution(record, field) {
     return salesOrderActionAvailable(record, 'correct-sales-order-attribution')
   }
   if (activeTabKey.value === 'recharge') return record?.attributionEditable === true
+  if (activeTabKey.value === 'refund') return field === 'business_date'
+    && editableRefundSourceTypes.has(record?.refundSourceType)
   return activeTabKey.value === 'supplement' && ['business_date', 'source'].includes(field)
     && record?.attributionEditable === true
 }
@@ -1121,6 +1260,7 @@ function canCorrectAttribution(record, field) {
 function attributionAction(type, field) {
   return type === 'sales' ? 'correct-sales-order-attribution'
     : type === 'service' ? 'correct-service-order-date'
+    : type === 'refund' ? 'correct-refund-date'
     : type === 'recharge' ? 'correct-recharge-order-attribution'
       : field === 'source' ? 'correct-debt-repayment-source' : 'correct-debt-repayment-date'
 }
@@ -1130,7 +1270,7 @@ async function readAttributionChanges(record, tab = activeTabKey.value) {
   const serial = ++attributionChangesSerial
   attributionChanges.value = []
   const identity = attributionIdentity(record, tab)
-  if (!identity || !['sales', 'service', 'recharge', 'supplement'].includes(identity.recordType)) return
+  if (!identity || !['sales', 'service', 'recharge', 'supplement', 'refund'].includes(identity.recordType)) return
   try {
     const response = await requestAction('query-order-attribution-changes', identity)
     if (serial === attributionChangesSerial && ['success', 'succeeded'].includes(actionStatus(response))) {
@@ -1512,11 +1652,14 @@ async function submitSalesPersonnelAdjustment() {
 function recordPersonnelActionNames(type) {
   return type === 'recharge'
     ? { open: 'open-recharge-personnel-adjustment', adjust: 'adjust-recharge-personnel' }
+    : type === 'refund'
+      ? { open: 'open-refund-personnel-adjustment', adjust: 'adjust-refund-personnel' }
     : { open: 'open-supplement-personnel-adjustment', adjust: 'adjust-supplement-personnel' }
 }
 
 function recordPersonnelId(record, type) {
   if (type === 'recharge') return String(record?.rechargeId || String(record?.id || '').replace(/^recharge:/, ''))
+  if (type === 'refund') return String(record?.operationId || String(record?.id || '').replace(/^refund:/, ''))
   return String(record?.repaymentId || String(record?.id || '').replace(/^v3-(?:sales-)?supplement:/, ''))
 }
 
@@ -1550,9 +1693,10 @@ function recordPersonnelInitialSelection(line = {}) {
       employeeId,
       performanceAmountCents,
       performanceAmountLocked: Boolean(
-        selected.performanceAmountLocked
+        (recordPersonnelTarget.value?.type === 'refund' && Object.prototype.hasOwnProperty.call(selected, 'performanceAmountCents'))
+        || (selected.performanceAmountLocked
           ?? selected.performance_amount_locked
-          ?? Object.prototype.hasOwnProperty.call(selected, 'amountCents')
+          ?? Object.prototype.hasOwnProperty.call(selected, 'amountCents'))
       ),
       selected: true
     }
@@ -1561,14 +1705,15 @@ function recordPersonnelInitialSelection(line = {}) {
 
 async function openRecordPersonnelEditor(record) {
   const type = activeTabKey.value
-  if (!['recharge', 'supplement'].includes(type) || !record
+  if (!['recharge', 'supplement', 'refund'].includes(type) || !record
     || !canUseCashierV3Operation('cashier.v3.order.staff_adjust')) return
+  if (type === 'refund' && !editableRefundSourceTypes.has(record.refundSourceType)) return
   const recordId = recordPersonnelId(record, type)
   if (!recordId) return
   const actions = recordPersonnelActionNames(type)
   recordPersonnelError.value = ''
   recordPersonnelEntry.value = null
-  recordPersonnelTarget.value = { type, recordId }
+  recordPersonnelTarget.value = { type, recordId, recordNo: type === 'refund' ? String(record.refundOrderNo || '') : '' }
   recordPersonnelEditorOpen.value = false
   recordPersonnelSubmitting.value = false
   try {
@@ -1580,12 +1725,14 @@ async function openRecordPersonnelEditor(record) {
     }
     const recordVersion = Number(entry.recordVersion)
     const stateContextId = String(state.stateContextId || '')
-    if (!Number.isSafeInteger(recordVersion) || recordVersion <= 0 || !stateContextId) {
+    if (!Number.isSafeInteger(recordVersion) || recordVersion < (type === 'refund' ? 0 : 1) || (type !== 'refund' && !stateContextId)) {
       recordPersonnelError.value = '销售人记录版本读取失败，请刷新后重新打开。'
       return
     }
-    const kind = type === 'recharge' ? 'recharge_order' : 'debt_repayment'
-    mergeCashierV3PublicVersions([{ kind, id: String(entry.recordId || recordId), version: recordVersion }], stateContextId, { requestStateContextId: stateContextId })
+    if (type !== 'refund') {
+      const kind = type === 'recharge' ? 'recharge_order' : 'debt_repayment'
+      mergeCashierV3PublicVersions([{ kind, id: String(entry.recordId || recordId), version: recordVersion }], stateContextId, { requestStateContextId: stateContextId })
+    }
     recordPersonnelEntry.value = entry
     recordPersonnelEditorOpen.value = true
   } catch (error) {
@@ -1750,6 +1897,11 @@ function orderCenterToday() {
   return new Date(now.getTime() - offset).toISOString().slice(0, 10)
 }
 
+// 退款业务日和服务端事实统一按门店经营时区，不依赖浏览器所处时区。
+function refundBusinessToday() {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+}
+
 function businessDateRangeFromQuery(query = {}) {
   let from = String(query.businessDateFrom ?? query.business_date_from ?? query.dateFrom ?? query.date_from ?? '').trim()
   let to = String(query.businessDateTo ?? query.business_date_to ?? query.dateTo ?? query.date_to ?? '').trim()
@@ -1776,20 +1928,18 @@ function normalizeOrderCenterDateQuery(query = {}) {
   }
 }
 
-function defaultOrderCenterDateQuery() {
-  // 八个页签的首屏日期框都显示今天，发送给后端的日期别名和结构化
-  // business_date 过滤也必须同时锁定今天，避免展示范围与真实数据不一致。
-  const today = orderCenterToday()
+function defaultOrderCenterDateQuery(date = orderCenterToday()) {
+  // 首屏默认当天；补录退款成功后改用本次选定业务日，避免新记录被当天筛选隐藏。
   return {
     dataScope: 'normal',
     businessStatus: '',
-    dateFrom: today,
-    dateTo: today,
-    businessDateFrom: today,
-    businessDateTo: today,
+    dateFrom: date,
+    dateTo: date,
+    businessDateFrom: date,
+    businessDateTo: date,
     topFilters: [
-      { field: 'business_date', operator: 'gte', value: today },
-      { field: 'business_date', operator: 'lte', value: today }
+      { field: 'business_date', operator: 'gte', value: date },
+      { field: 'business_date', operator: 'lte', value: date }
     ]
   }
 }
@@ -3148,7 +3298,7 @@ onBeforeUnmount(() => {
                 {{ displayRecordField(record, fieldItem.key) }}
               </button>
               <button
-                v-else-if="!isPlatformReadOnly && fieldItem.key === 'salesperson' && ['recharge', 'supplement'].includes(activeTabKey) && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
+                v-else-if="!isPlatformReadOnly && fieldItem.key === 'salesperson' && ['recharge', 'supplement', 'refund'].includes(activeTabKey) && (activeTabKey !== 'refund' || editableRefundSourceTypes.has(record.refundSourceType)) && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
                 type="button"
                 class="order-link"
                 title="修改销售人"
@@ -3278,6 +3428,7 @@ onBeforeUnmount(() => {
       :selected-salespeople="recordPersonnelInitialSelection(recordPersonnelEntry.lines?.[0])"
       :allocation-total-amount-cents="recordPersonnelEntry.totalAmountCents || 0"
       :performance-base-amount-cents="recordPersonnelEntry.performanceBaseAmountCents || 0"
+      :refund-whole-yuan-tail="recordPersonnelTarget.type === 'refund'"
       :saving="recordPersonnelSubmitting"
       :load-error="recordPersonnelError"
       @close="closeRecordPersonnelEditor"
@@ -3318,6 +3469,7 @@ onBeforeUnmount(() => {
         <div class="unified-refund-dialog__search">
           <input v-model.trim="unifiedRefundKeyword" type="search" class="service-void-modal__textarea" :aria-label="unifiedRefundMode === 'card' ? '搜索卡项' : '搜索单据号'" :placeholder="unifiedRefundMode === 'card' ? '搜索卡号、卡名或来源单号' : '搜索单据号'" :readonly="importedCardRefundUncertain" @keydown.enter.prevent="loadImportedCardRefundCards(importedCardRefundMember)" />
           <button type="button" class="button button--secondary" :disabled="importedCardRefundLoading || importedCardRefundUncertain" @click="loadImportedCardRefundCards(importedCardRefundMember)">查询</button>
+          <button v-if="unifiedRefundMode === 'document'" type="button" class="button button--secondary" :disabled="importedCardRefundUncertain" @click="openUnifiedRefundCatalog">选择商品</button>
         </div>
         <div v-if="importedCardRefundLoading" class="imported-card-refund-dialog__empty">正在读取可退款对象…</div>
         <template v-else-if="unifiedRefundMode === 'card'">
@@ -3362,10 +3514,15 @@ onBeforeUnmount(() => {
           </div>
         </template>
         <template v-else>
-          <div v-if="!unifiedRefundLines.length" class="imported-card-refund-dialog__empty">没有可退款的购买项目或产品明细。</div>
+          <div v-if="unifiedRefundCatalogItem" class="unified-refund-dialog__selected-catalog">
+            <strong>{{ unifiedRefundCatalogItem.name }}</strong>
+            <span>{{ unifiedRefundCatalogItem.kind }} · 无原单退款</span>
+            <button type="button" class="button button--text" :disabled="importedCardRefundUncertain" @click="unifiedRefundCatalogItem = null">移除</button>
+          </div>
+          <div v-else-if="!unifiedRefundLines.length" class="imported-card-refund-dialog__empty">没有可退款的购买项目或产品明细。</div>
           <div v-else class="imported-card-refund-dialog__cards">
             <label v-for="line in unifiedRefundLines" :key="line.lineId" class="imported-card-refund-dialog__card">
-              <input v-model="unifiedRefundLineId" type="radio" name="unified-document-line" :value="line.lineId" :disabled="importedCardRefundUncertain" />
+              <input v-model="unifiedRefundLineId" type="radio" name="unified-document-line" :value="line.lineId" :disabled="importedCardRefundUncertain" @change="unifiedRefundCatalogItem = null" />
               <span class="imported-card-refund-dialog__card-main"><strong>{{ line.name }}</strong><small>单据号：{{ line.sourceOrderNo }}　{{ line.itemType === 'project' ? '购买项目' : '产品' }}　实际剩余金额：{{ importedCardRefundMoney(line.remainingAmountCents) }}</small></span>
             </label>
           </div>
@@ -3375,15 +3532,29 @@ onBeforeUnmount(() => {
           <span>第 {{ importedCardRefundPage }} / {{ Math.ceil(importedCardRefundTotal / 50) }} 页</span>
           <button type="button" class="button button--secondary" :disabled="importedCardRefundLoading || importedCardRefundUncertain || importedCardRefundPage * 50 >= importedCardRefundTotal" @click="loadImportedCardRefundCards(importedCardRefundMember, importedCardRefundPage + 1)">下一页</button>
         </div>
-        <div class="unified-refund-dialog__field">
-          <label class="service-void-modal__label" for="imported-card-refund-amount">本次退款金额</label>
-          <input id="imported-card-refund-amount" :value="importedCardRefundAmount" class="service-void-modal__textarea" inputmode="numeric" pattern="[1-9][0-9]*" placeholder="整数元" :readonly="importedCardRefundUncertain" required @beforeinput="blockNonDigitRefundInput" @input="updateWholeYuanRefundInput($event, 'refund')" />
+        <div class="unified-refund-dialog__field-row">
+          <div class="unified-refund-dialog__field">
+            <label class="service-void-modal__label" for="imported-card-refund-amount">本次退款金额</label>
+            <input id="imported-card-refund-amount" :value="importedCardRefundAmount" class="service-void-modal__textarea" inputmode="numeric" pattern="[1-9][0-9]*" placeholder="整数元" :readonly="importedCardRefundUncertain" required @beforeinput="blockNonDigitRefundInput" @input="updateWholeYuanRefundInput($event, 'refund')" />
+          </div>
+          <div v-if="effectiveRefundMode !== 'catalog'" class="unified-refund-dialog__field">
+            <label class="service-void-modal__label" for="unified-refund-balance">转入余额</label>
+            <input id="unified-refund-balance" :value="unifiedRefundBalanceAmount" class="service-void-modal__textarea" inputmode="numeric" pattern="(?:0|[1-9][0-9]*)" placeholder="整数元，可填 0" :readonly="importedCardRefundUncertain" @beforeinput="blockNonDigitRefundInput" @input="updateWholeYuanRefundInput($event, 'balance')" />
+          </div>
         </div>
-        <div class="unified-refund-dialog__field">
-          <label class="service-void-modal__label" for="unified-refund-balance">转入余额</label>
-          <input id="unified-refund-balance" :value="unifiedRefundBalanceAmount" class="service-void-modal__textarea" inputmode="numeric" pattern="(?:0|[1-9][0-9]*)" placeholder="整数元，可填 0" :readonly="importedCardRefundUncertain" @beforeinput="blockNonDigitRefundInput" @input="updateWholeYuanRefundInput($event, 'balance')" />
+        <div class="unified-refund-dialog__field-row">
+          <div class="unified-refund-dialog__field">
+            <label class="service-void-modal__label" for="unified-refund-business-date">退款日期</label>
+            <input id="unified-refund-business-date" v-model="unifiedRefundBusinessDate" type="date" class="service-void-modal__textarea" :max="refundBusinessToday()" :readonly="importedCardRefundUncertain" required />
+          </div>
+          <div class="unified-refund-dialog__field">
+            <label class="service-void-modal__label">退款销售人</label>
+            <button type="button" class="button button--secondary service-void-modal__textarea unified-refund-dialog__personnel-button" :title="unifiedRefundSalespeople.map((person) => person.name).join('、') || '选择销售人'" :disabled="importedCardRefundUncertain || unifiedRefundPersonnelLoading || !unifiedRefundPersonnel" @click="unifiedRefundPersonnelEditorOpen = true">
+              {{ unifiedRefundPersonnelLoading ? '读取中…' : unifiedRefundSalespeople.length ? unifiedRefundSalespeople.map((person) => person.name).join('、') : '选择销售人' }}
+            </button>
+          </div>
         </div>
-        <div class="unified-refund-dialog__choices" role="group" aria-label="作废选择">
+        <div v-if="effectiveRefundMode !== 'catalog'" class="unified-refund-dialog__choices" role="group" aria-label="作废选择">
           <label><input v-model="unifiedRefundVoid" type="radio" :value="false" /> 不作废</label>
           <label><input v-model="unifiedRefundVoid" type="radio" :value="true" /> {{ unifiedRefundMode === 'card' ? '作废本卡' : '作废明细' }}</label>
         </div>
@@ -3394,10 +3565,41 @@ onBeforeUnmount(() => {
         </div>
         <footer class="service-void-modal__actions">
           <button type="button" class="button button--secondary" :disabled="importedCardRefundUncertain" @click="closeImportedCardRefund">取消</button>
-          <button type="submit" class="button button--primary" :disabled="importedCardRefundSubmitting || importedCardRefundLoading || (unifiedRefundMode === 'card' ? !importedCardRefundCards.length : !unifiedRefundLines.length)">{{ importedCardRefundSubmitting ? '提交中…' : importedCardRefundUncertain ? '重试确认' : '确认退款' }}</button>
+          <button type="submit" class="button button--primary" :disabled="importedCardRefundSubmitting || importedCardRefundLoading || unifiedRefundPersonnelLoading || (unifiedRefundMode === 'card' ? !importedCardRefundCards.length : !unifiedRefundLines.length && !unifiedRefundCatalogItem)">{{ importedCardRefundSubmitting ? '提交中…' : importedCardRefundUncertain ? '重试确认' : '确认退款' }}</button>
         </footer>
       </form>
     </div>
+
+    <div v-if="unifiedRefundCatalogOpen" class="service-void-modal unified-refund-catalog-modal" role="dialog" aria-modal="true" aria-label="选择商品">
+      <div class="service-void-modal__backdrop" @click="!unifiedRefundCatalogLoading && (unifiedRefundCatalogOpen = false)"></div>
+      <section class="service-void-modal__panel unified-refund-catalog-modal__panel">
+        <header class="service-void-modal__head"><h2>选择商品</h2><button type="button" class="button button--secondary" @click="unifiedRefundCatalogOpen = false">关闭</button></header>
+        <div class="unified-refund-catalog-modal__filters">
+          <input v-model="unifiedRefundCatalogKeyword" type="search" class="service-void-modal__textarea" placeholder="搜索名称、规格或编码" aria-label="搜索商品" />
+          <select v-model="unifiedRefundCatalogKind" class="service-void-modal__textarea" aria-label="商品类型"><option v-for="kind in ['全部', '项目', '产品', '卡项']" :key="kind">{{ kind }}</option></select>
+        </div>
+        <div class="unified-refund-catalog-modal__list">
+          <p v-if="unifiedRefundCatalogLoading">正在读取商品…</p>
+          <p v-else-if="!visibleRefundCatalogItems.length">没有匹配的商品。</p>
+          <button v-for="item in visibleRefundCatalogItems" :key="item.skuId" type="button" class="unified-refund-catalog-modal__item" @click="selectUnifiedRefundCatalogItem(item)"><strong>{{ item.name }}</strong><span>{{ item.kind }}{{ item.specification ? ` · ${item.specification}` : '' }}</span></button>
+        </div>
+      </section>
+    </div>
+
+    <PersonnelPerformanceOverlay
+      v-if="unifiedRefundPersonnelEditorOpen && unifiedRefundPersonnel"
+      initial-tab="salespeople"
+      initial-mode="full"
+      :show-craftsmen="false"
+      :show-salespeople="true"
+      :salesperson-candidates="unifiedRefundPersonnel.salespeople || []"
+      :selected-salespeople="unifiedRefundSalespeople"
+      :performance-base-amount-cents="Number(importedCardRefundAmount || 0) * 100"
+      refund-whole-yuan-tail
+      :allocation-total-amount-cents="Number(importedCardRefundAmount || 0) * 100"
+      @close="unifiedRefundPersonnelEditorOpen = false"
+      @confirm="setUnifiedRefundSalespeople"
+    />
 
     <div v-if="attributionEditor" class="service-void-modal" role="dialog" aria-modal="true" aria-label="更正订单归属">
       <div class="service-void-modal__backdrop"></div>
@@ -3534,7 +3736,7 @@ onBeforeUnmount(() => {
           <h2 id="record-personnel-reason-title">填写修改原因</h2>
           <button type="button" class="service-void-modal__close" :disabled="recordPersonnelSubmitting" @click="cancelRecordPersonnelReason">×</button>
         </header>
-        <p class="service-void-modal__record">{{ recordPersonnelTarget.type === 'recharge' ? '充值订单' : '补交记录' }} · {{ recordPersonnelTarget.recordId }}</p>
+        <p class="service-void-modal__record">{{ recordPersonnelTarget.type === 'recharge' ? '充值订单' : recordPersonnelTarget.type === 'refund' ? '退款记录' : '补交记录' }} · {{ recordPersonnelTarget.recordNo || recordPersonnelTarget.recordId }}</p>
         <label class="service-void-modal__label" for="record-personnel-reason">修改原因</label>
         <textarea id="record-personnel-reason" v-model="recordPersonnelReason" class="service-void-modal__textarea" maxlength="255" rows="4" placeholder="请输入修改原因"></textarea>
         <p v-if="recordPersonnelError" class="service-void-modal__error" role="alert">{{ recordPersonnelError }}</p>
@@ -3773,6 +3975,19 @@ onBeforeUnmount(() => {
 .unified-refund-dialog__search { display: flex; align-items: center; gap: 8px; }
 .unified-refund-dialog__search .service-void-modal__textarea { flex: 1; min-width: 0; width: auto; }
 .unified-refund-dialog__search .button { flex: none; min-width: 72px; margin-left: auto; }
+.unified-refund-dialog__search .button + .button { margin-left: 0; }
+.unified-refund-dialog__selected-catalog { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid #b8d1f3; border-radius: 6px; background: #f3f8ff; }
+.unified-refund-dialog__selected-catalog span { color: #667085; }
+.unified-refund-dialog__selected-catalog .button { margin-left: auto; }
+.unified-refund-catalog-modal { z-index: 90; }
+.unified-refund-catalog-modal__panel { width: min(680px, calc(100vw - 32px)); }
+.unified-refund-catalog-modal__filters { display: flex; gap: 8px; margin: 16px 0; }
+.unified-refund-catalog-modal__filters input { flex: 1; min-width: 0; }
+.unified-refund-catalog-modal__filters select { width: 112px; }
+.unified-refund-catalog-modal__list { display: grid; gap: 6px; max-height: min(55vh, 480px); overflow-y: auto; }
+.unified-refund-catalog-modal__item { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; padding: 10px; border: 1px solid #d0d5dd; border-radius: 6px; background: #fff; color: #1d2939; text-align: left; cursor: pointer; }
+.unified-refund-catalog-modal__item:hover { border-color: #2d74c4; background: #f3f8ff; }
+.unified-refund-catalog-modal__item span { color: #667085; }
 .unified-refund-dialog__card-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; flex: none; height: clamp(240px, 38dvh, 380px); min-height: 0; }
 .unified-refund-dialog__card-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .unified-refund-dialog__column-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex: none; margin-bottom: 10px; }
@@ -3802,6 +4017,9 @@ onBeforeUnmount(() => {
 .unified-refund-dialog__component-remaining strong { color: #1f5e99; }
 .unified-refund-dialog__component-remaining small { color: #66758b; }
 .unified-refund-dialog__field .service-void-modal__label { margin-bottom: 6px; }
+.unified-refund-dialog__field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.unified-refund-dialog__field-row > .unified-refund-dialog__field { min-width: 0; }
+.unified-refund-dialog__personnel-button { height: 39px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .unified-refund-dialog__component-panel .unified-refund-dialog__field { margin-top: 14px; }
 .unified-refund-dialog__choices { display: flex; flex-wrap: wrap; gap: 8px 20px; }
 .unified-refund-dialog__choices label { display: inline-flex; align-items: center; gap: 6px; }
@@ -3816,6 +4034,7 @@ onBeforeUnmount(() => {
 @media (max-width: 560px) {
   .imported-card-refund-dialog > .service-void-modal__head { padding: 16px 18px 12px; }
   .unified-refund-dialog__body { gap: 14px; padding: 16px 18px; }
+  .unified-refund-dialog__field-row { grid-template-columns: minmax(0, 1fr); }
   .unified-refund-dialog__component-remaining { flex-direction: column; align-items: flex-end; gap: 0; }
   .imported-card-refund-dialog > .service-void-modal__actions { padding: 12px 18px; }
 }

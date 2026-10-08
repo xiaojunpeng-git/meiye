@@ -10,10 +10,13 @@ $checks = [
         && strpos($gateway, 'stored_context_store_denied') !== false
         && strpos($gateway, 'stored_context_tenant_denied') !== false,
     'historical replay no longer re-resolves terminal resources through attachScopes' => strpos($gateway, 'attachScopes(\n                $replayContexts') === false,
-    'empty-context refund replay checks committed operation and current store scope' => strpos($gateway, "\$canonicalAction !== 'refund-card-or-line'") !== false
+    'empty-context refund replay checks committed operation and current store scope' => strpos($gateway, "['refund-card-or-line', 'adjust-refund-personnel']") !== false
         && strpos($gateway, 'unifiedRefundReplayScopeFailure(') !== false
         && strpos($gateway, "->where('command_idempotency_key', (string)(\$existing['idempotency_key'] ?? ''))") !== false
         && strpos($gateway, 'refund_replay_store_denied') !== false,
+    'empty-context refund personnel replay checks its own audit and operator scope' => strpos($gateway, 'refundPersonnelReplayScopeFailure(') !== false
+        && strpos($gateway, "->where('r.operator_id', \$operatorScope->operatorId())") !== false
+        && strpos($gateway, 'refund_personnel_replay_revision_missing') !== false,
 ];
 
 $failed = [];

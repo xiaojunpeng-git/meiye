@@ -76,7 +76,8 @@ try {
     'correct-service-order-date',
     'correct-recharge-order-attribution',
     'correct-debt-repayment-date',
-    'correct-debt-repayment-source'
+    'correct-debt-repayment-source',
+    'correct-refund-date'
   ]
   for (const action of actions) {
     await bridge.requestCashierV3Action(action, {
@@ -91,7 +92,7 @@ try {
     assert.deepEqual(payload.command.contexts, [])
     assert.ok(payload.command.idempotencyKey)
   }
-  console.log('R22 order attribution: five commands reached adapter with empty contexts; no database write')
+  console.log(`${actions.length} order attribution commands reached adapter with empty contexts; no database write`)
 } finally {
   fs.rmSync(tempDir, { recursive: true, force: true })
 }

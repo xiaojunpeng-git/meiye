@@ -1774,7 +1774,8 @@ class CashierV3CommandGatewayServices extends BaseServices
         // 重放必须重新解析第一次落回执时保存的 contexts；不能信任本次请求
         // 夹带的版本或只依赖 store_id/operator_id，否则数据范围收窄后会泄露旧 data。
         $storedContexts = json_decode((string)($existing['contexts_json'] ?? ''), true);
-        if (!is_array($storedContexts) || ($storedContexts === [] && $canonicalAction !== 'refund-card-or-line')) {
+        if (!is_array($storedContexts) || ($storedContexts === []
+            && !in_array($canonicalAction, ['refund-card-or-line', 'adjust-refund-personnel'], true))) {
             return $this->replayDenied(
                 $stateContext,
                 $txnDataScope,
@@ -1786,7 +1787,9 @@ class CashierV3CommandGatewayServices extends BaseServices
         // Unified refund locks its target inside the domain transaction and intentionally stores
         // no browser contexts. For this action, recheck the committed operation and today's scope.
         $scopeFailure = $storedContexts === []
-            ? $this->unifiedRefundReplayScopeFailure($existing, $operatorScope, $txnDataScope)
+            ? ($canonicalAction === 'adjust-refund-personnel'
+                ? $this->refundPersonnelReplayScopeFailure($existing, $operatorScope, $txnDataScope)
+                : $this->unifiedRefundReplayScopeFailure($existing, $operatorScope, $txnDataScope))
             : $this->historicalReplayScopeFailure($storedContexts, $operatorScope, $txnDataScope);
         if ($scopeFailure !== '') {
             return $this->replayDenied(
@@ -1959,9 +1962,37 @@ class CashierV3CommandGatewayServices extends BaseServices
             ->where('operator_id', $operatorScope->operatorId())
             ->where('operation_type', 'refund')
             ->where('status', 'succeeded')->find();
-        if (!$operation || !in_array((string)($operation['source_type'] ?? ''), ['card', 'document'], true)
+        // Catalog refunds have no original order, but their committed refund operation is still
+        // the replay authority for the same operator/store/idempotency key.
+        if (!$operation || !in_array((string)($operation['source_type'] ?? ''), ['card', 'document', 'catalog'], true)
             || (string)$operation['operation_no'] !== (string)($existing['business_no'] ?? '')) {
             return 'refund_replay_operation_missing';
+        }
+        return '';
+    }
+
+    /** 改派重放只验证服务端审计绑定的退款、原操作员及当前门店权限，不接受客户端伪造对象。 */
+    private function refundPersonnelReplayScopeFailure(
+        array $existing,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): string {
+        $identityFailure = $this->historicalReplayScopeFailure([], $operatorScope, $dataScope);
+        if ($identityFailure !== '') return $identityFailure;
+        if ($dataScope->isReadOnlySession() || !$dataScope->allowsStore($operatorScope->storeId())) {
+            return 'refund_personnel_replay_store_denied';
+        }
+        $revision = Db::name('cashier_v3_refund_salesperson_revision')->alias('r')
+            ->join('cashier_v3_order_lifecycle_operation op',
+                'op.tenant_id=r.tenant_id AND op.operation_id=r.operation_id')
+            ->where('r.tenant_id', $operatorScope->tenantId())
+            ->where('r.store_id', $operatorScope->storeId())
+            ->where('r.operator_id', $operatorScope->operatorId())
+            ->where('r.command_idempotency_key', (string)($existing['idempotency_key'] ?? ''))
+            ->where('op.operation_type', 'refund')->where('op.status', 'succeeded')
+            ->field('op.operation_no')->find();
+        if (!$revision || (string)$revision['operation_no'] !== (string)($existing['business_no'] ?? '')) {
+            return 'refund_personnel_replay_revision_missing';
         }
         return '';
     }

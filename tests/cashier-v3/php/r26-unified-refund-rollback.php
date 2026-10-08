@@ -9,6 +9,7 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
 use app\services\cashier\v3\manifest\CashierV3ActionManifest;
 use app\services\cashier\v3\order\CashierV3UnifiedRefundServices;
+use app\services\cashier\v3\order\CashierV3RefundSalespersonServices;
 use app\services\cashier\v3\order\CashierV3OrderCenterRecordQueryServices;
 use app\services\cashier\v3\member\CashierV3MemberDetailQueryServices;
 use app\services\cashier\v3\cashier\CashierV3EntitlementProjectionServices;
@@ -29,6 +30,13 @@ $scope = new CashierV3DataScopeContext((int)$staff['id'], (int)$staff['id'], $st
     (string)$staff['org_id'], [$storeId], CashierV3DataScopeContext::MODE_STORES, [], false,
     '', 'r26-rollback', ['cashier.v3.order_center', 'cashier.v3.order.refund'], $staff);
 $service = new CashierV3UnifiedRefundServices();
+// 新退款在独立负向事实中记录本门店销售人；回滚后原销售事实保持不变。
+$personnelEntry = (new CashierV3RefundSalespersonServices())->selection([
+    'mode' => 'card', 'memberId' => 978855, 'holderId' => 2074451,
+], $operator, $scope);
+$refundSalesperson = $personnelEntry['salespeople'][0] ?? null;
+if (!$refundSalesperson) throw new RuntimeException('Local refund salesperson probe fixture unavailable.');
+$singleSalesperson = [['staffId' => $refundSalesperson['staffId'], 'allocationWeight' => 100]];
 $cards = $service->candidates(['memberId' => 978855, 'mode' => 'card'], $operator, $scope)['cards'];
 $card = array_values(array_filter($cards, static fn(array $item): bool => (int)$item['holderId'] === 2074451))[0] ?? null;
 if (!$card || !$card['canRefund']) throw new RuntimeException('Local card probe fixture unavailable.');
@@ -38,7 +46,8 @@ $key = 'CMD-' . substr($hex, 0, 8) . '-' . substr($hex, 8, 4) . '-4'
 $payload = ['mode' => 'card', 'memberId' => 978855, 'holderId' => 2074451,
     'componentId' => (int)$card['components'][0]['id'], 'lineId' => '',
     'refundAmount' => '450', 'balanceAmount' => '700', 'balanceKind' => 'bonus',
-    'voidTarget' => false, 'validThrough' => 0, 'reason' => 'R26本地事务回滚验证'];
+    'voidTarget' => false, 'validThrough' => 0, 'reason' => 'R26本地事务回滚验证',
+    'salespeople' => $singleSalesperson];
 $dispatcher = CashierV3Bootstrap::dispatcher();
 Db::startTrans();
 try {
@@ -76,6 +85,11 @@ try {
     if (($response['status'] ?? '') !== 'success') throw new RuntimeException(json_encode($response, JSON_UNESCAPED_UNICODE));
     $cardNo = (string)($response['data']['unifiedRefund']['operationNo'] ?? '');
     if (!preg_match('/^TK[0-9]{6}[0-9]{4}$/D', $cardNo)) throw new RuntimeException('Card refund number is not TK + date + 4 digits.');
+    $refundId = (string)($response['data']['unifiedRefund']['operationId'] ?? '');
+    if ((int)Db::name('cashier_v3_performance_fact')->where('order_id', $refundId)
+        ->where('performance_type', 'refund_sales_deduction')->sum('amount_cents') !== -45000) {
+        throw new RuntimeException('Refund salesperson negative performance fact missing.');
+    }
     $replayed = $dispatcher->gateway()->execute('refund-card-or-line',
         ['idempotencyKey' => $key, 'contexts' => []], $payload, $operator,
         ['client_session_id' => 'SESSION-' . substr($key, 4), 'operator_profile' => $staff],
@@ -98,7 +112,7 @@ try {
     $docPayload = ['mode' => 'document', 'memberId' => 1136826, 'holderId' => 0,
         'componentId' => 0, 'lineId' => $line['lineId'], 'refundAmount' => '10',
         'balanceAmount' => '12', 'balanceKind' => 'bonus', 'voidTarget' => true,
-        'validThrough' => 0, 'reason' => 'R26本地单据事务回滚验证'];
+        'validThrough' => 0, 'reason' => 'R26本地单据事务回滚验证', 'salespeople' => $singleSalesperson];
     $doc = $dispatcher->gateway()->execute('refund-card-or-line',
         ['idempotencyKey' => $docKey, 'contexts' => []], $docPayload, $operator,
         ['client_session_id' => 'SESSION-' . substr($docKey, 4), 'operator_profile' => $staff],
@@ -140,7 +154,7 @@ try {
     $sharedPayload = ['mode' => 'card', 'memberId' => $sharedMemberId, 'holderId' => $sharedHolderId,
         'componentId' => 0, 'lineId' => '', 'refundAmount' => '100', 'balanceAmount' => '0',
         'balanceKind' => 'bonus', 'voidTarget' => false, 'validThrough' => 0,
-        'reason' => 'R26本地共享次数事务回滚验证'];
+        'reason' => 'R26本地共享次数事务回滚验证', 'salespeople' => $singleSalesperson];
     $sharedResponse = $dispatcher->gateway()->execute('refund-card-or-line',
         ['idempotencyKey' => $sharedKey, 'contexts' => []], $sharedPayload, $operator,
         ['client_session_id' => 'SESSION-' . substr($sharedKey, 4), 'operator_profile' => $staff],
@@ -218,8 +232,15 @@ try {
         || (int)$closedRule['shared_remaining_times'] !== 0 || (string)$closedRule['status'] !== 'revoked') {
         throw new RuntimeException('Voided shared-count card retained usable rights.');
     }
+} catch (\Throwable $error) {
+    $failure = $error;
 } finally {
     Db::rollback();
+}
+if (isset($failure)) {
+    // 缺少本地固定样本也必须返回失败码，不能把中途回滚误报成完整通过。
+    file_put_contents('php://stderr', $failure->getMessage() . PHP_EOL);
+    exit(1);
 }
 if (Db::name(CashierV3UnifiedRefundServices::TABLE)->where('command_idempotency_key', $key)->count()) {
     throw new RuntimeException('Probe transaction did not roll back.');

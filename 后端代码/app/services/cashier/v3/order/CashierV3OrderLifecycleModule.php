@@ -16,7 +16,7 @@ final class CashierV3OrderLifecycleModule
         $attribution = new CashierV3OrderAttributionCorrectionServices();
         foreach (['correct-sales-order-attribution', 'correct-service-order-date',
             'correct-recharge-order-attribution', 'correct-debt-repayment-date',
-            'correct-debt-repayment-source'] as $action) {
+            'correct-debt-repayment-source', 'correct-refund-date'] as $action) {
             // 更正以服务端主单锁和提交时旧值比较控制并发，避免给原单增加业务版本。
             $dispatcher->handlers()->registerCommand($action, static function (array $scope) use ($attribution): array {
                 $result = $attribution->executeInTx($scope);
@@ -39,16 +39,35 @@ final class CashierV3OrderLifecycleModule
         $service = new CashierV3OrderLifecycleServices($workspace, new CashierV3SaleCatalogServices());
         $importedCardRefund = new CashierV3ImportedCardRefundServices();
         $unifiedRefund = new CashierV3UnifiedRefundServices();
+        $refundPersonnel = new CashierV3RefundSalespersonServices();
         $dispatcher->handlers()->registerProjection('query-unified-refund-candidates', static function (array $scope) use ($unifiedRefund): array {
             return ['data' => ['unifiedRefundCandidates' => $unifiedRefund->candidates(
                 (array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope'])],
                 'message' => '可退款项目已读取。'];
+        });
+        $dispatcher->handlers()->registerProjection('query-unified-refund-salespeople', static function (array $scope) use ($refundPersonnel): array {
+            return ['data' => ['refundSalespeople' => $refundPersonnel->selection((array)($scope['payload'] ?? []),
+                $scope['operator_scope'], $scope['data_scope'])], 'message' => '原单销售人已读取。'];
+        });
+        $dispatcher->handlers()->registerProjection('open-refund-personnel-adjustment', static function (array $scope) use ($refundPersonnel): array {
+            return ['data' => ['personnelAdjustment' => $refundPersonnel->entry((array)($scope['payload'] ?? []),
+                $scope['operator_scope'], $scope['data_scope'])], 'message' => '退款销售人已读取。'];
         });
         $dispatcher->handlers()->registerCommand('refund-card-or-line', static function (array $scope) use ($unifiedRefund): array {
             return $unifiedRefund->executeInTx($scope);
         });
         // The service locks the chosen card/line and member balance in one transaction.
         $dispatcher->policies()->register(new CashierV3ContextPolicy('refund-card-or-line', [], [], static function (): array {
+            return ['required' => [], 'allowed' => [], 'identities' => [],
+                'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
+        }, [], [], [], true));
+        $dispatcher->handlers()->registerCommand('adjust-refund-personnel', static function (array $scope) use ($refundPersonnel): array {
+            $result = $refundPersonnel->adjustInTx($scope);
+            return ['data' => ['refundPersonnelAdjustment' => $result], 'business_no' => (string)$result['operationNo'],
+                'message' => (string)$result['message']];
+        });
+        // The refund row itself provides the locked version; this command never inherits the cashier draft.
+        $dispatcher->policies()->register(new CashierV3ContextPolicy('adjust-refund-personnel', [], [], static function (): array {
             return ['required' => [], 'allowed' => [], 'identities' => [],
                 'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
         }, [], [], [], true));

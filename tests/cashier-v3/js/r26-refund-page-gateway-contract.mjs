@@ -30,6 +30,11 @@ const contextBranch = bridge.match(/if \(\['void-order-center-supplement'[\s\S]*
 const serverDiscovery = bridge.match(/const serverDiscoverableContextActions = \[[\s\S]*?\]/)?.[0] || ''
 assert.match(contextBranch, /'refund-card-or-line'/)
 assert.match(serverDiscovery, /'refund-card-or-line'/)
+// 退款改派走同一条服务端锁单路径，两个前端上下文门禁必须一致。
+assert.match(contextBranch, /'adjust-refund-personnel'/)
+assert.match(serverDiscovery, /'adjust-refund-personnel'/)
+assert.match(orderCenter, /recordPersonnelTarget\.type === 'refund' \? '退款记录'/)
+assert.match(orderCenter, /recordPersonnelTarget\.recordNo \|\| recordPersonnelTarget\.recordId/)
 
 // Both refund modes credit bonus only; a stale client cannot select principal.
 const closeDialog = orderCenter.match(/function closeImportedCardRefund\(\) \{[\s\S]*?\n\}/)?.[0] || ''
@@ -78,7 +83,7 @@ assert.doesNotMatch(orderCenter, /unifiedRefundSuccess|unified-refund-result/)
 assert.match(orderCenter, /if \(!result\?\.operationNo\) \{[\s\S]*importedCardRefundUncertain\.value = true/)
 const refundSubmit = orderCenter.match(/async function submitImportedCardRefund\(\) \{[\s\S]*?\n\}\n/)?.[0] || ''
 assert.match(refundSubmit, /if \(!result\?\.operationNo\) \{[\s\S]*?return[\s\S]*?\n      \}/)
-assert.match(refundSubmit, /closeImportedCardRefund\(\)[\s\S]*activeTabKey\.value = 'refund'[\s\S]*queryModelByType\.value = \{ \.\.\.queryModelByType\.value, refund: \{\} \}[\s\S]*executedQueryByType\.value = \{ \.\.\.executedQueryByType\.value, refund: null \}[\s\S]*await queryRecords\(\{ \.\.\.defaultOrderCenterDateQuery\(\), recordType: 'refund', page: 1, keyword: '' \}, true\)/)
+assert.match(refundSubmit, /closeImportedCardRefund\(\)[\s\S]*activeTabKey\.value = 'refund'[\s\S]*queryModelByType\.value = \{ \.\.\.queryModelByType\.value, refund: \{\} \}[\s\S]*executedQueryByType\.value = \{ \.\.\.executedQueryByType\.value, refund: null \}[\s\S]*await queryRecords\(\{ \.\.\.defaultOrderCenterDateQuery\(businessDate\), recordType: 'refund', page: 1, keyword: '' \}, true\)/)
 assert.match(refundService, /'targetName' => \(string\)\(\$saved\['target_name_snapshot'\]/)
 // The V3 entitlement order carries a v3c... ID, but card refunds must show
 // the sale number through the tenant-scoped issuance receipt, including old rows.

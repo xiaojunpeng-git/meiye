@@ -760,6 +760,7 @@ class CashierV3ActionManifest
             'correct-recharge-order-attribution' => self::attributionCorrectionEventContract('correct-recharge-order-attribution'),
             'correct-debt-repayment-date' => self::attributionCorrectionEventContract('correct-debt-repayment-date'),
             'correct-debt-repayment-source' => self::attributionCorrectionEventContract('correct-debt-repayment-source'),
+            'correct-refund-date' => self::attributionCorrectionEventContract('correct-refund-date'),
             'refund-sales-order' => [
                 'required_event_types' => ['sales_order.refunded'], 'allowed_event_types' => ['sales_order.refunded'],
                 'event_rules' => ['sales_order.refunded' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'refund-sales-order']],
@@ -786,6 +787,16 @@ class CashierV3ActionManifest
                 ]],
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['manual_refund.completed' => []],
+            ],
+            'adjust-refund-personnel' => [
+                'required_event_types' => ['manual_refund.personnel_adjusted'],
+                'allowed_event_types' => ['manual_refund.personnel_adjusted'],
+                'event_rules' => ['manual_refund.personnel_adjusted' => [
+                    'min_count' => 1, 'max_count' => 1,
+                    'aggregate_type' => 'manual_refund', 'source_type' => 'adjust-refund-personnel',
+                ]],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['manual_refund.personnel_adjusted' => []],
             ],
             'void-sales-order' => [
                 'required_event_types' => ['sales_order.voided'], 'allowed_event_types' => ['sales_order.voided'],

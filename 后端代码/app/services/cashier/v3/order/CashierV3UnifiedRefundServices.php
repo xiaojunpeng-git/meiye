@@ -15,12 +15,13 @@ use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
 use app\services\cashier\v3\card\CashierV3CardComponentPurchaseAmountAuthority;
 use app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
+use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\user\UserBalanceAtomicServices;
 use think\facade\Db;
 
 /**
  * One manual refund targets one card component, a whole shared-count pool,
- * or a purchased sales line. The
+ * a purchased sales line, or a catalog item without an original order. The
  * recorded refund and optional member-balance grant are independent facts;
  * neither is a payment-channel refund or a new sale receipt.
  */
@@ -37,7 +38,11 @@ final class CashierV3UnifiedRefundServices
             throw self::fail('请选择有效会员。', 'refund_member_invalid');
         }
         $mode = (string)($payload['mode'] ?? 'card');
-        if (!in_array($mode, ['card', 'document'], true)) throw self::fail('请选择退款类型。', 'refund_mode_invalid');
+        if (!in_array($mode, ['card', 'document', 'catalog'], true)) throw self::fail('请选择退款类型。', 'refund_mode_invalid');
+        if ($mode === 'catalog') {
+            // The catalog is a label authority only: this mode never creates a sale or restores stock/rights.
+            return ['mode' => 'catalog', 'items' => $this->catalogItems($operator, $scope)];
+        }
         $keyword = trim((string)($payload['keyword'] ?? ''));
         if (mb_strlen($keyword) > 64) throw self::fail('查询内容过长。', 'refund_keyword_invalid');
         if ($mode === 'card') {
@@ -109,7 +114,7 @@ final class CashierV3UnifiedRefundServices
         $this->assertAccess($operator, $scope);
         $payload = (array)($command['payload'] ?? []);
         $mode = (string)($payload['mode'] ?? '');
-        if (!in_array($mode, ['card', 'document'], true)) throw self::fail('请选择退款类型。', 'refund_mode_invalid');
+        if (!in_array($mode, ['card', 'document', 'catalog'], true)) throw self::fail('请选择退款类型。', 'refund_mode_invalid');
         $memberId = (int)($payload['memberId'] ?? 0);
         $void = $payload['voidTarget'] ?? false;
         if (!is_bool($void) || $memberId <= 0) throw self::fail('退款对象无效，请重新选择。', 'refund_target_invalid');
@@ -123,8 +128,10 @@ final class CashierV3UnifiedRefundServices
         $holderId = (int)($payload['holderId'] ?? 0);
         $componentId = (int)($payload['componentId'] ?? 0);
         $lineId = trim((string)($payload['lineId'] ?? ''));
+        $catalogItemId = (int)($payload['catalogItemId'] ?? 0);
         if (($mode === 'card' && $holderId <= 0)
-            || ($mode === 'document' && !preg_match('/^[A-Za-z0-9_.:-]{1,64}$/D', $lineId))) {
+            || ($mode === 'document' && !preg_match('/^[A-Za-z0-9_.:-]{1,64}$/D', $lineId))
+            || ($mode === 'catalog' && ($catalogItemId <= 0 || $void || $balanceCents !== 0))) {
             throw self::fail('请选择一张卡的项目或一条购买明细。', 'refund_line_invalid');
         }
         $key = (string)($command['idempotency_key'] ?? '');
@@ -138,7 +145,8 @@ final class CashierV3UnifiedRefundServices
         }
         $snapshot = $mode === 'card'
             ? $this->cardSnapshot($holderId, $memberId, $scope->tenantId(), true)
-            : $this->lineSnapshot($lineId, $memberId, $scope->tenantId(), true);
+            : ($mode === 'document' ? $this->lineSnapshot($lineId, $memberId, $scope->tenantId(), true)
+                : $this->catalogSnapshot($catalogItemId, $operator, $scope));
         if ($snapshot['voided'] || !$snapshot['canRefund']) {
             throw self::fail((string)$snapshot['unavailableReason'], 'refund_target_unavailable');
         }
@@ -151,7 +159,7 @@ final class CashierV3UnifiedRefundServices
                 : $this->selectedCardComponent($snapshot, $componentId))
             : $snapshot;
         $remaining = (int)$target['remainingAmountCents'];
-        if ($refundCents > $remaining || $balanceCents > (int)$snapshot['remainingAmountCents']) {
+        if ($mode !== 'catalog' && ($refundCents > $remaining || $balanceCents > (int)$snapshot['remainingAmountCents'])) {
             throw self::fail('本次退款金额或转入余额超过实际剩余金额，请调整后重试。', 'refund_amount_exceeds_remaining');
         }
         $newEnd = (int)($payload['validThrough'] ?? 0);
@@ -163,13 +171,18 @@ final class CashierV3UnifiedRefundServices
             throw self::fail('该退款对象不需要修改有效期。', 'refund_expiry_not_applicable');
         }
         $now = time();
-        $date = (new \DateTimeImmutable('@' . $now))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
+        $actualDate = (new \DateTimeImmutable('@' . $now))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
+        $date = self::refundBusinessDate($payload['businessDate'] ?? $actualDate, $actualDate);
         $operationId = 'OLO-' . strtoupper(substr(hash('sha256', $scope->tenantId() . '|' . $key), 0, 40));
+        // Repeated refunds of one SKU are distinct refund facts; the source line must be the
+        // refund operation, while the catalog SKU remains a separate searchable dimension.
+        if ($mode === 'catalog') $target['lineId'] = $operationId;
         // Only a successful, non-replayed command allocates a visible refund number.
         // The allocator's locked daily sequence rolls back with this refund transaction.
         $operationNo = (new CashierV3BusinessDocumentNumberServices())->allocateForSourceInTx(
             $scope->tenantId(), CashierV3BusinessDocumentNumberServices::REFUND,
-            'unified_refund', $operationId, $date, $now
+            // 单号按实际登记日连续编号；可补录的经营归属日不倒排单号。
+            'unified_refund', $operationId, $actualDate, $now
         );
         $event = $command['event_recorder']->recordInTx($command['event_execution'],
             (array)($command['event_contract'] ?? []), [
@@ -185,7 +198,9 @@ final class CashierV3UnifiedRefundServices
             ]);
         $after = $mode === 'card'
             ? $this->adjustCard($snapshot, $target, $refundCents, $void, $newEnd, $scope->tenantId(), $now)
-            : $this->adjustLine($snapshot, $refundCents, $void);
+            : ($mode === 'document' ? $this->adjustLine($snapshot, $refundCents, $void)
+                : ['remainingAmountCents' => 0, 'closedRemainingCents' => 0,
+                    'remainingTimes' => 0, 'timesRemoved' => 0, 'timesClosed' => 0]);
         $sourceOrderId = (string)$snapshot['sourceOrderId'];
         $sourceOrderNo = (string)$snapshot['sourceOrderNo'];
         $row = [
@@ -212,6 +227,8 @@ final class CashierV3UnifiedRefundServices
             'target_type' => $mode, 'card_holder_id' => $mode === 'card' ? $holderId : 0,
             'card_component_id' => $mode === 'card' ? $componentId : 0,
             'source_order_id' => $sourceOrderId, 'source_line_id' => $mode === 'document' ? $lineId : '',
+            'catalog_item_id' => $mode === 'catalog' ? $catalogItemId : 0,
+            'catalog_kind' => $mode === 'catalog' ? (string)$target['kind'] : '',
             'source_order_no_snapshot' => $sourceOrderNo, 'target_name_snapshot' => (string)$target['name'],
             'refund_amount_cents' => $refundCents, 'balance_credit_cents' => $balanceCents,
             'balance_kind' => $balanceKind, 'remaining_before_cents' => (int)$snapshot['remainingAmountCents'],
@@ -225,9 +242,23 @@ final class CashierV3UnifiedRefundServices
             'business_date' => $date, 'occurred_at' => $now, 'settled_at' => $now,
             'recorded_at' => $now, 'status' => 'effective',
         ]);
+        // 退款人员归属独立于原单，负向工资事实与退款在同一事务落账。
+        (new CashierV3RefundSalespersonServices())->createInTx($row, $payload,
+            (int)$adjustmentRowId, $event, $operator, $scope);
         $this->creditBalance($memberId, $balanceCents, $key, (int)$adjustmentRowId,
             $operationId, $sourceOrderNo, $operator, $scope, $event, $date, $now);
         return $this->result($row, false, $after + ['voidTarget' => $void]);
+    }
+
+    /** 补录日期只改变经营归属；真实发生、结算和记录时间仍取服务端时钟。 */
+    private static function refundBusinessDate($value, string $today): string
+    {
+        $value = trim((string)$value);
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value, new \DateTimeZone('Asia/Shanghai'));
+        if (!$date || $date->format('Y-m-d') !== $value || $value > $today) {
+            throw self::fail('请选择不晚于今天的有效退款日期。', 'refund_business_date_invalid');
+        }
+        return $value;
     }
 
     /** Manual refund performance is a signed adjustment, never a channel payment reversal. */
@@ -278,6 +309,27 @@ final class CashierV3UnifiedRefundServices
             if ((int)$component['id'] === $componentId && (int)$component['remainingAmountCents'] > 0) return $component;
         }
         throw self::fail('所选卡项目没有可退金额，请重新选择。', 'refund_component_unavailable');
+    }
+
+    /** Both picker and final write resolve the same store-scoped SKU authority; price is never a refund cap. */
+    private function catalogItems(CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
+    {
+        $items = (new CashierV3SaleCatalogServices())->catalog($operator, $scope)['items'] ?? [];
+        return array_values(array_filter($items, static fn(array $item): bool =>
+            empty($item['disabled']) && in_array((string)($item['kind'] ?? ''), ['项目', '产品', '卡项'], true)));
+    }
+
+    /** An unlinked refund has no remaining sale value, card state, or source order to mutate. */
+    private function catalogSnapshot(int $skuId, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
+    {
+        foreach ($this->catalogItems($operator, $scope) as $item) {
+            if ((int)($item['skuId'] ?? 0) !== $skuId) continue;
+            return ['id' => 'catalog:' . $skuId, 'name' => (string)$item['name'],
+                'kind' => (string)$item['kind'], 'sourceOrderId' => '', 'sourceOrderNo' => '',
+                'remainingAmountCents' => 0, 'remainingTimes' => 0, 'voided' => false,
+                'canRefund' => true, 'unavailableReason' => ''];
+        }
+        throw self::fail('所选商品已不在当前门店目录中，请重新选择。', 'refund_catalog_item_unavailable');
     }
 
     private function cardSnapshot(int $holderId, int $memberId, string $tenantId, bool $lock, ?array $candidate = null): array
