@@ -138,6 +138,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['restore-order-center-debt'] = self::FEATURE_ORDER_VOID;
         $command['void-order-center-gift'] = self::FEATURE_ORDER_VOID;
         $command['void-order-center-project-replacement'] = self::FEATURE_ORDER_VOID;
+        $command['void-order-center-refund'] = self::FEATURE_ORDER_VOID;
         $command['reopen-sales-order'] = self::FEATURE_ORDER_REOPEN;
         $command['upgrade-sales-order'] = self::FEATURE_ORDER_CENTER;
         $command['print-sales-order-receipt'] = self::FEATURE_ORDER_RECEIPT_PRINT;

@@ -2745,6 +2745,13 @@ async function restoreDebt(record) {
 }
 
 const rechargeLifecycleActions = computed(() => {
+  // 退款作废只开放给仍生效的 V3 退款；旧退款缺少权益与余额快照，不能推测恢复。
+  if (activeTabKey.value === 'refund' && genericDetailRecord.value) {
+    return String(genericDetailRecord.value.id || '').startsWith('refund:')
+      && editableRefundSourceTypes.has(genericDetailRecord.value.refundSourceType)
+      && genericDetailRecord.value.refundStatus === '已退款'
+      && canUseCashierV3Operation('cashier.v3.order.void') ? ['refund-record-void'] : []
+  }
   // 卡操作只开放 V3 项目替换的反向操作；旧版记录缺少可核对的目标权益快照。
   if (activeTabKey.value === 'card_operation' && genericDetailRecord.value) {
     return canVoidProjectReplacement(genericDetailRecord.value) ? ['replacement-void'] : []
@@ -2765,7 +2772,7 @@ async function handleRechargeLifecycleAction(payload = {}) {
   const record = genericDetailRecord.value || {}
   const action = String(payload.action || '')
   if (action === 'void-order-center-supplement' || action === 'void-order-center-gift'
-    || action === 'void-order-center-project-replacement') {
+    || action === 'void-order-center-project-replacement' || action === 'void-order-center-refund') {
     const recordId = action === 'void-order-center-gift' ? giftVoidRecordId(record) : String(record.id || '')
     if (!recordId) return { result: { status: 'failed', message: '记录标识已变化，请刷新后重试。' } }
     const key = `${action}:${recordId}`
@@ -3333,6 +3340,8 @@ onBeforeUnmount(() => {
                 class="button button--text"
                 @click="openRecordDetail(record)"
               >{{ activeTabKey === 'service' ? '详情' : '查看详情' }}</button>
+              <button v-if="activeTabKey === 'refund' && editableRefundSourceTypes.has(record.refundSourceType) && record.refundStatus === '已退款' && canUseCashierV3Operation('cashier.v3.order.void')"
+                type="button" class="button button--text button--danger" @click="openRecordDetail(record, 'refund-record-void')">作废</button>
               <button v-if="canVoidProjectReplacement(record)" type="button"
                 class="button button--text button--danger" @click="openProjectReplacementVoid(record)">作废</button>
               <!-- 服务只保留详情入口；打印与作废统一按消费订单处理，避免拆单操作。 -->

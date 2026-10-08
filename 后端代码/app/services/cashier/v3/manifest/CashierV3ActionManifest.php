@@ -847,6 +847,15 @@ class CashierV3ActionManifest
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['card.operation.voided' => []],
             ],
+            // 误录退款完整撤销保留原退款事件，另记反向事件和独立作废审计。
+            'void-order-center-refund' => [
+                'required_event_types' => ['manual_refund.voided'],
+                'allowed_event_types' => ['manual_refund.voided'],
+                'event_rules' => ['manual_refund.voided' => ['min_count' => 1, 'max_count' => 1,
+                    'aggregate_type' => 'manual_refund', 'source_type' => 'void-order-center-refund']],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['manual_refund.voided' => []],
+            ],
             'adjust-service-record-craftsmen' => [
                 'required_event_types' => ['service_record.craftsmen_adjusted'],
                 'allowed_event_types' => ['service_record.craftsmen_adjusted'],

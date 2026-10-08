@@ -196,6 +196,9 @@ final class CashierV3UnifiedRefundServices
                 'payload' => ['mode' => $mode, 'refundAmountCents' => $refundCents,
                     'balanceCreditCents' => $balanceCents, 'voidTarget' => $void],
             ]);
+        // 卡项作废必须能精确恢复整张卡的既有状态；请求事实同时保存前后快照，
+        // 不用当前卡规则猜测退款前哪些项目原本已停用。
+        $rightsBefore = $mode === 'card' ? $this->refundReversalRightsSnapshotInTx($scope->tenantId(), $holderId) : null;
         $after = $mode === 'card'
             ? $this->adjustCard($snapshot, $target, $refundCents, $void, $newEnd, $scope->tenantId(), $now)
             : ($mode === 'document' ? $this->adjustLine($snapshot, $refundCents, $void)
@@ -203,13 +206,18 @@ final class CashierV3UnifiedRefundServices
                     'remainingTimes' => 0, 'timesRemoved' => 0, 'timesClosed' => 0]);
         $sourceOrderId = (string)$snapshot['sourceOrderId'];
         $sourceOrderNo = (string)$snapshot['sourceOrderNo'];
+        $requestSnapshot = $payload;
+        if ($rightsBefore !== null) $requestSnapshot['_reversal'] = [
+            'rightsBefore' => $rightsBefore,
+            'rightsAfter' => $this->refundReversalRightsSnapshotInTx($scope->tenantId(), $holderId),
+        ];
         $row = [
             'operation_id' => $operationId, 'operation_no' => $operationNo, 'tenant_id' => $scope->tenantId(),
             'store_id' => $operator->storeId(), 'member_id' => $memberId, 'operator_id' => $operator->operatorId(),
             'source_type' => $mode, 'source_order_id' => $sourceOrderId,
             'source_order_no_snapshot' => $sourceOrderNo, 'operation_type' => 'refund',
             'command_idempotency_key' => $key, 'immutable_fingerprint' => $fingerprint,
-            'reason_snapshot' => $reason, 'request_json' => json_encode($payload, JSON_UNESCAPED_UNICODE),
+            'reason_snapshot' => $reason, 'request_json' => json_encode($requestSnapshot, JSON_UNESCAPED_UNICODE),
             'business_event_no' => (string)$event['event_no'], 'amount_cents' => -$refundCents,
             'cash_refund_cents' => $refundCents, 'reversed_cash_cents' => 0,
             'restored_principal_cents' => 0,
@@ -466,6 +474,25 @@ final class CashierV3UnifiedRefundServices
             'validThrough' => (int)$candidate['write_end'], 'isTimeCard' => $isTime,
             'ruleType' => (string)($rule['rule_type'] ?? ''), 'components' => $components,
             'voided' => $voided, 'canRefund' => $canRefund, 'unavailableReason' => $canRefund ? '' : $reason];
+    }
+
+    /** 只保存本次退款可能改变的权益列；作废时对比整个后快照再恢复原值。 */
+    public function refundReversalRightsSnapshotInTx(string $tenantId, int $holderId): array
+    {
+        CashierV3TransactionGuard::assertInTransaction('refundReversalRightsSnapshot');
+        $holder = (array)Db::name('user_card_holder')->where('id', $holderId)
+            ->field('id,uid,oid,is_del,write_times,write_surplus_times,write_end')->lock(true)->find();
+        if (!$holder) throw self::fail('卡项权威记录缺失，无法保存退款恢复快照。', 'refund_rights_holder_missing');
+        $state = (array)Db::name('cashier_v3_card_state')->where('tenant_id', $tenantId)
+            ->where('card_holder_id', $holderId)->field('id,current_member_id,card_status,status_reason_snapshot,current_version,last_operation_id')->lock(true)->find();
+        $rule = (array)Db::name('cashier_v3_card_rule_state')->where('tenant_id', $tenantId)
+            ->where('card_holder_id', $holderId)->field('id,status,shared_remaining_times,valid_through,selected_kind_count,state_version')->lock(true)->find();
+        $components = Db::name('cashier_v3_card_rule_component')->where('tenant_id', $tenantId)
+            ->where('card_holder_id', $holderId)->field('id,status,remaining_times,selection_status,state_version')->order('id asc')->lock(true)->select()->toArray();
+        $carts = Db::name('store_order_cart_info')->where('oid', (int)$holder['oid'])
+            ->where('cart_type', 2)->where('product_type', 6)
+            ->field('id,cart_info,write_times,write_surplus_times,write_end')->order('id asc')->lock(true)->select()->toArray();
+        return compact('holder', 'state', 'rule', 'components', 'carts');
     }
 
     private function lineSnapshot(string $lineId, int $memberId, string $tenantId, bool $lock, ?array $line = null): array

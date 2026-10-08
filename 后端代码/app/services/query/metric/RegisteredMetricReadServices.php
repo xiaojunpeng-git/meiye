@@ -2522,6 +2522,8 @@ final class RegisteredMetricReadServices
             ->where('p.status', 'effective')->where('p.fact_type', 'payment_refunded')
             ->where('p.source_document_type', 'imported_card_refund')
             ->where('p.amount_cents', '<', 0)
+            // 误录退款的原现金事实保留审计，但正常指标不得再计入作废单。
+            ->whereRaw("(p.source_document_type <> 'manual_refund' OR NOT EXISTS (SELECT 1 FROM eb_cashier_v3_refund_adjustment voided_refund WHERE voided_refund.tenant_id=p.tenant_id AND voided_refund.operation_id=p.order_id AND voided_refund.status='voided'))")
             ->whereBetween('p.business_date', [$range['start'], $range['end']]);
     }
 

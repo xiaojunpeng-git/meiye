@@ -824,8 +824,11 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('system_store s', 's.id = rlo.store_id')
             ->leftJoin('system_store_staff st', 'st.id = rlo.operator_id')
             ->where('rlo.tenant_id', (string)$criteria['tenantId'])
-            ->where('rlo.operation_type', 'refund')
-            ->where('rlo.status', 'succeeded');
+            ->where('rlo.operation_type', 'refund');
+        // 正常数据及报表只包含生效退款；全部数据仍可追溯已作废的原记录。
+        if ($criteria['status'] === 'voided') $query->where('rlo.status', 'voided');
+        elseif ($criteria['status'] === 'completed' || $criteria['dataScope'] === 'normal') $query->where('rlo.status', 'succeeded');
+        else $query->whereIn('rlo.status', ['succeeded', 'voided']);
         $this->applyStoreScope($query, 'rlo.store_id', $criteria['allowedStoreIds']);
         $this->applyBusinessDateRange($query, 'rlo.business_date', $criteria);
         $this->applyKeyword($query, $criteria['keyword'], [
@@ -885,7 +888,7 @@ final class CashierV3OrderCenterRecordQueryServices
                     ? '手工确认退款' : '原记账方式退回'),
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
-                'refundStatus' => '已退款',
+                'refundStatus' => (string)$row['status'] === 'voided' ? '已作废' : '已退款',
                 'refundCompletedAt' => $this->dateTime((int)$row['settled_at']),
                 'refundSourceType' => (string)$row['source_type'],
             ];
@@ -2247,6 +2250,7 @@ final class CashierV3OrderCenterRecordQueryServices
         if ($type === 'refund') {
             return array_merge($options, [
                 ['value' => 'completed', 'label' => '已退款'],
+                ['value' => 'voided', 'label' => '已作废'],
             ]);
         }
         if ($type === 'debt') {

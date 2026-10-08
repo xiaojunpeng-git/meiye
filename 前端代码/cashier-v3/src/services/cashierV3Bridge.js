@@ -2896,7 +2896,7 @@ function resolveCommandContexts(action, payload) {
   // attaching the currently displayed cashier workspace revision.
   // 项目替换作废以原操作号反查并锁定权益，不能继承收银工作台版本。
   // 统一退款以服务端事务锁定选中的卡项或单据明细及会员余额，不继承收银工作台版本。
-  if (['void-order-center-supplement', 'void-order-center-project-replacement', 'cancel-order-center-debt', 'restore-order-center-debt', 'refund-imported-card', 'refund-card-or-line', 'adjust-refund-personnel'].includes(action)) {
+  if (['void-order-center-supplement', 'void-order-center-project-replacement', 'void-order-center-refund', 'cancel-order-center-debt', 'restore-order-center-debt', 'refund-imported-card', 'refund-card-or-line', 'adjust-refund-personnel'].includes(action)) {
     return { invalid: false, contexts: [] }
   }
 
@@ -3747,6 +3747,7 @@ export async function requestCashierV3Action(action, payload = {}) {
     'restore-order-center-debt',
     'void-order-center-supplement',
     'void-order-center-project-replacement',
+    'void-order-center-refund',
     'void-service-record',
     'complete-checkout-reservations',
     'correct-sales-order-attribution',

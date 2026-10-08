@@ -62,7 +62,8 @@ final class CashierV3OrderCenterVoidServices
             ->where('command_idempotency_key', $key)->lock(true)->find();
         if ($existing) {
             // A command key cannot be replayed for a different record or action.
-            if (($action === 'void-order-center-project-replacement' && (int)$existing['store_id'] !== $operator->storeId())
+            if ((in_array($action, ['void-order-center-project-replacement', 'void-order-center-refund'], true)
+                    && (int)$existing['store_id'] !== $operator->storeId())
                 || (string)$existing['record_id'] !== $recordId || (string)$existing['source_kind'] !== $this->voidSourceKind($action, $recordId)
                 || (string)$existing['status'] !== 'succeeded') {
                 throw self::failure('作废请求与原记录不一致，请重新打开记录。', 'order_center_void_replay_mismatch');
@@ -72,9 +73,14 @@ final class CashierV3OrderCenterVoidServices
         $recordOperation = Db::name(self::OPERATION_TABLE)->where('tenant_id', $dataScope->tenantId())
             ->where('record_id', $recordId)->where('status', 'succeeded')->lock(true)->find();
         if ($recordOperation) {
-            if (($action === 'void-order-center-project-replacement' && (int)$recordOperation['store_id'] !== $operator->storeId())
+            if ((in_array($action, ['void-order-center-project-replacement', 'void-order-center-refund'], true)
+                    && (int)$recordOperation['store_id'] !== $operator->storeId())
                 || (string)$recordOperation['source_kind'] !== $this->voidSourceKind($action, $recordId)) {
                 throw self::failure('记录作废类型不一致。', 'order_center_void_kind_mismatch');
+            }
+            // 另一个幂等键不能把已完成作废伪装成一次新事件；同键重放由网关回执处理。
+            if ($action === 'void-order-center-refund') {
+                throw self::failure('这笔退款已经作废，请刷新退款记录。', 'refund_void_already_completed');
             }
             return $this->replayedVoid($recordOperation, $action);
         }
@@ -87,6 +93,10 @@ final class CashierV3OrderCenterVoidServices
         }
         if ($action === 'void-order-center-project-replacement') {
             return $this->voidProjectReplacement($recordId, $reason, $key, $operator, $dataScope, $recorder, $execution, (array)($scope['event_contract'] ?? []));
+        }
+        if ($action === 'void-order-center-refund') {
+            return (new CashierV3RefundVoidServices())->executeInTx($recordId, $reason, $key,
+                $operator, $dataScope, $recorder, $execution, (array)($scope['event_contract'] ?? []));
         }
         throw self::failure('暂不支持该订单中心作废类型。', 'order_center_void_action_invalid');
     }
@@ -393,15 +403,17 @@ final class CashierV3OrderCenterVoidServices
     private function replayedVoid(array $row, string $action): array
     {
         $replacement = $action === 'void-order-center-project-replacement';
+        $refund = $action === 'void-order-center-refund';
         return ['data' => ['void' => ['operationNo' => (string)$row['operation_no'], 'replayed' => true]],
             'business_no' => (string)$row['operation_no'],
-            'touched' => [$replacement ? 'source_card' : ($action === 'void-order-center-gift' ? 'cashier_workspace' : 'supplement_record')],
-            'message' => $replacement ? '该项目替换已作废。' : ($action === 'void-order-center-gift' ? '该赠送记录已作废。' : '该补交记录已作废。')];
+            'touched' => [$replacement ? 'source_card' : ($refund ? 'order_center' : ($action === 'void-order-center-gift' ? 'cashier_workspace' : 'supplement_record'))],
+            'message' => $replacement ? '该项目替换已作废。' : ($refund ? '该退款记录已作废。' : ($action === 'void-order-center-gift' ? '该赠送记录已作废。' : '该补交记录已作废。'))];
     }
 
     private function voidSourceKind(string $action, string $recordId): string
     {
         if ($action === 'void-order-center-project-replacement') return 'project_replacement';
+        if ($action === 'void-order-center-refund') return 'manual_refund';
         if ($action === 'void-order-center-gift') return 'gift';
         if ($action === 'void-order-center-supplement') {
             return strpos($recordId, 'v3-sales-supplement:') === 0 ? 'sales_supplement' : 'recharge_supplement';
@@ -430,7 +442,7 @@ final class CashierV3OrderCenterVoidServices
         }
     }
 
-    private function operation(CashierV3DataScopeContext $scope, CashierV3OperatorScope $operator, string $key, string $recordId, string $kind, string $sourceId, string $reason, int $now): array
+    public function operation(CashierV3DataScopeContext $scope, CashierV3OperatorScope $operator, string $key, string $recordId, string $kind, string $sourceId, string $reason, int $now): array
     {
         $operationId = 'OCV-' . strtoupper(substr(hash_hmac('sha256', $scope->tenantId() . '|' . $recordId . '|' . $key, (string)config('cashier_v3.checkout_namespace_secret')), 0, 40));
         $operationNo = 'ZF' . date('ymdHis', $now) . strtoupper(substr(hash('sha256', $operationId), 0, 6));

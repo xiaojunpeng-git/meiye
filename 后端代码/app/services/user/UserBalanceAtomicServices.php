@@ -50,6 +50,11 @@ class UserBalanceAtomicServices extends BaseServices
             'ledger_type' => 'manual_refund_credit', 'pm' => 1,
             'title' => '退款转入余额', 'mark' => '退款转入余额{%num%}元',
         ],
+        // 只扣回误录退款所入账的赠金，不挪用本金掩盖余额不足。
+        'manual_refund_void' => [
+            'ledger_type' => 'manual_refund_void', 'pm' => 0,
+            'title' => '误录退款作废', 'mark' => '误录退款作废扣回赠金{%num%}元',
+        ],
         'order_void' => [
             'ledger_type' => 'order_void', 'pm' => 1,
             'title' => '订单作废冲正', 'mark' => '订单作废退回余额{%num%}元',

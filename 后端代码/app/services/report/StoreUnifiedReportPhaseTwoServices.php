@@ -1921,6 +1921,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $this->applyOrganizationFilters($query, $alias, $this->activeInput, $this->activeRange);
         $query->where($alias . '.status', 'effective')
             ->where($alias . '.amount_cents', '<', 0)
+            // 作废退款仍可从审计追溯，市场 K、下钻及院店退款台账均不再统计。
+            ->whereRaw("({$alias}.source_document_type <> 'manual_refund' OR NOT EXISTS (SELECT 1 FROM eb_cashier_v3_refund_adjustment voided_refund WHERE voided_refund.tenant_id={$alias}.tenant_id AND voided_refund.operation_id={$alias}.order_id AND voided_refund.status='voided'))")
             ->where(function ($kind) use ($alias): void {
                 $kind->where(function ($manual) use ($alias): void {
                     $manual->where($alias . '.fact_type', 'manual_refund_adjustment')
