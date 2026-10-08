@@ -211,9 +211,11 @@ export default {
       this.open = Boolean(open);
       this.$nextTick(() => {
         const modalBody = this.$el && this.$el.closest('.ivu-modal-body');
-        if (!modalBody) return;
-        const hasOpenPanel = Boolean(modalBody.querySelector('.organization-store-scope-picker__panel'));
-        modalBody.classList.toggle('organization-store-scope-picker-open', hasOpenPanel);
+        if (modalBody) {
+          const hasOpenPanel = Boolean(modalBody.querySelector('.organization-store-scope-picker__panel'));
+          modalBody.classList.toggle('organization-store-scope-picker-open', hasOpenPanel);
+        }
+        // 面板会转移到 body；普通页面也必须按触发按钮重新定位，否则落在页面底部、看起来像没有打开。
         this.updatePanelPosition();
       });
     },

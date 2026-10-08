@@ -45,7 +45,7 @@ final class EmployeeDashboardServices
                 'overview' => '在职且启用的员工档案及有效门店任职关系；年龄和工龄按查询截止日计算。',
                 'roles' => '当前有效岗位任职和员工美容师能力开关；编制读取集团看板已保存的门店月度目标外的员工编制配置。',
                 'performance' => '成功销售分配、完成服务和消耗业绩事实；退款/作废按反向事实净额处理。',
-                'target' => '集团管理看板按门店、月份保存的目标事实；未配置目标显示“-”。',
+                'target' => '门店目标报表当前引用的有效方案；目标与完成值同为全店实际业绩，未配置显示“-”。',
             ],
         ];
     }
@@ -143,9 +143,53 @@ final class EmployeeDashboardServices
 
     private function target(array $stores,array $range,array $performance): array
     {
-        $year=(int)substr($range['end'],0,4);$month=(int)substr($range['end'],5,2);$targets=[];try{$targets=(new GroupManagementDashboardTargetServices())->totals(['tenant_id'=>'0','store_ids'=>$stores],$year,[$month]);}catch(\Throwable $e){$targets=[];}$consumption=$this->sumPerformance($stores,$range,'consume_amount');$target=array_sum($targets);$branches=[];foreach(Db::name('system_store')->whereIn('id',$stores)->column('name','id') as $sid=>$name){$t=(int)($targets[(int)$sid]??0);$c=$this->sumPerformance([(int)$sid],$range,'consume_amount');$branches[]=['label'=>(string)$name,'consumption'=>$c/100,'target'=>$t/100,'completion'=>$t?round($c*100/$t,1):null];}
-        $trend=[];$trendLabels=[];$cursor=date('Y-m-01',strtotime($range['start']));$endMonth=date('Y-m-01',strtotime($range['end']));while($cursor<=$endMonth){$mStart=$cursor;$mEnd=date('Y-m-t',strtotime($cursor));$mRange=['start'=>max($range['start'],$mStart),'end'=>min($range['end'],$mEnd)];$mTarget=0;try{$mTarget=array_sum((new GroupManagementDashboardTargetServices())->totals(['tenant_id'=>'0','store_ids'=>$stores],(int)substr($cursor,0,4),[(int)substr($cursor,5,2)]));}catch(\Throwable $e){}$mConsume=$this->sumPerformance($stores,$mRange,'consume_amount');$trend[]=$mTarget?round($mConsume*100/$mTarget,1):null;$trendLabels[]=substr($cursor,5).'月';$cursor=date('Y-m-01',strtotime($cursor.' +1 month'));}
-        return ['cards'=>[$this->registeredCard('consumption_amount','consume_amount',$consumption/100,'元','teal'),$this->card('consumption_ratio','消耗/销售比例',$performance['cards'][0]['value']?round($consumption/100*100/$performance['cards'][0]['value'],1):null,'%','消耗业绩除以销售业绩，分母为零显示“-”','green'),$this->card('target_amount','业绩目标',$target/100,'元','集团管理看板门店月度目标事实','blue'),$this->card('target_completion','目标完成率',$target?round($consumption*100/$target,1):null,'%','消耗业绩除以目标，未配置目标显示“-”','amber')], 'trend'=>$trend, 'trendLabels'=>$trendLabels, 'branches'=>$branches];
+        $month = substr($range['end'], 0, 7);
+        $schemes = new \app\services\target\TargetSchemeServices();
+        $context = ['tenant_id' => '0', 'store_ids' => $stores];
+        $effective = $schemes->effective($context, 'store_target', [$month]);
+        $targets = [];
+        foreach ($effective['lines'] as $line) {
+            if ($line['metric_code'] === 'actual_performance' && $line['scope_type'] === 'store')
+                $targets[(int)$line['store_id']] = (int)$line['target_value'];
+        }
+        $coveredStores = array_keys($targets);
+        $actual = $coveredStores ? $this->sumPerformance($coveredStores, $range, 'actual_performance') : 0;
+        $target = array_sum($targets);
+        $consumption = $this->sumPerformance($stores, $range, 'consume_amount');
+        $branches = [];
+        foreach (Db::name('system_store')->whereIn('id', $stores)->column('name', 'id') as $sid => $name) {
+            $t = (int)($targets[(int)$sid] ?? 0);
+            $value = $t ? $this->sumPerformance([(int)$sid], $range, 'actual_performance') : 0;
+            $branches[] = ['label' => (string)$name, 'consumption' => $value / 100,
+                'target' => $t / 100, 'completion' => $t ? round($value * 100 / $t, 1) : null];
+        }
+        $trend = []; $trendLabels = [];
+        $cursor = date('Y-m-01', strtotime($range['start']));
+        $endMonth = date('Y-m-01', strtotime($range['end']));
+        while ($cursor <= $endMonth) {
+            $monthKey = substr($cursor, 0, 7);
+            $lines = $schemes->effective($context, 'store_target', [$monthKey])['lines'];
+            $monthTargets = [];
+            foreach ($lines as $line) if ($line['metric_code'] === 'actual_performance' && $line['scope_type'] === 'store')
+                $monthTargets[(int)$line['store_id']] = (int)$line['target_value'];
+            $monthTarget = array_sum($monthTargets);
+            $monthActual = $monthTargets ? $this->sumPerformance(array_keys($monthTargets), [
+                'start' => max($range['start'], $cursor), 'end' => min($range['end'], date('Y-m-t', strtotime($cursor))),
+            ], 'actual_performance') : 0;
+            $trend[] = $monthTarget ? round($monthActual * 100 / $monthTarget, 1) : null;
+            $trendLabels[] = substr($cursor, 5) . '月';
+            $cursor = date('Y-m-01', strtotime($cursor . ' +1 month'));
+        }
+        // 消耗卡保持自身指标；只有目标卡使用实际业绩的同口径分子与分母。
+        return ['cards' => [
+            $this->registeredCard('consumption_amount', 'consume_amount', $consumption / 100, '元', 'teal'),
+            $this->card('consumption_ratio', '消耗/销售比例', $performance['cards'][0]['value']
+                ? round($consumption / $performance['cards'][0]['value'], 1) : null,
+                '%', '消耗业绩除以销售业绩，分母为零显示“-”', 'green'),
+            $this->card('target_amount', '实际业绩目标', $target / 100, '元', '门店目标有效方案', 'blue'),
+            $this->card('target_completion', '目标完成率', $target ? round($actual * 100 / $target, 1) : null,
+                '%', '仅统计有目标的门店，同口径实际业绩除以目标', 'amber'),
+        ], 'trend' => $trend, 'trendLabels' => $trendLabels, 'branches' => $branches];
     }
 
     private function scopeSummary(array $stores,array $performance): array { $amount=(float)($performance['cards'][0]['value']??0);$cons=(float)($performance['cards'][3]['value']??0);return ['总部'=>['total'=>(int)Db::name('system_store_staff')->whereIn('store_id',$stores)->where('status',1)->where('is_del',0)->count(),'amount'=>$amount,'consumption'=>$cons]]; }

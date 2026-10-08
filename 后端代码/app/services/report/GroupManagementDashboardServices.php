@@ -133,16 +133,19 @@ final class GroupManagementDashboardServices
                     : (bool)$aggregateStatus['aggregation_caught_up'],
             ];
         }
-        $goalMonths = $this->monthsForRange($range);
-        $targets = $this->targets->totals(['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, $goalMonths);
-        $monthTargets = $this->targets->totals(['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, [(int)substr($range['end'], 5, 2)]);
+        // 进度只比较已设置目标的门店×月份；普通经营业绩卡仍按完整筛选范围展示。
+        $goalProgress = (new \app\services\target\TargetSchemeReportServices())->groupProgress(
+            ['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, $range['end']
+        );
+        $monthTargets = $goalProgress['month_targets'];
         $categoryCards = (new \app\services\query\metric\RegisteredMetricReadServices())->categoryDashboardCards(
             'cash_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryTree['roots'], $categoryTree['children'], $categoryIds
         );
         $currentTarget = array_sum($monthTargets);
-        $yearTarget = array_sum($targets);
-        $monthActual = $this->actualCashTotal($scope['tenant_id'], $scope['store_ids'], ['start' => $month . '-01', 'end' => $range['end']], $categoryIds);
-        $yearActual = $this->actualCashTotal($scope['tenant_id'], $scope['store_ids'], ['start' => sprintf('%04d-01-01', $year), 'end' => $range['end']], $categoryIds);
+        $yearTarget = array_sum($goalProgress['year_targets']);
+        $monthActual = $goalProgress['month_actual'];
+        $yearActual = $goalProgress['year_actual'];
+        $targetedStoreIds = array_map('intval', array_keys($monthTargets));
 
         return [
             'dashboard_code' => self::DASHBOARD_CODE,
@@ -154,12 +157,12 @@ final class GroupManagementDashboardServices
             'categories' => $categoryCards,
             'sources' => $this->sources($scope['store_ids'], $range, $cashRows, $serviceRows),
             'goals' => [
-                'month' => $this->goalProjection('本月目标进度', $currentTarget, $monthActual, '所选月份内门店手动目标之和与同范围实际业绩。'),
-                'year' => $this->goalProjection('本年目标进度', $yearTarget, $yearActual, '所选年度内门店手动目标之和与同范围实际业绩。'),
-                'source_explanation' => '目标只在集团管理看板按门店月度手动保存；分公司、城市经理和集团目标由门店目标自动汇总。该设置不读取、不修改，也不影响任何既有目标或其他功能。',
+                'month' => $this->goalProjection('本月目标进度', $currentTarget, $monthActual, '只比较本月已设置全店实际业绩目标的门店；完成值来自相同门店的统一事实，不随商品分类筛选改变。'),
+                'year' => $this->goalProjection('本年目标进度', $yearTarget, $yearActual, '全年目标汇总已配置月份；完成值只统计这些门店和月份截至所选日期的统一事实。'),
+                'source_explanation' => '目标由已关联集团管理看板的生效目标方案提供；未配置目标的门店和月份不进入达成率。',
             ],
-            'rankings' => $this->rankings($scope['tenant_id'], $scope['store_ids'], ['start' => $month . '-01', 'end' => $range['end']], $monthTargets, $aggregateReady, $categoryIds),
-            'alerts' => $this->alerts($scope['tenant_id'], $scope['store_ids'], ['start' => $month . '-01', 'end' => $range['end']], $monthTargets, $aggregateReady, $categoryIds),
+            'rankings' => $this->rankings($scope['tenant_id'], $targetedStoreIds, ['start' => $month . '-01', 'end' => $range['end']], $monthTargets, $aggregateReady, []),
+            'alerts' => $this->alerts($scope['tenant_id'], $targetedStoreIds, ['start' => $month . '-01', 'end' => $range['end']], $monthTargets, $aggregateReady, []),
             'field_explanations' => $this->fieldExplanations(),
             'target_management' => $this->targets->yearTargets(['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year),
             'metric_version' => self::METRIC_VERSION,
@@ -428,14 +431,19 @@ final class GroupManagementDashboardServices
 
     private function rankings(string $tenantId, array $stores, array $range, array $targets, bool $aggregateEligible, array $categoryIds = []): array
     {
+        if (!$stores) return ['company' => ['title' => '分公司目标排行', 'records' => []],
+            'city_manager' => ['title' => '城市经理目标排行', 'records' => []],
+            'store' => ['title' => '门店目标排行', 'records' => []],
+            'source_explanation' => '当前范围没有已配置月目标的门店。'];
         $actual = $this->cashByStore($tenantId, $stores, $range, $categoryIds);
         $storeNames = Db::name('system_store')->whereIn('id', $stores)->column('name', 'id'); $dimensionRows = []; foreach ($stores as $storeId) { $row = ['store_id' => $storeId]; $this->organizationDimensions->project($row, '', '', $range['end']); $dimensionRows[$storeId] = $row; }
         $build = function (string $dimension) use ($stores, $actual, $targets, $storeNames, $dimensionRows): array { $rows = []; foreach ($stores as $storeId) { $key = $dimension === 'store' ? (string)$storeId : (string)($dimensionRows[$storeId][$dimension] ?? '未配置'); $name = $dimension === 'store' ? (string)($storeNames[$storeId] ?? ('门店' . $storeId)) : $key; if (!isset($rows[$key])) $rows[$key] = ['name' => $name, 'target_amount_cents' => 0, 'actual_performance_cents' => 0]; $rows[$key]['target_amount_cents'] += (int)($targets[$storeId] ?? 0); $rows[$key]['actual_performance_cents'] += (int)($actual[$storeId] ?? 0); } foreach ($rows as &$row) $row['achievement_rate'] = $row['target_amount_cents'] > 0 ? round($row['actual_performance_cents'] / $row['target_amount_cents'] * 100, 1) : null; unset($row); usort($rows, static function ($a, $b): int { return ($b['achievement_rate'] ?? -1) <=> ($a['achievement_rate'] ?? -1) ?: strcmp($a['name'], $b['name']); }); return $rows; };
-        return ['company' => ['title' => '分公司目标排行', 'records' => $build('company')], 'city_manager' => ['title' => '城市经理目标排行', 'records' => $build('city_manager')], 'store' => ['title' => '门店目标排行', 'records' => $build('store')], 'source_explanation' => '门店目标按当前分公司、城市经理组织统计维度向上汇总；实际业绩按现金业绩减退款金额后的净额汇总。'];
+        return ['company' => ['title' => '分公司目标排行', 'records' => $build('company')], 'city_manager' => ['title' => '城市经理目标排行', 'records' => $build('city_manager')], 'store' => ['title' => '门店目标排行', 'records' => $build('store')], 'source_explanation' => '只展示本月已设置全店实际业绩目标的门店；目标按当前组织归属汇总，完成值按相同门店的统一事实计算。'];
     }
 
     private function alerts(string $tenantId, array $stores, array $range, array $targets, bool $aggregateEligible, array $categoryIds = []): array
     {
+        if (!$stores) return ['records' => [], 'source_explanation' => '当前范围没有已配置月目标的门店。'];
         $actual = $this->cashByStore($tenantId, $stores, $range, $categoryIds); $names = Db::name('system_store')->whereIn('id', $stores)->column('name', 'id'); $out = [];
         foreach ($stores as $id) { $target = (int)($targets[$id] ?? 0); if ($target <= 0) continue; $rate = round((int)($actual[$id] ?? 0) / $target * 100, 1); if ($rate < 80) $out[] = ['store_id' => $id, 'store_name' => (string)($names[$id] ?? ''), 'type' => '目标达成未达标', 'message' => '目标达成率 ' . $rate . '% ，低于 80%', 'achievement_rate' => $rate]; }
         return ['records' => $out, 'source_explanation' => '当前阶段预警门店目标达成率低于 80%；后续环比和退款阈值使用同一后端阈值配置后再启用。'];
@@ -469,7 +477,6 @@ final class GroupManagementDashboardServices
 
     private function metric(string $code,string $name,$value,string $type,string $explanation):array{return['metric_code'=>$code,'name'=>$name,'value_cents'=>$type==='money'?$value:null,'value'=>$type==='count'?$value:null,'value_type'=>$type,'drilldown'=>in_array($code,['cash_performance','refund_performance','actual_performance','consumption_performance'],true)?['metric_code'=>$code]:null,'source_explanation'=>$explanation];}
     private function sum(array $rows,string $key):int{$sum=0;foreach($rows as$row)$sum+=(int)($row[$key]??0);return$sum;}
-    private function monthsForRange(array $range):array{$out=[];$date=substr($range['start'],0,7).'-01';$end=substr($range['end'],0,7).'-01';while($date<=$end){$out[]=(int)substr($date,5,2);$date=date('Y-m-01',strtotime($date.' +1 month'));}return$out;}
     private function goalProjection(string $title,int $target,int $actual,string $explanation):array{$rate=$target>0?round($actual/$target*100,1):null;return['title'=>$title,'target_amount_cents'=>$target,'actual_performance_cents'=>$actual,'remaining_amount_cents'=>max(0,$target-$actual),'achievement_rate'=>$rate,'source_explanation'=>$explanation];}
     private function filterSchema(array $roots):array{$options=[['value'=>0,'label'=>'全部商品']];foreach($roots as$row)$options[]=['value'=>(int)$row['id'],'label'=>(string)$row['name']];return[['key'=>'start_date','label'=>'开始日期','type'=>'date','source_explanation'=>'包含开始当天。'],['key'=>'end_date','label'=>'截止日期','type'=>'date','source_explanation'=>'包含截止当天。'],['key'=>'category_id','label'=>'商品分类','type'=>'select','options'=>$options,'source_explanation'=>'只显示当前启用一级商品分类；选择后包含全部下级分类。'],['key'=>'store_ids','label'=>'组织 / 门店','type'=>'scope_picker','source_explanation'=>'当前账号权限范围由后端强制，选择只能缩小范围。']];}
     private function fieldExplanations(): array

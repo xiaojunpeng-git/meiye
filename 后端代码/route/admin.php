@@ -1638,6 +1638,15 @@ Route::group('adminapi', function () {
         Route::get('metric_options', 'v1.target.StoreTarget/metricOptions')->option(['real_name' => '目标指标选项']);
         Route::get('monthly_detail', 'v1.target.StoreTarget/monthlyDetail')->option(['real_name' => '月度目标完成明细']);
         Route::get('store_detail', 'v1.target.StoreTarget/storeDetail')->option(['real_name' => '门店目标完成明细']);
+        Route::get('scheme/catalog', 'v1.target.StoreTarget/schemeCatalog')->option(['real_name' => '目标方案指标与门店']);
+        Route::get('scheme/products', 'v1.target.StoreTarget/schemeProducts')->option(['real_name' => '目标方案商品']);
+        Route::get('scheme/list', 'v1.target.StoreTarget/schemeList')->option(['real_name' => '目标方案列表']);
+        Route::get('scheme/detail', 'v1.target.StoreTarget/schemeDetail')->option(['real_name' => '目标方案详情']);
+        Route::post('scheme/create', 'v1.target.StoreTarget/schemeCreate')->option(['real_name' => '新建目标方案']);
+        Route::post('scheme/update', 'v1.target.StoreTarget/schemeUpdate')->option(['real_name' => '编辑目标方案']);
+        Route::post('scheme/lines', 'v1.target.StoreTarget/schemeLines')->option(['real_name' => '保存目标方案明细']);
+        Route::post('scheme/activate', 'v1.target.StoreTarget/schemeActivate')->option(['real_name' => '启用目标方案']);
+        Route::get('scheme/report', 'v1.target.StoreTarget/schemeReport')->option(['real_name' => '目标方案分析']);
     })->middleware([
         \app\http\middleware\admin\AdminAuthTokenMiddleware::class,
         \app\http\middleware\admin\AdminCkeckRoleMiddleware::class

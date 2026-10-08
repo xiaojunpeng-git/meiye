@@ -54,3 +54,14 @@ export function targetStoreDetail(data) {
     params: data
   });
 }
+
+// 目标方案的草稿、有效目标和报表引用均由同一个后端服务维护。
+export const schemeCatalog = () => request({ url: 'target/scheme/catalog', method: 'get' });
+export const schemeProducts = (params) => request({ url: 'target/scheme/products', method: 'get', params });
+export const schemeList = () => request({ url: 'target/scheme/list', method: 'get' });
+export const schemeDetail = (id) => request({ url: 'target/scheme/detail', method: 'get', params: { id }});
+export const schemeCreate = (data) => request({ url: 'target/scheme/create', method: 'post', data });
+export const schemeUpdate = (data) => request({ url: 'target/scheme/update', method: 'post', data });
+export const schemeSaveLines = (data) => request({ url: 'target/scheme/lines', method: 'post', data });
+export const schemeActivate = (data) => request({ url: 'target/scheme/activate', method: 'post', data });
+export const schemeReport = (params) => request({ url: 'target/scheme/report', method: 'get', params });

@@ -1699,7 +1699,9 @@ final class RegisteredMetricReadServices
             $query->whereRaw('COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) IN (' . implode(',', array_fill(0, count($categoryIds), '?')) . ')', $categoryIds);
         }
         $this->applySaleAllocationFilters($query, $filters);
-        return $query->fieldRaw("s.fact_id,s.store_id,s.member_id,s.order_id,s.source_line_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,COALESCE(c.sale_amount_cents,s.sale_amount_cents) amount_cents,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) category_id,COALESCE(c.category_path_snapshot,d.category_path_snapshot,'') category_path,COALESCE(c.product_type_snapshot,d.product_type_snapshot,'') product_type_snapshot,COALESCE(c.partner_name_snapshot,d.partner_name_snapshot,'') partner_name_snapshot,d.is_experience")
+        // 商品目标按销售发生时冻结的商品 ID 归属；卡项按冻结组件分摊，
+        // 不用商品当前分类或人员业绩行重新推算商品销售额。
+        return $query->fieldRaw("s.fact_id,s.store_id,s.member_id,s.order_id,s.source_line_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,COALESCE(c.sale_amount_cents,s.sale_amount_cents) amount_cents,COALESCE(c.component_product_id,d.item_id,0) item_id,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) category_id,COALESCE(c.category_path_snapshot,d.category_path_snapshot,'') category_path,COALESCE(c.product_type_snapshot,d.product_type_snapshot,'') product_type_snapshot,COALESCE(c.partner_name_snapshot,d.partner_name_snapshot,'') partner_name_snapshot,d.is_experience")
             ->select()->toArray();
     }
 
@@ -1715,7 +1717,8 @@ final class RegisteredMetricReadServices
         $this->applyParticipantScope($query, $filters, 'checkout:p');
         if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
         $this->applyServiceFilters($query, $filters, 'p', 'sv');
-        return $query->fieldRaw("p.fact_id,p.store_id,p.member_id,p.order_id,p.checkout_request_id,p.source_line_id,p.business_date,p.amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot,sv.project_category_id_snapshot category_id,sv.project_category_id_snapshot,sv.project_category_path_snapshot,COALESCE(NULLIF(sv.project_category_path_snapshot,''),sv.project_category_name_snapshot) category_path_snapshot")
+        // 消耗业绩在服务完成时已落到项目级事实，商品目标只按服务事实的项目 ID 收敛。
+        return $query->fieldRaw("p.fact_id,p.store_id,p.member_id,p.order_id,p.checkout_request_id,p.source_line_id,p.business_date,p.amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot,sv.project_id item_id,sv.project_category_id_snapshot category_id,sv.project_category_id_snapshot,sv.project_category_path_snapshot,COALESCE(NULLIF(sv.project_category_path_snapshot,''),sv.project_category_name_snapshot) category_path_snapshot")
             ->select()->toArray();
     }
 
@@ -1732,7 +1735,7 @@ final class RegisteredMetricReadServices
         // Directly completed reservations carry attribution on the service fact;
         // checkout services retain their sale-fact fallback for old rows.
         // 仅追加冻结体验维度供各消费方判断门店到店资格，不改变项目数量指标本身。
-        return $query->fieldRaw("s.service_fact_id,s.store_id,s.member_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.project_id,s.project_name_snapshot,s.project_category_id_snapshot,s.project_category_path_snapshot,s.source_line_id,s.quantity,s.is_experience,COALESCE(NULLIF(s.business_source_primary_id,0),(SELECT MAX(sf.business_source_primary_id) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=s.tenant_id AND sf.checkout_request_id=s.checkout_request_id AND sf.source_line_id=s.source_line_id AND sf.fact_direction='forward' AND sf.status='effective')) business_source_primary_id")
+        return $query->fieldRaw("s.service_fact_id,s.store_id,s.member_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.project_id,s.project_id item_id,s.project_name_snapshot,s.project_category_id_snapshot category_id,s.project_category_path_snapshot,s.source_line_id,s.quantity,s.is_experience,COALESCE(NULLIF(s.business_source_primary_id,0),(SELECT MAX(sf.business_source_primary_id) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=s.tenant_id AND sf.checkout_request_id=s.checkout_request_id AND sf.source_line_id=s.source_line_id AND sf.fact_direction='forward' AND sf.status='effective')) business_source_primary_id")
             ->select()->toArray();
     }
 

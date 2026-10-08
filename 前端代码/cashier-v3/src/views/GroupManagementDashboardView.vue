@@ -15,8 +15,7 @@ import {
   queryGroupManagementDashboard,
   queryGroupManagementDashboardScope,
   queryGroupManagementDashboardDrilldown,
-  queryGroupManagementDashboardTargets,
-  saveGroupManagementDashboardTarget
+  queryGroupManagementDashboardTargets
 } from '@/services/groupManagementDashboardApi'
 
 const dashboardElement = ref(null)
@@ -25,7 +24,6 @@ const dashboard = ref(null)
 const targets = ref(null)
 const loading = ref(false)
 const targetLoading = ref(false)
-const targetSaving = ref(false)
 const errorMessage = ref('')
 const targetError = ref('')
 const period = ref('today')
@@ -37,7 +35,6 @@ const fieldGuideFocus = ref('')
 const targetDrawerOpen = ref(false)
 const presentationMode = ref(false)
 const categoryRankTypes = ref({})
-const targetDrafts = ref({})
 const selectedTargetYear = ref(String(new Date().getFullYear()))
 const drilldown = ref(null)
 const drilldownLoading = ref(false)
@@ -62,10 +59,11 @@ function formatMoney(cents) {
   if (cents === null || cents === undefined || cents === '') return '-'
   const amount = Number(cents)
   if (!Number.isFinite(amount)) return '-'
-  return `¥${(amount / 100).toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
+  return `¥${(amount / 100).toLocaleString('zh-CN', { maximumFractionDigits: 0 })}`
 }
 
 function formatRate(rate) {
+  if (rate === null || rate === undefined || rate === '') return '-'
   const value = Number(rate)
   return Number.isFinite(value) ? `${value.toFixed(1).replace(/\.0$/, '')}%` : '-'
 }
@@ -75,20 +73,6 @@ function formatTrendValue(cents) {
   if (!Number.isFinite(value)) return '-'
   const amount = value / 100
   return Math.abs(amount) >= 100000 ? `${Math.round(amount / 1000)}k` : amount.toLocaleString('zh-CN', { maximumFractionDigits: 0 })
-}
-
-function formatDraft(cents) {
-  const value = Number(cents)
-  return Number.isFinite(value) ? String(value / 100) : ''
-}
-
-function parseDraftToCents(value) {
-  const text = String(value ?? '').trim()
-  // Empty is an explicit dashboard-target clear. Numeric 0 remains a valid
-  // zero target and must not be collapsed into the clear command.
-  if (text === '') return ''
-  if (!/^\d+(?:\.\d{1,2})?$/.test(text)) throw new Error('目标金额只能填写非负数字，最多保留两位小数。')
-  return Math.round(Number(text) * 100)
 }
 
 function currentQuery() {
@@ -315,20 +299,11 @@ async function toggleFullscreen() {
   presentationMode.value = true
 }
 
-function makeDrafts(payload) {
-  const drafts = {}
-  ;(payload?.stores || []).forEach((store) => {
-    ;(store.months || []).forEach((cell) => { drafts[cell.subject_key] = cell.is_cleared ? '' : formatDraft(cell.target_amount_cents) })
-  })
-  return drafts
-}
-
 async function loadTargets() {
   targetLoading.value = true
   targetError.value = ''
   try {
     targets.value = await queryGroupManagementDashboardTargets({ year: selectedTargetYear.value, ...(scopePicker.value.selectedStoreIds.length ? { store_ids: scopePicker.value.selectedStoreIds.join(',') } : {}) })
-    targetDrafts.value = makeDrafts(targets.value)
   } catch (error) {
     targets.value = null
     targetError.value = error?.message || '门店月度目标加载失败。'
@@ -340,34 +315,6 @@ async function loadTargets() {
 async function openTargetDrawer() {
   targetDrawerOpen.value = true
   await loadTargets()
-}
-
-async function saveTargets() {
-  if (!targets.value || targetSaving.value) return
-  targetSaving.value = true
-  targetError.value = ''
-  try {
-    for (const store of targetRows.value) {
-      for (const cell of store.months || []) {
-        const nextAmount = parseDraftToCents(targetDrafts.value[cell.subject_key])
-        const currentAmount = cell.is_cleared ? '' : Number(cell.target_amount_cents || 0)
-        if (nextAmount === currentAmount) continue
-        await saveGroupManagementDashboardTarget({
-          store_id: store.store_id,
-          year: Number(selectedTargetYear.value),
-          month: cell.month,
-          target_amount_cents: nextAmount,
-          expected_version: Number(cell.expected_version || 0),
-          subject_key: cell.subject_key
-        })
-      }
-    }
-    await Promise.all([loadTargets(), loadDashboard()])
-  } catch (error) {
-    targetError.value = error?.message || '门店月度目标保存失败，请刷新后重试。'
-  } finally {
-    targetSaving.value = false
-  }
 }
 
 let targetRankScrollFrame = null
@@ -451,7 +398,24 @@ onBeforeUnmount(() => {
     <div v-if="drilldown" class="dashboard-modal" role="dialog" aria-modal="true" aria-label="经营明细"><section class="dashboard-modal__card"><header><div><strong>{{ drilldown.label }}明细</strong><p v-for="(value, key) in drilldown.conditions" :key="key">{{ key }}：{{ value }}</p></div><button type="button" aria-label="关闭明细" @click="drilldown = null">×</button></header><p v-if="drilldownLoading" class="dashboard-empty">正在读取明细...</p><p v-else-if="drilldownError" class="dashboard-empty">{{ drilldownError }}</p><div v-else class="dashboard-drilldown-list"><p>{{ drilldown.explanation }}</p><article v-for="(row, index) in drilldown.records" :key="row.fact_id || row.id || index"><strong>{{ row.store_name || row.store_name_snapshot || row.item_name || row.project_name_snapshot || '业务明细' }}</strong><span>{{ row.business_date || '-' }}</span><b>{{ formatMoney(row.amount_cents) }}</b></article><p v-if="!drilldown.records.length" class="dashboard-empty">当前条件没有可解释的明细。</p></div></section></div>
     <div v-if="fieldGuideOpen" class="dashboard-modal" role="dialog" aria-modal="true" aria-label="列名取值来源"><section class="dashboard-modal__card"><header><div><strong>{{ fieldGuideFocus ? '列名取值来源' : '集团管理看板列名取值来源' }}</strong><p>以下业务解释由服务端口径元数据返回。</p></div><button type="button" aria-label="关闭" @click="fieldGuideOpen = false">×</button></header><div class="dashboard-field-guide"><article v-for="([key, value]) in Object.entries(fieldExplanations).filter(([key]) => !fieldGuideFocus || key === fieldGuideFocus)" :key="key"><strong>{{ key }}</strong><p>{{ value }}</p></article><p v-if="!Object.keys(fieldExplanations).length" class="dashboard-empty">暂无列名取值来源。</p></div></section></div>
 
-    <aside v-if="targetDrawerOpen" class="target-drawer" aria-label="目标管理"><div class="target-drawer__backdrop" @click="targetDrawerOpen = false"></div><section class="target-drawer__panel"><header><div><h2>目标管理</h2><p>只用于集团管理看板。门店填写月度目标，分公司、城市经理和集团自动汇总。</p></div><button type="button" aria-label="关闭目标管理" @click="targetDrawerOpen = false">×</button></header><div class="target-drawer__month"><label>目标年度<select v-model="selectedTargetYear"><option v-for="year in [new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1]" :key="year" :value="String(year)">{{ year }}</option></select></label><span>{{ targets?.source_explanation || '正在读取门店月度目标。' }}</span></div><div class="target-drawer__content"><section><h3>门店月度目标</h3><p>门店在行、月份在列。保存后刷新可恢复，保存的目标不会影响订单、收款、服务或其他目标功能。</p><p v-if="targetError" class="dashboard-state dashboard-state--error">{{ targetError }}</p><p v-else-if="targetLoading" class="dashboard-state">正在加载门店月度目标...</p><div v-else class="target-monthly-table"><div class="target-monthly-table__header"><span>门店</span><span v-for="month in targetMonths" :key="month">{{ month }} 月</span><span>年度合计</span></div><div v-for="store in targetRows" :key="store.store_id" class="target-monthly-table__row"><strong>{{ store.store_name }}</strong><input v-for="cell in store.months" :key="cell.subject_key" v-model="targetDrafts[cell.subject_key]" type="text" inputmode="decimal" :disabled="targetSaving" :aria-label="`${selectedTargetYear}年${cell.month}月${store.store_name}目标`" /><b>{{ formatMoney(store.annual_target_cents) }}</b></div><p v-if="!targetRows.length" class="dashboard-empty">当前权限范围没有可填写目标的门店。</p></div></section><section><div class="target-drawer__tree-title"><div><h3>组织目标自动汇总</h3><p>上级组织从已保存的门店月度目标自动汇总，只读不可编辑。</p></div></div><p class="target-drawer__feedback">保存后看板会重新查询目标进度、分公司排行、城市经理排行与门店排行。</p></section></div><footer><span>目标只归属集团管理看板。</span><button type="button" class="button button--primary" :disabled="targetSaving || targetLoading" @click="saveTargets">{{ targetSaving ? '保存中...' : '保存目标' }}</button></footer></section></aside>
+    <aside v-if="targetDrawerOpen" class="target-drawer" aria-label="目标管理">
+      <div class="target-drawer__backdrop" @click="targetDrawerOpen = false"></div>
+      <section class="target-drawer__panel">
+        <header><div><h2>目标管理</h2><p>目标取自已生效且关联集团看板的目标方案，此处只读。</p></div><button type="button" aria-label="关闭目标管理" @click="targetDrawerOpen = false">×</button></header>
+        <div class="target-drawer__month"><label>目标年度<select v-model="selectedTargetYear"><option v-for="year in [new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1]" :key="year" :value="String(year)">{{ year }}</option></select></label><span>{{ targets?.source_explanation || '正在读取生效方案。' }}</span></div>
+        <div class="target-drawer__content"><section><h3>门店月度目标</h3>
+          <p>仅展示方案中设置的全店实际业绩目标；未设置的月份显示“-”，不按零处理。</p>
+          <p v-if="targetError" class="dashboard-state dashboard-state--error">{{ targetError }}</p>
+          <p v-else-if="targetLoading" class="dashboard-state">正在加载门店月度目标...</p>
+          <div v-else class="target-monthly-table">
+            <div class="target-monthly-table__header"><span>门店</span><span v-for="month in targetMonths" :key="month">{{ month }} 月</span><span>年度合计</span></div>
+            <div v-for="store in targetRows" :key="store.store_id" class="target-monthly-table__row"><strong>{{ store.store_name }}</strong><span v-for="cell in store.months" :key="cell.subject_key">{{ cell.target_amount_cents === '' ? '-' : formatMoney(cell.target_amount_cents) }}</span><b>{{ formatMoney(store.annual_target_cents) }}</b></div>
+            <p v-if="!targetRows.length" class="dashboard-empty">当前权限范围没有目标门店。</p>
+          </div>
+        </section></div>
+        <footer><span>设置目标请到平台端“数据 → 目标管理 → 目标方案”。</span></footer>
+      </section>
+    </aside>
   </main>
 </template>
 
@@ -500,6 +464,7 @@ onBeforeUnmount(() => {
 .dashboard-target-rank-list button:nth-child(3),
 .dashboard-target-rank-list button:nth-child(4),
 .dashboard-target-rank-list button:nth-child(5) { background: transparent; }
+.target-monthly-table__row>span{text-align:right;color:#405166}
 .group-dashboard{--metric-amount:#1f5f8b;--metric-count:#2b4358;--metric-activity:#357a72;--metric-average:#3b78a5;--metric-attention:#b7791f}
 .dashboard-metric--blue strong,.dashboard-metric--green strong,.dashboard-metric--yellow strong{color:var(--metric-amount)}
 .dashboard-metric--red strong{color:var(--metric-attention)}

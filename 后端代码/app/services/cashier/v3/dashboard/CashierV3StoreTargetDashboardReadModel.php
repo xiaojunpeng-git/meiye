@@ -9,14 +9,15 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\query\metric\ServiceCustomerMetricReadServices;
-use app\services\report\GroupManagementDashboardTargetServices;
+use app\services\query\metric\RegisteredMetricReadServices;
 use app\services\report\StoreReportNormalDataScopeServices;
+use app\services\target\TargetSchemeServices;
 use think\facade\Db;
 
 /**
  * 门店端目标看板只读模型。
  *
- * 目标进度复用集团看板的门店月度目标事实；员工排行直接读取 V3
+ * 目标进度读取关联“门店目标”的生效方案；员工排行直接读取 V3
  * immutable performance/service facts。门店范围始终由当前 operator 强制
  * 收窄，客户端传入的 store_id/store_ids 不参与扩大权限。
  */
@@ -36,13 +37,20 @@ final class CashierV3StoreTargetDashboardReadModel
         $year = (int)substr($range['end'], 0, 4);
         $monthStart = $month . '-01';
         $yearStart = sprintf('%04d-01-01', $year);
-        $targets = new GroupManagementDashboardTargetServices();
-        $monthTotals = $targets->totals(['tenant_id' => $tenantId, 'store_ids' => [$storeId]], $year, [(int)substr($month, 5, 2)]);
-        $yearTotals = $targets->totals(['tenant_id' => $tenantId, 'store_ids' => [$storeId]], $year, range(1, 12));
-        $monthTarget = (int)($monthTotals[$storeId] ?? 0);
-        $yearTarget = (int)($yearTotals[$storeId] ?? 0);
-        $monthActual = $this->cashTotal($tenantId, $storeId, $monthStart, $range['end']);
-        $yearActual = $this->cashTotal($tenantId, $storeId, $yearStart, $range['end']);
+        $bound = (new TargetSchemeServices())->effective(
+            ['tenant_id' => $tenantId, 'store_ids' => [$storeId]], 'store_target',
+            array_map(static fn($m) => sprintf('%04d-%02d', $year, $m), range(1, 12))
+        );
+        // 现有进度卡只展示“全店实际业绩”目标；其他已设置指标仍在目标分析中分别展示，绝不相加。
+        $monthTarget = 0; $yearTarget = 0;
+        foreach ($bound['lines'] as $line) {
+            if ($line['metric_code'] !== 'actual_performance' || $line['scope_type'] !== 'store') continue;
+            $yearTarget += (int)$line['target_value'];
+            if ($line['month_key'] === $month) $monthTarget += (int)$line['target_value'];
+        }
+        $metrics = new RegisteredMetricReadServices();
+        $monthActual = $metrics->summary('actual_performance', $tenantId, [$storeId], ['start' => $monthStart, 'end' => $range['end']]);
+        $yearActual = $metrics->summary('actual_performance', $tenantId, [$storeId], ['start' => $yearStart, 'end' => $range['end']]);
 
         return [
             'availability' => ['contractVersion' => self::CONTRACT_VERSION, 'status' => 'active', 'dataLoaded' => true],
@@ -56,26 +64,13 @@ final class CashierV3StoreTargetDashboardReadModel
             'cash_ranking' => $this->cashRanking($tenantId, $storeId, $range),
             'consumption_ranking' => $this->consumptionRanking($tenantId, $storeId, $range),
             'source_explanation' => [
-                'goals' => '门店目标读取 cashier_v3_group_dashboard_target 的门店月度目标事实；实际现金按有效 payment_fact 的正负签名净额汇总；本页只读。',
+                'goals' => '门店目标读取关联门店目标的生效方案；完成值使用统一事实层“实际业绩”指标，未设置目标不回退旧表；本页只读。',
                 'cash_ranking' => '现金业绩读取有效 sales_performance_allocated 事实；销售数量关联有效销售明细数量，成交人数按顾客去重。',
                 'consumption_ranking' => '消耗业绩、手工和项目数保留实际完成服务的有效业绩；服务人次对会员本人按同日去重，服务人数对会员本人按周期去重，朋友算和游客逐条计数；普通岗位共同服务时均分，独立核算岗位按发生时职位另组计算；本人或朋友选择“不算人数人次”不计入这两列。',
             ],
             'metricVersion' => self::METRIC_VERSION,
             'dataAsOf' => date('Y-m-d H:i:s'),
         ];
-    }
-
-    private function cashTotal(string $tenantId, int $storeId, string $start, string $end): int
-    {
-        // 作废过滤器使用原生关联条件，必须引用查询别名；逻辑表名在本地库会被 ORM 加上 eb_ 前缀。
-        $query = Db::name('cashier_v3_payment_fact')->alias('pf')->where('pf.tenant_id', $tenantId)->where('pf.store_id', $storeId)
-            ->whereBetween('pf.business_date', [$start, $end])->where('pf.status', 'effective')
-            // Reversal facts carry their signed negative amount and must remain
-            // in the same sum so partial refunds produce the correct net value.
-            ;
-        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'pf.tenant_id', 'pf.order_id');
-        $row = $query->fieldRaw('COALESCE(SUM(pf.amount_cents),0) AS amount_cents')->find();
-        return (int)($row['amount_cents'] ?? 0);
     }
 
     /** @return array<string,mixed> */
