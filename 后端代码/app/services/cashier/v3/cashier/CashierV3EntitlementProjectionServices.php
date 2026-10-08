@@ -744,7 +744,22 @@ final class CashierV3EntitlementProjectionServices
             // cart_info. Do not replace that snapshot with the card-rule
             // whole-yuan projection for this one explicit source type.
             $actualSaleAmountCents = (int)($snapshot['actualSaleAmounts'][$detailId] ?? -1);
-            if ($actualSaleAmountCents >= 0) {
+            $sharedPurchase = is_array($ruleAuthority)
+                && (string)$ruleAuthority['ruleType'] === 'choice_count'
+                && !$centCapableOperationDetail;
+            if ($sharedPurchase) {
+                // 任选次数卡只有一份整卡购买金额。项目分摊事实不能再除以
+                // 共享总次数，否则选择桃花灸和背部 spa 会得出不同单次金额。
+                $sharedSnapshot = $decoded;
+                $sharedSnapshot['r26RefundedCents'] = (int)($sharedRefunds[(int)$holder['id']]['returned'] ?? 0);
+                $sharedSnapshot['r26RefundRemovedTimes'] = (int)($sharedRefunds[(int)$holder['id']]['removed'] ?? 0);
+                $amounts = CashierV3SharedCardPurchaseAmount::project($order, $ruleAuthority, $sharedSnapshot)
+                    ?? [
+                        'purchaseAmount' => null, 'remainingAmount' => null,
+                        'totalPurchaseTimes' => 0, 'consumedTimesAtSelection' => 0,
+                        'calculationVersion' => 'shared-card-purchase-invalid-v1',
+                    ];
+            } elseif ($actualSaleAmountCents >= 0) {
                 $amounts = $this->projectActualSaleAmount($cart, $rawSurplus, $actualSaleAmountCents, $decoded);
             } else {
                 $amounts = $centCapableOperationDetail
@@ -926,24 +941,48 @@ final class CashierV3EntitlementProjectionServices
                 : ($kind['code'] === 'time_card'
                 ? $this->timeCardSourceAmounts($order)
                 : $this->sourceAmounts($projects));
-            if (is_array($holderRuleAuthority) && (string)$holderRuleAuthority['ruleType'] === 'choice_count'
-                && (int)($sharedRefunds[$holderId]['returned'] ?? 0) > 0) {
-                if ($cardDisabled) {
-                    $sourceAmounts['remainingAmount'] = '0.00';
-                } else {
+            if (is_array($holderRuleAuthority) && (string)$holderRuleAuthority['ruleType'] === 'choice_count') {
+                $returned = (int)($sharedRefunds[$holderId]['returned'] ?? 0);
+                $removed = (int)($sharedRefunds[$holderId]['removed'] ?? 0);
+                $shared = CashierV3SharedCardPurchaseAmount::project($order, $holderRuleAuthority, [
+                    'r26RefundedCents' => $returned,
+                    'r26RefundRemovedTimes' => $removed,
+                ]);
+                if ($shared === null) {
+                    throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '本卡共享次数与购买金额不一致，请联系管理员核对。', CashierV3ResultCode::STATUS_FAILED,
+                        ['reason' => 'entitlement_shared_purchase_invalid']);
+                }
+                if ($returned > 0) {
                     try {
-                        $quota = CashierV3CardRefundQuotaPolicy::sharedPool((string)($order['pay_price'] ?? ''),
-                            $purchaseTimes, $remaining, (int)$sharedRefunds[$holderId]['returned'],
-                            (int)($sharedRefunds[$holderId]['removed'] ?? 0));
+                        $quota = CashierV3CardRefundQuotaPolicy::sharedPool($shared['purchaseAmount'],
+                            $purchaseTimes, $remaining, $returned, $removed);
+                        if ($this->centsToMoney($quota['remainingValueCents']) !== $shared['remainingAmount']) {
+                            throw new \InvalidArgumentException('shared refund value differs from writeoff pool');
+                        }
                     } catch (\InvalidArgumentException $error) {
                         throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
                             '本卡共享次数与退款金额不一致，请联系管理员核对。', CashierV3ResultCode::STATUS_FAILED,
                             ['reason' => 'entitlement_shared_refund_value_mismatch']);
                     }
-                    $sourceAmounts['remainingAmount'] = $this->centsToMoney($quota['remainingValueCents']);
                 }
-                $sourceAmounts['purchaseAmount'] = $this->nonnegativeCentMoney($order['pay_price'] ?? null);
-                $sourceAmounts['calculationVersion'] = 'shared-card-refund-v1';
+                // 项目选项各自展示同一共享池，但父卡只能计一次；独立购买的
+                // 替换/升级项目仍沿用自己的金额快照，不并入共享次数分母。
+                $independentProjects = array_values(array_filter($projects, static function (array $project): bool {
+                    return CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($project);
+                }));
+                $independent = $independentProjects ? $this->sourceAmounts($independentProjects)
+                    : ['purchaseAmount' => '0.00', 'remainingAmount' => '0.00'];
+                $blocked = bcadd($outstandingDebtAmount, $this->cancelledDebt($order, null, $tenantId), 2);
+                $sharedRemaining = bcsub($shared['remainingAmount'], $blocked, 2);
+                $sharedRemaining = bccomp($sharedRemaining, '0', 2) > 0 ? $sharedRemaining : '0.00';
+                $sourceAmounts = [
+                    'purchaseAmount' => $independent['purchaseAmount'] === null ? null
+                        : bcadd($shared['purchaseAmount'], $independent['purchaseAmount'], 2),
+                    'remainingAmount' => $independent['remainingAmount'] === null ? null
+                        : bcadd($cardDisabled ? '0.00' : $sharedRemaining, $independent['remainingAmount'], 2),
+                    'calculationVersion' => CashierV3SharedCardPurchaseAmount::CALCULATION_VERSION,
+                ];
             }
             // 时间卡父行没有项目金额汇总，仍须排除不可再使用的欠款/取消额。
             if ($kind['code'] === 'time_card' && $sourceAmounts['remainingAmount'] !== null) {

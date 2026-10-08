@@ -3246,10 +3246,14 @@ async function addEntitlementLines(payload = {}) {
 }
 
 function localEntitlementAmount(lines = [], line = {}) {
-  const sourceKey = `${line.entitlementInstanceType || 'card_holder'}:${line.entitlementInstanceId || line.cardHolderId || ''}:${line.entitlementSourceDetailId || line.memberBenefitPoolId || ''}`
+  // 任选次数卡的所有原项目共用一份购买金额和次数序号；替换/升级项目
+  // 有独立金额快照，仍以明细为键，不占用整卡分摊序号。
+  const sharedCard = String(line.amountCalculationVersion || '').startsWith('shared-card-purchase-amount-')
+  const sourceKey = `${line.entitlementInstanceType || 'card_holder'}:${line.entitlementInstanceId || line.cardHolderId || ''}:${sharedCard ? 'shared' : (line.entitlementSourceDetailId || line.memberBenefitPoolId || '')}`
   const selectedBefore = (Array.isArray(lines) ? lines : []).reduce((total, current) => {
     if (!isEntitlementLine(current)) return total
-    const currentKey = `${current.entitlementInstanceType || 'card_holder'}:${current.entitlementInstanceId || current.cardHolderId || ''}:${current.entitlementSourceDetailId || current.memberBenefitPoolId || ''}`
+    const currentShared = String(current.amountCalculationVersion || '').startsWith('shared-card-purchase-amount-')
+    const currentKey = `${current.entitlementInstanceType || 'card_holder'}:${current.entitlementInstanceId || current.cardHolderId || ''}:${currentShared ? 'shared' : (current.entitlementSourceDetailId || current.memberBenefitPoolId || '')}`
     return currentKey === sourceKey ? total + Math.max(1, Number(current.quantity || 1)) : total
   }, 0)
   const totalCents = moneyToCents(line.purchaseAmount)

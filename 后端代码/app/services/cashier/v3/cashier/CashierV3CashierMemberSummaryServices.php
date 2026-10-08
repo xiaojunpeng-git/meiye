@@ -95,7 +95,7 @@ final class CashierV3CashierMemberSummaryServices
             ->where('refund_status', 0)
             ->where('terminal_action', 0)
             ->where('card_upgrade_use_oid', 0)
-            ->field('id,uid,store_id')
+            ->field('id,uid,store_id,pay_price')
             ->select());
         $validOrderIds = array_values(array_unique(array_map('intval', array_column($validOrders, 'id'))));
         if (!$validOrderIds) {
@@ -121,6 +121,35 @@ final class CashierV3CashierMemberSummaryServices
         $remainingTimes = 0;
         $remainingAmount = '0.00';
         $activeOrders = [];
+        $sharedRules = [];
+        $sharedTenants = [];
+        foreach ($this->rows(Db::name('cashier_v3_card_rule_state')
+            ->whereIn('card_holder_id', array_values($holderIdByOrder))
+            ->where('member_id', $memberId)
+            ->where('rule_type', 'choice_count')
+            ->field('card_holder_id,tenant_id,shared_total_times,shared_remaining_times')
+            ->select()) as $state) {
+            $id = (int)$state['card_holder_id'];
+            $sharedTenants[$id] = (string)$state['tenant_id'];
+            $sharedRules[$id] = [
+                'ruleType' => 'choice_count',
+                'totalTimes' => (int)$state['shared_total_times'],
+                'remainingTimes' => (int)$state['shared_remaining_times'],
+            ];
+        }
+        $sharedRefunds = [];
+        if ($sharedRules) {
+            foreach ($this->rows(Db::name('cashier_v3_refund_adjustment')
+                ->whereIn('card_holder_id', array_keys($sharedRules))
+                ->where('status', 'effective')
+                ->field('card_holder_id,refund_amount_cents,times_removed')
+                ->select()) as $refund) {
+                $id = (int)$refund['card_holder_id'];
+                $sharedRefunds[$id]['returned'] = ($sharedRefunds[$id]['returned'] ?? 0) + (int)$refund['refund_amount_cents'];
+                $sharedRefunds[$id]['removed'] = ($sharedRefunds[$id]['removed'] ?? 0) + (int)$refund['times_removed'];
+            }
+        }
+        $countedSharedHolders = [];
         $carts = $this->rows(Db::name('store_order_cart_info')
             ->whereIn('oid', array_keys($holderOrderIds))
             ->where('cart_type', 2)
@@ -146,14 +175,42 @@ final class CashierV3CashierMemberSummaryServices
                 || ($start > 0 && $start > $now) || ($end > 0 && $end < $now)) {
                 continue;
             }
-            if (!isset($timeCardHolderIds[(int)($holderIdByOrder[(int)$cart['oid']] ?? 0)])) {
-                $remainingTimes += $remaining;
-            }
-            $consumed = $total - $remaining;
+            $holderId = (int)($holderIdByOrder[(int)$cart['oid']] ?? 0);
             $snapshot = is_string($cart['cart_info'] ?? null)
                 ? json_decode((string)$cart['cart_info'], true)
                 : ($cart['cart_info'] ?? []);
             $snapshot = is_array($snapshot) ? $snapshot : [];
+            if (isset($sharedRules[$holderId])
+                && !CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($snapshot)) {
+                // 共享卡每个项目都映射同一余次池，顶部摘要只能把整卡金额计一次。
+                if (isset($countedSharedHolders[$holderId])) continue;
+                $countedSharedHolders[$holderId] = true;
+                $rule = $sharedRules[$holderId];
+                $sharedSnapshot = [
+                    'r26RefundedCents' => (int)($sharedRefunds[$holderId]['returned'] ?? 0),
+                    'r26RefundRemovedTimes' => (int)($sharedRefunds[$holderId]['removed'] ?? 0),
+                ];
+                $order = $orderMap[(int)$cart['oid']] ?? [];
+                $amounts = CashierV3SharedCardPurchaseAmount::project($order, $rule, $sharedSnapshot);
+                if ($amounts === null) {
+                    throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '会员卡项金额资料异常，请联系管理员核对。', CashierV3ResultCode::STATUS_FAILED,
+                        ['reason' => 'cashier_member_shared_card_amount_invalid']);
+                }
+                $blocked = (new CashierV3CardOriginDebtResolver())->unavailableCardDebt(
+                    $order, $memberId, $sharedTenants[$holderId], false
+                );
+                $usable = bcsub($amounts['remainingAmount'], $blocked, 2);
+                $remainingAmount = bcadd($remainingAmount,
+                    bccomp($usable, '0', 2) > 0 ? $usable : '0.00', 2);
+                $remainingTimes += $rule['remainingTimes'];
+                $activeOrders[(int)$cart['oid']] = true;
+                continue;
+            }
+            if (!isset($timeCardHolderIds[(int)($holderIdByOrder[(int)$cart['oid']] ?? 0)])) {
+                $remainingTimes += $remaining;
+            }
+            $consumed = $total - $remaining;
             $actualSaleAmountCents = (int)($actualSaleAmounts[(int)($cart['id'] ?? 0)] ?? -1);
             try {
                 $amount = $actualSaleAmountCents >= 0

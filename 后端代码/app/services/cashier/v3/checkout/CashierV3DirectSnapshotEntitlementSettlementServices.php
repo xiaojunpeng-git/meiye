@@ -14,6 +14,7 @@ use app\services\cashier\v3\CashierV3ResourceVersionServices;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
+use app\services\cashier\v3\cashier\CashierV3SharedCardPurchaseAmount;
 use app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver;
 use app\services\cashier\v3\cashier\CashierV3EntitlementResourceVersionProvider;
 use app\services\cashier\v3\checkout\persistence\CashierV3EntitlementCompletionPlanV1;
@@ -681,15 +682,48 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             }, $snapshotLines)),
         ];
         $kernelPlanResources = $this->kernelResourceSubset($gateway, $snapshot, $directSnapshot);
+        $actualAmountsByLine = array_column($entitlementLines, 'entitlement_actual_amount_cents', 'line_id');
+        $sharedCursors = [];
+        foreach ($entitlementLines as $line) {
+            $lineId = (string)$line['line_id'];
+            $authority = $authorities[$lineId];
+            if (!str_starts_with((string)$authority['amountCalculationVersion'], 'shared-card-purchase-amount-')) {
+                continue;
+            }
+            // 同一卡跨项目结账也只能走一条整卡次数轴。锁定后的次数/退款事实
+            // 重算实绩；旧草稿或并发变化不能让浏览器金额替代权威金额落账。
+            $holderId = (int)$authority['holder']['id'];
+            $consumed = (int)$authority['totalPurchaseTimes']
+                - (int)$authority['physicalRemainingTimes'] - (int)$authority['refundRemovedTimes'];
+            if (!isset($sharedCursors[$holderId])) {
+                $sharedCursors[$holderId] = ['consumed' => $consumed, 'selected' => 0,
+                    'remaining' => (int)$authority['physicalRemainingTimes']];
+            } elseif ($sharedCursors[$holderId]['consumed'] !== $consumed
+                || $sharedCursors[$holderId]['remaining'] !== (int)$authority['physicalRemainingTimes']) {
+                throw self::failure('authority_shared_card_snapshot_inconsistent', ['lineId' => $lineId]);
+            }
+            $quantity = (int)$intentsByLine[$lineId]['quantity'];
+            $sharedCursors[$holderId]['selected'] += $quantity;
+            if ($sharedCursors[$holderId]['selected'] > $sharedCursors[$holderId]['remaining']) {
+                throw self::failure('authority_shared_card_times_insufficient', ['lineId' => $lineId]);
+            }
+            $expected = CashierV3EntitlementCompletionKernel::allocateActualAmountCents(
+                (int)bcmul((string)$authority['purchaseAmount'], '100', 0),
+                (int)$authority['totalPurchaseTimes'],
+                $consumed + $sharedCursors[$holderId]['selected'] - $quantity,
+                $quantity,
+                (string)$authority['amountCalculationVersion']
+            );
+            if ((int)$actualAmountsByLine[$lineId] !== $expected) {
+                throw self::failure('authority_shared_card_actual_amount_changed', ['lineId' => $lineId]);
+            }
+            $actualAmountsByLine[$lineId] = $expected;
+        }
         $kernelPlan = CashierV3EntitlementCompletionKernel::plan(
             $command,
             $snapshot,
             $kernelPlanResources,
-            array_column(
-                $entitlementLines,
-                'entitlement_actual_amount_cents',
-                'line_id'
-            )
+            $actualAmountsByLine
         );
 
         return [
@@ -1104,6 +1138,7 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
         $result = [];
         $orderCartRowsByOrder = [];
         $actualSaleAmountsByOrder = [];
+        $sharedRefundsByHolder = [];
         foreach ($lines as $line) {
             $lineId = (string)$line['line_id'];
             $holderId = (int)$line['source_id'];
@@ -1206,7 +1241,36 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             // value is not the amount paid for a repriced card and cannot bound
             // cancelled-debt usage or the final service amount.
             $actualSaleAmountCents = $actualSaleAmountsByOrder[$originOrderId][$detailId] ?? null;
-            if ($actualSaleAmountCents !== null) {
+            $sharedPurchase = is_array($ruleAuthority)
+                && (string)$ruleAuthority['ruleType'] === 'choice_count'
+                && !CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($decoded);
+            if ($sharedPurchase) {
+                // 最终锁定必须与选择器、退款使用同一整卡金额；项目销售分摊
+                // 仅供销售追溯，不能再次覆盖共享次数池的核销基数。
+                if (!isset($sharedRefundsByHolder[$holderId])) {
+                    $sharedRefundsByHolder[$holderId] = ['returned' => 0, 'removed' => 0];
+                    foreach ($this->rows(Db::name('cashier_v3_refund_adjustment')
+                        ->where('tenant_id', $operatorScope->tenantId())
+                        ->where('card_holder_id', $holderId)
+                        ->where('status', 'effective')
+                        ->field('refund_amount_cents,times_removed')
+                        ->lock(true)
+                        ->select()) as $refund) {
+                        $sharedRefundsByHolder[$holderId]['returned'] += (int)$refund['refund_amount_cents'];
+                        $sharedRefundsByHolder[$holderId]['removed'] += (int)$refund['times_removed'];
+                    }
+                }
+                $sharedSnapshot = $decoded;
+                $sharedSnapshot['r26RefundedCents'] = $sharedRefundsByHolder[$holderId]['returned'];
+                $sharedSnapshot['r26RefundRemovedTimes'] = $sharedRefundsByHolder[$holderId]['removed'];
+                $sharedAmounts = CashierV3SharedCardPurchaseAmount::project($order, $ruleAuthority, $sharedSnapshot);
+                if ($sharedAmounts === null) {
+                    throw self::failure('authority_shared_card_purchase_invalid', ['lineId' => $lineId]);
+                }
+                $amount = $sharedAmounts['purchaseAmount'];
+                $totalTimes = $sharedAmounts['totalPurchaseTimes'];
+                $amountCalculationVersion = $sharedAmounts['calculationVersion'];
+            } elseif ($actualSaleAmountCents !== null) {
                 $amount = $this->centsToMoney((int)$actualSaleAmountCents);
                 $amountCalculationVersion = 'card-sale-actual-amount-'
                     . CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION;
@@ -1215,12 +1279,14 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                     $decoded['amountCalculationVersion'] = $amountCalculationVersion;
                 }
             }
-            $remainingAmount = CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
-                $amount,
-                $totalTimes,
-                $totalTimes - $remaining,
-                $decoded
-            );
+            $remainingAmount = $sharedPurchase
+                ? $sharedAmounts['remainingAmount']
+                : CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
+                    $amount,
+                    $totalTimes,
+                    $totalTimes - $remaining,
+                    $decoded
+                );
             $pendingDebt = $this->pendingDebt($order, $memberId);
             $debtLimited = $this->writeoffServices()->calcEffectiveWriteSurplusTimes(
                 $detail,
@@ -1257,6 +1323,7 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 'purchaseAmount' => $amount,
                 'totalPurchaseTimes' => $totalTimes,
                 'amountCalculationVersion' => $amountCalculationVersion,
+                'refundRemovedTimes' => $sharedPurchase ? $sharedRefundsByHolder[$holderId]['removed'] : 0,
                 'projectUnique' => $projectUnique,
                 'projectCategoryName' => $categoryName !== '' ? $categoryName : '未分类',
             ];
