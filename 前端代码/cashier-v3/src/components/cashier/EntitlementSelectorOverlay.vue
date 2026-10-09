@@ -382,7 +382,7 @@ function operationProjectSelected(source = {}, project = {}) {
   <section class="cashier-entitlement-selector-panel" aria-label="使用权益">
     <header class="cashier-entitlement-selector-panel__header">
       <strong>{{ operationLabel || '使用权益' }}</strong>
-      <button type="button" class="button button--primary cashier-entitlement-selector-panel__return-button" :disabled="submitting" @click="emit('close')">返回选购</button>
+      <button v-if="!isLoading" type="button" class="button button--primary cashier-entitlement-selector-panel__return-button" :disabled="submitting" @click="emit('close')">返回选购</button>
     </header>
 
     <section v-if="isLoading" class="cashier-entitlement-selector__blocked" role="status" aria-live="polite">
@@ -544,4 +544,13 @@ function operationProjectSelected(source = {}, project = {}) {
       </div>
     </template>
   </section>
+  <!-- 权益查询只读且可能耗时；加载提示跟随请求状态，不能提前开放返回操作。 -->
+  <Teleport to="body">
+    <div v-if="isLoading" class="cashier-entitlement-loading" role="dialog" aria-modal="true" aria-labelledby="cashier-entitlement-loading-title">
+      <div class="cashier-entitlement-loading__panel">
+        <span class="cashier-entitlement-loading__spinner" aria-hidden="true" />
+        <strong id="cashier-entitlement-loading-title">正在加载会员权益</strong>
+      </div>
+    </div>
+  </Teleport>
 </template>

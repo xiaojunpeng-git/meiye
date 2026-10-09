@@ -4272,7 +4272,7 @@ button:disabled {
   min-height: 40px;
 }
 
-/* 收银“使用权益”在商品选择区原位切换，不创建全屏或浮层。 */
+/* 收银“使用权益”的操作区原位切换，仅读取权益期间显示阻塞式加载提示。 */
 .cashier-entitlement-selector-panel {
   position: relative;
   display: grid;
@@ -4282,6 +4282,48 @@ button:disabled {
   min-height: 0;
   overflow: hidden;
   background: #fff;
+}
+
+.cashier-entitlement-loading {
+  position: fixed;
+  z-index: 1750;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(20, 28, 40, .38);
+}
+
+.cashier-entitlement-loading__panel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: min(360px, 100%);
+  min-height: 84px;
+  padding: 20px;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 14px 36px rgba(31, 49, 76, .2);
+  color: #1f2329;
+  font-size: 15px;
+}
+
+.cashier-entitlement-loading__spinner {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 3px solid #d7e7fa;
+  border-top-color: #1677cc;
+  border-radius: 50%;
+  animation: cashier-entitlement-loading-spin .8s linear infinite;
+}
+
+@keyframes cashier-entitlement-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cashier-entitlement-loading__spinner { animation: none; }
 }
 
 .cashier-card-operation-editor {
