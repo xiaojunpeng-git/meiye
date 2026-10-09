@@ -1,0 +1,257 @@
+{
+  "feature_commit": "d2573c380605a129c1d4787879bebfc189f90b8f",
+  "baseline": "e124f80f2b2cc929fd6cf854f3d0bf77294d4201",
+  "source_files": [
+    {
+      "path": "前端代码/cashier-v3/src/views/OrderCenterView.vue",
+      "sha256": "25960399f5ca9bdf023d9a542494c21db6d4e6fba76dc7d9fa83f48fccb59884"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue",
+      "sha256": "c48e48c2dd1db8fb17482d57e8f377be56ea60f623417bb2d7475446d485606a"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/order/CashierV3SalesOrderQueryServices.php",
+      "sha256": "2f59b6c973b6a0ffed0f7c56508c4a21774d511d6c48040fd2cd3991e885ffe7"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/order/CashierV3SalesOrderInventoryReversalServices.php",
+      "sha256": "250c1ff68dbe6114158753ffa81d8d427f02143110b2e7ba9bec0798250304b5"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/settlement/CashierV3SaleInventorySettlementServices.php",
+      "sha256": "af47d70e8bae0a60d3bf57af5e858d3ba9698e180f7f3260ad81347278a9ea31"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/settlement/CashierV3PresaleStockRepairServices.php",
+      "sha256": "829fd63915e10d89ba1c166238157c12ad8af7cc24559ec179591b6eb582d6e5"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryMovementDisplayServices.php",
+      "sha256": "289710c6f859bd08aab7ad719b42ecc37c78d47b29da8e585d33f84fa2343daa"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryNormalMovementScopeServices.php",
+      "sha256": "591a4bcae2d661b1fcba9a902d8da47163adaa4147f370e353741ae16305b83a"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryStoreReadModelServices.php",
+      "sha256": "b15d8be6c3b84c29a91c21ca9aba617c9e41693a7fb33ff4537d067e47a79b1e"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryPlatformHqReadModelServices.php",
+      "sha256": "2106cae81b305b03cc05f4397773cbb1fcd8f27f6fad83478b8abcdef5cc6a73"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryMovementQueryServices.php",
+      "sha256": "b9ce1df7de987c58bacf5d96a0300f1fcf1bc117f35d44de70b3f31c069660b5"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryMovementAnalyticsServices.php",
+      "sha256": "34cfd639d622703187a82d76db9a7eccf70c931328b4fa481d2363e8876883a5"
+    },
+    {
+      "path": "后端代码/app/services/report/ProductManagementDashboardServices.php",
+      "sha256": "1e23a10cb24abc473d1d1d6b78d6faf61dc877946860899ed627544daa11ef0b"
+    },
+    {
+      "path": "tests/cashier-v3-sale-inventory/mysql56-matrix.sh",
+      "sha256": "3efba7c871596c752a78575c517b99b39df392a1cb901fb3b3cbe6862c06ac54"
+    },
+    {
+      "path": "tests/cashier-v3-sale-inventory/php/mysql-integration.php",
+      "sha256": "de33d7214a34f3350881f1e7a98599d723eeefc194ae0e1b64124733e136bc5a"
+    },
+    {
+      "path": "tests/cashier-v3-sale-inventory/php/presale-repair-local-integration.php",
+      "sha256": "16dbab04d59736a50668d53e73aded2c2c98a2c24d3a3c1daf1c2bbff4852b87"
+    },
+    {
+      "path": "tests/inventory/php/inventory-batch-reconciliation-contract.php",
+      "sha256": "437ea9231c3bbcc37e57881ac34ac1bec75893a247201490b61486ba794c62bd"
+    },
+    {
+      "path": "tests/inventory/php/movement-business-display.php",
+      "sha256": "8a087ccb22324060d1ce12e6d1f18ec6367c2c0fef7585e28082f0af9b8b6aa7"
+    },
+    {
+      "path": "tests/inventory/php/presale-normal-flow-local-integration.php",
+      "sha256": "f05903129984f4d181feb202453355fc3f86586247f86cecd84b09b8cba12ce0"
+    },
+    {
+      "path": "tests/inventory/js/movement-business-display-render.mjs",
+      "sha256": "4be6631a90880a6426d696d6670806675a250a831d5957e830a9ab2ed5a08cf4"
+    },
+    {
+      "path": "tests/cashier-v3/php/order-center-product-presale-read.php",
+      "sha256": "71da67a80b9cc52a61dc8dd57d8e88602a911f474193b28be818eb7711058040"
+    },
+    {
+      "path": "tests/cashier-v3/js/order-center-product-presale-render.mjs",
+      "sha256": "79db6a4236f0ec24f74ba231b284091df2fc1317d524ef1fbb3040ea5a42d740"
+    },
+    {
+      "path": "scripts/cashier-v3/repair-local-presale-stock.php",
+      "sha256": "70267d48fc28abda332b27924d4459344582308a8cb113dd8a8a5e5155883094"
+    },
+    {
+      "path": "scripts/cashier-v3/repair-authorized-presale-stock.php",
+      "sha256": "270dfe3e1d1881cbe660791b4fa06e660caedebbc54a0570b0bd619c136a3d35"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R51-product-presale-label-selftest-2026-10-09.md",
+      "sha256": "14827eb697f5f048e3c4e1e765ba1ecf0d36066b5f2f53795289efba09944ff0"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R51-product-presale-label-2026-10-09.png",
+      "sha256": "7fe2d1f5c40ea7fbd2e233b5cc93f67079e071baf51e14d609beec111a9915aa"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R51-presale-stock-selftest-2026-10-10.md",
+      "sha256": "810f0b3bd467c643ceaea4c0eb77806c8f63471dbd01d637c50a9ea591ed4232"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R51-presale-stock-repair-local-2026-10-10.json",
+      "sha256": "4e54b559d43a2d034bb01c951575bd2809d3b18609742b99cab8944f3ba144d7"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R51-presale-stock-repair-local-2026-10-10.png",
+      "sha256": "1716a70b690472cd2250493e3805de152b82a109cb22137af1ed34f1fb54dbd9"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R51-presale-normal-flow-selftest-2026-10-10.md",
+      "sha256": "abc181f910358f37b9433698a80b1f482809ee5fbb4a785700d22b8b83960a4f"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R51-presale-normal-flow-local-2026-10-10.png",
+      "sha256": "e9dfdda83daeef0c43f260458207f0b802c3e0ea20894710ab556d980a17168c"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R51-no-outbound-label-selftest-2026-10-10.md",
+      "sha256": "3aa1f984a71dc773bb297948742e72acd6b03b3169af2d241849113edabfa761"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R51-no-outbound-label-local-2026-10-10.png",
+      "sha256": "865fe25b1bc3f090075398f282866f80441f7eae5b1a16417eae25f879add29c"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R51-product-type-wording-local-2026-10-10.png",
+      "sha256": "c0f89d3d8f58ef55abbc639165876b6fdec47a1f1fa94280bf1dd8da7ee4ff6c"
+    },
+    {
+      "path": "tests/inventory/evidence/R51-movement-business-display-selftest-2026-10-09.md",
+      "sha256": "f49eeab31e322ed0a7eee187f198a28355047906c3ff500a3247b38f258eeb8a"
+    },
+    {
+      "path": "tests/inventory/evidence/R51-movement-business-display-2026-10-09.png",
+      "sha256": "5388b608216c982c63eb889069fe8699da5d8c838a6a2e496134c02f5d08272c"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R51-release-acceptance-2026-10-10.md",
+      "sha256": "47c6fba5105ac872468e10fa5c9649bc6885e6e582aad2167fe06a9df6f63034"
+    }
+  ],
+  "assets": [
+    {
+      "path": "assets/exceljs.min-a0d233a6.js",
+      "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+    },
+    {
+      "path": "assets/index-83276a0e.css",
+      "sha256": "83276a0e7e25c410ff363e197feb0b2e6b3a226092a57ac8caa346c2134e78bd"
+    },
+    {
+      "path": "assets/index-e98a5db6.js",
+      "sha256": "266aff9c15722f0d4a76d372fc91c095059bf874429eb48d716c1df4243912be"
+    },
+    {
+      "path": "assets/login-beauty-quiet-826510a5.png",
+      "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47"
+    },
+    {
+      "path": "index.html",
+      "sha256": "88afb303359aaa58c655ac825d38b8b8b49782e77a8a7a82a99ec9685a770d9c"
+    }
+  ],
+  "backend_package_sha256": "ed58d229bd228f7e2483dd16fe7236694fac6f03ab005824409651037d8c3f1a",
+  "frontend_package_sha256": "efe175d2abb368e187cb4a0b684917f911b5fc1d71c37899ef04a99741b8b3d9",
+  "online_assets": [
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/index.html",
+      "status": 200,
+      "sha256": "88afb303359aaa58c655ac825d38b8b8b49782e77a8a7a82a99ec9685a770d9c"
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-83276a0e.css",
+      "status": 200,
+      "sha256": "83276a0e7e25c410ff363e197feb0b2e6b3a226092a57ac8caa346c2134e78bd"
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-e98a5db6.js",
+      "status": 200,
+      "sha256": "266aff9c15722f0d4a76d372fc91c095059bf874429eb48d716c1df4243912be"
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/index.html",
+      "status": 200,
+      "sha256": "92e3015464292f1a655e2ac526fdf5bb20efed262f19ac359c918682f429bdff"
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-83276a0e.css",
+      "status": 200,
+      "sha256": "83276a0e7e25c410ff363e197feb0b2e6b3a226092a57ac8caa346c2134e78bd"
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-e98a5db6.js",
+      "status": 200,
+      "sha256": "266aff9c15722f0d4a76d372fc91c095059bf874429eb48d716c1df4243912be"
+    }
+  ],
+  "repair_apply": {
+    "mode": "apply",
+    "results": [
+      {
+        "orderNo": "XS26100900129",
+        "restoredQuantityUnits": 5,
+        "replayedQuantityUnits": 0,
+        "restoredAllocationCount": 1
+      },
+      {
+        "orderNo": "XS26100800251",
+        "restoredQuantityUnits": 1,
+        "replayedQuantityUnits": 0,
+        "restoredAllocationCount": 1
+      }
+    ],
+    "source_snapshots_unchanged": true
+  },
+  "repair_replay": {
+    "mode": "preview",
+    "results": [
+      {
+        "orderNo": "XS26100900129",
+        "restoredQuantityUnits": 0,
+        "replayedQuantityUnits": 5,
+        "restoredAllocationCount": 0
+      },
+      {
+        "orderNo": "XS26100800251",
+        "restoredQuantityUnits": 0,
+        "replayedQuantityUnits": 1,
+        "restoredAllocationCount": 0
+      }
+    ],
+    "source_snapshots_unchanged": true
+  },
+  "screenshots": [
+    {
+      "path": "R51-rh-presale-label-online-2026-10-10.png",
+      "sha256": "6d2f91624388628fa647eda7923ea1506b537da00b8a0eb0442fd0d6a4005569"
+    },
+    {
+      "path": "R51-rh-presale-stock-online-2026-10-10.png",
+      "sha256": "059236cc8ecff8ea3ae59801d292b5bc90cf86a556aff79e02d5fd2d6521db16"
+    }
+  ],
+  "unrelated_index_sha256": "dc31b057aca12a17ee75ed7a86e023bfeba79933849b91605faa54e209c95b46"
+}

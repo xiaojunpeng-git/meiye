@@ -67,13 +67,18 @@ final class InventoryPlatformHqReadModelServices
             ];
         }, $rows);
         $batchIds = array_map(static fn(array $row): int => (int)$row['batch_id'], $batches);
-        $facts = Db::name('inventory_batch_movement_fact')->alias('f')->leftJoin('inventory_location l', 'l.id=f.location_id')
+        $factQuery = Db::name('inventory_batch_movement_fact')->alias('f')->leftJoin('inventory_location l', 'l.id=f.location_id')
+            ->leftJoin('inventory_batch b', 'b.id=f.batch_id')
             ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
             ->where('f.tenant_id', (string)$location['tenant_id'])->where('f.location_id', (int)$location['id'])
             ->where('f.store_id', 0)->whereIn('f.batch_id', $batchIds)->where('f.fact_status', 'SETTLED')
-            ->leftJoin('inventory_stock s', 's.id=f.stock_id')
-            ->field('f.id,COALESCE(n.document_no,f.source_id) order_sn,f.source_type,f.source_id,f.source_detail_id,f.reversal_of,f.business_date,f.direction,f.quantity_units,s.quantity_scale,s.stock_unit,f.unit_cost_cents,f.cost_amount_cents,f.recorded_at,l.location_name')
+            ->leftJoin('inventory_stock s', 's.id=f.stock_id');
+        // Keep HQ scope unchanged while sharing the normal physical-flow rule.
+        (new InventoryNormalMovementScopeServices())->excludeCorrectedPresalePairs($factQuery);
+        $facts = $factQuery->field('f.id,COALESCE(n.document_no,f.source_id) order_sn,f.source_type,f.source_id,f.source_detail_id,f.reversal_of,f.business_date,f.direction,f.quantity_units,s.quantity_scale,s.stock_unit,f.unit_cost_cents,f.cost_amount_cents,f.recorded_at,l.location_name,f.tenant_id,f.store_id,n.document_no document_no_snapshot,b.product_name_snapshot source_product_name')
             ->order('f.id desc')->limit(200)->select()->toArray();
+        // Shared modal uses the same source labels without widening headquarters permissions.
+        $facts = (new InventoryMovementDisplayServices())->decorate($facts);
         foreach ($facts as &$fact) {
             if (!$canViewCost) {
                 $fact['unit_cost_cents'] = null;

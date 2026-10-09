@@ -42,7 +42,8 @@ reconciliationAssert('stock detail displays server total, reconciliation state a
 
 reconciliationAssert('stock movement detail formats quantity with its scale and displays a readable type, unit and unit cost',
     $modal !== false
-    && strpos($modal, 'movementTypeName(movement.source_type)') !== false
+    // Source names are authoritative server projections shared by store/HQ.
+    && strpos($modal, 'movement.source_type_name') !== false
     && strpos($modal, 'formatQuantity(movement.quantity_units, movement.quantity_scale)') !== false
     && strpos($modal, 'movement.stock_unit || detail.product.stock_unit') !== false
     && strpos($modal, 'movement.unit_cost_cents') !== false);

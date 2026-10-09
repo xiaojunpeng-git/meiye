@@ -40,10 +40,12 @@ docker run -d --name "$MYSQL" --network "$NETWORK" --platform linux/amd64 --cpus
   --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci \
   --sql-mode=STRICT_ALL_TABLES --innodb-large-prefix=0 --innodb-file-format=Antelope >/dev/null
 for _ in $(seq 1 90); do
-  docker exec "$MYSQL" mysqladmin ping -uroot --silent >/dev/null 2>&1 && break
+  # The image starts a socket-only initialization server first. Wait for the
+  # final TCP listener used by the PHP container, not that temporary server.
+  docker exec "$MYSQL" mysql -h127.0.0.1 -uroot -Nse 'SELECT 1' >/dev/null 2>&1 && break
   sleep 1
 done
-docker exec "$MYSQL" mysqladmin ping -uroot --silent >/dev/null
+docker exec "$MYSQL" mysql -h127.0.0.1 -uroot -Nse 'SELECT 1' >/dev/null
 [[ "$(docker exec "$MYSQL" mysql -uroot -Nse 'SELECT VERSION()')" == '5.6.51' ]]
 
 mysql_file() {
@@ -119,6 +121,16 @@ docker exec "$MYSQL" mysql -uroot --database="$WRONG_INDEX_DB" -e "ALTER TABLE e
 assert_receipt_precheck_fails "$WRONG_INDEX_DB" 'wrong_unique_index_order'
 assert_receipt_postcheck_fails "$WRONG_INDEX_DB" 'wrong_unique_index_order'
 
+# This narrow legacy fixture predates the shared movement writer's audit and
+# remark columns. Match its current schema without migrating unrelated domains.
+docker exec "$MYSQL" mysql -uroot --database="$DB" -e "
+  ALTER TABLE eb_inventory_batch_movement_fact
+    ADD COLUMN operator_type varchar(32) NOT NULL DEFAULT '',
+    ADD COLUMN operator_id bigint unsigned NOT NULL DEFAULT 0,
+    ADD COLUMN operator_name_snapshot varchar(128) NOT NULL DEFAULT '',
+    ADD COLUMN detail_remark varchar(500) NOT NULL DEFAULT '';
+" >/dev/null
+
 docker exec "$MYSQL" mysql -uroot --database="$DB" -e "
   INSERT INTO eb_inventory_location
     (id,tenant_id,organization_id,organization_path,organization_name_snapshot,location_type,
@@ -156,7 +168,11 @@ docker run --rm --name "$PHP_CONTAINER" --network "$NETWORK" --platform "$PHP_PL
       "DRIVER = file" \
       "CACHE_DRIVER = file" > /var/www/html/.env
     php -l /tests/cashier-v3-sale-inventory/php/mysql-integration.php
-    php /tests/cashier-v3-sale-inventory/php/mysql-integration.php
+    # ThinkPHP can render an uncaught exception and still exit zero; require the
+    # completed assertion summary so an aborted regression cannot look green.
+    php /tests/cashier-v3-sale-inventory/php/mysql-integration.php > /tmp/sale-inventory-test.log 2>&1
+    cat /tmp/sale-inventory-test.log
+    grep -E "^SALE_INVENTORY_MYSQL passed=[0-9]+ failed=0$" /tmp/sale-inventory-test.log
   '
 
 echo 'SALE_INVENTORY_MYSQL56=PASS'

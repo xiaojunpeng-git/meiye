@@ -183,6 +183,8 @@ final class InventoryMovementQueryServices
             ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
             ->where('f.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->whereIn('f.location_id', $locationIds)->where('f.fact_status', 'SETTLED');
+        // Count and rows must exclude the same neutralized presale audit pairs.
+        (new InventoryNormalMovementScopeServices())->excludeCorrectedPresalePairs($base);
         if ($keyword !== '') {
             $like = '%' . $keyword . '%';
             $base->whereLike('f.source_id|n.document_no|b.product_name_snapshot|b.sku_name_snapshot|b.batch_no', $like);

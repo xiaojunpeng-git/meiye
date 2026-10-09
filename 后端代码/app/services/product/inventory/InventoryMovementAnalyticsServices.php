@@ -46,6 +46,9 @@ final class InventoryMovementAnalyticsServices
                     });
             })
             ->field($fields);
+        // Corrected non-physical presales are not business inbound/outbound counts
+        // or costs; apply the same rule before daily/period grouping and export.
+        (new InventoryNormalMovementScopeServices())->excludeCorrectedPresalePairs($query);
         $rows = $query->group(($groupByPeriod ? '' : 'f.business_date,') . $dimensions)
             ->order($groupByPeriod ? 'product_id asc,sku_id asc' : 'f.business_date desc,product_id asc,sku_id asc')->select()->toArray();
         foreach ($rows as &$row) {

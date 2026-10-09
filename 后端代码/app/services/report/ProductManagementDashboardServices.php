@@ -297,14 +297,40 @@ final class ProductManagementDashboardServices
         $rows = Db::name('cashier_v3_sale_inventory_receipt')
             ->where('tenant_id', $scope['tenant_id'])->whereIn('store_id', $scope['store_ids'])
             ->whereBetween('business_date', [$range['start'], $range['end']])
-            ->field('result_snapshot')->select()->toArray();
-        $out = [];
+            ->field('sales_order_id,result_snapshot')->select()->toArray();
+        // The receipt is an immutable checkout snapshot. A later linked presale
+        // correction cancels erroneous physical cost on that original sales day,
+        // without rewriting the receipt or changing payments/revenue.
+        $corrections = [];
+        if ($rows) {
+            $adjustments = Db::name('inventory_batch_movement_fact')->alias('r')
+                ->join('inventory_batch_movement_fact original', 'original.id=r.reversal_of AND original.tenant_id=r.tenant_id AND original.store_id=r.store_id AND original.source_id=r.source_id AND original.source_detail_id=r.source_detail_id')
+                ->where('r.tenant_id', $scope['tenant_id'])->whereIn('r.store_id', $scope['store_ids'])
+                ->whereIn('r.source_id', array_column($rows, 'sales_order_id'))
+                ->where('r.source_type', 'cashier_presale_stock_repair')->where('r.direction', 1)->where('r.fact_status', 'SETTLED')
+                ->where('original.source_type', 'cashier_sale')->where('original.direction', -1)->where('original.fact_status', 'SETTLED')
+                ->fieldRaw('r.source_id,r.source_detail_id,SUM(r.cost_amount_cents) cost_cents')
+                ->group('r.source_id,r.source_detail_id')->select()->toArray();
+            foreach ($adjustments as $adjustment) {
+                $corrections[$adjustment['source_id'] . ':' . $adjustment['source_detail_id']] = (int)$adjustment['cost_cents'];
+            }
+        }
+        $allocations = [];
         foreach ($rows as $row) {
             $snapshot = json_decode((string)$row['result_snapshot'], true);
             foreach ((array)($snapshot['eventAllocations'] ?? []) as $allocation) {
                 $lineId = trim((string)($allocation['salesOrderLineId'] ?? ''));
-                if ($lineId !== '') $out[] = ['item_id' => $lineId, 'cost_cents' => (int)($allocation['actualCostCents'] ?? 0)];
+                if ($lineId === '') continue;
+                $key = $row['sales_order_id'] . ':' . $lineId;
+                if (!isset($allocations[$key])) $allocations[$key] = ['item_id' => $lineId, 'cost_cents' => 0];
+                $allocations[$key]['cost_cents'] += (int)($allocation['actualCostCents'] ?? 0);
             }
+        }
+        $out = [];
+        foreach ($allocations as $key => $allocation) {
+            $allocation['cost_cents'] -= $corrections[$key] ?? 0;
+            if ($allocation['cost_cents'] < 0) throw new \RuntimeException('presale_stock_repair_cost_mismatch');
+            $out[] = $allocation;
         }
         return $out;
     }
