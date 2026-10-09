@@ -246,10 +246,14 @@ try {
     MemberIntegrationFixture::seedMember(4103, '转让候选会员', '13800004103', 8);
 
     $now = time();
+    // Source card belongs to another store while every command is submitted
+    // by the fixture cashier at store 8. This keeps the full operation suite
+    // on the real cross-store boundary instead of testing only a special case.
+    $sourceStoreId = 9;
     Db::name('store_order')->insert([
         'id' => 4501,
         'uid' => 4101,
-        'store_id' => 8,
+        'store_id' => $sourceStoreId,
         'paid' => 1,
         'is_del' => 0,
         'is_system_del' => 0,
@@ -271,7 +275,7 @@ try {
         'oid' => 4501,
         'card_name' => '卡操作测试次卡',
         'card_no' => 'CARDOP-4601',
-        'store_id' => 8,
+        'store_id' => $sourceStoreId,
         'product_type' => 4,
         'write_times' => 10,
         'write_surplus_times' => 8,
@@ -412,11 +416,12 @@ try {
         $ruleAuthority,
         $ruleComponent,
         $differentPriceRuleComponent,
-        $now
+        $now,
+        $sourceStoreId
     ): void {
         $ruleWriter->issueInTx(
             'CARDOP-RULE-4601',
-            ['tenant_id' => '0', 'order_id' => 'SO-CARDOP-4501', 'member_id' => 4101, 'store_id' => 8],
+            ['tenant_id' => '0', 'order_id' => 'SO-CARDOP-4501', 'member_id' => 4101, 'store_id' => $sourceStoreId],
             ['order_line_id' => 'SOL-CARDOP-4501'],
             ['catalog_product_id' => 4803, 'catalog_sku_id' => 4901],
             [
@@ -502,8 +507,10 @@ try {
         && ($state['card_status'] ?? '') === 'enabled'
         && (int)($state['current_version'] ?? 0) === 2,
         json_encode($state, JSON_UNESCAPED_UNICODE), 'C2-CARDOP-BE-03');
-    ok('历史销售订单会员不被转让改写',
-        (int)Db::name('store_order')->where('id', 4501)->value('uid') === 4101,
+    ok('跨店转让不改写历史销售订单会员或购卡门店',
+        (int)Db::name('store_order')->where('id', 4501)->value('uid') === 4101
+        && (int)Db::name('store_order')->where('id', 4501)->value('store_id') === $sourceStoreId
+        && (int)Db::name('user_card_holder')->where('id', 4601)->value('store_id') === $sourceStoreId,
         '', 'C2-CARDOP-BE-04');
     ok('转让操作冻结原始销售归属和本次归属快照',
         (string)($transferAudit['operation_type'] ?? '') === 'card_transfer'

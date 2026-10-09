@@ -5,6 +5,7 @@ namespace app\services\cashier\v3\card;
 
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
+use app\services\cashier\v3\CashierV3CrossStoreEntitlementPolicy;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
@@ -218,7 +219,12 @@ final class CashierV3CardOperationAuthorityServices
                 'member_benefit_pool', (string)$targetDetailId, $operatorScope, $dataScope
             );
         }
-        $auditSnapshots = $this->lockAuditSnapshotsInTx($source, $operationState, $operatorScope);
+        $auditSnapshots = $this->lockAuditSnapshotsInTx(
+            $source,
+            $operationState,
+            $operatorScope,
+            $dataScope
+        );
         $operation = $this->insertOperation(
             $plan,
             $source,
@@ -432,13 +438,10 @@ final class CashierV3CardOperationAuthorityServices
             || (int)($holder['store_id'] ?? 0) <= 0) {
             throw self::notFound('card_source_order_not_active');
         }
-        // 项目替换/升级及整卡升级不以购卡门店限制办理，不设临时放行或跨店开关。
-        // 其它卡操作保留原边界；账号权限由命令网关校验，原卡与原订单仍须一致。
-        if (!in_array($operationType, [
-            CashierV3CardOperationKernel::TYPE_PROJECT_REPLACEMENT,
-            CashierV3CardOperationKernel::TYPE_PROJECT_UPGRADE,
-            CashierV3CardOperationKernel::TYPE_CARD_UPGRADE,
-        ], true) && (int)$holder['store_id'] !== $operatorScope->storeId()) {
+        // 购卡门店是不可改写的来源快照，不是跨店卡操作的执行门店。
+        // 命令网关仍按每种操作分别校验功能权限；跨店权益关闭时则保持本店边界。
+        if (!CashierV3CrossStoreEntitlementPolicy::enabled()
+            && (int)$holder['store_id'] !== $operatorScope->storeId()) {
             throw self::notFound('card_source_store_not_allowed');
         }
         // 升级会把原卡权益折成新销售抵扣；待还债务必须先补交或取消。
@@ -1243,7 +1246,8 @@ final class CashierV3CardOperationAuthorityServices
     private function lockAuditSnapshotsInTx(
         array $source,
         array $state,
-        CashierV3OperatorScope $operatorScope
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
     ): array {
         $store = $this->row(Db::name('system_store')
             ->where('id', $operatorScope->storeId())
@@ -1290,8 +1294,34 @@ final class CashierV3CardOperationAuthorityServices
             ->lock(true)
             ->find());
         $operatorName = trim((string)($operator['staff_name'] ?? ''));
-        if ((int)($operator['id'] ?? 0) !== $operatorScope->operatorId()
-            || $operatorName === '') {
+        if ((int)($operator['id'] ?? 0) !== $operatorScope->operatorId()) {
+            $operatorName = '';
+        }
+        // 组织员工账号可以获得门店功能权限，但并不一定存在旧门店员工行。
+        // 审计姓名优先取锁定的员工主档；仅在没有员工主档时使用服务端登录
+        // 快照，客户端提交值不得参与卡操作事实。
+        if ($operatorName === '' && $dataScope->employeeId() > 0) {
+            $employee = $this->row(Db::name('employee')
+                ->where('id', $dataScope->employeeId())
+                ->where('status', 1)
+                ->where('is_del', 0)
+                ->field('id,name')
+                ->lock(true)
+                ->find());
+            if ((int)($employee['id'] ?? 0) === $dataScope->employeeId()) {
+                $operatorName = trim((string)($employee['name'] ?? ''));
+            }
+        }
+        if ($operatorName === '') {
+            $profile = $dataScope->operatorProfile();
+            foreach (['staff_name', 'real_name', 'name', 'account'] as $field) {
+                $operatorName = trim((string)($profile[$field] ?? ''));
+                if ($operatorName !== '') {
+                    break;
+                }
+            }
+        }
+        if ($operatorName === '') {
             throw self::failure('card_operation_operator_snapshot_missing');
         }
 
