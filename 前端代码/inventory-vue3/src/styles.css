@@ -115,3 +115,21 @@ button { cursor: pointer; }
 .filter-card > label button {
   font-size: 12px;
 }
+
+/* 门店单据与订单列表使用同一分组层级：单据占一条横向色带，明细共用表头。 */
+.table-scroll .inventory-grouped-table { min-width: 1060px; }
+/* The cashier shell clips page overflow, so grouped document rows must scroll inside their own list. */
+.table-card--grouped-scroll .table-scroll { max-height: clamp(240px, calc(100vh - 245px), 800px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-color: #91aac4 #eef3f8; scrollbar-width: thin; }
+.table-card--grouped-scroll .table-scroll thead th { position: sticky; z-index: 1; top: 0; }
+.table-scroll .inventory-grouped-table--inbound, .table-scroll .inventory-grouped-table--outbound { min-width: 1320px; }
+.inventory-grouped-table > thead th { height: 38px; }
+.table-scroll .inventory-group-row > td { height: 48px; padding: 0 16px; background: #e5edf6; }
+.inventory-group-line { display: flex; align-items: center; gap: 18px; width: max-content; min-width: 100%; white-space: nowrap; }
+.inventory-group-line > span { display: inline-flex; align-items: baseline; flex: none; gap: 3px; }
+.inventory-group-line strong { color: #61758b; font-weight: 500; }
+.inventory-group-line b { color: #344f6c; font-weight: 600; }
+.inventory-group-line > span:first-child b { color: #176fd1; }
+.inventory-group-line__actions { gap: 8px !important; margin-left: auto; }
+.table-scroll .inventory-detail-line > td { height: 39px; background: #fff; }
+.table-scroll .inventory-detail-message-row > td { height: 40px; color: #74889b; }
+.table-scroll .inventory-detail-message-row--error > td { color: #b63333; }

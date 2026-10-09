@@ -267,8 +267,8 @@ const columns = computed(() => {
   if (props.pageKey === 'count') return [...product, '商品条码', '账面库存', '实盘库存', '库存盈亏', '盘盈批次号', '盘盈单价', '生产日期', '到期日']
   if (props.pageKey === 'request') return [...product, '当前库存', '申请数量', '明细备注']
   if (props.pageKey === 'transfer') return [...product, '发货批次', '收货状态', '调拨数量', '明细备注']
-  if (props.pageKey === 'usage') return [...product, '领用数量', '实际单位成本', '明细备注']
-  if (props.pageKey === 'outbound') return [...product, '扣减批次', '到期日', '出库数量', '实际单位成本', '明细备注', '成本金额']
+  if (props.pageKey === 'usage') return [...product, '领用数量', '成本单价', '明细备注']
+  if (props.pageKey === 'outbound') return [...product, '扣减批次', '到期日', '出库数量', '成本单价', '明细备注', '成本金额']
   return [...product, ...batch, '入库数量', '入库单价', '明细备注', '入库金额']
 })
 
@@ -1244,7 +1244,7 @@ function submitPrimaryEditor() {
             </template>
             <template v-else-if="pageKey === 'outbound' && detail?.document">
               <div class="detail-meta"><span>出库单号：<b>{{ detail.document.order_sn }}</b></span><span>出库日期：{{ detail.document.business_date }}</span><span>出库时间：{{ detail.document.recorded_at ? new Date(Number(detail.document.recorded_at) * 1000).toLocaleString() : '-' }}</span><span>出库主体：{{ detail.document.location_name }}</span></div>
-              <section class="line-section"><header><div><h3>出库商品</h3><p>明细由已结算出库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>扣减批次</th><th>生产日期</th><th>到期日</th><th>出库数量</th><th>库存单位</th><th>实际单位成本</th><th>明细备注</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该出库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.batch_no }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.detail_remark || '-' }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>出库商品</h3><p>明细由已结算出库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>扣减批次</th><th>生产日期</th><th>到期日</th><th>出库数量</th><th>库存单位</th><th>成本单价</th><th>明细备注</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该出库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.batch_no }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.detail_remark || '-' }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'count' && detail?.document">
               <div class="detail-meta"><span>盘点单号：<b>{{ detail.document.order_sn || '-' }}</b></span><span>库存仓：{{ detail.document.location_name || scopeName }}</span><span>盘点日期：{{ detail.document.count_date || '-' }}</span><span>盘点状态：{{ detailStatus(detail.document) }}</span></div>
