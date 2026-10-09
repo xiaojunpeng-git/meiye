@@ -78,12 +78,14 @@ $creator = ['type'=>'STORE_STAFF','id'=>1200,'name'=>'R46 local creator'];
 $operator = ['type'=>'STORE_STAFF','id'=>179,'name'=>'R46 local operator'];
 $authorized = $operator + ['can_audit_store_documents'=>true];
 $editor = $operator + ['can_edit_store_documents'=>true];
+$deleter = $operator + ['can_delete_store_documents'=>true];
 $subject = (array)Db::name('store_fund_subject')->where('is_enabled',1)->find();
 if (!$subject) throw new RuntimeException('No active local subject.');
 $filters = ['date_from'=>'2026-10-09','date_to'=>'2026-10-09'];
 $input = ['business_date'=>'2026-10-09','direction'=>'INCOME','summary'=>'R46 rollback-only audit probe',
     'lines'=>[['subject_id'=>(int)$subject['id'],'amount_cents'=>12345,'summary'=>'Snapshot stays intact']]];
 $id = 0;
+$controllerId = 0;
 Db::startTrans();
 try {
     $document = $service->save($scope,$creator,$input);
@@ -164,6 +166,7 @@ try {
     $assert($approvalReplay['audit_revision'] === $restored['audit_revision'], 'Repeated approval is idempotent');
     $assert($service->report($scope,$filters)['summary'] === $before, 'Repeated approval does not double count');
     $denied(static function () use ($service,$scope,$creator,$id) { $service->deleteDraft($scope,$creator,$id); }, 'fund_document_delete_requires_draft');
+    $denied(static function () use ($service,$scope,$deleter,$id) { $service->deleteDraft($scope,$deleter,$id); }, 'fund_document_delete_requires_draft');
     $assert($service->detail($scope,$id)['document_status'] === 'APPROVED', 'Rejected deletion preserves approval');
     $editInput['audit_revision'] = (int)$restored['audit_revision'];
     $denied(static function () use ($service,$scope,$editor,$editInput) { $service->save($scope,$editor,$editInput); }, 'fund_document_not_editable');
@@ -175,12 +178,18 @@ try {
     $listBeforeDelete = $service->listDocuments($scope,$filters);
     $denied(static function () use ($service,$scope,$operator,$id) { $service->deleteDraft($scope,$operator,$id); }, 'fund_document_operator_forbidden');
     $denied(static function () use ($service,$scope,$editor,$id) { $service->deleteDraft($scope,$editor,$id); }, 'fund_document_operator_forbidden');
-    $denied(static function () use ($service,$creator,$id) { $service->deleteDraft(['mode'=>'store','store_id'=>175],$creator,$id); }, 'fund_document_not_found');
-    $denied(static function () use ($service,$creator,$id) { $service->deleteDraft(['mode'=>'platform','store_ids'=>[23]],$creator,$id); }, 'fund_document_operator_forbidden');
-    $deleted = $service->deleteDraft($scope,$creator,$id);
-    $assert($deleted === ['id'=>$id,'deleted'=>true], 'Delete returns confirmed terminal result');
+    // 本店非录入人须经独立删除判权；字符串标记、审核权限、跨店和平台不能借此放行。
+    $denied(static function () use ($service,$scope,$authorized,$id) { $service->deleteDraft($scope,$authorized,$id); }, 'fund_document_operator_forbidden');
+    $denied(static function () use ($service,$scope,$operator,$id) { $service->deleteDraft($scope,$operator+['can_delete_store_documents'=>'true'],$id); }, 'fund_document_operator_forbidden');
+    $denied(static function () use ($service,$deleter,$id) { $service->deleteDraft(['mode'=>'store','store_id'=>175],$deleter,$id); }, 'fund_document_not_found');
+    $denied(static function () use ($service,$deleter,$id) { $service->deleteDraft(['mode'=>'platform','store_ids'=>[23]],$deleter,$id); }, 'fund_document_operator_forbidden');
+    $denied(static function () use ($service,$scope,$deleter,$id) { $service->deleteDraft($scope,array_replace($deleter,['id'=>0]),$id); }, 'fund_document_operator_forbidden');
+    $denied(static function () use ($service,$scope,$deleter,$id) { $service->deleteDraft($scope,array_replace($deleter,['type'=>'ADMIN']),$id); }, 'fund_document_operator_forbidden');
+    $deleted = $service->deleteDraft($scope,$deleter,$id);
+    $assert($deleted === ['id'=>$id,'deleted'=>true], 'Other authorized staff delete store draft');
     $raw = (array)Db::name('store_fund_document')->where('id',$id)->find();
     $assert($raw['document_status'] === 'DELETED', 'Delete is logical, not physical');
+    $assert($raw['created_by_id'] === $draft['created_by_id'] && $raw['document_no'] === $draft['document_no'], 'Noncreator deletion preserves original identity');
     $assert((int)$raw['audit_revision'] === (int)$draft['audit_revision']+1, 'Delete increments one resource revision');
     $assert(Db::name('store_fund_document_line')->where('document_id',$id)->order('line_no')->select()->toArray() === $draft['lines'], 'Deleted detail amounts and snapshots retained');
     $assert((int)$service->listDocuments($scope,$filters)['count'] === (int)$listBeforeDelete['count']-1, 'Deleted row removed from pagination total');
@@ -193,11 +202,53 @@ try {
     $denied(static function () use ($service,$scope,$creator,$input,$id) { $service->save($scope,$creator,$input+['id'=>$id]); }, 'fund_document_not_editable');
     $denied(static function () use ($service,$scope,$editor,$editInput) { $service->save($scope,$editor,$editInput); }, 'fund_document_not_editable');
     $assert($service->deleteDraft($scope,$creator,$id) === $deleted, 'Deletion retry is idempotent');
+    $assert($service->deleteDraft($scope,$deleter,$id) === $deleted, 'Authorized noncreator deletion retry is idempotent');
+    $denied(static function () use ($service,$scope,$operator,$id) { $service->deleteDraft($scope,$operator,$id); }, 'fund_document_operator_forbidden');
     $assert((int)Db::name('store_fund_document')->where('id',$id)->value('audit_revision') === (int)$raw['audit_revision'], 'Deletion retry does not advance revision');
     $assert($service->report($scope,$filters) === $reportBeforeDelete, 'Draft deletion does not change report');
     $assert($service->ledger($scope,$filters) === $ledgerBeforeDelete, 'Draft deletion does not change ledger');
+
+    // 真实控制器到数据库的回滚链路：客户端即使伪造身份/权限，仍须先通过服务端能力检查。
+    $controllerDocument = $service->save($scope,$creator,$input);
+    $controllerId = (int)$controllerDocument['id'];
+    $controller->services = $service;
+    $requestProperty = new ReflectionProperty($controller, 'request');
+    $requestProperty->setAccessible(true);
+    $requestProperty->setValue($controller, (new think\Request())->withPost([
+        'store_id'=>175,'created_by_id'=>1200,'can_delete_store_documents'=>true,
+        'actor'=>['type'=>'STORE_STAFF','id'=>1200,'can_delete_store_documents'=>true],
+    ]));
+    $app->instance(CashierV3FeatureResolver::class, $fakeResolver);
+    try {
+        $fakeResolver->features = [];
+        $setContext(['type'=>'cashier_v3']);
+        $response = $controller->deleteDraft($controllerId)->getData();
+        $assert($response['status'] === 400 && $response['data']['code'] === 'fund_document_operator_forbidden', 'Controller rejects forged body without feature');
+        $fakeResolver->features = ['cashier.v3.member'];
+        foreach ([['type'=>'cashier_v3_delegated'], ['type'=>'cashier_v3','_cashier_v3_delegated'=>1]] as $profile) {
+            $setContext($profile);
+            $response = $controller->deleteDraft($controllerId)->getData();
+            $assert($response['status'] === 400 && $response['data']['code'] === 'fund_document_operator_forbidden', 'Controller rejects delegated readonly deletion');
+        }
+        $setContext(['type'=>'cashier_v3'], 175);
+        $response = $controller->deleteDraft($controllerId)->getData();
+        $assert($response['status'] === 400 && $response['data']['code'] === 'fund_document_not_found', 'Controller uses session store instead of request store');
+        $assert($service->detail($scope,$controllerId)['document_status'] === 'DRAFT', 'Denied controller requests preserve draft');
+        $setContext(['type'=>'cashier_v3']);
+        $service->audit($scope,$creator,$controllerId,true);
+        $response = $controller->deleteDraft($controllerId)->getData();
+        $assert($response['status'] === 400 && $response['data']['code'] === 'fund_document_delete_requires_draft', 'Controller refuses approved document for noncreator');
+        $service->audit($scope,$creator,$controllerId,false);
+        $response = $controller->deleteDraft($controllerId)->getData();
+        $assert($response['status'] === 200 && $response['data'] === ['id'=>$controllerId,'deleted'=>true], 'Controller grants actual authorized noncreator deletion');
+        $assert(Db::name('store_fund_document')->where('id',$controllerId)->value('document_status') === 'DELETED', 'Controller deletion persisted inside test transaction');
+        $assert((int)Db::name('store_fund_document')->where('id',$controllerId)->value('created_by_id') === 1200, 'Controller never overwrites creator with acting user');
+    } finally {
+        $app->instance(CashierV3FeatureResolver::class, $resolver);
+    }
 } finally {
     Db::rollback();
 }
 $assert(!Db::name('store_fund_document')->where('id',$id)->find(), 'Probe rolled back');
+$assert(!Db::name('store_fund_document')->where('id',$controllerId)->find(), 'Controller probe rolled back');
 echo json_encode(['result'=>'PASS','checks'=>$checks,'rollback'=>true],JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT), PHP_EOL;

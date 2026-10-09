@@ -115,7 +115,7 @@ final class StoreFundServices
 
     /**
      * 未审核单据逻辑删除：与审核共用原单行锁，不删除历史金额、明细或关联。
-     * 门店范围及操作权限由服务端提供；删除权限尚未另行放宽，继续限原录入人。
+     * 本店有费用权限人员可删除他人录入的未审核单；授权标记只接受控制器判权结果。
      */
     public function deleteDraft(array $scope, array $actor, int $id): array
     {
@@ -129,7 +129,10 @@ final class StoreFundServices
             $this->applyScope($query, $scope);
             $row = (array)$query->find();
             if (!$row) throw new \RuntimeException('fund_document_not_found');
-            $this->assertDocumentOperator($row, $actor);
+            // 门店范围已由查询强制限定；编辑或审核授权不能代替独立的删除授权。
+            if (($actor['can_delete_store_documents'] ?? false) !== true) {
+                $this->assertDocumentOperator($row, $actor);
+            }
             // 重复删除返回同一终态；已审核单必须先按既有规则撤销，不能直接删除。
             if ($row['document_status'] !== 'DELETED') {
                 if ($row['document_status'] !== 'DRAFT') throw new \RuntimeException('fund_document_delete_requires_draft');

@@ -60,12 +60,14 @@ final class StoreFund extends AuthController
         }
     }
 
-    /** 删除只接受服务端会话和费用能力，不能复用请求体伪造操作者或越过审核状态。 */
+    /** 有费用权限即可删除本店未审核单；身份和删除授权均由服务端生成，不继承请求体。 */
     public function deleteDraft(int $id)
     {
         try {
             $this->assertFundWritePermission();
-            return $this->success($this->services->deleteDraft($this->scope(), $this->actor(), $id));
+            $actor = $this->actor();
+            $actor['can_delete_store_documents'] = true;
+            return $this->success($this->services->deleteDraft($this->scope(), $actor, $id));
         } catch (\Throwable $e) {
             $message = $e->getMessage() === 'fund_document_delete_requires_draft'
                 ? '已审核收支单不能删除，请先撤销审核。' : '收支单删除失败，单据不存在或无权操作。';

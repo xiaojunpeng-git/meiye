@@ -1,0 +1,42 @@
+{
+  "version": "R48-store-draft-delete-20261009",
+  "task": "R48-00001",
+  "baseline_head": "67e25e56d5a3e6960c36b13f77aea41663956c23",
+  "status": "开发与自测完成，待产品经理确认验收",
+  "files": [
+    {
+      "path": "后端代码/app/controller/store/fund/StoreFund.php",
+      "sha256": "536adc29e431292fcca76edf0eafc3419376af721160e6c10c3a1ae8f8372050"
+    },
+    {
+      "path": "后端代码/app/services/fund/StoreFundServices.php",
+      "sha256": "d0b8dd323388d9c445e1c39d8c71f17581787c3e881b34de4d8c93d2df498271"
+    },
+    {
+      "path": "tests/fund-management/php/revoke-audit-local-integration.php",
+      "sha256": "d2a27e36fd9dcfb1f4a1d7d29493bd6a5bd422c1a79cc66feb644abad90748d4"
+    }
+  ],
+  "patch_sha256": "b7b47d8e5011fc20b72862b5496bbf96198694f42abe3eb3b1f2e892e54f11f2",
+  "evidence": {
+    "path": "tests/fund-management/R48-store-draft-delete-selftest-2026-10-09.md",
+    "sha256": "a796539e7220af7d75a26e5e181d904f80dac9e1ae4263672e85738716377ff8"
+  },
+  "tests": {
+    "local_mysql_checks": 96,
+    "rollback": true,
+    "php_lint": "PASS",
+    "backend_contract": "PASS",
+    "frontend_contract": "PASS",
+    "diff_check": "PASS",
+    "browser_delete": "NOT_RUN",
+    "concurrent_load_test": "NOT_RUN"
+  },
+  "frontend_changes": false,
+  "migrations": [],
+  "generated_artifacts": [],
+  "remote_operations": false,
+  "commit": false,
+  "deploy": false,
+  "push": false
+}
